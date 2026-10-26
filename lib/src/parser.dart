@@ -196,7 +196,13 @@ AstExpression parserPrimary(Parser parser) {
     expression.constant = constant;
     return expression;
   }
-  if (constant) parserError(parser, 'const currently requires a List literal');
+  if (constant) {
+    var expression = parserMetadatum(parser);
+    if (expression.kind != astCall)
+      parserError(parser, 'const requires a constructor invocation');
+    expression.constant = true;
+    return expression;
+  }
   var name = parserName(parser);
   return AstExpression(
     astName,
@@ -240,22 +246,35 @@ AstExpression parserCall(
   return AstExpression(astCall, '', children, typeArguments, token);
 }
 
-List<AstExpression> parserMetadata(Parser parser) {
-  if (!parserIs(parser, '@')) return const <AstExpression>[];
-  var metadata = <AstExpression>[];
-  while (parserTake(parser, '@')) {
-    var token = parser.position;
-    var value = AstExpression(
-      astName,
+AstExpression parserMetadatum(Parser parser) {
+  var token = parser.position;
+  var value = AstExpression(
+    astName,
+    parserName(parser),
+    const <AstExpression>[],
+    const <AstType>[],
+    token,
+  );
+  var names = 1;
+  while (parserTake(parser, '.')) {
+    if (names == 3) parserError(parser, 'constant name has too many parts');
+    names++;
+    var member = parser.position;
+    value = AstExpression(
+      astMember,
       parserName(parser),
-      const <AstExpression>[],
+      <AstExpression>[value],
       const <AstType>[],
-      token,
+      member,
     );
-    var names = 1;
-    while (parserTake(parser, '.')) {
-      if (names == 3) parserError(parser, 'annotation name has too many parts');
-      names++;
+  }
+  var arguments = const <AstType>[];
+  if (parserIs(parser, '<')) {
+    if (names > 2) parserError(parser, 'expected constant constructor');
+    arguments = parserTypeArguments(parser);
+    if (parserTake(parser, '.')) {
+      value.typeArguments = arguments;
+      arguments = const <AstType>[];
       var member = parser.position;
       value = AstExpression(
         astMember,
@@ -265,29 +284,18 @@ List<AstExpression> parserMetadata(Parser parser) {
         member,
       );
     }
-    var arguments = const <AstType>[];
-    if (parserIs(parser, '<')) {
-      if (names > 2) parserError(parser, 'expected annotation constructor');
-      arguments = parserTypeArguments(parser);
-      if (parserTake(parser, '.')) {
-        value.typeArguments = arguments;
-        arguments = const <AstType>[];
-        var member = parser.position;
-        value = AstExpression(
-          astMember,
-          parserName(parser),
-          <AstExpression>[value],
-          const <AstType>[],
-          member,
-        );
-      }
-      if (!parserIs(parser, '('))
-        parserError(parser, 'expected annotation constructor arguments');
-    }
-    if (parserIs(parser, '('))
-      value = parserCall(parser, value, token, arguments);
-    metadata.add(value);
+    if (!parserIs(parser, '('))
+      parserError(parser, 'expected constant constructor arguments');
   }
+  if (parserIs(parser, '('))
+    value = parserCall(parser, value, token, arguments);
+  return value;
+}
+
+List<AstExpression> parserMetadata(Parser parser) {
+  if (!parserIs(parser, '@')) return const <AstExpression>[];
+  var metadata = <AstExpression>[];
+  while (parserTake(parser, '@')) metadata.add(parserMetadatum(parser));
   return metadata;
 }
 
@@ -681,6 +689,7 @@ AstFunction parserFunction(
   int token,
   bool getter,
   bool setter,
+  bool constant,
 ) {
   if ((getter || setter) && parserIs(parser, '<')) {
     parserError(parser, 'accessors cannot have type parameters');
@@ -702,6 +711,10 @@ AstFunction parserFunction(
     }
     if (result.name == '') result = AstType('void', <AstType>[], token);
   }
+  if (parserIs(parser, ':'))
+    parserError(parser, 'constructor initializer lists are unsupported');
+  if (constant && !parserIs(parser, ';'))
+    parserError(parser, 'const constructor cannot have a body');
   List<AstStatement> body = <AstStatement>[];
   List<AstExpression> arrow = <AstExpression>[];
   if (parserTake(parser, '=>')) {
@@ -722,6 +735,7 @@ AstFunction parserFunction(
     getter,
   );
   function.setter = setter;
+  function.constant = constant;
   return function;
 }
 
@@ -734,6 +748,7 @@ AstClass parserClass(Parser parser, int token) {
   while (!parserIs(parser, '}')) {
     var metadata = parserMetadata(parser);
     var memberToken = parser.position;
+    var constant = parserTake(parser, 'const');
     if (parserIs(parser, name) &&
         parser.tokens[parser.position + 1].kind == tokenSymbol &&
         parser.tokens[parser.position + 1].text == '(') {
@@ -746,10 +761,13 @@ AstClass parserClass(Parser parser, int token) {
         memberToken,
         false,
         false,
+        constant,
       );
       constructor.metadata = metadata;
       constructors.add(constructor);
     } else {
+      if (constant)
+        parserError(parser, 'const requires an unnamed constructor');
       var external = parserTake(parser, 'external');
       var modifier = parserModifier(parser);
       var getter =
@@ -779,6 +797,7 @@ AstClass parserClass(Parser parser, int token) {
           memberToken,
           getter,
           setter,
+          false,
         );
         method.metadata = metadata;
         methods.add(method);
@@ -900,6 +919,8 @@ AstUnit parseUnit(Parser parser) {
         name = parserName(parser);
       }
       if (getter || setter || parserIs(parser, '(')) {
+        if (modifier == 'const')
+          parserError(parser, 'const requires a constructor declaration');
         if ((getter || setter) && modifier != '') {
           parserError(parser, 'accessors cannot have variable modifiers');
         }
@@ -911,6 +932,7 @@ AstUnit parseUnit(Parser parser) {
           token,
           getter,
           setter,
+          false,
         );
         function.metadata = metadata;
         unit.functions.add(function);

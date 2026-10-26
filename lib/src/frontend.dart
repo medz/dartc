@@ -1070,7 +1070,8 @@ int feNonNullableValue(int type, int token) {
 int feLowerHint(AstExpression expression, int context) {
   if (expression.kind == astPostfix && expression.text == '!')
     return feLowerNullAssertion(expression, context);
-  if (expression.kind == astList && expression.constant) {
+  if ((expression.kind == astList || expression.kind == astCall) &&
+      expression.constant) {
     feConstants.localTypes = feFlow.types;
     var value = evaluateConstant(feConstants, expression, context, true);
     feConstantValue(value, value.type, expression.token);
@@ -1099,32 +1100,19 @@ int feLowerInContext(AstExpression expression, int context) {
   );
 }
 
-void feCheckMetadataScope(AstExpression expression, int owner) {
-  if (expression.kind == astName &&
-      expression.binding < 0 &&
-      lookupMember(feMembers[owner], expression.text) >= 0)
-    feAstError(
-      expression.token,
-      'metadata cannot reference an instance member',
-    );
-  var i = 0;
-  while (i < expression.children.length) {
-    feCheckMetadataScope(expression.children[i], owner);
-    i++;
-  }
-}
-
 void feCheckMetadata(List<AstExpression> metadata, int owner) {
   if (metadata.isEmpty) return;
   feConstants.localTypes = feFlow.types;
+  var scope = feConstants.instanceScope;
+  feConstants.instanceScope = null;
+  if (owner >= 0) feConstants.instanceScope = feMembers[owner];
   var i = 0;
   while (i < metadata.length) {
     var expression = metadata[i];
-    if (owner >= 0 && expression.kind != astCall)
-      feCheckMetadataScope(expression, owner);
     checkMetadataConstant(feConstants, expression);
     i++;
   }
+  feConstants.instanceScope = scope;
 }
 
 void feCheckUnitMetadata(AstUnit syntax) {
@@ -1156,6 +1144,46 @@ void feCheckUnitMetadata(AstUnit syntax) {
   }
 }
 
+void feRegisterConstantConstructors() {
+  var owner = 0;
+  while (owner < feClassNodes.length) {
+    var function = feClassConstructors[owner];
+    if (function >= 0 && feFunctionNodes[function].constant) {
+      var fields = <int>[];
+      var parameterTypes = <int>[];
+      var parameterFields = <int>[];
+      var fieldStart = feClassFieldStarts[owner];
+      var field = 0;
+      while (field < feClassFieldCounts[owner]) {
+        fields.add(feFieldTypes[fieldStart + field]);
+        field++;
+      }
+      var start = feParamStarts[function] + 1;
+      var p = 0;
+      while (p < feFunctionNodes[function].parameters.length) {
+        parameterTypes.add(feParamTypes[start + p]);
+        var field = feParamFields[start + p];
+        if (field >= 0) field -= fieldStart;
+        parameterFields.add(field);
+        p++;
+      }
+      while (feConstants.constructors.length <= owner)
+        feConstants.constructors.add(null);
+      feConstants.constructors[owner] = ConstantConstructorInfo(
+        owner,
+        feClassNodes[owner],
+        feFunctionNodes[function],
+        feMembers[owner],
+        fields,
+        parameterTypes,
+        parameterFields,
+      );
+    }
+    owner++;
+  }
+  checkConstantConstructors(feConstants);
+}
+
 void feResolveDefaults(int count) {
   var omitted = ConstantValue(tNull, tNull, 0, '');
   while (feParamDefaults.length < feParamTypes.length)
@@ -1164,6 +1192,8 @@ void feResolveDefaults(int count) {
   while (f < count) {
     var syntax = feFunctionNodes[f];
     feCheckMetadata(syntax.metadata, feOwners[f]);
+    feConstants.instanceScope = null;
+    if (feOwners[f] >= 0) feConstants.instanceScope = feMembers[feOwners[f]];
     var parameters = syntax.parameters;
     var offset = feParamStarts[f];
     if (feOwners[f] >= 0) offset++;
@@ -1204,6 +1234,7 @@ void feResolveDefaults(int count) {
     }
     f++;
   }
+  feConstants.instanceScope = null;
 }
 
 void feDefaultArgument(int parameter, int token) {
@@ -1227,8 +1258,9 @@ int feConstantGetter(ConstantValue value) {
       kind = typeKindString;
       payload = internString(child.text);
     }
-    if (typeIsList(child.kind)) {
+    if (typeIsList(child.kind) || typeIsClass(child.kind)) {
       kind = typeKindList;
+      if (typeIsClass(child.kind)) kind = typeKindClass;
       payload = feConstantGetter(child);
     }
     kinds.add(kind);
@@ -1255,8 +1287,8 @@ int feConstantGetter(ConstantValue value) {
     ),
   );
   feConstantGetters[key] = getter;
-  var data = constantLists.length;
-  constantLists.add(ListConstantData(value.kind, kinds, values));
+  var data = constantData.length;
+  constantData.add(ConstantData(value.kind, kinds, values));
   feConstantObjects.add(ConstantObject(getter, slot, state, data));
   return getter;
 }
@@ -1264,7 +1296,7 @@ int feConstantGetter(ConstantValue value) {
 void feConstantValue(ConstantValue value, int type, int token) {
   if (value.kind == tString)
     feOperand(opString, internString(value.text));
-  else if (typeIsList(value.kind))
+  else if (typeIsList(value.kind) || typeIsClass(value.kind))
     feCall(feConstantGetter(value), 0);
   else
     feInteger(value.integer, value.kind);
@@ -1281,9 +1313,11 @@ void feGenerateConstantObjects() {
     feOperand(opLoadGlobal, object.slot);
     feEmit(opReturn);
     fePatch(initialize, ir.length);
-    var type = constantLists[object.data].type;
+    var type = constantData[object.data].type;
     feOperand(opConstantData, object.data);
-    feBuiltinTyped(bListFromData, 1, type);
+    var factory = bListFromData;
+    if (typeIsClass(type)) factory = bObjectFromData;
+    feBuiltinTyped(factory, 1, type);
     feDuplicate(type);
     feOperand(opStoreGlobal, object.slot);
     feInteger(1, tBool);
@@ -2239,7 +2273,10 @@ int feLowerValue(AstExpression expression) {
     return feLowerList(expression, -1);
   }
   if (kind == astMember) return feLowerMember(expression);
-  if (kind == astCall) return feLowerCall(expression, -1);
+  if (kind == astCall) {
+    if (expression.constant) return feLowerHint(expression, -1);
+    return feLowerCall(expression, -1);
+  }
   if (kind == astIndex) {
     var receiver = feNonNullableValue(
       feLowerExpression(expression.children[0]),
@@ -2732,6 +2769,8 @@ void feInferGlobal(int global) {
   var previousToken = feAt;
   var previousGlobal = feInitializingGlobal;
   var previousFlow = feFlow;
+  var previousScope = feConstants.instanceScope;
+  feConstants.instanceScope = null;
   ir = <int>[];
   irTypes = <int>[];
   feSlotTypes = <int>[];
@@ -2768,6 +2807,7 @@ void feInferGlobal(int global) {
   feAt = previousToken;
   feInitializingGlobal = previousGlobal;
   feFlow = previousFlow;
+  feConstants.instanceScope = previousScope;
 }
 
 void feAppendInitializer(GlobalInitializer initializer) {
@@ -2884,7 +2924,7 @@ void parseSource(SourceProgram source) {
   feParamDefaults.clear();
   feConstantObjects.clear();
   feConstantGetters.clear();
-  constantLists.clear();
+  constantData.clear();
   feBindings = FunctionBindings(<LocalVariable>[], -1);
   feBindingTypes = <int>[];
   feBindingSlots = <int>[];
@@ -2937,6 +2977,7 @@ void parseSource(SourceProgram source) {
     sourceCore,
     'identical',
   );
+  feRegisterConstantConstructors();
   feCheckUnitMetadata(syntax);
   var constant = 0;
   while (constant < feGlobalNodes.length) {
@@ -3022,6 +3063,8 @@ void parseSource(SourceProgram source) {
   var f = 1;
   while (f < sourceFunctions) {
     feFunction = f;
+    feConstants.instanceScope = null;
+    if (feOwners[f] >= 0) feConstants.instanceScope = feMembers[feOwners[f]];
     var functionSyntax = feFunctionNodes[f];
     feAt = functionSyntax.token;
     functions[f].start = ir.length;
@@ -3114,6 +3157,7 @@ void parseSource(SourceProgram source) {
     functions[f].localTypes = feSlotTypes;
     f++;
   }
+  feConstants.instanceScope = null;
   feGenerateGlobals(sourceGlobals);
   if (imageKind == 0)
     feGenerateEntry();
@@ -3162,7 +3206,8 @@ void feGenerateEntry() {
   p = supplied;
   while (p < parameters.length) {
     var value = feParamDefaults[offset + p];
-    if (typeIsList(value.kind)) feConstantGetter(value);
+    if (typeIsList(value.kind) || typeIsClass(value.kind))
+      feConstantGetter(value);
     p++;
   }
   feGenerateConstantObjects();

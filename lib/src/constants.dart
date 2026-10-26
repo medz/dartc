@@ -1,4 +1,6 @@
 import 'ast.dart';
+import 'arguments.dart';
+import 'members.dart';
 import 'resolve_type.dart';
 import 'source.dart';
 import 'symbols.dart';
@@ -16,6 +18,32 @@ class ConstantValue {
   ConstantValue(this.type, this.kind, this.integer, this.text);
 }
 
+class ConstantConstructorInfo {
+  int classId;
+  AstClass owner;
+  AstFunction syntax;
+  ClassMembers members;
+  List<int> fieldTypes;
+  List<int> parameterTypes;
+  List<int> parameterFields;
+  List<int> states = const <int>[];
+  List<ConstantValue> values = const <ConstantValue>[];
+
+  ConstantConstructorInfo(
+    this.classId,
+    this.owner,
+    this.syntax,
+    this.members,
+    this.fieldTypes,
+    this.parameterTypes,
+    this.parameterFields,
+  ) {
+    var count = parameterTypes.length + fieldTypes.length;
+    states = List<int>.filled(count, 0);
+    values = List<ConstantValue>.filled(count, ConstantValue(-1, tNull, 0, ''));
+  }
+}
+
 class ConstantContext {
   SymbolTable symbols;
   List<AstVariable> globals;
@@ -25,7 +53,9 @@ class ConstantContext {
   List<ConstantValue> values = <ConstantValue>[];
   List<ConstantValue> locals = <ConstantValue>[];
   List<int> localTypes = <int>[];
-  List<ConstantValue> lists = <ConstantValue>[];
+  List<ConstantValue> aggregates = <ConstantValue>[];
+  List<ConstantConstructorInfo?> constructors = <ConstantConstructorInfo?>[];
+  ClassMembers? instanceScope;
   int identical = -1;
 
   ConstantContext(this.symbols, this.globals, this.globalTypes) {
@@ -75,6 +105,8 @@ ConstantValue _constantGlobal(
     );
   }
   context.states[global] = 1;
+  var scope = context.instanceScope;
+  context.instanceScope = null;
   var value = _evaluateConstant(
     context,
     syntax.initializer[0],
@@ -82,6 +114,7 @@ ConstantValue _constantGlobal(
     declared,
     true,
   );
+  context.instanceScope = scope;
   var type = declared;
   if (type < 0) {
     type = value.type;
@@ -105,20 +138,18 @@ ConstantValue _constantGlobal(
 }
 
 void checkMetadataConstant(ConstantContext context, AstExpression expression) {
+  ConstantValue value;
   if (expression.kind == astCall)
-    _constantError(
+    value = _constantConstructor(context, expression, true, true);
+  else if (expression.kind == astName && expression.binding >= 0)
+    value = _evaluateConstant(context, expression, true, -1, true);
+  else
+    value = _constantReference(
       context,
-      expression.token,
-      'constructor annotations are unsupported',
+      expression,
+      _constantSymbol(context, expression),
+      true,
     );
-  var value = expression.kind == astName && expression.binding >= 0
-      ? _evaluateConstant(context, expression, true, -1, true)
-      : _constantReference(
-          context,
-          expression,
-          _constantSymbol(context, expression),
-          true,
-        );
   if (value.type == tVoid)
     _constantError(
       context,
@@ -151,14 +182,19 @@ ConstantValue _constantReference(
   );
 }
 
-String _constantText(ConstantValue value) {
+String _constantText(ConstantContext context, ConstantValue value, int token) {
   if (value.kind == tString) return value.text;
   if (value.kind == tNull) return 'null';
   if (value.kind == tBool) {
     if (value.integer != 0) return 'true';
     return 'false';
   }
-  return value.integer.toString();
+  if (value.kind == tInt) return value.integer.toString();
+  _constantError(
+    context,
+    token,
+    'constant interpolation requires a primitive value',
+  );
 }
 
 ConstantValue _constantBinary(
@@ -218,6 +254,12 @@ ConstantValue _constantBinary(
     return ConstantValue(type, tBool, right.integer, '');
   }
   if (op == '==' || op == '!=') {
+    if (right.kind != tNull && !_constantPrimitiveEquality(context, left))
+      _constantError(
+        context,
+        expression.token,
+        'constant equality requires primitive equality',
+      );
     var equal = _constantSame(left, right);
     if (op == '!=') equal = !equal;
     if (equal) integer = 1;
@@ -269,7 +311,21 @@ ConstantValue _constantBinary(
 bool _constantSame(ConstantValue left, ConstantValue right) {
   if (left.kind != right.kind) return false;
   if (left.kind == tString) return left.text == right.text;
-  return left.integer == right.integer;
+  if (left.kind == tNull) return true;
+  if (left.kind == tInt ||
+      left.kind == tBool ||
+      typeIsList(left.kind) ||
+      typeIsClass(left.kind))
+    return left.integer == right.integer;
+  return false;
+}
+
+bool _constantPrimitiveEquality(ConstantContext context, ConstantValue value) {
+  if (!typeIsClass(value.kind)) return true;
+  var owner = context.constructors[typeArgument(value.kind)];
+  return owner != null &&
+      lookupMember(owner.members, '==') < 0 &&
+      lookupMember(owner.members, 'hashCode') < 0;
 }
 
 ConstantValue _constantCoalescing(
@@ -318,6 +374,15 @@ int _constantSymbol(ConstantContext context, AstExpression expression) {
   } else {
     return -1;
   }
+  var scope = context.instanceScope;
+  var name = expression.text;
+  if (prefix != '') name = prefix;
+  if (scope != null && lookupMember(scope, name) >= 0)
+    _constantError(
+      context,
+      expression.token,
+      'constant expression cannot reference an instance member',
+    );
   return resolveSymbol(
     context.symbols,
     context.symbols.program.tokens[expression.token].source,
@@ -371,23 +436,197 @@ ConstantValue _constantList(
   var result = ConstantValue(type, type, -1, '');
   result.elements = elements;
   if (!active) return result;
-  i = 0;
-  while (i < context.lists.length) {
-    var previous = context.lists[i];
-    if (previous.kind == type && previous.elements.length == elements.length) {
+  return _constantAggregate(context, result);
+}
+
+ConstantValue _constantAggregate(ConstantContext context, ConstantValue value) {
+  var i = 0;
+  while (i < context.aggregates.length) {
+    var previous = context.aggregates[i];
+    if (previous.kind == value.kind &&
+        previous.elements.length == value.elements.length) {
       var same = true;
       var item = 0;
-      while (same && item < elements.length) {
-        same = _constantSame(previous.elements[item], elements[item]);
+      while (same && item < value.elements.length) {
+        same = _constantSame(previous.elements[item], value.elements[item]);
         item++;
       }
       if (same) return previous;
     }
     i++;
   }
-  result.integer = context.lists.length;
-  context.lists.add(result);
-  return result;
+  value.integer = context.aggregates.length;
+  context.aggregates.add(value);
+  return value;
+}
+
+ConstantValue _constantChecked(
+  ConstantContext context,
+  ConstantValue value,
+  int type,
+  int token,
+  bool active,
+) {
+  if (!typingAssignable(value.type, type) ||
+      active && !typeIsSubtype(value.kind, type))
+    _constantError(context, token, 'incompatible constant value');
+  return constantWithType(value, type);
+}
+
+ConstantValue _constantDeclaration(
+  ConstantContext context,
+  ConstantConstructorInfo owner,
+  int index,
+  bool field,
+  bool active,
+) {
+  var slot = index;
+  var type = -1;
+  var token = owner.syntax.token;
+  AstExpression? expression;
+  if (field) {
+    slot += owner.parameterTypes.length;
+    type = owner.fieldTypes[index];
+    var variable = owner.owner.fields[index];
+    token = variable.token;
+    if (variable.initializer.isNotEmpty) expression = variable.initializer[0];
+  } else {
+    type = owner.parameterTypes[index];
+    token = owner.syntax.parameters[index].token;
+    expression = owner.syntax.parameters[index].defaultValue;
+  }
+  if (!active) return ConstantValue(type, tNull, 0, '');
+  if (owner.states[slot] == 3) return owner.values[slot];
+  if (owner.states[slot] == 1)
+    _constantError(context, token, 'cyclic constant initializer');
+  owner.states[slot] = 1;
+  var scope = context.instanceScope;
+  context.instanceScope = owner.members;
+  var value = ConstantValue(tNull, tNull, 0, '');
+  if (expression != null)
+    value = _evaluateConstant(context, expression, true, type, false);
+  context.instanceScope = scope;
+  value = _constantChecked(context, value, type, token, true);
+  owner.values[slot] = value;
+  owner.states[slot] = 3;
+  return value;
+}
+
+void checkConstantConstructors(ConstantContext context) {
+  var c = 0;
+  while (c < context.constructors.length) {
+    var owner = context.constructors[c];
+    if (owner != null) {
+      var p = 0;
+      while (p < owner.syntax.parameters.length) {
+        var parameter = owner.syntax.parameters[p];
+        if (parameter.kind != astRequiredPositional && !parameter.required)
+          _constantDeclaration(context, owner, p, false, true);
+        p++;
+      }
+      var f = 0;
+      while (f < owner.owner.fields.length) {
+        if (owner.owner.fields[f].initializer.isNotEmpty)
+          _constantDeclaration(context, owner, f, true, true);
+        f++;
+      }
+    }
+    c++;
+  }
+}
+
+ConstantValue _constantConstructor(
+  ConstantContext context,
+  AstExpression expression,
+  bool active,
+  bool implicitConst,
+) {
+  var callee = expression.children[0];
+  var symbol = _constantSymbol(context, callee);
+  if (symbol < 0 || context.symbols.declarations[symbol].kind != symbolClass)
+    _constantError(
+      context,
+      expression.token,
+      'constant expression requires a const constructor',
+    );
+  var classId = context.symbols.declarations[symbol].target;
+  ConstantConstructorInfo? owner;
+  if (classId < context.constructors.length)
+    owner = context.constructors[classId];
+  if (owner == null || !expression.constant && !implicitConst)
+    _constantError(
+      context,
+      expression.token,
+      'constant constructor requires const',
+    );
+  if (expression.typeArguments.isNotEmpty || callee.typeArguments.isNotEmpty)
+    _constantError(
+      context,
+      expression.token,
+      'nongeneric constructor does not accept type arguments',
+    );
+  var bindings = bindArguments(
+    context.symbols.program,
+    owner.syntax,
+    expression,
+    1,
+  );
+  var parameters = List<ConstantValue>.filled(
+    owner.parameterTypes.length,
+    ConstantValue(-1, tNull, 0, ''),
+  );
+  var i = 1;
+  while (i < expression.children.length) {
+    var argument = expression.children[i];
+    if (argument.kind == astNamedArgument) argument = argument.children[0];
+    var parameter = bindings[i - 1];
+    var type = owner.parameterTypes[parameter];
+    var value = _evaluateConstant(context, argument, active, type, true);
+    parameters[parameter] = _constantChecked(
+      context,
+      value,
+      type,
+      argument.token,
+      active,
+    );
+    i++;
+  }
+  i = 0;
+  while (i < parameters.length) {
+    if (parameters[i].type < 0)
+      parameters[i] = _constantDeclaration(context, owner, i, false, active);
+    i++;
+  }
+  var fields = <ConstantValue>[];
+  i = 0;
+  while (i < owner.fieldTypes.length) {
+    fields.add(_constantDeclaration(context, owner, i, true, false));
+    i++;
+  }
+  i = 0;
+  while (i < parameters.length) {
+    var field = owner.parameterFields[i];
+    if (field >= 0)
+      fields[field] = _constantChecked(
+        context,
+        parameters[i],
+        owner.fieldTypes[field],
+        owner.syntax.parameters[i].token,
+        active,
+      );
+    i++;
+  }
+  i = 0;
+  while (i < fields.length) {
+    if (owner.owner.fields[i].initializer.isNotEmpty)
+      fields[i] = _constantDeclaration(context, owner, i, true, active);
+    i++;
+  }
+  var type = classType(classId);
+  var value = ConstantValue(type, type, -1, '');
+  value.elements = fields;
+  if (!active) return value;
+  return _constantAggregate(context, value);
 }
 
 ConstantValue _evaluateConstant(
@@ -465,6 +704,7 @@ ConstantValue _evaluateConstant(
     );
   }
   if (kind == astCall &&
+      !expression.constant &&
       context.identical >= 0 &&
       _constantSymbol(context, expression.children[0]) == context.identical) {
     if (expression.typeArguments.isNotEmpty ||
@@ -501,6 +741,8 @@ ConstantValue _evaluateConstant(
     if (_constantSame(left, right)) integer = 1;
     return ConstantValue(tBool, tBool, integer, '');
   }
+  if (kind == astCall)
+    return _constantConstructor(context, expression, active, implicitConst);
   if (kind == astUnary) {
     var operand = expression.children[0];
     if (expression.text == '-' && operand.kind == astInteger) {
@@ -594,14 +836,18 @@ ConstantValue _evaluateConstant(
           'void is not a constant value',
         );
       }
-      if (active && typeIsList(value.kind)) {
+      if (active &&
+          value.kind != tInt &&
+          value.kind != tBool &&
+          value.kind != tString &&
+          value.kind != tNull) {
         return _constantError(
           context,
           expression.token,
           'constant interpolation requires a primitive value',
         );
       }
-      if (active) text = text + _constantText(value);
+      if (active) text = text + _constantText(context, value, expression.token);
       i++;
     }
     return ConstantValue(tString, tString, 0, text);

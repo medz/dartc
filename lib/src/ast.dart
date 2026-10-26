@@ -130,6 +130,7 @@ class AstFunction {
   int token;
   bool getter;
   bool setter = false;
+  bool constant = false;
 
   AstFunction(
     this.name,

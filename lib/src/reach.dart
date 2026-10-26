@@ -3,6 +3,7 @@ import 'ir.dart';
 import 'constant_data.dart';
 import 'layout.dart';
 import 'ssa.dart';
+import 'types.dart';
 
 void _reachFunction(List<int> reachable, List<int> work, int target) {
   if (reachable[target] == 0) {
@@ -53,10 +54,20 @@ List<int> reachableFunctions(List<SsaFunction> source) {
         if (instruction.op == opCall) {
           _reachFunction(reachable, work, instruction.target);
         } else if (instruction.op == opConstantData) {
-          var data = constantLists[instruction.target];
+          var data = constantData[instruction.target];
+          if (typeIsClass(data.type)) {
+            var owner = dartTypes[data.type].argument;
+            if (allocated[owner] == 0) {
+              allocated[owner] = 1;
+              classes.add(owner);
+              if (indirect && classToStringFunctions[owner] >= 0)
+                _reachFunction(reachable, work, classToStringFunctions[owner]);
+            }
+          }
           var child = 0;
           while (child < data.kinds.length) {
-            if (data.kinds[child] == typeKindList)
+            if (data.kinds[child] == typeKindList ||
+                data.kinds[child] == typeKindClass)
               _reachFunction(reachable, work, data.values[child]);
             child++;
           }

@@ -8,6 +8,25 @@ class Leaf {
   Leaf(this.marker);
 }
 
+class ConstantLeaf {
+  final int marker;
+  final Object? wide;
+  final String? text;
+  final ConstantLeaf? child;
+  final List<ConstantLeaf> refs;
+  final List<Object?> tagged;
+  const ConstantLeaf(
+    this.marker,
+    this.wide,
+    this.text, [
+    this.child,
+    this.refs = const <ConstantLeaf>[],
+    this.tagged = const <Object?>[],
+  ]);
+
+  String toString() => 'constant leaf';
+}
+
 class Wide {
   int marker = 200;
   int p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0;
@@ -271,6 +290,71 @@ void runtimeOwnership(int queue, int edges) {
   check(rt.rtRootMark() == mark);
 }
 
+void constantObjectRoots(int queue, int edges) {
+  var mark = rt.rtRootMark();
+  const child = ConstantLeaf(501, 9223372036854775807, 'const🙂');
+  const parent = ConstantLeaf(
+    502,
+    -9223372036854775808,
+    null,
+    child,
+    <ConstantLeaf>[child],
+    <Object?>[child, null],
+  );
+  var parentAddress = capture(parent, 502, queue);
+  check(rt.rtRootMark() == mark);
+  var count = rt.rtTraceObject(parentAddress, edges, capacity);
+  var childAddress = findMarker(edges, count, 501);
+  var refs = 0;
+  var tagged = 0;
+  var wide = 0;
+  var i = 0;
+  while (i < count) {
+    var object = rt.nativeLoad64(edges + i * 8);
+    var kind = rt.nativeLoad64(
+      rt.rtObjectDescriptor(object) + abi.descriptorKindOffset,
+    );
+    if (kind == abi.descriptorList) {
+      if (rt.rtListLength(object) == 1) refs = object;
+      if (rt.rtListLength(object) == 2) tagged = object;
+    }
+    if (kind == abi.descriptorIntBox) wide = object;
+    i++;
+  }
+  check(
+    count == 4 && childAddress != 0 && refs != 0 && tagged != 0 && wide != 0,
+  );
+  check(rt.nativeLoad64(wide + abi.objectHeaderBytes) == -9223372036854775808);
+  check(listElements(refs, edges) == 1 && contains(edges, 1, childAddress));
+  check(listElements(tagged, edges) == 1 && contains(edges, 1, childAddress));
+  count = rt.rtTraceObject(childAddress, edges, capacity);
+  check(count == 4 && hasStringRoot(edges, count, 99, 111, 7));
+  wide = 0;
+  i = 0;
+  while (i < count) {
+    var object = rt.nativeLoad64(edges + i * 8);
+    if (rt.nativeLoad64(
+          rt.rtObjectDescriptor(object) + abi.descriptorKindOffset,
+        ) ==
+        abi.descriptorIntBox)
+      wide = object;
+    i++;
+  }
+  check(
+    wide != 0 &&
+        rt.nativeLoad64(wide + abi.objectHeaderBytes) == 9223372036854775807,
+  );
+  check(capture(parent, 502, queue) == parentAddress);
+  count = snapshot(queue);
+  check(
+    contains(queue, count, parentAddress) &&
+        contains(queue, count, childAddress),
+  );
+  Object value = parent;
+  check(value.toString() == 'constant leaf');
+  check(rt.rtRootMark() == mark);
+}
+
 void main(List<String> args) {
   if (args.isNotEmpty) {
     capacityFailure(Leaf(190));
@@ -371,6 +455,7 @@ void main(List<String> args) {
   tagged.clear();
   check(listElements(taggedAddress, edges) == 0);
   runtimeOwnership(queue, edges);
+  constantObjectRoots(queue, edges);
   rt.rtUnmap(edges, capacity * 8);
   rt.rtUnmap(queue, capacity * 8);
   print('roots ok');

@@ -758,6 +758,13 @@ void main() {
           "import 'dart:core'; import 'dart:core' as core; const local = <int>[1]; "
           'const same = core.identical(local, first.values); '
           'void main() { print(same); print(identical(local, second.values)); print(first.values == second.values); }',
+      'const-class-first.dart': "class Item { final int value; const Item(this.value); } const item = Item(7);",
+      'const-class-second.dart': "class Item { final int value; const Item(this.value); } const item = Item(7);",
+      'const-class-exports.dart':
+          "export 'const-class-first.dart' show Item, item;",
+      'const-class-imports.dart': "import 'const-class-first.dart' as first; import 'const-class-exports.dart' as alias; import 'const-class-second.dart' as other; const value = first.Item(7); @alias.Item(7) void annotated() {} void main() { print(identical(value, alias.item)); print(identical(value, first.item)); print(identical(value, other.item)); print(value.value); }",
+      'const-class-metadata-only.dart': "class UnusedTag { final int value; const UnusedTag(this.value); String toString() { print('unused metadata'); return 'tag'; } } const unused = UnusedTag(7); @unused void neverCalled() { print('never called'); } @UnusedTag(8) void main() { print(42); }",
+      'const-class-finite-default.dart': "class C { final C? next; const C([this.next = const C(null)]); } void main() { const first = C(); const same = C(C(null)); print(identical(first, same)); print(first.next!.next); var one = C(); var two = C(); print(identical(one, two)); print(identical(one.next, two.next)); print(identical(one.next, first.next)); }",
     };
     for (final entry in libraries.entries) {
       File('${temporary.path}/${entry.key}').writeAsStringSync(entry.value);
@@ -771,7 +778,29 @@ void main() {
     compare(File('${temporary.path}/property-imports.dart'), []);
     compare(File('${temporary.path}/top-accessor-imports.dart'), []);
     compare(File('${temporary.path}/metadata-imports.dart'), []);
+    compare(File('${temporary.path}/const-class-imports.dart'), []);
+    compare(File('${temporary.path}/const-class-metadata-only.dart'), []);
+    compare(File('${temporary.path}/const-class-finite-default.dart'), []);
     final rejected = [
+      r"class C { final int value; const C(this.value); } const object = C(1); const text = '$object'; void main() {}",
+      r"class C { final int value; const C(this.value); int get hashCode => value; } const same = C(1) == C(1); void main() {}",
+      "class C { int value = 1; const C(); } void main() {}",
+      "class C { const C() {} } void main() {}",
+      "class C { const C() => 1; } void main() {}",
+      "class C { final int value; const C(); } void main() {}",
+      "class C { final int value = 1; const C(this.value); } void main() {}",
+      "class C { final List<int> values = []; const C(); } void main() {}",
+      "class C { final List<int> values; const C([this.values = []]); } void main() {}",
+      "int value() => 1; class C { final int field = value(); const C(); } void main() {}",
+      "class C { final int value; C(this.value); } const object = C(1); void main() {}",
+      "class C { final int value; const C(this.value); } int value = 1; const object = C(value); void main() {}",
+      "class C { final int value; const C(this.value); } const object = C(\"wrong\"); void main() {}",
+      "const value = const identical(1, 1); void main() {}",
+      "@identical(1, 1) void main() {}",
+      "class C { final C? next; const C([this.next = const C()]); } void main() {}",
+      "const value = 1; class Mark { final int id; const Mark(this.id); } class C { int value = 2; C(); @Mark(value) void f() {} } void main() {}",
+      "const value = 1; class Mark { final int id; const Mark(this.id); } class C { int value = 2; C(); void f() { const mark = Mark(value); print(mark); } } void main() {}",
+      "const value = 1; class Mark { final int id; const Mark(this.id); } class C { int value = 2; final Mark mark = const Mark(value); C(); } void main() {}",
       '@missing void main() {}',
       'int get note => 1; @note void main() {}',
       'void main() { @note int value = 1; const note = 2; print(value); }',

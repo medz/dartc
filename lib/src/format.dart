@@ -111,7 +111,7 @@ class ConstantLayout {
   int end;
   List<int> globalOffsets = <int>[];
   int globalBytes = 0;
-  List<int> listOffsets = <int>[];
+  List<int> dataOffsets = <int>[];
   List<int> refBitmapOffsets = <int>[];
   List<int> taggedBitmapOffsets = <int>[];
   int metadataFeatures = 0;
@@ -160,7 +160,7 @@ ConstantLayout layoutConstants(int start) {
   List<int> descriptorOffsets = <int>[];
   List<int> classNameStrings = <int>[];
   List<int> typeOffsets = <int>[];
-  List<int> listOffsets = <int>[];
+  List<int> dataOffsets = <int>[];
   List<int> refBitmapOffsets = <int>[];
   List<int> taggedBitmapOffsets = <int>[];
   List<int> globalOffsets = <int>[];
@@ -184,8 +184,8 @@ ConstantLayout layoutConstants(int start) {
     i++;
   }
   i = 0;
-  while (i < constantLists.length) {
-    listOffsets.add(-1);
+  while (i < constantData.length) {
+    dataOffsets.add(-1);
     i++;
   }
   i = 0;
@@ -207,7 +207,7 @@ ConstantLayout layoutConstants(int start) {
     } else if (addressKinds[i] == 4) {
       markTypeReference(typeOffsets, types, addressTargets[i]);
     } else if (addressKinds[i] == 5) {
-      listOffsets[addressTargets[i]] = 0;
+      dataOffsets[addressTargets[i]] = 0;
     }
     i++;
   }
@@ -221,9 +221,9 @@ ConstantLayout layoutConstants(int start) {
     i++;
   }
   i = 0;
-  while (i < constantLists.length) {
-    if (listOffsets[i] == 0) {
-      var data = constantLists[i];
+  while (i < constantData.length) {
+    if (dataOffsets[i] == 0) {
+      var data = constantData[i];
       markTypeReference(typeOffsets, types, data.type);
       var value = 0;
       while (value < data.kinds.length) {
@@ -388,15 +388,19 @@ ConstantLayout layoutConstants(int start) {
   }
   end = alignImage(end, 8);
   i = 0;
-  while (i < constantLists.length) {
-    if (listOffsets[i] == 0) {
-      listOffsets[i] = end;
-      var data = constantLists[i];
+  while (i < constantData.length) {
+    if (dataOffsets[i] == 0) {
+      dataOffsets[i] = end;
+      var data = constantData[i];
       var entryBytes = 8;
-      if (typeIsTagged(typeArgument(data.type))) {
+      var headerBytes = constantListDataOffset;
+      if (typeIsClass(data.type)) {
+        headerBytes = constantObjectDataOffset;
+        entryBytes = constantObjectEntryBytes;
+      } else if (typeIsTagged(typeArgument(data.type))) {
         entryBytes = constantListTaggedEntryBytes;
       }
-      end = end + constantListDataOffset + data.values.length * entryBytes;
+      end = end + headerBytes + data.values.length * entryBytes;
     }
     i++;
   }
@@ -417,7 +421,7 @@ ConstantLayout layoutConstants(int start) {
   );
   layout.globalOffsets = globalOffsets;
   layout.globalBytes = globalBytes;
-  layout.listOffsets = listOffsets;
+  layout.dataOffsets = dataOffsets;
   layout.refBitmapOffsets = refBitmapOffsets;
   layout.taggedBitmapOffsets = taggedBitmapOffsets;
   layout.metadataFeatures = features;
@@ -452,7 +456,7 @@ List<int> createMachOExecutable() {
     } else if (addressKinds[site] == 3) {
       target = base + constants.metadataOffset;
     } else if (addressKinds[site] == 5) {
-      target = base + constants.listOffsets[addressTargets[site]];
+      target = base + constants.dataOffsets[addressTargets[site]];
     } else {
       target = base + constants.typeOffsets[addressTargets[site]];
     }
@@ -608,7 +612,7 @@ List<int> createElfExecutable() {
     } else if (addressKinds[site] == 3) {
       target = base + constants.metadataOffset;
     } else if (addressKinds[site] == 5) {
-      target = base + constants.listOffsets[addressTargets[site]];
+      target = base + constants.dataOffsets[addressTargets[site]];
     } else {
       target = base + constants.typeOffsets[addressTargets[site]];
     }
@@ -923,14 +927,15 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
   }
   imageRootTable(layout, codeOffset, dataBaseOffset);
   var list = 0;
-  while (list < constantLists.length) {
-    var offset = layout.listOffsets[list];
+  while (list < constantData.length) {
+    var offset = layout.dataOffsets[list];
     if (offset >= 0) {
       imageZeros(offset - image.length);
-      var data = constantLists[list];
+      var data = constantData[list];
       image64(layout.typeOffsets[data.type] - offset);
       image64(data.values.length);
-      var tagged = typeIsTagged(typeArgument(data.type));
+      var tagged =
+          typeIsClass(data.type) || typeIsTagged(typeArgument(data.type));
       var i = 0;
       while (i < data.values.length) {
         var entry = image.length;
@@ -938,7 +943,7 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
         var value = data.values[i];
         if (kind == typeKindString) {
           value = layout.stringOffsets[value] - entry;
-        } else if (kind == typeKindList) {
+        } else if (kind == typeKindList || kind == typeKindClass) {
           value = codeOffset + armFunctionOffsets[value] * 4 - entry;
         }
         if (tagged) image64(kind);

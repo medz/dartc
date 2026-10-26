@@ -13,7 +13,7 @@ external int nativeCall1(int function, int value);
 external int nativeCall0(int function);
 external int nativeFramePointer();
 
-const int rtAbiVersion = 9;
+const int rtAbiVersion = 10;
 
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
@@ -551,6 +551,8 @@ int rtListFromData(int data) {
   var length = nativeLoad64(data + constantListLengthOffset);
   var result = rtListNew(type);
   if (length == 0) return rtListFreeze(result);
+  var mark = rtRootMark();
+  rtRootPush(result, storageRef);
   var backing = rtListBackingNew(type, length);
   nativeStore64(result + listCapacityOffset, length);
   nativeStore64(result + listBackingOffset, backing);
@@ -568,7 +570,7 @@ int rtListFromData(int data) {
     var value = nativeLoad64(entry);
     if (representation == storageRef) {
       if (value != 0) {
-        if (kind == typeKindList)
+        if (kind == typeKindList || kind == typeKindClass)
           value = nativeCall0(entry + value);
         else
           value = entry + value;
@@ -582,18 +584,20 @@ int rtListFromData(int data) {
         value = rtBoxBool(value);
       else if (actual == typeKindNull)
         value = 0;
-      else if (actual == typeKindList)
+      else if (actual == typeKindList || actual == typeKindClass)
         value = nativeCall0(entry + value);
       else
         value = entry + value;
     }
     nativeStore64(backing + arrayDataOffset + index * 8, value);
     nativeStore64(backing + arrayLengthOffset, index + 1);
+    nativeStore64(result + listLengthOffset, index + 1);
     entry = entry + stride;
     index = index + 1;
   }
-  nativeStore64(result + listLengthOffset, length);
-  return rtListFreeze(result);
+  rtListFreeze(result);
+  rtRootRestore(mark);
+  return result;
 }
 
 int rtStringFromCodes(int codes) {
@@ -923,6 +927,44 @@ int rtObjectNew(int descriptor) {
     offset = offset + 8;
   }
   return object;
+}
+
+int rtObjectFromData(int data) {
+  var type = data + nativeLoad64(data + constantObjectTypeOffset);
+  var descriptor = type + nativeLoad64(type + typeClassOffset);
+  var count = nativeLoad64(data + constantObjectLengthOffset);
+  var result = rtObjectNew(descriptor);
+  var mark = rtRootMark();
+  rtRootPush(result, storageRef);
+  var bitmap = nativeLoad64(descriptor + descriptorTaggedBitmapOffset);
+  if (bitmap != 0) bitmap = descriptor + bitmap;
+  var entry = data + constantObjectDataOffset;
+  var index = 0;
+  while (index < count) {
+    var kind = nativeLoad64(entry);
+    var value = nativeLoad64(entry + 8);
+    if (kind == typeKindInt || kind == typeKindBool) {
+      if (bitmap != 0 &&
+          (nativeLoad64(bitmap + (index ~/ 64) * 8) & (1 << (index & 63))) !=
+              0) {
+        if (kind == typeKindInt)
+          value = rtBoxInt(value);
+        else
+          value = rtBoxBool(value);
+      }
+    } else if (kind == typeKindNull) {
+      value = 0;
+    } else if (kind == typeKindString) {
+      value = entry + value;
+    } else if (kind == typeKindList || kind == typeKindClass) {
+      value = nativeCall0(entry + value);
+    }
+    nativeStore64(result + objectHeaderBytes + index * 8, value);
+    entry = entry + constantObjectEntryBytes;
+    index = index + 1;
+  }
+  rtRootRestore(mark);
+  return result;
 }
 
 int rtObjectGet(int object, int index) {

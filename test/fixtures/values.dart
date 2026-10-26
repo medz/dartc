@@ -1527,6 +1527,99 @@ void constantLists() {
   constantDefaults();
 }
 
+int constObjectCalls = 0;
+
+class ConstAtom {
+  final int number;
+  const ConstAtom(this.number, [int unused = 0]);
+  String toString() => 'Atom(' + number.toString() + ')';
+}
+
+class ConstOtherAtom {
+  final int number;
+  const ConstOtherAtom(this.number);
+}
+
+class ConstRecord {
+  final Object? payload;
+  final ConstAtom? child;
+  final List<Object?> items;
+  final bool enabled = true;
+  final String label = 'fixed🙂';
+  const ConstRecord({this.payload, this.child, this.items = const []});
+}
+
+class ConstChain {
+  final ConstChain? next;
+  const ConstChain(this.next);
+}
+
+const constantAtom = ConstAtom(7);
+const constantRecord = ConstRecord(
+  payload: -9223372036854775808,
+  child: ConstAtom(7),
+  items: <Object?>[
+    ConstAtom(7),
+    <int>[1],
+    false,
+    null,
+    'nested🙂',
+  ],
+);
+
+int constObjectValue() {
+  constObjectCalls++;
+  return 7;
+}
+
+void constObjectDefault([ConstAtom value = const ConstAtom(7)]) {
+  print(identical(value, constantAtom));
+}
+
+void constObjects() {
+  const first = ConstAtom(7);
+  const sameFields = ConstAtom(7, 99);
+  const Object widened = ConstAtom(7);
+  const different = ConstOtherAtom(7);
+  const same = first == sameFields;
+  print(<bool>[
+    identical(first, constantAtom),
+    identical(first, sameFields),
+    identical(first, widened),
+    identical(first, different),
+    same,
+  ]);
+  var one = ConstAtom(constObjectValue());
+  var two = ConstAtom(constObjectValue());
+  print(<bool>[identical(one, two), identical(one, first)]);
+  print(constObjectCalls);
+  print(<int>[
+    const ConstAtom(-9223372036854775808).number,
+    const ConstAtom(9223372036854775807).number,
+  ]);
+  const objects = <ConstAtom>[ConstAtom(7)];
+  const equivalent = <ConstAtom>[ConstAtom(7, 99)];
+  print(identical(objects, equivalent));
+  print(objects);
+  print(identical(constantRecord.child, first));
+  print(constantRecord.items);
+  print(<Object?>[
+    constantRecord.payload,
+    constantRecord.child!.number,
+    constantRecord.enabled,
+    constantRecord.label,
+  ]);
+  var dynamicRecord = pass(constantRecord);
+  print(dynamicRecord is ConstRecord);
+  print((dynamicRecord as ConstRecord).payload);
+  const empty = ConstRecord();
+  print(<Object?>[empty.child, empty.payload, empty.items]);
+  const chain = ConstChain(ConstChain(null));
+  print(chain.next!.next);
+  print(identical(chain.next, const ConstChain(null)));
+  constObjectDefault();
+}
+
 void bufferValues() {
   boxStrings = 0;
   var buffer = StringBuffer(7);
@@ -1680,6 +1773,7 @@ void main(List<String> args) {
   argumentCalls();
   shiftContexts();
   constantLists();
+  constObjects();
   bufferValues();
   stringBoundaries();
   listGrowth(args);

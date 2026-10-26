@@ -39,7 +39,14 @@ void checkInitializers(SymbolTable symbols, AstUnit unit) {
       }
       var c = 0;
       while (c < owner.constructors.length) {
-        var parameters = owner.constructors[c].parameters;
+        var constructor = owner.constructors[c];
+        if (constructor.constant && field.modifier != 'final')
+          _initError(
+            symbols,
+            field.token,
+            'const constructor requires final fields',
+          );
+        var parameters = constructor.parameters;
         var initialized = false;
         var p = 0;
         while (p < parameters.length) {

@@ -37,7 +37,9 @@ The source checkout additionally supports simple classes with fields, field-form
 
 The `StringBuffer` subset supports empty construction, String arguments to `write` and `writeln`, `clear`, `length`, `isEmpty`, and `toString`. Indexed list access checks bounds. `List.filled` honors `growable`, which defaults to `false`; fixed-length lists allow element replacement and reject `add`, `removeLast`, and `clear`. List `for`/`in` checks for length changes between iteration steps.
 
-The source checkout also accepts user const-variable annotations on existing declaration forms. Annotation constructors, core annotations such as `@override`, and reflective metadata are not yet supported.
+Const generative constructors support final fields, declaration initializers, and field-formal parameters. Const instances share canonical identity across expressions, nested lists, and default values; ordinary constructor calls create fresh instances. Named and redirecting constructors, factories, and initializer lists remain unsupported.
+
+The source checkout also accepts user const-variable annotations on existing declaration forms. Annotations may also call the supported const constructors. Core annotations such as `@override` and reflective metadata remain unsupported.
 
 String indices and positions use UTF-16 code units and check ranges. `String.fromCharCodes` currently takes one `List<int>` argument, with codes from 0 through `0x10ffff`; surrogate code units are preserved.
 
