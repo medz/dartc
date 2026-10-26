@@ -1,6 +1,7 @@
 import 'ast.dart';
 import 'parser.dart';
 import 'ir.dart';
+import 'layout.dart';
 import 'types.dart';
 import 'scanner.dart';
 import 'source.dart';
@@ -260,7 +261,7 @@ void feCollectDeclarations(AstUnit unit) {
     feClassNodes.add(syntax);
     feClassFieldCounts.add(0);
     feClassConstructors.add(-1);
-    classSizes.add(16);
+    classSizes.add(objectHeaderBytes);
     classPointerMasks.add(0);
     feDeclare(source, syntax.name, symbolClass, owner, syntax.token);
     if (source == feSources.core && !syntax.name.startsWith('_')) {
@@ -288,7 +289,7 @@ void feCollectDeclarations(AstUnit unit) {
       field++;
     }
     feClassFieldCounts[i] = field;
-    classSizes[i] = 16 + field * 8;
+    classSizes[i] = objectHeaderBytes + field * 8;
     i++;
   }
   i = 0;
@@ -434,7 +435,8 @@ int feBuiltinType(int id) {
       id == bNativeLoad16 ||
       id == bNativeStore16 ||
       id == bNativeSyscall ||
-      id == bNativeTarget)
+      id == bNativeTarget ||
+      id == bNativeMetadataAddress)
     return tInt;
   if (id == bArguments) return listType(tString);
   return tVoid;
@@ -627,6 +629,7 @@ int fePrimitive(String name) {
   if (name == 'nativeStore16') return bNativeStore16;
   if (name == 'nativeSyscall') return bNativeSyscall;
   if (name == 'nativeTarget') return bNativeTarget;
+  if (name == 'nativeMetadataAddress') return bNativeMetadataAddress;
   return 0;
 }
 
@@ -640,7 +643,8 @@ int fePrimitiveArity(int primitive) {
       primitive == bNativeStore16)
     return 2;
   if (primitive == bNativeSyscall) return 7;
-  if (primitive == bNativeTarget) return 0;
+  if (primitive == bNativeTarget || primitive == bNativeMetadataAddress)
+    return 0;
   return -1;
 }
 
@@ -1755,6 +1759,7 @@ void parseSource(SourceProgram source) {
   feInstallSymbols();
   feCollectDeclarations(syntax);
   stringUnitBytes = 8;
+  stringHeaderBytes = 8;
   var runtimeGlobal = 0;
   while (runtimeGlobal < globalNames.length) {
     if (feRawGlobals[runtimeGlobal] == 1 &&
@@ -1762,9 +1767,24 @@ void parseSource(SourceProgram source) {
       if (_feLiteralTypes[runtimeGlobal] != tInt ||
           (_feLiteralValues[runtimeGlobal] != 2 &&
               _feLiteralValues[runtimeGlobal] != 8)) {
-        feError('runtime rtStringUnitBytes must be 2 or 8');
+        feAstError(
+          feGlobalNodes[runtimeGlobal].token,
+          'runtime rtStringUnitBytes must be 2 or 8',
+        );
       }
       stringUnitBytes = _feLiteralValues[runtimeGlobal];
+    }
+    if (feRawGlobals[runtimeGlobal] == 1 &&
+        globalNames[runtimeGlobal] == 'rtStringHeaderBytes') {
+      if (_feLiteralTypes[runtimeGlobal] != tInt ||
+          (_feLiteralValues[runtimeGlobal] != 8 &&
+              _feLiteralValues[runtimeGlobal] != stringDataOffset)) {
+        feAstError(
+          feGlobalNodes[runtimeGlobal].token,
+          'runtime rtStringHeaderBytes must be 8 or 24',
+        );
+      }
+      stringHeaderBytes = _feLiteralValues[runtimeGlobal];
     }
     runtimeGlobal++;
   }

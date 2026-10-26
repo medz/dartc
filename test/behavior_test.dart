@@ -76,6 +76,7 @@ class Counter {
 const int bias = 7;
 const bool enabled = true;
 const int labelValue = -1234567;
+const int rtStringHeaderBytes = 8;
 int calls = 0;
 int traversals = 0;
 int initial = initialize();
@@ -97,7 +98,10 @@ int fibonacci(int bias) {
   return fibonacci(bias - 1) + fibonacci(bias - 2);
 }
 
+int nativeMetadataAddress() => 77;
+
 void main(List<String> args) {
+  print(nativeMetadataAddress());
   print(calls);
   spare = 99;
   print(calls);
@@ -354,6 +358,7 @@ import './nested/../other.dart' as other show shared;
 import 'math.dart' as math hide shared;
 import 'host.dart';
 int nativeLoad16(int value) => value + 3;
+const int rtStringHeaderBytes = 24;
 void main() {
   print(shared());
   print(other.shared());
@@ -426,6 +431,8 @@ void main() {
       'external int nativeLoad64(int pointer, int extra);',
       'external bool nativeTarget();',
       "external int nativeLoad64(int pointer); int invalid() => nativeLoad64('wrong');",
+      'external int nativeMetadataAddress(int extra);',
+      'const int rtStringHeaderBytes = 16;',
     ];
     for (var i = 0; i < invalidRuntimes.length; i++) {
       final runtime = File('${temporary.path}/runtime-$i.dart')

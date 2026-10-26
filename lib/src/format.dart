@@ -1,5 +1,6 @@
 import 'arm64.dart';
 import 'ir.dart';
+import 'layout.dart';
 import 'sign.dart';
 
 List<int> image = <int>[];
@@ -94,9 +95,17 @@ void imageSection(
 class ConstantLayout {
   List<int> stringOffsets;
   List<int> descriptorOffsets;
+  int stringDescriptorOffset;
+  int metadataOffset;
   int end;
 
-  ConstantLayout(this.stringOffsets, this.descriptorOffsets, this.end);
+  ConstantLayout(
+    this.stringOffsets,
+    this.descriptorOffsets,
+    this.stringDescriptorOffset,
+    this.metadataOffset,
+    this.end,
+  );
 }
 
 ConstantLayout layoutConstants(int start) {
@@ -112,21 +121,27 @@ ConstantLayout layoutConstants(int start) {
     descriptorOffsets.add(-1);
     i++;
   }
+  bool needsMetadata = false;
   i = 0;
   while (i < addressKinds.length) {
     if (addressKinds[i] == 0) {
       stringOffsets[addressTargets[i]] = 0;
     } else if (addressKinds[i] == 2) {
       descriptorOffsets[addressTargets[i]] = 0;
+    } else if (addressKinds[i] == 3) {
+      needsMetadata = true;
     }
     i++;
   }
   int end = start;
+  bool needsStringDescriptor = needsMetadata;
   i = 0;
   while (i < strings.length) {
     if (stringOffsets[i] == 0) {
       stringOffsets[i] = end;
-      end = end + alignImage(8 + strings[i].length * stringUnitBytes, 8);
+      int bytes = stringHeaderBytes + strings[i].length * stringUnitBytes;
+      end = end + alignImage(bytes, 8);
+      if (stringHeaderBytes == stringDataOffset) needsStringDescriptor = true;
     }
     i++;
   }
@@ -134,11 +149,27 @@ ConstantLayout layoutConstants(int start) {
   while (i < classSizes.length) {
     if (descriptorOffsets[i] == 0) {
       descriptorOffsets[i] = end;
-      end = end + 32;
+      end = end + classDescriptorBytes;
     }
     i++;
   }
-  return ConstantLayout(stringOffsets, descriptorOffsets, end);
+  int stringDescriptorOffset = -1;
+  if (needsStringDescriptor) {
+    stringDescriptorOffset = end;
+    end = end + classDescriptorBytes;
+  }
+  int metadataOffset = -1;
+  if (needsMetadata) {
+    metadataOffset = end;
+    end = end + 8;
+  }
+  return ConstantLayout(
+    stringOffsets,
+    descriptorOffsets,
+    stringDescriptorOffset,
+    metadataOffset,
+    end,
+  );
 }
 
 List<int> createMachOExecutable() {
@@ -158,8 +189,10 @@ List<int> createMachOExecutable() {
       target = base + constants.stringOffsets[addressTargets[site]];
     } else if (addressKinds[site] == 1) {
       target = dataBase + addressTargets[site] * 8;
-    } else {
+    } else if (addressKinds[site] == 2) {
       target = base + constants.descriptorOffsets[addressTargets[site]];
+    } else {
+      target = base + constants.metadataOffset;
     }
     int word = addressSites[site];
     int pc = base + codeOffset + word * 4;
@@ -308,8 +341,10 @@ List<int> createElfExecutable() {
       target = base + constants.stringOffsets[addressTargets[site]];
     } else if (addressKinds[site] == 1) {
       target = dataBase + addressTargets[site] * 8;
-    } else {
+    } else if (addressKinds[site] == 2) {
       target = base + constants.descriptorOffsets[addressTargets[site]];
+    } else {
+      target = base + constants.metadataOffset;
     }
     int word = addressSites[site];
     int pc = base + codeOffset + word * 4;
@@ -363,6 +398,12 @@ void imageConstants(ConstantLayout layout) {
   while (stringIndex < strings.length) {
     if (layout.stringOffsets[stringIndex] >= 0) {
       String value = strings[stringIndex];
+      if (stringHeaderBytes == stringDataOffset) {
+        image64(
+          layout.stringDescriptorOffset - layout.stringOffsets[stringIndex],
+        );
+        image64(objectStaticRelative);
+      }
       image64(value.length);
       int character = 0;
       while (character < value.length) {
@@ -382,9 +423,20 @@ void imageConstants(ConstantLayout layout) {
     if (layout.descriptorOffsets[descriptor] >= 0) {
       image64(descriptor);
       image64(classSizes[descriptor]);
-      image64((classSizes[descriptor] - 16) ~/ 8);
+      image64((classSizes[descriptor] - objectHeaderBytes) ~/ 8);
       image64(classPointerMasks[descriptor]);
+      image64(descriptorClass);
     }
     descriptor++;
+  }
+  if (layout.stringDescriptorOffset >= 0) {
+    image64(-1);
+    image64(stringDataOffset);
+    image64(-1);
+    image64(0);
+    image64(descriptorString);
+  }
+  if (layout.metadataOffset >= 0) {
+    image64(layout.stringDescriptorOffset - layout.metadataOffset);
   }
 }

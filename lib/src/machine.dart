@@ -10,7 +10,7 @@ const int rAddr = 2;
 const int rI1 = 3;
 
 const int mConstant = 1;
-// Address kinds: 0 string, 1 global slot, 2 class descriptor.
+// Address kinds: 0 string, 1 global slot, 2 class descriptor, 3 runtime metadata.
 const int mAddress = 2;
 const int mLoad64 = 3;
 const int mStore64 = 4;
@@ -194,6 +194,12 @@ void machineSelectInstruction(
     return;
   }
   if (op == opBuiltin) {
+    if (target == bNativeMetadataAddress) {
+      instructions.add(
+        MachineInstruction(mAddress, output, <int>[], 0, 3, effects),
+      );
+      return;
+    }
     if (target == bNativeTarget) {
       instructions.add(
         MachineInstruction(mConstant, output, <int>[], targetOS, 0, effects),

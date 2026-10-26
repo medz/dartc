@@ -75,6 +75,7 @@ const int bNativeSyscall = 104;
 const int bNativeTarget = 105;
 const int bNativeLoad16 = 106;
 const int bNativeStore16 = 107;
+const int bNativeMetadataAddress = 108;
 
 class FunctionInfo {
   String name;
@@ -109,6 +110,7 @@ int entrySource = -1;
 int targetOS = 0;
 int imageKind = 0;
 int stringUnitBytes = 8;
+int stringHeaderBytes = 8;
 List<String> exportNames = <String>[];
 List<int> exportFunctions = <int>[];
 List<int> exportParameters = <int>[];
