@@ -1,10 +1,7 @@
-const int tVoid = 0;
-const int tInt = 1;
-const int tString = 2;
-const int tBool = 3;
-const int tPointer = 4;
-const int tList = 100;
-const int tClass = 10000;
+// Bootstrap source collection follows imports as well as public exports.
+// ignore: unused_import
+import 'types.dart';
+export 'types.dart';
 
 const int opInt = 1;
 const int opString = 2;

@@ -6,7 +6,7 @@ import 'machine.dart';
 List<int> emitBranchSites = <int>[];
 List<int> emitBranchTargets = <int>[];
 
-void emitEdge(MachineEdge edge, MachineFunction function) {
+void emitEdge(MachineEdge edge, MachineFunction function, int fallthrough) {
   List<int> parameters = function.blocks[edge.target].parameters;
   List<int> locations = function.allocation.locations;
   int i = 0;
@@ -25,9 +25,11 @@ void emitEdge(MachineEdge edge, MachineFunction function) {
       emitStore(function, parameters[i], register);
     }
   }
-  emitBranchSites.add(machineCode.length);
-  emitBranchTargets.add(edge.target);
-  machineCode.add(0x14000000);
+  if (edge.target != fallthrough) {
+    emitBranchSites.add(machineCode.length);
+    emitBranchTargets.add(edge.target);
+    machineCode.add(0x14000000);
+  }
 }
 
 void emitInstruction(MachineInstruction instruction, MachineFunction function) {
@@ -151,6 +153,45 @@ void emitInstruction(MachineInstruction instruction, MachineFunction function) {
   if (output >= 0) emitStore(function, output, result);
 }
 
+List<int> emitUseCounts(MachineFunction function) {
+  List<int> uses = <int>[];
+  int value = 0;
+  while (value < function.reps.length) {
+    uses.add(0);
+    value = value + 1;
+  }
+  int block = 0;
+  while (block < function.blocks.length) {
+    MachineBlock current = function.blocks[block];
+    int instruction = 0;
+    while (instruction < current.instructions.length) {
+      List<int> inputs = current.instructions[instruction].inputs;
+      int input = 0;
+      while (input < inputs.length) {
+        uses[inputs[input]] = uses[inputs[input]] + 1;
+        input = input + 1;
+      }
+      instruction = instruction + 1;
+    }
+    MachineTerminator end = current.end;
+    if (end.value >= 0) uses[end.value] = uses[end.value] + 1;
+    int input = 0;
+    while (input < end.first.arguments.length) {
+      int value = end.first.arguments[input];
+      uses[value] = uses[value] + 1;
+      input = input + 1;
+    }
+    input = 0;
+    while (input < end.second.arguments.length) {
+      int value = end.second.arguments[input];
+      uses[value] = uses[value] + 1;
+      input = input + 1;
+    }
+    block = block + 1;
+  }
+  return uses;
+}
+
 void emitFunction(MachineFunction function) {
   machineCode.add(0xa9bf7bfd);
   machineCode.add(0x910003fd);
@@ -190,6 +231,7 @@ void emitFunction(MachineFunction function) {
     }
     argument = argument + 1;
   }
+  List<int> uses = emitUseCounts(function);
   List<int> offsets = <int>[];
   emitBranchSites = <int>[];
   emitBranchTargets = <int>[];
@@ -197,22 +239,42 @@ void emitFunction(MachineFunction function) {
   while (block < function.blocks.length) {
     offsets.add(machineCode.length);
     MachineBlock current = function.blocks[block];
+    MachineTerminator end = current.end;
+    int compareCondition = -1;
     int instruction = 0;
     while (instruction < current.instructions.length) {
-      emitInstruction(current.instructions[instruction], function);
+      MachineInstruction operation = current.instructions[instruction];
+      if (instruction + 1 == current.instructions.length &&
+          operation.op == mCompare &&
+          operation.output >= 0 &&
+          end.kind == 2 &&
+          end.value == operation.output &&
+          uses[operation.output] == 1) {
+        int left = emitOperand(function, operation.inputs[0], 0);
+        int right = emitOperand(function, operation.inputs[1], 1);
+        machineCode.add(0xeb00001f | (right << 16) | (left << 5));
+        compareCondition = operation.extra;
+      } else {
+        emitInstruction(operation, function);
+      }
       instruction = instruction + 1;
     }
-    MachineTerminator end = current.end;
     if (end.kind == 1) {
-      emitEdge(end.first, function);
+      emitEdge(end.first, function, block + 1);
     } else if (end.kind == 2) {
-      emitLoad(function, end.value, 0);
+      if (compareCondition < 0) emitLoad(function, end.value, 0);
       int condition = machineCode.length;
       machineCode.add(0);
-      emitEdge(end.first, function);
-      machineCode[condition] =
-          0xb4000000 | (((machineCode.length - condition) & 0x7ffff) << 5);
-      emitEdge(end.second, function);
+      emitEdge(end.first, function, -1);
+      int distance = (machineCode.length - condition) & 0x7ffff;
+      if (compareCondition >= 0) {
+        // The flag-consuming branch immediately follows CMP, before edge copies.
+        machineCode[condition] =
+            0x54000000 | (distance << 5) | (compareCondition ^ 1);
+      } else {
+        machineCode[condition] = 0xb4000000 | (distance << 5);
+      }
+      emitEdge(end.second, function, block + 1);
     } else {
       if (end.value >= 0)
         emitLoad(function, end.value, 0);

@@ -15,7 +15,8 @@ const int mLoad64 = 3;
 const int mStore64 = 4;
 const int mLoad8 = 5;
 const int mStore8 = 6;
-// Calls pass inputs in x0..x7 and return their result in x0.
+// Calls pass the first eight inputs in x0..x7, the rest on the stack.
+// Results return in x0.
 const int mCall = 7;
 const int mSyscall = 8;
 const int mAdd = 9;
@@ -106,7 +107,7 @@ class MachineEdge {
 int machineRep(int type) {
   if (type == tPointer) return rAddr;
   if (type == tBool) return rI1;
-  if (type == tString || type >= tList) return rRef;
+  if (typeIsReference(type)) return rRef;
   return rI64;
 }
 

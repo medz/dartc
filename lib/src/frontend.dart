@@ -29,6 +29,7 @@ List<int> feGlobalValues = <int>[];
 List<int> feRawGlobals = <int>[];
 List<GlobalInitializer> feGlobalInitializers = <GlobalInitializer>[];
 int feRuntimeTokens = 0;
+int fePendingTypeClosers = 0;
 List<int> _feLiteralTypes = <int>[];
 List<int> _feLiteralValues = <int>[];
 List<int> feParamStarts = <int>[];
@@ -89,6 +90,7 @@ void feScan(String source, int runtimeLength) {
   feTokens.clear();
   feKinds.clear();
   feRuntimeTokens = 0;
+  fePendingTypeClosers = 0;
   var i = 0;
   while (i < source.length) {
     var runtime = i < runtimeLength;
@@ -290,7 +292,7 @@ int feClassId(String name) {
 }
 
 bool feClassType(int type) {
-  return type >= tClass && type < tClass + feClassNames.length;
+  return typeIsClass(type);
 }
 
 int feField(int owner, String name) {
@@ -304,6 +306,7 @@ int feField(int owner, String name) {
 void feDiscoverClasses() {
   for (var i = 0; i < feTokens.length - 1; i++) {
     if (feKinds[i] == 1 && feTokens[i] == 'class') {
+      classType(feClassNames.length);
       feClassNames.add(feTokens[i + 1]);
       feClassFieldCounts.add(0);
       feClassConstructors.add(-1);
@@ -323,6 +326,23 @@ bool feTypeStart() {
       feClassId(fePeek()) >= 0;
 }
 
+void feTypeClose() {
+  if (fePendingTypeClosers > 0) {
+    fePendingTypeClosers--;
+    return;
+  }
+  if (feTake('>')) return;
+  if (feTake('>>')) {
+    fePendingTypeClosers = 1;
+    return;
+  }
+  if (feTake('>>>')) {
+    fePendingTypeClosers = 2;
+    return;
+  }
+  feExpect('>');
+}
+
 int feType() {
   if (feTake('int')) return tInt;
   if (feTake('String')) return tString;
@@ -333,14 +353,14 @@ int feType() {
     var element = tInt;
     if (feTake('<')) {
       element = feType();
-      feExpect('>');
+      feTypeClose();
     }
-    return tList + element;
+    return listType(element);
   }
   var owner = feClassId(fePeek());
   if (owner >= 0) {
     feAt++;
-    return tClass + owner;
+    return classType(owner);
   }
   feError('unsupported type ' + fePeek());
   return tInt;
@@ -420,7 +440,7 @@ void feFunctionSignature(
   var count = 0;
   if (owner >= 0) {
     feParamNames.add('this');
-    feParamTypes.add(tClass + owner);
+    feParamTypes.add(classType(owner));
     feParamFields.add(-1);
     count++;
   }
@@ -494,7 +514,7 @@ void feClassSignature() {
         var index = feClassFieldCounts[owner];
         feClassFieldCounts[owner] = index + 1;
         classSizes[owner] = 16 + (index + 1) * 8;
-        if (type == tString || type >= tList) {
+        if (typeIsReference(type)) {
           classPointerMasks[owner] = classPointerMasks[owner] | (1 << index);
         }
         feFieldNames.add(field);
@@ -509,7 +529,7 @@ void feClassSignature() {
     feTake('final');
     if (feIs(name) && feTokens[feAt + 1] == '(') {
       feAt += 2;
-      feFunctionSignature(name + '.new', tClass + owner, owner, true, false);
+      feFunctionSignature(name + '.new', classType(owner), owner, true, false);
     } else {
       var type = feType();
       var member = feName();
@@ -672,7 +692,7 @@ int feBuiltinType(int id) {
       id == bNativeSyscall ||
       id == bNativeTarget)
     return tInt;
-  if (id == bArguments) return tList + tString;
+  if (id == bArguments) return listType(tString);
   return tVoid;
 }
 
@@ -941,10 +961,10 @@ int feListLiteral(int element) {
   feExpect('[');
   var allocation = ir.length;
   var duplicates = <int>[];
-  feBuiltinTyped(bListNew, 0, tList + element);
+  feBuiltinTyped(bListNew, 0, listType(element));
   while (!feIs(']')) {
     duplicates.add(ir.length);
-    feDuplicate(tList + element);
+    feDuplicate(listType(element));
     var valueType = feExpression();
     if (element == 0) element = valueType;
     feBuiltin(bListAdd, 2);
@@ -953,7 +973,7 @@ int feListLiteral(int element) {
   }
   feExpect(']');
   if (element == 0) element = tInt;
-  var type = tList + element;
+  var type = listType(element);
   irTypes[allocation] = type;
   for (var i = 0; i < duplicates.length; i++) irTypes[duplicates[i]] = type;
   return type;
@@ -1022,14 +1042,14 @@ int fePrimary() {
     type = feListLiteral(0);
   } else if (feTake('<')) {
     var element = feType();
-    feExpect('>');
+    feTypeClose();
     type = feListLiteral(element);
   } else {
     var name = feName();
     var owner = feClassId(name);
     if (owner >= 0 && feIs('(')) {
       feOperand(opDescriptor, owner);
-      feBuiltinTyped(bObjectNew, 1, tClass + owner);
+      feBuiltinTyped(bObjectNew, 1, classType(owner));
       var count = feArgumentList();
       var constructor = feClassConstructors[owner];
       if (constructor >= 0) {
@@ -1039,7 +1059,7 @@ int fePrimary() {
       } else if (count != 0) {
         feError('constructor argument count for ' + name);
       }
-      type = tClass + owner;
+      type = classType(owner);
     } else if (name == 'Pointer' && feIs('.')) {
       type = fePointerFromFunction();
     } else if ((name == 'List' || name == 'String' || name == 'int') &&
@@ -1047,7 +1067,7 @@ int fePrimary() {
       var element = tInt;
       if (feTake('<')) {
         element = feType();
-        feExpect('>');
+        feTypeClose();
       }
       feExpect('.');
       var member = feName();
@@ -1064,8 +1084,8 @@ int fePrimary() {
           feTake(',');
         }
         feExpect(')');
-        type = tList + element;
-        if (element == tInt && valueType != tInt) type = tList + valueType;
+        type = listType(element);
+        if (element == tInt && valueType != tInt) type = listType(valueType);
         feBuiltinTyped(bListFilled, 2, type);
       } else if (name == 'String' && member == 'fromCharCodes') {
         var count = feArgumentList();
@@ -1096,13 +1116,13 @@ int fePrimary() {
         feBuiltin(bStringSubstring, 3);
         type = tString;
       } else {
-        type -= tList;
+        type = typeArgument(type);
         feBuiltinTyped(bListGet, 2, type);
       }
     } else if (feTake('.')) {
       var member = feName();
       if (feClassType(type)) {
-        var owner = type - tClass;
+        var owner = typeArgument(type);
         if (feIs('(')) {
           var function = feFindFunction(feClassNames[owner] + '.' + member);
           if (function < 0) feError('unknown method ' + member);
@@ -1142,20 +1162,20 @@ int fePrimary() {
           feOperand(opInt, 1);
           feEmit(opSub);
         }
-        type -= tList;
+        type = typeArgument(type);
         feBuiltinTyped(bListGet, 2, type);
       } else if (member == 'toString') {
         feExpect('(');
         feExpect(')');
         if (type != tString) feBuiltin(bIntToString, 1);
         type = tString;
-      } else if (type >= tList) {
+      } else if (typeIsList(type)) {
         var count = feArgumentList();
         if (member == 'add') {
           feBuiltin(bListAdd, count + 1);
           type = tVoid;
         } else if (member == 'removeLast') {
-          type -= tList;
+          type = typeArgument(type);
           feBuiltinTyped(bListRemoveLast, count + 1, type);
         } else if (member == 'clear') {
           feBuiltin(bListClear, count + 1);
@@ -1333,10 +1353,10 @@ int feExpression() {
         if (feTake('[')) {
           feExpression();
           feExpect(']');
-          type -= tList;
+          type = typeArgument(type);
         } else {
           feExpect('.');
-          var field = feField(type - tClass, feName());
+          var field = feField(typeArgument(type), feName());
           feOperand(opInt, feFieldIndices[field]);
           type = feFieldTypes[field];
           current = 2;
@@ -1631,6 +1651,7 @@ void feInferGlobal(int global) {
   var previousLocals = feSlotTypes;
   var previousNext = feNextLocal;
   var previousToken = feAt;
+  var previousClosers = fePendingTypeClosers;
   var previousGlobal = feInitializingGlobal;
   ir = <int>[];
   irTypes = <int>[];
@@ -1661,6 +1682,7 @@ void feInferGlobal(int global) {
   feSlotTypes = previousLocals;
   feNextLocal = previousNext;
   feAt = previousToken;
+  fePendingTypeClosers = previousClosers;
   feInitializingGlobal = previousGlobal;
 }
 
@@ -1734,6 +1756,7 @@ void feGenerateGlobals(int count) {
 }
 
 void parseSource(String source, int runtimeLength) {
+  resetTypes();
   ir.clear();
   irTypes.clear();
   functions.clear();

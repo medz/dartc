@@ -318,8 +318,14 @@ int rtListFilled(int length, int value) {
 
 int rtStringFromCodes(int codes) {
   var length = rtListLength(codes);
-  var result = rtStringNew(length * 2);
+  var units = length;
   var i = 0;
+  while (i < length) {
+    if (rtListGet(codes, i) > 65535) units = units + 1;
+    i = i + 1;
+  }
+  var result = rtStringNew(units);
+  i = 0;
   var count = 0;
   while (i < length) {
     var c = rtListGet(codes, i);

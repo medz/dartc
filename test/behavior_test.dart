@@ -69,7 +69,7 @@ void main(List<String> args) {
   print(text.lastIndexOf('🙂'));
   print(text.startsWith('你好', 5));
   print(text.endsWith('🙂'));
-  print(String.fromCharCodes(<int>[0x4f60, 0x597d, 0x1f642]) == text.substring(5));
+  print(String.fromCharCodes(<int>[68, 97, 114, 116, 32, 0x4f60, 0x597d, 0x1f642]) == text);
   print('value=' + labelValue.toString());
   print(10000000000 + int.parse('0xff'));
   print(args.length);
@@ -85,6 +85,9 @@ void main(List<String> args) {
   print(info.offsets[1]);
   print(info.active);
   print(functions.first == info);
+  List<List<FunctionInfo>> groups = <List<FunctionInfo>>[functions];
+  groups[0][0].start += 1;
+  print(groups.first.first.label());
 }
 ''';
 
