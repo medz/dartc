@@ -183,12 +183,20 @@ AstExpression parserPrimary(Parser parser) {
     parserExpect(parser, ')');
     return expression;
   }
-  if (parserIs(parser, '[')) return parserList(parser, <AstType>[], token);
+  var constant = parserTake(parser, 'const');
+  if (parserIs(parser, '[')) {
+    var expression = parserList(parser, <AstType>[], token);
+    expression.constant = constant;
+    return expression;
+  }
   if (parserTake(parser, '<')) {
     List<AstType> arguments = <AstType>[parseAstType(parser)];
     if (!parserTypeClose(parser)) parserError(parser, 'expected >');
-    return parserList(parser, arguments, token);
+    var expression = parserList(parser, arguments, token);
+    expression.constant = constant;
+    return expression;
   }
+  if (constant) parserError(parser, 'const currently requires a List literal');
   var name = parserName(parser);
   return AstExpression(astName, name, <AstExpression>[], <AstType>[], token);
 }
@@ -769,9 +777,21 @@ AstStatement parserEmptyStatement(int token) {
 }
 
 bool parserVariableStatement(Parser parser) {
+  if (parserIs(parser, 'const')) {
+    var position = parser.position;
+    parser.position++;
+    var declaration = parserTypedDeclaration(parser);
+    if (!declaration &&
+        parser.tokens[parser.position].kind == tokenIdentifier) {
+      var next = parser.tokens[parser.position + 1];
+      declaration =
+          tokenIs(next, '=') || tokenIs(next, ',') || tokenIs(next, ';');
+    }
+    parser.position = position;
+    return declaration;
+  }
   return parserIs(parser, 'var') ||
       parserIs(parser, 'final') ||
-      parserIs(parser, 'const') ||
       parserTypedDeclaration(parser);
 }
 

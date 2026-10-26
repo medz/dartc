@@ -2,6 +2,7 @@ import 'ast.dart';
 import 'arguments.dart';
 import 'binding.dart';
 import 'constants.dart';
+import 'resolve_type.dart';
 import 'flow.dart';
 import 'parser.dart';
 import 'ir.dart';
@@ -53,6 +54,19 @@ class GlobalInitializer {
     this.state,
   );
 }
+
+class ConstantObject {
+  ConstantValue value;
+  int getter;
+  int slot;
+  int state;
+  int token;
+
+  ConstantObject(this.value, this.getter, this.slot, this.state, this.token);
+}
+
+List<ConstantObject> feConstantObjects = <ConstantObject>[];
+List<int> feConstantGetters = <int>[];
 
 SourceProgram feSources = SourceProgram(
   <SourceFile>[],
@@ -182,7 +196,7 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
   if (constructor)
     result = classType(owner);
   else if (syntax.result.name != '')
-    result = feLowerType(syntax.result);
+    result = resolveType(feSymbols, syntax.result);
   else if (owner >= 0 && syntax.name == 'toString' && !syntax.getter)
     result = tString;
   if (owner >= 0) {
@@ -205,7 +219,7 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
       var entry = feField(owner, parameter.name);
       type = feFieldTypes[entry];
       if (parameter.type.name != '') {
-        type = feLowerType(parameter.type);
+        type = resolveType(feSymbols, parameter.type);
         if (!typeIsSubtype(type, feFieldTypes[entry])) {
           feAstError(
             parameter.token,
@@ -215,7 +229,7 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
       }
       field = feFieldIndices[entry];
     } else if (parameter.type.name != '') {
-      type = feLowerType(parameter.type);
+      type = resolveType(feSymbols, parameter.type);
     }
     feParamTypes.add(type);
     feParamFields.add(field);
@@ -284,7 +298,7 @@ void feCollectDeclarations(AstUnit unit) {
       var syntax = fields[field];
       if (syntax.type.name == '')
         feAstError(syntax.token, 'field requires a type');
-      var type = feLowerType(syntax.type);
+      var type = resolveType(feSymbols, syntax.type);
       feFieldNames.add(syntax.name);
       feFieldNodes.add(syntax);
       feFieldTypes.add(type);
@@ -307,7 +321,7 @@ void feCollectDeclarations(AstUnit unit) {
     var syntax = unit.variables[i];
     var source = feTokens[syntax.token].source;
     var type = -1;
-    if (syntax.type.name != '') type = feLowerType(syntax.type);
+    if (syntax.type.name != '') type = resolveType(feSymbols, syntax.type);
     if (type < 0 && syntax.initializer.isEmpty) type = tDynamic;
     var global = globalNames.length;
     globalNames.add(syntax.name);
@@ -641,6 +655,9 @@ void feLoadGlobalValue(int global) {
     feOperand(opString, _feLiteralValues[global]);
   } else if (_feLiteralTypes[global] != 0) {
     feInteger(_feLiteralValues[global], _feLiteralTypes[global]);
+  } else if (feGlobalNodes[global].modifier == 'const') {
+    var value = feConstants.values[global];
+    feConstantValue(value, value.type, feGlobalNodes[global].token);
   } else if (imageKind == 0 && feRawGlobals[global] == 0) {
     feGlobalType(global);
     feCall(feGlobalInitializers[global].getter, 0);
@@ -734,6 +751,13 @@ void feInstallSymbols() {
   declareSymbol(feSymbols, sourceCore, 'Null', symbolType, tNull);
   declareSymbol(feSymbols, sourceCore, 'List', symbolType, -1);
   declareSymbol(feSymbols, sourceCore, 'print', symbolBuiltin, bPrintInt);
+  declareSymbol(
+    feSymbols,
+    sourceCore,
+    'identical',
+    symbolBuiltin,
+    bValueIdentical,
+  );
   declareSymbol(feSymbols, sourceFfi, 'Pointer', symbolType, tPointer);
   declareSymbol(feSymbols, sourceFfi, 'NativeFunction', symbolType, tPointer);
   declareSymbol(feSymbols, sourceFfi, 'Int64', symbolType, tInt);
@@ -877,51 +901,6 @@ int feCombine(String op, int left, int right, int token) {
   return result;
 }
 
-int feLowerType(AstType syntax) {
-  if (syntax.name.endsWith('?')) {
-    return nullableType(
-      feLowerType(
-        AstType(
-          syntax.name.substring(0, syntax.name.length - 1),
-          syntax.arguments,
-          syntax.token,
-        ),
-      ),
-    );
-  }
-  var count = syntax.arguments.length;
-  if (syntax.name == 'void' || syntax.name == 'dynamic') {
-    if (count != 0)
-      feAstError(syntax.token, 'type does not accept type arguments');
-    if (syntax.name == 'void') return tVoid;
-    return tDynamic;
-  }
-  var symbol = feTypeSymbol(syntax);
-  if (symbol < 0) feAstError(syntax.token, 'unknown type ' + syntax.name);
-  var declaration = feSymbols.declarations[symbol];
-  var generic =
-      declaration.kind == symbolType &&
-      (declaration.target < 0 || declaration.target == tPointer);
-  if (generic && count > 1 || !generic && count != 0) {
-    feAstError(
-      syntax.token,
-      'wrong number of type arguments for ' + syntax.name,
-    );
-  }
-  if (declaration.kind == symbolClass) return classType(declaration.target);
-  if (declaration.kind == symbolType) {
-    if (declaration.target < 0) {
-      var element = tDynamic;
-      if (syntax.arguments.length != 0)
-        element = feLowerType(syntax.arguments[0]);
-      return listType(element);
-    }
-    return declaration.target;
-  }
-  feAstError(syntax.token, 'declaration is not a type: ' + syntax.name);
-  return tInt;
-}
-
 int feConvertValue(int actual, int expected, int token) {
   if (actual == tVoid && expected != tVoid)
     feAstError(token, 'void expression cannot be used as a value');
@@ -962,7 +941,7 @@ void feConditionFact(AstExpression expression, bool truth) {
   } else if (expression.kind == astTypeTest) {
     var binding = expression.children[0].binding;
     if (binding < 0) return;
-    var tested = feLowerType(expression.typeArguments[0]);
+    var tested = resolveType(feSymbols, expression.typeArguments[0]);
     if (expression.text == 'is!') truth = !truth;
     if (truth)
       flowPromote(feFlow, binding, tested);
@@ -1026,6 +1005,12 @@ int feNonNullableValue(int type, int token) {
 }
 
 int feLowerHint(AstExpression expression, int context) {
+  if (expression.kind == astList && expression.constant) {
+    feConstants.localTypes = feFlow.types;
+    var value = evaluateConstant(feConstants, expression, context, true);
+    feConstantValue(value, value.type, expression.token);
+    return value.type;
+  }
   if (expression.kind == astConditional)
     return feLowerConditional(expression, context);
   var type = -1;
@@ -1076,9 +1061,14 @@ void feResolveDefaults(int count) {
       }
       if (parameter.kind != astRequiredPositional && !parameter.required) {
         var value = omitted;
-        if (parameter.defaults.isNotEmpty)
-          value = evaluateConstant(feConstants, parameter.defaults[0]);
         var type = feParamTypes[offset + p];
+        if (parameter.defaults.isNotEmpty)
+          value = evaluateConstant(
+            feConstants,
+            parameter.defaults[0],
+            type,
+            false,
+          );
         if (!typingAssignable(value.type, type) ||
             !typeIsSubtype(value.kind, type))
           feAstError(
@@ -1094,12 +1084,82 @@ void feResolveDefaults(int count) {
 }
 
 void feDefaultArgument(int parameter, int token) {
-  var value = feParamDefaults[parameter];
+  feConstantValue(feParamDefaults[parameter], feParamTypes[parameter], token);
+}
+
+int feConstantGetter(ConstantValue value, int token) {
+  var key = value.integer;
+  while (feConstantGetters.length <= key) feConstantGetters.add(-1);
+  if (feConstantGetters[key] >= 0) return feConstantGetters[key];
+  var i = 0;
+  while (i < value.elements.length) {
+    var child = value.elements[i];
+    if (typeIsList(child.kind)) feConstantGetter(child, token);
+    i++;
+  }
+  var slot = globalNames.length;
+  globalNames.add('#constant:' + key.toString());
+  globalTypes.add(value.kind);
+  var state = globalNames.length;
+  globalNames.add('#constant-state:' + key.toString());
+  globalTypes.add(tBool);
+  var getter = functions.length;
+  functions.add(
+    FunctionInfo(
+      '#constant:' + key.toString(),
+      0,
+      0,
+      0,
+      value.kind,
+      <int>[],
+      <int>[],
+      sourceUnknown,
+    ),
+  );
+  feConstantGetters[key] = getter;
+  feConstantObjects.add(ConstantObject(value, getter, slot, state, token));
+  return getter;
+}
+
+void feConstantValue(ConstantValue value, int type, int token) {
   if (value.kind == tString)
     feOperand(opString, internString(value.text));
+  else if (typeIsList(value.kind))
+    feCall(feConstantGetter(value, token), 0);
   else
     feInteger(value.integer, value.kind);
-  feConvertValue(value.kind, feParamTypes[parameter], token);
+  feConvertValue(value.kind, type, token);
+}
+
+void feGenerateConstantObjects() {
+  var i = 0;
+  while (i < feConstantObjects.length) {
+    var object = feConstantObjects[i];
+    functions[object.getter].start = ir.length;
+    feOperand(opLoadGlobal, object.state);
+    var initialize = feJump(opJumpFalse);
+    feOperand(opLoadGlobal, object.slot);
+    feEmit(opReturn);
+    fePatch(initialize, ir.length);
+    var type = object.value.kind;
+    var element = typeArgument(type);
+    feBuiltinTyped(bListNew, 0, type);
+    var child = 0;
+    while (child < object.value.elements.length) {
+      feDuplicate(type);
+      feConstantValue(object.value.elements[child], element, object.token);
+      feBuiltin(bListAdd, 2);
+      feEmit(opPop);
+      child++;
+    }
+    feBuiltinTyped(bListFreeze, 1, type);
+    feDuplicate(type);
+    feOperand(opStoreGlobal, object.slot);
+    feInteger(1, tBool);
+    feOperand(opStoreGlobal, object.state);
+    feEmit(opReturn);
+    i++;
+  }
 }
 
 int feLowerArguments(AstExpression call, int start, int function) {
@@ -1155,7 +1215,7 @@ int feLowerArguments(AstExpression call, int start, int function) {
 int feLowerList(AstExpression expression, int context) {
   var element = -1;
   if (expression.typeArguments.length != 0) {
-    element = feLowerType(expression.typeArguments[0]);
+    element = resolveType(feSymbols, expression.typeArguments[0]);
   } else if (context > 0 && typeIsList(context)) {
     element = typeArgument(context);
   }
@@ -1259,7 +1319,8 @@ int feLowerPointerBinding(AstExpression call) {
 }
 
 int feMetadataMask(AstExpression expression) {
-  var value = evaluateConstant(feConstants, expression);
+  feConstants.localTypes = feFlow.types;
+  var value = evaluateConstant(feConstants, expression, tInt, false);
   if (value.type != tInt || value.kind != tInt)
     feAstError(
       expression.token,
@@ -1297,6 +1358,20 @@ int feLowerBuiltinArguments(AstExpression call, int builtin) {
 }
 
 int feLowerBuiltinCall(AstExpression call, int builtin) {
+  if (builtin == bValueIdentical) {
+    if (call.children.length != 3)
+      feAstError(call.token, 'argument count for identical');
+    var argument = 1;
+    while (argument < call.children.length) {
+      var expression = call.children[argument];
+      if (expression.kind == astNamedArgument)
+        feAstError(expression.token, 'identical arguments must be positional');
+      feLowerInContext(expression, tDynamic);
+      argument++;
+    }
+    feBuiltinTyped(bValueIdentical, 2, tBool);
+    return tBool;
+  }
   if (builtin == bNativeMetadataAddress) {
     if (call.children.length != 2)
       feAstError(call.token, 'primitive argument count');
@@ -1361,7 +1436,7 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
     }
     var element = -1;
     if (receiver.typeArguments.length != 0) {
-      element = feLowerType(receiver.typeArguments[0]);
+      element = resolveType(feSymbols, receiver.typeArguments[0]);
     } else if (context > 0 && typeIsList(context)) {
       element = typeArgument(context);
     }
@@ -1621,6 +1696,8 @@ FeLvalue feLowerLvalue(AstExpression expression) {
     var binding = expression.binding;
     if (binding >= 0) {
       feLocalSlot(binding, expression.token);
+      if (feBindings.variables[binding].constant)
+        feAstError(expression.token, 'cannot assign a constant');
       return FeLvalue(feBindingTypes[binding], 0, -1, -1, binding, -1);
     }
   }
@@ -1804,7 +1881,10 @@ int feLowerExpression(AstExpression expression) {
     return feLoadDeclaration(symbol, expression.token);
   }
   if (kind == astInterpolation) return feLowerInterpolation(expression);
-  if (kind == astList) return feLowerList(expression, -1);
+  if (kind == astList) {
+    if (expression.constant) return feLowerHint(expression, -1);
+    return feLowerList(expression, -1);
+  }
   if (kind == astMember) return feLowerMember(expression);
   if (kind == astCall) return feLowerCall(expression, -1);
   if (kind == astIndex) {
@@ -1832,7 +1912,7 @@ int feLowerExpression(AstExpression expression) {
   if (kind == astTypeTest || kind == astTypeCast) {
     var actual = feLowerExpression(expression.children[0]);
     feConvertValue(actual, tDynamic, expression.children[0].token);
-    var target = feLowerType(expression.typeArguments[0]);
+    var target = resolveType(feSymbols, expression.typeArguments[0]);
     if (kind == astTypeCast) {
       feOperand(opTypeCast, target);
       var binding = expression.children[0].binding;
@@ -1925,10 +2005,23 @@ int feLowerConditional(AstExpression expression, int context) {
 void feLowerVariable(AstVariable variable) {
   feAt = variable.token;
   var type = -1;
-  if (variable.type.name != '') type = feLowerType(variable.type);
+  if (variable.type.name != '') type = resolveType(feSymbols, variable.type);
   if (type < 0 && variable.initializer.isEmpty) type = tDynamic;
   var value = type;
-  if (variable.initializer.length != 0)
+  ConstantValue? constant;
+  if (variable.modifier == 'const') {
+    feConstants.localTypes = feFlow.types;
+    if (variable.initializer.isEmpty)
+      feAstError(variable.token, 'constant requires an initializer');
+    constant = evaluateConstant(
+      feConstants,
+      variable.initializer[0],
+      type,
+      true,
+    );
+    value = constant.type;
+    feConstantValue(constant, value, variable.token);
+  } else if (variable.initializer.length != 0)
     value = feLowerHint(variable.initializer[0], type);
   else
     feInteger(0, type);
@@ -1942,6 +2035,14 @@ void feLowerVariable(AstVariable variable) {
   flowDeclare(feFlow, variable.binding, type, typeCanBeNull(type));
   if (variable.initializer.isNotEmpty)
     flowWrite(feFlow, variable.binding, type, value);
+  if (constant != null) {
+    if (feConstants.locals.isEmpty) {
+      var unknown = ConstantValue(-1, tNull, 0, '');
+      while (feConstants.locals.length < feBindings.variables.length)
+        feConstants.locals.add(unknown);
+    }
+    feConstants.locals[variable.binding] = constantWithType(constant, type);
+  }
   feOperand(opStoreLocal, slot);
 }
 
@@ -2149,7 +2250,9 @@ void fePrepareGlobals(int count) {
       -1,
       -1,
     );
-    if (imageKind == 0 && feRawGlobals[i] == 0 && _feLiteralTypes[i] == 0) {
+    if (imageKind == 0 &&
+        feRawGlobals[i] == 0 &&
+        feGlobalNodes[i].modifier != 'const') {
       var type = globalTypes[i];
       initializer.getter = functions.length;
       functions.add(
@@ -2349,6 +2452,8 @@ void parseSource(SourceProgram source) {
   feParamStarts.clear();
   feParamTypes.clear();
   feParamDefaults.clear();
+  feConstantObjects.clear();
+  feConstantGetters.clear();
   feBindings = FunctionBindings(<LocalVariable>[], -1);
   feBindingTypes = <int>[];
   feBindingSlots = <int>[];
@@ -2395,6 +2500,11 @@ void parseSource(SourceProgram source) {
   feInstallSymbols();
   feCollectDeclarations(syntax);
   feConstants = ConstantContext(feSymbols, feGlobalNodes, globalTypes);
+  feConstants.identical = symbolOwnDeclaration(
+    feSymbols,
+    sourceCore,
+    'identical',
+  );
   var constant = 0;
   while (constant < feGlobalNodes.length) {
     if (feGlobalNodes[constant].modifier == 'const') {
@@ -2457,7 +2567,8 @@ void parseSource(SourceProgram source) {
   feFunction = 0;
   var i = 0;
   while (i < sourceGlobals) {
-    if (feGlobalInitializers[i].getter < 0 && _feLiteralTypes[i] == 0) {
+    if (feGlobalInitializers[i].getter < 0 &&
+        feGlobalNodes[i].modifier != 'const') {
       feInitializingGlobal = i;
       var variable = feGlobalNodes[i];
       if (variable.initializer.length == 0) {
@@ -2482,6 +2593,7 @@ void parseSource(SourceProgram source) {
     feAt = functionSyntax.token;
     functions[f].start = ir.length;
     feBindings = bodyBindings[f];
+    feConstants.locals.clear();
     feFlow = flowCreate(feBindings.variables.length);
     feBindingTypes = <int>[];
     feBindingSlots = <int>[];
@@ -2558,7 +2670,10 @@ void parseSource(SourceProgram source) {
     f++;
   }
   feGenerateGlobals(sourceGlobals);
-  if (imageKind == 0) feGenerateEntry();
+  if (imageKind == 0)
+    feGenerateEntry();
+  else
+    feGenerateConstantObjects();
 }
 
 void feGenerateEntry() {
@@ -2599,6 +2714,13 @@ void feGenerateEntry() {
     );
   var supplied = positional;
   if (supplied > 2) supplied = 2;
+  p = supplied;
+  while (p < parameters.length) {
+    var value = feParamDefaults[offset + p];
+    if (typeIsList(value.kind)) feConstantGetter(value, syntax.token);
+    p++;
+  }
+  feGenerateConstantObjects();
   entryFunction = main;
   if (parameters.length <= 1 && parameters.length == positional) return;
   var types = <int>[];
@@ -2653,7 +2775,7 @@ void feLowerForIn(AstStatement statement) {
   var declaration = statement.variables[0];
   var context = -1;
   if (declaration.type.name != '')
-    context = listType(feLowerType(declaration.type));
+    context = listType(resolveType(feSymbols, declaration.type));
   var iterableType = feNonNullableValue(
     feLowerHint(statement.expressions[0], context),
     statement.expressions[0].token,

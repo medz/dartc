@@ -920,6 +920,67 @@ void shiftContexts() {
   literalShifts(-1);
 }
 
+const Object constantObject = 1;
+const num constantNumber = 1;
+const List<num> constantNumbers = [1, 9223372036854775807];
+const constantMatrix = [
+  [1],
+  [1],
+];
+const constantIdentity = identical(const <int>[1], const <int>[1]);
+
+void constantDefaults([
+  List<int> empty = const [],
+  List<List<int>> nested = const [[]],
+]) {
+  print(identical(empty, const <int>[]));
+  print(identical(nested[0], const <int>[]));
+  print(nested);
+}
+
+void constantLists() {
+  const first = <Object?>[constantObject, '好🙂', null, true];
+  const second = <Object?>[constantNumber, '好🙂', null, true];
+  print(first);
+  print(identical(first, second));
+  print(first == second);
+  print(constantIdentity);
+  print(identical(const <Object>[1], const <num>[1]));
+  print(identical(const <num>[1], const <int>[1]));
+  print(identical(constantMatrix[0], constantMatrix[1]));
+  print(identical(constantMatrix[0], const <int>[1]));
+  const widened = <List<Object>>[
+    <int>[1],
+  ];
+  print(identical(widened[0], constantMatrix[0]));
+  print(
+    identical(widened, const <List<Object>>[
+      <Object>[1],
+    ]),
+  );
+  const empty = [];
+  print(empty is List<int>);
+  print(identical(empty, const <dynamic>[]));
+  const List<int> contextual = [];
+  print(identical(contextual, const <int>[]));
+  const token = 2;
+  const local = [token];
+  print(identical(local, const <int>[2]));
+  const Object promoted = 1;
+  if (promoted is int) {
+    const typed = <int>[promoted];
+    print(identical(typed, constantMatrix[0]));
+  }
+  const int? nullable = 1;
+  const present = <int>[nullable];
+  print(identical(present, constantMatrix[0]));
+  List<Object> view = constantNumbers;
+  print(view);
+  print(view[1]);
+  print(identical(view, constantNumbers));
+  constantDefaults();
+}
+
 void bufferValues() {
   boxStrings = 0;
   var buffer = StringBuffer(7);
@@ -1025,6 +1086,7 @@ void main(List<String> args) {
   staticContexts(1, null);
   argumentCalls();
   shiftContexts();
+  constantLists();
   bufferValues();
   stringBoundaries();
   listGrowth(args);

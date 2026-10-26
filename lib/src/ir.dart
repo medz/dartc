@@ -93,6 +93,8 @@ const int bValueGt = 53;
 const int bValueGe = 54;
 const int bValueToString = 55;
 const int bValueIs = 56;
+const int bListFreeze = 57;
+const int bValueIdentical = 58;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;

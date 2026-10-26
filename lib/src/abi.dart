@@ -41,6 +41,8 @@ int runtimeFunction(int builtin, int castType) {
   if (builtin == bListRemoveLast) return abiFunction('rtListRemoveLast', 0);
   if (builtin == bListClear) return abiFunction('rtListClear', 0);
   if (builtin == bListFilled) return abiFunction('rtListFilled', 0);
+  if (builtin == bListFreeze) return abiFunction('rtListFreeze', 0);
+  if (builtin == bValueIdentical) return abiFunction('rtValueIdentical', 0);
   if (builtin == bHostRead) return abiFunction('rtHostRead', 0);
   if (builtin == bHostWrite) return abiFunction('rtHostWrite', 0);
   if (builtin == bHostFinish) return abiFunction('rtHostFinish', 0);

@@ -32,6 +32,7 @@ class AstExpression {
   List<AstType> typeArguments;
   int token;
   int binding = -1;
+  bool constant = false;
 
   AstExpression(
     this.kind,

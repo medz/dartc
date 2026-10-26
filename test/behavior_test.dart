@@ -440,8 +440,8 @@ void main(List<String> args) {
     compare(values, [for (var i = 0; i < 20; i++) '参数$i🙂']);
     final namedEntry = File('${temporary.path}/named-entry.dart')
       ..writeAsStringSync(
-        "void main({String label = 'named', bool flag = true}) { "
-        'print(label); print(flag); }',
+        "void main({String label = 'named', bool flag = true, List<List<int>> values = const [[]]}) { "
+        'print(label); print(flag); print(values); }',
       );
     compare(namedEntry, ['ignored', '你好']);
     final twoEntry = File('${temporary.path}/two-entry.dart')
@@ -512,6 +512,9 @@ void main() {
       "void main() { List<Object> view = <int>[1]; print('before'); view[0] = 'wrong'; print('after'); }",
       "void main() { List<Object> view = <num>[1]; print('before'); view[0] = 'wrong'; print('after'); }",
       "void main() { List<Object> view = <int>[1]; print('before'); view.add('wrong'); print('after'); }",
+      "void main() { List<Object> view = const<int>[1]; print('before'); view[9] = 'wrong'; print('after'); }",
+      "void main() { List<Object> view = const<int>[1]; print('before'); view[9] = 2; print('after'); }",
+      "void main() { var values = const[<int>[]]; print('before'); values[0].clear(); print('after'); }",
       "void main() { var values = <int>[]; print('before'); print(values[0]); }",
       "void main() { var values = <int>[1]; print('before'); print(values[-1]); }",
       "void main() { var values = <int>[1]; print('before'); values[1] = 2; print('after'); }",
@@ -603,6 +606,13 @@ void main() {
           "import 'dart:core' as both show print; import 'ordinary.dart' as both; "
           "import 'combined-export.dart' as combined; import 'dart:core' as core; "
           'void main() { core.print(both.print(5)); core.print(combined.print(5)); }',
+      'constant-values.dart': 'const values = <int>[1];',
+      'constant-other.dart': 'const values = <int>[1];',
+      'constant-imports.dart':
+          "import 'constant-values.dart' as first; import 'constant-other.dart' as second; "
+          "import 'dart:core'; import 'dart:core' as core; const local = <int>[1]; "
+          'const same = core.identical(local, first.values); '
+          'void main() { print(same); print(identical(local, second.values)); print(first.values == second.values); }',
     };
     for (final entry in libraries.entries) {
       File('${temporary.path}/${entry.key}').writeAsStringSync(entry.value);
@@ -612,6 +622,7 @@ void main() {
     compare(File('${temporary.path}/priority.dart'), []);
     compare(File('${temporary.path}/export-priority.dart'), []);
     compare(File('${temporary.path}/prefix-priority.dart'), []);
+    compare(File('${temporary.path}/constant-imports.dart'), []);
     final rejected = [
       "import 'exports.dart'; void main() { print(hidden()); }",
       "import 'math.dart'; void main() { print(_private()); }",
@@ -666,6 +677,13 @@ void main() {
       'int value = 1; void call([int argument = value]) {} void main() { call(2); }',
       'int value = 1; void call([int argument = true ? 1 : value]) {} void main() {}',
       "const dynamic value = 'wrong'; void call([int argument = value]) {} void main() { call(2); }",
+      'void call([List<int> values = []]) {} void main() { call(); }',
+      'int value = 1; const values = [value]; void main() { print(values); }',
+      'const Object value = 1; const values = <int>[value]; void main() { print(values); }',
+      "const dynamic value = 'wrong'; const values = <int>[value]; void main() { print(values); }",
+      'const int value = 1; void call(int value) { const values = [value]; print(values); } void main() { call(2); }',
+      'void main() { const values = [1]; values = <int>[2]; print(values); }',
+      'bool identical(Object? left, Object? right) => true; const same = identical(1, 1); void main() { print(same); }',
       "void main() { print('abc'.codeUnitAt()); }",
       "void main() { print('abc'.substring()); }",
       "void main() { print('abc'.endsWith('c', 1)); }",

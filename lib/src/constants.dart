@@ -1,4 +1,5 @@
 import 'ast.dart';
+import 'resolve_type.dart';
 import 'source.dart';
 import 'symbols.dart';
 import 'types.dart';
@@ -10,6 +11,7 @@ class ConstantValue {
   int kind;
   int integer;
   String text;
+  List<ConstantValue> elements = const <ConstantValue>[];
 
   ConstantValue(this.type, this.kind, this.integer, this.text);
 }
@@ -21,6 +23,10 @@ class ConstantContext {
   // 0 unseen, 1 visiting, 2 inferred type only, 3 evaluated value.
   List<int> states = <int>[];
   List<ConstantValue> values = <ConstantValue>[];
+  List<ConstantValue> locals = <ConstantValue>[];
+  List<int> localTypes = <int>[];
+  List<ConstantValue> lists = <ConstantValue>[];
+  int identical = -1;
 
   ConstantContext(this.symbols, this.globals, this.globalTypes) {
     var i = 0;
@@ -30,6 +36,12 @@ class ConstantContext {
       i++;
     }
   }
+}
+
+ConstantValue constantWithType(ConstantValue value, int type) {
+  var result = ConstantValue(type, value.kind, value.integer, value.text);
+  result.elements = value.elements;
+  return result;
 }
 
 ConstantValue _constantError(
@@ -68,7 +80,13 @@ ConstantValue _constantGlobal(
     );
   }
   context.states[global] = 1;
-  var value = _evaluateConstant(context, syntax.initializer[0], active);
+  var value = _evaluateConstant(
+    context,
+    syntax.initializer[0],
+    active,
+    declared,
+    true,
+  );
   var type = declared;
   if (type < 0) {
     type = value.type;
@@ -82,7 +100,7 @@ ConstantValue _constantGlobal(
       'invalid const declaration type',
     );
   }
-  value = ConstantValue(type, value.kind, value.integer, value.text);
+  value = constantWithType(value, type);
   context.values[global] = value;
   if (active)
     context.states[global] = 3;
@@ -129,9 +147,16 @@ ConstantValue _constantBinary(
   ConstantContext context,
   AstExpression expression,
   bool active,
+  bool implicitConst,
 ) {
   var op = expression.text;
-  var left = _evaluateConstant(context, expression.children[0], active);
+  var left = _evaluateConstant(
+    context,
+    expression.children[0],
+    active,
+    -1,
+    implicitConst,
+  );
   var rightActive = active;
   var logical = op == '&&' || op == '||';
   if (logical && active) {
@@ -146,7 +171,13 @@ ConstantValue _constantBinary(
       rightActive = false;
     }
   }
-  var right = _evaluateConstant(context, expression.children[1], rightActive);
+  var right = _evaluateConstant(
+    context,
+    expression.children[1],
+    rightActive,
+    -1,
+    implicitConst,
+  );
   var type = typingBinary(op, left.type, right.type);
   if (type < 0) {
     return _constantError(
@@ -169,11 +200,7 @@ ConstantValue _constantBinary(
     return ConstantValue(type, tBool, right.integer, '');
   }
   if (op == '==' || op == '!=') {
-    var equal = left.kind == right.kind;
-    if (equal && left.kind == tString)
-      equal = left.text == right.text;
-    else if (equal)
-      equal = left.integer == right.integer;
+    var equal = _constantSame(left, right);
     if (op == '!=') equal = !equal;
     if (equal) integer = 1;
     return ConstantValue(type, tBool, integer, '');
@@ -221,10 +248,101 @@ ConstantValue _constantBinary(
   return ConstantValue(type, kind, integer, '');
 }
 
+bool _constantSame(ConstantValue left, ConstantValue right) {
+  if (left.kind != right.kind) return false;
+  if (left.kind == tString) return left.text == right.text;
+  return left.integer == right.integer;
+}
+
+int _constantSymbol(ConstantContext context, AstExpression expression) {
+  var prefix = '';
+  if (expression.kind == astName) {
+    if (expression.binding >= 0) return -1;
+  } else if (expression.kind == astMember &&
+      expression.children[0].kind == astName &&
+      expression.children[0].binding < 0) {
+    prefix = expression.children[0].text;
+  } else {
+    return -1;
+  }
+  return resolveSymbol(
+    context.symbols,
+    context.symbols.program.tokens[expression.token].source,
+    expression.text,
+    prefix,
+  );
+}
+
+ConstantValue _constantList(
+  ConstantContext context,
+  AstExpression expression,
+  bool active,
+  int expected,
+  bool implicitConst,
+) {
+  if (!implicitConst && !expression.constant) {
+    return _constantError(
+      context,
+      expression.token,
+      'constant List requires const',
+    );
+  }
+  var element = -1;
+  if (expression.typeArguments.isNotEmpty) {
+    element = resolveType(context.symbols, expression.typeArguments[0]);
+  } else if (expected >= 0 && typeIsList(typeNonNullable(expected))) {
+    element = typeArgument(typeNonNullable(expected));
+  }
+  var elements = <ConstantValue>[];
+  var inferred = -1;
+  var i = 0;
+  while (i < expression.children.length) {
+    var child = expression.children[i];
+    var value = _evaluateConstant(context, child, active, element, true);
+    if (element >= 0 &&
+        (!typingAssignable(value.type, element) ||
+            active && !typeIsSubtype(value.kind, element))) {
+      return _constantError(
+        context,
+        child.token,
+        'invalid constant List element',
+      );
+    }
+    inferred = joinTypes(inferred, value.type);
+    elements.add(value);
+    i++;
+  }
+  if (element < 0) element = inferred;
+  if (element < 0) element = tDynamic;
+  var type = listType(element);
+  var result = ConstantValue(type, type, -1, '');
+  result.elements = elements;
+  if (!active) return result;
+  i = 0;
+  while (i < context.lists.length) {
+    var previous = context.lists[i];
+    if (previous.kind == type && previous.elements.length == elements.length) {
+      var same = true;
+      var item = 0;
+      while (same && item < elements.length) {
+        same = _constantSame(previous.elements[item], elements[item]);
+        item++;
+      }
+      if (same) return previous;
+    }
+    i++;
+  }
+  result.integer = context.lists.length;
+  context.lists.add(result);
+  return result;
+}
+
 ConstantValue _evaluateConstant(
   ConstantContext context,
   AstExpression expression,
   bool active,
+  int expected,
+  bool implicitConst,
 ) {
   var kind = expression.kind;
   if (kind == astInteger) {
@@ -238,34 +356,46 @@ ConstantValue _evaluateConstant(
   if (kind == astString)
     return ConstantValue(tString, tString, 0, expression.text);
   if (kind == astNull) return ConstantValue(tNull, tNull, 0, '');
+  if (kind == astList) {
+    return _constantList(context, expression, active, expected, implicitConst);
+  }
   if (kind == astName) {
+    if (expression.binding >= 0) {
+      var binding = expression.binding;
+      if (binding >= context.locals.length ||
+          context.locals[binding].type < 0) {
+        return _constantError(
+          context,
+          expression.token,
+          'constant expression requires an initialized const local',
+        );
+      }
+      return constantWithType(
+        context.locals[binding],
+        context.localTypes[binding],
+      );
+    }
     return _constantReference(
       context,
       expression,
-      resolveSymbol(
-        context.symbols,
-        context.symbols.program.tokens[expression.token].source,
-        expression.text,
-        '',
-      ),
+      _constantSymbol(context, expression),
       active,
     );
   }
   if (kind == astMember) {
     var receiver = expression.children[0];
-    if (receiver.kind == astName) {
-      var symbol = resolveSymbol(
-        context.symbols,
-        context.symbols.program.tokens[expression.token].source,
-        expression.text,
-        receiver.text,
-      );
-      if (symbol != -1) {
-        return _constantReference(context, expression, symbol, active);
-      }
+    var symbol = _constantSymbol(context, expression);
+    if (symbol != -1) {
+      return _constantReference(context, expression, symbol, active);
     }
     if (expression.text == 'length') {
-      var value = _evaluateConstant(context, receiver, active);
+      var value = _evaluateConstant(
+        context,
+        receiver,
+        active,
+        -1,
+        implicitConst,
+      );
       if (value.type == tString || value.type == tDynamic) {
         var type = tInt;
         if (value.type == tDynamic) type = tDynamic;
@@ -281,12 +411,48 @@ ConstantValue _evaluateConstant(
       'unsupported constant property',
     );
   }
+  if (kind == astCall &&
+      context.identical >= 0 &&
+      _constantSymbol(context, expression.children[0]) == context.identical) {
+    if (expression.children.length != 3) {
+      return _constantError(
+        context,
+        expression.token,
+        'identical requires two arguments',
+      );
+    }
+    var left = _evaluateConstant(
+      context,
+      expression.children[1],
+      active,
+      -1,
+      implicitConst,
+    );
+    var right = _evaluateConstant(
+      context,
+      expression.children[2],
+      active,
+      -1,
+      implicitConst,
+    );
+    if (left.type == tVoid || right.type == tVoid) {
+      return _constantError(
+        context,
+        expression.token,
+        'void is not a constant value',
+      );
+    }
+    if (!active) return ConstantValue(tBool, tNull, 0, '');
+    var integer = 0;
+    if (_constantSame(left, right)) integer = 1;
+    return ConstantValue(tBool, tBool, integer, '');
+  }
   if (kind == astUnary) {
     var operand = expression.children[0];
     if (expression.text == '-' && operand.kind == astInteger) {
       return ConstantValue(tInt, tInt, int.parse('-' + operand.text), '');
     }
-    var value = _evaluateConstant(context, operand, active);
+    var value = _evaluateConstant(context, operand, active, -1, implicitConst);
     var type = typingUnary(expression.text, value.type);
     if (type < 0) {
       return _constantError(
@@ -310,9 +476,16 @@ ConstantValue _evaluateConstant(
     if (expression.text == '!') integer = 1 - integer;
     return ConstantValue(type, valueKind, integer, '');
   }
-  if (kind == astBinary) return _constantBinary(context, expression, active);
+  if (kind == astBinary)
+    return _constantBinary(context, expression, active, implicitConst);
   if (kind == astConditional) {
-    var condition = _evaluateConstant(context, expression.children[0], active);
+    var condition = _evaluateConstant(
+      context,
+      expression.children[0],
+      active,
+      tBool,
+      implicitConst,
+    );
     if (!typingCondition(condition.type) || active && condition.kind != tBool) {
       return _constantError(
         context,
@@ -324,28 +497,45 @@ ConstantValue _evaluateConstant(
       context,
       expression.children[1],
       active && condition.integer != 0,
+      expected,
+      implicitConst,
     );
     var elseValue = _evaluateConstant(
       context,
       expression.children[2],
       active && condition.integer == 0,
+      expected,
+      implicitConst,
     );
     var type = joinTypes(thenValue.type, elseValue.type);
     if (!active) return ConstantValue(type, tNull, 0, '');
     var value = elseValue;
     if (condition.integer != 0) value = thenValue;
-    return ConstantValue(type, value.kind, value.integer, value.text);
+    return constantWithType(value, type);
   }
   if (kind == astInterpolation) {
     var text = '';
     var i = 0;
     while (i < expression.children.length) {
-      var value = _evaluateConstant(context, expression.children[i], active);
+      var value = _evaluateConstant(
+        context,
+        expression.children[i],
+        active,
+        -1,
+        implicitConst,
+      );
       if (value.type == tVoid) {
         return _constantError(
           context,
           expression.token,
           'void is not a constant value',
+        );
+      }
+      if (active && typeIsList(value.kind)) {
+        return _constantError(
+          context,
+          expression.token,
+          'constant interpolation requires a primitive value',
         );
       }
       if (active) text = text + _constantText(value);
@@ -363,6 +553,8 @@ ConstantValue _evaluateConstant(
 ConstantValue evaluateConstant(
   ConstantContext context,
   AstExpression expression,
+  int expected,
+  bool implicitConst,
 ) {
-  return _evaluateConstant(context, expression, true);
+  return _evaluateConstant(context, expression, true, expected, implicitConst);
 }

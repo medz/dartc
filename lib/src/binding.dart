@@ -5,6 +5,7 @@ class LocalVariable {
   String name;
   int token;
   AstType type;
+  bool constant = false;
 
   LocalVariable(this.name, this.token, this.type);
 }
@@ -119,6 +120,8 @@ void bindingDeclarations(
       variable.token,
       variable.type,
     );
+    binder.result.variables[variable.binding].constant =
+        variable.modifier == 'const';
     i++;
   }
 }

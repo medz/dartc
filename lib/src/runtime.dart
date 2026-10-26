@@ -11,7 +11,7 @@ external int nativeTarget();
 external int nativeMetadataAddress(int features);
 external int nativeCall1(int function, int value);
 
-const int rtAbiVersion = 5;
+const int rtAbiVersion = 6;
 
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
@@ -371,6 +371,18 @@ int rtListFixedError() {
   return 0;
 }
 
+int rtListReadOnlyError() {
+  var message = rtCString(
+    0x69203a6374726164,
+    0x656c626174756d6d,
+    0xa7473696c20,
+    0,
+  );
+  rtWriteAll(2, message, 22);
+  rtHostExit(70);
+  return 0;
+}
+
 int rtListNew(int typeRef) {
   var metadata = nativeMetadataAddress(metadataLists);
   var descriptor =
@@ -383,6 +395,15 @@ int rtListNew(int typeRef) {
   nativeStore64(result + listBackingOffset, 0);
   nativeStore64(result + listTypeOffset, typeRef);
   return result;
+}
+
+int rtListFreeze(int list) {
+  var flags = nativeLoad64(list + objectFlagsOffset);
+  nativeStore64(
+    list + objectFlagsOffset,
+    flags | objectListFixed | objectListReadOnly,
+  );
+  return list;
 }
 
 int rtListBackingNew(int typeRef, int capacity) {
@@ -434,6 +455,9 @@ int rtListSet(int list, int index, int value, int sourceType) {
   var actualType = rtListElementType(list);
   if (actualType != sourceType) {
     stored = rtValueCast(rtValueBox(value, sourceType), actualType);
+  }
+  if ((nativeLoad64(list + objectFlagsOffset) & objectListReadOnly) != 0) {
+    return rtListReadOnlyError();
   }
   var length = nativeLoad64(list + listLengthOffset);
   if (index < 0 || index >= length) return rtListRangeError();
@@ -1044,6 +1068,14 @@ int rtValueUshr(int left, int right) {
   if (count < 0) return rtValueTypeError();
   if (count >= 64) return rtBoxInt(0);
   return rtBoxInt(value >>> count);
+}
+
+int rtValueIdentical(int left, int right) {
+  if (left == right) return 1;
+  if (rtValueKind(left) == typeKindInt && rtValueKind(right) == typeKindInt) {
+    if (rtValueInt(left) == rtValueInt(right)) return 1;
+  }
+  return 0;
 }
 
 int rtValueEq(int left, int right) {
