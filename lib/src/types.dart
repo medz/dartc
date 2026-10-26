@@ -7,10 +7,11 @@ const int tDynamic = 5;
 const int tNull = 6;
 const int tObject = 7;
 const int tNum = 8;
+const int tNever = 9;
 
-const int kNullable = 9;
-const int kList = 10;
-const int kClass = 11;
+const int kNullable = 10;
+const int kList = 11;
+const int kClass = 12;
 
 class DartType {
   int kind;
@@ -28,7 +29,7 @@ void resetTypes() {
   dartTypes.clear();
   classDartTypes.clear();
   var i = 0;
-  while (i <= tNum) {
+  while (i <= tNever) {
     dartTypes.add(DartType(i, -1, -1, -1));
     i++;
   }
@@ -71,6 +72,7 @@ bool typeIsReference(int type) {
 }
 
 int nullableType(int type) {
+  if (type == tNever) return tNull;
   if (type == tDynamic || type == tNull || typeIsNullable(type)) return type;
   var item = dartTypes[type];
   if (item.nullableType < 0) {
@@ -95,6 +97,7 @@ bool typeCanBeNull(int type) {
 }
 
 bool typeIsDisjoint(int left, int right) {
+  if (left == tNever || right == tNever) return true;
   if (left == tNull) return !typeCanBeNull(right);
   if (right == tNull) return !typeCanBeNull(left);
   if (typeCanBeNull(left) && typeCanBeNull(right)) return false;
@@ -125,6 +128,7 @@ bool typeIsDisjoint(int left, int right) {
 bool typeIsTagged(int type) {
   return type == tVoid ||
       type == tNum ||
+      type == tNever ||
       type == tDynamic ||
       type == tNull ||
       type == tObject ||
@@ -132,7 +136,10 @@ bool typeIsTagged(int type) {
 }
 
 bool typeIsSubtype(int actual, int expected) {
-  if (actual == expected || expected == tDynamic || expected == tVoid)
+  if (actual == expected ||
+      actual == tNever ||
+      expected == tDynamic ||
+      expected == tVoid)
     return true;
   if (typeIsNullable(expected)) {
     var base = typeNonNullable(expected);
@@ -154,6 +161,8 @@ bool typeIsSubtype(int actual, int expected) {
 
 int joinTypes(int left, int right) {
   if (left < 0) return right;
+  if (left == tNever) return right;
+  if (right == tNever) return left;
   if (left == right) return left;
   if (left == tVoid || right == tVoid) return tVoid;
   if (left == tDynamic || right == tDynamic) return tDynamic;

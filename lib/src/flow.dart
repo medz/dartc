@@ -1,49 +1,116 @@
 import 'types.dart';
 
+const int flowUnassigned = 0;
+const int flowAssigned = 1;
+const int flowMaybeAssigned = 2;
+
 class FlowState {
   List<int> types;
-  List<bool> assigned;
+  List<int> assignments;
+  List<bool> reachability;
   bool reachable;
 
-  FlowState(this.types, this.assigned, this.reachable);
+  FlowState(this.types, this.assignments, this.reachability, this.reachable);
 }
 
 FlowState flowCreate(int count) {
   return FlowState(
     List<int>.filled(count, -1),
-    List<bool>.filled(count, false),
+    List<int>.filled(count, flowUnassigned),
+    <bool>[true],
     true,
   );
 }
 
 FlowState flowCopy(FlowState state) {
-  var result = flowCreate(state.types.length);
-  result.reachable = state.reachable;
+  var result = FlowState(
+    List<int>.filled(state.types.length, -1),
+    List<int>.filled(state.types.length, flowUnassigned),
+    List<bool>.filled(state.reachability.length, false, growable: true),
+    state.reachable,
+  );
   var i = 0;
   while (i < state.types.length) {
     result.types[i] = state.types[i];
-    result.assigned[i] = state.assigned[i];
+    result.assignments[i] = state.assignments[i];
+    i++;
+  }
+  i = 0;
+  while (i < state.reachability.length) {
+    result.reachability[i] = state.reachability[i];
     i++;
   }
   return result;
 }
 
+void flowUnreachable(FlowState state) {
+  state.reachability[state.reachability.length - 1] = false;
+  state.reachable = false;
+}
+
+FlowState flowSplit(FlowState state) {
+  var result = flowCopy(state);
+  result.reachability.add(true);
+  return result;
+}
+
+FlowState flowUnsplitTo(FlowState state, int depth) {
+  var result = flowCopy(state);
+  while (result.reachability.length > depth) {
+    var reached = result.reachability.removeLast();
+    var parent = result.reachability.length - 1;
+    result.reachability[parent] = result.reachability[parent] && reached;
+  }
+  return result;
+}
+
+FlowState flowUnsplit(FlowState state) {
+  return flowUnsplitTo(state, state.reachability.length - 1);
+}
+
 FlowState flowJoin(FlowState left, FlowState right, List<int> declaredTypes) {
-  if (!left.reachable && right.reachable) return flowCopy(right);
-  if (!right.reachable && left.reachable) return flowCopy(left);
-  var result = flowCreate(left.types.length);
-  result.reachable = left.reachable || right.reachable;
-  var i = 0;
-  while (i < left.types.length) {
-    var type = declaredTypes[i];
-    if (left.types[i] >= 0 && right.types[i] >= 0) {
-      type = joinTypes(left.types[i], right.types[i]);
-      if (declaredTypes[i] >= 0 && !typeIsSubtype(type, declaredTypes[i])) {
-        type = declaredTypes[i];
+  if (left.reachability.length > right.reachability.length) {
+    left = flowUnsplitTo(left, right.reachability.length);
+  } else if (right.reachability.length > left.reachability.length) {
+    right = flowUnsplitTo(right, left.reachability.length);
+  }
+  var depth = left.reachability.length;
+  var leftReachable = left.reachability[depth - 1];
+  var rightReachable = right.reachability[depth - 1];
+  FlowState result;
+  if (!leftReachable && rightReachable) {
+    result = flowCopy(right);
+  } else if (!rightReachable && leftReachable) {
+    result = flowCopy(left);
+  } else {
+    result = FlowState(
+      List<int>.filled(left.types.length, -1),
+      List<int>.filled(left.types.length, flowMaybeAssigned),
+      List<bool>.filled(depth, false, growable: true),
+      true,
+    );
+    var i = 0;
+    while (i < left.types.length) {
+      var type = declaredTypes[i];
+      if (left.types[i] >= 0 && right.types[i] >= 0) {
+        type = joinTypes(left.types[i], right.types[i]);
+        if (declaredTypes[i] >= 0 && !typeIsSubtype(type, declaredTypes[i])) {
+          type = declaredTypes[i];
+        }
       }
+      result.types[i] = type;
+      if (left.assignments[i] == right.assignments[i]) {
+        result.assignments[i] = left.assignments[i];
+      }
+      i++;
     }
-    result.types[i] = type;
-    result.assigned[i] = left.assigned[i] && right.assigned[i];
+  }
+  result.reachable = true;
+  var i = 0;
+  while (i < depth) {
+    var reached = left.reachability[i] || right.reachability[i];
+    result.reachability[i] = reached;
+    result.reachable = result.reachable && reached;
     i++;
   }
   return result;
@@ -51,7 +118,7 @@ FlowState flowJoin(FlowState left, FlowState right, List<int> declaredTypes) {
 
 void flowDeclare(FlowState state, int binding, int type, bool assigned) {
   state.types[binding] = type;
-  state.assigned[binding] = assigned;
+  state.assignments[binding] = assigned ? flowAssigned : flowUnassigned;
 }
 
 void flowWrite(FlowState state, int binding, int declaredType, int valueType) {
@@ -62,7 +129,7 @@ void flowWrite(FlowState state, int binding, int declaredType, int valueType) {
   }
   if (!typeCanBeNull(valueType)) type = typeNonNullable(type);
   state.types[binding] = type;
-  state.assigned[binding] = true;
+  state.assignments[binding] = flowAssigned;
 }
 
 void flowPromote(FlowState state, int binding, int testedType) {
@@ -71,7 +138,7 @@ void flowPromote(FlowState state, int binding, int testedType) {
     return;
   }
   if (typeIsDisjoint(current, testedType)) {
-    state.reachable = false;
+    flowUnreachable(state);
     return;
   }
   var promoted = testedType;
@@ -89,7 +156,7 @@ void flowExclude(FlowState state, int binding, int testedType) {
   var current = state.types[binding];
   if (current < 0 || current == tVoid) return;
   if (typeIsSubtype(current, testedType)) {
-    state.reachable = false;
+    flowUnreachable(state);
     return;
   }
   if (typeCanBeNull(testedType)) {
@@ -108,7 +175,7 @@ void flowNull(FlowState state, int binding, bool equalsNull) {
   if (current < 0) return;
   if (equalsNull && !typeCanBeNull(current) ||
       !equalsNull && current == tNull) {
-    state.reachable = false;
+    flowUnreachable(state);
   }
   if (!equalsNull) state.types[binding] = typeNonNullable(current);
 }
@@ -118,6 +185,9 @@ void flowDemote(FlowState state, List<int> written, List<int> declaredTypes) {
   while (i < written.length) {
     var binding = written[i];
     state.types[binding] = declaredTypes[binding];
+    if (state.assignments[binding] == flowUnassigned) {
+      state.assignments[binding] = flowMaybeAssigned;
+    }
     i++;
   }
 }

@@ -7,7 +7,7 @@ bool typingAssignable(int actual, int expected) {
 }
 
 bool typingCondition(int type) {
-  return type == tBool || type == tDynamic;
+  return type == tDynamic || typeIsSubtype(type, tBool);
 }
 
 bool typingReceiver(int type) {
@@ -24,9 +24,9 @@ int typingUnary(String op, int type) {
   if (op == '!') {
     if (typingCondition(type)) return tBool;
   } else if (op == '-') {
-    if (type == tInt || type == tNum || type == tDynamic) return type;
+    if (type == tDynamic || typeIsSubtype(type, tNum)) return type;
   } else if (op == '~') {
-    if (type == tInt || type == tDynamic) return type;
+    if (type == tDynamic || typeIsSubtype(type, tInt)) return type;
   }
   return -1;
 }
@@ -44,20 +44,21 @@ int typingBinary(String op, int left, int right) {
   var comparison = op == '<' || op == '<=' || op == '>' || op == '>=';
   if (!arithmetic && !bitwise && !shift && !comparison && op != '~/') return -1;
   if (left == tDynamic) return tDynamic;
+  if (left == tNever) return tNever;
   if (left == tString && op == '+') {
-    if (right == tString || right == tDynamic) return tString;
+    if (typingAssignable(right, tString)) return tString;
     return -1;
   }
   if (left == tBool && bitwise) {
-    if (right == tBool || right == tDynamic) return tBool;
+    if (typingAssignable(right, tBool)) return tBool;
     return -1;
   }
   if (left != tInt && left != tNum) return -1;
   if (bitwise || shift) {
-    if (left == tInt && (right == tInt || right == tDynamic)) return tInt;
+    if (left == tInt && typingAssignable(right, tInt)) return tInt;
     return -1;
   }
-  if (right != tInt && right != tNum && right != tDynamic) return -1;
+  if (!typingAssignable(right, tNum)) return -1;
   if (comparison) return tBool;
   if (op == '~/') return tInt;
   if (arithmetic) {

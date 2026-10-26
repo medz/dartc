@@ -33,7 +33,7 @@
 
 | 官方特性规范 | 跟踪位置 | 当前边界 |
 |---|---|---|
-| [空安全](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md) | [类型](types.md)、[变量](variables.md) | 部分实现；完整提升、推断和 Never 等规则尚未覆盖 |
+| [空安全](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md) | [类型](types.md)、[变量](variables.md) | 已有底类型与部分赋值、提升规则；完整提升、推断及控制流仍有缺口 |
 | [增强枚举](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.17/enhanced-enums/feature-specification.md)、[super 形参](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.17/super-parameters/feature-specification.md) | [类](classes.md) | 未实现 |
 | [Records](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/records/feature-specification.md)、[Patterns](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md)及[穷尽性](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/exhaustiveness.md) | [类型](types.md)、[表达式](expressions.md)、[语句](statements.md) | 未实现 |
 | [类修饰符](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/class-modifiers/feature-specification.md)、[Extension types](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.3/extension-types/feature-specification.md) | [类](classes.md)、[类型](types.md) | 未实现 |
@@ -57,6 +57,6 @@
 
 语言任务从对应条款的缺口开始，先列出所需的绑定、类型、流分析和运行时依赖，再交付可验证的语义增量。当前优先补齐已有基础中的共用依赖：库与语言版本、独立语义检查、一般类型关系与推断、函数值和类成员绑定；随后依据这些依赖推进闭包、继承与动态调用、集合、异常和 Dart 3 的结构化特性。章节中的细分条目承接具体工作，不把这个顺序变成缩小语言目标的范围声明。
 
-已接受语法却缺少语义约束的问题优先处理，例如 [final 赋值规则](variables.md)、[类成员冲突](classes.md)及[返回与终止检查](functions.md)。新增语法也必须沿所属条款完成绑定、静态检查和执行行为，不能只增加 parser 分支。
+已接受语法却缺少语义约束的问题优先处理，例如[类成员冲突](classes.md)及[完整类型关系](types.md)。闭包、异常等后续能力也必须扩展已有赋值与返回路径检查；新增语法应沿所属条款完成绑定、静态检查和执行行为，不能只增加 parser 分支。
 
 每次语言变更应同时更新所属条目、实现入口与一个拥有该行为的编译执行测试；优先扩展已有测试。先用 SDK 3.13.5 核对成功行为和应拒绝的程序，再用本地原生 dartc 验证，并在编译器或运行时变化后完成原生重建。没有需要时不新增状态生成器、独立清单或重复测试目录。

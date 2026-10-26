@@ -2,6 +2,7 @@
 
 按[固定草案源码](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)建立索引；条款目录见[官方草案 PDF](https://dart.dev/to/spec-draft)。
 兼容验证基线为 Dart SDK 3.13.5；§15 泛型和 §20 类型关系另见[类型追踪](types.md)。
+字段的空安全初始化约束还依据[空安全补充][nnbd]，不能只用旧草案章节判定兼容。
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
@@ -14,8 +15,8 @@
 | §10.3 Getter | 部分实现 | 支持实例 getter 声明、隐式 receiver 与读取；static、继承及完整冲突规则未实现。 | [parser.dart](../lib/src/parser.dart) `parserClass()`；[frontend.dart](../lib/src/frontend.dart) `feLowerMember()`；[values.dart](../test/fixtures/values.dart) `BindingProbe.doubled`、`localBindings()` |
 | §10.4 Setter | 未实现 | 可写字段不等于用户 setter；AST 没有 setter 声明状态。 | [ast.dart](../lib/src/ast.dart) `AstFunction`；[parser.dart](../lib/src/parser.dart) `parserClass()`；尚无验证入口 |
 | §10.5 抽象实例成员 | 未实现 | 没有抽象类/成员语义及完整实例化检查；能解析无体签名不代表抽象语义成立。 | [parser.dart](../lib/src/parser.dart) `parserFunction()`；[frontend.dart](../lib/src/frontend.dart) `feRegisterFunction()`；尚无验证入口 |
-| §10.6 实例变量 | 部分实现 | 要求字段显式类型，有初始值、字段存取及 word/ref/tagged 表示；`final`、`late`、完整初始化检查缺失。 | [frontend.dart](../lib/src/frontend.dart) `feCollectDeclarations()`；[runtime.dart](../lib/src/runtime.dart) `rtObjectGet()`、`rtObjectSet()`；[values.dart](../test/fixtures/values.dart) `assignmentValues()` |
-| §10.7.1 生成式构造 | 部分实现 | 支持未命名构造、缺省无参构造、字段初始化与 `this.field`；命名、重定向、初始化列表和 super 调用未实现。 | [parser.dart](../lib/src/parser.dart) `parserClass()`；[frontend.dart](../lib/src/frontend.dart) 构造 lowering；[values.dart](../test/fixtures/values.dart) `Cell`、`Plain`、`argumentCalls()` |
+| [§10.6 实例变量][instance-variables] | 部分实现 | 要求字段显式类型，支持字段存取；final 字段禁止普通再写入，可空 final 也必须初始化，const 实例字段被拒绝。`late`、协变字段及完整初始化形式未实现。 | [frontend.dart](../lib/src/frontend.dart) `feLowerLvalue()`；[initialization.dart](../lib/src/initialization.dart) `checkInitializers()`；[values.dart](../test/fixtures/values.dart) `Plain`、`finalContexts()`；[behavior_test.dart](../test/behavior_test.dart) `rejected` |
+| [§10.7.1 生成式构造][generative-constructors] | 部分实现 | 支持未命名构造、缺省无参构造、字段声明初始化与 `this.field`；每个已支持构造器须初始化 final/非空字段，final 声明与字段形参重复初始化被拒绝。命名、重定向、初始化列表和 super 调用未实现。 | [parser.dart](../lib/src/parser.dart) `parserClass()`；[initialization.dart](../lib/src/initialization.dart) `checkInitializers()`；[frontend.dart](../lib/src/frontend.dart) 构造 lowering；[values.dart](../test/fixtures/values.dart) `Plain`、`argumentCalls()`；[behavior_test.dart](../test/behavior_test.dart) `rejected` |
 | §10.7.2 Factory | 未实现 | 无 factory 声明、重定向目标或返回实例规则。 | [ast.dart](../lib/src/ast.dart) `AstFunction`；[parser.dart](../lib/src/parser.dart) `parserClass()`；尚无验证入口 |
 | §10.7.3 常量构造器 | 未实现 | 现有常量 List 不包含用户 const 实例、潜在常量初始化或实例规范化。 | [constants.dart](../lib/src/constants.dart) `evaluateConstant()`；尚无类常量构造验证 |
 | §10.8 静态方法和字段 | 未实现 | 无 static 成员 AST 状态或静态成员命名空间。 | [ast.dart](../lib/src/ast.dart) `AstClass`、`AstFunction`；[parser.dart](../lib/src/parser.dart) `parserClass()`；尚无验证入口 |
@@ -34,3 +35,7 @@
 - Dart 3 类修饰符、extension type 等新增声明需补其特性规范，不能仅依据本草案章节判定兼容。
 
 已有对象行为由 `objectValues()`、`assignmentValues()`、`argumentCalls()` 负责；新声明形式应先补 AST 和符号契约，再建立实际调用及拒绝行为。
+
+[nnbd]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md
+[instance-variables]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L3646
+[generative-constructors]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L3749

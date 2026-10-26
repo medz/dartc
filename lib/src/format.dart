@@ -580,6 +580,7 @@ int imageTypeKind(int kind) {
   if (kind == tNull) return typeKindNull;
   if (kind == tObject) return typeKindObject;
   if (kind == tNum) return typeKindNum;
+  if (kind == tNever) return typeKindNever;
   if (kind == kNullable) return typeKindNullable;
   if (kind == kList) return typeKindList;
   return typeKindClass;

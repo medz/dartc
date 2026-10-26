@@ -15,10 +15,10 @@
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
-| §20.1 静态类型 | 部分实现 | 区分 `int`、`num`、`bool`、`String`、`Null`、`Object`、`dynamic`、`void`、可空类型、`List<T>` 和已声明类；尚非完整 Dart 类型模型。 | [types.dart](../lib/src/types.dart)：`DartType`；[values.dart](../test/fixtures/values.dart)：`typeChecks`、`staticContexts`。 |
+| §20.1 静态类型 | 部分实现 | 区分 `int`、`num`、`bool`、`String`、`Null`、`Never`、`Object`、`dynamic`、`void`、可空类型、`List<T>` 和已声明类；尚非完整 Dart 类型模型。 | [types.dart](../lib/src/types.dart)：`DartType`；[values.dart](../test/fixtures/values.dart)：`typeChecks`、`staticContexts`、`neverContexts`。 |
 | §20.1 类型名解析 | 部分实现 | 按声明库、导入前缀解析类型，检查已支持类型的参数数量；没有通用类型参数作用域。 | [resolve_type.dart](../lib/src/resolve_type.dart)：`resolveType`；[behavior_test.dart](../test/behavior_test.dart)：`libraries`、`rejected`。 |
 | §20.2 动态类型系统 | 部分实现 | `is`、`is!`、`as` 与隐式动态转换使用实际运行时类型；覆盖嵌套 List、类与可空类型；不含一般动态成员分派。 | [runtime.dart](../lib/src/runtime.dart)：`rtValueMatches`、`rtValueCast`；[values.dart](../test/fixtures/values.dart)：`typeChecks`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
-| §20.4 子类型 | 部分实现 | 有 `int <: num`、空性、支持类型到 `Object` 的关系及 List 协变；类之间仅识别同一声明，尚无继承层次的子类型计算。 | [types.dart](../lib/src/types.dart)：`typeIsSubtype`；[runtime.dart](../lib/src/runtime.dart)：`rtTypeSubtype`；[values.dart](../test/fixtures/values.dart)：`typeChecks`、`staticContexts`。 |
+| §20.4 子类型 | 部分实现 | 有 `Never` 底类型、`int <: num`、空性、支持类型到 `Object` 的关系及 List 协变；类之间仅识别同一声明，尚无继承层次的子类型计算。 | [types.dart](../lib/src/types.dart)：`typeIsSubtype`；[runtime.dart](../lib/src/runtime.dart)：`rtTypeSubtype`；[values.dart](../test/fixtures/values.dart)：`typeChecks`、`staticContexts`、`neverContexts`。 |
 | §20.7 `dynamic` | 部分实现 | 独立语义类型；可隐式转入具体类型并执行运行时检查，不能与 `Object` 或声明存储类型混用；仅实现部分动态运算。 | [typing.dart](../lib/src/typing.dart)：`typingAssignable`、`typingBinary`；[frontend.dart](../lib/src/frontend.dart)：`feConvertValue`；[values.dart](../test/fixtures/values.dart)：`valueContexts`、`staticContexts`。 |
 | §20.9 `void` | 部分实现 | 限制值消费；`void` 上下文可保留实际返回负载，支持 `List<void>`；完整函数类型和异步语义相关规则尚缺。 | [typing.dart](../lib/src/typing.dart)：`typingAssignable`；[frontend.dart](../lib/src/frontend.dart)：`feConvertValue`；[values.dart](../test/fixtures/values.dart)：`valueContexts`。 |
 | §20.10 参数化类型 | 部分实现 | 保留完整嵌套 `List<T>` 实际类型；协变视图写入按底层元素类型检查。`Pointer<T>` 仅有受限 FFI 语义，不能视为一般泛型实现。 | [types.dart](../lib/src/types.dart)：`listType`；[runtime.dart](../lib/src/runtime.dart)：`rtListGet`、`rtListSet`、`rtListAdd`；[values.dart](../test/fixtures/values.dart)：`staticContexts`、`typeChecks`。 |
@@ -35,10 +35,11 @@
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
 | 可空与非空类型 | 部分实现 | 识别 `T?`，拒绝未经提升的可空成员、索引和算术消费；`== null` 真分支不直接把类型变成 `Null`。 | [types.dart](../lib/src/types.dart)：`nullableType`、`typeCanBeNull`；[flow.dart](../lib/src/flow.dart)：`flowNull`；[values.dart](../test/fixtures/values.dart)：`flowBranches`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
+| 空安全底类型 `Never` | 部分实现 | 作为子类型与合并的底类型，`Never?` 规范化为 `Null`；空 `List<Never>` 可协变读取，写入仍按实际元素类型检查。没有 `Never` 实例；完整类型参数及交集类型规则尚缺。 | [types.dart](../lib/src/types.dart)：`typeIsSubtype`、`joinTypes`、`nullableType`；[runtime.dart](../lib/src/runtime.dart)：`rtTypeSubtype`、`rtValueMatches`；[values.dart](../test/fixtures/values.dart)：`neverContexts`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
 | 隐式赋值兼容 | 部分实现 | `Object`、可空类型不能直接下转为具体值；`dynamic` 可以检查转换。赋值目标的转换与表达式自身结果类型分别处理。 | [typing.dart](../lib/src/typing.dart)：`typingAssignable`；[frontend.dart](../lib/src/frontend.dart)：`feLowerAssignment`；[values.dart](../test/fixtures/values.dart)：`assignmentValues`、`staticContexts`。 |
 | 局部与顶层推断 | 部分实现 | 从初始化表达式、List 元素及上下文推断；支持部分条件表达式和常量默认值。尚无泛型约束求解、闭包参数及覆盖推断。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerHint`、`feLowerVariable`、`feInferGlobal`；[constants.dart](../lib/src/constants.dart)：`evaluateConstant`；[values.dart](../test/fixtures/values.dart)：`constantLists`、`staticContexts`。 |
 | 类型提升与撤销 | 部分实现 | 按局部绑定身份处理 `is`、空检查、逻辑分支、退出、赋值及循环写入；读取类型与声明存储类型分开。闭包捕获、字段提升和模式提升未实现。 | [binding.dart](../lib/src/binding.dart)：`bindFunctionLocals`；[flow.dart](../lib/src/flow.dart)：`flowPromote`、`flowExclude`、`flowWrite`、`flowDemote`；[values.dart](../test/fixtures/values.dart)：`flowBranches`、`flowAssignments`、`flowContexts`。 |
-| 确定赋值与可达性 | 部分实现 | 分支合并、循环及标签退出保守处理已赋值事实；不可达代码也不能放过未赋值读取。未覆盖异常、闭包及异步控制流。 | [flow.dart](../lib/src/flow.dart)：`FlowState`、`flowJoin`；[frontend.dart](../lib/src/frontend.dart)：`feReadLocal`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
+| 确定赋值、确定未赋值与可达性 | 部分实现 | 分别跟踪局部可读与 final 首次可写事实，合并分支、循环和标签退出；不可达代码仍检查读写。`Never` 调用终止正常路径，非空结果不能正常落空；未覆盖异常、闭包及异步控制流。 | [flow.dart](../lib/src/flow.dart)：`FlowState`、`flowJoin`；[frontend.dart](../lib/src/frontend.dart)：`feReadLocal`、`feWriteLvalue`、`feCall`；[values.dart](../test/fixtures/values.dart)：`finalAssignments`、`neverWrapper`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
 | `num` 与数值推断 | 部分实现 | `num` 与 `int` 独立；`int + dynamic` 推断 `num`，动态左操作数结果保留 `dynamic`，`~/` 和整数位运算有独立规则。运行时当前仅有整数数值。 | [typing.dart](../lib/src/typing.dart)：`typingBinary`、`typingUnary`；[values.dart](../test/fixtures/values.dart)：`staticContexts`。 |
 
 ## 尚缺与待核验
@@ -48,7 +49,7 @@
 | §15.2–15.3 超界类型与实例化到界 | 未实现 | 没有类型参数、边界或通用实例化算法。 | 后续扩展 [resolve_type.dart](../lib/src/resolve_type.dart)、[types.dart](../lib/src/types.dart)；尚无行为验证。 |
 | §20.5–20.6 函数类型与 `Function` | 未实现 | 编译器内部函数签名不等于语言函数值、函数子类型或闭包。 | 后续扩展 [types.dart](../lib/src/types.dart)、[frontend.dart](../lib/src/frontend.dart)；尚无行为验证。 |
 | §20.8 `FutureOr` | 未实现 | `Future`、`FutureOr`、异步类型规则未接入。 | [types.dart](../lib/src/types.dart) 尚无对应类型；尚无行为验证。 |
-| 空安全底类型及后续 Dart 3 类型 | 未实现 | `Never`、记录类型、扩展类型及相应关系未实现；不以有限不相交类型分析替代底类型。 | 后续扩展 [types.dart](../lib/src/types.dart)、[resolve_type.dart](../lib/src/resolve_type.dart)。 |
+| 后续 Dart 3 类型 | 未实现 | 记录类型、扩展类型及相应关系未实现；已有 `Never` 和有限不相交类型分析不代表这些规则成立。 | 后续扩展 [types.dart](../lib/src/types.dart)、[resolve_type.dart](../lib/src/resolve_type.dart)。 |
 | 完整类型规范及诊断覆盖 | 待核对 | 尚未逐条运行官方语言测试；现有有限类型关系和推断必须继续与规范对照。 | [behavior_test.dart](../test/behavior_test.dart) 为当前差分入口；原生自举只验证构建链，不证明类型系统完整。 |
 
 ## 验证方式

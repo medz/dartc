@@ -7,6 +7,7 @@ import 'resolve_type.dart';
 import 'flow.dart';
 import 'parser.dart';
 import 'ir.dart';
+import 'initialization.dart';
 import 'layout.dart';
 import 'types.dart';
 import 'typing.dart';
@@ -450,6 +451,7 @@ void feDuplicate(int type) {
 }
 
 int feBuiltinType(int id) {
+  if (id == bHostExit || id == bHostFinish) return tNever;
   if (id == bIntToString ||
       id == bStringConcat ||
       id == bStringSubstring ||
@@ -487,6 +489,7 @@ void feBuiltinTyped(int id, int count, int type) {
   irTypes[ir.length - 1] = type;
   feWord(id);
   feWord(count);
+  if (type == tNever) flowUnreachable(feFlow);
 }
 
 void feBuiltin(int id, int count) {
@@ -498,6 +501,7 @@ void feCall(int function, int count) {
   irTypes[ir.length - 1] = functions[function].result;
   feWord(function);
   feWord(count);
+  if (functions[function].result == tNever) flowUnreachable(feFlow);
 }
 
 int feJump(int op) {
@@ -536,7 +540,7 @@ void feNarrowValue(int stored, int promoted) {
 
 int feReadLocal(int binding, int token) {
   var slot = feLocalSlot(binding, token);
-  if (!feFlow.assigned[binding]) {
+  if (feFlow.assignments[binding] != flowAssigned) {
     feAstError(
       token,
       'local is not definitely assigned: ' + feBindings.variables[binding].name,
@@ -756,6 +760,7 @@ void feInstallSymbols() {
   declareSymbol(feSymbols, sourceCore, 'dynamic', symbolType, tDynamic);
   declareSymbol(feSymbols, sourceCore, 'Object', symbolType, tObject);
   declareSymbol(feSymbols, sourceCore, 'Null', symbolType, tNull);
+  declareSymbol(feSymbols, sourceCore, 'Never', symbolType, tNever);
   declareSymbol(feSymbols, sourceCore, 'List', symbolType, -1);
   declareSymbol(feSymbols, sourceCore, 'print', symbolBuiltin, bPrintInt);
   declareSymbol(
@@ -867,6 +872,10 @@ int feValueOperation(String op) {
 int feCombine(String op, int left, int right, int token) {
   var result = typingBinary(op, left, right);
   if (result < 0) feAstError(token, 'operator requires compatible operands');
+  if (result == tNever) {
+    feEmit(opPop);
+    return tNever;
+  }
   if (op == '+' && left == tString && right == tString) {
     feBuiltin(bStringConcat, 2);
     return tString;
@@ -944,7 +953,7 @@ void feLowerBoolean(AstExpression expression) {
 
 void feConditionFact(AstExpression expression, bool truth) {
   if (expression.kind == astBoolean) {
-    if ((expression.text == 'true') != truth) feFlow.reachable = false;
+    if ((expression.text == 'true') != truth) flowUnreachable(feFlow);
   } else if (expression.kind == astTypeTest) {
     var binding = expression.children[0].binding;
     if (binding < 0) return;
@@ -977,17 +986,21 @@ FlowState feConditionJumps(
   }
   if (expression.kind == astBinary &&
       (expression.text == '&&' || expression.text == '||')) {
+    feFlow = flowSplit(feFlow);
     if (expression.text == '&&' && !when || expression.text == '||' && when) {
       var left = feConditionJumps(expression.children[0], when, jumps);
       var right = feConditionJumps(expression.children[1], when, jumps);
-      return feJoinFlow(left, right);
+      var taken = flowUnsplit(feJoinFlow(left, right));
+      feFlow = flowUnsplit(feFlow);
+      return taken;
     } else {
       var skip = <int>[];
       var left = feConditionJumps(expression.children[0], !when, skip);
       var right = feConditionJumps(expression.children[1], when, jumps);
       feFlow = feJoinFlow(feFlow, left);
       fePatchJumps(skip, ir.length);
-      return right;
+      feFlow = flowUnsplit(feFlow);
+      return flowUnsplit(right);
     }
   }
   feLowerBoolean(expression);
@@ -1503,6 +1516,7 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
   var receiver = callee.children[0];
   var member = callee.text;
   var type = feLowerExpression(receiver);
+  if (type == tNever) return feLowerNeverArguments(call, callee);
   if (member == 'toString' &&
       (!feClassType(type) || feMethod(typeArgument(type), member, false) < 0)) {
     if (call.children.length != 1)
@@ -1520,7 +1534,11 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
     var owner = typeArgument(type);
     feCheckPrivate(owner, member, call.token);
     var function = feMethod(owner, member, false);
-    if (function < 0) feAstError(call.token, 'unknown method ' + member);
+    if (function < 0) {
+      var value = feReadMember(type, member, call.token);
+      if (value == tNever) return feLowerNeverArguments(call, callee);
+      feAstError(call.token, 'member value is not callable');
+    }
     var count = feLowerArguments(call, 1, function) + 1;
     feCall(function, count);
     return functions[function].result;
@@ -1611,6 +1629,33 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
   return tInt;
 }
 
+int feLowerNeverArguments(AstExpression call, AstExpression callee) {
+  var i = 0;
+  while (i < callee.typeArguments.length) {
+    resolveType(feSymbols, callee.typeArguments[i]);
+    i++;
+  }
+  var names = <String>[];
+  i = 1;
+  while (i < call.children.length) {
+    var argument = call.children[i];
+    if (argument.kind == astNamedArgument) {
+      var name = 0;
+      while (name < names.length) {
+        if (names[name] == argument.text)
+          feAstError(argument.token, 'duplicate named argument');
+        name++;
+      }
+      names.add(argument.text);
+      argument = argument.children[0];
+    }
+    feLowerInContext(argument, tDynamic);
+    feEmit(opPop);
+    i++;
+  }
+  return tNever;
+}
+
 int feLowerCall(AstExpression call, int context) {
   var callee = feWithReceiver(call.children[0]);
   var symbol = feExpressionSymbol(callee);
@@ -1619,6 +1664,10 @@ int feLowerCall(AstExpression call, int context) {
     if (declaration.kind == symbolFunction) {
       var function = declaration.target;
       if (feFunctionNodes[function].getter) {
+        if (functions[function].result == tNever) {
+          feCall(function, 0);
+          return feLowerNeverArguments(call, callee);
+        }
         feAstError(call.token, 'getter is not callable: ' + declaration.name);
       }
       var count = feLowerArguments(call, 1, function);
@@ -1637,6 +1686,8 @@ int feLowerCall(AstExpression call, int context) {
       feCall(constructor, count + 1);
       return classType(owner);
     }
+    var value = feLoadDeclaration(symbol, callee.token);
+    if (value == tNever) return feLowerNeverArguments(call, callee);
     feAstError(call.token, 'declaration is not callable: ' + declaration.name);
   }
   if (callee.kind == astMember) {
@@ -1647,6 +1698,8 @@ int feLowerCall(AstExpression call, int context) {
     }
     return feLowerMemberCall(call, callee);
   }
+  var value = feLowerExpression(callee);
+  if (value == tNever) return feLowerNeverArguments(call, callee);
   feAstError(call.token, 'unknown call target ' + callee.text);
   return tInt;
 }
@@ -1658,10 +1711,14 @@ int feLowerMember(AstExpression expression) {
     feLowerExpression(expression.children[0]),
     expression.children[0].token,
   );
-  var member = expression.text;
+  return feReadMember(type, expression.text, expression.token);
+}
+
+int feReadMember(int type, String member, int token) {
+  if (type == tNever) return tNever;
   if (feClassType(type)) {
     var owner = typeArgument(type);
-    feCheckPrivate(owner, member, expression.token);
+    feCheckPrivate(owner, member, token);
     var getter = feMethod(owner, member, true);
     if (getter >= 0) {
       feCall(getter, 1);
@@ -1675,7 +1732,7 @@ int feLowerMember(AstExpression expression) {
   }
   if (member == 'length' || member == 'isEmpty' || member == 'isNotEmpty') {
     if (type != tString && !typeIsList(type))
-      feAstError(expression.token, 'unsupported property ' + member);
+      feAstError(token, 'unsupported property ' + member);
     if (type == tString)
       feBuiltin(bStringLength, 1);
     else
@@ -1703,7 +1760,7 @@ int feLowerMember(AstExpression expression) {
     feBuiltinTyped(bListGet, 2, element);
     return element;
   }
-  feAstError(expression.token, 'unsupported property ' + member);
+  feAstError(token, 'unsupported property ' + member);
   return tInt;
 }
 
@@ -1727,8 +1784,9 @@ FeLvalue feLowerLvalue(AstExpression expression) {
         'declaration is not assignable: ' + declaration.name,
       );
     }
-    if (feGlobalNodes[declaration.target].modifier == 'const')
-      feAstError(expression.token, 'cannot assign a constant');
+    var modifier = feGlobalNodes[declaration.target].modifier;
+    if (modifier == 'const' || modifier == 'final')
+      feAstError(expression.token, 'cannot assign a final variable');
     return FeLvalue(
       feGlobalType(declaration.target),
       0,
@@ -1745,6 +1803,15 @@ FeLvalue feLowerLvalue(AstExpression expression) {
     feLowerExpression(expression.children[0]),
     expression.children[0].token,
   );
+  if (receiverType == tNever) {
+    if (expression.kind == astIndex) {
+      feLowerInContext(expression.children[1], tDynamic);
+      feEmit(opPop);
+    }
+    var receiver = feTemp(tNever);
+    feOperand(opStoreLocal, receiver);
+    return FeLvalue(tDynamic, 3, receiver, -1, -1, -1);
+  }
   var container = 1;
   var type = tInt;
   if (expression.kind == astIndex) {
@@ -1758,6 +1825,8 @@ FeLvalue feLowerLvalue(AstExpression expression) {
     var owner = typeArgument(receiverType);
     feCheckPrivate(owner, expression.text, expression.token);
     var field = feField(owner, expression.text);
+    if (feFieldNodes[field].modifier == 'final')
+      feAstError(expression.token, 'cannot assign a final field');
     feOperand(opInt, feFieldIndices[field]);
     type = feFieldTypes[field];
     container = 2;
@@ -1770,6 +1839,10 @@ FeLvalue feLowerLvalue(AstExpression expression) {
 }
 
 int feReadLvalue(FeLvalue target, int token) {
+  if (target.container == 3) {
+    feOperand(opLoadLocal, target.receiver);
+    return tNever;
+  }
   if (target.container == 0) {
     if (target.binding >= 0)
       return feReadLocal(target.binding, token);
@@ -1792,7 +1865,13 @@ void feWriteFlow(FeLvalue target, int type) {
   }
 }
 
-void feWriteLvalue(FeLvalue target) {
+void feWriteLvalue(FeLvalue target, int token) {
+  if (target.binding >= 0 &&
+      feBindings.variables[target.binding].finalVariable &&
+      feFlow.assignments[target.binding] != flowUnassigned) {
+    feAstError(token, 'final variable might already be assigned');
+  }
+  if (target.container == 3) return;
   if (target.container == 0) {
     feDuplicate(target.type);
     if (target.binding >= 0)
@@ -1822,7 +1901,7 @@ int feLowerAssignment(AstExpression expression, bool postfix) {
     feOperand(opStoreLocal, value);
     feOperand(opLoadLocal, value);
     feConvertValue(type, target.type, source.token);
-    feWriteLvalue(target);
+    feWriteLvalue(target, expression.token);
     feWriteFlow(target, type);
     feEmit(opPop);
     feOperand(opLoadLocal, value);
@@ -1855,7 +1934,7 @@ int feLowerAssignment(AstExpression expression, bool postfix) {
   feOperand(opStoreLocal, value);
   feOperand(opLoadLocal, value);
   feConvertValue(result, target.type, expression.token);
-  feWriteLvalue(target);
+  feWriteLvalue(target, expression.token);
   feWriteFlow(target, result);
   feEmit(opPop);
   if (postfix)
@@ -1867,6 +1946,12 @@ int feLowerAssignment(AstExpression expression, bool postfix) {
 }
 
 int feLowerExpression(AstExpression expression) {
+  var type = feLowerValue(expression);
+  if (type == tNever) flowUnreachable(feFlow);
+  return type;
+}
+
+int feLowerValue(AstExpression expression) {
   expression = feWithReceiver(expression);
   var kind = expression.kind;
   if (kind == astInteger) {
@@ -1909,6 +1994,11 @@ int feLowerExpression(AstExpression expression) {
       feLowerExpression(expression.children[0]),
       expression.children[0].token,
     );
+    if (receiver == tNever) {
+      feLowerInContext(expression.children[1], tDynamic);
+      feEmit(opPop);
+      return tNever;
+    }
     feLowerInContext(expression.children[1], tInt);
     if (receiver == tString) {
       feDuplicate(tInt);
@@ -1951,6 +2041,7 @@ int feLowerExpression(AstExpression expression) {
     }
     var result = typingUnary(op, type);
     if (result < 0) feAstError(expression.token, 'invalid unary operand type');
+    if (result == tNever) return tNever;
     if (type == tNum || type == tDynamic) {
       var value = feTemp(type);
       feOperand(opStoreLocal, value);
@@ -1974,6 +2065,7 @@ int feLowerExpression(AstExpression expression) {
     var op = expression.text;
     if (op == '??') return feLowerCoalescing(expression, -1);
     if (op == '&&' || op == '||') {
+      feFlow = flowSplit(feFlow);
       var otherwise = <int>[];
       var falseFlow = feConditionJumps(expression, false, otherwise);
       feInteger(1, tBool);
@@ -1981,7 +2073,7 @@ int feLowerExpression(AstExpression expression) {
       fePatchJumps(otherwise, ir.length);
       feInteger(0, tBool);
       fePatch(done, ir.length);
-      feFlow = feJoinFlow(feFlow, falseFlow);
+      feFlow = flowUnsplit(feJoinFlow(feFlow, falseFlow));
       return tBool;
     }
     var left = feLowerExpression(expression.children[0]);
@@ -1998,9 +2090,12 @@ int feLowerCoalescing(AstExpression expression, int context) {
   var left = feLowerHint(source, context);
   if (left == tVoid)
     feAstError(source.token, 'void expression cannot be used as a value');
+  feFlow = flowSplit(feFlow);
   if (left == tNull) {
     feEmit(opPop);
-    return feLowerHint(expression.children[1], context);
+    var type = feLowerHint(expression.children[1], context);
+    feFlow = flowUnsplit(feFlow);
+    return type;
   }
   var value = feTemp(left);
   feOperand(opStoreLocal, value);
@@ -2018,7 +2113,7 @@ int feLowerCoalescing(AstExpression expression, int context) {
   if (source.kind == astName && source.binding >= 0)
     flowNull(feFlow, source.binding, true);
   else if (!typeCanBeNull(left))
-    feFlow.reachable = false;
+    flowUnreachable(feFlow);
   var right = feLowerHint(expression.children[1], context);
   var result = typingCoalescing(left, right);
   feConvertValue(right, result, expression.children[1].token);
@@ -2032,12 +2127,13 @@ int feLowerCoalescing(AstExpression expression, int context) {
   var promoted = typeNonNullable(left);
   feNarrowValue(left, promoted);
   feConvertValue(promoted, result, source.token);
-  feFlow = feJoinFlow(feFlow, rightFlow);
+  feFlow = flowUnsplit(feJoinFlow(feFlow, rightFlow));
   fePatch(done, ir.length);
   return result;
 }
 
 int feLowerConditional(AstExpression expression, int context) {
+  feFlow = flowSplit(feFlow);
   var otherwise = <int>[];
   var falseFlow = feConditionJumps(expression.children[0], false, otherwise);
   var type = feLowerHint(expression.children[1], context);
@@ -2061,6 +2157,7 @@ int feLowerConditional(AstExpression expression, int context) {
   feOperand(opLoadLocal, elseValue);
   feConvertValue(elseType, result, expression.children[2].token);
   fePatch(done, ir.length);
+  feFlow = flowUnsplit(feFlow);
   return result;
 }
 
@@ -2094,7 +2191,13 @@ void feLowerVariable(AstVariable variable) {
   feConvertValue(value, type, variable.token);
   var slot = feTemp(type);
   feBindLocal(variable.binding, type, slot);
-  flowDeclare(feFlow, variable.binding, type, typeCanBeNull(type));
+  flowDeclare(
+    feFlow,
+    variable.binding,
+    type,
+    typeCanBeNull(type) &&
+        !feBindings.variables[variable.binding].finalVariable,
+  );
   if (variable.initializer.isNotEmpty)
     flowWrite(feFlow, variable.binding, type, value);
   if (constant != null) {
@@ -2214,10 +2317,11 @@ void feLowerStatement(AstStatement statement) {
       feConvertValue(tNull, functions[feFunction].result, statement.token);
     }
     feEmit(opReturn);
-    feFlow.reachable = false;
+    flowUnreachable(feFlow);
     return;
   }
   if (kind == astIfStatement) {
+    feFlow = flowSplit(feFlow);
     var otherwise = <int>[];
     var falseFlow = feConditionJumps(statement.condition[0], false, otherwise);
     feLowerStatement(statement.children[0]);
@@ -2232,7 +2336,7 @@ void feLowerStatement(AstStatement statement) {
       fePatchJumps(otherwise, ir.length);
       feFlow = falseFlow;
     }
-    feFlow = feJoinFlow(trueFlow, feFlow);
+    feFlow = flowUnsplit(feJoinFlow(trueFlow, feFlow));
     return;
   }
   if (kind == astLabeledStatement) {
@@ -2245,11 +2349,12 @@ void feLowerStatement(AstStatement statement) {
   }
   if (kind == astWhileStatement || kind == astForStatement) {
     if (kind == astForStatement) feLowerStatement(statement.children[0]);
+    feFlow = flowSplit(feFlow);
     feLoopFlow(statement);
     var repeat = ir.length;
     var exit = <int>[];
     var exitFlow = flowCopy(feFlow);
-    exitFlow.reachable = false;
+    flowUnreachable(exitFlow);
     if (statement.condition.length != 0)
       exitFlow = feConditionJumps(statement.condition[0], false, exit);
     var breakBase = feBreaks.length;
@@ -2273,6 +2378,7 @@ void feLowerStatement(AstStatement statement) {
     feLabelRepeat(statement.token, update);
     feFlow = exitFlow;
     feLoopEnd(breakBase, continueBase, ir.length, update);
+    feFlow = flowUnsplit(feFlow);
     return;
   }
   if (kind == astBreakStatement) {
@@ -2283,7 +2389,7 @@ void feLowerStatement(AstStatement statement) {
     if (feLoopBreaks.isEmpty) feError('break outside loop');
     feBreaks.add(feJump(opJump));
     feBreakFlows.add(flowCopy(feFlow));
-    feFlow.reachable = false;
+    flowUnreachable(feFlow);
     return;
   }
   if (kind == astContinueStatement) {
@@ -2294,7 +2400,7 @@ void feLowerStatement(AstStatement statement) {
     if (feLoopContinues.isEmpty) feError('continue outside loop');
     feContinues.add(feJump(opJump));
     feContinueFlows.add(flowCopy(feFlow));
-    feFlow.reachable = false;
+    flowUnreachable(feFlow);
     return;
   }
   feAstError(statement.token, 'unsupported statement');
@@ -2562,6 +2668,7 @@ void parseSource(SourceProgram source) {
   var syntax = parseUnit(Parser(feTokens, 0, 0, paths));
   feInstallSymbols();
   feCollectDeclarations(syntax);
+  checkInitializers(feSymbols, syntax);
   feConstants = ConstantContext(feSymbols, feGlobalNodes, globalTypes);
   feConstants.identical = symbolOwnDeclaration(
     feSymbols,
@@ -2725,7 +2832,19 @@ void parseSource(SourceProgram source) {
     } else {
       if (functionSyntax.body.length != 0)
         feLowerStatement(functionSyntax.body[0]);
-      feInteger(0, functions[f].result);
+      var result = functions[f].result;
+      if (feFlow.reachable && !typeCanBeNull(result)) {
+        feAstError(
+          functionSyntax.token,
+          'non-nullable function may complete without returning',
+        );
+      }
+      if (typeCanBeNull(result)) {
+        feInteger(0, tNull);
+        feConvertValue(tNull, result, functionSyntax.token);
+      } else {
+        feInteger(0, result);
+      }
       feEmit(opReturn);
     }
     functions[f].locals = feNextLocal;
@@ -2862,6 +2981,7 @@ void feLowerForIn(AstStatement statement) {
   }
   var variable = feTemp(type);
   feBindLocal(declaration.binding, type, variable);
+  feFlow = flowSplit(feFlow);
   feLoopFlow(statement);
   var exitFlow = flowCopy(feFlow);
   flowDeclare(feFlow, declaration.binding, type, true);
@@ -2891,9 +3011,11 @@ void feLowerForIn(AstStatement statement) {
   feLabelRepeat(statement.token, update);
   feFlow = exitFlow;
   feLoopEnd(breakBase, continueBase, ir.length, update);
+  feFlow = flowUnsplit(feFlow);
 }
 
 void feLowerDoWhile(AstStatement statement) {
+  feFlow = flowSplit(feFlow);
   feLoopFlow(statement);
   var repeat = ir.length;
   var breakBase = feBreaks.length;
@@ -2908,6 +3030,7 @@ void feLowerDoWhile(AstStatement statement) {
   fePatchJumps(repeats, repeat);
   feLabelRepeat(statement.token, condition);
   feLoopEnd(breakBase, continueBase, ir.length, condition);
+  feFlow = flowUnsplit(feFlow);
 }
 
 bool feSwitchConstant(AstExpression expression) {
@@ -2938,6 +3061,7 @@ void feLowerSwitch(AstStatement statement) {
   }
   var value = feTemp(type);
   feOperand(opStoreLocal, value);
+  feFlow = flowSplit(feFlow);
   List<int> entries = <int>[];
   var fallback = -1;
   var booleans = 0;
@@ -2983,7 +3107,7 @@ void feLowerSwitch(AstStatement statement) {
   var unmatched = feJump(opJump);
   var entryFlow = flowCopy(feFlow);
   var exitFlow = flowCopy(feFlow);
-  if (fallback >= 0 || booleans == 3) exitFlow.reachable = false;
+  if (fallback >= 0 || booleans == 3) flowUnreachable(exitFlow);
   var breakBase = feBreaks.length;
   feLoopBreaks.add(breakBase);
   i = 0;
@@ -3012,6 +3136,7 @@ void feLowerSwitch(AstStatement statement) {
     feFlow = feJoinFlow(feFlow, feBreakFlows.removeLast());
   }
   feLoopBreaks.removeLast();
+  feFlow = flowUnsplit(feFlow);
 }
 
 void feLabelRepeat(int token, int target) {
@@ -3023,6 +3148,7 @@ void feLabelRepeat(int token, int target) {
 }
 
 void feLowerLabel(AstStatement statement) {
+  feFlow = flowSplit(feFlow);
   var body = statement.children[0];
   var target = body;
   while (target.kind == astLabeledStatement) target = target.children[0];
@@ -3054,6 +3180,7 @@ void feLowerLabel(AstStatement statement) {
     i++;
   }
   feLabels.removeLast();
+  feFlow = flowUnsplit(feFlow);
 }
 
 void feLowerLabeledJump(AstStatement statement, bool repeat) {
@@ -3071,7 +3198,7 @@ void feLowerLabeledJump(AstStatement statement, bool repeat) {
     label.breaks.add(feJump(opJump));
     label.breakFlows.add(flowCopy(feFlow));
   }
-  feFlow.reachable = false;
+  flowUnreachable(feFlow);
 }
 
 int feLowerInterpolation(AstExpression expression) {

@@ -6,6 +6,7 @@ class LocalVariable {
   int token;
   AstType type;
   bool constant = false;
+  bool finalVariable = false;
 
   LocalVariable(this.name, this.token, this.type);
 }
@@ -120,8 +121,9 @@ void bindingDeclarations(
       variable.token,
       variable.type,
     );
-    binder.result.variables[variable.binding].constant =
-        variable.modifier == 'const';
+    var local = binder.result.variables[variable.binding];
+    local.constant = variable.modifier == 'const';
+    local.finalVariable = local.constant || variable.modifier == 'final';
     i++;
   }
 }
@@ -255,6 +257,7 @@ FunctionBindings bindFunctionLocals(
       syntax.token,
       AstType('', <AstType>[], syntax.token),
     );
+    result.variables[result.receiver].finalVariable = true;
   }
   var i = 0;
   while (i < syntax.parameters.length) {

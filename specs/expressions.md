@@ -28,13 +28,14 @@
 | §17.15 函数调用 | 部分实现 | 必需/可选位置参数、命名/required 参数、声明库范围内的默认常量；实参按源码顺序求值后绑定。函数值调用和一般泛型调用尚缺。 | [arguments.dart](../lib/src/arguments.dart)：`bindArguments`；[frontend.dart](../lib/src/frontend.dart)：`feLowerArguments`；[values.dart](../test/fixtures/values.dart)：`argumentCalls`。 |
 | §17.18–17.19 查找与顶层 getter | 部分实现 | 声明库及前缀查找、顶层变量惰性读取、支持的 getter；完整查找冲突和动态调用规则仍需核验。 | [symbols.dart](../lib/src/symbols.dart)：`resolveSymbol`；[frontend.dart](../lib/src/frontend.dart)：`feLoadDeclaration`、`feGenerateGlobals`；[behavior_test.dart](../test/behavior_test.dart)：`libraries`。 |
 | §17.20–17.22 成员调用与属性读取 | 部分实现 | 已知类实例方法、字段、getter 及部分内建成员；一般动态成员分派、级联、super 和方法提取未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerMemberCall`、`feLowerMember`；[values.dart](../test/fixtures/values.dart)：`objectValues`、`localBindings`。 |
+| 空安全补充：`Never` 表达式消费 | 部分实现 | 支持底类型接收者的属性、索引及已有调用入口；结果保留 `Never`，仍检查实参、重复命名参数、类型实参与 void 消费。此类路径不能产生实际接收者，不引入一般动态分派；函数提取等入口仍缺。 | [frontend.dart](../lib/src/frontend.dart)：`feReadMember`、`feLowerNeverArguments`、`feLowerLvalue`；[behavior_test.dart](../test/behavior_test.dart)：`neverExpressions`、`rejected`；规则依据[空安全补充][nnbd]。 |
 | §17.37–17.38 词法查找与标识符 | 部分实现 | 整个局部作用域预绑定，支持遮蔽、前向/自身引用错误及 `_`；闭包与局部函数作用域尚缺。 | [binding.dart](../lib/src/binding.dart)：`bindFunctionLocals`；[frontend.dart](../lib/src/frontend.dart)：`feReadLocal`；[values.dart](../test/fixtures/values.dart)：`localBindings`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
 
 ## 赋值、分支与运算
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
-| §17.23、§17.36 赋值与可赋值表达式 | 部分实现 | 局部、全局、字段、List 索引及已有复合赋值；接收者/索引只求值一次，存储转换不替代 RHS 的结果类型和负载。`??=` 未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerLvalue`、`feLowerAssignment`；[values.dart](../test/fixtures/values.dart)：`assignmentValues`、`staticContexts`。 |
+| §17.23、§17.36 赋值与可赋值表达式 | 部分实现 | 局部、全局、字段、List 索引及已有复合赋值；接收者/索引只求值一次，存储转换不替代 RHS 的结果类型和负载。拒绝 final 再写入；Never 属性/索引的简单赋值保留 RHS 类型。`??=` 未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerLvalue`、`feLowerAssignment`、`feWriteLvalue`；[values.dart](../test/fixtures/values.dart)：`assignmentValues`、`finalAssignments`；[behavior_test.dart](../test/behavior_test.dart)：`neverExpressions`、`rejected`。 |
 | §17.24 条件表达式 | 部分实现 | 仅执行选定分支，两分支均检查并接受上下文类型；结果合并依赖当前有限类型 LUB。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerConditional`；[values.dart](../test/fixtures/values.dart)：`conditionTernary`、`flowContexts`。 |
 | §17.25 `??` | 部分实现 | 左侧一次求值，仅 null 时执行 RHS；两侧静态检查和接收 List 上下文；Null 左侧取 RHS 类型，否则合并非空左类型与 RHS。拒绝 void 左侧，允许 void RHS 并保留选中负载。 | [typing.dart](../lib/src/typing.dart)：`typingCoalescing`；[frontend.dart](../lib/src/frontend.dart)：`feLowerCoalescing`；[constants.dart](../lib/src/constants.dart)：`_constantCoalescing`；[values.dart](../test/fixtures/values.dart)：`coalescingContexts`。 |
 | §17.26 逻辑表达式 | 部分实现 | `&&`、`\|\|` 短路及分支提升；普通布尔值与条件消费均保留副作用和动态 bool 检查。 | [frontend.dart](../lib/src/frontend.dart)：`feConditionJumps`、`feLowerExpression`；[values.dart](../test/fixtures/values.dart)：`conditionContexts`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
@@ -44,6 +45,7 @@
 | §17.31–17.32 加法与乘法类 | 部分实现 | `+`、`-`、`*`、`~/`、`%`，String 拼接；`int + dynamic` 为 num，`dynamic + int` 为 dynamic，整数 `~/ dynamic` 为 int。`/` 和浮点运算未实现。 | [typing.dart](../lib/src/typing.dart)：`typingBinary`；[frontend.dart](../lib/src/frontend.dart)：`feCombine`；[values.dart](../test/fixtures/values.dart)：`staticContexts`。 |
 | §17.33、§17.35 一元与后缀 | 部分实现 | `!`、数值负号、整数 `~`、前后 `++`/`--`；增减的结果与存储类型分别处理。空断言 `!` 后缀及用户运算符未实现。 | [typing.dart](../lib/src/typing.dart)：`typingUnary`；[frontend.dart](../lib/src/frontend.dart)：`feLowerAssignment`；[values.dart](../test/fixtures/values.dart)：`assignmentValues`、`flowAssignments`。 |
 | §17.39–17.40 类型测试与转换 | 部分实现 | `is`、`is!`、`as` 保留单次求值，覆盖当前类型和完整 List 参数；允许无关静态类型的显式 cast 后在运行时检查。函数、记录及一般泛型目标未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerExpression`；[runtime.dart](../lib/src/runtime.dart)：`rtValueMatches`、`rtValueCast`；[values.dart](../test/fixtures/values.dart)：`typeChecks`。 |
+| 空安全补充：底类型运算结果 | 部分实现 | 支持的普通运算在 Never 左侧保留底类型；相等、逻辑和 `!` 仍为 bool。具体接收者沿用其结果规则，例如 `int + Never` 为 num。不能因路径不完成而跳过其他操作数的静态检查。 | [typing.dart](../lib/src/typing.dart)：`typingBinary`、`typingUnary`；[frontend.dart](../lib/src/frontend.dart)：`feCombine`；[behavior_test.dart](../test/behavior_test.dart)：`neverNegation`、`neverRelation`、`neverRightArithmetic`、`neverLogical`。 |
 
 ## List API 边界
 
@@ -66,6 +68,7 @@
 [draft]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex
 [pdf]: https://dart.dev/to/spec-draft
 [entry]: https://dart.dev/resources/language/spec
+[nnbd]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md
 [filled]: https://api.dart.dev/stable/3.13.5/dart-core/List/List.filled.html
 [put]: https://api.dart.dev/stable/3.13.5/dart-core/List/operator_put.html
 [clear]: https://api.dart.dev/stable/3.13.5/dart-core/List/clear.html

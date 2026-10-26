@@ -480,7 +480,12 @@ bool parserTypedDeclaration(Parser parser) {
 
 String parserModifier(Parser parser) {
   if (parserTake(parser, 'var')) return 'var';
-  if (parserTake(parser, 'final')) return 'final';
+  if (parserTake(parser, 'final')) {
+    if (parserIs(parser, 'var')) {
+      parserError(parser, 'final cannot be combined with var');
+    }
+    return 'final';
+  }
   if (parserTake(parser, 'const')) return 'const';
   return '';
 }
@@ -560,6 +565,9 @@ List<AstParameter> parserParameters(Parser parser) {
         parser.position++;
         required = true;
       }
+    }
+    if (parserIs(parser, 'final') || parserIs(parser, 'const')) {
+      parserError(parser, 'parameters cannot have final or const modifiers');
     }
     var type = parserDeclarationType(parser, '');
     var fieldFormal = parserTake(parser, 'this');

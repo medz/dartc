@@ -47,7 +47,8 @@ class Box {
 }
 
 class Plain {
-  int value;
+  final int value;
+  final bool enabled = true;
   Plain([this.value = 7]);
 }
 
@@ -137,7 +138,7 @@ void valueVoid() => 7;
 class Cell {
   dynamic value;
   Object? optional;
-  Object _hidden;
+  final Object _hidden;
   Cell(this.value, this.optional, {int this._hidden = 7});
   toString() => 'Cell(${this.value},${this.optional})';
 }
@@ -581,6 +582,101 @@ void coalescingContexts() {
   List<Object?> conditionalView = conditionalPayload;
   print(conditionalView);
   coalescingDefaults();
+}
+
+final int lazyFinalValue = conditionChoice(9);
+
+void finalAssignments(bool flag) {
+  final int initialized = 3;
+  final int deferred;
+  final bool? nullable;
+  if (flag) {
+    deferred = 4;
+    nullable = null;
+  } else {
+    deferred = 5;
+    nullable = false;
+  }
+  print(<Object?>[initialized, deferred, nullable]);
+  final values = <int>[1];
+  values.add(2);
+  values[0]++;
+  print(values);
+  for (final item in <int>[1, 2]) {
+    final int copy;
+    copy = item + 1;
+    print(copy);
+  }
+}
+
+int completeReturn(bool flag) {
+  if (flag) return 6;
+  return 7;
+}
+
+Never nonCompletingWhile() {
+  while (true) {}
+}
+
+int neverWrapper() {
+  nonCompletingWhile();
+}
+
+int nonCompletingFor() {
+  for (;;) {}
+}
+
+int nonCompletingDo() {
+  do {} while (true);
+}
+
+// ignore: body_might_complete_normally_nullable
+int? fallthroughInt() {}
+// ignore: body_might_complete_normally_nullable
+bool? fallthroughBool() {}
+dynamic fallthroughDynamic() {}
+void fallthroughVoid() {}
+
+void finalContexts() {
+  conditionTrace = '';
+  print('final:$conditionTrace');
+  print(lazyFinalValue);
+  print(lazyFinalValue);
+  print(conditionTrace);
+  finalAssignments(true);
+  finalAssignments(false);
+  print(Plain(8).value);
+  print(Plain().enabled);
+  print(<Object?>[completeReturn(true), completeReturn(false)]);
+  print(<Object?>[fallthroughInt(), fallthroughBool(), fallthroughDynamic()]);
+  List<Object?> erased = <void>[fallthroughVoid()];
+  print(erased);
+}
+
+void neverContexts() {
+  var empty = <Never>[];
+  List<String> texts = empty;
+  List<int> numbers = empty;
+  print(<Object>[texts, numbers]);
+  dynamic bottom = pass(empty);
+  print(bottom is List<String>);
+  print(bottom is List<int>);
+  dynamic value = pass(null);
+  print(value is Never);
+  // ignore: type_check_with_null
+  print(value is Never?);
+  value = 1;
+  // ignore: type_check_with_null
+  print(value is Never?);
+  Never? nullable = null;
+  print(nullable);
+  print(identical(const <Never?>[], const <Null>[]));
+  final int unreachable;
+  return;
+  // ignore: dead_code
+  if (false) unreachable = 1;
+  unreachable = 2;
+  print(unreachable);
 }
 
 class BindingProbe {
@@ -1191,6 +1287,8 @@ void main(List<String> args) {
   filledLists();
   conditionContexts();
   coalescingContexts();
+  finalContexts();
+  neverContexts();
   localBindings();
   flowContexts();
   staticContexts(1, null);

@@ -3,6 +3,27 @@ import 'dart:io';
 import '../lib/src/layout.dart';
 
 const program = r'''
+Never neverStops() { while (true) {} }
+Never get neverGetter => neverStops();
+void neverGetterCall() { neverGetter(); }
+
+Never neverExpressions(Never value) {
+  Never property = value.missing;
+  Never indexed = value['index'];
+  var assignments = [value.missing = 1];
+  List<int> typed = assignments;
+  var compounds = [value[true] += 1];
+  List<Never> checked = compounds;
+  value<int, String>(typed, other: property);
+  value.foo(checked, other: indexed);
+  return value.toString(1, other: true);
+}
+
+Never neverNegation(Never value) => -value;
+Never neverRelation(Never value) => value < 1;
+num neverRightArithmetic(Never value) => 1 + value;
+bool neverLogical(Never value) => !value || value;
+
 class FunctionInfo {
   String name;
   int start;
@@ -489,6 +510,8 @@ void main(List<String> args) {
       "bool side() { print('rhs'); return true; } void main() { dynamic value = 1; print('before'); if (value && side()) print('after'); }",
       "void main() { dynamic value = 'wrong'; print('before'); value as int; print('after'); }",
       "void main() { dynamic value = null; print('before'); value as int; print('after'); }",
+      "void main() { dynamic value = null; print('before'); value as Never; print('after'); }",
+      "void main() { List<String> values = <Never>[]; print('before'); values.add('x'); }",
       "void main() { dynamic value = 1; print('before'); value as bool; print('after'); }",
       'void main() { Object value = <Object>[1]; print(\'before\'); value as List<int>; print(\'after\'); }',
       "void main() { dynamic value = 'wrong'; print('before'); int number = value; print('after'); }",
@@ -624,6 +647,10 @@ void main() {
     compare(File('${temporary.path}/prefix-priority.dart'), []);
     compare(File('${temporary.path}/constant-imports.dart'), []);
     final rejected = [
+      'void f(Never value) { value.foo(x: 1, x: 2); } void main() {}',
+      'void f(Never value) { value.foo<Missing>(); } void main() {}',
+      'void noop() {} void f(Never value) { value[noop()]; } void main() {}',
+      'class C { C(); void change() { this = C(); } } void main() {}',
       "import 'exports.dart'; void main() { print(hidden()); }",
       "import 'math.dart'; void main() { print(_private()); }",
       "import 'dart:core' hide print; void main() { print(1); }",
@@ -635,6 +662,25 @@ void main() {
       'void value() {} void main() { value() ?? 1; }',
       'void value() {} void main() { dynamic source = 1; var values = [source ?? value()]; print(values[0]); }',
       'void main() { int value; print(1 ?? value); }',
+      'void main() { final int value = 1; value = 2; print(value); }',
+      'void main() { final int value = 1; print(++value); }',
+      'void main() { final int value; value = (value = 1); print(value); }',
+      'void main() { final int value; return; if (true) value = 1; value = 2; print(value); }',
+      'void f(bool flag) { final int value; return; if (flag) value = 1; value = 2; print(value); } void main() { f(true); }',
+      'final int value = 1; void main() { value = 2; print(value); }',
+      'final int? value; void main() { print(value); }',
+      'int value; void main() { print(value); }',
+      'class C { final int value; C(this.value); } void main() { var object = C(1); object.value += 2; }',
+      'class C { const int value = 1; C(); } void main() { print(C().value); }',
+      'class C { final int? value; } void main() { print(C().value); }',
+      'class C { int value; C(); } void main() { print(C().value); }',
+      'class C { final int value = 1; C(this.value); } void main() { print(C(2).value); }',
+      'void main() { final int? value; print(value); }',
+      'void f(bool flag) { final int value; if (flag) value = 1; value = 2; print(value); } void main() { f(false); }',
+      'void main() { final int value; for (int i = 0; i < 2; i++) { value = i; } }',
+      'void main() { final int value; do { value = 1; } while (false); print(value); }',
+      'int value() {} void main() { print(value()); }',
+      'int value(bool flag) { if (flag) return 1; } void main() { print(value(false)); }',
       'int value = 2; const selected = 1 ?? value; void main() { print(selected); }',
       "void main() { var values = [1 ?? 'other']; List<int> narrow = values; print(narrow); }",
       'void main() { print(1 as int is int); }',

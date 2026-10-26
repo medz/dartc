@@ -12,7 +12,7 @@ external int nativeMetadataAddress(int features);
 external int nativeCall1(int function, int value);
 external int nativeCall0(int function);
 
-const int rtAbiVersion = 7;
+const int rtAbiVersion = 8;
 
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
@@ -917,6 +917,7 @@ int rtTypeSubtype(int actual, int expected) {
   var target = nativeLoad64(expected + typeKindOffset);
   if (target == typeKindDynamic || target == typeKindVoid) return 1;
   var source = nativeLoad64(actual + typeKindOffset);
+  if (source == typeKindNever) return 1;
   if (target == typeKindNullable) {
     var child = rtTypeArgument(expected);
     if (nativeLoad64(child + typeKindOffset) == typeKindObject) return 1;
@@ -1004,6 +1005,7 @@ int rtValueBox(int value, int type) {
 
 int rtValueMatches(int value, int expected) {
   var kind = nativeLoad64(expected + typeKindOffset);
+  if (kind == typeKindNever) return 0;
   if (kind == typeKindDynamic || kind == typeKindVoid) return 1;
   if (kind == typeKindNullable) {
     if (value == 0) return 1;
