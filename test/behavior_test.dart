@@ -437,6 +437,18 @@ void main(List<String> args) {
       );
     compare(values, [for (var i = 0; i < 20; i++) '参数$i🙂']);
     final failingValues = [
+      "void main() { print('before'); print('abc'.codeUnitAt(-1)); }",
+      "void main() { print('before'); print('abc'.codeUnitAt(3)); }",
+      "void main() { print('before'); print('abc'[9223372036854775807]); }",
+      "void main() { print('before'); print('abc'.substring(-1)); }",
+      "void main() { print('before'); 'abc'.substring(0, -1); print('after'); }",
+      "void main() { print('before'); print('abc'.substring(2, 1)); }",
+      "void main() { print('before'); print('abc'.substring(0, 4)); }",
+      "void main() { print('before'); print('abc'.indexOf('', 4)); }",
+      "void main() { print('before'); print('abc'.lastIndexOf('', -1)); }",
+      "void main() { print('before'); print('abc'.startsWith('', 4)); }",
+      "void main() { print('before'); print(String.fromCharCodes(<int>[-1])); }",
+      "void main() { print('before'); print(String.fromCharCodes(<int>[1114112])); }",
       "bool side() { print('rhs'); return true; } void main() { dynamic value = 1; print('before'); if (value && side()) print('after'); }",
       "void main() { dynamic value = 'wrong'; print('before'); value as int; print('after'); }",
       "void main() { dynamic value = null; print('before'); value as int; print('after'); }",
@@ -567,6 +579,10 @@ void main() {
       'class C { int get value => 7; void f() { print(value); int value = 9; } } void main() {}',
       'int x = 7; void main() { print(x); mark: int x = 3; }',
       'void main() { if (true) int inner = 1; print(inner); }',
+      "void main() { print('abc'.codeUnitAt()); }",
+      "void main() { print('abc'.substring()); }",
+      "void main() { print('abc'.endsWith('c', 1)); }",
+      'void main() { print(String.fromCharCodes(<int>[65], 0)); }',
     ];
     void reject(File invalid, {String? runtime, String? diagnostic}) {
       final result = Process.runSync(

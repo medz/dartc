@@ -535,6 +535,32 @@ void localBindings() {
   print(_);
 }
 
+int stringEvaluations = 0;
+
+String stringReceiver() {
+  stringEvaluations++;
+  return 'a🙂b';
+}
+
+void stringBoundaries() {
+  print(stringReceiver().substring(1));
+  print(stringReceiver().lastIndexOf(''));
+  print(stringEvaluations);
+  var text = 'a🙂b';
+  for (int start = 0; start <= text.length; start++) {
+    print(text.substring(start, start));
+    print(text.indexOf('', start));
+    print(text.lastIndexOf('', start));
+    print(text.startsWith('', start));
+  }
+  print(text.codeUnitAt(3));
+  var codes = String.fromCharCodes(<int>[0, 55296, 120, 57343, 1114111]);
+  print(codes.length);
+  print(codes.codeUnitAt(1));
+  print(codes.codeUnitAt(3));
+  print(codes.substring(4));
+}
+
 void listGrowth(List<String> args) {
   var values = <int>[];
   values.clear();
@@ -595,5 +621,6 @@ void main(List<String> args) {
   filledLists();
   conditionContexts();
   localBindings();
+  stringBoundaries();
   listGrowth(args);
 }

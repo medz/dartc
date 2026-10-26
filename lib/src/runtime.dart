@@ -133,7 +133,26 @@ int rtStringLength(int value) {
   return nativeLoad64(value + stringLengthOffset);
 }
 
+int rtStringRangeError() {
+  var message = rtCString(
+    0x73203a6374726164,
+    0x617220676e697274,
+    0x6f7272652065676e,
+    0xa72,
+  );
+  rtWriteAll(2, message, 26);
+  rtHostExit(70);
+  return 0;
+}
+
 int rtStringCodeUnit(int value, int index) {
+  if (index < 0 || index >= nativeLoad64(value + stringLengthOffset)) {
+    return rtStringRangeError();
+  }
+  return nativeLoad16(value + stringDataOffset + index * 2);
+}
+
+int rtStringRawCodeUnit(int value, int index) {
   return nativeLoad16(value + stringDataOffset + index * 2);
 }
 
@@ -193,7 +212,10 @@ int rtStringEqual(int left, int right) {
 }
 
 int rtStringSubstring(int value, int start, int end) {
-  if (end < 0) end = nativeLoad64(value + stringLengthOffset);
+  var length = nativeLoad64(value + stringLengthOffset);
+  if (start < 0 || start > length || end < start || end > length) {
+    return rtStringRangeError();
+  }
   var result = rtStringAllocate(rtObjectDescriptor(value), end - start);
   var i = start;
   while (i < end) {
@@ -206,9 +228,8 @@ int rtStringSubstring(int value, int start, int end) {
   return result;
 }
 
-int rtStringStartsWith(int value, int prefix, int start) {
+int rtStringMatch(int value, int prefix, int start) {
   var n = nativeLoad64(prefix + stringLengthOffset);
-  if (start + n > nativeLoad64(value + stringLengthOffset)) return 0;
   var i = 0;
   while (i < n) {
     if (nativeLoad16(value + stringDataOffset + (start + i) * 2) !=
@@ -219,35 +240,41 @@ int rtStringStartsWith(int value, int prefix, int start) {
   return 1;
 }
 
+int rtStringStartsWith(int value, int prefix, int start) {
+  var length = nativeLoad64(value + stringLengthOffset);
+  if (start < 0 || start > length) return rtStringRangeError();
+  if (nativeLoad64(prefix + stringLengthOffset) > length - start) return 0;
+  return rtStringMatch(value, prefix, start);
+}
+
 int rtStringEndsWith(int value, int suffix) {
   var start =
       nativeLoad64(value + stringLengthOffset) -
       nativeLoad64(suffix + stringLengthOffset);
   if (start < 0) return 0;
-  return rtStringStartsWith(value, suffix, start);
+  return rtStringMatch(value, suffix, start);
 }
 
 int rtStringIndexOf(int value, int needle, int start) {
-  var end =
-      nativeLoad64(value + stringLengthOffset) -
-      nativeLoad64(needle + stringLengthOffset);
+  var length = nativeLoad64(value + stringLengthOffset);
+  if (start < 0 || start > length) return rtStringRangeError();
+  var end = length - nativeLoad64(needle + stringLengthOffset);
   var i = start;
   while (i <= end) {
-    if (rtStringStartsWith(value, needle, i) == 1) return i;
+    if (rtStringMatch(value, needle, i) == 1) return i;
     i = i + 1;
   }
   return -1;
 }
 
 int rtStringLastIndexOf(int value, int needle, int start) {
-  if (start < 0) start = nativeLoad64(value + stringLengthOffset);
-  var end =
-      nativeLoad64(value + stringLengthOffset) -
-      nativeLoad64(needle + stringLengthOffset);
+  var length = nativeLoad64(value + stringLengthOffset);
+  if (start < 0 || start > length) return rtStringRangeError();
+  var end = length - nativeLoad64(needle + stringLengthOffset);
   var i = start;
   if (i > end) i = end;
   while (i >= 0) {
-    if (rtStringStartsWith(value, needle, i) == 1) return i;
+    if (rtStringMatch(value, needle, i) == 1) return i;
     i = i - 1;
   }
   return -1;
@@ -293,15 +320,15 @@ int rtIntParse(int value) {
   var length = nativeLoad64(value + stringLengthOffset);
   var i = 0;
   var sign = 1;
-  if (length > 0 && rtStringCodeUnit(value, 0) == 45) {
+  if (length > 0 && rtStringRawCodeUnit(value, 0) == 45) {
     sign = -1;
     i = 1;
-  } else if (length > 0 && rtStringCodeUnit(value, 0) == 43) {
+  } else if (length > 0 && rtStringRawCodeUnit(value, 0) == 43) {
     i = 1;
   }
   var radix = 10;
-  if (i + 1 < length && rtStringCodeUnit(value, i) == 48) {
-    var x = rtStringCodeUnit(value, i + 1);
+  if (i + 1 < length && rtStringRawCodeUnit(value, i) == 48) {
+    var x = rtStringRawCodeUnit(value, i + 1);
     if (x == 120 || x == 88) {
       radix = 16;
       i = i + 2;
@@ -309,7 +336,7 @@ int rtIntParse(int value) {
   }
   var result = 0;
   while (i < length) {
-    var c = rtStringCodeUnit(value, i);
+    var c = rtStringRawCodeUnit(value, i);
     var digit = c - 48;
     if (c >= 65 && c <= 70) digit = c - 55;
     if (c >= 97 && c <= 102) digit = c - 87;
@@ -498,7 +525,18 @@ int rtStringFromCodes(int codes) {
   var units = length;
   var i = 0;
   while (i < length) {
-    if (rtListRawGet(codes, i) > 65535) units = units + 1;
+    var code = rtListRawGet(codes, i);
+    if (code < 0 || code > 1114111) {
+      var message = rtCString(
+        0x69203a6374726164,
+        0x632064696c61766e,
+        0x7265746361726168,
+        0xa65646f6320,
+      );
+      rtWriteAll(2, message, 30);
+      rtHostExit(70);
+    }
+    if (code > 65535) units = units + 1;
     i = i + 1;
   }
   var result = rtStringNew(units);

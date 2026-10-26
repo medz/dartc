@@ -1244,6 +1244,8 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
   if (declaration.source == sourceCore &&
       name == 'String' &&
       member == 'fromCharCodes') {
+    if (call.children.length != 2)
+      feAstError(call.token, 'String.fromCharCodes requires one List argument');
     var count = feLowerBuiltinArguments(call, bStringFromCodes);
     feBuiltin(bStringFromCodes, count);
     return tString;
@@ -1318,13 +1320,27 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
     if (member == 'endsWith') builtin = bStringEndsWith;
     if (builtin == 0)
       feAstError(call.token, 'unsupported String method ' + member);
-    var count = feLowerBuiltinArguments(call, builtin);
+    var count = call.children.length - 1;
+    if (count < 1 ||
+        count > 2 ||
+        (member == 'codeUnitAt' || member == 'endsWith') && count != 1)
+      feAstError(call.token, 'argument count for String.' + member);
+    var defaultReceiver = -1;
+    if (count == 1 && (member == 'substring' || member == 'lastIndexOf')) {
+      defaultReceiver = feTemp(tString);
+      feDuplicate(tString);
+      feOperand(opStoreLocal, defaultReceiver);
+    }
+    feLowerBuiltinArguments(call, builtin);
     if (member == 'codeUnitAt') {
       feBuiltin(bStringCodeUnit, count + 1);
       return tInt;
     }
     if (member == 'substring') {
-      if (count == 1) feOperand(opInt, -1);
+      if (count == 1) {
+        feOperand(opLoadLocal, defaultReceiver);
+        feBuiltin(bStringLength, 1);
+      }
       feBuiltin(bStringSubstring, 3);
       return tString;
     }
@@ -1332,8 +1348,10 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
       if (count == 1) {
         if (member == 'indexOf')
           feOperand(opInt, 0);
-        else
-          feOperand(opInt, -1);
+        else {
+          feOperand(opLoadLocal, defaultReceiver);
+          feBuiltin(bStringLength, 1);
+        }
       }
       if (member == 'indexOf')
         feBuiltin(bStringIndexOf, 3);
