@@ -1,3 +1,5 @@
+import 'layout.dart';
+
 external int nativeLoad64(int p);
 external int nativeStore64(int p, int value);
 external int nativeLoad16(int p);
@@ -6,8 +8,10 @@ external int nativeLoad8(int p);
 external int nativeStore8(int p, int value);
 external int nativeSyscall(int n, int a, int b, int c, int d, int e, int f);
 external int nativeTarget();
+external int nativeMetadataAddress();
 
 const int rtStringUnitBytes = 2;
+const int rtStringHeaderBytes = 24;
 
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
@@ -126,33 +130,49 @@ int rtInitializationError() {
 }
 
 int rtStringLength(int value) {
-  return nativeLoad64(value);
+  return nativeLoad64(value + stringLengthOffset);
 }
 
 int rtStringCodeUnit(int value, int index) {
-  return nativeLoad16(value + 8 + index * 2);
+  return nativeLoad16(value + stringDataOffset + index * 2);
 }
 
-int rtStringNew(int length) {
-  var result = rtAlloc(8 + length * 2);
-  nativeStore64(result, length);
+int rtStringAllocate(int descriptor, int length) {
+  var size = nativeLoad64(descriptor + descriptorSizeOffset);
+  var result = rtAlloc(size + length * 2);
+  nativeStore64(result, descriptor);
+  nativeStore64(result + 8, 0);
+  nativeStore64(result + stringLengthOffset, length);
   return result;
 }
 
+int rtStringNew(int length) {
+  var metadata = nativeMetadataAddress();
+  var descriptor =
+      metadata + nativeLoad64(metadata + metadataStringDescriptorOffset);
+  return rtStringAllocate(descriptor, length);
+}
+
 int rtStringConcat(int left, int right) {
-  var a = nativeLoad64(left);
+  var a = nativeLoad64(left + stringLengthOffset);
   if (a == 0) return right;
-  var b = nativeLoad64(right);
+  var b = nativeLoad64(right + stringLengthOffset);
   if (b == 0) return left;
-  var result = rtStringNew(a + b);
+  var result = rtStringAllocate(rtObjectDescriptor(left), a + b);
   var i = 0;
   while (i < a) {
-    nativeStore16(result + 8 + i * 2, nativeLoad16(left + 8 + i * 2));
+    nativeStore16(
+      result + stringDataOffset + i * 2,
+      nativeLoad16(left + stringDataOffset + i * 2),
+    );
     i = i + 1;
   }
   i = 0;
   while (i < b) {
-    nativeStore16(result + 8 + (a + i) * 2, nativeLoad16(right + 8 + i * 2));
+    nativeStore16(
+      result + stringDataOffset + (a + i) * 2,
+      nativeLoad16(right + stringDataOffset + i * 2),
+    );
     i = i + 1;
   }
   return result;
@@ -160,11 +180,12 @@ int rtStringConcat(int left, int right) {
 
 int rtStringEqual(int left, int right) {
   if (left == right) return 1;
-  var length = nativeLoad64(left);
-  if (length != nativeLoad64(right)) return 0;
+  var length = nativeLoad64(left + stringLengthOffset);
+  if (length != nativeLoad64(right + stringLengthOffset)) return 0;
   var i = 0;
   while (i < length) {
-    if (nativeLoad16(left + 8 + i * 2) != nativeLoad16(right + 8 + i * 2))
+    if (nativeLoad16(left + stringDataOffset + i * 2) !=
+        nativeLoad16(right + stringDataOffset + i * 2))
       return 0;
     i = i + 1;
   }
@@ -172,13 +193,13 @@ int rtStringEqual(int left, int right) {
 }
 
 int rtStringSubstring(int value, int start, int end) {
-  if (end < 0) end = nativeLoad64(value);
-  var result = rtStringNew(end - start);
+  if (end < 0) end = nativeLoad64(value + stringLengthOffset);
+  var result = rtStringAllocate(rtObjectDescriptor(value), end - start);
   var i = start;
   while (i < end) {
     nativeStore16(
-      result + 8 + (i - start) * 2,
-      nativeLoad16(value + 8 + i * 2),
+      result + stringDataOffset + (i - start) * 2,
+      nativeLoad16(value + stringDataOffset + i * 2),
     );
     i = i + 1;
   }
@@ -186,12 +207,12 @@ int rtStringSubstring(int value, int start, int end) {
 }
 
 int rtStringStartsWith(int value, int prefix, int start) {
-  var n = nativeLoad64(prefix);
-  if (start + n > nativeLoad64(value)) return 0;
+  var n = nativeLoad64(prefix + stringLengthOffset);
+  if (start + n > nativeLoad64(value + stringLengthOffset)) return 0;
   var i = 0;
   while (i < n) {
-    if (nativeLoad16(value + 8 + (start + i) * 2) !=
-        nativeLoad16(prefix + 8 + i * 2))
+    if (nativeLoad16(value + stringDataOffset + (start + i) * 2) !=
+        nativeLoad16(prefix + stringDataOffset + i * 2))
       return 0;
     i = i + 1;
   }
@@ -199,13 +220,17 @@ int rtStringStartsWith(int value, int prefix, int start) {
 }
 
 int rtStringEndsWith(int value, int suffix) {
-  var start = nativeLoad64(value) - nativeLoad64(suffix);
+  var start =
+      nativeLoad64(value + stringLengthOffset) -
+      nativeLoad64(suffix + stringLengthOffset);
   if (start < 0) return 0;
   return rtStringStartsWith(value, suffix, start);
 }
 
 int rtStringIndexOf(int value, int needle, int start) {
-  var end = nativeLoad64(value) - nativeLoad64(needle);
+  var end =
+      nativeLoad64(value + stringLengthOffset) -
+      nativeLoad64(needle + stringLengthOffset);
   var i = start;
   while (i <= end) {
     if (rtStringStartsWith(value, needle, i) == 1) return i;
@@ -215,8 +240,10 @@ int rtStringIndexOf(int value, int needle, int start) {
 }
 
 int rtStringLastIndexOf(int value, int needle, int start) {
-  if (start < 0) start = nativeLoad64(value);
-  var end = nativeLoad64(value) - nativeLoad64(needle);
+  if (start < 0) start = nativeLoad64(value + stringLengthOffset);
+  var end =
+      nativeLoad64(value + stringLengthOffset) -
+      nativeLoad64(needle + stringLengthOffset);
   var i = start;
   if (i > end) i = end;
   while (i >= 0) {
@@ -232,27 +259,30 @@ int rtIntToString(int value) {
   var number = value;
   if (number > 0) number = -number;
   if (number == 0) {
-    nativeStore16(result + 8, 48);
+    nativeStore16(result + stringDataOffset, 48);
     count = 1;
   }
   while (number < 0) {
     var quotient = number ~/ 10;
     var digit = quotient * 10 - number;
-    nativeStore16(result + 8 + count * 2, 48 + digit);
+    nativeStore16(result + stringDataOffset + count * 2, 48 + digit);
     count = count + 1;
     number = quotient;
   }
   if (value < 0) {
-    nativeStore16(result + 8 + count * 2, 45);
+    nativeStore16(result + stringDataOffset + count * 2, 45);
     count = count + 1;
   }
-  nativeStore64(result, count);
+  nativeStore64(result + stringLengthOffset, count);
   var i = 0;
   var end = count - 1;
   while (i < end) {
-    var digit = nativeLoad16(result + 8 + i * 2);
-    nativeStore16(result + 8 + i * 2, nativeLoad16(result + 8 + end * 2));
-    nativeStore16(result + 8 + end * 2, digit);
+    var digit = nativeLoad16(result + stringDataOffset + i * 2);
+    nativeStore16(
+      result + stringDataOffset + i * 2,
+      nativeLoad16(result + stringDataOffset + end * 2),
+    );
+    nativeStore16(result + stringDataOffset + end * 2, digit);
     i = i + 1;
     end = end - 1;
   }
@@ -260,7 +290,7 @@ int rtIntToString(int value) {
 }
 
 int rtIntParse(int value) {
-  var length = nativeLoad64(value);
+  var length = nativeLoad64(value + stringLengthOffset);
   var i = 0;
   var sign = 1;
   if (length > 0 && rtStringCodeUnit(value, 0) == 45) {
@@ -368,16 +398,22 @@ int rtStringFromCodes(int codes) {
     var c = rtListGet(codes, i);
     if (c > 65535) {
       var scalar = c - 65536;
-      nativeStore16(result + 8 + count * 2, 55296 + (scalar >> 10));
-      nativeStore16(result + 10 + count * 2, 56320 + (scalar & 1023));
+      nativeStore16(
+        result + stringDataOffset + count * 2,
+        55296 + (scalar >> 10),
+      );
+      nativeStore16(
+        result + stringDataOffset + 2 + count * 2,
+        56320 + (scalar & 1023),
+      );
       count = count + 2;
     } else {
-      nativeStore16(result + 8 + count * 2, c);
+      nativeStore16(result + stringDataOffset + count * 2, c);
       count = count + 1;
     }
     i = i + 1;
   }
-  nativeStore64(result, count);
+  nativeStore64(result + stringLengthOffset, count);
   return result;
 }
 
@@ -407,15 +443,21 @@ int rtStringDecodeUtf8(int bytes, int length) {
     }
     if (c > 65535) {
       var scalar = c - 65536;
-      nativeStore16(result + 8 + count * 2, 55296 + (scalar >> 10));
-      nativeStore16(result + 10 + count * 2, 56320 + (scalar & 1023));
+      nativeStore16(
+        result + stringDataOffset + count * 2,
+        55296 + (scalar >> 10),
+      );
+      nativeStore16(
+        result + stringDataOffset + 2 + count * 2,
+        56320 + (scalar & 1023),
+      );
       count = count + 2;
     } else {
-      nativeStore16(result + 8 + count * 2, c);
+      nativeStore16(result + stringDataOffset + count * 2, c);
       count = count + 1;
     }
   }
-  nativeStore64(result, count);
+  nativeStore64(result + stringLengthOffset, count);
   return result;
 }
 
@@ -426,16 +468,16 @@ int rtStringFromCString(int bytes) {
 }
 
 int rtStringEncodeUtf8(int value) {
-  var length = nativeLoad64(value);
+  var length = nativeLoad64(value + stringLengthOffset);
   var result = rtAlloc(9 + length * 4);
   var i = 0;
   var count = 0;
   while (i < length) {
-    var c = nativeLoad16(value + 8 + i * 2);
+    var c = nativeLoad16(value + stringDataOffset + i * 2);
     i = i + 1;
     if (c >= 55296 && c <= 56319) {
       var low = 0;
-      if (i < length) low = nativeLoad16(value + 8 + i * 2);
+      if (i < length) low = nativeLoad16(value + stringDataOffset + i * 2);
       if (low >= 56320 && low <= 57343) {
         c = 65536 + ((c - 55296) << 10) + low - 56320;
         i = i + 1;
@@ -595,6 +637,14 @@ int rtHostFinish(int path, int outputTarget) {
   if (changed < 0) rtIoError();
   rtHostExit(0);
   return 0;
+}
+
+int rtObjectDescriptor(int object) {
+  var descriptor = nativeLoad64(object);
+  if ((nativeLoad64(object + 8) & objectStaticRelative) != 0) {
+    descriptor = object + descriptor;
+  }
+  return descriptor;
 }
 
 int rtObjectNew(int descriptor) {

@@ -124,6 +124,9 @@ void main(List<String> args) {
   print(values.length);
   String text = 'Dart 你好🙂';
   print(text.substring(5));
+  String copied = text.substring(5);
+  print(copied + '!');
+  print(copied.substring(0, 2));
   print(text.substring(0, 4));
   print(text.length);
   print(text.codeUnitAt(5));
