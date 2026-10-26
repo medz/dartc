@@ -27,11 +27,13 @@ dart run bin/dartc.dart example/hello.dart -o build/hello
 - Top-level functions and variables, direct calls, and recursion.
 - Integers, booleans, strings, and typed lists.
 - Local variables, assignments, arithmetic, comparisons, and short-circuit logic.
-- `if`, `while`, three-part `for`, `break`, `continue`, and `return`.
-- Basic string and list operations, Unicode strings, `print`, and command-line arguments.
-- Relative source imports.
+- `if`, `while`, `do`/`while`, three-part `for`, list `for`/`in`, labelled jumps, constant `switch` cases, and `return`.
+- Basic string and list operations, Unicode strings, interpolation, `print`, and command-line arguments.
+- Relative source imports and exports, prefixes, private names, and `show`/`hide` filters.
 
-The source checkout additionally supports simple classes with fields, field-formal constructors, and directly resolved instance methods, nested typed lists, and lazy top-level initialization.
+The source checkout additionally supports simple classes with fields, field-formal constructors, getters, and directly resolved instance methods, nested typed lists, and lazy top-level initialization. Instance members may be used with or without `this`.
+
+The `StringBuffer` subset supports empty construction, String arguments to `write` and `writeln`, `clear`, `length`, `isEmpty`, and `toString`. Lists must not change length during `for`/`in` iteration; concurrent modification errors are not yet implemented.
 
 Inheritance, closures, exceptions, async code, and most SDK libraries are not yet supported. Runtime memory is currently reclaimed when the process exits. Self-hosting does not imply full Dart language compatibility.
 
