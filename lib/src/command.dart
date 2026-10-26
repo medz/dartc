@@ -1,9 +1,13 @@
-import 'arm64.dart';
+import 'allocate.dart';
+import 'emit.dart';
 import 'format.dart';
 import 'frontend.dart';
 import 'host.dart';
 import 'ir.dart';
 import 'library.dart';
+import 'machine.dart';
+import 'optimize.dart';
+import 'ssa.dart';
 
 List<String> sourceFiles = <String>[];
 
@@ -140,7 +144,11 @@ void runCompiler(List<String> args) {
     exportFunctions = <int>[function];
     exportParameters = <int>[parameters];
   }
-  generateArm64();
+  List<SsaFunction> ssa = buildSsa();
+  optimizeSsa(ssa);
+  List<MachineFunction> program = selectMachine(ssa);
+  allocateRegisters(program);
+  generateCode(program);
   List<int> bytes = <int>[];
   if (imageKind == 0)
     bytes = createExecutable();

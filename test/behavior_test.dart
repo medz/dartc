@@ -20,7 +20,9 @@ class FunctionInfo {
   String label() => this.name + ':' + this.start.toString();
 }
 
-int bias = 7;
+const int bias = 7;
+const bool enabled = true;
+const int labelValue = -1234567;
 int calls = 0;
 int initial = initialize();
 List<int> values = <int>[2, 3];
@@ -30,9 +32,9 @@ int initialize() {
   return bias * 3;
 }
 
-int fibonacci(int n) {
-  if (n < 2) return n;
-  return fibonacci(n - 1) + fibonacci(n - 2);
+int fibonacci(int bias) {
+  if (bias < 2) return bias;
+  return fibonacci(bias - 1) + fibonacci(bias - 2);
 }
 
 void main(List<String> args) {
@@ -62,11 +64,11 @@ void main(List<String> args) {
   print(text.startsWith('你好', 5));
   print(text.endsWith('🙂'));
   print(String.fromCharCodes(<int>[0x4f60, 0x597d, 0x1f642]) == text.substring(5));
-  print('value=' + (-1234567).toString());
+  print('value=' + labelValue.toString());
   print(10000000000 + int.parse('0xff'));
   print(args.length);
   print(args[1]);
-  var info = FunctionInfo('entry', 2, 1, 3, 1, <int>[4, 8], true);
+  var info = FunctionInfo('entry', 2, 1, 3, 1, <int>[4, 8], enabled);
   var functions = <FunctionInfo>[info];
   functions[0].start = 7;
   functions[0].parameters++;

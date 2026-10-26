@@ -6,6 +6,8 @@ List<int> feKinds = <int>[];
 int feAt = 0;
 List<int> feBodies = <int>[];
 List<int> feGlobalValues = <int>[];
+List<int> _feLiteralTypes = <int>[];
+List<int> _feLiteralValues = <int>[];
 List<int> feParamStarts = <int>[];
 List<String> feParamNames = <String>[];
 List<int> feParamTypes = <int>[];
@@ -495,6 +497,36 @@ void feClassSignature() {
   feExpect('}');
 }
 
+void _feRecordLiteralConstant(int global, int start, int end) {
+  var count = end - start;
+  var position = start;
+  var sign = 1;
+  if (count == 2 && feTokens[start] == '-') {
+    position = position + 1;
+    sign = -1;
+  } else if (count != 1) {
+    return;
+  }
+  var type = 0;
+  var value = 0;
+  if (feKinds[position] == 2) {
+    type = tInt;
+    value = int.parse(feTokens[position]) * sign;
+  } else if (sign == 1 && feKinds[position] == 1) {
+    if (feTokens[position] == 'true') {
+      type = tBool;
+      value = 1;
+    } else if (feTokens[position] == 'false') {
+      type = tBool;
+    }
+  }
+  if (type == 0) return;
+  if (globalTypes[global] != 0 && globalTypes[global] != type) return;
+  _feLiteralTypes[global] = type;
+  _feLiteralValues[global] = value;
+  globalTypes[global] = type;
+}
+
 void feSignatures() {
   while (!feIs('')) {
     if (feTake('class')) {
@@ -517,10 +549,11 @@ void feSignatures() {
     }
     var external = feTake('external');
     var inferred = false;
+    var constant = false;
     if (feTake('var')) {
       inferred = true;
     } else {
-      feTake('const');
+      constant = feTake('const');
       feTake('final');
     }
     var type = tInt;
@@ -535,10 +568,15 @@ void feSignatures() {
     } else {
       globalNames.add(name);
       globalTypes.add(type);
+      _feLiteralTypes.add(0);
+      _feLiteralValues.add(0);
       if (inferred) globalTypes[globalTypes.length - 1] = 0;
       if (feTake('=')) {
-        feGlobalValues.add(feAt);
+        var start = feAt;
+        feGlobalValues.add(start);
         feSkipExpression();
+        if (constant)
+          _feRecordLiteralConstant(globalNames.length - 1, start, feAt);
       } else {
         feGlobalValues.add(-1);
       }
@@ -680,7 +718,11 @@ void feLoad(String name) {
   }
   var global = feGlobal(name);
   if (global >= 0) {
-    feOperand(opLoadGlobal, global);
+    if (_feLiteralTypes[global] != 0) {
+      feInteger(_feLiteralValues[global], _feLiteralTypes[global]);
+    } else {
+      feOperand(opLoadGlobal, global);
+    }
     return;
   }
   feError('unknown variable ' + name);
@@ -1519,6 +1561,8 @@ void parseSource(String source) {
   feInitializingGlobal = -1;
   feBodies.clear();
   feGlobalValues.clear();
+  _feLiteralTypes.clear();
+  _feLiteralValues.clear();
   feParamStarts.clear();
   feParamNames.clear();
   feParamTypes.clear();

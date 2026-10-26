@@ -19,19 +19,29 @@ void run(String executable, List<String> arguments, {bool native = false}) {
   }
 }
 
-void main() {
+void main(List<String> args) {
   final root = File.fromUri(Platform.script).parent.parent.absolute.path;
   final build = Directory('$root/build')..createSync(recursive: true);
   final sdk = Platform.resolvedExecutable;
   final source = '$root/bin/dartc.dart';
   final standard = '$root/lib/src/runtime.dart';
-  final seed = '${build.path}/seed';
+  var seed = '${build.path}/seed';
+  if (args.length == 2 && args[0] == '--seed') {
+    seed = File(args[1]).absolute.path;
+  } else if (args.isNotEmpty) {
+    stderr.writeln(
+      'Usage: dart tool/bootstrap.dart [--seed <native compiler>]',
+    );
+    exit(64);
+  }
   final stage1 = '${build.path}/dartc-stage1';
   final stage2 = '${build.path}/dartc-stage2';
   final stage3 = '${build.path}/dartc-stage3';
   try {
-    stdout.writeln('Building the seed with official Dart.');
-    run(sdk, ['compile', 'exe', source, '-o', seed]);
+    if (args.isEmpty) {
+      stdout.writeln('Building the seed with official Dart.');
+      run(sdk, ['compile', 'exe', source, '-o', seed]);
+    }
     stdout.writeln('Building stage 1 with the seed.');
     run(seed, [source, '-o', stage1, '--std', standard], native: true);
     stdout.writeln('Building stage 2 with stage 1.');
