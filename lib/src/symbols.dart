@@ -5,6 +5,7 @@ const int symbolGlobal = 2;
 const int symbolClass = 3;
 const int symbolNativeType = 4;
 const int symbolBuiltin = 5;
+const int symbolType = 6;
 
 class DeclarationSymbol {
   int source;
