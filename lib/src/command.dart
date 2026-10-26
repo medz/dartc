@@ -1,78 +1,80 @@
-import 'dart:io';
+import 'arm64.dart';
+import 'format.dart';
+import 'frontend.dart';
+import 'host.dart';
 
-import 'native.dart';
-import 'parser.dart';
+List<String> sourceFiles = <String>[];
 
-// Usage: dartc hello.dart [-o hello]
-void main(List<String> args) {
-  if (args.length != 1 && (args.length != 3 || args[1] != '-o') ||
-      args.isNotEmpty && args.first == '--help') {
-    print('Usage: dartc <source.dart> [-o <executable>]');
-    exitCode = args.length == 1 && args.first == '--help' ? 0 : 64;
-    return;
+bool sourceSeen(String path) {
+  int i = 0;
+  while (i < sourceFiles.length) {
+    if (sourceFiles[i] == path) return true;
+    i = i + 1;
   }
+  return false;
+}
 
-  final input = File(args.first).absolute;
-  final inputPath = input.path;
-  final defaultOutput = inputPath.endsWith('.dart')
-      ? inputPath.substring(0, inputPath.length - 5)
-      : inputPath + '.out';
-  final output = File(args.length == 3 ? args[2] : defaultOutput).absolute;
-  final outputPath = output.path;
-
-  try {
-    if (!Platform.isMacOS) {
-      throw UnsupportedError('Signing requires macOS; target is macOS ARM64');
-    }
-    if (inputPath == outputPath ||
-        output.existsSync() &&
-            input.resolveSymbolicLinksSync() ==
-                output.resolveSymbolicLinksSync()) {
-      throw ArgumentError('Output must not overwrite the source');
-    }
-
-    final statements = parse(input.readAsStringSync());
-    final program = generateNative(statements);
-    output.parent.createSync(recursive: true);
-    final temporary = output.parent.createTempSync('.dartc-');
-    try {
-      final staged = File(temporary.path + '/program');
-      staged.writeAsBytesSync(program.bytes);
-      for (final command in [
-        ['/bin/chmod', '+x', staged.path],
-        [
-          '/usr/bin/codesign',
-          '--force',
-          '--sign',
-          '-',
-          '--timestamp=none',
-          '--identifier',
-          'dev.medz.dartc',
-          staged.path,
-        ],
-      ]) {
-        final result = Process.runSync(command.first, command.sublist(1));
-        if (result.exitCode != 0) {
-          throw ProcessException(
-            command.first,
-            command.sublist(1),
-            result.stderr.toString().trim(),
-            result.exitCode,
-          );
-        }
+String collectSource(String path) {
+  if (sourceSeen(path)) return '';
+  sourceFiles.add(path);
+  String source = hostRead(path);
+  String folder = path.substring(0, path.lastIndexOf('/') + 1);
+  String dependencies = '';
+  int position = 0;
+  while (position < source.length) {
+    int end = source.indexOf('\n', position);
+    if (end < 0) end = source.length;
+    String line = source.substring(position, end);
+    if (line.startsWith("import '")) {
+      int close = line.indexOf("'", 8);
+      String name = line.substring(8, close);
+      if (!name.startsWith('dart:') && name != 'host.dart') {
+        dependencies = dependencies + collectSource(folder + name);
       }
-      staged.renameSync(outputPath);
-    } finally {
-      temporary.deleteSync(recursive: true);
     }
-
-    final fileSize = output.lengthSync();
-    final codeSize = program.codeSize;
-    final stringSize = program.stringSize;
-    print('$outputPath: $fileSize bytes');
-    print('ARM64 code: $codeSize bytes; UTF-8 strings: $stringSize bytes');
-  } catch (error) {
-    stderr.writeln('$inputPath: $error');
-    exitCode = 1;
+    position = end + 1;
   }
+  return dependencies + '\n' + source;
+}
+
+void runCompiler(List<String> args) {
+  if (args.length == 0 || args[0] == '--help') {
+    print(
+      'Usage: dartc <source.dart> [-o <executable>] [--std <runtime.dart>]',
+    );
+    hostExit(0);
+  }
+  String input = args[0];
+  String output = '';
+  String standard = '';
+  int argument = 1;
+  while (argument < args.length) {
+    if (args[argument] == '-o') {
+      argument = argument + 1;
+      output = args[argument];
+    } else if (args[argument] == '--std') {
+      argument = argument + 1;
+      standard = args[argument];
+    } else {
+      print('Unknown option: ' + args[argument]);
+      hostExit(64);
+    }
+    argument = argument + 1;
+  }
+  if (output == '') {
+    if (input.endsWith('.dart')) {
+      output = input.substring(0, input.length - 5);
+    } else {
+      output = input + '.out';
+    }
+  }
+  if (standard == '') standard = hostStdPath();
+  sourceFiles = <String>[];
+  String source = hostRead(standard) + '\n' + collectSource(input);
+  parseSource(source);
+  generateArm64();
+  List<int> bytes = createExecutable();
+  hostWrite(output, bytes);
+  print(output + ': ' + bytes.length.toString() + ' bytes');
+  hostFinish(output);
 }

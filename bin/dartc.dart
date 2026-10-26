@@ -1,3 +1,5 @@
-import 'package:dartc/src/command.dart' as command;
+import '../lib/src/command.dart';
 
-void main(List<String> args) => command.main(args);
+void main(List<String> args) {
+  runCompiler(args);
+}
