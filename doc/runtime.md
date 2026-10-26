@@ -27,7 +27,9 @@ NoGC 检查的是函数体；分配/GC 角色描述的是调用对外的影响�
 ## 保守检查边界
 
 - 未知间接调用被拒绝，包括没有直接目标证明的原生函数地址调用。
-- 尚未消除的受检转换、动态布尔消费、可能失败的 String/List 操作及 `int.parse` 保留潜在 Dart 异常义务。不能用当前失败路径直接退出进程或不再分配托管内存来豁免语言义务。
+- 尚未消除的受检转换和动态布尔消费按潜在 Dart 异常保守拒绝。不能用当前失败路径直接退出进程或不再分配托管内存来豁免语言义务。
+- 受检 String 索引、切片、字符代码构造，以及带 start 边界的 `startsWith` / `indexOf` / `lastIndexOf` 保留潜在 Dart 失败义务；`int.parse` 同样保留格式失败义务。当前不为具体索引或 start 作范围证明。[String API](https://api.dart.dev/dart-core/String-class.html)、[int.parse](https://api.dart.dev/dart-core/int/parse.html)
+- List 读取、写入、增删、清空和 filled 构造保留可能的范围、类型或固定长度/只读失败义务；即使当前调用使用可变 List，也不能证明整个通用函数体无失败路径。`String.length`、`List.length`、`identical` 和布尔编码不因此被一概拒绝；`endsWith` 遇过长后缀返回 false，没有受检 start 参数。[List API](https://api.dart.dev/dart-core/List-class.html)、[endsWith](https://api.dart.dev/dart-core/String/endsWith.html)
 - 除法和取模需有已知非零常量除数；移位需有非负常量计数，或通过与非负常量掩码做按位与来证明非负。对其他除数和移位计数尚不作一般范围证明。
 - 仍可能分配的整数装箱、对象和 List 创建会被拒绝。常量对象及惰性全局的首次物化路径也参与检查，不能只考虑缓存已热的情况。
 
@@ -44,3 +46,11 @@ NoGC 检查的是函数体；分配/GC 角色描述的是调用对外的影响�
 当前支持范围限原生可执行文件。静态/动态库产物路径尚不装载 core pragma 入口。
 
 实现入口：[frontend.dart](../lib/src/frontend.dart) 的 `fePragmaFlags()`、`feCheckMetadata()`；[nogc.dart](../lib/src/nogc.dart) 的 `checkNoGcSsa()`、`checkNoGcMachine()`。core 声明入口是 [core.dart](../lib/src/std/core.dart)，不等同于完整 SDK core 库。行为验证由 [behavior_test.dart](../test/behavior_test.dart) 的 core/NoGC 程序与拒绝用例，以及 [roots.dart](../test/fixtures/roots.dart) 的 `noGcRoots()` 负责。
+
+## 原始缓冲与构建期间的根
+
+`rtCStringAcquire()` / `rtCStringRelease()` 独占借用可复用的原生四 word 缓冲，不再将无对象头的 C 字符块交给托管 arena；重复借用或无借用释放会终止。`rtStringFromWords()` 在解码完成后释放借用；`rtStringFromCString()` 只读取调用方提供的地址，不取得其所有权。argv 等 OS 内存不是托管对象根。该原生缓冲的所有权持续到进程结束，NoGC 允许它的原始映射。
+
+以 `int` 保存对象地址的运行时函数不能依赖普通整数字段自动成为根。`rtArguments()`、`rtListFilled()`、List 转换/扩容路径、`rtStringConcat()` 及默认运行时路径构造在跨托管分配处使用 mark/push/restore 作用域；来源值和转换后的值分别按其 TypeRef 的 Ref/Tagged 表示登记，Word 不因数值像指针而入根。新 List 的结果在分配 backing 前保活，扩容前保留已装箱的实际元素；退出作用域发生在最后一次需要该对象的分配之后。常量对象物化仍先建立可安全扫描的字段/已初始化前缀，再发布子引用。
+
+这些根记录当前适用于非移动表示的所有权表达；raw 局部地址和派生指针没有重定位后重读协议。尚未开启 GC，构造器 reserve 到安全对象头/引用前缀完成之间也不能任意插入回收点。真实行为测试验证输出、返回后对象图和根作用域恢复，不证明分配中途已发生并通过回收。根枚举与所有权用例归 [roots.dart](../test/fixtures/roots.dart) 的 `runtimeOwnership()`、`builderRoots()`、`constantObjectRoots()`；字符串、List 与命令行行为继续复用 [values.dart](../test/fixtures/values.dart) 和 [behavior_test.dart](../test/behavior_test.dart)。

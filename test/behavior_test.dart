@@ -512,7 +512,10 @@ void main(List<String> args) {
       compileArguments(roots, rootsExecutable),
       native: compiler != null,
     );
-    final rootOutput = run(rootsExecutable, [], native: true).stdout;
+    final rootOutput = run(rootsExecutable, [
+      'alpha',
+      '你好🙂',
+    ], native: true).stdout;
     if (rootOutput != 'roots ok\n') {
       throw StateError(
         'Unexpected native root enumeration output: $rootOutput',

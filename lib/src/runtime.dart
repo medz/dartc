@@ -95,13 +95,32 @@ int rtGrowBuffer(int address, int oldBytes, int newBytes) {
   return result;
 }
 
-int rtCString(int a, int b, int c, int d) {
-  var p = rtAlloc(32);
-  nativeStore64(p, a);
-  nativeStore64(p + 8, b);
-  nativeStore64(p + 16, c);
-  nativeStore64(p + 24, d);
-  return p;
+int rtCStringBytes = 0;
+int rtCStringBusy = 0;
+
+@pragma('dartc:no-gc')
+int rtCStringAcquire(int a, int b, int c, int d) {
+  if (rtCStringBusy != 0) {
+    rtHostExit(70);
+    return 0;
+  }
+  if (rtCStringBytes == 0) rtCStringBytes = rtMap(32);
+  rtCStringBusy = 1;
+  nativeStore64(rtCStringBytes, a);
+  nativeStore64(rtCStringBytes + 8, b);
+  nativeStore64(rtCStringBytes + 16, c);
+  nativeStore64(rtCStringBytes + 24, d);
+  return rtCStringBytes;
+}
+
+@pragma('dartc:no-gc')
+int rtCStringRelease() {
+  if (rtCStringBusy == 0) {
+    rtHostExit(70);
+    return 0;
+  }
+  rtCStringBusy = 0;
+  return 0;
 }
 
 int rtWriteAll(int fd, int p, int length) {
@@ -115,14 +134,14 @@ int rtWriteAll(int fd, int p, int length) {
 }
 
 int rtIoError() {
-  var message = rtCString(0x726f727265204f49, 10, 0, 0);
+  var message = rtCStringAcquire(0x726f727265204f49, 10, 0, 0);
   rtWriteAll(2, message, 9);
   rtHostExit(74);
   return 0;
 }
 
 int rtInitializationError() {
-  var message = rtCString(
+  var message = rtCStringAcquire(
     0x63203a6374726164,
     0x2072616c75637269,
     0x696c616974696e69,
@@ -138,7 +157,7 @@ int rtStringLength(int value) {
 }
 
 int rtStringRangeError() {
-  var message = rtCString(
+  var message = rtCStringAcquire(
     0x73203a6374726164,
     0x617220676e697274,
     0x6f7272652065676e,
@@ -181,6 +200,9 @@ int rtStringConcat(int left, int right) {
   if (a == 0) return right;
   var b = nativeLoad64(right + stringLengthOffset);
   if (b == 0) return left;
+  var mark = rtRootMark();
+  rtRootPush(left, storageRef);
+  rtRootPush(right, storageRef);
   var result = rtStringAllocate(rtObjectDescriptor(left), a + b);
   var i = 0;
   while (i < a) {
@@ -198,6 +220,7 @@ int rtStringConcat(int left, int right) {
     );
     i = i + 1;
   }
+  rtRootRestore(mark);
   return result;
 }
 
@@ -352,7 +375,7 @@ int rtIntParse(int value) {
 }
 
 int rtListRangeError() {
-  var message = rtCString(
+  var message = rtCStringAcquire(
     0x6c203a6374726164,
     0x676e617220747369,
     0xa726f7272652065,
@@ -364,7 +387,7 @@ int rtListRangeError() {
 }
 
 int rtListFixedError() {
-  var message = rtCString(
+  var message = rtCStringAcquire(
     0x66203a6374726164,
     0x73696c2064657869,
     0x6874676e656c2074,
@@ -376,7 +399,7 @@ int rtListFixedError() {
 }
 
 int rtListReadOnlyError() {
-  var message = rtCString(
+  var message = rtCStringAcquire(
     0x69203a6374726164,
     0x656c626174756d6d,
     0xa7473696c20,
@@ -457,7 +480,11 @@ int rtListGet(int list, int index, int expectedType) {
 int rtListSet(int list, int index, int value, int sourceType) {
   var stored = value;
   var actualType = rtListElementType(list);
+  var mark = -1;
   if (actualType != sourceType) {
+    mark = rtRootMark();
+    rtRootPush(list, storageRef);
+    rtRootPushValue(value, sourceType);
     stored = rtValueCast(rtValueBox(value, sourceType), actualType);
   }
   if ((nativeLoad64(list + objectFlagsOffset) & objectListReadOnly) != 0) {
@@ -467,13 +494,18 @@ int rtListSet(int list, int index, int value, int sourceType) {
   if (index < 0 || index >= length) return rtListRangeError();
   var backing = nativeLoad64(list + listBackingOffset);
   nativeStore64(backing + arrayDataOffset + index * 8, stored);
+  if (mark >= 0) rtRootRestore(mark);
   return value;
 }
 
 int rtListAdd(int list, int value, int sourceType) {
   var stored = value;
   var actualType = rtListElementType(list);
+  var mark = -1;
   if (actualType != sourceType) {
+    mark = rtRootMark();
+    rtRootPush(list, storageRef);
+    rtRootPushValue(value, sourceType);
     stored = rtValueCast(rtValueBox(value, sourceType), actualType);
   }
   if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
@@ -483,6 +515,11 @@ int rtListAdd(int list, int value, int sourceType) {
   var capacity = nativeLoad64(list + listCapacityOffset);
   var backing = nativeLoad64(list + listBackingOffset);
   if (length == capacity) {
+    if (mark < 0) {
+      mark = rtRootMark();
+      rtRootPush(list, storageRef);
+    }
+    rtRootPushValue(stored, actualType);
     var nextCapacity = capacity * 2;
     if (nextCapacity == 0) nextCapacity = 8;
     if (backing == 0) {
@@ -503,6 +540,7 @@ int rtListAdd(int list, int value, int sourceType) {
   nativeStore64(backing + arrayDataOffset + length * 8, stored);
   nativeStore64(backing + arrayLengthOffset, length + 1);
   nativeStore64(list + listLengthOffset, length + 1);
+  if (mark >= 0) rtRootRestore(mark);
   return 0;
 }
 
@@ -510,11 +548,17 @@ int rtListRemoveLast(int list, int expectedType) {
   if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
     return rtListFixedError();
   }
+  var mark = -1;
+  if (rtListElementType(list) != expectedType) {
+    mark = rtRootMark();
+    rtRootPush(list, storageRef);
+  }
   var length = nativeLoad64(list + listLengthOffset) - 1;
   var value = rtListGet(list, length, expectedType);
   var backing = nativeLoad64(list + listBackingOffset);
   nativeStore64(backing + arrayLengthOffset, length);
   nativeStore64(list + listLengthOffset, length);
+  if (mark >= 0) rtRootRestore(mark);
   return value;
 }
 
@@ -530,11 +574,17 @@ int rtListClear(int list) {
 
 int rtListFilled(int length, int value, int growable, int typeRef) {
   if (length < 0) return rtListRangeError();
+  var mark = -1;
+  if (length != 0) {
+    mark = rtRootMark();
+    rtRootPushValue(value, rtTypeArgument(typeRef));
+  }
   var result = rtListNew(typeRef);
   if (growable == 0) {
     nativeStore64(result + objectFlagsOffset, objectListFixed);
   }
   if (length == 0) return result;
+  rtRootPush(result, storageRef);
   var backing = rtListBackingNew(typeRef, length);
   var i = 0;
   while (i < length) {
@@ -545,6 +595,7 @@ int rtListFilled(int length, int value, int growable, int typeRef) {
   nativeStore64(result + listCapacityOffset, length);
   nativeStore64(result + listBackingOffset, backing);
   nativeStore64(result + listLengthOffset, length);
+  rtRootRestore(mark);
   return result;
 }
 
@@ -609,7 +660,7 @@ int rtStringFromCodes(int codes) {
   while (i < length) {
     var code = rtListRawGet(codes, i);
     if (code < 0 || code > 1114111) {
-      var message = rtCString(
+      var message = rtCStringAcquire(
         0x69203a6374726164,
         0x632064696c61766e,
         0x7265746361726168,
@@ -695,6 +746,13 @@ int rtStringFromCString(int bytes) {
   var length = 0;
   while (nativeLoad8(bytes + length) != 0) length = length + 1;
   return rtStringDecodeUtf8(bytes, length);
+}
+
+int rtStringFromWords(int a, int b, int c, int d) {
+  var bytes = rtCStringAcquire(a, b, c, d);
+  var result = rtStringFromCString(bytes);
+  rtCStringRelease();
+  return result;
 }
 
 int rtUtf8Bytes = 0;
@@ -790,17 +848,19 @@ int rtPrintInt(int value) {
   return rtPrintString(rtIntToString(value));
 }
 
+@pragma('dartc:no-gc')
 int rtPrintBool(int value) {
   var p = 0;
   var length = 0;
   if (value == 0) {
-    p = rtCString(0x0a65736c6166, 0, 0, 0);
+    p = rtCStringAcquire(0x0a65736c6166, 0, 0, 0);
     length = 6;
   } else {
-    p = rtCString(0x0a65757274, 0, 0, 0);
+    p = rtCStringAcquire(0x0a65757274, 0, 0, 0);
     length = 5;
   }
   rtWriteAll(1, p, length);
+  rtCStringRelease();
   return 0;
 }
 
@@ -845,6 +905,7 @@ int rtPackBytes(int source, int destination, int count) {
   return 0;
 }
 
+@pragma('dartc:no-gc')
 int rtHostWrite(int path, int bytes) {
   var encoded = rtStringEncodeUtf8(path);
   var fd = rtSyscall(5, encoded + 8, 1537, 420, 0, 0, 0);
@@ -877,6 +938,9 @@ int rtArguments(int argc, int argv, int typeRef) {
     rtGlobalRootSet(rtExecutableRoot, executable);
   }
   var result = rtListNew(typeRef);
+  if (argc <= 1) return result;
+  var mark = rtRootMark();
+  rtRootPush(result, storageRef);
   var i = 1;
   while (i < argc) {
     rtListAdd(
@@ -886,25 +950,34 @@ int rtArguments(int argc, int argv, int typeRef) {
     );
     i = i + 1;
   }
+  rtRootRestore(mark);
   return result;
 }
 
 int rtHostStdPath() {
   var executable = rtGlobalRootValue(rtExecutableRoot);
-  var slash = rtStringFromCString(rtCString(47, 0, 0, 0));
+  var slash = rtStringFromWords(47, 0, 0, 0);
   var end = rtStringLastIndexOf(executable, slash, rtStringLength(executable));
   var directory = 0;
   if (end < 0) {
-    directory = rtStringFromCString(rtCString(46, 0, 0, 0));
+    directory = rtStringFromWords(46, 0, 0, 0);
   } else {
     directory = rtStringSubstring(executable, 0, end);
   }
-  var suffix = rtStringFromCString(
-    rtCString(0x2f62696c2f2e2e2f, 0x746e75722f637273, 0x747261642e656d69, 0),
+  var mark = rtRootMark();
+  rtRootPush(directory, storageRef);
+  var suffix = rtStringFromWords(
+    0x2f62696c2f2e2e2f,
+    0x746e75722f637273,
+    0x747261642e656d69,
+    0,
   );
-  return rtStringConcat(directory, suffix);
+  var result = rtStringConcat(directory, suffix);
+  rtRootRestore(mark);
+  return result;
 }
 
+@pragma('dartc:no-gc')
 int rtHostFinish(int path, int outputTarget) {
   var encoded = rtStringEncodeUtf8(path);
   var changed = rtSyscall(15, encoded + 8, 493, 0, 0, 0, 0);
@@ -984,7 +1057,7 @@ int rtObjectSet(int object, int index, int value) {
 }
 
 int rtValueTypeError() {
-  var message = rtCString(
+  var message = rtCStringAcquire(
     0x72203a6374726164,
     0x7420656d69746e75,
     0x6f72726520657079,
@@ -1254,7 +1327,7 @@ int rtValueGe(int left, int right) {
 }
 
 int rtListModificationError() {
-  var message = rtCString(
+  var message = rtCStringAcquire(
     0x63203a6374726164,
     0x6e65727275636e6f,
     0x696669646f6d2074,
@@ -1309,13 +1382,13 @@ int rtValueFormat(int value, int handleType) {
 
 int rtValueFormatCore(int value, int handleType, int kind) {
   if (value == 0) {
-    return rtStringFromCString(rtCString(0x6c6c756e, 0, 0, 0));
+    return rtStringFromWords(0x6c6c756e, 0, 0, 0);
   }
   if (value == valueFalse) {
-    return rtStringFromCString(rtCString(0x65736c6166, 0, 0, 0));
+    return rtStringFromWords(0x65736c6166, 0, 0, 0);
   }
   if (value == valueTrue) {
-    return rtStringFromCString(rtCString(0x65757274, 0, 0, 0));
+    return rtStringFromWords(0x65757274, 0, 0, 0);
   }
   if (kind == typeKindInt) return rtIntToString(rtValueInt(value));
   if (kind == typeKindString) return value;
@@ -1324,18 +1397,16 @@ int rtValueFormatCore(int value, int handleType, int kind) {
     var callback = nativeLoad64(descriptor + descriptorToStringOffset);
     if (callback != 0) return nativeCall1(descriptor + callback, value);
     var name = descriptor + nativeLoad64(descriptor + descriptorNameOffset);
-    var prefix = rtStringFromCString(
-      rtCString(0x65636e6174736e49, 0x2720666f20, 0, 0),
-    );
+    var prefix = rtStringFromWords(0x65636e6174736e49, 0x2720666f20, 0, 0);
     rtRootPush(prefix, storageRef);
-    var suffix = rtStringFromCString(rtCString(39, 0, 0, 0));
+    var suffix = rtStringFromWords(39, 0, 0, 0);
     rtRootPush(suffix, storageRef);
     var head = rtStringConcat(prefix, name);
     rtRootPush(head, storageRef);
     return rtStringConcat(head, suffix);
   }
   var length = rtListLength(value);
-  if (length == 0) return rtStringFromCString(rtCString(0x5d5b, 0, 0, 0));
+  if (length == 0) return rtStringFromWords(0x5d5b, 0, 0, 0);
   if (rtValueActiveRoot == 0) {
     var active = rtListNew(handleType);
     rtValueActiveRoot = rtGlobalRootNew(active, storageRef);
@@ -1345,7 +1416,7 @@ int rtValueFormatCore(int value, int handleType, int kind) {
   var i = 0;
   while (i < depth) {
     if (rtListRawGet(active, i) == value) {
-      return rtStringFromCString(rtCString(0x5d2e2e2e5b, 0, 0, 0));
+      return rtStringFromWords(0x5d2e2e2e5b, 0, 0, 0);
     }
     i = i + 1;
   }
@@ -1353,10 +1424,10 @@ int rtValueFormatCore(int value, int handleType, int kind) {
   rtListAdd(active, value, wordType);
   var parts = rtListNew(handleType);
   rtRootPush(parts, storageRef);
-  var opening = rtStringFromCString(rtCString(91, 0, 0, 0));
+  var opening = rtStringFromWords(91, 0, 0, 0);
   rtRootPush(opening, storageRef);
   rtListAdd(parts, opening, wordType);
-  var separator = rtStringFromCString(rtCString(0x202c, 0, 0, 0));
+  var separator = rtStringFromWords(0x202c, 0, 0, 0);
   rtRootPush(separator, storageRef);
   var elementType = rtListElementType(value);
   i = 0;
@@ -1374,7 +1445,7 @@ int rtValueFormatCore(int value, int handleType, int kind) {
     rtRootRestore(mark);
     i = i + 1;
   }
-  var closing = rtStringFromCString(rtCString(93, 0, 0, 0));
+  var closing = rtStringFromWords(93, 0, 0, 0);
   rtRootPush(closing, storageRef);
   rtListAdd(parts, closing, wordType);
   var result = rtStringFromParts(parts);
@@ -1442,6 +1513,13 @@ int rtRootPush(int value, int kind) {
   nativeStore64(slot + 8, kind);
   rtRootCount = rtRootCount + 1;
   return 0;
+}
+
+@pragma('dartc:no-gc')
+int rtRootPushValue(int value, int type) {
+  var representation = nativeLoad64(type + typeValueRepOffset);
+  if (representation == storageWord) return 0;
+  return rtRootPush(value, representation);
 }
 
 @pragma('dartc:no-gc')

@@ -377,14 +377,74 @@ void noGcRoots(int queue) {
   check(!contains(queue, snapshot(queue), raw));
 }
 
+void sharedFilledEdges(int list, int value, int edges) {
+  var count = listElements(list, edges);
+  check(count == 3);
+  var i = 0;
+  while (i < count) {
+    check(rt.nativeLoad64(edges + i * 8) == value);
+    i++;
+  }
+}
+
+void builderRoots(int queue, int edges) {
+  var mark = rt.rtRootMark();
+  var words = <int>[701];
+  var wordType = rt.nativeLoad64(
+    captureList(words, 1, queue) + abi.listTypeOffset,
+  );
+  var intType = rt.rtTypeArgument(wordType);
+  var objects = <Object?>[];
+  var list = captureList(objects, 0, queue);
+  var objectType = rt.nativeLoad64(list + abi.listTypeOffset);
+  rt.rtListAdd(list, 9223372036854775807, intType);
+  check(objects.length == 1 && rt.rtRootMark() == mark);
+  var full = rt.nativeLoad64(list + abi.listCapacityOffset);
+  var i = 1;
+  while (i < full) {
+    rt.rtListAdd(list, i, intType);
+    i++;
+  }
+  rt.rtListAdd(list, 9223372036854775807, intType);
+  check(objects.length == full + 1 && rt.rtRootMark() == mark);
+  var count = listElements(list, edges);
+  check(count == 2);
+  i = 0;
+  while (i < count) {
+    var boxed = rt.nativeLoad64(edges + i * 8);
+    check(
+      rt.nativeLoad64(
+                rt.rtObjectDescriptor(boxed) + abi.descriptorKindOffset,
+              ) ==
+              abi.descriptorIntBox &&
+          rt.nativeLoad64(boxed + abi.objectHeaderBytes) == 9223372036854775807,
+    );
+    i++;
+  }
+  var wide = rt.nativeLoad64(edges);
+  var refs = <Leaf>[Leaf(702)];
+  var refType = rt.nativeLoad64(
+    captureList(refs, 1, queue) + abi.listTypeOffset,
+  );
+  var child = capture(refs[0], 702, queue);
+  sharedFilledEdges(rt.rtListFilled(3, child, 1, refType), child, edges);
+  check(rt.rtRootMark() == mark);
+  sharedFilledEdges(rt.rtListFilled(3, wide, 1, objectType), wide, edges);
+  check(rt.rtRootMark() == mark);
+  var rawWords = rt.rtListFilled(3, child, 1, wordType);
+  check(listElements(rawWords, edges) == 0 && rt.rtRootMark() == mark);
+  check(refs[0].marker == 702 && objects[0] == 9223372036854775807);
+}
+
 void main(List<String> args) {
-  if (args.isNotEmpty) {
+  if (args.isNotEmpty && args[0] == 'capacity') {
     capacityFailure(Leaf(190));
     return;
   }
   var queue = rt.rtMap(capacity * 8);
   var edges = rt.rtMap(capacity * 8);
   noGcRoots(queue);
+  builderRoots(queue, edges);
   var keep = Leaf(111);
   var count = snapshot(queue);
   check(findMarker(queue, count, 111) != 0);
