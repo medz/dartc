@@ -183,6 +183,7 @@ void touchVoid() {
 }
 
 void valueVoid() => 7;
+void opaqueValue(dynamic value) => value;
 
 class Cell {
   dynamic value;
@@ -269,6 +270,36 @@ void valueContexts() {
   var inferredFilled = List.filled(1, valueVoid());
   List<Object?> inferredFilledView = inferredFilled;
   print(inferredFilledView);
+  conditionTrace = '';
+  print(<Object?>[
+    opaqueValue(argumentValue(1, 9223372036854775807)) as int,
+    opaqueValue(-9223372036854775808) as int,
+    opaqueValue(false) as bool,
+    opaqueValue(null) as Null,
+    opaqueValue('字🙂') as String,
+    (opaqueValue(<int>[8]) as List<int>)[0],
+    (opaqueValue(holder) as Cell).value,
+  ]);
+  print(conditionTrace);
+  var payload = <int>[9];
+  print(identical(payload, opaqueValue(payload) as List<Object>));
+  var dynamicValues = [opaqueValue(1) as dynamic];
+  print(dynamicValues is List<int>);
+  var objectValues = [opaqueValue(1) as Object];
+  print(objectValues is List<int>);
+  var numValues = [opaqueValue(9223372036854775807) as num];
+  print(numValues is List<int>);
+  void castLocal = 3;
+  castLocal as int;
+  var localValues = [castLocal];
+  List<int> localInts = localValues;
+  print(localInts);
+  void nullableLocal = null;
+  nullableLocal as int?;
+  var nullValues = [nullableLocal];
+  List<int?> nullableInts = nullValues;
+  print(nullableInts);
+  print(nullValues is List<int>);
   var nested = <List<Object>>[
     <int>[1],
     <String>['x'],

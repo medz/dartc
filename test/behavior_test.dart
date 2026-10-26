@@ -6,6 +6,13 @@ const program = r'''
 Never neverStops() { while (true) {} }
 Never get neverGetter => neverStops();
 void neverGetterCall() { neverGetter(); }
+void voidCastNever() {
+  void value = 1;
+  value as Never;
+  var values = [value];
+  List<Never> checked = values;
+  print(checked);
+}
 int neverLocalCoalescing(Never value, dynamic fallback) {
   value ??= fallback;
 }
@@ -567,6 +574,8 @@ void main(List<String> args) {
       "void main() { dynamic value = null; print('before'); value as Never; print('after'); }",
       "void main() { List<String> values = <Never>[]; print('before'); values.add('x'); }",
       "void main() { dynamic value = 1; print('before'); value as bool; print('after'); }",
+      'void wrong() => false; void main() { print("before"); wrong() as int; print("after"); }',
+      'void missing() {} void main() { print("before"); missing() as String; print("after"); }',
       'void main() { Object value = <Object>[1]; print(\'before\'); value as List<int>; print(\'after\'); }',
       "void main() { dynamic value = 'wrong'; print('before'); int number = value; print('after'); }",
       "class C { C(); set value(int next) { print('setter'); } } dynamic value() { print('rhs'); return 'wrong'; } void main() { print('before'); C().value = value(); print('after'); }",
@@ -761,6 +770,9 @@ void main() {
       'void main() { dynamic source = 1; int slot = 0; var values = [slot = source]; List<int> typed = values; print(typed); }',
       'void value() { return 7; } void main() { value(); }',
       'void value() {} void main() { dynamic result = value(); print(result); }',
+      'void value() => 7; void main() { print(value() is int); }',
+      'void main() { void value = 7; value as dynamic; print(value); }',
+      'void main() { void value = 7; value as Object?; print(value); }',
       'void value() {} void main() { value() ?? 1; }',
       'void value() {} void main() { dynamic source = 1; var values = [source ?? value()]; print(values[0]); }',
       'void main() { int value; print(1 ?? value); }',

@@ -2174,12 +2174,20 @@ int feLowerValue(AstExpression expression) {
   }
   if (kind == astTypeTest || kind == astTypeCast) {
     var actual = feLowerExpression(expression.children[0]);
-    feConvertValue(actual, tDynamic, expression.children[0].token);
+    if (kind == astTypeCast && actual == tVoid)
+      feBuiltinTyped(bBoxRef, 1, tDynamic);
+    else
+      feConvertValue(actual, tDynamic, expression.children[0].token);
     var target = resolveType(feSymbols, expression.typeArguments[0]);
     if (kind == astTypeCast) {
       feOperand(opTypeCast, target);
       var binding = expression.children[0].binding;
-      if (binding >= 0) flowPromote(feFlow, binding, target);
+      if (binding >= 0) {
+        if (actual == tVoid && !typeIsSubtype(actual, target))
+          feFlow.types[binding] = target;
+        else
+          flowPromote(feFlow, binding, target);
+      }
       return target;
     }
     feOperand(opTypeTest, target);
