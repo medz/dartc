@@ -9,6 +9,7 @@
 | --- | --- | --- | --- |
 | [§21.1 Lexical Rules][lexical]：字符与 token | 部分实现 | token 保留来源和 UTF-16 区间；已有整数、字符串及所支持运算符扫描，完整词法及非法输入边界尚未覆盖。 | [scanner.dart](../lib/src/scanner.dart)；[behavior_test.dart](../test/behavior_test.dart) |
 | [§21.1 Lexical Rules][lexical]：字面量扫描 | 部分实现 | 支持 raw、三引号、转义、插值与相邻字符串；浮点字面量未实现，转义范围和换行边界仍需逐项核对。字面量语义归表达式章节。 | [scanner.dart](../lib/src/scanner.dart)、[parser.dart](../lib/src/parser.dart)；[values.dart](../test/fixtures/values.dart) |
+| [Dart 3.6 数字分隔符][separators] | 部分实现 | 十进制和十六进制整数的数字间允许一个或多个下划线；前缀后、尾部及非数字边界被拒绝。token 保留原 UTF-16 区间，整数文本在扫描边界去除分隔符；浮点和指数形式尚未实现，字符串 `int.parse` 不因该词法特性改变。 | [scanner.dart](../lib/src/scanner.dart)；[values.dart](../test/fixtures/values.dart) 的 `Box.arguments`、`staticContexts`；[behavior_test.dart](../test/behavior_test.dart) 的拒绝用例 |
 | [§21.1.1 Reserved Words][reserved] | 部分实现 | parser 在部分文法位置区分关键字与名称；保留字、内建标识符作为声明名或类型名的限制尚不完整。 | [parser.dart](../lib/src/parser.dart)、[resolve_type.dart](../lib/src/resolve_type.dart)；[behavior_test.dart](../test/behavior_test.dart) |
 | [§21.1.2 Comments][comments] | 部分实现 | 扫描单行和嵌套块注释，并拒绝未闭合块注释；嵌套层次、行结束符等边界缺完整行为覆盖。 | [scanner.dart](../lib/src/scanner.dart)；[behavior_test.dart](../test/behavior_test.dart) 中的库指令注释用例 |
 | [§21.2 Operator Precedence][precedence] | 部分实现 | 已支持运算符按递归下降解析，含 `is`/`as`、`??`、条件与赋值；级联、空感知访问、后缀空断言等文法未实现，不能视为完整运算符表。 | [parser.dart](../lib/src/parser.dart)；[values.dart](../test/fixtures/values.dart)、[behavior_test.dart](../test/behavior_test.dart) |
@@ -33,3 +34,5 @@
 [reserved]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L21801
 [comments]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L21837
 [precedence]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L21864
+
+[separators]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.6/digit-separators/feature-specification.md

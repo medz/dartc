@@ -56,6 +56,43 @@ int scanHex(int c, int offset) {
   scanError('invalid hexadecimal digit', offset);
 }
 
+String scanSeparatedInteger(String source, int start, int end) {
+  var hexadecimal =
+      end - start >= 2 &&
+      source.codeUnitAt(start) == 48 &&
+      (source.codeUnitAt(start + 1) == 120 ||
+          source.codeUnitAt(start + 1) == 88);
+  List<int> units = <int>[];
+  var digitsStart = start;
+  if (hexadecimal) {
+    units.add(48);
+    units.add(source.codeUnitAt(start + 1));
+    digitsStart += 2;
+  }
+  var i = digitsStart;
+  var digit = false;
+  while (i < end) {
+    var c = source.codeUnitAt(i);
+    if (c == 95) {
+      var separator = i;
+      if (!digit) scanError('digit separators must be between digits', i);
+      while (i < end && source.codeUnitAt(i) == 95) i++;
+      if (i == end)
+        scanError('digit separators must be between digits', separator);
+      digit = false;
+      continue;
+    }
+    if (!scanDigit(c) &&
+        (!hexadecimal || !(c >= 65 && c <= 70 || c >= 97 && c <= 102))) {
+      scanError('invalid integer literal with digit separators', i);
+    }
+    units.add(c);
+    digit = true;
+    i++;
+  }
+  return String.fromCharCodes(units);
+}
+
 void scanString(Scanner scanner, bool raw, int tokenStart) {
   var source = scanner.source;
   var tokens = scanner.tokens;
@@ -238,11 +275,20 @@ void scanCode(Scanner scanner, bool interpolation) {
     }
     if (scanDigit(c)) {
       var start = i;
+      var separated = false;
       i++;
-      while (i < source.length &&
-          (scanLetter(source.codeUnitAt(i)) || scanDigit(source.codeUnitAt(i))))
+      while (i < source.length) {
+        var next = source.codeUnitAt(i);
+        if (!scanLetter(next) && !scanDigit(next)) break;
+        if (next == 95) separated = true;
         i++;
-      tokens.add(Token(tokenInteger, source.substring(start, i), start, i, -1));
+      }
+      var text = '';
+      if (separated)
+        text = scanSeparatedInteger(source, start, i);
+      else
+        text = source.substring(start, i);
+      tokens.add(Token(tokenInteger, text, start, i, -1));
       continue;
     }
     var size = 1;

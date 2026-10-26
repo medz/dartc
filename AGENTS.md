@@ -8,6 +8,7 @@
 - Validate inputs at their owning boundary once. Do not add defensive checks or speculative edge-case machinery throughout internal code.
 - Do not add production exports, options, or globals solely for tests. Extend an existing behavior test before adding another.
 - Keep changes within the requested compiler scope. Commit and push completed working changes directly.
+- Give parallel tasks non-overlapping file ownership and integrate verified increments through main. Freeze compiler/runtime inputs during bootstrap and benchmarks; prepare pending changes as local patches when those inputs are in use.
 
 - Follow doc/architecture.md as an evolving target. Self-hosting a subset is a milestone, not completion of the compiler or runtime design.
 - Plan language work from specs/ and update its upstream clause references, implementation gaps, and behavior-test evidence with each language change. Keep language compatibility details there; keep doc/architecture.md focused on compiler and runtime design.

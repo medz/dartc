@@ -841,6 +841,15 @@ void main() {
         ..writeAsStringSync(rejected[i]);
       reject(invalid);
     }
+    for (final literal in ['1_', '0x_FF', '0_xFF']) {
+      final invalid = File('${temporary.path}/separator-$literal.dart')
+        ..writeAsStringSync('void main() { print($literal); }');
+      final expected = Process.runSync(sdk, [invalid.path]);
+      if (expected.exitCode == 0) {
+        throw StateError('Expected SDK rejection for ${invalid.path}.');
+      }
+      reject(invalid, diagnostic: 'digit separator');
+    }
     final core = Directory('${temporary.path}/std/core')
       ..createSync(recursive: true);
     File('${File(standard).parent.path}/std/core/string_buffer.dart')

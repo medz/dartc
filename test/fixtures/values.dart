@@ -21,7 +21,7 @@ class Box {
     bool flag = false,
     String tag = 'tail',
     Object? absent,
-    int wide = -9223372036854775808,
+    int wide = -9_223_372_036_854_775_808,
   }) {
     print(<Object?>[
       value,
@@ -1071,6 +1071,7 @@ void staticContexts(Object? left, Object? right) {
   var words = ['s' + pass('t')];
   List<String> typedWords = words;
   print(typedWords);
+  print(1__000 + 0XF__F);
   Object compound = 1;
   if (compound is int) {
     var changes = [compound += rhs];
@@ -1087,7 +1088,7 @@ void staticContexts(Object? left, Object? right) {
   int quotient = number ~/ 2;
   print(quotient);
   if (number is int) print(number & 1);
-  List<num> owned = <num>[1, 9223372036854775807];
+  List<num> owned = <num>[1, 0x7FFF_FFFF_FFFF_FFFF];
   List<Object> objects = owned;
   objects[0] = 3;
   objects.add(5);
