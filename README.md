@@ -31,11 +31,11 @@ dart run bin/dartc.dart example/hello.dart -o build/hello
 - Basic string and list operations, Unicode strings, interpolation, `print`, and command-line arguments.
 - Relative source imports and exports, prefixes, private names, and `show`/`hide` filters.
 
-The source checkout additionally supports simple classes with fields, field-formal constructors, getters, and directly resolved instance methods, nested typed lists, and lazy top-level initialization. Instance members may be used with or without `this`.
+The source checkout additionally supports simple classes with fields, field-formal constructors, getters, and directly resolved instance methods, nested typed lists, and lazy top-level initialization. Instance members may be used with or without `this`. Basic `dynamic`, `Object`, `null`, and nullable values retain their runtime types across assignments, calls, fields, and list storage. List covariance checks writes against the actual element type. Interpolation and `print` support lists and class `toString` overrides, including cyclic lists.
 
 The `StringBuffer` subset supports empty construction, String arguments to `write` and `writeln`, `clear`, `length`, `isEmpty`, and `toString`. Lists must not change length during `for`/`in` iteration; concurrent modification errors are not yet implemented.
 
-Inheritance, closures, exceptions, async code, and most SDK libraries are not yet supported. Runtime memory is currently reclaimed when the process exits. Self-hosting does not imply full Dart language compatibility.
+Inheritance, general dynamic member calls, closures, exceptions, async code, and most SDK libraries are not yet supported. Failed runtime type checks terminate the process; exception handling and stack unwinding are not implemented. Runtime memory is currently reclaimed when the process exits. Self-hosting does not imply full Dart language compatibility.
 
 ## Build a standalone compiler
 

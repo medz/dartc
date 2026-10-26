@@ -311,7 +311,7 @@ int ssaEffects(int op, int target) {
   }
   if (op == opBuiltin) {
     if (target == bBoxRef || target == bBoxBool) return 0;
-    if (target == bNativeTarget || target == bNativeMetadataAddress) return 0;
+    if (target == bNativeTarget) return 0;
     if (target == bNativeLoad64 ||
         target == bNativeLoad8 ||
         target == bNativeLoad16) {

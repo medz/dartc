@@ -200,12 +200,6 @@ void machineSelectInstruction(
     return;
   }
   if (op == opBuiltin) {
-    if (target == bNativeMetadataAddress) {
-      instructions.add(
-        MachineInstruction(mAddress, output, <int>[], 1, 3, effects),
-      );
-      return;
-    }
     if (target == bBoxRef) {
       instructions.add(
         MachineInstruction(mMove, output, inputs, 0, 0, effects),

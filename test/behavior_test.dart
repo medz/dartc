@@ -521,12 +521,14 @@ void main() {
     final empty = File('${temporary.path}/empty.dart')
       ..writeAsStringSync('void main() {}');
     final invalidRuntimes = [
-      'const int rtAbiVersion = 2; external int nativeLoad64(int pointer, int extra);',
-      'const int rtAbiVersion = 2; external bool nativeTarget();',
-      "const int rtAbiVersion = 2; external int nativeLoad64(int pointer); int invalid() => nativeLoad64('wrong');",
-      'const int rtAbiVersion = 2; external int nativeMetadataAddress(int first, int second);',
+      'const int rtAbiVersion = 3; external int nativeLoad64(int pointer, int extra);',
+      'const int rtAbiVersion = 3; external bool nativeTarget();',
+      "const int rtAbiVersion = 3; external int nativeLoad64(int pointer); int invalid() => nativeLoad64('wrong');",
+      'const int rtAbiVersion = 3; external int nativeMetadataAddress(int first, int second);',
+      'const int rtAbiVersion = 3; external int nativeMetadataAddress();',
+      'const int rtAbiVersion = 2;',
       'const int rtAbiVersion = 1;',
-      'int rtAbiVersion = 2;',
+      'int rtAbiVersion = 3;',
       '',
     ];
     for (var i = 0; i < invalidRuntimes.length; i++) {

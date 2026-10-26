@@ -68,7 +68,6 @@ List<int> feGlobalSources = <int>[];
 List<int> feRawGlobals = <int>[];
 List<GlobalInitializer> feGlobalInitializers = <GlobalInitializer>[];
 int feRuntimeTokens = 0;
-int feMetadataArity = 0;
 List<int> _feLiteralTypes = <int>[];
 List<int> _feLiteralValues = <int>[];
 List<int> feParamStarts = <int>[];
@@ -141,10 +140,9 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
         'unsupported external declaration ' + syntax.name,
       );
     }
-    var validArity = syntax.parameters.length == fePrimitiveArity(primitive);
-    if (primitive == bNativeMetadataAddress)
-      validArity = syntax.parameters.length <= 1;
-    if (owner >= 0 || syntax.getter || !validArity) {
+    if (owner >= 0 ||
+        syntax.getter ||
+        syntax.parameters.length != fePrimitiveArity(primitive)) {
       feAstError(syntax.token, 'invalid primitive signature ' + syntax.name);
     }
     feCheckPrimitiveType(syntax.result);
@@ -156,8 +154,6 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
       feCheckPrimitiveType(syntaxParameter.type);
       parameter++;
     }
-    if (primitive == bNativeMetadataAddress)
-      feMetadataArity = syntax.parameters.length;
     feDeclare(source, syntax.name, symbolBuiltin, primitive, syntax.token);
     return -1;
   }
@@ -652,7 +648,8 @@ int fePrimitive(String name) {
 int fePrimitiveArity(int primitive) {
   if (primitive == bNativeLoad64 ||
       primitive == bNativeLoad8 ||
-      primitive == bNativeLoad16)
+      primitive == bNativeLoad16 ||
+      primitive == bNativeMetadataAddress)
     return 1;
   if (primitive == bNativeStore64 ||
       primitive == bNativeStore8 ||
@@ -661,7 +658,6 @@ int fePrimitiveArity(int primitive) {
     return 2;
   if (primitive == bNativeSyscall) return 7;
   if (primitive == bNativeTarget) return 0;
-  if (primitive == bNativeMetadataAddress) return feMetadataArity;
   return -1;
 }
 
@@ -1098,10 +1094,9 @@ int feLowerBuiltinArguments(AstExpression call, int builtin) {
 
 int feLowerBuiltinCall(AstExpression call, int builtin) {
   if (builtin == bNativeMetadataAddress) {
-    if (call.children.length - 1 != feMetadataArity)
+    if (call.children.length != 2)
       feAstError(call.token, 'primitive argument count');
-    var mask = 1;
-    if (feMetadataArity == 1) mask = feMetadataMask(call.children[1]);
+    var mask = feMetadataMask(call.children[1]);
     if (mask < 1 || mask > 7)
       feAstError(call.token, 'metadata feature mask must be between 1 and 7');
     feOperand(opMetadataAddress, mask);
@@ -2074,7 +2069,6 @@ void parseSource(SourceProgram source) {
   feTokens = source.tokens;
   feAt = 0;
   feRuntimeTokens = source.runtimeTokens;
-  feMetadataArity = 0;
   var paths = <String>[];
   var file = 0;
   while (file < source.files.length) {
@@ -2096,8 +2090,7 @@ void parseSource(SourceProgram source) {
     }
     var global = feSymbols.declarations[marker].target;
     if (_feLiteralTypes[global] != tInt ||
-        (_feLiteralValues[global] != runtimeAbiVersion &&
-            _feLiteralValues[global] != runtimeAbiVersion - 1)) {
+        _feLiteralValues[global] != runtimeAbiVersion) {
       feAstError(
         feGlobalNodes[global].token,
         'runtime rtAbiVersion must be const int ' +
