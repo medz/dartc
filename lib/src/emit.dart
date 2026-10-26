@@ -1,4 +1,5 @@
 import 'arm64.dart';
+import 'abi.dart';
 import 'host.dart';
 import 'ir.dart';
 import 'machine.dart';
@@ -325,7 +326,7 @@ void generateCode(List<MachineFunction> program) {
     i = i + 1;
   }
   if (imageKind == 0) {
-    int main = armFunctionId('main');
+    int main = abiFunction('main', entrySource);
     if (functions[main].parameters == 0) {
       armCall(0);
     } else {
@@ -338,7 +339,7 @@ void generateCode(List<MachineFunction> program) {
       armCall(0);
       armPop(1);
       armPop(0);
-      armCall(armFunctionId('rtArguments'));
+      armCall(runtimeFunction(bArguments));
     }
     armCall(main);
     armConstant(0, 0);

@@ -12,8 +12,9 @@ class Token {
   String text;
   int start;
   int end;
+  int source;
 
-  Token(this.kind, this.text, this.start, this.end);
+  Token(this.kind, this.text, this.start, this.end, this.source);
 }
 
 void scanError(String message, int offset) {
@@ -148,7 +149,7 @@ List<Token> scanTokens(String source) {
       }
       if (!closed) scanError('unterminated string', tokenStart);
       tokens.add(
-        Token(tokenString, String.fromCharCodes(units), tokenStart, i),
+        Token(tokenString, String.fromCharCodes(units), tokenStart, i, -1),
       );
       continue;
     }
@@ -158,7 +159,9 @@ List<Token> scanTokens(String source) {
       while (i < source.length &&
           (scanLetter(source.codeUnitAt(i)) || scanDigit(source.codeUnitAt(i))))
         i++;
-      tokens.add(Token(tokenIdentifier, source.substring(start, i), start, i));
+      tokens.add(
+        Token(tokenIdentifier, source.substring(start, i), start, i, -1),
+      );
       continue;
     }
     if (scanDigit(c)) {
@@ -167,7 +170,7 @@ List<Token> scanTokens(String source) {
       while (i < source.length &&
           (scanLetter(source.codeUnitAt(i)) || scanDigit(source.codeUnitAt(i))))
         i++;
-      tokens.add(Token(tokenInteger, source.substring(start, i), start, i));
+      tokens.add(Token(tokenInteger, source.substring(start, i), start, i, -1));
       continue;
     }
     var size = 1;
@@ -201,9 +204,11 @@ List<Token> scanTokens(String source) {
           two == '--')
         size = 2;
     }
-    tokens.add(Token(tokenSymbol, source.substring(i, i + size), i, i + size));
+    tokens.add(
+      Token(tokenSymbol, source.substring(i, i + size), i, i + size, -1),
+    );
     i += size;
   }
-  tokens.add(Token(tokenEnd, '', source.length, source.length));
+  tokens.add(Token(tokenEnd, '', source.length, source.length, -1));
   return tokens;
 }

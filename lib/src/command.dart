@@ -9,40 +9,7 @@ import 'machine.dart';
 import 'optimize.dart';
 import 'reach.dart';
 import 'ssa.dart';
-
-List<String> sourceFiles = <String>[];
-
-bool sourceSeen(String path) {
-  int i = 0;
-  while (i < sourceFiles.length) {
-    if (sourceFiles[i] == path) return true;
-    i = i + 1;
-  }
-  return false;
-}
-
-String collectSource(String path) {
-  if (sourceSeen(path)) return '';
-  sourceFiles.add(path);
-  String source = hostRead(path);
-  String folder = path.substring(0, path.lastIndexOf('/') + 1);
-  String dependencies = '';
-  int position = 0;
-  while (position < source.length) {
-    int end = source.indexOf('\n', position);
-    if (end < 0) end = source.length;
-    String line = source.substring(position, end);
-    if (line.startsWith("import '")) {
-      int close = line.indexOf("'", 8);
-      String name = line.substring(8, close);
-      if (!name.startsWith('dart:') && name != 'host.dart') {
-        dependencies = dependencies + collectSource(folder + name);
-      }
-    }
-    position = end + 1;
-  }
-  return dependencies + '\n' + source;
-}
+import 'source.dart';
 
 void runCompiler(List<String> args) {
   if (args.length == 0 || args[0] == '--help') {
@@ -120,16 +87,11 @@ void runCompiler(List<String> args) {
     if (imageKind == 2) output = output + '.o';
     if (imageKind == 3) output = output + '.a';
   }
-  sourceFiles = <String>[];
-  String source = collectSource(input);
-  int runtimeLength = 0;
-  if (imageKind == 0) {
-    if (standard == '') standard = hostStdPath();
-    String runtime = hostRead(standard);
-    runtimeLength = runtime.length;
-    source = runtime + '\n' + source;
-  }
-  parseSource(source, runtimeLength);
+  if (imageKind == 0 && standard == '') standard = hostStdPath();
+  String runtime = '';
+  if (imageKind == 0) runtime = standard;
+  SourceProgram sources = collectSources(input, runtime);
+  parseSource(sources);
   if (imageKind != 0) {
     int chosen = -1;
     int i = 0;

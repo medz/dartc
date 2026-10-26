@@ -1,7 +1,9 @@
+import 'ast.dart';
+import 'parser.dart';
 import 'ir.dart';
 import 'types.dart';
 import 'scanner.dart';
-import 'host.dart';
+import 'source.dart';
 
 class GlobalInitializer {
   List<int> code;
@@ -23,6 +25,14 @@ class GlobalInitializer {
   );
 }
 
+SourceProgram feSources = SourceProgram(
+  <SourceFile>[],
+  <int>[],
+  <Token>[],
+  -1,
+  0,
+  '',
+);
 List<Token> feTokens = <Token>[];
 int feAt = 0;
 List<int> feBodies = <int>[];
@@ -61,8 +71,7 @@ List<int> feConstructors = <int>[];
 List<int> feParamFields = <int>[];
 
 void feError(String message) {
-  print('dartc: ' + message + ' at offset ' + feTokens[feAt].start.toString());
-  hostExit(1);
+  sourceError(feSources, feTokens[feAt], message);
 }
 
 String fePeek() {
@@ -635,16 +644,18 @@ void feScopeEnd(int start) {
   }
 }
 
-int fePrecedence(String op) {
-  if (op == '|') return 1;
-  if (op == '^') return 2;
-  if (op == '&') return 3;
-  if (op == '==' || op == '!=') return 4;
-  if (op == '<' || op == '<=' || op == '>' || op == '>=') return 5;
-  if (op == '<<' || op == '>>' || op == '>>>') return 6;
-  if (op == '+' || op == '-') return 7;
-  if (op == '*' || op == '~/' || op == '%') return 8;
-  return 0;
+class FeLvalue {
+  String name;
+  int type;
+  int container;
+  int receiver;
+  int index;
+
+  FeLvalue(this.name, this.type, this.container, this.receiver, this.index);
+}
+
+void feAstError(int token, String message) {
+  sourceError(feSources, feTokens[token], message);
 }
 
 int feBinaryOp(String op) {
@@ -690,24 +701,119 @@ int feCombine(String op, int left, int right) {
   return tInt;
 }
 
-int feArgumentList() {
-  feExpect('(');
-  var count = 0;
-  while (!feIs(')')) {
-    feExpression();
-    count++;
-    if (!feTake(',')) break;
+int feLowerType(AstType syntax) {
+  var name = syntax.name;
+  if (name == 'int' || name == 'dynamic') return tInt;
+  if (name == 'String') return tString;
+  if (name == 'bool') return tBool;
+  if (name == 'void') return tVoid;
+  if (name == 'List') {
+    var element = tInt;
+    if (syntax.arguments.length != 0)
+      element = feLowerType(syntax.arguments[0]);
+    return listType(element);
   }
-  feExpect(')');
-  return count;
+  var owner = feClassId(name);
+  if (owner >= 0) return classType(owner);
+  feAstError(syntax.token, 'unsupported type ' + name);
+  return tInt;
 }
 
-int feNamedCall(String name) {
+int feLowerArguments(AstExpression call, int start) {
+  var argument = start;
+  while (argument < call.children.length) {
+    var expression = call.children[argument];
+    if (expression.kind == astNamedArgument) {
+      feAstError(
+        expression.token,
+        'unsupported named argument ' + expression.text,
+      );
+    }
+    feLowerExpression(expression);
+    argument++;
+  }
+  return call.children.length - start;
+}
+
+int feLowerList(AstExpression expression) {
+  var element = 0;
+  if (expression.typeArguments.length != 0) {
+    element = feLowerType(expression.typeArguments[0]);
+  }
+  var allocation = ir.length;
+  var duplicates = <int>[];
+  feBuiltinTyped(bListNew, 0, listType(element));
+  var item = 0;
+  while (item < expression.children.length) {
+    duplicates.add(ir.length);
+    feDuplicate(listType(element));
+    var type = feLowerExpression(expression.children[item]);
+    if (element == 0) element = type;
+    feBuiltin(bListAdd, 2);
+    feEmit(opPop);
+    item++;
+  }
+  if (element == 0) element = tInt;
+  var type = listType(element);
+  irTypes[allocation] = type;
+  for (var i = 0; i < duplicates.length; i++) irTypes[duplicates[i]] = type;
+  return type;
+}
+
+int feLowerPointerBinding(AstExpression call) {
+  if (imageKind == 0 || feInitializingGlobal < 0) {
+    feAstError(
+      call.token,
+      'FFI callback bindings require library output and a top-level binding',
+    );
+  }
+  var callee = call.children[0];
+  if (callee.typeArguments.length != 1 || call.children.length < 2) {
+    feAstError(call.token, 'FFI callback requires a signature and function');
+  }
+  var signature = callee.typeArguments[0].name;
+  var native = -1;
+  for (var i = 0; i < feNativeNames.length; i++) {
+    if (feNativeNames[i] == signature) native = i;
+  }
+  if (native < 0) feAstError(call.token, 'unknown FFI signature ' + signature);
+  var implementation = call.children[1];
+  if (implementation.kind != astName) {
+    feAstError(
+      implementation.token,
+      'FFI callback requires a function declaration',
+    );
+  }
+  var function = feFindFunction(implementation.text);
+  if (function < 0) {
+    feAstError(
+      implementation.token,
+      'unknown callback function ' + implementation.text,
+    );
+  }
+  if (functions[function].parameters != feNativeParams[native]) {
+    feAstError(
+      call.token,
+      'FFI parameter count does not match ' + implementation.text,
+    );
+  }
+  if (call.children.length > 2) {
+    feLowerExpression(call.children[2]);
+    feEmit(opPop);
+  }
+  exportNames.add(globalNames[feInitializingGlobal]);
+  exportFunctions.add(function);
+  exportParameters.add(feNativeParams[native]);
+  feInteger(0, tPointer);
+  return tPointer;
+}
+
+int feLowerBuiltinCall(AstExpression call) {
+  var name = call.children[0].text;
   if (name == 'print') {
-    feExpect('(');
-    var type = feExpression();
-    feTake(',');
-    feExpect(')');
+    if (call.children.length != 2)
+      feAstError(call.token, 'argument count for print');
+    var type = feLowerExpression(call.children[1]);
     if (type == tString)
       feBuiltin(bPrintString, 1);
     else if (type == tBool)
@@ -738,546 +844,448 @@ int feNamedCall(String name) {
     builtin = bHostStdPath;
     result = tString;
   }
+  if (name == 'hostTarget') builtin = bHostTarget;
   if (name == 'nativeLoad64') builtin = bNativeLoad64;
+  if (name == 'nativeLoad8') builtin = bNativeLoad8;
+  if (name == 'nativeLoad16') builtin = bNativeLoad16;
   if (name == 'nativeStore64') {
     builtin = bNativeStore64;
     result = tVoid;
   }
-  if (name == 'nativeLoad8') builtin = bNativeLoad8;
-  if (name == 'nativeLoad16') builtin = bNativeLoad16;
-  if (name == 'nativeStore16') builtin = bNativeStore16;
   if (name == 'nativeStore8') {
     builtin = bNativeStore8;
     result = tVoid;
   }
+  if (name == 'nativeStore16') builtin = bNativeStore16;
   if (name == 'nativeSyscall') builtin = bNativeSyscall;
   if (name == 'nativeTarget') builtin = bNativeTarget;
-  if (name == 'hostTarget') builtin = bHostTarget;
-  var count = feArgumentList();
-  if (builtin != 0) {
-    feBuiltin(builtin, count);
-    return result;
+  if (builtin == 0) feAstError(call.token, 'unknown function ' + name);
+  var count = feLowerArguments(call, 1);
+  feBuiltin(builtin, count);
+  return result;
+}
+
+int feLowerStaticCall(AstExpression call) {
+  var callee = call.children[0];
+  var receiver = callee.children[0];
+  var name = receiver.text;
+  var member = callee.text;
+  if (name == 'Pointer' && member == 'fromFunction') {
+    return feLowerPointerBinding(call);
   }
-  var function = feFindFunction(name);
-  if (function < 0) {
-    feError('unknown function ' + name);
+  if (name == 'List' && member == 'filled') {
+    if (call.children.length < 3) {
+      feAstError(call.token, 'List.filled requires length and value');
+    }
+    var element = tInt;
+    if (receiver.typeArguments.length != 0) {
+      element = feLowerType(receiver.typeArguments[0]);
+    }
+    feLowerExpression(call.children[1]);
+    var valueType = feLowerExpression(call.children[2]);
+    var argument = 3;
+    while (argument < call.children.length) {
+      var named = call.children[argument];
+      if (named.kind != astNamedArgument || named.text != 'growable') {
+        feAstError(named.token, 'unsupported List.filled argument');
+      }
+      feLowerExpression(named.children[0]);
+      feEmit(opPop);
+      argument++;
+    }
+    if (element == tInt && valueType != tInt) element = valueType;
+    var type = listType(element);
+    feBuiltinTyped(bListFilled, 2, type);
+    return type;
+  }
+  if (name == 'String' && member == 'fromCharCodes') {
+    var count = feLowerArguments(call, 1);
+    feBuiltin(bStringFromCodes, count);
+    return tString;
+  }
+  if (name == 'int' && member == 'parse') {
+    var count = feLowerArguments(call, 1);
+    feBuiltin(bIntParse, count);
     return tInt;
   }
-  if (functions[function].parameters != count)
-    feError('argument count for ' + name);
-  feCall(function, count);
-  return functions[function].result;
+  feAstError(call.token, 'unsupported static call ' + name + '.' + member);
+  return tInt;
 }
 
-int feListLiteral(int element) {
-  feExpect('[');
-  var allocation = ir.length;
-  var duplicates = <int>[];
-  feBuiltinTyped(bListNew, 0, listType(element));
-  while (!feIs(']')) {
-    duplicates.add(ir.length);
-    feDuplicate(listType(element));
-    var valueType = feExpression();
-    if (element == 0) element = valueType;
-    feBuiltin(bListAdd, 2);
-    feEmit(opPop);
-    if (!feTake(',')) break;
-  }
-  feExpect(']');
-  if (element == 0) element = tInt;
-  var type = listType(element);
-  irTypes[allocation] = type;
-  for (var i = 0; i < duplicates.length; i++) irTypes[duplicates[i]] = type;
-  return type;
-}
-
-int fePointerFromFunction() {
-  if (imageKind == 0 || feInitializingGlobal < 0) {
-    feError(
-      'FFI callback bindings require library output and a top-level binding',
-    );
-  }
-  feExpect('.');
-  feExpect('fromFunction');
-  feExpect('<');
-  var nativeName = feName();
-  feExpect('>');
-  var native = -1;
-  for (var i = 0; i < feNativeNames.length; i++) {
-    if (feNativeNames[i] == nativeName) native = i;
-  }
-  if (native < 0) feError('unknown FFI signature ' + nativeName);
-  feExpect('(');
-  var implementation = feName();
-  var function = feFindFunction(implementation);
-  if (function < 0) feError('unknown callback function ' + implementation);
-  if (functions[function].parameters != feNativeParams[native]) {
-    feError('FFI parameter count does not match ' + implementation);
-  }
-  if (feTake(',') && !feIs(')')) {
-    feExpression();
-    feEmit(opPop);
-    feTake(',');
-  }
-  feExpect(')');
-  exportNames.add(globalNames[feInitializingGlobal]);
-  exportFunctions.add(function);
-  exportParameters.add(feNativeParams[native]);
-  feInteger(0, tPointer);
-  return tPointer;
-}
-
-int fePrimary() {
-  var type = tInt;
-  if (feTokens[feAt].kind == tokenInteger) {
-    feOperand(opInt, int.parse(fePeek()));
-    feAt++;
-  } else if (feTokens[feAt].kind == tokenString) {
-    var value = fePeek();
-    feAt++;
-    while (feTokens[feAt].kind == tokenString) {
-      value = value + fePeek();
-      feAt++;
+int feLowerMemberCall(AstExpression call) {
+  var callee = call.children[0];
+  var receiver = callee.children[0];
+  var member = callee.text;
+  var type = feLowerExpression(receiver);
+  if (feClassType(type)) {
+    var owner = typeArgument(type);
+    var function = feFindFunction(feClassNames[owner] + '.' + member);
+    if (function < 0) feAstError(call.token, 'unknown method ' + member);
+    var count = feLowerArguments(call, 1) + 1;
+    if (functions[function].parameters != count) {
+      feAstError(call.token, 'method argument count for ' + member);
     }
-    feOperand(opString, feString(value));
-    type = tString;
-  } else if (feTake('true')) {
-    feInteger(1, tBool);
-    type = tBool;
-  } else if (feTake('false') || feTake('null')) {
-    feInteger(0, tBool);
-    type = tBool;
-  } else if (feTake('(')) {
-    type = feExpression();
-    feExpect(')');
-  } else if (feIs('[')) {
-    type = feListLiteral(0);
-  } else if (feTake('<')) {
-    var element = feType();
-    feTypeClose();
-    type = feListLiteral(element);
-  } else {
-    var name = feName();
+    feCall(function, count);
+    return functions[function].result;
+  }
+  if (member == 'toString') {
+    if (call.children.length != 1)
+      feAstError(call.token, 'argument count for toString');
+    if (type != tString) feBuiltin(bIntToString, 1);
+    return tString;
+  }
+  var count = feLowerArguments(call, 1);
+  if (typeIsList(type)) {
+    if (member == 'add') {
+      feBuiltin(bListAdd, count + 1);
+      return tVoid;
+    }
+    if (member == 'removeLast') {
+      var element = typeArgument(type);
+      feBuiltinTyped(bListRemoveLast, count + 1, element);
+      return element;
+    }
+    if (member == 'clear') {
+      feBuiltin(bListClear, count + 1);
+      return tVoid;
+    }
+    feAstError(call.token, 'unsupported List method ' + member);
+  }
+  if (type == tString) {
+    if (member == 'codeUnitAt') {
+      feBuiltin(bStringCodeUnit, count + 1);
+      return tInt;
+    }
+    if (member == 'substring') {
+      if (count == 1) feOperand(opInt, -1);
+      feBuiltin(bStringSubstring, 3);
+      return tString;
+    }
+    if (member == 'indexOf' || member == 'lastIndexOf') {
+      if (count == 1) {
+        if (member == 'indexOf')
+          feOperand(opInt, 0);
+        else
+          feOperand(opInt, -1);
+      }
+      if (member == 'indexOf')
+        feBuiltin(bStringIndexOf, 3);
+      else
+        feBuiltin(bStringLastIndexOf, 3);
+      return tInt;
+    }
+    if (member == 'startsWith') {
+      if (count == 1) feOperand(opInt, 0);
+      feBuiltin(bStringStartsWith, 3);
+      return tBool;
+    }
+    if (member == 'endsWith') {
+      feBuiltin(bStringEndsWith, count + 1);
+      return tBool;
+    }
+    feAstError(call.token, 'unsupported String method ' + member);
+  }
+  feAstError(call.token, 'unsupported member call ' + member);
+  return tInt;
+}
+
+int feLowerCall(AstExpression call) {
+  var callee = call.children[0];
+  if (callee.kind == astName) {
+    var name = callee.text;
+    var function = feFindFunction(name);
+    if (function >= 0) {
+      var count = feLowerArguments(call, 1);
+      if (functions[function].parameters != count) {
+        feAstError(call.token, 'argument count for ' + name);
+      }
+      feCall(function, count);
+      return functions[function].result;
+    }
     var owner = feClassId(name);
-    if (owner >= 0 && feIs('(')) {
+    if (owner >= 0) {
       feOperand(opDescriptor, owner);
       feBuiltinTyped(bObjectNew, 1, classType(owner));
-      var count = feArgumentList();
+      var count = feLowerArguments(call, 1);
       var constructor = feClassConstructors[owner];
       if (constructor >= 0) {
-        if (functions[constructor].parameters != count + 1)
-          feError('constructor argument count for ' + name);
+        if (functions[constructor].parameters != count + 1) {
+          feAstError(call.token, 'constructor argument count for ' + name);
+        }
         feCall(constructor, count + 1);
       } else if (count != 0) {
-        feError('constructor argument count for ' + name);
+        feAstError(call.token, 'constructor argument count for ' + name);
       }
-      type = classType(owner);
-    } else if (name == 'Pointer' && feIs('.')) {
-      type = fePointerFromFunction();
-    } else if ((name == 'List' || name == 'String' || name == 'int') &&
-        (feIs('.') || feIs('<'))) {
-      var element = tInt;
-      if (feTake('<')) {
-        element = feType();
-        feTypeClose();
-      }
-      feExpect('.');
-      var member = feName();
-      if (name == 'List' && member == 'filled') {
-        feExpect('(');
-        feExpression();
-        feExpect(',');
-        var valueType = feExpression();
-        if (feTake(',') && !feIs(')')) {
-          feExpect('growable');
-          feExpect(':');
-          feExpression();
-          feEmit(opPop);
-          feTake(',');
-        }
-        feExpect(')');
-        type = listType(element);
-        if (element == tInt && valueType != tInt) type = listType(valueType);
-        feBuiltinTyped(bListFilled, 2, type);
-      } else if (name == 'String' && member == 'fromCharCodes') {
-        var count = feArgumentList();
-        feBuiltin(bStringFromCodes, count);
-        type = tString;
-      } else if (name == 'int' && member == 'parse') {
-        var count = feArgumentList();
-        feBuiltin(bIntParse, count);
-        type = tInt;
-      } else {
-        feError('unsupported static call ' + name + '.' + member);
-      }
-    } else if (feIs('(')) {
-      type = feNamedCall(name);
-    } else {
-      type = feVariableType(name);
-      feLoad(name);
+      return classType(owner);
     }
+    return feLowerBuiltinCall(call);
   }
-  while (true) {
-    if (feTake('[')) {
-      feExpression();
-      feExpect(']');
-      if (type == tString) {
-        feDuplicate(tInt);
-        feOperand(opInt, 1);
-        feEmit(opAdd);
-        feBuiltin(bStringSubstring, 3);
-        type = tString;
-      } else {
-        type = typeArgument(type);
-        feBuiltinTyped(bListGet, 2, type);
-      }
-    } else if (feTake('.')) {
-      var member = feName();
-      if (feClassType(type)) {
-        var owner = typeArgument(type);
-        if (feIs('(')) {
-          var function = feFindFunction(feClassNames[owner] + '.' + member);
-          if (function < 0) feError('unknown method ' + member);
-          var count = feArgumentList() + 1;
-          if (functions[function].parameters != count)
-            feError('method argument count for ' + member);
-          feCall(function, count);
-          type = functions[function].result;
-        } else {
-          var field = feField(owner, member);
-          feOperand(opInt, feFieldIndices[field]);
-          type = feFieldTypes[field];
-          feBuiltinTyped(bObjectGet, 2, type);
-        }
-      } else if (member == 'length' ||
-          member == 'isEmpty' ||
-          member == 'isNotEmpty') {
-        if (type == tString)
-          feBuiltin(bStringLength, 1);
-        else
-          feBuiltin(bListLength, 1);
-        type = tInt;
-        if (member != 'length') {
-          feOperand(opInt, 0);
-          if (member == 'isEmpty')
-            feEmit(opEq);
-          else
-            feEmit(opNe);
-          type = tBool;
-        }
-      } else if (member == 'first' || member == 'last') {
-        if (member == 'first')
-          feOperand(opInt, 0);
-        else {
-          feDuplicate(type);
-          feBuiltin(bListLength, 1);
-          feOperand(opInt, 1);
-          feEmit(opSub);
-        }
-        type = typeArgument(type);
-        feBuiltinTyped(bListGet, 2, type);
-      } else if (member == 'toString') {
-        feExpect('(');
-        feExpect(')');
-        if (type != tString) feBuiltin(bIntToString, 1);
-        type = tString;
-      } else if (typeIsList(type)) {
-        var count = feArgumentList();
-        if (member == 'add') {
-          feBuiltin(bListAdd, count + 1);
-          type = tVoid;
-        } else if (member == 'removeLast') {
-          type = typeArgument(type);
-          feBuiltinTyped(bListRemoveLast, count + 1, type);
-        } else if (member == 'clear') {
-          feBuiltin(bListClear, count + 1);
-          type = tVoid;
-        } else {
-          feError('unsupported List method ' + member);
-        }
-      } else if (type == tString) {
-        var count = feArgumentList();
-        if (member == 'codeUnitAt') {
-          feBuiltin(bStringCodeUnit, count + 1);
-          type = tInt;
-        } else if (member == 'substring') {
-          if (count == 1) feOperand(opInt, -1);
-          feBuiltin(bStringSubstring, 3);
-          type = tString;
-        } else if (member == 'indexOf' || member == 'lastIndexOf') {
-          if (count == 1) {
-            if (member == 'indexOf')
-              feOperand(opInt, 0);
-            else
-              feOperand(opInt, -1);
-          }
-          if (member == 'indexOf')
-            feBuiltin(bStringIndexOf, 3);
-          else
-            feBuiltin(bStringLastIndexOf, 3);
-          type = tInt;
-        } else if (member == 'startsWith') {
-          if (count == 1) feOperand(opInt, 0);
-          feBuiltin(bStringStartsWith, 3);
-          type = tBool;
-        } else if (member == 'endsWith') {
-          feBuiltin(bStringEndsWith, count + 1);
-          type = tBool;
-        } else {
-          feError('unsupported String method ' + member);
-        }
-      } else {
-        feError('unsupported member ' + member);
-      }
-    } else {
-      break;
+  if (callee.kind == astMember) {
+    var receiver = callee.children[0];
+    if (receiver.kind == astName &&
+        feLocal(receiver.text) < 0 &&
+        feGlobal(receiver.text) < 0 &&
+        feClassId(receiver.text) < 0 &&
+        (receiver.text == 'List' ||
+            receiver.text == 'String' ||
+            receiver.text == 'int' ||
+            receiver.text == 'Pointer')) {
+      return feLowerStaticCall(call);
     }
+    return feLowerMemberCall(call);
   }
-  return type;
+  feAstError(call.token, 'unsupported call target');
+  return tInt;
 }
 
-int feUnary() {
-  if (feTake('-')) {
-    feUnary();
-    feEmit(opNeg);
+int feLowerMember(AstExpression expression) {
+  var type = feLowerExpression(expression.children[0]);
+  var member = expression.text;
+  if (feClassType(type)) {
+    var field = feField(typeArgument(type), member);
+    feOperand(opInt, feFieldIndices[field]);
+    var result = feFieldTypes[field];
+    feBuiltinTyped(bObjectGet, 2, result);
+    return result;
+  }
+  if (member == 'length' || member == 'isEmpty' || member == 'isNotEmpty') {
+    if (type == tString)
+      feBuiltin(bStringLength, 1);
+    else
+      feBuiltin(bListLength, 1);
+    if (member != 'length') {
+      feOperand(opInt, 0);
+      if (member == 'isEmpty')
+        feEmit(opEq);
+      else
+        feEmit(opNe);
+      return tBool;
+    }
     return tInt;
   }
-  if (feTake('+')) return feUnary();
-  if (feTake('!')) {
-    feUnary();
-    feEmit(opNot);
-    return tBool;
+  if (typeIsList(type) && (member == 'first' || member == 'last')) {
+    if (member == 'first')
+      feOperand(opInt, 0);
+    else {
+      feDuplicate(type);
+      feBuiltin(bListLength, 1);
+      feOperand(opInt, 1);
+      feEmit(opSub);
+    }
+    var element = typeArgument(type);
+    feBuiltinTyped(bListGet, 2, element);
+    return element;
   }
-  if (feTake('~')) {
-    feUnary();
-    feEmit(opBitNot);
-    return tInt;
+  feAstError(expression.token, 'unsupported property ' + member);
+  return tInt;
+}
+
+FeLvalue feLowerLvalue(AstExpression expression) {
+  if (expression.kind == astName) {
+    return FeLvalue(
+      expression.text,
+      feVariableType(expression.text),
+      0,
+      -1,
+      -1,
+    );
   }
-  if (feTake('++') || feTake('--')) {
-    var op = feTokens[feAt - 1].text;
-    var name = feName();
-    feLoad(name);
+  var receiverType = feLowerExpression(expression.children[0]);
+  var container = 1;
+  var type = tInt;
+  if (expression.kind == astIndex) {
+    feLowerExpression(expression.children[1]);
+    type = typeArgument(receiverType);
+  } else if (expression.kind == astMember) {
+    var field = feField(typeArgument(receiverType), expression.text);
+    feOperand(opInt, feFieldIndices[field]);
+    type = feFieldTypes[field];
+    container = 2;
+  } else {
+    feAstError(expression.token, 'expression is not assignable');
+  }
+  var index = feTemp(tInt);
+  feOperand(opStoreLocal, index);
+  var receiver = feTemp(receiverType);
+  feOperand(opStoreLocal, receiver);
+  return FeLvalue('', type, container, receiver, index);
+}
+
+void feReadLvalue(FeLvalue target) {
+  if (target.container == 0) {
+    feLoad(target.name);
+    return;
+  }
+  feOperand(opLoadLocal, target.receiver);
+  feOperand(opLoadLocal, target.index);
+  if (target.container == 1)
+    feBuiltinTyped(bListGet, 2, target.type);
+  else
+    feBuiltinTyped(bObjectGet, 2, target.type);
+}
+
+void feWriteLvalue(FeLvalue target) {
+  if (target.container == 0) {
+    feDuplicate(target.type);
+    feStore(target.name);
+    return;
+  }
+  var value = feTemp(target.type);
+  feOperand(opStoreLocal, value);
+  feOperand(opLoadLocal, target.receiver);
+  feOperand(opLoadLocal, target.index);
+  feOperand(opLoadLocal, value);
+  if (target.container == 1)
+    feBuiltinTyped(bListSet, 3, target.type);
+  else
+    feBuiltinTyped(bObjectSet, 3, target.type);
+}
+
+int feLowerAssignment(AstExpression expression, bool postfix) {
+  var target = feLowerLvalue(expression.children[0]);
+  var op = expression.text;
+  var increment = op == '++' || op == '--';
+  var previous = -1;
+  if (op != '=') {
+    feReadLvalue(target);
+    if (postfix) {
+      previous = feTemp(target.type);
+      feDuplicate(target.type);
+      feOperand(opStoreLocal, previous);
+    }
+  }
+  if (increment) {
     feOperand(opInt, 1);
     if (op == '++')
       feEmit(opAdd);
     else
       feEmit(opSub);
-    feDuplicate(tInt);
-    feStore(name);
+  } else {
+    var right = feLowerExpression(expression.children[1]);
+    if (op != '=')
+      feCombine(op.substring(0, op.length - 1), target.type, right);
+  }
+  feWriteLvalue(target);
+  if (postfix) {
+    feEmit(opPop);
+    feOperand(opLoadLocal, previous);
+  }
+  return target.type;
+}
+
+int feLowerExpression(AstExpression expression) {
+  var kind = expression.kind;
+  if (kind == astInteger) {
+    feOperand(opInt, int.parse(expression.text));
     return tInt;
   }
-  return fePrimary();
-}
-
-int feBinary(int minimum) {
-  var type = feUnary();
-  while (feTokens[feAt].kind != tokenString &&
-      fePrecedence(fePeek()) >= minimum) {
-    var op = fePeek();
-    var precedence = fePrecedence(op);
-    feAt++;
-    var right = feBinary(precedence + 1);
-    type = feCombine(op, type, right);
+  if (kind == astString) {
+    feOperand(opString, feString(expression.text));
+    return tString;
   }
-  return type;
-}
-
-int feAnd() {
-  var type = feBinary(1);
-  while (feTake('&&')) {
-    feDuplicate(tBool);
-    var end = feJump(opJumpFalse);
-    feEmit(opPop);
-    feBinary(1);
-    fePatch(end, ir.length);
-    type = tBool;
+  if (kind == astBoolean || kind == astNull) {
+    var value = 0;
+    if (expression.text == 'true') value = 1;
+    feInteger(value, tBool);
+    return tBool;
   }
-  return type;
-}
-
-int feOr() {
-  var type = feAnd();
-  while (feTake('||')) {
-    feDuplicate(tBool);
-    var rhs = feJump(opJumpFalse);
-    var end = feJump(opJump);
-    fePatch(rhs, ir.length);
-    feEmit(opPop);
-    feAnd();
-    fePatch(end, ir.length);
-    type = tBool;
+  if (kind == astName) {
+    var type = feVariableType(expression.text);
+    feLoad(expression.text);
+    return type;
   }
-  return type;
-}
-
-bool feAssignmentOp(String op) {
-  return op == '=' ||
-      op == '+=' ||
-      op == '-=' ||
-      op == '*=' ||
-      op == '~/=' ||
-      op == '%=' ||
-      op == '&=' ||
-      op == '|=' ||
-      op == '^=' ||
-      op == '<<=' ||
-      op == '>>=' ||
-      op == '>>>=' ||
-      op == '++' ||
-      op == '--';
-}
-
-int feLvalueEnd() {
-  if (feTokens[feAt].kind != tokenIdentifier) return -1;
-  var end = feAt + 1;
-  while (true) {
-    if (feTokens[end].text == '[') {
-      var depth = 1;
-      end++;
-      while (depth > 0 && feTokens[end].text != '') {
-        if (feTokens[end].kind != tokenString) {
-          if (feTokens[end].text == '[') depth++;
-          if (feTokens[end].text == ']') depth--;
-        }
-        end++;
+  if (kind == astList) return feLowerList(expression);
+  if (kind == astMember) return feLowerMember(expression);
+  if (kind == astCall) return feLowerCall(expression);
+  if (kind == astIndex) {
+    var receiver = feLowerExpression(expression.children[0]);
+    feLowerExpression(expression.children[1]);
+    if (receiver == tString) {
+      feDuplicate(tInt);
+      feOperand(opInt, 1);
+      feEmit(opAdd);
+      feBuiltin(bStringSubstring, 3);
+      return tString;
+    }
+    var type = typeArgument(receiver);
+    feBuiltinTyped(bListGet, 2, type);
+    return type;
+  }
+  if (kind == astAssignment || kind == astPostfix) {
+    return feLowerAssignment(expression, kind == astPostfix);
+  }
+  if (kind == astUnary) {
+    var op = expression.text;
+    if (op == '++' || op == '--') return feLowerAssignment(expression, false);
+    var type = feLowerExpression(expression.children[0]);
+    if (op == '+') return type;
+    if (op == '-') {
+      feEmit(opNeg);
+      return tInt;
+    }
+    if (op == '~') {
+      feEmit(opBitNot);
+      return tInt;
+    }
+    feEmit(opNot);
+    return tBool;
+  }
+  if (kind == astBinary) {
+    var left = feLowerExpression(expression.children[0]);
+    var op = expression.text;
+    if (op == '&&' || op == '||') {
+      feDuplicate(tBool);
+      var otherwise = feJump(opJumpFalse);
+      if (op == '&&') {
+        feEmit(opPop);
+        feLowerExpression(expression.children[1]);
+        fePatch(otherwise, ir.length);
+      } else {
+        var done = feJump(opJump);
+        fePatch(otherwise, ir.length);
+        feEmit(opPop);
+        feLowerExpression(expression.children[1]);
+        fePatch(done, ir.length);
       }
-    } else if (feTokens[end].text == '.' &&
-        feTokens[end + 1].kind == tokenIdentifier) {
-      end += 2;
-    } else
-      break;
+      return tBool;
+    }
+    var right = feLowerExpression(expression.children[1]);
+    return feCombine(op, left, right);
   }
-  if (feAssignmentOp(feTokens[end].text)) return end;
-  return -1;
+  if (kind == astConditional) {
+    feLowerExpression(expression.children[0]);
+    var otherwise = feJump(opJumpFalse);
+    var type = feLowerExpression(expression.children[1]);
+    var done = feJump(opJump);
+    fePatch(otherwise, ir.length);
+    feLowerExpression(expression.children[2]);
+    fePatch(done, ir.length);
+    return type;
+  }
+  feAstError(expression.token, 'unsupported expression');
+  return tInt;
 }
 
 int feExpression() {
-  var end = feLvalueEnd();
-  if (end >= 0) {
-    var name = feName();
-    var type = feVariableType(name);
-    var container = 0;
-    var receiver = -1;
-    var index = -1;
-    if (feAt < end) {
-      feLoad(name);
-      while (feAt < end) {
-        var receiverType = type;
-        var current = 1;
-        if (feTake('[')) {
-          feExpression();
-          feExpect(']');
-          type = typeArgument(type);
-        } else {
-          feExpect('.');
-          var field = feField(typeArgument(type), feName());
-          feOperand(opInt, feFieldIndices[field]);
-          type = feFieldTypes[field];
-          current = 2;
-        }
-        if (feAt == end) {
-          container = current;
-          index = feTemp(tInt);
-          feOperand(opStoreLocal, index);
-          receiver = feTemp(receiverType);
-          feOperand(opStoreLocal, receiver);
-        } else {
-          if (current == 1)
-            feBuiltinTyped(bListGet, 2, type);
-          else
-            feBuiltinTyped(bObjectGet, 2, type);
-        }
-      }
-    }
-    var op = fePeek();
-    feAt++;
-    if (op != '=') {
-      if (container != 0) {
-        feOperand(opLoadLocal, receiver);
-        feOperand(opLoadLocal, index);
-        if (container == 1)
-          feBuiltinTyped(bListGet, 2, type);
-        else
-          feBuiltinTyped(bObjectGet, 2, type);
-      } else {
-        feLoad(name);
-      }
-    }
-    var postfix = op == '++' || op == '--';
-    var previous = -1;
-    if (postfix) {
-      previous = feTemp(type);
-      feDuplicate(type);
-      feOperand(opStoreLocal, previous);
-      feOperand(opInt, 1);
-      if (op == '++')
-        feEmit(opAdd);
-      else
-        feEmit(opSub);
-    } else {
-      var right = feExpression();
-      if (op != '=') feCombine(op.substring(0, op.length - 1), type, right);
-    }
-    if (container != 0) {
-      var value = feTemp(type);
-      feOperand(opStoreLocal, value);
-      feOperand(opLoadLocal, receiver);
-      feOperand(opLoadLocal, index);
-      feOperand(opLoadLocal, value);
-      if (container == 1)
-        feBuiltinTyped(bListSet, 3, type);
-      else
-        feBuiltinTyped(bObjectSet, 3, type);
-    } else {
-      feDuplicate(type);
-      feStore(name);
-    }
-    if (postfix) {
-      feEmit(opPop);
-      feOperand(opLoadLocal, previous);
-    }
-    return type;
-  }
-  var type = feOr();
-  if (feTake('?')) {
-    var otherwise = feJump(opJumpFalse);
-    var thenType = feExpression();
-    feExpect(':');
-    var done = feJump(opJump);
-    fePatch(otherwise, ir.length);
-    feExpression();
-    fePatch(done, ir.length);
-    return thenType;
-  }
-  return type;
+  var parser = Parser(feTokens, feAt, fePendingTypeClosers);
+  var expression = parseExpression(parser);
+  feAt = parser.position;
+  fePendingTypeClosers = parser.pendingClosers;
+  return feLowerExpression(expression);
 }
 
-bool feDeclarationStart() {
-  return feIs('var') || feIs('final') || feIs('const') || feTypeStart();
-}
-
-void feDeclaration() {
-  var inferred = false;
-  if (feTake('var'))
-    inferred = true;
-  else {
-    feTake('final');
-    feTake('const');
-  }
+void feLowerVariable(AstVariable variable) {
+  feAt = variable.token;
   var type = 0;
-  if (feTypeStart())
-    type = feType();
-  else
-    inferred = true;
-  var name = feName();
+  if (variable.type.name != '') type = feLowerType(variable.type);
   var value = tInt;
-  if (feTake('='))
-    value = feExpression();
+  if (variable.initializer.length != 0)
+    value = feLowerExpression(variable.initializer[0]);
   else
-    feOperand(opInt, 0);
-  if (inferred || type == 0) type = value;
+    feInteger(0, type);
+  if (type == 0) type = value;
   var slot = feTemp(type);
-  feLocalNames.add(name);
+  feLocalNames.add(variable.name);
   feLocalTypes.add(type);
   feLocalSlots.add(slot);
   feOperand(opStoreLocal, slot);
@@ -1291,128 +1299,104 @@ void feLoopEnd(int breakBase, int continueBase, int end, int repeat) {
   feLoopContinues.removeLast();
 }
 
-void feStatement() {
-  if (feTake('{')) {
+void feLowerStatement(AstStatement statement) {
+  feAt = statement.token;
+  var kind = statement.kind;
+  if (kind == astEmptyStatement) return;
+  if (kind == astBlockStatement) {
     var scope = feLocalNames.length;
-    while (!feIs('}')) feStatement();
-    feExpect('}');
+    var i = 0;
+    while (i < statement.children.length) {
+      feLowerStatement(statement.children[i]);
+      i++;
+    }
     feScopeEnd(scope);
     return;
   }
-  if (feTake(';')) return;
-  if (feTake('return')) {
-    if (feIs(';') && feConstructors[feFunction] == 1)
+  if (kind == astVariableStatement) {
+    var i = 0;
+    while (i < statement.variables.length) {
+      feLowerVariable(statement.variables[i]);
+      i++;
+    }
+    return;
+  }
+  if (kind == astExpressionStatement) {
+    feLowerExpression(statement.expressions[0]);
+    feEmit(opPop);
+    return;
+  }
+  if (kind == astReturnStatement) {
+    if (statement.expressions.length != 0)
+      feLowerExpression(statement.expressions[0]);
+    else if (feConstructors[feFunction] == 1)
       feOperand(opLoadLocal, 0);
-    else if (feIs(';'))
-      feInteger(0, tVoid);
     else
-      feExpression();
-    feExpect(';');
+      feInteger(0, tVoid);
     feEmit(opReturn);
     return;
   }
-  if (feTake('if')) {
-    feExpect('(');
-    feExpression();
-    feExpect(')');
+  if (kind == astIfStatement) {
+    feLowerExpression(statement.condition[0]);
     var otherwise = feJump(opJumpFalse);
-    feStatement();
-    if (feTake('else')) {
+    feLowerStatement(statement.children[0]);
+    if (statement.children.length == 2) {
       var done = feJump(opJump);
       fePatch(otherwise, ir.length);
-      feStatement();
+      feLowerStatement(statement.children[1]);
       fePatch(done, ir.length);
     } else {
       fePatch(otherwise, ir.length);
     }
     return;
   }
-  if (feTake('while')) {
-    var repeat = ir.length;
-    feExpect('(');
-    feExpression();
-    feExpect(')');
-    var exit = feJump(opJumpFalse);
-    var breakBase = feBreaks.length;
-    var continueBase = feContinues.length;
-    feLoopBreaks.add(breakBase);
-    feLoopContinues.add(continueBase);
-    feStatement();
-    feOperand(opJump, repeat);
-    fePatch(exit, ir.length);
-    feLoopEnd(breakBase, continueBase, ir.length, repeat);
-    return;
-  }
-  if (feTake('for')) {
+  if (kind == astWhileStatement || kind == astForStatement) {
     var scope = feLocalNames.length;
-    feExpect('(');
-    if (!feIs(';')) {
-      if (feDeclarationStart())
-        feDeclaration();
-      else {
-        feExpression();
-        feEmit(opPop);
-      }
-    }
-    feExpect(';');
+    if (kind == astForStatement) feLowerStatement(statement.children[0]);
     var repeat = ir.length;
-    if (!feIs(';'))
-      feExpression();
+    if (statement.condition.length != 0)
+      feLowerExpression(statement.condition[0]);
     else
       feInteger(1, tBool);
-    feExpect(';');
     var exit = feJump(opJumpFalse);
-    var update = feAt;
-    var depth = 0;
-    while (!feIs('') && !(feIs(')') && depth == 0)) {
-      if (feTake('('))
-        depth++;
-      else if (feTake(')'))
-        depth--;
-      else
-        feAt++;
-    }
-    var updateEnd = feAt;
-    feExpect(')');
     var breakBase = feBreaks.length;
     var continueBase = feContinues.length;
     feLoopBreaks.add(breakBase);
     feLoopContinues.add(continueBase);
-    feStatement();
-    var bodyEnd = feAt;
-    var updateTarget = ir.length;
-    feAt = update;
-    if (feAt < updateEnd) {
-      feExpression();
+    if (kind == astForStatement)
+      feLowerStatement(statement.children[1]);
+    else
+      feLowerStatement(statement.children[0]);
+    var update = ir.length;
+    if (statement.update.length != 0) {
+      feLowerExpression(statement.update[0]);
       feEmit(opPop);
     }
-    feAt = bodyEnd;
     feOperand(opJump, repeat);
     fePatch(exit, ir.length);
-    feLoopEnd(breakBase, continueBase, ir.length, updateTarget);
+    feLoopEnd(breakBase, continueBase, ir.length, update);
     feScopeEnd(scope);
     return;
   }
-  if (feTake('break')) {
+  if (kind == astBreakStatement) {
     if (feLoopBreaks.isEmpty) feError('break outside loop');
     feBreaks.add(feJump(opJump));
-    feExpect(';');
     return;
   }
-  if (feTake('continue')) {
+  if (kind == astContinueStatement) {
     if (feLoopContinues.isEmpty) feError('continue outside loop');
     feContinues.add(feJump(opJump));
-    feExpect(';');
     return;
   }
-  if (feDeclarationStart()) {
-    feDeclaration();
-    feExpect(';');
-    return;
-  }
-  feExpression();
-  feEmit(opPop);
-  feExpect(';');
+  feAstError(statement.token, 'unsupported statement');
+}
+
+void feStatement() {
+  var parser = Parser(feTokens, feAt, fePendingTypeClosers);
+  var statement = parseStatement(parser);
+  feLowerStatement(statement);
+  feAt = parser.position;
+  fePendingTypeClosers = parser.pendingClosers;
 }
 
 void fePrepareGlobals(int count) {
@@ -1569,7 +1553,7 @@ void feGenerateGlobals(int count) {
   }
 }
 
-void parseSource(String source, int runtimeLength) {
+void parseSource(SourceProgram source) {
   resetTypes();
   ir.clear();
   irTypes.clear();
@@ -1617,14 +1601,11 @@ void parseSource(String source, int runtimeLength) {
   feParamStarts.add(0);
   feOwners.add(-1);
   feConstructors.add(0);
-  feTokens = scanTokens(source);
+  feSources = source;
+  feTokens = source.tokens;
   feAt = 0;
   fePendingTypeClosers = 0;
-  feRuntimeTokens = 0;
-  while (feRuntimeTokens < feTokens.length &&
-      feTokens[feRuntimeTokens].start < runtimeLength) {
-    feRuntimeTokens++;
-  }
+  feRuntimeTokens = source.runtimeTokens;
   feDiscoverClasses();
   feSignatures();
   stringUnitBytes = 8;
@@ -1711,4 +1692,72 @@ void parseSource(String source, int runtimeLength) {
     functions[f].localTypes = feSlotTypes;
   }
   feGenerateGlobals(sourceGlobals);
+}
+
+void feLowerForIn(AstStatement statement) {
+  var scope = feLocalNames.length;
+  var iterableType = feLowerExpression(statement.expressions[0]);
+  if (!typeIsList(iterableType)) {
+    feAstError(statement.token, 'for-in currently requires a List');
+  }
+  var iterable = feTemp(iterableType);
+  feOperand(opStoreLocal, iterable);
+  var index = feTemp(tInt);
+  feOperand(opInt, 0);
+  feOperand(opStoreLocal, index);
+  var declaration = statement.variables[0];
+  var element = typeArgument(iterableType);
+  var type = element;
+  if (declaration.type.name != '') type = feLowerType(declaration.type);
+  if (type != element) {
+    feAstError(
+      declaration.token,
+      'for-in variable type must match the List element type',
+    );
+  }
+  var variable = feTemp(type);
+  feLocalNames.add(declaration.name);
+  feLocalTypes.add(type);
+  feLocalSlots.add(variable);
+  var repeat = ir.length;
+  feOperand(opLoadLocal, index);
+  feOperand(opLoadLocal, iterable);
+  feBuiltin(bListLength, 1);
+  feEmit(opLt);
+  var done = feJump(opJumpFalse);
+  feOperand(opLoadLocal, iterable);
+  feOperand(opLoadLocal, index);
+  feBuiltinTyped(bListGet, 2, element);
+  feOperand(opStoreLocal, variable);
+  var breakBase = feBreaks.length;
+  var continueBase = feContinues.length;
+  feLoopBreaks.add(breakBase);
+  feLoopContinues.add(continueBase);
+  feLowerStatement(statement.children[0]);
+  var update = ir.length;
+  feOperand(opLoadLocal, index);
+  feOperand(opInt, 1);
+  feEmit(opAdd);
+  feOperand(opStoreLocal, index);
+  feOperand(opJump, repeat);
+  fePatch(done, ir.length);
+  feLoopEnd(breakBase, continueBase, ir.length, update);
+  feScopeEnd(scope);
+}
+
+void feLowerDoWhile(AstStatement statement) {
+  var scope = feLocalNames.length;
+  var repeat = ir.length;
+  var breakBase = feBreaks.length;
+  var continueBase = feContinues.length;
+  feLoopBreaks.add(breakBase);
+  feLoopContinues.add(continueBase);
+  feLowerStatement(statement.children[0]);
+  var condition = ir.length;
+  feLowerExpression(statement.condition[0]);
+  var done = feJump(opJumpFalse);
+  feOperand(opJump, repeat);
+  fePatch(done, ir.length);
+  feLoopEnd(breakBase, continueBase, ir.length, condition);
+  feScopeEnd(scope);
 }

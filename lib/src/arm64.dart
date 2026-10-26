@@ -1,6 +1,3 @@
-import 'host.dart';
-import 'ir.dart';
-
 List<int> machineCode = <int>[];
 List<int> addressSites = <int>[];
 List<int> addressKinds = <int>[];
@@ -66,16 +63,6 @@ void armStoreLocal(int slot, int register) {
   armConstant(10, offset);
   machineCode.add(0xcb0a03a9);
   machineCode.add(0xf9000120 | register);
-}
-
-int armFunctionId(String name) {
-  var i = 0;
-  while (i < functions.length) {
-    if (functions[i].name == name) return i;
-    i = i + 1;
-  }
-  print('Missing native function: ' + name);
-  hostExit(1);
 }
 
 void armCall(int target) {

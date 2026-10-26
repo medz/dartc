@@ -1,0 +1,167 @@
+const int astInteger = 1;
+const int astString = 2;
+const int astBoolean = 3;
+const int astNull = 4;
+const int astName = 5;
+const int astList = 6;
+const int astMember = 7;
+const int astCall = 8;
+const int astUnary = 9;
+const int astPostfix = 10;
+const int astBinary = 11;
+const int astAssignment = 12;
+const int astConditional = 13;
+const int astNamedArgument = 14;
+const int astIndex = 15;
+
+class AstType {
+  String name;
+  List<AstType> arguments;
+  int token;
+
+  AstType(this.name, this.arguments, this.token);
+}
+
+class AstExpression {
+  int kind;
+  String text;
+  List<AstExpression> children;
+  List<AstType> typeArguments;
+  int token;
+
+  AstExpression(
+    this.kind,
+    this.text,
+    this.children,
+    this.typeArguments,
+    this.token,
+  );
+}
+
+const int astEmptyStatement = 0;
+const int astBlockStatement = 1;
+const int astExpressionStatement = 2;
+const int astVariableStatement = 3;
+const int astReturnStatement = 4;
+const int astIfStatement = 5;
+const int astWhileStatement = 6;
+const int astForStatement = 7;
+const int astBreakStatement = 8;
+const int astContinueStatement = 9;
+const int astForInStatement = 10;
+const int astDoWhileStatement = 11;
+
+const int astImportDirective = 1;
+const int astExportDirective = 2;
+const int astLibraryDirective = 3;
+
+class AstVariable {
+  AstType type;
+  String name;
+  List<AstExpression> initializer;
+  String modifier;
+  int token;
+
+  AstVariable(
+    this.type,
+    this.name,
+    this.initializer,
+    this.modifier,
+    this.token,
+  );
+}
+
+class AstParameter {
+  AstType type;
+  String name;
+  bool fieldFormal;
+  int token;
+
+  AstParameter(this.type, this.name, this.fieldFormal, this.token);
+}
+
+class AstStatement {
+  int kind;
+  List<AstExpression> expressions;
+  List<AstStatement> children;
+  List<AstVariable> variables;
+  List<AstExpression> condition;
+  List<AstExpression> update;
+  int token;
+
+  AstStatement(
+    this.kind,
+    this.expressions,
+    this.children,
+    this.variables,
+    this.condition,
+    this.update,
+    this.token,
+  );
+}
+
+class AstFunction {
+  String name;
+  AstType result;
+  List<AstParameter> parameters;
+  List<AstStatement> body;
+  List<AstExpression> arrow;
+  bool external;
+  int token;
+  bool getter;
+
+  AstFunction(
+    this.name,
+    this.result,
+    this.parameters,
+    this.body,
+    this.arrow,
+    this.external,
+    this.token,
+    this.getter,
+  );
+}
+
+class AstClass {
+  String name;
+  List<AstVariable> fields;
+  List<AstFunction> constructors;
+  List<AstFunction> methods;
+  int token;
+
+  AstClass(this.name, this.fields, this.constructors, this.methods, this.token);
+}
+
+class AstTypedef {
+  String name;
+  AstType result;
+  List<AstType> parameterTypes;
+  int token;
+
+  AstTypedef(this.name, this.result, this.parameterTypes, this.token);
+}
+
+class AstDirective {
+  int kind;
+  String uri;
+  String prefix;
+  int token;
+
+  AstDirective(this.kind, this.uri, this.prefix, this.token);
+}
+
+class AstUnit {
+  List<AstDirective> directives;
+  List<AstVariable> variables;
+  List<AstFunction> functions;
+  List<AstClass> classes;
+  List<AstTypedef> typedefs;
+
+  AstUnit(
+    this.directives,
+    this.variables,
+    this.functions,
+    this.classes,
+    this.typedefs,
+  );
+}

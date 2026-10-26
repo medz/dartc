@@ -25,6 +25,7 @@ const int bias = 7;
 const bool enabled = true;
 const int labelValue = -1234567;
 int calls = 0;
+int traversals = 0;
 int initial = initialize();
 int spare = initialize();
 List<int> values = <int>[2, 3];
@@ -32,6 +33,11 @@ List<int> values = <int>[2, 3];
 int initialize() {
   calls = calls + 1;
   return bias * 3;
+}
+
+List<int> sequence() {
+  traversals++;
+  return <int>[1, 2, 3, 4, 5];
 }
 
 int fibonacci(int bias) {
@@ -88,6 +94,19 @@ void main(List<String> args) {
   List<List<FunctionInfo>> groups = <List<FunctionInfo>>[functions];
   groups[0][0].start += 1;
   print(groups.first.first.label());
+  int forInTotal = 0;
+  for (final value in sequence()) {
+    if (value == 2) continue;
+    if (value == 5) break;
+    forInTotal += value;
+  }
+  print(forInTotal);
+  print(traversals);
+  int doCount = 0;
+  do {
+    doCount++;
+  } while (false);
+  print(doCount);
 }
 ''';
 

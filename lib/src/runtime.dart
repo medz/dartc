@@ -53,6 +53,28 @@ int rtAlloc(int bytes) {
   return result;
 }
 
+int rtGrowBuffer(int address, int oldBytes, int newBytes) {
+  var oldSize = (oldBytes + 15) & -16;
+  var newSize = (newBytes + 15) & -16;
+  if (address != 0 &&
+      address + oldSize == rtArenaNext &&
+      address + newSize <= rtArenaEnd) {
+    rtArenaNext = address + newSize;
+    return address;
+  }
+  var result = rtAlloc(newBytes);
+  var offset = 0;
+  while (offset + 8 <= oldBytes) {
+    nativeStore64(result + offset, nativeLoad64(address + offset));
+    offset = offset + 8;
+  }
+  while (offset < oldBytes) {
+    nativeStore8(result + offset, nativeLoad8(address + offset));
+    offset = offset + 1;
+  }
+  return result;
+}
+
 int rtCString(int a, int b, int c, int d) {
   var p = rtAlloc(32);
   nativeStore64(p, a);
@@ -191,20 +213,20 @@ int rtStringLastIndexOf(int value, int needle, int start) {
 }
 
 int rtIntToString(int value) {
-  var digits = rtAlloc(168);
+  var digits = rtAlloc(21);
   var count = 0;
   var negative = 0;
   var number = value;
   if (number < 0) negative = 1;
   if (number > 0) number = -number;
   if (number == 0) {
-    nativeStore64(digits, 48);
+    nativeStore8(digits, 48);
     count = 1;
   }
   while (number < 0) {
     var quotient = number ~/ 10;
     var digit = quotient * 10 - number;
-    nativeStore64(digits + count * 8, 48 + digit);
+    nativeStore8(digits + count, 48 + digit);
     count = count + 1;
     number = quotient;
   }
@@ -214,7 +236,7 @@ int rtIntToString(int value) {
   while (i < count) {
     nativeStore16(
       result + 8 + (negative + i) * 2,
-      nativeLoad64(digits + (count - i - 1) * 8),
+      nativeLoad8(digits + count - i - 1),
     );
     i = i + 1;
   }
@@ -278,15 +300,10 @@ int rtListAdd(int list, int value) {
   var capacity = nativeLoad64(list + 8);
   var data = nativeLoad64(list + 16);
   if (length == capacity) {
-    capacity = capacity * 2;
-    if (capacity == 0) capacity = 8;
-    var replacement = rtAlloc(capacity * 8);
-    var i = 0;
-    while (i < length) {
-      nativeStore64(replacement + i * 8, nativeLoad64(data + i * 8));
-      i = i + 1;
-    }
-    data = replacement;
+    var nextCapacity = capacity * 2;
+    if (nextCapacity == 0) nextCapacity = 8;
+    data = rtGrowBuffer(data, capacity * 8, nextCapacity * 8);
+    capacity = nextCapacity;
     nativeStore64(list + 8, capacity);
     nativeStore64(list + 16, data);
   }
@@ -473,13 +490,7 @@ int rtHostRead(int path) {
   var done = 0;
   while (done == 0) {
     if (length == capacity) {
-      var replacement = rtAlloc(capacity * 2);
-      var i = 0;
-      while (i < length) {
-        nativeStore8(replacement + i, nativeLoad8(bytes + i));
-        i = i + 1;
-      }
-      bytes = replacement;
+      bytes = rtGrowBuffer(bytes, capacity, capacity * 2);
       capacity = capacity * 2;
     }
     var count = rtSyscall(3, fd, bytes + length, capacity - length, 0, 0, 0);
