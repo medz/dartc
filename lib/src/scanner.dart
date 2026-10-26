@@ -25,6 +25,10 @@ class Scanner {
   String source;
   List<Token> tokens;
   int position;
+  int languageMajor = 3;
+  int languageMinor = 13;
+  int languageOffset = -1;
+  String path = '';
 
   Scanner(this.source, this.tokens, this.position);
 }
@@ -36,8 +40,10 @@ bool tokenIs(Token token, String text) {
       token.text == text;
 }
 
-Never scanError(String message, int offset) {
-  print('dartc: ' + message + ' at offset ' + offset.toString());
+Never scanError(String message, int offset, [String path = '']) {
+  var location = '';
+  if (path != '') location = path + ':';
+  print('dartc: ' + location + message + ' at offset ' + offset.toString());
   hostExit(1);
 }
 
@@ -91,6 +97,109 @@ String scanSeparatedInteger(String source, int start, int end) {
     i++;
   }
   return String.fromCharCodes(units);
+}
+
+bool scanVersionAtLeast(Scanner scanner, int major, int minor) {
+  return scanner.languageMajor > major ||
+      scanner.languageMajor == major && scanner.languageMinor >= minor;
+}
+
+int scanComment(String source, int start) {
+  var i = start + 2;
+  if (source.codeUnitAt(start + 1) == 47) {
+    while (i < source.length &&
+        source.codeUnitAt(i) != 10 &&
+        source.codeUnitAt(i) != 13)
+      i++;
+    return i;
+  }
+  var depth = 1;
+  while (i + 1 < source.length && depth > 0) {
+    if (source.codeUnitAt(i) == 47 && source.codeUnitAt(i + 1) == 42) {
+      depth++;
+      i += 2;
+    } else if (source.codeUnitAt(i) == 42 && source.codeUnitAt(i + 1) == 47) {
+      depth--;
+      i += 2;
+    } else {
+      i++;
+    }
+  }
+  if (depth != 0) scanError('unterminated comment', start);
+  return i;
+}
+
+void scanLanguageVersion(Scanner scanner, int start, int end) {
+  if (scanner.languageOffset >= 0) return;
+  var source = scanner.source;
+  var i = start + 2;
+  while (i < end && (source.codeUnitAt(i) == 32 || source.codeUnitAt(i) == 9))
+    i++;
+  if (i + 5 > end ||
+      source.codeUnitAt(i) != 64 ||
+      source.codeUnitAt(i + 1) != 100 ||
+      source.codeUnitAt(i + 2) != 97 ||
+      source.codeUnitAt(i + 3) != 114 ||
+      source.codeUnitAt(i + 4) != 116)
+    return;
+  i += 5;
+  while (i < end && (source.codeUnitAt(i) == 32 || source.codeUnitAt(i) == 9))
+    i++;
+  if (i == end || source.codeUnitAt(i) != 61) return;
+  i++;
+  while (i < end && (source.codeUnitAt(i) == 32 || source.codeUnitAt(i) == 9))
+    i++;
+  var digits = i;
+  var major = 0;
+  while (i < end && scanDigit(source.codeUnitAt(i))) {
+    major = major * 10 + source.codeUnitAt(i) - 48;
+    i++;
+  }
+  if (i == digits || i == end || source.codeUnitAt(i) != 46) return;
+  i++;
+  digits = i;
+  var minor = 0;
+  while (i < end && scanDigit(source.codeUnitAt(i))) {
+    minor = minor * 10 + source.codeUnitAt(i) - 48;
+    i++;
+  }
+  if (i == digits) return;
+  while (i < end && (source.codeUnitAt(i) == 32 || source.codeUnitAt(i) == 9))
+    i++;
+  if (i != end) return;
+  scanner.languageMajor = major;
+  scanner.languageMinor = minor;
+  scanner.languageOffset = start;
+}
+
+void scanHeader(Scanner scanner) {
+  var source = scanner.source;
+  var i = scanner.position;
+  if (i == 0 && i < source.length && source.codeUnitAt(i) == 65279) i++;
+  if (i == 0 &&
+      i + 1 < source.length &&
+      source.codeUnitAt(i) == 35 &&
+      source.codeUnitAt(i + 1) == 33) {
+    while (i < source.length &&
+        source.codeUnitAt(i) != 10 &&
+        source.codeUnitAt(i) != 13)
+      i++;
+  }
+  while (i < source.length) {
+    var c = source.codeUnitAt(i);
+    if (c <= 32) {
+      i++;
+    } else if (c == 47 &&
+        i + 1 < source.length &&
+        (source.codeUnitAt(i + 1) == 47 || source.codeUnitAt(i + 1) == 42)) {
+      var end = scanComment(source, i);
+      if (source.codeUnitAt(i + 1) == 47) scanLanguageVersion(scanner, i, end);
+      i = end;
+    } else {
+      break;
+    }
+  }
+  scanner.position = i;
 }
 
 void scanString(Scanner scanner, bool raw, int tokenStart) {
@@ -226,26 +335,10 @@ void scanCode(Scanner scanner, bool interpolation) {
       i++;
       continue;
     }
-    if (c == 47 && i + 1 < source.length && source.codeUnitAt(i + 1) == 47) {
-      while (i < source.length && source.codeUnitAt(i) != 10) i++;
-      continue;
-    }
-    if (c == 47 && i + 1 < source.length && source.codeUnitAt(i + 1) == 42) {
-      i += 2;
-      var depth = 1;
-      while (i + 1 < source.length && depth > 0) {
-        if (source.codeUnitAt(i) == 47 && source.codeUnitAt(i + 1) == 42) {
-          depth++;
-          i += 2;
-        } else if (source.codeUnitAt(i) == 42 &&
-            source.codeUnitAt(i + 1) == 47) {
-          depth--;
-          i += 2;
-        } else {
-          i++;
-        }
-      }
-      if (depth != 0) scanError('unterminated comment', tokenStart);
+    if (c == 47 &&
+        i + 1 < source.length &&
+        (source.codeUnitAt(i + 1) == 47 || source.codeUnitAt(i + 1) == 42)) {
+      i = scanComment(source, i);
       continue;
     }
     var raw = false;
@@ -284,18 +377,28 @@ void scanCode(Scanner scanner, bool interpolation) {
         i++;
       }
       var text = '';
-      if (separated)
+      if (separated) {
+        if (!scanVersionAtLeast(scanner, 3, 6)) {
+          scanError(
+            'digit separators require language version 3.6',
+            start,
+            scanner.path,
+          );
+        }
         text = scanSeparatedInteger(source, start, i);
-      else
+      } else
         text = source.substring(start, i);
       tokens.add(Token(tokenInteger, text, start, i, -1));
       continue;
     }
     var size = 1;
+    var tripleShift = false;
     if (i + 3 < source.length && source.substring(i, i + 4) == '>>>=') {
       size = 4;
+      tripleShift = true;
     } else if (i + 2 < source.length) {
       var three = source.substring(i, i + 3);
+      tripleShift = three == '>>>';
       if (three == '>>>' ||
           three == '<<=' ||
           three == '>>=' ||
@@ -327,6 +430,7 @@ void scanCode(Scanner scanner, bool interpolation) {
           two == '--')
         size = 2;
     }
+    if (tripleShift && !scanVersionAtLeast(scanner, 2, 14)) size = 2;
     tokens.add(
       Token(tokenSymbol, source.substring(i, i + size), i, i + size, -1),
     );
@@ -337,8 +441,8 @@ void scanCode(Scanner scanner, bool interpolation) {
   scanner.position = i;
 }
 
-List<Token> scanTokens(String source) {
-  var scanner = Scanner(source, <Token>[], 0);
+List<Token> scanTokens(Scanner scanner) {
+  var source = scanner.source;
   scanCode(scanner, false);
   scanner.tokens.add(Token(tokenEnd, '', source.length, source.length, -1));
   return scanner.tokens;

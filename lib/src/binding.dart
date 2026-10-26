@@ -29,6 +29,7 @@ class LocalBinder {
   SourceProgram source;
   FunctionBindings result;
   List<BindingScope> scopes;
+  bool wildcards = true;
 
   LocalBinder(this.source, this.result, this.scopes);
 }
@@ -49,7 +50,8 @@ int bindingDeclare(
   var variables = binder.scopes[scope].variables;
   var i = 0;
   while (i < variables.length) {
-    if (name != '_' && binder.result.variables[variables[i]].name == name) {
+    if ((!binder.wildcards || name != '_') &&
+        binder.result.variables[variables[i]].name == name) {
       sourceError(
         binder.source,
         binder.source.tokens[token],
@@ -65,7 +67,7 @@ int bindingDeclare(
 }
 
 int bindingLookup(LocalBinder binder, int scope, String name) {
-  if (name == '_') return -1;
+  if (binder.wildcards && name == '_') return -1;
   while (scope >= 0) {
     var variables = binder.scopes[scope].variables;
     var i = 0;
@@ -254,6 +256,12 @@ FunctionBindings bindFunctionLocals(
 ) {
   var result = FunctionBindings(<LocalVariable>[], -1);
   var binder = LocalBinder(source, result, <BindingScope>[]);
+  binder.wildcards = sourceVersionAtLeast(
+    source,
+    source.tokens[syntax.token].source,
+    3,
+    7,
+  );
   var parameters = bindingScope(binder, -1);
   if (receiver) {
     result.receiver = bindingDeclare(
@@ -270,7 +278,7 @@ FunctionBindings bindFunctionLocals(
     var parameter = syntax.parameters[i];
     var previous = 0;
     while (previous < i) {
-      if (parameter.name != '_' &&
+      if ((!binder.wildcards || parameter.name != '_') &&
           syntax.parameters[previous].name == parameter.name) {
         sourceError(
           source,

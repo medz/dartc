@@ -26,6 +26,8 @@ dart run bin/dartc.dart example/hello.dart -o build/hello
 
 Language compatibility targets Dart 3.13.5. The [specification tracker](specs/README.md) maps official language clauses to implementation gaps and behavior tests; the list below is a usage summary.
 
+Each source file defaults to language version 3.13. A leading `// @dart = major.minor` comment can select 2.12 through 3.13 for the [implemented versioned rules](specs/lexical-structure.md). This does not provide complete compatibility with those language versions. Package configuration files do not yet select versions or resolve package imports.
+
 - Top-level functions and variables, direct calls, and recursion.
 - Integers, booleans, strings, and typed lists.
 - Local variables, assignments, arithmetic, comparisons, and short-circuit logic.

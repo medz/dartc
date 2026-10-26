@@ -7,7 +7,7 @@
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
-| [§19 Libraries and Scripts][libraries]：编译单元 | 部分实现 | 源库保留独立文件身份、声明和依赖；支持 `library` 声明。元数据覆盖[已实现声明子集](classes.md)，script tag 和完整顶层声明文法未覆盖。 | [source.dart](../lib/src/source.dart)、[parser.dart](../lib/src/parser.dart)；[behavior_test.dart](../test/behavior_test.dart) |
+| [§19 Libraries and Scripts][libraries]：编译单元 | 部分实现 | 源库保留独立文件身份、声明和依赖；支持具名 `library` 声明，`library;` 要求[文件版本至少 2.19][features]。元数据覆盖[已实现声明子集](classes.md)，文件头的 script tag 范围见[词法结构](lexical-structure.md)；完整顶层声明文法未覆盖。 | [source.dart](../lib/src/source.dart)、[parser.dart](../lib/src/parser.dart)；[behavior_test.dart](../test/behavior_test.dart) |
 | [§19.1 Imports][imports] | 部分实现 | 支持立即导入、`as` 前缀及显式/隐式 `dart:core` 处理；可执行文件的 core 入口通过真实 Dart export 提供 StringBuffer 与 pragma 声明，原生内建类型仍保留系统身份。前缀、再导出和用户同名遮蔽按实际声明来源处理；这不是完整 SDK 库。 | [source.dart](../lib/src/source.dart)、[symbols.dart](../lib/src/symbols.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 `imports.dart`、`core.dart`；[core.dart](../lib/src/std/core.dart) |
 | [§19.1.1 The Imported Namespace][imported] | 部分实现 | 按读取与写入分别解析 getter/setter，可组合独立来源的两侧；本库任一同名声明遮蔽导入两侧，前缀和私有性保持来源身份。扩展及完整命名空间组合尚缺。 | [symbols.dart](../lib/src/symbols.dart) 的 `resolveSymbol`、`resolveWriteSymbol`；[behavior_test.dart](../test/behavior_test.dart) 的 `top-accessor-imports.dart`、`rejected` |
 | [§19.1.2 Semantics of Imports][import-semantics]：延迟导入 | 未实现 | `deferred` 被拒绝；没有 `loadLibrary`、加载状态及相应调用时序。 | [parser.dart](../lib/src/parser.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 deferred 拒绝用例 |
@@ -17,6 +17,7 @@
 | [§19.2][exports]、[§19.4][conflicts]：访问器冲突差异 | 待核对 | 固定草案的 basename 规则与 SDK 3.13.5 analyzer/CFE 不完全一致：一个库提供 getter+setter，另一个仅 getter，仅写该名时交换 import 或 export 顺序可改变 CFE 结果；analyzer 对两种 export 顺序都报告冲突。本实现不仿该顺序选择，不能据此声称完整命名空间兼容。 | [官方固定草案][spec]；[symbols.dart](../lib/src/symbols.dart)；[behavior_test.dart](../test/behavior_test.dart) 为后续差分入口 |
 | [§19.5 Parts][parts] | 未实现 | 未解析 `part` / `part of`，没有多编译单元共享同一库作用域、私有性和重复 part 校验。 | [parser.dart](../lib/src/parser.dart)、[source.dart](../lib/src/source.dart)；尚无对应正向行为验证 |
 | [§19.6 Scripts][scripts] | 部分实现 | 从导出空间查找 `main`，支持至多两个必需位置参数及可选/命名默认值；当前第一位置实参为 `List<String>`，第二位置实参固定为 `null`。isolate 启动载荷和完整脚本调用语义尚未验收。 | [frontend.dart](../lib/src/frontend.dart) 的 `feGenerateEntry`；[behavior_test.dart](../test/behavior_test.dart) 的 named-entry、two-entry、invalid-entry 与 argv 用例 |
+| [语言版本与包配置][versioning] | 部分实现 | 已加载文件各自保留版本，导入方不覆盖被导入声明的语法、默认值及流分析版本。未读取 `package_config.json` 的 `languageVersion` 或包 URI 映射，也不从 pubspec 推导版本；范围及默认值见[词法结构](lexical-structure.md)。 | [source.dart](../lib/src/source.dart) `SourceFile`、`sourceVersionAtLeast()`；[behavior_test.dart](../test/behavior_test.dart) 的 `version-imports.dart`、`version-unnamed.dart` |
 | [§19.7 URIs][uris] | 部分实现 | 处理相对/绝对文件路径及 `dart:core`、`dart:ffi`；缺 `package:`、`file:` URI、条件 URI 和完整 URI 规范化。 | [source.dart](../lib/src/source.dart)、[parser.dart](../lib/src/parser.dart)；[behavior_test.dart](../test/behavior_test.dart) 的路径归一与不支持 URI 拒绝用例 |
 | [§6.3 Concurrency][concurrency] | 未实现 | 原生产物没有 isolates、消息端口、spawn 和独立隔离堆；未提供 `dart:isolate` 的程序执行能力。 | [source.dart](../lib/src/source.dart)、[runtime.dart](../lib/src/runtime.dart)；尚无 isolate 原生行为验证 |
 | [§19][libraries]：完整命名空间与 URI 组合 | 待核对 | 当前用例覆盖有限的导入图和优先级；未形成完整规范兼容性测试，不能从单一导入程序成功推断一般库系统已完成。 | [behavior_test.dart](../test/behavior_test.dart)；后续补充仍以真实多文件编译执行为依据 |
@@ -39,3 +40,6 @@
 [scripts]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L19336
 [uris]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L19386
 [concurrency]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L1170
+
+[versioning]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.8/language-versioning/feature-specification.md
+[features]: https://github.com/dart-lang/sdk/blob/3.13.5/tools/experimental_features.yaml

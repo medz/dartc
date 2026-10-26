@@ -30,7 +30,7 @@
 
 ## 空安全、推断与流分析
 
-下表依赖[空安全][nnbd]、[推断][inference]和[流分析][flow]补充文档；旧草案章节不能单独代表这些规则。
+下表依赖[空安全][nnbd]、[推断][inference]和[流分析][flow]补充文档；旧草案章节不能单独代表这些规则。Dart 3.9 的 sound-flow-analysis 门槛还依据[对应 SDK 特性表][features]与真实编译差分。
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
@@ -39,7 +39,7 @@
 | 隐式赋值兼容 | 部分实现 | `Object`、可空类型不能直接下转为具体值；`dynamic` 可以检查转换。赋值目标的转换与表达式自身结果类型分别处理；`??=` 合并非空读取类型与原 RHS 类型，写入转换不改变结果类型。 | [typing.dart](../lib/src/typing.dart)：`typingAssignable`；[frontend.dart](../lib/src/frontend.dart)：`feLowerAssignment`；[values.dart](../test/fixtures/values.dart)：`assignmentValues`、`staticContexts`、`coalescingAssignmentValues`。 |
 | 局部与顶层推断 | 部分实现 | 从初始化表达式、List 元素及上下文推断；支持部分条件表达式和常量默认值。尚无泛型约束求解、闭包参数及覆盖推断。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerHint`、`feLowerVariable`、`feInferGlobal`；[constants.dart](../lib/src/constants.dart)：`evaluateConstant`；[values.dart](../test/fixtures/values.dart)：`constantLists`、`staticContexts`。 |
 | 类型提升与撤销 | 部分实现 | 按局部绑定身份处理 `is`、空检查、逻辑分支、退出、赋值及循环写入；`??=` 的非空路径与实际写入路径分别提升、合流；直接局部空断言在检查后提升，读取类型与声明存储类型分开。闭包捕获、字段提升和模式提升未实现。 | [binding.dart](../lib/src/binding.dart)：`bindFunctionLocals`；[flow.dart](../lib/src/flow.dart)：`flowPromote`、`flowExclude`、`flowWrite`、`flowDemote`；[values.dart](../test/fixtures/values.dart)：`flowBranches`、`flowAssignments`、`flowContexts`、`coalescingAssignmentFlow`、`nullAssertionValues`。 |
-| 确定赋值、确定未赋值与可达性 | 部分实现 | 分别跟踪局部可读与 final 首次可写事实，合并分支、循环和标签退出；不可达代码仍检查读写。`Never` 调用终止正常路径，非空结果不能正常落空；未覆盖异常、闭包及异步控制流。 | [flow.dart](../lib/src/flow.dart)：`FlowState`、`flowJoin`；[frontend.dart](../lib/src/frontend.dart)：`feReadLocal`、`feWriteLvalue`、`feCall`；[values.dart](../test/fixtures/values.dart)：`finalAssignments`、`neverWrapper`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
+| 确定赋值、确定未赋值与可达性 | 部分实现 | 分别跟踪局部可读与 final 首次可写事实，合并分支、循环和标签退出；不可达代码仍检查读写。`Never` 调用终止正常路径，非空结果不能正常落空。3.9 起才以非空静态类型、总真 `is` 及 Null/非空类型不匹配判定相应死边；不把任意不相交的 `int is String` 分支当作 DFA 豁免。版本来自函数或全局初始化的拥有文件；未覆盖异常、闭包及异步控制流。 | [flow.dart](../lib/src/flow.dart)：`FlowState`、`flowJoin`；[frontend.dart](../lib/src/frontend.dart)：`feReadLocal`、`feWriteLvalue`、`feCall`；[values.dart](../test/fixtures/values.dart)：`finalAssignments`、`neverWrapper`；[behavior_test.dart](../test/behavior_test.dart)：`version-imports.dart`、`rejected`。 |
 | `num` 与数值推断 | 部分实现 | `num` 与 `int` 独立；`int + dynamic` 推断 `num`，动态左操作数结果保留 `dynamic`，`~/` 和整数位运算有独立规则。运行时当前仅有整数数值。 | [typing.dart](../lib/src/typing.dart)：`typingBinary`、`typingUnary`；[values.dart](../test/fixtures/values.dart)：`staticContexts`。 |
 
 ## 尚缺与待核验
@@ -65,3 +65,5 @@
 [nnbd]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md
 [inference]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/inference.md
 [flow]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/flow-analysis.md
+
+[features]: https://github.com/dart-lang/sdk/blob/3.13.5/tools/experimental_features.yaml

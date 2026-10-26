@@ -9,17 +9,20 @@ class FlowState {
   List<int> assignments;
   List<bool> reachability;
   bool reachable;
+  bool soundFlow = true;
 
   FlowState(this.types, this.assignments, this.reachability, this.reachable);
 }
 
-FlowState flowCreate(int count) {
-  return FlowState(
+FlowState flowCreate(int count, [bool soundFlow = true]) {
+  var result = FlowState(
     List<int>.filled(count, -1),
     List<int>.filled(count, flowUnassigned),
     <bool>[true],
     true,
   );
+  result.soundFlow = soundFlow;
+  return result;
 }
 
 FlowState flowCopy(FlowState state) {
@@ -29,6 +32,7 @@ FlowState flowCopy(FlowState state) {
     List<bool>.filled(state.reachability.length, false, growable: true),
     state.reachable,
   );
+  result.soundFlow = state.soundFlow;
   var i = 0;
   while (i < state.types.length) {
     result.types[i] = state.types[i];
@@ -105,6 +109,7 @@ FlowState flowJoin(FlowState left, FlowState right, List<int> declaredTypes) {
       i++;
     }
   }
+  result.soundFlow = left.soundFlow;
   result.reachable = true;
   var i = 0;
   while (i < depth) {
@@ -138,7 +143,11 @@ void flowPromote(FlowState state, int binding, int testedType) {
     return;
   }
   if (typeIsDisjoint(current, testedType)) {
-    flowUnreachable(state);
+    if (state.soundFlow &&
+        (current == tNull && !typeCanBeNull(testedType) ||
+            !typeCanBeNull(current) && testedType == tNull)) {
+      flowUnreachable(state);
+    }
     return;
   }
   var promoted = testedType;
@@ -156,7 +165,7 @@ void flowExclude(FlowState state, int binding, int testedType) {
   var current = state.types[binding];
   if (current < 0 || current == tVoid) return;
   if (typeIsSubtype(current, testedType)) {
-    flowUnreachable(state);
+    if (state.soundFlow) flowUnreachable(state);
     return;
   }
   if (typeCanBeNull(testedType)) {
@@ -173,7 +182,7 @@ void flowExclude(FlowState state, int binding, int testedType) {
 void flowNull(FlowState state, int binding, bool equalsNull) {
   var current = state.types[binding];
   if (current < 0) return;
-  if (equalsNull && !typeCanBeNull(current) ||
+  if (state.soundFlow && equalsNull && !typeCanBeNull(current) ||
       !equalsNull && current == tNull) {
     flowUnreachable(state);
   }

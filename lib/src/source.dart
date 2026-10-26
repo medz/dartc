@@ -33,6 +33,9 @@ class SourceFile {
   List<Token> tokens;
   List<SourceImport> imports;
   bool system = false;
+  int languageMajor = 3;
+  int languageMinor = 13;
+  int languageOffset = -1;
 
   SourceFile(this.path, this.tokens, this.imports);
 }
@@ -86,6 +89,22 @@ String sourcePath(String path) {
   return result;
 }
 
+bool sourceVersionAtLeast(
+  SourceProgram program,
+  int source,
+  int major,
+  int minor,
+) {
+  var languageMajor = 3;
+  var languageMinor = 13;
+  if (source >= 0) {
+    languageMajor = program.files[source].languageMajor;
+    languageMinor = program.files[source].languageMinor;
+  }
+  return languageMajor > major ||
+      languageMajor == major && languageMinor >= minor;
+}
+
 bool sourceIsSystem(SourceProgram program, int source) {
   if (source == sourceCore || source == sourceFfi) return true;
   return source >= 0 && program.files[source].system;
@@ -120,14 +139,33 @@ int sourceLoad(SourceProgram program, String path) {
     i++;
   }
   int id = program.files.length;
-  List<Token> tokens = scanTokens(hostRead(path));
+  var scanner = Scanner(hostRead(path), <Token>[], 0);
+  scanner.path = path;
+  scanHeader(scanner);
+  List<SourceImport> imports = <SourceImport>[];
+  var file = SourceFile(path, scanner.tokens, imports);
+  file.languageMajor = scanner.languageMajor;
+  file.languageMinor = scanner.languageMinor;
+  file.languageOffset = scanner.languageOffset;
+  program.files.add(file);
+  if (!sourceVersionAtLeast(program, id, 2, 12) ||
+      sourceVersionAtLeast(program, id, 3, 14)) {
+    sourceError(
+      program,
+      Token(tokenSymbol, '', file.languageOffset, file.languageOffset, id),
+      'unsupported language version ' +
+          file.languageMajor.toString() +
+          '.' +
+          file.languageMinor.toString() +
+          '; supported versions are 2.12 through 3.13',
+    );
+  }
+  List<Token> tokens = scanTokens(scanner);
   i = 0;
   while (i < tokens.length) {
     tokens[i].source = id;
     i++;
   }
-  List<SourceImport> imports = <SourceImport>[];
-  program.files.add(SourceFile(path, tokens, imports));
   String directory = path.substring(0, path.lastIndexOf('/') + 1);
   var paths = <String>[];
   i = 0;
@@ -151,7 +189,16 @@ int sourceLoad(SourceProgram program, String path) {
     parser.position = i + 1;
     var directive = parserDirective(parser, kind, i);
     i = parser.position;
-    if (library) continue;
+    if (library) {
+      if (directive.uri == '' && !sourceVersionAtLeast(program, id, 2, 19)) {
+        sourceError(
+          program,
+          tokens[start],
+          'unnamed library requires language version 2.19',
+        );
+      }
+      continue;
+    }
     var uri = directive.uri;
     int target = sourceUnknown;
     if (uri == 'dart:core') {

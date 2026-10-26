@@ -10,6 +10,26 @@ String parameterName(AstParameter parameter) {
   return name;
 }
 
+void checkArgumentOrder(SourceProgram source, AstExpression call) {
+  if (sourceVersionAtLeast(source, source.tokens[call.token].source, 2, 17))
+    return;
+  var named = false;
+  var i = 1;
+  while (i < call.children.length) {
+    var argument = call.children[i];
+    if (argument.kind == astNamedArgument) {
+      named = true;
+    } else if (named) {
+      sourceError(
+        source,
+        source.tokens[argument.token],
+        'positional arguments after named arguments require language version 2.17',
+      );
+    }
+    i++;
+  }
+}
+
 List<int> bindArguments(
   SourceProgram source,
   AstFunction function,

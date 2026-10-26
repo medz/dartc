@@ -545,6 +545,7 @@ ConstantValue _constantConstructor(
   bool active,
   bool implicitConst,
 ) {
+  checkArgumentOrder(context.symbols.program, expression);
   var callee = expression.children[0];
   var symbol = _constantSymbol(context, callee);
   if (symbol < 0 || context.symbols.declarations[symbol].kind != symbolClass)

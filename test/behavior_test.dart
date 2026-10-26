@@ -818,6 +818,96 @@ class pragma { final String name; const pragma(this.name); }
 List<int> allocated() => <int>[7];
 void main() { print(allocated()); }
 ''',
+      'version-old.dart': r'''
+// @dart=3.6
+int _ = 7;
+int parameter(int _) => _;
+int local() { int _ = 2; return _; }
+int loop() { for (var _ in <int>[3]) return _; return 0; }
+int separated() => 1_000;
+''',
+      'version-new.dart': r'''
+// @dart=3.7
+int _ = 7;
+int parameter(int _) => _;
+int local() { int _ = 2; return _; }
+int loop() { for (var _ in <int>[3]) return _; return 0; }
+int pair(int _, int _) => _;
+''',
+      'version-accessors.dart': r'''
+// @dart=3.9
+class Accessor { int get value => 1; set value(String next) {} }
+int get value => 2;
+set value(String next) {}
+''',
+      'version-private.dart': r'''
+// @dart=3.12
+class Secret {
+  final int _value;
+  Secret({this._value = 1});
+  int read() => _value;
+}
+''',
+      'version-flow.dart': r'''
+// @dart=3.9
+int assigned(int value) { int result; if (value != null) result = 1; return result; }
+int unassigned(int value) { final int result; if (value == null) result = 1; result = 2; return result; }
+''',
+      'version-switch.dart': r'''
+// @dart=3.0
+int selected(bool value) {
+  int result;
+  switch (value) { case true: result = 1; break; case false: result = 2; break; }
+  return result;
+}
+''',
+      'version-imports.dart': r'''
+// @dart=2.12
+import 'version-old.dart' as old;
+import 'version-new.dart' as modern;
+import 'version-accessors.dart' as accessors;
+import 'version-private.dart' as secret;
+import 'version-flow.dart' as flow;
+import 'version-switch.dart' as selection;
+int nullFact(Null value) { int result; if (value == null) result = 4; return result; }
+void main() {
+  print(old.parameter(2)); print(old.local()); print(old.loop()); print(old.separated());
+  print(modern.parameter(2)); print(modern.local()); print(modern.loop()); print(modern.pair(2, 3));
+  List<List<List<int>>> nested = <List<List<int>>>[<List<int>>[<int>[7]]];
+  print(nested[0][0][0]);
+  var accessor = accessors.Accessor(); accessor.value = 'ignored'; print(accessor.value);
+  accessors.value = 'ignored'; print(accessors.value);
+  print(secret.Secret(value: 8).read());
+  print(flow.assigned(1)); print(flow.unassigned(1));
+  print(selection.selected(true)); print(selection.selected(false)); print(nullFact(null));
+}
+''',
+      'version-header.dart': "#!/usr/bin/env dart\r\n/* header /* nested */ end */\r\n// @dart=2.14\r\n// @dart=3.14\r\nvoid main() { int value = -1; print(value >>> 63); value >>>= 63; print(value); }\r\n",
+      'version-bom.dart': "\ufeff// @dart=3.6\nvoid main(){print(1_000);}\n",
+      'version-named.dart': r'''
+// @dart=2.17
+class Arguments { final int first; final int last; const Arguments(this.first, {this.last = 0}); }
+const arguments = Arguments(last: 4, 3);
+int sum(int value, {int extra = 1}) => value + extra;
+int trace = 0;
+bool growable() { trace = trace * 10 + 1; return false; }
+int length() { trace = trace * 10 + 2; return 2; }
+int element() { trace = trace * 10 + 3; return 1; }
+void main() { print(sum(extra: 2, 3)); print(arguments.first + arguments.last); print(List<int>.filled(growable: growable(), length(), element())); print(trace); }
+''',
+      'version-unnamed.dart': r'''
+// @dart=2.19
+library;
+void main() { print(42); }
+''',
+      'version-markers.dart': r'''
+/// @dart=3.5
+// @dart=3.5.0
+/* // @dart=3.5 */
+import 'dart:core';
+// @dart=3.5
+void main() { print(1_000); }
+''',
       'constant-values.dart': 'const values = <int>[1];',
       'constant-other.dart': 'const values = <int>[1];',
       'constant-imports.dart':
@@ -847,6 +937,12 @@ void main() { print(allocated()); }
     compare(File('${temporary.path}/core-annotations-filtered.dart'), []);
     compare(File('${temporary.path}/nogc-values.dart'), []);
     compare(File('${temporary.path}/nogc-user-annotation.dart'), []);
+    compare(File('${temporary.path}/version-imports.dart'), []);
+    compare(File('${temporary.path}/version-header.dart'), []);
+    compare(File('${temporary.path}/version-named.dart'), []);
+    compare(File('${temporary.path}/version-unnamed.dart'), []);
+    compare(File('${temporary.path}/version-markers.dart'), []);
+    compare(File('${temporary.path}/version-bom.dart'), []);
     compare(File('${temporary.path}/constant-imports.dart'), []);
     compare(File('${temporary.path}/property-imports.dart'), []);
     compare(File('${temporary.path}/top-accessor-imports.dart'), []);
@@ -858,6 +954,25 @@ void main() { print(allocated()); }
       "@pragma('dartc:no-gc') int checked(String value,int index)=>value.codeUnitAt(index);void main(){print(checked('a',0));}",
       "@pragma('dartc:no-gc') int checked(String value)=>int.parse(value);void main(){print(checked('7'));}",
       "@pragma('dartc:no-gc') void checked(List<int> values){values.clear();}void main(){var values=<int>[1];checked(values);print(values.length);}",
+      "\ufeff#!/usr/bin/env dart\n// @dart=3.6\nvoid main(){print(1_000);}\n",
+      "// @dart=3.5\nvoid main(){print(1_000);}",
+      // The accepted versioning specification permits tabs in a marker.
+      "//\t@dart\t=\t3.5\nvoid main(){print(1_000);}",
+      "// @dart=3.6\nvoid main(){int _=1;int _=2;}",
+      "// @dart=3.6\nvoid f(int _,int _){}void main(){}",
+      "// @dart=2.13\nvoid main(){print(1>>>1);}",
+      "// @dart=2.16\nint f(int value,{int extra=0})=>value+extra;void main(){print(f(extra:2,3));}",
+      "// @dart=2.16\nclass C{final int value;const C(this.value,{int ignored=0});}const c=C(ignored:2,3);void main(){}",
+      "// @dart=2.18\nlibrary;void main(){}",
+      "// @dart=3.14\nvoid main(){}",
+      "// @dart=2.11\nvoid main(){}",
+      "// @dart=3.8\nclass C{int get value=>1;set value(String next){}}void main(){}",
+      "// @dart=3.8\nint get value=>1;set value(String next){}void main(){}",
+      "// @dart=3.11\nclass C{int _value;C({this._value=1});}void main(){}",
+      "// @dart=3.8\nint f(int value){int result;if(value!=null)result=1;return result;}void main(){print(f(1));}",
+      "// @dart=2.12\nvoid f(int value){final int result;if(value==null)result=1;result=2;print(result);}void main(){f(1);}",
+      "// @dart=2.19\nint f(bool value){int result;switch(value){case true:result=1;break;case false:result=2;break;}return result;}void main(){print(f(true));}",
+      "void f(int value){final int result;if(value is String)result=1;result=2;print(result);}void main(){f(1);}",
       "import 'dart:core'; import 'dart:core' as core; List<int> helper() => <int>[1]; @core.pragma('dartc:no-gc') List<int> bad() => helper(); void main() {}",
       "const noGc = pragma('dartc:no-gc'); void helper([List<int> values = const <int>[1]]) {} @noGc void bad() { helper(); } void main() {}",
       "Object value = 1; @pragma('dartc:no-gc') Object bad() => value; void main() {}",

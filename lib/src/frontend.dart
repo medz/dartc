@@ -1255,6 +1255,18 @@ void feResolveDefaults(int count) {
       var parameter = parameters[p];
       feCheckMetadata(parameter.metadata, feOwners[f]);
       if (parameter.kind == astNamedParameter) {
+        if (parameter.fieldFormal &&
+            parameter.name.startsWith('_') &&
+            !sourceVersionAtLeast(
+              feSources,
+              feTokens[parameter.token].source,
+              3,
+              12,
+            ))
+          feAstError(
+            parameter.token,
+            'private named field-formals require language version 3.12',
+          );
         var name = parameterName(parameter);
         if (name == '' || name.startsWith('_'))
           feAstError(
@@ -1288,6 +1300,57 @@ void feResolveDefaults(int count) {
     f++;
   }
   feConstants.instanceScope = null;
+}
+
+void feCheckLegacyAccessor(int getterType, int setter, int parameter) {
+  var setterType = feParamTypes[feParamStarts[setter] + parameter];
+  if (!typeIsSubtype(getterType, setterType))
+    feAstError(
+      feFunctionNodes[setter].token,
+      'getter type must be a subtype of setter type before language version 3.9',
+    );
+}
+
+void feCheckAccessorVersions() {
+  var owner = 0;
+  while (owner < feMembers.length) {
+    if (!sourceVersionAtLeast(feSources, feClassSources[owner], 3, 9)) {
+      var members = feMembers[owner].members;
+      var i = 0;
+      while (i < members.length) {
+        var member = members[i];
+        if (member.setter >= 0) {
+          var read = -1;
+          if (member.field >= 0)
+            read = feFieldTypes[feClassFieldStarts[owner] + member.field];
+          else if (member.getter >= 0)
+            read = functions[feMemberFunctions[owner][member.getter]].result;
+          if (read >= 0)
+            feCheckLegacyAccessor(
+              read,
+              feMemberFunctions[owner][member.setter],
+              1,
+            );
+        }
+        i++;
+      }
+    }
+    owner++;
+  }
+  var i = 0;
+  while (i < feSymbols.declarations.length) {
+    var declaration = feSymbols.declarations[i];
+    if (declaration.setter >= 0 &&
+        !sourceVersionAtLeast(feSources, declaration.source, 3, 9)) {
+      var read = -1;
+      if (declaration.kind == symbolGlobal)
+        read = globalTypes[declaration.target];
+      else if (declaration.kind == symbolProperty && declaration.target >= 0)
+        read = functions[declaration.target].result;
+      if (read >= 0) feCheckLegacyAccessor(read, declaration.setter, 0);
+    }
+    i++;
+  }
 }
 
 void feDefaultArgument(int parameter, int token) {
@@ -1656,9 +1719,32 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
   if (declaration.source == sourceCore &&
       name == 'List' &&
       member == 'filled') {
-    if (call.children.length < 3) {
-      feAstError(call.token, 'List.filled requires length and value');
+    var lengthArgument = -1;
+    var valueArgument = -1;
+    var growableArgument = -1;
+    var argument = 1;
+    while (argument < call.children.length) {
+      var expression = call.children[argument];
+      if (expression.kind == astNamedArgument) {
+        if (expression.text != 'growable')
+          feAstError(expression.token, 'unsupported List.filled argument');
+        if (growableArgument >= 0)
+          feAstError(expression.token, 'duplicate growable argument');
+        growableArgument = argument;
+      } else if (lengthArgument < 0) {
+        lengthArgument = argument;
+      } else if (valueArgument < 0) {
+        valueArgument = argument;
+      } else {
+        feAstError(
+          expression.token,
+          'too many List.filled positional arguments',
+        );
+      }
+      argument++;
     }
+    if (lengthArgument < 0 || valueArgument < 0)
+      feAstError(call.token, 'List.filled requires length and value');
     var element = -1;
     if (receiver.typeArguments.length != 0) {
       if (receiver.typeArguments.length != 1)
@@ -1667,25 +1753,37 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
     } else if (context > 0 && typeIsList(context)) {
       element = typeArgument(context);
     }
-    feLowerInContext(call.children[1], tInt);
+    var lengthSlot = -1;
+    var valueSlot = -1;
+    var growableSlot = -1;
     var valueType = -1;
-    if (element < 0)
-      valueType = feLowerHint(call.children[2], -1);
-    else
-      valueType = feLowerInContext(call.children[2], element);
-    var hasGrowable = false;
-    var argument = 3;
+    argument = 1;
     while (argument < call.children.length) {
-      var named = call.children[argument];
-      if (named.kind != astNamedArgument || named.text != 'growable') {
-        feAstError(named.token, 'unsupported List.filled argument');
+      var expression = call.children[argument];
+      if (argument == lengthArgument) {
+        feLowerInContext(expression, tInt);
+        lengthSlot = feTemp(tInt);
+        feOperand(opStoreLocal, lengthSlot);
+      } else if (argument == valueArgument) {
+        if (element < 0)
+          valueType = feLowerHint(expression, -1);
+        else
+          valueType = feLowerInContext(expression, element);
+        valueSlot = feTemp(valueType);
+        feOperand(opStoreLocal, valueSlot);
+      } else {
+        feLowerBoolean(expression.children[0]);
+        growableSlot = feTemp(tBool);
+        feOperand(opStoreLocal, growableSlot);
       }
-      if (hasGrowable) feAstError(named.token, 'duplicate growable argument');
-      hasGrowable = true;
-      feLowerBoolean(named.children[0]);
       argument++;
     }
-    if (!hasGrowable) feInteger(0, tBool);
+    feOperand(opLoadLocal, lengthSlot);
+    feOperand(opLoadLocal, valueSlot);
+    if (growableSlot >= 0)
+      feOperand(opLoadLocal, growableSlot);
+    else
+      feInteger(0, tBool);
     if (element < 0) element = valueType;
     var type = listType(element);
     feBuiltinTyped(bListFilled, 3, type);
@@ -1856,6 +1954,7 @@ int feLowerNeverArguments(AstExpression call) {
 }
 
 int feLowerCall(AstExpression call, int context) {
+  checkArgumentOrder(feSources, call);
   var callee = feWithReceiver(call.children[0]);
   var symbol = feExpressionSymbol(callee, false);
   if (symbol >= 0) {
@@ -2228,7 +2327,7 @@ int feLowerCoalescingAssignment(AstExpression expression, FeLvalue target) {
   }
   var afterLeft = feFlow;
   feFlow = flowCopy(afterLeft);
-  if (!typeCanBeNull(left)) flowUnreachable(feFlow);
+  if (feFlow.soundFlow && !typeCanBeNull(left)) flowUnreachable(feFlow);
   var source = expression.children[1];
   var context = target.type;
   if (target.binding >= 0) context = left;
@@ -2462,7 +2561,7 @@ int feLowerCoalescing(AstExpression expression, int context) {
   feFlow = flowCopy(afterLeft);
   if (source.kind == astName && source.binding >= 0)
     flowNull(feFlow, source.binding, true);
-  else if (!typeCanBeNull(left))
+  else if (feFlow.soundFlow && !typeCanBeNull(left))
     flowUnreachable(feFlow);
   var right = feLowerHint(expression.children[1], context);
   var result = typingCoalescing(left, right);
@@ -2829,7 +2928,15 @@ void feInferGlobal(int global) {
   feSlotTypes = <int>[];
   feNextLocal = 0;
   feInitializingGlobal = global;
-  feFlow = flowCreate(0);
+  feFlow = flowCreate(
+    0,
+    sourceVersionAtLeast(
+      feSources,
+      feTokens[feGlobalNodes[global].token].source,
+      3,
+      9,
+    ),
+  );
   var type = globalTypes[global];
   var syntax = feGlobalNodes[global];
   if (syntax.initializer.length == 0) {
@@ -3091,6 +3198,7 @@ void parseSource(SourceProgram source) {
     if (feGlobalInitializers[global].getter >= 0) feInferGlobal(global);
     global++;
   }
+  feCheckAccessorVersions();
   feNextLocal = 0;
   feFunction = 0;
   var i = 0;
@@ -3099,6 +3207,12 @@ void parseSource(SourceProgram source) {
         feGlobalNodes[i].modifier != 'const') {
       feInitializingGlobal = i;
       var variable = feGlobalNodes[i];
+      feFlow.soundFlow = sourceVersionAtLeast(
+        feSources,
+        feTokens[variable.token].source,
+        3,
+        9,
+      );
       if (variable.initializer.length == 0) {
         feInteger(0, globalTypes[i]);
       } else {
@@ -3124,7 +3238,15 @@ void parseSource(SourceProgram source) {
     functions[f].start = ir.length;
     feBindings = bodyBindings[f];
     feConstants.locals.clear();
-    feFlow = flowCreate(feBindings.variables.length);
+    feFlow = flowCreate(
+      feBindings.variables.length,
+      sourceVersionAtLeast(
+        feSources,
+        feTokens[functionSyntax.token].source,
+        3,
+        9,
+      ),
+    );
     feBindingTypes = <int>[];
     feBindingSlots = <int>[];
     var binding = 0;
@@ -3481,7 +3603,15 @@ void feLowerSwitch(AstStatement statement) {
   var unmatched = feJump(opJump);
   var entryFlow = flowCopy(feFlow);
   var exitFlow = flowCopy(feFlow);
-  if (fallback >= 0 || booleans == 3) flowUnreachable(exitFlow);
+  if (fallback >= 0 ||
+      booleans == 3 &&
+          sourceVersionAtLeast(
+            feSources,
+            feTokens[statement.token].source,
+            3,
+            0,
+          ))
+    flowUnreachable(exitFlow);
   var breakBase = feBreaks.length;
   feLoopBreaks.add(breakBase);
   i = 0;

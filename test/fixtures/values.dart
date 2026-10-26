@@ -1248,6 +1248,11 @@ void flowContexts() {
     break;
   } while (turn < 3);
   print([carried, turn]);
+  int certain;
+  // Sound flow uses the non-null type for definite assignment since Dart 3.9.
+  // ignore: unnecessary_null_comparison
+  if (turn != null) certain = turn;
+  print(certain);
 }
 
 int staticReturn(dynamic value) => value;
