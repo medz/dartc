@@ -24,6 +24,8 @@ dart run bin/dartc.dart example/hello.dart -o build/hello
 
 ## Supported Dart
 
+Language compatibility targets Dart 3.13.5. The [specification tracker](specs/README.md) maps official language clauses to implementation gaps and behavior tests; the list below is a usage summary.
+
 - Top-level functions and variables, direct calls, and recursion.
 - Integers, booleans, strings, and typed lists.
 - Local variables, assignments, arithmetic, comparisons, and short-circuit logic.
