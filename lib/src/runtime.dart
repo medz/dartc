@@ -10,8 +10,7 @@ external int nativeSyscall(int n, int a, int b, int c, int d, int e, int f);
 external int nativeTarget();
 external int nativeMetadataAddress();
 
-const int rtStringUnitBytes = 2;
-const int rtStringHeaderBytes = 24;
+const int rtAbiVersion = 2;
 
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
@@ -141,7 +140,7 @@ int rtStringAllocate(int descriptor, int length) {
   var size = nativeLoad64(descriptor + descriptorSizeOffset);
   var result = rtAlloc(size + length * 2);
   nativeStore64(result, descriptor);
-  nativeStore64(result + 8, 0);
+  nativeStore64(result + objectFlagsOffset, 0);
   nativeStore64(result + stringLengthOffset, length);
   return result;
 }
@@ -641,18 +640,18 @@ int rtHostFinish(int path, int outputTarget) {
 
 int rtObjectDescriptor(int object) {
   var descriptor = nativeLoad64(object);
-  if ((nativeLoad64(object + 8) & objectStaticRelative) != 0) {
+  if ((nativeLoad64(object + objectFlagsOffset) & objectStaticRelative) != 0) {
     descriptor = object + descriptor;
   }
   return descriptor;
 }
 
 int rtObjectNew(int descriptor) {
-  var size = nativeLoad64(descriptor + 8);
+  var size = nativeLoad64(descriptor + descriptorSizeOffset);
   var object = rtAlloc(size);
   nativeStore64(object, descriptor);
-  nativeStore64(object + 8, 0);
-  var offset = 16;
+  nativeStore64(object + objectFlagsOffset, 0);
+  var offset = objectHeaderBytes;
   while (offset < size) {
     nativeStore64(object + offset, 0);
     offset = offset + 8;
@@ -661,10 +660,10 @@ int rtObjectNew(int descriptor) {
 }
 
 int rtObjectGet(int object, int index) {
-  return nativeLoad64(object + 16 + index * 8);
+  return nativeLoad64(object + objectHeaderBytes + index * 8);
 }
 
 int rtObjectSet(int object, int index, int value) {
-  nativeStore64(object + 16 + index * 8, value);
+  nativeStore64(object + objectHeaderBytes + index * 8, value);
   return value;
 }

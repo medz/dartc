@@ -1,5 +1,8 @@
 // Shared compiler/runtime object layout. Offsets are bytes.
+const int runtimeAbiVersion = 2;
 const int objectHeaderBytes = 16;
+const int objectFlagsOffset = 8;
+// Static objects store a descriptor displacement relative to their own address.
 const int objectStaticRelative = 1;
 const int stringLengthOffset = 16;
 const int stringDataOffset = 24;

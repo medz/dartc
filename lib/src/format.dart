@@ -139,9 +139,9 @@ ConstantLayout layoutConstants(int start) {
   while (i < strings.length) {
     if (stringOffsets[i] == 0) {
       stringOffsets[i] = end;
-      int bytes = stringHeaderBytes + strings[i].length * stringUnitBytes;
+      int bytes = stringDataOffset + strings[i].length * 2;
       end = end + alignImage(bytes, 8);
-      if (stringHeaderBytes == stringDataOffset) needsStringDescriptor = true;
+      needsStringDescriptor = true;
     }
     i++;
   }
@@ -398,20 +398,14 @@ void imageConstants(ConstantLayout layout) {
   while (stringIndex < strings.length) {
     if (layout.stringOffsets[stringIndex] >= 0) {
       String value = strings[stringIndex];
-      if (stringHeaderBytes == stringDataOffset) {
-        image64(
-          layout.stringDescriptorOffset - layout.stringOffsets[stringIndex],
-        );
-        image64(objectStaticRelative);
-      }
+      image64(
+        layout.stringDescriptorOffset - layout.stringOffsets[stringIndex],
+      );
+      image64(objectStaticRelative);
       image64(value.length);
       int character = 0;
       while (character < value.length) {
-        if (stringUnitBytes == 2) {
-          image16(value.codeUnitAt(character));
-        } else {
-          image64(value.codeUnitAt(character));
-        }
+        image16(value.codeUnitAt(character));
         character++;
       }
       imageZeros(alignImage(image.length, 8) - image.length);

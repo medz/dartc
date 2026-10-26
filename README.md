@@ -52,6 +52,8 @@ The native compiler uses `lib/src/runtime.dart` as its standard-runtime source. 
 dartc program.dart -o program --std /path/to/dartc/lib/src/runtime.dart
 ```
 
+The compiler and runtime source must use the same ABI. Rebuild the compiler when updating the runtime source.
+
 The compiler writes ARM64 instructions, Mach-O, ELF, archives, and local Mach-O signatures in Dart. No C compiler, assembler, linker, or signing subprocess is required.
 
 ## Cross-compile

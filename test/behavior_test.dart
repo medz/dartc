@@ -76,7 +76,7 @@ class Counter {
 const int bias = 7;
 const bool enabled = true;
 const int labelValue = -1234567;
-const int rtStringHeaderBytes = 8;
+const int rtAbiVersion = -1;
 int calls = 0;
 int traversals = 0;
 int initial = initialize();
@@ -361,7 +361,7 @@ import './nested/../other.dart' as other show shared;
 import 'math.dart' as math hide shared;
 import 'host.dart';
 int nativeLoad16(int value) => value + 3;
-const int rtStringHeaderBytes = 24;
+const int rtAbiVersion = -2;
 void main() {
   print(shared());
   print(other.shared());
@@ -431,11 +431,13 @@ void main() {
     final empty = File('${temporary.path}/empty.dart')
       ..writeAsStringSync('void main() {}');
     final invalidRuntimes = [
-      'external int nativeLoad64(int pointer, int extra);',
-      'external bool nativeTarget();',
-      "external int nativeLoad64(int pointer); int invalid() => nativeLoad64('wrong');",
-      'external int nativeMetadataAddress(int extra);',
-      'const int rtStringHeaderBytes = 16;',
+      'const int rtAbiVersion = 2; external int nativeLoad64(int pointer, int extra);',
+      'const int rtAbiVersion = 2; external bool nativeTarget();',
+      "const int rtAbiVersion = 2; external int nativeLoad64(int pointer); int invalid() => nativeLoad64('wrong');",
+      'const int rtAbiVersion = 2; external int nativeMetadataAddress(int extra);',
+      'const int rtAbiVersion = 1;',
+      'int rtAbiVersion = 2;',
+      '',
     ];
     for (var i = 0; i < invalidRuntimes.length; i++) {
       final runtime = File('${temporary.path}/runtime-$i.dart')

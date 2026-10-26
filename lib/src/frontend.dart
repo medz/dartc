@@ -1758,35 +1758,25 @@ void parseSource(SourceProgram source) {
   var syntax = parseUnit(Parser(feTokens, 0, 0, paths));
   feInstallSymbols();
   feCollectDeclarations(syntax);
-  stringUnitBytes = 8;
-  stringHeaderBytes = 8;
-  var runtimeGlobal = 0;
-  while (runtimeGlobal < globalNames.length) {
-    if (feRawGlobals[runtimeGlobal] == 1 &&
-        globalNames[runtimeGlobal] == 'rtStringUnitBytes') {
-      if (_feLiteralTypes[runtimeGlobal] != tInt ||
-          (_feLiteralValues[runtimeGlobal] != 2 &&
-              _feLiteralValues[runtimeGlobal] != 8)) {
-        feAstError(
-          feGlobalNodes[runtimeGlobal].token,
-          'runtime rtStringUnitBytes must be 2 or 8',
-        );
-      }
-      stringUnitBytes = _feLiteralValues[runtimeGlobal];
+  if (imageKind == 0) {
+    var marker = symbolOwnDeclaration(feSymbols, 0, 'rtAbiVersion');
+    if (marker < 0 || feSymbols.declarations[marker].kind != symbolGlobal) {
+      sourceError(
+        feSources,
+        feSources.files[0].tokens[0],
+        'runtime must declare const int rtAbiVersion = ' +
+            runtimeAbiVersion.toString(),
+      );
     }
-    if (feRawGlobals[runtimeGlobal] == 1 &&
-        globalNames[runtimeGlobal] == 'rtStringHeaderBytes') {
-      if (_feLiteralTypes[runtimeGlobal] != tInt ||
-          (_feLiteralValues[runtimeGlobal] != 8 &&
-              _feLiteralValues[runtimeGlobal] != stringDataOffset)) {
-        feAstError(
-          feGlobalNodes[runtimeGlobal].token,
-          'runtime rtStringHeaderBytes must be 8 or 24',
-        );
-      }
-      stringHeaderBytes = _feLiteralValues[runtimeGlobal];
+    var global = feSymbols.declarations[marker].target;
+    if (_feLiteralTypes[global] != tInt ||
+        _feLiteralValues[global] != runtimeAbiVersion) {
+      feAstError(
+        feGlobalNodes[global].token,
+        'runtime rtAbiVersion must be const int ' +
+            runtimeAbiVersion.toString(),
+      );
     }
-    runtimeGlobal++;
   }
   var sourceFunctions = functions.length;
   var sourceGlobals = globalNames.length;
