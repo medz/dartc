@@ -890,6 +890,19 @@ void main() {
         .copySync('${core.path}/string_buffer.dart');
     final empty = File('${temporary.path}/empty.dart')
       ..writeAsStringSync('void main() {}');
+    final emptyRuntime = File('${temporary.path}/runtime-empty.dart')
+      ..writeAsStringSync('const int rtAbiVersion = $runtimeAbiVersion;');
+    final emptyExecutable = '${empty.path}.out';
+    run(
+      driver,
+      compileArguments(empty, emptyExecutable, emptyRuntime.path),
+      native: compiler != null,
+    );
+    if (run(emptyExecutable, [], native: true).stdout != '') {
+      throw StateError(
+        'Empty program with no runtime storage produced output.',
+      );
+    }
     final invalidRuntimes = [
       'const int rtAbiVersion = $runtimeAbiVersion; external int nativeLoad64(int pointer, int extra);',
       'const int rtAbiVersion = $runtimeAbiVersion; external bool nativeTarget();',

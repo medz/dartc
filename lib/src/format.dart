@@ -109,6 +109,8 @@ class ConstantLayout {
   int handleTypeOffset;
   int metadataOffset;
   int end;
+  List<int> globalOffsets = <int>[];
+  int globalBytes = 0;
   List<int> listOffsets = <int>[];
   List<int> refBitmapOffsets = <int>[];
   List<int> taggedBitmapOffsets = <int>[];
@@ -161,6 +163,7 @@ ConstantLayout layoutConstants(int start) {
   List<int> listOffsets = <int>[];
   List<int> refBitmapOffsets = <int>[];
   List<int> taggedBitmapOffsets = <int>[];
+  List<int> globalOffsets = <int>[];
   List<int> types = <int>[];
   int i = 0;
   while (i < strings.length) {
@@ -185,11 +188,18 @@ ConstantLayout layoutConstants(int start) {
     listOffsets.add(-1);
     i++;
   }
+  i = 0;
+  while (i < globalNames.length) {
+    globalOffsets.add(-1);
+    i++;
+  }
   int features = 0;
   i = 0;
   while (i < addressKinds.length) {
     if (addressKinds[i] == 0) {
       stringOffsets[addressTargets[i]] = 0;
+    } else if (addressKinds[i] == 1) {
+      globalOffsets[addressTargets[i]] = 0;
     } else if (addressKinds[i] == 2) {
       descriptorOffsets[addressTargets[i]] = 0;
     } else if (addressKinds[i] == 3) {
@@ -198,6 +208,15 @@ ConstantLayout layoutConstants(int start) {
       markTypeReference(typeOffsets, types, addressTargets[i]);
     } else if (addressKinds[i] == 5) {
       listOffsets[addressTargets[i]] = 0;
+    }
+    i++;
+  }
+  var globalBytes = 0;
+  i = 0;
+  while (i < globalOffsets.length) {
+    if (globalOffsets[i] == 0) {
+      globalOffsets[i] = globalBytes;
+      globalBytes += 8;
     }
     i++;
   }
@@ -356,7 +375,8 @@ ConstantLayout layoutConstants(int start) {
     }
     i = 0;
     while (i < globalTypes.length) {
-      if (typeIsReference(globalTypes[i]) || typeIsTagged(globalTypes[i])) {
+      if (globalOffsets[i] >= 0 &&
+          (typeIsReference(globalTypes[i]) || typeIsTagged(globalTypes[i]))) {
         globalRoots.add(i);
       }
       i++;
@@ -395,6 +415,8 @@ ConstantLayout layoutConstants(int start) {
     metadataOffset,
     end,
   );
+  layout.globalOffsets = globalOffsets;
+  layout.globalBytes = globalBytes;
   layout.listOffsets = listOffsets;
   layout.refBitmapOffsets = refBitmapOffsets;
   layout.taggedBitmapOffsets = taggedBitmapOffsets;
@@ -417,14 +439,14 @@ List<int> createMachOExecutable() {
   ConstantLayout constants = layoutConstants(constantOffset);
   int payloadEnd = constants.end;
   int textSize = alignImage(payloadEnd, page);
-  int dataSize = alignImage(globalNames.length * 8, page);
+  int dataSize = alignImage(constants.globalBytes, page);
   int site = 0;
   while (site < addressSites.length) {
     int target = 0;
     if (addressKinds[site] == 0) {
       target = base + constants.stringOffsets[addressTargets[site]];
     } else if (addressKinds[site] == 1) {
-      target = dataBase + addressTargets[site] * 8;
+      target = dataBase + constants.globalOffsets[addressTargets[site]];
     } else if (addressKinds[site] == 2) {
       target = base + constants.descriptorOffsets[addressTargets[site]];
     } else if (addressKinds[site] == 3) {
@@ -470,7 +492,7 @@ List<int> createMachOExecutable() {
     0,
   );
   imageSegment('__DATA', dataBase, dataSize, textSize, 0, 3, 1);
-  imageSection('__bss', '__DATA', dataBase, 0, globalNames.length * 8, 1);
+  imageSection('__bss', '__DATA', dataBase, 0, constants.globalBytes, 1);
   int linkeditCommand = image.length;
   imageSegment('__LINKEDIT', dataBase + dataSize, page, textSize, 16, 1, 0);
 
@@ -504,7 +526,7 @@ List<int> createMachOExecutable() {
   image32(hash);
   image32((hash * 0x01000193) & 0xffffffff);
   image32((hash ^ payloadEnd) & 0xffffffff);
-  image32((hash ^ globalNames.length) & 0xffffffff);
+  image32((hash ^ (constants.globalBytes ~/ 8)) & 0xffffffff);
 
   image32(0x80000028);
   image32(24);
@@ -573,14 +595,14 @@ List<int> createElfExecutable() {
   int payloadEnd = constants.end;
   int dataOffset = alignImage(payloadEnd, 4096);
   int dataBase = base + dataOffset;
-  int dataSize = alignImage(globalNames.length * 8, 4096);
+  int dataSize = alignImage(constants.globalBytes, 4096);
   int site = 0;
   while (site < addressSites.length) {
     int target = 0;
     if (addressKinds[site] == 0) {
       target = base + constants.stringOffsets[addressTargets[site]];
     } else if (addressKinds[site] == 1) {
-      target = dataBase + addressTargets[site] * 8;
+      target = dataBase + constants.globalOffsets[addressTargets[site]];
     } else if (addressKinds[site] == 2) {
       target = base + constants.descriptorOffsets[addressTargets[site]];
     } else if (addressKinds[site] == 3) {
@@ -738,7 +760,7 @@ void imageRootTable(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
   while (i < layout.globalRoots.length) {
     var global = layout.globalRoots[i];
     var record = layout.globalRootsOffset + i * globalRootBytes;
-    image64(dataBaseOffset + global * 8 - record);
+    image64(dataBaseOffset + layout.globalOffsets[global] - record);
     var kind = storageTagged;
     if (typeIsReference(globalTypes[global])) kind = storageRef;
     image64(kind);
