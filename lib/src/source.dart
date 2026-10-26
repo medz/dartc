@@ -82,7 +82,7 @@ String sourcePath(String path) {
 }
 
 bool sourceIs(Token token, String text) {
-  return token.kind != tokenString && token.text == text;
+  return tokenIs(token, text);
 }
 
 int sourceLoad(SourceProgram program, String path) {

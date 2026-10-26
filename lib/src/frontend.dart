@@ -100,7 +100,7 @@ String fePeek() {
 }
 
 bool feIs(String text) {
-  return feTokens[feAt].kind != tokenString && fePeek() == text;
+  return tokenIs(feTokens[feAt], text);
 }
 
 bool feTake(String text) {
@@ -1224,6 +1224,7 @@ int feLowerExpression(AstExpression expression) {
     feLoad(expression.text);
     return type;
   }
+  if (kind == astInterpolation) return feLowerInterpolation(expression);
   if (kind == astList) return feLowerList(expression);
   if (kind == astMember) return feLowerMember(expression);
   if (kind == astCall) return feLowerCall(expression);
@@ -1963,4 +1964,39 @@ void feLowerLabeledJump(AstStatement statement, bool repeat) {
   } else {
     label.breaks.add(feJump(opJump));
   }
+}
+
+int feLowerInterpolation(AstExpression expression) {
+  var i = 0;
+  while (i < expression.children.length) {
+    var part = expression.children[i];
+    var type = feLowerExpression(part);
+    if (part.kind == astNull) {
+      feAstError(part.token, 'null interpolation is not supported yet');
+    }
+    if (type == tInt) {
+      feBuiltin(bIntToString, 1);
+    } else if (type == tBool) {
+      var otherwise = feJump(opJumpFalse);
+      feOperand(opString, feString('true'));
+      var done = feJump(opJump);
+      fePatch(otherwise, ir.length);
+      feOperand(opString, feString('false'));
+      fePatch(done, ir.length);
+    } else if (feClassType(type)) {
+      var owner = typeArgument(type);
+      var method = feFindFunction(feClassNames[owner] + '.toString');
+      if (method < 0) feAstError(part.token, 'interpolation requires toString');
+      if (functions[method].parameters != 1 ||
+          functions[method].result != tString) {
+        feAstError(part.token, 'interpolation requires String toString()');
+      }
+      feCall(method, 1);
+    } else if (type != tString) {
+      feAstError(part.token, 'unsupported interpolation value');
+    }
+    if (i > 0) feBuiltin(bStringConcat, 2);
+    i++;
+  }
+  return tString;
 }

@@ -13,6 +13,7 @@ const int astAssignment = 12;
 const int astConditional = 13;
 const int astNamedArgument = 14;
 const int astIndex = 15;
+const int astInterpolation = 16;
 
 class AstType {
   String name;

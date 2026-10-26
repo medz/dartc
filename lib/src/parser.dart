@@ -27,8 +27,7 @@ String parserPeek(Parser parser) {
 
 bool parserIs(Parser parser, String text) {
   if (parser.pendingClosers > 0) return text == '>';
-  return parser.tokens[parser.position].kind != tokenString &&
-      parserPeek(parser) == text;
+  return tokenIs(parser.tokens[parser.position], text);
 }
 
 bool parserTake(Parser parser, String text) {
@@ -150,20 +149,8 @@ AstExpression parserPrimary(Parser parser) {
       token,
     );
   }
-  if (current.kind == tokenString) {
-    var value = current.text;
-    parser.position++;
-    while (parser.tokens[parser.position].kind == tokenString) {
-      value = value + parser.tokens[parser.position].text;
-      parser.position++;
-    }
-    return AstExpression(
-      astString,
-      value,
-      <AstExpression>[],
-      <AstType>[],
-      token,
-    );
+  if (current.kind == tokenString || current.kind == tokenStringPart) {
+    return parserString(parser);
   }
   if (parserTake(parser, 'true') || parserTake(parser, 'false')) {
     return AstExpression(
@@ -976,4 +963,47 @@ List<AstVariable> parserVariableTail(Parser parser, AstVariable first) {
     );
   }
   return variables;
+}
+
+AstExpression parserString(Parser parser) {
+  var token = parser.position;
+  List<AstExpression> parts = <AstExpression>[];
+  var interpolated = false;
+  while (parser.tokens[parser.position].kind == tokenString ||
+      parser.tokens[parser.position].kind == tokenStringPart) {
+    var plain = parser.tokens[parser.position].kind == tokenString;
+    while (true) {
+      var part = parser.tokens[parser.position];
+      parts.add(
+        AstExpression(
+          astString,
+          part.text,
+          <AstExpression>[],
+          <AstType>[],
+          parser.position,
+        ),
+      );
+      parser.position++;
+      if (plain || part.kind == tokenStringTail) break;
+      interpolated = true;
+      if (parser.tokens[parser.position].kind != tokenInterpolationStart) {
+        parserError(parser, 'expected interpolation');
+      }
+      parser.position++;
+      parts.add(parseExpression(parser));
+      if (parser.tokens[parser.position].kind != tokenInterpolationEnd) {
+        parserError(parser, 'expected end of interpolation');
+      }
+      parser.position++;
+    }
+  }
+  if (interpolated)
+    return AstExpression(astInterpolation, '', parts, <AstType>[], token);
+  var text = '';
+  var i = 0;
+  while (i < parts.length) {
+    text = text + parts[i].text;
+    i++;
+  }
+  return AstExpression(astString, text, <AstExpression>[], <AstType>[], token);
 }

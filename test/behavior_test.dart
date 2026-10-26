@@ -19,6 +19,7 @@ class FunctionInfo {
   }
 
   String label() => this.name + ':' + this.start.toString();
+  String toString() => this.label();
 }
 
 const int bias = 7;
@@ -143,6 +144,8 @@ void main(List<String> args) {
     multiple += left + right + offset;
   }
   print(multiple);
+  print('value=$multiple, enabled=$enabled, text=${text.substring(0, 4)}, info=$info');
+  print('nested=${'${multiple + 1}'}');
   switch (text.substring(0, 4)) {
     case 'Dart':
       print('switch');
