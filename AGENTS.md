@@ -1,6 +1,7 @@
 # Development
 
 - Keep the implementation direct and small. Use native Dart and avoid unnecessary dependencies or abstractions.
+- Keep module ownership explicit. Import definitions from their owning files; do not hide internal dependencies behind barrel exports.
 - Work toward genuine native self-hosting. Do not substitute an official-compiler wrapper or interpreter for compiling Dart source to native instructions.
 - Keep README and other user documentation focused on installation, supported behavior, and usage. Do not add internal progress logs.
 - Test observable behavior through real compilation and execution. Give each behavior one owning test; avoid mocks, source-text assertions, and tests that repeat implementation details.

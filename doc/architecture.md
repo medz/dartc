@@ -25,7 +25,7 @@
 
 自托管之后的演进链路为：已有 dartc 编译改进后的 Dart 编译器与运行时，得到新版 dartc，再由新版重建自身并验证行为。引入新的底层原语时，先用旧版本已有能力实现识别和编译该原语的新版编译器，再让运行时开始使用它，保留可恢复的引导节点。
 
-本文的模块和 ABI 可以随实现经验调整。当前能编译自身的语言子集、启动期初始化和进程级 arena 都不代表最终语言兼容性或运行时设计已经完成；最终验收还包括一般 Dart 程序所需语义、可改进的运行时和上述自我演进能力。
+本文的模块和 ABI 可以随实现经验调整。当前能编译自身的语言子集、运行时启动约定和进程级 arena 都不代表最终语言兼容性或运行时设计已经完成；最终验收还包括一般 Dart 程序所需语义、可改进的运行时和上述自我演进能力。
 
 ## 架构基线
 
@@ -120,12 +120,67 @@ test/
 
 初始入口使用直接函数调用与固定阶段。只有增加真实的第二个目标时才抽出必要的共用目标逻辑，不先建立插件注册框架。
 
+## 前端阶段与语义边界
+
+递归下降是本项目可继续采用的解析方式。需要分离的是语法识别、名称绑定、类型判断与代码生成的职责，而不是为更换解析算法建立一套新框架。
+
+| 阶段 | 输入与输出 | 拥有的职责 |
+|---|---|---|
+| scanner | 一个源文件 → 带文件身份与位置的 tokens | 注释、标识符、字面量、运算符和词法错误；不查符号、不选择运行时函数 |
+| parser | tokens → 语法 AST | 声明、类型写法、表达式、语句和库指令；保留名称与源位置，不分配局部槽、不发射 IR |
+| resolver | 库图与 AST → 符号绑定及语义注解 | 库可见性、作用域、名称遮蔽、参数与成员绑定、类型规则和必要流分析 |
+| typed lowering | AST、绑定、类型与语言配置 → SSA | 保持求值顺序，展开语言结构，形成显式调用、控制流、对象操作及效果 |
+
+AST 只记录语法结构，例如调用的目标表达式、实参和类型实参；它不因一个名称恰好叫 `print` 就选择输出指令。类型写法同样先保留为语法节点，之后才解析为语义类型。绑定和类型可以保存在同一棵 AST 的注解表中；`ResolvedProgram` 是这些结果的组合，不要求再复制一棵“类型 AST”或增加一套优化 IR。
+
+库依赖由源文件中的库指令建立，保留库 URI、导入前缀和可见性信息，不能靠连接源码字符串获得名称空间。scanner 不负责寻找依赖，parser 不负责决定导入的名字最终指向哪个声明。根源文件和后续发现的依赖使用相同的扫描、解析入口，之后统一交给 resolver。
+
+### 过渡实现与目标的差距
+
+现有前端已经包含字符级扫描和递归下降表达式、语句解析。其过渡实现仍会在消费 tokens 的同时查询声明表、推断类型、分配局部槽并发射线性栈 IR，再由 `buildSsa` 提升为类型化 CFG SSA。声明预扫描还承担字段布局与函数签名登记。这条路径已经能够支撑自托管，但尚不等于上表中的 parser、resolver 和 typed lowering 已独立实现。 当前 Token 记录的是拼接输入中的 UTF16 偏移，尚无文件身份；依赖仍按 import 行收集并拼接，库命名空间与源文件映射尚未建立。
+
+主要需要拆开的耦合如下：
+
+- 类型写法的解析同时查询已发现的类并构造语义类型，语法识别因此依赖声明收集状态。
+- 调用和成员表达式在解析期间按拼写及接收者类型选择 builtin 或普通函数，并立即产生 IR；尚未使用绑定后的库符号身份。类型判断与运行时实现选择发生在同一次遍历中。
+- 条件、循环、赋值和构造器在解析时立即分配槽位、修补跳转或展开字段写入，没有可供独立绑定与检查的语法结构。
+- 导入收集、声明可见性和原语身份尚不能只靠“源文件已扫描”或“已有类型编号”代替。独立 scanner 只解决词法边界，不自动完成库解析和语义绑定。
+
+这些是需要逐步替换的实现边界，不是为已有子集补充更多名称分支的理由。
+
+### 绑定后再选择 builtin
+
+resolver 必须先回答一个名称属于哪个库、哪个声明，以及成员和类型实参绑定到哪里。局部变量、用户声明和导入前缀都参与这个过程。用户自己的 `print`、`nativeLoad16` 或同名成员不能仅因拼写相同就获得标准库或底层原语语义。
+
+builtin 表以已绑定的库符号身份及其声明契约为入口，例如目标标准库中的 `dart:core` 输出函数、受信任的内部内存原语，或 `dart:ffi` 中具有显式 NativeType 签名的声明。完成绑定与类型核验后，typed lowering 才能选择普通库调用、受约束的内建操作或等价的直接指令。符号名仍可用于诊断，但不能作为唯一身份。
+
+`String` 和 `List` 的成员、运算符以及 FFI 声明也遵守这一规则。解析器只产生调用、成员访问或运算表达式；接收者类型和已绑定声明决定其语义。标准库实现可以演进，前端不应因此不断增加按成员文本选择运行时函数的分支。原语的签名、效果与可信来源在明确边界核验，内部阶段使用核验后的符号和类型。
+
+### 保持原生自举的渐进替换
+
+先固定源文件身份、token 位置与库指令，再把当前支持的声明、表达式和语句保存为普通 Dart AST 节点。resolver 收集声明并建立作用域，随后逐项接管当前解析过程中完成的绑定和类型工作。AST 节点只在真实语言构造需要时增加，不提前建立通用插件或 visitor 框架。
+
+迁移期间，新的 typed lowering 可以继续输出现有带类型信息的栈 IR，由既有 SSA 提升和后端编译。这只是保留可用后端的适配边界，不把栈 IR 发展为第三套长期优化表示；在语义边界稳定后，再由相同 lowering 直接构造 SSA。两条入口不长期独立实现同一套 Dart 语义。
+
+每次替换保持旧原生编译器能够构建新版，并由新版继续构建自身；已有程序的可观察行为和后续自编译结果用于验证迁移。若 AST 或 resolver 的实现需要新语言能力，先引导该能力，再在自身源码采用。完成一个文件的拆分，不作为整个前端架构完成的判据。
+
+### 实现参考与组织原则
+
+- [OXC 的 parser 与 semantic](https://github.com/oxc-project/oxc/tree/main/crates)：语法结构与作用域、符号身份分开，语义结果附着已有 AST；本项目保持单一 Dart 包，不复制其 Rust crate 划分。
+- [Go 的编译阶段](https://github.com/golang/go/blob/master/src/cmd/compile/README.md)及[原语选择](https://github.com/golang/go/blob/master/src/cmd/compile/internal/ssagen/intrinsics.go)：通用语义先进入 IR，目标相关 lowering 与分配在后；原语选择依赖已经绑定的调用和库身份。
+- [Zerolang 的类型核心](https://github.com/vercel-labs/zerolang/blob/main/native/zero-c/src/type_core.h)和[文件映像接口](https://github.com/vercel-labs/zerolang/blob/main/native/zero-c/src/macho_format.h)：类型定义有单一归属，代码、重定位和映像通过明确数据交接；文件封装不回头猜测前端语义。
+
+源码按真实职责分组，需要同一份定义的模块直接 import 其拥有者。内部文件不通过转导隐藏依赖；也不为尚未实现的阶段预建目录、通用基类或注册框架。平台差异只在出现实际差异的位置拆开，公共的数据定义与算法仍共用。
+
 ## 构建数据流
 
 ```text
-SourceGraph
-  → ResolvedProgram
-  → 结构化语法展开
+SourceGraph（按库保留源文件及依赖）
+  → scanner：带源位置的 tokens
+  → parser：语法 AST
+  → resolver：符号绑定、类型与流分析
+  → ResolvedProgram（AST 与语义注解）
+  → typed lowering 与结构化语法展开
   → SsaProgram
   → 局部优化与全程序分析
   → 表示选择与运行时 ABI 展开
@@ -145,7 +200,9 @@ SourceGraph
 主要接口按下列职责划分；名称和类型表示模块契约，不是已实现的 API。
 
 ```dart
-ResolvedProgram resolve(SourceGraph sources, LanguageConfig language);
+Tokens scan(SourceUnit source);
+AstUnit parse(Tokens tokens);
+ResolvedProgram resolve(SourceGraph parsedUnits, LanguageConfig language);
 SsaProgram buildSsa(ResolvedProgram program);
 void optimize(SsaProgram program, OptimizationPolicy policy);
 void lowerRepresentations(SsaProgram program, TargetAbi abi);

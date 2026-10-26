@@ -31,9 +31,9 @@ dart run bin/dartc.dart example/hello.dart -o build/hello
 - Basic string and list operations, Unicode strings, `print`, and command-line arguments.
 - Relative source imports.
 
-The source checkout additionally supports simple classes with fields, field-formal constructors, and directly resolved instance methods.
+The source checkout additionally supports simple classes with fields, field-formal constructors, and directly resolved instance methods, nested typed lists, and lazy top-level initialization.
 
-Inheritance, closures, exceptions, async code, and most SDK libraries are not yet supported. Top-level variables are initialized lazily. Runtime memory is currently reclaimed when the process exits. Self-hosting does not imply full Dart language compatibility.
+Inheritance, closures, exceptions, async code, and most SDK libraries are not yet supported. Runtime memory is currently reclaimed when the process exits. Self-hosting does not imply full Dart language compatibility.
 
 ## Build a standalone compiler
 

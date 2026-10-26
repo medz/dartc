@@ -1,11 +1,13 @@
 external int nativeLoad64(int p);
 external int nativeStore64(int p, int value);
+external int nativeLoad16(int p);
+external int nativeStore16(int p, int value);
 external int nativeLoad8(int p);
 external int nativeStore8(int p, int value);
 external int nativeSyscall(int n, int a, int b, int c, int d, int e, int f);
 external int nativeTarget();
 
-const int rtStringUnitBytes = 8;
+const int rtStringUnitBytes = 2;
 
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
@@ -94,11 +96,11 @@ int rtStringLength(int value) {
 }
 
 int rtStringCodeUnit(int value, int index) {
-  return nativeLoad64(value + 8 + index * 8);
+  return nativeLoad16(value + 8 + index * 2);
 }
 
 int rtStringNew(int length) {
-  var result = rtAlloc(8 + length * 8);
+  var result = rtAlloc(8 + length * 2);
   nativeStore64(result, length);
   return result;
 }
@@ -109,12 +111,12 @@ int rtStringConcat(int left, int right) {
   var result = rtStringNew(a + b);
   var i = 0;
   while (i < a) {
-    nativeStore64(result + 8 + i * 8, nativeLoad64(left + 8 + i * 8));
+    nativeStore16(result + 8 + i * 2, nativeLoad16(left + 8 + i * 2));
     i = i + 1;
   }
   i = 0;
   while (i < b) {
-    nativeStore64(result + 8 + (a + i) * 8, nativeLoad64(right + 8 + i * 8));
+    nativeStore16(result + 8 + (a + i) * 2, nativeLoad16(right + 8 + i * 2));
     i = i + 1;
   }
   return result;
@@ -126,7 +128,7 @@ int rtStringEqual(int left, int right) {
   if (length != nativeLoad64(right)) return 0;
   var i = 0;
   while (i < length) {
-    if (nativeLoad64(left + 8 + i * 8) != nativeLoad64(right + 8 + i * 8))
+    if (nativeLoad16(left + 8 + i * 2) != nativeLoad16(right + 8 + i * 2))
       return 0;
     i = i + 1;
   }
@@ -138,9 +140,9 @@ int rtStringSubstring(int value, int start, int end) {
   var result = rtStringNew(end - start);
   var i = start;
   while (i < end) {
-    nativeStore64(
-      result + 8 + (i - start) * 8,
-      nativeLoad64(value + 8 + i * 8),
+    nativeStore16(
+      result + 8 + (i - start) * 2,
+      nativeLoad16(value + 8 + i * 2),
     );
     i = i + 1;
   }
@@ -152,8 +154,8 @@ int rtStringStartsWith(int value, int prefix, int start) {
   if (start + n > nativeLoad64(value)) return 0;
   var i = 0;
   while (i < n) {
-    if (nativeLoad64(value + 8 + (start + i) * 8) !=
-        nativeLoad64(prefix + 8 + i * 8))
+    if (nativeLoad16(value + 8 + (start + i) * 2) !=
+        nativeLoad16(prefix + 8 + i * 2))
       return 0;
     i = i + 1;
   }
@@ -207,11 +209,11 @@ int rtIntToString(int value) {
     number = quotient;
   }
   var result = rtStringNew(count + negative);
-  if (negative == 1) nativeStore64(result + 8, 45);
+  if (negative == 1) nativeStore16(result + 8, 45);
   var i = 0;
   while (i < count) {
-    nativeStore64(
-      result + 8 + (negative + i) * 8,
+    nativeStore16(
+      result + 8 + (negative + i) * 2,
       nativeLoad64(digits + (count - i - 1) * 8),
     );
     i = i + 1;
@@ -333,11 +335,11 @@ int rtStringFromCodes(int codes) {
     var c = rtListGet(codes, i);
     if (c > 65535) {
       var scalar = c - 65536;
-      nativeStore64(result + 8 + count * 8, 55296 + (scalar >> 10));
-      nativeStore64(result + 16 + count * 8, 56320 + (scalar & 1023));
+      nativeStore16(result + 8 + count * 2, 55296 + (scalar >> 10));
+      nativeStore16(result + 10 + count * 2, 56320 + (scalar & 1023));
       count = count + 2;
     } else {
-      nativeStore64(result + 8 + count * 8, c);
+      nativeStore16(result + 8 + count * 2, c);
       count = count + 1;
     }
     i = i + 1;
@@ -372,11 +374,11 @@ int rtStringDecodeUtf8(int bytes, int length) {
     }
     if (c > 65535) {
       var scalar = c - 65536;
-      nativeStore64(result + 8 + count * 8, 55296 + (scalar >> 10));
-      nativeStore64(result + 16 + count * 8, 56320 + (scalar & 1023));
+      nativeStore16(result + 8 + count * 2, 55296 + (scalar >> 10));
+      nativeStore16(result + 10 + count * 2, 56320 + (scalar & 1023));
       count = count + 2;
     } else {
-      nativeStore64(result + 8 + count * 8, c);
+      nativeStore16(result + 8 + count * 2, c);
       count = count + 1;
     }
   }
@@ -396,11 +398,11 @@ int rtStringEncodeUtf8(int value) {
   var i = 0;
   var count = 0;
   while (i < length) {
-    var c = nativeLoad64(value + 8 + i * 8);
+    var c = nativeLoad16(value + 8 + i * 2);
     i = i + 1;
     if (c >= 55296 && c <= 56319) {
       var low = 0;
-      if (i < length) low = nativeLoad64(value + 8 + i * 8);
+      if (i < length) low = nativeLoad16(value + 8 + i * 2);
       if (low >= 56320 && low <= 57343) {
         c = 65536 + ((c - 55296) << 10) + low - 56320;
         i = i + 1;
