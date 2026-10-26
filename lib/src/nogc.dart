@@ -46,6 +46,23 @@ bool _ssaNonnegative(List<SsaInstruction?> definitions, int value) {
           _ssaConstant(definitions, definition.inputs[1], false));
 }
 
+bool _builtinThrows(int target) {
+  // A raw abort implementation does not discharge a Dart failure obligation.
+  return target == bValueCast ||
+      target == bValueBool ||
+      target == bStringCodeUnit ||
+      target == bStringSubstring ||
+      target == bStringFromCodes ||
+      target == bStringIndexOf ||
+      target == bStringStartsWith ||
+      target == bStringLastIndexOf ||
+      target == bIntParse ||
+      target >= bListGet && target <= bListFilled ||
+      target >= bValueAdd && target <= bValueUshr ||
+      target >= bValueLt && target <= bValueGe ||
+      target == bValueToString;
+}
+
 List<int> checkNoGcSsa(
   List<SsaFunction> program,
   SourceProgram sources,
@@ -79,7 +96,7 @@ List<int> checkNoGcSsa(
           effects |= ssaThrow;
         } else if (op == opBuiltin) {
           var target = instruction.target;
-          if (target == bValueCast || target == bValueBool) effects |= ssaThrow;
+          if (_builtinThrows(target)) effects |= ssaThrow;
           if (target == bObjectNew ||
               target == bListNew ||
               target == bListFilled ||

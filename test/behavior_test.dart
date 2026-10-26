@@ -808,7 +808,9 @@ int compute(int value) {
 }
 @core.pragma('dartc:no-gc')
 Object box(bool value) => value;
-void main() { print(compute(65)); print(box(true)); print(box(false)); }
+@pragma('dartc:no-gc')
+bool safe(String value, String suffix) => value.endsWith(suffix);
+void main() { print(compute(65)); print(box(true)); print(box(false)); print(safe('a', 'long')); }
 ''',
       'nogc-user-annotation.dart': r'''
 class pragma { final String name; const pragma(this.name); }
@@ -853,6 +855,9 @@ void main() { print(allocated()); }
     compare(File('${temporary.path}/const-class-metadata-only.dart'), []);
     compare(File('${temporary.path}/const-class-finite-default.dart'), []);
     final rejected = [
+      "@pragma('dartc:no-gc') int checked(String value,int index)=>value.codeUnitAt(index);void main(){print(checked('a',0));}",
+      "@pragma('dartc:no-gc') int checked(String value)=>int.parse(value);void main(){print(checked('7'));}",
+      "@pragma('dartc:no-gc') void checked(List<int> values){values.clear();}void main(){var values=<int>[1];checked(values);print(values.length);}",
       "import 'dart:core'; import 'dart:core' as core; List<int> helper() => <int>[1]; @core.pragma('dartc:no-gc') List<int> bad() => helper(); void main() {}",
       "const noGc = pragma('dartc:no-gc'); void helper([List<int> values = const <int>[1]]) {} @noGc void bad() { helper(); } void main() {}",
       "Object value = 1; @pragma('dartc:no-gc') Object bad() => value; void main() {}",
