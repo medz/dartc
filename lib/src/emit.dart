@@ -126,6 +126,19 @@ void emitInstruction(MachineInstruction instruction, MachineFunction function) {
       machineCode.add(0xd4001001);
       machineCode.add(0xda803400);
     }
+  } else if (op == mShlImmediate ||
+      op == mShrImmediate ||
+      op == mUshrImmediate) {
+    int left = emitOperand(function, inputs[0], 0);
+    result = emitDestination(function, output);
+    int count = instruction.target;
+    int opcode = 0xd340fc00 | (count << 16);
+    if (op == mShlImmediate) {
+      opcode = 0xd3400000 | (((64 - count) & 63) << 16) | ((63 - count) << 10);
+    } else if (op == mShrImmediate) {
+      opcode = 0x9340fc00 | (count << 16);
+    }
+    machineCode.add(opcode | (left << 5) | result);
   } else if (op == mShl || op == mShr || op == mUshr) {
     int left = emitOperand(function, inputs[0], 0);
     int right = emitOperand(function, inputs[1], 1);

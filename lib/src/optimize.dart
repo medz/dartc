@@ -455,10 +455,92 @@ void removeDeadValues(SsaFunction function) {
   }
 }
 
+void resolveValues(List<int> aliases, List<int> values) {
+  var i = 0;
+  while (i < values.length) {
+    values[i] = resolveValue(aliases, values[i]);
+    i++;
+  }
+}
+
+void simplifyBooleanChecks(SsaFunction function) {
+  var boxes = <int>[];
+  var b = 0;
+  while (b < function.blocks.length) {
+    var instructions = function.blocks[b].instructions;
+    var i = 0;
+    while (i < instructions.length) {
+      var instruction = instructions[i];
+      if (instruction.op == opBuiltin &&
+          instruction.target == bBoxBool &&
+          instruction.effects == 0 &&
+          instruction.value >= 0 &&
+          function.valueTypes[instruction.inputs[0]] == tBool) {
+        if (boxes.isEmpty) boxes = ssaFill(function.valueTypes.length, -1);
+        boxes[instruction.value] = instruction.inputs[0];
+      }
+      i++;
+    }
+    b++;
+  }
+  if (boxes.isEmpty) return;
+  var aliases = <int>[];
+  b = 0;
+  while (b < function.blocks.length) {
+    var instructions = function.blocks[b].instructions;
+    var kept = 0;
+    var i = 0;
+    while (i < instructions.length) {
+      var instruction = instructions[i];
+      var check =
+          instruction.op == opTypeCast && instruction.target == tBool ||
+          instruction.op == opBuiltin &&
+              (instruction.target == bValueBool ||
+                  instruction.target == bValueCast &&
+                      instruction.resultType == tBool);
+      var source = -1;
+      if (check) source = boxes[instruction.inputs[0]];
+      if (source >= 0) {
+        if (aliases.isEmpty) {
+          var value = 0;
+          while (value < function.valueTypes.length) {
+            aliases.add(value);
+            value++;
+          }
+        }
+        if (instruction.value >= 0) aliases[instruction.value] = source;
+      } else {
+        instructions[kept] = instruction;
+        kept++;
+      }
+      i++;
+    }
+    while (instructions.length > kept) instructions.removeLast();
+    b++;
+  }
+  if (aliases.isEmpty) return;
+  b = 0;
+  while (b < function.blocks.length) {
+    var block = function.blocks[b];
+    var i = 0;
+    while (i < block.instructions.length) {
+      resolveValues(aliases, block.instructions[i].inputs);
+      i++;
+    }
+    var end = block.end;
+    if (end.value >= 0) end.value = resolveValue(aliases, end.value);
+    if (end.kind == 1 || end.kind == 2)
+      resolveValues(aliases, end.first.arguments);
+    if (end.kind == 2) resolveValues(aliases, end.second.arguments);
+    b++;
+  }
+}
+
 void optimizeSsa(List<SsaFunction> program) {
   var i = 0;
   while (i < program.length) {
     var function = program[i];
+    simplifyBooleanChecks(function);
     var state = sccpAnalyze(function);
     sccpRewrite(function, state);
     removeDeadValues(function);

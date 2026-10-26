@@ -41,6 +41,9 @@ const int mLoad16 = 24;
 const int mStore16 = 25;
 const int mMove = 26;
 const int mCallIndirect = 27;
+const int mShlImmediate = 28;
+const int mShrImmediate = 29;
+const int mUshrImmediate = 30;
 
 class RegisterAllocation {
   List<int> locations;
@@ -154,6 +157,7 @@ void machineSelectInstruction(
   SsaInstruction source,
   List<int> types,
   List<int> reps,
+  List<int> counts,
   List<MachineInstruction> instructions,
 ) {
   int op = source.op;
@@ -319,13 +323,73 @@ void machineSelectInstruction(
   }
   int arithmetic = machineArithmetic(op);
   if (arithmetic != 0) {
+    var count = 0;
+    if ((op == opShl || op == opShr || op == opUshr) &&
+        counts[inputs[1]] >= 0) {
+      count = counts[inputs[1]];
+      if (op == opShl) arithmetic = mShlImmediate;
+      if (op == opShr) arithmetic = mShrImmediate;
+      if (op == opUshr) arithmetic = mUshrImmediate;
+      inputs.removeLast();
+      effects = 0;
+    }
     instructions.add(
-      MachineInstruction(arithmetic, output, inputs, 0, 0, effects),
+      MachineInstruction(arithmetic, output, inputs, count, 0, effects),
     );
     return;
   }
   print('Unsupported SSA operation: ' + op.toString());
   hostExit(1);
+}
+
+void machineRemoveUnusedConstants(List<MachineBlock> blocks, int count) {
+  var used = List<bool>.filled(count, false);
+  var b = 0;
+  while (b < blocks.length) {
+    var block = blocks[b];
+    var i = 0;
+    while (i < block.instructions.length) {
+      var inputs = block.instructions[i].inputs;
+      var n = 0;
+      while (n < inputs.length) {
+        used[inputs[n]] = true;
+        n++;
+      }
+      i++;
+    }
+    var end = block.end;
+    if (end.value >= 0) used[end.value] = true;
+    i = 0;
+    while (i < end.first.arguments.length) {
+      used[end.first.arguments[i]] = true;
+      i++;
+    }
+    i = 0;
+    while (i < end.second.arguments.length) {
+      used[end.second.arguments[i]] = true;
+      i++;
+    }
+    b++;
+  }
+  b = 0;
+  while (b < blocks.length) {
+    var instructions = blocks[b].instructions;
+    var i = 0;
+    var kept = 0;
+    while (i < instructions.length) {
+      var instruction = instructions[i];
+      if (instruction.op != mConstant ||
+          instruction.effects != 0 ||
+          instruction.output < 0 ||
+          used[instruction.output]) {
+        instructions[kept] = instruction;
+        kept++;
+      }
+      i++;
+    }
+    while (instructions.length > kept) instructions.removeLast();
+    b++;
+  }
 }
 
 List<MachineFunction> selectMachine(
@@ -357,7 +421,25 @@ List<MachineFunction> selectMachine(
       i = i + 1;
     }
     List<MachineBlock> blocks = <MachineBlock>[];
+    var counts = ssaFill(function.valueTypes.length, -1);
     int b = 0;
+    while (b < function.blocks.length) {
+      var instructions = function.blocks[b].instructions;
+      i = 0;
+      while (i < instructions.length) {
+        var instruction = instructions[i];
+        if (instruction.op == opInt &&
+            instruction.value >= 0 &&
+            instruction.effects == 0 &&
+            instruction.target >= 0 &&
+            instruction.target <= 63) {
+          counts[instruction.value] = instruction.target;
+        }
+        i++;
+      }
+      b++;
+    }
+    b = 0;
     while (b < function.blocks.length) {
       SsaBlock block = function.blocks[b];
       List<MachineInstruction> instructions = <MachineInstruction>[];
@@ -367,6 +449,7 @@ List<MachineFunction> selectMachine(
           block.instructions[i],
           function.valueTypes,
           reps,
+          counts,
           instructions,
         );
         i = i + 1;
@@ -386,6 +469,7 @@ List<MachineFunction> selectMachine(
       );
       b = b + 1;
     }
+    machineRemoveUnusedConstants(blocks, reps.length);
     result.add(
       MachineFunction(
         machineCopyValues(function.arguments),

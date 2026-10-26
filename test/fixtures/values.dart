@@ -461,6 +461,19 @@ void conditionTernary(bool a, bool b) {
   print('ternary:$selected:$conditionTrace');
 }
 
+void conditionComparisons(dynamic value) {
+  conditionTrace = '';
+  int result = 0;
+  if (argumentValue(1, value) < 3) result += 1;
+  if (!(argumentValue(2, value) >= 3)) result += 2;
+  if (argumentValue(3, value) < 3 && argumentValue(4, value) > 0) result += 4;
+  if (argumentValue(5, value) >= 3 || argumentValue(6, value) == 0) result += 8;
+  dynamic boxed = argumentValue(7, value) < 3;
+  bool explicit = boxed as bool;
+  print(<dynamic>[boxed, !(argumentValue(8, value) < 3)]);
+  print('$result:$explicit:$conditionTrace');
+}
+
 void conditionContexts() {
   for (int bits = 0; bits < 16; bits++) {
     conditionCase(
@@ -483,6 +496,9 @@ void conditionContexts() {
   var first = lazyCondition;
   var second = lazyCondition;
   print('lazy:$first:$second:$conditionTrace');
+  conditionComparisons(pass(1));
+  conditionComparisons(pass(4));
+  conditionComparisons(pass(0));
 }
 
 class BindingProbe {
@@ -872,10 +888,36 @@ void argumentCalls() {
   box.arguments(1, 'short', false, null, Box(2), values, 3, last: 8);
   print(recursiveArguments(3));
   print(box.recurse(2));
+}
+
+void literalShifts(int value) {
+  print(<int>[
+    value << 0,
+    value >> 0,
+    value >>> 0,
+    value << 1,
+    value >> 1,
+    value >>> 1,
+    value << 31,
+    value >> 31,
+    value >>> 31,
+    value << 32,
+    value >> 32,
+    value >>> 32,
+    value << 63,
+    value >> 63,
+    value >>> 63,
+  ]);
+}
+
+void shiftContexts() {
   for (int count in <int>[0, 63, 64, 65, 9223372036854775807]) {
     print(<int>[1 << count, -1 >> count, -1 >>> count]);
     print(<int>[-1 << count, 1 >> count, 1 >>> count]);
   }
+  literalShifts(-9223372036854775808);
+  literalShifts(9223372036854775807);
+  literalShifts(-1);
 }
 
 void bufferValues() {
@@ -982,6 +1024,7 @@ void main(List<String> args) {
   flowContexts();
   staticContexts(1, null);
   argumentCalls();
+  shiftContexts();
   bufferValues();
   stringBoundaries();
   listGrowth(args);
