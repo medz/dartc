@@ -153,15 +153,15 @@ int feMethod(int owner, String name, bool getter) {
   return feMemberFunctions[owner][method];
 }
 
-void feDeclare(int source, String name, int kind, int target, int token) {
-  if (declareSymbol(feSymbols, source, name, kind, target) < 0) {
+int feDeclare(int source, String name, int kind, int target, int token) {
+  var symbol = declareSymbol(feSymbols, source, name, kind, target);
+  if (symbol < 0) {
     feAstError(token, 'duplicate declaration ' + name);
   }
+  return symbol;
 }
 
 int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
-  if (syntax.setter && owner < 0)
-    feAstError(syntax.token, 'top-level setter binding is not yet supported');
   if (syntax.external) {
     var source = feTokens[syntax.token].source;
     var primitive = fePrimitive(syntax.name);
@@ -259,8 +259,22 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
   } else {
     feConstructors.add(0);
   }
-  if (owner < 0)
-    feDeclare(source, syntax.name, symbolFunction, id, syntax.token);
+  if (owner < 0) {
+    if (syntax.getter || syntax.setter) {
+      var symbol = declareAccessor(
+        feSymbols,
+        source,
+        syntax.name,
+        id,
+        syntax.setter,
+      );
+      if (symbol < 0) {
+        feAstError(syntax.token, 'duplicate declaration ' + syntax.name);
+      }
+    } else {
+      feDeclare(source, syntax.name, symbolFunction, id, syntax.token);
+    }
+  }
   return id;
 }
 
@@ -340,7 +354,15 @@ void feCollectDeclarations(AstUnit unit) {
       feRawGlobals.add(0);
     _feLiteralTypes.add(0);
     _feLiteralValues.add(0);
-    feDeclare(source, syntax.name, symbolGlobal, global, syntax.token);
+    var symbol = feDeclare(
+      source,
+      syntax.name,
+      symbolGlobal,
+      global,
+      syntax.token,
+    );
+    feSymbols.declarations[symbol].writable =
+        syntax.modifier != 'final' && syntax.modifier != 'const';
     i++;
   }
   i = 0;
@@ -608,8 +630,13 @@ int feFindFunction(String name) {
   feError('unknown runtime function ' + name);
 }
 
-int feResolveName(int token, String name, String prefix) {
-  var symbol = resolveSymbol(feSymbols, feTokens[token].source, name, prefix);
+int feResolveName(int token, String name, String prefix, bool writing) {
+  var source = feTokens[token].source;
+  var symbol = -1;
+  if (writing)
+    symbol = resolveWriteSymbol(feSymbols, source, name, prefix);
+  else
+    symbol = resolveSymbol(feSymbols, source, name, prefix);
   if (symbol == -2) feAstError(token, 'ambiguous name ' + name);
   return symbol;
 }
@@ -625,10 +652,10 @@ bool feHasPrefix(int token, String prefix) {
   return false;
 }
 
-int feExpressionSymbol(AstExpression expression) {
+int feExpressionSymbol(AstExpression expression, bool writing) {
   if (expression.kind == astName) {
     if (expression.binding >= 0 || feImplicitMember(expression)) return -1;
-    return feResolveName(expression.token, expression.text, '');
+    return feResolveName(expression.token, expression.text, '', writing);
   }
   if (expression.kind == astMember) {
     var receiver = expression.children[0];
@@ -636,7 +663,12 @@ int feExpressionSymbol(AstExpression expression) {
         receiver.binding < 0 &&
         !feImplicitMember(receiver) &&
         feHasPrefix(receiver.token, receiver.text)) {
-      return feResolveName(expression.token, expression.text, receiver.text);
+      return feResolveName(
+        expression.token,
+        expression.text,
+        receiver.text,
+        writing,
+      );
     }
   }
   return -1;
@@ -644,11 +676,12 @@ int feExpressionSymbol(AstExpression expression) {
 
 int feTypeSymbol(AstType syntax) {
   var dot = syntax.name.indexOf('.');
-  if (dot < 0) return feResolveName(syntax.token, syntax.name, '');
+  if (dot < 0) return feResolveName(syntax.token, syntax.name, '', false);
   return feResolveName(
     syntax.token,
     syntax.name.substring(dot + 1),
     syntax.name.substring(0, dot),
+    false,
   );
 }
 
@@ -693,8 +726,7 @@ int feLoadDeclaration(int symbol, int token) {
     feLoadGlobalValue(declaration.target);
     return type;
   }
-  if (declaration.kind == symbolFunction &&
-      feFunctionNodes[declaration.target].getter) {
+  if (declaration.kind == symbolProperty && declaration.target >= 0) {
     feCall(declaration.target, 0);
     return functions[declaration.target].result;
   }
@@ -814,6 +846,8 @@ class FeLvalue {
   int global;
   int owner = -1;
   int member = -1;
+  int reader = -1;
+  int setter = -1;
 
   FeLvalue(
     this.type,
@@ -1301,7 +1335,7 @@ int feLowerPointerBinding(AstExpression call) {
   }
   var native = feSymbols.declarations[binding].target;
   var implementation = call.children[1];
-  var target = feExpressionSymbol(implementation);
+  var target = feExpressionSymbol(implementation, false);
   if (target < 0 || feSymbols.declarations[target].kind != symbolFunction) {
     feAstError(
       implementation.token,
@@ -1656,18 +1690,11 @@ int feLowerNeverArguments(AstExpression call, AstExpression callee) {
 
 int feLowerCall(AstExpression call, int context) {
   var callee = feWithReceiver(call.children[0]);
-  var symbol = feExpressionSymbol(callee);
+  var symbol = feExpressionSymbol(callee, false);
   if (symbol >= 0) {
     var declaration = feSymbols.declarations[symbol];
     if (declaration.kind == symbolFunction) {
       var function = declaration.target;
-      if (feFunctionNodes[function].getter) {
-        if (functions[function].result == tNever) {
-          feCall(function, 0);
-          return feLowerNeverArguments(call, callee);
-        }
-        feAstError(call.token, 'getter is not callable: ' + declaration.name);
-      }
       var count = feLowerArguments(call, 1, function);
       feCall(function, count);
       return functions[function].result;
@@ -1690,7 +1717,7 @@ int feLowerCall(AstExpression call, int context) {
   }
   if (callee.kind == astMember) {
     var receiver = callee.children[0];
-    var owner = feExpressionSymbol(receiver);
+    var owner = feExpressionSymbol(receiver, false);
     if (owner >= 0 && feSymbols.declarations[owner].kind == symbolType) {
       return feLowerStaticCall(call, owner, context);
     }
@@ -1702,7 +1729,7 @@ int feLowerCall(AstExpression call, int context) {
 }
 
 int feLowerMember(AstExpression expression) {
-  var symbol = feExpressionSymbol(expression);
+  var symbol = feExpressionSymbol(expression, false);
   if (symbol >= 0) return feLoadDeclaration(symbol, expression.token);
   var type = feNonNullableValue(
     feLowerExpression(expression.children[0]),
@@ -1769,7 +1796,7 @@ int feReadBoundMember(int owner, MemberBinding member, int token) {
   feAstError(token, 'member has no getter: ' + member.name);
 }
 
-FeLvalue feLowerLvalue(AstExpression expression) {
+FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
   expression = feWithReceiver(expression);
   if (expression.kind == astName) {
     var binding = expression.binding;
@@ -1780,19 +1807,35 @@ FeLvalue feLowerLvalue(AstExpression expression) {
       return FeLvalue(feBindingTypes[binding], 0, -1, -1, binding, -1);
     }
   }
-  var symbol = feExpressionSymbol(expression);
+  var symbol = feExpressionSymbol(expression, true);
   if (symbol >= 0) {
     var declaration = feSymbols.declarations[symbol];
-    if (declaration.kind != symbolGlobal) {
+    var reader = -1;
+    if (reading) {
+      reader = feExpressionSymbol(expression, false);
+      if (reader < 0) feAstError(expression.token, 'declaration has no getter');
+    }
+    if (declaration.setter >= 0) {
+      var setter = declaration.setter;
+      var target = FeLvalue(
+        feParamTypes[feParamStarts[setter]],
+        5,
+        -1,
+        -1,
+        -1,
+        -1,
+      );
+      target.reader = reader;
+      target.setter = setter;
+      return target;
+    }
+    if (declaration.kind != symbolGlobal || !declaration.writable) {
       feAstError(
         expression.token,
         'declaration is not assignable: ' + declaration.name,
       );
     }
-    var modifier = feGlobalNodes[declaration.target].modifier;
-    if (modifier == 'const' || modifier == 'final')
-      feAstError(expression.token, 'cannot assign a final variable');
-    return FeLvalue(
+    var target = FeLvalue(
       feGlobalType(declaration.target),
       0,
       -1,
@@ -1800,6 +1843,8 @@ FeLvalue feLowerLvalue(AstExpression expression) {
       -1,
       declaration.target,
     );
+    target.reader = reader;
+    return target;
   }
   if (expression.kind != astIndex && expression.kind != astMember) {
     feAstError(expression.token, 'expression is not assignable');
@@ -1871,11 +1916,11 @@ int feReadLvalue(FeLvalue target, int token) {
     return tNever;
   }
   if (target.container == 0) {
-    if (target.binding >= 0)
-      return feReadLocal(target.binding, token);
-    else
-      feLoadGlobalValue(target.global);
-    return target.type;
+    if (target.binding >= 0) return feReadLocal(target.binding, token);
+    return feLoadDeclaration(target.reader, token);
+  }
+  if (target.container == 5) {
+    return feLoadDeclaration(target.reader, token);
   }
   if (target.container == 4) {
     feOperand(opLoadLocal, target.receiver);
@@ -1915,6 +1960,10 @@ void feWriteLvalue(FeLvalue target, int token) {
       feStoreGlobalValue(target.global);
     return;
   }
+  if (target.container == 5) {
+    feCall(target.setter, 1);
+    return;
+  }
   var value = feTemp(target.type);
   feOperand(opStoreLocal, value);
   feOperand(opLoadLocal, target.receiver);
@@ -1934,8 +1983,8 @@ void feWriteLvalue(FeLvalue target, int token) {
 }
 
 int feLowerAssignment(AstExpression expression, bool postfix) {
-  var target = feLowerLvalue(expression.children[0]);
   var op = expression.text;
+  var target = feLowerLvalue(expression.children[0], op != '=');
   if (op == '=') {
     var source = expression.children[1];
     var type = feLowerHint(source, target.type);
@@ -2019,7 +2068,7 @@ int feLowerValue(AstExpression expression) {
     if (binding >= 0) {
       return feReadLocal(binding, expression.token);
     }
-    var symbol = feExpressionSymbol(expression);
+    var symbol = feExpressionSymbol(expression, false);
     if (symbol < 0)
       feAstError(expression.token, 'unknown name ' + expression.text);
     return feLoadDeclaration(symbol, expression.token);
@@ -3095,7 +3144,7 @@ bool feSwitchConstant(AstExpression expression) {
       expression.text == '-' &&
       expression.children[0].kind == astInteger)
     return true;
-  var symbol = feExpressionSymbol(expression);
+  var symbol = feExpressionSymbol(expression, false);
   if (symbol >= 0) {
     var declaration = feSymbols.declarations[symbol];
     return declaration.kind == symbolGlobal &&
@@ -3140,7 +3189,7 @@ void feLowerSwitch(AstStatement statement) {
           value = 0;
           if (constant.text == 'true') value = 1;
         } else {
-          var symbol = feExpressionSymbol(constant);
+          var symbol = feExpressionSymbol(constant, false);
           if (symbol >= 0) {
             var declaration = feSymbols.declarations[symbol];
             if (declaration.kind == symbolGlobal)

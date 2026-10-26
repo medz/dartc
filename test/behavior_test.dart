@@ -531,6 +531,7 @@ void main(List<String> args) {
       'void main() { Object value = <Object>[1]; print(\'before\'); value as List<int>; print(\'after\'); }',
       "void main() { dynamic value = 'wrong'; print('before'); int number = value; print('after'); }",
       "class C { C(); set value(int next) { print('setter'); } } dynamic value() { print('rhs'); return 'wrong'; } void main() { print('before'); C().value = value(); print('after'); }",
+      "set target(int next) { print('setter'); } dynamic value() { print('rhs'); return 'wrong'; } void main() { print('before'); target = value(); print('after'); }",
       "void main() { print('before'); int count = -1; 1 << count; print('after'); }",
       "void main() { print('before'); int count = -1; -1 >> count; print('after'); }",
       "void main() { print('before'); int count = -1; -1 >>> count; print('after'); }",
@@ -624,6 +625,33 @@ void main() {
       'property-imports.dart':
           "import 'properties.dart' as p; void main() { var value = p.Counter(); "
           'value.value += 2; print(value.value); }',
+      'top-accessor-storage.dart': 'int stored = 4;',
+      'top-accessor-get.dart':
+          "import 'top-accessor-storage.dart'; int get sharedAccess => stored; "
+          'int get _hiddenTop => stored;',
+      'top-accessor-set.dart':
+          "import 'top-accessor-storage.dart'; set sharedAccess(int next) { stored = next; } "
+          'set _hiddenTop(int next) { stored = next; }',
+      'top-accessor-pair.dart':
+          "export 'top-accessor-get.dart'; export 'top-accessor-set.dart';",
+      'top-accessor-own-get.dart':
+          "import 'top-accessor-storage.dart'; export 'top-accessor-set.dart'; "
+          'int get sharedAccess => stored;',
+      'top-accessor-own-set.dart':
+          "import 'top-accessor-storage.dart'; export 'top-accessor-get.dart'; "
+          'set sharedAccess(int next) { stored = next; }',
+      'top-accessor-imports.dart':
+          "import 'top-accessor-get.dart'; import 'top-accessor-set.dart'; "
+          "import 'top-accessor-get.dart' as p show sharedAccess; "
+          "import 'top-accessor-set.dart' as p show sharedAccess; "
+          "import 'top-accessor-pair.dart' as both show sharedAccess; "
+          "import 'top-accessor-own-get.dart' as ownGet; "
+          "import 'top-accessor-own-set.dart' as ownSet; "
+          'void main() { sharedAccess = 2; print(sharedAccess); '
+          'p.sharedAccess += 3; print(p.sharedAccess); '
+          'both.sharedAccess++; print(both.sharedAccess); '
+          'ownGet.sharedAccess += 4; print(ownGet.sharedAccess); '
+          'ownSet.sharedAccess++; print(ownSet.sharedAccess); }',
       'imports.dart': r'''
 import /* directive comment */
   'exports.dart' show shared;
@@ -673,6 +701,7 @@ void main() {
     compare(File('${temporary.path}/prefix-priority.dart'), []);
     compare(File('${temporary.path}/constant-imports.dart'), []);
     compare(File('${temporary.path}/property-imports.dart'), []);
+    compare(File('${temporary.path}/top-accessor-imports.dart'), []);
     final rejected = [
       'void f(Never value) { value.foo(x: 1, x: 2); } void main() {}',
       'void f(Never value) { value.foo<Missing>(); } void main() {}',
@@ -681,6 +710,11 @@ void main() {
       "import 'exports.dart'; void main() { print(hidden()); }",
       "import 'math.dart'; void main() { print(_private()); }",
       "import 'properties.dart' as p; void main() { var value = p.Counter(); value._hidden = 2; }",
+      "import 'top-accessor-set.dart'; int get sharedAccess => 9; void main() { sharedAccess = 2; }",
+      "import 'top-accessor-get.dart'; set sharedAccess(int next) {} void main() { print(sharedAccess); }",
+      "import 'top-accessor-pair.dart' as p hide sharedAccess; void main() { p.sharedAccess = 2; }",
+      "import 'top-accessor-pair.dart' as p hide sharedAccess; void main() { print(p.sharedAccess); }",
+      "import 'top-accessor-pair.dart' as p; void main() { p._hiddenTop = 2; }",
       "import 'dart:core' hide print; void main() { print(1); }",
       "import 'math.dart' deferred as math; void main() {}",
       "import 'dart:math'; void main() {}",
@@ -708,6 +742,13 @@ void main() {
       'class C { int value = 1; C(); set value(int next) {} } void main() {}',
       'class C { C(); int value() => 1; int get value => 2; } void main() {}',
       'class C { C(); int get value => 1; set value(int next) {} } void main() { dynamic next = 2; C().value += next; }',
+      'int get value => 1; int get value => 2; void main() {}',
+      'set value(int next) {} set value(int next) {} void main() {}',
+      'int value = 1; set value(int next) {} void main() {}',
+      'int value() => 1; set value(int next) {} void main() {}',
+      'int get value => 1; void main() { value = 2; }',
+      'set value(int next) {} void main() { print(value); }',
+      'int get value => 1; set value(int next) {} void main() { dynamic next = 2; value += next; }',
       'class C { const int value = 1; C(); } void main() { print(C().value); }',
       'class C { final int? value; } void main() { print(C().value); }',
       'class C { int value; C(); } void main() { print(C().value); }',

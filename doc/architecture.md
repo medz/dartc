@@ -139,7 +139,7 @@ AST 只记录语法结构，例如调用的目标表达式、实参和类型实�
 
 具体语言行为及其缺口见 [specs/](../specs/README.md)；这里保留当前实现与目标模块边界的差距。
 
-现有 scanner 按文件产生带源身份与 UTF-16 位置的 Token，parser 独立构造 AST，库图与符号表保存来源和可见性。`binding.dart` 在 lowering 前为局部引用建立声明 ID，`members.dart` 按所属类建立成员声明命名空间；声明身份与字段偏移、IR 函数 ID 分开映射。`resolve_type.dart`、`typing.dart`、`flow.dart` 与 `constants.dart` 分别承担类型解析、类型规则、流事实和常量求值。`arguments.dart` 保存实参到形参的对应关系，调用求值与物理参数排列分开。
+现有 scanner 按文件产生带源身份与 UTF-16 位置的 Token，parser 独立构造 AST，`source.dart` 与 `symbols.dart` 分别保存库图和声明身份，库查找区分读取与写入目标。`binding.dart` 在 lowering 前为局部引用建立声明 ID，`members.dart` 按所属类建立成员声明命名空间；声明身份与字段偏移、IR 函数 ID 分开映射。`resolve_type.dart`、`typing.dart`、`flow.dart` 与 `constants.dart` 分别承担类型解析、类型规则、流事实和常量求值。`arguments.dart` 保存实参到形参的对应关系，调用求值与物理参数排列分开。
 
 语义类型、流类型与存储槽表示分别保存，在 lowering 边界显式转换。常量池的语义值与映像数据分开，getter 引用紧凑只读数据，由 Dart 运行时循环构造；字符串和嵌套 getter 使用相对地址，子 getter 是显式可达性依赖。未使用全局槽裁剪尚未实现，缓存的多线程发布仍需随线程与 GC 契约建立。
 

@@ -457,6 +457,78 @@ void filledLists() {
 
 String conditionTrace = '';
 
+int topStorage = 4;
+int get topAccess {
+  conditionTrace = conditionTrace + '1';
+  return topStorage;
+}
+
+set topAccess(int next) {
+  conditionTrace = conditionTrace + '3';
+  topStorage = next;
+}
+
+int get topLength => topStorage;
+set topLength(String text) {
+  topStorage = text.length;
+}
+
+int get topNumber => topStorage;
+set topNumber(num next) {
+  topStorage = next as int;
+}
+
+set topOnly(int next) {
+  topStorage = next;
+}
+
+get topUntyped => global;
+set topUntyped(next) {
+  global = next;
+}
+
+final int topFinal = 7;
+set topFinal(int next) {
+  topStorage = next;
+}
+
+const int topConstant = 8;
+set topConstant(int next) {
+  topStorage = next;
+}
+
+void topAccessorValues() {
+  conditionTrace = '';
+  print(topAccess = conditionChoice(2));
+  print(conditionTrace);
+  conditionTrace = '';
+  print(topAccess += conditionChoice(2));
+  print(conditionTrace);
+  conditionTrace = '';
+  print(topAccess++);
+  print(conditionTrace);
+  conditionTrace = '';
+  print(++topAccess);
+  print(conditionTrace);
+  print(topLength = '字🙂');
+  print(topLength);
+  var combined = [topNumber += pass(2)];
+  List<num> numbers = combined;
+  print(combined is List<int>);
+  print(numbers);
+  var assigned = [topOnly = pass(9223372036854775807)];
+  print(assigned is List<int>);
+  print(assigned);
+  print(topStorage);
+  topUntyped = 'untyped';
+  print([topUntyped] is List<String>);
+  print(topUntyped);
+  topFinal = 9;
+  print(<int>[topFinal, topStorage]);
+  topConstant = 10;
+  print(<int>[topConstant, topStorage]);
+}
+
 dynamic conditionOperand(int marker, bool value) {
   conditionTrace = conditionTrace + marker.toString();
   return value;
@@ -1350,6 +1422,7 @@ void main(List<String> args) {
   valueContexts();
   assignmentValues();
   accessorValues();
+  topAccessorValues();
   typeChecks();
   filledLists();
   conditionContexts();

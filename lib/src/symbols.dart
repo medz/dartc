@@ -6,12 +6,15 @@ const int symbolClass = 3;
 const int symbolNativeType = 4;
 const int symbolBuiltin = 5;
 const int symbolType = 6;
+const int symbolProperty = 7;
 
 class DeclarationSymbol {
   int source;
   String name;
   int kind;
   int target;
+  int setter = -1;
+  bool writable = false;
 
   DeclarationSymbol(this.source, this.name, this.kind, this.target);
 }
@@ -46,7 +49,44 @@ int declareSymbol(
   return symbol;
 }
 
-int symbolMerge(SymbolTable table, int left, int right) {
+int declareAccessor(
+  SymbolTable table,
+  int source,
+  String name,
+  int function,
+  bool setter,
+) {
+  var symbol = symbolOwnDeclaration(table, source, name);
+  if (symbol < 0) {
+    symbol = table.declarations.length;
+    table.declarations.add(DeclarationSymbol(source, name, symbolProperty, -1));
+  }
+  var declaration = table.declarations[symbol];
+  if (setter) {
+    if (declaration.setter >= 0 ||
+        declaration.kind != symbolProperty &&
+            (declaration.kind != symbolGlobal || declaration.writable)) {
+      return -2;
+    }
+    declaration.setter = function;
+  } else {
+    if (declaration.kind != symbolProperty || declaration.target >= 0) {
+      return -2;
+    }
+    declaration.target = function;
+  }
+  return symbol;
+}
+
+bool _symbolHasFacet(DeclarationSymbol declaration, bool writing) {
+  if (writing) {
+    return declaration.setter >= 0 ||
+        declaration.kind == symbolGlobal && declaration.writable;
+  }
+  return declaration.kind != symbolProperty || declaration.target >= 0;
+}
+
+int symbolMerge(SymbolTable table, int left, int right, bool writing) {
   if (left == -2 || right == -2) return -2;
   if (left == -1) return right;
   if (right == -1 || left == right) return left;
@@ -56,13 +96,29 @@ int symbolMerge(SymbolTable table, int left, int right) {
   var rightSystem = rightSource == sourceCore || rightSource == sourceFfi;
   if (leftSystem && !rightSystem) return right;
   if (!leftSystem && rightSystem) return left;
-  return -2;
+  var leftFacet = _symbolHasFacet(table.declarations[left], writing);
+  var rightFacet = _symbolHasFacet(table.declarations[right], writing);
+  if (leftFacet && rightFacet) return -2;
+  if (rightFacet) return right;
+  return left;
 }
 
 int symbolExportedDeclaration(SymbolTable table, int source, String name) {
+  return _symbolExportedDeclaration(table, source, name, false);
+}
+
+int _symbolExportedDeclaration(
+  SymbolTable table,
+  int source,
+  String name,
+  bool writing,
+) {
   if (name.startsWith('_')) return -1;
   var direct = symbolOwnDeclaration(table, source, name);
-  if (direct >= 0 || source < 0) return direct;
+  if (source < 0 ||
+      direct >= 0 && _symbolHasFacet(table.declarations[direct], writing)) {
+    return direct;
+  }
   var visited = <int>[];
   var i = 0;
   while (i < table.program.files.length) {
@@ -81,9 +137,11 @@ int symbolExportedDeclaration(SymbolTable table, int source, String name) {
     }
     var declaration = symbolOwnDeclaration(table, current, name);
     if (declaration >= 0) {
-      result = symbolMerge(table, result, declaration);
+      result = symbolMerge(table, result, declaration, writing);
       if (result == -2) return -2;
-    } else if (current >= 0) {
+      if (_symbolHasFacet(table.declarations[declaration], writing)) continue;
+    }
+    if (current >= 0) {
       var imports = table.program.files[current].imports;
       i = 0;
       while (i < imports.length) {
@@ -98,6 +156,25 @@ int symbolExportedDeclaration(SymbolTable table, int source, String name) {
 }
 
 int resolveSymbol(SymbolTable table, int source, String name, String prefix) {
+  return _resolveSymbol(table, source, name, prefix, false);
+}
+
+int resolveWriteSymbol(
+  SymbolTable table,
+  int source,
+  String name,
+  String prefix,
+) {
+  return _resolveSymbol(table, source, name, prefix, true);
+}
+
+int _resolveSymbol(
+  SymbolTable table,
+  int source,
+  String name,
+  String prefix,
+  bool writing,
+) {
   if (prefix == '') {
     var direct = symbolOwnDeclaration(table, source, name);
     if (direct >= 0) return direct;
@@ -115,15 +192,20 @@ int resolveSymbol(SymbolTable table, int source, String name, String prefix) {
       if (!dependency.exported &&
           dependency.prefix == prefix &&
           sourceAllows(dependency, name)) {
-        var symbol = symbolExportedDeclaration(table, dependency.target, name);
-        result = symbolMerge(table, result, symbol);
+        var symbol = _symbolExportedDeclaration(
+          table,
+          dependency.target,
+          name,
+          writing,
+        );
+        result = symbolMerge(table, result, symbol, writing);
         if (result == -2) return -2;
       }
       i++;
     }
   }
   if (result == -1 && prefix == '' && !explicitCore) {
-    return symbolExportedDeclaration(table, sourceCore, name);
+    return _symbolExportedDeclaration(table, sourceCore, name, writing);
   }
   return result;
 }
