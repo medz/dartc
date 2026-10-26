@@ -68,6 +68,7 @@ List<int> feGlobalSources = <int>[];
 List<int> feRawGlobals = <int>[];
 List<GlobalInitializer> feGlobalInitializers = <GlobalInitializer>[];
 int feRuntimeTokens = 0;
+int feMetadataArity = 0;
 List<int> _feLiteralTypes = <int>[];
 List<int> _feLiteralValues = <int>[];
 List<int> feParamStarts = <int>[];
@@ -86,7 +87,6 @@ List<int> feSlotTypes = <int>[];
 List<String> feNativeNames = <String>[];
 List<int> feNativeParams = <int>[];
 int feInitializingGlobal = -1;
-List<String> feClassNames = <String>[];
 List<int> feClassFieldCounts = <int>[];
 List<int> feClassConstructors = <int>[];
 List<String> feFieldNames = <String>[];
@@ -109,7 +109,7 @@ int feField(int owner, String name) {
   for (var i = 0; i < feFieldNames.length; i++) {
     if (feFieldClasses[i] == owner && feFieldNames[i] == name) return i;
   }
-  feError('unknown field ' + feClassNames[owner] + '.' + name);
+  feError('unknown field ' + classNames[owner] + '.' + name);
   return 0;
 }
 
@@ -141,9 +141,10 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
         'unsupported external declaration ' + syntax.name,
       );
     }
-    if (owner >= 0 ||
-        syntax.getter ||
-        syntax.parameters.length != fePrimitiveArity(primitive)) {
+    var validArity = syntax.parameters.length == fePrimitiveArity(primitive);
+    if (primitive == bNativeMetadataAddress)
+      validArity = syntax.parameters.length <= 1;
+    if (owner >= 0 || syntax.getter || !validArity) {
       feAstError(syntax.token, 'invalid primitive signature ' + syntax.name);
     }
     feCheckPrimitiveType(syntax.result);
@@ -155,6 +156,8 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
       feCheckPrimitiveType(syntaxParameter.type);
       parameter++;
     }
+    if (primitive == bNativeMetadataAddress)
+      feMetadataArity = syntax.parameters.length;
     feDeclare(source, syntax.name, symbolBuiltin, primitive, syntax.token);
     return -1;
   }
@@ -163,13 +166,15 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
   var count = 0;
   var source = feTokens[syntax.token].source;
   var name = syntax.name;
-  var result = tInt;
+  var result = tDynamic;
   if (constructor)
     result = classType(owner);
   else if (syntax.result.name != '')
     result = feLowerType(syntax.result);
+  else if (owner >= 0 && syntax.name == 'toString' && !syntax.getter)
+    result = tString;
   if (owner >= 0) {
-    name = feClassNames[owner] + '.' + syntax.name;
+    name = classNames[owner] + '.' + syntax.name;
     feParamNames.add('this');
     feParamTypes.add(classType(owner));
     feParamFields.add(-1);
@@ -178,7 +183,7 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
   var p = 0;
   while (p < syntax.parameters.length) {
     var parameter = syntax.parameters[p];
-    var type = tInt;
+    var type = tDynamic;
     var field = -1;
     if (parameter.fieldFormal) {
       var entry = feField(owner, parameter.name);
@@ -234,7 +239,7 @@ void feRecordLiteral(int global, AstVariable syntax) {
     if (expression.text == 'true') value = 1;
   }
   if (type == 0) return;
-  if (globalTypes[global] != 0 && globalTypes[global] != type) return;
+  if (globalTypes[global] >= 0 && globalTypes[global] != type) return;
   _feLiteralTypes[global] = type;
   _feLiteralValues[global] = value;
   globalTypes[global] = type;
@@ -254,15 +259,17 @@ void feCollectDeclarations(AstUnit unit) {
   while (i < unit.classes.length) {
     var syntax = unit.classes[i];
     var source = feTokens[syntax.token].source;
-    var owner = feClassNames.length;
+    var owner = classNames.length;
     classType(owner);
-    feClassNames.add(syntax.name);
+    classNames.add(syntax.name);
     feClassSources.add(source);
     feClassNodes.add(syntax);
     feClassFieldCounts.add(0);
     feClassConstructors.add(-1);
     classSizes.add(objectHeaderBytes);
     classPointerMasks.add(0);
+    classTaggedMasks.add(0);
+    classToStringFunctions.add(-1);
     feDeclare(source, syntax.name, symbolClass, owner, syntax.token);
     if (source == feSources.core && !syntax.name.startsWith('_')) {
       feDeclare(sourceCore, syntax.name, symbolClass, owner, syntax.token);
@@ -286,6 +293,9 @@ void feCollectDeclarations(AstUnit unit) {
       if (typeIsReference(type)) {
         classPointerMasks[i] = classPointerMasks[i] | (1 << field);
       }
+      if (typeIsTagged(type)) {
+        classTaggedMasks[i] = classTaggedMasks[i] | (1 << field);
+      }
       field++;
     }
     feClassFieldCounts[i] = field;
@@ -296,8 +306,9 @@ void feCollectDeclarations(AstUnit unit) {
   while (i < unit.variables.length) {
     var syntax = unit.variables[i];
     var source = feTokens[syntax.token].source;
-    var type = 0;
+    var type = -1;
     if (syntax.type.name != '') type = feLowerType(syntax.type);
+    if (type < 0 && syntax.initializer.isEmpty) type = tDynamic;
     var global = globalNames.length;
     globalNames.add(syntax.name);
     globalTypes.add(type);
@@ -373,6 +384,17 @@ void feCollectDeclarations(AstUnit unit) {
       feRegisterFunction(syntax.methods[method], i, false);
       method++;
     }
+    var toString = feMethod(i, 'toString', false);
+    if (toString >= 0) {
+      if (functions[toString].parameters != 1 ||
+          functions[toString].result != tString) {
+        feAstError(
+          feFunctionNodes[toString].token,
+          'toString must return String and have no parameters',
+        );
+      }
+      classToStringFunctions[i] = toString;
+    }
     i++;
   }
 }
@@ -394,7 +416,7 @@ void feOperand(int op, int value) {
   var position = ir.length;
   feEmit(op);
   feWord(value);
-  if (op == opInt) irTypes[position] = tInt;
+  if (op == opInt || op == opMetadataAddress) irTypes[position] = tInt;
   if (op == opString) irTypes[position] = tString;
   if (op == opDescriptor) irTypes[position] = tPointer;
   if (op == opLoadLocal) irTypes[position] = feSlotTypes[value];
@@ -436,7 +458,8 @@ int feBuiltinType(int id) {
       id == bNativeStore16 ||
       id == bNativeSyscall ||
       id == bNativeTarget ||
-      id == bNativeMetadataAddress)
+      id == bNativeMetadataAddress ||
+      id == bNativeCall1)
     return tInt;
   if (id == bArguments) return listType(tString);
   return tVoid;
@@ -467,14 +490,6 @@ int feJump(int op) {
 
 void fePatch(int position, int target) {
   ir[position] = target;
-}
-
-int feString(String text) {
-  for (var i = 0; i < strings.length; i++) {
-    if (strings[i] == text) return i;
-  }
-  strings.add(text);
-  return strings.length - 1;
 }
 
 int feLocal(String name) {
@@ -570,7 +585,7 @@ int feTypeSymbol(AstType syntax) {
 }
 
 int feGlobalType(int global) {
-  if (globalTypes[global] == 0 && imageKind == 0 && feRawGlobals[global] == 0) {
+  if (globalTypes[global] < 0 && imageKind == 0 && feRawGlobals[global] == 0) {
     feInferGlobal(global);
   }
   return globalTypes[global];
@@ -630,6 +645,7 @@ int fePrimitive(String name) {
   if (name == 'nativeSyscall') return bNativeSyscall;
   if (name == 'nativeTarget') return bNativeTarget;
   if (name == 'nativeMetadataAddress') return bNativeMetadataAddress;
+  if (name == 'nativeCall1') return bNativeCall1;
   return 0;
 }
 
@@ -640,11 +656,12 @@ int fePrimitiveArity(int primitive) {
     return 1;
   if (primitive == bNativeStore64 ||
       primitive == bNativeStore8 ||
-      primitive == bNativeStore16)
+      primitive == bNativeStore16 ||
+      primitive == bNativeCall1)
     return 2;
   if (primitive == bNativeSyscall) return 7;
-  if (primitive == bNativeTarget || primitive == bNativeMetadataAddress)
-    return 0;
+  if (primitive == bNativeTarget) return 0;
+  if (primitive == bNativeMetadataAddress) return feMetadataArity;
   return -1;
 }
 
@@ -664,7 +681,9 @@ void feInstallSymbols() {
   declareSymbol(feSymbols, sourceCore, 'String', symbolType, tString);
   declareSymbol(feSymbols, sourceCore, 'bool', symbolType, tBool);
   declareSymbol(feSymbols, sourceCore, 'void', symbolType, tVoid);
-  declareSymbol(feSymbols, sourceCore, 'dynamic', symbolType, tInt);
+  declareSymbol(feSymbols, sourceCore, 'dynamic', symbolType, tDynamic);
+  declareSymbol(feSymbols, sourceCore, 'Object', symbolType, tObject);
+  declareSymbol(feSymbols, sourceCore, 'Null', symbolType, tNull);
   declareSymbol(feSymbols, sourceCore, 'List', symbolType, -1);
   declareSymbol(feSymbols, sourceCore, 'print', symbolBuiltin, bPrintInt);
   declareSymbol(feSymbols, sourceFfi, 'Pointer', symbolType, tPointer);
@@ -755,7 +774,26 @@ int feBinaryOp(String op) {
   return opAdd;
 }
 
-int feCombine(String op, int left, int right) {
+int feValueOperation(String op) {
+  if (op == '+') return bValueAdd;
+  if (op == '-') return bValueSub;
+  if (op == '*') return bValueMul;
+  if (op == '~/') return bValueDiv;
+  if (op == '%') return bValueMod;
+  if (op == '&') return bValueAnd;
+  if (op == '|') return bValueOr;
+  if (op == '^') return bValueXor;
+  if (op == '<<') return bValueShl;
+  if (op == '>>') return bValueShr;
+  if (op == '>>>') return bValueUshr;
+  if (op == '==' || op == '!=') return bValueEq;
+  if (op == '<') return bValueLt;
+  if (op == '<=') return bValueLe;
+  if (op == '>') return bValueGt;
+  return bValueGe;
+}
+
+int feCombine(String op, int left, int right, int token) {
   if (op == '+' && left == tString && right == tString) {
     feBuiltin(bStringConcat, 2);
     return tString;
@@ -765,6 +803,33 @@ int feCombine(String op, int left, int right) {
     if (op == '!=') feEmit(opNot);
     return tBool;
   }
+  var equal = op == '==' || op == '!=';
+  var comparison = equal || op == '<' || op == '<=' || op == '>' || op == '>=';
+  if (typeIsTagged(left) ||
+      typeIsTagged(right) ||
+      typeIsNullable(left) ||
+      typeIsNullable(right) ||
+      equal && left != right) {
+    var savedRight = feTemp(right);
+    feOperand(opStoreLocal, savedRight);
+    feConvertValue(left, tDynamic, token);
+    feOperand(opLoadLocal, savedRight);
+    feConvertValue(right, tDynamic, token);
+    var type = tDynamic;
+    if (comparison) type = tBool;
+    feBuiltinTyped(feValueOperation(op), 2, type);
+    if (op == '!=') feEmit(opNot);
+    return type;
+  }
+  if (left == tBool &&
+      right == tBool &&
+      (op == '&' || op == '|' || op == '^')) {
+    feEmit(feBinaryOp(op));
+    irTypes[ir.length - 1] = tBool;
+    return tBool;
+  }
+  if (!equal && (left != tInt || right != tInt))
+    feAstError(token, 'operator requires compatible operands');
   feEmit(feBinaryOp(op));
   if (op == '==' ||
       op == '!=' ||
@@ -777,15 +842,26 @@ int feCombine(String op, int left, int right) {
 }
 
 int feLowerType(AstType syntax) {
+  if (syntax.name.endsWith('?')) {
+    return nullableType(
+      feLowerType(
+        AstType(
+          syntax.name.substring(0, syntax.name.length - 1),
+          syntax.arguments,
+          syntax.token,
+        ),
+      ),
+    );
+  }
   if (syntax.name == 'void') return tVoid;
-  if (syntax.name == 'dynamic') return tInt;
+  if (syntax.name == 'dynamic') return tDynamic;
   var symbol = feTypeSymbol(syntax);
   if (symbol < 0) feAstError(syntax.token, 'unknown type ' + syntax.name);
   var declaration = feSymbols.declarations[symbol];
   if (declaration.kind == symbolClass) return classType(declaration.target);
   if (declaration.kind == symbolType) {
     if (declaration.target < 0) {
-      var element = tInt;
+      var element = tDynamic;
       if (syntax.arguments.length != 0)
         element = feLowerType(syntax.arguments[0]);
       return listType(element);
@@ -796,7 +872,74 @@ int feLowerType(AstType syntax) {
   return tInt;
 }
 
-int feLowerArguments(AstExpression call, int start) {
+int feConvertValue(int actual, int expected, int token) {
+  if (actual == tVoid && expected != tVoid)
+    feAstError(token, 'void expression cannot be used as a value');
+  if (expected < 0 || actual == expected) return actual;
+  if (typeIsSubtype(actual, expected)) {
+    var builtin = bBoxRef;
+    if (typeIsTagged(expected)) {
+      if (actual == tInt) builtin = bBoxInt;
+      if (actual == tBool) builtin = bBoxBool;
+      if (actual == tPointer)
+        feAstError(token, 'native addresses cannot be boxed as Dart values');
+    }
+    feBuiltinTyped(builtin, 1, expected);
+    return expected;
+  }
+  if (actual == tDynamic || actual == tObject || typeIsNullable(actual)) {
+    feBuiltinTyped(bValueCast, 1, expected);
+    return expected;
+  }
+  feAstError(token, 'incompatible value type');
+  return expected;
+}
+
+void feBooleanValue(int type, int token) {
+  if (type == tVoid)
+    feAstError(token, 'void expression cannot be used as a value');
+  if (type == tBool) return;
+  if (typeIsTagged(type) || typeIsNullable(type)) {
+    feBuiltinTyped(bValueBool, 1, tBool);
+    return;
+  }
+  feAstError(token, 'condition requires bool');
+}
+
+void feLowerBoolean(AstExpression expression) {
+  feBooleanValue(feLowerExpression(expression), expression.token);
+}
+
+int feNonNullableValue(int type) {
+  if (!typeIsNullable(type)) return type;
+  var result = typeNonNullable(type);
+  feBuiltinTyped(bValueCast, 1, result);
+  return result;
+}
+
+int feLowerHint(AstExpression expression, int context) {
+  if (expression.kind == astConditional)
+    return feLowerConditional(expression, context);
+  var type = -1;
+  var listContext = context;
+  if (listContext >= 0) listContext = typeNonNullable(listContext);
+  if (listContext >= 0 && typeIsList(listContext)) {
+    if (expression.kind == astList) type = feLowerList(expression, listContext);
+    if (expression.kind == astCall) type = feLowerCall(expression, listContext);
+  }
+  if (type < 0) type = feLowerExpression(expression);
+  return type;
+}
+
+int feLowerInContext(AstExpression expression, int context) {
+  return feConvertValue(
+    feLowerHint(expression, context),
+    context,
+    expression.token,
+  );
+}
+
+int feLowerArguments(AstExpression call, int start, int function) {
   var argument = start;
   while (argument < call.children.length) {
     var expression = call.children[argument];
@@ -806,34 +949,57 @@ int feLowerArguments(AstExpression call, int start) {
         'unsupported named argument ' + expression.text,
       );
     }
-    feLowerExpression(expression);
+    var context = -1;
+    if (function >= 0) {
+      var parameter = argument - start;
+      if (feOwners[function] >= 0) parameter++;
+      if (parameter < functions[function].parameterTypes.length)
+        context = functions[function].parameterTypes[parameter];
+    }
+    feLowerInContext(expression, context);
     argument++;
   }
   return call.children.length - start;
 }
 
-int feLowerList(AstExpression expression) {
-  var element = 0;
+int feLowerList(AstExpression expression, int context) {
+  var element = -1;
   if (expression.typeArguments.length != 0) {
     element = feLowerType(expression.typeArguments[0]);
+  } else if (context > 0 && typeIsList(context)) {
+    element = typeArgument(context);
   }
-  var allocation = ir.length;
-  var duplicates = <int>[];
-  feBuiltinTyped(bListNew, 0, listType(element));
+  var values = <int>[];
+  var types = <int>[];
+  var inferred = -1;
   var item = 0;
   while (item < expression.children.length) {
-    duplicates.add(ir.length);
-    feDuplicate(listType(element));
-    var type = feLowerExpression(expression.children[item]);
-    if (element == 0) element = type;
+    var child = expression.children[item];
+    var expected = element;
+    if (expected == tVoid) expected = tDynamic;
+    var type = feLowerInContext(child, expected);
+    inferred = joinTypes(inferred, type);
+    var slot = feTemp(type);
+    feOperand(opStoreLocal, slot);
+    values.add(slot);
+    types.add(type);
+    item++;
+  }
+  if (element < 0) element = inferred;
+  if (element < 0) element = tDynamic;
+  var type = listType(element);
+  feBuiltinTyped(bListNew, 0, type);
+  item = 0;
+  while (item < values.length) {
+    feDuplicate(type);
+    feOperand(opLoadLocal, values[item]);
+    var expected = element;
+    if (expected == tVoid) expected = tDynamic;
+    feConvertValue(types[item], expected, expression.children[item].token);
     feBuiltin(bListAdd, 2);
     feEmit(opPop);
     item++;
   }
-  if (element == 0) element = tInt;
-  var type = listType(element);
-  irTypes[allocation] = type;
-  for (var i = 0; i < duplicates.length; i++) irTypes[duplicates[i]] = type;
   return type;
 }
 
@@ -886,7 +1052,61 @@ int feLowerPointerBinding(AstExpression call) {
   return tPointer;
 }
 
+int feMetadataMask(AstExpression expression) {
+  if (expression.kind == astInteger) return int.parse(expression.text);
+  var symbol = feExpressionSymbol(expression);
+  if (symbol >= 0) {
+    var declaration = feSymbols.declarations[symbol];
+    if (declaration.kind == symbolGlobal &&
+        _feLiteralTypes[declaration.target] == tInt)
+      return _feLiteralValues[declaration.target];
+  }
+  feAstError(
+    expression.token,
+    'metadata feature mask must be an integer constant',
+  );
+  return 0;
+}
+
+int feBuiltinArgumentType(int builtin, int argument) {
+  if (builtin == bHostRead || builtin == bHostFinish)
+    return argument == 0 ? tString : tInt;
+  if (builtin == bHostWrite) return argument == 0 ? tString : listType(tInt);
+  if (builtin == bHostExit) return tInt;
+  if (builtin == bStringFromCodes) return argument == 0 ? listType(tInt) : tInt;
+  if (builtin == bIntParse ||
+      builtin == bStringIndexOf ||
+      builtin == bStringLastIndexOf ||
+      builtin == bStringStartsWith ||
+      builtin == bStringEndsWith)
+    return argument == 0 ? tString : tInt;
+  if (builtin == bStringCodeUnit || builtin == bStringSubstring) return tInt;
+  return -1;
+}
+
+int feLowerBuiltinArguments(AstExpression call, int builtin) {
+  var argument = 1;
+  while (argument < call.children.length) {
+    var expression = call.children[argument];
+    if (expression.kind == astNamedArgument)
+      feAstError(expression.token, 'unsupported named argument');
+    feLowerInContext(expression, feBuiltinArgumentType(builtin, argument - 1));
+    argument++;
+  }
+  return call.children.length - 1;
+}
+
 int feLowerBuiltinCall(AstExpression call, int builtin) {
+  if (builtin == bNativeMetadataAddress) {
+    if (call.children.length - 1 != feMetadataArity)
+      feAstError(call.token, 'primitive argument count');
+    var mask = 1;
+    if (feMetadataArity == 1) mask = feMetadataMask(call.children[1]);
+    if (mask < 1 || mask > 7)
+      feAstError(call.token, 'metadata feature mask must be between 1 and 7');
+    feOperand(opMetadataAddress, mask);
+    return tInt;
+  }
   if (builtin == bPrintInt) {
     if (call.children.length != 2)
       feAstError(call.token, 'argument count for print');
@@ -895,8 +1115,13 @@ int feLowerBuiltinCall(AstExpression call, int builtin) {
       feBuiltin(bPrintString, 1);
     else if (type == tBool)
       feBuiltin(bPrintBool, 1);
-    else
+    else if (type == tInt)
       feBuiltin(bPrintInt, 1);
+    else {
+      feConvertValue(type, tDynamic, call.token);
+      feBuiltinTyped(bValueToString, 1, tString);
+      feBuiltin(bPrintString, 1);
+    }
     return tVoid;
   }
   var expected = fePrimitiveArity(builtin);
@@ -908,18 +1133,17 @@ int feLowerBuiltinCall(AstExpression call, int builtin) {
       var expression = call.children[argument];
       if (expression.kind == astNamedArgument)
         feAstError(expression.token, 'primitive arguments must be positional');
-      if (feLowerExpression(expression) != tInt)
-        feAstError(expression.token, 'primitive argument requires int');
+      feLowerInContext(expression, tInt);
       argument++;
     }
   } else {
-    count = feLowerArguments(call, 1);
+    count = feLowerBuiltinArguments(call, builtin);
   }
   feBuiltin(builtin, count);
   return feBuiltinType(builtin);
 }
 
-int feLowerStaticCall(AstExpression call, int symbol) {
+int feLowerStaticCall(AstExpression call, int symbol, int context) {
   var callee = call.children[0];
   var receiver = callee.children[0];
   var declaration = feSymbols.declarations[symbol];
@@ -936,23 +1160,27 @@ int feLowerStaticCall(AstExpression call, int symbol) {
     if (call.children.length < 3) {
       feAstError(call.token, 'List.filled requires length and value');
     }
-    var element = tInt;
+    var element = -1;
     if (receiver.typeArguments.length != 0) {
       element = feLowerType(receiver.typeArguments[0]);
+    } else if (context > 0 && typeIsList(context)) {
+      element = typeArgument(context);
     }
-    feLowerExpression(call.children[1]);
-    var valueType = feLowerExpression(call.children[2]);
+    feLowerInContext(call.children[1], tInt);
+    var expected = element;
+    if (expected == tVoid) expected = tDynamic;
+    var valueType = feLowerInContext(call.children[2], expected);
     var argument = 3;
     while (argument < call.children.length) {
       var named = call.children[argument];
       if (named.kind != astNamedArgument || named.text != 'growable') {
         feAstError(named.token, 'unsupported List.filled argument');
       }
-      feLowerExpression(named.children[0]);
+      feLowerBoolean(named.children[0]);
       feEmit(opPop);
       argument++;
     }
-    if (element == tInt && valueType != tInt) element = valueType;
+    if (element < 0) element = valueType;
     var type = listType(element);
     feBuiltinTyped(bListFilled, 2, type);
     return type;
@@ -960,12 +1188,12 @@ int feLowerStaticCall(AstExpression call, int symbol) {
   if (declaration.source == sourceCore &&
       name == 'String' &&
       member == 'fromCharCodes') {
-    var count = feLowerArguments(call, 1);
+    var count = feLowerBuiltinArguments(call, bStringFromCodes);
     feBuiltin(bStringFromCodes, count);
     return tString;
   }
   if (declaration.source == sourceCore && name == 'int' && member == 'parse') {
-    var count = feLowerArguments(call, 1);
+    var count = feLowerBuiltinArguments(call, bIntParse);
     feBuiltin(bIntParse, count);
     return tInt;
   }
@@ -977,42 +1205,65 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
   var receiver = callee.children[0];
   var member = callee.text;
   var type = feLowerExpression(receiver);
+  if (member == 'toString' &&
+      (!feClassType(type) || feMethod(typeArgument(type), member, false) < 0)) {
+    if (call.children.length != 1)
+      feAstError(call.token, 'argument count for toString');
+    if (type == tInt)
+      feBuiltin(bIntToString, 1);
+    else if (type != tString) {
+      feConvertValue(type, tDynamic, call.token);
+      feBuiltinTyped(bValueToString, 1, tString);
+    }
+    return tString;
+  }
+  type = feNonNullableValue(type);
   if (feClassType(type)) {
     var owner = typeArgument(type);
     feCheckPrivate(owner, member, call.token);
     var function = feMethod(owner, member, false);
     if (function < 0) feAstError(call.token, 'unknown method ' + member);
-    var count = feLowerArguments(call, 1) + 1;
+    var count = feLowerArguments(call, 1, function) + 1;
     if (functions[function].parameters != count) {
       feAstError(call.token, 'method argument count for ' + member);
     }
     feCall(function, count);
     return functions[function].result;
   }
-  if (member == 'toString') {
-    if (call.children.length != 1)
-      feAstError(call.token, 'argument count for toString');
-    if (type != tString) feBuiltin(bIntToString, 1);
-    return tString;
+  if (typeIsList(type) && member == 'add') {
+    if (call.children.length != 2)
+      feAstError(call.token, 'argument count for List.add');
+    var element = typeArgument(type);
+    if (element == tVoid) element = tDynamic;
+    feLowerInContext(call.children[1], element);
+    feBuiltin(bListAdd, 2);
+    return tVoid;
   }
-  var count = feLowerArguments(call, 1);
   if (typeIsList(type)) {
-    if (member == 'add') {
-      feBuiltin(bListAdd, count + 1);
-      return tVoid;
-    }
+    if (call.children.length != 1)
+      feAstError(call.token, 'List method requires no arguments');
     if (member == 'removeLast') {
       var element = typeArgument(type);
-      feBuiltinTyped(bListRemoveLast, count + 1, element);
+      feBuiltinTyped(bListRemoveLast, 1, element);
       return element;
     }
     if (member == 'clear') {
-      feBuiltin(bListClear, count + 1);
+      feBuiltin(bListClear, 1);
       return tVoid;
     }
     feAstError(call.token, 'unsupported List method ' + member);
   }
   if (type == tString) {
+    var builtin = 0;
+    if (member == 'codeUnitAt') builtin = bStringCodeUnit;
+    if (member == 'substring') builtin = bStringSubstring;
+    if (member == 'indexOf') builtin = bStringIndexOf;
+    if (member == 'lastIndexOf') builtin = bStringLastIndexOf;
+    if (member == 'startsWith') builtin = bStringStartsWith;
+    if (member == 'endsWith') builtin = bStringEndsWith;
+    if (builtin == 0)
+      feAstError(call.token, 'unsupported String method ' + member);
+    var count = feLowerBuiltinArguments(call, builtin);
     if (member == 'codeUnitAt') {
       feBuiltin(bStringCodeUnit, count + 1);
       return tInt;
@@ -1050,7 +1301,7 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
   return tInt;
 }
 
-int feLowerCall(AstExpression call) {
+int feLowerCall(AstExpression call, int context) {
   var callee = feWithReceiver(call.children[0]);
   var symbol = feExpressionSymbol(callee);
   if (symbol >= 0) {
@@ -1060,7 +1311,7 @@ int feLowerCall(AstExpression call) {
       if (feFunctionNodes[function].getter) {
         feAstError(call.token, 'getter is not callable: ' + declaration.name);
       }
-      var count = feLowerArguments(call, 1);
+      var count = feLowerArguments(call, 1, function);
       if (functions[function].parameters != count) {
         feAstError(call.token, 'argument count for ' + declaration.name);
       }
@@ -1074,8 +1325,8 @@ int feLowerCall(AstExpression call) {
       var owner = declaration.target;
       feOperand(opDescriptor, owner);
       feBuiltinTyped(bObjectNew, 1, classType(owner));
-      var count = feLowerArguments(call, 1);
       var constructor = feClassConstructors[owner];
+      var count = feLowerArguments(call, 1, constructor);
       if (functions[constructor].parameters != count + 1) {
         feAstError(
           call.token,
@@ -1091,7 +1342,7 @@ int feLowerCall(AstExpression call) {
     var receiver = callee.children[0];
     var owner = feExpressionSymbol(receiver);
     if (owner >= 0 && feSymbols.declarations[owner].kind == symbolType) {
-      return feLowerStaticCall(call, owner);
+      return feLowerStaticCall(call, owner, context);
     }
     return feLowerMemberCall(call, callee);
   }
@@ -1102,7 +1353,7 @@ int feLowerCall(AstExpression call) {
 int feLowerMember(AstExpression expression) {
   var symbol = feExpressionSymbol(expression);
   if (symbol >= 0) return feLoadDeclaration(symbol, expression.token);
-  var type = feLowerExpression(expression.children[0]);
+  var type = feNonNullableValue(feLowerExpression(expression.children[0]));
   var member = expression.text;
   if (feClassType(type)) {
     var owner = typeArgument(type);
@@ -1119,6 +1370,8 @@ int feLowerMember(AstExpression expression) {
     return result;
   }
   if (member == 'length' || member == 'isEmpty' || member == 'isNotEmpty') {
+    if (type != tString && !typeIsList(type))
+      feAstError(expression.token, 'unsupported property ' + member);
     if (type == tString)
       feBuiltin(bStringLength, 1);
     else
@@ -1179,13 +1432,19 @@ FeLvalue feLowerLvalue(AstExpression expression) {
   if (expression.kind != astIndex && expression.kind != astMember) {
     feAstError(expression.token, 'expression is not assignable');
   }
-  var receiverType = feLowerExpression(expression.children[0]);
+  var receiverType = feNonNullableValue(
+    feLowerExpression(expression.children[0]),
+  );
   var container = 1;
   var type = tInt;
   if (expression.kind == astIndex) {
-    feLowerExpression(expression.children[1]);
+    if (!typeIsList(receiverType))
+      feAstError(expression.token, 'indexed assignment requires List');
+    feLowerInContext(expression.children[1], tInt);
     type = typeArgument(receiverType);
   } else {
+    if (!feClassType(receiverType))
+      feAstError(expression.token, 'field assignment requires an instance');
     var owner = typeArgument(receiverType);
     feCheckPrivate(owner, expression.text, expression.token);
     var field = feField(owner, expression.text);
@@ -1251,14 +1510,21 @@ int feLowerAssignment(AstExpression expression, bool postfix) {
   }
   if (increment) {
     feOperand(opInt, 1);
-    if (op == '++')
-      feEmit(opAdd);
-    else
-      feEmit(opSub);
+    var binary = '+';
+    if (op == '--') binary = '-';
+    var result = feCombine(binary, target.type, tInt, expression.token);
+    feConvertValue(result, target.type, expression.token);
   } else {
-    var right = feLowerExpression(expression.children[1]);
-    if (op != '=')
-      feCombine(op.substring(0, op.length - 1), target.type, right);
+    var right = feLowerInContext(expression.children[1], target.type);
+    if (op != '=') {
+      var result = feCombine(
+        op.substring(0, op.length - 1),
+        target.type,
+        right,
+        expression.token,
+      );
+      feConvertValue(result, target.type, expression.token);
+    }
   }
   feWriteLvalue(target);
   if (postfix) {
@@ -1276,10 +1542,14 @@ int feLowerExpression(AstExpression expression) {
     return tInt;
   }
   if (kind == astString) {
-    feOperand(opString, feString(expression.text));
+    feOperand(opString, internString(expression.text));
     return tString;
   }
-  if (kind == astBoolean || kind == astNull) {
+  if (kind == astNull) {
+    feInteger(0, tNull);
+    return tNull;
+  }
+  if (kind == astBoolean) {
     var value = 0;
     if (expression.text == 'true') value = 1;
     feInteger(value, tBool);
@@ -1297,12 +1567,14 @@ int feLowerExpression(AstExpression expression) {
     return feLoadDeclaration(symbol, expression.token);
   }
   if (kind == astInterpolation) return feLowerInterpolation(expression);
-  if (kind == astList) return feLowerList(expression);
+  if (kind == astList) return feLowerList(expression, -1);
   if (kind == astMember) return feLowerMember(expression);
-  if (kind == astCall) return feLowerCall(expression);
+  if (kind == astCall) return feLowerCall(expression, -1);
   if (kind == astIndex) {
-    var receiver = feLowerExpression(expression.children[0]);
-    feLowerExpression(expression.children[1]);
+    var receiver = feNonNullableValue(
+      feLowerExpression(expression.children[0]),
+    );
+    feLowerInContext(expression.children[1], tInt);
     if (receiver == tString) {
       feDuplicate(tInt);
       feOperand(opInt, 1);
@@ -1310,6 +1582,8 @@ int feLowerExpression(AstExpression expression) {
       feBuiltin(bStringSubstring, 3);
       return tString;
     }
+    if (!typeIsList(receiver))
+      feAstError(expression.token, 'indexing requires String or List');
     var type = typeArgument(receiver);
     feBuiltinTyped(bListGet, 2, type);
     return type;
@@ -1321,6 +1595,29 @@ int feLowerExpression(AstExpression expression) {
     var op = expression.text;
     if (op == '++' || op == '--') return feLowerAssignment(expression, false);
     var type = feLowerExpression(expression.children[0]);
+    if (op == '!') {
+      feBooleanValue(type, expression.token);
+      feEmit(opNot);
+      return tBool;
+    }
+    if (typeIsTagged(type) || typeIsNullable(type)) {
+      if (op == '+') {
+        feBuiltinTyped(bValueCast, 1, tInt);
+        return feConvertValue(tInt, tDynamic, expression.token);
+      }
+      var value = feTemp(type);
+      feOperand(opStoreLocal, value);
+      if (op == '-')
+        feInteger(0, tInt);
+      else
+        feInteger(-1, tInt);
+      feOperand(opLoadLocal, value);
+      var binary = '-';
+      if (op == '~') binary = '^';
+      return feCombine(binary, tInt, type, expression.token);
+    }
+    if (type != tInt)
+      feAstError(expression.token, 'unary operator requires int');
     if (op == '+') return type;
     if (op == '-') {
       feEmit(opNeg);
@@ -1330,55 +1627,74 @@ int feLowerExpression(AstExpression expression) {
       feEmit(opBitNot);
       return tInt;
     }
-    feEmit(opNot);
-    return tBool;
+    feAstError(expression.token, 'unsupported unary operator');
   }
   if (kind == astBinary) {
     var left = feLowerExpression(expression.children[0]);
     var op = expression.text;
     if (op == '&&' || op == '||') {
+      feBooleanValue(left, expression.children[0].token);
       feDuplicate(tBool);
       var otherwise = feJump(opJumpFalse);
       if (op == '&&') {
         feEmit(opPop);
-        feLowerExpression(expression.children[1]);
+        feLowerBoolean(expression.children[1]);
         fePatch(otherwise, ir.length);
       } else {
         var done = feJump(opJump);
         fePatch(otherwise, ir.length);
         feEmit(opPop);
-        feLowerExpression(expression.children[1]);
+        feLowerBoolean(expression.children[1]);
         fePatch(done, ir.length);
       }
       return tBool;
     }
     var right = feLowerExpression(expression.children[1]);
-    return feCombine(op, left, right);
+    return feCombine(op, left, right, expression.token);
   }
-  if (kind == astConditional) {
-    feLowerExpression(expression.children[0]);
-    var otherwise = feJump(opJumpFalse);
-    var type = feLowerExpression(expression.children[1]);
-    var done = feJump(opJump);
-    fePatch(otherwise, ir.length);
-    feLowerExpression(expression.children[2]);
-    fePatch(done, ir.length);
-    return type;
-  }
+  if (kind == astConditional) return feLowerConditional(expression, -1);
   feAstError(expression.token, 'unsupported expression');
   return tInt;
 }
 
+int feLowerConditional(AstExpression expression, int context) {
+  feLowerBoolean(expression.children[0]);
+  var otherwise = feJump(opJumpFalse);
+  var type = feLowerHint(expression.children[1], context);
+  var thenValue = feTemp(type);
+  feOperand(opStoreLocal, thenValue);
+  var thenConvert = feJump(opJump);
+  fePatch(otherwise, ir.length);
+  var elseType = feLowerHint(expression.children[2], context);
+  var elseValue = feTemp(elseType);
+  feOperand(opStoreLocal, elseValue);
+  var elseConvert = feJump(opJump);
+  var result = joinTypes(type, elseType);
+  fePatch(thenConvert, ir.length);
+  feOperand(opLoadLocal, thenValue);
+  feConvertValue(type, result, expression.children[1].token);
+  var done = feJump(opJump);
+  fePatch(elseConvert, ir.length);
+  feOperand(opLoadLocal, elseValue);
+  feConvertValue(elseType, result, expression.children[2].token);
+  fePatch(done, ir.length);
+  return result;
+}
+
 void feLowerVariable(AstVariable variable) {
   feAt = variable.token;
-  var type = 0;
+  var type = -1;
   if (variable.type.name != '') type = feLowerType(variable.type);
-  var value = tInt;
+  if (type < 0 && variable.initializer.isEmpty) type = tDynamic;
+  var value = type;
   if (variable.initializer.length != 0)
-    value = feLowerExpression(variable.initializer[0]);
+    value = feLowerInContext(variable.initializer[0], type);
   else
     feInteger(0, type);
-  if (type == 0) type = value;
+  if (type < 0) {
+    if (value == tNull) value = feConvertValue(value, tDynamic, variable.token);
+    type = value;
+  }
   var slot = feTemp(type);
   feLocalNames.add(variable.name);
   feLocalTypes.add(type);
@@ -1431,16 +1747,20 @@ void feLowerStatement(AstStatement statement) {
   }
   if (kind == astReturnStatement) {
     if (statement.expressions.length != 0)
-      feLowerExpression(statement.expressions[0]);
+      feLowerInContext(statement.expressions[0], functions[feFunction].result);
     else if (feConstructors[feFunction] == 1)
       feOperand(opLoadLocal, 0);
-    else
+    else if (functions[feFunction].result == tVoid)
       feInteger(0, tVoid);
+    else {
+      feInteger(0, tNull);
+      feConvertValue(tNull, functions[feFunction].result, statement.token);
+    }
     feEmit(opReturn);
     return;
   }
   if (kind == astIfStatement) {
-    feLowerExpression(statement.condition[0]);
+    feLowerBoolean(statement.condition[0]);
     var otherwise = feJump(opJumpFalse);
     feLowerStatement(statement.children[0]);
     if (statement.children.length == 2) {
@@ -1466,7 +1786,7 @@ void feLowerStatement(AstStatement statement) {
     if (kind == astForStatement) feLowerStatement(statement.children[0]);
     var repeat = ir.length;
     if (statement.condition.length != 0)
-      feLowerExpression(statement.condition[0]);
+      feLowerBoolean(statement.condition[0]);
     else
       feInteger(1, tBool);
     var exit = feJump(opJumpFalse);
@@ -1583,13 +1903,16 @@ void feInferGlobal(int global) {
   var type = globalTypes[global];
   var syntax = feGlobalNodes[global];
   if (syntax.initializer.length == 0) {
-    if (type == 0) type = tInt;
+    if (type < 0) type = tDynamic;
     feInteger(0, type);
   } else {
     feAt = syntax.initializer[0].token;
-    type = feLowerExpression(syntax.initializer[0]);
+    type = feLowerInContext(syntax.initializer[0], type);
   }
-  if (globalTypes[global] == 0) globalTypes[global] = type;
+  if (globalTypes[global] < 0) {
+    if (type == tNull) type = feConvertValue(type, tDynamic, syntax.token);
+    globalTypes[global] = type;
+  }
   initializer.result = globalTypes[global];
   initializer.code = ir;
   initializer.types = irTypes;
@@ -1688,7 +2011,9 @@ void parseSource(SourceProgram source) {
   strings.clear();
   classSizes.clear();
   classPointerMasks.clear();
-  feClassNames.clear();
+  classTaggedMasks.clear();
+  classToStringFunctions.clear();
+  classNames.clear();
   feClassSources.clear();
   feClassNodes.clear();
   feFieldNodes.clear();
@@ -1749,6 +2074,7 @@ void parseSource(SourceProgram source) {
   feTokens = source.tokens;
   feAt = 0;
   feRuntimeTokens = source.runtimeTokens;
+  feMetadataArity = 0;
   var paths = <String>[];
   var file = 0;
   while (file < source.files.length) {
@@ -1770,7 +2096,8 @@ void parseSource(SourceProgram source) {
     }
     var global = feSymbols.declarations[marker].target;
     if (_feLiteralTypes[global] != tInt ||
-        _feLiteralValues[global] != runtimeAbiVersion) {
+        (_feLiteralValues[global] != runtimeAbiVersion &&
+            _feLiteralValues[global] != runtimeAbiVersion - 1)) {
       feAstError(
         feGlobalNodes[global].token,
         'runtime rtAbiVersion must be const int ' +
@@ -1796,8 +2123,8 @@ void parseSource(SourceProgram source) {
       if (variable.initializer.length == 0) {
         feInteger(0, globalTypes[i]);
       } else {
-        var type = feLowerExpression(variable.initializer[0]);
-        if (globalTypes[i] == 0) globalTypes[i] = type;
+        var type = feLowerInContext(variable.initializer[0], globalTypes[i]);
+        if (globalTypes[i] < 0) globalTypes[i] = type;
       }
       feOperand(opStoreGlobal, i);
     }
@@ -1844,7 +2171,10 @@ void parseSource(SourceProgram source) {
             feFieldNodes[field].initializer.length != 0) {
           feOperand(opLoadLocal, 0);
           feOperand(opInt, feFieldIndices[field]);
-          feLowerExpression(feFieldNodes[field].initializer[0]);
+          feLowerInContext(
+            feFieldNodes[field].initializer[0],
+            feFieldTypes[field],
+          );
           feBuiltinTyped(bObjectSet, 3, feFieldTypes[field]);
           feEmit(opPop);
         }
@@ -1870,8 +2200,7 @@ void parseSource(SourceProgram source) {
       feOperand(opLoadLocal, 0);
       feEmit(opReturn);
     } else if (functionSyntax.arrow.length != 0) {
-      var type = feLowerExpression(functionSyntax.arrow[0]);
-      if (functionSyntax.result.name == '') functions[f].result = type;
+      feLowerInContext(functionSyntax.arrow[0], functions[f].result);
       feEmit(opReturn);
     } else {
       if (functionSyntax.body.length != 0)
@@ -1888,7 +2217,13 @@ void parseSource(SourceProgram source) {
 
 void feLowerForIn(AstStatement statement) {
   var scope = feLocalNames.length;
-  var iterableType = feLowerExpression(statement.expressions[0]);
+  var declaration = statement.variables[0];
+  var context = -1;
+  if (declaration.type.name != '')
+    context = listType(feLowerType(declaration.type));
+  var iterableType = feNonNullableValue(
+    feLowerHint(statement.expressions[0], context),
+  );
   if (!typeIsList(iterableType)) {
     feAstError(statement.token, 'for-in currently requires a List');
   }
@@ -1897,11 +2232,13 @@ void feLowerForIn(AstStatement statement) {
   var index = feTemp(tInt);
   feOperand(opInt, 0);
   feOperand(opStoreLocal, index);
-  var declaration = statement.variables[0];
   var element = typeArgument(iterableType);
   var type = element;
-  if (declaration.type.name != '') type = feLowerType(declaration.type);
-  if (type != element) {
+  if (context >= 0) type = typeArgument(context);
+  if (!typeIsSubtype(element, type) &&
+      element != tDynamic &&
+      element != tObject &&
+      !typeIsNullable(element)) {
     feAstError(
       declaration.token,
       'for-in variable type must match the List element type',
@@ -1919,7 +2256,7 @@ void feLowerForIn(AstStatement statement) {
   var done = feJump(opJumpFalse);
   feOperand(opLoadLocal, iterable);
   feOperand(opLoadLocal, index);
-  feBuiltinTyped(bListGet, 2, element);
+  feBuiltinTyped(bListGet, 2, type);
   feOperand(opStoreLocal, variable);
   var breakBase = feBreaks.length;
   var continueBase = feContinues.length;
@@ -1947,7 +2284,7 @@ void feLowerDoWhile(AstStatement statement) {
   feLoopContinues.add(continueBase);
   feLowerStatement(statement.children[0]);
   var condition = ir.length;
-  feLowerExpression(statement.condition[0]);
+  feLowerBoolean(statement.condition[0]);
   var done = feJump(opJumpFalse);
   feOperand(opJump, repeat);
   fePatch(done, ir.length);
@@ -2003,7 +2340,7 @@ void feLowerSwitch(AstStatement statement) {
       if (caseType != type) {
         feAstError(constant.token, 'case type must match the switch value');
       }
-      feCombine('==', type, caseType);
+      feCombine('==', type, caseType, constant.token);
       var next = feJump(opJumpFalse);
       entries.add(feJump(opJump));
       fePatch(next, ir.length);
@@ -2115,19 +2452,17 @@ int feLowerInterpolation(AstExpression expression) {
       feLowerExpression(part);
     else
       feOperand(opLoadLocal, slots[i]);
-    if (part.kind == astNull) {
-      feAstError(part.token, 'null interpolation is not supported yet');
-    }
     if (type == tInt) {
       feBuiltin(bIntToString, 1);
     } else if (type == tBool) {
       var otherwise = feJump(opJumpFalse);
-      feOperand(opString, feString('true'));
+      feOperand(opString, internString('true'));
       var done = feJump(opJump);
       fePatch(otherwise, ir.length);
-      feOperand(opString, feString('false'));
+      feOperand(opString, internString('false'));
       fePatch(done, ir.length);
-    } else if (feClassType(type)) {
+    } else if (feClassType(type) &&
+        feMethod(typeArgument(type), 'toString', false) >= 0) {
       var owner = typeArgument(type);
       var method = feMethod(owner, 'toString', false);
       if (method < 0) feAstError(part.token, 'interpolation requires toString');
@@ -2137,7 +2472,8 @@ int feLowerInterpolation(AstExpression expression) {
       }
       feCall(method, 1);
     } else if (type != tString) {
-      feAstError(part.token, 'unsupported interpolation value');
+      feConvertValue(type, tDynamic, part.token);
+      feBuiltinTyped(bValueToString, 1, tString);
     }
     if (i > 0) feBuiltin(bStringConcat, 2);
     i++;

@@ -2,6 +2,7 @@ import 'arm64.dart';
 import 'ir.dart';
 import 'layout.dart';
 import 'sign.dart';
+import 'types.dart';
 
 List<int> image = <int>[];
 
@@ -95,22 +96,48 @@ void imageSection(
 class ConstantLayout {
   List<int> stringOffsets;
   List<int> descriptorOffsets;
+  List<int> classNameStrings;
+  List<int> typeOffsets;
   int stringDescriptorOffset;
+  int listDescriptorOffset;
+  int wordArrayDescriptorOffset;
+  int refArrayDescriptorOffset;
+  int taggedArrayDescriptorOffset;
+  int intBoxDescriptorOffset;
+  int handleTypeOffset;
   int metadataOffset;
   int end;
 
   ConstantLayout(
     this.stringOffsets,
     this.descriptorOffsets,
+    this.classNameStrings,
+    this.typeOffsets,
     this.stringDescriptorOffset,
+    this.listDescriptorOffset,
+    this.wordArrayDescriptorOffset,
+    this.refArrayDescriptorOffset,
+    this.taggedArrayDescriptorOffset,
+    this.intBoxDescriptorOffset,
+    this.handleTypeOffset,
     this.metadataOffset,
     this.end,
   );
 }
 
+void markTypeReference(List<int> offsets, List<int> work, int type) {
+  if (offsets[type] < 0) {
+    offsets[type] = 0;
+    work.add(type);
+  }
+}
+
 ConstantLayout layoutConstants(int start) {
   List<int> stringOffsets = <int>[];
   List<int> descriptorOffsets = <int>[];
+  List<int> classNameStrings = <int>[];
+  List<int> typeOffsets = <int>[];
+  List<int> types = <int>[];
   int i = 0;
   while (i < strings.length) {
     stringOffsets.add(-1);
@@ -119,9 +146,15 @@ ConstantLayout layoutConstants(int start) {
   i = 0;
   while (i < classSizes.length) {
     descriptorOffsets.add(-1);
+    classNameStrings.add(-1);
     i++;
   }
-  bool needsMetadata = false;
+  i = 0;
+  while (i < dartTypes.length) {
+    typeOffsets.add(-1);
+    i++;
+  }
+  int features = 0;
   i = 0;
   while (i < addressKinds.length) {
     if (addressKinds[i] == 0) {
@@ -129,12 +162,46 @@ ConstantLayout layoutConstants(int start) {
     } else if (addressKinds[i] == 2) {
       descriptorOffsets[addressTargets[i]] = 0;
     } else if (addressKinds[i] == 3) {
-      needsMetadata = true;
+      features = features | addressTargets[i];
+    } else if (addressKinds[i] == 4) {
+      markTypeReference(typeOffsets, types, addressTargets[i]);
     }
     i++;
   }
+  bool needsValues = (features & metadataValues) != 0;
+  int handleType = -1;
+  if (needsValues) {
+    features = features | metadataStrings | metadataLists;
+    handleType = listType(tInt);
+    while (typeOffsets.length < dartTypes.length) typeOffsets.add(-1);
+    markTypeReference(typeOffsets, types, handleType);
+  }
+  i = 0;
+  while (i < types.length) {
+    var type = dartTypes[types[i]];
+    if (type.kind == kList || type.kind == kNullable) {
+      markTypeReference(typeOffsets, types, type.argument);
+    } else if (type.kind == kClass) {
+      descriptorOffsets[type.argument] = 0;
+    }
+    i++;
+  }
+  if (needsValues) {
+    i = 0;
+    while (i < descriptorOffsets.length) {
+      if (descriptorOffsets[i] == 0) {
+        int name = internString(classNames[i]);
+        classNameStrings[i] = name;
+        while (stringOffsets.length < strings.length) stringOffsets.add(-1);
+        stringOffsets[name] = 0;
+      }
+      i++;
+    }
+  }
+  bool needsMetadata = features != 0;
+  bool needsLists = (features & metadataLists) != 0;
   int end = start;
-  bool needsStringDescriptor = needsMetadata;
+  bool needsStringDescriptor = (features & metadataStrings) != 0;
   i = 0;
   while (i < strings.length) {
     if (stringOffsets[i] == 0) {
@@ -158,15 +225,56 @@ ConstantLayout layoutConstants(int start) {
     stringDescriptorOffset = end;
     end = end + classDescriptorBytes;
   }
+  int listDescriptorOffset = -1;
+  int wordArrayDescriptorOffset = -1;
+  int refArrayDescriptorOffset = -1;
+  if (needsLists) {
+    listDescriptorOffset = end;
+    end = end + classDescriptorBytes;
+    wordArrayDescriptorOffset = end;
+    end = end + classDescriptorBytes;
+    refArrayDescriptorOffset = end;
+    end = end + classDescriptorBytes;
+  }
+  int taggedArrayDescriptorOffset = -1;
+  int intBoxDescriptorOffset = -1;
+  if (needsLists) {
+    taggedArrayDescriptorOffset = end;
+    end = end + classDescriptorBytes;
+  }
+  if (needsValues) {
+    intBoxDescriptorOffset = end;
+    end = end + classDescriptorBytes;
+  }
+  i = 0;
+  while (i < typeOffsets.length) {
+    if (typeOffsets[i] == 0) {
+      typeOffsets[i] = end;
+      end = end + typeRefBytes;
+    }
+    i++;
+  }
+  int handleTypeOffset = -1;
+  if (needsValues) handleTypeOffset = typeOffsets[handleType];
   int metadataOffset = -1;
   if (needsMetadata) {
     metadataOffset = end;
     end = end + 8;
+    if (needsLists) end = end + 32;
+    if (needsValues) end = end + 16;
   }
   return ConstantLayout(
     stringOffsets,
     descriptorOffsets,
+    classNameStrings,
+    typeOffsets,
     stringDescriptorOffset,
+    listDescriptorOffset,
+    wordArrayDescriptorOffset,
+    refArrayDescriptorOffset,
+    taggedArrayDescriptorOffset,
+    intBoxDescriptorOffset,
+    handleTypeOffset,
     metadataOffset,
     end,
   );
@@ -191,8 +299,10 @@ List<int> createMachOExecutable() {
       target = dataBase + addressTargets[site] * 8;
     } else if (addressKinds[site] == 2) {
       target = base + constants.descriptorOffsets[addressTargets[site]];
-    } else {
+    } else if (addressKinds[site] == 3) {
       target = base + constants.metadataOffset;
+    } else {
+      target = base + constants.typeOffsets[addressTargets[site]];
     }
     int word = addressSites[site];
     int pc = base + codeOffset + word * 4;
@@ -295,7 +405,7 @@ List<int> createMachOExecutable() {
     instruction = instruction + 1;
   }
   imageZeros(constantOffset - image.length);
-  imageConstants(constants);
+  imageConstants(constants, codeOffset);
   imageZeros(textSize + 16 - image.length);
   signMachO(image, signatureCommand, linkeditCommand, textSize, 1);
   return image;
@@ -343,8 +453,10 @@ List<int> createElfExecutable() {
       target = dataBase + addressTargets[site] * 8;
     } else if (addressKinds[site] == 2) {
       target = base + constants.descriptorOffsets[addressTargets[site]];
-    } else {
+    } else if (addressKinds[site] == 3) {
       target = base + constants.metadataOffset;
+    } else {
+      target = base + constants.typeOffsets[addressTargets[site]];
     }
     int word = addressSites[site];
     int pc = base + codeOffset + word * 4;
@@ -383,7 +495,7 @@ List<int> createElfExecutable() {
     instruction = instruction + 1;
   }
   imageZeros(constantOffset - image.length);
-  imageConstants(constants);
+  imageConstants(constants, codeOffset);
   imageZeros(dataOffset - image.length);
   return image;
 }
@@ -393,7 +505,41 @@ List<int> createExecutable() {
   return createMachOExecutable();
 }
 
-void imageConstants(ConstantLayout layout) {
+void imageDescriptor(
+  int id,
+  int size,
+  int fields,
+  int pointers,
+  int kind,
+  int tagged,
+  int name,
+  int toString,
+) {
+  image64(id);
+  image64(size);
+  image64(fields);
+  image64(pointers);
+  image64(kind);
+  image64(tagged);
+  image64(name);
+  image64(toString);
+}
+
+int imageTypeKind(int kind) {
+  if (kind == tVoid) return typeKindVoid;
+  if (kind == tInt) return typeKindInt;
+  if (kind == tString) return typeKindString;
+  if (kind == tBool) return typeKindBool;
+  if (kind == tPointer) return typeKindPointer;
+  if (kind == tDynamic) return typeKindDynamic;
+  if (kind == tNull) return typeKindNull;
+  if (kind == tObject) return typeKindObject;
+  if (kind == kNullable) return typeKindNullable;
+  if (kind == kList) return typeKindList;
+  return typeKindClass;
+}
+
+void imageConstants(ConstantLayout layout, int codeOffset) {
   int stringIndex = 0;
   while (stringIndex < strings.length) {
     if (layout.stringOffsets[stringIndex] >= 0) {
@@ -415,22 +561,90 @@ void imageConstants(ConstantLayout layout) {
   int descriptor = 0;
   while (descriptor < classSizes.length) {
     if (layout.descriptorOffsets[descriptor] >= 0) {
-      image64(descriptor);
-      image64(classSizes[descriptor]);
-      image64((classSizes[descriptor] - objectHeaderBytes) ~/ 8);
-      image64(classPointerMasks[descriptor]);
-      image64(descriptorClass);
+      int name = 0;
+      if (layout.classNameStrings[descriptor] >= 0) {
+        name =
+            layout.stringOffsets[layout.classNameStrings[descriptor]] -
+            layout.descriptorOffsets[descriptor];
+      }
+      int callback = classToStringFunctions[descriptor];
+      int toString = 0;
+      if (callback >= 0 && armFunctionOffsets[callback] > 0) {
+        toString =
+            codeOffset +
+            armFunctionOffsets[callback] * 4 -
+            layout.descriptorOffsets[descriptor];
+      }
+      imageDescriptor(
+        descriptor,
+        classSizes[descriptor],
+        (classSizes[descriptor] - objectHeaderBytes) ~/ 8,
+        classPointerMasks[descriptor],
+        descriptorClass,
+        classTaggedMasks[descriptor],
+        name,
+        toString,
+      );
     }
     descriptor++;
   }
   if (layout.stringDescriptorOffset >= 0) {
-    image64(-1);
-    image64(stringDataOffset);
-    image64(-1);
-    image64(0);
-    image64(descriptorString);
+    imageDescriptor(-1, stringDataOffset, -1, 0, descriptorString, 0, 0, 0);
+  }
+  if (layout.listDescriptorOffset >= 0) {
+    imageDescriptor(-2, listInstanceBytes, 4, 4, descriptorList, 0, 0, 0);
+    imageDescriptor(-3, arrayDataOffset, -1, 0, descriptorWordArray, 0, 0, 0);
+    imageDescriptor(-4, arrayDataOffset, -1, 0, descriptorRefArray, 0, 0, 0);
+  }
+  if (layout.taggedArrayDescriptorOffset >= 0) {
+    imageDescriptor(-6, arrayDataOffset, -1, 0, descriptorTaggedArray, 0, 0, 0);
+  }
+  if (layout.intBoxDescriptorOffset >= 0) {
+    imageDescriptor(-5, objectHeaderBytes + 8, 1, 0, descriptorIntBox, 0, 0, 0);
+  }
+  int typeIndex = 0;
+  while (typeIndex < layout.typeOffsets.length) {
+    int offset = layout.typeOffsets[typeIndex];
+    if (offset >= 0) {
+      var type = dartTypes[typeIndex];
+      image64(imageTypeKind(type.kind));
+      int argument = 0;
+      if (type.kind == kList || type.kind == kNullable) {
+        argument = layout.typeOffsets[type.argument] - offset;
+      }
+      image64(argument);
+      int classOffset = 0;
+      if (type.kind == kClass) {
+        classOffset = layout.descriptorOffsets[type.argument] - offset;
+      }
+      image64(classOffset);
+      int representation = storageWord;
+      if (typeIsTagged(typeIndex) || typeIndex == tVoid) {
+        representation = storageTagged;
+      } else if (typeIsReference(typeIndex)) {
+        representation = storageRef;
+      }
+      image64(representation);
+    }
+    typeIndex++;
   }
   if (layout.metadataOffset >= 0) {
-    image64(layout.stringDescriptorOffset - layout.metadataOffset);
+    int stringDescriptor = 0;
+    if (layout.stringDescriptorOffset >= 0) {
+      stringDescriptor = layout.stringDescriptorOffset - layout.metadataOffset;
+    }
+    image64(stringDescriptor);
+    if (layout.listDescriptorOffset >= 0) {
+      image64(layout.listDescriptorOffset - layout.metadataOffset);
+      image64(layout.wordArrayDescriptorOffset - layout.metadataOffset);
+      image64(layout.refArrayDescriptorOffset - layout.metadataOffset);
+    }
+    if (layout.taggedArrayDescriptorOffset >= 0) {
+      image64(layout.taggedArrayDescriptorOffset - layout.metadataOffset);
+    }
+    if (layout.intBoxDescriptorOffset >= 0) {
+      image64(layout.intBoxDescriptorOffset - layout.metadataOffset);
+      image64(layout.handleTypeOffset - layout.metadataOffset);
+    }
   }
 }

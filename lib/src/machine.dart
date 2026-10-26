@@ -8,9 +8,10 @@ const int rI64 = 0;
 const int rRef = 1;
 const int rAddr = 2;
 const int rI1 = 3;
+const int rTagged = 4;
 
 const int mConstant = 1;
-// Address kinds: 0 string, 1 global slot, 2 class descriptor, 3 runtime metadata.
+// Address kinds: 0 string, 1 global, 2 class descriptor, 3 metadata, 4 TypeRef.
 const int mAddress = 2;
 const int mLoad64 = 3;
 const int mStore64 = 4;
@@ -38,6 +39,8 @@ const int mNot = 22;
 const int mCompare = 23;
 const int mLoad16 = 24;
 const int mStore16 = 25;
+const int mMove = 26;
+const int mCallIndirect = 27;
 
 class RegisterAllocation {
   List<int> locations;
@@ -110,6 +113,7 @@ class MachineEdge {
 int machineRep(int type) {
   if (type == tPointer) return rAddr;
   if (type == tBool) return rI1;
+  if (typeIsTagged(type)) return rTagged;
   if (typeIsReference(type)) return rRef;
   return rI64;
 }
@@ -148,6 +152,7 @@ int machineArithmetic(int op) {
 
 void machineSelectInstruction(
   SsaInstruction source,
+  List<int> types,
   List<int> reps,
   List<MachineInstruction> instructions,
 ) {
@@ -162,9 +167,10 @@ void machineSelectInstruction(
     );
     return;
   }
-  if (op == opString || op == opDescriptor) {
+  if (op == opString || op == opDescriptor || op == opMetadataAddress) {
     int kind = 0;
     if (op == opDescriptor) kind = 2;
+    if (op == opMetadataAddress) kind = 3;
     instructions.add(
       MachineInstruction(mAddress, output, inputs, target, kind, effects),
     );
@@ -196,7 +202,19 @@ void machineSelectInstruction(
   if (op == opBuiltin) {
     if (target == bNativeMetadataAddress) {
       instructions.add(
-        MachineInstruction(mAddress, output, <int>[], 0, 3, effects),
+        MachineInstruction(mAddress, output, <int>[], 1, 3, effects),
+      );
+      return;
+    }
+    if (target == bBoxRef) {
+      instructions.add(
+        MachineInstruction(mMove, output, inputs, 0, 0, effects),
+      );
+      return;
+    }
+    if (target == bNativeCall1) {
+      instructions.add(
+        MachineInstruction(mCallIndirect, output, inputs, 0, 0, effects),
       );
       return;
     }
@@ -234,6 +252,26 @@ void machineSelectInstruction(
         );
       }
       return;
+    }
+    var typeId = -1;
+    if (target == bListNew ||
+        target == bListFilled ||
+        target == bListGet ||
+        target == bListRemoveLast ||
+        target == bValueCast) {
+      typeId = source.resultType;
+    } else if (target == bListAdd) {
+      typeId = types[source.inputs[1]];
+    } else if (target == bListSet) {
+      typeId = types[source.inputs[2]];
+    }
+    if (typeId >= 0) {
+      var type = reps.length;
+      reps.add(rAddr);
+      instructions.add(
+        MachineInstruction(mAddress, type, <int>[], typeId, 4, 0),
+      );
+      inputs.add(type);
     }
     instructions.add(
       MachineInstruction(
@@ -305,7 +343,12 @@ List<MachineFunction> selectMachine(
       List<MachineInstruction> instructions = <MachineInstruction>[];
       i = 0;
       while (i < block.instructions.length) {
-        machineSelectInstruction(block.instructions[i], reps, instructions);
+        machineSelectInstruction(
+          block.instructions[i],
+          function.valueTypes,
+          reps,
+          instructions,
+        );
         i = i + 1;
       }
       SsaTerminator end = block.end;

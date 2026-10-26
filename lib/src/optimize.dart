@@ -429,6 +429,11 @@ void removeDeadValues(SsaFunction function) {
           instruction.inputs[n] = resolveValue(aliases, instruction.inputs[n]);
           n++;
         }
+        if (instruction.effects != 0 &&
+            instruction.value >= 0 &&
+            live[instruction.value] == 0) {
+          instruction.value = -1;
+        }
         kept.add(instruction);
       }
       i++;

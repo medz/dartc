@@ -73,6 +73,90 @@ class Counter {
   int builtinShadow() => print(20);
 }
 
+List<String> globalStrings = [];
+List<List<bool>> globalFlags = [[]];
+
+List<String> returned() {
+  return [];
+}
+
+List<String> arrow() => [];
+
+void take(List<String> values) {
+  values.add('argument');
+  print(values[0]);
+}
+
+void takeNested(List<List<String>> values) {
+  values[0].add('nested argument');
+  print(values[0][0]);
+}
+
+class Holder {
+  List<String> values = [];
+  List<List<String>> nested = [[]];
+  Holder(List<String> initial) {
+    this.values = initial;
+  }
+
+  void accept(List<String> values) {
+    values.add('method');
+    print(values[0]);
+  }
+
+  List<String> result() => [];
+}
+
+void listContexts() {
+  List<String> local = [];
+  local.add('local');
+  print(local[0]);
+  globalStrings.add('global');
+  print(globalStrings[0]);
+  globalFlags[0].add(true);
+  print(globalFlags[0][0]);
+  List<List<String>> conditional = true ? [[]] : [[]];
+  conditional[0].add('conditional');
+  print(conditional[0][0]);
+  List<List<String>> assigned = <List<String>>[];
+  assigned = [[]];
+  assigned[0].add('assignment');
+  print(assigned[0][0]);
+  take([]);
+  takeNested([[]]);
+  var holder = Holder([]);
+  holder.values.add('constructor');
+  print(holder.values[0]);
+  holder.nested[0].add('field');
+  print(holder.nested[0][0]);
+  holder.accept([]);
+  print(holder.result().length);
+  print(returned().length);
+  print(arrow().length);
+  var nested = <List<String>>[];
+  nested.add([]);
+  nested[0].add('add');
+  print(nested[0][0]);
+  List<List<String>> filled = List.filled(1, []);
+  filled[0].add('filled context');
+  print(filled[0][0]);
+  var explicit = List<List<String>>.filled(1, []);
+  explicit[0].add('filled explicit');
+  print(explicit[0][0]);
+  var inferred = List.filled(1, 'inferred');
+  print(inferred[0]);
+  var flags = List<bool>.filled(1, true);
+  print(flags[0]);
+  var objects = List<Holder>.filled(1, holder);
+  print(objects[0].values[0]);
+  for (List<String> values in [[]]) {
+    print(values.length);
+  }
+  for (String value in []) {
+    print(value);
+  }
+}
+
 const int bias = 7;
 const bool enabled = true;
 const int labelValue = -1234567;
@@ -101,6 +185,7 @@ int fibonacci(int bias) {
 int nativeMetadataAddress() => 77;
 
 void main(List<String> args) {
+  listContexts();
   print(nativeMetadataAddress());
   print(calls);
   spare = 99;
@@ -346,6 +431,11 @@ void main(List<String> args) {
     }
 
     compare(source, ['alpha', '你好']);
+    final values = File('${temporary.path}/values.dart')
+      ..writeAsStringSync(
+        File('$root/test/fixtures/values.dart').readAsStringSync(),
+      );
+    compare(values, [for (var i = 0; i < 20; i++) '参数$i🙂']);
     final libraries = {
       'math.dart':
           'int shared() => 11; int hidden() => 90; int _private() => 8;',
@@ -434,7 +524,7 @@ void main() {
       'const int rtAbiVersion = 2; external int nativeLoad64(int pointer, int extra);',
       'const int rtAbiVersion = 2; external bool nativeTarget();',
       "const int rtAbiVersion = 2; external int nativeLoad64(int pointer); int invalid() => nativeLoad64('wrong');",
-      'const int rtAbiVersion = 2; external int nativeMetadataAddress(int extra);',
+      'const int rtAbiVersion = 2; external int nativeMetadataAddress(int first, int second);',
       'const int rtAbiVersion = 1;',
       'int rtAbiVersion = 2;',
       '',

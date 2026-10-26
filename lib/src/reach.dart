@@ -12,10 +12,18 @@ void _reachFunction(List<int> reachable, List<int> work, int target) {
 List<int> reachableFunctions(List<SsaFunction> source) {
   List<int> reachable = <int>[];
   List<int> work = <int>[];
+  List<int> allocated = <int>[];
+  List<int> classes = <int>[];
+  bool indirect = false;
   var i = 0;
   while (i < source.length) {
     reachable.add(0);
     i = i + 1;
+  }
+  i = 0;
+  while (i < classSizes.length) {
+    allocated.add(0);
+    i++;
   }
   if (imageKind == 0) {
     _reachFunction(reachable, work, 0);
@@ -42,8 +50,28 @@ List<int> reachableFunctions(List<SsaFunction> source) {
         var instruction = instructions[i];
         if (instruction.op == opCall) {
           _reachFunction(reachable, work, instruction.target);
+        } else if (instruction.op == opDescriptor) {
+          var owner = instruction.target;
+          if (allocated[owner] == 0) {
+            allocated[owner] = 1;
+            classes.add(owner);
+            if (indirect && classToStringFunctions[owner] >= 0) {
+              _reachFunction(reachable, work, classToStringFunctions[owner]);
+            }
+          }
         } else if (instruction.op == opBuiltin &&
-            instruction.target < bNativeLoad64) {
+            instruction.target == bNativeCall1 &&
+            !indirect) {
+          indirect = true;
+          var c = 0;
+          while (c < classes.length) {
+            var method = classToStringFunctions[classes[c]];
+            if (method >= 0) _reachFunction(reachable, work, method);
+            c++;
+          }
+        } else if (instruction.op == opBuiltin &&
+            instruction.target < bNativeLoad64 &&
+            instruction.target != bBoxRef) {
           _reachFunction(reachable, work, runtimeFunction(instruction.target));
         }
         i = i + 1;

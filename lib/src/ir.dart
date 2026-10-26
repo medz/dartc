@@ -32,6 +32,7 @@ const int opBuiltin = 31;
 const int opReturn = 32;
 const int opNot = 33;
 const int opDescriptor = 34;
+const int opMetadataAddress = 35;
 
 const int bPrintString = 1;
 const int bPrintInt = 2;
@@ -66,6 +67,28 @@ const int bHostTarget = 30;
 const int bObjectNew = 31;
 const int bObjectGet = 32;
 const int bObjectSet = 33;
+const int bBoxInt = 34;
+const int bBoxBool = 35;
+const int bBoxRef = 36;
+const int bValueCast = 37;
+const int bValueBool = 38;
+const int bValueAdd = 39;
+const int bValueSub = 40;
+const int bValueMul = 41;
+const int bValueDiv = 42;
+const int bValueMod = 43;
+const int bValueAnd = 44;
+const int bValueOr = 45;
+const int bValueXor = 46;
+const int bValueShl = 47;
+const int bValueShr = 48;
+const int bValueUshr = 49;
+const int bValueEq = 50;
+const int bValueLt = 51;
+const int bValueLe = 52;
+const int bValueGt = 53;
+const int bValueGe = 54;
+const int bValueToString = 55;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;
@@ -76,6 +99,7 @@ const int bNativeTarget = 105;
 const int bNativeLoad16 = 106;
 const int bNativeStore16 = 107;
 const int bNativeMetadataAddress = 108;
+const int bNativeCall1 = 109;
 
 class FunctionInfo {
   String name;
@@ -115,12 +139,26 @@ List<int> exportParameters = <int>[];
 
 List<int> classSizes = <int>[];
 List<int> classPointerMasks = <int>[];
+List<int> classTaggedMasks = <int>[];
+List<String> classNames = <String>[];
+List<int> classToStringFunctions = <int>[];
+
+int internString(String text) {
+  var i = 0;
+  while (i < strings.length) {
+    if (strings[i] == text) return i;
+    i++;
+  }
+  strings.add(text);
+  return strings.length - 1;
+}
 
 int irWidth(int op) {
   if (op == opCall || op == opBuiltin) return 3;
   if (op == opInt ||
       op == opString ||
       op == opDescriptor ||
+      op == opMetadataAddress ||
       op == opLoadLocal ||
       op == opStoreLocal ||
       op == opLoadGlobal ||

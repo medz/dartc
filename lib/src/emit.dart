@@ -3,6 +3,7 @@ import 'abi.dart';
 import 'host.dart';
 import 'ir.dart';
 import 'machine.dart';
+import 'types.dart';
 
 List<int> emitBranchSites = <int>[];
 List<int> emitBranchTargets = <int>[];
@@ -45,6 +46,8 @@ void emitInstruction(MachineInstruction instruction, MachineFunction function) {
   if (op == mConstant) {
     result = emitDestination(function, output);
     armConstant(result, instruction.target);
+  } else if (op == mMove) {
+    result = emitOperand(function, inputs[0], 0);
   } else if (op == mAddress) {
     armAddress(instruction.extra, instruction.target);
   } else if (op == mLoad64 || op == mLoad8 || op == mLoad16) {
@@ -65,9 +68,12 @@ void emitInstruction(MachineInstruction instruction, MachineFunction function) {
       machineCode.add(0x79000000 | (address << 5) | value);
     else
       machineCode.add(0x39000000 | (address << 5) | value);
-  } else if (op == mCall) {
+  } else if (op == mCall || op == mCallIndirect) {
+    var first = 0;
+    if (op == mCallIndirect) first = 1;
+    var count = inputs.length - first;
     int outgoing = 0;
-    if (inputs.length > 8) outgoing = alignFrame((inputs.length - 8) * 8);
+    if (count > 8) outgoing = alignFrame((count - 8) * 8);
     int remaining = outgoing;
     while (remaining >= 4096) {
       machineCode.add(0xd14007ff);
@@ -75,8 +81,8 @@ void emitInstruction(MachineInstruction instruction, MachineFunction function) {
     }
     if (remaining != 0) machineCode.add(0xd10003ff | (remaining << 10));
     int argument = 8;
-    while (argument < inputs.length) {
-      int value = emitOperand(function, inputs[argument], 0);
+    while (argument < count) {
+      int value = emitOperand(function, inputs[first + argument], 0);
       int offset = (argument - 8) * 8;
       if (offset <= 32760) {
         machineCode.add(0xf90003e0 | ((offset ~/ 8) << 10) | value);
@@ -89,11 +95,16 @@ void emitInstruction(MachineInstruction instruction, MachineFunction function) {
       argument = argument + 1;
     }
     argument = 0;
-    while (argument < inputs.length && argument < 8) {
-      emitLoad(function, inputs[argument], argument);
+    while (argument < count && argument < 8) {
+      emitLoad(function, inputs[first + argument], argument);
       argument = argument + 1;
     }
-    armCall(instruction.target);
+    if (op == mCallIndirect) {
+      emitLoad(function, inputs[0], 16);
+      machineCode.add(0xd63f0200);
+    } else {
+      armCall(instruction.target);
+    }
     remaining = outgoing;
     while (remaining >= 4096) {
       machineCode.add(0x914007ff);
@@ -339,6 +350,10 @@ void generateCode(List<MachineFunction> program) {
       armCall(0);
       armPop(1);
       armPop(0);
+      armMove(9, 0);
+      armAddress(4, listType(tString));
+      armMove(2, 0);
+      armMove(0, 9);
       armCall(runtimeFunction(bArguments));
     }
     armCall(main);

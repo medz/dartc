@@ -50,6 +50,27 @@ int runtimeFunction(int builtin) {
   if (builtin == bObjectNew) return abiFunction('rtObjectNew', 0);
   if (builtin == bObjectGet) return abiFunction('rtObjectGet', 0);
   if (builtin == bObjectSet) return abiFunction('rtObjectSet', 0);
+  if (builtin == bBoxInt) return abiFunction('rtBoxInt', 0);
+  if (builtin == bBoxBool) return abiFunction('rtBoxBool', 0);
+  if (builtin == bValueCast) return abiFunction('rtValueCast', 0);
+  if (builtin == bValueBool) return abiFunction('rtValueBool', 0);
+  if (builtin == bValueAdd) return abiFunction('rtValueAdd', 0);
+  if (builtin == bValueSub) return abiFunction('rtValueSub', 0);
+  if (builtin == bValueMul) return abiFunction('rtValueMul', 0);
+  if (builtin == bValueDiv) return abiFunction('rtValueDiv', 0);
+  if (builtin == bValueMod) return abiFunction('rtValueMod', 0);
+  if (builtin == bValueAnd) return abiFunction('rtValueAnd', 0);
+  if (builtin == bValueOr) return abiFunction('rtValueOr', 0);
+  if (builtin == bValueXor) return abiFunction('rtValueXor', 0);
+  if (builtin == bValueShl) return abiFunction('rtValueShl', 0);
+  if (builtin == bValueShr) return abiFunction('rtValueShr', 0);
+  if (builtin == bValueUshr) return abiFunction('rtValueUshr', 0);
+  if (builtin == bValueEq) return abiFunction('rtValueEq', 0);
+  if (builtin == bValueLt) return abiFunction('rtValueLt', 0);
+  if (builtin == bValueLe) return abiFunction('rtValueLe', 0);
+  if (builtin == bValueGt) return abiFunction('rtValueGt', 0);
+  if (builtin == bValueGe) return abiFunction('rtValueGe', 0);
+  if (builtin == bValueToString) return abiFunction('rtValueToString', 0);
   print('Unknown native builtin: ' + builtin.toString());
   hostExit(1);
 }

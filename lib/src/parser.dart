@@ -89,6 +89,7 @@ bool parserLookType(Parser parser) {
     }
     if (!parserTypeClose(parser)) return false;
   }
+  parserTake(parser, '?');
   return true;
 }
 
@@ -119,6 +120,7 @@ AstType parseAstType(Parser parser) {
     while (parserTake(parser, ',')) arguments.add(parseAstType(parser));
     if (!parserTypeClose(parser)) parserError(parser, 'expected >');
   }
+  if (parserTake(parser, '?')) name = name + '?';
   return AstType(name, arguments, token);
 }
 
@@ -378,7 +380,8 @@ bool parserTypedDeclaration(Parser parser) {
     typed =
         parser.pendingClosers == 0 &&
         parser.tokens[parser.position].kind == tokenIdentifier &&
-        !parserIs(parser, 'in');
+        !parserIs(parser, 'in') &&
+        !tokenIs(parser.tokens[parser.position + 1], ':');
   }
   parser.position = position;
   parser.pendingClosers = closers;

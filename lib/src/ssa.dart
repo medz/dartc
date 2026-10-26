@@ -33,8 +33,16 @@ class SsaInstruction {
   int target;
   List<int> inputs;
   int effects;
+  int resultType;
 
-  SsaInstruction(this.op, this.value, this.target, this.inputs, this.effects);
+  SsaInstruction(
+    this.op,
+    this.value,
+    this.target,
+    this.inputs,
+    this.effects,
+    this.resultType,
+  );
 }
 
 class SsaEdge {
@@ -302,6 +310,7 @@ int ssaEffects(int op, int target) {
     return ssaRead | ssaWrite | ssaAllocate | ssaThrow | ssaGc | ssaNative;
   }
   if (op == opBuiltin) {
+    if (target == bBoxRef || target == bBoxBool) return 0;
     if (target == bNativeTarget || target == bNativeMetadataAddress) return 0;
     if (target == bNativeLoad64 ||
         target == bNativeLoad8 ||
@@ -398,7 +407,14 @@ void ssaTranslateBlock(
         stack.add(value);
       }
       block.instructions.add(
-        SsaInstruction(op, value, target, inputs, ssaEffects(op, target)),
+        SsaInstruction(
+          op,
+          value,
+          target,
+          inputs,
+          ssaEffects(op, target),
+          irTypes[position],
+        ),
       );
     }
     position = position + irWidth(op);
