@@ -8,9 +8,10 @@ external int nativeLoad8(int p);
 external int nativeStore8(int p, int value);
 external int nativeSyscall(int n, int a, int b, int c, int d, int e, int f);
 external int nativeTarget();
-external int nativeMetadataAddress();
+external int nativeMetadataAddress(int features);
+external int nativeCall1(int function, int value);
 
-const int rtAbiVersion = 2;
+const int rtAbiVersion = 3;
 
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
@@ -146,7 +147,7 @@ int rtStringAllocate(int descriptor, int length) {
 }
 
 int rtStringNew(int length) {
-  var metadata = nativeMetadataAddress();
+  var metadata = nativeMetadataAddress(metadataStrings);
   var descriptor =
       metadata + nativeLoad64(metadata + metadataStringDescriptorOffset);
   return rtStringAllocate(descriptor, length);
@@ -319,66 +320,132 @@ int rtIntParse(int value) {
   return result * sign;
 }
 
-int rtListNew() {
-  var result = rtAlloc(24);
-  nativeStore64(result, 0);
-  nativeStore64(result + 8, 0);
-  nativeStore64(result + 16, 0);
+int rtListNew(int typeRef) {
+  var metadata = nativeMetadataAddress(metadataLists);
+  var descriptor =
+      metadata + nativeLoad64(metadata + metadataListDescriptorOffset);
+  var result = rtAlloc(nativeLoad64(descriptor + descriptorSizeOffset));
+  nativeStore64(result, descriptor);
+  nativeStore64(result + objectFlagsOffset, 0);
+  nativeStore64(result + listLengthOffset, 0);
+  nativeStore64(result + listCapacityOffset, 0);
+  nativeStore64(result + listBackingOffset, 0);
+  nativeStore64(result + listTypeOffset, typeRef);
+  return result;
+}
+
+int rtListBackingNew(int typeRef, int capacity) {
+  var element = typeRef + nativeLoad64(typeRef + typeArgumentOffset);
+  var slot = metadataWordArrayDescriptorOffset;
+  if (nativeLoad64(element + typeValueRepOffset) == storageRef) {
+    slot = metadataRefArrayDescriptorOffset;
+  } else if (nativeLoad64(element + typeValueRepOffset) == storageTagged) {
+    slot = metadataTaggedArrayDescriptorOffset;
+  }
+  var metadata = nativeMetadataAddress(metadataLists);
+  var descriptor = metadata + nativeLoad64(metadata + slot);
+  var result = rtAlloc(
+    nativeLoad64(descriptor + descriptorSizeOffset) + capacity * 8,
+  );
+  nativeStore64(result, descriptor);
+  nativeStore64(result + objectFlagsOffset, 0);
+  nativeStore64(result + arrayLengthOffset, 0);
   return result;
 }
 
 int rtListLength(int list) {
-  return nativeLoad64(list);
+  return nativeLoad64(list + listLengthOffset);
 }
 
-int rtListGet(int list, int index) {
-  return nativeLoad64(nativeLoad64(list + 16) + index * 8);
+int rtListRawGet(int list, int index) {
+  var backing = nativeLoad64(list + listBackingOffset);
+  return nativeLoad64(backing + arrayDataOffset + index * 8);
 }
 
-int rtListSet(int list, int index, int value) {
-  nativeStore64(nativeLoad64(list + 16) + index * 8, value);
+int rtListElementType(int list) {
+  return rtTypeArgument(nativeLoad64(list + listTypeOffset));
+}
+
+int rtListGet(int list, int index, int expectedType) {
+  var value = rtListRawGet(list, index);
+  var actualType = rtListElementType(list);
+  if (actualType == expectedType) return value;
+  return rtValueCast(rtValueBox(value, actualType), expectedType);
+}
+
+int rtListSet(int list, int index, int value, int sourceType) {
+  var stored = value;
+  var actualType = rtListElementType(list);
+  if (actualType != sourceType) {
+    stored = rtValueCast(rtValueBox(value, sourceType), actualType);
+  }
+  var backing = nativeLoad64(list + listBackingOffset);
+  nativeStore64(backing + arrayDataOffset + index * 8, stored);
   return value;
 }
 
-int rtListAdd(int list, int value) {
-  var length = nativeLoad64(list);
-  var capacity = nativeLoad64(list + 8);
-  var data = nativeLoad64(list + 16);
+int rtListAdd(int list, int value, int sourceType) {
+  var stored = value;
+  var actualType = rtListElementType(list);
+  if (actualType != sourceType) {
+    stored = rtValueCast(rtValueBox(value, sourceType), actualType);
+  }
+  var length = nativeLoad64(list + listLengthOffset);
+  var capacity = nativeLoad64(list + listCapacityOffset);
+  var backing = nativeLoad64(list + listBackingOffset);
   if (length == capacity) {
     var nextCapacity = capacity * 2;
     if (nextCapacity == 0) nextCapacity = 8;
-    data = rtGrowBuffer(data, capacity * 8, nextCapacity * 8);
-    capacity = nextCapacity;
-    nativeStore64(list + 8, capacity);
-    nativeStore64(list + 16, data);
+    if (backing == 0) {
+      backing = rtListBackingNew(
+        nativeLoad64(list + listTypeOffset),
+        nextCapacity,
+      );
+    } else {
+      backing = rtGrowBuffer(
+        backing,
+        arrayDataOffset + capacity * 8,
+        arrayDataOffset + nextCapacity * 8,
+      );
+    }
+    nativeStore64(list + listCapacityOffset, nextCapacity);
+    nativeStore64(list + listBackingOffset, backing);
   }
-  nativeStore64(data + length * 8, value);
-  nativeStore64(list, length + 1);
+  nativeStore64(backing + arrayDataOffset + length * 8, stored);
+  nativeStore64(backing + arrayLengthOffset, length + 1);
+  nativeStore64(list + listLengthOffset, length + 1);
   return 0;
 }
 
-int rtListRemoveLast(int list) {
-  var length = nativeLoad64(list) - 1;
-  nativeStore64(list, length);
-  return nativeLoad64(nativeLoad64(list + 16) + length * 8);
+int rtListRemoveLast(int list, int expectedType) {
+  var length = nativeLoad64(list + listLengthOffset) - 1;
+  var value = rtListGet(list, length, expectedType);
+  var backing = nativeLoad64(list + listBackingOffset);
+  nativeStore64(backing + arrayLengthOffset, length);
+  nativeStore64(list + listLengthOffset, length);
+  return value;
 }
 
 int rtListClear(int list) {
-  nativeStore64(list, 0);
+  var backing = nativeLoad64(list + listBackingOffset);
+  if (backing != 0) nativeStore64(backing + arrayLengthOffset, 0);
+  nativeStore64(list + listLengthOffset, 0);
   return 0;
 }
 
-int rtListFilled(int length, int value) {
-  var result = rtListNew();
-  var data = rtAlloc(length * 8);
-  nativeStore64(result, length);
-  nativeStore64(result + 8, length);
-  nativeStore64(result + 16, data);
+int rtListFilled(int length, int value, int typeRef) {
+  var result = rtListNew(typeRef);
+  if (length == 0) return result;
+  var backing = rtListBackingNew(typeRef, length);
   var i = 0;
   while (i < length) {
-    nativeStore64(data + i * 8, value);
+    nativeStore64(backing + arrayDataOffset + i * 8, value);
     i = i + 1;
   }
+  nativeStore64(backing + arrayLengthOffset, length);
+  nativeStore64(result + listCapacityOffset, length);
+  nativeStore64(result + listBackingOffset, backing);
+  nativeStore64(result + listLengthOffset, length);
   return result;
 }
 
@@ -387,14 +454,14 @@ int rtStringFromCodes(int codes) {
   var units = length;
   var i = 0;
   while (i < length) {
-    if (rtListGet(codes, i) > 65535) units = units + 1;
+    if (rtListRawGet(codes, i) > 65535) units = units + 1;
     i = i + 1;
   }
   var result = rtStringNew(units);
   i = 0;
   var count = 0;
   while (i < length) {
-    var c = rtListGet(codes, i);
+    var c = rtListRawGet(codes, i);
     if (c > 65535) {
       var scalar = c - 65536;
       nativeStore16(
@@ -585,7 +652,7 @@ int rtHostWrite(int path, int bytes) {
   var capacity = 65536;
   if (length < capacity) capacity = length;
   var data = rtMap(capacity);
-  var source = nativeLoad64(bytes + 16);
+  var source = nativeLoad64(bytes + listBackingOffset) + arrayDataOffset;
   var offset = 0;
   while (offset < length) {
     var count = length - offset;
@@ -600,12 +667,16 @@ int rtHostWrite(int path, int bytes) {
   return 0;
 }
 
-int rtArguments(int argc, int argv) {
+int rtArguments(int argc, int argv, int typeRef) {
   rtExecutable = rtStringFromCString(nativeLoad64(argv));
-  var result = rtListNew();
+  var result = rtListNew(typeRef);
   var i = 1;
   while (i < argc) {
-    rtListAdd(result, rtStringFromCString(nativeLoad64(argv + i * 8)));
+    rtListAdd(
+      result,
+      rtStringFromCString(nativeLoad64(argv + i * 8)),
+      rtTypeArgument(typeRef),
+    );
     i = i + 1;
   }
   return result;
@@ -666,4 +737,353 @@ int rtObjectGet(int object, int index) {
 int rtObjectSet(int object, int index, int value) {
   nativeStore64(object + objectHeaderBytes + index * 8, value);
   return value;
+}
+
+int rtValueTypeError() {
+  var message = rtCString(
+    0x72203a6374726164,
+    0x7420656d69746e75,
+    0x6f72726520657079,
+    0xa72,
+  );
+  rtWriteAll(2, message, 26);
+  rtHostExit(70);
+  return 0;
+}
+
+int rtTypeArgument(int type) {
+  return type + nativeLoad64(type + typeArgumentOffset);
+}
+
+int rtTypeSubtype(int actual, int expected) {
+  if (actual == expected) return 1;
+  var target = nativeLoad64(expected + typeKindOffset);
+  if (target == typeKindDynamic || target == typeKindVoid) return 1;
+  var source = nativeLoad64(actual + typeKindOffset);
+  if (target == typeKindNullable) {
+    var child = rtTypeArgument(expected);
+    if (nativeLoad64(child + typeKindOffset) == typeKindObject) return 1;
+    if (source == typeKindNull) return 1;
+    if (source == typeKindNullable) actual = rtTypeArgument(actual);
+    return rtTypeSubtype(actual, child);
+  }
+  if (source == typeKindNullable) return 0;
+  if (source == typeKindNull) {
+    if (target == typeKindNull) return 1;
+    return 0;
+  }
+  if (target == typeKindObject) {
+    if (source == typeKindDynamic || source == typeKindVoid) return 0;
+    return 1;
+  }
+  if (source != target) return 0;
+  if (source == typeKindList) {
+    return rtTypeSubtype(rtTypeArgument(actual), rtTypeArgument(expected));
+  }
+  if (source == typeKindClass) {
+    var left = actual + nativeLoad64(actual + typeClassOffset);
+    var right = expected + nativeLoad64(expected + typeClassOffset);
+    if (left != right) return 0;
+  }
+  return 1;
+}
+
+int rtBoxInt(int value) {
+  if (value >= -4611686018427387904 && value <= 4611686018427387903) {
+    return (value << 1) | 1;
+  }
+  var metadata = nativeMetadataAddress(metadataValues);
+  var descriptor =
+      metadata + nativeLoad64(metadata + metadataIntBoxDescriptorOffset);
+  var result = rtObjectNew(descriptor);
+  nativeStore64(result + objectHeaderBytes, value);
+  return result;
+}
+
+int rtBoxBool(int value) {
+  if (value == 0) return valueFalse;
+  return valueTrue;
+}
+
+int rtValueKind(int value) {
+  if (value == 0) return typeKindNull;
+  if (value == valueFalse || value == valueTrue) return typeKindBool;
+  if ((value & 1) != 0) return typeKindInt;
+  var kind = nativeLoad64(rtObjectDescriptor(value) + descriptorKindOffset);
+  if (kind == descriptorIntBox) return typeKindInt;
+  if (kind == descriptorString) return typeKindString;
+  if (kind == descriptorList) return typeKindList;
+  return typeKindClass;
+}
+
+int rtValueInt(int value) {
+  if ((value & 1) != 0) return value >> 1;
+  if (value > valueTrue) {
+    var kind = nativeLoad64(rtObjectDescriptor(value) + descriptorKindOffset);
+    if (kind == descriptorIntBox)
+      return nativeLoad64(value + objectHeaderBytes);
+  }
+  return rtValueTypeError();
+}
+
+int rtValueBool(int value) {
+  if (value == valueFalse) return 0;
+  if (value == valueTrue) return 1;
+  return rtValueTypeError();
+}
+
+int rtValueBox(int value, int type) {
+  var representation = nativeLoad64(type + typeValueRepOffset);
+  if (representation == storageTagged || representation == storageRef) {
+    return value;
+  }
+  var kind = nativeLoad64(type + typeKindOffset);
+  if (kind == typeKindInt) return rtBoxInt(value);
+  if (kind == typeKindBool) return rtBoxBool(value);
+  if (kind == typeKindNull) return 0;
+  return rtValueTypeError();
+}
+
+int rtValueMatches(int value, int expected) {
+  var kind = nativeLoad64(expected + typeKindOffset);
+  if (kind == typeKindDynamic || kind == typeKindVoid) return 1;
+  if (kind == typeKindNullable) {
+    if (value == 0) return 1;
+    return rtValueMatches(value, rtTypeArgument(expected));
+  }
+  if (kind == typeKindNull) {
+    if (value == 0) return 1;
+    return 0;
+  }
+  if (value == 0) return 0;
+  if (kind == typeKindObject) return 1;
+  var actual = rtValueKind(value);
+  if (actual != kind) return 0;
+  if (kind == typeKindList) {
+    return rtTypeSubtype(nativeLoad64(value + listTypeOffset), expected);
+  }
+  if (kind == typeKindClass) {
+    var descriptor = expected + nativeLoad64(expected + typeClassOffset);
+    if (rtObjectDescriptor(value) != descriptor) return 0;
+  }
+  return 1;
+}
+
+int rtValueCast(int value, int expected) {
+  if (rtValueMatches(value, expected) == 0) return rtValueTypeError();
+  var representation = nativeLoad64(expected + typeValueRepOffset);
+  if (representation == storageTagged) return value;
+  if (value == 0) return 0;
+  var kind = nativeLoad64(expected + typeKindOffset);
+  if (kind == typeKindNullable) {
+    kind = nativeLoad64(rtTypeArgument(expected) + typeKindOffset);
+  }
+  if (kind == typeKindInt) return rtValueInt(value);
+  if (kind == typeKindBool) return rtValueBool(value);
+  if (kind == typeKindVoid) return 0;
+  return value;
+}
+
+int rtValueAdd(int left, int right) {
+  var kind = rtValueKind(left);
+  if (kind == typeKindInt)
+    return rtBoxInt(rtValueInt(left) + rtValueInt(right));
+  if (kind == typeKindString && rtValueKind(right) == typeKindString) {
+    return rtStringConcat(left, right);
+  }
+  return rtValueTypeError();
+}
+
+int rtValueSub(int left, int right) {
+  return rtBoxInt(rtValueInt(left) - rtValueInt(right));
+}
+
+int rtValueMul(int left, int right) {
+  return rtBoxInt(rtValueInt(left) * rtValueInt(right));
+}
+
+int rtValueDiv(int left, int right) {
+  var divisor = rtValueInt(right);
+  if (divisor == 0) return rtValueTypeError();
+  return rtBoxInt(rtValueInt(left) ~/ divisor);
+}
+
+int rtValueMod(int left, int right) {
+  var divisor = rtValueInt(right);
+  if (divisor == 0) return rtValueTypeError();
+  return rtBoxInt(rtValueInt(left) % divisor);
+}
+
+int rtValueAnd(int left, int right) {
+  if (left == valueFalse || left == valueTrue) {
+    return rtBoxBool(rtValueBool(left) & rtValueBool(right));
+  }
+  return rtBoxInt(rtValueInt(left) & rtValueInt(right));
+}
+
+int rtValueOr(int left, int right) {
+  if (left == valueFalse || left == valueTrue) {
+    return rtBoxBool(rtValueBool(left) | rtValueBool(right));
+  }
+  return rtBoxInt(rtValueInt(left) | rtValueInt(right));
+}
+
+int rtValueXor(int left, int right) {
+  if (left == valueFalse || left == valueTrue) {
+    return rtBoxBool(rtValueBool(left) ^ rtValueBool(right));
+  }
+  return rtBoxInt(rtValueInt(left) ^ rtValueInt(right));
+}
+
+int rtValueShl(int left, int right) {
+  var value = rtValueInt(left);
+  var count = rtValueInt(right);
+  if (count < 0) return rtValueTypeError();
+  if (count >= 64) return rtBoxInt(0);
+  return rtBoxInt(value << count);
+}
+
+int rtValueShr(int left, int right) {
+  var value = rtValueInt(left);
+  var count = rtValueInt(right);
+  if (count < 0) return rtValueTypeError();
+  if (count >= 64) {
+    if (value < 0) return rtBoxInt(-1);
+    return rtBoxInt(0);
+  }
+  return rtBoxInt(value >> count);
+}
+
+int rtValueUshr(int left, int right) {
+  var value = rtValueInt(left);
+  var count = rtValueInt(right);
+  if (count < 0) return rtValueTypeError();
+  if (count >= 64) return rtBoxInt(0);
+  return rtBoxInt(value >>> count);
+}
+
+int rtValueEq(int left, int right) {
+  if (left == right) return 1;
+  var a = rtValueKind(left);
+  var b = rtValueKind(right);
+  if (a != b) return 0;
+  if (a == typeKindInt) {
+    if (rtValueInt(left) == rtValueInt(right)) return 1;
+  } else if (a == typeKindString) {
+    return rtStringEqual(left, right);
+  }
+  return 0;
+}
+
+int rtValueLt(int left, int right) {
+  if (rtValueInt(left) < rtValueInt(right)) return 1;
+  return 0;
+}
+
+int rtValueLe(int left, int right) {
+  if (rtValueInt(left) <= rtValueInt(right)) return 1;
+  return 0;
+}
+
+int rtValueGt(int left, int right) {
+  if (rtValueInt(left) > rtValueInt(right)) return 1;
+  return 0;
+}
+
+int rtValueGe(int left, int right) {
+  if (rtValueInt(left) >= rtValueInt(right)) return 1;
+  return 0;
+}
+
+int rtValueActive = 0;
+
+int rtStringFromParts(int parts) {
+  var length = 0;
+  var count = rtListLength(parts);
+  var i = 0;
+  while (i < count) {
+    length = length + rtStringLength(rtListRawGet(parts, i));
+    i = i + 1;
+  }
+  var result = rtStringNew(length);
+  var position = 0;
+  i = 0;
+  while (i < count) {
+    var part = rtListRawGet(parts, i);
+    var units = rtStringLength(part);
+    var unit = 0;
+    while (unit < units) {
+      nativeStore16(
+        result + stringDataOffset + position * 2,
+        nativeLoad16(part + stringDataOffset + unit * 2),
+      );
+      position = position + 1;
+      unit = unit + 1;
+    }
+    i = i + 1;
+  }
+  return result;
+}
+
+int rtValueFormat(int value, int handleType) {
+  if (value == 0) {
+    return rtStringFromCString(rtCString(0x6c6c756e, 0, 0, 0));
+  }
+  if (value == valueFalse) {
+    return rtStringFromCString(rtCString(0x65736c6166, 0, 0, 0));
+  }
+  if (value == valueTrue) {
+    return rtStringFromCString(rtCString(0x65757274, 0, 0, 0));
+  }
+  var kind = rtValueKind(value);
+  if (kind == typeKindInt) return rtIntToString(rtValueInt(value));
+  if (kind == typeKindString) return value;
+  var descriptor = rtObjectDescriptor(value);
+  if (kind == typeKindClass) {
+    var callback = nativeLoad64(descriptor + descriptorToStringOffset);
+    if (callback != 0) return nativeCall1(descriptor + callback, value);
+    var name = descriptor + nativeLoad64(descriptor + descriptorNameOffset);
+    var prefix = rtStringFromCString(
+      rtCString(0x65636e6174736e49, 0x2720666f20, 0, 0),
+    );
+    var suffix = rtStringFromCString(rtCString(39, 0, 0, 0));
+    return rtStringConcat(rtStringConcat(prefix, name), suffix);
+  }
+  var length = rtListLength(value);
+  if (length == 0) return rtStringFromCString(rtCString(0x5d5b, 0, 0, 0));
+  if (rtValueActive == 0) rtValueActive = rtListNew(handleType);
+  var active = rtValueActive;
+  var depth = rtListLength(active);
+  var i = 0;
+  while (i < depth) {
+    if (rtListRawGet(active, i) == value) {
+      return rtStringFromCString(rtCString(0x5d2e2e2e5b, 0, 0, 0));
+    }
+    i = i + 1;
+  }
+  var wordType = rtTypeArgument(handleType);
+  rtListAdd(active, value, wordType);
+  var parts = rtListNew(handleType);
+  rtListAdd(parts, rtStringFromCString(rtCString(91, 0, 0, 0)), wordType);
+  var separator = rtStringFromCString(rtCString(0x202c, 0, 0, 0));
+  var elementType = rtListElementType(value);
+  i = 0;
+  while (i < length) {
+    if (i != 0) rtListAdd(parts, separator, wordType);
+    var element = rtValueBox(rtListRawGet(value, i), elementType);
+    rtListAdd(parts, rtValueFormat(element, handleType), wordType);
+    i = i + 1;
+  }
+  rtListAdd(parts, rtStringFromCString(rtCString(93, 0, 0, 0)), wordType);
+  var result = rtStringFromParts(parts);
+  var backing = nativeLoad64(active + listBackingOffset);
+  nativeStore64(backing + arrayLengthOffset, depth);
+  nativeStore64(active + listLengthOffset, depth);
+  return result;
+}
+
+int rtValueToString(int value) {
+  var metadata = nativeMetadataAddress(metadataValues);
+  var handleType = metadata + nativeLoad64(metadata + metadataHandleTypeOffset);
+  return rtValueFormat(value, handleType);
 }
