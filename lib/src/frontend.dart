@@ -1,4 +1,5 @@
 import 'ast.dart';
+import 'binding.dart';
 import 'parser.dart';
 import 'ir.dart';
 import 'layout.dart';
@@ -71,11 +72,10 @@ int feRuntimeTokens = 0;
 List<int> _feLiteralTypes = <int>[];
 List<int> _feLiteralValues = <int>[];
 List<int> feParamStarts = <int>[];
-List<String> feParamNames = <String>[];
 List<int> feParamTypes = <int>[];
-List<String> feLocalNames = <String>[];
-List<int> feLocalTypes = <int>[];
-List<int> feLocalSlots = <int>[];
+FunctionBindings feBindings = FunctionBindings(<LocalVariable>[], -1);
+List<int> feBindingTypes = <int>[];
+List<int> feBindingSlots = <int>[];
 List<int> feBreaks = <int>[];
 List<int> feContinues = <int>[];
 List<int> feLoopBreaks = <int>[];
@@ -158,7 +158,7 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
     return -1;
   }
   var id = functions.length;
-  var start = feParamNames.length;
+  var start = feParamTypes.length;
   var count = 0;
   var source = feTokens[syntax.token].source;
   var name = syntax.name;
@@ -171,7 +171,6 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
     result = tString;
   if (owner >= 0) {
     name = classNames[owner] + '.' + syntax.name;
-    feParamNames.add('this');
     feParamTypes.add(classType(owner));
     feParamFields.add(-1);
     count++;
@@ -182,13 +181,17 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
     var type = tDynamic;
     var field = -1;
     if (parameter.fieldFormal) {
+      if (!constructor)
+        feAstError(
+          parameter.token,
+          'field-formal parameter requires a constructor',
+        );
       var entry = feField(owner, parameter.name);
       type = feFieldTypes[entry];
       field = feFieldIndices[entry];
     } else if (parameter.type.name != '') {
       type = feLowerType(parameter.type);
     }
-    feParamNames.add(parameter.name);
     feParamTypes.add(type);
     feParamFields.add(field);
     count++;
@@ -498,16 +501,29 @@ void fePatchJumps(List<int> jumps, int target) {
   }
 }
 
-int feLocal(String name) {
-  for (var i = feLocalNames.length - 1; i >= 0; i--) {
-    if (feLocalNames[i] == name) return i;
-  }
-  return -1;
+void feBindLocal(int binding, int type, int slot) {
+  feBindingTypes[binding] = type;
+  feBindingSlots[binding] = slot;
 }
 
-bool feImplicitMember(String name) {
-  if (feInitializingGlobal >= 0 || feLocal('this') < 0 || feLocal(name) >= 0)
+int feLocalSlot(int binding, int token) {
+  var slot = feBindingSlots[binding];
+  if (slot < 0) {
+    feAstError(
+      token,
+      'local referenced before declaration: ' +
+          feBindings.variables[binding].name,
+    );
+  }
+  return slot;
+}
+
+bool feImplicitMember(AstExpression expression) {
+  if (feInitializingGlobal >= 0 ||
+      feBindings.receiver < 0 ||
+      expression.binding >= 0)
     return false;
+  var name = expression.text;
   var owner = feOwners[feFunction];
   var field = 0;
   while (field < feFieldNames.length) {
@@ -519,7 +535,7 @@ bool feImplicitMember(String name) {
 }
 
 AstExpression feWithReceiver(AstExpression expression) {
-  if (expression.kind != astName || !feImplicitMember(expression.text))
+  if (expression.kind != astName || !feImplicitMember(expression))
     return expression;
   var receiver = AstExpression(
     astName,
@@ -528,6 +544,7 @@ AstExpression feWithReceiver(AstExpression expression) {
     <AstType>[],
     expression.token,
   );
+  receiver.binding = feBindings.receiver;
   return AstExpression(
     astMember,
     expression.text,
@@ -564,15 +581,14 @@ bool feHasPrefix(int token, String prefix) {
 
 int feExpressionSymbol(AstExpression expression) {
   if (expression.kind == astName) {
-    if (feLocal(expression.text) >= 0 || feImplicitMember(expression.text))
-      return -1;
+    if (expression.binding >= 0 || feImplicitMember(expression)) return -1;
     return feResolveName(expression.token, expression.text, '');
   }
   if (expression.kind == astMember) {
     var receiver = expression.children[0];
     if (receiver.kind == astName &&
-        feLocal(receiver.text) < 0 &&
-        !feImplicitMember(receiver.text) &&
+        receiver.binding < 0 &&
+        !feImplicitMember(receiver) &&
         feHasPrefix(receiver.token, receiver.text)) {
       return feResolveName(expression.token, expression.text, receiver.text);
     }
@@ -728,20 +744,12 @@ int feTemp(int type) {
   return slot;
 }
 
-void feScopeEnd(int start) {
-  while (feLocalNames.length > start) {
-    feLocalNames.removeLast();
-    feLocalTypes.removeLast();
-    feLocalSlots.removeLast();
-  }
-}
-
 class FeLvalue {
   int type;
   int container;
   int receiver;
   int index;
-  int local;
+  int binding;
   int global;
 
   FeLvalue(
@@ -749,7 +757,7 @@ class FeLvalue {
     this.container,
     this.receiver,
     this.index,
-    this.local,
+    this.binding,
     this.global,
   );
 }
@@ -1453,9 +1461,10 @@ int feLowerMember(AstExpression expression) {
 FeLvalue feLowerLvalue(AstExpression expression) {
   expression = feWithReceiver(expression);
   if (expression.kind == astName) {
-    var local = feLocal(expression.text);
-    if (local >= 0) {
-      return FeLvalue(feLocalTypes[local], 0, -1, -1, feLocalSlots[local], -1);
+    var binding = expression.binding;
+    if (binding >= 0) {
+      feLocalSlot(binding, expression.token);
+      return FeLvalue(feBindingTypes[binding], 0, -1, -1, binding, -1);
     }
   }
   var symbol = feExpressionSymbol(expression);
@@ -1508,8 +1517,8 @@ FeLvalue feLowerLvalue(AstExpression expression) {
 
 void feReadLvalue(FeLvalue target) {
   if (target.container == 0) {
-    if (target.local >= 0)
-      feOperand(opLoadLocal, target.local);
+    if (target.binding >= 0)
+      feOperand(opLoadLocal, feBindingSlots[target.binding]);
     else
       feLoadGlobalValue(target.global);
     return;
@@ -1525,8 +1534,8 @@ void feReadLvalue(FeLvalue target) {
 void feWriteLvalue(FeLvalue target) {
   if (target.container == 0) {
     feDuplicate(target.type);
-    if (target.local >= 0)
-      feOperand(opStoreLocal, target.local);
+    if (target.binding >= 0)
+      feOperand(opStoreLocal, feBindingSlots[target.binding]);
     else
       feStoreGlobalValue(target.global);
     return;
@@ -1611,10 +1620,10 @@ int feLowerExpression(AstExpression expression) {
     return tBool;
   }
   if (kind == astName) {
-    var local = feLocal(expression.text);
-    if (local >= 0) {
-      feOperand(opLoadLocal, feLocalSlots[local]);
-      return feLocalTypes[local];
+    var binding = expression.binding;
+    if (binding >= 0) {
+      feOperand(opLoadLocal, feLocalSlot(binding, expression.token));
+      return feBindingTypes[binding];
     }
     var symbol = feExpressionSymbol(expression);
     if (symbol < 0)
@@ -1763,9 +1772,7 @@ void feLowerVariable(AstVariable variable) {
     type = value;
   }
   var slot = feTemp(type);
-  feLocalNames.add(variable.name);
-  feLocalTypes.add(type);
-  feLocalSlots.add(slot);
+  feBindLocal(variable.binding, type, slot);
   feOperand(opStoreLocal, slot);
 }
 
@@ -1790,13 +1797,11 @@ void feLowerStatement(AstStatement statement) {
     return;
   }
   if (kind == astBlockStatement) {
-    var scope = feLocalNames.length;
     var i = 0;
     while (i < statement.children.length) {
       feLowerStatement(statement.children[i]);
       i++;
     }
-    feScopeEnd(scope);
     return;
   }
   if (kind == astVariableStatement) {
@@ -1858,7 +1863,6 @@ void feLowerStatement(AstStatement statement) {
     return;
   }
   if (kind == astWhileStatement || kind == astForStatement) {
-    var scope = feLocalNames.length;
     if (kind == astForStatement) feLowerStatement(statement.children[0]);
     var repeat = ir.length;
     var exit = <int>[];
@@ -1883,7 +1887,6 @@ void feLowerStatement(AstStatement statement) {
     fePatchJumps(exit, ir.length);
     feLabelRepeat(statement.token, update);
     feLoopEnd(breakBase, continueBase, ir.length, update);
-    feScopeEnd(scope);
     return;
   }
   if (kind == astBreakStatement) {
@@ -2114,11 +2117,10 @@ void parseSource(SourceProgram source) {
   _feLiteralTypes.clear();
   _feLiteralValues.clear();
   feParamStarts.clear();
-  feParamNames.clear();
   feParamTypes.clear();
-  feLocalNames.clear();
-  feLocalTypes.clear();
-  feLocalSlots.clear();
+  feBindings = FunctionBindings(<LocalVariable>[], -1);
+  feBindingTypes = <int>[];
+  feBindingSlots = <int>[];
   feBreaks.clear();
   feContinues.clear();
   feLoopBreaks.clear();
@@ -2178,6 +2180,18 @@ void parseSource(SourceProgram source) {
     }
   }
   var sourceFunctions = functions.length;
+  var bodyBindings = <FunctionBindings>[];
+  var bindingFunction = 0;
+  while (bindingFunction < sourceFunctions) {
+    bodyBindings.add(
+      bindFunctionLocals(
+        source,
+        feFunctionNodes[bindingFunction],
+        feOwners[bindingFunction] >= 0,
+      ),
+    );
+    bindingFunction++;
+  }
   var sourceGlobals = globalNames.length;
   fePrepareGlobals(sourceGlobals);
   var global = 0;
@@ -2213,29 +2227,32 @@ void parseSource(SourceProgram source) {
     var functionSyntax = feFunctionNodes[f];
     feAt = functionSyntax.token;
     functions[f].start = ir.length;
-    feLocalNames = <String>[];
-    feLocalTypes = <int>[];
-    feLocalSlots = <int>[];
+    feBindings = bodyBindings[f];
+    feBindingTypes = <int>[];
+    feBindingSlots = <int>[];
+    var binding = 0;
+    while (binding < feBindings.variables.length) {
+      feBindingTypes.add(-1);
+      feBindingSlots.add(-1);
+      binding++;
+    }
     feSlotTypes = <int>[];
     feNextLocal = 0;
     var start = feParamStarts[f];
     var p = 0;
     while (p < functions[f].parameters) {
       var slot = feTemp(feParamTypes[start + p]);
-      if (feConstructors[f] == 0 || feParamFields[start + p] < 0) {
-        feLocalNames.add(feParamNames[start + p]);
-        feLocalTypes.add(feParamTypes[start + p]);
-        feLocalSlots.add(slot);
-      }
+      var binding = feBindings.receiver;
+      var parameter = p;
+      if (feOwners[f] >= 0) parameter--;
+      if (parameter >= 0)
+        binding = functionSyntax.parameters[parameter].binding;
+      if (binding >= 0) feBindLocal(binding, feParamTypes[start + p], slot);
       p++;
     }
     if (feConstructors[f] == 1) {
-      var names = feLocalNames;
-      var types = feLocalTypes;
-      var slots = feLocalSlots;
-      feLocalNames = <String>[];
-      feLocalTypes = <int>[];
-      feLocalSlots = <int>[];
+      var bindings = feBindings;
+      feBindings = FunctionBindings(<LocalVariable>[], -1);
       var owner = feOwners[f];
       var field = 0;
       while (field < feFieldNames.length) {
@@ -2252,9 +2269,7 @@ void parseSource(SourceProgram source) {
         }
         field++;
       }
-      feLocalNames = names;
-      feLocalTypes = types;
-      feLocalSlots = slots;
+      feBindings = bindings;
       p = 1;
       while (p < functions[f].parameters) {
         var field = feParamFields[start + p];
@@ -2288,7 +2303,6 @@ void parseSource(SourceProgram source) {
 }
 
 void feLowerForIn(AstStatement statement) {
-  var scope = feLocalNames.length;
   var declaration = statement.variables[0];
   var context = -1;
   if (declaration.type.name != '')
@@ -2317,9 +2331,7 @@ void feLowerForIn(AstStatement statement) {
     );
   }
   var variable = feTemp(type);
-  feLocalNames.add(declaration.name);
-  feLocalTypes.add(type);
-  feLocalSlots.add(variable);
+  feBindLocal(declaration.binding, type, variable);
   var repeat = ir.length;
   feOperand(opLoadLocal, index);
   feOperand(opLoadLocal, iterable);
@@ -2344,11 +2356,9 @@ void feLowerForIn(AstStatement statement) {
   fePatch(done, ir.length);
   feLabelRepeat(statement.token, update);
   feLoopEnd(breakBase, continueBase, ir.length, update);
-  feScopeEnd(scope);
 }
 
 void feLowerDoWhile(AstStatement statement) {
-  var scope = feLocalNames.length;
   var repeat = ir.length;
   var breakBase = feBreaks.length;
   var continueBase = feContinues.length;
@@ -2361,7 +2371,6 @@ void feLowerDoWhile(AstStatement statement) {
   fePatchJumps(repeats, repeat);
   feLabelRepeat(statement.token, condition);
   feLoopEnd(breakBase, continueBase, ir.length, condition);
-  feScopeEnd(scope);
 }
 
 bool feSwitchConstant(AstExpression expression) {
@@ -2383,7 +2392,6 @@ bool feSwitchConstant(AstExpression expression) {
 }
 
 void feLowerSwitch(AstStatement statement) {
-  var scope = feLocalNames.length;
   var type = feLowerExpression(statement.expressions[0]);
   if (type != tInt && type != tString && type != tBool) {
     feAstError(
@@ -2426,20 +2434,17 @@ void feLowerSwitch(AstStatement statement) {
     var branch = statement.children[i];
     if (entries[i] >= 0) fePatch(entries[i], ir.length);
     if (i == fallback) fePatch(unmatched, ir.length);
-    var caseScope = feLocalNames.length;
     var child = 0;
     while (child < branch.children.length) {
       feLowerStatement(branch.children[child]);
       child++;
     }
-    feScopeEnd(caseScope);
     if (branch.children.isNotEmpty) feBreaks.add(feJump(opJump));
     i++;
   }
   if (fallback < 0) fePatch(unmatched, ir.length);
   while (feBreaks.length > breakBase) fePatch(feBreaks.removeLast(), ir.length);
   feLoopBreaks.removeLast();
-  feScopeEnd(scope);
 }
 
 void feLabelRepeat(int token, int target) {

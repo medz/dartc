@@ -31,6 +31,7 @@ class AstExpression {
   List<AstExpression> children;
   List<AstType> typeArguments;
   int token;
+  int binding = -1;
 
   AstExpression(
     this.kind,
@@ -67,6 +68,7 @@ class AstVariable {
   List<AstExpression> initializer;
   String modifier;
   int token;
+  int binding = -1;
 
   AstVariable(
     this.type,
@@ -82,6 +84,7 @@ class AstParameter {
   String name;
   bool fieldFormal;
   int token;
+  int binding = -1;
 
   AstParameter(this.type, this.name, this.fieldFormal, this.token);
 }

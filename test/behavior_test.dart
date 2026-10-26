@@ -558,6 +558,15 @@ void main() {
       'void main() { print(1 as void); }',
       'void main() { print(1 is int<String>); }',
       'void main() { print(<int>[] is List<int, String>); }',
+      'void main() { int x = 3; { int x = x + 1; print(x); } }',
+      'int x = 3; void main() { print(x); int x = 4; }',
+      'void main() { int x = 1; int x = 2; }',
+      'void f(int x, int x) {} void main() {}',
+      'class C { int x; C(this.x, int x) {} } void main() {}',
+      'void main() { int x = 3; for (int x = x; x < 4; x++) {} }',
+      'class C { int get value => 7; void f() { print(value); int value = 9; } } void main() {}',
+      'int x = 7; void main() { print(x); mark: int x = 3; }',
+      'void main() { if (true) int inner = 1; print(inner); }',
     ];
     void reject(File invalid, {String? runtime, String? diagnostic}) {
       final result = Process.runSync(

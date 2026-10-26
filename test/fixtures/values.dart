@@ -442,6 +442,99 @@ void conditionContexts() {
   print('lazy:$first:$second:$conditionTrace');
 }
 
+class BindingProbe {
+  int value;
+  BindingProbe(this.value) {
+    value += 1;
+  }
+
+  int get doubled => value * 2;
+  int parameter(int value) => value + this.value;
+
+  int localGetter() {
+    int doubled = 3;
+    return doubled + this.doubled;
+  }
+
+  int localField() {
+    int value = 4;
+    {
+      value += 1;
+    }
+    return value + this.value;
+  }
+}
+
+int bindingParameter(int value) {
+  int value = 9;
+  return value;
+}
+
+int bindingCalls = 0;
+int _ = 11;
+
+int bindingMark() {
+  bindingCalls++;
+  return bindingCalls;
+}
+
+void localBindings() {
+  int value = 1;
+  {
+    int value = 2;
+    {
+      int value = 3;
+      print(value);
+    }
+    print(value);
+  }
+  {
+    value += 4;
+  }
+  print(value);
+  for (int value = 0; value < 2; value++) print(value);
+  print(value);
+  var rows = <int>[6, 7];
+  for (var rows in rows) print(rows);
+  print(rows);
+  for (int value = 0; value < 1; value++) {
+    int value = 8;
+    print(value);
+  }
+  switch (2) {
+    case 1:
+      int branch = 1;
+      print(branch);
+      break;
+    case 2:
+      int branch = 2;
+      print(branch);
+      break;
+  }
+  // A label does not introduce a declaration scope.
+  // ignore: unused_label
+  mark:
+  int marked = 10;
+  print(marked);
+  var probe = BindingProbe(5);
+  print(probe.value);
+  print(probe.parameter(2));
+  print(probe.localGetter());
+  print(probe.localField());
+  print(bindingParameter(2));
+  for (int shadow = 0; shadow < 2; shadow++)
+    // ignore: unused_local_variable
+    int shadow = bindingMark();
+  if (choose())
+    // ignore: unused_local_variable
+    int value = bindingMark();
+  print(value);
+  int _ = bindingMark();
+  int _ = bindingMark();
+  print(bindingCalls);
+  print(_);
+}
+
 void listGrowth(List<String> args) {
   var values = <int>[];
   values.clear();
@@ -501,5 +594,6 @@ void main(List<String> args) {
   typeChecks();
   filledLists();
   conditionContexts();
+  localBindings();
   listGrowth(args);
 }
