@@ -363,12 +363,15 @@ int rtListRawGet(int list, int index) {
 }
 
 int rtListElementType(int list) {
-  return rtTypeArgument(nativeLoad64(list + listTypeOffset));
+  var type = nativeLoad64(list + listTypeOffset);
+  return type + nativeLoad64(type + typeArgumentOffset);
 }
 
 int rtListGet(int list, int index, int expectedType) {
-  var value = rtListRawGet(list, index);
-  var actualType = rtListElementType(list);
+  var backing = nativeLoad64(list + listBackingOffset);
+  var value = nativeLoad64(backing + arrayDataOffset + index * 8);
+  var type = nativeLoad64(list + listTypeOffset);
+  var actualType = type + nativeLoad64(type + typeArgumentOffset);
   if (actualType == expectedType) return value;
   return rtValueCast(rtValueBox(value, actualType), expectedType);
 }
