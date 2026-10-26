@@ -12,4 +12,4 @@
 - Follow doc/architecture.md as an evolving target. Self-hosting a subset is a milestone, not completion of the compiler or runtime design.
 - Plan language work from specs/ and update its upstream clause references, implementation gaps, and behavior-test evidence with each language change. Keep language compatibility details there; keep doc/architecture.md focused on compiler and runtime design.
 - Keep compiler and runtime algorithms expressible and replaceable in Dart. Reuse FFI types and layouts; concentrate unavoidable machine-specific capabilities in a small explicit primitive boundary.
-- Bootstrap new primitives in two steps: build compiler support using old capabilities, then adopt the primitive in runtime code and rebuild.
+- Bootstrap new language features and primitives in two steps: build compiler support using old capabilities, then adopt them in compiler or runtime code and rebuild. Use them where they simplify existing code; measure the same workload before claiming performance gains.

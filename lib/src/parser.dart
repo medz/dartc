@@ -152,8 +152,8 @@ AstExpression parserPrimary(Parser parser) {
     return AstExpression(
       astInteger,
       current.text,
-      <AstExpression>[],
-      <AstType>[],
+      const <AstExpression>[],
+      const <AstType>[],
       token,
     );
   }
@@ -164,8 +164,8 @@ AstExpression parserPrimary(Parser parser) {
     return AstExpression(
       astBoolean,
       current.text,
-      <AstExpression>[],
-      <AstType>[],
+      const <AstExpression>[],
+      const <AstType>[],
       token,
     );
   }
@@ -173,8 +173,8 @@ AstExpression parserPrimary(Parser parser) {
     return AstExpression(
       astNull,
       'null',
-      <AstExpression>[],
-      <AstType>[],
+      const <AstExpression>[],
+      const <AstType>[],
       token,
     );
   }
@@ -198,7 +198,13 @@ AstExpression parserPrimary(Parser parser) {
   }
   if (constant) parserError(parser, 'const currently requires a List literal');
   var name = parserName(parser);
-  return AstExpression(astName, name, <AstExpression>[], <AstType>[], token);
+  return AstExpression(
+    astName,
+    name,
+    const <AstExpression>[],
+    const <AstType>[],
+    token,
+  );
 }
 
 AstExpression parserCall(Parser parser, AstExpression callee, int token) {
@@ -457,7 +463,7 @@ AstExpression parseExpression(Parser parser) {
 }
 
 AstType parserInferredType(int token) {
-  return AstType('', <AstType>[], token);
+  return AstType('', const <AstType>[], token);
 }
 
 bool parserTypedDeclaration(Parser parser) {
