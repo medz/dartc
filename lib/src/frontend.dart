@@ -32,6 +32,7 @@ SourceProgram feSources = SourceProgram(
   -1,
   0,
   '',
+  -1,
 );
 List<Token> feTokens = <Token>[];
 int feAt = 0;
@@ -294,7 +295,16 @@ void feFunctionSignature(
     parameterTypes.add(feParamTypes[paramStart + p]);
   }
   functions.add(
-    FunctionInfo(name, 0, count, count, type, parameterTypes, <int>[]),
+    FunctionInfo(
+      name,
+      0,
+      count,
+      count,
+      type,
+      parameterTypes,
+      <int>[],
+      feTokens[feAt].source,
+    ),
   );
   feParamStarts.add(paramStart);
   feBodies.add(feAt);
@@ -1350,6 +1360,14 @@ void feLowerStatement(AstStatement statement) {
     }
     return;
   }
+  if (kind == astForInStatement) {
+    feLowerForIn(statement);
+    return;
+  }
+  if (kind == astDoWhileStatement) {
+    feLowerDoWhile(statement);
+    return;
+  }
   if (kind == astWhileStatement || kind == astForStatement) {
     var scope = feLocalNames.length;
     if (kind == astForStatement) feLowerStatement(statement.children[0]);
@@ -1415,7 +1433,16 @@ void fePrepareGlobals(int count) {
       var type = globalTypes[i];
       initializer.getter = functions.length;
       functions.add(
-        FunctionInfo('#get:' + globalNames[i], 0, 0, 0, type, <int>[], <int>[]),
+        FunctionInfo(
+          '#get:' + globalNames[i],
+          0,
+          0,
+          0,
+          type,
+          <int>[],
+          <int>[],
+          feTokens[feGlobalValues[i]].source,
+        ),
       );
       initializer.setter = functions.length;
       functions.add(
@@ -1427,6 +1454,7 @@ void fePrepareGlobals(int count) {
           type,
           <int>[type],
           <int>[type],
+          feTokens[feGlobalValues[i]].source,
         ),
       );
       initializer.state = globalNames.length;
@@ -1596,11 +1624,12 @@ void parseSource(SourceProgram source) {
   feContinues.clear();
   feLoopBreaks.clear();
   feLoopContinues.clear();
-  functions.add(FunctionInfo('__init', 0, 0, 0, tVoid, <int>[], <int>[]));
+  functions.add(FunctionInfo('__init', 0, 0, 0, tVoid, <int>[], <int>[], -1));
   feBodies.add(0);
   feParamStarts.add(0);
   feOwners.add(-1);
   feConstructors.add(0);
+  entrySource = source.entry;
   feSources = source;
   feTokens = source.tokens;
   feAt = 0;
