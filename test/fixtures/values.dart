@@ -3,6 +3,7 @@ int boxStrings = 0;
 class Box {
   int value;
   int extra;
+  int? cached;
   Box(this.value, {this.extra = 7});
   String toString() {
     boxStrings++;
@@ -53,6 +54,21 @@ class Box {
   set access(int next) {
     conditionTrace = conditionTrace + '4';
     value = next;
+  }
+
+  int? get conditionalAccess {
+    conditionTrace = conditionTrace + '2';
+    return cached;
+  }
+
+  set conditionalAccess(int next) {
+    conditionTrace = conditionTrace + '4';
+    cached = next;
+  }
+
+  int? get opaqueAccess => cached;
+  set opaqueAccess(void next) {
+    print(<void>[next]);
   }
 
   int get textLength => value;
@@ -640,6 +656,120 @@ void conditionContexts() {
   conditionComparisons(pass(0));
 }
 
+List<Object>? coalescingStorage;
+List<Object>? get coalescingTop {
+  conditionTrace = conditionTrace + '1';
+  return coalescingStorage;
+}
+
+set coalescingTop(List<int> next) {
+  conditionTrace = conditionTrace + '3';
+  coalescingStorage = next;
+}
+
+void coalescingAssignmentFlow(
+  int? number,
+  List<Object>? lists,
+  Object? object,
+) {
+  var inferred = [number ??= nonCompletingWhile()];
+  List<int> numbers = inferred;
+  print(<Object>[numbers, number + 1]);
+  object ??= 7;
+  var retained = [object];
+  List<Object> objects = retained;
+  print(retained is List<int>);
+  print(objects);
+  if (lists is List<int>?) {
+    var assigned = [lists ??= []];
+    List<List<int>> integers = assigned;
+    print(integers);
+  }
+}
+
+void coalescingAssignmentValues() {
+  int? local = pass(null);
+  var assigned = [local ??= 6];
+  List<int> integers = assigned;
+  print(<Object>[integers, local + 1]);
+  global = null;
+  conditionTrace = '';
+  print([global ??= conditionChoice(5), global ??= conditionChoice(6)]);
+  print(conditionTrace);
+  var cell = Cell(0, null);
+  conditionTrace = '';
+  print((argumentValue(1, cell) as Cell).optional ??= conditionChoice(3));
+  print(conditionTrace);
+  var indexed = <int?>[null];
+  for (var attempt = 0; attempt < 2; attempt++) {
+    conditionTrace = '';
+    print(
+      (argumentValue(1, indexed) as List<int?>)[conditionChoice(2) - 2] ??=
+          conditionChoice(3),
+    );
+    print(conditionTrace);
+  }
+  var box = Box(0);
+  for (var attempt = 0; attempt < 2; attempt++) {
+    conditionTrace = '';
+    print(
+      (argumentValue(1, box) as Box).conditionalAccess ??= conditionChoice(3),
+    );
+    print(conditionTrace);
+  }
+  box.cached = null;
+  var dynamicResult = [box.conditionalAccess ??= pass(9223372036854775807)];
+  print(dynamicResult is List<int>);
+  print(dynamicResult);
+  conditionTrace = '';
+  var lists = [coalescingTop ??= []];
+  List<List<Object>> objects = lists;
+  print(lists[0] is List<int>);
+  print(lists is List<List<int>>);
+  print(objects);
+  print(conditionTrace);
+  conditionTrace = '';
+  print(coalescingTop ??= <int>[conditionChoice(2)]);
+  print(conditionTrace);
+  conditionTrace = '';
+  // ignore: dead_code, dead_null_aware_expression
+  var finalValue = topFinal ??= conditionChoice(1);
+  // ignore: dead_code, dead_null_aware_expression
+  var constantValue = topConstant ??= conditionChoice(2);
+  print(<int>[finalValue, constantValue]);
+  print(conditionTrace);
+  // A nonnull getter still contributes the unexecuted RHS type to the result.
+  // ignore: dead_code, dead_null_aware_expression
+  var wide = [box.textLength ??= 'unused'];
+  List<Object> joined = wide;
+  print(wide is List<int>);
+  print(joined);
+  var present = Box(0);
+  present.cached = 1;
+  box.cached = null;
+  List<Object?> payload = <void>[
+    present.opaqueAccess ??= valueVoid(),
+    box.opaqueAccess ??= valueVoid(),
+  ];
+  print(payload);
+  Null absent;
+  var nullResult = [absent ??= null];
+  List<Null> nulls = nullResult;
+  print(nulls);
+  Object? knownNull = pass(null);
+  knownNull as Null;
+  int definitelyAssigned;
+  knownNull ??= (definitelyAssigned = 8);
+  print(definitelyAssigned);
+  int nonnull = 1;
+  final int writtenLater;
+  // ignore: dead_code, dead_null_aware_expression
+  nonnull ??= (writtenLater = 2);
+  writtenLater = 3;
+  print(writtenLater);
+  coalescingAssignmentFlow(4, null, null);
+}
+
 const coalescingNested = <List<int>>[
   null ?? <int>[3],
 ];
@@ -720,6 +850,7 @@ void coalescingContexts() {
   List<Object?> conditionalView = conditionalPayload;
   print(conditionalView);
   coalescingDefaults();
+  coalescingAssignmentValues();
 }
 
 final int lazyFinalValue = conditionChoice(9);

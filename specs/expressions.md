@@ -35,7 +35,7 @@
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
-| §17.23、§17.36 赋值与可赋值表达式 | 部分实现 | 局部、全局、字段、实例/顶层 setter、List 索引及已有复合赋值；接收者/索引只求值一次，简单赋值保留原 RHS 类型和负载，setter 返回值不替代它；复合赋值独立检查 getter 运算和 setter 写入类型。final/const 存储只读，同名显式 setter 可以接收写入。`??=` 未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerLvalue`、`feLowerAssignment`、`feWriteLvalue`；[values.dart](../test/fixtures/values.dart)：`assignmentValues`、`accessorValues`、`topAccessorValues`；[behavior_test.dart](../test/behavior_test.dart)：`neverExpressions`、`rejected`、`failingValues`。 |
+| §17.23、§17.36 赋值与可赋值表达式 | 部分实现 | 局部、全局、字段、实例/顶层 setter、List 索引及已有复合赋值；接收者/索引只求值一次，简单赋值保留原 RHS 类型和负载，setter 返回值不替代它；复合赋值独立检查 getter 运算和 setter 写入类型。final/const 存储只读，同名显式 setter 可以接收写入。`??=` 仅 null 时求值并写入 RHS，仍检查读写两侧及未执行的 RHS；原读取/RHS 负载独立于 setter 转换。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerLvalue`、`feLowerAssignment`、`feWriteLvalue`；[values.dart](../test/fixtures/values.dart)：`assignmentValues`、`accessorValues`、`topAccessorValues`、`coalescingAssignmentValues`；[behavior_test.dart](../test/behavior_test.dart)：`neverExpressions`、`rejected`、`failingValues`。 |
 | §17.24 条件表达式 | 部分实现 | 仅执行选定分支，两分支均检查并接受上下文类型；结果合并依赖当前有限类型 LUB。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerConditional`；[values.dart](../test/fixtures/values.dart)：`conditionTernary`、`flowContexts`。 |
 | §17.25 `??` | 部分实现 | 左侧一次求值，仅 null 时执行 RHS；两侧静态检查和接收 List 上下文；Null 左侧取 RHS 类型，否则合并非空左类型与 RHS。拒绝 void 左侧，允许 void RHS 并保留选中负载。 | [typing.dart](../lib/src/typing.dart)：`typingCoalescing`；[frontend.dart](../lib/src/frontend.dart)：`feLowerCoalescing`；[constants.dart](../lib/src/constants.dart)：`_constantCoalescing`；[values.dart](../test/fixtures/values.dart)：`coalescingContexts`。 |
 | §17.26 逻辑表达式 | 部分实现 | `&&`、`\|\|` 短路及分支提升；普通布尔值与条件消费均保留副作用和动态 bool 检查。 | [frontend.dart](../lib/src/frontend.dart)：`feConditionJumps`、`feLowerExpression`；[values.dart](../test/fixtures/values.dart)：`conditionContexts`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
@@ -63,7 +63,9 @@
 | §17.8、§17.10–17.11、§17.14 | 未实现 | Symbol 字面量、throw 表达式、函数表达式和 isolate 创建尚未接入。 | [ast.dart](../lib/src/ast.dart) 尚无对应表达式；尚无行为验证。 |
 | §17.16–17.17、§17.34 | 未实现 | 函数提取、泛型函数实例化、await；尚无闭包和异步执行基础。 | 后续扩展 [parser.dart](../lib/src/parser.dart)、[frontend.dart](../lib/src/frontend.dart)；尚无行为验证。 |
 | 空安全及后续 Dart 3 表达式 | 未实现 | `?.`、`?[]`、空断言、记录和模式相关表达式未实现；不能由 `??` 覆盖推定支持。 | 后续扩展 [parser.dart](../lib/src/parser.dart)、[ast.dart](../lib/src/ast.dart)；尚无行为验证。 |
-| 优先级、所有静态错误及完成方式 | 待核对 | 已有解析和拒绝样例，尚未逐规则核验官方语言测试；成功自举不提供完整表达式兼容性证明。 | [parser.dart](../lib/src/parser.dart)：`parserPrecedence`、`parserBinary`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
+| 优先级、所有静态错误及完成方式 | 待核对 | 已有解析和拒绝样例；尚未逐规则核验官方语言测试；成功自举不提供完整表达式兼容性证明。 | [parser.dart](../lib/src/parser.dart)：`parserPrecedence`、`parserBinary`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
+
+SDK 3.13.5 对 `??=` 有两处 analyzer/CFE 差异待继续核对：`void` getter 作为左侧时 analyzer 拒绝，CFE 接受表达式语句，dartc 按 void 值消费规则拒绝；`int f(Never value, dynamic fallback) { value ??= fallback; }` 的正常落空被 analyzer 拒绝而被 CFE 接受，dartc 将 `Never` 读取视为不能正常完成，仍检查 RHS。此差异不扩展为一般诊断一致性结论，后者由 [behavior_test.dart](../test/behavior_test.dart) 的 `neverLocalCoalescing` 跟踪。
 
 [draft]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex
 [pdf]: https://dart.dev/to/spec-draft

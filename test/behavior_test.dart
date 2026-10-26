@@ -6,6 +6,9 @@ const program = r'''
 Never neverStops() { while (true) {} }
 Never get neverGetter => neverStops();
 void neverGetterCall() { neverGetter(); }
+int neverLocalCoalescing(Never value, dynamic fallback) {
+  value ??= fallback;
+}
 
 Never neverExpressions(Never value) {
   Never property = value.missing;
@@ -14,8 +17,10 @@ Never neverExpressions(Never value) {
   List<int> typed = assignments;
   var compounds = [value[true] += 1];
   List<Never> checked = compounds;
+  var ifNull = [value.missing ??= 1];
+  List<int> selected = ifNull;
   value<int, String>(typed, other: property);
-  value.foo(checked, other: indexed);
+  value.foo(checked, selected, other: indexed);
   return value.toString(1, other: true);
 }
 
@@ -566,6 +571,7 @@ void main(List<String> args) {
       "void main() { dynamic value = 'wrong'; print('before'); int number = value; print('after'); }",
       "class C { C(); set value(int next) { print('setter'); } } dynamic value() { print('rhs'); return 'wrong'; } void main() { print('before'); C().value = value(); print('after'); }",
       "set target(int next) { print('setter'); } dynamic value() { print('rhs'); return 'wrong'; } void main() { print('before'); target = value(); print('after'); }",
+      "class C { C(); int? get value { print('getter'); return null; } set value(int next) { print('setter'); } } dynamic bad() { print('rhs'); return 'wrong'; } void main() { print('before'); C().value ??= bad(); print('after'); }",
       "void main() { print('before'); int count = -1; 1 << count; print('after'); }",
       "void main() { print('before'); int count = -1; -1 >> count; print('after'); }",
       "void main() { print('before'); int count = -1; -1 >>> count; print('after'); }",
@@ -758,6 +764,14 @@ void main() {
       'void value() {} void main() { value() ?? 1; }',
       'void value() {} void main() { dynamic source = 1; var values = [source ?? value()]; print(values[0]); }',
       'void main() { int value; print(1 ?? value); }',
+      'class C { C(); int get value => 1; } void main() { C().value ??= 2; }',
+      'class C { C(); set value(int next) {} } void main() { C().value ??= 2; }',
+      'void main() { final int value = 1; value ??= 2; }',
+      "void main() { int value = 1; value ??= 'wrong'; }",
+      'void main() { int value = 1; int missing; value ??= missing; }',
+      'void touch() {} void main() { dynamic value; value ??= touch(); }',
+      'void f(int? value) { int assigned; value ??= (assigned = 1); print(assigned); } void main() { f(2); }',
+      'void f(int? value) { final int assigned; value ??= (assigned = 1); assigned = 2; } void main() { f(2); }',
       'void main() { final int value = 1; value = 2; print(value); }',
       'void main() { final int value = 1; print(++value); }',
       'void main() { final int value; value = (value = 1); print(value); }',

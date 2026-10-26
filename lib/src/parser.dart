@@ -397,6 +397,7 @@ AstExpression parserBinary(Parser parser, int minimum) {
 
 bool parserAssignment(String op) {
   return op == '=' ||
+      op == '??=' ||
       op == '+=' ||
       op == '-=' ||
       op == '*=' ||
@@ -441,9 +442,6 @@ AstExpression parseExpression(Parser parser) {
       <AstType>[],
       token,
     );
-  }
-  if (parserIs(parser, '??=')) {
-    parserError(parser, 'unsupported assignment operator ??=');
   }
   var op = parserPeek(parser);
   if (parser.tokens[parser.position].kind == tokenSymbol &&

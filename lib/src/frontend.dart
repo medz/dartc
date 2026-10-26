@@ -1992,6 +1992,7 @@ void feWriteLvalue(FeLvalue target, int token) {
 int feLowerAssignment(AstExpression expression, bool postfix) {
   var op = expression.text;
   var target = feLowerLvalue(expression.children[0], op != '=');
+  if (op == '??=') return feLowerCoalescingAssignment(expression, target);
   if (op == '=') {
     var source = expression.children[1];
     var type = feLowerHint(source, target.type);
@@ -2040,6 +2041,63 @@ int feLowerAssignment(AstExpression expression, bool postfix) {
   else
     feOperand(opLoadLocal, value);
   if (postfix) return readType;
+  return result;
+}
+
+int feLowerCoalescingAssignment(AstExpression expression, FeLvalue target) {
+  var left = feReadLvalue(target, expression.token);
+  if (left == tVoid)
+    feAstError(expression.token, 'void expression cannot be used as a value');
+  if (left == tNever) flowUnreachable(feFlow);
+  feFlow = flowSplit(feFlow);
+  var value = -1;
+  var present = -1;
+  if (left == tNull) {
+    feEmit(opPop);
+  } else {
+    value = feTemp(left);
+    feOperand(opStoreLocal, value);
+    if (typeCanBeNull(left)) {
+      feOperand(opLoadLocal, value);
+      feInteger(0, tNull);
+      feEmit(opNe);
+    } else {
+      feInteger(1, tBool);
+    }
+    present = feJump(opJumpTrue);
+  }
+  var afterLeft = feFlow;
+  feFlow = flowCopy(afterLeft);
+  if (!typeCanBeNull(left)) flowUnreachable(feFlow);
+  var source = expression.children[1];
+  var context = target.type;
+  if (target.binding >= 0) context = left;
+  var right = feLowerHint(source, context);
+  var assigned = feTemp(right);
+  feOperand(opStoreLocal, assigned);
+  feOperand(opLoadLocal, assigned);
+  feConvertValue(right, target.type, source.token);
+  feWriteLvalue(target, expression.token);
+  feWriteFlow(target, right);
+  feEmit(opPop);
+  var result = typingCoalescing(left, right);
+  feOperand(opLoadLocal, assigned);
+  feConvertValue(right, result, source.token);
+  if (left == tNull) {
+    feFlow = flowUnsplit(feFlow);
+    return result;
+  }
+  var rightFlow = feFlow;
+  var done = feJump(opJump);
+  fePatch(present, ir.length);
+  feFlow = afterLeft;
+  if (target.binding >= 0) flowNull(feFlow, target.binding, false);
+  feOperand(opLoadLocal, value);
+  var promoted = typeNonNullable(left);
+  feNarrowValue(left, promoted);
+  feConvertValue(promoted, result, expression.token);
+  feFlow = flowUnsplit(feJoinFlow(feFlow, rightFlow));
+  fePatch(done, ir.length);
   return result;
 }
 
