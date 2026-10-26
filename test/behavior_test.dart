@@ -730,6 +730,12 @@ void main() {
   print(hostRead(5));
 }
 ''',
+      'metadata-notes.dart':
+          'const note = <int>[1]; @note int value(int x) => x + 1;',
+      'metadata-exports.dart': '@barrelNote export "metadata-notes.dart" show note, value; const barrelNote = 1;',
+      'metadata-imports.dart':
+          '@meta.note import "metadata-exports.dart" as meta show note, value; '
+          '@meta.note void main() { print(meta.value(3)); }',
       'core.dart': "import 'dart:core' as core; void main() {core.print(42);}",
       'ordinary.dart': 'int print(int value) => value + 4;',
       'core-export.dart': "export 'dart:core' show print;",
@@ -764,7 +770,18 @@ void main() {
     compare(File('${temporary.path}/constant-imports.dart'), []);
     compare(File('${temporary.path}/property-imports.dart'), []);
     compare(File('${temporary.path}/top-accessor-imports.dart'), []);
+    compare(File('${temporary.path}/metadata-imports.dart'), []);
     final rejected = [
+      '@missing void main() {}',
+      'int get note => 1; @note void main() {}',
+      'void main() { @note int value = 1; const note = 2; print(value); }',
+      'const note = 1; void f(int note) { @note int value = 2; print(value); } void main() { f(3); }',
+      'const note = 1; class C { int note = 2; C(); @note void f() {} } void main() { C().f(); }',
+      'const note = 1; void main() { for (@note var note in <int>[2]) print(note); }',
+      'const note = "text"; @note.length void main() {}',
+      'const void note = 1; @note void main() {}',
+      'import "metadata-exports.dart" as meta hide note; @meta.note void main() {}',
+      'import "metadata-notes.dart" as meta; void main() { const meta = 1; @meta.note int value = 2; print(value); }',
       'int f() => 1; void main() { print(f<int>()); }',
       'void main() { print<int>(1); }',
       'void main() { List<int>.filled<int>(1, 0); }',

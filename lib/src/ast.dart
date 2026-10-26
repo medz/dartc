@@ -64,6 +64,7 @@ const int astExportDirective = 2;
 const int astLibraryDirective = 3;
 
 class AstVariable {
+  List<AstExpression> metadata = const <AstExpression>[];
   AstType type;
   String name;
   List<AstExpression> initializer;
@@ -85,6 +86,7 @@ const int astOptionalPositional = 1;
 const int astNamedParameter = 2;
 
 class AstParameter {
+  List<AstExpression> metadata = const <AstExpression>[];
   AstType type;
   String name;
   bool fieldFormal;
@@ -118,6 +120,7 @@ class AstStatement {
 }
 
 class AstFunction {
+  List<AstExpression> metadata = const <AstExpression>[];
   String name;
   AstType result;
   List<AstParameter> parameters;
@@ -141,6 +144,7 @@ class AstFunction {
 }
 
 class AstClass {
+  List<AstExpression> metadata = const <AstExpression>[];
   String name;
   List<AstVariable> fields;
   List<AstFunction> constructors;
@@ -151,6 +155,7 @@ class AstClass {
 }
 
 class AstTypedef {
+  List<AstExpression> metadata = const <AstExpression>[];
   String name;
   AstType result;
   List<AstType> parameterTypes;
@@ -167,6 +172,7 @@ class AstCombinator {
 }
 
 class AstDirective {
+  List<AstExpression> metadata = const <AstExpression>[];
   int kind;
   String uri;
   String prefix;

@@ -1625,7 +1625,43 @@ void listGrowth(List<String> args) {
   print(args[0]);
 }
 
+@metadataTag
+class MetadataProbe {
+  @metadataList
+  int metadataTag;
+  @metadataList
+  MetadataProbe(@metadataList this.metadataTag);
+  @metadataList
+  int read(@metadataList int metadataList) {
+    const localNote = true;
+    @localNote
+    int value = metadataList + this.metadataTag;
+    return value;
+  }
+}
+
+@metadataNull
+const metadataTag = 1;
+const metadataList = <Object?>[null, '注🙂'];
+const metadataNull = null;
+
+@metadataTag
+@metadataList
+@metadataNull
+void metadataValues() {
+  print(MetadataProbe(3).read(4));
+  const localNote = 'local';
+  @metadataList
+  int first = 1, second = 2;
+  @localNote
+  int zero = 0;
+  for (@localNote int i = 0; i < 1; i++) first += i;
+  for (@localNote final element in <int>[3]) second += element;
+  print(<int>[first + zero, second]);
+}
+
 void main(List<String> args) {
+  metadataValues();
   objectValues();
   valueContexts();
   assignmentValues();

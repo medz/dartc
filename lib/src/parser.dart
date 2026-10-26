@@ -240,6 +240,57 @@ AstExpression parserCall(
   return AstExpression(astCall, '', children, typeArguments, token);
 }
 
+List<AstExpression> parserMetadata(Parser parser) {
+  if (!parserIs(parser, '@')) return const <AstExpression>[];
+  var metadata = <AstExpression>[];
+  while (parserTake(parser, '@')) {
+    var token = parser.position;
+    var value = AstExpression(
+      astName,
+      parserName(parser),
+      const <AstExpression>[],
+      const <AstType>[],
+      token,
+    );
+    var names = 1;
+    while (parserTake(parser, '.')) {
+      if (names == 3) parserError(parser, 'annotation name has too many parts');
+      names++;
+      var member = parser.position;
+      value = AstExpression(
+        astMember,
+        parserName(parser),
+        <AstExpression>[value],
+        const <AstType>[],
+        member,
+      );
+    }
+    var arguments = const <AstType>[];
+    if (parserIs(parser, '<')) {
+      if (names > 2) parserError(parser, 'expected annotation constructor');
+      arguments = parserTypeArguments(parser);
+      if (parserTake(parser, '.')) {
+        value.typeArguments = arguments;
+        arguments = const <AstType>[];
+        var member = parser.position;
+        value = AstExpression(
+          astMember,
+          parserName(parser),
+          <AstExpression>[value],
+          const <AstType>[],
+          member,
+        );
+      }
+      if (!parserIs(parser, '('))
+        parserError(parser, 'expected annotation constructor arguments');
+    }
+    if (parserIs(parser, '('))
+      value = parserCall(parser, value, token, arguments);
+    metadata.add(value);
+  }
+  return metadata;
+}
+
 AstExpression parserPostfix(Parser parser) {
   var expression = parserPrimary(parser);
   while (true) {
@@ -522,8 +573,10 @@ List<AstVariable> parserVariablesRest(
   String name,
   String modifier,
   int token,
+  List<AstExpression> metadata,
 ) {
   var variable = parserVariableInitializer(parser, type, name, modifier, token);
+  variable.metadata = metadata;
   var variables = parserVariableTail(parser, variable);
   parserExpect(parser, ';');
   return variables;
@@ -542,11 +595,14 @@ AstVariable parserVariableInitializer(
 }
 
 List<AstVariable> parserVariables(Parser parser) {
+  var metadata = parserMetadata(parser);
+  if (metadata.isNotEmpty && !parserVariableStatement(parser))
+    parserError(parser, 'metadata must precede a local declaration');
   var token = parser.position;
   var modifier = parserModifier(parser);
   var type = parserDeclarationType(parser, modifier);
   var name = parserName(parser);
-  return parserVariablesRest(parser, type, name, modifier, token);
+  return parserVariablesRest(parser, type, name, modifier, token, metadata);
 }
 
 List<AstParameter> parserParameters(Parser parser) {
@@ -569,6 +625,7 @@ List<AstParameter> parserParameters(Parser parser) {
         parserError(parser, 'optional parameter group cannot be empty');
       }
     }
+    var metadata = parserMetadata(parser);
     var token = parser.position;
     var required = false;
     if (parserIs(parser, 'required')) {
@@ -598,6 +655,7 @@ List<AstParameter> parserParameters(Parser parser) {
       name = parserName(parser);
     }
     var parameter = AstParameter(type, name, fieldFormal, token);
+    parameter.metadata = metadata;
     parameter.kind = kind;
     parameter.required = required;
     if (parserIs(parser, '=')) {
@@ -674,22 +732,23 @@ AstClass parserClass(Parser parser, int token) {
   List<AstFunction> constructors = <AstFunction>[];
   List<AstFunction> methods = <AstFunction>[];
   while (!parserIs(parser, '}')) {
+    var metadata = parserMetadata(parser);
     var memberToken = parser.position;
     if (parserIs(parser, name) &&
         parser.tokens[parser.position + 1].kind == tokenSymbol &&
         parser.tokens[parser.position + 1].text == '(') {
       parser.position++;
-      constructors.add(
-        parserFunction(
-          parser,
-          name,
-          parserInferredType(memberToken),
-          false,
-          memberToken,
-          false,
-          false,
-        ),
+      var constructor = parserFunction(
+        parser,
+        name,
+        parserInferredType(memberToken),
+        false,
+        memberToken,
+        false,
+        false,
       );
+      constructor.metadata = metadata;
+      constructors.add(constructor);
     } else {
       var external = parserTake(parser, 'external');
       var modifier = parserModifier(parser);
@@ -712,17 +771,17 @@ AstClass parserClass(Parser parser, int token) {
         if ((getter || setter) && modifier != '') {
           parserError(parser, 'accessors cannot have variable modifiers');
         }
-        methods.add(
-          parserFunction(
-            parser,
-            member,
-            type,
-            external,
-            memberToken,
-            getter,
-            setter,
-          ),
+        var method = parserFunction(
+          parser,
+          member,
+          type,
+          external,
+          memberToken,
+          getter,
+          setter,
         );
+        method.metadata = metadata;
+        methods.add(method);
       } else {
         if (external) parserError(parser, 'external fields are not supported');
         var variables = parserVariablesRest(
@@ -731,6 +790,7 @@ AstClass parserClass(Parser parser, int token) {
           member,
           modifier,
           memberToken,
+          metadata,
         );
         var i = 0;
         while (i < variables.length) {
@@ -799,17 +859,28 @@ AstUnit parseUnit(Parser parser) {
     <AstTypedef>[],
   );
   while (!parserIs(parser, '')) {
+    var metadata = parserMetadata(parser);
     var token = parser.position;
     if (parserTake(parser, 'import')) {
-      unit.directives.add(parserDirective(parser, astImportDirective, token));
+      var directive = parserDirective(parser, astImportDirective, token);
+      directive.metadata = metadata;
+      unit.directives.add(directive);
     } else if (parserTake(parser, 'export')) {
-      unit.directives.add(parserDirective(parser, astExportDirective, token));
+      var directive = parserDirective(parser, astExportDirective, token);
+      directive.metadata = metadata;
+      unit.directives.add(directive);
     } else if (parserTake(parser, 'library')) {
-      unit.directives.add(parserDirective(parser, astLibraryDirective, token));
+      var directive = parserDirective(parser, astLibraryDirective, token);
+      directive.metadata = metadata;
+      unit.directives.add(directive);
     } else if (parserTake(parser, 'class')) {
-      unit.classes.add(parserClass(parser, token));
+      var syntax = parserClass(parser, token);
+      syntax.metadata = metadata;
+      unit.classes.add(syntax);
     } else if (parserTake(parser, 'typedef')) {
-      unit.typedefs.add(parserTypedef(parser, token));
+      var syntax = parserTypedef(parser, token);
+      syntax.metadata = metadata;
+      unit.typedefs.add(syntax);
     } else {
       var external = parserTake(parser, 'external');
       var modifier = parserModifier(parser);
@@ -832,9 +903,17 @@ AstUnit parseUnit(Parser parser) {
         if ((getter || setter) && modifier != '') {
           parserError(parser, 'accessors cannot have variable modifiers');
         }
-        unit.functions.add(
-          parserFunction(parser, name, type, external, token, getter, setter),
+        var function = parserFunction(
+          parser,
+          name,
+          type,
+          external,
+          token,
+          getter,
+          setter,
         );
+        function.metadata = metadata;
+        unit.functions.add(function);
       } else {
         if (external)
           parserError(parser, 'external variables are not supported');
@@ -844,6 +923,7 @@ AstUnit parseUnit(Parser parser) {
           name,
           modifier,
           token,
+          metadata,
         );
         var i = 0;
         while (i < variables.length) {
@@ -994,6 +1074,10 @@ AstStatement parseStatement(Parser parser) {
     var initialToken = parser.position;
     var initial = parserEmptyStatement(initialToken);
     if (!parserTake(parser, ';')) {
+      var metadata = parserMetadata(parser);
+      initialToken = parser.position;
+      if (metadata.isNotEmpty && !parserVariableStatement(parser))
+        parserError(parser, 'metadata must precede a for declaration');
       if (parserVariableStatement(parser)) {
         var modifier = parserModifier(parser);
         var type = parserDeclarationType(parser, modifier);
@@ -1005,6 +1089,7 @@ AstStatement parseStatement(Parser parser) {
           modifier,
           initialToken,
         );
+        variable.metadata = metadata;
         if (parserTake(parser, 'in')) {
           if (modifier == 'const' || variable.initializer.isNotEmpty) {
             parserError(
@@ -1098,7 +1183,7 @@ AstStatement parseStatement(Parser parser) {
       token,
     );
   }
-  if (parserVariableStatement(parser)) {
+  if (parserIs(parser, '@') || parserVariableStatement(parser)) {
     return AstStatement(
       astVariableStatement,
       <AstExpression>[],
@@ -1184,15 +1269,15 @@ List<AstVariable> parserVariableTail(Parser parser, AstVariable first) {
   while (parserTake(parser, ',')) {
     var token = parser.position;
     var name = parserName(parser);
-    variables.add(
-      parserVariableInitializer(
-        parser,
-        first.type,
-        name,
-        first.modifier,
-        token,
-      ),
+    var variable = parserVariableInitializer(
+      parser,
+      first.type,
+      name,
+      first.modifier,
+      token,
     );
+    variable.metadata = first.metadata;
+    variables.add(variable);
   }
   return variables;
 }

@@ -1099,18 +1099,78 @@ int feLowerInContext(AstExpression expression, int context) {
   );
 }
 
+void feCheckMetadataScope(AstExpression expression, int owner) {
+  if (expression.kind == astName &&
+      expression.binding < 0 &&
+      lookupMember(feMembers[owner], expression.text) >= 0)
+    feAstError(
+      expression.token,
+      'metadata cannot reference an instance member',
+    );
+  var i = 0;
+  while (i < expression.children.length) {
+    feCheckMetadataScope(expression.children[i], owner);
+    i++;
+  }
+}
+
+void feCheckMetadata(List<AstExpression> metadata, int owner) {
+  if (metadata.isEmpty) return;
+  feConstants.localTypes = feFlow.types;
+  var i = 0;
+  while (i < metadata.length) {
+    var expression = metadata[i];
+    if (owner >= 0 && expression.kind != astCall)
+      feCheckMetadataScope(expression, owner);
+    checkMetadataConstant(feConstants, expression);
+    i++;
+  }
+}
+
+void feCheckUnitMetadata(AstUnit syntax) {
+  var i = 0;
+  while (i < syntax.directives.length) {
+    feCheckMetadata(syntax.directives[i].metadata, -1);
+    i++;
+  }
+  i = 0;
+  while (i < syntax.variables.length) {
+    feCheckMetadata(syntax.variables[i].metadata, -1);
+    i++;
+  }
+  i = 0;
+  while (i < syntax.typedefs.length) {
+    feCheckMetadata(syntax.typedefs[i].metadata, -1);
+    i++;
+  }
+  i = 0;
+  while (i < syntax.classes.length) {
+    var node = syntax.classes[i];
+    feCheckMetadata(node.metadata, -1);
+    var field = 0;
+    while (field < node.fields.length) {
+      feCheckMetadata(node.fields[field].metadata, i);
+      field++;
+    }
+    i++;
+  }
+}
+
 void feResolveDefaults(int count) {
   var omitted = ConstantValue(tNull, tNull, 0, '');
   while (feParamDefaults.length < feParamTypes.length)
     feParamDefaults.add(omitted);
   var f = 1;
   while (f < count) {
-    var parameters = feFunctionNodes[f].parameters;
+    var syntax = feFunctionNodes[f];
+    feCheckMetadata(syntax.metadata, feOwners[f]);
+    var parameters = syntax.parameters;
     var offset = feParamStarts[f];
     if (feOwners[f] >= 0) offset++;
     var p = 0;
     while (p < parameters.length) {
       var parameter = parameters[p];
+      feCheckMetadata(parameter.metadata, feOwners[f]);
       if (parameter.kind == astNamedParameter) {
         var name = parameterName(parameter);
         if (name == '' || name.startsWith('_'))
@@ -2363,6 +2423,7 @@ int feLowerConditional(AstExpression expression, int context) {
 
 void feLowerVariable(AstVariable variable) {
   feAt = variable.token;
+  feCheckMetadata(variable.metadata, feOwners[feFunction]);
   var type = -1;
   if (variable.type.name != '') type = resolveType(feSymbols, variable.type);
   if (type < 0 && variable.initializer.isEmpty) type = tDynamic;
@@ -2876,6 +2937,7 @@ void parseSource(SourceProgram source) {
     sourceCore,
     'identical',
   );
+  feCheckUnitMetadata(syntax);
   var constant = 0;
   while (constant < feGlobalNodes.length) {
     if (feGlobalNodes[constant].modifier == 'const') {
@@ -3156,6 +3218,7 @@ void feGenerateEntry() {
 
 void feLowerForIn(AstStatement statement) {
   var declaration = statement.variables[0];
+  feCheckMetadata(declaration.metadata, feOwners[feFunction]);
   var context = -1;
   if (declaration.type.name != '')
     context = listType(resolveType(feSymbols, declaration.type));

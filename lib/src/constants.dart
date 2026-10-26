@@ -104,6 +104,29 @@ ConstantValue _constantGlobal(
   return value;
 }
 
+void checkMetadataConstant(ConstantContext context, AstExpression expression) {
+  if (expression.kind == astCall)
+    _constantError(
+      context,
+      expression.token,
+      'constructor annotations are unsupported',
+    );
+  var value = expression.kind == astName && expression.binding >= 0
+      ? _evaluateConstant(context, expression, true, -1, true)
+      : _constantReference(
+          context,
+          expression,
+          _constantSymbol(context, expression),
+          true,
+        );
+  if (value.type == tVoid)
+    _constantError(
+      context,
+      expression.token,
+      'void value cannot be used as metadata',
+    );
+}
+
 ConstantValue evaluateGlobalConstant(ConstantContext context, int global) {
   return _constantGlobal(context, global, true);
 }

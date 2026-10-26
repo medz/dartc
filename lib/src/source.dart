@@ -132,15 +132,18 @@ int sourceLoad(SourceProgram program, String path) {
   var parser = Parser(tokens, 0, 0, paths);
   i = 0;
   while (i < tokens.length && tokens[i].kind != tokenEnd) {
+    int start = i;
+    parser.position = i;
+    parserMetadata(parser);
+    i = parser.position;
     bool exported = sourceIs(tokens[i], 'export');
     var library = sourceIs(tokens[i], 'library');
     if (!exported && !library && !sourceIs(tokens[i], 'import')) break;
-    int start = i;
     var kind = astImportDirective;
     if (exported) kind = astExportDirective;
     if (library) kind = astLibraryDirective;
     parser.position = i + 1;
-    var directive = parserDirective(parser, kind, start);
+    var directive = parserDirective(parser, kind, i);
     i = parser.position;
     if (library) continue;
     var uri = directive.uri;

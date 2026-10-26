@@ -202,6 +202,11 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
     bindingExpressions(binder, scope, statement.expressions);
     var loop = bindingScope(binder, scope);
     bindingDeclarations(binder, loop, statement.variables);
+    var variable = 0;
+    while (variable < statement.variables.length) {
+      bindingExpressions(binder, loop, statement.variables[variable].metadata);
+      variable++;
+    }
     bindingBody(binder, loop, statement.children[0]);
     return;
   }
@@ -228,6 +233,7 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
   }
   var i = 0;
   while (i < statement.variables.length) {
+    bindingExpressions(binder, scope, statement.variables[i].metadata);
     bindingExpressions(binder, scope, statement.variables[i].initializer);
     i++;
   }
