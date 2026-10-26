@@ -1360,6 +1360,10 @@ void feLowerStatement(AstStatement statement) {
     }
     return;
   }
+  if (kind == astSwitchStatement) {
+    feLowerSwitch(statement);
+    return;
+  }
   if (kind == astForInStatement) {
     feLowerForIn(statement);
     return;
@@ -1788,5 +1792,81 @@ void feLowerDoWhile(AstStatement statement) {
   feOperand(opJump, repeat);
   fePatch(done, ir.length);
   feLoopEnd(breakBase, continueBase, ir.length, condition);
+  feScopeEnd(scope);
+}
+
+bool feSwitchConstant(AstExpression expression) {
+  if (expression.kind == astInteger ||
+      expression.kind == astString ||
+      expression.kind == astBoolean)
+    return true;
+  if (expression.kind == astUnary &&
+      expression.text == '-' &&
+      expression.children[0].kind == astInteger)
+    return true;
+  if (expression.kind == astName && feLocal(expression.text) < 0) {
+    var global = feGlobal(expression.text);
+    return global >= 0 && _feLiteralTypes[global] != 0;
+  }
+  return false;
+}
+
+void feLowerSwitch(AstStatement statement) {
+  var scope = feLocalNames.length;
+  var type = feLowerExpression(statement.expressions[0]);
+  if (type != tInt && type != tString && type != tBool) {
+    feAstError(
+      statement.token,
+      'switch currently requires int, String or bool',
+    );
+  }
+  var value = feTemp(type);
+  feOperand(opStoreLocal, value);
+  List<int> entries = <int>[];
+  var fallback = -1;
+  var i = 0;
+  while (i < statement.children.length) {
+    var branch = statement.children[i];
+    if (branch.expressions.isEmpty) {
+      fallback = i;
+      entries.add(-1);
+    } else {
+      var constant = branch.expressions[0];
+      if (!feSwitchConstant(constant)) {
+        feAstError(constant.token, 'case requires a supported constant');
+      }
+      feOperand(opLoadLocal, value);
+      var caseType = feLowerExpression(constant);
+      if (caseType != type) {
+        feAstError(constant.token, 'case type must match the switch value');
+      }
+      feCombine('==', type, caseType);
+      var next = feJump(opJumpFalse);
+      entries.add(feJump(opJump));
+      fePatch(next, ir.length);
+    }
+    i++;
+  }
+  var unmatched = feJump(opJump);
+  var breakBase = feBreaks.length;
+  feLoopBreaks.add(breakBase);
+  i = 0;
+  while (i < statement.children.length) {
+    var branch = statement.children[i];
+    if (entries[i] >= 0) fePatch(entries[i], ir.length);
+    if (i == fallback) fePatch(unmatched, ir.length);
+    var caseScope = feLocalNames.length;
+    var child = 0;
+    while (child < branch.children.length) {
+      feLowerStatement(branch.children[child]);
+      child++;
+    }
+    feScopeEnd(caseScope);
+    if (branch.children.isNotEmpty) feBreaks.add(feJump(opJump));
+    i++;
+  }
+  if (fallback < 0) fePatch(unmatched, ir.length);
+  while (feBreaks.length > breakBase) fePatch(feBreaks.removeLast(), ir.length);
+  feLoopBreaks.removeLast();
   feScopeEnd(scope);
 }

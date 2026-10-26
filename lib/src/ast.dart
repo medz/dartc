@@ -50,6 +50,8 @@ const int astBreakStatement = 8;
 const int astContinueStatement = 9;
 const int astForInStatement = 10;
 const int astDoWhileStatement = 11;
+const int astSwitchStatement = 12;
+const int astSwitchCaseStatement = 13;
 
 const int astImportDirective = 1;
 const int astExportDirective = 2;

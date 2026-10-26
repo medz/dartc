@@ -107,6 +107,27 @@ void main(List<String> args) {
     doCount++;
   } while (false);
   print(doCount);
+  int branchTotal = 0;
+  for (int value in <int>[1, 7, 3, 4]) {
+    switch (value) {
+      case 1:
+      case bias:
+        branchTotal += 10;
+      case 3:
+        continue;
+      default:
+        branchTotal += 1;
+        break;
+    }
+    branchTotal += 100;
+  }
+  print(branchTotal);
+  switch (text.substring(0, 4)) {
+    case 'Dart':
+      print('switch');
+    default:
+      print('unexpected');
+  }
 }
 ''';
 

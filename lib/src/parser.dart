@@ -711,6 +711,7 @@ AstStatement parseStatement(Parser parser) {
       token,
     );
   }
+  if (parserTake(parser, 'switch')) return parserSwitch(parser, token);
   if (parserTake(parser, 'do')) {
     var body = parseStatement(parser);
     parserExpect(parser, 'while');
@@ -848,6 +849,51 @@ AstStatement parseStatement(Parser parser) {
     astExpressionStatement,
     <AstExpression>[expression],
     <AstStatement>[],
+    <AstVariable>[],
+    <AstExpression>[],
+    <AstExpression>[],
+    token,
+  );
+}
+
+AstStatement parserSwitch(Parser parser, int token) {
+  parserExpect(parser, '(');
+  var value = parseExpression(parser);
+  parserExpect(parser, ')');
+  parserExpect(parser, '{');
+  List<AstStatement> cases = <AstStatement>[];
+  while (!parserIs(parser, '}')) {
+    var caseToken = parser.position;
+    List<AstExpression> pattern = <AstExpression>[];
+    if (parserTake(parser, 'case')) {
+      pattern.add(parseExpression(parser));
+    } else {
+      parserExpect(parser, 'default');
+    }
+    parserExpect(parser, ':');
+    List<AstStatement> body = <AstStatement>[];
+    while (!parserIs(parser, 'case') &&
+        !parserIs(parser, 'default') &&
+        !parserIs(parser, '}')) {
+      body.add(parseStatement(parser));
+    }
+    cases.add(
+      AstStatement(
+        astSwitchCaseStatement,
+        pattern,
+        body,
+        <AstVariable>[],
+        <AstExpression>[],
+        <AstExpression>[],
+        caseToken,
+      ),
+    );
+  }
+  parserExpect(parser, '}');
+  return AstStatement(
+    astSwitchStatement,
+    <AstExpression>[value],
+    cases,
     <AstVariable>[],
     <AstExpression>[],
     <AstExpression>[],
