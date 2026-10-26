@@ -22,6 +22,57 @@ class FunctionInfo {
   String toString() => this.label();
 }
 
+int value = 99;
+int compute(int count) => -1;
+int fallback(int count) => count + 4;
+
+class Probe {
+  int value;
+  Probe(this.value);
+  String toString() => value.toString();
+}
+
+Probe probe = Probe(1);
+String updateProbe() {
+  probe.value = 2;
+  return 'next';
+}
+
+class Counter {
+  int value;
+  List<int> values;
+  Counter(this.value, this.values) {
+    value += 2;
+    values[0]++;
+  }
+
+  int get total => value + values[0];
+
+  int compute(int count) {
+    if (count == 0) return total;
+    value++;
+    return compute(count - 1);
+  }
+
+  int shadow(int value) {
+    value += 3;
+    return value + this.value;
+  }
+
+  int nested() {
+    var result = value;
+    {
+      int value = 7;
+      result += value;
+    }
+    return result + value;
+  }
+
+  int globalCall(int count) => fallback(count);
+  int print(int count) => count + value;
+  int builtinShadow() => print(20);
+}
+
 const int bias = 7;
 const bool enabled = true;
 const int labelValue = -1234567;
@@ -78,6 +129,21 @@ void main(List<String> args) {
   print(text.endsWith('🙂'));
   print(String.fromCharCodes(<int>[68, 97, 114, 116, 32, 0x4f60, 0x597d, 0x1f642]) == text);
   print('value=' + labelValue.toString());
+  print(0.toString());
+  print(9.toString());
+  print((-9).toString());
+  print(9223372036854775807.toString());
+  print((-9223372036854775807 - 1).toString());
+  print('' + text);
+  print(text + '');
+  print('' + '');
+  print('$probe${updateProbe()}');
+  probe.value = 1;
+  print('${probe}${updateProbe()}');
+  String foo = 'left', bar = 'right', foo$bar = 'joined';
+  print('$foo$bar');
+  print('${foo$bar}');
+  print('$foo${bar}tail');
   print(10000000000 + int.parse('0xff'));
   print(args.length);
   print(args[1]);
@@ -95,6 +161,26 @@ void main(List<String> args) {
   List<List<FunctionInfo>> groups = <List<FunctionInfo>>[functions];
   groups[0][0].start += 1;
   print(groups.first.first.label());
+  var counter = Counter(3, <int>[8]);
+  print(counter.value);
+  print(counter.values[0]);
+  print(counter.compute(3));
+  print(counter.shadow(10));
+  print(counter.nested());
+  print(counter.globalCall(5));
+  print(counter.builtinShadow());
+  print(value);
+  print(compute(4));
+  int dead = 0;
+  int live = 0;
+  int remaining = 4;
+  while (remaining > 0) {
+    dead = dead * 3 + remaining;
+    live += initialize();
+    remaining--;
+  }
+  print(live);
+  print(calls);
   int forInTotal = 0;
   for (final value in sequence()) {
     if (value == 2) continue;
@@ -198,35 +284,130 @@ void main(List<String> args) {
   try {
     final source = File('${temporary.path}/program.dart')
       ..writeAsStringSync(program);
-    final executable = '${temporary.path}/program';
     final sdk = Platform.resolvedExecutable;
-    final arguments = ['alpha', '你好'];
-    final expected = run(sdk, [source.path, ...arguments]).stdout as String;
-    if (compiler == null) {
-      run(sdk, [
-        '$root/bin/dartc.dart',
-        source.path,
-        '-o',
-        executable,
-        '--std',
-        standard,
-      ]);
-    } else {
-      run(compiler, [
-        source.path,
-        '-o',
-        executable,
-        '--std',
-        standard,
-      ], native: true);
+    final driver = compiler ?? sdk;
+    List<String> compileArguments(
+      File source,
+      String output, [
+      String? runtime,
+    ]) => [
+      if (compiler == null) '$root/bin/dartc.dart',
+      source.path,
+      '-o',
+      output,
+      '--std',
+      runtime ?? standard,
+    ];
+    void compare(File source, List<String> arguments) {
+      final executable = '${source.path}.out';
+      final expected = run(sdk, [source.path, ...arguments]).stdout as String;
+      run(
+        driver,
+        compileArguments(source, executable),
+        native: compiler != null,
+      );
+      final actual = run(executable, arguments, native: true).stdout as String;
+      if (actual != expected) {
+        throw StateError(
+          '${source.path} differs from official Dart.\n'
+          'Expected:\n$expected\nActual:\n$actual',
+        );
+      }
     }
-    final actual = run(executable, arguments, native: true).stdout as String;
-    if (actual != expected) {
-      stderr.writeln('Compiled program differs from official Dart.');
-      stderr.writeln('Expected:\n$expected');
-      stderr.writeln('Actual:\n$actual');
-      exitCode = 1;
-      return;
+
+    compare(source, ['alpha', '你好']);
+    final libraries = {
+      'math.dart':
+          'int shared() => 11; int hidden() => 90; int _private() => 8;',
+      'other.dart': 'int shared() => 22;',
+      'exports.dart':
+          "export 'math.dart' show shared, hidden hide hidden;\n"
+          "export 'other.dart' show shared hide shared;",
+      'host.dart': 'int hostRead(int value) => value + 4;',
+      'imports.dart': r'''
+import /* directive comment */
+  'exports.dart' show shared;
+import './nested/../other.dart' as other show shared;
+import 'math.dart' as math hide shared;
+import 'host.dart';
+int nativeLoad16(int value) => value + 3;
+void main() {
+  print(shared());
+  print(other.shared());
+  print(math.hidden());
+  print(nativeLoad16(5));
+  print(hostRead(5));
+}
+''',
+      'core.dart': "import 'dart:core' as core; void main() {core.print(42);}",
+      'ordinary.dart': 'int print(int value) => value + 4;',
+      'core-export.dart': "export 'dart:core' show print;",
+      'priority.dart':
+          "import 'dart:core'; import 'dart:core' as core; "
+          "import 'ordinary.dart'; void main() { core.print(print(5)); }",
+      'export-priority.dart':
+          "import 'core-export.dart'; import 'dart:core' as core; "
+          "import 'ordinary.dart'; void main() { core.print(print(5)); }",
+      'combined-export.dart':
+          "export 'dart:core' show print; export 'ordinary.dart';",
+      'prefix-priority.dart':
+          "import 'dart:core' as both show print; import 'ordinary.dart' as both; "
+          "import 'combined-export.dart' as combined; import 'dart:core' as core; "
+          'void main() { core.print(both.print(5)); core.print(combined.print(5)); }',
+    };
+    for (final entry in libraries.entries) {
+      File('${temporary.path}/${entry.key}').writeAsStringSync(entry.value);
+    }
+    compare(File('${temporary.path}/imports.dart'), []);
+    compare(File('${temporary.path}/core.dart'), []);
+    compare(File('${temporary.path}/priority.dart'), []);
+    compare(File('${temporary.path}/export-priority.dart'), []);
+    compare(File('${temporary.path}/prefix-priority.dart'), []);
+    final rejected = [
+      "import 'exports.dart'; void main() { print(hidden()); }",
+      "import 'math.dart'; void main() { print(_private()); }",
+      "import 'dart:core' hide print; void main() { print(1); }",
+      "import 'math.dart' deferred as math; void main() {}",
+      "import 'dart:math'; void main() {}",
+    ];
+    void reject(File invalid, {String? runtime, String? diagnostic}) {
+      final result = Process.runSync(
+        driver,
+        compileArguments(invalid, '${invalid.path}.out', runtime),
+        environment: compiler == null ? null : {'PATH': '/usr/bin:/bin'},
+        includeParentEnvironment: compiler == null,
+      );
+      if (result.exitCode != 1 ||
+          !'${result.stdout}${result.stderr}'.contains(
+            diagnostic ?? invalid.path,
+          )) {
+        throw StateError(
+          'Expected source diagnostic for ${invalid.path}: '
+          '${result.stdout}${result.stderr}',
+        );
+      }
+    }
+
+    for (var i = 0; i < rejected.length; i++) {
+      final invalid = File('${temporary.path}/rejected-$i.dart')
+        ..writeAsStringSync(rejected[i]);
+      reject(invalid);
+    }
+    final core = Directory('${temporary.path}/std/core')
+      ..createSync(recursive: true);
+    File('${File(standard).parent.path}/std/core/string_buffer.dart')
+        .copySync('${core.path}/string_buffer.dart');
+    final empty = File('${temporary.path}/empty.dart')
+      ..writeAsStringSync('void main() {}');
+    final invalidRuntimes = [
+      'external int nativeLoad64(int pointer, int extra);',
+      'external bool nativeTarget();',
+      "external int nativeLoad64(int pointer); int invalid() => nativeLoad64('wrong');",
+    ];
+    for (var i = 0; i < invalidRuntimes.length; i++) {
+      final runtime = File('${temporary.path}/runtime-$i.dart')
+        ..writeAsStringSync(invalidRuntimes[i]);
+      reject(empty, runtime: runtime.path, diagnostic: runtime.path);
     }
     stdout.writeln('Behavior matches official Dart.');
   } on ProcessException catch (error) {

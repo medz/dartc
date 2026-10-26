@@ -112,6 +112,7 @@ void scanString(Scanner scanner, bool raw, int tokenStart) {
         start = i;
         i++;
         while (i < source.length &&
+            source.codeUnitAt(i) != 36 &&
             (scanLetter(source.codeUnitAt(i)) ||
                 scanDigit(source.codeUnitAt(i))))
           i++;

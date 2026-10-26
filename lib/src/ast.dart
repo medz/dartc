@@ -145,13 +145,21 @@ class AstTypedef {
   AstTypedef(this.name, this.result, this.parameterTypes, this.token);
 }
 
+class AstCombinator {
+  bool show;
+  List<String> names;
+
+  AstCombinator(this.show, this.names);
+}
+
 class AstDirective {
   int kind;
   String uri;
   String prefix;
   int token;
+  List<AstCombinator> combinators;
 
-  AstDirective(this.kind, this.uri, this.prefix, this.token);
+  AstDirective(this.kind, this.uri, this.prefix, this.token, this.combinators);
 }
 
 class AstUnit {

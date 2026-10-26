@@ -67,7 +67,6 @@ List<int> feGlobalSources = <int>[];
 List<int> feRawGlobals = <int>[];
 List<GlobalInitializer> feGlobalInitializers = <GlobalInitializer>[];
 int feRuntimeTokens = 0;
-int fePendingTypeClosers = 0;
 List<int> _feLiteralTypes = <int>[];
 List<int> _feLiteralValues = <int>[];
 List<int> feParamStarts = <int>[];
@@ -99,33 +98,6 @@ List<int> feParamFields = <int>[];
 
 void feError(String message) {
   sourceError(feSources, feTokens[feAt], message);
-}
-
-String fePeek() {
-  return feTokens[feAt].text;
-}
-
-bool feIs(String text) {
-  return tokenIs(feTokens[feAt], text);
-}
-
-bool feTake(String text) {
-  if (feIs(text)) {
-    feAt++;
-    return true;
-  }
-  return false;
-}
-
-void feExpect(String text) {
-  if (!feTake(text)) feError('expected ' + text);
-}
-
-String feName() {
-  if (feTokens[feAt].kind != tokenIdentifier) feError('expected name');
-  var name = fePeek();
-  feAt++;
-  return name;
 }
 
 bool feClassType(int type) {
@@ -167,6 +139,20 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
         syntax.token,
         'unsupported external declaration ' + syntax.name,
       );
+    }
+    if (owner >= 0 ||
+        syntax.getter ||
+        syntax.parameters.length != fePrimitiveArity(primitive)) {
+      feAstError(syntax.token, 'invalid primitive signature ' + syntax.name);
+    }
+    feCheckPrimitiveType(syntax.result);
+    var parameter = 0;
+    while (parameter < syntax.parameters.length) {
+      var syntaxParameter = syntax.parameters[parameter];
+      if (syntaxParameter.fieldFormal)
+        feAstError(syntaxParameter.token, 'primitive parameters require int');
+      feCheckPrimitiveType(syntaxParameter.type);
+      parameter++;
     }
     feDeclare(source, syntax.name, symbolBuiltin, primitive, syntax.token);
     return -1;
@@ -442,7 +428,9 @@ int feBuiltinType(int id) {
       id == bListLength ||
       id == bHostTarget ||
       id == bNativeLoad64 ||
+      id == bNativeStore64 ||
       id == bNativeLoad8 ||
+      id == bNativeStore8 ||
       id == bNativeLoad16 ||
       id == bNativeStore16 ||
       id == bNativeSyscall ||
@@ -494,6 +482,38 @@ int feLocal(String name) {
   return -1;
 }
 
+bool feImplicitMember(String name) {
+  if (feInitializingGlobal >= 0 || feLocal('this') < 0 || feLocal(name) >= 0)
+    return false;
+  var owner = feOwners[feFunction];
+  var field = 0;
+  while (field < feFieldNames.length) {
+    if (feFieldClasses[field] == owner && feFieldNames[field] == name)
+      return true;
+    field++;
+  }
+  return feMethod(owner, name, false) >= 0 || feMethod(owner, name, true) >= 0;
+}
+
+AstExpression feWithReceiver(AstExpression expression) {
+  if (expression.kind != astName || !feImplicitMember(expression.text))
+    return expression;
+  var receiver = AstExpression(
+    astName,
+    'this',
+    <AstExpression>[],
+    <AstType>[],
+    expression.token,
+  );
+  return AstExpression(
+    astMember,
+    expression.text,
+    <AstExpression>[receiver],
+    expression.typeArguments,
+    expression.token,
+  );
+}
+
 int feFindFunction(String name) {
   for (var i = 1; i < functions.length; i++) {
     if (functions[i].source == 0 && functions[i].name == name) return i;
@@ -521,13 +541,15 @@ bool feHasPrefix(int token, String prefix) {
 
 int feExpressionSymbol(AstExpression expression) {
   if (expression.kind == astName) {
-    if (feLocal(expression.text) >= 0) return -1;
+    if (feLocal(expression.text) >= 0 || feImplicitMember(expression.text))
+      return -1;
     return feResolveName(expression.token, expression.text, '');
   }
   if (expression.kind == astMember) {
     var receiver = expression.children[0];
     if (receiver.kind == astName &&
         feLocal(receiver.text) < 0 &&
+        !feImplicitMember(receiver.text) &&
         feHasPrefix(receiver.token, receiver.text)) {
       return feResolveName(expression.token, expression.text, receiver.text);
     }
@@ -606,6 +628,31 @@ int fePrimitive(String name) {
   if (name == 'nativeSyscall') return bNativeSyscall;
   if (name == 'nativeTarget') return bNativeTarget;
   return 0;
+}
+
+int fePrimitiveArity(int primitive) {
+  if (primitive == bNativeLoad64 ||
+      primitive == bNativeLoad8 ||
+      primitive == bNativeLoad16)
+    return 1;
+  if (primitive == bNativeStore64 ||
+      primitive == bNativeStore8 ||
+      primitive == bNativeStore16)
+    return 2;
+  if (primitive == bNativeSyscall) return 7;
+  if (primitive == bNativeTarget) return 0;
+  return -1;
+}
+
+void feCheckPrimitiveType(AstType syntax) {
+  var symbol = feTypeSymbol(syntax);
+  if (symbol < 0 ||
+      syntax.arguments.length != 0 ||
+      feSymbols.declarations[symbol].source != sourceCore ||
+      feSymbols.declarations[symbol].kind != symbolType ||
+      feSymbols.declarations[symbol].name != 'int') {
+    feAstError(syntax.token, 'primitive signature requires dart:core int');
+  }
 }
 
 void feInstallSymbols() {
@@ -726,6 +773,8 @@ int feCombine(String op, int left, int right) {
 }
 
 int feLowerType(AstType syntax) {
+  if (syntax.name == 'void') return tVoid;
+  if (syntax.name == 'dynamic') return tInt;
   var symbol = feTypeSymbol(syntax);
   if (symbol < 0) feAstError(syntax.token, 'unknown type ' + syntax.name);
   var declaration = feSymbols.declarations[symbol];
@@ -846,7 +895,22 @@ int feLowerBuiltinCall(AstExpression call, int builtin) {
       feBuiltin(bPrintInt, 1);
     return tVoid;
   }
-  var count = feLowerArguments(call, 1);
+  var expected = fePrimitiveArity(builtin);
+  var count = call.children.length - 1;
+  if (expected >= 0) {
+    if (count != expected) feAstError(call.token, 'primitive argument count');
+    var argument = 1;
+    while (argument < call.children.length) {
+      var expression = call.children[argument];
+      if (expression.kind == astNamedArgument)
+        feAstError(expression.token, 'primitive arguments must be positional');
+      if (feLowerExpression(expression) != tInt)
+        feAstError(expression.token, 'primitive argument requires int');
+      argument++;
+    }
+  } else {
+    count = feLowerArguments(call, 1);
+  }
   feBuiltin(builtin, count);
   return feBuiltinType(builtin);
 }
@@ -905,8 +969,7 @@ int feLowerStaticCall(AstExpression call, int symbol) {
   return tInt;
 }
 
-int feLowerMemberCall(AstExpression call) {
-  var callee = call.children[0];
+int feLowerMemberCall(AstExpression call, AstExpression callee) {
   var receiver = callee.children[0];
   var member = callee.text;
   var type = feLowerExpression(receiver);
@@ -984,7 +1047,7 @@ int feLowerMemberCall(AstExpression call) {
 }
 
 int feLowerCall(AstExpression call) {
-  var callee = call.children[0];
+  var callee = feWithReceiver(call.children[0]);
   var symbol = feExpressionSymbol(callee);
   if (symbol >= 0) {
     var declaration = feSymbols.declarations[symbol];
@@ -1026,7 +1089,7 @@ int feLowerCall(AstExpression call) {
     if (owner >= 0 && feSymbols.declarations[owner].kind == symbolType) {
       return feLowerStaticCall(call, owner);
     }
-    return feLowerMemberCall(call);
+    return feLowerMemberCall(call, callee);
   }
   feAstError(call.token, 'unknown call target ' + callee.text);
   return tInt;
@@ -1084,6 +1147,7 @@ int feLowerMember(AstExpression expression) {
 }
 
 FeLvalue feLowerLvalue(AstExpression expression) {
+  expression = feWithReceiver(expression);
   if (expression.kind == astName) {
     var local = feLocal(expression.text);
     if (local >= 0) {
@@ -1201,6 +1265,7 @@ int feLowerAssignment(AstExpression expression, bool postfix) {
 }
 
 int feLowerExpression(AstExpression expression) {
+  expression = feWithReceiver(expression);
   var kind = expression.kind;
   if (kind == astInteger) {
     feOperand(opInt, int.parse(expression.text));
@@ -1300,14 +1365,6 @@ int feLowerExpression(AstExpression expression) {
   return tInt;
 }
 
-int feExpression() {
-  var parser = Parser(feTokens, feAt, fePendingTypeClosers);
-  var expression = parseExpression(parser);
-  feAt = parser.position;
-  fePendingTypeClosers = parser.pendingClosers;
-  return feLowerExpression(expression);
-}
-
 void feLowerVariable(AstVariable variable) {
   feAt = variable.token;
   var type = 0;
@@ -1400,14 +1457,6 @@ void feLowerStatement(AstStatement statement) {
     feLowerSwitch(statement);
     return;
   }
-  if (kind == astForInStatement) {
-    feLowerForIn(statement);
-    return;
-  }
-  if (kind == astDoWhileStatement) {
-    feLowerDoWhile(statement);
-    return;
-  }
   if (kind == astWhileStatement || kind == astForStatement) {
     var scope = feLocalNames.length;
     if (kind == astForStatement) feLowerStatement(statement.children[0]);
@@ -1458,14 +1507,6 @@ void feLowerStatement(AstStatement statement) {
     return;
   }
   feAstError(statement.token, 'unsupported statement');
-}
-
-void feStatement() {
-  var parser = Parser(feTokens, feAt, fePendingTypeClosers);
-  var statement = parseStatement(parser);
-  feLowerStatement(statement);
-  feAt = parser.position;
-  fePendingTypeClosers = parser.pendingClosers;
 }
 
 void fePrepareGlobals(int count) {
@@ -1529,7 +1570,6 @@ void feInferGlobal(int global) {
   var previousLocals = feSlotTypes;
   var previousNext = feNextLocal;
   var previousToken = feAt;
-  var previousClosers = fePendingTypeClosers;
   var previousGlobal = feInitializingGlobal;
   ir = <int>[];
   irTypes = <int>[];
@@ -1561,7 +1601,6 @@ void feInferGlobal(int global) {
   feSlotTypes = previousLocals;
   feNextLocal = previousNext;
   feAt = previousToken;
-  fePendingTypeClosers = previousClosers;
   feInitializingGlobal = previousGlobal;
 }
 
@@ -1705,9 +1744,14 @@ void parseSource(SourceProgram source) {
   feSymbols = SymbolTable(source, <DeclarationSymbol>[]);
   feTokens = source.tokens;
   feAt = 0;
-  fePendingTypeClosers = 0;
   feRuntimeTokens = source.runtimeTokens;
-  var syntax = parseUnit(Parser(feTokens, 0, 0));
+  var paths = <String>[];
+  var file = 0;
+  while (file < source.files.length) {
+    paths.add(source.files[file].path);
+    file++;
+  }
+  var syntax = parseUnit(Parser(feTokens, 0, 0, paths));
   feInstallSymbols();
   feCollectDeclarations(syntax);
   stringUnitBytes = 8;
@@ -1768,9 +1812,12 @@ void parseSource(SourceProgram source) {
     var start = feParamStarts[f];
     var p = 0;
     while (p < functions[f].parameters) {
-      feLocalNames.add(feParamNames[start + p]);
-      feLocalTypes.add(feParamTypes[start + p]);
-      feLocalSlots.add(feTemp(feParamTypes[start + p]));
+      var slot = feTemp(feParamTypes[start + p]);
+      if (feConstructors[f] == 0 || feParamFields[start + p] < 0) {
+        feLocalNames.add(feParamNames[start + p]);
+        feLocalTypes.add(feParamTypes[start + p]);
+        feLocalSlots.add(slot);
+      }
       p++;
     }
     if (feConstructors[f] == 1) {
@@ -2034,10 +2081,30 @@ void feLowerLabeledJump(AstStatement statement, bool repeat) {
 }
 
 int feLowerInterpolation(AstExpression expression) {
+  var slots = <int>[];
+  var types = <int>[];
   var i = 0;
   while (i < expression.children.length) {
     var part = expression.children[i];
-    var type = feLowerExpression(part);
+    var type = tString;
+    var slot = -1;
+    if (part.kind != astString) {
+      type = feLowerExpression(part);
+      slot = feTemp(type);
+      feOperand(opStoreLocal, slot);
+    }
+    slots.add(slot);
+    types.add(type);
+    i++;
+  }
+  i = 0;
+  while (i < expression.children.length) {
+    var part = expression.children[i];
+    var type = types[i];
+    if (slots[i] < 0)
+      feLowerExpression(part);
+    else
+      feOperand(opLoadLocal, slots[i]);
     if (part.kind == astNull) {
       feAstError(part.token, 'null interpolation is not supported yet');
     }

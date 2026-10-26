@@ -1,5 +1,7 @@
 import 'host.dart';
 import 'scanner.dart';
+import 'ast.dart';
+import 'parser.dart';
 
 const int sourceUnknown = -1;
 const int sourceHost = -2;
@@ -13,6 +15,7 @@ class SourceImport {
   int start;
   int end;
   bool exported;
+  List<AstCombinator> combinators;
 
   SourceImport(
     this.uri,
@@ -21,6 +24,7 @@ class SourceImport {
     this.start,
     this.end,
     this.exported,
+    this.combinators,
   );
 }
 
@@ -85,6 +89,22 @@ bool sourceIs(Token token, String text) {
   return tokenIs(token, text);
 }
 
+bool sourceAllows(SourceImport dependency, String name) {
+  var i = 0;
+  while (i < dependency.combinators.length) {
+    var combinator = dependency.combinators[i];
+    var found = false;
+    var n = 0;
+    while (n < combinator.names.length) {
+      if (combinator.names[n] == name) found = true;
+      n++;
+    }
+    if (combinator.show != found) return false;
+    i++;
+  }
+  return true;
+}
+
 int sourceLoad(SourceProgram program, String path) {
   path = sourcePath(path);
   if (path == program.hostPath) return sourceHost;
@@ -103,49 +123,50 @@ int sourceLoad(SourceProgram program, String path) {
   List<SourceImport> imports = <SourceImport>[];
   program.files.add(SourceFile(path, tokens, imports));
   String directory = path.substring(0, path.lastIndexOf('/') + 1);
+  var paths = <String>[];
+  i = 0;
+  while (i < program.files.length) {
+    paths.add(program.files[i].path);
+    i++;
+  }
+  var parser = Parser(tokens, 0, 0, paths);
   i = 0;
   while (i < tokens.length && tokens[i].kind != tokenEnd) {
     bool exported = sourceIs(tokens[i], 'export');
-    if (sourceIs(tokens[i], 'library')) {
-      while (i < tokens.length && !sourceIs(tokens[i], ';')) i++;
-      i++;
-      continue;
-    }
-    if (!exported && !sourceIs(tokens[i], 'import')) break;
+    var library = sourceIs(tokens[i], 'library');
+    if (!exported && !library && !sourceIs(tokens[i], 'import')) break;
     int start = i;
-    i++;
-    if (tokens[i].kind != tokenString) {
-      print('dartc: expected library URI in ' + path);
-      hostExit(1);
-    }
-    String uri = tokens[i].text;
-    String prefix = '';
-    i++;
-    while (i < tokens.length &&
-        !sourceIs(tokens[i], ';') &&
-        tokens[i].kind != tokenEnd) {
-      if (sourceIs(tokens[i], 'as')) {
-        i++;
-        prefix = tokens[i].text;
-      }
-      i++;
-    }
-    if (tokens[i].kind == tokenEnd) {
-      print('dartc: unterminated library directive in ' + path);
-      hostExit(1);
-    }
-    i++;
+    var kind = astImportDirective;
+    if (exported) kind = astExportDirective;
+    if (library) kind = astLibraryDirective;
+    parser.position = i + 1;
+    var directive = parserDirective(parser, kind, start);
+    i = parser.position;
+    if (library) continue;
+    var uri = directive.uri;
     int target = sourceUnknown;
     if (uri == 'dart:core') {
       target = sourceCore;
     } else if (uri == 'dart:ffi') {
       target = sourceFfi;
-    } else if (!uri.startsWith('dart:')) {
+    } else if (uri.indexOf(':') < 0) {
       String dependency = directory + uri;
       if (uri.startsWith('/')) dependency = uri;
       target = sourceLoad(program, dependency);
+    } else {
+      sourceError(program, tokens[start], 'unsupported library URI ' + uri);
     }
-    imports.add(SourceImport(uri, prefix, target, start, i, exported));
+    imports.add(
+      SourceImport(
+        uri,
+        directive.prefix,
+        target,
+        start,
+        i,
+        exported,
+        directive.combinators,
+      ),
+    );
   }
   program.order.add(id);
   return id;

@@ -6,13 +6,18 @@ class Parser {
   List<Token> tokens;
   int position;
   int pendingClosers;
+  List<String> paths;
 
-  Parser(this.tokens, this.position, this.pendingClosers);
+  Parser(this.tokens, this.position, this.pendingClosers, this.paths);
 }
 
 void parserError(Parser parser, String message) {
+  var token = parser.tokens[parser.position];
+  var location = '';
+  if (token.source >= 0) location = parser.paths[token.source] + ':';
   print(
     'dartc parser: ' +
+        location +
         message +
         ' at offset ' +
         parser.tokens[parser.position].start.toString(),
@@ -560,6 +565,7 @@ AstTypedef parserTypedef(Parser parser, int token) {
 AstDirective parserDirective(Parser parser, int kind, int token) {
   var uri = '';
   var prefix = '';
+  var combinators = <AstCombinator>[];
   if (kind == astLibraryDirective) {
     if (!parserIs(parser, ';')) {
       uri = parserName(parser);
@@ -571,10 +577,19 @@ AstDirective parserDirective(Parser parser, int kind, int token) {
     }
     uri = parser.tokens[parser.position].text;
     parser.position++;
-    if (parserTake(parser, 'as')) prefix = parserName(parser);
+    if (kind == astImportDirective && parserTake(parser, 'as')) {
+      prefix = parserName(parser);
+    }
+    while (parserIs(parser, 'show') || parserIs(parser, 'hide')) {
+      var show = parserTake(parser, 'show');
+      if (!show) parserExpect(parser, 'hide');
+      var names = <String>[parserName(parser)];
+      while (parserTake(parser, ',')) names.add(parserName(parser));
+      combinators.add(AstCombinator(show, names));
+    }
   }
   parserExpect(parser, ';');
-  return AstDirective(kind, uri, prefix, token);
+  return AstDirective(kind, uri, prefix, token, combinators);
 }
 
 AstUnit parseUnit(Parser parser) {

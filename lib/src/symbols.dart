@@ -46,10 +46,16 @@ int declareSymbol(
   return symbol;
 }
 
-int symbolMerge(int left, int right) {
+int symbolMerge(SymbolTable table, int left, int right) {
   if (left == -2 || right == -2) return -2;
   if (left == -1) return right;
   if (right == -1 || left == right) return left;
+  var leftSource = table.declarations[left].source;
+  var rightSource = table.declarations[right].source;
+  var leftSystem = leftSource == sourceCore || leftSource == sourceFfi;
+  var rightSystem = rightSource == sourceCore || rightSource == sourceFfi;
+  if (leftSystem && !rightSystem) return right;
+  if (!leftSystem && rightSystem) return left;
   return -2;
 }
 
@@ -75,13 +81,15 @@ int symbolExportedDeclaration(SymbolTable table, int source, String name) {
     }
     var declaration = symbolOwnDeclaration(table, current, name);
     if (declaration >= 0) {
-      result = symbolMerge(result, declaration);
+      result = symbolMerge(table, result, declaration);
       if (result == -2) return -2;
     } else if (current >= 0) {
       var imports = table.program.files[current].imports;
       i = 0;
       while (i < imports.length) {
-        if (imports[i].exported) work.add(imports[i].target);
+        if (imports[i].exported && sourceAllows(imports[i], name)) {
+          work.add(imports[i].target);
+        }
         i++;
       }
     }
@@ -95,20 +103,26 @@ int resolveSymbol(SymbolTable table, int source, String name, String prefix) {
     if (direct >= 0) return direct;
   }
   var result = -1;
+  var explicitCore = false;
   if (source >= 0) {
     var imports = table.program.files[source].imports;
     var i = 0;
     while (i < imports.length) {
       var dependency = imports[i];
-      if (!dependency.exported && dependency.prefix == prefix) {
+      if (!dependency.exported && dependency.target == sourceCore) {
+        explicitCore = true;
+      }
+      if (!dependency.exported &&
+          dependency.prefix == prefix &&
+          sourceAllows(dependency, name)) {
         var symbol = symbolExportedDeclaration(table, dependency.target, name);
-        result = symbolMerge(result, symbol);
+        result = symbolMerge(table, result, symbol);
         if (result == -2) return -2;
       }
       i++;
     }
   }
-  if (result == -1 && prefix == '') {
+  if (result == -1 && prefix == '' && !explicitCore) {
     return symbolExportedDeclaration(table, sourceCore, name);
   }
   return result;
