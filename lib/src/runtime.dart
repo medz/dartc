@@ -57,6 +57,8 @@ int rtUnmap(int address, int bytes) {
   return rtSyscall(73, address, bytes, 0, 0, 0, 0);
 }
 
+@pragma('dartc:managed-allocate')
+@pragma('dartc:no-gc')
 int rtAlloc(int bytes) {
   var size = (bytes + 15) & -16;
   if (rtArenaNext + size > rtArenaEnd || rtArenaNext == 0) {
@@ -699,6 +701,7 @@ int rtUtf8Bytes = 0;
 int rtUtf8Capacity = 0;
 int rtUtf8Busy = 0;
 
+@pragma('dartc:no-gc')
 int rtUtf8Acquire(int bytes) {
   if (rtUtf8Busy != 0) {
     rtHostExit(70);
@@ -717,6 +720,7 @@ int rtUtf8Acquire(int bytes) {
   return rtUtf8Bytes;
 }
 
+@pragma('dartc:no-gc')
 int rtUtf8Release() {
   if (rtUtf8Busy == 0) {
     rtHostExit(70);
@@ -726,6 +730,7 @@ int rtUtf8Release() {
   return 0;
 }
 
+@pragma('dartc:no-gc')
 int rtStringEncodeUtf8(int value) {
   var length = nativeLoad64(value + stringLengthOffset);
   var result = rtUtf8Acquire(9 + length * 4);
@@ -771,6 +776,7 @@ int rtStringEncodeUtf8(int value) {
   return result;
 }
 
+@pragma('dartc:no-gc')
 int rtPrintString(int value) {
   var encoded = rtStringEncodeUtf8(value);
   var length = nativeLoad64(encoded);
@@ -908,6 +914,7 @@ int rtHostFinish(int path, int outputTarget) {
   return 0;
 }
 
+@pragma('dartc:no-gc')
 int rtObjectDescriptor(int object) {
   var descriptor = nativeLoad64(object);
   if ((nativeLoad64(object + objectFlagsOffset) & objectStaticRelative) != 0) {
@@ -988,6 +995,7 @@ int rtValueTypeError() {
   return 0;
 }
 
+@pragma('dartc:no-gc')
 int rtTypeArgument(int type) {
   return type + nativeLoad64(type + typeArgumentOffset);
 }
@@ -1039,6 +1047,7 @@ int rtBoxInt(int value) {
   return result;
 }
 
+@pragma('dartc:no-gc')
 int rtBoxBool(int value) {
   if (value == 0) return valueFalse;
   return valueTrue;
@@ -1393,6 +1402,7 @@ int rtGlobalRoots = 0;
 int rtGlobalRootCount = 0;
 int rtGlobalRootCapacity = 0;
 
+@pragma('dartc:no-gc')
 int rtRootBuffer(int previous, int count, int capacity) {
   var buffer = rtMap(capacity * 16);
   var i = 0;
@@ -1404,10 +1414,12 @@ int rtRootBuffer(int previous, int count, int capacity) {
   return buffer;
 }
 
+@pragma('dartc:no-gc')
 int rtRootMark() {
   return rtRootCount;
 }
 
+@pragma('dartc:no-gc')
 int rtRootPush(int value, int kind) {
   if (kind == storageRef) {
     if (value == 0) return 0;
@@ -1432,12 +1444,14 @@ int rtRootPush(int value, int kind) {
   return 0;
 }
 
+@pragma('dartc:no-gc')
 int rtRootRestore(int mark) {
   if (mark < 0 || mark > rtRootCount) return rtRootFailure();
   rtRootCount = mark;
   return 0;
 }
 
+@pragma('dartc:no-gc')
 int rtGlobalRootNew(int value, int kind) {
   if (kind != storageRef && kind != storageTagged) return rtRootFailure();
   if (rtGlobalRootCount == rtGlobalRootCapacity) {
@@ -1456,11 +1470,13 @@ int rtGlobalRootNew(int value, int kind) {
   return rtGlobalRootCount;
 }
 
+@pragma('dartc:no-gc')
 int rtGlobalRootValue(int index) {
   if (index <= 0 || index > rtGlobalRootCount) return rtRootFailure();
   return nativeLoad64(rtGlobalRoots + (index - 1) * 16);
 }
 
+@pragma('dartc:no-gc')
 int rtGlobalRootSet(int index, int value) {
   if (index <= 0 || index > rtGlobalRootCount) return rtRootFailure();
   nativeStore64(rtGlobalRoots + (index - 1) * 16, value);
@@ -1480,6 +1496,7 @@ int rtRootAppend(int value, int kind, int worklist, int count, int capacity) {
   return count + 1;
 }
 
+@pragma('dartc:no-gc')
 int rtTraceRoots(int frame, int worklist, int capacity) {
   if (frame == 0 || capacity < 0 || capacity != 0 && worklist == 0) {
     return rtRootFailure();
@@ -1571,6 +1588,7 @@ int rtTraceRoots(int frame, int worklist, int capacity) {
   }
 }
 
+@pragma('dartc:no-gc')
 int rtTraceBitmap(
   int value,
   int fields,
@@ -1604,6 +1622,7 @@ int rtTraceBitmap(
 }
 
 // value is an object base supplied by root or object-edge enumeration.
+@pragma('dartc:no-gc')
 int rtTraceObject(int value, int worklist, int capacity) {
   if (capacity < 0 || capacity != 0 && worklist == 0) {
     return rtRootFailure();

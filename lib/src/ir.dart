@@ -111,6 +111,17 @@ const int bNativeCall1 = 109;
 const int bNativeCall0 = 110;
 const int bNativeFramePointer = 111;
 
+const int contractNoGc = 1;
+const int contractAllocate = 2;
+const int contractMayGc = 4;
+
+class FunctionContract {
+  final int flags;
+  final int token;
+
+  const FunctionContract(this.flags, this.token);
+}
+
 class FunctionInfo {
   String name;
   int start;
@@ -120,6 +131,7 @@ class FunctionInfo {
   List<int> parameterTypes;
   List<int> localTypes;
   int source;
+  FunctionContract? contract;
 
   FunctionInfo(
     this.name,

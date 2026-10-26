@@ -7,6 +7,7 @@ import 'ir.dart';
 import 'library.dart';
 import 'machine.dart';
 import 'optimize.dart';
+import 'nogc.dart';
 import 'reach.dart';
 import 'ssa.dart';
 import 'source.dart';
@@ -112,7 +113,36 @@ void runCompiler(List<String> args) {
   }
   List<SsaFunction> ssa = buildSsa();
   optimizeSsa(ssa);
-  List<MachineFunction> program = selectMachine(ssa, reachableFunctions(ssa));
+  var reachable = reachableFunctions(ssa);
+  var checked = reachable;
+  var marked = <int>[];
+  var f = 0;
+  while (f < functions.length) {
+    var contract = functions[f].contract;
+    if (contract != null && (contract.flags & contractNoGc) != 0) marked.add(f);
+    f++;
+  }
+  List<int> obligations = const <int>[];
+  List<int> validation = const <int>[];
+  if (marked.isNotEmpty) {
+    validation = reachableFunctions(ssa, marked);
+    obligations = checkNoGcSsa(ssa, sources, validation);
+    checked = List<int>.filled(reachable.length, 0);
+    f = 0;
+    while (f < checked.length) {
+      checked[f] = reachable[f] | validation[f];
+      f++;
+    }
+  }
+  List<MachineFunction> program = selectMachine(ssa, checked);
+  if (marked.isNotEmpty) {
+    checkNoGcMachine(program, obligations, sources, validation);
+    f = 0;
+    while (f < program.length) {
+      program[f].reachable = reachable[f] != 0;
+      f++;
+    }
+  }
   allocateRegisters(program);
   generateCode(program);
   List<int> bytes = <int>[];

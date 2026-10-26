@@ -12,7 +12,7 @@ void _reachFunction(List<int> reachable, List<int> work, int target) {
   }
 }
 
-List<int> reachableFunctions(List<SsaFunction> source) {
+List<int> reachableFunctions(List<SsaFunction> source, [List<int>? roots]) {
   List<int> reachable = <int>[];
   List<int> work = <int>[];
   List<int> allocated = <int>[];
@@ -28,7 +28,13 @@ List<int> reachableFunctions(List<SsaFunction> source) {
     allocated.add(0);
     i++;
   }
-  if (imageKind == 0) {
+  if (roots != null) {
+    i = 0;
+    while (i < roots.length) {
+      _reachFunction(reachable, work, roots[i]);
+      i++;
+    }
+  } else if (imageKind == 0) {
     _reachFunction(reachable, work, 0);
     var main = entryFunction;
     _reachFunction(reachable, work, main);

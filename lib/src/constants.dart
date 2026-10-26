@@ -137,7 +137,10 @@ ConstantValue _constantGlobal(
   return value;
 }
 
-void checkMetadataConstant(ConstantContext context, AstExpression expression) {
+ConstantValue evaluateMetadataConstant(
+  ConstantContext context,
+  AstExpression expression,
+) {
   ConstantValue value;
   if (expression.kind == astCall)
     value = _constantConstructor(context, expression, true, true);
@@ -156,6 +159,7 @@ void checkMetadataConstant(ConstantContext context, AstExpression expression) {
       expression.token,
       'void value cannot be used as metadata',
     );
+  return value;
 }
 
 ConstantValue evaluateGlobalConstant(ConstantContext context, int global) {

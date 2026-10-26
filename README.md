@@ -39,7 +39,7 @@ The `StringBuffer` subset supports empty construction, String arguments to `writ
 
 Const generative constructors support final fields, declaration initializers, and field-formal parameters. Const instances share canonical identity across expressions, nested lists, and default values; ordinary constructor calls create fresh instances. Named and redirecting constructors, factories, and initializer lists remain unsupported.
 
-The source checkout also accepts user const-variable annotations on existing declaration forms. Annotations may also call the supported const constructors. Core annotations such as `@override` and reflective metadata remain unsupported.
+The source checkout also accepts user const-variable annotations on existing declaration forms. Annotations may also call the supported const constructors. The core `pragma` subset supports compiler-checked `@pragma('dartc:no-gc')` function contracts; see [runtime contracts](doc/runtime.md) for usage and limits. Other core annotations such as `@override` and reflective metadata remain unsupported.
 
 String indices and positions use UTF-16 code units and check ranges. `String.fromCharCodes` currently takes one `List<int>` argument, with codes from 0 through `0x10ffff`; surrogate code units are preserved.
 

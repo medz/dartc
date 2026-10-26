@@ -127,6 +127,9 @@ List<int> feFieldIndices = <int>[];
 List<int> feOwners = <int>[];
 List<int> feConstructors = <int>[];
 List<int> feParamFields = <int>[];
+int fePragmaClass = -1;
+int fePragmaNameField = -1;
+int fePragmaOptionsField = -1;
 
 Never feError(String message) {
   sourceError(feSources, feTokens[feAt], message);
@@ -304,9 +307,6 @@ void feCollectDeclarations(AstUnit unit) {
     classTaggedMasks.add(<int>[]);
     classToStringFunctions.add(-1);
     feDeclare(source, syntax.name, symbolClass, owner, syntax.token);
-    if (source == feSources.core && !syntax.name.startsWith('_')) {
-      feDeclare(sourceCore, syntax.name, symbolClass, owner, syntax.token);
-    }
     i++;
   }
   i = 0;
@@ -1100,19 +1100,66 @@ int feLowerInContext(AstExpression expression, int context) {
   );
 }
 
-void feCheckMetadata(List<AstExpression> metadata, int owner) {
+void feResolvePragma() {
+  fePragmaClass = -1;
+  fePragmaNameField = -1;
+  fePragmaOptionsField = -1;
+  var symbol = symbolExportedDeclaration(feSymbols, sourceCore, 'pragma');
+  if (symbol < 0 || feSymbols.declarations[symbol].kind != symbolClass) return;
+  fePragmaClass = feSymbols.declarations[symbol].target;
+  var members = feMembers[fePragmaClass];
+  var name = lookupMember(members, 'name');
+  var options = lookupMember(members, 'options');
+  if (name >= 0) fePragmaNameField = members.members[name].field;
+  if (options >= 0) fePragmaOptionsField = members.members[options].field;
+}
+
+int fePragmaFlags(ConstantValue value, int token) {
+  if (fePragmaClass < 0 || value.kind != classType(fePragmaClass)) return 0;
+  if (fePragmaNameField < 0 || fePragmaOptionsField < 0)
+    feAstError(token, 'core pragma requires name and options fields');
+  var name = value.elements[fePragmaNameField];
+  if (name.kind != tString)
+    feAstError(token, 'core pragma name requires String');
+  var flags = 0;
+  if (name.text == 'dartc:no-gc') flags = contractNoGc;
+  if (name.text == 'dartc:managed-allocate') flags = contractAllocate;
+  if (name.text == 'dartc:may-gc') flags = contractMayGc;
+  if (flags != 0 && value.elements[fePragmaOptionsField].kind != tNull)
+    feAstError(token, 'dartc function pragmas do not accept options');
+  return flags;
+}
+
+void feCheckMetadata(
+  List<AstExpression> metadata,
+  int owner, [
+  int function = -1,
+]) {
   if (metadata.isEmpty) return;
   feConstants.localTypes = feFlow.types;
   var scope = feConstants.instanceScope;
   feConstants.instanceScope = null;
   if (owner >= 0) feConstants.instanceScope = feMembers[owner];
+  var flags = 0;
+  var token = -1;
   var i = 0;
   while (i < metadata.length) {
     var expression = metadata[i];
-    checkMetadataConstant(feConstants, expression);
+    var value = evaluateMetadataConstant(feConstants, expression);
+    var annotation = fePragmaFlags(value, expression.token);
+    if (annotation != 0) {
+      if (function < 0)
+        feAstError(
+          expression.token,
+          'dartc function pragma requires a function body',
+        );
+      flags |= annotation;
+      if (token < 0) token = expression.token;
+    }
     i++;
   }
   feConstants.instanceScope = scope;
+  if (flags != 0) functions[function].contract = FunctionContract(flags, token);
 }
 
 void feCheckUnitMetadata(AstUnit syntax) {
@@ -1124,6 +1171,12 @@ void feCheckUnitMetadata(AstUnit syntax) {
   i = 0;
   while (i < syntax.variables.length) {
     feCheckMetadata(syntax.variables[i].metadata, -1);
+    i++;
+  }
+  i = 0;
+  while (i < syntax.functions.length) {
+    if (syntax.functions[i].external)
+      feCheckMetadata(syntax.functions[i].metadata, -1);
     i++;
   }
   i = 0;
@@ -1191,7 +1244,7 @@ void feResolveDefaults(int count) {
   var f = 1;
   while (f < count) {
     var syntax = feFunctionNodes[f];
-    feCheckMetadata(syntax.metadata, feOwners[f]);
+    feCheckMetadata(syntax.metadata, feOwners[f], f);
     feConstants.instanceScope = null;
     if (feOwners[f] >= 0) feConstants.instanceScope = feMembers[feOwners[f]];
     var parameters = syntax.parameters;
@@ -2978,6 +3031,7 @@ void parseSource(SourceProgram source) {
     'identical',
   );
   feRegisterConstantConstructors();
+  feResolvePragma();
   feCheckUnitMetadata(syntax);
   var constant = 0;
   while (constant < feGlobalNodes.length) {

@@ -32,6 +32,7 @@ class SourceFile {
   String path;
   List<Token> tokens;
   List<SourceImport> imports;
+  bool system = false;
 
   SourceFile(this.path, this.tokens, this.imports);
 }
@@ -83,6 +84,11 @@ String sourcePath(String path) {
   }
   if (result == '') return '.';
   return result;
+}
+
+bool sourceIsSystem(SourceProgram program, int source) {
+  if (source == sourceCore || source == sourceFfi) return true;
+  return source >= 0 && program.files[source].system;
 }
 
 bool sourceIs(Token token, String text) {
@@ -195,10 +201,23 @@ SourceProgram collectSources(String input, String runtime) {
     int standard = sourceLoad(program, runtime);
     program.runtimeTokens = program.files[standard].tokens.length - 1;
     String directory = runtime.substring(0, runtime.lastIndexOf('/') + 1);
-    program.core = sourceLoad(
-      program,
-      directory + 'std/core/string_buffer.dart',
-    );
+    program.core = sourceLoad(program, directory + 'std/core.dart');
+    var work = <int>[program.core];
+    var cursor = 0;
+    while (cursor < work.length) {
+      var source = program.files[work[cursor]];
+      cursor++;
+      if (source.system) continue;
+      source.system = true;
+      var dependency = 0;
+      while (dependency < source.imports.length) {
+        var imported = source.imports[dependency];
+        if (imported.exported && imported.target >= 0) {
+          work.add(imported.target);
+        }
+        dependency++;
+      }
+    }
   }
   program.entry = sourceLoad(program, input);
   int i = 0;

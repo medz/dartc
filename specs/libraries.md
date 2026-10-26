@@ -7,8 +7,8 @@
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
-| [§19 Libraries and Scripts][libraries]：编译单元 | 部分实现 | 源库保留独立文件身份、声明和依赖；支持 `library` 声明。元数据、script tag 和完整顶层声明文法未覆盖。 | [source.dart](../lib/src/source.dart)、[parser.dart](../lib/src/parser.dart)；[behavior_test.dart](../test/behavior_test.dart) |
-| [§19.1 Imports][imports] | 部分实现 | 支持立即导入、`as` 前缀及显式/隐式 `dart:core` 处理；系统库只提供当前实现的声明，不等于完整 SDK 库。 | [source.dart](../lib/src/source.dart)、[symbols.dart](../lib/src/symbols.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 `imports.dart`、`core.dart` |
+| [§19 Libraries and Scripts][libraries]：编译单元 | 部分实现 | 源库保留独立文件身份、声明和依赖；支持 `library` 声明。元数据覆盖[已实现声明子集](classes.md)，script tag 和完整顶层声明文法未覆盖。 | [source.dart](../lib/src/source.dart)、[parser.dart](../lib/src/parser.dart)；[behavior_test.dart](../test/behavior_test.dart) |
+| [§19.1 Imports][imports] | 部分实现 | 支持立即导入、`as` 前缀及显式/隐式 `dart:core` 处理；可执行文件的 core 入口通过真实 Dart export 提供 StringBuffer 与 pragma 声明，原生内建类型仍保留系统身份。前缀、再导出和用户同名遮蔽按实际声明来源处理；这不是完整 SDK 库。 | [source.dart](../lib/src/source.dart)、[symbols.dart](../lib/src/symbols.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 `imports.dart`、`core.dart`；[core.dart](../lib/src/std/core.dart) |
 | [§19.1.1 The Imported Namespace][imported] | 部分实现 | 按读取与写入分别解析 getter/setter，可组合独立来源的两侧；本库任一同名声明遮蔽导入两侧，前缀和私有性保持来源身份。扩展及完整命名空间组合尚缺。 | [symbols.dart](../lib/src/symbols.dart) 的 `resolveSymbol`、`resolveWriteSymbol`；[behavior_test.dart](../test/behavior_test.dart) 的 `top-accessor-imports.dart`、`rejected` |
 | [§19.1.2 Semantics of Imports][import-semantics]：延迟导入 | 未实现 | `deferred` 被拒绝；没有 `loadLibrary`、加载状态及相应调用时序。 | [parser.dart](../lib/src/parser.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 deferred 拒绝用例 |
 | [§19.2 Exports][exports] | 部分实现 | 支持导出、再导出与过滤，读写保留原声明来源；本库声明缺少所需读/写侧时继续查找再导出。导出冲突的全库声明检查仍缺，循环导出和扩展成员尚缺系统验证。 | [source.dart](../lib/src/source.dart)、[symbols.dart](../lib/src/symbols.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 `exports.dart`、`top-accessor-imports.dart`、`export-priority.dart` |

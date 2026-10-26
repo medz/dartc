@@ -355,6 +355,28 @@ void constantObjectRoots(int queue, int edges) {
   check(rt.rtRootMark() == mark);
 }
 
+@pragma('dartc:no-gc')
+int noGcScope(int raw, int queue) {
+  var mark = rt.rtRootMark();
+  var i = 0;
+  while (i < 1100) {
+    rt.rtRootPush(raw, abi.storageRef);
+    i++;
+  }
+  var count = rt.rtTraceRoots(rt.nativeFramePointer(), queue, capacity);
+  rt.rtRootRestore(mark);
+  return count;
+}
+
+void noGcRoots(int queue) {
+  var raw = capture(Leaf(601), 601, queue);
+  var mark = rt.rtRootMark();
+  var count = noGcScope(raw, queue);
+  check(contains(queue, count, raw));
+  check(rt.rtRootMark() == mark);
+  check(!contains(queue, snapshot(queue), raw));
+}
+
 void main(List<String> args) {
   if (args.isNotEmpty) {
     capacityFailure(Leaf(190));
@@ -362,6 +384,7 @@ void main(List<String> args) {
   }
   var queue = rt.rtMap(capacity * 8);
   var edges = rt.rtMap(capacity * 8);
+  noGcRoots(queue);
   var keep = Leaf(111);
   var count = snapshot(queue);
   check(findMarker(queue, count, 111) != 0);

@@ -92,8 +92,8 @@ int symbolMerge(SymbolTable table, int left, int right, bool writing) {
   if (right == -1 || left == right) return left;
   var leftSource = table.declarations[left].source;
   var rightSource = table.declarations[right].source;
-  var leftSystem = leftSource == sourceCore || leftSource == sourceFfi;
-  var rightSystem = rightSource == sourceCore || rightSource == sourceFfi;
+  var leftSystem = sourceIsSystem(table.program, leftSource);
+  var rightSystem = sourceIsSystem(table.program, rightSource);
   if (leftSystem && !rightSystem) return right;
   if (!leftSystem && rightSystem) return left;
   var leftFacet = _symbolHasFacet(table.declarations[left], writing);
@@ -115,6 +115,10 @@ int _symbolExportedDeclaration(
 ) {
   if (name.startsWith('_')) return -1;
   var direct = symbolOwnDeclaration(table, source, name);
+  if (source == sourceCore && direct < 0 && table.program.core >= 0) {
+    source = table.program.core;
+    direct = symbolOwnDeclaration(table, source, name);
+  }
   if (source < 0 ||
       direct >= 0 && _symbolHasFacet(table.declarations[direct], writing)) {
     return direct;
@@ -131,6 +135,11 @@ int _symbolExportedDeclaration(
   while (cursor < work.length) {
     var current = work[cursor];
     cursor++;
+    if (current == sourceCore &&
+        symbolOwnDeclaration(table, current, name) < 0 &&
+        table.program.core >= 0) {
+      current = table.program.core;
+    }
     if (current >= 0) {
       if (visited[current] != 0) continue;
       visited[current] = 1;

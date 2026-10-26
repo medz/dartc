@@ -751,6 +751,71 @@ void main() {
           "import 'dart:core' as both show print; import 'ordinary.dart' as both; "
           "import 'combined-export.dart' as combined; import 'dart:core' as core; "
           'void main() { core.print(both.print(5)); core.print(combined.print(5)); }',
+      'core-annotations-user.dart':
+          'class pragma { final int code; const pragma(this.code); }',
+      'core-annotations-export.dart':
+          "export 'dart:core' show pragma, StringBuffer;",
+      'core-annotations-combined.dart': "export 'dart:core' show pragma; export 'core-annotations-user.dart';",
+      'core-annotations-imports.dart': r'''
+import 'dart:core';
+import 'dart:core' as core;
+import 'core-annotations-user.dart';
+import 'dart:core' as both show pragma;
+import 'core-annotations-user.dart' as both;
+import 'dart:core' as alias show pragma;
+import 'core-annotations-export.dart' as alias;
+import 'core-annotations-combined.dart' as combined;
+const hint = core.pragma('OtherTool:hint', [1, true]);
+@hint
+@core.pragma('OtherTool:ignored')
+@pragma(7)
+@both.pragma(8)
+@alias.pragma('OtherTool:alias')
+void main() {
+  print(pragma(7).code);
+  print(both.pragma(8).code);
+  print(combined.pragma(9).code);
+  print(hint.name);
+  print(hint.options);
+  print(const alias.pragma('OtherTool:alias').options);
+  print(identical(const core.pragma('OtherTool:same'),
+      const alias.pragma('OtherTool:same')));
+  var buffer = alias.StringBuffer();
+  buffer.write('entry');
+  print(buffer);
+}
+''',
+      'core-annotations-implicit.dart':
+          "import 'core-annotations-user.dart'; @pragma(7) void main() { "
+          "var buffer = StringBuffer(); buffer.write(pragma(7).code); print(buffer); }",
+      'core-annotations-own.dart':
+          'const pragma = 7; @pragma void main() { print(pragma); }',
+      'core-annotations-filtered.dart':
+          "import 'dart:core' show print; import 'dart:core' as core show pragma; "
+          "@core.pragma('OtherTool:hint') void main() { "
+          "const hint = core.pragma('OtherTool:hint', 7); print(hint.name); print(hint.options); }",
+      'nogc-values.dart': r'''
+import 'dart:core';
+import 'dart:core' as core;
+const noGc = core.pragma('dartc:no-gc');
+int pure(int value) => value + 1;
+int even(int value) { if (value == 0) return 1; return odd(value - 1); }
+int odd(int value) { if (value == 0) return 0; return even(value - 1); }
+@noGc
+int compute(int value) {
+  print('nogc-static');
+  return pure(value ~/ 3) + even(value & 7) + (value << (value & 63));
+}
+@core.pragma('dartc:no-gc')
+Object box(bool value) => value;
+void main() { print(compute(65)); print(box(true)); print(box(false)); }
+''',
+      'nogc-user-annotation.dart': r'''
+class pragma { final String name; const pragma(this.name); }
+@pragma('dartc:no-gc')
+List<int> allocated() => <int>[7];
+void main() { print(allocated()); }
+''',
       'constant-values.dart': 'const values = <int>[1];',
       'constant-other.dart': 'const values = <int>[1];',
       'constant-imports.dart':
@@ -774,6 +839,12 @@ void main() {
     compare(File('${temporary.path}/priority.dart'), []);
     compare(File('${temporary.path}/export-priority.dart'), []);
     compare(File('${temporary.path}/prefix-priority.dart'), []);
+    compare(File('${temporary.path}/core-annotations-imports.dart'), []);
+    compare(File('${temporary.path}/core-annotations-implicit.dart'), []);
+    compare(File('${temporary.path}/core-annotations-own.dart'), []);
+    compare(File('${temporary.path}/core-annotations-filtered.dart'), []);
+    compare(File('${temporary.path}/nogc-values.dart'), []);
+    compare(File('${temporary.path}/nogc-user-annotation.dart'), []);
     compare(File('${temporary.path}/constant-imports.dart'), []);
     compare(File('${temporary.path}/property-imports.dart'), []);
     compare(File('${temporary.path}/top-accessor-imports.dart'), []);
@@ -782,6 +853,20 @@ void main() {
     compare(File('${temporary.path}/const-class-metadata-only.dart'), []);
     compare(File('${temporary.path}/const-class-finite-default.dart'), []);
     final rejected = [
+      "import 'dart:core'; import 'dart:core' as core; List<int> helper() => <int>[1]; @core.pragma('dartc:no-gc') List<int> bad() => helper(); void main() {}",
+      "const noGc = pragma('dartc:no-gc'); void helper([List<int> values = const <int>[1]]) {} @noGc void bad() { helper(); } void main() {}",
+      "Object value = 1; @pragma('dartc:no-gc') Object bad() => value; void main() {}",
+      "@pragma('dartc:no-gc') int bad(dynamic value) => value as int; void main() {}",
+      "@pragma('dartc:no-gc') int bad(int value, int other) => (value ~/ other) + (value << other); void main() {}",
+      "@pragma('dartc:may-gc') int helper(int value) => value; @pragma('dartc:no-gc') int bad() => helper(1); void main() {}",
+      "@pragma('dartc:no-gc') int value = 0; void main() {}",
+      "@pragma('dartc:no-gc', true) void bad() {} void main() {}",
+      "import '$standard' as rt; @pragma('dartc:no-gc') int bad(int target) => rt.nativeCall0(target); void main() {}",
+      "import '$standard' as rt; @pragma('dartc:no-gc') int bad(int bytes) => rt.rtAlloc(bytes); void main() {}",
+      "import '$standard' as rt; @pragma('dartc:no-gc') int bad(int type) => rt.rtListNew(type); void main() {}",
+      "import 'dart:core' hide pragma; @pragma('OtherTool:hint') void main() {}",
+      "import 'dart:core' as core; @pragma('OtherTool:hint') void main() {}",
+      "import 'dart:core' as core; @core.pragma(7) void main() {}",
       r"class C { final int value; const C(this.value); } const object = C(1); const text = '$object'; void main() {}",
       r"class C { final int value; const C(this.value); int get hashCode => value; } const same = C(1) == C(1); void main() {}",
       "class C { int value = 1; const C(); } void main() {}",
@@ -982,8 +1067,12 @@ void main() {
     }
     final core = Directory('${temporary.path}/std/core')
       ..createSync(recursive: true);
-    File('${File(standard).parent.path}/std/core/string_buffer.dart')
-        .copySync('${core.path}/string_buffer.dart');
+    for (final name in ['string_buffer.dart', 'annotations.dart']) {
+      File('${File(standard).parent.path}/std/core/$name')
+          .copySync('${core.path}/$name');
+    }
+    File('${File(standard).parent.path}/std/core.dart')
+        .copySync('${temporary.path}/std/core.dart');
     final empty = File('${temporary.path}/empty.dart')
       ..writeAsStringSync('void main() {}');
     final emptyRuntime = File('${temporary.path}/runtime-empty.dart')
