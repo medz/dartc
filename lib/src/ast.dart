@@ -14,6 +14,8 @@ const int astConditional = 13;
 const int astNamedArgument = 14;
 const int astIndex = 15;
 const int astInterpolation = 16;
+const int astTypeTest = 17;
+const int astTypeCast = 18;
 
 class AstType {
   String name;

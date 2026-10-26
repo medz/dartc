@@ -415,6 +415,8 @@ void feOperand(int op, int value) {
   if (op == opInt || op == opMetadataAddress) irTypes[position] = tInt;
   if (op == opString) irTypes[position] = tString;
   if (op == opDescriptor) irTypes[position] = tPointer;
+  if (op == opTypeTest) irTypes[position] = tBool;
+  if (op == opTypeCast) irTypes[position] = value;
   if (op == opLoadLocal) irTypes[position] = feSlotTypes[value];
   if (op == opLoadGlobal) irTypes[position] = globalTypes[value];
 }
@@ -849,11 +851,25 @@ int feLowerType(AstType syntax) {
       ),
     );
   }
-  if (syntax.name == 'void') return tVoid;
-  if (syntax.name == 'dynamic') return tDynamic;
+  var count = syntax.arguments.length;
+  if (syntax.name == 'void' || syntax.name == 'dynamic') {
+    if (count != 0)
+      feAstError(syntax.token, 'type does not accept type arguments');
+    if (syntax.name == 'void') return tVoid;
+    return tDynamic;
+  }
   var symbol = feTypeSymbol(syntax);
   if (symbol < 0) feAstError(syntax.token, 'unknown type ' + syntax.name);
   var declaration = feSymbols.declarations[symbol];
+  var generic =
+      declaration.kind == symbolType &&
+      (declaration.target < 0 || declaration.target == tPointer);
+  if (generic && count > 1 || !generic && count != 0) {
+    feAstError(
+      syntax.token,
+      'wrong number of type arguments for ' + syntax.name,
+    );
+  }
   if (declaration.kind == symbolClass) return classType(declaration.target);
   if (declaration.kind == symbolType) {
     if (declaration.target < 0) {
@@ -1167,19 +1183,22 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
       valueType = feLowerHint(call.children[2], -1);
     else
       valueType = feLowerInContext(call.children[2], element);
+    var hasGrowable = false;
     var argument = 3;
     while (argument < call.children.length) {
       var named = call.children[argument];
       if (named.kind != astNamedArgument || named.text != 'growable') {
         feAstError(named.token, 'unsupported List.filled argument');
       }
+      if (hasGrowable) feAstError(named.token, 'duplicate growable argument');
+      hasGrowable = true;
       feLowerBoolean(named.children[0]);
-      feEmit(opPop);
       argument++;
     }
+    if (!hasGrowable) feInteger(0, tBool);
     if (element < 0) element = valueType;
     var type = listType(element);
-    feBuiltinTyped(bListFilled, 2, type);
+    feBuiltinTyped(bListFilled, 3, type);
     return type;
   }
   if (declaration.source == sourceCore &&
@@ -1594,6 +1613,18 @@ int feLowerExpression(AstExpression expression) {
   }
   if (kind == astAssignment || kind == astPostfix) {
     return feLowerAssignment(expression, kind == astPostfix);
+  }
+  if (kind == astTypeTest || kind == astTypeCast) {
+    var actual = feLowerExpression(expression.children[0]);
+    feConvertValue(actual, tDynamic, expression.children[0].token);
+    var target = feLowerType(expression.typeArguments[0]);
+    if (kind == astTypeCast) {
+      feOperand(opTypeCast, target);
+      return target;
+    }
+    feOperand(opTypeTest, target);
+    if (expression.text == 'is!') feEmit(opNot);
+    return tBool;
   }
   if (kind == astUnary) {
     var op = expression.text;

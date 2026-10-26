@@ -50,6 +50,11 @@ List<int> reachableFunctions(List<SsaFunction> source) {
         var instruction = instructions[i];
         if (instruction.op == opCall) {
           _reachFunction(reachable, work, instruction.target);
+        } else if (instruction.op == opTypeTest ||
+            instruction.op == opTypeCast) {
+          var builtin = bValueIs;
+          if (instruction.op == opTypeCast) builtin = bValueCast;
+          _reachFunction(reachable, work, runtimeFunction(builtin));
         } else if (instruction.op == opDescriptor) {
           var owner = instruction.target;
           if (allocated[owner] == 0) {

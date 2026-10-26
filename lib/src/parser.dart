@@ -93,14 +93,14 @@ bool parserLookType(Parser parser) {
   return true;
 }
 
-bool parserHasTypeArguments(Parser parser) {
+bool parserHasTypeArguments(Parser parser, bool invocation) {
   var position = parser.position;
   var closers = parser.pendingClosers;
   var valid = parserTake(parser, '<');
   if (valid) valid = parserLookType(parser);
   while (valid && parserTake(parser, ',')) valid = parserLookType(parser);
   if (valid) valid = parserTypeClose(parser);
-  if (valid) {
+  if (valid && invocation) {
     valid =
         parser.pendingClosers == 0 &&
         (parserIs(parser, '(') || parserIs(parser, '.'));
@@ -115,7 +115,8 @@ AstType parseAstType(Parser parser) {
   var name = parserName(parser);
   while (parserTake(parser, '.')) name = name + '.' + parserName(parser);
   List<AstType> arguments = <AstType>[];
-  if (parserTake(parser, '<')) {
+  if (parserIs(parser, '<') && parserHasTypeArguments(parser, false)) {
+    parserExpect(parser, '<');
     arguments.add(parseAstType(parser));
     while (parserTake(parser, ',')) arguments.add(parseAstType(parser));
     if (!parserTypeClose(parser)) parserError(parser, 'expected >');
@@ -226,7 +227,7 @@ AstExpression parserPostfix(Parser parser) {
     var token = parser.position;
     if ((expression.kind == astName || expression.kind == astMember) &&
         parserIs(parser, '<') &&
-        parserHasTypeArguments(parser)) {
+        parserHasTypeArguments(parser, true)) {
       expression.typeArguments = parserTypeArguments(parser);
     } else if (parserTake(parser, '.')) {
       var member = parser.position;
@@ -291,7 +292,13 @@ int parserPrecedence(String op) {
   if (op == '||') return 1;
   if (op == '&&') return 2;
   if (op == '==' || op == '!=') return 3;
-  if (op == '<' || op == '<=' || op == '>' || op == '>=') return 4;
+  if (op == '<' ||
+      op == '<=' ||
+      op == '>' ||
+      op == '>=' ||
+      op == 'is' ||
+      op == 'as')
+    return 4;
   if (op == '|') return 5;
   if (op == '^') return 6;
   if (op == '&') return 7;
@@ -301,22 +308,79 @@ int parserPrecedence(String op) {
   return 0;
 }
 
+bool parserNullableTypeEnd(Parser parser) {
+  return parser.tokens[parser.position].kind == tokenInterpolationEnd ||
+      parserIs(parser, ')') ||
+      parserIs(parser, '}') ||
+      parserIs(parser, ']') ||
+      parserIs(parser, '?') ||
+      parserIs(parser, ',') ||
+      parserIs(parser, ';') ||
+      parserIs(parser, ':') ||
+      parserIs(parser, 'is') ||
+      parserIs(parser, 'as') ||
+      parserIs(parser, '||') ||
+      parserIs(parser, '&&') ||
+      parserIs(parser, '');
+}
+
+AstType parserExpressionType(Parser parser) {
+  var type = parseAstType(parser);
+  if (type.name.endsWith('?') && !parserNullableTypeEnd(parser)) {
+    type.name = type.name.substring(0, type.name.length - 1);
+    parser.position--;
+  }
+  if (type.name == 'void' || type.name == 'void?') {
+    parser.position = type.token;
+    parserError(parser, 'type test or cast requires a non-void type');
+  }
+  return type;
+}
+
 AstExpression parserBinary(Parser parser, int minimum) {
   var expression = parserUnary(parser);
-  while (parser.tokens[parser.position].kind != tokenString &&
-      parserPrecedence(parserPeek(parser)) >= minimum) {
+  var maximum = 10;
+  var previousComparison = -1;
+  while (parser.tokens[parser.position].kind != tokenString) {
     var token = parser.position;
     var op = parserPeek(parser);
     var precedence = parserPrecedence(op);
-    parser.position++;
-    var right = parserBinary(parser, precedence + 1);
-    expression = AstExpression(
-      astBinary,
-      op,
-      <AstExpression>[expression, right],
-      <AstType>[],
-      token,
-    );
+    if (precedence < minimum || precedence > maximum) break;
+    parserTake(parser, op);
+    if (op == 'is' || op == 'as') {
+      var kind = astTypeCast;
+      if (op == 'is') {
+        kind = astTypeTest;
+        if (parserTake(parser, '!')) op = 'is!';
+      }
+      var type = parserExpressionType(parser);
+      expression = AstExpression(
+        kind,
+        op,
+        <AstExpression>[expression],
+        <AstType>[type],
+        token,
+      );
+      if (parserIs(parser, 'is') || parserIs(parser, 'as'))
+        parserError(parser, 'type tests and casts cannot be chained');
+    } else {
+      if (precedence == 3 || precedence == 4) {
+        if (previousComparison == precedence) {
+          parser.position = token;
+          parserError(parser, 'comparison operators cannot be chained');
+        }
+        previousComparison = precedence;
+      }
+      var right = parserBinary(parser, precedence + 1);
+      expression = AstExpression(
+        astBinary,
+        op,
+        <AstExpression>[expression, right],
+        <AstType>[],
+        token,
+      );
+    }
+    maximum = precedence;
   }
   return expression;
 }
@@ -381,6 +445,8 @@ bool parserTypedDeclaration(Parser parser) {
         parser.pendingClosers == 0 &&
         parser.tokens[parser.position].kind == tokenIdentifier &&
         !parserIs(parser, 'in') &&
+        !parserIs(parser, 'is') &&
+        !parserIs(parser, 'as') &&
         !tokenIs(parser.tokens[parser.position + 1], ':');
   }
   parser.position = position;

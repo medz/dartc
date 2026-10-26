@@ -437,9 +437,21 @@ void main(List<String> args) {
       );
     compare(values, [for (var i = 0; i < 20; i++) '参数$i🙂']);
     final failingValues = [
+      "void main() { dynamic value = 'wrong'; print('before'); value as int; print('after'); }",
+      "void main() { dynamic value = null; print('before'); value as int; print('after'); }",
+      'void main() { Object value = <Object>[1]; print(\'before\'); value as List<int>; print(\'after\'); }',
       "void main() { dynamic value = 'wrong'; print('before'); int number = value; print('after'); }",
       "void main() { List<Object> view = <int>[1]; print('before'); view[0] = 'wrong'; print('after'); }",
       "void main() { List<Object> view = <int>[1]; print('before'); view.add('wrong'); print('after'); }",
+      "void main() { var values = <int>[]; print('before'); print(values[0]); }",
+      "void main() { var values = <int>[1]; print('before'); print(values[-1]); }",
+      "void main() { var values = <int>[1]; print('before'); values[1] = 2; print('after'); }",
+      "int value() { print('rhs'); return 2; } void main() { var values = <int>[]; print('before'); values[0] = value(); print('after'); }",
+      "void main() { var values = <int>[]; print('before'); values.removeLast(); print('after'); }",
+      "void main() { print('before'); var values = List<int>.filled(-1, 0); print(values); }",
+      "void main() { var values = List<int>.filled(0, 0); print('before'); values.add(1); print('after'); }",
+      "void main() { var values = List<int>.filled(0, 0); print('before'); values.clear(); print('after'); }",
+      "void main() { var values = List<int>.filled(0, 0); print('before'); values.removeLast(); print('after'); }",
       for (final change in ['owner.clear();', 'owner.add(2);'])
         '''
 class Mutator {
@@ -474,7 +486,7 @@ void main() {
       );
       if (expected.exitCode == 0 ||
           actual.exitCode != 70 ||
-          expected.stdout != 'before\n' ||
+          !expected.stdout.toString().startsWith('before\n') ||
           actual.stdout != expected.stdout) {
         throw StateError(
           '${source.path} did not fail at the expected value boundary.\n'
@@ -540,6 +552,11 @@ void main() {
       'void main() { dynamic source = 1; int slot = 0; var values = [slot = source]; List<int> typed = values; print(typed); }',
       'void value() { return 7; } void main() { value(); }',
       'void value() {} void main() { dynamic result = value(); print(result); }',
+      'void main() { print(1 as int is int); }',
+      'void main() { print(1 is void); }',
+      'void main() { print(1 as void); }',
+      'void main() { print(1 is int<String>); }',
+      'void main() { print(<int>[] is List<int, String>); }',
     ];
     void reject(File invalid, {String? runtime, String? diagnostic}) {
       final result = Process.runSync(
@@ -571,14 +588,15 @@ void main() {
     final empty = File('${temporary.path}/empty.dart')
       ..writeAsStringSync('void main() {}');
     final invalidRuntimes = [
-      'const int rtAbiVersion = 3; external int nativeLoad64(int pointer, int extra);',
-      'const int rtAbiVersion = 3; external bool nativeTarget();',
-      "const int rtAbiVersion = 3; external int nativeLoad64(int pointer); int invalid() => nativeLoad64('wrong');",
-      'const int rtAbiVersion = 3; external int nativeMetadataAddress(int first, int second);',
-      'const int rtAbiVersion = 3; external int nativeMetadataAddress();',
+      'const int rtAbiVersion = 4; external int nativeLoad64(int pointer, int extra);',
+      'const int rtAbiVersion = 4; external bool nativeTarget();',
+      "const int rtAbiVersion = 4; external int nativeLoad64(int pointer); int invalid() => nativeLoad64('wrong');",
+      'const int rtAbiVersion = 4; external int nativeMetadataAddress(int first, int second);',
+      'const int rtAbiVersion = 4; external int nativeMetadataAddress();',
+      'const int rtAbiVersion = 3;',
       'const int rtAbiVersion = 2;',
       'const int rtAbiVersion = 1;',
-      'int rtAbiVersion = 3;',
+      'int rtAbiVersion = 4;',
       '',
     ];
     for (var i = 0; i < invalidRuntimes.length; i++) {

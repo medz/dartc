@@ -115,7 +115,12 @@ List<int> ssaCopy(List<int> values) {
 int ssaInputCount(int op, int position) {
   if (op == opCall || op == opBuiltin) return ir[position + 2];
   if (op == opStoreGlobal) return 1;
-  if (op == opNeg || op == opBitNot || op == opNot) return 1;
+  if (op == opNeg ||
+      op == opBitNot ||
+      op == opNot ||
+      op == opTypeTest ||
+      op == opTypeCast)
+    return 1;
   if (op >= opAdd && op <= opGe) return 2;
   return 0;
 }
@@ -301,6 +306,7 @@ SsaEdge ssaTransfer(
 }
 
 int ssaEffects(int op, int target) {
+  if (op == opTypeCast) return ssaRead | ssaAllocate | ssaThrow | ssaGc;
   if (op == opLoadGlobal) return ssaRead;
   if (op == opStoreGlobal) return ssaWrite;
   if (op == opDiv || op == opMod || op == opShl || op == opShr || op == opUshr)

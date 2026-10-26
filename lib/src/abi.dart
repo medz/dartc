@@ -53,6 +53,7 @@ int runtimeFunction(int builtin) {
   if (builtin == bBoxInt) return abiFunction('rtBoxInt', 0);
   if (builtin == bBoxBool) return abiFunction('rtBoxBool', 0);
   if (builtin == bValueCast) return abiFunction('rtValueCast', 0);
+  if (builtin == bValueIs) return abiFunction('rtValueMatches', 0);
   if (builtin == bValueBool) return abiFunction('rtValueBool', 0);
   if (builtin == bValueAdd) return abiFunction('rtValueAdd', 0);
   if (builtin == bValueSub) return abiFunction('rtValueSub', 0);

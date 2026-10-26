@@ -11,7 +11,7 @@ external int nativeTarget();
 external int nativeMetadataAddress(int features);
 external int nativeCall1(int function, int value);
 
-const int rtAbiVersion = 3;
+const int rtAbiVersion = 4;
 
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
@@ -320,6 +320,30 @@ int rtIntParse(int value) {
   return result * sign;
 }
 
+int rtListRangeError() {
+  var message = rtCString(
+    0x6c203a6374726164,
+    0x676e617220747369,
+    0xa726f7272652065,
+    0,
+  );
+  rtWriteAll(2, message, 24);
+  rtHostExit(70);
+  return 0;
+}
+
+int rtListFixedError() {
+  var message = rtCString(
+    0x66203a6374726164,
+    0x73696c2064657869,
+    0x6874676e656c2074,
+    0xa,
+  );
+  rtWriteAll(2, message, 25);
+  rtHostExit(70);
+  return 0;
+}
+
 int rtListNew(int typeRef) {
   var metadata = nativeMetadataAddress(metadataLists);
   var descriptor =
@@ -368,6 +392,8 @@ int rtListElementType(int list) {
 }
 
 int rtListGet(int list, int index, int expectedType) {
+  var length = nativeLoad64(list + listLengthOffset);
+  if (index < 0 || index >= length) return rtListRangeError();
   var backing = nativeLoad64(list + listBackingOffset);
   var value = nativeLoad64(backing + arrayDataOffset + index * 8);
   var type = nativeLoad64(list + listTypeOffset);
@@ -382,6 +408,8 @@ int rtListSet(int list, int index, int value, int sourceType) {
   if (actualType != sourceType) {
     stored = rtValueCast(rtValueBox(value, sourceType), actualType);
   }
+  var length = nativeLoad64(list + listLengthOffset);
+  if (index < 0 || index >= length) return rtListRangeError();
   var backing = nativeLoad64(list + listBackingOffset);
   nativeStore64(backing + arrayDataOffset + index * 8, stored);
   return value;
@@ -392,6 +420,9 @@ int rtListAdd(int list, int value, int sourceType) {
   var actualType = rtListElementType(list);
   if (actualType != sourceType) {
     stored = rtValueCast(rtValueBox(value, sourceType), actualType);
+  }
+  if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
+    return rtListFixedError();
   }
   var length = nativeLoad64(list + listLengthOffset);
   var capacity = nativeLoad64(list + listCapacityOffset);
@@ -421,6 +452,9 @@ int rtListAdd(int list, int value, int sourceType) {
 }
 
 int rtListRemoveLast(int list, int expectedType) {
+  if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
+    return rtListFixedError();
+  }
   var length = nativeLoad64(list + listLengthOffset) - 1;
   var value = rtListGet(list, length, expectedType);
   var backing = nativeLoad64(list + listBackingOffset);
@@ -430,14 +464,21 @@ int rtListRemoveLast(int list, int expectedType) {
 }
 
 int rtListClear(int list) {
+  if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
+    return rtListFixedError();
+  }
   var backing = nativeLoad64(list + listBackingOffset);
   if (backing != 0) nativeStore64(backing + arrayLengthOffset, 0);
   nativeStore64(list + listLengthOffset, 0);
   return 0;
 }
 
-int rtListFilled(int length, int value, int typeRef) {
+int rtListFilled(int length, int value, int growable, int typeRef) {
+  if (length < 0) return rtListRangeError();
   var result = rtListNew(typeRef);
+  if (growable == 0) {
+    nativeStore64(result + objectFlagsOffset, objectListFixed);
+  }
   if (length == 0) return result;
   var backing = rtListBackingNew(typeRef, length);
   var i = 0;

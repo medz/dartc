@@ -33,6 +33,8 @@ const int opReturn = 32;
 const int opNot = 33;
 const int opDescriptor = 34;
 const int opMetadataAddress = 35;
+const int opTypeTest = 36;
+const int opTypeCast = 37;
 
 const int bPrintString = 1;
 const int bPrintInt = 2;
@@ -89,6 +91,7 @@ const int bValueLe = 52;
 const int bValueGt = 53;
 const int bValueGe = 54;
 const int bValueToString = 55;
+const int bValueIs = 56;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;
@@ -159,6 +162,8 @@ int irWidth(int op) {
       op == opString ||
       op == opDescriptor ||
       op == opMetadataAddress ||
+      op == opTypeTest ||
+      op == opTypeCast ||
       op == opLoadLocal ||
       op == opStoreLocal ||
       op == opLoadGlobal ||

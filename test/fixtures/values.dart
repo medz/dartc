@@ -9,6 +9,8 @@ class Plain {
   Plain(this.value);
 }
 
+class UnusedType {}
+
 class Echo {
   List<dynamic> owner;
   Echo(this.owner);
@@ -233,6 +235,116 @@ void assignmentValues() {
   print(assignmentTrace);
 }
 
+int typeEvaluations = 0;
+
+dynamic typeValue(dynamic value) {
+  typeEvaluations++;
+  return value;
+}
+
+void typeChecks() {
+  dynamic value = 5;
+  print(value is int);
+  print(value is! String);
+  print((value as int) + 1);
+  print((value as Object) is int);
+  print((value as dynamic) is int);
+  print(pass(value) is int ? 'integer' : 'other');
+  print(pass(1) + 2 is int);
+  print(1 + 2 is! String);
+  print(pass(3) is int == true);
+  value = null;
+  // Exercise Null and top-type operators even when an equivalent check exists.
+  // ignore: type_check_with_null
+  print(value is Null);
+  // ignore: unnecessary_type_check
+  print(value is dynamic);
+  print(value is Object);
+  // ignore: unnecessary_type_check
+  print(value is Object?);
+  print(value is int?);
+  print(value as Null);
+  print(value as int?);
+  print(value as String?);
+  value = Box(13);
+  print(value is Box);
+  print(value is UnusedType);
+  print(value is Plain);
+  print(value is Box?);
+  print((value as Box).value);
+  Object object = value;
+  print((object as Box).value);
+  value = <int>[1, 2];
+  print(value is List<int>);
+  print(value is List<Object>);
+  print(value is! List<String>);
+  print((value as List<int>)[0]);
+  print(value as List<Object>);
+  value = <int?>[1, null];
+  print(value is List<int?>);
+  print(value is! List<int>);
+  print(value as List<Object?>);
+  value = <List<int>>[
+    <int>[3],
+  ];
+  print(value is List<List<int>>);
+  print(value is List<List<Object>>);
+  print(value is! List<List<String>>);
+  print((value as List<List<Object>>)[0][0]);
+  value = pass(<void>[1, 'text']);
+  print(value is List<void>);
+  print(value as List<Object?>);
+  value = <dynamic>[1];
+  print(value is! List<int>);
+  print(typeValue(7) is int);
+  print(typeValue(8) as int);
+  print(typeValue(true) is! bool);
+  print(typeValue(false) as bool);
+  print(!choose() && typeValue(1) is int);
+  print(choose() || typeValue(false) as bool);
+  typeValue(9) is int;
+  typeValue(10) as int;
+  print(typeEvaluations);
+}
+
+int filledTrace = 0;
+
+int filledLength() {
+  filledTrace = filledTrace * 10 + 1;
+  return 1;
+}
+
+int filledValue() {
+  filledTrace = filledTrace * 10 + 2;
+  return 5;
+}
+
+bool filledGrowable() {
+  filledTrace = filledTrace * 10 + 3;
+  return true;
+}
+
+void filledLists() {
+  var values = List<int>.filled(
+    filledLength(),
+    filledValue(),
+    growable: filledGrowable(),
+  );
+  values.add(7);
+  print(values);
+  print(filledTrace);
+  var fixed = List<int>.filled(2, 4);
+  fixed[0] = 9;
+  print(fixed);
+  var explicitFixed = List<int>.filled(1, 2, growable: false);
+  explicitFixed[0] = 3;
+  print(explicitFixed);
+  dynamic growable = true;
+  var dynamicFlag = List<bool>.filled(0, false, growable: growable);
+  dynamicFlag.add(true);
+  print(dynamicFlag);
+}
+
 void listGrowth(List<String> args) {
   var values = <int>[];
   values.clear();
@@ -289,5 +401,7 @@ void main(List<String> args) {
   objectValues();
   valueContexts();
   assignmentValues();
+  typeChecks();
+  filledLists();
   listGrowth(args);
 }

@@ -199,6 +199,25 @@ void machineSelectInstruction(
     );
     return;
   }
+  if (op == opTypeTest || op == opTypeCast) {
+    var type = reps.length;
+    reps.add(rAddr);
+    instructions.add(MachineInstruction(mAddress, type, <int>[], target, 4, 0));
+    inputs.add(type);
+    var builtin = bValueIs;
+    if (op == opTypeCast) builtin = bValueCast;
+    instructions.add(
+      MachineInstruction(
+        mCall,
+        output,
+        inputs,
+        runtimeFunction(builtin),
+        0,
+        effects,
+      ),
+    );
+    return;
+  }
   if (op == opBuiltin) {
     if (target == bBoxRef) {
       instructions.add(
