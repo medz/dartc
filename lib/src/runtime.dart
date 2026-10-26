@@ -995,6 +995,18 @@ int rtValueGe(int left, int right) {
   return 0;
 }
 
+int rtListModificationError() {
+  var message = rtCString(
+    0x63203a6374726164,
+    0x6e65727275636e6f,
+    0x696669646f6d2074,
+    0xa6e6f69746163,
+  );
+  rtWriteAll(2, message, 31);
+  rtHostExit(70);
+  return 0;
+}
+
 int rtValueActive = 0;
 
 int rtStringFromParts(int parts) {
@@ -1071,7 +1083,11 @@ int rtValueFormat(int value, int handleType) {
   while (i < length) {
     if (i != 0) rtListAdd(parts, separator, wordType);
     var element = rtValueBox(rtListRawGet(value, i), elementType);
-    rtListAdd(parts, rtValueFormat(element, handleType), wordType);
+    var rendered = rtValueFormat(element, handleType);
+    if (nativeLoad64(value + listLengthOffset) != length) {
+      return rtListModificationError();
+    }
+    rtListAdd(parts, rendered, wordType);
     i = i + 1;
   }
   rtListAdd(parts, rtStringFromCString(rtCString(93, 0, 0, 0)), wordType);

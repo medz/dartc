@@ -84,6 +84,12 @@ bool tick() {
 
 bool choose() => true;
 
+void touchVoid() {
+  print('void');
+}
+
+void valueVoid() => 7;
+
 class Cell {
   dynamic value;
   Object? optional;
@@ -147,9 +153,27 @@ void valueContexts() {
   holder.value = 'changed';
   holder.optional = true;
   print(holder);
-  List<void> erased = <void>[1, 's', null, true, holder];
+  List<void> erased = <void>[
+    1,
+    's',
+    null,
+    true,
+    holder,
+    touchVoid(),
+    valueVoid(),
+  ];
   List<Object?> view = erased;
   print(view);
+  List<Object?> repeatedVoid = List<void>.filled(2, touchVoid());
+  print(repeatedVoid);
+  List<Object?> repeatedValue = List<void>.filled(2, valueVoid());
+  print(repeatedValue);
+  var inferredVoid = [valueVoid()];
+  List<Object?> inferredView = inferredVoid;
+  print(inferredView);
+  var inferredFilled = List.filled(1, valueVoid());
+  List<Object?> inferredFilledView = inferredFilled;
+  print(inferredFilledView);
   var nested = <List<Object>>[
     <int>[1],
     <String>['x'],
@@ -162,6 +186,51 @@ void valueContexts() {
   var values = List<dynamic>.filled(1, 'ok');
   print(values[0]);
   print('interpolate=${pass(null)},${pass(false)},${pass(1)}');
+}
+
+int assignmentTrace = 0;
+List<Object> assignmentStorage = <int>[0];
+
+List<Object> assignmentReceiver() {
+  assignmentTrace = assignmentTrace * 10 + 1;
+  return assignmentStorage;
+}
+
+int assignmentIndex() {
+  assignmentTrace = assignmentTrace * 10 + 2;
+  return 0;
+}
+
+int assignmentValue() {
+  assignmentTrace = assignmentTrace * 10 + 3;
+  return 6;
+}
+
+void assignmentValues() {
+  dynamic slot;
+  var localValues = [slot = 1];
+  List<int> localInts = localValues;
+  print(localInts[0]);
+  print(slot);
+  Object object = 0;
+  var objectValues = [object = 2];
+  List<int> objectInts = objectValues;
+  print(objectInts[0]);
+  print(object);
+  var globalValues = [global = 3];
+  List<int> globalInts = globalValues;
+  print(globalInts[0]);
+  var holder = Cell(0, null);
+  var fieldValues = [holder.optional = 4];
+  List<int> fieldInts = fieldValues;
+  print(fieldInts[0]);
+  var indexedValues = [
+    assignmentReceiver()[assignmentIndex()] = assignmentValue(),
+  ];
+  List<int> indexedInts = indexedValues;
+  print(indexedInts[0]);
+  print(assignmentStorage);
+  print(assignmentTrace);
 }
 
 void listGrowth(List<String> args) {
@@ -219,5 +288,6 @@ void listGrowth(List<String> args) {
 void main(List<String> args) {
   objectValues();
   valueContexts();
+  assignmentValues();
   listGrowth(args);
 }

@@ -971,9 +971,11 @@ int feLowerList(AstExpression expression, int context) {
   var item = 0;
   while (item < expression.children.length) {
     var child = expression.children[item];
-    var expected = element;
-    if (expected == tVoid) expected = tDynamic;
-    var type = feLowerInContext(child, expected);
+    var type = -1;
+    if (element < 0)
+      type = feLowerHint(child, -1);
+    else
+      type = feLowerInContext(child, element);
     inferred = joinTypes(inferred, type);
     var slot = feTemp(type);
     feOperand(opStoreLocal, slot);
@@ -989,9 +991,7 @@ int feLowerList(AstExpression expression, int context) {
   while (item < values.length) {
     feDuplicate(type);
     feOperand(opLoadLocal, values[item]);
-    var expected = element;
-    if (expected == tVoid) expected = tDynamic;
-    feConvertValue(types[item], expected, expression.children[item].token);
+    feConvertValue(types[item], element, expression.children[item].token);
     feBuiltin(bListAdd, 2);
     feEmit(opPop);
     item++;
@@ -1162,9 +1162,11 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
       element = typeArgument(context);
     }
     feLowerInContext(call.children[1], tInt);
-    var expected = element;
-    if (expected == tVoid) expected = tDynamic;
-    var valueType = feLowerInContext(call.children[2], expected);
+    var valueType = -1;
+    if (element < 0)
+      valueType = feLowerHint(call.children[2], -1);
+    else
+      valueType = feLowerInContext(call.children[2], element);
     var argument = 3;
     while (argument < call.children.length) {
       var named = call.children[argument];
@@ -1229,7 +1231,6 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
     if (call.children.length != 2)
       feAstError(call.token, 'argument count for List.add');
     var element = typeArgument(type);
-    if (element == tVoid) element = tDynamic;
     feLowerInContext(call.children[1], element);
     feBuiltin(bListAdd, 2);
     return tVoid;
@@ -1493,15 +1494,25 @@ void feWriteLvalue(FeLvalue target) {
 int feLowerAssignment(AstExpression expression, bool postfix) {
   var target = feLowerLvalue(expression.children[0]);
   var op = expression.text;
+  if (op == '=') {
+    var source = expression.children[1];
+    var type = feLowerHint(source, target.type);
+    var value = feTemp(type);
+    feOperand(opStoreLocal, value);
+    feOperand(opLoadLocal, value);
+    feConvertValue(type, target.type, source.token);
+    feWriteLvalue(target);
+    feEmit(opPop);
+    feOperand(opLoadLocal, value);
+    return type;
+  }
   var increment = op == '++' || op == '--';
   var previous = -1;
-  if (op != '=') {
-    feReadLvalue(target);
-    if (postfix) {
-      previous = feTemp(target.type);
-      feDuplicate(target.type);
-      feOperand(opStoreLocal, previous);
-    }
+  feReadLvalue(target);
+  if (postfix) {
+    previous = feTemp(target.type);
+    feDuplicate(target.type);
+    feOperand(opStoreLocal, previous);
   }
   if (increment) {
     feOperand(opInt, 1);
@@ -1511,15 +1522,13 @@ int feLowerAssignment(AstExpression expression, bool postfix) {
     feConvertValue(result, target.type, expression.token);
   } else {
     var right = feLowerInContext(expression.children[1], target.type);
-    if (op != '=') {
-      var result = feCombine(
-        op.substring(0, op.length - 1),
-        target.type,
-        right,
-        expression.token,
-      );
-      feConvertValue(result, target.type, expression.token);
-    }
+    var result = feCombine(
+      op.substring(0, op.length - 1),
+      target.type,
+      right,
+      expression.token,
+    );
+    feConvertValue(result, target.type, expression.token);
   }
   feWriteLvalue(target);
   if (postfix) {
@@ -1741,9 +1750,18 @@ void feLowerStatement(AstStatement statement) {
     return;
   }
   if (kind == astReturnStatement) {
-    if (statement.expressions.length != 0)
-      feLowerInContext(statement.expressions[0], functions[feFunction].result);
-    else if (feConstructors[feFunction] == 1)
+    if (statement.expressions.length != 0) {
+      var value = statement.expressions[0];
+      var result = functions[feFunction].result;
+      if (result == tVoid) {
+        var type = feLowerHint(value, tVoid);
+        if (type != tVoid && type != tNull)
+          feAstError(value.token, 'void function cannot return a value');
+        feConvertValue(type, tVoid, value.token);
+      } else {
+        feLowerInContext(value, result);
+      }
+    } else if (feConstructors[feFunction] == 1)
       feOperand(opLoadLocal, 0);
     else if (functions[feFunction].result == tVoid)
       feInteger(0, tVoid);

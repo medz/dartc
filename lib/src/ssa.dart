@@ -1,6 +1,5 @@
 import 'host.dart';
 import 'ir.dart';
-import 'types.dart';
 
 const int ssaRead = 1;
 const int ssaWrite = 2;
@@ -361,7 +360,7 @@ void ssaTranslateBlock(
       stack.removeLast();
     } else if (op == opReturn) {
       var value = stack.removeLast();
-      if (info.result == tVoid) value = -1;
+      // Void values can be observed through void contexts such as List<void>.
       block.end = SsaTerminator(
         3,
         value,

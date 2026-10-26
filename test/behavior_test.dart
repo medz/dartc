@@ -436,6 +436,53 @@ void main(List<String> args) {
         File('$root/test/fixtures/values.dart').readAsStringSync(),
       );
     compare(values, [for (var i = 0; i < 20; i++) '参数$i🙂']);
+    final failingValues = [
+      "void main() { dynamic value = 'wrong'; print('before'); int number = value; print('after'); }",
+      "void main() { List<Object> view = <int>[1]; print('before'); view[0] = 'wrong'; print('after'); }",
+      "void main() { List<Object> view = <int>[1]; print('before'); view.add('wrong'); print('after'); }",
+      for (final change in ['owner.clear();', 'owner.add(2);'])
+        '''
+class Mutator {
+  List<dynamic> owner;
+  Mutator(this.owner);
+  String toString() { $change return 'changed'; }
+}
+void main() {
+  var values = <dynamic>[];
+  values.add(Mutator(values));
+  print('before');
+  print(values);
+  print('after');
+}
+''',
+    ];
+    for (var i = 0; i < failingValues.length; i++) {
+      final source = File('${temporary.path}/value-error-$i.dart')
+        ..writeAsStringSync(failingValues[i]);
+      final executable = '${source.path}.out';
+      final expected = Process.runSync(sdk, [source.path]);
+      run(
+        driver,
+        compileArguments(source, executable),
+        native: compiler != null,
+      );
+      final actual = Process.runSync(
+        executable,
+        [],
+        environment: {'PATH': '/usr/bin:/bin'},
+        includeParentEnvironment: false,
+      );
+      if (expected.exitCode == 0 ||
+          actual.exitCode != 70 ||
+          expected.stdout != 'before\n' ||
+          actual.stdout != expected.stdout) {
+        throw StateError(
+          '${source.path} did not fail at the expected value boundary.\n'
+          'Official Dart: ${expected.exitCode} ${expected.stdout}${expected.stderr}\n'
+          'Native: ${actual.exitCode} ${actual.stdout}${actual.stderr}',
+        );
+      }
+    }
     final libraries = {
       'math.dart':
           'int shared() => 11; int hidden() => 90; int _private() => 8;',
@@ -490,6 +537,9 @@ void main() {
       "import 'dart:core' hide print; void main() { print(1); }",
       "import 'math.dart' deferred as math; void main() {}",
       "import 'dart:math'; void main() {}",
+      'void main() { dynamic source = 1; int slot = 0; var values = [slot = source]; List<int> typed = values; print(typed); }',
+      'void value() { return 7; } void main() { value(); }',
+      'void value() {} void main() { dynamic result = value(); print(result); }',
     ];
     void reject(File invalid, {String? runtime, String? diagnostic}) {
       final result = Process.runSync(
