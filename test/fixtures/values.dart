@@ -44,12 +44,45 @@ class Box {
     if (count == 0) return value + bias;
     return recurse(count - 1, bias: bias + 1);
   }
+
+  int get access {
+    conditionTrace = conditionTrace + '2';
+    return value;
+  }
+
+  set access(int next) {
+    conditionTrace = conditionTrace + '4';
+    value = next;
+  }
+
+  int get textLength => value;
+  set textLength(String text) {
+    value = text.length;
+  }
+
+  int get number => value;
+  set number(num next) {
+    value = next as int;
+  }
+
+  set writeOnly(int next) {
+    value = next;
+  }
+
+  void updateAccess(int next) {
+    access = next;
+    access += 1;
+  }
 }
 
 class Plain {
   final int value;
   final bool enabled = true;
+  int assigned = 0;
   Plain([this.value = 7]);
+  set value(int next) {
+    assigned = next;
+  }
 }
 
 class UnusedType {}
@@ -277,6 +310,39 @@ void assignmentValues() {
   print(indexedInts[0]);
   print(assignmentStorage);
   print(assignmentTrace);
+}
+
+void accessorValues() {
+  var box = Box(4);
+  conditionTrace = '';
+  print((argumentValue(1, box) as Box).access = conditionChoice(3));
+  print(conditionTrace);
+  conditionTrace = '';
+  print((argumentValue(1, box) as Box).access += conditionChoice(3));
+  print(conditionTrace);
+  conditionTrace = '';
+  print((argumentValue(1, box) as Box).access++);
+  print(conditionTrace);
+  conditionTrace = '';
+  print(++(argumentValue(1, box) as Box).access);
+  print(conditionTrace);
+  conditionTrace = '';
+  box.updateAccess(9);
+  print(<Object>[box.value, conditionTrace]);
+  print(box.textLength = '字🙂');
+  print(box.textLength);
+  var combined = [box.number += pass(2)];
+  List<num> numbers = combined;
+  print(combined is List<int>);
+  print(numbers);
+  var assigned = [box.writeOnly = pass(9223372036854775807)];
+  print(assigned is List<int>);
+  print(assigned);
+  print(box.value);
+  var plain = Plain(8);
+  print(<int>[plain.value, plain.assigned]);
+  plain.value = 9;
+  print(<int>[plain.value, plain.assigned]);
 }
 
 int typeEvaluations = 0;
@@ -1283,6 +1349,7 @@ void main(List<String> args) {
   objectValues();
   valueContexts();
   assignmentValues();
+  accessorValues();
   typeChecks();
   filledLists();
   conditionContexts();

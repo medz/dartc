@@ -515,6 +515,7 @@ void main(List<String> args) {
       "void main() { dynamic value = 1; print('before'); value as bool; print('after'); }",
       'void main() { Object value = <Object>[1]; print(\'before\'); value as List<int>; print(\'after\'); }',
       "void main() { dynamic value = 'wrong'; print('before'); int number = value; print('after'); }",
+      "class C { C(); set value(int next) { print('setter'); } } dynamic value() { print('rhs'); return 'wrong'; } void main() { print('before'); C().value = value(); print('after'); }",
       "void main() { print('before'); int count = -1; 1 << count; print('after'); }",
       "void main() { print('before'); int count = -1; -1 >> count; print('after'); }",
       "void main() { print('before'); int count = -1; -1 >>> count; print('after'); }",
@@ -598,6 +599,13 @@ void main() {
           "export 'math.dart' show shared, hidden hide hidden;\n"
           "export 'other.dart' show shared hide shared;",
       'host.dart': 'int hostRead(int value) => value + 4;',
+      'properties.dart':
+          'class Counter { int _value = 1; Counter(); int get value => _value; '
+          'set value(int next) { _value = next; } int get _hidden => _value; '
+          'set _hidden(int next) { _value = next; } }',
+      'property-imports.dart':
+          "import 'properties.dart' as p; void main() { var value = p.Counter(); "
+          'value.value += 2; print(value.value); }',
       'imports.dart': r'''
 import /* directive comment */
   'exports.dart' show shared;
@@ -646,6 +654,7 @@ void main() {
     compare(File('${temporary.path}/export-priority.dart'), []);
     compare(File('${temporary.path}/prefix-priority.dart'), []);
     compare(File('${temporary.path}/constant-imports.dart'), []);
+    compare(File('${temporary.path}/property-imports.dart'), []);
     final rejected = [
       'void f(Never value) { value.foo(x: 1, x: 2); } void main() {}',
       'void f(Never value) { value.foo<Missing>(); } void main() {}',
@@ -653,6 +662,7 @@ void main() {
       'class C { C(); void change() { this = C(); } } void main() {}',
       "import 'exports.dart'; void main() { print(hidden()); }",
       "import 'math.dart'; void main() { print(_private()); }",
+      "import 'properties.dart' as p; void main() { var value = p.Counter(); value._hidden = 2; }",
       "import 'dart:core' hide print; void main() { print(1); }",
       "import 'math.dart' deferred as math; void main() {}",
       "import 'dart:math'; void main() {}",
@@ -671,6 +681,15 @@ void main() {
       'final int? value; void main() { print(value); }',
       'int value; void main() { print(value); }',
       'class C { final int value; C(this.value); } void main() { var object = C(1); object.value += 2; }',
+      'class C { C(); set value() {} } void main() {}',
+      'class C { C(); set value([int next = 1]) {} } void main() {}',
+      'class C { C(); set value({required int next}) {} } void main() {}',
+      'class C { C(); int set value(int next) { return next; } } void main() {}',
+      'class C { C(); int get value => 1; } void main() { C().value = 2; }',
+      'class C { C(); set value(int next) {} } void main() { C().value += 2; }',
+      'class C { int value = 1; C(); set value(int next) {} } void main() {}',
+      'class C { C(); int value() => 1; int get value => 2; } void main() {}',
+      'class C { C(); int get value => 1; set value(int next) {} } void main() { dynamic next = 2; C().value += next; }',
       'class C { const int value = 1; C(); } void main() { print(C().value); }',
       'class C { final int? value; } void main() { print(C().value); }',
       'class C { int value; C(); } void main() { print(C().value); }',

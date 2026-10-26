@@ -70,5 +70,4 @@ int resolveType(SymbolTable symbols, AstType syntax) {
     token,
     'declaration is not a type: ' + syntax.name,
   );
-  return tInt;
 }

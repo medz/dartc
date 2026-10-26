@@ -87,7 +87,7 @@ class SsaFlow {
   );
 }
 
-void ssaError(String message) {
+Never ssaError(String message) {
   print('dartc SSA: ' + message);
   hostExit(1);
 }

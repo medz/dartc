@@ -212,7 +212,7 @@ SourceProgram collectSources(String input, String runtime) {
   return program;
 }
 
-void sourceError(SourceProgram program, Token token, String message) {
+Never sourceError(SourceProgram program, Token token, String message) {
   print(
     'dartc: ' +
         program.files[token.source].path +

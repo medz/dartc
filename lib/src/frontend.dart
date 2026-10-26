@@ -9,6 +9,7 @@ import 'parser.dart';
 import 'ir.dart';
 import 'initialization.dart';
 import 'layout.dart';
+import 'members.dart';
 import 'types.dart';
 import 'typing.dart';
 import 'scanner.dart';
@@ -88,6 +89,9 @@ ConstantContext feConstants = ConstantContext(
 );
 List<AstFunction> feFunctionNodes = <AstFunction>[];
 List<AstClass> feClassNodes = <AstClass>[];
+List<ClassMembers> feMembers = <ClassMembers>[];
+List<List<int>> feMemberFunctions = <List<int>>[];
+List<int> feClassFieldStarts = <int>[];
 List<AstVariable> feGlobalNodes = <AstVariable>[];
 List<AstVariable> feFieldNodes = <AstVariable>[];
 List<int> feClassSources = <int>[];
@@ -118,15 +122,13 @@ List<int> feNativeParams = <int>[];
 int feInitializingGlobal = -1;
 List<int> feClassFieldCounts = <int>[];
 List<int> feClassConstructors = <int>[];
-List<String> feFieldNames = <String>[];
 List<int> feFieldTypes = <int>[];
-List<int> feFieldClasses = <int>[];
 List<int> feFieldIndices = <int>[];
 List<int> feOwners = <int>[];
 List<int> feConstructors = <int>[];
 List<int> feParamFields = <int>[];
 
-void feError(String message) {
+Never feError(String message) {
   sourceError(feSources, feTokens[feAt], message);
 }
 
@@ -135,23 +137,20 @@ bool feClassType(int type) {
 }
 
 int feField(int owner, String name) {
-  for (var i = 0; i < feFieldNames.length; i++) {
-    if (feFieldClasses[i] == owner && feFieldNames[i] == name) return i;
-  }
+  var index = lookupMember(feMembers[owner], name);
+  if (index >= 0 && feMembers[owner].members[index].field >= 0)
+    return feClassFieldStarts[owner] + feMembers[owner].members[index].field;
   feError('unknown field ' + classNames[owner] + '.' + name);
-  return 0;
 }
 
 int feMethod(int owner, String name, bool getter) {
-  var i = 1;
-  while (i < feFunctionNodes.length) {
-    if (feOwners[i] == owner &&
-        feFunctionNodes[i].name == name &&
-        feFunctionNodes[i].getter == getter)
-      return i;
-    i++;
-  }
-  return -1;
+  var index = lookupMember(feMembers[owner], name);
+  if (index < 0) return -1;
+  var member = feMembers[owner].members[index];
+  var method = member.method;
+  if (getter) method = member.getter;
+  if (method < 0) return -1;
+  return feMemberFunctions[owner][method];
 }
 
 void feDeclare(int source, String name, int kind, int target, int token) {
@@ -161,6 +160,8 @@ void feDeclare(int source, String name, int kind, int target, int token) {
 }
 
 int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
+  if (syntax.setter && owner < 0)
+    feAstError(syntax.token, 'top-level setter binding is not yet supported');
   if (syntax.external) {
     var source = feTokens[syntax.token].source;
     var primitive = fePrimitive(syntax.name);
@@ -198,7 +199,10 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
     result = classType(owner);
   else if (syntax.result.name != '')
     result = resolveType(feSymbols, syntax.result);
-  else if (owner >= 0 && syntax.name == 'toString' && !syntax.getter)
+  else if (owner >= 0 &&
+      syntax.name == 'toString' &&
+      !syntax.getter &&
+      !syntax.setter)
     result = tString;
   if (owner >= 0) {
     name = classNames[owner] + '.' + syntax.name;
@@ -228,7 +232,7 @@ int feRegisterFunction(AstFunction syntax, int owner, bool constructor) {
           );
         }
       }
-      field = feFieldIndices[entry];
+      field = entry;
     } else if (parameter.type.name != '') {
       type = resolveType(feSymbols, parameter.type);
     }
@@ -293,6 +297,9 @@ void feCollectDeclarations(AstUnit unit) {
   }
   i = 0;
   while (i < unit.classes.length) {
+    feClassFieldStarts.add(feFieldTypes.length);
+    feMembers.add(bindClassMembers(feSources, unit.classes[i]));
+    feMemberFunctions.add(<int>[]);
     var fields = unit.classes[i].fields;
     var field = 0;
     while (field < fields.length) {
@@ -300,10 +307,8 @@ void feCollectDeclarations(AstUnit unit) {
       if (syntax.type.name == '')
         feAstError(syntax.token, 'field requires a type');
       var type = resolveType(feSymbols, syntax.type);
-      feFieldNames.add(syntax.name);
       feFieldNodes.add(syntax);
       feFieldTypes.add(type);
-      feFieldClasses.add(i);
       feFieldIndices.add(field);
       if (typeIsReference(type)) {
         classPointerMasks[i] = classPointerMasks[i] | (1 << field);
@@ -395,13 +400,15 @@ void feCollectDeclarations(AstUnit unit) {
     }
     var method = 0;
     while (method < syntax.methods.length) {
-      feRegisterFunction(syntax.methods[method], i, false);
+      feMemberFunctions[i].add(
+        feRegisterFunction(syntax.methods[method], i, false),
+      );
       method++;
     }
     var toString = feMethod(i, 'toString', false);
     if (toString >= 0) {
       if (functions[toString].parameters != 1 ||
-          functions[toString].result != tString) {
+          !typeIsSubtype(functions[toString].result, tString)) {
         feAstError(
           feFunctionNodes[toString].token,
           'toString must return String and have no parameters',
@@ -571,13 +578,7 @@ bool feImplicitMember(AstExpression expression) {
     return false;
   var name = expression.text;
   var owner = feOwners[feFunction];
-  var field = 0;
-  while (field < feFieldNames.length) {
-    if (feFieldClasses[field] == owner && feFieldNames[field] == name)
-      return true;
-    field++;
-  }
-  return feMethod(owner, name, false) >= 0 || feMethod(owner, name, true) >= 0;
+  return lookupMember(feMembers[owner], name) >= 0;
 }
 
 AstExpression feWithReceiver(AstExpression expression) {
@@ -605,7 +606,6 @@ int feFindFunction(String name) {
     if (functions[i].source == 0 && functions[i].name == name) return i;
   }
   feError('unknown runtime function ' + name);
-  return -1;
 }
 
 int feResolveName(int token, String name, String prefix) {
@@ -699,7 +699,6 @@ int feLoadDeclaration(int symbol, int token) {
     return functions[declaration.target].result;
   }
   feAstError(token, 'declaration is not a value: ' + declaration.name);
-  return tInt;
 }
 
 void feCheckPrivate(int owner, String name, int token) {
@@ -813,6 +812,8 @@ class FeLvalue {
   int index;
   int binding;
   int global;
+  int owner = -1;
+  int member = -1;
 
   FeLvalue(
     this.type,
@@ -824,7 +825,7 @@ class FeLvalue {
   );
 }
 
-void feAstError(int token, String message) {
+Never feAstError(int token, String message) {
   sourceError(feSources, feTokens[token], message);
 }
 
@@ -847,7 +848,6 @@ int feBinaryOp(String op) {
   if (op == '>') return opGt;
   if (op == '>=') return opGe;
   feError('unsupported operator ' + op);
-  return opAdd;
 }
 
 int feValueOperation(String op) {
@@ -1509,7 +1509,6 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
     return tInt;
   }
   feAstError(call.token, 'unsupported static call ' + name + '.' + member);
-  return tInt;
 }
 
 int feLowerMemberCall(AstExpression call, AstExpression callee) {
@@ -1626,7 +1625,6 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
     feAstError(call.token, 'unsupported String method ' + member);
   }
   feAstError(call.token, 'unsupported member call ' + member);
-  return tInt;
 }
 
 int feLowerNeverArguments(AstExpression call, AstExpression callee) {
@@ -1701,7 +1699,6 @@ int feLowerCall(AstExpression call, int context) {
   var value = feLowerExpression(callee);
   if (value == tNever) return feLowerNeverArguments(call, callee);
   feAstError(call.token, 'unknown call target ' + callee.text);
-  return tInt;
 }
 
 int feLowerMember(AstExpression expression) {
@@ -1719,16 +1716,9 @@ int feReadMember(int type, String member, int token) {
   if (feClassType(type)) {
     var owner = typeArgument(type);
     feCheckPrivate(owner, member, token);
-    var getter = feMethod(owner, member, true);
-    if (getter >= 0) {
-      feCall(getter, 1);
-      return functions[getter].result;
-    }
-    var field = feField(owner, member);
-    feOperand(opInt, feFieldIndices[field]);
-    var result = feFieldTypes[field];
-    feBuiltinTyped(bObjectGet, 2, result);
-    return result;
+    var index = lookupMember(feMembers[owner], member);
+    if (index < 0) feAstError(token, 'unknown member ' + member);
+    return feReadBoundMember(owner, feMembers[owner].members[index], token);
   }
   if (member == 'length' || member == 'isEmpty' || member == 'isNotEmpty') {
     if (type != tString && !typeIsList(type))
@@ -1761,7 +1751,22 @@ int feReadMember(int type, String member, int token) {
     return element;
   }
   feAstError(token, 'unsupported property ' + member);
-  return tInt;
+}
+
+int feReadBoundMember(int owner, MemberBinding member, int token) {
+  if (member.getter >= 0) {
+    var getter = feMemberFunctions[owner][member.getter];
+    feCall(getter, 1);
+    return functions[getter].result;
+  }
+  if (member.field >= 0) {
+    var field = feClassFieldStarts[owner] + member.field;
+    feOperand(opInt, feFieldIndices[field]);
+    var result = feFieldTypes[field];
+    feBuiltinTyped(bObjectGet, 2, result);
+    return result;
+  }
+  feAstError(token, 'member has no getter: ' + member.name);
 }
 
 FeLvalue feLowerLvalue(AstExpression expression) {
@@ -1824,7 +1829,29 @@ FeLvalue feLowerLvalue(AstExpression expression) {
       feAstError(expression.token, 'field assignment requires an instance');
     var owner = typeArgument(receiverType);
     feCheckPrivate(owner, expression.text, expression.token);
-    var field = feField(owner, expression.text);
+    var entry = lookupMember(feMembers[owner], expression.text);
+    if (entry < 0)
+      feAstError(expression.token, 'unknown member ' + expression.text);
+    var member = feMembers[owner].members[entry];
+    if (member.setter >= 0) {
+      var setter = feMemberFunctions[owner][member.setter];
+      var receiver = feTemp(receiverType);
+      feOperand(opStoreLocal, receiver);
+      var target = FeLvalue(
+        feParamTypes[feParamStarts[setter] + 1],
+        4,
+        receiver,
+        -1,
+        -1,
+        -1,
+      );
+      target.owner = owner;
+      target.member = entry;
+      return target;
+    }
+    if (member.field < 0)
+      feAstError(expression.token, 'member has no setter: ' + member.name);
+    var field = feClassFieldStarts[owner] + member.field;
     if (feFieldNodes[field].modifier == 'final')
       feAstError(expression.token, 'cannot assign a final field');
     feOperand(opInt, feFieldIndices[field]);
@@ -1849,6 +1876,14 @@ int feReadLvalue(FeLvalue target, int token) {
     else
       feLoadGlobalValue(target.global);
     return target.type;
+  }
+  if (target.container == 4) {
+    feOperand(opLoadLocal, target.receiver);
+    return feReadBoundMember(
+      target.owner,
+      feMembers[target.owner].members[target.member],
+      token,
+    );
   }
   feOperand(opLoadLocal, target.receiver);
   feOperand(opLoadLocal, target.index);
@@ -1883,6 +1918,13 @@ void feWriteLvalue(FeLvalue target, int token) {
   var value = feTemp(target.type);
   feOperand(opStoreLocal, value);
   feOperand(opLoadLocal, target.receiver);
+  if (target.container == 4) {
+    var member = feMembers[target.owner].members[target.member];
+    var setter = feMemberFunctions[target.owner][member.setter];
+    feOperand(opLoadLocal, value);
+    feCall(setter, 2);
+    return;
+  }
   feOperand(opLoadLocal, target.index);
   feOperand(opLoadLocal, value);
   if (target.container == 1)
@@ -2082,7 +2124,6 @@ int feLowerValue(AstExpression expression) {
   }
   if (kind == astConditional) return feLowerConditional(expression, -1);
   feAstError(expression.token, 'unsupported expression');
-  return tInt;
 }
 
 int feLowerCoalescing(AstExpression expression, int context) {
@@ -2594,12 +2635,13 @@ void parseSource(SourceProgram source) {
   classNames.clear();
   feClassSources.clear();
   feClassNodes.clear();
+  feMembers.clear();
+  feMemberFunctions.clear();
+  feClassFieldStarts.clear();
   feFieldNodes.clear();
   feClassFieldCounts.clear();
   feClassConstructors.clear();
-  feFieldNames.clear();
   feFieldTypes.clear();
-  feFieldClasses.clear();
   feFieldIndices.clear();
   feOwners.clear();
   feConstructors.clear();
@@ -2791,10 +2833,10 @@ void parseSource(SourceProgram source) {
       var bindings = feBindings;
       feBindings = FunctionBindings(<LocalVariable>[], -1);
       var owner = feOwners[f];
-      var field = 0;
-      while (field < feFieldNames.length) {
-        if (feFieldClasses[field] == owner &&
-            feFieldNodes[field].initializer.length != 0) {
+      var field = feClassFieldStarts[owner];
+      var end = field + feClassFieldCounts[owner];
+      while (field < end) {
+        if (feFieldNodes[field].initializer.length != 0) {
           feOperand(opLoadLocal, 0);
           feOperand(opInt, feFieldIndices[field]);
           feLowerInContext(
@@ -2812,10 +2854,10 @@ void parseSource(SourceProgram source) {
         var field = feParamFields[start + p];
         if (field >= 0) {
           feOperand(opLoadLocal, 0);
-          feOperand(opInt, field);
+          feOperand(opInt, feFieldIndices[field]);
           feOperand(opLoadLocal, p);
           var syntax = functionSyntax.parameters[p - 1];
-          var fieldType = feFieldTypes[feField(feOwners[f], syntax.name)];
+          var fieldType = feFieldTypes[field];
           feConvertValue(feParamTypes[start + p], fieldType, syntax.token);
           feBuiltinTyped(bObjectSet, 3, fieldType);
           feEmit(opPop);

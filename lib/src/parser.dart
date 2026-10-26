@@ -11,7 +11,7 @@ class Parser {
   Parser(this.tokens, this.position, this.pendingClosers, this.paths);
 }
 
-void parserError(Parser parser, String message) {
+Never parserError(Parser parser, String message) {
   var token = parser.tokens[parser.position];
   var location = '';
   if (token.source >= 0) location = parser.paths[token.source] + ':';
@@ -603,9 +603,28 @@ AstFunction parserFunction(
   bool external,
   int token,
   bool getter,
+  bool setter,
 ) {
+  if ((getter || setter) && parserIs(parser, '<')) {
+    parserError(parser, 'accessors cannot have type parameters');
+  }
+  if (getter && parserIs(parser, '(')) {
+    parserError(parser, 'getters cannot have parameters');
+  }
   List<AstParameter> parameters = <AstParameter>[];
   if (!getter) parameters = parserParameters(parser);
+  if (setter) {
+    if (result.name != '' &&
+        (result.name != 'void' || result.arguments.isNotEmpty)) {
+      parserError(parser, 'setter result must be void');
+    }
+    if (parameters.length != 1 ||
+        parameters[0].kind != astRequiredPositional ||
+        parameters[0].fieldFormal) {
+      parserError(parser, 'setter requires one positional parameter');
+    }
+    if (result.name == '') result = AstType('void', <AstType>[], token);
+  }
   List<AstStatement> body = <AstStatement>[];
   List<AstExpression> arrow = <AstExpression>[];
   if (parserTake(parser, '=>')) {
@@ -615,7 +634,7 @@ AstFunction parserFunction(
     if (!parserIs(parser, '{')) parserError(parser, 'expected function body');
     body.add(parseStatement(parser));
   }
-  return AstFunction(
+  var function = AstFunction(
     name,
     result,
     parameters,
@@ -625,6 +644,8 @@ AstFunction parserFunction(
     token,
     getter,
   );
+  function.setter = setter;
+  return function;
 }
 
 AstClass parserClass(Parser parser, int token) {
@@ -647,6 +668,7 @@ AstClass parserClass(Parser parser, int token) {
           false,
           memberToken,
           false,
+          false,
         ),
       );
     } else {
@@ -655,17 +677,32 @@ AstClass parserClass(Parser parser, int token) {
       var getter =
           parserIs(parser, 'get') &&
           parser.tokens[parser.position + 1].kind == tokenIdentifier;
+      var setter =
+          parserIs(parser, 'set') &&
+          parser.tokens[parser.position + 1].kind == tokenIdentifier;
       var type = parserInferredType(memberToken);
-      if (!getter) type = parserDeclarationType(parser, modifier);
+      if (!getter && !setter) type = parserDeclarationType(parser, modifier);
       var member = parserName(parser);
-      if (member == 'get' &&
+      if ((member == 'get' || member == 'set') &&
           parser.tokens[parser.position].kind == tokenIdentifier) {
-        getter = true;
+        getter = member == 'get';
+        setter = member == 'set';
         member = parserName(parser);
       }
-      if (getter || parserIs(parser, '(')) {
+      if (getter || setter || parserIs(parser, '(')) {
+        if ((getter || setter) && modifier != '') {
+          parserError(parser, 'accessors cannot have variable modifiers');
+        }
         methods.add(
-          parserFunction(parser, member, type, external, memberToken, getter),
+          parserFunction(
+            parser,
+            member,
+            type,
+            external,
+            memberToken,
+            getter,
+            setter,
+          ),
         );
       } else {
         if (external) parserError(parser, 'external fields are not supported');
@@ -760,17 +797,24 @@ AstUnit parseUnit(Parser parser) {
       var getter =
           parserIs(parser, 'get') &&
           parser.tokens[parser.position + 1].kind == tokenIdentifier;
+      var setter =
+          parserIs(parser, 'set') &&
+          parser.tokens[parser.position + 1].kind == tokenIdentifier;
       var type = parserInferredType(token);
-      if (!getter) type = parserDeclarationType(parser, modifier);
+      if (!getter && !setter) type = parserDeclarationType(parser, modifier);
       var name = parserName(parser);
-      if (name == 'get' &&
+      if ((name == 'get' || name == 'set') &&
           parser.tokens[parser.position].kind == tokenIdentifier) {
-        getter = true;
+        getter = name == 'get';
+        setter = name == 'set';
         name = parserName(parser);
       }
-      if (getter || parserIs(parser, '(')) {
+      if (getter || setter || parserIs(parser, '(')) {
+        if ((getter || setter) && modifier != '') {
+          parserError(parser, 'accessors cannot have variable modifiers');
+        }
         unit.functions.add(
-          parserFunction(parser, name, type, external, token, getter),
+          parserFunction(parser, name, type, external, token, getter, setter),
         );
       } else {
         if (external)

@@ -126,6 +126,7 @@ class AstFunction {
   bool external;
   int token;
   bool getter;
+  bool setter = false;
 
   AstFunction(
     this.name,

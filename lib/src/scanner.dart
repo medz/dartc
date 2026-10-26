@@ -36,7 +36,7 @@ bool tokenIs(Token token, String text) {
       token.text == text;
 }
 
-void scanError(String message, int offset) {
+Never scanError(String message, int offset) {
   print('dartc: ' + message + ' at offset ' + offset.toString());
   hostExit(1);
 }
@@ -54,7 +54,6 @@ int scanHex(int c, int offset) {
   if (c >= 65 && c <= 70) return c - 55;
   if (c >= 97 && c <= 102) return c - 87;
   scanError('invalid hexadecimal digit', offset);
-  return 0;
 }
 
 void scanString(Scanner scanner, bool raw, int tokenStart) {

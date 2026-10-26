@@ -4,7 +4,7 @@ import 'source.dart';
 import 'symbols.dart';
 import 'types.dart';
 
-void _initError(SymbolTable symbols, int token, String message) {
+Never _initError(SymbolTable symbols, int token, String message) {
   sourceError(symbols.program, symbols.program.tokens[token], message);
 }
 

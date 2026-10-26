@@ -44,14 +44,9 @@ ConstantValue constantWithType(ConstantValue value, int type) {
   return result;
 }
 
-ConstantValue _constantError(
-  ConstantContext context,
-  int token,
-  String message,
-) {
+Never _constantError(ConstantContext context, int token, String message) {
   var program = context.symbols.program;
   sourceError(program, program.tokens[token], message);
-  return ConstantValue(tNull, tNull, 0, '');
 }
 
 ConstantValue _constantGlobal(
