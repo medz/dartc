@@ -407,7 +407,7 @@ AstType parserDeclarationType(Parser parser, String modifier) {
   return parserInferredType(parser.position);
 }
 
-AstVariable parserVariableRest(
+List<AstVariable> parserVariablesRest(
   Parser parser,
   AstType type,
   String name,
@@ -415,8 +415,9 @@ AstVariable parserVariableRest(
   int token,
 ) {
   var variable = parserVariableInitializer(parser, type, name, modifier, token);
+  var variables = parserVariableTail(parser, variable);
   parserExpect(parser, ';');
-  return variable;
+  return variables;
 }
 
 AstVariable parserVariableInitializer(
@@ -431,12 +432,12 @@ AstVariable parserVariableInitializer(
   return AstVariable(type, name, initializer, modifier, token);
 }
 
-AstVariable parserVariable(Parser parser) {
+List<AstVariable> parserVariables(Parser parser) {
   var token = parser.position;
   var modifier = parserModifier(parser);
   var type = parserDeclarationType(parser, modifier);
   var name = parserName(parser);
-  return parserVariableRest(parser, type, name, modifier, token);
+  return parserVariablesRest(parser, type, name, modifier, token);
 }
 
 List<AstParameter> parserParameters(Parser parser) {
@@ -534,9 +535,18 @@ AstClass parserClass(Parser parser, int token) {
         );
       } else {
         if (external) parserError(parser, 'external fields are not supported');
-        fields.add(
-          parserVariableRest(parser, type, member, modifier, memberToken),
+        var variables = parserVariablesRest(
+          parser,
+          type,
+          member,
+          modifier,
+          memberToken,
         );
+        var i = 0;
+        while (i < variables.length) {
+          fields.add(variables[i]);
+          i++;
+        }
       }
     }
   }
@@ -621,9 +631,18 @@ AstUnit parseUnit(Parser parser) {
       } else {
         if (external)
           parserError(parser, 'external variables are not supported');
-        unit.variables.add(
-          parserVariableRest(parser, type, name, modifier, token),
+        var variables = parserVariablesRest(
+          parser,
+          type,
+          name,
+          modifier,
+          token,
         );
+        var i = 0;
+        while (i < variables.length) {
+          unit.variables.add(variables[i]);
+          i++;
+        }
       }
     }
   }
@@ -786,12 +805,13 @@ AstStatement parseStatement(Parser parser) {
             token,
           );
         }
+        var variables = parserVariableTail(parser, variable);
         parserExpect(parser, ';');
         initial = AstStatement(
           astVariableStatement,
           <AstExpression>[],
           <AstStatement>[],
-          <AstVariable>[variable],
+          variables,
           <AstExpression>[],
           <AstExpression>[],
           initialToken,
@@ -814,7 +834,10 @@ AstStatement parseStatement(Parser parser) {
     if (!parserIs(parser, ';')) condition.add(parseExpression(parser));
     parserExpect(parser, ';');
     List<AstExpression> update = <AstExpression>[];
-    if (!parserIs(parser, ')')) update.add(parseExpression(parser));
+    if (!parserIs(parser, ')')) {
+      update.add(parseExpression(parser));
+      while (parserTake(parser, ',')) update.add(parseExpression(parser));
+    }
     parserExpect(parser, ')');
     List<AstStatement> children = <AstStatement>[
       initial,
@@ -861,7 +884,7 @@ AstStatement parseStatement(Parser parser) {
       astVariableStatement,
       <AstExpression>[],
       <AstStatement>[],
-      <AstVariable>[parserVariable(parser)],
+      parserVariables(parser),
       <AstExpression>[],
       <AstExpression>[],
       token,
@@ -935,4 +958,22 @@ List<AstExpression> parserJumpLabel(Parser parser) {
     );
   }
   return labels;
+}
+
+List<AstVariable> parserVariableTail(Parser parser, AstVariable first) {
+  List<AstVariable> variables = <AstVariable>[first];
+  while (parserTake(parser, ',')) {
+    var token = parser.position;
+    var name = parserName(parser);
+    variables.add(
+      parserVariableInitializer(
+        parser,
+        first.type,
+        name,
+        first.modifier,
+        token,
+      ),
+    );
+  }
+  return variables;
 }

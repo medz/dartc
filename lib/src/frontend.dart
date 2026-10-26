@@ -1414,9 +1414,11 @@ void feLowerStatement(AstStatement statement) {
     else
       feLowerStatement(statement.children[0]);
     var update = ir.length;
-    if (statement.update.length != 0) {
-      feLowerExpression(statement.update[0]);
+    var updateIndex = 0;
+    while (updateIndex < statement.update.length) {
+      feLowerExpression(statement.update[updateIndex]);
       feEmit(opPop);
+      updateIndex++;
     }
     feOperand(opJump, repeat);
     fePatch(exit, ir.length);

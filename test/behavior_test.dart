@@ -138,6 +138,11 @@ void main(List<String> args) {
     labeled += 100;
   }
   print(labeled);
+  int multiple = 0, offset = 2;
+  for (int left = 0, right = left + 6; left < right; left++, right--) {
+    multiple += left + right + offset;
+  }
+  print(multiple);
   switch (text.substring(0, 4)) {
     case 'Dart':
       print('switch');
