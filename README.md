@@ -89,6 +89,6 @@ dart run test/behavior_test.dart
 dart run test/library_test.dart build/dartc-stage2
 ```
 
-The compiler architecture is described in [docs/architecture.md](docs/architecture.md).
+The compiler architecture is described in [doc/architecture.md](doc/architecture.md).
 
 MIT licensed.
