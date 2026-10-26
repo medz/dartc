@@ -47,11 +47,15 @@ const int mUshrImmediate = 30;
 const int mFramePointer = 31;
 
 class RegisterAllocation {
-  List<int> locations;
-  int spillSlots;
-  List<int> savedRegisters;
+  final List<int> locations;
+  final int spillSlots;
+  final List<int> savedRegisters;
 
-  RegisterAllocation(this.locations, this.spillSlots, this.savedRegisters);
+  const RegisterAllocation(
+    this.locations,
+    this.spillSlots,
+    this.savedRegisters,
+  );
 }
 
 class MachineFunction {
@@ -418,7 +422,7 @@ List<MachineFunction> selectMachine(
           <int>[],
           <MachineBlock>[],
           machineRep(function.result),
-          RegisterAllocation(<int>[], 0, <int>[]),
+          const RegisterAllocation(<int>[], 0, <int>[]),
           false,
         ),
       );
@@ -487,7 +491,7 @@ List<MachineFunction> selectMachine(
         reps,
         blocks,
         machineRep(function.result),
-        RegisterAllocation(<int>[], 0, <int>[]),
+        const RegisterAllocation(<int>[], 0, <int>[]),
         true,
       ),
     );
