@@ -1,4 +1,5 @@
 import 'ir.dart';
+import 'types.dart';
 import 'ssa.dart';
 
 // Lattice states are unknown, one constant, and overdefined.

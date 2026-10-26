@@ -5,6 +5,8 @@ external int nativeStore8(int p, int value);
 external int nativeSyscall(int n, int a, int b, int c, int d, int e, int f);
 external int nativeTarget();
 
+const int rtStringUnitBytes = 8;
+
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
 int rtExecutable = 0;

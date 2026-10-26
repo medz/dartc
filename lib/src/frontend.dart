@@ -1,4 +1,6 @@
 import 'ir.dart';
+import 'types.dart';
+import 'scanner.dart';
 import 'host.dart';
 
 class GlobalInitializer {
@@ -21,8 +23,7 @@ class GlobalInitializer {
   );
 }
 
-List<String> feTokens = <String>[];
-List<int> feKinds = <int>[];
+List<Token> feTokens = <Token>[];
 int feAt = 0;
 List<int> feBodies = <int>[];
 List<int> feGlobalValues = <int>[];
@@ -60,209 +61,16 @@ List<int> feConstructors = <int>[];
 List<int> feParamFields = <int>[];
 
 void feError(String message) {
-  print('dartc: ' + message + ' near token ' + feAt.toString());
+  print('dartc: ' + message + ' at offset ' + feTokens[feAt].start.toString());
   hostExit(1);
 }
 
-bool feDigit(int c) {
-  return c >= 48 && c <= 57;
-}
-
-bool feLetter(int c) {
-  return c >= 65 && c <= 90 || c >= 97 && c <= 122 || c == 95 || c == 36;
-}
-
-int feHex(int c) {
-  if (c >= 48 && c <= 57) return c - 48;
-  if (c >= 65 && c <= 70) return c - 55;
-  if (c >= 97 && c <= 102) return c - 87;
-  feError('invalid hexadecimal digit');
-  return 0;
-}
-
-void feToken(String text, int kind, bool runtime) {
-  feTokens.add(text);
-  feKinds.add(kind);
-  if (runtime) feRuntimeTokens = feTokens.length;
-}
-
-void feScan(String source, int runtimeLength) {
-  feTokens.clear();
-  feKinds.clear();
-  feRuntimeTokens = 0;
-  fePendingTypeClosers = 0;
-  var i = 0;
-  while (i < source.length) {
-    var runtime = i < runtimeLength;
-    var c = source.codeUnitAt(i);
-    if (c <= 32) {
-      i++;
-      continue;
-    }
-    if (c == 47 && i + 1 < source.length && source.codeUnitAt(i + 1) == 47) {
-      while (i < source.length && source.codeUnitAt(i) != 10) i++;
-      continue;
-    }
-    if (c == 47 && i + 1 < source.length && source.codeUnitAt(i + 1) == 42) {
-      i += 2;
-      var depth = 1;
-      while (i + 1 < source.length && depth > 0) {
-        if (source.codeUnitAt(i) == 47 && source.codeUnitAt(i + 1) == 42) {
-          depth++;
-          i += 2;
-        } else if (source.codeUnitAt(i) == 42 &&
-            source.codeUnitAt(i + 1) == 47) {
-          depth--;
-          i += 2;
-        } else {
-          i++;
-        }
-      }
-      if (depth != 0) feError('unterminated comment');
-      continue;
-    }
-    var raw = false;
-    if (c == 114 &&
-        i + 1 < source.length &&
-        (source.codeUnitAt(i + 1) == 39 || source.codeUnitAt(i + 1) == 34)) {
-      raw = true;
-      i++;
-      c = source.codeUnitAt(i);
-    }
-    if (c == 39 || c == 34) {
-      var quote = c;
-      var triple =
-          i + 2 < source.length &&
-          source.codeUnitAt(i + 1) == quote &&
-          source.codeUnitAt(i + 2) == quote;
-      i++;
-      if (triple) i += 2;
-      var units = <int>[];
-      var closed = false;
-      while (i < source.length) {
-        c = source.codeUnitAt(i);
-        if (c == quote &&
-            (!triple ||
-                i + 2 < source.length &&
-                    source.codeUnitAt(i + 1) == quote &&
-                    source.codeUnitAt(i + 2) == quote)) {
-          i++;
-          if (triple) i += 2;
-          closed = true;
-          break;
-        }
-        i++;
-        if (!raw && c == 92) {
-          if (i == source.length) feError('unterminated escape');
-          c = source.codeUnitAt(i);
-          i++;
-          if (c == 110) {
-            c = 10;
-          } else if (c == 114) {
-            c = 13;
-          } else if (c == 116) {
-            c = 9;
-          } else if (c == 98) {
-            c = 8;
-          } else if (c == 102) {
-            c = 12;
-          } else if (c == 118) {
-            c = 11;
-          } else if (c == 120 || c == 117) {
-            var count = 2;
-            if (c == 117) count = 4;
-            var braces =
-                c == 117 && i < source.length && source.codeUnitAt(i) == 123;
-            if (braces) i++;
-            c = 0;
-            var digits = 0;
-            while (i < source.length &&
-                (braces && source.codeUnitAt(i) != 125 ||
-                    !braces && digits < count)) {
-              c = c * 16 + feHex(source.codeUnitAt(i));
-              i++;
-              digits++;
-            }
-            if (braces) {
-              if (i == source.length) feError('unterminated unicode escape');
-              i++;
-            }
-          }
-        }
-        if (c > 65535) {
-          c -= 65536;
-          units.add(55296 + (c >> 10));
-          units.add(56320 + (c & 1023));
-        } else {
-          units.add(c);
-        }
-      }
-      if (!closed) feError('unterminated string');
-      feToken(String.fromCharCodes(units), 3, runtime);
-      continue;
-    }
-    if (feLetter(c)) {
-      var start = i;
-      i++;
-      while (i < source.length &&
-          (feLetter(source.codeUnitAt(i)) || feDigit(source.codeUnitAt(i))))
-        i++;
-      feToken(source.substring(start, i), 1, runtime);
-      continue;
-    }
-    if (feDigit(c)) {
-      var start = i;
-      i++;
-      while (i < source.length &&
-          (feLetter(source.codeUnitAt(i)) || feDigit(source.codeUnitAt(i))))
-        i++;
-      feToken(source.substring(start, i), 2, runtime);
-      continue;
-    }
-    var size = 1;
-    if (i + 3 < source.length && source.substring(i, i + 4) == '>>>=') {
-      size = 4;
-    } else if (i + 2 < source.length) {
-      var three = source.substring(i, i + 3);
-      if (three == '>>>' || three == '<<=' || three == '>>=' || three == '~/=')
-        size = 3;
-    }
-    if (size == 1 && i + 1 < source.length) {
-      var two = source.substring(i, i + 2);
-      if (two == '=>' ||
-          two == '==' ||
-          two == '!=' ||
-          two == '<=' ||
-          two == '>=' ||
-          two == '&&' ||
-          two == '||' ||
-          two == '<<' ||
-          two == '>>' ||
-          two == '~/' ||
-          two == '+=' ||
-          two == '-=' ||
-          two == '*=' ||
-          two == '%=' ||
-          two == '&=' ||
-          two == '|=' ||
-          two == '^=' ||
-          two == '++' ||
-          two == '--')
-        size = 2;
-    }
-    feToken(source.substring(i, i + size), 0, runtime);
-    i += size;
-  }
-  feToken('', 0, false);
-  feAt = 0;
-}
-
 String fePeek() {
-  return feTokens[feAt];
+  return feTokens[feAt].text;
 }
 
 bool feIs(String text) {
-  return feKinds[feAt] != 3 && fePeek() == text;
+  return feTokens[feAt].kind != tokenString && fePeek() == text;
 }
 
 bool feTake(String text) {
@@ -278,7 +86,7 @@ void feExpect(String text) {
 }
 
 String feName() {
-  if (feKinds[feAt] != 1) feError('expected name');
+  if (feTokens[feAt].kind != tokenIdentifier) feError('expected name');
   var name = fePeek();
   feAt++;
   return name;
@@ -305,9 +113,9 @@ int feField(int owner, String name) {
 
 void feDiscoverClasses() {
   for (var i = 0; i < feTokens.length - 1; i++) {
-    if (feKinds[i] == 1 && feTokens[i] == 'class') {
+    if (feTokens[i].kind == tokenIdentifier && feTokens[i].text == 'class') {
       classType(feClassNames.length);
-      feClassNames.add(feTokens[i + 1]);
+      feClassNames.add(feTokens[i + 1].text);
       feClassFieldCounts.add(0);
       feClassConstructors.add(-1);
       classSizes.add(16);
@@ -386,7 +194,7 @@ void feSkipExpression() {
   var braces = 0;
   while (!feIs('')) {
     if (feIs(';') && parens == 0 && brackets == 0 && braces == 0) return;
-    if (feKinds[feAt] != 3) {
+    if (feTokens[feAt].kind != tokenString) {
       if (feIs('(')) parens++;
       if (feIs(')')) parens--;
       if (feIs('[')) brackets++;
@@ -407,7 +215,7 @@ void feNativeTypedef() {
   var count = 0;
   while (!feIs(')')) {
     feExpect('Int64');
-    if (feKinds[feAt] == 1) feName();
+    if (feTokens[feAt].kind == tokenIdentifier) feName();
     count++;
     if (!feTake(',')) break;
   }
@@ -499,7 +307,7 @@ void feClassSignature() {
   var body = feAt;
   while (!feIs('}')) {
     feTake('final');
-    if (feIs(name) && feTokens[feAt + 1] == '(') {
+    if (feIs(name) && feTokens[feAt + 1].text == '(') {
       feAt++;
       feSkipGroup('(', ')');
       feFunctionTail();
@@ -527,7 +335,7 @@ void feClassSignature() {
   feAt = body;
   while (!feIs('}')) {
     feTake('final');
-    if (feIs(name) && feTokens[feAt + 1] == '(') {
+    if (feIs(name) && feTokens[feAt + 1].text == '(') {
       feAt += 2;
       feFunctionSignature(name + '.new', classType(owner), owner, true, false);
     } else {
@@ -547,7 +355,7 @@ void _feRecordLiteralConstant(int global, int start, int end) {
   var count = end - start;
   var position = start;
   var sign = 1;
-  if (count == 2 && feTokens[start] == '-') {
+  if (count == 2 && feTokens[start].text == '-') {
     position = position + 1;
     sign = -1;
   } else if (count != 1) {
@@ -555,14 +363,14 @@ void _feRecordLiteralConstant(int global, int start, int end) {
   }
   var type = 0;
   var value = 0;
-  if (feKinds[position] == 2) {
+  if (feTokens[position].kind == tokenInteger) {
     type = tInt;
-    value = int.parse(feTokens[position]) * sign;
-  } else if (sign == 1 && feKinds[position] == 1) {
-    if (feTokens[position] == 'true') {
+    value = int.parse(feTokens[position].text) * sign;
+  } else if (sign == 1 && feTokens[position].kind == tokenIdentifier) {
+    if (feTokens[position].text == 'true') {
       type = tBool;
       value = 1;
-    } else if (feTokens[position] == 'false') {
+    } else if (feTokens[position].text == 'false') {
       type = tBool;
     }
   }
@@ -689,6 +497,8 @@ int feBuiltinType(int id) {
       id == bHostTarget ||
       id == bNativeLoad64 ||
       id == bNativeLoad8 ||
+      id == bNativeLoad16 ||
+      id == bNativeStore16 ||
       id == bNativeSyscall ||
       id == bNativeTarget)
     return tInt;
@@ -934,6 +744,8 @@ int feNamedCall(String name) {
     result = tVoid;
   }
   if (name == 'nativeLoad8') builtin = bNativeLoad8;
+  if (name == 'nativeLoad16') builtin = bNativeLoad16;
+  if (name == 'nativeStore16') builtin = bNativeStore16;
   if (name == 'nativeStore8') {
     builtin = bNativeStore8;
     result = tVoid;
@@ -1017,13 +829,13 @@ int fePointerFromFunction() {
 
 int fePrimary() {
   var type = tInt;
-  if (feKinds[feAt] == 2) {
+  if (feTokens[feAt].kind == tokenInteger) {
     feOperand(opInt, int.parse(fePeek()));
     feAt++;
-  } else if (feKinds[feAt] == 3) {
+  } else if (feTokens[feAt].kind == tokenString) {
     var value = fePeek();
     feAt++;
-    while (feKinds[feAt] == 3) {
+    while (feTokens[feAt].kind == tokenString) {
       value = value + fePeek();
       feAt++;
     }
@@ -1242,7 +1054,7 @@ int feUnary() {
     return tInt;
   }
   if (feTake('++') || feTake('--')) {
-    var op = feTokens[feAt - 1];
+    var op = feTokens[feAt - 1].text;
     var name = feName();
     feLoad(name);
     feOperand(opInt, 1);
@@ -1259,7 +1071,8 @@ int feUnary() {
 
 int feBinary(int minimum) {
   var type = feUnary();
-  while (feKinds[feAt] != 3 && fePrecedence(fePeek()) >= minimum) {
+  while (feTokens[feAt].kind != tokenString &&
+      fePrecedence(fePeek()) >= minimum) {
     var op = fePeek();
     var precedence = fePrecedence(op);
     feAt++;
@@ -1315,25 +1128,26 @@ bool feAssignmentOp(String op) {
 }
 
 int feLvalueEnd() {
-  if (feKinds[feAt] != 1) return -1;
+  if (feTokens[feAt].kind != tokenIdentifier) return -1;
   var end = feAt + 1;
   while (true) {
-    if (feTokens[end] == '[') {
+    if (feTokens[end].text == '[') {
       var depth = 1;
       end++;
-      while (depth > 0 && feTokens[end] != '') {
-        if (feKinds[end] != 3) {
-          if (feTokens[end] == '[') depth++;
-          if (feTokens[end] == ']') depth--;
+      while (depth > 0 && feTokens[end].text != '') {
+        if (feTokens[end].kind != tokenString) {
+          if (feTokens[end].text == '[') depth++;
+          if (feTokens[end].text == ']') depth--;
         }
         end++;
       }
-    } else if (feTokens[end] == '.' && feKinds[end + 1] == 1) {
+    } else if (feTokens[end].text == '.' &&
+        feTokens[end + 1].kind == tokenIdentifier) {
       end += 2;
     } else
       break;
   }
-  if (feAssignmentOp(feTokens[end])) return end;
+  if (feAssignmentOp(feTokens[end].text)) return end;
   return -1;
 }
 
@@ -1803,9 +1617,30 @@ void parseSource(String source, int runtimeLength) {
   feParamStarts.add(0);
   feOwners.add(-1);
   feConstructors.add(0);
-  feScan(source, runtimeLength);
+  feTokens = scanTokens(source);
+  feAt = 0;
+  fePendingTypeClosers = 0;
+  feRuntimeTokens = 0;
+  while (feRuntimeTokens < feTokens.length &&
+      feTokens[feRuntimeTokens].start < runtimeLength) {
+    feRuntimeTokens++;
+  }
   feDiscoverClasses();
   feSignatures();
+  stringUnitBytes = 8;
+  var runtimeGlobal = 0;
+  while (runtimeGlobal < globalNames.length) {
+    if (feRawGlobals[runtimeGlobal] == 1 &&
+        globalNames[runtimeGlobal] == 'rtStringUnitBytes') {
+      if (_feLiteralTypes[runtimeGlobal] != tInt ||
+          (_feLiteralValues[runtimeGlobal] != 2 &&
+              _feLiteralValues[runtimeGlobal] != 8)) {
+        feError('runtime rtStringUnitBytes must be 2 or 8');
+      }
+      stringUnitBytes = _feLiteralValues[runtimeGlobal];
+    }
+    runtimeGlobal++;
+  }
   var sourceFunctions = functions.length;
   var sourceGlobals = globalNames.length;
   fePrepareGlobals(sourceGlobals);

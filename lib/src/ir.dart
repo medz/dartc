@@ -1,8 +1,3 @@
-// Bootstrap source collection follows imports as well as public exports.
-// ignore: unused_import
-import 'types.dart';
-export 'types.dart';
-
 const int opInt = 1;
 const int opString = 2;
 const int opLoadLocal = 3;
@@ -78,6 +73,8 @@ const int bNativeLoad8 = 102;
 const int bNativeStore8 = 103;
 const int bNativeSyscall = 104;
 const int bNativeTarget = 105;
+const int bNativeLoad16 = 106;
+const int bNativeStore16 = 107;
 
 class FunctionInfo {
   String name;
@@ -108,6 +105,7 @@ List<String> strings = <String>[];
 
 int targetOS = 0;
 int imageKind = 0;
+int stringUnitBytes = 8;
 List<String> exportNames = <String>[];
 List<int> exportFunctions = <int>[];
 List<int> exportParameters = <int>[];

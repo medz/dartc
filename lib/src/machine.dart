@@ -1,6 +1,7 @@
 import 'abi.dart';
 import 'host.dart';
 import 'ir.dart';
+import 'types.dart';
 import 'ssa.dart';
 
 const int rI64 = 0;
@@ -35,6 +36,8 @@ const int mBitNot = 21;
 const int mNot = 22;
 // extra stores the ARM64 condition code for a signed comparison.
 const int mCompare = 23;
+const int mLoad16 = 24;
+const int mStore16 = 25;
 
 class RegisterAllocation {
   List<int> locations;
@@ -203,15 +206,21 @@ void machineSelectInstruction(
       );
       return;
     }
-    if (target == bNativeLoad64 || target == bNativeLoad8) {
+    if (target == bNativeLoad64 ||
+        target == bNativeLoad8 ||
+        target == bNativeLoad16) {
       int load = mLoad64;
       if (target == bNativeLoad8) load = mLoad8;
+      if (target == bNativeLoad16) load = mLoad16;
       instructions.add(MachineInstruction(load, output, inputs, 0, 0, effects));
       return;
     }
-    if (target == bNativeStore64 || target == bNativeStore8) {
+    if (target == bNativeStore64 ||
+        target == bNativeStore8 ||
+        target == bNativeStore16) {
       int store = mStore64;
       if (target == bNativeStore8) store = mStore8;
+      if (target == bNativeStore16) store = mStore16;
       instructions.add(MachineInstruction(store, -1, inputs, 0, 0, effects));
       if (output >= 0) {
         instructions.add(

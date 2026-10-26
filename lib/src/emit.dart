@@ -46,18 +46,22 @@ void emitInstruction(MachineInstruction instruction, MachineFunction function) {
     armConstant(result, instruction.target);
   } else if (op == mAddress) {
     armAddress(instruction.extra, instruction.target);
-  } else if (op == mLoad64 || op == mLoad8) {
+  } else if (op == mLoad64 || op == mLoad8 || op == mLoad16) {
     int address = emitOperand(function, inputs[0], 0);
     result = emitDestination(function, output);
     if (op == mLoad64)
       machineCode.add(0xf9400000 | (address << 5) | result);
+    else if (op == mLoad16)
+      machineCode.add(0x79400000 | (address << 5) | result);
     else
       machineCode.add(0x39400000 | (address << 5) | result);
-  } else if (op == mStore64 || op == mStore8) {
+  } else if (op == mStore64 || op == mStore8 || op == mStore16) {
     int address = emitOperand(function, inputs[0], 0);
     int value = emitOperand(function, inputs[1], 1);
     if (op == mStore64)
       machineCode.add(0xf9000000 | (address << 5) | value);
+    else if (op == mStore16)
+      machineCode.add(0x79000000 | (address << 5) | value);
     else
       machineCode.add(0x39000000 | (address << 5) | value);
   } else if (op == mCall) {

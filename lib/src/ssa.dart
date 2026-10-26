@@ -1,5 +1,6 @@
 import 'host.dart';
 import 'ir.dart';
+import 'types.dart';
 
 const int ssaRead = 1;
 const int ssaWrite = 2;
@@ -302,10 +303,14 @@ int ssaEffects(int op, int target) {
   }
   if (op == opBuiltin) {
     if (target == bNativeTarget) return 0;
-    if (target == bNativeLoad64 || target == bNativeLoad8) {
+    if (target == bNativeLoad64 ||
+        target == bNativeLoad8 ||
+        target == bNativeLoad16) {
       return ssaRead | ssaNative;
     }
-    if (target == bNativeStore64 || target == bNativeStore8) {
+    if (target == bNativeStore64 ||
+        target == bNativeStore8 ||
+        target == bNativeStore16) {
       return ssaWrite | ssaNative;
     }
     if (target == bNativeSyscall) return ssaRead | ssaWrite | ssaNative;

@@ -102,7 +102,8 @@ List<int> createMachOExecutable() {
   int s = 0;
   while (s < strings.length) {
     stringOffsets.add(payloadEnd);
-    payloadEnd = payloadEnd + 8 + strings[s].length * 8;
+    payloadEnd =
+        payloadEnd + alignImage(8 + strings[s].length * stringUnitBytes, 8);
     s = s + 1;
   }
   int descriptorOffset = payloadEnd;
@@ -226,9 +227,14 @@ List<int> createMachOExecutable() {
     image64(value.length);
     int character = 0;
     while (character < value.length) {
-      image64(value.codeUnitAt(character));
+      if (stringUnitBytes == 2) {
+        image16(value.codeUnitAt(character));
+      } else {
+        image64(value.codeUnitAt(character));
+      }
       character = character + 1;
     }
+    imageZeros(alignImage(image.length, 8) - image.length);
     stringIndex = stringIndex + 1;
   }
   imageDescriptors();
@@ -270,7 +276,8 @@ List<int> createElfExecutable() {
   int s = 0;
   while (s < strings.length) {
     stringOffsets.add(payloadEnd);
-    payloadEnd = payloadEnd + 8 + strings[s].length * 8;
+    payloadEnd =
+        payloadEnd + alignImage(8 + strings[s].length * stringUnitBytes, 8);
     s = s + 1;
   }
   int descriptorOffset = payloadEnd;
@@ -331,9 +338,14 @@ List<int> createElfExecutable() {
     image64(value.length);
     int character = 0;
     while (character < value.length) {
-      image64(value.codeUnitAt(character));
+      if (stringUnitBytes == 2) {
+        image16(value.codeUnitAt(character));
+      } else {
+        image64(value.codeUnitAt(character));
+      }
       character = character + 1;
     }
+    imageZeros(alignImage(image.length, 8) - image.length);
     stringIndex = stringIndex + 1;
   }
   imageDescriptors();
