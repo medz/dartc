@@ -9,6 +9,8 @@ void hostWrite(String path, List<int> bytes) {
 
 Never hostExit(int status) => exit(status);
 
+int hostTarget() => Platform.isLinux ? 1 : 0;
+
 String hostStdPath() {
   var folder = File.fromUri(Platform.script).absolute.parent.path;
   while (folder != '/') {
@@ -19,21 +21,8 @@ String hostStdPath() {
   throw StateError('Cannot locate the dartc runtime source; use --std <file>');
 }
 
-Never hostFinish(String path) {
+Never hostFinish(String path, int outputTarget) {
   final mode = Process.runSync('/bin/chmod', ['+x', path]);
-  if (mode.exitCode != 0) {
-    stderr.write(mode.stderr);
-    exit(mode.exitCode);
-  }
-  final result = Process.runSync('/usr/bin/codesign', [
-    '--force',
-    '--sign',
-    '-',
-    '--timestamp=none',
-    '--identifier',
-    'dev.medz.dartc',
-    path,
-  ]);
-  if (result.exitCode != 0) stderr.write(result.stderr);
-  exit(result.exitCode);
+  if (mode.exitCode != 0) stderr.write(mode.stderr);
+  exit(mode.exitCode);
 }

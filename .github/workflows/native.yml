@@ -1,0 +1,41 @@
+name: Native self-hosting
+
+on:
+  workflow_dispatch:
+    inputs:
+      cross_ref:
+        description: Commit or branch containing the Mac-built dartc-linux
+        required: false
+        type: string
+
+jobs:
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.13.5'
+          architecture: arm64
+      - run: dart tool/bootstrap.dart
+      - uses: actions/checkout@v7
+        if: inputs.cross_ref != ''
+        with:
+          ref: ${{ inputs.cross_ref }}
+          path: .cross
+      - name: Run the Mac-built Linux compiler
+        if: inputs.cross_ref != ''
+        env:
+          PATH: /usr/bin:/bin
+        run: |
+          .cross/dartc-linux "$PWD/bin/dartc.dart" --std "$PWD/lib/src/runtime.dart" -o "$PWD/build/cross-stage1"
+          cmp build/cross-stage1 build/dartc-stage2
+      - name: Cross-compile back to macOS
+        env:
+          PATH: /usr/bin:/bin
+        run: build/dartc-stage2 "$PWD/bin/dartc.dart" --std "$PWD/lib/src/runtime.dart" --target macos-arm64 -o "$PWD/build/dartc-cross-macos"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dartc-cross-macos
+          path: build/dartc-cross-macos
+          retention-days: 1

@@ -2,6 +2,8 @@
 
 - Compile functions, control flow, strings, lists, and relative imports.
 - Build a standalone native compiler that can compile its own Dart sources.
+- Generate macOS and Linux ARM64 executables, including local Mach-O signatures in Dart.
+- Export explicitly typed FFI callbacks as experimental macOS native libraries.
 
 ## 0.0.1
 

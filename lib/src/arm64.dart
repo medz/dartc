@@ -33,7 +33,7 @@ void armConstant(int register, int value) {
   }
 }
 
-// One word occupies a 16-byte evaluation slot, preserving Darwin SP alignment.
+// One word occupies a 16-byte evaluation slot, preserving platform SP alignment.
 void armPush(int register) {
   machineCode.add(0xf81f0fe0 | register);
 }
@@ -113,6 +113,7 @@ int armBuiltinFunction(int builtin) {
   if (builtin == bHostExit) return armFunctionId('rtHostExit');
   if (builtin == bHostStdPath) return armFunctionId('rtHostStdPath');
   if (builtin == bArguments) return armFunctionId('rtArguments');
+  if (builtin == bHostTarget) return armFunctionId('rtHostTarget');
   print('Unknown native builtin: ' + builtin.toString());
   hostExit(1);
 }
@@ -161,22 +162,34 @@ void generateArm64() {
     armFunctionOffsets.add(0);
     i = i + 1;
   }
-  var argumentsFunction = armFunctionId('rtArguments');
-  var mainFunction = armFunctionId('main');
-
-  // LC_MAIN supplies argc/argv in x0/x1. Keep them over global initialization.
-  armPush(0);
-  armPush(1);
-  armCall(0);
-  armPop(1);
-  armPop(0);
-  armCall(argumentsFunction);
-  armCall(mainFunction);
-  armConstant(0, 0);
-  armConstant(16, 1);
-  machineCode.add(0xd4001001);
-
   var function = 0;
+  if (imageKind == 0) {
+    var argumentsFunction = armFunctionId('rtArguments');
+    var mainFunction = armFunctionId('main');
+    // Darwin LC_MAIN supplies registers; Linux starts with argc/argv on SP.
+    if (targetOS == 1) {
+      machineCode.add(0xf94003e0);
+      machineCode.add(0x910023e1);
+    }
+    armPush(0);
+    armPush(1);
+    armCall(0);
+    armPop(1);
+    armPop(0);
+    armCall(argumentsFunction);
+    armCall(mainFunction);
+    armConstant(0, 0);
+    if (targetOS == 1) {
+      armConstant(8, 93);
+      machineCode.add(0xd4000001);
+    } else {
+      armConstant(16, 1);
+      machineCode.add(0xd4001001);
+    }
+  } else {
+    // Context-free libraries have neither application startup nor initializers.
+    function = 1;
+  }
   while (function < functionNames.length) {
     armFunctionOffsets[function] = machineCode.length;
     machineCode.add(0xa9bf7bfd);
@@ -199,6 +212,13 @@ void generateArm64() {
       armIrOffsets[position] = machineCode.length;
       var op = ir[position];
       position = position + 1;
+      if (imageKind != 0 &&
+          (op == opString || op == opLoadGlobal || op == opStoreGlobal)) {
+        print(
+          'Native libraries require functions without strings or global state',
+        );
+        hostExit(1);
+      }
       if (op == opInt) {
         armConstant(0, ir[position]);
         position = position + 1;
@@ -259,6 +279,10 @@ void generateArm64() {
         var target = ir[position];
         var count = ir[position + 1];
         position = position + 2;
+        if (imageKind != 0 && op == opBuiltin && target < bNativeLoad64) {
+          print('Native libraries cannot use managed runtime operations');
+          hostExit(1);
+        }
         armArguments(count);
         if (op == opCall) {
           armCall(target);
@@ -276,14 +300,24 @@ void generateArm64() {
           machineCode.add(0x39000001);
           armConstant(0, 0);
         } else if (target == bNativeSyscall) {
-          armMove(16, 0);
+          if (targetOS == 1) {
+            armMove(8, 0);
+          } else {
+            armMove(16, 0);
+          }
           i = 0;
           while (i < 6) {
             armMove(i, i + 1);
             i = i + 1;
           }
-          machineCode.add(0xd4001001);
-          machineCode.add(0xda803400);
+          if (targetOS == 1) {
+            machineCode.add(0xd4000001);
+          } else {
+            machineCode.add(0xd4001001);
+            machineCode.add(0xda803400);
+          }
+        } else if (target == bNativeTarget) {
+          armConstant(0, targetOS);
         } else {
           var nativeFunction = armBuiltinFunction(target);
           armCall(nativeFunction);

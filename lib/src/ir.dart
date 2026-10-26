@@ -2,6 +2,7 @@ const int tVoid = 0;
 const int tInt = 1;
 const int tString = 2;
 const int tBool = 3;
+const int tPointer = 4;
 const int tList = 100;
 
 const int opInt = 1;
@@ -67,12 +68,14 @@ const int bHostExit = 26;
 const int bHostStdPath = 27;
 const int bArguments = 28;
 const int bStringLastIndexOf = 29;
+const int bHostTarget = 30;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;
 const int bNativeLoad8 = 102;
 const int bNativeStore8 = 103;
 const int bNativeSyscall = 104;
+const int bNativeTarget = 105;
 
 List<int> ir = <int>[];
 List<String> functionNames = <String>[];
@@ -83,3 +86,9 @@ List<int> functionReturns = <int>[];
 List<String> globalNames = <String>[];
 List<int> globalTypes = <int>[];
 List<String> strings = <String>[];
+
+int targetOS = 0;
+int imageKind = 0;
+List<String> exportNames = <String>[];
+List<int> exportFunctions = <int>[];
+List<int> exportParameters = <int>[];

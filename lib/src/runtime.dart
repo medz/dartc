@@ -3,13 +3,34 @@ external int nativeStore64(int p, int value);
 external int nativeLoad8(int p);
 external int nativeStore8(int p, int value);
 external int nativeSyscall(int n, int a, int b, int c, int d, int e, int f);
+external int nativeTarget();
 
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
 int rtExecutable = 0;
 
+int rtHostTarget() {
+  return nativeTarget();
+}
+
+int rtSyscall(int n, int a, int b, int c, int d, int e, int f) {
+  if (nativeTarget() == 0) return nativeSyscall(n, a, b, c, d, e, f);
+  if (n == 1) return nativeSyscall(93, a, b, c, d, e, f);
+  if (n == 3) return nativeSyscall(63, a, b, c, d, e, f);
+  if (n == 4) return nativeSyscall(64, a, b, c, d, e, f);
+  if (n == 6) return nativeSyscall(57, a, b, c, d, e, f);
+  if (n == 197) return nativeSyscall(222, a, b, c, 34, e, f);
+  if (n == 5) {
+    var flags = b;
+    if (flags == 1537) flags = 577;
+    return nativeSyscall(56, -100, a, flags, c, 0, 0);
+  }
+  if (n == 15) return nativeSyscall(53, -100, a, b, 0, 0, 0);
+  return -38;
+}
+
 int rtHostExit(int code) {
-  nativeSyscall(1, code, 0, 0, 0, 0, 0);
+  rtSyscall(1, code, 0, 0, 0, 0, 0);
   return 0;
 }
 
@@ -18,7 +39,7 @@ int rtAlloc(int bytes) {
   if (rtArenaNext + size > rtArenaEnd || rtArenaNext == 0) {
     var capacity = 8388608;
     if (size > capacity) capacity = (size + 16383) & -16384;
-    var memory = nativeSyscall(197, 0, capacity, 3, 4098, -1, 0);
+    var memory = rtSyscall(197, 0, capacity, 3, 4098, -1, 0);
     if (memory < 0) rtHostExit(71);
     rtArenaNext = memory;
     rtArenaEnd = memory + capacity;
@@ -40,7 +61,7 @@ int rtCString(int a, int b, int c, int d) {
 int rtWriteAll(int fd, int p, int length) {
   var offset = 0;
   while (offset < length) {
-    var written = nativeSyscall(4, fd, p + offset, length - offset, 0, 0, 0);
+    var written = rtSyscall(4, fd, p + offset, length - offset, 0, 0, 0);
     if (written <= 0) rtHostExit(74);
     offset = offset + written;
   }
@@ -422,7 +443,7 @@ int rtPrintBool(int value) {
 
 int rtHostRead(int path) {
   var encoded = rtStringEncodeUtf8(path);
-  var fd = nativeSyscall(5, encoded + 8, 0, 0, 0, 0, 0);
+  var fd = rtSyscall(5, encoded + 8, 0, 0, 0, 0, 0);
   if (fd < 0) rtIoError();
   var capacity = 65536;
   var bytes = rtAlloc(capacity);
@@ -439,26 +460,18 @@ int rtHostRead(int path) {
       bytes = replacement;
       capacity = capacity * 2;
     }
-    var count = nativeSyscall(
-      3,
-      fd,
-      bytes + length,
-      capacity - length,
-      0,
-      0,
-      0,
-    );
+    var count = rtSyscall(3, fd, bytes + length, capacity - length, 0, 0, 0);
     if (count < 0) rtIoError();
     if (count == 0) done = 1;
     length = length + count;
   }
-  nativeSyscall(6, fd, 0, 0, 0, 0, 0);
+  rtSyscall(6, fd, 0, 0, 0, 0, 0);
   return rtStringDecodeUtf8(bytes, length);
 }
 
 int rtHostWrite(int path, int bytes) {
   var encoded = rtStringEncodeUtf8(path);
-  var fd = nativeSyscall(5, encoded + 8, 1537, 493, 0, 0, 0);
+  var fd = rtSyscall(5, encoded + 8, 1537, 420, 0, 0, 0);
   if (fd < 0) rtIoError();
   var length = rtListLength(bytes);
   var data = rtAlloc(length);
@@ -468,7 +481,7 @@ int rtHostWrite(int path, int bytes) {
     i = i + 1;
   }
   rtWriteAll(fd, data, length);
-  nativeSyscall(6, fd, 0, 0, 0, 0, 0);
+  rtSyscall(6, fd, 0, 0, 0, 0, 0);
   return 0;
 }
 
@@ -502,28 +515,10 @@ int rtHostStdPath() {
   return rtStringConcat(directory, suffix);
 }
 
-int rtHostFinish(int path) {
+int rtHostFinish(int path, int outputTarget) {
   var encoded = rtStringEncodeUtf8(path);
-  var changed = nativeSyscall(15, encoded + 8, 493, 0, 0, 0, 0);
+  var changed = rtSyscall(15, encoded + 8, 493, 0, 0, 0, 0);
   if (changed < 0) rtIoError();
-  var command = rtCString(0x6e69622f7273752f, 0x67697365646f632f, 0x6e, 0);
-  var force = rtCString(0x6563726f662d2d, 0, 0, 0);
-  var sign = rtCString(0x6e6769732d2d, 0, 0, 0);
-  var adHoc = rtCString(45, 0, 0, 0);
-  var timestamp = rtCString(0x7473656d69742d2d, 0x656e6f6e3d706d61, 0, 0);
-  var identifier = rtCString(0x69746e6564692d2d, 0x72656966, 0, 0);
-  var identity = rtCString(0x7a64656d2e766564, 0x63747261642e, 0, 0);
-  var arguments = rtAlloc(72);
-  nativeStore64(arguments, command);
-  nativeStore64(arguments + 8, force);
-  nativeStore64(arguments + 16, sign);
-  nativeStore64(arguments + 24, adHoc);
-  nativeStore64(arguments + 32, timestamp);
-  nativeStore64(arguments + 40, identifier);
-  nativeStore64(arguments + 48, identity);
-  nativeStore64(arguments + 56, encoded + 8);
-  nativeStore64(arguments + 64, 0);
-  nativeSyscall(59, command, arguments, 0, 0, 0, 0);
-  rtIoError();
+  rtHostExit(0);
   return 0;
 }

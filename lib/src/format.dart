@@ -1,5 +1,6 @@
 import 'arm64.dart';
 import 'ir.dart';
+import 'sign.dart';
 
 List<int> image = <int>[];
 
@@ -90,7 +91,7 @@ void imageSection(
   image32(0);
 }
 
-List<int> createExecutable() {
+List<int> createMachOExecutable() {
   int base = 0x100000000;
   int dataBase = 0x110000000;
   int page = 0x4000;
@@ -127,7 +128,7 @@ List<int> createExecutable() {
   image32(0x100000c);
   image32(0);
   image32(2);
-  image32(12);
+  image32(13);
   image32(0);
   image32(0x200085);
   image32(0);
@@ -151,6 +152,7 @@ List<int> createExecutable() {
   );
   imageSegment('__DATA', dataBase, dataSize, textSize, 0, 3, 1);
   imageSection('__bss', '__DATA', dataBase, 0, globalNames.length * 8, 1);
+  int linkeditCommand = image.length;
   imageSegment('__LINKEDIT', dataBase + dataSize, page, textSize, 16, 1, 0);
 
   image32(0xe);
@@ -201,6 +203,11 @@ List<int> createExecutable() {
   image32(0x80000022);
   image32(48);
   imageZeros(40);
+  int signatureCommand = image.length;
+  image32(0x1d);
+  image32(16);
+  image32(0);
+  image32(0);
   imagePatch32(20, image.length - 32);
   imageZeros(codeOffset - image.length);
   int instruction = 0;
@@ -221,5 +228,110 @@ List<int> createExecutable() {
     stringIndex = stringIndex + 1;
   }
   imageZeros(textSize + 16 - image.length);
+  signMachO(image, signatureCommand, linkeditCommand, textSize, 1);
   return image;
+}
+
+void image16(int value) {
+  image.add(value & 255);
+  image.add((value >> 8) & 255);
+}
+
+void imageElfSegment(
+  int type,
+  int flags,
+  int offset,
+  int address,
+  int fileSize,
+  int memorySize,
+  int alignment,
+) {
+  image32(type);
+  image32(flags);
+  image64(offset);
+  image64(address);
+  image64(address);
+  image64(fileSize);
+  image64(memorySize);
+  image64(alignment);
+}
+
+List<int> createElfExecutable() {
+  int base = 0x400000;
+  int codeOffset = 0x1000;
+  int constantOffset = alignImage(codeOffset + machineCode.length * 4, 8);
+  List<int> stringOffsets = <int>[];
+  int payloadEnd = constantOffset;
+  int s = 0;
+  while (s < strings.length) {
+    stringOffsets.add(payloadEnd);
+    payloadEnd = payloadEnd + 8 + strings[s].length * 8;
+    s = s + 1;
+  }
+  int dataOffset = alignImage(payloadEnd, 4096);
+  int dataBase = base + dataOffset;
+  int dataSize = alignImage(globalNames.length * 8, 4096);
+  int site = 0;
+  while (site < addressSites.length) {
+    int target = 0;
+    if (addressKinds[site] == 0) {
+      target = base + stringOffsets[addressTargets[site]];
+    } else {
+      target = dataBase + addressTargets[site] * 8;
+    }
+    int word = addressSites[site];
+    int pc = base + codeOffset + word * 4;
+    int pages = ((target >> 12) - (pc >> 12)) & 0x1fffff;
+    machineCode[word] = 0x90000000 | ((pages & 3) << 29) | ((pages >> 2) << 5);
+    machineCode[word + 1] = 0x91000000 | ((target & 0xfff) << 10);
+    site = site + 1;
+  }
+  image = <int>[];
+  image.add(127);
+  imageName('ELF', 3);
+  image.add(2);
+  image.add(1);
+  image.add(1);
+  imageZeros(9);
+  image16(2);
+  image16(183);
+  image32(1);
+  image64(base + codeOffset);
+  image64(64);
+  image64(0);
+  image32(0);
+  image16(64);
+  image16(56);
+  image16(3);
+  image16(0);
+  image16(0);
+  image16(0);
+  imageElfSegment(1, 5, 0, base, payloadEnd, payloadEnd, 4096);
+  imageElfSegment(1, 6, dataOffset, dataBase, 0, dataSize, 4096);
+  imageElfSegment(0x6474e551, 6, 0, 0, 0, 0, 16);
+  imageZeros(codeOffset - image.length);
+  int instruction = 0;
+  while (instruction < machineCode.length) {
+    image32(machineCode[instruction]);
+    instruction = instruction + 1;
+  }
+  imageZeros(constantOffset - image.length);
+  int stringIndex = 0;
+  while (stringIndex < strings.length) {
+    String value = strings[stringIndex];
+    image64(value.length);
+    int character = 0;
+    while (character < value.length) {
+      image64(value.codeUnitAt(character));
+      character = character + 1;
+    }
+    stringIndex = stringIndex + 1;
+  }
+  imageZeros(dataOffset - image.length);
+  return image;
+}
+
+List<int> createExecutable() {
+  if (targetOS == 1) return createElfExecutable();
+  return createMachOExecutable();
 }

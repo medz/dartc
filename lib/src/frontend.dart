@@ -18,6 +18,9 @@ List<int> feLoopBreaks = <int>[];
 List<int> feLoopContinues = <int>[];
 int feNextLocal = 0;
 int feFunction = 0;
+List<String> feNativeNames = <String>[];
+List<int> feNativeParams = <int>[];
+int feInitializingGlobal = -1;
 
 void feError(String message) {
   print('dartc: ' + message + ' near token ' + feAt.toString());
@@ -299,8 +302,32 @@ void feSkipExpression() {
   }
 }
 
+void feNativeTypedef() {
+  var name = feName();
+  feExpect('=');
+  feExpect('Int64');
+  feExpect('Function');
+  feExpect('(');
+  var count = 0;
+  while (!feIs(')')) {
+    feExpect('Int64');
+    if (feKinds[feAt] == 1) feName();
+    count++;
+    if (!feTake(',')) break;
+  }
+  feExpect(')');
+  feExpect(';');
+  if (count > 8) feError('FFI callbacks support up to eight Int64 parameters');
+  feNativeNames.add(name);
+  feNativeParams.add(count);
+}
+
 void feSignatures() {
   while (!feIs('')) {
+    if (feTake('typedef')) {
+      feNativeTypedef();
+      continue;
+    }
     if (feTake('import') || feTake('export') || feTake('library')) {
       while (!feIs(';') && !feIs('')) feAt++;
       feExpect(';');
@@ -596,6 +623,8 @@ int feNamedCall(String name) {
     result = tVoid;
   }
   if (name == 'nativeSyscall') builtin = bNativeSyscall;
+  if (name == 'nativeTarget') builtin = bNativeTarget;
+  if (name == 'hostTarget') builtin = bHostTarget;
   var count = feArgumentList();
   if (builtin != 0) {
     feBuiltin(builtin, count);
@@ -629,6 +658,42 @@ int feListLiteral(int element) {
   return tList + element;
 }
 
+int fePointerFromFunction() {
+  if (imageKind == 0 || feInitializingGlobal < 0) {
+    feError(
+      'FFI callback bindings require library output and a top-level binding',
+    );
+  }
+  feExpect('.');
+  feExpect('fromFunction');
+  feExpect('<');
+  var nativeName = feName();
+  feExpect('>');
+  var native = -1;
+  for (var i = 0; i < feNativeNames.length; i++) {
+    if (feNativeNames[i] == nativeName) native = i;
+  }
+  if (native < 0) feError('unknown FFI signature ' + nativeName);
+  feExpect('(');
+  var implementation = feName();
+  var function = feFindFunction(implementation);
+  if (function < 0) feError('unknown callback function ' + implementation);
+  if (functionParams[function] != feNativeParams[native]) {
+    feError('FFI parameter count does not match ' + implementation);
+  }
+  if (feTake(',') && !feIs(')')) {
+    feExpression();
+    feEmit(opPop);
+    feTake(',');
+  }
+  feExpect(')');
+  exportNames.add(globalNames[feInitializingGlobal]);
+  exportFunctions.add(function);
+  exportParameters.add(feNativeParams[native]);
+  feOperand(opInt, 0);
+  return tPointer;
+}
+
 int fePrimary() {
   var type = tInt;
   if (feKinds[feAt] == 2) {
@@ -660,7 +725,9 @@ int fePrimary() {
     type = feListLiteral(element);
   } else {
     var name = feName();
-    if ((name == 'List' || name == 'String' || name == 'int') &&
+    if (name == 'Pointer' && feIs('.')) {
+      type = fePointerFromFunction();
+    } else if ((name == 'List' || name == 'String' || name == 'int') &&
         (feIs('.') || feIs('<'))) {
       var element = tInt;
       if (feTake('<')) {
@@ -1158,6 +1225,12 @@ void parseSource(String source) {
   globalNames.clear();
   globalTypes.clear();
   strings.clear();
+  exportNames.clear();
+  exportFunctions.clear();
+  exportParameters.clear();
+  feNativeNames.clear();
+  feNativeParams.clear();
+  feInitializingGlobal = -1;
   feBodies.clear();
   feGlobalValues.clear();
   feParamStarts.clear();
@@ -1182,6 +1255,7 @@ void parseSource(String source) {
   feNextLocal = 0;
   feFunction = 0;
   for (var i = 0; i < globalNames.length; i++) {
+    feInitializingGlobal = i;
     if (feGlobalValues[i] < 0) {
       feOperand(opInt, 0);
     } else {
@@ -1191,6 +1265,7 @@ void parseSource(String source) {
     }
     feOperand(opStoreGlobal, i);
   }
+  feInitializingGlobal = -1;
   feOperand(opInt, 0);
   feEmit(opReturn);
   functionLocals[0] = feNextLocal;

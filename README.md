@@ -2,11 +2,11 @@
 
 A native Dart compiler written in Dart.
 
-`dartc` is experimental and self-hosting. It compiles a Dart subset directly to macOS ARM64 machine code. Generated executables do not require the Dart SDK, VM, or snapshots.
+`dartc` is experimental and self-hosting. It compiles a Dart subset directly to ARM64 machine code for macOS and Linux. Generated executables do not require the Dart SDK, VM, or snapshots.
 
 ## Build and run
 
-Requires Dart 3.13 or later and macOS on Apple Silicon.
+Requires Dart 3.13 or later. Self-hosting is supported on macOS and Linux ARM64.
 
 ```sh
 git clone https://github.com/medz/dartc.git
@@ -44,12 +44,45 @@ The native compiler uses `lib/src/runtime.dart` as its standard-runtime source. 
 dartc program.dart -o program --std /path/to/dartc/lib/src/runtime.dart
 ```
 
-The compiler writes ARM64 instructions and Mach-O files directly. Local signing uses macOS `codesign`; no C compiler, assembler, or linker is required.
+The compiler writes ARM64 instructions, Mach-O, ELF, archives, and local Mach-O signatures in Dart. No C compiler, assembler, linker, or signing subprocess is required.
+
+## Cross-compile
+
+Choose the target explicitly when it differs from the host:
+
+```sh
+build/dartc-stage2 example/hello.dart --target linux-arm64 -o build/hello-linux
+build/dartc-stage2 example/hello.dart --target macos-arm64 -o build/hello-macos
+```
+
+Only ARM64 targets are currently supported.
+
+## Native libraries
+
+Experimental macOS ARM64 library output uses explicit FFI callback signatures. The current subset accepts `Int64` parameters and results; it does not infer native types from ordinary Dart types.
+
+```dart
+import 'dart:ffi';
+
+typedef AddNative = Int64 Function(Int64, Int64);
+int addImpl(int a, int b) => a + b;
+final add = Pointer.fromFunction<AddNative>(addImpl, 0);
+```
+
+Export the named FFI binding:
+
+```sh
+build/dartc-stage2 example/math.dart --emit dylib --export add -o build/libmath.dylib
+build/dartc-stage2 example/math.dart --emit static --export add -o build/libmath.a
+```
+
+`--emit object` writes a Mach-O target file. Library functions currently support integer computation and direct calls, without global state, allocation, or a Dart runtime context. Callers declare the corresponding native signature, for example `int64_t add(int64_t, int64_t)` in C. Linux library output is not yet supported.
 
 ## Verify program behavior
 
 ```sh
 dart run test/behavior_test.dart
+dart run test/library_test.dart build/dartc-stage2
 ```
 
 The compiler architecture is described in [docs/architecture.md](docs/architecture.md).
