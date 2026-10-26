@@ -4,6 +4,12 @@ A native Dart compiler written in Dart.
 
 `dartc` is experimental and self-hosting. It compiles a Dart subset directly to ARM64 machine code for macOS and Linux. Generated executables do not require the Dart SDK, VM, or snapshots.
 
+## Install
+
+```sh
+dart pub global activate dartc
+```
+
 ## Build and run
 
 Requires Dart 3.13 or later. Self-hosting is supported on macOS and Linux ARM64.
@@ -15,8 +21,6 @@ dart pub get
 dart run bin/dartc.dart example/hello.dart -o build/hello
 ./build/hello
 ```
-
-The published `0.0.1` package supports the initial `main` and string-literal `print` subset. Use the repository for the compiler described below.
 
 ## Supported Dart
 

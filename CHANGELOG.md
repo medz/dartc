@@ -1,4 +1,4 @@
-## Unreleased
+## 0.1.0
 
 - Compile functions, control flow, strings, lists, and relative imports.
 - Build a standalone native compiler that can compile its own Dart sources.

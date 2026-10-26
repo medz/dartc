@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 
 String hostRead(String path) => File(path).readAsStringSync();
 
@@ -12,6 +13,10 @@ Never hostExit(int status) => exit(status);
 int hostTarget() => Platform.isLinux ? 1 : 0;
 
 String hostStdPath() {
+  final asset = Isolate.resolvePackageUriSync(
+    Uri.parse('package:dartc/src/runtime.dart'),
+  );
+  if (asset != null) return asset.toFilePath();
   var folder = File.fromUri(Platform.script).absolute.parent.path;
   while (folder != '/') {
     final candidate = folder + '/lib/src/runtime.dart';
