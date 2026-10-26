@@ -300,8 +300,8 @@ void feCollectDeclarations(AstUnit unit) {
     feClassFieldCounts.add(0);
     feClassConstructors.add(-1);
     classSizes.add(objectHeaderBytes);
-    classPointerMasks.add(0);
-    classTaggedMasks.add(0);
+    classPointerMasks.add(<int>[]);
+    classTaggedMasks.add(<int>[]);
     classToStringFunctions.add(-1);
     feDeclare(source, syntax.name, symbolClass, owner, syntax.token);
     if (source == feSources.core && !syntax.name.startsWith('_')) {
@@ -324,11 +324,18 @@ void feCollectDeclarations(AstUnit unit) {
       feFieldNodes.add(syntax);
       feFieldTypes.add(type);
       feFieldIndices.add(field);
+      if ((field & 63) == 0) {
+        classPointerMasks[i].add(0);
+        classTaggedMasks[i].add(0);
+      }
+      var word = field ~/ 64;
       if (typeIsReference(type)) {
-        classPointerMasks[i] = classPointerMasks[i] | (1 << field);
+        classPointerMasks[i][word] =
+            classPointerMasks[i][word] | (1 << (field & 63));
       }
       if (typeIsTagged(type)) {
-        classTaggedMasks[i] = classTaggedMasks[i] | (1 << field);
+        classTaggedMasks[i][word] =
+            classTaggedMasks[i][word] | (1 << (field & 63));
       }
       field++;
     }
@@ -507,7 +514,8 @@ int feBuiltinType(int id) {
       id == bNativeTarget ||
       id == bNativeMetadataAddress ||
       id == bNativeCall1 ||
-      id == bNativeCall0)
+      id == bNativeCall0 ||
+      id == bNativeFramePointer)
     return tInt;
   if (id == bArguments) return listType(tString);
   return tVoid;
@@ -751,6 +759,7 @@ int fePrimitive(String name) {
   if (name == 'nativeMetadataAddress') return bNativeMetadataAddress;
   if (name == 'nativeCall1') return bNativeCall1;
   if (name == 'nativeCall0') return bNativeCall0;
+  if (name == 'nativeFramePointer') return bNativeFramePointer;
   return 0;
 }
 
@@ -767,7 +776,7 @@ int fePrimitiveArity(int primitive) {
       primitive == bNativeCall1)
     return 2;
   if (primitive == bNativeSyscall) return 7;
-  if (primitive == bNativeTarget) return 0;
+  if (primitive == bNativeTarget || primitive == bNativeFramePointer) return 0;
   return -1;
 }
 
@@ -1436,8 +1445,10 @@ int feLowerBuiltinCall(AstExpression call, int builtin) {
     if (call.children.length != 2)
       feAstError(call.token, 'primitive argument count');
     var mask = feMetadataMask(call.children[1]);
-    if (mask < 1 || mask > 7)
-      feAstError(call.token, 'metadata feature mask must be between 1 and 7');
+    var allowed =
+        metadataStrings | metadataLists | metadataValues | metadataRoots;
+    if (mask < 1 || (mask & ~allowed) != 0)
+      feAstError(call.token, 'unknown metadata feature mask');
     feOperand(opMetadataAddress, mask);
     return tInt;
   }

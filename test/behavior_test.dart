@@ -474,6 +474,40 @@ void main(List<String> args) {
         File('$root/test/fixtures/values.dart').readAsStringSync(),
       );
     compare(values, [for (var i = 0; i < 20; i++) '参数$i🙂']);
+    final roots = File('${temporary.path}/roots.dart')
+      ..writeAsStringSync(
+        File('$root/test/fixtures/roots.dart')
+            .readAsStringSync()
+            .replaceAll("'../../lib/src/runtime.dart'", "'$standard'")
+            .replaceAll(
+              "'../../lib/src/layout.dart'",
+              "'${File(standard).parent.path}/layout.dart'",
+            ),
+      );
+    final rootsExecutable = '${roots.path}.out';
+    run(
+      driver,
+      compileArguments(roots, rootsExecutable),
+      native: compiler != null,
+    );
+    final rootOutput = run(rootsExecutable, [], native: true).stdout;
+    if (rootOutput != 'roots ok\n') {
+      throw StateError(
+        'Unexpected native root enumeration output: $rootOutput',
+      );
+    }
+    final exhaustedRoots = Process.runSync(
+      rootsExecutable,
+      ['capacity'],
+      environment: {'PATH': '/usr/bin:/bin'},
+      includeParentEnvironment: false,
+    );
+    if (exhaustedRoots.exitCode != 70 || exhaustedRoots.stdout != 'before\n') {
+      throw StateError(
+        'Root worklist exhaustion did not fail at the expected boundary: '
+        '${exhaustedRoots.stdout}${exhaustedRoots.stderr}',
+      );
+    }
     final namedEntry = File('${temporary.path}/named-entry.dart')
       ..writeAsStringSync(
         "void main({String label = 'named', bool flag = true, List<List<int>> values = const [[]]}) { "

@@ -11,8 +11,9 @@ external int nativeTarget();
 external int nativeMetadataAddress(int features);
 external int nativeCall1(int function, int value);
 external int nativeCall0(int function);
+external int nativeFramePointer();
 
-const int rtAbiVersion = 8;
+const int rtAbiVersion = 9;
 
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
@@ -1271,4 +1272,192 @@ int rtValueToString(int value) {
   var metadata = nativeMetadataAddress(metadataValues);
   var handleType = metadata + nativeLoad64(metadata + metadataHandleTypeOffset);
   return rtValueFormat(value, handleType);
+}
+
+Never rtRootFailure() {
+  rtHostExit(70);
+  while (true) {}
+}
+
+int rtRootAppend(int value, int kind, int worklist, int count, int capacity) {
+  if (kind == storageRef) {
+    if (value == 0) return count;
+  } else if (kind == storageTagged) {
+    if (value <= valueTrue || (value & 1) != 0) return count;
+  } else {
+    return rtRootFailure();
+  }
+  if (count >= capacity) return rtRootFailure();
+  nativeStore64(worklist + count * 8, value);
+  return count + 1;
+}
+
+int rtTraceRoots(int frame, int worklist, int capacity) {
+  if (frame == 0 || capacity < 0 || capacity != 0 && worklist == 0) {
+    return rtRootFailure();
+  }
+  var metadata = nativeMetadataAddress(metadataRoots);
+  var displacement = nativeLoad64(metadata + metadataRootTableOffset);
+  if (displacement == 0) return rtRootFailure();
+  var table = metadata + displacement;
+  var callCount = nativeLoad64(table + rootTableCallCountOffset);
+  var calls = table + nativeLoad64(table + rootTableCallsOffset);
+  var globalCount = nativeLoad64(table + rootTableGlobalCountOffset);
+  var globals = table + nativeLoad64(table + rootTableGlobalsOffset);
+  var count = 0;
+  var i = 0;
+  while (i < globalCount) {
+    var record = globals + i * globalRootBytes;
+    var slot = record + nativeLoad64(record + globalRootAddressOffset);
+    count = rtRootAppend(
+      nativeLoad64(slot),
+      nativeLoad64(record + globalRootKindOffset),
+      worklist,
+      count,
+      capacity,
+    );
+    i = i + 1;
+  }
+  while (true) {
+    var pc = nativeLoad64(frame + 8);
+    var low = 0;
+    var high = callCount;
+    while (low < high) {
+      var middle = (low + high) ~/ 2;
+      var record = calls + middle * rootCallBytes;
+      var returnPc = record + nativeLoad64(record + rootCallReturnOffset);
+      if (returnPc < pc)
+        low = middle + 1;
+      else
+        high = middle;
+    }
+    if (low == callCount) return rtRootFailure();
+    var call = calls + low * rootCallBytes;
+    if (call + nativeLoad64(call + rootCallReturnOffset) != pc) {
+      return rtRootFailure();
+    }
+    var roots = nativeLoad64(call + rootCallCountOffset);
+    if (roots == -1) return count;
+    if (roots < 0) return rtRootFailure();
+    var caller = nativeLoad64(frame);
+    if (caller == 0) return rtRootFailure();
+    var slots = call + nativeLoad64(call + rootCallSlotsOffset);
+    i = 0;
+    while (i < roots) {
+      var record = slots + i * rootSlotBytes;
+      var slot = caller + nativeLoad64(record + rootSlotFrameOffset);
+      count = rtRootAppend(
+        nativeLoad64(slot),
+        nativeLoad64(record + rootSlotKindOffset),
+        worklist,
+        count,
+        capacity,
+      );
+      i = i + 1;
+    }
+    frame = caller;
+  }
+}
+
+int rtTraceBitmap(
+  int value,
+  int fields,
+  int bitmap,
+  int kind,
+  int worklist,
+  int count,
+  int capacity,
+) {
+  var field = 0;
+  while (field < fields) {
+    var bits = nativeLoad64(bitmap + (field ~/ 64) * 8);
+    var end = field + 64;
+    if (end > fields) end = fields;
+    while (bits != 0 && field < end) {
+      if ((bits & 1) != 0) {
+        count = rtRootAppend(
+          nativeLoad64(value + objectHeaderBytes + field * 8),
+          kind,
+          worklist,
+          count,
+          capacity,
+        );
+      }
+      bits = bits >>> 1;
+      field = field + 1;
+    }
+    field = end;
+  }
+  return count;
+}
+
+// value is an object base supplied by root or object-edge enumeration.
+int rtTraceObject(int value, int worklist, int capacity) {
+  if (capacity < 0 || capacity != 0 && worklist == 0) {
+    return rtRootFailure();
+  }
+  if (value == 0) return 0;
+  var descriptor = rtObjectDescriptor(value);
+  var kind = nativeLoad64(descriptor + descriptorKindOffset);
+  if (kind == descriptorString ||
+      kind == descriptorIntBox ||
+      kind == descriptorWordArray) {
+    return 0;
+  }
+  if (kind == descriptorList) {
+    return rtRootAppend(
+      nativeLoad64(value + listBackingOffset),
+      storageRef,
+      worklist,
+      0,
+      capacity,
+    );
+  }
+  var count = 0;
+  if (kind == descriptorClass) {
+    var fields = nativeLoad64(descriptor + descriptorFieldsOffset);
+    var bitmap = nativeLoad64(descriptor + descriptorRefBitmapOffset);
+    if (bitmap != 0) {
+      count = rtTraceBitmap(
+        value,
+        fields,
+        descriptor + bitmap,
+        storageRef,
+        worklist,
+        count,
+        capacity,
+      );
+    }
+    bitmap = nativeLoad64(descriptor + descriptorTaggedBitmapOffset);
+    if (bitmap != 0) {
+      count = rtTraceBitmap(
+        value,
+        fields,
+        descriptor + bitmap,
+        storageTagged,
+        worklist,
+        count,
+        capacity,
+      );
+    }
+    return count;
+  }
+  if (kind != descriptorRefArray && kind != descriptorTaggedArray) {
+    return rtRootFailure();
+  }
+  var representation = storageRef;
+  if (kind == descriptorTaggedArray) representation = storageTagged;
+  var length = nativeLoad64(value + arrayLengthOffset);
+  var i = 0;
+  while (i < length) {
+    count = rtRootAppend(
+      nativeLoad64(value + arrayDataOffset + i * 8),
+      representation,
+      worklist,
+      count,
+      capacity,
+    );
+    i = i + 1;
+  }
+  return count;
 }

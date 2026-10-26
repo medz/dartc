@@ -108,6 +108,7 @@ const int bNativeStore16 = 107;
 const int bNativeMetadataAddress = 108;
 const int bNativeCall1 = 109;
 const int bNativeCall0 = 110;
+const int bNativeFramePointer = 111;
 
 class FunctionInfo {
   String name;
@@ -147,8 +148,8 @@ List<int> exportFunctions = <int>[];
 List<int> exportParameters = <int>[];
 
 List<int> classSizes = <int>[];
-List<int> classPointerMasks = <int>[];
-List<int> classTaggedMasks = <int>[];
+List<List<int>> classPointerMasks = <List<int>>[];
+List<List<int>> classTaggedMasks = <List<int>>[];
 List<String> classNames = <String>[];
 List<int> classToStringFunctions = <int>[];
 

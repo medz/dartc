@@ -2,6 +2,7 @@ import 'arm64.dart';
 import 'constant_data.dart';
 import 'ir.dart';
 import 'layout.dart';
+import 'root_map.dart';
 import 'sign.dart';
 import 'types.dart';
 
@@ -109,6 +110,15 @@ class ConstantLayout {
   int metadataOffset;
   int end;
   List<int> listOffsets = <int>[];
+  List<int> refBitmapOffsets = <int>[];
+  List<int> taggedBitmapOffsets = <int>[];
+  int metadataFeatures = 0;
+  int metadataBytes = 0;
+  int rootTableOffset = -1;
+  int rootCallsOffset = -1;
+  List<int> rootSlotOffsets = <int>[];
+  int globalRootsOffset = -1;
+  List<int> globalRoots = <int>[];
 
   ConstantLayout(
     this.stringOffsets,
@@ -134,12 +144,23 @@ void markTypeReference(List<int> offsets, List<int> work, int type) {
   }
 }
 
+bool bitmapNonzero(List<int> words) {
+  var i = 0;
+  while (i < words.length) {
+    if (words[i] != 0) return true;
+    i++;
+  }
+  return false;
+}
+
 ConstantLayout layoutConstants(int start) {
   List<int> stringOffsets = <int>[];
   List<int> descriptorOffsets = <int>[];
   List<int> classNameStrings = <int>[];
   List<int> typeOffsets = <int>[];
   List<int> listOffsets = <int>[];
+  List<int> refBitmapOffsets = <int>[];
+  List<int> taggedBitmapOffsets = <int>[];
   List<int> types = <int>[];
   int i = 0;
   while (i < strings.length) {
@@ -150,6 +171,8 @@ ConstantLayout layoutConstants(int start) {
   while (i < classSizes.length) {
     descriptorOffsets.add(-1);
     classNameStrings.add(-1);
+    refBitmapOffsets.add(-1);
+    taggedBitmapOffsets.add(-1);
     i++;
   }
   i = 0;
@@ -225,6 +248,7 @@ ConstantLayout layoutConstants(int start) {
   }
   bool needsMetadata = features != 0;
   bool needsLists = (features & metadataLists) != 0;
+  bool needsRoots = (features & metadataRoots) != 0;
   int end = start;
   bool needsStringDescriptor = (features & metadataStrings) != 0;
   i = 0;
@@ -272,6 +296,22 @@ ConstantLayout layoutConstants(int start) {
     end = end + classDescriptorBytes;
   }
   i = 0;
+  while (i < classSizes.length) {
+    if (descriptorOffsets[i] >= 0) {
+      var fields = (classSizes[i] - objectHeaderBytes) ~/ 8;
+      var bytes = ((fields + 63) ~/ 64) * 8;
+      if (bitmapNonzero(classPointerMasks[i])) {
+        refBitmapOffsets[i] = end;
+        end += bytes;
+      }
+      if (bitmapNonzero(classTaggedMasks[i])) {
+        taggedBitmapOffsets[i] = end;
+        end += bytes;
+      }
+    }
+    i++;
+  }
+  i = 0;
   while (i < typeOffsets.length) {
     if (typeOffsets[i] == 0) {
       typeOffsets[i] = end;
@@ -282,11 +322,49 @@ ConstantLayout layoutConstants(int start) {
   int handleTypeOffset = -1;
   if (needsValues) handleTypeOffset = typeOffsets[handleType];
   int metadataOffset = -1;
+  int metadataBytes = 0;
   if (needsMetadata) {
     metadataOffset = end;
-    end = end + 8;
-    if (needsLists) end = end + 32;
-    if (needsValues) end = end + 16;
+    metadataBytes = metadataStringDescriptorOffset + 8;
+    if (needsLists) metadataBytes = metadataTaggedArrayDescriptorOffset + 8;
+    if (needsValues) metadataBytes = metadataHandleTypeOffset + 8;
+    if (needsRoots) metadataBytes = metadataRootTableOffset + 8;
+    end += metadataBytes;
+  }
+  int rootTableOffset = -1;
+  int rootCallsOffset = -1;
+  List<int> rootSlotOffsets = <int>[];
+  int globalRootsOffset = -1;
+  List<int> globalRoots = <int>[];
+  if (needsRoots) {
+    rootTableOffset = end;
+    end += rootTableBytes;
+    if (emittedRootMaps.isNotEmpty) {
+      rootCallsOffset = end;
+      end += emittedRootMaps.length * rootCallBytes;
+    }
+    i = 0;
+    while (i < emittedRootMaps.length) {
+      var roots = emittedRootMaps[i];
+      var offset = -1;
+      if (!roots.boundary && roots.offsets.isNotEmpty) {
+        offset = end;
+        end += roots.offsets.length * rootSlotBytes;
+      }
+      rootSlotOffsets.add(offset);
+      i++;
+    }
+    i = 0;
+    while (i < globalTypes.length) {
+      if (typeIsReference(globalTypes[i]) || typeIsTagged(globalTypes[i])) {
+        globalRoots.add(i);
+      }
+      i++;
+    }
+    if (globalRoots.isNotEmpty) {
+      globalRootsOffset = end;
+      end += globalRoots.length * globalRootBytes;
+    }
   }
   end = alignImage(end, 8);
   i = 0;
@@ -318,6 +396,15 @@ ConstantLayout layoutConstants(int start) {
     end,
   );
   layout.listOffsets = listOffsets;
+  layout.refBitmapOffsets = refBitmapOffsets;
+  layout.taggedBitmapOffsets = taggedBitmapOffsets;
+  layout.metadataFeatures = features;
+  layout.metadataBytes = metadataBytes;
+  layout.rootTableOffset = rootTableOffset;
+  layout.rootCallsOffset = rootCallsOffset;
+  layout.rootSlotOffsets = rootSlotOffsets;
+  layout.globalRootsOffset = globalRootsOffset;
+  layout.globalRoots = globalRoots;
   return layout;
 }
 
@@ -448,7 +535,7 @@ List<int> createMachOExecutable() {
     instruction = instruction + 1;
   }
   imageZeros(constantOffset - image.length);
-  imageConstants(constants, codeOffset);
+  imageConstants(constants, codeOffset, dataBase - base);
   imageZeros(textSize + 16 - image.length);
   signMachO(image, signatureCommand, linkeditCommand, textSize, 1);
   return image;
@@ -540,7 +627,7 @@ List<int> createElfExecutable() {
     instruction = instruction + 1;
   }
   imageZeros(constantOffset - image.length);
-  imageConstants(constants, codeOffset);
+  imageConstants(constants, codeOffset, dataBase - base);
   imageZeros(dataOffset - image.length);
   return image;
 }
@@ -554,18 +641,18 @@ void imageDescriptor(
   int id,
   int size,
   int fields,
-  int pointers,
+  int refBitmap,
   int kind,
-  int tagged,
+  int taggedBitmap,
   int name,
   int toString,
 ) {
   image64(id);
   image64(size);
   image64(fields);
-  image64(pointers);
+  image64(refBitmap);
   image64(kind);
-  image64(tagged);
+  image64(taggedBitmap);
   image64(name);
   image64(toString);
 }
@@ -586,7 +673,80 @@ int imageTypeKind(int kind) {
   return typeKindClass;
 }
 
-void imageConstants(ConstantLayout layout, int codeOffset) {
+void imageBitmap(List<int> words, int count) {
+  var i = 0;
+  while (i < count) {
+    var word = 0;
+    if (i < words.length) word = words[i];
+    image64(word);
+    i++;
+  }
+}
+
+void imageMetadataReference(ConstantLayout layout, int feature, int target) {
+  var displacement = 0;
+  if ((layout.metadataFeatures & feature) != 0 && target >= 0) {
+    displacement = target - layout.metadataOffset;
+  }
+  image64(displacement);
+}
+
+void imageRootTable(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
+  if (layout.rootTableOffset < 0) return;
+  imageZeros(layout.rootTableOffset - image.length);
+  image64(emittedRootMaps.length);
+  var calls = 0;
+  if (layout.rootCallsOffset >= 0) {
+    calls = layout.rootCallsOffset - layout.rootTableOffset;
+  }
+  image64(calls);
+  image64(layout.globalRoots.length);
+  var globals = 0;
+  if (layout.globalRootsOffset >= 0) {
+    globals = layout.globalRootsOffset - layout.rootTableOffset;
+  }
+  image64(globals);
+  var i = 0;
+  while (i < emittedRootMaps.length) {
+    var roots = emittedRootMaps[i];
+    var record = layout.rootCallsOffset + i * rootCallBytes;
+    image64(codeOffset + roots.returnOffset - record);
+    var count = roots.offsets.length;
+    if (roots.boundary) count = -1;
+    image64(count);
+    var slots = 0;
+    if (layout.rootSlotOffsets[i] >= 0) {
+      slots = layout.rootSlotOffsets[i] - record;
+    }
+    image64(slots);
+    i++;
+  }
+  i = 0;
+  while (i < emittedRootMaps.length) {
+    if (layout.rootSlotOffsets[i] >= 0) {
+      var roots = emittedRootMaps[i];
+      var slot = 0;
+      while (slot < roots.offsets.length) {
+        image64(roots.offsets[slot]);
+        image64(roots.kinds[slot]);
+        slot++;
+      }
+    }
+    i++;
+  }
+  i = 0;
+  while (i < layout.globalRoots.length) {
+    var global = layout.globalRoots[i];
+    var record = layout.globalRootsOffset + i * globalRootBytes;
+    image64(dataBaseOffset + global * 8 - record);
+    var kind = storageTagged;
+    if (typeIsReference(globalTypes[global])) kind = storageRef;
+    image64(kind);
+    i++;
+  }
+}
+
+void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
   int stringIndex = 0;
   while (stringIndex < strings.length) {
     if (layout.stringOffsets[stringIndex] >= 0) {
@@ -622,13 +782,25 @@ void imageConstants(ConstantLayout layout, int codeOffset) {
             armFunctionOffsets[callback] * 4 -
             layout.descriptorOffsets[descriptor];
       }
+      int references = 0;
+      if (layout.refBitmapOffsets[descriptor] >= 0) {
+        references =
+            layout.refBitmapOffsets[descriptor] -
+            layout.descriptorOffsets[descriptor];
+      }
+      int tagged = 0;
+      if (layout.taggedBitmapOffsets[descriptor] >= 0) {
+        tagged =
+            layout.taggedBitmapOffsets[descriptor] -
+            layout.descriptorOffsets[descriptor];
+      }
       imageDescriptor(
         descriptor,
         classSizes[descriptor],
         (classSizes[descriptor] - objectHeaderBytes) ~/ 8,
-        classPointerMasks[descriptor],
+        references,
         descriptorClass,
-        classTaggedMasks[descriptor],
+        tagged,
         name,
         toString,
       );
@@ -639,7 +811,7 @@ void imageConstants(ConstantLayout layout, int codeOffset) {
     imageDescriptor(-1, stringDataOffset, -1, 0, descriptorString, 0, 0, 0);
   }
   if (layout.listDescriptorOffset >= 0) {
-    imageDescriptor(-2, listInstanceBytes, 4, 4, descriptorList, 0, 0, 0);
+    imageDescriptor(-2, listInstanceBytes, 4, 0, descriptorList, 0, 0, 0);
     imageDescriptor(-3, arrayDataOffset, -1, 0, descriptorWordArray, 0, 0, 0);
     imageDescriptor(-4, arrayDataOffset, -1, 0, descriptorRefArray, 0, 0, 0);
   }
@@ -648,6 +820,18 @@ void imageConstants(ConstantLayout layout, int codeOffset) {
   }
   if (layout.intBoxDescriptorOffset >= 0) {
     imageDescriptor(-5, objectHeaderBytes + 8, 1, 0, descriptorIntBox, 0, 0, 0);
+  }
+  descriptor = 0;
+  while (descriptor < classSizes.length) {
+    var fields = (classSizes[descriptor] - objectHeaderBytes) ~/ 8;
+    var words = (fields + 63) ~/ 64;
+    if (layout.refBitmapOffsets[descriptor] >= 0) {
+      imageBitmap(classPointerMasks[descriptor], words);
+    }
+    if (layout.taggedBitmapOffsets[descriptor] >= 0) {
+      imageBitmap(classTaggedMasks[descriptor], words);
+    }
+    descriptor++;
   }
   int typeIndex = 0;
   while (typeIndex < layout.typeOffsets.length) {
@@ -676,24 +860,46 @@ void imageConstants(ConstantLayout layout, int codeOffset) {
     typeIndex++;
   }
   if (layout.metadataOffset >= 0) {
-    int stringDescriptor = 0;
-    if (layout.stringDescriptorOffset >= 0) {
-      stringDescriptor = layout.stringDescriptorOffset - layout.metadataOffset;
+    imageMetadataReference(
+      layout,
+      metadataStrings,
+      layout.stringDescriptorOffset,
+    );
+    if (layout.metadataBytes > metadataStringDescriptorOffset + 8) {
+      imageMetadataReference(
+        layout,
+        metadataLists,
+        layout.listDescriptorOffset,
+      );
+      imageMetadataReference(
+        layout,
+        metadataLists,
+        layout.wordArrayDescriptorOffset,
+      );
+      imageMetadataReference(
+        layout,
+        metadataLists,
+        layout.refArrayDescriptorOffset,
+      );
+      imageMetadataReference(
+        layout,
+        metadataLists,
+        layout.taggedArrayDescriptorOffset,
+      );
     }
-    image64(stringDescriptor);
-    if (layout.listDescriptorOffset >= 0) {
-      image64(layout.listDescriptorOffset - layout.metadataOffset);
-      image64(layout.wordArrayDescriptorOffset - layout.metadataOffset);
-      image64(layout.refArrayDescriptorOffset - layout.metadataOffset);
+    if (layout.metadataBytes > metadataTaggedArrayDescriptorOffset + 8) {
+      imageMetadataReference(
+        layout,
+        metadataValues,
+        layout.intBoxDescriptorOffset,
+      );
+      imageMetadataReference(layout, metadataValues, layout.handleTypeOffset);
     }
-    if (layout.taggedArrayDescriptorOffset >= 0) {
-      image64(layout.taggedArrayDescriptorOffset - layout.metadataOffset);
-    }
-    if (layout.intBoxDescriptorOffset >= 0) {
-      image64(layout.intBoxDescriptorOffset - layout.metadataOffset);
-      image64(layout.handleTypeOffset - layout.metadataOffset);
+    if (layout.metadataBytes > metadataHandleTypeOffset + 8) {
+      imageMetadataReference(layout, metadataRoots, layout.rootTableOffset);
     }
   }
+  imageRootTable(layout, codeOffset, dataBaseOffset);
   var list = 0;
   while (list < constantLists.length) {
     var offset = layout.listOffsets[list];

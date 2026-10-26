@@ -2,7 +2,9 @@ import 'arm64.dart';
 import 'abi.dart';
 import 'host.dart';
 import 'ir.dart';
+import 'layout.dart';
 import 'machine.dart';
+import 'root_map.dart';
 import 'types.dart';
 
 List<int> emitBranchSites = <int>[];
@@ -34,7 +36,11 @@ void emitEdge(MachineEdge edge, MachineFunction function, int fallthrough) {
   }
 }
 
-void emitInstruction(MachineInstruction instruction, MachineFunction function) {
+void emitInstruction(
+  MachineInstruction instruction,
+  MachineFunction function,
+  CallRootMap? roots,
+) {
   int op = instruction.op;
   int output = instruction.output;
   List<int> inputs = instruction.inputs;
@@ -48,6 +54,9 @@ void emitInstruction(MachineInstruction instruction, MachineFunction function) {
     armConstant(result, instruction.target);
   } else if (op == mMove) {
     result = emitOperand(function, inputs[0], 0);
+  } else if (op == mFramePointer) {
+    result = emitDestination(function, output);
+    armMove(result, 29);
   } else if (op == mAddress) {
     armAddress(instruction.extra, instruction.target);
   } else if (op == mLoad64 || op == mLoad8 || op == mLoad16) {
@@ -104,6 +113,10 @@ void emitInstruction(MachineInstruction instruction, MachineFunction function) {
       machineCode.add(0xd63f0200);
     } else {
       armCall(instruction.target);
+    }
+    if (roots != null) {
+      roots.returnOffset = machineCode.length * 4;
+      emittedRootMaps.add(roots);
     }
     remaining = outgoing;
     while (remaining >= 4096) {
@@ -247,7 +260,10 @@ List<int> emitUseCounts(MachineFunction function) {
   return uses;
 }
 
-void emitFunction(MachineFunction function) {
+void emitFunction(MachineFunction function, bool rootsEnabled) {
+  List<CallRootMap> roots = const <CallRootMap>[];
+  if (rootsEnabled) roots = buildCallRootMaps(function);
+  var nextRoot = 0;
   machineCode.add(0xa9bf7bfd);
   machineCode.add(0x910003fd);
   int frame = alignFrame(
@@ -310,7 +326,14 @@ void emitFunction(MachineFunction function) {
         machineCode.add(0xeb00001f | (right << 16) | (left << 5));
         compareCondition = operation.extra;
       } else {
-        emitInstruction(operation, function);
+        CallRootMap? callRoots;
+        if (nextRoot < roots.length &&
+            roots[nextRoot].block == block &&
+            roots[nextRoot].instruction == instruction) {
+          callRoots = roots[nextRoot];
+          nextRoot++;
+        }
+        emitInstruction(operation, function, callRoots);
       }
       instruction = instruction + 1;
     }
@@ -362,7 +385,40 @@ int alignFrame(int size) {
   return ((size + 15) ~/ 16) * 16;
 }
 
+bool emitNeedsRoots(List<MachineFunction> program) {
+  var f = 0;
+  while (f < program.length) {
+    var function = program[f];
+    var b = 0;
+    while (b < function.blocks.length) {
+      var instructions = function.blocks[b].instructions;
+      var i = 0;
+      while (i < instructions.length) {
+        var instruction = instructions[i];
+        if (instruction.op == mAddress &&
+            instruction.extra == 3 &&
+            (instruction.target & metadataRoots) != 0)
+          return true;
+        i++;
+      }
+      b++;
+    }
+    f++;
+  }
+  return false;
+}
+
+void emitRootBoundary(bool enabled) {
+  if (!enabled) return;
+  var boundary = CallRootMap(-1, -1, const <int>[], const <int>[]);
+  boundary.boundary = true;
+  boundary.returnOffset = machineCode.length * 4;
+  emittedRootMaps.add(boundary);
+}
+
 void generateCode(List<MachineFunction> program) {
+  var rootsEnabled = emitNeedsRoots(program);
+  emittedRootMaps.clear();
   machineCode = <int>[];
   addressSites = <int>[];
   addressKinds = <int>[];
@@ -379,6 +435,7 @@ void generateCode(List<MachineFunction> program) {
     int main = entryFunction;
     if (functions[main].parameters == 0) {
       armCall(0);
+      emitRootBoundary(rootsEnabled);
     } else {
       if (targetOS == 1) {
         machineCode.add(0xf94003e0);
@@ -387,6 +444,7 @@ void generateCode(List<MachineFunction> program) {
       armPush(0);
       armPush(1);
       armCall(0);
+      emitRootBoundary(rootsEnabled);
       armPop(1);
       armPop(0);
       armMove(9, 0);
@@ -394,8 +452,10 @@ void generateCode(List<MachineFunction> program) {
       armMove(2, 0);
       armMove(0, 9);
       armCall(runtimeFunction(bArguments, -1));
+      emitRootBoundary(rootsEnabled);
     }
     armCall(main);
+    emitRootBoundary(rootsEnabled);
     armConstant(0, 0);
     if (targetOS == 1) {
       armConstant(8, 93);
@@ -410,7 +470,7 @@ void generateCode(List<MachineFunction> program) {
   while (function < program.length) {
     if (program[function].reachable) {
       armFunctionOffsets[function] = machineCode.length;
-      emitFunction(program[function]);
+      emitFunction(program[function], rootsEnabled);
     }
     function = function + 1;
   }

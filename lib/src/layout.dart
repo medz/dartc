@@ -1,5 +1,5 @@
 // Shared compiler/runtime object layout. Offsets are bytes.
-const int runtimeAbiVersion = 8;
+const int runtimeAbiVersion = 9;
 const int objectHeaderBytes = 16;
 const int objectFlagsOffset = 8;
 // Static objects store a descriptor displacement relative to their own address.
@@ -11,8 +11,10 @@ const int stringDataOffset = 24;
 
 const int classDescriptorBytes = 64;
 const int descriptorSizeOffset = 8;
+const int descriptorFieldsOffset = 16;
+const int descriptorRefBitmapOffset = 24;
 const int descriptorKindOffset = 32;
-const int descriptorTaggedMaskOffset = 40;
+const int descriptorTaggedBitmapOffset = 40;
 const int descriptorNameOffset = 48;
 const int descriptorToStringOffset = 56;
 const int descriptorClass = 0;
@@ -42,10 +44,29 @@ const int metadataRefArrayDescriptorOffset = 24;
 const int metadataTaggedArrayDescriptorOffset = 32;
 const int metadataIntBoxDescriptorOffset = 40;
 const int metadataHandleTypeOffset = 48;
+const int metadataRootTableOffset = 56;
 
 const int metadataStrings = 1;
 const int metadataLists = 2;
 const int metadataValues = 4;
+const int metadataRoots = 8;
+
+// Root metadata stores displacements relative to each containing record.
+const int rootTableBytes = 32;
+const int rootTableCallCountOffset = 0;
+const int rootTableCallsOffset = 8;
+const int rootTableGlobalCountOffset = 16;
+const int rootTableGlobalsOffset = 24;
+const int rootCallBytes = 24;
+const int rootCallReturnOffset = 0;
+const int rootCallCountOffset = 8;
+const int rootCallSlotsOffset = 16;
+const int rootSlotBytes = 16;
+const int rootSlotFrameOffset = 0;
+const int rootSlotKindOffset = 8;
+const int globalRootBytes = 16;
+const int globalRootAddressOffset = 0;
+const int globalRootKindOffset = 8;
 
 // TypeRefs are native metadata records, separate from managed Dart Type objects.
 const int typeRefBytes = 32;

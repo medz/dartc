@@ -44,6 +44,7 @@ const int mCallIndirect = 27;
 const int mShlImmediate = 28;
 const int mShrImmediate = 29;
 const int mUshrImmediate = 30;
+const int mFramePointer = 31;
 
 class RegisterAllocation {
   List<int> locations;
@@ -246,6 +247,12 @@ void machineSelectInstruction(
     if (target == bNativeTarget) {
       instructions.add(
         MachineInstruction(mConstant, output, <int>[], targetOS, 0, effects),
+      );
+      return;
+    }
+    if (target == bNativeFramePointer) {
+      instructions.add(
+        MachineInstruction(mFramePointer, output, inputs, 0, 0, effects),
       );
       return;
     }
