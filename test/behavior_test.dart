@@ -9,12 +9,13 @@ class FunctionInfo {
   int result;
   List<int> offsets;
   bool active;
+  int flags;
   FunctionInfo(this.name, this.start, this.parameters, this.locals, this.result,
-      this.offsets, this.active);
+      this.offsets, this.active, this.flags);
 
   int frameWords(int extra) {
     this.locals += extra;
-    return this.parameters + this.locals;
+    return this.parameters + this.locals + this.flags;
   }
 
   String label() => this.name + ':' + this.start.toString();
@@ -25,6 +26,7 @@ const bool enabled = true;
 const int labelValue = -1234567;
 int calls = 0;
 int initial = initialize();
+int spare = initialize();
 List<int> values = <int>[2, 3];
 
 int initialize() {
@@ -38,6 +40,10 @@ int fibonacci(int bias) {
 }
 
 void main(List<String> args) {
+  print(calls);
+  spare = 99;
+  print(calls);
+  print(spare);
   print(initial);
   print(calls);
   int sum = 0;
@@ -68,7 +74,7 @@ void main(List<String> args) {
   print(10000000000 + int.parse('0xff'));
   print(args.length);
   print(args[1]);
-  var info = FunctionInfo('entry', 2, 1, 3, 1, <int>[4, 8], enabled);
+  var info = FunctionInfo('entry', 2, 1, 3, 1, <int>[4, 8], enabled, 13);
   var functions = <FunctionInfo>[info];
   functions[0].start = 7;
   functions[0].parameters++;

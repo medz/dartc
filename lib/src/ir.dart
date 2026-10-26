@@ -117,3 +117,18 @@ List<int> exportParameters = <int>[];
 
 List<int> classSizes = <int>[];
 List<int> classPointerMasks = <int>[];
+
+int irWidth(int op) {
+  if (op == opCall || op == opBuiltin) return 3;
+  if (op == opInt ||
+      op == opString ||
+      op == opDescriptor ||
+      op == opLoadLocal ||
+      op == opStoreLocal ||
+      op == opLoadGlobal ||
+      op == opStoreGlobal ||
+      op == opJump ||
+      op == opJumpFalse)
+    return 2;
+  return 1;
+}

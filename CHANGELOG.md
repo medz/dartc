@@ -1,6 +1,8 @@
 ## Unreleased
 
 - Support simple classes, fields, constructors, and direct instance methods.
+- Initialize top-level variables lazily and omit unused native functions.
+- Pass additional internal function arguments on the stack.
 
 ## 0.1.0
 

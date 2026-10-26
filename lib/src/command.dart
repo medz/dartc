@@ -7,6 +7,7 @@ import 'ir.dart';
 import 'library.dart';
 import 'machine.dart';
 import 'optimize.dart';
+import 'reach.dart';
 import 'ssa.dart';
 
 List<String> sourceFiles = <String>[];
@@ -121,11 +122,14 @@ void runCompiler(List<String> args) {
   }
   sourceFiles = <String>[];
   String source = collectSource(input);
+  int runtimeLength = 0;
   if (imageKind == 0) {
     if (standard == '') standard = hostStdPath();
-    source = hostRead(standard) + '\n' + source;
+    String runtime = hostRead(standard);
+    runtimeLength = runtime.length;
+    source = runtime + '\n' + source;
   }
-  parseSource(source);
+  parseSource(source, runtimeLength);
   if (imageKind != 0) {
     int chosen = -1;
     int i = 0;
@@ -146,7 +150,7 @@ void runCompiler(List<String> args) {
   }
   List<SsaFunction> ssa = buildSsa();
   optimizeSsa(ssa);
-  List<MachineFunction> program = selectMachine(ssa);
+  List<MachineFunction> program = selectMachine(ssa, reachableFunctions(ssa));
   allocateRegisters(program);
   generateCode(program);
   List<int> bytes = <int>[];

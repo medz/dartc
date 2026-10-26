@@ -1,11 +1,34 @@
 import 'ir.dart';
 import 'host.dart';
 
+class GlobalInitializer {
+  List<int> code;
+  List<int> types;
+  List<int> locals;
+  int result;
+  int getter;
+  int setter;
+  int state;
+
+  GlobalInitializer(
+    this.code,
+    this.types,
+    this.locals,
+    this.result,
+    this.getter,
+    this.setter,
+    this.state,
+  );
+}
+
 List<String> feTokens = <String>[];
 List<int> feKinds = <int>[];
 int feAt = 0;
 List<int> feBodies = <int>[];
 List<int> feGlobalValues = <int>[];
+List<int> feRawGlobals = <int>[];
+List<GlobalInitializer> feGlobalInitializers = <GlobalInitializer>[];
+int feRuntimeTokens = 0;
 List<int> _feLiteralTypes = <int>[];
 List<int> _feLiteralValues = <int>[];
 List<int> feParamStarts = <int>[];
@@ -56,16 +79,19 @@ int feHex(int c) {
   return 0;
 }
 
-void feToken(String text, int kind) {
+void feToken(String text, int kind, bool runtime) {
   feTokens.add(text);
   feKinds.add(kind);
+  if (runtime) feRuntimeTokens = feTokens.length;
 }
 
-void feScan(String source) {
+void feScan(String source, int runtimeLength) {
   feTokens.clear();
   feKinds.clear();
+  feRuntimeTokens = 0;
   var i = 0;
   while (i < source.length) {
+    var runtime = i < runtimeLength;
     var c = source.codeUnitAt(i);
     if (c <= 32) {
       i++;
@@ -170,7 +196,7 @@ void feScan(String source) {
         }
       }
       if (!closed) feError('unterminated string');
-      feToken(String.fromCharCodes(units), 3);
+      feToken(String.fromCharCodes(units), 3, runtime);
       continue;
     }
     if (feLetter(c)) {
@@ -179,7 +205,7 @@ void feScan(String source) {
       while (i < source.length &&
           (feLetter(source.codeUnitAt(i)) || feDigit(source.codeUnitAt(i))))
         i++;
-      feToken(source.substring(start, i), 1);
+      feToken(source.substring(start, i), 1, runtime);
       continue;
     }
     if (feDigit(c)) {
@@ -188,7 +214,7 @@ void feScan(String source) {
       while (i < source.length &&
           (feLetter(source.codeUnitAt(i)) || feDigit(source.codeUnitAt(i))))
         i++;
-      feToken(source.substring(start, i), 2);
+      feToken(source.substring(start, i), 2, runtime);
       continue;
     }
     var size = 1;
@@ -222,10 +248,10 @@ void feScan(String source) {
           two == '--')
         size = 2;
     }
-    feToken(source.substring(i, i + size), 0);
+    feToken(source.substring(i, i + size), 0, runtime);
     i += size;
   }
-  feToken('', 0);
+  feToken('', 0, false);
   feAt = 0;
 }
 
@@ -529,6 +555,7 @@ void _feRecordLiteralConstant(int global, int start, int end) {
 
 void feSignatures() {
   while (!feIs('')) {
+    var declaration = feAt;
     if (feTake('class')) {
       feClassSignature();
       continue;
@@ -568,6 +595,10 @@ void feSignatures() {
     } else {
       globalNames.add(name);
       globalTypes.add(type);
+      if (declaration < feRuntimeTokens)
+        feRawGlobals.add(1);
+      else
+        feRawGlobals.add(0);
       _feLiteralTypes.add(0);
       _feLiteralValues.add(0);
       if (inferred) globalTypes[globalTypes.length - 1] = 0;
@@ -705,7 +736,14 @@ int feVariableType(String name) {
   var local = feLocal(name);
   if (local >= 0) return feLocalTypes[local];
   var global = feGlobal(name);
-  if (global >= 0) return globalTypes[global];
+  if (global >= 0) {
+    if (globalTypes[global] == 0 &&
+        imageKind == 0 &&
+        feRawGlobals[global] == 0) {
+      feInferGlobal(global);
+    }
+    return globalTypes[global];
+  }
   feError('unknown variable ' + name);
   return tInt;
 }
@@ -720,6 +758,9 @@ void feLoad(String name) {
   if (global >= 0) {
     if (_feLiteralTypes[global] != 0) {
       feInteger(_feLiteralValues[global], _feLiteralTypes[global]);
+    } else if (imageKind == 0 && feRawGlobals[global] == 0) {
+      if (globalTypes[global] == 0) feInferGlobal(global);
+      feCall(feGlobalInitializers[global].getter, 0);
     } else {
       feOperand(opLoadGlobal, global);
     }
@@ -736,7 +777,14 @@ void feStore(String name) {
   }
   var global = feGlobal(name);
   if (global >= 0) {
-    feOperand(opStoreGlobal, global);
+    if (imageKind == 0 &&
+        feRawGlobals[global] == 0 &&
+        _feLiteralTypes[global] == 0) {
+      feCall(feGlobalInitializers[global].setter, 1);
+      feEmit(opPop);
+    } else {
+      feOperand(opStoreGlobal, global);
+    }
     return;
   }
   feError('unknown variable ' + name);
@@ -1533,7 +1581,159 @@ void feStatement() {
   feExpect(';');
 }
 
-void parseSource(String source) {
+void fePrepareGlobals(int count) {
+  var i = 0;
+  while (i < count) {
+    var initializer = GlobalInitializer(
+      <int>[],
+      <int>[],
+      <int>[],
+      0,
+      -1,
+      -1,
+      -1,
+    );
+    if (imageKind == 0 && feRawGlobals[i] == 0 && _feLiteralTypes[i] == 0) {
+      var type = globalTypes[i];
+      initializer.getter = functions.length;
+      functions.add(
+        FunctionInfo('#get:' + globalNames[i], 0, 0, 0, type, <int>[], <int>[]),
+      );
+      initializer.setter = functions.length;
+      functions.add(
+        FunctionInfo(
+          '#set:' + globalNames[i],
+          0,
+          1,
+          1,
+          type,
+          <int>[type],
+          <int>[type],
+        ),
+      );
+      initializer.state = globalNames.length;
+      globalNames.add('#state:' + globalNames[i]);
+      globalTypes.add(tInt);
+    }
+    feGlobalInitializers.add(initializer);
+    i++;
+  }
+}
+
+void feInferGlobal(int global) {
+  var initializer = feGlobalInitializers[global];
+  if (initializer.code.isNotEmpty) return;
+  if (initializer.result == -1)
+    feError('cannot infer global type ' + globalNames[global]);
+  initializer.result = -1;
+  var previousCode = ir;
+  var previousTypes = irTypes;
+  var previousLocals = feSlotTypes;
+  var previousNext = feNextLocal;
+  var previousToken = feAt;
+  var previousGlobal = feInitializingGlobal;
+  ir = <int>[];
+  irTypes = <int>[];
+  feSlotTypes = <int>[];
+  feNextLocal = 0;
+  feInitializingGlobal = global;
+  var type = globalTypes[global];
+  if (feGlobalValues[global] < 0) {
+    if (type == 0) type = tInt;
+    feInteger(0, type);
+  } else {
+    feAt = feGlobalValues[global];
+    type = feExpression();
+  }
+  if (globalTypes[global] == 0) globalTypes[global] = type;
+  initializer.result = globalTypes[global];
+  initializer.code = ir;
+  initializer.types = irTypes;
+  initializer.locals = feSlotTypes;
+  var getter = functions[initializer.getter];
+  getter.result = initializer.result;
+  var setter = functions[initializer.setter];
+  setter.result = initializer.result;
+  setter.parameterTypes[0] = initializer.result;
+  setter.localTypes[0] = initializer.result;
+  ir = previousCode;
+  irTypes = previousTypes;
+  feSlotTypes = previousLocals;
+  feNextLocal = previousNext;
+  feAt = previousToken;
+  feInitializingGlobal = previousGlobal;
+}
+
+void feAppendInitializer(GlobalInitializer initializer) {
+  var base = ir.length;
+  var position = 0;
+  while (position < initializer.code.length) {
+    var op = initializer.code[position];
+    var width = irWidth(op);
+    var word = 0;
+    while (word < width) {
+      var value = initializer.code[position + word];
+      if (word == 1 && (op == opJump || op == opJumpFalse))
+        value = value + base;
+      ir.add(value);
+      irTypes.add(initializer.types[position + word]);
+      word++;
+    }
+    position = position + width;
+  }
+}
+
+void feGenerateGlobals(int count) {
+  var i = 0;
+  while (i < count) {
+    var initializer = feGlobalInitializers[i];
+    if (initializer.getter >= 0) {
+      var getter = functions[initializer.getter];
+      getter.start = ir.length;
+      feSlotTypes = initializer.locals;
+      feNextLocal = initializer.locals.length;
+      feOperand(opLoadGlobal, initializer.state);
+      feOperand(opInt, 2);
+      feEmit(opEq);
+      var incomplete = feJump(opJumpFalse);
+      feOperand(opLoadGlobal, i);
+      feEmit(opReturn);
+      fePatch(incomplete, ir.length);
+      feOperand(opLoadGlobal, initializer.state);
+      feOperand(opInt, 1);
+      feEmit(opEq);
+      var begin = feJump(opJumpFalse);
+      feCall(feFindFunction('rtInitializationError'), 0);
+      feEmit(opPop);
+      fePatch(begin, ir.length);
+      feOperand(opInt, 1);
+      feOperand(opStoreGlobal, initializer.state);
+      feAppendInitializer(initializer);
+      feOperand(opStoreGlobal, i);
+      feOperand(opInt, 2);
+      feOperand(opStoreGlobal, initializer.state);
+      feOperand(opLoadGlobal, i);
+      feEmit(opReturn);
+      getter.locals = feNextLocal;
+      getter.localTypes = feSlotTypes;
+      var setter = functions[initializer.setter];
+      setter.start = ir.length;
+      feSlotTypes = <int>[globalTypes[i]];
+      feNextLocal = 1;
+      feOperand(opLoadLocal, 0);
+      feOperand(opStoreGlobal, i);
+      feOperand(opInt, 2);
+      feOperand(opStoreGlobal, initializer.state);
+      feOperand(opLoadLocal, 0);
+      feEmit(opReturn);
+      setter.locals = 1;
+      setter.localTypes = feSlotTypes;
+    }
+    i++;
+  }
+}
+
+void parseSource(String source, int runtimeLength) {
   ir.clear();
   irTypes.clear();
   functions.clear();
@@ -1561,6 +1761,8 @@ void parseSource(String source) {
   feInitializingGlobal = -1;
   feBodies.clear();
   feGlobalValues.clear();
+  feRawGlobals.clear();
+  feGlobalInitializers.clear();
   _feLiteralTypes.clear();
   _feLiteralValues.clear();
   feParamStarts.clear();
@@ -1578,12 +1780,22 @@ void parseSource(String source) {
   feParamStarts.add(0);
   feOwners.add(-1);
   feConstructors.add(0);
-  feScan(source);
+  feScan(source, runtimeLength);
   feDiscoverClasses();
   feSignatures();
+  var sourceFunctions = functions.length;
+  var sourceGlobals = globalNames.length;
+  fePrepareGlobals(sourceGlobals);
+  var global = 0;
+  while (global < sourceGlobals) {
+    if (feGlobalInitializers[global].getter >= 0) feInferGlobal(global);
+    global++;
+  }
   feNextLocal = 0;
   feFunction = 0;
-  for (var i = 0; i < globalNames.length; i++) {
+  for (var i = 0; i < sourceGlobals; i++) {
+    if (feGlobalInitializers[i].getter >= 0 || _feLiteralTypes[i] != 0)
+      continue;
     feInitializingGlobal = i;
     if (feGlobalValues[i] < 0) {
       feOperand(opInt, 0);
@@ -1599,7 +1811,7 @@ void parseSource(String source) {
   feEmit(opReturn);
   functions[0].locals = feNextLocal;
   functions[0].localTypes = feSlotTypes;
-  for (var f = 1; f < functions.length; f++) {
+  for (var f = 1; f < sourceFunctions; f++) {
     feFunction = f;
     feAt = feBodies[f];
     functions[f].start = ir.length;
@@ -1640,4 +1852,5 @@ void parseSource(String source) {
     functions[f].locals = feNextLocal;
     functions[f].localTypes = feSlotTypes;
   }
+  feGenerateGlobals(sourceGlobals);
 }

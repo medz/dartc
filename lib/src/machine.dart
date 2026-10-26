@@ -1,3 +1,4 @@
+import 'abi.dart';
 import 'host.dart';
 import 'ir.dart';
 import 'ssa.dart';
@@ -48,6 +49,7 @@ class MachineFunction {
   List<MachineBlock> blocks;
   int resultRep;
   RegisterAllocation allocation;
+  bool reachable;
 
   MachineFunction(
     this.arguments,
@@ -55,6 +57,7 @@ class MachineFunction {
     this.blocks,
     this.resultRep,
     this.allocation,
+    this.reachable,
   );
 }
 
@@ -119,58 +122,6 @@ List<int> machineCopyValues(List<int> values) {
 
 MachineEdge machineEdge(SsaEdge edge) {
   return MachineEdge(edge.target, machineCopyValues(edge.arguments));
-}
-
-int machineFunctionId(String name) {
-  int i = 0;
-  while (i < functions.length) {
-    if (functions[i].name == name) return i;
-    i = i + 1;
-  }
-  print('Missing native function: ' + name);
-  hostExit(1);
-}
-
-int machineBuiltinFunction(int builtin) {
-  if (builtin == bPrintString) return machineFunctionId('rtPrintString');
-  if (builtin == bPrintInt) return machineFunctionId('rtPrintInt');
-  if (builtin == bPrintBool) return machineFunctionId('rtPrintBool');
-  if (builtin == bIntToString) return machineFunctionId('rtIntToString');
-  if (builtin == bStringConcat) return machineFunctionId('rtStringConcat');
-  if (builtin == bStringEqual) return machineFunctionId('rtStringEqual');
-  if (builtin == bStringLength) return machineFunctionId('rtStringLength');
-  if (builtin == bStringCodeUnit) return machineFunctionId('rtStringCodeUnit');
-  if (builtin == bStringSubstring)
-    return machineFunctionId('rtStringSubstring');
-  if (builtin == bStringFromCodes)
-    return machineFunctionId('rtStringFromCodes');
-  if (builtin == bStringIndexOf) return machineFunctionId('rtStringIndexOf');
-  if (builtin == bStringStartsWith)
-    return machineFunctionId('rtStringStartsWith');
-  if (builtin == bStringEndsWith) return machineFunctionId('rtStringEndsWith');
-  if (builtin == bStringLastIndexOf)
-    return machineFunctionId('rtStringLastIndexOf');
-  if (builtin == bIntParse) return machineFunctionId('rtIntParse');
-  if (builtin == bListNew) return machineFunctionId('rtListNew');
-  if (builtin == bListLength) return machineFunctionId('rtListLength');
-  if (builtin == bListGet) return machineFunctionId('rtListGet');
-  if (builtin == bListSet) return machineFunctionId('rtListSet');
-  if (builtin == bListAdd) return machineFunctionId('rtListAdd');
-  if (builtin == bListRemoveLast) return machineFunctionId('rtListRemoveLast');
-  if (builtin == bListClear) return machineFunctionId('rtListClear');
-  if (builtin == bListFilled) return machineFunctionId('rtListFilled');
-  if (builtin == bHostRead) return machineFunctionId('rtHostRead');
-  if (builtin == bHostWrite) return machineFunctionId('rtHostWrite');
-  if (builtin == bHostFinish) return machineFunctionId('rtHostFinish');
-  if (builtin == bHostExit) return machineFunctionId('rtHostExit');
-  if (builtin == bHostStdPath) return machineFunctionId('rtHostStdPath');
-  if (builtin == bArguments) return machineFunctionId('rtArguments');
-  if (builtin == bHostTarget) return machineFunctionId('rtHostTarget');
-  if (builtin == bObjectNew) return machineFunctionId('rtObjectNew');
-  if (builtin == bObjectGet) return machineFunctionId('rtObjectGet');
-  if (builtin == bObjectSet) return machineFunctionId('rtObjectSet');
-  print('Unknown native builtin: ' + builtin.toString());
-  hostExit(1);
 }
 
 int machineArithmetic(int op) {
@@ -273,7 +224,7 @@ void machineSelectInstruction(
         mCall,
         output,
         inputs,
-        machineBuiltinFunction(target),
+        runtimeFunction(target),
         0,
         effects,
       ),
@@ -303,11 +254,28 @@ void machineSelectInstruction(
   hostExit(1);
 }
 
-List<MachineFunction> selectMachine(List<SsaFunction> source) {
+List<MachineFunction> selectMachine(
+  List<SsaFunction> source,
+  List<int> reachable,
+) {
   List<MachineFunction> result = <MachineFunction>[];
   int f = 0;
   while (f < source.length) {
     SsaFunction function = source[f];
+    if (reachable[f] == 0) {
+      result.add(
+        MachineFunction(
+          <int>[],
+          <int>[],
+          <MachineBlock>[],
+          machineRep(function.result),
+          RegisterAllocation(<int>[], 0, <int>[]),
+          false,
+        ),
+      );
+      f = f + 1;
+      continue;
+    }
     List<int> reps = <int>[];
     int i = 0;
     while (i < function.valueTypes.length) {
@@ -346,6 +314,7 @@ List<MachineFunction> selectMachine(List<SsaFunction> source) {
         blocks,
         machineRep(function.result),
         RegisterAllocation(<int>[], 0, <int>[]),
+        true,
       ),
     );
     f = f + 1;

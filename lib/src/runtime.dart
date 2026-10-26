@@ -75,6 +75,18 @@ int rtIoError() {
   return 0;
 }
 
+int rtInitializationError() {
+  var message = rtCString(
+    0x63203a6374726164,
+    0x2072616c75637269,
+    0x696c616974696e69,
+    0xa6e6f6974617a,
+  );
+  rtWriteAll(2, message, 31);
+  rtHostExit(70);
+  return 0;
+}
+
 int rtStringLength(int value) {
   return nativeLoad64(value);
 }

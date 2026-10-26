@@ -59,12 +59,40 @@ void emitInstruction(MachineInstruction instruction, MachineFunction function) {
     else
       machineCode.add(0x39000000 | (address << 5) | value);
   } else if (op == mCall) {
-    int argument = 0;
+    int outgoing = 0;
+    if (inputs.length > 8) outgoing = alignFrame((inputs.length - 8) * 8);
+    int remaining = outgoing;
+    while (remaining >= 4096) {
+      machineCode.add(0xd14007ff);
+      remaining = remaining - 4096;
+    }
+    if (remaining != 0) machineCode.add(0xd10003ff | (remaining << 10));
+    int argument = 8;
     while (argument < inputs.length) {
+      int value = emitOperand(function, inputs[argument], 0);
+      int offset = (argument - 8) * 8;
+      if (offset <= 32760) {
+        machineCode.add(0xf90003e0 | ((offset ~/ 8) << 10) | value);
+      } else {
+        armConstant(10, offset);
+        machineCode.add(0x910003e9);
+        machineCode.add(0x8b0a0129);
+        machineCode.add(0xf9000120 | value);
+      }
+      argument = argument + 1;
+    }
+    argument = 0;
+    while (argument < inputs.length && argument < 8) {
       emitLoad(function, inputs[argument], argument);
       argument = argument + 1;
     }
     armCall(instruction.target);
+    remaining = outgoing;
+    while (remaining >= 4096) {
+      machineCode.add(0x914007ff);
+      remaining = remaining - 4096;
+    }
+    if (remaining != 0) machineCode.add(0x910003ff | (remaining << 10));
   } else if (op == mSyscall) {
     int numberRegister = 16;
     if (targetOS == 1) numberRegister = 8;
@@ -146,7 +174,20 @@ void emitFunction(MachineFunction function) {
   }
   int argument = 0;
   while (argument < function.arguments.length) {
-    emitStore(function, function.arguments[argument], argument);
+    if (argument < 8) {
+      emitStore(function, function.arguments[argument], argument);
+    } else {
+      int register = emitDestination(function, function.arguments[argument]);
+      int offset = 16 + (argument - 8) * 8;
+      if (offset <= 32760) {
+        machineCode.add(0xf94003a0 | ((offset ~/ 8) << 10) | register);
+      } else {
+        armConstant(10, offset);
+        machineCode.add(0x8b0a03a9);
+        machineCode.add(0xf9400120 | register);
+      }
+      emitStore(function, function.arguments[argument], register);
+    }
     argument = argument + 1;
   }
   List<int> offsets = <int>[];
@@ -218,17 +259,22 @@ void generateCode(List<MachineFunction> program) {
     i = i + 1;
   }
   if (imageKind == 0) {
-    if (targetOS == 1) {
-      machineCode.add(0xf94003e0);
-      machineCode.add(0x910023e1);
+    int main = armFunctionId('main');
+    if (functions[main].parameters == 0) {
+      armCall(0);
+    } else {
+      if (targetOS == 1) {
+        machineCode.add(0xf94003e0);
+        machineCode.add(0x910023e1);
+      }
+      armPush(0);
+      armPush(1);
+      armCall(0);
+      armPop(1);
+      armPop(0);
+      armCall(armFunctionId('rtArguments'));
     }
-    armPush(0);
-    armPush(1);
-    armCall(0);
-    armPop(1);
-    armPop(0);
-    armCall(armFunctionId('rtArguments'));
-    armCall(armFunctionId('main'));
+    armCall(main);
     armConstant(0, 0);
     if (targetOS == 1) {
       armConstant(8, 93);
@@ -241,8 +287,10 @@ void generateCode(List<MachineFunction> program) {
   int function = 0;
   if (imageKind != 0) function = 1;
   while (function < program.length) {
-    armFunctionOffsets[function] = machineCode.length;
-    emitFunction(program[function]);
+    if (program[function].reachable) {
+      armFunctionOffsets[function] = machineCode.length;
+      emitFunction(program[function]);
+    }
     function = function + 1;
   }
   int call = 0;

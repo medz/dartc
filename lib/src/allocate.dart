@@ -357,7 +357,7 @@ void allocateFunction(MachineFunction function) {
 void allocateRegisters(List<MachineFunction> program) {
   int i = 0;
   while (i < program.length) {
-    allocateFunction(program[i]);
+    if (program[i].reachable) allocateFunction(program[i]);
     i = i + 1;
   }
 }

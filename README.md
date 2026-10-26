@@ -33,7 +33,7 @@ dart run bin/dartc.dart example/hello.dart -o build/hello
 
 The source checkout additionally supports simple classes with fields, field-formal constructors, and directly resolved instance methods.
 
-Inheritance, closures, exceptions, async code, and most SDK libraries are not yet supported. Top-level initialization is currently eager. Self-hosting does not imply full Dart language compatibility.
+Inheritance, closures, exceptions, async code, and most SDK libraries are not yet supported. Top-level variables are initialized lazily. Runtime memory is currently reclaimed when the process exits. Self-hosting does not imply full Dart language compatibility.
 
 ## Build a standalone compiler
 

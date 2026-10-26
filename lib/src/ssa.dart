@@ -104,22 +104,6 @@ List<int> ssaCopy(List<int> values) {
   return copy;
 }
 
-int ssaWidth(int op) {
-  if (op == opCall || op == opBuiltin) return 3;
-  if (op == opInt ||
-      op == opString ||
-      op == opDescriptor ||
-      op == opLoadLocal ||
-      op == opStoreLocal ||
-      op == opLoadGlobal ||
-      op == opStoreGlobal ||
-      op == opJump ||
-      op == opJumpFalse) {
-    return 2;
-  }
-  return 1;
-}
-
 int ssaInputCount(int op, int position) {
   if (op == opCall || op == opBuiltin) return ir[position + 2];
   if (op == opStoreGlobal) return 1;
@@ -134,7 +118,7 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
   var position = info.start;
   while (position < end) {
     var op = ir[position];
-    var next = position + ssaWidth(op);
+    var next = position + irWidth(op);
     if (op == opJump || op == opJumpFalse) {
       leaders[ir[position + 1] - info.start] = 1;
     }
@@ -182,7 +166,7 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
         if (flow.definitions[slot] == 0) flow.uses[slot] = 1;
       }
       if (op == opStoreLocal) flow.definitions[ir[position + 1]] = 1;
-      position = position + ssaWidth(op);
+      position = position + irWidth(op);
     }
     var finalOp = ir[last];
     if (finalOp == opJump) {
@@ -254,7 +238,7 @@ void ssaStackShapes(FunctionInfo info, List<SsaFlow> flows) {
         }
         stack.add(irTypes[position]);
       }
-      position = position + ssaWidth(op);
+      position = position + irWidth(op);
     }
     var edge = 0;
     while (edge < flow.successors.length) {
@@ -402,7 +386,7 @@ void ssaTranslateBlock(
         count = count - 1;
       }
       var target = 0;
-      if (ssaWidth(op) > 1) target = ir[position + 1];
+      if (irWidth(op) > 1) target = ir[position + 1];
       var value = -1;
       if (op != opStoreGlobal) {
         value = ssaValue(function, irTypes[position]);
@@ -412,7 +396,7 @@ void ssaTranslateBlock(
         SsaInstruction(op, value, target, inputs, ssaEffects(op, target)),
       );
     }
-    position = position + ssaWidth(op);
+    position = position + irWidth(op);
   }
   if (block.end.kind == 0) {
     if (flow.successors.length == 0) {
