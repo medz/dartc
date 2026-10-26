@@ -691,9 +691,40 @@ int rtStringFromCString(int bytes) {
   return rtStringDecodeUtf8(bytes, length);
 }
 
+int rtUtf8Bytes = 0;
+int rtUtf8Capacity = 0;
+int rtUtf8Busy = 0;
+
+int rtUtf8Acquire(int bytes) {
+  if (rtUtf8Busy != 0) {
+    rtHostExit(70);
+    return 0;
+  }
+  if (bytes > rtUtf8Capacity) {
+    var capacity = (bytes + 16383) & -16384;
+    if (capacity < rtUtf8Capacity * 2) capacity = rtUtf8Capacity * 2;
+    var previous = rtUtf8Bytes;
+    var oldCapacity = rtUtf8Capacity;
+    rtUtf8Bytes = rtMap(capacity);
+    rtUtf8Capacity = capacity;
+    rtUnmap(previous, oldCapacity);
+  }
+  rtUtf8Busy = 1;
+  return rtUtf8Bytes;
+}
+
+int rtUtf8Release() {
+  if (rtUtf8Busy == 0) {
+    rtHostExit(70);
+    return 0;
+  }
+  rtUtf8Busy = 0;
+  return 0;
+}
+
 int rtStringEncodeUtf8(int value) {
   var length = nativeLoad64(value + stringLengthOffset);
-  var result = rtAlloc(9 + length * 4);
+  var result = rtUtf8Acquire(9 + length * 4);
   var i = 0;
   var count = 0;
   while (i < length) {
@@ -741,6 +772,7 @@ int rtPrintString(int value) {
   var length = nativeLoad64(encoded);
   nativeStore8(encoded + 8 + length, 10);
   rtWriteAll(1, encoded + 8, length + 1);
+  rtUtf8Release();
   return 0;
 }
 
@@ -765,6 +797,7 @@ int rtPrintBool(int value) {
 int rtHostRead(int path) {
   var encoded = rtStringEncodeUtf8(path);
   var fd = rtSyscall(5, encoded + 8, 0, 0, 0, 0, 0);
+  rtUtf8Release();
   if (fd < 0) rtIoError();
   var capacity = 65536;
   var bytes = rtMap(capacity);
@@ -805,6 +838,7 @@ int rtPackBytes(int source, int destination, int count) {
 int rtHostWrite(int path, int bytes) {
   var encoded = rtStringEncodeUtf8(path);
   var fd = rtSyscall(5, encoded + 8, 1537, 420, 0, 0, 0);
+  rtUtf8Release();
   if (fd < 0) rtIoError();
   var length = rtListLength(bytes);
   var capacity = 65536;
@@ -864,6 +898,7 @@ int rtHostStdPath() {
 int rtHostFinish(int path, int outputTarget) {
   var encoded = rtStringEncodeUtf8(path);
   var changed = rtSyscall(15, encoded + 8, 493, 0, 0, 0, 0);
+  rtUtf8Release();
   if (changed < 0) rtIoError();
   rtHostExit(0);
   return 0;

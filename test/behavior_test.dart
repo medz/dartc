@@ -956,7 +956,7 @@ void main(List<String> args) {
 }
 ''',
       );
-    final outputPrefix = '${temporary.path}/io-output-';
+    final outputPrefix = '${temporary.path}/io-你好🙂-';
     compare(
       io,
       [outputPrefix],

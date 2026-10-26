@@ -1495,6 +1495,11 @@ void stringBoundaries() {
   print(codes.codeUnitAt(1));
   print(codes.codeUnitAt(3));
   print(codes.substring(4));
+  var large = String.fromCharCodes(List<int>.filled(65536, 65));
+  print(large);
+  print(codes);
+  print('tail🙂');
+  print('');
 }
 
 void listGrowth(List<String> args) {
