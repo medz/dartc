@@ -673,6 +673,66 @@ void flowContexts() {
   print([carried, turn]);
 }
 
+int staticReturn(dynamic value) => value;
+
+void staticContexts(Object? left, Object? right) {
+  dynamic rhs = pass(2);
+  var sums = [1 + rhs];
+  List<num> numbers = sums;
+  dynamic reified = numbers;
+  print(numbers);
+  print(reified is List<num>);
+  print(reified is List<int>);
+  print([rhs + 1] is List<num>);
+  var comparisons = [rhs < 1];
+  print(comparisons);
+  print(comparisons is List<bool>);
+  var integers = [7 ~/ rhs, 7 & rhs];
+  List<int> typedIntegers = integers;
+  print(typedIntegers);
+  var flags = [true & pass(false), !pass(true), 1 < rhs];
+  List<bool> typedFlags = flags;
+  print(typedFlags);
+  var words = ['s' + pass('t')];
+  List<String> typedWords = words;
+  print(typedWords);
+  Object compound = 1;
+  if (compound is int) {
+    var changes = [compound += rhs];
+    List<num> changedNumbers = changes;
+    dynamic changedType = changedNumbers;
+    print(changedNumbers);
+    print(changedType is List<int>);
+  }
+  num number = 4;
+  var plain = [number, -number, number + 2];
+  List<num> plainNumbers = plain;
+  print(plainNumbers);
+  print(plain is List<int>);
+  int quotient = number ~/ 2;
+  print(quotient);
+  if (number is int) print(number & 1);
+  List<num> owned = <num>[1, 9223372036854775807];
+  List<Object> objects = owned;
+  objects[0] = 3;
+  objects.add(5);
+  print(owned);
+  print(owned[1]);
+  List<num> view = <int>[6];
+  view[0] = 7;
+  view.add(8);
+  print(view);
+  print(view[0]);
+  print(pass(1) is num);
+  print(pass(9223372036854775807) is num);
+  print(pass('text') is num);
+  print(staticReturn(pass(9)));
+  print(left == right);
+  print(left != null);
+  print(null == right);
+  print(right.toString());
+}
+
 int stringEvaluations = 0;
 
 String stringReceiver() {
@@ -760,6 +820,7 @@ void main(List<String> args) {
   conditionContexts();
   localBindings();
   flowContexts();
+  staticContexts(1, null);
   stringBoundaries();
   listGrowth(args);
 }

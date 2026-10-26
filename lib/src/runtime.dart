@@ -11,7 +11,7 @@ external int nativeTarget();
 external int nativeMetadataAddress(int features);
 external int nativeCall1(int function, int value);
 
-const int rtAbiVersion = 4;
+const int rtAbiVersion = 5;
 
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
@@ -858,6 +858,7 @@ int rtTypeSubtype(int actual, int expected) {
     if (source == typeKindDynamic || source == typeKindVoid) return 0;
     return 1;
   }
+  if (source == typeKindInt && target == typeKindNum) return 1;
   if (source != target) return 0;
   if (source == typeKindList) {
     return rtTypeSubtype(rtTypeArgument(actual), rtTypeArgument(expected));
@@ -940,6 +941,7 @@ int rtValueMatches(int value, int expected) {
   if (value == 0) return 0;
   if (kind == typeKindObject) return 1;
   var actual = rtValueKind(value);
+  if (kind == typeKindNum && actual == typeKindInt) return 1;
   if (actual != kind) return 0;
   if (kind == typeKindList) {
     return rtTypeSubtype(nativeLoad64(value + listTypeOffset), expected);

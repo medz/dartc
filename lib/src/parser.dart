@@ -270,12 +270,7 @@ AstExpression parserUnary(Parser parser) {
   var token = parser.position;
   var op = parserPeek(parser);
   if (parser.tokens[token].kind == tokenSymbol &&
-      (op == '-' ||
-          op == '+' ||
-          op == '!' ||
-          op == '~' ||
-          op == '++' ||
-          op == '--')) {
+      (op == '-' || op == '!' || op == '~' || op == '++' || op == '--')) {
     parser.position++;
     return AstExpression(
       astUnary,

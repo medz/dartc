@@ -5,6 +5,7 @@ import 'parser.dart';
 import 'ir.dart';
 import 'layout.dart';
 import 'types.dart';
+import 'typing.dart';
 import 'scanner.dart';
 import 'source.dart';
 import 'symbols.dart';
@@ -729,6 +730,7 @@ void feCheckPrimitiveType(AstType syntax) {
 
 void feInstallSymbols() {
   declareSymbol(feSymbols, sourceCore, 'int', symbolType, tInt);
+  declareSymbol(feSymbols, sourceCore, 'num', symbolType, tNum);
   declareSymbol(feSymbols, sourceCore, 'String', symbolType, tString);
   declareSymbol(feSymbols, sourceCore, 'bool', symbolType, tBool);
   declareSymbol(feSymbols, sourceCore, 'void', symbolType, tVoid);
@@ -837,6 +839,8 @@ int feValueOperation(String op) {
 }
 
 int feCombine(String op, int left, int right, int token) {
+  var result = typingBinary(op, left, right);
+  if (result < 0) feAstError(token, 'operator requires compatible operands');
   if (op == '+' && left == tString && right == tString) {
     feBuiltin(bStringConcat, 2);
     return tString;
@@ -858,11 +862,14 @@ int feCombine(String op, int left, int right, int token) {
     feConvertValue(left, tDynamic, token);
     feOperand(opLoadLocal, savedRight);
     feConvertValue(right, tDynamic, token);
-    var type = tDynamic;
-    if (comparison) type = tBool;
+    var type = result;
+    if (comparison)
+      type = tBool;
+    else if (result == tInt || result == tBool)
+      type = tDynamic;
     feBuiltinTyped(feValueOperation(op), 2, type);
     if (op == '!=') feEmit(opNot);
-    return type;
+    return feConvertValue(type, result, token);
   }
   if (left == tBool &&
       right == tBool &&
@@ -871,17 +878,8 @@ int feCombine(String op, int left, int right, int token) {
     irTypes[ir.length - 1] = tBool;
     return tBool;
   }
-  if (!equal && (left != tInt || right != tInt))
-    feAstError(token, 'operator requires compatible operands');
   feEmit(feBinaryOp(op));
-  if (op == '==' ||
-      op == '!=' ||
-      op == '<' ||
-      op == '<=' ||
-      op == '>' ||
-      op == '>=')
-    return tBool;
-  return tInt;
+  return result;
 }
 
 int feLowerType(AstType syntax) {
@@ -933,6 +931,9 @@ int feConvertValue(int actual, int expected, int token) {
   if (actual == tVoid && expected != tVoid)
     feAstError(token, 'void expression cannot be used as a value');
   if (expected < 0 || actual == expected) return actual;
+  if (!typingAssignable(actual, expected)) {
+    feAstError(token, 'incompatible value type');
+  }
   if (typeIsSubtype(actual, expected)) {
     var builtin = bBoxRef;
     if (typeIsTagged(expected)) {
@@ -944,23 +945,16 @@ int feConvertValue(int actual, int expected, int token) {
     feBuiltinTyped(builtin, 1, expected);
     return expected;
   }
-  if (actual == tDynamic || actual == tObject || typeIsNullable(actual)) {
-    feBuiltinTyped(bValueCast, 1, expected);
-    return expected;
-  }
-  feAstError(token, 'incompatible value type');
+  feBuiltinTyped(bValueCast, 1, expected);
   return expected;
 }
 
 void feBooleanValue(int type, int token) {
   if (type == tVoid)
     feAstError(token, 'void expression cannot be used as a value');
+  if (!typingCondition(type)) feAstError(token, 'condition requires bool');
   if (type == tBool) return;
-  if (typeIsTagged(type) || typeIsNullable(type)) {
-    feBuiltinTyped(bValueBool, 1, tBool);
-    return;
-  }
-  feAstError(token, 'condition requires bool');
+  feBuiltinTyped(bValueBool, 1, tBool);
 }
 
 void feLowerBoolean(AstExpression expression) {
@@ -1027,11 +1021,13 @@ FlowState feConditionJumps(
   return taken;
 }
 
-int feNonNullableValue(int type) {
-  if (!typeIsNullable(type)) return type;
-  var result = typeNonNullable(type);
-  feBuiltinTyped(bValueCast, 1, result);
-  return result;
+int feNonNullableValue(int type, int token) {
+  if (type == tVoid)
+    feAstError(token, 'void expression cannot be used as a value');
+  if (!typingReceiver(type)) {
+    feAstError(token, 'member access requires a non-nullable receiver');
+  }
+  return type;
 }
 
 int feLowerHint(AstExpression expression, int context) {
@@ -1340,7 +1336,7 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
     }
     return tString;
   }
-  type = feNonNullableValue(type);
+  type = feNonNullableValue(type, receiver.token);
   if (feClassType(type)) {
     var owner = typeArgument(type);
     feCheckPrivate(owner, member, call.token);
@@ -1491,7 +1487,10 @@ int feLowerCall(AstExpression call, int context) {
 int feLowerMember(AstExpression expression) {
   var symbol = feExpressionSymbol(expression);
   if (symbol >= 0) return feLoadDeclaration(symbol, expression.token);
-  var type = feNonNullableValue(feLowerExpression(expression.children[0]));
+  var type = feNonNullableValue(
+    feLowerExpression(expression.children[0]),
+    expression.children[0].token,
+  );
   var member = expression.text;
   if (feClassType(type)) {
     var owner = typeArgument(type);
@@ -1573,6 +1572,7 @@ FeLvalue feLowerLvalue(AstExpression expression) {
   }
   var receiverType = feNonNullableValue(
     feLowerExpression(expression.children[0]),
+    expression.children[0].token,
   );
   var container = 1;
   var type = tInt;
@@ -1733,6 +1733,7 @@ int feLowerExpression(AstExpression expression) {
   if (kind == astIndex) {
     var receiver = feNonNullableValue(
       feLowerExpression(expression.children[0]),
+      expression.children[0].token,
     );
     feLowerInContext(expression.children[1], tInt);
     if (receiver == tString) {
@@ -1774,34 +1775,26 @@ int feLowerExpression(AstExpression expression) {
       feEmit(opNot);
       return tBool;
     }
-    if (typeIsTagged(type) || typeIsNullable(type)) {
-      if (op == '+') {
-        feBuiltinTyped(bValueCast, 1, tInt);
-        return feConvertValue(tInt, tDynamic, expression.token);
-      }
+    var result = typingUnary(op, type);
+    if (result < 0) feAstError(expression.token, 'invalid unary operand type');
+    if (type == tNum || type == tDynamic) {
       var value = feTemp(type);
       feOperand(opStoreLocal, value);
       if (op == '-')
         feInteger(0, tInt);
       else
         feInteger(-1, tInt);
+      feConvertValue(tInt, tDynamic, expression.token);
       feOperand(opLoadLocal, value);
-      var binary = '-';
-      if (op == '~') binary = '^';
-      return feCombine(binary, tInt, type, expression.token);
+      var builtin = bValueSub;
+      if (op == '~') builtin = bValueXor;
+      feBuiltinTyped(builtin, 2, result);
+      return result;
     }
-    if (type != tInt)
-      feAstError(expression.token, 'unary operator requires int');
-    if (op == '+') return type;
-    if (op == '-') {
-      feEmit(opNeg);
-      return tInt;
-    }
-    if (op == '~') {
-      feEmit(opBitNot);
-      return tInt;
-    }
-    feAstError(expression.token, 'unsupported unary operator');
+    var operation = opNeg;
+    if (op == '~') operation = opBitNot;
+    feEmit(operation);
+    return result;
   }
   if (kind == astBinary) {
     var op = expression.text;
@@ -2473,6 +2466,7 @@ void feLowerForIn(AstStatement statement) {
     context = listType(feLowerType(declaration.type));
   var iterableType = feNonNullableValue(
     feLowerHint(statement.expressions[0], context),
+    statement.expressions[0].token,
   );
   if (!typeIsList(iterableType)) {
     feAstError(statement.token, 'for-in currently requires a List');
@@ -2485,10 +2479,7 @@ void feLowerForIn(AstStatement statement) {
   var element = typeArgument(iterableType);
   var type = element;
   if (context >= 0) type = typeArgument(context);
-  if (!typeIsSubtype(element, type) &&
-      element != tDynamic &&
-      element != tObject &&
-      !typeIsNullable(element)) {
+  if (!typingAssignable(element, type)) {
     feAstError(
       declaration.token,
       'for-in variable type must match the List element type',

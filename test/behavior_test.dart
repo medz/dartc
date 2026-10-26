@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import '../lib/src/layout.dart';
+
 const program = r'''
 class FunctionInfo {
   String name;
@@ -455,6 +457,7 @@ void main(List<String> args) {
       'void main() { Object value = <Object>[1]; print(\'before\'); value as List<int>; print(\'after\'); }',
       "void main() { dynamic value = 'wrong'; print('before'); int number = value; print('after'); }",
       "void main() { List<Object> view = <int>[1]; print('before'); view[0] = 'wrong'; print('after'); }",
+      "void main() { List<Object> view = <num>[1]; print('before'); view[0] = 'wrong'; print('after'); }",
       "void main() { List<Object> view = <int>[1]; print('before'); view.add('wrong'); print('after'); }",
       "void main() { var values = <int>[]; print('before'); print(values[0]); }",
       "void main() { var values = <int>[1]; print('before'); print(values[-1]); }",
@@ -585,6 +588,17 @@ void main() {
       'void main() { Object value = 1; var values = [value]; List<int> typed = values; print(typed); }',
       'void f(int? value) { if (value == null) { var values = [value]; List<Null> typed = values; print(typed); } } void main() { f(null); }',
       'void f(int value) { int result; switch (value) { case 1: result = 1; break; default: } print(result); } void main() { f(2); }',
+      'void main() { Object value = 1; int number = value; print(number); }',
+      'void take(int value) {} void f(int? value) { take(value); } void main() { f(1); }',
+      'int f(Object? value) => value; void main() { print(f(1)); }',
+      'void f(bool? value) { if (value) print(1); } void main() { f(true); }',
+      "void f(String? value) { print(value.length); } void main() { f('s'); }",
+      'void f(List<int>? value) { print(value[0]); } void main() { f(<int>[1]); }',
+      'void f(int? value) { print(-value); } void main() { f(1); }',
+      'void f(int? value) { print(1 + value); } void main() { f(1); }',
+      'void f(Object value, dynamic other) { print(value + other); } void main() { f(1, 2); }',
+      'void main() { int value = 1; dynamic other = 2; value += other; print(value); }',
+      'void main() { List<num> values = <num>[1]; List<int> narrow = values; print(narrow); }',
       "void main() { print('abc'.codeUnitAt()); }",
       "void main() { print('abc'.substring()); }",
       "void main() { print('abc'.endsWith('c', 1)); }",
@@ -620,15 +634,13 @@ void main() {
     final empty = File('${temporary.path}/empty.dart')
       ..writeAsStringSync('void main() {}');
     final invalidRuntimes = [
-      'const int rtAbiVersion = 4; external int nativeLoad64(int pointer, int extra);',
-      'const int rtAbiVersion = 4; external bool nativeTarget();',
-      "const int rtAbiVersion = 4; external int nativeLoad64(int pointer); int invalid() => nativeLoad64('wrong');",
-      'const int rtAbiVersion = 4; external int nativeMetadataAddress(int first, int second);',
-      'const int rtAbiVersion = 4; external int nativeMetadataAddress();',
-      'const int rtAbiVersion = 3;',
-      'const int rtAbiVersion = 2;',
-      'const int rtAbiVersion = 1;',
-      'int rtAbiVersion = 4;',
+      'const int rtAbiVersion = $runtimeAbiVersion; external int nativeLoad64(int pointer, int extra);',
+      'const int rtAbiVersion = $runtimeAbiVersion; external bool nativeTarget();',
+      "const int rtAbiVersion = $runtimeAbiVersion; external int nativeLoad64(int pointer); int invalid() => nativeLoad64('wrong');",
+      'const int rtAbiVersion = $runtimeAbiVersion; external int nativeMetadataAddress(int first, int second);',
+      'const int rtAbiVersion = $runtimeAbiVersion; external int nativeMetadataAddress();',
+      'const int rtAbiVersion = ${runtimeAbiVersion - 1};',
+      'int rtAbiVersion = $runtimeAbiVersion;',
       '',
     ];
     for (var i = 0; i < invalidRuntimes.length; i++) {

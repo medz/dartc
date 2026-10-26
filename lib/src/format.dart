@@ -534,6 +534,7 @@ int imageTypeKind(int kind) {
   if (kind == tDynamic) return typeKindDynamic;
   if (kind == tNull) return typeKindNull;
   if (kind == tObject) return typeKindObject;
+  if (kind == tNum) return typeKindNum;
   if (kind == kNullable) return typeKindNullable;
   if (kind == kList) return typeKindList;
   return typeKindClass;

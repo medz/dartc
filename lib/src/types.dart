@@ -6,10 +6,11 @@ const int tPointer = 4;
 const int tDynamic = 5;
 const int tNull = 6;
 const int tObject = 7;
+const int tNum = 8;
 
-const int kNullable = 8;
-const int kList = 9;
-const int kClass = 10;
+const int kNullable = 9;
+const int kList = 10;
+const int kClass = 11;
 
 class DartType {
   int kind;
@@ -27,7 +28,7 @@ void resetTypes() {
   dartTypes.clear();
   classDartTypes.clear();
   var i = 0;
-  while (i <= tObject) {
+  while (i <= tNum) {
     dartTypes.add(DartType(i, -1, -1, -1));
     i++;
   }
@@ -99,7 +100,8 @@ bool typeIsDisjoint(int left, int right) {
   if (typeCanBeNull(left) && typeCanBeNull(right)) return false;
   left = typeNonNullable(left);
   right = typeNonNullable(right);
-  if (left == right ||
+  if (typeIsSubtype(left, right) ||
+      typeIsSubtype(right, left) ||
       left == tDynamic ||
       right == tDynamic ||
       left == tVoid ||
@@ -111,15 +113,18 @@ bool typeIsDisjoint(int left, int right) {
     return false;
   }
   return left == tInt ||
+      left == tNum ||
       left == tString ||
       left == tBool ||
       right == tInt ||
+      right == tNum ||
       right == tString ||
       right == tBool;
 }
 
 bool typeIsTagged(int type) {
   return type == tVoid ||
+      type == tNum ||
       type == tDynamic ||
       type == tNull ||
       type == tObject ||
@@ -140,6 +145,7 @@ bool typeIsSubtype(int actual, int expected) {
       typeIsNullable(actual))
     return false;
   if (expected == tObject) return true;
+  if (actual == tInt && expected == tNum) return true;
   if (typeIsList(actual) && typeIsList(expected)) {
     return typeIsSubtype(typeArgument(actual), typeArgument(expected));
   }
@@ -151,6 +157,8 @@ int joinTypes(int left, int right) {
   if (left == right) return left;
   if (left == tDynamic || right == tDynamic) return tDynamic;
   if (left == tVoid || right == tVoid) return tVoid;
+  if (typeIsSubtype(left, right)) return right;
+  if (typeIsSubtype(right, left)) return left;
   if (left == tNull) return nullableType(right);
   if (right == tNull) return nullableType(left);
   if (typeIsNullable(left) || typeIsNullable(right)) {
