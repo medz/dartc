@@ -32,11 +32,13 @@ SourceProgram feSources = SourceProgram(
   -1,
   0,
   '',
+  -1,
 );
 List<Token> feTokens = <Token>[];
 int feAt = 0;
 List<int> feBodies = <int>[];
 List<int> feGlobalValues = <int>[];
+List<int> feGlobalSources = <int>[];
 List<int> feRawGlobals = <int>[];
 List<GlobalInitializer> feGlobalInitializers = <GlobalInitializer>[];
 int feRuntimeTokens = 0;
@@ -294,7 +296,16 @@ void feFunctionSignature(
     parameterTypes.add(feParamTypes[paramStart + p]);
   }
   functions.add(
-    FunctionInfo(name, 0, count, count, type, parameterTypes, <int>[]),
+    FunctionInfo(
+      name,
+      0,
+      count,
+      count,
+      type,
+      parameterTypes,
+      <int>[],
+      feTokens[feAt - 1].source,
+    ),
   );
   feParamStarts.add(paramStart);
   feBodies.add(feAt);
@@ -431,6 +442,7 @@ void feSignatures() {
       feFunctionSignature(name, type, -1, false, external);
     } else {
       globalNames.add(name);
+      feGlobalSources.add(feTokens[declaration].source);
       globalTypes.add(type);
       if (declaration < feRuntimeTokens)
         feRawGlobals.add(1);
@@ -1415,7 +1427,16 @@ void fePrepareGlobals(int count) {
       var type = globalTypes[i];
       initializer.getter = functions.length;
       functions.add(
-        FunctionInfo('#get:' + globalNames[i], 0, 0, 0, type, <int>[], <int>[]),
+        FunctionInfo(
+          '#get:' + globalNames[i],
+          0,
+          0,
+          0,
+          type,
+          <int>[],
+          <int>[],
+          feGlobalSources[i],
+        ),
       );
       initializer.setter = functions.length;
       functions.add(
@@ -1427,10 +1448,12 @@ void fePrepareGlobals(int count) {
           type,
           <int>[type],
           <int>[type],
+          feGlobalSources[i],
         ),
       );
       initializer.state = globalNames.length;
       globalNames.add('#state:' + globalNames[i]);
+      feGlobalSources.add(feGlobalSources[i]);
       globalTypes.add(tInt);
     }
     feGlobalInitializers.add(initializer);
@@ -1582,6 +1605,7 @@ void parseSource(SourceProgram source) {
   feInitializingGlobal = -1;
   feBodies.clear();
   feGlobalValues.clear();
+  feGlobalSources.clear();
   feRawGlobals.clear();
   feGlobalInitializers.clear();
   _feLiteralTypes.clear();
@@ -1596,12 +1620,15 @@ void parseSource(SourceProgram source) {
   feContinues.clear();
   feLoopBreaks.clear();
   feLoopContinues.clear();
-  functions.add(FunctionInfo('__init', 0, 0, 0, tVoid, <int>[], <int>[]));
+  functions.add(
+    FunctionInfo('__init', 0, 0, 0, tVoid, <int>[], <int>[], sourceUnknown),
+  );
   feBodies.add(0);
   feParamStarts.add(0);
   feOwners.add(-1);
   feConstructors.add(0);
   feSources = source;
+  entrySource = source.entry;
   feTokens = source.tokens;
   feAt = 0;
   fePendingTypeClosers = 0;

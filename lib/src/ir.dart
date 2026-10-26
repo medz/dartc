@@ -84,6 +84,7 @@ class FunctionInfo {
   int result;
   List<int> parameterTypes;
   List<int> localTypes;
+  int source;
 
   FunctionInfo(
     this.name,
@@ -93,6 +94,7 @@ class FunctionInfo {
     this.result,
     this.parameterTypes,
     this.localTypes,
+    this.source,
   );
 }
 
@@ -103,6 +105,7 @@ List<String> globalNames = <String>[];
 List<int> globalTypes = <int>[];
 List<String> strings = <String>[];
 
+int entrySource = -1;
 int targetOS = 0;
 int imageKind = 0;
 int stringUnitBytes = 8;
