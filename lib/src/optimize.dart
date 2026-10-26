@@ -243,60 +243,210 @@ void sccpRewrite(SsaFunction function, SccpState state) {
   function.blocks = blocks;
 }
 
-void sccpUseEdge(List<int> uses, SsaEdge edge) {
+void markLiveValue(List<int> live, List<int> work, int value) {
+  if (live[value] == 0) {
+    live[value] = 1;
+    work.add(value);
+  }
+}
+
+void addEdgeDependencies(
+  SsaFunction function,
+  List<List<int>> dependencies,
+  SsaEdge edge,
+) {
+  var parameters = function.blocks[edge.target].parameters;
   var i = 0;
   while (i < edge.arguments.length) {
-    var value = edge.arguments[i];
-    uses[value] = uses[value] + 1;
+    var value = parameters[i];
+    if (dependencies[value].length == 0) {
+      dependencies[value] = <int>[edge.arguments[i]];
+    } else {
+      dependencies[value].add(edge.arguments[i]);
+    }
     i++;
   }
 }
 
-void sccpRemoveDeadValues(SsaFunction function) {
+int resolveValue(List<int> aliases, int value) {
+  var result = value;
+  while (aliases[result] != result) result = aliases[result];
+  while (aliases[value] != value) {
+    var next = aliases[value];
+    aliases[value] = result;
+    value = next;
+  }
+  return result;
+}
+
+List<int> simplifyBlockParameters(
+  SsaFunction function,
+  List<List<int>> dependencies,
+) {
+  List<int> aliases = <int>[];
+  var i = 0;
+  while (i < function.valueTypes.length) {
+    aliases.add(i);
+    i++;
+  }
   var changed = true;
   while (changed) {
     changed = false;
-    var uses = ssaFill(function.valueTypes.length, 0);
     var b = 0;
     while (b < function.blocks.length) {
-      var block = function.blocks[b];
-      var i = 0;
-      while (i < block.instructions.length) {
-        var inputs = block.instructions[i].inputs;
+      var parameters = function.blocks[b].parameters;
+      i = 0;
+      while (i < parameters.length) {
+        var parameter = parameters[i];
+        if (aliases[parameter] == parameter) {
+          var inputs = dependencies[parameter];
+          var candidate = -1;
+          var n = 0;
+          while (n < inputs.length) {
+            var input = resolveValue(aliases, inputs[n]);
+            if (input != parameter) {
+              if (candidate == -1) {
+                candidate = input;
+              } else if (candidate != input) {
+                candidate = -2;
+                break;
+              }
+            }
+            n++;
+          }
+          if (candidate >= 0) {
+            aliases[parameter] = candidate;
+            changed = true;
+          }
+        }
+        i++;
+      }
+      b++;
+    }
+  }
+  return aliases;
+}
+
+void removeDeadEdgeArguments(
+  SsaFunction function,
+  List<int> live,
+  List<int> aliases,
+  SsaEdge edge,
+) {
+  var parameters = function.blocks[edge.target].parameters;
+  List<int> kept = <int>[];
+  var i = 0;
+  while (i < parameters.length) {
+    if (live[parameters[i]] != 0) {
+      kept.add(resolveValue(aliases, edge.arguments[i]));
+    }
+    i++;
+  }
+  edge.arguments = kept;
+}
+
+void removeDeadValues(SsaFunction function) {
+  List<int> roots = <int>[];
+  List<List<int>> dependencies = <List<int>>[];
+  List<int> empty = <int>[];
+  var i = 0;
+  while (i < function.valueTypes.length) {
+    dependencies.add(empty);
+    i++;
+  }
+  var b = 0;
+  while (b < function.blocks.length) {
+    var block = function.blocks[b];
+    i = 0;
+    while (i < block.instructions.length) {
+      var instruction = block.instructions[i];
+      if (instruction.value >= 0) {
+        dependencies[instruction.value] = instruction.inputs;
+      }
+      if (instruction.effects != 0) {
         var n = 0;
-        while (n < inputs.length) {
-          uses[inputs[n]] = uses[inputs[n]] + 1;
+        while (n < instruction.inputs.length) {
+          roots.add(instruction.inputs[n]);
           n++;
         }
-        i++;
       }
-      var end = block.end;
-      if (end.kind == 2 || end.kind == 3 && end.value >= 0) {
-        uses[end.value] = uses[end.value] + 1;
-      }
-      if (end.kind == 1 || end.kind == 2) sccpUseEdge(uses, end.first);
-      if (end.kind == 2) sccpUseEdge(uses, end.second);
-      b++;
+      i++;
     }
-    b = 0;
-    while (b < function.blocks.length) {
-      var block = function.blocks[b];
-      List<SsaInstruction> kept = <SsaInstruction>[];
-      var i = 0;
-      while (i < block.instructions.length) {
-        var instruction = block.instructions[i];
-        if (instruction.effects == 0 &&
-            instruction.value >= 0 &&
-            uses[instruction.value] == 0) {
-          changed = true;
-        } else {
-          kept.add(instruction);
+    var end = block.end;
+    if (end.kind == 2 || end.kind == 3 && end.value >= 0) {
+      roots.add(end.value);
+    }
+    if (end.kind == 1 || end.kind == 2) {
+      addEdgeDependencies(function, dependencies, end.first);
+    }
+    if (end.kind == 2) {
+      addEdgeDependencies(function, dependencies, end.second);
+    }
+    b++;
+  }
+  var aliases = simplifyBlockParameters(function, dependencies);
+  var live = ssaFill(function.valueTypes.length, 0);
+  List<int> work = <int>[];
+  i = 0;
+  while (i < roots.length) {
+    markLiveValue(live, work, resolveValue(aliases, roots[i]));
+    i++;
+  }
+  i = 0;
+  while (i < work.length) {
+    var inputs = dependencies[work[i]];
+    var n = 0;
+    while (n < inputs.length) {
+      markLiveValue(live, work, resolveValue(aliases, inputs[n]));
+      n++;
+    }
+    i++;
+  }
+  b = 0;
+  while (b < function.blocks.length) {
+    var end = function.blocks[b].end;
+    if (end.value >= 0) end.value = resolveValue(aliases, end.value);
+    if (end.kind == 1 || end.kind == 2) {
+      removeDeadEdgeArguments(function, live, aliases, end.first);
+    }
+    if (end.kind == 2) {
+      removeDeadEdgeArguments(function, live, aliases, end.second);
+    }
+    b++;
+  }
+  b = 0;
+  while (b < function.blocks.length) {
+    var block = function.blocks[b];
+    List<SsaInstruction> kept = <SsaInstruction>[];
+    i = 0;
+    while (i < block.instructions.length) {
+      var instruction = block.instructions[i];
+      if (instruction.effects != 0 ||
+          instruction.value < 0 ||
+          live[instruction.value] != 0) {
+        var n = 0;
+        while (n < instruction.inputs.length) {
+          instruction.inputs[n] = resolveValue(aliases, instruction.inputs[n]);
+          n++;
         }
-        i++;
+        kept.add(instruction);
       }
-      block.instructions = kept;
-      b++;
+      i++;
     }
+    block.instructions = kept;
+    List<int> parameters = <int>[];
+    List<int> localSlots = <int>[];
+    i = 0;
+    while (i < block.parameters.length) {
+      if (live[block.parameters[i]] != 0) {
+        parameters.add(block.parameters[i]);
+        if (i < block.localSlots.length) localSlots.add(block.localSlots[i]);
+      }
+      i++;
+    }
+    block.parameters = parameters;
+    block.localSlots = localSlots;
+    b++;
   }
 }
 
@@ -306,7 +456,7 @@ void optimizeSsa(List<SsaFunction> program) {
     var function = program[i];
     var state = sccpAnalyze(function);
     sccpRewrite(function, state);
-    sccpRemoveDeadValues(function);
+    removeDeadValues(function);
     i++;
   }
 }
