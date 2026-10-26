@@ -1,3 +1,7 @@
+## Unreleased
+
+- Support simple classes, fields, constructors, and direct instance methods.
+
 ## 0.1.0
 
 - Compile functions, control flow, strings, lists, and relative imports.

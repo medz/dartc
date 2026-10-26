@@ -105,6 +105,8 @@ List<int> createMachOExecutable() {
     payloadEnd = payloadEnd + 8 + strings[s].length * 8;
     s = s + 1;
   }
+  int descriptorOffset = payloadEnd;
+  payloadEnd = payloadEnd + classSizes.length * 32;
   int textSize = alignImage(payloadEnd, page);
   int dataSize = alignImage(globalNames.length * 8, page);
   int site = 0;
@@ -112,8 +114,10 @@ List<int> createMachOExecutable() {
     int target = 0;
     if (addressKinds[site] == 0) {
       target = base + stringOffsets[addressTargets[site]];
-    } else {
+    } else if (addressKinds[site] == 1) {
       target = dataBase + addressTargets[site] * 8;
+    } else {
+      target = base + descriptorOffset + addressTargets[site] * 32;
     }
     int word = addressSites[site];
     int pc = base + codeOffset + word * 4;
@@ -227,6 +231,7 @@ List<int> createMachOExecutable() {
     }
     stringIndex = stringIndex + 1;
   }
+  imageDescriptors();
   imageZeros(textSize + 16 - image.length);
   signMachO(image, signatureCommand, linkeditCommand, textSize, 1);
   return image;
@@ -268,6 +273,8 @@ List<int> createElfExecutable() {
     payloadEnd = payloadEnd + 8 + strings[s].length * 8;
     s = s + 1;
   }
+  int descriptorOffset = payloadEnd;
+  payloadEnd = payloadEnd + classSizes.length * 32;
   int dataOffset = alignImage(payloadEnd, 4096);
   int dataBase = base + dataOffset;
   int dataSize = alignImage(globalNames.length * 8, 4096);
@@ -276,8 +283,10 @@ List<int> createElfExecutable() {
     int target = 0;
     if (addressKinds[site] == 0) {
       target = base + stringOffsets[addressTargets[site]];
-    } else {
+    } else if (addressKinds[site] == 1) {
       target = dataBase + addressTargets[site] * 8;
+    } else {
+      target = base + descriptorOffset + addressTargets[site] * 32;
     }
     int word = addressSites[site];
     int pc = base + codeOffset + word * 4;
@@ -327,6 +336,7 @@ List<int> createElfExecutable() {
     }
     stringIndex = stringIndex + 1;
   }
+  imageDescriptors();
   imageZeros(dataOffset - image.length);
   return image;
 }
@@ -334,4 +344,15 @@ List<int> createElfExecutable() {
 List<int> createExecutable() {
   if (targetOS == 1) return createElfExecutable();
   return createMachOExecutable();
+}
+
+void imageDescriptors() {
+  int descriptor = 0;
+  while (descriptor < classSizes.length) {
+    image64(descriptor);
+    image64(classSizes[descriptor]);
+    image64((classSizes[descriptor] - 16) ~/ 8);
+    image64(classPointerMasks[descriptor]);
+    descriptor = descriptor + 1;
+  }
 }

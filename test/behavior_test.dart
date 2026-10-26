@@ -1,6 +1,25 @@
 import 'dart:io';
 
 const program = r'''
+class FunctionInfo {
+  String name;
+  int start;
+  int parameters;
+  int locals;
+  int result;
+  List<int> offsets;
+  bool active;
+  FunctionInfo(this.name, this.start, this.parameters, this.locals, this.result,
+      this.offsets, this.active);
+
+  int frameWords(int extra) {
+    this.locals += extra;
+    return this.parameters + this.locals;
+  }
+
+  String label() => this.name + ':' + this.start.toString();
+}
+
 int bias = 7;
 int calls = 0;
 int initial = initialize();
@@ -47,6 +66,17 @@ void main(List<String> args) {
   print(10000000000 + int.parse('0xff'));
   print(args.length);
   print(args[1]);
+  var info = FunctionInfo('entry', 2, 1, 3, 1, <int>[4, 8], true);
+  var functions = <FunctionInfo>[info];
+  functions[0].start = 7;
+  functions[0].parameters++;
+  print(functions[0].label());
+  print(info.frameWords(2));
+  print(functions[0].offsets[1]);
+  functions[0].offsets[1] += 5;
+  print(info.offsets[1]);
+  print(info.active);
+  print(functions.first == info);
 }
 ''';
 

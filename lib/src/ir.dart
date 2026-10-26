@@ -4,6 +4,7 @@ const int tString = 2;
 const int tBool = 3;
 const int tPointer = 4;
 const int tList = 100;
+const int tClass = 10000;
 
 const int opInt = 1;
 const int opString = 2;
@@ -38,6 +39,7 @@ const int opCall = 30;
 const int opBuiltin = 31;
 const int opReturn = 32;
 const int opNot = 33;
+const int opDescriptor = 34;
 
 const int bPrintString = 1;
 const int bPrintInt = 2;
@@ -69,6 +71,9 @@ const int bHostStdPath = 27;
 const int bArguments = 28;
 const int bStringLastIndexOf = 29;
 const int bHostTarget = 30;
+const int bObjectNew = 31;
+const int bObjectGet = 32;
+const int bObjectSet = 33;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;
@@ -77,12 +82,29 @@ const int bNativeStore8 = 103;
 const int bNativeSyscall = 104;
 const int bNativeTarget = 105;
 
+class FunctionInfo {
+  String name;
+  int start;
+  int parameters;
+  int locals;
+  int result;
+  List<int> parameterTypes;
+  List<int> localTypes;
+
+  FunctionInfo(
+    this.name,
+    this.start,
+    this.parameters,
+    this.locals,
+    this.result,
+    this.parameterTypes,
+    this.localTypes,
+  );
+}
+
 List<int> ir = <int>[];
-List<String> functionNames = <String>[];
-List<int> functionStarts = <int>[];
-List<int> functionParams = <int>[];
-List<int> functionLocals = <int>[];
-List<int> functionReturns = <int>[];
+List<int> irTypes = <int>[];
+List<FunctionInfo> functions = <FunctionInfo>[];
 List<String> globalNames = <String>[];
 List<int> globalTypes = <int>[];
 List<String> strings = <String>[];
@@ -92,3 +114,6 @@ int imageKind = 0;
 List<String> exportNames = <String>[];
 List<int> exportFunctions = <int>[];
 List<int> exportParameters = <int>[];
+
+List<int> classSizes = <int>[];
+List<int> classPointerMasks = <int>[];

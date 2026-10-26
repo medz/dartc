@@ -74,8 +74,8 @@ void armStoreLocal(int slot, int register) {
 
 int armFunctionId(String name) {
   var i = 0;
-  while (i < functionNames.length) {
-    if (functionNames[i] == name) return i;
+  while (i < functions.length) {
+    if (functions[i].name == name) return i;
     i = i + 1;
   }
   print('Missing native function: ' + name);
@@ -114,6 +114,9 @@ int armBuiltinFunction(int builtin) {
   if (builtin == bHostStdPath) return armFunctionId('rtHostStdPath');
   if (builtin == bArguments) return armFunctionId('rtArguments');
   if (builtin == bHostTarget) return armFunctionId('rtHostTarget');
+  if (builtin == bObjectNew) return armFunctionId('rtObjectNew');
+  if (builtin == bObjectGet) return armFunctionId('rtObjectGet');
+  if (builtin == bObjectSet) return armFunctionId('rtObjectSet');
   print('Unknown native builtin: ' + builtin.toString());
   hostExit(1);
 }
@@ -158,7 +161,7 @@ void generateArm64() {
     i = i + 1;
   }
   i = 0;
-  while (i < functionNames.length) {
+  while (i < functions.length) {
     armFunctionOffsets.add(0);
     i = i + 1;
   }
@@ -190,32 +193,35 @@ void generateArm64() {
     // Context-free libraries have neither application startup nor initializers.
     function = 1;
   }
-  while (function < functionNames.length) {
+  while (function < functions.length) {
     armFunctionOffsets[function] = machineCode.length;
     machineCode.add(0xa9bf7bfd);
     machineCode.add(0x910003fd);
-    var frame = ((functionLocals[function] * 8 + 15) ~/ 16) * 16;
+    var frame = ((functions[function].locals * 8 + 15) ~/ 16) * 16;
     while (frame >= 4096) {
       machineCode.add(0xd14007ff);
       frame = frame - 4096;
     }
     if (frame != 0) machineCode.add(0xd10003ff | (frame << 10));
     i = 0;
-    while (i < functionParams[function]) {
+    while (i < functions[function].parameters) {
       armStoreLocal(i, i);
       i = i + 1;
     }
-    var position = functionStarts[function];
+    var position = functions[function].start;
     var end = ir.length;
-    if (function + 1 < functionNames.length) end = functionStarts[function + 1];
+    if (function + 1 < functions.length) end = functions[function + 1].start;
     while (position < end) {
       armIrOffsets[position] = machineCode.length;
       var op = ir[position];
       position = position + 1;
       if (imageKind != 0 &&
-          (op == opString || op == opLoadGlobal || op == opStoreGlobal)) {
+          (op == opString ||
+              op == opDescriptor ||
+              op == opLoadGlobal ||
+              op == opStoreGlobal)) {
         print(
-          'Native libraries require functions without strings or global state',
+          'Native libraries require functions without strings, objects or global state',
         );
         hostExit(1);
       }
@@ -227,6 +233,12 @@ void generateArm64() {
       }
       if (op == opString) {
         armAddress(0, ir[position]);
+        position = position + 1;
+        armPush(0);
+        continue;
+      }
+      if (op == opDescriptor) {
+        armAddress(2, ir[position]);
         position = position + 1;
         armPush(0);
         continue;

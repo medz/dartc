@@ -522,3 +522,25 @@ int rtHostFinish(int path, int outputTarget) {
   rtHostExit(0);
   return 0;
 }
+
+int rtObjectNew(int descriptor) {
+  var size = nativeLoad64(descriptor + 8);
+  var object = rtAlloc(size);
+  nativeStore64(object, descriptor);
+  nativeStore64(object + 8, 0);
+  var offset = 16;
+  while (offset < size) {
+    nativeStore64(object + offset, 0);
+    offset = offset + 8;
+  }
+  return object;
+}
+
+int rtObjectGet(int object, int index) {
+  return nativeLoad64(object + 16 + index * 8);
+}
+
+int rtObjectSet(int object, int index, int value) {
+  nativeStore64(object + 16 + index * 8, value);
+  return value;
+}
