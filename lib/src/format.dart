@@ -91,34 +91,75 @@ void imageSection(
   image32(0);
 }
 
+class ConstantLayout {
+  List<int> stringOffsets;
+  List<int> descriptorOffsets;
+  int end;
+
+  ConstantLayout(this.stringOffsets, this.descriptorOffsets, this.end);
+}
+
+ConstantLayout layoutConstants(int start) {
+  List<int> stringOffsets = <int>[];
+  List<int> descriptorOffsets = <int>[];
+  int i = 0;
+  while (i < strings.length) {
+    stringOffsets.add(-1);
+    i++;
+  }
+  i = 0;
+  while (i < classSizes.length) {
+    descriptorOffsets.add(-1);
+    i++;
+  }
+  i = 0;
+  while (i < addressKinds.length) {
+    if (addressKinds[i] == 0) {
+      stringOffsets[addressTargets[i]] = 0;
+    } else if (addressKinds[i] == 2) {
+      descriptorOffsets[addressTargets[i]] = 0;
+    }
+    i++;
+  }
+  int end = start;
+  i = 0;
+  while (i < strings.length) {
+    if (stringOffsets[i] == 0) {
+      stringOffsets[i] = end;
+      end = end + alignImage(8 + strings[i].length * stringUnitBytes, 8);
+    }
+    i++;
+  }
+  i = 0;
+  while (i < classSizes.length) {
+    if (descriptorOffsets[i] == 0) {
+      descriptorOffsets[i] = end;
+      end = end + 32;
+    }
+    i++;
+  }
+  return ConstantLayout(stringOffsets, descriptorOffsets, end);
+}
+
 List<int> createMachOExecutable() {
   int base = 0x100000000;
   int dataBase = 0x110000000;
   int page = 0x4000;
   int codeOffset = 0x1000;
   int constantOffset = alignImage(codeOffset + machineCode.length * 4, 8);
-  List<int> stringOffsets = <int>[];
-  int payloadEnd = constantOffset;
-  int s = 0;
-  while (s < strings.length) {
-    stringOffsets.add(payloadEnd);
-    payloadEnd =
-        payloadEnd + alignImage(8 + strings[s].length * stringUnitBytes, 8);
-    s = s + 1;
-  }
-  int descriptorOffset = payloadEnd;
-  payloadEnd = payloadEnd + classSizes.length * 32;
+  ConstantLayout constants = layoutConstants(constantOffset);
+  int payloadEnd = constants.end;
   int textSize = alignImage(payloadEnd, page);
   int dataSize = alignImage(globalNames.length * 8, page);
   int site = 0;
   while (site < addressSites.length) {
     int target = 0;
     if (addressKinds[site] == 0) {
-      target = base + stringOffsets[addressTargets[site]];
+      target = base + constants.stringOffsets[addressTargets[site]];
     } else if (addressKinds[site] == 1) {
       target = dataBase + addressTargets[site] * 8;
     } else {
-      target = base + descriptorOffset + addressTargets[site] * 32;
+      target = base + constants.descriptorOffsets[addressTargets[site]];
     }
     int word = addressSites[site];
     int pc = base + codeOffset + word * 4;
@@ -221,23 +262,7 @@ List<int> createMachOExecutable() {
     instruction = instruction + 1;
   }
   imageZeros(constantOffset - image.length);
-  int stringIndex = 0;
-  while (stringIndex < strings.length) {
-    String value = strings[stringIndex];
-    image64(value.length);
-    int character = 0;
-    while (character < value.length) {
-      if (stringUnitBytes == 2) {
-        image16(value.codeUnitAt(character));
-      } else {
-        image64(value.codeUnitAt(character));
-      }
-      character = character + 1;
-    }
-    imageZeros(alignImage(image.length, 8) - image.length);
-    stringIndex = stringIndex + 1;
-  }
-  imageDescriptors();
+  imageConstants(constants);
   imageZeros(textSize + 16 - image.length);
   signMachO(image, signatureCommand, linkeditCommand, textSize, 1);
   return image;
@@ -271,17 +296,8 @@ List<int> createElfExecutable() {
   int base = 0x400000;
   int codeOffset = 0x1000;
   int constantOffset = alignImage(codeOffset + machineCode.length * 4, 8);
-  List<int> stringOffsets = <int>[];
-  int payloadEnd = constantOffset;
-  int s = 0;
-  while (s < strings.length) {
-    stringOffsets.add(payloadEnd);
-    payloadEnd =
-        payloadEnd + alignImage(8 + strings[s].length * stringUnitBytes, 8);
-    s = s + 1;
-  }
-  int descriptorOffset = payloadEnd;
-  payloadEnd = payloadEnd + classSizes.length * 32;
+  ConstantLayout constants = layoutConstants(constantOffset);
+  int payloadEnd = constants.end;
   int dataOffset = alignImage(payloadEnd, 4096);
   int dataBase = base + dataOffset;
   int dataSize = alignImage(globalNames.length * 8, 4096);
@@ -289,11 +305,11 @@ List<int> createElfExecutable() {
   while (site < addressSites.length) {
     int target = 0;
     if (addressKinds[site] == 0) {
-      target = base + stringOffsets[addressTargets[site]];
+      target = base + constants.stringOffsets[addressTargets[site]];
     } else if (addressKinds[site] == 1) {
       target = dataBase + addressTargets[site] * 8;
     } else {
-      target = base + descriptorOffset + addressTargets[site] * 32;
+      target = base + constants.descriptorOffsets[addressTargets[site]];
     }
     int word = addressSites[site];
     int pc = base + codeOffset + word * 4;
@@ -332,23 +348,7 @@ List<int> createElfExecutable() {
     instruction = instruction + 1;
   }
   imageZeros(constantOffset - image.length);
-  int stringIndex = 0;
-  while (stringIndex < strings.length) {
-    String value = strings[stringIndex];
-    image64(value.length);
-    int character = 0;
-    while (character < value.length) {
-      if (stringUnitBytes == 2) {
-        image16(value.codeUnitAt(character));
-      } else {
-        image64(value.codeUnitAt(character));
-      }
-      character = character + 1;
-    }
-    imageZeros(alignImage(image.length, 8) - image.length);
-    stringIndex = stringIndex + 1;
-  }
-  imageDescriptors();
+  imageConstants(constants);
   imageZeros(dataOffset - image.length);
   return image;
 }
@@ -358,13 +358,33 @@ List<int> createExecutable() {
   return createMachOExecutable();
 }
 
-void imageDescriptors() {
+void imageConstants(ConstantLayout layout) {
+  int stringIndex = 0;
+  while (stringIndex < strings.length) {
+    if (layout.stringOffsets[stringIndex] >= 0) {
+      String value = strings[stringIndex];
+      image64(value.length);
+      int character = 0;
+      while (character < value.length) {
+        if (stringUnitBytes == 2) {
+          image16(value.codeUnitAt(character));
+        } else {
+          image64(value.codeUnitAt(character));
+        }
+        character++;
+      }
+      imageZeros(alignImage(image.length, 8) - image.length);
+    }
+    stringIndex++;
+  }
   int descriptor = 0;
   while (descriptor < classSizes.length) {
-    image64(descriptor);
-    image64(classSizes[descriptor]);
-    image64((classSizes[descriptor] - 16) ~/ 8);
-    image64(classPointerMasks[descriptor]);
-    descriptor = descriptor + 1;
+    if (layout.descriptorOffsets[descriptor] >= 0) {
+      image64(descriptor);
+      image64(classSizes[descriptor]);
+      image64((classSizes[descriptor] - 16) ~/ 8);
+      image64(classPointerMasks[descriptor]);
+    }
+    descriptor++;
   }
 }
