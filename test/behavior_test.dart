@@ -6,6 +6,14 @@ const program = r'''
 Never neverStops() { while (true) {} }
 Never get neverGetter => neverStops();
 void neverGetterCall() { neverGetter(); }
+Never nullAssertion(Null value) {
+  value!;
+  var inferred = [value];
+  List<Never> checked = inferred;
+  print(checked);
+  return value;
+}
+int neverAssertion(Never value) { value!; }
 void voidCastNever() {
   void value = 1;
   value as Never;
@@ -18,6 +26,8 @@ int neverLocalCoalescing(Never value, dynamic fallback) {
 }
 
 Never neverExpressions(Never value) {
+  value!<int>();
+  (value as Never)<int>();
   Never property = value.missing;
   Never indexed = value['index'];
   var assignments = [value.missing = 1];
@@ -572,6 +582,9 @@ void main(List<String> args) {
       "void main() { dynamic value = 'wrong'; print('before'); value as int; print('after'); }",
       "void main() { dynamic value = null; print('before'); value as int; print('after'); }",
       "void main() { dynamic value = null; print('before'); value as Never; print('after'); }",
+      'void main() { dynamic value = null; print("before"); value!; print("after"); }',
+      'String? missing() { print("getter"); return null; } void main() { print("before"); missing()!; print("after"); }',
+      'void main() { Null value; print("before"); value!; print("after"); }',
       "void main() { List<String> values = <Never>[]; print('before'); values.add('x'); }",
       "void main() { dynamic value = 1; print('before'); value as bool; print('after'); }",
       'void wrong() => false; void main() { print("before"); wrong() as int; print("after"); }',
@@ -752,6 +765,13 @@ void main() {
     compare(File('${temporary.path}/property-imports.dart'), []);
     compare(File('${temporary.path}/top-accessor-imports.dart'), []);
     final rejected = [
+      'int f() => 1; void main() { print(f<int>()); }',
+      'void main() { print<int>(1); }',
+      'void main() { List<int>.filled<int>(1, 0); }',
+      'void main() { List<int, String>.filled(2, 1); }',
+      'void main() { <int>[].add<int>(1); }',
+      'const same = identical<int>(1, 1); void main() { print(same); }',
+      'class C { int value = 1; C(); } void main() { var value = C(); print(value<int>.value); }',
       'void f(Never value) { value.foo(x: 1, x: 2); } void main() {}',
       'void f(Never value) { value.foo<Missing>(); } void main() {}',
       'void noop() {} void f(Never value) { value[noop()]; } void main() {}',
@@ -771,6 +791,10 @@ void main() {
       'void value() { return 7; } void main() { value(); }',
       'void value() {} void main() { dynamic result = value(); print(result); }',
       'void value() => 7; void main() { print(value() is int); }',
+      'void noop() {} void main() { noop()!; }',
+      'void main() { final int? value; print(value!); }',
+      'void main() { int? value = 1; value! += 2; }',
+      'void take([int value = 1!]) {} void main() { take(); }',
       'void main() { void value = 7; value as dynamic; print(value); }',
       'void main() { void value = 7; value as Object?; print(value); }',
       'void value() {} void main() { value() ?? 1; }',

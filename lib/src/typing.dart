@@ -14,6 +14,12 @@ bool typingReceiver(int type) {
   return type == tDynamic || !typeCanBeNull(type);
 }
 
+int typingNullAssertion(int type) {
+  if (type == tVoid) return -1;
+  if (type == tNull) return tNever;
+  return typeNonNullable(type);
+}
+
 int typingCoalescing(int left, int right) {
   if (left == tVoid) return -1;
   if (left == tNull) return right;

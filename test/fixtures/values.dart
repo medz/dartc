@@ -884,6 +884,46 @@ void coalescingContexts() {
   coalescingAssignmentValues();
 }
 
+void nullAssertionValues() {
+  int? number = pass(0);
+  bool? flag = pass(false);
+  String? text = pass('字🙂');
+  List<int>? list = pass(<int>[7]);
+  Object? object = pass(9);
+  print(<Object>[
+    number! + 1,
+    !flag!,
+    text!.length,
+    identical(list, list!),
+    object!,
+  ]);
+  print(<Object>[number + 1, flag && true, text.length, list[0]]);
+  var inferred = [object];
+  List<Object> objects = inferred;
+  print(inferred is List<int>);
+  print(objects);
+  dynamic unknown = pass(9223372036854775807);
+  var dynamicValues = [unknown!];
+  print(dynamicValues is List<int>);
+  print(dynamicValues);
+  for (dynamic value in <dynamic>[0, false, '', const <int>[]]) print(value!);
+  // ignore: unnecessary_non_null_assertion
+  List<int> contextual = []!;
+  contextual.add(1);
+  // ignore: unnecessary_non_null_assertion
+  List<List<int>> nested = (null ?? [[]])!;
+  nested[0].add(2);
+  print([contextual, nested]);
+  var box = Box(0);
+  box.cached = 0;
+  conditionTrace = '';
+  print((argumentValue(1, box) as Box).conditionalAccess!);
+  print(conditionTrace);
+  print((opaqueValue(7) as dynamic)!);
+  // ignore: unnecessary_non_null_assertion
+  print(number!!);
+}
+
 final int lazyFinalValue = conditionChoice(9);
 
 void finalAssignments(bool flag) {
@@ -1595,6 +1635,7 @@ void main(List<String> args) {
   filledLists();
   conditionContexts();
   coalescingContexts();
+  nullAssertionValues();
   finalContexts();
   neverContexts();
   localBindings();

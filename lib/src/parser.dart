@@ -207,7 +207,12 @@ AstExpression parserPrimary(Parser parser) {
   );
 }
 
-AstExpression parserCall(Parser parser, AstExpression callee, int token) {
+AstExpression parserCall(
+  Parser parser,
+  AstExpression callee,
+  int token,
+  List<AstType> typeArguments,
+) {
   parserExpect(parser, '(');
   List<AstExpression> children = <AstExpression>[callee];
   while (!parserIs(parser, ')')) {
@@ -232,17 +237,25 @@ AstExpression parserCall(Parser parser, AstExpression callee, int token) {
     if (!parserTake(parser, ',')) break;
   }
   parserExpect(parser, ')');
-  return AstExpression(astCall, '', children, <AstType>[], token);
+  return AstExpression(astCall, '', children, typeArguments, token);
 }
 
 AstExpression parserPostfix(Parser parser) {
   var expression = parserPrimary(parser);
   while (true) {
     var token = parser.position;
-    if ((expression.kind == astName || expression.kind == astMember) &&
-        parserIs(parser, '<') &&
-        parserHasTypeArguments(parser, true)) {
-      expression.typeArguments = parserTypeArguments(parser);
+    if (parserIs(parser, '<') && parserHasTypeArguments(parser, true)) {
+      var arguments = parserTypeArguments(parser);
+      if (parserIs(parser, '(')) {
+        expression = parserCall(parser, expression, token, arguments);
+      } else {
+        if (expression.kind != astName &&
+            (expression.kind != astMember ||
+                expression.children[0].kind != astName)) {
+          parserError(parser, 'unsupported type application');
+        }
+        expression.typeArguments = arguments;
+      }
     } else if (parserTake(parser, '.')) {
       var member = parser.position;
       var name = parserName(parser);
@@ -254,7 +267,7 @@ AstExpression parserPostfix(Parser parser) {
         member,
       );
     } else if (parserIs(parser, '(')) {
-      expression = parserCall(parser, expression, token);
+      expression = parserCall(parser, expression, token, const <AstType>[]);
     } else if (parserTake(parser, '[')) {
       var index = parseExpression(parser);
       parserExpect(parser, ']');
@@ -265,7 +278,9 @@ AstExpression parserPostfix(Parser parser) {
         <AstType>[],
         token,
       );
-    } else if (parserTake(parser, '++') || parserTake(parser, '--')) {
+    } else if (parserTake(parser, '!') ||
+        parserTake(parser, '++') ||
+        parserTake(parser, '--')) {
       expression = AstExpression(
         astPostfix,
         parser.tokens[token].text,

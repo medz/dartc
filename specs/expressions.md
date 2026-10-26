@@ -25,7 +25,7 @@
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
 | §17.12 `this`、§17.13 实例创建 | 部分实现 | 支持当前类实例、字段、普通构造器与字段形参；const 对象、工厂、重定向和父类构造链未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feWithReceiver`、`feLowerStaticCall`；[values.dart](../test/fixtures/values.dart)：`localBindings`、`argumentCalls`。 |
-| §17.15 函数调用 | 部分实现 | 必需/可选位置参数、命名/required 参数、声明库范围内的默认常量；实参按源码顺序求值后绑定。函数值调用和一般泛型调用尚缺。 | [arguments.dart](../lib/src/arguments.dart)：`bindArguments`；[frontend.dart](../lib/src/frontend.dart)：`feLowerArguments`；[values.dart](../test/fixtures/values.dart)：`argumentCalls`。 |
+| §17.15 函数调用 | 部分实现 | 必需/可选位置参数、命名/required 参数、声明库范围内的默认常量；实参按源码顺序求值后绑定。调用的类型实参与 callee 自有类型分开存储；已有普通函数、构造器和方法拒绝不匹配的类型实参。函数值调用和一般泛型声明尚缺。 | [arguments.dart](../lib/src/arguments.dart)：`bindArguments`；[frontend.dart](../lib/src/frontend.dart)：`feLowerArguments`；[values.dart](../test/fixtures/values.dart)：`argumentCalls`。 |
 | §17.18–17.19 查找与顶层 getter | 部分实现 | 声明库及前缀按读/写分别解析，支持顶层 getter/setter 和变量惰性读取；本库任一同名声明遮蔽导入的两侧。完整库冲突与 SDK 差异见[库追踪](libraries.md)。 | [symbols.dart](../lib/src/symbols.dart)：`resolveSymbol`、`resolveWriteSymbol`；[frontend.dart](../lib/src/frontend.dart)：`feLoadDeclaration`、`feGenerateGlobals`；[values.dart](../test/fixtures/values.dart)：`topAccessorValues`；[behavior_test.dart](../test/behavior_test.dart)：`libraries`。 |
 | §17.20–17.22 成员调用与属性读取 | 部分实现 | 绑定本类实例方法、字段及访问器，getter 读取与 setter 写入分别选择声明和类型；仅写属性不能读取。一般动态成员分派、级联、super 和方法提取未实现。 | [members.dart](../lib/src/members.dart)：`bindClassMembers`；[frontend.dart](../lib/src/frontend.dart)：`feLowerMemberCall`、`feReadBoundMember`；[values.dart](../test/fixtures/values.dart)：`accessorValues`、`localBindings`。 |
 | 空安全补充：`Never` 表达式消费 | 部分实现 | 支持底类型接收者的属性、索引及已有调用入口；结果保留 `Never`，仍检查实参、重复命名参数、类型实参与 void 消费。此类路径不能产生实际接收者，不引入一般动态分派；函数提取等入口仍缺。 | [frontend.dart](../lib/src/frontend.dart)：`feReadMember`、`feLowerNeverArguments`、`feLowerLvalue`；[behavior_test.dart](../test/behavior_test.dart)：`neverExpressions`、`rejected`；规则依据[空安全补充][nnbd]。 |
@@ -43,7 +43,8 @@
 | §17.28 关系运算 | 部分实现 | 整数及整数 `num` 路径；静态数值左侧结果 bool，动态左侧结果 dynamic；浮点和用户运算符未实现。 | [typing.dart](../lib/src/typing.dart)：`typingBinary`；[values.dart](../test/fixtures/values.dart)：`staticContexts`、`conditionComparisons`。 |
 | §17.29–17.30 位运算与移位 | 部分实现 | 整数 `&`、`\|`、`^`、`<<`、`>>`、`>>>` 及布尔位运算；覆盖 64 位边界、大移位与负数失败。用户运算符未实现。 | [typing.dart](../lib/src/typing.dart)：`typingBinary`；[values.dart](../test/fixtures/values.dart)：`literalShifts`、`shiftContexts`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
 | §17.31–17.32 加法与乘法类 | 部分实现 | `+`、`-`、`*`、`~/`、`%`，String 拼接；`int + dynamic` 为 num，`dynamic + int` 为 dynamic，整数 `~/ dynamic` 为 int。`/` 和浮点运算未实现。 | [typing.dart](../lib/src/typing.dart)：`typingBinary`；[frontend.dart](../lib/src/frontend.dart)：`feCombine`；[values.dart](../test/fixtures/values.dart)：`staticContexts`。 |
-| §17.33、§17.35 一元与后缀 | 部分实现 | `!`、数值负号、整数 `~`、前后 `++`/`--`；增减的结果与存储类型分别处理。空断言 `!` 后缀及用户运算符未实现。 | [typing.dart](../lib/src/typing.dart)：`typingUnary`；[frontend.dart](../lib/src/frontend.dart)：`feLowerAssignment`；[values.dart](../test/fixtures/values.dart)：`assignmentValues`、`flowAssignments`。 |
+| §17.33、§17.35 一元与后缀 | 部分实现 | 前缀逻辑 `!`、数值负号、整数 `~`、前后 `++`/`--`；增减的结果与存储类型分别处理。用户运算符未实现。 | [typing.dart](../lib/src/typing.dart)：`typingUnary`；[frontend.dart](../lib/src/frontend.dart)：`feLowerAssignment`；[values.dart](../test/fixtures/values.dart)：`assignmentValues`、`flowAssignments`。 |
+| 空安全补充：空断言 `e!` | 部分实现 | 操作数只求值一次，仅 null 时运行失败（尚不可捕获），否则保留原值；结果为 NonNull(T)，Null 得 Never，dynamic 仍为 dynamic。透传 List 上下文并提升直接局部读取；void 操作数、常量上下文及作为赋值目标均拒绝。 | [typing.dart](../lib/src/typing.dart)：`typingNullAssertion`；[frontend.dart](../lib/src/frontend.dart)：`feLowerNullAssertion`；[values.dart](../test/fixtures/values.dart)：`nullAssertionValues`；[behavior_test.dart](../test/behavior_test.dart)：`nullAssertion`、`neverAssertion`、`neverExpressions`、`rejected`、`failingValues`；依据[空安全补充][nnbd]。 |
 | §17.39–17.40 类型测试与转换 | 部分实现 | `is`、`is!`、`as` 保留单次求值，覆盖当前类型和完整 List 参数；允许无关静态类型的显式 cast 后在运行时检查；`as` 可消费 void 的实际负载，`is` 和隐式消费不因此放宽。函数、记录及一般泛型目标未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerExpression`；[runtime.dart](../lib/src/runtime.dart)：`rtValueMatches`、`rtValueCast`；[values.dart](../test/fixtures/values.dart)：`typeChecks`、`valueContexts`。 |
 | 空安全补充：底类型运算结果 | 部分实现 | 支持的普通运算在 Never 左侧保留底类型；相等、逻辑和 `!` 仍为 bool。具体接收者沿用其结果规则，例如 `int + Never` 为 num。不能因路径不完成而跳过其他操作数的静态检查。 | [typing.dart](../lib/src/typing.dart)：`typingBinary`、`typingUnary`；[frontend.dart](../lib/src/frontend.dart)：`feCombine`；[behavior_test.dart](../test/behavior_test.dart)：`neverNegation`、`neverRelation`、`neverRightArithmetic`、`neverLogical`。 |
 
@@ -62,10 +63,12 @@
 | --- | --- | --- | --- |
 | §17.8、§17.10–17.11、§17.14 | 未实现 | Symbol 字面量、throw 表达式、函数表达式和 isolate 创建尚未接入。 | [ast.dart](../lib/src/ast.dart) 尚无对应表达式；尚无行为验证。 |
 | §17.16–17.17、§17.34 | 未实现 | 函数提取、泛型函数实例化、await；尚无闭包和异步执行基础。 | 后续扩展 [parser.dart](../lib/src/parser.dart)、[frontend.dart](../lib/src/frontend.dart)；尚无行为验证。 |
-| 空安全及后续 Dart 3 表达式 | 未实现 | `?.`、`?[]`、空断言、记录和模式相关表达式未实现；不能由 `??` 覆盖推定支持。 | 后续扩展 [parser.dart](../lib/src/parser.dart)、[ast.dart](../lib/src/ast.dart)；尚无行为验证。 |
+| 空安全及后续 Dart 3 表达式 | 未实现 | `?.`、`?[]`、记录和模式相关表达式未实现；不能由 `??` 或空断言覆盖推定支持。 | 后续扩展 [parser.dart](../lib/src/parser.dart)、[ast.dart](../lib/src/ast.dart)；尚无行为验证。 |
 | 优先级、所有静态错误及完成方式 | 待核对 | 已有解析和拒绝样例；尚未逐规则核验官方语言测试；成功自举不提供完整表达式兼容性证明。 | [parser.dart](../lib/src/parser.dart)：`parserPrecedence`、`parserBinary`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
 
 SDK 3.13.5 对 `??=` 有两处 analyzer/CFE 差异待继续核对：`void` getter 作为左侧时 analyzer 拒绝，CFE 接受表达式语句，dartc 按 void 值消费规则拒绝；`int f(Never value, dynamic fallback) { value ??= fallback; }` 的正常落空被 analyzer 拒绝而被 CFE 接受，dartc 将 `Never` 读取视为不能正常完成，仍检查 RHS。此差异不扩展为一般诊断一致性结论，后者由 [behavior_test.dart](../test/behavior_test.dart) 的 `neverLocalCoalescing` 跟踪。
+
+空断言选择器遵循固定草案的 `selector*`：允许重复 `!` 后继续成员、索引或调用。SDK 3.13.5 的[解析路径][sdk-bang-parser]会拒绝 `value!!.member`、`value!![0]`、`value!!(1)`，而 `(value!!)(1)` 可通过；这是已观察到的规范/SDK 差异，不表示已确认上游缺陷或实现完整诊断兼容。
 
 [draft]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex
 [pdf]: https://dart.dev/to/spec-draft
@@ -74,3 +77,4 @@ SDK 3.13.5 对 `??=` 有两处 analyzer/CFE 差异待继续核对：`void` gette
 [filled]: https://api.dart.dev/stable/3.13.5/dart-core/List/List.filled.html
 [put]: https://api.dart.dev/stable/3.13.5/dart-core/List/operator_put.html
 [clear]: https://api.dart.dev/stable/3.13.5/dart-core/List/clear.html
+[sdk-bang-parser]: https://github.com/dart-lang/sdk/blob/3.13.5/pkg/_fe_analyzer_shared/lib/src/parser/parser_impl.dart#L7400-L7413

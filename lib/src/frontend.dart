@@ -1068,6 +1068,8 @@ int feNonNullableValue(int type, int token) {
 }
 
 int feLowerHint(AstExpression expression, int context) {
+  if (expression.kind == astPostfix && expression.text == '!')
+    return feLowerNullAssertion(expression, context);
   if (expression.kind == astList && expression.constant) {
     feConstants.localTypes = feFlow.types;
     var value = evaluateConstant(feConstants, expression, context, true);
@@ -1232,6 +1234,8 @@ void feGenerateConstantObjects() {
 }
 
 int feLowerArguments(AstExpression call, int start, int function) {
+  if (call.typeArguments.length != 0)
+    feAstError(call.token, 'nongeneric call does not accept type arguments');
   var parameters = feFunctionNodes[function].parameters;
   var offset = feParamStarts[function];
   if (feOwners[function] >= 0) offset++;
@@ -1329,11 +1333,10 @@ int feLowerPointerBinding(AstExpression call) {
       'FFI callback bindings require library output and a top-level binding',
     );
   }
-  var callee = call.children[0];
-  if (callee.typeArguments.length != 1 || call.children.length < 2) {
+  if (call.typeArguments.length != 1 || call.children.length < 2) {
     feAstError(call.token, 'FFI callback requires a signature and function');
   }
-  var signature = callee.typeArguments[0];
+  var signature = call.typeArguments[0];
   var binding = feTypeSymbol(signature);
   if (binding < 0 || feSymbols.declarations[binding].kind != symbolNativeType) {
     feAstError(call.token, 'unknown FFI signature ' + signature.name);
@@ -1427,6 +1430,8 @@ int feLowerBuiltinArguments(AstExpression call, int builtin) {
 }
 
 int feLowerBuiltinCall(AstExpression call, int builtin) {
+  if (call.typeArguments.length != 0)
+    feAstError(call.token, 'nongeneric call does not accept type arguments');
   if (builtin == bValueIdentical) {
     if (call.children.length != 3)
       feAstError(call.token, 'argument count for identical');
@@ -1499,6 +1504,8 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
       member == 'fromFunction') {
     return feLowerPointerBinding(call);
   }
+  if (call.typeArguments.length != 0)
+    feAstError(call.token, 'nongeneric call does not accept type arguments');
   if (declaration.source == sourceCore &&
       name == 'List' &&
       member == 'filled') {
@@ -1507,6 +1514,8 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
     }
     var element = -1;
     if (receiver.typeArguments.length != 0) {
+      if (receiver.typeArguments.length != 1)
+        feAstError(receiver.token, 'List requires one type argument');
       element = resolveType(feSymbols, receiver.typeArguments[0]);
     } else if (context > 0 && typeIsList(context)) {
       element = typeArgument(context);
@@ -1556,9 +1565,11 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
   var receiver = callee.children[0];
   var member = callee.text;
   var type = feLowerExpression(receiver);
-  if (type == tNever) return feLowerNeverArguments(call, callee);
+  if (type == tNever) return feLowerNeverArguments(call);
   if (member == 'toString' &&
       (!feClassType(type) || feMethod(typeArgument(type), member, false) < 0)) {
+    if (call.typeArguments.length != 0)
+      feAstError(call.token, 'nongeneric call does not accept type arguments');
     if (call.children.length != 1)
       feAstError(call.token, 'argument count for toString');
     if (type == tInt)
@@ -1576,13 +1587,15 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
     var function = feMethod(owner, member, false);
     if (function < 0) {
       var value = feReadMember(type, member, call.token);
-      if (value == tNever) return feLowerNeverArguments(call, callee);
+      if (value == tNever) return feLowerNeverArguments(call);
       feAstError(call.token, 'member value is not callable');
     }
     var count = feLowerArguments(call, 1, function) + 1;
     feCall(function, count);
     return functions[function].result;
   }
+  if (call.typeArguments.length != 0)
+    feAstError(call.token, 'nongeneric call does not accept type arguments');
   if (typeIsList(type) && member == 'add') {
     if (call.children.length != 2)
       feAstError(call.token, 'argument count for List.add');
@@ -1668,10 +1681,10 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
   feAstError(call.token, 'unsupported member call ' + member);
 }
 
-int feLowerNeverArguments(AstExpression call, AstExpression callee) {
+int feLowerNeverArguments(AstExpression call) {
   var i = 0;
-  while (i < callee.typeArguments.length) {
-    resolveType(feSymbols, callee.typeArguments[i]);
+  while (i < call.typeArguments.length) {
+    resolveType(feSymbols, call.typeArguments[i]);
     i++;
   }
   var names = <String>[];
@@ -1719,7 +1732,7 @@ int feLowerCall(AstExpression call, int context) {
       return classType(owner);
     }
     var value = feLoadDeclaration(symbol, callee.token);
-    if (value == tNever) return feLowerNeverArguments(call, callee);
+    if (value == tNever) return feLowerNeverArguments(call);
     feAstError(call.token, 'declaration is not callable: ' + declaration.name);
   }
   if (callee.kind == astMember) {
@@ -1731,7 +1744,7 @@ int feLowerCall(AstExpression call, int context) {
     return feLowerMemberCall(call, callee);
   }
   var value = feLowerExpression(callee);
-  if (value == tNever) return feLowerNeverArguments(call, callee);
+  if (value == tNever) return feLowerNeverArguments(call);
   feAstError(call.token, 'unknown call target ' + callee.text);
 }
 
@@ -2101,6 +2114,25 @@ int feLowerCoalescingAssignment(AstExpression expression, FeLvalue target) {
   return result;
 }
 
+int feLowerNullAssertion(AstExpression expression, int context) {
+  var source = expression.children[0];
+  var type = feLowerHint(source, context);
+  var result = typingNullAssertion(type);
+  if (result < 0)
+    feAstError(expression.token, 'void expression cannot be used as a value');
+  if (typeCanBeNull(type)) {
+    feConvertValue(type, tDynamic, source.token);
+    var checked = result;
+    if (type == tDynamic) checked = tObject;
+    feOperand(opTypeCast, checked);
+    if (checked != result) feConvertValue(checked, result, expression.token);
+  }
+  if (source.kind == astName && source.binding >= 0)
+    feFlow.types[source.binding] = result;
+  if (result == tNever) flowUnreachable(feFlow);
+  return result;
+}
+
 int feLowerExpression(AstExpression expression) {
   var type = feLowerValue(expression);
   if (type == tNever) flowUnreachable(feFlow);
@@ -2110,6 +2142,9 @@ int feLowerExpression(AstExpression expression) {
 int feLowerValue(AstExpression expression) {
   expression = feWithReceiver(expression);
   var kind = expression.kind;
+  if ((kind == astName || kind == astMember) &&
+      expression.typeArguments.length != 0)
+    feAstError(expression.token, 'type application values are unsupported');
   if (kind == astInteger) {
     feOperand(opInt, int.parse(expression.text));
     return tInt;
@@ -2169,6 +2204,8 @@ int feLowerValue(AstExpression expression) {
     feBuiltinTyped(bListGet, 2, type);
     return type;
   }
+  if (kind == astPostfix && expression.text == '!')
+    return feLowerNullAssertion(expression, -1);
   if (kind == astAssignment || kind == astPostfix) {
     return feLowerAssignment(expression, kind == astPostfix);
   }

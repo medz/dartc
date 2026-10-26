@@ -444,11 +444,12 @@ ConstantValue _evaluateConstant(
   if (kind == astCall &&
       context.identical >= 0 &&
       _constantSymbol(context, expression.children[0]) == context.identical) {
-    if (expression.children.length != 3) {
+    if (expression.typeArguments.isNotEmpty ||
+        expression.children.length != 3) {
       return _constantError(
         context,
         expression.token,
-        'identical requires two arguments',
+        'identical requires two arguments and no type arguments',
       );
     }
     var left = _evaluateConstant(
