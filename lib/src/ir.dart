@@ -36,6 +36,7 @@ const int opMetadataAddress = 35;
 const int opTypeTest = 36;
 const int opTypeCast = 37;
 const int opJumpTrue = 38;
+const int opConstantData = 39;
 
 const int bPrintString = 1;
 const int bPrintInt = 2;
@@ -93,7 +94,7 @@ const int bValueGt = 53;
 const int bValueGe = 54;
 const int bValueToString = 55;
 const int bValueIs = 56;
-const int bListFreeze = 57;
+const int bListFromData = 57;
 const int bValueIdentical = 58;
 
 const int bNativeLoad64 = 100;
@@ -106,6 +107,7 @@ const int bNativeLoad16 = 106;
 const int bNativeStore16 = 107;
 const int bNativeMetadataAddress = 108;
 const int bNativeCall1 = 109;
+const int bNativeCall0 = 110;
 
 class FunctionInfo {
   String name;
@@ -166,6 +168,7 @@ int irWidth(int op) {
       op == opString ||
       op == opDescriptor ||
       op == opMetadataAddress ||
+      op == opConstantData ||
       op == opTypeTest ||
       op == opTypeCast ||
       op == opLoadLocal ||

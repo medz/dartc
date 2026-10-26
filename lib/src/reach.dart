@@ -1,5 +1,7 @@
 import 'abi.dart';
 import 'ir.dart';
+import 'constant_data.dart';
+import 'layout.dart';
 import 'ssa.dart';
 
 void _reachFunction(List<int> reachable, List<int> work, int target) {
@@ -50,6 +52,14 @@ List<int> reachableFunctions(List<SsaFunction> source) {
         var instruction = instructions[i];
         if (instruction.op == opCall) {
           _reachFunction(reachable, work, instruction.target);
+        } else if (instruction.op == opConstantData) {
+          var data = constantLists[instruction.target];
+          var child = 0;
+          while (child < data.kinds.length) {
+            if (data.kinds[child] == typeKindList)
+              _reachFunction(reachable, work, data.values[child]);
+            child++;
+          }
         } else if (instruction.op == opTypeTest ||
             instruction.op == opTypeCast) {
           var builtin = bValueIs;

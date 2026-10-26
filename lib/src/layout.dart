@@ -1,5 +1,5 @@
 // Shared compiler/runtime object layout. Offsets are bytes.
-const int runtimeAbiVersion = 6;
+const int runtimeAbiVersion = 7;
 const int objectHeaderBytes = 16;
 const int objectFlagsOffset = 8;
 // Static objects store a descriptor displacement relative to their own address.
@@ -26,6 +26,11 @@ const int listTypeOffset = 40;
 const int listInstanceBytes = 48;
 const int arrayLengthOffset = 16;
 const int arrayDataOffset = 24;
+// Compact constant-list metadata stores displacements from each record/entry.
+const int constantListTypeOffset = 0;
+const int constantListLengthOffset = 8;
+const int constantListDataOffset = 16;
+const int constantListTaggedEntryBytes = 16;
 const int descriptorList = 2;
 const int descriptorWordArray = 3;
 const int descriptorRefArray = 4;

@@ -922,7 +922,11 @@ void shiftContexts() {
 
 const Object constantObject = 1;
 const num constantNumber = 1;
-const List<num> constantNumbers = [1, 9223372036854775807];
+const List<num> constantNumbers = [
+  1,
+  9223372036854775807,
+  -9223372036854775808,
+];
 const constantMatrix = [
   [1],
   [1],
@@ -939,6 +943,29 @@ void constantDefaults([
 }
 
 void constantLists() {
+  const words = <int>[-9223372036854775808, 9223372036854775807];
+  const flags = <bool>[false, true];
+  const texts = <String?>[null, '字🙂'];
+  const optional = <int?>[null, 0, -9223372036854775808];
+  const tagged = <dynamic>[
+    0,
+    false,
+    '轻🙂',
+    null,
+    <int>[13],
+  ];
+  const deep = <List<List<String?>>?>[
+    null,
+    <List<String?>>[
+      <String?>['深🙂', null],
+    ],
+  ];
+  print(words);
+  print(flags);
+  print(texts);
+  print(optional);
+  print(tagged);
+  print(deep);
   const first = <Object?>[constantObject, '好🙂', null, true];
   const second = <Object?>[constantNumber, '好🙂', null, true];
   print(first);

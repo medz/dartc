@@ -10,8 +10,9 @@ external int nativeSyscall(int n, int a, int b, int c, int d, int e, int f);
 external int nativeTarget();
 external int nativeMetadataAddress(int features);
 external int nativeCall1(int function, int value);
+external int nativeCall0(int function);
 
-const int rtAbiVersion = 6;
+const int rtAbiVersion = 7;
 
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
@@ -542,6 +543,56 @@ int rtListFilled(int length, int value, int growable, int typeRef) {
   nativeStore64(result + listBackingOffset, backing);
   nativeStore64(result + listLengthOffset, length);
   return result;
+}
+
+int rtListFromData(int data) {
+  var type = data + nativeLoad64(data + constantListTypeOffset);
+  var length = nativeLoad64(data + constantListLengthOffset);
+  var result = rtListNew(type);
+  if (length == 0) return rtListFreeze(result);
+  var backing = rtListBackingNew(type, length);
+  nativeStore64(result + listCapacityOffset, length);
+  nativeStore64(result + listBackingOffset, backing);
+  var element = rtTypeArgument(type);
+  var representation = nativeLoad64(element + typeValueRepOffset);
+  var kind = nativeLoad64(element + typeKindOffset);
+  if (kind == typeKindNullable) {
+    kind = nativeLoad64(rtTypeArgument(element) + typeKindOffset);
+  }
+  var stride = 8;
+  if (representation == storageTagged) stride = constantListTaggedEntryBytes;
+  var entry = data + constantListDataOffset;
+  var index = 0;
+  while (index < length) {
+    var value = nativeLoad64(entry);
+    if (representation == storageRef) {
+      if (value != 0) {
+        if (kind == typeKindList)
+          value = nativeCall0(entry + value);
+        else
+          value = entry + value;
+      }
+    } else if (representation == storageTagged) {
+      var actual = value;
+      value = nativeLoad64(entry + 8);
+      if (actual == typeKindInt)
+        value = rtBoxInt(value);
+      else if (actual == typeKindBool)
+        value = rtBoxBool(value);
+      else if (actual == typeKindNull)
+        value = 0;
+      else if (actual == typeKindList)
+        value = nativeCall0(entry + value);
+      else
+        value = entry + value;
+    }
+    nativeStore64(backing + arrayDataOffset + index * 8, value);
+    nativeStore64(backing + arrayLengthOffset, index + 1);
+    entry = entry + stride;
+    index = index + 1;
+  }
+  nativeStore64(result + listLengthOffset, length);
+  return rtListFreeze(result);
 }
 
 int rtStringFromCodes(int codes) {

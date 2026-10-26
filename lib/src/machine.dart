@@ -171,10 +171,14 @@ void machineSelectInstruction(
     );
     return;
   }
-  if (op == opString || op == opDescriptor || op == opMetadataAddress) {
+  if (op == opString ||
+      op == opDescriptor ||
+      op == opMetadataAddress ||
+      op == opConstantData) {
     int kind = 0;
     if (op == opDescriptor) kind = 2;
     if (op == opMetadataAddress) kind = 3;
+    if (op == opConstantData) kind = 5;
     instructions.add(
       MachineInstruction(mAddress, output, inputs, target, kind, effects),
     );
@@ -233,7 +237,7 @@ void machineSelectInstruction(
       );
       return;
     }
-    if (target == bNativeCall1) {
+    if (target == bNativeCall1 || target == bNativeCall0) {
       instructions.add(
         MachineInstruction(mCallIndirect, output, inputs, 0, 0, effects),
       );

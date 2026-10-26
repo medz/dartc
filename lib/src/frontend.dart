@@ -2,6 +2,7 @@ import 'ast.dart';
 import 'arguments.dart';
 import 'binding.dart';
 import 'constants.dart';
+import 'constant_data.dart';
 import 'resolve_type.dart';
 import 'flow.dart';
 import 'parser.dart';
@@ -56,13 +57,12 @@ class GlobalInitializer {
 }
 
 class ConstantObject {
-  ConstantValue value;
   int getter;
   int slot;
   int state;
-  int token;
+  int data;
 
-  ConstantObject(this.value, this.getter, this.slot, this.state, this.token);
+  ConstantObject(this.getter, this.slot, this.state, this.data);
 }
 
 List<ConstantObject> feConstantObjects = <ConstantObject>[];
@@ -432,6 +432,7 @@ void feOperand(int op, int value) {
   if (op == opInt || op == opMetadataAddress) irTypes[position] = tInt;
   if (op == opString) irTypes[position] = tString;
   if (op == opDescriptor) irTypes[position] = tPointer;
+  if (op == opConstantData) irTypes[position] = tPointer;
   if (op == opTypeTest) irTypes[position] = tBool;
   if (op == opTypeCast) irTypes[position] = value;
   if (op == opLoadLocal) irTypes[position] = feSlotTypes[value];
@@ -474,7 +475,8 @@ int feBuiltinType(int id) {
       id == bNativeSyscall ||
       id == bNativeTarget ||
       id == bNativeMetadataAddress ||
-      id == bNativeCall1)
+      id == bNativeCall1 ||
+      id == bNativeCall0)
     return tInt;
   if (id == bArguments) return listType(tString);
   return tVoid;
@@ -710,6 +712,7 @@ int fePrimitive(String name) {
   if (name == 'nativeTarget') return bNativeTarget;
   if (name == 'nativeMetadataAddress') return bNativeMetadataAddress;
   if (name == 'nativeCall1') return bNativeCall1;
+  if (name == 'nativeCall0') return bNativeCall0;
   return 0;
 }
 
@@ -717,7 +720,8 @@ int fePrimitiveArity(int primitive) {
   if (primitive == bNativeLoad64 ||
       primitive == bNativeLoad8 ||
       primitive == bNativeLoad16 ||
-      primitive == bNativeMetadataAddress)
+      primitive == bNativeMetadataAddress ||
+      primitive == bNativeCall0)
     return 1;
   if (primitive == bNativeStore64 ||
       primitive == bNativeStore8 ||
@@ -1087,14 +1091,29 @@ void feDefaultArgument(int parameter, int token) {
   feConstantValue(feParamDefaults[parameter], feParamTypes[parameter], token);
 }
 
-int feConstantGetter(ConstantValue value, int token) {
+int feConstantGetter(ConstantValue value) {
   var key = value.integer;
   while (feConstantGetters.length <= key) feConstantGetters.add(-1);
   if (feConstantGetters[key] >= 0) return feConstantGetters[key];
+  var kinds = <int>[];
+  var values = <int>[];
   var i = 0;
   while (i < value.elements.length) {
     var child = value.elements[i];
-    if (typeIsList(child.kind)) feConstantGetter(child, token);
+    var kind = typeKindNull;
+    var payload = child.integer;
+    if (child.kind == tInt) kind = typeKindInt;
+    if (child.kind == tBool) kind = typeKindBool;
+    if (child.kind == tString) {
+      kind = typeKindString;
+      payload = internString(child.text);
+    }
+    if (typeIsList(child.kind)) {
+      kind = typeKindList;
+      payload = feConstantGetter(child);
+    }
+    kinds.add(kind);
+    values.add(payload);
     i++;
   }
   var slot = globalNames.length;
@@ -1117,7 +1136,9 @@ int feConstantGetter(ConstantValue value, int token) {
     ),
   );
   feConstantGetters[key] = getter;
-  feConstantObjects.add(ConstantObject(value, getter, slot, state, token));
+  var data = constantLists.length;
+  constantLists.add(ListConstantData(value.kind, kinds, values));
+  feConstantObjects.add(ConstantObject(getter, slot, state, data));
   return getter;
 }
 
@@ -1125,7 +1146,7 @@ void feConstantValue(ConstantValue value, int type, int token) {
   if (value.kind == tString)
     feOperand(opString, internString(value.text));
   else if (typeIsList(value.kind))
-    feCall(feConstantGetter(value, token), 0);
+    feCall(feConstantGetter(value), 0);
   else
     feInteger(value.integer, value.kind);
   feConvertValue(value.kind, type, token);
@@ -1141,18 +1162,9 @@ void feGenerateConstantObjects() {
     feOperand(opLoadGlobal, object.slot);
     feEmit(opReturn);
     fePatch(initialize, ir.length);
-    var type = object.value.kind;
-    var element = typeArgument(type);
-    feBuiltinTyped(bListNew, 0, type);
-    var child = 0;
-    while (child < object.value.elements.length) {
-      feDuplicate(type);
-      feConstantValue(object.value.elements[child], element, object.token);
-      feBuiltin(bListAdd, 2);
-      feEmit(opPop);
-      child++;
-    }
-    feBuiltinTyped(bListFreeze, 1, type);
+    var type = constantLists[object.data].type;
+    feOperand(opConstantData, object.data);
+    feBuiltinTyped(bListFromData, 1, type);
     feDuplicate(type);
     feOperand(opStoreGlobal, object.slot);
     feInteger(1, tBool);
@@ -2454,6 +2466,7 @@ void parseSource(SourceProgram source) {
   feParamDefaults.clear();
   feConstantObjects.clear();
   feConstantGetters.clear();
+  constantLists.clear();
   feBindings = FunctionBindings(<LocalVariable>[], -1);
   feBindingTypes = <int>[];
   feBindingSlots = <int>[];
@@ -2717,7 +2730,7 @@ void feGenerateEntry() {
   p = supplied;
   while (p < parameters.length) {
     var value = feParamDefaults[offset + p];
-    if (typeIsList(value.kind)) feConstantGetter(value, syntax.token);
+    if (typeIsList(value.kind)) feConstantGetter(value);
     p++;
   }
   feGenerateConstantObjects();
