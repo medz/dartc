@@ -536,6 +536,56 @@ void simplifyBooleanChecks(SsaFunction function) {
   }
 }
 
+void removeInitialZeroStores(SsaFunction function) {
+  var knownZero = List<bool>.filled(globalNames.length, true);
+  var zeroValues = List<bool>.filled(function.valueTypes.length, false);
+  var entry = function.blocks[0];
+  // ssaBuildFunction starts with an empty argument-transfer block.
+  if (entry.instructions.isEmpty &&
+      entry.end.kind == 1 &&
+      entry.end.first.arguments.isEmpty)
+    entry = function.blocks[entry.end.first.target];
+  var instructions = entry.instructions;
+  var kept = 0;
+  var i = 0;
+  while (i < instructions.length) {
+    var instruction = instructions[i];
+    var op = instruction.op;
+    var remove = false;
+    if (op == opStoreGlobal) {
+      var zero = zeroValues[instruction.inputs[0]];
+      remove = zero && knownZero[instruction.target];
+      knownZero[instruction.target] = zero;
+    } else {
+      // Unknown operations cannot preserve the loader's initial BSS facts.
+      var pure =
+          op == opInt ||
+          op == opString ||
+          op == opDescriptor ||
+          op == opMetadataAddress ||
+          op == opConstantData ||
+          op >= opAdd && op <= opGe ||
+          op == opNot ||
+          op == opBuiltin &&
+              (instruction.target == bBoxRef || instruction.target == bBoxBool);
+      if (instruction.effects != 0 || !pure) break;
+      if (op == opInt && instruction.value >= 0 && instruction.target == 0)
+        zeroValues[instruction.value] = true;
+    }
+    if (!remove) {
+      instructions[kept] = instruction;
+      kept++;
+    }
+    i++;
+  }
+  while (i < instructions.length) {
+    instructions[kept] = instructions[i];
+    kept++;
+    i++;
+  }
+  while (instructions.length > kept) instructions.removeLast();
+}
+
 void optimizeSsa(List<SsaFunction> program) {
   var i = 0;
   while (i < program.length) {
@@ -543,6 +593,7 @@ void optimizeSsa(List<SsaFunction> program) {
     simplifyBooleanChecks(function);
     var state = sccpAnalyze(function);
     sccpRewrite(function, state);
+    if (imageKind == 0 && i == 0) removeInitialZeroStores(function);
     removeDeadValues(function);
     i++;
   }

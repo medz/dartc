@@ -929,6 +929,42 @@ void main() {
         'Empty program with no runtime storage produced output.',
       );
     }
+    final eagerRuntime = File('${temporary.path}/runtime-eager.dart')
+      ..writeAsStringSync(
+        'const int rtAbiVersion = $runtimeAbiVersion;\n' +
+            r'''external int nativeTarget();
+external int nativeSyscall(int n, int a, int b, int c, int d, int e, int f);
+int zero = 0;
+bool flag = false;
+int calls = 0;
+int first = changeLater();
+int later = 0;
+int effect = returnZero();
+int changeLater() { calls++; later = 7; return 1; }
+int returnZero() { calls++; effect = 9; return 0; }
+void verify() {
+  var status = 0;
+  if (zero != 0 || flag || calls != 2 || first != 1 || later != 0 || effect != 0)
+    status = 73;
+  var syscall = 1;
+  if (nativeTarget() == 1) syscall = 93;
+  nativeSyscall(syscall, status, 0, 0, 0, 0, 0);
+}
+''',
+      );
+    final eager = File('${temporary.path}/eager.dart')
+      ..writeAsStringSync(
+        "import 'runtime-eager.dart' as rt; void main() { rt.verify(); }",
+      );
+    final eagerExecutable = '${eager.path}.out';
+    run(
+      driver,
+      compileArguments(eager, eagerExecutable, eagerRuntime.path),
+      native: compiler != null,
+    );
+    if (run(eagerExecutable, [], native: true).stdout != '') {
+      throw StateError('Eager scalar initialization produced output.');
+    }
     final invalidRuntimes = [
       'const int rtAbiVersion = $runtimeAbiVersion; external int nativeLoad64(int pointer, int extra);',
       'const int rtAbiVersion = $runtimeAbiVersion; external bool nativeTarget();',
