@@ -385,7 +385,8 @@ bool parserTypedDeclaration(Parser parser) {
   if (typed) {
     typed =
         parser.pendingClosers == 0 &&
-        parser.tokens[parser.position].kind == tokenIdentifier;
+        parser.tokens[parser.position].kind == tokenIdentifier &&
+        !parserIs(parser, 'in');
   }
   parser.position = position;
   parser.pendingClosers = closers;
