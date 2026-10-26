@@ -304,6 +304,21 @@ void main(List<String> args) {
   }
   print(forInTotal);
   print(traversals);
+  var iterationValues = <int>[1, 2, 3];
+  var iterationTotal = 0;
+  for (final value in iterationValues) {
+    iterationTotal += value;
+    iterationValues[1] = 4;
+    iterationValues.add(9);
+    iterationValues.removeLast();
+  }
+  print(iterationTotal);
+  for (final value in iterationValues) {
+    iterationValues.clear();
+    print(value);
+    break;
+  }
+  print(iterationValues.length);
   int doCount = 0;
   do {
     doCount++;
@@ -544,6 +559,9 @@ void main() {
       "void main() { var values = <int>[1]; print('before'); values[1] = 2; print('after'); }",
       "int value() { print('rhs'); return 2; } void main() { var values = <int>[]; print('before'); values[0] = value(); print('after'); }",
       "void main() { var values = <int>[]; print('before'); values.removeLast(); print('after'); }",
+      "void main() { var values = <int>[1, 2]; print('before'); for (final value in values) { values.clear(); print(value); } print('after'); }",
+      "void main() { var values = <int>[1]; print('before'); for (final value in values) { if (value == 1) values.add(2); print(value); } print('after'); }",
+      "void main() { var values = <int>[1]; print('before'); for (final value in values) { values.clear(); print(value); continue; } print('after'); }",
       "void main() { print('before'); var values = List<int>.filled(-1, 0); print(values); }",
       "void main() { var values = List<int>.filled(0, 0); print('before'); values.add(1); print('after'); }",
       "void main() { var values = List<int>.filled(0, 0); print('before'); values.clear(); print('after'); }",

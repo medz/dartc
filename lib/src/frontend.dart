@@ -3009,6 +3009,10 @@ void feLowerForIn(AstStatement statement) {
   }
   var iterable = feTemp(iterableType);
   feOperand(opStoreLocal, iterable);
+  var length = feTemp(tInt);
+  feOperand(opLoadLocal, iterable);
+  feBuiltin(bListLength, 1);
+  feOperand(opStoreLocal, length);
   var index = feTemp(tInt);
   feOperand(opInt, 0);
   feOperand(opStoreLocal, index);
@@ -3028,9 +3032,16 @@ void feLowerForIn(AstStatement statement) {
   var exitFlow = flowCopy(feFlow);
   flowDeclare(feFlow, declaration.binding, type, true);
   var repeat = ir.length;
-  feOperand(opLoadLocal, index);
   feOperand(opLoadLocal, iterable);
   feBuiltin(bListLength, 1);
+  feOperand(opLoadLocal, length);
+  feEmit(opEq);
+  var unchanged = feJump(opJumpTrue);
+  feCall(feFindFunction('rtListModificationError'), 0);
+  feEmit(opPop);
+  fePatch(unchanged, ir.length);
+  feOperand(opLoadLocal, index);
+  feOperand(opLoadLocal, length);
   feEmit(opLt);
   var done = feJump(opJumpFalse);
   feOperand(opLoadLocal, iterable);
