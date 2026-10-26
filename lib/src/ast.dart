@@ -52,6 +52,7 @@ const int astForInStatement = 10;
 const int astDoWhileStatement = 11;
 const int astSwitchStatement = 12;
 const int astSwitchCaseStatement = 13;
+const int astLabeledStatement = 14;
 
 const int astImportDirective = 1;
 const int astExportDirective = 2;

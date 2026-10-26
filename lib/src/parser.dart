@@ -651,6 +651,28 @@ bool parserVariableStatement(Parser parser) {
 
 AstStatement parseStatement(Parser parser) {
   var token = parser.position;
+  if (parser.tokens[parser.position].kind == tokenIdentifier &&
+      parser.tokens[parser.position + 1].kind == tokenSymbol &&
+      parser.tokens[parser.position + 1].text == ':') {
+    var name = parserName(parser);
+    parserExpect(parser, ':');
+    var label = AstExpression(
+      astName,
+      name,
+      <AstExpression>[],
+      <AstType>[],
+      token,
+    );
+    return AstStatement(
+      astLabeledStatement,
+      <AstExpression>[label],
+      <AstStatement>[parseStatement(parser)],
+      <AstVariable>[],
+      <AstExpression>[],
+      <AstExpression>[],
+      token,
+    );
+  }
   if (parserTake(parser, '{')) {
     List<AstStatement> children = <AstStatement>[];
     while (!parserIs(parser, '}')) children.add(parseStatement(parser));
@@ -809,10 +831,11 @@ AstStatement parseStatement(Parser parser) {
     );
   }
   if (parserTake(parser, 'break')) {
+    var labels = parserJumpLabel(parser);
     parserExpect(parser, ';');
     return AstStatement(
       astBreakStatement,
-      <AstExpression>[],
+      labels,
       <AstStatement>[],
       <AstVariable>[],
       <AstExpression>[],
@@ -821,10 +844,11 @@ AstStatement parseStatement(Parser parser) {
     );
   }
   if (parserTake(parser, 'continue')) {
+    var labels = parserJumpLabel(parser);
     parserExpect(parser, ';');
     return AstStatement(
       astContinueStatement,
-      <AstExpression>[],
+      labels,
       <AstStatement>[],
       <AstVariable>[],
       <AstExpression>[],
@@ -899,4 +923,16 @@ AstStatement parserSwitch(Parser parser, int token) {
     <AstExpression>[],
     token,
   );
+}
+
+List<AstExpression> parserJumpLabel(Parser parser) {
+  List<AstExpression> labels = <AstExpression>[];
+  if (parser.tokens[parser.position].kind == tokenIdentifier) {
+    var token = parser.position;
+    var name = parserName(parser);
+    labels.add(
+      AstExpression(astName, name, <AstExpression>[], <AstType>[], token),
+    );
+  }
+  return labels;
 }

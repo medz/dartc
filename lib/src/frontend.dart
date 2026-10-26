@@ -5,6 +5,26 @@ import 'types.dart';
 import 'scanner.dart';
 import 'source.dart';
 
+class ControlLabel {
+  String name;
+  int target;
+  bool loop;
+  List<int> breaks;
+  List<int> continues;
+  int repeat;
+
+  ControlLabel(
+    this.name,
+    this.target,
+    this.loop,
+    this.breaks,
+    this.continues,
+    this.repeat,
+  );
+}
+
+List<ControlLabel> feLabels = <ControlLabel>[];
+
 class GlobalInitializer {
   List<int> code;
   List<int> types;
@@ -1360,6 +1380,10 @@ void feLowerStatement(AstStatement statement) {
     }
     return;
   }
+  if (kind == astLabeledStatement) {
+    feLowerLabel(statement);
+    return;
+  }
   if (kind == astSwitchStatement) {
     feLowerSwitch(statement);
     return;
@@ -1396,16 +1420,25 @@ void feLowerStatement(AstStatement statement) {
     }
     feOperand(opJump, repeat);
     fePatch(exit, ir.length);
+    feLabelRepeat(statement.token, update);
     feLoopEnd(breakBase, continueBase, ir.length, update);
     feScopeEnd(scope);
     return;
   }
   if (kind == astBreakStatement) {
+    if (statement.expressions.isNotEmpty) {
+      feLowerLabeledJump(statement, false);
+      return;
+    }
     if (feLoopBreaks.isEmpty) feError('break outside loop');
     feBreaks.add(feJump(opJump));
     return;
   }
   if (kind == astContinueStatement) {
+    if (statement.expressions.isNotEmpty) {
+      feLowerLabeledJump(statement, true);
+      return;
+    }
     if (feLoopContinues.isEmpty) feError('continue outside loop');
     feContinues.add(feJump(opJump));
     return;
@@ -1628,6 +1661,7 @@ void parseSource(SourceProgram source) {
   feContinues.clear();
   feLoopBreaks.clear();
   feLoopContinues.clear();
+  feLabels.clear();
   functions.add(FunctionInfo('__init', 0, 0, 0, tVoid, <int>[], <int>[], -1));
   feBodies.add(0);
   feParamStarts.add(0);
@@ -1774,6 +1808,7 @@ void feLowerForIn(AstStatement statement) {
   feOperand(opStoreLocal, index);
   feOperand(opJump, repeat);
   fePatch(done, ir.length);
+  feLabelRepeat(statement.token, update);
   feLoopEnd(breakBase, continueBase, ir.length, update);
   feScopeEnd(scope);
 }
@@ -1791,6 +1826,7 @@ void feLowerDoWhile(AstStatement statement) {
   var done = feJump(opJumpFalse);
   feOperand(opJump, repeat);
   fePatch(done, ir.length);
+  feLabelRepeat(statement.token, condition);
   feLoopEnd(breakBase, continueBase, ir.length, condition);
   feScopeEnd(scope);
 }
@@ -1869,4 +1905,60 @@ void feLowerSwitch(AstStatement statement) {
   while (feBreaks.length > breakBase) fePatch(feBreaks.removeLast(), ir.length);
   feLoopBreaks.removeLast();
   feScopeEnd(scope);
+}
+
+void feLabelRepeat(int token, int target) {
+  var i = 0;
+  while (i < feLabels.length) {
+    if (feLabels[i].target == token) feLabels[i].repeat = target;
+    i++;
+  }
+}
+
+void feLowerLabel(AstStatement statement) {
+  var body = statement.children[0];
+  var target = body;
+  while (target.kind == astLabeledStatement) target = target.children[0];
+  var kind = target.kind;
+  var loop =
+      kind == astForStatement ||
+      kind == astForInStatement ||
+      kind == astWhileStatement ||
+      kind == astDoWhileStatement;
+  var label = ControlLabel(
+    statement.expressions[0].text,
+    target.token,
+    loop,
+    <int>[],
+    <int>[],
+    -1,
+  );
+  feLabels.add(label);
+  feLowerStatement(body);
+  var i = 0;
+  while (i < label.breaks.length) {
+    fePatch(label.breaks[i], ir.length);
+    i++;
+  }
+  i = 0;
+  while (i < label.continues.length) {
+    fePatch(label.continues[i], label.repeat);
+    i++;
+  }
+  feLabels.removeLast();
+}
+
+void feLowerLabeledJump(AstStatement statement, bool repeat) {
+  var name = statement.expressions[0].text;
+  var i = feLabels.length - 1;
+  while (i >= 0 && feLabels[i].name != name) i--;
+  if (i < 0) feAstError(statement.token, 'unknown label ' + name);
+  var label = feLabels[i];
+  if (repeat) {
+    if (!label.loop)
+      feAstError(statement.token, 'continue requires a loop label');
+    label.continues.add(feJump(opJump));
+  } else {
+    label.breaks.add(feJump(opJump));
+  }
 }

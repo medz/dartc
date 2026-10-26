@@ -122,6 +122,22 @@ void main(List<String> args) {
     branchTotal += 100;
   }
   print(branchTotal);
+  int labeled = 0;
+  outer:
+  for (var row in <int>[1, 2, 3]) {
+    for (var column in <int>[1, 2, 3]) {
+      if (column == 2) continue outer;
+      labeled += row;
+    }
+  }
+  finish: {
+    while (true) {
+      labeled += 10;
+      break finish;
+    }
+    labeled += 100;
+  }
+  print(labeled);
   switch (text.substring(0, 4)) {
     case 'Dart':
       print('switch');
