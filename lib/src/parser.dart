@@ -592,7 +592,7 @@ List<AstParameter> parserParameters(Parser parser) {
         parserError(parser, 'required parameter cannot have a default value');
       }
       parser.position++;
-      parameter.defaults.add(parseExpression(parser));
+      parameter.defaultValue = parseExpression(parser);
     }
     parameters.add(parameter);
     if (!parserTake(parser, ',')) break;

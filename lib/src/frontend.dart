@@ -1118,13 +1118,9 @@ void feResolveDefaults(int count) {
       if (parameter.kind != astRequiredPositional && !parameter.required) {
         var value = omitted;
         var type = feParamTypes[offset + p];
-        if (parameter.defaults.isNotEmpty)
-          value = evaluateConstant(
-            feConstants,
-            parameter.defaults[0],
-            type,
-            false,
-          );
+        var expression = parameter.defaultValue;
+        if (expression != null)
+          value = evaluateConstant(feConstants, expression, type, false);
         if (!typingAssignable(value.type, type) ||
             !typeIsSubtype(value.kind, type))
           feAstError(

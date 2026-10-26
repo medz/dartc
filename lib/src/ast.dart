@@ -92,7 +92,7 @@ class AstParameter {
   int binding = -1;
   int kind = astRequiredPositional;
   bool required = false;
-  List<AstExpression> defaults = <AstExpression>[];
+  AstExpression? defaultValue;
 
   AstParameter(this.type, this.name, this.fieldFormal, this.token);
 }
