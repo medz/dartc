@@ -490,6 +490,14 @@ void fePatch(int position, int target) {
   ir[position] = target;
 }
 
+void fePatchJumps(List<int> jumps, int target) {
+  var i = 0;
+  while (i < jumps.length) {
+    fePatch(jumps[i], target);
+    i++;
+  }
+}
+
 int feLocal(String name) {
   for (var i = feLocalNames.length - 1; i >= 0; i--) {
     if (feLocalNames[i] == name) return i;
@@ -920,6 +928,30 @@ void feBooleanValue(int type, int token) {
 
 void feLowerBoolean(AstExpression expression) {
   feBooleanValue(feLowerExpression(expression), expression.token);
+}
+
+void feConditionJumps(AstExpression expression, bool when, List<int> jumps) {
+  if (expression.kind == astUnary && expression.text == '!') {
+    feConditionJumps(expression.children[0], !when, jumps);
+    return;
+  }
+  if (expression.kind == astBinary &&
+      (expression.text == '&&' || expression.text == '||')) {
+    if (expression.text == '&&' && !when || expression.text == '||' && when) {
+      feConditionJumps(expression.children[0], when, jumps);
+      feConditionJumps(expression.children[1], when, jumps);
+    } else {
+      var skip = <int>[];
+      feConditionJumps(expression.children[0], !when, skip);
+      feConditionJumps(expression.children[1], when, jumps);
+      fePatchJumps(skip, ir.length);
+    }
+    return;
+  }
+  feLowerBoolean(expression);
+  var op = opJumpFalse;
+  if (when) op = opJumpTrue;
+  jumps.add(feJump(op));
 }
 
 int feNonNullableValue(int type) {
@@ -1693,13 +1725,13 @@ int feLowerExpression(AstExpression expression) {
 }
 
 int feLowerConditional(AstExpression expression, int context) {
-  feLowerBoolean(expression.children[0]);
-  var otherwise = feJump(opJumpFalse);
+  var otherwise = <int>[];
+  feConditionJumps(expression.children[0], false, otherwise);
   var type = feLowerHint(expression.children[1], context);
   var thenValue = feTemp(type);
   feOperand(opStoreLocal, thenValue);
   var thenConvert = feJump(opJump);
-  fePatch(otherwise, ir.length);
+  fePatchJumps(otherwise, ir.length);
   var elseType = feLowerHint(expression.children[2], context);
   var elseValue = feTemp(elseType);
   feOperand(opStoreLocal, elseValue);
@@ -1804,16 +1836,16 @@ void feLowerStatement(AstStatement statement) {
     return;
   }
   if (kind == astIfStatement) {
-    feLowerBoolean(statement.condition[0]);
-    var otherwise = feJump(opJumpFalse);
+    var otherwise = <int>[];
+    feConditionJumps(statement.condition[0], false, otherwise);
     feLowerStatement(statement.children[0]);
     if (statement.children.length == 2) {
       var done = feJump(opJump);
-      fePatch(otherwise, ir.length);
+      fePatchJumps(otherwise, ir.length);
       feLowerStatement(statement.children[1]);
       fePatch(done, ir.length);
     } else {
-      fePatch(otherwise, ir.length);
+      fePatchJumps(otherwise, ir.length);
     }
     return;
   }
@@ -1829,11 +1861,9 @@ void feLowerStatement(AstStatement statement) {
     var scope = feLocalNames.length;
     if (kind == astForStatement) feLowerStatement(statement.children[0]);
     var repeat = ir.length;
+    var exit = <int>[];
     if (statement.condition.length != 0)
-      feLowerBoolean(statement.condition[0]);
-    else
-      feInteger(1, tBool);
-    var exit = feJump(opJumpFalse);
+      feConditionJumps(statement.condition[0], false, exit);
     var breakBase = feBreaks.length;
     var continueBase = feContinues.length;
     feLoopBreaks.add(breakBase);
@@ -1850,7 +1880,7 @@ void feLowerStatement(AstStatement statement) {
       updateIndex++;
     }
     feOperand(opJump, repeat);
-    fePatch(exit, ir.length);
+    fePatchJumps(exit, ir.length);
     feLabelRepeat(statement.token, update);
     feLoopEnd(breakBase, continueBase, ir.length, update);
     feScopeEnd(scope);
@@ -1984,7 +2014,7 @@ void feAppendInitializer(GlobalInitializer initializer) {
     var word = 0;
     while (word < width) {
       var value = initializer.code[position + word];
-      if (word == 1 && (op == opJump || op == opJumpFalse))
+      if (word == 1 && (op == opJump || op == opJumpFalse || op == opJumpTrue))
         value = value + base;
       ir.add(value);
       irTypes.add(initializer.types[position + word]);
@@ -2326,10 +2356,9 @@ void feLowerDoWhile(AstStatement statement) {
   feLoopContinues.add(continueBase);
   feLowerStatement(statement.children[0]);
   var condition = ir.length;
-  feLowerBoolean(statement.condition[0]);
-  var done = feJump(opJumpFalse);
-  feOperand(opJump, repeat);
-  fePatch(done, ir.length);
+  var repeats = <int>[];
+  feConditionJumps(statement.condition[0], true, repeats);
+  fePatchJumps(repeats, repeat);
   feLabelRepeat(statement.token, condition);
   feLoopEnd(breakBase, continueBase, ir.length, condition);
   feScopeEnd(scope);

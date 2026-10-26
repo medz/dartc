@@ -35,6 +35,7 @@ const int opDescriptor = 34;
 const int opMetadataAddress = 35;
 const int opTypeTest = 36;
 const int opTypeCast = 37;
+const int opJumpTrue = 38;
 
 const int bPrintString = 1;
 const int bPrintInt = 2;
@@ -169,7 +170,8 @@ int irWidth(int op) {
       op == opLoadGlobal ||
       op == opStoreGlobal ||
       op == opJump ||
-      op == opJumpFalse)
+      op == opJumpFalse ||
+      op == opJumpTrue)
     return 2;
   return 1;
 }

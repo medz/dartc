@@ -437,6 +437,7 @@ void main(List<String> args) {
       );
     compare(values, [for (var i = 0; i < 20; i++) '参数$i🙂']);
     final failingValues = [
+      "bool side() { print('rhs'); return true; } void main() { dynamic value = 1; print('before'); if (value && side()) print('after'); }",
       "void main() { dynamic value = 'wrong'; print('before'); value as int; print('after'); }",
       "void main() { dynamic value = null; print('before'); value as int; print('after'); }",
       'void main() { Object value = <Object>[1]; print(\'before\'); value as List<int>; print(\'after\'); }',

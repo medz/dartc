@@ -132,10 +132,14 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
   while (position < end) {
     var op = ir[position];
     var next = position + irWidth(op);
-    if (op == opJump || op == opJumpFalse) {
+    if (op == opJump || op == opJumpFalse || op == opJumpTrue) {
       leaders[ir[position + 1] - info.start] = 1;
     }
-    if ((op == opJump || op == opJumpFalse || op == opReturn) && next < end) {
+    if ((op == opJump ||
+            op == opJumpFalse ||
+            op == opJumpTrue ||
+            op == opReturn) &&
+        next < end) {
       leaders[next - info.start] = 1;
     }
     position = next;
@@ -187,6 +191,9 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
     } else if (finalOp == opJumpFalse) {
       flow.successors.add(i + 1);
       flow.successors.add(blockAt[ir[last + 1] - info.start]);
+    } else if (finalOp == opJumpTrue) {
+      flow.successors.add(blockAt[ir[last + 1] - info.start]);
+      flow.successors.add(i + 1);
     } else if (finalOp != opReturn && i + 1 < flows.length) {
       flow.successors.add(i + 1);
     }
@@ -241,6 +248,7 @@ void ssaStackShapes(FunctionInfo info, List<SsaFlow> flows) {
           op == opStoreGlobal ||
           op == opPop ||
           op == opJumpFalse ||
+          op == opJumpTrue ||
           op == opReturn) {
         stack.removeLast();
       } else if (op != opJump) {
@@ -373,7 +381,7 @@ void ssaTranslateBlock(
         SsaEdge(-1, <int>[]),
         SsaEdge(-1, <int>[]),
       );
-    } else if (op == opJump || op == opJumpFalse) {
+    } else if (op == opJump || op == opJumpFalse || op == opJumpTrue) {
       var next = blockIds[flow.successors[0]];
       if (op == opJump) {
         block.end = SsaTerminator(

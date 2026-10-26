@@ -345,6 +345,103 @@ void filledLists() {
   print(dynamicFlag);
 }
 
+String conditionTrace = '';
+
+dynamic conditionOperand(int marker, bool value) {
+  conditionTrace = conditionTrace + marker.toString();
+  return value;
+}
+
+int conditionChoice(int marker) {
+  conditionTrace = conditionTrace + marker.toString();
+  return marker;
+}
+
+bool lazyCondition =
+    (conditionOperand(1, false) || conditionOperand(2, true)) &&
+        !conditionOperand(3, false)
+    ? conditionOperand(4, true) || conditionOperand(5, false)
+    : conditionOperand(6, false);
+
+void conditionCase(int bits, bool a, bool b, bool c, bool d) {
+  conditionTrace = '';
+  int result = 0;
+  if ((conditionOperand(1, a) || conditionOperand(2, b)) &&
+      !(conditionOperand(3, c) && !conditionOperand(4, d))) {
+    result = 1;
+  }
+  print('$bits:$result:$conditionTrace');
+}
+
+void conditionLoops(int stop) {
+  conditionTrace = '';
+  int index = 0, total = 0;
+  while (conditionOperand(1, index < 5) &&
+      (!conditionOperand(2, index == 2) || conditionOperand(3, index < 4))) {
+    index++;
+    if (index == 2) continue;
+    total += index;
+    if (index == stop) break;
+  }
+  print('while:$index:$total:$conditionTrace');
+  conditionTrace = '';
+  total = 0;
+  for (
+    index = 0;
+    conditionOperand(1, index < 5) &&
+        (conditionOperand(2, index != 2) || !conditionOperand(3, index >= 5));
+    index++
+  ) {
+    if (index == 1) continue;
+    total += index;
+    if (index == stop) break;
+  }
+  print('for:$index:$total:$conditionTrace');
+  conditionTrace = '';
+  index = 0;
+  total = 0;
+  do {
+    index++;
+    if (index == 2) continue;
+    total += index;
+    if (index == stop) break;
+  } while (conditionOperand(1, index < 5) &&
+      (conditionOperand(2, index != 3) || !conditionOperand(3, index >= 5)));
+  print('do:$index:$total:$conditionTrace');
+}
+
+void conditionTernary(bool a, bool b) {
+  conditionTrace = '';
+  var selected = conditionOperand(1, a) || !conditionOperand(2, b)
+      ? conditionChoice(5)
+      : conditionChoice(6);
+  print('ternary:$selected:$conditionTrace');
+}
+
+void conditionContexts() {
+  for (int bits = 0; bits < 16; bits++) {
+    conditionCase(
+      bits,
+      (bits & 1) != 0,
+      (bits & 2) != 0,
+      (bits & 4) != 0,
+      (bits & 8) != 0,
+    );
+  }
+  conditionLoops(3);
+  conditionLoops(9);
+  conditionTernary(true, true);
+  conditionTernary(false, true);
+  conditionTernary(false, false);
+  dynamic invalid = pass(1);
+  if (choose() || invalid) print('short circuit');
+  if (!choose() && invalid) print('unreachable');
+  conditionTrace = '';
+  var first = lazyCondition;
+  var second = lazyCondition;
+  print('lazy:$first:$second:$conditionTrace');
+}
+
 void listGrowth(List<String> args) {
   var values = <int>[];
   values.clear();
@@ -403,5 +500,6 @@ void main(List<String> args) {
   assignmentValues();
   typeChecks();
   filledLists();
+  conditionContexts();
   listGrowth(args);
 }
