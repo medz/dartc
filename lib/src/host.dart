@@ -3,6 +3,18 @@ import 'dart:isolate';
 
 String hostRead(String path) => File(path).readAsStringSync();
 
+String? hostReadIfExists(String path) {
+  try {
+    return hostRead(path);
+  } on FileSystemException catch (error) {
+    final code = error.osError?.errorCode;
+    if (code == 2 || code == 20) return null;
+    rethrow;
+  }
+}
+
+String hostCurrentDirectory() => Directory.current.path;
+
 void hostWrite(String path, List<int> bytes) {
   File(path).parent.createSync(recursive: true);
   File(path).writeAsBytesSync(bytes);

@@ -488,11 +488,13 @@ void feDuplicate(int type) {
 
 int feBuiltinType(int id) {
   if (id == bHostExit || id == bHostFinish) return tNever;
+  if (id == bHostReadIfExists) return nullableType(tString);
   if (id == bIntToString ||
       id == bStringConcat ||
       id == bStringSubstring ||
       id == bStringFromCodes ||
       id == bHostRead ||
+      id == bHostCurrentDirectory ||
       id == bHostStdPath)
     return tString;
   if (id == bStringEqual || id == bStringStartsWith || id == bStringEndsWith)
@@ -814,6 +816,20 @@ void feInstallSymbols() {
   declareSymbol(feSymbols, sourceFfi, 'NativeFunction', symbolType, tPointer);
   declareSymbol(feSymbols, sourceFfi, 'Int64', symbolType, tInt);
   declareSymbol(feSymbols, sourceHost, 'hostRead', symbolBuiltin, bHostRead);
+  declareSymbol(
+    feSymbols,
+    sourceHost,
+    'hostReadIfExists',
+    symbolBuiltin,
+    bHostReadIfExists,
+  );
+  declareSymbol(
+    feSymbols,
+    sourceHost,
+    'hostCurrentDirectory',
+    symbolBuiltin,
+    bHostCurrentDirectory,
+  );
   declareSymbol(feSymbols, sourceHost, 'hostWrite', symbolBuiltin, bHostWrite);
   declareSymbol(
     feSymbols,
@@ -1612,7 +1628,9 @@ int feMetadataMask(AstExpression expression) {
 }
 
 int feBuiltinArgumentType(int builtin, int argument) {
-  if (builtin == bHostRead || builtin == bHostFinish)
+  if (builtin == bHostRead ||
+      builtin == bHostReadIfExists ||
+      builtin == bHostFinish)
     return argument == 0 ? tString : tInt;
   if (builtin == bHostWrite) return argument == 0 ? tString : listType(tInt);
   if (builtin == bHostExit) return tInt;
@@ -1642,6 +1660,9 @@ int feLowerBuiltinArguments(AstExpression call, int builtin) {
 int feLowerBuiltinCall(AstExpression call, int builtin) {
   if (call.typeArguments.length != 0)
     feAstError(call.token, 'nongeneric call does not accept type arguments');
+  if (builtin == bHostReadIfExists && call.children.length != 2 ||
+      builtin == bHostCurrentDirectory && call.children.length != 1)
+    feAstError(call.token, 'host argument count');
   if (builtin == bValueIdentical) {
     if (call.children.length != 3)
       feAstError(call.token, 'argument count for identical');

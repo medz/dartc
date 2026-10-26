@@ -682,7 +682,10 @@ void main() {
       'exports.dart':
           "export 'math.dart' show shared, hidden hide hidden;\n"
           "export 'other.dart' show shared hide shared;",
-      'host.dart': 'int hostRead(int value) => value + 4;',
+      'host.dart':
+          'int hostRead(int value) => value + 4; '
+          'int hostReadIfExists(int value) => value + 5; '
+          'int hostCurrentDirectory(int value) => value + 6;',
       'properties.dart':
           'class Counter { int _value = 1; Counter(); int get value => _value; '
           'set value(int next) { _value = next; } int get _hidden => _value; '
@@ -731,6 +734,8 @@ void main() {
   print(math.hidden());
   print(nativeLoad16(5));
   print(hostRead(5));
+  print(hostReadIfExists(5));
+  print(hostCurrentDirectory(5));
 }
 ''',
       'metadata-notes.dart':
@@ -1267,6 +1272,15 @@ void verify() {
         "import '${File(standard).parent.path}/host.dart';\n" +
             r'''
 void main(List<String> args) {
+  if (args.length > 1) {
+    if (args[1] == 'cwd')
+      print(hostCurrentDirectory());
+    else {
+      print('before');
+      print(hostReadIfExists(args[0]));
+    }
+    return;
+  }
   var sizes = <int>[0, 1, 65535, 65536, 65537, 131073];
   var index = 0;
   while (index < sizes.length) {
@@ -1283,6 +1297,11 @@ void main(List<String> args) {
   }
   hostWrite(args[0] + 'utf8', <int>[68, 97, 114, 116, 32, 228, 189, 160, 229, 165, 189, 240, 159, 153, 130]);
   print(hostRead(args[0] + 'utf8'));
+  print(hostReadIfExists(args[0] + 'utf8'));
+  print(hostReadIfExists(args[0] + 'missing') == null);
+  print(hostReadIfExists(args[0] + '0')!.isEmpty);
+  print(hostReadIfExists(args[0] + '0/child') == null);
+  print(hostCurrentDirectory());
 }
 ''',
       );
@@ -1295,6 +1314,67 @@ void main(List<String> args) {
         '${outputPrefix}utf8',
       ],
     );
+    final cwd = Directory('${temporary.path}/cwd-你好🙂 %')..createSync();
+    final ioExecutable = '${io.path}.out';
+    for (final directory in [
+      cwd,
+      if (Platform.isLinux)
+        Directory(
+          '${cwd.path}/${List.filled(32, 'directory-with-a-long-component-你好🙂').join('/')}',
+        )..createSync(recursive: true),
+    ]) {
+      final expected = Process.runSync(sdk, [
+        io.path,
+        outputPrefix,
+        'cwd',
+      ], workingDirectory: directory.path);
+      final actual = Process.runSync(
+        ioExecutable,
+        [outputPrefix, 'cwd'],
+        workingDirectory: directory.path,
+        environment: {
+          'PATH': '/usr/bin:/bin',
+          'PWD': '/not-the-working-directory',
+        },
+        includeParentEnvironment: false,
+      );
+      if (expected.exitCode != 0 ||
+          actual.exitCode != 0 ||
+          actual.stdout != expected.stdout) {
+        throw StateError(
+          'Native working directory differs: '
+          '${expected.stdout}${expected.stderr}${actual.stdout}${actual.stderr}',
+        );
+      }
+    }
+    final directoryRead = Process.runSync(
+      ioExecutable,
+      [cwd.path, 'read'],
+      environment: {'PATH': '/usr/bin:/bin'},
+      includeParentEnvironment: false,
+    );
+    if (directoryRead.exitCode != 74 ||
+        directoryRead.stdout != 'before\n' ||
+        !directoryRead.stderr.toString().contains(cwd.path)) {
+      throw StateError(
+        'Optional reading treated an I/O error as missing: '
+        '${directoryRead.stdout}${directoryRead.stderr}',
+      );
+    }
+    for (final body in [
+      "void main() { String value = hostReadIfExists('missing'); print(value); }",
+      'void main() { hostReadIfExists(1); }',
+      'void main() { hostReadIfExists(); }',
+      "void main() { hostCurrentDirectory('extra'); }",
+      "@pragma('dartc:no-gc') String? read(String path) => hostReadIfExists(path); void main() {}",
+      "@pragma('dartc:no-gc') String cwd() => hostCurrentDirectory(); void main() {}",
+    ]) {
+      final invalid = File('${temporary.path}/invalid-host.dart')
+        ..writeAsStringSync(
+          "import '${File(standard).parent.path}/host.dart';\n$body",
+        );
+      reject(invalid);
+    }
     stdout.writeln('Behavior matches official Dart.');
   } on ProcessException catch (error) {
     stderr.writeln(error);

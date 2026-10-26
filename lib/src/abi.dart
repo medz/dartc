@@ -45,6 +45,9 @@ int runtimeFunction(int builtin, int castType) {
   if (builtin == bObjectFromData) return abiFunction('rtObjectFromData', 0);
   if (builtin == bValueIdentical) return abiFunction('rtValueIdentical', 0);
   if (builtin == bHostRead) return abiFunction('rtHostRead', 0);
+  if (builtin == bHostReadIfExists) return abiFunction('rtHostReadIfExists', 0);
+  if (builtin == bHostCurrentDirectory)
+    return abiFunction('rtHostCurrentDirectory', 0);
   if (builtin == bHostWrite) return abiFunction('rtHostWrite', 0);
   if (builtin == bHostFinish) return abiFunction('rtHostFinish', 0);
   if (builtin == bHostExit) return abiFunction('rtHostExit', 0);

@@ -54,3 +54,13 @@ NoGC 检查的是函数体；分配/GC 角色描述的是调用对外的影响�
 以 `int` 保存对象地址的运行时函数不能依赖普通整数字段自动成为根。`rtArguments()`、`rtListFilled()`、List 转换/扩容路径、`rtStringConcat()` 及默认运行时路径构造在跨托管分配处使用 mark/push/restore 作用域；来源值和转换后的值分别按其 TypeRef 的 Ref/Tagged 表示登记，Word 不因数值像指针而入根。新 List 的结果在分配 backing 前保活，扩容前保留已装箱的实际元素；退出作用域发生在最后一次需要该对象的分配之后。常量对象物化仍先建立可安全扫描的字段/已初始化前缀，再发布子引用。
 
 这些根记录当前适用于非移动表示的所有权表达；raw 局部地址和派生指针没有重定位后重读协议。尚未开启 GC，构造器 reserve 到安全对象头/引用前缀完成之间也不能任意插入回收点。真实行为测试验证输出、返回后对象图和根作用域恢复，不证明分配中途已发生并通过回收。根枚举与所有权用例归 [roots.dart](../test/fixtures/roots.dart) 的 `runtimeOwnership()`、`builderRoots()`、`constantObjectRoots()`；字符串、List 与命令行行为继续复用 [values.dart](../test/fixtures/values.dart) 和 [behavior_test.dart](../test/behavior_test.dart)。
+
+## 编译器的文件服务
+
+[host.dart](../lib/src/host.dart) 定义编译器的宿主接口；官方 Dart 运行时使用 SDK 实现，原生 dartc 通过受信模块的声明身份连接到普通 Dart 运行时函数。同名用户函数仍按用户声明调用。
+
+- `hostReadIfExists(path)` 返回 `String?`。仅在 open 返回 `ENOENT` 或 `ENOTDIR` 时返回 null；空文件返回空字符串。权限、目录读取及其他 I/O 失败仍终止，路径与错误写入 stderr，保留调用方的 stdout。
+- `hostCurrentDirectory()` 返回实际工作目录，不读取 `PWD`，也不从可执行文件推断。macOS 使用 open/fcntl 的 [F_GETPATH](https://github.com/apple-oss-distributions/Libc/blob/main/gen/FreeBSD/getcwd.c) 路径，Linux 使用 [getcwd 系统调用](https://github.com/torvalds/linux/blob/master/tools/include/uapi/asm-generic/unistd.h)并在缓冲不足时重试。超出这些系统接口能表示的路径会报告 I/O 错误；尚无 libc 的长路径遍历回退。
+- 文件和工作目录的原始缓冲在解码后释放；托管 String 或 null 使用现有 Ref 表示。两项服务可能创建托管 String，不能作为 NoGC 接口。
+
+这些内部接口为源码和包配置加载提供系统边界；当前尚未实现 `package_config.json` 发现、JSON/URI 解析或 `package:` 导入，也不代表完整 `dart:io`。真实文件读写、缺失与非缺失错误、Unicode 路径和工作目录验证统一归 [behavior_test.dart](../test/behavior_test.dart) 的 I/O 程序。

@@ -97,6 +97,8 @@ const int bValueIs = 56;
 const int bListFromData = 57;
 const int bValueIdentical = 58;
 const int bObjectFromData = 59;
+const int bHostReadIfExists = 60;
+const int bHostCurrentDirectory = 61;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;

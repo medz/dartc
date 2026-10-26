@@ -133,7 +133,14 @@ int rtWriteAll(int fd, int p, int length) {
   return 0;
 }
 
-int rtIoError() {
+int rtIoError([int path = 0]) {
+  if (path != 0) {
+    var encoded = rtStringEncodeUtf8(path);
+    var length = nativeLoad64(encoded);
+    nativeStore8(encoded + 8 + length, 10);
+    rtWriteAll(2, encoded + 8, length + 1);
+    rtUtf8Release();
+  }
   var message = rtCStringAcquire(0x726f727265204f49, 10, 0, 0);
   rtWriteAll(2, message, 9);
   rtHostExit(74);
@@ -865,10 +872,21 @@ int rtPrintBool(int value) {
 }
 
 int rtHostRead(int path) {
+  return rtHostReadFile(path, 0);
+}
+
+int rtHostReadIfExists(int path) {
+  return rtHostReadFile(path, 1);
+}
+
+int rtHostReadFile(int path, int optional) {
   var encoded = rtStringEncodeUtf8(path);
   var fd = rtSyscall(5, encoded + 8, 0, 0, 0, 0, 0);
   rtUtf8Release();
-  if (fd < 0) rtIoError();
+  if (fd < 0) {
+    if (optional != 0 && (fd == -2 || fd == -20)) return 0;
+    return rtIoError(path);
+  }
   var capacity = 65536;
   var bytes = rtMap(capacity);
   var length = 0;
@@ -886,12 +904,40 @@ int rtHostRead(int path) {
       capacity = capacity * 2;
     }
     var count = rtSyscall(3, fd, bytes + length, capacity - length, 0, 0, 0);
-    if (count < 0) rtIoError();
+    if (count < 0) {
+      return rtIoError(path);
+    }
     if (count == 0) done = 1;
     length = length + count;
   }
   rtSyscall(6, fd, 0, 0, 0, 0, 0);
   var result = rtStringDecodeUtf8(bytes, length);
+  rtUnmap(bytes, capacity);
+  return result;
+}
+
+int rtHostCurrentDirectory() {
+  var capacity = 1024;
+  var bytes = rtMap(capacity);
+  if (nativeTarget() == 0) {
+    // Darwin has no getcwd syscall; F_GETPATH writes a MAXPATHLEN buffer.
+    nativeStore64(bytes, 46);
+    var fd = rtSyscall(5, bytes, 0, 0, 0, 0, 0);
+    if (fd < 0) return rtIoError();
+    var status = rtSyscall(92, fd, 50, bytes, 0, 0, 0);
+    rtSyscall(6, fd, 0, 0, 0, 0, 0);
+    if (status < 0) return rtIoError();
+  } else {
+    var status = nativeSyscall(17, bytes, capacity, 0, 0, 0, 0);
+    while (status == -34) {
+      rtUnmap(bytes, capacity);
+      capacity = capacity * 2;
+      bytes = rtMap(capacity);
+      status = nativeSyscall(17, bytes, capacity, 0, 0, 0, 0);
+    }
+    if (status < 0) return rtIoError();
+  }
+  var result = rtStringFromCString(bytes);
   rtUnmap(bytes, capacity);
   return result;
 }
