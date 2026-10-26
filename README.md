@@ -50,13 +50,21 @@ build/dartc-stage2 example/hello.dart -o build/hello
 
 The bootstrap command starts from the previously verified local `build/dartc-seed`. Only when that file is absent does it use official Dart to build the initial seed. It then rebuilds with native `dartc`, compares repeated builds, and checks behavior against official Dart. A successful run updates the local native seed; a failed run preserves it. Use `--seed /path/to/dartc` to select an existing native compiler explicitly.
 
+Compare two existing native compilers on the current source and runtime:
+
+```sh
+dart run tool/benchmark.dart --compare /path/to/baseline-dartc /path/to/candidate-dartc
+```
+
+This mode uses the supplied engines directly; it does not rebuild them or build an official AOT compiler. It preserves the engines and local bootstrap seed.
+
 Official AOT builds can be used as a separate, opt-in performance reference:
 
 ```sh
 dart run tool/benchmark.dart
 ```
 
-This compares the same compiler task and writes measurements to `build/benchmark.json`. Reference binaries do not become bootstrap seeds. CI runs only when manually dispatched during compiler development.
+Both modes compare the same compiler task, check identical target bytes and `--help` output, and write measurements to `build/benchmark.json`. Temporary measured targets are removed afterward. Reference binaries do not become bootstrap seeds. CI runs only when manually dispatched during compiler development.
 
 The native compiler uses `lib/src/runtime.dart` as its standard-runtime source. When placing the compiler outside the repository, supply its location:
 

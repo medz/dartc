@@ -66,54 +66,78 @@ num median(List<num> values) {
 Future<void> main(List<String> args) async {
   final root = File.fromUri(Platform.script).parent.parent.absolute.path;
   var seed = '$root/build/dartc-seed';
+  final comparing = args.length == 3 && args[0] == '--compare';
   if (args.length == 2 && args[0] == '--seed') {
     seed = File(args[1]).absolute.path;
-  } else if (args.isNotEmpty) {
+  } else if (args.isNotEmpty && !comparing) {
     stderr.writeln(
-      'Usage: dart tool/benchmark.dart [--seed <native compiler>]',
+      'Usage: dart tool/benchmark.dart [--seed <native compiler>]\n'
+      '       dart tool/benchmark.dart --compare <baseline-native> <candidate-native>',
     );
     exitCode = 64;
     return;
   }
+  final outputs = <String, String>{};
+  var cleanupTargets = false;
   try {
-    if (Platform.version.split(' ').first != '3.13.5') {
+    if (!comparing && Platform.version.split(' ').first != '3.13.5') {
       throw StateError('Run the reference benchmark with Dart SDK 3.13.5.');
     }
     if (!Platform.isMacOS && !Platform.isLinux) {
       throw StateError('The benchmark supports macOS and Linux.');
     }
-    if (!File(seed).existsSync()) {
-      throw StateError('Native seed missing: $seed. Supply one with --seed.');
+    final inputs = comparing
+        ? {
+            'baseline': File(args[1]).absolute.path,
+            'candidate': File(args[2]).absolute.path,
+          }
+        : {'seed': seed};
+    for (final name in inputs.keys) {
+      final file = File(inputs[name]!);
+      if (!file.existsSync()) {
+        throw StateError('Native compiler missing: ${file.path}.');
+      }
+      inputs[name] = file.resolveSymbolicLinksSync();
     }
-    seed = File(seed).resolveSymbolicLinksSync();
     final build = Directory('$root/build')..createSync(recursive: true);
-    final nativeDirectory = Directory('${build.path}/benchmark-native')
-      ..createSync();
-    final officialDirectory = Directory('${build.path}/benchmark-official')
-      ..createSync();
-    final nativeFolder = nativeDirectory.resolveSymbolicLinksSync();
-    final officialFolder = officialDirectory.resolveSymbolicLinksSync();
-    final native = '$nativeFolder/dartc-reference';
-    final official = '$officialFolder/dartc-reference';
-    final outputs = {
-      'native': '$nativeFolder/compiled-dartc',
-      'official': '$officialFolder/compiled-dartc',
-    };
+    final names = comparing
+        ? ['baseline', 'candidate']
+        : ['native', 'official'];
+    final folders = <String, String>{};
+    for (final name in names) {
+      final directory = Directory('${build.path}/benchmark-$name')
+        ..createSync();
+      folders[name] = directory.resolveSymbolicLinksSync();
+      outputs[name] = '${folders[name]}/compiled-dartc';
+    }
+    final engines = comparing
+        ? {...inputs}
+        : {for (final name in names) name: '${folders[name]}/dartc-reference'};
     final result = File('${build.resolveSymbolicLinksSync()}/benchmark.json');
-    for (final output in [native, official, ...outputs.values, result.path]) {
-      if (seed == output ||
-          File(output).existsSync() &&
-              FileSystemEntity.identicalSync(seed, output)) {
-        throw StateError(
-          'The seed must differ from the benchmark output paths.',
-        );
+    final outputPaths = [
+      if (!comparing) ...engines.values,
+      ...outputs.values,
+      result.path,
+    ];
+    for (final input in inputs.values) {
+      for (final output in outputPaths) {
+        if (input == output ||
+            File(output).existsSync() &&
+                FileSystemEntity.identicalSync(input, output)) {
+          throw StateError(
+            'Native compilers must differ from the benchmark output paths.',
+          );
+        }
       }
     }
+    final inputHashes = {
+      for (final entry in inputs.entries)
+        entry.key: await sha256(File(entry.value).readAsBytesSync()),
+    };
     final sdk = Platform.resolvedExecutable;
     final source = '$root/bin/dartc.dart';
     final standard = '$root/lib/src/runtime.dart';
     final sourceBefore = await sourceHash(root);
-    final seedBefore = await sha256(File(seed).readAsBytesSync());
     final timeOptions = Platform.isMacOS ? ['-l'] : ['-v'];
     final timeExists = File('/usr/bin/time').existsSync();
     final timeProbe = timeExists
@@ -159,37 +183,50 @@ Future<void> main(List<String> args) async {
       };
     }
 
-    stdout.writeln('Building native reference with $seed.');
-    final nativeBuild = measure(seed, [
-      source,
-      '-o',
-      native,
-      '--std',
-      standard,
-    ]);
-    nativeBuild['path'] = native;
-    nativeBuild['size_bytes'] = File(native).lengthSync();
-    stdout.writeln('Building official AOT reference with Dart SDK 3.13.5.');
-    final officialBuild = measure(sdk, [
-      'compile',
-      'exe',
-      source,
-      '-o',
-      official,
-    ], isolated: false);
-    officialBuild['path'] = official;
-    officialBuild['size_bytes'] = File(official).lengthSync();
-    final engines = {'native': native, 'official': official};
-    final engineHashes = {
-      for (final entry in engines.entries)
-        entry.key: await sha256(File(entry.value).readAsBytesSync()),
-    };
+    final builds = <String, Map<String, Object?>>{};
+    cleanupTargets = true;
+    if (comparing) {
+      stdout.writeln('Comparing existing native compilers:');
+      for (final entry in engines.entries) {
+        stdout.writeln('  ${entry.key}: ${entry.value}');
+      }
+    } else {
+      seed = inputs['seed']!;
+      final native = engines['native']!;
+      final official = engines['official']!;
+      stdout.writeln('Building native reference with $seed.');
+      final nativeBuild = measure(seed, [
+        source,
+        '-o',
+        native,
+        '--std',
+        standard,
+      ]);
+      nativeBuild['path'] = native;
+      nativeBuild['size_bytes'] = File(native).lengthSync();
+      builds['native'] = nativeBuild;
+      stdout.writeln('Building official AOT reference with Dart SDK 3.13.5.');
+      final officialBuild = measure(sdk, [
+        'compile',
+        'exe',
+        source,
+        '-o',
+        official,
+      ], isolated: false);
+      officialBuild['path'] = official;
+      officialBuild['size_bytes'] = File(official).lengthSync();
+      builds['official_aot_reference'] = officialBuild;
+    }
+    final engineHashes = comparing
+        ? inputHashes
+        : {
+            for (final entry in engines.entries)
+              entry.key: await sha256(File(entry.value).readAsBytesSync()),
+          };
     final runs = <Map<String, Object?>>[];
     List<int>? expected;
     for (var iteration = 0; iteration <= 6; iteration++) {
-      final order = iteration.isEven
-          ? ['native', 'official']
-          : ['official', 'native'];
+      final order = iteration.isEven ? names : names.reversed;
       for (final name in order) {
         final sample = measure(engines[name]!, [
           source,
@@ -227,19 +264,27 @@ Future<void> main(List<String> args) async {
             : null,
       };
     }
-    final nativeHelp = Process.runSync(outputs['native']!, ['--help']);
-    final officialHelp = Process.runSync(outputs['official']!, ['--help']);
-    if (nativeHelp.exitCode != 0 ||
-        officialHelp.exitCode != 0 ||
-        nativeHelp.stdout != officialHelp.stdout ||
-        nativeHelp.stderr != officialHelp.stderr) {
+    final help = [
+      for (final name in names)
+        Process.runSync(
+          outputs[name]!,
+          ['--help'],
+          environment: {'LC_ALL': 'C', 'PATH': '/usr/bin:/bin'},
+          includeParentEnvironment: false,
+        ),
+    ];
+    if (help[0].exitCode != 0 ||
+        help[1].exitCode != 0 ||
+        help[0].stdout != help[1].stdout ||
+        help[0].stderr != help[1].stderr) {
       throw StateError('Generated compilers differ when executing --help.');
     }
-    if (sourceBefore != await sourceHash(root) ||
-        seedBefore != await sha256(File(seed).readAsBytesSync())) {
-      throw StateError(
-        'Compiler source or native seed changed during measurement.',
-      );
+    if (sourceBefore != await sourceHash(root)) {
+      throw StateError('Compiler source changed during measurement.');
+    }
+    if (!comparing &&
+        inputHashes['seed'] != await sha256(File(seed).readAsBytesSync())) {
+      throw StateError('Native seed changed during measurement.');
     }
     for (final entry in engines.entries) {
       if (engineHashes[entry.key] !=
@@ -248,13 +293,16 @@ Future<void> main(List<String> args) async {
       }
     }
     final report = {
+      'mode': comparing ? 'native_comparison' : 'official_reference',
       'sdk': {'path': sdk, 'version': Platform.version},
       'platform': Platform.operatingSystem,
       'source_sha256': sourceBefore,
-      'native_seed': {'path': seed, 'sha256': seedBefore},
+      if (!comparing)
+        'native_seed': {'path': seed, 'sha256': inputHashes['seed']},
       'task': {'source': source, 'runtime': standard},
-      'build_samples': 1,
-      'build': {'native': nativeBuild, 'official_aot_reference': officialBuild},
+      'build_samples': comparing ? 0 : 1,
+      'build': builds,
+      'compiler_paths': engines,
       'compiler_sha256': engineHashes,
       'output': {
         'size_bytes': expected!.length,
@@ -276,5 +324,12 @@ Future<void> main(List<String> args) async {
   } catch (error) {
     stderr.writeln(error);
     exitCode = 1;
+  } finally {
+    if (cleanupTargets) {
+      for (final path in outputs.values) {
+        final file = File(path);
+        if (file.existsSync()) file.deleteSync();
+      }
+    }
   }
 }
