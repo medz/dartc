@@ -298,9 +298,16 @@ void main(List<String> args) {
       '--std',
       runtime ?? standard,
     ];
-    void compare(File source, List<String> arguments) {
+    void compare(
+      File source,
+      List<String> arguments, {
+      List<String> outputs = const [],
+    }) {
       final executable = '${source.path}.out';
       final expected = run(sdk, [source.path, ...arguments]).stdout as String;
+      final expectedFiles = [
+        for (final path in outputs) File(path).readAsBytesSync(),
+      ];
       run(
         driver,
         compileArguments(source, executable),
@@ -312,6 +319,22 @@ void main(List<String> args) {
           '${source.path} differs from official Dart.\n'
           'Expected:\n$expected\nActual:\n$actual',
         );
+      }
+      for (var i = 0; i < outputs.length; i++) {
+        final actualBytes = File(outputs[i]).readAsBytesSync();
+        final expectedBytes = expectedFiles[i];
+        if (actualBytes.length != expectedBytes.length) {
+          throw StateError(
+            '${outputs[i]} differs in length from official Dart.',
+          );
+        }
+        for (var byte = 0; byte < actualBytes.length; byte++) {
+          if (actualBytes[byte] != expectedBytes[byte]) {
+            throw StateError(
+              '${outputs[i]} differs from official Dart at byte $byte.',
+            );
+          }
+        }
       }
     }
 
@@ -409,6 +432,39 @@ void main() {
         ..writeAsStringSync(invalidRuntimes[i]);
       reject(empty, runtime: runtime.path, diagnostic: runtime.path);
     }
+    final io = File('${temporary.path}/io.dart')
+      ..writeAsStringSync(
+        "import '${File(standard).parent.path}/host.dart';\n" +
+            r'''
+void main(List<String> args) {
+  var sizes = <int>[0, 1, 65535, 65536, 65537, 131073];
+  var index = 0;
+  while (index < sizes.length) {
+    var size = sizes[index];
+    var path = args[0] + index.toString();
+    hostWrite(path, List<int>.filled(size, 65));
+    var text = hostRead(path);
+    print(text.length);
+    if (text.length > 0) {
+      print(text.codeUnitAt(0));
+      print(text.codeUnitAt(text.length - 1));
+    }
+    index++;
+  }
+  hostWrite(args[0] + 'utf8', <int>[68, 97, 114, 116, 32, 228, 189, 160, 229, 165, 189, 240, 159, 153, 130]);
+  print(hostRead(args[0] + 'utf8'));
+}
+''',
+      );
+    final outputPrefix = '${temporary.path}/io-output-';
+    compare(
+      io,
+      [outputPrefix],
+      outputs: [
+        for (var i = 0; i < 6; i++) '$outputPrefix$i',
+        '${outputPrefix}utf8',
+      ],
+    );
     stdout.writeln('Behavior matches official Dart.');
   } on ProcessException catch (error) {
     stderr.writeln(error);

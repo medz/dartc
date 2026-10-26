@@ -23,6 +23,7 @@ int rtSyscall(int n, int a, int b, int c, int d, int e, int f) {
   if (n == 3) return nativeSyscall(63, a, b, c, d, e, f);
   if (n == 4) return nativeSyscall(64, a, b, c, d, e, f);
   if (n == 6) return nativeSyscall(57, a, b, c, d, e, f);
+  if (n == 73) return nativeSyscall(215, a, b, c, d, e, f);
   if (n == 197) return nativeSyscall(222, a, b, c, 34, e, f);
   if (n == 5) {
     var flags = b;
@@ -38,13 +39,24 @@ int rtHostExit(int code) {
   return 0;
 }
 
+int rtMap(int bytes) {
+  if (bytes == 0) return 0;
+  var memory = rtSyscall(197, 0, bytes, 3, 4098, -1, 0);
+  if (memory < 0) rtHostExit(71);
+  return memory;
+}
+
+int rtUnmap(int address, int bytes) {
+  if (bytes == 0) return 0;
+  return rtSyscall(73, address, bytes, 0, 0, 0, 0);
+}
+
 int rtAlloc(int bytes) {
   var size = (bytes + 15) & -16;
   if (rtArenaNext + size > rtArenaEnd || rtArenaNext == 0) {
     var capacity = 8388608;
     if (size > capacity) capacity = (size + 16383) & -16384;
-    var memory = rtSyscall(197, 0, capacity, 3, 4098, -1, 0);
-    if (memory < 0) rtHostExit(71);
+    var memory = rtMap(capacity);
     rtArenaNext = memory;
     rtArenaEnd = memory + capacity;
   }
@@ -489,12 +501,19 @@ int rtHostRead(int path) {
   var fd = rtSyscall(5, encoded + 8, 0, 0, 0, 0, 0);
   if (fd < 0) rtIoError();
   var capacity = 65536;
-  var bytes = rtAlloc(capacity);
+  var bytes = rtMap(capacity);
   var length = 0;
   var done = 0;
   while (done == 0) {
     if (length == capacity) {
-      bytes = rtGrowBuffer(bytes, capacity, capacity * 2);
+      var replacement = rtMap(capacity * 2);
+      var offset = 0;
+      while (offset < capacity) {
+        nativeStore64(replacement + offset, nativeLoad64(bytes + offset));
+        offset = offset + 8;
+      }
+      rtUnmap(bytes, capacity);
+      bytes = replacement;
       capacity = capacity * 2;
     }
     var count = rtSyscall(3, fd, bytes + length, capacity - length, 0, 0, 0);
@@ -503,7 +522,9 @@ int rtHostRead(int path) {
     length = length + count;
   }
   rtSyscall(6, fd, 0, 0, 0, 0, 0);
-  return rtStringDecodeUtf8(bytes, length);
+  var result = rtStringDecodeUtf8(bytes, length);
+  rtUnmap(bytes, capacity);
+  return result;
 }
 
 int rtPackBytes(int source, int destination, int count) {
@@ -522,7 +543,7 @@ int rtHostWrite(int path, int bytes) {
   var length = rtListLength(bytes);
   var capacity = 65536;
   if (length < capacity) capacity = length;
-  var data = rtAlloc(capacity);
+  var data = rtMap(capacity);
   var source = nativeLoad64(bytes + 16);
   var offset = 0;
   while (offset < length) {
@@ -533,6 +554,7 @@ int rtHostWrite(int path, int bytes) {
     source = source + count * 8;
     offset = offset + count;
   }
+  rtUnmap(data, capacity);
   rtSyscall(6, fd, 0, 0, 0, 0, 0);
   return 0;
 }
