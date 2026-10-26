@@ -86,6 +86,38 @@ int typeNonNullable(int type) {
   return type;
 }
 
+bool typeCanBeNull(int type) {
+  return type == tDynamic ||
+      type == tVoid ||
+      type == tNull ||
+      typeIsNullable(type);
+}
+
+bool typeIsDisjoint(int left, int right) {
+  if (left == tNull) return !typeCanBeNull(right);
+  if (right == tNull) return !typeCanBeNull(left);
+  if (typeCanBeNull(left) && typeCanBeNull(right)) return false;
+  left = typeNonNullable(left);
+  right = typeNonNullable(right);
+  if (left == right ||
+      left == tDynamic ||
+      right == tDynamic ||
+      left == tVoid ||
+      right == tVoid ||
+      left == tObject ||
+      right == tObject ||
+      left == tPointer ||
+      right == tPointer) {
+    return false;
+  }
+  return left == tInt ||
+      left == tString ||
+      left == tBool ||
+      right == tInt ||
+      right == tString ||
+      right == tBool;
+}
+
 bool typeIsTagged(int type) {
   return type == tVoid ||
       type == tDynamic ||

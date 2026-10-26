@@ -282,3 +282,68 @@ FunctionBindings bindFunctionLocals(
   bindingExpressions(binder, parameters, syntax.arrow);
   return result;
 }
+
+void collectWrittenBinding(int binding, List<bool> seen, List<int> written) {
+  if (binding >= 0 && !seen[binding]) {
+    seen[binding] = true;
+    written.add(binding);
+  }
+}
+
+void collectWrittenExpression(
+  AstExpression expression,
+  List<bool> seen,
+  List<int> written,
+) {
+  if (expression.kind == astAssignment ||
+      (expression.kind == astUnary || expression.kind == astPostfix) &&
+          (expression.text == '++' || expression.text == '--')) {
+    var target = expression.children[0];
+    if (target.kind == astName) {
+      collectWrittenBinding(target.binding, seen, written);
+    }
+  }
+  var i = 0;
+  while (i < expression.children.length) {
+    collectWrittenExpression(expression.children[i], seen, written);
+    i++;
+  }
+}
+
+void collectWrittenStatement(
+  AstStatement statement,
+  List<bool> seen,
+  List<int> written,
+) {
+  var i = 0;
+  while (i < statement.expressions.length) {
+    collectWrittenExpression(statement.expressions[i], seen, written);
+    i++;
+  }
+  i = 0;
+  while (i < statement.condition.length) {
+    collectWrittenExpression(statement.condition[i], seen, written);
+    i++;
+  }
+  i = 0;
+  while (i < statement.update.length) {
+    collectWrittenExpression(statement.update[i], seen, written);
+    i++;
+  }
+  i = 0;
+  while (i < statement.variables.length) {
+    var variable = statement.variables[i];
+    collectWrittenBinding(variable.binding, seen, written);
+    var value = 0;
+    while (value < variable.initializer.length) {
+      collectWrittenExpression(variable.initializer[value], seen, written);
+      value++;
+    }
+    i++;
+  }
+  i = 0;
+  while (i < statement.children.length) {
+    collectWrittenStatement(statement.children[i], seen, written);
+    i++;
+  }
+}

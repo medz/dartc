@@ -1,5 +1,6 @@
 import 'host.dart';
 import 'ir.dart';
+import 'types.dart';
 
 int abiFunction(String name, int source) {
   int i = 0;
@@ -11,7 +12,7 @@ int abiFunction(String name, int source) {
   hostExit(1);
 }
 
-int runtimeFunction(int builtin) {
+int runtimeFunction(int builtin, int castType) {
   if (imageKind != 0) {
     print('Library output cannot use managed runtime operations.');
     hostExit(1);
@@ -52,7 +53,11 @@ int runtimeFunction(int builtin) {
   if (builtin == bObjectSet) return abiFunction('rtObjectSet', 0);
   if (builtin == bBoxInt) return abiFunction('rtBoxInt', 0);
   if (builtin == bBoxBool) return abiFunction('rtBoxBool', 0);
-  if (builtin == bValueCast) return abiFunction('rtValueCast', 0);
+  if (builtin == bValueCast) {
+    if (castType == tInt) return abiFunction('rtValueInt', 0);
+    if (castType == tBool) return abiFunction('rtValueBool', 0);
+    return abiFunction('rtValueCast', 0);
+  }
   if (builtin == bValueIs) return abiFunction('rtValueMatches', 0);
   if (builtin == bValueBool) return abiFunction('rtValueBool', 0);
   if (builtin == bValueAdd) return abiFunction('rtValueAdd', 0);

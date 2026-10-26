@@ -354,7 +354,7 @@ void generateCode(List<MachineFunction> program) {
       armAddress(4, listType(tString));
       armMove(2, 0);
       armMove(0, 9);
-      armCall(runtimeFunction(bArguments));
+      armCall(runtimeFunction(bArguments, -1));
     }
     armCall(main);
     armConstant(0, 0);

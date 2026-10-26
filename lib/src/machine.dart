@@ -200,10 +200,14 @@ void machineSelectInstruction(
     return;
   }
   if (op == opTypeTest || op == opTypeCast) {
-    var type = reps.length;
-    reps.add(rAddr);
-    instructions.add(MachineInstruction(mAddress, type, <int>[], target, 4, 0));
-    inputs.add(type);
+    if (op == opTypeTest || target != tInt && target != tBool) {
+      var type = reps.length;
+      reps.add(rAddr);
+      instructions.add(
+        MachineInstruction(mAddress, type, <int>[], target, 4, 0),
+      );
+      inputs.add(type);
+    }
     var builtin = bValueIs;
     if (op == opTypeCast) builtin = bValueCast;
     instructions.add(
@@ -211,7 +215,7 @@ void machineSelectInstruction(
         mCall,
         output,
         inputs,
-        runtimeFunction(builtin),
+        runtimeFunction(builtin, target),
         0,
         effects,
       ),
@@ -267,11 +271,14 @@ void machineSelectInstruction(
       return;
     }
     var typeId = -1;
-    if (target == bListNew ||
+    var castType = -1;
+    if (target == bValueCast) {
+      castType = source.resultType;
+      if (castType != tInt && castType != tBool) typeId = castType;
+    } else if (target == bListNew ||
         target == bListFilled ||
         target == bListGet ||
-        target == bListRemoveLast ||
-        target == bValueCast) {
+        target == bListRemoveLast) {
       typeId = source.resultType;
     } else if (target == bListAdd) {
       typeId = types[source.inputs[1]];
@@ -291,7 +298,7 @@ void machineSelectInstruction(
         mCall,
         output,
         inputs,
-        runtimeFunction(target),
+        runtimeFunction(target, castType),
         0,
         effects,
       ),

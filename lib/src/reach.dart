@@ -30,7 +30,7 @@ List<int> reachableFunctions(List<SsaFunction> source) {
     var main = abiFunction('main', entrySource);
     _reachFunction(reachable, work, main);
     if (functions[main].parameters > 0) {
-      _reachFunction(reachable, work, runtimeFunction(bArguments));
+      _reachFunction(reachable, work, runtimeFunction(bArguments, -1));
     }
   } else {
     i = 0;
@@ -53,8 +53,12 @@ List<int> reachableFunctions(List<SsaFunction> source) {
         } else if (instruction.op == opTypeTest ||
             instruction.op == opTypeCast) {
           var builtin = bValueIs;
-          if (instruction.op == opTypeCast) builtin = bValueCast;
-          _reachFunction(reachable, work, runtimeFunction(builtin));
+          var castType = -1;
+          if (instruction.op == opTypeCast) {
+            builtin = bValueCast;
+            castType = instruction.target;
+          }
+          _reachFunction(reachable, work, runtimeFunction(builtin, castType));
         } else if (instruction.op == opDescriptor) {
           var owner = instruction.target;
           if (allocated[owner] == 0) {
@@ -77,7 +81,15 @@ List<int> reachableFunctions(List<SsaFunction> source) {
         } else if (instruction.op == opBuiltin &&
             instruction.target < bNativeLoad64 &&
             instruction.target != bBoxRef) {
-          _reachFunction(reachable, work, runtimeFunction(instruction.target));
+          var castType = -1;
+          if (instruction.target == bValueCast) {
+            castType = instruction.resultType;
+          }
+          _reachFunction(
+            reachable,
+            work,
+            runtimeFunction(instruction.target, castType),
+          );
         }
         i = i + 1;
       }

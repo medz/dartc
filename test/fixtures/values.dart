@@ -535,6 +535,144 @@ void localBindings() {
   print(_);
 }
 
+void flowBranches(Object? value, int? number) {
+  print(value is Box && value.value > 0);
+  print(value is! Box || value.value > 0);
+  var selected = value is Box ? value.value : -1;
+  print(selected);
+  if (value is Box) {
+    var inferred = [value];
+    List<Box> boxes = inferred;
+    print(boxes[0].value);
+  } else if (value is String) {
+    print(value.length);
+  }
+  if (number is! int) {
+    var inferred = [number];
+    List<Null> absent = inferred;
+    print(absent);
+  } else {
+    var inferred = [number];
+    List<int> numbers = inferred;
+    print(numbers);
+  }
+  if (number == null) number = 4;
+  var present = [number];
+  List<int> presentNumbers = present;
+  print(presentNumbers[0] + 1);
+  if (value != null && value is! Box) {
+    var inferred = [value];
+    List<Object> objects = inferred;
+    print(objects);
+  }
+}
+
+void flowExit(Object? value) {
+  if (value is! int) return;
+  var inferred = [value];
+  List<int> numbers = inferred;
+  print(numbers);
+}
+
+void flowAssignments(Object value, dynamic other) {
+  if (value is int) {
+    var inferred = [value++, ++value, value += 2];
+    List<int> numbers = inferred;
+    print(numbers);
+    value = 8;
+    var retained = [value];
+    List<int> retainedNumbers = retained;
+    print(retainedNumbers);
+    value = 'changed';
+    print([value] is List<String>);
+  }
+  if (other is int) {
+    other = 9;
+    var inferred = [other];
+    List<int> numbers = inferred;
+    print(numbers);
+    other = 'dynamic';
+    print([other] is List<String>);
+  }
+}
+
+void flowContexts() {
+  Object object = 1;
+  Object? optional = 2;
+  dynamic unknown = 3;
+  print([object] is List<int>);
+  print([optional] is List<int>);
+  print([unknown] is List<int>);
+  int? number = 1;
+  var updates = [number++, ++number, number += 2];
+  List<int> updatedNumbers = updates;
+  print(updatedNumbers);
+  Object cast = pass(Box(12));
+  cast as Box;
+  print(cast.value);
+  unknown as int;
+  var castValues = [unknown];
+  List<int> castNumbers = castValues;
+  print(castNumbers);
+  Object joined = pass(7);
+  if (choose()) {
+    joined as int;
+  } else {
+    joined as int;
+  }
+  var joinedValues = [joined];
+  List<int> joinedNumbers = joinedValues;
+  print(joinedNumbers);
+  flowBranches(Box(6), 2);
+  flowBranches('text', null);
+  flowExit(10);
+  flowExit(null);
+  flowAssignments(1, 2);
+  int? loopValue;
+  do {
+    loopValue = 4;
+  } while (!choose());
+  var doValues = [loopValue];
+  List<int> doNumbers = doValues;
+  print(doNumbers);
+  loopValue = null;
+  for (loopValue = 5; !choose();) {}
+  var forValues = [loopValue];
+  List<int> forNumbers = forValues;
+  print(forNumbers);
+  loopValue = null;
+  while (loopValue == null) loopValue = 6;
+  var whileValues = [loopValue];
+  List<int> whileNumbers = whileValues;
+  print(whileNumbers);
+  Object countdown = 2;
+  while (countdown is int && countdown > 0) {
+    print(countdown + 1);
+    countdown = 0;
+  }
+  Object? last;
+  for (var item in <int>[8]) last = item;
+  print([last] is List<int>);
+  int switched;
+  switch (choose()) {
+    case true:
+      switched = 11;
+      break;
+    case false:
+      switched = 12;
+      break;
+  }
+  print(switched);
+  int carried;
+  int turn = 0;
+  do {
+    carried = ++turn;
+    if (turn == 1) continue;
+    break;
+  } while (turn < 3);
+  print([carried, turn]);
+}
+
 int stringEvaluations = 0;
 
 String stringReceiver() {
@@ -621,6 +759,7 @@ void main(List<String> args) {
   filledLists();
   conditionContexts();
   localBindings();
+  flowContexts();
   stringBoundaries();
   listGrowth(args);
 }
