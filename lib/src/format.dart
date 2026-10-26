@@ -239,7 +239,7 @@ ConstantLayout layoutConstants(int start) {
   int handleType = -1;
   if (needsValues) {
     features = features | metadataStrings | metadataLists;
-    handleType = listType(tInt);
+    handleType = listType(tObject);
     while (typeOffsets.length < dartTypes.length) typeOffsets.add(-1);
     markTypeReference(typeOffsets, types, handleType);
   }

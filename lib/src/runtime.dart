@@ -17,7 +17,7 @@ const int rtAbiVersion = 9;
 
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
-int rtExecutable = 0;
+int rtExecutableRoot = 0;
 
 int rtHostTarget() {
   return nativeTarget();
@@ -826,7 +826,12 @@ int rtHostWrite(int path, int bytes) {
 }
 
 int rtArguments(int argc, int argv, int typeRef) {
-  rtExecutable = rtStringFromCString(nativeLoad64(argv));
+  var executable = rtStringFromCString(nativeLoad64(argv));
+  if (rtExecutableRoot == 0) {
+    rtExecutableRoot = rtGlobalRootNew(executable, storageRef);
+  } else {
+    rtGlobalRootSet(rtExecutableRoot, executable);
+  }
   var result = rtListNew(typeRef);
   var i = 1;
   while (i < argc) {
@@ -841,17 +846,14 @@ int rtArguments(int argc, int argv, int typeRef) {
 }
 
 int rtHostStdPath() {
+  var executable = rtGlobalRootValue(rtExecutableRoot);
   var slash = rtStringFromCString(rtCString(47, 0, 0, 0));
-  var end = rtStringLastIndexOf(
-    rtExecutable,
-    slash,
-    rtStringLength(rtExecutable),
-  );
+  var end = rtStringLastIndexOf(executable, slash, rtStringLength(executable));
   var directory = 0;
   if (end < 0) {
     directory = rtStringFromCString(rtCString(46, 0, 0, 0));
   } else {
-    directory = rtStringSubstring(rtExecutable, 0, end);
+    directory = rtStringSubstring(executable, 0, end);
   }
   var suffix = rtStringFromCString(
     rtCString(0x2f62696c2f2e2e2f, 0x746e75722f637273, 0x747261642e656d69, 0),
@@ -1177,7 +1179,7 @@ int rtListModificationError() {
   return 0;
 }
 
-int rtValueActive = 0;
+int rtValueActiveRoot = 0;
 
 int rtStringFromParts(int parts) {
   var length = 0;
@@ -1208,6 +1210,18 @@ int rtStringFromParts(int parts) {
 }
 
 int rtValueFormat(int value, int handleType) {
+  var kind = rtValueKind(value);
+  if (kind != typeKindClass && kind != typeKindList) {
+    return rtValueFormatCore(value, handleType, kind);
+  }
+  var mark = rtRootMark();
+  rtRootPush(value, storageTagged);
+  var result = rtValueFormatCore(value, handleType, kind);
+  rtRootRestore(mark);
+  return result;
+}
+
+int rtValueFormatCore(int value, int handleType, int kind) {
   if (value == 0) {
     return rtStringFromCString(rtCString(0x6c6c756e, 0, 0, 0));
   }
@@ -1217,7 +1231,6 @@ int rtValueFormat(int value, int handleType) {
   if (value == valueTrue) {
     return rtStringFromCString(rtCString(0x65757274, 0, 0, 0));
   }
-  var kind = rtValueKind(value);
   if (kind == typeKindInt) return rtIntToString(rtValueInt(value));
   if (kind == typeKindString) return value;
   var descriptor = rtObjectDescriptor(value);
@@ -1228,13 +1241,20 @@ int rtValueFormat(int value, int handleType) {
     var prefix = rtStringFromCString(
       rtCString(0x65636e6174736e49, 0x2720666f20, 0, 0),
     );
+    rtRootPush(prefix, storageRef);
     var suffix = rtStringFromCString(rtCString(39, 0, 0, 0));
-    return rtStringConcat(rtStringConcat(prefix, name), suffix);
+    rtRootPush(suffix, storageRef);
+    var head = rtStringConcat(prefix, name);
+    rtRootPush(head, storageRef);
+    return rtStringConcat(head, suffix);
   }
   var length = rtListLength(value);
   if (length == 0) return rtStringFromCString(rtCString(0x5d5b, 0, 0, 0));
-  if (rtValueActive == 0) rtValueActive = rtListNew(handleType);
-  var active = rtValueActive;
+  if (rtValueActiveRoot == 0) {
+    var active = rtListNew(handleType);
+    rtValueActiveRoot = rtGlobalRootNew(active, storageRef);
+  }
+  var active = rtGlobalRootValue(rtValueActiveRoot);
   var depth = rtListLength(active);
   var i = 0;
   while (i < depth) {
@@ -1246,21 +1266,31 @@ int rtValueFormat(int value, int handleType) {
   var wordType = rtTypeArgument(handleType);
   rtListAdd(active, value, wordType);
   var parts = rtListNew(handleType);
-  rtListAdd(parts, rtStringFromCString(rtCString(91, 0, 0, 0)), wordType);
+  rtRootPush(parts, storageRef);
+  var opening = rtStringFromCString(rtCString(91, 0, 0, 0));
+  rtRootPush(opening, storageRef);
+  rtListAdd(parts, opening, wordType);
   var separator = rtStringFromCString(rtCString(0x202c, 0, 0, 0));
+  rtRootPush(separator, storageRef);
   var elementType = rtListElementType(value);
   i = 0;
   while (i < length) {
+    var mark = rtRootMark();
     if (i != 0) rtListAdd(parts, separator, wordType);
     var element = rtValueBox(rtListRawGet(value, i), elementType);
+    rtRootPush(element, storageTagged);
     var rendered = rtValueFormat(element, handleType);
+    rtRootPush(rendered, storageRef);
     if (nativeLoad64(value + listLengthOffset) != length) {
       return rtListModificationError();
     }
     rtListAdd(parts, rendered, wordType);
+    rtRootRestore(mark);
     i = i + 1;
   }
-  rtListAdd(parts, rtStringFromCString(rtCString(93, 0, 0, 0)), wordType);
+  var closing = rtStringFromCString(rtCString(93, 0, 0, 0));
+  rtRootPush(closing, storageRef);
+  rtListAdd(parts, closing, wordType);
   var result = rtStringFromParts(parts);
   var backing = nativeLoad64(active + listBackingOffset);
   nativeStore64(backing + arrayLengthOffset, depth);
@@ -1277,6 +1307,87 @@ int rtValueToString(int value) {
 Never rtRootFailure() {
   rtHostExit(70);
   while (true) {}
+}
+
+int rtRootValues = 0;
+int rtRootCount = 0;
+int rtRootCapacity = 0;
+int rtGlobalRoots = 0;
+int rtGlobalRootCount = 0;
+int rtGlobalRootCapacity = 0;
+
+int rtRootBuffer(int previous, int count, int capacity) {
+  var buffer = rtMap(capacity * 16);
+  var i = 0;
+  while (i < count) {
+    nativeStore64(buffer + i * 16, nativeLoad64(previous + i * 16));
+    nativeStore64(buffer + i * 16 + 8, nativeLoad64(previous + i * 16 + 8));
+    i = i + 1;
+  }
+  return buffer;
+}
+
+int rtRootMark() {
+  return rtRootCount;
+}
+
+int rtRootPush(int value, int kind) {
+  if (kind == storageRef) {
+    if (value == 0) return 0;
+  } else if (kind == storageTagged) {
+    if (value <= valueTrue || (value & 1) != 0) return 0;
+  } else {
+    return rtRootFailure();
+  }
+  if (rtRootCount == rtRootCapacity) {
+    var capacity = rtRootCapacity * 2;
+    if (capacity == 0) capacity = 1024;
+    var previous = rtRootValues;
+    var oldCapacity = rtRootCapacity;
+    rtRootValues = rtRootBuffer(previous, rtRootCount, capacity);
+    rtRootCapacity = capacity;
+    rtUnmap(previous, oldCapacity * 16);
+  }
+  var slot = rtRootValues + rtRootCount * 16;
+  nativeStore64(slot, value);
+  nativeStore64(slot + 8, kind);
+  rtRootCount = rtRootCount + 1;
+  return 0;
+}
+
+int rtRootRestore(int mark) {
+  if (mark < 0 || mark > rtRootCount) return rtRootFailure();
+  rtRootCount = mark;
+  return 0;
+}
+
+int rtGlobalRootNew(int value, int kind) {
+  if (kind != storageRef && kind != storageTagged) return rtRootFailure();
+  if (rtGlobalRootCount == rtGlobalRootCapacity) {
+    var capacity = rtGlobalRootCapacity * 2;
+    if (capacity == 0) capacity = 1024;
+    var previous = rtGlobalRoots;
+    var oldCapacity = rtGlobalRootCapacity;
+    rtGlobalRoots = rtRootBuffer(previous, rtGlobalRootCount, capacity);
+    rtGlobalRootCapacity = capacity;
+    rtUnmap(previous, oldCapacity * 16);
+  }
+  var slot = rtGlobalRoots + rtGlobalRootCount * 16;
+  nativeStore64(slot, value);
+  nativeStore64(slot + 8, kind);
+  rtGlobalRootCount = rtGlobalRootCount + 1;
+  return rtGlobalRootCount;
+}
+
+int rtGlobalRootValue(int index) {
+  if (index <= 0 || index > rtGlobalRootCount) return rtRootFailure();
+  return nativeLoad64(rtGlobalRoots + (index - 1) * 16);
+}
+
+int rtGlobalRootSet(int index, int value) {
+  if (index <= 0 || index > rtGlobalRootCount) return rtRootFailure();
+  nativeStore64(rtGlobalRoots + (index - 1) * 16, value);
+  return 0;
 }
 
 int rtRootAppend(int value, int kind, int worklist, int count, int capacity) {
@@ -1306,6 +1417,30 @@ int rtTraceRoots(int frame, int worklist, int capacity) {
   var globals = table + nativeLoad64(table + rootTableGlobalsOffset);
   var count = 0;
   var i = 0;
+  while (i < rtGlobalRootCount) {
+    var slot = rtGlobalRoots + i * 16;
+    count = rtRootAppend(
+      nativeLoad64(slot),
+      nativeLoad64(slot + 8),
+      worklist,
+      count,
+      capacity,
+    );
+    i = i + 1;
+  }
+  i = 0;
+  while (i < rtRootCount) {
+    var slot = rtRootValues + i * 16;
+    count = rtRootAppend(
+      nativeLoad64(slot),
+      nativeLoad64(slot + 8),
+      worklist,
+      count,
+      capacity,
+    );
+    i = i + 1;
+  }
+  i = 0;
   while (i < globalCount) {
     var record = globals + i * globalRootBytes;
     var slot = record + nativeLoad64(record + globalRootAddressOffset);

@@ -493,7 +493,9 @@ ThreadState 中登记的引用
 
 只有可达的 `nativeMetadataAddress` 请求包含 `metadataRoots` 时才保留根表；调用返回 PC、全局槽和子表引用均用相对各记录基址的位移，和代码、常量及数据段一起布局。根遍历只增加 `nativeFramePointer` 这一读取当前帧指针的受信机器原语；帧链查找、根值过滤和对象边遍历保持为 Dart 算法。
 
-Dart `rtTraceRoots`、`rtTraceObject` 已实现栈与全局根、对象边枚举，[原生行为测试](../test/fixtures/roots.dart)已在 macOS/Linux ARM64 执行，并在 macOS 验证地址随机化下的枚举。分配器仍不执行收集；运行时 raw int、word array 中的隐藏托管引用、物理分配跨度及完整 noGC 约束尚未闭合。启用 GC 还须验证完整堆保活与标记清扫行为，枚举验证不等于 GC 验收。
+Dart `rtTraceRoots`、`rtTraceObject` 已实现栈与全局根、对象边枚举，[原生行为测试](../test/fixtures/roots.dart)已在 macOS/Linux ARM64 执行，并在 macOS 验证地址随机化下的枚举。运行时显式根另分为临时范围与持久槽：前者按 mark/push/restore 截断活跃前缀，后者以稳定的槽索引更新，不受嵌套范围恢复影响。两类记录使用惰性分配的原始缓冲区，不分配托管对象；登记操作不引入根元数据，只有实际请求枚举时才保留根表。格式化器的循环检测和字符串片段 List 使用 tagged 元素，使对象边可被扫描。
+
+分配器仍不执行收集；builders、拼接及路径处理的其余 raw 引用、物理分配跨度与完整 noGC 约束尚未闭合。显式根的嵌套、扩容、更新及格式化回调枚举已有 macOS ARM64 执行证据，其他平台须补充对应验证。启用 GC 还须验证完整堆保活与标记清扫行为，枚举验证不等于 GC 验收。
 
 ClassDesc 通过指针位图和变长对象扫描规则描述对象负载。分配器必须先建立可被 GC 安全扫描的对象头和引用槽，才允许下一安全点；语言字段的默认值、late 哨兵和初始化顺序另由标准库与编译代码保证。
 

@@ -1,7 +1,7 @@
 import '../../lib/src/runtime.dart' as rt;
 import '../../lib/src/layout.dart' as abi;
 
-const capacity = 512;
+const capacity = 2048;
 
 class Leaf {
   int marker;
@@ -37,11 +37,19 @@ class Wide {
 
 class Watch {
   int queue;
-  Watch(this.queue);
+  bool formatting;
+  int edges;
+  int input = 0;
+  Watch(this.queue, [this.formatting = false, this.edges = 0]);
 
   String toString() {
     var count = snapshot(queue);
-    check(findMarker(queue, count, 160) != 0);
+    if (formatting) {
+      check(formatterEdges(queue, count, edges, input));
+      check(hasStringRoot(queue, count, 44, 32, 2));
+    } else {
+      check(findMarker(queue, count, 160) != 0);
+    }
     return 'watched';
   }
 }
@@ -85,6 +93,23 @@ bool contains(int queue, int count, int object) {
   return false;
 }
 
+bool hasStringRoot(int queue, int count, int first, int second, int length) {
+  var i = 0;
+  while (i < count) {
+    var object = rt.nativeLoad64(queue + i * 8);
+    var descriptor = rt.rtObjectDescriptor(object);
+    if (rt.nativeLoad64(descriptor + abi.descriptorKindOffset) ==
+            abi.descriptorString &&
+        rt.rtStringLength(object) == length &&
+        rt.rtStringCodeUnit(object, 0) == first &&
+        (length == 1 || rt.rtStringCodeUnit(object, 1) == second)) {
+      return true;
+    }
+    i++;
+  }
+  return false;
+}
+
 int snapshot(int queue) {
   return rt.rtTraceRoots(rt.nativeFramePointer(), queue, capacity);
 }
@@ -119,6 +144,25 @@ int listElements(int object, int queue) {
   return rt.rtTraceObject(backing, queue, capacity);
 }
 
+bool formatterEdges(int queue, int count, int edges, int input) {
+  var active = false;
+  var parts = false;
+  var i = 0;
+  while (i < count) {
+    var object = rt.nativeLoad64(queue + i * 8);
+    var descriptor = rt.rtObjectDescriptor(object);
+    if (rt.nativeLoad64(descriptor + abi.descriptorKindOffset) ==
+            abi.descriptorList &&
+        rt.rtListLength(object) != 0) {
+      var children = listElements(object, edges);
+      if (contains(edges, children, input)) active = true;
+      if (hasStringRoot(edges, children, 91, 0, 1)) parts = true;
+    }
+    i++;
+  }
+  return active && parts;
+}
+
 int many(
   Object? a,
   Object? b,
@@ -148,6 +192,83 @@ int recurse(int depth, int queue) {
 void capacityFailure(Object? value) {
   print('before');
   rt.rtTraceRoots(rt.nativeFramePointer(), 0, 0);
+}
+
+void runtimeOwnership(int queue, int edges) {
+  var mark = rt.rtRootMark();
+  var first = capture(Leaf(401), 401, queue);
+  check(!contains(queue, snapshot(queue), first));
+  rt.rtRootPush(first, abi.storageRef);
+  check(contains(queue, snapshot(queue), first));
+  var nested = rt.rtRootMark();
+  var second = capture(Leaf(402), 402, queue);
+  rt.rtRootPush(second, abi.storageTagged);
+  var persistent = rt.rtGlobalRootNew(second, abi.storageRef);
+  rt.rtRootRestore(nested);
+  check(contains(queue, snapshot(queue), second));
+  rt.rtRootRestore(mark);
+  var count = snapshot(queue);
+  check(!contains(queue, count, first) && contains(queue, count, second));
+  rt.rtGlobalRootSet(persistent, first);
+  check(rt.rtGlobalRootValue(persistent) == first);
+  count = snapshot(queue);
+  check(contains(queue, count, first) && !contains(queue, count, second));
+  rt.rtGlobalRootSet(persistent, 0);
+  check(!contains(queue, snapshot(queue), first));
+
+  rt.rtRootPush(0, abi.storageRef);
+  rt.rtRootPush(0, abi.storageTagged);
+  rt.rtRootPush(abi.valueFalse, abi.storageTagged);
+  rt.rtRootPush(abi.valueTrue, abi.storageTagged);
+  rt.rtRootPush(rt.rtBoxInt(-7), abi.storageTagged);
+  check(rt.rtRootMark() == mark);
+  var box = rt.rtBoxInt(9223372036854775807);
+  rt.rtRootPush(box, abi.storageTagged);
+  check(contains(queue, snapshot(queue), box));
+  rt.rtRootRestore(mark);
+  check(!contains(queue, snapshot(queue), box));
+
+  rt.rtRootPush(second, abi.storageRef);
+  var i = 1;
+  while (i < 1100) {
+    rt.rtRootPush(first, abi.storageTagged);
+    i++;
+  }
+  check(rt.rtRootMark() == mark + 1100);
+  count = snapshot(queue);
+  check(contains(queue, count, first) && contains(queue, count, second));
+  rt.rtRootRestore(mark);
+  count = snapshot(queue);
+  check(!contains(queue, count, first) && !contains(queue, count, second));
+  var stable = rt.rtGlobalRootNew(first, abi.storageTagged);
+  i = 0;
+  while (i < 1100) {
+    rt.rtGlobalRootNew(0, abi.storageRef);
+    i++;
+  }
+  check(rt.rtGlobalRootValue(stable) == first);
+  rt.rtGlobalRootSet(persistent, second);
+  count = snapshot(queue);
+  check(contains(queue, count, first) && contains(queue, count, second));
+  rt.rtGlobalRootSet(stable, 0);
+  rt.rtGlobalRootSet(persistent, 0);
+  count = snapshot(queue);
+  check(!contains(queue, count, first) && !contains(queue, count, second));
+
+  var watched = Watch(queue, true, edges);
+  var rendering = <Object>[watched, 9223372036854775807, 'tail', true, false];
+  watched.input = captureList(rendering, 5, queue);
+  check(
+    rendering.toString() == '[watched, 9223372036854775807, tail, true, false]',
+  );
+  check(rt.rtRootMark() == mark);
+  Object fallback = Leaf(403);
+  check(fallback.toString() == "Instance of 'Leaf'");
+  check(rt.rtRootMark() == mark);
+  var cyclic = <Object>[];
+  cyclic.add(cyclic);
+  check(cyclic.toString() == '[[...]]');
+  check(rt.rtRootMark() == mark);
 }
 
 void main(List<String> args) {
@@ -249,6 +370,7 @@ void main(List<String> args) {
   check(count == 2 && findMarker(edges, count, 303) != 0);
   tagged.clear();
   check(listElements(taggedAddress, edges) == 0);
+  runtimeOwnership(queue, edges);
   rt.rtUnmap(edges, capacity * 8);
   rt.rtUnmap(queue, capacity * 8);
   print('roots ok');
