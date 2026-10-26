@@ -135,6 +135,7 @@ List<int> globalTypes = <int>[];
 List<String> strings = <String>[];
 
 int entrySource = -1;
+int entryFunction = -1;
 int targetOS = 0;
 int imageKind = 0;
 List<String> exportNames = <String>[];

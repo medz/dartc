@@ -2,14 +2,18 @@ class StringBuffer {
   List<String> _parts = <String>[];
   int _length = 0;
 
-  StringBuffer();
+  StringBuffer([Object content = '']) {
+    this.write(content);
+  }
 
-  void write(String value) {
+  void write(Object? object) {
+    String value = object.toString();
+    if (value.isEmpty) return;
     this._parts.add(value);
     this._length = this._length + value.length;
   }
 
-  void writeln(String value) {
+  void writeln([Object? value = '']) {
     this.write(value);
     this.write('\n');
   }

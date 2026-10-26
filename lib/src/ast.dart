@@ -79,12 +79,19 @@ class AstVariable {
   );
 }
 
+const int astRequiredPositional = 0;
+const int astOptionalPositional = 1;
+const int astNamedParameter = 2;
+
 class AstParameter {
   AstType type;
   String name;
   bool fieldFormal;
   int token;
   int binding = -1;
+  int kind = astRequiredPositional;
+  bool required = false;
+  List<AstExpression> defaults = <AstExpression>[];
 
   AstParameter(this.type, this.name, this.fieldFormal, this.token);
 }

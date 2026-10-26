@@ -438,6 +438,41 @@ void main(List<String> args) {
         File('$root/test/fixtures/values.dart').readAsStringSync(),
       );
     compare(values, [for (var i = 0; i < 20; i++) '参数$i🙂']);
+    final namedEntry = File('${temporary.path}/named-entry.dart')
+      ..writeAsStringSync(
+        "void main({String label = 'named', bool flag = true}) { "
+        'print(label); print(flag); }',
+      );
+    compare(namedEntry, ['ignored', '你好']);
+    final twoEntry = File('${temporary.path}/two-entry.dart')
+      ..writeAsStringSync(
+        "void main(List<String> args, [Object? message = 'default', int third = 3]) { "
+        'print(args); print(message); print(third); }',
+      );
+    compare(twoEntry, ['alpha', '你好🙂']);
+    final invalidEntry = File('${temporary.path}/invalid-entry.dart')
+      ..writeAsStringSync(
+        "void main(List<String> args, [int second = 1]) { print('body'); }",
+      );
+    final expectedEntry = Process.runSync(sdk, [invalidEntry.path]);
+    final entryExecutable = '${invalidEntry.path}.out';
+    run(
+      driver,
+      compileArguments(invalidEntry, entryExecutable),
+      native: compiler != null,
+    );
+    final actualEntry = Process.runSync(
+      entryExecutable,
+      [],
+      environment: {'PATH': '/usr/bin:/bin'},
+      includeParentEnvironment: false,
+    );
+    if (expectedEntry.exitCode == 0 ||
+        actualEntry.exitCode != 70 ||
+        expectedEntry.stdout != '' ||
+        actualEntry.stdout != expectedEntry.stdout) {
+      throw StateError('Entry argument checks must fail before the main body.');
+    }
     final failingValues = [
       "void main() { print('before'); print('abc'.codeUnitAt(-1)); }",
       "void main() { print('before'); print('abc'.codeUnitAt(3)); }",
@@ -456,6 +491,23 @@ void main(List<String> args) {
       "void main() { dynamic value = null; print('before'); value as int; print('after'); }",
       'void main() { Object value = <Object>[1]; print(\'before\'); value as List<int>; print(\'after\'); }',
       "void main() { dynamic value = 'wrong'; print('before'); int number = value; print('after'); }",
+      "void main() { print('before'); int count = -1; 1 << count; print('after'); }",
+      "void main() { print('before'); int count = -1; -1 >> count; print('after'); }",
+      "void main() { print('before'); int count = -1; -1 >>> count; print('after'); }",
+      '''
+class C {
+  C();
+  void call(int positional, {required int named}) {}
+}
+C receiver() { print('receiver'); return C(); }
+dynamic bad() { print('bad'); return 'wrong'; }
+int later() { print('later'); return 2; }
+void main() {
+  print('before');
+  receiver().call(named: bad(), later());
+  print('after');
+}
+''',
       "void main() { List<Object> view = <int>[1]; print('before'); view[0] = 'wrong'; print('after'); }",
       "void main() { List<Object> view = <num>[1]; print('before'); view[0] = 'wrong'; print('after'); }",
       "void main() { List<Object> view = <int>[1]; print('before'); view.add('wrong'); print('after'); }",
@@ -599,6 +651,20 @@ void main() {
       'void f(Object value, dynamic other) { print(value + other); } void main() { f(1, 2); }',
       'void main() { int value = 1; dynamic other = 2; value += other; print(value); }',
       'void main() { List<num> values = <num>[1]; List<int> narrow = values; print(narrow); }',
+      'void call({required int value}) {} void main() { call(); }',
+      'void call({int value = 1}) {} void main() { call(value: 1, value: 2); }',
+      'void call({int value = 1}) {} void main() { call(other: 2); }',
+      'void call(int value) {} void main() { call(value: 1); }',
+      'void call(int value, [int other = 1]) {} void main() { call(); }',
+      'void call([int value = 1]) {} void main() { call(1, 2); }',
+      'void call([int value]) {} void main() {}',
+      'void call({required int value = 1}) {} void main() {}',
+      'void call([int value = 1], {int other = 2}) {} void main() {}',
+      'class C { int value; C({required this.value}); } void main() { C(); }',
+      'class C { int _x; C({this._x = 1, int x = 2}); } void main() {}',
+      'int value = 1; void call([int argument = value]) {} void main() { call(2); }',
+      'int value = 1; void call([int argument = true ? 1 : value]) {} void main() {}',
+      "const dynamic value = 'wrong'; void call([int argument = value]) {} void main() { call(2); }",
       "void main() { print('abc'.codeUnitAt()); }",
       "void main() { print('abc'.substring()); }",
       "void main() { print('abc'.endsWith('c', 1)); }",

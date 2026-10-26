@@ -27,7 +27,7 @@ List<int> reachableFunctions(List<SsaFunction> source) {
   }
   if (imageKind == 0) {
     _reachFunction(reachable, work, 0);
-    var main = abiFunction('main', entrySource);
+    var main = entryFunction;
     _reachFunction(reachable, work, main);
     if (functions[main].parameters > 0) {
       _reachFunction(reachable, work, runtimeFunction(bArguments, -1));

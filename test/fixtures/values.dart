@@ -1,12 +1,54 @@
+int boxStrings = 0;
+
 class Box {
   int value;
-  Box(this.value);
-  String toString() => 'Box(' + this.value.toString() + ')';
+  int extra;
+  Box(this.value, {this.extra = 7});
+  String toString() {
+    boxStrings++;
+    return 'Box(' + this.value.toString() + ')';
+  }
+
+  void arguments(
+    int first,
+    String second,
+    bool third,
+    Object? fourth,
+    Box fifth,
+    List<int> sixth,
+    num seventh, {
+    required int last,
+    bool flag = false,
+    String tag = 'tail',
+    Object? absent,
+    int wide = -9223372036854775808,
+  }) {
+    print(<Object?>[
+      value,
+      first,
+      second,
+      third,
+      fourth,
+      fifth.value,
+      sixth[0],
+      seventh,
+      last,
+      flag,
+      tag,
+      absent,
+      wide,
+    ]);
+  }
+
+  int recurse(int count, {int bias = 1}) {
+    if (count == 0) return value + bias;
+    return recurse(count - 1, bias: bias + 1);
+  }
 }
 
 class Plain {
   int value;
-  Plain(this.value);
+  Plain([this.value = 7]);
 }
 
 class UnusedType {}
@@ -95,7 +137,8 @@ void valueVoid() => 7;
 class Cell {
   dynamic value;
   Object? optional;
-  Cell(this.value, this.optional);
+  Object _hidden;
+  Cell(this.value, this.optional, {int this._hidden = 7});
   toString() => 'Cell(${this.value},${this.optional})';
 }
 
@@ -733,6 +776,123 @@ void staticContexts(Object? left, Object? right) {
   print(right.toString());
 }
 
+const int argumentDefault = 4;
+
+dynamic argumentValue(int marker, dynamic value) {
+  conditionTrace = conditionTrace + marker.toString();
+  return value;
+}
+
+String namedArguments(
+  int first,
+  int second, {
+  required String label,
+  int count = argumentDefault,
+  Object? value,
+  bool flag = true,
+}) {
+  print(<Object?>[first, second, label, count, value, flag]);
+  return label;
+}
+
+void positionalArguments([
+  int argumentDefault = argumentDefault,
+  String label = 'positional',
+  bool flag = true,
+  Object? value,
+  int? nullable = 9,
+  num wide = 9223372036854775807,
+  int left = 1 << 64,
+  int unsigned = -1 >>> 64,
+]) {
+  print(<Object?>[
+    argumentDefault,
+    label,
+    flag,
+    value,
+    nullable,
+    wide,
+    left,
+    unsigned,
+  ]);
+}
+
+void nullableArguments({required Object? value, Object? fallback = 'default'}) {
+  print(<Object?>[value, fallback]);
+}
+
+int recursiveArguments(int count, {int total = 1}) {
+  if (count == 0) return total;
+  return recursiveArguments(count - 1, total: total + count);
+}
+
+void argumentCalls() {
+  conditionTrace = '';
+  print(
+    namedArguments(
+      count: argumentValue(1, 5),
+      argumentValue(2, 2),
+      label: argumentValue(3, 'named'),
+      argumentValue(4, 4),
+      value: argumentValue(5, Box(6)),
+      flag: argumentValue(6, false),
+    ),
+  );
+  print(conditionTrace);
+  namedArguments(2, 4, label: 'omitted');
+  positionalArguments();
+  positionalArguments(2, 'explicit', false, Box(3), null, -9223372036854775808);
+  nullableArguments(value: null);
+  nullableArguments(fallback: null, value: 9223372036854775807);
+  var box = Box(9, extra: 11);
+  print(Box(9).extra);
+  print(box.extra);
+  print(Plain().value);
+  print(Plain(3).value);
+  print(Cell(1, null)._hidden);
+  print(Cell(1, null, hidden: pass(9))._hidden);
+  var values = <int>[7];
+  conditionTrace = '';
+  (argumentValue(0, box) as Box).arguments(
+    wide: argumentValue(1, 9223372036854775807),
+    argumentValue(2, 1),
+    tag: argumentValue(3, 'tag'),
+    argumentValue(4, '字🙂'),
+    flag: argumentValue(5, false),
+    argumentValue(6, true),
+    argumentValue(7, 9223372036854775807),
+    last: argumentValue(8, 8),
+    argumentValue(9, Box(12)),
+    absent: argumentValue(10, null),
+    argumentValue(11, values),
+    argumentValue(12, 9223372036854775807),
+  );
+  print(conditionTrace);
+  print(<Object?>[box.value, box.extra, values[0]]);
+  box.arguments(1, 'short', false, null, Box(2), values, 3, last: 8);
+  print(recursiveArguments(3));
+  print(box.recurse(2));
+  for (int count in <int>[0, 63, 64, 65, 9223372036854775807]) {
+    print(<int>[1 << count, -1 >> count, -1 >>> count]);
+    print(<int>[-1 << count, 1 >> count, 1 >>> count]);
+  }
+}
+
+void bufferValues() {
+  boxStrings = 0;
+  var buffer = StringBuffer(7);
+  buffer.write(null);
+  buffer.writeln();
+  buffer.writeln(Box(4));
+  print(buffer.toString());
+  print(boxStrings);
+  print(buffer.toString());
+  print(boxStrings);
+  var initial = StringBuffer(Box(5));
+  print(initial.toString());
+  print(boxStrings);
+}
+
 int stringEvaluations = 0;
 
 String stringReceiver() {
@@ -821,6 +981,8 @@ void main(List<String> args) {
   localBindings();
   flowContexts();
   staticContexts(1, null);
+  argumentCalls();
+  bufferValues();
   stringBoundaries();
   listGrowth(args);
 }

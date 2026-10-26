@@ -499,21 +499,62 @@ List<AstVariable> parserVariables(Parser parser) {
 List<AstParameter> parserParameters(Parser parser) {
   parserExpect(parser, '(');
   List<AstParameter> parameters = <AstParameter>[];
-  while (!parserIs(parser, ')')) {
+  var kind = astRequiredPositional;
+  var close = ')';
+  while (!parserIs(parser, close)) {
+    if (kind == astRequiredPositional &&
+        (parserIs(parser, '[') || parserIs(parser, '{'))) {
+      kind = astOptionalPositional;
+      close = ']';
+      if (parserTake(parser, '{')) {
+        kind = astNamedParameter;
+        close = '}';
+      } else {
+        parserExpect(parser, '[');
+      }
+      if (parserIs(parser, close)) {
+        parserError(parser, 'optional parameter group cannot be empty');
+      }
+    }
     var token = parser.position;
-    var type = parserInferredType(token);
+    var required = false;
+    if (parserIs(parser, 'required')) {
+      var next = parser.tokens[parser.position + 1];
+      if (!tokenIs(next, ',') &&
+          !tokenIs(next, ')') &&
+          !tokenIs(next, ']') &&
+          !tokenIs(next, '}') &&
+          !tokenIs(next, '=')) {
+        if (kind != astNamedParameter) {
+          parserError(parser, 'required needs a named parameter');
+        }
+        parser.position++;
+        required = true;
+      }
+    }
+    var type = parserDeclarationType(parser, '');
     var fieldFormal = parserTake(parser, 'this');
     var name = '';
     if (fieldFormal) {
       parserExpect(parser, '.');
       name = parserName(parser);
     } else {
-      type = parserDeclarationType(parser, '');
       name = parserName(parser);
     }
-    parameters.add(AstParameter(type, name, fieldFormal, token));
+    var parameter = AstParameter(type, name, fieldFormal, token);
+    parameter.kind = kind;
+    parameter.required = required;
+    if (parserIs(parser, '=')) {
+      if (kind == astRequiredPositional || required) {
+        parserError(parser, 'required parameter cannot have a default value');
+      }
+      parser.position++;
+      parameter.defaults.add(parseExpression(parser));
+    }
+    parameters.add(parameter);
     if (!parserTake(parser, ',')) break;
   }
+  if (kind != astRequiredPositional) parserExpect(parser, close);
   parserExpect(parser, ')');
   return parameters;
 }

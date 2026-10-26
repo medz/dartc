@@ -126,6 +126,35 @@ void emitInstruction(MachineInstruction instruction, MachineFunction function) {
       machineCode.add(0xd4001001);
       machineCode.add(0xda803400);
     }
+  } else if (op == mShl || op == mShr || op == mUshr) {
+    int left = emitOperand(function, inputs[0], 0);
+    int right = emitOperand(function, inputs[1], 1);
+    result = emitDestination(function, output);
+    machineCode.add(0xf100001f | (right << 5));
+    int valid = machineCode.length;
+    machineCode.add(0);
+    armConstant(0, 70);
+    if (targetOS == 0) {
+      armConstant(16, 1);
+      machineCode.add(0xd4001001);
+    } else {
+      armConstant(8, 93);
+      machineCode.add(0xd4000001);
+    }
+    machineCode[valid] = 0x5400000a | ((machineCode.length - valid) << 5);
+    machineCode.add(0xf101001f | (right << 5));
+    int limit = 31;
+    if (op == mShr) {
+      // x9 is reserved scratch; preserve the sign before output aliases left.
+      machineCode.add(0x937ffc09 | (left << 5));
+      limit = 9;
+    }
+    int registers = (right << 16) | (left << 5) | result;
+    if (op == mShl) machineCode.add(0x9ac02000 | registers);
+    if (op == mShr) machineCode.add(0x9ac02800 | registers);
+    if (op == mUshr) machineCode.add(0x9ac02400 | registers);
+    // CSEL retains the shifted value only when the count is below 64.
+    machineCode.add(0x9a80b000 | (limit << 16) | (result << 5) | result);
   } else if (op == mNeg || op == mBitNot || op == mNot) {
     int value = emitOperand(function, inputs[0], 0);
     result = emitDestination(function, output);
@@ -158,9 +187,6 @@ void emitInstruction(MachineInstruction instruction, MachineFunction function) {
     if (op == mAnd) machineCode.add(0x8a000000 | registers);
     if (op == mOr) machineCode.add(0xaa000000 | registers);
     if (op == mXor) machineCode.add(0xca000000 | registers);
-    if (op == mShl) machineCode.add(0x9ac02000 | registers);
-    if (op == mShr) machineCode.add(0x9ac02800 | registers);
-    if (op == mUshr) machineCode.add(0x9ac02400 | registers);
     if (op == mCompare) {
       machineCode.add(0xeb00001f | (right << 16) | (left << 5));
       machineCode.add(0x9a9f07e0 | ((instruction.extra ^ 1) << 12) | result);
@@ -337,7 +363,7 @@ void generateCode(List<MachineFunction> program) {
     i = i + 1;
   }
   if (imageKind == 0) {
-    int main = abiFunction('main', entrySource);
+    int main = entryFunction;
     if (functions[main].parameters == 0) {
       armCall(0);
     } else {
