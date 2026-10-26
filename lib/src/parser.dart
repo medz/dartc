@@ -323,6 +323,7 @@ bool parserNullableTypeEnd(Parser parser) {
       parserIs(parser, 'is') ||
       parserIs(parser, 'as') ||
       parserIs(parser, '||') ||
+      parserIs(parser, '??') ||
       parserIs(parser, '&&') ||
       parserIs(parser, '');
 }
@@ -403,8 +404,25 @@ bool parserAssignment(String op) {
       op == '>>>=';
 }
 
-AstExpression parseExpression(Parser parser) {
+AstExpression parserIfNull(Parser parser) {
   var expression = parserBinary(parser, 1);
+  while (parserIs(parser, '??')) {
+    var token = parser.position;
+    parser.position++;
+    var right = parserBinary(parser, 1);
+    expression = AstExpression(
+      astBinary,
+      '??',
+      <AstExpression>[expression, right],
+      <AstType>[],
+      token,
+    );
+  }
+  return expression;
+}
+
+AstExpression parseExpression(Parser parser) {
+  var expression = parserIfNull(parser);
   var token = parser.position;
   if (parserTake(parser, '?')) {
     var yes = parseExpression(parser);
@@ -417,6 +435,9 @@ AstExpression parseExpression(Parser parser) {
       <AstType>[],
       token,
     );
+  }
+  if (parserIs(parser, '??=')) {
+    parserError(parser, 'unsupported assignment operator ??=');
   }
   var op = parserPeek(parser);
   if (parser.tokens[parser.position].kind == tokenSymbol &&

@@ -527,6 +527,13 @@ FlowState feJoinFlow(FlowState left, FlowState right) {
   return flowJoin(left, right, feBindingTypes);
 }
 
+void feNarrowValue(int stored, int promoted) {
+  if (stored == promoted) return;
+  var builtin = bBoxRef;
+  if (promoted == tInt || promoted == tBool) builtin = bValueCast;
+  feBuiltinTyped(builtin, 1, promoted);
+}
+
 int feReadLocal(int binding, int token) {
   var slot = feLocalSlot(binding, token);
   if (!feFlow.assigned[binding]) {
@@ -537,11 +544,7 @@ int feReadLocal(int binding, int token) {
   }
   feOperand(opLoadLocal, slot);
   var type = feFlow.types[binding];
-  if (type != feBindingTypes[binding]) {
-    var builtin = bBoxRef;
-    if (type == tInt || type == tBool) builtin = bValueCast;
-    feBuiltinTyped(builtin, 1, type);
-  }
+  feNarrowValue(feBindingTypes[binding], type);
   return type;
 }
 
@@ -1017,6 +1020,8 @@ int feLowerHint(AstExpression expression, int context) {
   }
   if (expression.kind == astConditional)
     return feLowerConditional(expression, context);
+  if (expression.kind == astBinary && expression.text == '??')
+    return feLowerCoalescing(expression, context);
   var type = -1;
   var listContext = context;
   if (listContext >= 0) listContext = typeNonNullable(listContext);
@@ -1967,6 +1972,7 @@ int feLowerExpression(AstExpression expression) {
   }
   if (kind == astBinary) {
     var op = expression.text;
+    if (op == '??') return feLowerCoalescing(expression, -1);
     if (op == '&&' || op == '||') {
       var otherwise = <int>[];
       var falseFlow = feConditionJumps(expression, false, otherwise);
@@ -1985,6 +1991,50 @@ int feLowerExpression(AstExpression expression) {
   if (kind == astConditional) return feLowerConditional(expression, -1);
   feAstError(expression.token, 'unsupported expression');
   return tInt;
+}
+
+int feLowerCoalescing(AstExpression expression, int context) {
+  var source = expression.children[0];
+  var left = feLowerHint(source, context);
+  if (left == tVoid)
+    feAstError(source.token, 'void expression cannot be used as a value');
+  if (left == tNull) {
+    feEmit(opPop);
+    return feLowerHint(expression.children[1], context);
+  }
+  var value = feTemp(left);
+  feOperand(opStoreLocal, value);
+  if (typeCanBeNull(left)) {
+    // Nullable references and tagged values both encode null as zero.
+    feOperand(opLoadLocal, value);
+    feInteger(0, tNull);
+    feEmit(opNe);
+  } else {
+    feInteger(1, tBool);
+  }
+  var present = feJump(opJumpTrue);
+  var afterLeft = feFlow;
+  feFlow = flowCopy(afterLeft);
+  if (source.kind == astName && source.binding >= 0)
+    flowNull(feFlow, source.binding, true);
+  else if (!typeCanBeNull(left))
+    feFlow.reachable = false;
+  var right = feLowerHint(expression.children[1], context);
+  var result = typingCoalescing(left, right);
+  feConvertValue(right, result, expression.children[1].token);
+  var rightFlow = feFlow;
+  var done = feJump(opJump);
+  fePatch(present, ir.length);
+  feFlow = afterLeft;
+  if (source.kind == astName && source.binding >= 0)
+    flowNull(feFlow, source.binding, false);
+  feOperand(opLoadLocal, value);
+  var promoted = typeNonNullable(left);
+  feNarrowValue(left, promoted);
+  feConvertValue(promoted, result, source.token);
+  feFlow = feJoinFlow(feFlow, rightFlow);
+  fePatch(done, ir.length);
+  return result;
 }
 
 int feLowerConditional(AstExpression expression, int context) {

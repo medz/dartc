@@ -251,7 +251,11 @@ void scanCode(Scanner scanner, bool interpolation) {
       size = 4;
     } else if (i + 2 < source.length) {
       var three = source.substring(i, i + 3);
-      if (three == '>>>' || three == '<<=' || three == '>>=' || three == '~/=')
+      if (three == '>>>' ||
+          three == '<<=' ||
+          three == '>>=' ||
+          three == '~/=' ||
+          three == '??=')
         size = 3;
     }
     if (size == 1 && i + 1 < source.length) {
@@ -263,6 +267,7 @@ void scanCode(Scanner scanner, bool interpolation) {
           two == '>=' ||
           two == '&&' ||
           two == '||' ||
+          two == '??' ||
           two == '<<' ||
           two == '>>' ||
           two == '~/' ||

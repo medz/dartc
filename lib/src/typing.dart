@@ -14,6 +14,12 @@ bool typingReceiver(int type) {
   return type == tDynamic || !typeCanBeNull(type);
 }
 
+int typingCoalescing(int left, int right) {
+  if (left == tVoid) return -1;
+  if (left == tNull) return right;
+  return joinTypes(typeNonNullable(left), right);
+}
+
 int typingUnary(String op, int type) {
   if (op == '!') {
     if (typingCondition(type)) return tBool;

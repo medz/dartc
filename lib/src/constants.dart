@@ -254,6 +254,41 @@ bool _constantSame(ConstantValue left, ConstantValue right) {
   return left.integer == right.integer;
 }
 
+ConstantValue _constantCoalescing(
+  ConstantContext context,
+  AstExpression expression,
+  bool active,
+  int expected,
+  bool implicitConst,
+) {
+  var left = _evaluateConstant(
+    context,
+    expression.children[0],
+    active,
+    expected,
+    implicitConst,
+  );
+  var right = _evaluateConstant(
+    context,
+    expression.children[1],
+    active && left.kind == tNull,
+    expected,
+    implicitConst,
+  );
+  var type = typingCoalescing(left.type, right.type);
+  if (type < 0) {
+    return _constantError(
+      context,
+      expression.token,
+      'void cannot be a null-coalescing receiver',
+    );
+  }
+  if (!active) return ConstantValue(type, tNull, 0, '');
+  var value = left;
+  if (left.kind == tNull) value = right;
+  return constantWithType(value, type);
+}
+
 int _constantSymbol(ConstantContext context, AstExpression expression) {
   var prefix = '';
   if (expression.kind == astName) {
@@ -475,6 +510,15 @@ ConstantValue _evaluateConstant(
     if (expression.text == '~') integer = ~integer;
     if (expression.text == '!') integer = 1 - integer;
     return ConstantValue(type, valueKind, integer, '');
+  }
+  if (kind == astBinary && expression.text == '??') {
+    return _constantCoalescing(
+      context,
+      expression,
+      active,
+      expected,
+      implicitConst,
+    );
   }
   if (kind == astBinary)
     return _constantBinary(context, expression, active, implicitConst);

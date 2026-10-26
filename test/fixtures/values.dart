@@ -501,6 +501,88 @@ void conditionContexts() {
   conditionComparisons(pass(0));
 }
 
+const coalescingNested = <List<int>>[
+  null ?? <int>[3],
+];
+
+void coalescingDefaults([
+  // ignore: dead_code, dead_null_aware_expression
+  int number = null ?? (1 ?? (1 ~/ 0)),
+  List<List<int>> nested = const <List<int>>[
+    null ?? <int>[3],
+  ],
+]) {
+  print(number);
+  print(identical(nested, coalescingNested));
+}
+
+void coalescingValues(
+  int? number,
+  bool? flag,
+  String? text,
+  List<List<int>>? lists,
+) {
+  int selected = number ?? 4;
+  bool enabled = flag ?? true;
+  String label = text ?? 'fallback';
+  List<List<int>> nested = lists ?? [[]];
+  nested[0].add(9);
+  print(<Object>[selected, enabled, label, nested]);
+  print(flag ?? false || true);
+  print(flag ?? false ? 1 : 2);
+  number ?? (number = 5);
+  print(number + 1);
+  // ignore: dead_code, dead_null_aware_expression
+  number ?? touchVoid();
+  // ignore: dead_code, dead_null_aware_expression
+  List<Object?> payload = <void>[number ?? touchVoid()];
+  print(payload);
+}
+
+void coalescingContexts() {
+  conditionTrace = '';
+  print(<dynamic>[
+    argumentValue(1, 0) ?? argumentValue(2, 7),
+    argumentValue(3, false) ?? argumentValue(4, true),
+    argumentValue(5, null) ?? argumentValue(6, 'right'),
+    argumentValue(7, Box(8)) ?? argumentValue(8, Box(9)),
+  ]);
+  print(conditionTrace);
+  conditionTrace = '';
+  print(
+    argumentValue(1, null) ??
+        argumentValue(2, 0) ??
+        argumentValue(3, 'unreachable'),
+  );
+  print(conditionTrace);
+  print((pass('字🙂') as String?) ?? 'cast fallback');
+  var exact = [null ?? 5];
+  List<int> integers = exact;
+  print(integers);
+  var unknown = [pass(6) ?? 7];
+  print(unknown is List<int>);
+  print(unknown);
+  // ignore: dead_code, dead_null_aware_expression
+  var joined = [1 ?? 'other'];
+  List<Object> objects = joined;
+  print(joined is List<int>);
+  print(objects);
+  coalescingValues(null, null, null, null);
+  coalescingValues(-9223372036854775808, false, 'present', <List<int>>[[]]);
+  int? absent = pass(null);
+  absent ?? touchVoid();
+  List<Object?> missing = <void>[absent ?? touchVoid()];
+  print(missing);
+  dynamic dynamicValue = pass(9223372036854775807);
+  var dynamicPayload = [dynamicValue ?? touchVoid()];
+  List<Object?> dynamicView = dynamicPayload;
+  print(dynamicView);
+  var conditionalPayload = [choose() ? dynamicValue : valueVoid()];
+  List<Object?> conditionalView = conditionalPayload;
+  print(conditionalView);
+  coalescingDefaults();
+}
+
 class BindingProbe {
   int value;
   BindingProbe(this.value) {
@@ -1108,6 +1190,7 @@ void main(List<String> args) {
   typeChecks();
   filledLists();
   conditionContexts();
+  coalescingContexts();
   localBindings();
   flowContexts();
   staticContexts(1, null);

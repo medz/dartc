@@ -155,8 +155,8 @@ bool typeIsSubtype(int actual, int expected) {
 int joinTypes(int left, int right) {
   if (left < 0) return right;
   if (left == right) return left;
-  if (left == tDynamic || right == tDynamic) return tDynamic;
   if (left == tVoid || right == tVoid) return tVoid;
+  if (left == tDynamic || right == tDynamic) return tDynamic;
   if (typeIsSubtype(left, right)) return right;
   if (typeIsSubtype(right, left)) return left;
   if (left == tNull) return nullableType(right);
