@@ -129,7 +129,9 @@ int rtStringNew(int length) {
 
 int rtStringConcat(int left, int right) {
   var a = nativeLoad64(left);
+  if (a == 0) return right;
   var b = nativeLoad64(right);
+  if (b == 0) return left;
   var result = rtStringNew(a + b);
   var i = 0;
   while (i < a) {
@@ -213,32 +215,34 @@ int rtStringLastIndexOf(int value, int needle, int start) {
 }
 
 int rtIntToString(int value) {
-  var digits = rtAlloc(21);
+  var result = rtStringNew(20);
   var count = 0;
-  var negative = 0;
   var number = value;
-  if (number < 0) negative = 1;
   if (number > 0) number = -number;
   if (number == 0) {
-    nativeStore8(digits, 48);
+    nativeStore16(result + 8, 48);
     count = 1;
   }
   while (number < 0) {
     var quotient = number ~/ 10;
     var digit = quotient * 10 - number;
-    nativeStore8(digits + count, 48 + digit);
+    nativeStore16(result + 8 + count * 2, 48 + digit);
     count = count + 1;
     number = quotient;
   }
-  var result = rtStringNew(count + negative);
-  if (negative == 1) nativeStore16(result + 8, 45);
+  if (value < 0) {
+    nativeStore16(result + 8 + count * 2, 45);
+    count = count + 1;
+  }
+  nativeStore64(result, count);
   var i = 0;
-  while (i < count) {
-    nativeStore16(
-      result + 8 + (negative + i) * 2,
-      nativeLoad8(digits + count - i - 1),
-    );
+  var end = count - 1;
+  while (i < end) {
+    var digit = nativeLoad16(result + 8 + i * 2);
+    nativeStore16(result + 8 + i * 2, nativeLoad16(result + 8 + end * 2));
+    nativeStore16(result + 8 + end * 2, digit);
     i = i + 1;
+    end = end - 1;
   }
   return result;
 }
@@ -502,18 +506,33 @@ int rtHostRead(int path) {
   return rtStringDecodeUtf8(bytes, length);
 }
 
+int rtPackBytes(int source, int destination, int count) {
+  var i = 0;
+  while (i < count) {
+    nativeStore8(destination + i, nativeLoad64(source + i * 8));
+    i = i + 1;
+  }
+  return 0;
+}
+
 int rtHostWrite(int path, int bytes) {
   var encoded = rtStringEncodeUtf8(path);
   var fd = rtSyscall(5, encoded + 8, 1537, 420, 0, 0, 0);
   if (fd < 0) rtIoError();
   var length = rtListLength(bytes);
-  var data = rtAlloc(length);
-  var i = 0;
-  while (i < length) {
-    nativeStore8(data + i, rtListGet(bytes, i));
-    i = i + 1;
+  var capacity = 65536;
+  if (length < capacity) capacity = length;
+  var data = rtAlloc(capacity);
+  var source = nativeLoad64(bytes + 16);
+  var offset = 0;
+  while (offset < length) {
+    var count = length - offset;
+    if (count > capacity) count = capacity;
+    rtPackBytes(source, data, count);
+    rtWriteAll(fd, data, count);
+    source = source + count * 8;
+    offset = offset + count;
   }
-  rtWriteAll(fd, data, length);
   rtSyscall(6, fd, 0, 0, 0, 0, 0);
   return 0;
 }
