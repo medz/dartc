@@ -2,9 +2,9 @@
 
 A native Dart compiler written in Dart.
 
-The goal is an independent, optimizing, self-hosted toolchain whose compiler and runtime algorithms can evolve in Dart.
+The goal is for Dart to bootstrap and evolve its own compiler, runtime and standard libraries through an independent, optimizing native toolchain.
 
-Version 0.2 is an early preview. It compiles a Dart subset directly to ARM64 machine code for macOS and Linux. Native compiler binaries and generated executables run without the Dart SDK, VM or snapshots. Self-hosting does not imply full Dart compatibility.
+Version 0.2 is an early preview. `dartc` compiles Dart source directly to ARM64 machine code for macOS and Linux. Native compiler binaries and generated executables run without the Dart SDK, VM or snapshots.
 
 ## Try the native compiler
 
@@ -33,19 +33,19 @@ dartc hello.dart -o hello
 
 The capabilities below refer to this source revision. See [published versions](https://pub.dev/packages/dartc/versions) for older packages.
 
-## Supported Dart
+## Dart compatibility
 
-The compatibility baseline is Dart 3.13.5. The [specification tracker](specs/README.md) records supported behavior, remaining gaps and owning tests by upstream language clause.
+The compatibility baseline is Dart 3.13.5, with complete language implementation as the target. The [specification tracker](specs/README.md) records current behavior, remaining gaps and owning tests by upstream language clause.
 
-| Area | Supported subset |
+| Area | Implemented behavior |
 | --- | --- |
 | Values | Native integers, booleans, Unicode strings, nullable values, typed lists and runtime type checks |
 | Declarations | Top-level variables, lazy initialization, simple classes, fields, unnamed constructors, getters and setters |
 | Functions | Direct calls, recursion, local and anonymous functions without runtime captures, optional/named direct arguments, required-positional function values and structural function types |
 | Control flow | Blocks, assignments, conditions, loops, labelled jumps, constant switch cases and returns |
 | Libraries | Relative, file/package imports and exports, prefixes, filters, conditional URIs and library parts |
-| Constants | Supported scalar/list constants, canonical const instances, metadata and the core pragma subset |
-| Core APIs | print, command-line arguments, basic String/List operations and a String-only StringBuffer subset |
+| Constants | Scalar/list constants, canonical const instances, metadata and supported core pragmas |
+| Core APIs | print, command-line arguments, basic String/List operations and String-only StringBuffer operations |
 
 Capturing closures, inheritance, general generics and dynamic member calls, mixins, extensions, records, patterns, exceptions, async code, isolates and most SDK libraries are not implemented. General optional/named function-value signatures and method/constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
 

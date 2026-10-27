@@ -72,7 +72,7 @@ Keep bin/ and lib/ together. Add this bundle's bin directory to PATH,
 then compile with `dartc hello.dart -o hello` and run `./hello`.
 The compiler and output executables do not need the Dart SDK or VM.
 
-This release supports a Dart subset. Captures, inheritance, general generics,
+Language implementation is in progress. Captures, inheritance, general generics,
 exceptions, async code and most SDK libraries are not implemented.
 Managed storage is retained until process exit.
 
