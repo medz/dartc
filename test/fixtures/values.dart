@@ -1928,7 +1928,84 @@ void functionValues() {
   );
 }
 
+int initializerTrace = 0;
+int initializerMark(int tag, int value) {
+  initializerTrace = initializerTrace * 10 + tag;
+  return value;
+}
+
+class InitializerOrder {
+  int first = initializerMark(1, 10);
+  int second = initializerMark(2, 20);
+  int formal;
+  final int copy;
+  final int assigned;
+  InitializerOrder(this.formal, int input)
+    : copy = initializerMark(3, formal),
+      assigned = initializerMark(4, input = input + 1),
+      this.second = initializerMark(5, input) {
+    formal += 10;
+    print(<int>[formal, copy, assigned, first, second, input]);
+    initializerMark(6, 0);
+  }
+  set copy(int next) {
+    initializerMark(9, next);
+  }
+}
+
+const int initializerOuter = 7;
+
+class InitializerConstant {
+  final int declared = initializerOuter;
+  final int input;
+  final int sum;
+  final Object? boxed;
+  final Object? absent;
+  final List<int> list;
+  const InitializerConstant(
+    int initializerOuter, [
+    this.input = initializerOuter,
+  ]) : sum = initializerOuter + input,
+       boxed = initializerOuter,
+       absent = null,
+       list = const [9];
+}
+
+class InitializerPrivate {
+  final int _value;
+  final int next;
+  const InitializerPrivate({this._value = 3}) : next = _value + 1;
+}
+
+void constructorInitializers() {
+  initializerTrace = 0;
+  InitializerOrder(initializerMark(7, 4), initializerMark(8, 7));
+  print(initializerTrace);
+  const first = InitializerConstant(2);
+  const again = InitializerConstant(2, 7);
+  const different = InitializerConstant(3);
+  print(<Object?>[
+    first.declared,
+    first.input,
+    first.sum,
+    first.boxed,
+    first.absent,
+    first.list,
+  ]);
+  print(different.sum);
+  print(identical(first, again));
+  print(identical(first, different));
+  print(identical(first, InitializerConstant(2)));
+  const wide = InitializerConstant(-9223372036854775808, 0);
+  print(<Object?>[wide.sum, wide.boxed]);
+  var ordinary = InitializerConstant(-9223372036854775808, 0);
+  print(<Object?>[ordinary.sum, ordinary.boxed]);
+  const private = InitializerPrivate(value: 8);
+  print(<int>[private._value, private.next]);
+}
+
 void main(List<String> args) {
+  constructorInitializers();
   metadataValues();
   objectValues();
   valueContexts();

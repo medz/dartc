@@ -764,6 +764,7 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "dynamic badInitializer() { print('rhs'); return 'wrong'; } class C { final int value; C():value=badInitializer() { print('body'); } } void main() { print('before'); C(); }",
       "typedef F=int Function(int); String wrong(int value)=>'wrong'; int argument(){print('argument');return 1;} void main(){print('before');dynamic source=wrong;F callback=source;print(callback(argument()));}",
       "typedef F=int Function(int); int argument(){print('argument');return 1;} void main(){print('before');dynamic source=1;F callback=source;print(callback(argument()));}",
       "typedef F=int Function(int); int argument(){print('argument');return 1;} void main(){F? callback;print('before');callback!(argument());}",
@@ -1427,6 +1428,24 @@ void main() { print(1_000); }
       'class C { final int? value; } void main() { print(C().value); }',
       'class C { int value; C(); } void main() { print(C().value); }',
       'class C { final int value = 1; C(this.value); } void main() { print(C(2).value); }',
+      'class C { int? value; C(this.value):value=2; } void main() {}',
+      'class C { int? value; C():value=1,value=2; } void main() {}',
+      'class C { final int value=1; C():value=2; } void main() {}',
+      'class C { final int value; int other; C():other=1; } void main() {}',
+      'class C { int get value=>1; C():value=2; } void main() {}',
+      'class C { int value=1; final int other; C():other=value; } void main() {}',
+      'class C { int value=1; final int other; C():other=this.value; } void main() {}',
+      'class C { int value; final int other; C(this.value):other=(value=2); } void main() {}',
+      'class C { int _value; final int other; C({this._value=1}):other=value; } void main() {}',
+      'class C { final int value; C():value="wrong"; } void main() {}',
+      'int ordinary(int value)=>value; class C { final int value; const C(int input):value=ordinary(input); } void main() {}',
+      'class C { final int value; const C(int input):value=(input=2); } void main() {}',
+      'class C { final List<int> values; const C(int input):values=[input]; } void main() {}',
+      'class C { final List<int> values; const C(int input):values=const[input]; } void main() {}',
+      // These initializer forms are valid Dart but remain unsupported.
+      'class C { C():assert(true); } void main() { C(); }',
+      'class C { C():super(); } void main() { C(); }',
+      'class C { final int Function() value; C(int input):value=(()=>input); } void main() { print(C(7).value()); }',
       'void main() { final int? value; print(value); }',
       'void f(bool flag) { final int value; if (flag) value = 1; value = 2; print(value); } void main() { f(false); }',
       'void main() { final int value; for (int i = 0; i < 2; i++) { value = i; } }',

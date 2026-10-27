@@ -897,6 +897,91 @@ List<AstParameter> parserParameters(Parser parser) {
   return parameters;
 }
 
+AstInitializer parserInitializer(Parser parser) {
+  var token = parser.position;
+  if (parserTake(parser, 'assert')) {
+    parserExpect(parser, '(');
+    var condition = parseExpression(parser);
+    AstExpression? message;
+    if (parserTake(parser, ',') && !parserIs(parser, ')')) {
+      message = parseExpression(parser);
+      parserTake(parser, ',');
+    }
+    parserExpect(parser, ')');
+    var initializer = AstInitializer(
+      astAssertInitializer,
+      '',
+      condition,
+      token,
+    );
+    initializer.message = message;
+    return initializer;
+  }
+  var name = '';
+  if (parserIs(parser, 'this') || parserIs(parser, 'super')) {
+    var receiver = parserPeek(parser);
+    parser.position++;
+    var member = parser.position;
+    if (parserTake(parser, '.')) {
+      member = parser.position;
+      name = parserName(parser);
+    }
+    if (receiver == 'super' || parserIs(parser, '(')) {
+      var callee = AstExpression(
+        astName,
+        receiver,
+        const <AstExpression>[],
+        const <AstType>[],
+        token,
+      );
+      if (name != '') {
+        callee = AstExpression(
+          astMember,
+          name,
+          <AstExpression>[callee],
+          const <AstType>[],
+          member,
+        );
+      }
+      var call = parserCall(
+        parser,
+        callee,
+        token,
+        const <AstType>[],
+        name == '' ? astCallIdentifier : astCallSelector,
+      );
+      var kind = astSuperInitializer;
+      if (receiver == 'this') kind = astRedirectInitializer;
+      return AstInitializer(kind, '', call, token);
+    }
+    if (name == '') parserError(parser, 'expected constructor invocation');
+  } else {
+    name = parserName(parser);
+  }
+  parserExpect(parser, '=');
+  var expressionStart = parser.position;
+  var expression = parseExpression(parser);
+  if (expression.kind == astFunctionExpression &&
+      expression.token == expressionStart)
+    parserError(parser, 'initializer function expression requires parentheses');
+  return AstInitializer(astFieldInitializer, name, expression, token);
+}
+
+List<AstInitializer> parserInitializers(Parser parser) {
+  parserExpect(parser, ':');
+  var result = <AstInitializer>[];
+  while (true) {
+    var initializer = parserInitializer(parser);
+    if (initializer.kind == astRedirectInitializer && result.isNotEmpty)
+      parserError(parser, 'redirect cannot have other initializers');
+    result.add(initializer);
+    if (!parserTake(parser, ',')) break;
+    if (initializer.kind == astRedirectInitializer)
+      parserError(parser, 'redirect cannot have other initializers');
+  }
+  return result;
+}
+
 AstFunction parserFunction(
   Parser parser,
   String name,
@@ -905,8 +990,9 @@ AstFunction parserFunction(
   int token,
   bool getter,
   bool setter,
-  bool constant,
-) {
+  bool constant, [
+  bool constructor = false,
+]) {
   if ((getter || setter) && parserIs(parser, '<')) {
     parserError(parser, 'accessors cannot have type parameters');
   }
@@ -929,8 +1015,18 @@ AstFunction parserFunction(
     }
     if (result.name == '') result = AstType('void', <AstType>[], token);
   }
-  if (parserIs(parser, ':'))
-    parserError(parser, 'constructor initializer lists are unsupported');
+  List<AstInitializer> initializers = const <AstInitializer>[];
+  if (parserIs(parser, ':')) {
+    if (!constructor || external)
+      parserError(parser, 'initializer list requires a generative constructor');
+    initializers = parserInitializers(parser);
+  }
+  if (initializers.isNotEmpty &&
+      initializers[0].kind == astRedirectInitializer &&
+      !parserIs(parser, ';'))
+    parserError(parser, 'redirecting constructor cannot have a body');
+  if (constructor && parserIs(parser, '=>'))
+    parserError(parser, 'generative constructor cannot have an arrow body');
   if (constant && !parserIs(parser, ';'))
     parserError(parser, 'const constructor cannot have a body');
   List<AstStatement> body = <AstStatement>[];
@@ -954,6 +1050,7 @@ AstFunction parserFunction(
   );
   function.setter = setter;
   function.constant = constant;
+  function.initializers = initializers;
   return function;
 }
 
@@ -980,6 +1077,7 @@ AstClass parserClass(Parser parser, int token) {
         false,
         false,
         constant,
+        true,
       );
       constructor.metadata = metadata;
       constructors.add(constructor);

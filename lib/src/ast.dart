@@ -138,12 +138,28 @@ class AstStatement {
   );
 }
 
+const int astFieldInitializer = 0;
+const int astAssertInitializer = 1;
+const int astSuperInitializer = 2;
+const int astRedirectInitializer = 3;
+
+class AstInitializer {
+  int kind;
+  String name;
+  AstExpression expression;
+  int token;
+  AstExpression? message;
+
+  AstInitializer(this.kind, this.name, this.expression, this.token);
+}
+
 class AstFunction {
   int local = -1;
   List<AstExpression> metadata = const <AstExpression>[];
   String name;
   AstType result;
   List<AstParameter> parameters;
+  List<AstInitializer> initializers = const <AstInitializer>[];
   List<AstStatement> body;
   List<AstExpression> arrow;
   bool external;

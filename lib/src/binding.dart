@@ -464,6 +464,8 @@ FunctionBindings _bindFunctionLocals(
     7,
   );
   var parameters = bindingScope(binder, -1);
+  var initializers = -1;
+  if (syntax.initializers.isNotEmpty) initializers = bindingScope(binder, -1);
   if (receiver) {
     result.receiver = bindingDeclare(
       binder,
@@ -490,13 +492,28 @@ FunctionBindings _bindFunctionLocals(
       previous++;
     }
     parameter.binding = -1;
-    if (!parameter.fieldFormal) {
+    if (!parameter.fieldFormal || initializers >= 0) {
       parameter.binding = result.variables.length;
-      result.variables.add(
-        LocalVariable(parameter.name, parameter.token, parameter.type),
+      var variable = LocalVariable(
+        parameter.name,
+        parameter.token,
+        parameter.type,
       );
-      binder.scopes[parameters].variables.add(parameter.binding);
+      variable.finalVariable = parameter.fieldFormal;
+      result.variables.add(variable);
+      if (!parameter.fieldFormal)
+        binder.scopes[parameters].variables.add(parameter.binding);
+      if (initializers >= 0)
+        binder.scopes[initializers].variables.add(parameter.binding);
     }
+    i++;
+  }
+  i = 0;
+  while (i < syntax.initializers.length) {
+    var initializer = syntax.initializers[i];
+    bindingExpression(binder, initializers, initializer.expression);
+    var message = initializer.message;
+    if (message != null) bindingExpression(binder, initializers, message);
     i++;
   }
   bindingStatements(binder, parameters, syntax.body);
