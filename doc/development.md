@@ -2,6 +2,8 @@
 
 Run these commands from the repository root with your installed Dart SDK on macOS/Linux ARM64. [Build the native compiler](../README.md#build-from-source) first; bootstrap verifies and saves `build/dartc-seed` for subsequent runs. Reports record the SDK version actually used; upgrading the SDK also upgrades the reference compiler for new comparisons.
 
+Bootstrap builds stages in a fresh directory and publishes them after the stage2/stage3 byte comparison and behavior checks pass. A code-generation change can make stage1 differ from stage2. Stable self-rebuilds, language behavior and performance each require their own evidence.
+
 ## Compare compiler performance
 
 Compare two existing native compilers on the same compiler task:
@@ -43,6 +45,8 @@ dart tool/fuzz.dart --seed 1 --count 20
 ```
 
 Each case compares the SDK oracle, SDK-hosted dartc and native dartc. Failures retain the actual sources, dependencies, commands and a frozen compiler/runtime/tool snapshot under `build/fuzz/`.
+
+Cases must keep program dependencies inside `project/`. Dependency checks cover the SDK-selected files and the frozen compiler's native-target source graph, including conditional imports selected differently by the two compilers. The native engine must match that compiler source. A pass compares exit status, stdout and stderr; use program benchmarks with `--check-output` for file-output contracts.
 
 Replay requires the recorded SDK version, platform and toolchain fingerprints. An SDK upgrade is a new comparison context; it does not change an existing finding.
 

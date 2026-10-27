@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Reject missing bootstrap/benchmark artifacts, compare behavior stderr and fresh output files, and pin native-target dependencies in differential cases.
 - Implement `List.insert` in Dart with shared list growth, preserving element checks and evaluation order.
 - Support class static fields, methods and accessors, including lazy initialization, const references and supported function values.
 - Resolve user-class constructor calls through type aliases, including alias chains, nullable aliases and library-private constructors.

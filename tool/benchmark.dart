@@ -108,7 +108,7 @@ Future<void> main(List<String> args) async {
         : ['native', 'official'];
     final folders = <String, String>{};
     for (final name in names) {
-      final directory = Directory('${build.path}/benchmark-$name')
+      final directory = Directory('${measurementDirectory.path}/$name')
         ..createSync();
       folders[name] = directory.resolveSymbolicLinksSync();
       outputs[name] = '${folders[name]}/compiled-dartc';
@@ -271,6 +271,8 @@ Future<void> main(List<String> args) async {
     for (var iteration = 0; iteration <= 6; iteration++) {
       final order = iteration.isEven ? names : names.reversed;
       for (final name in order) {
+        final output = File(outputs[name]!);
+        if (output.existsSync()) output.deleteSync();
         final sample = await measure(engines[name]!, [
           source,
           '-o',
@@ -278,7 +280,12 @@ Future<void> main(List<String> args) async {
           '--std',
           standard,
         ]);
-        final bytes = File(outputs[name]!).readAsBytesSync();
+        if (!output.existsSync()) {
+          throw StateError(
+            '$name did not produce a compiler artifact; raw sample: ${sample['sample_report']}',
+          );
+        }
+        final bytes = output.readAsBytesSync();
         expected ??= bytes;
         final matches = equalBytes(expected, bytes);
         final rawReport = File(sample['sample_report'] as String);
@@ -373,6 +380,10 @@ Future<void> main(List<String> args) async {
     }
     final report = {
       'mode': comparing ? 'native_comparison' : 'official_reference',
+      'comparison_scope': 'dartc_implementation_execution',
+      'reference_role': comparing
+          ? 'baseline_native_dartc'
+          : 'sdk_aot_built_dartc',
       'sdk': {'path': sdk, 'version': Platform.version},
       'platform': Platform.operatingSystem,
       'source_sha256': sourceBefore,

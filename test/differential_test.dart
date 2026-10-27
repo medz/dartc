@@ -84,6 +84,7 @@ Future<void> main(List<String> args) async {
     final accepted = await active.evaluate(supported);
     check(accepted.verdict == 'pass' && !accepted.failed, 'Supported case');
     checkStages(accepted, {
+      'inputs.collect': 0,
       for (final lane in ['reference', 'host', 'native']) ...{
         '$lane.compile': 0,
         '$lane.run': 0,
@@ -99,6 +100,40 @@ Future<void> main(List<String> args) async {
         'project/dependency.dart',
       ]),
       'Saved input hashes must include local dependencies.',
+    );
+
+    final conditional = makeCase(
+      'conditional',
+      {'kind': 'supported'},
+      {
+        'main.dart': "import 'native.dart' if(dart.library.io) 'sdk.dart';void main(){print(answer());}",
+        'native.dart': 'int answer()=>7;',
+        'sdk.dart': 'int answer()=>7;',
+      },
+    );
+    final selected = await active.evaluate(conditional);
+    check(
+      selected.verdict == 'pass',
+      'Both selected dependency paths are saved',
+    );
+    final outside = File('${active.directory.path}/outside.dart')
+      ..writeAsStringSync('int answer()=>7;');
+    final external = makeCase(
+      'conditional-external',
+      {'kind': 'supported'},
+      {
+        'main.dart':
+            "import '${outside.uri}' if(dart.library.io) 'sdk.dart';void main(){print(answer());}",
+        'sdk.dart': 'int answer()=>7;',
+      },
+    );
+    final unpinned = await active.evaluate(external);
+    check(
+      unpinned.verdict.startsWith('invalid-contract:external-dependency:') &&
+          !unpinned.stages.containsKey('reference.run') &&
+          !unpinned.stages.containsKey('host.run') &&
+          !unpinned.stages.containsKey('native.run'),
+      'A native-only external dependency must be rejected before execution',
     );
 
     final invalid = makeCase(
@@ -184,6 +219,7 @@ Future<void> main(List<String> args) async {
     final failed = await active.evaluate(runtimeFailure);
     check(failed.verdict == 'pass' && !failed.failed, 'Runtime failure case');
     checkStages(failed, {
+      'inputs.collect': 0,
       'reference.compile': 0,
       'reference.run': null,
       'host.compile': 0,
@@ -282,6 +318,29 @@ Future<void> main(List<String> args) async {
       );
     } finally {
       sessionFile.writeAsStringSync(originalSession);
+    }
+
+    final collector = File('${active.directory.path}/collect-inputs.dart');
+    final originalCollector = collector.readAsStringSync();
+    try {
+      collector.writeAsStringSync(
+        '// changed collector\n',
+        mode: FileMode.append,
+      );
+      final replay = await captureProcess(active.sdk, [
+        '${active.directory.path}/runner/fuzz.dart',
+        '--replay',
+        supported.path,
+      ]);
+      captures['changed-collector-replay'] = replay;
+      check(
+        processFinished(replay) &&
+            replay.exitCode != 0 &&
+            replay.stderr.contains('Recorded toolchain changed'),
+        'Replay must refuse a changed dependency collector',
+      );
+    } finally {
+      collector.writeAsStringSync(originalCollector);
     }
 
     final dependency = File('${supported.path}/project/dependency.dart');

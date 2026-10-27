@@ -86,6 +86,22 @@ class DifferentialSession {
         Directory('${folder.path}/runtime'),
         dartOnly: true,
       );
+      File('${folder.path}/collect-inputs.dart').writeAsStringSync(r'''
+import 'dart:convert';
+import 'dart:io';
+import 'compiler/lib/src/driver/packages.dart';
+import 'compiler/lib/src/source.dart';
+
+void main(List<String> args) {
+  final program = collectSources(
+    args[0],
+    args[1],
+    compilerPackages(args[0], Directory.current.path, args[2]),
+    Platform.isLinux ? 1 : 0,
+  );
+  print(jsonEncode([for (final file in program.files) file.path]));
+}
+''');
       File(engine).copySync('${folder.path}/engine');
       writeJson(File('${folder.path}/packages.json'), {
         'configVersion': 2,
@@ -169,6 +185,7 @@ class DifferentialSession {
                       (file.path.startsWith('${directory.path}/compiler/') ||
                           file.path.startsWith('${directory.path}/runtime/') ||
                           file.path.startsWith('${directory.path}/runner/')) ||
+                  file.path == '${directory.path}/collect-inputs.dart' ||
                   file.path == native ||
                   file.path == '${directory.path}/packages.json',
             )
@@ -334,9 +351,56 @@ class DifferentialSession {
           }
         }
       }
+    }
+    if (kind != 'invalid' &&
+        ['reference', 'host', 'native'].every(
+          (lane) =>
+              processFinished(stages['$lane.compile']!) &&
+              stages['$lane.compile']!.exitCode == 0,
+        )) {
+      final collected = await execute('inputs.collect', sdk, [
+        '--packages=${directory.path}/packages.json',
+        '${directory.path}/collect-inputs.dart',
+        File('${project.path}/$entry').uri.toString(),
+        File(runtime).uri.toString(),
+        packages,
+      ]);
+      var violation = '';
+      if (!processFinished(collected) || collected.exitCode != 0) {
+        violation = 'invalid-contract:native-dependency-discovery';
+      } else {
+        final roots = [
+          project,
+          Directory('${directory.path}/runtime'),
+          Directory('${directory.path}/compiler'),
+        ].map((folder) => '${folder.resolveSymbolicLinksSync()}/').toList();
+        for (final path
+            in (jsonDecode(collected.stdout) as List).cast<String>()) {
+          final actual = File(path).resolveSymbolicLinksSync();
+          if (!roots.any(actual.startsWith)) {
+            violation = 'invalid-contract:external-dependency:$actual';
+            break;
+          }
+        }
+      }
+      if (violation != '') {
+        final outcome = DifferentialResult(
+          kind as String,
+          stages,
+          violation,
+          inputHashes: inputHashes,
+        );
+        writeJson(File('${caseDirectory.path}/result.json'), outcome.toJson());
+        return outcome;
+      }
+    }
+    for (final lane in ['reference', 'host', 'native']) {
+      final compiled = stages['$lane.compile']!;
       if (kind != 'invalid' &&
-          processFinished(result) &&
-          result.exitCode == 0) {
+          processFinished(compiled) &&
+          compiled.exitCode == 0) {
+        final output =
+            '${artifacts.path}/$lane${lane == 'reference' ? '.dill' : ''}';
         await execute('$lane.run', lane == 'reference' ? sdk : output, [
           if (lane == 'reference') output,
           ...arguments,

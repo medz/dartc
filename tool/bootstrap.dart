@@ -1,25 +1,38 @@
+import 'dart:convert';
 import 'dart:io';
 
-void run(String executable, List<String> arguments, {bool native = false}) {
-  final result = Process.runSync(
+import 'src/process.dart';
+
+Future<void> run(
+  String executable,
+  List<String> arguments, {
+  bool native = false,
+  Duration timeout = const Duration(seconds: 30),
+}) async {
+  final result = await captureProcess(
     executable,
     arguments,
     environment: native ? {'PATH': '/usr/bin:/bin'} : null,
     includeParentEnvironment: !native,
+    timeout: timeout,
   );
-  stdout.write(result.stdout);
-  stderr.write(result.stderr);
-  if (result.exitCode != 0) {
+  stdout.add(result.stdoutBytes);
+  stderr.add(result.stderrBytes);
+  if (result.exitCode != 0 ||
+      result.timedOut ||
+      result.outputLimited ||
+      result.startError != null ||
+      result.captureError != null) {
     throw ProcessException(
       executable,
       arguments,
-      'Command failed.',
-      result.exitCode,
+      jsonEncode(result.toJson()),
+      result.exitCode ?? -1,
     );
   }
 }
 
-void main(List<String> args) {
+Future<void> main(List<String> args) async {
   final root = File.fromUri(Platform.script).parent.parent.absolute.path;
   final build = Directory('$root/build')..createSync(recursive: true);
   final sdk = Platform.resolvedExecutable;
@@ -35,37 +48,44 @@ void main(List<String> args) {
     );
     exit(64);
   }
-  final stage1 = '${build.path}/dartc-stage1';
-  final stage2 = '${build.path}/dartc-stage2';
-  final stage3 = '${build.path}/dartc-stage3';
-  final seedCopy = File('${build.path}/dartc-bootstrap-seed');
-  var ownsCopy = false;
+  final work = build.createTempSync('bootstrap-');
+  final stage1 = '${work.path}/dartc-stage1';
+  final stage2 = '${work.path}/dartc-stage2';
+  final stage3 = '${work.path}/dartc-stage3';
+  final seedCopy = File('${work.path}/dartc-seed');
+  var passed = false;
   try {
     final input = File(seed);
     if (input.existsSync()) {
-      if (seedCopy.existsSync() &&
-          FileSystemEntity.identicalSync(input.path, seedCopy.path)) {
-        throw ArgumentError('The bootstrap temporary copy cannot be the seed.');
-      }
-      ownsCopy = true;
       input.copySync(seedCopy.path);
       stdout.writeln('Using native seed: $seed');
     } else {
       if (args.isNotEmpty) {
         throw StateError('Native seed not found: $seed.');
       }
-      ownsCopy = true;
       stdout.writeln(
         'No local native seed found. Building the initial seed with official Dart.',
       );
-      run(sdk, ['compile', 'exe', source, '-o', seedCopy.path]);
+      await run(sdk, ['compile', 'exe', source, '-o', seedCopy.path]);
     }
+    Future<void> compile(String compiler, String output) async {
+      await run(compiler, [
+        source,
+        '-o',
+        output,
+        '--std',
+        standard,
+      ], native: true);
+      if (!File(output).existsSync() || File(output).lengthSync() == 0)
+        throw StateError('Compiler produced no executable: $output');
+    }
+
     stdout.writeln('Building stage 1 with the seed copy.');
-    run(seedCopy.path, [source, '-o', stage1, '--std', standard], native: true);
+    await compile(seedCopy.path, stage1);
     stdout.writeln('Building stage 2 with stage 1.');
-    run(stage1, [source, '-o', stage2, '--std', standard], native: true);
+    await compile(stage1, stage2);
     stdout.writeln('Building stage 3 with stage 2.');
-    run(stage2, [source, '-o', stage3, '--std', standard], native: true);
+    await compile(stage2, stage3);
     final a = File(stage2).readAsBytesSync();
     final b = File(stage3).readAsBytesSync();
     if (a.length != b.length)
@@ -75,21 +95,29 @@ void main(List<String> args) {
         throw StateError('Stage 2 and stage 3 differ at byte $i.');
     }
     stdout.writeln('Stage 2 and stage 3 are identical (${a.length} bytes).');
-    run(sdk, [
+    await run(sdk, [
       '$root/test/behavior_test.dart',
       '--compiler',
       stage2,
       '--std',
       standard,
-    ]);
+    ], timeout: const Duration(minutes: 5));
+    for (final stage in [stage1, stage2, stage3]) {
+      File(stage)
+          .copySync('${build.path}/${File(stage).uri.pathSegments.last}');
+    }
     File(stage2).copySync(seedCopy.path);
     seedCopy.renameSync(verifiedSeed);
-    stdout.writeln('Self-hosting verified: $stage2');
+    passed = true;
+    stdout.writeln(
+      'Self-rebuild and behavior checks passed: ${build.path}/dartc-stage2',
+    );
     stdout.writeln('Updated verified native seed: $verifiedSeed');
   } catch (error) {
     stderr.writeln(error);
+    stderr.writeln('Bootstrap work retained at: ${work.path}');
     exitCode = 1;
   } finally {
-    if (ownsCopy && seedCopy.existsSync()) seedCopy.deleteSync();
+    if (passed) work.deleteSync(recursive: true);
   }
 }

@@ -638,11 +638,15 @@ Future<void> main(List<String> args) async {
       String? workingDirectory,
     }) async {
       final executable = '${source.path}.out';
-      final expected = (await run(sdk, [
+      for (final path in outputs) {
+        final file = File(path);
+        if (file.existsSync()) file.deleteSync();
+      }
+      final expected = await run(sdk, [
         ...sdkOptions(options),
         source.path,
         ...arguments,
-      ], workingDirectory: workingDirectory)).stdout;
+      ], workingDirectory: workingDirectory);
       final expectedFiles = [
         for (final path in outputs) File(path).readAsBytesSync(),
       ];
@@ -655,16 +659,24 @@ Future<void> main(List<String> args) async {
         native: compiler != null,
         workingDirectory: workingDirectory,
       );
-      final actual = (await run(
+      for (final path in outputs) {
+        final file = File(path);
+        if (file.existsSync()) file.deleteSync();
+      }
+      final actual = await run(
         executable,
         arguments,
         native: true,
         workingDirectory: workingDirectory,
-      )).stdout;
-      if (actual != expected) {
+      );
+      if (base64Encode(actual.stdoutBytes) !=
+              base64Encode(expected.stdoutBytes) ||
+          base64Encode(actual.stderrBytes) !=
+              base64Encode(expected.stderrBytes)) {
         throw StateError(
           '${source.path} differs from official Dart.\n'
-          'Expected:\n$expected\nActual:\n$actual',
+          'Expected stdout:\n${expected.stdout}\nActual stdout:\n${actual.stdout}\n'
+          'Expected stderr:\n${expected.stderr}\nActual stderr:\n${actual.stderr}',
         );
       }
       for (var i = 0; i < outputs.length; i++) {
