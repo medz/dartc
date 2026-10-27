@@ -56,6 +56,7 @@ void _indexDeclaration(SymbolTable table, int symbol) {
 }
 
 int symbolOwnDeclaration(SymbolTable table, int source, String name) {
+  source = sourceLibrary(table.program, source);
   var scope = source - sourceFfi;
   if (scope >= table.sourceDeclarations.length) return -1;
   var declarations = table.sourceDeclarations[scope];
@@ -75,6 +76,7 @@ int declareSymbol(
   int kind,
   int target,
 ) {
+  source = sourceLibrary(table.program, source);
   if (symbolOwnDeclaration(table, source, name) >= 0) return -2;
   var symbol = table.declarations.length;
   table.declarations.add(DeclarationSymbol(source, name, kind, target));
@@ -89,6 +91,7 @@ int declareAccessor(
   int function,
   bool setter,
 ) {
+  source = sourceLibrary(table.program, source);
   var symbol = symbolOwnDeclaration(table, source, name);
   if (symbol < 0) {
     symbol = table.declarations.length;
@@ -151,6 +154,7 @@ int _symbolExportedDeclaration(
   String name,
   bool writing,
 ) {
+  source = sourceLibrary(table.program, source);
   if (name.startsWith('_')) return -1;
   var direct = symbolOwnDeclaration(table, source, name);
   if (source == sourceCore && direct < 0 && table.program.core >= 0) {
@@ -222,6 +226,7 @@ int _resolveSymbol(
   String prefix,
   bool writing,
 ) {
+  source = sourceLibrary(table.program, source);
   if (prefix == '') {
     var direct = symbolOwnDeclaration(table, source, name);
     if (direct >= 0) return direct;

@@ -798,7 +798,7 @@ int feResolveName(int token, String name, String prefix, bool writing) {
 }
 
 bool feHasPrefix(int token, String prefix) {
-  var source = feTokens[token].source;
+  var source = sourceLibrary(feSources, feTokens[token].source);
   var imports = feSources.files[source].imports;
   var i = 0;
   while (i < imports.length) {
@@ -910,7 +910,9 @@ int feFunctionReference(int function, int token) {
 }
 
 void feCheckPrivate(int owner, String name, int token) {
-  if (name.startsWith('_') && feTokens[token].source != feClassSources[owner]) {
+  if (name.startsWith('_') &&
+      sourceLibrary(feSources, feTokens[token].source) !=
+          sourceLibrary(feSources, feClassSources[owner])) {
     feAstError(token, 'private member ' + name);
   }
 }

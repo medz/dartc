@@ -75,6 +75,9 @@ const int astLocalFunctionStatement = 15;
 const int astImportDirective = 1;
 const int astExportDirective = 2;
 const int astLibraryDirective = 3;
+const int astPartDirective = 4;
+const int astPartOfUriDirective = 5;
+const int astPartOfNameDirective = 6;
 
 class AstVariable {
   List<AstExpression> metadata = const <AstExpression>[];

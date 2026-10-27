@@ -780,6 +780,40 @@ void main() {
       }
     }
     final libraries = {
+      'parts-dep.dart':
+          'const int delta=7;class Value{int amount;Value(this.amount);}',
+      'parts-main.dart': r'''
+library parts.sample;
+import 'parts-dep.dart' as dep;
+part 'parts-uri.dart';
+part 'parts-name.dart';
+const mark='annotation';
+const int _offset=3;
+int _state=0;
+int get split=>_state;
+class Hidden{int _value=10;}
+''',
+      'parts-uri.dart': r'''
+@mark
+part of 'parts-main.dart';
+int read(Hidden value){_state++;return value._value+dep.delta;}
+int localPart(){int inside(dep.Value value)=>value.amount+_offset;return inside(dep.Value(4));}
+set split(int value){_state=value;}
+''',
+      'parts-name.dart': r'''
+part of parts.sample;
+int named()=>_state;
+class PartBox{int _value=5;}
+int part()=>2;
+void main(){
+  print(read(Hidden()));print(named());
+  split=4;print(split);print(PartBox()._value);print(part());print(localPart());
+}
+''',
+      'parts-forbidden.dart': "part of parts.sample;import 'parts-dep.dart';",
+      'parts-version.dart': "// @dart=3.12\npart of parts.sample;",
+      'parts-shared.dart': 'part of parts.shared;int shared=1;',
+      'parts-other.dart': "library parts.shared;part 'parts-shared.dart';",
       'conditional-first.dart': 'const int chosen=21;',
       'conditional-other.dart': 'const int chosen=99;',
       'conditional-export.dart': r'''
@@ -1111,6 +1145,7 @@ void main() { print(1_000); }
     compare(File('${temporary.path}/const-class-finite-default.dart'), []);
     compare(File('${temporary.path}/function-imports.dart'), []);
     compare(File('${temporary.path}/conditional-imports.dart'), []);
+    compare(File('${temporary.path}/parts-main.dart'), []);
     final rejected = [
       'int value()=>99;void main(){print(value());int value()=>7;}',
       'void main(){int first(int value)=>second(value);int second(int value)=>first(value);}',
@@ -1388,6 +1423,31 @@ void main() { print(1_000); }
       final invalid = File('${temporary.path}/rejected-$i.dart')
         ..writeAsStringSync(rejected[i]);
       reject(invalid);
+    }
+    final rejectedParts = <String, String>{
+      "import 'parts-name.dart';void main(){}": 'parts-name.dart',
+      "library parts.sample;part 'parts-dep.dart';void main(){}":
+          'parts-dep.dart',
+      "library parts.sample;part 'parts-uri.dart';void main(){}":
+          'parts-uri.dart',
+      "library wrong;part 'parts-name.dart';void main(){}": 'parts-name.dart',
+      "library parts.shared;part 'parts-shared.dart';part './parts-shared.dart';void main(){}":
+          'parts-shared.dart',
+      "library parts.sample;part 'parts-forbidden.dart';void main(){}":
+          'parts-forbidden.dart',
+      "library parts.shared;import 'parts-other.dart';part 'parts-shared.dart';void main(){}":
+          'parts-shared.dart',
+      "// @dart=3.13\nlibrary parts.sample;part 'parts-version.dart';void main(){}":
+          'parts-version.dart',
+      "// @dart=3.13\nlibrary parts.sample;part 'parts-name.dart';void main(){}":
+          'parts-name.dart',
+    };
+    var partRejection = 0;
+    for (var entry in rejectedParts.entries) {
+      final invalid = File(
+        '${temporary.path}/rejected-part-${partRejection++}.dart',
+      )..writeAsStringSync(entry.key);
+      reject(invalid, diagnostic: '${temporary.path}/${entry.value}');
     }
     final conditionalIo = File('${temporary.path}/conditional-target-io.dart')
       ..writeAsStringSync(
@@ -1729,6 +1789,15 @@ void verify() {
         ..writeAsStringSync(invalidRuntimes[i]);
       reject(empty, runtime: runtime.path, diagnostic: runtime.path);
     }
+    final runtimePart = File('${temporary.path}/runtime-part-body.dart')
+      ..writeAsStringSync(
+        "part of 'runtime-part-root.dart';external int nativeTarget();",
+      );
+    final partRuntime = File('${temporary.path}/runtime-part-root.dart')
+      ..writeAsStringSync(
+        "part 'runtime-part-body.dart';const int rtAbiVersion=$runtimeAbiVersion;",
+      );
+    reject(empty, runtime: partRuntime.path, diagnostic: runtimePart.path);
     final io = File('${temporary.path}/io.dart')
       ..writeAsStringSync(
         "import '${File(standard).parent.path}/host.dart';\n" +

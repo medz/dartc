@@ -999,16 +999,26 @@ String parserUriString(Parser parser) {
   return text;
 }
 
+bool parserPartDirective(Parser parser) {
+  if (!parserIs(parser, 'part')) return false;
+  var next = parser.tokens[parser.position + 1];
+  return next.kind == tokenString ||
+      next.kind == tokenStringPart ||
+      tokenIs(next, 'of');
+}
+
 AstDirective parserDirective(Parser parser, int kind, int token) {
   var uri = '';
   var prefix = '';
   var combinators = <AstCombinator>[];
   List<AstConditionalUri>? conditions;
-  if (kind == astLibraryDirective) {
-    if (!parserIs(parser, ';')) {
+  if (kind == astLibraryDirective || kind == astPartOfNameDirective) {
+    if (kind == astPartOfNameDirective || !parserIs(parser, ';')) {
       uri = parserName(parser);
       while (parserTake(parser, '.')) uri = uri + '.' + parserName(parser);
     }
+  } else if (kind == astPartDirective || kind == astPartOfUriDirective) {
+    uri = parserUriString(parser);
   } else {
     uri = parserUriString(parser);
     while (parserTake(parser, 'if')) {
@@ -1050,9 +1060,24 @@ AstUnit parseUnit(Parser parser) {
     <AstClass>[],
     <AstTypedef>[],
   );
+  var source = -1;
+  var declarations = false;
   while (!parserIs(parser, '')) {
     var metadata = parserMetadata(parser);
     var token = parser.position;
+    if (parser.tokens[token].source != source) {
+      source = parser.tokens[token].source;
+      declarations = false;
+    }
+    if (parserIs(parser, 'import') ||
+        parserIs(parser, 'export') ||
+        parserIs(parser, 'library') ||
+        parserPartDirective(parser)) {
+      if (declarations)
+        parserError(parser, 'directives must precede declarations');
+    } else {
+      declarations = true;
+    }
     if (parserTake(parser, 'import')) {
       var directive = parserDirective(parser, astImportDirective, token);
       directive.metadata = metadata;
@@ -1063,6 +1088,18 @@ AstUnit parseUnit(Parser parser) {
       unit.directives.add(directive);
     } else if (parserTake(parser, 'library')) {
       var directive = parserDirective(parser, astLibraryDirective, token);
+      directive.metadata = metadata;
+      unit.directives.add(directive);
+    } else if (parserPartDirective(parser)) {
+      parser.position++;
+      var kind = astPartDirective;
+      if (parserTake(parser, 'of')) {
+        kind = astPartOfNameDirective;
+        if (parser.tokens[parser.position].kind == tokenString ||
+            parser.tokens[parser.position].kind == tokenStringPart)
+          kind = astPartOfUriDirective;
+      }
+      var directive = parserDirective(parser, kind, token);
       directive.metadata = metadata;
       unit.directives.add(directive);
     } else if (parserTake(parser, 'class')) {

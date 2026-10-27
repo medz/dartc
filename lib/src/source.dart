@@ -33,6 +33,8 @@ class SourceImport {
 class SourceFile {
   String path;
   String uri = '';
+  int library = -1;
+  String libraryName = '';
   List<Token> tokens;
   List<SourceImport> imports;
   bool system = false;
@@ -41,6 +43,11 @@ class SourceFile {
   int languageOffset = -1;
 
   SourceFile(this.path, this.tokens, this.imports);
+}
+
+int sourceLibrary(SourceProgram program, int source) {
+  if (source < 0) return source;
+  return program.files[source].library;
 }
 
 class SourceProgram {
@@ -82,8 +89,26 @@ bool sourceVersionAtLeast(
 }
 
 bool sourceIsSystem(SourceProgram program, int source) {
+  source = sourceLibrary(program, source);
   if (source == sourceCore || source == sourceFfi) return true;
   return source >= 0 && program.files[source].system;
+}
+
+String sourceReferenceUri(String base, String reference) {
+  var scheme = sourceUriScheme(reference);
+  if (scheme == 'package') {
+    var package = sourcePackageUri(reference);
+    return 'package:' + package.name + '/' + package.path;
+  }
+  if (scheme == '' && sourceUriScheme(base) == 'package') {
+    var package = sourcePackageRelative(sourcePackageUri(base), reference);
+    return 'package:' + package.name + '/' + package.path;
+  }
+  if (scheme == '' || scheme == 'file') {
+    if (scheme == 'file') base = 'file:///';
+    return sourceResolveFileUri(base, reference);
+  }
+  return reference;
 }
 
 bool sourceIs(Token token, String text) {
@@ -136,6 +161,7 @@ int sourceLoad(
   SourceProgram program,
   String uri, [
   bool implementation = false,
+  int library = -1,
 ]) {
   SourcePackageUri? package;
   if (sourceUriScheme(uri) == 'package') {
@@ -145,7 +171,31 @@ int sourceLoad(
   if (uri == program.hostUri) return sourceHost;
   int i = 0;
   while (i < program.files.length) {
-    if (program.files[i].uri == uri) return i;
+    if (program.files[i].uri == uri) {
+      var file = program.files[i];
+      if (library >= 0) {
+        if (file.library == i)
+          sourceError(
+            program,
+            file.tokens[0],
+            'library cannot be used as a part',
+          );
+        if (file.library != library)
+          sourceError(
+            program,
+            file.tokens[0],
+            'part belongs to more than one library',
+          );
+        sourceError(program, file.tokens[0], 'part used more than once');
+      }
+      if (file.library != i)
+        sourceError(
+          program,
+          file.tokens[0],
+          'part cannot be imported as a library',
+        );
+      return i;
+    }
     i++;
   }
   String path;
@@ -191,6 +241,8 @@ int sourceLoad(
   List<SourceImport> imports = <SourceImport>[];
   var file = SourceFile(path, scanner.tokens, imports);
   file.uri = uri;
+  file.library = id;
+  if (library >= 0) file.library = library;
   file.languageMajor = scanner.languageMajor;
   file.languageMinor = scanner.languageMinor;
   file.languageOffset = scanner.languageOffset;
@@ -220,32 +272,122 @@ int sourceLoad(
     i++;
   }
   var parser = Parser(tokens, 0, 0, paths);
+  var partOf = false;
+  var librarySeen = false;
+  var partsSeen = false;
+  if (library >= 0) {
+    var parent = program.files[library];
+    if (file.languageMajor != parent.languageMajor ||
+        file.languageMinor != parent.languageMinor ||
+        (file.languageOffset >= 0) != (parent.languageOffset >= 0))
+      sourceError(
+        program,
+        tokens[0],
+        'part language version must match its library',
+      );
+  }
   i = 0;
   while (i < tokens.length && tokens[i].kind != tokenEnd) {
     int start = i;
     parser.position = i;
     parserMetadata(parser);
     i = parser.position;
-    bool exported = sourceIs(tokens[i], 'export');
-    var library = sourceIs(tokens[i], 'library');
-    if (!exported && !library && !sourceIs(tokens[i], 'import')) break;
-    var kind = astImportDirective;
-    if (exported) kind = astExportDirective;
-    if (library) kind = astLibraryDirective;
+    var kind = 0;
+    if (sourceIs(tokens[i], 'import')) kind = astImportDirective;
+    if (sourceIs(tokens[i], 'export')) kind = astExportDirective;
+    if (sourceIs(tokens[i], 'library')) kind = astLibraryDirective;
+    if (parserPartDirective(parser)) kind = astPartDirective;
+    if (kind == 0) break;
     parser.position = i + 1;
+    if (kind == astPartDirective && parserTake(parser, 'of')) {
+      kind = astPartOfNameDirective;
+      if (parser.tokens[parser.position].kind == tokenString ||
+          parser.tokens[parser.position].kind == tokenStringPart)
+        kind = astPartOfUriDirective;
+    }
     var directive = parserDirective(parser, kind, i);
     i = parser.position;
-    if (library) {
-      if (directive.uri == '' && !sourceVersionAtLeast(program, id, 2, 19)) {
+    if (kind == astPartOfUriDirective || kind == astPartOfNameDirective) {
+      if (library < 0)
+        sourceError(
+          program,
+          tokens[start],
+          'part cannot be imported as a library',
+        );
+      if (partOf)
+        sourceError(
+          program,
+          tokens[start],
+          'part must have one part of directive',
+        );
+      var parent = program.files[library];
+      if (kind == astPartOfUriDirective) {
+        if (sourceReferenceUri(uri, directive.uri) != parent.uri)
+          sourceError(
+            program,
+            tokens[start],
+            'part of URI does not match its library',
+          );
+      } else if (parent.libraryName == '' ||
+          directive.uri != parent.libraryName) {
+        sourceError(
+          program,
+          tokens[start],
+          'part of name does not match its library',
+        );
+      }
+      partOf = true;
+      continue;
+    }
+    if (library >= 0)
+      sourceError(
+        program,
+        tokens[start],
+        'part of must be the only directive in a part',
+      );
+    if (kind == astLibraryDirective) {
+      if (librarySeen || imports.isNotEmpty || partsSeen)
+        sourceError(
+          program,
+          tokens[start],
+          'library directive must come first',
+        );
+      librarySeen = true;
+      file.libraryName = directive.uri;
+      if (directive.uri == '' && !sourceVersionAtLeast(program, id, 2, 19))
         sourceError(
           program,
           tokens[start],
           'unnamed library requires language version 2.19',
         );
-      }
       continue;
     }
     var reference = sourceDirectiveUri(program, directive);
+    if (kind == astPartDirective) {
+      var scheme = sourceUriScheme(reference);
+      if (scheme != '' && scheme != 'file' && scheme != 'package')
+        sourceError(
+          program,
+          tokens[start],
+          'unsupported part URI ' + reference,
+        );
+      partsSeen = true;
+      var part = sourceLoad(
+        program,
+        sourceReferenceUri(uri, reference),
+        implementation,
+        id,
+      );
+      if (part < 0)
+        sourceError(program, tokens[start], 'part must be a Dart source file');
+      continue;
+    }
+    if (partsSeen)
+      sourceError(
+        program,
+        tokens[start],
+        'imports and exports must precede parts',
+      );
     int target = sourceUnknown;
     if (reference == 'dart:core') {
       target = sourceCore;
@@ -253,32 +395,18 @@ int sourceLoad(
       target = sourceFfi;
     } else {
       var scheme = sourceUriScheme(reference);
-      if (scheme == 'package') {
-        target = sourceLoad(program, reference, implementation);
-      } else if (scheme == '' && package != null) {
-        var imported = sourcePackageRelative(package, reference);
-        target = sourceLoad(
-          program,
-          'package:' + imported.name + '/' + imported.path,
-          implementation,
-        );
-      } else if (scheme == '' || scheme == 'file') {
-        var base = uri;
-        if (scheme == 'file') base = 'file:///';
-        target = sourceLoad(
-          program,
-          sourceResolveFileUri(base, reference),
-          implementation,
-        );
-      } else {
+      if (scheme != '' && scheme != 'package' && scheme != 'file')
         sourceError(
           program,
           tokens[start],
           'unsupported library URI ' + reference,
         );
-      }
+      target = sourceLoad(
+        program,
+        sourceReferenceUri(uri, reference),
+        implementation,
+      );
     }
-
     imports.add(
       SourceImport(
         reference,
@@ -286,11 +414,13 @@ int sourceLoad(
         target,
         start,
         i,
-        exported,
+        kind == astExportDirective,
         directive.combinators,
       ),
     );
   }
+  if (library >= 0 && !partOf)
+    sourceError(program, tokens[0], 'part must begin with a part of directive');
   program.order.add(id);
   return id;
 }
