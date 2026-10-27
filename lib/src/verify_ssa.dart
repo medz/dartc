@@ -138,7 +138,7 @@ class _SsaVerifier {
       if (callee.parameterTypes.length != count || result != callee.result)
         fail('call metadata');
     } else if (op == opBuiltin) {
-      if (!(target >= bPrintString && target <= bFunctionType ||
+      if (!(target >= bPrintString && target <= bListSublist ||
           target >= bNativeLoad64 &&
               target <= bNativeFramePointer &&
               target != bNativeMetadataAddress))
@@ -152,6 +152,8 @@ class _SsaVerifier {
         count = 1;
       } else if (target == bFunctionInvoke && count < 2) {
         fail('invoke operand count');
+      } else if (target == bListSublist) {
+        count = 4;
       }
     } else if (op == opStoreGlobal ||
         op == opNeg ||
@@ -269,6 +271,10 @@ class _SsaVerifier {
           if (inputType(input) != tInt) fail('primitive operand type');
         }
         if (result != tInt) fail('primitive result');
+      } else if (target == bListSublist) {
+        if (!typeIsList(result) || inputType(instruction.inputs[0]) != result)
+          fail('sublist receiver type');
+        for (var i = 1; i < 4; i++) expectInput(instruction, i, tInt);
       } else if (target == bBoxInt || target == bBoxBool) {
         expectInput(instruction, 0, target == bBoxInt ? tInt : tBool);
         if (!typeIsTagged(result)) fail('boxed result');

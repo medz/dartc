@@ -109,6 +109,7 @@ const int bFunctionInvoke = 63;
 const int bListRemoveAt = 64;
 const int bListInsert = 65;
 const int bFunctionType = 66;
+const int bListSublist = 67;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;

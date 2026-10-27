@@ -2975,6 +2975,214 @@ void collectionValues() {
   print(cb);
 }
 
+int listPatternLengths(List<int> value) => switch (value) {
+  [] => 0,
+  [_, _] => 2,
+  [_, _, _, ...] => 3,
+  [_] => 1,
+};
+
+int listPatternIntersection(List<int> value) => switch (value) {
+  [] || [_] => 0,
+  [_, ...] && [_, _, ...] => 1,
+  _ => -1,
+};
+
+int listPatternUnion(List<int>? value) {
+  if (value case [] || [_, ...]) return value.length;
+  return -1;
+}
+
+String listPatternShape(Object? value) => switch (value) {
+  [] => 'empty',
+  <int>[var a] => 'typed/$a',
+  [int a, String b] => '$a/$b',
+  [var first, ...var middle, var last] => '$first/$middle/$last',
+  [...var rest] => '$rest',
+  _ => 'other',
+};
+
+void listPatterns() {
+  for (var value in <Object?>[
+    <int>[],
+    <int>[1],
+    <dynamic>[1],
+    <Object>[2, 'two'],
+    <int>[1, 2, 3, 4],
+    null,
+    'text',
+  ])
+    print(listPatternShape(value));
+  for (var value in <List<int>>[
+    [],
+    [1],
+    [1, 2],
+    [1, 2, 3],
+    [1, 2, 3, 4],
+  ]) {
+    print(listPatternLengths(value));
+    print(listPatternIntersection(value));
+    print(listPatternUnion(value));
+  }
+  print(listPatternUnion(null));
+  if (<List<int>>[
+        [1],
+        [2, 3],
+      ]
+      case [[var first], [var second, var third]])
+    print(first + second + third);
+  var node = PatternNode(1, null, 'list', [3, 4]);
+  if (node case PatternNode(values: [var first, var second]))
+    print(first + second);
+  if (node.values case List(length: var n) && [var first, ...])
+    print(n + first);
+  var cached = [1, 2, 3];
+  bool clear() {
+    cached.clear();
+    return false;
+  }
+
+  print(switch (cached) {
+    [var first, _, ...] when clear() => first,
+    [var first, ...] => first,
+    _ => -1,
+  });
+  var sliceSource = [1, 2, 3];
+  List<int>? saved;
+  bool save(List<int> slice) {
+    saved = slice;
+    sliceSource.add(4);
+    return false;
+  }
+
+  print(switch (sliceSource) {
+    [_, ...var rest] when save(rest) => 0,
+    [_, ...var rest] => identical(rest, saved) ? rest.length : -1,
+    _ => -2,
+  });
+  print(saved);
+  var tail = [1, 2];
+  bool changeTail() {
+    tail[1] = 8;
+    return false;
+  }
+
+  print(switch (tail) {
+    [_, var last] when changeTail() => last,
+    [..., var last] => last,
+    _ => -1,
+  });
+  var sameTail = [1, 2, 3];
+  bool changeSameTail() {
+    sameTail[2] = 8;
+    return false;
+  }
+
+  print(switch (sameTail) {
+    [_, ..., var last] when changeSameTail() => last,
+    [..., var last] => last,
+    _ => -1,
+  });
+  var differentSlices = [1, 2, 3];
+  List<int>? head;
+  bool saveHead(List<int> slice) {
+    head = slice;
+    return false;
+  }
+
+  print(switch (differentSlices) {
+    [...var rest, _] when saveHead(rest) => rest,
+    [...var rest] => rest,
+  });
+  print(head);
+  var callbacks = <int Function()>[];
+  for (var i in [1, 2]) {
+    if ([i, i + 1] case [var first, ...var rest]) {
+      callbacks.add(() => ++first + rest[0]);
+    }
+  }
+  print([callbacks[0](), callbacks[1](), callbacks[0]()]);
+  print([
+    for (var value in <Object?>[
+      [1],
+      null,
+      [2, 3],
+    ])
+      if (value case [int first, ...]) first,
+  ]);
+  if (<Null>[null] case [var inferred]) print([inferred] is List<Null>);
+  if (null case var inferred) print([inferred] is List<Null>);
+  print(switch (null) {
+    var inferred => [inferred] is List<Null>,
+  });
+  if (<Null>[null] case [Null explicit]) {
+    // ignore: unnecessary_type_check
+    print([explicit] is List<Null>);
+  }
+  var wildcard = [1];
+  bool clearWildcard() {
+    wildcard.clear();
+    return false;
+  }
+
+  print(switch (wildcard) {
+    [_] when clearWildcard() => 0,
+    [var _] => 1,
+    _ => 2,
+  });
+}
+
+void sublistValues() {
+  List<num> view = <int>[1, 2, 3, 4];
+  var middle = view.sublist(1, 3);
+  print(middle);
+  print(middle is List<int>);
+  middle.add(5);
+  middle[0] = 9;
+  print(middle);
+  print(view);
+  print(view.sublist(2));
+  print(view.sublist(4, null));
+  print(view.sublist(0, 0));
+  var fromConstant = const <String>['a', 'b'].sublist(0);
+  fromConstant.add('c');
+  print(fromConstant);
+  var fromFixed = List<int>.filled(2, 7).sublist(1);
+  fromFixed.add(8);
+  print(fromFixed);
+  var wide = <Object?>[null, Box(4), 'word', 9223372036854775807];
+  var copied = wide.sublist(1);
+  print(copied[0]);
+  print(copied[1]);
+  print(copied[2]);
+  print(identical(copied[0], wide[1]));
+  var trace = '';
+  var source = [1, 2, 3];
+  List<int> receiver() {
+    trace += 'r';
+    return source;
+  }
+
+  int start() {
+    trace += 's';
+    source.add(4);
+    return 1;
+  }
+
+  int? end() {
+    trace += 'e';
+    source.add(5);
+    return null;
+  }
+
+  print(receiver().sublist(start(), end()));
+  print(trace);
+  if (source case [_, ...var rest, _]) print(rest);
+  if (source case [...var all]) print(identical(all, source));
+  if (view case [_, ...var rest]) print(rest is List<int>);
+  if (view case [...List<int> rest]) print(rest);
+}
+
 var objectPatternTrace = <String>[];
 
 class PatternNode {
@@ -3450,6 +3658,8 @@ void switchExpressions() {
 void main(List<String> args) {
   ifCaseValues();
   objectPatterns();
+  listPatterns();
+  sublistValues();
   collectionValues();
   nullAwareValues();
   cascadeValues();

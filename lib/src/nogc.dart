@@ -59,6 +59,7 @@ bool _builtinThrows(int target) {
       target >= bListGet && target <= bListFilled ||
       target == bListRemoveAt ||
       target == bListInsert ||
+      target == bListSublist ||
       target >= bValueAdd && target <= bValueUshr ||
       target >= bValueLt && target <= bValueGe ||
       target == bValueToString;
@@ -101,6 +102,7 @@ List<int> checkNoGcSsa(
           if (target == bObjectNew ||
               target == bListNew ||
               target == bListFilled ||
+              target == bListSublist ||
               target == bBoxInt ||
               target == bListFromData ||
               target == bObjectFromData) {

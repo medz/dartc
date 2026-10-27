@@ -613,7 +613,13 @@ AstPattern parserPattern(Parser parser, [int minimum = 1]) {
 AstPattern parserUnaryPattern(Parser parser) {
   var token = parser.position;
   var op = parserPeek(parser);
-  if (parser.tokens[token].kind == tokenSymbol &&
+  var typedList = false;
+  if (parserIs(parser, '<')) {
+    var look = Parser(parser.tokens, token, 0, parser.paths);
+    typedList = parserLookTypeArguments(look) && parserIs(look, '[');
+  }
+  if (!typedList &&
+      parser.tokens[token].kind == tokenSymbol &&
       (op == '==' ||
           op == '!=' ||
           op == '<' ||
@@ -628,6 +634,33 @@ AstPattern parserUnaryPattern(Parser parser) {
   if (parserTake(parser, '(')) {
     pattern = parserPattern(parser);
     parserExpect(parser, ')');
+  } else if (parserIs(parser, '[') || typedList) {
+    AstType? element;
+    if (parserIs(parser, '<')) {
+      var arguments = parserTypeArguments(parser);
+      if (arguments.length != 1)
+        parserError(parser, 'list pattern requires one type argument');
+      element = arguments[0];
+    }
+    parserExpect(parser, '[');
+    var children = <AstPattern>[];
+    var hasRest = false;
+    while (!parserIs(parser, ']')) {
+      var position = parser.position;
+      if (parserTake(parser, '...')) {
+        if (hasRest) parserError(parser, 'list pattern has more than one rest');
+        hasRest = true;
+        var rest = <AstPattern>[];
+        if (!parserIs(parser, ',') && !parserIs(parser, ']'))
+          rest.add(parserPattern(parser));
+        children.add(AstPattern(patternRest, position, '', rest));
+      } else {
+        children.add(parserPattern(parser));
+      }
+      if (!parserTake(parser, ',')) break;
+    }
+    parserExpect(parser, ']');
+    pattern = AstPattern(patternList, token, '', children)..type = element;
   } else if (parserIs(parser, 'var') || parserIs(parser, 'final')) {
     var finalVariable = parserTake(parser, 'final');
     if (!finalVariable) parserExpect(parser, 'var');

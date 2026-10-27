@@ -479,6 +479,46 @@ bool objectPatternGuard(int queue) {
   return false;
 }
 
+bool listPatternGuard(List<Leaf> source, int queue, int edges) {
+  source.clear();
+  var count = snapshot(queue);
+  for (var i = 0; i < count; i++) {
+    var object = rt.nativeLoad64(queue + i * 8);
+    if (rt.nativeLoad64(
+              rt.rtObjectDescriptor(object) + abi.descriptorKindOffset,
+            ) ==
+            abi.descriptorList &&
+        rt.rtListLength(object) == 1) {
+      var children = listElements(object, edges);
+      if (findMarker(edges, children, 816) != 0) return false;
+    }
+  }
+  check(false);
+  return false;
+}
+
+void listPatternRoots(int queue, int edges) {
+  var mark = rt.rtRootMark();
+  var source = <Leaf>[Leaf(815), Leaf(816)];
+  var selected = switch (source) {
+    [_, ...var rest] when listPatternGuard(source, queue, edges) => rest,
+    [_, ...var rest] => rest,
+    _ => <Leaf>[],
+  };
+  var list = captureList(selected, 1, queue);
+  check(listElements(list, edges) == 1);
+  check(findMarker(edges, 1, 816) != 0 && selected[0].marker == 816);
+  var tagged = <Object?>[null, Leaf(817), 9223372036854775807, true].sublist(1);
+  list = captureList(tagged, 3, queue);
+  check(listElements(list, edges) == 2);
+  check(findMarker(edges, 2, 817) != 0);
+  check(tagged[1] == 9223372036854775807);
+  var words = <int>[1, 2, 3, 4].sublist(0);
+  list = captureList(words, 4, queue);
+  check(listElements(list, edges) == 0 && words[3] == 4);
+  check(rt.rtRootMark() == mark);
+}
+
 void closureRoots(int queue, int edges) {
   var owner = PatternRoot();
   var objectPatterns = <int Function()>[
@@ -573,6 +613,7 @@ void main(List<String> args) {
   }
   var queue = rt.rtMap(capacity * 8);
   var edges = rt.rtMap(capacity * 8);
+  listPatternRoots(queue, edges);
   closureRoots(queue, edges);
   noGcRoots(queue);
   builderRoots(queue, edges);

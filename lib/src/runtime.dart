@@ -696,6 +696,32 @@ int rtListFilled(int length, int value, int growable, int typeRef) {
   return result;
 }
 
+int rtListSublist(int list, int start, int end, int hasEnd) {
+  var length = nativeLoad64(list + listLengthOffset);
+  if (hasEnd == 0) end = length;
+  if (start < 0 || end < start || end > length) return rtListRangeError();
+  var count = end - start;
+  var type = nativeLoad64(list + listTypeOffset);
+  var mark = rtRootMark();
+  rtRootPush(list, storageRef);
+  var result = rtListNew(type);
+  if (count > 0) {
+    rtRootPush(result, storageRef);
+    var backing = rtListBackingNew(type, count);
+    for (var i = 0; i < count; i++)
+      nativeStore64(
+        backing + arrayDataOffset + i * 8,
+        rtListRawGet(list, start + i),
+      );
+    nativeStore64(backing + arrayLengthOffset, count);
+    nativeStore64(result + listCapacityOffset, count);
+    nativeStore64(result + listBackingOffset, backing);
+    nativeStore64(result + listLengthOffset, count);
+  }
+  rtRootRestore(mark);
+  return result;
+}
+
 int rtListFromData(int data) {
   var type = data + nativeLoad64(data + constantListTypeOffset);
   var length = nativeLoad64(data + constantListLengthOffset);

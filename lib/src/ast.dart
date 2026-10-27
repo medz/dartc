@@ -36,6 +36,8 @@ const int patternCast = 6;
 const int patternNullCheck = 7;
 const int patternNullAssert = 8;
 const int patternObject = 9;
+const int patternList = 10;
+const int patternRest = 11;
 
 class AstPatternField {
   final String name;

@@ -43,6 +43,7 @@ int runtimeFunction(int builtin, int castType) {
   if (builtin == bListRemoveAt) return abiFunction('rtListRemoveAt', 0);
   if (builtin == bListClear) return abiFunction('rtListClear', 0);
   if (builtin == bListFilled) return abiFunction('rtListFilled', 0);
+  if (builtin == bListSublist) return abiFunction('rtListSublist', 0);
   if (builtin == bListFromData) return abiFunction('rtListFromData', 0);
   if (builtin == bObjectFromData) return abiFunction('rtObjectFromData', 0);
   if (builtin == bValueIdentical) return abiFunction('rtValueIdentical', 0);

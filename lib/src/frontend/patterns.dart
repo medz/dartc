@@ -14,6 +14,14 @@ const int patternSpaceFalse = 4;
 const int patternSpaceOther = 8;
 const int patternSpaceAll = 15;
 
+class PatternLengthRange {
+  final int type;
+  final int start;
+  final int end;
+
+  PatternLengthRange(this.type, this.start, this.end);
+}
+
 class CheckedPattern {
   final AstPattern syntax;
   final int input;
@@ -25,8 +33,46 @@ class CheckedPattern {
   ConstantValue? constant;
   List<CheckedPattern> children = const <CheckedPattern>[];
   List<CheckedMemberRead> fields = const <CheckedMemberRead>[];
+  List<PatternLengthRange> lengths = const <PatternLengthRange>[];
 
   CheckedPattern(this.syntax, this.input, this.matched, this.remaining);
+}
+
+int patternListRest(AstPattern syntax) {
+  for (var i = 0; i < syntax.children.length; i++)
+    if (syntax.children[i].kind == patternRest) return i;
+  return -1;
+}
+
+bool patternSkipsRead(AstPattern syntax) {
+  return syntax.kind == patternVariable &&
+      syntax.text == '_' &&
+      syntax.type == null;
+}
+
+bool patternLengthsCover(List<PatternLengthRange> ranges, int input) {
+  input = typeNonNullable(input);
+  if (!typeIsList(input)) return false;
+  var next = 0;
+  while (true) {
+    var end = next - 1;
+    for (var range in ranges) {
+      if (range.start <= next && typeIsSubtype(input, range.type)) {
+        if (range.end < 0) return true;
+        if (range.end > end) end = range.end;
+      }
+    }
+    if (end < next) return false;
+    next = end + 1;
+  }
+}
+
+bool patternIsTotal(CheckedPattern pattern) {
+  var coverage = pattern.coverage;
+  if (patternLengthsCover(pattern.lengths, pattern.input))
+    coverage |= patternSpaceOther;
+  return (coverage & patternRequiredSpace(pattern.input)) ==
+      patternRequiredSpace(pattern.input);
 }
 
 Never patternError(ConstantContext context, int token, String message) {
@@ -80,7 +126,9 @@ CheckedPattern checkPattern(
   var kind = syntax.kind;
   if (kind == patternVariable) {
     var type = syntax.type;
-    var declared = type == null ? input : resolveType(context.symbols, type);
+    var declared = type == null
+        ? (input == tNull ? tDynamic : input)
+        : resolveType(context.symbols, type);
     result.variableType = declared;
     result.tested = type == null ? -1 : declared;
     result.matched = type == null ? input : patternMatchedType(input, declared);
@@ -100,6 +148,57 @@ CheckedPattern checkPattern(
         );
       variableTypes[binding] = declared;
     }
+  } else if (kind == patternList) {
+    var element = nullableType(tObject);
+    if (syntax.type != null)
+      element = resolveType(context.symbols, syntax.type!);
+    else if (typeIsList(typeNonNullable(input)))
+      element = typeArgument(typeNonNullable(input));
+    else if (input == tDynamic)
+      element = tDynamic;
+    var type = listType(element);
+    result.tested = type;
+    result.matched = patternMatchedType(input, type);
+    result.children = <CheckedPattern>[];
+    var total = true;
+    var rest = patternListRest(syntax);
+    for (var child in syntax.children) {
+      var checked = checkPattern(
+        context,
+        child,
+        child.kind == patternRest ? type : element,
+        variableTypes,
+        readMember,
+      );
+      result.children.add(checked);
+      if (!patternIsTotal(checked)) total = false;
+    }
+    if (total) {
+      var count = syntax.children.length - (rest >= 0 ? 1 : 0);
+      result.lengths = <PatternLengthRange>[
+        PatternLengthRange(type, count, rest >= 0 ? -1 : count),
+      ];
+      if (rest >= 0 && count == 0) {
+        result.coverage = patternTypeSpace(input, type);
+        result.remaining = patternRemainingType(input, type);
+      }
+    }
+  } else if (kind == patternRest) {
+    result.coverage = patternSpaceAll;
+    result.remaining = tNever;
+    if (syntax.children.isNotEmpty) {
+      var child = checkPattern(
+        context,
+        syntax.children[0],
+        input,
+        variableTypes,
+        readMember,
+      );
+      result.children = <CheckedPattern>[child];
+      result.coverage = child.coverage;
+      result.lengths = child.lengths;
+      result.remaining = child.remaining;
+    }
   } else if (kind == patternObject) {
     var type = resolveObjectPatternType(context.symbols, syntax.type!, input);
     result.tested = type;
@@ -118,9 +217,7 @@ CheckedPattern checkPattern(
       );
       result.fields.add(member);
       result.children.add(child);
-      if ((child.coverage & patternRequiredSpace(member.type)) !=
-          patternRequiredSpace(member.type))
-        total = false;
+      if (!patternIsTotal(child)) total = false;
     }
     if (total) {
       result.coverage = patternTypeSpace(input, type);
@@ -190,6 +287,7 @@ CheckedPattern checkPattern(
       result.matched = joinTypes(left.matched, right.matched);
       result.remaining = right.remaining;
       result.coverage = left.coverage | right.coverage;
+      result.lengths = <PatternLengthRange>[...left.lengths, ...right.lengths];
     }
   } else {
     var type = kind == patternCast
@@ -207,16 +305,21 @@ CheckedPattern checkPattern(
     result.matched = inner.matched;
     result.remaining = inner.remaining;
     result.coverage = inner.coverage;
+    result.lengths = inner.lengths;
     if (kind == patternNullCheck) {
       result.remaining = joinTypes(tNull, result.remaining);
       result.coverage &= ~patternSpaceNull;
     } else if (kind == patternNullAssert) {
       result.coverage |= patternSpaceNull;
-    } else if (kind == patternCast &&
-        (inner.coverage & patternRequiredSpace(type)) ==
-            patternRequiredSpace(type)) {
+    } else if (kind == patternCast && patternIsTotal(inner)) {
       result.coverage = patternSpaceAll;
     }
+  }
+  if (patternLengthsCover(result.lengths, input)) {
+    result.remaining =
+        typeCanBeNull(input) && (result.coverage & patternSpaceNull) == 0
+        ? tNull
+        : tNever;
   }
   return result;
 }

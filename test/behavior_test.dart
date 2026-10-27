@@ -851,6 +851,17 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "void main(){print('before');if(<int?>[null] case [var n!])print(n);}",
+      "void main(){print('before');if(<Object>['wrong'] case [var n as int])print(n);}",
+      "void main(){print('before');if(<Object>[1] case [...var rest as List<int>])print(rest);}",
+      "List<int> receiver(){print('receiver');return [1];}int start(){print('start');return -1;}int end(){print('end');return 1;}void main(){print('before');print(receiver().sublist(start(),end()));}",
+      "void main(){print('before');print([1,2].sublist(0,-1));}",
+      "void main(){print('before');print([1,2].sublist(2,1));}",
+      "void main(){print('before');print([1,2].sublist(0,3));}",
+      "void main(){print('before');print([1,2].sublist(3));}",
+      "dynamic start(){print('start');return 'wrong';}int end(){print('end');return 1;}void main(){print('before');print([1].sublist(start(),end()));}",
+      "dynamic end(){print('end');return 'wrong';}void main(){print('before');print([1].sublist(0,end()));}",
+      "void main(){List<Object> view=<int>[1];var copy=view.sublist(0);print('before');copy.add('wrong');}",
       "class C{int? get x{print('getter');return null;}} void main(){print('before');if(C() case C(x:var n!)) print(n);}",
       "class C{Object get x{print('getter');return 'wrong';}} void main(){print('before');if(C() case C(x:var n as int)) print(n);}",
       "class C{int get x{print('getter');return <int>[][0];}} void main(){print('before');if(C() case C(x:_)) print('body');}",
@@ -1328,7 +1339,9 @@ bool safe(String value, String suffix) => value.endsWith(suffix);
 class Callable { int call(int value) => value + 1; }
 @noGc
 int invoke(Callable value) => value(3);
-void main() { print(compute(65)); print(box(true)); print(box(false)); print(safe('a', 'long')); print(invoke(Callable())); }
+@noGc
+bool all(List<int> value) { if (value case [...var _]) return true; return false; }
+void main() { print(compute(65)); print(box(true)); print(box(false)); print(safe('a', 'long')); print(invoke(Callable())); print(all([1])); }
 ''',
       'nogc-user-annotation.dart': r'''
 class pragma { final String name; const pragma(this.name); }
@@ -1592,6 +1605,30 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      // SDK exhaustiveness does not combine List length spaces through &&.
+      'int unused(List<int> v)=>switch(v){[] || [_]=>0,[_,...]&&[_,_,...]=>1};void main(){}',
+      'int unused(List<int> v)=>switch(v){([]||[_,...])&&List<int>()=>0};void main(){}',
+      'void unused(List<int> v){if(v case [...,...])print(v);}void main(){}',
+      'void unused(Object v){if(v case <int,String>[])print(v);}void main(){}',
+      'void unused(List<int> v){if(v case [var a,...var a])print(a);}void main(){}',
+      'void unused(List<int> v){if(v case [var a]||[...var a])print(a);}void main(){}',
+      'void unused(List<int> v){if(v case [var a]||[final a,...])print(a);}void main(){}',
+      'void unused(List<int> v){if(v case [var a] when ++a>0)print(a);}void main(){}',
+      'void unused(List<int> v){if(v case [final a])a++;}void main(){}',
+      'void unused(List<int> v){if(v case [var a])print(a);print(a);}void main(){}',
+      'void unused(List<int> v){if(v case [var a]){String s=a;print(s);}}void main(){}',
+      'void unused(List<int> v){if(v case [...var a]){List<String> s=a;print(s);}}void main(){}',
+      'int unused(List<int> v)=>switch(v){[] =>0,[_,_,...]=>1};void main(){}',
+      'int unused(List<int>? v)=>switch(v){[] =>0,[_,...]=>1};void main(){}',
+      'int unused(List<int> v)=>switch(v){[] =>0,[1,...]=>1};void main(){}',
+      'int unused(List<Object> v)=>switch(v){<int>[...]=>0};void main(){}',
+      'int unused(List<int> v)=>switch(v){[...] when true=>0};void main(){}',
+      'int unused(List<int> v)=>switch(v){_=>0,[var a]=>missing};void main(){}',
+      'void unused(){[1].sublist();}void main(){}',
+      'void unused(){[1].sublist(0,1,2);}void main(){}',
+      'void unused(){[1].sublist(start:0);}void main(){}',
+      'void unused(){[1].sublist(0,"end");}void main(){}',
+      'void unused(){[1].sublist(null);}void main(){}',
       "import 'object-pattern-library.dart' as p;void unused(Object v){if(v case p.PatternBox(_value:_))print(v);}void main(){}",
       "import 'object-pattern-library.dart' as p;void unused(Object v){if(v case p.PatternAlias(value:var p))print(p);}void main(){}",
       "const x=1;class C{int x=1;}void unused(C c){if(c case C(:x))print(c);}void main(){}",
@@ -1855,6 +1892,8 @@ void main() {
       "@pragma('dartc:no-gc') int checked(List<int> values,int index)=>values.removeAt(index);void main(){}",
       "void main(){@pragma('dartc:no-gc') int checked(List<int> values,int index)=>values.removeAt(index);}",
       "@pragma('dartc:no-gc') void checked(List<int> values,int index,int element){values.insert(index,element);}void main(){}",
+      "@pragma('dartc:no-gc') List<int> checked(List<int> values)=>values.sublist(0);void main(){}",
+      "@pragma('dartc:no-gc') int checked(List<int> values){if(values case [...var copy])return copy.length;return 0;}void main(){}",
       "void main(){<int>[].insert(0);}",
       "void main(){<int>[].insert('wrong',1);}",
       "void main(){<int>[].insert(0,'wrong');}",

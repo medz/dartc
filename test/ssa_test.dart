@@ -145,6 +145,10 @@ void corrupt(List<SsaFunction> program, String mode) {
   } else if (mode == 'unknown-builtin') {
     final invoke = operation(named(program, 'apply'), opBuiltin);
     invoke.target = -1;
+  } else if (mode == 'sublist-arity' || mode == 'sublist-index') {
+    final slice = operation(named(program, 'slice'), opBuiltin);
+    if (mode == 'sublist-arity') slice.inputs.removeLast();
+    else slice.inputs[1] = slice.inputs[0];
   } else if (mode == 'valid') {
     // Unused metadata IDs and well-formed unreachable blocks are permitted.
     order.valueTypes.add(tString);
@@ -209,6 +213,7 @@ int checked(dynamic value) => value as int;
 bool tested(dynamic value) => value is int;
 void dropped(dynamic value) { value as int; }
 int apply(int Function(int) function, int value) => function(value);
+List<int> slice(List<int> value) => value.sublist(1);
 void main() {
   print(order(3));
   print(diamond(true, 4));
@@ -218,6 +223,7 @@ void main() {
   dropped(1);
   print(apply(callee, 8));
   print(apply(Counter().add, 9));
+  print(slice([1, 2]));
 }
 ''';
 
@@ -273,6 +279,8 @@ Future<void> main(List<String> args) async {
       'callable-type': 'callable metadata',
       'bound-receiver-type': 'bound method receiver',
       'unknown-builtin': 'unknown SSA builtin',
+      'sublist-arity': 'operand count',
+      'sublist-index': 'operand type',
     };
     for (final entry in cases.entries) {
       final result = await captureProcess(
