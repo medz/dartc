@@ -263,6 +263,10 @@ void bindingExpression(
   int scope,
   AstExpression expression,
 ) {
+  if (expression.kind == astForElement) {
+    bindingStatement(binder, scope, expression.loop!);
+    return;
+  }
   if (expression.kind == astFunctionExpression) {
     var syntax = expression.function!;
     syntax.local = binder.functions.length;
@@ -413,7 +417,7 @@ void bindingFunctionBody(LocalBinder binder, int scope, AstFunction syntax) {
   );
 }
 
-void bindExpressionFunctions(
+FunctionBindings bindExpressionLocals(
   SourceProgram source,
   AstExpression expression,
   List<LocalFunctionBinding> functions,
@@ -425,6 +429,7 @@ void bindExpressionFunctions(
     functions,
   );
   bindingExpression(binder, -1, expression);
+  return binder.result;
 }
 
 void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
@@ -455,6 +460,8 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
   }
   if (kind == astForInStatement) {
     bindingExpressions(binder, scope, statement.expressions);
+    if (statement.variables.isEmpty)
+      bindingWrite(binder, statement.expressions[1].binding);
     var loop = bindingScope(binder, scope);
     bindingDeclarations(binder, loop, statement.variables);
     var variable = 0;
@@ -613,6 +620,10 @@ void collectWrittenExpression(
   List<bool> seen,
   List<int> written,
 ) {
+  if (expression.kind == astForElement) {
+    collectWrittenStatement(expression.loop!, seen, written);
+    return;
+  }
   if (expression.kind == astAssignment ||
       (expression.kind == astUnary || expression.kind == astPostfix) &&
           (expression.text == '++' || expression.text == '--')) {
@@ -633,6 +644,8 @@ void collectWrittenStatement(
   List<bool> seen,
   List<int> written,
 ) {
+  if (statement.kind == astForInStatement && statement.variables.isEmpty)
+    collectWrittenBinding(statement.expressions[1].binding, seen, written);
   var i = 0;
   while (i < statement.expressions.length) {
     collectWrittenExpression(statement.expressions[i], seen, written);

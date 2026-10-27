@@ -26,6 +26,15 @@ int typingCoalescing(int left, int right) {
   return joinTypes(typeNonNullable(left), right);
 }
 
+int typingIterableElement(int type, bool nullAware) {
+  if (type == tNever || nullAware && type == tNull) return tNever;
+  if (type == tDynamic) return tDynamic;
+  if (!nullAware && typeCanBeNull(type)) return -1;
+  type = typeNonNullable(type);
+  if (typeIsList(type)) return typeArgument(type);
+  return -1;
+}
+
 int typingUnary(String op, int type) {
   if (op == '!') {
     if (typingCondition(type)) return tBool;

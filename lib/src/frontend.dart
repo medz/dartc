@@ -41,6 +41,7 @@ class ControlLabel {
 List<ControlLabel> feLabels = <ControlLabel>[];
 
 class GlobalInitializer {
+  FunctionBindings bindings;
   List<int> code;
   List<int> types;
   List<int> locals;
@@ -50,6 +51,7 @@ class GlobalInitializer {
   int state;
 
   GlobalInitializer(
+    this.bindings,
     this.code,
     this.types,
     this.locals,
@@ -174,6 +176,7 @@ List<List<int>> feClassStaticGlobals = <List<int>>[];
 List<int> feClassFieldStarts = <int>[];
 List<AstVariable> feGlobalNodes = <AstVariable>[];
 List<AstVariable> feFieldNodes = <AstVariable>[];
+List<FunctionBindings> feFieldBindings = <FunctionBindings>[];
 List<int> feClassSources = <int>[];
 List<int> feGlobalSources = <int>[];
 List<int> feGlobalOwners = <int>[];
@@ -1865,45 +1868,139 @@ int feLowerArguments(AstExpression call, int start, int function) {
   return parameters.length;
 }
 
+class FeListLiteral {
+  final int context;
+  final int slot;
+  int inferred = -1;
+
+  FeListLiteral(this.context, this.slot);
+}
+
 int feLowerList(AstExpression expression, int context) {
   var element = -1;
-  if (expression.typeArguments.length != 0) {
+  if (expression.typeArguments.isNotEmpty)
     element = resolveType(feSymbols, expression.typeArguments[0]);
-  } else if (context > 0 && typeIsList(context)) {
+  else if (context >= 0 && typeIsList(context))
     element = typeArgument(context);
-  }
-  var values = <int>[];
-  var types = <int>[];
-  var inferred = -1;
-  var item = 0;
-  while (item < expression.children.length) {
-    var child = expression.children[item];
-    var type = -1;
-    if (element < 0)
-      type = feLowerHint(child, -1);
-    else
-      type = feLowerInContext(child, element);
-    inferred = joinTypes(inferred, type);
-    var slot = feTemp(type);
-    feOperand(opStoreLocal, slot);
-    values.add(slot);
-    types.add(type);
-    item++;
-  }
-  if (element < 0) element = inferred;
-  if (element < 0) element = tDynamic;
-  var type = listType(element);
+  var type = listType(element < 0 ? tDynamic : element);
+  var allocation = ir.length;
   feBuiltinTyped(bListNew, 0, type);
-  item = 0;
-  while (item < values.length) {
-    feDuplicate(type);
-    feOperand(opLoadLocal, values[item]);
-    feConvertValue(types[item], element, expression.children[item].token);
-    feBuiltin(bListAdd, 2);
-    feEmit(opPop);
-    item++;
-  }
+  var literal = FeListLiteral(element, feTemp(type));
+  feOperand(opStoreLocal, literal.slot);
+  for (var child in expression.children) feLowerListElement(child, literal);
+  if (element < 0) element = literal.inferred;
+  if (element < 0) element = tDynamic;
+  type = listType(element);
+  // Resolve the allocation and its local before the stack IR enters SSA.
+  irTypes[allocation] = type;
+  feSlotTypes[literal.slot] = type;
+  feOperand(opLoadLocal, literal.slot);
   return type;
+}
+
+void feAppendListElement(FeListLiteral literal, int type, int token) {
+  literal.inferred = joinTypes(literal.inferred, type);
+  if (literal.context >= 0) type = feConvertValue(type, literal.context, token);
+  var value = feTemp(type);
+  feOperand(opStoreLocal, value);
+  feOperand(opLoadLocal, literal.slot);
+  feOperand(opLoadLocal, value);
+  feBuiltin(bListAdd, 2);
+  feEmit(opPop);
+}
+
+void feLowerListElement(AstExpression expression, FeListLiteral literal) {
+  if (expression.kind == astIfElement) {
+    feFlow = flowSplit(feFlow);
+    var otherwise = <int>[];
+    var falseFlow = feConditionJumps(expression.children[0], false, otherwise);
+    feLowerListElement(expression.children[1], literal);
+    var trueFlow = feFlow;
+    if (expression.children.length == 3) {
+      var done = feJump(opJump);
+      fePatchJumps(otherwise, ir.length);
+      feFlow = falseFlow;
+      feLowerListElement(expression.children[2], literal);
+      fePatch(done, ir.length);
+    } else {
+      fePatchJumps(otherwise, ir.length);
+      feFlow = falseFlow;
+    }
+    feFlow = flowUnsplit(feJoinFlow(trueFlow, feFlow));
+  } else if (expression.kind == astForElement) {
+    void lowerElement(AstStatement body) {
+      feLowerListElement(body.expressions[0], literal);
+    }
+
+    var loop = expression.loop!;
+    if (loop.kind == astForInStatement)
+      feLowerForIn(loop, lowerElement);
+    else
+      feLowerWhileFor(loop, lowerElement);
+  } else if (expression.kind == astSpreadElement) {
+    feLowerListSpread(expression, literal);
+  } else {
+    var type = feLowerHint(expression, literal.context);
+    feAppendListElement(literal, type, expression.token);
+  }
+}
+
+void feLowerListSpread(AstExpression expression, FeListLiteral literal) {
+  var source = expression.children[0];
+  var context = literal.context < 0 ? -1 : listType(literal.context);
+  var type = feLowerHint(source, context);
+  var nullAware = expression.text == '...?';
+  var element = typingIterableElement(type, nullAware);
+  if (element < 0)
+    feAstError(source.token, 'spread requires a compatible iterable');
+  if (literal.context >= 0 && !typingAssignable(element, literal.context))
+    feAstError(
+      source.token,
+      'spread element type is incompatible with the List',
+    );
+  literal.inferred = joinTypes(literal.inferred, element);
+  var receiver = feTemp(type);
+  feOperand(opStoreLocal, receiver);
+  var skip = -1;
+  FlowState? skipped;
+  if (nullAware) {
+    skipped = feNullBranch(source, type);
+    skip = feJumpIfNull(receiver);
+    receiver = feNonNullReceiver(receiver);
+    type = feSlotTypes[receiver];
+  }
+  var iterableType = type;
+  if (!typeIsList(iterableType)) iterableType = listType(element);
+  feOperand(opLoadLocal, receiver);
+  feConvertValue(type, iterableType, source.token);
+  var iterable = feTemp(iterableType);
+  feOperand(opStoreLocal, iterable);
+  var length = feTemp(tInt);
+  feOperand(opLoadLocal, iterable);
+  feBuiltin(bListLength, 1);
+  feOperand(opStoreLocal, length);
+  var index = feTemp(tInt);
+  feInteger(0, tInt);
+  feOperand(opStoreLocal, index);
+  var repeat = ir.length;
+  feOperand(opLoadLocal, index);
+  feOperand(opLoadLocal, length);
+  feEmit(opLt);
+  var done = feJump(opJumpFalse);
+  feOperand(opLoadLocal, iterable);
+  feOperand(opLoadLocal, index);
+  feBuiltinTyped(bListGet, 2, element);
+  feAppendListElement(literal, element, expression.token);
+  feOperand(opLoadLocal, index);
+  feInteger(1, tInt);
+  feEmit(opAdd);
+  feOperand(opStoreLocal, index);
+  feOperand(opJump, repeat);
+  fePatch(done, ir.length);
+  if (skipped != null) {
+    fePatch(skip, ir.length);
+    feFlow = flowUnsplit(feJoinFlow(feFlow, skipped));
+  }
 }
 
 int feLowerPointerBinding(AstExpression call) {
@@ -2522,8 +2619,7 @@ void feLowerConstructor(int function) {
     feOperand(opLoadLocal, 0);
     feOperand(opInt, feFieldIndices[field]);
     if (step.kind == constructorDeclaration) {
-      feBindings = FunctionBindings(<LocalVariable>[], -1);
-      feLowerInContext(feFieldNodes[field].initializer[0], fieldType);
+      feLowerInitializer(feFieldNodes[field], feFieldBindings[field], fieldType);
     } else if (step.kind == constructorFormal) {
       var parameter = 1 + step.index;
       feOperand(opLoadLocal, step.index + 1);
@@ -3574,6 +3670,8 @@ void feContinueFlow(int token, int base) {
 void feLoopFlow(AstStatement statement) {
   var written = <int>[];
   var seen = List<bool>.filled(feBindingTypes.length, false);
+  if (statement.kind == astForInStatement && statement.variables.isEmpty)
+    collectWrittenBinding(statement.expressions[1].binding, seen, written);
   var body = 0;
   if (statement.kind == astForStatement) body = 1;
   collectWrittenStatement(statement.children[body], seen, written);
@@ -3794,7 +3892,7 @@ void feLowerStatement(AstStatement statement) {
     return;
   }
   if (kind == astForInStatement) {
-    feLowerForIn(statement);
+    feLowerForIn(statement, feLowerStatement);
     return;
   }
   if (kind == astDoWhileStatement) {
@@ -3895,46 +3993,7 @@ void feLowerStatement(AstStatement statement) {
     return;
   }
   if (kind == astWhileStatement || kind == astForStatement) {
-    if (kind == astForStatement) feLowerStatement(statement.children[0]);
-    feFlow = flowSplit(feFlow);
-    feLoopFlow(statement);
-    var repeat = ir.length;
-    var exit = <int>[];
-    var exitFlow = flowCopy(feFlow);
-    flowUnreachable(exitFlow);
-    if (statement.condition.length != 0)
-      exitFlow = feConditionJumps(statement.condition[0], false, exit);
-    var breakBase = feBreaks.length;
-    var continueBase = feContinues.length;
-    feLoopBreaks.add(breakBase);
-    feLoopContinues.add(continueBase);
-    if (kind == astForStatement)
-      feLowerStatement(statement.children[1]);
-    else
-      feLowerStatement(statement.children[0]);
-    var update = ir.length;
-    feContinueFlow(statement.token, continueBase);
-    if (kind == astForStatement) {
-      for (var variable in statement.children[0].variables) {
-        if (feCellBinding(variable.binding)) {
-          feLoadLocalStorage(variable.binding);
-          feAllocateCell(feBindingTypes[variable.binding]);
-          feOperand(opStoreLocal, feBindingSlots[variable.binding]);
-        }
-      }
-    }
-    var updateIndex = 0;
-    while (updateIndex < statement.update.length) {
-      feLowerExpression(statement.update[updateIndex]);
-      feEmit(opPop);
-      updateIndex++;
-    }
-    feOperand(opJump, repeat);
-    fePatchJumps(exit, ir.length);
-    feLabelRepeat(statement.token, update);
-    feFlow = exitFlow;
-    feLoopEnd(breakBase, continueBase, ir.length, update);
-    feFlow = flowUnsplit(feFlow);
+    feLowerWhileFor(statement, feLowerStatement);
     return;
   }
   if (kind == astBreakStatement) {
@@ -3962,10 +4021,11 @@ void feLowerStatement(AstStatement statement) {
   feAstError(statement.token, 'unsupported statement');
 }
 
-void fePrepareGlobals(int count) {
+void fePrepareGlobals(int count, List<FunctionBindings> bindings) {
   var i = 0;
   while (i < count) {
     var initializer = GlobalInitializer(
+      bindings[i],
       <int>[],
       <int>[],
       <int>[],
@@ -4014,49 +4074,59 @@ void fePrepareGlobals(int count) {
   }
 }
 
+int feLowerInitializer(
+  AstVariable syntax,
+  FunctionBindings bindings,
+  int context,
+) {
+  var previousBindings = feBindings;
+  var previousTypes = feBindingTypes;
+  var previousSlots = feBindingSlots;
+  var previousFlow = feFlow;
+  var previousConstants = feConstants.locals;
+  var previousConstantTypes = feConstants.localTypes;
+  feBindings = bindings;
+  feBindingTypes = List<int>.filled(bindings.variables.length, -1);
+  feBindingSlots = List<int>.filled(bindings.variables.length, -1);
+  feConstants.locals = <ConstantValue>[];
+  feConstants.localTypes = <int>[];
+  feFlow = flowCreate(
+    bindings.variables.length,
+    sourceVersionAtLeast(feSources, feTokens[syntax.token].source, 3, 9),
+  );
+  var type = context;
+  if (syntax.initializer.isEmpty) {
+    if (type < 0) type = tDynamic;
+    feInteger(0, type);
+  } else {
+    feAt = syntax.initializer[0].token;
+    type = feLowerInContext(syntax.initializer[0], context);
+  }
+  feBindings = previousBindings;
+  feBindingTypes = previousTypes;
+  feBindingSlots = previousSlots;
+  feFlow = previousFlow;
+  feConstants.locals = previousConstants;
+  feConstants.localTypes = previousConstantTypes;
+  return type;
+}
+
 void feInferGlobal(int global) {
   var initializer = feGlobalInitializers[global];
   if (initializer.code.isNotEmpty) return;
   if (initializer.result == -1)
     feError('cannot infer global type ' + globalNames[global]);
   initializer.result = -1;
-  var previousCode = ir;
-  var previousTypes = irTypes;
-  var previousLocals = feSlotTypes;
-  var previousNext = feNextLocal;
-  var previousToken = feAt;
-  var previousGlobal = feInitializingGlobal;
-  var previousFlow = feFlow;
-  var previousScope = feConstants.lexicalClass;
-  var previousBindings = feBindings;
-  var previousConstants = feConstants.locals;
-  var previousConstantTypes = feConstants.localTypes;
+  var previous = FeFunctionState();
   feConstants.lexicalClass = feGlobalOwners[global];
-  feBindings = FunctionBindings(<LocalVariable>[], -1);
-  feConstants.locals = <ConstantValue>[];
   ir = <int>[];
   irTypes = <int>[];
   feSlotTypes = <int>[];
   feNextLocal = 0;
   feInitializingGlobal = global;
-  feFlow = flowCreate(
-    0,
-    sourceVersionAtLeast(
-      feSources,
-      feTokens[feGlobalNodes[global].token].source,
-      3,
-      9,
-    ),
-  );
   var type = globalTypes[global];
   var syntax = feGlobalNodes[global];
-  if (syntax.initializer.length == 0) {
-    if (type < 0) type = tDynamic;
-    feInteger(0, type);
-  } else {
-    feAt = syntax.initializer[0].token;
-    type = feLowerInContext(syntax.initializer[0], type);
-  }
+  type = feLowerInitializer(syntax, initializer.bindings, type);
   if (globalTypes[global] < 0) {
     if (type == tNull) type = feConvertValue(type, tDynamic, syntax.token);
     globalTypes[global] = type;
@@ -4071,17 +4141,7 @@ void feInferGlobal(int global) {
   setter.result = initializer.result;
   setter.parameterTypes[0] = initializer.result;
   setter.localTypes[0] = initializer.result;
-  ir = previousCode;
-  irTypes = previousTypes;
-  feSlotTypes = previousLocals;
-  feNextLocal = previousNext;
-  feAt = previousToken;
-  feInitializingGlobal = previousGlobal;
-  feFlow = previousFlow;
-  feConstants.lexicalClass = previousScope;
-  feBindings = previousBindings;
-  feConstants.locals = previousConstants;
-  feConstants.localTypes = previousConstantTypes;
+  previous.restore();
 }
 
 void feAppendInitializer(GlobalInitializer initializer) {
@@ -4255,14 +4315,17 @@ void feBeginFunction(int f, FunctionBindings bindings) {
   }
 }
 
-void feBindInitializerFunctions(AstVariable syntax, int owner) {
-  var i = 0;
-  while (i < syntax.initializer.length) {
-    bindExpressionFunctions(feSources, syntax.initializer[i], feLocalFunctions);
-    i++;
-  }
+FunctionBindings feBindInitializer(AstVariable syntax, int owner) {
+  var bindings = FunctionBindings(<LocalVariable>[], -1);
+  if (syntax.initializer.isNotEmpty)
+    bindings = bindExpressionLocals(
+      feSources,
+      syntax.initializer[0],
+      feLocalFunctions,
+    );
   while (feLocalOwners.length < feLocalFunctions.length)
     feLocalOwners.add(owner);
+  return bindings;
 }
 
 void parseSource(SourceProgram source) {
@@ -4286,6 +4349,7 @@ void parseSource(SourceProgram source) {
   feMemberFunctions.clear();
   feClassFieldStarts.clear();
   feFieldNodes.clear();
+  feFieldBindings.clear();
   feClassFieldCounts.clear();
   feClassConstructors.clear();
   feConstructorPlans.clear();
@@ -4453,11 +4517,11 @@ void parseSource(SourceProgram source) {
       );
     }
   }
+  var initializerBindings = <FunctionBindings>[];
   var initializer = 0;
   while (initializer < feGlobalNodes.length) {
-    feBindInitializerFunctions(
-      feGlobalNodes[initializer],
-      feGlobalOwners[initializer],
+    initializerBindings.add(
+      feBindInitializer(feGlobalNodes[initializer], feGlobalOwners[initializer]),
     );
     initializer++;
   }
@@ -4466,7 +4530,7 @@ void parseSource(SourceProgram source) {
     var field = feClassFieldStarts[owner];
     var end = field + feClassFieldCounts[owner];
     while (field < end) {
-      feBindInitializerFunctions(feFieldNodes[field], owner);
+      feFieldBindings.add(feBindInitializer(feFieldNodes[field], owner));
       field++;
     }
     owner++;
@@ -4496,7 +4560,7 @@ void parseSource(SourceProgram source) {
   sourceFunctions = functions.length;
   feResolveDefaults(feLocalStart);
   var sourceGlobals = globalNames.length;
-  fePrepareGlobals(sourceGlobals);
+  fePrepareGlobals(sourceGlobals, initializerBindings);
   var global = 0;
   while (global < sourceGlobals) {
     if (feGlobalInitializers[global].getter >= 0) feInferGlobal(global);
@@ -4510,19 +4574,10 @@ void parseSource(SourceProgram source) {
     if (feGlobalInitializers[i].getter < 0 &&
         feGlobalNodes[i].modifier != 'const') {
       feInitializingGlobal = i;
-      var variable = feGlobalNodes[i];
-      feFlow.soundFlow = sourceVersionAtLeast(
-        feSources,
-        feTokens[variable.token].source,
-        3,
-        9,
+      var type = feLowerInitializer(
+        feGlobalNodes[i], feGlobalInitializers[i].bindings, globalTypes[i],
       );
-      if (variable.initializer.length == 0) {
-        feInteger(0, globalTypes[i]);
-      } else {
-        var type = feLowerInContext(variable.initializer[0], globalTypes[i]);
-        if (globalTypes[i] < 0) globalTypes[i] = type;
-      }
+      if (globalTypes[i] < 0) globalTypes[i] = type;
       feOperand(opStoreGlobal, i);
     }
     i++;
@@ -4729,19 +4784,78 @@ void feGenerateEntry() {
   functions[entryFunction].localTypes = feSlotTypes;
 }
 
-void feLowerForIn(AstStatement statement) {
-  var declaration = statement.variables[0];
-  feCheckMetadata(declaration.metadata, feLexicalOwner(feFunction));
+void feLowerWhileFor(
+  AstStatement statement,
+  void Function(AstStatement) lowerBody,
+) {
+  var kind = statement.kind;
+  if (kind == astForStatement) feLowerStatement(statement.children[0]);
+  feFlow = flowSplit(feFlow);
+  feLoopFlow(statement);
+  var repeat = ir.length;
+  var exit = <int>[];
+  var exitFlow = flowCopy(feFlow);
+  flowUnreachable(exitFlow);
+  if (statement.condition.length != 0)
+    exitFlow = feConditionJumps(statement.condition[0], false, exit);
+  var breakBase = feBreaks.length;
+  var continueBase = feContinues.length;
+  feLoopBreaks.add(breakBase);
+  feLoopContinues.add(continueBase);
+  if (kind == astForStatement)
+    lowerBody(statement.children[1]);
+  else
+    lowerBody(statement.children[0]);
+  var update = ir.length;
+  feContinueFlow(statement.token, continueBase);
+  if (kind == astForStatement) {
+    for (var variable in statement.children[0].variables) {
+      if (feCellBinding(variable.binding)) {
+        feLoadLocalStorage(variable.binding);
+        feAllocateCell(feBindingTypes[variable.binding]);
+        feOperand(opStoreLocal, feBindingSlots[variable.binding]);
+      }
+    }
+  }
+  var updateIndex = 0;
+  while (updateIndex < statement.update.length) {
+    feLowerExpression(statement.update[updateIndex]);
+    feEmit(opPop);
+    updateIndex++;
+  }
+  feOperand(opJump, repeat);
+  fePatchJumps(exit, ir.length);
+  feLabelRepeat(statement.token, update);
+  feFlow = exitFlow;
+  feLoopEnd(breakBase, continueBase, ir.length, update);
+  feFlow = flowUnsplit(feFlow);
+}
+
+void feLowerForIn(
+  AstStatement statement,
+  void Function(AstStatement) lowerBody,
+) {
+  AstVariable? declaration;
+  if (statement.variables.isNotEmpty) declaration = statement.variables[0];
   var context = -1;
-  if (declaration.type.name != '')
-    context = listType(resolveType(feSymbols, declaration.type));
+  if (declaration != null) {
+    feCheckMetadata(declaration.metadata, feLexicalOwner(feFunction));
+    if (declaration.type.name != '')
+      context = listType(resolveType(feSymbols, declaration.type));
+  }
   var iterableType = feNonNullableValue(
     feLowerHint(statement.expressions[0], context),
     statement.expressions[0].token,
   );
-  if (!typeIsList(iterableType)) {
-    feAstError(statement.token, 'for-in currently requires a List');
-  }
+  var element = typingIterableElement(iterableType, false);
+  if (element < 0)
+    feAstError(statement.token, 'for-in requires a compatible iterable');
+  if (!typeIsList(iterableType))
+    iterableType = feConvertValue(
+      iterableType,
+      listType(element),
+      statement.token,
+    );
   var iterable = feTemp(iterableType);
   feOperand(opStoreLocal, iterable);
   var length = feTemp(tInt);
@@ -4751,22 +4865,24 @@ void feLowerForIn(AstStatement statement) {
   var index = feTemp(tInt);
   feOperand(opInt, 0);
   feOperand(opStoreLocal, index);
-  var element = typeArgument(iterableType);
   var type = element;
   if (context >= 0) type = typeArgument(context);
   if (!typingAssignable(element, type)) {
     feAstError(
-      declaration.token,
+      statement.token,
       'for-in variable type must match the List element type',
     );
   }
-  var cell = feCellBinding(declaration.binding);
-  var variable = feTemp(cell ? tObject : type);
-  feBindLocal(declaration.binding, type, variable);
+  var cell = declaration != null && feCellBinding(declaration.binding);
+  var variable = -1;
+  if (declaration != null) {
+    variable = feTemp(cell ? tObject : type);
+    feBindLocal(declaration.binding, type, variable);
+  }
   feFlow = flowSplit(feFlow);
   feLoopFlow(statement);
   var exitFlow = flowCopy(feFlow);
-  flowDeclare(feFlow, declaration.binding, type, true);
+  if (declaration != null) flowDeclare(feFlow, declaration.binding, type, true);
   var repeat = ir.length;
   feOperand(opLoadLocal, iterable);
   feBuiltin(bListLength, 1);
@@ -4783,13 +4899,24 @@ void feLowerForIn(AstStatement statement) {
   feOperand(opLoadLocal, iterable);
   feOperand(opLoadLocal, index);
   feBuiltinTyped(bListGet, 2, type);
-  if (cell) feAllocateCell(type);
-  feOperand(opStoreLocal, variable);
+  if (declaration != null) {
+    if (cell) feAllocateCell(type);
+    feOperand(opStoreLocal, variable);
+  } else {
+    var value = feTemp(type);
+    feOperand(opStoreLocal, value);
+    var target = feLowerLvalue(statement.expressions[1], false);
+    feOperand(opLoadLocal, value);
+    feConvertValue(type, target.type, statement.token);
+    feWriteLvalue(target, statement.token);
+    feWriteFlow(target, type);
+    feEmit(opPop);
+  }
   var breakBase = feBreaks.length;
   var continueBase = feContinues.length;
   feLoopBreaks.add(breakBase);
   feLoopContinues.add(continueBase);
-  feLowerStatement(statement.children[0]);
+  lowerBody(statement.children[0]);
   var update = ir.length;
   feContinueFlow(statement.token, continueBase);
   feOperand(opLoadLocal, index);

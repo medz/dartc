@@ -851,6 +851,11 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "void main(){dynamic values=<Object>[1,'bad'];print('before');print([for(int i in values) i]);}",
+      "int tail(){print('tail');return 3;}void main(){dynamic values=<Object>[1,'bad'];print('before');print(<int>[...values,tail()]);}",
+      "void main(){dynamic values=3;print('before');print([...values]);}",
+      "void main(){dynamic values=null;print('before');print([...values]);}",
+      "void main(){var values=[1,2];print('before');print([for(var i in values) (values..clear()).length]);}",
       'class C{int value=1;}C? missing(){print("receiver");return null;}void main(){print("before");print((missing()?.value)!);}',
       'class C{C? child;}void main(){print("before");print(C()?.child!.child);}',
 
@@ -1524,6 +1529,23 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      "void unused(){print(<int>[if(false) 'wrong']);}void main(){}",
+      "void unused(){print([if(1) 2]);}void main(){}",
+      "void unused(){print([for(var i in [1]) if(false) missing]);}void main(){}",
+      "void main(){var values=[for(var i in [1]) i];print(i);print(values);}",
+      "void main(){final int i;print([for(i in [1,2]) i]);}",
+      "void main(){final i=0;print([for(i in [1]) i]);}",
+      "List<String>? f()=>null;void main(){print(<int>[...?f()]);}",
+      "List<int>? f()=>null;void main(){print([...f()]);}",
+      "void main(){print([...1]);}",
+      "void f(){}void main(){print([...f()]);}",
+      "const list=[if(false) ...<int>[1][0]];void main(){}",
+      "const list=[if(false) for(var i=0;i<1;i++) i];void main(){}",
+      "int f()=>1;const list=[if(false) f()];void main(){}",
+      "const list=<int>[if(false) 'wrong'];void main(){}",
+      "const dynamic values=<Object>[1,'wrong'];const list=<int>[...values];void main(){}",
+      "void main(){List<int>? a=null;print([... ? a]);}",
+      "void main(){final int value;print([if(false) value=1]);print(value);}",
       'class C{int value=1;}void main(){int value=C()?.value;print(value);}',
       'class C{int value=1;}C? maybe()=>C();void main(){(maybe()?.value)=2;}',
       'class C{int value=1;}C? maybe()=>null;void main(){print(-maybe()?.value);}',

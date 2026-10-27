@@ -607,24 +607,13 @@ ConstantValue _constantList(
   }
   var elements = <ConstantValue>[];
   var inferred = -1;
-  var i = 0;
   var allowParameters = context.allowInitializerParameters;
   context.allowInitializerParameters = false;
-  while (i < expression.children.length) {
-    var child = expression.children[i];
-    var value = _evaluateConstant(context, child, active, element, true);
-    if (element >= 0 &&
-        (!typingAssignable(value.type, element) ||
-            active && !typeIsSubtype(constantValueType(value), element))) {
-      return _constantError(
-        context,
-        child.token,
-        'invalid constant List element',
-      );
-    }
-    inferred = joinTypes(inferred, value.type);
-    elements.add(value);
-    i++;
+  for (var child in expression.children) {
+    inferred = joinTypes(
+      inferred,
+      _constantListElement(context, child, active, element, elements),
+    );
   }
   context.allowInitializerParameters = allowParameters;
   if (element < 0) element = inferred;
@@ -634,6 +623,94 @@ ConstantValue _constantList(
   result.elements = elements;
   if (!active) return result;
   return _constantAggregate(context, result);
+}
+
+int _constantListElement(
+  ConstantContext context,
+  AstExpression expression,
+  bool active,
+  int expected,
+  List<ConstantValue> elements,
+) {
+  if (expression.kind == astForElement)
+    _constantError(context, expression.token, 'for element is not constant');
+  if (expression.kind == astIfElement) {
+    var condition = _evaluateConstant(
+      context,
+      expression.children[0],
+      active,
+      tBool,
+      true,
+    );
+    if (!typingCondition(condition.type) || active && condition.kind != tBool)
+      _constantError(
+        context,
+        expression.token,
+        'collection condition requires bool',
+      );
+    var truth = condition.integer != 0;
+    var type = _constantListElement(
+      context,
+      expression.children[1],
+      active && truth,
+      expected,
+      elements,
+    );
+    if (expression.children.length == 3)
+      type = joinTypes(
+        type,
+        _constantListElement(
+          context,
+          expression.children[2],
+          active && !truth,
+          expected,
+          elements,
+        ),
+      );
+    return type;
+  }
+  if (expression.kind == astSpreadElement) {
+    var hint = expected < 0 ? -1 : listType(expected);
+    var value = _evaluateConstant(
+      context,
+      expression.children[0],
+      active,
+      hint,
+      true,
+    );
+    var nullAware = expression.text == '...?';
+    var type = typingIterableElement(value.type, nullAware);
+    if (type < 0 || expected >= 0 && !typingAssignable(type, expected))
+      _constantError(
+        context,
+        expression.token,
+        'invalid constant spread element type',
+      );
+    if (!active || nullAware && value.kind == tNull) return type;
+    if (!typeIsList(value.kind))
+      _constantError(
+        context,
+        expression.token,
+        'constant spread requires a constant collection',
+      );
+    for (var element in value.elements) {
+      if (expected >= 0 && !typeIsSubtype(constantValueType(element), expected))
+        _constantError(
+          context,
+          expression.token,
+          'invalid constant List element',
+        );
+      elements.add(element);
+    }
+    return type;
+  }
+  var value = _evaluateConstant(context, expression, active, expected, true);
+  if (expected >= 0 &&
+      (!typingAssignable(value.type, expected) ||
+          active && !typeIsSubtype(constantValueType(value), expected)))
+    _constantError(context, expression.token, 'invalid constant List element');
+  if (active) elements.add(value);
+  return value.type;
 }
 
 ConstantValue _constantAggregate(ConstantContext context, ConstantValue value) {

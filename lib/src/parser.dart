@@ -331,11 +331,164 @@ AstExpression parserList(Parser parser, List<AstType> arguments, int token) {
   parserExpect(parser, '[');
   List<AstExpression> children = <AstExpression>[];
   while (!parserIs(parser, ']')) {
-    children.add(parseExpression(parser));
+    children.add(parserCollectionElement(parser));
     if (!parserTake(parser, ',')) break;
   }
   parserExpect(parser, ']');
   return AstExpression(astList, '', children, arguments, token);
+}
+
+AstExpression parserCollectionElement(Parser parser) {
+  var token = parser.position;
+  if (parserTake(parser, '...') || parserTake(parser, '...?')) {
+    var operator = parser.tokens[token].text;
+    return AstExpression(
+      astSpreadElement,
+      operator,
+      <AstExpression>[parseExpression(parser)],
+      const <AstType>[],
+      token,
+    );
+  }
+  if (parserTake(parser, 'if')) {
+    parserExpect(parser, '(');
+    var condition = parseExpression(parser);
+    parserExpect(parser, ')');
+    var children = <AstExpression>[condition, parserCollectionElement(parser)];
+    if (parserTake(parser, 'else'))
+      children.add(parserCollectionElement(parser));
+    return AstExpression(astIfElement, '', children, const <AstType>[], token);
+  }
+  if (parserTake(parser, 'for')) {
+    var result = AstExpression(
+      astForElement,
+      '',
+      const <AstExpression>[],
+      const <AstType>[],
+      token,
+    );
+    result.loop = parserFor(parser, token, true);
+    return result;
+  }
+  return parseExpression(parser);
+}
+
+AstStatement parserForBody(Parser parser, bool collection) {
+  if (!collection) return parseStatement(parser);
+  var token = parser.position;
+  return AstStatement(
+    astExpressionStatement,
+    <AstExpression>[parserCollectionElement(parser)],
+    const <AstStatement>[],
+    const <AstVariable>[],
+    const <AstExpression>[],
+    const <AstExpression>[],
+    token,
+  );
+}
+
+AstStatement parserFor(Parser parser, int token, bool collection) {
+  parserExpect(parser, '(');
+  var initialToken = parser.position;
+  var initial = parserEmptyStatement(initialToken);
+  if (!parserTake(parser, ';')) {
+    var metadata = parserMetadata(parser);
+    initialToken = parser.position;
+    if (metadata.isNotEmpty && !parserVariableStatement(parser))
+      parserError(parser, 'metadata must precede a for declaration');
+    if (parserVariableStatement(parser)) {
+      var modifier = parserModifier(parser);
+      var type = parserDeclarationType(parser, modifier);
+      var name = parserName(parser);
+      var variable = parserVariableInitializer(
+        parser,
+        type,
+        name,
+        modifier,
+        initialToken,
+      );
+      variable.metadata = metadata;
+      if (parserTake(parser, 'in')) {
+        if (modifier == 'const' || variable.initializer.isNotEmpty) {
+          parserError(
+            parser,
+            'for-in requires a declaration without an initializer',
+          );
+        }
+        var iterable = parseExpression(parser);
+        parserExpect(parser, ')');
+        return AstStatement(
+          astForInStatement,
+          <AstExpression>[iterable],
+          <AstStatement>[parserForBody(parser, collection)],
+          <AstVariable>[variable],
+          <AstExpression>[],
+          <AstExpression>[],
+          token,
+        );
+      }
+      var variables = parserVariableTail(parser, variable);
+      parserExpect(parser, ';');
+      initial = AstStatement(
+        astVariableStatement,
+        <AstExpression>[],
+        <AstStatement>[],
+        variables,
+        <AstExpression>[],
+        <AstExpression>[],
+        initialToken,
+      );
+    } else {
+      var value = parseExpression(parser);
+      if (parserTake(parser, 'in')) {
+        if (value.kind != astName)
+          parserError(parser, 'for-in target requires an identifier');
+        var iterable = parseExpression(parser);
+        parserExpect(parser, ')');
+        return AstStatement(
+          astForInStatement,
+          <AstExpression>[iterable, value],
+          <AstStatement>[parserForBody(parser, collection)],
+          const <AstVariable>[],
+          const <AstExpression>[],
+          const <AstExpression>[],
+          token,
+        );
+      }
+      parserExpect(parser, ';');
+      initial = AstStatement(
+        astExpressionStatement,
+        <AstExpression>[value],
+        <AstStatement>[],
+        <AstVariable>[],
+        <AstExpression>[],
+        <AstExpression>[],
+        initialToken,
+      );
+    }
+  }
+  List<AstExpression> condition = <AstExpression>[];
+  if (!parserIs(parser, ';')) condition.add(parseExpression(parser));
+  parserExpect(parser, ';');
+  List<AstExpression> update = <AstExpression>[];
+  if (!parserIs(parser, ')')) {
+    update.add(parseExpression(parser));
+    while (parserTake(parser, ',')) update.add(parseExpression(parser));
+  }
+  parserExpect(parser, ')');
+  List<AstStatement> children = <AstStatement>[
+    initial,
+    parserForBody(parser, collection),
+  ];
+  return AstStatement(
+    astForStatement,
+    <AstExpression>[],
+    children,
+    <AstVariable>[],
+    condition,
+    update,
+    token,
+  );
 }
 
 bool parserFunctionAhead(Parser parser, int position) {
@@ -1867,94 +2020,7 @@ AstStatement parseStatement(Parser parser) {
       token,
     );
   }
-  if (parserTake(parser, 'for')) {
-    parserExpect(parser, '(');
-    var initialToken = parser.position;
-    var initial = parserEmptyStatement(initialToken);
-    if (!parserTake(parser, ';')) {
-      var metadata = parserMetadata(parser);
-      initialToken = parser.position;
-      if (metadata.isNotEmpty && !parserVariableStatement(parser))
-        parserError(parser, 'metadata must precede a for declaration');
-      if (parserVariableStatement(parser)) {
-        var modifier = parserModifier(parser);
-        var type = parserDeclarationType(parser, modifier);
-        var name = parserName(parser);
-        var variable = parserVariableInitializer(
-          parser,
-          type,
-          name,
-          modifier,
-          initialToken,
-        );
-        variable.metadata = metadata;
-        if (parserTake(parser, 'in')) {
-          if (modifier == 'const' || variable.initializer.isNotEmpty) {
-            parserError(
-              parser,
-              'for-in requires a declaration without an initializer',
-            );
-          }
-          var iterable = parseExpression(parser);
-          parserExpect(parser, ')');
-          return AstStatement(
-            astForInStatement,
-            <AstExpression>[iterable],
-            <AstStatement>[parseStatement(parser)],
-            <AstVariable>[variable],
-            <AstExpression>[],
-            <AstExpression>[],
-            token,
-          );
-        }
-        var variables = parserVariableTail(parser, variable);
-        parserExpect(parser, ';');
-        initial = AstStatement(
-          astVariableStatement,
-          <AstExpression>[],
-          <AstStatement>[],
-          variables,
-          <AstExpression>[],
-          <AstExpression>[],
-          initialToken,
-        );
-      } else {
-        var value = parseExpression(parser);
-        parserExpect(parser, ';');
-        initial = AstStatement(
-          astExpressionStatement,
-          <AstExpression>[value],
-          <AstStatement>[],
-          <AstVariable>[],
-          <AstExpression>[],
-          <AstExpression>[],
-          initialToken,
-        );
-      }
-    }
-    List<AstExpression> condition = <AstExpression>[];
-    if (!parserIs(parser, ';')) condition.add(parseExpression(parser));
-    parserExpect(parser, ';');
-    List<AstExpression> update = <AstExpression>[];
-    if (!parserIs(parser, ')')) {
-      update.add(parseExpression(parser));
-      while (parserTake(parser, ',')) update.add(parseExpression(parser));
-    }
-    parserExpect(parser, ')');
-    List<AstStatement> children = <AstStatement>[
-      initial,
-      parseStatement(parser),
-    ];
-    return AstStatement(
-      astForStatement,
-      <AstExpression>[],
-      children,
-      <AstVariable>[],
-      condition,
-      update,
-      token,
-    );
-  }
+  if (parserTake(parser, 'for')) return parserFor(parser, token, false);
   if (parserTake(parser, 'break')) {
     var labels = parserJumpLabel(parser);
     parserExpect(parser, ';');

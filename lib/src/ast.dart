@@ -20,6 +20,9 @@ const int astFunctionExpression = 19;
 const int astCascade = 20;
 const int astImplicitReceiver = 21;
 const int astNullAware = 22;
+const int astSpreadElement = 23;
+const int astIfElement = 24;
+const int astForElement = 25;
 
 const String astCallIdentifier = 'identifier';
 const String astCallSelector = 'selector';
@@ -44,6 +47,7 @@ class AstFunctionType {
 
 class AstExpression {
   AstFunction? function;
+  AstStatement? loop;
   int kind;
   String text;
   List<AstExpression> children;

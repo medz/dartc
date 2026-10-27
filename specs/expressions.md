@@ -16,7 +16,8 @@
 | §17.4 null、§17.6 布尔 | 部分实现 | 有字面量及静态类型，动态布尔消费有检查；`Object`、`bool?` 不能未经转换或提升用作条件。 | [typing.dart](../lib/src/typing.dart)：`typingCondition`；[frontend.dart](../lib/src/frontend.dart)：`feBooleanValue`；[values.dart](../test/fixtures/values.dart)：`valueContexts`、`flowBranches`。 |
 | [§17.5 数字][numbers] | 部分实现 | 支持有符号 64 位整数及 `num` 身份；十进制负边界只允许[直接负字面量][negative-literals]，括号内字面量先独立校验。非负十六进制可用完整 64 位补码，直接负十六进制仍受有符号范围约束；普通表达式和常量同用范围规则。浮点字面量、`double` 与浮点执行未实现。 | [literals.dart](../lib/src/frontend/literals.dart)：`isNegatedIntegerLiteral`、`decodeIntegerLiteral`；[values.dart](../test/fixtures/values.dart)：`shiftContexts`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
 | §17.7 字符串与插值 | 部分实现 | 字面量、拼接、插值和 UTF-16 内容可用；完整词法变体与全部 String API 尚未逐项核验。 | [parser.dart](../lib/src/parser.dart)：`parserPrimary`；[frontend.dart](../lib/src/frontend.dart)：`feLowerInterpolation`；[values.dart](../test/fixtures/values.dart)：`stringBoundaries`、`constantLists`。 |
-| §17.9 集合字面量 | 部分实现 | 可变与 const List，显式或上下文元素类型、嵌套与空列表；const 按完整实际 `List<T>` 及元素规范化，跨库和嵌套共享身份。Set、Map、展开及集合 if/for 未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerList`；[constants.dart](../lib/src/constants.dart)：`_constantList`；[values.dart](../test/fixtures/values.dart)：`constantLists`；[behavior_test.dart](../test/behavior_test.dart)：`libraries`。 |
+| §17.9 集合字面量 | 部分实现 | 可变与 const List，显式或上下文元素类型、嵌套与空列表；const 按完整实际 `List<T>` 及元素规范化，跨库和嵌套共享身份。支持嵌套的 if/else、for、for-in 及普通/空感知展开，具体规则见下一条；Set、Map、空感知单元素、模式与异步集合元素未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerList`；[constants.dart](../lib/src/constants.dart)：`_constantList`；[values.dart](../test/fixtures/values.dart)：`constantLists`；[behavior_test.dart](../test/behavior_test.dart)：`libraries`。 |
+| [§17.9 集合元素、推断与求值][collection-elements] | 部分实现 | List 的条件与循环元素按源码顺序求值，共用语句的作用域、流分析和逐轮捕获规则；局部、顶层、静态/实例字段及构造器初始化中的循环均保留绑定。`...` 与 `...?` 支持 List，空感知展开仅跳过 null 集合，保留内部 null；静态元素类型参与上下文与 LUB 推断，dynamic 源按运行时元素逐个检查。const 支持条件/展开及规范化身份；未执行元素仍检查类型和潜在常量资格，for 元素不是潜在常量。一般 Iterable/Iterator、Set/Map 及完整推断仍缺。 | [parser.dart](../lib/src/parser.dart)：`parserCollectionElement`、`parserFor`；[binding.dart](../lib/src/binding.dart)：`bindingExpression`；[frontend.dart](../lib/src/frontend.dart)：`feLowerListElement`、`feLowerListSpread`、`feLowerInitializer`；[constants.dart](../lib/src/constants.dart)：`_constantListElement`；[values.dart](../test/fixtures/values.dart)：`collectionValues`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`、`failingValues`。 |
 
 ## 调用、查找与访问
 
@@ -85,6 +86,8 @@ SDK 3.13.5 对 `??=` 有两处 analyzer/CFE 差异待核对：`void` getter 作�
 
 空断言选择器遵循固定草案的 `selector*`：允许重复 `!` 后继续成员、索引或调用。SDK 3.13.5 的[解析路径][sdk-bang-parser]会拒绝 `value!!.member`、`value!![0]`、`value!!(1)`，而 `(value!!)(1)` 可通过；dartc 在此采用规范文法，与 SDK 的诊断不完全一致。
 
+SDK 3.13.7 CFE 接受 `const values = [if (false) <int>[1][9] else 2]`，analyzer 将被跳过的索引报告为 `non_constant_list_element`。dartc 按 CFE 检查该分支的潜在常量资格与索引类型，不执行取值或范围检查；`collectionValues` 保留该差异的行为用例与逐行 analyzer 忽略。
+
 SDK 3.13.7 的 [`?[]` 判定][sdk-null-index-parser]优先选择可解析的条件表达式；`true ? (values?[0]) : 0` 需要内层括号，否则该写法被拒绝。类型转换、可空类型和泛型实参不得误作条件分隔符。普通级联在此 SDK 中终止空短路传播：`receiver()?.child()..field = 1` 的级联目标仍可空，不能按非空 child 检查；dartc 遵循该行为，与[空安全补充][null-aware]中级联可继续传播的描述有差异。验证入口为 `nullAwareValues` 与 `rejected`。
 
 SDK 3.13.7 CFE 接受 `const dynamic value = null; const result = value?[true]`、`const result = null?.missing` 和 `const result = null?[0]`，analyzer 拒绝这些常量。dartc 采用 CFE 的空短路结果，同时拒绝被跳过的非常量函数调用、赋值和已知错误索引类型；`nullAwareValues` 保留对应 analyzer 诊断的逐行忽略，`rejected` 检查静态义务。
@@ -112,3 +115,5 @@ SDK 3.13.7 CFE 接受 `const dynamic value = null; const result = value?[true]`�
 
 [null-aware]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md
 [sdk-null-index-parser]: https://github.com/dart-lang/sdk/blob/3.13.7/pkg/_fe_analyzer_shared/lib/src/parser/parser_impl.dart#L6694-L6719
+
+[collection-elements]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex

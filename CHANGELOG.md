@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Support List collection if/else, for and for-in elements, ordinary/null-aware spreads, and constant conditional/spread evaluation.
+
 - Support null-aware member/index chains, preserving single receiver evaluation, skipped side effects, assignment flow and constant-expression checks.
 
 - Support ordinary and null-shorting cascades with ordered member/index operations and contextual receiver types.

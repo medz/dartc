@@ -2555,7 +2555,140 @@ void nullAwareValues() {
   print(initialized);
 }
 
+int collectionTrace = 0;
+int collectionStep(int n) {
+  collectionTrace = collectionTrace * 10 + n;
+  return n;
+}
+
+bool collectionCondition(int n, bool b) {
+  collectionStep(n);
+  return b;
+}
+
+List<int> collectionSequence(int n) {
+  collectionStep(n);
+  return <int>[n, n + 1];
+}
+
+List<int>? collectionMaybe(bool b) => b ? <int>[8, 9] : null;
+var collectionGlobals = [for (var i = 0; i < 3; i++) () => i];
+
+class CollectionFields {
+  List<int> field = [for (var i = 1; i <= 2; i++) i * 2];
+  List<int Function()> callbacks = [
+    for (var i in [3, 4]) () => i,
+  ];
+  List<int> initialized;
+  CollectionFields(int n) : initialized = [for (var i = 0; i < n; i++) i];
+  CollectionFields.named()
+    : initialized = [
+        for (var i in [5, 6]) i,
+      ];
+  static var values = [
+    for (var i in [1, 2]) i + 10,
+  ];
+}
+
+void collectionValues() {
+  print([
+    collectionStep(1),
+    if (collectionCondition(2, true)) collectionStep(3) else collectionStep(4),
+    ...collectionSequence(5),
+    collectionStep(7),
+  ]);
+  print(collectionTrace);
+  // ignore: dead_code
+  print([if (false) 1]);
+  print([
+    if (true)
+      // ignore: dead_code
+      if (false) 1 else 2,
+  ]);
+  print([
+    for (var i = 0; i < 4; i++)
+      if (i % 2 == 0) i,
+  ]);
+  print([
+    for (var i in [1, 2])
+      for (var j in [3, 4]) i * 10 + j,
+  ]);
+  print([
+    ...[1, 2],
+    ...?collectionMaybe(false),
+    ...?collectionMaybe(true),
+  ]);
+  var callbacks = [for (var i = 0; i < 3; i++) () => i];
+  print(callbacks[0]());
+  print(callbacks[2]());
+  var closures = [
+    for (var i in [4, 5, 6]) () => i,
+  ];
+  print(closures[0]());
+  print(closures[2]());
+  print(collectionGlobals[0]());
+  print(collectionGlobals[2]());
+  var c = CollectionFields(3);
+  print(c.field);
+  print(c.initialized);
+  print(c.callbacks[0]());
+  print(c.callbacks[1]());
+  print(CollectionFields.named().field);
+  print(CollectionFields.named().initialized);
+  print(CollectionFields.values);
+  var i = 0;
+  print([
+    for (i in [2, 3]) i,
+  ]);
+  print(i);
+  for (i in [4, 5]) print(i);
+  print(i);
+  Object? value = 1;
+  print([if (value is int) value + 1]);
+  final int assigned;
+  print([if (collectionCondition(1, true)) assigned = 2 else assigned = 3]);
+  print(assigned);
+  dynamic dyn = <Object>[1, 2];
+  print([for (int value in dyn) value + 1]);
+  var reused = 0;
+  print([for (reused in dyn) reused]);
+  print(<int>[...dyn]);
+  // ignore: unnecessary_type_check
+  print([...dyn] is List<dynamic>);
+  // ignore: dead_code
+  var mixed = [if (false) 1 else 's'];
+  // ignore: unnecessary_type_check
+  print(mixed is List<Object>);
+  print(mixed is List<String>);
+  var nested = <List<int>>[
+    if (true) [],
+    // ignore: unused_local_variable
+    for (var i in [1]) [],
+  ];
+  // ignore: unnecessary_type_check
+  print(nested[0] is List<int>);
+  var empty = [...?null];
+  // ignore: unnecessary_type_check
+  print(empty is List<Never>);
+  // ignore: unnecessary_type_check
+  print([1, ...?null] is List<int>);
+  const base = [1, 2];
+  // ignore: dead_code
+  const c1 = [0, ...base, if (false) 3 else 4, ...?null];
+  const c2 = [0, 1, 2, 4];
+  print(identical(c1, c2));
+  const dynamic dc = <Object>[1, 2];
+  const cd = <int>[...dc];
+  print(cd);
+  const cb = [
+    // ignore: non_constant_list_element, dead_code
+    if (false) <int>[1][9] else 2,
+  ];
+  print(cb);
+}
+
 void main(List<String> args) {
+  collectionValues();
   nullAwareValues();
   cascadeValues();
   staticMembers();

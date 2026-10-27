@@ -409,10 +409,14 @@ void scanCode(Scanner scanner, bool interpolation) {
     }
     var size = 1;
     var tripleShift = false;
-    if (i + 3 < source.length && source.substring(i, i + 4) == '>>>=') {
-      size = 4;
-      tripleShift = true;
-    } else if (i + 2 < source.length) {
+    if (i + 3 < source.length) {
+      var four = source.substring(i, i + 4);
+      if (four == '>>>=' || four == '...?') {
+        size = 4;
+        tripleShift = four == '>>>=';
+      }
+    }
+    if (size == 1 && i + 2 < source.length) {
       var three = source.substring(i, i + 3);
       tripleShift = three == '>>>';
       if (three == '>>>' ||
@@ -420,7 +424,8 @@ void scanCode(Scanner scanner, bool interpolation) {
           three == '>>=' ||
           three == '~/=' ||
           three == '??=' ||
-          three == '?..')
+          three == '?..' ||
+          three == '...')
         size = 3;
     }
     if (size == 1 && i + 1 < source.length) {
