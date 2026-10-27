@@ -39,9 +39,12 @@ bool _ssaConstant(List<SsaInstruction?> definitions, int value, bool nonzero) {
 
 bool _ssaNonnegative(List<SsaInstruction?> definitions, int value) {
   if (_ssaConstant(definitions, value, false)) return true;
-  if (definitions[value] case SsaInstruction(op: opAnd, :var inputs))
-    return _ssaConstant(definitions, inputs[0], false) ||
-        _ssaConstant(definitions, inputs[1], false);
+  if (definitions[value] case SsaInstruction(
+    op: opAnd,
+    inputs: [var left, var right],
+  ))
+    return _ssaConstant(definitions, left, false) ||
+        _ssaConstant(definitions, right, false);
   return false;
 }
 
@@ -146,9 +149,12 @@ bool _machineConstant(
 
 bool _machineNonnegative(List<MachineInstruction?> definitions, int value) {
   if (_machineConstant(definitions, value, false)) return true;
-  if (definitions[value] case MachineInstruction(op: mAnd, :var inputs))
-    return _machineConstant(definitions, inputs[0], false) ||
-        _machineConstant(definitions, inputs[1], false);
+  if (definitions[value] case MachineInstruction(
+    op: mAnd,
+    inputs: [var left, var right],
+  ))
+    return _machineConstant(definitions, left, false) ||
+        _machineConstant(definitions, right, false);
   return false;
 }
 
