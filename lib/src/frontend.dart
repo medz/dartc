@@ -1892,7 +1892,7 @@ class FeListLiteral {
 
   FeListLiteral(this.context, this.slot);
 
-  void lowerBody(AstStatement body) {
+  void call(AstStatement body) {
     feLowerListElement(body.expressions[0], this);
   }
 }
@@ -1951,9 +1951,9 @@ void feLowerListElement(AstExpression expression, FeListLiteral literal) {
   } else if (expression.kind == astForElement) {
     var loop = expression.loop!;
     if (loop.kind == astForInStatement)
-      feLowerForIn(loop, literal.lowerBody);
+      feLowerForIn(loop, literal);
     else
-      feLowerWhileFor(loop, literal.lowerBody);
+      feLowerWhileFor(loop, literal);
   } else if (expression.kind == astSpreadElement) {
     feLowerListSpread(expression, literal);
   } else if (expression.kind == astNullAwareElement) {
