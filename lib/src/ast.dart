@@ -24,6 +24,38 @@ const int astSpreadElement = 23;
 const int astIfElement = 24;
 const int astForElement = 25;
 const int astNullAwareElement = 26;
+const int astSwitchExpression = 27;
+
+const int patternConstant = 1;
+const int patternVariable = 2;
+const int patternAnd = 3;
+const int patternOr = 4;
+const int patternRelational = 5;
+const int patternCast = 6;
+const int patternNullCheck = 7;
+const int patternNullAssert = 8;
+
+class AstPattern {
+  final int kind;
+  final int token;
+  final String text;
+  final List<AstPattern> children;
+  AstExpression? constant;
+  bool constantContext = false;
+  AstType? type;
+  bool finalVariable = false;
+  int binding = -1;
+
+  AstPattern(this.kind, this.token, this.text, this.children);
+}
+
+class AstSwitchArm {
+  final AstPattern pattern;
+  final AstExpression? guard;
+  final AstExpression value;
+
+  AstSwitchArm(this.pattern, this.guard, this.value);
+}
 
 const String astCallIdentifier = 'identifier';
 const String astCallSelector = 'selector';
@@ -49,6 +81,7 @@ class AstFunctionType {
 class AstExpression {
   AstFunction? function;
   AstStatement? loop;
+  List<AstSwitchArm> arms = const <AstSwitchArm>[];
   int kind;
   String text;
   List<AstExpression> children;

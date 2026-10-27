@@ -7,6 +7,7 @@ class Parser {
   int position;
   int pendingClosers;
   bool pendingEquals = false;
+  bool inSwitchGuard = false;
   List<String> paths;
 
   Parser(this.tokens, this.position, this.pendingClosers, this.paths);
@@ -329,12 +330,15 @@ List<AstType> parserTypeArguments(Parser parser) {
 
 AstExpression parserList(Parser parser, List<AstType> arguments, int token) {
   parserExpect(parser, '[');
+  var guard = parser.inSwitchGuard;
+  parser.inSwitchGuard = false;
   List<AstExpression> children = <AstExpression>[];
   while (!parserIs(parser, ']')) {
     children.add(parserCollectionElement(parser));
     if (!parserTake(parser, ',')) break;
   }
   parserExpect(parser, ']');
+  parser.inSwitchGuard = guard;
   return AstExpression(astList, '', children, arguments, token);
 }
 
@@ -567,9 +571,167 @@ AstExpression parserFunctionExpression(Parser parser) {
   return expression;
 }
 
+AstPattern parserPattern(Parser parser, [int minimum = 1]) {
+  var pattern = parserUnaryPattern(parser);
+  while (true) {
+    var token = parser.position;
+    var precedence = parserIs(parser, '||')
+        ? 1
+        : parserIs(parser, '&&')
+        ? 2
+        : 0;
+    if (precedence < minimum) break;
+    parser.position++;
+    pattern = AstPattern(
+      precedence == 1 ? patternOr : patternAnd,
+      token,
+      '',
+      <AstPattern>[pattern, parserPattern(parser, precedence + 1)],
+    );
+  }
+  return pattern;
+}
+
+AstPattern parserUnaryPattern(Parser parser) {
+  var token = parser.position;
+  var op = parserPeek(parser);
+  if (op == '==' ||
+      op == '!=' ||
+      op == '<' ||
+      op == '<=' ||
+      op == '>' ||
+      op == '>=') {
+    parser.position++;
+    return AstPattern(patternRelational, token, op, const <AstPattern>[])
+      ..constant = parserBinary(parser, 5);
+  }
+  AstPattern pattern;
+  if (parserTake(parser, '(')) {
+    pattern = parserPattern(parser);
+    parserExpect(parser, ')');
+  } else if (parserIs(parser, 'var') || parserIs(parser, 'final')) {
+    var finalVariable = parserTake(parser, 'final');
+    if (!finalVariable) parserExpect(parser, 'var');
+    AstType? type;
+    if (finalVariable && parserPatternTypeAhead(parser))
+      type = parseAstType(parser);
+    pattern =
+        AstPattern(
+            patternVariable,
+            token,
+            parserName(parser),
+            const <AstPattern>[],
+          )
+          ..type = type
+          ..finalVariable = finalVariable;
+  } else if (parserPatternTypeAhead(parser)) {
+    var type = parseAstType(parser);
+    pattern = AstPattern(
+      patternVariable,
+      token,
+      parserName(parser),
+      const <AstPattern>[],
+    )..type = type;
+  } else if (parserTake(parser, '_')) {
+    pattern = AstPattern(patternVariable, token, '_', const <AstPattern>[]);
+  } else {
+    AstExpression value;
+    var constantContext = false;
+    if (parserIs(parser, 'const') && tokenIs(parser.tokens[token + 1], '(')) {
+      parser.position += 2;
+      constantContext = true;
+      var guard = parser.inSwitchGuard;
+      parser.inSwitchGuard = false;
+      value = parseExpression(parser);
+      parserExpect(parser, ')');
+      parser.inSwitchGuard = guard;
+    } else if (parserIs(parser, '-') &&
+        parser.tokens[token + 1].kind == tokenInteger) {
+      parser.position++;
+      value = AstExpression(
+        astUnary,
+        '-',
+        <AstExpression>[parserPrimary(parser)],
+        const <AstType>[],
+        token,
+      );
+    } else {
+      value = parserPrimary(parser);
+      while (parserTake(parser, '.')) {
+        value = AstExpression(
+          astMember,
+          parserName(parser),
+          <AstExpression>[value],
+          const <AstType>[],
+          token,
+        );
+      }
+    }
+    if (value.kind == astName &&
+        (value.text == 'as' || value.text == 'when'))
+      parserError(parser, 'invalid pattern identifier ' + value.text);
+    pattern = AstPattern(patternConstant, token, '', const <AstPattern>[])
+      ..constant = value
+      ..constantContext = constantContext;
+  }
+  if (pattern.kind == patternVariable &&
+      (pattern.text == 'as' || pattern.text == 'when'))
+    parserError(parser, 'invalid pattern variable ' + pattern.text);
+  if (parserTake(parser, 'as')) {
+    return AstPattern(patternCast, token, '', <AstPattern>[pattern])
+      ..type = parserExpressionType(parser);
+  }
+  if (parserTake(parser, '?'))
+    return AstPattern(patternNullCheck, token, '', <AstPattern>[pattern]);
+  if (parserTake(parser, '!'))
+    return AstPattern(patternNullAssert, token, '', <AstPattern>[pattern]);
+  return pattern;
+}
+
+bool parserPatternTypeAhead(Parser parser) {
+  if (parserIs(parser, 'const')) return false;
+  var end = parserDeclarationTypeEnd(parser);
+  return end >= 0 &&
+      !tokenIs(parser.tokens[end], 'when') &&
+      !tokenIs(parser.tokens[end], 'as');
+}
+
+AstExpression parserSwitchExpression(Parser parser, int token) {
+  var previousGuard = parser.inSwitchGuard;
+  parser.inSwitchGuard = false;
+  parserExpect(parser, '(');
+  var source = parseExpression(parser);
+  parserExpect(parser, ')');
+  parserExpect(parser, '{');
+  var arms = <AstSwitchArm>[];
+  while (!parserIs(parser, '}')) {
+    var pattern = parserPattern(parser);
+    AstExpression? guard;
+    if (parserTake(parser, 'when')) {
+      parser.inSwitchGuard = true;
+      guard = parseExpression(parser);
+      parser.inSwitchGuard = false;
+    }
+    parserExpect(parser, '=>');
+    arms.add(AstSwitchArm(pattern, guard, parseExpression(parser)));
+    if (!parserTake(parser, ',')) break;
+  }
+  parserExpect(parser, '}');
+  parser.inSwitchGuard = previousGuard;
+  return AstExpression(
+    astSwitchExpression,
+    '',
+    <AstExpression>[source],
+    const <AstType>[],
+    token,
+  )..arms = arms;
+}
+
 AstExpression parserPrimary(Parser parser) {
   var token = parser.position;
   var current = parser.tokens[token];
+  if (parserTake(parser, 'switch'))
+    return parserSwitchExpression(parser, token);
   if (parserTake(parser, 'new')) {
     var expression = parserMetadatum(parser);
     if (expression.kind != astCall)
@@ -609,13 +771,16 @@ AstExpression parserPrimary(Parser parser) {
       token,
     );
   }
-  if (parserFunctionAhead(parser, parser.position))
+  if (!parser.inSwitchGuard && parserFunctionAhead(parser, parser.position))
     return parserFunctionExpression(parser);
   if (parserIs(parser, '<') && parserGenericFunctionAhead(parser))
     parserError(parser, 'generic function expressions are unsupported');
   if (parserTake(parser, '(')) {
+    var guard = parser.inSwitchGuard;
+    parser.inSwitchGuard = false;
     var expression = parseExpression(parser);
     parserExpect(parser, ')');
+    parser.inSwitchGuard = guard;
     // A parenthesized null-shorting chain cannot absorb later assignments.
     if (expression.kind == astNullAware) expression.text = '()';
     return expression;
@@ -658,6 +823,8 @@ AstExpression parserCall(
   String disposition = astCallValue,
 ]) {
   parserExpect(parser, '(');
+  var guard = parser.inSwitchGuard;
+  parser.inSwitchGuard = false;
   List<AstExpression> children = <AstExpression>[callee];
   while (!parserIs(parser, ')')) {
     var argumentToken = parser.position;
@@ -681,6 +848,7 @@ AstExpression parserCall(
     if (!parserTake(parser, ',')) break;
   }
   parserExpect(parser, ')');
+  parser.inSwitchGuard = guard;
   return AstExpression(astCall, disposition, children, typeArguments, token);
 }
 

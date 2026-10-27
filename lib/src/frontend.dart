@@ -2,6 +2,7 @@ import 'ast.dart';
 import 'frontend/arguments.dart';
 import 'frontend/literals.dart';
 import 'frontend/parameters.dart';
+import 'frontend/patterns.dart';
 import 'binding.dart';
 import 'constants.dart';
 import 'constant_data.dart';
@@ -1424,6 +1425,8 @@ int feNonNullableValue(int type, int token) {
 }
 
 int feLowerHint(AstExpression expression, int context) {
+  if (expression.kind == astSwitchExpression)
+    return feLowerSwitchExpression(expression, context);
   if (expression.kind == astNullAware)
     return feLowerNullAware(expression, context);
   if (expression.kind == astCascade) return feLowerCascade(expression, context);
@@ -3302,6 +3305,8 @@ int feLowerExpression(AstExpression expression) {
 }
 
 int feLowerValue(AstExpression expression) {
+  if (expression.kind == astSwitchExpression)
+    return feLowerSwitchExpression(expression, -1);
   expression = feWithReceiver(expression);
   var kind = expression.kind;
   if (kind == astNullAware) return feLowerNullAware(expression, -1);
@@ -5048,6 +5053,185 @@ void feLowerDoWhile(AstStatement statement) {
   feLabelRepeat(statement.token, condition);
   feLoopEnd(breakBase, continueBase, ir.length, condition);
   feFlow = flowUnsplit(feFlow);
+}
+
+void fePatternRead(int slot, int type, int token) {
+  feOperand(opLoadLocal, slot);
+  var stored = feSlotTypes[slot];
+  if (stored == tVoid && type != tVoid) {
+    feBuiltinTyped(bBoxRef, 1, tDynamic);
+    stored = tDynamic;
+  }
+  if (typeIsSubtype(stored, type))
+    feConvertValue(stored, type, token);
+  else
+    feNarrowValue(stored, type);
+}
+
+int fePatternSlot(int slot, int type, int token) {
+  if (feSlotTypes[slot] == type) return slot;
+  fePatternRead(slot, type, token);
+  var result = feTemp(type);
+  feOperand(opStoreLocal, result);
+  return result;
+}
+
+void fePatternVariables(CheckedPattern pattern) {
+  var binding = pattern.syntax.binding;
+  if (binding >= 0 && feBindingSlots[binding] < 0)
+    feBindLocal(binding, pattern.variableType, feTemp(pattern.variableType));
+  for (var child in pattern.children) fePatternVariables(child);
+}
+
+void feLowerPattern(CheckedPattern pattern, int value, List<int> failed) {
+  var syntax = pattern.syntax;
+  var kind = syntax.kind;
+  var token = syntax.token;
+  if (kind == patternVariable) {
+    if (pattern.tested >= 0 && !typeIsSubtype(pattern.input, pattern.tested)) {
+      fePatternRead(value, pattern.input, token);
+      feCallableBox(pattern.input, token);
+      feOperand(opTypeTest, pattern.tested);
+      failed.add(feJump(opJumpFalse));
+    }
+    var binding = syntax.binding;
+    if (binding >= 0) {
+      fePatternRead(value, pattern.variableType, token);
+      feOperand(opStoreLocal, feBindingSlots[binding]);
+      flowDeclare(feFlow, binding, pattern.variableType, true);
+    }
+  } else if (kind == patternAnd) {
+    var left = pattern.children[0];
+    feLowerPattern(left, value, failed);
+    var right = pattern.children[1];
+    feLowerPattern(right, fePatternSlot(value, right.input, token), failed);
+  } else if (kind == patternOr) {
+    var before = flowCopy(feFlow);
+    var other = <int>[];
+    feLowerPattern(pattern.children[0], value, other);
+    var leftFlow = feFlow;
+    var done = feJump(opJump);
+    fePatchJumps(other, ir.length);
+    feFlow = before;
+    var right = pattern.children[1];
+    feLowerPattern(right, fePatternSlot(value, right.input, token), failed);
+    feFlow = feJoinFlow(leftFlow, feFlow);
+    fePatch(done, ir.length);
+  } else if (kind == patternNullCheck) {
+    failed.add(feJumpIfNull(value));
+    var inner = pattern.children[0];
+    feLowerPattern(inner, fePatternSlot(value, inner.input, token), failed);
+  } else if (kind == patternCast || kind == patternNullAssert) {
+    fePatternRead(value, pattern.input, token);
+    feCallableBox(pattern.input, token);
+    var checked = pattern.tested;
+    if (kind == patternNullAssert && typeCanBeNull(checked)) checked = tObject;
+    feOperand(opTypeCast, checked);
+    feConvertValue(checked, pattern.tested, token);
+    var slot = feTemp(pattern.tested);
+    feOperand(opStoreLocal, slot);
+    feLowerPattern(pattern.children[0], slot, failed);
+  } else {
+    var constant = pattern.constant!;
+    var input = pattern.input;
+    if (input == tVoid) input = tDynamic;
+    var constantType = constant.type == tVoid ? tDynamic : constant.type;
+    var comparison = tBool;
+    if (kind == patternConstant) {
+      feConstantValue(constant, constantType, token);
+      fePatternRead(value, input, token);
+      comparison = feCombine('==', constantType, input, token);
+    } else {
+      fePatternRead(value, input, token);
+      feConstantValue(constant, constantType, token);
+      comparison = feCombine(syntax.text, input, constantType, token);
+    }
+    feBooleanValue(comparison, token);
+    failed.add(feJump(opJumpFalse));
+  }
+}
+
+int feLowerSwitchExpression(AstExpression expression, int context) {
+  var source = expression.children[0];
+  var type = feLowerExpression(source);
+  var value = feTemp(type);
+  feOperand(opStoreLocal, value);
+  feFlow = flowSplit(feFlow);
+  var exitFlow = flowCopy(feFlow);
+  flowUnreachable(exitFlow);
+  var slots = <int>[];
+  var conversions = <int>[];
+  var result = tNever;
+  var coverage = 0;
+  var remaining = type;
+  var binding = source.kind == astName ? source.binding : -1;
+  if (binding >= 0 && !fePromotable(binding)) binding = -1;
+  for (var arm in expression.arms) {
+    feConstants.localTypes = feFlow.types;
+    var pattern = checkPattern(
+      feConstants,
+      arm.pattern,
+      remaining,
+      feBindingTypes,
+    );
+    fePatternVariables(pattern);
+    var nextFlow = flowCopy(feFlow);
+    if (pattern.remaining == tNever) flowUnreachable(nextFlow);
+    var failed = <int>[];
+    feLowerPattern(
+      pattern,
+      fePatternSlot(value, remaining, arm.pattern.token),
+      failed,
+    );
+    if (binding >= 0) flowPromote(feFlow, binding, pattern.matched);
+    var guard = arm.guard;
+    if (guard != null) {
+      var rejected = feConditionJumps(guard, false, failed);
+      nextFlow = feJoinFlow(nextFlow, rejected);
+      if (binding >= 0) {
+        var written = <int>[];
+        collectWrittenExpression(
+          guard,
+          List<bool>.filled(feBindingTypes.length, false),
+          written,
+        );
+        for (var changed in written) {
+          if (changed == binding) binding = -1;
+        }
+      }
+    } else {
+      coverage |= pattern.coverage;
+      if (pattern.remaining != tNever) remaining = pattern.remaining;
+    }
+    var armType = feLowerHint(arm.value, context);
+    result = joinTypes(result, armType);
+    var slot = feTemp(armType);
+    feOperand(opStoreLocal, slot);
+    slots.add(slot);
+    conversions.add(feJump(opJump));
+    exitFlow = feJoinFlow(exitFlow, feFlow);
+    fePatchJumps(failed, ir.length);
+    feFlow = nextFlow;
+    if (binding >= 0) flowPromote(feFlow, binding, remaining);
+  }
+  var required = patternRequiredSpace(type);
+  if ((coverage & required) != required)
+    feAstError(expression.token, 'switch expression is not exhaustive');
+  feCall(feFindFunction('rtPatternMatchFailure'), 0);
+  feConvertValue(tNever, functions[feFunction].result, expression.token);
+  feEmit(opReturn);
+  var done = <int>[];
+  for (var i = 0; i < slots.length; i++) {
+    fePatch(conversions[i], ir.length);
+    var slot = slots[i];
+    feOperand(opLoadLocal, slot);
+    feConvertValue(feSlotTypes[slot], result, expression.arms[i].value.token);
+    done.add(feJump(opJump));
+  }
+  fePatchJumps(done, ir.length);
+  if (slots.isEmpty) feInteger(0, tNever);
+  feFlow = flowUnsplit(exitFlow);
+  return result;
 }
 
 bool feSwitchConstant(AstExpression expression) {

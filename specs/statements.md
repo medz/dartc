@@ -1,7 +1,7 @@
 # 语句：§18 Statements
 
 按[固定草案源码](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)的 §18 建立索引；条款目录见[官方草案 PDF](https://dart.dev/to/spec-draft)。
-SDK 对照版本见[总览](README.md)；本表的 switch 是已有常量 case 子集，不包含 Dart 3 模式匹配的完整要求。
+SDK 对照版本见[总览](README.md)；本表的 switch 语句仍采用常量 case，switch 表达式的模式实现见[模式](patterns.md)。
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |

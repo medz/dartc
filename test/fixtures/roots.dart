@@ -452,6 +452,17 @@ List<int Function()> closureGraph() {
 }
 
 void closureRoots(int queue, int edges) {
+  var patterns = <int Function()>[
+    switch (Leaf(806)) {
+      Leaf value => () => value.marker,
+    },
+  ];
+  var patternList = captureList(patterns, 1, queue);
+  check(listElements(patternList, edges) == 1);
+  var pattern = rt.nativeLoad64(edges);
+  check(rt.rtTraceObject(pattern, edges, capacity) == 1);
+  check(findMarker(edges, 1, 806) != 0);
+  check(patterns[0]() == 806);
   var callables = <int Function()>[Leaf(805)];
   var callableList = captureList(callables, 1, queue);
   check(listElements(callableList, edges) == 1);

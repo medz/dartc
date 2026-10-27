@@ -1692,6 +1692,11 @@ Never rtRootFailure() {
   while (true) {}
 }
 
+Never rtPatternMatchFailure() {
+  rtValueTypeError();
+  while (true) {}
+}
+
 int rtRootValues = 0;
 int rtRootCount = 0;
 int rtRootCapacity = 0;

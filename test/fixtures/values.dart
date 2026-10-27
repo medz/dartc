@@ -2975,6 +2975,161 @@ void collectionValues() {
   print(cb);
 }
 
+int switchTrace = 0;
+int switchStep(int n) {
+  switchTrace = switchTrace * 10 + n;
+  return n;
+}
+
+bool switchGuard(int n) {
+  switchStep(n);
+  return n == 2;
+}
+
+int switchChoose(int n) => switch (n) {
+  -1 || 0 => 1,
+  >= 1 && < 5 => 2,
+  var v when switchGuard(v) => v,
+  _ => 3,
+};
+int switchTyped(Object? n) => switch (n) {
+  int value && > 0 => value + 1,
+  String value => value.length,
+  List<int> values => values[0],
+  IntCallback callback => callback(3),
+  null => 0,
+  _ => -1,
+};
+int switchOrBound(int n) => switch (n) {
+  >= 0 && var value || < 0 && var value => value + 1,
+  _ => 0,
+};
+int switchNullable(bool? n) => switch (n) {
+  true || false => 1,
+  null => 2,
+};
+int switchNonNull(int? n) => switch (n) {
+  var value? => value + 2,
+  null => 0,
+};
+int switchAsserted(int? n) => switch (n) {
+  var value! => value + 3,
+};
+int switchCasted(Object? n) => switch (n) {
+  var value as int => value + 4,
+};
+int switchPromote(Object n) => switch (n) {
+  int _ => n + 1,
+  _ => 0,
+};
+int switchMaybe(Object? n) => switch (n) {
+  null => 0,
+  var v => v is int ? 1 : 2,
+};
+const switchSaved = <int>[1, 2];
+int switchConstants(Object n) => switch (n) {
+  const (1 + 2) => 1,
+  switchSaved => 2,
+  const ([3, 4]) => 4,
+  const (ConstAtom(9)) => 5,
+  _ => 3,
+};
+int switchConstantCast(Object n) => switch (n) {
+  topConstant as int => 6,
+  _ => 0,
+};
+void switchOpaque() => 4;
+// ignore: use_of_void_result
+List<void> switchVoidMatch() => switch (switchOpaque()) {
+  var v => [v],
+};
+const void switchVoidConstant = 1;
+int switchVoidRelation(int n) => switch (n) {
+  // ignore: use_of_void_result
+  == switchVoidConstant => 1,
+  _ => 2,
+};
+var switchEscaped = <int Function()>[];
+bool switchCapture(int Function() f) {
+  switchEscaped.add(f);
+  return false;
+}
+
+int switchCapturePattern(Object n) => switch (n) {
+  int value when switchCapture(() => value) => 0,
+  _ => 1,
+};
+Never switchEmpty(Never n) => switch (n) {};
+void switchExpressions() {
+  for (var n in [-1, 0, 1, 4, 5, 9]) print(switchChoose(n));
+  for (var n in <Object?>[2, -1, 'abc', null, true, <int>[13], functionPlus])
+    print(switchTyped(n));
+  print(switchOrBound(3));
+  print(switchOrBound(-3));
+  print(switchNullable(null));
+  print(switchNullable(true));
+  print(switchNonNull(4));
+  print(switchNonNull(null));
+  print(switchAsserted(3));
+  print(switchCasted(3));
+  print(switchPromote(3));
+  print(switchMaybe(3));
+  print(switchConstants(3));
+  print(switchConstants(switchSaved));
+  print(switchConstants([1, 2]));
+  print(switchConstants(const [3, 4]));
+  print(switchConstants(const ConstAtom(9)));
+  print(switchConstantCast(topConstant));
+  print(switchVoidMatch());
+  print(switchVoidRelation(1));
+  IntCallback fn = switch (1) {
+    1 => (x) => x + 1,
+    _ => (x) => x + 2,
+  };
+  print(fn(4));
+  switchTrace = 0;
+  print(switch (switchStep(1)) {
+    2 when switchGuard(2) => switchStep(3),
+    1 when switchGuard(2) => switchStep(4),
+    _ => switchStep(5),
+  });
+  print(switchTrace);
+  Object original = 7;
+  print(switch (original) {
+    int _ when (original = 'changed') == 'again' => -1,
+    int value => value,
+    _ => 0,
+  });
+  print(original);
+  int assigned;
+  print(switch (true) {
+    true => assigned = 1,
+    false => assigned = 2,
+  });
+  print(assigned);
+  print(switchCapturePattern(7));
+  print(switchEscaped[0]());
+  for (var i = 0; i < 3; i++)
+    print(switch (i) {
+      var n when switchCapture(() => n) => 0,
+      _ => 1,
+    });
+  print(switchEscaped[1]());
+  print(switchEscaped[2]());
+  print(switchEscaped[3]());
+  var cls = switch (2) {
+    1 => [1],
+    _ => [2],
+  };
+  print(cls[0]);
+  print(
+    (switch (1) {
+          _ => 1,
+        }) +
+        1,
+  );
+}
+
 void main(List<String> args) {
   collectionValues();
   nullAwareValues();
@@ -3003,6 +3158,7 @@ void main(List<String> args) {
   constantLists();
   constObjects();
   functionValues();
+  switchExpressions();
   genericAliases();
   legacyAliases();
   bufferValues();

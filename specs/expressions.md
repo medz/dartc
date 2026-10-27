@@ -34,7 +34,7 @@
 | [空安全补充：空短路访问][null-aware] | 部分实现 | 支持 `?.`、`?[]` 的属性、调用、索引、空断言及赋值/增减链；接收者一次求值，null 时跳过后续选择器、实参、索引和 RHS。括号与普通运算终止传播，类型限定目标沿用静态查找。值接收者的结果可空，即使接收者静态非空；void 仍不能被消费。常量路径支持 String.length 与被跳过的索引，仍检查潜在常量资格及索引类型；一般动态分派和完整常量成员规则仍缺。 | [parser.dart](../lib/src/parser.dart)：`parserSelectors`、`parserIndexIsConditional`；[frontend.dart](../lib/src/frontend.dart)：`feLowerNullAware`；[constants.dart](../lib/src/constants.dart)：`_evaluateConstant`；[values.dart](../test/fixtures/values.dart)：`nullAwareValues`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`、`failingValues`。 |
 | [§17.15 级联][cascades] | 部分实现 | 支持 `..` 与首次 `?..`，接收者一次求值并保留为结果；各段按序访问、调用、索引或赋值，null 时跳过整组副作用。接收者获得上下文类型，空短路分支参与提升及确定赋值合流；3.9 起以非空目标类型排除 null 分支。静态义务不因跳过执行而消失。嵌套级联、段内空短路访问与箭头函数体遵循 SDK 解析；一般动态分派仍缺。 | [parser.dart](../lib/src/parser.dart)：`parserCascadeSection`；[frontend.dart](../lib/src/frontend.dart)：`feLowerCascade`；[values.dart](../test/fixtures/values.dart)：`cascadeValues`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
 | 空安全补充：`Never` 表达式消费 | 部分实现 | 支持底类型接收者的属性、索引及已有调用入口；结果保留 `Never`，仍检查实参、重复命名参数、类型实参与 void 消费。此类路径不能产生实际接收者，不引入一般动态分派；方法提取等入口仍缺。 | [frontend.dart](../lib/src/frontend.dart)：`feReadMember`、`feLowerNeverArguments`、`feLowerLvalue`；[behavior_test.dart](../test/behavior_test.dart)：`neverExpressions`、`rejected`；规则依据[空安全补充][nnbd]。 |
-| §17.37–17.38 词法查找与标识符 | 部分实现 | 整个局部作用域预绑定，支持遮蔽、前向/自身引用错误及 `_`；局部和匿名函数保持独立函数体作用域，外层捕获沿原声明绑定；模式绑定未实现。 | [binding.dart](../lib/src/binding.dart)：`bindFunctionLocals`；[frontend.dart](../lib/src/frontend.dart)：`feReadLocal`；[values.dart](../test/fixtures/values.dart)：`localBindings`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
+| §17.37–17.38 词法查找与标识符 | 部分实现 | 整个局部作用域预绑定，支持遮蔽、前向/自身引用错误及 `_`；局部和匿名函数保持独立函数体作用域，外层捕获沿原声明绑定；switch 表达式模式绑定见[模式](patterns.md)。 | [binding.dart](../lib/src/binding.dart)：`bindFunctionLocals`；[frontend.dart](../lib/src/frontend.dart)：`feReadLocal`；[values.dart](../test/fixtures/values.dart)：`localBindings`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
 
 ## 赋值、分支与运算
 
@@ -78,7 +78,7 @@
 | --- | --- | --- | --- |
 | §17.8、§17.10–17.11 | 未实现 | Symbol 字面量、throw 表达式和 isolate 创建未实现。 | [ast.dart](../lib/src/ast.dart) 尚无对应表达式；尚无行为验证。 |
 | §17.17、§17.34 | 未实现 | 泛型函数实例化、await；尚无一般泛型或异步执行基础。 | [parser.dart](../lib/src/parser.dart)、[frontend.dart](../lib/src/frontend.dart)；尚无行为验证。 |
-| Dart 3 表达式 | 未实现 | 记录和模式相关表达式未实现。 | [parser.dart](../lib/src/parser.dart)、[ast.dart](../lib/src/ast.dart)；尚无行为验证。 |
+| Dart 3 表达式 | 部分实现 | switch 表达式、标量模式、守卫、变量绑定及穷尽性边界见[模式](patterns.md)；记录和解构模式未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerSwitchExpression`；[values.dart](../test/fixtures/values.dart)：`switchExpressions`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`、`failingValues`。 |
 | 优先级、所有静态错误及完成方式 | 待核对 | 优先级、静态错误及完成方式的完整一致性覆盖尚缺。 | [parser.dart](../lib/src/parser.dart)：`parserPrecedence`、`parserBinary`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
 
 实例 getter 的函数值调用按 SDK 3.13.5 CFE 求值顺序处理：以 receiver、getter、实参、函数体分别记为 1、2、3、4，`receiver().callback(arg())` 的轨迹为 `1324`，`(receiver().callback)(arg())` 为 `1234`；隐式 this 遵循实例形式；顶层和静态 getter 先读取再求实参，静态选择器加括号不改变顺序。[固定草案的 getter fallback][getter-invocation]描述先调用 getter 再调用返回值，与此行为有差异；dartc 采用 SDK 3.13.5 的顺序，不据此判定上游缺陷。行为入口为 [values.dart](../test/fixtures/values.dart) 的 `functionValues()` 与 `staticMembers()`。

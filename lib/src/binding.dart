@@ -258,11 +258,100 @@ void bindingType(LocalBinder binder, int scope, AstType syntax) {
   for (var argument in syntax.arguments) bindingType(binder, scope, argument);
 }
 
+List<AstPattern> bindingPatternVariables(
+  LocalBinder binder,
+  AstPattern pattern,
+) {
+  if (pattern.kind == patternVariable && pattern.text != '_')
+    return <AstPattern>[pattern];
+  if (pattern.children.isEmpty) return <AstPattern>[];
+  var variables = bindingPatternVariables(binder, pattern.children[0]);
+  if (pattern.children.length == 1) return variables;
+  var right = bindingPatternVariables(binder, pattern.children[1]);
+  if (pattern.kind == patternOr) {
+    if (variables.length != right.length)
+      sourceError(
+        binder.source,
+        binder.source.tokens[pattern.token],
+        'logical-or patterns must bind the same variables',
+      );
+    for (var variable in right) {
+      var found = false;
+      for (var previous in variables) {
+        if (previous.text == variable.text &&
+            previous.finalVariable == variable.finalVariable)
+          found = true;
+      }
+      if (!found)
+        sourceError(
+          binder.source,
+          binder.source.tokens[variable.token],
+          'logical-or variable name or finality differs',
+        );
+    }
+  } else {
+    for (var variable in right) {
+      for (var previous in variables) {
+        if (previous.text == variable.text)
+          sourceError(
+            binder.source,
+            binder.source.tokens[variable.token],
+            'duplicate pattern variable ' + variable.text,
+          );
+      }
+      variables.add(variable);
+    }
+  }
+  return variables;
+}
+
+void bindingPattern(LocalBinder binder, int scope, AstPattern pattern) {
+  var type = pattern.type;
+  if (type != null) bindingType(binder, scope, type);
+  if (pattern.kind == patternVariable && pattern.text != '_')
+    pattern.binding = bindingLookup(binder, scope, pattern.text);
+  var constant = pattern.constant;
+  if (constant != null) bindingExpression(binder, scope, constant);
+  for (var child in pattern.children) bindingPattern(binder, scope, child);
+}
+
 void bindingExpression(
   LocalBinder binder,
   int scope,
   AstExpression expression,
 ) {
+  if (expression.kind == astSwitchExpression) {
+    if (!sourceVersionAtLeast(
+      binder.source,
+      binder.source.tokens[expression.token].source,
+      3,
+      0,
+    ))
+      sourceError(
+        binder.source,
+        binder.source.tokens[expression.token],
+        'switch expressions require language version 3.0',
+      );
+    bindingExpression(binder, scope, expression.children[0]);
+    for (var arm in expression.arms) {
+      var local = bindingScope(binder, scope);
+      for (var variable in bindingPatternVariables(binder, arm.pattern)) {
+        var id = bindingDeclare(
+          binder,
+          local,
+          variable.text,
+          variable.token,
+          variable.type ?? AstType('', const <AstType>[], variable.token),
+        );
+        binder.result.variables[id].finalVariable = true;
+      }
+      bindingPattern(binder, local, arm.pattern);
+      var guard = arm.guard;
+      if (guard != null) bindingExpression(binder, local, guard);
+      bindingExpression(binder, local, arm.value);
+    }
+    return;
+  }
   if (expression.kind == astForElement) {
     bindingStatement(binder, scope, expression.loop!);
     return;
@@ -622,6 +711,13 @@ void collectWrittenExpression(
   List<bool> seen,
   List<int> written,
 ) {
+  if (expression.kind == astSwitchExpression) {
+    for (var arm in expression.arms) {
+      var guard = arm.guard;
+      if (guard != null) collectWrittenExpression(guard, seen, written);
+      collectWrittenExpression(arm.value, seen, written);
+    }
+  }
   if (expression.kind == astForElement) {
     collectWrittenStatement(expression.loop!, seen, written);
     return;

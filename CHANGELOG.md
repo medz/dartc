@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Support switch expressions with scalar patterns, typed bindings, guards, contextual results and scalar exhaustiveness checks.
 - Support calling objects with instance `call` methods and implicitly extracting those methods in supported function-type contexts.
 - Support bound instance-method values with required positional signatures, receiver retention, method equality and typed calls.
 - Support List collection if/else, for and for-in elements, ordinary/null-aware spreads, null-aware single elements, and their supported constant evaluation.
