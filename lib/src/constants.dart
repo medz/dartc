@@ -28,7 +28,7 @@ class ConstantConstructorInfo {
   ClassMembers members;
   List<int> fieldTypes;
   List<int> parameterTypes;
-  List<ConstructorStep> steps;
+  ConstructorPlan plan;
   List<int> states = const <int>[];
   List<ConstantValue> values = const <ConstantValue>[];
 
@@ -39,12 +39,19 @@ class ConstantConstructorInfo {
     this.members,
     this.fieldTypes,
     this.parameterTypes,
-    this.steps,
+    this.plan,
   ) {
     var count = parameterTypes.length + fieldTypes.length;
     states = List<int>.filled(count, 0);
     values = List<ConstantValue>.filled(count, ConstantValue(-1, tNull, 0, ''));
   }
+}
+
+class _ConstantInvocation {
+  final ConstantConstructorInfo owner;
+  final List<ConstantValue> parameters;
+
+  _ConstantInvocation(this.owner, this.parameters);
 }
 
 class ConstantContext {
@@ -60,6 +67,7 @@ class ConstantContext {
   bool allowInitializerParameters = false;
   List<ConstantValue> aggregates = <ConstantValue>[];
   List<ConstantConstructorInfo?> constructors = <ConstantConstructorInfo?>[];
+  List<_ConstantInvocation> invocations = <_ConstantInvocation>[];
   List<ClassMembers> classMembers = const <ClassMembers>[];
   List<List<int>> classConstructors = const <List<int>>[];
   ClassMembers? instanceScope;
@@ -598,11 +606,78 @@ ConstantValue _constantInitializer(
   return _constantChecked(context, value, type, initializer.token, active);
 }
 
+ConstantConstructorInfo _constantRedirectTarget(
+  ConstantContext context,
+  ConstantConstructorInfo owner,
+) {
+  var function = owner.plan.redirectTarget;
+  ConstantConstructorInfo? target;
+  if (function >= 0 && function < context.constructors.length)
+    target = context.constructors[function];
+  if (target == null || !target.syntax.constant)
+    _constantError(
+      context,
+      owner.syntax.initializers[0].token,
+      'const redirect requires a const target',
+    );
+  return target;
+}
+
+List<ConstantValue> _constantArguments(
+  ConstantContext context,
+  ConstantConstructorInfo owner,
+  AstExpression call,
+  bool active,
+  bool redirectArguments,
+) {
+  checkArgumentOrder(context.symbols.program, call);
+  var bindings = bindArguments(context.symbols.program, owner.syntax, call, 1);
+  var parameters = List<ConstantValue>.filled(
+    owner.parameterTypes.length,
+    ConstantValue(-1, tNull, 0, ''),
+  );
+  var allow = context.allowInitializerParameters;
+  context.allowInitializerParameters = redirectArguments;
+  var i = 1;
+  while (i < call.children.length) {
+    var argument = call.children[i];
+    if (argument.kind == astNamedArgument) argument = argument.children[0];
+    var parameter = bindings[i - 1];
+    var type = owner.parameterTypes[parameter];
+    var value = _evaluateConstant(
+      context,
+      argument,
+      active,
+      type,
+      !redirectArguments,
+    );
+    parameters[parameter] = _constantChecked(
+      context,
+      value,
+      type,
+      argument.token,
+      active,
+    );
+    i++;
+  }
+  context.allowInitializerParameters = allow;
+  i = 0;
+  while (i < parameters.length) {
+    if (parameters[i].type < 0)
+      parameters[i] = _constantDeclaration(context, owner, i, false, active);
+    i++;
+  }
+  return parameters;
+}
+
 void checkConstantConstructors(ConstantContext context) {
   var c = 0;
   while (c < context.constructors.length) {
     var owner = context.constructors[c];
     if (owner != null) {
+      ConstantConstructorInfo? target;
+      if (owner.plan.redirectTarget >= 0)
+        target = _constantRedirectTarget(context, owner);
       var p = 0;
       while (p < owner.syntax.parameters.length) {
         var parameter = owner.syntax.parameters[p];
@@ -610,11 +685,13 @@ void checkConstantConstructors(ConstantContext context) {
           _constantDeclaration(context, owner, p, false, true);
         p++;
       }
-      var f = 0;
-      while (f < owner.owner.fields.length) {
-        if (owner.owner.fields[f].initializer.isNotEmpty)
-          _constantDeclaration(context, owner, f, true, true);
-        f++;
+      if (target == null) {
+        var f = 0;
+        while (f < owner.owner.fields.length) {
+          if (owner.owner.fields[f].initializer.isNotEmpty)
+            _constantDeclaration(context, owner, f, true, true);
+          f++;
+        }
       }
       if (owner.syntax.initializers.isNotEmpty) {
         var parameters = <ConstantValue>[];
@@ -632,12 +709,22 @@ void checkConstantConstructors(ConstantContext context) {
           parameters,
         );
         context.allowInitializerParameters = true;
-        var i = 0;
-        while (i < owner.steps.length) {
-          var step = owner.steps[i];
-          if (step.kind == constructorExplicit)
-            _constantInitializer(context, owner, step, false);
-          i++;
+        if (target != null) {
+          _constantArguments(
+            context,
+            target,
+            owner.syntax.initializers[0].expression,
+            false,
+            true,
+          );
+        } else {
+          var i = 0;
+          while (i < owner.plan.steps.length) {
+            var step = owner.plan.steps[i];
+            if (step.kind == constructorExplicit)
+              _constantInitializer(context, owner, step, false);
+            i++;
+          }
         }
         context.instanceScope = scope;
         context.initializerParameters = previous;
@@ -648,13 +735,112 @@ void checkConstantConstructors(ConstantContext context) {
   }
 }
 
+ConstantValue _constantInvoke(
+  ConstantContext context,
+  ConstantConstructorInfo owner,
+  List<ConstantValue> parameters,
+  bool active,
+) {
+  if (!active) {
+    // Arguments are checked by the caller; declaration qualification checks the
+    // initializer once, without evaluating a nested constructor body.
+    var type = classType(owner.classId);
+    return ConstantValue(type, type, -1, '');
+  }
+  var scope = context.instanceScope;
+  var previous = context.initializerParameters;
+  var allow = context.allowInitializerParameters;
+  var depth = context.invocations.length;
+  while (true) {
+    var call = 0;
+    while (call < context.invocations.length) {
+      var previousCall = context.invocations[call];
+      if (previousCall.owner == owner) {
+        var parameter = 0;
+        while (parameter < parameters.length &&
+            _constantSame(
+              previousCall.parameters[parameter],
+              parameters[parameter],
+            )) {
+          parameter++;
+        }
+        if (parameter == parameters.length)
+          _constantError(
+            context,
+            owner.syntax.token,
+            'cyclic constant constructor invocation',
+          );
+      }
+      call++;
+    }
+    context.invocations.add(_ConstantInvocation(owner, parameters));
+    context.instanceScope = owner.members;
+    if (owner.syntax.initializers.isNotEmpty)
+      context.initializerParameters = _constantParameterFrame(
+        owner,
+        parameters,
+      );
+    else
+      context.initializerParameters = const <ConstantValue>[];
+    context.allowInitializerParameters = true;
+    if (owner.plan.redirectTarget < 0) break;
+    var target = _constantRedirectTarget(context, owner);
+    parameters = _constantArguments(
+      context,
+      target,
+      owner.syntax.initializers[0].expression,
+      active,
+      true,
+    );
+    owner = target;
+  }
+  var fields = <ConstantValue>[];
+  var i = 0;
+  while (i < owner.fieldTypes.length) {
+    fields.add(_constantDeclaration(context, owner, i, true, false));
+    i++;
+  }
+  i = 0;
+  while (i < owner.plan.steps.length) {
+    var step = owner.plan.steps[i];
+    if (step.kind == constructorDeclaration) {
+      fields[step.field] = _constantDeclaration(
+        context,
+        owner,
+        step.index,
+        true,
+        active,
+      );
+    } else if (step.kind == constructorFormal) {
+      fields[step.field] = _constantChecked(
+        context,
+        parameters[step.index],
+        owner.fieldTypes[step.field],
+        owner.syntax.parameters[step.index].token,
+        active,
+      );
+    } else {
+      // Potential qualification was checked once at the declaration.
+      fields[step.field] = _constantInitializer(context, owner, step, true);
+    }
+    i++;
+  }
+  context.instanceScope = scope;
+  context.initializerParameters = previous;
+  context.allowInitializerParameters = allow;
+  while (context.invocations.length > depth) context.invocations.removeLast();
+  var type = classType(owner.classId);
+  var value = ConstantValue(type, type, -1, '');
+  value.elements = fields;
+  return _constantAggregate(context, value);
+}
+
 ConstantValue _constantConstructor(
   ConstantContext context,
   AstExpression expression,
   bool active,
   bool implicitConst,
 ) {
-  checkArgumentOrder(context.symbols.program, expression);
   if (expression.text == astCallNew)
     _constantError(
       context,
@@ -721,89 +907,14 @@ ConstantValue _constantConstructor(
       expression.token,
       'nongeneric constructor does not accept type arguments',
     );
-  var bindings = bindArguments(
-    context.symbols.program,
-    owner.syntax,
+  var parameters = _constantArguments(
+    context,
+    owner,
     expression,
-    1,
+    active,
+    false,
   );
-  var parameters = List<ConstantValue>.filled(
-    owner.parameterTypes.length,
-    ConstantValue(-1, tNull, 0, ''),
-  );
-  var i = 1;
-  var allowParameters = context.allowInitializerParameters;
-  context.allowInitializerParameters = false;
-  while (i < expression.children.length) {
-    var argument = expression.children[i];
-    if (argument.kind == astNamedArgument) argument = argument.children[0];
-    var parameter = bindings[i - 1];
-    var type = owner.parameterTypes[parameter];
-    var value = _evaluateConstant(context, argument, active, type, true);
-    parameters[parameter] = _constantChecked(
-      context,
-      value,
-      type,
-      argument.token,
-      active,
-    );
-    i++;
-  }
-  context.allowInitializerParameters = allowParameters;
-  i = 0;
-  while (i < parameters.length) {
-    if (parameters[i].type < 0)
-      parameters[i] = _constantDeclaration(context, owner, i, false, active);
-    i++;
-  }
-  var fields = <ConstantValue>[];
-  i = 0;
-  while (i < owner.fieldTypes.length) {
-    fields.add(_constantDeclaration(context, owner, i, true, false));
-    i++;
-  }
-  var scope = context.instanceScope;
-  var previous = context.initializerParameters;
-  var allow = context.allowInitializerParameters;
-  context.instanceScope = owner.members;
-  if (owner.syntax.initializers.isNotEmpty)
-    context.initializerParameters = _constantParameterFrame(owner, parameters);
-  else
-    context.initializerParameters = const <ConstantValue>[];
-  context.allowInitializerParameters = true;
-  i = 0;
-  while (i < owner.steps.length) {
-    var step = owner.steps[i];
-    if (step.kind == constructorDeclaration) {
-      fields[step.field] = _constantDeclaration(
-        context,
-        owner,
-        step.index,
-        true,
-        active,
-      );
-    } else if (step.kind == constructorFormal) {
-      fields[step.field] = _constantChecked(
-        context,
-        parameters[step.index],
-        owner.fieldTypes[step.field],
-        owner.syntax.parameters[step.index].token,
-        active,
-      );
-    } else if (active) {
-      // Potential qualification was checked once at the declaration.
-      fields[step.field] = _constantInitializer(context, owner, step, true);
-    }
-    i++;
-  }
-  context.instanceScope = scope;
-  context.initializerParameters = previous;
-  context.allowInitializerParameters = allow;
-  var type = classType(classId);
-  var value = ConstantValue(type, type, -1, '');
-  value.elements = fields;
-  if (!active) return value;
-  return _constantAggregate(context, value);
+  return _constantInvoke(context, owner, parameters, active);
 }
 
 ConstantValue _evaluateConstant(

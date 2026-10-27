@@ -2021,7 +2021,27 @@ class NamedChoice {
   const NamedChoice(this.value);
   const NamedChoice.named([int value = 4]) : value = value;
   const NamedChoice.other({int value = 4}) : value = value;
+  const NamedChoice.forward([int value = 3]) : this.named(value + 1);
+  const NamedChoice.chain({int value = 3}) : this.forward(value);
   int named(int extra) => value + extra;
+}
+
+RedirectOrder? redirectSeen;
+
+class RedirectOrder {
+  int declared = initializerMark(4, 40);
+  final int first;
+  final int second;
+  RedirectOrder.new(this.first, this.second) {
+    redirectSeen = this;
+    initializerMark(5, 0);
+  }
+  RedirectOrder.forward(int value)
+    : this._middle(
+        initializerMark(2, value = value + 1),
+        second: initializerMark(3, value + 1),
+      );
+  RedirectOrder._middle(int value, {int second = 6}) : this.new(value, second);
 }
 
 class NamedOnly {
@@ -2048,6 +2068,15 @@ void namedConstructors() {
   print(new NamedChoice.named(9).named(1));
   print(new NewAlias(6).value);
   print(identical(new NewAlias.new(), const NewAlias()));
+  print(identical(first, const NamedChoice.chain()));
+  print(identical(first, NamedChoice.chain()));
+  print(NamedChoice.forward().value);
+  print(NamedChoice.chain(value: 8).value);
+  initializerTrace = 0;
+  var redirected = RedirectOrder.forward(initializerMark(1, 7));
+  print(initializerTrace);
+  print(identical(redirectSeen, redirected));
+  print(<int>[redirected.first, redirected.second, redirected.declared]);
 }
 
 void main(List<String> args) {

@@ -764,6 +764,7 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "dynamic redirectedArgument() { print('rhs'); return 'wrong'; } class C { final int value; C.base(this.value) { print('body'); } C(dynamic value):this.base(value); } void main() { print('before'); C(redirectedArgument()); }",
       "dynamic badInitializer() { print('rhs'); return 'wrong'; } class C { final int value; C():value=badInitializer() { print('body'); } } void main() { print('before'); C(); }",
       "typedef F=int Function(int); String wrong(int value)=>'wrong'; int argument(){print('argument');return 1;} void main(){print('before');dynamic source=wrong;F callback=source;print(callback(argument()));}",
       "typedef F=int Function(int); int argument(){print('argument');return 1;} void main(){print('before');dynamic source=1;F callback=source;print(callback(argument()));}",
@@ -1221,7 +1222,9 @@ class NamedLibraryChoice {
   const NamedLibraryChoice.new(this.value);
   const NamedLibraryChoice.named([int value = 4]) : value = value;
   const NamedLibraryChoice.other({this.value = 4});
-  const NamedLibraryChoice._hidden(this.value);
+  const NamedLibraryChoice._hidden(int value) : this.new(value);
+  const NamedLibraryChoice.forward([int value = 3]) : this._hidden(value);
+  const NamedLibraryChoice.chain({int value = 3}) : this.forward(value);
 }
 class NamedScope {
   NamedScope.named();
@@ -1237,10 +1240,10 @@ const partChoice = NamedLibraryChoice._hidden(3);
       'named-constructors-imports.dart': r'''
 import 'named-constructors-library.dart' as direct;
 import 'named-constructors-export.dart' as p;
-@p.NamedLibraryChoice.named(5)
+@p.NamedLibraryChoice.chain(value: 5)
 @p.NamedLibraryChoice.new(6)
 void annotated() {}
-int selected([p.NamedLibraryChoice value = const p.NamedLibraryChoice.other(value: 9)]) => value.value;
+int selected([p.NamedLibraryChoice value = const p.NamedLibraryChoice.chain(value: 9)]) => value.value;
 void main() {
   const first = p.NamedLibraryChoice.named();
   print(identical(first, const direct.NamedLibraryChoice.other()));
@@ -1248,6 +1251,7 @@ void main() {
   print(p.NamedScope.named().read());
   print(selected());
   print(new p.NamedLibraryChoice.named(10).value);
+  print(identical(const p.NamedLibraryChoice.chain(), p.hiddenChoice()));
 }
 ''',
       'const-class-first.dart': "class Item { final int value; const Item(this.value); } const item = Item(7);",
@@ -1257,6 +1261,7 @@ void main() {
       'const-class-imports.dart': "import 'const-class-first.dart' as first; import 'const-class-exports.dart' as alias; import 'const-class-second.dart' as other; const value = first.Item(7); @alias.Item(7) void annotated() {} void main() { print(identical(value, alias.item)); print(identical(value, first.item)); print(identical(value, other.item)); print(value.value); }",
       'const-class-metadata-only.dart': "class UnusedTag { final int value; const UnusedTag(this.value); String toString() { print('unused metadata'); return 'tag'; } } const unused = UnusedTag(7); @unused void neverCalled() { print('never called'); } @UnusedTag(8) void main() { print(42); }",
       'const-class-finite-default.dart': "class C { final C? next; const C([this.next = const C(null)]); } void main() { const first = C(); const same = C(C(null)); print(identical(first, same)); print(first.next!.next); var one = C(); var two = C(); print(identical(one, two)); print(identical(one.next, two.next)); print(identical(one.next, first.next)); }",
+      'redirect-finite-constant.dart': "class C { final C? child; const C(int depth) : this.value(depth == 0 ? null : const C(0)); const C.value(this.child); } void main() { const value = C(1); print(value.child == null); print(value.child!.child); print(identical(value, const C.value(C(0)))); }",
     };
     for (final entry in libraries.entries) {
       File('${temporary.path}/${entry.key}').writeAsStringSync(entry.value);
@@ -1292,10 +1297,25 @@ void main() {
       File('${temporary.path}/const-class-finite-default.dart'),
       [],
     );
+    await compare(File('${temporary.path}/redirect-finite-constant.dart'), []);
     await compare(File('${temporary.path}/function-imports.dart'), []);
     await compare(File('${temporary.path}/conditional-imports.dart'), []);
     await compare(File('${temporary.path}/parts-main.dart'), []);
     final rejected = [
+      'class C{C():this();}void main(){}',
+      'class C{C.first():this.second();C.second():this.first();}void main(){}',
+      'class C{int value;C.base(this.value);C.bad(this.value):this.base(value);}void main(){}',
+      'class C{int value;C.base(this.value);C.bad():value=1,this.base(2);}void main(){}',
+      'class C{C.base();C.bad():this.base(){}}void main(){}',
+      'class C{C():this.missing();}void main(){}',
+      'class C{C.base(int value);C():this.base("wrong");}void main(){}',
+      'class C{final int value;C.base(this.value);const C(int value):this.base(value);}void main(){}',
+      'int ordinary(int value)=>value;class C{final int value;const C.base(this.value);const C(int input):this.base(ordinary(input));}void main(){}',
+      'class C{final int value;const C.base(this.value);const C(int input):this.base(input=2);}void main(){}',
+      'class C{final List<int> values;const C.base(this.values);const C(int input):this.base([input]);}void main(){}',
+      'class C{final List<int> values;const C.base(this.values);const C(int input):this.base(const[input]);}const value=C(7);void main(){}',
+      "class C{final int value;const C.base(this.value);const C(int value):this.base(value);}const Object value=true?0:const C('wrong');void main(){print(value);}",
+      'class C{final C? child;const C():this.value(const C());const C.value(this.child);}void main(){const value=C();print(value);}',
       '// @dart=2.12\nvoid main(){(List<int>.filled)(1,3);}',
       '// @dart=2.12\nvoid main(){(String.fromCharCodes)(<int>[65]);}',
       "void main(){new int.parse('7');}",

@@ -17,6 +17,13 @@ class ConstructorStep {
   const ConstructorStep(this.kind, this.index, this.field);
 }
 
+class ConstructorPlan {
+  final List<ConstructorStep> steps;
+  final int redirectTarget;
+
+  const ConstructorPlan(this.steps, this.redirectTarget);
+}
+
 Never _initError(SymbolTable symbols, int token, String message) {
   sourceError(symbols.program, symbols.program.tokens[token], message);
 }
@@ -64,14 +71,68 @@ int _initializerField(
   return members.members[member].field;
 }
 
-List<ConstructorStep> planConstructorInitializers(
+ConstructorPlan planConstructorInitializers(
   SymbolTable symbols,
   AstClass owner,
   AstFunction syntax,
   ClassMembers members,
+  List<int> classFunctions,
 ) {
-  var initialized = List<int>.filled(owner.fields.length, 0);
-  var steps = <ConstructorStep>[];
+  var redirectTarget = -1;
+  if (syntax.initializers.isNotEmpty &&
+      syntax.initializers[0].kind == astRedirectInitializer) {
+    var initializer = syntax.initializers[0];
+    if (syntax.initializers.length != 1)
+      _initError(
+        symbols,
+        initializer.token,
+        'redirect cannot have other initializers',
+      );
+    if (syntax.body.isNotEmpty || syntax.arrow.isNotEmpty)
+      _initError(
+        symbols,
+        syntax.token,
+        'redirecting constructor cannot have a body',
+      );
+    var parameter = 0;
+    while (parameter < syntax.parameters.length) {
+      var formal = syntax.parameters[parameter];
+      if (formal.fieldFormal)
+        _initError(
+          symbols,
+          formal.token,
+          'redirecting constructor cannot have field formals',
+        );
+      parameter++;
+    }
+    var call = initializer.expression;
+    var callee = call.children[0];
+    if (call.typeArguments.isNotEmpty ||
+        callee.typeArguments.isNotEmpty ||
+        callee.kind == astMember && callee.children[0].typeArguments.isNotEmpty)
+      _initError(
+        symbols,
+        call.token,
+        'nongeneric constructor does not accept type arguments',
+      );
+    var name = '';
+    if (callee.kind == astMember)
+      name = constructorSelector(symbols.program, callee.text, callee.token);
+    var ordinal = lookupConstructor(members, name);
+    if (ordinal < 0)
+      _initError(
+        symbols,
+        callee.token,
+        'unknown redirecting constructor target',
+      );
+    redirectTarget = classFunctions[ordinal];
+  }
+  var initialized = const <int>[];
+  var steps = const <ConstructorStep>[];
+  if (redirectTarget < 0) {
+    initialized = List<int>.filled(owner.fields.length, 0);
+    steps = <ConstructorStep>[];
+  }
   var f = 0;
   while (f < owner.fields.length) {
     var field = owner.fields[f];
@@ -81,12 +142,14 @@ List<ConstructorStep> planConstructorInitializers(
         field.token,
         'const constructor requires final fields',
       );
-    if (field.initializer.isNotEmpty) {
+    if (redirectTarget < 0 && field.initializer.isNotEmpty) {
       initialized[f] = 1;
       steps.add(ConstructorStep(constructorDeclaration, f, f));
     }
     f++;
   }
+  if (redirectTarget >= 0)
+    return ConstructorPlan(const <ConstructorStep>[], redirectTarget);
   var p = 0;
   while (p < syntax.parameters.length) {
     var parameter = syntax.parameters[p];
@@ -133,5 +196,33 @@ List<ConstructorStep> planConstructorInitializers(
       _initError(symbols, owner.fields[f].token, 'missing field initializer');
     f++;
   }
-  return steps;
+  return ConstructorPlan(steps, -1);
+}
+
+void checkConstructorRedirects(
+  SymbolTable symbols,
+  List<AstFunction> syntax,
+  List<ConstructorPlan> plans,
+) {
+  var states = List<int>.filled(plans.length, 0);
+  var function = 0;
+  while (function < plans.length) {
+    var current = function;
+    while (current >= 0 && states[current] == 0) {
+      states[current] = 1;
+      current = plans[current].redirectTarget;
+    }
+    if (current >= 0 && states[current] == 1)
+      _initError(
+        symbols,
+        syntax[current].initializers[0].token,
+        'redirecting constructors cannot be cyclic',
+      );
+    current = function;
+    while (current >= 0 && states[current] == 1) {
+      states[current] = 2;
+      current = plans[current].redirectTarget;
+    }
+    function++;
+  }
 }

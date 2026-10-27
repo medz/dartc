@@ -183,7 +183,7 @@ List<int> feNativeParams = <int>[];
 int feInitializingGlobal = -1;
 List<int> feClassFieldCounts = <int>[];
 List<List<int>> feClassConstructors = <List<int>>[];
-List<List<ConstructorStep>> feConstructorPlans = <List<ConstructorStep>>[];
+List<ConstructorPlan> feConstructorPlans = <ConstructorPlan>[];
 List<int> feFieldTypes = <int>[];
 List<int> feFieldIndices = <int>[];
 List<int> feOwners = <int>[];
@@ -2256,6 +2256,56 @@ int feLowerImmediateCall(AstExpression call, AstExpression expression) {
   return functions[function].result;
 }
 
+void feLowerConstructor(int function) {
+  var syntax = feFunctionNodes[function];
+  var plan = feConstructorPlans[function];
+  if (plan.redirectTarget >= 0) {
+    var call = syntax.initializers[0].expression;
+    checkArgumentOrder(feSources, call);
+    var bodyBindings = feBindings;
+    feBindings = FunctionBindings(bodyBindings.variables, -1);
+    feOperand(opLoadLocal, 0);
+    var count = feLowerArguments(call, 1, plan.redirectTarget);
+    feCall(plan.redirectTarget, count + 1);
+    feBindings = bodyBindings;
+    feEmit(opReturn);
+    return;
+  }
+  var bodyBindings = feBindings;
+  var owner = feOwners[function];
+  var steps = plan.steps;
+  var stepIndex = 0;
+  while (stepIndex < steps.length) {
+    var step = steps[stepIndex];
+    var field = feClassFieldStarts[owner] + step.field;
+    var fieldType = feFieldTypes[field];
+    feOperand(opLoadLocal, 0);
+    feOperand(opInt, feFieldIndices[field]);
+    if (step.kind == constructorDeclaration) {
+      feBindings = FunctionBindings(<LocalVariable>[], -1);
+      feLowerInContext(feFieldNodes[field].initializer[0], fieldType);
+    } else if (step.kind == constructorFormal) {
+      var parameter = feParamStarts[function] + 1 + step.index;
+      feOperand(opLoadLocal, step.index + 1);
+      feConvertValue(
+        feParamTypes[parameter],
+        fieldType,
+        syntax.parameters[step.index].token,
+      );
+    } else {
+      feBindings = FunctionBindings(bodyBindings.variables, -1);
+      feLowerInContext(syntax.initializers[step.index].expression, fieldType);
+    }
+    feBuiltinTyped(bObjectSet, 3, fieldType);
+    feEmit(opPop);
+    stepIndex++;
+  }
+  feBindings = bodyBindings;
+  if (syntax.body.length != 0) feLowerStatement(syntax.body[0]);
+  feOperand(opLoadLocal, 0);
+  feEmit(opReturn);
+}
+
 int feLowerConstructorCall(
   AstExpression call,
   int owner,
@@ -3743,19 +3793,21 @@ void parseSource(SourceProgram source) {
   checkInitializers(feSymbols, syntax);
   var plannedFunction = 0;
   while (plannedFunction < functions.length) {
-    var steps = const <ConstructorStep>[];
+    var plan = const ConstructorPlan(<ConstructorStep>[], -1);
     if (feConstructors[plannedFunction] == 1) {
       var owner = feOwners[plannedFunction];
-      steps = planConstructorInitializers(
+      plan = planConstructorInitializers(
         feSymbols,
         feClassNodes[owner],
         feFunctionNodes[plannedFunction],
         feMembers[owner],
+        feClassConstructors[owner],
       );
     }
-    feConstructorPlans.add(steps);
+    feConstructorPlans.add(plan);
     plannedFunction++;
   }
+  checkConstructorRedirects(feSymbols, feFunctionNodes, feConstructorPlans);
   var sourceFunctions = functions.length;
   var bodyBindings = <FunctionBindings>[];
   var bindingFunction = 0;
@@ -3891,43 +3943,7 @@ void parseSource(SourceProgram source) {
     feBeginFunction(f, bodyBindings[f]);
     var functionSyntax = feFunctionNodes[f];
     if (feConstructors[f] == 1) {
-      var bodyBindings = feBindings;
-      var owner = feOwners[f];
-      var steps = feConstructorPlans[f];
-      var stepIndex = 0;
-      while (stepIndex < steps.length) {
-        var step = steps[stepIndex];
-        var field = feClassFieldStarts[owner] + step.field;
-        var fieldType = feFieldTypes[field];
-        feOperand(opLoadLocal, 0);
-        feOperand(opInt, feFieldIndices[field]);
-        if (step.kind == constructorDeclaration) {
-          feBindings = FunctionBindings(<LocalVariable>[], -1);
-          feLowerInContext(feFieldNodes[field].initializer[0], fieldType);
-        } else if (step.kind == constructorFormal) {
-          var parameter = feParamStarts[f] + 1 + step.index;
-          feOperand(opLoadLocal, step.index + 1);
-          feConvertValue(
-            feParamTypes[parameter],
-            fieldType,
-            functionSyntax.parameters[step.index].token,
-          );
-        } else {
-          feBindings = FunctionBindings(bodyBindings.variables, -1);
-          feLowerInContext(
-            functionSyntax.initializers[step.index].expression,
-            fieldType,
-          );
-        }
-        feBuiltinTyped(bObjectSet, 3, fieldType);
-        feEmit(opPop);
-        stepIndex++;
-      }
-      feBindings = bodyBindings;
-      if (functionSyntax.body.length != 0)
-        feLowerStatement(functionSyntax.body[0]);
-      feOperand(opLoadLocal, 0);
-      feEmit(opReturn);
+      feLowerConstructor(f);
     } else if (functionSyntax.arrow.length != 0) {
       var expression = functionSyntax.arrow[0];
       if (feInfersLocalResult(f)) {
