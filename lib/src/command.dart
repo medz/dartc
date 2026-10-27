@@ -47,6 +47,11 @@ PackageConfig? compilerPackages(String input, String cwd, String? explicit) {
 }
 
 void runCompiler(List<String> args) {
+  Never argumentError(String message) {
+    print(message);
+    hostExit(64);
+  }
+
   if (args.length == 0 || args[0] == '--help') {
     print(
       'Usage: dartc <source.dart> [-o <file>] [--target macos-arm64|linux-arm64]',
@@ -73,8 +78,7 @@ void runCompiler(List<String> args) {
       continue;
     }
     if (argument == args.length) {
-      print('Missing value for ' + option);
-      hostExit(64);
+      argumentError('Missing value for ' + option);
     }
     String value = args[argument];
     if (option == '-o') {
@@ -89,8 +93,7 @@ void runCompiler(List<String> args) {
       } else if (value == 'linux-arm64') {
         targetOS = 1;
       } else {
-        print('Unsupported target: ' + value);
-        hostExit(64);
+        argumentError('Unsupported target: ' + value);
       }
     } else if (option == '--emit') {
       if (value == 'exe')
@@ -102,24 +105,22 @@ void runCompiler(List<String> args) {
       else if (value == 'static')
         imageKind = 3;
       else {
-        print('Unsupported output: ' + value);
-        hostExit(64);
+        argumentError('Unsupported output: ' + value);
       }
     } else if (option == '--export') {
       selectedExport = value;
     } else {
-      print('Unknown option: ' + option);
-      hostExit(64);
+      argumentError('Unknown option: ' + option);
     }
     argument = argument + 1;
   }
   if (imageKind != 0 && targetOS != 0) {
-    print('Library output currently supports macOS ARM64.');
-    hostExit(64);
+    argumentError('Library output currently supports macOS ARM64.');
   }
   if (imageKind != 0 && selectedExport == '') {
-    print('Library output requires --export <Pointer.fromFunction binding>.');
-    hostExit(64);
+    argumentError(
+      'Library output requires --export <Pointer.fromFunction binding>.',
+    );
   }
   var cwd = hostCurrentDirectory();
   var inputUri = sourceInputUri(cwd, input);
