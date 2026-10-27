@@ -1,14 +1,6 @@
-import 'ast.dart';
-import 'source.dart';
-
-String parameterName(AstParameter parameter) {
-  var name = parameter.name;
-  if (parameter.kind == astNamedParameter &&
-      parameter.fieldFormal &&
-      name.startsWith('_'))
-    return name.substring(1);
-  return name;
-}
+import '../ast.dart';
+import '../source.dart';
+import 'parameters.dart';
 
 void checkArgumentOrder(SourceProgram source, AstExpression call) {
   if (sourceVersionAtLeast(source, source.tokens[call.token].source, 2, 17))

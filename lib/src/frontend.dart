@@ -1,5 +1,6 @@
 import 'ast.dart';
-import 'arguments.dart';
+import 'frontend/arguments.dart';
+import 'frontend/parameters.dart';
 import 'binding.dart';
 import 'constants.dart';
 import 'constant_data.dart';
@@ -1443,39 +1444,7 @@ void feResolveFunctionDefaults(int f) {
   while (p < parameters.length) {
     var parameter = parameters[p];
     feCheckMetadata(parameter.metadata, owner);
-    if (parameter.kind == astNamedParameter) {
-      var privateFieldFormal =
-          parameter.fieldFormal && parameter.name.startsWith('_');
-      if (privateFieldFormal &&
-          !sourceVersionAtLeast(
-            feSources,
-            feTokens[parameter.token].source,
-            3,
-            12,
-          ))
-        feAstError(
-          parameter.token,
-          'private named field-formals require language version 3.12',
-        );
-      var name = parameterName(parameter);
-      if (name == '' ||
-          name.startsWith('_') ||
-          !scanLetter(name.codeUnitAt(0)) ||
-          tokenIsReserved(Token(tokenIdentifier, name, 0, 0, 0)))
-        feAstError(parameter.token, 'named parameter must have a public name');
-      var other = 0;
-      while (other < parameters.length) {
-        var candidate = parameters[other];
-        if (other != p &&
-            (candidate.kind == astNamedParameter &&
-                    parameterName(candidate) == name ||
-                privateFieldFormal &&
-                    (candidate.name == parameter.name ||
-                        candidate.name == name)))
-          feAstError(parameter.token, 'conflicting parameter name ' + name);
-        other++;
-      }
-    }
+    checkParameterName(feSources, parameters, p);
     if (parameter.kind != astRequiredPositional && !parameter.required) {
       var value = omitted;
       var type = feParamTypes[offset + p];

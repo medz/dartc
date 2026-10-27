@@ -1,5 +1,5 @@
 import 'ast.dart';
-import 'arguments.dart';
+import 'frontend/arguments.dart';
 import 'ir.dart';
 import 'members.dart';
 import 'resolve_type.dart';

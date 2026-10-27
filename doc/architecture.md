@@ -66,7 +66,7 @@
 
 ### 当前源码组织
 
-编译器主要文件仍平铺在 `lib/src`，标准库源码位于独立的 `std` 目录；目标运行时主要集中在 `runtime.dart`。以下按实际职责归组，不表示这些分组已经是目录：
+编译器主要文件仍平铺在 `lib/src`，参数声明与实参绑定位于 `frontend`，标准库源码位于独立的 `std` 目录；目标运行时主要集中在 `runtime.dart`。以下按实际职责归组：
 
 ```text
 bin/dartc.dart
@@ -76,7 +76,9 @@ lib/src/
   scanner.dart, ast.dart, parser.dart             词法与语法结构
   symbols.dart, binding.dart, members.dart         库、局部与成员声明绑定
   types.dart, resolve_type.dart, typing.dart       语义类型与类型规则
-  flow.dart, arguments.dart, initialization.dart  流分析、参数与初始化检查
+  flow.dart, initialization.dart                 流分析与初始化检查
+  frontend/
+    parameters.dart, arguments.dart              形参名称校验与实参绑定
   constants.dart, constant_data.dart              常量语义值与只读数据
   frontend.dart                                  声明收集、语义接线与 AST lowering
   ir.dart, ssa.dart, optimize.dart, reach.dart      IR、优化与可达性
@@ -203,7 +205,7 @@ AST 只记录语法结构，例如调用的目标表达式、实参和类型实�
 
 当前模块拥有关系如下；语言兼容范围由 [specs/](../specs/README.md) 维护。
 
-现有 scanner 按文件产生带源身份与 UTF-16 位置的 Token，parser 独立构造 AST，`source.dart` 与 `symbols.dart` 分别保存库图和声明身份，库查找区分读取与写入目标。`binding.dart` 在 lowering 前为局部引用建立声明 ID，`members.dart` 按所属类建立成员声明命名空间；声明身份与字段偏移、IR 函数 ID 分开映射。`resolve_type.dart`、`typing.dart`、`flow.dart` 与 `constants.dart` 分别承担类型解析、类型规则、流事实和常量求值。`arguments.dart` 保存实参到形参的对应关系，调用求值与物理参数排列分开。
+现有 scanner 按文件产生带源身份与 UTF-16 位置的 Token，parser 独立构造 AST，`source.dart` 与 `symbols.dart` 分别保存库图和声明身份，库查找区分读取与写入目标。`binding.dart` 在 lowering 前为局部引用建立声明 ID，`members.dart` 按所属类建立成员声明命名空间；声明身份与字段偏移、IR 函数 ID 分开映射。`resolve_type.dart`、`typing.dart`、`flow.dart` 与 `constants.dart` 分别承担类型解析、类型规则、流事实和常量求值。`frontend/parameters.dart` 拥有形参名称映射与声明检查，`frontend/arguments.dart` 保存实参到形参的对应关系；调用求值与物理参数排列分开。
 
 语义类型、流类型与存储槽表示分别保存，在 lowering 边界显式转换。常量池的语义值与映像数据分开，getter 引用紧凑只读数据，由 Dart 运行时循环构造；字符串和嵌套 getter 使用相对地址，子 getter 是显式可达性依赖。全局声明 ID 保持稳定，最终代码引用的槽才分配映像存储；重定位和全局根使用同一物理槽映射，布局裁剪不改变初始化语义。缓存的多线程发布仍需随线程与 GC 契约建立。
 
