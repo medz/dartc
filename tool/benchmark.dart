@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'src/process.dart';
+import 'src/program_benchmark.dart';
 
 Future<String> sha256(List<int> bytes) async {
   final process = await Process.start(
@@ -57,6 +58,10 @@ num median(List<num> values) {
 
 Future<void> main(List<String> args) async {
   final root = File.fromUri(Platform.script).parent.parent.absolute.path;
+  if (args.isNotEmpty && args[0] == '--program') {
+    await programBenchmark(args, root);
+    return;
+  }
   var seed = '$root/build/dartc-seed';
   final comparing = args.length == 3 && args[0] == '--compare';
   if (args.length == 2 && args[0] == '--seed') {
@@ -64,7 +69,9 @@ Future<void> main(List<String> args) async {
   } else if (args.isNotEmpty && !comparing) {
     stderr.writeln(
       'Usage: dart tool/benchmark.dart [--seed <native compiler>]\n'
-      '       dart tool/benchmark.dart --compare <baseline-native> <candidate-native>',
+      '       dart tool/benchmark.dart --compare <baseline-native> <candidate-native>\n'
+      '       dart tool/benchmark.dart --program <entry> [--seed <native>] [--packages <config>]\n'
+      '            [--input <relative-file>]... [--check-output <relative-file>]... -- [args...]',
     );
     exitCode = 64;
     return;
