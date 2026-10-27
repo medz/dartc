@@ -29,6 +29,14 @@ bool tokenIsReserved(Token token) {
   return words.indexOf('|' + token.text + '|') >= 0;
 }
 
+// Type declaration names exclude built-in identifiers, but retain contextual words.
+bool tokenIsTypeDeclarationIdentifier(Token token) {
+  if (token.kind != tokenIdentifier || tokenIsReserved(token)) return false;
+  var words =
+      '|abstract|as|covariant|deferred|dynamic|export|external|extension|factory|Function|get|implements|import|interface|late|library|mixin|operator|part|required|set|static|typedef|';
+  return words.indexOf('|' + token.text + '|') < 0;
+}
+
 class Scanner {
   String source;
   List<Token> tokens;

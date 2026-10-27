@@ -28,6 +28,11 @@ import '${library.resolve('ssa.dart')}';
 import '${library.resolve('optimize.dart')}';
 import '${library.resolve('types.dart')}';
 import '${library.resolve('verify_ssa.dart')}';
+import '${library.resolve('machine.dart')}';
+import '${library.resolve('allocate.dart')}';
+import '${library.resolve('emit.dart')}';
+import '${library.resolve('reach.dart')}';
+import '${library.resolve('format.dart')}';
 
 SsaFunction named(List<SsaFunction> program, String name) {
   var i = 0;
@@ -47,6 +52,15 @@ SsaInstruction operation(SsaFunction function, int op) {
   ssaError('test operation missing');
 }
 
+int templateParameter() {
+  var i = 0;
+  while (i < dartTypes.length) {
+    if (dartTypes[i].kind == kTypeParameter) return i;
+    i++;
+  }
+  ssaError('test type parameter missing');
+}
+
 void corrupt(List<SsaFunction> program, String mode) {
   final order = named(program, 'order');
   final diamond = named(program, 'diamond');
@@ -61,6 +75,14 @@ void corrupt(List<SsaFunction> program, String mode) {
     add.inputs[0] = order.valueTypes.length;
   } else if (mode == 'metadata') {
     order.valueTypes[add.value] = tBool;
+  } else if (mode == 'type-parameter' || mode == 'nested-type-parameter') {
+    var type = templateParameter();
+    if (mode == 'nested-type-parameter')
+      type = functionType(nullableType(type), <int>[listType(type)]);
+    order.valueTypes[add.value] = type;
+    add.resultType = type;
+  } else if (mode == 'format-type-parameter') {
+    operation(named(program, 'tested'), opTypeTest).target = templateParameter();
   } else if (mode == 'order') {
     add.inputs[0] = operation(order, opMul).value;
   } else if (mode == 'dominance') {
@@ -144,12 +166,19 @@ void main(List<String> args) {
   optimizeSsa(program);
   verifySsa(program);
   corrupt(program, args[2]);
-  verifySsa(program);
+  if (args[2] != 'format-type-parameter') verifySsa(program);
+  if (args[2] == 'valid' || args[2] == 'format-type-parameter') {
+    final selected = selectMachine(program, reachableFunctions(program));
+    allocateRegisters(selected);
+    generateCode(selected);
+    createExecutable();
+  }
   print('SSA verified');
 }
 ''';
 
 const taskSource = '''
+typedef UnusedTemplate<T> = List<T>;
 int callee(int value) => value + 1;
 int order(int value) {
   final next = value + 1;
@@ -173,6 +202,7 @@ int loop(int count) {
   return result;
 }
 int checked(dynamic value) => value as int;
+bool tested(dynamic value) => value is int;
 void dropped(dynamic value) { value as int; }
 int apply(int Function(int) function, int value) => function(value);
 void main() {
@@ -180,6 +210,7 @@ void main() {
   print(diamond(true, 4));
   print(loop(3));
   print(checked(7));
+  print(tested(7));
   dropped(1);
   print(apply(callee, 8));
 }
@@ -219,6 +250,9 @@ Future<void> main(List<String> args) async {
       'undefined': 'undefined value',
       'invalid-value': 'invalid value',
       'metadata': 'result metadata',
+      'type-parameter': 'uninstantiated executable type',
+      'nested-type-parameter': 'uninstantiated executable type',
+      'format-type-parameter': 'uninstantiated runtime type',
       'order': 'use before definition',
       'dominance': 'definition does not dominate use',
       'edge-target': 'edge target',
@@ -253,9 +287,12 @@ Future<void> main(List<String> args) async {
         completed(result);
         check(result.stdout == 'SSA verified\n', result.stdout);
       } else {
+        final prefix = entry.key == 'format-type-parameter'
+            ? 'dartc: uninstantiated runtime type'
+            : 'dartc SSA: verify ';
         check(
           result.exitCode == 1 &&
-              result.stdout.startsWith('dartc SSA: verify ') &&
+              result.stdout.startsWith(prefix) &&
               result.stdout.contains(entry.value),
           '${entry.key}: ${jsonEncode(result.toJson())}',
         );

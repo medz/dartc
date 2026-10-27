@@ -14,7 +14,7 @@
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
 | §20.1 静态类型 | 部分实现 | 区分 `int`、`num`、`bool`、`String`、`Null`、`Never`、`Object`、`dynamic`、`void`、可空类型、`List<T>`、函数签名、Function 上界和已声明类；局部 value 声明遮蔽同名类型/prefix 时拒绝，函数签名不看 body locals；尚非完整 Dart 类型模型。 | [types.dart](../lib/src/types.dart)：`DartType`；[values.dart](../test/fixtures/values.dart)：`typeChecks`、`staticContexts`、`neverContexts`；[behavior_test.dart](../test/behavior_test.dart)：`program/localFunctions`、`rejected`。 |
-| §20.1 类型名解析 | 部分实现 | 按声明库、导入前缀解析类型，检查已支持类型的参数数量；没有通用类型参数作用域。 | [resolve_type.dart](../lib/src/resolve_type.dart)：`resolveType`；[behavior_test.dart](../test/behavior_test.dart)：`libraries`、`rejected`。 |
+| §20.1 类型名解析 | 部分实现 | 按声明库、导入前缀和 part 的库身份解析类型；别名类型参数具有独立声明身份与作用域，可遮蔽同名类或导入前缀，检查参数数量及边界。泛型类/函数的参数作用域仍未接入。 | [resolve_type.dart](../lib/src/resolve_type.dart)：`resolveType`；[behavior_test.dart](../test/behavior_test.dart)：`libraries`、`rejected`。 |
 | §20.2 动态类型系统 | 部分实现 | `is`、`is!`、`as` 与隐式动态转换使用实际运行时类型；覆盖嵌套 List、类、函数签名与可空类型；不含一般动态成员分派或 dynamic 函数值调用。 | [runtime.dart](../lib/src/runtime.dart)：`rtValueMatches`、`rtValueCast`；[values.dart](../test/fixtures/values.dart)：`typeChecks`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
 | §20.4 子类型 | 部分实现 | 有 `Never` 底类型、`int <: num`、空性、支持类型到 `Object` 的关系、List 协变及函数参数逆变/结果协变；类之间仅识别同一声明，尚无继承层次的子类型计算。 | [types.dart](../lib/src/types.dart)：`typeIsSubtype`；[runtime.dart](../lib/src/runtime.dart)：`rtTypeSubtype`；[values.dart](../test/fixtures/values.dart)：`typeChecks`、`staticContexts`、`neverContexts`。 |
 | [§20.5–20.6 函数类型与 `Function`][function-types] | 部分实现 | 顶层、非捕获局部与匿名函数共用结构签名、参数逆变/返回协变、Function 上界和运行时测试/转换/List 写入检查；局部缺省结果与匿名结果从 typed body 推断，声明身份不充当类型身份。源函数值签名仍限非泛型必需位置参数；可选/命名/泛型值签名与捕获未实现，裸 Function 尚不能直接调用。 | [types.dart](../lib/src/types.dart) `functionType()`、`typeIsSubtype()`；[frontend.dart](../lib/src/frontend.dart) `feInferLocalResult()`、`feLowerFunctionExpression()`；[runtime.dart](../lib/src/runtime.dart) `rtTypeSubtype()`；[behavior_test.dart](../test/behavior_test.dart) `program/localFunctions()`、`program/anonymousFunctions()`、`failingValues` |
@@ -23,9 +23,10 @@
 | §20.10 参数化类型 | 部分实现 | 保留完整嵌套 `List<T>` 实际类型；协变视图写入按底层元素类型检查。`Pointer<T>` 仅有受限 FFI 语义，不能视为一般泛型实现。 | [types.dart](../lib/src/types.dart)：`listType`；[runtime.dart](../lib/src/runtime.dart)：`rtListGet`、`rtListSet`、`rtListAdd`；[values.dart](../test/fixtures/values.dart)：`staticContexts`、`typeChecks`。 |
 | §20.10.2 最小上界 | 部分实现 | 对支持类型、空性、嵌套 List 和函数签名求公共类型，区分 `void` 与 `dynamic`；不是完整约束求解或所有 Dart 类型的 LUB 算法。 | [types.dart](../lib/src/types.dart)：`joinTypes`；[values.dart](../test/fixtures/values.dart)：`staticContexts`、`coalescingContexts`、`functionValues`。 |
 | §20.11 相同类型 | 部分实现 | 已支持类型按结构复用类型身份；运行时检查保留实际 List 参数和函数签名。尚无一般 `Type` 值及其公开操作。 | [types.dart](../lib/src/types.dart)：`listType`、`nullableType`、`classType`、`functionType`；[values.dart](../test/fixtures/values.dart)：`constantLists`、`typeChecks`。 |
-| §15 泛型 | 部分实现 | 能使用内建 `List<T>`；泛型类、泛型函数或方法声明未实现。 | [resolve_type.dart](../lib/src/resolve_type.dart)：`resolveType`；[values.dart](../test/fixtures/values.dart)：`typeChecks`。 |
-| §15.1 型变 | 部分实现 | List 元素参数有协变关系和运行时写入检查；用户声明的型变、覆盖和 `covariant` 参数规则未实现。 | [types.dart](../lib/src/types.dart)：`typeIsSubtype`；[runtime.dart](../lib/src/runtime.dart)：`rtListSet`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
-| [§20.3 类型别名][aliases] | 部分实现 | 类型注解中支持非泛型别名、声明库解析、前向展开与循环拒绝；普通 RHS 要求语言版本至少 2.13，2.12 仅接受直接且非可空的函数类型 RHS。Function 不能作类型别名名。用户类的非泛型别名及别名链可调用其已实现构造器，普通、new、const 与 .new 都复用实际类身份和私有性；.new 仍要求调用点版本至少 2.15。可空别名也可选择构造器及静态成员；可空别名的结果类型差异见下方兼容说明。类的静态成员访问见[类追踪](classes.md)。内建 List/String 构造别名及泛型别名仍缺，FFI 别名保留独立原生签名。 | [symbols.dart](../lib/src/symbols.dart)：`TypeAlias`；[resolve_type.dart](../lib/src/resolve_type.dart)：`resolveType`、`resolvedClassOwner`；[values.dart](../test/fixtures/values.dart)：`namedConstructors`；[behavior_test.dart](../test/behavior_test.dart)：`function-imports.dart`、`named-constructors-imports.dart`、`rejected`；[library_test.dart](../test/library_test.dart)。 |
+| [§15 类型参数][type-parameters] | 部分实现 | 泛型别名保存有序参数及上界，以声明身份绑定和代入；保留 List、可空类型及函数签名中的参数结构，检查未使用声明的重复名、作用域、边界与循环。[3.7 起 `_` 参数][wildcards]保留身份和实参数量，但不引入可查找名字；此前按普通参数绑定。泛型类、泛型函数/方法及函数类型自身的泛型参数仍未实现。 | [ast.dart](../lib/src/ast.dart)：`AstTypeParameter`；[types.dart](../lib/src/types.dart)：`TypeParameterInfo`、`substituteType`；[resolve_type.dart](../lib/src/resolve_type.dart)：`resolveTypeAliasDeclarations`；[values.dart](../test/fixtures/values.dart)：`genericAliases`；[behavior_test.dart](../test/behavior_test.dart)：`generic-aliases-imports.dart`、`rejectedTypeAliases`。 |
+| §15.1 型变 | 部分实现 | List 元素协变、函数参数逆变/结果协变参与别名参数的型变计算及实例化；List 写入仍检查实际元素类型。用户声明的型变、覆盖和 `covariant` 参数规则未实现。 | [types.dart](../lib/src/types.dart)：`typeIsSubtype`；[runtime.dart](../lib/src/runtime.dart)：`rtListSet`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
+| [§20.3 类型别名][aliases] | 部分实现 | 支持现代 `=` 形式及旧式函数 typedef，含泛型参数、省略结果/参数类型和嵌套函数形参；两种拼写复用类型代入、前向和链式展开。在声明库下将真实参数代入当前 List、函数签名、可空及用户类模型。普通 RHS 要求至少 2.13，2.12 只接受直接且非可空的函数类型 RHS；Function 不能作别名名。用户类别名复用实际类构造计划、私有性及常量身份，`.new` 仍要求 2.15；可空结果差异见下文。内建 List/String 构造别名、泛型函数类型和旧式 typedef 的 covariant 形参仍缺；FFI 别名保留独立原生签名，泛型原生模板尚未支持。 | [symbols.dart](../lib/src/symbols.dart)：`TypeAlias`；[resolve_type.dart](../lib/src/resolve_type.dart)：`resolveType`、`resolveDeclarationType`；[values.dart](../test/fixtures/values.dart)：`genericAliases`、`legacyAliases`、`namedConstructors`；[behavior_test.dart](../test/behavior_test.dart)：`generic-aliases-imports.dart`、`named-constructors-imports.dart`、`rejected`。 |
+| [§15.2 超界类型][super-bounded-types]、[§15.3 实例化到界][instantiate-to-bound] | 部分实现 | 泛型别名区分显式实参检查、合法超界类型与原始别名的默认实例化；依赖和 F-bound 按参数身份与型变求默认值，替换所需的下界使用 Never；无显式上界的原始参数按规则取 dynamic。原始类型用于上界时须满足简单界限制。只覆盖现有类型模型，未覆盖一般泛型类/函数的推断与运行时实例化。 | [types.dart](../lib/src/types.dart)：`instantiateTypeParameters`、`superBoundedType`；[resolve_type.dart](../lib/src/resolve_type.dart)：`resolveTypeAliasDeclarations`；[values.dart](../test/fixtures/values.dart)：`genericAliases`；[behavior_test.dart](../test/behavior_test.dart)：`rejectedTypeAliases`。 |
 
 ## 空安全、推断与流分析
 
@@ -45,7 +46,6 @@
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
-| §15.2–15.3 超界类型与实例化到界 | 未实现 | 没有类型参数、边界或通用实例化算法。 | [resolve_type.dart](../lib/src/resolve_type.dart)、[types.dart](../lib/src/types.dart)；尚无行为验证。 |
 | §20.8 `FutureOr` | 未实现 | `Future`、`FutureOr`、异步类型规则未接入。 | [types.dart](../lib/src/types.dart) 尚无对应类型；尚无行为验证。 |
 | Records 与扩展类型 | 未实现 | 记录类型、扩展类型及相应关系未实现；已有 `Never` 和有限不相交类型分析不代表这些规则成立。 | [types.dart](../lib/src/types.dart)、[resolve_type.dart](../lib/src/resolve_type.dart)。 |
 | 完整类型规范及诊断覆盖 | 待核对 | 完整类型关系、推断及诊断的一致性覆盖尚缺。 | [behavior_test.dart](../test/behavior_test.dart) 为差分入口。 |
@@ -56,7 +56,11 @@
 [values.dart](../test/fixtures/values.dart) 用实际 List 推断、类型检查、成员消费和副作用使静态类型区别可观察。
 运行时失败以进程退出表示；错误对象、可捕获异常及完整诊断兼容未实现。
 
-可空类别名的隐式命名及 `.new` 调用，SDK 3.13.7 的 CFE 与 analyzer 对结果 nullability 的处理有差异：CFE 保留可空结果，未命名、显式 `new` 和 `const` 路径返回非空结果；analyzer 将这些结果均按非空类处理。dartc 的行为测试以实际 SDK 执行类型为对照。固定的 2.13/2.15 特性文档未单独解释这个差异，不据此宣称规范给出同样区分。
+类型参数注解在整组参数作用域中检查，typedef 自身注解仍取外围作用域。元数据构造和列表类型参数按展开后的实际类型依赖检查常量资格：擦除参数的 `Phantom<T> = Marker` 可用于注解构造及 `const <Phantom<T>>[]`，仍依赖 T 的 `const <T>[]` 被拒绝。SDK 3.13.7 CFE 接受前一种常量 List 注解，而 analyzer 报错；行为用例放在生成的库程序中保留这一差异，不将它解释为规范给出相反结论。
+
+SDK 3.13.7 对跨库带前缀的泛型别名到非泛型类的 `p.A<int>()` 隐式构造报类型实参数量错误，而同库调用、显式 `new p.A<int>()` 及命名形式被接受。固定 2.13 规则允许 qualified alias 用于实例创建；此差异待核对，不据此增加前缀名称分支或判定该形式在语言上非法。
+
+非泛型可空类别名的隐式命名及 `.new` 调用，SDK 3.13.7 的 CFE 与 analyzer 对结果 nullability 的处理有差异：CFE 保留可空结果，未命名、显式 `new` 和 `const` 路径返回非空结果；analyzer 将这些结果均按非空类处理。泛型可空类别名的 CFE 行为又有区别：省略实参的调用结果保持可空，显式实参的调用结果非空。dartc 尚未完整区分这些构造结果。固定的 2.13/2.15 特性文档未单独解释这组差异，不据此宣称规范给出同样区分。
 
 [draft]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex
 [pdf]: https://dart.dev/to/spec-draft
@@ -70,3 +74,8 @@
 [aliases]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.13/nonfunction-type-aliases/feature-specification.md
 [function-types]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L22447-L22501
 [anonymous-inference]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/inference.md#L263-L372
+
+[type-parameters]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L7413-L7478
+[instantiate-to-bound]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L7882-L8357
+[wildcards]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/wildcard-variables/feature-specification.md#L114-L126
+[super-bounded-types]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L7685-L7880

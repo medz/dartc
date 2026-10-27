@@ -902,6 +902,64 @@ void main() {
       }
     }
     final libraries = {
+      'generic-aliases-library.dart': r'''
+// @dart=3.7
+library generic.aliases;
+import 'dart:ffi';
+part 'generic-aliases-part.dart';
+typedef Rows<T extends num>=List<T?>;
+typedef TypedList<T extends List<int>>=T;
+typedef TypedNested<T extends List<List<int>>>=T;
+typedef NativeShadow<Int64> = Int64 Function(Int64);
+typedef PrivateList<T> = List<_Scalar>;
+class Carrier {
+  final int value;
+  const Carrier([this.value=7]);
+  const Carrier.named(this.value);
+  static int twice(int value)=>value*2;
+}
+typedef ClassAlias<T extends num> = Carrier;
+typedef Identity<T> = T;
+typedef Concrete = Identity<Carrier>;
+typedef Phantom<T> = Carrier;
+typedef Annotated<@pragma('OtherTool:hint',const <Phantom<T>>[]) T> = List<T>;
+''',
+      'generic-aliases-part.dart': r'''
+// @dart=3.7
+part of 'generic-aliases-library.dart';
+typedef _Scalar = int;
+typedef Transform<T> = T Function(T);
+typedef _ = int;
+typedef WildcardLookup<_> = List<_>;
+''',
+      'generic-aliases-export.dart': "export 'generic-aliases-library.dart' show Rows,TypedList,TypedNested,NativeShadow,PrivateList,Transform,ClassAlias,Concrete,Carrier,Annotated,WildcardLookup;",
+      'generic-aliases-old.dart': r'''
+// @dart=2.12
+typedef _ Transform<_>(_ value);
+int next(int value)=>value+1;
+int current(){Transform<int> callback=next;return callback(1);}
+''',
+      'generic-aliases-imports.dart': r'''
+import 'generic-aliases-export.dart' as p;
+import 'generic-aliases-old.dart' as old;
+typedef _Scalar=String;
+int step(int value)=>value+1;
+void main(){
+  p.Rows<int> values=[null,7];print(values);
+  p.TypedList<List<int>> typed=[2];print(typed);
+  p.TypedNested<List<List<int>>> nested=[[3]];print(nested);
+  p.NativeShadow<int> nativeShadow=step;print(nativeShadow(8));
+  p.PrivateList<bool> private=[1];print(private);
+  p.Transform<int> callback=step;print(callback(7));
+  print(new p.ClassAlias<int>(9).value);
+  print(const p.ClassAlias<int>.named(10).value);
+  print(p.ClassAlias.twice(3));
+  print(<int>[p.Concrete.twice(2),const p.Concrete(11).value]);
+  p.WildcardLookup<bool> ignored=[7];print(ignored);
+  p.Annotated<int> annotated=[1];print(annotated);
+  print(old.current());
+}
+''',
       'parts-dep.dart':
           'const int delta=7;class Value{int amount;Value(this.amount);}',
       'parts-main.dart': r'''
@@ -1359,9 +1417,34 @@ void main() {
     );
     await compare(File('${temporary.path}/redirect-finite-constant.dart'), []);
     await compare(File('${temporary.path}/static-members-imports.dart'), []);
+    await compare(File('${temporary.path}/generic-aliases-imports.dart'), []);
     await compare(File('${temporary.path}/function-imports.dart'), []);
     await compare(File('${temporary.path}/conditional-imports.dart'), []);
     await compare(File('${temporary.path}/parts-main.dart'), []);
+    final rejectedTypeAliases = [
+      'typedef int Invalid(int value=1);void main(){}',
+      'typedef int Invalid(var value);void main(){}',
+      'typedef int Invalid(int value,int value);void main(){}',
+      'typedef T Invalid<T,T>(T value);void main(){}',
+      'typedef int Invalid = int Function();void main(){}',
+      'typedef Number<T extends num> = int;typedef Erase<T> = int;typedef Invalid<T> = Erase<Number<T>>;void main(){}',
+      'class C{C();}typedef Identity<T> = T?;void main(){Identity<C>();}',
+      'class C{static int value()=>1;}typedef A<T> = C;void main(){print(A<int>.value());}',
+      'typedef Invalid<T extends T> = List<T>;void main(){}',
+      'typedef Erase<T> = int;typedef A<T> = Erase<B<T>>;typedef B<T> = A<T>;void main(){}',
+      'class C{}typedef A<T extends num> = C;typedef Invalid = A<dynamic>;void main(){}',
+      'typedef Erase<T> = int;typedef A<T extends Erase<T>> = T;typedef B<T extends A> = T;void main(){B b=7;print(b);}',
+      'typedef Invalid<T,T> = int;void main(){}',
+      'typedef N<T extends num> = List<T>;typedef Invalid<T> = N<T>;void main(){}',
+      'typedef N<T extends num> = List<T>;N<String>? value;void main(){}',
+      'typedef Ignored<_,_> = int;Ignored<int> value=1;void main(){}',
+      'const tag=1;typedef Invalid<@tag tag> = List<tag>;void main(){}',
+      "typedef Invalid<@pragma('OtherTool:hint',const <T>[]) T> = List<T>;void main(){}",
+      "import 'generic-aliases-export.dart' as p;typedef Invalid<p> = p.Carrier;void main(){}",
+      '// @dart=2.12\ntypedef Invalid<T> = List<T>;void main(){}',
+      '// @dart=3.6\ntypedef Invalid<_,_> = int;void main(){}',
+      'typedef Invalid<get> = int;void main(){}',
+    ];
     final rejected = [
       'class C{C.named();}typedef A=C?;void main(){List<C> values=[A.named()];print(values);}',
       "import 'named-constructors-export.dart' as p;typedef LocalAlias=p.NamedLibraryChoice;void main(){LocalAlias._hidden(3);}",
@@ -1711,10 +1794,19 @@ void main() {
     }) async {
       if (checkSdk) {
         final expected = await capture(sdk, [
+          'compile',
+          'kernel',
           ...sdkOptions(options),
           invalid.path,
+          '-o',
+          '${invalid.path}.dill',
         ], workingDirectory: workingDirectory);
-        if (expected.exitCode == 0)
+        if (expected.exitCode == null ||
+            expected.exitCode == 0 ||
+            expected.timedOut ||
+            expected.outputLimited ||
+            expected.startError != null ||
+            expected.captureError != null)
           throw StateError('Expected SDK rejection for ${invalid.path}.');
       }
       final result = await capture(
@@ -1738,6 +1830,11 @@ void main() {
       }
     }
 
+    for (var i = 0; i < rejectedTypeAliases.length; i++) {
+      final invalid = File('${temporary.path}/rejected-type-alias-$i.dart')
+        ..writeAsStringSync(rejectedTypeAliases[i]);
+      await reject(invalid, checkSdk: true);
+    }
     for (var i = 0; i < rejected.length; i++) {
       final invalid = File('${temporary.path}/rejected-$i.dart')
         ..writeAsStringSync(rejected[i]);

@@ -34,6 +34,15 @@ const _constructorFormsV4 = <String>[
   'staticGetter',
   'staticField',
 ];
+const _aliases = <String>['aliasInt', 'aliasBool'];
+const _aliasForms = <String>[
+  'identity',
+  'list',
+  'nullable',
+  'function',
+  'nested',
+  'bounded',
+];
 
 class GeneratedProgram {
   final int seed;
@@ -59,7 +68,7 @@ class FuzzBool {
 }
 ''',
       );
-    else if (_version == 4)
+    else if (_version >= 4)
       result.write(r'''
 class FuzzInt {
   final int value;
@@ -81,6 +90,26 @@ class FuzzBool {
   static bool Function(bool, bool) cached = initialize();
   static bool Function(bool, bool) initialize() { note(36); return calculate; }
 }
+''');
+    if (_version == 5)
+      result.write(r'''
+typedef FuzzValue<T> = T;
+typedef FuzzItems<T> = List<T>;
+typedef FuzzMaybe<T> = T?;
+typedef FuzzCallback<T> = FuzzValue<T> Function(FuzzValue<T>, FuzzValue<T>);
+typedef FuzzNested<T> = FuzzItems<FuzzMaybe<T>>;
+typedef FuzzNumber<T extends num> = T;
+int aliasIdentityInt(FuzzValue<int> first, FuzzValue<int> second) { note(38); return first - second; }
+bool aliasIdentityBool(FuzzValue<bool> first, FuzzValue<bool> second) { note(39); return first && !second; }
+int aliasListInt(int first, int second) { note(40); FuzzItems<int> values = [first, second]; return values[0] - values[1]; }
+bool aliasListBool(bool first, bool second) { note(41); FuzzItems<bool> values = [first, second]; return values[0] && !values[1]; }
+int aliasNullableInt(FuzzMaybe<int> first, FuzzMaybe<int> second) { note(42); FuzzMaybe<int> value = first! < second! ? null : first; return (value ?? second!) - second!; }
+bool aliasNullableBool(FuzzMaybe<bool> first, FuzzMaybe<bool> second) { note(43); FuzzMaybe<bool> value = first! ? first : null; return (value ?? second!) != second!; }
+int aliasFunctionInt(int first, int second) { note(44); FuzzCallback<int> callback = aliasIdentityInt; return callback(first, second); }
+bool aliasFunctionBool(bool first, bool second) { note(45); FuzzCallback<bool> callback = aliasIdentityBool; return callback(first, second); }
+int aliasNestedInt(int first, int second) { note(46); FuzzNested<int> values = [first, null, second]; return (values[0] ?? 0) - (values[2] ?? 0); }
+bool aliasNestedBool(bool first, bool second) { note(47); FuzzNested<bool> values = [first, null, second]; return (values[0] ?? false) && !(values[2] ?? false); }
+int aliasBoundedInt(FuzzNumber<int> first, FuzzNumber<int> second) { note(48); return first - second; }
 ''');
     result.write(r'''
 int trace = 0;
@@ -127,7 +156,7 @@ void main() {
 
 GeneratedProgram programFromJson(Map<String, Object?> model) {
   final version = _integer(model['version']);
-  if (version != 2 && version != 3 && version != 4)
+  if (version != 2 && version != 3 && version != 4 && version != 5)
     throw const FormatException('Unknown program model');
   final seed = _integer(model['seed']);
   if (seed < 0 || seed > 0xffffffff) {
@@ -188,6 +217,24 @@ GeneratedProgram generateProgram(int seed) {
         (seed + 2) % _constructorFormsV4.length,
       ),
     ),
+    statement(
+      'value',
+      _alias(
+        _Type.integer,
+        _tap(13, _operation('value')),
+        _tap(14, _integerExpression(random, 1)),
+        seed % _aliasForms.length,
+      ),
+    ),
+    statement(
+      'flag',
+      _alias(
+        _Type.boolean,
+        _tap(15, _operation('flag')),
+        _tap(16, _bool(random.next(2) == 0)),
+        (seed + 2) % (_aliasForms.length - 1),
+      ),
+    ),
     // Both operands cross real call boundaries; a large count cannot be folded.
     statement(
       'value',
@@ -218,11 +265,11 @@ GeneratedProgram generateProgram(int seed) {
           'value',
           _operation('combine', [
             _operation('value'),
-            _construct(
+            _alias(
               _Type.integer,
               _operation('value'),
               _integerExpression(random, 1),
-              seed % _constructorFormsV4.length,
+              seed % _aliasForms.length,
             ),
           ]),
         ),
@@ -238,7 +285,7 @@ GeneratedProgram generateProgram(int seed) {
       ]),
     ),
   ];
-  return GeneratedProgram._(seed, statements, 4);
+  return GeneratedProgram._(seed, statements, 5);
 }
 
 class _Random {
@@ -265,12 +312,22 @@ _Expression _construct(
   second,
 ], _constructorFormsV4[form]);
 
+_Expression _alias(
+  _Type type,
+  _Expression first,
+  _Expression second,
+  int form,
+) => _operation(type == _Type.integer ? 'aliasInt' : 'aliasBool', [
+  first,
+  second,
+], _aliasForms[form]);
+
 _Expression _integerExpression(_Random random, int depth) {
   if (depth == 0) {
     if (random.next(3) == 0) return _operation('value');
     return _int(_integers[random.next(_integers.length)]);
   }
-  switch (random.next(8)) {
+  switch (random.next(9)) {
     case 0:
       return _operation(random.next(2) == 0 ? 'negate' : '~', [
         _integerExpression(random, depth - 1),
@@ -303,6 +360,13 @@ _Expression _integerExpression(_Random random, int depth) {
         _integerExpression(random, depth - 1),
         random.next(_constructorFormsV4.length),
       );
+    case 6:
+      return _alias(
+        _Type.integer,
+        _integerExpression(random, depth - 1),
+        _integerExpression(random, depth - 1),
+        random.next(_aliasForms.length),
+      );
     default:
       return _tap(8 + random.next(20), _integerExpression(random, depth - 1));
   }
@@ -313,7 +377,7 @@ _Expression _boolean(_Random random, int depth) {
     if (random.next(3) == 0) return _operation('flag');
     return _tap(8 + random.next(20), _bool(random.next(2) == 0));
   }
-  switch (random.next(8)) {
+  switch (random.next(9)) {
     case 0:
       return _operation('!', [_boolean(random, depth - 1)]);
     case 1:
@@ -338,6 +402,13 @@ _Expression _boolean(_Random random, int depth) {
         _boolean(random, depth - 1),
         random.next(_constructorFormsV4.length),
       );
+    case 5:
+      return _alias(
+        _Type.boolean,
+        _boolean(random, depth - 1),
+        _boolean(random, depth - 1),
+        random.next(_aliasForms.length - 1),
+      );
     default:
       return _tap(8 + random.next(20), _boolean(random, depth - 1));
   }
@@ -357,6 +428,11 @@ class _Expression {
     if (op == 'tap') {
       final name = type == _Type.integer ? 'tapInt' : 'tapBool';
       return '$name($tag, ${args[0].source})';
+    }
+    if (_aliases.contains(op)) {
+      final suffix = type == _Type.integer ? 'Int' : 'Bool';
+      final form = value[0].toUpperCase() + value.substring(1);
+      return 'alias$form$suffix(${args[0].source}, ${args[1].source})';
     }
     if (_constructors.contains(op)) {
       final name = type == _Type.integer ? 'FuzzInt' : 'FuzzBool';
@@ -391,7 +467,7 @@ class _Expression {
     'op': op,
     if (op == 'int' || op == 'bool') 'value': value,
     if (op == 'tap') 'tag': tag,
-    if (_constructors.contains(op)) 'form': value,
+    if (_constructors.contains(op) || _aliases.contains(op)) 'form': value,
     'args': [for (final argument in args) argument.toJson()],
   };
 
@@ -413,6 +489,8 @@ class _Expression {
     }
     if (_constructors.contains(op) && value != 'call')
       yield _operation(op, args, 'call');
+    if (_aliases.contains(op) && value != 'identity')
+      yield _operation(op, args, 'identity');
     yield type == _Type.integer ? _int('0') : _bool(false);
     for (final argument in args) {
       if (argument.type == type) yield argument;
@@ -463,6 +541,14 @@ _Expression _operation(
         args.length != count ||
         args.any((argument) => argument.type != type))
       throw const FormatException('Invalid constructor expression');
+  } else if (_aliases.contains(op)) {
+    count = 2;
+    type = op == 'aliasInt' ? _Type.integer : _Type.boolean;
+    if (!_aliasForms.contains(value) ||
+        type == _Type.boolean && value == 'bounded' ||
+        args.length != count ||
+        args.any((argument) => argument.type != type))
+      throw const FormatException('Invalid alias expression');
   } else if (op == 'negate' || op == '~' || op == '!') {
     count = 1;
     type = op == '!' ? _Type.boolean : _Type.integer;
@@ -637,12 +723,16 @@ _Expression _expressionFromJson(Object? value, int version) {
   final op = _string(model['op']);
   if (version == 2 && _constructors.contains(op))
     throw const FormatException('Constructor expressions require model 3');
+  if (version < 5 && _aliases.contains(op))
+    throw const FormatException('Alias expressions require model 5');
   var payload = '';
   if (op == 'int' || op == 'bool')
     payload = _string(model['value']);
-  else if (_constructors.contains(op)) {
+  else if (_constructors.contains(op) || _aliases.contains(op)) {
     payload = _string(model['form']);
-    if (version < 4 && !_constructorForms.contains(payload))
+    if (_constructors.contains(op) &&
+        version < 4 &&
+        !_constructorForms.contains(payload))
       throw const FormatException('Constructor form requires model 4');
   }
   final expression = _operation(

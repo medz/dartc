@@ -63,6 +63,7 @@ class ConstantContext {
   List<ConstantValue> values = <ConstantValue>[];
   List<ConstantValue> locals = <ConstantValue>[];
   List<int> localTypes = <int>[];
+  List<int> typeScope = const <int>[];
   List<ConstantValue> initializerParameters = const <ConstantValue>[];
   bool allowInitializerParameters = false;
   List<ConstantValue> aggregates = <ConstantValue>[];
@@ -129,8 +130,10 @@ ConstantValue _constantGlobal(
   }
   context.states[global] = 1;
   var scope = context.lexicalClass;
+  var typeScope = context.typeScope;
   var parameters = context.initializerParameters;
   context.lexicalClass = context.globalOwners[global];
+  context.typeScope = const <int>[];
   context.initializerParameters = const <ConstantValue>[];
   var value = _evaluateConstant(
     context,
@@ -140,6 +143,7 @@ ConstantValue _constantGlobal(
     true,
   );
   context.lexicalClass = scope;
+  context.typeScope = typeScope;
   context.initializerParameters = parameters;
   var type = declared;
   if (type < 0) {
@@ -432,6 +436,13 @@ int _constantSymbol(ConstantContext context, AstExpression expression) {
   var scope = context.lexicalClass;
   var name = expression.text;
   if (prefix != '') name = prefix;
+  if (context.typeScope.isNotEmpty &&
+      typeParameterInScope(context.typeScope, name) >= 0)
+    _constantError(
+      context,
+      expression.token,
+      'type parameter is not a constant declaration',
+    );
   if (scope >= 0 && lookupMember(context.classMembers[scope], name) >= 0)
     return -1;
   return resolveSymbol(
@@ -451,18 +462,63 @@ int _constantStaticOwner(ConstantContext context, AstExpression expression) {
   } else if (expression.kind == astMember) {
     var receiver = expression.children[0];
     var symbol = _constantSymbol(context, receiver);
-    var owner = resolvedClassOwner(context.symbols, symbol);
+    var owner = declarationClassOwner(context.symbols, symbol);
     if (owner >= 0) {
       if (receiver.typeArguments.isNotEmpty)
         _constantError(
           context,
           receiver.token,
-          'nongeneric class does not accept type arguments',
+          'static member qualifier does not accept type arguments',
         );
       return owner;
     }
   }
   return -1;
+}
+
+int _constantType(ConstantContext context, AstType syntax) {
+  var type = resolveType(context.symbols, syntax, context.typeScope);
+  if (typeContainsParameters(type))
+    _constantError(
+      context,
+      syntax.token,
+      'constant type cannot depend on a type parameter',
+    );
+  return type;
+}
+
+int _constantConstructorType(
+  ConstantContext context,
+  int symbol,
+  List<AstType> arguments,
+  int token,
+) {
+  if (symbol < 0) return -1;
+  var declaration = context.symbols.declarations[symbol];
+  if (declaration.kind != symbolClass && declaration.kind != symbolAlias)
+    return -1;
+  var type = resolveDeclarationType(
+    context.symbols,
+    symbol,
+    arguments,
+    token,
+    context.typeScope,
+    false,
+  );
+  if (declaration.kind == symbolAlias &&
+      context.symbols.aliases[declaration.target].expandsToParameter)
+    _constantError(
+      context,
+      token,
+      'type parameter alias has no constructor namespace',
+    );
+  if (typeContainsParameters(type))
+    _constantError(
+      context,
+      token,
+      'constant type cannot depend on a type parameter',
+    );
+  return type;
 }
 
 ConstantValue _constantStaticReference(
@@ -544,7 +600,7 @@ ConstantValue _constantList(
   }
   var element = -1;
   if (expression.typeArguments.isNotEmpty) {
-    element = resolveType(context.symbols, expression.typeArguments[0]);
+    element = _constantType(context, expression.typeArguments[0]);
   } else if (expected >= 0 && typeIsList(typeNonNullable(expected))) {
     element = typeArgument(typeNonNullable(expected));
   }
@@ -641,13 +697,16 @@ ConstantValue _constantDeclaration(
     _constantError(context, token, 'cyclic constant initializer');
   owner.states[slot] = 1;
   var scope = context.lexicalClass;
+  var typeScope = context.typeScope;
   var parameters = context.initializerParameters;
   context.lexicalClass = owner.classId;
+  context.typeScope = const <int>[];
   context.initializerParameters = const <ConstantValue>[];
   var value = ConstantValue(tNull, tNull, 0, '');
   if (expression != null)
     value = _evaluateConstant(context, expression, true, type, false);
   context.lexicalClass = scope;
+  context.typeScope = typeScope;
   context.initializerParameters = parameters;
   value = _constantChecked(context, value, type, token, true);
   owner.values[slot] = value;
@@ -839,9 +898,11 @@ ConstantValue _constantInvoke(
     return ConstantValue(type, type, -1, '');
   }
   var scope = context.lexicalClass;
+  var typeScope = context.typeScope;
   var previous = context.initializerParameters;
   var allow = context.allowInitializerParameters;
   var depth = context.invocations.length;
+  context.typeScope = const <int>[];
   while (true) {
     var call = 0;
     while (call < context.invocations.length) {
@@ -917,6 +978,7 @@ ConstantValue _constantInvoke(
     i++;
   }
   context.lexicalClass = scope;
+  context.typeScope = typeScope;
   context.initializerParameters = previous;
   context.allowInitializerParameters = allow;
   while (context.invocations.length > depth) context.invocations.removeLast();
@@ -947,12 +1009,41 @@ ConstantValue _constantConstructor(
   var callee = expression.children[0];
   var classExpression = callee;
   var symbol = _constantSymbol(context, callee);
-  var classId = resolvedClassOwner(context.symbols, symbol);
+  var arguments = expression.typeArguments;
+  if ((callee.kind == astName || callee.kind == astMember) &&
+      callee.typeArguments.isNotEmpty) {
+    if (arguments.isNotEmpty)
+      _constantError(
+        context,
+        callee.token,
+        'duplicate constructor type arguments',
+      );
+    arguments = callee.typeArguments;
+  }
+  var classType = _constantConstructorType(
+    context,
+    symbol,
+    arguments,
+    callee.token,
+  );
+  var classId = classType < 0 ? -1 : resolvedTypeClassOwner(classType);
   var name = '';
   if (classId < 0 && callee.kind == astMember) {
     classExpression = callee.children[0];
     symbol = _constantSymbol(context, classExpression);
-    classId = resolvedClassOwner(context.symbols, symbol);
+    classType = _constantConstructorType(
+      context,
+      symbol,
+      classExpression.typeArguments,
+      classExpression.token,
+    );
+    classId = classType < 0 ? -1 : resolvedTypeClassOwner(classType);
+    if (classId >= 0 && expression.typeArguments.isNotEmpty)
+      _constantError(
+        context,
+        expression.token,
+        'constructor selector does not accept type arguments',
+      );
     if (classId >= 0)
       name = constructorSelector(
         context.symbols.program,
@@ -987,13 +1078,6 @@ ConstantValue _constantConstructor(
       context,
       callee.token,
       'private constructor is not accessible',
-    );
-  if (expression.typeArguments.isNotEmpty ||
-      classExpression.typeArguments.isNotEmpty)
-    _constantError(
-      context,
-      expression.token,
-      'nongeneric constructor does not accept type arguments',
     );
   var parameters = _constantArguments(
     context,

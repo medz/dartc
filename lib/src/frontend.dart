@@ -368,8 +368,6 @@ void feCollectDeclarations(AstUnit unit) {
   var i = 0;
   while (i < unit.classes.length) {
     var syntax = unit.classes[i];
-    if (syntax.name == 'Function')
-      feAstError(syntax.token, 'Function cannot be used as a class name');
     var source = feTokens[syntax.token].source;
     var owner = classNames.length;
     classType(owner);
@@ -416,8 +414,6 @@ void feCollectDeclarations(AstUnit unit) {
   i = 0;
   while (i < unit.typedefs.length) {
     var syntax = unit.typedefs[i];
-    if (syntax.name == 'Function')
-      feAstError(syntax.token, 'Function cannot be used as a type alias name');
     var signature = syntax.type.function;
     if (!sourceVersionAtLeast(
           feSources,
@@ -432,7 +428,9 @@ void feCollectDeclarations(AstUnit unit) {
       );
     var kind = symbolAlias;
     var target = feSymbols.aliases.length;
-    if (signature != null && feIsNativeInt64(signature.result)) {
+    if (syntax.typeParameters.isEmpty &&
+        signature != null &&
+        feIsNativeInt64(signature.result)) {
       var p = 0;
       while (p < signature.parameters.length) {
         var parameter = signature.parameters[p];
@@ -454,7 +452,9 @@ void feCollectDeclarations(AstUnit unit) {
       feNativeNames.add(syntax.name);
       feNativeParams.add(p);
     } else {
-      feSymbols.aliases.add(TypeAlias(syntax.type));
+      var alias = TypeAlias(syntax.type);
+      alias.syntaxParameters = syntax.typeParameters;
+      feSymbols.aliases.add(alias);
     }
     feDeclare(
       feTokens[syntax.token].source,
@@ -465,17 +465,17 @@ void feCollectDeclarations(AstUnit unit) {
     );
     i++;
   }
-  i = 0;
-  while (i < unit.typedefs.length) {
-    var syntax = unit.typedefs[i];
-    var symbol = symbolOwnDeclaration(
-      feSymbols,
-      feTokens[syntax.token].source,
-      syntax.name,
-    );
-    if (feSymbols.declarations[symbol].kind == symbolAlias)
-      resolveType(feSymbols, AstType(syntax.name, <AstType>[], syntax.token));
-    i++;
+  resolveTypeAliasDeclarations(feSymbols);
+  for (var alias in feSymbols.aliases) {
+    var signature = alias.syntax.function;
+    if (alias.parameters.isNotEmpty &&
+        signature != null &&
+        typeParameterInScope(alias.parameters, signature.result.name) < 0 &&
+        feIsNativeInt64(signature.result))
+      feAstError(
+        alias.syntax.token,
+        'generic FFI function aliases are not supported',
+      );
   }
   var object = symbolOwnDeclaration(feSymbols, sourceCore, 'Object');
   var objectMembers = feSymbols.declarations[object].instanceMembers;
@@ -796,6 +796,25 @@ bool feImplicitMember(AstExpression expression) {
   return true;
 }
 
+int feConstructorType(int symbol, List<AstType> arguments, int token) {
+  if (symbol < 0) return -1;
+  var declaration = feSymbols.declarations[symbol];
+  if (declaration.kind != symbolClass && declaration.kind != symbolAlias)
+    return -1;
+  var type = resolveDeclarationType(
+    feSymbols,
+    symbol,
+    arguments,
+    token,
+    const <int>[],
+    false,
+  );
+  if (declaration.kind == symbolAlias &&
+      feSymbols.aliases[declaration.target].expandsToParameter)
+    feAstError(token, 'type parameter alias has no constructor namespace');
+  return type;
+}
+
 AstExpression feWithReceiver(AstExpression expression) {
   if (expression.kind != astName || !feImplicitMember(expression))
     return expression;
@@ -882,12 +901,15 @@ int feStaticOwner(AstExpression expression) {
   } else if (expression.kind == astMember) {
     var receiver = expression.children[0];
     var symbol = feExpressionSymbol(receiver, false);
-    var owner = resolvedClassOwner(feSymbols, symbol);
+    var owner = declarationClassOwner(feSymbols, symbol);
     if (owner >= 0) {
-      if (receiver.typeArguments.isNotEmpty)
+      var index = lookupMember(feMembers[owner], expression.text);
+      if (receiver.typeArguments.isNotEmpty &&
+          index >= 0 &&
+          feMembers[owner].members[index].isStatic)
         feAstError(
           receiver.token,
-          'nongeneric class does not accept type arguments',
+          'static member qualifier does not accept type arguments',
         );
       return owner;
     }
@@ -1461,7 +1483,22 @@ void feCheckUnitMetadata(AstUnit syntax) {
   }
   i = 0;
   while (i < syntax.typedefs.length) {
-    feCheckMetadata(syntax.typedefs[i].metadata, -1);
+    var node = syntax.typedefs[i];
+    feCheckMetadata(node.metadata, -1);
+    if (node.typeParameters.isNotEmpty) {
+      var symbol = symbolOwnDeclaration(
+        feSymbols,
+        feTokens[node.token].source,
+        node.name,
+      );
+      var alias = feSymbols.aliases[feSymbols.declarations[symbol].target];
+      var scope = feConstants.typeScope;
+      feConstants.typeScope = alias.parameters;
+      for (var parameter in node.typeParameters) {
+        feCheckMetadata(parameter.metadata, -1);
+      }
+      feConstants.typeScope = scope;
+    }
     i++;
   }
   i = 0;
@@ -2481,9 +2518,27 @@ int feLowerCall(AstExpression call, int context) {
   checkArgumentOrder(feSources, call);
   var callee = feWithReceiver(call.children[0]);
   var symbol = feExpressionSymbol(callee, false);
-  var classOwner = resolvedClassOwner(feSymbols, symbol);
-  if (classOwner >= 0)
-    return feLowerConstructorCall(call, classOwner, '', callee.token);
+  var classArguments = call.typeArguments;
+  if ((callee.kind == astName || callee.kind == astMember) &&
+      callee.typeArguments.isNotEmpty) {
+    if (classArguments.isNotEmpty)
+      feAstError(callee.token, 'duplicate constructor type arguments');
+    classArguments = callee.typeArguments;
+  }
+  var classType = feConstructorType(symbol, classArguments, callee.token);
+  var classOwner = classType < 0 ? -1 : resolvedTypeClassOwner(classType);
+  if (classOwner >= 0) {
+    var physicalCall = call;
+    if (call.typeArguments.isNotEmpty)
+      physicalCall = AstExpression(
+        call.kind,
+        call.text,
+        call.children,
+        const <AstType>[],
+        call.token,
+      );
+    return feLowerConstructorCall(physicalCall, classOwner, '', callee.token);
+  }
   var staticOwner = feStaticOwner(callee);
   if (staticOwner >= 0) {
     var index = lookupMember(feMembers[staticOwner], callee.text);
@@ -2495,13 +2550,13 @@ int feLowerCall(AstExpression call, int context) {
   if (symbol < 0 && callee.kind == astMember) {
     var receiver = callee.children[0];
     var owner = feExpressionSymbol(receiver, false);
-    var classOwner = resolvedClassOwner(feSymbols, owner);
+    var classType = feConstructorType(
+      owner,
+      receiver.typeArguments,
+      receiver.token,
+    );
+    var classOwner = classType < 0 ? -1 : resolvedTypeClassOwner(classType);
     if (classOwner >= 0) {
-      if (receiver.typeArguments.isNotEmpty)
-        feAstError(
-          receiver.token,
-          'nongeneric constructor does not accept type arguments',
-        );
       var type = feLowerConstructorCall(
         call,
         classOwner,
@@ -2510,11 +2565,7 @@ int feLowerCall(AstExpression call, int context) {
       );
       var declaration = feSymbols.declarations[owner];
       if (call.text != astCallNew && declaration.kind == symbolAlias)
-        return feConvertValue(
-          type,
-          feSymbols.aliases[declaration.target].type,
-          call.token,
-        );
+        return feConvertValue(type, classType, call.token);
       return type;
     }
     if (owner >= 0 && feSymbols.declarations[owner].kind == symbolType)

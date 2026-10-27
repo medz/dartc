@@ -1865,6 +1865,73 @@ void metadataValues() {
   print(<int>[first + zero, second]);
 }
 
+typedef GenericIdentity<T> = T;
+typedef GenericTransform<T> = T Function(T);
+typedef GenericCallbacks<T> = List<GenericTransform<T>?>;
+typedef GenericNested<T extends num> = List<List<T?>>;
+typedef GenericNullableNested<T extends num> = GenericNested<T>?;
+typedef GenericNumbers<T extends num> = List<T>;
+typedef GenericRecursive<T extends List<T>> = T;
+typedef GenericReverse<T extends void Function(T)> = T;
+typedef GenericShadow<int> = List<int>;
+typedef GenericIgnored<_, _> = int;
+
+class GenericMark {
+  const GenericMark();
+}
+
+typedef GenericPhantom<T> = GenericMark;
+typedef GenericAnnotated<@GenericPhantom<T>() T> = List<T>;
+
+typedef LegacyUntyped(int);
+typedef int LegacyInteger(int value);
+typedef T LegacyNumeric<@metadataTag T extends num>(T value);
+typedef int LegacyHigher(int callback(int value));
+typedef LegacyNested(callback(value));
+
+dynamic legacyEcho(dynamic value) => value;
+int legacyApply(int Function(int) callback) => callback(6);
+dynamic legacyNested(dynamic Function(dynamic) callback) => callback('nested');
+
+void legacyAliases() {
+  LegacyUntyped untyped = legacyEcho;
+  print(untyped('text'));
+  LegacyInteger integer = functionPlus;
+  print(integer(3));
+  LegacyNumeric<int> numeric = functionPlus;
+  print(numeric(4));
+  LegacyHigher higher = legacyApply;
+  print(higher(functionPlus));
+  LegacyNested nested = legacyNested;
+  print(nested(legacyEcho));
+}
+
+void genericAliases() {
+  GenericTransform<int> callback = functionPlus;
+  print(callback(7));
+  GenericCallbacks<int> callbacks = [callback, null];
+  print(callbacks[0]!(6));
+  print(callbacks[1]);
+  GenericNullableNested<int> nested = [
+    [null, 7],
+  ];
+  print(nested);
+  GenericIdentity identity = 7;
+  print(pass([identity]) is List<int>);
+  GenericNumbers numbers = [];
+  print(pass(numbers) is List<num>);
+  GenericRecursive recursive = [];
+  print(pass([recursive]) is List<List<dynamic>>);
+  GenericReverse reverse = opaqueValue;
+  print(pass([reverse]) is List<void Function(Never)>);
+  GenericShadow<String> shadow = ['s'];
+  print(shadow);
+  GenericIgnored<int, String> ignored = 9;
+  print(ignored);
+  GenericAnnotated<bool> annotated = [true];
+  print(annotated);
+}
+
 typedef IntCallback = int Function(int);
 typedef PackedCallback = Object? Function(
   int,
@@ -2265,6 +2332,8 @@ void main(List<String> args) {
   constantLists();
   constObjects();
   functionValues();
+  genericAliases();
+  legacyAliases();
   bufferValues();
   stringBoundaries();
   listGrowth(args);

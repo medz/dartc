@@ -46,6 +46,7 @@ class _SsaVerifier {
 
   void type(int id) {
     if (id < 0 || id >= dartTypes.length) fail('invalid type');
+    if (typeContainsParameters(id)) fail('uninstantiated executable type');
   }
 
   void value(int id) {

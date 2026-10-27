@@ -13,10 +13,35 @@ const int symbolAlias = 8;
 const int accessorGetter = 1;
 const int accessorSetter = 2;
 
+class AliasApplication {
+  final int symbol;
+  final List<int> arguments;
+  final int token;
+  final bool raw;
+  final bool allowSuperBounded;
+
+  AliasApplication(
+    this.symbol,
+    this.arguments,
+    this.token,
+    this.raw,
+    this.allowSuperBounded,
+  );
+}
+
 class TypeAlias {
   final AstType syntax;
+  List<AstTypeParameter> syntaxParameters = const <AstTypeParameter>[];
+  List<int> parameters = const <int>[];
+  List<int> defaultArguments = const <int>[];
+  List<AliasApplication> boundUses = const <AliasApplication>[];
+  List<AliasApplication> bodyUses = const <AliasApplication>[];
+  int template = -1;
   int type = -1;
+  int simpleBounds = -1;
+  bool parametersReady = false;
   bool resolving = false;
+  bool expandsToParameter = false;
 
   TypeAlias(this.syntax);
 }

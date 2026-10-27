@@ -1,5 +1,6 @@
 import 'arm64.dart';
 import 'constant_data.dart';
+import 'host.dart';
 import 'ir.dart';
 import 'layout.dart';
 import 'root_map.dart';
@@ -144,6 +145,10 @@ class ConstantLayout {
 
 void markTypeReference(List<int> offsets, List<int> work, int type) {
   if (offsets[type] < 0) {
+    if (typeContainsParameters(type)) {
+      print('dartc: uninstantiated runtime type');
+      hostExit(1);
+    }
     offsets[type] = 0;
     work.add(type);
   }

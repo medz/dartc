@@ -38,7 +38,7 @@ Reports record elapsed time, user/system CPU time and kernel peak RSS. Each task
 
 ## Differential testing
 
-Generate bounded integer/boolean expressions and constructor interactions:
+Generate bounded integer/boolean expressions, constructor calls and generic-alias interactions:
 
 ```sh
 dart tool/fuzz.dart --seed 1 --count 20

@@ -194,8 +194,18 @@ class AstClass {
   AstClass(this.name, this.fields, this.constructors, this.methods, this.token);
 }
 
+class AstTypeParameter {
+  List<AstExpression> metadata = const <AstExpression>[];
+  String name;
+  AstType? bound;
+  int token;
+
+  AstTypeParameter(this.name, this.bound, this.token);
+}
+
 class AstTypedef {
   List<AstExpression> metadata = const <AstExpression>[];
+  List<AstTypeParameter> typeParameters = const <AstTypeParameter>[];
   String name;
   AstType type;
   int token;
