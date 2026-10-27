@@ -1,3 +1,8 @@
+## Unreleased
+
+- Decode integer literal boundaries consistently in native and SDK-hosted compilers, including direct negative literals, parentheses and 64-bit hexadecimal values.
+- Add bounded differential generation, saved-case replay and reduction for compiler development.
+
 ## 0.2.0
 
 Early preview release for macOS and Linux ARM64.

@@ -115,3 +115,5 @@ dartc example/math.dart --emit static --export add -o libmath.a
 Start language work from [specs](specs/README.md). Compiler/runtime design is in [architecture.md](doc/architecture.md), and runtime contributor contracts are in [runtime.md](doc/runtime.md).
 
 Compare existing native engines on the same compiler task with `dart tool/benchmark.dart --compare <baseline> <candidate>`. Running the benchmark without that option builds a separate official AOT reference. Reference binaries never become bootstrap seeds. Development CI is manually dispatched.
+
+Run `dart tool/fuzz.dart --seed 1 --count 20` for bounded integer/boolean differential cases. Each case compares the SDK oracle, SDK-hosted dartc and native dartc. Failures retain actual sources, dependencies, commands and a frozen compiler/runtime/tool snapshot under `build/fuzz/`; the printed replay command uses those files. Generated cases support `--replay <saved case> --shrink`. Use `--case <saved case>` with a repaired compiler to verify a fix, and `--help` for explicit rejection and runtime-failure contracts.

@@ -23,6 +23,8 @@ jobs:
           sdk: '3.13.5'
           architecture: arm64
       - run: dart tool/bootstrap.dart
+      - run: dart test/differential_test.dart --compiler build/dartc-stage2
+      - run: dart tool/fuzz.dart --compiler build/dartc-stage2 --count 12
       - name: Package and test the native release
         if: inputs.package_release
         run: dart tool/package_release.dart --compiler build/dartc-stage2
