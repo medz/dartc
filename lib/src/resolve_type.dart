@@ -1,9 +1,33 @@
 import 'ast.dart';
+import 'binding.dart';
 import 'source.dart';
 import 'symbols.dart';
 import 'types.dart';
 
 int resolveType(SymbolTable symbols, AstType syntax) {
+  var function = syntax.function;
+  if (function != null) {
+    bindFunctionTypeParameters(symbols.program, function);
+    var parameters = <int>[];
+    for (var parameter in function.parameters) {
+      if (parameter.metadata.isNotEmpty)
+        sourceError(
+          symbols.program,
+          symbols.program.tokens[parameter.token],
+          'function type parameter metadata is not supported',
+        );
+      if (parameter.kind != astRequiredPositional)
+        sourceError(
+          symbols.program,
+          symbols.program.tokens[parameter.token],
+          'optional and named function types are not supported',
+        );
+      parameters.add(resolveType(symbols, parameter.type));
+    }
+    var type = functionType(resolveType(symbols, function.result), parameters);
+    if (syntax.name.endsWith('?')) return nullableType(type);
+    return type;
+  }
   if (syntax.name.endsWith('?')) {
     return nullableType(
       resolveType(
@@ -55,6 +79,20 @@ int resolveType(SymbolTable symbols, AstType syntax) {
     );
   }
   if (declaration.kind == symbolClass) return classType(declaration.target);
+  if (declaration.kind == symbolAlias) {
+    var alias = symbols.aliases[declaration.target];
+    if (alias.type >= 0) return alias.type;
+    if (alias.resolving)
+      sourceError(
+        symbols.program,
+        symbols.program.tokens[alias.syntax.token],
+        'cyclic type alias ' + declaration.name,
+      );
+    alias.resolving = true;
+    alias.type = resolveType(symbols, alias.syntax);
+    alias.resolving = false;
+    return alias.type;
+  }
   if (declaration.kind == symbolType) {
     if (declaration.target < 0) {
       var element = tDynamic;

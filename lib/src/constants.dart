@@ -1,5 +1,6 @@
 import 'ast.dart';
 import 'arguments.dart';
+import 'ir.dart';
 import 'members.dart';
 import 'resolve_type.dart';
 import 'source.dart';
@@ -74,6 +75,11 @@ ConstantValue constantWithType(ConstantValue value, int type) {
   return result;
 }
 
+int constantValueType(ConstantValue value) {
+  if (value.kind == tFunction) return functionValueType(value.integer);
+  return value.kind;
+}
+
 Never _constantError(ConstantContext context, int token, String message) {
   var program = context.symbols.program;
   sourceError(program, program.tokens[token], message);
@@ -121,7 +127,7 @@ ConstantValue _constantGlobal(
     if (type == tNull) type = tDynamic;
   }
   if (!typingAssignable(value.type, type) ||
-      active && !typeIsSubtype(value.kind, type)) {
+      active && !typeIsSubtype(constantValueType(value), type)) {
     return _constantError(
       context,
       syntax.token,
@@ -146,13 +152,20 @@ ConstantValue evaluateMetadataConstant(
     value = _constantConstructor(context, expression, true, true);
   else if (expression.kind == astName && expression.binding >= 0)
     value = _evaluateConstant(context, expression, true, -1, true);
-  else
-    value = _constantReference(
+  else {
+    var symbol = _constantSymbol(context, expression);
+    if (symbol < 0 || context.symbols.declarations[symbol].kind != symbolGlobal)
+      _constantError(
+        context,
+        expression.token,
+        'metadata reference requires an unambiguous const declaration',
+      );
+    value = _constantGlobal(
       context,
-      expression,
-      _constantSymbol(context, expression),
+      context.symbols.declarations[symbol].target,
       true,
     );
+  }
   if (value.type == tVoid)
     _constantError(
       context,
@@ -172,11 +185,24 @@ ConstantValue _constantReference(
   int symbol,
   bool active,
 ) {
+  if (symbol >= 0) {
+    var declaration = context.symbols.declarations[symbol];
+    if (declaration.kind == symbolFunction) {
+      var type = functionValueType(declaration.target);
+      if (type < 0)
+        _constantError(
+          context,
+          expression.token,
+          'constant reference to this function shape is not supported',
+        );
+      return ConstantValue(type, tFunction, declaration.target, '');
+    }
+  }
   if (symbol < 0 || context.symbols.declarations[symbol].kind != symbolGlobal) {
     return _constantError(
       context,
       expression.token,
-      'constant expression requires an unambiguous const declaration',
+      'constant expression requires an unambiguous const or function declaration',
     );
   }
   return _constantGlobal(
@@ -318,6 +344,7 @@ bool _constantSame(ConstantValue left, ConstantValue right) {
   if (left.kind == tNull) return true;
   if (left.kind == tInt ||
       left.kind == tBool ||
+      left.kind == tFunction ||
       typeIsList(left.kind) ||
       typeIsClass(left.kind))
     return left.integer == right.integer;
@@ -423,7 +450,7 @@ ConstantValue _constantList(
     var value = _evaluateConstant(context, child, active, element, true);
     if (element >= 0 &&
         (!typingAssignable(value.type, element) ||
-            active && !typeIsSubtype(value.kind, element))) {
+            active && !typeIsSubtype(constantValueType(value), element))) {
       return _constantError(
         context,
         child.token,
@@ -472,7 +499,7 @@ ConstantValue _constantChecked(
   bool active,
 ) {
   if (!typingAssignable(value.type, type) ||
-      active && !typeIsSubtype(value.kind, type))
+      active && !typeIsSubtype(constantValueType(value), type))
     _constantError(context, token, 'incompatible constant value');
   return constantWithType(value, type);
 }

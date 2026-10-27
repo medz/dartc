@@ -1,3 +1,5 @@
+import 'types.dart';
+
 const int opInt = 1;
 const int opString = 2;
 const int opLoadLocal = 3;
@@ -37,6 +39,7 @@ const int opTypeTest = 36;
 const int opTypeCast = 37;
 const int opJumpTrue = 38;
 const int opConstantData = 39;
+const int opFunctionReference = 40;
 
 const int bPrintString = 1;
 const int bPrintInt = 2;
@@ -99,6 +102,8 @@ const int bValueIdentical = 58;
 const int bObjectFromData = 59;
 const int bHostReadIfExists = 60;
 const int bHostCurrentDirectory = 61;
+const int bFunctionEntry = 62;
+const int bFunctionInvoke = 63;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;
@@ -134,6 +139,9 @@ class FunctionInfo {
   List<int> localTypes;
   int source;
   FunctionContract? contract;
+  bool callableShape = false;
+  int callableType = -1;
+  int callableAdapter = -1;
 
   FunctionInfo(
     this.name,
@@ -178,6 +186,15 @@ int internString(String text) {
   return strings.length - 1;
 }
 
+int functionValueType(int function) {
+  var info = functions[function];
+  if (!info.callableShape) return -1;
+  if (info.callableType < 0) {
+    info.callableType = functionType(info.result, info.parameterTypes);
+  }
+  return info.callableType;
+}
+
 int irWidth(int op) {
   if (op == opCall || op == opBuiltin) return 3;
   if (op == opInt ||
@@ -185,6 +202,7 @@ int irWidth(int op) {
       op == opDescriptor ||
       op == opMetadataAddress ||
       op == opConstantData ||
+      op == opFunctionReference ||
       op == opTypeTest ||
       op == opTypeCast ||
       op == opLoadLocal ||

@@ -71,26 +71,68 @@ bool parserTypeClose(Parser parser) {
   return false;
 }
 
-bool parserLookType(Parser parser) {
+bool parserLookType(Parser parser, [bool declaration = false]) {
   if (parser.pendingClosers != 0 ||
       parser.tokens[parser.position].kind != tokenIdentifier)
     return false;
-  parser.position++;
-  while (parserTake(parser, '.')) {
-    if (parser.pendingClosers != 0 ||
-        parser.tokens[parser.position].kind != tokenIdentifier)
-      return false;
+  var result = false;
+  if (!parserIs(parser, 'Function') ||
+      !tokenIs(parser.tokens[parser.position + 1], '(') &&
+          !tokenIs(parser.tokens[parser.position + 1], '<')) {
     parser.position++;
-  }
-  if (parserTake(parser, '<')) {
-    if (!parserLookType(parser)) return false;
-    while (parserTake(parser, ',')) {
-      if (!parserLookType(parser)) return false;
+    while (parserTake(parser, '.')) {
+      if (parser.pendingClosers != 0 ||
+          parser.tokens[parser.position].kind != tokenIdentifier)
+        return false;
+      parser.position++;
     }
-    if (!parserTypeClose(parser)) return false;
+    if (parserTake(parser, '<')) {
+      if (!parserLookType(parser)) return false;
+      while (parserTake(parser, ',')) {
+        if (!parserLookType(parser)) return false;
+      }
+      if (!parserTypeClose(parser)) return false;
+    }
+    parserTake(parser, '?');
+    result = true;
   }
-  parserTake(parser, '?');
-  return true;
+  while (parserIs(parser, 'Function') &&
+      (tokenIs(parser.tokens[parser.position + 1], '(') ||
+          tokenIs(parser.tokens[parser.position + 1], '<'))) {
+    var tail = parser.position;
+    var closers = parser.pendingClosers;
+    parser.position++;
+    if (parserTake(parser, '<')) {
+      while (true) {
+        if (parser.tokens[parser.position].kind != tokenIdentifier)
+          return false;
+        parser.position++;
+        if (parserTake(parser, 'extends') && !parserLookType(parser))
+          return false;
+        if (!parserTake(parser, ',')) break;
+      }
+      if (!parserTypeClose(parser)) return false;
+    }
+    if (!parserTake(parser, '(')) return false;
+    var depth = 1;
+    while (depth != 0) {
+      if (parserIs(parser, '')) return false;
+      if (parserTake(parser, '('))
+        depth++;
+      else if (parserTake(parser, ')'))
+        depth--;
+      else
+        parser.position++;
+    }
+    parserTake(parser, '?');
+    if (declaration && parser.tokens[parser.position].kind != tokenIdentifier) {
+      parser.position = tail;
+      parser.pendingClosers = closers;
+      return result;
+    }
+    result = true;
+  }
+  return result;
 }
 
 bool parserHasTypeArguments(Parser parser, bool invocation) {
@@ -110,19 +152,92 @@ bool parserHasTypeArguments(Parser parser, bool invocation) {
   return valid;
 }
 
-AstType parseAstType(Parser parser) {
-  var token = parser.position;
-  var name = parserName(parser);
-  while (parserTake(parser, '.')) name = name + '.' + parserName(parser);
-  List<AstType> arguments = <AstType>[];
-  if (parserIs(parser, '<') && parserHasTypeArguments(parser, false)) {
-    parserExpect(parser, '<');
-    arguments.add(parseAstType(parser));
-    while (parserTake(parser, ',')) arguments.add(parseAstType(parser));
-    if (!parserTypeClose(parser)) parserError(parser, 'expected >');
+List<AstParameter> parserFunctionTypeParameters(Parser parser) {
+  parserExpect(parser, '(');
+  var parameters = <AstParameter>[];
+  var kind = astRequiredPositional;
+  var close = ')';
+  while (!parserIs(parser, close)) {
+    if (kind == astRequiredPositional &&
+        (parserIs(parser, '[') || parserIs(parser, '{'))) {
+      kind = astOptionalPositional;
+      close = ']';
+      if (parserTake(parser, '{')) {
+        kind = astNamedParameter;
+        close = '}';
+      } else
+        parserExpect(parser, '[');
+      if (parserIs(parser, close))
+        parserError(parser, 'optional parameter group cannot be empty');
+    }
+    var metadata = parserMetadata(parser);
+    var token = parser.position;
+    var required = parserTake(parser, 'required');
+    if (required && kind != astNamedParameter)
+      parserError(parser, 'required needs a named parameter');
+    if (parserIs(parser, 'final') ||
+        parserIs(parser, 'const') ||
+        parserIs(parser, 'this') ||
+        parserIs(parser, 'super')) {
+      parserError(parser, 'invalid function type parameter');
+    }
+    var type = parseAstType(parser);
+    var name = '';
+    if (parser.tokens[parser.position].kind == tokenIdentifier)
+      name = parserName(parser);
+    if (kind == astNamedParameter && name == '')
+      parserError(parser, 'named function type parameter requires a name');
+    if (parserIs(parser, '='))
+      parserError(
+        parser,
+        'function type parameters cannot have default values',
+      );
+    var parameter = AstParameter(type, name, false, token);
+    parameter.metadata = metadata;
+    parameter.kind = kind;
+    parameter.required = required;
+    parameters.add(parameter);
+    if (!parserTake(parser, ',')) break;
   }
-  if (parserTake(parser, '?')) name = name + '?';
-  return AstType(name, arguments, token);
+  if (kind != astRequiredPositional) parserExpect(parser, close);
+  parserExpect(parser, ')');
+  return parameters;
+}
+
+AstType parseAstType(Parser parser, [int end = -1]) {
+  var token = parser.position;
+  AstType result;
+  if (parserIs(parser, 'Function') &&
+      (tokenIs(parser.tokens[parser.position + 1], '(') ||
+          tokenIs(parser.tokens[parser.position + 1], '<'))) {
+    result = AstType('dynamic', const <AstType>[], token);
+  } else {
+    var name = parserName(parser);
+    while (parserTake(parser, '.')) name = name + '.' + parserName(parser);
+    List<AstType> arguments = <AstType>[];
+    if (parserIs(parser, '<') && parserHasTypeArguments(parser, false)) {
+      parserExpect(parser, '<');
+      arguments.add(parseAstType(parser));
+      while (parserTake(parser, ',')) arguments.add(parseAstType(parser));
+      if (!parserTypeClose(parser)) parserError(parser, 'expected >');
+    }
+    if (parserTake(parser, '?')) name = name + '?';
+    result = AstType(name, arguments, token);
+  }
+  while (parser.position != end &&
+      parserIs(parser, 'Function') &&
+      (tokenIs(parser.tokens[parser.position + 1], '(') ||
+          tokenIs(parser.tokens[parser.position + 1], '<'))) {
+    parser.position++;
+    if (parserIs(parser, '<'))
+      parserError(parser, 'generic function types are unsupported');
+    var parameters = parserFunctionTypeParameters(parser);
+    var type = AstType('Function', const <AstType>[], token);
+    type.function = AstFunctionType(result, parameters);
+    if (parserTake(parser, '?')) type.name = 'Function?';
+    result = type;
+  }
+  return result;
 }
 
 List<AstType> parserTypeArguments(Parser parser) {
@@ -217,8 +332,9 @@ AstExpression parserCall(
   Parser parser,
   AstExpression callee,
   int token,
-  List<AstType> typeArguments,
-) {
+  List<AstType> typeArguments, [
+  String disposition = astCallValue,
+]) {
   parserExpect(parser, '(');
   List<AstExpression> children = <AstExpression>[callee];
   while (!parserIs(parser, ')')) {
@@ -243,7 +359,7 @@ AstExpression parserCall(
     if (!parserTake(parser, ',')) break;
   }
   parserExpect(parser, ')');
-  return AstExpression(astCall, '', children, typeArguments, token);
+  return AstExpression(astCall, disposition, children, typeArguments, token);
 }
 
 AstExpression parserMetadatum(Parser parser) {
@@ -300,13 +416,24 @@ List<AstExpression> parserMetadata(Parser parser) {
 }
 
 AstExpression parserPostfix(Parser parser) {
+  var parenthesized = parserIs(parser, '(');
   var expression = parserPrimary(parser);
+  var disposition = astCallValue;
+  if (!parenthesized && expression.kind == astName)
+    disposition = astCallIdentifier;
   while (true) {
     var token = parser.position;
     if (parserIs(parser, '<') && parserHasTypeArguments(parser, true)) {
       var arguments = parserTypeArguments(parser);
       if (parserIs(parser, '(')) {
-        expression = parserCall(parser, expression, token, arguments);
+        expression = parserCall(
+          parser,
+          expression,
+          token,
+          arguments,
+          disposition,
+        );
+        disposition = astCallValue;
       } else {
         if (expression.kind != astName &&
             (expression.kind != astMember ||
@@ -325,8 +452,16 @@ AstExpression parserPostfix(Parser parser) {
         <AstType>[],
         member,
       );
+      disposition = astCallSelector;
     } else if (parserIs(parser, '(')) {
-      expression = parserCall(parser, expression, token, const <AstType>[]);
+      expression = parserCall(
+        parser,
+        expression,
+        token,
+        const <AstType>[],
+        disposition,
+      );
+      disposition = astCallValue;
     } else if (parserTake(parser, '[')) {
       var index = parseExpression(parser);
       parserExpect(parser, ']');
@@ -337,6 +472,7 @@ AstExpression parserPostfix(Parser parser) {
         <AstType>[],
         token,
       );
+      disposition = astCallValue;
     } else if (parserTake(parser, '!') ||
         parserTake(parser, '++') ||
         parserTake(parser, '--')) {
@@ -347,6 +483,7 @@ AstExpression parserPostfix(Parser parser) {
         <AstType>[],
         token,
       );
+      disposition = astCallValue;
     } else {
       break;
     }
@@ -538,10 +675,10 @@ AstType parserInferredType(int token) {
   return AstType('', const <AstType>[], token);
 }
 
-bool parserTypedDeclaration(Parser parser) {
+int parserDeclarationTypeEnd(Parser parser) {
   var position = parser.position;
   var closers = parser.pendingClosers;
-  var typed = parserLookType(parser);
+  var typed = parserLookType(parser, true);
   if (typed) {
     typed =
         parser.pendingClosers == 0 &&
@@ -551,9 +688,15 @@ bool parserTypedDeclaration(Parser parser) {
         !parserIs(parser, 'as') &&
         !tokenIs(parser.tokens[parser.position + 1], ':');
   }
+  var end = -1;
+  if (typed) end = parser.position;
   parser.position = position;
   parser.pendingClosers = closers;
-  return typed;
+  return end;
+}
+
+bool parserTypedDeclaration(Parser parser) {
+  return parserDeclarationTypeEnd(parser) >= 0;
 }
 
 String parserModifier(Parser parser) {
@@ -569,8 +712,9 @@ String parserModifier(Parser parser) {
 }
 
 AstType parserDeclarationType(Parser parser, String modifier) {
-  if (modifier != 'var' && parserTypedDeclaration(parser)) {
-    return parseAstType(parser);
+  if (modifier != 'var') {
+    var end = parserDeclarationTypeEnd(parser);
+    if (end >= 0) return parseAstType(parser, end);
   }
   return parserInferredType(parser.position);
 }
@@ -697,6 +841,8 @@ AstFunction parserFunction(
   if (getter && parserIs(parser, '(')) {
     parserError(parser, 'getters cannot have parameters');
   }
+  if (parserIs(parser, '<'))
+    parserError(parser, 'generic function declarations are unsupported');
   List<AstParameter> parameters = <AstParameter>[];
   if (!getter) parameters = parserParameters(parser);
   if (setter) {
@@ -825,18 +971,12 @@ AstClass parserClass(Parser parser, int token) {
 
 AstTypedef parserTypedef(Parser parser, int token) {
   var name = parserName(parser);
+  if (parserIs(parser, '<'))
+    parserError(parser, 'generic type aliases are unsupported');
   parserExpect(parser, '=');
-  var result = parseAstType(parser);
-  parserExpect(parser, 'Function');
-  parserExpect(parser, '(');
-  List<AstType> parameters = <AstType>[];
-  while (!parserIs(parser, ')')) {
-    parameters.add(parseAstType(parser));
-    if (!parserTake(parser, ',')) break;
-  }
-  parserExpect(parser, ')');
+  var type = parseAstType(parser);
   parserExpect(parser, ';');
-  return AstTypedef(name, result, parameters, token);
+  return AstTypedef(name, type, token);
 }
 
 AstDirective parserDirective(Parser parser, int kind, int token) {

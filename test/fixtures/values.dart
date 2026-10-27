@@ -1758,6 +1758,153 @@ void metadataValues() {
   print(<int>[first + zero, second]);
 }
 
+typedef IntCallback = int Function(int);
+typedef PackedCallback = Object? Function(
+  int,
+  String,
+  bool,
+  Object?,
+  List<int>,
+  int,
+  String,
+  bool,
+  int,
+);
+
+int functionTrace = 0;
+int functionIdentity(int value) => value;
+int functionPlus(int value) => value + 1;
+int functionOther(int value) => value - 1;
+int functionFromObject(Object? value) => value as int;
+bool functionFlag(bool value) => value;
+String functionText(String value) => value;
+int functionNumber() => 7;
+IntCallback functionReturn() => functionPlus;
+int functionApply(IntCallback callback, int value) => callback(value);
+int functionDefault([IntCallback callback = functionIdentity]) => callback(11);
+int functionNullable(IntCallback? callback) {
+  if (callback == null) return -1;
+  return callback(7);
+}
+
+int functionStep(int value) {
+  functionTrace = functionTrace * 10 + 4;
+  return value + 1;
+}
+
+class CallbackSlot {
+  IntCallback callback;
+  CallbackSlot(this.callback);
+  IntCallback get selected {
+    functionTrace = functionTrace * 10 + 2;
+    return callback;
+  }
+}
+
+CallbackSlot functionReceiver() {
+  functionTrace = functionTrace * 10 + 1;
+  return CallbackSlot(functionStep);
+}
+
+int functionArgument() {
+  functionTrace = functionTrace * 10 + 3;
+  return 4;
+}
+
+class CallbackRecord {
+  final IntCallback callback;
+  const CallbackRecord(this.callback);
+}
+
+const functionSaved = functionIdentity;
+const functionCallbacks = <IntCallback>[functionIdentity];
+const functionRecord = CallbackRecord(functionIdentity);
+IntCallback functionSelected = functionPlus;
+
+Object? functionPacked(
+  int first,
+  String second,
+  bool third,
+  Object? fourth,
+  List<int> fifth,
+  int sixth,
+  String seventh,
+  bool eighth,
+  int ninth,
+) {
+  print(<Object?>[
+    first,
+    second,
+    third,
+    fourth,
+    fifth[0],
+    sixth,
+    seventh,
+    eighth,
+    ninth,
+  ]);
+  return ninth;
+}
+
+void functionValues() {
+  print(functionApply(functionPlus, 2));
+  print(functionReturn()(4));
+  print(functionSelected(3));
+  functionSelected = functionOther;
+  print(functionSelected(3));
+  var callbacks = <IntCallback>[functionPlus, functionOther];
+  print(<int>[callbacks[0](5), callbacks[1](5)]);
+  print(identical(functionSaved, functionCallbacks[0]));
+  print(identical(functionRecord.callback, functionIdentity));
+  print(functionRecord.callback(10));
+  print(functionDefault());
+  print(functionNullable(functionPlus));
+  print(functionNullable(null));
+  IntCallback broad = functionFromObject;
+  print(broad(9223372036854775807));
+  Object? Function(int) producer = functionIdentity;
+  print(producer(-9223372036854775808));
+  bool Function(bool) flag = functionFlag;
+  print(flag(false));
+  String Function(String) text = functionText;
+  print(text('回调🙂'));
+  void Function() discard = functionNumber;
+  print(<void>[discard()]);
+  dynamic source = functionIdentity;
+  IntCallback checked = source;
+  print(checked(0));
+  Object callable = functionPlus;
+  print(callable is Function);
+  if (callable is IntCallback) print(callable(6));
+  IntCallback local = functionPlus;
+  print(local((local = functionOther)(10)));
+  print(local(10));
+  var slot = CallbackSlot(functionPlus);
+  print(slot.callback((slot.callback = functionOther)(10)));
+  slot.callback = functionPlus;
+  print((slot.callback)((slot.callback = functionOther)(10)));
+  functionTrace = 0;
+  print(functionReceiver().selected(functionArgument()));
+  print(functionTrace);
+  functionTrace = 0;
+  print((functionReceiver().selected)(functionArgument()));
+  print(functionTrace);
+  PackedCallback packed = functionPacked;
+  print(
+    packed(
+      -9223372036854775808,
+      '栈🙂',
+      true,
+      null,
+      <int>[17],
+      31,
+      '尾',
+      false,
+      9223372036854775807,
+    ),
+  );
+}
+
 void main(List<String> args) {
   metadataValues();
   objectValues();
@@ -1779,6 +1926,7 @@ void main(List<String> args) {
   shiftContexts();
   constantLists();
   constObjects();
+  functionValues();
   bufferValues();
   stringBoundaries();
   listGrowth(args);

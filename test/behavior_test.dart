@@ -569,6 +569,10 @@ void main(List<String> args) {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "typedef F=int Function(int); String wrong(int value)=>'wrong'; int argument(){print('argument');return 1;} void main(){print('before');dynamic source=wrong;F callback=source;print(callback(argument()));}",
+      "typedef F=int Function(int); int argument(){print('argument');return 1;} void main(){print('before');dynamic source=1;F callback=source;print(callback(argument()));}",
+      "typedef F=int Function(int); int argument(){print('argument');return 1;} void main(){F? callback;print('before');callback!(argument());}",
+      "typedef F=int Function(int); int value(int x)=>x; String wrong(int x)=>'wrong'; void main(){List<Function> callbacks=<F>[value];print('before');callbacks[0]=wrong;print('after');}",
       "void main() { print('before'); print('abc'.codeUnitAt(-1)); }",
       "void main() { print('before'); print('abc'.codeUnitAt(3)); }",
       "void main() { print('before'); print('abc'[9223372036854775807]); }",
@@ -676,6 +680,30 @@ void main() {
       }
     }
     final libraries = {
+      'function-first.dart': r'''
+// @dart=2.12
+typedef Unary=int Function(int);
+int value(int input)=>input+40;
+const saved=value;
+const nested=<List<Unary>>[<Unary>[value]];
+''',
+      'function-other.dart':
+          'int value(int input)=>input+40; const saved=value;',
+      'function-exports.dart':
+          "export 'function-first.dart' show Unary,value,saved,nested;",
+      'function-imports.dart': r'''
+import 'function-first.dart' as first;
+import 'function-exports.dart' as alias;
+import 'function-other.dart' as other;
+void main(){
+  print(identical(first.value,alias.saved));
+  print(first.value==alias.value);
+  print(identical(first.saved,other.saved));
+  print(alias.nested[0][0](2));
+  first.Unary callback=alias.value;
+  print(callback.call(3));
+}
+''',
       'math.dart':
           'int shared() => 11; int hidden() => 90; int _private() => 8;',
       'other.dart': 'int shared() => 22;',
@@ -958,7 +986,17 @@ void main() { print(1_000); }
     compare(File('${temporary.path}/const-class-imports.dart'), []);
     compare(File('${temporary.path}/const-class-metadata-only.dart'), []);
     compare(File('${temporary.path}/const-class-finite-default.dart'), []);
+    compare(File('${temporary.path}/function-imports.dart'), []);
     final rejected = [
+      'int value(int input)=>input; void main(){int Function(Object?) callback=value;print(callback(null));}',
+      'int value(int input)=>input; void main(){int Function(int) callback=value;callback();}',
+      'void main(){int Function(int)? callback;callback(1);}',
+      'typedef First=Later;typedef Later=First Function(int);void main(){}',
+      'void value(){} @value void main(){}',
+      "@pragma('dartc:no-gc') void invoke(void Function() callback)=>callback();void target(){print(1);}void main(){invoke(target);}",
+      '// @dart=2.12\ntypedef F=int Function();typedef Copy=F;void main(){}',
+      '// @dart=2.12\ntypedef Nullable=int Function()?;void main(){}',
+      'typedef Function=int;void main(){Function value=7;print(value);}',
       "@pragma('dartc:no-gc') int checked(String value,int index)=>value.codeUnitAt(index);void main(){print(checked('a',0));}",
       "@pragma('dartc:no-gc') int checked(String value)=>int.parse(value);void main(){print(checked('7'));}",
       "@pragma('dartc:no-gc') void checked(List<int> values){values.clear();}void main(){var values=<int>[1];checked(values);print(values.length);}",

@@ -1,3 +1,4 @@
+import 'ast.dart';
 import 'source.dart';
 
 const int symbolFunction = 1;
@@ -7,6 +8,17 @@ const int symbolNativeType = 4;
 const int symbolBuiltin = 5;
 const int symbolType = 6;
 const int symbolProperty = 7;
+const int symbolAlias = 8;
+const int accessorGetter = 1;
+const int accessorSetter = 2;
+
+class TypeAlias {
+  final AstType syntax;
+  int type = -1;
+  bool resolving = false;
+
+  TypeAlias(this.syntax);
+}
 
 class DeclarationSymbol {
   int source;
@@ -14,6 +26,7 @@ class DeclarationSymbol {
   int kind;
   int target;
   int setter = -1;
+  int accessors = 0;
   bool writable = false;
 
   DeclarationSymbol(this.source, this.name, this.kind, this.target);
@@ -22,15 +35,34 @@ class DeclarationSymbol {
 class SymbolTable {
   SourceProgram program;
   List<DeclarationSymbol> declarations;
+  List<TypeAlias> aliases = <TypeAlias>[];
+  List<List<int>> sourceDeclarations = <List<int>>[];
 
-  SymbolTable(this.program, this.declarations);
+  SymbolTable(this.program, this.declarations) {
+    var i = 0;
+    while (i < declarations.length) {
+      _indexDeclaration(this, i);
+      i++;
+    }
+  }
+}
+
+void _indexDeclaration(SymbolTable table, int symbol) {
+  var scope = table.declarations[symbol].source - sourceFfi;
+  while (table.sourceDeclarations.length <= scope) {
+    table.sourceDeclarations.add(<int>[]);
+  }
+  table.sourceDeclarations[scope].add(symbol);
 }
 
 int symbolOwnDeclaration(SymbolTable table, int source, String name) {
+  var scope = source - sourceFfi;
+  if (scope >= table.sourceDeclarations.length) return -1;
+  var declarations = table.sourceDeclarations[scope];
   var i = 0;
-  while (i < table.declarations.length) {
-    var declaration = table.declarations[i];
-    if (declaration.source == source && declaration.name == name) return i;
+  while (i < declarations.length) {
+    var symbol = declarations[i];
+    if (table.declarations[symbol].name == name) return symbol;
     i++;
   }
   return -1;
@@ -46,6 +78,7 @@ int declareSymbol(
   if (symbolOwnDeclaration(table, source, name) >= 0) return -2;
   var symbol = table.declarations.length;
   table.declarations.add(DeclarationSymbol(source, name, kind, target));
+  _indexDeclaration(table, symbol);
   return symbol;
 }
 
@@ -60,19 +93,23 @@ int declareAccessor(
   if (symbol < 0) {
     symbol = table.declarations.length;
     table.declarations.add(DeclarationSymbol(source, name, symbolProperty, -1));
+    _indexDeclaration(table, symbol);
   }
   var declaration = table.declarations[symbol];
   if (setter) {
-    if (declaration.setter >= 0 ||
+    if ((declaration.accessors & accessorSetter) != 0 ||
         declaration.kind != symbolProperty &&
             (declaration.kind != symbolGlobal || declaration.writable)) {
       return -2;
     }
+    declaration.accessors |= accessorSetter;
     declaration.setter = function;
   } else {
-    if (declaration.kind != symbolProperty || declaration.target >= 0) {
+    if (declaration.kind != symbolProperty ||
+        (declaration.accessors & accessorGetter) != 0) {
       return -2;
     }
+    declaration.accessors |= accessorGetter;
     declaration.target = function;
   }
   return symbol;
@@ -80,10 +117,11 @@ int declareAccessor(
 
 bool _symbolHasFacet(DeclarationSymbol declaration, bool writing) {
   if (writing) {
-    return declaration.setter >= 0 ||
+    return (declaration.accessors & accessorSetter) != 0 ||
         declaration.kind == symbolGlobal && declaration.writable;
   }
-  return declaration.kind != symbolProperty || declaration.target >= 0;
+  return declaration.kind != symbolProperty ||
+      (declaration.accessors & accessorGetter) != 0;
 }
 
 int symbolMerge(SymbolTable table, int left, int right, bool writing) {

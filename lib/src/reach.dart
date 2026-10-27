@@ -12,6 +12,11 @@ void _reachFunction(List<int> reachable, List<int> work, int target) {
   }
 }
 
+void _reachCallable(List<int> reachable, List<int> work, int target) {
+  _reachFunction(reachable, work, target);
+  _reachFunction(reachable, work, functions[target].callableAdapter);
+}
+
 List<int> reachableFunctions(List<SsaFunction> source, [List<int>? roots]) {
   List<int> reachable = <int>[];
   List<int> work = <int>[];
@@ -59,6 +64,8 @@ List<int> reachableFunctions(List<SsaFunction> source, [List<int>? roots]) {
         var instruction = instructions[i];
         if (instruction.op == opCall) {
           _reachFunction(reachable, work, instruction.target);
+        } else if (instruction.op == opFunctionReference) {
+          _reachCallable(reachable, work, instruction.target);
         } else if (instruction.op == opConstantData) {
           var data = constantData[instruction.target];
           if (typeIsClass(data.type)) {
@@ -75,6 +82,8 @@ List<int> reachableFunctions(List<SsaFunction> source, [List<int>? roots]) {
             if (data.kinds[child] == typeKindList ||
                 data.kinds[child] == typeKindClass)
               _reachFunction(reachable, work, data.values[child]);
+            if (data.kinds[child] == typeKindFunction)
+              _reachCallable(reachable, work, data.values[child]);
             child++;
           }
         } else if (instruction.op == opTypeTest ||
@@ -107,7 +116,8 @@ List<int> reachableFunctions(List<SsaFunction> source, [List<int>? roots]) {
           }
         } else if (instruction.op == opBuiltin &&
             instruction.target < bNativeLoad64 &&
-            instruction.target != bBoxRef) {
+            instruction.target != bBoxRef &&
+            instruction.target != bFunctionInvoke) {
           var castType = -1;
           if (instruction.target == bValueCast) {
             castType = instruction.resultType;

@@ -17,12 +17,24 @@ const int astInterpolation = 16;
 const int astTypeTest = 17;
 const int astTypeCast = 18;
 
+const String astCallIdentifier = 'identifier';
+const String astCallSelector = 'selector';
+const String astCallValue = 'value';
+
 class AstType {
   String name;
   List<AstType> arguments;
   int token;
+  AstFunctionType? function;
 
   AstType(this.name, this.arguments, this.token);
+}
+
+class AstFunctionType {
+  AstType result;
+  List<AstParameter> parameters;
+
+  AstFunctionType(this.result, this.parameters);
 }
 
 class AstExpression {
@@ -158,11 +170,10 @@ class AstClass {
 class AstTypedef {
   List<AstExpression> metadata = const <AstExpression>[];
   String name;
-  AstType result;
-  List<AstType> parameterTypes;
+  AstType type;
   int token;
 
-  AstTypedef(this.name, this.result, this.parameterTypes, this.token);
+  AstTypedef(this.name, this.type, this.token);
 }
 
 class AstCombinator {

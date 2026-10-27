@@ -13,7 +13,7 @@ external int nativeCall1(int function, int value);
 external int nativeCall0(int function);
 external int nativeFramePointer();
 
-const int rtAbiVersion = 10;
+const int rtAbiVersion = 11;
 const int rtArenaHeaderBytes = 48;
 
 int rtArenaHead = 0;
@@ -1068,6 +1068,24 @@ int rtObjectDescriptor(int object) {
   return descriptor;
 }
 
+@pragma('dartc:no-gc')
+int rtFunctionType(int value) {
+  var type = nativeLoad64(value + functionTypeOffset);
+  if ((nativeLoad64(value + objectFlagsOffset) & objectStaticRelative) != 0) {
+    type = value + type;
+  }
+  return type;
+}
+
+@pragma('dartc:no-gc')
+int rtFunctionEntry(int value) {
+  var entry = nativeLoad64(value + functionEntryOffset);
+  if ((nativeLoad64(value + objectFlagsOffset) & objectStaticRelative) != 0) {
+    entry = value + entry;
+  }
+  return entry;
+}
+
 int rtObjectNew(int descriptor) {
   var size = nativeLoad64(descriptor + descriptorSizeOffset);
   var object = rtAlloc(size);
@@ -1106,7 +1124,7 @@ int rtObjectFromData(int data) {
       }
     } else if (kind == typeKindNull) {
       value = 0;
-    } else if (kind == typeKindString) {
+    } else if (kind == typeKindString || kind == typeKindFunction) {
       value = entry + value;
     } else if (kind == typeKindList || kind == typeKindClass) {
       value = nativeCall0(entry + value);
@@ -1177,6 +1195,45 @@ int rtTypeSubtype(int actual, int expected) {
     var right = expected + nativeLoad64(expected + typeClassOffset);
     if (left != right) return 0;
   }
+  if (source == typeKindFunction) {
+    var targetSignature = nativeLoad64(expected + typeArgumentOffset);
+    if (targetSignature == 0) return 1;
+    var sourceSignature = nativeLoad64(actual + typeArgumentOffset);
+    if (sourceSignature == 0) return 0;
+    sourceSignature = actual + sourceSignature;
+    targetSignature = expected + targetSignature;
+    var required = nativeLoad64(
+      sourceSignature + functionSignatureRequiredOffset,
+    );
+    var count = nativeLoad64(targetSignature + functionSignatureCountOffset);
+    if (required >
+            nativeLoad64(targetSignature + functionSignatureRequiredOffset) ||
+        nativeLoad64(sourceSignature + functionSignatureCountOffset) < count) {
+      return 0;
+    }
+    var result =
+        sourceSignature +
+        nativeLoad64(sourceSignature + functionSignatureResultOffset);
+    var expectedResult =
+        targetSignature +
+        nativeLoad64(targetSignature + functionSignatureResultOffset);
+    if (rtTypeSubtype(result, expectedResult) == 0) return 0;
+    var i = 0;
+    while (i < count) {
+      var sourceParameter =
+          sourceSignature + functionSignatureParametersOffset + i * 8;
+      var targetParameter =
+          targetSignature + functionSignatureParametersOffset + i * 8;
+      if (rtTypeSubtype(
+            targetParameter + nativeLoad64(targetParameter),
+            sourceParameter + nativeLoad64(sourceParameter),
+          ) ==
+          0) {
+        return 0;
+      }
+      i++;
+    }
+  }
   return 1;
 }
 
@@ -1206,6 +1263,7 @@ int rtValueKind(int value) {
   if (kind == descriptorIntBox) return typeKindInt;
   if (kind == descriptorString) return typeKindString;
   if (kind == descriptorList) return typeKindList;
+  if (kind == descriptorFunction) return typeKindFunction;
   return typeKindClass;
 }
 
@@ -1256,6 +1314,9 @@ int rtValueMatches(int value, int expected) {
   if (actual != kind) return 0;
   if (kind == typeKindList) {
     return rtTypeSubtype(nativeLoad64(value + listTypeOffset), expected);
+  }
+  if (kind == typeKindFunction) {
+    return rtTypeSubtype(rtFunctionType(value), expected);
   }
   if (kind == typeKindClass) {
     var descriptor = expected + nativeLoad64(expected + typeClassOffset);
@@ -1464,6 +1525,9 @@ int rtValueFormatCore(int value, int handleType, int kind) {
   }
   if (kind == typeKindInt) return rtIntToString(rtValueInt(value));
   if (kind == typeKindString) return value;
+  if (kind == typeKindFunction) {
+    return rtStringFromWords(0x657275736f6c43, 0, 0, 0);
+  }
   var descriptor = rtObjectDescriptor(value);
   if (kind == typeKindClass) {
     var callback = nativeLoad64(descriptor + descriptorToStringOffset);
@@ -1782,7 +1846,8 @@ int rtTraceObject(int value, int worklist, int capacity) {
   var kind = nativeLoad64(descriptor + descriptorKindOffset);
   if (kind == descriptorString ||
       kind == descriptorIntBox ||
-      kind == descriptorWordArray) {
+      kind == descriptorWordArray ||
+      kind == descriptorFunction) {
     return 0;
   }
   if (kind == descriptorList) {

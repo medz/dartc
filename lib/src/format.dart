@@ -112,6 +112,9 @@ class ConstantLayout {
   List<int> globalOffsets = <int>[];
   int globalBytes = 0;
   List<int> dataOffsets = <int>[];
+  List<int> callableOffsets = <int>[];
+  List<int> signatureOffsets = <int>[];
+  int functionDescriptorOffset = -1;
   List<int> refBitmapOffsets = <int>[];
   List<int> taggedBitmapOffsets = <int>[];
   int metadataFeatures = 0;
@@ -161,6 +164,8 @@ ConstantLayout layoutConstants(int start) {
   List<int> classNameStrings = <int>[];
   List<int> typeOffsets = <int>[];
   List<int> dataOffsets = <int>[];
+  List<int> callableOffsets = <int>[];
+  List<int> signatureOffsets = <int>[];
   List<int> refBitmapOffsets = <int>[];
   List<int> taggedBitmapOffsets = <int>[];
   List<int> globalOffsets = <int>[];
@@ -189,6 +194,11 @@ ConstantLayout layoutConstants(int start) {
     i++;
   }
   i = 0;
+  while (i < functions.length) {
+    callableOffsets.add(-1);
+    i++;
+  }
+  i = 0;
   while (i < globalNames.length) {
     globalOffsets.add(-1);
     i++;
@@ -208,6 +218,8 @@ ConstantLayout layoutConstants(int start) {
       markTypeReference(typeOffsets, types, addressTargets[i]);
     } else if (addressKinds[i] == 5) {
       dataOffsets[addressTargets[i]] = 0;
+    } else if (addressKinds[i] == 6) {
+      callableOffsets[addressTargets[i]] = 0;
     }
     i++;
   }
@@ -229,10 +241,28 @@ ConstantLayout layoutConstants(int start) {
       while (value < data.kinds.length) {
         if (data.kinds[value] == typeKindString) {
           stringOffsets[data.values[value]] = 0;
+        } else if (data.kinds[value] == typeKindFunction) {
+          callableOffsets[data.values[value]] = 0;
         }
         value++;
       }
     }
+    i++;
+  }
+  bool needsFunctions = false;
+  i = 0;
+  while (i < callableOffsets.length) {
+    if (callableOffsets[i] == 0) {
+      needsFunctions = true;
+      var type = functionValueType(i);
+      while (typeOffsets.length < dartTypes.length) typeOffsets.add(-1);
+      markTypeReference(typeOffsets, types, type);
+    }
+    i++;
+  }
+  i = 0;
+  while (i < functionSignatures.length) {
+    signatureOffsets.add(-1);
     i++;
   }
   bool needsValues = (features & metadataValues) != 0;
@@ -250,6 +280,15 @@ ConstantLayout layoutConstants(int start) {
       markTypeReference(typeOffsets, types, type.argument);
     } else if (type.kind == kClass) {
       descriptorOffsets[type.argument] = 0;
+    } else if (type.kind == kFunction) {
+      signatureOffsets[type.argument] = 0;
+      var signature = functionSignatures[type.argument];
+      markTypeReference(typeOffsets, types, signature.result);
+      var p = 0;
+      while (p < signature.parameters.length) {
+        markTypeReference(typeOffsets, types, signature.parameters[p]);
+        p++;
+      }
     }
     i++;
   }
@@ -314,6 +353,11 @@ ConstantLayout layoutConstants(int start) {
     intBoxDescriptorOffset = end;
     end = end + classDescriptorBytes;
   }
+  int functionDescriptorOffset = -1;
+  if (needsFunctions) {
+    functionDescriptorOffset = end;
+    end += classDescriptorBytes;
+  }
   i = 0;
   while (i < classSizes.length) {
     if (descriptorOffsets[i] >= 0) {
@@ -335,6 +379,16 @@ ConstantLayout layoutConstants(int start) {
     if (typeOffsets[i] == 0) {
       typeOffsets[i] = end;
       end = end + typeRefBytes;
+    }
+    i++;
+  }
+  i = 0;
+  while (i < signatureOffsets.length) {
+    if (signatureOffsets[i] == 0) {
+      signatureOffsets[i] = end;
+      end +=
+          functionSignatureParametersOffset +
+          functionSignatures[i].parameters.length * 8;
     }
     i++;
   }
@@ -404,6 +458,14 @@ ConstantLayout layoutConstants(int start) {
     }
     i++;
   }
+  i = 0;
+  while (i < callableOffsets.length) {
+    if (callableOffsets[i] == 0) {
+      callableOffsets[i] = end;
+      end += functionInstanceBytes;
+    }
+    i++;
+  }
   var layout = ConstantLayout(
     stringOffsets,
     descriptorOffsets,
@@ -422,6 +484,9 @@ ConstantLayout layoutConstants(int start) {
   layout.globalOffsets = globalOffsets;
   layout.globalBytes = globalBytes;
   layout.dataOffsets = dataOffsets;
+  layout.callableOffsets = callableOffsets;
+  layout.signatureOffsets = signatureOffsets;
+  layout.functionDescriptorOffset = functionDescriptorOffset;
   layout.refBitmapOffsets = refBitmapOffsets;
   layout.taggedBitmapOffsets = taggedBitmapOffsets;
   layout.metadataFeatures = features;
@@ -457,6 +522,8 @@ List<int> createMachOExecutable() {
       target = base + constants.metadataOffset;
     } else if (addressKinds[site] == 5) {
       target = base + constants.dataOffsets[addressTargets[site]];
+    } else if (addressKinds[site] == 6) {
+      target = base + constants.callableOffsets[addressTargets[site]];
     } else {
       target = base + constants.typeOffsets[addressTargets[site]];
     }
@@ -613,6 +680,8 @@ List<int> createElfExecutable() {
       target = base + constants.metadataOffset;
     } else if (addressKinds[site] == 5) {
       target = base + constants.dataOffsets[addressTargets[site]];
+    } else if (addressKinds[site] == 6) {
+      target = base + constants.callableOffsets[addressTargets[site]];
     } else {
       target = base + constants.typeOffsets[addressTargets[site]];
     }
@@ -694,6 +763,7 @@ int imageTypeKind(int kind) {
   if (kind == tObject) return typeKindObject;
   if (kind == tNum) return typeKindNum;
   if (kind == tNever) return typeKindNever;
+  if (kind == tFunction || kind == kFunction) return typeKindFunction;
   if (kind == kNullable) return typeKindNullable;
   if (kind == kList) return typeKindList;
   return typeKindClass;
@@ -847,6 +917,18 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
   if (layout.intBoxDescriptorOffset >= 0) {
     imageDescriptor(-5, objectHeaderBytes + 8, 1, 0, descriptorIntBox, 0, 0, 0);
   }
+  if (layout.functionDescriptorOffset >= 0) {
+    imageDescriptor(
+      -7,
+      functionInstanceBytes,
+      0,
+      0,
+      descriptorFunction,
+      0,
+      0,
+      0,
+    );
+  }
   descriptor = 0;
   while (descriptor < classSizes.length) {
     var fields = (classSizes[descriptor] - objectHeaderBytes) ~/ 8;
@@ -868,6 +950,8 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
       int argument = 0;
       if (type.kind == kList || type.kind == kNullable) {
         argument = layout.typeOffsets[type.argument] - offset;
+      } else if (type.kind == kFunction) {
+        argument = layout.signatureOffsets[type.argument] - offset;
       }
       image64(argument);
       int classOffset = 0;
@@ -884,6 +968,22 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
       image64(representation);
     }
     typeIndex++;
+  }
+  var signatureIndex = 0;
+  while (signatureIndex < layout.signatureOffsets.length) {
+    var offset = layout.signatureOffsets[signatureIndex];
+    if (offset >= 0) {
+      var signature = functionSignatures[signatureIndex];
+      image64(layout.typeOffsets[signature.result] - offset);
+      image64(signature.required);
+      image64(signature.parameters.length);
+      var p = 0;
+      while (p < signature.parameters.length) {
+        image64(layout.typeOffsets[signature.parameters[p]] - image.length);
+        p++;
+      }
+    }
+    signatureIndex++;
   }
   if (layout.metadataOffset >= 0) {
     imageMetadataReference(
@@ -945,6 +1045,8 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
           value = layout.stringOffsets[value] - entry;
         } else if (kind == typeKindList || kind == typeKindClass) {
           value = codeOffset + armFunctionOffsets[value] * 4 - entry;
+        } else if (kind == typeKindFunction) {
+          value = layout.callableOffsets[value] - entry;
         }
         if (tagged) image64(kind);
         image64(value);
@@ -952,5 +1054,20 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
       }
     }
     list++;
+  }
+  var function = 0;
+  while (function < layout.callableOffsets.length) {
+    var offset = layout.callableOffsets[function];
+    if (offset >= 0) {
+      image64(layout.functionDescriptorOffset - offset);
+      image64(objectStaticRelative);
+      image64(layout.typeOffsets[functionValueType(function)] - offset);
+      image64(
+        codeOffset +
+            armFunctionOffsets[functions[function].callableAdapter] * 4 -
+            offset,
+      );
+    }
+    function++;
   }
 }

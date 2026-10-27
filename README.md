@@ -10,6 +10,8 @@ A native Dart compiler written in Dart.
 dart pub global activate dartc
 ```
 
+Source-checkout capabilities described below can be newer than the [published releases](https://pub.dev/packages/dartc/versions).
+
 ## Build and run
 
 Requires Dart 3.13 or later. Self-hosting is supported on macOS and Linux ARM64.
@@ -37,6 +39,8 @@ Each source file defaults to language version 3.13. A leading `// @dart = major.
 
 The source checkout additionally supports simple classes with fields, field-formal constructors, getters, setters, and directly resolved instance methods, nested typed lists, and lazy top-level initialization. Instance members may be used with or without `this`. Top-level getters and setters have independent read/write types and work through supported imports and exports. Basic `dynamic`, `Object`, `null`, and nullable values retain their runtime types across assignments, calls, fields, and list storage. Null-coalescing `??` expressions evaluate the fallback only when the left operand is null, including in constants and default values. `??=` evaluates and assigns the fallback only when the target reads null; postfix `!` checks for null and preserves a non-null value. Runtime `is`, `is!`, and `as` check supported value types and reified list arguments. List covariance checks writes against the actual element type. Interpolation and `print` support lists and class `toString` overrides, including cyclic lists.
 
+The source checkout supports nongeneric top-level function tear-offs with required positional parameters, structural function types and ordinary nongeneric type aliases. Function values can pass through parameters, returns, fields, lists and const storage; typed calls and `.call` preserve argument checks, function identity and parameter/return variance. Function-value signatures with optional or named parameters, generic functions, instance/static method and constructor tear-offs, capturing closures, calls through `dynamic` or bare `Function`, and user-defined callable objects remain unsupported. Direct function calls retain their existing optional/named parameter support.
+
 The `StringBuffer` subset supports empty construction, String arguments to `write` and `writeln`, `clear`, `length`, `isEmpty`, and `toString`. Indexed list access checks bounds. `List.filled` honors `growable`, which defaults to `false`; fixed-length lists allow element replacement and reject `add`, `removeLast`, and `clear`. List `for`/`in` checks for length changes between iteration steps.
 
 Const generative constructors support final fields, declaration initializers, and field-formal parameters. Const instances share canonical identity across expressions, nested lists, and default values; ordinary constructor calls create fresh instances. Named and redirecting constructors, factories, and initializer lists remain unsupported.
@@ -45,7 +49,7 @@ The source checkout also accepts user const-variable annotations on existing dec
 
 String indices and positions use UTF-16 code units and check ranges. `String.fromCharCodes` currently takes one `List<int>` argument, with codes from 0 through `0x10ffff`; surrogate code units are preserved.
 
-Inheritance, general dynamic member calls, closures, exceptions, async code, and most SDK libraries are not yet supported. Failed runtime type checks terminate the process; exception handling and stack unwinding are not implemented. Managed objects are currently reclaimed when the process exits. Self-hosting does not imply full Dart language compatibility.
+Function expressions, local functions, capturing closures, inheritance, general dynamic member calls, exceptions, async code, and most SDK libraries are not yet supported. Failed runtime type checks terminate the process; exception handling and stack unwinding are not implemented. Managed objects are currently reclaimed when the process exits. Self-hosting does not imply full Dart language compatibility.
 
 ## Build a standalone compiler
 

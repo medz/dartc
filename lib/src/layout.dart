@@ -1,5 +1,5 @@
 // Shared compiler/runtime object layout. Offsets are bytes.
-const int runtimeAbiVersion = 10;
+const int runtimeAbiVersion = 11;
 const int objectHeaderBytes = 16;
 const int objectFlagsOffset = 8;
 // Static objects store a descriptor displacement relative to their own address.
@@ -43,6 +43,14 @@ const int descriptorWordArray = 3;
 const int descriptorRefArray = 4;
 const int descriptorIntBox = 5;
 const int descriptorTaggedArray = 6;
+const int descriptorFunction = 7;
+const int functionTypeOffset = 16;
+const int functionEntryOffset = 24;
+const int functionInstanceBytes = 32;
+const int functionSignatureResultOffset = 0;
+const int functionSignatureRequiredOffset = 8;
+const int functionSignatureCountOffset = 16;
+const int functionSignatureParametersOffset = 24;
 const int metadataListDescriptorOffset = 8;
 const int metadataWordArrayDescriptorOffset = 16;
 const int metadataRefArrayDescriptorOffset = 24;
@@ -92,6 +100,7 @@ const int typeKindObject = 9;
 const int typeKindNullable = 10;
 const int typeKindNum = 11;
 const int typeKindNever = 12;
+const int typeKindFunction = 13;
 const int storageWord = 0;
 const int storageRef = 1;
 const int storageTagged = 2;

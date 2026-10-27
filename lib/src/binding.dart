@@ -34,6 +34,36 @@ class LocalBinder {
   LocalBinder(this.source, this.result, this.scopes);
 }
 
+void bindFunctionTypeParameters(SourceProgram source, AstFunctionType syntax) {
+  var i = 0;
+  while (i < syntax.parameters.length) {
+    var parameter = syntax.parameters[i];
+    var wildcard =
+        parameter.kind != astNamedParameter &&
+        parameter.name == '_' &&
+        sourceVersionAtLeast(
+          source,
+          source.tokens[parameter.token].source,
+          3,
+          7,
+        );
+    if (parameter.name != '' && !wildcard) {
+      var previous = 0;
+      while (previous < i) {
+        if (syntax.parameters[previous].name == parameter.name) {
+          sourceError(
+            source,
+            source.tokens[parameter.token],
+            'duplicate function type parameter ' + parameter.name,
+          );
+        }
+        previous++;
+      }
+    }
+    i++;
+  }
+}
+
 int bindingScope(LocalBinder binder, int parent) {
   var id = binder.scopes.length;
   binder.scopes.add(BindingScope(parent, <int>[]));

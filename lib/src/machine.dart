@@ -11,7 +11,8 @@ const int rI1 = 3;
 const int rTagged = 4;
 
 const int mConstant = 1;
-// Address kinds: 0 string, 1 global, 2 class descriptor, 3 metadata, 4 TypeRef.
+// Address kinds: 0 string, 1 global, 2 class descriptor, 3 metadata, 4 TypeRef,
+// 5 constant data, 6 callable object.
 const int mAddress = 2;
 const int mLoad64 = 3;
 const int mStore64 = 4;
@@ -179,11 +180,13 @@ void machineSelectInstruction(
   if (op == opString ||
       op == opDescriptor ||
       op == opMetadataAddress ||
-      op == opConstantData) {
+      op == opConstantData ||
+      op == opFunctionReference) {
     int kind = 0;
     if (op == opDescriptor) kind = 2;
     if (op == opMetadataAddress) kind = 3;
     if (op == opConstantData) kind = 5;
+    if (op == opFunctionReference) kind = 6;
     instructions.add(
       MachineInstruction(mAddress, output, inputs, target, kind, effects),
     );
@@ -242,7 +245,9 @@ void machineSelectInstruction(
       );
       return;
     }
-    if (target == bNativeCall1 || target == bNativeCall0) {
+    if (target == bNativeCall1 ||
+        target == bNativeCall0 ||
+        target == bFunctionInvoke) {
       instructions.add(
         MachineInstruction(mCallIndirect, output, inputs, 0, 0, effects),
       );
