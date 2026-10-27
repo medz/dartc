@@ -58,4 +58,4 @@ Use `dart tool/fuzz.dart --help` for explicit rejection and runtime-failure cont
 
 ## CI
 
-The [native self-hosting workflow](../.github/workflows/native.yml) is manually dispatched. It bootstraps on Linux ARM64, runs differential, resource-measurement, program-benchmark and fuzz tests, and cross-compiles the compiler for macOS. Release packaging and verification are optional workflow inputs.
+The [native self-hosting workflow](../.github/workflows/native.yml) is manually dispatched. It bootstraps on Linux ARM64, runs differential, SSA verification, resource-measurement, program-benchmark and fuzz tests, and cross-compiles the compiler for macOS. Release packaging and verification are optional workflow inputs.

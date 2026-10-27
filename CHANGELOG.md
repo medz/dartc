@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Verify SSA definitions, control flow, types and dominance before machine lowering, with native malformed-IR regression checks.
 - Support generative constructor redirection, preserving argument order, single-instance initialization and const identity.
 - Add Dart implementations of `StringBuffer.writeCharCode` and `isNotEmpty`.
 - Support explicit `new` for implemented class constructors and existing List/String factory entries, preserving constant-expression restrictions.

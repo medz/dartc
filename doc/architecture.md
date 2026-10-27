@@ -84,7 +84,8 @@ lib/src/
     literals.dart                                整数字面量语义与范围检查
   constants.dart, constant_data.dart              常量语义值与只读数据
   frontend.dart                                  声明收集、语义接线与 AST lowering
-  ir.dart, ssa.dart, optimize.dart, reach.dart      IR、优化与可达性
+  ir.dart, ssa.dart, verify_ssa.dart               IR、SSA 构造与验证
+  optimize.dart, reach.dart                       优化与可达性
   machine.dart, allocate.dart, root_map.dart        Machine IR、分配与根位置
   arm64.dart, emit.dart                           指令编码与发射
   abi.dart, layout.dart, nogc.dart                 运行时绑定、布局与效果约束
@@ -93,7 +94,7 @@ lib/src/
   std/core.dart, std/core/                        目标标准库源码
 test/
   behavior_test.dart, differential_test.dart, library_test.dart
-  measure_test.dart, program_benchmark_test.dart
+  measure_test.dart, program_benchmark_test.dart, ssa_test.dart
   fixtures/
 tool/
   bootstrap.dart, benchmark.dart, package_release.dart, fuzz.dart
@@ -398,6 +399,8 @@ invoke 的返回值进入正常块；异常对象与栈轨迹进入异常块。f
 ### 验证
 
 IR 验证器检查定义支配使用、块参数、调用签名、表示转换、异常边、安全点约束与 noGC 约束。优化器不能绕过这些规则。开发模式可在每个变换后验证，正常构建至少在表示选择和后端边界验证。
+
+当前 `verify_ssa.dart` 在优化后的 SSA 交给机器表示前检查定义、支配关系、控制流、直接调用、类型与效果元数据；常规编译在这一消费边界扫描一次。原生回归驱动同时验证 SSA 构造与优化结果，再注入错误检查诊断。异常边和完整安全点验证仍需随相应表示建立，noGC 约束由 `nogc.dart` 单独拥有。
 
 ## 优化与 Machine IR
 

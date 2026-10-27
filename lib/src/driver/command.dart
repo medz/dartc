@@ -12,6 +12,7 @@ import '../reach.dart';
 import '../ssa.dart';
 import '../source.dart';
 import '../source_uri.dart';
+import '../verify_ssa.dart';
 import 'packages.dart';
 
 void runCompiler(List<String> args) {
@@ -128,6 +129,7 @@ void runCompiler(List<String> args) {
   }
   List<SsaFunction> ssa = buildSsa();
   optimizeSsa(ssa);
+  verifySsa(ssa);
   var reachable = reachableFunctions(ssa);
   var checked = reachable;
   var marked = <int>[];
