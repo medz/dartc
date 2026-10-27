@@ -8,6 +8,8 @@ dartc 是用 Dart 实现的独立原生 Dart 编译器，目标是完整实现�
 
 语言条款、实现缺口和行为入口统一在 [specs/](../specs/README.md) 跟踪；实际运行时 API 与所有权见 [runtime.md](runtime.md)，安装与使用见 [README](../README.md)。
 
+外部工具链的设计对照、源码职责和本项目的演进边界审查见[编译器调查](compiler-survey/README.md)。调查提供取舍依据，不代表其中机制已经实现。
+
 ## 当前实现边界
 
 | 领域 | 当前边界 |

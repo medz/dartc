@@ -130,3 +130,5 @@ dartc example/math.dart --emit static --export add -o libmath.a
 ## Contributing
 
 Start language work from the [specification tracker](specs/README.md). See the [architecture](doc/architecture.md) for compiler/runtime design, [runtime contracts](doc/runtime.md) for memory and ownership rules, and [developer tooling](doc/development.md) for compiler/program benchmarks and differential testing.
+
+The [compiler survey](doc/compiler-survey/README.md) compares established toolchains, community compilers and managed runtimes, with a source-based audit of dartc's evolution boundaries.
