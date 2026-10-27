@@ -71,7 +71,7 @@ NoGC 检查的是函数体；分配/GC 角色描述的是调用对外的影响�
 - `hostCurrentDirectory()` 返回实际工作目录，不读取 `PWD`，也不从可执行文件推断。macOS 使用 open/fcntl 的 [F_GETPATH](https://github.com/apple-oss-distributions/Libc/blob/main/gen/FreeBSD/getcwd.c) 路径，Linux 使用 [getcwd 系统调用](https://github.com/torvalds/linux/blob/master/tools/include/uapi/asm-generic/unistd.h)并在缓冲不足时重试。超出这些系统接口能表示的路径会报告 I/O 错误；尚无 libc 的长路径遍历回退。
 - 文件和工作目录的原始缓冲在解码后释放；托管 String 或 null 使用现有 Ref 表示。两项服务可能创建托管 String，不能作为 NoGC 接口。
 
-这些内部接口为源码和包配置加载提供系统边界；当前尚未实现 `package_config.json` 发现、JSON/URI 解析或 `package:` 导入，也不代表完整 `dart:io`。真实文件读写、缺失与非缺失错误、Unicode 路径和工作目录验证统一归 [behavior_test.dart](../test/behavior_test.dart) 的 I/O 程序。
+这些内部接口为[源码和包配置加载](../specs/libraries.md)提供系统边界；现已支持本地 package configuration v2 与 file/package URI，不代表完整 `dart:io`。真实文件读写、缺失与非缺失错误、Unicode 路径和工作目录验证统一归 [behavior_test.dart](../test/behavior_test.dart) 的 I/O 程序。
 
 ## 函数值与调用边界
 

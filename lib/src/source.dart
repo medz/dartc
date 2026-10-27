@@ -52,6 +52,7 @@ class SourceProgram {
   String hostUri;
   int core;
   PackageConfig? packages;
+  List<String> libraries = const <String>[];
 
   SourceProgram(
     this.files,
@@ -103,6 +104,32 @@ bool sourceAllows(SourceImport dependency, String name) {
     i++;
   }
   return true;
+}
+
+// These are the system-library entries provided by the current target ports.
+// FFI advertises its existing restricted declarations, not the complete SDK API.
+List<String> sourceTargetLibraries(int target) {
+  if (target == 0 || target == 1) return const <String>['core', 'ffi'];
+  print('Unsupported source target: ' + target.toString());
+  hostExit(1);
+}
+
+String sourceDirectiveUri(SourceProgram program, AstDirective directive) {
+  var i = 0;
+  while (i < directive.conditions.length) {
+    var condition = directive.conditions[i];
+    if (condition.key.startsWith('dart.library.')) {
+      var name = condition.key.substring(13);
+      var library = 0;
+      while (library < program.libraries.length) {
+        if (program.libraries[library] == name && condition.value == 'true')
+          return condition.uri;
+        library++;
+      }
+    }
+    i++;
+  }
+  return directive.uri;
 }
 
 int sourceLoad(
@@ -218,7 +245,7 @@ int sourceLoad(
       }
       continue;
     }
-    var reference = directive.uri;
+    var reference = sourceDirectiveUri(program, directive);
     int target = sourceUnknown;
     if (reference == 'dart:core') {
       target = sourceCore;
@@ -272,6 +299,7 @@ SourceProgram collectSources(
   String input,
   String runtime, [
   PackageConfig? packages,
+  int target = 0,
 ]) {
   String hostUri = '';
   if (runtime != '') hostUri = sourceResolveFileUri(runtime, 'host.dart');
@@ -285,6 +313,7 @@ SourceProgram collectSources(
     -1,
   );
   program.packages = packages;
+  program.libraries = sourceTargetLibraries(target);
   if (runtime != '') {
     int standard = sourceLoad(program, runtime, true);
     program.runtimeTokens = program.files[standard].tokens.length - 1;

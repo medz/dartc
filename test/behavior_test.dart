@@ -703,6 +703,29 @@ void main() {
       }
     }
     final libraries = {
+      'conditional-first.dart': 'const int chosen=21;',
+      'conditional-other.dart': 'const int chosen=99;',
+      'conditional-export.dart': r'''
+export 'conditional-missing-default.dart'
+    if (dart . library . core == 'tr' 'ue') 'conditional-first.dart'
+    if (dart.library.ffi) 'conditional-missing-later.dart' show chosen;
+''',
+      'conditional-fallback.dart': r'''
+import 'conditional-first.dart'
+    if (dart.library.nonexistent == '') 'conditional-missing-empty.dart'
+    if (dart.library.nonexistent == 'false') 'conditional-missing-false.dart'
+    if (dart.library.Function) 'conditional-missing-Function.dart' as value;
+int fallback()=>value.chosen;
+''',
+      'conditional-imports.dart': r'''
+import 'conditional-missing-default.dart'
+    if (dart.library.ffi) 'conditional-first.dart'
+    if (dart.library.core) 'conditional-missing-later.dart' as direct show chosen;
+import 'conditional-export.dart' as exported;
+import 'conditional-fallback.dart';
+void main(){print(direct.chosen);print(exported.chosen);print(fallback());}
+''',
+      'conditional-io.dart': "import 'dart:io';",
       'function-first.dart': r'''
 // @dart=2.12
 typedef Unary=int Function(int);
@@ -1010,7 +1033,14 @@ void main() { print(1_000); }
     compare(File('${temporary.path}/const-class-metadata-only.dart'), []);
     compare(File('${temporary.path}/const-class-finite-default.dart'), []);
     compare(File('${temporary.path}/function-imports.dart'), []);
+    compare(File('${temporary.path}/conditional-imports.dart'), []);
     final rejected = [
+      "import 'conditional-first.dart' if(true) 'conditional-other.dart';void main(){}",
+      "import 'conditional-first.dart' if(dart.library.if) 'conditional-other.dart';void main(){}",
+      "import 'conditional-first.dart' if(dart.library.core && true) 'conditional-other.dart';void main(){}",
+      "import 'conditional-first.dart' if(dart.library.core == true) 'conditional-other.dart';void main(){}",
+      r"import 'conditional-first.dart' if(dart.library.nonexistent) 'x${1}.dart';void main(){}",
+      r"import 'conditional-first.dart' if(dart.library.core == '${true}') 'conditional-other.dart';void main(){}",
       'int value(int input)=>input; void main(){int Function(Object?) callback=value;print(callback(null));}',
       'int value(int input)=>input; void main(){int Function(int) callback=value;callback();}',
       'void main(){int Function(int)? callback;callback(1);}',
@@ -1265,6 +1295,12 @@ void main() { print(1_000); }
         ..writeAsStringSync(rejected[i]);
       reject(invalid);
     }
+    final conditionalIo = File('${temporary.path}/conditional-target-io.dart')
+      ..writeAsStringSync(
+        "import 'conditional-io.dart' if(dart.library.io) 'conditional-first.dart';void main(){}",
+      );
+    run(sdk, [conditionalIo.path]);
+    reject(conditionalIo, diagnostic: 'unsupported library URI dart:io');
     for (final literal in ['1_', '0x_FF', '0_xFF']) {
       final invalid = File('${temporary.path}/separator-$literal.dart')
         ..writeAsStringSync('void main() { print($literal); }');

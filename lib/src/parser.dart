@@ -979,21 +979,52 @@ AstTypedef parserTypedef(Parser parser, int token) {
   return AstTypedef(name, type, token);
 }
 
+String parserUriName(Parser parser) {
+  if (tokenIsReserved(parser.tokens[parser.position]))
+    parserError(parser, 'reserved word cannot be a URI test identifier');
+  return parserName(parser);
+}
+
+String parserUriString(Parser parser) {
+  if (parser.tokens[parser.position].kind != tokenString)
+    parserError(parser, 'expected URI string without interpolation');
+  var text = parser.tokens[parser.position].text;
+  parser.position++;
+  while (parser.tokens[parser.position].kind == tokenString) {
+    text += parser.tokens[parser.position].text;
+    parser.position++;
+  }
+  if (parser.tokens[parser.position].kind == tokenStringPart)
+    parserError(parser, 'URI strings cannot contain interpolation');
+  return text;
+}
+
 AstDirective parserDirective(Parser parser, int kind, int token) {
   var uri = '';
   var prefix = '';
   var combinators = <AstCombinator>[];
+  List<AstConditionalUri>? conditions;
   if (kind == astLibraryDirective) {
     if (!parserIs(parser, ';')) {
       uri = parserName(parser);
       while (parserTake(parser, '.')) uri = uri + '.' + parserName(parser);
     }
   } else {
-    if (parser.tokens[parser.position].kind != tokenString) {
-      parserError(parser, 'expected library URI');
+    uri = parserUriString(parser);
+    while (parserTake(parser, 'if')) {
+      var conditionToken = parser.position - 1;
+      parserExpect(parser, '(');
+      var key = parserUriName(parser);
+      while (parserTake(parser, '.')) key += '.' + parserUriName(parser);
+      var value = 'true';
+      if (parserTake(parser, '==')) value = parserUriString(parser);
+      parserExpect(parser, ')');
+      var alternative = parserUriString(parser);
+      conditions ??= <AstConditionalUri>[];
+      conditions.add(
+        AstConditionalUri(key, value, alternative, conditionToken),
+      );
     }
-    uri = parser.tokens[parser.position].text;
-    parser.position++;
     if (kind == astImportDirective && parserTake(parser, 'as')) {
       prefix = parserName(parser);
     }
@@ -1006,7 +1037,9 @@ AstDirective parserDirective(Parser parser, int kind, int token) {
     }
   }
   parserExpect(parser, ';');
-  return AstDirective(kind, uri, prefix, token, combinators);
+  var directive = AstDirective(kind, uri, prefix, token, combinators);
+  if (conditions != null) directive.conditions = conditions;
+  return directive;
 }
 
 AstUnit parseUnit(Parser parser) {

@@ -183,7 +183,17 @@ class AstCombinator {
   AstCombinator(this.show, this.names);
 }
 
+class AstConditionalUri {
+  final String key;
+  final String value;
+  final String uri;
+  final int token;
+
+  AstConditionalUri(this.key, this.value, this.uri, this.token);
+}
+
 class AstDirective {
+  List<AstConditionalUri> conditions = const <AstConditionalUri>[];
   List<AstExpression> metadata = const <AstExpression>[];
   int kind;
   String uri;

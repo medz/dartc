@@ -137,7 +137,7 @@ void runCompiler(List<String> args) {
   String runtime = '';
   if (imageKind == 0) runtime = sourceInputUri(cwd, standard);
   var config = compilerPackages(inputUri, cwd, packages);
-  SourceProgram sources = collectSources(inputUri, runtime, config);
+  SourceProgram sources = collectSources(inputUri, runtime, config, targetOS);
   parseSource(sources);
   if (imageKind != 0) {
     int chosen = -1;
