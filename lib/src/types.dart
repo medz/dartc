@@ -89,8 +89,7 @@ int functionType(int result, List<int> parameters, [int required = -1]) {
     }
     type++;
   }
-  var owned = <int>[];
-  for (var parameter in parameters) owned.add(parameter);
+  var owned = <int>[...parameters];
   var signature = functionSignatures.length;
   functionSignatures.add(FunctionSignature(result, owned, required));
   var item = DartType(kFunction, signature, -1, -1);

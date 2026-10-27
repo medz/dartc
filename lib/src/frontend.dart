@@ -4420,12 +4420,7 @@ void parseSource(SourceProgram source) {
   feTokens = source.tokens;
   feAt = 0;
   feRuntimeTokens = source.runtimeTokens;
-  var paths = <String>[];
-  var file = 0;
-  while (file < source.files.length) {
-    paths.add(source.files[file].path);
-    file++;
-  }
+  var paths = <String>[for (var file in source.files) file.path];
   var syntax = parseUnit(Parser(feTokens, 0, 0, paths));
   feInstallSymbols();
   feCollectDeclarations(syntax);
@@ -4736,8 +4731,7 @@ void feGenerateEntry() {
   feGenerateConstantObjects();
   entryFunction = main;
   if (parameters.length <= 1 && parameters.length == positional) return;
-  var types = <int>[];
-  if (positional > 0) types.add(argumentsType);
+  var types = <int>[if (positional > 0) argumentsType];
   entryFunction = functions.length;
   functions.add(
     FunctionInfo(

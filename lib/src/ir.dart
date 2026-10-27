@@ -204,12 +204,9 @@ int functionValueType(int function) {
   if (info.callableType < 0) {
     var parameters = info.parameterTypes;
     if (info.closureLayout != null) {
-      parameters = <int>[];
-      var i = 1;
-      while (i < info.parameterTypes.length) {
-        parameters.add(info.parameterTypes[i]);
-        i++;
-      }
+      parameters = <int>[
+        for (var i = 1; i < info.parameterTypes.length; i++) info.parameterTypes[i],
+      ];
     }
     info.callableType = functionType(info.result, parameters);
   }

@@ -102,16 +102,6 @@ List<int> ssaFill(int count, int value) {
   return values;
 }
 
-List<int> ssaCopy(List<int> values) {
-  List<int> copy = <int>[];
-  var i = 0;
-  while (i < values.length) {
-    copy.add(values[i]);
-    i = i + 1;
-  }
-  return copy;
-}
-
 int ssaInputCount(int op, int position) {
   if (op == opCall || op == opBuiltin) return ir[position + 2];
   if (op == opStoreGlobal) return 1;
@@ -236,7 +226,7 @@ void ssaStackShapes(FunctionInfo info, List<SsaFlow> flows) {
   var cursor = 0;
   while (cursor < work.length) {
     var flow = flows[work[cursor]];
-    var stack = ssaCopy(flow.shape.types);
+    var stack = <int>[...flow.shape.types];
     var position = flow.start;
     while (position < flow.end) {
       var op = ir[position];
@@ -267,7 +257,7 @@ void ssaStackShapes(FunctionInfo info, List<SsaFlow> flows) {
       var shape = flows[successor].shape;
       if (!shape.known) {
         shape.known = true;
-        shape.types = ssaCopy(stack);
+        shape.types = <int>[...stack];
         work.add(successor);
       } else {
         if (shape.types.length != stack.length) {
