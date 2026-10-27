@@ -93,7 +93,7 @@ class FeFunctionState {
   final List<int> bindingSlots = feBindingSlots;
   final List<int> slots = feSlotTypes;
   final int nextLocal = feNextLocal;
-  final int cascadeSlot = feCascadeSlot;
+  final int implicitReceiverSlot = feImplicitReceiverSlot;
   final FlowState flow = feFlow;
   final List<ConstantValue> constants = feConstants.locals;
   final List<int> constantTypes = feConstants.localTypes;
@@ -120,7 +120,7 @@ class FeFunctionState {
     feBindingSlots = bindingSlots;
     feSlotTypes = slots;
     feNextLocal = nextLocal;
-    feCascadeSlot = cascadeSlot;
+    feImplicitReceiverSlot = implicitReceiverSlot;
     feFlow = flow;
     feConstants.locals = constants;
     feConstants.localTypes = constantTypes;
@@ -163,7 +163,7 @@ List<FeClosure> feLocalClosures = <FeClosure>[];
 List<List<ConstantValue>?> feLocalConstants = <List<ConstantValue>?>[];
 List<int> feLocalOwners = <int>[];
 int feLocalStart = 0;
-int feCascadeSlot = -1;
+int feImplicitReceiverSlot = -1;
 List<bool> feLocalInferred = <bool>[];
 List<int> feLocalContexts = <int>[];
 List<int>? feReturnTypes;
@@ -1421,6 +1421,8 @@ int feNonNullableValue(int type, int token) {
 }
 
 int feLowerHint(AstExpression expression, int context) {
+  if (expression.kind == astNullAware)
+    return feLowerNullAware(expression, context);
   if (expression.kind == astCascade)
     return feLowerCascade(expression, context);
   if (expression.kind == astFunctionExpression)
@@ -3133,10 +3135,11 @@ int feLowerExpression(AstExpression expression) {
 int feLowerValue(AstExpression expression) {
   expression = feWithReceiver(expression);
   var kind = expression.kind;
+  if (kind == astNullAware) return feLowerNullAware(expression, -1);
   if (kind == astCascade) return feLowerCascade(expression, -1);
-  if (kind == astCascadeReceiver) {
-    feOperand(opLoadLocal, feCascadeSlot);
-    return feSlotTypes[feCascadeSlot];
+  if (kind == astImplicitReceiver) {
+    feOperand(opLoadLocal, feImplicitReceiverSlot);
+    return feSlotTypes[feImplicitReceiverSlot];
   }
   if (kind == astFunctionExpression)
     return feLowerFunctionExpression(expression, -1);
@@ -3297,6 +3300,79 @@ int feLowerValue(AstExpression expression) {
   feAstError(expression.token, 'unsupported expression');
 }
 
+FlowState feNullBranch(AstExpression source, int type) {
+  feFlow = flowSplit(feFlow);
+  var skipped = flowCopy(feFlow);
+  if (source.kind == astName &&
+      source.binding >= 0 &&
+      fePromotable(source.binding)) {
+    flowNull(skipped, source.binding, true);
+    flowNull(feFlow, source.binding, false);
+    if (type == tNull) feFlow.types[source.binding] = tNever;
+  } else {
+    if (feFlow.soundFlow && !typeCanBeNull(type)) flowUnreachable(skipped);
+    if (type == tNull) flowUnreachable(feFlow);
+  }
+  return skipped;
+}
+
+int feJumpIfNull(int receiver) {
+  if (typeCanBeNull(feSlotTypes[receiver])) {
+    feOperand(opLoadLocal, receiver);
+    feInteger(0, tNull);
+    feEmit(opEq);
+  } else {
+    feInteger(0, tBool);
+  }
+  return feJump(opJumpTrue);
+}
+
+int feNonNullReceiver(int receiver) {
+  var type = feSlotTypes[receiver];
+  var promoted = typingNullAssertion(type);
+  feOperand(opLoadLocal, receiver);
+  feNarrowValue(type, promoted);
+  var slot = feTemp(promoted);
+  feOperand(opStoreLocal, slot);
+  return slot;
+}
+
+int feLowerNullAware(AstExpression expression, int context) {
+  var source = expression.children[0];
+  var body = expression.children[1];
+  var symbol = feExpressionSymbol(source, false);
+  if (symbol >= 0 &&
+      (declarationClassOwner(feSymbols, symbol) >= 0 ||
+          feSymbols.declarations[symbol].kind == symbolType)) {
+    // A type qualifier is not a nullable value; retain normal static lookup.
+    var access = astImplicitReceiverAccess(body);
+    var receiver = access.children[0];
+    access.children[0] = source;
+    var type = feLowerHint(body, context);
+    access.children[0] = receiver;
+    return type;
+  }
+  var type = feLowerExpression(source);
+  if (type == tVoid)
+    feAstError(source.token, 'void expression cannot be used as a value');
+  var receiver = feTemp(type);
+  feOperand(opStoreLocal, receiver);
+  var skipped = feNullBranch(source, type);
+  var skip = feJumpIfNull(receiver);
+  var previous = feImplicitReceiverSlot;
+  feImplicitReceiverSlot = feNonNullReceiver(receiver);
+  var value = feLowerHint(body, context);
+  var result = value == tVoid ? tVoid : nullableType(value);
+  feConvertValue(value, result, body.token);
+  var done = feJump(opJump);
+  fePatch(skip, ir.length);
+  feInteger(0, result);
+  fePatch(done, ir.length);
+  feFlow = flowUnsplit(feJoinFlow(feFlow, skipped));
+  feImplicitReceiverSlot = previous;
+  return result;
+}
+
 int feLowerCascade(AstExpression expression, int context) {
   var source = expression.children[0];
   var type = feLowerHint(source, context);
@@ -3304,36 +3380,14 @@ int feLowerCascade(AstExpression expression, int context) {
     feAstError(source.token, 'void expression cannot be used as a value');
   var receiver = feTemp(type);
   feOperand(opStoreLocal, receiver);
-  var previous = feCascadeSlot;
-  feCascadeSlot = receiver;
+  var previous = feImplicitReceiverSlot;
+  feImplicitReceiverSlot = receiver;
   var skip = -1;
   FlowState? nullFlow;
   if (expression.text == '?..') {
-    feFlow = flowSplit(feFlow);
-    nullFlow = flowCopy(feFlow);
-    if (source.kind == astName &&
-        source.binding >= 0 &&
-        fePromotable(source.binding)) {
-      flowNull(nullFlow, source.binding, true);
-      flowNull(feFlow, source.binding, false);
-      if (type == tNull) feFlow.types[source.binding] = tNever;
-    } else {
-      if (feFlow.soundFlow && !typeCanBeNull(type)) flowUnreachable(nullFlow);
-      if (type == tNull) flowUnreachable(feFlow);
-    }
-    if (typeCanBeNull(type)) {
-      feOperand(opLoadLocal, receiver);
-      feInteger(0, tNull);
-      feEmit(opEq);
-    } else {
-      feInteger(0, tBool);
-    }
-    skip = feJump(opJumpTrue);
-    var promoted = typingNullAssertion(type);
-    feOperand(opLoadLocal, receiver);
-    feNarrowValue(type, promoted);
-    feCascadeSlot = feTemp(promoted);
-    feOperand(opStoreLocal, feCascadeSlot);
+    nullFlow = feNullBranch(source, type);
+    skip = feJumpIfNull(receiver);
+    feImplicitReceiverSlot = feNonNullReceiver(receiver);
   }
   var section = 1;
   while (section < expression.children.length) {
@@ -3345,7 +3399,7 @@ int feLowerCascade(AstExpression expression, int context) {
     fePatch(skip, ir.length);
     feFlow = flowUnsplit(feJoinFlow(feFlow, nullFlow));
   }
-  feCascadeSlot = previous;
+  feImplicitReceiverSlot = previous;
   feOperand(opLoadLocal, receiver);
   return type;
 }
@@ -4101,7 +4155,7 @@ void feGenerateGlobals(int count) {
 
 void feBeginFunction(int f, FunctionBindings bindings) {
   feFunction = f;
-  feCascadeSlot = -1;
+  feImplicitReceiverSlot = -1;
   feConstants.lexicalClass = -1;
   var owner = feLexicalOwner(f);
   feConstants.lexicalClass = owner;
@@ -4245,7 +4299,7 @@ void parseSource(SourceProgram source) {
   feLocalConstants.clear();
   feLocalOwners.clear();
   feLocalStart = 0;
-  feCascadeSlot = -1;
+  feImplicitReceiverSlot = -1;
   feLocalInferred.clear();
   feLocalContexts.clear();
   feReturnTypes = null;

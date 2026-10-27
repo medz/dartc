@@ -851,6 +851,9 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      'class C{int value=1;}C? missing(){print("receiver");return null;}void main(){print("before");print((missing()?.value)!);}',
+      'class C{C? child;}void main(){print("before");print(C()?.child!.child);}',
+
       "class C { static set value(int next) { print('setter'); } } dynamic bad() { print('rhs'); return 'wrong'; } void main() { print('before'); C.value = bad(); }",
       "dynamic redirectedArgument() { print('rhs'); return 'wrong'; } class C { final int value; C.base(this.value) { print('body'); } C(dynamic value):this.base(value); } void main() { print('before'); C(redirectedArgument()); }",
       "dynamic badInitializer() { print('rhs'); return 'wrong'; } class C { final int value; C():value=badInitializer() { print('body'); } } void main() { print('before'); C(); }",
@@ -1521,6 +1524,24 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      'class C{int value=1;}void main(){int value=C()?.value;print(value);}',
+      'class C{int value=1;}C? maybe()=>C();void main(){(maybe()?.value)=2;}',
+      'class C{int value=1;}C? maybe()=>null;void main(){print(-maybe()?.value);}',
+      'class C{void run(){}}void unused(){print(C()?.run());}void main(){}',
+      'class C{int Function(int) get callback=>(x)=>x;}C? maybe()=>null;void main(){print((maybe()?.callback)(1));}',
+      'class C{int value=1;C child()=>C();}C? maybe()=>null;void main(){maybe()?.child()..value=3;}',
+      'class C{int value=1;}C? maybe()=>null;void main(){int x;maybe()?.value=x=1;print(x);}',
+      'class C{int value=1;}C? maybe()=>null;void main(){final int x;maybe()?.value=x=1;x=2;}',
+      'class C{int value=1;}C? maybe()=>null;void unused(){maybe()?.value="wrong";}void main(){}',
+      'const x=true ? 2 : <int>[1][true];void main(){}',
+      'const value=null?.missing();void main(){}',
+      'int f()=>1;const value=null?[f()];void main(){}',
+      'const value=null?.missing=1;void main(){}',
+      'const String? value=null;const result=value?.missing;void main(){}',
+      'const value=<int>[1]?.length;void main(){}',
+      'void main(){List<int>? x=null;print(true ? x?[0] : 0);}',
+      "import 'dart:core' as p;void main(){p?.print(1);}",
+      '// @dart=3.8\nclass C{int value=0;}void main(){final int x;C()?.value=x=1;print(x);}',
       '// @dart=3.8\nclass C{int value=0;}void main(){final int x;C()?..value=x=1;print(x);}',
       "class C{int value=0;}C? maybe()=>null;void unused(){maybe()?..value='wrong';}void main(){}",
       'class C{final int value=0;}void main(){C()..value=1;}',

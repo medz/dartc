@@ -165,14 +165,19 @@ bool parserLookType(Parser parser, [bool declaration = false]) {
   return result;
 }
 
+bool parserLookTypeArguments(Parser parser) {
+  if (!parserTake(parser, '<') || !parserLookType(parser)) return false;
+  while (parserTake(parser, ',')) {
+    if (!parserLookType(parser)) return false;
+  }
+  return parserTypeClose(parser);
+}
+
 bool parserHasTypeArguments(Parser parser, bool invocation) {
   var position = parser.position;
   var closers = parser.pendingClosers;
   var equals = parser.pendingEquals;
-  var valid = parserTake(parser, '<');
-  if (valid) valid = parserLookType(parser);
-  while (valid && parserTake(parser, ',')) valid = parserLookType(parser);
-  if (valid) valid = parserTypeClose(parser);
+  var valid = parserLookTypeArguments(parser);
   if (valid && invocation) {
     valid =
         parser.pendingClosers == 0 &&
@@ -450,6 +455,8 @@ AstExpression parserPrimary(Parser parser) {
   if (parserTake(parser, '(')) {
     var expression = parseExpression(parser);
     parserExpect(parser, ')');
+    // A parenthesized null-shorting chain cannot absorb later assignments.
+    if (expression.kind == astNullAware) expression.text = '()';
     return expression;
   }
   var constant = parserTake(parser, 'const');
@@ -592,7 +599,48 @@ AstExpression parserSelectors(
 ) {
   while (true) {
     var token = parser.position;
-    if (parserIs(parser, '<') && parserHasTypeArguments(parser, true)) {
+    if (parserIs(parser, '?.') ||
+        parserIs(parser, '?') &&
+            tokenIs(parser.tokens[token + 1], '[') &&
+            !parserIndexIsConditional(parser)) {
+      var member = parserTake(parser, '?.');
+      if (!member) parser.position++;
+      var receiver = parserImplicitReceiver(token);
+      AstExpression access;
+      var call = astCallValue;
+      if (member) {
+        var name = parser.position;
+        access = AstExpression(
+          astMember,
+          parserName(parser),
+          <AstExpression>[receiver],
+          const <AstType>[],
+          name,
+        );
+        call = astCallSelector;
+      } else {
+        parserExpect(parser, '[');
+        var index = parseExpression(parser);
+        parserExpect(parser, ']');
+        access = AstExpression(
+          astIndex,
+          '[]',
+          <AstExpression>[receiver, index],
+          const <AstType>[],
+          token,
+        );
+      }
+      return AstExpression(
+        astNullAware,
+        '',
+        <AstExpression>[
+          expression,
+          parserSelectors(parser, access, call, increment),
+        ],
+        const <AstType>[],
+        token,
+      );
+    } else if (parserIs(parser, '<') && parserHasTypeArguments(parser, true)) {
       var arguments = parserTypeArguments(parser);
       if (parserIs(parser, '(')) {
         expression = parserCall(
@@ -643,8 +691,7 @@ AstExpression parserSelectors(
       );
       disposition = astCallValue;
     } else if (parserTake(parser, '!') ||
-        increment &&
-            (parserTake(parser, '++') || parserTake(parser, '--'))) {
+        increment && (parserTake(parser, '++') || parserTake(parser, '--'))) {
       expression = AstExpression(
         astPostfix,
         parser.tokens[token].text,
@@ -666,13 +713,15 @@ AstExpression parserUnary(Parser parser) {
   if (parser.tokens[token].kind == tokenSymbol &&
       (op == '-' || op == '!' || op == '~' || op == '++' || op == '--')) {
     parser.position++;
-    return AstExpression(
+    var expression = AstExpression(
       astUnary,
       op,
       <AstExpression>[parserUnary(parser)],
       <AstType>[],
       token,
     );
+    if (op == '++' || op == '--') return parserContinueNullAware(expression);
+    return expression;
   }
   return parserPostfix(parser);
 }
@@ -810,15 +859,115 @@ AstExpression parserIfNull(Parser parser) {
   return expression;
 }
 
-AstExpression parserCascadeSection(Parser parser) {
-  var token = parser.position;
-  var receiver = AstExpression(
-    astCascadeReceiver,
+AstExpression parserImplicitReceiver(int token) {
+  return AstExpression(
+    astImplicitReceiver,
     '',
     const <AstExpression>[],
     const <AstType>[],
     token,
   );
+}
+
+// Assignment and increment belong inside the receiver's short-circuit branch.
+AstExpression parserContinueNullAware(AstExpression operation) {
+  var receiver = operation.children[0];
+  if (receiver.kind != astNullAware || receiver.text == '()') return operation;
+  operation.children[0] = receiver.children[1];
+  receiver.children[1] = parserContinueNullAware(operation);
+  return receiver;
+}
+
+// Prefer a conditional when the list expression has a matching top-level colon.
+bool parserIndexIsConditional(Parser parser) {
+  var position = parser.position + 1;
+  var depth = 0;
+  var questions = 0;
+  while (position < parser.tokens.length) {
+    var token = parser.tokens[position];
+    if (tokenIs(token, '(') ||
+        tokenIs(token, '[') ||
+        tokenIs(token, '{') ||
+        token.kind == tokenInterpolationStart) {
+      depth++;
+    } else if (tokenIs(token, ')') ||
+        tokenIs(token, ']') ||
+        tokenIs(token, '}') ||
+        token.kind == tokenInterpolationEnd) {
+      if (depth == 0) return false;
+      depth--;
+    } else if (depth == 0) {
+      if (token.kind == tokenEnd ||
+          tokenIs(token, ';') ||
+          tokenIs(token, ',') ||
+          tokenIs(token, '..') ||
+          tokenIs(token, '?..'))
+        return false;
+      if (tokenIs(token, '<')) {
+        var look = Parser(parser.tokens, position, 0, parser.paths);
+        if (parserLookTypeArguments(look) &&
+            look.pendingClosers == 0 &&
+            !look.pendingEquals &&
+            (parserIs(look, '(') || parserIs(look, '.'))) {
+          position = look.position;
+          continue;
+        }
+      }
+      if (tokenIs(token, 'as') || tokenIs(token, 'is')) {
+        var start = position + 1;
+        if (tokenIs(parser.tokens[start], '!')) start++;
+        var look = Parser(parser.tokens, start, 0, parser.paths);
+        if (parserLookType(look)) {
+          if (tokenIs(parser.tokens[look.position - 1], '?') &&
+              !parserNullableTypeEnd(look))
+            look.position--;
+          position = look.position;
+          continue;
+        }
+      }
+      if (tokenIs(token, '?') &&
+          parserExpressionStart(parser.tokens[position + 1]))
+        questions++;
+      if (tokenIs(token, ':')) {
+        if (questions == 0) return true;
+        questions--;
+      }
+    }
+    position++;
+  }
+  return false;
+}
+
+bool parserExpressionStart(Token token) {
+  if (token.kind == tokenInteger ||
+      token.kind == tokenString ||
+      token.kind == tokenStringPart)
+    return true;
+  if (token.kind == tokenIdentifier) {
+    return !tokenIsReserved(token) ||
+        tokenIs(token, 'this') ||
+        tokenIs(token, 'super') ||
+        tokenIs(token, 'new') ||
+        tokenIs(token, 'const') ||
+        tokenIs(token, 'null') ||
+        tokenIs(token, 'true') ||
+        tokenIs(token, 'false') ||
+        tokenIs(token, 'throw');
+  }
+  return tokenIs(token, '(') ||
+      tokenIs(token, '[') ||
+      tokenIs(token, '{') ||
+      tokenIs(token, '<') ||
+      tokenIs(token, '-') ||
+      tokenIs(token, '!') ||
+      tokenIs(token, '~') ||
+      tokenIs(token, '++') ||
+      tokenIs(token, '--');
+}
+
+AstExpression parserCascadeSection(Parser parser) {
+  var token = parser.position;
+  var receiver = parserImplicitReceiver(token);
   AstExpression section;
   var disposition = astCallValue;
   if (parserTake(parser, '[')) {
@@ -853,6 +1002,7 @@ AstExpression parserCascadeSection(Parser parser) {
       const <AstType>[],
       assignment,
     );
+    section = parserContinueNullAware(section);
   }
   return section;
 }
@@ -885,6 +1035,7 @@ AstExpression parseExpression(Parser parser, [bool allowCascade = true]) {
       <AstType>[],
       assignment,
     );
+    expression = parserContinueNullAware(expression);
   } else if (allowCascade &&
       (parserIs(parser, '..') || parserIs(parser, '?..'))) {
     var cascade = parser.position++;

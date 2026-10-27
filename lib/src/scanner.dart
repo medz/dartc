@@ -434,6 +434,7 @@ void scanCode(Scanner scanner, bool interpolation) {
           two == '||' ||
           two == '??' ||
           two == '..' ||
+          two == '?.' ||
           two == '<<' ||
           two == '>>' ||
           two == '~/' ||

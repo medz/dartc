@@ -2401,7 +2401,162 @@ void cascadeValues() {
   print(receiver.value);
 }
 
+typedef NullAwareList<A, B> = List<A>;
+typedef NullAwareAlias<A, B> = NullAwareBox;
+int nullAwareTrace = 0;
+int nullAwareStep(int value) {
+  nullAwareTrace = nullAwareTrace * 10 + value;
+  return value;
+}
+
+class NullAwareBox {
+  int value = 7;
+  int? cached;
+  NullAwareBox? child;
+  List<int> values = <int>[10, 20];
+  NullAwareBox();
+  NullAwareBox setValue(int input) {
+    value = input;
+    return this;
+  }
+
+  int get read {
+    nullAwareStep(2);
+    return value;
+  }
+
+  set write(int input) {
+    nullAwareStep(3);
+    value = input;
+  }
+
+  int Function(int) get callback {
+    nullAwareStep(2);
+    return (input) => value + input;
+  }
+
+  static int staticValue = 3;
+  static int twice(int input) => input * 2;
+  static const answer = 42;
+}
+
+NullAwareBox? nullAwareBox(bool present) {
+  nullAwareStep(1);
+  return present ? NullAwareBox() : null;
+}
+
+List<int>? nullAwareNumbers(bool present) => present ? <int>[1, 2] : null;
+
+class NullAwareLength {
+  final int? value;
+  const NullAwareLength(String? input) : value = input?.length;
+}
+
+void nullAwareValues() {
+  var absent = nullAwareBox(false);
+  print(absent?.setValue(nullAwareStep(4)).read);
+  print(nullAwareTrace);
+  nullAwareTrace = 0;
+  var target = nullAwareBox(true);
+  print(target?.setValue(nullAwareStep(4)).read);
+  print(nullAwareTrace);
+  print(target?.value++);
+  print(++target?.value);
+  print(target?.write = nullAwareStep(4));
+  print(target!.value);
+  nullAwareTrace = 0;
+  print(absent?.values[nullAwareStep(4)] = nullAwareStep(5));
+  print(nullAwareTrace);
+  // ignore: invalid_null_aware_operator
+  print(target?.values[0] += 3);
+  // ignore: invalid_null_aware_operator
+  print(target?.values[0]);
+  nullAwareTrace = 0;
+  print(absent?.cached ??= nullAwareStep(4));
+  print(nullAwareTrace);
+  // ignore: invalid_null_aware_operator
+  print(target?.cached ??= 8);
+  // ignore: invalid_null_aware_operator
+  print(target?.cached ??= 9);
+  nullAwareTrace = 0;
+  print(absent?.callback(nullAwareStep(4)));
+  print(nullAwareTrace);
+  nullAwareTrace = 0;
+  // ignore: invalid_null_aware_operator
+  print(target?.callback(nullAwareStep(4)));
+  print(nullAwareTrace);
+  // ignore: invalid_null_aware_operator
+  print(target?.child?.setValue(nullAwareStep(5)).read);
+  print(nullAwareTrace);
+  print(absent?.child!.value);
+  var cascade = NullAwareBox()
+    ..child?.value = nullAwareStep(6)
+    ..value = 9;
+  print(cascade.value);
+  cascade.child = NullAwareBox();
+  cascade..child?.value = 8;
+  print(cascade.child!.value);
+  print(nullAwareNumbers(false)?[nullAwareStep(4)]);
+  print(nullAwareNumbers(true)?[0] += 5);
+  print(nullAwareNumbers(false)?[nullAwareStep(7)]);
+  // ignore: dead_code
+  print(true ? [1].length : [2].length);
+  // ignore: dead_code
+  print(true ? [1] as List<int>? ?? [] : [2]);
+  // ignore: dead_code
+  print(true ? [1] as NullAwareList<int?, String> : [2]);
+  // ignore: dead_code
+  print(true ? [1].length + NullAwareAlias<int, String>().value : 2);
+  // ignore: dead_code
+  print(true ? (nullAwareNumbers(false)?[0]) : 1);
+  // ignore: invalid_null_aware_operator
+  print((target?.values)?[0]);
+  Null empty = null;
+  // ignore: dead_code
+  print(empty?.missing(empty.member));
+  // ignore: dead_code
+  print(empty?[true]);
+  // ignore: invalid_null_aware_operator
+  int staticResult = NullAwareBox?.twice(3);
+  print(staticResult);
+  // ignore: invalid_null_aware_operator
+  print(NullAwareBox?.staticValue += 1);
+  NullAwareBox constructed = NullAwareBox?.new();
+  print(constructed.value);
+  // ignore: invalid_null_aware_operator
+  const staticConstant = NullAwareBox?.answer;
+  const String? missing = null;
+  const len = missing?.length;
+  const String text = 'abc';
+  // ignore: invalid_null_aware_operator
+  const length = text?.length;
+  const List<int>? list = null;
+  const n = list?.length;
+  const dynamic unknown = null;
+  // CFE accepts these skipped constants; analyzer rejects them.
+  // ignore: const_initialized_with_non_constant_value
+  const indexed = unknown?[true];
+  // ignore: const_eval_property_access, dead_code
+  const bottom = null?.whatever;
+  // ignore: const_initialized_with_non_constant_value, dead_code
+  const subscript = null?[0];
+  print(staticConstant);
+  print(len);
+  print(length);
+  print(n);
+  print(indexed);
+  print(bottom);
+  print(subscript);
+  print(const NullAwareLength(null).value);
+  print(const NullAwareLength('ab').value);
+  final int initialized;
+  // ignore: invalid_null_aware_operator
+  NullAwareBox()?.value = initialized = 8;
+  print(initialized);
+}
+
 void main(List<String> args) {
+  nullAwareValues();
   cascadeValues();
   staticMembers();
   namedConstructors();

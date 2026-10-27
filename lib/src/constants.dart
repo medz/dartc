@@ -63,6 +63,7 @@ class ConstantContext {
   List<ConstantValue> values = <ConstantValue>[];
   List<ConstantValue> locals = <ConstantValue>[];
   List<int> localTypes = <int>[];
+  ConstantValue? implicitReceiver;
   List<int> typeScope = const <int>[];
   List<ConstantValue> initializerParameters = const <ConstantValue>[];
   bool allowInitializerParameters = false;
@@ -1097,6 +1098,58 @@ ConstantValue _evaluateConstant(
   bool implicitConst,
 ) {
   var kind = expression.kind;
+  if (kind == astImplicitReceiver) return context.implicitReceiver!;
+  if (kind == astNullAware) {
+    var source = expression.children[0];
+    var body = expression.children[1];
+    var symbol = _constantSymbol(context, source);
+    if (symbol >= 0 &&
+        (declarationClassOwner(context.symbols, symbol) >= 0 ||
+            context.symbols.declarations[symbol].kind == symbolType)) {
+      var access = astImplicitReceiverAccess(body);
+      var receiver = access.children[0];
+      access.children[0] = source;
+      var value = _evaluateConstant(
+        context,
+        body,
+        active,
+        expected,
+        implicitConst,
+      );
+      access.children[0] = receiver;
+      return value;
+    }
+    var receiver = _evaluateConstant(
+      context,
+      source,
+      active,
+      -1,
+      implicitConst,
+    );
+    if (receiver.type == tVoid)
+      _constantError(
+        context,
+        source.token,
+        'void cannot be a null-aware receiver',
+      );
+    var previous = context.implicitReceiver;
+    context.implicitReceiver = constantWithType(
+      receiver,
+      typingNullAssertion(receiver.type),
+    );
+    var taken = active && receiver.kind != tNull;
+    var value = _evaluateConstant(
+      context,
+      body,
+      taken,
+      expected,
+      implicitConst,
+    );
+    context.implicitReceiver = previous;
+    var type = value.type == tVoid ? tVoid : nullableType(value.type);
+    if (!taken) return ConstantValue(type, tNull, 0, '');
+    return constantWithType(value, type);
+  }
   if (kind == astInteger) {
     return ConstantValue(
       tInt,
@@ -1173,14 +1226,9 @@ ConstantValue _evaluateConstant(
     if (symbol != -1) {
       return _constantReference(context, expression, symbol, active);
     }
+    var value = _evaluateConstant(context, receiver, active, -1, implicitConst);
+    if (value.type == tNever) return ConstantValue(tNever, tNull, 0, '');
     if (expression.text == 'length') {
-      var value = _evaluateConstant(
-        context,
-        receiver,
-        active,
-        -1,
-        implicitConst,
-      );
       if (value.type == tString || value.type == tDynamic) {
         var type = tInt;
         if (value.type == tDynamic) type = tDynamic;
@@ -1189,12 +1237,51 @@ ConstantValue _evaluateConstant(
           return ConstantValue(type, tInt, value.text.length, '');
         }
       }
+      if (!active && typeIsList(value.type))
+        return ConstantValue(tInt, tNull, 0, '');
     }
     return _constantError(
       context,
       expression.token,
       'unsupported constant property',
     );
+  }
+  if (kind == astIndex) {
+    var receiver = _evaluateConstant(
+      context,
+      expression.children[0],
+      active,
+      -1,
+      implicitConst,
+    );
+    var index = _evaluateConstant(
+      context,
+      expression.children[1],
+      active,
+      -1,
+      implicitConst,
+    );
+    var type = receiver.type;
+    if (index.type == tVoid ||
+        type != tNever &&
+            type != tDynamic &&
+            !typingAssignable(index.type, tInt))
+      _constantError(context, expression.token, 'invalid constant index type');
+    if (typeIsList(type))
+      type = typeArgument(type);
+    else if (type != tNever && type != tString && type != tDynamic)
+      _constantError(
+        context,
+        expression.token,
+        'invalid constant index receiver',
+      );
+    if (active)
+      _constantError(
+        context,
+        expression.token,
+        'indexing is not a constant operation',
+      );
+    return ConstantValue(type, tNull, 0, '');
   }
   if (kind == astCall &&
       !expression.constant &&

@@ -531,8 +531,8 @@ FunctionBindings _bindFunctionLocals(
   int outerScope,
   ClassMembers? members,
 ) {
-  var result = FunctionBindings(<LocalVariable>[], -1);
-  if (outer != null) result.outer = outer.result;
+  var result = FunctionBindings(<LocalVariable>[], -1)
+    ..outer = outer?.result;
   var binder = LocalBinder(source, result, <BindingScope>[], functions);
   binder.outer = outer;
   binder.outerScope = outerScope;

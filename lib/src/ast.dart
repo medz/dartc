@@ -18,7 +18,8 @@ const int astTypeTest = 17;
 const int astTypeCast = 18;
 const int astFunctionExpression = 19;
 const int astCascade = 20;
-const int astCascadeReceiver = 21;
+const int astImplicitReceiver = 21;
+const int astNullAware = 22;
 
 const String astCallIdentifier = 'identifier';
 const String astCallSelector = 'selector';
@@ -58,6 +59,12 @@ class AstExpression {
     this.typeArguments,
     this.token,
   );
+}
+
+AstExpression astImplicitReceiverAccess(AstExpression expression) {
+  while (expression.children[0].kind != astImplicitReceiver)
+    expression = expression.children[0];
+  return expression;
 }
 
 const int astEmptyStatement = 0;

@@ -135,8 +135,8 @@ void runCompiler(List<String> args) {
   var marked = <int>[];
   var f = 0;
   while (f < functions.length) {
-    var contract = functions[f].contract;
-    if (contract != null && (contract.flags & contractNoGc) != 0) marked.add(f);
+    var flags = functions[f].contract?.flags ?? 0;
+    if ((flags & contractNoGc) != 0) marked.add(f);
     f++;
   }
   List<int> obligations = const <int>[];

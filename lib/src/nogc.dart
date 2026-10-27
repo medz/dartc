@@ -7,11 +7,10 @@ const int _unknownCall = 64;
 const int _forbidden = ssaAllocate | ssaThrow | ssaGc | _unknownCall;
 
 int _callRole(int function) {
-  var contract = functions[function].contract;
-  if (contract == null) return 0;
+  var flags = functions[function].contract?.flags ?? 0;
   var result = 0;
-  if ((contract.flags & contractAllocate) != 0) result |= ssaAllocate;
-  if ((contract.flags & contractMayGc) != 0) result |= ssaGc;
+  if ((flags & contractAllocate) != 0) result |= ssaAllocate;
+  if ((flags & contractMayGc) != 0) result |= ssaGc;
   return result;
 }
 
