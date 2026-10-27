@@ -13,6 +13,7 @@ class MemberBinding {
 
 class ClassMembers {
   List<MemberBinding> members;
+  List<String> constructors = const <String>[];
 
   ClassMembers(this.members);
 }
@@ -21,6 +22,26 @@ int lookupMember(ClassMembers owner, String name) {
   var i = 0;
   while (i < owner.members.length) {
     if (owner.members[i].name == name) return i;
+    i++;
+  }
+  return -1;
+}
+
+String constructorSelector(SourceProgram source, String name, int token) {
+  if (name != 'new') return name;
+  if (!sourceVersionAtLeast(source, source.tokens[token].source, 2, 15))
+    _memberError(
+      source,
+      token,
+      'constructor name new requires language version 2.15',
+    );
+  return '';
+}
+
+int lookupConstructor(ClassMembers owner, String name) {
+  var i = 0;
+  while (i < owner.constructors.length) {
+    if (owner.constructors[i] == name) return i;
     i++;
   }
   return -1;
@@ -40,19 +61,27 @@ Never _memberError(SourceProgram source, int token, String message) {
 }
 
 ClassMembers bindClassMembers(SourceProgram source, AstClass syntax) {
+  var result = ClassMembers(<MemberBinding>[]);
+  if (syntax.constructors.isEmpty)
+    result.constructors = const <String>[''];
+  else
+    result.constructors = <String>[];
   var i = 0;
   while (i < syntax.constructors.length) {
     var constructor = syntax.constructors[i];
-    var previous = 0;
-    while (previous < i) {
-      if (syntax.constructors[previous].name == constructor.name) {
-        _memberError(source, constructor.token, 'duplicate constructor');
-      }
-      previous++;
-    }
+    var dot = constructor.name.indexOf('.');
+    var name = '';
+    if (dot >= 0)
+      name = constructorSelector(
+        source,
+        constructor.name.substring(dot + 1),
+        constructor.token + 2,
+      );
+    if (lookupConstructor(result, name) >= 0)
+      _memberError(source, constructor.token, 'duplicate constructor');
+    result.constructors.add(name);
     i++;
   }
-  var result = ClassMembers(<MemberBinding>[]);
   i = 0;
   while (i < syntax.methods.length) {
     var method = syntax.methods[i];

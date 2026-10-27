@@ -40,7 +40,7 @@ The compatibility baseline is Dart 3.13.5, with complete language implementation
 | Area | Implemented behavior |
 | --- | --- |
 | Values | Native integers, booleans, Unicode strings, nullable values, typed lists and runtime type checks |
-| Declarations | Top-level variables, lazy initialization, simple classes, fields, unnamed constructors with field initializer lists, getters and setters |
+| Declarations | Top-level variables, lazy initialization, simple classes, fields, named/unnamed constructors with field initializer lists, getters and setters |
 | Functions | Direct calls, recursion, local and anonymous functions without runtime captures, optional/named direct arguments, required-positional function values and structural function types |
 | Control flow | Blocks, assignments, conditions, loops, labelled jumps, constant switch cases and returns |
 | Libraries | Relative, file/package imports and exports, prefixes, filters, conditional URIs and library parts |

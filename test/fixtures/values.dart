@@ -2004,7 +2004,39 @@ void constructorInitializers() {
   print(<int>[private._value, private.next]);
 }
 
+class NamedChoice {
+  final int value;
+  const NamedChoice(this.value);
+  const NamedChoice.named([int value = 4]) : value = value;
+  const NamedChoice.other({int value = 4}) : value = value;
+  int named(int extra) => value + extra;
+}
+
+class NamedOnly {
+  final int value;
+  NamedOnly.pick(this.value);
+}
+
+class NewAlias {
+  final int value;
+  const NewAlias.new([this.value = 5]);
+}
+
+void namedConstructors() {
+  const first = NamedChoice.named();
+  const same = NamedChoice.other();
+  print(identical(first, same));
+  print(identical(first, NamedChoice.named()));
+  print(NamedChoice.named(7).named(1));
+  print(NamedChoice.other(value: 9).value);
+  print(NamedOnly.pick(6).value);
+  print(identical(const NewAlias(), const NewAlias.new()));
+  print(identical(NewAlias(), NewAlias.new()));
+  print(NewAlias.new(8).value);
+}
+
 void main(List<String> args) {
+  namedConstructors();
   constructorInitializers();
   metadataValues();
   objectValues();

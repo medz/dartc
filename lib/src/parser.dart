@@ -330,6 +330,8 @@ AstExpression parserFunctionExpression(Parser parser) {
 AstExpression parserPrimary(Parser parser) {
   var token = parser.position;
   var current = parser.tokens[token];
+  if (parserIs(parser, 'new'))
+    parserError(parser, 'explicit new constructor expressions are unsupported');
   if (current.kind == tokenInteger) {
     parser.position++;
     return AstExpression(
@@ -476,7 +478,13 @@ AstExpression parserMetadatum(Parser parser) {
       parserError(parser, 'expected constant constructor arguments');
   }
   if (parserIs(parser, '('))
-    value = parserCall(parser, value, token, arguments);
+    value = parserCall(
+      parser,
+      value,
+      token,
+      arguments,
+      value.kind == astMember ? astCallSelector : astCallIdentifier,
+    );
   return value;
 }
 
@@ -748,6 +756,7 @@ AstType parserInferredType(int token) {
 }
 
 int parserDeclarationTypeEnd(Parser parser) {
+  if (parserIs(parser, 'new')) return -1;
   var position = parser.position;
   var closers = parser.pendingClosers;
   var typed = parserLookType(parser, true);
@@ -1054,6 +1063,15 @@ AstFunction parserFunction(
   return function;
 }
 
+bool parserConstructorAhead(Parser parser, String name) {
+  if (!parserIs(parser, name)) return false;
+  var position = parser.position;
+  if (tokenIs(parser.tokens[position + 1], '(')) return true;
+  return tokenIs(parser.tokens[position + 1], '.') &&
+      parser.tokens[position + 2].kind == tokenIdentifier &&
+      tokenIs(parser.tokens[position + 3], '(');
+}
+
 AstClass parserClass(Parser parser, int token) {
   var name = parserName(parser);
   parserExpect(parser, '{');
@@ -1064,16 +1082,22 @@ AstClass parserClass(Parser parser, int token) {
     var metadata = parserMetadata(parser);
     var memberToken = parser.position;
     var constant = parserTake(parser, 'const');
-    if (parserIs(parser, name) &&
-        parser.tokens[parser.position + 1].kind == tokenSymbol &&
-        parser.tokens[parser.position + 1].text == '(') {
+    if (parserConstructorAhead(parser, name)) {
+      var constructorToken = parser.position;
       parser.position++;
+      var constructorName = name;
+      if (parserTake(parser, '.')) {
+        if (tokenIsReserved(parser.tokens[parser.position]) &&
+            !parserIs(parser, 'new'))
+          parserError(parser, 'reserved word cannot be a constructor name');
+        constructorName += '.' + parserName(parser);
+      }
       var constructor = parserFunction(
         parser,
-        name,
-        parserInferredType(memberToken),
+        constructorName,
+        parserInferredType(constructorToken),
         false,
-        memberToken,
+        constructorToken,
         false,
         false,
         constant,
@@ -1083,7 +1107,7 @@ AstClass parserClass(Parser parser, int token) {
       constructors.add(constructor);
     } else {
       if (constant)
-        parserError(parser, 'const requires an unnamed constructor');
+        parserError(parser, 'const requires a constructor declaration');
       var external = parserTake(parser, 'external');
       var modifier = parserModifier(parser);
       var getter =

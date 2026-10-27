@@ -60,6 +60,8 @@ class ConstantContext {
   bool allowInitializerParameters = false;
   List<ConstantValue> aggregates = <ConstantValue>[];
   List<ConstantConstructorInfo?> constructors = <ConstantConstructorInfo?>[];
+  List<ClassMembers> classMembers = const <ClassMembers>[];
+  List<List<int>> classConstructors = const <List<int>>[];
   ClassMembers? instanceScope;
   int identical = -1;
 
@@ -360,10 +362,8 @@ bool _constantSame(ConstantValue left, ConstantValue right) {
 
 bool _constantPrimitiveEquality(ConstantContext context, ConstantValue value) {
   if (!typeIsClass(value.kind)) return true;
-  var owner = context.constructors[typeArgument(value.kind)];
-  return owner != null &&
-      lookupMember(owner.members, '==') < 0 &&
-      lookupMember(owner.members, 'hashCode') < 0;
+  var owner = context.classMembers[typeArgument(value.kind)];
+  return lookupMember(owner, '==') < 0 && lookupMember(owner, 'hashCode') < 0;
 }
 
 ConstantValue _constantCoalescing(
@@ -655,25 +655,61 @@ ConstantValue _constantConstructor(
   bool implicitConst,
 ) {
   checkArgumentOrder(context.symbols.program, expression);
+  if (expression.text == astCallValue)
+    _constantError(
+      context,
+      expression.token,
+      'constant expression requires a direct constructor invocation',
+    );
   var callee = expression.children[0];
+  var classExpression = callee;
   var symbol = _constantSymbol(context, callee);
+  var name = '';
+  if (symbol < 0 || context.symbols.declarations[symbol].kind != symbolClass) {
+    if (callee.kind == astMember) {
+      classExpression = callee.children[0];
+      symbol = _constantSymbol(context, classExpression);
+      if (symbol >= 0 &&
+          context.symbols.declarations[symbol].kind == symbolClass)
+        name = constructorSelector(
+          context.symbols.program,
+          callee.text,
+          callee.token,
+        );
+    }
+  }
   if (symbol < 0 || context.symbols.declarations[symbol].kind != symbolClass)
     _constantError(
       context,
       expression.token,
       'constant expression requires a const constructor',
     );
-  var classId = context.symbols.declarations[symbol].target;
+  var declaration = context.symbols.declarations[symbol];
+  var classId = declaration.target;
+  var constructor = lookupConstructor(context.classMembers[classId], name);
+  if (constructor < 0)
+    _constantError(context, callee.token, 'unknown constructor');
+  var source = context.symbols.program;
+  if (name.startsWith('_') &&
+      sourceLibrary(source, source.tokens[callee.token].source) !=
+          sourceLibrary(source, declaration.source))
+    _constantError(
+      context,
+      callee.token,
+      'private constructor is not accessible',
+    );
+  var function = context.classConstructors[classId][constructor];
   ConstantConstructorInfo? owner;
-  if (classId < context.constructors.length)
-    owner = context.constructors[classId];
+  if (function < context.constructors.length)
+    owner = context.constructors[function];
   if (owner == null || !expression.constant && !implicitConst)
     _constantError(
       context,
       expression.token,
       'constant constructor requires const',
     );
-  if (expression.typeArguments.isNotEmpty || callee.typeArguments.isNotEmpty)
+  if (expression.typeArguments.isNotEmpty ||
+      classExpression.typeArguments.isNotEmpty)
     _constantError(
       context,
       expression.token,

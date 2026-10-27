@@ -1210,6 +1210,43 @@ void main() { print(1_000); }
           "import 'dart:core'; import 'dart:core' as core; const local = <int>[1]; "
           'const same = core.identical(local, first.values); '
           'void main() { print(same); print(identical(local, second.values)); print(first.values == second.values); }',
+      'named-constructors-library.dart': r'''
+library named.constructors;
+part 'named-constructors-part.dart';
+int named() => 99;
+class NamedLibraryChoice {
+  final int value;
+  const NamedLibraryChoice.new(this.value);
+  const NamedLibraryChoice.named([int value = 4]) : value = value;
+  const NamedLibraryChoice.other({this.value = 4});
+  const NamedLibraryChoice._hidden(this.value);
+}
+class NamedScope {
+  NamedScope.named();
+  int read() => named();
+}
+NamedLibraryChoice hiddenChoice() => partChoice;
+''',
+      'named-constructors-part.dart': r'''
+part of 'named-constructors-library.dart';
+const partChoice = NamedLibraryChoice._hidden(3);
+''',
+      'named-constructors-export.dart': "export 'named-constructors-library.dart' show NamedLibraryChoice, NamedScope, hiddenChoice;",
+      'named-constructors-imports.dart': r'''
+import 'named-constructors-library.dart' as direct;
+import 'named-constructors-export.dart' as p;
+@p.NamedLibraryChoice.named(5)
+@p.NamedLibraryChoice.new(6)
+void annotated() {}
+int selected([p.NamedLibraryChoice value = const p.NamedLibraryChoice.other(value: 9)]) => value.value;
+void main() {
+  const first = p.NamedLibraryChoice.named();
+  print(identical(first, const direct.NamedLibraryChoice.other()));
+  print(identical(p.hiddenChoice(), const direct.NamedLibraryChoice(3)));
+  print(p.NamedScope.named().read());
+  print(selected());
+}
+''',
       'const-class-first.dart': "class Item { final int value; const Item(this.value); } const item = Item(7);",
       'const-class-second.dart': "class Item { final int value; const Item(this.value); } const item = Item(7);",
       'const-class-exports.dart':
@@ -1242,6 +1279,10 @@ void main() { print(1_000); }
     await compare(File('${temporary.path}/property-imports.dart'), []);
     await compare(File('${temporary.path}/top-accessor-imports.dart'), []);
     await compare(File('${temporary.path}/metadata-imports.dart'), []);
+    await compare(
+      File('${temporary.path}/named-constructors-imports.dart'),
+      [],
+    );
     await compare(File('${temporary.path}/const-class-imports.dart'), []);
     await compare(File('${temporary.path}/const-class-metadata-only.dart'), []);
     await compare(
@@ -1252,6 +1293,18 @@ void main() { print(1_000); }
     await compare(File('${temporary.path}/conditional-imports.dart'), []);
     await compare(File('${temporary.path}/parts-main.dart'), []);
     final rejected = [
+      // Constructor tear-offs are valid Dart but are not yet supported.
+      'class C{C.named();}void main(){(C.named)();}',
+      '// @dart=2.12\nclass C{C.named();}void main(){(C.named)();}',
+      'class C{const C.named();}const value=(C.named)();void main(){}',
+      'class C{C.named();C.named();}void main(){}',
+      'class C{C();C.new();}void main(){}',
+      'class C{C.named();}void main(){C();}',
+      'class C{C.named();}void main(){C.other();}',
+      "import 'named-constructors-export.dart' as p;void main(){p.NamedLibraryChoice._hidden(3);}",
+      "import 'named-constructors-export.dart' as p;const value=p.NamedLibraryChoice._hidden(3);void main(){}",
+      '// @dart=2.14\nclass C{C.new();}void main(){C();}',
+      '// @dart=2.14\nclass C{C();}void main(){C.new();}',
       'void main(){var value=1;var callback=()=>value;print(callback());}',
       'class Captured{int value=1;void run(){var callback=()=>this.value;print(callback());}}void main(){Captured().run();}',
       'void main(){var callback=<T>(T value)=>value;print(callback<int>(1));}',

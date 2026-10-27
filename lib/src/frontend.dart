@@ -182,7 +182,7 @@ List<String> feNativeNames = <String>[];
 List<int> feNativeParams = <int>[];
 int feInitializingGlobal = -1;
 List<int> feClassFieldCounts = <int>[];
-List<int> feClassConstructors = <int>[];
+List<List<int>> feClassConstructors = <List<int>>[];
 List<List<ConstructorStep>> feConstructorPlans = <List<ConstructorStep>>[];
 List<int> feFieldTypes = <int>[];
 List<int> feFieldIndices = <int>[];
@@ -276,7 +276,7 @@ int feRegisterFunction(
       !syntax.setter)
     result = tString;
   if (owner >= 0) {
-    name = classNames[owner] + '.' + syntax.name;
+    if (!constructor) name = classNames[owner] + '.' + syntax.name;
     feParamTypes.add(classType(owner));
     count++;
   }
@@ -322,7 +322,7 @@ int feRegisterFunction(
   feOwners.add(owner);
   if (constructor) {
     feConstructors.add(1);
-    feClassConstructors[owner] = id;
+    feClassConstructors[owner].add(id);
   } else {
     feConstructors.add(0);
   }
@@ -371,7 +371,7 @@ void feCollectDeclarations(AstUnit unit) {
     feClassSources.add(source);
     feClassNodes.add(syntax);
     feClassFieldCounts.add(0);
-    feClassConstructors.add(-1);
+    feClassConstructors.add(<int>[]);
     classSizes.add(objectHeaderBytes);
     classPointerMasks.add(<int>[]);
     classTaggedMasks.add(<int>[]);
@@ -1386,10 +1386,10 @@ void feCheckUnitMetadata(AstUnit syntax) {
 }
 
 void feRegisterConstantConstructors() {
-  var owner = 0;
-  while (owner < feClassNodes.length) {
-    var function = feClassConstructors[owner];
-    if (function >= 0 && feFunctionNodes[function].constant) {
+  var function = 1;
+  while (function < feFunctionNodes.length) {
+    if (feConstructors[function] == 1 && feFunctionNodes[function].constant) {
+      var owner = feOwners[function];
       var fields = <int>[];
       var parameterTypes = <int>[];
       var fieldStart = feClassFieldStarts[owner];
@@ -1404,19 +1404,19 @@ void feRegisterConstantConstructors() {
         parameterTypes.add(feParamTypes[start + p]);
         p++;
       }
-      while (feConstants.constructors.length <= owner)
+      while (feConstants.constructors.length <= function)
         feConstants.constructors.add(null);
-      feConstants.constructors[owner] = ConstantConstructorInfo(
+      feConstants.constructors[function] = ConstantConstructorInfo(
         owner,
         feClassNodes[owner],
         feFunctionNodes[function],
         feMembers[owner],
         fields,
         parameterTypes,
-        feConstructorPlans[owner],
+        feConstructorPlans[function],
       );
     }
-    owner++;
+    function++;
   }
   checkConstantConstructors(feConstants);
 }
@@ -2248,6 +2248,39 @@ int feLowerImmediateCall(AstExpression call, AstExpression expression) {
   return functions[function].result;
 }
 
+int feLowerConstructorCall(
+  AstExpression call,
+  int owner,
+  String rawName,
+  int token,
+) {
+  if (call.text == astCallValue)
+    feAstError(call.token, 'constructor tear-off invocation is unsupported');
+  var name = constructorSelector(feSources, rawName, token);
+  feCheckPrivate(owner, name, token);
+  var ordinal = lookupConstructor(feMembers[owner], name);
+  if (ordinal < 0) feAstError(token, 'unknown constructor');
+  var constructor = feClassConstructors[owner][ordinal];
+  var count = feLowerArguments(call, 1, constructor);
+  var values = List<int>.filled(count, -1);
+  var parameter = count - 1;
+  while (parameter >= 0) {
+    var type = feParamTypes[feParamStarts[constructor] + 1 + parameter];
+    values[parameter] = feTemp(type);
+    feOperand(opStoreLocal, values[parameter]);
+    parameter--;
+  }
+  feOperand(opDescriptor, owner);
+  feBuiltinTyped(bObjectNew, 1, classType(owner));
+  parameter = 0;
+  while (parameter < count) {
+    feOperand(opLoadLocal, values[parameter]);
+    parameter++;
+  }
+  feCall(constructor, count + 1);
+  return classType(owner);
+}
+
 int feLowerCall(AstExpression call, int context) {
   checkArgumentOrder(feSources, call);
   var callee = feWithReceiver(call.children[0]);
@@ -2274,28 +2307,8 @@ int feLowerCall(AstExpression call, int context) {
     if (declaration.kind == symbolBuiltin) {
       return feLowerBuiltinCall(call, declaration.target);
     }
-    if (declaration.kind == symbolClass) {
-      var owner = declaration.target;
-      var constructor = feClassConstructors[owner];
-      var count = feLowerArguments(call, 1, constructor);
-      var values = List<int>.filled(count, -1);
-      var parameter = count - 1;
-      while (parameter >= 0) {
-        var type = feParamTypes[feParamStarts[constructor] + 1 + parameter];
-        values[parameter] = feTemp(type);
-        feOperand(opStoreLocal, values[parameter]);
-        parameter--;
-      }
-      feOperand(opDescriptor, owner);
-      feBuiltinTyped(bObjectNew, 1, classType(owner));
-      parameter = 0;
-      while (parameter < count) {
-        feOperand(opLoadLocal, values[parameter]);
-        parameter++;
-      }
-      feCall(constructor, count + 1);
-      return classType(owner);
-    }
+    if (declaration.kind == symbolClass)
+      return feLowerConstructorCall(call, declaration.target, '', callee.token);
     var value = feLoadDeclaration(symbol, callee.token);
     if (value == tNever) return feLowerNeverArguments(call);
     return feLowerFunctionCall(call, value);
@@ -2303,6 +2316,19 @@ int feLowerCall(AstExpression call, int context) {
   if (callee.kind == astMember) {
     var receiver = callee.children[0];
     var owner = feExpressionSymbol(receiver, false);
+    if (owner >= 0 && feSymbols.declarations[owner].kind == symbolClass) {
+      if (receiver.typeArguments.isNotEmpty)
+        feAstError(
+          receiver.token,
+          'nongeneric constructor does not accept type arguments',
+        );
+      return feLowerConstructorCall(
+        call,
+        feSymbols.declarations[owner].target,
+        callee.text,
+        callee.token,
+      );
+    }
     if (owner >= 0 && feSymbols.declarations[owner].kind == symbolType) {
       return feLowerStaticCall(call, owner, context);
     }
@@ -3702,17 +3728,20 @@ void parseSource(SourceProgram source) {
   feInstallSymbols();
   feCollectDeclarations(syntax);
   checkInitializers(feSymbols, syntax);
-  var plannedOwner = 0;
-  while (plannedOwner < feClassNodes.length) {
-    feConstructorPlans.add(
-      planConstructorInitializers(
+  var plannedFunction = 0;
+  while (plannedFunction < functions.length) {
+    var steps = const <ConstructorStep>[];
+    if (feConstructors[plannedFunction] == 1) {
+      var owner = feOwners[plannedFunction];
+      steps = planConstructorInitializers(
         feSymbols,
-        feClassNodes[plannedOwner],
-        feFunctionNodes[feClassConstructors[plannedOwner]],
-        feMembers[plannedOwner],
-      ),
-    );
-    plannedOwner++;
+        feClassNodes[owner],
+        feFunctionNodes[plannedFunction],
+        feMembers[owner],
+      );
+    }
+    feConstructorPlans.add(steps);
+    plannedFunction++;
   }
   var sourceFunctions = functions.length;
   var bodyBindings = <FunctionBindings>[];
@@ -3731,6 +3760,8 @@ void parseSource(SourceProgram source) {
     bindingFunction++;
   }
   feConstants = ConstantContext(feSymbols, feGlobalNodes, globalTypes);
+  feConstants.classMembers = feMembers;
+  feConstants.classConstructors = feClassConstructors;
   feConstants.identical = symbolOwnDeclaration(
     feSymbols,
     sourceCore,
@@ -3849,7 +3880,7 @@ void parseSource(SourceProgram source) {
     if (feConstructors[f] == 1) {
       var bodyBindings = feBindings;
       var owner = feOwners[f];
-      var steps = feConstructorPlans[owner];
+      var steps = feConstructorPlans[f];
       var stepIndex = 0;
       while (stepIndex < steps.length) {
         var step = steps[stepIndex];
