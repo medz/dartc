@@ -1,6 +1,6 @@
 ## 0.2.0
 
-Experimental preview for macOS and Linux ARM64.
+Early preview release for macOS and Linux ARM64.
 
 - Provide standalone native compiler archives with compatible runtime sources.
 - Support simple classes, accessors, nullable/reified value checks, canonical const instances and lazy top-level initialization.

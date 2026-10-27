@@ -66,7 +66,7 @@ void main(List<String> args) {
     }
     File('${bundle.path}/README.md').writeAsStringSync('''# dartc $version
 
-Experimental native Dart compiler for $os ARM64.
+Native Dart compiler for $os ARM64. This is an early preview release.
 
 Keep bin/ and lib/ together. Add this bundle's bin directory to PATH,
 then compile with `dartc hello.dart -o hello` and run `./hello`.

@@ -1,8 +1,10 @@
 # dartc
 
-An experimental native Dart compiler written in Dart.
+A native Dart compiler written in Dart.
 
-`dartc` compiles a Dart subset directly to ARM64 machine code for macOS and Linux. Native compiler binaries and generated executables run without the Dart SDK, VM or snapshots. Self-hosting does not imply full Dart compatibility.
+The goal is an independent, optimizing, self-hosted toolchain whose compiler and runtime algorithms can evolve in Dart.
+
+Version 0.2 is an early preview. It compiles a Dart subset directly to ARM64 machine code for macOS and Linux. Native compiler binaries and generated executables run without the Dart SDK, VM or snapshots. Self-hosting does not imply full Dart compatibility.
 
 ## Try the native compiler
 

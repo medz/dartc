@@ -3,6 +3,7 @@
 - Keep the implementation direct and small. Use native Dart and avoid unnecessary dependencies or abstractions.
 - Keep module ownership explicit. Import definitions from their owning files; do not hide internal dependencies behind barrel exports.
 - Work toward genuine native self-hosting. Do not substitute an official-compiler wrapper or interpreter for compiling Dart source to native instructions.
+- Treat dartc as a long-term compiler project. Preview labels describe a release's maturity; they do not reduce the language or architecture goals to an experiment.
 - Keep README and other user documentation focused on installation, supported behavior, and usage. Do not add development diaries, per-increment summaries, temporary build/test records or one-off benchmark results to committed Markdown. Keep CHANGELOG limited to user-facing release changes.
 - Test observable behavior through real compilation and execution. Give each behavior one owning test; avoid mocks, source-text assertions, and tests that repeat implementation details.
 - Validate inputs at their owning boundary once. Do not add defensive checks or speculative edge-case machinery throughout internal code.
