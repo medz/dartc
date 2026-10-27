@@ -19,7 +19,6 @@ const int rtArenaHeaderBytes = 48;
 int rtArenaHead = 0;
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
-int rtExecutableRoot = 0;
 
 int rtHostTarget() {
   return nativeTarget();
@@ -1003,12 +1002,6 @@ int rtHostWrite(int path, int bytes) {
 }
 
 int rtArguments(int argc, int argv, int typeRef) {
-  var executable = rtStringFromCString(nativeLoad64(argv));
-  if (rtExecutableRoot == 0) {
-    rtExecutableRoot = rtGlobalRootNew(executable, storageRef);
-  } else {
-    rtGlobalRootSet(rtExecutableRoot, executable);
-  }
   var result = rtListNew(typeRef);
   if (argc <= 1) return result;
   var mark = rtRootMark();
@@ -1026,17 +1019,42 @@ int rtArguments(int argc, int argv, int typeRef) {
   return result;
 }
 
+int _rtExecutablePath() {
+  var capacity = 4096;
+  var bytes = rtMap(capacity);
+  var result = 0;
+  if (nativeTarget() == 0) {
+    // Darwin proc_info(PIDINFO, getpid(), PIDPATHINFO, 0, buffer, size).
+    var pid = nativeSyscall(20, 0, 0, 0, 0, 0, 0);
+    var status = nativeSyscall(336, 2, pid, 11, 0, bytes, capacity);
+    if (status < 0) return rtIoError();
+    result = rtStringFromCString(bytes);
+  } else {
+    var path = rtCStringAcquire(0x65732f636f72702f, 0x6578652f666c, 0, 0);
+    var length = nativeSyscall(78, -100, path, bytes, capacity, 0, 0);
+    // readlinkat does not terminate the result and truncates to capacity.
+    while (length == capacity) {
+      rtUnmap(bytes, capacity);
+      capacity = capacity * 2;
+      bytes = rtMap(capacity);
+      length = nativeSyscall(78, -100, path, bytes, capacity, 0, 0);
+    }
+    rtCStringRelease();
+    if (length < 0) return rtIoError();
+    result = rtStringDecodeUtf8(bytes, length);
+  }
+  rtUnmap(bytes, capacity);
+  return result;
+}
+
 int rtHostStdPath() {
-  var executable = rtGlobalRootValue(rtExecutableRoot);
+  var executable = _rtExecutablePath();
+  var mark = rtRootMark();
+  rtRootPush(executable, storageRef);
   var slash = rtStringFromWords(47, 0, 0, 0);
   var end = rtStringLastIndexOf(executable, slash, rtStringLength(executable));
-  var directory = 0;
-  if (end < 0) {
-    directory = rtStringFromWords(46, 0, 0, 0);
-  } else {
-    directory = rtStringSubstring(executable, 0, end);
-  }
-  var mark = rtRootMark();
+  if (end < 0) return rtIoError();
+  var directory = rtStringSubstring(executable, 0, end);
   rtRootPush(directory, storageRef);
   var suffix = rtStringFromWords(
     0x2f62696c2f2e2e2f,
