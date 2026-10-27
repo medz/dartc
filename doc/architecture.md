@@ -92,10 +92,13 @@ lib/src/
   runtime.dart                                   目标运行时与受信原语声明
   std/core.dart, std/core/                        目标标准库源码
 test/
-  behavior_test.dart, differential_test.dart, library_test.dart, fixtures/
+  behavior_test.dart, differential_test.dart, library_test.dart, measure_test.dart
+  fixtures/
 tool/
   bootstrap.dart, benchmark.dart, package_release.dart, fuzz.dart
-  src/                                           进程捕获、差分执行与生成模型
+  src/
+    process.dart, differential.dart, fuzz_program.dart 进程捕获、差分执行与生成模型
+    measure.dart                                 原生任务资源采样
 ```
 
 `frontend.dart`、`runtime.dart` 和 `format.dart` 仍跨越多个职责。已有独立文件是后续拆分的定义拥有者，不能把大文件的状态复制进新文件后形成第二套实现。

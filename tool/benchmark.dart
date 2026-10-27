@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'src/process.dart';
+
 Future<String> sha256(List<int> bytes) async {
   final process = await Process.start(
     Platform.isMacOS ? '/usr/bin/shasum' : '/usr/bin/sha256sum',
@@ -37,16 +39,6 @@ Future<String> sourceHash(String root) {
   return sha256(bytes.takeBytes());
 }
 
-int? residentBytes(String output) {
-  final match = RegExp(
-    Platform.isMacOS
-        ? r'(\d+)\s+maximum resident set size'
-        : r'Maximum resident set size \(kbytes\):\s*(\d+)',
-  ).firstMatch(output);
-  if (match == null) return null;
-  return int.parse(match[1]!) * (Platform.isMacOS ? 1 : 1024);
-}
-
 bool equalBytes(List<int> a, List<int> b) {
   if (a.length != b.length) return false;
   for (var i = 0; i < a.length; i++) {
@@ -79,6 +71,7 @@ Future<void> main(List<String> args) async {
   }
   final outputs = <String, String>{};
   var cleanupTargets = false;
+  Directory? measurementDirectory;
   try {
     if (!comparing && Platform.version.split(' ').first != '3.13.5') {
       throw StateError('Run the reference benchmark with Dart SDK 3.13.5.');
@@ -100,6 +93,12 @@ Future<void> main(List<String> args) async {
       inputs[name] = file.resolveSymbolicLinksSync();
     }
     final build = Directory('$root/build')..createSync(recursive: true);
+    measurementDirectory = build.createTempSync('benchmark-measure-');
+    final sampleReports = [
+      for (var index = 0; index < 16; index++)
+        '${measurementDirectory.path}/sample-$index.json',
+    ];
+    final taskManifest = '${measurementDirectory.path}/inputs.json';
     final names = comparing
         ? ['baseline', 'candidate']
         : ['native', 'official'];
@@ -118,6 +117,8 @@ Future<void> main(List<String> args) async {
       if (!comparing) ...engines.values,
       ...outputs.values,
       result.path,
+      taskManifest,
+      ...sampleReports,
     ];
     for (final input in inputs.values) {
       for (final output in outputPaths) {
@@ -138,48 +139,84 @@ Future<void> main(List<String> args) async {
     final source = '$root/bin/dartc.dart';
     final standard = '$root/lib/src/runtime.dart';
     final sourceBefore = await sourceHash(root);
-    final timeOptions = Platform.isMacOS ? ['-l'] : ['-v'];
-    final timeExists = File('/usr/bin/time').existsSync();
-    final timeProbe = timeExists
-        ? Process.runSync(
-            '/usr/bin/time',
-            [...timeOptions, '/usr/bin/true'],
-            environment: {'LC_ALL': 'C'},
-          )
-        : null;
-    final hasRss =
-        timeProbe != null &&
-        timeProbe.exitCode == 0 &&
-        residentBytes('${timeProbe.stderr}') != null;
-    final rssNote = hasRss
-        ? 'Darwin bytes; Linux KiB multiplied by 1024.'
-        : '/usr/bin/time RSS unavailable: ${timeProbe?.stderr ?? 'not installed'}';
-
-    Map<String, Object?> measure(
+    final sampler = '$root/tool/src/measure.dart';
+    final processHelper = '$root/tool/src/process.dart';
+    final samplerHash = await sha256(File(sampler).readAsBytesSync());
+    final processHash = await sha256(File(processHelper).readAsBytesSync());
+    File(taskManifest).writeAsStringSync(
+      jsonEncode({
+        'source': source,
+        'runtime': standard,
+        'source_sha256': sourceBefore,
+        'inputs': inputs,
+        'input_sha256': inputHashes,
+        'sampler_sha256': samplerHash,
+        'process_helper_sha256': processHash,
+      }),
+    );
+    var nextSample = 0;
+    Future<Map<String, Object?>> measure(
       String executable,
       List<String> arguments, {
       bool isolated = true,
-    }) {
-      final watch = Stopwatch()..start();
-      final result = Process.runSync(
-        hasRss ? '/usr/bin/time' : executable,
-        hasRss ? [...timeOptions, executable, ...arguments] : arguments,
+    }) async {
+      final sampleReport = File(sampleReports[nextSample++]);
+      final driver = await captureProcess(
+        sdk,
+        [
+          sampler,
+          '--report',
+          sampleReport.path,
+          '--',
+          executable,
+          ...arguments,
+        ],
         workingDirectory: root,
         environment: {'LC_ALL': 'C', if (isolated) 'PATH': '/usr/bin:/bin'},
         includeParentEnvironment: !isolated,
+        timeout: const Duration(seconds: 45),
       );
-      watch.stop();
-      if (result.exitCode != 0) {
-        throw ProcessException(
-          executable,
-          arguments,
-          '${result.stdout}${result.stderr}',
-          result.exitCode,
+      if (driver.exitCode != 0 ||
+          driver.timedOut ||
+          driver.outputLimited ||
+          driver.startError != null ||
+          driver.captureError != null ||
+          !sampleReport.existsSync()) {
+        throw StateError(
+          'Measurement driver failed; work: ${measurementDirectory!.path}',
         );
       }
+      final data =
+          jsonDecode(sampleReport.readAsStringSync()) as Map<String, dynamic>;
+      final outcome = data['outcome'] as Map<String, dynamic>;
+      if (outcome['exitCode'] != 0 ||
+          outcome['timedOut'] != false ||
+          outcome['outputLimited'] != false ||
+          outcome['startError'] != null ||
+          outcome['captureError'] != null) {
+        throw StateError(
+          'Native task failed; raw outcome: ${sampleReport.path}',
+        );
+      }
+      final resource = data['measurement'] as Map<String, dynamic>?;
+      num? milliseconds(String key) =>
+          resource == null ? null : (resource[key] as num) / 1000;
       return {
-        'wall_ms': watch.elapsedMicroseconds / 1000,
-        'rss_bytes': hasRss ? residentBytes('${result.stderr}') : null,
+        'wall_ms': milliseconds('wallMicroseconds'),
+        'user_ms': milliseconds('userMicroseconds'),
+        'system_ms': milliseconds('systemMicroseconds'),
+        'cpu_ms': resource == null
+            ? null
+            : ((resource['userMicroseconds'] as num) +
+                      (resource['systemMicroseconds'] as num)) /
+                  1000,
+        'rss_bytes': resource?['kernelPeakRssBytes'],
+        'isolated': isolated,
+        'sample_report': sampleReport.path,
+        'measurement': resource,
+        'measurement_issues': data['issues'],
+        'outcome': outcome,
+        'driver_outcome': driver.toJson(),
       };
     }
 
@@ -195,7 +232,7 @@ Future<void> main(List<String> args) async {
       final native = engines['native']!;
       final official = engines['official']!;
       stdout.writeln('Building native reference with $seed.');
-      final nativeBuild = measure(seed, [
+      final nativeBuild = await measure(seed, [
         source,
         '-o',
         native,
@@ -206,7 +243,7 @@ Future<void> main(List<String> args) async {
       nativeBuild['size_bytes'] = File(native).lengthSync();
       builds['native'] = nativeBuild;
       stdout.writeln('Building official AOT reference with Dart SDK 3.13.5.');
-      final officialBuild = measure(sdk, [
+      final officialBuild = await measure(sdk, [
         'compile',
         'exe',
         source,
@@ -228,7 +265,7 @@ Future<void> main(List<String> args) async {
     for (var iteration = 0; iteration <= 6; iteration++) {
       final order = iteration.isEven ? names : names.reversed;
       for (final name in order) {
-        final sample = measure(engines[name]!, [
+        final sample = await measure(engines[name]!, [
           source,
           '-o',
           outputs[name]!,
@@ -237,8 +274,20 @@ Future<void> main(List<String> args) async {
         ]);
         final bytes = File(outputs[name]!).readAsBytesSync();
         expected ??= bytes;
-        if (!equalBytes(expected, bytes)) {
-          throw StateError('$name generated different native target bytes.');
+        final matches = equalBytes(expected, bytes);
+        final rawReport = File(sample['sample_report'] as String);
+        final raw =
+            jsonDecode(rawReport.readAsStringSync()) as Map<String, dynamic>;
+        raw['parent_output_validation'] = {
+          'size_bytes': bytes.length,
+          'sha256': await sha256(bytes),
+          'matches_prior_outputs': matches,
+        };
+        rawReport.writeAsStringSync(jsonEncode(raw));
+        if (!matches) {
+          throw StateError(
+            '$name generated different native target bytes; raw sample: ${rawReport.path}',
+          );
         }
         runs.add({
           'engine': name,
@@ -255,28 +304,48 @@ Future<void> main(List<String> args) async {
             (sample) => sample['engine'] == name && sample['warmup'] == false,
           )
           .toList();
+      num? sampleMedian(String key) {
+        final values = [
+          for (final sample in samples)
+            if (sample[key] != null) sample[key] as num,
+        ];
+        return values.length == samples.length ? median(values) : null;
+      }
+
       medians[name] = {
-        'wall_ms': median([
-          for (final sample in samples) sample['wall_ms'] as num,
-        ]),
-        'rss_bytes': hasRss
-            ? median([for (final sample in samples) sample['rss_bytes'] as num])
-            : null,
+        for (final key in [
+          'wall_ms',
+          'user_ms',
+          'system_ms',
+          'cpu_ms',
+          'rss_bytes',
+        ])
+          key: sampleMedian(key),
       };
     }
-    final help = [
-      for (final name in names)
-        Process.runSync(
+    final help = <ProcessOutcome>[];
+    for (final name in names) {
+      help.add(
+        await captureProcess(
           outputs[name]!,
           ['--help'],
-          environment: {'LC_ALL': 'C', 'PATH': '/usr/bin:/bin'},
+          workingDirectory: root,
+          environment: const {'LC_ALL': 'C', 'PATH': '/usr/bin:/bin'},
           includeParentEnvironment: false,
+          timeout: const Duration(seconds: 15),
         ),
-    ];
-    if (help[0].exitCode != 0 ||
-        help[1].exitCode != 0 ||
-        help[0].stdout != help[1].stdout ||
-        help[0].stderr != help[1].stderr) {
+      );
+    }
+    if (help.any(
+          (item) =>
+              item.exitCode != 0 ||
+              item.timedOut ||
+              item.outputLimited ||
+              item.startError != null ||
+              item.captureError != null,
+        ) ||
+        !equalBytes(help[0].stdoutBytes, help[1].stdoutBytes) ||
+        !equalBytes(help[0].stderrBytes, help[1].stderrBytes)) {
       throw StateError('Generated compilers differ when executing --help.');
     }
     if (sourceBefore != await sourceHash(root)) {
@@ -291,6 +360,10 @@ Future<void> main(List<String> args) async {
           await sha256(File(entry.value).readAsBytesSync())) {
         throw StateError('${entry.key} reference changed during measurement.');
       }
+    }
+    if (samplerHash != await sha256(File(sampler).readAsBytesSync()) ||
+        processHash != await sha256(File(processHelper).readAsBytesSync())) {
+      throw StateError('Measurement implementation changed during the run.');
     }
     final report = {
       'mode': comparing ? 'native_comparison' : 'official_reference',
@@ -312,7 +385,18 @@ Future<void> main(List<String> args) async {
       },
       'warmups': 1,
       'samples_per_engine': 6,
-      'rss_note': rssNote.trim(),
+      'measurement_run_directory': measurementDirectory.path,
+      'measurement_tool_sha256': samplerHash,
+      'units': {
+        'wall_ms': 'ms',
+        'user_ms': 'ms',
+        'system_ms': 'ms',
+        'cpu_ms': 'ms',
+        'rss_bytes': 'bytes',
+      },
+      'wall_scope': 'Native task spawn through exit/pipes; excludes Dart driver startup, FFI reads, hashes and JSON.',
+      'cpu_scope': 'Waited child CPU, including waited descendants if present.',
+      'rss_note': 'Kernel maximum child high-water; Darwin bytes, Linux KiB converted to bytes. Not simultaneous process-tree RSS. Unavailable metrics stay null, without time fallback.',
       'runs': runs,
       'medians': medians,
     };
@@ -323,6 +407,11 @@ Future<void> main(List<String> args) async {
     stdout.writeln('Identical native target bytes; results: ${result.path}');
   } catch (error) {
     stderr.writeln(error);
+    if (measurementDirectory != null) {
+      stderr.writeln(
+        'Measurement work retained at: ${measurementDirectory.path}',
+      );
+    }
     exitCode = 1;
   } finally {
     if (cleanupTargets) {
