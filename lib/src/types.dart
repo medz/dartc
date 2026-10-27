@@ -486,13 +486,18 @@ void _parameterDependencies(int type, List<int> parameters, List<int> found) {
     _parameterDependencies(input, parameters, found);
 }
 
-List<int> instantiateTypeParameters(List<int> parameters) {
+List<int> instantiateTypeParameters(
+  List<int> parameters, [
+  List<int> inferred = const <int>[],
+]) {
   if (parameters.isEmpty) return const <int>[];
   var bounds = <int>[];
   var edges = <List<int>>[];
   for (var parameter in parameters) {
     var info = typeParameterInfo(parameter);
     var bound = info.hasBound ? info.bound : tDynamic;
+    if (inferred.isNotEmpty && inferred[bounds.length] >= 0)
+      bound = inferred[bounds.length];
     bounds.add(bound);
     var dependencies = <int>[];
     _parameterDependencies(bound, parameters, dependencies);
@@ -564,7 +569,11 @@ List<int> instantiateTypeParameters(List<int> parameters) {
     remaining--;
     var keys = <int>[parameters[selected]];
     var upper = <int>[bounds[selected]];
-    var lower = const <int>[tNever];
+    var lower = <int>[
+      inferred.isNotEmpty && inferred[selected] >= 0
+          ? bounds[selected]
+          : tNever,
+    ];
     i = 0;
     while (i < bounds.length) {
       bounds[i] = _substituteType(

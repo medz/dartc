@@ -851,6 +851,9 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "class C{int? get x{print('getter');return null;}} void main(){print('before');if(C() case C(x:var n!)) print(n);}",
+      "class C{Object get x{print('getter');return 'wrong';}} void main(){print('before');if(C() case C(x:var n as int)) print(n);}",
+      "class C{int get x{print('getter');return <int>[][0];}} void main(){print('before');if(C() case C(x:_)) print('body');}",
       "dynamic guard(){print('guard');return 1;}void main(){print('before');if(1 case var n when guard())print(n);}",
       "void fail(int? value){if(value case var n!)print(n);}void main(){print('before');fail(null);}",
       "void fail(Object value){if(value case var n as int)print(n);}void main(){print('before');fail('wrong');}",
@@ -999,6 +1002,32 @@ void main() {
       }
     }
     final libraries = {
+      'object-pattern-library.dart': r'''
+library object.patterns;
+part 'object-pattern-part.dart';
+class PatternBox {
+  int _value;
+  PatternBox(this._value);
+  int get value => _value;
+  int read() => _value;
+}
+typedef PatternAlias = PatternBox;
+''',
+      'object-pattern-part.dart': r'''
+part of 'object-pattern-library.dart';
+int readPattern(Object value) => switch(value) {
+  PatternBox(_value: var n) => n,
+  _ => -1,
+};
+''',
+      'object-pattern-imports.dart': r'''
+import 'object-pattern-library.dart' as p;
+void main() {
+  Object value = p.PatternBox(12);
+  if(value case p.PatternAlias(:var value, :var read)) print(value + read());
+  print(p.readPattern(value));
+}
+''',
       'generic-aliases-library.dart': r'''
 // @dart=3.7
 library generic.aliases;
@@ -1501,6 +1530,7 @@ void main() {
       File('${temporary.path}/${entry.key}').writeAsStringSync(entry.value);
     }
     await compare(File('${temporary.path}/imports.dart'), []);
+    await compare(File('${temporary.path}/object-pattern-imports.dart'), []);
     await compare(File('${temporary.path}/core.dart'), []);
     await compare(File('${temporary.path}/priority.dart'), []);
     await compare(File('${temporary.path}/export-priority.dart'), []);
@@ -1562,6 +1592,29 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      "import 'object-pattern-library.dart' as p;void unused(Object v){if(v case p.PatternBox(_value:_))print(v);}void main(){}",
+      "import 'object-pattern-library.dart' as p;void unused(Object v){if(v case p.PatternAlias(value:var p))print(p);}void main(){}",
+      "const x=1;class C{int x=1;}void unused(C c){if(c case C(:x))print(c);}void main(){}",
+      "class C{int x=1;} void unused(C c){if(c case C(var x)) print(x);}void main(){}",
+      "class C{int x=1;} void unused(C c){if(c case C(x:var a,x:var b)) print(a+b);}void main(){}",
+      "class C{int x=1;} void unused(C c){if(c case C(:var x,x:_)) print(x);}void main(){}",
+      "class C{} void unused(C c){if(c case C(:_)) print(c);}void main(){}",
+      "class C{} void unused(C c){if(c case C(:1)) print(c);}void main(){}",
+      "class C{} void unused(C c){if(c case C(missing:_)) print(c);}void main(){}",
+      "class C{static int x=1;} void unused(C c){if(c case C(x:_)) print(c);}void main(){}",
+      "class C{set x(int value){}} void unused(C c){if(c case C(x:_)) print(c);}void main(){}",
+      "class C{int x=1,y=2,z=3;} void unused(C c){if(c case C(x:var a,y:var b,z:var a)) print(b);}void main(){}",
+      "class C{int x=1;} void unused(C c){if(c case C(x:var C)) print(C);}void main(){}",
+      "class C{int x=1;} void unused(C c){if(c case C(x:var n) when ++n>0) print(n);}void main(){}",
+      "class C{int x=1;} void unused(C c){if(c case C(x:final n)) n++;}void main(){}",
+      "class C{} int unused(Object c)=>switch(c){_=>0,C(missing:_)=>1};void main(){}",
+      "const C=1; void unused(Object c){if(c case C()) print(c);}void main(){}",
+      "class C{} void unused(Object c){if(c case C<int>()) print(c);}void main(){}",
+      "typedef C=String?; void unused(Object c){if(c case C(length:var n)) print(n);}void main(){}",
+      "class C{int x=1;} void unused(C c){if(c case C(x:var n)) print(n); print(n);}void main(){}",
+      "class C{int x=1;} void unused(C c){if(c case C(x:var n)){String s=n;print(s);}}void main(){}",
+      "class C{int x=1;} void unused(C c){if(c case C(x:var n)||C(x:String n)) print(n);}void main(){}",
+      "// @dart=2.19\nclass C{} void unused(C c){if(c case C()) print(c);}void main(){}",
       '// @dart=2.19\nvoid unused(){if(1 case var n)print(n);}void main(){}',
       '// @dart=2.19\nvoid unused(){print([if(1 case var n)n]);}void main(){}',
       'void unused(){if(1 case var n when ++n>0)print(n);}void main(){}',

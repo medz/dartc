@@ -466,7 +466,34 @@ List<int Function()> ifCaseGraph() {
   return result;
 }
 
+class PatternRoot {
+  int reads = 0;
+  Leaf get child {
+    reads++;
+    return Leaf(811);
+  }
+}
+
+bool objectPatternGuard(int queue) {
+  check(findMarker(queue, snapshot(queue), 811) != 0);
+  return false;
+}
+
 void closureRoots(int queue, int edges) {
+  var owner = PatternRoot();
+  var objectPatterns = <int Function()>[
+    switch (owner) {
+      PatternRoot(child: Leaf(marker: 0)) => () => 0,
+      PatternRoot(child: _) when objectPatternGuard(queue) => () => 0,
+      PatternRoot(child: Leaf(read: var read)) => read,
+    },
+  ];
+  check(owner.reads == 1);
+  var objectPatternList = captureList(objectPatterns, 1, queue);
+  check(listElements(objectPatternList, edges) == 1);
+  check(rt.rtTraceObject(rt.nativeLoad64(edges), edges, capacity) == 1);
+  check(findMarker(edges, 1, 811) != 0);
+  check(objectPatterns[0]() == 811);
   var cases = ifCaseGraph();
   var caseList = captureList(cases, 2, queue);
   check(listElements(caseList, edges) == 2);

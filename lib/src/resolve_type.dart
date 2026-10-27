@@ -291,6 +291,122 @@ int resolveType(
   return _resolveType(symbols, syntax, scope, null);
 }
 
+// Object patterns infer omitted arguments from the matched value, rather than
+// resolving a raw annotation to its default type arguments.
+int resolveObjectPatternType(SymbolTable symbols, AstType syntax, int input) {
+  var resolved = resolveType(symbols, syntax);
+  if (syntax.arguments.isNotEmpty || syntax.name == 'dynamic') return resolved;
+  var symbol = _typeSymbol(symbols, syntax, const <int>[]);
+  var declaration = symbols.declarations[symbol];
+  if (declaration.kind == symbolType && declaration.target < 0) {
+    var context = typeNonNullable(input);
+    if (typeIsList(context) && !typeIsSubtype(typeArgument(context), tNull))
+      return context;
+    return resolved;
+  }
+  if (declaration.kind != symbolAlias) return resolved;
+  var alias = symbols.aliases[declaration.target];
+  if (alias.parameters.isEmpty) return resolved;
+  var upper = List<int>.filled(alias.parameters.length, -1);
+  var lower = List<int>.filled(alias.parameters.length, -1);
+  _objectPatternConstraints(
+    alias.template,
+    input,
+    alias.parameters,
+    upper,
+    lower,
+    true,
+  );
+  var inferred = <int>[];
+  for (var i = 0; i < upper.length; i++)
+    inferred.add(upper[i] >= 0 ? upper[i] : lower[i]);
+  var arguments = instantiateTypeParameters(alias.parameters, inferred);
+  for (var i = 0; i < arguments.length; i++) {
+    var bound = substituteType(
+      typeParameterInfo(alias.parameters[i]).bound,
+      alias.parameters,
+      arguments,
+    );
+    if (!typeIsSubtype(arguments[i], bound))
+      arguments[i] = meetTypes(arguments[i], bound);
+  }
+  _checkAliasApplication(symbols, symbol, arguments, syntax.token, true);
+  return substituteType(alias.template, alias.parameters, arguments);
+}
+
+void _objectPatternConstraints(
+  int template,
+  int context,
+  List<int> parameters,
+  List<int> upper,
+  List<int> lower,
+  bool covariant,
+) {
+  if (context == tDynamic || context == tVoid || typeIsSubtype(context, tNull))
+    return;
+  var parameter = typeParameterIndex(parameters, template);
+  if (parameter >= 0) {
+    var constraints = covariant ? upper : lower;
+    var previous = constraints[parameter];
+    constraints[parameter] = previous < 0
+        ? context
+        : covariant
+        ? meetTypes(previous, context)
+        : joinTypes(previous, context);
+  } else if (typeIsNullable(template)) {
+    _objectPatternConstraints(
+      typeNonNullable(template),
+      typeNonNullable(context),
+      parameters,
+      upper,
+      lower,
+      covariant,
+    );
+  } else if (typeIsNullable(context)) {
+    _objectPatternConstraints(
+      template,
+      typeNonNullable(context),
+      parameters,
+      upper,
+      lower,
+      covariant,
+    );
+  } else if (typeIsList(template) && typeIsList(context)) {
+    _objectPatternConstraints(
+      typeArgument(template),
+      typeArgument(context),
+      parameters,
+      upper,
+      lower,
+      covariant,
+    );
+  } else if (typeIsFunction(template) && typeIsFunction(context)) {
+    var source = functionSignature(template);
+    var target = functionSignature(context);
+    _objectPatternConstraints(
+      source.result,
+      target.result,
+      parameters,
+      upper,
+      lower,
+      covariant,
+    );
+    for (
+      var i = 0;
+      i < source.parameters.length && i < target.parameters.length;
+      i++
+    )
+      _objectPatternConstraints(
+        source.parameters[i],
+        target.parameters[i],
+        parameters,
+        upper,
+        lower,
+        !covariant,
+      );
+  }
+}
+
 int _resolveType(
   SymbolTable symbols,
   AstType syntax,

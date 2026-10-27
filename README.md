@@ -59,12 +59,12 @@ The [specification tracker](specs/README.md) records the reference SDK, current 
 | Values | Native integers, booleans, Unicode strings, nullable values, typed lists with conditional/loop/spread and null-aware elements and runtime type checks |
 | Declarations | Top-level variables, lazy initialization, simple classes, instance/static fields and methods, bound method values, named/unnamed constructors with field initializer lists, getters, setters and generic type aliases |
 | Functions | Direct calls and callable objects, recursion, local and anonymous functions with lexical captures, optional/named direct arguments, required-positional function values and structural function types |
-| Control flow | Blocks, assignments, cascades, null-aware member/index chains, conditions and if-case statements/elements, loops, labelled jumps, constant switch cases, switch expressions with scalar patterns and guards, and returns |
+| Control flow | Blocks, assignments, cascades, null-aware member/index chains, conditions and if-case statements/elements, loops, labelled jumps, constant switch cases, switch expressions with scalar/object patterns and guards, and returns |
 | Libraries | Relative, file/package imports and exports, prefixes, filters, conditional URIs and library parts |
 | Constants | Scalar/list constants, canonical const instances, metadata and supported core pragmas |
 | Core APIs | print, command-line arguments, basic String/List operations and StringBuffer object/character writing |
 
-Inheritance, generic classes and functions, dynamic member calls, mixins, extensions, records, destructuring patterns, exceptions, async code, isolates and most SDK libraries are not implemented. Capturing functions with optional/named parameters, general optional/named function-value signatures and constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
+Inheritance, generic classes and functions, dynamic member calls, mixins, extensions, records, list/map/record patterns, exceptions, async code, isolates and most SDK libraries are not implemented. Capturing functions with optional/named parameters, general optional/named function-value signatures and constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
 
 Package configuration v2 supplies local package mappings and default language versions. A leading `// @dart = major.minor` comment can select an implemented versioned rule from 2.12 through 3.13; this is not complete compatibility with those language versions. See [libraries](specs/libraries.md) and [lexical structure](specs/lexical-structure.md).
 

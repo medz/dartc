@@ -1,5 +1,6 @@
 import '../ast.dart';
 import '../constants.dart';
+import '../members.dart';
 import '../resolve_type.dart';
 import '../source.dart';
 import '../types.dart';
@@ -23,6 +24,7 @@ class CheckedPattern {
   int variableType = -1;
   ConstantValue? constant;
   List<CheckedPattern> children = const <CheckedPattern>[];
+  List<CheckedMemberRead> fields = const <CheckedMemberRead>[];
 
   CheckedPattern(this.syntax, this.input, this.matched, this.remaining);
 }
@@ -72,6 +74,7 @@ CheckedPattern checkPattern(
   AstPattern syntax,
   int input,
   List<int> variableTypes,
+  CheckedMemberRead Function(int, String, int) readMember,
 ) {
   var result = CheckedPattern(syntax, input, input, input);
   var kind = syntax.kind;
@@ -96,6 +99,32 @@ CheckedPattern checkPattern(
           'logical-or pattern variable types differ',
         );
       variableTypes[binding] = declared;
+    }
+  } else if (kind == patternObject) {
+    var type = resolveObjectPatternType(context.symbols, syntax.type!, input);
+    result.tested = type;
+    result.matched = patternMatchedType(input, type);
+    result.children = <CheckedPattern>[];
+    result.fields = <CheckedMemberRead>[];
+    var total = true;
+    for (var field in syntax.fields) {
+      var member = readMember(type, field.name, field.token);
+      var child = checkPattern(
+        context,
+        field.pattern,
+        member.type,
+        variableTypes,
+        readMember,
+      );
+      result.fields.add(member);
+      result.children.add(child);
+      if ((child.coverage & patternRequiredSpace(member.type)) !=
+          patternRequiredSpace(member.type))
+        total = false;
+    }
+    if (total) {
+      result.coverage = patternTypeSpace(input, type);
+      result.remaining = patternRemainingType(input, type);
     }
   } else if (kind == patternConstant || kind == patternRelational) {
     var value = evaluateConstant(
@@ -136,10 +165,22 @@ CheckedPattern checkPattern(
     }
     if (kind == patternRelational) result.coverage = 0;
   } else if (kind == patternAnd || kind == patternOr) {
-    var left = checkPattern(context, syntax.children[0], input, variableTypes);
+    var left = checkPattern(
+      context,
+      syntax.children[0],
+      input,
+      variableTypes,
+      readMember,
+    );
     var next = kind == patternAnd ? left.matched : left.remaining;
     if (next == tNever) next = input;
-    var right = checkPattern(context, syntax.children[1], next, variableTypes);
+    var right = checkPattern(
+      context,
+      syntax.children[1],
+      next,
+      variableTypes,
+      readMember,
+    );
     result.children = <CheckedPattern>[left, right];
     if (kind == patternAnd) {
       result.matched = right.matched;
@@ -155,7 +196,13 @@ CheckedPattern checkPattern(
         ? resolveType(context.symbols, syntax.type!)
         : typingNonNull(input);
     result.tested = type;
-    var inner = checkPattern(context, syntax.children[0], type, variableTypes);
+    var inner = checkPattern(
+      context,
+      syntax.children[0],
+      type,
+      variableTypes,
+      readMember,
+    );
     result.children = <CheckedPattern>[inner];
     result.matched = inner.matched;
     result.remaining = inner.remaining;

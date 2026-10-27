@@ -35,12 +35,22 @@ const int patternRelational = 5;
 const int patternCast = 6;
 const int patternNullCheck = 7;
 const int patternNullAssert = 8;
+const int patternObject = 9;
+
+class AstPatternField {
+  final String name;
+  final int token;
+  final AstPattern pattern;
+
+  AstPatternField(this.name, this.token, this.pattern);
+}
 
 class AstPattern {
   final int kind;
   final int token;
   final String text;
   final List<AstPattern> children;
+  List<AstPatternField> fields = const <AstPatternField>[];
   AstExpression? constant;
   bool constantContext = false;
   AstType? type;

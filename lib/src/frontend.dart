@@ -86,6 +86,16 @@ class FeClosure {
   bool prepared = false;
 }
 
+class PatternReadCache {
+  final int parent;
+  final String name;
+  int uses = 1;
+  int slot = -1;
+  int ready = -1;
+
+  PatternReadCache(this.parent, this.name);
+}
+
 class FeFunctionState {
   final List<int> code = ir;
   final List<int> types = irTypes;
@@ -2859,9 +2869,13 @@ int feLowerMember(AstExpression expression) {
 }
 
 int feReadMember(int type, String member, int token) {
-  if (type == tNever) return tNever;
-  if ((typeIsFunction(type) || type == tFunction) && member == 'call')
-    return type;
+  return feReadCheckedMember(feCheckMemberRead(type, member, token), token);
+}
+
+CheckedMemberRead feCheckMemberRead(int type, String member, int token) {
+  if (type == tNever ||
+      (typeIsFunction(type) || type == tFunction) && member == 'call')
+    return CheckedMemberRead(type, type, memberReadIdentity, -1);
   if (feClassType(type)) {
     var owner = typeArgument(type);
     feCheckPrivate(owner, member, token);
@@ -2870,58 +2884,98 @@ int feReadMember(int type, String member, int token) {
     var binding = feMembers[owner].members[index];
     if (binding.isStatic)
       feAstError(token, 'static member cannot be accessed through an instance');
-    return feReadBoundMember(owner, binding, token);
+    return feCheckBoundMember(owner, binding, token);
   }
   if (member == 'length' || member == 'isEmpty' || member == 'isNotEmpty') {
     if (type != tString && !typeIsList(type))
       feAstError(token, 'unsupported property ' + member);
-    if (type == tString)
-      feBuiltin(bStringLength, 1);
-    else
-      feBuiltin(bListLength, 1);
-    if (member != 'length') {
-      feOperand(opInt, 0);
-      if (member == 'isEmpty')
-        feEmit(opEq);
-      else
-        feEmit(opNe);
-      return tBool;
-    }
-    return tInt;
+    var kind = member == 'length'
+        ? memberReadLength
+        : member == 'isEmpty'
+        ? memberReadIsEmpty
+        : memberReadIsNotEmpty;
+    return CheckedMemberRead(type, member == 'length' ? tInt : tBool, kind, -1);
   }
-  if (typeIsList(type) && (member == 'first' || member == 'last')) {
-    if (member == 'first')
+  if (typeIsList(type) && (member == 'first' || member == 'last'))
+    return CheckedMemberRead(
+      type,
+      typeArgument(type),
+      member == 'first' ? memberReadFirst : memberReadLast,
+      -1,
+    );
+  feAstError(token, 'unsupported property ' + member);
+}
+
+CheckedMemberRead feCheckBoundMember(
+  int owner,
+  MemberBinding member,
+  int token,
+) {
+  var receiver = classType(owner);
+  if (member.method >= 0) {
+    var function = feMemberFunctions[owner][member.method];
+    return CheckedMemberRead(
+      receiver,
+      feCallableType(function, token),
+      memberReadMethod,
+      function,
+    );
+  }
+  if (member.getter >= 0) {
+    var getter = feMemberFunctions[owner][member.getter];
+    return CheckedMemberRead(
+      receiver,
+      functions[getter].result,
+      memberReadGetter,
+      getter,
+    );
+  }
+  if (member.field >= 0) {
+    var field = feClassFieldStarts[owner] + member.field;
+    return CheckedMemberRead(
+      receiver,
+      feFieldTypes[field],
+      memberReadField,
+      feFieldIndices[field],
+    );
+  }
+  feAstError(token, 'member has no getter: ' + member.name);
+}
+
+int feReadCheckedMember(CheckedMemberRead member, int token) {
+  var kind = member.kind;
+  if (kind == memberReadMethod)
+    return feCreateBoundMethod(member.target, token);
+  if (kind == memberReadGetter) {
+    feCall(member.target, 1);
+  } else if (kind == memberReadField) {
+    feOperand(opInt, member.target);
+    feBuiltinTyped(bObjectGet, 2, member.type);
+  } else if (kind == memberReadLength ||
+      kind == memberReadIsEmpty ||
+      kind == memberReadIsNotEmpty) {
+    feBuiltin(member.receiver == tString ? bStringLength : bListLength, 1);
+    if (kind != memberReadLength) {
+      feOperand(opInt, 0);
+      feEmit(kind == memberReadIsEmpty ? opEq : opNe);
+    }
+  } else if (kind == memberReadFirst || kind == memberReadLast) {
+    if (kind == memberReadFirst)
       feOperand(opInt, 0);
     else {
-      feDuplicate(type);
+      feDuplicate(member.receiver);
       feBuiltin(bListLength, 1);
       feOperand(opInt, 1);
       feEmit(opSub);
     }
-    var element = typeArgument(type);
-    feBuiltinTyped(bListGet, 2, element);
-    return element;
+    feBuiltinTyped(bListGet, 2, member.type);
   }
-  feAstError(token, 'unsupported property ' + member);
+  return member.type;
 }
 
 int feReadBoundMember(int owner, MemberBinding member, int token) {
   if (member.isStatic) return feReadStaticMember(owner, member, token);
-  if (member.method >= 0)
-    return feCreateBoundMethod(feMemberFunctions[owner][member.method], token);
-  if (member.getter >= 0) {
-    var getter = feMemberFunctions[owner][member.getter];
-    feCall(getter, 1);
-    return functions[getter].result;
-  }
-  if (member.field >= 0) {
-    var field = feClassFieldStarts[owner] + member.field;
-    feOperand(opInt, feFieldIndices[field]);
-    var result = feFieldTypes[field];
-    feBuiltinTyped(bObjectGet, 2, result);
-    return result;
-  }
-  feAstError(token, 'member has no getter: ' + member.name);
+  return feReadCheckedMember(feCheckBoundMember(owner, member, token), token);
 }
 
 FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
@@ -4675,7 +4729,9 @@ void parseSource(SourceProgram source) {
         feGlobalNodes[i].modifier != 'const') {
       feInitializingGlobal = i;
       var type = feLowerInitializer(
-        feGlobalNodes[i], feGlobalInitializers[i].bindings, globalTypes[i],
+        feGlobalNodes[i],
+        feGlobalInitializers[i].bindings,
+        globalTypes[i],
       );
       if (globalTypes[i] < 0) globalTypes[i] = type;
       feOperand(opStoreGlobal, i);
@@ -5098,6 +5154,70 @@ void fePatternCells(CheckedPattern pattern) {
     for (var child in pattern.children) fePatternCells(child);
 }
 
+int fePatternReadKey(List<PatternReadCache> cache, int parent, String name) {
+  for (var i = 0; i < cache.length; i++)
+    if (cache[i].parent == parent && cache[i].name == name) return i;
+  return -1;
+}
+
+void fePatternCacheKeys(
+  List<PatternReadCache> cache,
+  AstPattern syntax,
+  int parent,
+) {
+  for (var field in syntax.fields) {
+    var key = fePatternReadKey(cache, parent, field.name);
+    if (key < 0) {
+      key = cache.length;
+      cache.add(PatternReadCache(parent, field.name));
+    } else {
+      cache[key].uses++;
+    }
+    fePatternCacheKeys(cache, field.pattern, key);
+  }
+  for (var child in syntax.children) fePatternCacheKeys(cache, child, parent);
+}
+
+void fePatternCacheInitialize(List<PatternReadCache> cache) {
+  for (var read in cache) {
+    if (read.uses > 1) {
+      read.slot = feTemp(tDynamic);
+      feInteger(0, tNull);
+      feConvertValue(tNull, tDynamic, feAt);
+      feOperand(opStoreLocal, read.slot);
+      read.ready = feTemp(tBool);
+      feInteger(0, tBool);
+      feOperand(opStoreLocal, read.ready);
+    }
+  }
+}
+
+int fePatternMemberRead(
+  PatternReadCache cache,
+  CheckedMemberRead member,
+  int value,
+  int token,
+) {
+  var done = -1;
+  if (cache.ready >= 0) {
+    feOperand(opLoadLocal, cache.ready);
+    done = feJump(opJumpTrue);
+  }
+  fePatternRead(value, member.receiver, token);
+  feReadCheckedMember(member, token);
+  if (cache.ready < 0) {
+    cache.slot = feTemp(member.type);
+    feOperand(opStoreLocal, cache.slot);
+  } else {
+    feCallableBox(member.type, token);
+    feOperand(opStoreLocal, cache.slot);
+    feInteger(1, tBool);
+    feOperand(opStoreLocal, cache.ready);
+    fePatch(done, ir.length);
+  }
+  return fePatternSlot(cache.slot, member.type, token);
+}
+
 FlowState feIfConditionJumps(AstExpression condition, List<int> failed) {
   if (condition.kind != astIfCaseCondition)
     return feConditionJumps(condition, false, failed);
@@ -5105,12 +5225,16 @@ FlowState feIfConditionJumps(AstExpression condition, List<int> failed) {
   var type = feLowerExpression(source);
   var value = feTemp(type);
   feOperand(opStoreLocal, value);
+  var cache = <PatternReadCache>[];
+  fePatternCacheKeys(cache, condition.pattern!, -1);
+  fePatternCacheInitialize(cache);
   feConstants.localTypes = feFlow.types;
   var pattern = checkPattern(
     feConstants,
     condition.pattern!,
     type,
     feBindingTypes,
+    feCheckMemberRead,
   );
   fePatternVariables(pattern);
   var otherwise = flowCopy(feFlow);
@@ -5120,7 +5244,7 @@ FlowState feIfConditionJumps(AstExpression condition, List<int> failed) {
     flowUnreachable(otherwise);
   else if (binding >= 0)
     flowPromote(otherwise, binding, pattern.remaining);
-  feLowerPattern(pattern, value, failed);
+  feLowerPattern(pattern, value, failed, cache, -1);
   fePatternCells(pattern);
   if (binding >= 0) flowPromote(feFlow, binding, pattern.matched);
   if (condition.children.length == 2)
@@ -5131,44 +5255,86 @@ FlowState feIfConditionJumps(AstExpression condition, List<int> failed) {
   return otherwise;
 }
 
-void feLowerPattern(CheckedPattern pattern, int value, List<int> failed) {
+void feLowerPattern(
+  CheckedPattern pattern,
+  int value,
+  List<int> failed,
+  List<PatternReadCache> cache,
+  int parent,
+) {
   var syntax = pattern.syntax;
   var kind = syntax.kind;
   var token = syntax.token;
-  if (kind == patternVariable) {
+  if (kind == patternVariable || kind == patternObject) {
     if (pattern.tested >= 0 && !typeIsSubtype(pattern.input, pattern.tested)) {
-      fePatternRead(value, pattern.input, token);
-      feCallableBox(pattern.input, token);
-      feOperand(opTypeTest, pattern.tested);
-      failed.add(feJump(opJumpFalse));
+      if (typeIsSubtype(typingNonNull(pattern.input), pattern.tested)) {
+        failed.add(feJumpIfNull(value));
+      } else {
+        fePatternRead(value, pattern.input, token);
+        feCallableBox(pattern.input, token);
+        feOperand(opTypeTest, pattern.tested);
+        failed.add(feJump(opJumpFalse));
+      }
     }
-    var binding = syntax.binding;
-    if (binding >= 0) {
-      fePatternRead(value, pattern.variableType, token);
-      feOperand(opStoreLocal, feBindingSlots[binding]);
-      flowDeclare(feFlow, binding, pattern.variableType, true);
+    if (kind == patternObject) {
+      for (var i = 0; i < pattern.fields.length; i++) {
+        var field = syntax.fields[i];
+        var key = fePatternReadKey(cache, parent, field.name);
+        var member = fePatternMemberRead(
+          cache[key],
+          pattern.fields[i],
+          value,
+          field.token,
+        );
+        feLowerPattern(pattern.children[i], member, failed, cache, key);
+      }
+    } else {
+      var binding = syntax.binding;
+      if (binding >= 0) {
+        fePatternRead(value, pattern.variableType, token);
+        feOperand(opStoreLocal, feBindingSlots[binding]);
+        flowDeclare(feFlow, binding, pattern.variableType, true);
+      }
     }
   } else if (kind == patternAnd) {
     var left = pattern.children[0];
-    feLowerPattern(left, value, failed);
+    feLowerPattern(left, value, failed, cache, parent);
     var right = pattern.children[1];
-    feLowerPattern(right, fePatternSlot(value, right.input, token), failed);
+    feLowerPattern(
+      right,
+      fePatternSlot(value, right.input, token),
+      failed,
+      cache,
+      parent,
+    );
   } else if (kind == patternOr) {
     var before = flowCopy(feFlow);
     var other = <int>[];
-    feLowerPattern(pattern.children[0], value, other);
+    feLowerPattern(pattern.children[0], value, other, cache, parent);
     var leftFlow = feFlow;
     var done = feJump(opJump);
     fePatchJumps(other, ir.length);
     feFlow = before;
     var right = pattern.children[1];
-    feLowerPattern(right, fePatternSlot(value, right.input, token), failed);
+    feLowerPattern(
+      right,
+      fePatternSlot(value, right.input, token),
+      failed,
+      cache,
+      parent,
+    );
     feFlow = feJoinFlow(leftFlow, feFlow);
     fePatch(done, ir.length);
   } else if (kind == patternNullCheck) {
     failed.add(feJumpIfNull(value));
     var inner = pattern.children[0];
-    feLowerPattern(inner, fePatternSlot(value, inner.input, token), failed);
+    feLowerPattern(
+      inner,
+      fePatternSlot(value, inner.input, token),
+      failed,
+      cache,
+      parent,
+    );
   } else if (kind == patternCast || kind == patternNullAssert) {
     fePatternRead(value, pattern.input, token);
     feCallableBox(pattern.input, token);
@@ -5178,7 +5344,7 @@ void feLowerPattern(CheckedPattern pattern, int value, List<int> failed) {
     feConvertValue(checked, pattern.tested, token);
     var slot = feTemp(pattern.tested);
     feOperand(opStoreLocal, slot);
-    feLowerPattern(pattern.children[0], slot, failed);
+    feLowerPattern(pattern.children[0], slot, failed, cache, parent);
   } else {
     var constant = pattern.constant!;
     var input = pattern.input;
@@ -5204,6 +5370,9 @@ int feLowerSwitchExpression(AstExpression expression, int context) {
   var type = feLowerExpression(source);
   var value = feTemp(type);
   feOperand(opStoreLocal, value);
+  var cache = <PatternReadCache>[];
+  for (var arm in expression.arms) fePatternCacheKeys(cache, arm.pattern, -1);
+  fePatternCacheInitialize(cache);
   feFlow = flowSplit(feFlow);
   var exitFlow = flowCopy(feFlow);
   flowUnreachable(exitFlow);
@@ -5221,6 +5390,7 @@ int feLowerSwitchExpression(AstExpression expression, int context) {
       arm.pattern,
       remaining,
       feBindingTypes,
+      feCheckMemberRead,
     );
     fePatternVariables(pattern);
     var nextFlow = flowCopy(feFlow);
@@ -5230,6 +5400,8 @@ int feLowerSwitchExpression(AstExpression expression, int context) {
       pattern,
       fePatternSlot(value, remaining, arm.pattern.token),
       failed,
+      cache,
+      -1,
     );
     if (binding >= 0) flowPromote(feFlow, binding, pattern.matched);
     var guard = arm.guard;

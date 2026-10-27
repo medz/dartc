@@ -278,11 +278,13 @@ List<AstPattern> bindingPatternVariables(
 ) {
   if (pattern.kind == patternVariable && pattern.text != '_')
     return <AstPattern>[pattern];
-  if (pattern.children.isEmpty) return <AstPattern>[];
-  var variables = bindingPatternVariables(binder, pattern.children[0]);
-  if (pattern.children.length == 1) return variables;
-  var right = bindingPatternVariables(binder, pattern.children[1]);
+  var children = pattern.children;
+  if (pattern.kind == patternObject)
+    children = <AstPattern>[for (var field in pattern.fields) field.pattern];
+  if (children.isEmpty) return <AstPattern>[];
+  var variables = bindingPatternVariables(binder, children[0]);
   if (pattern.kind == patternOr) {
+    var right = bindingPatternVariables(binder, children[1]);
     if (variables.length != right.length)
       sourceError(
         binder.source,
@@ -304,16 +306,18 @@ List<AstPattern> bindingPatternVariables(
         );
     }
   } else {
-    for (var variable in right) {
-      for (var previous in variables) {
-        if (previous.text == variable.text)
-          sourceError(
-            binder.source,
-            binder.source.tokens[variable.token],
-            'duplicate pattern variable ' + variable.text,
-          );
+    for (var i = 1; i < children.length; i++) {
+      for (var variable in bindingPatternVariables(binder, children[i])) {
+        for (var previous in variables) {
+          if (previous.text == variable.text)
+            sourceError(
+              binder.source,
+              binder.source.tokens[variable.token],
+              'duplicate pattern variable ' + variable.text,
+            );
+        }
+        variables.add(variable);
       }
-      variables.add(variable);
     }
   }
   return variables;
@@ -326,6 +330,8 @@ void bindingPattern(LocalBinder binder, int scope, AstPattern pattern) {
   if (pattern.constant case final constant?)
     bindingExpression(binder, scope, constant);
   for (var child in pattern.children) bindingPattern(binder, scope, child);
+  for (var field in pattern.fields)
+    bindingPattern(binder, scope, field.pattern);
 }
 
 int bindingPatternScope(
@@ -358,11 +364,7 @@ void bindingGuard(LocalBinder binder, int scope, AstExpression guard) {
   for (var _ in variables) binder.guardVariables.removeLast();
 }
 
-int bindingIfCondition(
-  LocalBinder binder,
-  int scope,
-  AstExpression condition,
-) {
+int bindingIfCondition(LocalBinder binder, int scope, AstExpression condition) {
   if (condition.kind != astIfCaseCondition) {
     bindingExpression(binder, scope, condition);
     return scope;
@@ -702,8 +704,7 @@ FunctionBindings _bindFunctionLocals(
   int outerScope,
   ClassMembers? members,
 ) {
-  var result = FunctionBindings(<LocalVariable>[], -1)
-    ..outer = outer?.result;
+  var result = FunctionBindings(<LocalVariable>[], -1)..outer = outer?.result;
   var binder = LocalBinder(source, result, <BindingScope>[], functions);
   binder.outer = outer;
   binder.outerScope = outerScope;

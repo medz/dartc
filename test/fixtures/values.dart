@@ -2975,6 +2975,195 @@ void collectionValues() {
   print(cb);
 }
 
+var objectPatternTrace = <String>[];
+
+class PatternNode {
+  int tag;
+  PatternNode? child;
+  String text;
+  List<int> values;
+  PatternNode(this.tag, this.child, this.text, this.values);
+
+  int get number {
+    objectPatternTrace.add('number');
+    return tag;
+  }
+
+  PatternNode? get next {
+    objectPatternTrace.add('next');
+    return child;
+  }
+
+  String get word {
+    objectPatternTrace.add('word');
+    return text;
+  }
+
+  int read() => tag;
+}
+
+class PatternVoidGetter {
+  void get value => 1;
+}
+
+int objectPatternVoid(PatternVoidGetter value) => switch (value) {
+  PatternVoidGetter(value: 2) => 2,
+  PatternVoidGetter(value: 1) => 1,
+  _ => 0,
+};
+
+class PatternPair {
+  PatternNode left;
+  PatternNode right;
+  PatternPair(this.left, this.right);
+}
+
+typedef PatternItems<T> = List<T>;
+typedef PatternNestedItems<T> = List<List<T>>;
+typedef PatternBoundItems<T extends num> = List<T>;
+typedef PatternCallback<T> = T Function(T);
+typedef PatternNull = Null;
+typedef PatternVoid = void;
+typedef PatternDependent<T, U extends T> = T Function(U);
+typedef PatternNullable = int?;
+
+int patternNested(Object? value, PatternNode root) {
+  bool change() {
+    objectPatternTrace.add('guard');
+    root.child!.tag = 50;
+    root.child = PatternNode(60, null, 'new', []);
+    return false;
+  }
+
+  return switch (value) {
+    PatternNode(next: PatternNode(number: 0)) => -1,
+    PatternNode(next: PatternNode(number: var n)) when change() => n,
+    PatternNode(next: PatternNode(number: var n), read: var read) => n + read(),
+    _ => -2,
+  };
+}
+
+String patternFields(Object? value) => switch (value) {
+  PatternNode(number: 0, word: _) => 'zero',
+  PatternNode(word: String(length: 2), number: var n) => n.toString(),
+  PatternNode(:var tag, :final text, :List<int> values) => '$tag/$text/$values',
+  String(:var length) => 'string/$length',
+  _ => 'other',
+};
+
+String objectPatternLists(Object value) => switch (value) {
+  List<int>(first: var first) when first == 99 => 'int/$first',
+  List<Object>(first: var first) => 'object/$first',
+  _ => 'other',
+};
+
+void objectPatterns() {
+  print(objectPatternVoid(PatternVoidGetter()));
+  var child = PatternNode(2, null, 'cc', [3]);
+  var root = PatternNode(10, child, 'rr', [4]);
+  print(patternNested(root, root));
+  print(objectPatternTrace);
+  objectPatternTrace.clear();
+  print(patternFields(root));
+  print(objectPatternTrace);
+  print(patternFields('abc'));
+  print(patternFields(null));
+  objectPatternTrace.clear();
+  if (root case PatternNode(number: _) && PatternNode(number: var n)) print(n);
+  print(objectPatternTrace);
+  objectPatternTrace.clear();
+  if (PatternPair(child, child) case PatternPair(
+    left: PatternNode(number: var left),
+    right: PatternNode(number: var right),
+  ))
+    print(left + right);
+  print(objectPatternTrace);
+  if (root
+      case PatternNode(number: 1, word: var text) ||
+          PatternNode(word: var text))
+    print(text);
+  if (root case PatternNode(:final child?)) print(child.tag);
+  if (root case PatternNode(:var child as PatternNode)) print(child.tag);
+  if (root case PatternNode(:var child!)) print(child.tag);
+  var reads = <int Function()>[];
+  for (var i = 0; i < 3; i++) {
+    root.tag = i;
+    if (root case PatternNode(number: var n) && PatternNode(number: int _)) {
+      reads.add(() => ++n);
+    }
+  }
+  print([reads[0](), reads[1](), reads[2](), reads[0]()]);
+  int Function()? saved;
+  bool save(int Function() read) {
+    saved = read;
+    return false;
+  }
+
+  var method = switch (root) {
+    PatternNode(read: var read) when save(read) => read,
+    PatternNode(read: var read) => read,
+  };
+  print(method == saved);
+  print(method());
+  var objects = <Object?>[root, null, 'abc'];
+  print([
+    for (var object in objects)
+      if (object case PatternNode(:var tag)) tag,
+  ]);
+  print(objectPatternLists(<int>[7]));
+  print(objectPatternLists(<String>['text']));
+  var values = <int>[3, 4];
+  if (values case List(:var first, :var last, :var length)) {
+    int sum = first + last + length;
+    print(sum);
+  }
+  if (values case PatternItems(:var first)) {
+    int n = first;
+    print(n);
+    // ignore: unnecessary_type_check
+    print([first] is List<int>);
+  }
+  if (<List<String>>[
+        ['nested'],
+      ]
+      case PatternNestedItems(:var first)) {
+    List<String> strings = first;
+    print(strings);
+  }
+  if (<Object>[1] case PatternBoundItems(:var first)) {
+    num n = first;
+    print(n);
+  }
+  if (<Null>[null] case List(:var first)) print([first] is List<Null>);
+  if (<Null>[null] case PatternItems(:var first)) print([first] is List<Null>);
+  print(switch (1) {
+    PatternVoid() => 1,
+  });
+  Object? maybe = null;
+  print(switch (maybe) {
+    PatternNull() => 1,
+    _ => 0,
+  });
+  print(switch (maybe) {
+    PatternNullable() => 1,
+    _ => 0,
+  });
+  print(switch (maybe) {
+    dynamic() => 1,
+  });
+  int callback(int n) => n + 1;
+  if (callback case PatternCallback(call: var read)) {
+    int Function(int) typed = read;
+    print(typed(4));
+  }
+  if (callback case PatternDependent(call: var read)) {
+    int Function(int) typed = read;
+    print(typed(5));
+  }
+  if (callback case Function()) print('function');
+  if (callback case Function(int) read) print(read(5));
+}
+
 var ifCaseGlobal = [if (3 case int value) value + 1];
 
 class IfCaseBox {
@@ -3260,6 +3449,7 @@ void switchExpressions() {
 
 void main(List<String> args) {
   ifCaseValues();
+  objectPatterns();
   collectionValues();
   nullAwareValues();
   cascadeValues();

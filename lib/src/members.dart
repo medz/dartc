@@ -4,6 +4,25 @@ import 'source.dart';
 const int interfaceMethod = 0;
 const int interfaceGetter = 1;
 
+const int memberReadIdentity = 0;
+const int memberReadMethod = 1;
+const int memberReadGetter = 2;
+const int memberReadField = 3;
+const int memberReadLength = 4;
+const int memberReadIsEmpty = 5;
+const int memberReadIsNotEmpty = 6;
+const int memberReadFirst = 7;
+const int memberReadLast = 8;
+
+class CheckedMemberRead {
+  final int receiver;
+  final int type;
+  final int kind;
+  final int target;
+
+  CheckedMemberRead(this.receiver, this.type, this.kind, this.target);
+}
+
 class InterfaceMember {
   final String name;
   final int role;

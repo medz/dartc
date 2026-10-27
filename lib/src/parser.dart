@@ -643,6 +643,43 @@ AstPattern parserUnaryPattern(Parser parser) {
           )
           ..type = type
           ..finalVariable = finalVariable;
+  } else if (!parserPatternTypeAhead(parser) &&
+      parserObjectPatternAhead(parser)) {
+    var name = parserName(parser);
+    if (parserTake(parser, '.')) name += '.' + parserName(parser);
+    var type = AstType(
+      name,
+      parserIs(parser, '<') ? parserTypeArguments(parser) : const <AstType>[],
+      token,
+    );
+    pattern = AstPattern(patternObject, token, '', const <AstPattern>[])
+      ..type = type
+      ..fields = <AstPatternField>[];
+    parserExpect(parser, '(');
+    while (!parserIs(parser, ')')) {
+      var fieldToken = parser.position;
+      var fieldName = '';
+      if (!parserIs(parser, ':')) fieldName = parserName(parser);
+      parserExpect(parser, ':');
+      var field = parserPattern(parser);
+      if (fieldName == '') {
+        var inner = field;
+        while (inner.kind == patternCast ||
+            inner.kind == patternNullCheck ||
+            inner.kind == patternNullAssert)
+          inner = inner.children[0];
+        if (inner.kind == patternVariable && inner.text != '_')
+          fieldName = inner.text;
+        else
+          parserError(parser, 'object pattern field requires a name');
+      }
+      for (var previous in pattern.fields)
+        if (previous.name == fieldName)
+          parserError(parser, 'duplicate object pattern field ' + fieldName);
+      pattern.fields.add(AstPatternField(fieldName, fieldToken, field));
+      if (!parserTake(parser, ',')) break;
+    }
+    parserExpect(parser, ')');
   } else if (parserPatternTypeAhead(parser)) {
     var type = parseAstType(parser);
     pattern = AstPattern(
@@ -686,8 +723,7 @@ AstPattern parserUnaryPattern(Parser parser) {
         );
       }
     }
-    if (value.kind == astName &&
-        (value.text == 'as' || value.text == 'when'))
+    if (value.kind == astName && (value.text == 'as' || value.text == 'when'))
       parserError(parser, 'invalid pattern identifier ' + value.text);
     pattern = AstPattern(patternConstant, token, '', const <AstPattern>[])
       ..constant = value
@@ -713,6 +749,20 @@ bool parserPatternTypeAhead(Parser parser) {
   return end >= 0 &&
       !tokenIs(parser.tokens[end], 'when') &&
       !tokenIs(parser.tokens[end], 'as');
+}
+
+bool parserObjectPatternAhead(Parser parser) {
+  if (parser.tokens[parser.position].kind != tokenIdentifier ||
+      parserIs(parser, 'const') ||
+      parserIs(parser, 'void'))
+    return false;
+  var look = Parser(parser.tokens, parser.position + 1, 0, parser.paths);
+  if (parserTake(look, '.')) {
+    if (look.tokens[look.position].kind != tokenIdentifier) return false;
+    look.position++;
+  }
+  if (parserIs(look, '<') && !parserLookTypeArguments(look)) return false;
+  return look.pendingClosers == 0 && !look.pendingEquals && parserIs(look, '(');
 }
 
 AstExpression parserSwitchExpression(Parser parser, int token) {
@@ -1382,8 +1432,7 @@ AstExpression parseExpression(Parser parser, [bool allowCascade = true]) {
       (parserIs(parser, '..') || parserIs(parser, '?..'))) {
     var cascade = parser.position++;
     var sections = <AstExpression>[expression, parserCascadeSection(parser)];
-    while (parserTake(parser, '..'))
-      sections.add(parserCascadeSection(parser));
+    while (parserTake(parser, '..')) sections.add(parserCascadeSection(parser));
     expression = AstExpression(
       astCascade,
       parser.tokens[cascade].text,

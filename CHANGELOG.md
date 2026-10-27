@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Support object patterns with fields, getters, method values, nested matching and shared property reads.
 - Support if-case statements and runtime List elements, including guards, mutable then bindings and shared closure captures.
 - Support switch expressions with scalar patterns, typed bindings, guards, contextual results and scalar exhaustiveness checks.
 - Support calling objects with instance `call` methods and implicitly extracting those methods in supported function-type contexts.
