@@ -55,6 +55,14 @@ NoGC 检查的是函数体；分配/GC 角色描述的是调用对外的影响�
 
 这些根记录当前适用于非移动表示的所有权表达；raw 局部地址和派生指针没有重定位后重读协议。尚未开启 GC，构造器 reserve 到安全对象头/引用前缀完成之间也不能任意插入回收点。真实行为测试验证输出、返回后对象图和根作用域恢复，不证明分配中途已发生并通过回收。根枚举与所有权用例归 [roots.dart](../test/fixtures/roots.dart) 的 `runtimeOwnership()`、`builderRoots()`、`constantObjectRoots()`；字符串、List 与命令行行为继续复用 [values.dart](../test/fixtures/values.dart) 和 [behavior_test.dart](../test/behavior_test.dart)。
 
+## 托管分配的物理区间
+
+每个 arena 在 payload 前保留 48 字节原始记录，保存下一 arena、映射请求长度、已使用长度及边界图。当前 bump arena 是链头，换 arena 后仍保留旧区间的所有权。
+
+边界图为每 16 字节保留 2 bit；当前只将每次 reservation 的起点置为 allocated，内部保持零。物理跨度由下一起点或已使用前缀末尾决定，不从 String 的逻辑长度或 List 的当前元素数反推。最后一个 backing 原位增长只推进同一区间末尾；搬移增长保留新旧两个起点，复制完成后才发布新 backing。
+
+8 MiB arena 的边界图请求为 128 KiB，约为 payload 映射请求的 1.5625%；每个 arena 增加一次原始映射，每次分配写入起点及使用末尾。记录不进入托管对象扫描，普通对象不逐个 mmap。当前没有标记、清扫、空闲块复用或 arena 释放，所有映射仍保留至进程退出；这些记录尚不构成 GC。reservation 到对象头、引用槽及复制前缀安全之间仍必须保持无回收窗口。
+
 ## 编译器的文件服务
 
 [host.dart](../lib/src/host.dart) 定义编译器的宿主接口；官方 Dart 运行时使用 SDK 实现，原生 dartc 通过受信模块的声明身份连接到普通 Dart 运行时函数。同名用户函数仍按用户声明调用。

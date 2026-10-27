@@ -14,7 +14,9 @@ external int nativeCall0(int function);
 external int nativeFramePointer();
 
 const int rtAbiVersion = 10;
+const int rtArenaHeaderBytes = 48;
 
+int rtArenaHead = 0;
 int rtArenaNext = 0;
 int rtArenaEnd = 0;
 int rtExecutableRoot = 0;
@@ -57,19 +59,39 @@ int rtUnmap(int address, int bytes) {
   return rtSyscall(73, address, bytes, 0, 0, 0, 0);
 }
 
+// Raw arena record: next0/mapBytes8/usedBytes16/bitmap24/bitmapBytes32.
+@pragma('dartc:no-gc')
+int rtArenaOpen(int size) {
+  var capacity = 8388608;
+  if (size + rtArenaHeaderBytes > capacity) {
+    capacity = (size + rtArenaHeaderBytes + 16383) & -16384;
+  }
+  var arena = rtMap(capacity);
+  var bitmapBytes = (((capacity - rtArenaHeaderBytes) ~/ 16 + 31) ~/ 32) * 8;
+  var bitmap = rtMap(bitmapBytes);
+  nativeStore64(arena, rtArenaHead);
+  nativeStore64(arena + 8, capacity);
+  nativeStore64(arena + 16, 0);
+  nativeStore64(arena + 24, bitmap);
+  nativeStore64(arena + 32, bitmapBytes);
+  rtArenaHead = arena;
+  rtArenaNext = arena + rtArenaHeaderBytes;
+  rtArenaEnd = arena + capacity;
+  return 0;
+}
+
 @pragma('dartc:managed-allocate')
 @pragma('dartc:no-gc')
 int rtAlloc(int bytes) {
   var size = (bytes + 15) & -16;
-  if (rtArenaNext + size > rtArenaEnd || rtArenaNext == 0) {
-    var capacity = 8388608;
-    if (size > capacity) capacity = (size + 16383) & -16384;
-    var memory = rtMap(capacity);
-    rtArenaNext = memory;
-    rtArenaEnd = memory + capacity;
-  }
+  if (rtArenaNext + size > rtArenaEnd || rtArenaNext == 0) rtArenaOpen(size);
   var result = rtArenaNext;
-  rtArenaNext = rtArenaNext + size;
+  var arena = rtArenaHead;
+  var cell = (result - arena - rtArenaHeaderBytes) ~/ 16;
+  var word = nativeLoad64(arena + 24) + (cell ~/ 32) * 8;
+  nativeStore64(word, nativeLoad64(word) | (1 << ((cell * 2) & 63)));
+  rtArenaNext = result + size;
+  nativeStore64(arena + 16, rtArenaNext - arena - rtArenaHeaderBytes);
   return result;
 }
 
@@ -80,6 +102,10 @@ int rtGrowBuffer(int address, int oldBytes, int newBytes) {
       address + oldSize == rtArenaNext &&
       address + newSize <= rtArenaEnd) {
     rtArenaNext = address + newSize;
+    nativeStore64(
+      rtArenaHead + 16,
+      rtArenaNext - rtArenaHead - rtArenaHeaderBytes,
+    );
     return address;
   }
   var result = rtAlloc(newBytes);
