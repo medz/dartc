@@ -14,7 +14,7 @@
 | §17.3 常量表达式 | 部分实现 | 标量、支持的运算、条件、插值、常量引用、受支持的顶层函数引用与核心 `identical` 可求值；拒绝非常量引用和循环。静态类型与实际负载分开；支持当前生成式构造器子集的 const 实例，与 List 共用规范化身份；Map、Set、完整潜在常量表达式及其他构造形式仍缺。 | [constants.dart](../lib/src/constants.dart)：`evaluateConstant`、`evaluateGlobalConstant`、`checkConstantConstructors`；[values.dart](../test/fixtures/values.dart)：`constObjects`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`、`libraries`。 |
 | §17.3.2 常量上下文 | 部分实现 | 支持顶层和局部 const、嵌套隐式 const List 及上下文元素类型；参数 List 默认值需显式 `const`，不能把普通 `[]` 当默认常量。const 构造实参引入隐式常量上下文；构造器声明默认值和字段初始化仍按自身声明作用域及常量资格检查，不能由调用方上下文放宽。 | [constants.dart](../lib/src/constants.dart)：`_constantList`；[frontend.dart](../lib/src/frontend.dart)：`feResolveDefaults`；[values.dart](../test/fixtures/values.dart)：`constantDefaults`、`constantLists`。 |
 | §17.4 null、§17.6 布尔 | 部分实现 | 有字面量及静态类型，动态布尔消费有检查；`Object`、`bool?` 不能未经转换或提升用作条件。 | [typing.dart](../lib/src/typing.dart)：`typingCondition`；[frontend.dart](../lib/src/frontend.dart)：`feBooleanValue`；[values.dart](../test/fixtures/values.dart)：`valueContexts`、`flowBranches`。 |
-| §17.5 数字 | 部分实现 | 支持原生有符号 64 位整数、边界值和整数作为 `num` 实例；浮点字面量、`double` 与浮点执行未实现。 | [scanner.dart](../lib/src/scanner.dart)：`scanTokens`；[frontend.dart](../lib/src/frontend.dart)：`feLowerExpression`；[values.dart](../test/fixtures/values.dart)：`staticContexts`、`shiftContexts`。 |
+| [§17.5 数字][numbers] | 部分实现 | 支持有符号 64 位整数及 `num` 身份；十进制负边界只允许[直接负字面量][negative-literals]，括号内字面量先独立校验。非负十六进制可用完整 64 位补码，直接负十六进制仍受有符号范围约束；普通表达式和常量同用范围规则。浮点字面量、`double` 与浮点执行未实现。 | [literals.dart](../lib/src/frontend/literals.dart)：`isNegatedIntegerLiteral`、`decodeIntegerLiteral`；[values.dart](../test/fixtures/values.dart)：`shiftContexts`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
 | §17.7 字符串与插值 | 部分实现 | 字面量、拼接、插值和 UTF-16 内容可用；完整词法变体与全部 String API 尚未逐项核验。 | [parser.dart](../lib/src/parser.dart)：`parserPrimary`；[frontend.dart](../lib/src/frontend.dart)：`feLowerInterpolation`；[values.dart](../test/fixtures/values.dart)：`stringBoundaries`、`constantLists`。 |
 | §17.9 集合字面量 | 部分实现 | 可变与 const List，显式或上下文元素类型、嵌套与空列表；const 按完整实际 `List<T>` 及元素规范化，跨库和嵌套共享身份。Set、Map、展开及集合 if/for 未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerList`；[constants.dart](../lib/src/constants.dart)：`_constantList`；[values.dart](../test/fixtures/values.dart)：`constantLists`；[behavior_test.dart](../test/behavior_test.dart)：`libraries`。 |
 
@@ -85,3 +85,6 @@ SDK 3.13.5 对 `??=` 有两处 analyzer/CFE 差异待核对：`void` getter 作�
 [getter-invocation]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L13474-L13485
 
 [function-expressions]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L10886-L10919
+
+[numbers]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L8523-L8593
+[negative-literals]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L15521-L15549

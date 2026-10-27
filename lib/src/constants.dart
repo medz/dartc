@@ -1,5 +1,6 @@
 import 'ast.dart';
 import 'frontend/arguments.dart';
+import 'frontend/literals.dart';
 import 'ir.dart';
 import 'members.dart';
 import 'resolve_type.dart';
@@ -670,7 +671,12 @@ ConstantValue _evaluateConstant(
 ) {
   var kind = expression.kind;
   if (kind == astInteger) {
-    return ConstantValue(tInt, tInt, int.parse(expression.text), '');
+    return ConstantValue(
+      tInt,
+      tInt,
+      decodeIntegerLiteral(context.symbols.program, expression),
+      '',
+    );
   }
   if (kind == astBoolean) {
     var integer = 0;
@@ -777,8 +783,13 @@ ConstantValue _evaluateConstant(
     return _constantConstructor(context, expression, active, implicitConst);
   if (kind == astUnary) {
     var operand = expression.children[0];
-    if (expression.text == '-' && operand.kind == astInteger) {
-      return ConstantValue(tInt, tInt, int.parse('-' + operand.text), '');
+    if (isNegatedIntegerLiteral(expression)) {
+      return ConstantValue(
+        tInt,
+        tInt,
+        decodeIntegerLiteral(context.symbols.program, expression),
+        '',
+      );
     }
     var value = _evaluateConstant(context, operand, active, -1, implicitConst);
     var type = typingUnary(expression.text, value.type);

@@ -1435,6 +1435,29 @@ void literalShifts(int value) {
 }
 
 void shiftContexts() {
+  const boundaries = <int>[
+    (-9_223_372_036_854_775_808),
+    - -9223372036854775808,
+    -(-9223372036854775808),
+    -0009223372036854775808,
+    0x8000000000000000,
+    -0x8000000000000000,
+    0x0000FFFFFFFFFFFFFFFF,
+    -(0xffffffffffffffff),
+    0009223372036854775807,
+  ];
+  print(boundaries);
+  print(<int>[
+    (-9_223_372_036_854_775_808),
+    - -9223372036854775808,
+    -(-9223372036854775808),
+    -0009223372036854775808,
+    0x8000000000000000,
+    -0x8000000000000000,
+    0x0000FFFFFFFFFFFFFFFF,
+    -(0xffffffffffffffff),
+    0009223372036854775807,
+  ]);
   for (int count in <int>[0, 63, 64, 65, 9223372036854775807]) {
     print(<int>[1 << count, -1 >> count, -1 >>> count]);
     print(<int>[-1 << count, 1 >> count, 1 >>> count]);

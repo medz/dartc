@@ -1,5 +1,6 @@
 import 'ast.dart';
 import 'frontend/arguments.dart';
+import 'frontend/literals.dart';
 import 'frontend/parameters.dart';
 import 'binding.dart';
 import 'constants.dart';
@@ -2711,7 +2712,7 @@ int feLowerValue(AstExpression expression) {
       expression.typeArguments.length != 0)
     feAstError(expression.token, 'type application values are unsupported');
   if (kind == astInteger) {
-    feOperand(opInt, int.parse(expression.text));
+    feOperand(opInt, decodeIntegerLiteral(feSources, expression));
     return tInt;
   }
   if (kind == astString) {
@@ -2802,6 +2803,10 @@ int feLowerValue(AstExpression expression) {
   if (kind == astUnary) {
     var op = expression.text;
     if (op == '++' || op == '--') return feLowerAssignment(expression, false);
+    if (isNegatedIntegerLiteral(expression)) {
+      feOperand(opInt, decodeIntegerLiteral(feSources, expression));
+      return tInt;
+    }
     var type = feLowerExpression(expression.children[0]);
     if (op == '!') {
       feBooleanValue(type, expression.token);
