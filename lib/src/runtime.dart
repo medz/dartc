@@ -13,7 +13,7 @@ external int nativeCall1(int function, int value);
 external int nativeCall0(int function);
 external int nativeFramePointer();
 
-const int rtAbiVersion = 12;
+const int rtAbiVersion = 13;
 const int rtArenaHeaderBytes = 48;
 
 int rtArenaHead = 0;
@@ -1518,6 +1518,13 @@ int rtValueEq(int left, int right) {
     if (rtValueInt(left) == rtValueInt(right)) return 1;
   } else if (a == typeKindString) {
     return rtStringEqual(left, right);
+  } else if (a == typeKindFunction) {
+    var descriptor = rtObjectDescriptor(left);
+    if (nativeLoad64(descriptor) == boundMethodClassId &&
+        descriptor == rtObjectDescriptor(right) &&
+        nativeLoad64(left + functionInstanceBytes) ==
+            nativeLoad64(right + functionInstanceBytes))
+      return 1;
   }
   return 0;
 }

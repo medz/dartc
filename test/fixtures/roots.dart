@@ -6,6 +6,7 @@ const capacity = 2048;
 class Leaf {
   int marker;
   Leaf(this.marker);
+  int read() => marker;
 }
 
 class ConstantLeaf {
@@ -450,6 +451,15 @@ List<int Function()> closureGraph() {
 }
 
 void closureRoots(int queue, int edges) {
+  var methods = <int Function()>[Leaf(804).read];
+  var methodList = captureList(methods, 1, queue);
+  check(listElements(methodList, edges) == 1);
+  var method = rt.nativeLoad64(edges);
+  var descriptor = rt.rtObjectDescriptor(method);
+  check(rt.nativeLoad64(descriptor) == abi.boundMethodClassId);
+  check(rt.rtTraceObject(method, edges, capacity) == 1);
+  check(findMarker(edges, 1, 804) != 0);
+  check(methods[0]() == 804);
   var callbacks = closureGraph();
   var list = captureList(callbacks, 2, queue);
   check(listElements(list, edges) == 2);

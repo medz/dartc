@@ -136,8 +136,9 @@ class FunctionContract {
 
 class ClosureLayout {
   final List<int> fieldTypes;
+  final bool boundReceiver;
 
-  ClosureLayout(this.fieldTypes);
+  ClosureLayout(this.fieldTypes, [this.boundReceiver = false]);
 }
 
 class FunctionInfo {

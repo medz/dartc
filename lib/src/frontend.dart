@@ -343,22 +343,22 @@ int feRegisterFunction(
   } else {
     feConstructors.add(0);
   }
-  if (owner < 0 || syntax.isStatic) {
-    if (owner < 0 && !local) {
-      var symbol = symbolOwnDeclaration(feSymbols, source, syntax.name);
-      if (syntax.setter)
-        feSymbols.declarations[symbol].setter = id;
-      else
-        feSymbols.declarations[symbol].target = id;
-    }
-    var callable = !syntax.getter && !syntax.setter;
-    p = 0;
-    while (p < syntax.parameters.length) {
-      if (syntax.parameters[p].kind != astRequiredPositional) callable = false;
-      p++;
-    }
-    functions[id].callableShape = callable;
+  if (owner < 0 && !local) {
+    var symbol = symbolOwnDeclaration(feSymbols, source, syntax.name);
+    if (syntax.setter)
+      feSymbols.declarations[symbol].setter = id;
+    else
+      feSymbols.declarations[symbol].target = id;
   }
+  var callable = !constructor && !syntax.getter && !syntax.setter;
+  p = 0;
+  while (p < syntax.parameters.length) {
+    if (syntax.parameters[p].kind != astRequiredPositional) callable = false;
+    p++;
+  }
+  functions[id].callableShape = callable;
+  if (callable && owner >= 0 && !syntax.isStatic)
+    functions[id].closureLayout = ClosureLayout(<int>[classType(owner)], true);
   return id;
 }
 
@@ -1290,7 +1290,7 @@ int feCombine(String op, int left, int right, int token) {
       typeIsTagged(right) ||
       typeIsNullable(left) ||
       typeIsNullable(right) ||
-      equal && left != right) {
+      equal && (left != right || typeIsFunction(left) || left == tFunction)) {
     var savedRight = feTemp(right);
     feOperand(opStoreLocal, savedRight);
     feConvertValue(left, tDynamic, token);
@@ -2641,7 +2641,11 @@ void feLowerConstructor(int function) {
     feOperand(opLoadLocal, 0);
     feOperand(opInt, feFieldIndices[field]);
     if (step.kind == constructorDeclaration) {
-      feLowerInitializer(feFieldNodes[field], feFieldBindings[field], fieldType);
+      feLowerInitializer(
+        feFieldNodes[field],
+        feFieldBindings[field],
+        fieldType,
+      );
     } else if (step.kind == constructorFormal) {
       var parameter = 1 + step.index;
       feOperand(opLoadLocal, step.index + 1);
@@ -2856,6 +2860,8 @@ int feReadMember(int type, String member, int token) {
 
 int feReadBoundMember(int owner, MemberBinding member, int token) {
   if (member.isStatic) return feReadStaticMember(owner, member, token);
+  if (member.method >= 0)
+    return feCreateBoundMethod(feMemberFunctions[owner][member.method], token);
   if (member.getter >= 0) {
     var getter = feMemberFunctions[owner][member.getter];
     feCall(getter, 1);
@@ -3848,9 +3854,7 @@ int fePrepareFunctionExpression(AstExpression expression, int context) {
   return function;
 }
 
-int feCreateClosure(int function, int token) {
-  var layout = functions[function].closureLayout;
-  if (layout == null) return feFunctionReference(function, token);
+int feAllocateClosure(int function, int token) {
   var type = feCallableType(function, token);
   feOperand(opClosureDescriptor, function);
   feBuiltinTyped(bObjectNew, 1, type);
@@ -3866,6 +3870,27 @@ int feCreateClosure(int function, int token) {
     feEmit(opPop);
     field++;
   }
+  return closure;
+}
+
+int feCreateBoundMethod(int function, int token) {
+  var receiverType = functions[function].parameterTypes[0];
+  var receiver = feTemp(receiverType);
+  feOperand(opStoreLocal, receiver);
+  var closure = feAllocateClosure(function, token);
+  feOperand(opLoadLocal, closure);
+  feOperand(opInt, 2);
+  feOperand(opLoadLocal, receiver);
+  feBuiltinTyped(bObjectSet, 3, receiverType);
+  feEmit(opPop);
+  feOperand(opLoadLocal, closure);
+  return feSlotTypes[closure];
+}
+
+int feCreateClosure(int function, int token) {
+  var layout = functions[function].closureLayout;
+  if (layout == null) return feFunctionReference(function, token);
+  var closure = feAllocateClosure(function, token);
   var local = function - feLocalStart;
   var bindings = feLocalFunctions[local].body!;
   var captureIndex = 0;
@@ -3884,7 +3909,7 @@ int feCreateClosure(int function, int token) {
     captureIndex++;
   }
   feOperand(opLoadLocal, closure);
-  return type;
+  return feSlotTypes[closure];
 }
 
 int feLowerFunctionExpression(AstExpression expression, int context) {
@@ -4291,6 +4316,7 @@ void feBeginFunction(int f, FunctionBindings bindings) {
   feSlotTypes = <int>[];
   feNextLocal = 0;
   var context = functions[f].closureLayout;
+  if (context != null && context.boundReceiver) context = null;
   var p = 0;
   while (p < functions[f].parameters) {
     feTemp(functions[f].parameterTypes[p]);
@@ -4540,7 +4566,10 @@ void parseSource(SourceProgram source) {
   var initializer = 0;
   while (initializer < feGlobalNodes.length) {
     initializerBindings.add(
-      feBindInitializer(feGlobalNodes[initializer], feGlobalOwners[initializer]),
+      feBindInitializer(
+        feGlobalNodes[initializer],
+        feGlobalOwners[initializer],
+      ),
     );
     initializer++;
   }
@@ -4690,7 +4719,13 @@ void feGenerateCallableAdapters() {
         p++;
       }
       var token = feFunctionNodes[target].token;
-      if (offset != 0) feOperand(opLoadLocal, 0);
+      if (offset != 0) {
+        feOperand(opLoadLocal, 0);
+        if (info.closureLayout!.boundReceiver) {
+          feOperand(opInt, 2);
+          feBuiltinTyped(bObjectGet, 2, info.parameterTypes[0]);
+        }
+      }
       p = offset;
       while (p < info.parameterTypes.length) {
         feOperand(opLoadLocal, p + 1 - offset);

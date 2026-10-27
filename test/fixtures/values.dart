@@ -1988,7 +1988,60 @@ int functionArgument() {
 class CallbackRecord {
   final IntCallback callback;
   const CallbackRecord(this.callback);
+  int apply(int value) => callback(value);
 }
+
+class MethodReceiver {
+  int value;
+  MethodReceiver(this.value);
+  int add(int next) {
+    functionTrace = functionTrace * 10 + 4;
+    return value += next;
+  }
+
+  int read(int next) => value + next;
+  int other(int next) => value + next;
+  int fromObject(Object? next) => next as int;
+  String text(String next) => next + value.toString();
+  void discard() => value;
+  IntCallback implicit() => add;
+  IntCallback explicit() => this.add;
+  IntCallback nested() {
+    IntCallback select() => add;
+    return select();
+  }
+
+  Object? packed(
+    int first,
+    String second,
+    bool third,
+    Object? fourth,
+    List<int> fifth,
+    int sixth,
+    String seventh,
+    bool eighth,
+    int ninth,
+  ) => functionPacked(
+    first,
+    second,
+    third,
+    fourth,
+    fifth,
+    sixth,
+    seventh,
+    eighth,
+    ninth + value,
+  );
+}
+
+MethodReceiver methodReceiver(MethodReceiver value) {
+  functionTrace = functionTrace * 10 + 1;
+  return value;
+}
+
+MethodReceiver? methodMaybe(bool present, MethodReceiver value) =>
+    present ? value : null;
+IntCallback methodSelected = MethodReceiver(8).add;
 
 const functionSaved = functionIdentity;
 const functionCallbacks = <IntCallback>[functionIdentity];
@@ -2021,6 +2074,65 @@ Object? functionPacked(
 }
 
 void functionValues() {
+  var receiver = MethodReceiver(1), otherReceiver = MethodReceiver(1);
+  functionTrace = 0;
+  var method = methodReceiver(receiver).add;
+  print(functionTrace);
+  print(method(2));
+  print(receiver.value);
+  print(method == receiver.add);
+  print(method != otherReceiver.add);
+  print(receiver.read != receiver.other);
+  print(method == receiver.implicit());
+  print(method == receiver.explicit());
+  print(method == receiver.nested());
+  IntCallback wrapping = (value) => receiver.add(value);
+  print(method == wrapping);
+  Function broadMethod = method;
+  Function repeatedMethod = receiver.add;
+  print(broadMethod == repeatedMethod);
+  Object objectMethod = method;
+  print(objectMethod == receiver.add);
+  IntCallback? nullableMethod = methodMaybe(true, receiver)?.add;
+  print(nullableMethod == method);
+  print(methodMaybe(false, receiver)?.add);
+  print(nullableMethod!(1));
+  dynamic dynamicMethod = receiver.read;
+  IntCallback checkedMethod = dynamicMethod;
+  print(checkedMethod(2));
+  print(dynamicMethod is IntCallback);
+  print(dynamicMethod is String Function(int));
+  Object? Function(int) widened = receiver.read;
+  print(widened(3));
+  IntCallback acceptsObject = receiver.fromObject;
+  print(acceptsObject(-9223372036854775808));
+  String Function(String) textMethod = receiver.text;
+  print(textMethod('接收者🙂'));
+  void Function() discardedMethod = receiver.discard;
+  print(<void>[discardedMethod()]);
+  print(methodSelected(3));
+  var methodList = <IntCallback>[receiver.add, otherReceiver.add];
+  print(methodList[0] == method);
+  print(methodList[1].call(4));
+  functionTrace = 0;
+  print((methodReceiver(receiver).add)(functionArgument()));
+  print(functionTrace);
+  print(functionRecord.apply == const CallbackRecord(functionIdentity).apply);
+  print(functionRecord.apply(12));
+  PackedCallback packedMethod = MethodReceiver(2).packed;
+  print(
+    packedMethod(
+      -9223372036854775808,
+      '方法栈🙂',
+      true,
+      null,
+      [17],
+      31,
+      '尾',
+      false,
+      40,
+    ),
+  );
   print(functionApply(functionPlus, 2));
   print(functionReturn()(4));
   print(functionSelected(3));

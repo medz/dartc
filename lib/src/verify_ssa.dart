@@ -228,6 +228,12 @@ class _SsaVerifier {
         final closure = callee.closureLayout;
         if (closure == null) fail('closure layout');
         for (final field in closure.fieldTypes) type(field);
+        if (closure.boundReceiver &&
+            (closure.fieldTypes.length != 1 ||
+                callee.parameterTypes.isEmpty ||
+                !typeIsClass(closure.fieldTypes[0]) ||
+                closure.fieldTypes[0] != callee.parameterTypes[0]))
+          fail('bound method receiver');
       }
     } else if (op == opCaptureCellDescriptor) {
       type(target);

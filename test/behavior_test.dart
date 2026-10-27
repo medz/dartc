@@ -851,6 +851,9 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "class C{int read(int value){print('body');return value;}}void main(){dynamic value=C().read;print('before');String Function(int) wrong=value;print(wrong(1));}",
+      "class C{int read(int value){print('body');return value;}}dynamic bad(){print('argument');return 'wrong';}void main(){var callback=C().read;print('before');print(callback(bad()));}",
+      "class C{int read()=>1;}C? missing()=>null;int argument(){print('argument');return 0;}void main(){var callback=missing()?.read;print('before');print(callback!());print(argument());}",
       "dynamic bad(){print('value');return 'wrong';}int tail(){print('tail');return 2;}void main(){print('before');print(<int>[?bad(),tail()]);}",
       "void main(){dynamic values=<Object>[1,'bad'];print('before');print([for(int i in values) i]);}",
       "int tail(){print('tail');return 3;}void main(){dynamic values=<Object>[1,'bad'];print('before');print(<int>[...values,tail()]);}",
@@ -1107,11 +1110,18 @@ typedef Unary=int Function(int);
 int value(int input)=>input+40;
 const saved=value;
 const nested=<List<Unary>>[<Unary>[value]];
+class Receiver {
+  int value;
+  Receiver(this.value);
+  int add(int next)=>value+=next;
+  int _read()=>value;
+  int Function() privateCallback()=>_read;
+}
+final receiver=Receiver(5);
 ''',
       'function-other.dart':
           'int value(int input)=>input+40; const saved=value;',
-      'function-exports.dart':
-          "export 'function-first.dart' show Unary,value,saved,nested;",
+      'function-exports.dart': "export 'function-first.dart' show Unary,value,saved,nested,Receiver,receiver;",
       'function-imports.dart': r'''
 import 'function-first.dart' as first;
 import 'function-exports.dart' as alias;
@@ -1123,6 +1133,10 @@ void main(){
   print(alias.nested[0][0](2));
   first.Unary callback=alias.value;
   print(callback.call(3));
+  first.Unary method=alias.receiver.add;
+  print(method==first.receiver.add);
+  print(method(2));
+  print(first.receiver.privateCallback()());
 }
 ''',
       'math.dart':
@@ -1530,6 +1544,15 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      'class C{int read(int x)=>x;}void unused(){String Function(int) f=C().read;print(f);}void main(){}',
+      'class C{int read(int x)=>x;}void unused(){int Function(Object?) f=C().read;print(f);}void main(){}',
+      'class C{int read()=>1;}C? maybe()=>null;void unused(){var f=maybe().read;print(f);}void main(){}',
+      'class C{int read()=>1;}void main(){print(C.read);}',
+      'class C{int read()=>1;}void main(){C().read=()=>2;}',
+      'class C{const C();int read()=>1;}const c=C();const f=c.read;void main(){}',
+      'class C{const C();int read()=>1;}const c=C();const f=[if(false) c.read];void main(){}',
+      "import 'function-first.dart';void main(){print(receiver._read);}",
+      'class C{int Function() value;C():value=read;int read()=>1;}void main(){}',
       '// @dart=3.7\nvoid unused(){print([?null]);}void main(){}',
       '// @dart=3.7\nconst values=[?null];void main(){}',
       'String? absent()=>null;void unused(){print(<int>[?absent()]);}void main(){}',
@@ -1690,6 +1713,7 @@ void main() {
       'typedef First=Later;typedef Later=First Function(int);void main(){}',
       'void value(){} @value void main(){}',
       "@pragma('dartc:no-gc') void invoke(void Function() callback)=>callback();void target(){print(1);}void main(){invoke(target);}",
+      "class C{int read()=>1;}@pragma('dartc:no-gc') int Function() extract(C value)=>value.read;void main(){}",
       '// @dart=2.12\ntypedef F=int Function();typedef Copy=F;void main(){}',
       '// @dart=2.12\ntypedef Nullable=int Function()?;void main(){}',
       'typedef Function=int;void main(){Function value=7;print(value);}',

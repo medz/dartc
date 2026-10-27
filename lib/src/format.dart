@@ -1064,10 +1064,10 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
   while (functionDescriptor < layout.closureDescriptors.length) {
     var captured = layout.closureDescriptors[functionDescriptor];
     if (captured != null) {
-      var fields =
-          functions[functionDescriptor].closureLayout!.fieldTypes.length;
+      var closure = functions[functionDescriptor].closureLayout!;
+      var fields = closure.fieldTypes.length;
       imageDescriptor(
-        -7,
+        closure.boundReceiver ? boundMethodClassId : -7,
         functionInstanceBytes + fields * 8,
         (functionInstanceBytes - objectHeaderBytes) ~/ 8 + fields,
         captured.referencesOffset < 0

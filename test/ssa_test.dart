@@ -139,6 +139,9 @@ void corrupt(List<SsaFunction> program, String mode) {
   } else if (mode == 'callable-type') {
     final reference = operation(named(program, 'main'), opFunctionReference);
     functions[reference.target].callableType = tFunction;
+  } else if (mode == 'bound-receiver-type') {
+    final descriptor = operation(named(program, 'main'), opClosureDescriptor);
+    functions[descriptor.target].closureLayout!.fieldTypes[0] = tInt;
   } else if (mode == 'unknown-builtin') {
     final invoke = operation(named(program, 'apply'), opBuiltin);
     invoke.target = -1;
@@ -179,6 +182,7 @@ void main(List<String> args) {
 
 const taskSource = '''
 typedef UnusedTemplate<T> = List<T>;
+class Counter { int add(int value) => value + 1; }
 int callee(int value) => value + 1;
 int order(int value) {
   final next = value + 1;
@@ -213,6 +217,7 @@ void main() {
   print(tested(7));
   dropped(1);
   print(apply(callee, 8));
+  print(apply(Counter().add, 9));
 }
 ''';
 
@@ -266,6 +271,7 @@ Future<void> main(List<String> args) async {
       'cast-representation': 'type operation operand representation',
       'callable': 'callable metadata',
       'callable-type': 'callable metadata',
+      'bound-receiver-type': 'bound method receiver',
       'unknown-builtin': 'unknown SSA builtin',
     };
     for (final entry in cases.entries) {
