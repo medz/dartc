@@ -1784,6 +1784,48 @@ void listGrowth(List<String> args) {
   print(assignmentReceiver().removeAt(assignmentIndex()));
   print(assignmentTrace);
   print(assignmentStorage);
+  var inserted = <int>[];
+  inserted.insert(0, 2);
+  inserted.insert(0, 1);
+  inserted.insert(inserted.length, 4);
+  inserted.insert(2, 3);
+  print(inserted);
+  i = 0;
+  while (i < 40) {
+    inserted.insert(1, i);
+    i++;
+  }
+  print(<int>[inserted.length, inserted[1], inserted[41], inserted[43]]);
+  var insertedNullable = <int?>[null];
+  insertedNullable.insert(0, -9223372036854775808);
+  insertedNullable.insert(1, null);
+  print(insertedNullable);
+  var insertedRefs = <String?>[];
+  insertedRefs.insert(0, '字🙂');
+  insertedRefs.insert(1, null);
+  print(insertedRefs);
+  var insertedFlags = <bool>[];
+  insertedFlags.insert(0, false);
+  insertedFlags.insert(0, true);
+  print(insertedFlags);
+  var insertedBoxes = <Box>[];
+  insertedBoxes.insert(0, Box(9));
+  print(insertedBoxes[0].value);
+  var insertedObjects = <Object?>[false, null];
+  insertedObjects.insert(1, 9223372036854775807);
+  insertedObjects.insert(0, '字🙂');
+  print(insertedObjects);
+  List<Object?> insertedWords = <int>[];
+  insertedWords.insert(0, 9223372036854775807);
+  insertedWords.insert(0, -9223372036854775808);
+  print(insertedWords);
+  assignmentStorage = <int>[0];
+  assignmentTrace = 0;
+  assignmentReceiver().insert(assignmentIndex(), assignmentValue());
+  print(assignmentTrace);
+  print(assignmentStorage);
+  print(<void>[inserted.insert(0, 9)]);
+  print(inserted[0]);
   print(args.length);
   print(args[0]);
 }

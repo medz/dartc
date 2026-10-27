@@ -307,7 +307,7 @@ void machineSelectInstruction(
       typeId = source.resultType;
     } else if (target == bListAdd) {
       typeId = types[source.inputs[1]];
-    } else if (target == bListSet) {
+    } else if (target == bListSet || target == bListInsert) {
       typeId = types[source.inputs[2]];
     }
     if (typeId >= 0) {

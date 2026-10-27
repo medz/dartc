@@ -530,6 +530,32 @@ int rtListSet(int list, int index, int value, int sourceType) {
   return value;
 }
 
+int rtListGrow(int list, int value, int elementType) {
+  var mark = rtRootMark();
+  rtRootPush(list, storageRef);
+  rtRootPushValue(value, elementType);
+  var capacity = nativeLoad64(list + listCapacityOffset);
+  var backing = nativeLoad64(list + listBackingOffset);
+  var nextCapacity = capacity * 2;
+  if (nextCapacity == 0) nextCapacity = 8;
+  if (backing == 0) {
+    backing = rtListBackingNew(
+      nativeLoad64(list + listTypeOffset),
+      nextCapacity,
+    );
+  } else {
+    backing = rtGrowBuffer(
+      backing,
+      arrayDataOffset + capacity * 8,
+      arrayDataOffset + nextCapacity * 8,
+    );
+  }
+  nativeStore64(list + listCapacityOffset, nextCapacity);
+  nativeStore64(list + listBackingOffset, backing);
+  rtRootRestore(mark);
+  return backing;
+}
+
 int rtListAdd(int list, int value, int sourceType) {
   var stored = value;
   var actualType = rtListElementType(list);
@@ -547,29 +573,43 @@ int rtListAdd(int list, int value, int sourceType) {
   var capacity = nativeLoad64(list + listCapacityOffset);
   var backing = nativeLoad64(list + listBackingOffset);
   if (length == capacity) {
-    if (mark < 0) {
-      mark = rtRootMark();
-      rtRootPush(list, storageRef);
-    }
-    rtRootPushValue(stored, actualType);
-    var nextCapacity = capacity * 2;
-    if (nextCapacity == 0) nextCapacity = 8;
-    if (backing == 0) {
-      backing = rtListBackingNew(
-        nativeLoad64(list + listTypeOffset),
-        nextCapacity,
-      );
-    } else {
-      backing = rtGrowBuffer(
-        backing,
-        arrayDataOffset + capacity * 8,
-        arrayDataOffset + nextCapacity * 8,
-      );
-    }
-    nativeStore64(list + listCapacityOffset, nextCapacity);
-    nativeStore64(list + listBackingOffset, backing);
+    backing = rtListGrow(list, stored, actualType);
   }
   nativeStore64(backing + arrayDataOffset + length * 8, stored);
+  nativeStore64(backing + arrayLengthOffset, length + 1);
+  nativeStore64(list + listLengthOffset, length + 1);
+  if (mark >= 0) rtRootRestore(mark);
+  return 0;
+}
+
+int rtListInsert(int list, int index, int value, int sourceType) {
+  var stored = value;
+  var actualType = rtListElementType(list);
+  var mark = -1;
+  if (actualType != sourceType) {
+    mark = rtRootMark();
+    rtRootPush(list, storageRef);
+    rtRootPushValue(value, sourceType);
+    stored = rtValueCast(rtValueBox(value, sourceType), actualType);
+  }
+  if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
+    return rtListFixedError();
+  }
+  var length = nativeLoad64(list + listLengthOffset);
+  if (index < 0 || index > length) return rtListRangeError();
+  var backing = nativeLoad64(list + listBackingOffset);
+  if (length == nativeLoad64(list + listCapacityOffset)) {
+    backing = rtListGrow(list, stored, actualType);
+  }
+  var next = length;
+  while (next > index) {
+    nativeStore64(
+      backing + arrayDataOffset + next * 8,
+      nativeLoad64(backing + arrayDataOffset + (next - 1) * 8),
+    );
+    next--;
+  }
+  nativeStore64(backing + arrayDataOffset + index * 8, stored);
   nativeStore64(backing + arrayLengthOffset, length + 1);
   nativeStore64(list + listLengthOffset, length + 1);
   if (mark >= 0) rtRootRestore(mark);

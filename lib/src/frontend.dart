@@ -2268,6 +2268,14 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
     return tVoid;
   }
   if (typeIsList(type)) {
+    if (member == 'insert') {
+      if (call.children.length != 3)
+        feAstError(call.token, 'argument count for List.insert');
+      feLowerInContext(call.children[1], tInt);
+      feLowerInContext(call.children[2], typeArgument(type));
+      feBuiltin(bListInsert, 3);
+      return tVoid;
+    }
     if (member == 'removeAt') {
       if (call.children.length != 2)
         feAstError(call.token, 'argument count for List.removeAt');

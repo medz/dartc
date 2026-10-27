@@ -59,6 +59,7 @@ bool _builtinThrows(int target) {
       target == bIntParse ||
       target >= bListGet && target <= bListFilled ||
       target == bListRemoveAt ||
+      target == bListInsert ||
       target >= bValueAdd && target <= bValueUshr ||
       target >= bValueLt && target <= bValueGe ||
       target == bValueToString;

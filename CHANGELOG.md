@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Implement `List.insert` in Dart with shared list growth, preserving element checks and evaluation order.
 - Support class static fields, methods and accessors, including lazy initialization, const references and supported function values.
 - Resolve user-class constructor calls through type aliases, including alias chains, nullable aliases and library-private constructors.
 - Implement `List.removeAt` in Dart, preserving element types, evaluation order and fixed/read-only list checks.

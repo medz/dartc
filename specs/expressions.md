@@ -58,6 +58,7 @@
 | [`List.filled`][filled] | 部分实现 | 默认固定长度，`growable: true` 可增长；实参一次求值、共享 fill 引用。并未覆盖全部 List 构造器和长度 setter。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerStaticCall`；[runtime.dart](../lib/src/runtime.dart)：`rtListFilled`；[values.dart](../test/fixtures/values.dart)：`filledLists`。 |
 | [`[]=`][put]、[`clear`][clear] 与只读 List | 部分实现 | 支持索引、add、removeLast、clear；写入按实际元素类型检查，再检查只读性和范围；空 const 也不可 clear。类型、只读及范围失败尚以退出表示，不具备完整可捕获异常语义。 | [runtime.dart](../lib/src/runtime.dart)：`rtListSet`、`rtListAdd`、`rtListClear`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
 | [`removeAt`](https://api.dart.dev/stable/3.13.7/dart-core/List/removeAt.html) | 部分实现 | 删除并返回指定元素，保留其静态类型和剩余元素顺序；接收者与索引按序各求值一次。固定/只读列表在范围检查前拒绝改长，索引的入口类型检查仍先执行；失败沿用进程终止边界，尚无完整可捕获异常。 | [runtime.dart](../lib/src/runtime.dart)：`rtListRemoveAt`；[values.dart](../test/fixtures/values.dart)：`listGrowth`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
+| [`insert`](https://api.dart.dev/dart-core/List/insert.html) | 部分实现 | 在 `0..length` 插入并保持后续元素顺序，返回 void；接收者、索引、元素按序求值。元素按实际类型检查，再拒绝固定/只读列表及非法范围；失败仍为进程终止，尚无可捕获异常。 | [runtime.dart](../lib/src/runtime.dart)：`rtListInsert`、`rtListGrow`；[values.dart](../test/fixtures/values.dart)：`listGrowth`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`、NoGC 拒例。 |
 
 ## StringBuffer API 边界
 
