@@ -7,6 +7,7 @@ class Leaf {
   int marker;
   Leaf(this.marker);
   int read() => marker;
+  int call() => marker;
 }
 
 class ConstantLeaf {
@@ -451,6 +452,13 @@ List<int Function()> closureGraph() {
 }
 
 void closureRoots(int queue, int edges) {
+  var callables = <int Function()>[Leaf(805)];
+  var callableList = captureList(callables, 1, queue);
+  check(listElements(callableList, edges) == 1);
+  var callable = rt.nativeLoad64(edges);
+  check(rt.rtTraceObject(callable, edges, capacity) == 1);
+  check(findMarker(edges, 1, 805) != 0);
+  check(callables[0]() == 805);
   var methods = <int Function()>[Leaf(804).read];
   var methodList = captureList(methods, 1, queue);
   check(listElements(methodList, edges) == 1);

@@ -151,6 +151,7 @@ ConstantValue _constantGlobal(
     type = value.type;
     if (type == tNull) type = tDynamic;
   }
+  value = _constantImplicitCall(context, value, type, syntax.token, active);
   if (!typingAssignable(value.type, type) ||
       active && !typeIsSubtype(constantValueType(value), type)) {
     return _constantError(
@@ -656,6 +657,13 @@ int _constantListElement(
       hint,
       true,
     );
+    value = _constantImplicitCall(
+      context,
+      value,
+      hint,
+      expression.token,
+      active,
+    );
     var type = typingNonNull(value.type);
     if (expected >= 0 && !typingAssignable(type, expected))
       _constantError(
@@ -745,6 +753,13 @@ int _constantListElement(
     return type;
   }
   var value = _evaluateConstant(context, expression, active, expected, true);
+  value = _constantImplicitCall(
+    context,
+    value,
+    expected,
+    expression.token,
+    active,
+  );
   if (expected >= 0 &&
       (!typingAssignable(value.type, expected) ||
           active && !typeIsSubtype(constantValueType(value), expected)))
@@ -774,6 +789,30 @@ ConstantValue _constantAggregate(ConstantContext context, ConstantValue value) {
   return value;
 }
 
+ConstantValue _constantImplicitCall(
+  ConstantContext context,
+  ConstantValue value,
+  int expected,
+  int token,
+  bool active,
+) {
+  if (expected < 0 || !typeIsClass(value.type)) return value;
+  var target = typeNonNullable(expected);
+  if (!typeIsFunction(target) && target != tFunction) return value;
+  var owner = typeArgument(value.type);
+  var members = context.classMembers[owner];
+  var index = lookupMember(members, 'call');
+  if (index < 0) return value;
+  var member = members.members[index];
+  if (member.isStatic || member.method < 0) return value;
+  var type = functionValueType(context.classFunctions[owner][member.method]);
+  if (type < 0)
+    _constantError(context, token, 'unsupported callable signature');
+  if (active)
+    _constantError(context, token, 'implicit call tear-off is not constant');
+  return ConstantValue(type, tNull, 0, '');
+}
+
 ConstantValue _constantChecked(
   ConstantContext context,
   ConstantValue value,
@@ -781,6 +820,7 @@ ConstantValue _constantChecked(
   int token,
   bool active,
 ) {
+  value = _constantImplicitCall(context, value, type, token, active);
   if (!typingAssignable(value.type, type) ||
       active && !typeIsSubtype(constantValueType(value), type))
     _constantError(context, token, 'incompatible constant value');

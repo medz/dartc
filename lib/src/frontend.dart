@@ -1455,6 +1455,24 @@ int feLowerHint(AstExpression expression, int context) {
 
 int feLowerInContext(AstExpression expression, int context) {
   return feConvertValue(
+    feLowerAssignedValue(expression, context),
+    context,
+    expression.token,
+  );
+}
+
+int feImplicitCall(int actual, int expected, int token) {
+  if (expected < 0 || !feClassType(actual)) return actual;
+  var target = typeNonNullable(expected);
+  if (!typeIsFunction(target) && target != tFunction) return actual;
+  var method = feMethod(typeArgument(actual), 'call', false);
+  if (method < 0) return actual;
+  return feCreateBoundMethod(method, token);
+}
+
+int feLowerAssignedValue(AstExpression expression, int context) {
+  // Coerce the whole expression; context alone does not coerce its operands.
+  return feImplicitCall(
     feLowerHint(expression, context),
     context,
     expression.token,
@@ -1952,7 +1970,7 @@ void feLowerListElement(AstExpression expression, FeListLiteral literal) {
     var context = literal.context;
     if (context >= 0 && context != tVoid) context = nullableType(context);
     var source = expression.children[0];
-    var type = feLowerHint(source, context);
+    var type = feLowerAssignedValue(source, context);
     var value = feTemp(type);
     feOperand(opStoreLocal, value);
     var skip = feJumpIfNull(value);
@@ -1962,7 +1980,7 @@ void feLowerListElement(AstExpression expression, FeListLiteral literal) {
     feAppendListElement(literal, element, source.token);
     fePatch(skip, ir.length);
   } else {
-    var type = feLowerHint(expression, literal.context);
+    var type = feLowerAssignedValue(expression, literal.context);
     feAppendListElement(literal, type, expression.token);
   }
 }
@@ -2356,7 +2374,15 @@ int feInvokeFunction(AstExpression call, FunctionSignature signature) {
   return feConvertValue(tDynamic, signature.result, call.token);
 }
 
-int feLowerFunctionCall(AstExpression call, int type) {
+int feLowerValueCall(AstExpression call, int type) {
+  if (feClassType(type)) {
+    var method = feMethod(typeArgument(type), 'call', false);
+    if (method >= 0) {
+      var count = feLowerArguments(call, 1, method);
+      feCall(method, count + 1);
+      return functions[method].result;
+    }
+  }
   var signature = feCallSignature(call, type);
   fePrepareFunctionCall(type);
   var i = 0;
@@ -2386,6 +2412,24 @@ int feLowerMemberValueCall(AstExpression call, int type, String member) {
     feLowerNeverArguments(call);
     feOperand(opLoadLocal, receiver);
     return feReadBoundMember(owner, binding, call.token);
+  }
+  if (feClassType(value)) {
+    var method = feMethod(typeArgument(value), 'call', false);
+    if (method >= 0) {
+      var count = feLowerArguments(call, 1, method);
+      var arguments = List<int>.filled(count, -1);
+      var i = count - 1;
+      while (i >= 0) {
+        arguments[i] = feTemp(functions[method].parameterTypes[i + 1]);
+        feOperand(opStoreLocal, arguments[i]);
+        i--;
+      }
+      feOperand(opLoadLocal, receiver);
+      feReadBoundMember(owner, binding, call.token);
+      for (var argument in arguments) feOperand(opLoadLocal, argument);
+      feCall(method, count + 1);
+      return functions[method].result;
+    }
   }
   var signature = feCallSignature(call, value);
   var arguments = <int>[];
@@ -2425,7 +2469,7 @@ int feLowerStaticMemberCall(
   }
   var type = feReadStaticMember(owner, member, call.token);
   if (type == tNever) return feLowerNeverArguments(call);
-  return feLowerFunctionCall(call, type);
+  return feLowerValueCall(call, type);
 }
 
 int feLowerMemberCall(AstExpression call, AstExpression callee) {
@@ -2436,7 +2480,7 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
   var type = feLowerExpression(receiver);
   if (type == tNever) return feLowerNeverArguments(call);
   if (typeIsFunction(type) && member == 'call')
-    return feLowerFunctionCall(call, type);
+    return feLowerValueCall(call, type);
   if (member == 'toString' &&
       (!feClassType(type) || feMethod(typeArgument(type), member, false) < 0)) {
     if (call.typeArguments.length != 0)
@@ -2470,7 +2514,7 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
       }
       var value = feReadMember(type, member, call.token);
       if (value == tNever) return feLowerNeverArguments(call);
-      return feLowerFunctionCall(call, value);
+      return feLowerValueCall(call, value);
     }
     var count = feLowerArguments(call, 1, function) + 1;
     feCall(function, count);
@@ -2786,12 +2830,12 @@ int feLowerCall(AstExpression call, int context) {
       return feLowerBuiltinCall(call, declaration.target);
     var value = feLoadDeclaration(symbol, callee.token);
     if (value == tNever) return feLowerNeverArguments(call);
-    return feLowerFunctionCall(call, value);
+    return feLowerValueCall(call, value);
   }
   if (callee.kind == astMember) return feLowerMemberCall(call, callee);
   var value = feLowerExpression(callee);
   if (value == tNever) return feLowerNeverArguments(call);
-  return feLowerFunctionCall(call, value);
+  return feLowerValueCall(call, value);
 }
 
 int feLowerMember(AstExpression expression) {
@@ -3123,7 +3167,7 @@ int feLowerAssignment(AstExpression expression, bool postfix) {
   if (op == '??=') return feLowerCoalescingAssignment(expression, target);
   if (op == '=') {
     var source = expression.children[1];
-    var type = feLowerHint(source, target.type);
+    var type = feLowerAssignedValue(source, target.type);
     var value = feTemp(type);
     feOperand(opStoreLocal, value);
     feOperand(opLoadLocal, value);
@@ -3200,7 +3244,7 @@ int feLowerCoalescingAssignment(AstExpression expression, FeLvalue target) {
   var source = expression.children[1];
   var context = target.type;
   if (target.binding >= 0) context = left;
-  var right = feLowerHint(source, context);
+  var right = feLowerAssignedValue(source, context);
   var assigned = feTemp(right);
   feOperand(opStoreLocal, assigned);
   feOperand(opLoadLocal, assigned);
@@ -3630,7 +3674,7 @@ void feLowerVariable(AstVariable variable) {
     value = constant.type;
     feConstantValue(constant, value, variable.token);
   } else if (variable.initializer.length != 0)
-    value = feLowerHint(variable.initializer[0], type);
+    value = feLowerAssignedValue(variable.initializer[0], type);
   else
     feInteger(0, type);
   if (type < 0) {
@@ -3739,7 +3783,7 @@ void feInferLocalResult(int local) {
   var context = feLocalContexts[local];
   var arrow = declaration.syntax.arrow;
   if (arrow != null) {
-    result = feLowerHint(arrow, context);
+    result = feLowerAssignedValue(arrow, context);
   } else {
     var body = declaration.syntax.body;
     if (body != null) feLowerStatement(body);
@@ -3976,7 +4020,7 @@ void feLowerStatement(AstStatement statement) {
       if (statement.expressions.isEmpty)
         feInteger(0, tNull);
       else
-        type = feLowerHint(
+        type = feLowerAssignedValue(
           statement.expressions[0],
           feLocalResultContext(feFunction),
         );
@@ -3992,12 +4036,15 @@ void feLowerStatement(AstStatement statement) {
         var context = tVoid;
         if (feInfersLocalResult(feFunction))
           context = feLocalResultContext(feFunction);
-        var type = feLowerHint(value, context);
+        var type = feLowerAssignedValue(value, context);
         if (type != tVoid && type != tNull)
           feAstError(value.token, 'void function cannot return a value');
         feConvertValue(type, tVoid, value.token);
       } else if (feInfersLocalResult(feFunction)) {
-        var type = feLowerHint(value, feLocalResultContext(feFunction));
+        var type = feLowerAssignedValue(
+          value,
+          feLocalResultContext(feFunction),
+        );
         feConvertValue(type, result, value.token);
       } else {
         feLowerInContext(value, result);
@@ -4645,7 +4692,7 @@ void parseSource(SourceProgram source) {
       feLowerConstructor(f);
     } else if (expression != null) {
       if (feInfersLocalResult(f)) {
-        var type = feLowerHint(expression, feLocalResultContext(f));
+        var type = feLowerAssignedValue(expression, feLocalResultContext(f));
         feConvertValue(type, functions[f].result, expression.token);
       } else {
         feLowerInContext(expression, functions[f].result);
@@ -4920,12 +4967,6 @@ void feLowerForIn(
   feOperand(opStoreLocal, index);
   var type = element;
   if (context >= 0) type = typeArgument(context);
-  if (!typingAssignable(element, type)) {
-    feAstError(
-      statement.token,
-      'for-in variable type must match the List element type',
-    );
-  }
   var cell = declaration != null && feCellBinding(declaration.binding);
   var variable = -1;
   if (declaration != null) {
@@ -4951,8 +4992,13 @@ void feLowerForIn(
   var done = feJump(opJumpFalse);
   feOperand(opLoadLocal, iterable);
   feOperand(opLoadLocal, index);
-  feBuiltinTyped(bListGet, 2, type);
+  feBuiltinTyped(bListGet, 2, element);
   if (declaration != null) {
+    feConvertValue(
+      feImplicitCall(element, type, statement.token),
+      type,
+      statement.token,
+    );
     if (cell) feAllocateCell(type);
     feOperand(opStoreLocal, variable);
   } else {
@@ -4960,9 +5006,10 @@ void feLowerForIn(
     feOperand(opStoreLocal, value);
     var target = feLowerLvalue(statement.expressions[1], false);
     feOperand(opLoadLocal, value);
-    feConvertValue(type, target.type, statement.token);
+    var assigned = feImplicitCall(type, target.type, statement.token);
+    feConvertValue(assigned, target.type, statement.token);
     feWriteLvalue(target, statement.token);
-    feWriteFlow(target, type);
+    feWriteFlow(target, assigned);
     feEmit(opPop);
   }
   var breakBase = feBreaks.length;

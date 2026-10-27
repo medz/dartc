@@ -2000,6 +2000,7 @@ class MethodReceiver {
   }
 
   int read(int next) => value + next;
+  int call(int next) => add(next);
   int other(int next) => value + next;
   int fromObject(Object? next) => next as int;
   String text(String next) => next + value.toString();
@@ -2042,6 +2043,53 @@ MethodReceiver methodReceiver(MethodReceiver value) {
 MethodReceiver? methodMaybe(bool present, MethodReceiver value) =>
     present ? value : null;
 IntCallback methodSelected = MethodReceiver(8).add;
+IntCallback callableSelected = MethodReceiver(11);
+IntCallback callableReturn(MethodReceiver value) => value;
+IntCallback callableFallback(MethodReceiver? value) =>
+    value ?? MethodReceiver(6);
+IntCallback callableAssert(MethodReceiver? value) => value!;
+
+class OptionalCallable {
+  int call(int first, [int second = 7]) => first + second;
+}
+
+class ConstantCallable {
+  final int value;
+  const ConstantCallable(this.value);
+  int call(int next) => value + next;
+}
+
+class ConvertedCallable {
+  final IntCallback callback;
+  // ignore: invalid_constant
+  const ConvertedCallable(ConstantCallable source) : callback = source;
+}
+
+class NamedCallable {
+  int call({required int first, int second = 5}) {
+    functionTrace = functionTrace * 10 + 4;
+    return first * 10 + second;
+  }
+}
+
+class CallableSlot {
+  MethodReceiver value;
+  CallableSlot(this.value);
+  MethodReceiver get selected {
+    functionTrace = functionTrace * 10 + 2;
+    return value;
+  }
+
+  NamedCallable get named {
+    functionTrace = functionTrace * 10 + 2;
+    return NamedCallable();
+  }
+}
+
+int callableReplace(CallableSlot slot) {
+  slot.value = MethodReceiver(9);
+  return 2;
+}
 
 const functionSaved = functionIdentity;
 const functionCallbacks = <IntCallback>[functionIdentity];
@@ -2074,6 +2122,81 @@ Object? functionPacked(
 }
 
 void functionValues() {
+  var callableObject = MethodReceiver(1);
+  print(callableObject(2));
+  functionTrace = 0;
+  print(methodReceiver(callableObject)(functionArgument()));
+  print(functionTrace);
+  IntCallback converted = callableObject;
+  print(converted == callableObject.call);
+  print(converted(1));
+  print(functionApply(callableObject, 2));
+  print(callableReturn(callableObject)(1));
+  print(callableSelected(2));
+  Function bareCallable = callableObject;
+  IntCallback? nullableCallable = callableObject;
+  print(bareCallable == callableObject.call);
+  print(nullableCallable == callableObject.call);
+  Object objectCallable = callableObject;
+  dynamic dynamicCallable = callableObject;
+  print(objectCallable is MethodReceiver);
+  print(dynamicCallable is MethodReceiver);
+  print(callableObject is Function);
+  var assignment = (converted = callableObject);
+  print(assignment is MethodReceiver);
+  print(assignment == callableObject.call);
+  nullableCallable = null;
+  print((nullableCallable ??= callableObject)(1));
+  // ignore: invalid_null_aware_operator
+  print(<IntCallback>[callableObject, ?callableObject][1](1));
+  for (IntCallback value in <MethodReceiver>[callableObject]) print(value(1));
+  for (converted in <MethodReceiver>[callableObject]) print(converted(1));
+  print([
+    for (IntCallback value in <MethodReceiver>[callableObject]) value(1),
+  ]);
+  print(CallbackSlot(callableObject).callback(1));
+  var storedCallable = CallbackSlot(functionIdentity);
+  storedCallable.callback = callableObject;
+  print(storedCallable.callback(1));
+  IntCallback Function() factory = () => callableObject;
+  print(factory()(1));
+  IntCallback conditional = callableObject.value > 0
+      ? callableObject
+      : MethodReceiver(99);
+  print(conditional == callableObject.call);
+  IntCallback cascade = MethodReceiver(1)..value = 3;
+  print(cascade(2));
+  print(callableFallback(null)(2));
+  print(callableFallback(callableObject)(2));
+  print(callableAssert(callableObject)(2));
+  IntCallback constantCallable = const ConstantCallable(7);
+  print(constantCallable(2));
+  // ignore: non_constant_list_element, dead_code
+  const skippedCallables = <IntCallback>[if (false) ConstantCallable(7)];
+  const skippedArguments = <CallbackRecord>[
+    // ignore: const_with_non_constant_argument
+    if (false) CallbackRecord(ConstantCallable(7)),
+  ];
+  print(skippedCallables.length);
+  print(skippedArguments.length);
+  print(ConvertedCallable(const ConstantCallable(7)).callback(3));
+  print(OptionalCallable()(2));
+  print(OptionalCallable()(2, 3));
+  print(NamedCallable()(first: 2));
+  var callableSlot = CallableSlot(callableObject);
+  functionTrace = 0;
+  print(callableSlot.selected(functionArgument()));
+  print(functionTrace);
+  functionTrace = 0;
+  print((callableSlot.selected)(functionArgument()));
+  print(functionTrace);
+  functionTrace = 0;
+  print(callableSlot.named(second: functionArgument(), first: 2));
+  print(functionTrace);
+  callableSlot.value = MethodReceiver(1);
+  print(callableSlot.value(callableReplace(callableSlot)));
+  callableSlot.value = MethodReceiver(1);
+  print((callableSlot.value)(callableReplace(callableSlot)));
   var receiver = MethodReceiver(1), otherReceiver = MethodReceiver(1);
   functionTrace = 0;
   var method = methodReceiver(receiver).add;

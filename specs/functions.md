@@ -22,7 +22,7 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 | §9.2.2 隐式默认 `null` | 部分实现 | 可空或动态参数允许省略；非空参数缺默认值报错。 | [frontend.dart](../lib/src/frontend.dart) `feLowerArguments()`；[values.dart](../test/fixtures/values.dart) `nullableArguments()`；[behavior_test.dart](../test/behavior_test.dart) `rejected` |
 | §9.2 初始化形式参数 | 部分实现 | 已实现的生成式构造支持 `this.field`、命名默认值及显式子类型到字段表示转换；[私有命名字段形式参数][private-named]要求声明库版本至少 3.12，去掉首个 `_` 后须为合法公共标识符，且声明名和公共名不得与其他形参冲突（含位置形参）。以公共名调用，旧版本调用方不改变声明规则；super 参数及主构造器未实现；生成式重定向不能带字段形式参数，见[构造器规则](classes.md)。 | [frontend.dart](../lib/src/frontend.dart) `feRegisterFunction()`、`feResolveFunctionDefaults()`；[parameters.dart](../lib/src/frontend/parameters.dart) `parameterName()`、`checkParameterName()`；[values.dart](../test/fixtures/values.dart) `Cell`、`argumentCalls()`；[behavior_test.dart](../test/behavior_test.dart) `version-private.dart`、`version-imports.dart`、`rejected` |
 | §9.2.3 `covariant` 参数 | 未实现 | 未记录此修饰符或建立 override 参数入口检查；List 协变写入检查不能代替它。 | [ast.dart](../lib/src/ast.dart) `AstParameter`；[parser.dart](../lib/src/parser.dart) `parserParameters()`；尚无验证入口 |
-| [§9.3 函数类型与函数对象][signature] | 部分实现 | 可执行文件支持非泛型必需位置签名的函数值及存储、传参、返回、typed List、调用/`.call`；常量、身份与输出限制见[函数值](#函数值)。 | [frontend.dart](../lib/src/frontend.dart) `feFunctionReference()`、`feLowerFunctionCall()`；[values.dart](../test/fixtures/values.dart) `functionValues()`；[behavior_test.dart](../test/behavior_test.dart) `program/localFactory()`、`program/localFunctions()`、`program/anonymousFunctions()`、`rejected` |
+| [§9.3 函数类型与函数对象][signature] | 部分实现 | 可执行文件支持非泛型必需位置签名的函数值及存储、传参、返回、typed List、调用/`.call`；常量、身份与输出限制见[函数值](#函数值)。 | [frontend.dart](../lib/src/frontend.dart) `feFunctionReference()`、`feLowerValueCall()`；[values.dart](../test/fixtures/values.dart) `functionValues()`；[behavior_test.dart](../test/behavior_test.dart) `program/localFactory()`、`program/localFunctions()`、`program/anonymousFunctions()`、`rejected` |
 | §9.4 外部函数 | 部分实现 | 仅受信运行时中的显式原语签名可连接；没有通用 external 链接或 `NoSuchMethodError` 路径。 | [frontend.dart](../lib/src/frontend.dart) `feRegisterFunction()`；[runtime.dart](../lib/src/runtime.dart) external 声明；[behavior_test.dart](../test/behavior_test.dart) `invalidRuntimes` |
 | §9 异步与生成器 | 未实现 | 无 `async`、`sync*`、`async*` 函数表示、暂停点及调度实现。 | [ast.dart](../lib/src/ast.dart) `AstFunction`；[parser.dart](../lib/src/parser.dart) `parserFunction()`；尚无验证入口 |
 | §17.15 参数求值及绑定 | 部分实现 | 直接调用保留实参源码顺序及形参重排；函数值的读取时机按 callee 形式区分，实例与静态选择器的 SDK 求值顺序见[表达式追踪](expressions.md)。 | [frontend.dart](../lib/src/frontend.dart) `feLowerArguments()`；[values.dart](../test/fixtures/values.dart) `argumentCalls()`、`functionValues()`、`staticMembers()` 的 trace 与寄存器/栈参数 |
@@ -68,6 +68,18 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 顶层函数和静态方法引用可用于常量，局部声明引用与匿名表达式不因此成为 const。无捕获局部函数对象可按声明共享；跨调用的对象身份是实现选择，不能依赖 SDK 某次分配行为。重复读取同一作用域中的局部声明仍保持身份，依据[函数闭包化规则][closurization]。
 
+## 可调用对象
+
+依据[函数表达式调用][callable-invocation]与[隐式转换][callable-coercion]，已知非空类声明中的实例 `call` 方法支持 `object(...)`，直接调用复用必需、可选和命名参数绑定。字段、getter 和静态成员名为 `call` 时，不会使所属实例可直接调用；继承和 extension 提供的调用仍缺。
+
+在赋值、传参、返回、列表单元素和 `for-in` 变量的函数类型上下文中，非空对象可隐式提取 `call`。支持具体必需位置签名、`Function` 及其可空形式；转换结果沿用绑定方法的接收者存活和相等性。`Object`、`dynamic` 和无上下文推断保留原对象；对象本身不是 `Function`，显式 `as` 和来自 dynamic 的检查转换不提取方法。
+
+条件、`??`、级联和空断言先确定整个表达式的类型，再做隐式提取；可空对象不能借可空函数目标自动提取。集合 spread 不逐元素插入该转换。实例字段/getter 的直接调用保持先求值实参、再读取成员的顺序；括号包住成员时先读取。函数值的可选/命名、泛型签名和 dynamic 调用仍受前述缺口限制。
+
+SDK 3.13.7 CFE 允许未选中常量集合分支及构造实参中的隐式提取，并检查签名兼容；实际执行提取时报告常量错误。它也允许 const 构造器声明中的对应隐式转换在普通实例创建时执行。analyzer 分别报告 `non_constant_list_element`、`const_with_non_constant_argument`、`invalid_constant`；dartc 采用 CFE 行为，测试逐行注明诊断忽略。显式实例方法引用仍不是常量表达式，即使位于未选中的分支。
+
+行为入口为 [values.dart](../test/fixtures/values.dart) 的 `functionValues()`、[behavior_test.dart](../test/behavior_test.dart) 的 `function-imports.dart`、`nogc-values.dart`、`rejected` 与 `failingValues`；[roots.dart](../test/fixtures/roots.dart) 的 `closureRoots()` 检查隐式提取后接收者的根枚举。
+
 ## 实现边界
 
 - 已知声明的直接调用保留原参数绑定；函数值调用目前只消费具体的非泛型必需位置签名，不能把裸 `Function` 或 `dynamic` 当作已知签名。
@@ -90,3 +102,6 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 [private-named]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.12/private-named-parameters/feature-specification.md
 
 [instance-closurization]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L14032-L14148
+
+[callable-invocation]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L12456-L12561
+[callable-coercion]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/inference.md#L1051-L1082

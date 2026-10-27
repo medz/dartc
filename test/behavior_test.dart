@@ -851,6 +851,9 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "class C{int call(int value)=>value;}void main(){dynamic value=C();print('before');int Function(int) f=value;print(f(1));}",
+      "class C{int call(int value)=>value;}void main(){print('before');print(C() as Function);}",
+      "class C{int call(int value){print('body');return value;}}dynamic bad(){print('argument');return 'wrong';}void main(){print('before');print(C()(bad()));}",
       "class C{int read(int value){print('body');return value;}}void main(){dynamic value=C().read;print('before');String Function(int) wrong=value;print(wrong(1));}",
       "class C{int read(int value){print('body');return value;}}dynamic bad(){print('argument');return 'wrong';}void main(){var callback=C().read;print('before');print(callback(bad()));}",
       "class C{int read()=>1;}C? missing()=>null;int argument(){print('argument');return 0;}void main(){var callback=missing()?.read;print('before');print(callback!());print(argument());}",
@@ -1114,6 +1117,7 @@ class Receiver {
   int value;
   Receiver(this.value);
   int add(int next)=>value+=next;
+  int call(int next)=>add(next);
   int _read()=>value;
   int Function() privateCallback()=>_read;
 }
@@ -1137,6 +1141,10 @@ void main(){
   print(method==first.receiver.add);
   print(method(2));
   print(first.receiver.privateCallback()());
+  first.Unary callable=alias.receiver;
+  print(callable==first.receiver.call);
+  print(callable(3));
+  print(alias.receiver(4));
 }
 ''',
       'math.dart':
@@ -1281,7 +1289,10 @@ int compute(int value) {
 Object box(bool value) => value;
 @pragma('dartc:no-gc')
 bool safe(String value, String suffix) => value.endsWith(suffix);
-void main() { print(compute(65)); print(box(true)); print(box(false)); print(safe('a', 'long')); }
+class Callable { int call(int value) => value + 1; }
+@noGc
+int invoke(Callable value) => value(3);
+void main() { print(compute(65)); print(box(true)); print(box(false)); print(safe('a', 'long')); print(invoke(Callable())); }
 ''',
       'nogc-user-annotation.dart': r'''
 class pragma { final String name; const pragma(this.name); }
@@ -1544,6 +1555,23 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      'class C{int call(int x)=>x;}void unused(){String Function(int) f=C();}void main(){}',
+      'class C{int call(int x)=>x;}void unused(){int Function(Object?) f=C();}void main(){}',
+      'class C{int call(int x)=>x;}void unused(C? c){int Function(int)? f=c;}void main(){}',
+      'class C{int call()=>1;}void unused(C? c){c();}void main(){}',
+      'class C{static int call()=>1;}void unused(){C()();}void main(){}',
+      'class C{int Function() get call=>()=>1;}void unused(){C()();}void main(){}',
+      'class C{int Function() call=()=>1;}void unused(){Function f=C();}void main(){}',
+      'class C{int call()=>1;}void unused(){C()(1);}void main(){}',
+      'class C{int call()=>1;}void unused(){C()<int>();}void main(){}',
+      'class C{const C();int call()=>1;}const Function f=C();void main(){}',
+      'class C{const C();int call()=>1;}const f=<String Function()>[if(false) C()];void main(){}',
+      'class C{const C();int call()=>1;}const f=<Function>[C()];void main(){}',
+      'class C{int call()=>1;}void unused(){print(<Function>[...<C>[C()]]);}void main(){}',
+      'class C{int call()=>1;}void unused(C? c){print(<Function>[?c]);}void main(){}',
+      'class C{int call()=>1;}class D{int call()=>1;}Function unused(bool b)=>b?C():D();void main(){}',
+      'class C{int call()=>1;}class D{int call()=>1;}Function unused(C? c)=>c??D();void main(){}',
+      "class C{int call()=>1;}@pragma('dartc:no-gc') int Function() extract(C value)=>value;void main(){}",
       'class C{int read(int x)=>x;}void unused(){String Function(int) f=C().read;print(f);}void main(){}',
       'class C{int read(int x)=>x;}void unused(){int Function(Object?) f=C().read;print(f);}void main(){}',
       'class C{int read()=>1;}C? maybe()=>null;void unused(){var f=maybe().read;print(f);}void main(){}',

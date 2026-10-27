@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Support calling objects with instance `call` methods and implicitly extracting those methods in supported function-type contexts.
 - Support bound instance-method values with required positional signatures, receiver retention, method equality and typed calls.
 - Support List collection if/else, for and for-in elements, ordinary/null-aware spreads, null-aware single elements, and their supported constant evaluation.
 - Support null-aware member/index chains, preserving single receiver evaluation, skipped side effects, assignment flow and constant-expression checks.
