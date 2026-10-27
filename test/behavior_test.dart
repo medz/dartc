@@ -230,8 +230,85 @@ int fibonacci(int bias) {
 
 int nativeMetadataAddress() => 77;
 
+int localTrace = 0;
+int localStep(int value) { localTrace = localTrace * 10 + value; return value; }
+localTopResult() => 1;
+void localOpaque() => 9223372036854775807;
+
+int Function(int) localFactory() {
+  const offsets = <int>[3];
+  int plus(int value) => value + offsets[0];
+  next(int value) => plus(value) + 1;
+  int Function(int) select() => next;
+  return select();
+}
+
+void localFunctions() {
+  int factorial(int value) => value < 2 ? 1 : value * factorial(value - 1);
+  int sameName(int sameName) => sameName + 1;
+  print(factorial(5));
+  print(sameName(4));
+  {
+    int factorial(int value) => value + 3;
+    print(factorial(2));
+  }
+  const bias = 7;
+  int optional([int value = bias]) => value;
+  named(int value, {int extra = bias, int last = 3}) => value + extra + last;
+  print(optional());
+  print(named(last: localStep(1), localStep(2), extra: localStep(3)));
+  print(localTrace);
+  print([named(4)] is List<int>);
+  int packed(int a,int b,int c,int d,int e,int f,int g,int h,{int i=9}) => a+i;
+  print(packed(1,2,3,4,5,6,7,8));
+  @pragma('dartc:no-gc') int safe(int value) => value + 1;
+  print(safe(7));
+  var callback = localFactory();
+  print(callback(5));
+  print(<int Function(int)>[callback][0](3));
+  localResult() => 1;
+  blockResult() { return 1; }
+  print([localTopResult()] is List<int>);
+  print([localResult()] is List<int>);
+  print([blockResult()] is List<int>);
+  recursive(int value) => value == 0 ? 1 : recursive(value - 1);
+  print([recursive(2)] is List<int>);
+  nothing() {}
+  forever() { while (true) {} }
+  deadReturn() { if (false) return 'dead'; return 1; }
+  nested() { hidden() => 7; return 'outer'; }
+  listResult(bool flag) { if (flag) return []; return [1]; }
+  nullable(bool flag) { if (flag) return 1; }
+  opaque() => localOpaque();
+  print([nothing()] is List<Null>);
+  print(forever is Never Function());
+  print([deadReturn()] is List<int>);
+  print([nested()] is List<String>);
+  print(listResult(false) is List<int>);
+  print([nullable(true)] is List<int?>);
+  print(<void>[opaque()]);
+  Probe identity(Probe value) { int Probe = 0; return value; }
+  Probe byName(Probe Probe) => Probe;
+  print(identity(Probe(3)).value);
+  print(byName(Probe(4)).value);
+  var total = 0;
+  repeat:
+  for (var i = 0; i < 3; i++) {
+    value() => 1;
+    total += value();
+    if (i < 2) continue repeat;
+    break repeat;
+  }
+  print(total);
+  if (true) int inIf() => 1;
+  declared: int labeled() => 2;
+  while (false) int inLoop() => 3;
+  print(labeled());
+}
+
 void main(List<String> args) {
   listContexts();
+  localFunctions();
   print(nativeMetadataAddress());
   print(calls);
   spare = 99;
@@ -1035,6 +1112,23 @@ void main() { print(1_000); }
     compare(File('${temporary.path}/function-imports.dart'), []);
     compare(File('${temporary.path}/conditional-imports.dart'), []);
     final rejected = [
+      'int value()=>99;void main(){print(value());int value()=>7;}',
+      'void main(){int first(int value)=>second(value);int second(int value)=>first(value);}',
+      'void main(){int value()=>1;int value()=>2;}',
+      'int other()=>2;void main(){int value()=>1;value=other;}',
+      'void main(){int value()=>1;const saved=value;print(saved());}',
+      'void main(){int value();}',
+      "void main(){int String()=>1;String value='wrong';print(value);}",
+      "void main(){int String=1;String value='wrong';print(value);}",
+      "import 'properties.dart' as p;void main(){int p=1;p.Counter? value;print(value);}",
+      'void main(){int value()=>bias;const bias=7;print(value());}',
+      'void touch(){}void main(){value(bool flag){if(flag)return touch();return 1;}}',
+      'void main(){outer:while(true){value(){break outer;}break;}}',
+      // NoGC contracts also apply to unused local bodies (valid ordinary Dart).
+      "void main(){@pragma('dartc:no-gc') List<int> value()=>[1];}",
+      // These captures are valid Dart, but deliberately unsupported by dartc.
+      'int value=99;void main(){int value=7;int read()=>value;print(read());}',
+      'int value=99;class C{int value=7;C();int read(){int local()=>value;return local();}}void main(){print(C().read());}',
       "import 'conditional-first.dart' if(true) 'conditional-other.dart';void main(){}",
       "import 'conditional-first.dart' if(dart.library.if) 'conditional-other.dart';void main(){}",
       "import 'conditional-first.dart' if(dart.library.core && true) 'conditional-other.dart';void main(){}",

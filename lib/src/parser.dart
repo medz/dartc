@@ -1162,6 +1162,25 @@ bool parserVariableStatement(Parser parser) {
       parserTypedDeclaration(parser);
 }
 
+bool parserUntypedFunction(Parser parser) {
+  var position = parser.position;
+  if (parser.tokens[position].kind != tokenIdentifier ||
+      !tokenIs(parser.tokens[position + 1], '('))
+    return false;
+  var depth = 1;
+  position += 2;
+  while (depth > 0 && parser.tokens[position].kind != tokenEnd) {
+    if (tokenIs(parser.tokens[position], '(')) depth++;
+    if (tokenIs(parser.tokens[position], ')')) depth--;
+    position++;
+  }
+  return depth == 0 &&
+      (tokenIs(parser.tokens[position], '{') ||
+          tokenIs(parser.tokens[position], '=>') ||
+          tokenIs(parser.tokens[position], 'async') ||
+          tokenIs(parser.tokens[position], 'sync'));
+}
+
 AstStatement parseStatement(Parser parser) {
   var token = parser.position;
   if (parser.tokens[parser.position].kind == tokenIdentifier &&
@@ -1378,12 +1397,38 @@ AstStatement parseStatement(Parser parser) {
       token,
     );
   }
-  if (parserIs(parser, '@') || parserVariableStatement(parser)) {
+  if (parserIs(parser, '@') ||
+      parserVariableStatement(parser) ||
+      parserUntypedFunction(parser)) {
+    var metadata = parserMetadata(parser);
+    var declaration = parser.position;
+    var modifier = parserModifier(parser);
+    var type = parserDeclarationType(parser, modifier);
+    var name = parserName(parser);
+    if (modifier == '' && parserIs(parser, '(')) {
+      var function = parserFunction(
+        parser,
+        name,
+        type,
+        false,
+        declaration,
+        false,
+        false,
+        false,
+      );
+      if (function.body.isEmpty && function.arrow.isEmpty)
+        parserError(parser, 'local function requires a body');
+      function.metadata = metadata;
+      var statement = parserEmptyStatement(token);
+      statement.kind = astLocalFunctionStatement;
+      statement.function = function;
+      return statement;
+    }
     return AstStatement(
       astVariableStatement,
       <AstExpression>[],
       <AstStatement>[],
-      parserVariables(parser),
+      parserVariablesRest(parser, type, name, modifier, declaration, metadata),
       <AstExpression>[],
       <AstExpression>[],
       token,

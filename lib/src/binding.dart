@@ -5,10 +5,19 @@ class LocalVariable {
   String name;
   int token;
   AstType type;
+  int function = -1;
+  int outer = -1;
   bool constant = false;
   bool finalVariable = false;
 
   LocalVariable(this.name, this.token, this.type);
+}
+
+class LocalFunctionBinding {
+  final AstFunction syntax;
+  FunctionBindings? body;
+
+  LocalFunctionBinding(this.syntax);
 }
 
 class FunctionBindings {
@@ -30,8 +39,11 @@ class LocalBinder {
   FunctionBindings result;
   List<BindingScope> scopes;
   bool wildcards = true;
+  final List<LocalFunctionBinding> functions;
+  LocalBinder? outer;
+  int outerScope = -1;
 
-  LocalBinder(this.source, this.result, this.scopes);
+  LocalBinder(this.source, this.result, this.scopes, this.functions);
 }
 
 void bindFunctionTypeParameters(SourceProgram source, AstFunctionType syntax) {
@@ -111,13 +123,92 @@ int bindingLookup(LocalBinder binder, int scope, String name) {
   return -1;
 }
 
+int bindingReference(LocalBinder binder, int scope, String name, int token) {
+  var binding = bindingLookup(binder, scope, name);
+  if (binding >= 0) {
+    var variable = binder.result.variables[binding];
+    if (variable.function >= 0 &&
+        token < binder.functions[variable.function].syntax.token)
+      sourceError(
+        binder.source,
+        binder.source.tokens[token],
+        'local function referenced before declaration: ' + name,
+      );
+    return binding;
+  }
+  var outer = binder.outer;
+  if (outer == null) return -1;
+  var original = bindingReference(outer, binder.outerScope, name, token);
+  if (original < 0) return -1;
+  var variable = outer.result.variables[original];
+  if (variable.function < 0 && !variable.constant)
+    sourceError(
+      binder.source,
+      binder.source.tokens[token],
+      'capturing outer local is not supported: ' + name,
+    );
+  if (token < variable.token)
+    sourceError(
+      binder.source,
+      binder.source.tokens[token],
+      'local referenced before declaration: ' + name,
+    );
+  var i = 0;
+  while (i < binder.result.variables.length) {
+    if (binder.result.variables[i].outer == original) return i;
+    i++;
+  }
+  var alias = LocalVariable(name, variable.token, variable.type);
+  alias.function = variable.function;
+  alias.outer = original;
+  alias.constant = variable.constant;
+  alias.finalVariable = true;
+  binder.result.variables.add(alias);
+  return binder.result.variables.length - 1;
+}
+
+void bindingType(LocalBinder binder, int scope, AstType syntax) {
+  var function = syntax.function;
+  if (function != null) {
+    bindingType(binder, scope, function.result);
+    for (var parameter in function.parameters)
+      bindingType(binder, scope, parameter.type);
+  } else {
+    var name = syntax.name;
+    if (name.endsWith('?')) name = name.substring(0, name.length - 1);
+    var dot = name.indexOf('.');
+    if (dot >= 0) name = name.substring(0, dot);
+    if (name != '' && name != 'void' && name != 'dynamic') {
+      LocalBinder? current = binder;
+      var at = scope;
+      while (current != null) {
+        if (bindingLookup(current, at, name) >= 0)
+          sourceError(
+            binder.source,
+            binder.source.tokens[syntax.token],
+            'local declaration is not a type: ' + name,
+          );
+        at = current.outerScope;
+        current = current.outer;
+      }
+    }
+  }
+  for (var argument in syntax.arguments) bindingType(binder, scope, argument);
+}
+
 void bindingExpression(
   LocalBinder binder,
   int scope,
   AstExpression expression,
 ) {
+  for (var type in expression.typeArguments) bindingType(binder, scope, type);
   if (expression.kind == astName) {
-    expression.binding = bindingLookup(binder, scope, expression.text);
+    expression.binding = bindingReference(
+      binder,
+      scope,
+      expression.text,
+      expression.token,
+    );
   }
   var i = 0;
   while (i < expression.children.length) {
@@ -170,6 +261,19 @@ void bindingCollectStatement(
   }
   if (statement.kind == astVariableStatement) {
     bindingDeclarations(binder, scope, statement.variables);
+  } else if (statement.kind == astLocalFunctionStatement) {
+    var syntax = statement.function!;
+    syntax.local = binder.functions.length;
+    binder.functions.add(LocalFunctionBinding(syntax));
+    var id = bindingDeclare(
+      binder,
+      scope,
+      syntax.name,
+      syntax.token,
+      AstType('', <AstType>[], syntax.token),
+    );
+    binder.result.variables[id].function = syntax.local;
+    binder.result.variables[id].finalVariable = true;
   }
 }
 
@@ -210,6 +314,26 @@ void bindingBody(LocalBinder binder, int scope, AstStatement statement) {
 
 void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
   var kind = statement.kind;
+  if (kind == astLocalFunctionStatement) {
+    var syntax = statement.function!;
+    bindingType(binder, scope, syntax.result);
+    bindingExpressions(binder, scope, syntax.metadata);
+    for (var parameter in syntax.parameters) {
+      bindingType(binder, scope, parameter.type);
+      bindingExpressions(binder, scope, parameter.metadata);
+      var value = parameter.defaultValue;
+      if (value != null) bindingExpression(binder, scope, value);
+    }
+    binder.functions[syntax.local].body = _bindFunctionLocals(
+      binder.source,
+      syntax,
+      false,
+      binder.functions,
+      binder,
+      scope,
+    );
+    return;
+  }
   if (kind == astBreakStatement || kind == astContinueStatement) return;
   if (kind == astLabeledStatement) {
     bindingStatement(binder, scope, statement.children[0]);
@@ -236,6 +360,7 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
     bindingDeclarations(binder, loop, statement.variables);
     var variable = 0;
     while (variable < statement.variables.length) {
+      bindingType(binder, loop, statement.variables[variable].type);
       bindingExpressions(binder, loop, statement.variables[variable].metadata);
       variable++;
     }
@@ -265,6 +390,7 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
   }
   var i = 0;
   while (i < statement.variables.length) {
+    bindingType(binder, scope, statement.variables[i].type);
     bindingExpressions(binder, scope, statement.variables[i].metadata);
     bindingExpressions(binder, scope, statement.variables[i].initializer);
     i++;
@@ -282,10 +408,31 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
 FunctionBindings bindFunctionLocals(
   SourceProgram source,
   AstFunction syntax,
+  bool receiver, [
+  List<LocalFunctionBinding>? functions,
+]) {
+  return _bindFunctionLocals(
+    source,
+    syntax,
+    receiver,
+    functions ?? <LocalFunctionBinding>[],
+    null,
+    -1,
+  );
+}
+
+FunctionBindings _bindFunctionLocals(
+  SourceProgram source,
+  AstFunction syntax,
   bool receiver,
+  List<LocalFunctionBinding> functions,
+  LocalBinder? outer,
+  int outerScope,
 ) {
   var result = FunctionBindings(<LocalVariable>[], -1);
-  var binder = LocalBinder(source, result, <BindingScope>[]);
+  var binder = LocalBinder(source, result, <BindingScope>[], functions);
+  binder.outer = outer;
+  binder.outerScope = outerScope;
   binder.wildcards = sourceVersionAtLeast(
     source,
     source.tokens[syntax.token].source,

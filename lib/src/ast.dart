@@ -70,6 +70,7 @@ const int astDoWhileStatement = 11;
 const int astSwitchStatement = 12;
 const int astSwitchCaseStatement = 13;
 const int astLabeledStatement = 14;
+const int astLocalFunctionStatement = 15;
 
 const int astImportDirective = 1;
 const int astExportDirective = 2;
@@ -112,6 +113,7 @@ class AstParameter {
 }
 
 class AstStatement {
+  AstFunction? function;
   int kind;
   List<AstExpression> expressions;
   List<AstStatement> children;
@@ -132,6 +134,7 @@ class AstStatement {
 }
 
 class AstFunction {
+  int local = -1;
   List<AstExpression> metadata = const <AstExpression>[];
   String name;
   AstType result;

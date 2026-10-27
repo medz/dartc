@@ -6,10 +6,10 @@
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
 | §18.0.1 语句完成方式 | 部分实现 | lowering 表示正常、返回、break 和 continue；异常完成及栈展开未实现。 | [frontend.dart](../lib/src/frontend.dart) `feLowerStatement()`；[flow.dart](../lib/src/flow.dart) `FlowState`；[values.dart](../test/fixtures/values.dart) `flowContexts()` |
-| §18.1 块 | 部分实现 | 顺序执行并创建局部作用域；局部函数和模式声明未实现。 | [binding.dart](../lib/src/binding.dart) `bindingStatements()`；[values.dart](../test/fixtures/values.dart) `localBindings()` |
+| §18.1 块 | 部分实现 | 顺序执行并创建局部作用域；局部函数有独立参数与函数体作用域，模式声明未实现。 | [binding.dart](../lib/src/binding.dart) `bindingStatements()`；[values.dart](../test/fixtures/values.dart) `localBindings()` |
 | §18.2 空及表达式语句 | 部分实现 | 可丢弃结果但保留有副作用或可能失败的操作；表达式集合仍是子集。 | [frontend.dart](../lib/src/frontend.dart) `feLowerStatement()`；[ssa.dart](../lib/src/ssa.dart) effect；[values.dart](../test/fixtures/values.dart) `coalescingContexts()`；[behavior_test.dart](../test/behavior_test.dart) `failingValues` |
 | §18.3 局部变量声明 | 部分实现 | 有绑定、类型转换和确定赋值；`final` 规则与 `late` 缺口见[变量追踪](variables.md)。 | [frontend.dart](../lib/src/frontend.dart) `feLowerVariable()`；[values.dart](../test/fixtures/values.dart) `localBindings()`、`flowContexts()` |
-| §18.4 局部函数声明 | 未实现 | 语句 AST 无局部函数种类，未实现闭包和局部递归。 | [ast.dart](../lib/src/ast.dart)；[parser.dart](../lib/src/parser.dart) `parseStatement()`；尚无验证入口 |
+| §18.4 局部函数声明 | 部分实现 | 支持无捕获声明、自递归与函数值，按声明身份绑定；返回推断和捕获缺口见[函数](functions.md)。 | [ast.dart](../lib/src/ast.dart)、[parser.dart](../lib/src/parser.dart)、[binding.dart](../lib/src/binding.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 `localFunctions()`、`rejected` |
 | §18.5 `if` | 部分实现 | 布尔检查、短路条件和两支流状态合并已接入；case 条件、异常流未实现。 | [frontend.dart](../lib/src/frontend.dart) `feConditionJumps()`；[values.dart](../test/fixtures/values.dart) `conditionCase()`、`flowBranches()` |
 | §18.6.1 `for` | 部分实现 | 支持声明或表达式初始化、条件、多条更新及跳转；闭包逐迭代变量语义未实现。 | [parser.dart](../lib/src/parser.dart) `parseStatement()`；[frontend.dart](../lib/src/frontend.dart) `feLowerStatement()`；[behavior_test.dart](../test/behavior_test.dart) `program/main()` |
 | §18.6.2 `for-in` | 部分实现 | 当前按 List 长度和索引迭代，iterable 只求值一次；每次迭代步先检查初始长度，长度变化在下次取元素或判定结束前失败，break 不再检查。元素替换及步间恢复原长度可继续；没有一般 Iterable/Iterator 协议或可捕获的 ConcurrentModificationError。 | [frontend.dart](../lib/src/frontend.dart) `feLowerForIn()`；[runtime.dart](../lib/src/runtime.dart) `rtListModificationError()`；[behavior_test.dart](../test/behavior_test.dart) `program/sequence()`、`program/main()`、`failingValues`；[List API](https://api.dart.dev/stable/3.13.5/dart-core/List-class.html) 补充迭代失效规则 |
