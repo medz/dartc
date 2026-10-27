@@ -584,7 +584,7 @@ ConstantLayout layoutConstants(int start) {
     }
     i++;
   }
-  var layout = ConstantLayout(
+  return ConstantLayout(
     stringOffsets,
     descriptorOffsets,
     classNameStrings,
@@ -598,25 +598,24 @@ ConstantLayout layoutConstants(int start) {
     handleTypeOffset,
     metadataOffset,
     end,
-  );
-  layout.globalOffsets = globalOffsets;
-  layout.globalBytes = globalBytes;
-  layout.dataOffsets = dataOffsets;
-  layout.callableOffsets = callableOffsets;
-  layout.closureDescriptors = closureDescriptors;
-  layout.captureCellDescriptors = captureCellDescriptors;
-  layout.signatureOffsets = signatureOffsets;
-  layout.functionDescriptorOffset = functionDescriptorOffset;
-  layout.refBitmapOffsets = refBitmapOffsets;
-  layout.taggedBitmapOffsets = taggedBitmapOffsets;
-  layout.metadataFeatures = features;
-  layout.metadataBytes = metadataBytes;
-  layout.rootTableOffset = rootTableOffset;
-  layout.rootCallsOffset = rootCallsOffset;
-  layout.rootSlotOffsets = rootSlotOffsets;
-  layout.globalRootsOffset = globalRootsOffset;
-  layout.globalRoots = globalRoots;
-  return layout;
+  )
+    ..globalOffsets = globalOffsets
+    ..globalBytes = globalBytes
+    ..dataOffsets = dataOffsets
+    ..callableOffsets = callableOffsets
+    ..closureDescriptors = closureDescriptors
+    ..captureCellDescriptors = captureCellDescriptors
+    ..signatureOffsets = signatureOffsets
+    ..functionDescriptorOffset = functionDescriptorOffset
+    ..refBitmapOffsets = refBitmapOffsets
+    ..taggedBitmapOffsets = taggedBitmapOffsets
+    ..metadataFeatures = features
+    ..metadataBytes = metadataBytes
+    ..rootTableOffset = rootTableOffset
+    ..rootCallsOffset = rootCallsOffset
+    ..rootSlotOffsets = rootSlotOffsets
+    ..globalRootsOffset = globalRootsOffset
+    ..globalRoots = globalRoots;
 }
 
 List<int> createMachOExecutable() {

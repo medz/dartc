@@ -17,6 +17,8 @@ const int astInterpolation = 16;
 const int astTypeTest = 17;
 const int astTypeCast = 18;
 const int astFunctionExpression = 19;
+const int astCascade = 20;
+const int astCascadeReceiver = 21;
 
 const String astCallIdentifier = 'identifier';
 const String astCallSelector = 'selector';

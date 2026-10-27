@@ -93,6 +93,7 @@ class FeFunctionState {
   final List<int> bindingSlots = feBindingSlots;
   final List<int> slots = feSlotTypes;
   final int nextLocal = feNextLocal;
+  final int cascadeSlot = feCascadeSlot;
   final FlowState flow = feFlow;
   final List<ConstantValue> constants = feConstants.locals;
   final List<int> constantTypes = feConstants.localTypes;
@@ -119,6 +120,7 @@ class FeFunctionState {
     feBindingSlots = bindingSlots;
     feSlotTypes = slots;
     feNextLocal = nextLocal;
+    feCascadeSlot = cascadeSlot;
     feFlow = flow;
     feConstants.locals = constants;
     feConstants.localTypes = constantTypes;
@@ -161,6 +163,7 @@ List<FeClosure> feLocalClosures = <FeClosure>[];
 List<List<ConstantValue>?> feLocalConstants = <List<ConstantValue>?>[];
 List<int> feLocalOwners = <int>[];
 int feLocalStart = 0;
+int feCascadeSlot = -1;
 List<bool> feLocalInferred = <bool>[];
 List<int> feLocalContexts = <int>[];
 List<int>? feReturnTypes;
@@ -1418,6 +1421,8 @@ int feNonNullableValue(int type, int token) {
 }
 
 int feLowerHint(AstExpression expression, int context) {
+  if (expression.kind == astCascade)
+    return feLowerCascade(expression, context);
   if (expression.kind == astFunctionExpression)
     return feLowerFunctionExpression(expression, context);
   if (expression.kind == astPostfix && expression.text == '!')
@@ -3128,6 +3133,11 @@ int feLowerExpression(AstExpression expression) {
 int feLowerValue(AstExpression expression) {
   expression = feWithReceiver(expression);
   var kind = expression.kind;
+  if (kind == astCascade) return feLowerCascade(expression, -1);
+  if (kind == astCascadeReceiver) {
+    feOperand(opLoadLocal, feCascadeSlot);
+    return feSlotTypes[feCascadeSlot];
+  }
   if (kind == astFunctionExpression)
     return feLowerFunctionExpression(expression, -1);
   if ((kind == astName || kind == astMember) &&
@@ -3285,6 +3295,59 @@ int feLowerValue(AstExpression expression) {
   }
   if (kind == astConditional) return feLowerConditional(expression, -1);
   feAstError(expression.token, 'unsupported expression');
+}
+
+int feLowerCascade(AstExpression expression, int context) {
+  var source = expression.children[0];
+  var type = feLowerHint(source, context);
+  if (type == tVoid)
+    feAstError(source.token, 'void expression cannot be used as a value');
+  var receiver = feTemp(type);
+  feOperand(opStoreLocal, receiver);
+  var previous = feCascadeSlot;
+  feCascadeSlot = receiver;
+  var skip = -1;
+  FlowState? nullFlow;
+  if (expression.text == '?..') {
+    feFlow = flowSplit(feFlow);
+    nullFlow = flowCopy(feFlow);
+    if (source.kind == astName &&
+        source.binding >= 0 &&
+        fePromotable(source.binding)) {
+      flowNull(nullFlow, source.binding, true);
+      flowNull(feFlow, source.binding, false);
+      if (type == tNull) feFlow.types[source.binding] = tNever;
+    } else {
+      if (feFlow.soundFlow && !typeCanBeNull(type)) flowUnreachable(nullFlow);
+      if (type == tNull) flowUnreachable(feFlow);
+    }
+    if (typeCanBeNull(type)) {
+      feOperand(opLoadLocal, receiver);
+      feInteger(0, tNull);
+      feEmit(opEq);
+    } else {
+      feInteger(0, tBool);
+    }
+    skip = feJump(opJumpTrue);
+    var promoted = typingNullAssertion(type);
+    feOperand(opLoadLocal, receiver);
+    feNarrowValue(type, promoted);
+    feCascadeSlot = feTemp(promoted);
+    feOperand(opStoreLocal, feCascadeSlot);
+  }
+  var section = 1;
+  while (section < expression.children.length) {
+    feLowerExpression(expression.children[section]);
+    feEmit(opPop);
+    section++;
+  }
+  if (nullFlow != null) {
+    fePatch(skip, ir.length);
+    feFlow = flowUnsplit(feJoinFlow(feFlow, nullFlow));
+  }
+  feCascadeSlot = previous;
+  feOperand(opLoadLocal, receiver);
+  return type;
 }
 
 int feLowerCoalescing(AstExpression expression, int context) {
@@ -4038,6 +4101,7 @@ void feGenerateGlobals(int count) {
 
 void feBeginFunction(int f, FunctionBindings bindings) {
   feFunction = f;
+  feCascadeSlot = -1;
   feConstants.lexicalClass = -1;
   var owner = feLexicalOwner(f);
   feConstants.lexicalClass = owner;
@@ -4181,6 +4245,7 @@ void parseSource(SourceProgram source) {
   feLocalConstants.clear();
   feLocalOwners.clear();
   feLocalStart = 0;
+  feCascadeSlot = -1;
   feLocalInferred.clear();
   feLocalContexts.clear();
   feReturnTypes = null;

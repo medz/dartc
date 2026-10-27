@@ -2307,7 +2307,102 @@ void staticMembers() {
   print(functionTrace);
 }
 
+class CascadeBox {
+  int value = 0;
+  List<int> values = <int>[];
+  CascadeBox? child;
+  int Function() callback = () => 0;
+  CascadeBox Function() factory = () => CascadeBox();
+
+  CascadeBox();
+
+  CascadeBox update(int input) {
+    value = input;
+    return CascadeBox();
+  }
+
+  set written(int input) { value = input; }
+  int get read => value;
+  void get discarded {}
+}
+
+int cascadeTrace = 0;
+int cascadeStep(int value) {
+  cascadeTrace = cascadeTrace * 10 + value;
+  return value;
+}
+CascadeBox cascadeTarget() {
+  cascadeStep(1);
+  return CascadeBox();
+}
+CascadeBox? cascadeOptional(bool present) => present ? CascadeBox() : null;
+
+void cascadeValues() {
+  var object = cascadeTarget()
+    ..value = cascadeStep(2)
+    ..values.add(cascadeStep(3))
+    ..update(cascadeStep(4)).value = cascadeStep(5)
+    ..value += cascadeStep(6)
+    ..discarded;
+  print(cascadeTrace);
+  print(object.value);
+  print(object.values);
+  List<int> items = []..add(1)..add(2)..[0] += 3;
+  print(items);
+  // ignore: unnecessary_type_check
+  print(items is List<int>);
+  var nested = CascadeBox()
+    ..child = (CascadeBox()..value = 9)
+    ..value = 7;
+  print(nested.child!.value);
+  print(nested.value);
+  var first = CascadeBox(), second = CascadeBox();
+  // ignore: dead_code
+  var chosen = true ? first : second..value = 3;
+  print(first.value);
+  print(second.value);
+  print(identical(first, chosen));
+  var factory = () => CascadeBox()..value = 8;
+  print(factory().value);
+  var callbacks = CascadeBox()..callback = (() => 7)..value = 9;
+  print(callbacks.callback());
+  print(callbacks.value);
+  var arrow = CascadeBox()..factory = () => CascadeBox()..value = 8;
+  print(arrow.value);
+  print(arrow.factory().value);
+  var right = 0;
+  var assigned = CascadeBox()..value = right = 5..written = 6;
+  print(right);
+  print(assigned.read);
+  var value = cascadeOptional(true);
+  var same = value?..value = value.value + 3..values.add(8);
+  print(identical(value, same));
+  print(value!.value);
+  cascadeTrace = 0;
+  var missing = cascadeOptional(false)
+    ?..values[cascadeStep(1)] = cascadeStep(2)
+    ..value = cascadeStep(3);
+  print(missing);
+  print(cascadeTrace);
+  Null absent = null;
+  // ignore: dead_code
+  print(absent?..missing(absent.member));
+  final int initialized;
+  // ignore: invalid_null_aware_operator
+  CascadeBox()?..value = initialized = 7;
+  print(initialized);
+  var original = CascadeBox();
+  var receiver = original;
+  var result = receiver
+    ..value = (receiver = CascadeBox()).value + 5
+    ..written = 8;
+  print(identical(original, result));
+  print(original.value);
+  print(receiver.value);
+}
+
 void main(List<String> args) {
+  cascadeValues();
   staticMembers();
   namedConstructors();
   constructorInitializers();

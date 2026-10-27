@@ -33,10 +33,9 @@ class FunctionBindings {
   FunctionBindings(this.variables, this.receiver);
 
   FunctionBindings withReceiver(int receiver) {
-    var result = FunctionBindings(variables, receiver);
-    result.outer = outer;
-    result.captures = captures;
-    return result;
+    return FunctionBindings(variables, receiver)
+      ..outer = outer
+      ..captures = captures;
   }
 }
 

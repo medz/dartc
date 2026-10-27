@@ -581,6 +581,15 @@ AstExpression parserPostfix(Parser parser) {
   var disposition = astCallValue;
   if (!parenthesized && expression.kind == astName)
     disposition = astCallIdentifier;
+  return parserSelectors(parser, expression, disposition, true);
+}
+
+AstExpression parserSelectors(
+  Parser parser,
+  AstExpression expression,
+  String disposition,
+  bool increment,
+) {
   while (true) {
     var token = parser.position;
     if (parserIs(parser, '<') && parserHasTypeArguments(parser, true)) {
@@ -634,8 +643,8 @@ AstExpression parserPostfix(Parser parser) {
       );
       disposition = astCallValue;
     } else if (parserTake(parser, '!') ||
-        parserTake(parser, '++') ||
-        parserTake(parser, '--')) {
+        increment &&
+            (parserTake(parser, '++') || parserTake(parser, '--'))) {
       expression = AstExpression(
         astPostfix,
         parser.tokens[token].text,
@@ -701,6 +710,8 @@ bool parserNullableTypeEnd(Parser parser) {
       parserIs(parser, 'as') ||
       parserIs(parser, '||') ||
       parserIs(parser, '??') ||
+      parserIs(parser, '..') ||
+      parserIs(parser, '?..') ||
       parserIs(parser, '&&') ||
       parserIs(parser, '');
 }
@@ -799,13 +810,60 @@ AstExpression parserIfNull(Parser parser) {
   return expression;
 }
 
-AstExpression parseExpression(Parser parser) {
+AstExpression parserCascadeSection(Parser parser) {
+  var token = parser.position;
+  var receiver = AstExpression(
+    astCascadeReceiver,
+    '',
+    const <AstExpression>[],
+    const <AstType>[],
+    token,
+  );
+  AstExpression section;
+  var disposition = astCallValue;
+  if (parserTake(parser, '[')) {
+    var index = parseExpression(parser);
+    parserExpect(parser, ']');
+    section = AstExpression(
+      astIndex,
+      '[]',
+      <AstExpression>[receiver, index],
+      const <AstType>[],
+      token,
+    );
+  } else {
+    section = AstExpression(
+      astMember,
+      parserName(parser),
+      <AstExpression>[receiver],
+      const <AstType>[],
+      token,
+    );
+    disposition = astCallSelector;
+  }
+  section = parserSelectors(parser, section, disposition, false);
+  var op = parserPeek(parser);
+  if (parser.tokens[parser.position].kind == tokenSymbol &&
+      parserAssignment(op)) {
+    var assignment = parser.position++;
+    section = AstExpression(
+      astAssignment,
+      op,
+      <AstExpression>[section, parseExpression(parser, false)],
+      const <AstType>[],
+      assignment,
+    );
+  }
+  return section;
+}
+
+AstExpression parseExpression(Parser parser, [bool allowCascade = true]) {
   var expression = parserIfNull(parser);
   var token = parser.position;
   if (parserTake(parser, '?')) {
-    var yes = parseExpression(parser);
+    var yes = parseExpression(parser, false);
     parserExpect(parser, ':');
-    var no = parseExpression(parser);
+    var no = parseExpression(parser, false);
     expression = AstExpression(
       astConditional,
       '?',
@@ -819,13 +877,26 @@ AstExpression parseExpression(Parser parser) {
       parserAssignment(op)) {
     var assignment = parser.position;
     parser.position++;
-    var value = parseExpression(parser);
+    var value = parseExpression(parser, allowCascade);
     expression = AstExpression(
       astAssignment,
       op,
       <AstExpression>[expression, value],
       <AstType>[],
       assignment,
+    );
+  } else if (allowCascade &&
+      (parserIs(parser, '..') || parserIs(parser, '?..'))) {
+    var cascade = parser.position++;
+    var sections = <AstExpression>[expression, parserCascadeSection(parser)];
+    while (parserTake(parser, '..'))
+      sections.add(parserCascadeSection(parser));
+    expression = AstExpression(
+      astCascade,
+      parser.tokens[cascade].text,
+      sections,
+      const <AstType>[],
+      cascade,
     );
   }
   return expression;

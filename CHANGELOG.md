@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Support ordinary and null-shorting cascades with ordered member/index operations and contextual receiver types.
 - Support capturing synchronous local and anonymous functions with required positional parameters, including shared writes, recursion, `this` and per-iteration loop bindings.
 - Reject missing bootstrap/benchmark artifacts, compare behavior stderr and fresh output files, and pin native-target dependencies in differential cases.
 - Add generic type-alias parameter scopes, bounds, substitution and raw-type instantiation, including constructor aliases and metadata checks.

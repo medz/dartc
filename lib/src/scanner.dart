@@ -419,7 +419,8 @@ void scanCode(Scanner scanner, bool interpolation) {
           three == '<<=' ||
           three == '>>=' ||
           three == '~/=' ||
-          three == '??=')
+          three == '??=' ||
+          three == '?..')
         size = 3;
     }
     if (size == 1 && i + 1 < source.length) {
@@ -432,6 +433,7 @@ void scanCode(Scanner scanner, bool interpolation) {
           two == '&&' ||
           two == '||' ||
           two == '??' ||
+          two == '..' ||
           two == '<<' ||
           two == '>>' ||
           two == '~/' ||

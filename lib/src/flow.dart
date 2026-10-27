@@ -15,14 +15,12 @@ class FlowState {
 }
 
 FlowState flowCreate(int count, [bool soundFlow = true]) {
-  var result = FlowState(
+  return FlowState(
     List<int>.filled(count, -1),
     List<int>.filled(count, flowUnassigned),
     <bool>[true],
     true,
-  );
-  result.soundFlow = soundFlow;
-  return result;
+  )..soundFlow = soundFlow;
 }
 
 FlowState flowCopy(FlowState state) {
