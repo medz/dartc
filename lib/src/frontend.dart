@@ -1444,8 +1444,9 @@ void feResolveFunctionDefaults(int f) {
     var parameter = parameters[p];
     feCheckMetadata(parameter.metadata, owner);
     if (parameter.kind == astNamedParameter) {
-      if (parameter.fieldFormal &&
-          parameter.name.startsWith('_') &&
+      var privateFieldFormal =
+          parameter.fieldFormal && parameter.name.startsWith('_');
+      if (privateFieldFormal &&
           !sourceVersionAtLeast(
             feSources,
             feTokens[parameter.token].source,
@@ -1457,14 +1458,22 @@ void feResolveFunctionDefaults(int f) {
           'private named field-formals require language version 3.12',
         );
       var name = parameterName(parameter);
-      if (name == '' || name.startsWith('_'))
+      if (name == '' ||
+          name.startsWith('_') ||
+          !scanLetter(name.codeUnitAt(0)) ||
+          tokenIsReserved(Token(tokenIdentifier, name, 0, 0, 0)))
         feAstError(parameter.token, 'named parameter must have a public name');
-      var previous = 0;
-      while (previous < p) {
-        if (parameters[previous].kind == astNamedParameter &&
-            parameterName(parameters[previous]) == name)
-          feAstError(parameter.token, 'duplicate named parameter ' + name);
-        previous++;
+      var other = 0;
+      while (other < parameters.length) {
+        var candidate = parameters[other];
+        if (other != p &&
+            (candidate.kind == astNamedParameter &&
+                    parameterName(candidate) == name ||
+                privateFieldFormal &&
+                    (candidate.name == parameter.name ||
+                        candidate.name == name)))
+          feAstError(parameter.token, 'conflicting parameter name ' + name);
+        other++;
       }
     }
     if (parameter.kind != astRequiredPositional && !parameter.required) {

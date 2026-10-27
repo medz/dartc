@@ -1081,8 +1081,12 @@ set value(String next) {}
 // @dart=3.12
 class Secret {
   final int _value;
-  Secret({this._value = 1});
+  final int _X;
+  final int _required;
+  Secret({this._value = 1, this._X = 2, this._required = 3});
   int read() => _value;
+  int upper() => _X;
+  int contextual() => _required;
 }
 ''',
       'version-flow.dart': r'''
@@ -1115,6 +1119,8 @@ void main() {
   var accessor = accessors.Accessor(); accessor.value = 'ignored'; print(accessor.value);
   accessors.value = 'ignored'; print(accessors.value);
   print(secret.Secret(value: 8).read());
+  print(secret.Secret(X: 9).upper());
+  print(secret.Secret(required: 10).contextual());
   print(flow.assigned(1)); print(flow.unassigned(1));
   print(selection.selected(true)); print(selection.selected(false)); print(nullFact(null));
 }
@@ -1417,6 +1423,10 @@ void main() { print(1_000); }
       'void call([int value = 1], {int other = 2}) {} void main() {}',
       'class C { int value; C({required this.value}); } void main() { C(); }',
       'class C { int _x; C({this._x = 1, int x = 2}); } void main() {}',
+      'class C { int _x; C({int x = 2, this._x = 1}); } void main() {}',
+      'class C { int _2x; C({this._2x = 1}); } void main() {}',
+      'class C { int _class; C({this._class = 1}); } void main() {}',
+      'class C { int _x; C(int x, {this._x = 1}); } void main() {}',
       'int value = 1; void call([int argument = value]) {} void main() { call(2); }',
       'int value = 1; void call([int argument = true ? 1 : value]) {} void main() {}',
       "const dynamic value = 'wrong'; void call([int argument = value]) {} void main() { call(2); }",
