@@ -617,7 +617,10 @@ ConstantValue _constantList(
     );
   }
   context.allowInitializerParameters = allowParameters;
-  if (element < 0) element = inferred;
+  if (element < 0)
+    element = inferred;
+  else
+    element = typeCompleteSchema(element, inferred);
   if (element < 0) element = tDynamic;
   var type = listType(element);
   var result = ConstantValue(type, type, -1, '');

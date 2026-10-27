@@ -30,6 +30,7 @@ class CheckedPattern {
   int coverage = 0;
   int tested = -1;
   int variableType = -1;
+  bool castInput = false;
   ConstantValue? constant;
   List<CheckedPattern> children = const <CheckedPattern>[];
   List<CheckedMemberRead> fields = const <CheckedMemberRead>[];
@@ -115,31 +116,77 @@ int patternRemainingType(int input, int tested) {
   return input;
 }
 
+int patternContextType(
+  ConstantContext context,
+  AstPattern syntax,
+  List<int> variableTypes,
+) {
+  var kind = syntax.kind;
+  if (kind == patternAssignedVariable) return variableTypes[syntax.binding];
+  if (kind == patternVariable)
+    return syntax.type == null
+        ? typeSchemaHole()
+        : resolveType(context.symbols, syntax.type!);
+  if (kind == patternObject) return resolveType(context.symbols, syntax.type!);
+  if (kind == patternCast) return typeSchemaHole();
+  if (kind == patternNullAssert)
+    return nullableType(
+      patternContextType(context, syntax.children[0], variableTypes),
+    );
+  if (kind == patternAnd)
+    return meetTypes(
+      patternContextType(context, syntax.children[0], variableTypes),
+      patternContextType(context, syntax.children[1], variableTypes),
+    );
+  if (kind == patternList) {
+    if (syntax.type != null)
+      return listType(resolveType(context.symbols, syntax.type!));
+    var element = typeSchemaHole();
+    for (var child in syntax.children) {
+      var hint = typeSchemaHole();
+      if (child.kind == patternRest) {
+        if (child.children.isEmpty) continue;
+        hint = patternContextType(context, child.children[0], variableTypes);
+        if (!typeIsList(hint)) continue;
+        hint = typeArgument(hint);
+      } else {
+        hint = patternContextType(context, child, variableTypes);
+      }
+      element = meetTypes(element, hint);
+    }
+    return listType(element);
+  }
+  return typeSchemaHole();
+}
+
 CheckedPattern checkPattern(
   ConstantContext context,
   AstPattern syntax,
   int input,
   List<int> variableTypes,
-  CheckedMemberRead Function(int, String, int) readMember,
-) {
+  CheckedMemberRead Function(int, String, int) readMember, [
+  bool irrefutable = false,
+]) {
   var result = CheckedPattern(syntax, input, input, input);
   var kind = syntax.kind;
-  if (kind == patternVariable) {
+  if (kind == patternVariable || kind == patternAssignedVariable) {
     var type = syntax.type;
-    var declared = type == null
+    var assigned = kind == patternAssignedVariable;
+    var declared = assigned
+        ? variableTypes[syntax.binding]
+        : type == null
         ? (input == tNull ? tDynamic : input)
         : resolveType(context.symbols, type);
+    var untyped = type == null && !assigned;
     result.variableType = declared;
-    result.tested = type == null ? -1 : declared;
-    result.matched = type == null ? input : patternMatchedType(input, declared);
-    result.remaining = type == null
-        ? tNever
-        : patternRemainingType(input, declared);
-    result.coverage = type == null
+    result.tested = untyped ? -1 : declared;
+    result.matched = untyped ? input : patternMatchedType(input, declared);
+    result.remaining = untyped ? tNever : patternRemainingType(input, declared);
+    result.coverage = untyped
         ? patternSpaceAll
         : patternTypeSpace(input, declared);
     var binding = syntax.binding;
-    if (binding >= 0) {
+    if (binding >= 0 && !assigned) {
       if (variableTypes[binding] >= 0 && variableTypes[binding] != declared)
         patternError(
           context,
@@ -169,6 +216,7 @@ CheckedPattern checkPattern(
         child.kind == patternRest ? type : element,
         variableTypes,
         readMember,
+        irrefutable,
       );
       result.children.add(checked);
       if (!patternIsTotal(checked)) total = false;
@@ -193,6 +241,7 @@ CheckedPattern checkPattern(
         input,
         variableTypes,
         readMember,
+        irrefutable,
       );
       result.children = <CheckedPattern>[child];
       result.coverage = child.coverage;
@@ -214,6 +263,7 @@ CheckedPattern checkPattern(
         member.type,
         variableTypes,
         readMember,
+        irrefutable,
       );
       result.fields.add(member);
       result.children.add(child);
@@ -268,6 +318,7 @@ CheckedPattern checkPattern(
       input,
       variableTypes,
       readMember,
+      irrefutable,
     );
     var next = kind == patternAnd ? left.matched : left.remaining;
     if (next == tNever) next = input;
@@ -277,6 +328,7 @@ CheckedPattern checkPattern(
       next,
       variableTypes,
       readMember,
+      irrefutable,
     );
     result.children = <CheckedPattern>[left, right];
     if (kind == patternAnd) {
@@ -300,6 +352,7 @@ CheckedPattern checkPattern(
       type,
       variableTypes,
       readMember,
+      irrefutable,
     );
     result.children = <CheckedPattern>[inner];
     result.matched = inner.matched;
@@ -314,6 +367,21 @@ CheckedPattern checkPattern(
     } else if (kind == patternCast && patternIsTotal(inner)) {
       result.coverage = patternSpaceAll;
     }
+  }
+  if (irrefutable &&
+      result.tested >= 0 &&
+      (kind == patternVariable ||
+          kind == patternAssignedVariable ||
+          kind == patternList ||
+          kind == patternObject)) {
+    if (input == tDynamic)
+      result.castInput = result.tested != tDynamic;
+    else if (!typeIsSubtype(input, result.tested))
+      patternError(
+        context,
+        syntax.token,
+        'matched value is not assignable to pattern type',
+      );
   }
   if (patternLengthsCover(result.lengths, input)) {
     result.remaining =

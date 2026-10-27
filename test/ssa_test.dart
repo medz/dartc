@@ -81,6 +81,14 @@ void corrupt(List<SsaFunction> program, String mode) {
       type = functionType(nullableType(type), <int>[listType(type)]);
     order.valueTypes[add.value] = type;
     add.resultType = type;
+  } else if (mode == 'schema-hole' || mode == 'nested-schema-hole') {
+    var type = typeSchemaHole();
+    if (mode == 'nested-schema-hole')
+      type = functionType(nullableType(type), <int>[listType(type)]);
+    order.valueTypes[add.value] = type;
+    add.resultType = type;
+  } else if (mode == 'format-schema-hole') {
+    operation(named(program, 'tested'), opTypeTest).target = listType(typeSchemaHole());
   } else if (mode == 'format-type-parameter') {
     operation(named(program, 'tested'), opTypeTest).target = templateParameter();
   } else if (mode == 'order') {
@@ -173,8 +181,9 @@ void main(List<String> args) {
   optimizeSsa(program);
   verifySsa(program);
   corrupt(program, args[2]);
-  if (args[2] != 'format-type-parameter') verifySsa(program);
-  if (args[2] == 'valid' || args[2] == 'format-type-parameter') {
+  final format = args[2] == 'format-type-parameter' || args[2] == 'format-schema-hole';
+  if (!format) verifySsa(program);
+  if (args[2] == 'valid' || format) {
     final selected = selectMachine(program, reachableFunctions(program));
     allocateRegisters(selected);
     generateCode(selected);
@@ -262,6 +271,9 @@ Future<void> main(List<String> args) async {
       'invalid-value': 'invalid value',
       'metadata': 'result metadata',
       'type-parameter': 'uninstantiated executable type',
+      'schema-hole': 'uninstantiated executable type',
+      'nested-schema-hole': 'uninstantiated executable type',
+      'format-schema-hole': 'uninstantiated runtime type',
       'nested-type-parameter': 'uninstantiated executable type',
       'format-type-parameter': 'uninstantiated runtime type',
       'order': 'use before definition',
@@ -301,7 +313,9 @@ Future<void> main(List<String> args) async {
         completed(result);
         check(result.stdout == 'SSA verified\n', result.stdout);
       } else {
-        final prefix = entry.key == 'format-type-parameter'
+        final prefix =
+            (entry.key == 'format-type-parameter' ||
+                entry.key == 'format-schema-hole')
             ? 'dartc: uninstantiated runtime type'
             : 'dartc SSA: verify ';
         check(

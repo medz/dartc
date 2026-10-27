@@ -1437,6 +1437,9 @@ int feNonNullableValue(int type, int token) {
 }
 
 int feLowerHint(AstExpression expression, int context) {
+  if (expression.kind == astPatternAssignment)
+    return feLowerPatternAssignment(expression);
+  if (context == schemaHole) context = -1;
   if (expression.kind == astSwitchExpression)
     return feLowerSwitchExpression(expression, context);
   if (expression.kind == astNullAware)
@@ -1918,13 +1921,18 @@ int feLowerList(AstExpression expression, int context) {
     element = resolveType(feSymbols, expression.typeArguments[0]);
   else if (context >= 0 && typeIsList(context))
     element = typeArgument(context);
-  var type = listType(element < 0 ? tDynamic : element);
+  var type = listType(
+    element < 0 ? tDynamic : typeCompleteSchema(element, tDynamic),
+  );
   var allocation = ir.length;
   feBuiltinTyped(bListNew, 0, type);
   var literal = FeListLiteral(element, feTemp(type));
   feOperand(opStoreLocal, literal.slot);
   for (var child in expression.children) feLowerListElement(child, literal);
-  if (element < 0) element = literal.inferred;
+  if (element < 0)
+    element = literal.inferred;
+  else
+    element = typeCompleteSchema(element, literal.inferred);
   if (element < 0) element = tDynamic;
   type = listType(element);
   // Resolve the allocation and its local before the stack IR enters SSA.
@@ -1936,7 +1944,12 @@ int feLowerList(AstExpression expression, int context) {
 
 void feAppendListElement(FeListLiteral literal, int type, int token) {
   literal.inferred = joinTypes(literal.inferred, type);
-  if (literal.context >= 0) type = feConvertValue(type, literal.context, token);
+  if (literal.context >= 0)
+    type = feConvertValue(
+      type,
+      typeCompleteSchema(literal.context, type),
+      token,
+    );
   var value = feTemp(type);
   feOperand(opStoreLocal, value);
   feOperand(opLoadLocal, literal.slot);
@@ -2296,10 +2309,11 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
         lengthSlot = feTemp(tInt);
         feOperand(opStoreLocal, lengthSlot);
       } else if (argument == valueArgument) {
-        if (element < 0)
-          valueType = feLowerHint(expression, -1);
-        else
-          valueType = feLowerInContext(expression, element);
+        valueType = feLowerAssignedValue(expression, element);
+        if (element >= 0) {
+          element = typeCompleteSchema(element, valueType);
+          valueType = feConvertValue(valueType, element, expression.token);
+        }
         valueSlot = feTemp(valueType);
         feOperand(opStoreLocal, valueSlot);
       } else {
@@ -3394,6 +3408,8 @@ int feLowerNullAssertion(AstExpression expression, int context) {
 }
 
 int feLowerExpression(AstExpression expression) {
+  if (expression.kind == astPatternAssignment)
+    return feLowerPatternAssignment(expression);
   var type = feLowerValue(expression);
   if (type == tNever) flowUnreachable(feFlow);
   return type;
@@ -3843,7 +3859,9 @@ void feContinueFlow(int token, int base) {
 void feLoopFlow(AstStatement statement) {
   var written = <int>[];
   var seen = List<bool>.filled(feBindingTypes.length, false);
-  if (statement.kind == astForInStatement && statement.variables.isEmpty)
+  if (statement.kind == astForInStatement &&
+      statement.variables.isEmpty &&
+      statement.patternDeclaration == null)
     collectWrittenBinding(statement.expressions[1].binding, seen, written);
   var body = 0;
   if (statement.kind == astForStatement) body = 1;
@@ -4098,6 +4116,19 @@ void feLowerStatement(AstStatement statement) {
       feLowerStatement(statement.children[i]);
       i++;
     }
+    return;
+  }
+  if (kind == astPatternDeclarationStatement) {
+    var declaration = statement.patternDeclaration!;
+    feCheckMetadata(declaration.metadata, feLexicalOwner(feFunction));
+    var context = patternContextType(
+      feConstants,
+      declaration.pattern,
+      feBindingTypes,
+    );
+    var type = feLowerAssignedValue(statement.expressions[0], context);
+    feLowerDestructure(declaration.pattern, type);
+    feEmit(opPop);
     return;
   }
   if (kind == astVariableStatement) {
@@ -4986,6 +5017,20 @@ void feGenerateEntry() {
   functions[entryFunction].localTypes = feSlotTypes;
 }
 
+void feRefreshLoopBinding(int binding) {
+  if (feCellBinding(binding)) {
+    feLoadLocalStorage(binding);
+    feAllocateCell(feBindingTypes[binding]);
+    feOperand(opStoreLocal, feBindingSlots[binding]);
+  }
+}
+
+void feRefreshPatternBindings(AstPattern pattern) {
+  if (pattern.binding >= 0) feRefreshLoopBinding(pattern.binding);
+  for (var child in pattern.children) feRefreshPatternBindings(child);
+  for (var field in pattern.fields) feRefreshPatternBindings(field.pattern);
+}
+
 void feLowerWhileFor(
   AstStatement statement,
   void Function(AstStatement) lowerBody,
@@ -5011,13 +5056,11 @@ void feLowerWhileFor(
   var update = ir.length;
   feContinueFlow(statement.token, continueBase);
   if (kind == astForStatement) {
-    for (var variable in statement.children[0].variables) {
-      if (feCellBinding(variable.binding)) {
-        feLoadLocalStorage(variable.binding);
-        feAllocateCell(feBindingTypes[variable.binding]);
-        feOperand(opStoreLocal, feBindingSlots[variable.binding]);
-      }
-    }
+    var initial = statement.children[0];
+    for (var variable in initial.variables)
+      feRefreshLoopBinding(variable.binding);
+    if (initial.patternDeclaration case final declaration?)
+      feRefreshPatternBindings(declaration.pattern);
   }
   var updateIndex = 0;
   while (updateIndex < statement.update.length) {
@@ -5039,11 +5082,18 @@ void feLowerForIn(
 ) {
   AstVariable? declaration;
   if (statement.variables.isNotEmpty) declaration = statement.variables[0];
+  var pattern = statement.patternDeclaration;
   var context = -1;
   if (declaration != null) {
     feCheckMetadata(declaration.metadata, feLexicalOwner(feFunction));
     if (declaration.type.name != '')
       context = listType(resolveType(feSymbols, declaration.type));
+  }
+  if (pattern != null) {
+    feCheckMetadata(pattern.metadata, feLexicalOwner(feFunction));
+    context = listType(
+      patternContextType(feConstants, pattern.pattern, feBindingTypes),
+    );
   }
   var iterableType = feNonNullableValue(
     feLowerHint(statement.expressions[0], context),
@@ -5068,7 +5118,7 @@ void feLowerForIn(
   feOperand(opInt, 0);
   feOperand(opStoreLocal, index);
   var type = element;
-  if (context >= 0) type = typeArgument(context);
+  if (context >= 0 && pattern == null) type = typeArgument(context);
   var cell = declaration != null && feCellBinding(declaration.binding);
   var variable = -1;
   if (declaration != null) {
@@ -5095,7 +5145,10 @@ void feLowerForIn(
   feOperand(opLoadLocal, iterable);
   feOperand(opLoadLocal, index);
   feBuiltinTyped(bListGet, 2, element);
-  if (declaration != null) {
+  if (pattern != null) {
+    feLowerDestructure(pattern.pattern, element);
+    feEmit(opPop);
+  } else if (declaration != null) {
     feConvertValue(
       feImplicitCall(element, type, statement.token),
       type,
@@ -5173,16 +5226,71 @@ int fePatternSlot(int slot, int type, int token) {
   return result;
 }
 
+void feCheckPatternTargets(AstPattern syntax) {
+  if (syntax.kind == patternAssignedVariable) {
+    feLocalSlot(syntax.binding, syntax.token);
+    if (feBindings.variables[syntax.binding].constant)
+      feAstError(syntax.token, 'cannot assign a constant');
+  }
+  for (var child in syntax.children) feCheckPatternTargets(child);
+  for (var field in syntax.fields) feCheckPatternTargets(field.pattern);
+}
+
+void feLowerDestructure(AstPattern syntax, int type) {
+  var value = feTemp(type);
+  feOperand(opStoreLocal, value);
+  var pattern = checkPattern(
+    feConstants,
+    syntax,
+    type,
+    feBindingTypes,
+    feCheckMemberRead,
+    true,
+  );
+  fePatternVariables(pattern);
+  var cache = <PatternReadCache>[];
+  fePatternCacheKeys(cache, syntax, -1);
+  fePatternCacheInitialize(cache);
+  var failed = <int>[];
+  feLowerPattern(pattern, value, failed, cache, -1);
+  if (failed.isNotEmpty) {
+    var matched = feFlow;
+    var done = feJump(opJump);
+    fePatchJumps(failed, ir.length);
+    feFlow = flowCopy(feFlow);
+    feCall(feFindFunction('rtPatternMatchFailure'), 0);
+    feConvertValue(tNever, functions[feFunction].result, syntax.token);
+    feEmit(opReturn);
+    fePatch(done, ir.length);
+    feFlow = matched;
+  }
+  fePatternCells(pattern);
+  feOperand(opLoadLocal, value);
+}
+
+int feLowerPatternAssignment(AstExpression expression) {
+  var pattern = expression.pattern!;
+  feCheckPatternTargets(pattern);
+  var context = patternContextType(feConstants, pattern, feBindingTypes);
+  var type = feLowerAssignedValue(expression.children[0], context);
+  feLowerDestructure(pattern, type);
+  return type;
+}
+
 void fePatternVariables(CheckedPattern pattern) {
   var binding = pattern.syntax.binding;
-  if (binding >= 0 && feBindingSlots[binding] < 0)
+  if (binding >= 0 &&
+      pattern.syntax.kind != patternAssignedVariable &&
+      feBindingSlots[binding] < 0)
     feBindLocal(binding, pattern.variableType, feTemp(pattern.variableType));
   for (var child in pattern.children) fePatternVariables(child);
 }
 
 void fePatternCells(CheckedPattern pattern) {
   var binding = pattern.syntax.binding;
-  if (binding >= 0 && feCellBinding(binding)) {
+  if (binding >= 0 &&
+      pattern.syntax.kind != patternAssignedVariable &&
+      feCellBinding(binding)) {
     feOperand(opLoadLocal, feBindingSlots[binding]);
     feAllocateCell(pattern.variableType);
     var cell = feTemp(tObject);
@@ -5395,8 +5503,17 @@ void feLowerPattern(
   var syntax = pattern.syntax;
   var kind = syntax.kind;
   var token = syntax.token;
-  if (kind == patternVariable || kind == patternObject || kind == patternList) {
-    if (pattern.tested >= 0 && !typeIsSubtype(pattern.input, pattern.tested)) {
+  if (kind == patternVariable ||
+      kind == patternAssignedVariable ||
+      kind == patternObject ||
+      kind == patternList) {
+    if (pattern.castInput) {
+      feOperand(opLoadLocal, value);
+      feOperand(opTypeCast, pattern.tested);
+      value = feTemp(pattern.tested);
+      feOperand(opStoreLocal, value);
+    } else if (pattern.tested >= 0 &&
+        !typeIsSubtype(pattern.input, pattern.tested)) {
       if (typeIsSubtype(typingNonNull(pattern.input), pattern.tested)) {
         failed.add(feJumpIfNull(value));
       } else {
@@ -5480,8 +5597,15 @@ void feLowerPattern(
       var binding = syntax.binding;
       if (binding >= 0) {
         fePatternRead(value, pattern.variableType, token);
-        feOperand(opStoreLocal, feBindingSlots[binding]);
-        flowDeclare(feFlow, binding, pattern.variableType, true);
+        if (kind == patternAssignedVariable) {
+          var target = FeLvalue(pattern.variableType, 0, -1, -1, binding, -1);
+          feWriteLvalue(target, token);
+          feWriteFlow(target, pattern.variableType);
+          feEmit(opPop);
+        } else {
+          feOperand(opStoreLocal, feBindingSlots[binding]);
+          flowDeclare(feFlow, binding, pattern.variableType, true);
+        }
       }
     }
   } else if (kind == patternAnd) {

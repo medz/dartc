@@ -26,6 +26,7 @@ const int astForElement = 25;
 const int astNullAwareElement = 26;
 const int astSwitchExpression = 27;
 const int astIfCaseCondition = 28;
+const int astPatternAssignment = 29;
 
 const int patternConstant = 1;
 const int patternVariable = 2;
@@ -38,6 +39,7 @@ const int patternNullAssert = 8;
 const int patternObject = 9;
 const int patternList = 10;
 const int patternRest = 11;
+const int patternAssignedVariable = 12;
 
 class AstPatternField {
   final String name;
@@ -135,6 +137,7 @@ const int astSwitchStatement = 12;
 const int astSwitchCaseStatement = 13;
 const int astLabeledStatement = 14;
 const int astLocalFunctionStatement = 15;
+const int astPatternDeclarationStatement = 16;
 
 const int astImportDirective = 1;
 const int astExportDirective = 2;
@@ -179,8 +182,17 @@ class AstParameter {
   AstParameter(this.type, this.name, this.fieldFormal, this.token);
 }
 
+class AstPatternDeclaration {
+  final AstPattern pattern;
+  final List<AstExpression> metadata;
+  final bool isFinal;
+
+  AstPatternDeclaration(this.pattern, this.metadata, this.isFinal);
+}
+
 class AstStatement {
   AstFunction? function;
+  AstPatternDeclaration? patternDeclaration;
   int kind;
   List<AstExpression> expressions;
   List<AstStatement> children;

@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Support local pattern declarations and assignments, including nested inference, captures and destructuring for/for-in statements and List elements.
 - Support List patterns with nested elements, rest matching, shared reads and length coverage, plus `List.sublist`.
 - Support object patterns with fields, getters, method values, nested matching and shared property reads.
 - Support if-case statements and runtime List elements, including guards, mutable then bindings and shared closure captures.

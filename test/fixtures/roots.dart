@@ -519,6 +519,38 @@ void listPatternRoots(int queue, int edges) {
   check(rt.rtRootMark() == mark);
 }
 
+class DestructureRoot {
+  int queue;
+  DestructureRoot(this.queue);
+  Leaf get first => Leaf(818);
+  Leaf get second {
+    check(findMarker(queue, snapshot(queue), 818) != 0);
+    return Leaf(819);
+  }
+}
+
+void destructuringRoots(int queue, int edges) {
+  var mark = rt.rtRootMark();
+  final DestructureRoot(:first, :second) = DestructureRoot(queue);
+  check(first.marker == 818 && second.marker == 819);
+  var [head, ...tail] = <Leaf>[Leaf(820), Leaf(821)];
+  var reads = <int Function()>[() => head.marker, () => tail[0].marker];
+  [head, ...tail] = <Leaf>[Leaf(822), Leaf(823)];
+  var list = captureList(reads, 2, queue);
+  check(listElements(list, edges) == 2);
+  var headRead = rt.nativeLoad64(edges);
+  var tailRead = rt.nativeLoad64(edges + 8);
+  check(rt.rtTraceObject(headRead, edges, capacity) == 1);
+  check(rt.rtTraceObject(rt.nativeLoad64(edges), edges, capacity) == 1);
+  check(findMarker(edges, 1, 822) != 0);
+  check(rt.rtTraceObject(tailRead, edges, capacity) == 1);
+  check(rt.rtTraceObject(rt.nativeLoad64(edges), edges, capacity) == 1);
+  check(listElements(rt.nativeLoad64(edges), edges) == 1);
+  check(findMarker(edges, 1, 823) != 0);
+  check(reads[0]() == 822 && reads[1]() == 823);
+  check(rt.rtRootMark() == mark);
+}
+
 void closureRoots(int queue, int edges) {
   var owner = PatternRoot();
   var objectPatterns = <int Function()>[
@@ -614,6 +646,7 @@ void main(List<String> args) {
   var queue = rt.rtMap(capacity * 8);
   var edges = rt.rtMap(capacity * 8);
   listPatternRoots(queue, edges);
+  destructuringRoots(queue, edges);
   closureRoots(queue, edges);
   noGcRoots(queue);
   builderRoots(queue, edges);

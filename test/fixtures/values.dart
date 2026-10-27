@@ -3655,7 +3655,164 @@ void switchExpressions() {
   );
 }
 
+class DestructurePair {
+  String Function() observe;
+  DestructurePair(this.observe);
+  int get a {
+    print('a/' + observe());
+    return 1;
+  }
+
+  int get b {
+    print('b/' + observe());
+    return 2;
+  }
+}
+
+class DestructureValue {
+  int number;
+  List<int> values;
+  DestructureValue(this.number, this.values);
+}
+
+void destructuringValues([bool choose = true]) {
+  var [a, int b, ...rest] = [1, 2, 3, 4];
+  print([a, b, rest]);
+  a = 3;
+  [a, b] = [b, a];
+  print([a, b]);
+  var old = [a, b];
+  var same = ([a, b] = old);
+  print(identical(old, same));
+  var x = 10, y = 20;
+  var pair = DestructurePair(() => '$x,$y');
+  print(identical((DestructurePair(a: x, b: y) = pair), pair));
+  print([x, y]);
+  final DestructureValue(number: n, values: [head, ...tail]) = DestructureValue(
+    7,
+    [8, 9],
+  );
+  print([n, head, tail]);
+  var (both && int typed) = 4;
+  print([both, typed]);
+  dynamic dynamicList = [5];
+  var [int checked] = dynamicList;
+  print(checked);
+  Object any = 6;
+  var (cast as int) = any;
+  print(cast);
+  int? optional = 7;
+  // ignore: unnecessary_null_assert_pattern
+  var (nonnull!) = optional;
+  print(nonnull);
+  List<int> empty;
+  // ignore: unnecessary_type_check
+  print(([empty] = [[]]) is List<List<int>>);
+  print(empty);
+  var [[nested], Object wider] = [
+    [1],
+    [2],
+  ];
+  // ignore: unnecessary_type_check
+  print([nested] is List<int>);
+  print(wider);
+  var [[nullable]!, ...remaining] = [
+    [2],
+    null,
+  ];
+  print(nullable);
+  print(remaining);
+  var [List<int> fromConstant] = const [[]];
+  // ignore: unnecessary_type_check
+  print([fromConstant] is List<List<int>>);
+  var [[fromFill]] = List.filled(1, [3]);
+  // ignore: unnecessary_type_check
+  print([fromFill] is List<int>);
+  var [fromSpread] = [
+    ...[
+      [4],
+    ],
+  ];
+  // ignore: unnecessary_type_check
+  print([fromSpread] is List<List<int>>);
+  var functions = <int Function()>[];
+  for (var [i, j] = [0, 10]; i < 3; i++, j++) {
+    functions.add(() => i + j);
+  }
+  print([for (var f in functions) f()]);
+  functions.clear();
+  for (var [i, ...r] in [
+    [1, 2],
+    [3, 4],
+  ]) {
+    functions.add(() => ++i + r[0]);
+  }
+  print([for (var f in functions) f()]);
+  print([for (var f in functions) f()]);
+  print([
+    for (final [i, j] in [
+      [1, 2],
+      [3, 4],
+    ])
+      i + j,
+  ]);
+  print([
+    for (var [i, j] = [0, 2]; i < 2; i++) i + j,
+  ]);
+  final int once;
+  [once] = [8];
+  print(once);
+  num promoted = 0;
+  [promoted] = <int>[9];
+  // ignore: unnecessary_type_check
+  print([promoted] is List<num>);
+  Object changed = 'old';
+  void update() {
+    [changed] = [10];
+  }
+
+  update();
+  print(changed);
+  var numList = <int>[1];
+  numList[0] = 11;
+  print(numList);
+  int chained = 0;
+  print(([a] = [chained] = [12])[0]);
+  print([a, chained]);
+  if (1 case var guarded when ([guarded] = [2])[0] == 2) print(guarded);
+  if (1 case var guarded
+      when (() {
+        [guarded] = [3];
+        return true;
+      })())
+    print(guarded);
+  var [List<int> conditional] = choose ? [[]] : [[]];
+  // ignore: unnecessary_type_check
+  print([conditional] is List<List<int>>);
+  // CFE infers the shared List<int> context; analyzer uses List<dynamic>.
+  // ignore: pattern_type_mismatch_in_irrefutable_context
+  var ([inferred] && [List<int> constrained]) = [[]];
+  // ignore: unnecessary_type_check
+  print([inferred] is List<List<int>>);
+  print(constrained);
+  functions.clear();
+  for (var [i, j] = [0, 10]; i < 3; i++, j++) {
+    if (i == 1) continue;
+    functions.add(() => i + j);
+  }
+  for (final [i, j] in [
+    [0, 10],
+    [1, 20],
+    [2, 30],
+  ]) {
+    if (i == 1) continue;
+    functions.add(() => i + j);
+  }
+  print([for (var f in functions) f()]);
+}
+
 void main(List<String> args) {
+  destructuringValues();
   ifCaseValues();
   objectPatterns();
   listPatterns();

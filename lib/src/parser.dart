@@ -426,7 +426,28 @@ AstStatement parserFor(Parser parser, int token, bool collection) {
     initialToken = parser.position;
     if (metadata.isNotEmpty && !parserVariableStatement(parser))
       parserError(parser, 'metadata must precede a for declaration');
-    if (parserVariableStatement(parser)) {
+    if (parserPatternDeclarationAhead(parser)) {
+      var pattern = parserPatternDeclaration(parser, metadata);
+      if (parserTake(parser, 'in')) {
+        var iterable = parseExpression(parser);
+        parserExpect(parser, ')');
+        return AstStatement(
+          astForInStatement,
+          <AstExpression>[iterable],
+          <AstStatement>[parserForBody(parser, collection)],
+          const <AstVariable>[],
+          const <AstExpression>[],
+          const <AstExpression>[],
+          token,
+        )..patternDeclaration = pattern;
+      }
+      parserExpect(parser, '=');
+      initial = parserEmptyStatement(initialToken)
+        ..kind = astPatternDeclarationStatement
+        ..patternDeclaration = pattern
+        ..expressions = <AstExpression>[parseExpression(parser)];
+      parserExpect(parser, ';');
+    } else if (parserVariableStatement(parser)) {
       var modifier = parserModifier(parser);
       var type = parserDeclarationType(parser, modifier);
       var name = parserName(parser);
@@ -589,8 +610,16 @@ AstExpression parserFunctionExpression(Parser parser) {
   return expression;
 }
 
-AstPattern parserPattern(Parser parser, [int minimum = 1]) {
-  var pattern = parserUnaryPattern(parser);
+const int patternMatching = 0;
+const int patternDeclaring = 1;
+const int patternAssigning = 2;
+
+AstPattern parserPattern(
+  Parser parser, [
+  int minimum = 1,
+  int context = patternMatching,
+]) {
+  var pattern = parserUnaryPattern(parser, context);
   while (true) {
     var token = parser.position;
     var precedence = parserIs(parser, '||')
@@ -604,13 +633,13 @@ AstPattern parserPattern(Parser parser, [int minimum = 1]) {
       precedence == 1 ? patternOr : patternAnd,
       token,
       '',
-      <AstPattern>[pattern, parserPattern(parser, precedence + 1)],
+      <AstPattern>[pattern, parserPattern(parser, precedence + 1, context)],
     );
   }
   return pattern;
 }
 
-AstPattern parserUnaryPattern(Parser parser) {
+AstPattern parserUnaryPattern(Parser parser, int context) {
   var token = parser.position;
   var op = parserPeek(parser);
   var typedList = false;
@@ -632,7 +661,7 @@ AstPattern parserUnaryPattern(Parser parser) {
   }
   AstPattern pattern;
   if (parserTake(parser, '(')) {
-    pattern = parserPattern(parser);
+    pattern = parserPattern(parser, 1, context);
     parserExpect(parser, ')');
   } else if (parserIs(parser, '[') || typedList) {
     AstType? element;
@@ -652,16 +681,18 @@ AstPattern parserUnaryPattern(Parser parser) {
         hasRest = true;
         var rest = <AstPattern>[];
         if (!parserIs(parser, ',') && !parserIs(parser, ']'))
-          rest.add(parserPattern(parser));
+          rest.add(parserPattern(parser, 1, context));
         children.add(AstPattern(patternRest, position, '', rest));
       } else {
-        children.add(parserPattern(parser));
+        children.add(parserPattern(parser, 1, context));
       }
       if (!parserTake(parser, ',')) break;
     }
     parserExpect(parser, ']');
     pattern = AstPattern(patternList, token, '', children)..type = element;
   } else if (parserIs(parser, 'var') || parserIs(parser, 'final')) {
+    if (context != patternMatching)
+      parserError(parser, 'var/final is not allowed inside this pattern');
     var finalVariable = parserTake(parser, 'final');
     if (!finalVariable) parserExpect(parser, 'var');
     AstType? type;
@@ -694,14 +725,16 @@ AstPattern parserUnaryPattern(Parser parser) {
       var fieldName = '';
       if (!parserIs(parser, ':')) fieldName = parserName(parser);
       parserExpect(parser, ':');
-      var field = parserPattern(parser);
+      var field = parserPattern(parser, 1, context);
       if (fieldName == '') {
         var inner = field;
         while (inner.kind == patternCast ||
             inner.kind == patternNullCheck ||
             inner.kind == patternNullAssert)
           inner = inner.children[0];
-        if (inner.kind == patternVariable && inner.text != '_')
+        if ((inner.kind == patternVariable ||
+                inner.kind == patternAssignedVariable) &&
+            inner.text != '_')
           fieldName = inner.text;
         else
           parserError(parser, 'object pattern field requires a name');
@@ -714,6 +747,8 @@ AstPattern parserUnaryPattern(Parser parser) {
     }
     parserExpect(parser, ')');
   } else if (parserPatternTypeAhead(parser)) {
+    if (context == patternAssigning)
+      parserError(parser, 'variable declaration in pattern assignment');
     var type = parseAstType(parser);
     pattern = AstPattern(
       patternVariable,
@@ -721,6 +756,20 @@ AstPattern parserUnaryPattern(Parser parser) {
       parserName(parser),
       const <AstPattern>[],
     )..type = type;
+  } else if (context != patternMatching &&
+      parser.tokens[parser.position].kind == tokenIdentifier &&
+      !parserIs(parser, 'const') &&
+      !parserIs(parser, 'true') &&
+      !parserIs(parser, 'false') &&
+      !parserIs(parser, 'null')) {
+    pattern = AstPattern(
+      context == patternAssigning && !parserIs(parser, '_')
+          ? patternAssignedVariable
+          : patternVariable,
+      token,
+      parserName(parser),
+      const <AstPattern>[],
+    );
   } else if (parserTake(parser, '_')) {
     pattern = AstPattern(patternVariable, token, '_', const <AstPattern>[]);
   } else {
@@ -762,7 +811,8 @@ AstPattern parserUnaryPattern(Parser parser) {
       ..constant = value
       ..constantContext = constantContext;
   }
-  if (pattern.kind == patternVariable &&
+  if ((pattern.kind == patternVariable ||
+          pattern.kind == patternAssignedVariable) &&
       (pattern.text == 'as' || pattern.text == 'when'))
     parserError(parser, 'invalid pattern variable ' + pattern.text);
   if (parserTake(parser, 'as')) {
@@ -1432,7 +1482,77 @@ AstExpression parserCascadeSection(Parser parser) {
   return section;
 }
 
+int parserOuterPatternEnd(Parser parser, [int offset = 0]) {
+  var position = parser.position + offset;
+  var tokens = parser.tokens;
+  if (!tokenIs(tokens[position], '(') && !tokenIs(tokens[position], '[')) {
+    var list = tokenIs(tokens[position], '<');
+    if (!list) {
+      if (tokens[position].kind != tokenIdentifier ||
+          tokenIs(tokens[position], 'const') ||
+          tokenIs(tokens[position], 'void'))
+        return -1;
+      position++;
+      if (tokenIs(tokens[position], '.')) {
+        position++;
+        if (tokens[position].kind != tokenIdentifier) return -1;
+        position++;
+      }
+    }
+    if (tokenIs(tokens[position], '<')) {
+      var look = Parser(tokens, position, 0, parser.paths);
+      if (!parserLookTypeArguments(look) ||
+          look.pendingClosers != 0 ||
+          look.pendingEquals)
+        return -1;
+      position = look.position;
+    }
+    if (!tokenIs(tokens[position], list ? '[' : '(')) return -1;
+  }
+  var depth = 0;
+  while (tokens[position].kind != tokenEnd) {
+    var token = tokens[position++];
+    if (tokenIs(token, '(') || tokenIs(token, '[') || tokenIs(token, '{'))
+      depth++;
+    if (tokenIs(token, ')') || tokenIs(token, ']') || tokenIs(token, '}'))
+      depth--;
+    if (depth == 0) return position;
+  }
+  return -1;
+}
+
+bool parserPatternDeclarationAhead(Parser parser) {
+  return (parserIs(parser, 'var') || parserIs(parser, 'final')) &&
+      parserOuterPatternEnd(parser, 1) >= 0;
+}
+
+AstPatternDeclaration parserPatternDeclaration(
+  Parser parser,
+  List<AstExpression> metadata,
+) {
+  var isFinal = parserTake(parser, 'final');
+  if (!isFinal) parserExpect(parser, 'var');
+  return AstPatternDeclaration(
+    parserPattern(parser, 1, patternDeclaring),
+    metadata,
+    isFinal,
+  );
+}
+
 AstExpression parseExpression(Parser parser, [bool allowCascade = true]) {
+  var end = parserOuterPatternEnd(parser);
+  if (end >= 0 && tokenIs(parser.tokens[end], '=')) {
+    var token = parser.position;
+    var pattern = parserPattern(parser, 1, patternAssigning);
+    parserExpect(parser, '=');
+    return AstExpression(
+      astPatternAssignment,
+      '',
+      <AstExpression>[parseExpression(parser, allowCascade)],
+      const <AstType>[],
+      token,
+    )..pattern = pattern;
+  }
   var expression = parserIfNull(parser);
   var token = parser.position;
   if (parserTake(parser, '?')) {
@@ -2321,6 +2441,16 @@ AstStatement parseStatement(Parser parser) {
       parserUntypedFunction(parser)) {
     var metadata = parserMetadata(parser);
     var declaration = parser.position;
+    if (parserPatternDeclarationAhead(parser)) {
+      var pattern = parserPatternDeclaration(parser, metadata);
+      parserExpect(parser, '=');
+      var value = parseExpression(parser);
+      parserExpect(parser, ';');
+      return parserEmptyStatement(token)
+        ..kind = astPatternDeclarationStatement
+        ..patternDeclaration = pattern
+        ..expressions = <AstExpression>[value];
+    }
     var modifier = parserModifier(parser);
     var type = parserDeclarationType(parser, modifier);
     var name = parserName(parser);

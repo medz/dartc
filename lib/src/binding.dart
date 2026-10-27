@@ -215,13 +215,19 @@ int bindingReceiver(LocalBinder binder, int scope) {
   return bindingCapture(binder, receiver);
 }
 
-void bindingWrite(LocalBinder binder, int binding, int token) {
+void bindingWrite(
+  LocalBinder binder,
+  int binding,
+  int token, [
+  bool patternAssignment = false,
+]) {
   if (binding < 0) return;
   var bindings = binder.result;
   var variable = bindings.variables[binding];
   var declaration = bindingDeclaration(bindings, binding);
   LocalBinder? current = binder;
-  while (current != null) {
+  // The SDK permits pattern assignments in guards; see specs/patterns.md.
+  while (!patternAssignment && current != null) {
     for (var guarded in current.guardVariables) {
       if (identical(guarded, declaration))
         sourceError(
@@ -276,7 +282,9 @@ List<AstPattern> bindingPatternVariables(
   LocalBinder binder,
   AstPattern pattern,
 ) {
-  if (pattern.kind == patternVariable && pattern.text != '_')
+  if ((pattern.kind == patternVariable ||
+          pattern.kind == patternAssignedVariable) &&
+      pattern.text != '_')
     return <AstPattern>[pattern];
   var children = pattern.children;
   if (pattern.kind == patternObject)
@@ -323,15 +331,88 @@ List<AstPattern> bindingPatternVariables(
   return variables;
 }
 
-void bindingPattern(LocalBinder binder, int scope, AstPattern pattern) {
+void bindingPattern(
+  LocalBinder binder,
+  int scope,
+  AstPattern pattern, [
+  bool irrefutable = false,
+]) {
+  if (irrefutable &&
+      (pattern.kind == patternOr ||
+          pattern.kind == patternRelational ||
+          pattern.kind == patternNullCheck ||
+          pattern.kind == patternConstant))
+    sourceError(
+      binder.source,
+      binder.source.tokens[pattern.token],
+      'refutable pattern in declaration or assignment',
+    );
+  if (pattern.kind == patternAssignedVariable) {
+    pattern.binding = bindingReference(
+      binder,
+      scope,
+      pattern.text,
+      pattern.token,
+    );
+    if (pattern.binding < 0 ||
+        binder.result.variables[pattern.binding].function >= 0)
+      sourceError(
+        binder.source,
+        binder.source.tokens[pattern.token],
+        'pattern assignment requires a local variable or parameter',
+      );
+    bindingWrite(binder, pattern.binding, pattern.token, true);
+  }
   if (pattern.type case final type?) bindingType(binder, scope, type);
   if (pattern.kind == patternVariable && pattern.text != '_')
     pattern.binding = bindingLookup(binder, scope, pattern.text);
   if (pattern.constant case final constant?)
     bindingExpression(binder, scope, constant);
-  for (var child in pattern.children) bindingPattern(binder, scope, child);
+  for (var child in pattern.children)
+    bindingPattern(binder, scope, child, irrefutable);
   for (var field in pattern.fields)
-    bindingPattern(binder, scope, field.pattern);
+    bindingPattern(binder, scope, field.pattern, irrefutable);
+}
+
+void bindingPatternVersion(LocalBinder binder, int token) {
+  if (!sourceVersionAtLeast(
+    binder.source,
+    binder.source.tokens[token].source,
+    3,
+    0,
+  ))
+    sourceError(
+      binder.source,
+      binder.source.tokens[token],
+      'destructuring requires language version 3.0',
+    );
+}
+
+void bindingPatternDeclarations(
+  LocalBinder binder,
+  int scope,
+  AstPatternDeclaration declaration,
+) {
+  for (var variable in bindingPatternVariables(binder, declaration.pattern)) {
+    var id = bindingDeclare(
+      binder,
+      scope,
+      variable.text,
+      variable.token,
+      variable.type ?? AstType('', const <AstType>[], variable.token),
+    );
+    binder.result.variables[id].finalVariable = declaration.isFinal;
+  }
+}
+
+void bindingPatternDeclaration(
+  LocalBinder binder,
+  int scope,
+  AstPatternDeclaration declaration,
+) {
+  bindingPatternVersion(binder, declaration.pattern.token);
+  bindingPattern(binder, scope, declaration.pattern, true);
+  bindingExpressions(binder, scope, declaration.metadata);
 }
 
 int bindingPatternScope(
@@ -392,6 +473,13 @@ void bindingExpression(
   int scope,
   AstExpression expression,
 ) {
+  if (expression.kind == astPatternAssignment) {
+    bindingPatternVersion(binder, expression.token);
+    bindingPatternVariables(binder, expression.pattern!);
+    bindingPattern(binder, scope, expression.pattern!, true);
+    bindingExpression(binder, scope, expression.children[0]);
+    return;
+  }
   if (expression.kind == astSwitchExpression) {
     if (!sourceVersionAtLeast(
       binder.source,
@@ -501,7 +589,9 @@ void bindingCollectStatement(
   while (statement.kind == astLabeledStatement) {
     statement = statement.children[0];
   }
-  if (statement.kind == astVariableStatement) {
+  if (statement.kind == astPatternDeclarationStatement) {
+    bindingPatternDeclarations(binder, scope, statement.patternDeclaration!);
+  } else if (statement.kind == astVariableStatement) {
     bindingDeclarations(binder, scope, statement.variables);
   } else if (statement.kind == astLocalFunctionStatement) {
     var syntax = statement.function!;
@@ -591,6 +681,11 @@ FunctionBindings bindExpressionLocals(
 
 void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
   var kind = statement.kind;
+  if (kind == astPatternDeclarationStatement) {
+    bindingPatternDeclaration(binder, scope, statement.patternDeclaration!);
+    bindingExpressions(binder, scope, statement.expressions);
+    return;
+  }
   if (kind == astLocalFunctionStatement) {
     bindingFunctionBody(binder, scope, statement.function!);
     return;
@@ -622,7 +717,7 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
   }
   if (kind == astForInStatement) {
     bindingExpressions(binder, scope, statement.expressions);
-    if (statement.variables.isEmpty)
+    if (statement.variables.isEmpty && statement.patternDeclaration == null)
       bindingWrite(
         binder,
         statement.expressions[1].binding,
@@ -630,6 +725,10 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
       );
     var loop = bindingScope(binder, scope);
     bindingDeclarations(binder, loop, statement.variables);
+    if (statement.patternDeclaration case final declaration?) {
+      bindingPatternDeclarations(binder, loop, declaration);
+      bindingPatternDeclaration(binder, loop, declaration);
+    }
     var variable = 0;
     while (variable < statement.variables.length) {
       bindingType(binder, loop, statement.variables[variable].type);
@@ -642,7 +741,7 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
   if (kind == astForStatement) {
     var loop = bindingScope(binder, scope);
     var initial = statement.children[0];
-    bindingDeclarations(binder, loop, initial.variables);
+    bindingCollectStatement(binder, loop, initial);
     bindingStatement(binder, loop, initial);
     bindingExpressions(binder, loop, statement.condition);
     bindingExpressions(binder, loop, statement.update);
@@ -781,11 +880,25 @@ void collectWrittenBinding(int binding, List<bool> seen, List<int> written) {
   }
 }
 
+void collectWrittenPattern(
+  AstPattern pattern,
+  List<bool> seen,
+  List<int> written,
+) {
+  collectWrittenBinding(pattern.binding, seen, written);
+  for (var child in pattern.children)
+    collectWrittenPattern(child, seen, written);
+  for (var field in pattern.fields)
+    collectWrittenPattern(field.pattern, seen, written);
+}
+
 void collectWrittenExpression(
   AstExpression expression,
   List<bool> seen,
   List<int> written,
 ) {
+  if (expression.kind == astPatternAssignment)
+    collectWrittenPattern(expression.pattern!, seen, written);
   if (expression.kind == astSwitchExpression) {
     for (var arm in expression.arms) {
       if (arm.guard case final guard?)
@@ -817,7 +930,11 @@ void collectWrittenStatement(
   List<bool> seen,
   List<int> written,
 ) {
-  if (statement.kind == astForInStatement && statement.variables.isEmpty)
+  if (statement.patternDeclaration case final declaration?)
+    collectWrittenPattern(declaration.pattern, seen, written);
+  if (statement.kind == astForInStatement &&
+      statement.variables.isEmpty &&
+      statement.patternDeclaration == null)
     collectWrittenBinding(statement.expressions[1].binding, seen, written);
   var i = 0;
   while (i < statement.expressions.length) {

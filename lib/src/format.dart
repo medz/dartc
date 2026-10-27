@@ -175,7 +175,7 @@ class ConstantLayout {
 
 void markTypeReference(List<int> offsets, List<int> work, int type) {
   if (offsets[type] < 0) {
-    if (typeContainsParameters(type)) {
+    if (typeContainsParameters(type) || typeHasSchemaHole(type)) {
       print('dartc: uninstantiated runtime type');
       hostExit(1);
     }

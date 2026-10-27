@@ -15,6 +15,9 @@ const int kList = 12;
 const int kClass = 13;
 const int kFunction = 14;
 const int kTypeParameter = 15;
+const int kSchemaHole = 16;
+
+int schemaHole = -1;
 
 class TypeParameterInfo {
   final int owner;
@@ -48,6 +51,7 @@ class DartType {
   int listType;
   int nullableType;
   bool containsParameters = false;
+  bool containsSchemaHole = false;
 
   DartType(this.kind, this.argument, this.listType, this.nullableType);
 }
@@ -58,6 +62,7 @@ List<FunctionSignature> functionSignatures = <FunctionSignature>[];
 List<TypeParameterInfo> typeParameters = <TypeParameterInfo>[];
 
 void resetTypes() {
+  schemaHole = -1;
   dartTypes.clear();
   classDartTypes.clear();
   functionSignatures.clear();
@@ -94,8 +99,10 @@ int functionType(int result, List<int> parameters, [int required = -1]) {
   functionSignatures.add(FunctionSignature(result, owned, required));
   var item = DartType(kFunction, signature, -1, -1);
   item.containsParameters = typeContainsParameters(result);
+  item.containsSchemaHole = typeHasSchemaHole(result);
   for (var parameter in parameters) {
     if (typeContainsParameters(parameter)) item.containsParameters = true;
+    if (typeHasSchemaHole(parameter)) item.containsSchemaHole = true;
   }
   dartTypes.add(item);
   return type;
@@ -107,12 +114,53 @@ FunctionSignature functionSignature(int type) {
   return functionSignatures[dartTypes[type].argument];
 }
 
+// Context schemas guide inference; complete them before producing executable types.
+int typeSchemaHole() {
+  if (schemaHole < 0) {
+    schemaHole = dartTypes.length;
+    dartTypes.add(DartType(kSchemaHole, -1, -1, -1)..containsSchemaHole = true);
+  }
+  return schemaHole;
+}
+
+bool typeHasSchemaHole(int type) => dartTypes[type].containsSchemaHole;
+
+int typeCompleteSchema(int schema, int inferred) {
+  if (!typeHasSchemaHole(schema)) return schema;
+  if (inferred < 0) inferred = tDynamic;
+  var kind = dartTypes[schema].kind;
+  if (kind == kSchemaHole) return inferred;
+  if (kind == kNullable)
+    return nullableType(
+      typeCompleteSchema(typeArgument(schema), typeNonNullable(inferred)),
+    );
+  if (kind == kList) {
+    inferred = typeNonNullable(inferred);
+    return listType(
+      typeCompleteSchema(
+        typeArgument(schema),
+        typeIsList(inferred) ? typeArgument(inferred) : tDynamic,
+      ),
+    );
+  }
+  var signature = functionSignature(schema);
+  var parameters = <int>[];
+  for (var parameter in signature.parameters)
+    parameters.add(typeCompleteSchema(parameter, tDynamic));
+  return functionType(
+    typeCompleteSchema(signature.result, tDynamic),
+    parameters,
+    signature.required,
+  );
+}
+
 int listType(int element) {
   var item = dartTypes[element];
   if (item.listType < 0) {
     item.listType = dartTypes.length;
     var type = DartType(kList, element, -1, -1);
     type.containsParameters = item.containsParameters;
+    type.containsSchemaHole = item.containsSchemaHole;
     dartTypes.add(type);
   }
   return item.listType;
@@ -157,6 +205,7 @@ int nullableType(int type) {
     item.nullableType = dartTypes.length;
     var result = DartType(kNullable, type, -1, -1);
     result.containsParameters = item.containsParameters;
+    result.containsSchemaHole = item.containsSchemaHole;
     dartTypes.add(result);
   }
   return item.nullableType;
@@ -223,6 +272,7 @@ bool typeIsTagged(int type) {
 }
 
 bool typeIsSubtype(int actual, int expected) {
+  if (dartTypes[expected].kind == kSchemaHole) return true;
   if (actual == expected ||
       actual == tNever ||
       expected == tDynamic ||
@@ -306,6 +356,8 @@ int joinTypes(int left, int right) {
 }
 
 int meetTypes(int left, int right) {
+  if (dartTypes[left].kind == kSchemaHole) return right;
+  if (dartTypes[right].kind == kSchemaHole) return left;
   if (left == right) return left;
   if (left == tNever || right == tNever) return tNever;
   if (left == tVoid) return right;
