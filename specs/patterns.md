@@ -13,6 +13,8 @@
 | List、map、record、object patterns | 未实现 | 尚无元素、字段或记录解构及对应匹配缓存和空间运算。类型模式 `List<int> values` 只检查并绑定整个 List。 | [ast.dart](../lib/src/ast.dart) 尚无解构模式节点；尚无行为验证。 |
 | Pattern declarations/assignments、if-case、pattern switch statements | 未实现 | 模式当前仅接入 switch 表达式；变量声明/赋值、if-case、集合 case 元素、循环及 switch 语句中的模式仍缺。 | [parser.dart](../lib/src/parser.dart)；既有 switch 语句边界见[语句](statements.md)。 |
 
+字符串常量按 token 种类识别，不把 `'=='`、`'<'` 等内容当作关系模式，也不把 `'when'`、`'as'` 当作模式关键字；验证入口为 [values.dart](../test/fixtures/values.dart) 的 `switchOperatorText`。
+
 SDK 3.13.7 CFE 接受 void 选择值，并允许用 `var` 模式把它绑定为 void；也接受关系模式引用 void 常量。analyzer 报告 `use_of_void_result`。dartc 采用 CFE 行为，绑定值仍受原有 void 消费规则约束。[values.dart](../test/fixtures/values.dart) 的 `switchVoidMatch`、`switchVoidRelation` 保留该差异及逐行诊断忽略。
 
 [patterns]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md

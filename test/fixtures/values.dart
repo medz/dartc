@@ -3038,6 +3038,12 @@ int switchConstantCast(Object n) => switch (n) {
   topConstant as int => 6,
   _ => 0,
 };
+int switchOperatorText(String n) => switch (n) {
+  '==' || '!=' => 1,
+  '<' || '<=' || '>' || '>=' => 2,
+  'when' || 'as' || 'switch' => 3,
+  _ => 4,
+};
 void switchOpaque() => 4;
 // ignore: use_of_void_result
 List<void> switchVoidMatch() => switch (switchOpaque()) {
@@ -3080,6 +3086,8 @@ void switchExpressions() {
   print(switchConstants(const [3, 4]));
   print(switchConstants(const ConstAtom(9)));
   print(switchConstantCast(topConstant));
+  for (var text in ['==', '!=', '<', '<=', '>', '>=', 'when', 'as', 'switch'])
+    print(switchOperatorText(text));
   print(switchVoidMatch());
   print(switchVoidRelation(1));
   IntCallback fn = switch (1) {
