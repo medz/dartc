@@ -128,9 +128,7 @@ class _SsaVerifier {
   }
 
   void instruction(SsaInstruction instruction) {
-    final op = instruction.op;
-    final target = instruction.target;
-    final result = instruction.resultType;
+    final SsaInstruction(:op, :target, resultType: result) = instruction;
     var count = 0;
     if (op == opCall) {
       if (target < 0 || target >= functions.length) fail('call target');

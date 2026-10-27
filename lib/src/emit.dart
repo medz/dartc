@@ -41,9 +41,7 @@ void emitInstruction(
   MachineFunction function,
   CallRootMap? roots,
 ) {
-  int op = instruction.op;
-  int output = instruction.output;
-  List<int> inputs = instruction.inputs;
+  final MachineInstruction(:op, :output, :inputs) = instruction;
   int result = 0;
   if (imageKind != 0 && op == mAddress) {
     print('Library functions cannot use globals, strings, or managed objects.');

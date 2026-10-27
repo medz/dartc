@@ -166,10 +166,7 @@ void machineSelectInstruction(
   List<int> counts,
   List<MachineInstruction> instructions,
 ) {
-  int op = source.op;
-  int output = source.value;
-  int target = source.target;
-  int effects = source.effects;
+  var SsaInstruction(:op, value: output, :target, :effects) = source;
   List<int> inputs = machineCopyValues(source.inputs);
   if (op == opInt) {
     instructions.add(
