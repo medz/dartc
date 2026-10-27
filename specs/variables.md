@@ -1,7 +1,7 @@
 # 变量：§8 Variables
 
 按[固定草案源码](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)的 §8、§8.1、§8.2 建立索引；条款目录见[官方草案 PDF](https://dart.dev/to/spec-draft)。
-兼容验证基线为 Dart SDK 3.13.5；下表只描述现有实现，不能据此认定整章符合规范。
+兼容验证基线为 Dart SDK 3.13.5；状态含义见[总览](README.md#状态与证据)。
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
@@ -10,7 +10,7 @@
 | [Dart 3.7 通配变量][features] | 部分实现 | 文件版本至少 3.7 的局部变量及参数 `_` 不引入可读取绑定，允许重复；此前是普通局部名，参与遮蔽与重复声明检查。同名库声明仍可被查找；字段和库变量不因此成为通配变量。模式语法未实现。 | [binding.dart](../lib/src/binding.dart) `bindingDeclare()`、`bindingLookup()`；[behavior_test.dart](../test/behavior_test.dart) 的 `version-imports.dart` 与重复 `_` 拒绝用例 |
 | §8 声明前引用 | 部分实现 | 预收集局部变量和函数名字，拒绝声明前读取且不回退同名 global；局部函数可在自身 body 递归，前向互递归不允许。只读函数声明不伪装成可写 local slot。完整捕获/异常流规则未实现。 | [binding.dart](../lib/src/binding.dart) `bindingCollect()`、`bindingReference()`；[frontend.dart](../lib/src/frontend.dart) `feReadLocal()`；[behavior_test.dart](../test/behavior_test.dart) `program/localFunctions()`、`rejected` |
 | §8 初始化类型及赋值 | 部分实现 | 区分声明类型、提升后的读取类型和存储表示，执行必要的装箱与检查；完整类型推断见[类型追踪](types.md)。 | [frontend.dart](../lib/src/frontend.dart) `feLowerVariable()`、`feConvertValue()`；[values.dart](../test/fixtures/values.dart) `flowAssignments()`、`staticContexts()` |
-| §8 确定赋值与确定未赋值 | 部分实现 | 分别跟踪可读和允许 final 首次赋值的事实；按局部可达性合并分支，覆盖现有循环、标签和返回；`??=` 的 RHS 写入不能无条件确立可读或首次可写事实。父路径不可达时仍检查局部分支中的读写。文件版本至少 3.9 才利用非空类型产生的 null/is 死边及非空 `??` / `??=` 的死 RHS 边合并 DA/DU；旧版本仍保留 return、Never 和显式布尔控制流。异常、闭包和模式变量未覆盖。 | [flow.dart](../lib/src/flow.dart) `flowJoin()`、`flowSplit()`、`flowUnsplit()`；[frontend.dart](../lib/src/frontend.dart) `feReadLocal()`；[values.dart](../test/fixtures/values.dart) `flowContexts()`、`neverContexts()`、`coalescingAssignmentValues()`；[behavior_test.dart](../test/behavior_test.dart) `rejected` |
+| §8 确定赋值与确定未赋值 | 部分实现 | 分别跟踪可读和允许 final 首次赋值的事实；按局部可达性合并分支，覆盖现有循环、标签和返回；`??=` 的 RHS 写入不能无条件确立可读或首次可写事实。父路径不可达时仍检查局部分支中的读写。文件版本至少 3.9 才利用非空类型产生的 null/is 死边及非空 `??` / `??=` 的死 RHS 边合并 DA/DU；旧版本仍保留 return、Never 和显式布尔控制流。异常、捕获闭包和模式变量未覆盖。 | [flow.dart](../lib/src/flow.dart) `flowJoin()`、`flowSplit()`、`flowUnsplit()`；[frontend.dart](../lib/src/frontend.dart) `feReadLocal()`；[values.dart](../test/fixtures/values.dart) `flowContexts()`、`neverContexts()`、`coalescingAssignmentValues()`；[behavior_test.dart](../test/behavior_test.dart) `rejected` |
 | §8 无初始值的声明 | 部分实现 | 非 final 的可空或动态局部变量取 null；未初始化的 final 即使可空也不能读取。库级 final 和非空变量要求初始化；现有类字段须由声明或受支持构造器初始化。完整初始化形式仍缺失。 | [frontend.dart](../lib/src/frontend.dart) `feLowerVariable()`；[initialization.dart](../lib/src/initialization.dart) `checkInitializers()`；[values.dart](../test/fixtures/values.dart) `flowContexts()`、`finalAssignments()`；[behavior_test.dart](../test/behavior_test.dart) `rejected` |
 | §8 局部 `final` | 部分实现 | 支持声明后首次赋值、互斥分支赋值；重复写、增减和可能重复的循环外变量写入被拒绝。循环体内新声明可各自初始化；RHS 求值后的写入也重新检查，防止嵌套赋值绕过限制。`??=` 同样要求可读及允许写入，不能因左值非空绕过限制。`late final` 未实现。 | [binding.dart](../lib/src/binding.dart) `LocalVariable.finalVariable`；[frontend.dart](../lib/src/frontend.dart) `feWriteLvalue()`；[flow.dart](../lib/src/flow.dart) `flowWrite()`、`flowDemote()`；[values.dart](../test/fixtures/values.dart) `finalAssignments()`；[behavior_test.dart](../test/behavior_test.dart) `rejected` |
 | §8 库级及字段 `final` | 部分实现 | final 存储没有隐式 setter；库变量和实例字段可与显式 setter 配对，此时赋值调用 setter 而不修改 final 存储。已检查缺少初始化和重复初始化；静态字段及完整构造器初始化链未实现。 | [symbols.dart](../lib/src/symbols.dart) `declareAccessor()`；[frontend.dart](../lib/src/frontend.dart) `feLowerLvalue()`；[initialization.dart](../lib/src/initialization.dart) `checkInitializers()`；[values.dart](../test/fixtures/values.dart) `finalContexts()`、`accessorValues()`、`topAccessorValues()`；[behavior_test.dart](../test/behavior_test.dart) `rejected` |
@@ -24,14 +24,7 @@
 | §8.2 `late` getter/setter | 未实现 | 未初始化读取、`late final` 再写入及其运行时错误尚未实现。 | [ast.dart](../lib/src/ast.dart) `AstVariable`；尚无验证入口 |
 | §8 静态及实例变量规则 | 部分实现 | 有普通实例字段；静态字段、`covariant` 字段和完整初始化规则见[类追踪](classes.md)。 | [frontend.dart](../lib/src/frontend.dart) `feCollectDeclarations()`；[values.dart](../test/fixtures/values.dart) `Cell`、`assignmentValues()` |
 
-实现边界：
-
-- `const` 对象的不可变性与 `final` 变量只写一次分别检查。
-- 库变量的惰性初始化不代表已经支持 `late`。
-- `Never` 调用参与可达性；底类型和提升边界见[类型追踪](types.md)，不能据此推定完整流分析已完成。
-- 当前运行时失败以诊断和退出结束，尚无可捕获的 Dart 异常。
-
-验证入口采用真实编译、执行与 SDK 输出对照；负例分别由 `rejected` 和 `failingValues` 管理。
-闭包捕获、模式变量、异常路径及完整初始化形式仍需各自的行为验证。
+`const` 对象不可变性与 `final` 变量首次赋值是独立约束；库变量惰性初始化不包含 `late` 语义。
+底类型和提升边界见[类型追踪](types.md)，运行时错误与可捕获异常的区别见[诊断](lexical-structure.md)。
 
 [features]: https://github.com/dart-lang/sdk/blob/3.13.5/tools/experimental_features.yaml

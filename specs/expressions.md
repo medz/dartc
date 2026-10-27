@@ -2,9 +2,7 @@
 
 兼容目标为 Dart 3.13.5，章节号以固定版本的[语言规范草案][draft]为准；[PDF][pdf]是可变的阅读入口。
 [官方入口][entry]说明 Dart 3 规范尚不完整；空安全与类型推断还需结合[类型追踪](types.md)所列补充文档。
-本页记录可运行子集及缺口，不复制规范正文，也不把某个表达式样例通过当成整个章节符合规范。
-
-状态含义统一见[总览](README.md#状态与证据)，当前各行只描述已有子集和已知缺口。
+本页记录表达式的支持范围与缺口，状态含义见[总览](README.md#状态与证据)。
 实现布局、常量数据编码和原生调用约定见[架构设计](../doc/architecture.md)。
 
 ## 求值、常量与字面量
@@ -25,12 +23,13 @@
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
 | §17.12 `this`、§17.13 实例创建 | 部分实现 | 支持当前类实例、字段、普通构造器与字段形参；支持已实现 const 生成式构造子集及规范化实例；工厂、重定向和父类构造链未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feWithReceiver`、`feLowerStaticCall`；[values.dart](../test/fixtures/values.dart)：`localBindings`、`argumentCalls`、`constObjects`。 |
+| [§17.14 函数表达式][function-expressions] | 部分实现 | 支持同步非泛型、无运行时捕获的匿名箭头体与块体，以及签名上下文推断；字面量直接调用和 `.call` 支持可选/命名参数。一般函数值签名限制与捕获缺口见[函数](functions.md)。 | [parser.dart](../lib/src/parser.dart) `parserFunctionExpression()`；[frontend.dart](../lib/src/frontend.dart) `feLowerFunctionExpression()`；[behavior_test.dart](../test/behavior_test.dart) `program/anonymousFunctions()`、`rejected`。 |
 | §17.15 函数调用 | 部分实现 | 必需/可选位置参数、命名/required 参数、声明库范围内的默认常量；实参按源码顺序求值后绑定。调用的类型实参与 callee 自有类型分开存储；已有普通函数、构造器和方法拒绝不匹配的类型实参。支持具体非泛型必需位置签名的值调用及 `.call`，参数和结果按静态签名检查；可选/命名函数值签名、泛型以及 dynamic/裸 Function 调用尚缺。 | [arguments.dart](../lib/src/arguments.dart)：`bindArguments`；[frontend.dart](../lib/src/frontend.dart)：`feLowerArguments`、`feLowerFunctionCall`；[values.dart](../test/fixtures/values.dart)：`argumentCalls`、`functionValues`。 |
 | [§17.16 函数提取][closurization] | 部分实现 | 非泛型、仅必需位置参数的顶层函数可作为值，按声明规范化身份并保留仅经值引用的目标。绑定实例方法、静态方法、构造器提取及捕获闭包尚缺。 | [frontend.dart](../lib/src/frontend.dart)：`feFunctionReference`；[reach.dart](../lib/src/reach.dart)：`reachableFunctions`；[values.dart](../test/fixtures/values.dart)：`functionValues`；[behavior_test.dart](../test/behavior_test.dart)：`function-imports.dart`。 |
 | §17.18–17.19 查找与顶层 getter | 部分实现 | 声明库及前缀按读/写分别解析，支持顶层 getter/setter 和变量惰性读取；本库任一同名声明遮蔽导入的两侧。完整库冲突与 SDK 差异见[库追踪](libraries.md)。 | [symbols.dart](../lib/src/symbols.dart)：`resolveSymbol`、`resolveWriteSymbol`；[frontend.dart](../lib/src/frontend.dart)：`feLoadDeclaration`、`feGenerateGlobals`；[values.dart](../test/fixtures/values.dart)：`topAccessorValues`；[behavior_test.dart](../test/behavior_test.dart)：`libraries`。 |
 | §17.20–17.22 成员调用与属性读取 | 部分实现 | 绑定本类实例方法、字段及访问器，getter 读取与 setter 写入分别选择声明和类型；字段/getter 返回的具体函数值可调用，读取时机见下方 SDK 差异说明。仅写属性不能读取；一般动态成员分派、级联、super 和方法提取未实现。 | [members.dart](../lib/src/members.dart)：`bindClassMembers`；[frontend.dart](../lib/src/frontend.dart)：`feLowerMemberCall`、`feReadBoundMember`；[values.dart](../test/fixtures/values.dart)：`accessorValues`、`localBindings`、`functionValues`。 |
 | 空安全补充：`Never` 表达式消费 | 部分实现 | 支持底类型接收者的属性、索引及已有调用入口；结果保留 `Never`，仍检查实参、重复命名参数、类型实参与 void 消费。此类路径不能产生实际接收者，不引入一般动态分派；方法提取等入口仍缺。 | [frontend.dart](../lib/src/frontend.dart)：`feReadMember`、`feLowerNeverArguments`、`feLowerLvalue`；[behavior_test.dart](../test/behavior_test.dart)：`neverExpressions`、`rejected`；规则依据[空安全补充][nnbd]。 |
-| §17.37–17.38 词法查找与标识符 | 部分实现 | 整个局部作用域预绑定，支持遮蔽、前向/自身引用错误及 `_`；闭包与局部函数作用域尚缺。 | [binding.dart](../lib/src/binding.dart)：`bindFunctionLocals`；[frontend.dart](../lib/src/frontend.dart)：`feReadLocal`；[values.dart](../test/fixtures/values.dart)：`localBindings`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
+| §17.37–17.38 词法查找与标识符 | 部分实现 | 整个局部作用域预绑定，支持遮蔽、前向/自身引用错误及 `_`；支持非捕获局部和匿名函数的独立函数体作用域；运行时捕获与模式绑定未实现。 | [binding.dart](../lib/src/binding.dart)：`bindFunctionLocals`；[frontend.dart](../lib/src/frontend.dart)：`feReadLocal`；[values.dart](../test/fixtures/values.dart)：`localBindings`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
 
 ## 赋值、分支与运算
 
@@ -62,16 +61,16 @@
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
-| §17.8、§17.10–17.11、§17.14 | 未实现 | Symbol 字面量、throw 表达式、函数表达式和 isolate 创建尚未接入。 | [ast.dart](../lib/src/ast.dart) 尚无对应表达式；尚无行为验证。 |
-| §17.17、§17.34 | 未实现 | 泛型函数实例化、await；尚无一般泛型或异步执行基础。 | 后续扩展 [parser.dart](../lib/src/parser.dart)、[frontend.dart](../lib/src/frontend.dart)；尚无行为验证。 |
-| 空安全及后续 Dart 3 表达式 | 未实现 | `?.`、`?[]`、记录和模式相关表达式未实现；不能由 `??` 或空断言覆盖推定支持。 | 后续扩展 [parser.dart](../lib/src/parser.dart)、[ast.dart](../lib/src/ast.dart)；尚无行为验证。 |
-| 优先级、所有静态错误及完成方式 | 待核对 | 已有解析和拒绝样例；尚未逐规则核验官方语言测试；成功自举不提供完整表达式兼容性证明。 | [parser.dart](../lib/src/parser.dart)：`parserPrecedence`、`parserBinary`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
+| §17.8、§17.10–17.11 | 未实现 | Symbol 字面量、throw 表达式和 isolate 创建未实现。 | [ast.dart](../lib/src/ast.dart) 尚无对应表达式；尚无行为验证。 |
+| §17.17、§17.34 | 未实现 | 泛型函数实例化、await；尚无一般泛型或异步执行基础。 | [parser.dart](../lib/src/parser.dart)、[frontend.dart](../lib/src/frontend.dart)；尚无行为验证。 |
+| 空安全与 Dart 3 表达式 | 未实现 | `?.`、`?[]`、记录和模式相关表达式未实现；不能由 `??` 或空断言覆盖推定支持。 | [parser.dart](../lib/src/parser.dart)、[ast.dart](../lib/src/ast.dart)；尚无行为验证。 |
+| 优先级、所有静态错误及完成方式 | 待核对 | 优先级、静态错误及完成方式的完整一致性覆盖尚缺。 | [parser.dart](../lib/src/parser.dart)：`parserPrecedence`、`parserBinary`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
 
-实例 getter 的函数值调用按 SDK 3.13.5 CFE 求值顺序处理：以 receiver、getter、实参、函数体分别记为 1、2、3、4，`receiver().callback(arg())` 的轨迹为 `1324`，`(receiver().callback)(arg())` 为 `1234`；隐式 this 遵循实例形式，顶层 getter 则先读取再求实参。[固定草案的 getter fallback][getter-invocation]描述先调用 getter 再调用返回值，与此实测有差异；本项目以 SDK 3.13.5 为兼容基线，不据此判定上游缺陷。行为入口为 [values.dart](../test/fixtures/values.dart) 的 `functionValues()`。
+实例 getter 的函数值调用按 SDK 3.13.5 CFE 求值顺序处理：以 receiver、getter、实参、函数体分别记为 1、2、3、4，`receiver().callback(arg())` 的轨迹为 `1324`，`(receiver().callback)(arg())` 为 `1234`；隐式 this 遵循实例形式，顶层 getter 则先读取再求实参。[固定草案的 getter fallback][getter-invocation]描述先调用 getter 再调用返回值，与此行为有差异；dartc 采用 SDK 3.13.5 的顺序，不据此判定上游缺陷。行为入口为 [values.dart](../test/fixtures/values.dart) 的 `functionValues()`。
 
-SDK 3.13.5 对 `??=` 有两处 analyzer/CFE 差异待继续核对：`void` getter 作为左侧时 analyzer 拒绝，CFE 接受表达式语句，dartc 按 void 值消费规则拒绝；`int f(Never value, dynamic fallback) { value ??= fallback; }` 的正常落空被 analyzer 拒绝而被 CFE 接受，dartc 将 `Never` 读取视为不能正常完成，仍检查 RHS。此差异不扩展为一般诊断一致性结论，后者由 [behavior_test.dart](../test/behavior_test.dart) 的 `neverLocalCoalescing` 跟踪。
+SDK 3.13.5 对 `??=` 有两处 analyzer/CFE 差异待核对：`void` getter 作为左侧时 analyzer 拒绝，CFE 接受表达式语句，dartc 按 void 值消费规则拒绝；`int f(Never value, dynamic fallback) { value ??= fallback; }` 的正常落空被 analyzer 拒绝而被 CFE 接受，dartc 将 `Never` 读取视为不能正常完成，仍检查 RHS。此差异不扩展为一般诊断一致性结论，后者由 [behavior_test.dart](../test/behavior_test.dart) 的 `neverLocalCoalescing` 跟踪。
 
-空断言选择器遵循固定草案的 `selector*`：允许重复 `!` 后继续成员、索引或调用。SDK 3.13.5 的[解析路径][sdk-bang-parser]会拒绝 `value!!.member`、`value!![0]`、`value!!(1)`，而 `(value!!)(1)` 可通过；这是已观察到的规范/SDK 差异，不表示已确认上游缺陷或实现完整诊断兼容。
+空断言选择器遵循固定草案的 `selector*`：允许重复 `!` 后继续成员、索引或调用。SDK 3.13.5 的[解析路径][sdk-bang-parser]会拒绝 `value!!.member`、`value!![0]`、`value!!(1)`，而 `(value!!)(1)` 可通过；dartc 在此采用规范文法，与 SDK 的诊断不完全一致。
 
 [draft]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex
 [pdf]: https://dart.dev/to/spec-draft
@@ -84,3 +83,5 @@ SDK 3.13.5 对 `??=` 有两处 analyzer/CFE 差异待继续核对：`void` gette
 
 [closurization]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L12601-L12663
 [getter-invocation]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L13474-L13485
+
+[function-expressions]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L10886-L10919

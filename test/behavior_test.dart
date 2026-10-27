@@ -306,9 +306,53 @@ void localFunctions() {
   print(labeled());
 }
 
+int Function(int) anonymousGlobal=(value)=>value+1;
+var anonymousMixed=(bool choose)=>choose?[1]:['s'];
+var anonymousNested=(bool choose)=>choose?[[1]]:[['s']];
+List<Object> Function() anonymousTyped=()=>[1];
+int anonymousTrace=0;
+int anonymousStep(int value){anonymousTrace=anonymousTrace*10+value;return value;}
+int anonymousApply(int Function(int) callback)=>callback(5);
+class AnonymousBox {
+  int Function(int) field=(value)=>value+2;
+  final int Function(int) supplied;
+  AnonymousBox(this.supplied);
+}
+void anonymousFunctions(){
+  var empty=()=>7;
+  var untyped=(value)=>value;
+  int Function(int) contextual=(value)=>value;
+  print([empty()] is List<int>);
+  print([untyped(1)] is List<int>);
+  print([contextual(1)] is List<int>);
+  var fresh=()=>[1];
+  print(anonymousMixed(true) is List<int>);
+  print(anonymousNested(true) is List<List<int>>);
+  print(anonymousTyped() is List<int>);print(fresh() is List<int>);
+  print(anonymousApply((value)=>value+2));
+  print(anonymousGlobal(8));
+  var box=AnonymousBox((value)=>value+3);
+  print(box.field(4));print(box.supplied(4));
+  int Function(int) Function() factory=()=>((value)=>value+2);
+  print(factory()(5));
+  var local=(){int plus(int value)=>value+1;return plus;};
+  print(local()(4));
+  var direct=(int value){return value+1;}(5);
+  print(direct);
+  print((([int value=4])=>value)());
+  print((([int value=4])=>value).call());
+  print(((int first,{int extra=2})=>first+extra).call(extra:3,2));
+  print(((int first,{int extra=2,int last=3})=>first+extra+last)(
+    last:anonymousStep(1),anonymousStep(2),extra:anonymousStep(3)));
+  print(anonymousTrace);
+  void Function() opaque=()=>9223372036854775807;
+  print(<void>[opaque()]);
+}
+
 void main(List<String> args) {
   listContexts();
   localFunctions();
+  anonymousFunctions();
   print(nativeMetadataAddress());
   print(calls);
   spare = 99;
@@ -1147,6 +1191,13 @@ void main() { print(1_000); }
     compare(File('${temporary.path}/conditional-imports.dart'), []);
     compare(File('${temporary.path}/parts-main.dart'), []);
     final rejected = [
+      'void main(){var value=1;var callback=()=>value;print(callback());}',
+      'class Captured{int value=1;void run(){var callback=()=>this.value;print(callback());}}void main(){Captured().run();}',
+      'void main(){var callback=<T>(T value)=>value;print(callback<int>(1));}',
+      'void main(){var callback=()async=>1;callback();}',
+      'void main(){const callback=()=>1;print(callback());}',
+      'void main(){int Function(int) callback=(value)=>"wrong";print(callback(1));}',
+      'void main(){void Function() callback=(){return 1;};callback();}',
       'int value()=>99;void main(){print(value());int value()=>7;}',
       'void main(){int first(int value)=>second(value);int second(int value)=>first(value);}',
       'void main(){int value()=>1;int value()=>2;}',

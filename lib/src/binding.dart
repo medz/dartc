@@ -201,6 +201,13 @@ void bindingExpression(
   int scope,
   AstExpression expression,
 ) {
+  if (expression.kind == astFunctionExpression) {
+    var syntax = expression.function!;
+    syntax.local = binder.functions.length;
+    binder.functions.add(LocalFunctionBinding(syntax));
+    bindingFunctionBody(binder, scope, syntax);
+    return;
+  }
   for (var type in expression.typeArguments) bindingType(binder, scope, type);
   if (expression.kind == astName) {
     expression.binding = bindingReference(
@@ -312,26 +319,43 @@ void bindingBody(LocalBinder binder, int scope, AstStatement statement) {
   bindingStatement(binder, body, statement);
 }
 
+void bindingFunctionBody(LocalBinder binder, int scope, AstFunction syntax) {
+  bindingType(binder, scope, syntax.result);
+  bindingExpressions(binder, scope, syntax.metadata);
+  for (var parameter in syntax.parameters) {
+    bindingType(binder, scope, parameter.type);
+    bindingExpressions(binder, scope, parameter.metadata);
+    var value = parameter.defaultValue;
+    if (value != null) bindingExpression(binder, scope, value);
+  }
+  binder.functions[syntax.local].body = _bindFunctionLocals(
+    binder.source,
+    syntax,
+    false,
+    binder.functions,
+    binder,
+    scope,
+  );
+}
+
+void bindExpressionFunctions(
+  SourceProgram source,
+  AstExpression expression,
+  List<LocalFunctionBinding> functions,
+) {
+  var binder = LocalBinder(
+    source,
+    FunctionBindings(<LocalVariable>[], -1),
+    <BindingScope>[],
+    functions,
+  );
+  bindingExpression(binder, -1, expression);
+}
+
 void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
   var kind = statement.kind;
   if (kind == astLocalFunctionStatement) {
-    var syntax = statement.function!;
-    bindingType(binder, scope, syntax.result);
-    bindingExpressions(binder, scope, syntax.metadata);
-    for (var parameter in syntax.parameters) {
-      bindingType(binder, scope, parameter.type);
-      bindingExpressions(binder, scope, parameter.metadata);
-      var value = parameter.defaultValue;
-      if (value != null) bindingExpression(binder, scope, value);
-    }
-    binder.functions[syntax.local].body = _bindFunctionLocals(
-      binder.source,
-      syntax,
-      false,
-      binder.functions,
-      binder,
-      scope,
-    );
+    bindingFunctionBody(binder, scope, statement.function!);
     return;
   }
   if (kind == astBreakStatement || kind == astContinueStatement) return;

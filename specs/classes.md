@@ -28,23 +28,21 @@
 | §14 Enums | 未实现 | 无枚举声明、值构建或成员；增强枚举还需对应特性规范补充。 | [ast.dart](../lib/src/ast.dart) `AstUnit`；[parser.dart](../lib/src/parser.dart) `parseUnit()`；尚无验证入口 |
 | §16 Metadata | 部分实现 | 解析并附着声明注解，校验 const-variable 引用身份，支持标量、List、null 及已实现构造子集的类实例；按外围声明作用域、局部绑定及库前缀/导出过滤解析。支持已实现 const 构造器的注解调用，以及真实 core `pragma` 的 name/options 常量值。编译期消费 `dartc:no-gc` 等函数约束，按类声明身份区分同名用户类；合同与验证边界见[运行时文档](../doc/runtime.md)。其他 core 注解、反射和运行时注解表尚缺；内部对象/类型 metadata 不属于此语法能力。 | [parser.dart](../lib/src/parser.dart) `parserMetadata()`；[binding.dart](../lib/src/binding.dart) `bindingStatement()`；[constants.dart](../lib/src/constants.dart) `evaluateMetadataConstant()`；[frontend.dart](../lib/src/frontend.dart) `feCheckMetadata()`；[values.dart](../test/fixtures/values.dart) `metadataValues()`；[behavior_test.dart](../test/behavior_test.dart) `libraries`、`rejected` |
 
-实现边界：
+## 实现边界
 
 - 用户类的 `toString()` 通过描述符回调支持动态格式化；这不是一般虚方法表或 noSuchMethod 分派。
-- 本类成员绑定保存各声明所属 AST 的序号，读取、写入和方法调用分别选择对应声明；get/set 作为普通方法或字段名称仍按语法上下文区分。
-- 当前对象头与字段扫描信息为后续运行时提供基础，尚未启用精确 GC。
-- Dart 3 类修饰符、extension type 等新增声明需补其特性规范，不能仅依据本草案章节判定兼容。
+- 读取、写入和方法调用分别选择对应声明；get/set 作为普通方法或字段名称仍按语法上下文区分。
+- 精确 GC 尚未启用；对象布局与内存管理边界见[运行时文档](../doc/runtime.md)。
 
-已有对象行为由 `objectValues()`、`assignmentValues()`、`accessorValues()`、`argumentCalls()`、`functionValues()` 负责；新声明形式应先补 AST 和符号契约，再建立实际调用及拒绝行为。
+## 规范与 SDK 差异
+
+Metadata 的资格与作用域依据固定草案 §16。analyzer 对 void 常量、常量属性访问及局部名字遮蔽的部分注解未报错，而 CFE 拒绝；不能据此认为注解有效，也不声称完整诊断一致。
+
+局部 const 注解用于多变量声明时，SDK 3.13.5 analyzer 通过，而 CFE 在复制注解时崩溃；该形式仍按一般元数据声明规则处理，不把该崩溃解释为语言非法，也不推断上游是否已确认缺陷。
+
+常量构造的有限重复依赖按具体默认值和字段表达式判定，不能把同一构造器再次出现直接视为循环。SDK 3.13.5 CFE 接受 `C([child = const C(null)])`，analyzer 报告递归常量构造；dartc 按有限值依赖处理，诊断不保证一致。
 
 [nnbd]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md
 [instance-variables]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L3646
 [generative-constructors]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L3749
-
-Metadata 的资格与作用域依据固定草案 §16，差分以 SDK 3.13.5 的实际编译执行为准。analyzer 对 void 常量、常量属性访问及局部名字遮蔽的部分注解未报错，而 CFE 拒绝；不能据此认为注解有效，也不声称完整诊断一致。
-
-局部 const 注解用于多变量声明时，SDK 3.13.5 analyzer 通过，而 CFE 会在注解克隆阶段崩溃；该形式仍按一般元数据声明规则处理，不把该崩溃解释为语言非法，也不推断上游是否已确认缺陷。
-
-常量构造的有限重复依赖按具体默认值和字段表达式判定，不能把同一构造器再次出现直接视为循环。`C([child = const C(null)])` 在 SDK 3.13.5 CFE 可编译运行，analyzer 却报告递归常量构造；按有限值依赖处理，不声称诊断完全一致。
-
 [constant-constructors]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L4437-L4507

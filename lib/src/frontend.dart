@@ -89,6 +89,7 @@ class FeFunctionState {
   final List<int> loopContinues = feLoopContinues;
   final List<ControlLabel> labels = feLabels;
   final List<int>? returns = feReturnTypes;
+  final int initializingGlobal = feInitializingGlobal;
 
   FeFunctionState();
 
@@ -114,6 +115,7 @@ class FeFunctionState {
     feLoopContinues = loopContinues;
     feLabels = labels;
     feReturnTypes = returns;
+    feInitializingGlobal = initializingGlobal;
   }
 }
 
@@ -143,6 +145,7 @@ List<List<ConstantValue>?> feLocalConstants = <List<ConstantValue>?>[];
 List<int> feLocalOwners = <int>[];
 int feLocalStart = 0;
 List<bool> feLocalInferred = <bool>[];
+List<int> feLocalContexts = <int>[];
 List<int>? feReturnTypes;
 List<AstClass> feClassNodes = <AstClass>[];
 List<ClassMembers> feMembers = <ClassMembers>[];
@@ -1253,6 +1256,8 @@ int feNonNullableValue(int type, int token) {
 }
 
 int feLowerHint(AstExpression expression, int context) {
+  if (expression.kind == astFunctionExpression)
+    return feLowerFunctionExpression(expression, context);
   if (expression.kind == astPostfix && expression.text == '!')
     return feLowerNullAssertion(expression, context);
   if ((expression.kind == astList || expression.kind == astCall) &&
@@ -2112,6 +2117,8 @@ int feLowerMemberValueCall(AstExpression call, int type, String member) {
 int feLowerMemberCall(AstExpression call, AstExpression callee) {
   var receiver = callee.children[0];
   var member = callee.text;
+  if (receiver.kind == astFunctionExpression && member == 'call')
+    return feLowerImmediateCall(call, receiver);
   var type = feLowerExpression(receiver);
   if (type == tNever) return feLowerNeverArguments(call);
   if (typeIsFunction(type) && member == 'call')
@@ -2263,9 +2270,18 @@ int feLowerNeverArguments(AstExpression call) {
   return tNever;
 }
 
+int feLowerImmediateCall(AstExpression call, AstExpression expression) {
+  var function = fePrepareFunctionExpression(expression, -1);
+  var count = feLowerArguments(call, 1, function);
+  feCall(function, count);
+  return functions[function].result;
+}
+
 int feLowerCall(AstExpression call, int context) {
   checkArgumentOrder(feSources, call);
   var callee = feWithReceiver(call.children[0]);
+  if (callee.kind == astFunctionExpression)
+    return feLowerImmediateCall(call, callee);
   if (callee.kind == astName && callee.binding >= 0) {
     var local = feBindings.variables[callee.binding].function;
     if (local >= 0) {
@@ -2711,6 +2727,8 @@ int feLowerExpression(AstExpression expression) {
 int feLowerValue(AstExpression expression) {
   expression = feWithReceiver(expression);
   var kind = expression.kind;
+  if (kind == astFunctionExpression)
+    return feLowerFunctionExpression(expression, -1);
   if ((kind == astName || kind == astMember) &&
       expression.typeArguments.length != 0)
     feAstError(expression.token, 'type application values are unsupported');
@@ -3052,10 +3070,12 @@ void feInferLocalResult(int local) {
   feLoopContinues = <int>[];
   feLabels = <ControlLabel>[];
   feReturnTypes = <int>[];
+  feInitializingGlobal = -1;
   feBeginFunction(function, declaration.body!);
   var result = tNever;
+  var context = feLocalContexts[local];
   if (declaration.syntax.arrow.isNotEmpty) {
-    result = feLowerHint(declaration.syntax.arrow[0], -1);
+    result = feLowerHint(declaration.syntax.arrow[0], context);
   } else {
     if (declaration.syntax.body.isNotEmpty)
       feLowerStatement(declaration.syntax.body[0]);
@@ -3068,12 +3088,14 @@ void feInferLocalResult(int local) {
     }
   }
   previous.restore();
+  if (context >= 0 && (context == tVoid || !typeIsSubtype(result, context)))
+    result = context;
   functions[function].result = result;
   functions[function].callableType = -1;
   feLocalInferred[local] = true;
 }
 
-void feLowerLocalFunction(AstFunction syntax) {
+void fePrepareLocalFunction(AstFunction syntax) {
   feResolveFunctionDefaults(feLocalStart + syntax.local);
   var bindings = feLocalFunctions[syntax.local].body!;
   List<ConstantValue>? values;
@@ -3098,6 +3120,10 @@ void feLowerLocalFunction(AstFunction syntax) {
   }
   feLocalConstants[syntax.local] = values;
   feInferLocalResult(syntax.local);
+}
+
+void feLowerLocalFunction(AstFunction syntax) {
+  fePrepareLocalFunction(syntax);
   var type = functionValueType(feLocalStart + syntax.local);
   if (type >= 0) {
     var binding = 0;
@@ -3109,6 +3135,44 @@ void feLowerLocalFunction(AstFunction syntax) {
       binding++;
     }
   }
+}
+
+int fePrepareFunctionExpression(AstExpression expression, int context) {
+  var syntax = expression.function!;
+  var function = feLocalStart + syntax.local;
+  if (feLocalInferred[syntax.local]) return function;
+  if (context >= 0) context = typeNonNullable(context);
+  if (context >= 0 && typeIsFunction(context)) {
+    var signature = functionSignature(context);
+    var start = feParamStarts[function];
+    var p = 0;
+    while (p < syntax.parameters.length && p < signature.parameters.length) {
+      if (syntax.parameters[p].type.name == '') {
+        var type = signature.parameters[p];
+        if (typeIsSubtype(type, tNull)) type = nullableType(tObject);
+        feParamTypes[start + p] = type;
+        functions[function].parameterTypes[p] = type;
+      }
+      p++;
+    }
+    feLocalContexts[syntax.local] = signature.result;
+  }
+  fePrepareLocalFunction(syntax);
+  return function;
+}
+
+int feLowerFunctionExpression(AstExpression expression, int context) {
+  return feFunctionReference(
+    fePrepareFunctionExpression(expression, context),
+    expression.token,
+  );
+}
+
+int feLocalResultContext(int function) {
+  if (function >= feLocalStart &&
+      function < feLocalStart + feLocalFunctions.length)
+    return feLocalContexts[function - feLocalStart];
+  return -1;
 }
 
 bool feInfersLocalResult(int function) {
@@ -3161,7 +3225,10 @@ void feLowerStatement(AstStatement statement) {
       if (statement.expressions.isEmpty)
         feInteger(0, tNull);
       else
-        type = feLowerHint(statement.expressions[0], -1);
+        type = feLowerHint(
+          statement.expressions[0],
+          feLocalResultContext(feFunction),
+        );
       returned.add(type);
       feEmit(opReturn);
       flowUnreachable(feFlow);
@@ -3172,13 +3239,14 @@ void feLowerStatement(AstStatement statement) {
       var result = functions[feFunction].result;
       if (result == tVoid) {
         var context = tVoid;
-        if (feInfersLocalResult(feFunction)) context = -1;
+        if (feInfersLocalResult(feFunction))
+          context = feLocalResultContext(feFunction);
         var type = feLowerHint(value, context);
         if (type != tVoid && type != tNull)
           feAstError(value.token, 'void function cannot return a value');
         feConvertValue(type, tVoid, value.token);
       } else if (feInfersLocalResult(feFunction)) {
-        var type = feLowerHint(value, -1);
+        var type = feLowerHint(value, feLocalResultContext(feFunction));
         feConvertValue(type, result, value.token);
       } else {
         feLowerInContext(value, result);
@@ -3347,7 +3415,12 @@ void feInferGlobal(int global) {
   var previousGlobal = feInitializingGlobal;
   var previousFlow = feFlow;
   var previousScope = feConstants.instanceScope;
+  var previousBindings = feBindings;
+  var previousConstants = feConstants.locals;
+  var previousConstantTypes = feConstants.localTypes;
   feConstants.instanceScope = null;
+  feBindings = FunctionBindings(<LocalVariable>[], -1);
+  feConstants.locals = <ConstantValue>[];
   ir = <int>[];
   irTypes = <int>[];
   feSlotTypes = <int>[];
@@ -3393,6 +3466,9 @@ void feInferGlobal(int global) {
   feInitializingGlobal = previousGlobal;
   feFlow = previousFlow;
   feConstants.instanceScope = previousScope;
+  feBindings = previousBindings;
+  feConstants.locals = previousConstants;
+  feConstants.localTypes = previousConstantTypes;
 }
 
 void feAppendInitializer(GlobalInitializer initializer) {
@@ -3529,6 +3605,16 @@ void feBeginFunction(int f, FunctionBindings bindings) {
   }
 }
 
+void feBindInitializerFunctions(AstVariable syntax, int owner) {
+  var i = 0;
+  while (i < syntax.initializer.length) {
+    bindExpressionFunctions(feSources, syntax.initializer[i], feLocalFunctions);
+    i++;
+  }
+  while (feLocalOwners.length < feLocalFunctions.length)
+    feLocalOwners.add(owner);
+}
+
 void parseSource(SourceProgram source) {
   resetTypes();
   ir.clear();
@@ -3561,6 +3647,7 @@ void parseSource(SourceProgram source) {
   feLocalOwners.clear();
   feLocalStart = 0;
   feLocalInferred.clear();
+  feLocalContexts.clear();
   feReturnTypes = null;
   feParamFields.clear();
   exportNames.clear();
@@ -3689,6 +3776,21 @@ void parseSource(SourceProgram source) {
       feLocalOwners.add(feOwners[bindingFunction]);
     bindingFunction++;
   }
+  var initializer = 0;
+  while (initializer < feGlobalNodes.length) {
+    feBindInitializerFunctions(feGlobalNodes[initializer], -1);
+    initializer++;
+  }
+  var owner = 0;
+  while (owner < feClassNodes.length) {
+    var field = feClassFieldStarts[owner];
+    var end = field + feClassFieldCounts[owner];
+    while (field < end) {
+      feBindInitializerFunctions(feFieldNodes[field], owner);
+      field++;
+    }
+    owner++;
+  }
   feLocalStart = sourceFunctions;
   var local = 0;
   while (local < feLocalFunctions.length) {
@@ -3697,6 +3799,7 @@ void parseSource(SourceProgram source) {
     bodyBindings.add(declaration.body!);
     feLocalConstants.add(null);
     feLocalInferred.add(declaration.syntax.result.name != '');
+    feLocalContexts.add(-1);
     local++;
   }
   sourceFunctions = functions.length;
@@ -3787,7 +3890,7 @@ void parseSource(SourceProgram source) {
     } else if (functionSyntax.arrow.length != 0) {
       var expression = functionSyntax.arrow[0];
       if (feInfersLocalResult(f)) {
-        var type = feLowerHint(expression, -1);
+        var type = feLowerHint(expression, feLocalResultContext(f));
         feConvertValue(type, functions[f].result, expression.token);
       } else {
         feLowerInContext(expression, functions[f].result);

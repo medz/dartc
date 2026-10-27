@@ -259,6 +259,74 @@ AstExpression parserList(Parser parser, List<AstType> arguments, int token) {
   return AstExpression(astList, '', children, arguments, token);
 }
 
+bool parserFunctionAhead(Parser parser, int position) {
+  if (!tokenIs(parser.tokens[position], '(')) return false;
+  var depth = 1;
+  position++;
+  while (depth > 0 && parser.tokens[position].kind != tokenEnd) {
+    if (tokenIs(parser.tokens[position], '(')) depth++;
+    if (tokenIs(parser.tokens[position], ')')) depth--;
+    position++;
+  }
+  return depth == 0 &&
+      (tokenIs(parser.tokens[position], '{') ||
+          tokenIs(parser.tokens[position], '=>') ||
+          tokenIs(parser.tokens[position], 'async') ||
+          tokenIs(parser.tokens[position], 'sync'));
+}
+
+bool parserGenericFunctionAhead(Parser parser) {
+  var position = parser.position;
+  var depth = 0;
+  while (parser.tokens[position].kind != tokenEnd) {
+    var token = parser.tokens[position];
+    if (tokenIs(token, '<')) depth++;
+    if (tokenIs(token, '>')) depth--;
+    if (tokenIs(token, '>>')) depth -= 2;
+    if (tokenIs(token, '>>>')) depth -= 3;
+    position++;
+    if (depth <= 0) return depth == 0 && parserFunctionAhead(parser, position);
+  }
+  return false;
+}
+
+AstExpression parserFunctionExpression(Parser parser) {
+  var token = parser.position;
+  var parameters = parserParameters(parser);
+  if (parserIs(parser, 'async') || parserIs(parser, 'sync'))
+    parserError(
+      parser,
+      'async and generator function expressions are unsupported',
+    );
+  var body = <AstStatement>[];
+  var arrow = <AstExpression>[];
+  if (parserTake(parser, '=>'))
+    arrow.add(parseExpression(parser));
+  else {
+    if (!parserIs(parser, '{'))
+      parserError(parser, 'expected function expression body');
+    body.add(parseStatement(parser));
+  }
+  var expression = AstExpression(
+    astFunctionExpression,
+    '',
+    const <AstExpression>[],
+    const <AstType>[],
+    token,
+  );
+  expression.function = AstFunction(
+    '',
+    parserInferredType(token),
+    parameters,
+    body,
+    arrow,
+    false,
+    token,
+    false,
+  );
+  return expression;
+}
+
 AstExpression parserPrimary(Parser parser) {
   var token = parser.position;
   var current = parser.tokens[token];
@@ -293,6 +361,10 @@ AstExpression parserPrimary(Parser parser) {
       token,
     );
   }
+  if (parserFunctionAhead(parser, parser.position))
+    return parserFunctionExpression(parser);
+  if (parserIs(parser, '<') && parserGenericFunctionAhead(parser))
+    parserError(parser, 'generic function expressions are unsupported');
   if (parserTake(parser, '(')) {
     var expression = parseExpression(parser);
     parserExpect(parser, ')');
@@ -1201,21 +1273,8 @@ bool parserVariableStatement(Parser parser) {
 
 bool parserUntypedFunction(Parser parser) {
   var position = parser.position;
-  if (parser.tokens[position].kind != tokenIdentifier ||
-      !tokenIs(parser.tokens[position + 1], '('))
-    return false;
-  var depth = 1;
-  position += 2;
-  while (depth > 0 && parser.tokens[position].kind != tokenEnd) {
-    if (tokenIs(parser.tokens[position], '(')) depth++;
-    if (tokenIs(parser.tokens[position], ')')) depth--;
-    position++;
-  }
-  return depth == 0 &&
-      (tokenIs(parser.tokens[position], '{') ||
-          tokenIs(parser.tokens[position], '=>') ||
-          tokenIs(parser.tokens[position], 'async') ||
-          tokenIs(parser.tokens[position], 'sync'));
+  return parser.tokens[position].kind == tokenIdentifier &&
+      parserFunctionAhead(parser, position + 1);
 }
 
 AstStatement parseStatement(Parser parser) {
