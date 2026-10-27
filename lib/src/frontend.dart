@@ -1229,45 +1229,45 @@ Never feAstError(int token, String message) {
   sourceError(feSources, feTokens[token], message);
 }
 
-int feBinaryOp(String op) {
-  if (op == '+') return opAdd;
-  if (op == '-') return opSub;
-  if (op == '*') return opMul;
-  if (op == '~/') return opDiv;
-  if (op == '%') return opMod;
-  if (op == '&') return opAnd;
-  if (op == '|') return opOr;
-  if (op == '^') return opXor;
-  if (op == '<<') return opShl;
-  if (op == '>>') return opShr;
-  if (op == '>>>') return opUshr;
-  if (op == '==') return opEq;
-  if (op == '!=') return opNe;
-  if (op == '<') return opLt;
-  if (op == '<=') return opLe;
-  if (op == '>') return opGt;
-  if (op == '>=') return opGe;
-  feError('unsupported operator ' + op);
-}
+int feBinaryOp(String op) => switch (op) {
+  '+' => opAdd,
+  '-' => opSub,
+  '*' => opMul,
+  '~/' => opDiv,
+  '%' => opMod,
+  '&' => opAnd,
+  '|' => opOr,
+  '^' => opXor,
+  '<<' => opShl,
+  '>>' => opShr,
+  '>>>' => opUshr,
+  '==' => opEq,
+  '!=' => opNe,
+  '<' => opLt,
+  '<=' => opLe,
+  '>' => opGt,
+  '>=' => opGe,
+  _ => feError('unsupported operator ' + op),
+};
 
-int feValueOperation(String op) {
-  if (op == '+') return bValueAdd;
-  if (op == '-') return bValueSub;
-  if (op == '*') return bValueMul;
-  if (op == '~/') return bValueDiv;
-  if (op == '%') return bValueMod;
-  if (op == '&') return bValueAnd;
-  if (op == '|') return bValueOr;
-  if (op == '^') return bValueXor;
-  if (op == '<<') return bValueShl;
-  if (op == '>>') return bValueShr;
-  if (op == '>>>') return bValueUshr;
-  if (op == '==' || op == '!=') return bValueEq;
-  if (op == '<') return bValueLt;
-  if (op == '<=') return bValueLe;
-  if (op == '>') return bValueGt;
-  return bValueGe;
-}
+int feValueOperation(String op) => switch (op) {
+  '+' => bValueAdd,
+  '-' => bValueSub,
+  '*' => bValueMul,
+  '~/' => bValueDiv,
+  '%' => bValueMod,
+  '&' => bValueAnd,
+  '|' => bValueOr,
+  '^' => bValueXor,
+  '<<' => bValueShl,
+  '>>' => bValueShr,
+  '>>>' => bValueUshr,
+  '==' || '!=' => bValueEq,
+  '<' => bValueLt,
+  '<=' => bValueLe,
+  '>' => bValueGt,
+  _ => bValueGe,
+};
 
 int feCombine(String op, int left, int right, int token) {
   var result = typingBinary(op, left, right);

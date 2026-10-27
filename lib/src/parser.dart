@@ -1056,25 +1056,19 @@ AstExpression parserUnary(Parser parser) {
   return parserPostfix(parser);
 }
 
-int parserPrecedence(String op) {
-  if (op == '||') return 1;
-  if (op == '&&') return 2;
-  if (op == '==' || op == '!=') return 3;
-  if (op == '<' ||
-      op == '<=' ||
-      op == '>' ||
-      op == '>=' ||
-      op == 'is' ||
-      op == 'as')
-    return 4;
-  if (op == '|') return 5;
-  if (op == '^') return 6;
-  if (op == '&') return 7;
-  if (op == '<<' || op == '>>' || op == '>>>') return 8;
-  if (op == '+' || op == '-') return 9;
-  if (op == '*' || op == '~/' || op == '%') return 10;
-  return 0;
-}
+int parserPrecedence(String op) => switch (op) {
+  '||' => 1,
+  '&&' => 2,
+  '==' || '!=' => 3,
+  '<' || '<=' || '>' || '>=' || 'is' || 'as' => 4,
+  '|' => 5,
+  '^' => 6,
+  '&' => 7,
+  '<<' || '>>' || '>>>' => 8,
+  '+' || '-' => 9,
+  '*' || '~/' || '%' => 10,
+  _ => 0,
+};
 
 bool parserNullableTypeEnd(Parser parser) {
   return parser.tokens[parser.position].kind == tokenInterpolationEnd ||
