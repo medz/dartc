@@ -66,12 +66,14 @@
 
 ### 当前源码组织
 
-编译器主要文件仍平铺在 `lib/src`，参数声明与实参绑定位于 `frontend`，标准库源码位于独立的 `std` 目录；目标运行时主要集中在 `runtime.dart`。以下按实际职责归组：
+编译器主要文件仍平铺在 `lib/src`，构建协调与包配置发现位于 `driver`，参数声明与实参绑定位于 `frontend`，标准库源码位于独立的 `std` 目录；目标运行时主要集中在 `runtime.dart`。以下按实际职责归组：
 
 ```text
 bin/dartc.dart
 lib/src/
-  command.dart, host.dart                         构建入口与宿主服务
+  host.dart                                      宿主服务
+  driver/
+    command.dart, packages.dart                    构建协调与包配置发现
   source.dart, source_uri.dart, package_config.dart 源文件、库依赖与包配置
   scanner.dart, ast.dart, parser.dart             词法与语法结构
   symbols.dart, binding.dart, members.dart         库、局部与成员声明绑定
