@@ -164,9 +164,7 @@ List<GlobalInitializer> feGlobalInitializers = <GlobalInitializer>[];
 int feRuntimeTokens = 0;
 List<int> _feLiteralTypes = <int>[];
 List<int> _feLiteralValues = <int>[];
-List<int> feParamStarts = <int>[];
-List<int> feParamTypes = <int>[];
-List<ConstantValue> feParamDefaults = <ConstantValue>[];
+List<List<ConstantValue>> feParamDefaults = <List<ConstantValue>>[];
 FunctionBindings feBindings = FunctionBindings(<LocalVariable>[], -1);
 List<int> feBindingTypes = <int>[];
 List<int> feBindingSlots = <int>[];
@@ -264,8 +262,7 @@ int feRegisterFunction(
     return -1;
   }
   var id = functions.length;
-  var start = feParamTypes.length;
-  var count = 0;
+  var types = <int>[];
   var source = feTokens[syntax.token].source;
   var name = syntax.name;
   var result = tDynamic;
@@ -282,8 +279,7 @@ int feRegisterFunction(
   if (owner >= 0) {
     if (!constructor) name = classNames[owner] + '.' + syntax.name;
     if (!syntax.isStatic) {
-      feParamTypes.add(classType(owner));
-      count++;
+      types.add(classType(owner));
     }
   }
   var p = 0;
@@ -310,20 +306,14 @@ int feRegisterFunction(
     } else if (parameter.type.name != '') {
       type = resolveType(feSymbols, parameter.type);
     }
-    feParamTypes.add(type);
-    count++;
+    types.add(type);
     p++;
   }
-  var types = <int>[];
-  p = 0;
-  while (p < count) {
-    types.add(feParamTypes[start + p]);
-    p++;
-  }
+  var count = types.length;
   functions.add(
     FunctionInfo(name, 0, count, count, result, types, <int>[], source),
   );
-  feParamStarts.add(start);
+  feParamDefaults.add(<ConstantValue>[]);
   feFunctionNodes.add(syntax);
   feOwners.add(owner);
   if (constructor) {
@@ -1532,10 +1522,10 @@ void feRegisterConstantConstructors() {
         fields.add(feFieldTypes[fieldStart + field]);
         field++;
       }
-      var start = feParamStarts[function] + 1;
+      var start = 1;
       var p = 0;
       while (p < feFunctionNodes[function].parameters.length) {
-        parameterTypes.add(feParamTypes[start + p]);
+        parameterTypes.add(functions[function].parameterTypes[start + p]);
         p++;
       }
       while (feConstants.constructors.length <= function)
@@ -1564,8 +1554,12 @@ void feResolveFunctionDefaults(int f) {
   feCheckMetadata(syntax.metadata, owner, f);
   feConstants.lexicalClass = owner;
   var parameters = syntax.parameters;
-  var offset = feParamStarts[f];
-  if (feHasReceiver(f)) offset++;
+  var offset = feHasReceiver(f) ? 1 : 0;
+  if (feParamDefaults[f].isEmpty)
+    feParamDefaults[f] = List<ConstantValue>.filled(
+      functions[f].parameters,
+      omitted,
+    );
   var p = 0;
   while (p < parameters.length) {
     var parameter = parameters[p];
@@ -1573,7 +1567,7 @@ void feResolveFunctionDefaults(int f) {
     checkParameterName(feSources, parameters, p);
     if (parameter.kind != astRequiredPositional && !parameter.required) {
       var value = omitted;
-      var type = feParamTypes[offset + p];
+      var type = functions[f].parameterTypes[offset + p];
       var expression = parameter.defaultValue;
       if (expression != null)
         value = evaluateConstant(feConstants, expression, type, false);
@@ -1583,7 +1577,7 @@ void feResolveFunctionDefaults(int f) {
           parameter.token,
           'default value is incompatible with parameter type',
         );
-      feParamDefaults[offset + p] = value;
+      feParamDefaults[f][offset + p] = value;
     }
     p++;
   }
@@ -1591,9 +1585,6 @@ void feResolveFunctionDefaults(int f) {
 }
 
 void feResolveDefaults(int count) {
-  var omitted = ConstantValue(tNull, tNull, 0, '');
-  while (feParamDefaults.length < feParamTypes.length)
-    feParamDefaults.add(omitted);
   var f = 1;
   while (f < count) {
     feResolveFunctionDefaults(f);
@@ -1602,7 +1593,7 @@ void feResolveDefaults(int count) {
 }
 
 void feCheckLegacyAccessor(int getterType, int setter, int parameter) {
-  var setterType = feParamTypes[feParamStarts[setter] + parameter];
+  var setterType = functions[setter].parameterTypes[parameter];
   if (!typeIsSubtype(getterType, setterType))
     feAstError(
       feFunctionNodes[setter].token,
@@ -1654,8 +1645,12 @@ void feCheckAccessorVersions() {
   }
 }
 
-void feDefaultArgument(int parameter, int token) {
-  feConstantValue(feParamDefaults[parameter], feParamTypes[parameter], token);
+void feDefaultArgument(int function, int parameter, int token) {
+  feConstantValue(
+    feParamDefaults[function][parameter],
+    functions[function].parameterTypes[parameter],
+    token,
+  );
 }
 
 int feConstantGetter(ConstantValue value) {
@@ -1754,8 +1749,7 @@ int feLowerArguments(AstExpression call, int start, int function) {
   if (call.typeArguments.length != 0)
     feAstError(call.token, 'nongeneric call does not accept type arguments');
   var parameters = feFunctionNodes[function].parameters;
-  var offset = feParamStarts[function];
-  if (feHasReceiver(function)) offset++;
+  var offset = feHasReceiver(function) ? 1 : 0;
   if (call.children.length - start == parameters.length &&
       (parameters.isEmpty || parameters.last.kind != astNamedParameter)) {
     var argument = start;
@@ -1766,7 +1760,10 @@ int feLowerArguments(AstExpression call, int start, int function) {
           expression.token,
           'unknown named argument ' + expression.text,
         );
-      feLowerInContext(expression, feParamTypes[offset + argument - start]);
+      feLowerInContext(
+        expression,
+        functions[function].parameterTypes[offset + argument - start],
+      );
       argument++;
     }
     return parameters.length;
@@ -1784,7 +1781,7 @@ int feLowerArguments(AstExpression call, int start, int function) {
     if (expression.kind == astNamedArgument)
       expression = expression.children[0];
     var parameter = bindings[argument - start];
-    var type = feParamTypes[offset + parameter];
+    var type = functions[function].parameterTypes[offset + parameter];
     feLowerInContext(expression, type);
     var value = feTemp(type);
     feOperand(opStoreLocal, value);
@@ -1796,7 +1793,7 @@ int feLowerArguments(AstExpression call, int start, int function) {
     if (values[parameter] >= 0)
       feOperand(opLoadLocal, values[parameter]);
     else
-      feDefaultArgument(offset + parameter, call.token);
+      feDefaultArgument(function, offset + parameter, call.token);
     parameter++;
   }
   return parameters.length;
@@ -2460,10 +2457,10 @@ void feLowerConstructor(int function) {
       feBindings = FunctionBindings(<LocalVariable>[], -1);
       feLowerInContext(feFieldNodes[field].initializer[0], fieldType);
     } else if (step.kind == constructorFormal) {
-      var parameter = feParamStarts[function] + 1 + step.index;
+      var parameter = 1 + step.index;
       feOperand(opLoadLocal, step.index + 1);
       feConvertValue(
-        feParamTypes[parameter],
+        functions[function].parameterTypes[parameter],
         fieldType,
         syntax.parameters[step.index].token,
       );
@@ -2498,7 +2495,7 @@ int feLowerConstructorCall(
   var values = List<int>.filled(count, -1);
   var parameter = count - 1;
   while (parameter >= 0) {
-    var type = feParamTypes[feParamStarts[constructor] + 1 + parameter];
+    var type = functions[constructor].parameterTypes[1 + parameter];
     values[parameter] = feTemp(type);
     feOperand(opStoreLocal, values[parameter]);
     parameter--;
@@ -2710,7 +2707,7 @@ FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
     var setter = -1;
     if (member.setter >= 0) {
       setter = feMemberFunctions[staticOwner][member.setter];
-      type = feParamTypes[feParamStarts[setter]];
+      type = functions[setter].parameterTypes[0];
     } else if (member.staticField >= 0) {
       global = feClassStaticGlobals[staticOwner][member.staticField];
       var modifier = feGlobalNodes[global].modifier;
@@ -2738,7 +2735,7 @@ FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
     if (declaration.setter >= 0) {
       var setter = declaration.setter;
       var target = FeLvalue(
-        feParamTypes[feParamStarts[setter]],
+        functions[setter].parameterTypes[0],
         5,
         -1,
         -1,
@@ -2808,7 +2805,7 @@ FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
       var receiver = feTemp(receiverType);
       feOperand(opStoreLocal, receiver);
       var target = FeLvalue(
-        feParamTypes[feParamStarts[setter] + 1],
+        functions[setter].parameterTypes[1],
         4,
         receiver,
         -1,
@@ -3481,13 +3478,11 @@ int fePrepareFunctionExpression(AstExpression expression, int context) {
   if (context >= 0) context = typeNonNullable(context);
   if (context >= 0 && typeIsFunction(context)) {
     var signature = functionSignature(context);
-    var start = feParamStarts[function];
     var p = 0;
     while (p < syntax.parameters.length && p < signature.parameters.length) {
       if (syntax.parameters[p].type.name == '') {
         var type = signature.parameters[p];
         if (typeIsSubtype(type, tNull)) type = nullableType(tObject);
-        feParamTypes[start + p] = type;
         functions[function].parameterTypes[p] = type;
       }
       p++;
@@ -3929,15 +3924,15 @@ void feBeginFunction(int f, FunctionBindings bindings) {
   }
   feSlotTypes = <int>[];
   feNextLocal = 0;
-  var start = feParamStarts[f];
   var p = 0;
   while (p < functions[f].parameters) {
-    var slot = feTemp(feParamTypes[start + p]);
+    var slot = feTemp(functions[f].parameterTypes[p]);
     var binding = feBindings.receiver;
     var parameter = p;
     if (feHasReceiver(f)) parameter--;
     if (parameter >= 0) binding = functionSyntax.parameters[parameter].binding;
-    if (binding >= 0) feBindLocal(binding, feParamTypes[start + p], slot);
+    if (binding >= 0)
+      feBindLocal(binding, functions[f].parameterTypes[p], slot);
     p++;
   }
 }
@@ -4001,8 +3996,6 @@ void parseSource(SourceProgram source) {
   feGlobalInitializers.clear();
   _feLiteralTypes.clear();
   _feLiteralValues.clear();
-  feParamStarts.clear();
-  feParamTypes.clear();
   feParamDefaults.clear();
   feConstantObjects.clear();
   feConstantGetters.clear();
@@ -4033,7 +4026,7 @@ void parseSource(SourceProgram source) {
       false,
     ),
   );
-  feParamStarts.add(0);
+  feParamDefaults.add(<ConstantValue>[]);
   feOwners.add(-1);
   feConstructors.add(0);
   feSources = source;
@@ -4333,9 +4326,9 @@ void feGenerateEntry() {
       syntax.token,
       'main accepts at most two required positional parameters',
     );
-  var offset = feParamStarts[main];
   var argumentsType = listType(tString);
-  if (positional > 0 && !typingAssignable(argumentsType, feParamTypes[offset]))
+  if (positional > 0 &&
+      !typingAssignable(argumentsType, functions[main].parameterTypes[0]))
     feAstError(
       parameters[0].token,
       'first main parameter must accept List<String>',
@@ -4344,7 +4337,7 @@ void feGenerateEntry() {
   if (supplied > 2) supplied = 2;
   p = supplied;
   while (p < parameters.length) {
-    var value = feParamDefaults[offset + p];
+    var value = feParamDefaults[main][p];
     if (typeIsList(value.kind) || typeIsClass(value.kind))
       feConstantGetter(value);
     p++;
@@ -4380,7 +4373,7 @@ void feGenerateEntry() {
       } else {
         feInteger(0, tNull);
       }
-      var expected = feParamTypes[offset + p];
+      var expected = functions[main].parameterTypes[p];
       if (typeIsSubtype(actual, expected)) {
         feConvertValue(actual, expected, parameters[p].token);
       } else {
@@ -4388,7 +4381,7 @@ void feGenerateEntry() {
         feBuiltinTyped(bValueCast, 1, expected);
       }
     } else {
-      feDefaultArgument(offset + p, syntax.token);
+      feDefaultArgument(main, p, syntax.token);
     }
     p++;
   }
