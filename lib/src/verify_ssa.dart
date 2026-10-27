@@ -137,7 +137,7 @@ class _SsaVerifier {
       if (callee.parameterTypes.length != count || result != callee.result)
         fail('call metadata');
     } else if (op == opBuiltin) {
-      if (!(target >= bPrintString && target <= bFunctionInvoke ||
+      if (!(target >= bPrintString && target <= bListRemoveAt ||
           target >= bNativeLoad64 &&
               target <= bNativeFramePointer &&
               target != bNativeMetadataAddress))

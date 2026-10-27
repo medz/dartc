@@ -1,6 +1,6 @@
 # Developer tooling
 
-Run these commands from the repository root with Dart 3.13.5 on macOS/Linux ARM64. [Build the native compiler](../README.md#build-from-source) first; bootstrap verifies and saves `build/dartc-seed` for subsequent runs.
+Run these commands from the repository root with your installed Dart SDK on macOS/Linux ARM64. [Build the native compiler](../README.md#build-from-source) first; bootstrap verifies and saves `build/dartc-seed` for subsequent runs. Reports record the SDK version actually used; upgrading the SDK also upgrades the reference compiler for new comparisons.
 
 ## Compare compiler performance
 
@@ -44,6 +44,8 @@ dart tool/fuzz.dart --seed 1 --count 20
 
 Each case compares the SDK oracle, SDK-hosted dartc and native dartc. Failures retain the actual sources, dependencies, commands and a frozen compiler/runtime/tool snapshot under `build/fuzz/`.
 
+Replay requires the recorded SDK version, platform and toolchain fingerprints. An SDK upgrade is a new comparison context; it does not change an existing finding.
+
 To investigate a saved failure:
 
 1. Run the printed replay command. It uses the recorded files rather than regenerating a program from its seed.
@@ -58,4 +60,4 @@ Use `dart tool/fuzz.dart --help` for explicit rejection and runtime-failure cont
 
 ## CI
 
-The [native self-hosting workflow](../.github/workflows/native.yml) is manually dispatched. It bootstraps on Linux ARM64, runs differential, SSA verification, resource-measurement, program-benchmark and fuzz tests, and cross-compiles the compiler for macOS. Release packaging and verification are optional workflow inputs.
+The [native self-hosting workflow](../.github/workflows/native.yml) is manually dispatched. Select the local SDK version for the batch with `dart_sdk`; its default is `stable`. It bootstraps on Linux ARM64, runs differential, SSA verification, resource-measurement, program-benchmark and fuzz tests, and cross-compiles the compiler for macOS. Release packaging and verification are optional workflow inputs.

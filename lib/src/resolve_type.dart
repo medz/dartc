@@ -109,3 +109,14 @@ int resolveType(SymbolTable symbols, AstType syntax) {
     'declaration is not a type: ' + syntax.name,
   );
 }
+
+int resolvedClassOwner(SymbolTable symbols, int symbol) {
+  if (symbol < 0) return -1;
+  var declaration = symbols.declarations[symbol];
+  if (declaration.kind == symbolClass) return declaration.target;
+  if (declaration.kind == symbolAlias) {
+    var type = typeNonNullable(symbols.aliases[declaration.target].type);
+    if (typeIsClass(type)) return typeArgument(type);
+  }
+  return -1;
+}

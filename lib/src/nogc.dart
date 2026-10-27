@@ -58,6 +58,7 @@ bool _builtinThrows(int target) {
       target == bStringLastIndexOf ||
       target == bIntParse ||
       target >= bListGet && target <= bListFilled ||
+      target == bListRemoveAt ||
       target >= bValueAdd && target <= bValueUshr ||
       target >= bValueLt && target <= bValueGe ||
       target == bValueToString;

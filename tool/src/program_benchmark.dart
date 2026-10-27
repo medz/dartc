@@ -171,9 +171,6 @@ Set<String> _localClosure(
 Future<void> programBenchmark(List<String> args, String root) async {
   Directory? work;
   try {
-    if (Platform.version.split(' ').first != '3.13.5') {
-      throw StateError('Run the program benchmark with Dart SDK 3.13.5.');
-    }
     if (!Platform.isMacOS && !Platform.isLinux)
       throw UnsupportedError('Benchmark platform.');
     final aliases = <String, String>{};

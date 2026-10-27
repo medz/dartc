@@ -65,9 +65,6 @@ class DifferentialSession {
     String standard, {
     Duration timeout = const Duration(seconds: 30),
   }) async {
-    if (Platform.version.split(' ').first != '3.13.5') {
-      throw StateError('Use Dart SDK 3.13.5 as the language oracle.');
-    }
     final output = Directory('$root/build/fuzz')..createSync(recursive: true);
     final folder = output.createTempSync('run-');
     try {

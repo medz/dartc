@@ -1,6 +1,6 @@
 # 类型与泛型
 
-兼容目标为 Dart 3.13.5；状态含义见[总览](README.md#状态与证据)。
+兼容目标、SDK 对照版本与状态含义见[总览](README.md#状态与证据)。
 章节号取自固定版本的[语言规范草案][draft]；[PDF][pdf]便于阅读，但链接内容可能更新。
 [官方规范入口][entry]说明 Dart 3 规范仍未覆盖当前全部语言特性，因此还需参考补充文档与对应 SDK 行为。
 
@@ -25,7 +25,7 @@
 | §20.11 相同类型 | 部分实现 | 已支持类型按结构复用类型身份；运行时检查保留实际 List 参数和函数签名。尚无一般 `Type` 值及其公开操作。 | [types.dart](../lib/src/types.dart)：`listType`、`nullableType`、`classType`、`functionType`；[values.dart](../test/fixtures/values.dart)：`constantLists`、`typeChecks`。 |
 | §15 泛型 | 部分实现 | 能使用内建 `List<T>`；泛型类、泛型函数或方法声明未实现。 | [resolve_type.dart](../lib/src/resolve_type.dart)：`resolveType`；[values.dart](../test/fixtures/values.dart)：`typeChecks`。 |
 | §15.1 型变 | 部分实现 | List 元素参数有协变关系和运行时写入检查；用户声明的型变、覆盖和 `covariant` 参数规则未实现。 | [types.dart](../lib/src/types.dart)：`typeIsSubtype`；[runtime.dart](../lib/src/runtime.dart)：`rtListSet`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
-| [§20.3 类型别名][aliases] | 部分实现 | 类型注解中支持非泛型别名、声明库解析、前向展开与循环拒绝；普通 RHS 要求语言版本至少 2.13，2.12 仅接受直接且非可空的函数类型 RHS。Function 不能作类型别名名。泛型别名及别名作为构造/静态调用目标尚缺；FFI 别名保留独立原生签名。 | [symbols.dart](../lib/src/symbols.dart)：`TypeAlias`；[resolve_type.dart](../lib/src/resolve_type.dart)：`resolveType`；[behavior_test.dart](../test/behavior_test.dart)：`function-imports.dart`、`rejected`；[library_test.dart](../test/library_test.dart)。 |
+| [§20.3 类型别名][aliases] | 部分实现 | 类型注解中支持非泛型别名、声明库解析、前向展开与循环拒绝；普通 RHS 要求语言版本至少 2.13，2.12 仅接受直接且非可空的函数类型 RHS。Function 不能作类型别名名。用户类的非泛型别名及别名链可调用其已实现构造器，普通、new、const 与 .new 都复用实际类身份和私有性；.new 仍要求调用点版本至少 2.15。可空别名也可选择构造器及静态成员；可空别名的结果类型差异见下方兼容说明。类的静态成员访问见[类追踪](classes.md)。内建 List/String 构造别名及泛型别名仍缺，FFI 别名保留独立原生签名。 | [symbols.dart](../lib/src/symbols.dart)：`TypeAlias`；[resolve_type.dart](../lib/src/resolve_type.dart)：`resolveType`、`resolvedClassOwner`；[values.dart](../test/fixtures/values.dart)：`namedConstructors`；[behavior_test.dart](../test/behavior_test.dart)：`function-imports.dart`、`named-constructors-imports.dart`、`rejected`；[library_test.dart](../test/library_test.dart)。 |
 
 ## 空安全、推断与流分析
 
@@ -55,6 +55,8 @@
 [behavior_test.dart](../test/behavior_test.dart) 将行为程序分别交给 SDK 与原生 dartc 编译执行，并检查应拒绝的源码。
 [values.dart](../test/fixtures/values.dart) 用实际 List 推断、类型检查、成员消费和副作用使静态类型区别可观察。
 运行时失败以进程退出表示；错误对象、可捕获异常及完整诊断兼容未实现。
+
+可空类别名的隐式命名及 `.new` 调用，SDK 3.13.7 的 CFE 与 analyzer 对结果 nullability 的处理有差异：CFE 保留可空结果，未命名、显式 `new` 和 `const` 路径返回非空结果；analyzer 将这些结果均按非空类处理。dartc 的行为测试以实际 SDK 执行类型为对照。固定的 2.13/2.15 特性文档未单独解释这个差异，不据此宣称规范给出同样区分。
 
 [draft]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex
 [pdf]: https://dart.dev/to/spec-draft

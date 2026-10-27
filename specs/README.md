@@ -1,15 +1,15 @@
 # Dart 语言兼容性
 
-本目录按 Dart Language Specification 跟踪 dartc 的语言实现。兼容基线为 **Dart SDK 3.13.5 的原生语言语义**。这里只记录条款引用、当前实现、缺口和验证入口，不保存或改写官方规范副本。
+本目录按 Dart Language Specification 跟踪 dartc 的语言实现。兼容目标为 Dart 原生语言语义，官方 SDK 对照随开发机安装版本升级，当前为 **Dart SDK 3.13.7**。这里只记录条款引用、当前实现、缺口和验证入口，不保存或改写官方规范副本。
 
 编译器结构、IR、ABI、运行时和自举设计见 [architecture.md](../doc/architecture.md)，安装与使用见 [README](../README.md)。
 
 ## 规范来源
 
 - [官方规范入口](https://dart.dev/resources/language/spec)说明 Dart 3 主规范仍在完善，尚未覆盖当前全部语言特性。
-- 主规范引用 [2026-10-14 草案 PDF](https://dart.dev/to/spec-draft)的章节名和编号；其封面仍标为 `Version 2.13-dev`，不能把它当作完整的 Dart 3.13.5 规范。可追溯源码固定为 [dart-lang/language@6a254a68](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)。PDF 地址会更新；核对历史引用时以固定源码及条款名为准。
+- 主规范引用 [2026-10-14 草案 PDF](https://dart.dev/to/spec-draft)的章节名和编号；其封面仍标为 `Version 2.13-dev`，不能把它当作完整的 Dart 3 规范。可追溯源码固定为 [dart-lang/language@6a254a68](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)。PDF 地址会更新；核对历史引用时以固定源码及条款名为准。
 - 草案尚未整合的规则引用官方 [accepted 特性规范](https://github.com/dart-lang/language/tree/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted)。`future-releases` 和未接受的提案不自动进入兼容基线。
-- 官方 SDK 3.13.5 和 [SDK 语言测试](https://github.com/dart-lang/sdk/tree/3.13.5/tests/language)用于差分验证。遇到规范草案与参考实现不一致，应在对应条目记录具体差异和来源，不能静默选择方便实现的行为。
+- 本机官方 SDK 和 [SDK 语言测试](https://github.com/dart-lang/sdk/tree/3.13.7/tests/language)用于差分验证，结果记录实际 SDK 版本与工具链指纹。遇到规范草案与参考实现不一致，应在对应条目记录具体差异和来源，不能静默选择方便实现的行为。
 
 章节号只用于定位所引用的草案，不作为本项目自己的规则编号。标准库 API 使用对应 API 文档作补充引用；实现若干库方法不能作为语言条款已经满足的证据。
 
@@ -55,4 +55,4 @@
 
 ## 维护要求
 
-语言变更应同步更新所属条目的支持范围、缺口、上游引用和行为测试入口。绑定、类型检查、流分析与运行时约束必须随语法一起落实；验证复用现有编译执行测试，并对照 SDK 3.13.5 的成功与拒绝行为。
+语言变更应同步更新所属条目的支持范围、缺口、上游引用和行为测试入口。绑定、类型检查、流分析与运行时约束必须随语法一起落实；验证复用现有编译执行测试，并对照实际使用的 SDK 的成功与拒绝行为。

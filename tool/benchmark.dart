@@ -80,9 +80,6 @@ Future<void> main(List<String> args) async {
   var cleanupTargets = false;
   Directory? measurementDirectory;
   try {
-    if (!comparing && Platform.version.split(' ').first != '3.13.5') {
-      throw StateError('Run the reference benchmark with Dart SDK 3.13.5.');
-    }
     if (!Platform.isMacOS && !Platform.isLinux) {
       throw StateError('The benchmark supports macOS and Linux.');
     }
@@ -249,7 +246,9 @@ Future<void> main(List<String> args) async {
       nativeBuild['path'] = native;
       nativeBuild['size_bytes'] = File(native).lengthSync();
       builds['native'] = nativeBuild;
-      stdout.writeln('Building official AOT reference with Dart SDK 3.13.5.');
+      stdout.writeln(
+        'Building official AOT reference with Dart SDK ${Platform.version.split(' ').first}.',
+      );
       final officialBuild = await measure(sdk, [
         'compile',
         'exe',

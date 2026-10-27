@@ -29,7 +29,7 @@ Never _initError(SymbolTable symbols, int token, String message) {
 }
 
 bool _requiresInitializer(SymbolTable symbols, AstVariable variable) {
-  if (variable.modifier == 'final') return true;
+  if (variable.modifier == 'final' || variable.modifier == 'const') return true;
   return variable.type.name != '' &&
       !typeCanBeNull(resolveType(symbols, variable.type));
 }
@@ -52,6 +52,14 @@ void checkInitializers(SymbolTable symbols, AstUnit unit) {
       var field = owner.fields[f];
       if (field.modifier == 'const') {
         _initError(symbols, field.token, 'const instance field');
+      }
+      f++;
+    }
+    f = 0;
+    while (f < owner.staticFields.length) {
+      var field = owner.staticFields[f];
+      if (field.initializer.isEmpty && _requiresInitializer(symbols, field)) {
+        _initError(symbols, field.token, 'missing static initializer');
       }
       f++;
     }

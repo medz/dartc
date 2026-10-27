@@ -594,6 +594,31 @@ int rtListRemoveLast(int list, int expectedType) {
   return value;
 }
 
+int rtListRemoveAt(int list, int index, int expectedType) {
+  if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
+    return rtListFixedError();
+  }
+  var mark = -1;
+  if (rtListElementType(list) != expectedType) {
+    mark = rtRootMark();
+    rtRootPush(list, storageRef);
+  }
+  var value = rtListGet(list, index, expectedType);
+  var length = nativeLoad64(list + listLengthOffset) - 1;
+  var backing = nativeLoad64(list + listBackingOffset);
+  while (index < length) {
+    nativeStore64(
+      backing + arrayDataOffset + index * 8,
+      nativeLoad64(backing + arrayDataOffset + (index + 1) * 8),
+    );
+    index++;
+  }
+  nativeStore64(backing + arrayLengthOffset, length);
+  nativeStore64(list + listLengthOffset, length);
+  if (mark >= 0) rtRootRestore(mark);
+  return value;
+}
+
 int rtListClear(int list) {
   if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
     return rtListFixedError();

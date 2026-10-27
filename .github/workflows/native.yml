@@ -3,6 +3,11 @@ name: Native self-hosting
 on:
   workflow_dispatch:
     inputs:
+      dart_sdk:
+        description: Dart SDK version for this validation batch
+        required: false
+        default: stable
+        type: string
       package_release:
         description: Package and verify the native Linux release archive
         required: false
@@ -20,7 +25,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dart-lang/setup-dart@v1
         with:
-          sdk: '3.13.5'
+          sdk: '${{ inputs.dart_sdk }}'
           architecture: arm64
       - run: dart tool/bootstrap.dart
       - run: dart test/differential_test.dart --compiler build/dartc-stage2

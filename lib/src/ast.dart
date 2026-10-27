@@ -168,6 +168,7 @@ class AstFunction {
   bool getter;
   bool setter = false;
   bool constant = false;
+  bool isStatic = false;
 
   AstFunction(
     this.name,
@@ -185,6 +186,7 @@ class AstClass {
   List<AstExpression> metadata = const <AstExpression>[];
   String name;
   List<AstVariable> fields;
+  List<AstVariable> staticFields = const <AstVariable>[];
   List<AstFunction> constructors;
   List<AstFunction> methods;
   int token;

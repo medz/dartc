@@ -1754,6 +1754,36 @@ void listGrowth(List<String> args) {
   print(nested[1][0]);
   var words = List<String>.filled(2, '中文');
   print(words[1]);
+  var positions = <int>[0, 1, 2, 3, 4];
+  print(positions.removeAt(0));
+  print(positions.removeAt(1));
+  print(positions.removeAt(positions.length - 1));
+  print(positions);
+  var nullable = <int?>[null, -9223372036854775808, 9223372036854775807];
+  print(nullable.removeAt(1));
+  print(nullable.removeAt(0));
+  print(nullable);
+  var references = <String?>['字🙂', null, 'tail'];
+  print(references.removeAt(1));
+  print(references.removeAt(0));
+  print(references);
+  var booleans = <bool>[false, true, false];
+  print(booleans.removeAt(1));
+  print(booleans);
+  var boxes = <Box>[Box(3), Box(5)];
+  print(boxes.removeAt(0).value);
+  print(boxes[0].value);
+  List<Object?> widened = <int>[-9223372036854775808, 0, 9223372036854775807];
+  print(widened.removeAt(2));
+  print(widened);
+  var mixed = <Object?>[false, 9223372036854775807, '字🙂', null];
+  print(mixed.removeAt(1));
+  print(mixed);
+  assignmentStorage = <int>[-9223372036854775808, 5];
+  assignmentTrace = 0;
+  print(assignmentReceiver().removeAt(assignmentIndex()));
+  print(assignmentTrace);
+  print(assignmentStorage);
   print(args.length);
   print(args[0]);
 }
@@ -2026,6 +2056,10 @@ class NamedChoice {
   int named(int extra) => value + extra;
 }
 
+typedef ChoiceAlias = NamedChoice;
+typedef ChainedChoice = ChoiceAlias;
+typedef NullableChoice = NamedChoice?;
+
 RedirectOrder? redirectSeen;
 
 class RedirectOrder {
@@ -2054,21 +2088,30 @@ class NewAlias {
   const NewAlias.new([this.value = 5]);
 }
 
+typedef NewChoiceAlias = NewAlias;
+
 void namedConstructors() {
-  const first = NamedChoice.named();
+  const first = ChoiceAlias.named();
   const same = NamedChoice.other();
+  print(<bool>[
+    pass([NullableChoice(4)]) is List<NamedChoice>,
+    pass([NullableChoice.named(4)]) is List<NamedChoice>,
+    pass([NullableChoice.new(4)]) is List<NamedChoice>,
+    pass([new NullableChoice.named(4)]) is List<NamedChoice>,
+    pass([const NullableChoice.named(4)]) is List<NamedChoice>,
+  ]);
   print(identical(first, same));
-  print(identical(first, NamedChoice.named()));
-  print(NamedChoice.named(7).named(1));
-  print(NamedChoice.other(value: 9).value);
+  print(identical(first, ChainedChoice.named()));
+  print(ChoiceAlias(7).named(1));
+  print(ChainedChoice.other(value: 9).value);
   print(NamedOnly.pick(6).value);
   print(identical(const NewAlias(), const NewAlias.new()));
   print(identical(NewAlias(), NewAlias.new()));
-  print(NewAlias.new(8).value);
-  print(new NamedChoice.named(9).named(1));
+  print(NewChoiceAlias.new(8).value);
+  print(new ChoiceAlias.named(9).named(1));
   print(new NewAlias(6).value);
   print(identical(new NewAlias.new(), const NewAlias()));
-  print(identical(first, const NamedChoice.chain()));
+  print(identical(first, const ChainedChoice.chain()));
   print(identical(first, NamedChoice.chain()));
   print(NamedChoice.forward().value);
   print(NamedChoice.chain(value: 8).value);
@@ -2079,7 +2122,84 @@ void namedConstructors() {
   print(<int>[redirected.first, redirected.second, redirected.declared]);
 }
 
+class StaticBox {
+  final int instanceValue;
+  const StaticBox(this.instanceValue);
+  static int value = initializerMark(1, 3);
+  static final int frozen = initializerMark(2, 7);
+  static int skipped = initializerMark(9, 99);
+  static int unused = initializerMark(8, 88);
+  static int? absent;
+  static dynamic unspecified;
+  static var inferred = value + 1;
+  static const int seed = 4;
+  static const StaticBox object = StaticBox(seed);
+  static int get total => value + frozen;
+  static set total(int next) {
+    value = next - frozen;
+  }
+
+  static int get split => value;
+  static set split(String next) {
+    value = next.length;
+  }
+
+  static set frozen(String next) {
+    value = next.length;
+  }
+
+  static set seed(int next) {
+    value = next;
+  }
+
+  static int twice(int value) => value * 2;
+  static int shadow(int value) => value;
+  static IntCallback get callback {
+    functionTrace = functionTrace * 10 + 2;
+    return functionStep;
+  }
+
+  int read() => twice(instanceValue) + value;
+  int static() => instanceValue;
+}
+
+typedef StaticAlias = StaticBox?;
+
+void staticMembers() {
+  initializerTrace = 0;
+  print(initializerTrace);
+  StaticBox.skipped = 5;
+  print(initializerTrace);
+  print(StaticBox.total);
+  print(initializerTrace);
+  StaticAlias.total += 2;
+  print(StaticAlias.total);
+  print(initializerTrace);
+  print(StaticBox.skipped);
+  print(StaticBox.absent);
+  print(StaticBox.unspecified);
+  print(StaticBox.split = 'text');
+  StaticBox.frozen = 'abcdef';
+  print(StaticBox.frozen);
+  StaticBox.seed = 9;
+  print(StaticBox.seed);
+  print(StaticBox.value);
+  print(StaticBox.inferred);
+  print(StaticBox(3).read());
+  print(StaticBox(5).static());
+  print(StaticAlias.shadow(20));
+  print(StaticAlias.object.instanceValue);
+  const callback = StaticAlias.twice;
+  int Function(int) typed = callback;
+  print(typed(8));
+  print(identical(callback, StaticBox.twice));
+  functionTrace = 0;
+  print(StaticBox.callback(functionArgument()));
+  print(functionTrace);
+}
+
 void main(List<String> args) {
+  staticMembers();
   namedConstructors();
   constructorInitializers();
   metadataValues();

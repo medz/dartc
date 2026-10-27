@@ -1082,13 +1082,29 @@ AstClass parserClass(Parser parser, int token) {
   var name = parserName(parser);
   parserExpect(parser, '{');
   List<AstVariable> fields = <AstVariable>[];
+  List<AstVariable>? staticFields;
   List<AstFunction> constructors = <AstFunction>[];
   List<AstFunction> methods = <AstFunction>[];
   while (!parserIs(parser, '}')) {
     var metadata = parserMetadata(parser);
     var memberToken = parser.position;
+    var external = parserTake(parser, 'external');
+    var isStatic = false;
+    if (parserIs(parser, 'static')) {
+      var next = parser.tokens[parser.position + 1];
+      if (!tokenIs(next, '(') &&
+          !tokenIs(next, '=') &&
+          !tokenIs(next, ',') &&
+          !tokenIs(next, ';')) {
+        parser.position++;
+        isStatic = true;
+      }
+    }
     var constant = parserTake(parser, 'const');
     if (parserConstructorAhead(parser, name)) {
+      if (isStatic) parserError(parser, 'constructors cannot be static');
+      if (external)
+        parserError(parser, 'external constructors are unsupported');
       var constructorToken = parser.position;
       parser.position++;
       var constructorName = name;
@@ -1112,10 +1128,10 @@ AstClass parserClass(Parser parser, int token) {
       constructor.metadata = metadata;
       constructors.add(constructor);
     } else {
-      if (constant)
+      if (constant && !isStatic)
         parserError(parser, 'const requires a constructor declaration');
-      var external = parserTake(parser, 'external');
-      var modifier = parserModifier(parser);
+      var modifier = 'const';
+      if (!constant) modifier = parserModifier(parser);
       var getter =
           parserIs(parser, 'get') &&
           parser.tokens[parser.position + 1].kind == tokenIdentifier;
@@ -1132,8 +1148,10 @@ AstClass parserClass(Parser parser, int token) {
         member = parserName(parser);
       }
       if (getter || setter || parserIs(parser, '(')) {
-        if ((getter || setter) && modifier != '') {
-          parserError(parser, 'accessors cannot have variable modifiers');
+        if (constant)
+          parserError(parser, 'const requires a constructor declaration');
+        if (modifier != '') {
+          parserError(parser, 'methods cannot have variable modifiers');
         }
         var method = parserFunction(
           parser,
@@ -1146,6 +1164,7 @@ AstClass parserClass(Parser parser, int token) {
           false,
         );
         method.metadata = metadata;
+        method.isStatic = isStatic;
         methods.add(method);
       } else {
         if (external) parserError(parser, 'external fields are not supported');
@@ -1159,14 +1178,19 @@ AstClass parserClass(Parser parser, int token) {
         );
         var i = 0;
         while (i < variables.length) {
-          fields.add(variables[i]);
+          if (isStatic)
+            (staticFields ??= <AstVariable>[]).add(variables[i]);
+          else
+            fields.add(variables[i]);
           i++;
         }
       }
     }
   }
   parserExpect(parser, '}');
-  return AstClass(name, fields, constructors, methods, token);
+  var result = AstClass(name, fields, constructors, methods, token);
+  if (staticFields != null) result.staticFields = staticFields;
+  return result;
 }
 
 AstTypedef parserTypedef(Parser parser, int token) {

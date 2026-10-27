@@ -70,7 +70,10 @@ class ConstantContext {
   List<_ConstantInvocation> invocations = <_ConstantInvocation>[];
   List<ClassMembers> classMembers = const <ClassMembers>[];
   List<List<int>> classConstructors = const <List<int>>[];
-  ClassMembers? instanceScope;
+  int lexicalClass = -1;
+  List<List<int>> classStaticGlobals = const <List<int>>[];
+  List<List<int>> classFunctions = const <List<int>>[];
+  List<int> globalOwners = const <int>[];
   int identical = -1;
 
   ConstantContext(this.symbols, this.globals, this.globalTypes) {
@@ -125,9 +128,9 @@ ConstantValue _constantGlobal(
     );
   }
   context.states[global] = 1;
-  var scope = context.instanceScope;
+  var scope = context.lexicalClass;
   var parameters = context.initializerParameters;
-  context.instanceScope = null;
+  context.lexicalClass = context.globalOwners[global];
   context.initializerParameters = const <ConstantValue>[];
   var value = _evaluateConstant(
     context,
@@ -136,7 +139,7 @@ ConstantValue _constantGlobal(
     declared,
     true,
   );
-  context.instanceScope = scope;
+  context.lexicalClass = scope;
   context.initializerParameters = parameters;
   var type = declared;
   if (type < 0) {
@@ -170,18 +173,24 @@ ConstantValue evaluateMetadataConstant(
   else if (expression.kind == astName && expression.binding >= 0)
     value = _evaluateConstant(context, expression, true, -1, true);
   else {
-    var symbol = _constantSymbol(context, expression);
-    if (symbol < 0 || context.symbols.declarations[symbol].kind != symbolGlobal)
-      _constantError(
+    var owner = _constantStaticOwner(context, expression);
+    if (owner >= 0) {
+      value = _constantStaticReference(context, expression, owner, true, true);
+    } else {
+      var symbol = _constantSymbol(context, expression);
+      if (symbol < 0 ||
+          context.symbols.declarations[symbol].kind != symbolGlobal)
+        _constantError(
+          context,
+          expression.token,
+          'metadata reference requires an unambiguous const declaration',
+        );
+      value = _constantGlobal(
         context,
-        expression.token,
-        'metadata reference requires an unambiguous const declaration',
+        context.symbols.declarations[symbol].target,
+        true,
       );
-    value = _constantGlobal(
-      context,
-      context.symbols.declarations[symbol].target,
-      true,
-    );
+    }
   }
   if (value.type == tVoid)
     _constantError(
@@ -420,20 +429,102 @@ int _constantSymbol(ConstantContext context, AstExpression expression) {
   } else {
     return -1;
   }
-  var scope = context.instanceScope;
+  var scope = context.lexicalClass;
   var name = expression.text;
   if (prefix != '') name = prefix;
-  if (scope != null && lookupMember(scope, name) >= 0)
-    _constantError(
-      context,
-      expression.token,
-      'constant expression cannot reference an instance member',
-    );
+  if (scope >= 0 && lookupMember(context.classMembers[scope], name) >= 0)
+    return -1;
   return resolveSymbol(
     context.symbols,
     context.symbols.program.tokens[expression.token].source,
     expression.text,
     prefix,
+  );
+}
+
+int _constantStaticOwner(ConstantContext context, AstExpression expression) {
+  if (expression.kind == astName && expression.binding < 0) {
+    var owner = context.lexicalClass;
+    if (owner >= 0 &&
+        lookupMember(context.classMembers[owner], expression.text) >= 0)
+      return owner;
+  } else if (expression.kind == astMember) {
+    var receiver = expression.children[0];
+    var symbol = _constantSymbol(context, receiver);
+    var owner = resolvedClassOwner(context.symbols, symbol);
+    if (owner >= 0) {
+      if (receiver.typeArguments.isNotEmpty)
+        _constantError(
+          context,
+          receiver.token,
+          'nongeneric class does not accept type arguments',
+        );
+      return owner;
+    }
+  }
+  return -1;
+}
+
+ConstantValue _constantStaticReference(
+  ConstantContext context,
+  AstExpression expression,
+  int owner,
+  bool active,
+  bool metadata,
+) {
+  if (expression.typeArguments.isNotEmpty)
+    _constantError(
+      context,
+      expression.token,
+      'type application values are unsupported',
+    );
+  var index = lookupMember(context.classMembers[owner], expression.text);
+  if (index < 0)
+    _constantError(context, expression.token, 'unknown static member');
+  var member = context.classMembers[owner].members[index];
+  if (!member.isStatic)
+    _constantError(
+      context,
+      expression.token,
+      'constant expression cannot reference an instance member',
+    );
+  var source = context.symbols.program;
+  var declarationSource = sourceUnknown;
+  var global = -1;
+  var function = -1;
+  if (member.staticField >= 0) {
+    global = context.classStaticGlobals[owner][member.staticField];
+    declarationSource = source.tokens[context.globals[global].token].source;
+  } else {
+    var method = member.method;
+    if (method < 0) method = member.getter;
+    if (method < 0) method = member.setter;
+    function = context.classFunctions[owner][method];
+    declarationSource = functions[function].source;
+  }
+  if (member.name.startsWith('_') &&
+      sourceLibrary(source, source.tokens[expression.token].source) !=
+          sourceLibrary(source, declarationSource))
+    _constantError(
+      context,
+      expression.token,
+      'private member is not accessible',
+    );
+  if (global >= 0) return _constantGlobal(context, global, active);
+  if (member.method >= 0 && !metadata) {
+    var type = functionValueType(function);
+    if (type < 0)
+      _constantError(
+        context,
+        expression.token,
+        'constant reference to this function shape is not supported',
+      );
+    return ConstantValue(type, tFunction, function, '');
+  }
+  _constantError(
+    context,
+    expression.token,
+    'constant expression requires a const declaration',
   );
 }
 
@@ -549,14 +640,14 @@ ConstantValue _constantDeclaration(
   if (owner.states[slot] == 1)
     _constantError(context, token, 'cyclic constant initializer');
   owner.states[slot] = 1;
-  var scope = context.instanceScope;
+  var scope = context.lexicalClass;
   var parameters = context.initializerParameters;
-  context.instanceScope = owner.members;
+  context.lexicalClass = owner.classId;
   context.initializerParameters = const <ConstantValue>[];
   var value = ConstantValue(tNull, tNull, 0, '');
   if (expression != null)
     value = _evaluateConstant(context, expression, true, type, false);
-  context.instanceScope = scope;
+  context.lexicalClass = scope;
   context.initializerParameters = parameters;
   value = _constantChecked(context, value, type, token, true);
   owner.values[slot] = value;
@@ -700,10 +791,10 @@ void checkConstantConstructors(ConstantContext context) {
           parameters.add(ConstantValue(owner.parameterTypes[p], tNull, 0, ''));
           p++;
         }
-        var scope = context.instanceScope;
+        var scope = context.lexicalClass;
         var previous = context.initializerParameters;
         var allow = context.allowInitializerParameters;
-        context.instanceScope = owner.members;
+        context.lexicalClass = owner.classId;
         context.initializerParameters = _constantParameterFrame(
           owner,
           parameters,
@@ -726,7 +817,7 @@ void checkConstantConstructors(ConstantContext context) {
             i++;
           }
         }
-        context.instanceScope = scope;
+        context.lexicalClass = scope;
         context.initializerParameters = previous;
         context.allowInitializerParameters = allow;
       }
@@ -747,7 +838,7 @@ ConstantValue _constantInvoke(
     var type = classType(owner.classId);
     return ConstantValue(type, type, -1, '');
   }
-  var scope = context.instanceScope;
+  var scope = context.lexicalClass;
   var previous = context.initializerParameters;
   var allow = context.allowInitializerParameters;
   var depth = context.invocations.length;
@@ -774,7 +865,7 @@ ConstantValue _constantInvoke(
       call++;
     }
     context.invocations.add(_ConstantInvocation(owner, parameters));
-    context.instanceScope = owner.members;
+    context.lexicalClass = owner.classId;
     if (owner.syntax.initializers.isNotEmpty)
       context.initializerParameters = _constantParameterFrame(
         owner,
@@ -825,7 +916,7 @@ ConstantValue _constantInvoke(
     }
     i++;
   }
-  context.instanceScope = scope;
+  context.lexicalClass = scope;
   context.initializerParameters = previous;
   context.allowInitializerParameters = allow;
   while (context.invocations.length > depth) context.invocations.removeLast();
@@ -856,40 +947,28 @@ ConstantValue _constantConstructor(
   var callee = expression.children[0];
   var classExpression = callee;
   var symbol = _constantSymbol(context, callee);
+  var classId = resolvedClassOwner(context.symbols, symbol);
   var name = '';
-  if (symbol < 0 || context.symbols.declarations[symbol].kind != symbolClass) {
-    if (callee.kind == astMember) {
-      classExpression = callee.children[0];
-      symbol = _constantSymbol(context, classExpression);
-      if (symbol >= 0 &&
-          context.symbols.declarations[symbol].kind == symbolClass)
-        name = constructorSelector(
-          context.symbols.program,
-          callee.text,
-          callee.token,
-        );
-    }
+  if (classId < 0 && callee.kind == astMember) {
+    classExpression = callee.children[0];
+    symbol = _constantSymbol(context, classExpression);
+    classId = resolvedClassOwner(context.symbols, symbol);
+    if (classId >= 0)
+      name = constructorSelector(
+        context.symbols.program,
+        callee.text,
+        callee.token,
+      );
   }
-  if (symbol < 0 || context.symbols.declarations[symbol].kind != symbolClass)
+  if (classId < 0)
     _constantError(
       context,
       expression.token,
       'constant expression requires a const constructor',
     );
-  var declaration = context.symbols.declarations[symbol];
-  var classId = declaration.target;
   var constructor = lookupConstructor(context.classMembers[classId], name);
   if (constructor < 0)
     _constantError(context, callee.token, 'unknown constructor');
-  var source = context.symbols.program;
-  if (name.startsWith('_') &&
-      sourceLibrary(source, source.tokens[callee.token].source) !=
-          sourceLibrary(source, declaration.source))
-    _constantError(
-      context,
-      callee.token,
-      'private constructor is not accessible',
-    );
   var function = context.classConstructors[classId][constructor];
   ConstantConstructorInfo? owner;
   if (function < context.constructors.length)
@@ -899,6 +978,15 @@ ConstantValue _constantConstructor(
       context,
       expression.token,
       'constant constructor requires const',
+    );
+  var source = context.symbols.program;
+  if (name.startsWith('_') &&
+      sourceLibrary(source, source.tokens[callee.token].source) !=
+          sourceLibrary(source, source.tokens[owner.owner.token].source))
+    _constantError(
+      context,
+      callee.token,
+      'private constructor is not accessible',
     );
   if (expression.typeArguments.isNotEmpty ||
       classExpression.typeArguments.isNotEmpty)
@@ -970,6 +1058,15 @@ ConstantValue _evaluateConstant(
         context.localTypes[binding],
       );
     }
+    var owner = _constantStaticOwner(context, expression);
+    if (owner >= 0)
+      return _constantStaticReference(
+        context,
+        expression,
+        owner,
+        active,
+        false,
+      );
     return _constantReference(
       context,
       expression,
@@ -978,6 +1075,15 @@ ConstantValue _evaluateConstant(
     );
   }
   if (kind == astMember) {
+    var owner = _constantStaticOwner(context, expression);
+    if (owner >= 0)
+      return _constantStaticReference(
+        context,
+        expression,
+        owner,
+        active,
+        false,
+      );
     var receiver = expression.children[0];
     var symbol = _constantSymbol(context, expression);
     if (symbol != -1) {

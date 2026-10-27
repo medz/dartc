@@ -104,6 +104,7 @@ const int bHostReadIfExists = 60;
 const int bHostCurrentDirectory = 61;
 const int bFunctionEntry = 62;
 const int bFunctionInvoke = 63;
+const int bListRemoveAt = 64;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;

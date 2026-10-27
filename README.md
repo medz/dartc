@@ -52,19 +52,19 @@ The capabilities below refer to this source revision. See [published versions](h
 
 ## Dart compatibility
 
-The compatibility baseline is Dart 3.13.5, with complete language implementation as the target. The [specification tracker](specs/README.md) records current behavior, remaining gaps and owning tests by upstream language clause.
+The [specification tracker](specs/README.md) records the reference SDK, current behavior, remaining gaps and owning tests by upstream language clause. Complete Dart language compatibility is the target.
 
 | Area | Implemented behavior |
 | --- | --- |
 | Values | Native integers, booleans, Unicode strings, nullable values, typed lists and runtime type checks |
-| Declarations | Top-level variables, lazy initialization, simple classes, fields, named/unnamed constructors with field initializer lists, getters and setters |
+| Declarations | Top-level variables, lazy initialization, simple classes, instance/static fields and methods, named/unnamed constructors with field initializer lists, getters and setters |
 | Functions | Direct calls, recursion, local and anonymous functions without runtime captures, optional/named direct arguments, required-positional function values and structural function types |
 | Control flow | Blocks, assignments, conditions, loops, labelled jumps, constant switch cases and returns |
 | Libraries | Relative, file/package imports and exports, prefixes, filters, conditional URIs and library parts |
 | Constants | Scalar/list constants, canonical const instances, metadata and supported core pragmas |
 | Core APIs | print, command-line arguments, basic String/List operations and StringBuffer object/character writing |
 
-Capturing closures, inheritance, general generics and dynamic member calls, mixins, extensions, records, patterns, exceptions, async code, isolates and most SDK libraries are not implemented. General optional/named function-value signatures and method/constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
+Capturing closures, inheritance, general generics and dynamic member calls, mixins, extensions, records, patterns, exceptions, async code, isolates and most SDK libraries are not implemented. General optional/named function-value signatures and bound instance method/constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
 
 Package configuration v2 supplies local package mappings and default language versions. A leading `// @dart = major.minor` comment can select an implemented versioned rule from 2.12 through 3.13; this is not complete compatibility with those language versions. See [libraries](specs/libraries.md) and [lexical structure](specs/lexical-structure.md).
 
@@ -88,7 +88,7 @@ Compiler and runtime sources must have matching ABIs. Keep them from the same re
 
 ## Build from source
 
-Development validation uses Dart 3.13.5 on macOS/Linux ARM64.
+Development validation uses the installed Dart SDK on macOS/Linux ARM64. Differential and benchmark reports record the SDK version used.
 
 ```sh
 git clone https://github.com/medz/dartc.git

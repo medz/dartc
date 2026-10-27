@@ -764,6 +764,7 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "class C { static set value(int next) { print('setter'); } } dynamic bad() { print('rhs'); return 'wrong'; } void main() { print('before'); C.value = bad(); }",
       "dynamic redirectedArgument() { print('rhs'); return 'wrong'; } class C { final int value; C.base(this.value) { print('body'); } C(dynamic value):this.base(value); } void main() { print('before'); C(redirectedArgument()); }",
       "dynamic badInitializer() { print('rhs'); return 'wrong'; } class C { final int value; C():value=badInitializer() { print('body'); } } void main() { print('before'); C(); }",
       "typedef F=int Function(int); String wrong(int value)=>'wrong'; int argument(){print('argument');return 1;} void main(){print('before');dynamic source=wrong;F callback=source;print(callback(argument()));}",
@@ -828,6 +829,11 @@ void main() {
       "void main() { var values = <int>[1]; print('before'); values[1] = 2; print('after'); }",
       "int value() { print('rhs'); return 2; } void main() { var values = <int>[]; print('before'); values[0] = value(); print('after'); }",
       "void main() { var values = <int>[]; print('before'); values.removeLast(); print('after'); }",
+      "List<int> receiver() { print('receiver'); return <int>[1]; } int index() { print('index'); return -1; } void main() { print('before'); receiver().removeAt(index()); print('after'); }",
+      "void main() { var values = <int>[1]; print('before'); values.removeAt(1); print('after'); }",
+      "void main() { var values = List<int>.filled(1, 1); print('before'); values.removeAt(-1); print('after'); }",
+      "void main() { print('before'); const <int>[].removeAt(0); print('after'); }",
+      "dynamic index() { print('index'); return 'wrong'; } void main() { print('before'); const <int>[1].removeAt(index()); print('after'); }",
       "void main() { var values = <int>[1, 2]; print('before'); for (final value in values) { values.clear(); print(value); } print('after'); }",
       "void main() { var values = <int>[1]; print('before'); for (final value in values) { if (value == 1) values.add(2); print(value); } print('after'); }",
       "void main() { var values = <int>[1]; print('before'); for (final value in values) { values.clear(); print(value); continue; } print('after'); }",
@@ -1230,28 +1236,65 @@ class NamedScope {
   NamedScope.named();
   int read() => named();
 }
+typedef NamedLibraryAlias = NamedLibraryChoice;
+typedef ChainedLibraryAlias = NamedLibraryAlias;
 NamedLibraryChoice hiddenChoice() => partChoice;
 ''',
       'named-constructors-part.dart': r'''
 part of 'named-constructors-library.dart';
 const partChoice = NamedLibraryChoice._hidden(3);
 ''',
-      'named-constructors-export.dart': "export 'named-constructors-library.dart' show NamedLibraryChoice, NamedScope, hiddenChoice;",
+      'named-constructors-export.dart': "export 'named-constructors-library.dart' show NamedLibraryChoice, NamedLibraryAlias, ChainedLibraryAlias, NamedScope, hiddenChoice;",
       'named-constructors-imports.dart': r'''
 import 'named-constructors-library.dart' as direct;
 import 'named-constructors-export.dart' as p;
-@p.NamedLibraryChoice.chain(value: 5)
-@p.NamedLibraryChoice.new(6)
+@p.ChainedLibraryAlias.chain(value: 5)
+@p.NamedLibraryAlias.new(6)
 void annotated() {}
-int selected([p.NamedLibraryChoice value = const p.NamedLibraryChoice.chain(value: 9)]) => value.value;
+int selected([p.NamedLibraryChoice value = const p.ChainedLibraryAlias.chain(value: 9)]) => value.value;
 void main() {
-  const first = p.NamedLibraryChoice.named();
+  const first = p.NamedLibraryAlias.named();
   print(identical(first, const direct.NamedLibraryChoice.other()));
   print(identical(p.hiddenChoice(), const direct.NamedLibraryChoice(3)));
   print(p.NamedScope.named().read());
   print(selected());
-  print(new p.NamedLibraryChoice.named(10).value);
+  print(new p.ChainedLibraryAlias.named(10).value);
   print(identical(const p.NamedLibraryChoice.chain(), p.hiddenChoice()));
+}
+''',
+      'static-members-library.dart': r'''
+library static.members;
+part 'static-members-part.dart';
+class StaticLibrary {
+  static int _count = 3;
+  static const int seed = 7;
+  static int get count => _count;
+  static int add(int amount) { _count += amount; return _count; }
+  static int _read() => _count;
+  static int fromPart() => staticPartRead();
+}
+''',
+      'static-members-part.dart': r'''
+part of 'static-members-library.dart';
+int staticPartRead() => StaticLibrary._read();
+''',
+      'static-members-export.dart':
+          "export 'static-members-library.dart' show StaticLibrary;",
+      'static-members-imports.dart': r'''
+import 'static-members-library.dart' as direct;
+import 'static-members-export.dart' as p;
+@p.StaticLibrary.seed
+void annotated() {}
+int selected([int value = p.StaticLibrary.seed]) => value;
+void main() {
+  print(p.StaticLibrary.count);
+  const callback = p.StaticLibrary.add;
+  int Function(int) typed = callback;
+  print(identical(typed, direct.StaticLibrary.add));
+  print(typed(2));
+  print(direct.StaticLibrary.count);
+  print(p.StaticLibrary.fromPart());
+  print(selected());
 }
 ''',
       'const-class-first.dart': "class Item { final int value; const Item(this.value); } const item = Item(7);",
@@ -1298,10 +1341,33 @@ void main() {
       [],
     );
     await compare(File('${temporary.path}/redirect-finite-constant.dart'), []);
+    await compare(File('${temporary.path}/static-members-imports.dart'), []);
     await compare(File('${temporary.path}/function-imports.dart'), []);
     await compare(File('${temporary.path}/conditional-imports.dart'), []);
     await compare(File('${temporary.path}/parts-main.dart'), []);
     final rejected = [
+      'class C{C.named();}typedef A=C?;void main(){List<C> values=[A.named()];print(values);}',
+      "import 'named-constructors-export.dart' as p;typedef LocalAlias=p.NamedLibraryChoice;void main(){LocalAlias._hidden(3);}",
+      "import 'named-constructors-export.dart' as p;typedef LocalAlias=p.NamedLibraryChoice;const value=LocalAlias._hidden(3);void main(){}",
+      '// @dart=2.14\nclass C{C();}typedef A=C;void main(){A.new();}',
+      "class C{static String toString()=>'';}void main(){}",
+      'class C{static int hashCode=0;}void main(){}',
+      'class C{C.named();static int named()=>1;}void main(){}',
+      'class C{static int value=1;int value=2;}void main(){}',
+      'class C{static int get value=>1;set value(int next){}}void main(){}',
+      'class C{static int value=1;static set value(int next){}}void main(){}',
+      'class C{static int method()=>1;static int get method=>2;}void main(){}',
+      'int value=9;class C{int value=1;static int read()=>value;}void main(){}',
+      'class C{static int read()=>this.hashCode;}void main(){}',
+      'class C{static int value=1;}void main(){print(C().value);}',
+      'class C{static int value;}void main(){}',
+      'class C{static final int? value;}void main(){}',
+      'int ordinary()=>1;class C{static const int value=ordinary();}void main(){}',
+      'class C{static int value="wrong";}void main(){}',
+      'class C{static final int value=1;}void main(){C.value=2;}',
+      'class C{static int value=1;C(this.value);}void main(){}',
+      "import 'static-members-export.dart' as p;void main(){print(p.StaticLibrary._count);}",
+      "import 'static-members-export.dart' as p;void main(){print(p.StaticLibrary._read());}",
       'class C{C():this();}void main(){}',
       'class C{C.first():this.second();C.second():this.first();}void main(){}',
       'class C{int value;C.base(this.value);C.bad(this.value):this.base(value);}void main(){}',
@@ -1382,6 +1448,8 @@ void main() {
       "@pragma('dartc:no-gc') int checked(String value,int index)=>value.codeUnitAt(index);void main(){print(checked('a',0));}",
       "@pragma('dartc:no-gc') int checked(String value)=>int.parse(value);void main(){print(checked('7'));}",
       "@pragma('dartc:no-gc') void checked(List<int> values){values.clear();}void main(){var values=<int>[1];checked(values);print(values.length);}",
+      "@pragma('dartc:no-gc') int checked(List<int> values,int index)=>values.removeAt(index);void main(){}",
+      "void main(){@pragma('dartc:no-gc') int checked(List<int> values,int index)=>values.removeAt(index);}",
       "\ufeff#!/usr/bin/env dart\n// @dart=3.6\nvoid main(){print(1_000);}\n",
       "// @dart=3.5\nvoid main(){print(1_000);}",
       // The accepted versioning specification permits tabs in a marker.

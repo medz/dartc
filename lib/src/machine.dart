@@ -302,7 +302,8 @@ void machineSelectInstruction(
     } else if (target == bListNew ||
         target == bListFilled ||
         target == bListGet ||
-        target == bListRemoveLast) {
+        target == bListRemoveLast ||
+        target == bListRemoveAt) {
       typeId = source.resultType;
     } else if (target == bListAdd) {
       typeId = types[source.inputs[1]];

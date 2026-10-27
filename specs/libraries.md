@@ -1,7 +1,7 @@
 # 库、脚本与并发边界
 
 本页索引 §19 与 §6.3；词法作用域和私有性见[词法结构](lexical-structure.md)。
-条号依据[官方草案 PDF][pdf]；条款链接固定到[固定 LaTeX 源码][spec]。语言兼容基线为 Dart 3.13.5。
+条号依据[官方草案 PDF][pdf]；条款链接固定到[固定 LaTeX 源码][spec]。SDK 对照版本见[总览](README.md)。
 
 状态含义见[总览](README.md#状态与证据)。
 

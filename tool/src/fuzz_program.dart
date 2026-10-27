@@ -26,6 +26,14 @@ const _constructorForms = <String>[
   'newNamed',
   'newAlias',
 ];
+const _constructorFormsV4 = <String>[
+  ..._constructorForms,
+  'redirect',
+  'newRedirect',
+  'staticMethod',
+  'staticGetter',
+  'staticField',
+];
 
 class GeneratedProgram {
   final int seed;
@@ -37,7 +45,8 @@ class GeneratedProgram {
   String get source {
     final result = StringBuffer();
     if (_version == 3)
-      result.write(r'''
+      result.write(
+        r'''
 class FuzzInt {
   final int value;
   const FuzzInt.new(int first, int second) : value = first - second;
@@ -47,6 +56,30 @@ class FuzzBool {
   final bool value;
   const FuzzBool.new(bool first, bool second) : value = first && !second;
   const FuzzBool.named(bool first, {required bool second}) : value = first && !second;
+}
+''',
+      );
+    else if (_version == 4)
+      result.write(r'''
+class FuzzInt {
+  final int value;
+  const FuzzInt.new(int first, int second) : value = first - second;
+  const FuzzInt.named(int first, {required int second}) : value = first - second;
+  const FuzzInt.redirect(int first, int second) : this.named(first, second: second);
+  static int calculate(int first, int second) { note(34); return first - second; }
+  static int Function(int, int) get callback { note(32); return calculate; }
+  static int Function(int, int) cached = initialize();
+  static int Function(int, int) initialize() { note(33); return calculate; }
+}
+class FuzzBool {
+  final bool value;
+  const FuzzBool.new(bool first, bool second) : value = first && !second;
+  const FuzzBool.named(bool first, {required bool second}) : value = first && !second;
+  const FuzzBool.redirect(bool first, bool second) : this.named(first, second: second);
+  static bool calculate(bool first, bool second) { note(37); return first && !second; }
+  static bool Function(bool, bool) get callback { note(35); return calculate; }
+  static bool Function(bool, bool) cached = initialize();
+  static bool Function(bool, bool) initialize() { note(36); return calculate; }
 }
 ''');
     result.write(r'''
@@ -94,7 +127,7 @@ void main() {
 
 GeneratedProgram programFromJson(Map<String, Object?> model) {
   final version = _integer(model['version']);
-  if (version != 2 && version != 3)
+  if (version != 2 && version != 3 && version != 4)
     throw const FormatException('Unknown program model');
   final seed = _integer(model['seed']);
   if (seed < 0 || seed > 0xffffffff) {
@@ -139,17 +172,21 @@ GeneratedProgram generateProgram(int seed) {
     ),
     statement(
       'value',
-      _operation('constructInt', [
+      _construct(
+        _Type.integer,
         _tap(9, _operation('value')),
         _tap(10, _integerExpression(random, 1)),
-      ], _constructorForms[seed % _constructorForms.length]),
+        seed % _constructorFormsV4.length,
+      ),
     ),
     statement(
       'flag',
-      _operation('constructBool', [
+      _construct(
+        _Type.boolean,
         _tap(11, _operation('flag')),
         _tap(12, _bool(random.next(2) == 0)),
-      ], _constructorForms[(seed + 2) % _constructorForms.length]),
+        (seed + 2) % _constructorFormsV4.length,
+      ),
     ),
     // Both operands cross real call boundaries; a large count cannot be folded.
     statement(
@@ -181,7 +218,12 @@ GeneratedProgram generateProgram(int seed) {
           'value',
           _operation('combine', [
             _operation('value'),
-            _integerExpression(random, 1),
+            _construct(
+              _Type.integer,
+              _operation('value'),
+              _integerExpression(random, 1),
+              seed % _constructorFormsV4.length,
+            ),
           ]),
         ),
         statement('flag', _boolean(random, 2)),
@@ -196,7 +238,7 @@ GeneratedProgram generateProgram(int seed) {
       ]),
     ),
   ];
-  return GeneratedProgram._(seed, statements, 3);
+  return GeneratedProgram._(seed, statements, 4);
 }
 
 class _Random {
@@ -212,6 +254,16 @@ _Expression _int(String value) => _operation('int', const [], value);
 _Expression _bool(bool value) => _operation('bool', const [], value.toString());
 _Expression _tap(int tag, _Expression value) =>
     _operation('tap', [value], '', tag);
+
+_Expression _construct(
+  _Type type,
+  _Expression first,
+  _Expression second,
+  int form,
+) => _operation(type == _Type.integer ? 'constructInt' : 'constructBool', [
+  first,
+  second,
+], _constructorFormsV4[form]);
 
 _Expression _integerExpression(_Random random, int depth) {
   if (depth == 0) {
@@ -245,10 +297,12 @@ _Expression _integerExpression(_Random random, int depth) {
         _integerExpression(random, depth - 1),
       ]);
     case 5:
-      return _operation('constructInt', [
+      return _construct(
+        _Type.integer,
         _integerExpression(random, depth - 1),
         _integerExpression(random, depth - 1),
-      ], _constructorForms[random.next(_constructorForms.length)]);
+        random.next(_constructorFormsV4.length),
+      );
     default:
       return _tap(8 + random.next(20), _integerExpression(random, depth - 1));
   }
@@ -278,10 +332,12 @@ _Expression _boolean(_Random random, int depth) {
         _boolean(random, depth - 1),
       ]);
     case 4:
-      return _operation('constructBool', [
+      return _construct(
+        _Type.boolean,
         _boolean(random, depth - 1),
         _boolean(random, depth - 1),
-      ], _constructorForms[random.next(_constructorForms.length)]);
+        random.next(_constructorFormsV4.length),
+      );
     default:
       return _tap(8 + random.next(20), _boolean(random, depth - 1));
   }
@@ -304,10 +360,19 @@ class _Expression {
     }
     if (_constructors.contains(op)) {
       final name = type == _Type.integer ? 'FuzzInt' : 'FuzzBool';
+      if (value == 'staticMethod' ||
+          value == 'staticGetter' ||
+          value == 'staticField') {
+        var member = 'calculate';
+        if (value == 'staticGetter') member = 'callback';
+        if (value == 'staticField') member = 'cached';
+        return '$name.$member(${args[0].source}, ${args[1].source})';
+      }
       final prefix = value.startsWith('new') ? 'new ' : '';
       var suffix = '';
       if (value == 'named' || value == 'newNamed') suffix = '.named';
       if (value == 'newAlias') suffix = '.new';
+      if (value == 'redirect' || value == 'newRedirect') suffix = '.redirect';
       final named = suffix == '.named' ? 'second: ' : '';
       return '($prefix$name$suffix(${args[0].source}, $named${args[1].source}).value)';
     }
@@ -394,7 +459,7 @@ _Expression _operation(
   } else if (_constructors.contains(op)) {
     count = 2;
     type = op == 'constructInt' ? _Type.integer : _Type.boolean;
-    if (!_constructorForms.contains(value) ||
+    if (!_constructorFormsV4.contains(value) ||
         args.length != count ||
         args.any((argument) => argument.type != type))
       throw const FormatException('Invalid constructor expression');
@@ -575,8 +640,11 @@ _Expression _expressionFromJson(Object? value, int version) {
   var payload = '';
   if (op == 'int' || op == 'bool')
     payload = _string(model['value']);
-  else if (_constructors.contains(op))
+  else if (_constructors.contains(op)) {
     payload = _string(model['form']);
+    if (version < 4 && !_constructorForms.contains(payload))
+      throw const FormatException('Constructor form requires model 4');
+  }
   final expression = _operation(
     op,
     [

@@ -1,4 +1,5 @@
 import 'ast.dart';
+import 'members.dart';
 import 'source.dart';
 
 const int symbolFunction = 1;
@@ -28,6 +29,7 @@ class DeclarationSymbol {
   int setter = -1;
   int accessors = 0;
   bool writable = false;
+  List<InterfaceMember> instanceMembers = const <InterfaceMember>[];
 
   DeclarationSymbol(this.source, this.name, this.kind, this.target);
 }
@@ -81,6 +83,18 @@ int declareSymbol(
   var symbol = table.declarations.length;
   table.declarations.add(DeclarationSymbol(source, name, kind, target));
   _indexDeclaration(table, symbol);
+  return symbol;
+}
+
+int declareObjectType(SymbolTable table, int type) {
+  var symbol = declareSymbol(table, sourceCore, 'Object', symbolType, type);
+  table.declarations[symbol].instanceMembers = const <InterfaceMember>[
+    InterfaceMember('==', interfaceMethod),
+    InterfaceMember('hashCode', interfaceGetter),
+    InterfaceMember('noSuchMethod', interfaceMethod),
+    InterfaceMember('runtimeType', interfaceGetter),
+    InterfaceMember('toString', interfaceMethod),
+  ];
   return symbol;
 }
 
