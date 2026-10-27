@@ -64,7 +64,7 @@ The [specification tracker](specs/README.md) records the reference SDK, current 
 | Constants | Scalar/list constants, canonical const instances, metadata and supported core pragmas |
 | Core APIs | print, command-line arguments, basic String/List operations and StringBuffer object/character writing |
 
-Inheritance, generic classes and functions, dynamic member calls, mixins, extensions, records, patterns, exceptions, async code, isolates and most SDK libraries are not implemented. Capturing functions with optional/named parameters, general optional/named function-value signatures and bound instance method/constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
+Inheritance, generic classes and functions, dynamic member calls, mixins, extensions, records, patterns, exceptions, async code, isolates and most SDK libraries are not implemented. Capturing functions with optional/named parameters, general optional/named function-value signatures and constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
 
 Package configuration v2 supplies local package mappings and default language versions. A leading `// @dart = major.minor` comment can select an implemented versioned rule from 2.12 through 3.13; this is not complete compatibility with those language versions. See [libraries](specs/libraries.md) and [lexical structure](specs/lexical-structure.md).
 

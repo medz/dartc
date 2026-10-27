@@ -1873,6 +1873,10 @@ class FeListLiteral {
   int inferred = -1;
 
   FeListLiteral(this.context, this.slot);
+
+  void lowerBody(AstStatement body) {
+    feLowerListElement(body.expressions[0], this);
+  }
 }
 
 int feLowerList(AstExpression expression, int context) {
@@ -1927,15 +1931,11 @@ void feLowerListElement(AstExpression expression, FeListLiteral literal) {
     }
     feFlow = flowUnsplit(feJoinFlow(trueFlow, feFlow));
   } else if (expression.kind == astForElement) {
-    void lowerElement(AstStatement body) {
-      feLowerListElement(body.expressions[0], literal);
-    }
-
     var loop = expression.loop!;
     if (loop.kind == astForInStatement)
-      feLowerForIn(loop, lowerElement);
+      feLowerForIn(loop, literal.lowerBody);
     else
-      feLowerWhileFor(loop, lowerElement);
+      feLowerWhileFor(loop, literal.lowerBody);
   } else if (expression.kind == astSpreadElement) {
     feLowerListSpread(expression, literal);
   } else if (expression.kind == astNullAwareElement) {

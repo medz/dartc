@@ -64,7 +64,7 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 可执行文件产物支持将顶层函数、静态方法、绑定实例方法、局部函数和匿名函数作为值存储、传参、返回或放入 typed List，并通过具体的非泛型必需位置签名调用或 `.call`。目标文件、静态库和动态库产物不支持 Dart 函数值。可选/命名函数值、泛型、构造器提取及 dynamic/裸 `Function` 调用尚未实现。
 
-[实例方法闭包化][instance-closurization]支持已绑定类声明的非泛型必需位置方法，包括显式/隐式 this、嵌套闭包内提取、跨库可见性及空短路接收者。接收者只求值一次，方法值持续持有该对象；相同对象的同一方法比较相等，不同对象或方法不相等。普通闭包仍按自身身份比较；不规定重复方法提取的 `identical` 结果。实例方法引用不是常量，未使用函数和未执行常量分支也须检查这一义务。String/List 的 builtin 方法提取、继承/super 分派以及 Function.hashCode 等继承 API 仍缺。验证入口为 [values.dart](../test/fixtures/values.dart) 的 `functionValues`、[behavior_test.dart](../test/behavior_test.dart) 的 `function-imports.dart`、拒例与失败用例，以及 [roots.dart](../test/fixtures/roots.dart) 的 `closureRoots`。
+[实例方法闭包化][instance-closurization]支持已绑定类声明的非泛型必需位置方法，包括显式/隐式 this、嵌套闭包内提取、跨库可见性及空短路接收者。接收者只求值一次，方法值持续持有该对象；相同对象的同一方法比较相等，不同对象或方法不相等。普通闭包仍按自身身份比较；不规定重复方法提取的 `identical` 结果。实例方法引用不是常量，未使用函数和未执行常量分支也须检查这一义务。仍以 builtin 分支实现的方法提取、继承/super 分派以及 Function.hashCode 等继承 API 仍缺。验证入口为 [values.dart](../test/fixtures/values.dart) 的 `functionValues`、[behavior_test.dart](../test/behavior_test.dart) 的 `function-imports.dart`、拒例与失败用例，以及 [roots.dart](../test/fixtures/roots.dart) 的 `closureRoots`。
 
 顶层函数和静态方法引用可用于常量，局部声明引用与匿名表达式不因此成为 const。无捕获局部函数对象可按声明共享；跨调用的对象身份是实现选择，不能依赖 SDK 某次分配行为。重复读取同一作用域中的局部声明仍保持身份，依据[函数闭包化规则][closurization]。
 
