@@ -482,7 +482,7 @@ bool filledGrowable() {
 }
 
 void filledLists() {
-  var values = List<int>.filled(
+  var values = new List<int>.filled(
     filledLength(),
     filledValue(),
     growable: filledGrowable(),
@@ -1682,7 +1682,7 @@ void stringBoundaries() {
     print(text.startsWith('', start));
   }
   print(text.codeUnitAt(3));
-  var codes = String.fromCharCodes(<int>[0, 55296, 120, 57343, 1114111]);
+  var codes = new String.fromCharCodes(<int>[0, 55296, 120, 57343, 1114111]);
   print(codes.length);
   print(codes.codeUnitAt(1));
   print(codes.codeUnitAt(3));
@@ -2033,6 +2033,9 @@ void namedConstructors() {
   print(identical(const NewAlias(), const NewAlias.new()));
   print(identical(NewAlias(), NewAlias.new()));
   print(NewAlias.new(8).value);
+  print(new NamedChoice.named(9).named(1));
+  print(new NewAlias(6).value);
+  print(identical(new NewAlias.new(), const NewAlias()));
 }
 
 void main(List<String> args) {

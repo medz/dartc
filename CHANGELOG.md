@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Support explicit `new` for implemented class constructors and existing List/String factory entries, preserving constant-expression restrictions.
 - Support named generative and const constructors, library-private constructor access and the `.new` unnamed-constructor alias.
 - Support field initializer lists in ordinary and const constructors, preserving initialization order and constructor parameter scopes.
 - Decode integer literal boundaries consistently in native and SDK-hosted compilers, including direct negative literals, parentheses and 64-bit hexadecimal values.

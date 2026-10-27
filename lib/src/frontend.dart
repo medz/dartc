@@ -1889,6 +1889,8 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
   if (declaration.source == sourceFfi &&
       name == 'Pointer' &&
       member == 'fromFunction') {
+    if (call.text == astCallNew)
+      feAstError(call.token, 'new cannot invoke a static method');
     return feLowerPointerBinding(call);
   }
   if (call.typeArguments.length != 0)
@@ -1896,6 +1898,8 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
   if (declaration.source == sourceCore &&
       name == 'List' &&
       member == 'filled') {
+    if (call.text == astCallValue)
+      feAstError(call.token, 'constructor tear-off invocation is unsupported');
     var lengthArgument = -1;
     var valueArgument = -1;
     var growableArgument = -1;
@@ -1969,6 +1973,8 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
   if (declaration.source == sourceCore &&
       name == 'String' &&
       member == 'fromCharCodes') {
+    if (call.text == astCallValue)
+      feAstError(call.token, 'constructor tear-off invocation is unsupported');
     if (call.children.length != 2)
       feAstError(call.token, 'String.fromCharCodes requires one List argument');
     var count = feLowerBuiltinArguments(call, bStringFromCodes);
@@ -1976,6 +1982,8 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
     return tString;
   }
   if (declaration.source == sourceCore && name == 'int' && member == 'parse') {
+    if (call.text == astCallNew)
+      feAstError(call.token, 'new cannot invoke a static method');
     var count = feLowerBuiltinArguments(call, bIntParse);
     feBuiltin(bIntParse, count);
     return tInt;
@@ -2284,36 +2292,15 @@ int feLowerConstructorCall(
 int feLowerCall(AstExpression call, int context) {
   checkArgumentOrder(feSources, call);
   var callee = feWithReceiver(call.children[0]);
-  if (callee.kind == astFunctionExpression)
-    return feLowerImmediateCall(call, callee);
-  if (callee.kind == astName && callee.binding >= 0) {
-    var local = feBindings.variables[callee.binding].function;
-    if (local >= 0) {
-      var function = feLocalStart + local;
-      var count = feLowerArguments(call, 1, function);
-      feCall(function, count);
-      return functions[function].result;
-    }
-  }
   var symbol = feExpressionSymbol(callee, false);
-  if (symbol >= 0) {
-    var declaration = feSymbols.declarations[symbol];
-    if (declaration.kind == symbolFunction) {
-      var function = declaration.target;
-      var count = feLowerArguments(call, 1, function);
-      feCall(function, count);
-      return functions[function].result;
-    }
-    if (declaration.kind == symbolBuiltin) {
-      return feLowerBuiltinCall(call, declaration.target);
-    }
-    if (declaration.kind == symbolClass)
-      return feLowerConstructorCall(call, declaration.target, '', callee.token);
-    var value = feLoadDeclaration(symbol, callee.token);
-    if (value == tNever) return feLowerNeverArguments(call);
-    return feLowerFunctionCall(call, value);
-  }
-  if (callee.kind == astMember) {
+  if (symbol >= 0 && feSymbols.declarations[symbol].kind == symbolClass)
+    return feLowerConstructorCall(
+      call,
+      feSymbols.declarations[symbol].target,
+      '',
+      callee.token,
+    );
+  if (symbol < 0 && callee.kind == astMember) {
     var receiver = callee.children[0];
     var owner = feExpressionSymbol(receiver, false);
     if (owner >= 0 && feSymbols.declarations[owner].kind == symbolClass) {
@@ -2329,11 +2316,37 @@ int feLowerCall(AstExpression call, int context) {
         callee.token,
       );
     }
-    if (owner >= 0 && feSymbols.declarations[owner].kind == symbolType) {
+    if (owner >= 0 && feSymbols.declarations[owner].kind == symbolType)
       return feLowerStaticCall(call, owner, context);
-    }
-    return feLowerMemberCall(call, callee);
   }
+  if (call.text == astCallNew)
+    feAstError(call.token, 'new requires a constructor');
+  if (callee.kind == astFunctionExpression)
+    return feLowerImmediateCall(call, callee);
+  if (callee.kind == astName && callee.binding >= 0) {
+    var local = feBindings.variables[callee.binding].function;
+    if (local >= 0) {
+      var function = feLocalStart + local;
+      var count = feLowerArguments(call, 1, function);
+      feCall(function, count);
+      return functions[function].result;
+    }
+  }
+  if (symbol >= 0) {
+    var declaration = feSymbols.declarations[symbol];
+    if (declaration.kind == symbolFunction) {
+      var function = declaration.target;
+      var count = feLowerArguments(call, 1, function);
+      feCall(function, count);
+      return functions[function].result;
+    }
+    if (declaration.kind == symbolBuiltin)
+      return feLowerBuiltinCall(call, declaration.target);
+    var value = feLoadDeclaration(symbol, callee.token);
+    if (value == tNever) return feLowerNeverArguments(call);
+    return feLowerFunctionCall(call, value);
+  }
+  if (callee.kind == astMember) return feLowerMemberCall(call, callee);
   var value = feLowerExpression(callee);
   if (value == tNever) return feLowerNeverArguments(call);
   return feLowerFunctionCall(call, value);

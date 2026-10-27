@@ -655,6 +655,12 @@ ConstantValue _constantConstructor(
   bool implicitConst,
 ) {
   checkArgumentOrder(context.symbols.program, expression);
+  if (expression.text == astCallNew)
+    _constantError(
+      context,
+      expression.token,
+      'new expression is not a constant expression',
+    );
   if (expression.text == astCallValue)
     _constantError(
       context,

@@ -23,6 +23,7 @@
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
 | §17.12 `this`、§17.13 实例创建 | 部分实现 | 支持当前类实例、字段、普通构造器与字段形参；支持已实现 const 生成式构造子集及规范化实例；工厂、重定向和父类构造链未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feWithReceiver`、`feLowerStaticCall`；[values.dart](../test/fixtures/values.dart)：`localBindings`、`argumentCalls`、`constObjects`。 |
+| [§17.13.1 `new` 表达式][new-expression] | 部分实现 | 前导 `new` 必须解析到已实现的类构造器，可调用未命名、命名与 `.new` 别名，并保留原有参数检查和求值顺序；支持既有 `List.filled`、`String.fromCharCodes` 构造入口。普通函数、getter、函数值及静态方法不因 `new` 变成构造器；`new` 在嵌套或未执行的常量分支中也不是常量。一般工厂、泛型类、重定向和继承构造仍缺。 | [ast.dart](../lib/src/ast.dart)：`astCallNew`；[parser.dart](../lib/src/parser.dart)：`parserPrimary`；[frontend.dart](../lib/src/frontend.dart)：`feLowerCall`；[constants.dart](../lib/src/constants.dart)：`_constantConstructor`；[values.dart](../test/fixtures/values.dart)：`namedConstructors`、`filledLists`、`stringBoundaries`；[behavior_test.dart](../test/behavior_test.dart)：`named-constructors-imports.dart`、`rejected`。 |
 | [§17.14 函数表达式][function-expressions] | 部分实现 | 支持同步非泛型、无运行时捕获的匿名箭头体与块体，以及签名上下文推断；字面量直接调用和 `.call` 支持可选/命名参数。一般函数值签名限制与捕获缺口见[函数](functions.md)。 | [parser.dart](../lib/src/parser.dart) `parserFunctionExpression()`；[frontend.dart](../lib/src/frontend.dart) `feLowerFunctionExpression()`；[behavior_test.dart](../test/behavior_test.dart) `program/anonymousFunctions()`、`rejected`。 |
 | §17.15 函数调用 | 部分实现 | 必需/可选位置参数、命名/required 参数、声明库范围内的默认常量；实参按源码顺序求值后绑定。调用的类型实参与 callee 自有类型分开存储；已有普通函数、构造器和方法拒绝不匹配的类型实参。支持具体非泛型必需位置签名的值调用及 `.call`，参数和结果按静态签名检查；可选/命名函数值签名、泛型以及 dynamic/裸 Function 调用尚缺。 | [arguments.dart](../lib/src/frontend/arguments.dart)：`bindArguments`；[frontend.dart](../lib/src/frontend.dart)：`feLowerArguments`、`feLowerFunctionCall`；[values.dart](../test/fixtures/values.dart)：`argumentCalls`、`functionValues`。 |
 | [§17.16 函数提取][closurization] | 部分实现 | 非泛型、仅必需位置参数的顶层函数可作为值，按声明规范化身份并保留仅经值引用的目标。绑定实例方法、静态方法、构造器提取及捕获闭包尚缺。 | [frontend.dart](../lib/src/frontend.dart)：`feFunctionReference`；[reach.dart](../lib/src/reach.dart)：`reachableFunctions`；[values.dart](../test/fixtures/values.dart)：`functionValues`；[behavior_test.dart](../test/behavior_test.dart)：`function-imports.dart`。 |
@@ -88,3 +89,5 @@ SDK 3.13.5 对 `??=` 有两处 analyzer/CFE 差异待核对：`void` getter 作�
 
 [numbers]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L9232-L9353
 [negative-literals]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L16817-L16845
+
+[new-expression]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L12273-L12375

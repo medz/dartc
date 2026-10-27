@@ -330,8 +330,14 @@ AstExpression parserFunctionExpression(Parser parser) {
 AstExpression parserPrimary(Parser parser) {
   var token = parser.position;
   var current = parser.tokens[token];
-  if (parserIs(parser, 'new'))
-    parserError(parser, 'explicit new constructor expressions are unsupported');
+  if (parserTake(parser, 'new')) {
+    var expression = parserMetadatum(parser);
+    if (expression.kind != astCall)
+      parserError(parser, 'new requires a constructor invocation');
+    expression.text = astCallNew;
+    expression.token = token;
+    return expression;
+  }
   if (current.kind == tokenInteger) {
     parser.position++;
     return AstExpression(

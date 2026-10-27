@@ -21,6 +21,7 @@ const int astFunctionExpression = 19;
 const String astCallIdentifier = 'identifier';
 const String astCallSelector = 'selector';
 const String astCallValue = 'value';
+const String astCallNew = 'new';
 
 class AstType {
   String name;

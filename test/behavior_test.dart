@@ -1245,6 +1245,7 @@ void main() {
   print(identical(p.hiddenChoice(), const direct.NamedLibraryChoice(3)));
   print(p.NamedScope.named().read());
   print(selected());
+  print(new p.NamedLibraryChoice.named(10).value);
 }
 ''',
       'const-class-first.dart': "class Item { final int value; const Item(this.value); } const item = Item(7);",
@@ -1293,6 +1294,18 @@ void main() {
     await compare(File('${temporary.path}/conditional-imports.dart'), []);
     await compare(File('${temporary.path}/parts-main.dart'), []);
     final rejected = [
+      '// @dart=2.12\nvoid main(){(List<int>.filled)(1,3);}',
+      '// @dart=2.12\nvoid main(){(String.fromCharCodes)(<int>[65]);}',
+      "void main(){new int.parse('7');}",
+      "import 'dart:ffi';typedef Callback=Int64 Function(Int64);int target(int value)=>value;void main(){new Pointer.fromFunction<Callback>(target,0);}",
+      'int value()=>1;void main(){new value();}',
+      'int target()=>1;int Function() get value=>target;void main(){new value();}',
+      'void main(){int value()=>1;new value();}',
+      'int target()=>1;void main(){var value=target;new value();}',
+      'class C{const C();}const value=new C();void main(){}',
+      'class C{const C();}const values=<C>[new C()];void main(){}',
+      'class C{const C();}const value=true?null:new C();void main(){}',
+      'class Child{const Child();}class C{final Child child;const C():child=new Child();}void main(){}',
       // Constructor tear-offs are valid Dart but are not yet supported.
       'class C{C.named();}void main(){(C.named)();}',
       '// @dart=2.12\nclass C{C.named();}void main(){(C.named)();}',
