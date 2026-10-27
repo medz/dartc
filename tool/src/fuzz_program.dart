@@ -18,15 +18,38 @@ const _counts = <String>['0', '1', '31', '32', '62', '63', '64', '65', '127'];
 const _arithmetic = <String>['+', '-', '*', '&', '|', '^'];
 const _comparisons = <String>['==', '!=', '<', '<=', '>', '>='];
 const _shifts = <String>['<<', '>>', '>>>'];
+const _constructors = <String>['constructInt', 'constructBool'];
+const _constructorForms = <String>[
+  'call',
+  'named',
+  'new',
+  'newNamed',
+  'newAlias',
+];
 
 class GeneratedProgram {
   final int seed;
   final List<_Statement> _statements;
+  final int _version;
 
-  GeneratedProgram._(this.seed, this._statements);
+  GeneratedProgram._(this.seed, this._statements, this._version);
 
   String get source {
-    final result = StringBuffer(r'''
+    final result = StringBuffer();
+    if (_version == 3)
+      result.write(r'''
+class FuzzInt {
+  final int value;
+  const FuzzInt.new(int first, int second) : value = first - second;
+  const FuzzInt.named(int first, {required int second}) : value = first - second;
+}
+class FuzzBool {
+  final bool value;
+  const FuzzBool.new(bool first, bool second) : value = first && !second;
+  const FuzzBool.named(bool first, {required bool second}) : value = first && !second;
+}
+''');
+    result.write(r'''
 int trace = 0;
 void note(int tag) { trace = (trace * 33 + tag) % 1000000007; }
 int tapInt(int tag, int value) { note(tag); return value; }
@@ -48,25 +71,30 @@ void main() {
   }
 
   Map<String, Object?> toJson() => {
-    'version': 2,
+    'version': _version,
     'seed': seed,
     'statements': [for (final statement in _statements) statement.toJson()],
   };
 
   Iterable<GeneratedProgram> reductions() sync* {
     for (var i = 0; i < _statements.length; i++) {
-      yield GeneratedProgram._(seed, _without(_statements, i));
+      yield GeneratedProgram._(seed, _without(_statements, i), _version);
     }
     for (var i = 0; i < _statements.length; i++) {
       for (final smaller in _statements[i].reductions()) {
-        yield GeneratedProgram._(seed, _replace(_statements, i, smaller));
+        yield GeneratedProgram._(
+          seed,
+          _replace(_statements, i, smaller),
+          _version,
+        );
       }
     }
   }
 }
 
 GeneratedProgram programFromJson(Map<String, Object?> model) {
-  if (_integer(model['version']) != 2)
+  final version = _integer(model['version']);
+  if (version != 2 && version != 3)
     throw const FormatException('Unknown program model');
   final seed = _integer(model['seed']);
   if (seed < 0 || seed > 0xffffffff) {
@@ -75,8 +103,8 @@ GeneratedProgram programFromJson(Map<String, Object?> model) {
   final ids = <int>{};
   return GeneratedProgram._(seed, [
     for (final value in _list(model['statements']))
-      _statementFromJson(value, ids),
-  ]);
+      _statementFromJson(value, ids, version),
+  ], version);
 }
 
 GeneratedProgram generateProgram(int seed) {
@@ -108,6 +136,20 @@ GeneratedProgram generateProgram(int seed) {
         ]),
         _operation('!', [_tap(4, _bool(random.next(2) == 0))]),
       ]),
+    ),
+    statement(
+      'value',
+      _operation('constructInt', [
+        _tap(9, _operation('value')),
+        _tap(10, _integerExpression(random, 1)),
+      ], _constructorForms[seed % _constructorForms.length]),
+    ),
+    statement(
+      'flag',
+      _operation('constructBool', [
+        _tap(11, _operation('flag')),
+        _tap(12, _bool(random.next(2) == 0)),
+      ], _constructorForms[(seed + 2) % _constructorForms.length]),
     ),
     // Both operands cross real call boundaries; a large count cannot be folded.
     statement(
@@ -154,7 +196,7 @@ GeneratedProgram generateProgram(int seed) {
       ]),
     ),
   ];
-  return GeneratedProgram._(seed, statements);
+  return GeneratedProgram._(seed, statements, 3);
 }
 
 class _Random {
@@ -176,7 +218,7 @@ _Expression _integerExpression(_Random random, int depth) {
     if (random.next(3) == 0) return _operation('value');
     return _int(_integers[random.next(_integers.length)]);
   }
-  switch (random.next(7)) {
+  switch (random.next(8)) {
     case 0:
       return _operation(random.next(2) == 0 ? 'negate' : '~', [
         _integerExpression(random, depth - 1),
@@ -202,6 +244,11 @@ _Expression _integerExpression(_Random random, int depth) {
         _integerExpression(random, depth - 1),
         _integerExpression(random, depth - 1),
       ]);
+    case 5:
+      return _operation('constructInt', [
+        _integerExpression(random, depth - 1),
+        _integerExpression(random, depth - 1),
+      ], _constructorForms[random.next(_constructorForms.length)]);
     default:
       return _tap(8 + random.next(20), _integerExpression(random, depth - 1));
   }
@@ -212,7 +259,7 @@ _Expression _boolean(_Random random, int depth) {
     if (random.next(3) == 0) return _operation('flag');
     return _tap(8 + random.next(20), _bool(random.next(2) == 0));
   }
-  switch (random.next(5)) {
+  switch (random.next(8)) {
     case 0:
       return _operation('!', [_boolean(random, depth - 1)]);
     case 1:
@@ -230,6 +277,11 @@ _Expression _boolean(_Random random, int depth) {
         _boolean(random, depth - 1),
         _boolean(random, depth - 1),
       ]);
+    case 4:
+      return _operation('constructBool', [
+        _boolean(random, depth - 1),
+        _boolean(random, depth - 1),
+      ], _constructorForms[random.next(_constructorForms.length)]);
     default:
       return _tap(8 + random.next(20), _boolean(random, depth - 1));
   }
@@ -250,6 +302,15 @@ class _Expression {
       final name = type == _Type.integer ? 'tapInt' : 'tapBool';
       return '$name($tag, ${args[0].source})';
     }
+    if (_constructors.contains(op)) {
+      final name = type == _Type.integer ? 'FuzzInt' : 'FuzzBool';
+      final prefix = value.startsWith('new') ? 'new ' : '';
+      var suffix = '';
+      if (value == 'named' || value == 'newNamed') suffix = '.named';
+      if (value == 'newAlias') suffix = '.new';
+      final named = suffix == '.named' ? 'second: ' : '';
+      return '($prefix$name$suffix(${args[0].source}, $named${args[1].source}).value)';
+    }
     if (op == 'combine' || op == 'decide' || op.startsWith('shift')) {
       return '$op(${args[0].source}, ${args[1].source})';
     }
@@ -265,6 +326,7 @@ class _Expression {
     'op': op,
     if (op == 'int' || op == 'bool') 'value': value,
     if (op == 'tap') 'tag': tag,
+    if (_constructors.contains(op)) 'form': value,
     'args': [for (final argument in args) argument.toJson()],
   };
 
@@ -284,6 +346,8 @@ class _Expression {
       if (value == 'true') yield _bool(false);
       return;
     }
+    if (_constructors.contains(op) && value != 'call')
+      yield _operation(op, args, 'call');
     yield type == _Type.integer ? _int('0') : _bool(false);
     for (final argument in args) {
       if (argument.type == type) yield argument;
@@ -327,6 +391,13 @@ _Expression _operation(
         args[1].type != args[2].type)
       throw const FormatException('Invalid conditional');
     type = args[1].type;
+  } else if (_constructors.contains(op)) {
+    count = 2;
+    type = op == 'constructInt' ? _Type.integer : _Type.boolean;
+    if (!_constructorForms.contains(value) ||
+        args.length != count ||
+        args.any((argument) => argument.type != type))
+      throw const FormatException('Invalid constructor expression');
   } else if (op == 'negate' || op == '~' || op == '!') {
     count = 1;
     type = op == '!' ? _Type.boolean : _Type.integer;
@@ -496,16 +567,23 @@ int _integer(Object? value) {
   return value;
 }
 
-_Expression _expressionFromJson(Object? value) {
+_Expression _expressionFromJson(Object? value, int version) {
   final model = _map(value);
   final op = _string(model['op']);
+  if (version == 2 && _constructors.contains(op))
+    throw const FormatException('Constructor expressions require model 3');
+  var payload = '';
+  if (op == 'int' || op == 'bool')
+    payload = _string(model['value']);
+  else if (_constructors.contains(op))
+    payload = _string(model['form']);
   final expression = _operation(
     op,
     [
       for (final argument in _list(model['args']))
-        _expressionFromJson(argument),
+        _expressionFromJson(argument, version),
     ],
-    op == 'int' || op == 'bool' ? _string(model['value']) : '',
+    payload,
     op == 'tap' ? _integer(model['tag']) : 0,
   );
   if (model['type'] != (expression.type == _Type.integer ? 'int' : 'bool'))
@@ -513,7 +591,7 @@ _Expression _expressionFromJson(Object? value) {
   return expression;
 }
 
-_Statement _statementFromJson(Object? value, Set<int> ids) {
+_Statement _statementFromJson(Object? value, Set<int> ids, int version) {
   final model = _map(value);
   final id = _integer(model['id']);
   if (id < 0 || !ids.add(id))
@@ -522,7 +600,7 @@ _Statement _statementFromJson(Object? value, Set<int> ids) {
     );
   final op = _string(model['op']);
   if (op == 'value' || op == 'flag' || op == 'if') {
-    final expression = _expressionFromJson(model['expression']);
+    final expression = _expressionFromJson(model['expression'], version);
     if (expression.type != (op == 'value' ? _Type.integer : _Type.boolean))
       throw const FormatException('Statement type mismatch');
     return _Statement(
@@ -532,13 +610,13 @@ _Statement _statementFromJson(Object? value, Set<int> ids) {
       body: op == 'if'
           ? [
               for (final statement in _list(model['body']))
-                _statementFromJson(statement, ids),
+                _statementFromJson(statement, ids, version),
             ]
           : const [],
       otherwise: op == 'if'
           ? [
               for (final statement in _list(model['otherwise']))
-                _statementFromJson(statement, ids),
+                _statementFromJson(statement, ids, version),
             ]
           : const [],
     );
@@ -554,7 +632,7 @@ _Statement _statementFromJson(Object? value, Set<int> ids) {
     bound: bound,
     body: [
       for (final statement in _list(model['body']))
-        _statementFromJson(statement, ids),
+        _statementFromJson(statement, ids, version),
     ],
   );
 }
