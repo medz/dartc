@@ -1,8 +1,14 @@
-## Unreleased
+## 0.2.0
 
-- Support simple classes, fields, constructors, and direct instance methods.
-- Initialize top-level variables lazily and omit unused native functions.
-- Pass additional internal function arguments on the stack.
+Experimental preview for macOS and Linux ARM64.
+
+- Provide standalone native compiler archives with compatible runtime sources.
+- Support simple classes, accessors, nullable/reified value checks, canonical const instances and lazy top-level initialization.
+- Add noncapturing local and anonymous functions, structural function types and nongeneric type aliases.
+- Resolve package configuration v2, language versions, file/package URIs, conditional imports and library parts.
+- Check runtime NoGC contracts and retain runtime components according to actual dependencies.
+
+Captures, inheritance, general generics, exceptions, async code and most SDK libraries remain unsupported. Runtime sources and native compiler binaries from older releases must not be mixed with this version.
 
 ## 0.1.0
 

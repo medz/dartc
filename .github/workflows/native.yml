@@ -3,6 +3,11 @@ name: Native self-hosting
 on:
   workflow_dispatch:
     inputs:
+      package_release:
+        description: Package and verify the native Linux release archive
+        required: false
+        default: false
+        type: boolean
       cross_ref:
         description: Commit or branch containing the Mac-built dartc-linux
         required: false
@@ -18,6 +23,16 @@ jobs:
           sdk: '3.13.5'
           architecture: arm64
       - run: dart tool/bootstrap.dart
+      - name: Package and test the native release
+        if: inputs.package_release
+        run: dart tool/package_release.dart --compiler build/dartc-stage2
+      - uses: actions/upload-artifact@v7
+        if: inputs.package_release
+        with:
+          name: dartc-linux-arm64-release
+          path: build/release/*
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/checkout@v7
         if: inputs.cross_ref != ''
         with:
