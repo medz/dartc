@@ -363,9 +363,7 @@ AstExpression parserCollectionElement(Parser parser) {
     );
   }
   if (parserTake(parser, 'if')) {
-    parserExpect(parser, '(');
-    var condition = parseExpression(parser);
-    parserExpect(parser, ')');
+    var condition = parserIfCondition(parser);
     var children = <AstExpression>[condition, parserCollectionElement(parser)];
     if (parserTake(parser, 'else'))
       children.add(parserCollectionElement(parser));
@@ -383,6 +381,26 @@ AstExpression parserCollectionElement(Parser parser) {
     return result;
   }
   return parseExpression(parser);
+}
+
+AstExpression parserIfCondition(Parser parser) {
+  parserExpect(parser, '(');
+  var source = parseExpression(parser);
+  if (parserTake(parser, 'case')) {
+    var token = parser.position - 1;
+    var pattern = parserPattern(parser);
+    var children = <AstExpression>[source];
+    if (parserTake(parser, 'when')) children.add(parseExpression(parser));
+    source = AstExpression(
+      astIfCaseCondition,
+      '',
+      children,
+      const <AstType>[],
+      token,
+    )..pattern = pattern;
+  }
+  parserExpect(parser, ')');
+  return source;
 }
 
 AstStatement parserForBody(Parser parser, bool collection) {
@@ -2143,9 +2161,7 @@ AstStatement parseStatement(Parser parser) {
     );
   }
   if (parserTake(parser, 'if')) {
-    parserExpect(parser, '(');
-    List<AstExpression> condition = <AstExpression>[parseExpression(parser)];
-    parserExpect(parser, ')');
+    var condition = <AstExpression>[parserIfCondition(parser)];
     List<AstStatement> children = <AstStatement>[parseStatement(parser)];
     if (parserTake(parser, 'else')) children.add(parseStatement(parser));
     return AstStatement(

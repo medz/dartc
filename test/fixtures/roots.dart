@@ -451,7 +451,35 @@ List<int Function()> closureGraph() {
   return [read, next];
 }
 
+bool keepPatternClosure(List<int Function()> list, int Function() read) {
+  list.add(read);
+  return true;
+}
+
+List<int Function()> ifCaseGraph() {
+  var result = <int Function()>[];
+  if (Leaf(807) case var value
+      when keepPatternClosure(result, () => value.marker)) {
+    value = Leaf(808);
+    result.add(() => value.marker);
+  }
+  return result;
+}
+
 void closureRoots(int queue, int edges) {
+  var cases = ifCaseGraph();
+  var caseList = captureList(cases, 2, queue);
+  check(listElements(caseList, edges) == 2);
+  var guard = rt.nativeLoad64(edges);
+  var body = rt.nativeLoad64(edges + 8);
+  check(rt.rtTraceObject(guard, edges, capacity) == 1);
+  var cell = rt.nativeLoad64(edges);
+  check(rt.nativeLoad64(rt.rtObjectDescriptor(cell)) == abi.captureCellClassId);
+  check(rt.rtTraceObject(body, edges, capacity) == 1);
+  check(rt.nativeLoad64(edges) == cell);
+  check(rt.rtTraceObject(cell, edges, capacity) == 1);
+  check(findMarker(edges, 1, 808) != 0);
+  check(cases[0]() == 808 && cases[1]() == 808);
   var patterns = <int Function()>[
     switch (Leaf(806)) {
       Leaf value => () => value.marker,

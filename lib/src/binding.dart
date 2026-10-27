@@ -55,6 +55,7 @@ class LocalBinder {
   LocalBinder? outer;
   int outerScope = -1;
   ClassMembers? members;
+  final List<LocalVariable> guardVariables = <LocalVariable>[];
 
   LocalBinder(this.source, this.result, this.scopes, this.functions);
 }
@@ -214,11 +215,24 @@ int bindingReceiver(LocalBinder binder, int scope) {
   return bindingCapture(binder, receiver);
 }
 
-void bindingWrite(LocalBinder binder, int binding) {
+void bindingWrite(LocalBinder binder, int binding, int token) {
   if (binding < 0) return;
   var bindings = binder.result;
   var variable = bindings.variables[binding];
-  bindingDeclaration(bindings, binding).written = true;
+  var declaration = bindingDeclaration(bindings, binding);
+  LocalBinder? current = binder;
+  while (current != null) {
+    for (var guarded in current.guardVariables) {
+      if (identical(guarded, declaration))
+        sourceError(
+          binder.source,
+          binder.source.tokens[token],
+          'cannot assign a pattern variable in its guard',
+        );
+    }
+    current = current.outer;
+  }
+  declaration.written = true;
   if (variable.outer < 0) return;
   while (true) {
     variable.writeCaptured = true;
@@ -315,6 +329,63 @@ void bindingPattern(LocalBinder binder, int scope, AstPattern pattern) {
   for (var child in pattern.children) bindingPattern(binder, scope, child);
 }
 
+int bindingPatternScope(
+  LocalBinder binder,
+  int scope,
+  AstPattern pattern,
+  bool readOnly,
+) {
+  var local = bindingScope(binder, scope);
+  for (var variable in bindingPatternVariables(binder, pattern)) {
+    var id = bindingDeclare(
+      binder,
+      local,
+      variable.text,
+      variable.token,
+      variable.type ?? AstType('', const <AstType>[], variable.token),
+    );
+    binder.result.variables[id].finalVariable =
+        readOnly || variable.finalVariable;
+  }
+  bindingPattern(binder, local, pattern);
+  return local;
+}
+
+void bindingGuard(LocalBinder binder, int scope, AstExpression guard) {
+  var variables = binder.scopes[scope].variables;
+  for (var id in variables)
+    binder.guardVariables.add(binder.result.variables[id]);
+  bindingExpression(binder, scope, guard);
+  for (var _ in variables) binder.guardVariables.removeLast();
+}
+
+int bindingIfCondition(
+  LocalBinder binder,
+  int scope,
+  AstExpression condition,
+) {
+  if (condition.kind != astIfCaseCondition) {
+    bindingExpression(binder, scope, condition);
+    return scope;
+  }
+  if (!sourceVersionAtLeast(
+    binder.source,
+    binder.source.tokens[condition.token].source,
+    3,
+    0,
+  ))
+    sourceError(
+      binder.source,
+      binder.source.tokens[condition.token],
+      'if-case requires language version 3.0',
+    );
+  bindingExpression(binder, scope, condition.children[0]);
+  var local = bindingPatternScope(binder, scope, condition.pattern!, false);
+  if (condition.children.length == 2)
+    bindingGuard(binder, local, condition.children[1]);
+  return local;
+}
+
 void bindingExpression(
   LocalBinder binder,
   int scope,
@@ -334,22 +405,18 @@ void bindingExpression(
       );
     bindingExpression(binder, scope, expression.children[0]);
     for (var arm in expression.arms) {
-      var local = bindingScope(binder, scope);
-      for (var variable in bindingPatternVariables(binder, arm.pattern)) {
-        var id = bindingDeclare(
-          binder,
-          local,
-          variable.text,
-          variable.token,
-          variable.type ?? AstType('', const <AstType>[], variable.token),
-        );
-        binder.result.variables[id].finalVariable = true;
-      }
-      bindingPattern(binder, local, arm.pattern);
+      var local = bindingPatternScope(binder, scope, arm.pattern, true);
       var guard = arm.guard;
-      if (guard != null) bindingExpression(binder, local, guard);
+      if (guard != null) bindingGuard(binder, local, guard);
       bindingExpression(binder, local, arm.value);
     }
+    return;
+  }
+  if (expression.kind == astIfElement) {
+    var local = bindingIfCondition(binder, scope, expression.children[0]);
+    bindingExpression(binder, local, expression.children[1]);
+    if (expression.children.length == 3)
+      bindingExpression(binder, scope, expression.children[2]);
     return;
   }
   if (expression.kind == astForElement) {
@@ -387,7 +454,8 @@ void bindingExpression(
       (expression.kind == astUnary || expression.kind == astPostfix) &&
           (expression.text == '++' || expression.text == '--')) {
     var target = expression.children[0];
-    if (target.kind == astName) bindingWrite(binder, target.binding);
+    if (target.kind == astName)
+      bindingWrite(binder, target.binding, target.token);
   }
 }
 
@@ -536,9 +604,14 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
     bindingStatements(binder, bindingScope(binder, scope), statement.children);
     return;
   }
-  if (kind == astIfStatement ||
-      kind == astWhileStatement ||
-      kind == astDoWhileStatement) {
+  if (kind == astIfStatement) {
+    var local = bindingIfCondition(binder, scope, statement.condition[0]);
+    bindingBody(binder, local, statement.children[0]);
+    if (statement.children.length == 2)
+      bindingBody(binder, scope, statement.children[1]);
+    return;
+  }
+  if (kind == astWhileStatement || kind == astDoWhileStatement) {
     bindingExpressions(binder, scope, statement.condition);
     var i = 0;
     while (i < statement.children.length) {
@@ -550,7 +623,11 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
   if (kind == astForInStatement) {
     bindingExpressions(binder, scope, statement.expressions);
     if (statement.variables.isEmpty)
-      bindingWrite(binder, statement.expressions[1].binding);
+      bindingWrite(
+        binder,
+        statement.expressions[1].binding,
+        statement.expressions[1].token,
+      );
     var loop = bindingScope(binder, scope);
     bindingDeclarations(binder, loop, statement.variables);
     var variable = 0;

@@ -2975,6 +2975,126 @@ void collectionValues() {
   print(cb);
 }
 
+var ifCaseGlobal = [if (3 case int value) value + 1];
+
+class IfCaseBox {
+  final List<int> values = [if (4 case int value) value + 1];
+  final List<int> initialized;
+  IfCaseBox(Object? value)
+    : initialized = [if (value case int n) n else 0];
+}
+
+int ifCaseRefuted(int? value) {
+  if (value case null) return 0;
+  return value + 1;
+}
+
+void ifCaseValues() {
+  var trace = <int>[];
+  int step(int n) {
+    trace.add(n);
+    return n;
+  }
+
+  bool guard(int n) {
+    step(n);
+    return n == 3;
+  }
+
+  if (step(1) case 2 when guard(3))
+    step(4);
+  else
+    step(5);
+  if (step(1) case var value when guard(2))
+    step(value + 3);
+  else
+    step(6);
+  if (step(1) case var value when guard(3)) step(value + 6);
+  print(trace);
+  for (var source in <Object?>[1, 'abc', null, true]) {
+    if (source case int value && > 0) {
+      value++;
+      print(value + source);
+    } else if (source case String value) {
+      print(value.length);
+    } else if (source case null) {
+      print('null');
+    } else {
+      print('other');
+    }
+  }
+  print(ifCaseRefuted(null));
+  print(ifCaseRefuted(4));
+  int assigned;
+  if (step(8) case int value) assigned = value;
+  print(assigned);
+  var outer = 9;
+  if (outer case var outer) {
+    outer++;
+    print(outer);
+  }
+  print(outer);
+  // ignore: unused_local_variable
+  if (1 case var value) {
+    var value = 11;
+    print(value);
+  }
+  Object changed = 7;
+  if (changed case int value when (changed = 'changed') == 'again')
+    print(value);
+  else
+    print(changed);
+  var saved = <int Function()>[];
+  bool save(int Function() function) {
+    saved.add(function);
+    return true;
+  }
+
+  for (var i = 0; i < 3; i++) {
+    if (i case var value when save(() => value)) {
+      value += 10;
+      saved.add(() => ++value);
+    }
+  }
+  for (var read in saved) print(read());
+  for (var read in saved) print(read());
+  if (1 case var value when (() {
+    var value = 0;
+    value++;
+    return value == 1;
+  })()) {
+    for (value in [12, 13]) print(value);
+  }
+  var collected = [
+    for (var source in <Object?>[1, null, 'x', 2])
+      if (source case int value when value > 0) ++value else 0,
+  ];
+  print(collected);
+  var nested = <List<int>>[
+    // ignore: dead_code
+    if (null case var value?) [value as int] else [],
+    if (2 case int value) [if (value case > 1) value],
+  ];
+  print(nested);
+  print([
+    for (var i = 0; i < 2; i++)
+      if (i case var value when save(() => value)) ++value,
+  ]);
+  print(saved[6]());
+  print(saved[7]());
+  if ([] case List<int> _)
+    print('typed');
+  else
+    print('dynamic');
+  // ignore: use_of_void_result
+  if (switchOpaque() case int value) print(value);
+  print(ifCaseGlobal);
+  var box = IfCaseBox(14);
+  print(box.values);
+  print(box.initialized);
+  print(IfCaseBox(null).initialized);
+}
+
 int switchTrace = 0;
 int switchStep(int n) {
   switchTrace = switchTrace * 10 + n;
@@ -3139,6 +3259,7 @@ void switchExpressions() {
 }
 
 void main(List<String> args) {
+  ifCaseValues();
   collectionValues();
   nullAwareValues();
   cascadeValues();

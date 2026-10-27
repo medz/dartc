@@ -851,6 +851,9 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "dynamic guard(){print('guard');return 1;}void main(){print('before');if(1 case var n when guard())print(n);}",
+      "void fail(int? value){if(value case var n!)print(n);}void main(){print('before');fail(null);}",
+      "void fail(Object value){if(value case var n as int)print(n);}void main(){print('before');fail('wrong');}",
       "int match(int? value)=>switch(value){var n! =>n};void main(){print('before');print(match(null));}",
       "int match(Object value)=>switch(value){var n as int=>n};void main(){print('before');print(match('wrong'));}",
       "dynamic guard(){print('guard');return 1;}void main(){print('before');print(switch(1){_ when guard()=>2,_=>3});}",
@@ -1559,6 +1562,25 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      '// @dart=2.19\nvoid unused(){if(1 case var n)print(n);}void main(){}',
+      '// @dart=2.19\nvoid unused(){print([if(1 case var n)n]);}void main(){}',
+      'void unused(){if(1 case var n when ++n>0)print(n);}void main(){}',
+      'void unused(){if(1 case var n when (() {n++;return true;})())print(n);}void main(){}',
+      'void unused(){if(1 case var n when (() {for(n in [2]){}return true;})())print(n);}void main(){}',
+      'void unused(){if(1 case final n){n++;}}void main(){}',
+      'void unused(){if(1 case final n){print((){n++;});}}void main(){}',
+      'void unused(){if(1 case var n)print(n);else print(n);}void main(){}',
+      'void unused(){if(1 case var n)print(n);print(n);}void main(){}',
+      'void unused(){print([if(1 case var n)n,n]);}void main(){}',
+      'void unused(Object value){if(value case int int)print(int);}void main(){}',
+      'void unused(Object value){if(value case int n||String n)print(n);}void main(){}',
+      'void unused(){if(0 case 1){print(missing);}}void main(){}',
+      'void unused(){int result;if(1 case var n when n>0)result=n;print(result);}void main(){}',
+      'void unused(Object value){if(value case int n when 1)print(n);}void main(){}',
+      'void unused(Object value){if(value case int n when (value="s")=="s")print(value+1);}void main(){}',
+      // Constant if-case evaluation remains an implementation gap.
+      'const values=[if(true case false)1 else 2];void main(){}',
+      'const values=[if(false)if(true case false)1];void main(){}',
       '// @dart=2.19\nvoid unused(){print(switch(1){_=>1});}void main(){}',
       'int unused(int value)=>switch(value){1=>2};void main(){}',
       'int unused(bool value)=>switch(value){==true=>1,==false=>2};void main(){}',

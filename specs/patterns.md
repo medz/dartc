@@ -1,21 +1,26 @@
-# 模式与 switch 表达式
+# 模式、switch 与 if-case
 
 本页跟踪 Dart 3.0 的[模式特性规范][patterns]与[穷尽性分析][exhaustiveness]。兼容目标及 SDK 版本见[总览](README.md)；记录类型见[类型](types.md)，switch 语句见[语句](statements.md)。
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
 | Switch expression | 部分实现 | 文件语言版本至少 3.0；选择值只求值一次，按源码顺序尝试模式、守卫和结果。只执行匹配且守卫为真的结果；结果接受下行类型上下文，各臂类型合并后显式转换。switch 表达式不是常量表达式。 | [parser.dart](../lib/src/parser.dart)：`parserSwitchExpression`；[frontend.dart](../lib/src/frontend.dart)：`feLowerSwitchExpression`；[values.dart](../test/fixtures/values.dart)：`switchExpressions`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
+| If-case statement and element | 部分实现 | 文件语言版本至少 3.0，支持语句和运行时 List 元素的 `if (expression case pattern when guard)`，模式范围同本表。选择表达式无模式提供的下行上下文，只求值一次；匹配失败跳过守卫，守卫失败进入 else。模式变量只在守卫和 then 可见，非 final 变量在 then 可修改，then 内可再声明同名变量。语句、集合、全局及字段/构造器初始化共用绑定与匹配实现；常量集合边界见下文，Set/Map 仍缺。 | [parser.dart](../lib/src/parser.dart)：`parserIfCondition`；[binding.dart](../lib/src/binding.dart)：`bindingIfCondition`；[frontend.dart](../lib/src/frontend.dart)：`feIfConditionJumps`；[values.dart](../test/fixtures/values.dart)：`ifCaseValues`、`IfCaseBox`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`、`failingValues`。 |
 | Constant、variable、wildcard、parenthesized patterns | 部分实现 | 支持现有常量表达式、命名常量、`const (expression)` 及其隐式常量上下文、`var`/`final`、显式类型变量、带或不带类型的 `_` 与括号。常量在比较左侧，类型模式先检查后绑定；显式变量类型保留声明类型，不隐式收窄为选择值类型。模式内的 `_` 从 3.0 起就是通配符。完整常量、用户运算符和类型体系仍有各自缺口。 | [binding.dart](../lib/src/binding.dart)：`bindingPattern`；[patterns.dart](../lib/src/frontend/patterns.dart)：`checkPattern`；[frontend.dart](../lib/src/frontend.dart)：`feLowerPattern`；[values.dart](../test/fixtures/values.dart)：`switchTyped`、`switchConstants`。 |
 | Relational、logical-and、logical-or patterns | 部分实现 | 支持关系运算、`&&`、`||` 的优先级和短路；关系右侧必须为常量并检查运算类型。`&&` 禁止重复变量；`||` 两侧必须绑定同名、同 final 性质及同声明类型的变量，匹配值写入共同绑定。dynamic 关系结果须通过布尔检查。用户运算符及完整匹配类型推导仍缺。 | [parser.dart](../lib/src/parser.dart)：`parserPattern`；[binding.dart](../lib/src/binding.dart)：`bindingPatternVariables`；[patterns.dart](../lib/src/frontend/patterns.dart)：`checkPattern`；[values.dart](../test/fixtures/values.dart)：`switchChoose`、`switchOrBound`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`、`failingValues`。 |
 | Cast、null-check、null-assert patterns | 部分实现 | `as Type` 检查后进入内部模式；`?` 对 null 匹配失败，`!` 对 null 运行时失败。内部变量按检查后的类型推导；不改变选择值已缓存一次的事实。失败仍终止进程，尚无可捕获的异常对象及展开。 | [patterns.dart](../lib/src/frontend/patterns.dart)：`checkPattern`；[frontend.dart](../lib/src/frontend.dart)：`feLowerPattern`；[values.dart](../test/fixtures/values.dart)：`switchNonNull`、`switchAsserted`、`switchCasted`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
 | Case scopes、guards、pattern variable flow | 部分实现 | 每臂先建立变量作用域，再绑定模式、守卫和结果，局部名可遮蔽模式中的类型及常量；`as`、`when` 不能作为模式变量名或裸常量名。switch 表达式的模式变量在守卫和结果中只读，闭包同样受约束；捕获保留对应匹配的值，包括守卫失败后逃逸的闭包。守卫写入原选择变量后，后续模式仍匹配缓存值，但不能据此继续提升已被写入的变量。完整模式流分析及字段提升仍缺。 | [binding.dart](../lib/src/binding.dart)：`bindingExpression`、`collectWrittenExpression`；[frontend.dart](../lib/src/frontend.dart)：`feLowerSwitchExpression`；[values.dart](../test/fixtures/values.dart)：`switchPromote`、`switchCapturePattern`、`switchExpressions`；[roots.dart](../test/fixtures/roots.dart)：`closureRoots`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
 | Exhaustiveness、unreachable cases | 部分实现 | 检查 bool、Null、可空类型及全覆盖变量/类型模式；Never 允许零臂。守卫和关系模式不贡献穷尽性，`== true`/`== false`、`!= null` 不能代替对应的常量/类型覆盖。不可达臂及未调用函数仍执行静态检查。当前使用标量覆盖域，尚无记录、枚举、sealed 子类型及解构空间分析，也未提供完整不可达 case 诊断。 | [patterns.dart](../lib/src/frontend/patterns.dart)：`patternRequiredSpace`、`patternTypeSpace`；[frontend.dart](../lib/src/frontend.dart)：`feLowerSwitchExpression`；[values.dart](../test/fixtures/values.dart)：`switchNullable`、`switchEmpty`、`switchExpressions`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
 | List、map、record、object patterns | 未实现 | 尚无元素、字段或记录解构及对应匹配缓存和空间运算。类型模式 `List<int> values` 只检查并绑定整个 List。 | [ast.dart](../lib/src/ast.dart) 尚无解构模式节点；尚无行为验证。 |
-| Pattern declarations/assignments、if-case、pattern switch statements | 未实现 | 模式当前仅接入 switch 表达式；变量声明/赋值、if-case、集合 case 元素、循环及 switch 语句中的模式仍缺。 | [parser.dart](../lib/src/parser.dart)；既有 switch 语句边界见[语句](statements.md)。 |
+| Pattern declarations/assignments、pattern switch statements | 未实现 | 变量声明/赋值、循环头及 switch 语句中的模式仍缺。 | [parser.dart](../lib/src/parser.dart)；既有 switch 语句边界见[语句](statements.md)。 |
+
+`if-case` 的守卫禁止对当前 case 的模式变量赋值，包括守卫内部的闭包；普通外层变量和嵌套作用域的新变量仍可写。守卫与 then 共享该 case 的绑定身份，捕获必须观察 then 中的后续修改；每次执行匹配建立新的捕获 cell。逻辑或两侧同名变量共用一次成功匹配的存储。成功、失败和守卫失败分别保留流状态，合流不能保留守卫已撤销的选择变量提升；全覆盖模式可以建立确定赋值。验证入口为 `ifCaseValues`、[roots.dart](../test/fixtures/roots.dart) 的 `ifCaseGraph` / `closureRoots` 及 `rejected`。
 
 字符串常量按 token 种类识别，不把 `'=='`、`'<'` 等内容当作关系模式，也不把 `'when'`、`'as'` 当作模式关键字；验证入口为 [values.dart](../test/fixtures/values.dart) 的 `switchOperatorText`。
 
 SDK 3.13.7 CFE 接受 void 选择值，并允许用 `var` 模式把它绑定为 void；也接受关系模式引用 void 常量。analyzer 报告 `use_of_void_result`。dartc 采用 CFE 行为，绑定值仍受原有 void 消费规则约束。[values.dart](../test/fixtures/values.dart) 的 `switchVoidMatch`、`switchVoidRelation` 保留该差异及逐行诊断忽略。
+
+常量 List 中的 `if-case` 尚未实现，不能把当前拒绝当作已核实的语言静态错误。SDK 3.13.7 CFE 对 `const values = [if (true case false) 1 else 2]` 报内部错误 `Unhandled IfCaseElement`，对未执行的嵌套 if-case 也一样；analyzer 接受该 bool 示例，对非 bool 选择值报告 `non_bool_condition`，引用模式变量的示例则异常退出。常量语义与参考实现差异待核对；[behavior_test.dart](../test/behavior_test.dart) 的 `rejected` 保留当前拒绝边界。
 
 [patterns]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md
 [exhaustiveness]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/exhaustiveness.md

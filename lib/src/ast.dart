@@ -25,6 +25,7 @@ const int astIfElement = 24;
 const int astForElement = 25;
 const int astNullAwareElement = 26;
 const int astSwitchExpression = 27;
+const int astIfCaseCondition = 28;
 
 const int patternConstant = 1;
 const int patternVariable = 2;
@@ -81,6 +82,7 @@ class AstFunctionType {
 class AstExpression {
   AstFunction? function;
   AstStatement? loop;
+  AstPattern? pattern;
   List<AstSwitchArm> arms = const <AstSwitchArm>[];
   int kind;
   String text;

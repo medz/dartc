@@ -683,6 +683,12 @@ int _constantListElement(
     return type;
   }
   if (expression.kind == astIfElement) {
+    if (expression.children[0].kind == astIfCaseCondition)
+      _constantError(
+        context,
+        expression.token,
+        'constant if-case elements are not supported',
+      );
     var condition = _evaluateConstant(
       context,
       expression.children[0],

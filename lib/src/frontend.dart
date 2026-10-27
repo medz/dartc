@@ -1937,7 +1937,7 @@ void feLowerListElement(AstExpression expression, FeListLiteral literal) {
   if (expression.kind == astIfElement) {
     feFlow = flowSplit(feFlow);
     var otherwise = <int>[];
-    var falseFlow = feConditionJumps(expression.children[0], false, otherwise);
+    var falseFlow = feIfConditionJumps(expression.children[0], otherwise);
     feLowerListElement(expression.children[1], literal);
     var trueFlow = feFlow;
     if (expression.children.length == 3) {
@@ -4069,7 +4069,7 @@ void feLowerStatement(AstStatement statement) {
   if (kind == astIfStatement) {
     feFlow = flowSplit(feFlow);
     var otherwise = <int>[];
-    var falseFlow = feConditionJumps(statement.condition[0], false, otherwise);
+    var falseFlow = feIfConditionJumps(statement.condition[0], otherwise);
     feLowerStatement(statement.children[0]);
     var trueFlow = feFlow;
     if (statement.children.length == 2) {
@@ -5081,6 +5081,54 @@ void fePatternVariables(CheckedPattern pattern) {
   if (binding >= 0 && feBindingSlots[binding] < 0)
     feBindLocal(binding, pattern.variableType, feTemp(pattern.variableType));
   for (var child in pattern.children) fePatternVariables(child);
+}
+
+void fePatternCells(CheckedPattern pattern) {
+  var binding = pattern.syntax.binding;
+  if (binding >= 0 && feCellBinding(binding)) {
+    feOperand(opLoadLocal, feBindingSlots[binding]);
+    feAllocateCell(pattern.variableType);
+    var cell = feTemp(tObject);
+    feBindingSlots[binding] = cell;
+    feOperand(opStoreLocal, cell);
+  }
+  if (pattern.syntax.kind == patternOr)
+    fePatternCells(pattern.children[0]);
+  else
+    for (var child in pattern.children) fePatternCells(child);
+}
+
+FlowState feIfConditionJumps(AstExpression condition, List<int> failed) {
+  if (condition.kind != astIfCaseCondition)
+    return feConditionJumps(condition, false, failed);
+  var source = condition.children[0];
+  var type = feLowerExpression(source);
+  var value = feTemp(type);
+  feOperand(opStoreLocal, value);
+  feConstants.localTypes = feFlow.types;
+  var pattern = checkPattern(
+    feConstants,
+    condition.pattern!,
+    type,
+    feBindingTypes,
+  );
+  fePatternVariables(pattern);
+  var otherwise = flowCopy(feFlow);
+  var binding = source.kind == astName ? source.binding : -1;
+  if (binding >= 0 && !fePromotable(binding)) binding = -1;
+  if (pattern.remaining == tNever)
+    flowUnreachable(otherwise);
+  else if (binding >= 0)
+    flowPromote(otherwise, binding, pattern.remaining);
+  feLowerPattern(pattern, value, failed);
+  fePatternCells(pattern);
+  if (binding >= 0) flowPromote(feFlow, binding, pattern.matched);
+  if (condition.children.length == 2)
+    otherwise = feJoinFlow(
+      otherwise,
+      feConditionJumps(condition.children[1], false, failed),
+    );
+  return otherwise;
 }
 
 void feLowerPattern(CheckedPattern pattern, int value, List<int> failed) {

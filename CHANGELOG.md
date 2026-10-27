@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Support if-case statements and runtime List elements, including guards, mutable then bindings and shared closure captures.
 - Support switch expressions with scalar patterns, typed bindings, guards, contextual results and scalar exhaustiveness checks.
 - Support calling objects with instance `call` methods and implicitly extracting those methods in supported function-type contexts.
 - Support bound instance-method values with required positional signatures, receiver retention, method equality and typed calls.
