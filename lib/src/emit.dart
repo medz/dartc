@@ -389,6 +389,10 @@ bool emitNeedsRoots(List<MachineFunction> program) {
   var f = 0;
   while (f < program.length) {
     var function = program[f];
+    if (!function.reachable) {
+      f++;
+      continue;
+    }
     var b = 0;
     while (b < function.blocks.length) {
       var instructions = function.blocks[b].instructions;

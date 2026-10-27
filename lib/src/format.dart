@@ -158,6 +158,28 @@ bool bitmapNonzero(List<int> words) {
   return false;
 }
 
+int _rootSlotsHash(CallRootMap roots) {
+  var hash = roots.offsets.length & 0x3fffffff;
+  var i = 0;
+  while (i < roots.offsets.length) {
+    hash = (hash * 31 + roots.offsets[i]) & 0x3fffffff;
+    hash = (hash * 31 + roots.kinds[i]) & 0x3fffffff;
+    i++;
+  }
+  return hash;
+}
+
+bool _sameRootSlots(CallRootMap left, CallRootMap right) {
+  if (left.offsets.length != right.offsets.length) return false;
+  var i = 0;
+  while (i < left.offsets.length) {
+    if (left.offsets[i] != right.offsets[i] || left.kinds[i] != right.kinds[i])
+      return false;
+    i++;
+  }
+  return true;
+}
+
 ConstantLayout layoutConstants(int start) {
   List<int> stringOffsets = <int>[];
   List<int> descriptorOffsets = <int>[];
@@ -416,13 +438,27 @@ ConstantLayout layoutConstants(int start) {
       rootCallsOffset = end;
       end += emittedRootMaps.length * rootCallBytes;
     }
+    var capacity = 1;
+    while (capacity < emittedRootMaps.length * 2) capacity *= 2;
+    var owners = List<int>.filled(capacity, -1);
     i = 0;
     while (i < emittedRootMaps.length) {
       var roots = emittedRootMaps[i];
       var offset = -1;
       if (!roots.boundary && roots.offsets.isNotEmpty) {
-        offset = end;
-        end += roots.offsets.length * rootSlotBytes;
+        var slot = _rootSlotsHash(roots) & (capacity - 1);
+        while (owners[slot] >= 0 &&
+            !_sameRootSlots(roots, emittedRootMaps[owners[slot]])) {
+          slot = (slot + 1) & (capacity - 1);
+        }
+        var owner = owners[slot];
+        if (owner < 0) {
+          owners[slot] = i;
+          offset = end;
+          end += roots.offsets.length * rootSlotBytes;
+        } else {
+          offset = rootSlotOffsets[owner];
+        }
       }
       rootSlotOffsets.add(offset);
       i++;
@@ -819,7 +855,7 @@ void imageRootTable(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
   }
   i = 0;
   while (i < emittedRootMaps.length) {
-    if (layout.rootSlotOffsets[i] >= 0) {
+    if (layout.rootSlotOffsets[i] == image.length) {
       var roots = emittedRootMaps[i];
       var slot = 0;
       while (slot < roots.offsets.length) {

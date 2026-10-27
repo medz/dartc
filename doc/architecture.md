@@ -495,7 +495,7 @@ ThreadState 中登记的引用
 
 当前过渡实现由 `root_map.dart` 从 MIR CFG 计算每个直接或间接调用之前的活跃值，再使用寄存器分配确定的实际 FP 槽，区分 Ref 与 Tagged。发射器在真实 BL/BLR 之后记录返回 PC，按发射顺序形成有序调用根表；零根调用仍保留记录，启动跳板的无帧调用使用边界记录终止遍历。全局根按槽的 Ref/Tagged 表示列出，整数、布尔和原生地址不作根。
 
-只有可达的 `nativeMetadataAddress` 请求包含 `metadataRoots` 时才保留根表；调用返回 PC、全局槽和子表引用均用相对各记录基址的位移，和代码、常量及数据段一起布局。根遍历只增加 `nativeFramePointer` 这一读取当前帧指针的受信机器原语；帧链查找、根值过滤和对象边遍历保持为 Dart 算法。
+只有可达的 `nativeMetadataAddress` 请求包含 `metadataRoots` 时才保留根表；调用返回 PC、全局槽和子表引用均用相对各记录基址的位移，和代码、常量及数据段一起布局。相同的有序根槽向量共享只读存储，每个调用点仍保留自己的返回 PC、根数和向量引用；零根及启动边界记录不因共享而省略。根遍历只增加 `nativeFramePointer` 这一读取当前帧指针的受信机器原语；帧链查找、根值过滤和对象边遍历保持为 Dart 算法。
 
 Dart `rtTraceRoots`、`rtTraceObject` 已实现栈与全局根、对象边枚举，[原生行为测试](../test/fixtures/roots.dart)已在 macOS/Linux ARM64 执行，并在 macOS 验证地址随机化下的枚举。运行时显式根另分为临时范围与持久槽：前者按 mark/push/restore 截断活跃前缀，后者以稳定的槽索引更新，不受嵌套范围恢复影响。两类记录使用惰性分配的原始缓冲区，不分配托管对象；登记操作不引入根元数据，只有实际请求枚举时才保留根表。格式化器的循环检测和字符串片段 List 使用 tagged 元素，使对象边可被扫描。
 
