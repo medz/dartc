@@ -23,6 +23,7 @@ const int astNullAware = 22;
 const int astSpreadElement = 23;
 const int astIfElement = 24;
 const int astForElement = 25;
+const int astNullAwareElement = 26;
 
 const String astCallIdentifier = 'identifier';
 const String astCallSelector = 'selector';

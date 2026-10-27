@@ -1,9 +1,7 @@
 ## Unreleased
 
-- Support List collection if/else, for and for-in elements, ordinary/null-aware spreads, and constant conditional/spread evaluation.
-
+- Support List collection if/else, for and for-in elements, ordinary/null-aware spreads, null-aware single elements, and their supported constant evaluation.
 - Support null-aware member/index chains, preserving single receiver evaluation, skipped side effects, assignment flow and constant-expression checks.
-
 - Support ordinary and null-shorting cascades with ordered member/index operations and contextual receiver types.
 - Support capturing synchronous local and anonymous functions with required positional parameters, including shared writes, recursion, `this` and per-iteration loop bindings.
 - Reject missing bootstrap/benchmark artifacts, compare behavior stderr and fresh output files, and pin native-target dependencies in differential cases.

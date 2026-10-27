@@ -1426,8 +1426,7 @@ int feNonNullableValue(int type, int token) {
 int feLowerHint(AstExpression expression, int context) {
   if (expression.kind == astNullAware)
     return feLowerNullAware(expression, context);
-  if (expression.kind == astCascade)
-    return feLowerCascade(expression, context);
+  if (expression.kind == astCascade) return feLowerCascade(expression, context);
   if (expression.kind == astFunctionExpression)
     return feLowerFunctionExpression(expression, context);
   if (expression.kind == astPostfix && expression.text == '!')
@@ -1939,6 +1938,29 @@ void feLowerListElement(AstExpression expression, FeListLiteral literal) {
       feLowerWhileFor(loop, lowerElement);
   } else if (expression.kind == astSpreadElement) {
     feLowerListSpread(expression, literal);
+  } else if (expression.kind == astNullAwareElement) {
+    if (!sourceVersionAtLeast(
+      feSources,
+      feTokens[expression.token].source,
+      3,
+      8,
+    ))
+      feAstError(
+        expression.token,
+        'null-aware elements require language version 3.8',
+      );
+    var context = literal.context;
+    if (context >= 0 && context != tVoid) context = nullableType(context);
+    var source = expression.children[0];
+    var type = feLowerHint(source, context);
+    var value = feTemp(type);
+    feOperand(opStoreLocal, value);
+    var skip = feJumpIfNull(value);
+    var element = typingNonNull(type);
+    feOperand(opLoadLocal, value);
+    feNarrowValue(type, element);
+    feAppendListElement(literal, element, source.token);
+    fePatch(skip, ir.length);
   } else {
     var type = feLowerHint(expression, literal.context);
     feAppendListElement(literal, type, expression.token);

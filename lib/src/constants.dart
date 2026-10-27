@@ -634,6 +634,46 @@ int _constantListElement(
 ) {
   if (expression.kind == astForElement)
     _constantError(context, expression.token, 'for element is not constant');
+  if (expression.kind == astNullAwareElement) {
+    var program = context.symbols.program;
+    if (!sourceVersionAtLeast(
+      program,
+      program.tokens[expression.token].source,
+      3,
+      8,
+    ))
+      _constantError(
+        context,
+        expression.token,
+        'null-aware elements require language version 3.8',
+      );
+    var hint = expected;
+    if (hint >= 0 && hint != tVoid) hint = nullableType(hint);
+    var value = _evaluateConstant(
+      context,
+      expression.children[0],
+      active,
+      hint,
+      true,
+    );
+    var type = typingNonNull(value.type);
+    if (expected >= 0 && !typingAssignable(type, expected))
+      _constantError(
+        context,
+        expression.token,
+        'invalid constant List element',
+      );
+    if (active && value.kind != tNull) {
+      if (expected >= 0 && !typeIsSubtype(constantValueType(value), expected))
+        _constantError(
+          context,
+          expression.token,
+          'invalid constant List element',
+        );
+      elements.add(value);
+    }
+    return type;
+  }
   if (expression.kind == astIfElement) {
     var condition = _evaluateConstant(
       context,

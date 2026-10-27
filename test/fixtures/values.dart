@@ -2572,6 +2572,11 @@ List<int> collectionSequence(int n) {
 }
 
 List<int>? collectionMaybe(bool b) => b ? <int>[8, 9] : null;
+int? collectionNullable(int value) {
+  collectionStep(value);
+  return value == 0 ? null : value;
+}
+
 var collectionGlobals = [for (var i = 0; i < 3; i++) () => i];
 
 class CollectionFields {
@@ -2591,6 +2596,54 @@ class CollectionFields {
 }
 
 void collectionValues() {
+  collectionTrace = 0;
+  print(<int>[
+    ?collectionNullable(0),
+    ?collectionNullable(2),
+    if (true) ?collectionNullable(3),
+    for (var i in [0, 4]) ?collectionNullable(i),
+  ]);
+  print(collectionTrace);
+  var nonNull = [?collectionNullable(5)];
+  // ignore: unnecessary_type_check
+  print(nonNull is List<int>);
+  var nothing = [?null];
+  // ignore: unnecessary_type_check
+  print(nothing is List<Never>);
+  // ignore: invalid_null_aware_operator
+  var nullableContext = <List<int>>[?[]];
+  // ignore: unnecessary_type_check
+  print(nullableContext[0] is List<int>);
+  dynamic nullable = null;
+  print(<int>[?nullable]);
+  nullable = 7;
+  print(<int>[?nullable]);
+  print([?nullable] is List<int>);
+  final int? assignedNull;
+  print([?(assignedNull = collectionNullable(0))]);
+  print(assignedNull);
+  print([?collectionCondition(6, false) ? 1 : null]);
+  const noValues = [?null];
+  print(identical(noValues, const <Never>[]));
+  const int? maybeConstant = null;
+  const retained = <int>[?maybeConstant, 2];
+  print(identical(retained, const [2]));
+  const dynamic absentConstant = null;
+  const fromDynamic = <int>[?absentConstant];
+  print(identical(fromDynamic, const <int>[]));
+  const dynamic invalidConstant = 'wrong';
+  // ignore: dead_code, non_constant_list_element
+  const unselected = <int>[if (false) ?invalidConstant];
+  print(unselected);
+  const void opaqueConstant = 9;
+  // ignore: use_of_void_result
+  const opaqueValues = [?opaqueConstant];
+  print(identical(opaqueValues, const <void>[9]));
+  void opaqueNull = null;
+  void opaqueValue = 10;
+  // ignore: use_of_void_result
+  print(<void>[?opaqueNull, ?opaqueValue]);
+  collectionTrace = 0;
   print([
     collectionStep(1),
     if (collectionCondition(2, true)) collectionStep(3) else collectionStep(4),

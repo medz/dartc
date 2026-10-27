@@ -851,6 +851,7 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "dynamic bad(){print('value');return 'wrong';}int tail(){print('tail');return 2;}void main(){print('before');print(<int>[?bad(),tail()]);}",
       "void main(){dynamic values=<Object>[1,'bad'];print('before');print([for(int i in values) i]);}",
       "int tail(){print('tail');return 3;}void main(){dynamic values=<Object>[1,'bad'];print('before');print(<int>[...values,tail()]);}",
       "void main(){dynamic values=3;print('before');print([...values]);}",
@@ -1529,6 +1530,17 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      '// @dart=3.7\nvoid unused(){print([?null]);}void main(){}',
+      '// @dart=3.7\nconst values=[?null];void main(){}',
+      'String? absent()=>null;void unused(){print(<int>[?absent()]);}void main(){}',
+      'void unused(){print([if(false) ?missing]);}void main(){}',
+      'void f(){}void unused(){print(<int>[?f()]);}void main(){}',
+      'void main(){print([??null]);}',
+      'void main(){print([?if(true) 1]);}',
+      'const dynamic x="bad";const values=<int>[?x];void main(){}',
+      'const Object? x=null;const values=<int>[?x];void main(){}',
+      'int? f()=>null;const values=[if(false) ?f()];void main(){}',
+      'int? f()=>null;void main(){var x=f();print([?x,x+1]);}',
       "void unused(){print(<int>[if(false) 'wrong']);}void main(){}",
       "void unused(){print([if(1) 2]);}void main(){}",
       "void unused(){print([for(var i in [1]) if(false) missing]);}void main(){}",

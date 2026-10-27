@@ -16,6 +16,10 @@ bool typingReceiver(int type) {
 
 int typingNullAssertion(int type) {
   if (type == tVoid) return -1;
+  return typingNonNull(type);
+}
+
+int typingNonNull(int type) {
   if (type == tNull) return tNever;
   return typeNonNullable(type);
 }

@@ -340,6 +340,14 @@ AstExpression parserList(Parser parser, List<AstType> arguments, int token) {
 
 AstExpression parserCollectionElement(Parser parser) {
   var token = parser.position;
+  if (parserTake(parser, '?'))
+    return AstExpression(
+      astNullAwareElement,
+      '',
+      <AstExpression>[parseExpression(parser)],
+      const <AstType>[],
+      token,
+    );
   if (parserTake(parser, '...') || parserTake(parser, '...?')) {
     var operator = parser.tokens[token].text;
     return AstExpression(

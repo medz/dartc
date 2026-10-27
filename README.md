@@ -56,7 +56,7 @@ The [specification tracker](specs/README.md) records the reference SDK, current 
 
 | Area | Implemented behavior |
 | --- | --- |
-| Values | Native integers, booleans, Unicode strings, nullable values, typed lists with conditional/loop/spread elements and runtime type checks |
+| Values | Native integers, booleans, Unicode strings, nullable values, typed lists with conditional/loop/spread and null-aware elements and runtime type checks |
 | Declarations | Top-level variables, lazy initialization, simple classes, instance/static fields and methods, named/unnamed constructors with field initializer lists, getters, setters and generic type aliases |
 | Functions | Direct calls, recursion, local and anonymous functions with lexical captures, optional/named direct arguments, required-positional function values and structural function types |
 | Control flow | Blocks, assignments, cascades, null-aware member/index chains, conditions, loops, labelled jumps, constant switch cases and returns |
