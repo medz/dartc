@@ -30,6 +30,15 @@ dartc hello.dart -o hello
 ./hello
 ```
 
+On Linux ARM64:
+
+```sh
+tar -xzf dartc-0.2.0-linux-arm64.tar.gz
+export PATH="$PWD/dartc-0.2.0-linux-arm64/bin:$PATH"
+dartc hello.dart -o hello
+./hello
+```
+
 Keep the archive's `bin/` and `lib/` directories together. Matching dartc runtime sources are included in `lib/` for compilation. `SHA256SUMS` contains the archive checksums.
 
 The pub package uses the Dart SDK as the compiler's host:
