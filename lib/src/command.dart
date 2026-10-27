@@ -11,6 +11,40 @@ import 'nogc.dart';
 import 'reach.dart';
 import 'ssa.dart';
 import 'source.dart';
+import 'source_uri.dart';
+import 'package_config.dart';
+
+PackageConfig? compilerPackages(String input, String cwd, String? explicit) {
+  String path;
+  String uri;
+  String? text;
+  if (explicit != null) {
+    if (explicit == '') {
+      print('Missing value for --packages');
+      hostExit(64);
+    }
+    uri = sourceInputUri(cwd, explicit);
+    path = sourceUriPath('/', uri);
+    text = hostReadIfExists(path);
+    if (text == null) {
+      print('Package configuration not found: ' + path);
+      hostExit(64);
+    }
+  } else {
+    var directory = input.substring(0, input.lastIndexOf('/') + 1);
+    while (true) {
+      uri = directory + '.dart_tool/package_config.json';
+      path = sourceUriPath('/', uri);
+      text = hostReadIfExists(path);
+      if (text != null) break;
+      if (directory == 'file:///') return null;
+      directory = sourceResolveFileUri(directory, '../');
+    }
+  }
+  var config = parsePackageConfig(path, text);
+  resolvePackageConfig(config, uri);
+  return config;
+}
 
 void runCompiler(List<String> args) {
   if (args.length == 0 || args[0] == '--help') {
@@ -20,18 +54,24 @@ void runCompiler(List<String> args) {
     print(
       '       [--emit exe|dylib|object|static] [--export <FFI binding>] [--std <runtime.dart>]',
     );
+    print('       [--packages <package_config.json>]');
     hostExit(0);
   }
   String input = args[0];
   String output = '';
   String standard = '';
   String selectedExport = '';
+  String? packages;
   targetOS = hostTarget();
   imageKind = 0;
   int argument = 1;
   while (argument < args.length) {
     String option = args[argument];
     argument = argument + 1;
+    if (option.startsWith('--packages=')) {
+      packages = option.substring(11);
+      continue;
+    }
     if (argument == args.length) {
       print('Missing value for ' + option);
       hostExit(64);
@@ -41,6 +81,8 @@ void runCompiler(List<String> args) {
       output = value;
     } else if (option == '--std') {
       standard = value;
+    } else if (option == '--packages') {
+      packages = value;
     } else if (option == '--target') {
       if (value == 'macos-arm64') {
         targetOS = 0;
@@ -79,6 +121,9 @@ void runCompiler(List<String> args) {
     print('Library output requires --export <Pointer.fromFunction binding>.');
     hostExit(64);
   }
+  var cwd = hostCurrentDirectory();
+  var inputUri = sourceInputUri(cwd, input);
+  input = sourceUriPath('/', inputUri);
   if (output == '') {
     if (input.endsWith('.dart'))
       output = input.substring(0, input.length - 5);
@@ -90,8 +135,9 @@ void runCompiler(List<String> args) {
   }
   if (imageKind == 0 && standard == '') standard = hostStdPath();
   String runtime = '';
-  if (imageKind == 0) runtime = standard;
-  SourceProgram sources = collectSources(input, runtime);
+  if (imageKind == 0) runtime = sourceInputUri(cwd, standard);
+  var config = compilerPackages(inputUri, cwd, packages);
+  SourceProgram sources = collectSources(inputUri, runtime, config);
   parseSource(sources);
   if (imageKind != 0) {
     int chosen = -1;

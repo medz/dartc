@@ -28,14 +28,14 @@ dart run bin/dartc.dart example/hello.dart -o build/hello
 
 Language compatibility targets Dart 3.13.5. The [specification tracker](specs/README.md) maps official language clauses to implementation gaps and behavior tests; the list below is a usage summary.
 
-Each source file defaults to language version 3.13. A leading `// @dart = major.minor` comment can select 2.12 through 3.13 for the [implemented versioned rules](specs/lexical-structure.md). This does not provide complete compatibility with those language versions. Package configuration files do not yet select versions or resolve package imports.
+Source files use their owning package's `languageVersion` from package configuration v2, or 3.13 when none is specified. A leading `// @dart = major.minor` comment can select 2.12 through 3.13 for the [implemented versioned rules](specs/lexical-structure.md). This does not provide complete compatibility with those language versions.
 
 - Top-level functions and variables, direct calls, and recursion.
 - Integers, booleans, strings, and typed lists.
 - Local variables, assignments, arithmetic, comparisons, and short-circuit logic.
 - `if`, `while`, `do`/`while`, three-part `for`, list `for`/`in`, labelled jumps, constant `switch` cases, and `return`.
 - Basic string and list operations, Unicode strings, interpolation, `print`, and command-line arguments.
-- Relative source imports and exports, prefixes, private names, and `show`/`hide` filters.
+- Local relative, `file:` and `package:` imports and exports, prefixes, private names, and `show`/`hide` filters.
 
 The source checkout additionally supports simple classes with fields, field-formal constructors, getters, setters, and directly resolved instance methods, nested typed lists, and lazy top-level initialization. Instance members may be used with or without `this`. Top-level getters and setters have independent read/write types and work through supported imports and exports. Basic `dynamic`, `Object`, `null`, and nullable values retain their runtime types across assignments, calls, fields, and list storage. Null-coalescing `??` expressions evaluate the fallback only when the left operand is null, including in constants and default values. `??=` evaluates and assigns the fallback only when the target reads null; postfix `!` checks for null and preserves a non-null value. Runtime `is`, `is!`, and `as` check supported value types and reified list arguments. List covariance checks writes against the actual element type. Interpolation and `print` support lists and class `toString` overrides, including cyclic lists.
 
@@ -50,6 +50,12 @@ The source checkout also accepts user const-variable annotations on existing dec
 String indices and positions use UTF-16 code units and check ranges. `String.fromCharCodes` currently takes one `List<int>` argument, with codes from 0 through `0x10ffff`; surrogate code units are preserved.
 
 Function expressions, local functions, capturing closures, inheritance, general dynamic member calls, exceptions, async code, and most SDK libraries are not yet supported. Failed runtime type checks terminate the process; exception handling and stack unwinding are not implemented. Managed objects are currently reclaimed when the process exits. Self-hosting does not imply full Dart language compatibility.
+
+## Package configuration
+
+`dartc` discovers the nearest `.dart_tool/package_config.json` above the source file. To select one explicitly, pass `--packages path/to/package_config.json` or `--packages=path/to/package_config.json`. Configuration is read once for the whole compilation; malformed or explicitly missing files are errors. Use `dart pub get` to resolve dependencies before compiling; `dartc` does not download packages or solve versions.
+
+Package roots and library directories resolve relative to the configuration file. Only local file-backed packages are supported. A file imported through `package:` has a different library identity from the same file imported through `file:`; use consistent imports. Runtime and core implementation sources retain their own default language version.
 
 ## Build a standalone compiler
 

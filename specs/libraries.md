@@ -17,10 +17,12 @@
 | [§19.2][exports]、[§19.4][conflicts]：访问器冲突差异 | 待核对 | 固定草案的 basename 规则与 SDK 3.13.5 analyzer/CFE 不完全一致：一个库提供 getter+setter，另一个仅 getter，仅写该名时交换 import 或 export 顺序可改变 CFE 结果；analyzer 对两种 export 顺序都报告冲突。本实现不仿该顺序选择，不能据此声称完整命名空间兼容。 | [官方固定草案][spec]；[symbols.dart](../lib/src/symbols.dart)；[behavior_test.dart](../test/behavior_test.dart) 为后续差分入口 |
 | [§19.5 Parts][parts] | 未实现 | 未解析 `part` / `part of`，没有多编译单元共享同一库作用域、私有性和重复 part 校验。 | [parser.dart](../lib/src/parser.dart)、[source.dart](../lib/src/source.dart)；尚无对应正向行为验证 |
 | [§19.6 Scripts][scripts] | 部分实现 | 从导出空间查找 `main`，支持至多两个必需位置参数及可选/命名默认值；当前第一位置实参为 `List<String>`，第二位置实参固定为 `null`。isolate 启动载荷和完整脚本调用语义尚未验收。 | [frontend.dart](../lib/src/frontend.dart) 的 `feGenerateEntry`；[behavior_test.dart](../test/behavior_test.dart) 的 named-entry、two-entry、invalid-entry 与 argv 用例 |
-| [语言版本与包配置][versioning] | 部分实现 | 已加载文件各自保留版本，导入方不覆盖被导入声明的语法、默认值及流分析版本。未读取 `package_config.json` 的 `languageVersion` 或包 URI 映射，也不从 pubspec 推导版本；范围及默认值见[词法结构](lexical-structure.md)。 | [source.dart](../lib/src/source.dart) `SourceFile`、`sourceVersionAtLeast()`；[behavior_test.dart](../test/behavior_test.dart) 的 `version-imports.dart`、`version-unnamed.dart` |
-| [§19.7 URIs][uris] | 部分实现 | 处理相对/绝对文件路径及 `dart:core`、`dart:ffi`；缺 `package:`、`file:` URI、条件 URI 和完整 URI 规范化。 | [source.dart](../lib/src/source.dart)、[parser.dart](../lib/src/parser.dart)；[behavior_test.dart](../test/behavior_test.dart) 的路径归一与不支持 URI 拒绝用例 |
+| [语言版本与包配置][versioning] | 部分实现 | 读取 [package configuration v2][packages]；从入口目录向上选择最近配置，或由 `--packages` 显式指定，整次编译只读取一次。包根覆盖 bin/test 等文件，最深根决定默认 `languageVersion`，文件头可覆盖；使用不支持版本的包仍报错，未使用的未来版本包不阻断编译。实现输入 runtime/core 保持自身默认版本。无配置时默认 3.13，不解析 pubspec 或旧 `.packages`，不求解和下载依赖；范围见[词法结构](lexical-structure.md)。 | [package_config.dart](../lib/src/package_config.dart)、[command.dart](../lib/src/command.dart)、[source.dart](../lib/src/source.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 package 配置及版本用例 |
+| [§19.7 URIs][uris] | 部分实现 | 支持本地相对 URI、`file:`、`package:` 及 `dart:core`、`dart:ffi`，处理点段、百分号 UTF-8、包根约束。库身份按规范 URI 保存：同一规范 file/relative URI 合并，package 保留包身份，内部双斜线及保留字符编码差异不被磁盘路径归一吞掉；包内相对 URI 按 package 基址解析。非本地 scheme/authority 清晰拒绝，缺条件 URI、非本地加载及完整 URI 组合验收。 | [source_uri.dart](../lib/src/source_uri.dart)、[source.dart](../lib/src/source.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 package 身份、包内相对 URI 与不支持 URI 拒绝用例 |
 | [§6.3 Concurrency][concurrency] | 未实现 | 原生产物没有 isolates、消息端口、spawn 和独立隔离堆；未提供 `dart:isolate` 的程序执行能力。 | [source.dart](../lib/src/source.dart)、[runtime.dart](../lib/src/runtime.dart)；尚无 isolate 原生行为验证 |
 | [§19][libraries]：完整命名空间与 URI 组合 | 待核对 | 当前用例覆盖有限的导入图和优先级；未形成完整规范兼容性测试，不能从单一导入程序成功推断一般库系统已完成。 | [behavior_test.dart](../test/behavior_test.dart)；后续补充仍以真实多文件编译执行为依据 |
+
+package v2 的嵌套根约束在配置边界检查。SDK 3.13.5 在未使用重叠包时接受部分无效配置，本实现按[固定 v2 格式][packages]拒绝；行为测试明确区分该差异，不将其报告为 SDK 完全一致。
 
 ## 验证边界
 
@@ -43,3 +45,5 @@
 
 [versioning]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.8/language-versioning/feature-specification.md
 [features]: https://github.com/dart-lang/sdk/blob/3.13.5/tools/experimental_features.yaml
+
+[packages]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.8/language-versioning/package-config-file-v2.md

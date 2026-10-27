@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import '../lib/src/layout.dart';
@@ -397,10 +398,12 @@ ProcessResult run(
   String executable,
   List<String> arguments, {
   bool native = false,
+  String? workingDirectory,
 }) {
   final result = Process.runSync(
     executable,
     arguments,
+    workingDirectory: workingDirectory,
     environment: native ? {'PATH': '/usr/bin:/bin'} : null,
     includeParentEnvironment: !native,
   );
@@ -450,22 +453,42 @@ void main(List<String> args) {
       '--std',
       runtime ?? standard,
     ];
+    List<String> sdkOptions(List<String> options) =>
+        options.length == 2 && options[0] == '--packages'
+        ? ['--packages=${options[1]}']
+        : options;
     void compare(
       File source,
       List<String> arguments, {
       List<String> outputs = const [],
+      List<String> options = const [],
+      String? workingDirectory,
     }) {
       final executable = '${source.path}.out';
-      final expected = run(sdk, [source.path, ...arguments]).stdout as String;
+      final expected =
+          run(sdk, [
+                ...sdkOptions(options),
+                source.path,
+                ...arguments,
+              ], workingDirectory: workingDirectory).stdout
+              as String;
       final expectedFiles = [
         for (final path in outputs) File(path).readAsBytesSync(),
       ];
       run(
         driver,
-        compileArguments(source, executable),
+        [...compileArguments(source, executable), ...options],
         native: compiler != null,
+        workingDirectory: workingDirectory,
       );
-      final actual = run(executable, arguments, native: true).stdout as String;
+      final actual =
+          run(
+                executable,
+                arguments,
+                native: true,
+                workingDirectory: workingDirectory,
+              ).stdout
+              as String;
       if (actual != expected) {
         throw StateError(
           '${source.path} differs from official Dart.\n'
@@ -1199,14 +1222,34 @@ void main() { print(1_000); }
       "void main() { print('abc'.endsWith('c', 1)); }",
       'void main() { print(String.fromCharCodes(<int>[65], 0)); }',
     ];
-    void reject(File invalid, {String? runtime, String? diagnostic}) {
+    void reject(
+      File invalid, {
+      String? runtime,
+      String? diagnostic,
+      int status = 1,
+      List<String> options = const [],
+      String? workingDirectory,
+      bool checkSdk = false,
+    }) {
+      if (checkSdk) {
+        final expected = Process.runSync(sdk, [
+          ...sdkOptions(options),
+          invalid.path,
+        ], workingDirectory: workingDirectory);
+        if (expected.exitCode == 0)
+          throw StateError('Expected SDK rejection for ${invalid.path}.');
+      }
       final result = Process.runSync(
         driver,
-        compileArguments(invalid, '${invalid.path}.out', runtime),
+        [
+          ...compileArguments(invalid, '${invalid.path}.out', runtime),
+          ...options,
+        ],
+        workingDirectory: workingDirectory,
         environment: compiler == null ? null : {'PATH': '/usr/bin:/bin'},
         includeParentEnvironment: compiler == null,
       );
-      if (result.exitCode != 1 ||
+      if (result.exitCode != status ||
           !'${result.stdout}${result.stderr}'.contains(
             diagnostic ?? invalid.path,
           )) {
@@ -1230,6 +1273,257 @@ void main() { print(1_000); }
         throw StateError('Expected SDK rejection for ${invalid.path}.');
       }
       reject(invalid, diagnostic: 'digit separator');
+    }
+    final packageProject = Directory(
+      '${temporary.path}/packages-你好 space/project',
+    );
+    final packageCwd = Directory('${packageProject.parent.path}/unrelated')
+      ..createSync(recursive: true);
+    final packageState = File('${packageProject.path}/lib %/state.dart');
+    packageState.parent.createSync(recursive: true);
+    packageState.writeAsStringSync(
+      'class Item { final int value; const Item(this.value); } '
+      'const item=Item(7); int count=0; int tick()=>++count;',
+    );
+    final packageSubstate = File('${packageState.parent.path}/sub/state.dart');
+    packageSubstate.parent.createSync(recursive: true);
+    packageSubstate.writeAsStringSync('int count=0; int tick()=>++count;');
+    final packageColon = File('${packageState.parent.path}/a:b.dart')
+      ..writeAsStringSync('int count=0; int tick()=>++count;');
+    File('${packageState.parent.path}/root.dart')
+        .writeAsStringSync('const int value=41;');
+    File('${packageProject.path}/root.dart')
+        .writeAsStringSync('const int value=99;');
+    File('${packageSubstate.parent.path}/middle.dart').writeAsStringSync(
+      "import '../../root.dart' as clamped; "
+      "import '${File('${packageProject.path}/root.dart').uri}' as absolute; "
+      'int read()=>clamped.value+absolute.value;',
+    );
+    final packageMain = File('${packageProject.path}/bin/main.dart');
+    packageMain.parent.createSync(recursive: true);
+    packageMain.writeAsStringSync(
+      "import 'package:probe/state.dart' as package; "
+      "import '../lib%20%25/state.dart' as relative; "
+      "import '${packageState.uri}' as absolute; "
+      "import 'package:probe/sub//state.dart' as packageDouble; "
+      "import 'package:probe/sub/state.dart' as packageSingle; "
+      "import '${packageSubstate.parent.uri}/state.dart' as fileDouble; "
+      "import '${packageSubstate.uri}' as fileSingle; "
+      "import 'package:probe/a:b.dart' as packageColon; "
+      "import 'package:probe/a%3Ab.dart' as packageEncoded; "
+      "import '${packageColon.uri}' as fileColon; "
+      "import '${packageColon.uri.toString().replaceFirst('/a:b.dart', '/a%3Ab.dart')}' as fileEncoded; "
+      "import 'package:probe/sub/middle.dart' as clamped; "
+      'int _=7; void main(){int _=2;print(_);'
+      'print(identical(package.item,relative.item));'
+      'print(identical(package.item,absolute.item));'
+      'print(identical(relative.item,absolute.item));'
+      'print(package.tick());print(relative.tick());print(absolute.tick());'
+      'print(identical(packageDouble.tick,packageSingle.tick));'
+      'print(packageDouble.tick());print(packageSingle.tick());'
+      'print(identical(fileDouble.tick,fileSingle.tick));'
+      'print(fileDouble.tick());print(fileSingle.tick());'
+      'print(identical(packageColon.tick,packageEncoded.tick));'
+      'print(packageColon.tick());print(packageEncoded.tick());'
+      'print(identical(fileColon.tick,fileEncoded.tick));'
+      'print(fileColon.tick());print(fileEncoded.tick());print(clamped.read());}',
+    );
+    final packageTest = File('${packageProject.path}/test/main.dart');
+    packageTest.parent.createSync(recursive: true);
+    packageTest.writeAsStringSync('int _=7; void main(){int _=2;print(_);}');
+    final packageHeader = File('${packageProject.path}/test/header.dart')
+      ..writeAsStringSync(
+        '// @dart=3.13\nint _=7; void main(){int _=2;print(_);}',
+      );
+    final packageConfig = File(
+      '${packageProject.path}/.dart_tool/package_config.json',
+    );
+    packageConfig.parent.createSync(recursive: true);
+    final packageEntry = {
+      'name': 'probe',
+      'rootUri': '../',
+      'packageUri': 'lib%20%25/',
+      'languageVersion': '3.6',
+    };
+    packageConfig.writeAsStringSync(
+      jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          packageEntry,
+          {
+            'name': 'runtime-input',
+            'rootUri': File(standard).parent.uri.toString(),
+            'languageVersion': '2.12',
+          },
+        ],
+      }),
+    );
+    final unrelatedConfig = File(
+      '${packageCwd.path}/.dart_tool/package_config.json',
+    );
+    unrelatedConfig.parent.createSync(recursive: true);
+    unrelatedConfig.writeAsStringSync(
+      jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          {
+            ...packageEntry,
+            'rootUri': '../../project/',
+            'languageVersion': '3.7',
+          },
+        ],
+      }),
+    );
+    compare(packageMain, [], workingDirectory: packageCwd.path);
+    compare(packageTest, [], workingDirectory: packageCwd.path);
+    compare(packageHeader, [], workingDirectory: packageCwd.path);
+    compare(
+      packageMain,
+      [],
+      workingDirectory: packageCwd.path,
+      options: ['--packages', packageConfig.path],
+    );
+    final nearestConfig = File(
+      '${packageMain.parent.path}/.dart_tool/package_config.json',
+    );
+    nearestConfig.parent.createSync(recursive: true);
+    nearestConfig.writeAsStringSync(
+      jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          {...packageEntry, 'rootUri': '../../', 'languageVersion': '3.7'},
+        ],
+      }),
+    );
+    compare(packageMain, [], workingDirectory: packageCwd.path);
+    compare(
+      packageMain,
+      [],
+      workingDirectory: packageCwd.path,
+      options: ['--packages=${packageConfig.uri}'],
+    );
+    final uriBaseConfig = File('${packageConfig.parent.path}/uri-base.json')
+      ..writeAsStringSync(
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {...packageEntry, 'rootUri': '../../'},
+          ],
+        }),
+      );
+    compare(
+      packageMain,
+      [],
+      workingDirectory: packageCwd.path,
+      options: [
+        '--packages=${uriBaseConfig.parent.uri}/${uriBaseConfig.uri.pathSegments.last}',
+      ],
+    );
+    final lastWinsConfig = File('${packageConfig.parent.path}/last-wins.json')
+      ..writeAsStringSync(
+        '\uFEFF' +
+            r'''
+{"configVersion":false,"config\u0056ersion":2,"packages":{},"packages":[
+ {"name":0,"name":"probe","rootUri":false,"rootUri":"../",
+  "packageUri":null,"packageUri":"lib%20%25/","languageVersion":[],"languageVersion":"3.6"}
+],"unknown":{"values":[true,false,null,-1.25e+3,{"escape":"\u4F60\u597D\uD83D\uDE42"}]}}
+''',
+      );
+    compare(
+      packageMain,
+      [],
+      workingDirectory: packageCwd.path,
+      options: ['--packages', lastWinsConfig.path],
+    );
+    final nestedMain = File('${packageProject.path}/inner/bin/main.dart');
+    nestedMain.parent.createSync(recursive: true);
+    nestedMain.writeAsStringSync('int _=7; void main(){int _=2;print(_);}');
+    packageConfig.writeAsStringSync(
+      jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          packageEntry,
+          {
+            'name': 'inner',
+            'rootUri': '../inner/',
+            'packageUri': 'lib/',
+            'languageVersion': '3.7',
+          },
+          {
+            'name': 'future',
+            'rootUri': '../unused/',
+            'languageVersion': '3.14',
+          },
+        ],
+      }),
+    );
+    compare(
+      packageMain,
+      [],
+      workingDirectory: packageCwd.path,
+      options: ['--packages', packageConfig.path],
+    );
+    compare(nestedMain, [], workingDirectory: packageCwd.path);
+    nearestConfig.writeAsStringSync(
+      '{"configVersion":2,"packages":[],"unknown":[1,]}',
+    );
+    reject(
+      packageMain,
+      diagnostic: nearestConfig.path,
+      checkSdk: true,
+      workingDirectory: packageCwd.path,
+    );
+    final missingConfig = '${packageConfig.parent.path}/missing.json';
+    reject(
+      packageMain,
+      diagnostic: missingConfig,
+      status: 64,
+      checkSdk: true,
+      workingDirectory: packageCwd.path,
+      options: ['--packages', missingConfig],
+    );
+    final invalidConfigs = {
+      'future-used': jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          {...packageEntry, 'languageVersion': '3.14'},
+        ],
+      }),
+      'duplicate-roots': jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          packageEntry,
+          {...packageEntry, 'name': 'other'},
+        ],
+      }),
+      'overlap': jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          packageEntry,
+          {'name': 'nested', 'rootUri': '../lib%20%25/nested/'},
+        ],
+      }),
+      'outside': jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          {...packageEntry, 'packageUri': '../'},
+        ],
+      }),
+      'version-number': '{"configVersion":2.0,"packages":[]}',
+    };
+    for (final entry in invalidConfigs.entries) {
+      final config = File('${packageConfig.parent.path}/${entry.key}.json')
+        ..writeAsStringSync(entry.value);
+      reject(
+        packageHeader,
+        // SDK 3.13.5 accepts this unused overlap; the pinned v2 format rejects it.
+        checkSdk: entry.key != 'overlap',
+        workingDirectory: packageCwd.path,
+        diagnostic: entry.key == 'future-used'
+            ? packageHeader.path
+            : config.path,
+        options: ['--packages=${config.path}'],
+      );
     }
     final core = Directory('${temporary.path}/std/core')
       ..createSync(recursive: true);

@@ -2,6 +2,8 @@ import 'host.dart';
 import 'scanner.dart';
 import 'ast.dart';
 import 'parser.dart';
+import 'source_uri.dart';
+import 'package_config.dart';
 
 const int sourceUnknown = -1;
 const int sourceHost = -2;
@@ -30,6 +32,7 @@ class SourceImport {
 
 class SourceFile {
   String path;
+  String uri = '';
   List<Token> tokens;
   List<SourceImport> imports;
   bool system = false;
@@ -46,8 +49,9 @@ class SourceProgram {
   List<Token> tokens;
   int entry;
   int runtimeTokens;
-  String hostPath;
+  String hostUri;
   int core;
+  PackageConfig? packages;
 
   SourceProgram(
     this.files,
@@ -55,38 +59,9 @@ class SourceProgram {
     this.tokens,
     this.entry,
     this.runtimeTokens,
-    this.hostPath,
+    this.hostUri,
     this.core,
   );
-}
-
-String sourcePath(String path) {
-  List<String> parts = <String>[];
-  bool absolute = path.startsWith('/');
-  int start = 0;
-  while (start < path.length) {
-    int end = path.indexOf('/', start);
-    if (end < 0) end = path.length;
-    String part = path.substring(start, end);
-    if (part != '' && part != '.') {
-      if (part == '..' && parts.length > 0 && parts.last != '..') {
-        parts.removeLast();
-      } else if (part != '..' || !absolute) {
-        parts.add(part);
-      }
-    }
-    start = end + 1;
-  }
-  String result = '';
-  if (absolute) result = '/';
-  int i = 0;
-  while (i < parts.length) {
-    if (i > 0) result = result + '/';
-    result = result + parts[i];
-    i++;
-  }
-  if (result == '') return '.';
-  return result;
 }
 
 bool sourceVersionAtLeast(
@@ -130,20 +105,65 @@ bool sourceAllows(SourceImport dependency, String name) {
   return true;
 }
 
-int sourceLoad(SourceProgram program, String path) {
-  path = sourcePath(path);
-  if (path == program.hostPath) return sourceHost;
+int sourceLoad(
+  SourceProgram program,
+  String uri, [
+  bool implementation = false,
+]) {
+  SourcePackageUri? package;
+  if (sourceUriScheme(uri) == 'package') {
+    package = sourcePackageUri(uri);
+    uri = 'package:' + package.name + '/' + package.path;
+  }
+  if (uri == program.hostUri) return sourceHost;
   int i = 0;
   while (i < program.files.length) {
-    if (program.files[i].path == path) return i;
+    if (program.files[i].uri == uri) return i;
     i++;
+  }
+  String path;
+  if (package != null) {
+    var config = program.packages;
+    if (config == null) {
+      print('dartc: no package configuration for ' + uri);
+      hostExit(1);
+    }
+    path = resolvePackageUri(config, package);
+  } else {
+    path = sourceUriPath('/', uri);
   }
   int id = program.files.length;
   var scanner = Scanner(hostRead(path), <Token>[], 0);
   scanner.path = path;
+  var packages = program.packages;
+  if (!implementation && packages != null) {
+    var package = sourcePackageForFile(packages, path);
+    if (package != null && package.languageMajor >= 0) {
+      var major = package.languageMajor;
+      var minor = package.languageMinor;
+      if (major < 2 ||
+          major == 2 && minor < 12 ||
+          major > 3 ||
+          major == 3 && minor > 13)
+        packageConfigError(
+          packages,
+          'unsupported language version ' +
+              major.toString() +
+              '.' +
+              minor.toString() +
+              ' for package ' +
+              package.name +
+              ' in ' +
+              path,
+        );
+      scanner.languageMajor = major;
+      scanner.languageMinor = minor;
+    }
+  }
   scanHeader(scanner);
   List<SourceImport> imports = <SourceImport>[];
   var file = SourceFile(path, scanner.tokens, imports);
+  file.uri = uri;
   file.languageMajor = scanner.languageMajor;
   file.languageMinor = scanner.languageMinor;
   file.languageOffset = scanner.languageOffset;
@@ -166,7 +186,6 @@ int sourceLoad(SourceProgram program, String path) {
     tokens[i].source = id;
     i++;
   }
-  String directory = path.substring(0, path.lastIndexOf('/') + 1);
   var paths = <String>[];
   i = 0;
   while (i < program.files.length) {
@@ -199,22 +218,43 @@ int sourceLoad(SourceProgram program, String path) {
       }
       continue;
     }
-    var uri = directive.uri;
+    var reference = directive.uri;
     int target = sourceUnknown;
-    if (uri == 'dart:core') {
+    if (reference == 'dart:core') {
       target = sourceCore;
-    } else if (uri == 'dart:ffi') {
+    } else if (reference == 'dart:ffi') {
       target = sourceFfi;
-    } else if (uri.indexOf(':') < 0) {
-      String dependency = directory + uri;
-      if (uri.startsWith('/')) dependency = uri;
-      target = sourceLoad(program, dependency);
     } else {
-      sourceError(program, tokens[start], 'unsupported library URI ' + uri);
+      var scheme = sourceUriScheme(reference);
+      if (scheme == 'package') {
+        target = sourceLoad(program, reference, implementation);
+      } else if (scheme == '' && package != null) {
+        var imported = sourcePackageRelative(package, reference);
+        target = sourceLoad(
+          program,
+          'package:' + imported.name + '/' + imported.path,
+          implementation,
+        );
+      } else if (scheme == '' || scheme == 'file') {
+        var base = uri;
+        if (scheme == 'file') base = 'file:///';
+        target = sourceLoad(
+          program,
+          sourceResolveFileUri(base, reference),
+          implementation,
+        );
+      } else {
+        sourceError(
+          program,
+          tokens[start],
+          'unsupported library URI ' + reference,
+        );
+      }
     }
+
     imports.add(
       SourceImport(
-        uri,
+        reference,
         directive.prefix,
         target,
         start,
@@ -228,27 +268,31 @@ int sourceLoad(SourceProgram program, String path) {
   return id;
 }
 
-SourceProgram collectSources(String input, String runtime) {
-  String hostPath = '';
-  if (runtime != '') {
-    hostPath = sourcePath(
-      runtime.substring(0, runtime.lastIndexOf('/') + 1) + 'host.dart',
-    );
-  }
+SourceProgram collectSources(
+  String input,
+  String runtime, [
+  PackageConfig? packages,
+]) {
+  String hostUri = '';
+  if (runtime != '') hostUri = sourceResolveFileUri(runtime, 'host.dart');
   SourceProgram program = SourceProgram(
     <SourceFile>[],
     <int>[],
     <Token>[],
     -1,
     0,
-    hostPath,
+    hostUri,
     -1,
   );
+  program.packages = packages;
   if (runtime != '') {
-    int standard = sourceLoad(program, runtime);
+    int standard = sourceLoad(program, runtime, true);
     program.runtimeTokens = program.files[standard].tokens.length - 1;
-    String directory = runtime.substring(0, runtime.lastIndexOf('/') + 1);
-    program.core = sourceLoad(program, directory + 'std/core.dart');
+    program.core = sourceLoad(
+      program,
+      sourceResolveFileUri(runtime, 'std/core.dart'),
+      true,
+    );
     var work = <int>[program.core];
     var cursor = 0;
     while (cursor < work.length) {
