@@ -13,7 +13,7 @@ external int nativeCall1(int function, int value);
 external int nativeCall0(int function);
 external int nativeFramePointer();
 
-const int rtAbiVersion = 11;
+const int rtAbiVersion = 12;
 const int rtArenaHeaderBytes = 48;
 
 int rtArenaHead = 0;
@@ -1929,8 +1929,7 @@ int rtTraceObject(int value, int worklist, int capacity) {
   var kind = nativeLoad64(descriptor + descriptorKindOffset);
   if (kind == descriptorString ||
       kind == descriptorIntBox ||
-      kind == descriptorWordArray ||
-      kind == descriptorFunction) {
+      kind == descriptorWordArray) {
     return 0;
   }
   if (kind == descriptorList) {
@@ -1943,7 +1942,7 @@ int rtTraceObject(int value, int worklist, int capacity) {
     );
   }
   var count = 0;
-  if (kind == descriptorClass) {
+  if (kind == descriptorClass || kind == descriptorFunction) {
     var fields = nativeLoad64(descriptor + descriptorFieldsOffset);
     var bitmap = nativeLoad64(descriptor + descriptorRefBitmapOffset);
     if (bitmap != 0) {

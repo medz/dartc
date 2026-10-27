@@ -166,25 +166,23 @@ Future<void> main(List<String> args) async {
       'unsupported',
       {
         'kind': 'unsupported',
-        'nativeDiagnostic': 'capturing outer local is not supported',
+        'nativeDiagnostic':
+            'async and generator function expressions are unsupported',
       },
-      {
-        'main.dart':
-            'void main(){int value=7;int callback()=>value;print(callback());}',
-      },
+      {'main.dart': 'void main(){var callback=()async=>7;print(7);}'},
     );
     final gap = await active.evaluate(unsupported);
-    check(
-      gap.verdict == 'capability-gap' && !gap.failed,
-      'Declared capture gap',
-    );
+    check(gap.verdict == 'capability-gap' && !gap.failed, 'Declared async gap');
     checkStages(gap, {
       'reference.compile': 0,
       'reference.run': 0,
       'host.compile': 1,
       'native.compile': 1,
     });
-    check(gap.stages['reference.run']!.stdout == '7\n', 'SDK capture');
+    check(
+      gap.stages['reference.run']!.stdout == '7\n',
+      'SDK async function declaration',
+    );
     // A real exit 1 without the contracted source diagnostic is not a gap.
     final gapDescriptor = File('${unsupported.path}/case.json');
     final originalGap = gapDescriptor.readAsStringSync();

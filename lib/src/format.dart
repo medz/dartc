@@ -96,6 +96,34 @@ void imageSection(
   image32(0);
 }
 
+class _CaptureDescriptor {
+  final List<int> references;
+  final List<int> tagged;
+  int offset = -1;
+  int referencesOffset = -1;
+  int taggedOffset = -1;
+
+  _CaptureDescriptor(this.references, this.tagged);
+}
+
+_CaptureDescriptor _captureDescriptor(List<int> types, int prefix) {
+  var words = (prefix + types.length + 63) ~/ 64;
+  var references = List<int>.filled(words, 0);
+  var tagged = List<int>.filled(words, 0);
+  var i = 0;
+  while (i < types.length) {
+    var field = prefix + i;
+    var word = field ~/ 64;
+    var bit = 1 << (field & 63);
+    if (typeIsReference(types[i]))
+      references[word] |= bit;
+    else if (typeIsTagged(types[i]))
+      tagged[word] |= bit;
+    i++;
+  }
+  return _CaptureDescriptor(references, tagged);
+}
+
 class ConstantLayout {
   List<int> stringOffsets;
   List<int> descriptorOffsets;
@@ -115,6 +143,8 @@ class ConstantLayout {
   List<int> dataOffsets = <int>[];
   List<int> callableOffsets = <int>[];
   List<int> signatureOffsets = <int>[];
+  List<_CaptureDescriptor?> closureDescriptors = <_CaptureDescriptor?>[];
+  List<_CaptureDescriptor?> captureCellDescriptors = <_CaptureDescriptor?>[];
   int functionDescriptorOffset = -1;
   List<int> refBitmapOffsets = <int>[];
   List<int> taggedBitmapOffsets = <int>[];
@@ -192,6 +222,8 @@ ConstantLayout layoutConstants(int start) {
   List<int> typeOffsets = <int>[];
   List<int> dataOffsets = <int>[];
   List<int> callableOffsets = <int>[];
+  List<_CaptureDescriptor?> closureDescriptors = <_CaptureDescriptor?>[];
+  List<_CaptureDescriptor?> captureCellDescriptors = <_CaptureDescriptor?>[];
   List<int> signatureOffsets = <int>[];
   List<int> refBitmapOffsets = <int>[];
   List<int> taggedBitmapOffsets = <int>[];
@@ -223,6 +255,12 @@ ConstantLayout layoutConstants(int start) {
   i = 0;
   while (i < functions.length) {
     callableOffsets.add(-1);
+    closureDescriptors.add(null);
+    i++;
+  }
+  i = 0;
+  while (i < dartTypes.length) {
+    captureCellDescriptors.add(null);
     i++;
   }
   i = 0;
@@ -247,6 +285,17 @@ ConstantLayout layoutConstants(int start) {
       dataOffsets[addressTargets[i]] = 0;
     } else if (addressKinds[i] == 6) {
       callableOffsets[addressTargets[i]] = 0;
+    } else if (addressKinds[i] == 7) {
+      var function = addressTargets[i];
+      if (closureDescriptors[function] == null)
+        closureDescriptors[function] = _captureDescriptor(
+          functions[function].closureLayout!.fieldTypes,
+          (functionInstanceBytes - objectHeaderBytes) ~/ 8,
+        );
+    } else if (addressKinds[i] == 8) {
+      var type = addressTargets[i];
+      if (captureCellDescriptors[type] == null)
+        captureCellDescriptors[type] = _captureDescriptor(<int>[type], 0);
     }
     i++;
   }
@@ -279,8 +328,8 @@ ConstantLayout layoutConstants(int start) {
   bool needsFunctions = false;
   i = 0;
   while (i < callableOffsets.length) {
-    if (callableOffsets[i] == 0) {
-      needsFunctions = true;
+    if (callableOffsets[i] == 0 || closureDescriptors[i] != null) {
+      if (callableOffsets[i] == 0) needsFunctions = true;
       var type = functionValueType(i);
       while (typeOffsets.length < dartTypes.length) typeOffsets.add(-1);
       markTypeReference(typeOffsets, types, type);
@@ -385,6 +434,17 @@ ConstantLayout layoutConstants(int start) {
     functionDescriptorOffset = end;
     end += classDescriptorBytes;
   }
+  for (var descriptors in <List<_CaptureDescriptor?>>[
+    closureDescriptors,
+    captureCellDescriptors,
+  ]) {
+    for (var descriptor in descriptors) {
+      if (descriptor != null) {
+        descriptor.offset = end;
+        end += classDescriptorBytes;
+      }
+    }
+  }
   i = 0;
   while (i < classSizes.length) {
     if (descriptorOffsets[i] >= 0) {
@@ -400,6 +460,23 @@ ConstantLayout layoutConstants(int start) {
       }
     }
     i++;
+  }
+  for (var descriptors in <List<_CaptureDescriptor?>>[
+    closureDescriptors,
+    captureCellDescriptors,
+  ]) {
+    for (var descriptor in descriptors) {
+      if (descriptor != null) {
+        if (bitmapNonzero(descriptor.references)) {
+          descriptor.referencesOffset = end;
+          end += descriptor.references.length * 8;
+        }
+        if (bitmapNonzero(descriptor.tagged)) {
+          descriptor.taggedOffset = end;
+          end += descriptor.tagged.length * 8;
+        }
+      }
+    }
   }
   i = 0;
   while (i < typeOffsets.length) {
@@ -526,6 +603,8 @@ ConstantLayout layoutConstants(int start) {
   layout.globalBytes = globalBytes;
   layout.dataOffsets = dataOffsets;
   layout.callableOffsets = callableOffsets;
+  layout.closureDescriptors = closureDescriptors;
+  layout.captureCellDescriptors = captureCellDescriptors;
   layout.signatureOffsets = signatureOffsets;
   layout.functionDescriptorOffset = functionDescriptorOffset;
   layout.refBitmapOffsets = refBitmapOffsets;
@@ -565,6 +644,12 @@ List<int> createMachOExecutable() {
       target = base + constants.dataOffsets[addressTargets[site]];
     } else if (addressKinds[site] == 6) {
       target = base + constants.callableOffsets[addressTargets[site]];
+    } else if (addressKinds[site] == 7) {
+      target =
+          base + constants.closureDescriptors[addressTargets[site]]!.offset;
+    } else if (addressKinds[site] == 8) {
+      target =
+          base + constants.captureCellDescriptors[addressTargets[site]]!.offset;
     } else {
       target = base + constants.typeOffsets[addressTargets[site]];
     }
@@ -723,6 +808,12 @@ List<int> createElfExecutable() {
       target = base + constants.dataOffsets[addressTargets[site]];
     } else if (addressKinds[site] == 6) {
       target = base + constants.callableOffsets[addressTargets[site]];
+    } else if (addressKinds[site] == 7) {
+      target =
+          base + constants.closureDescriptors[addressTargets[site]]!.offset;
+    } else if (addressKinds[site] == 8) {
+      target =
+          base + constants.captureCellDescriptors[addressTargets[site]]!.offset;
     } else {
       target = base + constants.typeOffsets[addressTargets[site]];
     }
@@ -970,6 +1061,46 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
       0,
     );
   }
+  var functionDescriptor = 0;
+  while (functionDescriptor < layout.closureDescriptors.length) {
+    var captured = layout.closureDescriptors[functionDescriptor];
+    if (captured != null) {
+      var fields =
+          functions[functionDescriptor].closureLayout!.fieldTypes.length;
+      imageDescriptor(
+        -7,
+        functionInstanceBytes + fields * 8,
+        (functionInstanceBytes - objectHeaderBytes) ~/ 8 + fields,
+        captured.referencesOffset < 0
+            ? 0
+            : captured.referencesOffset - captured.offset,
+        descriptorFunction,
+        captured.taggedOffset < 0 ? 0 : captured.taggedOffset - captured.offset,
+        0,
+        0,
+      );
+    }
+    functionDescriptor++;
+  }
+  var cellType = 0;
+  while (cellType < layout.captureCellDescriptors.length) {
+    var captured = layout.captureCellDescriptors[cellType];
+    if (captured != null) {
+      imageDescriptor(
+        captureCellClassId,
+        captureCellInstanceBytes,
+        1,
+        captured.referencesOffset < 0
+            ? 0
+            : captured.referencesOffset - captured.offset,
+        descriptorClass,
+        captured.taggedOffset < 0 ? 0 : captured.taggedOffset - captured.offset,
+        0,
+        0,
+      );
+    }
+    cellType++;
+  }
   descriptor = 0;
   while (descriptor < classSizes.length) {
     var fields = (classSizes[descriptor] - objectHeaderBytes) ~/ 8;
@@ -981,6 +1112,19 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
       imageBitmap(classTaggedMasks[descriptor], words);
     }
     descriptor++;
+  }
+  for (var descriptors in <List<_CaptureDescriptor?>>[
+    layout.closureDescriptors,
+    layout.captureCellDescriptors,
+  ]) {
+    for (var captured in descriptors) {
+      if (captured != null) {
+        if (captured.referencesOffset >= 0)
+          imageBitmap(captured.references, captured.references.length);
+        if (captured.taggedOffset >= 0)
+          imageBitmap(captured.tagged, captured.tagged.length);
+      }
+    }
   }
   int typeIndex = 0;
   while (typeIndex < layout.typeOffsets.length) {

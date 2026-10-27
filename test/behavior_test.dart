@@ -350,10 +350,85 @@ void anonymousFunctions(){
   print(<void>[opaque()]);
 }
 
+typedef CapturedRead = int Function();
+typedef CapturedStep = int Function(int);
+CapturedRead capturedCounter(int initial) {
+  var value=initial;
+  int next()=>++value;
+  print(identical(next,next));
+  return next;
+}
+List<CapturedRead> capturedPair() {
+  var value=0;
+  int next()=>++value;
+  int read()=>value;
+  return [next,read];
+}
+CapturedRead capturedChain(int initial) {
+  var value=initial;
+  CapturedRead middle(){int next()=>++value;return next;}
+  return middle();
+}
+CapturedStep capturedRecursive(int base) {
+  int next(int value) {
+    CapturedStep self=next;
+    return value==0?base:(value%2==0?next(value-1):self(value-1))+1;
+  }
+  return next;
+}
+class CapturedObject {
+  int value;
+  CapturedObject(this.value);
+  CapturedRead increment()=>()=>++value;
+  CapturedRead read()=>()=>this.value;
+  CapturedRead shadow(int value)=>()=>value;
+}
+class CapturedInitializer {
+  int value;
+  final CapturedRead read;
+  CapturedInitializer(this.value):read=(()=>value);
+  CapturedInitializer.parameter(int input):value=0,read=(()=>input);
+}
+void capturedFunctions() {
+  var first=capturedCounter(1),second=capturedCounter(10);
+  print(first());print(first());print(second());
+  var pair=capturedPair();print(pair[0]());print(pair[1]());
+  var chained=capturedChain(3);print(chained());print(chained());
+  print(capturedRecursive(10)(3));
+  var object=CapturedObject(4);
+  var increment=object.increment(),read=object.read();
+  print(increment());print(read());print(object.shadow(9)());
+  var initialized=CapturedInitializer(7);initialized.value=9;print(initialized.read());
+  print(CapturedInitializer.parameter(8).read());
+  Object stable=7;if(stable is int){int readStable()=>stable+1;print(readStable());}
+  var declared=<CapturedRead>[];
+  for(var i=0;i<3;i++){declared.add(()=>i);}
+  print(declared[0]());print(declared[1]());print(declared[2]());
+  var external=<CapturedRead>[];
+  var index=0;
+  for(index=0;index<3;index++){external.add(()=>index);}
+  print(external[0]());print(external[1]());print(external[2]());
+  var elements=<CapturedRead>[];
+  for(var value in<int>[2,4,6]){elements.add(()=>value);}
+  print(elements[0]());print(elements[1]());print(elements[2]());
+  int? nullable=3;int nullableRead()=>nullable??0;
+  nullable=null;print(nullableRead());
+  String text='before';String readText()=>text;
+  text='after';print(readText());
+  Object value=7;
+  int promoted(){if(value is int)return value+1;return -1;}
+  print(promoted());value='changed';print(promoted());
+  var base=10;
+  int packed(int a,int b,int c,int d,int e,int f,int g,int h)=>base+a+h;
+  var callback=packed;print(callback(1,2,3,4,5,6,7,8));
+  base=20;print(packed(1,2,3,4,5,6,7,8));
+}
+
 void main(List<String> args) {
   listContexts();
   localFunctions();
   anonymousFunctions();
+  capturedFunctions();
   print(nativeMetadataAddress());
   print(calls);
   spare = 99;
@@ -1446,6 +1521,16 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      "void main(){int? value=3;void clear(){value=null;}value!;clear();print(value+1);}",
+      "void main(){int? value;void clear(){value=null;}value??=3;clear();print(value+1);}",
+      "void main(){final int value;void initialize(){value=7;}initialize();}",
+      "void main(){int value;int read()=>value;value=7;print(read());}",
+      "void main(){int value;void initialize(){value=7;}initialize();print(value);}",
+      "void main(){Object value='bad';value=7;if(value is int){int read()=>value+1;print(read());}}",
+      "void main(){Object value=7;if(value is int){int read()=>value+1;value='bad';print(read());}}",
+      "void main(){Object value=7;void change(){value='bad';}if(value is int){change();print(value+1);}}",
+      "class C{int value=1;final int Function() read;C():read=(()=>value);}void main(){print(C().read());}",
+      "class C{int value=1;final int Function() read;C():read=(()=>this.value);}void main(){print(C().read());}",
       'class C{C.named();}typedef A=C?;void main(){List<C> values=[A.named()];print(values);}',
       "import 'named-constructors-export.dart' as p;typedef LocalAlias=p.NamedLibraryChoice;void main(){LocalAlias._hidden(3);}",
       "import 'named-constructors-export.dart' as p;typedef LocalAlias=p.NamedLibraryChoice;const value=LocalAlias._hidden(3);void main(){}",
@@ -1506,8 +1591,6 @@ void main() {
       "import 'named-constructors-export.dart' as p;const value=p.NamedLibraryChoice._hidden(3);void main(){}",
       '// @dart=2.14\nclass C{C.new();}void main(){C();}',
       '// @dart=2.14\nclass C{C();}void main(){C.new();}',
-      'void main(){var value=1;var callback=()=>value;print(callback());}',
-      'class Captured{int value=1;void run(){var callback=()=>this.value;print(callback());}}void main(){Captured().run();}',
       'void main(){var callback=<T>(T value)=>value;print(callback<int>(1));}',
       'void main(){var callback=()async=>1;callback();}',
       'void main(){const callback=()=>1;print(callback());}',
@@ -1527,9 +1610,6 @@ void main() {
       'void main(){outer:while(true){value(){break outer;}break;}}',
       // NoGC contracts also apply to unused local bodies (valid ordinary Dart).
       "void main(){@pragma('dartc:no-gc') List<int> value()=>[1];}",
-      // These captures are valid Dart, but deliberately unsupported by dartc.
-      'int value=99;void main(){int value=7;int read()=>value;print(read());}',
-      'int value=99;class C{int value=7;C();int read(){int local()=>value;return local();}}void main(){print(C().read());}',
       "import 'conditional-first.dart' if(true) 'conditional-other.dart';void main(){}",
       "import 'conditional-first.dart' if(dart.library.if) 'conditional-other.dart';void main(){}",
       "import 'conditional-first.dart' if(dart.library.core && true) 'conditional-other.dart';void main(){}",
@@ -1705,7 +1785,6 @@ void main() {
       // These initializer forms are valid Dart but remain unsupported.
       'class C { C():assert(true); } void main() { C(); }',
       'class C { C():super(); } void main() { C(); }',
-      'class C { final int Function() value; C(int input):value=(()=>input); } void main() { print(C(7).value()); }',
       'void main() { final int? value; print(value); }',
       'void f(bool flag) { final int value; if (flag) value = 1; value = 2; print(value); } void main() { f(false); }',
       'void main() { final int value; for (int i = 0; i < 2; i++) { value = i; } }',

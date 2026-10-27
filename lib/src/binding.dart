@@ -1,5 +1,6 @@
 import 'ast.dart';
 import 'source.dart';
+import 'members.dart';
 
 class LocalVariable {
   String name;
@@ -9,6 +10,9 @@ class LocalVariable {
   int outer = -1;
   bool constant = false;
   bool finalVariable = false;
+  bool written = false;
+  bool captured = false;
+  bool writeCaptured = false;
 
   LocalVariable(this.name, this.token, this.type);
 }
@@ -21,10 +25,19 @@ class LocalFunctionBinding {
 }
 
 class FunctionBindings {
+  FunctionBindings? outer;
+  List<int> captures = <int>[];
   List<LocalVariable> variables;
   int receiver;
 
   FunctionBindings(this.variables, this.receiver);
+
+  FunctionBindings withReceiver(int receiver) {
+    var result = FunctionBindings(variables, receiver);
+    result.outer = outer;
+    result.captures = captures;
+    return result;
+  }
 }
 
 class BindingScope {
@@ -42,6 +55,7 @@ class LocalBinder {
   final List<LocalFunctionBinding> functions;
   LocalBinder? outer;
   int outerScope = -1;
+  ClassMembers? members;
 
   LocalBinder(this.source, this.result, this.scopes, this.functions);
 }
@@ -141,30 +155,79 @@ int bindingReference(LocalBinder binder, int scope, String name, int token) {
   var original = bindingReference(outer, binder.outerScope, name, token);
   if (original < 0) return -1;
   var variable = outer.result.variables[original];
-  if (variable.function < 0 && !variable.constant)
-    sourceError(
-      binder.source,
-      binder.source.tokens[token],
-      'capturing outer local is not supported: ' + name,
-    );
   if (token < variable.token)
     sourceError(
       binder.source,
       binder.source.tokens[token],
       'local referenced before declaration: ' + name,
     );
+  return bindingCapture(binder, original);
+}
+
+LocalVariable bindingDeclaration(FunctionBindings bindings, int binding) {
+  var variable = bindings.variables[binding];
+  var outer = bindings.outer;
+  while (variable.outer >= 0 && outer != null) {
+    bindings = outer;
+    variable = bindings.variables[variable.outer];
+    outer = bindings.outer;
+  }
+  return variable;
+}
+
+int bindingCapture(LocalBinder binder, int original) {
+  var outer = binder.outer!;
+  var variable = outer.result.variables[original];
+  if (!variable.constant) variable.captured = true;
   var i = 0;
   while (i < binder.result.variables.length) {
     if (binder.result.variables[i].outer == original) return i;
     i++;
   }
-  var alias = LocalVariable(name, variable.token, variable.type);
+  var alias = LocalVariable(variable.name, variable.token, variable.type);
   alias.function = variable.function;
   alias.outer = original;
   alias.constant = variable.constant;
-  alias.finalVariable = true;
+  alias.finalVariable = variable.finalVariable;
+  var binding = binder.result.variables.length;
   binder.result.variables.add(alias);
-  return binder.result.variables.length - 1;
+  if (!variable.constant) binder.result.captures.add(binding);
+  if (outer.result.receiver == original) binder.result.receiver = binding;
+  return binding;
+}
+
+int bindingReceiver(LocalBinder binder, int scope) {
+  var receiver = binder.result.receiver;
+  if (receiver >= 0) {
+    if (binder.result.variables[receiver].outer >= 0) return receiver;
+    while (scope >= 0) {
+      for (var variable in binder.scopes[scope].variables) {
+        if (variable == receiver) return receiver;
+      }
+      scope = binder.scopes[scope].parent;
+    }
+    return -1;
+  }
+  var outer = binder.outer;
+  if (outer == null) return -1;
+  receiver = bindingReceiver(outer, binder.outerScope);
+  if (receiver < 0) return -1;
+  return bindingCapture(binder, receiver);
+}
+
+void bindingWrite(LocalBinder binder, int binding) {
+  if (binding < 0) return;
+  var bindings = binder.result;
+  var variable = bindings.variables[binding];
+  bindingDeclaration(bindings, binding).written = true;
+  if (variable.outer < 0) return;
+  while (true) {
+    variable.writeCaptured = true;
+    var outer = bindings.outer;
+    if (outer == null || variable.outer < 0) return;
+    bindings = outer;
+    variable = bindings.variables[variable.outer];
+  }
 }
 
 void bindingType(LocalBinder binder, int scope, AstType syntax) {
@@ -216,11 +279,23 @@ void bindingExpression(
       expression.text,
       expression.token,
     );
+    var members = binder.members;
+    if (expression.binding < 0 && members != null) {
+      var member = lookupMember(members, expression.text);
+      if (member >= 0 && !members.members[member].isStatic)
+        bindingReceiver(binder, scope);
+    }
   }
   var i = 0;
   while (i < expression.children.length) {
     bindingExpression(binder, scope, expression.children[i]);
     i++;
+  }
+  if (expression.kind == astAssignment ||
+      (expression.kind == astUnary || expression.kind == astPostfix) &&
+          (expression.text == '++' || expression.text == '--')) {
+    var target = expression.children[0];
+    if (target.kind == astName) bindingWrite(binder, target.binding);
   }
 }
 
@@ -335,6 +410,7 @@ void bindingFunctionBody(LocalBinder binder, int scope, AstFunction syntax) {
     binder.functions,
     binder,
     scope,
+    binder.members,
   );
 }
 
@@ -434,6 +510,7 @@ FunctionBindings bindFunctionLocals(
   AstFunction syntax,
   bool receiver, [
   List<LocalFunctionBinding>? functions,
+  ClassMembers? members,
 ]) {
   return _bindFunctionLocals(
     source,
@@ -442,6 +519,7 @@ FunctionBindings bindFunctionLocals(
     functions ?? <LocalFunctionBinding>[],
     null,
     -1,
+    members,
   );
 }
 
@@ -452,11 +530,14 @@ FunctionBindings _bindFunctionLocals(
   List<LocalFunctionBinding> functions,
   LocalBinder? outer,
   int outerScope,
+  ClassMembers? members,
 ) {
   var result = FunctionBindings(<LocalVariable>[], -1);
+  if (outer != null) result.outer = outer.result;
   var binder = LocalBinder(source, result, <BindingScope>[], functions);
   binder.outer = outer;
   binder.outerScope = outerScope;
+  binder.members = members;
   binder.wildcards = sourceVersionAtLeast(
     source,
     source.tokens[syntax.token].source,

@@ -51,6 +51,7 @@ int runtimeFunction(int builtin, int castType) {
   if (builtin == bHostCurrentDirectory)
     return abiFunction('rtHostCurrentDirectory', 0);
   if (builtin == bFunctionEntry) return abiFunction('rtFunctionEntry', 0);
+  if (builtin == bFunctionType) return abiFunction('rtFunctionType', 0);
   if (builtin == bHostWrite) return abiFunction('rtHostWrite', 0);
   if (builtin == bHostFinish) return abiFunction('rtHostFinish', 0);
   if (builtin == bHostExit) return abiFunction('rtHostExit', 0);

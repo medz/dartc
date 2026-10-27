@@ -487,20 +487,24 @@ void _parameterDependencies(int type, List<int> parameters, List<int> found) {
     _parameterDependencies(input, parameters, found);
 }
 
-class _ParameterComponents {
-  final List<List<int>> edges;
-  List<int> indices = const <int>[];
-  List<int> low = const <int>[];
-  List<int> active = const <int>[];
-  final List<int> stack = <int>[];
-  final List<List<int>> groups = <List<int>>[];
-  int next = 0;
-
-  _ParameterComponents(this.edges) {
-    indices = List<int>.filled(edges.length, -1);
-    low = List<int>.filled(edges.length, -1);
-    active = List<int>.filled(edges.length, 0);
+List<int> instantiateTypeParameters(List<int> parameters) {
+  if (parameters.isEmpty) return const <int>[];
+  var bounds = <int>[];
+  var edges = <List<int>>[];
+  for (var parameter in parameters) {
+    var info = typeParameterInfo(parameter);
+    var bound = info.hasBound ? info.bound : tDynamic;
+    bounds.add(bound);
+    var dependencies = <int>[];
+    _parameterDependencies(bound, parameters, dependencies);
+    edges.add(dependencies);
   }
+  final indices = List<int>.filled(edges.length, -1);
+  final low = List<int>.filled(edges.length, -1);
+  final active = List<int>.filled(edges.length, 0);
+  final stack = <int>[];
+  final groups = <List<int>>[];
+  var next = 0;
 
   void visit(int vertex) {
     indices[vertex] = next;
@@ -527,27 +531,13 @@ class _ParameterComponents {
       groups.add(group);
     }
   }
-}
 
-List<int> instantiateTypeParameters(List<int> parameters) {
-  if (parameters.isEmpty) return const <int>[];
-  var bounds = <int>[];
-  var edges = <List<int>>[];
-  for (var parameter in parameters) {
-    var info = typeParameterInfo(parameter);
-    var bound = info.hasBound ? info.bound : tDynamic;
-    bounds.add(bound);
-    var dependencies = <int>[];
-    _parameterDependencies(bound, parameters, dependencies);
-    edges.add(dependencies);
-  }
-  var components = _ParameterComponents(edges);
   var i = 0;
   while (i < parameters.length) {
-    if (components.indices[i] < 0) components.visit(i);
+    if (indices[i] < 0) visit(i);
     i++;
   }
-  for (var group in components.groups) {
+  for (var group in groups) {
     if (group.length > 1 ||
         typeParameterIndex(edges[group[0]], group[0]) >= 0) {
       var keys = <int>[];

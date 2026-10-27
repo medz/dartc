@@ -138,7 +138,7 @@ class _SsaVerifier {
       if (callee.parameterTypes.length != count || result != callee.result)
         fail('call metadata');
     } else if (op == opBuiltin) {
-      if (!(target >= bPrintString && target <= bListInsert ||
+      if (!(target >= bPrintString && target <= bFunctionType ||
           target >= bNativeLoad64 &&
               target <= bNativeFramePointer &&
               target != bNativeMetadataAddress))
@@ -147,7 +147,8 @@ class _SsaVerifier {
       // These normalized representation operations have explicit SSA shapes.
       // General library/primitive signatures remain owned by their producers.
       if (target >= bBoxInt && target <= bValueBool ||
-          target == bFunctionEntry) {
+          target == bFunctionEntry ||
+          target == bFunctionType) {
         count = 1;
       } else if (target == bFunctionInvoke && count < 2) {
         fail('invoke operand count');
@@ -167,7 +168,9 @@ class _SsaVerifier {
         op != opDescriptor &&
         op != opMetadataAddress &&
         op != opConstantData &&
-        op != opFunctionReference) {
+        op != opFunctionReference &&
+        op != opClosureDescriptor &&
+        op != opCaptureCellDescriptor) {
       fail('unknown SSA operation');
     }
     if (instruction.inputs.length != count) fail('operand count');
@@ -206,15 +209,29 @@ class _SsaVerifier {
           metadataStrings | metadataLists | metadataValues | metadataRoots;
       if (target <= 0 || (target & ~allowed) != 0 || result != tInt)
         fail('metadata constant');
-    } else if (op == opFunctionReference) {
-      if (target < 0 || target >= functions.length || !typeIsFunction(result))
+    } else if (op == opFunctionReference || op == opClosureDescriptor) {
+      if (target < 0 ||
+          target >= functions.length ||
+          (op == opClosureDescriptor
+              ? result != tPointer
+              : !typeIsFunction(result)))
         fail('function constant');
       final callee = functions[target];
       if (!callee.callableShape ||
           callee.callableAdapter < 0 ||
           callee.callableAdapter >= functions.length ||
-          callee.callableType != result)
+          (op == opFunctionReference && callee.callableType != result))
         fail('callable metadata');
+      if (op == opClosureDescriptor) {
+        type(callee.callableType);
+        if (!typeIsFunction(callee.callableType)) fail('closure signature');
+        final closure = callee.closureLayout;
+        if (closure == null) fail('closure layout');
+        for (final field in closure.fieldTypes) type(field);
+      }
+    } else if (op == opCaptureCellDescriptor) {
+      type(target);
+      if (result != tPointer) fail('capture cell descriptor');
     } else if (op == opTypeTest || op == opTypeCast) {
       type(target);
       if (!typeIsTagged(inputType(instruction.inputs[0])))
@@ -252,12 +269,13 @@ class _SsaVerifier {
       } else if (target == bValueBool) {
         if (!typeIsTagged(inputType(instruction.inputs[0])) || result != tBool)
           fail('boolean cast');
-      } else if (target == bFunctionEntry || target == bFunctionInvoke) {
-        final receiver = inputType(
-          instruction.inputs[target == bFunctionEntry ? 0 : 1],
-        );
+      } else if (target == bFunctionEntry ||
+          target == bFunctionType ||
+          target == bFunctionInvoke) {
+        final header = target != bFunctionInvoke;
+        final receiver = inputType(instruction.inputs[header ? 0 : 1]);
         if (!typeIsFunction(receiver)) fail('invoke receiver type');
-        if (target == bFunctionEntry) {
+        if (header) {
           if (result != tPointer) fail('entry result');
         } else {
           expectInput(instruction, 0, tPointer);

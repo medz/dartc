@@ -2,6 +2,8 @@
 
 [runtime.dart](../lib/src/runtime.dart) 实现目标程序的运行时算法；共享尺寸、偏移和表示由 [layout.dart](../lib/src/layout.dart) 定义。编译器与运行时必须使用匹配的 ABI，改变布局或调用协议时整体重建。
 
+当前 ABI 为 12，函数对象的捕获字段参与描述符扫描。旧版把函数对象视为叶节点，不能与带捕获对象的程序混用。
+
 main 使用进程级 bump arena，不执行 GC、空闲块复用或 arena 释放。根枚举和 NoGC 校验提供收集器所需的边界，不代表收集器已启用。收集器、异常展开和线程/调度的目标设计见 [architecture.md](architecture.md)。
 
 ## 对象与元数据布局
@@ -15,7 +17,7 @@ main 使用进程级 bump arena，不执行 GC、空闲块复用或 arena 释放
 | List | `+16` 长度、`+24` 容量、`+32` backing Ref、`+40` 原生 TypeRef 地址 |
 | backing array | `+16` 已初始化前缀长度，`+24` 起存元素；Word、Ref、Tagged 分别使用对应描述符，仅扫描有效前缀 |
 | IntBox | `+16` 完整整数负载；无托管子引用 |
-| Function | `+16` 原生结构签名引用、`+24` 调用适配器入口；32 字节，无环境字段，按叶扫描 |
+| Function | `+16` 原生结构签名引用、`+24` 调用适配器入口；捕获字段从 `+32` 开始，按描述符位图扫描；无捕获对象仍为 32 字节 |
 
 ClassDesc 为 64 字节只读记录，保存实例尺寸、字段数、对象种类、Ref/Tagged 位图、类名及可达的 toString 入口。位图按每 64 字段一个 word 分段，不限制为 64 个字段，全零位图不保留存储。变长对象按描述符种类扫描，不借用普通字段位图。
 
@@ -136,14 +138,14 @@ UTF-8 编码使用 I/O 层拥有的可复用原始缓冲，按需映射和扩容
 
 无捕获函数值在映像中使用只读对象，按实际声明或语法节点保存身份，不按静态函数类型复制对象。对象沿用 16 字节头，后续两个 word 分别引用结构签名和调用适配器；只读字段相对对象基址编码，不预留空捕获环境。语言支持范围及身份规则见 [函数](../specs/functions.md)。
 
-函数 TypeRef 与代码声明 ID 分开。bare `Function` 使用上界记录；具体签名保存结果、必需位置参数数目、总位置参数数目与参数 TypeRef。签名链接保留嵌套函数、List 和可空类型，运行时按参数逆变及返回协变检查。当前没有 named/generic 签名或捕获对象扫描布局。
+函数 TypeRef 与代码声明 ID 分开。bare `Function` 使用上界记录；具体签名保存结果、必需位置参数数目、总位置参数数目与参数 TypeRef。签名链接保留嵌套函数、List 和可空类型，运行时按参数逆变及返回协变检查。当前没有 named/generic 签名。
 
 普通已知目标调用保留原 ABI。函数值调用先取得已验证 callable 的代码地址，通过每目标一个适配器传递隐藏 callable Ref 和 tagged 实参，再按目标声明检查、解箱并直接调用原函数，将结果转回 tagged 表示；调用方按静态签名还原结果。这样允许函数子类型跨越 Word、Ref 和 Tagged 表示，不把原生地址调用原语当作 Dart 函数调用协议。代码地址不是根，仍活跃的 callable Ref 和 tagged 实参与其他值一样参与调用点根表。
 
-未知函数值调用保守拒绝用于 NoGC；适配器不继承目标函数的 NoGC 提示。提取只读函数对象与调用它的效果不同。函数对象不含托管子引用，扫描按叶处理；捕获闭包需要独立环境、调用与扫描合同，不能沿用叶对象结论。调用求值规则见 [表达式](../specs/expressions.md)。
+未知函数值调用保守拒绝用于 NoGC；适配器不继承目标函数的 NoGC 提示。提取只读函数对象与调用它的效果不同。堆闭包在固定函数前缀后保存捕获字段，描述符扫描 Ref/Tagged 捕获。可变绑定使用共享单元；单元保存声明类型的值并按该表示扫描，稳定捕获直接保存值。函数体接收隐藏 callable Ref，源码签名不含它。只读函数对象没有捕获字段，仍按叶处理。调用求值规则见 [表达式](../specs/expressions.md)。
 
 ## 行为验证入口
 
 - [behavior_test.dart](../test/behavior_test.dart)：core/NoGC、函数值、I/O 程序及拒绝/失败用例。
-- [roots.dart](../test/fixtures/roots.dart)：`noGcRoots()`、`runtimeOwnership()`、`builderRoots()`、`constantObjectRoots()`。
+- [roots.dart](../test/fixtures/roots.dart)：`noGcRoots()`、`runtimeOwnership()`、`builderRoots()`、`constantObjectRoots()`、`closureRoots()`。
 - [values.dart](../test/fixtures/values.dart)：String、List、类型与函数值行为。

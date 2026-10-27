@@ -1,5 +1,5 @@
 // Shared compiler/runtime object layout. Offsets are bytes.
-const int runtimeAbiVersion = 11;
+const int runtimeAbiVersion = 12;
 const int objectHeaderBytes = 16;
 const int objectFlagsOffset = 8;
 // Static objects store a descriptor displacement relative to their own address.
@@ -47,6 +47,9 @@ const int descriptorFunction = 7;
 const int functionTypeOffset = 16;
 const int functionEntryOffset = 24;
 const int functionInstanceBytes = 32;
+// Internal capture cells do not belong to the source class namespace.
+const int captureCellClassId = -8;
+const int captureCellInstanceBytes = objectHeaderBytes + 8;
 const int functionSignatureResultOffset = 0;
 const int functionSignatureRequiredOffset = 8;
 const int functionSignatureCountOffset = 16;

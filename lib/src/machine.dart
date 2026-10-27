@@ -181,12 +181,16 @@ void machineSelectInstruction(
       op == opDescriptor ||
       op == opMetadataAddress ||
       op == opConstantData ||
-      op == opFunctionReference) {
+      op == opFunctionReference ||
+      op == opClosureDescriptor ||
+      op == opCaptureCellDescriptor) {
     int kind = 0;
     if (op == opDescriptor) kind = 2;
     if (op == opMetadataAddress) kind = 3;
     if (op == opConstantData) kind = 5;
     if (op == opFunctionReference) kind = 6;
+    if (op == opClosureDescriptor) kind = 7;
+    if (op == opCaptureCellDescriptor) kind = 8;
     instructions.add(
       MachineInstruction(mAddress, output, inputs, target, kind, effects),
     );

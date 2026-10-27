@@ -69,6 +69,20 @@ class ConstantObject {
   ConstantObject(this.getter, this.slot, this.state, this.data);
 }
 
+class FeCapture {
+  final int binding;
+  final int type;
+  final int promoted;
+  final int assignment;
+
+  FeCapture(this.binding, this.type, this.promoted, this.assignment);
+}
+
+class FeClosure {
+  final List<FeCapture> captures = <FeCapture>[];
+  bool prepared = false;
+}
+
 class FeFunctionState {
   final List<int> code = ir;
   final List<int> types = irTypes;
@@ -143,6 +157,7 @@ ConstantContext feConstants = ConstantContext(
 );
 List<AstFunction> feFunctionNodes = <AstFunction>[];
 List<LocalFunctionBinding> feLocalFunctions = <LocalFunctionBinding>[];
+List<FeClosure> feLocalClosures = <FeClosure>[];
 List<List<ConstantValue>?> feLocalConstants = <List<ConstantValue>?>[];
 List<int> feLocalOwners = <int>[];
 int feLocalStart = 0;
@@ -600,6 +615,12 @@ bool feHasReceiver(int function) {
   return feOwners[function] >= 0 && !feFunctionNodes[function].isStatic;
 }
 
+int feParameterOffset(int function) {
+  return feHasReceiver(function) || functions[function].closureLayout != null
+      ? 1
+      : 0;
+}
+
 void feEmit(int op) {
   var type = tVoid;
   if (op >= opAdd && op <= opBitNot) type = tInt;
@@ -621,6 +642,8 @@ void feOperand(int op, int value) {
   if (op == opString) irTypes[position] = tString;
   if (op == opDescriptor) irTypes[position] = tPointer;
   if (op == opConstantData) irTypes[position] = tPointer;
+  if (op == opClosureDescriptor || op == opCaptureCellDescriptor)
+    irTypes[position] = tPointer;
   if (op == opTypeTest) irTypes[position] = tBool;
   if (op == opTypeCast) irTypes[position] = value;
   if (op == opLoadLocal) irTypes[position] = feSlotTypes[value];
@@ -638,7 +661,7 @@ void feDuplicate(int type) {
 }
 
 int feBuiltinType(int id) {
-  if (id == bFunctionEntry) return tPointer;
+  if (id == bFunctionEntry || id == bFunctionType) return tPointer;
   if (id == bFunctionInvoke) return tDynamic;
   if (id == bHostExit || id == bHostFinish) return tNever;
   if (id == bHostReadIfExists) return nullableType(tString);
@@ -719,6 +742,41 @@ void feBindLocal(int binding, int type, int slot) {
   flowDeclare(feFlow, binding, type, true);
 }
 
+bool feCellBinding(int binding) {
+  var variable = bindingDeclaration(feBindings, binding);
+  return variable.captured && variable.written && !variable.constant;
+}
+
+bool fePromotable(int binding) {
+  return !bindingDeclaration(feBindings, binding).writeCaptured;
+}
+
+void feAllocateCell(int type) {
+  var value = feTemp(type);
+  feOperand(opStoreLocal, value);
+  feOperand(opCaptureCellDescriptor, type);
+  feBuiltinTyped(bObjectNew, 1, tObject);
+  var cell = feTemp(tObject);
+  feOperand(opStoreLocal, cell);
+  feOperand(opLoadLocal, cell);
+  feOperand(opInt, 0);
+  feOperand(opLoadLocal, value);
+  feBuiltinTyped(bObjectSet, 3, type);
+  feEmit(opPop);
+  feOperand(opLoadLocal, cell);
+}
+
+int feLoadLocalStorage(int binding) {
+  var slot = feBindingSlots[binding];
+  feOperand(opLoadLocal, slot);
+  if (feCellBinding(binding)) {
+    feOperand(opInt, 0);
+    feBuiltinTyped(bObjectGet, 2, feBindingTypes[binding]);
+    return feBindingTypes[binding];
+  }
+  return feSlotTypes[slot];
+}
+
 FlowState feJoinFlow(FlowState left, FlowState right) {
   return flowJoin(left, right, feBindingTypes);
 }
@@ -732,7 +790,8 @@ void feNarrowValue(int stored, int promoted) {
 
 int feReadLocal(int binding, int token) {
   var variable = feBindings.variables[binding];
-  if (variable.function >= 0)
+  if (variable.function >= 0 &&
+      functions[feLocalStart + variable.function].closureLayout == null)
     return feFunctionReference(feLocalStart + variable.function, token);
   if (variable.outer >= 0 && variable.constant) {
     var value = feConstants.locals[binding];
@@ -741,16 +800,16 @@ int feReadLocal(int binding, int token) {
     feNarrowValue(value.type, type);
     return type;
   }
-  var slot = feLocalSlot(binding, token);
+  feLocalSlot(binding, token);
   if (feFlow.assignments[binding] != flowAssigned) {
     feAstError(
       token,
       'local is not definitely assigned: ' + feBindings.variables[binding].name,
     );
   }
-  feOperand(opLoadLocal, slot);
+  var stored = feLoadLocalStorage(binding);
   var type = feFlow.types[binding];
-  feNarrowValue(feBindingTypes[binding], type);
+  feNarrowValue(stored, type);
   return type;
 }
 
@@ -1290,7 +1349,7 @@ void feConditionFact(AstExpression expression, bool truth) {
     if ((expression.text == 'true') != truth) flowUnreachable(feFlow);
   } else if (expression.kind == astTypeTest) {
     var binding = expression.children[0].binding;
-    if (binding < 0) return;
+    if (binding < 0 || !fePromotable(binding)) return;
     var tested = resolveType(feSymbols, expression.typeArguments[0]);
     if (expression.text == 'is!') truth = !truth;
     if (truth)
@@ -1304,7 +1363,7 @@ void feConditionFact(AstExpression expression, bool truth) {
     var binding = -1;
     if (left.kind == astName && right.kind == astNull) binding = left.binding;
     if (right.kind == astName && left.kind == astNull) binding = right.binding;
-    if (binding >= 0) {
+    if (binding >= 0 && fePromotable(binding)) {
       flowNull(feFlow, binding, truth == (expression.text == '=='));
     }
   }
@@ -1554,7 +1613,7 @@ void feResolveFunctionDefaults(int f) {
   feCheckMetadata(syntax.metadata, owner, f);
   feConstants.lexicalClass = owner;
   var parameters = syntax.parameters;
-  var offset = feHasReceiver(f) ? 1 : 0;
+  var offset = feParameterOffset(f);
   if (feParamDefaults[f].isEmpty)
     feParamDefaults[f] = List<ConstantValue>.filled(
       functions[f].parameters,
@@ -1749,7 +1808,7 @@ int feLowerArguments(AstExpression call, int start, int function) {
   if (call.typeArguments.length != 0)
     feAstError(call.token, 'nongeneric call does not accept type arguments');
   var parameters = feFunctionNodes[function].parameters;
-  var offset = feHasReceiver(function) ? 1 : 0;
+  var offset = feParameterOffset(function);
   if (call.children.length - start == parameters.length &&
       (parameters.isEmpty || parameters.last.kind != astNamedParameter)) {
     var argument = start;
@@ -2423,8 +2482,10 @@ int feLowerNeverArguments(AstExpression call) {
 
 int feLowerImmediateCall(AstExpression call, AstExpression expression) {
   var function = fePrepareFunctionExpression(expression, -1);
+  var context = functions[function].closureLayout != null;
+  if (context) feCreateClosure(function, expression.token);
   var count = feLowerArguments(call, 1, function);
-  feCall(function, count);
+  feCall(function, count + (context ? 1 : 0));
   return functions[function].result;
 }
 
@@ -2435,7 +2496,7 @@ void feLowerConstructor(int function) {
     var call = syntax.initializers[0].expression;
     checkArgumentOrder(feSources, call);
     var bodyBindings = feBindings;
-    feBindings = FunctionBindings(bodyBindings.variables, -1);
+    feBindings = bodyBindings.withReceiver(-1);
     feOperand(opLoadLocal, 0);
     var count = feLowerArguments(call, 1, plan.redirectTarget);
     feCall(plan.redirectTarget, count + 1);
@@ -2465,7 +2526,7 @@ void feLowerConstructor(int function) {
         syntax.parameters[step.index].token,
       );
     } else {
-      feBindings = FunctionBindings(bodyBindings.variables, -1);
+      feBindings = bodyBindings.withReceiver(-1);
       feLowerInContext(syntax.initializers[step.index].expression, fieldType);
     }
     feBuiltinTyped(bObjectSet, 3, fieldType);
@@ -2576,8 +2637,10 @@ int feLowerCall(AstExpression call, int context) {
     var local = feBindings.variables[callee.binding].function;
     if (local >= 0) {
       var function = feLocalStart + local;
+      var context = functions[function].closureLayout != null;
+      if (context) feReadLocal(callee.binding, callee.token);
       var count = feLowerArguments(call, 1, function);
-      feCall(function, count);
+      feCall(function, count + (context ? 1 : 0));
       return functions[function].result;
     }
   }
@@ -2870,17 +2933,29 @@ int feReadLvalue(FeLvalue target, int token) {
 void feWriteFlow(FeLvalue target, int type) {
   if (target.binding >= 0) {
     flowWrite(feFlow, target.binding, target.type, type);
+    if (!fePromotable(target.binding))
+      feFlow.types[target.binding] = target.type;
   }
 }
 
 void feWriteLvalue(FeLvalue target, int token) {
   if (target.binding >= 0 &&
       feBindings.variables[target.binding].finalVariable &&
-      feFlow.assignments[target.binding] != flowUnassigned) {
+      (feBindings.variables[target.binding].outer >= 0 ||
+          feFlow.assignments[target.binding] != flowUnassigned)) {
     feAstError(token, 'final variable might already be assigned');
   }
   if (target.container == 3) return;
   if (target.container == 0) {
+    if (target.binding >= 0 && feCellBinding(target.binding)) {
+      var value = feTemp(target.type);
+      feOperand(opStoreLocal, value);
+      feOperand(opLoadLocal, feBindingSlots[target.binding]);
+      feOperand(opInt, 0);
+      feOperand(opLoadLocal, value);
+      feBuiltinTyped(bObjectSet, 3, target.type);
+      return;
+    }
     feDuplicate(target.type);
     if (target.binding >= 0)
       feOperand(opStoreLocal, feBindingSlots[target.binding]);
@@ -3012,7 +3087,8 @@ int feLowerCoalescingAssignment(AstExpression expression, FeLvalue target) {
   var done = feJump(opJump);
   fePatch(present, ir.length);
   feFlow = afterLeft;
-  if (target.binding >= 0) flowNull(feFlow, target.binding, false);
+  if (target.binding >= 0 && fePromotable(target.binding))
+    flowNull(feFlow, target.binding, false);
   feOperand(opLoadLocal, value);
   var promoted = typeNonNullable(left);
   feNarrowValue(left, promoted);
@@ -3035,7 +3111,9 @@ int feLowerNullAssertion(AstExpression expression, int context) {
     feOperand(opTypeCast, checked);
     if (checked != result) feConvertValue(checked, result, expression.token);
   }
-  if (source.kind == astName && source.binding >= 0)
+  if (source.kind == astName &&
+      source.binding >= 0 &&
+      fePromotable(source.binding))
     feFlow.types[source.binding] = result;
   if (result == tNever) flowUnreachable(feFlow);
   return result;
@@ -3139,7 +3217,7 @@ int feLowerValue(AstExpression expression) {
     if (kind == astTypeCast) {
       feOperand(opTypeCast, target);
       var binding = expression.children[0].binding;
-      if (binding >= 0) {
+      if (binding >= 0 && fePromotable(binding)) {
         if (actual == tVoid && !typeIsSubtype(actual, target))
           feFlow.types[binding] = target;
         else
@@ -3234,7 +3312,9 @@ int feLowerCoalescing(AstExpression expression, int context) {
   var present = feJump(opJumpTrue);
   var afterLeft = feFlow;
   feFlow = flowCopy(afterLeft);
-  if (source.kind == astName && source.binding >= 0)
+  if (source.kind == astName &&
+      source.binding >= 0 &&
+      fePromotable(source.binding))
     flowNull(feFlow, source.binding, true);
   else if (feFlow.soundFlow && !typeCanBeNull(left))
     flowUnreachable(feFlow);
@@ -3245,7 +3325,9 @@ int feLowerCoalescing(AstExpression expression, int context) {
   var done = feJump(opJump);
   fePatch(present, ir.length);
   feFlow = afterLeft;
-  if (source.kind == astName && source.binding >= 0)
+  if (source.kind == astName &&
+      source.binding >= 0 &&
+      fePromotable(source.binding))
     flowNull(feFlow, source.binding, false);
   feOperand(opLoadLocal, value);
   var promoted = typeNonNullable(left);
@@ -3314,7 +3396,9 @@ void feLowerVariable(AstVariable variable) {
     type = value;
   }
   feConvertValue(value, type, variable.token);
-  var slot = feTemp(type);
+  var cell = feCellBinding(variable.binding);
+  if (cell) feAllocateCell(type);
+  var slot = feTemp(cell ? tObject : type);
   feBindLocal(variable.binding, type, slot);
   flowDeclare(
     feFlow,
@@ -3325,6 +3409,7 @@ void feLowerVariable(AstVariable variable) {
   );
   if (variable.initializer.isNotEmpty)
     flowWrite(feFlow, variable.binding, type, value);
+  if (!fePromotable(variable.binding)) feFlow.types[variable.binding] = type;
   if (constant != null) {
     if (feConstants.locals.isEmpty) {
       var unknown = ConstantValue(-1, tNull, 0, '');
@@ -3430,8 +3515,30 @@ void feInferLocalResult(int local) {
 }
 
 void fePrepareLocalFunction(AstFunction syntax) {
-  feResolveFunctionDefaults(feLocalStart + syntax.local);
+  var function = feLocalStart + syntax.local;
+  feResolveFunctionDefaults(function);
   var bindings = feLocalFunctions[syntax.local].body!;
+  var closure = feLocalClosures[syntax.local];
+  var layout = functions[function].closureLayout;
+  if (!closure.prepared) {
+    closure.prepared = true;
+    if (layout != null) {
+      for (var binding in bindings.captures) {
+        var variable = bindings.variables[binding];
+        if (variable.function == syntax.local) continue;
+        var original = variable.outer;
+        var type = feBindingTypes[original];
+        if (type < 0)
+          feAstError(syntax.token, 'captured variable has no declared type');
+        var declaration = bindingDeclaration(feBindings, original);
+        var promoted = declaration.written ? type : feFlow.types[original];
+        closure.captures.add(
+          FeCapture(binding, type, promoted, feFlow.assignments[original]),
+        );
+        layout.fieldTypes.add(feCellBinding(original) ? tObject : type);
+      }
+    }
+  }
   List<ConstantValue>? values;
   var i = 0;
   while (i < bindings.variables.length) {
@@ -3458,12 +3565,20 @@ void fePrepareLocalFunction(AstFunction syntax) {
 
 void feLowerLocalFunction(AstFunction syntax) {
   fePrepareLocalFunction(syntax);
-  var type = functionValueType(feLocalStart + syntax.local);
+  var function = feLocalStart + syntax.local;
+  var type = functionValueType(function);
+  var slot = -1;
+  if (functions[function].closureLayout != null) {
+    feCreateClosure(function, syntax.token);
+    slot = feTemp(type);
+    feOperand(opStoreLocal, slot);
+  }
   if (type >= 0) {
     var binding = 0;
     while (binding < feBindings.variables.length) {
       if (feBindings.variables[binding].function == syntax.local) {
         feBindingTypes[binding] = type;
+        feBindingSlots[binding] = slot;
         flowDeclare(feFlow, binding, type, true);
       }
       binding++;
@@ -3483,7 +3598,8 @@ int fePrepareFunctionExpression(AstExpression expression, int context) {
       if (syntax.parameters[p].type.name == '') {
         var type = signature.parameters[p];
         if (typeIsSubtype(type, tNull)) type = nullableType(tObject);
-        functions[function].parameterTypes[p] = type;
+        functions[function].parameterTypes[p + feParameterOffset(function)] =
+            type;
       }
       p++;
     }
@@ -3493,8 +3609,47 @@ int fePrepareFunctionExpression(AstExpression expression, int context) {
   return function;
 }
 
+int feCreateClosure(int function, int token) {
+  var layout = functions[function].closureLayout;
+  if (layout == null) return feFunctionReference(function, token);
+  var type = feCallableType(function, token);
+  feOperand(opClosureDescriptor, function);
+  feBuiltinTyped(bObjectNew, 1, type);
+  var closure = feTemp(type);
+  feOperand(opStoreLocal, closure);
+  var field = 0;
+  while (field < 2) {
+    feOperand(opLoadLocal, closure);
+    feOperand(opInt, field);
+    feFunctionReference(function, token);
+    feBuiltin(field == 0 ? bFunctionType : bFunctionEntry, 1);
+    feBuiltinTyped(bObjectSet, 3, tPointer);
+    feEmit(opPop);
+    field++;
+  }
+  var local = function - feLocalStart;
+  var bindings = feLocalFunctions[local].body!;
+  var captureIndex = 0;
+  for (var capture in feLocalClosures[local].captures) {
+    var original = bindings.variables[capture.binding].outer;
+    feOperand(opLoadLocal, closure);
+    feOperand(opInt, 2 + captureIndex);
+    if (feCellBinding(original))
+      feOperand(opLoadLocal, feLocalSlot(original, token));
+    else {
+      var value = feReadLocal(original, token);
+      feConvertValue(value, capture.type, token);
+    }
+    feBuiltinTyped(bObjectSet, 3, layout.fieldTypes[captureIndex]);
+    feEmit(opPop);
+    captureIndex++;
+  }
+  feOperand(opLoadLocal, closure);
+  return type;
+}
+
 int feLowerFunctionExpression(AstExpression expression, int context) {
-  return feFunctionReference(
+  return feCreateClosure(
     fePrepareFunctionExpression(expression, context),
     expression.token,
   );
@@ -3642,6 +3797,15 @@ void feLowerStatement(AstStatement statement) {
       feLowerStatement(statement.children[0]);
     var update = ir.length;
     feContinueFlow(statement.token, continueBase);
+    if (kind == astForStatement) {
+      for (var variable in statement.children[0].variables) {
+        if (feCellBinding(variable.binding)) {
+          feLoadLocalStorage(variable.binding);
+          feAllocateCell(feBindingTypes[variable.binding]);
+          feOperand(opStoreLocal, feBindingSlots[variable.binding]);
+        }
+      }
+    }
     var updateIndex = 0;
     while (updateIndex < statement.update.length) {
       feLowerExpression(statement.update[updateIndex]);
@@ -3924,16 +4088,52 @@ void feBeginFunction(int f, FunctionBindings bindings) {
   }
   feSlotTypes = <int>[];
   feNextLocal = 0;
+  var context = functions[f].closureLayout;
   var p = 0;
   while (p < functions[f].parameters) {
-    var slot = feTemp(functions[f].parameterTypes[p]);
-    var binding = feBindings.receiver;
-    var parameter = p;
-    if (feHasReceiver(f)) parameter--;
-    if (parameter >= 0) binding = functionSyntax.parameters[parameter].binding;
-    if (binding >= 0)
-      feBindLocal(binding, functions[f].parameterTypes[p], slot);
+    feTemp(functions[f].parameterTypes[p]);
     p++;
+  }
+  p = context == null ? 0 : 1;
+  while (p < functions[f].parameters) {
+    var type = functions[f].parameterTypes[p];
+    var slot = p;
+    var binding = feBindings.receiver;
+    var parameter = p - feParameterOffset(f);
+    if (parameter >= 0) binding = functionSyntax.parameters[parameter].binding;
+    if (binding >= 0) {
+      if (feCellBinding(binding)) {
+        feOperand(opLoadLocal, slot);
+        feAllocateCell(type);
+        slot = feTemp(tObject);
+        feOperand(opStoreLocal, slot);
+      }
+      feBindLocal(binding, type, slot);
+    }
+    p++;
+  }
+  if (context != null) {
+    var local = f - feLocalStart;
+    var captureIndex = 0;
+    for (var capture in feLocalClosures[local].captures) {
+      var storageType = context.fieldTypes[captureIndex];
+      feOperand(opLoadLocal, 0);
+      feOperand(opInt, 2 + captureIndex);
+      feBuiltinTyped(bObjectGet, 2, storageType);
+      var slot = feTemp(storageType);
+      feOperand(opStoreLocal, slot);
+      feBindLocal(capture.binding, capture.type, slot);
+      feFlow.types[capture.binding] = capture.promoted;
+      feFlow.assignments[capture.binding] = capture.assignment;
+      captureIndex++;
+    }
+    var binding = 0;
+    while (binding < feBindings.variables.length) {
+      if (feBindings.variables[binding].function == local) {
+        feBindLocal(binding, functionValueType(f), 0);
+      }
+      binding++;
+    }
   }
 }
 
@@ -3977,6 +4177,7 @@ void parseSource(SourceProgram source) {
   feConstructors.clear();
   feFunctionNodes.clear();
   feLocalFunctions.clear();
+  feLocalClosures.clear();
   feLocalConstants.clear();
   feLocalOwners.clear();
   feLocalStart = 0;
@@ -4073,6 +4274,9 @@ void parseSource(SourceProgram source) {
         feFunctionNodes[bindingFunction],
         feHasReceiver(bindingFunction),
         feLocalFunctions,
+        feOwners[bindingFunction] < 0
+            ? null
+            : feMembers[feOwners[bindingFunction]],
       ),
     );
     while (feLocalOwners.length < feLocalFunctions.length)
@@ -4152,7 +4356,18 @@ void parseSource(SourceProgram source) {
   var local = 0;
   while (local < feLocalFunctions.length) {
     var declaration = feLocalFunctions[local];
-    feRegisterFunction(declaration.syntax, -1, false, true);
+    var function = feRegisterFunction(declaration.syntax, -1, false, true);
+    for (var binding in declaration.body!.captures) {
+      if (declaration.body!.variables[binding].function != local) {
+        var info = functions[function];
+        info.closureLayout = ClosureLayout(<int>[]);
+        info.parameterTypes.insert(0, tFunction);
+        info.parameters++;
+        info.locals++;
+        break;
+      }
+    }
+    feLocalClosures.add(FeClosure());
     bodyBindings.add(declaration.body!);
     feLocalConstants.add(null);
     feLocalInferred.add(declaration.syntax.result.name != '');
@@ -4252,7 +4467,8 @@ void feGenerateCallableAdapters() {
     var info = functions[target];
     if (info.callableAdapter == -2) {
       var parameters = <int>[tFunction];
-      var p = 0;
+      var offset = info.closureLayout == null ? 0 : 1;
+      var p = offset;
       while (p < info.parameterTypes.length) {
         parameters.add(tDynamic);
         p++;
@@ -4281,9 +4497,10 @@ void feGenerateCallableAdapters() {
         p++;
       }
       var token = feFunctionNodes[target].token;
-      p = 0;
+      if (offset != 0) feOperand(opLoadLocal, 0);
+      p = offset;
       while (p < info.parameterTypes.length) {
-        feOperand(opLoadLocal, p + 1);
+        feOperand(opLoadLocal, p + 1 - offset);
         feConvertValue(tDynamic, info.parameterTypes[p], token);
         p++;
       }
@@ -4424,7 +4641,8 @@ void feLowerForIn(AstStatement statement) {
       'for-in variable type must match the List element type',
     );
   }
-  var variable = feTemp(type);
+  var cell = feCellBinding(declaration.binding);
+  var variable = feTemp(cell ? tObject : type);
   feBindLocal(declaration.binding, type, variable);
   feFlow = flowSplit(feFlow);
   feLoopFlow(statement);
@@ -4446,6 +4664,7 @@ void feLowerForIn(AstStatement statement) {
   feOperand(opLoadLocal, iterable);
   feOperand(opLoadLocal, index);
   feBuiltinTyped(bListGet, 2, type);
+  if (cell) feAllocateCell(type);
   feOperand(opStoreLocal, variable);
   var breakBase = feBreaks.length;
   var continueBase = feContinues.length;

@@ -40,6 +40,8 @@ const int opTypeCast = 37;
 const int opJumpTrue = 38;
 const int opConstantData = 39;
 const int opFunctionReference = 40;
+const int opClosureDescriptor = 41;
+const int opCaptureCellDescriptor = 42;
 
 const int bPrintString = 1;
 const int bPrintInt = 2;
@@ -106,6 +108,7 @@ const int bFunctionEntry = 62;
 const int bFunctionInvoke = 63;
 const int bListRemoveAt = 64;
 const int bListInsert = 65;
+const int bFunctionType = 66;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;
@@ -131,6 +134,12 @@ class FunctionContract {
   const FunctionContract(this.flags, this.token);
 }
 
+class ClosureLayout {
+  final List<int> fieldTypes;
+
+  ClosureLayout(this.fieldTypes);
+}
+
 class FunctionInfo {
   String name;
   int start;
@@ -144,6 +153,7 @@ class FunctionInfo {
   bool callableShape = false;
   int callableType = -1;
   int callableAdapter = -1;
+  ClosureLayout? closureLayout;
 
   FunctionInfo(
     this.name,
@@ -192,7 +202,16 @@ int functionValueType(int function) {
   var info = functions[function];
   if (!info.callableShape) return -1;
   if (info.callableType < 0) {
-    info.callableType = functionType(info.result, info.parameterTypes);
+    var parameters = info.parameterTypes;
+    if (info.closureLayout != null) {
+      parameters = <int>[];
+      var i = 1;
+      while (i < info.parameterTypes.length) {
+        parameters.add(info.parameterTypes[i]);
+        i++;
+      }
+    }
+    info.callableType = functionType(info.result, parameters);
   }
   return info.callableType;
 }
@@ -205,6 +224,8 @@ int irWidth(int op) {
       op == opMetadataAddress ||
       op == opConstantData ||
       op == opFunctionReference ||
+      op == opClosureDescriptor ||
+      op == opCaptureCellDescriptor ||
       op == opTypeTest ||
       op == opTypeCast ||
       op == opLoadLocal ||

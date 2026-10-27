@@ -436,6 +436,52 @@ void builderRoots(int queue, int edges) {
   check(refs[0].marker == 702 && objects[0] == 9223372036854775807);
 }
 
+List<int Function()> closureGraph() {
+  final fixed = Leaf(802);
+  Object? shared = Leaf(801);
+  var number = 0;
+  int read() => fixed.marker + (shared as Leaf).marker + number;
+  int next() {
+    shared = Leaf(803);
+    return ++number;
+  }
+
+  return [read, next];
+}
+
+void closureRoots(int queue, int edges) {
+  var callbacks = closureGraph();
+  var list = captureList(callbacks, 2, queue);
+  check(listElements(list, edges) == 2);
+  var read = rt.nativeLoad64(edges);
+  var next = rt.nativeLoad64(edges + 8);
+  check(rt.rtTraceObject(read, edges, capacity) == 3);
+  check(findMarker(edges, 3, 802) != 0);
+  var shared = 0;
+  var cells = 0;
+  for (var i = 0; i < 3; i++) {
+    var object = rt.nativeLoad64(edges + i * 8);
+    var descriptor = rt.rtObjectDescriptor(object);
+    if (rt.nativeLoad64(descriptor) == abi.captureCellClassId) {
+      cells++;
+      var count = rt.rtTraceObject(object, queue, capacity);
+      if (count == 1) {
+        check(findMarker(queue, count, 801) != 0);
+        shared = object;
+      } else {
+        check(count == 0);
+      }
+    }
+  }
+  check(cells == 2 && shared != 0);
+  check(rt.rtTraceObject(next, edges, capacity) == 2);
+  check(contains(edges, 2, shared));
+  check(callbacks[0]() == 1603 && callbacks[1]() == 1);
+  check(rt.rtTraceObject(shared, edges, capacity) == 1);
+  check(findMarker(edges, 1, 803) != 0);
+  check(callbacks[0]() == 1606);
+}
+
 void main(List<String> args) {
   if (args.isNotEmpty && args[0] == 'capacity') {
     capacityFailure(Leaf(190));
@@ -443,6 +489,7 @@ void main(List<String> args) {
   }
   var queue = rt.rtMap(capacity * 8);
   var edges = rt.rtMap(capacity * 8);
+  closureRoots(queue, edges);
   noGcRoots(queue);
   builderRoots(queue, edges);
   var keep = Leaf(111);

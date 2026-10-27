@@ -323,7 +323,8 @@ int ssaEffects(int op, int target) {
     return ssaRead | ssaWrite | ssaAllocate | ssaThrow | ssaGc | ssaNative;
   }
   if (op == opBuiltin) {
-    if (target == bFunctionEntry) return ssaRead | ssaNative;
+    if (target == bFunctionEntry || target == bFunctionType)
+      return ssaRead | ssaNative;
     if (target == bValueIdentical) return ssaRead;
     if (target == bBoxRef || target == bBoxBool) return 0;
     if (target == bNativeTarget) return 0;

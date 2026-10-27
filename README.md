@@ -58,13 +58,13 @@ The [specification tracker](specs/README.md) records the reference SDK, current 
 | --- | --- |
 | Values | Native integers, booleans, Unicode strings, nullable values, typed lists and runtime type checks |
 | Declarations | Top-level variables, lazy initialization, simple classes, instance/static fields and methods, named/unnamed constructors with field initializer lists, getters, setters and generic type aliases |
-| Functions | Direct calls, recursion, local and anonymous functions without runtime captures, optional/named direct arguments, required-positional function values and structural function types |
+| Functions | Direct calls, recursion, local and anonymous functions with lexical captures, optional/named direct arguments, required-positional function values and structural function types |
 | Control flow | Blocks, assignments, conditions, loops, labelled jumps, constant switch cases and returns |
 | Libraries | Relative, file/package imports and exports, prefixes, filters, conditional URIs and library parts |
 | Constants | Scalar/list constants, canonical const instances, metadata and supported core pragmas |
 | Core APIs | print, command-line arguments, basic String/List operations and StringBuffer object/character writing |
 
-Capturing closures, inheritance, generic classes and functions, dynamic member calls, mixins, extensions, records, patterns, exceptions, async code, isolates and most SDK libraries are not implemented. General optional/named function-value signatures and bound instance method/constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
+Inheritance, generic classes and functions, dynamic member calls, mixins, extensions, records, patterns, exceptions, async code, isolates and most SDK libraries are not implemented. Capturing functions with optional/named parameters, general optional/named function-value signatures and bound instance method/constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
 
 Package configuration v2 supplies local package mappings and default language versions. A leading `// @dart = major.minor` comment can select an implemented versioned rule from 2.12 through 3.13; this is not complete compatibility with those language versions. See [libraries](specs/libraries.md) and [lexical structure](specs/lexical-structure.md).
 
