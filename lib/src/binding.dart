@@ -320,12 +320,11 @@ List<AstPattern> bindingPatternVariables(
 }
 
 void bindingPattern(LocalBinder binder, int scope, AstPattern pattern) {
-  var type = pattern.type;
-  if (type != null) bindingType(binder, scope, type);
+  if (pattern.type case final type?) bindingType(binder, scope, type);
   if (pattern.kind == patternVariable && pattern.text != '_')
     pattern.binding = bindingLookup(binder, scope, pattern.text);
-  var constant = pattern.constant;
-  if (constant != null) bindingExpression(binder, scope, constant);
+  if (pattern.constant case final constant?)
+    bindingExpression(binder, scope, constant);
   for (var child in pattern.children) bindingPattern(binder, scope, child);
 }
 
@@ -406,8 +405,7 @@ void bindingExpression(
     bindingExpression(binder, scope, expression.children[0]);
     for (var arm in expression.arms) {
       var local = bindingPatternScope(binder, scope, arm.pattern, true);
-      var guard = arm.guard;
-      if (guard != null) bindingGuard(binder, local, guard);
+      if (arm.guard case final guard?) bindingGuard(binder, local, guard);
       bindingExpression(binder, local, arm.value);
     }
     return;
@@ -560,8 +558,8 @@ void bindingFunctionBody(LocalBinder binder, int scope, AstFunction syntax) {
   for (var parameter in syntax.parameters) {
     bindingType(binder, scope, parameter.type);
     bindingExpressions(binder, scope, parameter.metadata);
-    var value = parameter.defaultValue;
-    if (value != null) bindingExpression(binder, scope, value);
+    if (parameter.defaultValue case final value?)
+      bindingExpression(binder, scope, value);
   }
   binder.functions[syntax.local].body = _bindFunctionLocals(
     binder.source,
@@ -765,14 +763,13 @@ FunctionBindings _bindFunctionLocals(
   while (i < syntax.initializers.length) {
     var initializer = syntax.initializers[i];
     bindingExpression(binder, initializers, initializer.expression);
-    var message = initializer.message;
-    if (message != null) bindingExpression(binder, initializers, message);
+    if (initializer.message case final message?)
+      bindingExpression(binder, initializers, message);
     i++;
   }
-  var body = syntax.body;
-  if (body != null) bindingStatement(binder, parameters, body);
-  var arrow = syntax.arrow;
-  if (arrow != null) bindingExpression(binder, parameters, arrow);
+  if (syntax.body case final body?) bindingStatement(binder, parameters, body);
+  if (syntax.arrow case final arrow?)
+    bindingExpression(binder, parameters, arrow);
   return result;
 }
 
@@ -790,8 +787,8 @@ void collectWrittenExpression(
 ) {
   if (expression.kind == astSwitchExpression) {
     for (var arm in expression.arms) {
-      var guard = arm.guard;
-      if (guard != null) collectWrittenExpression(guard, seen, written);
+      if (arm.guard case final guard?)
+        collectWrittenExpression(guard, seen, written);
       collectWrittenExpression(arm.value, seen, written);
     }
   }
