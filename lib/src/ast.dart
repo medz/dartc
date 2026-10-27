@@ -175,8 +175,8 @@ class AstFunction {
   AstType result;
   List<AstParameter> parameters;
   List<AstInitializer> initializers = const <AstInitializer>[];
-  List<AstStatement> body;
-  List<AstExpression> arrow;
+  AstStatement? body;
+  AstExpression? arrow;
   bool external;
   int token;
   bool getter;

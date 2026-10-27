@@ -603,8 +603,10 @@ FunctionBindings _bindFunctionLocals(
     if (message != null) bindingExpression(binder, initializers, message);
     i++;
   }
-  bindingStatements(binder, parameters, syntax.body);
-  bindingExpressions(binder, parameters, syntax.arrow);
+  var body = syntax.body;
+  if (body != null) bindingStatement(binder, parameters, body);
+  var arrow = syntax.arrow;
+  if (arrow != null) bindingExpression(binder, parameters, arrow);
   return result;
 }
 

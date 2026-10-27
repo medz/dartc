@@ -559,8 +559,8 @@ void feCollectDeclarations(AstUnit unit) {
           syntax.name,
           AstType(syntax.name, <AstType>[], syntax.token),
           <AstParameter>[],
-          <AstStatement>[],
-          <AstExpression>[],
+          null,
+          null,
           false,
           syntax.token,
           false,
@@ -2659,7 +2659,8 @@ void feLowerConstructor(int function) {
     stepIndex++;
   }
   feBindings = bodyBindings;
-  if (syntax.body.length != 0) feLowerStatement(syntax.body[0]);
+  var body = syntax.body;
+  if (body != null) feLowerStatement(body);
   feOperand(opLoadLocal, 0);
   feEmit(opReturn);
 }
@@ -3730,11 +3731,12 @@ void feInferLocalResult(int local) {
   feBeginFunction(function, declaration.body!);
   var result = tNever;
   var context = feLocalContexts[local];
-  if (declaration.syntax.arrow.isNotEmpty) {
-    result = feLowerHint(declaration.syntax.arrow[0], context);
+  var arrow = declaration.syntax.arrow;
+  if (arrow != null) {
+    result = feLowerHint(arrow, context);
   } else {
-    if (declaration.syntax.body.isNotEmpty)
-      feLowerStatement(declaration.syntax.body[0]);
+    var body = declaration.syntax.body;
+    if (body != null) feLowerStatement(body);
     if (feFlow.reachable) result = tNull;
     var returned = feReturnTypes!;
     var i = 0;
@@ -4425,8 +4427,8 @@ void parseSource(SourceProgram source) {
       '__init',
       AstType('void', <AstType>[], 0),
       <AstParameter>[],
-      <AstStatement>[],
-      <AstExpression>[],
+      null,
+      null,
       false,
       0,
       false,
@@ -4609,10 +4611,10 @@ void parseSource(SourceProgram source) {
     functions[f].start = ir.length;
     feBeginFunction(f, bodyBindings[f]);
     var functionSyntax = feFunctionNodes[f];
+    var expression = functionSyntax.arrow;
     if (feConstructors[f] == 1) {
       feLowerConstructor(f);
-    } else if (functionSyntax.arrow.length != 0) {
-      var expression = functionSyntax.arrow[0];
+    } else if (expression != null) {
       if (feInfersLocalResult(f)) {
         var type = feLowerHint(expression, feLocalResultContext(f));
         feConvertValue(type, functions[f].result, expression.token);
@@ -4621,8 +4623,8 @@ void parseSource(SourceProgram source) {
       }
       feEmit(opReturn);
     } else {
-      if (functionSyntax.body.length != 0)
-        feLowerStatement(functionSyntax.body[0]);
+      var body = functionSyntax.body;
+      if (body != null) feLowerStatement(body);
       var result = functions[f].result;
       if (feFlow.reachable && !typeCanBeNull(result)) {
         feAstError(

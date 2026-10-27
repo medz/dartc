@@ -538,14 +538,14 @@ AstExpression parserFunctionExpression(Parser parser) {
       parser,
       'async and generator function expressions are unsupported',
     );
-  var body = <AstStatement>[];
-  var arrow = <AstExpression>[];
+  AstStatement? body;
+  AstExpression? arrow;
   if (parserTake(parser, '=>'))
-    arrow.add(parseExpression(parser));
+    arrow = parseExpression(parser);
   else {
     if (!parserIs(parser, '{'))
       parserError(parser, 'expected function expression body');
-    body.add(parseStatement(parser));
+    body = parseStatement(parser);
   }
   var expression = AstExpression(
     astFunctionExpression,
@@ -1504,14 +1504,14 @@ AstFunction parserFunction(
     parserError(parser, 'generative constructor cannot have an arrow body');
   if (constant && !parserIs(parser, ';'))
     parserError(parser, 'const constructor cannot have a body');
-  List<AstStatement> body = <AstStatement>[];
-  List<AstExpression> arrow = <AstExpression>[];
+  AstStatement? body;
+  AstExpression? arrow;
   if (parserTake(parser, '=>')) {
-    arrow.add(parseExpression(parser));
+    arrow = parseExpression(parser);
     parserExpect(parser, ';');
   } else if (!parserTake(parser, ';')) {
     if (!parserIs(parser, '{')) parserError(parser, 'expected function body');
-    body.add(parseStatement(parser));
+    body = parseStatement(parser);
   }
   var function = AstFunction(
     name,
@@ -2074,7 +2074,7 @@ AstStatement parseStatement(Parser parser) {
         false,
         false,
       );
-      if (function.body.isEmpty && function.arrow.isEmpty)
+      if (function.body == null && function.arrow == null)
         parserError(parser, 'local function requires a body');
       function.metadata = metadata;
       var statement = parserEmptyStatement(token);

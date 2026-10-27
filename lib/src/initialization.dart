@@ -96,7 +96,7 @@ ConstructorPlan planConstructorInitializers(
         initializer.token,
         'redirect cannot have other initializers',
       );
-    if (syntax.body.isNotEmpty || syntax.arrow.isNotEmpty)
+    if (syntax.body != null || syntax.arrow != null)
       _initError(
         symbols,
         syntax.token,
