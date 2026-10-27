@@ -45,7 +45,7 @@ The compatibility baseline is Dart 3.13.5, with complete language implementation
 | Control flow | Blocks, assignments, conditions, loops, labelled jumps, constant switch cases and returns |
 | Libraries | Relative, file/package imports and exports, prefixes, filters, conditional URIs and library parts |
 | Constants | Scalar/list constants, canonical const instances, metadata and supported core pragmas |
-| Core APIs | print, command-line arguments, basic String/List operations and String-only StringBuffer operations |
+| Core APIs | print, command-line arguments, basic String/List operations and StringBuffer object/character writing |
 
 Capturing closures, inheritance, general generics and dynamic member calls, mixins, extensions, records, patterns, exceptions, async code, isolates and most SDK libraries are not implemented. General optional/named function-value signatures and method/constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
 

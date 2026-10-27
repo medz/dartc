@@ -58,6 +58,14 @@
 | [`List.filled`][filled] | 部分实现 | 默认固定长度，`growable: true` 可增长；实参一次求值、共享 fill 引用。并未覆盖全部 List 构造器和长度 setter。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerStaticCall`；[runtime.dart](../lib/src/runtime.dart)：`rtListFilled`；[values.dart](../test/fixtures/values.dart)：`filledLists`。 |
 | [`[]=`][put]、[`clear`][clear] 与只读 List | 部分实现 | 支持索引、add、removeLast、clear；写入按实际元素类型检查，再检查只读性和范围；空 const 也不可 clear。类型、只读及范围失败尚以退出表示，不具备完整可捕获异常语义。 | [runtime.dart](../lib/src/runtime.dart)：`rtListSet`、`rtListAdd`、`rtListClear`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
 
+## StringBuffer API 边界
+
+这些条目属于 Dart 3.13.5 SDK API，不代表完整标准库已实现。
+
+| 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
+| --- | --- | --- | --- |
+| [`writeCharCode`](https://api.dart.dev/stable/3.13.5/dart-core/StringBuffer/writeCharCode.html)、[`isNotEmpty`](https://api.dart.dev/stable/3.13.5/dart-core/StringBuffer/isNotEmpty.html) | 部分实现 | 支持 0..0x10FFFF，补充字符拆为 UTF-16 代理对，保留孤代理项；长度按 UTF-16 单元计算，clear 后查询为空。非法码点沿用运行时终止边界，尚无可捕获的 RangeError 对象；writeAll 等 API 尚未实现。 | [string_buffer.dart](../lib/src/std/core/string_buffer.dart)：`writeCharCode`、`isNotEmpty`；[values.dart](../test/fixtures/values.dart)：`bufferValues`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
+
 ## 尚缺与待核验
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |

@@ -13,6 +13,10 @@ class StringBuffer {
     this._length = this._length + value.length;
   }
 
+  void writeCharCode(int charCode) {
+    this.write(String.fromCharCodes(<int>[charCode]));
+  }
+
   void writeln([Object? value = '']) {
     this.write(value);
     this.write('\n');
@@ -26,6 +30,8 @@ class StringBuffer {
   int get length => this._length;
 
   bool get isEmpty => this._length == 0;
+
+  bool get isNotEmpty => this._length != 0;
 
   String toString() {
     if (this._length == 0) return '';

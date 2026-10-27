@@ -1661,6 +1661,18 @@ void bufferValues() {
   var initial = StringBuffer(Box(5));
   print(initial.toString());
   print(boxStrings);
+  var codes = StringBuffer();
+  print(<Object>[codes.length, codes.isEmpty, codes.isNotEmpty]);
+  for (var code in <int>[65, 0, 0x1f642, 0xd800, 0x10ffff]) {
+    codes.writeCharCode(code);
+  }
+  var value = codes.toString();
+  var units = <int>[];
+  for (var i = 0; i < value.length; i++) units.add(value.codeUnitAt(i));
+  print(units);
+  print(<Object>[codes.length, codes.isEmpty, codes.isNotEmpty]);
+  codes.clear();
+  print(<Object>[codes.length, codes.isEmpty, codes.isNotEmpty]);
 }
 
 int stringEvaluations = 0;

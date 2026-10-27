@@ -781,6 +781,8 @@ Future<void> main(List<String> args) async {
       "void main() { print('before'); print('abc'.startsWith('', 4)); }",
       "void main() { print('before'); print(String.fromCharCodes(<int>[-1])); }",
       "void main() { print('before'); print(String.fromCharCodes(<int>[1114112])); }",
+      "void main() { var buffer = StringBuffer('kept'); print('before'); buffer.writeCharCode(-1); print('after'); }",
+      "void main() { var buffer = StringBuffer('kept'); print('before'); buffer.writeCharCode(1114112); print('after'); }",
       "bool side() { print('rhs'); return true; } void main() { dynamic value = 1; print('before'); if (value && side()) print('after'); }",
       "void main() { dynamic value = 'wrong'; print('before'); value as int; print('after'); }",
       "void main() { dynamic value = null; print('before'); value as int; print('after'); }",
