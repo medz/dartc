@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../lib/src/layout.dart';
+import '../tool/src/process.dart';
 
 const program = r'''
 Never neverStops() { while (true) {} }
@@ -515,31 +516,7 @@ void main(List<String> args) {
 }
 ''';
 
-ProcessResult run(
-  String executable,
-  List<String> arguments, {
-  bool native = false,
-  String? workingDirectory,
-}) {
-  final result = Process.runSync(
-    executable,
-    arguments,
-    workingDirectory: workingDirectory,
-    environment: native ? {'PATH': '/usr/bin:/bin'} : null,
-    includeParentEnvironment: !native,
-  );
-  if (result.exitCode != 0) {
-    throw ProcessException(
-      executable,
-      arguments,
-      '${result.stdout}${result.stderr}',
-      result.exitCode,
-    );
-  }
-  return result;
-}
-
-void main(List<String> args) {
+Future<void> main(List<String> args) async {
   final root = File.fromUri(Platform.script).parent.parent.absolute.path;
   String? compiler;
   var standard = '$root/lib/src/runtime.dart';
@@ -557,11 +534,86 @@ void main(List<String> args) {
     if (option == '--std') standard = value;
   }
   final temporary = Directory.systemTemp.createTempSync('dartc-behavior-');
+  final sdk = Platform.resolvedExecutable;
+  final driver = compiler ?? sdk;
+  final processes = <ProcessOutcome>[];
+  final identities = <String, Object?>{
+    'sdk': {'executable': sdk, 'version': Platform.version},
+    'compiler': {
+      'executable': driver,
+      'source': compiler == null ? '$root/bin/dartc.dart' : null,
+    },
+    'runtime': {'path': standard, 'expectedAbi': runtimeAbiVersion},
+  };
+  var succeeded = false;
+
+  Future<ProcessOutcome> capture(
+    String executable,
+    List<String> arguments, {
+    String? workingDirectory,
+    Map<String, String>? environment,
+    bool includeParentEnvironment = true,
+  }) async {
+    final result = await captureProcess(
+      executable,
+      arguments,
+      workingDirectory: workingDirectory,
+      environment: environment,
+      includeParentEnvironment: includeParentEnvironment,
+    );
+    processes.add(result);
+    if (result.startError != null ||
+        result.captureError != null ||
+        result.timedOut ||
+        result.outputLimited ||
+        result.exitCode == null) {
+      throw StateError(
+        'Process capture failed: $executable $arguments '
+        '(timeout=${result.timedOut}, outputLimited=${result.outputLimited}, '
+        'start=${result.startError}, capture=${result.captureError})',
+      );
+    }
+    return result;
+  }
+
+  Future<ProcessOutcome> run(
+    String executable,
+    List<String> arguments, {
+    bool native = false,
+    String? workingDirectory,
+  }) async {
+    final result = await capture(
+      executable,
+      arguments,
+      workingDirectory: workingDirectory,
+      environment: native ? {'PATH': '/usr/bin:/bin'} : null,
+      includeParentEnvironment: !native,
+    );
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        executable,
+        arguments,
+        '${result.stdout}${result.stderr}',
+        result.exitCode!,
+      );
+    }
+    return result;
+  }
+
   try {
+    final hash = await run(
+      Platform.isMacOS ? '/usr/bin/shasum' : '/usr/bin/sha256sum',
+      [
+        if (Platform.isMacOS) '-a',
+        if (Platform.isMacOS) '256',
+        compiler ?? '$root/bin/dartc.dart',
+        standard,
+      ],
+    );
+    identities['sha256'] = hash.stdout;
+
     final source = File('${temporary.path}/program.dart')
       ..writeAsStringSync(program);
-    final sdk = Platform.resolvedExecutable;
-    final driver = compiler ?? sdk;
     List<String> compileArguments(
       File source,
       String output, [
@@ -578,38 +630,37 @@ void main(List<String> args) {
         options.length == 2 && options[0] == '--packages'
         ? ['--packages=${options[1]}']
         : options;
-    void compare(
+    Future<void> compare(
       File source,
       List<String> arguments, {
       List<String> outputs = const [],
       List<String> options = const [],
       String? workingDirectory,
-    }) {
+    }) async {
       final executable = '${source.path}.out';
-      final expected =
-          run(sdk, [
-                ...sdkOptions(options),
-                source.path,
-                ...arguments,
-              ], workingDirectory: workingDirectory).stdout
-              as String;
+      final expected = (await run(sdk, [
+        ...sdkOptions(options),
+        source.path,
+        ...arguments,
+      ], workingDirectory: workingDirectory)).stdout;
       final expectedFiles = [
         for (final path in outputs) File(path).readAsBytesSync(),
       ];
-      run(
+      for (var i = 0; i < outputs.length; i++) {
+        File('${outputs[i]}.sdk').writeAsBytesSync(expectedFiles[i]);
+      }
+      await run(
         driver,
         [...compileArguments(source, executable), ...options],
         native: compiler != null,
         workingDirectory: workingDirectory,
       );
-      final actual =
-          run(
-                executable,
-                arguments,
-                native: true,
-                workingDirectory: workingDirectory,
-              ).stdout
-              as String;
+      final actual = (await run(
+        executable,
+        arguments,
+        native: true,
+        workingDirectory: workingDirectory,
+      )).stdout;
       if (actual != expected) {
         throw StateError(
           '${source.path} differs from official Dart.\n'
@@ -634,12 +685,12 @@ void main(List<String> args) {
       }
     }
 
-    compare(source, ['alpha', '你好']);
+    await compare(source, ['alpha', '你好']);
     final values = File('${temporary.path}/values.dart')
       ..writeAsStringSync(
         File('$root/test/fixtures/values.dart').readAsStringSync(),
       );
-    compare(values, [for (var i = 0; i < 20; i++) '参数$i🙂']);
+    await compare(values, [for (var i = 0; i < 20; i++) '参数$i🙂']);
     final roots = File('${temporary.path}/roots.dart')
       ..writeAsStringSync(
         File('$root/test/fixtures/roots.dart')
@@ -651,21 +702,21 @@ void main(List<String> args) {
             ),
       );
     final rootsExecutable = '${roots.path}.out';
-    run(
+    await run(
       driver,
       compileArguments(roots, rootsExecutable),
       native: compiler != null,
     );
-    final rootOutput = run(rootsExecutable, [
+    final rootOutput = (await run(rootsExecutable, [
       'alpha',
       '你好🙂',
-    ], native: true).stdout;
+    ], native: true)).stdout;
     if (rootOutput != 'roots ok\n') {
       throw StateError(
         'Unexpected native root enumeration output: $rootOutput',
       );
     }
-    final exhaustedRoots = Process.runSync(
+    final exhaustedRoots = await capture(
       rootsExecutable,
       ['capacity'],
       environment: {'PATH': '/usr/bin:/bin'},
@@ -682,25 +733,25 @@ void main(List<String> args) {
         "void main({String label = 'named', bool flag = true, List<List<int>> values = const [[]]}) { "
         'print(label); print(flag); print(values); }',
       );
-    compare(namedEntry, ['ignored', '你好']);
+    await compare(namedEntry, ['ignored', '你好']);
     final twoEntry = File('${temporary.path}/two-entry.dart')
       ..writeAsStringSync(
         "void main(List<String> args, [Object? message = 'default', int third = 3]) { "
         'print(args); print(message); print(third); }',
       );
-    compare(twoEntry, ['alpha', '你好🙂']);
+    await compare(twoEntry, ['alpha', '你好🙂']);
     final invalidEntry = File('${temporary.path}/invalid-entry.dart')
       ..writeAsStringSync(
         "void main(List<String> args, [int second = 1]) { print('body'); }",
       );
-    final expectedEntry = Process.runSync(sdk, [invalidEntry.path]);
+    final expectedEntry = await capture(sdk, [invalidEntry.path]);
     final entryExecutable = '${invalidEntry.path}.out';
-    run(
+    await run(
       driver,
       compileArguments(invalidEntry, entryExecutable),
       native: compiler != null,
     );
-    final actualEntry = Process.runSync(
+    final actualEntry = await capture(
       entryExecutable,
       [],
       environment: {'PATH': '/usr/bin:/bin'},
@@ -800,13 +851,13 @@ void main() {
       final source = File('${temporary.path}/value-error-$i.dart')
         ..writeAsStringSync(failingValues[i]);
       final executable = '${source.path}.out';
-      final expected = Process.runSync(sdk, [source.path]);
-      run(
+      final expected = await capture(sdk, [source.path]);
+      await run(
         driver,
         compileArguments(source, executable),
         native: compiler != null,
       );
-      final actual = Process.runSync(
+      final actual = await capture(
         executable,
         [],
         environment: {'PATH': '/usr/bin:/bin'},
@@ -1169,33 +1220,36 @@ void main() { print(1_000); }
     for (final entry in libraries.entries) {
       File('${temporary.path}/${entry.key}').writeAsStringSync(entry.value);
     }
-    compare(File('${temporary.path}/imports.dart'), []);
-    compare(File('${temporary.path}/core.dart'), []);
-    compare(File('${temporary.path}/priority.dart'), []);
-    compare(File('${temporary.path}/export-priority.dart'), []);
-    compare(File('${temporary.path}/prefix-priority.dart'), []);
-    compare(File('${temporary.path}/core-annotations-imports.dart'), []);
-    compare(File('${temporary.path}/core-annotations-implicit.dart'), []);
-    compare(File('${temporary.path}/core-annotations-own.dart'), []);
-    compare(File('${temporary.path}/core-annotations-filtered.dart'), []);
-    compare(File('${temporary.path}/nogc-values.dart'), []);
-    compare(File('${temporary.path}/nogc-user-annotation.dart'), []);
-    compare(File('${temporary.path}/version-imports.dart'), []);
-    compare(File('${temporary.path}/version-header.dart'), []);
-    compare(File('${temporary.path}/version-named.dart'), []);
-    compare(File('${temporary.path}/version-unnamed.dart'), []);
-    compare(File('${temporary.path}/version-markers.dart'), []);
-    compare(File('${temporary.path}/version-bom.dart'), []);
-    compare(File('${temporary.path}/constant-imports.dart'), []);
-    compare(File('${temporary.path}/property-imports.dart'), []);
-    compare(File('${temporary.path}/top-accessor-imports.dart'), []);
-    compare(File('${temporary.path}/metadata-imports.dart'), []);
-    compare(File('${temporary.path}/const-class-imports.dart'), []);
-    compare(File('${temporary.path}/const-class-metadata-only.dart'), []);
-    compare(File('${temporary.path}/const-class-finite-default.dart'), []);
-    compare(File('${temporary.path}/function-imports.dart'), []);
-    compare(File('${temporary.path}/conditional-imports.dart'), []);
-    compare(File('${temporary.path}/parts-main.dart'), []);
+    await compare(File('${temporary.path}/imports.dart'), []);
+    await compare(File('${temporary.path}/core.dart'), []);
+    await compare(File('${temporary.path}/priority.dart'), []);
+    await compare(File('${temporary.path}/export-priority.dart'), []);
+    await compare(File('${temporary.path}/prefix-priority.dart'), []);
+    await compare(File('${temporary.path}/core-annotations-imports.dart'), []);
+    await compare(File('${temporary.path}/core-annotations-implicit.dart'), []);
+    await compare(File('${temporary.path}/core-annotations-own.dart'), []);
+    await compare(File('${temporary.path}/core-annotations-filtered.dart'), []);
+    await compare(File('${temporary.path}/nogc-values.dart'), []);
+    await compare(File('${temporary.path}/nogc-user-annotation.dart'), []);
+    await compare(File('${temporary.path}/version-imports.dart'), []);
+    await compare(File('${temporary.path}/version-header.dart'), []);
+    await compare(File('${temporary.path}/version-named.dart'), []);
+    await compare(File('${temporary.path}/version-unnamed.dart'), []);
+    await compare(File('${temporary.path}/version-markers.dart'), []);
+    await compare(File('${temporary.path}/version-bom.dart'), []);
+    await compare(File('${temporary.path}/constant-imports.dart'), []);
+    await compare(File('${temporary.path}/property-imports.dart'), []);
+    await compare(File('${temporary.path}/top-accessor-imports.dart'), []);
+    await compare(File('${temporary.path}/metadata-imports.dart'), []);
+    await compare(File('${temporary.path}/const-class-imports.dart'), []);
+    await compare(File('${temporary.path}/const-class-metadata-only.dart'), []);
+    await compare(
+      File('${temporary.path}/const-class-finite-default.dart'),
+      [],
+    );
+    await compare(File('${temporary.path}/function-imports.dart'), []);
+    await compare(File('${temporary.path}/conditional-imports.dart'), []);
+    await compare(File('${temporary.path}/parts-main.dart'), []);
     final rejected = [
       'void main(){var value=1;var callback=()=>value;print(callback());}',
       'class Captured{int value=1;void run(){var callback=()=>this.value;print(callback());}}void main(){Captured().run();}',
@@ -1442,7 +1496,7 @@ void main() { print(1_000); }
       "void main() { print('abc'.endsWith('c', 1)); }",
       'void main() { print(String.fromCharCodes(<int>[65], 0)); }',
     ];
-    void reject(
+    Future<void> reject(
       File invalid, {
       String? runtime,
       String? diagnostic,
@@ -1450,16 +1504,16 @@ void main() { print(1_000); }
       List<String> options = const [],
       String? workingDirectory,
       bool checkSdk = false,
-    }) {
+    }) async {
       if (checkSdk) {
-        final expected = Process.runSync(sdk, [
+        final expected = await capture(sdk, [
           ...sdkOptions(options),
           invalid.path,
         ], workingDirectory: workingDirectory);
         if (expected.exitCode == 0)
           throw StateError('Expected SDK rejection for ${invalid.path}.');
       }
-      final result = Process.runSync(
+      final result = await capture(
         driver,
         [
           ...compileArguments(invalid, '${invalid.path}.out', runtime),
@@ -1483,7 +1537,7 @@ void main() { print(1_000); }
     for (var i = 0; i < rejected.length; i++) {
       final invalid = File('${temporary.path}/rejected-$i.dart')
         ..writeAsStringSync(rejected[i]);
-      reject(invalid);
+      await reject(invalid);
     }
     final rejectedParts = <String, String>{
       "import 'parts-name.dart';void main(){}": 'parts-name.dart',
@@ -1508,22 +1562,22 @@ void main() { print(1_000); }
       final invalid = File(
         '${temporary.path}/rejected-part-${partRejection++}.dart',
       )..writeAsStringSync(entry.key);
-      reject(invalid, diagnostic: '${temporary.path}/${entry.value}');
+      await reject(invalid, diagnostic: '${temporary.path}/${entry.value}');
     }
     final conditionalIo = File('${temporary.path}/conditional-target-io.dart')
       ..writeAsStringSync(
         "import 'conditional-io.dart' if(dart.library.io) 'conditional-first.dart';void main(){}",
       );
-    run(sdk, [conditionalIo.path]);
-    reject(conditionalIo, diagnostic: 'unsupported library URI dart:io');
+    await run(sdk, [conditionalIo.path]);
+    await reject(conditionalIo, diagnostic: 'unsupported library URI dart:io');
     for (final literal in ['1_', '0x_FF', '0_xFF']) {
       final invalid = File('${temporary.path}/separator-$literal.dart')
         ..writeAsStringSync('void main() { print($literal); }');
-      final expected = Process.runSync(sdk, [invalid.path]);
+      final expected = await capture(sdk, [invalid.path]);
       if (expected.exitCode == 0) {
         throw StateError('Expected SDK rejection for ${invalid.path}.');
       }
-      reject(invalid, diagnostic: 'digit separator');
+      await reject(invalid, diagnostic: 'digit separator');
     }
     final packageProject = Directory(
       '${temporary.path}/packages-你好 space/project',
@@ -1625,10 +1679,10 @@ void main() { print(1_000); }
         ],
       }),
     );
-    compare(packageMain, [], workingDirectory: packageCwd.path);
-    compare(packageTest, [], workingDirectory: packageCwd.path);
-    compare(packageHeader, [], workingDirectory: packageCwd.path);
-    compare(
+    await compare(packageMain, [], workingDirectory: packageCwd.path);
+    await compare(packageTest, [], workingDirectory: packageCwd.path);
+    await compare(packageHeader, [], workingDirectory: packageCwd.path);
+    await compare(
       packageMain,
       [],
       workingDirectory: packageCwd.path,
@@ -1646,8 +1700,8 @@ void main() { print(1_000); }
         ],
       }),
     );
-    compare(packageMain, [], workingDirectory: packageCwd.path);
-    compare(
+    await compare(packageMain, [], workingDirectory: packageCwd.path);
+    await compare(
       packageMain,
       [],
       workingDirectory: packageCwd.path,
@@ -1662,7 +1716,7 @@ void main() { print(1_000); }
           ],
         }),
       );
-    compare(
+    await compare(
       packageMain,
       [],
       workingDirectory: packageCwd.path,
@@ -1680,7 +1734,7 @@ void main() { print(1_000); }
 ],"unknown":{"values":[true,false,null,-1.25e+3,{"escape":"\u4F60\u597D\uD83D\uDE42"}]}}
 ''',
       );
-    compare(
+    await compare(
       packageMain,
       [],
       workingDirectory: packageCwd.path,
@@ -1708,24 +1762,24 @@ void main() { print(1_000); }
         ],
       }),
     );
-    compare(
+    await compare(
       packageMain,
       [],
       workingDirectory: packageCwd.path,
       options: ['--packages', packageConfig.path],
     );
-    compare(nestedMain, [], workingDirectory: packageCwd.path);
+    await compare(nestedMain, [], workingDirectory: packageCwd.path);
     nearestConfig.writeAsStringSync(
       '{"configVersion":2,"packages":[],"unknown":[1,]}',
     );
-    reject(
+    await reject(
       packageMain,
       diagnostic: nearestConfig.path,
       checkSdk: true,
       workingDirectory: packageCwd.path,
     );
     final missingConfig = '${packageConfig.parent.path}/missing.json';
-    reject(
+    await reject(
       packageMain,
       diagnostic: missingConfig,
       status: 64,
@@ -1765,7 +1819,7 @@ void main() { print(1_000); }
     for (final entry in invalidConfigs.entries) {
       final config = File('${packageConfig.parent.path}/${entry.key}.json')
         ..writeAsStringSync(entry.value);
-      reject(
+      await reject(
         packageHeader,
         // SDK 3.13.5 accepts this unused overlap; the pinned v2 format rejects it.
         checkSdk: entry.key != 'overlap',
@@ -1789,12 +1843,12 @@ void main() { print(1_000); }
     final emptyRuntime = File('${temporary.path}/runtime-empty.dart')
       ..writeAsStringSync('const int rtAbiVersion = $runtimeAbiVersion;');
     final emptyExecutable = '${empty.path}.out';
-    run(
+    await run(
       driver,
       compileArguments(empty, emptyExecutable, emptyRuntime.path),
       native: compiler != null,
     );
-    if (run(emptyExecutable, [], native: true).stdout != '') {
+    if ((await run(emptyExecutable, [], native: true)).stdout != '') {
       throw StateError(
         'Empty program with no runtime storage produced output.',
       );
@@ -1827,12 +1881,12 @@ void verify() {
         "import 'runtime-eager.dart' as rt; void main() { rt.verify(); }",
       );
     final eagerExecutable = '${eager.path}.out';
-    run(
+    await run(
       driver,
       compileArguments(eager, eagerExecutable, eagerRuntime.path),
       native: compiler != null,
     );
-    if (run(eagerExecutable, [], native: true).stdout != '') {
+    if ((await run(eagerExecutable, [], native: true)).stdout != '') {
       throw StateError('Eager scalar initialization produced output.');
     }
     final invalidRuntimes = [
@@ -1848,7 +1902,7 @@ void verify() {
     for (var i = 0; i < invalidRuntimes.length; i++) {
       final runtime = File('${temporary.path}/runtime-$i.dart')
         ..writeAsStringSync(invalidRuntimes[i]);
-      reject(empty, runtime: runtime.path, diagnostic: runtime.path);
+      await reject(empty, runtime: runtime.path, diagnostic: runtime.path);
     }
     final runtimePart = File('${temporary.path}/runtime-part-body.dart')
       ..writeAsStringSync(
@@ -1858,7 +1912,11 @@ void verify() {
       ..writeAsStringSync(
         "part 'runtime-part-body.dart';const int rtAbiVersion=$runtimeAbiVersion;",
       );
-    reject(empty, runtime: partRuntime.path, diagnostic: runtimePart.path);
+    await reject(
+      empty,
+      runtime: partRuntime.path,
+      diagnostic: runtimePart.path,
+    );
     final io = File('${temporary.path}/io.dart')
       ..writeAsStringSync(
         "import '${File(standard).parent.path}/host.dart';\n" +
@@ -1898,7 +1956,7 @@ void main(List<String> args) {
 ''',
       );
     final outputPrefix = '${temporary.path}/io-你好🙂-';
-    compare(
+    await compare(
       io,
       [outputPrefix],
       outputs: [
@@ -1915,12 +1973,12 @@ void main(List<String> args) {
           '${cwd.path}/${List.filled(32, 'directory-with-a-long-component-你好🙂').join('/')}',
         )..createSync(recursive: true),
     ]) {
-      final expected = Process.runSync(sdk, [
+      final expected = await capture(sdk, [
         io.path,
         outputPrefix,
         'cwd',
       ], workingDirectory: directory.path);
-      final actual = Process.runSync(
+      final actual = await capture(
         ioExecutable,
         [outputPrefix, 'cwd'],
         workingDirectory: directory.path,
@@ -1939,7 +1997,7 @@ void main(List<String> args) {
         );
       }
     }
-    final directoryRead = Process.runSync(
+    final directoryRead = await capture(
       ioExecutable,
       [cwd.path, 'read'],
       environment: {'PATH': '/usr/bin:/bin'},
@@ -1965,13 +2023,30 @@ void main(List<String> args) {
         ..writeAsStringSync(
           "import '${File(standard).parent.path}/host.dart';\n$body",
         );
-      reject(invalid);
+      await reject(invalid);
     }
     stdout.writeln('Behavior matches official Dart.');
-  } on ProcessException catch (error) {
-    stderr.writeln(error);
+    succeeded = true;
+  } catch (error, stack) {
     exitCode = 1;
+    final report = File('${temporary.path}/failure.json');
+    try {
+      report.writeAsStringSync(
+        const JsonEncoder.withIndent('  ').convert({
+          'error': error.toString(),
+          'stack': stack.toString(),
+          'arguments': args,
+          'identities': identities,
+          'processes': [for (final process in processes) process.toJson()],
+        }),
+      );
+    } catch (recordError) {
+      stderr.writeln('Could not write failure record: $recordError');
+    }
+    stderr.writeln('Behavior failure preserved at ${temporary.path}');
+    stderr.writeln('Process evidence: ${report.path}');
+    stderr.writeln(error);
   } finally {
-    temporary.deleteSync(recursive: true);
+    if (succeeded) temporary.deleteSync(recursive: true);
   }
 }
