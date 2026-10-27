@@ -30,19 +30,19 @@ void _checkBody(SourceProgram sources, int function, int effects) {
 }
 
 bool _ssaConstant(List<SsaInstruction?> definitions, int value, bool nonzero) {
-  var definition = definitions[value];
-  if (definition == null || definition.op != opInt) return false;
-  if (nonzero) return definition.target != 0;
-  return definition.target >= 0;
+  return switch (definitions[value]) {
+    SsaInstruction(op: opInt, :var target) =>
+      nonzero ? target != 0 : target >= 0,
+    _ => false,
+  };
 }
 
 bool _ssaNonnegative(List<SsaInstruction?> definitions, int value) {
   if (_ssaConstant(definitions, value, false)) return true;
-  var definition = definitions[value];
-  return definition != null &&
-      definition.op == opAnd &&
-      (_ssaConstant(definitions, definition.inputs[0], false) ||
-          _ssaConstant(definitions, definition.inputs[1], false));
+  if (definitions[value] case SsaInstruction(op: opAnd, :var inputs))
+    return _ssaConstant(definitions, inputs[0], false) ||
+        _ssaConstant(definitions, inputs[1], false);
+  return false;
 }
 
 bool _builtinThrows(int target) {
@@ -135,19 +135,19 @@ bool _machineConstant(
   int value,
   bool nonzero,
 ) {
-  var definition = definitions[value];
-  if (definition == null || definition.op != mConstant) return false;
-  if (nonzero) return definition.target != 0;
-  return definition.target >= 0;
+  return switch (definitions[value]) {
+    MachineInstruction(op: mConstant, :var target) =>
+      nonzero ? target != 0 : target >= 0,
+    _ => false,
+  };
 }
 
 bool _machineNonnegative(List<MachineInstruction?> definitions, int value) {
   if (_machineConstant(definitions, value, false)) return true;
-  var definition = definitions[value];
-  return definition != null &&
-      definition.op == mAnd &&
-      (_machineConstant(definitions, definition.inputs[0], false) ||
-          _machineConstant(definitions, definition.inputs[1], false));
+  if (definitions[value] case MachineInstruction(op: mAnd, :var inputs))
+    return _machineConstant(definitions, inputs[0], false) ||
+        _machineConstant(definitions, inputs[1], false);
+  return false;
 }
 
 void checkNoGcMachine(
