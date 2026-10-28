@@ -230,8 +230,6 @@ List<int> feLocalContexts = <int>[];
 List<int>? feReturnTypes;
 List<AstClass> feClassNodes = <AstClass>[];
 List<ClassMembers> feMembers = <ClassMembers>[];
-List<List<int>> feMemberFunctions = <List<int>>[];
-List<List<int>> feClassStaticGlobals = <List<int>>[];
 List<int> feClassFieldStarts = <int>[];
 List<AstVariable> feGlobalNodes = <AstVariable>[];
 List<AstVariable> feFieldNodes = <AstVariable>[];
@@ -288,7 +286,7 @@ bool feClassType(int type) {
 int feField(int owner, String name, int token) {
   var index = lookupMember(feMembers[owner], name);
   if (index >= 0 && feMembers[owner].members[index].field >= 0)
-    return feClassFieldStarts[owner] + feMembers[owner].members[index].field;
+    return feMembers[owner].members[index].field;
   feAstError(token, 'unknown instance field ' + classNames[owner] + '.' + name);
 }
 
@@ -300,7 +298,7 @@ int feMethod(int owner, String name, bool getter) {
   var method = member.method;
   if (getter) method = member.getter;
   if (method < 0) return -1;
-  return feMemberFunctions[owner][method];
+  return method;
 }
 
 int feDeclare(int source, String name, int kind, int target, int token) {
@@ -475,7 +473,6 @@ void feCollectDeclarations(AstUnit unit) {
     feClassNodes.add(syntax);
     feClassFieldCounts.add(0);
     feClassConstructors.add(<int>[]);
-    feClassStaticGlobals.add(const <int>[]);
     classSizes.add(objectHeaderBytes);
     classPointerMasks.add(<int>[]);
     classTaggedMasks.add(<int>[]);
@@ -581,7 +578,8 @@ void feCollectDeclarations(AstUnit unit) {
   while (i < unit.classes.length) {
     feClassFieldStarts.add(feFieldTypes.length);
     feMembers.add(bindClassMembers(feSources, unit.classes[i], objectMembers));
-    feMemberFunctions.add(<int>[]);
+    for (final member in feMembers[i].members)
+      if (member.field >= 0) member.field += feClassFieldStarts[i];
     var fields = unit.classes[i].fields;
     var field = 0;
     while (field < fields.length) {
@@ -632,12 +630,15 @@ void feCollectDeclarations(AstUnit unit) {
   i = 0;
   while (i < unit.classes.length) {
     var fields = unit.classes[i].staticFields;
-    if (fields.isNotEmpty) feClassStaticGlobals[i] = <int>[];
+    final globals = <int>[];
     var field = 0;
     while (field < fields.length) {
-      feClassStaticGlobals[i].add(feRegisterGlobal(fields[field], i));
+      globals.add(feRegisterGlobal(fields[field], i));
       field++;
     }
+    for (final member in feMembers[i].members)
+      if (member.staticField >= 0)
+        member.staticField = globals[member.staticField];
     i++;
   }
   i = 0;
@@ -669,12 +670,16 @@ void feCollectDeclarations(AstUnit unit) {
         true,
       );
     }
+    final methods = <int>[];
     var method = 0;
     while (method < syntax.methods.length) {
-      feMemberFunctions[i].add(
-        feRegisterFunction(syntax.methods[method], i, false),
-      );
+      methods.add(feRegisterFunction(syntax.methods[method], i, false));
       method++;
+    }
+    for (final member in feMembers[i].members) {
+      if (member.method >= 0) member.method = methods[member.method];
+      if (member.getter >= 0) member.getter = methods[member.getter];
+      if (member.setter >= 0) member.setter = methods[member.setter];
     }
     for (var index = 0; index < syntax.fields.length; index++) {
       final field = feClassFieldStarts[i] + index;
@@ -1197,22 +1202,19 @@ MemberBinding feStaticBinding(int owner, String name, int token) {
   return member;
 }
 
-int feStaticReadType(int owner, MemberBinding member, int token) {
-  if (member.getter >= 0)
-    return functions[feMemberFunctions[owner][member.getter]].result;
-  if (member.staticField >= 0)
-    return feGlobalType(feClassStaticGlobals[owner][member.staticField]);
+int feStaticReadType(MemberBinding member, int token) {
+  if (member.getter >= 0) return functions[member.getter].result;
+  if (member.staticField >= 0) return feGlobalType(member.staticField);
   feAstError(token, 'member has no getter: ' + member.name);
 }
 
-int feReadStaticMember(int owner, MemberBinding member, int token) {
-  if (member.method >= 0)
-    return feFunctionReference(feMemberFunctions[owner][member.method], token);
-  var type = feStaticReadType(owner, member, token);
+int feReadStaticMember(MemberBinding member, int token) {
+  if (member.method >= 0) return feFunctionReference(member.method, token);
+  final type = feStaticReadType(member, token);
   if (member.getter >= 0)
-    feCall(feMemberFunctions[owner][member.getter], 0);
+    feCall(member.getter, 0);
   else
-    feLoadGlobalValue(feClassStaticGlobals[owner][member.staticField]);
+    feLoadGlobalValue(member.staticField);
   return type;
 }
 
@@ -1829,8 +1831,12 @@ void feResolvePragma() {
   var members = feMembers[fePragmaClass];
   var name = lookupMember(members, 'name');
   var options = lookupMember(members, 'options');
-  if (name >= 0) fePragmaNameField = members.members[name].field;
-  if (options >= 0) fePragmaOptionsField = members.members[options].field;
+  if (name >= 0 && members.members[name].field >= 0)
+    fePragmaNameField =
+        members.members[name].field - feClassFieldStarts[fePragmaClass];
+  if (options >= 0 && members.members[options].field >= 0)
+    fePragmaOptionsField =
+        members.members[options].field - feClassFieldStarts[fePragmaClass];
 }
 
 int fePragmaFlags(ConstantValue value, int token) {
@@ -2043,17 +2049,13 @@ void feCheckAccessorVersions() {
         if (member.setter >= 0) {
           var read = -1;
           if (member.staticField >= 0)
-            read = globalTypes[feClassStaticGlobals[owner][member.staticField]];
+            read = globalTypes[member.staticField];
           else if (member.field >= 0)
-            read = feFieldTypes[feClassFieldStarts[owner] + member.field];
+            read = feFieldTypes[member.field];
           else if (member.getter >= 0)
-            read = functions[feMemberFunctions[owner][member.getter]].result;
+            read = functions[member.getter].result;
           if (read >= 0)
-            feCheckLegacyAccessor(
-              read,
-              feMemberFunctions[owner][member.setter],
-              member.isStatic ? 0 : 1,
-            );
+            feCheckLegacyAccessor(read, member.setter, member.isStatic ? 0 : 1);
         }
         i++;
       }
@@ -3046,9 +3048,9 @@ int feLowerMemberValueCall(
       feMembers[owner].members[lookupMember(feMembers[owner], member)];
   var value = -1;
   if (binding.getter >= 0)
-    value = functions[feMemberFunctions[owner][binding.getter]].result;
+    value = functions[binding.getter].result;
   else if (binding.field >= 0)
-    value = feFieldTypes[feClassFieldStarts[owner] + binding.field];
+    value = feFieldTypes[binding.field];
   else
     feAstError(call.token, 'member has no getter: ' + member);
   if (value == tNever) {
@@ -3109,17 +3111,15 @@ int feLowerMemberValueCall(
 
 int feLowerStaticMemberCall(
   AstExpression call,
-  int owner,
   MemberBinding member, [
   int context = -1,
 ]) {
   if (call.text == astCallNew)
     feAstError(call.token, 'new requires a constructor');
   if (member.method >= 0) {
-    var function = feMemberFunctions[owner][member.method];
-    return feInvokeDeclaration(call, function, 0, context);
+    return feInvokeDeclaration(call, member.method, 0, context);
   }
-  var type = feReadStaticMember(owner, member, call.token);
+  final type = feReadStaticMember(member, call.token);
   if (type == tNever) return feLowerNeverArguments(call);
   return feLowerValueCall(call, type, context);
 }
@@ -3575,7 +3575,7 @@ int feLowerCall(AstExpression call, int context) {
     var index = lookupMember(feMembers[staticOwner], callee.text);
     if (index >= 0 && feMembers[staticOwner].members[index].isStatic) {
       var member = feStaticBinding(staticOwner, callee.text, callee.token);
-      return feLowerStaticMemberCall(call, staticOwner, member, context);
+      return feLowerStaticMemberCall(call, member, context);
     }
   }
   if (symbol < 0 && callee.kind == astMember) {
@@ -3652,7 +3652,6 @@ int feLowerMember(AstExpression expression) {
   var owner = feStaticOwner(expression);
   if (owner >= 0)
     return feReadStaticMember(
-      owner,
       feStaticBinding(owner, expression.text, expression.token),
       expression.token,
     );
@@ -3728,7 +3727,7 @@ CheckedMemberRead feCheckBoundMember(
 ) {
   var receiver = classType(owner);
   if (member.method >= 0) {
-    var function = feMemberFunctions[owner][member.method];
+    var function = member.method;
     return CheckedMemberRead(
       receiver,
       feCallableType(function, token),
@@ -3737,7 +3736,7 @@ CheckedMemberRead feCheckBoundMember(
     );
   }
   if (member.getter >= 0) {
-    var getter = feMemberFunctions[owner][member.getter];
+    var getter = member.getter;
     return CheckedMemberRead(
       receiver,
       functions[getter].result,
@@ -3746,7 +3745,7 @@ CheckedMemberRead feCheckBoundMember(
     );
   }
   if (member.field >= 0) {
-    var field = feClassFieldStarts[owner] + member.field;
+    var field = member.field;
     return CheckedMemberRead(
       receiver,
       feFieldTypes[field],
@@ -3797,7 +3796,7 @@ int feReadCheckedMember(CheckedMemberRead member, int token) {
 }
 
 int feReadBoundMember(int owner, MemberBinding member, int token) {
-  if (member.isStatic) return feReadStaticMember(owner, member, token);
+  if (member.isStatic) return feReadStaticMember(member, token);
   return feReadCheckedMember(feCheckBoundMember(owner, member, token), token);
 }
 
@@ -3825,17 +3824,17 @@ FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
     var type = -1;
     var setter = -1;
     if (member.setter >= 0) {
-      setter = feMemberFunctions[staticOwner][member.setter];
+      setter = member.setter;
       type = functions[setter].parameterTypes[0];
     } else if (member.staticField >= 0) {
-      global = feClassStaticGlobals[staticOwner][member.staticField];
+      global = member.staticField;
       if (!feGlobalNodes[global].hasSetter)
         feAstError(expression.token, 'cannot assign a final field');
       type = feGlobalType(global);
     } else {
       feAstError(expression.token, 'member has no setter: ' + member.name);
     }
-    if (reading) feStaticReadType(staticOwner, member, expression.token);
+    if (reading) feStaticReadType(member, expression.token);
     var target = FeLvalue(type, setter >= 0 ? 5 : 0, -1, -1, -1, global);
     target.owner = staticOwner;
     target.member = lookupMember(feMembers[staticOwner], member.name);
@@ -3919,7 +3918,7 @@ FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
         'static member cannot be accessed through an instance',
       );
     if (member.setter >= 0) {
-      var setter = feMemberFunctions[owner][member.setter];
+      var setter = member.setter;
       var receiver = feTemp(receiverType);
       feOperand(opStoreLocal, receiver);
       var target = FeLvalue(
@@ -3936,7 +3935,7 @@ FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
     }
     if (member.field < 0)
       feAstError(expression.token, 'member has no setter: ' + member.name);
-    var field = feClassFieldStarts[owner] + member.field;
+    var field = member.field;
     if (!feFieldNodes[field].hasSetter)
       feAstError(expression.token, 'cannot assign a final field');
     if (feFieldNodes[field].lateVariable) {
@@ -3965,7 +3964,6 @@ int feReadLvalue(FeLvalue target, int token) {
   }
   if ((target.container == 0 || target.container == 5) && target.owner >= 0)
     return feReadStaticMember(
-      target.owner,
       feMembers[target.owner].members[target.member],
       token,
     );
@@ -4042,9 +4040,7 @@ void feWriteLvalue(FeLvalue target, int token) {
   feOperand(opLoadLocal, target.receiver);
   if (target.container == 4) {
     var member = feMembers[target.owner].members[target.member];
-    var setter = target.setter >= 0
-        ? target.setter
-        : feMemberFunctions[target.owner][member.setter];
+    var setter = target.setter >= 0 ? target.setter : member.setter;
     feOperand(opLoadLocal, value);
     feCall(setter, 2);
     return;
@@ -4262,7 +4258,6 @@ int feLowerValue(AstExpression expression) {
     var owner = feStaticOwner(expression);
     if (owner >= 0)
       return feReadStaticMember(
-        owner,
         feStaticBinding(owner, expression.text, expression.token),
         expression.token,
       );
@@ -5862,8 +5857,6 @@ void parseSource(SourceProgram source) {
   feClassSources.clear();
   feClassNodes.clear();
   feMembers.clear();
-  feClassStaticGlobals.clear();
-  feMemberFunctions.clear();
   feClassFieldStarts.clear();
   feFieldNodes.clear();
   feFieldBindings.clear();
@@ -5960,6 +5953,7 @@ void parseSource(SourceProgram source) {
         feClassNodes[owner],
         feFunctionNodes[plannedFunction],
         feMembers[owner],
+        feClassFieldStarts[owner],
         feClassConstructors[owner],
       );
     }
@@ -5992,8 +5986,6 @@ void parseSource(SourceProgram source) {
   feConstants = ConstantContext(feSymbols, feGlobalNodes, globalTypes);
   feConstants.classMembers = feMembers;
   feConstants.classConstructors = feClassConstructors;
-  feConstants.classStaticGlobals = feClassStaticGlobals;
-  feConstants.classFunctions = feMemberFunctions;
   feConstants.globalOwners = feGlobalOwners;
   feConstants.identical = symbolOwnDeclaration(
     feSymbols,

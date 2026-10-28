@@ -75,8 +75,6 @@ class ConstantContext {
   List<ClassMembers> classMembers = const <ClassMembers>[];
   List<List<int>> classConstructors = const <List<int>>[];
   int lexicalClass = -1;
-  List<List<int>> classStaticGlobals = const <List<int>>[];
-  List<List<int>> classFunctions = const <List<int>>[];
   List<int> globalOwners = const <int>[];
   int identical = -1;
 
@@ -598,13 +596,13 @@ ConstantValue _constantStaticReference(
   var global = -1;
   var function = -1;
   if (member.staticField >= 0) {
-    global = context.classStaticGlobals[owner][member.staticField];
+    global = member.staticField;
     declarationSource = source.tokens[context.globals[global].token].source;
   } else {
     var method = member.method;
     if (method < 0) method = member.getter;
     if (method < 0) method = member.setter;
-    function = context.classFunctions[owner][method];
+    function = method;
     declarationSource = functions[function].source;
   }
   if (member.name.startsWith('_') &&
@@ -861,7 +859,7 @@ ConstantValue _constantImplicitCall(
   if (index < 0) return value;
   var member = members.members[index];
   if (member.isStatic || member.method < 0) return value;
-  var type = functionValueType(context.classFunctions[owner][member.method]);
+  var type = functionValueType(member.method);
   if (type < 0)
     _constantError(context, token, 'unsupported callable signature');
   if (active)

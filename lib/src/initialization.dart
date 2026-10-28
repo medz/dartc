@@ -71,13 +71,14 @@ void checkInitializers(SymbolTable symbols, AstUnit unit) {
 int _initializerField(
   SymbolTable symbols,
   ClassMembers members,
+  int fieldStart,
   String name,
   int token,
 ) {
   var member = lookupMember(members, name);
   if (member < 0 || members.members[member].field < 0)
     _initError(symbols, token, 'initializer requires an own instance field');
-  return members.members[member].field;
+  return members.members[member].field - fieldStart;
 }
 
 ConstructorPlan planConstructorInitializers(
@@ -85,6 +86,7 @@ ConstructorPlan planConstructorInitializers(
   AstClass owner,
   AstFunction syntax,
   ClassMembers members,
+  int fieldStart,
   List<int> classFunctions,
 ) {
   var redirectTarget = -1;
@@ -168,6 +170,7 @@ ConstructorPlan planConstructorInitializers(
       var field = _initializerField(
         symbols,
         members,
+        fieldStart,
         parameter.name,
         parameter.token,
       );
@@ -194,6 +197,7 @@ ConstructorPlan planConstructorInitializers(
     var field = _initializerField(
       symbols,
       members,
+      fieldStart,
       initializer.name,
       initializer.token,
     );

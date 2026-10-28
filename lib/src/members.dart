@@ -34,6 +34,8 @@ class InterfaceMember {
 class MemberBinding {
   String name;
   bool isStatic = false;
+  // bindClassMembers records syntax ordinals. Declaration collection resolves
+  // these to field, global and function IDs before checking member uses.
   int field = -1;
   int staticField = -1;
   int method = -1;
