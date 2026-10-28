@@ -7,17 +7,27 @@ const int flowMaybeAssigned = 2;
 class FlowState {
   List<int> types;
   List<int> assignments;
+  // Counts writes along each path, including conservative writes at joins.
+  // Comparing a saved state with its successor detects changes in finally.
+  List<int> writes;
   List<bool> reachability;
   bool reachable;
   bool soundFlow = true;
 
-  FlowState(this.types, this.assignments, this.reachability, this.reachable);
+  FlowState(
+    this.types,
+    this.assignments,
+    this.writes,
+    this.reachability,
+    this.reachable,
+  );
 }
 
 FlowState flowCreate(int count, [bool soundFlow = true]) {
   return FlowState(
     List<int>.filled(count, -1),
     List<int>.filled(count, flowUnassigned),
+    List<int>.filled(count, 0),
     <bool>[true],
     true,
   )..soundFlow = soundFlow;
@@ -27,6 +37,7 @@ FlowState flowCopy(FlowState state) {
   return FlowState(
     state.types.sublist(0),
     state.assignments.sublist(0),
+    state.writes.sublist(0),
     state.reachability.sublist(0),
     state.reachable,
   )..soundFlow = state.soundFlow;
@@ -75,6 +86,7 @@ FlowState flowJoin(FlowState left, FlowState right, List<int> declaredTypes) {
     result = FlowState(
       List<int>.filled(left.types.length, -1),
       List<int>.filled(left.types.length, flowMaybeAssigned),
+      List<int>.filled(left.types.length, 0),
       List<bool>.filled(depth, false, growable: true),
       true,
     );
@@ -88,6 +100,9 @@ FlowState flowJoin(FlowState left, FlowState right, List<int> declaredTypes) {
         }
       }
       result.types[i] = type;
+      result.writes[i] = left.writes[i] > right.writes[i]
+          ? left.writes[i]
+          : right.writes[i];
       if (left.assignments[i] == right.assignments[i]) {
         result.assignments[i] = left.assignments[i];
       }
@@ -107,11 +122,13 @@ FlowState flowJoin(FlowState left, FlowState right, List<int> declaredTypes) {
 }
 
 void flowDeclare(FlowState state, int binding, int type, bool assigned) {
+  state.writes[binding]++;
   state.types[binding] = type;
   state.assignments[binding] = assigned ? flowAssigned : flowUnassigned;
 }
 
 void flowWrite(FlowState state, int binding, int declaredType, int valueType) {
+  state.writes[binding]++;
   var current = state.types[binding];
   var type = declaredType;
   if (current >= 0 && typeIsSubtype(valueType, current)) {
@@ -178,10 +195,34 @@ void flowDemote(FlowState state, List<int> written, List<int> declaredTypes) {
   var i = 0;
   while (i < written.length) {
     var binding = written[i];
+    state.writes[binding]++;
     state.types[binding] = declaredTypes[binding];
     if (state.assignments[binding] == flowUnassigned) {
       state.assignments[binding] = flowMaybeAssigned;
     }
     i++;
   }
+}
+
+FlowState flowAttachFinally(
+  FlowState afterTry,
+  FlowState beforeFinally,
+  FlowState afterFinally,
+) {
+  final result = flowCopy(afterTry);
+  if (!afterFinally.reachability.last) flowUnreachable(result);
+  for (var i = 0; i < result.types.length; i++) {
+    final after = afterFinally.types[i];
+    if (after < 0) continue;
+    final changed = afterFinally.writes[i] != beforeFinally.writes[i];
+    final previous = afterTry.types[i];
+    if (changed || previous < 0 || typeIsSubtype(after, previous))
+      result.types[i] = after;
+    result.writes[i] += afterFinally.writes[i] - beforeFinally.writes[i];
+    if (afterFinally.assignments[i] == flowAssigned)
+      result.assignments[i] = flowAssigned;
+    else if (result.assignments[i] != flowAssigned)
+      result.assignments[i] = afterFinally.assignments[i];
+  }
+  return result;
 }

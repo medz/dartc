@@ -31,6 +31,7 @@ class ControlLabel {
   int repeat;
   List<FlowState> breakFlows = <FlowState>[];
   List<FlowState> continueFlows = <FlowState>[];
+  final int finallyDepth = feFinalizers.length;
 
   ControlLabel(
     this.name,
@@ -117,6 +118,36 @@ class FeCatch {
 
 List<FeCatch> feCatches = <FeCatch>[];
 
+const int completionNormal = 0;
+const int completionReturn = 1;
+const int completionThrow = 2;
+const int completionBreak = 3;
+const int completionContinue = 4;
+
+class FeCompletion {
+  final int kind;
+  final int target;
+  final ControlLabel? label;
+  FlowState flow;
+
+  FeCompletion(this.kind, this.target, this.label, this.flow);
+}
+
+class FeFinally {
+  final int breakDepth = feLoopBreaks.length;
+  final int continueDepth = feLoopContinues.length;
+  final int flowDepth = feFlow.reachability.length;
+  final int tag;
+  final int returned;
+  final FeCatch caught;
+  final List<FeCompletion> completions = <FeCompletion>[];
+  final List<int> entries = <int>[];
+
+  FeFinally(this.tag, this.returned, this.caught);
+}
+
+List<FeFinally> feFinalizers = <FeFinally>[];
+
 class FeFunctionState {
   final List<int> code = ir;
   final List<int> types = irTypes;
@@ -142,6 +173,7 @@ class FeFunctionState {
   final List<int> loopContinues = feLoopContinues;
   final List<ControlLabel> labels = feLabels;
   final List<FeCatch> catches = feCatches;
+  final List<FeFinally> finalizers = feFinalizers;
   final List<int>? returns = feReturnTypes;
   final int initializingGlobal = feInitializingGlobal;
 
@@ -172,6 +204,7 @@ class FeFunctionState {
     feLoopContinues = loopContinues;
     feLabels = labels;
     feCatches = catches;
+    feFinalizers = finalizers;
     feReturnTypes = returns;
     feInitializingGlobal = initializingGlobal;
   }
@@ -5125,8 +5158,7 @@ void feLowerStatement(AstStatement statement) {
           feLocalResultContext(feFunction),
         );
       returned.add(type);
-      feEmit(opReturn);
-      flowUnreachable(feFlow);
+      feCompleteReturn(type);
       return;
     }
     if (statement.expressions.length != 0) {
@@ -5157,8 +5189,7 @@ void feLowerStatement(AstStatement statement) {
       feInteger(0, tNull);
       feConvertValue(tNull, functions[feFunction].result, statement.token);
     }
-    feEmit(opReturn);
-    flowUnreachable(feFlow);
+    feCompleteReturn(functions[feFunction].result);
     return;
   }
   if (kind == astIfStatement) {
@@ -5198,9 +5229,7 @@ void feLowerStatement(AstStatement statement) {
       return;
     }
     if (feLoopBreaks.isEmpty) feError('break outside loop');
-    feBreaks.add(feJump(opJump));
-    feBreakFlows.add(flowCopy(feFlow));
-    flowUnreachable(feFlow);
+    feCompleteJump(false, feLoopBreaks.length - 1, null);
     return;
   }
   if (kind == astContinueStatement) {
@@ -5209,9 +5238,7 @@ void feLowerStatement(AstStatement statement) {
       return;
     }
     if (feLoopContinues.isEmpty) feError('continue outside loop');
-    feContinues.add(feJump(opJump));
-    feContinueFlows.add(flowCopy(feFlow));
-    flowUnreachable(feFlow);
+    feCompleteJump(true, feLoopContinues.length - 1, null);
     return;
   }
   feAstError(statement.token, 'unsupported statement');
@@ -5224,6 +5251,17 @@ void feRethrow(FeCatch caught) {
 }
 
 void feLowerTry(AstStatement statement) {
+  if (statement.children.length == 2)
+    feLowerTryFinally(statement);
+  else
+    feLowerTryCatch(statement);
+}
+
+void feLowerTryCatch(AstStatement statement) {
+  if (statement.catches.isEmpty) {
+    feLowerStatement(statement.children[0]);
+    return;
+  }
   feFlow = flowSplit(feFlow);
   final caughtFlow = flowCopy(feFlow);
   final written = <int>[];
@@ -5277,6 +5315,188 @@ void feLowerTry(AstStatement statement) {
   feRethrow(caught);
   fePatchJumps(done, ir.length);
   feFlow = flowUnsplit(completed);
+}
+
+void feRouteCompletion(
+  FeFinally cleanup,
+  int kind,
+  int target,
+  ControlLabel? label,
+) {
+  final flow = flowUnsplitTo(feFlow, cleanup.flowDepth);
+  var index = 0;
+  while (index < cleanup.completions.length) {
+    final completion = cleanup.completions[index];
+    if (completion.kind == kind &&
+        completion.target == target &&
+        completion.label == label) {
+      completion.flow = feJoinFlow(completion.flow, flow);
+      break;
+    }
+    index++;
+  }
+  if (index == cleanup.completions.length)
+    cleanup.completions.add(FeCompletion(kind, target, label, flow));
+  feOperand(opInt, index);
+  feOperand(opStoreLocal, cleanup.tag);
+  cleanup.entries.add(feJump(opJump));
+  flowUnreachable(feFlow);
+}
+
+void feCompleteReturn(int type) {
+  if (feFinalizers.isEmpty || type == tNever) {
+    feEmit(opReturn);
+  } else {
+    final cleanup = feFinalizers.last;
+    if (type == tVoid) {
+      feEmit(opPop);
+      feInteger(0, tNull);
+      type = tNull;
+    }
+    feConvertValue(type, feSlotTypes[cleanup.returned], feAt);
+    feOperand(opStoreLocal, cleanup.returned);
+    feRouteCompletion(cleanup, completionReturn, -1, null);
+  }
+  flowUnreachable(feFlow);
+}
+
+void feCompleteJump(bool repeat, int target, ControlLabel? label) {
+  for (var i = feFinalizers.length - 1; i >= 0; i--) {
+    final cleanup = feFinalizers[i];
+    final crosses = label == null
+        ? target < (repeat ? cleanup.continueDepth : cleanup.breakDepth)
+        : label.finallyDepth <= i;
+    if (crosses) {
+      feRouteCompletion(
+        cleanup,
+        repeat ? completionContinue : completionBreak,
+        target,
+        label,
+      );
+      return;
+    }
+  }
+  final jump = feJump(opJump);
+  final flow = flowCopy(feFlow);
+  if (label != null) {
+    if (repeat) {
+      label.continues.add(jump);
+      label.continueFlows.add(flow);
+    } else {
+      label.breaks.add(jump);
+      label.breakFlows.add(flow);
+    }
+  } else if (repeat) {
+    feContinues.add(jump);
+    feContinueFlows.add(flow);
+  } else {
+    feBreaks.add(jump);
+    feBreakFlows.add(flow);
+  }
+  flowUnreachable(feFlow);
+}
+
+int feInitializedTemp(int type) {
+  final slot = feTemp(type);
+  feInteger(0, type);
+  feOperand(opStoreLocal, slot);
+  return slot;
+}
+
+void feLowerTryFinally(AstStatement statement) {
+  feFlow = flowSplit(feFlow);
+  final beforeTry = flowCopy(feFlow);
+  final written = <int>[];
+  final seen = List<bool>.filled(feBindings.variables.length, false);
+  collectWrittenStatement(statement.children[0], seen, written);
+  for (var clause in statement.catches)
+    collectWrittenStatement(clause.body, seen, written);
+
+  final result = feReturnTypes == null
+      ? functions[feFunction].result
+      : tDynamic;
+  final stored = result == tVoid || result == tNever
+      ? tNull
+      : result == tInt ||
+            result == tBool ||
+            result == tDouble ||
+            result == tPointer
+      ? result
+      : nullableType(result);
+  final traceFunction = feFindFunction('rtCaughtTrace');
+  final traceType = functions[traceFunction].result;
+  final cleanup = FeFinally(
+    feTemp(tInt),
+    feInitializedTemp(stored),
+    FeCatch(
+      feInitializedTemp(nullableType(tObject)),
+      feInitializedTemp(nullableType(traceType)),
+    ),
+  );
+  feFinalizers.add(cleanup);
+  final handler = feJump(opBeginTry);
+  feLowerTryCatch(statement);
+  feEmit(opEndTry);
+  final afterTry = flowCopy(feFlow);
+  feRouteCompletion(cleanup, completionNormal, -1, null);
+  fePatch(handler, ir.length);
+  feCall(feFindFunction('rtCaughtException'), 0);
+  feConvertValue(tObject, feSlotTypes[cleanup.caught.value], statement.token);
+  feOperand(opStoreLocal, cleanup.caught.value);
+  feCall(traceFunction, 0);
+  feConvertValue(traceType, feSlotTypes[cleanup.caught.trace], statement.token);
+  feOperand(opStoreLocal, cleanup.caught.trace);
+  feCall(feFindFunction('rtClearException'), 0);
+  feEmit(opPop);
+  feRouteCompletion(cleanup, completionThrow, -1, null);
+
+  feFinalizers.removeLast();
+  fePatchJumps(cleanup.entries, ir.length);
+  flowDemote(beforeTry, written, feBindingTypes);
+  final beforeFinally = feJoinFlow(afterTry, beforeTry);
+  feFlow = flowCopy(beforeFinally);
+  feLowerStatement(statement.children[1]);
+  final afterFinally = feFlow;
+  final done = <int>[];
+  for (var i = 0; i < cleanup.completions.length; i++) {
+    final completion = cleanup.completions[i];
+    feOperand(opLoadLocal, cleanup.tag);
+    feOperand(opInt, i);
+    feEmit(opEq);
+    final next = feJump(opJumpFalse);
+    // Jump targets use the source jump's flow facts, as in Dart flow analysis.
+    // Cleanup dispatch must not add definite assignments to those facts.
+    feFlow = flowCopy(completion.flow);
+    if (completion.kind == completionNormal) {
+      done.add(feJump(opJump));
+    } else if (completion.kind == completionReturn) {
+      if (result == tVoid)
+        feInteger(0, tVoid);
+      else {
+        feOperand(opLoadLocal, cleanup.returned);
+        feNarrowValue(stored, result);
+      }
+      feCompleteReturn(result);
+    } else if (completion.kind == completionThrow) {
+      feOperand(opLoadLocal, cleanup.caught.value);
+      feNarrowValue(feSlotTypes[cleanup.caught.value], tObject);
+      feOperand(opLoadLocal, cleanup.caught.trace);
+      feNarrowValue(feSlotTypes[cleanup.caught.trace], traceType);
+      feCall(feFindFunction('rtRethrow'), 2);
+    } else {
+      feCompleteJump(
+        completion.kind == completionContinue,
+        completion.target,
+        completion.label,
+      );
+    }
+    fePatch(next, ir.length);
+  }
+  feEmit(opUnreachable);
+  fePatchJumps(done, ir.length);
+  feFlow = flowUnsplit(
+    flowAttachFinally(afterTry, beforeFinally, afterFinally),
+  );
 }
 
 void fePrepareGlobals(int count, List<FunctionBindings> bindings) {
@@ -5489,6 +5709,7 @@ void feGenerateGlobals(int count) {
 void feBeginFunction(int f, FunctionBindings bindings) {
   feFunction = f;
   feCatches = <FeCatch>[];
+  feFinalizers = <FeFinally>[];
   feConstants.typeScope = functions[f].typeScope;
   feImplicitReceiverSlot = -1;
   feConstants.lexicalClass = -1;
@@ -5619,6 +5840,7 @@ void parseSource(SourceProgram source) {
   resetTypes();
   feFunction = 0;
   feCatches = <FeCatch>[];
+  feFinalizers = <FeFinally>[];
   ir.clear();
   irTypes.clear();
   functions.clear();
@@ -7162,15 +7384,11 @@ void feLowerLabeledJump(AstStatement statement, bool repeat) {
   if (repeat) {
     if (!label.loop && !label.caseLabel)
       feAstError(statement.token, 'continue requires a loop or case label');
-    label.continues.add(feJump(opJump));
-    label.continueFlows.add(flowCopy(feFlow));
   } else {
     if (label.caseLabel)
       feAstError(statement.token, 'cannot break to a case label');
-    label.breaks.add(feJump(opJump));
-    label.breakFlows.add(flowCopy(feFlow));
   }
-  flowUnreachable(feFlow);
+  feCompleteJump(repeat, -1, label);
 }
 
 int feLowerInterpolation(AstExpression expression) {

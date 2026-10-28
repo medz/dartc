@@ -1,6 +1,6 @@
 ## Unreleased
 
-- Add synchronous `throw`, `try`/`on`/`catch` and `rethrow`, with native stack unwinding, typed catch parameters and preserved exception/stack-trace identity. `finally`, asynchronous exceptions and catchable runtime errors remain unimplemented.
+- Add synchronous `throw`, `try`/`on`/`catch`/`finally` and `rethrow`, with native stack unwinding, cleanup on returns and jumps, typed catch parameters and preserved exception/stack-trace identity. Asynchronous exceptions and catchable runtime errors remain unimplemented.
 - Add synchronous `StackTrace.current`, `StackTrace.fromString` and `StackTrace.empty`, backed by native frame metadata and Dart stack traversal.
 - Preserve non-returning control flow through native code generation. Fix return inference and missing-return checks after null-aware elements and empty `List<Never>` spreads.
 - Add lazy `late` locals, captured variables, top-level/static variables and typed instance fields, with final assignment checks and reentrant initialization.

@@ -323,6 +323,14 @@ int caught(int value) {
   try { result = callee(value); } catch (_) { result += 2; }
   return result;
 }
+int finalized(int value) {
+  try {
+    if (value < 0) throw value;
+    return callee(value);
+  } finally {
+    print(value);
+  }
+}
 Never terminal(dynamic value) => value as Never;
 int order(int value) {
   final next = value + 1;
@@ -352,6 +360,7 @@ int apply(int Function(int) function, int value) => function(value);
 List<int> slice(List<int> value) => value.sublist(1);
 void main() {
   print(caught(9));
+  try { print(finalized(3)); } catch (value) { print(value); }
   print(delayed(1)());
   print(generic<int>(1));
   print(genericList<int>(2));

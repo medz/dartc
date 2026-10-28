@@ -134,7 +134,7 @@ typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它
 
 可达调用需要异常后继时，元数据 `+80` 指向 `metadataHandlers` 处理表，并同时保留帧表。每项把精确返回 PC 映射到调用者的异常边入口，按 PC 排序；两地址均为相对表项的位移。没有处理器的调用无需表项，展开器继续查找父帧。
 
-[exceptions.dart](../lib/src/runtime/exceptions.dart) 拥有当前执行域的待处理对象、StackTrace 和原生恢复上下文。异常对象与轨迹是普通托管字段；catch 入口复制到局部根后清空字段，rethrow 使用当前词法 catch 保存的原值。`nativeCaptureContext` 将 FP、SP、PC、x19–x27 写入 96 字节原始缓冲；`nativeResumeContext` 恢复同一集合并跳转，结果为 Never。缓冲布局由 [layout.dart](../lib/src/layout.dart) 定义，不是平台 FFI 上下文。
+[exceptions.dart](../lib/src/runtime/exceptions.dart) 拥有当前执行域的待处理对象、StackTrace 和原生恢复上下文。异常对象与轨迹是普通托管字段；catch 或 finally 的异常入口复制到局部根后清空字段，rethrow 使用当前词法 catch 保存的原值。finally 的完成标记、返回值与异常保存由编译器生成，展开器仍只定位处理入口。`nativeCaptureContext` 将 FP、SP、PC、x19–x27 写入 96 字节原始缓冲；`nativeResumeContext` 恢复同一集合并跳转，结果为 Never。缓冲布局由 [layout.dart](../lib/src/layout.dart) 定义，不是平台 FFI 上下文。
 
 展开器按实际保存位图撤销各帧的寄存器保存，找到处理器后以父 FP 和固定帧大小重建 SP，不依赖抛出调用的溢出实参大小。查表和展开为 NoGC 路径。未找到处理器时输出异常与轨迹并以状态 255 退出；未知帧仍按内部合同失败终止。语言范围及缺口见 [specs/statements.md](../specs/statements.md)。
 

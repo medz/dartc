@@ -2058,6 +2058,291 @@ void exceptionValues() {
   print(read());
 }
 
+int finallyCompletion(int body, int cleanup, List<int> events) {
+  var i = 0;
+  while (i < 2) {
+    i++;
+    try {
+      events.add(10 + i);
+      if (body == 1) return i;
+      if (body == 2) throw i;
+      if (body == 3) break;
+      if (body == 4) continue;
+      events.add(20 + i);
+    } finally {
+      events.add(30 + i);
+      if (cleanup == 1) return 100 + i;
+      if (cleanup == 2) throw 100 + i;
+      if (cleanup == 3) break;
+      if (cleanup == 4) continue;
+      events.add(40 + i);
+    }
+    events.add(50 + i);
+  }
+  return 200 + i;
+}
+
+T finallyResult<T>(T value) {
+  try {
+    return value;
+  } finally {
+    print('generic finally');
+  }
+}
+
+double finallyDouble(double value) {
+  try {
+    return value + 0.25;
+  } finally {
+    value = 10.5;
+    print(value);
+  }
+}
+
+Box finallyObject(Box value) {
+  try {
+    return value;
+  } finally {
+    value.value++;
+  }
+}
+
+void finallyVoid() {
+  try {
+    return print('void return');
+  } finally {
+    print('void cleanup');
+  }
+}
+
+int finallyAlwaysReturns() {
+  try {} finally {
+    return 17;
+  }
+}
+
+class FinallyConstructor {
+  int value = 1;
+  FinallyConstructor() {
+    try {
+      return;
+    } finally {
+      value = 7;
+    }
+  }
+}
+
+int finallyCatch(int mode) {
+  try {
+    if (mode == 0) return 1;
+    return throw mode;
+  } on int catch (value) {
+    if (value == 1) return 2;
+    if (value == 2) throw value + 10;
+  } finally {
+    print('caught cleanup $mode');
+  }
+  return 3;
+}
+
+void finallyFlow(Object value) {
+  int assignedByTry;
+  final int assignedByFinally;
+  try {
+    assignedByTry = 3;
+    if (value is! int) return;
+  } finally {
+    assignedByFinally = 4;
+    if (false) value = 'unreachable write';
+  }
+  print(value + assignedByTry + assignedByFinally);
+  Object next = value;
+  try {
+    next = 'changed';
+  } finally {
+    if (next is! String) return;
+  }
+  print(next.length);
+  Object untouched = value;
+  try {
+    if (untouched is! int) return;
+  } finally {
+    try {} finally {
+      if (false) untouched = 'unreachable nested write';
+    }
+  }
+  print(untouched + 1);
+  int onBreak;
+  do {
+    try {
+      onBreak = 5;
+      break;
+    } finally {
+      print('assigned before break');
+    }
+  } while (false);
+  print(onBreak);
+}
+
+void finallyValues() {
+  for (var body = 0; body < 5; body++) {
+    for (var cleanup = 0; cleanup < 5; cleanup++) {
+      final events = <int>[];
+      try {
+        print(finallyCompletion(body, cleanup, events));
+      } catch (value) {
+        print(value);
+      }
+      print(events);
+    }
+  }
+  final object = Box(81);
+  print(identical(finallyObject(object), object));
+  print(object.value);
+  print(finallyDouble(-0.5));
+  print(finallyResult<int>(9223372036854775807));
+  print(finallyResult<double>(-0.0));
+  print(finallyResult<bool>(false));
+  print(finallyResult<String?>('kept'));
+  print(finallyResult<String?>(null));
+  print(identical(finallyResult<Box>(object), object));
+  finallyVoid();
+  print(finallyAlwaysReturns());
+  print(FinallyConstructor().value);
+  for (var i = 0; i < 4; i++) {
+    try {
+      print(finallyCatch(i));
+    } catch (value) {
+      print(value);
+    }
+  }
+  finallyFlow(9);
+  finallyFlow('early return');
+
+  final captured = <int Function()>[];
+  outer:
+  for (var i = 0; i < 3; i++) {
+    try {
+      for (var j = 0; j < 2; j++) {
+        try {
+          if (i == 0) continue outer;
+          if (i == 1) break outer;
+        } finally {
+          print('inner $i $j');
+        }
+      }
+    } finally {
+      final kept = i;
+      int read() => kept;
+      captured.add(read);
+      print('outer $i');
+    }
+  }
+  for (var read in captured) print(read());
+  for (var value in <int>[0, 1, 2]) {
+    try {
+      if (value == 0) continue;
+      break;
+    } finally {
+      print('for-in cleanup $value');
+    }
+  }
+  var round = 0;
+  do {
+    try {
+      round++;
+      continue;
+    } finally {
+      print('do cleanup $round');
+    }
+  } while (round < 2);
+  try {
+    for (var i = 0; i < 3; i++) {
+      if (i == 0) continue;
+      break;
+    }
+    switch (1) {
+      case 1:
+        try {
+          continue next;
+        } finally {
+          print('case cleanup');
+        }
+      next:
+      case 2:
+        print('continued case');
+    }
+    print('inside outer try');
+  } finally {
+    print('after inner jumps');
+  }
+  finish:
+  {
+    try {
+      try {
+        break finish;
+      } finally {
+        print('inner block');
+      }
+    } finally {
+      print('outer block');
+    }
+  }
+  StackTrace? original;
+  try {
+    try {
+      try {
+        throw object;
+      } catch (value, trace) {
+        original = trace;
+        rethrow;
+      }
+    } finally {
+      try {
+        throw 'cleanup exception';
+      } catch (value) {
+        print(value);
+      }
+    }
+  } catch (value, trace) {
+    print(identical(value, object));
+    print(identical(trace, original));
+    try {
+      try {
+        throw 'replaced';
+      } finally {
+        rethrow;
+      }
+    } catch (value, trace) {
+      print(identical(value, object));
+      print(identical(trace, original));
+    }
+  }
+  Object inferred() {
+    local() {
+      try {
+        return 1;
+      } finally {
+        return 'inferred Object';
+      }
+    }
+
+    return local();
+  }
+
+  print(inferred());
+  int Function() returnedClosure() {
+    var value = 5;
+    try {
+      return () => value;
+    } finally {
+      value++;
+    }
+  }
+
+  print(returnedClosure()());
+}
+
 int stringEvaluations = 0;
 
 String stringReceiver() {
@@ -5033,6 +5318,7 @@ void lateValues() {
 }
 
 void main(List<String> args) {
+  finallyValues();
   exceptionValues();
   stackTraceValues();
   lateValues();

@@ -1097,7 +1097,7 @@ void main() {
     }
     final uncaught = File('${temporary.path}/uncaught-exception.dart')
       ..writeAsStringSync('''
-Never failure() { throw 'uncaught🙂'; }
+Never failure() { try { throw 'uncaught🙂'; } finally { print('cleanup'); } }
 void main() { print('before'); failure(); print('after'); }
 ''');
     final uncaughtExecutable = '${uncaught.path}.out';
@@ -1115,7 +1115,7 @@ void main() { print('before'); failure(); print('after'); }
     );
     if (uncaughtExpected.exitCode != 255 ||
         uncaughtActual.exitCode != 255 ||
-        uncaughtExpected.stdout != 'before\n' ||
+        uncaughtExpected.stdout != 'before\ncleanup\n' ||
         uncaughtActual.stdout != uncaughtExpected.stdout ||
         !uncaughtActual.stderr.startsWith(
           'Unhandled exception:\nuncaught🙂\n',
@@ -1808,6 +1808,22 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      'void unused(){try{}finally{missing;}}void main(){}',
+      'void unused(){try{}finally{rethrow;}}void main(){}',
+      'void unused(){try{}catch(e){}finally{rethrow;}}void main(){}',
+      'void unused(){try{}catch(e){}finally{print(e);}}void main(){}',
+      'void unused(){try{}finally{break;}}void main(){}',
+      'void unused(){try{}finally{continue;}}void main(){}',
+      'void unused(){try{final x=1;}finally{print(x);}}void main(){}',
+      'void unused(){int x;try{x=1;}finally{print(x);}}void main(){}',
+      'void unused(){final int x;try{x=1;}finally{x=2;}}void main(){}',
+      'int unused(){int x;try{x=1;return x;}finally{print(x);}}void main(){}',
+      'void unused(){int x;while(true){try{break;}finally{x=1;}}print(x);}void main(){}',
+      'void unused(){int x;while(true){try{x=1;throw 1;}finally{break;}}print(x);}void main(){}',
+      "void unused(Object x){try{if(x is! int)return;}finally{x='bad';}print(x+1);}void main(){}",
+      "void unused(){f(){try{return 1;}finally{return 's';}}String x=f();print(x);}void main(){}",
+      "void unused(){try{throw 1;}finally{return;int x='bad';}}void main(){}",
+      'int unused(){try{}finally{}}void main(){}',
       'void unused(){rethrow;}void main(){}',
       'void unused(){try{throw 1;}catch(e){void f(){rethrow;}f();}}void main(){}',
       'void unused(){try{throw 1;}catch(e,s){e=1;}}void main(){}',

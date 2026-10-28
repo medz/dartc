@@ -715,6 +715,8 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
       bindingStatement(binder, local, clause.body);
       binder.catchDepth--;
     }
+    if (statement.children.length == 2)
+      bindingStatement(binder, scope, statement.children[1]);
     return;
   }
   if (kind == astPatternDeclarationStatement) {

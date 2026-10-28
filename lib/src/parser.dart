@@ -2403,12 +2403,16 @@ AstStatement parseStatement(Parser parser) {
       if (!parserIs(parser, '{')) parserExpect(parser, '{');
       catches.add(AstCatch(type, parameters, parseStatement(parser)));
     }
-    if (parserIs(parser, 'finally'))
-      parserError(parser, 'finally is not yet supported');
-    if (catches.isEmpty) parserExpect(parser, 'catch');
+    final children = <AstStatement>[body];
+    if (parserTake(parser, 'finally')) {
+      if (!parserIs(parser, '{')) parserExpect(parser, '{');
+      children.add(parseStatement(parser));
+    } else if (catches.isEmpty) {
+      parserError(parser, 'try requires catch or finally');
+    }
     return parserEmptyStatement(token)
       ..kind = astTryStatement
-      ..children = <AstStatement>[body]
+      ..children = children
       ..catches = catches;
   }
   if (parser.tokens[parser.position].kind == tokenIdentifier &&

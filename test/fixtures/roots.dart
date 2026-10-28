@@ -1067,6 +1067,62 @@ void exceptionRoots(int queue) {
   }
 }
 
+Leaf finallyRootReturn(int queue, bool replace) {
+  try {
+    return Leaf(980);
+  } finally {
+    check(findMarker(queue, snapshot(queue), 980) != 0);
+    if (replace) return Leaf(984);
+  }
+}
+
+int finallyTraceBits = 0;
+
+Never finallyRootThrow(int queue) {
+  try {
+    try {
+      throw Leaf(981);
+    } catch (value, trace) {
+      finallyTraceBits = rt.nativeValueBits(trace);
+      rethrow;
+    }
+  } finally {
+    var count = snapshot(queue);
+    check(findMarker(queue, count, 981) != 0);
+    check(contains(queue, count, finallyTraceBits));
+    try {
+      throw Leaf(982);
+    } on Leaf catch (value) {
+      count = snapshot(queue);
+      check(findMarker(queue, count, 981) != 0);
+      check(findMarker(queue, count, 982) == rt.nativeValueBits(value));
+      check(contains(queue, count, finallyTraceBits));
+    }
+  }
+}
+
+void finallyRootCatch(int queue) {
+  check(finallyRootReturn(queue, false).marker == 980);
+  check(finallyRootReturn(queue, true).marker == 984);
+  try {
+    finallyRootThrow(queue);
+  } on Leaf catch (value, trace) {
+    check(value.marker == 981);
+    check(rt.nativeValueBits(trace) == finallyTraceBits);
+    check(trace.toString().indexOf('finallyRootThrow') >= 0);
+  }
+}
+
+void finallyRoots(int queue) {
+  finallyRootCatch(queue);
+  final count = snapshot(queue);
+  check(findMarker(queue, count, 980) == 0);
+  check(findMarker(queue, count, 981) == 0);
+  check(findMarker(queue, count, 982) == 0);
+  check(findMarker(queue, count, 984) == 0);
+  check(!contains(queue, count, finallyTraceBits));
+}
+
 void main(List<String> args) {
   if (args.isNotEmpty && args[0] == 'capacity') {
     capacityFailure(Leaf(190));
@@ -1074,6 +1130,7 @@ void main(List<String> args) {
   }
   var queue = rt.rtMap(capacity * 8);
   var edges = rt.rtMap(capacity * 8);
+  finallyRoots(queue);
   exceptionRoots(queue);
   stackTraceRoots(queue, edges);
   lateRoots(queue, edges);
