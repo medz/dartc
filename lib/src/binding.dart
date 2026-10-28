@@ -533,7 +533,14 @@ void bindingExpression(
     );
     var members = binder.members;
     if (expression.binding < 0 && members != null) {
-      var member = lookupMember(members, expression.text);
+      var member = lookupMember(
+        members,
+        expression.text,
+        sourceLibrary(
+          binder.source,
+          binder.source.tokens[expression.token].source,
+        ),
+      );
       if (member >= 0 && !members.members[member].isStatic)
         bindingReceiver(binder, scope);
     }

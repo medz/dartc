@@ -1,12 +1,13 @@
 ## Unreleased
 
+- Add non-generic abstract classes and `implements`, with interface signature checks, implementation dispatch, runtime subtype tests and actual-implementation defaults. Class inheritance, covariant parameters and `noSuchMethod` forwarding remain unimplemented.
 - Add synchronous `throw`, `try`/`on`/`catch`/`finally` and `rethrow`, with native stack unwinding, cleanup on returns and jumps, typed catch parameters and preserved exception/stack-trace identity. Asynchronous exceptions and catchable runtime errors remain unimplemented.
 - Add synchronous `StackTrace.current`, `StackTrace.fromString` and `StackTrace.empty`, backed by native frame metadata and Dart stack traversal.
 - Preserve non-returning control flow through native code generation. Fix return inference and missing-return checks after null-aware elements and empty `List<Never>` spreads.
 - Add lazy `late` locals, captured variables, top-level/static variables and typed instance fields, with final assignment checks and reentrant initialization.
 - Add native double literals, arithmetic and `/`, including mixed numeric values, constants, nullable values, generics and collections.
 - Add decimal parsing and shortest round-trip formatting, numeric conversions, comparisons and double constants/properties.
-- Advance the source runtime ABI to 15 for boxed doubles and numeric metadata. Keep compiler, runtime and layout inputs matched when rebuilding.
+- Advance the source runtime ABI to 16 for numeric, exception and class subtype metadata. Keep compiler, runtime and layout inputs matched when rebuilding.
 
 ## 0.3.0
 

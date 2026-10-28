@@ -27,22 +27,27 @@ class CheckedMemberRead {
 class InterfaceMember {
   final String name;
   final int role;
+  final String implementation;
 
-  const InterfaceMember(this.name, this.role);
+  const InterfaceMember(this.name, this.role, [this.implementation = '']);
 }
 
 class MemberBinding {
   String name;
+  final int library;
   bool isStatic = false;
+  // A runtime implementation declares its receiver as its first formal.
+  bool receiverParameter = false;
   // bindClassMembers records syntax ordinals. Declaration collection resolves
   // these to field, global and function IDs before checking member uses.
   int field = -1;
+  int fieldSetter = -1;
   int staticField = -1;
   int method = -1;
   int getter = -1;
   int setter = -1;
 
-  MemberBinding(this.name);
+  MemberBinding(this.name, this.library);
 }
 
 class ClassMembers {
@@ -52,10 +57,13 @@ class ClassMembers {
   ClassMembers(this.members);
 }
 
-int lookupMember(ClassMembers owner, String name) {
+int lookupMember(ClassMembers owner, String name, [int library = -1]) {
   var i = 0;
   while (i < owner.members.length) {
-    if (owner.members[i].name == name) return i;
+    final member = owner.members[i];
+    if (member.name == name &&
+        (!name.startsWith('_') || library < 0 || member.library == library))
+      return i;
     i++;
   }
   return -1;
@@ -96,7 +104,10 @@ MemberBinding _memberBinding(
   var index = lookupMember(owner, name);
   if (index < 0) {
     index = owner.members.length;
-    var member = MemberBinding(name);
+    var member = MemberBinding(
+      name,
+      sourceLibrary(source, source.tokens[token].source),
+    );
     member.isStatic = isStatic;
     owner.members.add(member);
   } else if (owner.members[index].isStatic != isStatic) {
@@ -205,6 +216,7 @@ ClassMembers bindClassMembers(
       _memberError(source, field.token, 'duplicate member ' + field.name);
     }
     member.field = i;
+    if (field.hasSetter) member.fieldSetter = i;
     i++;
   }
   i = 0;

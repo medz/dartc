@@ -1174,6 +1174,35 @@ void main(List<String> args) {
       File(standard).uri.toString(),
     ]);
     final libraries = {
+      'interface-private.dart': r'''
+abstract class PrivateInterface {
+  int _read(int value);
+  int publicRead();
+}
+class PrivateImplementation implements PrivateInterface {
+  int _read(int value) => value + 10;
+  int publicRead() => _read(2);
+}
+int privateRead(PrivateInterface value) => value._read(3);
+''',
+      'interface-other.dart': r'''
+import 'interface-private.dart' as first;
+abstract class OtherInterface implements first.PrivateInterface {
+  String _read(int value);
+  String ownPrivate() => _read(4);
+}
+''',
+      'interface-imports.dart': r'''
+import 'interface-private.dart' as first;
+import 'interface-other.dart' as other;
+typedef ImportedInterface = first.PrivateInterface;
+void main() {
+  ImportedInterface value = first.PrivateImplementation();
+  print(first.privateRead(value));
+  print(value.publicRead());
+  print(value is other.OtherInterface);
+}
+''',
       'object-pattern-library.dart': r'''
 library object.patterns;
 part 'object-pattern-part.dart';
@@ -1750,6 +1779,7 @@ void main() {
       File('${temporary.path}/${entry.key}').writeAsStringSync(entry.value);
     }
     await compare(File('${temporary.path}/imports.dart'), []);
+    await compare(File('${temporary.path}/interface-imports.dart'), []);
     await compare(File('${temporary.path}/object-pattern-imports.dart'), []);
     await compare(File('${temporary.path}/core.dart'), []);
     await compare(File('${temporary.path}/priority.dart'), []);
@@ -1813,6 +1843,31 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      'typedef Identity<T>=T;class A{}class C implements Identity<A>{}void main(){}',
+      'typedef Bound<T extends A>=A;class A{}class B{}class C implements Bound<B>{}void main(){}',
+      'typedef Bound<T extends A>=List<T>;typedef Bad=Bound<B>;class A{}class B{}void main(){}',
+      'abstract class A{int f(int x);}abstract class B{int f(String x);}class C implements A,B{int f(x)=>1;}void main(){}',
+      'abstract class A{} void unused(){A();}void main(){}',
+      'abstract class A{const A();}const value=A();void main(){}',
+      'abstract class I{void f();}class C implements I{}void main(){}',
+      'class C{void f();}void main(){}',
+      'abstract class C{static void f();}void main(){}',
+      'abstract class A implements B{}abstract class B implements A{}void main(){}',
+      'class A{}class C implements A,A{}void main(){}',
+      'abstract class I{void f(num x);}class C implements I{void f(int x){}}void main(){}',
+      'abstract class I{int f();}class C implements I{num f()=>1;}void main(){}',
+      'abstract class I{void f([int x=1]);}class C implements I{void f(int x){}}void main(){}',
+      'abstract class I{void f({int x=1});}class C implements I{void f({required int x}){}}void main(){}',
+      'abstract class I{void f({int x=1});}class C implements I{void f(){}}void main(){}',
+      'abstract class A{int get f;}abstract class B{int f();}abstract class C implements A,B{}void main(){}',
+      'abstract class A{int f(int x);}abstract class B{String f(String x);}abstract class C implements A,B{}void main(){}',
+      'abstract class I{T f<T>(T x);}class C implements I{dynamic f(dynamic x)=>x;}void main(){}',
+      'abstract class I{T f<T extends num>(T x);}class C implements I{T f<T extends int>(T x)=>x;}void main(){}',
+      'class A{int x;A(this.x);}abstract class B implements A{B():x=2;}void main(){}',
+      'abstract class I{void f();}class C implements I{static void f(){}}void main(){}',
+      'abstract class I{set x(num x);}class C implements I{set x(int x){}}void main(){}',
+      'abstract class I{void f(){missing();}}void main(){}',
+      "import 'interface-private.dart';void unused(PrivateInterface value){value._read(3);}void main(){}",
       'void unused(){try{}finally{missing;}}void main(){}',
       'void unused(){try{}finally{rethrow;}}void main(){}',
       'void unused(){try{}catch(e){}finally{rethrow;}}void main(){}',

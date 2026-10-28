@@ -21,7 +21,7 @@
 | §6 Overview；§7 Errors and Warnings；§21 Reference | [词法、作用域与诊断](lexical-structure.md)、[并发边界](libraries.md) | 部分实现；isolate 并发未实现 |
 | §8 Variables | [变量](variables.md) | 部分实现 |
 | §9 Functions | [函数](functions.md) | 部分实现 |
-| §10 Classes；§11 Interfaces；§12 Mixins；§13 Extensions；§14 Enums；§16 Metadata | [类及相关声明](classes.md) | 简单类部分实现，其余构造仍有大片缺口 |
+| §10 Classes；§11 Interfaces；§12 Mixins；§13 Extensions；§14 Enums；§16 Metadata | [类及相关声明](classes.md) | 非泛型类、接口和元数据部分实现；继承、mixin、extension 和 enum 仍缺 |
 | §15 Generics；§20 Types | [类型与泛型](types.md) | 核心类型、List 实参、泛型别名与泛型函数直接调用部分实现；泛型类与泛型函数值仍缺 |
 | §17 Expressions | [表达式](expressions.md) | 部分实现 |
 | §18 Statements | [语句](statements.md) | 部分实现 |

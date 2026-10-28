@@ -99,6 +99,11 @@ class _SsaVerifier {
           fail('closure type environment scope');
       }
     }
+    if (info.typeParameters.isNotEmpty &&
+        (info.typeEnvironment < 0 ||
+            info.typeEnvironment >= info.parameters ||
+            info.parameterTypes[info.typeEnvironment] != listType(tObject)))
+      fail('generic type environment');
     for (var i = 0; i < info.typeParameters.length; i++) {
       var parameter = info.typeParameters[i];
       if (parameter < 0 ||

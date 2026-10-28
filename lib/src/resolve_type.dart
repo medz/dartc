@@ -285,7 +285,21 @@ void resolveTypeAliasDeclarations(SymbolTable symbols) {
     if (symbols.declarations[i].kind == symbolAlias) _resolveAlias(symbols, i);
     i++;
   }
-  i = 0;
+}
+
+void checkAliasApplications(SymbolTable symbols, List<AliasApplication> uses) {
+  for (final use in uses)
+    _checkAliasApplication(
+      symbols,
+      use.symbol,
+      use.arguments,
+      use.token,
+      use.allowSuperBounded,
+    );
+}
+
+void checkTypeAliasDeclarations(SymbolTable symbols) {
+  var i = 0;
   while (i < symbols.declarations.length) {
     if (symbols.declarations[i].kind == symbolAlias) {
       var alias = symbols.aliases[symbols.declarations[i].target];
@@ -297,25 +311,32 @@ void resolveTypeAliasDeclarations(SymbolTable symbols) {
             'raw type with non-simple bounds in type parameter bound',
           );
       }
-      for (var use in alias.boundUses)
-        _checkAliasApplication(
-          symbols,
-          use.symbol,
-          use.arguments,
-          use.token,
-          use.allowSuperBounded,
-        );
-      for (var use in alias.bodyUses)
-        _checkAliasApplication(
-          symbols,
-          use.symbol,
-          use.arguments,
-          use.token,
-          use.allowSuperBounded,
-        );
+      checkAliasApplications(symbols, alias.boundUses);
+      checkAliasApplications(symbols, alias.bodyUses);
     }
     i++;
   }
+}
+
+// Resolve the edge first; bounds require the validated class hierarchy.
+int resolveSuperinterface(
+  SymbolTable symbols,
+  AstType syntax,
+  List<AliasApplication> uses,
+) {
+  final type = _resolveType(symbols, syntax, const <int>[], uses, false);
+  if (type == tObject || typeIsClass(type)) {
+    final declaration =
+        symbols.declarations[_typeSymbol(symbols, syntax, const <int>[])];
+    if (declaration.kind == symbolAlias &&
+        symbols.aliases[declaration.target].expandsToParameter)
+      _typeError(
+        symbols,
+        syntax.token,
+        'superinterface alias cannot denote a type parameter',
+      );
+  }
+  return type;
 }
 
 int resolveType(

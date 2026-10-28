@@ -118,7 +118,7 @@ int declareObjectType(SymbolTable table, int type) {
     InterfaceMember('hashCode', interfaceGetter),
     InterfaceMember('noSuchMethod', interfaceMethod),
     InterfaceMember('runtimeType', interfaceGetter),
-    InterfaceMember('toString', interfaceMethod),
+    InterfaceMember('toString', interfaceMethod, 'rtObjectToString'),
   ];
   return symbol;
 }

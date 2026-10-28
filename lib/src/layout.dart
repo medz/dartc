@@ -1,5 +1,5 @@
 // Shared compiler/runtime object layout. Offsets are bytes.
-const int runtimeAbiVersion = 15;
+const int runtimeAbiVersion = 16;
 const int objectHeaderBytes = 16;
 const int objectFlagsOffset = 8;
 // Static objects store a descriptor displacement relative to their own address.
@@ -131,6 +131,10 @@ const int globalRootKindOffset = 8;
 const int typeRefBytes = 48;
 const int typeKindOffset = 16;
 const int typeArgumentOffset = 24;
+// Class arguments point to a table of emitted nominal subtype descriptors.
+// A zero displacement means that only the class itself matches.
+const int classSubtypeCountOffset = 0;
+const int classSubtypeEntriesOffset = 8;
 const int typeClassOffset = 32;
 const int typeValueRepOffset = 40;
 const int typeKindVoid = 0;

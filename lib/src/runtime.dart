@@ -34,7 +34,7 @@ Object rtCaughtException() => rtExceptionValue();
 StackTrace rtCaughtTrace() => rtExceptionTrace();
 int rtClearException() => rtClearPendingException();
 
-const int rtAbiVersion = 15;
+const int rtAbiVersion = 16;
 const int rtArenaHeaderBytes = 48;
 
 int rtArenaHead = 0;
@@ -1380,6 +1380,22 @@ int rtListFilledChecked(int length, int value, int growable, int type) {
   return result;
 }
 
+int rtClassSubtype(int descriptor, int expected) {
+  if (descriptor == expected + nativeLoad64(expected + typeClassOffset))
+    return 1;
+  final displacement = nativeLoad64(expected + typeArgumentOffset);
+  if (displacement == 0) return 0;
+  final table = expected + displacement;
+  final count = nativeLoad64(table + classSubtypeCountOffset);
+  for (var i = 0; i < count; i++) {
+    final entry = table + classSubtypeEntriesOffset + i * 8;
+    if (descriptor == entry + nativeLoad64(entry)) return 1;
+  }
+  return 0;
+}
+
+String rtObjectToString(Object value) => value.toString();
+
 int rtTypeSubtype(int actual, int expected) {
   if (actual == expected) return 1;
   var target = nativeLoad64(expected + typeKindOffset);
@@ -1411,8 +1427,7 @@ int rtTypeSubtype(int actual, int expected) {
   }
   if (source == typeKindClass) {
     var left = actual + nativeLoad64(actual + typeClassOffset);
-    var right = expected + nativeLoad64(expected + typeClassOffset);
-    if (left != right) return 0;
+    return rtClassSubtype(left, expected);
   }
   if (source == typeKindFunction) {
     var targetSignature = nativeLoad64(expected + typeArgumentOffset);
@@ -1542,8 +1557,7 @@ int rtValueMatches(int value, int expected) {
     return rtTypeSubtype(rtFunctionType(value), expected);
   }
   if (kind == typeKindClass) {
-    var descriptor = expected + nativeLoad64(expected + typeClassOffset);
-    if (rtObjectDescriptor(value) != descriptor) return 0;
+    return rtClassSubtype(rtObjectDescriptor(value), expected);
   }
   return 1;
 }

@@ -234,8 +234,10 @@ class ClosureLayout {
 
 class FunctionInfo {
   List<int> typeParameters = const <int>[];
+  int typeEnvironment = -1;
   String name;
   int start;
+  int end = -1;
   int parameters;
   int locals;
   int result;

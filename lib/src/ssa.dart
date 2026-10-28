@@ -122,6 +122,8 @@ bool ssaEndsFlow(int position) =>
     irTypes[position] == tNever;
 
 List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
+  if (info.start < 0 || end <= info.start || end > ir.length)
+    ssaError('invalid function IR range: ' + info.name);
   final leaders = List<int>.filled(end - info.start + 1, 0);
   final handlerAt = List<int>.filled(end - info.start + 1, -1);
   final handlers = <int>[];
@@ -130,6 +132,16 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
   while (position < end) {
     final op = ir[position];
     final next = position + irWidth(op);
+    if (next > end)
+      ssaError('instruction exceeds function IR range: ' + info.name);
+    if (op == opBeginTry ||
+        op == opJump ||
+        op == opJumpFalse ||
+        op == opJumpTrue) {
+      final target = ir[position + 1];
+      if (target < info.start || target >= end)
+        ssaError('branch leaves function IR range: ' + info.name);
+    }
     if (op == opBeginTry) {
       final target = ir[position + 1];
       handlers.add(target);
@@ -592,9 +604,7 @@ List<SsaFunction> buildSsa() {
   final List<SsaFunction> result = <SsaFunction>[];
   var i = 0;
   while (i < functions.length) {
-    var end = ir.length;
-    if (i + 1 < functions.length) end = functions[i + 1].start;
-    result.add(ssaBuildFunction(functions[i], end));
+    result.add(ssaBuildFunction(functions[i], functions[i].end));
     i = i + 1;
   }
   return result;

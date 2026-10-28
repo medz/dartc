@@ -296,6 +296,8 @@ class AstFunction {
 
 class AstClass {
   List<AstExpression> metadata = const <AstExpression>[];
+  bool isAbstract = false;
+  List<AstType> interfaces = const <AstType>[];
   String name;
   List<AstVariable> fields;
   List<AstVariable> staticFields = const <AstVariable>[];

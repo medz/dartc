@@ -5317,7 +5317,246 @@ void lateValues() {
   ]);
 }
 
+abstract class ArithmeticInterface {
+  num add(num value, [num extra = 1]);
+  String named({int x = 1, required int y});
+  int get value;
+  set value(int next);
+  int apply(int value);
+  T echo<T extends num>(T value);
+}
+
+class FieldArithmetic implements ArithmeticInterface {
+  int value;
+  FieldArithmetic(this.value);
+  num add(num value, [num extra = 20]) => this.value + value + extra;
+  String named({required int y, int x = 2}) => '$x:$y';
+  int apply(int input) => input + value;
+  T echo<T extends num>(T input) => input;
+}
+
+class AccessorArithmetic implements ArithmeticInterface {
+  int storage;
+  AccessorArithmetic(this.storage);
+  num add(num value, [num extra = 30]) => storage + value + extra;
+  String named({int x = 3, required int y, bool extra = false}) =>
+      '$x:$y:$extra';
+  int get value => storage;
+  set value(int next) {
+    storage = next * 2;
+  }
+
+  int apply(int input) => input * storage;
+  U echo<U extends num>(U input) => input;
+}
+
+abstract class IndirectArithmetic implements ArithmeticInterface {}
+
+typedef BoundedIndirect<T extends ArithmeticInterface> = IndirectArithmetic;
+typedef BoundedArithmeticList<T extends ArithmeticInterface> = List<T>;
+typedef FieldArithmeticList = BoundedArithmeticList<FieldArithmetic>;
+
+class InferredArithmetic implements BoundedIndirect<FieldArithmetic> {
+  int storage = 9;
+  get value => storage;
+  set value(next) {
+    storage = next;
+  }
+
+  add(value, [extra = 40]) => value + extra;
+  named({required y, x = 4}) => '$x:$y';
+  apply(value) => value - 1;
+  T echo<T extends num>(T value) => value;
+}
+
+abstract class IntegralInterface {
+  num read(int input);
+  num get value;
+  set value(int next);
+}
+
+abstract class NumericInterface {
+  int read(num input);
+  int get value;
+  set value(num next);
+}
+
+abstract class CombinedInterface
+    implements IntegralInterface, NumericInterface {}
+
+class CombinedArithmetic implements CombinedInterface {
+  int read(num input) => input.toInt();
+  int get value => 4;
+  set value(num next) {
+    print(next);
+  }
+}
+
+class InterfaceConstant implements ConstantInterface {
+  final int value;
+  const InterfaceConstant(this.value);
+  int read() => value;
+}
+
+abstract class ConstantInterface {
+  int read();
+}
+
+const ConstantInterface interfaceConstant = InterfaceConstant(4);
+
+class StoredInterface {
+  int value;
+  StoredInterface(this.value);
+}
+
+class StoredImplementation implements StoredInterface {
+  int storage = 3;
+  int get value => storage;
+  set value(int next) {
+    storage = next * 2;
+  }
+}
+
+class LateStoredImplementation implements StoredInterface {
+  late int value = interfaceArgument(4);
+}
+
+class FinalSetterImplementation implements NumericInterface {
+  final int value = 4;
+  int read(num input) => input.toInt();
+  set value(num next) {
+    print(next);
+  }
+}
+
+abstract class OptionalInterface {
+  int read(int value);
+  T echo<T extends Object?>(T value);
+}
+
+class OptionalImplementation implements OptionalInterface {
+  int read([int value = 3, int extra = 10]) => value + extra;
+  U echo<U extends dynamic>(U value) => value;
+}
+
+abstract class StringInterface {
+  String toString();
+}
+
+class DefaultStringImplementation implements StringInterface {}
+
+class DeclaredStringImplementation implements StringInterface {
+  String toString();
+}
+
+class ExplicitStringImplementation implements StringInterface {
+  String toString() => 'explicit';
+}
+
+int interfaceConsume(ArithmeticInterface value) => value.apply(2);
+V interfaceGeneric<V extends num>(ArithmeticInterface value, V input) =>
+    value.echo<V>(input);
+int interfaceArgument(int value) {
+  print(value);
+  if (value == 2) throw value;
+  return value;
+}
+
+void interfaceValues() {
+  final field = FieldArithmetic(5);
+  FieldArithmeticList fields = [field];
+  print(fields[0].apply(2));
+  final accessor = AccessorArithmetic(7);
+  for (final value in <ArithmeticInterface>[
+    field,
+    accessor,
+    InferredArithmetic(),
+  ]) {
+    print(value.add(2));
+    print(value.add(2, 4));
+    print(value.named(y: 8));
+    print(value.named(y: 8, x: 6));
+    print(value.value);
+    value.value += 3;
+    print(value.value);
+    final method = value.apply;
+    print(method(4));
+    print(method == value.apply);
+    print(value.echo<int>(8));
+    print(value.echo(1.5));
+  }
+  ArithmeticInterface same = field;
+  print(same.apply == field.apply);
+  dynamic erased = field;
+  print(erased is ArithmeticInterface);
+  print((erased as ArithmeticInterface).value);
+  dynamic values = <FieldArithmetic>[field];
+  print(values is List<ArithmeticInterface>);
+  print((values as List<ArithmeticInterface>)[0].value);
+  Object object = InferredArithmetic();
+  print(object is IndirectArithmetic);
+  print(object is ArithmeticInterface);
+  final inferred = <FieldArithmetic>[field].isEmpty ? field : accessor;
+  print(inferred.add(1));
+  int Function(FieldArithmetic) callback = interfaceConsume;
+  print(callback(field));
+  print(interfaceGeneric(field, 7));
+  print(interfaceGeneric(accessor, 1.5));
+  try {
+    throw accessor;
+  } on ArithmeticInterface catch (value) {
+    print(value.value);
+  }
+  try {
+    same.add(interfaceArgument(1), interfaceArgument(2));
+  } catch (error) {
+    print(error);
+  }
+  print(same.add(interfaceArgument(3)));
+  CombinedInterface combined = CombinedArithmetic();
+  print(combined.read(2.5));
+  print(combined.value);
+  combined.value = 3.5;
+  IntegralInterface integral = combined;
+  NumericInterface numeric = combined;
+  print(integral.read(3));
+  print(numeric.read(4.5));
+  print(interfaceConstant.read());
+  print(interfaceConstant is InterfaceConstant);
+  print(identical(interfaceConstant, const InterfaceConstant(4)));
+  StoredInterface stored = StoredImplementation();
+  print(stored.value++);
+  print(stored.value);
+  print(stored.value += 4);
+  print(stored.value);
+  StoredInterface lateStored = LateStoredImplementation();
+  print(lateStored.value++);
+  print(lateStored.value);
+  StoredInterface assignedLateStored = LateStoredImplementation();
+  assignedLateStored.value = 9;
+  print(assignedLateStored.value);
+  NumericInterface finalSetter = FinalSetterImplementation();
+  print(finalSetter.value);
+  finalSetter.value += 2.5;
+  OptionalInterface optional = OptionalImplementation();
+  print(optional.read(2));
+  print(optional.echo(3));
+  print(optional.echo(null));
+  print(OptionalImplementation().read());
+  for (final value in <StringInterface>[
+    DefaultStringImplementation(),
+    DeclaredStringImplementation(),
+    ExplicitStringImplementation(),
+  ]) {
+    print(value.toString());
+    print('$value');
+  }
+  print(DeclaredStringImplementation().toString());
+  print('${DeclaredStringImplementation()}');
+}
+
 void main(List<String> args) {
+  interfaceValues();
   finallyValues();
   exceptionValues();
   stackTraceValues();

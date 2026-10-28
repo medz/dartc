@@ -1282,6 +1282,12 @@ ConstantValue _constantConstructor(
       expression.token,
       'constant constructor requires const',
     );
+  if (owner.owner.isAbstract)
+    _constantError(
+      context,
+      expression.token,
+      'cannot instantiate an abstract class',
+    );
   var source = context.symbols.program;
   if (name.startsWith('_') &&
       sourceLibrary(source, source.tokens[callee.token].source) !=

@@ -145,6 +145,8 @@ class ConstantLayout {
   List<int> dataOffsets = <int>[];
   List<int> callableOffsets = <int>[];
   List<int> signatureOffsets = <int>[];
+  List<int> classSubtypeOffsets = <int>[];
+  List<List<int>> classSubtypes = <List<int>>[];
   List<_CaptureDescriptor?> closureDescriptors = <_CaptureDescriptor?>[];
   List<_CaptureDescriptor?> captureCellDescriptors = <_CaptureDescriptor?>[];
   List<_CaptureDescriptor?> lateCellDescriptors = <_CaptureDescriptor?>[];
@@ -569,6 +571,24 @@ ConstantLayout layoutConstants(int start) {
     }
     i++;
   }
+  final classSubtypeOffsets = List<int>.filled(typeOffsets.length, -1);
+  final classSubtypes = <List<int>>[];
+  for (var type = 0; type < typeOffsets.length; type++) {
+    final subtypes = <int>[];
+    if (typeOffsets[type] >= 0 && typeIsClass(type)) {
+      for (var owner = 0; owner < descriptorOffsets.length; owner++) {
+        if (descriptorOffsets[owner] >= 0 &&
+            typeArgument(type) != owner &&
+            typeIsSubtype(classType(owner), type))
+          subtypes.add(owner);
+      }
+    }
+    if (subtypes.isNotEmpty) {
+      classSubtypeOffsets[type] = end;
+      end += classSubtypeEntriesOffset + subtypes.length * 8;
+    }
+    classSubtypes.add(subtypes);
+  }
   int handleTypeOffset = -1;
   if (needsValues) handleTypeOffset = typeOffsets[handleType];
   int metadataOffset = -1;
@@ -698,6 +718,8 @@ ConstantLayout layoutConstants(int start) {
     ..captureCellDescriptors = captureCellDescriptors
     ..lateCellDescriptors = lateCellDescriptors
     ..signatureOffsets = signatureOffsets
+    ..classSubtypeOffsets = classSubtypeOffsets
+    ..classSubtypes = classSubtypes
     ..functionDescriptorOffset = functionDescriptorOffset
     ..typeDescriptorOffset = typeDescriptorOffset
     ..refBitmapOffsets = refBitmapOffsets
@@ -1313,6 +1335,9 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
         argument = typeParameterInfo(typeIndex).ordinal;
       } else if (type.kind == kFunction) {
         argument = layout.signatureOffsets[type.argument] - offset;
+      } else if (type.kind == kClass &&
+          layout.classSubtypeOffsets[typeIndex] >= 0) {
+        argument = layout.classSubtypeOffsets[typeIndex] - offset;
       }
       image64(argument);
       int classOffset = 0;
@@ -1345,6 +1370,12 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
       }
     }
     signatureIndex++;
+  }
+  for (final subtypes in layout.classSubtypes) {
+    if (subtypes.isEmpty) continue;
+    image64(subtypes.length);
+    for (final owner in subtypes)
+      image64(layout.descriptorOffsets[owner] - image.length);
   }
   if (layout.metadataOffset >= 0) {
     imageMetadataReference(

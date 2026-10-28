@@ -289,6 +289,7 @@ void corrupt(List<SsaFunction> program, String mode) {
 void main(List<String> args) {
   targetOS = host.hostTarget();
   frontend.parseSource(collectSources(args[0], args[1], null, targetOS));
+  if (args[2] == 'ir-function-range') functions[0].end = functions[0].start;
   final program = buildSsa();
   verifySsa(program);
   optimizeSsa(program);
@@ -308,6 +309,15 @@ void main(List<String> args) {
 
 const taskSource = '''
 typedef UnusedTemplate<T> = List<T>;
+abstract class Operation {
+  int apply(int value, [List<int> extra = const [1]]);
+  T echo<T extends num>(T value);
+}
+class Increment implements Operation {
+  int apply(int value, [List<int> extra = const [2]]) => value + extra[0];
+  T echo<T extends num>(T value) => value;
+}
+int invokeOperation(Operation operation) => operation.apply(2) + operation.echo<int>(3);
 class Counter { int add(int value) => value + 1; }
 T generic<T extends num>(T value) => value;
 List<T> genericList<T>(T value) => [value];
@@ -359,6 +369,7 @@ void dropped(dynamic value) { value as int; }
 int apply(int Function(int) function, int value) => function(value);
 List<int> slice(List<int> value) => value.sublist(1);
 void main() {
+  print(invokeOperation(Increment()));
   print(caught(9));
   try { print(finalized(3)); } catch (value) { print(value); }
   print(delayed(1)());
@@ -408,6 +419,7 @@ Future<void> main(List<String> args) async {
     );
     const cases = {
       'valid': '',
+      'ir-function-range': 'invalid function IR range',
       'invoke-edge-result': 'invoke result on exception edge',
       'invoke-handler-result': 'invoke result is unavailable on this path',
       'invoke-earlier': 'invoke has an earlier throwing operation',
@@ -479,9 +491,10 @@ Future<void> main(List<String> args) async {
         completed(result);
         check(result.stdout == 'SSA verified\n', result.stdout);
       } else {
-        final prefix =
-            (entry.key == 'format-type-parameter' ||
-                entry.key == 'format-schema-hole')
+        final prefix = entry.key == 'ir-function-range'
+            ? 'dartc SSA: invalid function IR range'
+            : (entry.key == 'format-type-parameter' ||
+                  entry.key == 'format-schema-hole')
             ? 'dartc: uninstantiated runtime type'
             : 'dartc SSA: verify ';
         check(

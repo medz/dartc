@@ -60,6 +60,7 @@ class DartType {
 
 List<DartType> dartTypes = <DartType>[];
 List<int> classDartTypes = <int>[];
+List<List<int>> classSupertypes = <List<int>>[];
 List<FunctionSignature> functionSignatures = <FunctionSignature>[];
 List<TypeParameterInfo> typeParameters = <TypeParameterInfo>[];
 
@@ -67,6 +68,7 @@ void resetTypes() {
   schemaHole = -1;
   dartTypes.clear();
   classDartTypes.clear();
+  classSupertypes.clear();
   functionSignatures.clear();
   typeParameters.clear();
   var i = 0;
@@ -172,6 +174,7 @@ int classType(int classId) {
   while (classDartTypes.length <= classId) {
     var owner = classDartTypes.length;
     classDartTypes.add(dartTypes.length);
+    classSupertypes.add(const <int>[]);
     dartTypes.add(DartType(kClass, owner, -1, -1));
   }
   return classDartTypes[classId];
@@ -320,6 +323,10 @@ bool typeIsSubtype(int actual, int expected) {
   if (actualKind == kList && expectedKind == kList) {
     return typeIsSubtype(typeArgument(actual), typeArgument(expected));
   }
+  if (actualKind == kClass && expectedKind == kClass) {
+    for (final parent in classSupertypes[typeArgument(actual)])
+      if (typeIsSubtype(parent, expected)) return true;
+  }
   return false;
 }
 
@@ -358,6 +365,18 @@ int joinTypes(int left, int right) {
   if (typeIsSubtype(left, tNum) && typeIsSubtype(right, tNum)) return tNum;
   if (typeIsList(left) && typeIsList(right)) {
     return listType(joinTypes(typeArgument(left), typeArgument(right)));
+  }
+  if (typeIsClass(left) && typeIsClass(right)) {
+    final common = <int>[];
+    for (final type in classDartTypes)
+      if (typeIsSubtype(left, type) && typeIsSubtype(right, type))
+        common.add(type);
+    for (final type in common) {
+      var mostSpecific = true;
+      for (final other in common)
+        if (!typeIsSubtype(type, other)) mostSpecific = false;
+      if (mostSpecific) return type;
+    }
   }
   return tObject;
 }

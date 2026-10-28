@@ -1959,6 +1959,12 @@ bool parserConstructorAhead(Parser parser, String name) {
 
 AstClass parserClass(Parser parser, int token) {
   var name = parserTypeDeclarationName(parser);
+  final interfaces = <AstType>[];
+  if (parserTake(parser, 'implements')) {
+    do {
+      interfaces.add(parseAstType(parser));
+    } while (parserTake(parser, ','));
+  }
   parserExpect(parser, '{');
   List<AstVariable> fields = <AstVariable>[];
   List<AstVariable>? staticFields;
@@ -2068,6 +2074,7 @@ AstClass parserClass(Parser parser, int token) {
   }
   parserExpect(parser, '}');
   var result = AstClass(name, fields, constructors, methods, token);
+  result.interfaces = interfaces;
   if (staticFields != null) result.staticFields = staticFields;
   return result;
 }
@@ -2243,8 +2250,13 @@ AstUnit parseUnit(Parser parser, [List<bool> patterns = const <bool>[]]) {
       var directive = parserDirective(parser, kind, token);
       directive.metadata = metadata;
       unit.directives.add(directive);
-    } else if (parserTake(parser, 'class')) {
+    } else if (parserIs(parser, 'class') ||
+        parserIs(parser, 'abstract') &&
+            tokenIs(parser.tokens[parser.position + 1], 'class')) {
+      final isAbstract = parserTake(parser, 'abstract');
+      parserExpect(parser, 'class');
       var syntax = parserClass(parser, token);
+      syntax.isAbstract = isAbstract;
       syntax.metadata = metadata;
       unit.classes.add(syntax);
     } else if (parserTake(parser, 'typedef')) {
