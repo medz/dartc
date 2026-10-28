@@ -1131,6 +1131,11 @@ void main() { print('before'); failure(); print('after'); }
       'parse-diagnostic.dart': 'void main( {}',
       'type-diagnostic.dart': "void unused(){int value='bad';}void main(){}",
       'catch-diagnostic.dart': 'void main(){try{throw 1;}catch(e){missing;}}',
+      'local-inference-diagnostic.dart':
+          "void main(){var f=(){int value='bad';return value;};print(f());}",
+      'global-inference-diagnostic.dart':
+          "var value=1+'bad';void main(){print(value);}",
+      'finally-diagnostic.dart': "void main(){try{var f=(){try{return 1;}finally{int x='bad';}};print(f());}finally{print('cleanup');}}",
       'valid-diagnostic.dart': 'T Function(T) identity<T>()=>(value)=>value;var values=<int>[1];void main(){print(identity<int>()(values[0]));}',
     };
     final diagnosticPaths = <String>[];

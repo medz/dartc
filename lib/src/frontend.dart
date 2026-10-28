@@ -4856,39 +4856,38 @@ void feLoopFlow(AstStatement statement) {
 
 void feInferLocalResult(int local) {
   if (feLocalInferred[local]) return;
-  var declaration = feLocalFunctions[local];
-  var function = feLocalStart + local;
-  var previous = FeFunctionState();
-  ir = <int>[];
-  irTypes = <int>[];
-  feConstants.locals = <ConstantValue>[];
-  feBreaks = <int>[];
-  feContinues = <int>[];
-  feBreakFlows = <FlowState>[];
-  feContinueFlows = <FlowState>[];
-  feLoopBreaks = <int>[];
-  feLoopContinues = <int>[];
-  feLabels = <ControlLabel>[];
-  feReturnTypes = <int>[];
-  feInitializingGlobal = -1;
-  feBeginFunction(function, declaration.body!);
+  final declaration = feLocalFunctions[local];
+  final function = feLocalStart + local;
+  final previous = FeFunctionState();
+  final context = feLocalContexts[local];
   var result = tNever;
-  var context = feLocalContexts[local];
-  var arrow = declaration.syntax.arrow;
-  if (arrow != null) {
-    result = feLowerAssignedValue(arrow, context);
-  } else {
-    var body = declaration.syntax.body;
-    if (body != null) feLowerStatement(body);
-    if (feFlow.reachable) result = tNull;
-    var returned = feReturnTypes!;
-    var i = 0;
-    while (i < returned.length) {
-      result = joinTypes(result, returned[i]);
-      i++;
+  try {
+    ir = <int>[];
+    irTypes = <int>[];
+    feConstants.locals = <ConstantValue>[];
+    feBreaks = <int>[];
+    feContinues = <int>[];
+    feBreakFlows = <FlowState>[];
+    feContinueFlows = <FlowState>[];
+    feLoopBreaks = <int>[];
+    feLoopContinues = <int>[];
+    feLabels = <ControlLabel>[];
+    feReturnTypes = <int>[];
+    feInitializingGlobal = -1;
+    feBeginFunction(function, declaration.body!);
+    final arrow = declaration.syntax.arrow;
+    if (arrow != null) {
+      result = feLowerAssignedValue(arrow, context);
+    } else {
+      final body = declaration.syntax.body;
+      if (body != null) feLowerStatement(body);
+      if (feFlow.reachable) result = tNull;
+      for (final returned in feReturnTypes!)
+        result = joinTypes(result, returned);
     }
+  } finally {
+    previous.restore();
   }
-  previous.restore();
   if (context >= 0 && (context == tVoid || !typeIsSubtype(result, context)))
     result = context;
   functions[function].result = result;
@@ -5593,36 +5592,42 @@ int feLowerInitializer(
 }
 
 void feInferGlobal(int global) {
-  var initializer = feGlobalInitializers[global];
+  final initializer = feGlobalInitializers[global];
   if (initializer.code.isNotEmpty) return;
   if (initializer.result == -1)
     feError('cannot infer global type ' + globalNames[global]);
   initializer.result = -1;
-  var previous = FeFunctionState();
-  feConstants.lexicalClass = feGlobalOwners[global];
-  ir = <int>[];
-  irTypes = <int>[];
-  feSlotTypes = <int>[];
-  feNextLocal = 0;
-  feInitializingGlobal = global;
-  var type = globalTypes[global];
-  var syntax = feGlobalNodes[global];
-  type = feLowerInitializer(syntax, initializer.bindings, type);
-  if (globalTypes[global] < 0) {
-    if (type == tNull) type = feConvertValue(type, tDynamic, syntax.token);
-    globalTypes[global] = type;
+  final previous = FeFunctionState();
+  try {
+    feConstants.lexicalClass = feGlobalOwners[global];
+    ir = <int>[];
+    irTypes = <int>[];
+    feSlotTypes = <int>[];
+    feNextLocal = 0;
+    feInitializingGlobal = global;
+    final syntax = feGlobalNodes[global];
+    var type = feLowerInitializer(
+      syntax,
+      initializer.bindings,
+      globalTypes[global],
+    );
+    if (globalTypes[global] < 0) {
+      if (type == tNull) type = feConvertValue(type, tDynamic, syntax.token);
+      globalTypes[global] = type;
+    }
+    initializer.result = globalTypes[global];
+    initializer.code = ir;
+    initializer.types = irTypes;
+    initializer.locals = feSlotTypes;
+    final getter = functions[initializer.getter];
+    getter.result = initializer.result;
+    final setter = functions[initializer.setter];
+    setter.result = initializer.result;
+    setter.parameterTypes[0] = initializer.result;
+    setter.localTypes[0] = initializer.result;
+  } finally {
+    previous.restore();
   }
-  initializer.result = globalTypes[global];
-  initializer.code = ir;
-  initializer.types = irTypes;
-  initializer.locals = feSlotTypes;
-  var getter = functions[initializer.getter];
-  getter.result = initializer.result;
-  var setter = functions[initializer.setter];
-  setter.result = initializer.result;
-  setter.parameterTypes[0] = initializer.result;
-  setter.localTypes[0] = initializer.result;
-  previous.restore();
 }
 
 void feAppendInitializer(GlobalInitializer initializer) {
