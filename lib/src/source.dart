@@ -1,6 +1,7 @@
 import 'host.dart';
 import 'scanner.dart';
 import 'ast.dart';
+import 'diagnostic.dart';
 import 'parser.dart';
 import 'source_uri.dart';
 import 'package_config.dart';
@@ -485,7 +486,7 @@ SourceProgram collectSources(
 }
 
 Never sourceError(SourceProgram program, Token token, String message) {
-  print(
+  throw Diagnostic(
     'dartc: ' +
         program.files[token.source].path +
         ':' +
@@ -493,5 +494,4 @@ Never sourceError(SourceProgram program, Token token, String message) {
         ': ' +
         message,
   );
-  hostExit(1);
 }

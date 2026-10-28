@@ -1301,7 +1301,7 @@ int fePrimitive(String name) {
 }
 
 void feCheckPrimitiveType(AstType syntax, int expected) {
-  if (feResolveType(syntax) != expected)
+  if (resolveType(feSymbols, syntax, const <int>[]) != expected)
     feAstError(syntax.token, 'invalid primitive value type');
 }
 
@@ -5617,6 +5617,8 @@ FunctionBindings feBindInitializer(AstVariable syntax, int owner) {
 
 void parseSource(SourceProgram source) {
   resetTypes();
+  feFunction = 0;
+  feCatches = <FeCatch>[];
   ir.clear();
   irTypes.clear();
   functions.clear();

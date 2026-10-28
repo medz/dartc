@@ -1,4 +1,4 @@
-import 'host.dart';
+import 'diagnostic.dart';
 
 const int tokenSymbol = 0;
 const int tokenIdentifier = 1;
@@ -60,8 +60,9 @@ bool tokenIs(Token token, String text) {
 Never scanError(String message, int offset, [String path = '']) {
   var location = '';
   if (path != '') location = path + ':';
-  print('dartc: ' + location + message + ' at offset ' + offset.toString());
-  hostExit(1);
+  throw Diagnostic(
+    'dartc: ' + location + message + ' at offset ' + offset.toString(),
+  );
 }
 
 bool scanDigit(int c) {

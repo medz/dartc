@@ -1126,6 +1126,48 @@ void main() { print('before'); failure(); print('after'); }
         'Uncaught exception did not preserve its effects, trace and exit status.',
       );
     }
+    final diagnosticInputs = <String, String>{
+      'scan-diagnostic.dart': "void main() { print('unterminated); }",
+      'parse-diagnostic.dart': 'void main( {}',
+      'type-diagnostic.dart': "void unused(){int value='bad';}void main(){}",
+      'catch-diagnostic.dart': 'void main(){try{throw 1;}catch(e){missing;}}',
+      'valid-diagnostic.dart': 'T Function(T) identity<T>()=>(value)=>value;var values=<int>[1];void main(){print(identity<int>()(values[0]));}',
+    };
+    final diagnosticPaths = <String>[];
+    for (final entry in diagnosticInputs.entries) {
+      final input = File('${temporary.path}/${entry.key}')
+        ..writeAsStringSync(entry.value);
+      diagnosticPaths.add(input.uri.toString());
+    }
+    final diagnostics = File('${temporary.path}/diagnostics.dart')
+      ..writeAsStringSync('''
+import '$root/lib/src/diagnostic.dart';
+import '$root/lib/src/frontend.dart';
+import '$root/lib/src/host.dart';
+import '$root/lib/src/ir.dart';
+import '$root/lib/src/source.dart';
+import '$root/lib/src/ssa.dart';
+import '$root/lib/src/verify_ssa.dart';
+void main(List<String> args) {
+  targetOS = hostTarget();
+  for (var i = 0; i < args.length - 2; i++) {
+    try {
+      parseSource(collectSources(args[i], args.last, null, targetOS));
+      print('missing diagnostic');
+    } on Diagnostic catch (error) {
+      print(error.message.startsWith('dartc'));
+      print(error.toString() == error.message);
+    }
+    parseSource(collectSources(args[args.length - 2], args.last, null, targetOS));
+    verifySsa(buildSsa());
+    print('recovered');
+  }
+}
+''');
+    await compare(diagnostics, [
+      ...diagnosticPaths,
+      File(standard).uri.toString(),
+    ]);
     final libraries = {
       'object-pattern-library.dart': r'''
 library object.patterns;

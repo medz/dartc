@@ -1,4 +1,5 @@
 import '../allocate.dart';
+import '../diagnostic.dart';
 import '../emit.dart';
 import '../format.dart';
 import '../frontend.dart';
@@ -15,7 +16,16 @@ import '../source_uri.dart';
 import '../verify_ssa.dart';
 import 'packages.dart';
 
-void runCompiler(List<String> args) {
+Never runCompiler(List<String> args) {
+  try {
+    _compile(args);
+  } on Diagnostic catch (error) {
+    print(error.message);
+    hostExit(1);
+  }
+}
+
+Never _compile(List<String> args) {
   Never argumentError(String message) {
     print(message);
     hostExit(64);

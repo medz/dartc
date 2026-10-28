@@ -1,5 +1,5 @@
 import 'ast.dart';
-import 'host.dart';
+import 'diagnostic.dart';
 import 'scanner.dart';
 
 class Parser {
@@ -18,14 +18,13 @@ Never parserError(Parser parser, String message) {
   var token = parser.tokens[parser.position];
   var location = '';
   if (token.source >= 0) location = parser.paths[token.source] + ':';
-  print(
+  throw Diagnostic(
     'dartc parser: ' +
         location +
         message +
         ' at offset ' +
         parser.tokens[parser.position].start.toString(),
   );
-  hostExit(1);
 }
 
 String parserPeek(Parser parser) {

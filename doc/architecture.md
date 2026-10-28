@@ -76,6 +76,7 @@ lib/src/
     command.dart, packages.dart                    构建协调与包配置发现
   source.dart, source_uri.dart, package_config.dart 源文件、库依赖与包配置
   scanner.dart, ast.dart, parser.dart             词法与语法结构
+  diagnostic.dart                                前端诊断值
   symbols.dart, binding.dart, members.dart         库、局部与成员声明绑定
   types.dart, resolve_type.dart, typing.dart       语义类型与类型规则
   flow.dart, initialization.dart                 流分析与初始化检查
@@ -203,6 +204,8 @@ test/
 构建入口使用直接函数调用与固定阶段。目标差异在实际需要的位置拆分，不建立通用插件注册框架。
 
 ## 前端阶段与语义边界
+
+扫描、解析和带源码位置的语义失败抛出 `Diagnostic`，诊断文本由发现错误的阶段构造；命令行入口捕获并负责输出与退出。嵌入式调用者可捕获诊断，再从新的源码输入重新建立前端状态。内部 IR、布局和机器合同失败保留独立的致命错误边界。
 
 递归下降是本项目可继续采用的解析方式。需要分离的是语法识别、名称绑定、类型判断与代码生成的职责，而不是为更换解析算法建立一套新框架。
 
