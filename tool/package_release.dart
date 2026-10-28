@@ -57,6 +57,7 @@ void main(List<String> args) {
       'lib/src/layout.dart',
       'lib/src/binary64.dart',
       'lib/src/runtime/frames.dart',
+      'lib/src/runtime/exceptions.dart',
       'lib/src/std/core.dart',
       'lib/src/std/core/annotations.dart',
       'lib/src/std/core/string_buffer.dart',
@@ -92,6 +93,14 @@ License: MIT (included).
     final work = Directory('${temporary.path}/project')..createSync();
     File('${work.path}/hello.dart').writeAsStringSync('''
 void main() {
+  try {
+    throw 'release';
+  } on String catch (value, trace) {
+    if (value != 'release' || trace.toString().indexOf('main') < 0) {
+      print('release failed');
+      return;
+    }
+  }
   final trace = StackTrace.current.toString();
   if (trace.indexOf('main') < 0 || double.parse('1.25') != 1.25) {
     print('release failed');

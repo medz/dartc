@@ -54,6 +54,8 @@ const int opDoubleNeg = 51;
 const int opIntToDouble = 52;
 const int opLateCellDescriptor = 53;
 const int opUnreachable = 54;
+const int opBeginTry = 55;
+const int opEndTry = 56;
 
 const int bPrintString = 1;
 const int bPrintInt = 2;
@@ -167,17 +169,22 @@ const int bNativeFloat64ToInt = 118;
 const int bNativeValueBits = 119;
 const int bNativeValueFromBits = 120;
 const int bNativeExit = 121;
+// Capture or restore FP/SP/PC and x19..x27 in a raw unwind context.
+const int bNativeCaptureContext = 122;
+const int bNativeResumeContext = 123;
 
 int nativeBuiltinInputType(int primitive) =>
     primitive == bNativeValueBits ? nullableType(tObject) : tInt;
 int nativeBuiltinResultType(int primitive) => switch (primitive) {
-  bNativeExit => tNever,
+  bNativeExit || bNativeResumeContext => tNever,
   bNativeValueFromBits => nullableType(tObject),
   _ => tInt,
 };
 
 int nativeBuiltinArity(int primitive) {
   if (primitive == bNativeExit ||
+      primitive == bNativeCaptureContext ||
+      primitive == bNativeResumeContext ||
       primitive == bNativeValueBits ||
       primitive == bNativeValueFromBits ||
       primitive == bNativeLoad64 ||
@@ -333,5 +340,6 @@ int irWidth(int op) {
       op == opJumpFalse ||
       op == opJumpTrue)
     return 2;
+  if (op == opBeginTry) return 2;
   return 1;
 }

@@ -20,6 +20,7 @@ class _SsaVerifier {
   List<int> rank = const <int>[];
   List<int> entered = const <int>[];
   List<int> exited = const <int>[];
+  final List<List<bool>?> withoutNormal = <List<bool>?>[];
   int block = -1;
   int position = -1;
 
@@ -208,7 +209,7 @@ class _SsaVerifier {
     } else if (op == opBuiltin) {
       if (!(target >= bPrintString && target <= bLateError ||
           target >= bNativeLoad64 &&
-              target <= bNativeExit &&
+              target <= bNativeResumeContext &&
               target != bNativeMetadataAddress))
         fail('unknown SSA builtin');
       count = instruction.inputs.length;
@@ -316,7 +317,8 @@ class _SsaVerifier {
           metadataLists |
           metadataValues |
           metadataRoots |
-          metadataFrames;
+          metadataFrames |
+          metadataHandlers;
       if (target <= 0 || (target & ~allowed) != 0 || result != tInt)
         fail('metadata constant');
     } else if (op == opFunctionReference || op == opClosureDescriptor) {
@@ -524,7 +526,8 @@ class _SsaVerifier {
         final operation = body.instructions[position];
         instruction(operation);
         if (operation.resultType == tNever &&
-            (position + 1 != body.instructions.length || body.end.kind != 4))
+            (position + 1 != body.instructions.length ||
+                body.end.kind != 4 && body.end.kind != 6))
           fail('Never operation has a normal continuation');
         position++;
       }
@@ -543,6 +546,26 @@ class _SsaVerifier {
           fail('return type');
         unusedEdge(end.first);
         unusedEdge(end.second);
+      } else if (end.kind == 5 || end.kind == 6) {
+        if (end.value != -1) fail('invoke value');
+        if (body.instructions.isEmpty ||
+            (body.instructions.last.effects & ssaThrow) == 0)
+          fail('invoke requires a throwing operation');
+        final operation = body.instructions.last;
+        for (var i = 0; i + 1 < body.instructions.length; i++)
+          if ((body.instructions[i].effects & ssaThrow) != 0)
+            fail('invoke has an earlier throwing operation');
+        if (end.kind == 5) {
+          if (operation.resultType == tNever) fail('Never invoke normal edge');
+          edge(end.first);
+        } else {
+          if (operation.resultType != tNever) fail('Never invoke result');
+          unusedEdge(end.first);
+        }
+        edge(end.second);
+        for (final argument in end.second.arguments)
+          if (argument == operation.value)
+            fail('invoke result on exception edge');
       } else if (end.kind == 4) {
         if (end.value != -1) fail('unreachable value');
         unusedEdge(end.first);
@@ -570,10 +593,10 @@ class _SsaVerifier {
       rank[current] = -2;
       work.add(-item);
       final end = function.blocks[current].end;
-      var successor = end.kind == 2 ? 2 : (end.kind == 1 ? 1 : 0);
-      while (successor > 0) {
-        successor--;
-        final next = successor == 0 ? end.first.target : end.second.target;
+      for (final next in <int>[
+        if (end.hasFirst) end.first.target,
+        if (end.hasSecond) end.second.target,
+      ]) {
         if (rank[next] == -1) {
           work.add(next + 1);
         }
@@ -650,7 +673,27 @@ class _SsaVerifier {
     }
   }
 
-  void use(int id) {
+  bool reachesWithoutNormal(int owner) {
+    while (withoutNormal.length < function.blocks.length)
+      withoutNormal.add(null);
+    var reached = withoutNormal[owner];
+    if (reached == null) {
+      reached = List<bool>.filled(function.blocks.length, false);
+      final work = <int>[0];
+      while (work.isNotEmpty) {
+        final current = work.removeLast();
+        if (reached[current]) continue;
+        reached[current] = true;
+        final end = function.blocks[current].end;
+        if (end.hasFirst && current != owner) work.add(end.first.target);
+        if (end.hasSecond) work.add(end.second.target);
+      }
+      withoutNormal[owner] = reached;
+    }
+    return reached[block];
+  }
+
+  void use(int id, [bool normalEdge = false]) {
     value(id);
     final owner = owners[id];
     if (owner < 0) fail('undefined value');
@@ -661,6 +704,13 @@ class _SsaVerifier {
             entered[owner] > entered[block] ||
             exited[owner] < exited[block]))
       fail('definition does not dominate use');
+    final body = function.blocks[owner];
+    if (body.end.kind == 5 &&
+        body.instructions.last.value == id &&
+        !(block == owner && normalEdge) &&
+        rank[block] >= 0 &&
+        reachesWithoutNormal(owner))
+      fail('invoke result is unavailable on this path');
   }
 
   void uses() {
@@ -674,10 +724,10 @@ class _SsaVerifier {
       }
       final end = body.end;
       if (end.kind == 2 || end.kind == 3) use(end.value);
-      if (end.kind == 1 || end.kind == 2) {
-        for (var input in end.first.arguments) use(input);
+      if (end.hasFirst) {
+        for (var input in end.first.arguments) use(input, end.kind == 5);
       }
-      if (end.kind == 2) {
+      if (end.hasSecond) {
         for (var input in end.second.arguments) use(input);
       }
       block++;

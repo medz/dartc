@@ -59,6 +59,7 @@ class LocalBinder {
   int outerScope = -1;
   ClassMembers? members;
   final List<LocalVariable> guardVariables = <LocalVariable>[];
+  int catchDepth = 0;
 
   LocalBinder(this.source, this.result, this.scopes, this.functions);
 }
@@ -686,6 +687,36 @@ FunctionBindings bindExpressionLocals(
 
 void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
   var kind = statement.kind;
+  if (kind == astRethrowStatement) {
+    if (binder.catchDepth == 0)
+      sourceError(
+        binder.source,
+        binder.source.tokens[statement.token],
+        'rethrow requires an enclosing catch in the same function',
+      );
+    return;
+  }
+  if (kind == astTryStatement) {
+    bindingStatement(binder, scope, statement.children[0]);
+    for (var clause in statement.catches) {
+      if (clause.type case final type?) bindingType(binder, scope, type);
+      final local = bindingScope(binder, scope);
+      for (var parameter in clause.parameters) {
+        parameter.binding = bindingDeclare(
+          binder,
+          local,
+          parameter.name,
+          parameter.token,
+          parameter.type,
+        );
+        binder.result.variables[parameter.binding].finalVariable = true;
+      }
+      binder.catchDepth++;
+      bindingStatement(binder, local, clause.body);
+      binder.catchDepth--;
+    }
+    return;
+  }
   if (kind == astPatternDeclarationStatement) {
     bindingPatternDeclaration(binder, scope, statement.patternDeclaration!);
     bindingExpressions(binder, scope, statement.expressions);
@@ -1007,6 +1038,8 @@ void collectWrittenStatement(
   List<bool> seen,
   List<int> written,
 ) {
+  for (var clause in statement.catches)
+    collectWrittenStatement(clause.body, seen, written);
   for (var branch in statement.cases) {
     if (branch.pattern case final pattern?)
       collectWrittenPattern(pattern, seen, written);

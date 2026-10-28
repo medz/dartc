@@ -54,6 +54,7 @@ void emitInstruction(
   MachineInstruction instruction,
   MachineFunction function,
   CallRootMap? roots,
+  EmittedHandler? handler,
 ) {
   final MachineInstruction(:op, :output, :inputs) = instruction;
   int result = 0;
@@ -103,6 +104,26 @@ void emitInstruction(
   } else if (op == mFramePointer) {
     result = emitDestination(function, output);
     armMove(result, 29);
+  } else if (op == mCaptureContext) {
+    emitLoad(function, inputs[0], 9);
+    machineCode.add(0xf900013d); // str x29, [x9]
+    machineCode.add(0x910003ea); // mov x10, sp
+    machineCode.add(0xf900052a); // str x10, [x9, #8]
+    machineCode.add(0x1000000a); // adr x10, .
+    machineCode.add(0xf900092a); // str x10, [x9, #16]
+    for (var register = 19; register <= 27; register++)
+      machineCode.add(0xf9000120 | ((register - 16) << 10) | register);
+    armConstant(0, 0);
+  } else if (op == mResumeContext) {
+    emitLoad(function, inputs[0], 9);
+    machineCode.add(0xf940013d); // ldr x29, [x9]
+    machineCode.add(0xf940052a); // ldr x10, [x9, #8]
+    machineCode.add(0xf9400930); // ldr x16, [x9, #16]
+    for (var register = 19; register <= 27; register++)
+      machineCode.add(0xf9400120 | ((register - 16) << 10) | register);
+    machineCode.add(0x9100015f); // mov sp, x10
+    machineCode.add(0xd61f0200); // br x16
+    return;
   } else if (op == mAddress) {
     armAddress(instruction.extra, instruction.target);
   } else if (op == mLoad64 || op == mLoad8 || op == mLoad16) {
@@ -163,6 +184,10 @@ void emitInstruction(
     if (roots != null) {
       roots.returnOffset = machineCode.length * 4;
       emittedRootMaps.add(roots);
+    }
+    if (handler != null) {
+      handler.returnOffset = machineCode.length * 4;
+      emittedHandlers.add(handler);
     }
     remaining = outgoing;
     while (remaining >= 4096) {
@@ -363,6 +388,8 @@ void emitFunction(
     MachineBlock current = function.blocks[block];
     MachineTerminator end = current.end;
     int compareCondition = -1;
+    EmittedHandler? handler;
+    if (end.kind == 5 || end.kind == 6) handler = EmittedHandler();
     int instruction = 0;
     while (instruction < current.instructions.length) {
       MachineInstruction operation = current.instructions[instruction];
@@ -384,7 +411,12 @@ void emitFunction(
           callRoots = roots[nextRoot];
           nextRoot++;
         }
-        emitInstruction(operation, function, callRoots);
+        emitInstruction(
+          operation,
+          function,
+          callRoots,
+          instruction + 1 == current.instructions.length ? handler : null,
+        );
       }
       instruction = instruction + 1;
     }
@@ -403,6 +435,15 @@ void emitFunction(
       } else {
         machineCode[condition] = 0xb4000000 | (distance << 5);
       }
+      emitEdge(end.second, function, block + 1);
+    } else if (end.kind == 5 || end.kind == 6) {
+      if (end.kind == 5)
+        emitEdge(end.first, function, -1);
+      else
+        machineCode.add(
+          0xd4200000,
+        ); // Never calls cannot fall into their handler.
+      handler!.landingOffset = machineCode.length * 4;
       emitEdge(end.second, function, block + 1);
     } else if (end.kind == 4) {
       // A proven non-returning path must never fall into the next block.
@@ -465,6 +506,9 @@ int emitMetadataFeatures(List<MachineFunction> program) {
     }
     var b = 0;
     while (b < function.blocks.length) {
+      final end = function.blocks[b].end;
+      if (end.kind == 5 || end.kind == 6)
+        features |= metadataFrames | metadataHandlers;
       var instructions = function.blocks[b].instructions;
       var i = 0;
       while (i < instructions.length) {
@@ -491,9 +535,10 @@ void emitRootBoundary(bool enabled) {
 void generateCode(List<MachineFunction> program) {
   final features = emitMetadataFeatures(program);
   final rootsEnabled = (features & metadataRoots) != 0;
-  final framesEnabled = (features & metadataFrames) != 0;
+  final framesEnabled = (features & (metadataFrames | metadataHandlers)) != 0;
   emittedRootMaps.clear();
   emittedFrames.clear();
+  emittedHandlers.clear();
   machineCode = <int>[];
   addressSites = <int>[];
   addressKinds = <int>[];

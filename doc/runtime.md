@@ -4,7 +4,7 @@
 
 当前源码 ABI 为 15。TypeRef 带对象头，List 和函数对象的类型引用参与扫描；值元数据的 `+64` 保存 DoubleBox 描述符位移。旧 ABI 的元数据不能与此运行时混用。
 
-main 使用进程级 bump arena，不执行 GC、空闲块复用或 arena 释放。根枚举和 NoGC 校验提供收集器所需的边界，不代表收集器已启用。收集器、异常展开和线程/调度的目标设计见 [architecture.md](architecture.md)。
+main 使用进程级 bump arena，不执行 GC、空闲块复用或 arena 释放。根枚举和 NoGC 校验提供收集器所需的边界，不代表收集器已启用。收集器和线程/调度的目标设计见 [architecture.md](architecture.md)。
 
 ## 对象与元数据布局
 
@@ -129,6 +129,14 @@ typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它
 [emit.dart](../lib/src/emit.dart) 从实际发射的 prologue/epilogue 和分配结果记录布局。已保存寄存器按寄存器编号升序排列，占用连续向下的 FP 槽；固定帧大小不含 FP/LR 头和调用期间临时分配的溢出参数区。无帧启动跳板使用负帧大小，遍历在读取其父 FP 前停止。
 
 [frames.dart](../lib/src/runtime/frames.dart) 的 `rtFrameDescriptor(pc)` 是 NoGC 二分查找，区间外返回零。`rtStackTraceString(frame)` 从传入帧的调用者开始，查询返回 PC 后才沿 FP 前进，遇到未知 PC 按运行时合同失败终止。捕获期间被访问的调用者帧保持活动，StringBuffer 和结果 String 由普通托管引用保活。该路径只读取调用链，不恢复寄存器或执行异常处理；标准库 API 范围见 [specs/libraries.md](../specs/libraries.md#stacktrace-api)。
+
+## 同步异常展开
+
+可达调用需要异常后继时，元数据 `+80` 指向 `metadataHandlers` 处理表，并同时保留帧表。每项把精确返回 PC 映射到调用者的异常边入口，按 PC 排序；两地址均为相对表项的位移。没有处理器的调用无需表项，展开器继续查找父帧。
+
+[exceptions.dart](../lib/src/runtime/exceptions.dart) 拥有当前执行域的待处理对象、StackTrace 和原生恢复上下文。异常对象与轨迹是普通托管字段；catch 入口复制到局部根后清空字段，rethrow 使用当前词法 catch 保存的原值。`nativeCaptureContext` 将 FP、SP、PC、x19–x27 写入 96 字节原始缓冲；`nativeResumeContext` 恢复同一集合并跳转，结果为 Never。缓冲布局由 [layout.dart](../lib/src/layout.dart) 定义，不是平台 FFI 上下文。
+
+展开器按实际保存位图撤销各帧的寄存器保存，找到处理器后以父 FP 和固定帧大小重建 SP，不依赖抛出调用的溢出实参大小。查表和展开为 NoGC 路径。未找到处理器时输出异常与轨迹并以状态 255 退出；未知帧仍按内部合同失败终止。语言范围及缺口见 [specs/statements.md](../specs/statements.md)。
 
 ## 原始缓冲与构建期间的根
 

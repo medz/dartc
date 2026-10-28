@@ -53,13 +53,17 @@ class SsaEdge {
 }
 
 class SsaTerminator {
-  // 1 jump, 2 branch, 3 return, 4 unreachable (no normal successor or value).
+  // 1 jump, 2 branch, 3 return, 4 unreachable, 5 invoke, 6 Never invoke.
+  // Invokes use first for normal continuation and second for exception transfer.
   int kind;
   int value;
   SsaEdge first;
   SsaEdge second;
 
   SsaTerminator(this.kind, this.value, this.first, this.second);
+
+  bool get hasFirst => kind == 1 || kind == 2 || kind == 5;
+  bool get hasSecond => kind == 2 || kind == 5 || kind == 6;
 }
 
 class SsaShape {
@@ -70,6 +74,7 @@ class SsaShape {
 }
 
 class SsaFlow {
+  int exceptional = -1;
   int start;
   int end;
   List<int> successors;
@@ -118,23 +123,41 @@ bool ssaEndsFlow(int position) =>
 
 List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
   final leaders = List<int>.filled(end - info.start + 1, 0);
+  final handlerAt = List<int>.filled(end - info.start + 1, -1);
+  final handlers = <int>[];
   leaders[0] = 1;
   var position = info.start;
   while (position < end) {
     final op = ir[position];
     final next = position + irWidth(op);
+    if (op == opBeginTry) {
+      final target = ir[position + 1];
+      handlers.add(target);
+      leaders[target - info.start] = 1;
+    } else if (op == opEndTry) {
+      if (handlers.isEmpty) ssaError(info.name + ': unmatched try end');
+      handlers.removeLast();
+    } else if (handlers.isNotEmpty &&
+        (ssaEffects(op, irWidth(op) > 1 ? ir[position + 1] : 0) & ssaThrow) !=
+            0) {
+      handlerAt[position - info.start] = handlers.last;
+    }
     if (op == opJump || op == opJumpFalse || op == opJumpTrue) {
       leaders[ir[position + 1] - info.start] = 1;
     }
     if ((op == opJump ||
             op == opJumpFalse ||
             op == opJumpTrue ||
+            op == opBeginTry ||
+            op == opEndTry ||
+            handlerAt[position - info.start] >= 0 ||
             ssaEndsFlow(position)) &&
         next < end) {
       leaders[next - info.start] = 1;
     }
     position = next;
   }
+  if (handlers.isNotEmpty) ssaError(info.name + ': unterminated try region');
   final List<int> starts = <int>[];
   var i = 0;
   while (i < end - info.start) {
@@ -187,6 +210,11 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
       flow.successors.add(i + 1);
     } else if (!ssaEndsFlow(last) && i + 1 < flows.length) {
       flow.successors.add(i + 1);
+    }
+    final handler = handlerAt[last - info.start];
+    if (handler >= 0) {
+      flow.exceptional = blockAt[handler - info.start];
+      flow.successors.add(flow.exceptional);
     }
     i = i + 1;
   }
@@ -243,7 +271,7 @@ void ssaStackShapes(FunctionInfo info, List<SsaFlow> flows) {
           op == opJumpTrue ||
           op == opReturn) {
         stack.removeLast();
-      } else if (op != opJump) {
+      } else if (op != opJump && op != opBeginTry && op != opEndTry) {
         var count = ssaInputCount(op, position);
         while (count > 0) {
           stack.removeLast();
@@ -256,18 +284,22 @@ void ssaStackShapes(FunctionInfo info, List<SsaFlow> flows) {
     var edge = 0;
     while (edge < flow.successors.length) {
       final successor = flow.successors[edge];
+      final transferred =
+          flow.exceptional >= 0 && edge == flow.successors.length - 1
+          ? const <int>[]
+          : stack;
       final shape = flows[successor].shape;
       if (!shape.known) {
         shape.known = true;
-        shape.types = <int>[...stack];
+        shape.types = <int>[...transferred];
         work.add(successor);
       } else {
-        if (shape.types.length != stack.length) {
+        if (shape.types.length != transferred.length) {
           ssaError(info.name + ': incompatible stack heights at merge');
         }
         var slot = 0;
-        while (slot < stack.length) {
-          if (shape.types[slot] != stack[slot]) {
+        while (slot < transferred.length) {
+          if (shape.types[slot] != transferred[slot]) {
             ssaError(info.name + ': incompatible stack types at merge');
           }
           slot = slot + 1;
@@ -332,7 +364,10 @@ int ssaEffects(int op, int target) {
         target == bNativeStore16) {
       return ssaWrite | ssaNative;
     }
-    if (target == bNativeSyscall || target == bNativeExit)
+    if (target == bNativeSyscall ||
+        target == bNativeExit ||
+        target == bNativeCaptureContext ||
+        target == bNativeResumeContext)
       return ssaRead | ssaWrite | ssaNative;
     return ssaRead | ssaWrite | ssaAllocate | ssaThrow | ssaGc | ssaNative;
   }
@@ -362,7 +397,9 @@ void ssaTranslateBlock(
   var position = flow.start;
   while (position < flow.end) {
     final op = ir[position];
-    if (op == opUnreachable) {
+    if (op == opBeginTry || op == opEndTry) {
+      // Lexical region markers have no runtime value or normal-path cost.
+    } else if (op == opUnreachable) {
       block.end = SsaTerminator(
         4,
         -1,
@@ -441,6 +478,19 @@ void ssaTranslateBlock(
       );
     }
     position = position + irWidth(op);
+  }
+  if (flow.exceptional >= 0) {
+    final caught = blockIds[flow.exceptional];
+    final never = block.end.kind == 4;
+    final normal = never ? -1 : blockIds[flow.successors[0]];
+    block.end = SsaTerminator(
+      never ? 6 : 5,
+      -1,
+      never
+          ? SsaEdge(-1, <int>[])
+          : ssaTransfer(function.blocks[normal], normal, locals, stack),
+      ssaTransfer(function.blocks[caught], caught, locals, const <int>[]),
+    );
   }
   if (block.end.kind == 0) {
     if (flow.successors.length == 0) {

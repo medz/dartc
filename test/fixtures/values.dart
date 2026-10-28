@@ -1808,6 +1808,256 @@ void stackTraceValues() {
   print(many.indexOf('stackTraceValues') > many.indexOf('stackTraceMany'));
 }
 
+int exceptionVisits = 0;
+
+int exceptionStep(int value) {
+  exceptionVisits = exceptionVisits * 10 + value;
+  return value;
+}
+
+Never exceptionLeaf(Object value, int depth) {
+  if (depth > 0) exceptionLeaf(value, depth - 1);
+  throw value;
+}
+
+int exceptionMany(
+  int a,
+  int b,
+  int c,
+  int d,
+  int e,
+  int f,
+  int g,
+  int h,
+  int i,
+  int j,
+  int k,
+  Object value,
+  double floating,
+  bool fail,
+) {
+  if (fail) exceptionLeaf(value, 12);
+  return a + b + c + d + e + f + g + h + i + j + k + floating.toInt();
+}
+
+int exceptionPressure(int seed, bool fail) {
+  final a = seed + 1, b = seed + 2, c = seed + 3, d = seed + 4;
+  final e = seed + 5, f = seed + 6, g = seed + 7, h = seed + 8;
+  final i = seed + 9, j = seed + 10, k = seed + 11;
+  final object = Box(seed);
+  final text = 'retained/$seed🙂';
+  final floating = seed + 0.25;
+  var result = seed;
+  try {
+    result = exceptionMany(
+      a,
+      b,
+      c,
+      d,
+      e,
+      f,
+      g,
+      h,
+      i,
+      j,
+      k,
+      object,
+      floating,
+      fail,
+    );
+  } on Box catch (caught, trace) {
+    print(identical(caught, object));
+    print(trace.toString().indexOf('exceptionLeaf') >= 0);
+    print(trace.toString().indexOf('exceptionPressure') >= 0);
+    print(text);
+    print(floating);
+    print(result);
+  }
+  return result + a + b + c + d + e + f + g + h + i + j + k + object.value;
+}
+
+T exceptionGeneric<T>(Object value, T fallback) {
+  try {
+    throw value;
+  } on T catch (caught) {
+    return caught;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+int exceptionInitializer() {
+  exceptionVisits++;
+  if (exceptionVisits == 1) throw 'retry';
+  return exceptionVisits;
+}
+
+final int exceptionGlobal = exceptionInitializer();
+
+class ExceptionFields {
+  late final int value = exceptionInitializer();
+  int get fail => throw 'getter';
+  set fail(int value) => throw value;
+  void method() => throw this;
+}
+
+int exceptionReturn(bool fail) {
+  try {
+    return fail ? throw 'return' : 23;
+  } on String {
+    return 24;
+  }
+}
+
+void exceptionValues() {
+  for (var value in <Object>[
+    0,
+    9223372036854775807,
+    1.25,
+    false,
+    '',
+    <int>[1],
+    Box(3),
+    () => 3,
+  ]) {
+    dynamic thrown = value;
+    try {
+      throw thrown;
+    } catch (caught) {
+      print(identical(value, caught));
+    }
+  }
+  print(exceptionPressure(3, false));
+  print(exceptionPressure(4, true));
+  print(exceptionReturn(false));
+  print(exceptionReturn(true));
+  print(exceptionGeneric<int>(31, 1));
+  print(exceptionGeneric<int>('no', 2));
+  print(exceptionGeneric<List<int>>(<int>[7], <int>[]));
+  final closures = <Object Function()>[];
+  StackTrace? original;
+  final object = Box(73);
+  try {
+    try {
+      exceptionLeaf(object, 3);
+    } on String {
+      print('wrong handler');
+    } catch (value, trace) {
+      closures.add(() => value);
+      closures.add(() => trace);
+      original = trace;
+      try {
+        throw 'nested';
+      } catch (other) {
+        print(other);
+      }
+      rethrow;
+    }
+  } on Box catch (value, trace) {
+    print(identical(value, object));
+    print(identical(original, trace));
+    print(identical(closures[0](), object));
+    print(identical(closures[1](), trace));
+  }
+  try {
+    try {
+      throw 81;
+    } on String {}
+  } on int? catch (value) {
+    print(value! + 1);
+  }
+  try {
+    throw true;
+  } on bool {
+    try {
+      rethrow;
+    } catch (value) {
+      final value = 'shadow';
+      print(value);
+    }
+  }
+  exceptionVisits = 0;
+  try {
+    print([exceptionStep(1), throw exceptionStep(2), exceptionStep(3)]);
+  } catch (value) {
+    print(value);
+    print(exceptionVisits);
+  }
+  int? missing;
+  try {
+    print(missing ?? (throw 'fallback'));
+  } catch (value) {
+    print(value);
+  }
+  final fields = ExceptionFields();
+  try {
+    fields.fail;
+  } catch (value) {
+    print(value);
+  }
+  try {
+    fields.fail = 4;
+  } catch (value) {
+    print(value);
+  }
+  final method = fields.method;
+  try {
+    method();
+  } catch (value) {
+    print(identical(value, fields));
+  }
+  final int assigned;
+  try {
+    throw 1;
+  } catch (_) {
+    assigned = 6;
+  }
+  print(assigned);
+  outer:
+  for (var i = 0; i < 4; i++) {
+    try {
+      if (i == 0) continue outer;
+      throw i;
+    } on int catch (value) {
+      if (value == 1) continue outer;
+      print(value);
+      break outer;
+    }
+  }
+  try {
+    try {
+      throw 'replace';
+    } catch (_) {
+      throw 91;
+    }
+  } on int catch (value) {
+    print(value);
+  }
+  exceptionVisits = 0;
+  try {
+    print(exceptionGlobal);
+  } catch (value) {
+    print(value);
+  }
+  print(exceptionGlobal);
+  exceptionVisits = 0;
+  try {
+    print(fields.value);
+  } catch (value) {
+    print(value);
+  }
+  print(fields.value);
+  exceptionVisits = 0;
+  late final local = exceptionInitializer();
+  final read = () => local;
+  try {
+    print(read());
+  } catch (value) {
+    print(value);
+  }
+  print(read());
+}
+
 int stringEvaluations = 0;
 
 String stringReceiver() {
@@ -4783,6 +5033,7 @@ void lateValues() {
 }
 
 void main(List<String> args) {
+  exceptionValues();
   stackTraceValues();
   lateValues();
   doubleValues();

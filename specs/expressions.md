@@ -77,7 +77,8 @@
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
-| §17.8、§17.10–17.11 | 未实现 | Symbol 字面量、throw 表达式和 isolate 创建未实现。 | [ast.dart](../lib/src/ast.dart) 尚无对应表达式；尚无行为验证。 |
+| §17.10 throw | 部分实现 | 单次求值后抛出非空对象，结果为 Never；支持条件、赋值、集合元素和括号内表达式，保留此前副作用并终止后续求值。静态拒绝 nullable、void 及可能为空的类型参数，接受 dynamic；dynamic 为 null 时应抛 TypeError，当前仍直接终止，是运行时错误对象的缺口。 | [parser.dart](../lib/src/parser.dart) `parseExpression()`；[frontend.dart](../lib/src/frontend.dart) `feLowerValue()`；[values.dart](../test/fixtures/values.dart) `exceptionValues()`；[behavior_test.dart](../test/behavior_test.dart) `rejected`。 |
+| §17.8、§17.11 | 未实现 | Symbol 字面量和 isolate 创建未实现。 | [ast.dart](../lib/src/ast.dart) 尚无对应表达式；尚无行为验证。 |
 | §17.17、§17.34 | 未实现 | 泛型函数值实例化表达式、await；直接泛型调用不代表已实现泛型函数值或异步执行。 | [parser.dart](../lib/src/parser.dart)、[frontend.dart](../lib/src/frontend.dart)；尚无行为验证。 |
 | Dart 3 表达式 | 部分实现 | switch 表达式、标量/对象/List 模式、守卫、变量绑定及穷尽性边界见[模式](patterns.md)；记录和 Map/record 模式未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerSwitchExpression`；[values.dart](../test/fixtures/values.dart)：`switchExpressions`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`、`failingValues`。 |
 | 优先级、所有静态错误及完成方式 | 待核对 | 优先级、静态错误及完成方式的完整一致性覆盖尚缺。 | [parser.dart](../lib/src/parser.dart)：`parserPrecedence`、`parserBinary`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |

@@ -32,7 +32,7 @@ package v2 的嵌套根约束在配置边界检查。SDK 3.13.5 在未使用重�
 | SDK 条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
 | [`StackTrace.current`][stack-current] | 部分实现 | 同步捕获当前 Dart 调用链，保留直接调用、递归、闭包和函数值调用；返回独立的不可变轨迹。文本按栈顺序列出函数名，可能包含编译器生成的调用适配器；尚无文件/行号、异步调用链和原生边界轨迹。实现位于 Dart 运行时，不依赖 SDK 或系统符号器。 | [frames.dart](../lib/src/runtime/frames.dart) `rtStackTraceString()`；[values.dart](../test/fixtures/values.dart) `stackTraceValues()`；[roots.dart](../test/fixtures/roots.dart) `stackTraceRoots()`；[behavior_test.dart](../test/behavior_test.dart) NoGC 拒例 |
-| [`StackTrace.fromString`][stack-string]、[`empty`][stack-empty]、[`toString`][stack-text] | 部分实现 | `fromString` 保留任意 String，`toString` 返回原文本；`empty` 为可在常量上下文使用的空轨迹。当前用普通 Dart 类及非 const 命名构造器提供 API；SDK 的抽象接口、factory 重定向及用户实现 StackTrace 仍依赖尚缺的类/接口语义。异常对象携带轨迹和 rethrow 保留轨迹尚未实现，见[语句](statements.md)。 | [stack_trace.dart](../lib/src/std/core/stack_trace.dart)；[values.dart](../test/fixtures/values.dart) `stackTraceValues()` |
+| [`StackTrace.fromString`][stack-string]、[`empty`][stack-empty]、[`toString`][stack-text] | 部分实现 | `fromString` 保留任意 String，`toString` 返回原文本；`empty` 为可在常量上下文使用的空轨迹。当前用普通 Dart 类及非 const 命名构造器提供 API；SDK 的抽象接口、factory 重定向及用户实现 StackTrace 仍依赖尚缺的类/接口语义。同步抛出携带轨迹，rethrow 保留同一轨迹对象；异常语言边界见[语句](statements.md)。 | [stack_trace.dart](../lib/src/std/core/stack_trace.dart)；[values.dart](../test/fixtures/values.dart) `stackTraceValues()` |
 
 [stack-current]: https://api.dart.dev/stable/3.13.7/dart-core/StackTrace/current.html
 [stack-string]: https://api.dart.dev/stable/3.13.7/dart-core/StackTrace/StackTrace.fromString.html

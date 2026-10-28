@@ -72,12 +72,28 @@ const int metadataHandleTypeOffset = 48;
 const int metadataRootTableOffset = 56;
 const int metadataDoubleBoxDescriptorOffset = 64;
 const int metadataFrameTableOffset = 72;
+const int metadataHandlerTableOffset = 80;
 
 const int metadataStrings = 1;
 const int metadataLists = 2;
 const int metadataValues = 4;
 const int metadataRoots = 8;
 const int metadataFrames = 16;
+const int metadataHandlers = 32;
+
+// Raw machine context. Restoring it transfers control and does not return.
+const int unwindContextBytes = 96;
+const int unwindFrameOffset = 0;
+const int unwindStackOffset = 8;
+const int unwindPcOffset = 16;
+const int unwindRegistersOffset = 24;
+
+const int handlerTableBytes = 16;
+const int handlerTableCountOffset = 0;
+const int handlerTableEntriesOffset = 8;
+const int handlerEntryBytes = 16;
+const int handlerReturnOffset = 0;
+const int handlerLandingOffset = 8;
 
 // Frame ranges are sorted half-open code intervals. All addresses are relative
 // to the containing table or descriptor. Saved x19..x27 occupy descending FP

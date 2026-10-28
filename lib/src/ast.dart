@@ -28,6 +28,7 @@ const int astSwitchExpression = 27;
 const int astIfCaseCondition = 28;
 const int astPatternAssignment = 29;
 const int astDouble = 30;
+const int astThrow = 31;
 
 const int patternConstant = 1;
 const int patternVariable = 2;
@@ -138,6 +139,8 @@ const int astSwitchStatement = 12;
 const int astLabeledStatement = 14;
 const int astLocalFunctionStatement = 15;
 const int astPatternDeclarationStatement = 16;
+const int astTryStatement = 17;
+const int astRethrowStatement = 18;
 
 const int astImportDirective = 1;
 const int astExportDirective = 2;
@@ -215,8 +218,17 @@ class AstSwitchCase {
   AstSwitchCase(this.token, this.pattern, this.guard, this.labels, this.body);
 }
 
+class AstCatch {
+  final AstType? type;
+  final List<AstParameter> parameters;
+  final AstStatement body;
+
+  AstCatch(this.type, this.parameters, this.body);
+}
+
 class AstStatement {
   List<AstSwitchCase> cases = const <AstSwitchCase>[];
+  List<AstCatch> catches = const <AstCatch>[];
   AstFunction? function;
   AstPatternDeclaration? patternDeclaration;
   int kind;

@@ -1,6 +1,8 @@
 import 'layout.dart';
 import 'binary64.dart';
 import 'host.dart';
+import 'runtime/exceptions.dart';
+import 'runtime/frames.dart';
 
 external int nativeLoad64(int p);
 external int nativeStore64(int p, int value);
@@ -17,6 +19,20 @@ external int nativeCall0(int function);
 external int nativeFramePointer();
 external int nativeValueBits(Object? value);
 external Object? nativeValueFromBits(int value);
+external int nativeCaptureContext(int context);
+external Never nativeResumeContext(int context);
+
+Never rtThrow(Object value) => rtRaiseException(
+  value,
+  StackTrace.fromString(rtStackTraceString(nativeFramePointer())),
+);
+
+Never rtRethrow(Object value, StackTrace trace) =>
+    rtRaiseException(value, trace);
+
+Object rtCaughtException() => rtExceptionValue();
+StackTrace rtCaughtTrace() => rtExceptionTrace();
+int rtClearException() => rtClearPendingException();
 
 const int rtAbiVersion = 15;
 const int rtArenaHeaderBytes = 48;

@@ -19,3 +19,11 @@ class EmittedFrame {
 }
 
 final List<EmittedFrame> emittedFrames = <EmittedFrame>[];
+
+// One potentially throwing call and its exceptional edge-copy trampoline.
+class EmittedHandler {
+  int returnOffset = -1;
+  int landingOffset = -1;
+}
+
+final List<EmittedHandler> emittedHandlers = <EmittedHandler>[];

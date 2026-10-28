@@ -58,6 +58,8 @@ const int mFloat64FromInt = 37;
 const int mFloat64ToInt = 38;
 const int mFloat64Neg = 39;
 const int mExit = 40;
+const int mCaptureContext = 41;
+const int mResumeContext = 42;
 
 class RegisterAllocation {
   final List<int> locations;
@@ -252,6 +254,19 @@ void machineSelectInstruction(
     return;
   }
   if (op == opBuiltin) {
+    if (target == bNativeCaptureContext || target == bNativeResumeContext) {
+      instructions.add(
+        MachineInstruction(
+          target == bNativeCaptureContext ? mCaptureContext : mResumeContext,
+          output,
+          inputs,
+          0,
+          0,
+          effects,
+        ),
+      );
+      return;
+    }
     if (target >= bNativeFloat64Add && target <= bNativeFloat64ToInt) {
       instructions.add(
         MachineInstruction(

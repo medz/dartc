@@ -162,6 +162,8 @@ class ConstantLayout {
   int frameTableOffset = -1;
   int frameDescriptorsOffset = -1;
   List<int> frameNameStrings = <int>[];
+  int handlerTableOffset = -1;
+  int handlerEntriesOffset = -1;
 
   ConstantLayout(
     this.stringOffsets,
@@ -369,6 +371,9 @@ ConstantLayout layoutConstants(int start) {
     signatureOffsets.add(-1);
     i++;
   }
+  if (emittedHandlers.isNotEmpty) features |= metadataHandlers;
+  final needsHandlers = (features & metadataHandlers) != 0;
+  if (needsHandlers) features |= metadataFrames;
   final needsFrames = (features & metadataFrames) != 0;
   final frameNameStrings = <int>[];
   if (needsFrames) {
@@ -575,6 +580,7 @@ ConstantLayout layoutConstants(int start) {
     if (needsRoots) metadataBytes = metadataRootTableOffset + 8;
     if (needsValues) metadataBytes = metadataDoubleBoxDescriptorOffset + 8;
     if (needsFrames) metadataBytes = metadataFrameTableOffset + 8;
+    if (needsHandlers) metadataBytes = metadataHandlerTableOffset + 8;
     end += metadataBytes;
   }
   int rootTableOffset = -1;
@@ -634,6 +640,14 @@ ConstantLayout layoutConstants(int start) {
     end += frameTableBytes;
     frameDescriptorsOffset = end;
     end += emittedFrames.length * frameDescriptorBytes;
+  }
+  var handlerTableOffset = -1;
+  var handlerEntriesOffset = -1;
+  if (needsHandlers) {
+    handlerTableOffset = end;
+    end += handlerTableBytes;
+    handlerEntriesOffset = end;
+    end += emittedHandlers.length * handlerEntryBytes;
   }
   end = alignImage(end, 8);
   i = 0;
@@ -698,7 +712,9 @@ ConstantLayout layoutConstants(int start) {
     ..globalRoots = globalRoots
     ..frameTableOffset = frameTableOffset
     ..frameDescriptorsOffset = frameDescriptorsOffset
-    ..frameNameStrings = frameNameStrings;
+    ..frameNameStrings = frameNameStrings
+    ..handlerTableOffset = handlerTableOffset
+    ..handlerEntriesOffset = handlerEntriesOffset;
 }
 
 List<int> createMachOExecutable() {
@@ -1082,6 +1098,19 @@ void imageFrameTable(ConstantLayout layout, int codeOffset) {
   }
 }
 
+void imageHandlerTable(ConstantLayout layout, int codeOffset) {
+  if (layout.handlerTableOffset < 0) return;
+  imageZeros(layout.handlerTableOffset - image.length);
+  image64(emittedHandlers.length);
+  image64(layout.handlerEntriesOffset - layout.handlerTableOffset);
+  for (var i = 0; i < emittedHandlers.length; i++) {
+    final handler = emittedHandlers[i];
+    final record = layout.handlerEntriesOffset + i * handlerEntryBytes;
+    image64(codeOffset + handler.returnOffset - record);
+    image64(codeOffset + handler.landingOffset - record);
+  }
+}
+
 void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
   int stringIndex = 0;
   while (stringIndex < strings.length) {
@@ -1365,9 +1394,16 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
     }
     if (layout.metadataBytes > metadataDoubleBoxDescriptorOffset + 8)
       imageMetadataReference(layout, metadataFrames, layout.frameTableOffset);
+    if (layout.metadataBytes > metadataFrameTableOffset + 8)
+      imageMetadataReference(
+        layout,
+        metadataHandlers,
+        layout.handlerTableOffset,
+      );
   }
   imageRootTable(layout, codeOffset, dataBaseOffset);
   imageFrameTable(layout, codeOffset);
+  imageHandlerTable(layout, codeOffset);
   var list = 0;
   while (list < constantData.length) {
     var offset = layout.dataOffsets[list];

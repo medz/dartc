@@ -66,7 +66,38 @@ void corrupt(List<SsaFunction> program, String mode) {
   final diamond = named(program, 'diamond');
   final add = operation(order, opAdd);
   final call = operation(diamond, opCall);
-  if (mode == 'exit-result' || mode == 'exit-arity' || mode == 'exit-effects') {
+  if (mode == 'invoke-edge-result' || mode == 'invoke-handler-result' ||
+      mode == 'invoke-earlier' || mode == 'invoke-nonthrow') {
+    final function = named(program, 'caught');
+    for (var block in function.blocks) {
+      if (block.end.kind != 5) continue;
+      final invoke = block.instructions.last;
+      if (invoke.op != opCall || functions[invoke.target].name != 'callee') continue;
+      if (mode == 'invoke-edge-result') {
+        final id = function.valueTypes.length;
+        function.valueTypes.add(tInt);
+        function.blocks[block.end.second.target].parameters.add(id);
+        block.end.second.arguments.add(invoke.value);
+      } else if (mode == 'invoke-handler-result') {
+        final id = function.valueTypes.length;
+        function.valueTypes.add(tInt);
+        function.blocks[block.end.second.target].instructions.insert(0,
+          SsaInstruction(opAdd, id, 0, <int>[invoke.value, invoke.value], 0, tInt));
+      } else if (mode == 'invoke-earlier') {
+        final id = function.valueTypes.length;
+        function.valueTypes.add(tInt);
+        block.instructions.insert(0, SsaInstruction(opCall, id, invoke.target,
+            function.arguments.sublist(0), invoke.effects, tInt));
+      } else {
+        invoke.op = opInt;
+        invoke.target = 0;
+        invoke.inputs.clear();
+        invoke.effects = 0;
+      }
+      return;
+    }
+    ssaError('test invoke missing');
+  } else if (mode == 'exit-result' || mode == 'exit-arity' || mode == 'exit-effects') {
     final function = named(program, 'rtHostExit');
     final instruction = operation(function, opBuiltin);
     if (mode == 'exit-result') {
@@ -287,6 +318,11 @@ int Function() delayed(int value) {
   return () => result;
 }
 int callee(int value) => value + 1;
+int caught(int value) {
+  var result = value;
+  try { result = callee(value); } catch (_) { result += 2; }
+  return result;
+}
 Never terminal(dynamic value) => value as Never;
 int order(int value) {
   final next = value + 1;
@@ -315,6 +351,7 @@ void dropped(dynamic value) { value as int; }
 int apply(int Function(int) function, int value) => function(value);
 List<int> slice(List<int> value) => value.sublist(1);
 void main() {
+  print(caught(9));
   print(delayed(1)());
   print(generic<int>(1));
   print(genericList<int>(2));
@@ -362,6 +399,10 @@ Future<void> main(List<String> args) async {
     );
     const cases = {
       'valid': '',
+      'invoke-edge-result': 'invoke result on exception edge',
+      'invoke-handler-result': 'invoke result is unavailable on this path',
+      'invoke-earlier': 'invoke has an earlier throwing operation',
+      'invoke-nonthrow': 'invoke requires a throwing operation',
       'exit-result': 'primitive result',
       'exit-arity': 'operand count',
       'exit-effects': 'operation effects',

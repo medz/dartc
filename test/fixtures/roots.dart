@@ -1023,6 +1023,50 @@ void stackTraceRoots(int queue, int edges) {
   check(rtFrameDescriptor(previousEnd) == 0);
 }
 
+Never exceptionRootThrow(int queue, int depth) {
+  if (depth > 0) exceptionRootThrow(queue, depth - 1);
+  check(findMarker(queue, snapshot(queue), 970) != 0);
+  throw Leaf(971);
+}
+
+void exceptionRootCatch(int queue) {
+  final retained = Leaf(970);
+  try {
+    exceptionRootThrow(queue, 16);
+  } on Leaf catch (value, trace) {
+    final count = snapshot(queue);
+    check(findMarker(queue, count, 970) != 0);
+    check(findMarker(queue, count, 971) == rt.nativeValueBits(value));
+    check(contains(queue, count, rt.nativeValueBits(trace)));
+    check(retained.marker == 970 && value.marker == 971);
+    check(trace.toString().indexOf('exceptionRootThrow') >= 0);
+  }
+}
+
+void exceptionRoots(int queue) {
+  exceptionRootCatch(queue);
+  final count = snapshot(queue);
+  check(findMarker(queue, count, 970) == 0);
+  check(findMarker(queue, count, 971) == 0);
+  final metadata = rt.nativeMetadataAddress(abi.metadataHandlers);
+  final table =
+      metadata + rt.nativeLoad64(metadata + abi.metadataHandlerTableOffset);
+  final entries =
+      table + rt.nativeLoad64(table + abi.handlerTableEntriesOffset);
+  final length = rt.nativeLoad64(table + abi.handlerTableCountOffset);
+  check(length > 0);
+  var previous = 0;
+  for (var i = 0; i < length; i++) {
+    final entry = entries + i * abi.handlerEntryBytes;
+    final pc = entry + rt.nativeLoad64(entry + abi.handlerReturnOffset);
+    final landing = entry + rt.nativeLoad64(entry + abi.handlerLandingOffset);
+    check(pc > previous);
+    final frame = rtFrameDescriptor(pc);
+    check(frame != 0 && rtFrameDescriptor(landing) == frame);
+    previous = pc;
+  }
+}
+
 void main(List<String> args) {
   if (args.isNotEmpty && args[0] == 'capacity') {
     capacityFailure(Leaf(190));
@@ -1030,6 +1074,7 @@ void main(List<String> args) {
   }
   var queue = rt.rtMap(capacity * 8);
   var edges = rt.rtMap(capacity * 8);
+  exceptionRoots(queue);
   stackTraceRoots(queue, edges);
   lateRoots(queue, edges);
   typeGraphRoots(queue, edges);

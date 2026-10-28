@@ -108,6 +108,15 @@ class FeLateLocal {
   FeLateLocal(this.state, this.initializer);
 }
 
+class FeCatch {
+  final int value;
+  final int trace;
+
+  FeCatch(this.value, this.trace);
+}
+
+List<FeCatch> feCatches = <FeCatch>[];
+
 class FeFunctionState {
   final List<int> code = ir;
   final List<int> types = irTypes;
@@ -132,6 +141,7 @@ class FeFunctionState {
   final List<int> loopBreaks = feLoopBreaks;
   final List<int> loopContinues = feLoopContinues;
   final List<ControlLabel> labels = feLabels;
+  final List<FeCatch> catches = feCatches;
   final List<int>? returns = feReturnTypes;
   final int initializingGlobal = feInitializingGlobal;
 
@@ -161,6 +171,7 @@ class FeFunctionState {
     feLoopBreaks = loopBreaks;
     feLoopContinues = loopContinues;
     feLabels = labels;
+    feCatches = catches;
     feReturnTypes = returns;
     feInitializingGlobal = initializingGlobal;
   }
@@ -817,7 +828,7 @@ int feBuiltinType(int id) {
     return tInt;
   if (id == bDoubleTryParse) return nullableType(tDouble);
   if (id == bNumberProperty) return tBool;
-  if (id >= bNativeFloat64Add && id <= bNativeExit)
+  if (id >= bNativeFloat64Add && id <= bNativeResumeContext)
     return nativeBuiltinResultType(id);
   if (id == bFunctionEntry || id == bFunctionType) return tPointer;
   if (id == bFunctionInvoke) return tDynamic;
@@ -1262,6 +1273,8 @@ void feCheckPrivate(int owner, String name, int token) {
 }
 
 int fePrimitive(String name) {
+  if (name == 'nativeCaptureContext') return bNativeCaptureContext;
+  if (name == 'nativeResumeContext') return bNativeResumeContext;
   if (name == 'nativeExit') return bNativeExit;
   if (name == 'nativeValueBits') return bNativeValueBits;
   if (name == 'nativeValueFromBits') return bNativeValueFromBits;
@@ -2739,7 +2752,8 @@ int feLowerBuiltinCall(AstExpression call, int builtin) {
         metadataLists |
         metadataValues |
         metadataRoots |
-        metadataFrames;
+        metadataFrames |
+        metadataHandlers;
     if (mask < 1 || (mask & ~allowed) != 0)
       feAstError(call.token, 'unknown metadata feature mask');
     feOperand(opMetadataAddress, mask);
@@ -4165,6 +4179,15 @@ int feLowerExpression(AstExpression expression) {
 }
 
 int feLowerValue(AstExpression expression) {
+  if (expression.kind == astThrow) {
+    final value = expression.children[0];
+    final type = feLowerAssignedValue(value, tObject);
+    if (type != tDynamic && typeCanBeNull(type))
+      feAstError(value.token, 'throw requires a non-nullable value');
+    feConvertValue(type, tObject, value.token);
+    feCall(feFindFunction('rtThrow'), 1);
+    return tNever;
+  }
   if (expression.kind == astSwitchExpression)
     return feLowerSwitchExpression(expression, -1);
   expression = feWithReceiver(expression);
@@ -5035,6 +5058,14 @@ bool feInfersLocalResult(int function) {
 void feLowerStatement(AstStatement statement) {
   feAt = statement.token;
   var kind = statement.kind;
+  if (kind == astTryStatement) {
+    feLowerTry(statement);
+    return;
+  }
+  if (kind == astRethrowStatement) {
+    feRethrow(feCatches.last);
+    return;
+  }
   if (kind == astEmptyStatement) return;
   if (kind == astLocalFunctionStatement) {
     feLowerLocalFunction(statement.function!);
@@ -5184,6 +5215,68 @@ void feLowerStatement(AstStatement statement) {
     return;
   }
   feAstError(statement.token, 'unsupported statement');
+}
+
+void feRethrow(FeCatch caught) {
+  feOperand(opLoadLocal, caught.value);
+  feOperand(opLoadLocal, caught.trace);
+  feCall(feFindFunction('rtRethrow'), 2);
+}
+
+void feLowerTry(AstStatement statement) {
+  feFlow = flowSplit(feFlow);
+  final caughtFlow = flowCopy(feFlow);
+  final written = <int>[];
+  collectWrittenStatement(
+    statement.children[0],
+    List<bool>.filled(feBindings.variables.length, false),
+    written,
+  );
+  flowDemote(caughtFlow, written, feBindingTypes);
+  final handler = feJump(opBeginTry);
+  feLowerStatement(statement.children[0]);
+  feEmit(opEndTry);
+  final done = <int>[feJump(opJump)];
+  var completed = feFlow;
+  fePatch(handler, ir.length);
+  feFlow = flowCopy(caughtFlow);
+  feCall(feFindFunction('rtCaughtException'), 0);
+  final value = feTemp(tObject);
+  feOperand(opStoreLocal, value);
+  final traceFunction = feFindFunction('rtCaughtTrace');
+  final traceType = functions[traceFunction].result;
+  feCall(traceFunction, 0);
+  final trace = feTemp(traceType);
+  feOperand(opStoreLocal, trace);
+  feCall(feFindFunction('rtClearException'), 0);
+  feEmit(opPop);
+  final caught = FeCatch(value, trace);
+  for (var clause in statement.catches) {
+    feFlow = flowCopy(caughtFlow);
+    final type = clause.type == null ? tObject : feResolveType(clause.type!);
+    feOperand(opLoadLocal, value);
+    feConvertValue(tObject, tDynamic, statement.token);
+    feOperand(opTypeTest, type);
+    final next = feJump(opJumpFalse);
+    for (var i = 0; i < clause.parameters.length; i++) {
+      final parameter = clause.parameters[i];
+      final parameterType = i == 0 ? type : traceType;
+      feOperand(opLoadLocal, i == 0 ? value : trace);
+      if (i == 0) feNarrowValue(tObject, type);
+      final slot = feTemp(parameterType);
+      feOperand(opStoreLocal, slot);
+      feBindLocal(parameter.binding, parameterType, slot);
+    }
+    feCatches.add(caught);
+    feLowerStatement(clause.body);
+    feCatches.removeLast();
+    completed = feJoinFlow(completed, feFlow);
+    done.add(feJump(opJump));
+    fePatch(next, ir.length);
+  }
+  feRethrow(caught);
+  fePatchJumps(done, ir.length);
+  feFlow = flowUnsplit(completed);
 }
 
 void fePrepareGlobals(int count, List<FunctionBindings> bindings) {
@@ -5395,6 +5488,7 @@ void feGenerateGlobals(int count) {
 
 void feBeginFunction(int f, FunctionBindings bindings) {
   feFunction = f;
+  feCatches = <FeCatch>[];
   feConstants.typeScope = functions[f].typeScope;
   feImplicitReceiverSlot = -1;
   feConstants.lexicalClass = -1;

@@ -166,8 +166,11 @@ SccpState sccpAnalyze(SsaFunction function) {
           i++;
         }
         final end = block.end;
-        if (end.kind == 1) {
+        if (end.kind == 1 || end.kind == 5) {
           sccpEdge(state, function, b, 0, end.first);
+          if (end.kind == 5) sccpEdge(state, function, b, 1, end.second);
+        } else if (end.kind == 6) {
+          sccpEdge(state, function, b, 1, end.second);
         } else if (end.kind == 2) {
           final kind = state.kinds[end.value];
           if (kind == 2 || kind == 1 && state.constants[end.value] != 0) {
@@ -216,9 +219,8 @@ void sccpRewrite(SsaFunction function, SccpState state) {
   b = 0;
   while (b < blocks.length) {
     final end = blocks[b].end;
-    if (end.kind == 1 || end.kind == 2)
-      end.first.target = mapping[end.first.target];
-    if (end.kind == 2) end.second.target = mapping[end.second.target];
+    if (end.hasFirst) end.first.target = mapping[end.first.target];
+    if (end.hasSecond) end.second.target = mapping[end.second.target];
     b++;
   }
   function.blocks = blocks;
@@ -357,10 +359,10 @@ void removeDeadValues(SsaFunction function) {
     if (end.kind == 2 || end.kind == 3 && end.value >= 0) {
       roots.add(end.value);
     }
-    if (end.kind == 1 || end.kind == 2) {
+    if (end.hasFirst) {
       addEdgeDependencies(function, dependencies, end.first);
     }
-    if (end.kind == 2) {
+    if (end.hasSecond) {
       addEdgeDependencies(function, dependencies, end.second);
     }
     b++;
@@ -387,10 +389,10 @@ void removeDeadValues(SsaFunction function) {
   while (b < function.blocks.length) {
     final end = function.blocks[b].end;
     if (end.value >= 0) end.value = resolveValue(aliases, end.value);
-    if (end.kind == 1 || end.kind == 2) {
+    if (end.hasFirst) {
       removeDeadEdgeArguments(function, live, aliases, end.first);
     }
-    if (end.kind == 2) {
+    if (end.hasSecond) {
       removeDeadEdgeArguments(function, live, aliases, end.second);
     }
     b++;
@@ -511,9 +513,8 @@ void simplifyBooleanChecks(SsaFunction function) {
     }
     final end = block.end;
     if (end.value >= 0) end.value = resolveValue(aliases, end.value);
-    if (end.kind == 1 || end.kind == 2)
-      resolveValues(aliases, end.first.arguments);
-    if (end.kind == 2) resolveValues(aliases, end.second.arguments);
+    if (end.hasFirst) resolveValues(aliases, end.first.arguments);
+    if (end.hasSecond) resolveValues(aliases, end.second.arguments);
     b++;
   }
 }
@@ -573,10 +574,25 @@ void optimizeSsa(List<SsaFunction> program) {
   while (i < program.length) {
     final function = program[i];
     simplifyBooleanChecks(function);
+    simplifyInvokes(function);
     final state = sccpAnalyze(function);
     sccpRewrite(function, state);
+    simplifyInvokes(function);
     if (imageKind == 0 && i == 0) removeInitialZeroStores(function);
     removeDeadValues(function);
     i++;
+  }
+}
+
+void simplifyInvokes(SsaFunction function) {
+  for (final block in function.blocks) {
+    final end = block.end;
+    if (end.kind != 5 && end.kind != 6) continue;
+    if (block.instructions.isNotEmpty &&
+        (block.instructions.last.effects & ssaThrow) != 0)
+      continue;
+    block.end = end.kind == 5
+        ? SsaTerminator(1, -1, end.first, SsaEdge(-1, <int>[]))
+        : SsaTerminator(4, -1, SsaEdge(-1, <int>[]), SsaEdge(-1, <int>[]));
   }
 }

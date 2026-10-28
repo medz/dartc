@@ -103,7 +103,9 @@ bool parserTypeClose(Parser parser) {
 bool parserLookType(Parser parser, [bool declaration = false]) {
   if (parser.pendingClosers != 0 ||
       parser.pendingEquals ||
-      parser.tokens[parser.position].kind != tokenIdentifier)
+      parser.tokens[parser.position].kind != tokenIdentifier ||
+      tokenIsReserved(parser.tokens[parser.position]) &&
+          !parserIs(parser, 'void'))
     return false;
   var result = false;
   if (!parserIs(parser, 'Function') ||
@@ -1546,6 +1548,16 @@ AstPatternDeclaration parserPatternDeclaration(
 }
 
 AstExpression parseExpression(Parser parser, [bool allowCascade = true]) {
+  if (parserTake(parser, 'throw')) {
+    final token = parser.position - 1;
+    return AstExpression(
+      astThrow,
+      '',
+      <AstExpression>[parseExpression(parser, allowCascade)],
+      const <AstType>[],
+      token,
+    );
+  }
   var end = parserOuterPatternEnd(parser);
   if (end >= 0 && tokenIs(parser.tokens[end], '=')) {
     var token = parser.position;
@@ -2349,6 +2361,57 @@ bool parserUntypedFunction(Parser parser) {
 
 AstStatement parseStatement(Parser parser) {
   var token = parser.position;
+  if (parserTake(parser, 'rethrow')) {
+    parserExpect(parser, ';');
+    return parserEmptyStatement(token)..kind = astRethrowStatement;
+  }
+  if (parserTake(parser, 'try')) {
+    if (!parserIs(parser, '{')) parserExpect(parser, '{');
+    final body = parseStatement(parser);
+    final catches = <AstCatch>[];
+    while (parserIs(parser, 'on') || parserIs(parser, 'catch')) {
+      AstType? type;
+      if (parserTake(parser, 'on')) {
+        type = parseAstType(parser);
+        if (type.name == 'void' || type.name == 'void?')
+          parserError(parser, 'catch requires a non-void type');
+      }
+      final parameters = <AstParameter>[];
+      if (parserTake(parser, 'catch')) {
+        parserExpect(parser, '(');
+        final first = parser.position;
+        parameters.add(
+          AstParameter(
+            parserInferredType(first),
+            parserName(parser),
+            false,
+            first,
+          ),
+        );
+        if (parserTake(parser, ',')) {
+          final second = parser.position;
+          parameters.add(
+            AstParameter(
+              parserInferredType(second),
+              parserName(parser),
+              false,
+              second,
+            ),
+          );
+        }
+        parserExpect(parser, ')');
+      }
+      if (!parserIs(parser, '{')) parserExpect(parser, '{');
+      catches.add(AstCatch(type, parameters, parseStatement(parser)));
+    }
+    if (parserIs(parser, 'finally'))
+      parserError(parser, 'finally is not yet supported');
+    if (catches.isEmpty) parserExpect(parser, 'catch');
+    return parserEmptyStatement(token)
+      ..kind = astTryStatement
+      ..children = <AstStatement>[body]
+      ..catches = catches;
+  }
   if (parser.tokens[parser.position].kind == tokenIdentifier &&
       parser.tokens[parser.position + 1].kind == tokenSymbol &&
       parser.tokens[parser.position + 1].text == ':') {

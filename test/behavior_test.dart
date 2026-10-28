@@ -1095,6 +1095,37 @@ void main() {
         );
       }
     }
+    final uncaught = File('${temporary.path}/uncaught-exception.dart')
+      ..writeAsStringSync('''
+Never failure() { throw 'uncaught🙂'; }
+void main() { print('before'); failure(); print('after'); }
+''');
+    final uncaughtExecutable = '${uncaught.path}.out';
+    await run(
+      driver,
+      compileArguments(uncaught, uncaughtExecutable),
+      native: compiler != null,
+    );
+    final uncaughtExpected = await capture(sdk, [uncaught.path]);
+    final uncaughtActual = await capture(
+      uncaughtExecutable,
+      [],
+      environment: {'PATH': '/usr/bin:/bin'},
+      includeParentEnvironment: false,
+    );
+    if (uncaughtExpected.exitCode != 255 ||
+        uncaughtActual.exitCode != 255 ||
+        uncaughtExpected.stdout != 'before\n' ||
+        uncaughtActual.stdout != uncaughtExpected.stdout ||
+        !uncaughtActual.stderr.startsWith(
+          'Unhandled exception:\nuncaught🙂\n',
+        ) ||
+        !uncaughtActual.stderr.contains('failure') ||
+        !uncaughtActual.stderr.contains('main')) {
+      throw StateError(
+        'Uncaught exception did not preserve its effects, trace and exit status.',
+      );
+    }
     final libraries = {
       'object-pattern-library.dart': r'''
 library object.patterns;
@@ -1735,6 +1766,26 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      'void unused(){rethrow;}void main(){}',
+      'void unused(){try{throw 1;}catch(e){void f(){rethrow;}f();}}void main(){}',
+      'void unused(){try{throw 1;}catch(e,s){e=1;}}void main(){}',
+      'void unused(){try{throw 1;}catch(e,s){s=StackTrace.empty;}}void main(){}',
+      'void unused(){try{}catch(e,e){}}void main(){}',
+      '// @dart=3.6\nvoid unused(){try{}catch(_,_){}}void main(){}',
+      'void unused(){try{}on Missing{}}void main(){}',
+      'void unused(){try{}on void{}}void main(){}',
+      "void unused(){try{}catch(e){int x='bad';}}void main(){}",
+      'void unused(){try{throw 1;}catch(e){int x=e;print(x);}}void main(){}',
+      'void unused(){try{throw 1;}catch(e){}print(e);}void main(){}',
+      "void unused(){final int x;try{x=1;throw '';}catch(e){x=2;}print(x);}void main(){}",
+      'void unused(){int x;try{x=1;}catch(e){}print(x);}void main(){}',
+      "void unused(Object x){if(x is int){try{x='bad';}catch(_){}print(x+1);}}void main(){}",
+      'void unused(Object? x){throw x;}void main(){}',
+      'void unused(void x){throw x;}void main(){}',
+      'Never unused<T>(T x){throw x;}void main(){}',
+      "void unused(){throw 1;int x='bad';}void main(){}",
+      'const x=true?1:throw 1;void main(){}',
+      'int unused(){try{return 1;}on Never{}}void main(){}',
       'external Never nativeExit(int code);void main(){}',
       "Never stop(){while(true){}} void unused(){stop();int value='wrong';} void main(){}",
       'Never stop(){while(true){}} void unused(){stop();missing();} void main(){}',
