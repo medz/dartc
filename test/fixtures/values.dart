@@ -5555,7 +5555,233 @@ void interfaceValues() {
   print('${DeclaredStringImplementation()}');
 }
 
+class InheritedChild extends InheritedBase {
+  int value = 10;
+  String child = 'child';
+  late int cached = super.value + 5;
+  InheritedChild(int initial) : super.named(initial);
+  int add(int input, [int extra = 20]) => super.add(input) + extra;
+  T echo<T extends num>(T input) => super.echo<T>(input);
+  int baseValue() => super.value;
+  void changeBase(int next) {
+    super.value = next;
+  }
+
+  int Function() parentRead() => super.read;
+  int Function() nestedRead() =>
+      () => super.read();
+  int Function() nestedWrite() => () {
+    super.value += 2;
+    return super.value;
+  };
+}
+
+class InheritedBase {
+  int value;
+  String base = 'base';
+  late final String lazy = 'lazy';
+  InheritedBase.named(this.value);
+  int read() => value;
+  int add(int input, [int extra = 1]) => value + input + extra;
+  int invoke() => add(2);
+  T echo<T extends num>(T input) => input;
+  String toString() => '$base:$value';
+}
+
+class InheritedLeaf extends InheritedChild {
+  InheritedLeaf(int value) : super(value);
+}
+
+class InheritedGetterBase {
+  int value = 1;
+}
+
+class InheritedGetter extends InheritedGetterBase {
+  int get value => super.value * 2;
+  void add(int input) {
+    super.value += input;
+  }
+}
+
+class InheritedDefaultBase {
+  final int value;
+  const InheritedDefaultBase([this.value = 7]);
+}
+
+class InheritedDefault extends InheritedDefaultBase {
+  const InheritedDefault();
+}
+
+class InheritedImplicit extends InheritedDefaultBase {}
+
+abstract class InheritedConstantBase {
+  final int value;
+  const InheritedConstantBase(this.value);
+  int read() => value;
+}
+
+class InheritedConstant extends InheritedConstantBase {
+  final int value;
+  final String label;
+  const InheritedConstant(int base, this.value, this.label) : super(base);
+  const InheritedConstant.named(String label) : this(2, 3, label);
+  int baseValue() => super.value;
+}
+
+class InheritedConcrete {
+  int read(int value) => value + 1;
+}
+
+abstract class InheritedAbstract extends InheritedConcrete {
+  int read(int value);
+}
+
+class InheritedConcreteLeaf extends InheritedAbstract {}
+
+class InheritedObject {
+  InheritedObject() : super();
+  String toString() => 'prefix:' + super.toString();
+}
+
+class InheritedObjectLeaf extends InheritedObject {}
+
+class InheritedCallable {
+  int call(int value) => value + 1;
+}
+
+class InheritedCallableChild extends InheritedCallable {
+  int call(int value) => super(value) + 2;
+}
+
+class InheritedCallableLeaf extends InheritedCallableChild {}
+
+class InheritedGenericCallable {
+  T call<T>(T value) => value;
+}
+
+class InheritedGenericCallableChild extends InheritedGenericCallable {
+  T call<T>(T value) => super<T>(value);
+}
+
+class InheritedCallback {
+  int Function(int) callback = (value) => value + 1;
+  int Function(int) get reader {
+    print(1);
+    return callback;
+  }
+}
+
+class InheritedCallbackChild extends InheritedCallback {
+  int change() {
+    print(2);
+    callback = (value) => value + 10;
+    return 3;
+  }
+
+  int direct() => super.reader(change());
+  int field() => super.callback(change());
+  int value() => (super.reader)(change());
+}
+
+int inheritanceMark(int value) {
+  print(value);
+  return value;
+}
+
+class InheritedOrderBase {
+  int declared = inheritanceMark(1);
+  int value;
+  InheritedOrderBase(this.value) {
+    print(2);
+  }
+}
+
+class InheritedOrder extends InheritedOrderBase {
+  int own = inheritanceMark(3);
+  int explicit;
+  InheritedOrder(int input)
+    : explicit = inheritanceMark(4),
+      super(inheritanceMark(input)) {
+    print(5);
+  }
+}
+
+class InheritedThrowBase {
+  int value = inheritanceMark(11);
+  InheritedThrowBase() {
+    throw 12;
+  }
+}
+
+class InheritedThrow extends InheritedThrowBase {
+  int child = inheritanceMark(13);
+  InheritedThrow() {
+    print(14);
+  }
+}
+
+void inheritanceValues() {
+  final child = InheritedLeaf(2);
+  InheritedBase base = child;
+  print(child.base + child.child);
+  print(child.value);
+  print(base.value);
+  print(child.baseValue());
+  child.changeBase(7);
+  print(child.baseValue());
+  print(child.cached);
+  print(child.lazy);
+  print(base.add(2));
+  print(child.add(2, 30));
+  print(base.invoke());
+  print(base.echo(2.5));
+  print(child.parentRead()());
+  print(child.nestedRead()());
+  print(child.nestedWrite()());
+  print(child.parentRead() == child.read);
+  print(child is InheritedBase);
+  print(child.toString());
+  print('$child');
+  final getter = InheritedGetter();
+  print(getter.value);
+  getter.value = 4;
+  print(getter.value);
+  getter.add(2);
+  print(getter.value);
+  print(getter.value++);
+  print(getter.value);
+  getter.value += 3;
+  print(getter.value);
+  print(const InheritedDefault().value);
+  print(InheritedImplicit().value);
+  const value = InheritedConstant(2, 3, 'constant');
+  const InheritedConstantBase constantBase = value;
+  print(constantBase.read());
+  print(value.baseValue());
+  print(value.label);
+  print(identical(value, const InheritedConstant.named('constant')));
+  print(identical(value, const InheritedConstant(9, 3, 'constant')));
+  print(InheritedConstant(2, 3, 'constant').baseValue());
+  print(InheritedConcreteLeaf().read(4));
+  print(InheritedObjectLeaf());
+  print(InheritedCallableLeaf()(3));
+  int Function(int) callable = InheritedCallableLeaf();
+  print(callable(4));
+  print(InheritedGenericCallableChild()<String>('inherited call'));
+  print(InheritedCallbackChild().direct());
+  print(InheritedCallbackChild().field());
+  print(InheritedCallbackChild().value());
+  final order = InheritedOrder(6);
+  print(order.declared + order.value + order.own + order.explicit);
+  try {
+    InheritedThrow();
+  } catch (error) {
+    print(error);
+  }
+}
+
 void main(List<String> args) {
+  inheritanceValues();
   interfaceValues();
   finallyValues();
   exceptionValues();

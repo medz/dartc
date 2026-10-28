@@ -1174,6 +1174,43 @@ void main(List<String> args) {
       File(standard).uri.toString(),
     ]);
     final libraries = {
+      'inheritance-parent.dart': r'''
+part 'inheritance-part.dart';
+class InheritanceParent {
+  int _value;
+  final String label;
+  InheritanceParent(this._value, {this.label = 'parent'});
+  InheritanceParent._private() : _value = 99, label = 'private';
+  int read() => _value;
+  int invoke() => method();
+  int method() => _value;
+  static int staticValue() => 100;
+}
+''',
+      'inheritance-part.dart': r'''
+part of 'inheritance-parent.dart';
+class PartChild extends InheritanceParent { PartChild() : super._private(); }
+''',
+      'inheritance-imports.dart': r'''
+import 'inheritance-parent.dart' as parent;
+typedef ParentAlias = parent.InheritanceParent;
+class Child extends ParentAlias {
+  int _value = 40;
+  Child(int value) : super(value, label: 'child');
+  int method() => super.method() + _value;
+  int own() => _value;
+  int Function() nested() => () => super.method();
+}
+void main() {
+  final child = Child(3);
+  print(child.read());
+  print(child.own());
+  print(child.invoke());
+  print(child.nested()());
+  print(child.label);
+  print(parent.PartChild().read());
+}
+''',
       'interface-private.dart': r'''
 abstract class PrivateInterface {
   int _read(int value);
@@ -1780,6 +1817,7 @@ void main() {
     }
     await compare(File('${temporary.path}/imports.dart'), []);
     await compare(File('${temporary.path}/interface-imports.dart'), []);
+    await compare(File('${temporary.path}/inheritance-imports.dart'), []);
     await compare(File('${temporary.path}/object-pattern-imports.dart'), []);
     await compare(File('${temporary.path}/core.dart'), []);
     await compare(File('${temporary.path}/priority.dart'), []);
@@ -1843,6 +1881,26 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      'class A{}class B extends A implements A{}void main(){}',
+      'class A extends B{}class B extends A{}void main(){}',
+      'class A{A.named();}class B extends A{}void main(){}',
+      'class A{A(int x);}class B extends A{}void main(){}',
+      'class A{}class B extends A{int x;B():super(),x=1;}void main(){}',
+      'class A{}class B extends A{B():super(),super();}void main(){}',
+      'class A{int x=0;}class B extends A{B():x=2;}void main(){}',
+      'class A{int x=0;}class B extends A{B(this.x);}void main(){}',
+      'class A{A();}class B extends A{const B();}void main(){}',
+      'class A{void f(num n){}}class B extends A{void f(int n){}}void main(){}',
+      'abstract class A{void f();}abstract class B extends A{void g(){super.f();}}void main(){}',
+      'class A{static void f(){}}class B extends A{void g(){super.f();}}void main(){}',
+      'class A{void f(){}}class B extends A{static void g(){super.f();}}void main(){}',
+      'class A{}class B extends A{Object f()=>super;}void main(){}',
+      'class A{final int x;const A(this.x);}int value()=>1;class B extends A{const B():super(value());}void main(){}',
+      "import 'inheritance-parent.dart';class Bad extends InheritanceParent{Bad():super._private();}void main(){}",
+      'class A{static int f()=>1;}class B extends A{}void unused(){B.f();}void main(){}',
+      'class A{int x=1;}class B extends A{B():super(this.x);}void main(){}',
+      'class A{}class B extends A{void unused(){super();}}void main(){}',
+      'class A{int call()=>1;}class B extends A{static int unused()=>super();}void main(){}',
       'typedef Identity<T>=T;class A{}class C implements Identity<A>{}void main(){}',
       'typedef Bound<T extends A>=A;class A{}class B{}class C implements Bound<B>{}void main(){}',
       'typedef Bound<T extends A>=List<T>;typedef Bad=Bound<B>;class A{}class B{}void main(){}',
@@ -2505,7 +2563,6 @@ void main() {
       'class C { final List<int> values; const C(int input):values=const[input]; } void main() {}',
       // These initializer forms are valid Dart but remain unsupported.
       'class C { C():assert(true); } void main() { C(); }',
-      'class C { C():super(); } void main() { C(); }',
       'void main() { final int? value; print(value); }',
       'void f(bool flag) { final int value; if (flag) value = 1; value = 2; print(value); } void main() { f(false); }',
       'void main() { final int value; for (int i = 0; i < 2; i++) { value = i; } }',

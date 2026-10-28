@@ -1503,6 +1503,7 @@ class FeLvalue {
   int member = -1;
   int reader = -1;
   int setter = -1;
+  CheckedMemberRead? directRead;
 
   FeLvalue(
     this.type,
@@ -2444,9 +2445,10 @@ int feInvokeDeclaration(
   int function, [
   int receiver = 0,
   int context = -1,
+  bool direct = false,
 ]) {
   final owner = receiver == 0 ? -1 : feOwners[function];
-  final dispatch = owner >= 0 && feNeedsDispatch(owner)
+  final dispatch = !direct && owner >= 0 && feNeedsDispatch(owner)
       ? feDispatchMethod(function, call)
       : -1;
   if (functions[function].typeParameters.isNotEmpty) {
@@ -2473,11 +2475,13 @@ int feLowerArguments(
   int start,
   int function, [
   bool suppliedOnly = false,
+  int parameterStart = 0,
 ]) {
   if (call.typeArguments.length != 0)
     feAstError(call.token, 'nongeneric call does not accept type arguments');
   var parameters = feFunctionNodes[function].parameters;
-  var offset = feParameterOffset(function);
+  if (parameterStart != 0) parameters = parameters.sublist(parameterStart);
+  var offset = feParameterOffset(function) + parameterStart;
   if (call.children.length - start == parameters.length &&
       (parameters.isEmpty || parameters.last.kind != astNamedParameter)) {
     var argument = start;
@@ -2501,6 +2505,7 @@ int feLowerArguments(
     feFunctionNodes[function],
     call,
     start,
+    parameterStart,
   );
   var values = List<int>.filled(parameters.length, -1);
   var argument = start;
@@ -3219,6 +3224,76 @@ int feLowerListSublist(AstExpression call, int type) {
   return type;
 }
 
+bool feIsSuper(AstExpression expression) =>
+    expression.kind == astName && expression.text == 'super';
+
+int feSuperOwner(AstExpression receiver) {
+  final owner = feLexicalOwner(feFunction);
+  if (owner < 0 || receiver.binding < 0 || feBindings.receiver < 0)
+    feAstError(receiver.token, 'super requires an instance receiver');
+  final type = classSuperclasses[owner];
+  return typeIsClass(type) ? typeArgument(type) : -1;
+}
+
+int feLoadSuper(AstExpression receiver, int owner) {
+  final type = owner < 0 ? tObject : classType(owner);
+  final actual = feReadLocal(receiver.binding, receiver.token);
+  return feConvertValue(actual, type, receiver.token);
+}
+
+MemberBinding? feSuperImplementation(
+  int owner,
+  String name,
+  int role,
+  int token,
+) => classImplementation(
+  owner,
+  name,
+  sourceLibrary(feSources, feTokens[token].source),
+  role,
+  feOwnMembers,
+  feObjectMembers,
+  feFunctionNodes,
+);
+
+CheckedMemberRead feSuperRead(int owner, String name, int token) {
+  final method = feSuperImplementation(owner, name, classMethod, token);
+  final member =
+      method ?? feSuperImplementation(owner, name, classGetter, token);
+  if (member == null)
+    feAstError(token, 'super member has no concrete getter: ' + name);
+  if (member.receiverParameter)
+    feAstError(token, 'Object method tear-offs are not yet supported');
+  return feCheckBoundMember(owner, member, token, true);
+}
+
+int feLowerSuperCall(
+  AstExpression call,
+  AstExpression receiver,
+  String name,
+  int context,
+) {
+  final owner = feSuperOwner(receiver);
+  final type = feLoadSuper(receiver, owner);
+  final member = feSuperImplementation(owner, name, classMethod, call.token);
+  if (member == null) {
+    final read = feReadCheckedMember(
+      feSuperRead(owner, name, call.token),
+      call.token,
+      true,
+    );
+    return feLowerValueCall(call, read, context);
+  }
+  final function = member.method;
+  feConvertValue(type, functions[function].parameterTypes[0], call.token);
+  if (member.receiverParameter) {
+    final count = feLowerArguments(call, 1, function, false, 1);
+    feCall(function, count + 1);
+    return functions[function].result;
+  }
+  return feInvokeDeclaration(call, function, 1, context, true);
+}
+
 int feLowerMemberCall(
   AstExpression call,
   AstExpression callee, [
@@ -3226,6 +3301,8 @@ int feLowerMemberCall(
 ]) {
   var receiver = callee.children[0];
   var member = callee.text;
+  if (feIsSuper(receiver))
+    return feLowerSuperCall(call, receiver, member, context);
   if (receiver.kind == astFunctionExpression && member == 'call')
     return feLowerImmediateCall(call, receiver);
   var type = feLowerExpression(receiver);
@@ -3525,12 +3602,9 @@ void feLowerConstructor(int function) {
   }
   var bodyBindings = feBindings;
   var owner = feOwners[function];
-  var steps = plan.steps;
-  var stepIndex = 0;
-  while (stepIndex < steps.length) {
-    var step = steps[stepIndex];
-    var field = feClassFieldStarts[owner] + step.field;
-    var fieldType = feFieldTypes[field];
+  for (final step in plan.steps) {
+    final field = feClassFieldStarts[owner] + step.field;
+    final fieldType = feFieldTypes[field];
     feOperand(opLoadLocal, 0);
     feOperand(opInt, feFieldIndices[field]);
     if (step.kind == constructorDeclaration) {
@@ -3560,7 +3634,21 @@ void feLowerConstructor(int function) {
       feBuiltinTyped(bObjectSet, 3, tBool);
       feEmit(opPop);
     }
-    stepIndex++;
+  }
+  if (plan.superTarget >= 0) {
+    feBindings = bodyBindings.withReceiver(-1);
+    final target = plan.superTarget;
+    final call = plan.superCall!;
+    checkArgumentOrder(feSources, call);
+    feOperand(opLoadLocal, 0);
+    feConvertValue(
+      classType(owner),
+      functions[target].parameterTypes[0],
+      call.token,
+    );
+    final count = feLowerArguments(call, 1, target);
+    feCall(target, count + 1);
+    feEmit(opPop);
   }
   feBindings = bodyBindings;
   var body = syntax.body;
@@ -3610,6 +3698,7 @@ int feLowerConstructorCall(
 int feLowerCall(AstExpression call, int context) {
   checkArgumentOrder(feSources, call);
   var callee = feWithReceiver(call.children[0]);
+  if (feIsSuper(callee)) return feLowerSuperCall(call, callee, 'call', context);
   var symbol = feExpressionSymbol(callee, false);
   var classArguments = call.typeArguments;
   if ((callee.kind == astName || callee.kind == astMember) &&
@@ -3698,6 +3787,16 @@ int feLowerCall(AstExpression call, int context) {
 }
 
 int feLowerMember(AstExpression expression) {
+  if (feIsSuper(expression.children[0])) {
+    final receiver = expression.children[0];
+    final owner = feSuperOwner(receiver);
+    feLoadSuper(receiver, owner);
+    return feReadCheckedMember(
+      feSuperRead(owner, expression.text, expression.token),
+      expression.token,
+      true,
+    );
+  }
   final receiverSymbol = feExpressionSymbol(expression.children[0], false);
   if (receiverSymbol >= 0) {
     final declaration = feSymbols.declarations[receiverSymbol];
@@ -3785,10 +3884,12 @@ CheckedMemberRead feCheckMemberRead(int type, String member, int token) {
 CheckedMemberRead feCheckBoundMember(
   int owner,
   MemberBinding member,
-  int token,
-) {
+  int token, [
+  bool direct = false,
+]) {
   var receiver = classType(owner);
-  if (feNeedsDispatch(owner) &&
+  if (!direct &&
+      feNeedsDispatch(owner) &&
       member.method < 0 &&
       hasClassMember(member, classGetter)) {
     final target = feDispatchMember(owner, member, classGetter, const <int>[]);
@@ -3831,8 +3932,18 @@ CheckedMemberRead feCheckBoundMember(
   feAstError(token, 'member has no getter: ' + member.name);
 }
 
-int feReadCheckedMember(CheckedMemberRead member, int token) {
+int feReadCheckedMember(
+  CheckedMemberRead member,
+  int token, [
+  bool direct = false,
+]) {
   var kind = member.kind;
+  if (kind == memberReadMethod || kind == memberReadGetter)
+    feConvertValue(
+      member.receiver,
+      functions[member.target].parameterTypes[0],
+      token,
+    );
   if (kind == memberReadNumberProperty) {
     feConvertValue(member.receiver, tDynamic, token);
     feOperand(opInt, member.target);
@@ -3840,7 +3951,7 @@ int feReadCheckedMember(CheckedMemberRead member, int token) {
     feConvertValue(tBool, member.type, token);
   }
   if (kind == memberReadMethod)
-    return feCreateBoundMethod(member.target, token);
+    return feCreateBoundMethod(member.target, token, direct);
   if (kind == memberReadGetter) {
     feCall(member.target, 1);
   } else if (kind == memberReadField) {
@@ -3875,6 +3986,8 @@ int feReadBoundMember(int owner, MemberBinding member, int token) {
 
 FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
   expression = feWithReceiver(expression);
+  if (expression.kind == astMember && feIsSuper(expression.children[0]))
+    return feLowerSuperLvalue(expression, reading);
   if (expression.kind == astName) {
     var binding = expression.binding;
     if (binding >= 0) {
@@ -3969,7 +4082,6 @@ FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
     feOperand(opStoreLocal, receiver);
     return FeLvalue(tDynamic, 3, receiver, -1, -1, -1);
   }
-  var container = 1;
   var type = tInt;
   if (expression.kind == astIndex) {
     if (!typeIsList(receiverType))
@@ -4024,11 +4136,9 @@ FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
       target.member = entry;
       return target;
     }
-    if (member.field < 0)
+    if (member.fieldSetter < 0)
       feAstError(expression.token, 'member has no setter: ' + member.name);
-    var field = member.field;
-    if (!feFieldNodes[field].hasSetter)
-      feAstError(expression.token, 'cannot assign a final field');
+    var field = member.fieldSetter;
     if (feFieldNodes[field].lateVariable) {
       final receiver = feTemp(receiverType);
       feOperand(opStoreLocal, receiver);
@@ -4038,17 +4148,66 @@ FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
         ..setter = feLateFieldSetters[field];
     }
     feOperand(opInt, feFieldIndices[field]);
-    type = feFieldTypes[field];
-    container = 2;
+    final index = feTemp(tInt);
+    feOperand(opStoreLocal, index);
+    final receiver = feTemp(receiverType);
+    feOperand(opStoreLocal, receiver);
+    return FeLvalue(feFieldTypes[field], 2, receiver, index, -1, -1)
+      ..owner = owner
+      ..member = entry;
   }
   var index = feTemp(tInt);
   feOperand(opStoreLocal, index);
   var receiver = feTemp(receiverType);
   feOperand(opStoreLocal, receiver);
-  return FeLvalue(type, container, receiver, index, -1, -1);
+  return FeLvalue(type, 1, receiver, index, -1, -1);
+}
+
+FeLvalue feLowerSuperLvalue(AstExpression expression, bool reading) {
+  final source = expression.children[0];
+  final owner = feSuperOwner(source);
+  final member = feSuperImplementation(
+    owner,
+    expression.text,
+    classSetter,
+    expression.token,
+  );
+  if (member == null)
+    feAstError(
+      expression.token,
+      'super member has no concrete setter: ' + expression.text,
+    );
+  final type = feLoadSuper(source, owner);
+  final receiver = feTemp(type);
+  feOperand(opStoreLocal, receiver);
+  final function = member.setter;
+  var field = -1;
+  var index = -1;
+  if (function < 0) {
+    field = member.fieldSetter;
+    index = feTemp(tInt);
+    feOperand(opInt, feFieldIndices[field]);
+    feOperand(opStoreLocal, index);
+  }
+  final setter = function >= 0 ? function : feLateFieldSetters[field];
+  final target = FeLvalue(
+    function >= 0 ? functions[function].parameterTypes[1] : feFieldTypes[field],
+    setter >= 0 ? 4 : 2,
+    receiver,
+    index,
+    -1,
+    -1,
+  )..setter = setter;
+  if (reading)
+    target.directRead = feSuperRead(owner, expression.text, expression.token);
+  return target;
 }
 
 int feReadLvalue(FeLvalue target, int token) {
+  if (target.directRead case final read?) {
+    feOperand(opLoadLocal, target.receiver);
+    return feReadCheckedMember(read, token, true);
+  }
   if (target.container == 3) {
     feOperand(opLoadLocal, target.receiver);
     return tNever;
@@ -4065,7 +4224,7 @@ int feReadLvalue(FeLvalue target, int token) {
   if (target.container == 5) {
     return feLoadDeclaration(target.reader, token);
   }
-  if (target.container == 4) {
+  if (target.owner >= 0) {
     feOperand(opLoadLocal, target.receiver);
     return feReadBoundMember(
       target.owner,
@@ -4130,8 +4289,14 @@ void feWriteLvalue(FeLvalue target, int token) {
   feOperand(opStoreLocal, value);
   feOperand(opLoadLocal, target.receiver);
   if (target.container == 4) {
-    var member = feMembers[target.owner].members[target.member];
-    var setter = target.setter >= 0 ? target.setter : member.setter;
+    final setter = target.setter >= 0
+        ? target.setter
+        : feMembers[target.owner].members[target.member].setter;
+    feConvertValue(
+      feSlotTypes[target.receiver],
+      functions[setter].parameterTypes[0],
+      token,
+    );
     feOperand(opLoadLocal, value);
     feCall(setter, 2);
     return;
@@ -4346,6 +4511,8 @@ int feLowerValue(AstExpression expression) {
     return tBool;
   }
   if (kind == astName) {
+    if (feIsSuper(expression))
+      feAstError(expression.token, 'super requires a member selector');
     var owner = feStaticOwner(expression);
     if (owner >= 0)
       return feReadStaticMember(
@@ -6073,6 +6240,46 @@ void parseSource(SourceProgram source) {
     feFunctionNodes,
     feFieldTypes,
   );
+  for (final owner in feClassOrder) {
+    final parent = classSuperclasses[owner];
+    if (typeIsClass(parent)) {
+      final base = typeArgument(parent);
+      final prefix = (classSizes[base] - objectHeaderBytes) ~/ 8;
+      classSizes[owner] += prefix * 8;
+      classPointerMasks[owner] = <int>[...classPointerMasks[base]];
+      classTaggedMasks[owner] = <int>[...classTaggedMasks[base]];
+      for (var index = 0; index < feClassFieldCounts[owner]; index++) {
+        final field = feClassFieldStarts[owner] + index;
+        final slot = prefix + index;
+        feFieldIndices[field] = slot;
+        if (feLateFieldStates[field] >= 0) feLateFieldStates[field] += prefix;
+        while (classPointerMasks[owner].length <= slot ~/ 64) {
+          classPointerMasks[owner].add(0);
+          classTaggedMasks[owner].add(0);
+        }
+        if (typeIsReference(feFieldTypes[field]))
+          classPointerMasks[owner][slot ~/ 64] |= 1 << (slot & 63);
+        if (typeIsTagged(feFieldTypes[field]))
+          classTaggedMasks[owner][slot ~/ 64] |= 1 << (slot & 63);
+      }
+      final slots = (classSizes[owner] - objectHeaderBytes) ~/ 8;
+      while (classPointerMasks[owner].length * 64 < slots) {
+        classPointerMasks[owner].add(0);
+        classTaggedMasks[owner].add(0);
+      }
+    }
+    final rendered = classImplementation(
+      owner,
+      'toString',
+      sourceCore,
+      classMethod,
+      feOwnMembers,
+      feObjectMembers,
+      feFunctionNodes,
+    );
+    classToStringFunctions[owner] =
+        rendered == null || rendered.receiverParameter ? -1 : rendered.method;
+  }
   checkInitializers(feSymbols, syntax);
   var plannedFunction = 0;
   while (plannedFunction < functions.length) {
@@ -6081,11 +6288,12 @@ void parseSource(SourceProgram source) {
       final owner = feOwners[plannedFunction];
       plan = planConstructorInitializers(
         feSymbols,
-        feClassNodes[owner],
+        owner,
+        feClassNodes,
         feFunctionNodes[plannedFunction],
-        feOwnMembers[owner],
+        feOwnMembers,
         feClassFieldStarts[owner],
-        feClassConstructors[owner],
+        feClassConstructors,
       );
     }
     feConstructorPlans.add(plan);
@@ -6447,29 +6655,18 @@ void feGenerateDispatches() {
       if (feClassNodes[owner].isAbstract ||
           !typeIsSubtype(classType(owner), receiverType))
         continue;
-      var index = lookupMember(
-        feOwnMembers[owner],
+      final memberRole = role == classTearoff ? classMethod : role;
+      final member = classImplementation(
+        owner,
         dispatch.member.name,
         dispatch.member.library,
-      );
-      var members = feOwnMembers[owner];
-      final memberRole = role == classTearoff ? classMethod : role;
-      if (index < 0 ||
-          !hasConcreteClassMember(
-            members.members[index],
-            memberRole,
-            feFunctionNodes,
-          )) {
-        members = feObjectMembers;
-        index = lookupMember(
-          members,
-          dispatch.member.name,
-          dispatch.member.library,
-        );
-        if (role == classTearoff)
-          feAstError(token, 'Object method tear-offs are not yet supported');
-      }
-      final member = members.members[index];
+        memberRole,
+        feOwnMembers,
+        feObjectMembers,
+        feFunctionNodes,
+      )!;
+      if (role == classTearoff && member.receiverParameter)
+        feAstError(token, 'Object method tear-offs are not yet supported');
       feOperand(opLoadLocal, 0);
       feConvertValue(receiverType, tDynamic, token);
       feOperand(opTypeTest, classType(owner));

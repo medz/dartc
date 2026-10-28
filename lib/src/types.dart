@@ -61,6 +61,7 @@ class DartType {
 List<DartType> dartTypes = <DartType>[];
 List<int> classDartTypes = <int>[];
 List<List<int>> classSupertypes = <List<int>>[];
+List<int> classSuperclasses = <int>[];
 List<FunctionSignature> functionSignatures = <FunctionSignature>[];
 List<TypeParameterInfo> typeParameters = <TypeParameterInfo>[];
 
@@ -69,6 +70,7 @@ void resetTypes() {
   dartTypes.clear();
   classDartTypes.clear();
   classSupertypes.clear();
+  classSuperclasses.clear();
   functionSignatures.clear();
   typeParameters.clear();
   var i = 0;
@@ -175,6 +177,7 @@ int classType(int classId) {
     var owner = classDartTypes.length;
     classDartTypes.add(dartTypes.length);
     classSupertypes.add(const <int>[]);
+    classSuperclasses.add(tObject);
     dartTypes.add(DartType(kClass, owner, -1, -1));
   }
   return classDartTypes[classId];

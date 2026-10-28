@@ -20,8 +20,15 @@ class ConstructorStep {
 class ConstructorPlan {
   final List<ConstructorStep> steps;
   final int redirectTarget;
+  final int superTarget;
+  final AstExpression? superCall;
 
-  const ConstructorPlan(this.steps, this.redirectTarget);
+  const ConstructorPlan(
+    this.steps,
+    this.redirectTarget, [
+    this.superTarget = -1,
+    this.superCall,
+  ]);
 }
 
 Never _initError(SymbolTable symbols, int token, String message) {
@@ -83,12 +90,16 @@ int _initializerField(
 
 ConstructorPlan planConstructorInitializers(
   SymbolTable symbols,
-  AstClass owner,
+  int classId,
+  List<AstClass> classes,
   AstFunction syntax,
-  ClassMembers members,
+  List<ClassMembers> membersByClass,
   int fieldStart,
-  List<int> classFunctions,
+  List<List<int>> constructorsByClass,
 ) {
+  final owner = classes[classId];
+  final members = membersByClass[classId];
+  final classFunctions = constructorsByClass[classId];
   var redirectTarget = -1;
   if (syntax.initializers.isNotEmpty &&
       syntax.initializers[0].kind == astRedirectInitializer) {
@@ -186,8 +197,20 @@ ConstructorPlan planConstructorInitializers(
     p++;
   }
   var i = 0;
+  AstExpression? superCall;
   while (i < syntax.initializers.length) {
     var initializer = syntax.initializers[i];
+    if (initializer.kind == astSuperInitializer) {
+      if (i + 1 != syntax.initializers.length)
+        _initError(
+          symbols,
+          initializer.token,
+          'super initializer must be last',
+        );
+      superCall = initializer.expression;
+      i++;
+      continue;
+    }
     if (initializer.kind != astFieldInitializer)
       _initError(
         symbols,
@@ -217,7 +240,56 @@ ConstructorPlan planConstructorInitializers(
       _initError(symbols, owner.fields[f].token, 'missing field initializer');
     f++;
   }
-  return ConstructorPlan(steps, -1);
+  final superclass = classSuperclasses[classId];
+  if (superclass == tObject && superCall == null)
+    return ConstructorPlan(steps, -1);
+  final call =
+      superCall ??
+      AstExpression(
+        astCall,
+        astCallIdentifier,
+        <AstExpression>[
+          AstExpression(
+            astName,
+            'super',
+            const <AstExpression>[],
+            const <AstType>[],
+            syntax.token,
+          ),
+        ],
+        const <AstType>[],
+        syntax.token,
+      );
+  final callee = call.children[0];
+  if (call.typeArguments.isNotEmpty || callee.typeArguments.isNotEmpty)
+    _initError(
+      symbols,
+      call.token,
+      'super constructor cannot have type arguments',
+    );
+  final name = callee.kind == astMember
+      ? constructorSelector(symbols.program, callee.text, callee.token)
+      : '';
+  if (superclass == tObject) {
+    if (name != '' || call.children.length != 1)
+      _initError(symbols, call.token, 'Object constructor takes no arguments');
+    return ConstructorPlan(steps, -1);
+  }
+  final parent = typeArgument(superclass);
+  final ordinal = lookupConstructor(membersByClass[parent], name);
+  if (ordinal < 0)
+    _initError(symbols, call.token, 'unknown superclass constructor');
+  if (name.startsWith('_') &&
+      sourceLibrary(
+            symbols.program,
+            symbols.program.tokens[syntax.token].source,
+          ) !=
+          sourceLibrary(
+            symbols.program,
+            symbols.program.tokens[classes[parent].token].source,
+          ))
+    _initError(symbols, call.token, 'private superclass constructor');
+  return ConstructorPlan(steps, -1, constructorsByClass[parent][ordinal], call);
 }
 
 void checkConstructorRedirects(

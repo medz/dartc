@@ -525,12 +525,9 @@ void bindingExpression(
   }
   for (var type in expression.typeArguments) bindingType(binder, scope, type);
   if (expression.kind == astName) {
-    expression.binding = bindingReference(
-      binder,
-      scope,
-      expression.text,
-      expression.token,
-    );
+    expression.binding = expression.text == 'super'
+        ? bindingReceiver(binder, scope)
+        : bindingReference(binder, scope, expression.text, expression.token);
     var members = binder.members;
     if (expression.binding < 0 && members != null) {
       var member = lookupMember(

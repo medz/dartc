@@ -297,6 +297,7 @@ class AstFunction {
 class AstClass {
   List<AstExpression> metadata = const <AstExpression>[];
   bool isAbstract = false;
+  AstType? superclass;
   List<AstType> interfaces = const <AstType>[];
   String name;
   List<AstVariable> fields;

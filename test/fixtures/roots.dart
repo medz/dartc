@@ -57,6 +57,20 @@ class Wide {
   Wide(this.tail, this.taggedTail, this.p62, this.third);
 }
 
+class DerivedWide extends Wide {
+  Leaf own;
+  Object? ownTagged;
+  late Leaf delayed = Leaf(207);
+  DerivedWide(
+    Leaf tail,
+    Object? tagged,
+    Leaf p62,
+    Leaf third,
+    this.own,
+    this.ownTagged,
+  ) : super(tail, tagged, p62, third);
+}
+
 class Watch {
   int queue;
   bool formatting;
@@ -1206,15 +1220,27 @@ void main(List<String> args) {
   var second = rt.nativeLoad64(edges + 8);
   check(listElements(first, edges) == 0);
   check(rt.rtTraceObject(second, edges, capacity) == 0);
-  var wide = Wide(Leaf(201), Leaf(202), Leaf(203), Leaf(204));
+  var wide = DerivedWide(
+    Leaf(201),
+    Leaf(202),
+    Leaf(203),
+    Leaf(204),
+    Leaf(205),
+    Leaf(206),
+  );
   wide.p61 = raw;
   var wideAddress = capture(wide, 200, queue);
   count = rt.rtTraceObject(wideAddress, edges, capacity);
-  check(count == 4);
+  check(count == 6);
   check(findMarker(edges, count, 201) != 0);
   check(findMarker(edges, count, 202) != 0);
   check(findMarker(edges, count, 203) != 0);
   check(findMarker(edges, count, 204) != 0);
+  check(findMarker(edges, count, 205) != 0);
+  check(findMarker(edges, count, 206) != 0);
+  check(wide.delayed.marker == 207);
+  count = rt.rtTraceObject(wideAddress, edges, capacity);
+  check(count == 7 && findMarker(edges, count, 207) != 0);
   check(wide.tail.marker == 201);
   var refs = <Leaf?>[Leaf(301), null, Leaf(302)];
   var tagged = <Object?>[Leaf(303), false, 9223372036854775807, Leaf(304)];

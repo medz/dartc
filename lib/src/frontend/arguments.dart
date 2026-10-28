@@ -26,9 +26,12 @@ List<int> bindArguments(
   SourceProgram source,
   AstFunction function,
   AstExpression call,
-  int start,
-) {
-  var parameters = function.parameters;
+  int start, [
+  int parameterStart = 0,
+]) {
+  var parameters = parameterStart == 0
+      ? function.parameters
+      : function.parameters.sublist(parameterStart);
   var supplied = List<bool>.filled(parameters.length, false);
   var result = <int>[];
   var positional = 0;

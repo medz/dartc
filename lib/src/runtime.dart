@@ -1394,7 +1394,9 @@ int rtClassSubtype(int descriptor, int expected) {
   return 0;
 }
 
-String rtObjectToString(Object value) => value.toString();
+String rtObjectToString(Object value) =>
+    nativeValueFromBits(rtObjectDefaultString(nativeValueBits(value)))
+        as String;
 
 int rtTypeSubtype(int actual, int expected) {
   if (actual == expected) return 1;
@@ -1902,6 +1904,22 @@ int rtValueFormat(int value, int handleType) {
   return result;
 }
 
+int rtObjectDefaultString(int value) {
+  final mark = rtRootMark();
+  rtRootPush(value, storageTagged);
+  final descriptor = rtObjectDescriptor(value);
+  final name = descriptor + nativeLoad64(descriptor + descriptorNameOffset);
+  final prefix = rtStringFromWords(0x65636e6174736e49, 0x2720666f20, 0, 0);
+  rtRootPush(prefix, storageRef);
+  final suffix = rtStringFromWords(39, 0, 0, 0);
+  rtRootPush(suffix, storageRef);
+  final head = rtStringConcat(prefix, name);
+  rtRootPush(head, storageRef);
+  final result = rtStringConcat(head, suffix);
+  rtRootRestore(mark);
+  return result;
+}
+
 int rtValueFormatCore(int value, int handleType, int kind) {
   if (value == 0) {
     return rtStringFromWords(0x6c6c756e, 0, 0, 0);
@@ -1922,14 +1940,7 @@ int rtValueFormatCore(int value, int handleType, int kind) {
   if (kind == typeKindClass) {
     var callback = nativeLoad64(descriptor + descriptorToStringOffset);
     if (callback != 0) return nativeCall1(descriptor + callback, value);
-    var name = descriptor + nativeLoad64(descriptor + descriptorNameOffset);
-    var prefix = rtStringFromWords(0x65636e6174736e49, 0x2720666f20, 0, 0);
-    rtRootPush(prefix, storageRef);
-    var suffix = rtStringFromWords(39, 0, 0, 0);
-    rtRootPush(suffix, storageRef);
-    var head = rtStringConcat(prefix, name);
-    rtRootPush(head, storageRef);
-    return rtStringConcat(head, suffix);
+    return rtObjectDefaultString(value);
   }
   var length = rtListLength(value);
   if (length == 0) return rtStringFromWords(0x5d5b, 0, 0, 0);

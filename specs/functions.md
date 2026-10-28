@@ -78,13 +78,13 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 可执行文件产物支持将顶层函数、静态方法、绑定实例方法、局部函数和匿名函数作为值存储、传参、返回或放入 typed List，并通过具体的非泛型必需位置签名调用或 `.call`。目标文件、静态库和动态库产物不支持 Dart 函数值。可选/命名函数值、泛型函数值、构造器提取及 dynamic/裸 `Function` 调用尚未实现。
 
-[实例方法闭包化][instance-closurization]支持已绑定类声明的非泛型必需位置方法，包括显式/隐式 this、嵌套闭包内提取、跨库可见性及空短路接收者。接收者只求值一次，方法值持续持有该对象；相同对象的同一方法比较相等，不同对象或方法不相等。普通闭包仍按自身身份比较；不规定重复方法提取的 `identical` 结果。实例方法引用不是常量，未使用函数和未执行常量分支也须检查这一义务。仍以 builtin 分支实现的方法提取、继承/super 分派以及 Function.hashCode 等继承 API 仍缺。验证入口为 [values.dart](../test/fixtures/values.dart) 的 `functionValues`、[behavior_test.dart](../test/behavior_test.dart) 的 `function-imports.dart`、拒例与失败用例，以及 [roots.dart](../test/fixtures/roots.dart) 的 `closureRoots`。
+[实例方法闭包化][instance-closurization]支持已绑定类声明的非泛型必需位置方法，包括显式/隐式 this、嵌套闭包内提取、跨库可见性及空短路接收者。接收者只求值一次，方法值持续持有该对象；相同对象的同一方法比较相等，不同对象或方法不相等。普通闭包仍按自身身份比较；不规定重复方法提取的 `identical` 结果。实例方法引用不是常量，未使用函数和未执行常量分支也须检查这一义务。支持继承方法和 super 方法值；super 选择父类具体实现，仍绑定原对象。仍以 builtin 分支实现的方法提取及 Function.hashCode 等继承 API 仍缺。验证入口为 [values.dart](../test/fixtures/values.dart) 的 `functionValues`、`inheritanceValues`、[behavior_test.dart](../test/behavior_test.dart) 的 `function-imports.dart`、拒例与失败用例，以及 [roots.dart](../test/fixtures/roots.dart) 的 `closureRoots`。
 
 顶层函数和静态方法引用可用于常量，局部声明引用与匿名表达式不因此成为 const。无捕获局部函数对象可按声明共享；跨调用的对象身份是实现选择，不能依赖 SDK 某次分配行为。重复读取同一作用域中的局部声明仍保持身份，依据[函数闭包化规则][closurization]。
 
 ## 可调用对象
 
-依据[函数表达式调用][callable-invocation]与[隐式转换][callable-coercion]，已知非空类声明中的实例 `call` 方法支持 `object(...)`，直接调用复用必需、可选和命名参数绑定。字段、getter 和静态成员名为 `call` 时，不会使所属实例可直接调用；继承和 extension 提供的调用仍缺。
+依据[函数表达式调用][callable-invocation]与[隐式转换][callable-coercion]，已知非空类声明中的实例 `call` 方法支持 `object(...)`，直接调用复用必需、可选和命名参数绑定。字段、getter 和静态成员名为 `call` 时，不会使所属实例可直接调用；支持继承的 `call` 和方法体内的 `super(...)`，后者按[super 调用规则][super-invocations]调用父类的 `call`。extension 提供的调用仍缺。
 
 在赋值、传参、返回、列表单元素和 `for-in` 变量的函数类型上下文中，非空对象可隐式提取 `call`。支持具体必需位置签名、`Function` 及其可空形式；转换结果沿用绑定方法的接收者存活和相等性。`Object`、`dynamic` 和无上下文推断保留原对象；对象本身不是 `Function`，显式 `as` 和来自 dynamic 的检查转换不提取方法。
 
@@ -123,3 +123,5 @@ SDK 3.13.7 CFE 允许未选中常量集合分支及构造实参中的隐式提�
 [generic-scope]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L2115-L2170
 [generic-call]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L11716-L12120
 [generic-inference]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/inference.md
+
+[super-invocations]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L14746

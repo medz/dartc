@@ -26,11 +26,38 @@ bool hasConcreteClassMember(
   int role,
   List<AstFunction> declarations,
 ) {
-  if (!hasClassMember(member, role)) return false;
+  if (member.isStatic || !hasClassMember(member, role)) return false;
   final function = classMemberFunction(member, role);
   if (function < 0) return true;
   final syntax = declarations[function];
   return syntax.body != null || syntax.arrow != null;
+}
+
+MemberBinding? classImplementation(
+  int owner,
+  String name,
+  int library,
+  int role,
+  List<ClassMembers> ownMembers,
+  ClassMembers objectMembers,
+  List<AstFunction> declarations,
+) {
+  while (owner >= 0) {
+    final index = lookupMember(ownMembers[owner], name, library);
+    if (index >= 0 &&
+        hasConcreteClassMember(
+          ownMembers[owner].members[index],
+          role,
+          declarations,
+        ))
+      return ownMembers[owner].members[index];
+    final parent = classSuperclasses[owner];
+    owner = typeIsClass(parent) ? typeArgument(parent) : -1;
+  }
+  final index = lookupMember(objectMembers, name, library);
+  return index >= 0 && hasClassMember(objectMembers.members[index], role)
+      ? objectMembers.members[index]
+      : null;
 }
 
 class ClassSignature {
@@ -342,26 +369,21 @@ List<ClassMembers> checkClassInterfaces(
         fail(owner, 'method conflicts with inherited accessor: ' + member.name);
       for (var role = classMethod; role <= classSetter; role++) {
         if (!hasClassMember(member, role)) continue;
-        var concrete =
-            own != null && hasConcreteClassMember(own, role, declarations);
-        if (!concrete) {
-          final inherited = lookupMember(
-            objectMembers,
-            member.name,
-            member.library,
-          );
-          if (inherited >= 0 &&
-              hasClassMember(objectMembers.members[inherited], role))
-            concrete = classSignatureSubtype(
-              classSignature(
-                objectMembers.members[inherited],
-                role,
-                declarations,
-                fieldTypes,
-              ),
+        final implementation = classImplementation(
+          owner,
+          member.name,
+          member.library,
+          role,
+          ownMembers,
+          objectMembers,
+          declarations,
+        );
+        final concrete =
+            implementation != null &&
+            classSignatureSubtype(
+              classSignature(implementation, role, declarations, fieldTypes),
               classSignature(member, role, declarations, fieldTypes),
             );
-        }
         if (!classes[owner].isAbstract && !concrete)
           fail(owner, 'missing concrete implementation of ' + member.name);
       }
@@ -372,11 +394,29 @@ List<ClassMembers> checkClassInterfaces(
 
 List<int> resolveClassInterfaces(SymbolTable symbols, List<AstClass> classes) {
   final parents = <List<int>>[];
+  final supers = <int>[];
   final uses = <AliasApplication>[];
   for (final syntax in classes) {
     final types = <int>[];
+    var superclass = tObject;
+    if (syntax.superclass case final parent?) {
+      superclass = resolveSuperinterface(symbols, parent, uses);
+      if (superclass != tObject && !typeIsClass(superclass))
+        sourceError(
+          symbols.program,
+          symbols.program.tokens[parent.token],
+          'this superclass type is not yet supported',
+        );
+    }
+    supers.add(superclass);
     for (final interface in syntax.interfaces) {
       final type = resolveSuperinterface(symbols, interface, uses);
+      if (syntax.superclass != null && type == superclass)
+        sourceError(
+          symbols.program,
+          symbols.program.tokens[interface.token],
+          'class cannot occur in both extends and implements',
+        );
       if (type != tObject && !typeIsClass(type))
         sourceError(
           symbols.program,
@@ -392,6 +432,7 @@ List<int> resolveClassInterfaces(SymbolTable symbols, List<AstClass> classes) {
           );
       types.add(type);
     }
+    if (typeIsClass(superclass)) types.insert(0, superclass);
     parents.add(types);
   }
   final states = List<int>.filled(classes.length, 0);
@@ -412,8 +453,10 @@ List<int> resolveClassInterfaces(SymbolTable symbols, List<AstClass> classes) {
   }
 
   for (var owner = 0; owner < classes.length; owner++) visit(owner);
-  for (var owner = 0; owner < classes.length; owner++)
+  for (var owner = 0; owner < classes.length; owner++) {
     classSupertypes[owner] = parents[owner];
+    classSuperclasses[owner] = supers[owner];
+  }
   checkAliasApplications(symbols, uses);
   return order;
 }

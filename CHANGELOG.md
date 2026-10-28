@@ -1,6 +1,6 @@
 ## Unreleased
 
-- Add non-generic abstract classes and `implements`, with interface signature checks, implementation dispatch, runtime subtype tests and actual-implementation defaults. Class inheritance, covariant parameters and `noSuchMethod` forwarding remain unimplemented.
+- Add non-generic abstract classes, `extends` and `implements`, with interface signature checks, inherited fields, implementation dispatch, runtime subtype tests and actual-implementation defaults. Support `super` member access, constructor chains and inherited const fields. Covariant parameters and `noSuchMethod` forwarding remain unimplemented.
 - Add synchronous `throw`, `try`/`on`/`catch`/`finally` and `rethrow`, with native stack unwinding, cleanup on returns and jumps, typed catch parameters and preserved exception/stack-trace identity. Asynchronous exceptions and catchable runtime errors remain unimplemented.
 - Add synchronous `StackTrace.current`, `StackTrace.fromString` and `StackTrace.empty`, backed by native frame metadata and Dart stack traversal.
 - Preserve non-returning control flow through native code generation. Fix return inference and missing-return checks after null-aware elements and empty `List<Never>` spreads.

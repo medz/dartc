@@ -317,6 +317,9 @@ class Increment implements Operation {
   int apply(int value, [List<int> extra = const [2]]) => value + extra[0];
   T echo<T extends num>(T value) => value;
 }
+class Twice extends Increment {
+  int apply(int value, [List<int> extra = const [3]]) => super.apply(value, extra) * 2;
+}
 int invokeOperation(Operation operation) => operation.apply(2) + operation.echo<int>(3);
 class Counter { int add(int value) => value + 1; }
 T generic<T extends num>(T value) => value;
@@ -369,7 +372,7 @@ void dropped(dynamic value) { value as int; }
 int apply(int Function(int) function, int value) => function(value);
 List<int> slice(List<int> value) => value.sublist(1);
 void main() {
-  print(invokeOperation(Increment()));
+  print(invokeOperation(Twice()));
   print(caught(9));
   try { print(finalized(3)); } catch (value) { print(value); }
   print(delayed(1)());

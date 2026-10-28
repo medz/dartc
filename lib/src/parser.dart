@@ -1959,6 +1959,9 @@ bool parserConstructorAhead(Parser parser, String name) {
 
 AstClass parserClass(Parser parser, int token) {
   var name = parserTypeDeclarationName(parser);
+  final superclass = parserTake(parser, 'extends')
+      ? parseAstType(parser)
+      : null;
   final interfaces = <AstType>[];
   if (parserTake(parser, 'implements')) {
     do {
@@ -2074,6 +2077,7 @@ AstClass parserClass(Parser parser, int token) {
   }
   parserExpect(parser, '}');
   var result = AstClass(name, fields, constructors, methods, token);
+  result.superclass = superclass;
   result.interfaces = interfaces;
   if (staticFields != null) result.staticFields = staticFields;
   return result;

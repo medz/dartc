@@ -985,6 +985,23 @@ ConstantConstructorInfo _constantRedirectTarget(
   return target;
 }
 
+ConstantConstructorInfo _constantSuperTarget(
+  ConstantContext context,
+  ConstantConstructorInfo owner,
+) {
+  final function = owner.plan.superTarget;
+  final target = function < context.constructors.length
+      ? context.constructors[function]
+      : null;
+  if (target == null)
+    _constantError(
+      context,
+      owner.syntax.token,
+      'const constructor requires a const superclass constructor',
+    );
+  return target;
+}
+
 List<ConstantValue> _constantArguments(
   ConstantContext context,
   ConstantConstructorInfo owner,
@@ -1040,6 +1057,9 @@ void checkConstantConstructors(ConstantContext context) {
       ConstantConstructorInfo? target;
       if (owner.plan.redirectTarget >= 0)
         target = _constantRedirectTarget(context, owner);
+      final parent = owner.plan.superTarget >= 0
+          ? _constantSuperTarget(context, owner)
+          : null;
       var p = 0;
       while (p < owner.syntax.parameters.length) {
         var parameter = owner.syntax.parameters[p];
@@ -1055,7 +1075,7 @@ void checkConstantConstructors(ConstantContext context) {
           f++;
         }
       }
-      if (owner.syntax.initializers.isNotEmpty) {
+      if (owner.syntax.initializers.isNotEmpty || parent != null) {
         var parameters = <ConstantValue>[];
         p = 0;
         while (p < owner.parameterTypes.length) {
@@ -1087,6 +1107,14 @@ void checkConstantConstructors(ConstantContext context) {
               _constantInitializer(context, owner, step, false);
             i++;
           }
+          if (parent != null)
+            _constantArguments(
+              context,
+              parent,
+              owner.plan.superCall!,
+              false,
+              true,
+            );
         }
         context.lexicalClass = scope;
         context.initializerParameters = previous;
@@ -1188,6 +1216,18 @@ ConstantValue _constantInvoke(
       fields[step.field] = _constantInitializer(context, owner, step, true);
     }
     i++;
+  }
+  if (owner.plan.superTarget >= 0) {
+    final parent = _constantSuperTarget(context, owner);
+    final arguments = _constantArguments(
+      context,
+      parent,
+      owner.plan.superCall!,
+      true,
+      true,
+    );
+    final inherited = _constantInvoke(context, parent, arguments, true);
+    fields = <ConstantValue>[...inherited.elements, ...fields];
   }
   context.lexicalClass = scope;
   context.typeScope = typeScope;
