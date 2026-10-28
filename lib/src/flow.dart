@@ -24,25 +24,12 @@ FlowState flowCreate(int count, [bool soundFlow = true]) {
 }
 
 FlowState flowCopy(FlowState state) {
-  var result = FlowState(
-    List<int>.filled(state.types.length, -1),
-    List<int>.filled(state.types.length, flowUnassigned),
-    List<bool>.filled(state.reachability.length, false, growable: true),
+  return FlowState(
+    state.types.sublist(0),
+    state.assignments.sublist(0),
+    state.reachability.sublist(0),
     state.reachable,
-  );
-  result.soundFlow = state.soundFlow;
-  var i = 0;
-  while (i < state.types.length) {
-    result.types[i] = state.types[i];
-    result.assignments[i] = state.assignments[i];
-    i++;
-  }
-  i = 0;
-  while (i < state.reachability.length) {
-    result.reachability[i] = state.reachability[i];
-    i++;
-  }
-  return result;
+  )..soundFlow = state.soundFlow;
 }
 
 void flowUnreachable(FlowState state) {
