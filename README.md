@@ -2,16 +2,16 @@
 
 A native Dart compiler written entirely in Dart.
 
-`dartc` compiles Dart source directly to ARM64 machine code for macOS and Linux, and can rebuild its own compiler. The goal is a complete, independent Dart toolchain whose compiler, runtime and standard libraries can evolve in Dart. Version 0.2 is an early preview.
+`dartc` compiles Dart source directly to ARM64 machine code for macOS and Linux, and can rebuild its own compiler. The goal is a complete, independent Dart toolchain whose compiler, runtime and standard libraries can evolve in Dart. Version 0.3 is an early preview.
 
 Generated executables include the reachable parts of dartc's own runtime, compiled to native code. Native compiler binaries and generated executables run without the official Dart SDK, VM, JIT or snapshots.
 
 ## Try the native compiler
 
-Download the archive for your platform from the [0.2.0 release](https://github.com/medz/dartc/releases/tag/v0.2.0):
+Download the archive for your platform from the [0.3.0 release](https://github.com/medz/dartc/releases/tag/v0.3.0):
 
-- `dartc-0.2.0-macos-arm64.tar.gz`
-- `dartc-0.2.0-linux-arm64.tar.gz`
+- `dartc-0.3.0-macos-arm64.tar.gz`
+- `dartc-0.3.0-linux-arm64.tar.gz`
 
 Save this as `hello.dart`:
 
@@ -24,8 +24,8 @@ void main() {
 Extract the archive, then compile `hello.dart`. On macOS ARM64:
 
 ```sh
-tar -xzf dartc-0.2.0-macos-arm64.tar.gz
-export PATH="$PWD/dartc-0.2.0-macos-arm64/bin:$PATH"
+tar -xzf dartc-0.3.0-macos-arm64.tar.gz
+export PATH="$PWD/dartc-0.3.0-macos-arm64/bin:$PATH"
 dartc hello.dart -o hello
 ./hello
 ```
@@ -33,8 +33,8 @@ dartc hello.dart -o hello
 On Linux ARM64:
 
 ```sh
-tar -xzf dartc-0.2.0-linux-arm64.tar.gz
-export PATH="$PWD/dartc-0.2.0-linux-arm64/bin:$PATH"
+tar -xzf dartc-0.3.0-linux-arm64.tar.gz
+export PATH="$PWD/dartc-0.3.0-linux-arm64/bin:$PATH"
 dartc hello.dart -o hello
 ./hello
 ```
