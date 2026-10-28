@@ -122,6 +122,14 @@ typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它
 
 根遍历只增加 `nativeFramePointer` 这一读取当前帧指针的受信机器原语；帧链查找、根值过滤和对象边遍历保持为 Dart 算法。未知返回 PC、非法根种类或队列容量不足会终止。
 
+## 帧描述符与同步轨迹
+
+可达代码请求 `metadataFrames` 时，元数据 `+72` 指向只读帧表；未请求时不保留帧表或函数名。表按代码地址排序，每个描述符保存半开代码区间、FP 以下的固定帧字节数、保存寄存器的起始 FP 偏移、x19–x27 位图及函数名。区间和名称用相对描述符的位移表示，表内引用相对表本身，随最终映像一起重定位。
+
+[emit.dart](../lib/src/emit.dart) 从实际发射的 prologue/epilogue 和分配结果记录布局。已保存寄存器按寄存器编号升序排列，占用连续向下的 FP 槽；固定帧大小不含 FP/LR 头和调用期间临时分配的溢出参数区。无帧启动跳板使用负帧大小，遍历在读取其父 FP 前停止。
+
+[frames.dart](../lib/src/runtime/frames.dart) 的 `rtFrameDescriptor(pc)` 是 NoGC 二分查找，区间外返回零。`rtStackTraceString(frame)` 从传入帧的调用者开始，查询返回 PC 后才沿 FP 前进，遇到未知 PC 按运行时合同失败终止。捕获期间被访问的调用者帧保持活动，StringBuffer 和结果 String 由普通托管引用保活。该路径只读取调用链，不恢复寄存器或执行异常处理；标准库 API 范围见 [specs/libraries.md](../specs/libraries.md#stacktrace-api)。
+
 ## 原始缓冲与构建期间的根
 
 `rtCStringAcquire()` / `rtCStringRelease()` 独占借用可复用的原生四 word 缓冲；无对象头的 C 字符块不进入托管 arena，重复借用或无借用释放会终止。`rtStringFromWords()` 在解码完成后释放借用；`rtStringFromCString()` 只读取调用方提供的地址，不取得其所有权。argv 等 OS 内存不是托管对象根。该原生缓冲的所有权持续到进程结束，NoGC 允许它的原始映射。

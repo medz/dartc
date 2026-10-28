@@ -312,7 +312,11 @@ class _SsaVerifier {
         fail('data constant');
     } else if (op == opMetadataAddress) {
       final allowed =
-          metadataStrings | metadataLists | metadataValues | metadataRoots;
+          metadataStrings |
+          metadataLists |
+          metadataValues |
+          metadataRoots |
+          metadataFrames;
       if (target <= 0 || (target & ~allowed) != 0 || result != tInt)
         fail('metadata constant');
     } else if (op == opFunctionReference || op == opClosureDescriptor) {

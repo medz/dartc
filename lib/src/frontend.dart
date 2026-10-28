@@ -2735,7 +2735,11 @@ int feLowerBuiltinCall(AstExpression call, int builtin) {
       feAstError(call.token, 'primitive argument count');
     var mask = feMetadataMask(call.children[1]);
     var allowed =
-        metadataStrings | metadataLists | metadataValues | metadataRoots;
+        metadataStrings |
+        metadataLists |
+        metadataValues |
+        metadataRoots |
+        metadataFrames;
     if (mask < 1 || (mask & ~allowed) != 0)
       feAstError(call.token, 'unknown metadata feature mask');
     feOperand(opMetadataAddress, mask);

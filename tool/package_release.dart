@@ -55,9 +55,12 @@ void main(List<String> args) {
     for (final relative in [
       'lib/src/runtime.dart',
       'lib/src/layout.dart',
+      'lib/src/binary64.dart',
+      'lib/src/runtime/frames.dart',
       'lib/src/std/core.dart',
       'lib/src/std/core/annotations.dart',
       'lib/src/std/core/string_buffer.dart',
+      'lib/src/std/core/stack_trace.dart',
       'LICENSE',
     ]) {
       final destination = File('${bundle.path}/$relative');
@@ -87,8 +90,16 @@ License: MIT (included).
     run('/usr/bin/tar', ['-xzf', archive.path, '-C', unpacked.path]);
     final installed = '${unpacked.path}/$name';
     final work = Directory('${temporary.path}/project')..createSync();
-    File('${work.path}/hello.dart')
-        .writeAsStringSync("void main(){print('release ok');}\n");
+    File('${work.path}/hello.dart').writeAsStringSync('''
+void main() {
+  final trace = StackTrace.current.toString();
+  if (trace.indexOf('main') < 0 || double.parse('1.25') != 1.25) {
+    print('release failed');
+    return;
+  }
+  print('release ok');
+}
+''');
     final aliases = Directory('${temporary.path}/aliases')..createSync();
     Link('${aliases.path}/dartc').createSync('$installed/bin/dartc');
     for (final command in [

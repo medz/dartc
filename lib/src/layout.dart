@@ -71,11 +71,27 @@ const int metadataIntBoxDescriptorOffset = 40;
 const int metadataHandleTypeOffset = 48;
 const int metadataRootTableOffset = 56;
 const int metadataDoubleBoxDescriptorOffset = 64;
+const int metadataFrameTableOffset = 72;
 
 const int metadataStrings = 1;
 const int metadataLists = 2;
 const int metadataValues = 4;
 const int metadataRoots = 8;
+const int metadataFrames = 16;
+
+// Frame ranges are sorted half-open code intervals. All addresses are relative
+// to the containing table or descriptor. Saved x19..x27 occupy descending FP
+// slots in increasing register order, starting at frameSavedOffset.
+const int frameTableBytes = 16;
+const int frameTableCountOffset = 0;
+const int frameTableDescriptorsOffset = 8;
+const int frameDescriptorBytes = 48;
+const int frameStartOffset = 0;
+const int frameEndOffset = 8;
+const int frameSizeOffset = 16;
+const int frameSavedOffset = 24;
+const int frameSavedMaskOffset = 32;
+const int frameNameOffset = 40;
 
 // Root metadata stores displacements relative to each containing record.
 const int rootTableBytes = 32;

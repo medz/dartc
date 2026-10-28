@@ -15,7 +15,7 @@ dartc 是用 Dart 实现的独立原生 Dart 编译器，目标是完整实现�
 | 前端 | 独立扫描与 AST、库/成员/局部绑定、有限类型和流分析；lowering 通过带类型的栈 IR 构造 SSA，尚无完整 ResolvedProgram |
 | 后端与链接 | 类型化 SSA、Machine IR、ARM64 分配与发码、依赖裁剪和原生文件封装；不是下文全部分析与优化的实现 |
 | 内存 | 进程级 bump arena、物理分配边界记录、精确根与对象边枚举、NoGC 合同检查；不执行标记清扫、空闲块复用或 arena 释放 |
-| 运行时 | 统一对象头、Ref/Tagged 表示、静态及托管类型元数据；运行时失败终止进程，已有闭包捕获布局与根枚举，异常展开、线程/isolate 和调度仍为设计目标 |
+| 运行时 | 统一对象头、Ref/Tagged 表示、静态及托管类型元数据；运行时失败终止进程，已有闭包捕获布局、根枚举与同步栈轨迹，异常展开、线程/isolate 和调度仍为设计目标 |
 
 ## 用 Dart 持续演进执行基础
 
@@ -91,9 +91,11 @@ lib/src/
   optimize.dart, reach.dart                       优化与可达性
   machine.dart, allocate.dart, root_map.dart        Machine IR、分配与根位置
   arm64.dart, emit.dart                           指令编码与发射
+  frame.dart                                     已发射函数的代码区间与栈帧布局
   abi.dart, layout.dart, nogc.dart                 运行时绑定、布局与效果约束
   format.dart, library.dart, sign.dart             映像布局、文件封装与签名
   runtime.dart                                   目标运行时与受信原语声明
+  runtime/frames.dart                            帧查找与同步栈轨迹
   std/core.dart, std/core/                        目标标准库源码
 test/
   behavior_test.dart, differential_test.dart, library_test.dart
@@ -593,7 +595,7 @@ WeakReference、Expando 与 Finalizer 的弱边单独描述。收集过程依次
 
 采用有帧指针的表驱动展开。正常调用直接返回正常值；发生异常时，由运行时查找处理表并恢复到对应 landing pad。
 
-FrameDesc 记录代码区间、帧大小、保存的寄存器与位置、根映射、处理区间、源位置和内联调用位置。可以省略帧的叶函数仍须满足调用链和异常轨迹所需约束。
+当前发射器根据实际代码区间和寄存器分配生成帧描述符，保存固定帧大小、callee-saved 寄存器位置及函数名。`runtime/frames.dart` 用返回 PC 查询描述符并沿 FP 捕获同步轨迹；启动跳板的无帧区间是显式终点。根映射仍按调用点独立存储。处理区间、源位置和内联调用位置随异常与优化实现补充，不能从函数名推断控制流。可以省略帧的叶函数仍须满足调用链和异常轨迹所需约束。
 
 抛出入口先把异常对象和栈轨迹登记为根，再捕获必要的轨迹并开始展开。实际恢复寄存器和跳转的展开核心是 noGC 路径。finally 的控制流由编译器生成，展开器只定位处理入口，不能替代语言级清理逻辑。
 

@@ -1,5 +1,6 @@
 import 'arm64.dart';
 import 'constant_data.dart';
+import 'frame.dart';
 import 'host.dart';
 import 'ir.dart';
 import 'layout.dart';
@@ -158,6 +159,9 @@ class ConstantLayout {
   List<int> rootSlotOffsets = <int>[];
   int globalRootsOffset = -1;
   List<int> globalRoots = <int>[];
+  int frameTableOffset = -1;
+  int frameDescriptorsOffset = -1;
+  List<int> frameNameStrings = <int>[];
 
   ConstantLayout(
     this.stringOffsets,
@@ -365,6 +369,21 @@ ConstantLayout layoutConstants(int start) {
     signatureOffsets.add(-1);
     i++;
   }
+  final needsFrames = (features & metadataFrames) != 0;
+  final frameNameStrings = <int>[];
+  if (needsFrames) {
+    features |= metadataStrings;
+    for (final frame in emittedFrames) {
+      var name = -1;
+      if (frame.function >= 0) {
+        final declared = functions[frame.function].name;
+        name = internString(declared == '' ? '<anonymous closure>' : declared);
+        while (stringOffsets.length < strings.length) stringOffsets.add(-1);
+        stringOffsets[name] = 0;
+      }
+      frameNameStrings.add(name);
+    }
+  }
   bool needsValues = (features & metadataValues) != 0;
   int handleType = -1;
   if (needsValues) {
@@ -555,6 +574,7 @@ ConstantLayout layoutConstants(int start) {
     if (needsLists) metadataBytes = metadataTaggedArrayDescriptorOffset + 8;
     if (needsRoots) metadataBytes = metadataRootTableOffset + 8;
     if (needsValues) metadataBytes = metadataDoubleBoxDescriptorOffset + 8;
+    if (needsFrames) metadataBytes = metadataFrameTableOffset + 8;
     end += metadataBytes;
   }
   int rootTableOffset = -1;
@@ -606,6 +626,14 @@ ConstantLayout layoutConstants(int start) {
       globalRootsOffset = end;
       end += globalRoots.length * globalRootBytes;
     }
+  }
+  var frameTableOffset = -1;
+  var frameDescriptorsOffset = -1;
+  if (needsFrames) {
+    frameTableOffset = end;
+    end += frameTableBytes;
+    frameDescriptorsOffset = end;
+    end += emittedFrames.length * frameDescriptorBytes;
   }
   end = alignImage(end, 8);
   i = 0;
@@ -667,7 +695,10 @@ ConstantLayout layoutConstants(int start) {
     ..rootCallsOffset = rootCallsOffset
     ..rootSlotOffsets = rootSlotOffsets
     ..globalRootsOffset = globalRootsOffset
-    ..globalRoots = globalRoots;
+    ..globalRoots = globalRoots
+    ..frameTableOffset = frameTableOffset
+    ..frameDescriptorsOffset = frameDescriptorsOffset
+    ..frameNameStrings = frameNameStrings;
 }
 
 List<int> createMachOExecutable() {
@@ -1033,6 +1064,24 @@ void imageRootTable(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
   }
 }
 
+void imageFrameTable(ConstantLayout layout, int codeOffset) {
+  if (layout.frameTableOffset < 0) return;
+  imageZeros(layout.frameTableOffset - image.length);
+  image64(emittedFrames.length);
+  image64(layout.frameDescriptorsOffset - layout.frameTableOffset);
+  for (var i = 0; i < emittedFrames.length; i++) {
+    final frame = emittedFrames[i];
+    final record = layout.frameDescriptorsOffset + i * frameDescriptorBytes;
+    image64(codeOffset + frame.start - record);
+    image64(codeOffset + frame.end - record);
+    image64(frame.bytes);
+    image64(frame.savedOffset);
+    image64(frame.savedMask);
+    final name = layout.frameNameStrings[i];
+    image64(name < 0 ? 0 : layout.stringOffsets[name] - record);
+  }
+}
+
 void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
   int stringIndex = 0;
   while (stringIndex < strings.length) {
@@ -1314,8 +1363,11 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
         layout.doubleBoxDescriptorOffset,
       );
     }
+    if (layout.metadataBytes > metadataDoubleBoxDescriptorOffset + 8)
+      imageMetadataReference(layout, metadataFrames, layout.frameTableOffset);
   }
   imageRootTable(layout, codeOffset, dataBaseOffset);
+  imageFrameTable(layout, codeOffset);
   var list = 0;
   while (list < constantData.length) {
     var offset = layout.dataOffsets[list];

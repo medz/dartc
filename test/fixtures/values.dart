@@ -1698,6 +1698,116 @@ void bufferValues() {
   print(<Object>[codes.length, codes.isEmpty, codes.isNotEmpty]);
 }
 
+StackTrace stackTraceRead() => StackTrace.current;
+
+StackTrace stackTraceMiddle() => stackTraceRead();
+
+int stackTraceVisits = 0;
+
+StackTrace stackTraceRecursive(int depth) {
+  if (depth == 0) return stackTraceRead();
+  final trace = stackTraceRecursive(depth - 1);
+  stackTraceVisits++;
+  return trace;
+}
+
+class StackTraceSource {
+  final int marker;
+  StackTraceSource(this.marker);
+
+  StackTrace read() {
+    final trace = StackTrace.current;
+    print(marker);
+    return trace;
+  }
+}
+
+StackTrace stackTraceMany(
+  int a,
+  int b,
+  int c,
+  int d,
+  int e,
+  int f,
+  int g,
+  int h,
+  int i,
+  Object object,
+  double value,
+) {
+  final trace = stackTraceRead();
+  print(a + b + c + d + e + f + g + h + i);
+  print(object);
+  print(value);
+  return trace;
+}
+
+StackTrace Function() stackTraceClosure(int marker) => () {
+  final trace = StackTrace.current;
+  print(marker);
+  return trace;
+};
+
+void stackTraceValues() {
+  final text = 'arbitrary\ntrace\u0000🙂\ud800';
+  final stored = StackTrace.fromString(text);
+  print(identical(stored.toString(), text));
+  print(StackTrace.empty.toString() == '');
+  print(identical(StackTrace.empty, StackTrace.empty));
+  const empty = StackTrace.empty;
+  print(identical(empty, StackTrace.empty));
+  Object value = stored;
+  print(value is StackTrace);
+  print((value as StackTrace).toString() == text);
+
+  final trace = stackTraceMiddle();
+  final rendered = trace.toString();
+  final leaf = rendered.indexOf('stackTraceRead');
+  final middle = rendered.indexOf('stackTraceMiddle');
+  final caller = rendered.indexOf('stackTraceValues');
+  print(leaf >= 0 && middle > leaf && caller > middle);
+  print(rendered.indexOf('StackTrace.current') == -1);
+  print(trace.toString() == rendered);
+
+  final recursive = stackTraceRecursive(48).toString();
+  var frames = 0;
+  var offset = recursive.indexOf('stackTraceRecursive');
+  while (offset >= 0) {
+    frames++;
+    offset = recursive.indexOf('stackTraceRecursive', offset + 1);
+  }
+  print(frames == 49);
+  print(stackTraceVisits == 48);
+  print(recursive.indexOf('stackTraceValues') >= 0);
+
+  final direct = StackTraceSource(71).read().toString();
+  print(direct.indexOf('StackTraceSource.read') >= 0);
+  final read = StackTraceSource(72).read;
+  final indirect = read().toString();
+  print(indirect.indexOf('StackTraceSource.read') >= 0);
+  print(indirect.indexOf('stackTraceValues') >= 0);
+  final closure = stackTraceClosure(73)().toString();
+  print(closure.indexOf('<anonymous closure>') >= 0);
+  print(closure.indexOf('stackTraceValues') >= 0);
+
+  final many = stackTraceMany(
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    'retained',
+    1.25,
+  ).toString();
+  print(many.indexOf('stackTraceRead') >= 0);
+  print(many.indexOf('stackTraceMany') > many.indexOf('stackTraceRead'));
+  print(many.indexOf('stackTraceValues') > many.indexOf('stackTraceMany'));
+}
+
 int stringEvaluations = 0;
 
 String stringReceiver() {
@@ -4673,6 +4783,7 @@ void lateValues() {
 }
 
 void main(List<String> args) {
+  stackTraceValues();
   lateValues();
   doubleValues();
   floatingContexts();

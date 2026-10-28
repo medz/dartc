@@ -1,5 +1,6 @@
 import 'arm64.dart';
 import 'abi.dart';
+import 'frame.dart';
 import 'host.dart';
 import 'ir.dart';
 import 'layout.dart';
@@ -303,10 +304,16 @@ List<int> emitUseCounts(MachineFunction function) {
   return uses;
 }
 
-void emitFunction(MachineFunction function, bool rootsEnabled) {
+void emitFunction(
+  MachineFunction function,
+  bool rootsEnabled,
+  bool framesEnabled,
+  int number,
+) {
   List<CallRootMap> roots = const <CallRootMap>[];
   if (rootsEnabled) roots = buildCallRootMaps(function);
   var nextRoot = 0;
+  final start = machineCode.length * 4;
   machineCode.add(0xa9bf7bfd);
   machineCode.add(0x910003fd);
   int frame = alignFrame(
@@ -314,6 +321,7 @@ void emitFunction(MachineFunction function, bool rootsEnabled) {
             function.allocation.savedRegisters.length) *
         8,
   );
+  final frameBytes = frame;
   while (frame >= 4096) {
     machineCode.add(0xd14007ff);
     frame = frame - 4096;
@@ -425,13 +433,29 @@ void emitFunction(MachineFunction function, bool rootsEnabled) {
     machineCode[site] = 0x14000000 | ((target - site) & 0x3ffffff);
     branch = branch + 1;
   }
+  if (framesEnabled) {
+    var mask = 0;
+    for (final register in function.allocation.savedRegisters)
+      mask |= 1 << (register - 19);
+    emittedFrames.add(
+      EmittedFrame(
+        start,
+        machineCode.length * 4,
+        frameBytes,
+        -(function.allocation.spillSlots + 1) * 8,
+        mask,
+        number,
+      ),
+    );
+  }
 }
 
 int alignFrame(int size) {
   return ((size + 15) ~/ 16) * 16;
 }
 
-bool emitNeedsRoots(List<MachineFunction> program) {
+int emitMetadataFeatures(List<MachineFunction> program) {
+  var features = 0;
   var f = 0;
   while (f < program.length) {
     var function = program[f];
@@ -445,17 +469,15 @@ bool emitNeedsRoots(List<MachineFunction> program) {
       var i = 0;
       while (i < instructions.length) {
         var instruction = instructions[i];
-        if (instruction.op == mAddress &&
-            instruction.extra == 3 &&
-            (instruction.target & metadataRoots) != 0)
-          return true;
+        if (instruction.op == mAddress && instruction.extra == 3)
+          features |= instruction.target;
         i++;
       }
       b++;
     }
     f++;
   }
-  return false;
+  return features;
 }
 
 void emitRootBoundary(bool enabled) {
@@ -467,8 +489,11 @@ void emitRootBoundary(bool enabled) {
 }
 
 void generateCode(List<MachineFunction> program) {
-  var rootsEnabled = emitNeedsRoots(program);
+  final features = emitMetadataFeatures(program);
+  final rootsEnabled = (features & metadataRoots) != 0;
+  final framesEnabled = (features & metadataFrames) != 0;
   emittedRootMaps.clear();
+  emittedFrames.clear();
   machineCode = <int>[];
   addressSites = <int>[];
   addressKinds = <int>[];
@@ -508,13 +533,15 @@ void generateCode(List<MachineFunction> program) {
     emitRootBoundary(rootsEnabled);
     armConstant(0, 0);
     emitExit();
+    if (framesEnabled)
+      emittedFrames.add(EmittedFrame(0, machineCode.length * 4, -1, 0, 0, -1));
   }
   int function = 0;
   if (imageKind != 0) function = 1;
   while (function < program.length) {
     if (program[function].reachable) {
       armFunctionOffsets[function] = machineCode.length;
-      emitFunction(program[function], rootsEnabled);
+      emitFunction(program[function], rootsEnabled, framesEnabled, function);
     }
     function = function + 1;
   }

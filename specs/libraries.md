@@ -8,7 +8,7 @@
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
 | [§19 Libraries and Scripts][libraries]：编译单元 | 部分实现 | 库与物理源文件分别保留身份、声明和依赖；支持具名 `library` 声明，`library;` 要求[文件版本至少 2.19][features]。元数据覆盖[已实现声明子集](classes.md)，文件头的 script tag 范围见[词法结构](lexical-structure.md)；完整顶层声明文法未覆盖。 | [source.dart](../lib/src/source.dart)、[parser.dart](../lib/src/parser.dart)；[behavior_test.dart](../test/behavior_test.dart) |
-| [§19.1 Imports][imports] | 部分实现 | 支持立即导入、`as` 前缀及显式/隐式 `dart:core` 处理；可执行文件的 core 入口通过真实 Dart export 提供 StringBuffer 与 pragma 声明，原生内建类型仍保留系统身份。前缀、再导出和用户同名遮蔽按实际声明来源处理；这不是完整 SDK 库。 | [source.dart](../lib/src/source.dart)、[symbols.dart](../lib/src/symbols.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 `imports.dart`、`core.dart`；[core.dart](../lib/src/std/core.dart) |
+| [§19.1 Imports][imports] | 部分实现 | 支持立即导入、`as` 前缀及显式/隐式 `dart:core` 处理；可执行文件的 core 入口通过真实 Dart export 提供 StringBuffer、StackTrace 与 pragma 声明，原生内建类型仍保留系统身份。前缀、再导出和用户同名遮蔽按实际声明来源处理；这不是完整 SDK 库。 | [source.dart](../lib/src/source.dart)、[symbols.dart](../lib/src/symbols.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 `imports.dart`、`core.dart`；[core.dart](../lib/src/std/core.dart) |
 | [§19.7 Conditional URIs][conditional] | 部分实现 | import/export 支持默认 URI 与有序 `if` 条件；按字符串值选择首个匹配，缺省比较 `"true"`，无匹配用默认。所有分支均检查字面量语法并拒插值，仅装入选中库。环境由显式目标给出：core 和现有受限 ffi 注册为 `"true"`，io/isolate/js 等未提供；不继承宿主 VM 能力。自定义环境及 String.fromEnvironment API 未实现。 | [ast.dart](../lib/src/ast.dart) `AstConditionalUri`；[parser.dart](../lib/src/parser.dart) `parserDirective`；[source.dart](../lib/src/source.dart) `sourceTargetLibraries`、`sourceDirectiveUri`；[behavior_test.dart](../test/behavior_test.dart) `conditional-imports.dart`、`conditional-target-io.dart`、`rejected` |
 | [§19.1.1 The Imported Namespace][imported] | 部分实现 | 按读取与写入分别解析 getter/setter，可组合独立来源的两侧；本库任一同名声明遮蔽导入两侧，前缀和私有性保持来源身份。扩展及完整命名空间组合尚缺。 | [symbols.dart](../lib/src/symbols.dart) 的 `resolveSymbol`、`resolveWriteSymbol`；[behavior_test.dart](../test/behavior_test.dart) 的 `top-accessor-imports.dart`、`rejected` |
 | [§19.1.2 Semantics of Imports][import-semantics]：延迟导入 | 未实现 | `deferred` 被拒绝；没有 `loadLibrary`、加载状态及相应调用时序。 | [parser.dart](../lib/src/parser.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 deferred 拒绝用例 |
@@ -26,6 +26,18 @@
 package v2 的嵌套根约束在配置边界检查。SDK 3.13.5 在未使用重叠包时接受部分无效配置，本实现按[固定 v2 格式][packages]拒绝；行为测试明确区分该差异，不将其报告为 SDK 完全一致。
 
 [behavior_test.dart](../test/behavior_test.dart) 拥有 Dart 库的多文件行为；[library_test.dart](../test/library_test.dart) 拥有原生静态/动态链接调用，两者验证范围不同。
+
+## StackTrace API
+
+| SDK 条目 | 状态 | 实现与缺口 | 实现与验证入口 |
+| --- | --- | --- | --- |
+| [`StackTrace.current`][stack-current] | 部分实现 | 同步捕获当前 Dart 调用链，保留直接调用、递归、闭包和函数值调用；返回独立的不可变轨迹。文本按栈顺序列出函数名，可能包含编译器生成的调用适配器；尚无文件/行号、异步调用链和原生边界轨迹。实现位于 Dart 运行时，不依赖 SDK 或系统符号器。 | [frames.dart](../lib/src/runtime/frames.dart) `rtStackTraceString()`；[values.dart](../test/fixtures/values.dart) `stackTraceValues()`；[roots.dart](../test/fixtures/roots.dart) `stackTraceRoots()`；[behavior_test.dart](../test/behavior_test.dart) NoGC 拒例 |
+| [`StackTrace.fromString`][stack-string]、[`empty`][stack-empty]、[`toString`][stack-text] | 部分实现 | `fromString` 保留任意 String，`toString` 返回原文本；`empty` 为可在常量上下文使用的空轨迹。当前用普通 Dart 类及非 const 命名构造器提供 API；SDK 的抽象接口、factory 重定向及用户实现 StackTrace 仍依赖尚缺的类/接口语义。异常对象携带轨迹和 rethrow 保留轨迹尚未实现，见[语句](statements.md)。 | [stack_trace.dart](../lib/src/std/core/stack_trace.dart)；[values.dart](../test/fixtures/values.dart) `stackTraceValues()` |
+
+[stack-current]: https://api.dart.dev/stable/3.13.7/dart-core/StackTrace/current.html
+[stack-string]: https://api.dart.dev/stable/3.13.7/dart-core/StackTrace/StackTrace.fromString.html
+[stack-empty]: https://api.dart.dev/stable/3.13.7/dart-core/StackTrace/empty-constant.html
+[stack-text]: https://api.dart.dev/stable/3.13.7/dart-core/StackTrace/toString.html
 
 [pdf]: https://dart.dev/to/spec-draft
 [spec]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex

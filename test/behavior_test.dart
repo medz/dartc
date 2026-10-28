@@ -786,6 +786,10 @@ Future<void> main(List<String> args) async {
             .replaceAll(
               "'../../lib/src/layout.dart'",
               "'${File(standard).parent.path}/layout.dart'",
+            )
+            .replaceAll(
+              "'../../lib/src/runtime/frames.dart'",
+              "'${File(standard).parent.path}/runtime/frames.dart'",
             ),
       );
     final rootsExecutable = '${roots.path}.out';
@@ -813,6 +817,35 @@ Future<void> main(List<String> args) async {
       throw StateError(
         'Root worklist exhaustion did not fail at the expected boundary: '
         '${exhaustedRoots.stdout}${exhaustedRoots.stderr}',
+      );
+    }
+    final framesOnly = File('${temporary.path}/frames-only.dart')
+      ..writeAsStringSync('''
+import '$standard' as rt;
+import '${File(standard).parent.path}/runtime/frames.dart';
+import '${File(standard).parent.path}/layout.dart' as abi;
+void main() {
+  final pc = rt.nativeLoad64(rt.nativeFramePointer() + 8);
+  final frame = rtFrameDescriptor(pc);
+  if (frame == 0 || rt.nativeLoad64(frame + abi.frameSizeOffset) != -1)
+    rt.nativeExit(73);
+  final metadata = rt.nativeMetadataAddress(abi.metadataFrames);
+  if (rt.nativeLoad64(metadata + abi.metadataStringDescriptorOffset) == 0 ||
+      rt.nativeLoad64(metadata + abi.metadataListDescriptorOffset) != 0 ||
+      rt.nativeLoad64(metadata + abi.metadataRootTableOffset) != 0 ||
+      rt.nativeLoad64(metadata + abi.metadataDoubleBoxDescriptorOffset) != 0)
+    rt.nativeExit(74);
+}
+''');
+    final framesExecutable = '${framesOnly.path}.out';
+    await run(
+      driver,
+      compileArguments(framesOnly, framesExecutable),
+      native: compiler != null,
+    );
+    if ((await run(framesExecutable, [], native: true)).stdout != '') {
+      throw StateError(
+        'Frame metadata without managed values produced output.',
       );
     }
     final genericEntry = File('${temporary.path}/generic-entry.dart')
@@ -2148,6 +2181,7 @@ void main() {
       "void main(){@pragma('dartc:no-gc') int checked(List<int> values,int index)=>values.removeAt(index);}",
       "@pragma('dartc:no-gc') void checked(List<int> values,int index,int element){values.insert(index,element);}void main(){}",
       "@pragma('dartc:no-gc') List<int> checked(List<int> values)=>values.sublist(0);void main(){}",
+      "@pragma('dartc:no-gc') StackTrace unused()=>StackTrace.current;void main(){}",
       "@pragma('dartc:no-gc') int checked(List<int> values){if(values case [...var copy])return copy.length;return 0;}void main(){}",
       "void main(){<int>[].insert(0);}",
       "void main(){<int>[].insert('wrong',1);}",
@@ -2730,12 +2764,12 @@ void main() {
     }
     final core = Directory('${temporary.path}/std/core')
       ..createSync(recursive: true);
-    for (final name in ['string_buffer.dart', 'annotations.dart']) {
-      File('${File(standard).parent.path}/std/core/$name')
-          .copySync('${core.path}/$name');
-    }
-    File('${File(standard).parent.path}/std/core.dart')
-        .copySync('${temporary.path}/std/core.dart');
+    // These fixtures deliberately provide no managed runtime. Their core
+    // declarations must not import the production runtime through StackTrace.
+    File('${File(standard).parent.path}/std/core/annotations.dart')
+        .copySync('${core.path}/annotations.dart');
+    File('${temporary.path}/std/core.dart')
+        .writeAsStringSync("export 'core/annotations.dart';");
     final empty = File('${temporary.path}/empty.dart')
       ..writeAsStringSync('void main() {}');
     final emptyRuntime = File('${temporary.path}/runtime-empty.dart')

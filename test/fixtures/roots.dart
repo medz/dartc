@@ -1,5 +1,6 @@
 import '../../lib/src/runtime.dart' as rt;
 import '../../lib/src/layout.dart' as abi;
+import '../../lib/src/runtime/frames.dart';
 
 const capacity = 2048;
 
@@ -971,6 +972,57 @@ void lateRoots(int queue, int edges) {
   check(object.scalar == 2.5 && (object.tagged as Leaf).marker == 956);
 }
 
+void stackTraceRoots(int queue, int edges) {
+  final trace = StackTrace.current;
+  final text = trace.toString();
+  check(text.indexOf('stackTraceRoots') >= 0);
+  check(rt.rtTraceObject(rt.nativeValueBits(trace), edges, capacity) == 1);
+  check(rt.nativeLoad64(edges) == rt.nativeValueBits(text));
+  final count = snapshot(queue);
+  check(contains(queue, count, rt.nativeValueBits(trace)));
+  check(trace.toString() == text);
+
+  final metadata = rt.nativeMetadataAddress(abi.metadataFrames);
+  final table =
+      metadata + rt.nativeLoad64(metadata + abi.metadataFrameTableOffset);
+  final frames =
+      table + rt.nativeLoad64(table + abi.frameTableDescriptorsOffset);
+  final length = rt.nativeLoad64(table + abi.frameTableCountOffset);
+  check(length > 1);
+  var previousEnd = 0;
+  for (var i = 0; i < length; i++) {
+    final descriptor = frames + i * abi.frameDescriptorBytes;
+    final start =
+        descriptor + rt.nativeLoad64(descriptor + abi.frameStartOffset);
+    final end = descriptor + rt.nativeLoad64(descriptor + abi.frameEndOffset);
+    check(start < end && start >= previousEnd);
+    check(rtFrameDescriptor(start) == descriptor);
+    check(rtFrameDescriptor(end - 1) == descriptor);
+    final bytes = rt.nativeLoad64(descriptor + abi.frameSizeOffset);
+    final mask = rt.nativeLoad64(descriptor + abi.frameSavedMaskOffset);
+    check((mask & ~511) == 0);
+    if (i == 0) {
+      check(rtFrameDescriptor(start - 1) == 0);
+      check(bytes == -1 && mask == 0);
+      check(rt.nativeLoad64(descriptor + abi.frameNameOffset) == 0);
+    } else {
+      check(bytes >= 0 && bytes % 16 == 0);
+      var saved = rt.nativeLoad64(descriptor + abi.frameSavedOffset);
+      for (var register = 0; register < 9; register++) {
+        if ((mask & (1 << register)) != 0) {
+          check(saved <= -8 && saved >= -bytes && saved % 8 == 0);
+          saved -= 8;
+        }
+      }
+      final name =
+          descriptor + rt.nativeLoad64(descriptor + abi.frameNameOffset);
+      check((rt.nativeValueFromBits(name) as String).isNotEmpty);
+    }
+    previousEnd = end;
+  }
+  check(rtFrameDescriptor(previousEnd) == 0);
+}
+
 void main(List<String> args) {
   if (args.isNotEmpty && args[0] == 'capacity') {
     capacityFailure(Leaf(190));
@@ -978,6 +1030,7 @@ void main(List<String> args) {
   }
   var queue = rt.rtMap(capacity * 8);
   var edges = rt.rtMap(capacity * 8);
+  stackTraceRoots(queue, edges);
   lateRoots(queue, edges);
   typeGraphRoots(queue, edges);
   genericTypeRoots(queue, edges);
