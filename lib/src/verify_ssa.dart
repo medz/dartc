@@ -47,7 +47,7 @@ class _SsaVerifier {
   void type(int id) {
     if (id < 0 || id >= dartTypes.length) fail('invalid type');
     if (typeHasSchemaHole(id) ||
-        !typeParametersInScope(id, functions[number].typeParameters))
+        !typeParametersInScope(id, functions[number].typeScope))
       fail('uninstantiated executable type');
   }
 
@@ -69,6 +69,35 @@ class _SsaVerifier {
 
   void definitions() {
     final info = functions[number];
+    final closure = info.closureLayout;
+    if (closure != null && closure.typeParameters.isNotEmpty) {
+      if (info.typeParameters.isNotEmpty ||
+          closure.boundReceiver ||
+          closure.fieldTypes.isEmpty ||
+          closure.fieldTypes[0] != listType(tObject) ||
+          info.parameterTypes.isEmpty ||
+          info.parameterTypes[0] != tFunction)
+        fail('closure type environment layout');
+      var enclosing = -1;
+      for (var i = 0; i < closure.typeParameters.length; i++) {
+        final parameter = closure.typeParameters[i];
+        if (parameter < 0 ||
+            parameter >= dartTypes.length ||
+            !typeIsParameter(parameter))
+          fail('closure type environment parameter');
+        final declaration = typeParameterInfo(parameter);
+        final owner = -declaration.owner - 1;
+        if (i == 0) enclosing = owner;
+        if (owner < 0 ||
+            owner >= functions.length ||
+            owner != enclosing ||
+            functions[owner].typeParameters.length !=
+                closure.typeParameters.length ||
+            functions[owner].typeParameters[i] != parameter ||
+            declaration.ordinal != i)
+          fail('closure type environment scope');
+      }
+    }
     for (var i = 0; i < info.typeParameters.length; i++) {
       var parameter = info.typeParameters[i];
       if (parameter < 0 ||
@@ -278,6 +307,7 @@ class _SsaVerifier {
         if (!typeIsFunction(callee.callableType)) fail('closure signature');
         final closure = callee.closureLayout;
         if (closure == null) fail('closure layout');
+        for (final parameter in closure.typeParameters) type(parameter);
         for (final field in closure.fieldTypes) type(field);
         if (closure.boundReceiver &&
             (closure.fieldTypes.length != 1 ||

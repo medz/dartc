@@ -144,8 +144,16 @@ class FunctionContract {
 class ClosureLayout {
   final List<int> fieldTypes;
   final bool boundReceiver;
+  // The first capture holds the enclosing invocation's type environment.
+  final List<int> typeParameters;
 
-  ClosureLayout(this.fieldTypes, [this.boundReceiver = false]);
+  ClosureLayout(
+    this.fieldTypes, [
+    this.boundReceiver = false,
+    this.typeParameters = const <int>[],
+  ]);
+
+  int get valueCaptureOffset => typeParameters.isEmpty ? 0 : 1;
 }
 
 class FunctionInfo {
@@ -163,6 +171,10 @@ class FunctionInfo {
   int callableType = -1;
   int callableAdapter = -1;
   ClosureLayout? closureLayout;
+
+  List<int> get typeScope => typeParameters.isNotEmpty
+      ? typeParameters
+      : closureLayout?.typeParameters ?? const <int>[];
 
   FunctionInfo(
     this.name,

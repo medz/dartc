@@ -269,6 +269,7 @@ int feRegisterFunction(
   int owner,
   bool constructor, [
   bool local = false,
+  List<int> enclosingTypes = const <int>[],
 ]) {
   if (syntax.typeParameters.isNotEmpty && (local || syntax.external))
     feAstError(
@@ -306,6 +307,7 @@ int feRegisterFunction(
   }
   var id = functions.length;
   var typeParameters = resolveFunctionTypeParameters(feSymbols, syntax, id);
+  var typeScope = local ? enclosingTypes : typeParameters;
   var types = <int>[];
   var source = feTokens[syntax.token].source;
   var name = syntax.name;
@@ -313,7 +315,7 @@ int feRegisterFunction(
   if (constructor)
     result = classType(owner);
   else if (syntax.result.name != '')
-    result = resolveType(feSymbols, syntax.result, typeParameters);
+    result = resolveType(feSymbols, syntax.result, typeScope);
   else if (owner >= 0 &&
       !syntax.isStatic &&
       syntax.name == 'toString' &&
@@ -340,7 +342,7 @@ int feRegisterFunction(
       var entry = feField(owner, parameter.name, parameter.token);
       type = feFieldTypes[entry];
       if (parameter.type.name != '') {
-        type = resolveType(feSymbols, parameter.type, typeParameters);
+        type = resolveType(feSymbols, parameter.type, typeScope);
         if (!typeIsSubtype(type, feFieldTypes[entry])) {
           feAstError(
             parameter.token,
@@ -349,7 +351,7 @@ int feRegisterFunction(
         }
       }
     } else if (parameter.type.name != '') {
-      type = resolveType(feSymbols, parameter.type, typeParameters);
+      type = resolveType(feSymbols, parameter.type, typeScope);
     }
     types.add(type);
     p++;
@@ -359,6 +361,12 @@ int feRegisterFunction(
     FunctionInfo(name, 0, count, count, result, types, <int>[], source),
   );
   functions[id].typeParameters = typeParameters;
+  if (enclosingTypes.isNotEmpty)
+    functions[id].closureLayout = ClosureLayout(
+      <int>[listType(tObject)],
+      false,
+      enclosingTypes,
+    );
   feParamDefaults.add(<ConstantValue>[]);
   feFunctionNodes.add(syntax);
   feOwners.add(owner);
@@ -662,16 +670,26 @@ int feParameterOffset(int function) {
 }
 
 int feResolveType(AstType syntax) =>
-    resolveType(feSymbols, syntax, functions[feFunction].typeParameters);
+    resolveType(feSymbols, syntax, functions[feFunction].typeScope);
+
+void feLoadCurrentTypeEnvironment() {
+  if (functions[feFunction].typeParameters.isNotEmpty) {
+    feOperand(opLoadLocal, feTypeEnvironmentSlot(feFunction));
+  } else {
+    feOperand(opLoadLocal, 0);
+    feOperand(opInt, 2);
+    feBuiltinTyped(bObjectGet, 2, listType(tObject));
+  }
+}
 
 // Returns the template operand so inferred List literals can finish its type.
 int feRuntimeType(int type, [bool instantiate = false]) {
   var position = ir.length;
   feOperand(opTypeReference, type);
   if (typeContainsParameters(type) || instantiate) {
-    if (functions[feFunction].typeParameters.isEmpty)
-      feAstError(feAt, 'captured type parameters are not yet supported');
-    feOperand(opLoadLocal, feTypeEnvironmentSlot(feFunction));
+    if (functions[feFunction].typeScope.isEmpty)
+      feAstError(feAt, 'type has no runtime type environment');
+    feLoadCurrentTypeEnvironment();
     feBuiltinTyped(bTypeInstantiate, 2, tObject);
   }
   return position + 1;
@@ -971,7 +989,7 @@ int feFindFunction(String name) {
 
 int feResolveName(int token, String name, String prefix, bool writing) {
   var head = prefix == '' ? name : prefix;
-  if (typeParameterInScope(functions[feFunction].typeParameters, head) >= 0)
+  if (typeParameterInScope(functions[feFunction].typeScope, head) >= 0)
     feAstError(token, 'type parameter values are not yet supported');
   var source = feTokens[token].source;
   var symbol = -1;
@@ -984,7 +1002,7 @@ int feResolveName(int token, String name, String prefix, bool writing) {
 }
 
 bool feHasPrefix(int token, String prefix) {
-  if (typeParameterInScope(functions[feFunction].typeParameters, prefix) >= 0)
+  if (typeParameterInScope(functions[feFunction].typeScope, prefix) >= 0)
     return false;
   var source = sourceLibrary(feSources, feTokens[token].source);
   var imports = feSources.files[source].imports;
@@ -1724,7 +1742,7 @@ void feResolveFunctionDefaults(int f) {
   var syntax = feFunctionNodes[f];
   feCheckMetadata(syntax.metadata, owner, f);
   var typeScope = feConstants.typeScope;
-  feConstants.typeScope = functions[f].typeParameters;
+  feConstants.typeScope = functions[f].typeScope;
   for (var parameter in syntax.typeParameters)
     feCheckMetadata(parameter.metadata, owner);
   feConstants.lexicalClass = owner;
@@ -2232,7 +2250,7 @@ int feLowerList(AstExpression expression, int context) {
     element < 0 ? tDynamic : typeCompleteSchema(element, tDynamic),
   );
   var runtimeType = -1;
-  if (functions[feFunction].typeParameters.isNotEmpty)
+  if (functions[feFunction].typeScope.isNotEmpty)
     runtimeType = feRuntimeType(type, true);
   var allocation = ir.length;
   feBuiltinTyped(
@@ -4361,6 +4379,12 @@ int fePrepareFunctionExpression(AstExpression expression, int context) {
 
 int feAllocateClosure(int function, int token) {
   var type = feCallableType(function, token);
+  var signature = -1;
+  if (typeContainsParameters(type)) {
+    feRuntimeType(type);
+    signature = feTemp(tObject);
+    feOperand(opStoreLocal, signature);
+  }
   feOperand(opClosureDescriptor, function);
   feBuiltinTyped(bObjectNew, 1, type);
   var closure = feTemp(type);
@@ -4369,9 +4393,15 @@ int feAllocateClosure(int function, int token) {
   while (field < 2) {
     feOperand(opLoadLocal, closure);
     feOperand(opInt, field);
-    feFunctionReference(function, token);
-    feBuiltin(field == 0 ? bFunctionType : bFunctionEntry, 1);
-    feBuiltinTyped(bObjectSet, 3, tPointer);
+    var fieldType = tPointer;
+    if (field == 0 && signature >= 0) {
+      feOperand(opLoadLocal, signature);
+      fieldType = tObject;
+    } else {
+      feFunctionReference(function, token);
+      feBuiltin(field == 0 ? bFunctionType : bFunctionEntry, 1);
+    }
+    feBuiltinTyped(bObjectSet, 3, fieldType);
     feEmit(opPop);
     field++;
   }
@@ -4398,7 +4428,14 @@ int feCreateClosure(int function, int token) {
   var closure = feAllocateClosure(function, token);
   var local = function - feLocalStart;
   var bindings = feLocalFunctions[local].body!;
-  var captureIndex = 0;
+  var captureIndex = layout.valueCaptureOffset;
+  if (captureIndex != 0) {
+    feOperand(opLoadLocal, closure);
+    feOperand(opInt, 2);
+    feLoadCurrentTypeEnvironment();
+    feBuiltinTyped(bObjectSet, 3, listType(tObject));
+    feEmit(opPop);
+  }
   for (var capture in feLocalClosures[local].captures) {
     var original = bindings.variables[capture.binding].outer;
     feOperand(opLoadLocal, closure);
@@ -4785,7 +4822,7 @@ void feGenerateGlobals(int count) {
 
 void feBeginFunction(int f, FunctionBindings bindings) {
   feFunction = f;
-  feConstants.typeScope = functions[f].typeParameters;
+  feConstants.typeScope = functions[f].typeScope;
   feImplicitReceiverSlot = -1;
   feConstants.lexicalClass = -1;
   var owner = feLexicalOwner(f);
@@ -4869,7 +4906,7 @@ void feBeginFunction(int f, FunctionBindings bindings) {
   }
   if (context != null) {
     var local = f - feLocalStart;
-    var captureIndex = 0;
+    var captureIndex = context.valueCaptureOffset;
     for (var capture in feLocalClosures[local].captures) {
       var storageType = context.fieldTypes[captureIndex];
       feOperand(opLoadLocal, 0);
@@ -5024,9 +5061,9 @@ void parseSource(SourceProgram source) {
   checkConstructorRedirects(feSymbols, feFunctionNodes, feConstructorPlans);
   var sourceFunctions = functions.length;
   var bodyBindings = <FunctionBindings>[];
+  var localTypeScopes = <List<int>>[];
   var bindingFunction = 0;
   while (bindingFunction < sourceFunctions) {
-    var previousLocals = feLocalFunctions.length;
     bodyBindings.add(
       bindFunctionLocals(
         source,
@@ -5038,12 +5075,8 @@ void parseSource(SourceProgram source) {
             : feMembers[feOwners[bindingFunction]],
       ),
     );
-    if (functions[bindingFunction].typeParameters.isNotEmpty &&
-        feLocalFunctions.length != previousLocals)
-      feAstError(
-        feLocalFunctions[previousLocals].syntax.token,
-        'closures in generic functions are not yet supported',
-      );
+    while (localTypeScopes.length < feLocalFunctions.length)
+      localTypeScopes.add(functions[bindingFunction].typeParameters);
     while (feLocalOwners.length < feLocalFunctions.length)
       feLocalOwners.add(feOwners[bindingFunction]);
     bindingFunction++;
@@ -5124,16 +5157,24 @@ void parseSource(SourceProgram source) {
   var local = 0;
   while (local < feLocalFunctions.length) {
     var declaration = feLocalFunctions[local];
-    var function = feRegisterFunction(declaration.syntax, -1, false, true);
+    var function = feRegisterFunction(
+      declaration.syntax,
+      -1,
+      false,
+      true,
+      local < localTypeScopes.length ? localTypeScopes[local] : const <int>[],
+    );
+    var info = functions[function];
     for (var binding in declaration.body!.captures) {
       if (declaration.body!.variables[binding].function != local) {
-        var info = functions[function];
-        info.closureLayout = ClosureLayout(<int>[]);
-        info.parameterTypes.insert(0, tFunction);
-        info.parameters++;
-        info.locals++;
+        info.closureLayout ??= ClosureLayout(<int>[]);
         break;
       }
+    }
+    if (info.closureLayout != null) {
+      info.parameterTypes.insert(0, tFunction);
+      info.parameters++;
+      info.locals++;
     }
     feLocalClosures.add(FeClosure());
     bodyBindings.add(declaration.body!);
@@ -5248,6 +5289,7 @@ void feGenerateCallableAdapters() {
           info.source,
         ),
       );
+      functions[adapter].closureLayout = info.closureLayout;
       feFunction = adapter;
       feFlow = flowCreate(0);
       feSlotTypes = <int>[];

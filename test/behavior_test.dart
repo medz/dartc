@@ -854,6 +854,10 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "T Function(Object?) cast<T>()=>(value)=>value as T;void main(){final f=cast<int>();print('before');f('wrong');}",
+      "T Function(T) identity<T>()=>(value)=>value;void main(){final f=identity<int>();dynamic value='wrong';print('before');f(value);}",
+      "T Function(T) identity<T>()=>(value)=>value;void main(){Object value=identity<int>();print('before');value as String Function(String);}",
+      "List<T> Function(T) wrap<T>()=>(value)=>[value];void main(){List<Object> values=wrap<int>()(1);print('before');values.add('wrong');}",
       "T cast<T>(Object? value)=>value as T;void main(){print('before');cast<int>('wrong');}",
       "T nonnull<T>(T value)=>value!;void main(){print('before');nonnull<int?>(null);}",
       "void call<T>(List<T> values,int last){} int later(){print('later');return 1;}void main(){dynamic values=<String>['wrong'];print('before');call<int>(values,later());}",
@@ -1660,6 +1664,13 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      'void outer<T>(){T unused()=>1;}void main(){}',
+      'void outer<T>(){T unused(){}}void main(){}',
+      'void outer<T>(){T value;T unused()=>value;}void main(){}',
+      'void outer<T>(){List<T> unused()=>const <T>[];}void main(){}',
+      'void outer<T>(T value){T unused(){return () { return 1; }();}}void main(){}',
+      'void outer<T>(T value){void unused(){value=1;}}void main(){}',
+      'void outer<T>(){void unused(){int T=1;T? value;print(value);}}void main(){}',
       'int get value<T> => 1;void main(){}',
       'set value<T>(T next){}void main(){}',
       'class C{C<T>();}void main(){}',

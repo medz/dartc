@@ -2556,7 +2556,10 @@ class CascadeBox {
     return CascadeBox();
   }
 
-  set written(int input) { value = input; }
+  set written(int input) {
+    value = input;
+  }
+
   int get read => value;
   void get discarded {}
 }
@@ -2566,10 +2569,12 @@ int cascadeStep(int value) {
   cascadeTrace = cascadeTrace * 10 + value;
   return value;
 }
+
 CascadeBox cascadeTarget() {
   cascadeStep(1);
   return CascadeBox();
 }
+
 CascadeBox? cascadeOptional(bool present) => present ? CascadeBox() : null;
 
 void cascadeValues() {
@@ -2582,7 +2587,10 @@ void cascadeValues() {
   print(cascadeTrace);
   print(object.value);
   print(object.values);
-  List<int> items = []..add(1)..add(2)..[0] += 3;
+  List<int> items = []
+    ..add(1)
+    ..add(2)
+    ..[0] += 3;
   print(items);
   // ignore: unnecessary_type_check
   print(items is List<int>);
@@ -2593,24 +2601,31 @@ void cascadeValues() {
   print(nested.value);
   var first = CascadeBox(), second = CascadeBox();
   // ignore: dead_code
-  var chosen = true ? first : second..value = 3;
+  var chosen = true ? first : second
+    ..value = 3;
   print(first.value);
   print(second.value);
   print(identical(first, chosen));
   var factory = () => CascadeBox()..value = 8;
   print(factory().value);
-  var callbacks = CascadeBox()..callback = (() => 7)..value = 9;
+  var callbacks = CascadeBox()
+    ..callback = (() => 7)
+    ..value = 9;
   print(callbacks.callback());
   print(callbacks.value);
   var arrow = CascadeBox()..factory = () => CascadeBox()..value = 8;
   print(arrow.value);
   print(arrow.factory().value);
   var right = 0;
-  var assigned = CascadeBox()..value = right = 5..written = 6;
+  var assigned = CascadeBox()
+    ..value = right = 5
+    ..written = 6;
   print(right);
   print(assigned.read);
   var value = cascadeOptional(true);
-  var same = value?..value = value.value + 3..values.add(8);
+  var same = value
+    ?..value = value.value + 3
+    ..values.add(8);
   print(identical(value, same));
   print(value!.value);
   cascadeTrace = 0;
@@ -3377,8 +3392,7 @@ var ifCaseGlobal = [if (3 case int value) value + 1];
 class IfCaseBox {
   final List<int> values = [if (4 case int value) value + 1];
   final List<int> initialized;
-  IfCaseBox(Object? value)
-    : initialized = [if (value case int n) n else 0];
+  IfCaseBox(Object? value) : initialized = [if (value case int n) n else 0];
 }
 
 int ifCaseRefuted(int? value) {
@@ -3455,11 +3469,12 @@ void ifCaseValues() {
   }
   for (var read in saved) print(read());
   for (var read in saved) print(read());
-  if (1 case var value when (() {
-    var value = 0;
-    value++;
-    return value == 1;
-  })()) {
+  if (1 case var value
+      when (() {
+        var value = 0;
+        value++;
+        return value == 1;
+      })()) {
     for (value in [12, 13]) print(value);
   }
   var collected = [
@@ -3585,7 +3600,15 @@ int switchCapturePattern(Object n) => switch (n) {
 Never switchEmpty(Never n) => switch (n) {};
 void switchExpressions() {
   for (var n in [-1, 0, 1, 4, 5, 9]) print(switchChoose(n));
-  for (var n in <Object?>[2, -1, 'abc', null, true, <int>[13], functionPlus])
+  for (var n in <Object?>[
+    2,
+    -1,
+    'abc',
+    null,
+    true,
+    <int>[13],
+    functionPlus,
+  ])
     print(switchTyped(n));
   print(switchOrBound(3));
   print(switchOrBound(-3));
@@ -4028,8 +4051,13 @@ int genericNext(int value) {
 
 class GenericCalls {
   static T take<T>(T value) => value;
+  static T Function() keepStatic<T>(T value) =>
+      () => value;
   T pick<T>(T value, {T? other}) => other ?? value;
   T call<T>(T value, {T? other}) => other ?? value;
+
+  T Function() keep<T>(T value) =>
+      () => pick<T>(value);
 }
 
 class GenericHolder {
@@ -4039,7 +4067,108 @@ class GenericHolder {
   }
 }
 
+U Function(T) genericSecondClosure<T, U>(U result) =>
+    (value) => result;
+
+T Function(T) genericIdentityClosure<T>() =>
+    (value) => value;
+List<T> Function(T) genericListClosure<T>() =>
+    (value) => [value];
+T Function(Object?) genericCastClosure<T>() =>
+    (value) => value as T;
+bool Function(Object?) genericTestClosure<T>() =>
+    (value) => value is T;
+T Function() Function() genericNestedClosure<T>(T value) =>
+    () =>
+        () => value;
+
+List<T Function(T)> genericSharedClosures<T>(T value) {
+  T read(T ignored) => value;
+  T write(T next) {
+    value = next;
+    return read(next);
+  }
+
+  return [read, write];
+}
+
+List<T Function()> genericLoopClosures<T>(List<T> values) => [
+  for (final value in values) () => value,
+];
+
+T Function(int) genericRecursiveClosure<T>(T value) {
+  T visit(int depth) => depth == 0 ? value : visit(depth - 1);
+  return visit;
+}
+
+List<List<T>> Function(T) genericRelayClosure<T>() =>
+    (value) => genericSingle<List<T>>(genericSingle<T>(value));
+
+List<T> genericLocalFunctions<T>(T value) {
+  T forward(T next) => next;
+  List<T> make() => [forward(value)];
+  final List<T> Function() inferred = () {
+    return [value];
+  };
+  final List<T> Function() filled = () => List<T>.filled(2, value);
+  return [...make(), ...inferred(), ...filled()];
+}
+
+List<T> Function() genericEmptyClosure<T>() =>
+    () => [];
+List<T?> Function() genericNullableClosure<T>() =>
+    () => [null];
+
+void genericClosures() {
+  final number = genericIdentityClosure<int>();
+  final text = genericIdentityClosure<String>();
+  Object value = number;
+  print(number(42));
+  print(text('closure'));
+  print(value is int Function(int));
+  print(value is String Function(String));
+  print(value is num Function(int));
+  print(value is int Function(num));
+  final nullable = genericIdentityClosure<int?>();
+  print(nullable(null));
+  print(nullable(7));
+  print(genericListClosure<String>()('typed'));
+  print(genericCastClosure<int>()(8));
+  print(genericTestClosure<List<int>>()([1]));
+  print(genericTestClosure<List<int>>()(['wrong']));
+  print(genericNestedClosure<String>('nested')()());
+  final shared = genericSharedClosures<String>('before');
+  print(shared[0]('ignored'));
+  print(shared[1]('after'));
+  print(shared[0]('ignored'));
+  final numbers = genericSharedClosures<int>(0x7fffffffffffffff);
+  print(numbers[0](0));
+  print(numbers[1](-0x8000000000000000));
+  print(numbers[0](0));
+  final loops = genericLoopClosures<int>([1, 2, 3]);
+  print([for (final read in loops) read()]);
+  print(genericRecursiveClosure<bool>(true)(4));
+  print(genericRelayClosure<String>()('relay'));
+  print(genericLocalFunctions<int>(9));
+  print(GenericCalls().keep<String>('receiver')());
+  print(GenericCalls.keepStatic<int>(17)());
+  final second = genericSecondClosure<int, String>('second parameter');
+  print(second(18));
+  value = second;
+  print(value is String Function(int));
+  print(value is int Function(String));
+  value = genericEmptyClosure<int>()();
+  print(value is List<int>);
+  print(value is List<String>);
+  value = genericNullableClosure<int>()();
+  print(value is List<int?>);
+  print(value is List<int>);
+  final void Function(void) ignored = genericIdentityClosure<void>();
+  ignored(print('void closure argument'));
+}
+
 void genericFunctions() {
+  genericClosures();
   print(genericIdentity<int>(42));
   print(genericIdentity(true));
   print(genericIdentity('generic'));

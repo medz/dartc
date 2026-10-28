@@ -340,7 +340,12 @@ ConstantLayout layoutConstants(int start) {
       if (callableOffsets[i] == 0) needsFunctions = true;
       var type = functionValueType(i);
       while (typeOffsets.length < dartTypes.length) typeOffsets.add(-1);
-      markTypeReference(typeOffsets, types, type);
+      markTypeReference(
+        typeOffsets,
+        types,
+        type,
+        functions[i].closureLayout?.typeParameters.isNotEmpty ?? false,
+      );
     }
     i++;
   }

@@ -77,6 +77,18 @@ void corrupt(List<SsaFunction> program, String mode) {
       invoke.inputs[0] = invoke.inputs[1];
   } else if (mode == 'type-reference-scope') {
     operation(named(program, 'genericList'), opTypeReference).target = templateParameter();
+  } else if (mode == 'closure-environment' || mode == 'closure-scope') {
+    final reference = operation(named(program, 'genericClosure'), opClosureDescriptor);
+    final info = functions[reference.target];
+    if (mode == 'closure-environment') {
+      info.closureLayout!.fieldTypes[0] = tInt;
+    } else {
+      functions[info.callableAdapter].closureLayout = ClosureLayout(
+        info.closureLayout!.fieldTypes,
+        false,
+        <int>[templateParameter()],
+      );
+    }
   } else if (mode == 'duplicate') {
     operation(order, opMul).value = add.value;
   } else if (mode == 'undefined') {
@@ -209,6 +221,7 @@ typedef UnusedTemplate<T> = List<T>;
 class Counter { int add(int value) => value + 1; }
 T generic<T extends num>(T value) => value;
 List<T> genericList<T>(T value) => [value];
+T Function(T) genericClosure<T>() => (T value) => value;
 int callee(int value) => value + 1;
 int order(int value) {
   final next = value + 1;
@@ -239,6 +252,7 @@ List<int> slice(List<int> value) => value.sublist(1);
 void main() {
   print(generic<int>(1));
   print(genericList<int>(2));
+  print(genericClosure<int>()(3));
   print(order(3));
   print(diamond(true, 4));
   print(loop(3));
@@ -284,6 +298,8 @@ Future<void> main(List<String> args) async {
       'generic-count': 'generic argument count',
       'generic-bound': 'generic argument bound',
       'generic-environment': 'call operand type',
+      'closure-environment': 'closure type environment layout',
+      'closure-scope': 'closure type environment scope',
       'type-reference-scope': 'uninstantiated executable type',
       'duplicate': 'duplicate definition',
       'undefined': 'undefined value',

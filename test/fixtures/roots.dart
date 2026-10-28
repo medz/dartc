@@ -784,8 +784,12 @@ List<List<T>> genericRootNested<T>(T value) => [genericRootList<T>(value)];
 List<List<T> Function(List<T>)> genericRootCallbacks<T>(
   List<T> Function(List<T>) callback,
 ) => [callback, callback, callback];
-List<Leaf> Function(List<Leaf>) genericRootCallback(Leaf retained) =>
-    (List<Leaf> values) => [retained, values[0]];
+List<T> Function(List<T>) genericRootCallback<T>(T retained) =>
+    (List<T> values) => [retained, values[0]];
+bool Function(Object?) genericRootTypeTest<T>() =>
+    (value) => value is T;
+bool Function(Object?) genericNestedRootTypeTest<T>() =>
+    genericRootTypeTest<List<T>>();
 
 void genericTypeRoots(int queue, int edges) {
   var mark = rt.rtRootMark();
@@ -807,7 +811,9 @@ void genericTypeRoots(int queue, int edges) {
   check(value is List<List<Leaf>> && value is! List<List<int>>);
   check(nested[0][0].marker == 841);
 
-  var callbacks = genericRootCallbacks<Leaf>(genericRootCallback(Leaf(842)));
+  var callbacks = genericRootCallbacks<Leaf>(
+    genericRootCallback<Leaf>(Leaf(842)),
+  );
   var list = captureList(callbacks, 3, queue);
   var listType = rt.nativeLoad64(list + abi.listTypeOffset);
   check(rt.rtTraceObject(listType, edges, capacity) == 1);
@@ -822,10 +828,32 @@ void genericTypeRoots(int queue, int edges) {
   check(contains(edges, 2, listType) && contains(edges, 2, backing));
   check(rt.rtTraceObject(backing, edges, capacity) == 3);
   var callback = rt.nativeLoad64(edges);
-  check(rt.rtTraceObject(callback, edges, capacity) == 1);
-  check(findMarker(edges, 1, 842) != 0);
+  check(rt.rtTraceObject(callback, edges, capacity) == 3);
+  check(contains(edges, 3, rt.rtFunctionType(callback)));
+  check(findMarker(edges, 3, 842) != 0);
+  var environment = rt.nativeLoad64(callback + abi.functionInstanceBytes);
+  check(contains(edges, 3, environment));
+  check(rt.rtTraceObject(environment, edges, capacity) == 1);
+  check(rt.rtTraceObject(rt.nativeLoad64(edges), edges, capacity) == 1);
+  check(rt.rtTraceObject(rt.nativeLoad64(edges), edges, capacity) == 0);
   var result = callbacks[0](nested[0]);
   check(result[0].marker == 842 && result[1].marker == 841);
+
+  // This closure mentions T only in its body. Its enclosing invocation has
+  // returned, and the reified List<Leaf> argument must still be traced.
+  var tests = <bool Function(Object?)>[genericNestedRootTypeTest<Leaf>()];
+  var testList = captureList(tests, 1, queue);
+  check(listElements(testList, edges) == 1);
+  var test = rt.nativeLoad64(edges);
+  check(rt.rtTraceObject(test, edges, capacity) == 1);
+  environment = rt.nativeLoad64(edges);
+  check(rt.rtTraceObject(environment, edges, capacity) == 1);
+  var arguments = rt.nativeLoad64(edges);
+  check(rt.rtTraceObject(arguments, edges, capacity) == 1);
+  var argument = rt.nativeLoad64(edges);
+  check(rt.nativeLoad64(argument + abi.typeKindOffset) == abi.typeKindList);
+  check(rt.rtTraceObject(argument, edges, capacity) == 0);
+  check(tests[0](<Leaf>[]) && !tests[0](<int>[]));
   check(rt.rtRootMark() == mark);
 }
 

@@ -22,7 +22,7 @@
 | §8 Variables | [变量](variables.md) | 部分实现 |
 | §9 Functions | [函数](functions.md) | 部分实现 |
 | §10 Classes；§11 Interfaces；§12 Mixins；§13 Extensions；§14 Enums；§16 Metadata | [类及相关声明](classes.md) | 简单类部分实现，其余构造仍有大片缺口 |
-| §15 Generics；§20 Types | [类型与泛型](types.md) | 核心类型、List 实参及泛型别名部分实现；泛型类与函数尚未实现 |
+| §15 Generics；§20 Types | [类型与泛型](types.md) | 核心类型、List 实参、泛型别名与泛型函数直接调用部分实现；泛型类与泛型函数值仍缺 |
 | §17 Expressions | [表达式](expressions.md) | 部分实现 |
 | §18 Statements | [语句](statements.md) | 部分实现 |
 | §19 Libraries and Scripts | [库与脚本](libraries.md) | 相对库依赖与入口部分实现 |

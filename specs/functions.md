@@ -34,7 +34,7 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 显式调用检查实参数量和代入后的上界。省略类型实参时，支持已有类型模型中的上下文、普通实参及带类型回调约束；返回上下文与参数上下文保持独立，例如 `print` 的 `Object?` 参数参与向下推断。没有约束时采用实例化到界。实参求值、必要检查和命名重排保持源码顺序；调用成员 getter 的时序遵守已有调用规则。
 
-泛型局部/匿名函数、泛型函数值及 tear-off、泛型函数类型、泛型体内的局部函数/闭包、未确定回调参数的水平推断、动态复合实参的向上推断、完整基于上界的推断和 `T & S` 交叉类型提升仍缺。泛型 `main` 当前仅支持无值参数、默认类型实参满足边界的声明。类型参数作为公开 `Type` 值尚未实现。这些限制是实现缺口，不改变语言兼容目标。
+泛型局部/匿名函数、泛型函数值及 tear-off、泛型函数类型、未确定回调参数的水平推断、动态复合实参的向上推断、完整基于上界的推断和 `T & S` 交叉类型提升仍缺。泛型 `main` 当前仅支持无值参数、默认类型实参满足边界的声明。类型参数作为公开 `Type` 值尚未实现。这些限制是实现缺口，不改变语言兼容目标。
 
 实现入口为 [resolve_type.dart](../lib/src/resolve_type.dart) 的 `resolveFunctionTypeParameters`、[generics.dart](../lib/src/frontend/generics.dart) 的约束收集及求解、[frontend.dart](../lib/src/frontend.dart) 的 `fePrepareGenericArguments`。行为入口为 [values.dart](../test/fixtures/values.dart) 的 `genericFunctions`、[behavior_test.dart](../test/behavior_test.dart) 的 `generic-functions-imports.dart`、`generic-entry.dart`、`rejected` 与 `failingValues`。推断依据[类型推断规则][generic-inference]，运行时类型图的存活检查由 [roots.dart](../test/fixtures/roots.dart) 的 `genericTypeRoots` 拥有。
 
@@ -68,7 +68,11 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 `for (var i = …)` 的闭包保留每轮绑定，更新表达式作用于下一轮绑定；`for-in` 的声明变量同样逐轮独立。循环使用外部已有变量时继续共享它。按声明点检查捕获的确定赋值事实；子函数中的写入不使父函数的变量自动成为已赋值。捕获的 final 不能在子函数中赋值。被闭包写入的绑定不参与类型提升；没有显式写入的绑定可以在闭包中保留外围提升。更完整的流规则仍按[类型追踪](types.md)补齐。
 
-行为入口为 [behavior_test.dart](../test/behavior_test.dart) 的 `capturedFunctions()` 及捕获拒绝用例；[roots.dart](../test/fixtures/roots.dart) 的 `closureRoots()` 验证逃逸闭包、共享绑定和捕获引用的枚举。可选/命名参数捕获、泛型捕获和异步捕获仍有实现缺口。
+行为入口为 [behavior_test.dart](../test/behavior_test.dart) 的 `capturedFunctions()` 及捕获拒绝用例；[roots.dart](../test/fixtures/roots.dart) 的 `closureRoots()` 验证逃逸闭包、共享绑定和捕获引用的枚举。可选/命名参数捕获、自身声明类型参数的局部/匿名函数和异步捕获仍有实现缺口。
+
+泛型顶层函数、静态和实例方法的函数体中，非泛型局部函数与匿名函数可捕获外层类型参数和普通变量，包括多层逃逸、共享可变绑定、自递归和隐式 `this`。外层类型参数可用于参数/结果/局部类型、List 构造、其他泛型直接调用、`is`/`as` 与模式；无值捕获或仅在函数体中使用类型参数的闭包也保留类型环境。函数对象按创建时的实际类型实参形成签名，参数逆变、结果协变及调用入口检查沿用非泛型函数值规则。未使用的泛型函数和局部函数仍检查函数体、返回、确定赋值与常量义务。
+
+依据[函数闭包化][closurization]和[函数对象签名][signature]；行为入口为 [values.dart](../test/fixtures/values.dart) 的 `genericClosures()`、[behavior_test.dart](../test/behavior_test.dart) 的 `rejected` / `failingValues`。外层返回后，闭包签名、类型环境及捕获值的根枚举由 [roots.dart](../test/fixtures/roots.dart) 的 `genericTypeRoots()` 验证。
 
 ## 函数值
 
