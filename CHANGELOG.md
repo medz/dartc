@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Support generic top-level and method calls with bounds, contextual argument inference and reified List, nullable and function types; preserve shared code through type-changing recursion.
+
 - Update the native runtime ABI to 14 so List and function objects retain heap type metadata; compiler and runtime sources must be rebuilt together.
 - Support pattern switch statements with guards, shared case bindings, exhaustive scalar checks and case-label continue, preserving legacy constant-case behavior.
 - Support local pattern declarations and assignments, including nested inference, captures and destructuring for/for-in statements and List elements.

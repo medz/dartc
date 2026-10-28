@@ -46,7 +46,8 @@ class _SsaVerifier {
 
   void type(int id) {
     if (id < 0 || id >= dartTypes.length) fail('invalid type');
-    if (typeContainsParameters(id) || typeHasSchemaHole(id))
+    if (typeHasSchemaHole(id) ||
+        !typeParametersInScope(id, functions[number].typeParameters))
       fail('uninstantiated executable type');
   }
 
@@ -68,6 +69,17 @@ class _SsaVerifier {
 
   void definitions() {
     final info = functions[number];
+    for (var i = 0; i < info.typeParameters.length; i++) {
+      var parameter = info.typeParameters[i];
+      if (parameter < 0 ||
+          parameter >= dartTypes.length ||
+          !typeIsParameter(parameter))
+        fail('generic parameter type');
+      var declaration = typeParameterInfo(parameter);
+      if (declaration.owner != -number - 1 || declaration.ordinal != i)
+        fail('generic parameter identity');
+      type(declaration.bound);
+    }
     type(function.result);
     if (function.result != info.result ||
         function.blocks.isEmpty ||
@@ -130,14 +142,40 @@ class _SsaVerifier {
   void instruction(SsaInstruction instruction) {
     final SsaInstruction(:op, :target, resultType: result) = instruction;
     var count = 0;
-    if (op == opCall) {
-      if (target < 0 || target >= functions.length) fail('call target');
-      final callee = functions[target];
+    if (op == opCall || op == opGenericCall) {
+      var calleeId = target;
+      if (op == opGenericCall) {
+        if (target < 0 || target >= genericCalls.length)
+          fail('generic call target');
+        calleeId = genericCalls[target].function;
+      }
+      if (calleeId < 0 || calleeId >= functions.length) fail('call target');
+      final callee = functions[calleeId];
       count = callee.parameters;
-      if (callee.parameterTypes.length != count || result != callee.result)
+      var expectedResult = callee.result;
+      if (op == opGenericCall) {
+        var arguments = genericCalls[target].typeArguments;
+        if (callee.typeParameters.isEmpty ||
+            arguments.length != callee.typeParameters.length)
+          fail('generic argument count');
+        for (var argument in arguments) type(argument);
+        for (var i = 0; i < arguments.length; i++) {
+          var bound = substituteType(
+            typeParameterInfo(callee.typeParameters[i]).bound,
+            callee.typeParameters,
+            arguments,
+          );
+          if (!typeIsSubtype(arguments[i], bound))
+            fail('generic argument bound');
+        }
+        expectedResult = genericBoundaryType(expectedResult);
+      } else if (callee.typeParameters.isNotEmpty) {
+        fail('generic call requires type arguments');
+      }
+      if (callee.parameterTypes.length != count || result != expectedResult)
         fail('call metadata');
     } else if (op == opBuiltin) {
-      if (!(target >= bPrintString && target <= bListSublist ||
+      if (!(target >= bPrintString && target <= bListFilledTyped ||
           target >= bNativeLoad64 &&
               target <= bNativeFramePointer &&
               target != bNativeMetadataAddress))
@@ -152,6 +190,12 @@ class _SsaVerifier {
       } else if (target == bFunctionInvoke && count < 2) {
         fail('invoke operand count');
       } else if (target == bListSublist) {
+        count = 4;
+      } else if (target == bTypeInstantiate || target == bValueCheck) {
+        count = 2;
+      } else if (target == bListNewTyped) {
+        count = 1;
+      } else if (target == bListFilledTyped) {
         count = 4;
       }
     } else if (op == opStoreGlobal ||
@@ -171,7 +215,8 @@ class _SsaVerifier {
         op != opConstantData &&
         op != opFunctionReference &&
         op != opClosureDescriptor &&
-        op != opCaptureCellDescriptor) {
+        op != opCaptureCellDescriptor &&
+        op != opTypeReference) {
       fail('unknown SSA operation');
     }
     if (instruction.inputs.length != count) fail('operand count');
@@ -179,15 +224,20 @@ class _SsaVerifier {
     if (instruction.effects != ssaEffects(op, target))
       fail('operation effects');
     if (op == opStoreGlobal && instruction.value != -1) fail('store result');
-    if (op == opCall) {
+    if (op == opCall || op == opGenericCall) {
+      var callee = op == opGenericCall ? genericCalls[target].function : target;
       var i = 0;
       while (i < count) {
-        final expected = functions[target].parameterTypes[i];
+        var expected = functions[callee].parameterTypes[i];
+        if (op == opGenericCall) expected = genericBoundaryType(expected);
         type(expected);
         if (!_compatible(inputType(instruction.inputs[i]), expected))
           fail('call operand type');
         i++;
       }
+    } else if (op == opTypeReference) {
+      type(target);
+      if (result != tObject) fail('type reference result');
     } else if (op == opLoadGlobal || op == opStoreGlobal) {
       if (target < 0 || target >= globalTypes.length) fail('global target');
       type(globalTypes[target]);
@@ -241,6 +291,7 @@ class _SsaVerifier {
       if (result != tPointer) fail('capture cell descriptor');
     } else if (op == opTypeTest || op == opTypeCast) {
       type(target);
+      if (typeContainsParameters(target)) fail('uninstantiated type operation');
       if (!typeIsTagged(inputType(instruction.inputs[0])))
         fail('type operation operand representation');
       if (result != (op == opTypeTest ? tBool : target))
@@ -265,11 +316,36 @@ class _SsaVerifier {
         i++;
       }
     } else if (op == opBuiltin) {
+      if ((target == bValueCast ||
+              target == bListNew ||
+              target == bListFilled) &&
+          typeContainsParameters(result))
+        fail('uninstantiated builtin type');
       if (target >= bNativeLoad64) {
         for (var input in instruction.inputs) {
           if (inputType(input) != tInt) fail('primitive operand type');
         }
         if (result != tInt) fail('primitive result');
+      } else if (target == bTypeInstantiate) {
+        expectInput(instruction, 0, tObject);
+        expectInput(instruction, 1, listType(tObject));
+        if (result != tObject) fail('instantiated type reference');
+      } else if (target == bValueCheck) {
+        if (!typeIsTagged(inputType(instruction.inputs[0])) ||
+            !typeIsTagged(result) && !typeIsReference(result))
+          fail('generic checked value representation');
+        expectInput(instruction, 1, tObject);
+      } else if (target == bListNewTyped || target == bListFilledTyped) {
+        if (!typeIsList(result)) fail('generic List result');
+        if (target == bListNewTyped) {
+          expectInput(instruction, 0, tObject);
+        } else {
+          expectInput(instruction, 0, tInt);
+          if (!typeIsTagged(inputType(instruction.inputs[1])))
+            fail('generic fill value');
+          expectInput(instruction, 2, tBool);
+          expectInput(instruction, 3, tObject);
+        }
       } else if (target == bListSublist) {
         if (!typeIsList(result) || inputType(instruction.inputs[0]) != result)
           fail('sublist receiver type');

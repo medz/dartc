@@ -1,5 +1,6 @@
 import 'ast.dart';
 import 'frontend/arguments.dart';
+import 'frontend/generics.dart';
 import 'frontend/literals.dart';
 import 'frontend/parameters.dart';
 import 'frontend/patterns.dart';
@@ -114,6 +115,7 @@ class FeFunctionState {
   final List<ConstantValue> constants = feConstants.locals;
   final List<int> constantTypes = feConstants.localTypes;
   final int constantScope = feConstants.lexicalClass;
+  final List<int> constantTypeScope = feConstants.typeScope;
   final List<int> breaks = feBreaks;
   final List<int> continues = feContinues;
   final List<FlowState> breakFlows = feBreakFlows;
@@ -141,6 +143,7 @@ class FeFunctionState {
     feConstants.locals = constants;
     feConstants.localTypes = constantTypes;
     feConstants.lexicalClass = constantScope;
+    feConstants.typeScope = constantTypeScope;
     feBreaks = breaks;
     feContinues = continues;
     feBreakFlows = breakFlows;
@@ -267,6 +270,11 @@ int feRegisterFunction(
   bool constructor, [
   bool local = false,
 ]) {
+  if (syntax.typeParameters.isNotEmpty && (local || syntax.external))
+    feAstError(
+      syntax.token,
+      'generic local or external functions are not yet supported',
+    );
   if (syntax.external) {
     var source = feTokens[syntax.token].source;
     var primitive = fePrimitive(syntax.name);
@@ -297,6 +305,7 @@ int feRegisterFunction(
     return -1;
   }
   var id = functions.length;
+  var typeParameters = resolveFunctionTypeParameters(feSymbols, syntax, id);
   var types = <int>[];
   var source = feTokens[syntax.token].source;
   var name = syntax.name;
@@ -304,7 +313,7 @@ int feRegisterFunction(
   if (constructor)
     result = classType(owner);
   else if (syntax.result.name != '')
-    result = resolveType(feSymbols, syntax.result);
+    result = resolveType(feSymbols, syntax.result, typeParameters);
   else if (owner >= 0 &&
       !syntax.isStatic &&
       syntax.name == 'toString' &&
@@ -317,6 +326,7 @@ int feRegisterFunction(
       types.add(classType(owner));
     }
   }
+  if (typeParameters.isNotEmpty) types.add(listType(tObject));
   var p = 0;
   while (p < syntax.parameters.length) {
     var parameter = syntax.parameters[p];
@@ -330,7 +340,7 @@ int feRegisterFunction(
       var entry = feField(owner, parameter.name, parameter.token);
       type = feFieldTypes[entry];
       if (parameter.type.name != '') {
-        type = resolveType(feSymbols, parameter.type);
+        type = resolveType(feSymbols, parameter.type, typeParameters);
         if (!typeIsSubtype(type, feFieldTypes[entry])) {
           feAstError(
             parameter.token,
@@ -339,7 +349,7 @@ int feRegisterFunction(
         }
       }
     } else if (parameter.type.name != '') {
-      type = resolveType(feSymbols, parameter.type);
+      type = resolveType(feSymbols, parameter.type, typeParameters);
     }
     types.add(type);
     p++;
@@ -348,6 +358,7 @@ int feRegisterFunction(
   functions.add(
     FunctionInfo(name, 0, count, count, result, types, <int>[], source),
   );
+  functions[id].typeParameters = typeParameters;
   feParamDefaults.add(<ConstantValue>[]);
   feFunctionNodes.add(syntax);
   feOwners.add(owner);
@@ -364,7 +375,11 @@ int feRegisterFunction(
     else
       feSymbols.declarations[symbol].target = id;
   }
-  var callable = !constructor && !syntax.getter && !syntax.setter;
+  var callable =
+      typeParameters.isEmpty &&
+      !constructor &&
+      !syntax.getter &&
+      !syntax.setter;
   p = 0;
   while (p < syntax.parameters.length) {
     if (syntax.parameters[p].kind != astRequiredPositional) callable = false;
@@ -635,10 +650,31 @@ bool feHasReceiver(int function) {
   return feOwners[function] >= 0 && !feFunctionNodes[function].isStatic;
 }
 
+int feTypeEnvironmentSlot(int function) => feHasReceiver(function) ? 1 : 0;
+
 int feParameterOffset(int function) {
-  return feHasReceiver(function) || functions[function].closureLayout != null
+  var offset =
+      feHasReceiver(function) || functions[function].closureLayout != null
       ? 1
       : 0;
+  if (functions[function].typeParameters.isNotEmpty) offset++;
+  return offset;
+}
+
+int feResolveType(AstType syntax) =>
+    resolveType(feSymbols, syntax, functions[feFunction].typeParameters);
+
+// Returns the template operand so inferred List literals can finish its type.
+int feRuntimeType(int type, [bool instantiate = false]) {
+  var position = ir.length;
+  feOperand(opTypeReference, type);
+  if (typeContainsParameters(type) || instantiate) {
+    if (functions[feFunction].typeParameters.isEmpty)
+      feAstError(feAt, 'captured type parameters are not yet supported');
+    feOperand(opLoadLocal, feTypeEnvironmentSlot(feFunction));
+    feBuiltinTyped(bTypeInstantiate, 2, tObject);
+  }
+  return position + 1;
 }
 
 void feEmit(int op) {
@@ -655,11 +691,21 @@ void feWord(int value) {
 }
 
 void feOperand(int op, int value) {
+  if ((op == opTypeTest || op == opTypeCast) && typeContainsParameters(value)) {
+    feRuntimeType(value);
+    feBuiltinTyped(
+      op == opTypeTest ? bValueIs : bValueCheck,
+      2,
+      op == opTypeTest ? tBool : value,
+    );
+    return;
+  }
   var position = ir.length;
   feEmit(op);
   feWord(value);
   if (op == opInt || op == opMetadataAddress) irTypes[position] = tInt;
   if (op == opString) irTypes[position] = tString;
+  if (op == opTypeReference) irTypes[position] = tObject;
   if (op == opDescriptor) irTypes[position] = tPointer;
   if (op == opConstantData) irTypes[position] = tPointer;
   if (op == opClosureDescriptor || op == opCaptureCellDescriptor)
@@ -720,6 +766,11 @@ int feBuiltinType(int id) {
 }
 
 void feBuiltinTyped(int id, int count, int type) {
+  if (id == bValueCast && typeContainsParameters(type)) {
+    feRuntimeType(type);
+    feBuiltinTyped(bValueCheck, 2, type);
+    return;
+  }
   feEmit(opBuiltin);
   irTypes[ir.length - 1] = type;
   feWord(id);
@@ -919,6 +970,9 @@ int feFindFunction(String name) {
 }
 
 int feResolveName(int token, String name, String prefix, bool writing) {
+  var head = prefix == '' ? name : prefix;
+  if (typeParameterInScope(functions[feFunction].typeParameters, head) >= 0)
+    feAstError(token, 'type parameter values are not yet supported');
   var source = feTokens[token].source;
   var symbol = -1;
   if (writing)
@@ -930,6 +984,8 @@ int feResolveName(int token, String name, String prefix, bool writing) {
 }
 
 bool feHasPrefix(int token, String prefix) {
+  if (typeParameterInScope(functions[feFunction].typeParameters, prefix) >= 0)
+    return false;
   var source = sourceLibrary(feSources, feTokens[token].source);
   var imports = feSources.files[source].imports;
   var i = 0;
@@ -1339,6 +1395,12 @@ int feConvertValue(int actual, int expected, int token) {
   if (!typingAssignable(actual, expected)) {
     feAstError(token, 'incompatible value type');
   }
+  if (actual != tNever &&
+      typeIsTagged(actual) &&
+      (expected == tInt || expected == tBool)) {
+    feBuiltinTyped(bValueCast, 1, expected);
+    return expected;
+  }
   if (typeIsSubtype(actual, expected)) {
     var builtin = bBoxRef;
     if (typeIsTagged(expected)) {
@@ -1372,7 +1434,7 @@ void feConditionFact(AstExpression expression, bool truth) {
   } else if (expression.kind == astTypeTest) {
     var binding = expression.children[0].binding;
     if (binding < 0 || !fePromotable(binding)) return;
-    var tested = resolveType(feSymbols, expression.typeArguments[0]);
+    var tested = feResolveType(expression.typeArguments[0]);
     if (expression.text == 'is!') truth = !truth;
     if (truth)
       flowPromote(feFlow, binding, tested);
@@ -1436,6 +1498,8 @@ int feNonNullableValue(int type, int token) {
   if (!typingReceiver(type)) {
     feAstError(token, 'member access requires a non-nullable receiver');
   }
+  var bound = typeBound(type);
+  if (bound != type) return feConvertValue(type, bound, token);
   return type;
 }
 
@@ -1463,12 +1527,12 @@ int feLowerHint(AstExpression expression, int context) {
     return feLowerConditional(expression, context);
   if (expression.kind == astBinary && expression.text == '??')
     return feLowerCoalescing(expression, context);
+  if (expression.kind == astCall) return feLowerCall(expression, context);
   var type = -1;
   var listContext = context;
   if (listContext >= 0) listContext = typeNonNullable(listContext);
   if (listContext >= 0 && typeIsList(listContext)) {
     if (expression.kind == astList) type = feLowerList(expression, listContext);
-    if (expression.kind == astCall) type = feLowerCall(expression, listContext);
   }
   if (type < 0) type = feLowerExpression(expression);
   return type;
@@ -1659,6 +1723,10 @@ void feResolveFunctionDefaults(int f) {
   feConstants.localTypes = feFlow.types;
   var syntax = feFunctionNodes[f];
   feCheckMetadata(syntax.metadata, owner, f);
+  var typeScope = feConstants.typeScope;
+  feConstants.typeScope = functions[f].typeParameters;
+  for (var parameter in syntax.typeParameters)
+    feCheckMetadata(parameter.metadata, owner);
   feConstants.lexicalClass = owner;
   var parameters = syntax.parameters;
   var offset = feParameterOffset(f);
@@ -1689,6 +1757,7 @@ void feResolveFunctionDefaults(int f) {
     p++;
   }
   feConstants.lexicalClass = scope;
+  feConstants.typeScope = typeScope;
 }
 
 void feResolveDefaults(int count) {
@@ -1852,6 +1921,241 @@ void feGenerateConstantObjects() {
   }
 }
 
+void feLoadTypeEnvironment(List<int> arguments) {
+  var environmentType = listType(tObject);
+  var environment = feTemp(environmentType);
+  feBuiltinTyped(bListNew, 0, environmentType);
+  feOperand(opStoreLocal, environment);
+  for (var argument in arguments) {
+    feOperand(opLoadLocal, environment);
+    feRuntimeType(argument);
+    feBuiltin(bListAdd, 2);
+    feEmit(opPop);
+  }
+  feOperand(opLoadLocal, environment);
+}
+
+int fePrepareInferredArguments(AstExpression call, int function, int context) {
+  var info = functions[function];
+  var parameters = info.typeParameters;
+  var lower = List<int>.filled(parameters.length, -1);
+  var upper = List<int>.filled(parameters.length, -1);
+  if (context >= 0 && context != tDynamic && context != tVoid)
+    constrainGenericTypes(
+      info.result,
+      context,
+      parameters,
+      lower,
+      upper,
+      false,
+    );
+  var fixed = <int>[];
+  var schemaArguments = <int>[];
+  for (var i = 0; i < parameters.length; i++) {
+    var type = upper[i] >= 0 ? upper[i] : lower[i];
+    var bound = typeParameterInfo(parameters[i]).bound;
+    if (type >= 0 && !typeContainsParameters(bound))
+      type = meetTypes(type, bound);
+    fixed.add(type >= 0 && !typeHasSchemaHole(type) ? type : -1);
+    schemaArguments.add(type < 0 ? typeSchemaHole() : type);
+  }
+  var syntax = feFunctionNodes[function];
+  var offset = feParameterOffset(function);
+  var bindings = bindArguments(feSources, syntax, call, 1);
+  var actualTypes = <int>[];
+  var actualSlots = <int>[];
+  var checks = <int>[];
+  var continuations = <int>[];
+  for (var i = 1; i < call.children.length; i++) {
+    var expression = call.children[i];
+    if (expression.kind == astNamedArgument)
+      expression = expression.children[0];
+    var template = info.parameterTypes[offset + bindings[i - 1]];
+    var schema = substituteType(template, parameters, schemaArguments);
+    var closure = expression.function;
+    if (closure != null && typeIsFunction(schema)) {
+      var inputs = functionSignature(schema).parameters;
+      for (var p = 0; p < closure.parameters.length && p < inputs.length; p++) {
+        if (closure.parameters[p].type.name == '' &&
+            typeHasSchemaHole(inputs[p]))
+          feAstError(
+            closure.parameters[p].token,
+            'generic inference for untyped callback parameters is not yet supported',
+          );
+      }
+    }
+    var actual = feLowerHint(expression, schema);
+    if (actual == tDynamic &&
+        typeHasSchemaHole(schema) &&
+        !typeIsParameter(template))
+      feAstError(
+        expression.token,
+        'generic inference from dynamic compound arguments is not yet supported',
+      );
+    constrainGenericTypes(template, actual, parameters, lower, upper);
+    var slot = feTemp(actual);
+    feOperand(opStoreLocal, slot);
+    actualTypes.add(actual);
+    actualSlots.add(slot);
+    // The inferred check still executes before the next source argument.
+    checks.add(feJump(opJump));
+    continuations.add(ir.length);
+  }
+  var arguments = inferGenericArguments(parameters, lower, upper, fixed);
+  for (var i = 0; i < arguments.length; i++) {
+    var bound = substituteType(
+      typeParameterInfo(parameters[i]).bound,
+      parameters,
+      arguments,
+    );
+    if (!typeIsSubtype(arguments[i], bound))
+      feAstError(
+        call.token,
+        'inferred type argument does not satisfy function bound',
+      );
+  }
+  var invocation = genericCalls.length;
+  genericCalls.add(GenericCall(function, arguments));
+  var values = List<int>.filled(syntax.parameters.length, -1);
+  var ready = feJump(opJump);
+  for (var i = 0; i < actualSlots.length; i++) {
+    fePatch(checks[i], ir.length);
+    var declared = info.parameterTypes[offset + bindings[i]];
+    var expected = substituteType(declared, parameters, arguments);
+    var token = call.children[i + 1].token;
+    feOperand(opLoadLocal, actualSlots[i]);
+    feConvertValue(actualTypes[i], expected, token);
+    var boundary = genericBoundaryType(declared);
+    if (expected == tVoid && boundary == tDynamic)
+      feBuiltinTyped(bBoxRef, 1, boundary);
+    else
+      feConvertValue(expected, boundary, token);
+    var slot = feTemp(boundary);
+    feOperand(opStoreLocal, slot);
+    values[bindings[i]] = slot;
+    feOperand(opJump, continuations[i]);
+  }
+  fePatch(ready, ir.length);
+  feLoadTypeEnvironment(arguments);
+  for (var i = 0; i < values.length; i++) {
+    if (values[i] >= 0) {
+      feOperand(opLoadLocal, values[i]);
+    } else {
+      var declared = info.parameterTypes[offset + i];
+      var expected = substituteType(declared, parameters, arguments);
+      feConstantValue(
+        feParamDefaults[function][offset + i],
+        expected,
+        call.token,
+      );
+      feConvertValue(expected, genericBoundaryType(declared), call.token);
+    }
+  }
+  return invocation;
+}
+
+int fePrepareGenericArguments(
+  AstExpression call,
+  int function, [
+  int context = -1,
+]) {
+  if (call.typeArguments.isEmpty)
+    return fePrepareInferredArguments(call, function, context);
+  var info = functions[function];
+  if (call.typeArguments.length != info.typeParameters.length)
+    feAstError(call.token, 'generic type argument count');
+  var arguments = <int>[];
+  for (var syntax in call.typeArguments) arguments.add(feResolveType(syntax));
+  for (var i = 0; i < arguments.length; i++) {
+    var bound = substituteType(
+      typeParameterInfo(info.typeParameters[i]).bound,
+      info.typeParameters,
+      arguments,
+    );
+    if (!typeIsSubtype(arguments[i], bound))
+      feAstError(
+        call.typeArguments[i].token,
+        'type argument does not satisfy function bound',
+      );
+  }
+  var invocation = genericCalls.length;
+  genericCalls.add(GenericCall(function, arguments));
+  feLoadTypeEnvironment(arguments);
+  var parameters = feFunctionNodes[function].parameters;
+  var offset = feParameterOffset(function);
+  var bindings = bindArguments(feSources, feFunctionNodes[function], call, 1);
+  var values = List<int>.filled(parameters.length, -1);
+  for (var i = 1; i < call.children.length; i++) {
+    var expression = call.children[i];
+    if (expression.kind == astNamedArgument)
+      expression = expression.children[0];
+    var parameter = bindings[i - 1];
+    var declared = info.parameterTypes[offset + parameter];
+    var type = substituteType(declared, info.typeParameters, arguments);
+    var actual = feLowerInContext(expression, type);
+    var boundary = genericBoundaryType(declared);
+    if (actual == tVoid && boundary == tDynamic)
+      feBuiltinTyped(bBoxRef, 1, boundary);
+    else
+      feConvertValue(actual, boundary, expression.token);
+    var slot = feTemp(boundary);
+    feOperand(opStoreLocal, slot);
+    values[parameter] = slot;
+  }
+  for (var i = 0; i < parameters.length; i++) {
+    if (values[i] >= 0) {
+      feOperand(opLoadLocal, values[i]);
+    } else {
+      var declared = info.parameterTypes[offset + i];
+      var type = substituteType(declared, info.typeParameters, arguments);
+      feConstantValue(feParamDefaults[function][offset + i], type, call.token);
+      feConvertValue(type, genericBoundaryType(declared), call.token);
+    }
+  }
+  return invocation;
+}
+
+int feFinishGenericCall(int invocation, int token) {
+  var call = genericCalls[invocation];
+  var info = functions[call.function];
+  var boundary = genericBoundaryType(info.result);
+  feEmit(opGenericCall);
+  irTypes[ir.length - 1] = boundary;
+  feWord(invocation);
+  feWord(info.parameters);
+  var result = substituteType(
+    info.result,
+    info.typeParameters,
+    call.typeArguments,
+  );
+  if (boundary != result) {
+    if (typingAssignable(boundary, result)) {
+      feConvertValue(boundary, result, token);
+    } else {
+      feConvertValue(boundary, tDynamic, token);
+      feOperand(opTypeCast, result);
+    }
+  }
+  if (result == tNever) flowUnreachable(feFlow);
+  return result;
+}
+
+int feInvokeDeclaration(
+  AstExpression call,
+  int function, [
+  int receiver = 0,
+  int context = -1,
+]) {
+  if (functions[function].typeParameters.isNotEmpty)
+    return feFinishGenericCall(
+      fePrepareGenericArguments(call, function, context),
+      call.token,
+    );
+  var count = feLowerArguments(call, 1, function);
+  feCall(function, count + receiver);
+  return functions[function].result;
+}
+
 int feLowerArguments(AstExpression call, int start, int function) {
   if (call.typeArguments.length != 0)
     feAstError(call.token, 'nongeneric call does not accept type arguments');
@@ -1921,14 +2225,21 @@ class FeListLiteral {
 int feLowerList(AstExpression expression, int context) {
   var element = -1;
   if (expression.typeArguments.isNotEmpty)
-    element = resolveType(feSymbols, expression.typeArguments[0]);
+    element = feResolveType(expression.typeArguments[0]);
   else if (context >= 0 && typeIsList(context))
     element = typeArgument(context);
   var type = listType(
     element < 0 ? tDynamic : typeCompleteSchema(element, tDynamic),
   );
+  var runtimeType = -1;
+  if (functions[feFunction].typeParameters.isNotEmpty)
+    runtimeType = feRuntimeType(type, true);
   var allocation = ir.length;
-  feBuiltinTyped(bListNew, 0, type);
+  feBuiltinTyped(
+    runtimeType < 0 ? bListNew : bListNewTyped,
+    runtimeType < 0 ? 0 : 1,
+    type,
+  );
   var literal = FeListLiteral(element, feTemp(type));
   feOperand(opStoreLocal, literal.slot);
   for (var child in expression.children) feLowerListElement(child, literal);
@@ -1940,6 +2251,7 @@ int feLowerList(AstExpression expression, int context) {
   type = listType(element);
   // Resolve the allocation and its local before the stack IR enters SSA.
   irTypes[allocation] = type;
+  if (runtimeType >= 0) ir[runtimeType] = type;
   feSlotTypes[literal.slot] = type;
   feOperand(opLoadLocal, literal.slot);
   return type;
@@ -2213,7 +2525,7 @@ int feLowerBuiltinCall(AstExpression call, int builtin) {
   if (builtin == bPrintInt) {
     if (call.children.length != 2)
       feAstError(call.token, 'argument count for print');
-    var type = feLowerExpression(call.children[1]);
+    var type = feLowerHint(call.children[1], nullableType(tObject));
     if (type == tString)
       feBuiltin(bPrintString, 1);
     else if (type == tBool)
@@ -2296,7 +2608,7 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
     if (receiver.typeArguments.length != 0) {
       if (receiver.typeArguments.length != 1)
         feAstError(receiver.token, 'List requires one type argument');
-      element = resolveType(feSymbols, receiver.typeArguments[0]);
+      element = feResolveType(receiver.typeArguments[0]);
     } else if (context > 0 && typeIsList(context)) {
       element = typeArgument(context);
     }
@@ -2328,13 +2640,20 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
     }
     feOperand(opLoadLocal, lengthSlot);
     feOperand(opLoadLocal, valueSlot);
+    if (typeContainsParameters(element < 0 ? valueType : element))
+      feConvertValue(valueType, tDynamic, call.token);
     if (growableSlot >= 0)
       feOperand(opLoadLocal, growableSlot);
     else
       feInteger(0, tBool);
     if (element < 0) element = valueType;
     var type = listType(element);
-    feBuiltinTyped(bListFilled, 3, type);
+    if (typeContainsParameters(type)) {
+      feRuntimeType(type);
+      feBuiltinTyped(bListFilledTyped, 4, type);
+    } else {
+      feBuiltinTyped(bListFilled, 3, type);
+    }
     return type;
   }
   if (declaration.source == sourceCore &&
@@ -2406,13 +2725,13 @@ int feInvokeFunction(AstExpression call, FunctionSignature signature) {
   return feConvertValue(tDynamic, signature.result, call.token);
 }
 
-int feLowerValueCall(AstExpression call, int type) {
+int feLowerValueCall(AstExpression call, int type, [int context = -1]) {
+  var bound = typeBound(type);
+  if (bound != type) type = feConvertValue(type, bound, call.token);
   if (feClassType(type)) {
     var method = feMethod(typeArgument(type), 'call', false);
     if (method >= 0) {
-      var count = feLowerArguments(call, 1, method);
-      feCall(method, count + 1);
-      return functions[method].result;
+      return feInvokeDeclaration(call, method, 1, context);
     }
   }
   var signature = feCallSignature(call, type);
@@ -2427,7 +2746,12 @@ int feLowerValueCall(AstExpression call, int type) {
   return feInvokeFunction(call, signature);
 }
 
-int feLowerMemberValueCall(AstExpression call, int type, String member) {
+int feLowerMemberValueCall(
+  AstExpression call,
+  int type,
+  String member, [
+  int context = -1,
+]) {
   var receiver = feTemp(type);
   feOperand(opStoreLocal, receiver);
   var owner = typeArgument(type);
@@ -2448,17 +2772,27 @@ int feLowerMemberValueCall(AstExpression call, int type, String member) {
   if (feClassType(value)) {
     var method = feMethod(typeArgument(value), 'call', false);
     if (method >= 0) {
-      var count = feLowerArguments(call, 1, method);
+      var invocation = -1;
+      var count = 0;
+      if (functions[method].typeParameters.isNotEmpty) {
+        invocation = fePrepareGenericArguments(call, method, context);
+        count = functions[method].parameters - 1;
+      } else {
+        count = feLowerArguments(call, 1, method);
+      }
       var arguments = List<int>.filled(count, -1);
       var i = count - 1;
       while (i >= 0) {
-        arguments[i] = feTemp(functions[method].parameterTypes[i + 1]);
+        arguments[i] = feTemp(
+          genericBoundaryType(functions[method].parameterTypes[i + 1]),
+        );
         feOperand(opStoreLocal, arguments[i]);
         i--;
       }
       feOperand(opLoadLocal, receiver);
       feReadBoundMember(owner, binding, call.token);
       for (var argument in arguments) feOperand(opLoadLocal, argument);
+      if (invocation >= 0) return feFinishGenericCall(invocation, call.token);
       feCall(method, count + 1);
       return functions[method].result;
     }
@@ -2489,19 +2823,18 @@ int feLowerMemberValueCall(AstExpression call, int type, String member) {
 int feLowerStaticMemberCall(
   AstExpression call,
   int owner,
-  MemberBinding member,
-) {
+  MemberBinding member, [
+  int context = -1,
+]) {
   if (call.text == astCallNew)
     feAstError(call.token, 'new requires a constructor');
   if (member.method >= 0) {
     var function = feMemberFunctions[owner][member.method];
-    var count = feLowerArguments(call, 1, function);
-    feCall(function, count);
-    return functions[function].result;
+    return feInvokeDeclaration(call, function, 0, context);
   }
   var type = feReadStaticMember(owner, member, call.token);
   if (type == tNever) return feLowerNeverArguments(call);
-  return feLowerValueCall(call, type);
+  return feLowerValueCall(call, type, context);
 }
 
 int feLowerListSublist(AstExpression call, int type) {
@@ -2542,7 +2875,11 @@ int feLowerListSublist(AstExpression call, int type) {
   return type;
 }
 
-int feLowerMemberCall(AstExpression call, AstExpression callee) {
+int feLowerMemberCall(
+  AstExpression call,
+  AstExpression callee, [
+  int context = -1,
+]) {
   var receiver = callee.children[0];
   var member = callee.text;
   if (receiver.kind == astFunctionExpression && member == 'call')
@@ -2550,7 +2887,7 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
   var type = feLowerExpression(receiver);
   if (type == tNever) return feLowerNeverArguments(call);
   if (typeIsFunction(type) && member == 'call')
-    return feLowerValueCall(call, type);
+    return feLowerValueCall(call, type, context);
   if (member == 'toString' &&
       (!feClassType(type) || feMethod(typeArgument(type), member, false) < 0)) {
     if (call.typeArguments.length != 0)
@@ -2580,15 +2917,13 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
             call.token,
             'static member cannot be accessed through an instance',
           );
-        return feLowerMemberValueCall(call, type, member);
+        return feLowerMemberValueCall(call, type, member, context);
       }
       var value = feReadMember(type, member, call.token);
       if (value == tNever) return feLowerNeverArguments(call);
-      return feLowerValueCall(call, value);
+      return feLowerValueCall(call, value, context);
     }
-    var count = feLowerArguments(call, 1, function) + 1;
-    feCall(function, count);
-    return functions[function].result;
+    return feInvokeDeclaration(call, function, 1, context);
   }
   if (call.typeArguments.length != 0)
     feAstError(call.token, 'nongeneric call does not accept type arguments');
@@ -2697,7 +3032,7 @@ int feLowerMemberCall(AstExpression call, AstExpression callee) {
 int feLowerNeverArguments(AstExpression call) {
   var i = 0;
   while (i < call.typeArguments.length) {
-    resolveType(feSymbols, call.typeArguments[i]);
+    feResolveType(call.typeArguments[i]);
     i++;
   }
   var names = <String>[];
@@ -2847,7 +3182,7 @@ int feLowerCall(AstExpression call, int context) {
     var index = lookupMember(feMembers[staticOwner], callee.text);
     if (index >= 0 && feMembers[staticOwner].members[index].isStatic) {
       var member = feStaticBinding(staticOwner, callee.text, callee.token);
-      return feLowerStaticMemberCall(call, staticOwner, member);
+      return feLowerStaticMemberCall(call, staticOwner, member, context);
     }
   }
   if (symbol < 0 && callee.kind == astMember) {
@@ -2893,20 +3228,18 @@ int feLowerCall(AstExpression call, int context) {
     var declaration = feSymbols.declarations[symbol];
     if (declaration.kind == symbolFunction) {
       var function = declaration.target;
-      var count = feLowerArguments(call, 1, function);
-      feCall(function, count);
-      return functions[function].result;
+      return feInvokeDeclaration(call, function, 0, context);
     }
     if (declaration.kind == symbolBuiltin)
       return feLowerBuiltinCall(call, declaration.target);
     var value = feLoadDeclaration(symbol, callee.token);
     if (value == tNever) return feLowerNeverArguments(call);
-    return feLowerValueCall(call, value);
+    return feLowerValueCall(call, value, context);
   }
-  if (callee.kind == astMember) return feLowerMemberCall(call, callee);
+  if (callee.kind == astMember) return feLowerMemberCall(call, callee, context);
   var value = feLowerExpression(callee);
   if (value == tNever) return feLowerNeverArguments(call);
-  return feLowerValueCall(call, value);
+  return feLowerValueCall(call, value, context);
 }
 
 int feLowerMember(AstExpression expression) {
@@ -3398,9 +3731,14 @@ int feLowerNullAssertion(AstExpression expression, int context) {
   if (typeCanBeNull(type)) {
     feConvertValue(type, tDynamic, source.token);
     var checked = result;
-    if (type == tDynamic) checked = tObject;
+    if (type == tDynamic || typeIsParameter(result)) checked = tObject;
     feOperand(opTypeCast, checked);
-    if (checked != result) feConvertValue(checked, result, expression.token);
+    if (checked != result) {
+      if (typeIsParameter(result))
+        feBuiltinTyped(bBoxRef, 1, result);
+      else
+        feConvertValue(checked, result, expression.token);
+    }
   }
   if (source.kind == astName &&
       source.binding >= 0 &&
@@ -3514,7 +3852,7 @@ int feLowerValue(AstExpression expression) {
       feBuiltinTyped(bBoxRef, 1, tDynamic);
     else
       feConvertValue(actual, tDynamic, expression.children[0].token);
-    var target = resolveType(feSymbols, expression.typeArguments[0]);
+    var target = feResolveType(expression.typeArguments[0]);
     if (kind == astTypeCast) {
       feOperand(opTypeCast, target);
       var binding = expression.children[0].binding;
@@ -3543,6 +3881,8 @@ int feLowerValue(AstExpression expression) {
       feEmit(opNot);
       return tBool;
     }
+    var bound = typeBound(type);
+    if (bound != type) type = feConvertValue(type, bound, expression.token);
     var result = typingUnary(op, type);
     if (result < 0) feAstError(expression.token, 'invalid unary operand type');
     if (result == tNever) return tNever;
@@ -3776,7 +4116,7 @@ void feLowerVariable(AstVariable variable) {
   feAt = variable.token;
   feCheckMetadata(variable.metadata, feLexicalOwner(feFunction));
   var type = -1;
-  if (variable.type.name != '') type = resolveType(feSymbols, variable.type);
+  if (variable.type.name != '') type = feResolveType(variable.type);
   if (type < 0 && variable.initializer.isEmpty) type = tDynamic;
   var value = type;
   ConstantValue? constant;
@@ -3809,7 +4149,7 @@ void feLowerVariable(AstVariable variable) {
     feFlow,
     variable.binding,
     type,
-    typeCanBeNull(type) &&
+    typeIsSubtype(tNull, type) &&
         !feBindings.variables[variable.binding].finalVariable,
   );
   if (variable.initializer.isNotEmpty)
@@ -4445,6 +4785,7 @@ void feGenerateGlobals(int count) {
 
 void feBeginFunction(int f, FunctionBindings bindings) {
   feFunction = f;
+  feConstants.typeScope = functions[f].typeParameters;
   feImplicitReceiverSlot = -1;
   feConstants.lexicalClass = -1;
   var owner = feLexicalOwner(f);
@@ -4505,6 +4846,11 @@ void feBeginFunction(int f, FunctionBindings bindings) {
   }
   p = context == null ? 0 : 1;
   while (p < functions[f].parameters) {
+    if (functions[f].typeParameters.isNotEmpty &&
+        p == feTypeEnvironmentSlot(f)) {
+      p++;
+      continue;
+    }
     var type = functions[f].parameterTypes[p];
     var slot = p;
     var binding = feBindings.receiver;
@@ -4564,6 +4910,7 @@ void parseSource(SourceProgram source) {
   ir.clear();
   irTypes.clear();
   functions.clear();
+  genericCalls.clear();
   feSlotTypes = <int>[];
   globalNames.clear();
   globalTypes.clear();
@@ -4679,6 +5026,7 @@ void parseSource(SourceProgram source) {
   var bodyBindings = <FunctionBindings>[];
   var bindingFunction = 0;
   while (bindingFunction < sourceFunctions) {
+    var previousLocals = feLocalFunctions.length;
     bodyBindings.add(
       bindFunctionLocals(
         source,
@@ -4690,6 +5038,12 @@ void parseSource(SourceProgram source) {
             : feMembers[feOwners[bindingFunction]],
       ),
     );
+    if (functions[bindingFunction].typeParameters.isNotEmpty &&
+        feLocalFunctions.length != previousLocals)
+      feAstError(
+        feLocalFunctions[previousLocals].syntax.token,
+        'closures in generic functions are not yet supported',
+      );
     while (feLocalOwners.length < feLocalFunctions.length)
       feLocalOwners.add(feOwners[bindingFunction]);
     bindingFunction++;
@@ -4840,13 +5194,13 @@ void parseSource(SourceProgram source) {
       var body = functionSyntax.body;
       if (body != null) feLowerStatement(body);
       var result = functions[f].result;
-      if (feFlow.reachable && !typeCanBeNull(result)) {
+      if (feFlow.reachable && !typeIsSubtype(tNull, result)) {
         feAstError(
           functionSyntax.token,
           'non-nullable function may complete without returning',
         );
       }
-      if (typeCanBeNull(result)) {
+      if (typeIsSubtype(tNull, result)) {
         feInteger(0, tNull);
         feConvertValue(tNull, result, functionSyntax.token);
       } else {
@@ -4939,7 +5293,28 @@ void feGenerateEntry() {
   var main = feSymbols.declarations[symbol].target;
   var syntax = feFunctionNodes[main];
   if (syntax.getter) feAstError(syntax.token, 'main must be a function');
+  var info = functions[main];
+  var offset = feParameterOffset(main);
+  var generic = info.typeParameters.isNotEmpty;
+  var typeArguments = instantiateTypeParameters(info.typeParameters);
+  for (var i = 0; i < typeArguments.length; i++) {
+    var bound = substituteType(
+      typeParameterInfo(info.typeParameters[i]).bound,
+      info.typeParameters,
+      typeArguments,
+    );
+    if (!typeIsSubtype(typeArguments[i], bound))
+      feAstError(
+        syntax.token,
+        'main type arguments do not satisfy function bounds',
+      );
+  }
   var parameters = syntax.parameters;
+  if (generic && parameters.isNotEmpty)
+    feAstError(
+      syntax.token,
+      'generic main with value parameters is not yet supported',
+    );
   var positional = 0;
   var required = 0;
   var p = 0;
@@ -4958,7 +5333,7 @@ void feGenerateEntry() {
     );
   var argumentsType = listType(tString);
   if (positional > 0 &&
-      !typingAssignable(argumentsType, functions[main].parameterTypes[0]))
+      !typingAssignable(argumentsType, info.parameterTypes[offset]))
     feAstError(
       parameters[0].token,
       'first main parameter must accept List<String>',
@@ -4967,14 +5342,15 @@ void feGenerateEntry() {
   if (supplied > 2) supplied = 2;
   p = supplied;
   while (p < parameters.length) {
-    var value = feParamDefaults[main][p];
+    var value = feParamDefaults[main][offset + p];
     if (typeIsList(value.kind) || typeIsClass(value.kind))
       feConstantGetter(value);
     p++;
   }
   feGenerateConstantObjects();
   entryFunction = main;
-  if (parameters.length <= 1 && parameters.length == positional) return;
+  if (!generic && parameters.length <= 1 && parameters.length == positional)
+    return;
   var types = <int>[if (positional > 0) argumentsType];
   entryFunction = functions.length;
   functions.add(
@@ -4992,8 +5368,11 @@ void feGenerateEntry() {
   feSlotTypes = <int>[];
   feNextLocal = 0;
   if (positional > 0) feTemp(argumentsType);
+  if (generic) feLoadTypeEnvironment(typeArguments);
   p = 0;
   while (p < parameters.length) {
+    var declared = info.parameterTypes[offset + p];
+    var expected = substituteType(declared, info.typeParameters, typeArguments);
     if (p < supplied) {
       var actual = tNull;
       if (p == 0) {
@@ -5002,7 +5381,6 @@ void feGenerateEntry() {
       } else {
         feInteger(0, tNull);
       }
-      var expected = functions[main].parameterTypes[p];
       if (typeIsSubtype(actual, expected)) {
         feConvertValue(actual, expected, parameters[p].token);
       } else {
@@ -5010,11 +5388,27 @@ void feGenerateEntry() {
         feBuiltinTyped(bValueCast, 1, expected);
       }
     } else {
-      feDefaultArgument(main, p, syntax.token);
+      feConstantValue(
+        feParamDefaults[main][offset + p],
+        expected,
+        syntax.token,
+      );
+    }
+    if (generic) {
+      var boundary = genericBoundaryType(declared);
+      if (expected == tVoid && boundary == tDynamic)
+        feBuiltinTyped(bBoxRef, 1, boundary);
+      else
+        feConvertValue(expected, boundary, syntax.token);
     }
     p++;
   }
-  feCall(main, parameters.length);
+  if (generic) {
+    var invocation = genericCalls.length;
+    genericCalls.add(GenericCall(main, typeArguments));
+    feFinishGenericCall(invocation, syntax.token);
+  } else
+    feCall(main, parameters.length);
   feEmit(opPop);
   feInteger(0, tVoid);
   feEmit(opReturn);
@@ -5092,7 +5486,7 @@ void feLowerForIn(
   if (declaration != null) {
     feCheckMetadata(declaration.metadata, feLexicalOwner(feFunction));
     if (declaration.type.name != '')
-      context = listType(resolveType(feSymbols, declaration.type));
+      context = listType(feResolveType(declaration.type));
   }
   if (pattern != null) {
     feCheckMetadata(pattern.metadata, feLexicalOwner(feFunction));

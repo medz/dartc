@@ -103,7 +103,8 @@ List<int> ssaFill(int count, int value) {
 }
 
 int ssaInputCount(int op, int position) {
-  if (op == opCall || op == opBuiltin) return ir[position + 2];
+  if (op == opCall || op == opGenericCall || op == opBuiltin)
+    return ir[position + 2];
   if (op == opStoreGlobal) return 1;
   if (op == opNeg ||
       op == opBitNot ||
@@ -309,7 +310,7 @@ int ssaEffects(int op, int target) {
   if (op == opStoreGlobal) return ssaWrite;
   if (op == opDiv || op == opMod || op == opShl || op == opShr || op == opUshr)
     return ssaThrow;
-  if (op == opCall) {
+  if (op == opCall || op == opGenericCall) {
     return ssaRead | ssaWrite | ssaAllocate | ssaThrow | ssaGc | ssaNative;
   }
   if (op == opBuiltin) {

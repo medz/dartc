@@ -342,6 +342,8 @@ int joinTypes(int left, int right) {
   }
   if (typeIsSubtype(left, right)) return right;
   if (typeIsSubtype(right, left)) return left;
+  if (typeIsParameter(left) || typeIsParameter(right))
+    return joinTypes(typeBound(left), typeBound(right));
   if (left == tNull) return nullableType(right);
   if (right == tNull) return nullableType(left);
   if (typeIsNullable(left) || typeIsNullable(right)) {
@@ -406,6 +408,34 @@ TypeParameterInfo typeParameterInfo(int type) =>
     typeParameters[dartTypes[type].argument];
 
 bool typeContainsParameters(int type) => dartTypes[type].containsParameters;
+
+// Boundary types describe the shared call's value representation. Runtime
+// type arguments remain separate and the source signature is not erased.
+int genericBoundaryType(int type) {
+  if (!typeContainsParameters(type)) return type;
+  if (typeIsList(type)) return listType(tDynamic);
+  if (typeIsFunction(type)) return tFunction;
+  if (typeIsNullable(type) && typeIsReference(type))
+    return nullableType(genericBoundaryType(typeArgument(type)));
+  return tDynamic;
+}
+
+int typeBound(int type) {
+  while (typeIsParameter(type)) type = typeParameterInfo(type).bound;
+  return type;
+}
+
+bool typeParametersInScope(int type, List<int> scope) {
+  if (!typeContainsParameters(type)) return true;
+  if (typeIsParameter(type)) return typeParameterIndex(scope, type) >= 0;
+  if (typeIsList(type) || typeIsNullable(type))
+    return typeParametersInScope(typeArgument(type), scope);
+  var signature = functionSignature(type);
+  if (!typeParametersInScope(signature.result, scope)) return false;
+  for (var parameter in signature.parameters)
+    if (!typeParametersInScope(parameter, scope)) return false;
+  return true;
+}
 
 int newTypeParameter(
   int owner,

@@ -6,6 +6,7 @@ const int objectFlagsOffset = 8;
 const int objectStaticRelative = 1;
 const int objectListFixed = 2;
 const int objectListReadOnly = 4;
+const int objectTypeTemplate = 8;
 const int stringLengthOffset = 16;
 const int stringDataOffset = 24;
 
@@ -108,6 +109,7 @@ const int typeKindNullable = 10;
 const int typeKindNum = 11;
 const int typeKindNever = 12;
 const int typeKindFunction = 13;
+const int typeKindParameter = 14;
 const int storageWord = 0;
 const int storageRef = 1;
 const int storageTagged = 2;

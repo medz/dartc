@@ -180,7 +180,8 @@ void machineSelectInstruction(
       op == opConstantData ||
       op == opFunctionReference ||
       op == opClosureDescriptor ||
-      op == opCaptureCellDescriptor) {
+      op == opCaptureCellDescriptor ||
+      op == opTypeReference) {
     int kind = 0;
     if (op == opDescriptor) kind = 2;
     if (op == opMetadataAddress) kind = 3;
@@ -188,6 +189,7 @@ void machineSelectInstruction(
     if (op == opFunctionReference) kind = 6;
     if (op == opClosureDescriptor) kind = 7;
     if (op == opCaptureCellDescriptor) kind = 8;
+    if (op == opTypeReference) kind = 9;
     instructions.add(
       MachineInstruction(mAddress, output, inputs, target, kind, effects),
     );
@@ -210,7 +212,8 @@ void machineSelectInstruction(
     }
     return;
   }
-  if (op == opCall) {
+  if (op == opCall || op == opGenericCall) {
+    if (op == opGenericCall) target = genericCalls[target].function;
     instructions.add(
       MachineInstruction(mCall, output, inputs, target, 0, effects),
     );
@@ -312,6 +315,7 @@ void machineSelectInstruction(
       typeId = types[source.inputs[2]];
     }
     if (typeId >= 0) {
+      if (typeContainsParameters(typeId)) typeId = tDynamic;
       var type = reps.length;
       reps.add(rAddr);
       instructions.add(

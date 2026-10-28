@@ -66,7 +66,18 @@ void corrupt(List<SsaFunction> program, String mode) {
   final diamond = named(program, 'diamond');
   final add = operation(order, opAdd);
   final call = operation(diamond, opCall);
-  if (mode == 'duplicate') {
+  if (mode == 'generic-count' || mode == 'generic-bound' || mode == 'generic-environment') {
+    final invoke = operation(named(program, 'main'), opGenericCall);
+    final arguments = genericCalls[invoke.target].typeArguments;
+    if (mode == 'generic-count')
+      arguments.removeLast();
+    else if (mode == 'generic-bound')
+      arguments[0] = tString;
+    else
+      invoke.inputs[0] = invoke.inputs[1];
+  } else if (mode == 'type-reference-scope') {
+    operation(named(program, 'genericList'), opTypeReference).target = templateParameter();
+  } else if (mode == 'duplicate') {
     operation(order, opMul).value = add.value;
   } else if (mode == 'undefined') {
     add.inputs[0] = order.valueTypes.length;
@@ -196,6 +207,8 @@ void main(List<String> args) {
 const taskSource = '''
 typedef UnusedTemplate<T> = List<T>;
 class Counter { int add(int value) => value + 1; }
+T generic<T extends num>(T value) => value;
+List<T> genericList<T>(T value) => [value];
 int callee(int value) => value + 1;
 int order(int value) {
   final next = value + 1;
@@ -224,6 +237,8 @@ void dropped(dynamic value) { value as int; }
 int apply(int Function(int) function, int value) => function(value);
 List<int> slice(List<int> value) => value.sublist(1);
 void main() {
+  print(generic<int>(1));
+  print(genericList<int>(2));
   print(order(3));
   print(diamond(true, 4));
   print(loop(3));
@@ -266,6 +281,10 @@ Future<void> main(List<String> args) async {
     );
     const cases = {
       'valid': '',
+      'generic-count': 'generic argument count',
+      'generic-bound': 'generic argument bound',
+      'generic-environment': 'call operand type',
+      'type-reference-scope': 'uninstantiated executable type',
       'duplicate': 'duplicate definition',
       'undefined': 'undefined value',
       'invalid-value': 'invalid value',

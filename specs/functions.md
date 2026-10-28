@@ -6,16 +6,16 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
 | §9 函数体 | 部分实现 | 支持同步块体和 `=>`；异步与生成器函数体未实现。 | [parser.dart](../lib/src/parser.dart) `parserFunction()`；[values.dart](../test/fixtures/values.dart) `integer()`、`argumentCalls()` |
-| §9.1 顶层函数声明 | 部分实现 | 支持声明绑定、直接调用、递归和跨库引用；非泛型、仅必需位置参数的顶层函数可提取为值。泛型函数未实现。 | [symbols.dart](../lib/src/symbols.dart)；[frontend.dart](../lib/src/frontend.dart) `feRegisterFunction()`；[behavior_test.dart](../test/behavior_test.dart) `program/fibonacci()` |
+| §9.1 顶层函数声明 | 部分实现 | 支持声明绑定、直接调用、递归和跨库引用；非泛型、仅必需位置参数的顶层函数可提取为值。泛型直接调用的支持范围见下文。 | [symbols.dart](../lib/src/symbols.dart)；[frontend.dart](../lib/src/frontend.dart) `feRegisterFunction()`；[behavior_test.dart](../test/behavior_test.dart) `program/fibonacci()` |
 | 顶层访问器 | 部分实现 | 支持 getter/setter 配对、仅读和仅写属性；文件版本至少 3.9 时，读结果与写参数类型可独立；此前要求 getter 结果是 setter 参数的子类型，写入仍按 setter 参数检查，按拥有声明的库版本决定，导入方不重新配对。未注解时为 dynamic；setter 只能省略或显式 void 结果且有一个必需位置参数。静态类访问器见[类追踪](classes.md)；完整库冲突规则尚缺。 | [symbols.dart](../lib/src/symbols.dart) `declareAccessor()`；[frontend.dart](../lib/src/frontend.dart) `feRegisterFunction()`、`feLoadDeclaration()`；[values.dart](../test/fixtures/values.dart) `topAccessorValues()`；[behavior_test.dart](../test/behavior_test.dart) `libraries`、`rejected`、`failingValues` |
 | [§9.1、§18.4 局部函数声明][local-declaration] | 部分实现 | 支持同步非泛型局部声明、词法捕获和自递归；作用域、调用与捕获限制见[局部函数](#局部函数)。 | [ast.dart](../lib/src/ast.dart) `AstStatement.function`；[binding.dart](../lib/src/binding.dart) `bindingReference()`；[frontend.dart](../lib/src/frontend.dart) `feLowerLocalFunction()`；[behavior_test.dart](../test/behavior_test.dart) `program/localFunctions()`、`rejected` |
 | [§17.14 匿名函数表达式][function-expressions]、[上下文推断][anonymous-inference] | 部分实现 | 支持同步非泛型箭头体、块体、词法捕获和上下文推断；调用与推断范围见[匿名函数](#匿名函数)。 | [parser.dart](../lib/src/parser.dart) `parserFunctionExpression()`；[binding.dart](../lib/src/binding.dart) `bindExpressionLocals()`；[frontend.dart](../lib/src/frontend.dart) `feLowerFunctionExpression()`；[behavior_test.dart](../test/behavior_test.dart) `program/anonymousFunctions()`、`rejected` |
-| §9 返回值 | 部分实现 | 按声明结果检查 return 和箭头体并执行必要转换；void 箭头体可保留实际负载，块体仍限制 void 返回表达式。局部省略结果的推断见下行；泛型、异常与异步相关规则尚缺。 | [frontend.dart](../lib/src/frontend.dart) `feLowerStatement()`；[values.dart](../test/fixtures/values.dart) `valueContexts()`、`staticReturn()`；[behavior_test.dart](../test/behavior_test.dart) `program/localFunctions()`、`rejected` |
+| §9 返回值 | 部分实现 | 按声明结果检查 return 和箭头体并执行必要转换；void 箭头体可保留实际负载，块体仍限制 void 返回表达式。局部省略结果的推断见下行；类型参数按声明身份检查返回，异常与异步相关规则尚缺。 | [frontend.dart](../lib/src/frontend.dart) `feLowerStatement()`；[values.dart](../test/fixtures/values.dart) `valueContexts()`、`staticReturn()`；[behavior_test.dart](../test/behavior_test.dart) `program/localFunctions()`、`rejected` |
 | [局部返回类型推断][local-inference] | 部分实现 | 按本函数的 return 类型和正常完成性推断；细则与递归边界见[局部返回类型推断](#局部返回类型推断)。[顶层省略结果仍为 dynamic][top-inference]。 | [frontend.dart](../lib/src/frontend.dart) `feInferLocalResult()`、`feBeginFunction()`；[behavior_test.dart](../test/behavior_test.dart) `program/localFunctions()` 的 List 推断、Null/Never、void 与返回上下文 |
 | §9 非空返回类型的正常落空 | 部分实现 | 结合当前流分析，拒绝可达的非空返回类型函数末尾；接受所有路径返回或已知不正常完成的循环/调用。完整异常及异步控制流未实现。 | [frontend.dart](../lib/src/frontend.dart) `parseSource()`；[flow.dart](../lib/src/flow.dart) `FlowState.reachable`；[values.dart](../test/fixtures/values.dart) `completeReturn()`、`nonCompletingFor()`、`nonCompletingDo()`；[behavior_test.dart](../test/behavior_test.dart) `rejected` |
 | §9 隐式返回 null | 部分实现 | 可空、dynamic、void 同步块体正常落空产生 null；未把未知的零值当作非空返回。`Future` 和生成器的隐式返回规则未实现。 | [frontend.dart](../lib/src/frontend.dart) `parseSource()`；[values.dart](../test/fixtures/values.dart) `fallthroughInt()`、`fallthroughBool()`、`fallthroughDynamic()`、`fallthroughVoid()` |
 | 空安全：`Never` 返回类型 | 部分实现 | 按声明结果使调用路径不正常完成，Never 返回类型不能正常落空；getter 的 Never 值也可在调用位置使用。同一规则用于源码诊断函数，函数体及调用方仍受当前表达式和类型子集限制，见[类型追踪](types.md)。 | [frontend.dart](../lib/src/frontend.dart) `feCall()`、`feLowerCall()`；[parser.dart](../lib/src/parser.dart) `parserError()`；[source.dart](../lib/src/source.dart) `sourceError()`；[values.dart](../test/fixtures/values.dart) `neverWrapper()`；[behavior_test.dart](../test/behavior_test.dart) `neverExpressions()`、`neverGetterCall()` |
-| §9.2.1 必需位置参数 | 部分实现 | 检查数量、类型并绑定参数槽，形参可为已支持的函数类型；一般泛型签名尚缺。 | [arguments.dart](../lib/src/frontend/arguments.dart) `bindArguments()`；[frontend.dart](../lib/src/frontend.dart) `feLowerArguments()`；[values.dart](../test/fixtures/values.dart) `argumentCalls()` |
+| §9.2.1 必需位置参数 | 部分实现 | 检查数量、类型并绑定参数槽，形参可为已支持的函数类型；泛型直接调用保留参数类型并在调用点代入；泛型函数类型仍缺。 | [arguments.dart](../lib/src/frontend/arguments.dart) `bindArguments()`；[frontend.dart](../lib/src/frontend.dart) `feLowerArguments()`；[values.dart](../test/fixtures/values.dart) `argumentCalls()` |
 | §9.2.2 可选位置参数 | 部分实现 | 支持省略、显式 `null` 和常量默认值；默认值仅限当前常量求值子集。 | [parser.dart](../lib/src/parser.dart) `parserParameters()`；[values.dart](../test/fixtures/values.dart) `positionalArguments()`、`constantDefaults()` |
 | §9.2.2 命名参数 | 部分实现 | 支持重排、必需命名参数及缺失、重复、未知参数诊断；命名实参之后再出现位置实参要求调用点文件版本至少 2.17，普通调用和常量构造调用都保留源码求值顺序。未实现完整函数子类型规则。 | [arguments.dart](../lib/src/frontend/arguments.dart) `checkArgumentOrder()`、`bindArguments()`；[values.dart](../test/fixtures/values.dart) `namedArguments()`；[behavior_test.dart](../test/behavior_test.dart) `rejected` |
 | §9.2.2 默认值绑定 | 部分实现 | 库/成员默认值在声明库作用域求值；局部函数采用声明处词法常量作用域，可引用此前可见的 outer const，不能偷读调用方名字或普通外层变量。支持当前标量、常量 List、类实例与顶层函数引用子集，不代表完整常量语言。 | [constants.dart](../lib/src/constants.dart) `evaluateConstant()`；[frontend.dart](../lib/src/frontend.dart) `feResolveFunctionDefaults()`；[values.dart](../test/fixtures/values.dart) `positionalArguments()`、`constantDefaults()`；[behavior_test.dart](../test/behavior_test.dart) `program/localFunctions()` |
@@ -27,6 +27,16 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 | §9 异步与生成器 | 未实现 | 无 `async`、`sync*`、`async*` 函数表示、暂停点及调度实现。 | [ast.dart](../lib/src/ast.dart) `AstFunction`；[parser.dart](../lib/src/parser.dart) `parserFunction()`；尚无验证入口 |
 | §17.15 参数求值及绑定 | 部分实现 | 直接调用保留实参源码顺序及形参重排；函数值的读取时机按 callee 形式区分，实例与静态选择器的 SDK 求值顺序见[表达式追踪](expressions.md)。 | [frontend.dart](../lib/src/frontend.dart) `feLowerArguments()`；[values.dart](../test/fixtures/values.dart) `argumentCalls()`、`functionValues()`、`staticMembers()` 的 trace 与寄存器/栈参数 |
 | §19.6 脚本入口的函数调用 | 部分实现 | 显式入口适配器传 CLI 参数、第二位置参数 `null` 并补其余默认值；不是一般函数对象启动模型。 | [frontend.dart](../lib/src/frontend.dart) `feGenerateEntry()`；[behavior_test.dart](../test/behavior_test.dart) `namedEntry`、`twoEntry`、`invalidEntry` |
+
+## 泛型直接调用
+
+[§9 类型参数作用域][generic-scope]和[§17.15 调用][generic-call]部分实现。顶层函数、静态及实例方法（包括 `call`）可声明类型参数、显式上界和必需/可选/命名值参数。参数按声明身份绑定，默认值在声明作用域检查；未使用函数也检查边界、函数体、返回和确定赋值。类型参数可用于 List、可空类型、非泛型函数签名、`is`/`as` 和已支持的模式。类型参数不能用于常量类型实参，构造器和访问器不能声明自身类型参数。
+
+显式调用检查实参数量和代入后的上界。省略类型实参时，支持已有类型模型中的上下文、普通实参及带类型回调约束；返回上下文与参数上下文保持独立，例如 `print` 的 `Object?` 参数参与向下推断。没有约束时采用实例化到界。实参求值、必要检查和命名重排保持源码顺序；调用成员 getter 的时序遵守已有调用规则。
+
+泛型局部/匿名函数、泛型函数值及 tear-off、泛型函数类型、泛型体内的局部函数/闭包、未确定回调参数的水平推断、动态复合实参的向上推断、完整基于上界的推断和 `T & S` 交叉类型提升仍缺。泛型 `main` 当前仅支持无值参数、默认类型实参满足边界的声明。类型参数作为公开 `Type` 值尚未实现。这些限制是实现缺口，不改变语言兼容目标。
+
+实现入口为 [resolve_type.dart](../lib/src/resolve_type.dart) 的 `resolveFunctionTypeParameters`、[generics.dart](../lib/src/frontend/generics.dart) 的约束收集及求解、[frontend.dart](../lib/src/frontend.dart) 的 `fePrepareGenericArguments`。行为入口为 [values.dart](../test/fixtures/values.dart) 的 `genericFunctions`、[behavior_test.dart](../test/behavior_test.dart) 的 `generic-functions-imports.dart`、`generic-entry.dart`、`rejected` 与 `failingValues`。推断依据[类型推断规则][generic-inference]，运行时类型图的存活检查由 [roots.dart](../test/fixtures/roots.dart) 的 `genericTypeRoots` 拥有。
 
 ## 局部函数
 
@@ -62,7 +72,7 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 ## 函数值
 
-可执行文件产物支持将顶层函数、静态方法、绑定实例方法、局部函数和匿名函数作为值存储、传参、返回或放入 typed List，并通过具体的非泛型必需位置签名调用或 `.call`。目标文件、静态库和动态库产物不支持 Dart 函数值。可选/命名函数值、泛型、构造器提取及 dynamic/裸 `Function` 调用尚未实现。
+可执行文件产物支持将顶层函数、静态方法、绑定实例方法、局部函数和匿名函数作为值存储、传参、返回或放入 typed List，并通过具体的非泛型必需位置签名调用或 `.call`。目标文件、静态库和动态库产物不支持 Dart 函数值。可选/命名函数值、泛型函数值、构造器提取及 dynamic/裸 `Function` 调用尚未实现。
 
 [实例方法闭包化][instance-closurization]支持已绑定类声明的非泛型必需位置方法，包括显式/隐式 this、嵌套闭包内提取、跨库可见性及空短路接收者。接收者只求值一次，方法值持续持有该对象；相同对象的同一方法比较相等，不同对象或方法不相等。普通闭包仍按自身身份比较；不规定重复方法提取的 `identical` 结果。实例方法引用不是常量，未使用函数和未执行常量分支也须检查这一义务。仍以 builtin 分支实现的方法提取、继承/super 分派以及 Function.hashCode 等继承 API 仍缺。验证入口为 [values.dart](../test/fixtures/values.dart) 的 `functionValues`、[behavior_test.dart](../test/behavior_test.dart) 的 `function-imports.dart`、拒例与失败用例，以及 [roots.dart](../test/fixtures/roots.dart) 的 `closureRoots`。
 
@@ -86,7 +96,7 @@ SDK 3.13.7 CFE 允许未选中常量集合分支及构造实参中的隐式提�
 - 默认值仅接受[已支持的常量表达式](expressions.md)，不覆盖完整常量语言。
 - 命名构造器的直接调用复用相同参数绑定；`.new` 是未命名构造器别名，不代表支持构造器函数值或 `(C.named)(...)`，见[类追踪](classes.md)。
 - 原语和 FFI 回调有独立签名边界；普通 Dart 函数对象不能隐式变成 FFI 指针，一般 external 连接仍缺。
-- 非空落空与 Never 调用采用现有局部流分析；`late`、捕获闭包、泛型函数、异常和异步路径仍有缺口。
+- 非空落空与 Never 调用采用现有局部流分析；`late`、捕获闭包、泛型交叉类型、异常和异步路径仍有缺口。
 
 版本门槛依据 [SDK 3.13.5 的特性表](https://github.com/dart-lang/sdk/blob/3.13.5/tools/experimental_features.yaml)；真实跨版本入口为 [behavior_test.dart](../test/behavior_test.dart) 的 `version-imports.dart`、`version-named.dart` 与拒绝用例。类与库级访问器都受声明版本约束；这不等同于完整旧版函数或继承规则。
 
@@ -105,3 +115,7 @@ SDK 3.13.7 CFE 允许未选中常量集合分支及构造实参中的隐式提�
 
 [callable-invocation]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L12456-L12561
 [callable-coercion]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/inference.md#L1051-L1082
+
+[generic-scope]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L2115-L2170
+[generic-call]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L11716-L12120
+[generic-inference]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/inference.md

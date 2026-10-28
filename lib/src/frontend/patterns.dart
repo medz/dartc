@@ -126,8 +126,9 @@ int patternContextType(
   if (kind == patternVariable)
     return syntax.type == null
         ? typeSchemaHole()
-        : resolveType(context.symbols, syntax.type!);
-  if (kind == patternObject) return resolveType(context.symbols, syntax.type!);
+        : resolveType(context.symbols, syntax.type!, context.typeScope);
+  if (kind == patternObject)
+    return resolveType(context.symbols, syntax.type!, context.typeScope);
   if (kind == patternCast) return typeSchemaHole();
   if (kind == patternNullAssert)
     return nullableType(
@@ -140,7 +141,9 @@ int patternContextType(
     );
   if (kind == patternList) {
     if (syntax.type != null)
-      return listType(resolveType(context.symbols, syntax.type!));
+      return listType(
+        resolveType(context.symbols, syntax.type!, context.typeScope),
+      );
     var element = typeSchemaHole();
     for (var child in syntax.children) {
       var hint = typeSchemaHole();
@@ -176,7 +179,7 @@ CheckedPattern checkPattern(
         ? variableTypes[syntax.binding]
         : type == null
         ? (input == tNull ? tDynamic : input)
-        : resolveType(context.symbols, type);
+        : resolveType(context.symbols, type, context.typeScope);
     var untyped = type == null && !assigned;
     result.variableType = declared;
     result.tested = untyped ? -1 : declared;
@@ -198,7 +201,7 @@ CheckedPattern checkPattern(
   } else if (kind == patternList) {
     var element = nullableType(tObject);
     if (syntax.type != null)
-      element = resolveType(context.symbols, syntax.type!);
+      element = resolveType(context.symbols, syntax.type!, context.typeScope);
     else if (typeIsList(typeNonNullable(input)))
       element = typeArgument(typeNonNullable(input));
     else if (input == tDynamic)
@@ -249,7 +252,12 @@ CheckedPattern checkPattern(
       result.remaining = child.remaining;
     }
   } else if (kind == patternObject) {
-    var type = resolveObjectPatternType(context.symbols, syntax.type!, input);
+    var type = resolveObjectPatternType(
+      context.symbols,
+      syntax.type!,
+      input,
+      context.typeScope,
+    );
     result.tested = type;
     result.matched = patternMatchedType(input, type);
     result.children = <CheckedPattern>[];
@@ -343,7 +351,7 @@ CheckedPattern checkPattern(
     }
   } else {
     var type = kind == patternCast
-        ? resolveType(context.symbols, syntax.type!)
+        ? resolveType(context.symbols, syntax.type!, context.typeScope)
         : typingNonNull(input);
     result.tested = type;
     var inner = checkPattern(

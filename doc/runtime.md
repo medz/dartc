@@ -24,6 +24,10 @@ ClassDesc 为 64 字节只读记录，保存实例尺寸、字段数、对象种
 
 TypeRef 的固定部分为 48 字节，是内部类型记录，不直接充当公开的 Dart Type 值。静态记录带 `objectStaticRelative` 标记，只引用静态元数据；堆记录使用普通对象头，其子类型由根遍历保留。List 和函数对象可引用这两种记录，扫描时跳过不持有堆引用的静态类型。函数签名记录保存结果类型、必需参数数和参数类型；堆函数类型将签名内联在固定部分之后，并扫描结果及参数类型。记录内类型边仍以所属记录或条目为基址保存相对位移。描述符、类型记录及常量按实际依赖链接，编译期实体 ID 不直接写作运行时地址。
 
+静态泛型模板另带 `objectTypeTemplate`；`typeKindParameter` 的 `+24` 保存类型环境索引，复合模板保留相对类型边。`rtInstantiateType` 接收模板及托管类型环境，直接复用具体类型，按需构造 List、可空和函数签名记录。构造过程中通过 runtime root scope 保留环境、子类型和已初始化的对象；实际类型记录不带模板标记。当前不缓存或驻留这些堆类型记录。
+
+共享泛型调用在实例接收者后、普通参数前传入 `List<Object>` 类型环境。语义类型参数的值使用 Tagged；复合 List/函数值保持 Ref。`rtValueCheck` 按实际 TypeRef 检查并保留原负载，具体调用方再按已知结果类型转换；`rtListFilledChecked` 按实际元素类型取得存储表示。类型环境和实例化属于分配效果，不能因被调函数体简单而从 NoGC 检查中省略。
+
 List 标志 `objectListFixed` / `objectListReadOnly` 分别限制长度变化和内容修改；语言行为见 [表达式](../specs/expressions.md)。更新 List 长度时同步维护 backing 的已初始化前缀，缩短后不扫描前缀之外的旧元素。
 
 ## NoGC 提示
@@ -77,7 +81,7 @@ NoGC 是静态合同验证，不插入收集器、安全点轮询或运行时注
 
 ## 根所有权
 
-根表示使用 `storageRef` / `storageTagged`；原始 Word、代码及 TypeRef 地址不作托管根。Ref 的零值和 Tagged 的立即值不加入对象队列。
+根表示使用 `storageRef` / `storageTagged`；原始 Word 和代码地址不作托管根；持有的 TypeRef 引用按 Ref 登记，静态记录不进入堆对象队列。Ref 的零值和 Tagged 的立即值不加入对象队列。
 
 | API | 所有权合同 |
 | --- | --- |

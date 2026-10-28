@@ -64,6 +64,12 @@ List<int> reachableFunctions(List<SsaFunction> source, [List<int>? roots]) {
         var instruction = instructions[i];
         if (instruction.op == opCall) {
           _reachFunction(reachable, work, instruction.target);
+        } else if (instruction.op == opGenericCall) {
+          _reachFunction(
+            reachable,
+            work,
+            genericCalls[instruction.target].function,
+          );
         } else if (instruction.op == opFunctionReference ||
             instruction.op == opClosureDescriptor) {
           _reachCallable(reachable, work, instruction.target);

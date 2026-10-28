@@ -8,14 +8,14 @@ Never _typeError(SymbolTable symbols, int token, String message) {
   sourceError(symbols.program, symbols.program.tokens[token], message);
 }
 
-void _prepareAliasParameters(SymbolTable symbols, int symbol) {
-  var alias = symbols.aliases[symbols.declarations[symbol].target];
-  if (alias.parametersReady) return;
-  alias.parametersReady = true;
-  if (alias.syntaxParameters.isEmpty) return;
-  alias.parameters = <int>[];
+List<int> _declareTypeParameters(
+  SymbolTable symbols,
+  List<AstTypeParameter> syntaxParameters,
+  int owner,
+) {
+  var parameters = <int>[];
   var ordinal = 0;
-  for (var syntax in alias.syntaxParameters) {
+  for (var syntax in syntaxParameters) {
     var binds =
         syntax.name != '_' ||
         !sourceVersionAtLeast(
@@ -24,15 +24,15 @@ void _prepareAliasParameters(SymbolTable symbols, int symbol) {
           3,
           7,
         );
-    if (binds && typeParameterInScope(alias.parameters, syntax.name) >= 0)
+    if (binds && typeParameterInScope(parameters, syntax.name) >= 0)
       _typeError(
         symbols,
         syntax.token,
         'duplicate type parameter ' + syntax.name,
       );
-    alias.parameters.add(
+    parameters.add(
       newTypeParameter(
-        symbol,
+        owner,
         ordinal,
         syntax.name,
         binds,
@@ -41,6 +41,43 @@ void _prepareAliasParameters(SymbolTable symbols, int symbol) {
     );
     ordinal++;
   }
+  return parameters;
+}
+
+void _prepareAliasParameters(SymbolTable symbols, int symbol) {
+  var alias = symbols.aliases[symbols.declarations[symbol].target];
+  if (alias.parametersReady) return;
+  alias.parametersReady = true;
+  alias.parameters = _declareTypeParameters(
+    symbols,
+    alias.syntaxParameters,
+    symbol,
+  );
+}
+
+List<int> resolveFunctionTypeParameters(
+  SymbolTable symbols,
+  AstFunction syntax,
+  int function,
+) {
+  var parameters = _declareTypeParameters(
+    symbols,
+    syntax.typeParameters,
+    -function - 1,
+  );
+  var uses = <AliasApplication>[];
+  var i = 0;
+  while (i < parameters.length) {
+    var bound = syntax.typeParameters[i].bound;
+    typeParameterInfo(parameters[i]).bound = bound == null
+        ? nullableType(tObject)
+        : _resolveType(symbols, bound, parameters, uses);
+    i++;
+  }
+  _checkParameterCycles(symbols, parameters, syntax.typeParameters);
+  for (var use in uses)
+    _checkAliasApplication(symbols, use.symbol, use.arguments, use.token, true);
+  return parameters;
 }
 
 int _typeSymbol(SymbolTable symbols, AstType syntax, List<int> scope) {
@@ -70,23 +107,21 @@ int _typeSymbol(SymbolTable symbols, AstType syntax, List<int> scope) {
   return symbol;
 }
 
-void _checkParameterCycles(SymbolTable symbols, TypeAlias alias) {
+void _checkParameterCycles(
+  SymbolTable symbols,
+  List<int> parameters,
+  List<AstTypeParameter> syntax,
+) {
   var start = 0;
-  while (start < alias.parameters.length) {
-    var seen = List<int>.filled(alias.parameters.length, 0);
+  while (start < parameters.length) {
+    var seen = List<int>.filled(parameters.length, 0);
     var current = start;
     while (current >= 0) {
       if (seen[current] != 0)
-        _typeError(
-          symbols,
-          alias.syntaxParameters[start].token,
-          'cyclic type parameter bound',
-        );
+        _typeError(symbols, syntax[start].token, 'cyclic type parameter bound');
       seen[current] = 1;
-      var bound = typeNonNullable(
-        typeParameterInfo(alias.parameters[current]).bound,
-      );
-      current = typeParameterIndex(alias.parameters, bound);
+      var bound = typeNonNullable(typeParameterInfo(parameters[current]).bound);
+      current = typeParameterIndex(parameters, bound);
     }
     start++;
   }
@@ -120,7 +155,7 @@ void _resolveAlias(SymbolTable symbols, int symbol) {
       typeParameterInfo(alias.parameters[i]).bound = bound;
       i++;
     }
-    _checkParameterCycles(symbols, alias);
+    _checkParameterCycles(symbols, alias.parameters, alias.syntaxParameters);
   }
   alias.bodyUses = <AliasApplication>[];
   alias.template = _resolveType(
@@ -293,10 +328,18 @@ int resolveType(
 
 // Object patterns infer omitted arguments from the matched value, rather than
 // resolving a raw annotation to its default type arguments.
-int resolveObjectPatternType(SymbolTable symbols, AstType syntax, int input) {
-  var resolved = resolveType(symbols, syntax);
-  if (syntax.arguments.isNotEmpty || syntax.name == 'dynamic') return resolved;
-  var symbol = _typeSymbol(symbols, syntax, const <int>[]);
+int resolveObjectPatternType(
+  SymbolTable symbols,
+  AstType syntax,
+  int input, [
+  List<int> scope = const <int>[],
+]) {
+  var resolved = resolveType(symbols, syntax, scope);
+  if (syntax.arguments.isNotEmpty ||
+      syntax.name == 'dynamic' ||
+      typeIsParameter(resolved))
+    return resolved;
+  var symbol = _typeSymbol(symbols, syntax, scope);
   var declaration = symbols.declarations[symbol];
   if (declaration.kind == symbolType && declaration.target < 0) {
     var context = typeNonNullable(input);

@@ -779,6 +779,56 @@ void typeGraphRoots(int queue, int edges) {
   check(rt.rtRootMark() == mark);
 }
 
+List<T> genericRootList<T>(T value) => [value];
+List<List<T>> genericRootNested<T>(T value) => [genericRootList<T>(value)];
+List<List<T> Function(List<T>)> genericRootCallbacks<T>(
+  List<T> Function(List<T>) callback,
+) => [callback, callback, callback];
+List<Leaf> Function(List<Leaf>) genericRootCallback(Leaf retained) =>
+    (List<Leaf> values) => [retained, values[0]];
+
+void genericTypeRoots(int queue, int edges) {
+  var mark = rt.rtRootMark();
+  var nested = genericRootNested<Leaf>(Leaf(841));
+  var outer = captureList(nested, 1, queue);
+  var outerType = rt.nativeLoad64(outer + abi.listTypeOffset);
+  check(
+    (rt.nativeLoad64(outerType + abi.objectFlagsOffset) &
+            (abi.objectStaticRelative | abi.objectTypeTemplate)) ==
+        0,
+  );
+  check(rt.rtTraceObject(outer, edges, capacity) == 2);
+  check(contains(edges, 2, outerType));
+  check(rt.rtTraceObject(outerType, edges, capacity) == 1);
+  var innerType = rt.nativeLoad64(edges);
+  check(rt.nativeLoad64(innerType + abi.typeKindOffset) == abi.typeKindList);
+  check(rt.rtTraceObject(innerType, edges, capacity) == 0);
+  Object value = nested;
+  check(value is List<List<Leaf>> && value is! List<List<int>>);
+  check(nested[0][0].marker == 841);
+
+  var callbacks = genericRootCallbacks<Leaf>(genericRootCallback(Leaf(842)));
+  var list = captureList(callbacks, 3, queue);
+  var listType = rt.nativeLoad64(list + abi.listTypeOffset);
+  check(rt.rtTraceObject(listType, edges, capacity) == 1);
+  var functionType = rt.nativeLoad64(edges);
+  check(rt.rtTraceObject(functionType, edges, capacity) == 2);
+  var resultType = rt.nativeLoad64(edges);
+  var parameterType = rt.nativeLoad64(edges + 8);
+  check(rt.rtTraceObject(resultType, edges, capacity) == 0);
+  check(rt.rtTraceObject(parameterType, edges, capacity) == 0);
+  check(rt.rtTraceObject(list, edges, capacity) == 2);
+  var backing = rt.nativeLoad64(list + abi.listBackingOffset);
+  check(contains(edges, 2, listType) && contains(edges, 2, backing));
+  check(rt.rtTraceObject(backing, edges, capacity) == 3);
+  var callback = rt.nativeLoad64(edges);
+  check(rt.rtTraceObject(callback, edges, capacity) == 1);
+  check(findMarker(edges, 1, 842) != 0);
+  var result = callbacks[0](nested[0]);
+  check(result[0].marker == 842 && result[1].marker == 841);
+  check(rt.rtRootMark() == mark);
+}
+
 void main(List<String> args) {
   if (args.isNotEmpty && args[0] == 'capacity') {
     capacityFailure(Leaf(190));
@@ -787,6 +837,7 @@ void main(List<String> args) {
   var queue = rt.rtMap(capacity * 8);
   var edges = rt.rtMap(capacity * 8);
   typeGraphRoots(queue, edges);
+  genericTypeRoots(queue, edges);
   listPatternRoots(queue, edges);
   destructuringRoots(queue, edges);
   switchStatementRoots(queue, edges);

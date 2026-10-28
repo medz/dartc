@@ -815,6 +815,9 @@ Future<void> main(List<String> args) async {
         '${exhaustedRoots.stdout}${exhaustedRoots.stderr}',
       );
     }
+    final genericEntry = File('${temporary.path}/generic-entry.dart')
+      ..writeAsStringSync('void main<T extends num>() { print(1 is T); }');
+    await compare(genericEntry, []);
     final namedEntry = File('${temporary.path}/named-entry.dart')
       ..writeAsStringSync(
         "void main({String label = 'named', bool flag = true, List<List<int>> values = const [[]]}) { "
@@ -851,6 +854,12 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "T cast<T>(Object? value)=>value as T;void main(){print('before');cast<int>('wrong');}",
+      "T nonnull<T>(T value)=>value!;void main(){print('before');nonnull<int?>(null);}",
+      "void call<T>(List<T> values,int last){} int later(){print('later');return 1;}void main(){dynamic values=<String>['wrong'];print('before');call<int>(values,later());}",
+      "void call<T>(T value,int last){} int later(){print('later');return 1;}void main(){dynamic value='wrong';print('before');call<int>(value,later());}",
+      "T call<T>(T value,int last)=>value;int later(){print('later');return 1;}void main(){dynamic value='wrong';print('before');int result=call(value,later());print(result);}",
+      "List<T> one<T>(T value)=>[value];void main(){List<Object> values=one<int>(1);print('before');values.add('wrong');}",
       "void main(){print('before');switch(<int?>[null]){case [var n!]:print(n);}}",
       "void main(){print('before');switch(<Object>['wrong']){case [var n as int]:print(n);}}",
       "dynamic guard(){print('guard');return 1;}void main(){print('before');switch(1){case var n when guard():print(n);}}",
@@ -1516,6 +1525,30 @@ void main() {
   print(identical(const p.NamedLibraryChoice.chain(), p.hiddenChoice()));
 }
 ''',
+      'generic-functions-library.dart': r'''
+class T { int value; T(this.value); }
+T identity<T>(T value) => value;
+List<T> single<T>(T value) => [value];
+class Generic { static T take<T>(T value) => value; T pick<T>(T value) => value; }
+int ignored<_, _>(int value) => value;
+''',
+      'generic-functions-old.dart': r'''
+// @dart=3.6
+_ identity<_>(_ value) => value;
+''',
+      'generic-functions-imports.dart': r'''
+import 'generic-functions-library.dart' as p;
+import 'generic-functions-old.dart' as old;
+void main() {
+  print(p.identity<int>(7));
+  print(p.identity(p.T(8)).value);
+  print(p.single('imported') is List<String>);
+  print(p.Generic.take<bool>(true));
+  print(p.Generic().pick(9));
+  print(p.ignored<int, String>(10));
+  print(old.identity<int>(11));
+}
+''',
       'static-members-library.dart': r'''
 library static.members;
 part 'static-members-part.dart';
@@ -1597,6 +1630,7 @@ void main() {
     );
     await compare(File('${temporary.path}/redirect-finite-constant.dart'), []);
     await compare(File('${temporary.path}/static-members-imports.dart'), []);
+    await compare(File('${temporary.path}/generic-functions-imports.dart'), []);
     await compare(File('${temporary.path}/generic-aliases-imports.dart'), []);
     await compare(File('${temporary.path}/function-imports.dart'), []);
     await compare(File('${temporary.path}/conditional-imports.dart'), []);
@@ -1626,6 +1660,28 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      'int get value<T> => 1;void main(){}',
+      'set value<T>(T next){}void main(){}',
+      'class C{C<T>();}void main(){}',
+      'void f<T>(int T){T? value;print(value);}void main(){}',
+      'void f<T>(){int T=1;T? value;print(value);}void main(){}',
+      "T invalid<T>()=>1;void main(){}",
+      "T invalid<T>(){}void main(){}",
+      "T invalid<T>(){T value;return value;}void main(){}",
+      "T invalid<T>([T value])=>value;void main(){}",
+      "T invalid<T>([T value=1])=>value;void main(){}",
+      "T invalid<T>(T value)=>value;void main(){invalid<int,String>(1);}",
+      "T invalid<T extends num>(T value)=>value;void main(){invalid<String>(\"x\");}",
+      "T invalid<T extends num>(T value)=>value;void main(){invalid<dynamic>(1);}",
+      "T invalid<T extends num>(T value)=>value;void main(){invalid(\"x\");}",
+      "T invalid<T>(T value)=>value;void main(){String value=invalid(1);}",
+      "T invalid<T,U extends List<T>>(U value)=>value[0];void main(){invalid<int,List<String>>([\"x\"]);}",
+      "void invalid<T,T>(){}void main(){}",
+      "void invalid<T extends T>(){}void main(){}",
+      "void invalid<T extends U,U extends T>(){}void main(){}",
+      "void invalid<T extends Missing>(){}void main(){}",
+      "void invalid<T>(){const values=<T>[];}void main(){}",
+      "T apply<T>(T Function(T) fn,T value)=>fn(value);int inc(int value)=>value+1;void main(){print(apply(inc,1));}",
       "void main(){switch(1){label:case int a:print(a);}}",
       "void main(){switch(1){case 0:continue label;label:case int a:print(a);}}",
       "void main(){switch(1){case int a:case final int a:print(a);}}",

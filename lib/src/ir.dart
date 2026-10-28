@@ -42,6 +42,8 @@ const int opConstantData = 39;
 const int opFunctionReference = 40;
 const int opClosureDescriptor = 41;
 const int opCaptureCellDescriptor = 42;
+const int opTypeReference = 43;
+const int opGenericCall = 44;
 
 const int bPrintString = 1;
 const int bPrintInt = 2;
@@ -110,6 +112,10 @@ const int bListRemoveAt = 64;
 const int bListInsert = 65;
 const int bFunctionType = 66;
 const int bListSublist = 67;
+const int bTypeInstantiate = 68;
+const int bValueCheck = 69;
+const int bListNewTyped = 70;
+const int bListFilledTyped = 71;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;
@@ -143,6 +149,7 @@ class ClosureLayout {
 }
 
 class FunctionInfo {
+  List<int> typeParameters = const <int>[];
   String name;
   int start;
   int parameters;
@@ -168,6 +175,17 @@ class FunctionInfo {
     this.source,
   );
 }
+
+// The frontend checks source arguments against the substituted signature.
+// This call crosses the shared body's representation boundary explicitly.
+class GenericCall {
+  final int function;
+  final List<int> typeArguments;
+
+  GenericCall(this.function, this.typeArguments);
+}
+
+List<GenericCall> genericCalls = <GenericCall>[];
 
 List<int> ir = <int>[];
 List<int> irTypes = <int>[];
@@ -212,7 +230,7 @@ int functionValueType(int function) {
 }
 
 int irWidth(int op) {
-  if (op == opCall || op == opBuiltin) return 3;
+  if (op == opCall || op == opGenericCall || op == opBuiltin) return 3;
   if (op == opInt ||
       op == opString ||
       op == opDescriptor ||
@@ -221,6 +239,7 @@ int irWidth(int op) {
       op == opFunctionReference ||
       op == opClosureDescriptor ||
       op == opCaptureCellDescriptor ||
+      op == opTypeReference ||
       op == opTypeTest ||
       op == opTypeCast ||
       op == opLoadLocal ||

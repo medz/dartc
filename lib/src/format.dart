@@ -174,12 +174,17 @@ class ConstantLayout {
   );
 }
 
-void markTypeReference(List<int> offsets, List<int> work, int type) {
+void markTypeReference(
+  List<int> offsets,
+  List<int> work,
+  int type, [
+  bool template = false,
+]) {
+  if (typeHasSchemaHole(type) || typeContainsParameters(type) && !template) {
+    print('dartc: uninstantiated runtime type');
+    hostExit(1);
+  }
   if (offsets[type] < 0) {
-    if (typeContainsParameters(type) || typeHasSchemaHole(type)) {
-      print('dartc: uninstantiated runtime type');
-      hostExit(1);
-    }
     offsets[type] = 0;
     work.add(type);
   }
@@ -282,6 +287,8 @@ ConstantLayout layoutConstants(int start) {
       features = features | addressTargets[i];
     } else if (addressKinds[i] == 4) {
       markTypeReference(typeOffsets, types, addressTargets[i]);
+    } else if (addressKinds[i] == 9) {
+      markTypeReference(typeOffsets, types, addressTargets[i], true);
     } else if (addressKinds[i] == 5) {
       dataOffsets[addressTargets[i]] = 0;
     } else if (addressKinds[i] == 6) {
@@ -354,16 +361,31 @@ ConstantLayout layoutConstants(int start) {
   while (i < types.length) {
     var type = dartTypes[types[i]];
     if (type.kind == kList || type.kind == kNullable) {
-      markTypeReference(typeOffsets, types, type.argument);
+      markTypeReference(
+        typeOffsets,
+        types,
+        type.argument,
+        type.containsParameters,
+      );
     } else if (type.kind == kClass) {
       descriptorOffsets[type.argument] = 0;
     } else if (type.kind == kFunction) {
       signatureOffsets[type.argument] = 0;
       var signature = functionSignatures[type.argument];
-      markTypeReference(typeOffsets, types, signature.result);
+      markTypeReference(
+        typeOffsets,
+        types,
+        signature.result,
+        type.containsParameters,
+      );
       var p = 0;
       while (p < signature.parameters.length) {
-        markTypeReference(typeOffsets, types, signature.parameters[p]);
+        markTypeReference(
+          typeOffsets,
+          types,
+          signature.parameters[p],
+          type.containsParameters,
+        );
         p++;
       }
     }
@@ -904,6 +926,7 @@ int imageTypeKind(int kind) {
   if (kind == tFunction || kind == kFunction) return typeKindFunction;
   if (kind == kNullable) return typeKindNullable;
   if (kind == kList) return typeKindList;
+  if (kind == kTypeParameter) return typeKindParameter;
   return typeKindClass;
 }
 
@@ -1141,11 +1164,16 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
     if (offset >= 0) {
       var type = dartTypes[typeIndex];
       image64(layout.typeDescriptorOffset - offset);
-      image64(objectStaticRelative);
+      image64(
+        objectStaticRelative |
+            (typeContainsParameters(typeIndex) ? objectTypeTemplate : 0),
+      );
       image64(imageTypeKind(type.kind));
       int argument = 0;
       if (type.kind == kList || type.kind == kNullable) {
         argument = layout.typeOffsets[type.argument] - offset;
+      } else if (type.kind == kTypeParameter) {
+        argument = typeParameterInfo(typeIndex).ordinal;
       } else if (type.kind == kFunction) {
         argument = layout.signatureOffsets[type.argument] - offset;
       }

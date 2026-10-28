@@ -1858,8 +1858,15 @@ AstFunction parserFunction(
   if (getter && parserIs(parser, '(')) {
     parserError(parser, 'getters cannot have parameters');
   }
-  if (parserIs(parser, '<'))
-    parserError(parser, 'generic function declarations are unsupported');
+  var typeParameters = const <AstTypeParameter>[];
+  if (parserIs(parser, '<')) {
+    if (constructor || getter || setter)
+      parserError(
+        parser,
+        'constructors and accessors cannot have type parameters',
+      );
+    typeParameters = parserTypeParameters(parser);
+  }
   List<AstParameter> parameters = <AstParameter>[];
   if (!getter) parameters = parserParameters(parser);
   if (setter) {
@@ -1908,6 +1915,7 @@ AstFunction parserFunction(
     getter,
   );
   function.setter = setter;
+  function.typeParameters = typeParameters;
   function.constant = constant;
   function.initializers = initializers;
   return function;
@@ -1991,7 +1999,7 @@ AstClass parserClass(Parser parser, int token) {
         setter = member == 'set';
         member = parserName(parser);
       }
-      if (getter || setter || parserIs(parser, '(')) {
+      if (getter || setter || parserIs(parser, '(') || parserIs(parser, '<')) {
         if (constant)
           parserError(parser, 'const requires a constructor declaration');
         if (modifier != '') {
@@ -2234,7 +2242,7 @@ AstUnit parseUnit(Parser parser, [List<bool> patterns = const <bool>[]]) {
         setter = name == 'set';
         name = parserName(parser);
       }
-      if (getter || setter || parserIs(parser, '(')) {
+      if (getter || setter || parserIs(parser, '(') || parserIs(parser, '<')) {
         if (modifier == 'const')
           parserError(parser, 'const requires a constructor declaration');
         if ((getter || setter) && modifier != '') {

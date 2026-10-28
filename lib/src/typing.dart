@@ -34,7 +34,7 @@ int typingIterableElement(int type, bool nullAware) {
   if (type == tNever || nullAware && type == tNull) return tNever;
   if (type == tDynamic) return tDynamic;
   if (!nullAware && typeCanBeNull(type)) return -1;
-  type = typeNonNullable(type);
+  type = typeNonNullable(typeBound(type));
   if (typeIsList(type)) return typeArgument(type);
   return -1;
 }
@@ -57,6 +57,8 @@ int typingBinary(String op, int left, int right) {
     if (typingCondition(left) && typingCondition(right)) return tBool;
     return -1;
   }
+  left = typeBound(left);
+  right = typeBound(right);
   var arithmetic = op == '+' || op == '-' || op == '*' || op == '%';
   var bitwise = op == '&' || op == '|' || op == '^';
   var shift = op == '<<' || op == '>>' || op == '>>>';

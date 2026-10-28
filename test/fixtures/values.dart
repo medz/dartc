@@ -3971,7 +3971,136 @@ void patternSwitchStatements() {
   }
 }
 
+T genericIdentity<T>(T value) => value;
+List<T> genericSingle<T>(T value) => [value];
+List<T> genericEmpty<T>() => [];
+List<T> genericNullable<T>(T? value) => [];
+List<T> genericBounded<T extends num>() => [];
+List<T> genericFilled<T>(T value) => List<T>.filled(2, value, growable: true);
+T genericCast<T>(Object? value) => value as T;
+bool genericMatches<T>(Object? value) => value is T;
+bool genericCallbackMatches<T>(Object? value) => value is T Function(T);
+T genericApply<T>(T Function(T) fn, T value) => fn(value);
+List<T> genericRelay<T>(T value) => genericSingle(value);
+T genericChoose<T>(T value, [T? fallback]) => fallback ?? value;
+T genericNamed<T>(T first, {required T second}) => second;
+T genericFirst<T, U extends List<T>>(U values) => values[0];
+List<T> genericDependent<T, U extends List<T>>(U values) => [];
+T genericLargest<T extends num>(T a, T b) => a > b ? a : b;
+num genericJoin<T extends num, U extends num>(bool select, T a, U b) =>
+    select ? a : b;
+int genericNegate<T extends int>(T value) => -value;
+int genericInvoke<T extends int Function(int)>(T callback) => callback(6);
+T genericWrite<T extends List<int>>(T values) {
+  values.add(3);
+  values[0]++;
+  return values;
+}
+
+int genericCount<T extends List<int>>(T values) => values.length;
+int genericHead<T extends List<int>>(T values) {
+  for (var value in values) return value;
+  return 0;
+}
+
+List<T> genericCopy<T>(List<T> values) => [for (var value in values) value];
+T genericPattern<T>(List<T> values) {
+  if (values case [T first, ...]) return first;
+  return values[0];
+}
+
+List<T> genericRest<T>(List<T> values) {
+  if (values case [_, ...var tail]) return tail;
+  return <T>[];
+}
+
+dynamic genericNest<T>(int depth, T value) {
+  if (depth == 0) return value;
+  return genericNest<List<T>>(depth - 1, [value]);
+}
+
+int genericIncrement(int value) => value + 1;
+String genericTrace = '';
+int genericNext(int value) {
+  genericTrace = genericTrace + value.toString();
+  return value;
+}
+
+class GenericCalls {
+  static T take<T>(T value) => value;
+  T pick<T>(T value, {T? other}) => other ?? value;
+  T call<T>(T value, {T? other}) => other ?? value;
+}
+
+class GenericHolder {
+  GenericCalls get value {
+    genericTrace = genericTrace + 'getter';
+    return GenericCalls();
+  }
+}
+
+void genericFunctions() {
+  print(genericIdentity<int>(42));
+  print(genericIdentity(true));
+  print(genericIdentity('generic'));
+  print(genericIdentity<int?>(null));
+  // ignore: unnecessary_type_check
+  print(genericSingle(5) is List<int>);
+  // ignore: unnecessary_type_check
+  print(genericSingle(null) is List<Null>);
+  List<num> numbers = genericSingle(2);
+  print(numbers is List<int>);
+  print(genericEmpty() is List<Never>);
+  // ignore: unnecessary_type_check
+  print(genericNullable(null) is List<Null>);
+  print(genericNullable(null) is List<Never>);
+  print(genericBounded() is List<int>);
+  print(genericFilled<int>(6));
+  print(genericFilled<String>('filled'));
+  print(genericCast<int>(8));
+  print(genericMatches<int>(9));
+  print(genericMatches<String>(9));
+  print(genericCallbackMatches<int>(genericIncrement));
+  print(genericCallbackMatches<String>(genericIncrement));
+  var applied = genericApply(genericIncrement, 10);
+  print(applied);
+  print(genericApply<int>((int value) => value + 2, 10));
+  // ignore: unnecessary_type_check
+  print(genericRelay('word') is List<String>);
+  print(genericChoose(5));
+  print(genericChoose(5, 6));
+  print(genericNamed(second: genericNext(1), genericNext(2)));
+  print(GenericHolder().value<int>(genericNext(3), other: genericNext(4)));
+  print(genericTrace);
+  print(GenericCalls.take<int>(11));
+  print(GenericCalls().pick<int>(12, other: 13));
+  print(GenericCalls()<String>('call'));
+  print(genericFirst<int, List<int>>([14]));
+  print(genericDependent(<int>[1]) is List<int>);
+  print(genericLargest(1, 2));
+  print(genericJoin(true, 3, 4));
+  print(genericNegate(5));
+  print(genericInvoke(genericIncrement));
+  print(genericWrite([3]));
+  print(genericCount([1, 2]));
+  print(genericHead([7]));
+  print(genericCopy(['a', 'b']));
+  print(genericPattern([8]));
+  print(genericRest(['first', 'second']));
+  print(genericNest<int>(6, 15));
+  List<List<int>> nested = genericSingle([]);
+  print(nested);
+  // ignore: unnecessary_type_check
+  print(nested is List<List<int>>);
+  var inferred = genericCopy(genericIdentity([1]));
+  // ignore: unnecessary_type_check
+  print(inferred is List<int>);
+  var voidValues = [genericIdentity(print('void argument'))];
+  print(voidValues.length);
+}
+
 void main(List<String> args) {
+  genericFunctions();
   patternSwitchStatements();
   destructuringValues();
   ifCaseValues();

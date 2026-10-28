@@ -1272,6 +1272,97 @@ int rtTypeArgument(int type) {
   return type + nativeLoad64(type + typeArgumentOffset);
 }
 
+int rtInstantiateType(int type, int arguments) {
+  if ((nativeLoad64(type + objectFlagsOffset) & objectTypeTemplate) == 0)
+    return type;
+  var kind = nativeLoad64(type + typeKindOffset);
+  if (kind == typeKindParameter)
+    return rtListRawGet(arguments, nativeLoad64(type + typeArgumentOffset));
+  var mark = rtRootMark();
+  rtRootPush(type, storageRef);
+  rtRootPush(arguments, storageRef);
+  var result = 0;
+  if (kind == typeKindList || kind == typeKindNullable) {
+    var child = rtInstantiateType(rtTypeArgument(type), arguments);
+    rtRootPush(child, storageRef);
+    result = rtAlloc(typeRefBytes);
+    nativeStore64(result, rtObjectDescriptor(type));
+    nativeStore64(result + objectFlagsOffset, 0);
+    nativeStore64(result + typeKindOffset, kind);
+    nativeStore64(result + typeArgumentOffset, child - result);
+    nativeStore64(result + typeClassOffset, 0);
+    var representation = storageRef;
+    if (kind == typeKindNullable &&
+        nativeLoad64(child + typeValueRepOffset) != storageRef)
+      representation = storageTagged;
+    nativeStore64(result + typeValueRepOffset, representation);
+  } else {
+    var source = rtTypeArgument(type);
+    var count = nativeLoad64(source + functionSignatureCountOffset);
+    result = rtAlloc(
+      typeRefBytes + functionSignatureParametersOffset + count * 8,
+    );
+    nativeStore64(result, rtObjectDescriptor(type));
+    nativeStore64(result + objectFlagsOffset, 0);
+    nativeStore64(result + typeKindOffset, typeKindFunction);
+    nativeStore64(result + typeArgumentOffset, typeRefBytes);
+    nativeStore64(result + typeClassOffset, 0);
+    nativeStore64(result + typeValueRepOffset, storageRef);
+    var signature = result + typeRefBytes;
+    nativeStore64(
+      signature + functionSignatureRequiredOffset,
+      nativeLoad64(source + functionSignatureRequiredOffset),
+    );
+    nativeStore64(signature + functionSignatureCountOffset, count);
+    nativeStore64(
+      signature + functionSignatureResultOffset,
+      source + nativeLoad64(source + functionSignatureResultOffset) - signature,
+    );
+    var i = 0;
+    while (i < count) {
+      var input = source + functionSignatureParametersOffset + i * 8;
+      var output = signature + functionSignatureParametersOffset + i * 8;
+      nativeStore64(output, input + nativeLoad64(input) - output);
+      i++;
+    }
+    // Publish a fully initialized graph before recursively allocating children.
+    rtRootPush(result, storageRef);
+    var resultType = rtInstantiateType(
+      source + nativeLoad64(source + functionSignatureResultOffset),
+      arguments,
+    );
+    nativeStore64(
+      signature + functionSignatureResultOffset,
+      resultType - signature,
+    );
+    i = 0;
+    while (i < count) {
+      var input = source + functionSignatureParametersOffset + i * 8;
+      var output = signature + functionSignatureParametersOffset + i * 8;
+      var parameter = rtInstantiateType(input + nativeLoad64(input), arguments);
+      nativeStore64(output, parameter - output);
+      i++;
+    }
+  }
+  rtRootRestore(mark);
+  return result;
+}
+
+int rtValueCheck(int value, int expected) {
+  if (rtValueMatches(value, expected) == 0) return rtValueTypeError();
+  return value;
+}
+
+int rtListFilledChecked(int length, int value, int growable, int type) {
+  var mark = rtRootMark();
+  rtRootPush(type, storageRef);
+  rtRootPush(value, storageTagged);
+  var stored = rtValueCast(value, rtTypeArgument(type));
+  var result = rtListFilled(length, stored, growable, type);
+  rtRootRestore(mark);
+  return result;
+}
+
 int rtTypeSubtype(int actual, int expected) {
   if (actual == expected) return 1;
   var target = nativeLoad64(expected + typeKindOffset);
