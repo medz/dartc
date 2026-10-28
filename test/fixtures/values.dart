@@ -3811,7 +3811,168 @@ void destructuringValues([bool choose = true]) {
   print([for (var f in functions) f()]);
 }
 
+int statementPatternResult(Object? value) {
+  switch (value) {
+    case null:
+      return 0;
+    case int n && > 0 when n < 3:
+      return n;
+    case [int n] || [int n, _]:
+      return n;
+    case String(length: var length):
+      return length;
+    default:
+      return -1;
+  }
+}
+
+int statementBoolean(bool? value) {
+  final int result;
+  switch (value) {
+    case true:
+      result = 1;
+    case false:
+      result = 2;
+    case null:
+      result = 3;
+  }
+  return result;
+}
+
+bool statementCapture(List<int Function()> functions, int Function() read) {
+  functions.add(read);
+  return true;
+}
+
+void statementSharedPromotion(Object value) {
+  switch (value) {
+    case List<Object> items when items is List<int> && items.length == 1:
+    case List<Object> items when items is List<int>:
+      int n = items[0];
+      print(n);
+  }
+}
+
+void patternSwitchStatements() {
+  for (var value in <Object?>[
+    null,
+    2,
+    [3],
+    [4, 5],
+    'abc',
+    true,
+  ])
+    print(statementPatternResult(value));
+  print([
+    statementBoolean(true),
+    statementBoolean(false),
+    statementBoolean(null),
+  ]);
+  statementSharedPromotion([8]);
+  statementSharedPromotion([9, 10]);
+  var functions = <int Function()>[];
+  for (Object value in [1, 2]) {
+    switch (value) {
+      case int n when statementCapture(functions, () => n):
+      case [int n]:
+        functions.add(() => ++n);
+    }
+  }
+  print([for (var read in functions) read()]);
+  print([for (var read in functions) read()]);
+  functions.clear();
+  switch (1) {
+    case int n when statementCapture(functions, () => n):
+      n = 4;
+      functions.add(() => n);
+  }
+  print([for (var read in functions) read()]);
+  functions.clear();
+  var owner = PatternNode(3, null, 'first', [1, 2]);
+  bool change() {
+    owner.tag = 9;
+    objectPatternTrace.add('guard');
+    return false;
+  }
+
+  objectPatternTrace.clear();
+  switch (owner) {
+    case PatternNode(number: 0):
+      print(0);
+    case PatternNode(number: var n) when change():
+      print(n);
+    case PatternNode(number: var n, word: var text):
+      print('$n/$text');
+  }
+  print(objectPatternTrace);
+  Object source = 1;
+  switch (source) {
+    case int n when (source = 'changed') == 'again':
+      print(n);
+    case int n:
+      print(n);
+      print(source);
+  }
+  var repeated = 0;
+  switch (1) {
+    again:
+    alias:
+    case 1:
+      print(repeated++);
+      if (repeated == 1) continue alias;
+      switch (2) {
+        case 2:
+          if (repeated < 3) continue again;
+      }
+    case 2:
+      print(-1);
+  }
+  switch (1) {
+    case 1:
+      continue next;
+    next:
+    case 2 when false:
+    case 3:
+      print(3);
+  }
+  outer:
+  for (var i = 0; i < 4; i++) {
+    switch (i) {
+      case 0:
+        continue;
+      case 1:
+        print(1);
+        break;
+      case 2:
+        continue outer;
+      default:
+        break outer;
+    }
+    print(9);
+  }
+  finish:
+  switch (1) {
+    case int n:
+      print(n);
+      break finish;
+  }
+  switch (1) {
+    case int n when ([n] = [2])[0] == 2:
+      print(n);
+  }
+  switch (1) {
+    // An unused label still prevents the pattern binding from entering the body.
+    // ignore: unused_label
+    label:
+    // ignore: unused_local_variable
+    case int n:
+      var n = 5;
+      print(n);
+  }
+}
+
 void main(List<String> args) {
+  patternSwitchStatements();
   destructuringValues();
   ifCaseValues();
   objectPatterns();

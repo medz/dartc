@@ -23,6 +23,7 @@ class ControlLabel {
   String name;
   int target;
   bool loop;
+  bool caseLabel = false;
   List<int> breaks;
   List<int> continues;
   int repeat;
@@ -833,6 +834,8 @@ int feReadLocal(int binding, int token) {
 }
 
 int feLocalSlot(int binding, int token) {
+  if (bindingDeclaration(feBindings, binding).unavailable)
+    feAstError(token, 'pattern variable is not shared by every case');
   var slot = feBindingSlots[binding];
   if (slot < 0) {
     feAstError(
@@ -4649,7 +4652,9 @@ void parseSource(SourceProgram source) {
   feAt = 0;
   feRuntimeTokens = source.runtimeTokens;
   var paths = <String>[for (var file in source.files) file.path];
-  var syntax = parseUnit(Parser(feTokens, 0, 0, paths));
+  var syntax = parseUnit(Parser(feTokens, 0, 0, paths), <bool>[
+    for (var file in source.files) file.languageMajor >= 3,
+  ]);
   feInstallSymbols();
   feCollectDeclarations(syntax);
   checkInitializers(feSymbols, syntax);
@@ -5769,117 +5774,214 @@ int feLowerSwitchExpression(AstExpression expression, int context) {
   return result;
 }
 
-bool feSwitchConstant(AstExpression expression) {
-  if (expression.kind == astInteger ||
-      expression.kind == astString ||
-      expression.kind == astBoolean)
-    return true;
-  if (expression.kind == astUnary &&
-      expression.text == '-' &&
-      expression.children[0].kind == astInteger)
-    return true;
-  var symbol = feExpressionSymbol(expression, false);
-  if (symbol >= 0) {
-    var declaration = feSymbols.declarations[symbol];
-    return declaration.kind == symbolGlobal &&
-        _feLiteralTypes[declaration.target] != 0;
+void feSwitchSharedVariables(List<AstSwitchCase> cases, int start, int end) {
+  var shared = cases[end].sharedBindings;
+  for (var index = 0; index < shared.length; index++) {
+    var id = shared[index];
+    var declaration = feBindings.variables[id];
+    var type = -1;
+    for (var i = start; i <= end; i++) {
+      var source = cases[i].sharedSources[index];
+      if (source < 0 || cases[i].labels.isNotEmpty) {
+        declaration.unavailable = true;
+      } else {
+        var candidate = feBindingTypes[source];
+        if (type < 0) type = candidate;
+        if (type != candidate ||
+            declaration.finalVariable !=
+                feBindings.variables[source].finalVariable)
+          declaration.unavailable = true;
+      }
+    }
+    if (!declaration.unavailable)
+      feBindLocal(id, type, feTemp(feCellBinding(id) ? tObject : type));
   }
-  return false;
+}
+
+void feSwitchCopyBindings(AstSwitchCase branch, AstSwitchCase body) {
+  for (var i = 0; i < body.sharedBindings.length; i++) {
+    var target = body.sharedBindings[i];
+    if (feBindings.variables[target].unavailable) continue;
+    var source = branch.sharedSources[i];
+    var type = feBindingTypes[target];
+    feLoadLocalStorage(source);
+    if (feCellBinding(target)) feAllocateCell(type);
+    feOperand(opStoreLocal, feBindingSlots[target]);
+    flowDeclare(feFlow, target, type, true);
+    if (fePromotable(target)) feFlow.types[target] = feFlow.types[source];
+  }
 }
 
 void feLowerSwitch(AstStatement statement) {
-  var type = feLowerExpression(statement.expressions[0]);
-  if (type != tInt && type != tString && type != tBool) {
-    feAstError(
-      statement.token,
-      'switch currently requires int, String or bool',
-    );
-  }
+  var source = statement.expressions[0];
+  var type = feLowerExpression(source);
   var value = feTemp(type);
   feOperand(opStoreLocal, value);
+  var cases = statement.cases;
+  var modern = sourceVersionAtLeast(
+    feSources,
+    feTokens[statement.token].source,
+    3,
+    0,
+  );
+  var cache = <PatternReadCache>[];
+  for (var branch in cases)
+    if (branch.pattern case final pattern?)
+      fePatternCacheKeys(cache, pattern, -1);
+  fePatternCacheInitialize(cache);
   feFlow = flowSplit(feFlow);
-  List<int> entries = <int>[];
-  var fallback = -1;
-  var booleans = 0;
-  var i = 0;
-  while (i < statement.children.length) {
-    var branch = statement.children[i];
-    if (branch.expressions.isEmpty) {
-      fallback = i;
-      entries.add(-1);
-    } else {
-      var constant = branch.expressions[0];
-      if (!feSwitchConstant(constant)) {
-        feAstError(constant.token, 'case requires a supported constant');
-      }
-      feOperand(opLoadLocal, value);
-      var caseType = feLowerExpression(constant);
-      if (caseType != type) {
-        feAstError(constant.token, 'case type must match the switch value');
-      }
-      if (type == tBool) {
-        var value = -1;
-        if (constant.kind == astBoolean) {
-          value = 0;
-          if (constant.text == 'true') value = 1;
-        } else {
-          var symbol = feExpressionSymbol(constant, false);
-          if (symbol >= 0) {
-            var declaration = feSymbols.declarations[symbol];
-            if (declaration.kind == symbolGlobal)
-              value = _feLiteralValues[declaration.target];
-          }
-        }
-        if (value == 0) booleans = booleans | 1;
-        if (value == 1) booleans = booleans | 2;
-      }
-      feCombine('==', type, caseType, constant.token);
-      var next = feJump(opJumpFalse);
-      entries.add(feJump(opJump));
-      fePatch(next, ir.length);
+  var initialFlow = flowCopy(feFlow);
+  var entries = <int>[];
+  var flows = <FlowState>[];
+  var labels = feLabels.length;
+  var labeled = false;
+  for (var branch in cases) {
+    for (var name in branch.labels) {
+      labeled = true;
+      feLabels.add(
+        ControlLabel(
+          name.text,
+          cases[branch.bodyIndex].token,
+          false,
+          <int>[],
+          <int>[],
+          -1,
+        )..caseLabel = true,
+      );
     }
-    i++;
   }
-  var unmatched = feJump(opJump);
-  var entryFlow = flowCopy(feFlow);
+  var coverage = 0;
+  var lengths = <PatternLengthRange>[];
+  var remaining = type;
+  var binding = source.kind == astName ? source.binding : -1;
+  if (binding >= 0 && !fePromotable(binding)) binding = -1;
+  for (var branch in cases) {
+    var nextFlow = flowCopy(feFlow);
+    var failed = <int>[];
+    var syntax = branch.pattern;
+    if (syntax == null) {
+      coverage = patternSpaceAll;
+      flowUnreachable(nextFlow);
+    } else {
+      feConstants.localTypes = feFlow.types;
+      var pattern = checkPattern(
+        feConstants,
+        syntax,
+        remaining,
+        feBindingTypes,
+        feCheckMemberRead,
+      );
+      if (!modern && !typeIsSubtype(pattern.constant!.type, type))
+        feAstError(
+          syntax.token,
+          'case constant is not a subtype of the switch value',
+        );
+      fePatternVariables(pattern);
+      if (pattern.remaining == tNever) flowUnreachable(nextFlow);
+      feLowerPattern(
+        pattern,
+        fePatternSlot(value, remaining, syntax.token),
+        failed,
+        cache,
+        -1,
+      );
+      fePatternCells(pattern);
+      if (binding >= 0) flowPromote(feFlow, binding, pattern.matched);
+      if (branch.guard case final guard?) {
+        nextFlow = feJoinFlow(nextFlow, feConditionJumps(guard, false, failed));
+        if (binding >= 0) {
+          var written = <int>[];
+          collectWrittenExpression(
+            guard,
+            List<bool>.filled(feBindingTypes.length, false),
+            written,
+          );
+          for (var changed in written) if (changed == binding) binding = -1;
+        }
+      } else {
+        coverage |= pattern.coverage;
+        for (var range in pattern.lengths) lengths.add(range);
+        if (pattern.remaining != tNever) remaining = pattern.remaining;
+      }
+    }
+    flows.add(flowCopy(feFlow));
+    entries.add(feJump(opJump));
+    fePatchJumps(failed, ir.length);
+    feFlow = nextFlow;
+    if (binding >= 0) flowPromote(feFlow, binding, remaining);
+  }
+  if (patternLengthsCover(lengths, type)) coverage |= patternSpaceOther;
+  var required = patternRequiredSpace(type);
+  var complete = (coverage & required) == required;
+  var alwaysExhaustive =
+      type == tNull || type == tNever || typeNonNullable(type) == tBool;
+  if (modern && alwaysExhaustive && !complete)
+    feAstError(statement.token, 'switch statement is not exhaustive');
+  // Before Dart 3 only default removes the unmatched path from flow analysis.
+  if (!modern) complete = cases.isNotEmpty && cases.last.pattern == null;
   var exitFlow = flowCopy(feFlow);
-  if (fallback >= 0 ||
-      booleans == 3 &&
-          sourceVersionAtLeast(
-            feSources,
-            feTokens[statement.token].source,
-            3,
-            0,
-          ))
+  var unmatched = -1;
+  if (complete) {
     flowUnreachable(exitFlow);
+    feCall(feFindFunction('rtPatternMatchFailure'), 0);
+    feConvertValue(tNever, functions[feFunction].result, statement.token);
+    feEmit(opReturn);
+  } else {
+    unmatched = feJump(opJump);
+  }
+  var labelFlow = flowCopy(initialFlow);
+  if (labeled) {
+    var written = <int>[];
+    collectWrittenStatement(
+      statement,
+      List<bool>.filled(feBindingTypes.length, false),
+      written,
+    );
+    flowDemote(labelFlow, written, feBindingTypes);
+  }
   var breakBase = feBreaks.length;
   feLoopBreaks.add(breakBase);
-  i = 0;
-  while (i < statement.children.length) {
-    var branch = statement.children[i];
-    feFlow = flowCopy(entryFlow);
-    if (entries[i] >= 0) fePatch(entries[i], ir.length);
-    if (i == fallback) fePatch(unmatched, ir.length);
-    var child = 0;
-    while (child < branch.children.length) {
-      feLowerStatement(branch.children[child]);
-      child++;
+  var start = 0;
+  while (start < cases.length) {
+    var end = cases[start].bodyIndex;
+    var body = cases[end];
+    feSwitchSharedVariables(cases, start, end);
+    var bodyFlow = flowCopy(initialFlow);
+    flowUnreachable(bodyFlow);
+    var jumps = <int>[];
+    var hasLabel = false;
+    for (var i = start; i <= end; i++) {
+      fePatch(entries[i], ir.length);
+      feFlow = flowCopy(flows[i]);
+      feSwitchCopyBindings(cases[i], body);
+      bodyFlow = feJoinFlow(bodyFlow, feFlow);
+      jumps.add(feJump(opJump));
+      if (cases[i].labels.isNotEmpty) hasLabel = true;
     }
-    if (branch.children.isNotEmpty) {
-      feBreaks.add(feJump(opJump));
-      feBreakFlows.add(flowCopy(feFlow));
-    } else if (i + 1 == statement.children.length) {
-      exitFlow = feJoinFlow(exitFlow, feFlow);
-    }
-    i++;
+    fePatchJumps(jumps, ir.length);
+    feLabelRepeat(body.token, ir.length);
+    feFlow = hasLabel ? feJoinFlow(bodyFlow, labelFlow) : bodyFlow;
+    for (var child in body.body) feLowerStatement(child);
+    if (!modern &&
+        end + 1 < cases.length &&
+        body.body.isNotEmpty &&
+        feFlow.reachability.last)
+      feAstError(body.token, 'switch case may fall through');
+    feBreaks.add(feJump(opJump));
+    feBreakFlows.add(flowCopy(feFlow));
+    start = end + 1;
   }
-  if (fallback < 0) fePatch(unmatched, ir.length);
+  if (unmatched >= 0) fePatch(unmatched, ir.length);
   feFlow = exitFlow;
   while (feBreaks.length > breakBase) {
     fePatch(feBreaks.removeLast(), ir.length);
     feFlow = feJoinFlow(feFlow, feBreakFlows.removeLast());
   }
   feLoopBreaks.removeLast();
+  while (feLabels.length > labels) {
+    var label = feLabels.removeLast();
+    fePatchJumps(label.continues, label.repeat);
+  }
   feFlow = flowUnsplit(feFlow);
 }
 
@@ -5934,11 +6036,13 @@ void feLowerLabeledJump(AstStatement statement, bool repeat) {
   if (i < 0) feAstError(statement.token, 'unknown label ' + name);
   var label = feLabels[i];
   if (repeat) {
-    if (!label.loop)
-      feAstError(statement.token, 'continue requires a loop label');
+    if (!label.loop && !label.caseLabel)
+      feAstError(statement.token, 'continue requires a loop or case label');
     label.continues.add(feJump(opJump));
     label.continueFlows.add(flowCopy(feFlow));
   } else {
+    if (label.caseLabel)
+      feAstError(statement.token, 'cannot break to a case label');
     label.breaks.add(feJump(opJump));
     label.breakFlows.add(flowCopy(feFlow));
   }

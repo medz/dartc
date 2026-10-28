@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Support pattern switch statements with guards, shared case bindings, exhaustive scalar checks and case-label continue, preserving legacy constant-case behavior.
 - Support local pattern declarations and assignments, including nested inference, captures and destructuring for/for-in statements and List elements.
 - Support List patterns with nested elements, rest matching, shared reads and length coverage, plus `List.sublist`.
 - Support object patterns with fields, getters, method values, nested matching and shared property reads.

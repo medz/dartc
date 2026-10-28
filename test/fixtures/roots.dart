@@ -551,6 +551,31 @@ void destructuringRoots(int queue, int edges) {
   check(rt.rtRootMark() == mark);
 }
 
+void switchStatementRoots(int queue, int edges) {
+  var mark = rt.rtRootMark();
+  var functions = <int Function()>[];
+  Object value = Leaf(824);
+  switch (value) {
+    case Leaf leaf when keepPatternClosure(functions, () => leaf.marker):
+    case [Leaf leaf]:
+      leaf = Leaf(825);
+      functions.add(() => leaf.marker);
+  }
+  var list = captureList(functions, 2, queue);
+  check(listElements(list, edges) == 2);
+  var guard = rt.nativeLoad64(edges);
+  var body = rt.nativeLoad64(edges + 8);
+  check(rt.rtTraceObject(guard, edges, capacity) == 1);
+  check(findMarker(edges, 1, 824) != 0);
+  check(rt.rtTraceObject(body, edges, capacity) == 1);
+  var cell = rt.nativeLoad64(edges);
+  check(rt.nativeLoad64(rt.rtObjectDescriptor(cell)) == abi.captureCellClassId);
+  check(rt.rtTraceObject(cell, edges, capacity) == 1);
+  check(findMarker(edges, 1, 825) != 0);
+  check(functions[0]() == 824 && functions[1]() == 825);
+  check(rt.rtRootMark() == mark);
+}
+
 void closureRoots(int queue, int edges) {
   var owner = PatternRoot();
   var objectPatterns = <int Function()>[
@@ -647,6 +672,7 @@ void main(List<String> args) {
   var edges = rt.rtMap(capacity * 8);
   listPatternRoots(queue, edges);
   destructuringRoots(queue, edges);
+  switchStatementRoots(queue, edges);
   closureRoots(queue, edges);
   noGcRoots(queue);
   builderRoots(queue, edges);

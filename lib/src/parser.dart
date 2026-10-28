@@ -8,6 +8,7 @@ class Parser {
   int pendingClosers;
   bool pendingEquals = false;
   bool inSwitchGuard = false;
+  bool patterns = true;
   List<String> paths;
 
   Parser(this.tokens, this.position, this.pendingClosers, this.paths);
@@ -828,7 +829,7 @@ AstPattern parserUnaryPattern(Parser parser, int context) {
 
 bool parserPatternTypeAhead(Parser parser) {
   if (parserIs(parser, 'const')) return false;
-  var end = parserDeclarationTypeEnd(parser);
+  var end = parserDeclarationTypeEnd(parser, true);
   return end >= 0 &&
       !tokenIs(parser.tokens[end], 'when') &&
       !tokenIs(parser.tokens[end], 'as');
@@ -1601,7 +1602,7 @@ AstType parserInferredType(int token) {
   return AstType('', const <AstType>[], token);
 }
 
-int parserDeclarationTypeEnd(Parser parser) {
+int parserDeclarationTypeEnd(Parser parser, [bool pattern = false]) {
   if (parserIs(parser, 'new')) return -1;
   var position = parser.position;
   var closers = parser.pendingClosers;
@@ -1615,7 +1616,7 @@ int parserDeclarationTypeEnd(Parser parser) {
         !parserIs(parser, 'in') &&
         !parserIs(parser, 'is') &&
         !parserIs(parser, 'as') &&
-        !tokenIs(parser.tokens[parser.position + 1], ':');
+        (pattern || !tokenIs(parser.tokens[parser.position + 1], ':'));
   }
   var end = -1;
   if (typed) end = parser.position;
@@ -2156,7 +2157,7 @@ AstDirective parserDirective(Parser parser, int kind, int token) {
   return directive;
 }
 
-AstUnit parseUnit(Parser parser) {
+AstUnit parseUnit(Parser parser, [List<bool> patterns = const <bool>[]]) {
   var unit = AstUnit(
     <AstDirective>[],
     <AstVariable>[],
@@ -2171,6 +2172,7 @@ AstUnit parseUnit(Parser parser) {
     var token = parser.position;
     if (parser.tokens[token].source != source) {
       source = parser.tokens[token].source;
+      if (patterns.isNotEmpty) parser.patterns = patterns[source];
       declarations = false;
     }
     if (parserIs(parser, 'import') ||
@@ -2496,49 +2498,90 @@ AstStatement parseStatement(Parser parser) {
   );
 }
 
+bool parserCaseAhead(Parser parser) {
+  var position = parser.position;
+  while (parser.tokens[position].kind == tokenIdentifier &&
+      !tokenIsReserved(parser.tokens[position]) &&
+      tokenIs(parser.tokens[position + 1], ':'))
+    position += 2;
+  return tokenIs(parser.tokens[position], 'case') ||
+      tokenIs(parser.tokens[position], 'default');
+}
+
 AstStatement parserSwitch(Parser parser, int token) {
   parserExpect(parser, '(');
   var value = parseExpression(parser);
   parserExpect(parser, ')');
   parserExpect(parser, '{');
-  List<AstStatement> cases = <AstStatement>[];
+  var cases = <AstSwitchCase>[];
+  var hasDefault = false;
   while (!parserIs(parser, '}')) {
+    if (hasDefault) parserError(parser, 'default must be the last case');
+    var labels = <AstExpression>[];
+    while (!parserIs(parser, 'case') && !parserIs(parser, 'default')) {
+      var position = parser.position;
+      if (tokenIsReserved(parser.tokens[position]))
+        parserError(parser, 'invalid case label');
+      var name = parserName(parser);
+      parserExpect(parser, ':');
+      for (var previous in cases)
+        for (var label in previous.labels)
+          if (label.text == name) parserError(parser, 'duplicate case label');
+      for (var label in labels)
+        if (label.text == name) parserError(parser, 'duplicate case label');
+      labels.add(
+        AstExpression(
+          astName,
+          name,
+          const <AstExpression>[],
+          const <AstType>[],
+          position,
+        ),
+      );
+    }
     var caseToken = parser.position;
-    List<AstExpression> pattern = <AstExpression>[];
+    AstPattern? pattern;
+    AstExpression? guard;
     if (parserTake(parser, 'case')) {
-      pattern.add(parseExpression(parser));
+      if (parser.patterns) {
+        pattern = parserPattern(parser);
+      } else {
+        pattern =
+            AstPattern(
+                patternConstant,
+                parser.position,
+                '',
+                const <AstPattern>[],
+              )
+              ..constant = parseExpression(parser)
+              ..constantContext = true;
+      }
+      if (parserTake(parser, 'when')) {
+        var previous = parser.inSwitchGuard;
+        parser.inSwitchGuard = true;
+        guard = parseExpression(parser);
+        parser.inSwitchGuard = previous;
+      }
     } else {
       parserExpect(parser, 'default');
+      hasDefault = true;
     }
     parserExpect(parser, ':');
-    List<AstStatement> body = <AstStatement>[];
-    while (!parserIs(parser, 'case') &&
-        !parserIs(parser, 'default') &&
-        !parserIs(parser, '}')) {
+    var body = <AstStatement>[];
+    while (!parserIs(parser, '}') && !parserCaseAhead(parser))
       body.add(parseStatement(parser));
-    }
-    cases.add(
-      AstStatement(
-        astSwitchCaseStatement,
-        pattern,
-        body,
-        <AstVariable>[],
-        <AstExpression>[],
-        <AstExpression>[],
-        caseToken,
-      ),
-    );
+    cases.add(AstSwitchCase(caseToken, pattern, guard, labels, body));
   }
   parserExpect(parser, '}');
-  return AstStatement(
-    astSwitchStatement,
-    <AstExpression>[value],
-    cases,
-    <AstVariable>[],
-    <AstExpression>[],
-    <AstExpression>[],
-    token,
-  );
+  var bodyIndex = cases.length - 1;
+  for (var i = cases.length - 1; i >= 0; i--) {
+    if (cases[i].body.isNotEmpty) bodyIndex = i;
+    cases[i].bodyIndex = bodyIndex;
+  }
+  return parserEmptyStatement(token)
+    ..kind = astSwitchStatement
+    ..expressions = <AstExpression>[value]
+    ..cases = cases;
 }
 
 List<AstExpression> parserJumpLabel(Parser parser) {

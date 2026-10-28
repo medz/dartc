@@ -134,7 +134,6 @@ const int astContinueStatement = 9;
 const int astForInStatement = 10;
 const int astDoWhileStatement = 11;
 const int astSwitchStatement = 12;
-const int astSwitchCaseStatement = 13;
 const int astLabeledStatement = 14;
 const int astLocalFunctionStatement = 15;
 const int astPatternDeclarationStatement = 16;
@@ -190,7 +189,22 @@ class AstPatternDeclaration {
   AstPatternDeclaration(this.pattern, this.metadata, this.isFinal);
 }
 
+class AstSwitchCase {
+  final int token;
+  final AstPattern? pattern;
+  final AstExpression? guard;
+  final List<AstExpression> labels;
+  final List<AstStatement> body;
+  int bodyIndex = -1;
+  List<int> bindings = const <int>[];
+  List<int> sharedBindings = const <int>[];
+  List<int> sharedSources = const <int>[];
+
+  AstSwitchCase(this.token, this.pattern, this.guard, this.labels, this.body);
+}
+
 class AstStatement {
+  List<AstSwitchCase> cases = const <AstSwitchCase>[];
   AstFunction? function;
   AstPatternDeclaration? patternDeclaration;
   int kind;

@@ -59,7 +59,7 @@ The [specification tracker](specs/README.md) records the reference SDK, current 
 | Values | Native integers, booleans, Unicode strings, nullable values, typed lists with conditional/loop/spread and null-aware elements and runtime type checks |
 | Declarations | Local object/List destructuring declarations and assignments, pattern loop bindings, top-level variables, lazy initialization, simple classes, instance/static fields and methods, bound method values, named/unnamed constructors with field initializer lists, getters, setters and generic type aliases |
 | Functions | Direct calls and callable objects, recursion, local and anonymous functions with lexical captures, optional/named direct arguments, required-positional function values and structural function types |
-| Control flow | Blocks, assignments, cascades, null-aware member/index chains, conditions and if-case statements/elements, loops, labelled jumps, constant switch cases, switch expressions with scalar/object/list patterns and guards, and returns |
+| Control flow | Blocks, assignments, cascades, null-aware member/index chains, conditions and if-case statements/elements, loops, labelled jumps, switch statements/expressions with scalar/object/list patterns and guards, shared case bodies and case-label continue, and returns |
 | Libraries | Relative, file/package imports and exports, prefixes, filters, conditional URIs and library parts |
 | Constants | Scalar/list constants, canonical const instances, metadata and supported core pragmas |
 | Core APIs | print, command-line arguments, basic String/List operations and StringBuffer object/character writing |

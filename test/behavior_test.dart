@@ -851,6 +851,9 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "void main(){print('before');switch(<int?>[null]){case [var n!]:print(n);}}",
+      "void main(){print('before');switch(<Object>['wrong']){case [var n as int]:print(n);}}",
+      "dynamic guard(){print('guard');return 1;}void main(){print('before');switch(1){case var n when guard():print(n);}}",
       r"class C{String Function() observe;C(this.observe);int get a{print(observe());return 3;}int? get b{print(observe());return null;}}void main(){print('before');int a=1,b=2;C(a:a,b:b!)=C(()=>'$a,$b');print('after');}",
       "void main(){print('before');var[a,b]=[1];print('after');}",
       "void main(){print('before');dynamic v=[1,'bad'];var[int a,int b]=v;print('after');}",
@@ -1399,6 +1402,19 @@ int selected(bool value) {
   return result;
 }
 ''',
+      'version-switch-legacy.dart': r'''
+// @dart=2.19
+const _ = 2;
+const item = 1;
+void switches() {
+  switch (3) { case 1 + 2: print(3); break; }
+  switch (1) { case _: print(2); break; default: print(1); }
+  switch ([1]) { case [item]: print(0); break; default: print(1); }
+  switch (const [1]) { case [item]: print(1); break; default: print(0); }
+  switch (1) { case 1 when false: print(0); break; default: print(2); }
+  switch (1) { case 1: print(1); }
+}
+''',
       'version-imports.dart': r'''
 // @dart=2.12
 import 'version-old.dart' as old;
@@ -1407,6 +1423,7 @@ import 'version-accessors.dart' as accessors;
 import 'version-private.dart' as secret;
 import 'version-flow.dart' as flow;
 import 'version-switch.dart' as selection;
+import 'version-switch-legacy.dart' as legacySelection;
 int nullFact(Null value) { int result; if (value == null) result = 4; return result; }
 void main() {
   print(old.parameter(2)); print(old.local()); print(old.loop()); print(old.separated());
@@ -1419,6 +1436,7 @@ void main() {
   print(secret.Secret(X: 9).upper());
   print(secret.Secret(required: 10).contextual());
   print(flow.assigned(1)); print(flow.unassigned(1));
+  legacySelection.switches();
   print(selection.selected(true)); print(selection.selected(false)); print(nullFact(null));
 }
 ''',
@@ -1608,6 +1626,40 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      "void main(){switch(1){label:case int a:print(a);}}",
+      "void main(){switch(1){case 0:continue label;label:case int a:print(a);}}",
+      "void main(){switch(1){case int a:case final int a:print(a);}}",
+      "void main(){switch(1){case int a:case String a:print(a);}}",
+      "void main(){Object v=1;switch(v){case var a when a is int:case int a:print(a);}}",
+      "void main(){switch(1){default:print(0);case 1:print(1);}}",
+      "void main(){switch(true){}}",
+      "void unused(bool b){switch(b){case true when b:case false:break;}}void main(){}",
+      "void unused(Null n){switch(n){}}void main(){}",
+      "void main(){int a;switch(1){case 1:a=3;continue target;target:case 2:print(a);}}",
+      "void main(){final int a;switch(1){case 1:continue target;target:case 2:a=3;print(a);}}",
+      "void main(){final int a;switch(1){target:case 2:a=3;print(a);case 1:continue target;}}",
+      "void main(){final int a;var i=0;switch(1){target:case 1:a=3;print(a);if(i++==0)continue target;}}",
+      "void main(){Object a=3;switch(1){case 1:a=\"s\";continue target;target:case 2:int b=a;print(b);}}",
+      "void main(){switch(1){label:case 1:break label;}}",
+      "void main(){switch(1){label:case 1:print(1);label:case 2:print(2);}}",
+      "// @dart=2.19\nvoid main(){switch(1){case 1:print(1);case 2:print(2);}}",
+      "void unused(){switch(1){case int a:print(a);}print(a);}void main(){}",
+      "const a=1;void unused(){switch(1){case var a && ==a:print(1);}}void main(){}",
+      "int a=7;void unused(){switch(1){case int a:case _:print(a);}}void main(){}",
+      "void unused(){switch(1){case int a:case _:a=3;}}void main(){}",
+      "void unused(){switch(1){case int a:case _:void f(){print(a);}f();}}void main(){}",
+      "void unused(){switch(1){case int a:case _:void f(){print(a);}}}void main(){}",
+      "void unused(){switch(1){case int a:default:print(a);}}void main(){}",
+      "void unused(){switch(1){case int a when (a=2)==2:print(a);}}void main(){}",
+      "void unused(Object v){switch(v){case _:break;case String(missing:var a):break;}}void main(){}",
+      "void unused(){switch(1){label:case 1:break;}continue label;}void main(){}",
+      "// @dart=2.19\nvoid unused(){switch(1){case int a:break;}}void main(){}",
+      "// @dart=2.19\nvoid main(){switch(1){case \"x\":print(0);break;default:print(1);}}",
+      "void unused(){switch(1){default:break;default:break;}}void main(){}",
+      "// @dart=2.19\nconst dynamic c=1;void main(){switch(1){case c:print(1);break;default:print(2);}}",
+      "// @dart=2.19\nvoid main(){switch(1){case null:print(1);break;default:print(2);}}",
+      "// @dart=2.19\nconst num c=1;void main(){switch(1){case c:print(1);break;default:print(2);}}",
+      "// @dart=2.19\nvoid main(){switch(null){case 1:print(1);break;case null:print(2);break;default:print(3);}}",
       "void unused(){var [a,a]=[1,2];}void main(){}",
       "void unused(){var a=0;[a,a]=[1,2];}void main(){}",
       "void unused(){var [1]=[1];}void main(){}",

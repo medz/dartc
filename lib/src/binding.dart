@@ -13,6 +13,7 @@ class LocalVariable {
   bool written = false;
   bool captured = false;
   bool writeCaptured = false;
+  bool unavailable = false;
 
   LocalVariable(this.name, this.token, this.type);
 }
@@ -749,16 +750,10 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
     return;
   }
   if (kind == astSwitchStatement) {
-    bindingExpressions(binder, scope, statement.expressions);
-    var i = 0;
-    while (i < statement.children.length) {
-      var branch = statement.children[i];
-      bindingExpressions(binder, scope, branch.expressions);
-      bindingStatements(binder, bindingScope(binder, scope), branch.children);
-      i++;
-    }
+    bindingSwitch(binder, scope, statement);
     return;
   }
+
   var i = 0;
   while (i < statement.variables.length) {
     bindingType(binder, scope, statement.variables[i].type);
@@ -773,6 +768,67 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
   while (i < statement.children.length) {
     bindingStatement(binder, scope, statement.children[i]);
     i++;
+  }
+}
+
+void bindingSwitch(LocalBinder binder, int scope, AstStatement statement) {
+  bindingExpressions(binder, scope, statement.expressions);
+  var cases = statement.cases;
+  var start = 0;
+  while (start < cases.length) {
+    var end = cases[start].bodyIndex;
+    var bodyScope = -1;
+    var shared = start != end;
+    for (var i = start; i <= end; i++) {
+      var branch = cases[i];
+      var local = bindingScope(binder, scope);
+      if (branch.pattern case final pattern?) {
+        local = bindingPatternScope(binder, scope, pattern, false);
+        branch.bindings = binder.scopes[local].variables;
+        if (branch.guard case final guard?) bindingGuard(binder, local, guard);
+      }
+      if (branch.labels.isNotEmpty) shared = true;
+      bodyScope = local;
+    }
+    if (shared) {
+      bodyScope = bindingScope(binder, scope);
+      for (var i = start; i <= end; i++) {
+        for (var id in cases[i].bindings) {
+          var variable = binder.result.variables[id];
+          var found = false;
+          for (var previous in binder.scopes[bodyScope].variables)
+            if (binder.result.variables[previous].name == variable.name)
+              found = true;
+          if (!found) {
+            var joined = bindingDeclare(
+              binder,
+              bodyScope,
+              variable.name,
+              variable.token,
+              AstType('', const <AstType>[], variable.token),
+            );
+            binder.result.variables[joined].finalVariable =
+                variable.finalVariable;
+          }
+        }
+      }
+      var joined = binder.scopes[bodyScope].variables;
+      cases[end].sharedBindings = joined;
+      for (var i = start; i <= end; i++) {
+        var sources = <int>[];
+        for (var id in joined) {
+          var source = -1;
+          for (var candidate in cases[i].bindings)
+            if (binder.result.variables[candidate].name ==
+                binder.result.variables[id].name)
+              source = candidate;
+          sources.add(source);
+        }
+        cases[i].sharedSources = sources;
+      }
+    }
+    bindingStatements(binder, bindingScope(binder, bodyScope), cases[end].body);
+    start = end + 1;
   }
 }
 
@@ -930,6 +986,14 @@ void collectWrittenStatement(
   List<bool> seen,
   List<int> written,
 ) {
+  for (var branch in statement.cases) {
+    if (branch.pattern case final pattern?)
+      collectWrittenPattern(pattern, seen, written);
+    if (branch.guard case final guard?)
+      collectWrittenExpression(guard, seen, written);
+    for (var child in branch.body)
+      collectWrittenStatement(child, seen, written);
+  }
   if (statement.patternDeclaration case final declaration?)
     collectWrittenPattern(declaration.pattern, seen, written);
   if (statement.kind == astForInStatement &&
