@@ -100,7 +100,7 @@ class Watch {
   }
 }
 
-Leaf globalLeaf = Leaf(180);
+Leaf globalLeaf = .new(180);
 Object? globalBox = 9223372036854775807;
 const cached = <Object?>[
   <int>[181],
@@ -449,7 +449,7 @@ void builderRoots(int queue, int edges) {
     i++;
   }
   var wide = rt.nativeLoad64(edges);
-  var refs = <Leaf>[Leaf(702)];
+  var refs = <Leaf>[.new(702)];
   var refType = rt.nativeLoad64(
     captureList(refs, 1, queue) + abi.listTypeOffset,
   );

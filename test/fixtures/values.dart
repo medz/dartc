@@ -6168,6 +6168,8 @@ void factoryValues() {
 
 void main(List<String> args) {
   factoryValues();
+  shorthandValues();
+  shorthandContexts();
   primaryConstructorValues();
   inheritanceValues();
   interfaceValues();
@@ -6217,4 +6219,181 @@ void main(List<String> args) {
   bufferValues();
   stringBoundaries();
   listGrowth(args);
+}
+
+String shorthandTrace = '';
+
+class ShorthandValue {
+  final int value;
+  const ShorthandValue(this.value);
+  const ShorthandValue.zero() : value = 0;
+  factory ShorthandValue.make([int value = 3]) => .new(value);
+  static const ShorthandValue one = .new(1);
+  static ShorthandValue get two => .new(2);
+  static ShorthandValue? get absent => null;
+  static List<ShorthandValue> get many => <ShorthandValue>[.one];
+  static ShorthandValue from(int value) => .new(value);
+  static ShorthandValue Function(int) get maker {
+    shorthandTrace += 'getter';
+    return from;
+  }
+
+  static T? choose<T>() {
+    print(<T>[] is List<ShorthandValue>);
+    return null;
+  }
+
+  ShorthandValue next() => .new(value + 1);
+}
+
+class ShorthandHolder {
+  ShorthandValue field = .new(8);
+  final ShorthandValue child;
+  ShorthandHolder(this.child);
+  ShorthandHolder.named(int value) : this(.new(value));
+  ShorthandValue get value => .one;
+  set value(ShorthandValue next) {
+    field = next;
+  }
+}
+
+class ShorthandConstant {
+  final ShorthandValue child;
+  const ShorthandConstant(this.child);
+  const ShorthandConstant.named() : child = const .new(4);
+}
+
+typedef ShorthandAlias = ShorthandValue?;
+typedef ShorthandIdentity<T> = T;
+
+ShorthandValue shorthandReturn(bool first) => first ? .one : .make(5);
+int shorthandDefault([ShorthandValue value = const .new(4)]) => value.value;
+ShorthandValue shorthandArgument(
+  ShorthandValue value, {
+  required ShorthandValue other,
+}) => .new(value.value + other.value);
+List<T> shorthandGeneric<T>(T value) => .filled(0, value);
+T shorthandId<T>(T value) => value;
+ShorthandValue Function() shorthandClosure() =>
+    () => .new(6);
+ShorthandValue shorthandSwitch(int value) => switch (value) {
+  0 => .one,
+  _ => .new(value),
+};
+
+void shorthandValues() {
+  ShorthandValue value = .new(4);
+  print(value.value);
+  value = .zero();
+  print(value.value);
+  value = .two;
+  print(value.value);
+  value = .from(7);
+  print(value.value);
+  value = .many[0].next();
+  print(value.value);
+  ShorthandValue? nullable = .absent?.next();
+  print(nullable == null);
+  nullable ??= .one;
+  print(nullable.value);
+  value = .absent ?? .one;
+  print(value.value);
+  value = (.one);
+  print(value.value);
+  ShorthandAlias alias = .new(5);
+  print(alias!.value);
+  {
+    final ShorthandValue = 10;
+    final one = 20;
+    ShorthandIdentity<ShorthandAlias> unshadowed = .one;
+    print(unshadowed!.value + ShorthandValue + one);
+  }
+  print(shorthandReturn(true).value);
+  print(shorthandReturn(false).value);
+  print(shorthandDefault());
+  print(shorthandArgument(.one, other: .new(3)).value);
+  print(shorthandClosure()().value);
+  print(shorthandSwitch(9).value);
+  ShorthandAlias inferred = shorthandId(.new(11));
+  print(inferred!.value);
+  ShorthandHolder holder = .named(12);
+  print(holder.field.value);
+  print(holder.child.value);
+  print(holder.value.value);
+  holder.value = .two;
+  print(holder.field.value);
+}
+
+int shorthandMarkedArgument() {
+  shorthandTrace += 'argument';
+  return 8;
+}
+
+void shorthandContexts() {
+  ShorthandValue created = .maker(shorthandMarkedArgument());
+  print(created.value);
+  print(shorthandTrace);
+  final list = <ShorthandValue>[
+    .one,
+    .new(3),
+    if (true) .two,
+    for (var i = 0; i < 2; i++) .new(i),
+    ?.absent,
+    ?.absent ?? .two,
+  ];
+  for (final value in list) print(value.value);
+  List<ShorthandValue>? filled = .filled(2, .one);
+  print(filled![0].value);
+  print(filled.length);
+  print(shorthandGeneric<int>(2) is List<int>);
+  int number = .parse('42');
+  double floating = .parse('4.5');
+  double fallback = .tryParse('bad') ?? 1.5;
+  String string = .fromCharCodes([65]);
+  print(<Object>[number, floating, fallback, string]);
+  const ShorthandValue constant = .new(4);
+  const constants = <ShorthandValue>[.one, .new(4)];
+  const ShorthandValue conditional = true ? .one : .new(3);
+  const ShorthandConstant outer = .new(.new(4));
+  ShorthandConstant initializer = const .named();
+  print(identical(constant, constants[1]));
+  print(identical(constant, outer.child));
+  print(identical(constant, initializer.child));
+  print(conditional.value);
+  ShorthandValue actual = .one;
+  print(actual == .one);
+  print(actual != .two);
+  const bool equal = ShorthandValue.one == .one;
+  print(equal);
+  print(actual == .choose());
+  print(switch (actual) {
+    .one => 1,
+    _ => 0,
+  });
+  print(switch (actual) {
+    const .new(1) => 1,
+    _ => 0,
+  });
+  print(switch (actual) {
+    == .one => 1,
+    _ => 0,
+  });
+  print(switch (actual) {
+    != .one => 1,
+    _ => 0,
+  });
+  print(switch (actual) {
+    const (true ? .one : .new(2)) => 1,
+    _ => 0,
+  });
+  if (actual case .one) print('matched');
+  double relation = 1;
+  print(switch (relation) {
+    < .infinity => 1,
+    _ => 0,
+  });
+  print(switch (relation) {
+    >= .negativeInfinity => 1,
+    _ => 0,
+  });
 }

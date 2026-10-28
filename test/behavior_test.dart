@@ -1178,6 +1178,54 @@ void main(List<String> args) {
       File(standard).uri.toString(),
     ]);
     final libraries = {
+      'shorthand-library.dart': r"""
+part 'shorthand-part.dart';
+class Value {
+  final int value;
+  const Value(this.value);
+  const Value._private() : value=7;
+  static const Value one=Value(1);
+  static const Value _hidden=Value(2);
+}
+class _Private {
+  final int value;
+  const _Private(this.value);
+  static const _Private one=_Private(9);
+}
+typedef PublicAlias=_Private;
+typedef PublicValueAlias=Value;
+""",
+      'shorthand-part.dart': r"""
+part of 'shorthand-library.dart';
+Value fromPart()=>._private();
+Value hiddenFromPart()=>._hidden;
+int privateTypeFromPart(){const _Private value=.one;return value.value;}
+""",
+      'shorthand-imports.dart': r"""
+import 'shorthand-library.dart' as lib;
+typedef Alias=lib.Value?;
+void main(){
+  final lib=0;
+  Alias value=.new(4);
+  print(value!.value+lib);
+  test();
+}
+void test(){
+  const lib.Value value=.one;
+  const hidden=lib.PublicAlias.one;
+  const lib.PublicValueAlias publicAlias=.one;
+  print(identical(value,lib.Value.one));
+  print(hidden.value);
+  print(publicAlias.value);
+  print(lib.privateTypeFromPart());
+  print(lib.fromPart().value);
+  print(lib.hiddenFromPart().value);
+}
+""",
+      'shorthand-private-type.dart': "import 'shorthand-library.dart' as lib; lib.PublicAlias f()=>.one; void main(){}",
+      'shorthand-private-member.dart': "import 'shorthand-library.dart' as lib; lib.Value f()=>._hidden; void main(){}",
+      'shorthand-private-constructor.dart': "import 'shorthand-library.dart' as lib; lib.Value f()=>._private(); void main(){}",
+
       'inheritance-parent.dart': r'''
 import 'factory-product.dart' as products;
 part 'inheritance-part.dart';
@@ -1897,6 +1945,7 @@ void main() {
       File('${temporary.path}/${entry.key}').writeAsStringSync(entry.value);
     }
     await compare(File('${temporary.path}/imports.dart'), []);
+    await compare(File('${temporary.path}/shorthand-imports.dart'), []);
     await compare(File('${temporary.path}/interface-imports.dart'), []);
     await compare(File('${temporary.path}/inheritance-imports.dart'), []);
     await compare(File('${temporary.path}/factory-method-312.dart'), []);
@@ -1963,6 +2012,37 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      'void f(double d){if(d case <(.infinity)) print(1);} void main(){}',
+      'void f(double d){print(d < .infinity);} void main(){}',
+
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}void f(){var c=.one;}void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}void f(){dynamic c=.one;}void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}void f(){Object c=.one;}void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}void f(){Null c=.one;}void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}void f(){C Function(int) c=.from;}void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}T f<T extends C>()=>.one;void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}int f()=>.one.n;void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}int f()=>.parse(\"1\")+1;void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}C f()=>(.one).next();void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}void f(){C c=C.one;print(c==(.one));}void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}void f(){C c=C.one;print(c==(true?.one:.two));}void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}void f(){C c=C.one;print(.one==c);}void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}void f(){.one=C.one;}void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}void f(){.one.n=4;}void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}void f(){.one++;}void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}void f(){++ .one;}void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}C f()=>new .new(1);void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}C f()=>.new<int>(1);void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}const C c=.two;void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}const C c=true?.one:.two;void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}class D{final C c;const D(int n):c=const .new(n);}void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}C f()=>.next();void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}void f(C c){switch(c){case .one.n:break;default:break;}}void main(){}",
+      "class C {final int n; const C(this.n); static const C one=C(1); static C get two=>C(2); static C from(int n)=>C(n); C next()=>C(n+1);}void f(C c){if(c case ==(.one))print(1);}void main(){}",
+      // The fixed specification and analyzer reject const static calls; CFE 3.13.7 executes them.
+      "class C {C(); static C make()=>C();} C f()=>const .make(); void main(){}",
+      "// @dart=3.9\nclass C {static C get value=>C();} C f()=>.value; void main(){}",
+
       "import 'inheritance-parent.dart' as p;void main(){p.FactoryContract._hidden();}",
       "class C{factory C()=>1;}void main(){}",
       "class C{factory C()=>null;}void main(){}",
@@ -2878,6 +2958,18 @@ void main() {
     }
     await reject(
       File('${temporary.path}/factory-private.dart'),
+      checkSdk: true,
+    );
+    await reject(
+      File('${temporary.path}/shorthand-private-member.dart'),
+      checkSdk: true,
+    );
+    await reject(
+      File('${temporary.path}/shorthand-private-constructor.dart'),
+      checkSdk: true,
+    );
+    await reject(
+      File('${temporary.path}/shorthand-private-type.dart'),
       checkSdk: true,
     );
     final rejectedParts = <String, String>{

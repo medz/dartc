@@ -274,15 +274,15 @@ ConstantValue _constantBinary(
   int expected,
 ) {
   var op = expression.text;
+  var logical = op == '&&' || op == '||';
   var left = _evaluateConstant(
     context,
     expression.children[0],
     active,
-    -1,
+    logical ? tBool : -1,
     implicitConst,
   );
   var rightActive = active;
-  var logical = op == '&&' || op == '||';
   if (logical && active) {
     if (left.kind != tBool) {
       return _constantError(
@@ -297,9 +297,14 @@ ConstantValue _constantBinary(
   }
   var right = _evaluateConstant(
     context,
-    expression.children[1],
+    resolveEqualityShorthand(
+      context.symbols,
+      op,
+      expression.children[1],
+      left.type,
+    ),
     rightActive,
-    typingBinaryContext(op, left.type, expected),
+    logical ? tBool : typingBinaryContext(op, left.type, expected),
     implicitConst,
   );
   var type = typingBinary(op, left.type, right.type);
@@ -476,6 +481,7 @@ ConstantValue _constantCoalescing(
 }
 
 int _constantSymbol(ConstantContext context, AstExpression expression) {
+  if (expression.kind == astTypeReference) return expression.declaration;
   var prefix = '';
   if (expression.kind == astName) {
     if (expression.binding >= 0) return -1;
@@ -1428,6 +1434,14 @@ ConstantValue _evaluateConstant(
   bool implicitConst,
 ) {
   var kind = expression.kind;
+  if (kind == astStaticShorthand)
+    return _evaluateConstant(
+      context,
+      resolveStaticShorthand(context.symbols, expression, expected),
+      active,
+      expected,
+      implicitConst,
+    );
   if (kind == astImplicitReceiver) return context.implicitReceiver!;
   if (kind == astNullAware) {
     var source = expression.children[0];

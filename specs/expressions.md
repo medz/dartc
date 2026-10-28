@@ -24,8 +24,8 @@
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
-| §17.12 `this`、§17.13 实例创建 | 部分实现 | 支持当前类实例、字段、普通构造器与字段形参；支持已实现的生成式构造与规范化 const 实例，细则见[类追踪](classes.md)；支持显式或隐式父类构造链；工厂未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feWithReceiver`、`feLowerStaticCall`；[values.dart](../test/fixtures/values.dart)：`localBindings`、`argumentCalls`、`constObjects`。 |
-| [§17.13.1 `new` 表达式][new-expression] | 部分实现 | 前导 `new` 必须解析到已实现的类构造器，可经类名或用户类类型别名调用未命名、命名与 `.new` 构造器，并保留原有参数检查和求值顺序；支持既有 `List.filled`、`String.fromCharCodes` 构造入口，其类型别名入口尚缺。普通函数、getter、函数值及静态方法不因 `new` 变成构造器；`new` 在嵌套或未执行的常量分支中也不是常量。生成式重定向的规则见[类追踪](classes.md)；一般工厂及泛型类仍缺。 | [ast.dart](../lib/src/ast.dart)：`astCallNew`；[parser.dart](../lib/src/parser.dart)：`parserPrimary`；[frontend.dart](../lib/src/frontend.dart)：`feLowerCall`；[constants.dart](../lib/src/constants.dart)：`_constantConstructor`；[values.dart](../test/fixtures/values.dart)：`namedConstructors`、`filledLists`、`stringBoundaries`；[behavior_test.dart](../test/behavior_test.dart)：`named-constructors-imports.dart`、`rejected`。 |
+| §17.12 `this`、§17.13 实例创建 | 部分实现 | 支持当前类实例、字段、普通构造器与字段形参；支持已实现的生成式构造与规范化 const 实例，细则见[类追踪](classes.md)；支持显式或隐式父类构造链及非泛型工厂。 | [frontend.dart](../lib/src/frontend.dart)：`feWithReceiver`、`feLowerStaticCall`；[values.dart](../test/fixtures/values.dart)：`localBindings`、`argumentCalls`、`constObjects`。 |
+| [§17.13.1 `new` 表达式][new-expression] | 部分实现 | 前导 `new` 必须解析到已实现的类构造器，可经类名或用户类类型别名调用未命名、命名与 `.new` 构造器，并保留原有参数检查和求值顺序；支持既有 `List.filled`、`String.fromCharCodes` 构造入口，其类型别名入口尚缺。普通函数、getter、函数值及静态方法不因 `new` 变成构造器；`new` 在嵌套或未执行的常量分支中也不是常量。生成式重定向的规则见[类追踪](classes.md)；泛型类及 external 构造仍缺。 | [ast.dart](../lib/src/ast.dart)：`astCallNew`；[parser.dart](../lib/src/parser.dart)：`parserPrimary`；[frontend.dart](../lib/src/frontend.dart)：`feLowerCall`；[constants.dart](../lib/src/constants.dart)：`_constantConstructor`；[values.dart](../test/fixtures/values.dart)：`namedConstructors`、`filledLists`、`stringBoundaries`；[behavior_test.dart](../test/behavior_test.dart)：`named-constructors-imports.dart`、`rejected`。 |
 | [§17.14 函数表达式][function-expressions] | 部分实现 | 支持同步非泛型匿名箭头体与块体及必需位置参数签名的捕获，以及签名上下文推断；无捕获字面量直接调用和 `.call` 支持可选/命名参数。一般函数值签名限制与捕获范围见[函数](functions.md)。 | [parser.dart](../lib/src/parser.dart) `parserFunctionExpression()`；[frontend.dart](../lib/src/frontend.dart) `feLowerFunctionExpression()`；[behavior_test.dart](../test/behavior_test.dart) `program/anonymousFunctions()`、`rejected`。 |
 | §17.15 函数调用 | 部分实现 | 必需/可选位置参数、命名/required 参数、声明库范围内的默认常量；实参按源码顺序求值后绑定。调用的类型实参与 callee 自有类型分开存储；已有普通函数、构造器和方法拒绝不匹配的类型实参。支持已知类的[可调用对象](functions.md#可调用对象)，以及具体非泛型必需位置签名的函数值调用及 `.call`，参数和结果按静态签名检查；泛型声明的直接调用与推断见[函数](functions.md#泛型直接调用)；可选/命名函数值签名、泛型函数值及 dynamic/裸 Function 调用尚缺。 | [arguments.dart](../lib/src/frontend/arguments.dart)：`bindArguments`；[frontend.dart](../lib/src/frontend.dart)：`feLowerArguments`、`feLowerValueCall`；[values.dart](../test/fixtures/values.dart)：`argumentCalls`、`functionValues`。 |
 | [§17.16 函数提取][closurization] | 部分实现 | 对[已支持的函数值来源和签名](functions.md#函数值)按声明规范化身份，保留仅经值引用的目标。静态方法提取复用普通函数值，实例方法值保存单次求值的接收者；完整签名、相等性与缺口由函数条目维护。 | [frontend.dart](../lib/src/frontend.dart)：`feFunctionReference`、`feCreateBoundMethod`；[reach.dart](../lib/src/reach.dart)：`reachableFunctions`；[values.dart](../test/fixtures/values.dart)：`functionValues`；[behavior_test.dart](../test/behavior_test.dart)：`function-imports.dart`。 |
@@ -52,6 +52,18 @@
 | 空安全补充：空断言 `e!` | 部分实现 | 操作数只求值一次，仅 null 时运行失败（尚不可捕获），否则保留原值；结果为 NonNull(T)，Null 得 Never，dynamic 仍为 dynamic。透传 List 上下文并提升直接局部读取；void 操作数、常量上下文及作为赋值目标均拒绝。 | [typing.dart](../lib/src/typing.dart)：`typingNullAssertion`；[frontend.dart](../lib/src/frontend.dart)：`feLowerNullAssertion`；[values.dart](../test/fixtures/values.dart)：`nullAssertionValues`；[behavior_test.dart](../test/behavior_test.dart)：`nullAssertion`、`neverAssertion`、`neverExpressions`、`rejected`、`failingValues`；依据[空安全补充][nnbd]。 |
 | §17.39–17.40 类型测试与转换 | 部分实现 | `is`、`is!`、`as` 保留单次求值，覆盖当前类型和完整 List 参数；允许无关静态类型的显式 cast 后在运行时检查；`as` 可消费 void 的实际负载，`is` 和隐式消费不因此放宽。支持已实现函数签名、Function 上界及函数类型参数的运行时实例化；记录及一般泛型类目标未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerExpression`；[runtime.dart](../lib/src/runtime.dart)：`rtValueMatches`、`rtValueCast`；[values.dart](../test/fixtures/values.dart)：`typeChecks`、`valueContexts`、`functionValues`。 |
 | 空安全补充：底类型运算结果 | 部分实现 | 支持的普通运算在 Never 左侧保留底类型；相等、逻辑和 `!` 仍为 bool。具体接收者沿用其结果规则，例如 `int + Never` 为 num。不能因路径不完成而跳过其他操作数的静态检查。 | [typing.dart](../lib/src/typing.dart)：`typingBinary`、`typingUnary`；[frontend.dart](../lib/src/frontend.dart)：`feCombine`；[behavior_test.dart](../test/behavior_test.dart)：`neverNegation`、`neverRelation`、`neverRightArithmetic`、`neverLogical`。 |
+
+## 点简写
+
+依据 [Dart 3.10 点简写规范][dot-shorthands]，支持已有类和标准库入口的 `.new(...)`、命名生成式/工厂构造、静态字段、getter 及方法调用。整个最长选择器链的上下文决定声明身份；括号终止该链。声明查找忽略局部同名变量，类型别名按展开后的类型处理，可空上下文使用非空声明。实参、返回、赋值、条件、`??`、List 元素及泛型调用已有的向下推断可提供上下文；List 的空感知元素也支持 `?.member`。运行时求值顺序、默认值、访问检查与正常显式调用共用实现。
+
+`==`/`!=` 只给直接的简写右操作数提供左侧静态类型作为声明查找上下文，不改变该操作数自身的类型推断上下文。`value == .name` 与 `value == (.name)` 因此不同。常量及关系模式按匹配类型和运算符参数上下文处理，关系模式的 SDK 差异见[模式](patterns.md)。常量求值使用相同声明身份，检查未选中分支及未调用声明的义务。`const .name(...)` 必须选择 const 构造器；普通静态 getter 或方法不因此成为常量。
+
+缺少上下文、dynamic/void/Never、结构化函数类型和类型参数（包括有类上界的参数）不能提供静态命名空间。无上下文时不按成员名搜索类。检查语言版本至少 3.10、私有成员与构造器、实例成员误用及非法赋值。按 SDK 3.13.7 的 CFE/analyzer 行为，跨库私有类不能提供简写命名空间，即使通过公共别名得到该类型；同库及 part 可用。构造器 tear-off、泛型函数值、泛型类、FutureOr、enum/mixin/extension type 及未实现的标准库成员仍依赖各自语言和库缺口。
+
+固定规范与 SDK 3.13.7 analyzer 都要求显式 const 简写调用选择 const 构造器；CFE 却接受并执行 `const .make()` 指向的普通静态方法。dartc 在此遵守 const 资格并拒绝，即使函数未调用。固定规范的裸常量模式还排除 `.new`，而此 SDK 的 CFE 与 analyzer 接受构造器函数值模式；dartc 的对应缺口归构造器 tear-off，不将其标成非法 Dart。
+
+实现入口为 [parser.dart](../lib/src/parser.dart) `parserStaticShorthand()`、[resolve_type.dart](../lib/src/resolve_type.dart) `resolveStaticShorthand()` 与 `resolveEqualityShorthand()`；普通 lowering 和 [constants.dart](../lib/src/constants.dart) 共用解析结果。行为入口为 [values.dart](../test/fixtures/values.dart) `shorthandValues()`、`shorthandContexts()`，[behavior_test.dart](../test/behavior_test.dart) `shorthand-imports.dart`、私有访问拒例和 `rejected`；[roots.dart](../test/fixtures/roots.dart) 的对象和 List 元素分配继续验证根枚举。
 
 ## List API 边界
 
@@ -130,3 +142,5 @@ SDK 3.13.7 CFE 接受 `const dynamic value = null; const result = value?[true]`�
 [collection-elements]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex
 
 [null-aware-elements]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.8/null-aware-elements/feature-specification.md
+
+[dot-shorthands]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.10/dot-shorthands/feature-specification.md

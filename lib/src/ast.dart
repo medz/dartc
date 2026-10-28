@@ -29,6 +29,8 @@ const int astIfCaseCondition = 28;
 const int astPatternAssignment = 29;
 const int astDouble = 30;
 const int astThrow = 31;
+const int astStaticShorthand = 32;
+const int astTypeReference = 33;
 
 const int patternConstant = 1;
 const int patternVariable = 2;
@@ -102,6 +104,8 @@ class AstExpression {
   List<AstType> typeArguments;
   int token;
   int binding = -1;
+  // Declaration identity for the inferred namespace of a static shorthand.
+  int declaration = -1;
   bool constant = false;
 
   AstExpression(

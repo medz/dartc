@@ -348,6 +348,17 @@ AstExpression parserList(Parser parser, List<AstType> arguments, int token) {
 
 AstExpression parserCollectionElement(Parser parser) {
   var token = parser.position;
+  // The scanner joins the null-aware element marker and shorthand dot.
+  if (parserIs(parser, '?.'))
+    return AstExpression(
+      astNullAwareElement,
+      '',
+      <AstExpression>[
+        parseExpression(parser, true, parserStaticShorthand(parser)),
+      ],
+      const <AstType>[],
+      token,
+    );
   if (parserTake(parser, '?'))
     return AstExpression(
       astNullAwareElement,
@@ -789,6 +800,9 @@ AstPattern parserUnaryPattern(Parser parser, int context) {
       value = parseExpression(parser);
       parserExpect(parser, ')');
       parser.restrictedExpression = guard;
+    } else if (parserIs(parser, '.') ||
+        parserIs(parser, 'const') && tokenIs(parser.tokens[token + 1], '.')) {
+      value = parserStaticShorthand(parser, false);
     } else if (parserIs(parser, '-') &&
         (parser.tokens[token + 1].kind == tokenInteger ||
             parser.tokens[token + 1].kind == tokenDouble)) {
@@ -943,6 +957,7 @@ AstExpression parserPrimary(Parser parser) {
     parser.restrictedExpression = guard;
     // A parenthesized null-shorting chain cannot absorb later assignments.
     if (expression.kind == astNullAware) expression.text = '()';
+    if (expression.kind == astStaticShorthand) expression.text = '()';
     return expression;
   }
   var constant = parserTake(parser, 'const');
@@ -1115,12 +1130,59 @@ List<AstExpression> parserMetadata(Parser parser) {
 }
 
 AstExpression parserPostfix(Parser parser) {
+  if (parserIs(parser, '.') ||
+      parserIs(parser, 'const') &&
+          tokenIs(parser.tokens[parser.position + 1], '.')) {
+    return parserStaticShorthand(parser);
+  }
   var parenthesized = parserIs(parser, '(');
   var expression = parserPrimary(parser);
   var disposition = astCallValue;
   if (!parenthesized && expression.kind == astName)
     disposition = astCallIdentifier;
   return parserSelectors(parser, expression, disposition, true);
+}
+
+AstExpression parserStaticShorthand(Parser parser, [bool selectors = true]) {
+  final token = parser.position;
+  final constant = parserTake(parser, 'const');
+  if (!parserTake(parser, '?.')) parserExpect(parser, '.');
+  final member = parser.position;
+  if (tokenIsReserved(parser.tokens[member]) && !parserIs(parser, 'new'))
+    parserError(parser, 'expected static shorthand name');
+  var head = AstExpression(
+    astMember,
+    parserName(parser),
+    <AstExpression>[
+      AstExpression(
+        astTypeReference,
+        '',
+        const <AstExpression>[],
+        const <AstType>[],
+        token,
+      ),
+    ],
+    const <AstType>[],
+    member,
+  );
+  if (constant) {
+    head = parserCall(parser, head, token, const <AstType>[], astCallSelector)
+      ..constant = true;
+  }
+  if (selectors)
+    head = parserSelectors(
+      parser,
+      head,
+      constant ? astCallValue : astCallSelector,
+      false,
+    );
+  return AstExpression(
+    astStaticShorthand,
+    '',
+    <AstExpression>[head],
+    const <AstType>[],
+    token,
+  );
 }
 
 AstExpression parserSelectors(
@@ -1304,8 +1366,12 @@ AstType parserExpressionType(Parser parser) {
   return type;
 }
 
-AstExpression parserBinary(Parser parser, int minimum) {
-  var expression = parserUnary(parser);
+AstExpression parserBinary(
+  Parser parser,
+  int minimum, [
+  AstExpression? initial,
+]) {
+  var expression = initial ?? parserUnary(parser);
   var maximum = 10;
   var previousComparison = -1;
   while (parser.tokens[parser.position].kind != tokenString) {
@@ -1369,8 +1435,8 @@ bool parserAssignment(String op) {
       op == '>>>=';
 }
 
-AstExpression parserIfNull(Parser parser) {
-  var expression = parserBinary(parser, 1);
+AstExpression parserIfNull(Parser parser, [AstExpression? initial]) {
+  var expression = parserBinary(parser, 1, initial);
   while (parserIs(parser, '??')) {
     var token = parser.position;
     parser.position++;
@@ -1483,6 +1549,7 @@ bool parserExpressionStart(Token token) {
         tokenIs(token, 'throw');
   }
   return tokenIs(token, '(') ||
+      tokenIs(token, '.') ||
       tokenIs(token, '[') ||
       tokenIs(token, '{') ||
       tokenIs(token, '<') ||
@@ -1592,8 +1659,12 @@ AstPatternDeclaration parserPatternDeclaration(
   );
 }
 
-AstExpression parseExpression(Parser parser, [bool allowCascade = true]) {
-  if (parserTake(parser, 'throw')) {
+AstExpression parseExpression(
+  Parser parser, [
+  bool allowCascade = true,
+  AstExpression? initial,
+]) {
+  if (initial == null && parserTake(parser, 'throw')) {
     final token = parser.position - 1;
     return AstExpression(
       astThrow,
@@ -1603,7 +1674,7 @@ AstExpression parseExpression(Parser parser, [bool allowCascade = true]) {
       token,
     );
   }
-  var end = parserOuterPatternEnd(parser);
+  var end = initial == null ? parserOuterPatternEnd(parser) : -1;
   if (end >= 0 && tokenIs(parser.tokens[end], '=')) {
     var token = parser.position;
     var pattern = parserPattern(parser, 1, patternAssigning);
@@ -1616,7 +1687,7 @@ AstExpression parseExpression(Parser parser, [bool allowCascade = true]) {
       token,
     )..pattern = pattern;
   }
-  var expression = parserIfNull(parser);
+  var expression = parserIfNull(parser, initial);
   var token = parser.position;
   if (parserTake(parser, '?')) {
     var yes = parseExpression(parser, false);

@@ -8,6 +8,71 @@ Never _typeError(SymbolTable symbols, int token, String message) {
   sourceError(symbols.program, symbols.program.tokens[token], message);
 }
 
+AstExpression resolveStaticShorthand(
+  SymbolTable symbols,
+  AstExpression expression,
+  int context,
+) {
+  final source = symbols.program.tokens[expression.token].source;
+  if (!sourceVersionAtLeast(symbols.program, source, 3, 10))
+    _typeError(
+      symbols,
+      expression.token,
+      'dot shorthands require language version 3.10',
+    );
+  final type = context < 0 ? -1 : typeNonNullable(context);
+  var symbol = -1;
+  if (type >= 0 &&
+      type != tDynamic &&
+      type != tVoid &&
+      type != tNever &&
+      !typeIsParameter(type) &&
+      !typeIsFunction(type) &&
+      type != schemaHole) {
+    for (var i = 0; i < symbols.declarations.length; i++) {
+      final declaration = symbols.declarations[i];
+      if (typeIsClass(type)
+          ? declaration.kind == symbolClass &&
+                declaration.target == typeArgument(type)
+          : declaration.kind == symbolType &&
+                declaration.source ==
+                    (type == tPointer ? sourceFfi : sourceCore) &&
+                declaration.target == (typeIsList(type) ? -1 : type)) {
+        if (declaration.name.startsWith('_') &&
+            sourceLibrary(symbols.program, declaration.source) !=
+                sourceLibrary(symbols.program, source))
+          break;
+        symbol = i;
+        break;
+      }
+    }
+  }
+  if (symbol < 0)
+    _typeError(
+      symbols,
+      expression.token,
+      'dot shorthand requires a context with a static namespace',
+    );
+  final body = expression.children[0];
+  var receiver = body;
+  while (receiver.kind != astTypeReference) receiver = receiver.children[0];
+  receiver.declaration = symbol;
+  return body;
+}
+
+AstExpression resolveEqualityShorthand(
+  SymbolTable symbols,
+  String operator,
+  AstExpression right,
+  int leftType,
+) {
+  if ((operator == '==' || operator == '!=') &&
+      right.kind == astStaticShorthand &&
+      right.text != '()')
+    return resolveStaticShorthand(symbols, right, leftType);
+  return right;
+}
+
 List<int> _declareTypeParameters(
   SymbolTable symbols,
   List<AstTypeParameter> syntaxParameters,

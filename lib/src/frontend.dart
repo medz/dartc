@@ -1193,6 +1193,7 @@ bool feHasPrefix(int token, String prefix) {
 }
 
 int feExpressionSymbol(AstExpression expression, bool writing) {
+  if (expression.kind == astTypeReference) return expression.declaration;
   if (expression.kind == astName) {
     if (expression.binding >= 0 || feImplicitMember(expression)) return -1;
     return feResolveName(expression.token, expression.text, '', writing);
@@ -1721,7 +1722,7 @@ void feBooleanValue(int type, int token) {
 }
 
 void feLowerBoolean(AstExpression expression) {
-  feBooleanValue(feLowerExpression(expression), expression.token);
+  feBooleanValue(feLowerHint(expression, tBool), expression.token);
 }
 
 void feConditionFact(AstExpression expression, bool truth) {
@@ -1800,6 +1801,11 @@ int feNonNullableValue(int type, int token) {
 }
 
 int feLowerHint(AstExpression expression, int context) {
+  if (expression.kind == astStaticShorthand)
+    return feLowerHint(
+      resolveStaticShorthand(feSymbols, expression, context),
+      context,
+    );
   if (doubleContext(context)) {
     if (expression.kind == astInteger || isNegatedIntegerLiteral(expression)) {
       feOperand(opDouble, decodeIntegerAsDouble(feSources, expression));
@@ -1812,7 +1818,12 @@ int feLowerHint(AstExpression expression, int context) {
       expression.text != '??') {
     final left = feLowerExpression(expression.children[0]);
     final right = feLowerHint(
-      expression.children[1],
+      resolveEqualityShorthand(
+        feSymbols,
+        expression.text,
+        expression.children[1],
+        left,
+      ),
       typingBinaryContext(expression.text, left, context),
     );
     return feCombine(expression.text, left, right, expression.token);
@@ -2962,12 +2973,13 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
     if (lengthArgument < 0 || valueArgument < 0)
       feAstError(call.token, 'List.filled requires length and value');
     var element = -1;
+    final listContext = context < 0 ? -1 : typeNonNullable(context);
     if (receiver.typeArguments.length != 0) {
       if (receiver.typeArguments.length != 1)
         feAstError(receiver.token, 'List requires one type argument');
       element = feResolveType(receiver.typeArguments[0]);
-    } else if (context > 0 && typeIsList(context)) {
-      element = typeArgument(context);
+    } else if (listContext >= 0 && typeIsList(listContext)) {
+      element = typeArgument(listContext);
     }
     var lengthSlot = -1;
     var valueSlot = -1;
@@ -4618,6 +4630,7 @@ int feLowerExpression(AstExpression expression) {
 }
 
 int feLowerValue(AstExpression expression) {
+  if (expression.kind == astStaticShorthand) return feLowerHint(expression, -1);
   if (expression.kind == astThrow) {
     final value = expression.children[0];
     final type = feLowerAssignedValue(value, tObject);
@@ -4805,7 +4818,7 @@ int feLowerValue(AstExpression expression) {
     }
     var left = feLowerExpression(expression.children[0]);
     var right = feLowerHint(
-      expression.children[1],
+      resolveEqualityShorthand(feSymbols, op, expression.children[1], left),
       typingBinaryContext(op, left, -1),
     );
     return feCombine(op, left, right, expression.token);

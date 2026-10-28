@@ -282,10 +282,20 @@ CheckedPattern checkPattern(
       result.remaining = patternRemainingType(input, type);
     }
   } else if (kind == patternConstant || kind == patternRelational) {
+    var expression = syntax.constant!;
+    // SDK 3.13 also supplies the matched namespace for <, <=, > and >=.
+    if (kind == patternRelational &&
+        expression.kind == astStaticShorthand &&
+        expression.text != '()')
+      expression = resolveStaticShorthand(context.symbols, expression, input);
     var value = evaluateConstant(
       context,
-      syntax.constant!,
-      input,
+      expression,
+      kind == patternConstant
+          ? input
+          : syntax.text == '==' || syntax.text == '!='
+          ? nullableType(tObject)
+          : typingBinaryContext(syntax.text, input, -1),
       syntax.constantContext,
     );
     result.constant = value;
