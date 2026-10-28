@@ -343,14 +343,14 @@ AstExpression parserList(Parser parser, List<AstType> arguments, int token) {
   }
   parserExpect(parser, ']');
   parser.restrictedExpression = guard;
-  return AstExpression(astList, '', children, arguments, token);
+  return .new(astList, '', children, arguments, token);
 }
 
 AstExpression parserCollectionElement(Parser parser) {
   var token = parser.position;
   // The scanner joins the null-aware element marker and shorthand dot.
   if (parserIs(parser, '?.'))
-    return AstExpression(
+    return .new(
       astNullAwareElement,
       '',
       <AstExpression>[
@@ -360,7 +360,7 @@ AstExpression parserCollectionElement(Parser parser) {
       token,
     );
   if (parserTake(parser, '?'))
-    return AstExpression(
+    return .new(
       astNullAwareElement,
       '',
       <AstExpression>[parseExpression(parser)],
@@ -369,7 +369,7 @@ AstExpression parserCollectionElement(Parser parser) {
     );
   if (parserTake(parser, '...') || parserTake(parser, '...?')) {
     var operator = parser.tokens[token].text;
-    return AstExpression(
+    return .new(
       astSpreadElement,
       operator,
       <AstExpression>[parseExpression(parser)],
@@ -382,7 +382,7 @@ AstExpression parserCollectionElement(Parser parser) {
     var children = <AstExpression>[condition, parserCollectionElement(parser)];
     if (parserTake(parser, 'else'))
       children.add(parserCollectionElement(parser));
-    return AstExpression(astIfElement, '', children, const <AstType>[], token);
+    return .new(astIfElement, '', children, const <AstType>[], token);
   }
   if (parserTake(parser, 'for')) {
     var result = AstExpression(
@@ -421,7 +421,7 @@ AstExpression parserIfCondition(Parser parser) {
 AstStatement parserForBody(Parser parser, bool collection) {
   if (!collection) return parseStatement(parser);
   var token = parser.position;
-  return AstStatement(
+  return .new(
     astExpressionStatement,
     <AstExpression>[parserCollectionElement(parser)],
     const <AstStatement>[],
@@ -446,7 +446,7 @@ AstStatement parserFor(Parser parser, int token, bool collection) {
       if (parserTake(parser, 'in')) {
         var iterable = parseExpression(parser);
         parserExpect(parser, ')');
-        return AstStatement(
+        return .new(
           astForInStatement,
           <AstExpression>[iterable],
           <AstStatement>[parserForBody(parser, collection)],
@@ -485,7 +485,7 @@ AstStatement parserFor(Parser parser, int token, bool collection) {
         }
         var iterable = parseExpression(parser);
         parserExpect(parser, ')');
-        return AstStatement(
+        return .new(
           astForInStatement,
           <AstExpression>[iterable],
           <AstStatement>[parserForBody(parser, collection)],
@@ -513,7 +513,7 @@ AstStatement parserFor(Parser parser, int token, bool collection) {
           parserError(parser, 'for-in target requires an identifier');
         var iterable = parseExpression(parser);
         parserExpect(parser, ')');
-        return AstStatement(
+        return .new(
           astForInStatement,
           <AstExpression>[iterable, value],
           <AstStatement>[parserForBody(parser, collection)],
@@ -548,7 +548,7 @@ AstStatement parserFor(Parser parser, int token, bool collection) {
     initial,
     parserForBody(parser, collection),
   ];
-  return AstStatement(
+  return .new(
     astForStatement,
     <AstExpression>[],
     children,
@@ -673,7 +673,7 @@ AstPattern parserUnaryPattern(Parser parser, int context) {
           op == '>' ||
           op == '>=')) {
     parser.position++;
-    return AstPattern(patternRelational, token, op, const <AstPattern>[])
+    return .new(patternRelational, token, op, const <AstPattern>[])
       ..constant = parserBinary(parser, 5);
   }
   AstPattern pattern;
@@ -837,13 +837,13 @@ AstPattern parserUnaryPattern(Parser parser, int context) {
       (pattern.text == 'as' || pattern.text == 'when'))
     parserError(parser, 'invalid pattern variable ' + pattern.text);
   if (parserTake(parser, 'as')) {
-    return AstPattern(patternCast, token, '', <AstPattern>[pattern])
+    return .new(patternCast, token, '', <AstPattern>[pattern])
       ..type = parserExpressionType(parser);
   }
   if (parserTake(parser, '?'))
-    return AstPattern(patternNullCheck, token, '', <AstPattern>[pattern]);
+    return .new(patternNullCheck, token, '', <AstPattern>[pattern]);
   if (parserTake(parser, '!'))
-    return AstPattern(patternNullAssert, token, '', <AstPattern>[pattern]);
+    return .new(patternNullAssert, token, '', <AstPattern>[pattern]);
   return pattern;
 }
 
@@ -891,7 +891,7 @@ AstExpression parserSwitchExpression(Parser parser, int token) {
   }
   parserExpect(parser, '}');
   parser.restrictedExpression = previousGuard;
-  return AstExpression(
+  return .new(
     astSwitchExpression,
     '',
     <AstExpression>[source],
@@ -915,7 +915,7 @@ AstExpression parserPrimary(Parser parser) {
   }
   if (current.kind == tokenInteger || current.kind == tokenDouble) {
     parser.position++;
-    return AstExpression(
+    return .new(
       current.kind == tokenDouble ? astDouble : astInteger,
       current.text,
       const <AstExpression>[],
@@ -927,7 +927,7 @@ AstExpression parserPrimary(Parser parser) {
     return parserString(parser);
   }
   if (parserTake(parser, 'true') || parserTake(parser, 'false')) {
-    return AstExpression(
+    return .new(
       astBoolean,
       current.text,
       const <AstExpression>[],
@@ -936,7 +936,7 @@ AstExpression parserPrimary(Parser parser) {
     );
   }
   if (parserTake(parser, 'null')) {
-    return AstExpression(
+    return .new(
       astNull,
       'null',
       const <AstExpression>[],
@@ -981,13 +981,7 @@ AstExpression parserPrimary(Parser parser) {
     return expression;
   }
   var name = parserName(parser);
-  return AstExpression(
-    astName,
-    name,
-    const <AstExpression>[],
-    const <AstType>[],
-    token,
-  );
+  return .new(astName, name, const <AstExpression>[], const <AstType>[], token);
 }
 
 AstExpression parserCall(
@@ -1024,7 +1018,7 @@ AstExpression parserCall(
   }
   parserExpect(parser, ')');
   parser.restrictedExpression = guard;
-  return AstExpression(astCall, disposition, children, typeArguments, token);
+  return .new(astCall, disposition, children, typeArguments, token);
 }
 
 AstExpression parserConstructorDesignation(Parser parser) {
@@ -1176,7 +1170,7 @@ AstExpression parserStaticShorthand(Parser parser, [bool selectors = true]) {
       constant ? astCallValue : astCallSelector,
       false,
     );
-  return AstExpression(
+  return .new(
     astStaticShorthand,
     '',
     <AstExpression>[head],
@@ -1224,7 +1218,7 @@ AstExpression parserSelectors(
           token,
         );
       }
-      return AstExpression(
+      return .new(
         astNullAware,
         '',
         <AstExpression>[
@@ -1453,7 +1447,7 @@ AstExpression parserIfNull(Parser parser, [AstExpression? initial]) {
 }
 
 AstExpression parserImplicitReceiver(int token) {
-  return AstExpression(
+  return .new(
     astImplicitReceiver,
     '',
     const <AstExpression>[],
@@ -1666,7 +1660,7 @@ AstExpression parseExpression(
 ]) {
   if (initial == null && parserTake(parser, 'throw')) {
     final token = parser.position - 1;
-    return AstExpression(
+    return .new(
       astThrow,
       '',
       <AstExpression>[parseExpression(parser, allowCascade)],
@@ -1679,7 +1673,7 @@ AstExpression parseExpression(
     var token = parser.position;
     var pattern = parserPattern(parser, 1, patternAssigning);
     parserExpect(parser, '=');
-    return AstExpression(
+    return .new(
       astPatternAssignment,
       '',
       <AstExpression>[parseExpression(parser, allowCascade)],
@@ -1732,7 +1726,7 @@ AstExpression parseExpression(
 }
 
 AstType parserInferredType(int token) {
-  return AstType('', const <AstType>[], token);
+  return .new('', const <AstType>[], token);
 }
 
 int parserDeclarationTypeEnd(Parser parser, [bool pattern = false]) {
@@ -2567,7 +2561,7 @@ AstUnit parseUnit(
 }
 
 AstStatement parserEmptyStatement(int token) {
-  return AstStatement(
+  return .new(
     astEmptyStatement,
     <AstExpression>[],
     <AstStatement>[],
@@ -2684,7 +2678,7 @@ AstStatement parseStatement(Parser parser) {
       <AstType>[],
       token,
     );
-    return AstStatement(
+    return .new(
       astLabeledStatement,
       <AstExpression>[label],
       <AstStatement>[parseStatement(parser)],
@@ -2698,7 +2692,7 @@ AstStatement parseStatement(Parser parser) {
     List<AstStatement> children = <AstStatement>[];
     while (!parserIs(parser, '}')) children.add(parseStatement(parser));
     parserExpect(parser, '}');
-    return AstStatement(
+    return .new(
       astBlockStatement,
       <AstExpression>[],
       children,
@@ -2713,7 +2707,7 @@ AstStatement parseStatement(Parser parser) {
     List<AstExpression> values = <AstExpression>[];
     if (!parserIs(parser, ';')) values.add(parseExpression(parser));
     parserExpect(parser, ';');
-    return AstStatement(
+    return .new(
       astReturnStatement,
       values,
       <AstStatement>[],
@@ -2727,7 +2721,7 @@ AstStatement parseStatement(Parser parser) {
     var condition = <AstExpression>[parserIfCondition(parser)];
     List<AstStatement> children = <AstStatement>[parseStatement(parser)];
     if (parserTake(parser, 'else')) children.add(parseStatement(parser));
-    return AstStatement(
+    return .new(
       astIfStatement,
       <AstExpression>[],
       children,
@@ -2742,7 +2736,7 @@ AstStatement parseStatement(Parser parser) {
     List<AstExpression> condition = <AstExpression>[parseExpression(parser)];
     parserExpect(parser, ')');
     List<AstStatement> children = <AstStatement>[parseStatement(parser)];
-    return AstStatement(
+    return .new(
       astWhileStatement,
       <AstExpression>[],
       children,
@@ -2760,7 +2754,7 @@ AstStatement parseStatement(Parser parser) {
     var condition = parseExpression(parser);
     parserExpect(parser, ')');
     parserExpect(parser, ';');
-    return AstStatement(
+    return .new(
       astDoWhileStatement,
       <AstExpression>[],
       <AstStatement>[body],
@@ -2774,7 +2768,7 @@ AstStatement parseStatement(Parser parser) {
   if (parserTake(parser, 'break')) {
     var labels = parserJumpLabel(parser);
     parserExpect(parser, ';');
-    return AstStatement(
+    return .new(
       astBreakStatement,
       labels,
       <AstStatement>[],
@@ -2787,7 +2781,7 @@ AstStatement parseStatement(Parser parser) {
   if (parserTake(parser, 'continue')) {
     var labels = parserJumpLabel(parser);
     parserExpect(parser, ';');
-    return AstStatement(
+    return .new(
       astContinueStatement,
       labels,
       <AstStatement>[],
@@ -2834,7 +2828,7 @@ AstStatement parseStatement(Parser parser) {
       statement.function = function;
       return statement;
     }
-    return AstStatement(
+    return .new(
       astVariableStatement,
       <AstExpression>[],
       <AstStatement>[],
@@ -2846,7 +2840,7 @@ AstStatement parseStatement(Parser parser) {
   }
   var expression = parseExpression(parser);
   parserExpect(parser, ';');
-  return AstStatement(
+  return .new(
     astExpressionStatement,
     <AstExpression>[expression],
     <AstStatement>[],
@@ -3007,12 +3001,12 @@ AstExpression parserString(Parser parser) {
     }
   }
   if (interpolated)
-    return AstExpression(astInterpolation, '', parts, <AstType>[], token);
+    return .new(astInterpolation, '', parts, <AstType>[], token);
   var text = '';
   var i = 0;
   while (i < parts.length) {
     text = text + parts[i].text;
     i++;
   }
-  return AstExpression(astString, text, <AstExpression>[], <AstType>[], token);
+  return .new(astString, text, <AstExpression>[], <AstType>[], token);
 }

@@ -252,7 +252,7 @@ FunctionBindings feBindings = FunctionBindings(<LocalVariable>[], -1);
 List<int> feBindingTypes = <int>[];
 List<int> feBindingSlots = <int>[];
 List<FeLateLocal?> feLateLocals = <FeLateLocal?>[];
-FlowState feFlow = FlowState.create(0);
+FlowState feFlow = .create(0);
 List<int> feBreaks = <int>[];
 List<int> feContinues = <int>[];
 List<FlowState> feBreakFlows = <FlowState>[];
@@ -2672,7 +2672,7 @@ void feLowerListElement(AstExpression expression, FeListLiteral literal) {
     var skip = feJumpIfNull(value);
     // Filtering null does not promote the source or terminate the skipped path.
     final afterValue = feFlow;
-    feFlow = FlowState.copy(afterValue);
+    feFlow = .copy(afterValue);
     var element = typingNonNull(type);
     feOperand(opLoadLocal, value);
     feNarrowValue(type, element);
@@ -2728,7 +2728,7 @@ void feLowerListSpread(AstExpression expression, FeListLiteral literal) {
   feEmit(opLt);
   var done = feJump(opJumpFalse);
   final emptyOrFinished = feFlow;
-  feFlow = FlowState.copy(emptyOrFinished);
+  feFlow = .copy(emptyOrFinished);
   feOperand(opLoadLocal, iterable);
   feOperand(opLoadLocal, index);
   feBuiltinTyped(bListGet, 2, element);
@@ -4560,7 +4560,7 @@ int feLowerCoalescingAssignment(AstExpression expression, FeLvalue target) {
     present = feJump(opJumpTrue);
   }
   var afterLeft = feFlow;
-  feFlow = FlowState.copy(afterLeft);
+  feFlow = .copy(afterLeft);
   if (feFlow.soundFlow && !typeCanBeNull(left)) flowUnreachable(feFlow);
   var source = expression.children[1];
   var context = target.type;
@@ -4955,7 +4955,7 @@ int feLowerCoalescing(AstExpression expression, int context) {
   }
   var present = feJump(opJumpTrue);
   var afterLeft = feFlow;
-  feFlow = FlowState.copy(afterLeft);
+  feFlow = .copy(afterLeft);
   if (source.kind == astName &&
       source.binding >= 0 &&
       fePromotable(source.binding))
@@ -5015,7 +5015,7 @@ int feLowerConditional(AstExpression expression, int context) {
 // remains usable. Only captured locals require a shared heap cell.
 void feLateFailure(int write) {
   final normal = feFlow;
-  feFlow = FlowState.copy(normal);
+  feFlow = .copy(normal);
   feOperand(opInt, write);
   feBuiltin(bLateError, 1);
   feEmit(opPop);
@@ -5097,7 +5097,7 @@ void feInitializeLateLocal(int binding, int token) {
     final captured = functions[function].closureLayout != null;
     if (captured) feLateLoadPart(binding, 2);
     final normal = feFlow;
-    feFlow = FlowState.copy(normal);
+    feFlow = .copy(normal);
     feCall(function, captured ? 1 : 0);
     feFlow = normal;
     feConvertValue(functions[function].result, feBindingTypes[binding], token);
@@ -5714,7 +5714,7 @@ void feLowerTryCatch(AstStatement statement) {
   final done = <int>[feJump(opJump)];
   var completed = feFlow;
   fePatch(handler, ir.length);
-  feFlow = FlowState.copy(caughtFlow);
+  feFlow = .copy(caughtFlow);
   feCall(feFindFunction('rtCaughtException'), 0);
   final value = feTemp(tObject);
   feOperand(opStoreLocal, value);
@@ -5727,7 +5727,7 @@ void feLowerTryCatch(AstStatement statement) {
   feEmit(opPop);
   final caught = FeCatch(value, trace);
   for (var clause in statement.catches) {
-    feFlow = FlowState.copy(caughtFlow);
+    feFlow = .copy(caughtFlow);
     final type = clause.type == null ? tObject : feResolveType(clause.type!);
     feOperand(opLoadLocal, value);
     feConvertValue(tObject, tDynamic, statement.token);
@@ -5891,7 +5891,7 @@ void feLowerTryFinally(AstStatement statement) {
   fePatchJumps(cleanup.entries, ir.length);
   flowDemote(beforeTry, written, feBindingTypes);
   final beforeFinally = feJoinFlow(afterTry, beforeTry);
-  feFlow = FlowState.copy(beforeFinally);
+  feFlow = .copy(beforeFinally);
   feLowerStatement(statement.children[1]);
   final afterFinally = feFlow;
   final done = <int>[];
@@ -5903,7 +5903,7 @@ void feLowerTryFinally(AstStatement statement) {
     final next = feJump(opJumpFalse);
     // Jump targets use the source jump's flow facts, as in Dart flow analysis.
     // Cleanup dispatch must not add definite assignments to those facts.
-    feFlow = FlowState.copy(completion.flow);
+    feFlow = .copy(completion.flow);
     if (completion.kind == completionNormal) {
       done.add(feJump(opJump));
     } else if (completion.kind == completionReturn) {
@@ -6007,7 +6007,7 @@ int feLowerInitializer(
   feLateLocals = List<FeLateLocal?>.filled(bindings.variables.length, null);
   feConstants.locals = <ConstantValue>[];
   feConstants.localTypes = <int>[];
-  feFlow = FlowState.create(
+  feFlow = .create(
     bindings.variables.length,
     sourceVersionAtLeast(feSources, feTokens[syntax.token].source, 3, 9),
   );
@@ -6174,7 +6174,7 @@ void feBeginFunction(int f, FunctionBindings bindings) {
       }
     }
   }
-  feFlow = FlowState.create(
+  feFlow = .create(
     feBindings.variables.length,
     sourceVersionAtLeast(
       feSources,
@@ -6350,7 +6350,7 @@ void parseSource(SourceProgram source) {
   feBindingTypes = <int>[];
   feBindingSlots = <int>[];
   feLateLocals = List<FeLateLocal?>.filled(feBindings.variables.length, null);
-  feFlow = FlowState.create(0);
+  feFlow = .create(0);
   feBreaks.clear();
   feContinues.clear();
   feBreakFlows.clear();
@@ -6854,7 +6854,7 @@ void feGenerateDispatches() {
     feFunction = dispatch.function;
     feSlotTypes = <int>[];
     feNextLocal = 0;
-    feFlow = FlowState.create(0);
+    feFlow = .create(0);
     for (final type in info.parameterTypes) feTemp(type);
     final token = feClassNodes[dispatch.owner].token;
     final receiverType = classType(dispatch.owner);
@@ -6880,7 +6880,7 @@ void feGenerateDispatches() {
       feConvertValue(receiverType, tDynamic, token);
       feOperand(opTypeTest, classType(owner));
       final next = feJump(opJumpFalse);
-      feFlow = FlowState.create(0);
+      feFlow = .create(0);
       feOperand(opLoadLocal, 0);
       feNarrowValue(receiverType, classType(owner));
       var result = tVoid;
@@ -7000,7 +7000,7 @@ void feGenerateCallableAdapters() {
       );
       functions[adapter].closureLayout = info.closureLayout;
       feFunction = adapter;
-      feFlow = FlowState.create(0);
+      feFlow = .create(0);
       feSlotTypes = <int>[];
       feNextLocal = 0;
       p = 0;
@@ -7288,7 +7288,7 @@ void feLowerForIn(
   feEmit(opEq);
   var unchanged = feJump(opJumpTrue);
   final iterationFlow = feFlow;
-  feFlow = FlowState.copy(iterationFlow);
+  feFlow = .copy(iterationFlow);
   feCall(feFindFunction('rtListModificationError'), 0);
   feEmit(opUnreachable);
   fePatch(unchanged, ir.length);
@@ -7412,7 +7412,7 @@ void feLowerDestructure(AstPattern syntax, int type) {
     var matched = feFlow;
     var done = feJump(opJump);
     fePatchJumps(failed, ir.length);
-    feFlow = FlowState.copy(feFlow);
+    feFlow = .copy(feFlow);
     feCall(feFindFunction('rtPatternMatchFailure'), 0);
     feEmit(opUnreachable);
     fePatch(done, ir.length);
@@ -8099,7 +8099,7 @@ void feLowerSwitch(AstStatement statement) {
     var hasLabel = false;
     for (var i = start; i <= end; i++) {
       fePatch(entries[i], ir.length);
-      feFlow = FlowState.copy(flows[i]);
+      feFlow = .copy(flows[i]);
       feSwitchCopyBindings(cases[i], body);
       bodyFlow = feJoinFlow(bodyFlow, feFlow);
       jumps.add(feJump(opJump));

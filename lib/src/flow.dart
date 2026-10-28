@@ -23,7 +23,7 @@ class FlowState {
   );
 
   factory FlowState.create(int count, [bool soundFlow = true]) {
-    return FlowState(
+    return .new(
       List<int>.filled(count, -1),
       List<int>.filled(count, flowUnassigned),
       List<int>.filled(count, 0),
@@ -33,7 +33,7 @@ class FlowState {
   }
 
   factory FlowState.copy(FlowState state) {
-    return FlowState(
+    return .new(
       state.types.sublist(0),
       state.assignments.sublist(0),
       state.writes.sublist(0),
@@ -79,9 +79,9 @@ FlowState flowJoin(FlowState left, FlowState right, List<int> declaredTypes) {
   var rightReachable = right.reachability[depth - 1];
   FlowState result;
   if (!leftReachable && rightReachable) {
-    result = FlowState.copy(right);
+    result = .copy(right);
   } else if (!rightReachable && leftReachable) {
-    result = FlowState.copy(left);
+    result = .copy(left);
   } else {
     result = FlowState(
       List<int>.filled(left.types.length, -1),
