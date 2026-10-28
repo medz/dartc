@@ -1,5 +1,6 @@
 import 'host.dart';
 import 'ir.dart';
+import 'types.dart';
 
 const int ssaRead = 1;
 const int ssaWrite = 2;
@@ -52,6 +53,7 @@ class SsaEdge {
 }
 
 class SsaTerminator {
+  // 1 jump, 2 branch, 3 return, 4 unreachable (no normal successor or value).
   int kind;
   int value;
   SsaEdge first;
@@ -109,6 +111,11 @@ int ssaInputCount(int op, int position) {
   return 0;
 }
 
+bool ssaEndsFlow(int position) =>
+    ir[position] == opReturn ||
+    ir[position] == opUnreachable ||
+    irTypes[position] == tNever;
+
 List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
   final leaders = List<int>.filled(end - info.start + 1, 0);
   leaders[0] = 1;
@@ -122,7 +129,7 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
     if ((op == opJump ||
             op == opJumpFalse ||
             op == opJumpTrue ||
-            op == opReturn) &&
+            ssaEndsFlow(position)) &&
         next < end) {
       leaders[next - info.start] = 1;
     }
@@ -178,7 +185,7 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
     } else if (finalOp == opJumpTrue) {
       flow.successors.add(blockAt[ir[last + 1] - info.start]);
       flow.successors.add(i + 1);
-    } else if (finalOp != opReturn && i + 1 < flows.length) {
+    } else if (!ssaEndsFlow(last) && i + 1 < flows.length) {
       flow.successors.add(i + 1);
     }
     i = i + 1;
@@ -224,6 +231,7 @@ void ssaStackShapes(FunctionInfo info, List<SsaFlow> flows) {
     var position = flow.start;
     while (position < flow.end) {
       final op = ir[position];
+      if (op == opUnreachable || irTypes[position] == tNever) break;
       if (op == opLoadLocal) {
         stack.add(info.localTypes[ir[position + 1]]);
       } else if (op == opDup) {
@@ -354,7 +362,14 @@ void ssaTranslateBlock(
   var position = flow.start;
   while (position < flow.end) {
     final op = ir[position];
-    if (op == opLoadLocal) {
+    if (op == opUnreachable) {
+      block.end = SsaTerminator(
+        4,
+        -1,
+        SsaEdge(-1, <int>[]),
+        SsaEdge(-1, <int>[]),
+      );
+    } else if (op == opLoadLocal) {
       stack.add(locals[ir[position + 1]]);
     } else if (op == opStoreLocal) {
       locals[ir[position + 1]] = stack.removeLast();
@@ -405,19 +420,24 @@ void ssaTranslateBlock(
       var target = 0;
       if (irWidth(op) > 1) target = ir[position + 1];
       var value = -1;
-      if (op != opStoreGlobal) {
+      final type = irTypes[position];
+      final effects = ssaEffects(op, target);
+      if (op != opStoreGlobal && type != tNever) {
         value = ssaValue(function, irTypes[position]);
         stack.add(value);
       }
-      block.instructions.add(
-        SsaInstruction(
-          op,
-          value,
-          target,
-          inputs,
-          ssaEffects(op, target),
-          irTypes[position],
-        ),
+      if (type != tNever || effects != 0) {
+        block.instructions.add(
+          SsaInstruction(op, value, target, inputs, effects, type),
+        );
+      }
+    }
+    if (irTypes[position] == tNever) {
+      block.end = SsaTerminator(
+        4,
+        -1,
+        SsaEdge(-1, <int>[]),
+        SsaEdge(-1, <int>[]),
       );
     }
     position = position + irWidth(op);

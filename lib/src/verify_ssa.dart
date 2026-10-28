@@ -151,6 +151,8 @@ class _SsaVerifier {
       while (position < body.instructions.length) {
         final instruction = body.instructions[position];
         type(instruction.resultType);
+        if (instruction.resultType == tNever && instruction.value != -1)
+          fail('Never operation has a result value');
         if (instruction.value >= 0) {
           define(instruction.value, position);
           if (function.valueTypes[instruction.value] != instruction.resultType)
@@ -515,7 +517,11 @@ class _SsaVerifier {
       final body = function.blocks[block];
       position = 0;
       while (position < body.instructions.length) {
-        instruction(body.instructions[position]);
+        final operation = body.instructions[position];
+        instruction(operation);
+        if (operation.resultType == tNever &&
+            (position + 1 != body.instructions.length || body.end.kind != 4))
+          fail('Never operation has a normal continuation');
         position++;
       }
       final end = body.end;
@@ -528,8 +534,13 @@ class _SsaVerifier {
         edge(end.first);
         edge(end.second);
       } else if (end.kind == 3) {
+        if (function.result == tNever) fail('Never function returns');
         if (!_compatible(inputType(end.value), function.result))
           fail('return type');
+        unusedEdge(end.first);
+        unusedEdge(end.second);
+      } else if (end.kind == 4) {
+        if (end.value != -1) fail('unreachable value');
         unusedEdge(end.first);
         unusedEdge(end.second);
       } else {

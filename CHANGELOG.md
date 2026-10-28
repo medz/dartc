@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Preserve non-returning control flow through native code generation. Fix return inference and missing-return checks after null-aware elements and empty `List<Never>` spreads.
 - Add lazy `late` locals, captured variables, top-level/static variables and typed instance fields, with final assignment checks and reentrant initialization.
 - Add native double literals, arithmetic and `/`, including mixed numeric values, constants, nullable values, generics and collections.
 - Add decimal parsing and shortest round-trip formatting, numeric conversions, comparisons and double constants/properties.

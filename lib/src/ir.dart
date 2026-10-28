@@ -53,6 +53,7 @@ const int opDoubleCompare = 50;
 const int opDoubleNeg = 51;
 const int opIntToDouble = 52;
 const int opLateCellDescriptor = 53;
+const int opUnreachable = 54;
 
 const int bPrintString = 1;
 const int bPrintInt = 2;

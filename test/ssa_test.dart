@@ -71,9 +71,31 @@ void corrupt(List<SsaFunction> program, String mode) {
     final instruction = operation(function, opBuiltin);
     if (mode == 'exit-result') {
       instruction.resultType = tInt;
-      function.valueTypes[instruction.value] = tInt;
     } else if (mode == 'exit-arity') instruction.inputs.clear();
     else instruction.effects = 0;
+  } else if (mode == 'never-value' || mode == 'never-continuation' ||
+      mode == 'never-after' || mode == 'unreachable-value' ||
+      mode == 'unreachable-edge') {
+    final function = named(program, 'terminal');
+    for (var block in function.blocks) {
+      if (block.end.kind != 4 || block.instructions.isEmpty) continue;
+      final operation = block.instructions.last;
+      if (operation.resultType != tNever) continue;
+      if (mode == 'never-value') {
+        operation.value = function.valueTypes.length;
+        function.valueTypes.add(tNever);
+      } else if (mode == 'never-continuation') {
+        block.end = SsaTerminator(1, -1, SsaEdge(0, <int>[]), SsaEdge(-1, <int>[]));
+      } else if (mode == 'never-after') {
+        block.instructions.add(SsaInstruction(opInt, -1, 0, <int>[], 0, tInt));
+      } else if (mode == 'unreachable-value') {
+        block.end.value = function.arguments[0];
+      } else {
+        block.end.first = SsaEdge(0, <int>[]);
+      }
+      return;
+    }
+    ssaError('test terminal operation missing');
   } else if (mode == 'late-cell-type') {
     operation(named(program, 'delayed'), opLateCellDescriptor).target = -1;
   } else if (mode == 'late-error-arity') {
@@ -265,6 +287,7 @@ int Function() delayed(int value) {
   return () => result;
 }
 int callee(int value) => value + 1;
+Never terminal(dynamic value) => value as Never;
 int order(int value) {
   final next = value + 1;
   return next * 2;
@@ -342,6 +365,11 @@ Future<void> main(List<String> args) async {
       'exit-result': 'primitive result',
       'exit-arity': 'operand count',
       'exit-effects': 'operation effects',
+      'never-value': 'Never operation has a result value',
+      'never-continuation': 'Never operation has a normal continuation',
+      'never-after': 'Never operation has a normal continuation',
+      'unreachable-value': 'unreachable value',
+      'unreachable-edge': 'unused edge',
       'late-cell-type': 'invalid type',
       'late-error-arity': 'operand count',
       'double-literal': 'integer constant type',

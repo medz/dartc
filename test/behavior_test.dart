@@ -960,6 +960,8 @@ Future<void> main(List<String> args) async {
       "void main() { dynamic value = 'wrong'; print('before'); value as int; print('after'); }",
       "void main() { dynamic value = null; print('before'); value as int; print('after'); }",
       "void main() { dynamic value = null; print('before'); value as Never; print('after'); }",
+      "Never fail(){dynamic value=1;return value as Never;} void main(){late Never value=fail();print('before');print(value);}",
+      "Never fail(){dynamic value=1;return value as Never;} void main(){late Never value=fail();Never read()=>value;print('before');print(read());}",
       'void main() { dynamic value = null; print("before"); value!; print("after"); }',
       'String? missing() { print("getter"); return null; } void main() { print("before"); missing()!; print("after"); }',
       'void main() { Null value; print("before"); value!; print("after"); }',
@@ -1701,6 +1703,15 @@ void main() {
     ];
     final rejected = [
       'external Never nativeExit(int code);void main(){}',
+      "Never stop(){while(true){}} void unused(){stop();int value='wrong';} void main(){}",
+      'Never stop(){while(true){}} void unused(){stop();missing();} void main(){}',
+      "Never stop(){while(true){}} void unused(){stop();void nested(){int value='wrong';}} void main(){}",
+      "Never stop(){while(true){}} int consume(int a,int b)=>a+b; void unused(){consume(stop(),'wrong');} void main(){}",
+      'Never stop(){while(true){}} Never unused(){stop();return;} void main(){}',
+      'int missingReturn(){[?null];} void main(){}',
+      'int missingReturn(){[...<Never>[]];} void main(){}',
+      'int missingReturn(){[...?null];} void main(){}',
+      'int missingReturn(){for(final value in <Never>[]) {}} void main(){}',
       "void unused(){late int value='wrong';}void main(){}",
       "void unused(){late final int value='wrong';}void main(){}",
       "class C{late int value='wrong';}void main(){}",
@@ -2816,6 +2827,13 @@ void verify() {
         "import '${File(standard).parent.path}/host.dart';\n" +
             r'''
 @pragma('dartc:no-gc') Never terminate(int status) => hostExit(status);
+T terminateGeneric<T>(int status) { terminate(status); }
+int exitTrace(int value) { print(value); return value; }
+int exitArguments(int first, int second, int third) => first + second + third;
+Never terminateWide(int a, int b, int c, int d, int e, int f, int g, int h, int status) {
+  print(a + b + c + d + e + f + g + h);
+  terminate(status);
+}
 int exitChoice(bool stop, int status) {
   if (stop) terminate(status);
   return 42;
@@ -2825,7 +2843,22 @@ void main(List<String> args) {
     if (args[1] == 'exit') {
       print('before');
       print(exitChoice(false, 0));
-      exitChoice(true, int.parse(args[0]));
+      final status = int.parse(args[0]);
+      if (args.length > 2) {
+        switch (args[2]) {
+          case 'arguments':
+            print(exitArguments(exitTrace(1), terminate(status), exitTrace(2)));
+          case 'closure':
+            Never stop() => terminate(status);
+            final Never Function() invoke = stop;
+            print(1 + invoke());
+          case 'generic':
+            print(<int>[exitTrace(1), terminateGeneric<Never>(status), exitTrace(2)]);
+          case 'wide':
+            terminateWide(1, 2, 3, 4, 5, 6, 7, 8, status);
+        }
+      }
+      exitChoice(true, status);
       print('after');
     } else if (args[1] == 'cwd')
       print(hostCurrentDirectory());
@@ -2870,8 +2903,19 @@ void main(List<String> args) {
     );
     final cwd = Directory('${temporary.path}/cwd-你好🙂 %')..createSync();
     final ioExecutable = '${io.path}.out';
-    for (final status in [0, 7, 255, 256, -1]) {
-      final arguments = [status.toString(), 'exit'];
+    for (final arguments in [
+      for (final status in [0, 7, 255, 256, -1]) [status.toString(), 'exit'],
+      for (final mode in ['arguments', 'closure', 'generic', 'wide'])
+        ['7', 'exit', mode],
+    ]) {
+      final mode = arguments.length > 2 ? arguments[2] : '';
+      final preceding =
+          'before\n42\n' +
+          switch (mode) {
+            'arguments' || 'generic' => '1\n',
+            'wide' => '36\n',
+            _ => '',
+          };
       final expected = await capture(sdk, [io.path, ...arguments]);
       final actual = await capture(
         ioExecutable,
@@ -2880,7 +2924,7 @@ void main(List<String> args) {
         includeParentEnvironment: false,
       );
       if (actual.exitCode != expected.exitCode ||
-          actual.stdout != 'before\n42\n' ||
+          actual.stdout != preceding ||
           actual.stdout != expected.stdout ||
           actual.stderr != expected.stderr) {
         throw StateError(

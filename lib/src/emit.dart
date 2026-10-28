@@ -396,6 +396,9 @@ void emitFunction(MachineFunction function, bool rootsEnabled) {
         machineCode[condition] = 0xb4000000 | (distance << 5);
       }
       emitEdge(end.second, function, block + 1);
+    } else if (end.kind == 4) {
+      // A proven non-returning path must never fall into the next block.
+      machineCode.add(0xd4200000); // brk #0
     } else {
       if (end.value >= 0)
         emitLoad(function, end.value, 0);

@@ -2529,11 +2529,15 @@ void feLowerListElement(AstExpression expression, FeListLiteral literal) {
     var value = feTemp(type);
     feOperand(opStoreLocal, value);
     var skip = feJumpIfNull(value);
+    // Filtering null does not promote the source or terminate the skipped path.
+    final afterValue = feFlow;
+    feFlow = flowCopy(afterValue);
     var element = typingNonNull(type);
     feOperand(opLoadLocal, value);
     feNarrowValue(type, element);
     feAppendListElement(literal, element, source.token);
     fePatch(skip, ir.length);
+    feFlow = afterValue;
   } else {
     var type = feLowerAssignedValue(expression, literal.context);
     feAppendListElement(literal, type, expression.token);
@@ -2582,6 +2586,8 @@ void feLowerListSpread(AstExpression expression, FeListLiteral literal) {
   feOperand(opLoadLocal, length);
   feEmit(opLt);
   var done = feJump(opJumpFalse);
+  final emptyOrFinished = feFlow;
+  feFlow = flowCopy(emptyOrFinished);
   feOperand(opLoadLocal, iterable);
   feOperand(opLoadLocal, index);
   feBuiltinTyped(bListGet, 2, element);
@@ -2592,6 +2598,7 @@ void feLowerListSpread(AstExpression expression, FeListLiteral literal) {
   feOperand(opStoreLocal, index);
   feOperand(opJump, repeat);
   fePatch(done, ir.length);
+  feFlow = emptyOrFinished;
   if (skipped != null) {
     fePatch(skip, ir.length);
     feFlow = flowUnsplit(feJoinFlow(feFlow, skipped));
@@ -4632,12 +4639,14 @@ void feLowerLateVariable(AstVariable variable, int type) {
     }
   }
   final captured = feCellBinding(binding);
-  final slot = feTemp(captured ? tObject : type);
+  // Uninitialized storage is not an instance of the declared Never type.
+  final storage = type == tNever ? tNull : type;
+  final slot = feTemp(captured ? tObject : storage);
   if (captured) {
     feOperand(opLateCellDescriptor, type);
     feBuiltinTyped(bObjectNew, 1, tObject);
   } else {
-    feInteger(0, type);
+    feInteger(0, storage);
     feLateLocals[binding] = FeLateLocal(
       feTemp(tBool),
       initializer == null
@@ -4694,16 +4703,19 @@ void feLowerVariable(AstVariable variable) {
     feConstantValue(constant, value, variable.token);
   } else if (variable.initializer.length != 0)
     value = feLowerAssignedValue(variable.initializer[0], type);
-  else
-    feInteger(0, type);
+  else {
+    if (type == tNever) value = tNull;
+    feInteger(0, value);
+  }
   if (type < 0) {
     if (value == tNull) value = feConvertValue(value, tDynamic, variable.token);
     type = value;
   }
-  feConvertValue(value, type, variable.token);
+  final storage = type == tNever && variable.initializer.isEmpty ? tNull : type;
+  feConvertValue(value, storage, variable.token);
   var cell = feCellBinding(variable.binding);
-  if (cell) feAllocateCell(type);
-  var slot = feTemp(cell ? tObject : type);
+  if (cell) feAllocateCell(storage);
+  var slot = feTemp(cell ? tObject : storage);
   feBindLocal(variable.binding, type, slot);
   flowDeclare(
     feFlow,
@@ -5817,13 +5829,13 @@ void parseSource(SourceProgram source) {
           'non-nullable function may complete without returning',
         );
       }
-      if (typeIsSubtype(tNull, result)) {
+      if (feFlow.reachable) {
         feInteger(0, tNull);
         feConvertValue(tNull, result, functionSyntax.token);
+        feEmit(opReturn);
       } else {
-        feInteger(0, result);
+        feEmit(opUnreachable);
       }
-      feEmit(opReturn);
     }
     functions[f].locals = feNextLocal;
     functions[f].localTypes = feSlotTypes;
@@ -6152,9 +6164,12 @@ void feLowerForIn(
   feOperand(opLoadLocal, length);
   feEmit(opEq);
   var unchanged = feJump(opJumpTrue);
+  final iterationFlow = feFlow;
+  feFlow = flowCopy(iterationFlow);
   feCall(feFindFunction('rtListModificationError'), 0);
-  feEmit(opPop);
+  feEmit(opUnreachable);
   fePatch(unchanged, ir.length);
+  feFlow = iterationFlow;
   feOperand(opLoadLocal, index);
   feOperand(opLoadLocal, length);
   feEmit(opLt);
@@ -6276,8 +6291,7 @@ void feLowerDestructure(AstPattern syntax, int type) {
     fePatchJumps(failed, ir.length);
     feFlow = flowCopy(feFlow);
     feCall(feFindFunction('rtPatternMatchFailure'), 0);
-    feConvertValue(tNever, functions[feFunction].result, syntax.token);
-    feEmit(opReturn);
+    feEmit(opUnreachable);
     fePatch(done, ir.length);
     feFlow = matched;
   }
@@ -6770,8 +6784,7 @@ int feLowerSwitchExpression(AstExpression expression, int context) {
   if ((coverage & required) != required)
     feAstError(expression.token, 'switch expression is not exhaustive');
   feCall(feFindFunction('rtPatternMatchFailure'), 0);
-  feConvertValue(tNever, functions[feFunction].result, expression.token);
-  feEmit(opReturn);
+  feEmit(opUnreachable);
   var done = <int>[];
   for (var i = 0; i < slots.length; i++) {
     fePatch(conversions[i], ir.length);
@@ -6781,7 +6794,7 @@ int feLowerSwitchExpression(AstExpression expression, int context) {
     done.add(feJump(opJump));
   }
   fePatchJumps(done, ir.length);
-  if (slots.isEmpty) feInteger(0, tNever);
+  if (slots.isEmpty) feEmit(opUnreachable);
   feFlow = flowUnsplit(exitFlow);
   return result;
 }
@@ -6936,8 +6949,7 @@ void feLowerSwitch(AstStatement statement) {
   if (complete) {
     flowUnreachable(exitFlow);
     feCall(feFindFunction('rtPatternMatchFailure'), 0);
-    feConvertValue(tNever, functions[feFunction].result, statement.token);
-    feEmit(opReturn);
+    feEmit(opUnreachable);
   } else {
     unmatched = feJump(opJump);
   }

@@ -994,6 +994,29 @@ void finalContexts() {
 }
 
 void neverContexts() {
+  // These declarations reserve storage; they do not evaluate a Never value.
+  // ignore: unused_local_variable
+  Never unassigned;
+  // ignore: unused_local_variable
+  late Never delayed;
+  // ignore: unused_local_variable
+  late final inferred = nonCompletingWhile();
+  nullElement() {
+    [?null];
+  }
+
+  emptySpread() {
+    [...<Never>[]];
+  }
+
+  // ignore: unnecessary_type_check
+  print(nullElement is Null Function());
+  print(nullElement is Never Function());
+  // ignore: unnecessary_type_check
+  print(emptySpread is Null Function());
+  print(emptySpread is Never Function());
+  print(nullElement());
+  print(emptySpread());
   var empty = <Never>[];
   List<String> texts = empty;
   List<int> numbers = empty;
@@ -2860,6 +2883,9 @@ void collectionValues() {
   var nothing = [?null];
   // ignore: unnecessary_type_check
   print(nothing is List<Never>);
+  final emptyNever = <Never>[];
+  print([...emptyNever]);
+  print([1, ...emptyNever, 2]);
   // ignore: invalid_null_aware_operator
   var nullableContext = <List<int>>[?[]];
   // ignore: unnecessary_type_check
