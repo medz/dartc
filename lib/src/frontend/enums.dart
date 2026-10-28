@@ -20,20 +20,22 @@ AstExpression _enumName(String name, int token) => AstExpression(
   token,
 );
 
-AstExpression _enumLiteral(int kind, String text, int token) =>
-    AstExpression(kind, text, const <AstExpression>[], const <AstType>[], token);
-
-AstExpression _enumNamedArgument(
-  String name,
-  AstExpression value,
-  int token,
-) => AstExpression(
-  astNamedArgument,
-  name,
-  <AstExpression>[value],
+AstExpression _enumLiteral(int kind, String text, int token) => AstExpression(
+  kind,
+  text,
+  const <AstExpression>[],
   const <AstType>[],
   token,
 );
+
+AstExpression _enumNamedArgument(String name, AstExpression value, int token) =>
+    AstExpression(
+      astNamedArgument,
+      name,
+      <AstExpression>[value],
+      const <AstType>[],
+      token,
+    );
 
 AstType _enumType(String name, int token) =>
     AstType(name, const <AstType>[], token);
@@ -43,14 +45,24 @@ AstParameter _enumHiddenParameter(String type, String name, int token) =>
       ..kind = astNamedParameter
       ..required = true;
 
-AstVariable _enumFinalField(String type, String name, int token) =>
-    AstVariable(_enumType(type, token), name, <AstExpression>[], 'final', token);
+AstVariable _enumFinalField(String type, String name, int token) => AstVariable(
+  _enumType(type, token),
+  name,
+  <AstExpression>[],
+  'final',
+  token,
+);
 
 AstInitializer _enumFieldInitializer(
   String field,
   String parameter,
   int token,
-) => AstInitializer(astFieldInitializer, field, _enumName(parameter, token), token);
+) => AstInitializer(
+  astFieldInitializer,
+  field,
+  _enumName(parameter, token),
+  token,
+);
 
 AstFunction _enumArrowMember(
   String name,
@@ -91,7 +103,8 @@ void desugarEnum(SourceProgram program, AstClass syntax) {
       syntax.staticFields.isNotEmpty ||
       syntax.constructors.isNotEmpty ||
       syntax.methods.isNotEmpty;
-  for (final value in syntax.enumValues) if (value.call != null) enhanced = true;
+  for (final value in syntax.enumValues)
+    if (value.call != null) enhanced = true;
   if (enhanced &&
       !sourceVersionAtLeast(program, program.tokens[token].source, 2, 17))
     _enumError(program, token, 'enhanced enums require language version 2.17');
@@ -134,8 +147,16 @@ void desugarEnum(SourceProgram program, AstClass syntax) {
       );
     } else {
       constructor.initializers = <AstInitializer>[
-        _enumFieldInitializer(enumIndexField, enumIndexParameter, constructorToken),
-        _enumFieldInitializer(enumNameField, enumNameParameter, constructorToken),
+        _enumFieldInitializer(
+          enumIndexField,
+          enumIndexParameter,
+          constructorToken,
+        ),
+        _enumFieldInitializer(
+          enumNameField,
+          enumNameParameter,
+          constructorToken,
+        ),
         ...constructor.initializers,
       ];
     }
