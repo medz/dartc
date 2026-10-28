@@ -127,18 +127,8 @@ int machineRep(int type) {
   return rI64;
 }
 
-List<int> machineCopyValues(List<int> values) {
-  List<int> result = <int>[];
-  int i = 0;
-  while (i < values.length) {
-    result.add(values[i]);
-    i = i + 1;
-  }
-  return result;
-}
-
 MachineEdge machineEdge(SsaEdge edge) {
-  return MachineEdge(edge.target, machineCopyValues(edge.arguments));
+  return MachineEdge(edge.target, edge.arguments.sublist(0));
 }
 
 int machineArithmetic(int op) {
@@ -167,7 +157,7 @@ void machineSelectInstruction(
   List<MachineInstruction> instructions,
 ) {
   var SsaInstruction(:op, value: output, :target, :effects) = source;
-  List<int> inputs = machineCopyValues(source.inputs);
+  final List<int> inputs = source.inputs.sublist(0);
   if (op == opInt) {
     instructions.add(
       MachineInstruction(mConstant, output, inputs, target, 0, effects),
@@ -196,12 +186,12 @@ void machineSelectInstruction(
     return;
   }
   if (op == opLoadGlobal || op == opStoreGlobal) {
-    int address = reps.length;
+    final int address = reps.length;
     reps.add(rAddr);
     instructions.add(
       MachineInstruction(mAddress, address, <int>[], target, 1, 0),
     );
-    List<int> memory = <int>[address];
+    final List<int> memory = <int>[address];
     if (op == opLoadGlobal) {
       instructions.add(
         MachineInstruction(mLoad64, output, memory, 0, 0, effects),
@@ -221,7 +211,7 @@ void machineSelectInstruction(
   }
   if (op == opTypeTest || op == opTypeCast) {
     if (op == opTypeTest || target != tInt && target != tBool) {
-      var type = reps.length;
+      final type = reps.length;
       reps.add(rAddr);
       instructions.add(
         MachineInstruction(mAddress, type, <int>[], target, 4, 0),
@@ -316,7 +306,7 @@ void machineSelectInstruction(
     }
     if (typeId >= 0) {
       if (typeContainsParameters(typeId)) typeId = tDynamic;
-      var type = reps.length;
+      final type = reps.length;
       reps.add(rAddr);
       instructions.add(
         MachineInstruction(mAddress, type, <int>[], typeId, 4, 0),
@@ -369,13 +359,13 @@ void machineSelectInstruction(
 }
 
 void machineRemoveUnusedConstants(List<MachineBlock> blocks, int count) {
-  var used = List<bool>.filled(count, false);
+  final used = List<bool>.filled(count, false);
   var b = 0;
   while (b < blocks.length) {
-    var block = blocks[b];
+    final block = blocks[b];
     var i = 0;
     while (i < block.instructions.length) {
-      var inputs = block.instructions[i].inputs;
+      final inputs = block.instructions[i].inputs;
       var n = 0;
       while (n < inputs.length) {
         used[inputs[n]] = true;
@@ -383,7 +373,7 @@ void machineRemoveUnusedConstants(List<MachineBlock> blocks, int count) {
       }
       i++;
     }
-    var end = block.end;
+    final end = block.end;
     if (end.value >= 0) used[end.value] = true;
     i = 0;
     while (i < end.first.arguments.length) {
@@ -399,11 +389,11 @@ void machineRemoveUnusedConstants(List<MachineBlock> blocks, int count) {
   }
   b = 0;
   while (b < blocks.length) {
-    var instructions = blocks[b].instructions;
+    final instructions = blocks[b].instructions;
     var i = 0;
     var kept = 0;
     while (i < instructions.length) {
-      var instruction = instructions[i];
+      final instruction = instructions[i];
       if (instruction.op != mConstant ||
           instruction.effects != 0 ||
           instruction.output < 0 ||
@@ -422,10 +412,10 @@ List<MachineFunction> selectMachine(
   List<SsaFunction> source,
   List<int> reachable,
 ) {
-  List<MachineFunction> result = <MachineFunction>[];
+  final List<MachineFunction> result = <MachineFunction>[];
   int f = 0;
   while (f < source.length) {
-    SsaFunction function = source[f];
+    final SsaFunction function = source[f];
     if (reachable[f] == 0) {
       result.add(
         MachineFunction(
@@ -440,20 +430,20 @@ List<MachineFunction> selectMachine(
       f = f + 1;
       continue;
     }
-    List<int> reps = <int>[];
+    final List<int> reps = <int>[];
     int i = 0;
     while (i < function.valueTypes.length) {
       reps.add(machineRep(function.valueTypes[i]));
       i = i + 1;
     }
-    List<MachineBlock> blocks = <MachineBlock>[];
-    var counts = ssaFill(function.valueTypes.length, -1);
+    final List<MachineBlock> blocks = <MachineBlock>[];
+    final counts = List<int>.filled(function.valueTypes.length, -1);
     int b = 0;
     while (b < function.blocks.length) {
-      var instructions = function.blocks[b].instructions;
+      final instructions = function.blocks[b].instructions;
       i = 0;
       while (i < instructions.length) {
-        var instruction = instructions[i];
+        final instruction = instructions[i];
         if (instruction.op == opInt &&
             instruction.value >= 0 &&
             instruction.effects == 0 &&
@@ -467,8 +457,8 @@ List<MachineFunction> selectMachine(
     }
     b = 0;
     while (b < function.blocks.length) {
-      SsaBlock block = function.blocks[b];
-      List<MachineInstruction> instructions = <MachineInstruction>[];
+      final SsaBlock block = function.blocks[b];
+      final List<MachineInstruction> instructions = <MachineInstruction>[];
       i = 0;
       while (i < block.instructions.length) {
         machineSelectInstruction(
@@ -480,10 +470,10 @@ List<MachineFunction> selectMachine(
         );
         i = i + 1;
       }
-      SsaTerminator end = block.end;
+      final SsaTerminator end = block.end;
       blocks.add(
         MachineBlock(
-          machineCopyValues(block.parameters),
+          block.parameters.sublist(0),
           instructions,
           MachineTerminator(
             end.kind,
@@ -498,7 +488,7 @@ List<MachineFunction> selectMachine(
     machineRemoveUnusedConstants(blocks, reps.length);
     result.add(
       MachineFunction(
-        machineCopyValues(function.arguments),
+        function.arguments.sublist(0),
         reps,
         blocks,
         machineRep(function.result),

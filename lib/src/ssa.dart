@@ -92,16 +92,6 @@ Never ssaError(String message) {
   hostExit(1);
 }
 
-List<int> ssaFill(int count, int value) {
-  List<int> values = <int>[];
-  var i = 0;
-  while (i < count) {
-    values.add(value);
-    i = i + 1;
-  }
-  return values;
-}
-
 int ssaInputCount(int op, int position) {
   if (op == opCall || op == opGenericCall || op == opBuiltin)
     return ir[position + 2];
@@ -117,12 +107,12 @@ int ssaInputCount(int op, int position) {
 }
 
 List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
-  var leaders = ssaFill(end - info.start + 1, 0);
+  final leaders = List<int>.filled(end - info.start + 1, 0);
   leaders[0] = 1;
   var position = info.start;
   while (position < end) {
-    var op = ir[position];
-    var next = position + irWidth(op);
+    final op = ir[position];
+    final next = position + irWidth(op);
     if (op == opJump || op == opJumpFalse || op == opJumpTrue) {
       leaders[ir[position + 1] - info.start] = 1;
     }
@@ -135,14 +125,14 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
     }
     position = next;
   }
-  List<int> starts = <int>[];
+  final List<int> starts = <int>[];
   var i = 0;
   while (i < end - info.start) {
     if (leaders[i] == 1) starts.add(info.start + i);
     i = i + 1;
   }
-  List<SsaFlow> flows = <SsaFlow>[];
-  var blockAt = ssaFill(end - info.start + 1, -1);
+  final List<SsaFlow> flows = <SsaFlow>[];
+  final blockAt = List<int>.filled(end - info.start + 1, -1);
   i = 0;
   while (i < starts.length) {
     var stop = end;
@@ -153,9 +143,9 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
         starts[i],
         stop,
         <int>[],
-        ssaFill(info.locals, 0),
-        ssaFill(info.locals, 0),
-        ssaFill(info.locals, 0),
+        List<int>.filled(info.locals, 0),
+        List<int>.filled(info.locals, 0),
+        List<int>.filled(info.locals, 0),
         SsaShape(false, <int>[]),
       ),
     );
@@ -163,20 +153,20 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
   }
   i = 0;
   while (i < flows.length) {
-    var flow = flows[i];
+    final flow = flows[i];
     position = flow.start;
     var last = position;
     while (position < flow.end) {
       last = position;
-      var op = ir[position];
+      final op = ir[position];
       if (op == opLoadLocal) {
-        var slot = ir[position + 1];
+        final slot = ir[position + 1];
         if (flow.definitions[slot] == 0) flow.uses[slot] = 1;
       }
       if (op == opStoreLocal) flow.definitions[ir[position + 1]] = 1;
       position = position + irWidth(op);
     }
-    var finalOp = ir[last];
+    final finalOp = ir[last];
     if (finalOp == opJump) {
       flow.successors.add(blockAt[ir[last + 1] - info.start]);
     } else if (finalOp == opJumpFalse) {
@@ -200,7 +190,7 @@ void ssaLiveness(List<SsaFlow> flows, int locals) {
     var i = flows.length;
     while (i > 0) {
       i = i - 1;
-      var flow = flows[i];
+      final flow = flows[i];
       var slot = 0;
       while (slot < locals) {
         var live = flow.uses[slot];
@@ -222,15 +212,15 @@ void ssaLiveness(List<SsaFlow> flows, int locals) {
 }
 
 void ssaStackShapes(FunctionInfo info, List<SsaFlow> flows) {
-  List<int> work = <int>[0];
+  final List<int> work = <int>[0];
   flows[0].shape.known = true;
   var cursor = 0;
   while (cursor < work.length) {
-    var flow = flows[work[cursor]];
-    var stack = <int>[...flow.shape.types];
+    final flow = flows[work[cursor]];
+    final stack = <int>[...flow.shape.types];
     var position = flow.start;
     while (position < flow.end) {
-      var op = ir[position];
+      final op = ir[position];
       if (op == opLoadLocal) {
         stack.add(info.localTypes[ir[position + 1]]);
       } else if (op == opDup) {
@@ -254,8 +244,8 @@ void ssaStackShapes(FunctionInfo info, List<SsaFlow> flows) {
     }
     var edge = 0;
     while (edge < flow.successors.length) {
-      var successor = flow.successors[edge];
-      var shape = flows[successor].shape;
+      final successor = flow.successors[edge];
+      final shape = flows[successor].shape;
       if (!shape.known) {
         shape.known = true;
         shape.types = <int>[...stack];
@@ -279,7 +269,7 @@ void ssaStackShapes(FunctionInfo info, List<SsaFlow> flows) {
 }
 
 int ssaValue(SsaFunction function, int type) {
-  var value = function.valueTypes.length;
+  final value = function.valueTypes.length;
   function.valueTypes.add(type);
   return value;
 }
@@ -290,7 +280,7 @@ SsaEdge ssaTransfer(
   List<int> locals,
   List<int> stack,
 ) {
-  List<int> values = <int>[];
+  final List<int> values = <int>[];
   var i = 0;
   while (i < target.localSlots.length) {
     values.add(locals[target.localSlots[i]]);
@@ -343,10 +333,10 @@ void ssaTranslateBlock(
   List<int> blockIds,
   int flowId,
 ) {
-  var flow = flows[flowId];
-  var block = function.blocks[blockIds[flowId]];
-  var locals = ssaFill(info.locals, -1);
-  List<int> stack = <int>[];
+  final flow = flows[flowId];
+  final block = function.blocks[blockIds[flowId]];
+  final locals = List<int>.filled(info.locals, -1);
+  final List<int> stack = <int>[];
   var i = 0;
   while (i < block.localSlots.length) {
     locals[block.localSlots[i]] = block.parameters[i];
@@ -358,7 +348,7 @@ void ssaTranslateBlock(
   }
   var position = flow.start;
   while (position < flow.end) {
-    var op = ir[position];
+    final op = ir[position];
     if (op == opLoadLocal) {
       stack.add(locals[ir[position + 1]]);
     } else if (op == opStoreLocal) {
@@ -368,7 +358,7 @@ void ssaTranslateBlock(
     } else if (op == opPop) {
       stack.removeLast();
     } else if (op == opReturn) {
-      var value = stack.removeLast();
+      final value = stack.removeLast();
       // Void values can be observed through void contexts such as List<void>.
       block.end = SsaTerminator(
         3,
@@ -377,7 +367,7 @@ void ssaTranslateBlock(
         SsaEdge(-1, <int>[]),
       );
     } else if (op == opJump || op == opJumpFalse || op == opJumpTrue) {
-      var next = blockIds[flow.successors[0]];
+      final next = blockIds[flow.successors[0]];
       if (op == opJump) {
         block.end = SsaTerminator(
           1,
@@ -386,8 +376,8 @@ void ssaTranslateBlock(
           SsaEdge(-1, <int>[]),
         );
       } else {
-        var condition = stack.removeLast();
-        var otherwise = blockIds[flow.successors[1]];
+        final condition = stack.removeLast();
+        final otherwise = blockIds[flow.successors[1]];
         block.end = SsaTerminator(
           2,
           condition,
@@ -397,7 +387,7 @@ void ssaTranslateBlock(
       }
     } else {
       var count = ssaInputCount(op, position);
-      List<int> inputs = <int>[];
+      final List<int> inputs = <int>[];
       i = stack.length - count;
       while (i < stack.length) {
         inputs.add(stack[i]);
@@ -431,7 +421,7 @@ void ssaTranslateBlock(
     if (flow.successors.length == 0) {
       ssaError(info.name + ': missing block terminator');
     }
-    var next = blockIds[flow.successors[0]];
+    final next = blockIds[flow.successors[0]];
     block.end = SsaTerminator(
       1,
       -1,
@@ -442,10 +432,10 @@ void ssaTranslateBlock(
 }
 
 SsaFunction ssaBuildFunction(FunctionInfo info, int end) {
-  var flows = ssaControlFlow(info, end);
+  final flows = ssaControlFlow(info, end);
   ssaLiveness(flows, info.locals);
   ssaStackShapes(info, flows);
-  var function = SsaFunction(<int>[], <int>[], <SsaBlock>[], info.result);
+  final function = SsaFunction(<int>[], <int>[], <SsaBlock>[], info.result);
   var i = 0;
   while (i < info.parameters) {
     function.arguments.add(ssaValue(function, info.parameterTypes[i]));
@@ -459,13 +449,13 @@ SsaFunction ssaBuildFunction(FunctionInfo info, int end) {
       SsaTerminator(0, -1, SsaEdge(-1, <int>[]), SsaEdge(-1, <int>[])),
     ),
   );
-  List<int> blockIds = <int>[];
+  final List<int> blockIds = <int>[];
   var flowId = 0;
   while (flowId < flows.length) {
-    var flow = flows[flowId];
+    final flow = flows[flowId];
     if (flow.shape.known) {
-      List<int> parameters = <int>[];
-      List<int> localSlots = <int>[];
+      final List<int> parameters = <int>[];
+      final List<int> localSlots = <int>[];
       var slot = 0;
       while (slot < info.locals) {
         if (flow.live[slot] != 0) {
@@ -493,13 +483,13 @@ SsaFunction ssaBuildFunction(FunctionInfo info, int end) {
     }
     flowId = flowId + 1;
   }
-  var locals = ssaFill(info.locals, -1);
+  final locals = List<int>.filled(info.locals, -1);
   i = 0;
   while (i < function.arguments.length) {
     locals[i] = function.arguments[i];
     i = i + 1;
   }
-  var first = function.blocks[blockIds[0]];
+  final first = function.blocks[blockIds[0]];
   i = 0;
   while (i < first.localSlots.length) {
     if (first.localSlots[i] >= info.parameters) {
@@ -524,7 +514,7 @@ SsaFunction ssaBuildFunction(FunctionInfo info, int end) {
 }
 
 List<SsaFunction> buildSsa() {
-  List<SsaFunction> result = <SsaFunction>[];
+  final List<SsaFunction> result = <SsaFunction>[];
   var i = 0;
   while (i < functions.length) {
     var end = ir.length;

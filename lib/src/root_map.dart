@@ -17,7 +17,7 @@ class CallRootMap {
 List<CallRootMap> emittedRootMaps = <CallRootMap>[];
 
 void _rootUse(List<int> live, int value) {
-  var word = value ~/ 32;
+  final word = value ~/ 32;
   live[word] = live[word] | (1 << (value & 31));
 }
 
@@ -33,19 +33,19 @@ CallRootMap _callRootMap(
   int block,
   int instruction,
 ) {
-  var result = CallRootMap(block, instruction, <int>[], <int>[]);
+  final result = CallRootMap(block, instruction, <int>[], <int>[]);
   var word = 0;
   while (word < live.length) {
     var bits = live[word];
     var bit = 0;
     while (bits != 0) {
       if ((bits & 1) != 0) {
-        var value = word * 32 + bit;
-        var rep = function.reps[value];
+        final value = word * 32 + bit;
+        final rep = function.reps[value];
         if (rep == rRef || rep == rTagged) {
-          var location = function.allocation.locations[value];
+          final location = function.allocation.locations[value];
           if (location >= 0) _rootMapError('live root is not spilled');
-          var slot = -1 - location;
+          final slot = -1 - location;
           var kind = storageRef;
           if (rep == rTagged) kind = storageTagged;
           if (slots[slot] != 0 && slots[slot] != kind) {
@@ -72,14 +72,14 @@ CallRootMap _callRootMap(
 }
 
 List<CallRootMap> buildCallRootMaps(MachineFunction function) {
-  var blocks = allocateLiveness(function);
-  var slots = List<int>.filled(function.allocation.spillSlots, 0);
-  var result = <CallRootMap>[];
+  final blocks = allocateLiveness(function);
+  final slots = List<int>.filled(function.allocation.spillSlots, 0);
+  final result = <CallRootMap>[];
   var b = 0;
   while (b < function.blocks.length) {
-    var block = function.blocks[b];
-    var live = machineCopyValues(blocks[b].liveOut);
-    var end = block.end;
+    final block = function.blocks[b];
+    final live = blocks[b].liveOut.sublist(0);
+    final end = block.end;
     if (end.value >= 0) _rootUse(live, end.value);
     var i = 0;
     while (i < end.first.arguments.length) {
@@ -95,10 +95,10 @@ List<CallRootMap> buildCallRootMaps(MachineFunction function) {
     i = block.instructions.length;
     while (i > 0) {
       i--;
-      var instruction = block.instructions[i];
+      final instruction = block.instructions[i];
       if (instruction.output >= 0) {
-        var value = instruction.output;
-        var word = value ~/ 32;
+        final value = instruction.output;
+        final word = value ~/ 32;
         live[word] = live[word] & ~(1 << (value & 31));
       }
       var input = 0;
@@ -112,7 +112,7 @@ List<CallRootMap> buildCallRootMaps(MachineFunction function) {
     }
     var last = result.length - 1;
     while (first < last) {
-      var saved = result[first];
+      final saved = result[first];
       result[first] = result[last];
       result[last] = saved;
       first++;

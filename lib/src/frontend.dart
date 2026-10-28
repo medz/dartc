@@ -277,8 +277,8 @@ int feRegisterFunction(
       'generic local or external functions are not yet supported',
     );
   if (syntax.external) {
-    var source = feTokens[syntax.token].source;
-    var primitive = fePrimitive(syntax.name);
+    final source = feTokens[syntax.token].source;
+    final primitive = fePrimitive(syntax.name);
     if (feRuntimeTokens == 0 || source != 0 || primitive == 0) {
       feAstError(
         syntax.token,
@@ -293,23 +293,23 @@ int feRegisterFunction(
     feCheckPrimitiveType(syntax.result);
     var parameter = 0;
     while (parameter < syntax.parameters.length) {
-      var syntaxParameter = syntax.parameters[parameter];
+      final syntaxParameter = syntax.parameters[parameter];
       if (syntaxParameter.fieldFormal ||
           syntaxParameter.kind != astRequiredPositional)
         feAstError(syntaxParameter.token, 'primitive parameters require int');
       feCheckPrimitiveType(syntaxParameter.type);
       parameter++;
     }
-    var symbol = symbolOwnDeclaration(feSymbols, source, syntax.name);
+    final symbol = symbolOwnDeclaration(feSymbols, source, syntax.name);
     feSymbols.declarations[symbol].kind = symbolBuiltin;
     feSymbols.declarations[symbol].target = primitive;
     return -1;
   }
-  var id = functions.length;
-  var typeParameters = resolveFunctionTypeParameters(feSymbols, syntax, id);
-  var typeScope = local ? enclosingTypes : typeParameters;
-  var types = <int>[];
-  var source = feTokens[syntax.token].source;
+  final id = functions.length;
+  final typeParameters = resolveFunctionTypeParameters(feSymbols, syntax, id);
+  final typeScope = local ? enclosingTypes : typeParameters;
+  final types = <int>[];
+  final source = feTokens[syntax.token].source;
   var name = syntax.name;
   var result = tDynamic;
   if (constructor)
@@ -331,7 +331,7 @@ int feRegisterFunction(
   if (typeParameters.isNotEmpty) types.add(listType(tObject));
   var p = 0;
   while (p < syntax.parameters.length) {
-    var parameter = syntax.parameters[p];
+    final parameter = syntax.parameters[p];
     var type = tDynamic;
     if (parameter.fieldFormal) {
       if (!constructor)
@@ -339,7 +339,7 @@ int feRegisterFunction(
           parameter.token,
           'field-formal parameter requires a constructor',
         );
-      var entry = feField(owner, parameter.name, parameter.token);
+      final entry = feField(owner, parameter.name, parameter.token);
       type = feFieldTypes[entry];
       if (parameter.type.name != '') {
         type = resolveType(feSymbols, parameter.type, typeScope);
@@ -356,7 +356,7 @@ int feRegisterFunction(
     types.add(type);
     p++;
   }
-  var count = types.length;
+  final count = types.length;
   functions.add(
     FunctionInfo(name, 0, count, count, result, types, <int>[], source),
   );
@@ -377,7 +377,7 @@ int feRegisterFunction(
     feConstructors.add(0);
   }
   if (owner < 0 && !local) {
-    var symbol = symbolOwnDeclaration(feSymbols, source, syntax.name);
+    final symbol = symbolOwnDeclaration(feSymbols, source, syntax.name);
     if (syntax.setter)
       feSymbols.declarations[symbol].setter = id;
     else
@@ -684,7 +684,7 @@ void feLoadCurrentTypeEnvironment() {
 
 // Returns the template operand so inferred List literals can finish its type.
 int feRuntimeType(int type, [bool instantiate = false]) {
-  var position = ir.length;
+  final position = ir.length;
   feOperand(opTypeReference, type);
   if (typeContainsParameters(type) || instantiate) {
     if (functions[feFunction].typeScope.isEmpty)
@@ -1735,19 +1735,19 @@ void feRegisterConstantConstructors() {
 }
 
 void feResolveFunctionDefaults(int f) {
-  var owner = feLexicalOwner(f);
-  var scope = feConstants.lexicalClass;
-  var omitted = ConstantValue(tNull, tNull, 0, '');
+  final owner = feLexicalOwner(f);
+  final scope = feConstants.lexicalClass;
+  final omitted = ConstantValue(tNull, tNull, 0, '');
   feConstants.localTypes = feFlow.types;
-  var syntax = feFunctionNodes[f];
+  final syntax = feFunctionNodes[f];
   feCheckMetadata(syntax.metadata, owner, f);
-  var typeScope = feConstants.typeScope;
+  final typeScope = feConstants.typeScope;
   feConstants.typeScope = functions[f].typeScope;
   for (var parameter in syntax.typeParameters)
     feCheckMetadata(parameter.metadata, owner);
   feConstants.lexicalClass = owner;
-  var parameters = syntax.parameters;
-  var offset = feParameterOffset(f);
+  final parameters = syntax.parameters;
+  final offset = feParameterOffset(f);
   if (feParamDefaults[f].isEmpty)
     feParamDefaults[f] = List<ConstantValue>.filled(
       functions[f].parameters,
@@ -1755,13 +1755,13 @@ void feResolveFunctionDefaults(int f) {
     );
   var p = 0;
   while (p < parameters.length) {
-    var parameter = parameters[p];
+    final parameter = parameters[p];
     feCheckMetadata(parameter.metadata, owner);
     checkParameterName(feSources, parameters, p);
     if (parameter.kind != astRequiredPositional && !parameter.required) {
       var value = omitted;
-      var type = functions[f].parameterTypes[offset + p];
-      var expression = parameter.defaultValue;
+      final type = functions[f].parameterTypes[offset + p];
+      final expression = parameter.defaultValue;
       if (expression != null)
         value = evaluateConstant(feConstants, expression, type, false);
       if (!typingAssignable(value.type, type) ||
@@ -4283,23 +4283,23 @@ void feInferLocalResult(int local) {
 }
 
 void fePrepareLocalFunction(AstFunction syntax) {
-  var function = feLocalStart + syntax.local;
+  final function = feLocalStart + syntax.local;
   feResolveFunctionDefaults(function);
-  var bindings = feLocalFunctions[syntax.local].body!;
-  var closure = feLocalClosures[syntax.local];
-  var layout = functions[function].closureLayout;
+  final bindings = feLocalFunctions[syntax.local].body!;
+  final closure = feLocalClosures[syntax.local];
+  final layout = functions[function].closureLayout;
   if (!closure.prepared) {
     closure.prepared = true;
     if (layout != null) {
       for (var binding in bindings.captures) {
-        var variable = bindings.variables[binding];
+        final variable = bindings.variables[binding];
         if (variable.function == syntax.local) continue;
-        var original = variable.outer;
-        var type = feBindingTypes[original];
+        final original = variable.outer;
+        final type = feBindingTypes[original];
         if (type < 0)
           feAstError(syntax.token, 'captured variable has no declared type');
-        var declaration = bindingDeclaration(feBindings, original);
-        var promoted = declaration.written ? type : feFlow.types[original];
+        final declaration = bindingDeclaration(feBindings, original);
+        final promoted = declaration.written ? type : feFlow.types[original];
         closure.captures.add(
           FeCapture(binding, type, promoted, feFlow.assignments[original]),
         );
@@ -4310,9 +4310,9 @@ void fePrepareLocalFunction(AstFunction syntax) {
   List<ConstantValue>? values;
   var i = 0;
   while (i < bindings.variables.length) {
-    var variable = bindings.variables[i];
+    final variable = bindings.variables[i];
     if (variable.outer >= 0 && variable.constant) {
-      var original = variable.outer;
+      final original = variable.outer;
       if (original >= feConstants.locals.length ||
           feConstants.locals[original].type < 0)
         feAstError(syntax.token, 'constant referenced before declaration');
@@ -4378,7 +4378,7 @@ int fePrepareFunctionExpression(AstExpression expression, int context) {
 }
 
 int feAllocateClosure(int function, int token) {
-  var type = feCallableType(function, token);
+  final type = feCallableType(function, token);
   var signature = -1;
   if (typeContainsParameters(type)) {
     feRuntimeType(type);
@@ -4387,7 +4387,7 @@ int feAllocateClosure(int function, int token) {
   }
   feOperand(opClosureDescriptor, function);
   feBuiltinTyped(bObjectNew, 1, type);
-  var closure = feTemp(type);
+  final closure = feTemp(type);
   feOperand(opStoreLocal, closure);
   var field = 0;
   while (field < 2) {
@@ -4409,10 +4409,10 @@ int feAllocateClosure(int function, int token) {
 }
 
 int feCreateBoundMethod(int function, int token) {
-  var receiverType = functions[function].parameterTypes[0];
-  var receiver = feTemp(receiverType);
+  final receiverType = functions[function].parameterTypes[0];
+  final receiver = feTemp(receiverType);
   feOperand(opStoreLocal, receiver);
-  var closure = feAllocateClosure(function, token);
+  final closure = feAllocateClosure(function, token);
   feOperand(opLoadLocal, closure);
   feOperand(opInt, 2);
   feOperand(opLoadLocal, receiver);
@@ -4423,11 +4423,11 @@ int feCreateBoundMethod(int function, int token) {
 }
 
 int feCreateClosure(int function, int token) {
-  var layout = functions[function].closureLayout;
+  final layout = functions[function].closureLayout;
   if (layout == null) return feFunctionReference(function, token);
-  var closure = feAllocateClosure(function, token);
-  var local = function - feLocalStart;
-  var bindings = feLocalFunctions[local].body!;
+  final closure = feAllocateClosure(function, token);
+  final local = function - feLocalStart;
+  final bindings = feLocalFunctions[local].body!;
   var captureIndex = layout.valueCaptureOffset;
   if (captureIndex != 0) {
     feOperand(opLoadLocal, closure);
@@ -4437,13 +4437,13 @@ int feCreateClosure(int function, int token) {
     feEmit(opPop);
   }
   for (var capture in feLocalClosures[local].captures) {
-    var original = bindings.variables[capture.binding].outer;
+    final original = bindings.variables[capture.binding].outer;
     feOperand(opLoadLocal, closure);
     feOperand(opInt, 2 + captureIndex);
     if (feCellBinding(original))
       feOperand(opLoadLocal, feLocalSlot(original, token));
     else {
-      var value = feReadLocal(original, token);
+      final value = feReadLocal(original, token);
       feConvertValue(value, capture.type, token);
     }
     feBuiltinTyped(bObjectSet, 3, layout.fieldTypes[captureIndex]);
@@ -4825,14 +4825,14 @@ void feBeginFunction(int f, FunctionBindings bindings) {
   feConstants.typeScope = functions[f].typeScope;
   feImplicitReceiverSlot = -1;
   feConstants.lexicalClass = -1;
-  var owner = feLexicalOwner(f);
+  final owner = feLexicalOwner(f);
   feConstants.lexicalClass = owner;
-  var functionSyntax = feFunctionNodes[f];
+  final functionSyntax = feFunctionNodes[f];
   feAt = functionSyntax.token;
   feBindings = bindings;
   feConstants.locals.clear();
   if (f >= feLocalStart) {
-    var values = feLocalConstants[f - feLocalStart];
+    final values = feLocalConstants[f - feLocalStart];
     if (values != null) {
       var i = 0;
       while (i < values.length) {
@@ -4860,7 +4860,7 @@ void feBeginFunction(int f, FunctionBindings bindings) {
   }
   binding = 0;
   while (binding < feBindings.variables.length) {
-    var variable = feBindings.variables[binding];
+    final variable = feBindings.variables[binding];
     var type = -1;
     if (variable.function >= 0)
       type = functionValueType(feLocalStart + variable.function);
@@ -4888,10 +4888,10 @@ void feBeginFunction(int f, FunctionBindings bindings) {
       p++;
       continue;
     }
-    var type = functions[f].parameterTypes[p];
+    final type = functions[f].parameterTypes[p];
     var slot = p;
     var binding = feBindings.receiver;
-    var parameter = p - feParameterOffset(f);
+    final parameter = p - feParameterOffset(f);
     if (parameter >= 0) binding = functionSyntax.parameters[parameter].binding;
     if (binding >= 0) {
       if (feCellBinding(binding)) {
@@ -4905,14 +4905,14 @@ void feBeginFunction(int f, FunctionBindings bindings) {
     p++;
   }
   if (context != null) {
-    var local = f - feLocalStart;
+    final local = f - feLocalStart;
     var captureIndex = context.valueCaptureOffset;
     for (var capture in feLocalClosures[local].captures) {
-      var storageType = context.fieldTypes[captureIndex];
+      final storageType = context.fieldTypes[captureIndex];
       feOperand(opLoadLocal, 0);
       feOperand(opInt, 2 + captureIndex);
       feBuiltinTyped(bObjectGet, 2, storageType);
-      var slot = feTemp(storageType);
+      final slot = feTemp(storageType);
       feOperand(opStoreLocal, slot);
       feBindLocal(capture.binding, capture.type, slot);
       feFlow.types[capture.binding] = capture.promoted;
@@ -5035,8 +5035,8 @@ void parseSource(SourceProgram source) {
   feTokens = source.tokens;
   feAt = 0;
   feRuntimeTokens = source.runtimeTokens;
-  var paths = <String>[for (var file in source.files) file.path];
-  var syntax = parseUnit(Parser(feTokens, 0, 0, paths), <bool>[
+  final paths = <String>[for (var file in source.files) file.path];
+  final syntax = parseUnit(Parser(feTokens, 0, 0, paths), <bool>[
     for (var file in source.files) file.languageMajor >= 3,
   ]);
   feInstallSymbols();
@@ -5046,7 +5046,7 @@ void parseSource(SourceProgram source) {
   while (plannedFunction < functions.length) {
     var plan = const ConstructorPlan(<ConstructorStep>[], -1);
     if (feConstructors[plannedFunction] == 1) {
-      var owner = feOwners[plannedFunction];
+      final owner = feOwners[plannedFunction];
       plan = planConstructorInitializers(
         feSymbols,
         feClassNodes[owner],
@@ -5060,8 +5060,8 @@ void parseSource(SourceProgram source) {
   }
   checkConstructorRedirects(feSymbols, feFunctionNodes, feConstructorPlans);
   var sourceFunctions = functions.length;
-  var bodyBindings = <FunctionBindings>[];
-  var localTypeScopes = <List<int>>[];
+  final bodyBindings = <FunctionBindings>[];
+  final localTypeScopes = <List<int>>[];
   var bindingFunction = 0;
   while (bindingFunction < sourceFunctions) {
     bodyBindings.add(
@@ -5098,7 +5098,7 @@ void parseSource(SourceProgram source) {
   var constant = 0;
   while (constant < feGlobalNodes.length) {
     if (feGlobalNodes[constant].modifier == 'const') {
-      var value = evaluateGlobalConstant(feConstants, constant);
+      final value = evaluateGlobalConstant(feConstants, constant);
       globalTypes[constant] = value.type;
       if (value.type == value.kind &&
           (value.kind == tInt ||
@@ -5113,7 +5113,7 @@ void parseSource(SourceProgram source) {
     constant++;
   }
   if (imageKind == 0) {
-    var marker = symbolOwnDeclaration(feSymbols, 0, 'rtAbiVersion');
+    final marker = symbolOwnDeclaration(feSymbols, 0, 'rtAbiVersion');
     if (marker < 0 || feSymbols.declarations[marker].kind != symbolGlobal) {
       sourceError(
         feSources,
@@ -5122,7 +5122,7 @@ void parseSource(SourceProgram source) {
             runtimeAbiVersion.toString(),
       );
     }
-    var global = feSymbols.declarations[marker].target;
+    final global = feSymbols.declarations[marker].target;
     if (_feLiteralTypes[global] != tInt ||
         _feLiteralValues[global] != runtimeAbiVersion) {
       feAstError(
@@ -5132,7 +5132,7 @@ void parseSource(SourceProgram source) {
       );
     }
   }
-  var initializerBindings = <FunctionBindings>[];
+  final initializerBindings = <FunctionBindings>[];
   var initializer = 0;
   while (initializer < feGlobalNodes.length) {
     initializerBindings.add(
@@ -5146,7 +5146,7 @@ void parseSource(SourceProgram source) {
   var owner = 0;
   while (owner < feClassNodes.length) {
     var field = feClassFieldStarts[owner];
-    var end = field + feClassFieldCounts[owner];
+    final end = field + feClassFieldCounts[owner];
     while (field < end) {
       feFieldBindings.add(feBindInitializer(feFieldNodes[field], owner));
       field++;
@@ -5156,15 +5156,15 @@ void parseSource(SourceProgram source) {
   feLocalStart = sourceFunctions;
   var local = 0;
   while (local < feLocalFunctions.length) {
-    var declaration = feLocalFunctions[local];
-    var function = feRegisterFunction(
+    final declaration = feLocalFunctions[local];
+    final function = feRegisterFunction(
       declaration.syntax,
       -1,
       false,
       true,
       local < localTypeScopes.length ? localTypeScopes[local] : const <int>[],
     );
-    var info = functions[function];
+    final info = functions[function];
     for (var binding in declaration.body!.captures) {
       if (declaration.body!.variables[binding].function != local) {
         info.closureLayout ??= ClosureLayout(<int>[]);
@@ -5185,7 +5185,7 @@ void parseSource(SourceProgram source) {
   }
   sourceFunctions = functions.length;
   feResolveDefaults(feLocalStart);
-  var sourceGlobals = globalNames.length;
+  final sourceGlobals = globalNames.length;
   fePrepareGlobals(sourceGlobals, initializerBindings);
   var global = 0;
   while (global < sourceGlobals) {
@@ -5200,7 +5200,7 @@ void parseSource(SourceProgram source) {
     if (feGlobalInitializers[i].getter < 0 &&
         feGlobalNodes[i].modifier != 'const') {
       feInitializingGlobal = i;
-      var type = feLowerInitializer(
+      final type = feLowerInitializer(
         feGlobalNodes[i],
         feGlobalInitializers[i].bindings,
         globalTypes[i],
@@ -5219,22 +5219,22 @@ void parseSource(SourceProgram source) {
   while (f < sourceFunctions) {
     functions[f].start = ir.length;
     feBeginFunction(f, bodyBindings[f]);
-    var functionSyntax = feFunctionNodes[f];
-    var expression = functionSyntax.arrow;
+    final functionSyntax = feFunctionNodes[f];
+    final expression = functionSyntax.arrow;
     if (feConstructors[f] == 1) {
       feLowerConstructor(f);
     } else if (expression != null) {
       if (feInfersLocalResult(f)) {
-        var type = feLowerAssignedValue(expression, feLocalResultContext(f));
+        final type = feLowerAssignedValue(expression, feLocalResultContext(f));
         feConvertValue(type, functions[f].result, expression.token);
       } else {
         feLowerInContext(expression, functions[f].result);
       }
       feEmit(opReturn);
     } else {
-      var body = functionSyntax.body;
+      final body = functionSyntax.body;
       if (body != null) feLowerStatement(body);
-      var result = functions[f].result;
+      final result = functions[f].result;
       if (feFlow.reachable && !typeIsSubtype(tNull, result)) {
         feAstError(
           functionSyntax.token,
@@ -5263,19 +5263,19 @@ void parseSource(SourceProgram source) {
 }
 
 void feGenerateCallableAdapters() {
-  var targets = functions.length;
+  final targets = functions.length;
   var target = 0;
   while (target < targets) {
-    var info = functions[target];
+    final info = functions[target];
     if (info.callableAdapter == -2) {
-      var parameters = <int>[tFunction];
-      var offset = info.closureLayout == null ? 0 : 1;
+      final parameters = <int>[tFunction];
+      final offset = info.closureLayout == null ? 0 : 1;
       var p = offset;
       while (p < info.parameterTypes.length) {
         parameters.add(tDynamic);
         p++;
       }
-      var adapter = functions.length;
+      final adapter = functions.length;
       info.callableAdapter = adapter;
       functions.add(
         FunctionInfo(
@@ -5299,7 +5299,7 @@ void feGenerateCallableAdapters() {
         feTemp(parameters[p]);
         p++;
       }
-      var token = feFunctionNodes[target].token;
+      final token = feFunctionNodes[target].token;
       if (offset != 0) {
         feOperand(opLoadLocal, 0);
         if (info.closureLayout!.boundReceiver) {

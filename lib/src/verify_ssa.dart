@@ -468,7 +468,7 @@ class _SsaVerifier {
 
   void dominance() {
     final count = function.blocks.length;
-    rank = ssaFill(count, -1);
+    rank = List<int>.filled(count, -1);
     var work = <int>[1];
     var postorder = <int>[];
     while (work.isNotEmpty) {
@@ -498,7 +498,7 @@ class _SsaVerifier {
       rank[postorder[i]] = order.length;
       order.add(postorder[i]);
     }
-    final idom = ssaFill(count, -1);
+    final idom = List<int>.filled(count, -1);
     idom[0] = 0;
     var changed = true;
     while (changed) {
@@ -543,8 +543,8 @@ class _SsaVerifier {
         children[parent].add(current);
       i++;
     }
-    entered = ssaFill(count, -1);
-    exited = ssaFill(count, -1);
+    entered = List<int>.filled(count, -1);
+    exited = List<int>.filled(count, -1);
     work = <int>[1];
     var clock = 0;
     while (work.isNotEmpty) {
@@ -611,8 +611,8 @@ void verifySsa(List<SsaFunction> program) {
     final verifier = _SsaVerifier(
       function,
       f,
-      ssaFill(function.valueTypes.length, -1),
-      ssaFill(function.valueTypes.length, -1),
+      List<int>.filled(function.valueTypes.length, -1),
+      List<int>.filled(function.valueTypes.length, -1),
       predecessors,
     );
     verifier.definitions();

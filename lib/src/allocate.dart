@@ -18,44 +18,34 @@ class RegisterBlock {
   );
 }
 
-List<int> allocateFill(int count, int value) {
-  List<int> values = <int>[];
-  int i = 0;
-  while (i < count) {
-    values.add(value);
-    i = i + 1;
-  }
-  return values;
-}
-
 void allocateDefine(RegisterBlock block, int value) {
-  int word = value ~/ 32;
+  final int word = value ~/ 32;
   block.definitions[word] = block.definitions[word] | (1 << (value & 31));
 }
 
 void allocateUse(RegisterBlock block, int value) {
-  int word = value ~/ 32;
-  int bit = 1 << (value & 31);
+  final int word = value ~/ 32;
+  final int bit = 1 << (value & 31);
   if ((block.definitions[word] & bit) == 0) {
     block.uses[word] = block.uses[word] | bit;
   }
 }
 
 List<RegisterBlock> allocateLiveness(MachineFunction function) {
-  int words = (function.reps.length + 31) ~/ 32;
-  List<RegisterBlock> blocks = <RegisterBlock>[];
+  final int words = (function.reps.length + 31) ~/ 32;
+  final List<RegisterBlock> blocks = <RegisterBlock>[];
   int position = 0;
   int b = 0;
   while (b < function.blocks.length) {
-    MachineBlock source = function.blocks[b];
-    int end = position + source.instructions.length * 2 + 1;
-    RegisterBlock block = RegisterBlock(
+    final MachineBlock source = function.blocks[b];
+    final int end = position + source.instructions.length * 2 + 1;
+    final RegisterBlock block = RegisterBlock(
       position,
       end,
-      allocateFill(words, 0),
-      allocateFill(words, 0),
-      allocateFill(words, 0),
-      allocateFill(words, 0),
+      List<int>.filled(words, 0),
+      List<int>.filled(words, 0),
+      List<int>.filled(words, 0),
+      List<int>.filled(words, 0),
     );
     int i = 0;
     if (b == 0) {
@@ -71,7 +61,7 @@ List<RegisterBlock> allocateLiveness(MachineFunction function) {
     }
     i = 0;
     while (i < source.instructions.length) {
-      MachineInstruction instruction = source.instructions[i];
+      final MachineInstruction instruction = source.instructions[i];
       int input = 0;
       while (input < instruction.inputs.length) {
         allocateUse(block, instruction.inputs[input]);
@@ -80,7 +70,7 @@ List<RegisterBlock> allocateLiveness(MachineFunction function) {
       if (instruction.output >= 0) allocateDefine(block, instruction.output);
       i = i + 1;
     }
-    MachineTerminator term = source.end;
+    final MachineTerminator term = source.end;
     if (term.value >= 0) allocateUse(block, term.value);
     i = 0;
     while (i < term.first.arguments.length) {
@@ -102,8 +92,8 @@ List<RegisterBlock> allocateLiveness(MachineFunction function) {
     b = blocks.length;
     while (b > 0) {
       b = b - 1;
-      RegisterBlock block = blocks[b];
-      MachineTerminator term = function.blocks[b].end;
+      final RegisterBlock block = blocks[b];
+      final MachineTerminator term = function.blocks[b].end;
       int word = 0;
       while (word < words) {
         int out = 0;
@@ -166,8 +156,8 @@ void allocateIntervals(
   }
   int b = 0;
   while (b < blocks.length) {
-    RegisterBlock block = blocks[b];
-    MachineBlock source = function.blocks[b];
+    final RegisterBlock block = blocks[b];
+    final MachineBlock source = function.blocks[b];
     allocateLiveIntervals(block.liveIn, block.start, starts, ends);
     allocateLiveIntervals(block.liveOut, block.end, starts, ends);
     i = 0;
@@ -178,7 +168,7 @@ void allocateIntervals(
     int position = block.start + 1;
     i = 0;
     while (i < source.instructions.length) {
-      MachineInstruction instruction = source.instructions[i];
+      final MachineInstruction instruction = source.instructions[i];
       int input = 0;
       while (input < instruction.inputs.length) {
         allocateTouch(starts, ends, instruction.inputs[input], position);
@@ -191,7 +181,7 @@ void allocateIntervals(
       position = position + 2;
       i = i + 1;
     }
-    MachineTerminator term = source.end;
+    final MachineTerminator term = source.end;
     if (term.value >= 0) allocateTouch(starts, ends, term.value, block.end);
     i = 0;
     while (i < term.first.arguments.length) {
@@ -215,7 +205,7 @@ void allocateHeapPush(List<int> heap, int value, List<int> keys) {
   heap.add(value);
   int position = heap.length - 1;
   while (position > 0) {
-    int parent = (position - 1) ~/ 2;
+    final int parent = (position - 1) ~/ 2;
     if (!allocateEarlier(value, heap[parent], keys)) break;
     heap[position] = heap[parent];
     position = parent;
@@ -224,8 +214,8 @@ void allocateHeapPush(List<int> heap, int value, List<int> keys) {
 }
 
 int allocateHeapPop(List<int> heap, List<int> keys) {
-  int result = heap[0];
-  int last = heap.removeLast();
+  final int result = heap[0];
+  final int last = heap.removeLast();
   if (heap.length != 0) {
     int position = 0;
     int child = 1;
@@ -245,13 +235,13 @@ int allocateHeapPop(List<int> heap, List<int> keys) {
 }
 
 List<int> allocateOrder(List<int> starts) {
-  List<int> heap = <int>[];
+  final List<int> heap = <int>[];
   int value = 0;
   while (value < starts.length) {
     if (starts[value] >= 0) allocateHeapPush(heap, value, starts);
     value = value + 1;
   }
-  List<int> order = <int>[];
+  final List<int> order = <int>[];
   while (heap.length != 0) order.add(allocateHeapPop(heap, starts));
   return order;
 }
@@ -263,11 +253,11 @@ void allocatePhysicalRegisters(
   List<int> ends,
   List<int> locations,
 ) {
-  List<int> owners = allocateFill(9, -1);
+  final List<int> owners = List<int>.filled(9, -1);
   int i = 0;
   while (i < order.length) {
-    int value = order[i];
-    int rep = function.reps[value];
+    final int value = order[i];
+    final int rep = function.reps[value];
     if (rep == rI64 || rep == rI1 || rep == rAddr) {
       int register = 0;
       int available = -1;
@@ -305,15 +295,15 @@ int allocateSpillSlots(
   List<int> ends,
   List<int> locations,
 ) {
-  List<int> active = <int>[];
-  List<int> free = <int>[];
+  final List<int> active = <int>[];
+  final List<int> free = <int>[];
   int count = 0;
   int i = 0;
   while (i < order.length) {
-    int value = order[i];
+    final int value = order[i];
     if (locations[value] < 0) {
       while (active.length != 0 && ends[active[0]] < starts[value]) {
-        int previous = allocateHeapPop(active, ends);
+        final int previous = allocateHeapPop(active, ends);
         free.add(-1 - locations[previous]);
       }
       int slot = count;
@@ -331,21 +321,21 @@ int allocateSpillSlots(
 }
 
 void allocateFunction(MachineFunction function) {
-  List<RegisterBlock> blocks = allocateLiveness(function);
-  List<int> starts = allocateFill(function.reps.length, -1);
-  List<int> ends = allocateFill(function.reps.length, -1);
+  final List<RegisterBlock> blocks = allocateLiveness(function);
+  final List<int> starts = List<int>.filled(function.reps.length, -1);
+  final List<int> ends = List<int>.filled(function.reps.length, -1);
   allocateIntervals(function, blocks, starts, ends);
-  List<int> order = allocateOrder(starts);
-  List<int> locations = allocateFill(function.reps.length, -1);
+  final List<int> order = allocateOrder(starts);
+  final List<int> locations = List<int>.filled(function.reps.length, -1);
   allocatePhysicalRegisters(function, order, starts, ends, locations);
-  int spills = allocateSpillSlots(order, starts, ends, locations);
-  List<int> used = allocateFill(9, 0);
+  final int spills = allocateSpillSlots(order, starts, ends, locations);
+  final List<int> used = List<int>.filled(9, 0);
   int value = 0;
   while (value < locations.length) {
     if (locations[value] >= 19) used[locations[value] - 19] = 1;
     value = value + 1;
   }
-  List<int> saved = <int>[];
+  final List<int> saved = <int>[];
   int register = 0;
   while (register < used.length) {
     if (used[register] != 0) saved.add(19 + register);
