@@ -39,7 +39,7 @@ List<int> reachableFunctions(List<SsaFunction> source, [List<int>? roots]) {
       _reachFunction(reachable, work, roots[i]);
       i++;
     }
-  } else if (imageKind == 0) {
+  } else if (imageKind == ImageKind.executable) {
     _reachFunction(reachable, work, 0);
     var main = entryFunction;
     _reachFunction(reachable, work, main);

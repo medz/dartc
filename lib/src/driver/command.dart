@@ -47,7 +47,7 @@ Never _compile(List<String> args) {
   String selectedExport = '';
   String? packages;
   targetOS = hostTarget();
-  imageKind = 0;
+  imageKind = ImageKind.executable;
   int argument = 1;
   while (argument < args.length) {
     String option = args[argument];
@@ -75,17 +75,13 @@ Never _compile(List<String> args) {
         argumentError('Unsupported target: ' + value);
       }
     } else if (option == '--emit') {
-      if (value == 'exe')
-        imageKind = 0;
-      else if (value == 'dylib')
-        imageKind = 1;
-      else if (value == 'object')
-        imageKind = 2;
-      else if (value == 'static')
-        imageKind = 3;
-      else {
-        argumentError('Unsupported output: ' + value);
-      }
+      imageKind = switch (value) {
+        'exe' => ImageKind.executable,
+        'dylib' => ImageKind.dynamicLibrary,
+        'object' => ImageKind.object,
+        'static' => ImageKind.staticLibrary,
+        _ => argumentError('Unsupported output: ' + value),
+      };
     } else if (option == '--export') {
       selectedExport = value;
     } else {
@@ -93,10 +89,10 @@ Never _compile(List<String> args) {
     }
     argument = argument + 1;
   }
-  if (imageKind != 0 && targetOS != 0) {
+  if (imageKind != ImageKind.executable && targetOS != 0) {
     argumentError('Library output currently supports macOS ARM64.');
   }
-  if (imageKind != 0 && selectedExport == '') {
+  if (imageKind != ImageKind.executable && selectedExport == '') {
     argumentError(
       'Library output requires --export <Pointer.fromFunction binding>.',
     );
@@ -109,17 +105,21 @@ Never _compile(List<String> args) {
       output = input.substring(0, input.length - 5);
     else
       output = input + '.out';
-    if (imageKind == 1) output = output + '.dylib';
-    if (imageKind == 2) output = output + '.o';
-    if (imageKind == 3) output = output + '.a';
+    output += switch (imageKind) {
+      .executable => '',
+      .dynamicLibrary => '.dylib',
+      .object => '.o',
+      .staticLibrary => '.a',
+    };
   }
-  if (imageKind == 0 && standard == '') standard = hostStdPath();
+  final executable = imageKind == ImageKind.executable;
+  if (executable && standard == '') standard = hostStdPath();
   String runtime = '';
-  if (imageKind == 0) runtime = sourceInputUri(cwd, standard);
+  if (executable) runtime = sourceInputUri(cwd, standard);
   var config = compilerPackages(inputUri, cwd, packages);
   SourceProgram sources = collectSources(inputUri, runtime, config, targetOS);
   parseSource(sources);
-  if (imageKind != 0) {
+  if (imageKind != ImageKind.executable) {
     int chosen = -1;
     int i = 0;
     while (i < exportNames.length) {
@@ -173,12 +173,14 @@ Never _compile(List<String> args) {
   allocateRegisters(program);
   generateCode(program);
   List<int> bytes = <int>[];
-  if (imageKind == 0)
+  if (imageKind == ImageKind.executable)
     bytes = createExecutable();
   else
     bytes = createLibrary(output);
   hostWrite(output, bytes);
   print(output + ': ' + bytes.length.toString() + ' bytes');
-  if (imageKind == 0 || imageKind == 1) hostFinish(output, targetOS);
+  if (imageKind == ImageKind.executable ||
+      imageKind == ImageKind.dynamicLibrary)
+    hostFinish(output, targetOS);
   hostExit(0);
 }

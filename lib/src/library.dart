@@ -310,7 +310,7 @@ List<int> createLibrary(String outputPath) {
     libraryNames.add(0);
     i++;
   }
-  if (imageKind == 2) return libraryObject();
-  if (imageKind == 3) return libraryArchive();
+  if (imageKind == ImageKind.object) return libraryObject();
+  if (imageKind == ImageKind.staticLibrary) return libraryArchive();
   return libraryDylib(outputPath);
 }

@@ -315,7 +315,10 @@ List<String> strings = <String>[];
 int entrySource = -1;
 int entryFunction = -1;
 int targetOS = 0;
-int imageKind = 0;
+
+enum ImageKind { executable, dynamicLibrary, object, staticLibrary }
+
+ImageKind imageKind = ImageKind.executable;
 List<String> exportNames = <String>[];
 List<int> exportFunctions = <int>[];
 List<int> exportParameters = <int>[];

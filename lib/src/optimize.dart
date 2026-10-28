@@ -578,7 +578,8 @@ void optimizeSsa(List<SsaFunction> program) {
     final state = sccpAnalyze(function);
     sccpRewrite(function, state);
     simplifyInvokes(function);
-    if (imageKind == 0 && i == 0) removeInitialZeroStores(function);
+    if (imageKind == ImageKind.executable && i == 0)
+      removeInitialZeroStores(function);
     removeDeadValues(function);
     i++;
   }

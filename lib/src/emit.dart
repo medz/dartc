@@ -58,7 +58,7 @@ void emitInstruction(
 ) {
   final MachineInstruction(:op, :output, :inputs) = instruction;
   int result = 0;
-  if (imageKind != 0 && op == mAddress) {
+  if (imageKind != ImageKind.executable && op == mAddress) {
     print('Library functions cannot use globals, strings, or managed objects.');
     hostExit(1);
   }
@@ -573,7 +573,7 @@ void generateCode(List<MachineFunction> program) {
     armFunctionOffsets.add(0);
     i = i + 1;
   }
-  if (imageKind == 0) {
+  if (imageKind == ImageKind.executable) {
     int main = entryFunction;
     if (functions[main].parameters == 0) {
       armCall(0);
@@ -604,7 +604,7 @@ void generateCode(List<MachineFunction> program) {
       emittedFrames.add(EmittedFrame(0, machineCode.length * 4, -1, 0, 0, -1));
   }
   int function = 0;
-  if (imageKind != 0) function = 1;
+  if (imageKind != ImageKind.executable) function = 1;
   while (function < program.length) {
     if (program[function].reachable) {
       armFunctionOffsets[function] = machineCode.length;

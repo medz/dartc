@@ -1283,7 +1283,9 @@ int feTypeSymbol(AstType syntax) {
 }
 
 int feGlobalType(int global) {
-  if (globalTypes[global] < 0 && imageKind == 0 && feRawGlobals[global] == 0) {
+  if (globalTypes[global] < 0 &&
+      imageKind == ImageKind.executable &&
+      feRawGlobals[global] == 0) {
     feInferGlobal(global);
   }
   return globalTypes[global];
@@ -1299,7 +1301,7 @@ void feLoadGlobalValue(int global) {
   } else if (feGlobalNodes[global].modifier == 'const') {
     var value = feConstants.values[global];
     feConstantValue(value, value.type, feGlobalNodes[global].token);
-  } else if (imageKind == 0 && feRawGlobals[global] == 0) {
+  } else if (imageKind == ImageKind.executable && feRawGlobals[global] == 0) {
     feGlobalType(global);
     feCall(feGlobalInitializers[global].getter, 0);
   } else {
@@ -1308,7 +1310,7 @@ void feLoadGlobalValue(int global) {
 }
 
 void feStoreGlobalValue(int global) {
-  if (imageKind == 0 &&
+  if (imageKind == ImageKind.executable &&
       feRawGlobals[global] == 0 &&
       _feLiteralTypes[global] == 0) {
     feCall(feGlobalInitializers[global].setter, 1);
@@ -1335,7 +1337,7 @@ int feLoadDeclaration(int symbol, int token) {
 }
 
 int feCallableType(int function, int token) {
-  if (imageKind != 0)
+  if (imageKind != ImageKind.executable)
     feAstError(token, 'library output cannot use Dart function values');
   var type = functionValueType(function);
   if (type < 0)
@@ -2756,7 +2758,7 @@ void feLowerListSpread(AstExpression expression, FeListLiteral literal) {
 }
 
 int feLowerPointerBinding(AstExpression call) {
-  if (imageKind == 0 || feInitializingGlobal < 0) {
+  if (imageKind == ImageKind.executable || feInitializingGlobal < 0) {
     feAstError(
       call.token,
       'FFI callback bindings require library output and a top-level binding',
@@ -5988,7 +5990,7 @@ void fePrepareGlobals(int count, List<FunctionBindings> bindings) {
       -1,
       -1,
     );
-    if (imageKind == 0 &&
+    if (imageKind == ImageKind.executable &&
         feRawGlobals[i] == 0 &&
         feGlobalNodes[i].modifier != 'const') {
       var type = globalTypes[i];
@@ -6583,7 +6585,7 @@ void parseSource(SourceProgram source) {
     }
     constant++;
   }
-  if (imageKind == 0) {
+  if (imageKind == ImageKind.executable) {
     final marker = symbolOwnDeclaration(feSymbols, 0, 'rtAbiVersion');
     if (marker < 0 || feSymbols.declarations[marker].kind != symbolGlobal) {
       sourceError(
@@ -6742,7 +6744,7 @@ void parseSource(SourceProgram source) {
   feConstants.lexicalClass = -1;
   feGenerateGlobals(sourceGlobals);
   feGenerateDispatches();
-  if (imageKind == 0) feGenerateEntry();
+  if (imageKind == ImageKind.executable) feGenerateEntry();
   feGenerateCallableAdapters();
   feGenerateConstantObjects();
 }
