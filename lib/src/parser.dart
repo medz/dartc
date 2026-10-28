@@ -7,7 +7,8 @@ class Parser {
   int position;
   int pendingClosers;
   bool pendingEquals = false;
-  bool inSwitchGuard = false;
+  // Guards and initializers require parentheses around function literals.
+  bool restrictedExpression = false;
   bool patterns = true;
   List<String> paths;
 
@@ -332,15 +333,15 @@ List<AstType> parserTypeArguments(Parser parser) {
 
 AstExpression parserList(Parser parser, List<AstType> arguments, int token) {
   parserExpect(parser, '[');
-  var guard = parser.inSwitchGuard;
-  parser.inSwitchGuard = false;
+  var guard = parser.restrictedExpression;
+  parser.restrictedExpression = false;
   List<AstExpression> children = <AstExpression>[];
   while (!parserIs(parser, ']')) {
     children.add(parserCollectionElement(parser));
     if (!parserTake(parser, ',')) break;
   }
   parserExpect(parser, ']');
-  parser.inSwitchGuard = guard;
+  parser.restrictedExpression = guard;
   return AstExpression(astList, '', children, arguments, token);
 }
 
@@ -782,11 +783,11 @@ AstPattern parserUnaryPattern(Parser parser, int context) {
     if (parserIs(parser, 'const') && tokenIs(parser.tokens[token + 1], '(')) {
       parser.position += 2;
       constantContext = true;
-      var guard = parser.inSwitchGuard;
-      parser.inSwitchGuard = false;
+      var guard = parser.restrictedExpression;
+      parser.restrictedExpression = false;
       value = parseExpression(parser);
       parserExpect(parser, ')');
-      parser.inSwitchGuard = guard;
+      parser.restrictedExpression = guard;
     } else if (parserIs(parser, '-') &&
         (parser.tokens[token + 1].kind == tokenInteger ||
             parser.tokens[token + 1].kind == tokenDouble)) {
@@ -854,8 +855,8 @@ bool parserObjectPatternAhead(Parser parser) {
 }
 
 AstExpression parserSwitchExpression(Parser parser, int token) {
-  var previousGuard = parser.inSwitchGuard;
-  parser.inSwitchGuard = false;
+  var previousGuard = parser.restrictedExpression;
+  parser.restrictedExpression = false;
   parserExpect(parser, '(');
   var source = parseExpression(parser);
   parserExpect(parser, ')');
@@ -865,16 +866,16 @@ AstExpression parserSwitchExpression(Parser parser, int token) {
     var pattern = parserPattern(parser);
     AstExpression? guard;
     if (parserTake(parser, 'when')) {
-      parser.inSwitchGuard = true;
+      parser.restrictedExpression = true;
       guard = parseExpression(parser);
-      parser.inSwitchGuard = false;
+      parser.restrictedExpression = false;
     }
     parserExpect(parser, '=>');
     arms.add(AstSwitchArm(pattern, guard, parseExpression(parser)));
     if (!parserTake(parser, ',')) break;
   }
   parserExpect(parser, '}');
-  parser.inSwitchGuard = previousGuard;
+  parser.restrictedExpression = previousGuard;
   return AstExpression(
     astSwitchExpression,
     '',
@@ -928,16 +929,17 @@ AstExpression parserPrimary(Parser parser) {
       token,
     );
   }
-  if (!parser.inSwitchGuard && parserFunctionAhead(parser, parser.position))
+  if (!parser.restrictedExpression &&
+      parserFunctionAhead(parser, parser.position))
     return parserFunctionExpression(parser);
   if (parserIs(parser, '<') && parserGenericFunctionAhead(parser))
     parserError(parser, 'generic function expressions are unsupported');
   if (parserTake(parser, '(')) {
-    var guard = parser.inSwitchGuard;
-    parser.inSwitchGuard = false;
+    var guard = parser.restrictedExpression;
+    parser.restrictedExpression = false;
     var expression = parseExpression(parser);
     parserExpect(parser, ')');
-    parser.inSwitchGuard = guard;
+    parser.restrictedExpression = guard;
     // A parenthesized null-shorting chain cannot absorb later assignments.
     if (expression.kind == astNullAware) expression.text = '()';
     return expression;
@@ -980,8 +982,8 @@ AstExpression parserCall(
   String disposition = astCallValue,
 ]) {
   parserExpect(parser, '(');
-  var guard = parser.inSwitchGuard;
-  parser.inSwitchGuard = false;
+  var guard = parser.restrictedExpression;
+  parser.restrictedExpression = false;
   List<AstExpression> children = <AstExpression>[callee];
   while (!parserIs(parser, ')')) {
     var argumentToken = parser.position;
@@ -1005,7 +1007,7 @@ AstExpression parserCall(
     if (!parserTake(parser, ',')) break;
   }
   parserExpect(parser, ')');
-  parser.inSwitchGuard = guard;
+  parser.restrictedExpression = guard;
   return AstExpression(astCall, disposition, children, typeArguments, token);
 }
 
@@ -1757,14 +1759,27 @@ List<AstParameter> parserParameters(Parser parser) {
     }
     var type = parserDeclarationType(parser, '');
     var fieldFormal = parserTake(parser, 'this');
+    final superFormal = !fieldFormal && parserTake(parser, 'super');
     var name = '';
-    if (fieldFormal) {
+    if (fieldFormal || superFormal) {
       parserExpect(parser, '.');
       name = parserName(parser);
     } else {
       name = parserName(parser);
     }
+    if ((fieldFormal || superFormal) && parserIs(parser, '(')) {
+      final result = type.name == ''
+          ? AstType('dynamic', const <AstType>[], type.token)
+          : type;
+      type = AstType('Function', const <AstType>[], type.token)
+        ..function = AstFunctionType(
+          result,
+          parserFunctionTypeParameters(parser, true),
+        );
+      if (parserTake(parser, '?')) type.name = 'Function?';
+    }
     var parameter = AstParameter(type, name, fieldFormal, token);
+    parameter.superFormal = superFormal;
     parameter.metadata = metadata;
     parameter.kind = kind;
     parameter.required = required;
@@ -1845,11 +1860,10 @@ AstInitializer parserInitializer(Parser parser) {
     name = parserName(parser);
   }
   parserExpect(parser, '=');
-  var expressionStart = parser.position;
+  final previous = parser.restrictedExpression;
+  parser.restrictedExpression = true;
   var expression = parseExpression(parser);
-  if (expression.kind == astFunctionExpression &&
-      expression.token == expressionStart)
-    parserError(parser, 'initializer function expression requires parentheses');
+  parser.restrictedExpression = previous;
   return AstInitializer(astFieldInitializer, name, expression, token);
 }
 
@@ -1903,7 +1917,8 @@ AstFunction parserFunction(
     }
     if (parameters.length != 1 ||
         parameters[0].kind != astRequiredPositional ||
-        parameters[0].fieldFormal) {
+        parameters[0].fieldFormal ||
+        parameters[0].superFormal) {
       parserError(parser, 'setter requires one positional parameter');
     }
     if (result.name == '') result = AstType('void', <AstType>[], token);
@@ -2675,10 +2690,10 @@ AstStatement parserSwitch(Parser parser, int token) {
               ..constantContext = true;
       }
       if (parserTake(parser, 'when')) {
-        var previous = parser.inSwitchGuard;
-        parser.inSwitchGuard = true;
+        var previous = parser.restrictedExpression;
+        parser.restrictedExpression = true;
         guard = parseExpression(parser);
-        parser.inSwitchGuard = previous;
+        parser.restrictedExpression = previous;
       }
     } else {
       parserExpect(parser, 'default');

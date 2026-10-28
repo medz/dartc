@@ -34,7 +34,8 @@
 | 官方特性规范 | 跟踪位置 | 当前边界 |
 |---|---|---|
 | [空安全](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md) | [类型](types.md)、[变量](variables.md) | 已有底类型与部分赋值、提升规则；完整提升、推断及控制流仍有缺口 |
-| [增强枚举](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.17/enhanced-enums/feature-specification.md)、[super 形参](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.17/super-parameters/feature-specification.md) | [类](classes.md) | 未实现 |
+| [增强枚举](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.17/enhanced-enums/feature-specification.md) | [类](classes.md) | 未实现 |
+| [super 形参](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.17/super-parameters/feature-specification.md) | [类](classes.md) | 非泛型生成式构造中的类型推断、默认值继承与参数转发已支持；泛型类和主构造器情形仍缺 |
 | [Records](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/records/feature-specification.md)、[Patterns](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md)及[穷尽性](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/exhaustiveness.md) | [类型](types.md)、[模式、switch 与 if-case](patterns.md)、[语句](statements.md) | switch 表达式、if-case、标量/对象/List 模式、局部解构声明/赋值及模式循环头部分实现；模式 switch 语句部分实现；Map/record 解构未实现 |
 | [类修饰符](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/class-modifiers/feature-specification.md)、[Extension types](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.3/extension-types/feature-specification.md) | [类](classes.md)、[类型](types.md) | 未实现 |
 | [数字分隔符](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.6/digit-separators/feature-specification.md) | [词法](lexical-structure.md) | 部分实现；整数、小数及指数中的数字分隔符可用 |
@@ -42,7 +43,7 @@
 | [基于界限的推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/inference-using-bounds/design-document.md) | [类型](types.md) | 未实现 |
 | [Null-aware elements](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.8/null-aware-elements/feature-specification.md) | [表达式](expressions.md) | List 的运行时及常量元素已支持；Set/Map 未实现 |
 | [Dot shorthands](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.10/dot-shorthands/feature-specification.md) | [表达式](expressions.md) | 未实现 |
-| [私有命名形参](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.12/private-named-parameters/feature-specification.md) | [函数](functions.md) | field-formal 公共名映射及冲突校验；super 与主构造器情形未实现 |
+| [私有命名形参](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.12/private-named-parameters/feature-specification.md) | [函数](functions.md) | field-formal 公共名映射及冲突校验、super 形参公共名称关联；主构造器情形未实现 |
 | [Primary constructors](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.13/primary-constructors/feature-specification.md) | [类](classes.md) | 未实现 |
 
 ## 状态与证据

@@ -1176,6 +1176,15 @@ void main(List<String> args) {
     final libraries = {
       'inheritance-parent.dart': r'''
 part 'inheritance-part.dart';
+const _defaultValues = <int>[2, 4];
+class SuperDefaults {
+  static const label = 'parent';
+  final int _value;
+  final String name;
+  final List<int> values;
+  const SuperDefaults({required this._value, this.name = label, this.values = _defaultValues});
+  int read() => _value;
+}
 class InheritanceParent {
   int _value;
   final String label;
@@ -1194,9 +1203,18 @@ class PartChild extends InheritanceParent { PartChild() : super._private(); }
       'inheritance-imports.dart': r'''
 import 'inheritance-parent.dart' as parent;
 typedef ParentAlias = parent.InheritanceParent;
+class SuperDefaultLeaf extends SuperDefaultChild {
+  final String own;
+  const SuperDefaultLeaf(this.own, {required super.value, super.name, super.values});
+}
+class SuperDefaultChild extends parent.SuperDefaults {
+  static const label = 'child';
+  const SuperDefaultChild({required super.value, super.name, super.values});
+  const SuperDefaultChild.named({required super.value, super.name = label, super.values});
+}
 class Child extends ParentAlias {
   int _value = 40;
-  Child(int value) : super(value, label: 'child');
+  Child(super.value) : super(label: 'child');
   int method() => super.method() + _value;
   int own() => _value;
   int Function() nested() => () => super.method();
@@ -1209,6 +1227,15 @@ void main() {
   print(child.nested()());
   print(child.label);
   print(parent.PartChild().read());
+  const inherited = SuperDefaultLeaf('leaf', value: 3);
+  print(inherited.read());
+  print(inherited.name);
+  print(inherited.own);
+  print(inherited.values);
+  print(identical(inherited, const SuperDefaultLeaf('leaf', value: 3, name: 'parent', values: [2, 4])));
+  print(SuperDefaultLeaf('fresh', value: 4).name);
+  print(const SuperDefaultChild.named(value: 5).name);
+  print(SuperDefaultChild(value: 6, name: 'explicit', values: [7]).values);
 }
 ''',
       'interface-private.dart': r'''
@@ -1881,6 +1908,30 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      'class C{final int Function() f;C(bool b):f=b ? () => 1 : () => 2;}void main(){}',
+      'int Function() f=()=>0;class C{final int Function() g;C():g=f=()=>1;}void main(){}',
+      "class C{C(super.x);}void main(){}",
+      "class A{void f(super.x){}}void main(){}",
+      "void f(super.x){}void main(){}",
+      "void main(){void f(super.x){}}",
+      "class A{A(int x);}class B extends A{B(super.x):this.named();B.named():super(1);}void main(){}",
+      "class A{A(int x,int y);}class B extends A{B(super.x):super(1);}void main(){}",
+      "class A{A({int? x});}class B extends A{B({super.x}):super(x:1);}void main(){}",
+      "class A{A(int x);}class B extends A{B(super.x,super.y);}void main(){}",
+      "class A{A({int? x});}class B extends A{B({super.y});}void main(){}",
+      "class A{A(int x);}class B extends A{B(dynamic super.x);}void main(){}",
+      "class C{int call()=>1;}class A{A(int Function() f);}class B extends A{B(C super.f);}void main(){}",
+      "class A{A(int x);}class B extends A{int y;B(super.x):y=(x=2);}void main(){}",
+      "class A{A(int x);}class B extends A{int Function() f;B(super.x):f=((){x=2;return x;});}void main(){}",
+      "class A{A(int x);}class B extends A{B(super.x){print(x);}}void main(){}",
+      "class A{num n;A([this.n=1.5]);}class B extends A{B([int super.n]);}void main(){}",
+      "class A{int? _x;A({this._x});}class B extends A{B({super._x});}void main(){}",
+      "// @dart=2.16\nclass A{A(int x);}class B extends A{B(super.x);}void main(){}",
+      "class A{A(int x);}class B extends A{const B(super.x);}void main(){}",
+      "class A{A([int n=1]);}const a=A();void main(){}",
+      "class A{A(int x,int y);}class B extends A{B(super.x);}void main(){}",
+      "class A{A([int x=1]);}class B extends A{B(super.x);}void main(){B();}",
+      "class A{A(int Function(int) f);}class B extends A{B(super.f(int n));}void main(){}",
       'class A{}class B extends A implements A{}void main(){}',
       'class A extends B{}class B extends A{}void main(){}',
       'class A{A.named();}class B extends A{}void main(){}',

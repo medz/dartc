@@ -23,22 +23,20 @@ class ConstantValue {
   ConstantValue(this.type, this.kind, this.integer, this.text);
 }
 
-class ConstantConstructorInfo {
+class ConstructorConstants {
   int classId;
   AstClass owner;
   AstFunction syntax;
-  ClassMembers members;
   List<int> fieldTypes;
   List<int> parameterTypes;
   ConstructorPlan plan;
   List<int> states = const <int>[];
   List<ConstantValue> values = const <ConstantValue>[];
 
-  ConstantConstructorInfo(
+  ConstructorConstants(
     this.classId,
     this.owner,
     this.syntax,
-    this.members,
     this.fieldTypes,
     this.parameterTypes,
     this.plan,
@@ -50,7 +48,7 @@ class ConstantConstructorInfo {
 }
 
 class _ConstantInvocation {
-  final ConstantConstructorInfo owner;
+  final ConstructorConstants owner;
   final List<ConstantValue> parameters;
 
   _ConstantInvocation(this.owner, this.parameters);
@@ -70,7 +68,7 @@ class ConstantContext {
   List<ConstantValue> initializerParameters = const <ConstantValue>[];
   bool allowInitializerParameters = false;
   List<ConstantValue> aggregates = <ConstantValue>[];
-  List<ConstantConstructorInfo?> constructors = <ConstantConstructorInfo?>[];
+  List<ConstructorConstants?> constructors = <ConstructorConstants?>[];
   List<_ConstantInvocation> invocations = <_ConstantInvocation>[];
   List<ClassMembers> classMembers = const <ClassMembers>[];
   List<List<int>> classConstructors = const <List<int>>[];
@@ -883,7 +881,7 @@ ConstantValue _constantChecked(
 
 ConstantValue _constantDeclaration(
   ConstantContext context,
-  ConstantConstructorInfo owner,
+  ConstructorConstants owner,
   int index,
   bool field,
   bool active,
@@ -917,6 +915,22 @@ ConstantValue _constantDeclaration(
   var value = ConstantValue(tNull, tNull, 0, '');
   if (expression != null)
     value = _evaluateConstant(context, expression, true, type, false);
+  else if (!field && owner.syntax.parameters[index].superFormal) {
+    final parent = context.constructors[owner.plan.superTarget]!;
+    final associated = owner.plan.superParameters[index];
+    final parameter = parent.syntax.parameters[associated];
+    if (parameter.kind != astRequiredPositional && !parameter.required) {
+      final inherited = _constantDeclaration(
+        context,
+        parent,
+        associated,
+        false,
+        true,
+      );
+      if (typeIsSubtype(constantValueType(inherited), type))
+        value = constantWithType(inherited, type);
+    }
+  }
   context.lexicalClass = scope;
   context.typeScope = typeScope;
   context.initializerParameters = parameters;
@@ -926,8 +940,20 @@ ConstantValue _constantDeclaration(
   return value;
 }
 
+ConstantValue constructorParameterDefault(
+  ConstantContext context,
+  int function,
+  int parameter,
+) => _constantDeclaration(
+  context,
+  context.constructors[function]!,
+  parameter,
+  false,
+  true,
+);
+
 List<ConstantValue> _constantParameterFrame(
-  ConstantConstructorInfo owner,
+  ConstructorConstants owner,
   List<ConstantValue> values,
 ) {
   var count = 0;
@@ -952,7 +978,7 @@ List<ConstantValue> _constantParameterFrame(
 
 ConstantValue _constantInitializer(
   ConstantContext context,
-  ConstantConstructorInfo owner,
+  ConstructorConstants owner,
   ConstructorStep step,
   bool active,
 ) {
@@ -968,12 +994,12 @@ ConstantValue _constantInitializer(
   return _constantChecked(context, value, type, initializer.token, active);
 }
 
-ConstantConstructorInfo _constantRedirectTarget(
+ConstructorConstants _constantRedirectTarget(
   ConstantContext context,
-  ConstantConstructorInfo owner,
+  ConstructorConstants owner,
 ) {
   var function = owner.plan.redirectTarget;
-  ConstantConstructorInfo? target;
+  ConstructorConstants? target;
   if (function >= 0 && function < context.constructors.length)
     target = context.constructors[function];
   if (target == null || !target.syntax.constant)
@@ -985,15 +1011,15 @@ ConstantConstructorInfo _constantRedirectTarget(
   return target;
 }
 
-ConstantConstructorInfo _constantSuperTarget(
+ConstructorConstants _constantSuperTarget(
   ConstantContext context,
-  ConstantConstructorInfo owner,
+  ConstructorConstants owner,
 ) {
   final function = owner.plan.superTarget;
   final target = function < context.constructors.length
       ? context.constructors[function]
       : null;
-  if (target == null)
+  if (target == null || !target.syntax.constant)
     _constantError(
       context,
       owner.syntax.token,
@@ -1004,7 +1030,7 @@ ConstantConstructorInfo _constantSuperTarget(
 
 List<ConstantValue> _constantArguments(
   ConstantContext context,
-  ConstantConstructorInfo owner,
+  ConstructorConstants owner,
   AstExpression call,
   bool active,
   bool redirectArguments,
@@ -1053,8 +1079,8 @@ void checkConstantConstructors(ConstantContext context) {
   var c = 0;
   while (c < context.constructors.length) {
     var owner = context.constructors[c];
-    if (owner != null) {
-      ConstantConstructorInfo? target;
+    if (owner != null && owner.syntax.constant) {
+      ConstructorConstants? target;
       if (owner.plan.redirectTarget >= 0)
         target = _constantRedirectTarget(context, owner);
       final parent = owner.plan.superTarget >= 0
@@ -1127,7 +1153,7 @@ void checkConstantConstructors(ConstantContext context) {
 
 ConstantValue _constantInvoke(
   ConstantContext context,
-  ConstantConstructorInfo owner,
+  ConstructorConstants owner,
   List<ConstantValue> parameters,
   bool active,
 ) {
@@ -1167,7 +1193,7 @@ ConstantValue _constantInvoke(
     }
     context.invocations.add(_ConstantInvocation(owner, parameters));
     context.lexicalClass = owner.classId;
-    if (owner.syntax.initializers.isNotEmpty)
+    if (owner.syntax.initializers.isNotEmpty || owner.plan.superCall != null)
       context.initializerParameters = _constantParameterFrame(
         owner,
         parameters,
@@ -1313,10 +1339,12 @@ ConstantValue _constantConstructor(
   if (constructor < 0)
     _constantError(context, callee.token, 'unknown constructor');
   var function = context.classConstructors[classId][constructor];
-  ConstantConstructorInfo? owner;
+  ConstructorConstants? owner;
   if (function < context.constructors.length)
     owner = context.constructors[function];
-  if (owner == null || !expression.constant && !implicitConst)
+  if (owner == null ||
+      !owner.syntax.constant ||
+      !expression.constant && !implicitConst)
     _constantError(
       context,
       expression.token,

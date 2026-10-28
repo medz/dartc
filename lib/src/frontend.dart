@@ -347,6 +347,7 @@ int feRegisterFunction(
     while (parameter < syntax.parameters.length) {
       final syntaxParameter = syntax.parameters[parameter];
       if (syntaxParameter.fieldFormal ||
+          syntaxParameter.superFormal ||
           syntaxParameter.kind != astRequiredPositional)
         feAstError(syntaxParameter.token, 'primitive parameters require int');
       feCheckPrimitiveType(
@@ -387,6 +388,15 @@ int feRegisterFunction(
   var p = 0;
   while (p < syntax.parameters.length) {
     final parameter = syntax.parameters[p];
+    if (parameter.superFormal) {
+      if (!constructor)
+        feAstError(parameter.token, 'super parameter requires a constructor');
+      if (!sourceVersionAtLeast(feSources, source, 2, 17))
+        feAstError(
+          parameter.token,
+          'super parameters require language version 2.17',
+        );
+    }
     var type = tDynamic;
     if (parameter.fieldFormal) {
       if (!constructor)
@@ -1974,38 +1984,29 @@ void feCheckUnitMetadata(AstUnit syntax) {
   }
 }
 
-void feRegisterConstantConstructors() {
-  var function = 1;
-  while (function < feFunctionNodes.length) {
-    if (feConstructors[function] == 1 && feFunctionNodes[function].constant) {
-      var owner = feOwners[function];
-      var fields = <int>[];
-      var parameterTypes = <int>[];
-      var fieldStart = feClassFieldStarts[owner];
-      var field = 0;
-      while (field < feClassFieldCounts[owner]) {
+void feRegisterConstructorConstants() {
+  for (var function = 1; function < feFunctionNodes.length; function++) {
+    if (feConstructors[function] != 1) continue;
+    final owner = feOwners[function];
+    final syntax = feFunctionNodes[function];
+    final fields = <int>[];
+    final parameterTypes = <int>[];
+    final fieldStart = feClassFieldStarts[owner];
+    if (syntax.constant)
+      for (var field = 0; field < feClassFieldCounts[owner]; field++)
         fields.add(feFieldTypes[fieldStart + field]);
-        field++;
-      }
-      var start = 1;
-      var p = 0;
-      while (p < feFunctionNodes[function].parameters.length) {
-        parameterTypes.add(functions[function].parameterTypes[start + p]);
-        p++;
-      }
-      while (feConstants.constructors.length <= function)
-        feConstants.constructors.add(null);
-      feConstants.constructors[function] = ConstantConstructorInfo(
-        owner,
-        feClassNodes[owner],
-        feFunctionNodes[function],
-        feMembers[owner],
-        fields,
-        parameterTypes,
-        feConstructorPlans[function],
-      );
-    }
-    function++;
+    for (var p = 0; p < syntax.parameters.length; p++)
+      parameterTypes.add(functions[function].parameterTypes[1 + p]);
+    while (feConstants.constructors.length <= function)
+      feConstants.constructors.add(null);
+    feConstants.constructors[function] = ConstructorConstants(
+      owner,
+      feClassNodes[owner],
+      syntax,
+      fields,
+      parameterTypes,
+      feConstructorPlans[function],
+    );
   }
   checkConstantConstructors(feConstants);
 }
@@ -2038,7 +2039,9 @@ void feResolveFunctionDefaults(int f) {
       var value = omitted;
       final type = functions[f].parameterTypes[offset + p];
       final expression = parameter.defaultValue;
-      if (expression != null)
+      if (feConstructors[f] == 1)
+        value = constructorParameterDefault(feConstants, f, p);
+      else if (expression != null)
         value = evaluateConstant(feConstants, expression, type, false);
       if (!typingAssignable(value.type, type) ||
           !typeIsSubtype(constantValueType(value), type))
@@ -6294,12 +6297,21 @@ void parseSource(SourceProgram source) {
         feOwnMembers,
         feClassFieldStarts[owner],
         feClassConstructors,
+        feFunctionNodes,
       );
     }
     feConstructorPlans.add(plan);
     plannedFunction++;
   }
   checkConstructorRedirects(feSymbols, feFunctionNodes, feConstructorPlans);
+  resolveSuperParameters(
+    feSymbols,
+    feFunctionNodes,
+    functions,
+    feConstructorPlans,
+    feClassConstructors,
+    feClassOrder,
+  );
   var sourceFunctions = functions.length;
   final bodyBindings = <FunctionBindings>[];
   final localTypeScopes = <List<int>>[];
@@ -6314,6 +6326,7 @@ void parseSource(SourceProgram source) {
         feOwners[bindingFunction] < 0
             ? null
             : feMembers[feOwners[bindingFunction]],
+        feConstructorPlans[bindingFunction].superCall,
       ),
     );
     while (localTypeScopes.length < feLocalFunctions.length)
@@ -6331,7 +6344,7 @@ void parseSource(SourceProgram source) {
     sourceCore,
     'identical',
   );
-  feRegisterConstantConstructors();
+  feRegisterConstructorConstants();
   feResolvePragma();
   feCheckUnitMetadata(syntax);
   var constant = 0;

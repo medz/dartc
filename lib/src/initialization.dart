@@ -1,4 +1,6 @@
 import 'ast.dart';
+import 'frontend/parameters.dart';
+import 'ir.dart';
 import 'members.dart';
 import 'resolve_type.dart';
 import 'source.dart';
@@ -22,12 +24,14 @@ class ConstructorPlan {
   final int redirectTarget;
   final int superTarget;
   final AstExpression? superCall;
+  final List<int> superParameters;
 
   const ConstructorPlan(
     this.steps,
     this.redirectTarget, [
     this.superTarget = -1,
     this.superCall,
+    this.superParameters = const <int>[],
   ]);
 }
 
@@ -96,6 +100,7 @@ ConstructorPlan planConstructorInitializers(
   List<ClassMembers> membersByClass,
   int fieldStart,
   List<List<int>> constructorsByClass,
+  List<AstFunction> declarations,
 ) {
   final owner = classes[classId];
   final members = membersByClass[classId];
@@ -119,11 +124,11 @@ ConstructorPlan planConstructorInitializers(
     var parameter = 0;
     while (parameter < syntax.parameters.length) {
       var formal = syntax.parameters[parameter];
-      if (formal.fieldFormal)
+      if (formal.fieldFormal || formal.superFormal)
         _initError(
           symbols,
           formal.token,
-          'redirecting constructor cannot have field formals',
+          'redirecting constructor cannot have initializing formals',
         );
       parameter++;
     }
@@ -241,6 +246,13 @@ ConstructorPlan planConstructorInitializers(
     f++;
   }
   final superclass = classSuperclasses[classId];
+  var forwarding = false;
+  for (final parameter in syntax.parameters) {
+    if (!parameter.superFormal) continue;
+    forwarding = true;
+    if (superclass == tObject)
+      _initError(symbols, parameter.token, 'no corresponding super parameter');
+  }
   if (superclass == tObject && superCall == null)
     return ConstructorPlan(steps, -1);
   final call =
@@ -289,7 +301,106 @@ ConstructorPlan planConstructorInitializers(
             symbols.program.tokens[classes[parent].token].source,
           ))
     _initError(symbols, call.token, 'private superclass constructor');
-  return ConstructorPlan(steps, -1, constructorsByClass[parent][ordinal], call);
+  final target = constructorsByClass[parent][ordinal];
+  if (!forwarding) return ConstructorPlan(steps, -1, target, call);
+  final formals = declarations[target].parameters;
+  final parameters = List<int>.filled(syntax.parameters.length, -1);
+  final arguments = <AstExpression>[callee];
+  var positional = 0;
+  for (var p = 0; p < syntax.parameters.length; p++) {
+    final parameter = syntax.parameters[p];
+    if (!parameter.superFormal) continue;
+    var associated = -1;
+    if (parameter.kind == astNamedParameter) {
+      for (var q = 0; q < formals.length; q++)
+        if (formals[q].kind == astNamedParameter &&
+            parameterName(formals[q]) == parameter.name)
+          associated = q;
+    } else {
+      if (positional < formals.length &&
+          formals[positional].kind != astNamedParameter)
+        associated = positional;
+      positional++;
+    }
+    if (associated < 0)
+      _initError(symbols, parameter.token, 'no corresponding super parameter');
+    for (var a = 1; a < call.children.length; a++) {
+      final argument = call.children[a];
+      if (parameter.kind == astNamedParameter
+          ? argument.kind == astNamedArgument && argument.text == parameter.name
+          : argument.kind != astNamedArgument)
+        _initError(
+          symbols,
+          argument.token,
+          'explicit super argument conflicts with super parameter',
+        );
+    }
+    parameters[p] = associated;
+    var argument = AstExpression(
+      astName,
+      parameter.name,
+      const <AstExpression>[],
+      const <AstType>[],
+      parameter.token,
+    );
+    if (parameter.kind == astNamedParameter)
+      argument = AstExpression(
+        astNamedArgument,
+        parameter.name,
+        <AstExpression>[argument],
+        const <AstType>[],
+        parameter.token,
+      );
+    arguments.add(argument);
+  }
+  for (var a = 1; a < call.children.length; a++)
+    arguments.add(call.children[a]);
+  return ConstructorPlan(
+    steps,
+    -1,
+    target,
+    AstExpression(
+      call.kind,
+      call.text,
+      arguments,
+      call.typeArguments,
+      call.token,
+    ),
+    parameters,
+  );
+}
+
+void resolveSuperParameters(
+  SymbolTable symbols,
+  List<AstFunction> declarations,
+  List<FunctionInfo> signatures,
+  List<ConstructorPlan> plans,
+  List<List<int>> constructors,
+  List<int> classOrder,
+) {
+  for (final owner in classOrder) {
+    for (final function in constructors[owner]) {
+      final plan = plans[function];
+      for (var p = 0; p < plan.superParameters.length; p++) {
+        final associated = plan.superParameters[p];
+        if (associated < 0) continue;
+        final parameter = declarations[function].parameters[p];
+        final parentType =
+            signatures[plan.superTarget].parameterTypes[associated + 1];
+        if (parameter.type.name == '')
+          signatures[function].parameterTypes[p + 1] = parentType;
+        if (!typeIsSubtype(
+          signatures[function].parameterTypes[p + 1],
+          parentType,
+        ))
+          _initError(
+            symbols,
+            parameter.token,
+            'super parameter type must be a subtype of its target',
+          );
+      }
+    }
+  }
 }
 
 void checkConstructorRedirects(

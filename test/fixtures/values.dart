@@ -5559,7 +5559,7 @@ class InheritedChild extends InheritedBase {
   int value = 10;
   String child = 'child';
   late int cached = super.value + 5;
-  InheritedChild(int initial) : super.named(initial);
+  InheritedChild(super.initial) : super.named();
   int add(int input, [int extra = 20]) => super.add(input) + extra;
   T echo<T extends num>(T input) => super.echo<T>(input);
   int baseValue() => super.value;
@@ -5589,7 +5589,7 @@ class InheritedBase {
 }
 
 class InheritedLeaf extends InheritedChild {
-  InheritedLeaf(int value) : super(value);
+  InheritedLeaf(super.value);
 }
 
 class InheritedGetterBase {
@@ -5609,7 +5609,7 @@ class InheritedDefaultBase {
 }
 
 class InheritedDefault extends InheritedDefaultBase {
-  const InheritedDefault();
+  const InheritedDefault([super.value]);
 }
 
 class InheritedImplicit extends InheritedDefaultBase {}
@@ -5623,7 +5623,7 @@ abstract class InheritedConstantBase {
 class InheritedConstant extends InheritedConstantBase {
   final int value;
   final String label;
-  const InheritedConstant(int base, this.value, this.label) : super(base);
+  const InheritedConstant(super.base, this.value, this.label);
   const InheritedConstant.named(String label) : this(2, 3, label);
   int baseValue() => super.value;
 }
@@ -5720,6 +5720,83 @@ class InheritedThrow extends InheritedThrowBase {
   }
 }
 
+class SuperNarrowBase {
+  final num? value;
+  const SuperNarrowBase([this.value = 1.5]);
+}
+
+class SuperNarrow extends SuperNarrowBase {
+  const SuperNarrow([int? super.value]);
+}
+
+class SuperIntegerBase {
+  final num value;
+  const SuperIntegerBase([this.value = 1]);
+}
+
+class SuperInteger extends SuperIntegerBase {
+  const SuperInteger([int super.value]);
+}
+
+class SuperOptional extends InheritedConstantBase {
+  const SuperOptional([super.value = 8]);
+}
+
+class SuperOrderBase {
+  final int first;
+  final int middle;
+  final int last;
+  SuperOrderBase(this.first, {required this.middle, required this.last});
+}
+
+class SuperOrder extends SuperOrderBase {
+  SuperOrder({required super.middle})
+    : super(last: inheritanceMark(21), inheritanceMark(22));
+}
+
+int superScopeValue = 9;
+
+class SuperScopeBase {
+  SuperScopeBase(int value);
+}
+
+class SuperScope extends SuperScopeBase {
+  final int copied;
+  final int Function() read;
+  SuperScope(super.superScopeValue)
+    : copied = (superScopeValue),
+      read = (() => superScopeValue) {
+    print(superScopeValue);
+  }
+  SuperScope.simple(super.superScopeValue)
+    : read = (() => superScopeValue),
+      copied = (superScopeValue) {
+    print(superScopeValue);
+  }
+  SuperScope.choose(super.superScopeValue, bool condition)
+    : copied = superScopeValue,
+      read = condition ? (() => superScopeValue) : (() => 0);
+}
+
+class SuperCallbackBase {
+  final int Function(int)? callback;
+  SuperCallbackBase([int this.callback(int value)?]);
+}
+
+class SuperCallback extends SuperCallbackBase {
+  SuperCallback([int super.callback(int value)?]);
+}
+
+class SuperWildBase {
+  final int first;
+  final int second;
+  SuperWildBase(this.first, this.second);
+}
+
+class SuperWild extends SuperWildBase {
+  SuperWild(super._, super._);
+}
+
 void inheritanceValues() {
   final child = InheritedLeaf(2);
   InheritedBase base = child;
@@ -5753,6 +5830,7 @@ void inheritanceValues() {
   getter.value += 3;
   print(getter.value);
   print(const InheritedDefault().value);
+  print(InheritedDefault(12).value);
   print(InheritedImplicit().value);
   const value = InheritedConstant(2, 3, 'constant');
   const InheritedConstantBase constantBase = value;
@@ -5771,6 +5849,22 @@ void inheritanceValues() {
   print(InheritedCallbackChild().direct());
   print(InheritedCallbackChild().field());
   print(InheritedCallbackChild().value());
+  print(const SuperNarrow().value);
+  print(SuperNarrow(3).value);
+  print(const SuperInteger().value);
+  print(const SuperOptional().value);
+  final forwarded = SuperOrder(middle: inheritanceMark(23));
+  print(forwarded.first + forwarded.middle + forwarded.last);
+  final scope = SuperScope(2);
+  print(scope.copied);
+  print(scope.read());
+  print(SuperScope.simple(3).copied);
+  print(SuperScope.choose(4, true).read());
+  print(SuperScope.choose(4, false).read());
+  print(SuperCallback().callback);
+  print(SuperCallback((value) => value + 2).callback!(3));
+  final wildcard = SuperWild(4, 5);
+  print(wildcard.first + wildcard.second);
   final order = InheritedOrder(6);
   print(order.declared + order.value + order.own + order.explicit);
   try {

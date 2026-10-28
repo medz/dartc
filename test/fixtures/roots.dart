@@ -62,13 +62,13 @@ class DerivedWide extends Wide {
   Object? ownTagged;
   late Leaf delayed = Leaf(207);
   DerivedWide(
-    Leaf tail,
-    Object? tagged,
-    Leaf p62,
-    Leaf third,
+    super.tail,
+    super.tagged,
+    super.p62,
+    super.third,
     this.own,
     this.ownTagged,
-  ) : super(tail, tagged, p62, third);
+  );
 }
 
 class Watch {

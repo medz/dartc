@@ -898,6 +898,7 @@ FunctionBindings bindFunctionLocals(
   bool receiver, [
   List<LocalFunctionBinding>? functions,
   ClassMembers? members,
+  AstExpression? superCall,
 ]) {
   return _bindFunctionLocals(
     source,
@@ -907,6 +908,7 @@ FunctionBindings bindFunctionLocals(
     null,
     -1,
     members,
+    superCall,
   );
 }
 
@@ -917,8 +919,9 @@ FunctionBindings _bindFunctionLocals(
   List<LocalFunctionBinding> functions,
   LocalBinder? outer,
   int outerScope,
-  ClassMembers? members,
-) {
+  ClassMembers? members, [
+  AstExpression? superCall,
+]) {
   var result = FunctionBindings(<LocalVariable>[], -1)..outer = outer?.result;
   var binder = LocalBinder(source, result, <BindingScope>[], functions);
   binder.outer = outer;
@@ -932,7 +935,8 @@ FunctionBindings _bindFunctionLocals(
   );
   var parameters = bindingScope(binder, -1);
   var initializers = -1;
-  if (syntax.initializers.isNotEmpty) initializers = bindingScope(binder, -1);
+  if (syntax.initializers.isNotEmpty || superCall != null)
+    initializers = bindingScope(binder, -1);
   if (receiver) {
     result.receiver = bindingDeclare(
       binder,
@@ -959,21 +963,31 @@ FunctionBindings _bindFunctionLocals(
       previous++;
     }
     parameter.binding = -1;
-    if (!parameter.fieldFormal || initializers >= 0) {
+    final initializing = parameter.fieldFormal || parameter.superFormal;
+    if (!initializing || initializers >= 0) {
       parameter.binding = result.variables.length;
       var variable = LocalVariable(
         parameter.name,
         parameter.token,
         parameter.type,
       );
-      variable.finalVariable = parameter.fieldFormal;
+      variable.finalVariable = initializing;
       result.variables.add(variable);
-      if (!parameter.fieldFormal)
+      if (!initializing)
         binder.scopes[parameters].variables.add(parameter.binding);
       if (initializers >= 0)
         binder.scopes[initializers].variables.add(parameter.binding);
     }
     i++;
+  }
+  if (superCall != null) {
+    var argument = 1;
+    for (final parameter in syntax.parameters) {
+      if (!parameter.superFormal) continue;
+      var value = superCall.children[argument++];
+      if (value.kind == astNamedArgument) value = value.children[0];
+      value.binding = parameter.binding;
+    }
   }
   i = 0;
   while (i < syntax.initializers.length) {

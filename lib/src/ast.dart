@@ -187,6 +187,7 @@ class AstParameter {
   AstType type;
   String name;
   bool fieldFormal;
+  bool superFormal = false;
   int token;
   int binding = -1;
   int kind = astRequiredPositional;
