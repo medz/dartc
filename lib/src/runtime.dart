@@ -1972,102 +1972,99 @@ int rtTraceObject(int value, int worklist, int capacity) {
   if (value == 0) return 0;
   var descriptor = rtObjectDescriptor(value);
   var kind = nativeLoad64(descriptor + descriptorKindOffset);
-  if (kind == descriptorString ||
-      kind == descriptorIntBox ||
-      kind == descriptorWordArray) {
-    return 0;
-  }
-  if (kind == descriptorList) {
-    var count = rtRootAppend(
-      nativeLoad64(value + listBackingOffset),
-      storageRef,
-      worklist,
-      0,
-      capacity,
-    );
-    return rtTraceType(
-      nativeLoad64(value + listTypeOffset),
-      worklist,
-      count,
-      capacity,
-    );
-  }
-  if (kind == descriptorType) {
-    // Static types only refer to other static metadata.
-    if ((nativeLoad64(value + objectFlagsOffset) & objectStaticRelative) != 0)
+  switch (kind) {
+    case descriptorString || descriptorIntBox || descriptorWordArray:
       return 0;
-    var typeKind = nativeLoad64(value + typeKindOffset);
-    if (typeKind == typeKindList || typeKind == typeKindNullable)
-      return rtTraceType(rtTypeArgument(value), worklist, 0, capacity);
-    if (typeKind != typeKindFunction ||
-        nativeLoad64(value + typeArgumentOffset) == 0)
-      return 0;
-    // A heap function type owns its signature inline, after the type record.
-    var signature = rtTypeArgument(value);
-    var result =
-        signature + nativeLoad64(signature + functionSignatureResultOffset);
-    var count = rtTraceType(result, worklist, 0, capacity);
-    var parameters = nativeLoad64(signature + functionSignatureCountOffset);
-    var i = 0;
-    while (i < parameters) {
-      var entry = signature + functionSignatureParametersOffset + i * 8;
-      count = rtTraceType(
-        entry + nativeLoad64(entry),
-        worklist,
-        count,
-        capacity,
-      );
-      i++;
-    }
-    return count;
-  }
-  var count = 0;
-  if (kind == descriptorClass || kind == descriptorFunction) {
-    if (kind == descriptorFunction)
-      count = rtTraceType(rtFunctionType(value), worklist, count, capacity);
-    var fields = nativeLoad64(descriptor + descriptorFieldsOffset);
-    var bitmap = nativeLoad64(descriptor + descriptorRefBitmapOffset);
-    if (bitmap != 0) {
-      count = rtTraceBitmap(
-        value,
-        fields,
-        descriptor + bitmap,
+    case descriptorList:
+      var count = rtRootAppend(
+        nativeLoad64(value + listBackingOffset),
         storageRef,
         worklist,
-        count,
+        0,
         capacity,
       );
-    }
-    bitmap = nativeLoad64(descriptor + descriptorTaggedBitmapOffset);
-    if (bitmap != 0) {
-      count = rtTraceBitmap(
-        value,
-        fields,
-        descriptor + bitmap,
-        storageTagged,
+      return rtTraceType(
+        nativeLoad64(value + listTypeOffset),
         worklist,
         count,
         capacity,
       );
-    }
-    return count;
+    case descriptorType:
+      // Static types only refer to other static metadata.
+      if ((nativeLoad64(value + objectFlagsOffset) & objectStaticRelative) != 0)
+        return 0;
+      var typeKind = nativeLoad64(value + typeKindOffset);
+      if (typeKind == typeKindList || typeKind == typeKindNullable)
+        return rtTraceType(rtTypeArgument(value), worklist, 0, capacity);
+      if (typeKind != typeKindFunction ||
+          nativeLoad64(value + typeArgumentOffset) == 0)
+        return 0;
+      // A heap function type owns its signature inline, after the type record.
+      var signature = rtTypeArgument(value);
+      var result =
+          signature + nativeLoad64(signature + functionSignatureResultOffset);
+      var count = rtTraceType(result, worklist, 0, capacity);
+      var parameters = nativeLoad64(signature + functionSignatureCountOffset);
+      var i = 0;
+      while (i < parameters) {
+        var entry = signature + functionSignatureParametersOffset + i * 8;
+        count = rtTraceType(
+          entry + nativeLoad64(entry),
+          worklist,
+          count,
+          capacity,
+        );
+        i++;
+      }
+      return count;
+    case descriptorClass || descriptorFunction:
+      var count = 0;
+      if (kind == descriptorFunction)
+        count = rtTraceType(rtFunctionType(value), worklist, count, capacity);
+      var fields = nativeLoad64(descriptor + descriptorFieldsOffset);
+      var bitmap = nativeLoad64(descriptor + descriptorRefBitmapOffset);
+      if (bitmap != 0) {
+        count = rtTraceBitmap(
+          value,
+          fields,
+          descriptor + bitmap,
+          storageRef,
+          worklist,
+          count,
+          capacity,
+        );
+      }
+      bitmap = nativeLoad64(descriptor + descriptorTaggedBitmapOffset);
+      if (bitmap != 0) {
+        count = rtTraceBitmap(
+          value,
+          fields,
+          descriptor + bitmap,
+          storageTagged,
+          worklist,
+          count,
+          capacity,
+        );
+      }
+      return count;
+    case descriptorRefArray || descriptorTaggedArray:
+      var count = 0;
+      var representation = storageRef;
+      if (kind == descriptorTaggedArray) representation = storageTagged;
+      var length = nativeLoad64(value + arrayLengthOffset);
+      var i = 0;
+      while (i < length) {
+        count = rtRootAppend(
+          nativeLoad64(value + arrayDataOffset + i * 8),
+          representation,
+          worklist,
+          count,
+          capacity,
+        );
+        i = i + 1;
+      }
+      return count;
+    default:
+      return rtRootFailure();
   }
-  if (kind != descriptorRefArray && kind != descriptorTaggedArray) {
-    return rtRootFailure();
-  }
-  var representation = storageRef;
-  if (kind == descriptorTaggedArray) representation = storageTagged;
-  var length = nativeLoad64(value + arrayLengthOffset);
-  var i = 0;
-  while (i < length) {
-    count = rtRootAppend(
-      nativeLoad64(value + arrayDataOffset + i * 8),
-      representation,
-      worklist,
-      count,
-      capacity,
-    );
-    i = i + 1;
-  }
-  return count;
 }
