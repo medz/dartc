@@ -43,13 +43,11 @@ const int patternList = 10;
 const int patternRest = 11;
 const int patternAssignedVariable = 12;
 
-class AstPatternField {
-  final String name;
-  final int token;
-  final AstPattern pattern;
-
-  AstPatternField(this.name, this.token, this.pattern);
-}
+class AstPatternField(
+  final String name,
+  final int token,
+  final AstPattern pattern,
+);
 
 class AstPattern {
   final int kind;
@@ -66,13 +64,11 @@ class AstPattern {
   AstPattern(this.kind, this.token, this.text, this.children);
 }
 
-class AstSwitchArm {
-  final AstPattern pattern;
-  final AstExpression? guard;
-  final AstExpression value;
-
-  AstSwitchArm(this.pattern, this.guard, this.value);
-}
+class AstSwitchArm(
+  final AstPattern pattern,
+  final AstExpression? guard,
+  final AstExpression value,
+);
 
 const String astCallIdentifier = 'identifier';
 const String astCallSelector = 'selector';

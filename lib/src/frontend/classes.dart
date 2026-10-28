@@ -61,19 +61,12 @@ MemberBinding? classImplementation(
       : null;
 }
 
-class ClassSignature {
-  final int result;
-  final List<int> parameters;
-  final List<AstParameter> formals;
-  final List<int> typeParameters;
-
-  ClassSignature(
-    this.result,
-    this.parameters,
-    this.formals,
-    this.typeParameters,
-  );
-}
+class ClassSignature(
+  final int result,
+  final List<int> parameters,
+  final List<AstParameter> formals,
+  final List<int> typeParameters,
+);
 
 ClassSignature classSignature(
   MemberBinding member,

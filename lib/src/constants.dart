@@ -47,12 +47,10 @@ class ConstructorConstants {
   }
 }
 
-class _ConstantInvocation {
-  final ConstructorConstants owner;
-  final List<ConstantValue> parameters;
-
-  _ConstantInvocation(this.owner, this.parameters);
-}
+class _ConstantInvocation(
+  final ConstructorConstants owner,
+  final List<ConstantValue> parameters,
+);
 
 class ConstantContext {
   SymbolTable symbols;

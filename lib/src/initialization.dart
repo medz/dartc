@@ -11,29 +11,15 @@ const int constructorDeclaration = 0;
 const int constructorFormal = 1;
 const int constructorExplicit = 2;
 
-class ConstructorStep {
-  final int kind;
-  final int index;
-  final int field;
+class const ConstructorStep(final int kind, final int index, final int field);
 
-  const ConstructorStep(this.kind, this.index, this.field);
-}
-
-class ConstructorPlan {
-  final List<ConstructorStep> steps;
-  final int redirectTarget;
-  final int superTarget;
-  final AstExpression? superCall;
-  final List<int> superParameters;
-
-  const ConstructorPlan(
-    this.steps,
-    this.redirectTarget, [
-    this.superTarget = -1,
-    this.superCall,
-    this.superParameters = const <int>[],
-  ]);
-}
+class const ConstructorPlan(
+  final List<ConstructorStep> steps,
+  final int redirectTarget, [
+  final int superTarget = -1,
+  final AstExpression? superCall,
+  final List<int> superParameters = const <int>[],
+]);
 
 Never _initError(SymbolTable symbols, int token, String message) {
   sourceError(symbols.program, symbols.program.tokens[token], message);
