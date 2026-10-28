@@ -72,11 +72,11 @@ Keep bin/ and lib/ together. Add this bundle's bin directory to PATH,
 then compile with `dartc hello.dart -o hello` and run `./hello`.
 The compiler and output executables do not need the Dart SDK or VM.
 
-Language implementation is in progress. Captures, inheritance, general generics,
-exceptions, async code and most SDK libraries are not implemented.
-Managed storage is retained until process exit.
+Language implementation is in progress; see the specification tracker for
+supported behavior and remaining gaps. Managed storage is retained until process exit.
 
-Usage and compatibility: https://github.com/medz/dartc/tree/v$version
+Usage: https://github.com/medz/dartc/tree/v$version
+Compatibility: https://github.com/medz/dartc/tree/v$version/specs
 License: MIT (included).
 ''');
     final archive = File('${temporary.path}/$name.tar.gz');
