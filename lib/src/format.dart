@@ -146,6 +146,7 @@ class ConstantLayout {
   List<int> signatureOffsets = <int>[];
   List<_CaptureDescriptor?> closureDescriptors = <_CaptureDescriptor?>[];
   List<_CaptureDescriptor?> captureCellDescriptors = <_CaptureDescriptor?>[];
+  List<_CaptureDescriptor?> lateCellDescriptors = <_CaptureDescriptor?>[];
   int functionDescriptorOffset = -1;
   int typeDescriptorOffset = -1;
   List<int> refBitmapOffsets = <int>[];
@@ -231,6 +232,7 @@ ConstantLayout layoutConstants(int start) {
   List<int> callableOffsets = <int>[];
   List<_CaptureDescriptor?> closureDescriptors = <_CaptureDescriptor?>[];
   List<_CaptureDescriptor?> captureCellDescriptors = <_CaptureDescriptor?>[];
+  List<_CaptureDescriptor?> lateCellDescriptors = <_CaptureDescriptor?>[];
   List<int> signatureOffsets = <int>[];
   List<int> refBitmapOffsets = <int>[];
   List<int> taggedBitmapOffsets = <int>[];
@@ -268,6 +270,7 @@ ConstantLayout layoutConstants(int start) {
   i = 0;
   while (i < dartTypes.length) {
     captureCellDescriptors.add(null);
+    lateCellDescriptors.add(null);
     i++;
   }
   i = 0;
@@ -305,6 +308,13 @@ ConstantLayout layoutConstants(int start) {
       var type = addressTargets[i];
       if (captureCellDescriptors[type] == null)
         captureCellDescriptors[type] = _captureDescriptor(<int>[type], 0);
+    } else if (addressKinds[i] == 10) {
+      final type = addressTargets[i];
+      lateCellDescriptors[type] ??= _captureDescriptor(<int>[
+        type,
+        tBool,
+        tFunction,
+      ], 0);
     }
     i++;
   }
@@ -474,6 +484,7 @@ ConstantLayout layoutConstants(int start) {
   for (var descriptors in <List<_CaptureDescriptor?>>[
     closureDescriptors,
     captureCellDescriptors,
+    lateCellDescriptors,
   ]) {
     for (var descriptor in descriptors) {
       if (descriptor != null) {
@@ -501,6 +512,7 @@ ConstantLayout layoutConstants(int start) {
   for (var descriptors in <List<_CaptureDescriptor?>>[
     closureDescriptors,
     captureCellDescriptors,
+    lateCellDescriptors,
   ]) {
     for (var descriptor in descriptors) {
       if (descriptor != null) {
@@ -642,6 +654,7 @@ ConstantLayout layoutConstants(int start) {
     ..callableOffsets = callableOffsets
     ..closureDescriptors = closureDescriptors
     ..captureCellDescriptors = captureCellDescriptors
+    ..lateCellDescriptors = lateCellDescriptors
     ..signatureOffsets = signatureOffsets
     ..functionDescriptorOffset = functionDescriptorOffset
     ..typeDescriptorOffset = typeDescriptorOffset
@@ -688,6 +701,9 @@ List<int> createMachOExecutable() {
     } else if (addressKinds[site] == 8) {
       target =
           base + constants.captureCellDescriptors[addressTargets[site]]!.offset;
+    } else if (addressKinds[site] == 10) {
+      target =
+          base + constants.lateCellDescriptors[addressTargets[site]]!.offset;
     } else {
       target = base + constants.typeOffsets[addressTargets[site]];
     }
@@ -852,6 +868,9 @@ List<int> createElfExecutable() {
     } else if (addressKinds[site] == 8) {
       target =
           base + constants.captureCellDescriptors[addressTargets[site]]!.offset;
+    } else if (addressKinds[site] == 10) {
+      target =
+          base + constants.lateCellDescriptors[addressTargets[site]]!.offset;
     } else {
       target = base + constants.typeOffsets[addressTargets[site]];
     }
@@ -1156,6 +1175,22 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
     }
     cellType++;
   }
+  for (final captured in layout.lateCellDescriptors) {
+    if (captured != null) {
+      imageDescriptor(
+        lateCellClassId,
+        lateCellInstanceBytes,
+        3,
+        captured.referencesOffset < 0
+            ? 0
+            : captured.referencesOffset - captured.offset,
+        descriptorClass,
+        captured.taggedOffset < 0 ? 0 : captured.taggedOffset - captured.offset,
+        0,
+        0,
+      );
+    }
+  }
   descriptor = 0;
   while (descriptor < classSizes.length) {
     var fields = (classSizes[descriptor] - objectHeaderBytes) ~/ 8;
@@ -1171,6 +1206,7 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
   for (var descriptors in <List<_CaptureDescriptor?>>[
     layout.closureDescriptors,
     layout.captureCellDescriptors,
+    layout.lateCellDescriptors,
   ]) {
     for (var captured in descriptors) {
       if (captured != null) {

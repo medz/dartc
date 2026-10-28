@@ -12,7 +12,8 @@ main 使用进程级 bump arena，不执行 GC、空闲块复用或 arena 释放
 
 | 对象 | 负载与扫描规则 |
 | --- | --- |
-| 普通实例 | 字段从 `+16` 开始，按声明表示分为 Word、Ref、Tagged |
+| 普通实例 | 字段从 `+16` 开始，按声明表示分为 Word、Ref、Tagged；late 状态字追加在语言字段之后，不参与扫描 |
+| 捕获的 late cell | `+16` 为声明类型的负载，`+24` 为已初始化标志，`+32` 为初始化器 Ref；初始负载为零，成功写入后清空初始化器 |
 | String | `+16` 长度，`+24` 起为 UTF-16 数据；无托管子引用 |
 | List | `+16` 长度、`+24` 容量、`+32` backing Ref、`+40` TypeRef 引用 |
 | backing array | `+16` 已初始化前缀长度，`+24` 起存元素；Word、Ref、Tagged 分别使用对应描述符，仅扫描有效前缀 |
@@ -40,6 +41,12 @@ List 标志 `objectListFixed` / `objectListReadOnly` 分别限制长度变化和
 [binary64.dart](../lib/src/binary64.dart) 由编译器常量求值与目标运行时共用。十进制解析以整数比值执行精确舍入，输出按相邻 binary64 值的舍入区间选择最短十进制表示；余数算法使用整数有效位和指数。算法保持为普通 Dart 源码，原语只提供机器运算。
 
 `nativeValueBits(Object?)` 暴露内部 Tagged word；`nativeValueFromBits(int)` 恢复同一表示。恢复的 word 必须来自合法的当前 ABI 值，不能把任意地址或浮点位模式当对象。转换本身不分配、不建立根，也不转移所有权。暴露的对象地址跨可能 GC 的调用前，调用方必须保留对应托管引用或登记 runtime root；转换的两侧各按自身表示参与根分析。数值字符串入口通过这个边界连接普通 Dart String 与原有的运行时地址接口。
+
+## 进程终止
+
+受信原语 `nativeExit(int status)` 的结果类型为 `Never`；绑定与 SSA 验证参数、结果及原生副作用。发码使用目标平台的进程退出入口，系统调用异常返回时触发硬件陷阱。`rtHostExit`、构建结束和致命错误出口均传播不返回的契约，不生成占位返回值或忙等循环。进程终止不提供 Dart 异常捕获与展开。
+
+实现入口：[ir.dart](../lib/src/ir.dart) 的原语签名、[emit.dart](../lib/src/emit.dart) 的 `emitExit()`；行为由 [behavior_test.dart](../test/behavior_test.dart) 的退出状态与先行副作用用例验证，签名及 effects 由 [ssa_test.dart](../test/ssa_test.dart) 验证。
 
 ## NoGC 提示
 
@@ -70,7 +77,7 @@ NoGC 检查的是函数体；分配/GC 角色描述的是调用对外的影响�
 ## 保守检查边界
 
 - 未知间接调用被拒绝，包括没有直接目标证明的原生函数地址调用。
-- 尚未消除的受检转换和动态布尔消费按潜在 Dart 异常保守拒绝。不能用当前失败路径直接退出进程或不再分配托管内存来豁免语言义务。
+- 尚未消除的受检转换、动态布尔消费和 late 失败路径按潜在 Dart 异常保守拒绝。不能用当前失败路径直接退出进程或不再分配托管内存来豁免语言义务。
 - 受检 String 索引、切片、字符代码构造，以及带 start 边界的 `startsWith` / `indexOf` / `lastIndexOf` 保留潜在 Dart 失败义务；`int.parse` 同样保留格式失败义务。当前不为具体索引或 start 作范围证明。[String API](https://api.dart.dev/dart-core/String-class.html)、[int.parse](https://api.dart.dev/dart-core/int/parse.html)
 - List 读取、写入、增删、清空和 filled 构造保留可能的范围、类型或固定长度/只读失败义务；即使当前调用使用可变 List，也不能证明整个通用函数体无失败路径。`String.length`、`List.length`、`identical` 和布尔编码不因此被一概拒绝；`endsWith` 遇过长后缀返回 false，没有受检 start 参数。[List API](https://api.dart.dev/dart-core/List-class.html)、[endsWith](https://api.dart.dev/dart-core/String/endsWith.html)
 - 除法和取模需有已知非零常量除数；移位需有非负常量计数，或通过与非负常量掩码做按位与来证明非负。对其他除数和移位计数尚不作一般范围证明。

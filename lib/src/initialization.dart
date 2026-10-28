@@ -29,6 +29,7 @@ Never _initError(SymbolTable symbols, int token, String message) {
 }
 
 bool _requiresInitializer(SymbolTable symbols, AstVariable variable) {
+  if (variable.lateVariable) return false;
   if (variable.modifier == 'final' || variable.modifier == 'const') return true;
   return variable.type.name != '' &&
       !typeCanBeNull(resolveType(symbols, variable.type));
@@ -144,13 +145,15 @@ ConstructorPlan planConstructorInitializers(
   var f = 0;
   while (f < owner.fields.length) {
     var field = owner.fields[f];
-    if (syntax.constant && field.modifier != 'final')
+    if (syntax.constant && (field.modifier != 'final' || field.lateVariable))
       _initError(
         symbols,
         field.token,
         'const constructor requires final fields',
       );
-    if (redirectTarget < 0 && field.initializer.isNotEmpty) {
+    if (redirectTarget < 0 &&
+        field.initializer.isNotEmpty &&
+        !field.lateVariable) {
       initialized[f] = 1;
       steps.add(ConstructorStep(constructorDeclaration, f, f));
     }
@@ -169,7 +172,10 @@ ConstructorPlan planConstructorInitializers(
         parameter.token,
       );
       if ((initialized[field] & 2) != 0 ||
-          initialized[field] != 0 && owner.fields[field].modifier == 'final')
+          initialized[field] != 0 && owner.fields[field].modifier == 'final' ||
+          owner.fields[field].lateVariable &&
+              owner.fields[field].modifier == 'final' &&
+              owner.fields[field].initializer.isNotEmpty)
         _initError(symbols, parameter.token, 'field initialized twice');
       initialized[field] |= 2;
       steps.add(ConstructorStep(constructorFormal, p, field));
@@ -192,7 +198,10 @@ ConstructorPlan planConstructorInitializers(
       initializer.token,
     );
     if ((initialized[field] & 6) != 0 ||
-        initialized[field] != 0 && owner.fields[field].modifier == 'final')
+        initialized[field] != 0 && owner.fields[field].modifier == 'final' ||
+        owner.fields[field].lateVariable &&
+            owner.fields[field].modifier == 'final' &&
+            owner.fields[field].initializer.isNotEmpty)
       _initError(symbols, initializer.token, 'field initialized twice');
     initialized[field] |= 4;
     steps.add(ConstructorStep(constructorExplicit, i, field));

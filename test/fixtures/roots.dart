@@ -887,6 +887,90 @@ void floatingRoots(int queue, int edges) {
   check(nullable[0] == 1.5);
 }
 
+Leaf Function() lateRootFactory(Leaf source) {
+  late final Leaf result = Leaf(source.marker + 1);
+  return () => result;
+}
+
+Object? Function() lateTaggedRootFactory(Leaf source) {
+  late Object? result = source;
+  return () => result;
+}
+
+List<Leaf Function()> lateSharedRootFactory() {
+  late Leaf result;
+  return [() => result, () => result = Leaf(953)];
+}
+
+int Function() lateWordRootFactory(int raw) {
+  late int word = raw;
+  return () => word;
+}
+
+class LateRoot {
+  late Leaf reference = Leaf(955);
+  late Object? tagged;
+  late double scalar = 2.5;
+}
+
+void lateRoots(int queue, int edges) {
+  final read = lateRootFactory(Leaf(951));
+  final closure = rt.nativeValueBits(read);
+  check(rt.rtTraceObject(closure, edges, capacity) == 1);
+  final cell = rt.nativeLoad64(edges);
+  check(rt.nativeLoad64(rt.rtObjectDescriptor(cell)) == abi.lateCellClassId);
+  // Before reading, only the initializer retains the source object.
+  check(rt.rtTraceObject(cell, edges, capacity) == 1);
+  final initializer = rt.nativeLoad64(edges);
+  check(rt.rtTraceObject(initializer, edges, capacity) == 1);
+  final source = findMarker(edges, 1, 951);
+  check(source != 0);
+  check(contains(queue, snapshot(queue), closure));
+  check(read().marker == 952);
+  // Successful initialization releases the thunk and keeps the typed payload.
+  check(rt.rtTraceObject(cell, edges, capacity) == 1);
+  check(findMarker(edges, 1, 952) != 0);
+  check(contains(queue, snapshot(queue), closure));
+  check(read().marker == 952);
+
+  final shared = lateSharedRootFactory();
+  final getter = rt.nativeValueBits(shared[0]);
+  final setter = rt.nativeValueBits(shared[1]);
+  check(rt.rtTraceObject(getter, edges, capacity) == 1);
+  final empty = rt.nativeLoad64(edges);
+  check(rt.rtTraceObject(empty, edges, capacity) == 0);
+  check(rt.rtTraceObject(setter, edges, capacity) == 1);
+  check(rt.nativeLoad64(edges) == empty);
+  check(shared[1]().marker == 953 && shared[0]().marker == 953);
+  check(rt.rtTraceObject(empty, edges, capacity) == 1);
+  check(findMarker(edges, 1, 953) != 0);
+
+  final tagged = lateTaggedRootFactory(Leaf(954));
+  check(rt.rtTraceObject(rt.nativeValueBits(tagged), edges, capacity) == 1);
+  final taggedCell = rt.nativeLoad64(edges);
+  check(tagged() is Leaf);
+  check(rt.rtTraceObject(taggedCell, edges, capacity) == 1);
+  check(findMarker(edges, 1, 954) != 0);
+  check((tagged() as Leaf).marker == 954);
+  final word = lateWordRootFactory(source);
+  check(word() == source);
+  check(rt.rtTraceObject(rt.nativeValueBits(word), edges, capacity) == 1);
+  check(rt.rtTraceObject(rt.nativeLoad64(edges), edges, capacity) == 0);
+  check(word() == source);
+
+  final object = LateRoot();
+  final address = rt.nativeValueBits(object);
+  check(rt.rtTraceObject(address, edges, capacity) == 0);
+  check(object.scalar == 2.5);
+  check(rt.rtTraceObject(address, edges, capacity) == 0);
+  object.tagged = Leaf(956);
+  check(object.reference.marker == 955);
+  check(rt.rtTraceObject(address, edges, capacity) == 2);
+  check(findMarker(edges, 2, 955) != 0);
+  check(findMarker(edges, 2, 956) != 0);
+  check(object.scalar == 2.5 && (object.tagged as Leaf).marker == 956);
+}
+
 void main(List<String> args) {
   if (args.isNotEmpty && args[0] == 'capacity') {
     capacityFailure(Leaf(190));
@@ -894,6 +978,7 @@ void main(List<String> args) {
   }
   var queue = rt.rtMap(capacity * 8);
   var edges = rt.rtMap(capacity * 8);
+  lateRoots(queue, edges);
   typeGraphRoots(queue, edges);
   genericTypeRoots(queue, edges);
   listPatternRoots(queue, edges);

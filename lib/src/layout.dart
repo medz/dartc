@@ -55,6 +55,10 @@ const int boundMethodClassId = -9;
 // Internal capture cells do not belong to the source class namespace.
 const int captureCellClassId = -8;
 const int captureCellInstanceBytes = objectHeaderBytes + 8;
+
+// Captured late locals store a typed payload, initialized bit, and initializer.
+const int lateCellClassId = -12;
+const int lateCellInstanceBytes = objectHeaderBytes + 24;
 const int functionSignatureResultOffset = 0;
 const int functionSignatureRequiredOffset = 8;
 const int functionSignatureCountOffset = 16;

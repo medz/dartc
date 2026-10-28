@@ -152,8 +152,14 @@ class AstVariable {
   String name;
   List<AstExpression> initializer;
   String modifier;
+  bool lateVariable = false;
+  AstFunction? lateInitializer;
   int token;
   int binding = -1;
+
+  bool get hasSetter =>
+      modifier != 'const' &&
+      (modifier != 'final' || lateVariable && initializer.isEmpty);
 
   AstVariable(
     this.type,
@@ -161,7 +167,12 @@ class AstVariable {
     this.initializer,
     this.modifier,
     this.token,
-  );
+  ) {
+    if (modifier.startsWith('late ')) {
+      lateVariable = true;
+      modifier = modifier.substring(5);
+    }
+  }
 }
 
 const int astRequiredPositional = 0;

@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Add lazy `late` locals, captured variables, top-level/static variables and typed instance fields, with final assignment checks and reentrant initialization.
 - Add native double literals, arithmetic and `/`, including mixed numeric values, constants, nullable values, generics and collections.
 - Add decimal parsing and shortest round-trip formatting, numeric conversions, comparisons and double constants/properties.
 - Advance the source runtime ABI to 15 for boxed doubles and numeric metadata. Keep compiler, runtime and layout inputs matched when rebuilding.

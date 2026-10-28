@@ -21,6 +21,7 @@ int runtimeFunction(int builtin, int castType) {
     print('Library output cannot use managed runtime operations.');
     hostExit(1);
   }
+  if (builtin == bLateError) return abiFunction('rtLateError', 0);
   if (builtin == bBoxDouble) return abiFunction('rtBoxDouble', 0);
   if (builtin == bDoubleToString) return abiFunction('rtDoubleToString', 0);
   if (builtin == bDoubleModulo) return abiFunction('rtDoubleModulo', 0);

@@ -4454,7 +4454,200 @@ void floatingContexts() {
   print(trace);
 }
 
+int lateReads = 0;
+int lateEffect(int value) {
+  lateReads++;
+  return value;
+}
+
+late int lateGlobal = lateEffect(10);
+late final int lateOnce;
+late int? lateNullable;
+int lateRecursions = 0;
+late int lateRecursive = ++lateRecursions == 1 ? lateRecursive + 1 : 10;
+int ordinaryRecursive = ++lateRecursions == 3 ? ordinaryRecursive + 1 : 20;
+late int lateOverwritten = lateWrite();
+int lateWrite() {
+  lateOverwritten = 4;
+  return 5;
+}
+
+late final int lateAccessor = 1;
+set lateAccessor(int value) => print(value);
+
+class LateFields {
+  int base;
+  int recursions = 0;
+  late int value = lateEffect(this.base);
+  late final int once;
+  late int? nullable;
+  late final double fraction = base / 2;
+  late int recursive = ++recursions == 1 ? recursive + 1 : 10;
+  late int overwritten = write();
+  late int Function() callback = () => base;
+  late final int paired = 2;
+  set paired(int value) => print(value);
+  static late int shared = lateEffect(3);
+  static late final double sharedOnce;
+  static late int? sharedNullable;
+  static late final int sharedPaired = 3;
+  static set sharedPaired(int value) => print(value);
+  LateFields(this.base);
+
+  int write() {
+    overwritten = 4;
+    return 5;
+  }
+
+  int Function() get reader =>
+      () => value;
+  int read() => value;
+}
+
+class LateInitialized {
+  late final int value;
+  LateInitialized.base(this.value);
+  LateInitialized() : this.base(9);
+}
+
+class LateSkipped {
+  late int value = lateEffect(100);
+  LateSkipped() : value = 3;
+}
+
+T lateGeneric<T>(T value) {
+  late T result = value;
+  return result;
+}
+
+void lateBranch(bool branch) {
+  late final int value;
+  if (branch) value = 1;
+  if (!branch) value = 2;
+  print(value);
+}
+
+int late(int value) => value + 1;
+
+void lateValues() {
+  print(late(2));
+  {
+    var late = 4;
+    late++;
+    print(late);
+  }
+  late final int firstLocal = lateEffect(7), nextLocal = firstLocal + 1;
+  print(lateReads);
+  print([nextLocal, firstLocal, nextLocal, lateReads]);
+  var source = 1;
+  late int local = lateEffect(source);
+  source = 2;
+  print(lateReads);
+  print([local, local, lateReads]);
+  late int skipped = lateEffect(100);
+  skipped = 9;
+  late final inferred = lateEffect(3);
+  late int? nullable = null;
+  late double floating = 1;
+  floating += 2.5;
+  late List<int> context = [];
+  context.add(1);
+  late int Function(int) callback = (n) => n + 1;
+  late int? promoted = 1;
+  print([
+    skipped,
+    inferred,
+    inferred,
+    nullable,
+    nullable,
+    floating,
+    context,
+    callback(3),
+    promoted + 1,
+    lateReads,
+  ]);
+
+  late int captured;
+  void set(int n) {
+    captured = n;
+  }
+
+  int read() => captured;
+  set(3);
+  print(read());
+  set(4);
+  print(read());
+  late final int once;
+  void initialize() {
+    once = 5;
+  }
+
+  initialize();
+  print(once);
+  late int delayed = lateEffect(6);
+  int readDelayed() => delayed;
+  print([readDelayed(), readDelayed(), lateReads]);
+  int Function()? reenter;
+  var recursions = 0;
+  late int recursive = ++recursions == 1 ? reenter!() + 1 : 4;
+  reenter = () => recursive;
+  print([recursive, recursions]);
+  // A wildcard does not cause a lazy initializer to run.
+  late var _ = lateEffect(100);
+  print(lateReads);
+  lateBranch(true);
+  lateBranch(false);
+  print([lateGeneric<double>(2.5), lateGeneric<String>('late')]);
+  final callbacks = <int Function()>[];
+  for (var i = 0; i < 2; i++) {
+    late int value = lateEffect(i);
+    callbacks.add(() => value);
+  }
+  print([callbacks[0](), callbacks[1](), callbacks[0](), lateReads]);
+
+  lateGlobal = 2;
+  lateOnce = 3;
+  lateNullable = null;
+  print([lateGlobal, lateOnce, lateNullable, lateReads]);
+  print([lateRecursive, ordinaryRecursive, lateRecursions, lateOverwritten]);
+  lateAccessor = 4;
+  print(lateAccessor);
+  final first = LateFields(6), second = LateFields(8);
+  first.value = 3;
+  first.once = 4;
+  first.nullable = null;
+  print([
+    first.read(),
+    second.reader(),
+    second.reader(),
+    first.once,
+    first.nullable,
+    first.fraction,
+    first.fraction,
+    first.recursive,
+    first.overwritten,
+    first.callback(),
+    lateReads,
+  ]);
+  if (second case LateFields(value: var value)) print(value);
+  print([LateInitialized().value, LateSkipped().value, lateReads]);
+  first.paired = 5;
+  print(first.paired);
+  LateFields.sharedOnce = 2.5;
+  LateFields.sharedNullable = null;
+  LateFields.sharedPaired = 6;
+  print([
+    LateFields.shared,
+    LateFields.shared,
+    LateFields.sharedOnce,
+    LateFields.sharedNullable,
+    LateFields.sharedPaired,
+    lateReads,
+  ]);
+}
+
 void main(List<String> args) {
+  lateValues();
   doubleValues();
   floatingContexts();
   genericFunctions();

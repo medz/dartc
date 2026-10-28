@@ -199,7 +199,7 @@ ClassMembers bindClassMembers(
     if (member.field >= 0 ||
         member.method >= 0 ||
         member.getter >= 0 ||
-        member.setter >= 0 && field.modifier != 'final') {
+        member.setter >= 0 && field.hasSetter) {
       _memberError(source, field.token, 'duplicate member ' + field.name);
     }
     member.field = i;
@@ -225,9 +225,7 @@ ClassMembers bindClassMembers(
     if (member.staticField >= 0 ||
         member.method >= 0 ||
         member.getter >= 0 ||
-        member.setter >= 0 &&
-            field.modifier != 'final' &&
-            field.modifier != 'const') {
+        member.setter >= 0 && field.hasSetter) {
       _memberError(
         source,
         field.token,

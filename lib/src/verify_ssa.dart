@@ -204,15 +204,16 @@ class _SsaVerifier {
       if (callee.parameterTypes.length != count || result != expectedResult)
         fail('call metadata');
     } else if (op == opBuiltin) {
-      if (!(target >= bPrintString && target <= bNumberProperty ||
+      if (!(target >= bPrintString && target <= bLateError ||
           target >= bNativeLoad64 &&
-              target <= bNativeValueFromBits &&
+              target <= bNativeExit &&
               target != bNativeMetadataAddress))
         fail('unknown SSA builtin');
       count = instruction.inputs.length;
       if (target >= bNativeLoad64) count = nativeBuiltinArity(target);
       // These normalized representation operations have explicit SSA shapes.
       // General library/primitive signatures remain owned by their producers.
+      if (target == bLateError) count = 1;
       if (target >= bBoxDouble && target <= bNumberProperty) {
         count =
             target == bDoubleModulo ||
@@ -260,6 +261,7 @@ class _SsaVerifier {
         op != opFunctionReference &&
         op != opClosureDescriptor &&
         op != opCaptureCellDescriptor &&
+        op != opLateCellDescriptor &&
         op != opTypeReference) {
       fail('unknown SSA operation');
     }
@@ -338,7 +340,7 @@ class _SsaVerifier {
                 closure.fieldTypes[0] != callee.parameterTypes[0]))
           fail('bound method receiver');
       }
-    } else if (op == opCaptureCellDescriptor) {
+    } else if (op == opCaptureCellDescriptor || op == opLateCellDescriptor) {
       type(target);
       if (result != tPointer) fail('capture cell descriptor');
     } else if (op == opTypeTest || op == opTypeCast) {
@@ -373,7 +375,10 @@ class _SsaVerifier {
               target == bListFilled) &&
           typeContainsParameters(result))
         fail('uninstantiated builtin type');
-      if (target >= bNativeLoad64) {
+      if (target == bLateError) {
+        expectInput(instruction, 0, tInt);
+        if (result != tNever) fail('late failure result');
+      } else if (target >= bNativeLoad64) {
         for (var input in instruction.inputs) {
           if (inputType(input) != nativeBuiltinInputType(target))
             fail('primitive operand type');

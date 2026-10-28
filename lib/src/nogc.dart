@@ -50,7 +50,8 @@ bool _ssaNonnegative(List<SsaInstruction?> definitions, int value) {
 
 bool _builtinThrows(int target) {
   // A raw abort implementation does not discharge a Dart failure obligation.
-  return target == bValueCast ||
+  return target == bLateError ||
+      target == bValueCast ||
       target == bValueCheck ||
       target == bListFilledTyped ||
       target == bValueBool ||

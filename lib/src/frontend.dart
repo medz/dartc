@@ -101,6 +101,13 @@ class PatternReadCache {
   PatternReadCache(this.parent, this.name, [this.first = -1, this.second = -1]);
 }
 
+class FeLateLocal {
+  final int state;
+  final int initializer;
+
+  FeLateLocal(this.state, this.initializer);
+}
+
 class FeFunctionState {
   final List<int> code = ir;
   final List<int> types = irTypes;
@@ -109,6 +116,7 @@ class FeFunctionState {
   final FunctionBindings bindings = feBindings;
   final List<int> bindingTypes = feBindingTypes;
   final List<int> bindingSlots = feBindingSlots;
+  final List<FeLateLocal?> lateLocals = feLateLocals;
   final List<int> slots = feSlotTypes;
   final int nextLocal = feNextLocal;
   final int implicitReceiverSlot = feImplicitReceiverSlot;
@@ -137,6 +145,7 @@ class FeFunctionState {
     feBindings = bindings;
     feBindingTypes = bindingTypes;
     feBindingSlots = bindingSlots;
+    feLateLocals = lateLocals;
     feSlotTypes = slots;
     feNextLocal = nextLocal;
     feImplicitReceiverSlot = implicitReceiverSlot;
@@ -160,23 +169,11 @@ class FeFunctionState {
 List<ConstantObject> feConstantObjects = <ConstantObject>[];
 List<int> feConstantGetters = <int>[];
 
-SourceProgram feSources = SourceProgram(
-  <SourceFile>[],
-  <int>[],
-  <Token>[],
-  -1,
-  0,
-  '',
-  -1,
-);
+late SourceProgram feSources;
 List<Token> feTokens = <Token>[];
 int feAt = 0;
-SymbolTable feSymbols = SymbolTable(feSources, <DeclarationSymbol>[]);
-ConstantContext feConstants = ConstantContext(
-  feSymbols,
-  <AstVariable>[],
-  <int>[],
-);
+late SymbolTable feSymbols;
+late ConstantContext feConstants;
 List<AstFunction> feFunctionNodes = <AstFunction>[];
 List<LocalFunctionBinding> feLocalFunctions = <LocalFunctionBinding>[];
 List<FeClosure> feLocalClosures = <FeClosure>[];
@@ -207,6 +204,7 @@ List<List<ConstantValue>> feParamDefaults = <List<ConstantValue>>[];
 FunctionBindings feBindings = FunctionBindings(<LocalVariable>[], -1);
 List<int> feBindingTypes = <int>[];
 List<int> feBindingSlots = <int>[];
+List<FeLateLocal?> feLateLocals = <FeLateLocal?>[];
 FlowState feFlow = flowCreate(0);
 List<int> feBreaks = <int>[];
 List<int> feContinues = <int>[];
@@ -225,6 +223,10 @@ List<List<int>> feClassConstructors = <List<int>>[];
 List<ConstructorPlan> feConstructorPlans = <ConstructorPlan>[];
 List<int> feFieldTypes = <int>[];
 List<int> feFieldIndices = <int>[];
+List<int> feLateFieldStates = <int>[];
+List<int> feLateFieldGetters = <int>[];
+List<int> feLateFieldSetters = <int>[];
+List<int> feLateFunctionFields = <int>[];
 List<int> feOwners = <int>[];
 List<int> feConstructors = <int>[];
 int fePragmaClass = -1;
@@ -374,6 +376,7 @@ int feRegisterFunction(
   feParamDefaults.add(<ConstantValue>[]);
   feFunctionNodes.add(syntax);
   feOwners.add(owner);
+  feLateFunctionFields.add(-1);
   if (constructor) {
     feConstructors.add(1);
     feClassConstructors[owner].add(id);
@@ -446,8 +449,7 @@ void feCollectDeclarations(AstUnit unit) {
       -1,
       syntax.token,
     );
-    feSymbols.declarations[symbol].writable =
-        syntax.modifier != 'final' && syntax.modifier != 'const';
+    feSymbols.declarations[symbol].writable = syntax.hasSetter;
     i++;
   }
   i = 0;
@@ -546,6 +548,9 @@ void feCollectDeclarations(AstUnit unit) {
       feFieldNodes.add(syntax);
       feFieldTypes.add(type);
       feFieldIndices.add(field);
+      feLateFieldStates.add(-1);
+      feLateFieldGetters.add(-1);
+      feLateFieldSetters.add(-1);
       if ((field & 63) == 0) {
         classPointerMasks[i].add(0);
         classTaggedMasks[i].add(0);
@@ -562,7 +567,17 @@ void feCollectDeclarations(AstUnit unit) {
       field++;
     }
     feClassFieldCounts[i] = field;
-    classSizes[i] = objectHeaderBytes + field * 8;
+    var storageFields = field;
+    for (var index = 0; index < fields.length; index++) {
+      if (fields[index].lateVariable) {
+        feLateFieldStates[feClassFieldStarts[i] + index] = storageFields++;
+      }
+    }
+    while (classPointerMasks[i].length * 64 < storageFields) {
+      classPointerMasks[i].add(0);
+      classTaggedMasks[i].add(0);
+    }
+    classSizes[i] = objectHeaderBytes + storageFields * 8;
     i++;
   }
   i = 0;
@@ -617,6 +632,41 @@ void feCollectDeclarations(AstUnit unit) {
       );
       method++;
     }
+    for (var index = 0; index < syntax.fields.length; index++) {
+      final field = feClassFieldStarts[i] + index;
+      final variable = syntax.fields[index];
+      if (!variable.lateVariable) continue;
+      final getter = AstFunction(
+        '#lateGet:' + variable.name,
+        variable.type,
+        const <AstParameter>[],
+        null,
+        variable.initializer.isEmpty ? null : variable.initializer[0],
+        false,
+        variable.token,
+        true,
+      );
+      final get = feRegisterFunction(getter, i, false);
+      feLateFunctionFields[get] = field;
+      feLateFieldGetters[field] = get;
+      if (variable.hasSetter) {
+        final setter = AstFunction(
+          '#lateSet:' + variable.name,
+          variable.type,
+          <AstParameter>[
+            AstParameter(variable.type, '#value', false, variable.token),
+          ],
+          null,
+          null,
+          false,
+          variable.token,
+          true,
+        );
+        final set = feRegisterFunction(setter, i, false);
+        feLateFunctionFields[set] = field;
+        feLateFieldSetters[field] = set;
+      }
+    }
     var toString = feMethod(i, 'toString', false);
     if (toString >= 0) {
       if (functions[toString].parameters != 1 ||
@@ -645,7 +695,7 @@ int feRegisterGlobal(AstVariable syntax, int owner) {
   feGlobalSources.add(source);
   feGlobalOwners.add(owner);
   feGlobalNodes.add(syntax);
-  if (owner < 0 && feRuntimeTokens > 0 && source == 0)
+  if (owner < 0 && feRuntimeTokens > 0 && source == 0 && !syntax.lateVariable)
     feRawGlobals.add(1);
   else
     feRawGlobals.add(0);
@@ -735,7 +785,9 @@ void feOperand(int op, int value) {
   if (op == opTypeReference) irTypes[position] = tObject;
   if (op == opDescriptor) irTypes[position] = tPointer;
   if (op == opConstantData) irTypes[position] = tPointer;
-  if (op == opClosureDescriptor || op == opCaptureCellDescriptor)
+  if (op == opClosureDescriptor ||
+      op == opCaptureCellDescriptor ||
+      op == opLateCellDescriptor)
     irTypes[position] = tPointer;
   if (op == opTypeTest) irTypes[position] = tBool;
   if (op == opTypeCast) irTypes[position] = value;
@@ -754,6 +806,7 @@ void feDuplicate(int type) {
 }
 
 int feBuiltinType(int id) {
+  if (id == bLateError) return tNever;
   if (id == bDoubleToString) return tString;
   if (id == bDoubleParse || id == bDoubleModulo || id == bValueToDouble)
     return tDouble;
@@ -764,7 +817,7 @@ int feBuiltinType(int id) {
     return tInt;
   if (id == bDoubleTryParse) return nullableType(tDouble);
   if (id == bNumberProperty) return tBool;
-  if (id >= bNativeFloat64Add && id <= bNativeValueFromBits)
+  if (id >= bNativeFloat64Add && id <= bNativeExit)
     return nativeBuiltinResultType(id);
   if (id == bFunctionEntry || id == bFunctionType) return tPointer;
   if (id == bFunctionInvoke) return tDynamic;
@@ -854,7 +907,9 @@ void feBindLocal(int binding, int type, int slot) {
 
 bool feCellBinding(int binding) {
   var variable = bindingDeclaration(feBindings, binding);
-  return variable.captured && variable.written && !variable.constant;
+  return variable.captured &&
+      (variable.written || variable.lateVariable) &&
+      !variable.constant;
 }
 
 bool fePromotable(int binding) {
@@ -912,12 +967,16 @@ int feReadLocal(int binding, int token) {
     return type;
   }
   feLocalSlot(binding, token);
-  if (feFlow.assignments[binding] != flowAssigned) {
+  if (feFlow.assignments[binding] != flowAssigned &&
+      (!variable.lateVariable ||
+          feFlow.assignments[binding] == flowUnassigned &&
+              !bindingDeclaration(feBindings, binding).writeCaptured)) {
     feAstError(
       token,
       'local is not definitely assigned: ' + feBindings.variables[binding].name,
     );
   }
+  if (variable.lateVariable) feInitializeLateLocal(binding, token);
   var stored = feLoadLocalStorage(binding);
   var type = feFlow.types[binding];
   feNarrowValue(stored, type);
@@ -1203,6 +1262,7 @@ void feCheckPrivate(int owner, String name, int token) {
 }
 
 int fePrimitive(String name) {
+  if (name == 'nativeExit') return bNativeExit;
   if (name == 'nativeValueBits') return bNativeValueBits;
   if (name == 'nativeValueFromBits') return bNativeValueFromBits;
   if (name == 'nativeLoad64') return bNativeLoad64;
@@ -3284,6 +3344,55 @@ int feLowerImmediateCall(AstExpression call, AstExpression expression) {
   return functions[function].result;
 }
 
+void feLateFieldState(int field) {
+  feOperand(opLoadLocal, 0);
+  feOperand(opInt, feLateFieldStates[field]);
+  feBuiltinTyped(bObjectGet, 2, tBool);
+}
+
+void feLateFieldStore(int field, int value) {
+  if (feFieldNodes[field].modifier == 'final') {
+    feLateFieldState(field);
+    final unwritten = feJump(opJumpFalse);
+    feLateFailure(1);
+    fePatch(unwritten, ir.length);
+  }
+  feOperand(opLoadLocal, 0);
+  feOperand(opInt, feFieldIndices[field]);
+  feOperand(opLoadLocal, value);
+  feBuiltinTyped(bObjectSet, 3, feFieldTypes[field]);
+  feEmit(opPop);
+  feOperand(opLoadLocal, 0);
+  feOperand(opInt, feLateFieldStates[field]);
+  feInteger(1, tBool);
+  feBuiltinTyped(bObjectSet, 3, tBool);
+  feEmit(opPop);
+}
+
+void feLowerLateField(int function, int field) {
+  if (function == feLateFieldSetters[field]) {
+    feLateFieldStore(field, 1);
+    feOperand(opLoadLocal, 1);
+  } else {
+    feLateFieldState(field);
+    final ready = feJump(opJumpTrue);
+    final expression = feFunctionNodes[function].arrow;
+    if (expression == null) {
+      feLateFailure(0);
+    } else {
+      feLowerInContext(expression, feFieldTypes[field]);
+      final value = feTemp(feFieldTypes[field]);
+      feOperand(opStoreLocal, value);
+      feLateFieldStore(field, value);
+    }
+    fePatch(ready, ir.length);
+    feOperand(opLoadLocal, 0);
+    feOperand(opInt, feFieldIndices[field]);
+    feBuiltinTyped(bObjectGet, 2, feFieldTypes[field]);
+  }
+  feEmit(opReturn);
+}
+
 void feLowerConstructor(int function) {
   var syntax = feFunctionNodes[function];
   var plan = feConstructorPlans[function];
@@ -3329,6 +3438,13 @@ void feLowerConstructor(int function) {
     }
     feBuiltinTyped(bObjectSet, 3, fieldType);
     feEmit(opPop);
+    if (feFieldNodes[field].lateVariable) {
+      feOperand(opLoadLocal, 0);
+      feOperand(opInt, feLateFieldStates[field]);
+      feInteger(1, tBool);
+      feBuiltinTyped(bObjectSet, 3, tBool);
+      feEmit(opPop);
+    }
     stepIndex++;
   }
   feBindings = bodyBindings;
@@ -3576,8 +3692,10 @@ CheckedMemberRead feCheckBoundMember(
     return CheckedMemberRead(
       receiver,
       feFieldTypes[field],
-      memberReadField,
-      feFieldIndices[field],
+      feFieldNodes[field].lateVariable ? memberReadGetter : memberReadField,
+      feFieldNodes[field].lateVariable
+          ? feLateFieldGetters[field]
+          : feFieldIndices[field],
     );
   }
   feAstError(token, 'member has no getter: ' + member.name);
@@ -3653,8 +3771,7 @@ FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
       type = functions[setter].parameterTypes[0];
     } else if (member.staticField >= 0) {
       global = feClassStaticGlobals[staticOwner][member.staticField];
-      var modifier = feGlobalNodes[global].modifier;
-      if (modifier == 'final' || modifier == 'const')
+      if (!feGlobalNodes[global].hasSetter)
         feAstError(expression.token, 'cannot assign a final field');
       type = feGlobalType(global);
     } else {
@@ -3762,8 +3879,16 @@ FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
     if (member.field < 0)
       feAstError(expression.token, 'member has no setter: ' + member.name);
     var field = feClassFieldStarts[owner] + member.field;
-    if (feFieldNodes[field].modifier == 'final')
+    if (!feFieldNodes[field].hasSetter)
       feAstError(expression.token, 'cannot assign a final field');
+    if (feFieldNodes[field].lateVariable) {
+      final receiver = feTemp(receiverType);
+      feOperand(opStoreLocal, receiver);
+      return FeLvalue(feFieldTypes[field], 4, receiver, -1, -1, -1)
+        ..owner = owner
+        ..member = entry
+        ..setter = feLateFieldSetters[field];
+    }
     feOperand(opInt, feFieldIndices[field]);
     type = feFieldTypes[field];
     container = 2;
@@ -3819,11 +3944,18 @@ void feWriteFlow(FeLvalue target, int type) {
 }
 
 void feWriteLvalue(FeLvalue target, int token) {
-  if (target.binding >= 0 &&
-      feBindings.variables[target.binding].finalVariable &&
-      (feBindings.variables[target.binding].outer >= 0 ||
-          feFlow.assignments[target.binding] != flowUnassigned)) {
-    feAstError(token, 'final variable might already be assigned');
+  if (target.binding >= 0) {
+    final variable = feBindings.variables[target.binding];
+    final assigned = feFlow.assignments[target.binding];
+    if (variable.finalVariable &&
+        (variable.lateVariable
+            ? assigned == flowAssigned
+            : variable.outer >= 0 || assigned != flowUnassigned))
+      feAstError(token, 'final variable might already be assigned');
+    if (variable.lateVariable) {
+      feStoreLateLocal(target.binding, token);
+      return;
+    }
   }
   if (target.container == 3) return;
   if (target.container == 0) {
@@ -3852,7 +3984,9 @@ void feWriteLvalue(FeLvalue target, int token) {
   feOperand(opLoadLocal, target.receiver);
   if (target.container == 4) {
     var member = feMembers[target.owner].members[target.member];
-    var setter = feMemberFunctions[target.owner][member.setter];
+    var setter = target.setter >= 0
+        ? target.setter
+        : feMemberFunctions[target.owner][member.setter];
     feOperand(opLoadLocal, value);
     feCall(setter, 2);
     return;
@@ -4390,12 +4524,160 @@ int feLowerConditional(AstExpression expression, int context) {
   return result;
 }
 
+// Late state is distinct from the payload, so every Dart value, including null,
+// remains usable. Only captured locals require a shared heap cell.
+void feLateFailure(int write) {
+  final normal = feFlow;
+  feFlow = flowCopy(normal);
+  feOperand(opInt, write);
+  feBuiltin(bLateError, 1);
+  feEmit(opPop);
+  feFlow = normal;
+}
+
+int feLateInitializerType(int binding) {
+  final syntax = bindingDeclaration(feBindings, binding).lateInitializer!;
+  return functionValueType(feLocalStart + syntax.local);
+}
+
+void feLateLoadPart(int binding, int part) {
+  if (feCellBinding(binding)) {
+    feOperand(opLoadLocal, feBindingSlots[binding]);
+    feOperand(opInt, part);
+    feBuiltinTyped(
+      bObjectGet,
+      2,
+      part == 1 ? tBool : feLateInitializerType(binding),
+    );
+  } else {
+    final local = feLateLocals[binding]!;
+    feOperand(opLoadLocal, part == 1 ? local.state : local.initializer);
+  }
+}
+
+void feLateStorePart(int binding, int part, int type) {
+  if (feCellBinding(binding)) {
+    final value = feTemp(type);
+    feOperand(opStoreLocal, value);
+    feOperand(opLoadLocal, feBindingSlots[binding]);
+    feOperand(opInt, part);
+    feOperand(opLoadLocal, value);
+    feBuiltinTyped(bObjectSet, 3, type);
+    feEmit(opPop);
+  } else {
+    final local = feLateLocals[binding]!;
+    feOperand(
+      opStoreLocal,
+      part == 0
+          ? feBindingSlots[binding]
+          : part == 1
+          ? local.state
+          : local.initializer,
+    );
+  }
+}
+
+void feStoreLateLocal(int binding, int token) {
+  final type = feBindingTypes[binding];
+  final value = feTemp(type);
+  feOperand(opStoreLocal, value);
+  if (feBindings.variables[binding].finalVariable) {
+    feLateLoadPart(binding, 1);
+    final unwritten = feJump(opJumpFalse);
+    feLateFailure(1);
+    fePatch(unwritten, ir.length);
+  }
+  feOperand(opLoadLocal, value);
+  feLateStorePart(binding, 0, type);
+  feInteger(1, tBool);
+  feLateStorePart(binding, 1, tBool);
+  if (bindingDeclaration(feBindings, binding).lateInitializer != null) {
+    final initializerType = feLateInitializerType(binding);
+    feInteger(0, initializerType);
+    feLateStorePart(binding, 2, initializerType);
+  }
+  feOperand(opLoadLocal, value);
+}
+
+void feInitializeLateLocal(int binding, int token) {
+  final declaration = bindingDeclaration(feBindings, binding);
+  feLateLoadPart(binding, 1);
+  final ready = feJump(opJumpTrue);
+  if (declaration.lateInitializer == null) {
+    feLateFailure(0);
+  } else {
+    final function = feLocalStart + declaration.lateInitializer!.local;
+    final captured = functions[function].closureLayout != null;
+    if (captured) feLateLoadPart(binding, 2);
+    final normal = feFlow;
+    feFlow = flowCopy(normal);
+    feCall(function, captured ? 1 : 0);
+    feFlow = normal;
+    feConvertValue(functions[function].result, feBindingTypes[binding], token);
+    feStoreLateLocal(binding, token);
+    feEmit(opPop);
+  }
+  fePatch(ready, ir.length);
+}
+
+void feLowerLateVariable(AstVariable variable, int type) {
+  final binding = variable.binding;
+  final initializer = variable.lateInitializer;
+  if (initializer != null) {
+    feLocalContexts[initializer.local] = type;
+    fePrepareLocalFunction(initializer);
+    if (type < 0) {
+      type = functions[feLocalStart + initializer.local].result;
+      if (type == tNull) type = tDynamic;
+    }
+  }
+  final captured = feCellBinding(binding);
+  final slot = feTemp(captured ? tObject : type);
+  if (captured) {
+    feOperand(opLateCellDescriptor, type);
+    feBuiltinTyped(bObjectNew, 1, tObject);
+  } else {
+    feInteger(0, type);
+    feLateLocals[binding] = FeLateLocal(
+      feTemp(tBool),
+      initializer == null
+          ? -1
+          : feTemp(functionValueType(feLocalStart + initializer.local)),
+    );
+  }
+  feOperand(opStoreLocal, slot);
+  feBindLocal(binding, type, slot);
+  feInteger(0, tBool);
+  feLateStorePart(binding, 1, tBool);
+  if (initializer != null) {
+    final actual = feCreateClosure(
+      feLocalStart + initializer.local,
+      variable.token,
+    );
+    feLateStorePart(binding, 2, actual);
+  }
+  flowDeclare(feFlow, binding, type, initializer != null);
+  if (initializer != null && variable.modifier != 'final') {
+    flowWrite(
+      feFlow,
+      binding,
+      type,
+      functions[feLocalStart + initializer.local].result,
+    );
+    if (!fePromotable(binding)) feFlow.types[binding] = type;
+  }
+}
+
 void feLowerVariable(AstVariable variable) {
   feAt = variable.token;
   feCheckMetadata(variable.metadata, feLexicalOwner(feFunction));
   var type = -1;
   if (variable.type.name != '') type = feResolveType(variable.type);
   if (type < 0 && variable.initializer.isEmpty) type = tDynamic;
+  if (variable.lateVariable) {
+    feLowerLateVariable(variable, type);
+    return;
+  }
   var value = type;
   ConstantValue? constant;
   if (variable.modifier == 'const') {
@@ -4949,12 +5231,14 @@ int feLowerInitializer(
   var previousBindings = feBindings;
   var previousTypes = feBindingTypes;
   var previousSlots = feBindingSlots;
+  final previousLate = feLateLocals;
   var previousFlow = feFlow;
   var previousConstants = feConstants.locals;
   var previousConstantTypes = feConstants.localTypes;
   feBindings = bindings;
   feBindingTypes = List<int>.filled(bindings.variables.length, -1);
   feBindingSlots = List<int>.filled(bindings.variables.length, -1);
+  feLateLocals = List<FeLateLocal?>.filled(bindings.variables.length, null);
   feConstants.locals = <ConstantValue>[];
   feConstants.localTypes = <int>[];
   feFlow = flowCreate(
@@ -4972,6 +5256,7 @@ int feLowerInitializer(
   feBindings = previousBindings;
   feBindingTypes = previousTypes;
   feBindingSlots = previousSlots;
+  feLateLocals = previousLate;
   feFlow = previousFlow;
   feConstants.locals = previousConstants;
   feConstants.localTypes = previousConstantTypes;
@@ -5046,16 +5331,20 @@ void feGenerateGlobals(int count) {
       feOperand(opLoadGlobal, i);
       feEmit(opReturn);
       fePatch(incomplete, ir.length);
-      feOperand(opLoadGlobal, initializer.state);
-      feOperand(opInt, 1);
-      feEmit(opEq);
-      var begin = feJump(opJumpFalse);
-      feCall(feFindFunction('rtInitializationError'), 0);
-      feEmit(opPop);
-      fePatch(begin, ir.length);
-      feOperand(opInt, 1);
-      feOperand(opStoreGlobal, initializer.state);
+      final syntax = feGlobalNodes[i];
+      if (syntax.lateVariable && syntax.initializer.isEmpty) feLateFailure(0);
       feAppendInitializer(initializer);
+      if (syntax.modifier == 'final') {
+        final value = feTemp(globalTypes[i]);
+        feOperand(opStoreLocal, value);
+        feOperand(opLoadGlobal, initializer.state);
+        feOperand(opInt, 2);
+        feEmit(opEq);
+        final unwritten = feJump(opJumpFalse);
+        feLateFailure(1);
+        fePatch(unwritten, ir.length);
+        feOperand(opLoadLocal, value);
+      }
       feOperand(opStoreGlobal, i);
       feOperand(opInt, 2);
       feOperand(opStoreGlobal, initializer.state);
@@ -5067,6 +5356,14 @@ void feGenerateGlobals(int count) {
       setter.start = ir.length;
       feSlotTypes = <int>[globalTypes[i]];
       feNextLocal = 1;
+      if (syntax.lateVariable && syntax.modifier == 'final') {
+        feOperand(opLoadGlobal, initializer.state);
+        feOperand(opInt, 2);
+        feEmit(opEq);
+        final unwritten = feJump(opJumpFalse);
+        feLateFailure(1);
+        fePatch(unwritten, ir.length);
+      }
       feOperand(opLoadLocal, 0);
       feOperand(opStoreGlobal, i);
       feOperand(opInt, 2);
@@ -5112,6 +5409,7 @@ void feBeginFunction(int f, FunctionBindings bindings) {
   );
   feBindingTypes = <int>[];
   feBindingSlots = <int>[];
+  feLateLocals = List<FeLateLocal?>.filled(feBindings.variables.length, null);
   var binding = 0;
   while (binding < feBindings.variables.length) {
     feBindingTypes.add(-1);
@@ -5177,6 +5475,11 @@ void feBeginFunction(int f, FunctionBindings bindings) {
       feBindLocal(capture.binding, capture.type, slot);
       feFlow.types[capture.binding] = capture.promoted;
       feFlow.assignments[capture.binding] = capture.assignment;
+      final declaration = bindingDeclaration(feBindings, capture.binding);
+      if (declaration.lateVariable &&
+          declaration.written &&
+          capture.assignment != flowAssigned)
+        feFlow.assignments[capture.binding] = flowMaybeAssigned;
       captureIndex++;
     }
     var binding = 0;
@@ -5230,6 +5533,10 @@ void parseSource(SourceProgram source) {
   feConstructorPlans.clear();
   feFieldTypes.clear();
   feFieldIndices.clear();
+  feLateFieldStates.clear();
+  feLateFieldGetters.clear();
+  feLateFieldSetters.clear();
+  feLateFunctionFields.clear();
   feOwners.clear();
   feConstructors.clear();
   feFunctionNodes.clear();
@@ -5262,6 +5569,7 @@ void parseSource(SourceProgram source) {
   feBindings = FunctionBindings(<LocalVariable>[], -1);
   feBindingTypes = <int>[];
   feBindingSlots = <int>[];
+  feLateLocals = List<FeLateLocal?>.filled(feBindings.variables.length, null);
   feFlow = flowCreate(0);
   feBreaks.clear();
   feContinues.clear();
@@ -5287,6 +5595,7 @@ void parseSource(SourceProgram source) {
   );
   feParamDefaults.add(<ConstantValue>[]);
   feOwners.add(-1);
+  feLateFunctionFields.add(-1);
   feConstructors.add(0);
   feSources = source;
   entrySource = source.entry;
@@ -5409,7 +5718,11 @@ void parseSource(SourceProgram source) {
     var field = feClassFieldStarts[owner];
     final end = field + feClassFieldCounts[owner];
     while (field < end) {
-      feFieldBindings.add(feBindInitializer(feFieldNodes[field], owner));
+      feFieldBindings.add(
+        feFieldNodes[field].lateVariable
+            ? FunctionBindings(<LocalVariable>[], -1)
+            : feBindInitializer(feFieldNodes[field], owner),
+      );
       field++;
     }
     owner++;
@@ -5482,7 +5795,9 @@ void parseSource(SourceProgram source) {
     feBeginFunction(f, bodyBindings[f]);
     final functionSyntax = feFunctionNodes[f];
     final expression = functionSyntax.arrow;
-    if (feConstructors[f] == 1) {
+    if (feLateFunctionFields[f] >= 0) {
+      feLowerLateField(f, feLateFunctionFields[f]);
+    } else if (feConstructors[f] == 1) {
       feLowerConstructor(f);
     } else if (expression != null) {
       if (feInfersLocalResult(f)) {

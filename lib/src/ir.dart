@@ -52,6 +52,7 @@ const int opDoubleDiv = 49;
 const int opDoubleCompare = 50;
 const int opDoubleNeg = 51;
 const int opIntToDouble = 52;
+const int opLateCellDescriptor = 53;
 
 const int bPrintString = 1;
 const int bPrintInt = 2;
@@ -138,6 +139,7 @@ const int bValueToInt = 82;
 const int bValueRemainder = 83;
 const int bValueCompareTo = 84;
 const int bNumberProperty = 85;
+const int bLateError = 86;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;
@@ -163,14 +165,19 @@ const int bNativeFloat64ToInt = 118;
 // Expose/restore the internal tagged word. An exposed address is not a GC root.
 const int bNativeValueBits = 119;
 const int bNativeValueFromBits = 120;
+const int bNativeExit = 121;
 
 int nativeBuiltinInputType(int primitive) =>
     primitive == bNativeValueBits ? nullableType(tObject) : tInt;
-int nativeBuiltinResultType(int primitive) =>
-    primitive == bNativeValueFromBits ? nullableType(tObject) : tInt;
+int nativeBuiltinResultType(int primitive) => switch (primitive) {
+  bNativeExit => tNever,
+  bNativeValueFromBits => nullableType(tObject),
+  _ => tInt,
+};
 
 int nativeBuiltinArity(int primitive) {
-  if (primitive == bNativeValueBits ||
+  if (primitive == bNativeExit ||
+      primitive == bNativeValueBits ||
       primitive == bNativeValueFromBits ||
       primitive == bNativeLoad64 ||
       primitive == bNativeLoad8 ||
@@ -313,6 +320,7 @@ int irWidth(int op) {
       op == opFunctionReference ||
       op == opClosureDescriptor ||
       op == opCaptureCellDescriptor ||
+      op == opLateCellDescriptor ||
       op == opTypeReference ||
       op == opTypeTest ||
       op == opTypeCast ||

@@ -854,6 +854,23 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "late int value;void main(){print('before');print(value);}",
+      "late int? value;void main(){print('before');print(value);}",
+      "class C{static late int value;}void main(){print('before');print(C.value);}",
+      "class C{late int? value;}void main(){print('before');print(C().value);}",
+      "void main(){late int value;void set(){value=1;}print('before');print(value);}",
+      "void main(){late final int value;void set(){value=1;}print('before');set();set();}",
+      "int rhs(){print('rhs');return 2;}late final int value;void main(){print('before');value=1;value=rhs();}",
+      "int rhs(){print('rhs');return 2;}class C{static late final int value;}void main(){print('before');C.value=1;C.value=rhs();}",
+      "int rhs(){print('rhs');return 2;}class C{late final int value;C(this.value);}void main(){print('before');C(1).value=rhs();}",
+      "void main(){print('before');late final int value;for(var i=0;i<2;i++){value=i;print(value);}}",
+      "int count=0;late final int value=++count==1?value+1:4;void main(){print('before');print(value);}",
+      "int count=0;final int value=++count==1?value+1:4;void main(){print('before');print(value);}",
+      "class C{int count=0;late final int value=++count==1?value+1:4;}void main(){print('before');print(C().value);}",
+      "void main(){int Function()? read;var count=0;late final int value=++count==1?read!()+1:4;read=()=>value;print('before');print(value);}",
+      "dynamic wrong(){print('initializer');return 'wrong';}void main(){late int value=wrong();print('before');print(value);}",
+      "dynamic wrong(){print('initializer');return 'wrong';}class C{late int value=wrong();}void main(){var value=C();print('before');print(value.value);}",
+
       "String argument(){print('argument');return 'bad';}void main(){dynamic value=1.5;print('before');value.remainder(argument());}",
       "String argument(){print('argument');return 'bad';}void main(){dynamic value=1.5;print('before');value.compareTo(argument());}",
       "void main(){print('before');double.nan.toInt();}",
@@ -1276,12 +1293,14 @@ import './nested/../other.dart' as other show shared;
 import 'math.dart' as math hide shared;
 import 'host.dart';
 int nativeLoad16(int value) => value + 3;
+int nativeExit(int value) => value + 2;
 const int rtAbiVersion = -2;
 void main() {
   print(shared());
   print(other.shared());
   print(math.hidden());
   print(nativeLoad16(5));
+  print(nativeExit(5));
   print(hostRead(5));
   print(hostReadIfExists(5));
   print(hostCurrentDirectory(5));
@@ -1374,7 +1393,10 @@ int invoke(Callable value) => value(3);
 bool all(List<int> value) { if (value case [...var _]) return true; return false; }
 @pragma('dartc:no-gc') double floating(double a, double b) => -(a+b)*a/b;
 @pragma('dartc:no-gc') double convert(int value) => value.toDouble();
-void main() { print(convert(9007199254740993)); print(floating(1.5, 0)); print(compute(65)); print(box(true)); print(box(false)); print(safe('a', 'long')); print(invoke(Callable())); print(all([1])); }
+class LateSafe { late int value=1; }
+@noGc int readLate(LateSafe object) => object.value;
+@noGc double localLate() { late double value=1.5; return value; }
+void main() { print(localLate()); print(readLate(LateSafe())); print(convert(9007199254740993)); print(floating(1.5, 0)); print(compute(65)); print(box(true)); print(box(false)); print(safe('a', 'long')); print(invoke(Callable())); print(all([1])); }
 ''',
       'nogc-user-annotation.dart': r'''
 class pragma { final String name; const pragma(this.name); }
@@ -1678,6 +1700,43 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      'external Never nativeExit(int code);void main(){}',
+      "void unused(){late int value='wrong';}void main(){}",
+      "void unused(){late final int value='wrong';}void main(){}",
+      "class C{late int value='wrong';}void main(){}",
+      "class C{static late int value='wrong';}void main(){}",
+      "late int value='wrong';void main(){}",
+      "void unused(){late int value;print(value);}void main(){}",
+      "void unused(){late int? value;print(value);}void main(){}",
+      "void unused(){late int value;int read()=>value;}void main(){}",
+      "void unused(){late int value=value;}void main(){}",
+      "void unused(){late int value=next;int next=1;}void main(){}",
+      "void unused(){int next;late int value=next;next=1;}void main(){}",
+      "void unused(){late final int? value=1;print(value+1);}void main(){}",
+      "void unused(){late final int value=1;value=2;}void main(){}",
+      "void unused(){late final int value;value=1;value=2;}void main(){}",
+      "void unused(){late final int value;value=(value=1);}void main(){}",
+      "void unused(){late final int value;value=1;void set(){value=2;}}void main(){}",
+      "void unused(){late final int value;void set(){value=1;value=2;}}void main(){}",
+      "late final int value=1;void unused(){value=2;}void main(){}",
+      "class C{late final int value=1;void unused(){value=2;}}void main(){}",
+      "class C{static late final int value=1;}void unused(){C.value=2;}void main(){}",
+      "late final int value;set value(int v){}void main(){}",
+      "class C{late final int value;set value(int v){}}void main(){}",
+      "class C{static late final int value;static set value(int v){}}void main(){}",
+      "class C{late final int value=1;C(this.value);}void main(){}",
+      "class C{late final int value=1;C():value=2;}void main(){}",
+      "class C{late final int value;const C();}void main(){}",
+      "void unused(late int value){}void main(){}",
+      "void unused(){late const value=1;}void main(){}",
+      "void unused(){late late int value;}void main(){}",
+      "void unused(){for(late int value=0;value<1;value++){}}void main(){}",
+      "void unused(){for(late int value in [1]){}}void main(){}",
+      "void unused(){print([for(late int value in [1]) value]);}void main(){}",
+      "@pragma('dartc:no-gc') int unused(bool branch){late int value;if(branch)value=1;return value;}void main(){}",
+      "@pragma('dartc:no-gc') void unused(){late int value=1;int read()=>value;}void main(){}",
+      "class C{late int value;}@pragma('dartc:no-gc') int unused(C object)=>object.value;void main(){}",
+
       'void unused(){double value=1+9007199254740993;}void main(){}',
       'const double value=1+9007199254740993;void main(){}',
 
@@ -2692,12 +2751,16 @@ int calls = 0;
 int first = changeLater();
 int later = 0;
 int effect = returnZero();
+int lazyCalls = 0;
+late int lazy = readLate();
+int readLate() { lazyCalls++; return 6; }
 int changeLater() { calls++; later = 7; return 1; }
 int returnZero() { calls++; effect = 9; return 0; }
 void verify() {
   var status = 0;
   if (zero != 0 || flag || calls != 2 || first != 1 || later != 0 || effect != 0)
     status = 73;
+  if (lazyCalls != 0 || lazy != 6 || lazy != 6 || lazyCalls != 1) status = 74;
   var syscall = 1;
   if (nativeTarget() == 1) syscall = 93;
   nativeSyscall(syscall, status, 0, 0, 0, 0, 0);
@@ -2718,6 +2781,9 @@ void verify() {
       throw StateError('Eager scalar initialization produced output.');
     }
     final invalidRuntimes = [
+      'const int rtAbiVersion = $runtimeAbiVersion; external int nativeExit(int code);',
+      'const int rtAbiVersion = $runtimeAbiVersion; external Never nativeExit(String code);',
+      'const int rtAbiVersion = $runtimeAbiVersion; external Never nativeExit(int code, int extra);',
       'const int rtAbiVersion = $runtimeAbiVersion; external int nativeLoad64(int pointer, int extra);',
       'const int rtAbiVersion = $runtimeAbiVersion; external bool nativeTarget();',
       "const int rtAbiVersion = $runtimeAbiVersion; external int nativeLoad64(int pointer); int invalid() => nativeLoad64('wrong');",
@@ -2749,9 +2815,19 @@ void verify() {
       ..writeAsStringSync(
         "import '${File(standard).parent.path}/host.dart';\n" +
             r'''
+@pragma('dartc:no-gc') Never terminate(int status) => hostExit(status);
+int exitChoice(bool stop, int status) {
+  if (stop) terminate(status);
+  return 42;
+}
 void main(List<String> args) {
   if (args.length > 1) {
-    if (args[1] == 'cwd')
+    if (args[1] == 'exit') {
+      print('before');
+      print(exitChoice(false, 0));
+      exitChoice(true, int.parse(args[0]));
+      print('after');
+    } else if (args[1] == 'cwd')
       print(hostCurrentDirectory());
     else {
       print('before');
@@ -2794,6 +2870,25 @@ void main(List<String> args) {
     );
     final cwd = Directory('${temporary.path}/cwd-你好🙂 %')..createSync();
     final ioExecutable = '${io.path}.out';
+    for (final status in [0, 7, 255, 256, -1]) {
+      final arguments = [status.toString(), 'exit'];
+      final expected = await capture(sdk, [io.path, ...arguments]);
+      final actual = await capture(
+        ioExecutable,
+        arguments,
+        environment: {'PATH': '/usr/bin:/bin'},
+        includeParentEnvironment: false,
+      );
+      if (actual.exitCode != expected.exitCode ||
+          actual.stdout != 'before\n42\n' ||
+          actual.stdout != expected.stdout ||
+          actual.stderr != expected.stderr) {
+        throw StateError(
+          'Process exit did not preserve status and preceding effects: '
+          '${actual.exitCode} ${actual.stdout}${actual.stderr}',
+        );
+      }
+    }
     for (final directory in [
       cwd,
       if (Platform.isLinux)

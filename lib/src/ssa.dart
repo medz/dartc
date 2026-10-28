@@ -324,7 +324,8 @@ int ssaEffects(int op, int target) {
         target == bNativeStore16) {
       return ssaWrite | ssaNative;
     }
-    if (target == bNativeSyscall) return ssaRead | ssaWrite | ssaNative;
+    if (target == bNativeSyscall || target == bNativeExit)
+      return ssaRead | ssaWrite | ssaNative;
     return ssaRead | ssaWrite | ssaAllocate | ssaThrow | ssaGc | ssaNative;
   }
   return 0;

@@ -66,7 +66,29 @@ void corrupt(List<SsaFunction> program, String mode) {
   final diamond = named(program, 'diamond');
   final add = operation(order, opAdd);
   final call = operation(diamond, opCall);
-  if (mode == 'double-literal') {
+  if (mode == 'exit-result' || mode == 'exit-arity' || mode == 'exit-effects') {
+    final function = named(program, 'rtHostExit');
+    final instruction = operation(function, opBuiltin);
+    if (mode == 'exit-result') {
+      instruction.resultType = tInt;
+      function.valueTypes[instruction.value] = tInt;
+    } else if (mode == 'exit-arity') instruction.inputs.clear();
+    else instruction.effects = 0;
+  } else if (mode == 'late-cell-type') {
+    operation(named(program, 'delayed'), opLateCellDescriptor).target = -1;
+  } else if (mode == 'late-error-arity') {
+    for (var function in program) {
+      for (var block in function.blocks) {
+        for (var instruction in block.instructions) {
+          if (instruction.op == opBuiltin && instruction.target == bLateError) {
+            instruction.inputs.clear();
+            return;
+          }
+        }
+      }
+    }
+    ssaError('late failure missing');
+  } else if (mode == 'double-literal') {
     operation(named(program, 'floating'), opDouble).op = opInt;
   } else if (mode == 'double-arity' || mode == 'double-operand' || mode == 'double-result') {
     final function = named(program, 'floating');
@@ -238,6 +260,10 @@ T generic<T extends num>(T value) => value;
 List<T> genericList<T>(T value) => [value];
 T Function(T) genericClosure<T>() => (T value) => value;
 double floating(double value) => value + 0.25;
+int Function() delayed(int value) {
+  late final int result = value + 1;
+  return () => result;
+}
 int callee(int value) => value + 1;
 int order(int value) {
   final next = value + 1;
@@ -266,6 +292,7 @@ void dropped(dynamic value) { value as int; }
 int apply(int Function(int) function, int value) => function(value);
 List<int> slice(List<int> value) => value.sublist(1);
 void main() {
+  print(delayed(1)());
   print(generic<int>(1));
   print(genericList<int>(2));
   print(genericClosure<int>()(3));
@@ -312,6 +339,11 @@ Future<void> main(List<String> args) async {
     );
     const cases = {
       'valid': '',
+      'exit-result': 'primitive result',
+      'exit-arity': 'operand count',
+      'exit-effects': 'operation effects',
+      'late-cell-type': 'invalid type',
+      'late-error-arity': 'operand count',
       'double-literal': 'integer constant type',
       'double-arity': 'operand count',
       'double-operand': 'operand type',

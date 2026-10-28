@@ -10,6 +10,19 @@ import 'types.dart';
 List<int> emitBranchSites = <int>[];
 List<int> emitBranchTargets = <int>[];
 
+// x0 holds the status. An unexpected kernel return traps instead of falling
+// through a call whose checked result is Never.
+void emitExit() {
+  if (targetOS == 1) {
+    armConstant(8, 94); // Linux exit_group.
+    machineCode.add(0xd4000001);
+  } else {
+    armConstant(16, 1); // Darwin exit.
+    machineCode.add(0xd4001001);
+  }
+  machineCode.add(0xd4200000); // brk #0
+}
+
 void emitEdge(MachineEdge edge, MachineFunction function, int fallthrough) {
   List<int> parameters = function.blocks[edge.target].parameters;
   List<int> locations = function.allocation.locations;
@@ -156,6 +169,10 @@ void emitInstruction(
       remaining = remaining - 4096;
     }
     if (remaining != 0) machineCode.add(0x910003ff | (remaining << 10));
+  } else if (op == mExit) {
+    emitLoad(function, inputs[0], 0);
+    emitExit();
+    return;
   } else if (op == mSyscall) {
     int numberRegister = 16;
     if (targetOS == 1) numberRegister = 8;
@@ -192,13 +209,7 @@ void emitInstruction(
     int valid = machineCode.length;
     machineCode.add(0);
     armConstant(0, 70);
-    if (targetOS == 0) {
-      armConstant(16, 1);
-      machineCode.add(0xd4001001);
-    } else {
-      armConstant(8, 93);
-      machineCode.add(0xd4000001);
-    }
+    emitExit();
     machineCode[valid] = 0x5400000a | ((machineCode.length - valid) << 5);
     machineCode.add(0xf101001f | (right << 5));
     int limit = 31;
@@ -493,13 +504,7 @@ void generateCode(List<MachineFunction> program) {
     armCall(main);
     emitRootBoundary(rootsEnabled);
     armConstant(0, 0);
-    if (targetOS == 1) {
-      armConstant(8, 93);
-      machineCode.add(0xd4000001);
-    } else {
-      armConstant(16, 1);
-      machineCode.add(0xd4001001);
-    }
+    emitExit();
   }
   int function = 0;
   if (imageKind != 0) function = 1;

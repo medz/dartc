@@ -10,6 +10,8 @@ class LocalVariable {
   int outer = -1;
   bool constant = false;
   bool finalVariable = false;
+  bool lateVariable = false;
+  AstFunction? lateInitializer;
   bool written = false;
   bool captured = false;
   bool writeCaptured = false;
@@ -190,6 +192,7 @@ int bindingCapture(LocalBinder binder, int original) {
   alias.outer = original;
   alias.constant = variable.constant;
   alias.finalVariable = variable.finalVariable;
+  alias.lateVariable = variable.lateVariable;
   var binding = binder.result.variables.length;
   binder.result.variables.add(alias);
   if (!variable.constant) binder.result.captures.add(binding);
@@ -578,6 +581,7 @@ void bindingDeclarations(
     var local = binder.result.variables[variable.binding];
     local.constant = variable.modifier == 'const';
     local.finalVariable = local.constant || variable.modifier == 'final';
+    local.lateVariable = variable.lateVariable;
     i++;
   }
 }
@@ -758,7 +762,26 @@ void bindingStatement(LocalBinder binder, int scope, AstStatement statement) {
   while (i < statement.variables.length) {
     bindingType(binder, scope, statement.variables[i].type);
     bindingExpressions(binder, scope, statement.variables[i].metadata);
-    bindingExpressions(binder, scope, statement.variables[i].initializer);
+    final variable = statement.variables[i];
+    if (variable.lateVariable && variable.initializer.isNotEmpty) {
+      final syntax = AstFunction(
+        '',
+        AstType('', const <AstType>[], variable.token),
+        const <AstParameter>[],
+        null,
+        variable.initializer[0],
+        false,
+        variable.token,
+        false,
+      );
+      syntax.local = binder.functions.length;
+      binder.functions.add(LocalFunctionBinding(syntax));
+      variable.lateInitializer = syntax;
+      binder.result.variables[variable.binding].lateInitializer = syntax;
+      bindingFunctionBody(binder, scope, syntax);
+    } else {
+      bindingExpressions(binder, scope, variable.initializer);
+    }
     i++;
   }
   bindingExpressions(binder, scope, statement.expressions);
@@ -1018,7 +1041,7 @@ void collectWrittenStatement(
     var variable = statement.variables[i];
     collectWrittenBinding(variable.binding, seen, written);
     var value = 0;
-    while (value < variable.initializer.length) {
+    while (!variable.lateVariable && value < variable.initializer.length) {
       collectWrittenExpression(variable.initializer[value], seen, written);
       value++;
     }

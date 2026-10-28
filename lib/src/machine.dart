@@ -57,6 +57,7 @@ const int mFloat64Compare = 36;
 const int mFloat64FromInt = 37;
 const int mFloat64ToInt = 38;
 const int mFloat64Neg = 39;
+const int mExit = 40;
 
 class RegisterAllocation {
   final List<int> locations;
@@ -187,6 +188,7 @@ void machineSelectInstruction(
       op == opFunctionReference ||
       op == opClosureDescriptor ||
       op == opCaptureCellDescriptor ||
+      op == opLateCellDescriptor ||
       op == opTypeReference) {
     int kind = 0;
     if (op == opDescriptor) kind = 2;
@@ -195,6 +197,7 @@ void machineSelectInstruction(
     if (op == opFunctionReference) kind = 6;
     if (op == opClosureDescriptor) kind = 7;
     if (op == opCaptureCellDescriptor) kind = 8;
+    if (op == opLateCellDescriptor) kind = 10;
     if (op == opTypeReference) kind = 9;
     instructions.add(
       MachineInstruction(mAddress, output, inputs, target, kind, effects),
@@ -287,6 +290,12 @@ void machineSelectInstruction(
     if (target == bNativeFramePointer) {
       instructions.add(
         MachineInstruction(mFramePointer, output, inputs, 0, 0, effects),
+      );
+      return;
+    }
+    if (target == bNativeExit) {
+      instructions.add(
+        MachineInstruction(mExit, output, inputs, 0, 0, effects),
       );
       return;
     }

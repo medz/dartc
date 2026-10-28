@@ -10,6 +10,7 @@ external int nativeLoad8(int p);
 external int nativeStore8(int p, int value);
 external int nativeSyscall(int n, int a, int b, int c, int d, int e, int f);
 external int nativeTarget();
+external Never nativeExit(int code);
 external int nativeMetadataAddress(int features);
 external int nativeCall1(int function, int value);
 external int nativeCall0(int function);
@@ -45,10 +46,7 @@ int rtSyscall(int n, int a, int b, int c, int d, int e, int f) {
   return -38;
 }
 
-int rtHostExit(int code) {
-  rtSyscall(1, code, 0, 0, 0, 0, 0);
-  return 0;
-}
+Never rtHostExit(int code) => nativeExit(code);
 
 int rtMap(int bytes) {
   if (bytes == 0) return 0;
@@ -131,7 +129,6 @@ int rtCStringBusy = 0;
 int rtCStringAcquire(int a, int b, int c, int d) {
   if (rtCStringBusy != 0) {
     rtHostExit(70);
-    return 0;
   }
   if (rtCStringBytes == 0) rtCStringBytes = rtMap(32);
   rtCStringBusy = 1;
@@ -146,7 +143,6 @@ int rtCStringAcquire(int a, int b, int c, int d) {
 int rtCStringRelease() {
   if (rtCStringBusy == 0) {
     rtHostExit(70);
-    return 0;
   }
   rtCStringBusy = 0;
   return 0;
@@ -162,7 +158,7 @@ int rtWriteAll(int fd, int p, int length) {
   return 0;
 }
 
-int rtIoError([int path = 0]) {
+Never rtIoError([int path = 0]) {
   if (path != 0) {
     var encoded = rtStringEncodeUtf8(path);
     var length = nativeLoad64(encoded);
@@ -173,26 +169,31 @@ int rtIoError([int path = 0]) {
   var message = rtCStringAcquire(0x726f727265204f49, 10, 0, 0);
   rtWriteAll(2, message, 9);
   rtHostExit(74);
-  return 0;
 }
 
-int rtInitializationError() {
-  var message = rtCStringAcquire(
-    0x63203a6374726164,
-    0x2072616c75637269,
-    0x696c616974696e69,
-    0xa6e6f6974617a,
-  );
-  rtWriteAll(2, message, 31);
+Never rtLateError(int write) {
+  final message = write != 0
+      ? rtCStringAcquire(
+          0x6c203a6374726164,
+          0x756c617620657461,
+          0x646165726c612065,
+          0xa7465732079,
+        )
+      : rtCStringAcquire(
+          0x6c203a6374726164,
+          0x756c617620657461,
+          0x736e752073692065,
+          0xa7465,
+        );
+  rtWriteAll(2, message, write != 0 ? 30 : 27);
   rtHostExit(70);
-  return 0;
 }
 
 int rtStringLength(int value) {
   return nativeLoad64(value + stringLengthOffset);
 }
 
-int rtStringRangeError() {
+Never rtStringRangeError() {
   var message = rtCStringAcquire(
     0x73203a6374726164,
     0x617220676e697274,
@@ -201,7 +202,6 @@ int rtStringRangeError() {
   );
   rtWriteAll(2, message, 26);
   rtHostExit(70);
-  return 0;
 }
 
 int rtStringCodeUnit(int value, int index) {
@@ -410,7 +410,7 @@ int rtIntParse(int value) {
   return result * sign;
 }
 
-int rtListRangeError() {
+Never rtListRangeError() {
   var message = rtCStringAcquire(
     0x6c203a6374726164,
     0x676e617220747369,
@@ -419,10 +419,9 @@ int rtListRangeError() {
   );
   rtWriteAll(2, message, 24);
   rtHostExit(70);
-  return 0;
 }
 
-int rtListFixedError() {
+Never rtListFixedError() {
   var message = rtCStringAcquire(
     0x66203a6374726164,
     0x73696c2064657869,
@@ -431,10 +430,9 @@ int rtListFixedError() {
   );
   rtWriteAll(2, message, 25);
   rtHostExit(70);
-  return 0;
 }
 
-int rtListReadOnlyError() {
+Never rtListReadOnlyError() {
   var message = rtCStringAcquire(
     0x69203a6374726164,
     0x656c626174756d6d,
@@ -443,7 +441,6 @@ int rtListReadOnlyError() {
   );
   rtWriteAll(2, message, 22);
   rtHostExit(70);
-  return 0;
 }
 
 int rtListNew(int typeRef) {
@@ -892,7 +889,6 @@ int rtUtf8Busy = 0;
 int rtUtf8Acquire(int bytes) {
   if (rtUtf8Busy != 0) {
     rtHostExit(70);
-    return 0;
   }
   if (bytes > rtUtf8Capacity) {
     var capacity = (bytes + 16383) & -16384;
@@ -911,7 +907,6 @@ int rtUtf8Acquire(int bytes) {
 int rtUtf8Release() {
   if (rtUtf8Busy == 0) {
     rtHostExit(70);
-    return 0;
   }
   rtUtf8Busy = 0;
   return 0;
@@ -1165,13 +1160,12 @@ int rtHostStdPath() {
 }
 
 @pragma('dartc:no-gc')
-int rtHostFinish(int path, int outputTarget) {
+Never rtHostFinish(int path, int outputTarget) {
   var encoded = rtStringEncodeUtf8(path);
   var changed = rtSyscall(15, encoded + 8, 493, 0, 0, 0, 0);
   rtUtf8Release();
   if (changed < 0) rtIoError();
   rtHostExit(0);
-  return 0;
 }
 
 @pragma('dartc:no-gc')
@@ -1263,7 +1257,7 @@ int rtObjectSet(int object, int index, int value) {
   return value;
 }
 
-int rtValueTypeError() {
+Never rtValueTypeError() {
   var message = rtCStringAcquire(
     0x72203a6374726164,
     0x7420656d69746e75,
@@ -1272,7 +1266,6 @@ int rtValueTypeError() {
   );
   rtWriteAll(2, message, 26);
   rtHostExit(70);
-  return 0;
 }
 
 @pragma('dartc:no-gc')
@@ -1826,7 +1819,7 @@ int rtValueGe(int left, int right) {
   return result == 0 || result == 1 ? 1 : 0;
 }
 
-int rtListModificationError() {
+Never rtListModificationError() {
   var message = rtCStringAcquire(
     0x63203a6374726164,
     0x6e65727275636e6f,
@@ -1835,7 +1828,6 @@ int rtListModificationError() {
   );
   rtWriteAll(2, message, 31);
   rtHostExit(70);
-  return 0;
 }
 
 int rtValueActiveRoot = 0;
@@ -1965,15 +1957,9 @@ int rtValueToString(int value) {
   return rtValueFormat(value, handleType);
 }
 
-Never rtRootFailure() {
-  rtHostExit(70);
-  while (true) {}
-}
+Never rtRootFailure() => rtHostExit(70);
 
-Never rtPatternMatchFailure() {
-  rtValueTypeError();
-  while (true) {}
-}
+Never rtPatternMatchFailure() => rtValueTypeError();
 
 int rtRootValues = 0;
 int rtRootCount = 0;

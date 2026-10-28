@@ -450,6 +450,8 @@ AstStatement parserFor(Parser parser, int token, bool collection) {
       parserExpect(parser, ';');
     } else if (parserVariableStatement(parser)) {
       var modifier = parserModifier(parser);
+      if (modifier.startsWith('late '))
+        parserError(parser, 'late is not allowed in a loop declaration');
       var type = parserDeclarationType(parser, modifier);
       var name = parserName(parser);
       var variable = parserVariableInitializer(
@@ -1634,6 +1636,16 @@ bool parserTypedDeclaration(Parser parser) {
 }
 
 String parserModifier(Parser parser) {
+  if (parserIs(parser, 'late') &&
+      parser.tokens[parser.position + 1].kind == tokenIdentifier) {
+    parser.position++;
+    final modifier = parserModifier(parser);
+    if (modifier == 'const' || modifier.startsWith('late '))
+      parserError(parser, 'invalid late modifier combination');
+    if (modifier == '' && !parserTypedDeclaration(parser))
+      parserError(parser, 'late requires a type, var or final');
+    return 'late ' + modifier;
+  }
   if (parserTake(parser, 'var')) return 'var';
   if (parserTake(parser, 'final')) {
     if (parserIs(parser, 'var')) {
@@ -1646,6 +1658,7 @@ String parserModifier(Parser parser) {
 }
 
 AstType parserDeclarationType(Parser parser, String modifier) {
+  if (modifier.startsWith('late ')) modifier = modifier.substring(5);
   if (modifier != 'var') {
     var end = parserDeclarationTypeEnd(parser);
     if (end >= 0) return parseAstType(parser, end);
@@ -2298,6 +2311,18 @@ AstStatement parserEmptyStatement(int token) {
 }
 
 bool parserVariableStatement(Parser parser) {
+  if (parserIs(parser, 'late')) {
+    final saved = parser.position;
+    parser.position++;
+    final declaration =
+        parserIs(parser, 'var') ||
+        parserIs(parser, 'final') ||
+        parserIs(parser, 'const') ||
+        parserIs(parser, 'late') ||
+        parserTypedDeclaration(parser);
+    parser.position = saved;
+    return declaration;
+  }
   if (parserIs(parser, 'const')) {
     var position = parser.position;
     parser.position++;
@@ -2620,6 +2645,7 @@ List<AstVariable> parserVariableTail(Parser parser, AstVariable first) {
       token,
     );
     variable.metadata = first.metadata;
+    variable.lateVariable = first.lateVariable;
     variables.add(variable);
   }
   return variables;

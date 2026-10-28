@@ -19,7 +19,7 @@
 | [§6.1 Scoping][scoping]：库与成员名称 | 部分实现 | 库名解析和局部到成员查找已有路径；继承、扩展成员等完整查找规则仍缺失。库命名空间另见[库与脚本](libraries.md)。 | [symbols.dart](../lib/src/symbols.dart)、[frontend.dart](../lib/src/frontend.dart)；[behavior_test.dart](../test/behavior_test.dart) |
 | [§6.2 Privacy][privacy] | 部分实现 | 按库身份限制下划线私有名，主文件与 parts 共享私有顶层名和实例成员，导入私有名仍被拒绝；继承和扩展组合下的库私有性尚未实现或验证。 | [symbols.dart](../lib/src/symbols.dart)、[frontend.dart](../lib/src/frontend.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 `_private`、`parts-main.dart` 用例 |
 | [§7 Errors and Warnings][errors]：编译期诊断 | 部分实现 | 解析、语义及版本错误可带源路径与偏移；部分扫描错误仅报告偏移。现有拒绝用例不覆盖全部规范错误，错误分类与警告机制尚不完整。 | [source.dart](../lib/src/source.dart)、[parser.dart](../lib/src/parser.dart)、[scanner.dart](../lib/src/scanner.dart)；[behavior_test.dart](../test/behavior_test.dart) 的拒绝用例 |
-| [§7 Errors and Warnings][errors]：动态错误 | 部分实现 | 范围、类型、只读 List 等边界有失败行为测试；当前终止进程，尚无规范异常对象、捕获与栈展开语义。 | [runtime.dart](../lib/src/runtime.dart)；[behavior_test.dart](../test/behavior_test.dart) 的运行失败用例 |
+| [§7 Errors and Warnings][errors]：动态错误 | 部分实现 | 范围、类型、只读 List、late 读写等边界有失败行为测试；当前终止进程，尚无规范异常对象、捕获与栈展开语义。 | [runtime.dart](../lib/src/runtime.dart)；[behavior_test.dart](../test/behavior_test.dart) 的运行失败用例 |
 | [§21.1][lexical]、[§7][errors]：完整一致性覆盖 | 待核对 | 尚无覆盖全部合法和非法 token、关键字位置及诊断类别的规范测试集；真实程序成功不等同于完整词法兼容。 | [test/](../test/) |
 
 数字扫描区分十六进制整数与十进制小数/指数形式，支持 `.5`；小数点不吞并成员访问或级联。整数、小数和指数中的分隔符均要求 3.6 及以上版本并位于数字之间。未使用函数中的非法指数或分隔符也必须诊断；语义范围与精确转换规则见[数字表达式](expressions.md)。
