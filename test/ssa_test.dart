@@ -66,7 +66,10 @@ void corrupt(List<SsaFunction> program, String mode) {
   final diamond = named(program, 'diamond');
   final add = operation(order, opAdd);
   final call = operation(diamond, opCall);
-  if (mode == 'invoke-edge-result' || mode == 'invoke-handler-result' ||
+  if (mode == 'constructor-prefix') {
+    final reference = operation(named(program, 'createCounter'), opFunctionReference);
+    functions[reference.target].parameterOffset = 0;
+  } else if (mode == 'invoke-edge-result' || mode == 'invoke-handler-result' ||
       mode == 'invoke-earlier' || mode == 'invoke-nonthrow') {
     final function = named(program, 'caught');
     for (var block in function.blocks) {
@@ -379,6 +382,7 @@ bool tested(dynamic value) => value is int;
 void dropped(dynamic value) { value as int; }
 int apply(int Function(int) function, int value) => function(value);
 int applyNamed(int Function({required int value, int other}) function) => function(value: 1);
+Counter createCounter() => (Counter.new)();
 List<int> slice(List<int> value) => value.sublist(1);
 void main() {
   print(invokeOperation(Twice()));
@@ -397,7 +401,7 @@ void main() {
   dropped(1);
   print(apply(callee, 8));
   print(applyNamed(({required int value, int other = 0}) => value + 1));
-  print(apply(Counter().add, 9));
+  print(apply(createCounter().add, 9));
   print(slice([1, 2]));
 }
 ''';
@@ -433,6 +437,7 @@ Future<void> main(List<String> args) async {
     const cases = {
       'valid': '',
       'ir-function-range': 'invalid function IR range',
+      'constructor-prefix': 'callable parameter prefix',
       'invoke-edge-result': 'invoke result on exception edge',
       'invoke-handler-result': 'invoke result is unavailable on this path',
       'invoke-earlier': 'invoke has an earlier throwing operation',

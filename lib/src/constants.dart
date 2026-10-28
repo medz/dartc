@@ -71,6 +71,8 @@ class ConstantContext {
   List<ConstructorConstants?> constructors = <ConstructorConstants?>[];
   List<_ConstantInvocation> invocations = <_ConstantInvocation>[];
   List<ClassMembers> classMembers = const <ClassMembers>[];
+  List<AstClass> classes = const <AstClass>[];
+  void Function(int)? prepareConstructorTypes;
   List<List<int>> classConstructors = const <List<int>>[];
   int lexicalClass = -1;
   List<int> globalOwners = const <int>[];
@@ -523,7 +525,10 @@ int _constantStaticOwner(ConstantContext context, AstExpression expression) {
     var symbol = _constantSymbol(context, receiver);
     var owner = declarationClassOwner(context.symbols, symbol);
     if (owner >= 0) {
-      if (receiver.typeArguments.isNotEmpty)
+      final index = lookupMember(context.classMembers[owner], expression.text);
+      if (receiver.typeArguments.isNotEmpty &&
+          index >= 0 &&
+          context.classMembers[owner].members[index].isStatic)
         _constantError(
           context,
           receiver.token,
@@ -593,6 +598,33 @@ ConstantValue _constantStaticReference(
       expression.token,
       'type application values are unsupported',
     );
+  if (!metadata && expression.kind == astMember) {
+    final ordinal = resolveConstructorReference(
+      context.symbols.program,
+      context.classes[owner],
+      context.classMembers[owner],
+      expression.text,
+      expression.token,
+      true,
+    );
+    if (ordinal >= 0) {
+      final receiver = expression.children[0];
+      checkConstructorValueType(
+        context.symbols,
+        _constantSymbol(context, receiver),
+        receiver.typeArguments,
+        receiver.token,
+      );
+      final function = context.classConstructors[owner][ordinal];
+      context.prepareConstructorTypes?.call(function);
+      return ConstantValue(
+        functionValueType(function),
+        tFunction,
+        function,
+        '',
+      );
+    }
+  }
   var index = lookupMember(context.classMembers[owner], expression.text);
   if (index < 0)
     _constantError(context, expression.token, 'unknown static member');
@@ -1380,7 +1412,13 @@ ConstantValue _constantConstructor(
       expression.token,
       'constant expression requires a const constructor',
     );
-  var constructor = lookupConstructor(context.classMembers[classId], name);
+  final constructor = resolveConstructorReference(
+    context.symbols.program,
+    context.classes[classId],
+    context.classMembers[classId],
+    name,
+    callee.token,
+  );
   if (constructor < 0)
     _constantError(context, callee.token, 'unknown constructor');
   var function = context.classConstructors[classId][constructor];
@@ -1397,21 +1435,6 @@ ConstantValue _constantConstructor(
       context,
       expression.token,
       'constant constructor requires const',
-    );
-  if (owner.owner.isAbstract && !owner.syntax.factory)
-    _constantError(
-      context,
-      expression.token,
-      'cannot instantiate an abstract class',
-    );
-  var source = context.symbols.program;
-  if (name.startsWith('_') &&
-      sourceLibrary(source, source.tokens[callee.token].source) !=
-          sourceLibrary(source, source.tokens[owner.owner.token].source))
-    _constantError(
-      context,
-      callee.token,
-      'private constructor is not accessible',
     );
   var parameters = _constantArguments(
     context,

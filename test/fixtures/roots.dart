@@ -602,19 +602,34 @@ void switchStatementRoots(int queue, int edges) {
 }
 
 void closureRoots(int queue, int edges) {
-  var arguments = namedArgumentRoots;
-  arguments(
-    queue,
-    ninth: Leaf(849),
-    first: Leaf(841),
-    seventh: Leaf(847),
-    third: Leaf(843),
-    fifth: Leaf(845),
-    second: Leaf(842),
-    eighth: Leaf(848),
-    fourth: Leaf(844),
-    sixth: Leaf(846),
-  );
+  final argumentCallbacks =
+      <
+        void Function(
+          int, {
+          required Object? first,
+          required Object? second,
+          required Object? third,
+          required Object? fourth,
+          required Object? fifth,
+          required Object? sixth,
+          required Object? seventh,
+          required Object? eighth,
+          required Object? ninth,
+        })
+      >[namedArgumentRoots, ConstructorArgumentRoots.new];
+  for (final arguments in argumentCallbacks)
+    arguments(
+      queue,
+      ninth: Leaf(849),
+      first: Leaf(841),
+      seventh: Leaf(847),
+      third: Leaf(843),
+      fifth: Leaf(845),
+      second: Leaf(842),
+      eighth: Leaf(848),
+      fourth: Leaf(844),
+      sixth: Leaf(846),
+    );
   var generic = namedTypeRoot<Leaf>(Leaf(850));
   var callbacksWithNames = <Leaf Function({required Leaf value})>[generic];
   var namedList = captureList(callbacksWithNames, 1, queue);
@@ -730,6 +745,29 @@ void namedArgumentRoots(
   required Object? ninth,
 }) {
   // No parameter is read here: their caller's borrowed vector owns these roots.
+  checkNamedArgumentRoots(queue);
+}
+
+class ConstructorArgumentRoots {
+  final int marker = 852;
+  ConstructorArgumentRoots(
+    int queue, {
+    required Object? first,
+    required Object? second,
+    required Object? third,
+    required Object? fourth,
+    required Object? fifth,
+    required Object? sixth,
+    required Object? seventh,
+    required Object? eighth,
+    required Object? ninth,
+  }) {
+    checkNamedArgumentRoots(queue);
+    check(findMarker(queue, snapshot(queue), 852) != 0);
+  }
+}
+
+void checkNamedArgumentRoots(int queue) {
   final count = snapshot(queue);
   for (var marker = 841; marker <= 849; marker++)
     check(findMarker(queue, count, marker) != 0);
@@ -1278,7 +1316,8 @@ void main(List<String> args) {
   var second = rt.nativeLoad64(edges + 8);
   check(listElements(first, edges) == 0);
   check(rt.rtTraceObject(second, edges, capacity) == 0);
-  var wide = WideOwnFields(
+  final constructWide = WideOwnFields.new;
+  var wide = constructWide(
     Leaf(201),
     Leaf(202),
     Leaf(203),

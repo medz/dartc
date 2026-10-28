@@ -89,6 +89,34 @@ int lookupConstructor(ClassMembers owner, String name) {
   return -1;
 }
 
+int resolveConstructorReference(
+  SourceProgram source,
+  AstClass syntax,
+  ClassMembers owner,
+  String rawName,
+  int token, [
+  bool tearOff = false,
+]) {
+  final name = constructorSelector(source, rawName, token);
+  final ordinal = lookupConstructor(owner, name);
+  if (ordinal < 0) return -1;
+  if (name.startsWith('_') &&
+      sourceLibrary(source, source.tokens[token].source) !=
+          sourceLibrary(source, source.tokens[syntax.token].source))
+    _memberError(source, token, 'private constructor ' + name);
+  if (tearOff &&
+      !sourceVersionAtLeast(source, source.tokens[token].source, 2, 15))
+    _memberError(
+      source,
+      token,
+      'constructor tear-off requires language version 2.15',
+    );
+  if (syntax.isAbstract &&
+      (syntax.constructors.isEmpty || !syntax.constructors[ordinal].factory))
+    _memberError(source, token, 'cannot instantiate an abstract class');
+  return ordinal;
+}
+
 MemberBinding _memberBinding(
   SourceProgram source,
   AstClass syntax,

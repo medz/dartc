@@ -2925,6 +2925,7 @@ void functionParameterValues() {
 }
 
 void functionValues() {
+  constructorValues();
   functionParameterValues();
   var callableObject = MethodReceiver(1);
   print(callableObject(2));
@@ -6251,6 +6252,125 @@ class FactoryCallbackProduct implements FactoryCallback {
 int oldStyleCallback(int callback(int value), int value) => callback(value);
 int nullableOldStyle([int callback(int value)?]) =>
     callback == null ? 0 : callback(4);
+
+class ConstructorValue {
+  final int value;
+  ConstructorValue(this.value);
+  const ConstructorValue.optional([this.value = 4]);
+  const ConstructorValue.named({this.value = 5});
+  ConstructorValue.forward({int value = 6}) : this(value);
+  ConstructorValue.ordered(int first, {required int second})
+    : value = functionMark(3) + first + second {
+    functionMark(4);
+  }
+  ConstructorValue.fail() : value = 0 {
+    throw 'constructor';
+  }
+  int named() => value + 1;
+  static ConstructorValue Function([int]) get callback =>
+      ConstructorValue.optional;
+}
+
+typedef ConstructorAlias = ConstructorValue;
+typedef NullableConstructorAlias = ConstructorValue?;
+
+const savedConstructor = ConstructorValue.new;
+const savedConstructors = <ConstructorValue Function(int)>[
+  savedConstructor,
+  ConstructorAlias.new,
+];
+ConstructorValue defaultConstructor([
+  ConstructorValue Function(int) make = ConstructorValue.new,
+]) => make(2);
+
+class InferredConstructorHolder([final make = InferredConstructorChild.new]);
+class InferredConstructorParent([final value = 9]);
+
+class InferredConstructorChild extends InferredConstructorParent {
+  InferredConstructorChild([super.value]);
+}
+
+class InferredPrimaryHolder([final make = InferredPrimary.new]);
+class InferredPrimary([final value = 11]);
+
+class EmptyConstructorValue {}
+
+void constructorValues() {
+  print(savedConstructor(1).value);
+  print(defaultConstructor().value);
+  print((ConstructorValue.new)(3).value);
+  print((ConstructorValue.optional)().value);
+  print((ConstructorValue.named).call().value);
+  print(ConstructorValue.callback().value);
+  final named = ConstructorValue.named;
+  print(named(value: 10).named());
+  print(identical(savedConstructor, ConstructorAlias.new));
+  print(identical(savedConstructor, NullableConstructorAlias.new));
+  print(identical(savedConstructors[0], savedConstructors[1]));
+  print(identical(savedConstructor, ConstructorValue.optional));
+  print(identical(savedConstructor, ConstructorValue.forward));
+  const equal = ConstructorAlias.new == ConstructorValue.new;
+  print(equal);
+  print(switch (savedConstructor) {
+    const (ConstructorValue.new) => 'constructor match',
+    _ => 'wrong constructor',
+  });
+  // The contextual namespace is the instance class, not the function type.
+  print(switch (ConstructorValue(0)) {
+    .new => 1,
+    _ => 2,
+  });
+  functionTrace = 0;
+  final ordered = ConstructorValue.ordered;
+  print(ordered(second: functionMark(2), functionMark(1)).value);
+  print(functionTrace);
+  final forward = ConstructorValue.forward;
+  print(forward().value);
+  final factory = FactoryValue.new;
+  print(factory().value);
+  print(factory(12).value);
+  print(factory is FactoryValue Function([int]));
+  print(factory is FactoryValue Function([num]));
+  print(identical(factory, FactoryProduct.new));
+  final factoryNamed = FactoryValue.named;
+  print(factoryNamed(value: 3).value);
+  print(factoryNamed(bonus: 2, value: 3).value);
+  final factoryExtra = FactoryValue.extra;
+  print(factoryExtra().value);
+  final privateNamed = FactoryPrivateProduct.new;
+  print(privateNamed(value: 8).value);
+  final nullable = FactoryNullable.new;
+  print(nullable().value);
+  final payload = FactoryPayload.new;
+  print(payload(13).value);
+  final box = FactoryBox.new;
+  print(identical(box(0), FactoryBox.cached));
+  print(box(1).value);
+  final body = FactoryValue.body;
+  print(body(5).value);
+  dynamic checked = savedConstructor;
+  ConstructorValue Function(int) checkedConstructor = checked;
+  print(checkedConstructor(14).value);
+  final holder = InferredConstructorHolder();
+  print(holder.make().value);
+  print(holder.make is InferredConstructorChild Function([int]));
+  print(holder.make is InferredConstructorChild Function([String]));
+  final primary = InferredPrimaryHolder();
+  print(primary.make().value);
+  print(primary.make is InferredPrimary Function([int]));
+  final empty = EmptyConstructorValue.new;
+  print(empty() is EmptyConstructorValue);
+  final failures = <Object Function()>[ConstructorValue.fail, FactoryBox.fail];
+  for (final failure in failures) {
+    try {
+      failure();
+    } catch (error) {
+      print(error);
+    } finally {
+      print('constructor finally');
+    }
+  }
+}
 
 void factoryValues() {
   print(FactoryPayload(5).value);

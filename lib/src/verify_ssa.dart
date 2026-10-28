@@ -120,6 +120,8 @@ class _SsaVerifier {
         function.blocks.isEmpty ||
         function.arguments.length != info.parameters ||
         info.parameterTypes.length != info.parameters ||
+        info.parameterOffset < 0 ||
+        info.parameterOffset > info.parameters ||
         info.localTypes.length != info.locals)
       fail('function metadata');
     for (var item in function.valueTypes) type(item);
@@ -350,9 +352,12 @@ class _SsaVerifier {
           callee.callableAdapter >= functions.length ||
           (op == opFunctionReference && callee.callableType != result))
         fail('callable metadata');
+      type(callee.callableType);
+      if (!typeIsFunction(callee.callableType)) fail('callable signature');
+      if (functionSignature(callee.callableType).parameters.length !=
+          callee.parameters - callee.parameterOffset)
+        fail('callable parameter prefix');
       if (op == opClosureDescriptor) {
-        type(callee.callableType);
-        if (!typeIsFunction(callee.callableType)) fail('closure signature');
         final closure = callee.closureLayout;
         if (closure == null) fail('closure layout');
         for (final parameter in closure.typeParameters) type(parameter);

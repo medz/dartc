@@ -437,6 +437,7 @@ int feRegisterFunction(
     FunctionInfo(name, 0, count, count, result, types, <int>[], source),
   );
   functions[id].typeParameters = typeParameters;
+  functions[id].parameterOffset = count - syntax.parameters.length;
   if (typeParameters.isNotEmpty)
     functions[id].typeEnvironment = owner >= 0 && !syntax.isStatic ? 1 : 0;
   if (enclosingTypes.isNotEmpty)
@@ -462,11 +463,7 @@ int feRegisterFunction(
     else
       feSymbols.declarations[symbol].target = id;
   }
-  var callable =
-      typeParameters.isEmpty &&
-      !constructor &&
-      !syntax.getter &&
-      !syntax.setter;
+  var callable = typeParameters.isEmpty && !syntax.getter && !syntax.setter;
   p = 0;
   final namedParameters = <String>[];
   final requiredNamedParameters = <bool>[];
@@ -483,7 +480,7 @@ int feRegisterFunction(
   functions[id].namedParameters = namedParameters;
   functions[id].requiredNamedParameters = requiredNamedParameters;
   functions[id].callableShape = callable;
-  if (callable && owner >= 0 && !syntax.isStatic)
+  if (callable && owner >= 0 && !syntax.isStatic && !constructor)
     functions[id].closureLayout = ClosureLayout(<int>[classType(owner)], true);
   return id;
 }
@@ -822,14 +819,7 @@ bool feHasReceiver(int function) {
 
 int feTypeEnvironmentSlot(int function) => functions[function].typeEnvironment;
 
-int feParameterOffset(int function) {
-  var offset =
-      feHasReceiver(function) || functions[function].closureLayout != null
-      ? 1
-      : 0;
-  if (functions[function].typeParameters.isNotEmpty) offset++;
-  return offset;
-}
+int feParameterOffset(int function) => functions[function].parameterOffset;
 
 int feResolveType(AstType syntax) =>
     resolveType(feSymbols, syntax, functions[feFunction].typeScope);
@@ -1347,10 +1337,7 @@ int feCallableType(int function, int token) {
     feAstError(token, 'library output cannot use Dart function values');
   var type = functionValueType(function);
   if (type < 0)
-    feAstError(
-      token,
-      'generic and constructor function values are not yet supported',
-    );
+    feAstError(token, 'generic function values are not yet supported');
   if (functions[function].callableAdapter == -1) {
     functions[function].callableAdapter = -2;
     feCallableTargets.add(function);
@@ -3834,13 +3821,14 @@ int feLowerConstructorCall(
   int token,
 ) {
   if (call.text == astCallValue)
-    feAstError(call.token, 'constructor tear-off invocation is unsupported');
-  var name = constructorSelector(feSources, rawName, token);
-  if (name.startsWith('_') &&
-      sourceLibrary(feSources, feTokens[token].source) !=
-          sourceLibrary(feSources, feClassSources[owner]))
-    feAstError(token, 'private constructor ' + name);
-  var ordinal = lookupConstructor(feMembers[owner], name);
+    feAstError(call.token, 'a type literal is not callable');
+  final ordinal = resolveConstructorReference(
+    feSources,
+    feClassNodes[owner],
+    feMembers[owner],
+    rawName,
+    token,
+  );
   if (ordinal < 0) feAstError(token, 'unknown constructor');
   var constructor = feClassConstructors[owner][ordinal];
   final contract = constructor;
@@ -3853,11 +3841,17 @@ int feLowerConstructorCall(
   final count = contract == constructor
       ? feLowerArguments(call, 1, constructor)
       : feLowerFactoryArguments(call, contract, constructor);
+  feInvokeConstructor(constructor, count);
+  feConvertValue(functions[constructor].result, result, token);
+  return result;
+}
+
+void feInvokeConstructor(int constructor, int count) {
   if (feConstructors[constructor] == 2) {
     feCall(constructor, count);
-    feConvertValue(functions[constructor].result, result, token);
-    return result;
+    return;
   }
+  final owner = feOwners[constructor];
   var values = List<int>.filled(count, -1);
   var parameter = count - 1;
   while (parameter >= 0) {
@@ -3874,8 +3868,6 @@ int feLowerConstructorCall(
     parameter++;
   }
   feCall(constructor, count + 1);
-  feConvertValue(functions[constructor].result, result, token);
-  return result;
 }
 
 int feLowerCall(AstExpression call, int context) {
@@ -3922,6 +3914,8 @@ int feLowerCall(AstExpression call, int context) {
     );
     var classOwner = classType < 0 ? -1 : resolvedTypeClassOwner(classType);
     if (classOwner >= 0) {
+      if (call.text == astCallValue)
+        return feLowerValueCall(call, feLowerMember(callee), context);
       var type = feLowerConstructorCall(
         call,
         classOwner,
@@ -3994,11 +3988,35 @@ int feLowerMember(AstExpression expression) {
     }
   }
   var owner = feStaticOwner(expression);
-  if (owner >= 0)
+  if (owner >= 0) {
+    if (expression.kind == astMember) {
+      final ordinal = resolveConstructorReference(
+        feSources,
+        feClassNodes[owner],
+        feMembers[owner],
+        expression.text,
+        expression.token,
+        true,
+      );
+      if (ordinal >= 0) {
+        final receiver = expression.children[0];
+        checkConstructorValueType(
+          feSymbols,
+          receiverSymbol,
+          receiver.typeArguments,
+          receiver.token,
+        );
+        return feFunctionReference(
+          feClassConstructors[owner][ordinal],
+          expression.token,
+        );
+      }
+    }
     return feReadStaticMember(
       feStaticBinding(owner, expression.text, expression.token),
       expression.token,
     );
+  }
   var symbol = feExpressionSymbol(expression, false);
   if (symbol >= 0) return feLoadDeclaration(symbol, expression.token);
   var type = feNonNullableValue(
@@ -6430,8 +6448,36 @@ void parseSource(SourceProgram source) {
     feObjectMembers.members.add(member);
   }
   feOwnMembers = feMembers;
+  checkInitializers(feSymbols, syntax);
+  var plannedFunction = 0;
+  while (plannedFunction < functions.length) {
+    var plan = const ConstructorPlan(<ConstructorStep>[], -1);
+    if (feConstructors[plannedFunction] == 1) {
+      final owner = feOwners[plannedFunction];
+      plan = planConstructorInitializers(
+        feSymbols,
+        owner,
+        feClassNodes,
+        feFunctionNodes[plannedFunction],
+        feOwnMembers,
+        feClassFieldStarts[owner],
+        feClassConstructors,
+        feFunctionNodes,
+      );
+    }
+    if (feConstructors[plannedFunction] == 2 &&
+        feFunctionNodes[plannedFunction].factoryRedirect != null)
+      plan = ConstructorPlan(
+        const <ConstructorStep>[],
+        feFactoryRedirectTarget(plannedFunction),
+      );
+    feConstructorPlans.add(plan);
+    plannedFunction++;
+  }
+  checkConstructorRedirects(feSymbols, feFunctionNodes, feConstructorPlans);
   feConstants = ConstantContext(feSymbols, feGlobalNodes, globalTypes);
   feConstants.classConstructors = feClassConstructors;
+  feConstants.classes = feClassNodes;
   feConstants.globalOwners = feGlobalOwners;
   feConstants.identical = symbolOwnDeclaration(
     feSymbols,
@@ -6448,19 +6494,8 @@ void parseSource(SourceProgram source) {
     feFieldTypes,
     feFieldNodes,
     feConstants,
+    feConstructorPlans,
   );
-  for (var f = 1; f < feFunctionNodes.length; f++) {
-    if (!feFunctionNodes[f].primary) continue;
-    final parameters = feFunctionNodes[f].parameters;
-    for (var p = 0; p < parameters.length; p++)
-      if (parameters[p].fieldFormal && parameters[p].type.name == '')
-        functions[f].parameterTypes[p + 1] =
-            feFieldTypes[feField(
-              feOwners[f],
-              parameters[p].name,
-              parameters[p].token,
-            )];
-  }
   for (final owner in feClassOrder) {
     final parent = classSuperclasses[owner];
     var prefix = 0;
@@ -6498,41 +6533,6 @@ void parseSource(SourceProgram source) {
     classToStringFunctions[owner] =
         rendered == null || rendered.receiverParameter ? -1 : rendered.method;
   }
-  checkInitializers(feSymbols, syntax);
-  var plannedFunction = 0;
-  while (plannedFunction < functions.length) {
-    var plan = const ConstructorPlan(<ConstructorStep>[], -1);
-    if (feConstructors[plannedFunction] == 1) {
-      final owner = feOwners[plannedFunction];
-      plan = planConstructorInitializers(
-        feSymbols,
-        owner,
-        feClassNodes,
-        feFunctionNodes[plannedFunction],
-        feOwnMembers,
-        feClassFieldStarts[owner],
-        feClassConstructors,
-        feFunctionNodes,
-      );
-    }
-    if (feConstructors[plannedFunction] == 2 &&
-        feFunctionNodes[plannedFunction].factoryRedirect != null)
-      plan = ConstructorPlan(
-        const <ConstructorStep>[],
-        feFactoryRedirectTarget(plannedFunction),
-      );
-    feConstructorPlans.add(plan);
-    plannedFunction++;
-  }
-  checkConstructorRedirects(feSymbols, feFunctionNodes, feConstructorPlans);
-  resolveSuperParameters(
-    feSymbols,
-    feFunctionNodes,
-    functions,
-    feConstructorPlans,
-    feClassConstructors,
-    feClassOrder,
-  );
   feCheckFactoryRedirects();
   var sourceFunctions = functions.length;
   final bodyBindings = <FunctionBindings>[];
@@ -6647,6 +6647,7 @@ void parseSource(SourceProgram source) {
     if (info.closureLayout != null) {
       info.parameterTypes.insert(0, tFunction);
       info.parameters++;
+      info.parameterOffset++;
       info.locals++;
     }
     feLocalClosures.add(FeClosure());
@@ -6992,17 +6993,21 @@ void feGenerateDispatches() {
 
 void feGenerateCallableAdapters() {
   for (var cursor = 0; cursor < feCallableTargets.length; cursor++) {
-    final target = feCallableTargets[cursor];
+    final function = feCallableTargets[cursor];
+    final callable = functions[function];
+    var target = function;
+    while (feFunctionNodes[target].factoryRedirect != null)
+      target = feConstructorPlans[target].redirectTarget;
     final info = functions[target];
-    if (info.callableAdapter == -2) {
+    if (callable.callableAdapter == -2) {
       // Hidden callable, read-only call shape, and borrowed stack vector.
       final parameters = <int>[tFunction, tInt, tInt];
-      final offset = info.closureLayout == null ? 0 : 1;
+      final offset = info.parameterOffset;
       final adapter = functions.length;
-      info.callableAdapter = adapter;
+      callable.callableAdapter = adapter;
       functions.add(
         FunctionInfo(
-          '#call:' + info.name,
+          '#call:' + callable.name,
           ir.length,
           parameters.length,
           parameters.length,
@@ -7023,7 +7028,7 @@ void feGenerateCallableAdapters() {
         p++;
       }
       final token = feFunctionNodes[target].token;
-      if (offset != 0) {
+      if (info.closureLayout != null) {
         feOperand(opLoadLocal, 0);
         if (info.closureLayout!.boundReceiver) {
           feOperand(opInt, 2);
@@ -7081,7 +7086,10 @@ void feGenerateCallableAdapters() {
           feOperand(opLoadLocal, slot);
         }
       }
-      feCall(target, info.parameters);
+      if (feConstructors[target] != 0)
+        feInvokeConstructor(target, info.parameters - offset);
+      else
+        feCall(target, info.parameters);
       feCallableBox(info.result, token);
       feEmit(opReturn);
       functions[adapter].locals = feNextLocal;

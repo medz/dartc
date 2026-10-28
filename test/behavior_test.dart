@@ -887,6 +887,8 @@ void main() {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      'class C{C(int x);}void main(){Object f=C.new;print("before");f as C Function(String);}',
+      'class C{C(int x);}void main(){var f=C.new;dynamic x="wrong";print("before");f(x);}',
       "class C{factory C(dynamic value)=>value;}void main(){print('before');C(1);print('after');}",
       "class C{factory C(dynamic value)=>value;}void main(){print('before');C(null);print('after');}",
       "abstract class C{factory C(int n,int later)=D;}class D implements C{D(num n,int later){print('body');}}int later(){print('later');return 2;}void main(){dynamic value=1.5;print('before');C(value,later());}",
@@ -1893,6 +1895,7 @@ NamedLibraryChoice hiddenChoice() => partChoice;
       'named-constructors-part.dart': r'''
 part of 'named-constructors-library.dart';
 const partChoice = NamedLibraryChoice._hidden(3);
+NamedLibraryChoice Function(int) privateConstructor() => NamedLibraryChoice._hidden;
 ''',
       'named-constructors-export.dart': "export 'named-constructors-library.dart' show NamedLibraryChoice, NamedLibraryAlias, ChainedLibraryAlias, NamedScope, hiddenChoice;",
       'named-constructors-imports.dart': r'''
@@ -1910,6 +1913,11 @@ void main() {
   print(selected());
   print(new p.ChainedLibraryAlias.named(10).value);
   print(identical(const p.NamedLibraryChoice.chain(), p.hiddenChoice()));
+  const make = p.ChainedLibraryAlias.named;
+  print(make().value);
+  print(identical(make, direct.NamedLibraryChoice.named));
+  print((p.ChainedLibraryAlias.named)(11).value);
+  print(direct.privateConstructor()(12).value);
 }
 ''',
       'generic-functions-library.dart': r'''
@@ -2652,10 +2660,10 @@ void main() {
       'class C{const C();}const values=<C>[new C()];void main(){}',
       'class C{const C();}const value=true?null:new C();void main(){}',
       'class Child{const Child();}class C{final Child child;const C():child=new Child();}void main(){}',
-      // Constructor tear-offs are valid Dart but are not yet supported.
-      'class C{C.named();}void main(){(C.named)();}',
       '// @dart=2.12\nclass C{C.named();}void main(){(C.named)();}',
       'class C{const C.named();}const value=(C.named)();void main(){}',
+      // SDK CFE skips this invalid call in a dead branch; analyzer rejects it.
+      'class C{const C();}const value=true?null:(C.new)();void main(){}',
       'class C{C.named();C.named();}void main(){}',
       'class C{C();C.new();}void main(){}',
       'class C{C.named();}void main(){C();}',
@@ -3001,6 +3009,34 @@ void main() {
       }
     }
 
+    final rejectedConstructorValues = [
+      'class C{C(int x);}void unused(){var f=C.new;f("bad");}void main(){}',
+      'class C{C(int x);}void unused(){var f=C.new;f();}void main(){}',
+      'class C{C({required int x});}void unused(){var f=C.new;f();}void main(){}',
+      'class C{C({int x=0});}void unused(){var f=C.new;f(y:1);}void main(){}',
+      'class C{C({int x=0});}void unused(){var f=C.new;f(x:1,x:2);}void main(){}',
+      'class C{C(int x);}void unused(){C Function(String) f=C.new;}void main(){}',
+      'class C{C();}void unused(){int Function() f=C.new;}void main(){}',
+      'abstract class C{C();}void unused(){var f=C.new;}void main(){}',
+      'abstract class C{const C();}const f=true?null:C.new;void main(){}',
+      'class P{P.named();}class C extends P{C():super.named();}void unused(){var f=C.named;}void main(){}',
+      'class C{C.named();}void unused(){var f=C.new;}void main(){}',
+      'class C{}void unused(){C.new=()=>C();}void main(){}',
+      'class C{}void unused(){(C)();}void main(){}',
+      'class C{const C();}const f=C.new;const value=f();void main(){}',
+      'class P{P([int x=3]);}class C extends P{C([super.x]);}class H([final make=C.new]);void unused(){H().make("bad");}void main(){}',
+      'class C([final callback=C.new]);void main(){}',
+      'class H([final make=C.new]);class C([final value=3]);void unused(){H().make("bad");}void main(){}',
+      "import 'named-constructors-export.dart' as p;void unused(){var f=p.NamedLibraryChoice._hidden;}void main(){}",
+      "import 'named-constructors-export.dart' as p;const f=true?null:p.NamedLibraryAlias._hidden;void main(){}",
+      '// @dart=2.14\nclass C{C.named();}void unused(){var f=C.named;}void main(){}',
+    ];
+    for (var i = 0; i < rejectedConstructorValues.length; i++) {
+      final invalid = File(
+        '${temporary.path}/rejected-constructor-value-$i.dart',
+      )..writeAsStringSync(rejectedConstructorValues[i]);
+      await reject(invalid, checkSdk: true);
+    }
     for (var i = 0; i < rejectedTypeAliases.length; i++) {
       final invalid = File('${temporary.path}/rejected-type-alias-$i.dart')
         ..writeAsStringSync(rejectedTypeAliases[i]);

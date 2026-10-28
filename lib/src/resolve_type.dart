@@ -753,3 +753,27 @@ int declarationClassOwner(SymbolTable symbols, int symbol) {
   if (alias.expandsToParameter) return -1;
   return resolvedTypeClassOwner(alias.template);
 }
+
+void checkConstructorValueType(
+  SymbolTable symbols,
+  int symbol,
+  List<AstType> arguments,
+  int token,
+) {
+  final declaration = symbols.declarations[symbol];
+  if (declaration.kind == symbolAlias &&
+      symbols.aliases[declaration.target].parameters.isNotEmpty)
+    sourceError(
+      symbols.program,
+      symbols.program.tokens[token],
+      'generic alias constructor values are not yet supported',
+    );
+  resolveDeclarationType(
+    symbols,
+    symbol,
+    arguments,
+    token,
+    const <int>[],
+    false,
+  );
+}

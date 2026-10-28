@@ -42,7 +42,8 @@
 | [通配变量](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/wildcard-variables/feature-specification.md) | [变量](variables.md) | 已有局部绑定行为，完整声明位置规则待核对 |
 | [基于界限的推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/inference-using-bounds/design-document.md) | [类型](types.md) | 未实现 |
 | [Null-aware elements](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.8/null-aware-elements/feature-specification.md) | [表达式](expressions.md) | List 的运行时及常量元素已支持；Set/Map 未实现 |
-| [Dot shorthands](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.10/dot-shorthands/feature-specification.md) | [表达式](expressions.md#点简写)、[模式](patterns.md) | 已有构造器与静态成员的上下文简写、选择器链、常量、相等操作数和模式已支持；构造器函数值、泛型类及未实现声明类别仍缺 |
+| [Constructor tear-offs](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.15/constructor-tearoffs/feature-specification.md) | [类](classes.md#构造器函数值)、[函数](functions.md#函数值) | 非泛型用户类构造器、工厂、重定向及普通类别名提取已支持；泛型类/别名及 builtin 标准库构造器提取仍缺 |
+| [Dot shorthands](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.10/dot-shorthands/feature-specification.md) | [表达式](expressions.md#点简写)、[模式](patterns.md) | 已有构造器与静态成员的上下文简写、选择器链、常量、相等操作数和模式已支持；非泛型用户类构造器函数值可用于常量模式；泛型类及未实现声明类别仍缺 |
 | [私有命名形参](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.12/private-named-parameters/feature-specification.md) | [函数](functions.md) | 字段形参和主构造器声明参数的公共名映射、冲突校验及 super 形参公共名称关联 |
 | [Primary constructors](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.13/primary-constructors/feature-specification.md) | [类](classes.md#主构造器) | 非泛型类的主构造器、字段声明参数与推断、初始化作用域、常量求值及生成式/工厂构造简写已支持；泛型类及其余声明类别仍缺 |
 

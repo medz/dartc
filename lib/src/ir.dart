@@ -240,6 +240,8 @@ class FunctionInfo {
   int start;
   int end = -1;
   int parameters;
+  // Hidden receiver, closure, and type-environment parameters precede formals.
+  int parameterOffset = 0;
   int locals;
   int result;
   List<int> parameterTypes;
@@ -345,7 +347,8 @@ int functionValueType(int function) {
   if (!info.callableShape) return -1;
   if (info.callableType < 0) {
     var parameters = info.parameterTypes;
-    if (info.closureLayout != null) parameters = parameters.sublist(1);
+    if (info.parameterOffset != 0)
+      parameters = parameters.sublist(info.parameterOffset);
     info.callableType = functionType(
       info.result,
       parameters,

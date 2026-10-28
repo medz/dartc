@@ -1,6 +1,7 @@
 import '../ast.dart';
 import '../constants.dart';
 import '../ir.dart';
+import '../initialization.dart';
 import '../members.dart';
 import '../resolve_type.dart';
 import '../source.dart';
@@ -204,6 +205,7 @@ List<ClassMembers> checkClassInterfaces(
   List<int> fieldTypes,
   List<AstVariable> fields,
   ConstantContext constants,
+  List<ConstructorPlan> constructorPlans,
 ) {
   final views = <ClassMembers>[];
   for (var owner = 0; owner < ownMembers.length; owner++) {
@@ -226,7 +228,45 @@ List<ClassMembers> checkClassInterfaces(
     );
   }
 
-  for (final owner in order) {
+  final states = List<int>.filled(classes.length, 0);
+  final fieldReady = <bool>[
+    for (final field in fields)
+      field.declaringParameter == null ||
+          field.declaringParameter!.type.name != '',
+  ];
+  late void Function(int) check;
+  void prepareConstructor(int function) {
+    final info = functions[function];
+    final owner = typeArgument(info.result);
+    final parameters = declarations[function].parameters;
+    for (var p = 0; p < parameters.length; p++) {
+      final parameter = parameters[p];
+      if (parameter.fieldFormal && parameter.type.name == '') {
+        final field = ownMembers[owner]
+            .members[lookupMember(ownMembers[owner], parameter.name)]
+            .field;
+        if (!fieldReady[field]) check(owner);
+        info.parameterTypes[p + 1] = fieldTypes[field];
+      }
+      if (parameter.superFormal) check(typeArgument(classSuperclasses[owner]));
+    }
+    resolveConstructorSuperParameters(
+      symbols,
+      declarations,
+      functions,
+      constructorPlans,
+      function,
+    );
+    info.callableType = -1;
+  }
+
+  check = (int owner) {
+    if (states[owner] == 2) return;
+    if (states[owner] == 1)
+      fail(owner, 'cyclic constructor parameter inference');
+    states[owner] = 1;
+    for (final parent in classSupertypes[owner])
+      if (typeIsClass(parent)) check(typeArgument(parent));
     for (final syntax in classes[owner].methods)
       if (syntax.isStatic && syntax.body == null && syntax.arrow == null)
         fail(owner, 'static method requires a body');
@@ -307,6 +347,7 @@ List<ClassMembers> checkClassInterfaces(
           if (type == tNull) type = nullableType(tObject);
         }
         fieldTypes[field] = type;
+        fieldReady[field] = true;
       }
       for (var role = classMethod; role <= classSetter; role++) {
         final candidates = <MemberBinding>[];
@@ -428,7 +469,14 @@ List<ClassMembers> checkClassInterfaces(
           fail(owner, 'missing concrete implementation of ' + member.name);
       }
     }
-  }
+    states[owner] = 2;
+    for (final function in constants.classConstructors[owner])
+      prepareConstructor(function);
+  };
+
+  constants.prepareConstructorTypes = prepareConstructor;
+  for (final owner in order) check(owner);
+  constants.prepareConstructorTypes = null;
   return views;
 }
 

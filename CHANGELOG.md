@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Support non-generic user-class constructor values, including factories, redirects, optional and named arguments, constant identity and ordinary type aliases. Resolve inferred field and super parameter types before exposing constructor signatures.
 - Support optional positional and named parameters in non-generic function values, including captures, defaults, structural function types and runtime checks.
 - Add contextual dot shorthands for supported constructors and static members, including selector chains, constants, equality operands and patterns.
 - Add non-generic factory constructors, redirecting and const factories, target defaults and abbreviated factory declarations. Preserve argument order, return checks, void payloads and constant identity across redirects. Accept function-form typed ordinary parameters.

@@ -59,9 +59,9 @@
 
 `==`/`!=` 只给直接的简写右操作数提供左侧静态类型作为声明查找上下文，不改变该操作数自身的类型推断上下文。`value == .name` 与 `value == (.name)` 因此不同。常量及关系模式按匹配类型和运算符参数上下文处理，关系模式的 SDK 差异见[模式](patterns.md)。常量求值使用相同声明身份，检查未选中分支及未调用声明的义务。`const .name(...)` 必须选择 const 构造器；普通静态 getter 或方法不因此成为常量。
 
-缺少上下文、dynamic/void/Never、结构化函数类型和类型参数（包括有类上界的参数）不能提供静态命名空间。无上下文时不按成员名搜索类。检查语言版本至少 3.10、私有成员与构造器、实例成员误用及非法赋值。按 SDK 3.13.7 的 CFE/analyzer 行为，跨库私有类不能提供简写命名空间，即使通过公共别名得到该类型；同库及 part 可用。构造器 tear-off、泛型函数值、泛型类、FutureOr、enum/mixin/extension type 及未实现的标准库成员仍依赖各自语言和库缺口。
+缺少上下文、dynamic/void/Never、结构化函数类型和类型参数（包括有类上界的参数）不能提供静态命名空间。无上下文时不按成员名搜索类。检查语言版本至少 3.10、私有成员与构造器、实例成员误用及非法赋值。按 SDK 3.13.7 的 CFE/analyzer 行为，跨库私有类不能提供简写命名空间，即使通过公共别名得到该类型；同库及 part 可用。泛型函数值、泛型类、FutureOr、enum/mixin/extension type 及未实现的标准库成员仍依赖各自语言和库缺口。
 
-固定规范与 SDK 3.13.7 analyzer 都要求显式 const 简写调用选择 const 构造器；CFE 却接受并执行 `const .make()` 指向的普通静态方法。dartc 在此遵守 const 资格并拒绝，即使函数未调用。固定规范的裸常量模式还排除 `.new`，而此 SDK 的 CFE 与 analyzer 接受构造器函数值模式；dartc 的对应缺口归构造器 tear-off，不将其标成非法 Dart。
+固定规范与 SDK 3.13.7 analyzer 都要求显式 const 简写调用选择 const 构造器；CFE 却接受并执行 `const .make()` 指向的普通静态方法。dartc 在此遵守 const 资格并拒绝，即使函数未调用。固定规范的裸常量模式还排除 `.new`，而此 SDK 的 CFE 与 analyzer 接受构造器函数值模式；dartc 接受已支持非泛型用户类的该模式，构造器引用及剩余缺口见[类追踪](classes.md#构造器函数值)。
 
 实现入口为 [parser.dart](../lib/src/parser.dart) `parserStaticShorthand()`、[resolve_type.dart](../lib/src/resolve_type.dart) `resolveStaticShorthand()` 与 `resolveEqualityShorthand()`；普通 lowering 和 [constants.dart](../lib/src/constants.dart) 共用解析结果。行为入口为 [values.dart](../test/fixtures/values.dart) `shorthandValues()`、`shorthandContexts()`，[behavior_test.dart](../test/behavior_test.dart) `shorthand-imports.dart`、私有访问拒例和 `rejected`；[roots.dart](../test/fixtures/roots.dart) 的对象和 List 元素分配继续验证根枚举。
 

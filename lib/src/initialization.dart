@@ -387,36 +387,28 @@ ConstructorPlan planConstructorInitializers(
   );
 }
 
-void resolveSuperParameters(
+void resolveConstructorSuperParameters(
   SymbolTable symbols,
   List<AstFunction> declarations,
   List<FunctionInfo> signatures,
   List<ConstructorPlan> plans,
-  List<List<int>> constructors,
-  List<int> classOrder,
+  int function,
 ) {
-  for (final owner in classOrder) {
-    for (final function in constructors[owner]) {
-      final plan = plans[function];
-      for (var p = 0; p < plan.superParameters.length; p++) {
-        final associated = plan.superParameters[p];
-        if (associated < 0) continue;
-        final parameter = declarations[function].parameters[p];
-        final parentType =
-            signatures[plan.superTarget].parameterTypes[associated + 1];
-        if (parameter.type.name == '')
-          signatures[function].parameterTypes[p + 1] = parentType;
-        if (!typeIsSubtype(
-          signatures[function].parameterTypes[p + 1],
-          parentType,
-        ))
-          _initError(
-            symbols,
-            parameter.token,
-            'super parameter type must be a subtype of its target',
-          );
-      }
-    }
+  final plan = plans[function];
+  for (var p = 0; p < plan.superParameters.length; p++) {
+    final associated = plan.superParameters[p];
+    if (associated < 0) continue;
+    final parameter = declarations[function].parameters[p];
+    final parentType =
+        signatures[plan.superTarget].parameterTypes[associated + 1];
+    if (parameter.type.name == '')
+      signatures[function].parameterTypes[p + 1] = parentType;
+    if (!typeIsSubtype(signatures[function].parameterTypes[p + 1], parentType))
+      _initError(
+        symbols,
+        parameter.token,
+        'super parameter type must be a subtype of its target',
+      );
   }
 }
 
