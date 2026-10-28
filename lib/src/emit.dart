@@ -52,6 +52,40 @@ void emitInstruction(
     armConstant(result, instruction.target);
   } else if (op == mMove) {
     result = emitOperand(function, inputs[0], 0);
+  } else if (op >= mFloat64Add && op <= mFloat64Neg) {
+    final left = emitOperand(function, inputs[0], 0);
+    result = emitDestination(function, output);
+    if (op == mFloat64FromInt) {
+      machineCode.add(0x9e620000 | (left << 5)); // scvtf d0, xN
+    } else {
+      machineCode.add(0x9e670000 | (left << 5)); // fmov d0, xN
+    }
+    if (op == mFloat64ToInt) {
+      machineCode.add(0x9e780000 | result); // fcvtzs xN, d0
+    } else if (op == mFloat64Neg) {
+      machineCode.add(0x1e614000); // fneg d0, d0
+      machineCode.add(0x9e660000 | result);
+    } else if (op == mFloat64FromInt) {
+      machineCode.add(0x9e660000 | result); // fmov xN, d0
+    } else {
+      final right = emitOperand(function, inputs[1], 1);
+      machineCode.add(0x9e670001 | (right << 5)); // fmov d1, xN
+      if (op == mFloat64Compare) {
+        machineCode.add(0x1e612000); // fcmp d0, d1
+        machineCode.add(0x9a9f57e9); // cset x9, mi
+        machineCode.add(0x9a9fd7e0 | result); // cset xN, gt
+        machineCode.add(0xcb090000 | (result << 5) | result);
+        machineCode.add(0x9a9f77e9); // cset x9, vs
+        machineCode.add(0xaa090400 | (result << 5) | result);
+      } else {
+        var encoding = 0x1e612800;
+        if (op == mFloat64Sub) encoding = 0x1e613800;
+        if (op == mFloat64Mul) encoding = 0x1e610800;
+        if (op == mFloat64Div) encoding = 0x1e611800;
+        machineCode.add(encoding);
+        machineCode.add(0x9e660000 | result);
+      }
+    }
   } else if (op == mFramePointer) {
     result = emitDestination(function, output);
     armMove(result, 29);

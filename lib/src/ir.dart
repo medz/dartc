@@ -44,6 +44,14 @@ const int opClosureDescriptor = 41;
 const int opCaptureCellDescriptor = 42;
 const int opTypeReference = 43;
 const int opGenericCall = 44;
+const int opDouble = 45;
+const int opDoubleAdd = 46;
+const int opDoubleSub = 47;
+const int opDoubleMul = 48;
+const int opDoubleDiv = 49;
+const int opDoubleCompare = 50;
+const int opDoubleNeg = 51;
+const int opIntToDouble = 52;
 
 const int bPrintString = 1;
 const int bPrintInt = 2;
@@ -116,6 +124,20 @@ const int bTypeInstantiate = 68;
 const int bValueCheck = 69;
 const int bListNewTyped = 70;
 const int bListFilledTyped = 71;
+const int bBoxDouble = 72;
+const int bDoubleToString = 73;
+const int bDoubleModulo = 74;
+const int bDoubleTruncDiv = 75;
+const int bDoubleToInt = 76;
+const int bDoubleParse = 77;
+const int bDoubleTryParse = 78;
+const int bValueFloatDiv = 79;
+const int bValueNeg = 80;
+const int bValueToDouble = 81;
+const int bValueToInt = 82;
+const int bValueRemainder = 83;
+const int bValueCompareTo = 84;
+const int bNumberProperty = 85;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;
@@ -129,6 +151,45 @@ const int bNativeMetadataAddress = 108;
 const int bNativeCall1 = 109;
 const int bNativeCall0 = 110;
 const int bNativeFramePointer = 111;
+// IEEE binary64 operations on raw bit patterns. Conversion to int truncates
+// and saturates; NaN converts to zero. Compare returns -1, 0, 1, or 2 (NaN).
+const int bNativeFloat64Add = 112;
+const int bNativeFloat64Sub = 113;
+const int bNativeFloat64Mul = 114;
+const int bNativeFloat64Div = 115;
+const int bNativeFloat64Compare = 116;
+const int bNativeFloat64FromInt = 117;
+const int bNativeFloat64ToInt = 118;
+// Expose/restore the internal tagged word. An exposed address is not a GC root.
+const int bNativeValueBits = 119;
+const int bNativeValueFromBits = 120;
+
+int nativeBuiltinInputType(int primitive) =>
+    primitive == bNativeValueBits ? nullableType(tObject) : tInt;
+int nativeBuiltinResultType(int primitive) =>
+    primitive == bNativeValueFromBits ? nullableType(tObject) : tInt;
+
+int nativeBuiltinArity(int primitive) {
+  if (primitive == bNativeValueBits ||
+      primitive == bNativeValueFromBits ||
+      primitive == bNativeLoad64 ||
+      primitive == bNativeLoad8 ||
+      primitive == bNativeLoad16 ||
+      primitive == bNativeMetadataAddress ||
+      primitive == bNativeCall0 ||
+      primitive == bNativeFloat64FromInt ||
+      primitive == bNativeFloat64ToInt)
+    return 1;
+  if (primitive == bNativeStore64 ||
+      primitive == bNativeStore8 ||
+      primitive == bNativeStore16 ||
+      primitive == bNativeCall1 ||
+      primitive >= bNativeFloat64Add && primitive <= bNativeFloat64Compare)
+    return 2;
+  if (primitive == bNativeSyscall) return 7;
+  if (primitive == bNativeTarget || primitive == bNativeFramePointer) return 0;
+  return -1;
+}
 
 const int contractNoGc = 1;
 const int contractAllocate = 2;
@@ -244,6 +305,7 @@ int functionValueType(int function) {
 int irWidth(int op) {
   if (op == opCall || op == opGenericCall || op == opBuiltin) return 3;
   if (op == opInt ||
+      op == opDouble ||
       op == opString ||
       op == opDescriptor ||
       op == opMetadataAddress ||

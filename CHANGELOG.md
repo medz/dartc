@@ -1,3 +1,9 @@
+## Unreleased
+
+- Add native double literals, arithmetic and `/`, including mixed numeric values, constants, nullable values, generics and collections.
+- Add decimal parsing and shortest round-trip formatting, numeric conversions, comparisons and double constants/properties.
+- Advance the source runtime ABI to 15 for boxed doubles and numeric metadata. Keep compiler, runtime and layout inputs matched when rebuilding.
+
 ## 0.3.0
 
 Early preview release for macOS and Linux ARM64, with Dart SDK 3.13.7 as the behavior reference.

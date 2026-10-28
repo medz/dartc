@@ -96,13 +96,16 @@ int ssaInputCount(int op, int position) {
   if (op == opCall || op == opGenericCall || op == opBuiltin)
     return ir[position + 2];
   if (op == opStoreGlobal) return 1;
-  if (op == opNeg ||
+  if (op == opDoubleNeg ||
+      op == opIntToDouble ||
+      op == opNeg ||
       op == opBitNot ||
       op == opNot ||
       op == opTypeTest ||
       op == opTypeCast)
     return 1;
-  if (op >= opAdd && op <= opGe) return 2;
+  if (op >= opAdd && op <= opGe || op >= opDoubleAdd && op <= opDoubleCompare)
+    return 2;
   return 0;
 }
 
@@ -304,6 +307,7 @@ int ssaEffects(int op, int target) {
     return ssaRead | ssaWrite | ssaAllocate | ssaThrow | ssaGc | ssaNative;
   }
   if (op == opBuiltin) {
+    if (target >= bNativeFloat64Add && target <= bNativeValueFromBits) return 0;
     if (target == bFunctionEntry || target == bFunctionType)
       return ssaRead | ssaNative;
     if (target == bValueIdentical) return ssaRead;

@@ -66,7 +66,22 @@ void corrupt(List<SsaFunction> program, String mode) {
   final diamond = named(program, 'diamond');
   final add = operation(order, opAdd);
   final call = operation(diamond, opCall);
-  if (mode == 'generic-count' || mode == 'generic-bound' || mode == 'generic-environment') {
+  if (mode == 'double-literal') {
+    operation(named(program, 'floating'), opDouble).op = opInt;
+  } else if (mode == 'double-arity' || mode == 'double-operand' || mode == 'double-result') {
+    final function = named(program, 'floating');
+    final floatingAdd = operation(function, opDoubleAdd);
+    if (mode == 'double-arity') floatingAdd.inputs.removeLast();
+    else if (mode == 'double-result') {
+      floatingAdd.resultType = tInt;
+      function.valueTypes[floatingAdd.value] = tInt;
+    } else {
+      final literal = operation(function, opDouble);
+      literal.op = opInt;
+      literal.resultType = tInt;
+      function.valueTypes[literal.value] = tInt;
+    }
+  } else if (mode == 'generic-count' || mode == 'generic-bound' || mode == 'generic-environment') {
     final invoke = operation(named(program, 'main'), opGenericCall);
     final arguments = genericCalls[invoke.target].typeArguments;
     if (mode == 'generic-count')
@@ -222,6 +237,7 @@ class Counter { int add(int value) => value + 1; }
 T generic<T extends num>(T value) => value;
 List<T> genericList<T>(T value) => [value];
 T Function(T) genericClosure<T>() => (T value) => value;
+double floating(double value) => value + 0.25;
 int callee(int value) => value + 1;
 int order(int value) {
   final next = value + 1;
@@ -253,6 +269,7 @@ void main() {
   print(generic<int>(1));
   print(genericList<int>(2));
   print(genericClosure<int>()(3));
+  print(floating(1.5));
   print(order(3));
   print(diamond(true, 4));
   print(loop(3));
@@ -295,6 +312,10 @@ Future<void> main(List<String> args) async {
     );
     const cases = {
       'valid': '',
+      'double-literal': 'integer constant type',
+      'double-arity': 'operand count',
+      'double-operand': 'operand type',
+      'double-result': 'double result type',
       'generic-count': 'generic argument count',
       'generic-bound': 'generic argument bound',
       'generic-environment': 'call operand type',

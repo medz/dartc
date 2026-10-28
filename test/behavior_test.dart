@@ -854,6 +854,18 @@ Future<void> main(List<String> args) async {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "String argument(){print('argument');return 'bad';}void main(){dynamic value=1.5;print('before');value.remainder(argument());}",
+      "String argument(){print('argument');return 'bad';}void main(){dynamic value=1.5;print('before');value.compareTo(argument());}",
+      "void main(){print('before');double.nan.toInt();}",
+      "void main(){print('before');double.infinity ~/ 1;}",
+      "void main(){print('before');1.5 ~/ 0;}",
+      "void main(){dynamic value=1;print('before');value as double;}",
+      "void main(){dynamic value=1.5;print('before');value as int;}",
+      "void main(){print('before');double.parse('wrong');}",
+      "void main(){dynamic value=1.5;print('before');int result=value.toDouble();print(result);}",
+      "void main(){dynamic value=1.5;print('before');int result=value.isNaN;print(result);}",
+      "void main(){List<num> values=<double>[1];print('before');values.add(2);}",
+
       "T Function(Object?) cast<T>()=>(value)=>value as T;void main(){final f=cast<int>();print('before');f('wrong');}",
       "T Function(T) identity<T>()=>(value)=>value;void main(){final f=identity<int>();dynamic value='wrong';print('before');f(value);}",
       "T Function(T) identity<T>()=>(value)=>value;void main(){Object value=identity<int>();print('before');value as String Function(String);}",
@@ -1360,7 +1372,9 @@ class Callable { int call(int value) => value + 1; }
 int invoke(Callable value) => value(3);
 @noGc
 bool all(List<int> value) { if (value case [...var _]) return true; return false; }
-void main() { print(compute(65)); print(box(true)); print(box(false)); print(safe('a', 'long')); print(invoke(Callable())); print(all([1])); }
+@pragma('dartc:no-gc') double floating(double a, double b) => -(a+b)*a/b;
+@pragma('dartc:no-gc') double convert(int value) => value.toDouble();
+void main() { print(convert(9007199254740993)); print(floating(1.5, 0)); print(compute(65)); print(box(true)); print(box(false)); print(safe('a', 'long')); print(invoke(Callable())); print(all([1])); }
 ''',
       'nogc-user-annotation.dart': r'''
 class pragma { final String name; const pragma(this.name); }
@@ -1664,6 +1678,26 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      'void unused(){double value=1+9007199254740993;}void main(){}',
+      'const double value=1+9007199254740993;void main(){}',
+
+      "void unused(){new double.parse('1');}void main(){}",
+      'void unused(){double value=9007199254740993;}void main(){}',
+      'void unused(){double value=-(1);}void main(){}',
+      'void unused(int value){double result=value;}void main(){}',
+      'void unused(){int value=1/2;}void main(){}',
+      'void unused(){print(1.0 & 2);}void main(){}',
+      'void unused(){print(1 << 2.0);}void main(){}',
+      'void unused(){print(1.0 + true);}void main(){}',
+      'void unused(){print(1.0e+);}void main(){}',
+      'void unused(){print(1.2_e3);}void main(){}',
+      'void unused(){print(1.2e_3);}void main(){}',
+      'void unused(){print(1.2e3_);}void main(){}',
+      '// @dart=3.5\nvoid unused(){print(1.2_5);}void main(){}',
+      'const value=1.5~/0;void main(){}',
+      'const value=double.nan~/1;void main(){}',
+      'const value=<double>[9007199254740993];void main(){}',
+
       'void outer<T>(){T unused()=>1;}void main(){}',
       'void outer<T>(){T unused(){}}void main(){}',
       'void outer<T>(){T value;T unused()=>value;}void main(){}',

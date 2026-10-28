@@ -82,9 +82,10 @@ lib/src/
   frontend/
     parameters.dart, arguments.dart              形参名称校验与实参绑定
     generics.dart                                泛型调用的类型约束与推断
-    literals.dart                                整数字面量语义与范围检查
+    literals.dart                                数值字面量语义与范围检查
     patterns.dart                                模式类型、常量与覆盖检查
   constants.dart, constant_data.dart              常量语义值与只读数据
+  binary64.dart                                  编译器与运行时共用的精确数值转换
   frontend.dart                                  声明收集、语义接线与 AST lowering
   ir.dart, ssa.dart, verify_ssa.dart               IR、SSA 构造与验证
   optimize.dart, reach.dart                       优化与可达性
@@ -355,7 +356,7 @@ merge(%value: int/i64):
 
 DartType 回答“这个值是什么”，Rep 回答“这个值如何保存”。两者必须分离。nullable、泛型、dynamic 和运行时类型实参不会因为选择了机器表示而消失。
 
-需要通用值表示的语义类型使用 tagged，已知整数运算可保持完整 i64；跨表示边界的装箱和解箱必须显式保留。类型与运算规则见 [类型](../specs/types.md)和[表达式](../specs/expressions.md)。
+需要通用值表示的语义类型使用 tagged，已知整数运算可保持完整 i64，已知 double 使用独立的 rF64Bits；跨表示边界的装箱和解箱必须显式保留。类型与运算规则见 [类型](../specs/types.md)和[表达式](../specs/expressions.md)。
 
 赋值边界的隐式 `call` 提取由语义 lowering 负责，在表达式类型确定后生成绑定方法对象；普通子类型判断和运行时类型检查不执行这一转换。已知类实例的直接调用沿用方法入口与参数绑定，不需要先创建函数对象。
 
@@ -365,7 +366,8 @@ DartType 回答“这个值是什么”，Rep 回答“这个值如何保存”�
 |---|---|
 | i1 | 已知的未装箱布尔值 |
 | i32、i64 | 整数计算、窄化和原生接口 |
-| f32、f64 | 浮点计算与原生接口 |
+| rF64Bits | 当前 binary64 的通用寄存器/栈传输表示；运算进入浮点寄存器，不是 GC 根 |
+| f32、f64 | 后续独立浮点寄存器分配与原生接口的表示 |
 | ref | GC 可识别的对象基址，可按静态类型允许 null |
 | tagged | 可能是小整数、null 或对象引用的 Dart 值 |
 | addr | 原生或底层内存地址，不是 GC 根 |
@@ -503,6 +505,8 @@ ClassDesc 是映像中的只读元数据，记录布局、字段表示、扫描�
 当前闭包在函数对象后保存捕获字段，可变捕获通过共享单元保持绑定；描述符区分 Word、Ref 和 Tagged 字段。捕获环境由隐藏参数传递，源码函数签名不含该参数。绑定方法把接收者作为捕获字段，适配器取出它后调用原方法入口；方法描述符身份与接收者身份共同决定函数相等性。闭包捕获外层类型参数时，`ClosureLayout.typeParameters` 绑定完整的外层类型环境，其首个捕获字段保存 `List<Object>`，值捕获随后排列。函数体和调用适配器从同一闭包读取该环境；闭包创建时实例化可见函数签名。只读签名模板用于取得共享代码入口，不作为闭包的实际类型。SSA 检查环境字段表示、形参位置与类型参数的声明身份。Records 使用编译期可识别的 shape 描述符保存位置字段与命名字段结构，运行时类型仍遵守结构化语义。
 
 ### 调用约定
+
+当前内部 ABI 的 double 参数和返回值传递原始 binary64 word，沿用 x0–x7/栈与 x0 的位置规则；浮点暂存寄存器只在机器操作内使用，具体约束见 [数值表示](runtime.md#数值表示与机器边界)。独立浮点寄存器分配需要同步修改调用布局、保存规则及恢复种子。
 
 以下是包含线程上下文和通用动态调用的目标约定；实际函数值适配见 [runtime.md](runtime.md#函数值与调用边界)。内部托管调用与平台 C ABI 分开定义。已知目标使用直接入口，只有动态调用、闭包通用调用和 Function.apply 等路径需要通用入口。
 

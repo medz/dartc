@@ -27,6 +27,7 @@ const int astNullAwareElement = 26;
 const int astSwitchExpression = 27;
 const int astIfCaseCondition = 28;
 const int astPatternAssignment = 29;
+const int astDouble = 30;
 
 const int patternConstant = 1;
 const int patternVariable = 2;

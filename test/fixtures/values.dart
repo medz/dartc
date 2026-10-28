@@ -4228,7 +4228,235 @@ void genericFunctions() {
   print(voidValues.length);
 }
 
+const double floatingConstant = 1 + 2 * 3;
+const double exactLarge = 100000000000000000000;
+const floatingConstants = <num>[1, 1.25, -0.0, double.infinity, double.nan];
+
+class FloatingBox {
+  double value;
+  FloatingBox(this.value);
+  double get next => value + 0.5;
+  set next(double number) {
+    value = number - 0.5;
+  }
+}
+
+class FrozenFloat {
+  final num value;
+  final double direct;
+  const FrozenFloat(this.value, this.direct);
+}
+
+T floatingIdentity<T>(T value) => value;
+double manyFloats(
+  double a,
+  double b,
+  double c,
+  double d,
+  double e,
+  double f,
+  double g,
+  double h,
+  double i,
+  double j,
+) => a + b + c + d + e + f + g + h + i + j;
+void doubleValues() {
+  print([floatingConstant, exactLarge, floatingConstants]);
+  const value = FrozenFloat(1.5, 2);
+  print([value.value, value.direct]);
+  print(identical(value, const FrozenFloat(1.5, 2)));
+  final doubles = <double>[
+    0,
+    -0.0,
+    .5,
+    -1.25,
+    4.9406564584124654e-324,
+    2.2250738585072014e-308,
+    double.maxFinite,
+    double.infinity,
+    double.negativeInfinity,
+    double.nan,
+  ];
+  for (final a in doubles) {
+    print([a, a.isNaN, a.isFinite, a.isInfinite, a.isNegative, -a]);
+    dynamic dynamicA = a;
+    print([
+      -dynamicA,
+      identical(a, dynamicA),
+      a == dynamicA,
+      // ignore: unnecessary_type_check
+      a is double,
+      // ignore: unnecessary_type_check
+      a is num,
+    ]);
+    for (final b in <double>[0, -0.0, 2, -2.5, double.infinity, double.nan]) {
+      print([a + b, a - b, a * b, a / b, a % b, a.remainder(b)]);
+      print([a == b, a != b, a < b, a <= b, a > b, a >= b, a.compareTo(b)]);
+      dynamic dynamicB = b;
+      print([
+        dynamicA + dynamicB,
+        dynamicA - dynamicB,
+        dynamicA * dynamicB,
+        dynamicA / dynamicB,
+        dynamicA % dynamicB,
+      ]);
+      print([
+        dynamicA == dynamicB,
+        dynamicA != dynamicB,
+        dynamicA < dynamicB,
+        dynamicA <= dynamicB,
+        dynamicA > dynamicB,
+        dynamicA >= dynamicB,
+      ]);
+    }
+  }
+  for (final integer in <int>[
+    0,
+    -1,
+    1,
+    9007199254740993,
+    9223372036854775807,
+    -9223372036854775808,
+  ]) {
+    final number = integer.toDouble();
+    print([number, number.toInt(), integer / 3, integer / 0, integer % 2.5]);
+    print([
+      number == integer,
+      integer == number,
+      number < integer,
+      integer < number,
+      number.compareTo(integer),
+      integer.compareTo(number),
+    ]);
+  }
+  for (final text in <String>[
+    '.25',
+    '-0.0',
+    '1.',
+    '1.e2',
+    '1e400',
+    '5e-324',
+    '  -NaN ',
+    'bad',
+    '',
+    '0x10',
+  ]) {
+    final parsed = double.tryParse(text);
+    print(parsed);
+    if (parsed != null) print(double.parse(text));
+  }
+  double? optional = 1;
+  // ignore: dead_code, dead_null_aware_expression
+  print(optional ?? 2.5);
+  optional = null;
+  optional ??= 3;
+  print(optional + 1);
+  final mixed = [1, 2.5];
+  // ignore: unnecessary_type_check
+  print([mixed is List<num>, mixed is List<int>, mixed is List<double>]);
+  final widened = <double>[1, 2, 3.5];
+  List<num> numbers = widened;
+  print(numbers[1]);
+  final box = FloatingBox(1)..next = 2.5;
+  print([box.value++, ++box.value, box.next, box.value += 0.25]);
+  var captured = 1.25;
+  double closure(double other) => captured += other;
+  print([closure(.5), closure(1), captured]);
+  print(manyFloats(1, 2, 3, 4, 5, 6, 7, 8, 9, 10.25));
+  print(floatingIdentity<double>(1.25));
+  print(floatingIdentity<num>(-0.0));
+  print([7.5 ~/ 2, -7.5 ~/ 2, 7 ~/ 2.5, -7 ~/ 2.5]);
+  const constants = <Object>[
+    1 / 0,
+    0 / 0,
+    -0.0,
+    1.5 + 2,
+    5.5 % 2,
+    5.5 ~/ 2,
+    0.0 == -0.0,
+    // ignore: unnecessary_nan_comparison
+    double.nan == double.nan,
+    identical(0.0, -0.0),
+    identical(double.nan, 0 / 0),
+    '$floatingConstant',
+  ];
+  print(constants);
+  print(1_2.5_0e-1_0);
+}
+
+String floatingPattern(num number) => switch (number) {
+  1 => 'one',
+  > 1.0 && < 2 => 'fraction',
+  double(isNaN: true) => 'nan',
+  int() => 'int',
+  _ => 'double',
+};
+
+void floatingContexts() {
+  double divided = 9007199254740993 / 2;
+  double added = 9007199254740993 + 0.5;
+  double multiplied = 9007199254740993 * 0.5;
+  double modulo = 9007199254740993 % 0.5;
+  int integer = 7;
+  double product = integer * 2;
+  double remainder = integer.remainder(2);
+  int integerRemainder = integer.remainder(2);
+  final doubleRemainders = <double>[integer.remainder(2)];
+  double compound = 1;
+  compound += 9007199254740993;
+  print([
+    divided,
+    added,
+    multiplied,
+    modulo,
+    product,
+    remainder,
+    integerRemainder,
+    doubleRemainders,
+    compound,
+  ]);
+  const double constDivision = 9007199254740993 / 2;
+  const double constAddition = 9007199254740993 + 1;
+  print([constDivision, constAddition]);
+  double hex = 0x8000000000000000;
+  double a = 1 + 2, b = 1 * 2, c = -1;
+  // ignore: dead_code
+  double d = true ? 1 : 2;
+  var values = <double>[1, 2.5];
+  values[0] /= 2;
+  a /= 2;
+  print([hex, a, b, c, d, values]);
+  print(identical(const <double>[1], const <double>[1.0]));
+  print(identical(const <double>[0], const <double>[-0.0]));
+  for (final number in <num>[1.0, 1.5, 2.0, double.nan, 3])
+    print(floatingPattern(number));
+  final text = <String>[
+    '1.00000000000000011102230246251565404236316680908203125',
+    '1.00000000000000011102230246251565404236316680908203126',
+    '2.4703282292062327e-324',
+    '2.4703282292062328e-324',
+    '1.7976931348623157e308',
+    '1.7976931348623159e308',
+  ];
+  for (final input in text) print(double.parse(input));
+  var trace = '';
+  double left() {
+    trace += 'L';
+    return 5.5;
+  }
+
+  double right() {
+    trace += 'R';
+    return 2;
+  }
+
+  print(left() / right());
+  print(trace);
+}
+
 void main(List<String> args) {
+  doubleValues();
+  floatingContexts();
   genericFunctions();
   patternSwitchStatements();
   destructuringValues();

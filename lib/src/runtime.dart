@@ -1,4 +1,6 @@
 import 'layout.dart';
+import 'binary64.dart';
+import 'host.dart';
 
 external int nativeLoad64(int p);
 external int nativeStore64(int p, int value);
@@ -12,8 +14,10 @@ external int nativeMetadataAddress(int features);
 external int nativeCall1(int function, int value);
 external int nativeCall0(int function);
 external int nativeFramePointer();
+external int nativeValueBits(Object? value);
+external Object? nativeValueFromBits(int value);
 
-const int rtAbiVersion = 14;
+const int rtAbiVersion = 15;
 const int rtArenaHeaderBytes = 48;
 
 int rtArenaHead = 0;
@@ -756,6 +760,8 @@ int rtListFromData(int data) {
       value = nativeLoad64(entry + 8);
       if (actual == typeKindInt)
         value = rtBoxInt(value);
+      else if (actual == typeKindDouble)
+        value = rtBoxDouble(value);
       else if (actual == typeKindBool)
         value = rtBoxBool(value);
       else if (actual == typeKindNull)
@@ -1222,12 +1228,14 @@ int rtObjectFromData(int data) {
   while (index < count) {
     var kind = nativeLoad64(entry);
     var value = nativeLoad64(entry + 8);
-    if (kind == typeKindInt || kind == typeKindBool) {
+    if (kind == typeKindInt || kind == typeKindDouble || kind == typeKindBool) {
       if (bitmap != 0 &&
           (nativeLoad64(bitmap + (index ~/ 64) * 8) & (1 << (index & 63))) !=
               0) {
         if (kind == typeKindInt)
           value = rtBoxInt(value);
+        else if (kind == typeKindDouble)
+          value = rtBoxDouble(value);
         else
           value = rtBoxBool(value);
       }
@@ -1385,7 +1393,9 @@ int rtTypeSubtype(int actual, int expected) {
     if (source == typeKindDynamic || source == typeKindVoid) return 0;
     return 1;
   }
-  if (source == typeKindInt && target == typeKindNum) return 1;
+  if ((source == typeKindInt || source == typeKindDouble) &&
+      target == typeKindNum)
+    return 1;
   if (source != target) return 0;
   if (source == typeKindList) {
     return rtTypeSubtype(rtTypeArgument(actual), rtTypeArgument(expected));
@@ -1461,6 +1471,7 @@ int rtValueKind(int value) {
   if ((value & 1) != 0) return typeKindInt;
   var kind = nativeLoad64(rtObjectDescriptor(value) + descriptorKindOffset);
   if (kind == descriptorIntBox) return typeKindInt;
+  if (kind == descriptorDoubleBox) return typeKindDouble;
   if (kind == descriptorString) return typeKindString;
   if (kind == descriptorList) return typeKindList;
   if (kind == descriptorFunction) return typeKindFunction;
@@ -1490,6 +1501,7 @@ int rtValueBox(int value, int type) {
   }
   var kind = nativeLoad64(type + typeKindOffset);
   if (kind == typeKindInt) return rtBoxInt(value);
+  if (kind == typeKindDouble) return rtBoxDouble(value);
   if (kind == typeKindBool) return rtBoxBool(value);
   if (kind == typeKindNull) return 0;
   return rtValueTypeError();
@@ -1510,7 +1522,9 @@ int rtValueMatches(int value, int expected) {
   if (value == 0) return 0;
   if (kind == typeKindObject) return 1;
   var actual = rtValueKind(value);
-  if (kind == typeKindNum && actual == typeKindInt) return 1;
+  if (kind == typeKindNum &&
+      (actual == typeKindInt || actual == typeKindDouble))
+    return 1;
   if (actual != kind) return 0;
   if (kind == typeKindList) {
     return rtTypeSubtype(nativeLoad64(value + listTypeOffset), expected);
@@ -1535,39 +1549,146 @@ int rtValueCast(int value, int expected) {
     kind = nativeLoad64(rtTypeArgument(expected) + typeKindOffset);
   }
   if (kind == typeKindInt) return rtValueInt(value);
+  if (kind == typeKindDouble) return rtValueDouble(value);
   if (kind == typeKindBool) return rtValueBool(value);
   if (kind == typeKindVoid) return 0;
   return value;
 }
 
+int rtBoxDouble(int bits) {
+  final metadata = nativeMetadataAddress(metadataValues);
+  final descriptor =
+      metadata + nativeLoad64(metadata + metadataDoubleBoxDescriptorOffset);
+  final result = rtObjectNew(descriptor);
+  nativeStore64(result + objectHeaderBytes, bits);
+  return result;
+}
+
+int rtValueDouble(int value) {
+  if (rtValueKind(value) != typeKindDouble) return rtValueTypeError();
+  return nativeLoad64(value + objectHeaderBytes);
+}
+
+int rtNumberDouble(int value) {
+  if (rtValueKind(value) == typeKindInt)
+    return hostFloat64FromInt(rtValueInt(value));
+  return rtValueDouble(value);
+}
+
+int rtDoubleToString(int bits) => nativeValueBits(binary64Format(bits));
+
+int rtDoubleToInt(int bits) {
+  if ((bits & 0x7fffffffffffffff) >= binary64Infinity)
+    return rtValueTypeError();
+  return hostFloat64ToInt(bits);
+}
+
+int rtNumberToInt(int value) {
+  if (rtValueKind(value) == typeKindInt) return rtValueInt(value);
+  return rtDoubleToInt(rtValueDouble(value));
+}
+
+int rtDoubleParse(int text) {
+  final bits = binary64Parse(nativeValueFromBits(text) as String);
+  if (bits == null) return rtValueTypeError();
+  return bits;
+}
+
+int rtDoubleTryParse(int text) {
+  final bits = binary64Parse(nativeValueFromBits(text) as String);
+  return bits == null ? 0 : rtBoxDouble(bits);
+}
+
+int rtDoubleModulo(int left, int right) => binary64Modulo(left, right);
+int rtDoubleTruncDiv(int left, int right) =>
+    rtDoubleToInt(hostFloat64Div(left, right));
+
+int rtValueNeg(int value) {
+  if (rtValueKind(value) == typeKindInt) return rtBoxInt(-rtValueInt(value));
+  return rtBoxDouble(rtValueDouble(value) ^ binary64Sign);
+}
+
+bool rtNumberIsIntPair(int left, int right) =>
+    rtValueKind(left) == typeKindInt && rtValueKind(right) == typeKindInt;
+
 int rtValueAdd(int left, int right) {
-  var kind = rtValueKind(left);
-  if (kind == typeKindInt)
-    return rtBoxInt(rtValueInt(left) + rtValueInt(right));
-  if (kind == typeKindString && rtValueKind(right) == typeKindString) {
+  if (rtValueKind(left) == typeKindString &&
+      rtValueKind(right) == typeKindString)
     return rtStringConcat(left, right);
-  }
-  return rtValueTypeError();
+  if (rtNumberIsIntPair(left, right))
+    return rtBoxInt(rtValueInt(left) + rtValueInt(right));
+  return rtBoxDouble(
+    hostFloat64Add(rtNumberDouble(left), rtNumberDouble(right)),
+  );
 }
 
 int rtValueSub(int left, int right) {
-  return rtBoxInt(rtValueInt(left) - rtValueInt(right));
+  if (rtNumberIsIntPair(left, right))
+    return rtBoxInt(rtValueInt(left) - rtValueInt(right));
+  return rtBoxDouble(
+    hostFloat64Sub(rtNumberDouble(left), rtNumberDouble(right)),
+  );
 }
 
 int rtValueMul(int left, int right) {
-  return rtBoxInt(rtValueInt(left) * rtValueInt(right));
+  if (rtNumberIsIntPair(left, right))
+    return rtBoxInt(rtValueInt(left) * rtValueInt(right));
+  return rtBoxDouble(
+    hostFloat64Mul(rtNumberDouble(left), rtNumberDouble(right)),
+  );
 }
 
+int rtValueFloatDiv(int left, int right) =>
+    rtBoxDouble(hostFloat64Div(rtNumberDouble(left), rtNumberDouble(right)));
+
 int rtValueDiv(int left, int right) {
-  var divisor = rtValueInt(right);
+  if (!rtNumberIsIntPair(left, right))
+    return rtBoxInt(
+      rtDoubleTruncDiv(rtNumberDouble(left), rtNumberDouble(right)),
+    );
+  final divisor = rtValueInt(right);
   if (divisor == 0) return rtValueTypeError();
   return rtBoxInt(rtValueInt(left) ~/ divisor);
 }
 
 int rtValueMod(int left, int right) {
-  var divisor = rtValueInt(right);
+  if (!rtNumberIsIntPair(left, right))
+    return rtBoxDouble(
+      binary64Modulo(rtNumberDouble(left), rtNumberDouble(right)),
+    );
+  final divisor = rtValueInt(right);
   if (divisor == 0) return rtValueTypeError();
   return rtBoxInt(rtValueInt(left) % divisor);
+}
+
+int rtValueRemainder(int left, int right) {
+  if (!rtNumberIsIntPair(left, right))
+    return rtBoxDouble(
+      binary64Remainder(rtNumberDouble(left), rtNumberDouble(right)),
+    );
+  final a = rtValueInt(left);
+  final b = rtValueInt(right);
+  if (b == 0) return rtValueTypeError();
+  final remainder = a % b;
+  return rtBoxInt(
+    a < 0 && remainder != 0 ? remainder - (b < 0 ? -b : b) : remainder,
+  );
+}
+
+int rtNumberProperty(int value, int property) {
+  final integer = rtValueKind(value) == typeKindInt;
+  final bits = integer ? 0 : rtValueDouble(value);
+  final magnitude = bits & 0x7fffffffffffffff;
+  final result = switch (property) {
+    0 => !integer && magnitude > binary64Infinity,
+    1 => integer || magnitude < binary64Infinity,
+    2 => !integer && magnitude == binary64Infinity,
+    _ =>
+      integer
+          ? rtValueInt(value) < 0
+          : bits < 0 && magnitude <= binary64Infinity,
+  };
+  return result ? 1 : 0;
 }
 
 int rtValueAnd(int left, int right) {
@@ -1620,23 +1741,36 @@ int rtValueUshr(int left, int right) {
 
 int rtValueIdentical(int left, int right) {
   if (left == right) return 1;
-  if (rtValueKind(left) == typeKindInt && rtValueKind(right) == typeKindInt) {
-    if (rtValueInt(left) == rtValueInt(right)) return 1;
+  final a = rtValueKind(left);
+  final b = rtValueKind(right);
+  if (a == typeKindDouble && b == typeKindDouble) {
+    final x = rtValueDouble(left);
+    final y = rtValueDouble(right);
+    return x == y || binary64IsNaN(x) && binary64IsNaN(y) ? 1 : 0;
   }
+  if (a == typeKindInt &&
+      b == typeKindInt &&
+      rtValueInt(left) == rtValueInt(right))
+    return 1;
   return 0;
 }
 
 int rtValueEq(int left, int right) {
+  final a = rtValueKind(left);
+  final b = rtValueKind(right);
+  if ((a == typeKindDouble || a == typeKindInt) &&
+      (b == typeKindDouble || b == typeKindInt)) {
+    if (a == typeKindInt && b == typeKindInt)
+      return rtValueInt(left) == rtValueInt(right) ? 1 : 0;
+    return hostFloat64Compare(rtNumberDouble(left), rtNumberDouble(right)) == 0
+        ? 1
+        : 0;
+  }
   if (left == right) return 1;
-  var a = rtValueKind(left);
-  var b = rtValueKind(right);
   if (a != b) return 0;
-  if (a == typeKindInt) {
-    if (rtValueInt(left) == rtValueInt(right)) return 1;
-  } else if (a == typeKindString) {
-    return rtStringEqual(left, right);
-  } else if (a == typeKindFunction) {
-    var descriptor = rtObjectDescriptor(left);
+  if (a == typeKindString) return rtStringEqual(left, right);
+  if (a == typeKindFunction) {
+    final descriptor = rtObjectDescriptor(left);
     if (nativeLoad64(descriptor) == boundMethodClassId &&
         descriptor == rtObjectDescriptor(right) &&
         nativeLoad64(left + functionInstanceBytes) ==
@@ -1646,24 +1780,50 @@ int rtValueEq(int left, int right) {
   return 0;
 }
 
-int rtValueLt(int left, int right) {
-  if (rtValueInt(left) < rtValueInt(right)) return 1;
-  return 0;
+int rtNumberCompare(int left, int right) {
+  if (rtNumberIsIntPair(left, right)) {
+    final a = rtValueInt(left);
+    final b = rtValueInt(right);
+    return a < b
+        ? -1
+        : a > b
+        ? 1
+        : 0;
+  }
+  return hostFloat64Compare(rtNumberDouble(left), rtNumberDouble(right));
 }
 
-int rtValueLe(int left, int right) {
-  if (rtValueInt(left) <= rtValueInt(right)) return 1;
-  return 0;
+int rtNumberCompareTo(int left, int right) {
+  final a = rtValueKind(left);
+  final b = rtValueKind(right);
+  if (a == typeKindInt && b == typeKindInt) return rtNumberCompare(left, right);
+  if (a == typeKindInt) {
+    final bits = rtValueDouble(right);
+    if (binary64IsNaN(bits)) return -1;
+    if (bits == binary64Sign && rtValueInt(left) == 0) return 1;
+    return -binary64CompareInt(bits, rtValueInt(left));
+  }
+  final bits = rtValueDouble(left);
+  if (b == typeKindInt) {
+    if (binary64IsNaN(bits)) return 1;
+    if (bits == binary64Sign && rtValueInt(right) == 0) return -1;
+    return binary64CompareInt(bits, rtValueInt(right));
+  }
+  final other = rtValueDouble(right);
+  if (binary64IsNaN(bits)) return binary64IsNaN(other) ? 0 : 1;
+  if (binary64IsNaN(other)) return -1;
+  final result = hostFloat64Compare(bits, other);
+  if (result == 0 && bits != other) return bits < 0 ? -1 : 1;
+  return result;
 }
 
-int rtValueGt(int left, int right) {
-  if (rtValueInt(left) > rtValueInt(right)) return 1;
-  return 0;
-}
-
+int rtValueLt(int left, int right) =>
+    rtNumberCompare(left, right) == -1 ? 1 : 0;
+int rtValueLe(int left, int right) => rtNumberCompare(left, right) <= 0 ? 1 : 0;
+int rtValueGt(int left, int right) => rtNumberCompare(left, right) == 1 ? 1 : 0;
 int rtValueGe(int left, int right) {
-  if (rtValueInt(left) >= rtValueInt(right)) return 1;
-  return 0;
+  final result = rtNumberCompare(left, right);
+  return result == 0 || result == 1 ? 1 : 0;
 }
 
 int rtListModificationError() {
@@ -1731,6 +1891,7 @@ int rtValueFormatCore(int value, int handleType, int kind) {
     return rtStringFromWords(0x65757274, 0, 0, 0);
   }
   if (kind == typeKindInt) return rtIntToString(rtValueInt(value));
+  if (kind == typeKindDouble) return rtDoubleToString(rtValueDouble(value));
   if (kind == typeKindString) return value;
   if (kind == typeKindFunction) {
     return rtStringFromWords(0x657275736f6c43, 0, 0, 0);
@@ -2064,7 +2225,10 @@ int rtTraceObject(int value, int worklist, int capacity) {
   var descriptor = rtObjectDescriptor(value);
   var kind = nativeLoad64(descriptor + descriptorKindOffset);
   switch (kind) {
-    case descriptorString || descriptorIntBox || descriptorWordArray:
+    case descriptorString ||
+        descriptorIntBox ||
+        descriptorDoubleBox ||
+        descriptorWordArray:
       return 0;
     case descriptorList:
       var count = rtRootAppend(

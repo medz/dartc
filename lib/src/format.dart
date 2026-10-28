@@ -135,6 +135,7 @@ class ConstantLayout {
   int refArrayDescriptorOffset;
   int taggedArrayDescriptorOffset;
   int intBoxDescriptorOffset;
+  int doubleBoxDescriptorOffset = -1;
   int handleTypeOffset;
   int metadataOffset;
   int end;
@@ -449,13 +450,16 @@ ConstantLayout layoutConstants(int start) {
   }
   int taggedArrayDescriptorOffset = -1;
   int intBoxDescriptorOffset = -1;
+  int doubleBoxDescriptorOffset = -1;
   if (needsLists) {
     taggedArrayDescriptorOffset = end;
     end = end + classDescriptorBytes;
   }
   if (needsValues) {
     intBoxDescriptorOffset = end;
-    end = end + classDescriptorBytes;
+    end += classDescriptorBytes;
+    doubleBoxDescriptorOffset = end;
+    end += classDescriptorBytes;
   }
   int functionDescriptorOffset = -1;
   if (needsFunctions) {
@@ -537,8 +541,8 @@ ConstantLayout layoutConstants(int start) {
     metadataOffset = end;
     metadataBytes = metadataStringDescriptorOffset + 8;
     if (needsLists) metadataBytes = metadataTaggedArrayDescriptorOffset + 8;
-    if (needsValues) metadataBytes = metadataHandleTypeOffset + 8;
     if (needsRoots) metadataBytes = metadataRootTableOffset + 8;
+    if (needsValues) metadataBytes = metadataDoubleBoxDescriptorOffset + 8;
     end += metadataBytes;
   }
   int rootTableOffset = -1;
@@ -644,6 +648,7 @@ ConstantLayout layoutConstants(int start) {
     ..refBitmapOffsets = refBitmapOffsets
     ..taggedBitmapOffsets = taggedBitmapOffsets
     ..metadataFeatures = features
+    ..doubleBoxDescriptorOffset = doubleBoxDescriptorOffset
     ..metadataBytes = metadataBytes
     ..rootTableOffset = rootTableOffset
     ..rootCallsOffset = rootCallsOffset
@@ -920,6 +925,7 @@ void imageDescriptor(
 int imageTypeKind(int kind) {
   if (kind == tVoid) return typeKindVoid;
   if (kind == tInt) return typeKindInt;
+  if (kind == tDouble) return typeKindDouble;
   if (kind == tString) return typeKindString;
   if (kind == tBool) return typeKindBool;
   if (kind == tPointer) return typeKindPointer;
@@ -1082,6 +1088,18 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
   }
   if (layout.intBoxDescriptorOffset >= 0) {
     imageDescriptor(-5, objectHeaderBytes + 8, 1, 0, descriptorIntBox, 0, 0, 0);
+  }
+  if (layout.doubleBoxDescriptorOffset >= 0) {
+    imageDescriptor(
+      -11,
+      objectHeaderBytes + 8,
+      1,
+      0,
+      descriptorDoubleBox,
+      0,
+      0,
+      0,
+    );
   }
   if (layout.functionDescriptorOffset >= 0) {
     imageDescriptor(
@@ -1252,6 +1270,13 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
     }
     if (layout.metadataBytes > metadataHandleTypeOffset + 8) {
       imageMetadataReference(layout, metadataRoots, layout.rootTableOffset);
+    }
+    if (layout.metadataBytes > metadataRootTableOffset + 8) {
+      imageMetadataReference(
+        layout,
+        metadataValues,
+        layout.doubleBoxDescriptorOffset,
+      );
     }
   }
   imageRootTable(layout, codeOffset, dataBaseOffset);

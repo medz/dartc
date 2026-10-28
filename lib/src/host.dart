@@ -1,5 +1,37 @@
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
+
+// Hosted adapters for the same binary64 word primitives used by native code.
+double _hostFloat64(int bits) => (ByteData(8)..setInt64(0, bits)).getFloat64(0);
+int _hostFloat64Bits(double value) =>
+    (ByteData(8)..setFloat64(0, value)).getInt64(0);
+
+int hostFloat64Add(int left, int right) =>
+    _hostFloat64Bits(_hostFloat64(left) + _hostFloat64(right));
+int hostFloat64Sub(int left, int right) =>
+    _hostFloat64Bits(_hostFloat64(left) - _hostFloat64(right));
+int hostFloat64Mul(int left, int right) =>
+    _hostFloat64Bits(_hostFloat64(left) * _hostFloat64(right));
+int hostFloat64Div(int left, int right) =>
+    _hostFloat64Bits(_hostFloat64(left) / _hostFloat64(right));
+int hostFloat64Compare(int left, int right) {
+  final a = _hostFloat64(left);
+  final b = _hostFloat64(right);
+  if (a < b) return -1;
+  if (a == b) return 0;
+  if (a > b) return 1;
+  return 2;
+}
+
+int hostFloat64FromInt(int value) => _hostFloat64Bits(value.toDouble());
+int hostFloat64ToInt(int bits) {
+  final value = _hostFloat64(bits);
+  if (value.isNaN) return 0;
+  if (value >= 9223372036854775808.0) return 0x7fffffffffffffff;
+  if (value <= -9223372036854775808.0) return -9223372036854775808;
+  return value.toInt();
+}
 
 String hostRead(String path) => File(path).readAsStringSync();
 

@@ -258,7 +258,7 @@ void allocatePhysicalRegisters(
   while (i < order.length) {
     final int value = order[i];
     final int rep = function.reps[value];
-    if (rep == rI64 || rep == rI1 || rep == rAddr) {
+    if (rep == rI64 || rep == rI1 || rep == rAddr || rep == rF64Bits) {
       int register = 0;
       int available = -1;
       int farthest = 0;

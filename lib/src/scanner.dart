@@ -9,6 +9,7 @@ const int tokenStringPart = 5;
 const int tokenInterpolationStart = 6;
 const int tokenInterpolationEnd = 7;
 const int tokenStringTail = 8;
+const int tokenDouble = 9;
 
 // Source ranges use UTF-16 offsets; end is exclusive.
 class Token {
@@ -382,29 +383,90 @@ void scanCode(Scanner scanner, bool interpolation) {
       );
       continue;
     }
-    if (scanDigit(c)) {
-      var start = i;
-      var separated = false;
-      i++;
-      while (i < source.length) {
-        var next = source.codeUnitAt(i);
-        if (!scanLetter(next) && !scanDigit(next)) break;
-        if (next == 95) separated = true;
-        i++;
+    if (scanDigit(c) ||
+        c == 46 &&
+            i + 1 < source.length &&
+            scanDigit(source.codeUnitAt(i + 1))) {
+      final start = i;
+      final hexadecimal =
+          c == 48 &&
+          i + 1 < source.length &&
+          (source.codeUnitAt(i + 1) == 120 || source.codeUnitAt(i + 1) == 88);
+      var floating = c == 46;
+      if (hexadecimal) {
+        i += 2;
+        while (i < source.length &&
+            (scanLetter(source.codeUnitAt(i)) ||
+                scanDigit(source.codeUnitAt(i))))
+          i++;
+      } else {
+        if (floating) i++;
+        while (i < source.length &&
+            (scanDigit(source.codeUnitAt(i)) || source.codeUnitAt(i) == 95))
+          i++;
+        if (!floating &&
+            i + 1 < source.length &&
+            source.codeUnitAt(i) == 46 &&
+            scanDigit(source.codeUnitAt(i + 1))) {
+          floating = true;
+          i++;
+          while (i < source.length &&
+              (scanDigit(source.codeUnitAt(i)) || source.codeUnitAt(i) == 95))
+            i++;
+        }
+        if (i < source.length &&
+            (source.codeUnitAt(i) == 101 || source.codeUnitAt(i) == 69)) {
+          floating = true;
+          i++;
+          if (i < source.length &&
+              (source.codeUnitAt(i) == 43 || source.codeUnitAt(i) == 45))
+            i++;
+        }
+        while (i < source.length &&
+            (scanLetter(source.codeUnitAt(i)) ||
+                scanDigit(source.codeUnitAt(i))))
+          i++;
       }
-      var text = '';
-      if (separated) {
-        if (!scanVersionAtLeast(scanner, 3, 6)) {
+      var text = source.substring(start, i);
+      if (text.indexOf('_') >= 0) {
+        if (!scanVersionAtLeast(scanner, 3, 6))
           scanError(
             'digit separators require language version 3.6',
             start,
             scanner.path,
           );
+        if (!floating) {
+          text = scanSeparatedInteger(source, start, i);
+        } else {
+          final units = <int>[];
+          var at = 0;
+          while (at < text.length) {
+            if (text.codeUnitAt(at) != 95) {
+              units.add(text.codeUnitAt(at));
+              at++;
+              continue;
+            }
+            final separator = at;
+            if (at == 0 || !scanDigit(text.codeUnitAt(at - 1)))
+              scanError(
+                'digit separators must be between digits',
+                start + at,
+                scanner.path,
+              );
+            while (at < text.length && text.codeUnitAt(at) == 95) at++;
+            if (at == text.length || !scanDigit(text.codeUnitAt(at)))
+              scanError(
+                'digit separators must be between digits',
+                start + separator,
+                scanner.path,
+              );
+          }
+          text = String.fromCharCodes(units);
         }
-        text = scanSeparatedInteger(source, start, i);
-      } else
-        text = source.substring(start, i);
-      tokens.add(Token(tokenInteger, text, start, i, -1));
+      }
+      tokens.add(
+        Token(floating ? tokenDouble : tokenInteger, text, start, i, -1),
+      );
       continue;
     }
     var size = 1;
@@ -443,6 +505,7 @@ void scanCode(Scanner scanner, bool interpolation) {
           two == '<<' ||
           two == '>>' ||
           two == '~/' ||
+          two == '/=' ||
           two == '+=' ||
           two == '-=' ||
           two == '*=' ||

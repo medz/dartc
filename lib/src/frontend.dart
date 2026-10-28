@@ -1,4 +1,5 @@
 import 'ast.dart';
+import 'binary64.dart';
 import 'frontend/arguments.dart';
 import 'frontend/generics.dart';
 import 'frontend/literals.dart';
@@ -287,17 +288,20 @@ int feRegisterFunction(
     }
     if (owner >= 0 ||
         syntax.getter ||
-        syntax.parameters.length != fePrimitiveArity(primitive)) {
+        syntax.parameters.length != nativeBuiltinArity(primitive)) {
       feAstError(syntax.token, 'invalid primitive signature ' + syntax.name);
     }
-    feCheckPrimitiveType(syntax.result);
+    feCheckPrimitiveType(syntax.result, nativeBuiltinResultType(primitive));
     var parameter = 0;
     while (parameter < syntax.parameters.length) {
       final syntaxParameter = syntax.parameters[parameter];
       if (syntaxParameter.fieldFormal ||
           syntaxParameter.kind != astRequiredPositional)
         feAstError(syntaxParameter.token, 'primitive parameters require int');
-      feCheckPrimitiveType(syntaxParameter.type);
+      feCheckPrimitiveType(
+        syntaxParameter.type,
+        nativeBuiltinInputType(primitive),
+      );
       parameter++;
     }
     final symbol = symbolOwnDeclaration(feSymbols, source, syntax.name);
@@ -697,7 +701,11 @@ int feRuntimeType(int type, [bool instantiate = false]) {
 
 void feEmit(int op) {
   var type = tVoid;
-  if (op >= opAdd && op <= opBitNot) type = tInt;
+  if (op >= opAdd && op <= opBitNot || op == opDoubleCompare) type = tInt;
+  if (op >= opDoubleAdd && op <= opDoubleDiv ||
+      op == opDoubleNeg ||
+      op == opIntToDouble)
+    type = tDouble;
   if (op >= opEq && op <= opGe || op == opNot) type = tBool;
   ir.add(op);
   irTypes.add(type);
@@ -723,6 +731,7 @@ void feOperand(int op, int value) {
   feWord(value);
   if (op == opInt || op == opMetadataAddress) irTypes[position] = tInt;
   if (op == opString) irTypes[position] = tString;
+  if (op == opDouble) irTypes[position] = tDouble;
   if (op == opTypeReference) irTypes[position] = tObject;
   if (op == opDescriptor) irTypes[position] = tPointer;
   if (op == opConstantData) irTypes[position] = tPointer;
@@ -735,7 +744,7 @@ void feOperand(int op, int value) {
 }
 
 void feInteger(int value, int type) {
-  feOperand(opInt, value);
+  feOperand(type == tDouble ? opDouble : opInt, value);
   irTypes[ir.length - 2] = type;
 }
 
@@ -745,6 +754,18 @@ void feDuplicate(int type) {
 }
 
 int feBuiltinType(int id) {
+  if (id == bDoubleToString) return tString;
+  if (id == bDoubleParse || id == bDoubleModulo || id == bValueToDouble)
+    return tDouble;
+  if (id == bDoubleToInt ||
+      id == bDoubleTruncDiv ||
+      id == bValueToInt ||
+      id == bValueCompareTo)
+    return tInt;
+  if (id == bDoubleTryParse) return nullableType(tDouble);
+  if (id == bNumberProperty) return tBool;
+  if (id >= bNativeFloat64Add && id <= bNativeValueFromBits)
+    return nativeBuiltinResultType(id);
   if (id == bFunctionEntry || id == bFunctionType) return tPointer;
   if (id == bFunctionInvoke) return tDynamic;
   if (id == bHostExit || id == bHostFinish) return tNever;
@@ -873,7 +894,8 @@ FlowState feJoinFlow(FlowState left, FlowState right) {
 void feNarrowValue(int stored, int promoted) {
   if (stored == promoted) return;
   var builtin = bBoxRef;
-  if (promoted == tInt || promoted == tBool) builtin = bValueCast;
+  if (promoted == tInt || promoted == tDouble || promoted == tBool)
+    builtin = bValueCast;
   feBuiltinTyped(builtin, 1, promoted);
 }
 
@@ -1112,6 +1134,8 @@ int feGlobalType(int global) {
 void feLoadGlobalValue(int global) {
   if (_feLiteralTypes[global] == tString) {
     feOperand(opString, _feLiteralValues[global]);
+  } else if (_feLiteralTypes[global] == tDouble) {
+    feOperand(opDouble, _feLiteralValues[global]);
   } else if (_feLiteralTypes[global] != 0) {
     feInteger(_feLiteralValues[global], _feLiteralTypes[global]);
   } else if (feGlobalNodes[global].modifier == 'const') {
@@ -1179,6 +1203,8 @@ void feCheckPrivate(int owner, String name, int token) {
 }
 
 int fePrimitive(String name) {
+  if (name == 'nativeValueBits') return bNativeValueBits;
+  if (name == 'nativeValueFromBits') return bNativeValueFromBits;
   if (name == 'nativeLoad64') return bNativeLoad64;
   if (name == 'nativeStore64') return bNativeStore64;
   if (name == 'nativeLoad8') return bNativeLoad8;
@@ -1191,39 +1217,73 @@ int fePrimitive(String name) {
   if (name == 'nativeCall1') return bNativeCall1;
   if (name == 'nativeCall0') return bNativeCall0;
   if (name == 'nativeFramePointer') return bNativeFramePointer;
+  if (name == 'nativeFloat64Add') return bNativeFloat64Add;
+  if (name == 'nativeFloat64Sub') return bNativeFloat64Sub;
+  if (name == 'nativeFloat64Mul') return bNativeFloat64Mul;
+  if (name == 'nativeFloat64Div') return bNativeFloat64Div;
+  if (name == 'nativeFloat64Compare') return bNativeFloat64Compare;
+  if (name == 'nativeFloat64FromInt') return bNativeFloat64FromInt;
+  if (name == 'nativeFloat64ToInt') return bNativeFloat64ToInt;
   return 0;
 }
 
-int fePrimitiveArity(int primitive) {
-  if (primitive == bNativeLoad64 ||
-      primitive == bNativeLoad8 ||
-      primitive == bNativeLoad16 ||
-      primitive == bNativeMetadataAddress ||
-      primitive == bNativeCall0)
-    return 1;
-  if (primitive == bNativeStore64 ||
-      primitive == bNativeStore8 ||
-      primitive == bNativeStore16 ||
-      primitive == bNativeCall1)
-    return 2;
-  if (primitive == bNativeSyscall) return 7;
-  if (primitive == bNativeTarget || primitive == bNativeFramePointer) return 0;
-  return -1;
-}
-
-void feCheckPrimitiveType(AstType syntax) {
-  var symbol = feTypeSymbol(syntax);
-  if (symbol < 0 ||
-      syntax.arguments.length != 0 ||
-      feSymbols.declarations[symbol].source != sourceCore ||
-      feSymbols.declarations[symbol].kind != symbolType ||
-      feSymbols.declarations[symbol].name != 'int') {
-    feAstError(syntax.token, 'primitive signature requires dart:core int');
-  }
+void feCheckPrimitiveType(AstType syntax, int expected) {
+  if (feResolveType(syntax) != expected)
+    feAstError(syntax.token, 'invalid primitive value type');
 }
 
 void feInstallSymbols() {
+  declareSymbol(
+    feSymbols,
+    sourceHost,
+    'hostFloat64Add',
+    symbolBuiltin,
+    bNativeFloat64Add,
+  );
+  declareSymbol(
+    feSymbols,
+    sourceHost,
+    'hostFloat64Sub',
+    symbolBuiltin,
+    bNativeFloat64Sub,
+  );
+  declareSymbol(
+    feSymbols,
+    sourceHost,
+    'hostFloat64Mul',
+    symbolBuiltin,
+    bNativeFloat64Mul,
+  );
+  declareSymbol(
+    feSymbols,
+    sourceHost,
+    'hostFloat64Div',
+    symbolBuiltin,
+    bNativeFloat64Div,
+  );
+  declareSymbol(
+    feSymbols,
+    sourceHost,
+    'hostFloat64Compare',
+    symbolBuiltin,
+    bNativeFloat64Compare,
+  );
+  declareSymbol(
+    feSymbols,
+    sourceHost,
+    'hostFloat64FromInt',
+    symbolBuiltin,
+    bNativeFloat64FromInt,
+  );
+  declareSymbol(
+    feSymbols,
+    sourceHost,
+    'hostFloat64ToInt',
+    symbolBuiltin,
+    bNativeFloat64ToInt,
+  );
   declareSymbol(feSymbols, sourceCore, 'int', symbolType, tInt);
+  declareSymbol(feSymbols, sourceCore, 'double', symbolType, tDouble);
   declareSymbol(feSymbols, sourceCore, 'num', symbolType, tNum);
   declareSymbol(feSymbols, sourceCore, 'String', symbolType, tString);
   declareSymbol(feSymbols, sourceCore, 'bool', symbolType, tBool);
@@ -1344,6 +1404,7 @@ int feValueOperation(String op) => switch (op) {
   '-' => bValueSub,
   '*' => bValueMul,
   '~/' => bValueDiv,
+  '/' => bValueFloatDiv,
   '%' => bValueMod,
   '&' => bValueAnd,
   '|' => bValueOr,
@@ -1374,6 +1435,58 @@ int feCombine(String op, int left, int right, int token) {
     if (op == '!=') feEmit(opNot);
     return tBool;
   }
+  if ((left == tInt || left == tDouble) &&
+      (right == tInt || right == tDouble) &&
+      (left == tDouble || right == tDouble || op == '/')) {
+    if (left == tInt) {
+      final saved = feTemp(right);
+      feOperand(opStoreLocal, saved);
+      feEmit(opIntToDouble);
+      feOperand(opLoadLocal, saved);
+    }
+    if (right == tInt) feEmit(opIntToDouble);
+    if (op == '%' || op == '~/') {
+      feBuiltin(op == '%' ? bDoubleModulo : bDoubleTruncDiv, 2);
+    } else if (op == '+' || op == '-' || op == '*' || op == '/') {
+      feEmit(switch (op) {
+        '+' => opDoubleAdd,
+        '-' => opDoubleSub,
+        '*' => opDoubleMul,
+        _ => opDoubleDiv,
+      });
+    } else {
+      feEmit(opDoubleCompare);
+      if (op == '>=') {
+        final comparison = feTemp(tInt);
+        feOperand(opStoreLocal, comparison);
+        feOperand(opLoadLocal, comparison);
+        feOperand(opInt, 0);
+        feEmit(opEq);
+        feOperand(opLoadLocal, comparison);
+        feOperand(opInt, 1);
+        feEmit(opEq);
+        feEmit(opOr);
+        irTypes[ir.length - 1] = tBool;
+      } else {
+        feOperand(
+          opInt,
+          op == '<'
+              ? -1
+              : op == '>'
+              ? 1
+              : 0,
+        );
+        feEmit(
+          op == '!='
+              ? opNe
+              : op == '<='
+              ? opLe
+              : opEq,
+        );
+      }
+    }
+    return result;
+  }
   var equal = op == '==' || op == '!=';
   var comparison = equal || op == '<' || op == '<=' || op == '>' || op == '>=';
   if (typeIsTagged(left) ||
@@ -1389,7 +1502,7 @@ int feCombine(String op, int left, int right, int token) {
     var type = result;
     if (comparison)
       type = tBool;
-    else if (result == tInt || result == tBool)
+    else if (result == tInt || result == tDouble || result == tBool)
       type = tDynamic;
     feBuiltinTyped(feValueOperation(op), 2, type);
     if (op == '!=') feEmit(opNot);
@@ -1415,7 +1528,7 @@ int feConvertValue(int actual, int expected, int token) {
   }
   if (actual != tNever &&
       typeIsTagged(actual) &&
-      (expected == tInt || expected == tBool)) {
+      (expected == tInt || expected == tDouble || expected == tBool)) {
     feBuiltinTyped(bValueCast, 1, expected);
     return expected;
   }
@@ -1423,6 +1536,7 @@ int feConvertValue(int actual, int expected, int token) {
     var builtin = bBoxRef;
     if (typeIsTagged(expected)) {
       if (actual == tInt) builtin = bBoxInt;
+      if (actual == tDouble) builtin = bBoxDouble;
       if (actual == tBool) builtin = bBoxBool;
       if (actual == tPointer)
         feAstError(token, 'native addresses cannot be boxed as Dart values');
@@ -1522,6 +1636,23 @@ int feNonNullableValue(int type, int token) {
 }
 
 int feLowerHint(AstExpression expression, int context) {
+  if (doubleContext(context)) {
+    if (expression.kind == astInteger || isNegatedIntegerLiteral(expression)) {
+      feOperand(opDouble, decodeIntegerAsDouble(feSources, expression));
+      return tDouble;
+    }
+  }
+  if (expression.kind == astBinary &&
+      expression.text != '&&' &&
+      expression.text != '||' &&
+      expression.text != '??') {
+    final left = feLowerExpression(expression.children[0]);
+    final right = feLowerHint(
+      expression.children[1],
+      typingBinaryContext(expression.text, left, context),
+    );
+    return feCombine(expression.text, left, right, expression.token);
+  }
   if (expression.kind == astPatternAssignment)
     return feLowerPatternAssignment(expression);
   if (context == schemaHole) context = -1;
@@ -1859,6 +1990,7 @@ int feConstantGetter(ConstantValue value) {
     var kind = typeKindNull;
     var payload = child.integer;
     if (child.kind == tInt) kind = typeKindInt;
+    if (child.kind == tDouble) kind = typeKindDouble;
     if (child.kind == tBool) kind = typeKindBool;
     if (child.kind == tString) {
       kind = typeKindString;
@@ -1906,6 +2038,8 @@ int feConstantGetter(ConstantValue value) {
 void feConstantValue(ConstantValue value, int type, int token) {
   if (value.kind == tFunction)
     feFunctionReference(value.integer, token);
+  else if (value.kind == tDouble)
+    feOperand(opDouble, value.integer);
   else if (value.kind == tString)
     feOperand(opString, internString(value.text));
   else if (typeIsList(value.kind) || typeIsClass(value.kind))
@@ -2550,14 +2684,17 @@ int feLowerBuiltinCall(AstExpression call, int builtin) {
       feBuiltin(bPrintBool, 1);
     else if (type == tInt)
       feBuiltin(bPrintInt, 1);
-    else {
+    else if (type == tDouble) {
+      feBuiltin(bDoubleToString, 1);
+      feBuiltin(bPrintString, 1);
+    } else {
       feConvertValue(type, tDynamic, call.token);
       feBuiltinTyped(bValueToString, 1, tString);
       feBuiltin(bPrintString, 1);
     }
     return tVoid;
   }
-  var expected = fePrimitiveArity(builtin);
+  var expected = nativeBuiltinArity(builtin);
   var count = call.children.length - 1;
   if (expected >= 0) {
     if (count != expected) feAstError(call.token, 'primitive argument count');
@@ -2566,7 +2703,7 @@ int feLowerBuiltinCall(AstExpression call, int builtin) {
       var expression = call.children[argument];
       if (expression.kind == astNamedArgument)
         feAstError(expression.token, 'primitive arguments must be positional');
-      feLowerInContext(expression, tInt);
+      feLowerInContext(expression, nativeBuiltinInputType(builtin));
       argument++;
     }
   } else {
@@ -2684,6 +2821,20 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
     var count = feLowerBuiltinArguments(call, bStringFromCodes);
     feBuiltin(bStringFromCodes, count);
     return tString;
+  }
+  if (declaration.source == sourceCore &&
+      name == 'double' &&
+      (member == 'parse' || member == 'tryParse')) {
+    if (call.text == astCallNew)
+      feAstError(call.token, 'new cannot invoke a static method');
+    if (call.typeArguments.isNotEmpty ||
+        call.children.length != 2 ||
+        call.children[1].kind == astNamedArgument)
+      feAstError(call.token, 'double parsing requires one positional String');
+    feLowerInContext(call.children[1], tString);
+    final builtin = member == 'parse' ? bDoubleParse : bDoubleTryParse;
+    feBuiltin(builtin, 1);
+    return feBuiltinType(builtin);
   }
   if (declaration.source == sourceCore && name == 'int' && member == 'parse') {
     if (call.text == astCallNew)
@@ -2914,6 +3065,8 @@ int feLowerMemberCall(
       feAstError(call.token, 'argument count for toString');
     if (type == tInt)
       feBuiltin(bIntToString, 1);
+    else if (type == tDouble)
+      feBuiltin(bDoubleToString, 1);
     else if (type != tString) {
       feConvertValue(type, tDynamic, call.token);
       feBuiltinTyped(bValueToString, 1, tString);
@@ -2921,6 +3074,54 @@ int feLowerMemberCall(
     return tString;
   }
   type = feNonNullableValue(type, receiver.token);
+  if ((type == tInt || type == tDouble || type == tNum || type == tDynamic) &&
+      (member == 'toDouble' ||
+          member == 'toInt' ||
+          member == 'truncate' ||
+          member == 'remainder' ||
+          member == 'compareTo')) {
+    final binary = member == 'remainder' || member == 'compareTo';
+    if (call.typeArguments.isNotEmpty ||
+        call.children.length != (binary ? 2 : 1) ||
+        binary && call.children[1].kind == astNamedArgument)
+      feAstError(call.token, 'invalid numeric method arguments');
+    if (!binary && (type == tInt || type == tDouble)) {
+      if (member == 'toDouble') {
+        if (type == tInt) feEmit(opIntToDouble);
+        return tDouble;
+      }
+      if (type == tDouble) feBuiltin(bDoubleToInt, 1);
+      return tInt;
+    }
+    feConvertValue(type, tDynamic, call.token);
+    var argumentType = -1;
+    if (binary) {
+      final hint = member == 'remainder'
+          ? typingBinaryContext('%', type, context)
+          : type == tDynamic
+          ? -1
+          : tNum;
+      argumentType = feLowerHint(call.children[1], hint);
+      if (type != tDynamic && !typingAssignable(argumentType, tNum))
+        feAstError(call.children[1].token, 'numeric method requires num');
+      feConvertValue(argumentType, tDynamic, call.token);
+    }
+    final builtin = switch (member) {
+      'toDouble' => bValueToDouble,
+      'toInt' || 'truncate' => bValueToInt,
+      'compareTo' => bValueCompareTo,
+      _ => bValueRemainder,
+    };
+    var result = feBuiltinType(builtin);
+    if (member == 'remainder') result = tDynamic;
+    feBuiltinTyped(builtin, binary ? 2 : 1, result);
+    if (member == 'remainder' && type != tDynamic) {
+      final expected = typingBinary('%', type, argumentType);
+      return feConvertValue(result, expected, call.token);
+    }
+    if (type == tDynamic) return feConvertValue(result, tDynamic, call.token);
+    return result;
+  }
   if (feClassType(type)) {
     var owner = typeArgument(type);
     feCheckPrivate(owner, member, call.token);
@@ -3261,6 +3462,19 @@ int feLowerCall(AstExpression call, int context) {
 }
 
 int feLowerMember(AstExpression expression) {
+  final receiverSymbol = feExpressionSymbol(expression.children[0], false);
+  if (receiverSymbol >= 0) {
+    final declaration = feSymbols.declarations[receiverSymbol];
+    if (declaration.source == sourceCore &&
+        declaration.kind == symbolType &&
+        declaration.target == tDouble) {
+      final value = binary64Constant(expression.text);
+      if (value != null) {
+        feOperand(opDouble, value);
+        return tDouble;
+      }
+    }
+  }
   var owner = feStaticOwner(expression);
   if (owner >= 0)
     return feReadStaticMember(
@@ -3294,6 +3508,24 @@ CheckedMemberRead feCheckMemberRead(int type, String member, int token) {
     if (binding.isStatic)
       feAstError(token, 'static member cannot be accessed through an instance');
     return feCheckBoundMember(owner, binding, token);
+  }
+  if ((type == tInt || type == tDouble || type == tNum || type == tDynamic) &&
+      (member == 'isNaN' ||
+          member == 'isFinite' ||
+          member == 'isInfinite' ||
+          member == 'isNegative')) {
+    final property = switch (member) {
+      'isNaN' => 0,
+      'isFinite' => 1,
+      'isInfinite' => 2,
+      _ => 3,
+    };
+    return CheckedMemberRead(
+      type,
+      type == tDynamic ? tDynamic : tBool,
+      memberReadNumberProperty,
+      property,
+    );
   }
   if (member == 'length' || member == 'isEmpty' || member == 'isNotEmpty') {
     if (type != tString && !typeIsList(type))
@@ -3353,6 +3585,12 @@ CheckedMemberRead feCheckBoundMember(
 
 int feReadCheckedMember(CheckedMemberRead member, int token) {
   var kind = member.kind;
+  if (kind == memberReadNumberProperty) {
+    feConvertValue(member.receiver, tDynamic, token);
+    feOperand(opInt, member.target);
+    feBuiltin(bNumberProperty, 2);
+    feConvertValue(tBool, member.type, token);
+  }
   if (kind == memberReadMethod)
     return feCreateBoundMethod(member.target, token);
   if (kind == memberReadGetter) {
@@ -3659,7 +3897,14 @@ int feLowerAssignment(AstExpression expression, bool postfix) {
     if (op == '--') binary = '-';
     result = feCombine(binary, readType, tInt, expression.token);
   } else {
-    var right = feLowerHint(expression.children[1], readType);
+    var right = feLowerHint(
+      expression.children[1],
+      typingBinaryContext(
+        op.substring(0, op.length - 1),
+        readType,
+        target.type,
+      ),
+    );
     result = feCombine(
       op.substring(0, op.length - 1),
       readType,
@@ -3790,6 +4035,10 @@ int feLowerValue(AstExpression expression) {
   if ((kind == astName || kind == astMember) &&
       expression.typeArguments.length != 0)
     feAstError(expression.token, 'type application values are unsupported');
+  if (kind == astDouble) {
+    feOperand(opDouble, decodeDoubleLiteral(feSources, expression));
+    return tDouble;
+  }
   if (kind == astInteger) {
     feOperand(opInt, decodeIntegerLiteral(feSources, expression));
     return tInt;
@@ -3904,6 +4153,14 @@ int feLowerValue(AstExpression expression) {
     var result = typingUnary(op, type);
     if (result < 0) feAstError(expression.token, 'invalid unary operand type');
     if (result == tNever) return tNever;
+    if (type == tDouble) {
+      feEmit(opDoubleNeg);
+      return tDouble;
+    }
+    if ((type == tNum || type == tDynamic) && op == '-') {
+      feBuiltinTyped(bValueNeg, 1, result);
+      return result;
+    }
     if (type == tNum || type == tDynamic) {
       var value = feTemp(type);
       feOperand(opStoreLocal, value);
@@ -3939,7 +4196,10 @@ int feLowerValue(AstExpression expression) {
       return tBool;
     }
     var left = feLowerExpression(expression.children[0]);
-    var right = feLowerExpression(expression.children[1]);
+    var right = feLowerHint(
+      expression.children[1],
+      typingBinaryContext(op, left, -1),
+    );
     return feCombine(op, left, right, expression.token);
   }
   if (kind == astConditional) return feLowerConditional(expression, -1);
@@ -5102,6 +5362,7 @@ void parseSource(SourceProgram source) {
       globalTypes[constant] = value.type;
       if (value.type == value.kind &&
           (value.kind == tInt ||
+              value.kind == tDouble ||
               value.kind == tBool ||
               value.kind == tString)) {
         _feLiteralTypes[constant] = value.kind;
@@ -6510,7 +6771,9 @@ int feLowerInterpolation(AstExpression expression) {
       feLowerExpression(part);
     else
       feOperand(opLoadLocal, slots[i]);
-    if (type == tInt) {
+    if (type == tDouble) {
+      feBuiltin(bDoubleToString, 1);
+    } else if (type == tInt) {
       feBuiltin(bIntToString, 1);
     } else if (type == tBool) {
       var otherwise = feJump(opJumpFalse);

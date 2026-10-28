@@ -1,4 +1,6 @@
 import 'ast.dart';
+import 'binary64.dart';
+import 'host.dart';
 import 'frontend/arguments.dart';
 import 'frontend/literals.dart';
 import 'initialization.dart';
@@ -252,6 +254,7 @@ String _constantText(ConstantContext context, ConstantValue value, int token) {
     return 'false';
   }
   if (value.kind == tInt) return value.integer.toString();
+  if (value.kind == tDouble) return binary64Format(value.integer);
   _constantError(
     context,
     token,
@@ -264,6 +267,7 @@ ConstantValue _constantBinary(
   AstExpression expression,
   bool active,
   bool implicitConst,
+  int expected,
 ) {
   var op = expression.text;
   var left = _evaluateConstant(
@@ -291,7 +295,7 @@ ConstantValue _constantBinary(
     context,
     expression.children[1],
     rightActive,
-    -1,
+    typingBinaryContext(op, left.type, expected),
     implicitConst,
   );
   var type = typingBinary(op, left.type, right.type);
@@ -323,6 +327,13 @@ ConstantValue _constantBinary(
         'constant equality requires primitive equality',
       );
     var equal = _constantSame(left, right);
+    if ((left.kind == tInt || left.kind == tDouble) &&
+        (right.kind == tInt || right.kind == tDouble)) {
+      if (left.kind == tDouble || right.kind == tDouble)
+        equal =
+            hostFloat64Compare(_constantDouble(left), _constantDouble(right)) ==
+            0;
+    }
     if (op == '!=') equal = !equal;
     if (equal) integer = 1;
     return ConstantValue(type, tBool, integer, '');
@@ -337,6 +348,36 @@ ConstantValue _constantBinary(
   }
   if (kind == tString) {
     return ConstantValue(type, tString, 0, left.text + right.text);
+  }
+  if (left.kind == tDouble || right.kind == tDouble || op == '/') {
+    final a = _constantDouble(left);
+    final b = _constantDouble(right);
+    if (op == '+') integer = hostFloat64Add(a, b);
+    if (op == '-') integer = hostFloat64Sub(a, b);
+    if (op == '*') integer = hostFloat64Mul(a, b);
+    if (op == '/') integer = hostFloat64Div(a, b);
+    if (op == '%') integer = binary64Modulo(a, b);
+    if (op == '~/') {
+      final quotient = hostFloat64Div(a, b);
+      if ((quotient & 0x7fffffffffffffff) >= binary64Infinity)
+        _constantError(
+          context,
+          expression.token,
+          'non-finite constant integer division',
+        );
+      integer = hostFloat64ToInt(quotient);
+    }
+    if (kind == tBool) {
+      final comparison = hostFloat64Compare(a, b);
+      final result = switch (op) {
+        '<' => comparison == -1,
+        '<=' => comparison <= 0,
+        '>' => comparison == 1,
+        _ => comparison == 0 || comparison == 1,
+      };
+      integer = result ? 1 : 0;
+    }
+    return ConstantValue(type, kind, integer, '');
   }
   var a = left.integer;
   var b = right.integer;
@@ -370,10 +411,16 @@ ConstantValue _constantBinary(
   return ConstantValue(type, kind, integer, '');
 }
 
+int _constantDouble(ConstantValue value) =>
+    value.kind == tInt ? hostFloat64FromInt(value.integer) : value.integer;
+
 bool _constantSame(ConstantValue left, ConstantValue right) {
   if (left.kind != right.kind) return false;
   if (left.kind == tString) return left.text == right.text;
   if (left.kind == tNull) return true;
+  if (left.kind == tDouble)
+    return left.integer == right.integer ||
+        binary64IsNaN(left.integer) && binary64IsNaN(right.integer);
   if (left.kind == tInt ||
       left.kind == tBool ||
       left.kind == tFunction ||
@@ -1316,6 +1363,21 @@ ConstantValue _evaluateConstant(
     if (!taken) return ConstantValue(type, tNull, 0, '');
     return constantWithType(value, type);
   }
+  if (kind == astDouble)
+    return ConstantValue(
+      tDouble,
+      tDouble,
+      decodeDoubleLiteral(context.symbols.program, expression),
+      '',
+    );
+  if (doubleContext(expected) &&
+      (kind == astInteger || isNegatedIntegerLiteral(expression)))
+    return ConstantValue(
+      tDouble,
+      tDouble,
+      decodeIntegerAsDouble(context.symbols.program, expression),
+      '',
+    );
   if (kind == astInteger) {
     return ConstantValue(
       tInt,
@@ -1378,6 +1440,16 @@ ConstantValue _evaluateConstant(
     );
   }
   if (kind == astMember) {
+    final receiverSymbol = _constantSymbol(context, expression.children[0]);
+    if (receiverSymbol >= 0) {
+      final declaration = context.symbols.declarations[receiverSymbol];
+      if (declaration.source == sourceCore &&
+          declaration.kind == symbolType &&
+          declaration.target == tDouble) {
+        final value = binary64Constant(expression.text);
+        if (value != null) return ConstantValue(tDouble, tDouble, value, '');
+      }
+    }
     var owner = _constantStaticOwner(context, expression);
     if (owner >= 0)
       return _constantStaticReference(
@@ -1518,7 +1590,8 @@ ConstantValue _evaluateConstant(
       );
     }
     var integer = value.integer;
-    if (expression.text == '-') integer = -integer;
+    if (expression.text == '-')
+      integer = value.kind == tDouble ? integer ^ binary64Sign : -integer;
     if (expression.text == '~') integer = ~integer;
     if (expression.text == '!') integer = 1 - integer;
     return ConstantValue(type, valueKind, integer, '');
@@ -1533,7 +1606,13 @@ ConstantValue _evaluateConstant(
     );
   }
   if (kind == astBinary)
-    return _constantBinary(context, expression, active, implicitConst);
+    return _constantBinary(
+      context,
+      expression,
+      active,
+      implicitConst,
+      expected,
+    );
   if (kind == astConditional) {
     var condition = _evaluateConstant(
       context,
@@ -1585,17 +1664,6 @@ ConstantValue _evaluateConstant(
           context,
           expression.token,
           'void is not a constant value',
-        );
-      }
-      if (active &&
-          value.kind != tInt &&
-          value.kind != tBool &&
-          value.kind != tString &&
-          value.kind != tNull) {
-        return _constantError(
-          context,
-          expression.token,
-          'constant interpolation requires a primitive value',
         );
       }
       if (active) text = text + _constantText(context, value, expression.token);

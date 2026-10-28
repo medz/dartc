@@ -9,6 +9,7 @@ const int rRef = 1;
 const int rAddr = 2;
 const int rI1 = 3;
 const int rTagged = 4;
+const int rF64Bits = 5;
 
 const int mConstant = 1;
 // Address kinds: 0 string, 1 global, 2 class descriptor, 3 metadata, 4 TypeRef,
@@ -46,6 +47,16 @@ const int mShlImmediate = 28;
 const int mShrImmediate = 29;
 const int mUshrImmediate = 30;
 const int mFramePointer = 31;
+// The internal ABI transports binary64 bits in general registers. d0/d1 are
+// instruction-local scratch, never live across a call or safe point.
+const int mFloat64Add = 32;
+const int mFloat64Sub = 33;
+const int mFloat64Mul = 34;
+const int mFloat64Div = 35;
+const int mFloat64Compare = 36;
+const int mFloat64FromInt = 37;
+const int mFloat64ToInt = 38;
+const int mFloat64Neg = 39;
 
 class RegisterAllocation {
   final List<int> locations;
@@ -120,6 +131,7 @@ class MachineEdge {
 }
 
 int machineRep(int type) {
+  if (type == tDouble) return rF64Bits;
   if (type == tPointer) return rAddr;
   if (type == tBool) return rI1;
   if (typeIsTagged(type)) return rTagged;
@@ -132,6 +144,10 @@ MachineEdge machineEdge(SsaEdge edge) {
 }
 
 int machineArithmetic(int op) {
+  if (op >= opDoubleAdd && op <= opDoubleCompare)
+    return mFloat64Add + op - opDoubleAdd;
+  if (op == opDoubleNeg) return mFloat64Neg;
+  if (op == opIntToDouble) return mFloat64FromInt;
   if (op == opAdd) return mAdd;
   if (op == opSub) return mSub;
   if (op == opMul) return mMul;
@@ -158,7 +174,7 @@ void machineSelectInstruction(
 ) {
   var SsaInstruction(:op, value: output, :target, :effects) = source;
   final List<int> inputs = source.inputs.sublist(0);
-  if (op == opInt) {
+  if (op == opInt || op == opDouble) {
     instructions.add(
       MachineInstruction(mConstant, output, inputs, target, 0, effects),
     );
@@ -233,7 +249,22 @@ void machineSelectInstruction(
     return;
   }
   if (op == opBuiltin) {
-    if (target == bBoxRef) {
+    if (target >= bNativeFloat64Add && target <= bNativeFloat64ToInt) {
+      instructions.add(
+        MachineInstruction(
+          mFloat64Add + target - bNativeFloat64Add,
+          output,
+          inputs,
+          0,
+          0,
+          effects,
+        ),
+      );
+      return;
+    }
+    if (target == bBoxRef ||
+        target == bNativeValueBits ||
+        target == bNativeValueFromBits) {
       instructions.add(
         MachineInstruction(mMove, output, inputs, 0, 0, effects),
       );

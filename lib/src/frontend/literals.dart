@@ -1,6 +1,8 @@
 import '../ast.dart';
+import '../binary64.dart';
 import '../scanner.dart';
 import '../source.dart';
+import '../types.dart';
 
 bool isNegatedIntegerLiteral(AstExpression expression) {
   return expression.kind == astUnary &&
@@ -68,3 +70,30 @@ int decodeIntegerLiteral(SourceProgram source, AstExpression expression) {
   if (negative) return value;
   return -value;
 }
+
+int decodeDoubleLiteral(SourceProgram source, AstExpression expression) {
+  final value = binary64Parse(expression.text);
+  if (value == null)
+    sourceError(
+      source,
+      source.tokens[expression.token],
+      'invalid double literal',
+    );
+  return value;
+}
+
+int decodeIntegerAsDouble(SourceProgram source, AstExpression expression) {
+  final text = expression.kind == astUnary
+      ? '-' + expression.children[0].text
+      : expression.text;
+  final bits = binary64IntegerLiteral(text);
+  if (bits == null)
+    sourceError(
+      source,
+      source.tokens[expression.token],
+      'integer literal has no exact double representation',
+    );
+  return bits;
+}
+
+bool doubleContext(int type) => type >= 0 && typeNonNullable(type) == tDouble;

@@ -50,6 +50,34 @@ int typingUnary(String op, int type) {
   return -1;
 }
 
+// The receiver is inferred without context. Numeric result context narrows
+// only the argument, following the sealed num operator/remainder rules.
+int typingBinaryContext(String op, int left, int context) {
+  left = typeBound(left);
+  if (left == tNever || left == tDynamic) return -1;
+  final arithmetic = op == '+' || op == '-' || op == '*' || op == '%';
+  final bitwise = op == '&' || op == '|' || op == '^';
+  if (left == tString && op == '+') return tString;
+  if (left == tBool && bitwise) return tBool;
+  if (!typeIsSubtype(left, tNum)) return -1;
+  if (bitwise || op == '<<' || op == '>>' || op == '>>>') return tInt;
+  if (arithmetic) {
+    if (context >= 0 && !typeIsSubtype(tNum, context)) {
+      if (typeIsSubtype(tInt, context) && left == tInt) return tInt;
+      if (typeIsSubtype(tDouble, context) && left != tDouble) return tDouble;
+    }
+    return tNum;
+  }
+  if (op == '/' ||
+      op == '~/' ||
+      op == '<' ||
+      op == '<=' ||
+      op == '>' ||
+      op == '>=')
+    return tNum;
+  return -1;
+}
+
 int typingBinary(String op, int left, int right) {
   if (left == tVoid || right == tVoid) return -1;
   if (op == '==' || op == '!=') return tBool;
@@ -63,7 +91,13 @@ int typingBinary(String op, int left, int right) {
   var bitwise = op == '&' || op == '|' || op == '^';
   var shift = op == '<<' || op == '>>' || op == '>>>';
   var comparison = op == '<' || op == '<=' || op == '>' || op == '>=';
-  if (!arithmetic && !bitwise && !shift && !comparison && op != '~/') return -1;
+  if (!arithmetic &&
+      !bitwise &&
+      !shift &&
+      !comparison &&
+      op != '~/' &&
+      op != '/')
+    return -1;
   if (left == tDynamic) return tDynamic;
   if (left == tNever) return tNever;
   if (left == tString && op == '+') {
@@ -74,7 +108,7 @@ int typingBinary(String op, int left, int right) {
     if (typingAssignable(right, tBool)) return tBool;
     return -1;
   }
-  if (left != tInt && left != tNum) return -1;
+  if (left != tInt && left != tDouble && left != tNum) return -1;
   if (bitwise || shift) {
     if (left == tInt && typingAssignable(right, tInt)) return tInt;
     return -1;
@@ -82,8 +116,10 @@ int typingBinary(String op, int left, int right) {
   if (!typingAssignable(right, tNum)) return -1;
   if (comparison) return tBool;
   if (op == '~/') return tInt;
+  if (op == '/') return tDouble;
   if (arithmetic) {
     if (left == tInt && right == tInt) return tInt;
+    if (left == tDouble || right == tDouble) return tDouble;
     return tNum;
   }
   return -1;

@@ -5,6 +5,7 @@ const int interfaceMethod = 0;
 const int interfaceGetter = 1;
 
 const int memberReadIdentity = 0;
+const int memberReadNumberProperty = 10;
 const int memberReadMethod = 1;
 const int memberReadGetter = 2;
 const int memberReadField = 3;

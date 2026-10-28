@@ -21,6 +21,20 @@ int runtimeFunction(int builtin, int castType) {
     print('Library output cannot use managed runtime operations.');
     hostExit(1);
   }
+  if (builtin == bBoxDouble) return abiFunction('rtBoxDouble', 0);
+  if (builtin == bDoubleToString) return abiFunction('rtDoubleToString', 0);
+  if (builtin == bDoubleModulo) return abiFunction('rtDoubleModulo', 0);
+  if (builtin == bDoubleTruncDiv) return abiFunction('rtDoubleTruncDiv', 0);
+  if (builtin == bDoubleToInt) return abiFunction('rtDoubleToInt', 0);
+  if (builtin == bDoubleParse) return abiFunction('rtDoubleParse', 0);
+  if (builtin == bDoubleTryParse) return abiFunction('rtDoubleTryParse', 0);
+  if (builtin == bValueFloatDiv) return abiFunction('rtValueFloatDiv', 0);
+  if (builtin == bValueNeg) return abiFunction('rtValueNeg', 0);
+  if (builtin == bValueToDouble) return abiFunction('rtNumberDouble', 0);
+  if (builtin == bValueToInt) return abiFunction('rtNumberToInt', 0);
+  if (builtin == bValueRemainder) return abiFunction('rtValueRemainder', 0);
+  if (builtin == bValueCompareTo) return abiFunction('rtNumberCompareTo', 0);
+  if (builtin == bNumberProperty) return abiFunction('rtNumberProperty', 0);
   if (builtin == bPrintString) return abiFunction('rtPrintString', 0);
   if (builtin == bPrintInt) return abiFunction('rtPrintInt', 0);
   if (builtin == bPrintBool) return abiFunction('rtPrintBool', 0);
@@ -70,6 +84,7 @@ int runtimeFunction(int builtin, int castType) {
   if (builtin == bBoxBool) return abiFunction('rtBoxBool', 0);
   if (builtin == bValueCast) {
     if (castType == tInt) return abiFunction('rtValueInt', 0);
+    if (castType == tDouble) return abiFunction('rtValueDouble', 0);
     if (castType == tBool) return abiFunction('rtValueBool', 0);
     return abiFunction('rtValueCast', 0);
   }

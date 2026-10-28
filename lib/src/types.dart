@@ -10,12 +10,14 @@ const int tNum = 8;
 const int tNever = 9;
 const int tFunction = 10;
 
-const int kNullable = 11;
-const int kList = 12;
-const int kClass = 13;
-const int kFunction = 14;
-const int kTypeParameter = 15;
-const int kSchemaHole = 16;
+const int tDouble = 11;
+
+const int kNullable = 12;
+const int kList = 13;
+const int kClass = 14;
+const int kFunction = 15;
+const int kTypeParameter = 16;
+const int kSchemaHole = 17;
 
 int schemaHole = -1;
 
@@ -68,7 +70,7 @@ void resetTypes() {
   functionSignatures.clear();
   typeParameters.clear();
   var i = 0;
-  while (i <= tFunction) {
+  while (i <= tDouble) {
     dartTypes.add(DartType(i, -1, -1, -1));
     i++;
   }
@@ -76,7 +78,7 @@ void resetTypes() {
 
 int functionType(int result, List<int> parameters, [int required = -1]) {
   if (required < 0) required = parameters.length;
-  var type = tFunction + 1;
+  var type = tDouble + 1;
   while (type < dartTypes.length) {
     if (dartTypes[type].kind == kFunction) {
       var signature = functionSignatures[dartTypes[type].argument];
@@ -250,10 +252,12 @@ bool typeIsDisjoint(int left, int right) {
     return false;
   }
   return left == tInt ||
+      left == tDouble ||
       left == tNum ||
       left == tString ||
       left == tBool ||
       right == tInt ||
+      right == tDouble ||
       right == tNum ||
       right == tString ||
       right == tBool;
@@ -294,7 +298,7 @@ bool typeIsSubtype(int actual, int expected) {
       actualKind == kNullable)
     return false;
   if (expected == tObject) return true;
-  if (actual == tInt && expected == tNum) return true;
+  if ((actual == tInt || actual == tDouble) && expected == tNum) return true;
   if (actualKind == kFunction) {
     if (expected == tFunction) return true;
     if (expectedKind == kFunction) {
@@ -351,6 +355,7 @@ int joinTypes(int left, int right) {
       joinTypes(typeNonNullable(left), typeNonNullable(right)),
     );
   }
+  if (typeIsSubtype(left, tNum) && typeIsSubtype(right, tNum)) return tNum;
   if (typeIsList(left) && typeIsList(right)) {
     return listType(joinTypes(typeArgument(left), typeArgument(right)));
   }

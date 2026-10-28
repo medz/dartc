@@ -785,7 +785,8 @@ AstPattern parserUnaryPattern(Parser parser, int context) {
       parserExpect(parser, ')');
       parser.inSwitchGuard = guard;
     } else if (parserIs(parser, '-') &&
-        parser.tokens[token + 1].kind == tokenInteger) {
+        (parser.tokens[token + 1].kind == tokenInteger ||
+            parser.tokens[token + 1].kind == tokenDouble)) {
       parser.position++;
       value = AstExpression(
         astUnary,
@@ -893,10 +894,10 @@ AstExpression parserPrimary(Parser parser) {
     expression.token = token;
     return expression;
   }
-  if (current.kind == tokenInteger) {
+  if (current.kind == tokenInteger || current.kind == tokenDouble) {
     parser.position++;
     return AstExpression(
-      astInteger,
+      current.kind == tokenDouble ? astDouble : astInteger,
       current.text,
       const <AstExpression>[],
       const <AstType>[],
@@ -1218,7 +1219,7 @@ int parserPrecedence(String op) => switch (op) {
   '&' => 7,
   '<<' || '>>' || '>>>' => 8,
   '+' || '-' => 9,
-  '*' || '~/' || '%' => 10,
+  '*' || '/' || '~/' || '%' => 10,
   _ => 0,
 };
 
@@ -1309,6 +1310,7 @@ bool parserAssignment(String op) {
       op == '-=' ||
       op == '*=' ||
       op == '~/=' ||
+      op == '/=' ||
       op == '%=' ||
       op == '&=' ||
       op == '|=' ||
@@ -1416,6 +1418,7 @@ bool parserIndexIsConditional(Parser parser) {
 
 bool parserExpressionStart(Token token) {
   if (token.kind == tokenInteger ||
+      token.kind == tokenDouble ||
       token.kind == tokenString ||
       token.kind == tokenStringPart)
     return true;

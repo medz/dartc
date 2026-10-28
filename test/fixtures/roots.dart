@@ -857,6 +857,36 @@ void genericTypeRoots(int queue, int edges) {
   check(rt.rtRootMark() == mark);
 }
 
+void floatingRoots(int queue, int edges) {
+  Object boxed = 1.25;
+  final address = rt.nativeValueBits(boxed);
+  final raw = capture(Leaf(609), 609, queue);
+  // A double containing an address's bits must remain a non-root word.
+  final bits = double.parse(
+    rt.nativeValueFromBits(rt.rtDoubleToString(raw)) as String,
+  );
+  final words = <double>[bits];
+  double captured() => bits;
+  final count = snapshot(queue);
+  check(contains(queue, count, address));
+  check(!contains(queue, count, raw));
+  check(rt.rtTraceObject(address, edges, capacity) == 0);
+  check(boxed == 1.25 && words[0] == captured());
+  final nullable = <double?>[1.5, null];
+  final list = rt.nativeValueBits(nullable);
+  check(contains(queue, snapshot(queue), list));
+  check(listElements(list, edges) == 1);
+  final element = rt.nativeLoad64(edges);
+  check(
+    rt.nativeLoad64(
+          rt.rtObjectDescriptor(element) + abi.descriptorKindOffset,
+        ) ==
+        abi.descriptorDoubleBox,
+  );
+  check(rt.rtTraceObject(element, edges, capacity) == 0);
+  check(nullable[0] == 1.5);
+}
+
 void main(List<String> args) {
   if (args.isNotEmpty && args[0] == 'capacity') {
     capacityFailure(Leaf(190));
@@ -964,6 +994,7 @@ void main(List<String> args) {
   check(count == 2 && findMarker(edges, count, 303) != 0);
   tagged.clear();
   check(listElements(taggedAddress, edges) == 0);
+  floatingRoots(queue, edges);
   runtimeOwnership(queue, edges);
   constantObjectRoots(queue, edges);
   rt.rtUnmap(edges, capacity * 8);

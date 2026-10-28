@@ -204,15 +204,26 @@ class _SsaVerifier {
       if (callee.parameterTypes.length != count || result != expectedResult)
         fail('call metadata');
     } else if (op == opBuiltin) {
-      if (!(target >= bPrintString && target <= bListFilledTyped ||
+      if (!(target >= bPrintString && target <= bNumberProperty ||
           target >= bNativeLoad64 &&
-              target <= bNativeFramePointer &&
+              target <= bNativeValueFromBits &&
               target != bNativeMetadataAddress))
         fail('unknown SSA builtin');
       count = instruction.inputs.length;
+      if (target >= bNativeLoad64) count = nativeBuiltinArity(target);
       // These normalized representation operations have explicit SSA shapes.
       // General library/primitive signatures remain owned by their producers.
-      if (target >= bBoxInt && target <= bValueBool ||
+      if (target >= bBoxDouble && target <= bNumberProperty) {
+        count =
+            target == bDoubleModulo ||
+                target == bDoubleTruncDiv ||
+                target == bValueFloatDiv ||
+                target == bValueRemainder ||
+                target == bValueCompareTo ||
+                target == bNumberProperty
+            ? 2
+            : 1;
+      } else if (target >= bBoxInt && target <= bValueBool ||
           target == bFunctionEntry ||
           target == bFunctionType) {
         count = 1;
@@ -227,16 +238,20 @@ class _SsaVerifier {
       } else if (target == bListFilledTyped) {
         count = 4;
       }
-    } else if (op == opStoreGlobal ||
+    } else if (op == opDoubleNeg ||
+        op == opIntToDouble ||
+        op == opStoreGlobal ||
         op == opNeg ||
         op == opBitNot ||
         op == opNot ||
         op == opTypeTest ||
         op == opTypeCast) {
       count = 1;
-    } else if (op >= opAdd && op <= opGe) {
+    } else if (op >= opAdd && op <= opGe ||
+        op >= opDoubleAdd && op <= opDoubleCompare) {
       count = 2;
-    } else if (op != opInt &&
+    } else if (op != opDouble &&
+        op != opInt &&
         op != opString &&
         op != opLoadGlobal &&
         op != opDescriptor &&
@@ -275,6 +290,13 @@ class _SsaVerifier {
       if (op == opStoreGlobal &&
           !_compatible(inputType(instruction.inputs[0]), globalTypes[target]))
         fail('store type');
+    } else if (op == opInt && result == tDouble) {
+      fail('integer constant type');
+    } else if (op >= opDouble && op <= opIntToDouble) {
+      final expected = op == opDoubleCompare ? tInt : tDouble;
+      if (result != expected) fail('double result type');
+      for (var i = 0; i < count; i++)
+        expectInput(instruction, i, op == opIntToDouble ? tInt : tDouble);
     } else if (op == opString) {
       if (target < 0 || target >= strings.length || result != tString)
         fail('string constant');
@@ -353,9 +375,10 @@ class _SsaVerifier {
         fail('uninstantiated builtin type');
       if (target >= bNativeLoad64) {
         for (var input in instruction.inputs) {
-          if (inputType(input) != tInt) fail('primitive operand type');
+          if (inputType(input) != nativeBuiltinInputType(target))
+            fail('primitive operand type');
         }
-        if (result != tInt) fail('primitive result');
+        if (result != nativeBuiltinResultType(target)) fail('primitive result');
       } else if (target == bTypeInstantiate) {
         expectInput(instruction, 0, tObject);
         expectInput(instruction, 1, listType(tObject));
@@ -380,9 +403,54 @@ class _SsaVerifier {
         if (!typeIsList(result) || inputType(instruction.inputs[0]) != result)
           fail('sublist receiver type');
         for (var i = 1; i < 4; i++) expectInput(instruction, i, tInt);
-      } else if (target == bBoxInt || target == bBoxBool) {
-        expectInput(instruction, 0, target == bBoxInt ? tInt : tBool);
+      } else if (target == bBoxInt ||
+          target == bBoxDouble ||
+          target == bBoxBool) {
+        expectInput(
+          instruction,
+          0,
+          target == bBoxInt
+              ? tInt
+              : target == bBoxDouble
+              ? tDouble
+              : tBool,
+        );
         if (!typeIsTagged(result)) fail('boxed result');
+      } else if (target >= bDoubleToString && target <= bNumberProperty) {
+        final raw =
+            target == bDoubleToString ||
+            target == bDoubleModulo ||
+            target == bDoubleTruncDiv ||
+            target == bDoubleToInt;
+        final parsing = target == bDoubleParse || target == bDoubleTryParse;
+        for (var i = 0; i < count; i++) {
+          if (raw)
+            expectInput(instruction, i, tDouble);
+          else if (parsing)
+            expectInput(instruction, i, tString);
+          else if (target == bNumberProperty && i == 1)
+            expectInput(instruction, i, tInt);
+          else if (!typeIsTagged(inputType(instruction.inputs[i])))
+            fail('numeric dispatch operand');
+        }
+        final expected = target == bDoubleToString
+            ? tString
+            : target == bDoubleModulo ||
+                  target == bDoubleParse ||
+                  target == bValueToDouble
+            ? tDouble
+            : target == bDoubleToInt ||
+                  target == bDoubleTruncDiv ||
+                  target == bValueToInt ||
+                  target == bValueCompareTo
+            ? tInt
+            : target == bDoubleTryParse
+            ? nullableType(tDouble)
+            : target == bNumberProperty
+            ? tBool
+            : -1;
+        if (expected >= 0 ? result != expected : !typeIsTagged(result))
+          fail('numeric dispatch result');
       } else if (target == bValueBool) {
         if (!typeIsTagged(inputType(instruction.inputs[0])) || result != tBool)
           fail('boolean cast');

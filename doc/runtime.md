@@ -2,7 +2,7 @@
 
 [runtime.dart](../lib/src/runtime.dart) 实现目标程序的运行时算法；共享尺寸、偏移和表示由 [layout.dart](../lib/src/layout.dart) 定义。编译器与运行时必须使用匹配的 ABI，改变布局或调用协议时整体重建。
 
-当前 ABI 为 14。TypeRef 带对象头，List 和函数对象的类型引用参与扫描；ABI 13 的无对象头类型记录不能与此布局混用。
+当前源码 ABI 为 15。TypeRef 带对象头，List 和函数对象的类型引用参与扫描；值元数据的 `+64` 保存 DoubleBox 描述符位移。旧 ABI 的元数据不能与此运行时混用。
 
 main 使用进程级 bump arena，不执行 GC、空闲块复用或 arena 释放。根枚举和 NoGC 校验提供收集器所需的边界，不代表收集器已启用。收集器、异常展开和线程/调度的目标设计见 [architecture.md](architecture.md)。
 
@@ -17,6 +17,7 @@ main 使用进程级 bump arena，不执行 GC、空闲块复用或 arena 释放
 | List | `+16` 长度、`+24` 容量、`+32` backing Ref、`+40` TypeRef 引用 |
 | backing array | `+16` 已初始化前缀长度，`+24` 起存元素；Word、Ref、Tagged 分别使用对应描述符，仅扫描有效前缀 |
 | IntBox | `+16` 完整整数负载；无托管子引用 |
+| DoubleBox | `+16` IEEE binary64 位模式；无托管子引用 |
 | Function | `+16` TypeRef 引用、`+24` 调用适配器入口；类型引用及捕获字段参与扫描，捕获字段从 `+32` 开始；无捕获对象仍为 32 字节 |
 | TypeRef | `+16` 类型种类、`+24` 子类型或函数签名位移、`+32` 类描述符位移、`+40` 值表示；堆记录扫描子类型，类描述符不作托管引用 |
 
@@ -29,6 +30,16 @@ TypeRef 的固定部分为 48 字节，是内部类型记录，不直接充当�
 共享泛型调用在实例接收者后、普通参数前传入 `List<Object>` 类型环境。语义类型参数的值使用 Tagged；复合 List/函数值保持 Ref。`rtValueCheck` 按实际 TypeRef 检查并保留原负载，具体调用方再按已知结果类型转换；`rtListFilledChecked` 按实际元素类型取得存储表示。类型环境和实例化属于分配效果，不能因被调函数体简单而从 NoGC 检查中省略。
 
 List 标志 `objectListFixed` / `objectListReadOnly` 分别限制长度变化和内容修改；语言行为见 [表达式](../specs/expressions.md)。更新 List 长度时同步维护 backing 的已初始化前缀，缩短后不扫描前缀之外的旧元素。
+
+## 数值表示与机器边界
+
+`double` 的语义类型独立于机器表示 `rF64Bits`。已知 double 在内部调用中用通用寄存器和栈槽传递原始 64 位值，前八个参数依次使用 x0–x7，结果为 x0；d0/d1 只在一条浮点机器操作内作临时寄存器，不跨调用或安全点存活。分配器可以把 `rF64Bits` 放入通用寄存器，但根表和对象位图不把它当引用。`num`、`Object`、`dynamic` 与 `double?` 的 double 负载经 DoubleBox 进入 Tagged 表示。
+
+四则运算、比较和整数转换由 ARM64 binary64 原语执行。原语以整数位模式收发，比较返回 -1、0、1 或 unordered 的 2；机器转整数采用截断和饱和，Dart 数值入口先拒绝 NaN 与无穷大。独立可执行文件使用进程初始的最近偶数舍入环境。此内部协议不适用于平台 FFI；浮点 FFI 参数、结果和外部浮点环境管理尚未接入。
+
+[binary64.dart](../lib/src/binary64.dart) 由编译器常量求值与目标运行时共用。十进制解析以整数比值执行精确舍入，输出按相邻 binary64 值的舍入区间选择最短十进制表示；余数算法使用整数有效位和指数。算法保持为普通 Dart 源码，原语只提供机器运算。
+
+`nativeValueBits(Object?)` 暴露内部 Tagged word；`nativeValueFromBits(int)` 恢复同一表示。恢复的 word 必须来自合法的当前 ABI 值，不能把任意地址或浮点位模式当对象。转换本身不分配、不建立根，也不转移所有权。暴露的对象地址跨可能 GC 的调用前，调用方必须保留对应托管引用或登记 runtime root；转换的两侧各按自身表示参与根分析。数值字符串入口通过这个边界连接普通 Dart String 与原有的运行时地址接口。
 
 ## NoGC 提示
 
