@@ -57,14 +57,14 @@ The [specification tracker](specs/README.md) records the reference SDK, current 
 | Area | Implemented behavior |
 | --- | --- |
 | Values | Native integers, booleans, Unicode strings, nullable values, typed lists with conditional/loop/spread and null-aware elements and runtime type checks |
-| Declarations | Local object/List destructuring declarations and assignments, pattern loop bindings, top-level variables, lazy initialization, simple classes, instance/static fields and methods, bound method values, named/unnamed constructors with field initializer lists, getters, setters and generic type aliases |
+| Declarations | Local object/List destructuring declarations and assignments, pattern loop bindings, top-level variables, lazy initialization, classes with inheritance, abstract classes and interfaces, enums with fields, constructors and methods, instance/static fields and methods, bound method values, named/unnamed constructors with field initializer lists, getters, setters and generic type aliases |
 | Functions | Generic top-level and method calls with bounds and partial inference, callable objects, recursion, local and anonymous functions with lexical captures, optional/named direct arguments, required-positional function values and structural function types |
 | Control flow | Blocks, assignments, cascades, null-aware member/index chains, conditions and if-case statements/elements, loops, labelled jumps, switch statements/expressions with scalar/object/list patterns and guards, shared case bodies and case-label continue, and returns |
 | Libraries | Relative, file/package imports and exports, prefixes, filters, conditional URIs and library parts |
 | Constants | Scalar/list constants, canonical const instances, metadata and supported core pragmas |
 | Core APIs | print, command-line arguments, basic String/List operations and StringBuffer object/character writing |
 
-Inheritance, generic classes, dynamic member calls, mixins, extensions, records, map/record patterns, exceptions, async code, isolates and most SDK libraries are not implemented. Generic function values, closures inside generic functions, complete generic inference, capturing functions with optional/named parameters, general optional/named function-value signatures and constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
+Generic classes, dynamic member calls, mixins, extensions, records, map/record patterns, asynchronous code, isolates and most SDK libraries are not implemented, and enums have no type parameters or mixins. Exceptions are synchronous only. Generic function values, closures inside generic functions, complete generic inference and generic or standard-library constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
 
 Package configuration v2 supplies local package mappings and default language versions. A leading `// @dart = major.minor` comment can select an implemented versioned rule from 2.12 through 3.13; this is not complete compatibility with those language versions. See [libraries](specs/libraries.md) and [lexical structure](specs/lexical-structure.md).
 

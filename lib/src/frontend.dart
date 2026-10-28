@@ -2,6 +2,7 @@ import 'ast.dart';
 import 'binary64.dart';
 import 'frontend/arguments.dart';
 import 'frontend/classes.dart';
+import 'frontend/enums.dart';
 import 'frontend/generics.dart';
 import 'frontend/literals.dart';
 import 'frontend/parameters.dart';
@@ -502,6 +503,7 @@ void feCollectDeclarations(AstUnit unit) {
   var i = 0;
   while (i < unit.classes.length) {
     var syntax = unit.classes[i];
+    if (syntax.isEnum) desugarEnum(feSources, syntax);
     var source = feTokens[syntax.token].source;
     if ((syntax.hasPrimary || syntax.abbreviatedBody) &&
         !sourceVersionAtLeast(feSources, source, 3, 13))
@@ -7904,6 +7906,7 @@ int feLowerSwitchExpression(AstExpression expression, int context) {
   var conversions = <int>[];
   var result = tNever;
   var coverage = 0;
+  var enumValues = <int>[];
   var lengths = <PatternLengthRange>[];
   var remaining = type;
   var binding = source.kind == astName ? source.binding : -1;
@@ -7946,6 +7949,7 @@ int feLowerSwitchExpression(AstExpression expression, int context) {
       }
     } else {
       coverage |= pattern.coverage;
+      for (var ordinal in pattern.enumValues) enumValues.add(ordinal);
       for (var range in pattern.lengths) lengths.add(range);
       if (pattern.remaining != tNever) remaining = pattern.remaining;
     }
@@ -7962,6 +7966,8 @@ int feLowerSwitchExpression(AstExpression expression, int context) {
   }
   var required = patternRequiredSpace(type);
   if (patternLengthsCover(lengths, type)) coverage |= patternSpaceOther;
+  if (patternEnumCovers(feConstants, type, enumValues))
+    coverage |= patternSpaceOther;
   if ((coverage & required) != required)
     feAstError(expression.token, 'switch expression is not exhaustive');
   feCall(feFindFunction('rtPatternMatchFailure'), 0);
@@ -8057,6 +8063,7 @@ void feLowerSwitch(AstStatement statement) {
     }
   }
   var coverage = 0;
+  var enumValues = <int>[];
   var lengths = <PatternLengthRange>[];
   var remaining = type;
   var binding = source.kind == astName ? source.binding : -1;
@@ -8106,6 +8113,7 @@ void feLowerSwitch(AstStatement statement) {
         }
       } else {
         coverage |= pattern.coverage;
+        for (var ordinal in pattern.enumValues) enumValues.add(ordinal);
         for (var range in pattern.lengths) lengths.add(range);
         if (pattern.remaining != tNever) remaining = pattern.remaining;
       }
@@ -8117,10 +8125,15 @@ void feLowerSwitch(AstStatement statement) {
     if (binding >= 0) flowPromote(feFlow, binding, remaining);
   }
   if (patternLengthsCover(lengths, type)) coverage |= patternSpaceOther;
+  if (patternEnumCovers(feConstants, type, enumValues))
+    coverage |= patternSpaceOther;
   var required = patternRequiredSpace(type);
   var complete = (coverage & required) == required;
   var alwaysExhaustive =
-      type == tNull || type == tNever || typeNonNullable(type) == tBool;
+      type == tNull ||
+      type == tNever ||
+      typeNonNullable(type) == tBool ||
+      patternEnumCount(feConstants, type) >= 0;
   if (modern && alwaysExhaustive && !complete)
     feAstError(statement.token, 'switch statement is not exhaustive');
   // Before Dart 3 only default removes the unmatched path from flow analysis.

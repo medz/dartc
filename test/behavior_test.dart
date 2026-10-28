@@ -3042,6 +3042,28 @@ void main() {
         ..writeAsStringSync(rejectedTypeAliases[i]);
       await reject(invalid, checkSdk: true);
     }
+    final rejectedEnums = [
+      'enum E { a, b } int f(E e) => switch (e) { E.a => 1 }; void main() { print(f(E.a)); }',
+      'enum E { a, b } void f(E e) { switch (e) { case E.a: print(1); } } void main() { f(E.a); }',
+      'enum E { a, b } int f(E? e) => switch (e) { E.a => 1, E.b => 2 }; void main() { print(f(E.a)); }',
+      'enum E { a, b } int f(E e) => switch (e) { E.a when e.index == 0 => 1, E.b => 2 }; void main() { print(f(E.a)); }',
+      'enum E {} void main() {}',
+      'enum E { a; final int index = 1; } void main() {}',
+      'enum E { a; static const values = 1; } void main() {}',
+      'enum E { a; int get hashCode => 1; } void main() {}',
+      'enum E { a(1); E(this.x) { print(1); } final int x; } void main() {}',
+      'enum E { a(1); E(this.x); int x; } void main() {}',
+      'enum E { a(1, 2); const E(this.x); final int x; } void main() {}',
+      'enum E { a } void main() { var e = E(); print(e); }',
+      'class C implements Enum { int get index => 0; String get name => "c"; } void main() {}',
+      'class C extends Enum {} void main() {}',
+      '// @dart = 2.12\nenum E { a; int get x => 1; } void main() {}',
+    ];
+    for (var i = 0; i < rejectedEnums.length; i++) {
+      final invalid = File('${temporary.path}/rejected-enum-$i.dart')
+        ..writeAsStringSync(rejectedEnums[i]);
+      await reject(invalid, checkSdk: true);
+    }
     for (var i = 0; i < rejected.length; i++) {
       final invalid = File('${temporary.path}/rejected-$i.dart')
         ..writeAsStringSync(rejected[i]);

@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Add non-generic enums, including simple and enhanced declarations with fields, const and redirecting constructors, factories, methods and static members, plus `values`, `index`, `name` and `toString`. Switches over enum values must be exhaustive in Dart 3 files. Type parameters, mixins and enum members named `name` remain unsupported.
 - Support non-generic user-class constructor values, including factories, redirects, optional and named arguments, constant identity and ordinary type aliases. Resolve inferred field and super parameter types before exposing constructor signatures.
 - Support optional positional and named parameters in non-generic function values, including captures, defaults, structural function types and runtime checks.
 - Add contextual dot shorthands for supported constructors and static members, including selector chains, constants, equality operands and patterns.

@@ -29,6 +29,8 @@ void checkParameterName(
 ) {
   var parameter = parameters[index];
   if (parameter.kind != astNamedParameter) return;
+  // Compiler-owned parameters use names that source text cannot spell.
+  if (parameter.name.startsWith('#')) return;
   var token = source.tokens[parameter.token];
   var privateFieldFormal =
       parameter.fieldFormal && parameter.name.startsWith('_');

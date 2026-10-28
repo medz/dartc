@@ -32,6 +32,9 @@ class CheckedPattern {
   int variableType = -1;
   bool castInput = false;
   ConstantValue? constant;
+  // Ordinals of enum values matched when the pattern does not cover the whole
+  // input type.
+  List<int> enumValues = const <int>[];
   List<CheckedPattern> children = const <CheckedPattern>[];
   List<CheckedMemberRead> fields = const <CheckedMemberRead>[];
   List<PatternLengthRange> lengths = const <PatternLengthRange>[];
@@ -66,6 +69,40 @@ bool patternLengthsCover(List<PatternLengthRange> ranges, int input) {
     if (end < next) return false;
     next = end + 1;
   }
+}
+
+// The number of values of an enum type, or -1 for any other type.
+int patternEnumCount(ConstantContext context, int type) {
+  type = typeNonNullable(type);
+  if (!typeIsClass(type)) return -1;
+  final syntax = context.classes[typeArgument(type)];
+  return syntax.isEnum ? syntax.enumValues.length : -1;
+}
+
+// Whether the matched ordinals include every value of the enum type.
+bool patternEnumCovers(ConstantContext context, int type, List<int> ordinals) {
+  final count = patternEnumCount(context, type);
+  if (count < 0) return false;
+  final seen = List<bool>.filled(count, false);
+  for (final ordinal in ordinals) seen[ordinal] = true;
+  for (final covered in seen) if (!covered) return false;
+  return true;
+}
+
+List<int> _patternUnion(List<int> left, List<int> right) => <int>[
+  ...left,
+  ...right,
+];
+
+// A side whose coverage includes the whole domain constrains nothing.
+List<int> _patternIntersection(CheckedPattern left, CheckedPattern right) {
+  if ((left.coverage & patternSpaceOther) != 0) return right.enumValues;
+  if ((right.coverage & patternSpaceOther) != 0) return left.enumValues;
+  final result = <int>[];
+  for (final ordinal in left.enumValues)
+    for (final other in right.enumValues)
+      if (ordinal == other) result.add(ordinal);
+  return result;
 }
 
 bool patternIsTotal(CheckedPattern pattern) {
@@ -327,6 +364,10 @@ CheckedPattern checkPattern(
       result.coverage = value.integer == 0
           ? patternSpaceFalse
           : patternSpaceTrue;
+    } else if (equality &&
+        value.type == typeNonNullable(input) &&
+        patternEnumCount(context, input) >= 0) {
+      result.enumValues = <int>[value.elements[0].integer];
     }
     if (kind == patternRelational) result.coverage = 0;
   } else if (kind == patternAnd || kind == patternOr) {
@@ -353,11 +394,13 @@ CheckedPattern checkPattern(
       result.matched = right.matched;
       result.remaining = joinTypes(left.remaining, right.remaining);
       result.coverage = left.coverage & right.coverage;
+      result.enumValues = _patternIntersection(left, right);
     } else {
       result.matched = joinTypes(left.matched, right.matched);
       result.remaining = right.remaining;
       result.coverage = left.coverage | right.coverage;
       result.lengths = <PatternLengthRange>[...left.lengths, ...right.lengths];
+      result.enumValues = _patternUnion(left.enumValues, right.enumValues);
     }
   } else {
     var type = kind == patternCast
@@ -377,6 +420,7 @@ CheckedPattern checkPattern(
     result.remaining = inner.remaining;
     result.coverage = inner.coverage;
     result.lengths = inner.lengths;
+    result.enumValues = inner.enumValues;
     if (kind == patternNullCheck) {
       result.remaining = joinTypes(tNull, result.remaining);
       result.coverage &= ~patternSpaceNull;

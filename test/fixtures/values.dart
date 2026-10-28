@@ -6423,6 +6423,7 @@ void factoryValues() {
 }
 
 void main(List<String> args) {
+  enumValues();
   factoryValues();
   shorthandValues();
   shorthandContexts();
@@ -6475,6 +6476,132 @@ void main(List<String> args) {
   bufferValues();
   stringBoundaries();
   listGrowth(args);
+}
+
+enum EnumColor { red, green, blue }
+
+abstract class EnumShape {
+  double area();
+}
+
+enum EnumKind implements EnumShape {
+  unit(1),
+  twice(2),
+  named.make(3),
+  other.make(4);
+
+  const EnumKind(this.side);
+  const EnumKind.make(int s) : this(s * 10);
+  final int side;
+  static const EnumKind first = unit;
+  static int total() => EnumKind.values.length;
+  double area() => side * 2.0;
+  String label() => 'k$side';
+  bool get big => side > 20;
+  factory EnumKind.pick(int n) => n > 0 ? unit : other;
+}
+
+enum EnumNamed {
+  a('first'),
+  b('second');
+
+  const EnumNamed(this.name);
+  final String name;
+  String toString() => 'N:$name';
+}
+
+class EnumTag {
+  final EnumColor color;
+  const EnumTag(this.color);
+}
+
+@EnumTag(EnumColor.green)
+EnumColor enumDefault([EnumColor c = EnumColor.blue]) => c;
+
+String enumStatement(EnumColor c) {
+  switch (c) {
+    case EnumColor.red:
+      return 'R';
+    case EnumColor.green:
+    case EnumColor.blue:
+      return 'GB';
+  }
+}
+
+int enumNullable(EnumColor? c) => switch (c) {
+  EnumColor.red || EnumColor.green => 1,
+  EnumColor.blue => 2,
+  null => 3,
+};
+
+String enumShorthand(EnumColor c) {
+  switch (c) {
+    case .red:
+      return 'dr';
+    default:
+      return 'd?';
+  }
+}
+
+String enumGuard(EnumColor c) => switch (c) {
+  EnumColor.red when c.index == 0 => 'zero-red',
+  EnumColor.red => 'red',
+  EnumColor.green => 'green',
+  EnumColor.blue => 'blue',
+};
+
+void enumValues() {
+  print(EnumColor.red);
+  print(EnumColor.values.length);
+  print(EnumColor.green.index);
+  print(EnumColor.blue.name);
+  print('${EnumColor.red} ${EnumColor.blue.index}');
+  print(EnumKind.unit.side);
+  print(EnumKind.named.side);
+  print(EnumKind.other.area());
+  print(EnumKind.twice.label());
+  print(EnumKind.first == EnumKind.unit);
+  print(EnumKind.total());
+  print(EnumKind.other.big);
+  print(EnumKind.pick(1));
+  print(EnumKind.pick(0));
+  print(EnumNamed.a);
+  print(EnumNamed.b.name);
+  print(EnumNamed.a.index);
+  EnumShape shape = EnumKind.unit;
+  print(shape.area());
+  Enum e = EnumColor.green;
+  print(e.index);
+  print(e.name);
+  dynamic d = EnumColor.red;
+  print(d is EnumColor);
+  print(d is Enum);
+  print(d is EnumKind);
+  print(enumStatement(EnumColor.red) + enumStatement(EnumColor.blue));
+  print(enumNullable(EnumColor.green));
+  print(enumNullable(null));
+  print(enumShorthand(EnumColor.red));
+  print(enumShorthand(EnumColor.blue));
+  print(enumGuard(EnumColor.red));
+  print(enumGuard(EnumColor.blue));
+  print(enumDefault());
+  print(enumDefault(EnumColor.red));
+  const list = [EnumColor.red, EnumColor.blue];
+  print(list.length);
+  print(identical(list[0], EnumColor.red));
+  print(identical(EnumColor.values[1], EnumColor.green));
+  var sum = 0;
+  for (final c in EnumColor.values) {
+    sum += c.index;
+  }
+  print(sum);
+  if (EnumColor.green case EnumColor.green || EnumColor.blue) print('case');
+  EnumColor chosen = .blue;
+  print(chosen == EnumColor.blue);
+  EnumColor? maybe;
+  print(maybe == null);
+  maybe = EnumColor.blue;
+  print(maybe.name);
 }
 
 String shorthandTrace = '';

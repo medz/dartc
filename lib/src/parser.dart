@@ -2098,9 +2098,54 @@ bool parserConstructorAhead(Parser parser, String name) {
       tokenIs(parser.tokens[position + 3], '(');
 }
 
-AstClass parserClass(Parser parser, int token) {
+AstEnumValue parserEnumValue(Parser parser, String enumName) {
+  final metadata = parserMetadata(parser);
+  final token = parser.position;
+  if (tokenIsReserved(parser.tokens[token]))
+    parserError(parser, 'reserved word cannot be an enum value name');
+  final name = parserName(parser);
+  if (parserIs(parser, '<'))
+    parserError(parser, 'generic enum values are unsupported');
+  var callee = AstExpression(
+    astName,
+    enumName,
+    const <AstExpression>[],
+    const <AstType>[],
+    token,
+  );
+  var disposition = astCallIdentifier;
+  if (parserTake(parser, '.')) {
+    final member = parser.position;
+    callee = AstExpression(
+      astMember,
+      parserName(parser),
+      <AstExpression>[callee],
+      const <AstType>[],
+      member,
+    );
+    disposition = astCallSelector;
+    if (!parserIs(parser, '('))
+      parserError(parser, 'expected enum constructor arguments');
+  }
+  AstExpression? call;
+  if (parserIs(parser, '('))
+    call = parserCall(parser, callee, token, const <AstType>[], disposition);
+  return AstEnumValue(name, token, metadata, call);
+}
+
+AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
   final constant = parserTake(parser, 'const');
   var name = parserTypeDeclarationName(parser);
+  if (isEnum &&
+      (parserIs(parser, '<') || parserIs(parser, '(') || parserIs(parser, '.')))
+    parserError(
+      parser,
+      'enums do not support type parameters or primary constructors',
+    );
+  if (isEnum && parserIs(parser, 'extends'))
+    parserError(parser, 'enums cannot extend a class');
+  if (isEnum && parserIs(parser, 'with'))
+    parserError(parser, 'enum mixins are unsupported');
   final fields = <AstVariable>[];
   final constructors = <AstFunction>[];
   AstFunction? primary;
@@ -2136,8 +2181,17 @@ AstClass parserClass(Parser parser, int token) {
       interfaces.add(parseAstType(parser));
     } while (parserTake(parser, ','));
   }
-  final abbreviatedBody = parserTake(parser, ';');
+  final abbreviatedBody = !isEnum && parserTake(parser, ';');
   if (!abbreviatedBody) parserExpect(parser, '{');
+  final enumValues = <AstEnumValue>[];
+  if (isEnum) {
+    while (!parserIs(parser, ';') && !parserIs(parser, '}')) {
+      enumValues.add(parserEnumValue(parser, name));
+      if (!parserTake(parser, ',')) break;
+    }
+    if (!parserTake(parser, ';') && !parserIs(parser, '}'))
+      parserError(parser, 'expected , ; or }');
+  }
   List<AstVariable>? staticFields;
   List<AstFunction> methods = <AstFunction>[];
   var primaryBody = false;
@@ -2308,6 +2362,8 @@ AstClass parserClass(Parser parser, int token) {
   result.abbreviatedBody = abbreviatedBody;
   result.superclass = superclass;
   result.interfaces = interfaces;
+  result.isEnum = isEnum;
+  result.enumValues = enumValues;
   if (staticFields != null) result.staticFields = staticFields;
   return result;
 }
@@ -2496,6 +2552,10 @@ AstUnit parseUnit(
       parserExpect(parser, 'class');
       var syntax = parserClass(parser, token);
       syntax.isAbstract = isAbstract;
+      syntax.metadata = metadata;
+      unit.classes.add(syntax);
+    } else if (parserTake(parser, 'enum')) {
+      var syntax = parserClass(parser, token, true);
       syntax.metadata = metadata;
       unit.classes.add(syntax);
     } else if (parserTake(parser, 'typedef')) {

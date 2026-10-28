@@ -300,9 +300,18 @@ class AstFunction {
   );
 }
 
+class AstEnumValue(
+  final String name,
+  final int token,
+  final List<AstExpression> metadata,
+  final AstExpression? call,
+);
+
 class AstClass {
   List<AstExpression> metadata = const <AstExpression>[];
   bool isAbstract = false;
+  bool isEnum = false;
+  List<AstEnumValue> enumValues = const <AstEnumValue>[];
   bool abbreviatedBody = false;
   AstType? superclass;
   List<AstType> interfaces = const <AstType>[];
