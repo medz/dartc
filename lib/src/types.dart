@@ -39,22 +39,14 @@ class TypeParameterInfo {
   );
 }
 
-class FunctionSignature {
-  final int result;
-  final List<int> parameters;
-  final int required;
-  // Positional parameters precede named parameters, sorted by public name.
-  final List<String> names;
-  final List<bool> requiredNamed;
-
-  FunctionSignature(
-    this.result,
-    this.parameters,
-    this.required,
-    this.names,
-    this.requiredNamed,
-  );
-
+// Positional parameters precede named parameters, sorted by public name.
+class FunctionSignature(
+  final int result,
+  final List<int> parameters,
+  final int required,
+  final List<String> names,
+  final List<bool> requiredNamed,
+) {
   int get positional => parameters.length - names.length;
 
   int namedIndex(String name) {

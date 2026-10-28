@@ -272,12 +272,7 @@ class FunctionInfo {
 
 // Supplied arguments, independent of the callee's defaults or semantic types.
 // The vector contains positional values followed by named values in this order.
-class CallShape {
-  final int positional;
-  final List<String> names;
-
-  CallShape(this.positional, this.names);
-
+class CallShape(final int positional, final List<String> names) {
   int get count => positional + names.length;
 
   int namedIndex(String name) {
