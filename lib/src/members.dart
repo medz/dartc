@@ -15,22 +15,18 @@ const int memberReadIsNotEmpty = 6;
 const int memberReadFirst = 7;
 const int memberReadLast = 8;
 
-class CheckedMemberRead {
-  final int receiver;
-  final int type;
-  final int kind;
-  final int target;
+class CheckedMemberRead(
+  final int receiver,
+  final int type,
+  final int kind,
+  final int target,
+);
 
-  CheckedMemberRead(this.receiver, this.type, this.kind, this.target);
-}
-
-class InterfaceMember {
-  final String name;
-  final int role;
-  final String implementation;
-
-  const InterfaceMember(this.name, this.role, [this.implementation = '']);
-}
+class const InterfaceMember(
+  final String name,
+  final int role, [
+  final String implementation = '',
+]);
 
 class MemberBinding {
   String name;

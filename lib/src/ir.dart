@@ -218,18 +218,12 @@ class FunctionContract {
   const FunctionContract(this.flags, this.token);
 }
 
-class ClosureLayout {
-  final List<int> fieldTypes;
-  final bool boundReceiver;
+class ClosureLayout(
+  final List<int> fieldTypes, [
+  final bool boundReceiver = false,
   // The first capture holds the enclosing invocation's type environment.
-  final List<int> typeParameters;
-
-  ClosureLayout(
-    this.fieldTypes, [
-    this.boundReceiver = false,
-    this.typeParameters = const <int>[],
-  ]);
-
+  final List<int> typeParameters = const <int>[],
+]) {
   int get valueCaptureOffset => typeParameters.isEmpty ? 0 : 1;
 }
 
