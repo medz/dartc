@@ -887,6 +887,10 @@ void main() {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "class C{factory C(dynamic value)=>value;}void main(){print('before');C(1);print('after');}",
+      "class C{factory C(dynamic value)=>value;}void main(){print('before');C(null);print('after');}",
+      "abstract class C{factory C(int n,int later)=D;}class D implements C{D(num n,int later){print('body');}}int later(){print('later');return 2;}void main(){dynamic value=1.5;print('before');C(value,later());}",
+      "abstract class C{factory C({required int n,required int later})=D;}class D implements C{D({required num n,required int later}){print('body');}}int later(){print('later');return 2;}void main(){dynamic value='wrong';print('before');C(n:value,later:later());}",
       "late int value;void main(){print('before');print(value);}",
       "late int? value;void main(){print('before');print(value);}",
       "class C{static late int value;}void main(){print('before');print(C.value);}",
@@ -1175,7 +1179,14 @@ void main(List<String> args) {
     ]);
     final libraries = {
       'inheritance-parent.dart': r'''
+import 'factory-product.dart' as products;
 part 'inheritance-part.dart';
+abstract class FactoryContract {
+  int get value;
+  const factory FactoryContract({int value}) = products.Product.named;
+  factory FactoryContract.body(int value) => products.Product.named(value: value);
+  const factory FactoryContract._hidden({int value}) = products.Product.named;
+}
 class const PrimaryPrivate({required final int _value, final String _label='private'}) {
   final int copied = _value + 1;
   int read() => _value;
@@ -1201,12 +1212,39 @@ class InheritanceParent {
   static int staticValue() => 100;
 }
 ''',
+      'factory-product.dart': r'''
+import 'inheritance-parent.dart' as parent;
+const _default = 11;
+class Product implements parent.FactoryContract {
+  final int _value;
+  const Product.named({this._value = _default});
+  const Product._private() : _value = 99;
+  int get value => _value;
+}
+''',
+      'factory-private.dart': r'''
+import 'factory-private-product.dart' as p;
+abstract class PrivateFactory { factory PrivateFactory() = p.PrivateProduct._hidden; }
+void main() {}
+''',
+      'factory-private-product.dart': r'''
+import 'factory-private.dart';
+class PrivateProduct implements PrivateFactory { PrivateProduct._hidden(); }
+''',
+      'factory-method-312.dart': r'''
+// @dart=3.12
+class OldFactoryMethod { int factory() => 4; }
+class OldFactory { OldFactory._(); factory OldFactory() => OldFactory._(); }
+void main() { print(OldFactoryMethod().factory()); print(OldFactory() is OldFactory); }
+''',
       'inheritance-part.dart': r'''
 part of 'inheritance-parent.dart';
 class PartChild extends InheritanceParent { PartChild() : super._private(); }
 ''',
       'inheritance-imports.dart': r'''
 import 'inheritance-parent.dart' as parent;
+import 'factory-product.dart' as products;
+typedef FactoryAlias = parent.FactoryContract;
 typedef ParentAlias = parent.InheritanceParent;
 class const PrimaryPrivateChild({required super.value, super.label}) extends parent.PrimaryPrivate;
 class SuperDefaultLeaf extends SuperDefaultChild {
@@ -1226,6 +1264,11 @@ class Child extends ParentAlias {
   int Function() nested() => () => super.method();
 }
 void main() {
+  const factory = FactoryAlias();
+  print(factory.value);
+  print(identical(factory, const products.Product.named()));
+  print(FactoryAlias(value: 5).value);
+  print(parent.FactoryContract.body(6).value);
   final child = Child(3);
   print(child.read());
   print(child.own());
@@ -1856,6 +1899,7 @@ void main() {
     await compare(File('${temporary.path}/imports.dart'), []);
     await compare(File('${temporary.path}/interface-imports.dart'), []);
     await compare(File('${temporary.path}/inheritance-imports.dart'), []);
+    await compare(File('${temporary.path}/factory-method-312.dart'), []);
     await compare(File('${temporary.path}/object-pattern-imports.dart'), []);
     await compare(File('${temporary.path}/core.dart'), []);
     await compare(File('${temporary.path}/priority.dart'), []);
@@ -1919,6 +1963,45 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      "import 'inheritance-parent.dart' as p;void main(){p.FactoryContract._hidden();}",
+      "class C{factory C()=>1;}void main(){}",
+      "class C{factory C()=>null;}void main(){}",
+      "class C{factory C(C? x)=>x;}void main(){}",
+      "class C{factory C(){return;}}void main(){}",
+      "class C{factory C(){}}void main(){}",
+      "class C{int? x;factory C(this.x)=>throw 1;}void main(){}",
+      "class B{B(int x);}class C extends B{factory C(super.x)=>throw 1;}void main(){}",
+      "class C{int x;factory C(int n):x=n;}void main(){}",
+      "class C{int x=1;factory C(){print(x);throw 1;}}void main(){}",
+      "class C{factory C()=>this;}void main(){}",
+      "class C{factory C(){C get()=>this;return get();}}void main(){}",
+      "class C{C._();const factory C()=>C._();}void main(){}",
+      "abstract class C{const factory C()=D;}class D implements C{D();}void main(){}",
+      "class C{factory C()=C.other;factory C.other()=C;}void main(){}",
+      "class C{factory C()=D;}class D{}void main(){}",
+      "class C{factory C()=D;}abstract class D implements C{D();}void main(){}",
+      "abstract class C{factory C(num n)=D;}class D implements C{D(int n);}void main(){}",
+      "abstract class C{factory C()=D;}class D implements C{D({required int n});}void main(){}",
+      "abstract class C{factory C([int n=4])=D;}class D implements C{D([int n=4]);}void main(){}",
+      "abstract class C{factory C(n)=D;}class D implements C{D(int n);}void main(){}",
+      "abstract class C{factory C({int? n})=D;}class D implements C{D({int? x});}void main(){}",
+      "class C{final int? x;factory C()=>throw 1;}void main(){}",
+      "class C{int x;factory C()=>throw 1;}void main(){}",
+      "class C{C():this.other();factory C.other()=>throw 1;}void main(){}",
+      "class B{factory B()=>throw 1;}class C extends B{C();}void main(){}",
+      "// @dart=3.12\nclass C{C._();factory other()=>C._();}void main(){}",
+      "class C{factory new()=>throw 1;}void main(){}",
+      "class C{factory C();}void main(){}",
+      "class C{factory C.named()=>throw 1;}void main(){C();}",
+      "abstract class C{const factory C()=D;}class D implements C{const D();int get extra=>1;}void main(){print((const C()).extra);}",
+      "abstract class C{factory C(int n)=D;}class D implements C{D(num n);}void main(){C(1.5);}",
+      "abstract class C{const factory C(int n)=D;}class D implements C{const D(num n);}void main(){const c=C(1.5);}",
+      "abstract class C{factory C([int n])=D;}class D implements C{D([int n='bad']);}void main(){}",
+      "class C{factory C<T>()=>throw 1;}void main(){}",
+      "class C{static factory C()=>throw 1;}void main(){}",
+      "class C{factory C() async=>throw 1;}void main(){}",
+      "class C{factory C()=C.missing;}void main(){}",
+      "class C{factory C()=>throw 1;}void main(){const Object c=true?1:C();}",
       "abstract class A{num get value;set value(int v);}class B(var value) implements A;void main(){print(B(2.5).value);}",
       "// @dart=3.12\nclass C();void main(){}",
       "// @dart=3.12\nclass C{new();}void main(){}",
@@ -2793,6 +2876,10 @@ void main() {
         ..writeAsStringSync(rejected[i]);
       await reject(invalid);
     }
+    await reject(
+      File('${temporary.path}/factory-private.dart'),
+      checkSdk: true,
+    );
     final rejectedParts = <String, String>{
       "import 'parts-name.dart';void main(){}": 'parts-name.dart',
       "library parts.sample;part 'parts-dep.dart';void main(){}":

@@ -58,6 +58,14 @@ class Wide {
 }
 
 abstract class WideOwnFields {
+  factory WideOwnFields(
+    Leaf tail,
+    Object? tagged,
+    Leaf edge,
+    Leaf third,
+    Leaf own,
+    Object? ownTagged,
+  ) = DerivedWide;
   Leaf get own;
   Object? get ownTagged;
 }
@@ -1222,14 +1230,14 @@ void main(List<String> args) {
   var second = rt.nativeLoad64(edges + 8);
   check(listElements(first, edges) == 0);
   check(rt.rtTraceObject(second, edges, capacity) == 0);
-  var wide = DerivedWide(
+  var wide = WideOwnFields(
     Leaf(201),
     Leaf(202),
     Leaf(203),
     Leaf(204),
     Leaf(205),
     Leaf(206),
-  );
+  ) as DerivedWide;
   wide.p61 = raw;
   var wideAddress = capture(wide, 200, queue);
   count = rt.rtTraceObject(wideAddress, edges, capacity);

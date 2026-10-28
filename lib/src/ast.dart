@@ -279,6 +279,8 @@ class AstFunction {
   bool setter = false;
   bool constant = false;
   bool isStatic = false;
+  bool factory = false;
+  AstExpression? factoryRedirect;
   bool primary = false;
   bool abbreviated = false;
 

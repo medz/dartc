@@ -10,6 +10,7 @@ class Parser {
   // Guards and initializers require parentheses around function literals.
   bool restrictedExpression = false;
   bool patterns = true;
+  bool abbreviatedConstructors = true;
   List<String> paths;
 
   Parser(this.tokens, this.position, this.pendingClosers, this.paths);
@@ -1011,6 +1012,49 @@ AstExpression parserCall(
   return AstExpression(astCall, disposition, children, typeArguments, token);
 }
 
+AstExpression parserConstructorDesignation(Parser parser) {
+  final token = parser.position;
+  var value = AstExpression(
+    astName,
+    parserTypeDeclarationName(parser),
+    const <AstExpression>[],
+    const <AstType>[],
+    token,
+  );
+  var names = 1;
+  while (parserTake(parser, '.')) {
+    if (names == 3) parserError(parser, 'constructor name has too many parts');
+    names++;
+    final member = parser.position;
+    if (tokenIsReserved(parser.tokens[member]) && !parserIs(parser, 'new'))
+      parserError(parser, 'expected constructor name');
+    value = AstExpression(
+      astMember,
+      parserName(parser),
+      <AstExpression>[value],
+      const <AstType>[],
+      member,
+    );
+  }
+  if (parserIs(parser, '<')) {
+    if (names > 2) parserError(parser, 'expected constructor type');
+    value.typeArguments = parserTypeArguments(parser);
+    if (parserTake(parser, '.')) {
+      final member = parser.position;
+      if (tokenIsReserved(parser.tokens[member]) && !parserIs(parser, 'new'))
+        parserError(parser, 'expected constructor name');
+      value = AstExpression(
+        astMember,
+        parserName(parser),
+        <AstExpression>[value],
+        const <AstType>[],
+        member,
+      );
+    }
+  }
+  return value;
+}
+
 AstExpression parserMetadatum(Parser parser) {
   var token = parser.position;
   var value = AstExpression(
@@ -1778,8 +1822,7 @@ List<AstParameter> parserParameters(
     } else {
       name = parserName(parser);
     }
-    if ((fieldFormal || superFormal || declaringFields != null) &&
-        parserIs(parser, '(')) {
+    if (parserIs(parser, '(')) {
       final result = type.name == ''
           ? AstType('dynamic', const <AstType>[], type.token)
           : type;
@@ -2049,7 +2092,56 @@ AstClass parserClass(Parser parser, int token) {
       }
     }
     var constant = parserTake(parser, 'const');
-    if (parserTake(parser, 'this')) {
+    if (!isStatic &&
+        parserIs(parser, 'factory') &&
+        (parser.abbreviatedConstructors ||
+            !tokenIs(parser.tokens[parser.position + 1], '(') &&
+                !tokenIs(parser.tokens[parser.position + 1], '<'))) {
+      if (external)
+        parserError(parser, 'external constructors are unsupported');
+      parser.position++;
+      final constructorToken = parser.position;
+      var constructorName = name;
+      var abbreviated = true;
+      if (parserTake(parser, name)) {
+        abbreviated = false;
+        if (parserTake(parser, '.')) {
+          if (tokenIsReserved(parser.tokens[parser.position]) &&
+              !parserIs(parser, 'new'))
+            parserError(parser, 'reserved word cannot be a constructor name');
+          constructorName += '.' + parserName(parser);
+        }
+      } else if (!parserIs(parser, '(')) {
+        if (tokenIsReserved(parser.tokens[parser.position]))
+          parserError(parser, 'reserved word cannot be a constructor name');
+        constructorName += '.' + parserName(parser);
+      }
+      final constructor =
+          AstFunction(
+              constructorName,
+              parserInferredType(constructorToken),
+              parserParameters(parser),
+              null,
+              null,
+              false,
+              constructorToken,
+              false,
+            )
+            ..factory = true
+            ..constant = constant
+            ..abbreviated = abbreviated
+            ..metadata = metadata;
+      if (parserTake(parser, '=')) {
+        constructor.factoryRedirect = parserConstructorDesignation(parser);
+        parserExpect(parser, ';');
+      } else {
+        if (constant) parserError(parser, 'const factory must redirect');
+        if (parserIs(parser, ';'))
+          parserError(parser, 'factory requires a body');
+        parserFunctionBody(parser, constructor, false);
+      }
+      constructors.add(constructor);
+    } else if (parserTake(parser, 'this')) {
       if (primary == null || primaryBody)
         parserError(parser, 'primary constructor body requires one header');
       if (external || isStatic || constant)
@@ -2275,7 +2367,11 @@ AstDirective parserDirective(Parser parser, int kind, int token) {
   return directive;
 }
 
-AstUnit parseUnit(Parser parser, [List<bool> patterns = const <bool>[]]) {
+AstUnit parseUnit(
+  Parser parser, [
+  List<bool> patterns = const <bool>[],
+  List<bool> abbreviatedConstructors = const <bool>[],
+]) {
   var unit = AstUnit(
     <AstDirective>[],
     <AstVariable>[],
@@ -2291,6 +2387,8 @@ AstUnit parseUnit(Parser parser, [List<bool> patterns = const <bool>[]]) {
     if (parser.tokens[token].source != source) {
       source = parser.tokens[token].source;
       if (patterns.isNotEmpty) parser.patterns = patterns[source];
+      if (abbreviatedConstructors.isNotEmpty)
+        parser.abbreviatedConstructors = abbreviatedConstructors[source];
       declarations = false;
     }
     if (parserIs(parser, 'import') ||

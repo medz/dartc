@@ -45,3 +45,20 @@ void checkParameterName(
     other++;
   }
 }
+
+int correspondingParameter(
+  List<AstParameter> parameters,
+  AstParameter source,
+  int index,
+) {
+  if (source.kind != astNamedParameter)
+    return index < parameters.length &&
+            parameters[index].kind != astNamedParameter
+        ? index
+        : -1;
+  for (var i = 0; i < parameters.length; i++)
+    if (parameters[i].kind == astNamedParameter &&
+        parameterName(parameters[i]) == parameterName(source))
+      return i;
+  return -1;
+}

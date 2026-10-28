@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Add non-generic factory constructors, redirecting and const factories, target defaults and abbreviated factory declarations. Preserve argument order, return checks, void payloads and constant identity across redirects. Accept function-form typed ordinary parameters.
+
 - Add non-generic primary constructors, declaring parameters with type inference, parameter capture in field initializers, const evaluation, class semicolons and abbreviated generative constructors. Reject values returned from generative constructors.
 - Add `super` parameters to non-generic generative constructors, including inferred types, inherited defaults, named forwarding and const evaluation. Support function-typed field and super parameter declarations.
 - Add non-generic abstract classes, `extends` and `implements`, with interface signature checks, inherited fields, implementation dispatch, runtime subtype tests and actual-implementation defaults. Support `super` member access, constructor chains and inherited const fields. Covariant parameters and `noSuchMethod` forwarding remain unimplemented.

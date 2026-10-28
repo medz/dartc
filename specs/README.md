@@ -21,7 +21,7 @@
 | §6 Overview；§7 Errors and Warnings；§21 Reference | [词法、作用域与诊断](lexical-structure.md)、[并发边界](libraries.md) | 部分实现；isolate 并发未实现 |
 | §8 Variables | [变量](variables.md) | 部分实现 |
 | §9 Functions | [函数](functions.md) | 部分实现 |
-| §10 Classes；§11 Interfaces；§12 Mixins；§13 Extensions；§14 Enums；§16 Metadata | [类及相关声明](classes.md) | 非泛型类、继承、接口和元数据部分实现；mixin、extension 和 enum 仍缺 |
+| §10 Classes；§11 Interfaces；§12 Mixins；§13 Extensions；§14 Enums；§16 Metadata | [类及相关声明](classes.md) | 非泛型类、继承、接口、工厂构造和元数据部分实现；mixin、extension 和 enum 仍缺 |
 | §15 Generics；§20 Types | [类型与泛型](types.md) | 核心类型、List 实参、泛型别名与泛型函数直接调用部分实现；泛型类与泛型函数值仍缺 |
 | §17 Expressions | [表达式](expressions.md) | 部分实现 |
 | §18 Statements | [语句](statements.md) | 部分实现 |
@@ -44,7 +44,7 @@
 | [Null-aware elements](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.8/null-aware-elements/feature-specification.md) | [表达式](expressions.md) | List 的运行时及常量元素已支持；Set/Map 未实现 |
 | [Dot shorthands](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.10/dot-shorthands/feature-specification.md) | [表达式](expressions.md) | 未实现 |
 | [私有命名形参](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.12/private-named-parameters/feature-specification.md) | [函数](functions.md) | 字段形参和主构造器声明参数的公共名映射、冲突校验及 super 形参公共名称关联 |
-| [Primary constructors](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.13/primary-constructors/feature-specification.md) | [类](classes.md#主构造器) | 非泛型类的主构造器、字段声明参数与推断、初始化作用域、常量求值及生成式构造简写已支持；泛型类及其余声明类别仍缺 |
+| [Primary constructors](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.13/primary-constructors/feature-specification.md) | [类](classes.md#主构造器) | 非泛型类的主构造器、字段声明参数与推断、初始化作用域、常量求值及生成式/工厂构造简写已支持；泛型类及其余声明类别仍缺 |
 
 ## 状态与证据
 

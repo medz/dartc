@@ -6,6 +6,7 @@ import '../resolve_type.dart';
 import '../source.dart';
 import '../symbols.dart';
 import '../types.dart';
+import 'parameters.dart';
 
 const int classMethod = 0;
 const int classGetter = 1;
@@ -101,23 +102,6 @@ ClassSignature classSignature(
     ],
     const <int>[],
   );
-}
-
-int correspondingParameter(
-  List<AstParameter> parameters,
-  AstParameter source,
-  int index,
-) {
-  if (source.kind != astNamedParameter)
-    return index < parameters.length &&
-            parameters[index].kind != astNamedParameter
-        ? index
-        : -1;
-  for (var i = 0; i < parameters.length; i++)
-    if (parameters[i].kind == astNamedParameter &&
-        parameters[i].name == source.name)
-      return i;
-  return -1;
 }
 
 bool classSignatureSubtype(ClassSignature actual, ClassSignature expected) {

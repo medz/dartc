@@ -3,6 +3,7 @@ import 'binary64.dart';
 import 'host.dart';
 import 'frontend/arguments.dart';
 import 'frontend/literals.dart';
+import 'frontend/parameters.dart';
 import 'initialization.dart';
 import 'ir.dart';
 import 'members.dart';
@@ -1008,7 +1009,7 @@ ConstructorConstants _constantRedirectTarget(
   if (target == null || !target.syntax.constant)
     _constantError(
       context,
-      owner.syntax.initializers[0].token,
+      owner.syntax.token,
       'const redirect requires a const target',
     );
   return target;
@@ -1071,7 +1072,7 @@ List<ConstantValue> _constantArguments(
   context.allowInitializerParameters = allow;
   i = 0;
   while (i < parameters.length) {
-    if (parameters[i].type < 0)
+    if (parameters[i].type < 0 && owner.syntax.factoryRedirect == null)
       parameters[i] = _constantDeclaration(context, owner, i, false, active);
     i++;
   }
@@ -1092,11 +1093,13 @@ void checkConstantConstructors(ConstantContext context) {
       var p = 0;
       while (p < owner.syntax.parameters.length) {
         var parameter = owner.syntax.parameters[p];
-        if (parameter.kind != astRequiredPositional && !parameter.required)
+        if (parameter.kind != astRequiredPositional &&
+            !parameter.required &&
+            owner.syntax.factoryRedirect == null)
           _constantDeclaration(context, owner, p, false, true);
         p++;
       }
-      if (target == null && !owner.syntax.primary) {
+      if (target == null && !owner.syntax.primary && !owner.syntax.factory) {
         var f = 0;
         while (f < owner.owner.fields.length) {
           if (owner.owner.fields[f].initializer.isNotEmpty)
@@ -1211,13 +1214,41 @@ ConstantValue _constantInvoke(
     context.allowInitializerParameters = true;
     if (owner.plan.redirectTarget < 0) break;
     var target = _constantRedirectTarget(context, owner);
-    parameters = _constantArguments(
-      context,
-      target,
-      owner.syntax.initializers[0].expression,
-      active,
-      true,
-    );
+    if (owner.syntax.factory) {
+      final forwarded = <ConstantValue>[];
+      for (var p = 0; p < target.parameterTypes.length; p++) {
+        final source = correspondingParameter(
+          owner.syntax.parameters,
+          target.syntax.parameters[p],
+          p,
+        );
+        forwarded.add(
+          source < 0 || parameters[source].type < 0
+              ? target.syntax.factoryRedirect == null
+                    ? _constantDeclaration(context, target, p, false, true)
+                    : ConstantValue(-1, tNull, 0, '')
+              : _constantChecked(
+                  context,
+                  parameters[source].type == tVoid &&
+                          target.parameterTypes[p] != tVoid
+                      ? constantWithType(parameters[source], tDynamic)
+                      : parameters[source],
+                  target.parameterTypes[p],
+                  owner.syntax.token,
+                  true,
+                ),
+        );
+      }
+      parameters = forwarded;
+    } else {
+      parameters = _constantArguments(
+        context,
+        target,
+        owner.syntax.initializers[0].expression,
+        active,
+        true,
+      );
+    }
     owner = target;
   }
   var fields = <ConstantValue>[];
@@ -1361,7 +1392,7 @@ ConstantValue _constantConstructor(
       expression.token,
       'constant constructor requires const',
     );
-  if (owner.owner.isAbstract)
+  if (owner.owner.isAbstract && !owner.syntax.factory)
     _constantError(
       context,
       expression.token,
@@ -1383,7 +1414,10 @@ ConstantValue _constantConstructor(
     active,
     false,
   );
-  return _constantInvoke(context, owner, parameters, active);
+  return constantWithType(
+    _constantInvoke(context, owner, parameters, active),
+    typeNonNullable(classType),
+  );
 }
 
 ConstantValue _evaluateConstant(

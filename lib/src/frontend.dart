@@ -275,6 +275,7 @@ List<int> feLateFieldGetters = <int>[];
 List<int> feLateFieldSetters = <int>[];
 List<int> feLateFunctionFields = <int>[];
 List<int> feOwners = <int>[];
+// 0 ordinary function, 1 generative constructor, 2 factory constructor.
 List<int> feConstructors = <int>[];
 int fePragmaClass = -1;
 int fePragmaNameField = -1;
@@ -386,7 +387,7 @@ int feRegisterFunction(
     result = tString;
   if (owner >= 0) {
     if (!constructor) name = classNames[owner] + '.' + syntax.name;
-    if (!syntax.isStatic) {
+    if (!syntax.isStatic && !syntax.factory) {
       types.add(classType(owner));
     }
   }
@@ -395,8 +396,11 @@ int feRegisterFunction(
   while (p < syntax.parameters.length) {
     final parameter = syntax.parameters[p];
     if (parameter.superFormal) {
-      if (!constructor)
-        feAstError(parameter.token, 'super parameter requires a constructor');
+      if (!constructor || syntax.factory)
+        feAstError(
+          parameter.token,
+          'super parameter requires a generative constructor',
+        );
       if (!sourceVersionAtLeast(feSources, source, 2, 17))
         feAstError(
           parameter.token,
@@ -405,10 +409,10 @@ int feRegisterFunction(
     }
     var type = tDynamic;
     if (parameter.fieldFormal) {
-      if (!constructor)
+      if (!constructor || syntax.factory)
         feAstError(
           parameter.token,
-          'field-formal parameter requires a constructor',
+          'field-formal parameter requires a generative constructor',
         );
       final entry = feField(owner, parameter.name, parameter.token);
       type = feFieldTypes[entry];
@@ -445,7 +449,7 @@ int feRegisterFunction(
   feOwners.add(owner);
   feLateFunctionFields.add(-1);
   if (constructor) {
-    feConstructors.add(1);
+    feConstructors.add(syntax.factory ? 2 : 1);
     feClassConstructors[owner].add(id);
   } else {
     feConstructors.add(0);
@@ -500,6 +504,7 @@ void feCollectDeclarations(AstUnit unit) {
     if (syntax.hasPrimary)
       for (final constructor in syntax.constructors)
         if (!constructor.primary &&
+            !constructor.factory &&
             (constructor.initializers.isEmpty ||
                 constructor.initializers[0].kind != astRedirectInitializer))
           feAstError(
@@ -799,7 +804,9 @@ int feRegisterGlobal(AstVariable syntax, int owner) {
 }
 
 bool feHasReceiver(int function) {
-  return feOwners[function] >= 0 && !feFunctionNodes[function].isStatic;
+  return feOwners[function] >= 0 &&
+      !feFunctionNodes[function].isStatic &&
+      !feFunctionNodes[function].factory;
 }
 
 int feTypeEnvironmentSlot(int function) => functions[function].typeEnvironment;
@@ -1992,17 +1999,19 @@ void feCheckUnitMetadata(AstUnit syntax) {
 
 void feRegisterConstructorConstants() {
   for (var function = 1; function < feFunctionNodes.length; function++) {
-    if (feConstructors[function] != 1) continue;
+    if (feConstructors[function] == 0) continue;
     final owner = feOwners[function];
     final syntax = feFunctionNodes[function];
     final fields = <int>[];
     final parameterTypes = <int>[];
     final fieldStart = feClassFieldStarts[owner];
-    if (syntax.constant)
+    if (syntax.constant && !syntax.factory)
       for (var field = 0; field < feClassFieldCounts[owner]; field++)
         fields.add(feFieldTypes[fieldStart + field]);
     for (var p = 0; p < syntax.parameters.length; p++)
-      parameterTypes.add(functions[function].parameterTypes[1 + p]);
+      parameterTypes.add(
+        functions[function].parameterTypes[feParameterOffset(function) + p],
+      );
     while (feConstants.constructors.length <= function)
       feConstants.constructors.add(null);
     feConstants.constructors[function] = ConstructorConstants(
@@ -2041,11 +2050,13 @@ void feResolveFunctionDefaults(int f) {
     final parameter = parameters[p];
     feCheckMetadata(parameter.metadata, owner);
     checkParameterName(feSources, parameters, p);
-    if (parameter.kind != astRequiredPositional && !parameter.required) {
+    if (parameter.kind != astRequiredPositional &&
+        !parameter.required &&
+        syntax.factoryRedirect == null) {
       var value = omitted;
       final type = functions[f].parameterTypes[offset + p];
       final expression = parameter.defaultValue;
-      if (feConstructors[f] == 1)
+      if (feConstructors[f] != 0)
         value = constructorParameterDefault(feConstants, f, p);
       else if (expression != null)
         value = evaluateConstant(feConstants, expression, type, false);
@@ -3594,6 +3605,122 @@ void feLowerLateField(int function, int field) {
   feEmit(opReturn);
 }
 
+int feFactoryRedirectTarget(int function) {
+  final expression = feFunctionNodes[function].factoryRedirect!;
+  var targetType = feConstructorType(
+    feExpressionSymbol(expression, false),
+    expression.typeArguments,
+    expression.token,
+  );
+  var name = '';
+  if (targetType < 0 && expression.kind == astMember) {
+    final receiver = expression.children[0];
+    targetType = feConstructorType(
+      feExpressionSymbol(receiver, false),
+      receiver.typeArguments,
+      receiver.token,
+    );
+    if (expression.typeArguments.isNotEmpty)
+      feAstError(
+        expression.token,
+        'constructor selector does not accept type arguments',
+      );
+    name = constructorSelector(feSources, expression.text, expression.token);
+  }
+  final owner = targetType < 0 ? -1 : resolvedTypeClassOwner(targetType);
+  if (owner < 0)
+    feAstError(
+      expression.token,
+      'factory redirect requires a class constructor',
+    );
+  if (name.startsWith('_') &&
+      sourceLibrary(feSources, feTokens[expression.token].source) !=
+          sourceLibrary(feSources, feClassSources[owner]))
+    feAstError(expression.token, 'private factory redirect target');
+  final ordinal = lookupConstructor(feMembers[owner], name);
+  if (ordinal < 0)
+    feAstError(expression.token, 'unknown factory redirect target');
+  final target = feClassConstructors[owner][ordinal];
+  if (!feFunctionNodes[target].factory && feClassNodes[owner].isAbstract)
+    feAstError(expression.token, 'cannot instantiate an abstract class');
+  return target;
+}
+
+void feCheckFactoryRedirects() {
+  for (var function = 1; function < feFunctionNodes.length; function++) {
+    final syntax = feFunctionNodes[function];
+    if (syntax.factoryRedirect == null) continue;
+    for (final parameter in syntax.parameters)
+      if (parameter.defaultValue != null)
+        feAstError(
+          parameter.token,
+          'redirecting factory cannot declare default values',
+        );
+    final target = feConstructorPlans[function].redirectTarget;
+    if (!classSignatureSubtype(
+      ClassSignature(
+        functions[target].result,
+        functions[target].parameterTypes.sublist(feParameterOffset(target)),
+        feFunctionNodes[target].parameters,
+        const <int>[],
+      ),
+      ClassSignature(
+        functions[function].result,
+        functions[function].parameterTypes,
+        syntax.parameters,
+        const <int>[],
+      ),
+    ))
+      feAstError(
+        syntax.factoryRedirect!.token,
+        'incompatible factory redirect signature',
+      );
+  }
+}
+
+int feLowerFactoryArguments(AstExpression call, int contract, int target) {
+  if (call.typeArguments.isNotEmpty)
+    feAstError(call.token, 'nongeneric call does not accept type arguments');
+  final sourceParameters = feFunctionNodes[contract].parameters;
+  final targetParameters = feFunctionNodes[target].parameters;
+  final bindings = bindArguments(feSources, feFunctionNodes[contract], call, 1);
+  final offset = feParameterOffset(target);
+  final values = List<int>.filled(targetParameters.length, -1);
+  for (var a = 1; a < call.children.length; a++) {
+    var expression = call.children[a];
+    if (expression.kind == astNamedArgument)
+      expression = expression.children[0];
+    final source = bindings[a - 1];
+    final parameter = correspondingParameter(
+      targetParameters,
+      sourceParameters[source],
+      source,
+    );
+    final sourceType = functions[contract].parameterTypes[source];
+    final targetType = functions[target].parameterTypes[offset + parameter];
+    feLowerInContext(expression, sourceType);
+    // Redirects transfer the payload even when the source contract says void.
+    if (sourceType == tVoid && targetType != tVoid)
+      feBuiltinTyped(bBoxRef, 1, targetType);
+    else
+      feConvertValue(sourceType, targetType, expression.token);
+    final slot = feTemp(targetType);
+    feOperand(opStoreLocal, slot);
+    values[parameter] = slot;
+  }
+  for (var p = 0; p < targetParameters.length; p++) {
+    if (values[p] >= 0)
+      feOperand(opLoadLocal, values[p]);
+    else
+      feConstantValue(
+        feParamDefaults[target][offset + p],
+        functions[target].parameterTypes[offset + p],
+        call.token,
+      );
+  }
+  return targetParameters.length;
+}
+
 void feLowerConstructor(int function) {
   var syntax = feFunctionNodes[function];
   var plan = feConstructorPlans[function];
@@ -3677,8 +3804,6 @@ int feLowerConstructorCall(
   String rawName,
   int token,
 ) {
-  if (feClassNodes[owner].isAbstract)
-    feAstError(token, 'cannot instantiate an abstract class');
   if (call.text == astCallValue)
     feAstError(call.token, 'constructor tear-off invocation is unsupported');
   var name = constructorSelector(feSources, rawName, token);
@@ -3689,7 +3814,21 @@ int feLowerConstructorCall(
   var ordinal = lookupConstructor(feMembers[owner], name);
   if (ordinal < 0) feAstError(token, 'unknown constructor');
   var constructor = feClassConstructors[owner][ordinal];
-  var count = feLowerArguments(call, 1, constructor);
+  final contract = constructor;
+  final result = classType(owner);
+  while (feFunctionNodes[constructor].factoryRedirect != null)
+    constructor = feConstructorPlans[constructor].redirectTarget;
+  owner = feOwners[constructor];
+  if (feClassNodes[owner].isAbstract && feConstructors[constructor] == 1)
+    feAstError(token, 'cannot instantiate an abstract class');
+  final count = contract == constructor
+      ? feLowerArguments(call, 1, constructor)
+      : feLowerFactoryArguments(call, contract, constructor);
+  if (feConstructors[constructor] == 2) {
+    feCall(constructor, count);
+    feConvertValue(functions[constructor].result, result, token);
+    return result;
+  }
   var values = List<int>.filled(count, -1);
   var parameter = count - 1;
   while (parameter >= 0) {
@@ -3706,7 +3845,8 @@ int feLowerConstructorCall(
     parameter++;
   }
   feCall(constructor, count + 1);
-  return classType(owner);
+  feConvertValue(functions[constructor].result, result, token);
+  return result;
 }
 
 int feLowerCall(AstExpression call, int context) {
@@ -6232,9 +6372,15 @@ void parseSource(SourceProgram source) {
   feAt = 0;
   feRuntimeTokens = source.runtimeTokens;
   final paths = <String>[for (var file in source.files) file.path];
-  final syntax = parseUnit(Parser(feTokens, 0, 0, paths), <bool>[
-    for (var file in source.files) file.languageMajor >= 3,
-  ]);
+  final syntax = parseUnit(
+    Parser(feTokens, 0, 0, paths),
+    <bool>[for (var file in source.files) file.languageMajor >= 3],
+    <bool>[
+      for (var file in source.files)
+        file.languageMajor > 3 ||
+            file.languageMajor == 3 && file.languageMinor >= 13,
+    ],
+  );
   feInstallSymbols();
   feCollectDeclarations(syntax);
   feObjectMembers = ClassMembers(<MemberBinding>[]);
@@ -6335,6 +6481,12 @@ void parseSource(SourceProgram source) {
         feFunctionNodes,
       );
     }
+    if (feConstructors[plannedFunction] == 2 &&
+        feFunctionNodes[plannedFunction].factoryRedirect != null)
+      plan = ConstructorPlan(
+        const <ConstructorStep>[],
+        feFactoryRedirectTarget(plannedFunction),
+      );
     feConstructorPlans.add(plan);
     plannedFunction++;
   }
@@ -6347,6 +6499,7 @@ void parseSource(SourceProgram source) {
     feClassConstructors,
     feClassOrder,
   );
+  feCheckFactoryRedirects();
   var sourceFunctions = functions.length;
   final bodyBindings = <FunctionBindings>[];
   final localTypeScopes = <List<int>>[];
@@ -6512,8 +6665,9 @@ void parseSource(SourceProgram source) {
       feLowerLateField(f, feLateFunctionFields[f]);
     } else if (feConstructors[f] == 1) {
       feLowerConstructor(f);
-    } else if (feOwners[f] >= 0 &&
-        !functionSyntax.isStatic &&
+    } else if (functionSyntax.factoryRedirect != null) {
+      feEmit(opUnreachable);
+    } else if (feHasReceiver(f) &&
         functionSyntax.body == null &&
         expression == null) {
       feEmit(opUnreachable);

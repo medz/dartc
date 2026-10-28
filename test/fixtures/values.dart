@@ -6018,7 +6018,156 @@ void primaryConstructorValues() {
   print(order.first + order.second);
 }
 
+abstract class FactoryValue {
+  num get value;
+  const factory FactoryValue([int value]) = FactoryBridge;
+  const factory FactoryValue.named({required int value, int bonus}) =
+      FactoryProduct.named;
+  factory FactoryValue.extra() = FactoryProduct;
+  factory FactoryValue.body(int value) => FactoryProduct(value + 1);
+}
+
+typedef NullableFactory = FactoryValue?;
+
+abstract class FactoryBridge implements FactoryValue {
+  const factory FactoryBridge([num value]) = FactoryProduct;
+}
+
+class const FactoryProduct([final num value = 4.5]) implements FactoryBridge {
+  const FactoryProduct.named({required int value, int bonus = 3})
+    : this(value + bonus);
+}
+
+class FactoryBox._(final int value) {
+  static final FactoryBox cached = FactoryBox._(0);
+  factory FactoryBox(int value) {
+    if (value == 0) return cached;
+    FactoryBox create() => FactoryBox._(value);
+    value++;
+    return create();
+  }
+  factory twice(int value) => FactoryBox(value * 2);
+  factory from(dynamic value) => value;
+  factory fail() => throw 'factory';
+}
+
+class FactoryNew {
+  static factory() => 9;
+  final int value;
+  FactoryNew._(this.value);
+  factory FactoryNew.new(int value) => FactoryNew._(value);
+}
+
+class FactoryAbbreviated._(final int value) {
+  factory(int value) => FactoryAbbreviated._(value);
+}
+
+abstract class FactoryPrivate {
+  int get value;
+  const factory FactoryPrivate({int value}) = FactoryPrivateProduct;
+}
+
+class FactoryPrivateProduct implements FactoryPrivate {
+  final int _value;
+  const FactoryPrivateProduct({this._value = 6});
+  int get value => _value;
+}
+
+abstract class FactoryNullable {
+  num? get value;
+  factory FactoryNullable([int value]) = FactoryNullableProduct;
+}
+
+class FactoryNullableProduct([final num? value]) implements FactoryNullable;
+
+abstract class FactoryMutable {
+  int value = 3;
+  late final int later;
+  const factory FactoryMutable() = FactoryMutableProduct;
+}
+
+class FactoryMutableProduct implements FactoryMutable {
+  const FactoryMutableProduct();
+  int get value => 5;
+  void set value(int value) {}
+  int get later => 6;
+  void set later(int value) {}
+}
+
+abstract class FactoryPayload {
+  Object? get value;
+  const factory FactoryPayload(void value) = FactoryPayloadProduct;
+}
+
+class const FactoryPayloadProduct(final Object? value)
+    implements FactoryPayload;
+
+abstract class FactoryCallback {
+  int get value;
+  factory FactoryCallback(int callback(int x)) = FactoryCallbackProduct;
+}
+
+class FactoryCallbackProduct implements FactoryCallback {
+  final int value;
+  FactoryCallbackProduct(int Function(int) callback) : value = callback(3);
+}
+
+int oldStyleCallback(int callback(int value), int value) => callback(value);
+int nullableOldStyle([int callback(int value)?]) =>
+    callback == null ? 0 : callback(4);
+
+void factoryValues() {
+  print(FactoryPayload(5).value);
+  print(FactoryPayload('payload').value);
+  print((const FactoryPayload(6)).value);
+  print(FactoryCallback((value) => value + 1).value);
+  print(oldStyleCallback((value) => value + 2, 5));
+  print(nullableOldStyle());
+  print(nullableOldStyle((value) => value + 3));
+  final fresh = FactoryValue();
+  print(fresh.value);
+  print(FactoryValue(2).value);
+  print(FactoryValue.body(2).value);
+  print(FactoryValue.extra().value);
+  print(
+    FactoryValue.named(
+      bonus: inheritanceMark(3),
+      value: inheritanceMark(4),
+    ).value,
+  );
+  const constant = FactoryValue();
+  print(pass([const NullableFactory(2)]) is List<FactoryValue>);
+  print(constant.value);
+  print(identical(constant, const FactoryProduct()));
+  print(identical(const FactoryValue(2), const FactoryProduct(2)));
+  print((const FactoryValue.named(value: 2)).value);
+  print(identical(fresh, FactoryValue()));
+  print(identical(fresh, constant));
+  print(identical(FactoryBox(0), FactoryBox(0)));
+  print(FactoryBox(2).value);
+  print(FactoryBox.twice(2).value);
+  print(FactoryBox.from(FactoryBox(0)).value);
+  try {
+    FactoryBox.fail();
+  } catch (error) {
+    print(error);
+  }
+  print(FactoryNew.new(7).value);
+  print(FactoryNew.factory());
+  print(FactoryAbbreviated(8).value);
+  const private = FactoryPrivate();
+  print(private.value);
+  print(FactoryPrivate(value: 9).value);
+  print(identical(private, const FactoryPrivateProduct()));
+  print(FactoryNullable().value);
+  print(FactoryNullable(4).value);
+  const mutable = FactoryMutable();
+  print(mutable.value);
+  print(mutable.later);
+}
+
 void main(List<String> args) {
+  factoryValues();
   primaryConstructorValues();
   inheritanceValues();
   interfaceValues();

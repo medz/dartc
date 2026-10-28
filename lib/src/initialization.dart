@@ -45,9 +45,20 @@ void checkInitializers(SymbolTable symbols, AstUnit unit) {
   i = 0;
   while (i < unit.classes.length) {
     var owner = unit.classes[i];
+    var hasGenerative = owner.constructors.isEmpty;
+    for (final constructor in owner.constructors)
+      if (!constructor.factory) hasGenerative = true;
     var f = 0;
     while (f < owner.fields.length) {
       var field = owner.fields[f];
+      if (!hasGenerative &&
+          field.initializer.isEmpty &&
+          _requiresInitializer(symbols, field))
+        _initError(
+          symbols,
+          field.token,
+          'field requires an initializer without a generative constructor',
+        );
       if (field.modifier == 'const') {
         _initError(symbols, field.token, 'const instance field');
       }
@@ -145,6 +156,12 @@ ConstructorPlan planConstructorInitializers(
         'unknown redirecting constructor target',
       );
     redirectTarget = classFunctions[ordinal];
+    if (declarations[redirectTarget].factory)
+      _initError(
+        symbols,
+        callee.token,
+        'generative redirect requires a generative target',
+      );
   }
   var initialized = const <int>[];
   var steps = const <ConstructorStep>[];
@@ -296,6 +313,12 @@ ConstructorPlan planConstructorInitializers(
           ))
     _initError(symbols, call.token, 'private superclass constructor');
   final target = constructorsByClass[parent][ordinal];
+  if (declarations[target].factory)
+    _initError(
+      symbols,
+      call.token,
+      'super invocation requires a generative constructor',
+    );
   if (!forwarding) return ConstructorPlan(steps, -1, target, call);
   final formals = declarations[target].parameters;
   final parameters = List<int>.filled(syntax.parameters.length, -1);
@@ -413,7 +436,7 @@ void checkConstructorRedirects(
     if (current >= 0 && states[current] == 1)
       _initError(
         symbols,
-        syntax[current].initializers[0].token,
+        syntax[current].token,
         'redirecting constructors cannot be cyclic',
       );
     current = function;
