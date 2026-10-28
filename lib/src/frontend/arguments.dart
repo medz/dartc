@@ -1,5 +1,6 @@
 import '../ast.dart';
 import '../source.dart';
+import '../types.dart';
 import 'parameters.dart';
 
 void checkArgumentOrder(SourceProgram source, AstExpression call) {
@@ -92,5 +93,56 @@ List<int> bindArguments(
     }
     p++;
   }
+  return result;
+}
+
+List<int> bindFunctionArguments(
+  SourceProgram source,
+  FunctionSignature signature,
+  AstExpression call,
+) {
+  checkArgumentOrder(source, call);
+  final supplied = List<bool>.filled(signature.parameters.length, false);
+  final result = <int>[];
+  var positional = 0;
+  for (var i = 1; i < call.children.length; i++) {
+    final argument = call.children[i];
+    var parameter = -1;
+    if (argument.kind == astNamedArgument) {
+      parameter = signature.namedIndex(argument.text);
+      if (parameter < 0)
+        sourceError(
+          source,
+          source.tokens[argument.token],
+          'unknown named argument ' + argument.text,
+        );
+    } else {
+      if (positional >= signature.positional)
+        sourceError(
+          source,
+          source.tokens[argument.token],
+          'too many positional arguments',
+        );
+      parameter = positional++;
+    }
+    if (supplied[parameter])
+      sourceError(
+        source,
+        source.tokens[argument.token],
+        'duplicate argument ' + argument.text,
+      );
+    supplied[parameter] = true;
+    result.add(parameter);
+  }
+  for (var p = 0; p < supplied.length; p++)
+    if (!supplied[p] &&
+        (p < signature.required ||
+            p >= signature.positional &&
+                signature.requiredNamed[p - signature.positional]))
+      sourceError(
+        source,
+        source.tokens[call.token],
+        'missing function-value argument',
+      );
   return result;
 }

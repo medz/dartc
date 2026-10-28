@@ -236,7 +236,7 @@ class _SsaVerifier {
           target == bFunctionEntry ||
           target == bFunctionType) {
         count = 1;
-      } else if (target == bFunctionInvoke && count < 2) {
+      } else if (target == bFunctionInvoke && count < 3) {
         fail('invoke operand count');
       } else if (target == bListSublist) {
         count = 4;
@@ -270,7 +270,8 @@ class _SsaVerifier {
         op != opClosureDescriptor &&
         op != opCaptureCellDescriptor &&
         op != opLateCellDescriptor &&
-        op != opTypeReference) {
+        op != opTypeReference &&
+        op != opCallShape) {
       fail('unknown SSA operation');
     }
     if (instruction.inputs.length != count) fail('operand count');
@@ -289,6 +290,16 @@ class _SsaVerifier {
           fail('call operand type');
         i++;
       }
+    } else if (op == opCallShape) {
+      if (target < 0 || target >= callShapes.length || result != tInt)
+        fail('call shape');
+      final shape = callShapes[target];
+      if (shape.positional < 0) fail('call positional count');
+      for (var i = 0; i < shape.names.length; i++)
+        if (shape.names[i] == '' ||
+            i > 0 &&
+                compareParameterNames(shape.names[i - 1], shape.names[i]) >= 0)
+          fail('call name order');
     } else if (op == opTypeReference) {
       type(target);
       if (result != tObject) fail('type reference result');
@@ -482,10 +493,27 @@ class _SsaVerifier {
           if (result != tPointer) fail('entry result');
         } else {
           expectInput(instruction, 0, tPointer);
-          if (count != functionSignature(receiver).parameters.length + 2 ||
-              result != tDynamic)
+          expectInput(instruction, 2, tInt);
+          final shapeValue = instruction.inputs[2];
+          if (positions[shapeValue] < 0) fail('invoke shape is not constant');
+          final producer = function
+              .blocks[owners[shapeValue]]
+              .instructions[positions[shapeValue]];
+          if (producer.op != opCallShape) fail('invoke shape producer');
+          final shape = callShapes[producer.target];
+          final signature = functionSignature(receiver);
+          if (count != shape.count + 3 ||
+              result != tDynamic ||
+              shape.positional < signature.required ||
+              shape.positional > signature.positional)
             fail('invoke signature');
-          var i = 2;
+          for (final name in shape.names)
+            if (signature.namedIndex(name) < 0) fail('invoke named argument');
+          for (var i = 0; i < signature.names.length; i++)
+            if (signature.requiredNamed[i] &&
+                shape.namedIndex(signature.names[i]) < 0)
+              fail('invoke required named argument');
+          var i = 3;
           while (i < count) {
             if (!typeIsTagged(inputType(instruction.inputs[i])))
               fail('invoke argument representation');

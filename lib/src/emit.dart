@@ -145,21 +145,26 @@ void emitInstruction(
     else
       machineCode.add(0x39000000 | (address << 5) | value);
   } else if (op == mCall || op == mCallIndirect) {
+    final vector = op == mCallIndirect && instruction.extra == 1;
     var first = 0;
     if (op == mCallIndirect) first = 1;
+    if (vector) first = 3;
     var count = inputs.length - first;
     int outgoing = 0;
-    if (count > 8) outgoing = alignFrame((count - 8) * 8);
+    if (vector)
+      outgoing = alignFrame(count * 8);
+    else if (count > 8)
+      outgoing = alignFrame((count - 8) * 8);
     int remaining = outgoing;
     while (remaining >= 4096) {
       machineCode.add(0xd14007ff);
       remaining = remaining - 4096;
     }
     if (remaining != 0) machineCode.add(0xd10003ff | (remaining << 10));
-    int argument = 8;
+    int argument = vector ? 0 : 8;
     while (argument < count) {
       int value = emitOperand(function, inputs[first + argument], 0);
-      int offset = (argument - 8) * 8;
+      int offset = (vector ? argument : argument - 8) * 8;
       if (offset <= 32760) {
         machineCode.add(0xf90003e0 | ((offset ~/ 8) << 10) | value);
       } else {
@@ -170,10 +175,27 @@ void emitInstruction(
       }
       argument = argument + 1;
     }
-    argument = 0;
-    while (argument < count && argument < 8) {
-      emitLoad(function, inputs[first + argument], argument);
-      argument = argument + 1;
+    if (vector) {
+      emitLoad(function, inputs[1], 0);
+      emitLoad(function, inputs[2], 1);
+      machineCode.add(0x910003e2); // mov x2, sp
+      if (roots != null) {
+        final frame = alignFrame(
+          (function.allocation.spillSlots +
+                  function.allocation.savedRegisters.length) *
+              8,
+        );
+        for (var i = 0; i < count; i++) {
+          roots.offsets.add(-frame - outgoing + i * 8);
+          roots.kinds.add(storageTagged);
+        }
+      }
+    } else {
+      argument = 0;
+      while (argument < count && argument < 8) {
+        emitLoad(function, inputs[first + argument], argument);
+        argument = argument + 1;
+      }
     }
     if (op == mCallIndirect) {
       emitLoad(function, inputs[0], 16);

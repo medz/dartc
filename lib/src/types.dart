@@ -43,8 +43,30 @@ class FunctionSignature {
   final int result;
   final List<int> parameters;
   final int required;
+  // Positional parameters precede named parameters, sorted by public name.
+  final List<String> names;
+  final List<bool> requiredNamed;
 
-  FunctionSignature(this.result, this.parameters, this.required);
+  FunctionSignature(
+    this.result,
+    this.parameters,
+    this.required,
+    this.names,
+    this.requiredNamed,
+  );
+
+  int get positional => parameters.length - names.length;
+
+  int namedIndex(String name) {
+    for (var i = 0; i < names.length; i++)
+      if (names[i] == name) return positional + i;
+    return -1;
+  }
+
+  int corresponding(FunctionSignature source, int index) =>
+      index < source.positional
+      ? (index < positional ? index : -1)
+      : namedIndex(source.names[index - source.positional]);
 }
 
 class DartType {
@@ -65,6 +87,15 @@ List<int> classSuperclasses = <int>[];
 List<FunctionSignature> functionSignatures = <FunctionSignature>[];
 List<TypeParameterInfo> typeParameters = <TypeParameterInfo>[];
 
+int compareParameterNames(String left, String right) {
+  final count = left.length < right.length ? left.length : right.length;
+  for (var i = 0; i < count; i++) {
+    final difference = left.codeUnitAt(i) - right.codeUnitAt(i);
+    if (difference != 0) return difference;
+  }
+  return left.length - right.length;
+}
+
 void resetTypes() {
   schemaHole = -1;
   dartTypes.clear();
@@ -80,19 +111,53 @@ void resetTypes() {
   }
 }
 
-int functionType(int result, List<int> parameters, [int required = -1]) {
-  if (required < 0) required = parameters.length;
+int functionType(
+  int result,
+  List<int> parameters, [
+  int required = -1,
+  List<String> names = const <String>[],
+  List<bool> requiredNamed = const <bool>[],
+]) {
+  final positional = parameters.length - names.length;
+  if (required < 0) required = positional;
+  if (names.isNotEmpty) {
+    parameters = <int>[...parameters];
+    names = <String>[...names];
+    requiredNamed = <bool>[...requiredNamed];
+    for (var i = 1; i < names.length; i++) {
+      var p = i;
+      while (p > 0 && compareParameterNames(names[p], names[p - 1]) < 0) {
+        final name = names[p];
+        names[p] = names[p - 1];
+        names[p - 1] = name;
+        final flag = requiredNamed[p];
+        requiredNamed[p] = requiredNamed[p - 1];
+        requiredNamed[p - 1] = flag;
+        final type = parameters[positional + p];
+        parameters[positional + p] = parameters[positional + p - 1];
+        parameters[positional + p - 1] = type;
+        p--;
+      }
+    }
+  }
   var type = tDouble + 1;
   while (type < dartTypes.length) {
     if (dartTypes[type].kind == kFunction) {
       var signature = functionSignatures[dartTypes[type].argument];
       if (signature.result == result &&
           signature.required == required &&
+          signature.names.length == names.length &&
           signature.parameters.length == parameters.length) {
         var same = true;
         var p = 0;
         while (same && p < parameters.length) {
           same = signature.parameters[p] == parameters[p];
+          if (p >= positional)
+            same =
+                same &&
+                signature.names[p - positional] == names[p - positional] &&
+                signature.requiredNamed[p - positional] ==
+                    requiredNamed[p - positional];
           p++;
         }
         if (same) return type;
@@ -102,7 +167,9 @@ int functionType(int result, List<int> parameters, [int required = -1]) {
   }
   var owned = <int>[...parameters];
   var signature = functionSignatures.length;
-  functionSignatures.add(FunctionSignature(result, owned, required));
+  functionSignatures.add(
+    FunctionSignature(result, owned, required, names, requiredNamed),
+  );
   var item = DartType(kFunction, signature, -1, -1);
   item.containsParameters = typeContainsParameters(result);
   item.containsSchemaHole = typeHasSchemaHole(result);
@@ -157,6 +224,8 @@ int typeCompleteSchema(int schema, int inferred) {
     typeCompleteSchema(signature.result, tDynamic),
     parameters,
     signature.required,
+    signature.names,
+    signature.requiredNamed,
   );
 }
 
@@ -311,14 +380,20 @@ bool typeIsSubtype(int actual, int expected) {
       var source = functionSignature(actual);
       var target = functionSignature(expected);
       if (source.required > target.required ||
-          source.parameters.length < target.parameters.length ||
+          source.positional < target.positional ||
           !typeIsSubtype(source.result, target.result))
         return false;
       var p = 0;
       while (p < target.parameters.length) {
-        if (!typeIsSubtype(target.parameters[p], source.parameters[p]))
+        final q = source.corresponding(target, p);
+        if (q < 0 || !typeIsSubtype(target.parameters[p], source.parameters[q]))
           return false;
         p++;
+      }
+      for (var i = 0; i < source.names.length; i++) {
+        if (!source.requiredNamed[i]) continue;
+        final q = target.namedIndex(source.names[i]);
+        if (q < 0 || !target.requiredNamed[q - target.positional]) return false;
       }
       return true;
     }
@@ -344,15 +419,40 @@ int joinTypes(int left, int right) {
     var a = functionSignature(left);
     var b = functionSignature(right);
     if (a.required != b.required) return tFunction;
-    var count = a.parameters.length;
-    if (b.parameters.length < count) count = b.parameters.length;
+    final named = a.names.isNotEmpty || b.names.isNotEmpty;
+    if (named && (a.positional != a.required || b.positional != b.required))
+      return tFunction;
+    var count = a.positional;
+    if (b.positional < count) count = b.positional;
     var parameters = <int>[];
     var p = 0;
     while (p < count) {
       parameters.add(meetTypes(a.parameters[p], b.parameters[p]));
       p++;
     }
-    return functionType(joinTypes(a.result, b.result), parameters, a.required);
+    final names = <String>[];
+    final required = <bool>[];
+    for (var i = 0; i < a.names.length; i++) {
+      final q = b.namedIndex(a.names[i]);
+      if (q < 0) {
+        if (a.requiredNamed[i]) return tFunction;
+        continue;
+      }
+      names.add(a.names[i]);
+      required.add(a.requiredNamed[i] || b.requiredNamed[q - b.positional]);
+      parameters.add(
+        meetTypes(a.parameters[a.positional + i], b.parameters[q]),
+      );
+    }
+    for (var i = 0; i < b.names.length; i++)
+      if (b.requiredNamed[i] && a.namedIndex(b.names[i]) < 0) return tFunction;
+    return functionType(
+      joinTypes(a.result, b.result),
+      parameters,
+      a.required,
+      names,
+      required,
+    );
   }
   if (typeIsSubtype(left, right)) return right;
   if (typeIsSubtype(right, left)) return left;
@@ -407,14 +507,20 @@ int meetTypes(int left, int right) {
   if (typeIsFunction(left) && typeIsFunction(right)) {
     var a = functionSignature(left);
     var b = functionSignature(right);
-    var count = a.parameters.length;
-    if (b.parameters.length > count) count = b.parameters.length;
+    final named = a.names.isNotEmpty || b.names.isNotEmpty;
+    if (named &&
+        (a.positional != a.required ||
+            b.positional != b.required ||
+            a.positional != b.positional))
+      return tNever;
+    var count = a.positional;
+    if (b.positional > count) count = b.positional;
     var parameters = <int>[];
     var p = 0;
     while (p < count) {
-      if (p >= a.parameters.length)
+      if (p >= a.positional)
         parameters.add(b.parameters[p]);
-      else if (p >= b.parameters.length)
+      else if (p >= b.positional)
         parameters.add(a.parameters[p]);
       else
         parameters.add(joinTypes(a.parameters[p], b.parameters[p]));
@@ -422,7 +528,32 @@ int meetTypes(int left, int right) {
     }
     var required = a.required;
     if (b.required < required) required = b.required;
-    return functionType(meetTypes(a.result, b.result), parameters, required);
+    final names = <String>[...a.names];
+    final requiredNamed = <bool>[];
+    for (var i = 0; i < a.names.length; i++) {
+      final q = b.namedIndex(a.names[i]);
+      parameters.add(
+        q < 0
+            ? a.parameters[a.positional + i]
+            : joinTypes(a.parameters[a.positional + i], b.parameters[q]),
+      );
+      requiredNamed.add(
+        q >= 0 && a.requiredNamed[i] && b.requiredNamed[q - b.positional],
+      );
+    }
+    for (var i = 0; i < b.names.length; i++) {
+      if (a.namedIndex(b.names[i]) >= 0) continue;
+      names.add(b.names[i]);
+      requiredNamed.add(false);
+      parameters.add(b.parameters[b.positional + i]);
+    }
+    return functionType(
+      meetTypes(a.result, b.result),
+      parameters,
+      required,
+      names,
+      requiredNamed,
+    );
   }
   if (typeIsSubtype(left, right)) return left;
   if (typeIsSubtype(right, left)) return right;
@@ -537,7 +668,13 @@ int _substituteType(
   var inputs = <int>[];
   for (var input in signature.parameters)
     inputs.add(_substituteType(input, parameters, upper, lower, -variance));
-  return functionType(result, inputs, signature.required);
+  return functionType(
+    result,
+    inputs,
+    signature.required,
+    signature.names,
+    signature.requiredNamed,
+  );
 }
 
 int _parameterOccurrences(int type, int parameter, int variance) {
@@ -717,6 +854,8 @@ int superBoundedType(int type, int variance) {
       superBoundedType(signature.result, variance),
       inputs,
       signature.required,
+      signature.names,
+      signature.requiredNamed,
     );
   }
   return type;

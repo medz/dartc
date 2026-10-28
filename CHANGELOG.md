@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Support optional positional and named parameters in non-generic function values, including captures, defaults, structural function types and runtime checks.
 - Add contextual dot shorthands for supported constructors and static members, including selector chains, constants, equality operands and patterns.
 - Add non-generic factory constructors, redirecting and const factories, target defaults and abbreviated factory declarations. Preserve argument order, return checks, void payloads and constant identity across redirects. Accept function-form typed ordinary parameters.
 - Add non-generic primary constructors, declaring parameters with type inference, parameter capture in field initializers, const evaluation, class semicolons and abbreviated generative constructors. Reject values returned from generative constructors.
@@ -11,7 +12,7 @@
 - Add lazy `late` locals, captured variables, top-level/static variables and typed instance fields, with final assignment checks and reentrant initialization.
 - Add native double literals, arithmetic and `/`, including mixed numeric values, constants, nullable values, generics and collections.
 - Add decimal parsing and shortest round-trip formatting, numeric conversions, comparisons and double constants/properties.
-- Advance the source runtime ABI to 16 for numeric, exception and class subtype metadata. Keep compiler, runtime and layout inputs matched when rebuilding.
+- Advance the source runtime ABI to 17 for numeric, exception, class subtype and function-call metadata. Keep compiler, runtime and layout inputs matched when rebuilding.
 
 ## 0.3.0
 

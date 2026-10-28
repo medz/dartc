@@ -61,19 +61,16 @@ void constrainGenericTypes(
         upper,
         covariant,
       );
-      for (
-        var i = 0;
-        i < signature.parameters.length && i < source.parameters.length;
-        i++
-      )
-        constrainGenericTypes(
-          signature.parameters[i],
-          source.parameters[i],
-          parameters,
-          lower,
-          upper,
-          !covariant,
-        );
+      for (var i = 0; i < signature.parameters.length; i++)
+        if (source.corresponding(signature, i) >= 0)
+          constrainGenericTypes(
+            signature.parameters[i],
+            source.parameters[source.corresponding(signature, i)],
+            parameters,
+            lower,
+            upper,
+            !covariant,
+          );
     }
   }
 }

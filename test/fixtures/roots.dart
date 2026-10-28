@@ -602,6 +602,29 @@ void switchStatementRoots(int queue, int edges) {
 }
 
 void closureRoots(int queue, int edges) {
+  var arguments = namedArgumentRoots;
+  arguments(
+    queue,
+    ninth: Leaf(849),
+    first: Leaf(841),
+    seventh: Leaf(847),
+    third: Leaf(843),
+    fifth: Leaf(845),
+    second: Leaf(842),
+    eighth: Leaf(848),
+    fourth: Leaf(844),
+    sixth: Leaf(846),
+  );
+  var generic = namedTypeRoot<Leaf>(Leaf(850));
+  var callbacksWithNames = <Leaf Function({required Leaf value})>[generic];
+  var namedList = captureList(callbacksWithNames, 1, queue);
+  check(listElements(namedList, edges) == 1);
+  var namedCallback = rt.nativeLoad64(edges);
+  var namedType = rt.rtFunctionType(namedCallback);
+  check(rt.rtTraceObject(namedCallback, edges, capacity) == 3);
+  check(contains(edges, 3, namedType));
+  check(findMarker(edges, 3, 850) != 0);
+  check(generic(value: Leaf(851)).marker == 851);
   var owner = PatternRoot();
   var objectPatterns = <int Function()>[
     switch (owner) {
@@ -688,6 +711,30 @@ void closureRoots(int queue, int edges) {
   check(callbacks[0]() == 1606);
 }
 
+T Function({required T value}) namedTypeRoot<T>(Leaf leaf) =>
+    ({required T value}) {
+      check(leaf.marker == 850);
+      return value;
+    };
+
+void namedArgumentRoots(
+  int queue, {
+  required Object? first,
+  required Object? second,
+  required Object? third,
+  required Object? fourth,
+  required Object? fifth,
+  required Object? sixth,
+  required Object? seventh,
+  required Object? eighth,
+  required Object? ninth,
+}) {
+  // No parameter is read here: their caller's borrowed vector owns these roots.
+  final count = snapshot(queue);
+  for (var marker = 841; marker <= 849; marker++)
+    check(findMarker(queue, count, marker) != 0);
+}
+
 int heapType(int source, [int child = -1]) {
   var mark = rt.rtRootMark();
   rt.rtRootPush(source, abi.storageRef);
@@ -737,6 +784,7 @@ int heapFunctionType(int source, int resultType, int parameterType) {
   );
   rt.nativeStore64(signature + abi.functionSignatureRequiredOffset, 1);
   rt.nativeStore64(signature + abi.functionSignatureCountOffset, 1);
+  rt.nativeStore64(signature + abi.functionSignaturePositionalOffset, 1);
   var parameter = signature + abi.functionSignatureParametersOffset;
   rt.nativeStore64(parameter, parameterType - parameter);
   rt.rtRootRestore(mark);

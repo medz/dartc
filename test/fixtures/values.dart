@@ -2789,7 +2789,143 @@ Object? functionPacked(
   return ninth;
 }
 
+typedef OptionalFunction = int Function(int, [int, int?]);
+typedef NamedFunction = int Function(int, {int z, required int a});
+typedef LegacyNamedFunction(int value, {required int a, int z});
+
+int optionalFunction(int x, [int y = 4, int? z]) => x + y + (z ?? 7);
+int namedFunction(int x, {int z = 13, required int a}) => x + z + a;
+num wideNamedFunction(num x, {num extra = 2, num z = 5, required num a}) =>
+    x + extra + z + a;
+int functionMark(int value) {
+  functionTrace = functionTrace * 10 + value;
+  return value;
+}
+
+int defaultCallback([int x = 11]) => x;
+int defaultFunction({
+  int Function() callback = defaultCallback,
+  List<int> values = const [3, 5],
+}) => callback() + values[1];
+const savedNamedFunction = namedFunction;
+const savedDefaultFunctions =
+    <int Function({int Function() callback, List<int> values})>[
+      defaultFunction,
+    ];
+
+class ParameterFunctionBase {
+  int method(int x, {int y = 1}) => x + y;
+  NamedFunction get callback {
+    functionTrace = functionTrace * 10 + 4;
+    return namedFunction;
+  }
+
+  static int staticMethod([int x = 6]) => x;
+}
+
+class ParameterFunctionChild extends ParameterFunctionBase {
+  int method(int x, {int y = 8}) => x + y;
+}
+
+T Function({required T value, T? fallback}) parameterClosure<T>(T x) =>
+    ({required T value, T? fallback}) {
+      print(x);
+      return fallback ?? value;
+    };
+
+T inferNamedParameter<T>(T Function({required T value}) callback, T value) =>
+    callback(value: value);
+
+void functionParameterValues() {
+  OptionalFunction positional = optionalFunction;
+  print(positional(1));
+  print(positional(1, 2));
+  print(positional(1, 2, 3));
+  int Function(int) narrowed = positional;
+  print(narrowed(9));
+  NamedFunction named = namedFunction;
+  functionTrace = 0;
+  print(named(a: functionMark(2), functionMark(1), z: functionMark(3)));
+  print(functionTrace);
+  print(named(2, a: 4));
+  print(savedNamedFunction == named);
+  print(savedDefaultFunctions[0]());
+  print(savedDefaultFunctions[0](callback: () => 17, values: [2, 4]));
+  LegacyNamedFunction legacy = named;
+  print(legacy(3, a: 4));
+  num Function(int, {required int a, int z}) wider = wideNamedFunction;
+  print(wider(3, a: 7));
+  ParameterFunctionBase object = ParameterFunctionChild();
+  var bound = object.method;
+  print(bound(2));
+  print(bound == object.method);
+  functionTrace = 0;
+  print(object.callback(a: functionMark(2), functionMark(1)));
+  print(functionTrace);
+  functionTrace = 0;
+  print((object.callback)(functionMark(1), a: functionMark(2)));
+  print(functionTrace);
+  var staticCallback = ParameterFunctionBase.staticMethod;
+  print(staticCallback());
+  var accumulated = 3;
+  const initial = 5;
+  int local(int x, {int y = initial}) {
+    accumulated += x + y;
+    return accumulated;
+  }
+
+  var captured = local;
+  print(captured(1));
+  print(captured(1, y: 9));
+  int Function({required int x, String text}) anonymous =
+      ({text = 'ok', required x}) {
+        print(text);
+        return x + 1;
+      };
+  print(anonymous(x: 4));
+  var closure = parameterClosure<int>(42);
+  print(closure(value: 8));
+  print(closure(fallback: 3, value: 9));
+  final inferred = inferNamedParameter(({required int value}) => value + 1, 5);
+  print(inferred);
+  Object erased = named;
+  print(erased is NamedFunction);
+  print(erased is int Function(int, {int a, int z}));
+  print(erased is int Function(int, {required int a, int z, int extra}));
+  print(positional is int Function(int));
+  print(named is int Function(int));
+  dynamic checked = wideNamedFunction;
+  num Function(int, {required int a, int z}) checkedNamed = checked;
+  print(checkedNamed(2, a: 3));
+  final joined = accumulated > 0
+      ? ({int a = 5, int b = 3}) => a + b
+      : ({int a = 9, String c = 'c'}) => a;
+  print(joined());
+  print(joined(a: 10));
+  int recursive({int count = 3}) =>
+      count == 0 ? 1 : recursive(count: count - 1) + 1;
+  var recurse = recursive;
+  print(recurse());
+  void Function([int]) noResult = ([int value = 6]) {
+    print(value);
+  };
+  noResult();
+  int Function({int value}) throwing = ({int value = 7}) {
+    try {
+      throw value;
+    } finally {
+      print('function finally');
+    }
+  };
+  try {
+    throwing();
+  } catch (value) {
+    print(value);
+  }
+}
+
 void functionValues() {
+  functionParameterValues();
   var callableObject = MethodReceiver(1);
   print(callableObject(2));
   functionTrace = 0;

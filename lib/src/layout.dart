@@ -1,5 +1,5 @@
 // Shared compiler/runtime object layout. Offsets are bytes.
-const int runtimeAbiVersion = 16;
+const int runtimeAbiVersion = 17;
 const int objectHeaderBytes = 16;
 const int objectFlagsOffset = 8;
 // Static objects store a descriptor displacement relative to their own address.
@@ -62,7 +62,15 @@ const int lateCellInstanceBytes = objectHeaderBytes + 24;
 const int functionSignatureResultOffset = 0;
 const int functionSignatureRequiredOffset = 8;
 const int functionSignatureCountOffset = 16;
-const int functionSignatureParametersOffset = 24;
+const int functionSignaturePositionalOffset = 24;
+const int functionSignatureParametersOffset = 32;
+// Named entries follow all parameter types, in canonical name order.
+const int functionSignatureNamedEntryBytes = 16;
+const int functionSignatureNamedRequiredOffset = 8;
+// Read-only supplied-argument shape; name displacements are entry-relative.
+const int callShapePositionalOffset = 0;
+const int callShapeNamedCountOffset = 8;
+const int callShapeNamesOffset = 16;
 const int metadataListDescriptorOffset = 8;
 const int metadataWordArrayDescriptorOffset = 16;
 const int metadataRefArrayDescriptorOffset = 24;

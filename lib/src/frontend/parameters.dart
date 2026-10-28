@@ -1,6 +1,17 @@
 import '../ast.dart';
 import '../scanner.dart';
 import '../source.dart';
+import '../types.dart';
+
+int functionParameterIndex(
+  FunctionSignature signature,
+  AstParameter parameter,
+  int index,
+) => parameter.kind == astNamedParameter
+    ? signature.namedIndex(parameterName(parameter))
+    : index < signature.positional
+    ? index
+    : -1;
 
 String parameterName(AstParameter parameter) {
   var name = parameter.name;

@@ -520,19 +520,16 @@ void _objectPatternConstraints(
       lower,
       covariant,
     );
-    for (
-      var i = 0;
-      i < source.parameters.length && i < target.parameters.length;
-      i++
-    )
-      _objectPatternConstraints(
-        source.parameters[i],
-        target.parameters[i],
-        parameters,
-        upper,
-        lower,
-        !covariant,
-      );
+    for (var i = 0; i < source.parameters.length; i++)
+      if (target.corresponding(source, i) >= 0)
+        _objectPatternConstraints(
+          source.parameters[i],
+          target.parameters[target.corresponding(source, i)],
+          parameters,
+          upper,
+          lower,
+          !covariant,
+        );
   }
 }
 
@@ -547,6 +544,9 @@ int _resolveType(
   if (function != null) {
     bindFunctionTypeParameters(symbols.program, function);
     var parameters = <int>[];
+    var required = 0;
+    final names = <String>[];
+    final requiredNamed = <bool>[];
     for (var parameter in function.parameters) {
       if (parameter.metadata.isNotEmpty)
         _typeError(
@@ -554,17 +554,19 @@ int _resolveType(
           parameter.token,
           'function type parameter metadata is not supported',
         );
-      if (parameter.kind != astRequiredPositional)
-        _typeError(
-          symbols,
-          parameter.token,
-          'optional and named function types are not supported',
-        );
+      if (parameter.kind == astRequiredPositional) required++;
+      if (parameter.kind == astNamedParameter) {
+        names.add(parameter.name);
+        requiredNamed.add(parameter.required);
+      }
       parameters.add(_resolveType(symbols, parameter.type, scope, uses));
     }
     var type = functionType(
       _resolveType(symbols, function.result, scope, uses),
       parameters,
+      required,
+      names,
+      requiredNamed,
     );
     if (syntax.name.endsWith('?')) return nullableType(type);
     return type;

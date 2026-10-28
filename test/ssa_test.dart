@@ -260,6 +260,14 @@ void corrupt(List<SsaFunction> program, String mode) {
   } else if (mode == 'callable-type') {
     final reference = operation(named(program, 'main'), opFunctionReference);
     functions[reference.target].callableType = tFunction;
+  } else if (mode == 'call-shape-count' || mode == 'call-shape-required' ||
+      mode == 'call-shape-order') {
+    final shape = operation(named(program, 'applyNamed'), opCallShape);
+    if (mode == 'call-shape-count')
+      callShapes[shape.target] = CallShape(1, <String>['value']);
+    else if (mode == 'call-shape-required')
+      callShapes[shape.target] = CallShape(0, <String>['other']);
+    else callShapes[shape.target] = CallShape(0, <String>['value', 'value']);
   } else if (mode == 'bound-receiver-type') {
     final descriptor = operation(named(program, 'main'), opClosureDescriptor);
     functions[descriptor.target].closureLayout!.fieldTypes[0] = tInt;
@@ -370,6 +378,7 @@ int checked(dynamic value) => value as int;
 bool tested(dynamic value) => value is int;
 void dropped(dynamic value) { value as int; }
 int apply(int Function(int) function, int value) => function(value);
+int applyNamed(int Function({required int value, int other}) function) => function(value: 1);
 List<int> slice(List<int> value) => value.sublist(1);
 void main() {
   print(invokeOperation(Twice()));
@@ -387,6 +396,7 @@ void main() {
   print(tested(7));
   dropped(1);
   print(apply(callee, 8));
+  print(applyNamed(({required int value, int other = 0}) => value + 1));
   print(apply(Counter().add, 9));
   print(slice([1, 2]));
 }
@@ -470,6 +480,9 @@ Future<void> main(List<String> args) async {
       'cast-representation': 'type operation operand representation',
       'callable': 'callable metadata',
       'callable-type': 'callable metadata',
+      'call-shape-count': 'invoke signature',
+      'call-shape-required': 'invoke required named argument',
+      'call-shape-order': 'call name order',
       'bound-receiver-type': 'bound method receiver',
       'unknown-builtin': 'unknown SSA builtin',
       'sublist-arity': 'operand count',

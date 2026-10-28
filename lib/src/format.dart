@@ -145,6 +145,7 @@ class ConstantLayout {
   List<int> dataOffsets = <int>[];
   List<int> callableOffsets = <int>[];
   List<int> signatureOffsets = <int>[];
+  List<int> callShapeOffsets = <int>[];
   List<int> classSubtypeOffsets = <int>[];
   List<List<int>> classSubtypes = <List<int>>[];
   List<_CaptureDescriptor?> closureDescriptors = <_CaptureDescriptor?>[];
@@ -242,6 +243,7 @@ ConstantLayout layoutConstants(int start) {
   List<_CaptureDescriptor?> captureCellDescriptors = <_CaptureDescriptor?>[];
   List<_CaptureDescriptor?> lateCellDescriptors = <_CaptureDescriptor?>[];
   List<int> signatureOffsets = <int>[];
+  final callShapeOffsets = List<int>.filled(callShapes.length, -1);
   List<int> refBitmapOffsets = <int>[];
   List<int> taggedBitmapOffsets = <int>[];
   List<int> globalOffsets = <int>[];
@@ -316,6 +318,14 @@ ConstantLayout layoutConstants(int start) {
       var type = addressTargets[i];
       if (captureCellDescriptors[type] == null)
         captureCellDescriptors[type] = _captureDescriptor(<int>[type], 0);
+    } else if (addressKinds[i] == 11) {
+      final shape = addressTargets[i];
+      callShapeOffsets[shape] = 0;
+      for (final name in callShapes[shape].names) {
+        final string = internString(name);
+        while (stringOffsets.length < strings.length) stringOffsets.add(-1);
+        stringOffsets[string] = 0;
+      }
     } else if (addressKinds[i] == 10) {
       final type = addressTargets[i];
       lateCellDescriptors[type] ??= _captureDescriptor(<int>[
@@ -414,6 +424,11 @@ ConstantLayout layoutConstants(int start) {
     } else if (type.kind == kFunction) {
       signatureOffsets[type.argument] = 0;
       var signature = functionSignatures[type.argument];
+      for (final name in signature.names) {
+        final string = internString(name);
+        while (stringOffsets.length < strings.length) stringOffsets.add(-1);
+        stringOffsets[string] = 0;
+      }
       markTypeReference(
         typeOffsets,
         types,
@@ -567,11 +582,17 @@ ConstantLayout layoutConstants(int start) {
       signatureOffsets[i] = end;
       end +=
           functionSignatureParametersOffset +
-          functionSignatures[i].parameters.length * 8;
+          functionSignatures[i].parameters.length * 8 +
+          functionSignatures[i].names.length * functionSignatureNamedEntryBytes;
     }
     i++;
   }
   final classSubtypeOffsets = List<int>.filled(typeOffsets.length, -1);
+  for (var i = 0; i < callShapeOffsets.length; i++) {
+    if (callShapeOffsets[i] < 0) continue;
+    callShapeOffsets[i] = end;
+    end += callShapeNamesOffset + callShapes[i].names.length * 8;
+  }
   final classSubtypes = <List<int>>[];
   for (var type = 0; type < typeOffsets.length; type++) {
     final subtypes = <int>[];
@@ -718,6 +739,7 @@ ConstantLayout layoutConstants(int start) {
     ..captureCellDescriptors = captureCellDescriptors
     ..lateCellDescriptors = lateCellDescriptors
     ..signatureOffsets = signatureOffsets
+    ..callShapeOffsets = callShapeOffsets
     ..classSubtypeOffsets = classSubtypeOffsets
     ..classSubtypes = classSubtypes
     ..functionDescriptorOffset = functionDescriptorOffset
@@ -770,6 +792,8 @@ List<int> createMachOExecutable() {
     } else if (addressKinds[site] == 8) {
       target =
           base + constants.captureCellDescriptors[addressTargets[site]]!.offset;
+    } else if (addressKinds[site] == 11) {
+      target = base + constants.callShapeOffsets[addressTargets[site]];
     } else if (addressKinds[site] == 10) {
       target =
           base + constants.lateCellDescriptors[addressTargets[site]]!.offset;
@@ -937,6 +961,8 @@ List<int> createElfExecutable() {
     } else if (addressKinds[site] == 8) {
       target =
           base + constants.captureCellDescriptors[addressTargets[site]]!.offset;
+    } else if (addressKinds[site] == 11) {
+      target = base + constants.callShapeOffsets[addressTargets[site]];
     } else if (addressKinds[site] == 10) {
       target =
           base + constants.lateCellDescriptors[addressTargets[site]]!.offset;
@@ -1363,13 +1389,28 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
       image64(layout.typeOffsets[signature.result] - offset);
       image64(signature.required);
       image64(signature.parameters.length);
+      image64(signature.positional);
       var p = 0;
       while (p < signature.parameters.length) {
         image64(layout.typeOffsets[signature.parameters[p]] - image.length);
         p++;
       }
+      for (var i = 0; i < signature.names.length; i++) {
+        image64(
+          layout.stringOffsets[internString(signature.names[i])] - image.length,
+        );
+        image64(signature.requiredNamed[i] ? 1 : 0);
+      }
     }
     signatureIndex++;
+  }
+  for (var i = 0; i < layout.callShapeOffsets.length; i++) {
+    if (layout.callShapeOffsets[i] < 0) continue;
+    final shape = callShapes[i];
+    image64(shape.positional);
+    image64(shape.names.length);
+    for (final name in shape.names)
+      image64(layout.stringOffsets[internString(name)] - image.length);
   }
   for (final subtypes in layout.classSubtypes) {
     if (subtypes.isEmpty) continue;

@@ -34,7 +34,7 @@ Object rtCaughtException() => rtExceptionValue();
 StackTrace rtCaughtTrace() => rtExceptionTrace();
 int rtClearException() => rtClearPendingException();
 
-const int rtAbiVersion = 16;
+const int rtAbiVersion = 17;
 const int rtArenaHeaderBytes = 48;
 
 int rtArenaHead = 0;
@@ -1316,8 +1316,12 @@ int rtInstantiateType(int type, int arguments) {
   } else {
     var source = rtTypeArgument(type);
     var count = nativeLoad64(source + functionSignatureCountOffset);
+    var positional = nativeLoad64(source + functionSignaturePositionalOffset);
     result = rtAlloc(
-      typeRefBytes + functionSignatureParametersOffset + count * 8,
+      typeRefBytes +
+          functionSignatureParametersOffset +
+          count * 8 +
+          (count - positional) * functionSignatureNamedEntryBytes,
     );
     nativeStore64(result, rtObjectDescriptor(type));
     nativeStore64(result + objectFlagsOffset, 0);
@@ -1331,6 +1335,7 @@ int rtInstantiateType(int type, int arguments) {
       nativeLoad64(source + functionSignatureRequiredOffset),
     );
     nativeStore64(signature + functionSignatureCountOffset, count);
+    nativeStore64(signature + functionSignaturePositionalOffset, positional);
     nativeStore64(
       signature + functionSignatureResultOffset,
       source + nativeLoad64(source + functionSignatureResultOffset) - signature,
@@ -1340,6 +1345,25 @@ int rtInstantiateType(int type, int arguments) {
       var input = source + functionSignatureParametersOffset + i * 8;
       var output = signature + functionSignatureParametersOffset + i * 8;
       nativeStore64(output, input + nativeLoad64(input) - output);
+      i++;
+    }
+    i = 0;
+    while (i < count - positional) {
+      var input =
+          source +
+          functionSignatureParametersOffset +
+          count * 8 +
+          i * functionSignatureNamedEntryBytes;
+      var output =
+          signature +
+          functionSignatureParametersOffset +
+          count * 8 +
+          i * functionSignatureNamedEntryBytes;
+      nativeStore64(output, input + nativeLoad64(input) - output);
+      nativeStore64(
+        output + functionSignatureNamedRequiredOffset,
+        nativeLoad64(input + functionSignatureNamedRequiredOffset),
+      );
       i++;
     }
     // Publish a fully initialized graph before recursively allocating children.
@@ -1442,9 +1466,18 @@ int rtTypeSubtype(int actual, int expected) {
       sourceSignature + functionSignatureRequiredOffset,
     );
     var count = nativeLoad64(targetSignature + functionSignatureCountOffset);
+    var positional = nativeLoad64(
+      targetSignature + functionSignaturePositionalOffset,
+    );
+    var sourceCount = nativeLoad64(
+      sourceSignature + functionSignatureCountOffset,
+    );
+    var sourcePositional = nativeLoad64(
+      sourceSignature + functionSignaturePositionalOffset,
+    );
     if (required >
             nativeLoad64(targetSignature + functionSignatureRequiredOffset) ||
-        nativeLoad64(sourceSignature + functionSignatureCountOffset) < count) {
+        sourcePositional < positional) {
       return 0;
     }
     var result =
@@ -1456,8 +1489,18 @@ int rtTypeSubtype(int actual, int expected) {
     if (rtTypeSubtype(result, expectedResult) == 0) return 0;
     var i = 0;
     while (i < count) {
+      var index = i;
+      if (i >= positional) {
+        var name =
+            targetSignature +
+            functionSignatureParametersOffset +
+            count * 8 +
+            (i - positional) * functionSignatureNamedEntryBytes;
+        index = rtFunctionParameter(sourceSignature, name + nativeLoad64(name));
+        if (index < 0) return 0;
+      }
       var sourceParameter =
-          sourceSignature + functionSignatureParametersOffset + i * 8;
+          sourceSignature + functionSignatureParametersOffset + index * 8;
       var targetParameter =
           targetSignature + functionSignatureParametersOffset + i * 8;
       if (rtTypeSubtype(
@@ -1469,8 +1512,54 @@ int rtTypeSubtype(int actual, int expected) {
       }
       i++;
     }
+    i = sourcePositional;
+    while (i < sourceCount) {
+      var name =
+          sourceSignature +
+          functionSignatureParametersOffset +
+          sourceCount * 8 +
+          (i - sourcePositional) * functionSignatureNamedEntryBytes;
+      if (nativeLoad64(name + functionSignatureNamedRequiredOffset) != 0) {
+        var index = rtFunctionParameter(
+          targetSignature,
+          name + nativeLoad64(name),
+        );
+        if (index < 0) return 0;
+        var entry =
+            targetSignature +
+            functionSignatureParametersOffset +
+            count * 8 +
+            (index - positional) * functionSignatureNamedEntryBytes;
+        if (nativeLoad64(entry + functionSignatureNamedRequiredOffset) == 0)
+          return 0;
+      }
+      i++;
+    }
   }
   return 1;
+}
+
+@pragma('dartc:no-gc')
+int rtFunctionParameter(int signature, int name) {
+  var count = nativeLoad64(signature + functionSignatureCountOffset);
+  var positional = nativeLoad64(signature + functionSignaturePositionalOffset);
+  var names = signature + functionSignatureParametersOffset + count * 8;
+  for (var i = positional; i < count; i++) {
+    var entry = names + (i - positional) * functionSignatureNamedEntryBytes;
+    if (rtStringEqual(name, entry + nativeLoad64(entry)) != 0) return i;
+  }
+  return -1;
+}
+
+@pragma('dartc:no-gc')
+int rtNamedArgument(int shape, int name) {
+  var count = nativeLoad64(shape + callShapeNamedCountOffset);
+  for (var i = 0; i < count; i++) {
+    var entry = shape + callShapeNamesOffset + i * 8;
+    if (rtStringEqual(name, entry + nativeLoad64(entry)) != 0)
+      return nativeLoad64(shape + callShapePositionalOffset) + i;
+  }
+  return -1;
 }
 
 int rtBoxInt(int value) {

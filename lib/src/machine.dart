@@ -191,7 +191,8 @@ void machineSelectInstruction(
       op == opClosureDescriptor ||
       op == opCaptureCellDescriptor ||
       op == opLateCellDescriptor ||
-      op == opTypeReference) {
+      op == opTypeReference ||
+      op == opCallShape) {
     int kind = 0;
     if (op == opDescriptor) kind = 2;
     if (op == opMetadataAddress) kind = 3;
@@ -201,6 +202,7 @@ void machineSelectInstruction(
     if (op == opCaptureCellDescriptor) kind = 8;
     if (op == opLateCellDescriptor) kind = 10;
     if (op == opTypeReference) kind = 9;
+    if (op == opCallShape) kind = 11;
     instructions.add(
       MachineInstruction(mAddress, output, inputs, target, kind, effects),
     );
@@ -292,7 +294,14 @@ void machineSelectInstruction(
         target == bNativeCall0 ||
         target == bFunctionInvoke) {
       instructions.add(
-        MachineInstruction(mCallIndirect, output, inputs, 0, 0, effects),
+        MachineInstruction(
+          mCallIndirect,
+          output,
+          inputs,
+          0,
+          target == bFunctionInvoke ? 1 : 0,
+          effects,
+        ),
       );
       return;
     }

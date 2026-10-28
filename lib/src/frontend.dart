@@ -220,6 +220,7 @@ int feAt = 0;
 late SymbolTable feSymbols;
 late ConstantContext feConstants;
 List<AstFunction> feFunctionNodes = <AstFunction>[];
+List<int> feCallableTargets = <int>[];
 List<LocalFunctionBinding> feLocalFunctions = <LocalFunctionBinding>[];
 List<FeClosure> feLocalClosures = <FeClosure>[];
 List<List<ConstantValue>?> feLocalConstants = <List<ConstantValue>?>[];
@@ -467,10 +468,20 @@ int feRegisterFunction(
       !syntax.getter &&
       !syntax.setter;
   p = 0;
+  final namedParameters = <String>[];
+  final requiredNamedParameters = <bool>[];
   while (p < syntax.parameters.length) {
-    if (syntax.parameters[p].kind != astRequiredPositional) callable = false;
+    final parameter = syntax.parameters[p];
+    if (parameter.kind == astRequiredPositional)
+      functions[id].requiredParameters++;
+    if (parameter.kind == astNamedParameter) {
+      namedParameters.add(parameterName(parameter));
+      requiredNamedParameters.add(parameter.required);
+    }
     p++;
   }
+  functions[id].namedParameters = namedParameters;
+  functions[id].requiredNamedParameters = requiredNamedParameters;
   functions[id].callableShape = callable;
   if (callable && owner >= 0 && !syntax.isStatic)
     functions[id].closureLayout = ClosureLayout(<int>[classType(owner)], true);
@@ -877,6 +888,7 @@ void feOperand(int op, int value) {
   feEmit(op);
   feWord(value);
   if (op == opInt || op == opMetadataAddress) irTypes[position] = tInt;
+  if (op == opCallShape) irTypes[position] = tInt;
   if (op == opString) irTypes[position] = tString;
   if (op == opDouble) irTypes[position] = tDouble;
   if (op == opTypeReference) irTypes[position] = tObject;
@@ -1335,9 +1347,14 @@ int feCallableType(int function, int token) {
     feAstError(token, 'library output cannot use Dart function values');
   var type = functionValueType(function);
   if (type < 0)
-    feAstError(token, 'function values require required positional parameters');
-  if (functions[function].callableAdapter == -1)
+    feAstError(
+      token,
+      'generic and constructor function values are not yet supported',
+    );
+  if (functions[function].callableAdapter == -1) {
     functions[function].callableAdapter = -2;
+    feCallableTargets.add(function);
+  }
   return type;
 }
 
@@ -2304,10 +2321,13 @@ int fePrepareInferredArguments(
     var schema = substituteType(template, parameters, schemaArguments);
     var closure = expression.function;
     if (closure != null && typeIsFunction(schema)) {
-      var inputs = functionSignature(schema).parameters;
-      for (var p = 0; p < closure.parameters.length && p < inputs.length; p++) {
-        if (closure.parameters[p].type.name == '' &&
-            typeHasSchemaHole(inputs[p]))
+      final signature = functionSignature(schema);
+      for (var p = 0; p < closure.parameters.length; p++) {
+        final parameter = closure.parameters[p];
+        final index = functionParameterIndex(signature, parameter, p);
+        if (parameter.type.name == '' &&
+            index >= 0 &&
+            typeHasSchemaHole(signature.parameters[index]))
           feAstError(
             closure.parameters[p].token,
             'generic inference for untyped callback parameters is not yet supported',
@@ -3068,24 +3088,7 @@ FunctionSignature feCallSignature(AstExpression call, int type) {
       call.token,
       'calling a value requires a concrete non-nullable function type',
     );
-  var signature = functionSignature(type);
-  if (signature.required != signature.parameters.length)
-    feAstError(
-      call.token,
-      'function-value calls with optional parameters are not supported',
-    );
-  if (call.children.length - 1 != signature.parameters.length)
-    feAstError(call.token, 'function-value argument count');
-  var i = 1;
-  while (i < call.children.length) {
-    if (call.children[i].kind == astNamedArgument)
-      feAstError(
-        call.children[i].token,
-        'function-value arguments must be positional',
-      );
-    i++;
-  }
-  return signature;
+  return functionSignature(type);
 }
 
 void feCallableBox(int type, int token) {
@@ -3103,8 +3106,43 @@ void fePrepareFunctionCall(int type) {
   feOperand(opLoadLocal, value);
 }
 
-int feInvokeFunction(AstExpression call, FunctionSignature signature) {
-  feBuiltin(bFunctionInvoke, signature.parameters.length + 2);
+List<int> feLowerValueArguments(
+  AstExpression call,
+  FunctionSignature signature,
+) {
+  final mapping = bindFunctionArguments(feSources, signature, call);
+  final slots = List<int>.filled(signature.parameters.length, -1);
+  for (var i = 0; i < mapping.length; i++) {
+    final argument = call.children[i + 1];
+    final expression = argument.kind == astNamedArgument
+        ? argument.children[0]
+        : argument;
+    final type = feLowerInContext(expression, signature.parameters[mapping[i]]);
+    feCallableBox(type, expression.token);
+    final slot = feTemp(tDynamic);
+    feOperand(opStoreLocal, slot);
+    slots[mapping[i]] = slot;
+  }
+  return slots;
+}
+
+int feInvokeFunction(
+  AstExpression call,
+  FunctionSignature signature,
+  List<int> slots,
+) {
+  var positional = 0;
+  final names = <String>[];
+  for (var p = 0; p < slots.length; p++) {
+    if (slots[p] < 0) continue;
+    if (p < signature.positional)
+      positional++;
+    else
+      names.add(signature.names[p - signature.positional]);
+  }
+  feOperand(opCallShape, internCallShape(positional, names));
+  for (final slot in slots) if (slot >= 0) feOperand(opLoadLocal, slot);
+  feBuiltin(bFunctionInvoke, positional + names.length + 3);
   return feConvertValue(tDynamic, signature.result, call.token);
 }
 
@@ -3119,14 +3157,8 @@ int feLowerValueCall(AstExpression call, int type, [int context = -1]) {
   }
   var signature = feCallSignature(call, type);
   fePrepareFunctionCall(type);
-  var i = 0;
-  while (i < signature.parameters.length) {
-    var expression = call.children[i + 1];
-    var argument = feLowerInContext(expression, signature.parameters[i]);
-    feCallableBox(argument, expression.token);
-    i++;
-  }
-  return feInvokeFunction(call, signature);
+  final slots = feLowerValueArguments(call, signature);
+  return feInvokeFunction(call, signature, slots);
 }
 
 int feLowerMemberValueCall(
@@ -3181,26 +3213,11 @@ int feLowerMemberValueCall(
     }
   }
   var signature = feCallSignature(call, value);
-  var arguments = <int>[];
-  var i = 0;
-  while (i < signature.parameters.length) {
-    var expression = call.children[i + 1];
-    var argument = feLowerInContext(expression, signature.parameters[i]);
-    feCallableBox(argument, expression.token);
-    var slot = feTemp(tDynamic);
-    feOperand(opStoreLocal, slot);
-    arguments.add(slot);
-    i++;
-  }
+  final arguments = feLowerValueArguments(call, signature);
   feOperand(opLoadLocal, receiver);
   feReadBoundMember(owner, binding, call.token);
   fePrepareFunctionCall(value);
-  i = 0;
-  while (i < arguments.length) {
-    feOperand(opLoadLocal, arguments[i]);
-    i++;
-  }
-  return feInvokeFunction(call, signature);
+  return feInvokeFunction(call, signature, arguments);
 }
 
 int feLowerStaticMemberCall(
@@ -5395,9 +5412,11 @@ int fePrepareFunctionExpression(AstExpression expression, int context) {
   if (context >= 0 && typeIsFunction(context)) {
     var signature = functionSignature(context);
     var p = 0;
-    while (p < syntax.parameters.length && p < signature.parameters.length) {
-      if (syntax.parameters[p].type.name == '') {
-        var type = signature.parameters[p];
+    while (p < syntax.parameters.length) {
+      final parameter = syntax.parameters[p];
+      final index = functionParameterIndex(signature, parameter, p);
+      if (index >= 0 && parameter.type.name == '') {
+        var type = signature.parameters[index];
         if (typeIsSubtype(type, tNull)) type = nullableType(tObject);
         functions[function].parameterTypes[p + feParameterOffset(function)] =
             type;
@@ -6320,6 +6339,7 @@ void parseSource(SourceProgram source) {
   feOwners.clear();
   feConstructors.clear();
   feFunctionNodes.clear();
+  feCallableTargets.clear();
   feLocalFunctions.clear();
   feLocalClosures.clear();
   feLocalConstants.clear();
@@ -6331,6 +6351,7 @@ void parseSource(SourceProgram source) {
   feReturnTypes = null;
   exportNames.clear();
   exportFunctions.clear();
+  callShapes.clear();
   exportParameters.clear();
   feNativeNames.clear();
   feNativeParams.clear();
@@ -6718,11 +6739,9 @@ void parseSource(SourceProgram source) {
   feConstants.lexicalClass = -1;
   feGenerateGlobals(sourceGlobals);
   feGenerateDispatches();
-  if (imageKind == 0)
-    feGenerateEntry();
-  else
-    feGenerateConstantObjects();
+  if (imageKind == 0) feGenerateEntry();
   feGenerateCallableAdapters();
+  feGenerateConstantObjects();
 }
 
 const int classTearoff = 3;
@@ -6972,18 +6991,13 @@ void feGenerateDispatches() {
 }
 
 void feGenerateCallableAdapters() {
-  final targets = functions.length;
-  var target = 0;
-  while (target < targets) {
+  for (var cursor = 0; cursor < feCallableTargets.length; cursor++) {
+    final target = feCallableTargets[cursor];
     final info = functions[target];
     if (info.callableAdapter == -2) {
-      final parameters = <int>[tFunction];
+      // Hidden callable, read-only call shape, and borrowed stack vector.
+      final parameters = <int>[tFunction, tInt, tInt];
       final offset = info.closureLayout == null ? 0 : 1;
-      var p = offset;
-      while (p < info.parameterTypes.length) {
-        parameters.add(tDynamic);
-        p++;
-      }
       final adapter = functions.length;
       info.callableAdapter = adapter;
       functions.add(
@@ -7003,7 +7017,7 @@ void feGenerateCallableAdapters() {
       feFlow = .create(0);
       feSlotTypes = <int>[];
       feNextLocal = 0;
-      p = 0;
+      var p = 0;
       while (p < parameters.length) {
         feTemp(parameters[p]);
         p++;
@@ -7016,11 +7030,56 @@ void feGenerateCallableAdapters() {
           feBuiltinTyped(bObjectGet, 2, info.parameterTypes[0]);
         }
       }
-      p = offset;
-      while (p < info.parameterTypes.length) {
-        feOperand(opLoadLocal, p + 1 - offset);
-        feConvertValue(tDynamic, info.parameterTypes[p], token);
-        p++;
+      final formals = feFunctionNodes[target].parameters;
+      for (var p = 0; p < formals.length; p++) {
+        final formal = formals[p];
+        final type = info.parameterTypes[offset + p];
+        var missing = -1;
+        var index = -1;
+        if (formal.kind == astOptionalPositional) {
+          feOperand(opLoadLocal, 1);
+          feBuiltin(bNativeLoad64, 1);
+          feOperand(opInt, p);
+          feEmit(opGt);
+          missing = feJump(opJumpFalse);
+        } else if (formal.kind == astNamedParameter) {
+          feOperand(opLoadLocal, 1);
+          feOperand(opString, internString(parameterName(formal)));
+          feConvertValue(tString, nullableType(tObject), token);
+          feBuiltin(bNativeValueBits, 1);
+          feCall(feFindFunction('rtNamedArgument'), 2);
+          index = feTemp(tInt);
+          feOperand(opStoreLocal, index);
+          if (!formal.required) {
+            feOperand(opLoadLocal, index);
+            feOperand(opInt, 0);
+            feEmit(opGe);
+            missing = feJump(opJumpFalse);
+          }
+        }
+        feOperand(opLoadLocal, 2);
+        if (index < 0)
+          feOperand(opInt, p * 8);
+        else {
+          feOperand(opLoadLocal, index);
+          feOperand(opInt, 8);
+          feEmit(opMul);
+        }
+        feEmit(opAdd);
+        feBuiltin(bNativeLoad64, 1);
+        feBuiltin(bNativeValueFromBits, 1);
+        feBuiltinTyped(bBoxRef, 1, tDynamic);
+        feConvertValue(tDynamic, type, token);
+        if (missing >= 0) {
+          final slot = feTemp(type);
+          feOperand(opStoreLocal, slot);
+          final end = feJump(opJump);
+          fePatch(missing, ir.length);
+          feConstantValue(feParamDefaults[target][offset + p], type, token);
+          feOperand(opStoreLocal, slot);
+          fePatch(end, ir.length);
+          feOperand(opLoadLocal, slot);
+        }
       }
       feCall(target, info.parameters);
       feCallableBox(info.result, token);
@@ -7029,7 +7088,6 @@ void feGenerateCallableAdapters() {
       functions[adapter].localTypes = feSlotTypes;
       functions[adapter].end = ir.length;
     }
-    target++;
   }
 }
 
@@ -7092,14 +7150,6 @@ void feGenerateEntry() {
     );
   var supplied = positional;
   if (supplied > 2) supplied = 2;
-  p = supplied;
-  while (p < parameters.length) {
-    var value = feParamDefaults[main][offset + p];
-    if (typeIsList(value.kind) || typeIsClass(value.kind))
-      feConstantGetter(value);
-    p++;
-  }
-  feGenerateConstantObjects();
   entryFunction = main;
   if (!generic && parameters.length <= 1 && parameters.length == positional)
     return;

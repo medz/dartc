@@ -56,6 +56,7 @@ const int opLateCellDescriptor = 53;
 const int opUnreachable = 54;
 const int opBeginTry = 55;
 const int opEndTry = 56;
+const int opCallShape = 57;
 
 const int bPrintString = 1;
 const int bPrintInt = 2;
@@ -246,6 +247,9 @@ class FunctionInfo {
   int source;
   FunctionContract? contract;
   bool callableShape = false;
+  int requiredParameters = 0;
+  List<String> namedParameters = const <String>[];
+  List<bool> requiredNamedParameters = const <bool>[];
   int callableType = -1;
   int callableAdapter = -1;
   ClosureLayout? closureLayout;
@@ -264,6 +268,39 @@ class FunctionInfo {
     this.localTypes,
     this.source,
   );
+}
+
+// Supplied arguments, independent of the callee's defaults or semantic types.
+// The vector contains positional values followed by named values in this order.
+class CallShape {
+  final int positional;
+  final List<String> names;
+
+  CallShape(this.positional, this.names);
+
+  int get count => positional + names.length;
+
+  int namedIndex(String name) {
+    for (var i = 0; i < names.length; i++)
+      if (names[i] == name) return positional + i;
+    return -1;
+  }
+}
+
+final List<CallShape> callShapes = <CallShape>[];
+
+int internCallShape(int positional, List<String> names) {
+  for (var i = 0; i < callShapes.length; i++) {
+    final shape = callShapes[i];
+    if (shape.positional != positional || shape.names.length != names.length)
+      continue;
+    var same = true;
+    for (var p = 0; same && p < names.length; p++)
+      same = shape.names[p] == names[p];
+    if (same) return i;
+  }
+  callShapes.add(CallShape(positional, <String>[...names]));
+  return callShapes.length - 1;
 }
 
 // The frontend checks source arguments against the substituted signature.
@@ -314,7 +351,13 @@ int functionValueType(int function) {
   if (info.callableType < 0) {
     var parameters = info.parameterTypes;
     if (info.closureLayout != null) parameters = parameters.sublist(1);
-    info.callableType = functionType(info.result, parameters);
+    info.callableType = functionType(
+      info.result,
+      parameters,
+      info.requiredParameters,
+      info.namedParameters,
+      info.requiredNamedParameters,
+    );
   }
   return info.callableType;
 }
@@ -332,6 +375,7 @@ int irWidth(int op) {
       op == opCaptureCellDescriptor ||
       op == opLateCellDescriptor ||
       op == opTypeReference ||
+      op == opCallShape ||
       op == opTypeTest ||
       op == opTypeCast ||
       op == opLoadLocal ||

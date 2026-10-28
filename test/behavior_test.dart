@@ -961,6 +961,9 @@ void main() {
       "class C{int call(int value)=>value;}void main(){print('before');print(C() as Function);}",
       "class C{int call(int value){print('body');return value;}}dynamic bad(){print('argument');return 'wrong';}void main(){print('before');print(C()(bad()));}",
       "class C{int read(int value){print('body');return value;}}void main(){dynamic value=C().read;print('before');String Function(int) wrong=value;print(wrong(1));}",
+      "int f({required int value})=>value;void main(){dynamic value=f;print('before');int Function({int value}) wrong=value;print(wrong());}",
+      "int f({int value=1})=>value;void main(){dynamic value=f;print('before');int Function({int other}) wrong=value;print(wrong());}",
+      "int f(int value)=>value;void main(){dynamic value=f;print('before');int Function([int]) wrong=value;print(wrong());}",
       "class C{int read(int value){print('body');return value;}}dynamic bad(){print('argument');return 'wrong';}void main(){var callback=C().read;print('before');print(callback(bad()));}",
       "class C{int read()=>1;}C? missing()=>null;int argument(){print('argument');return 0;}void main(){var callback=missing()?.read;print('before');print(callback!());print(argument());}",
       "dynamic bad(){print('value');return 'wrong';}int tail(){print('tail');return 2;}void main(){print('before');print(<int>[?bad(),tail()]);}",
@@ -1130,6 +1133,42 @@ void main() { print('before'); failure(); print('after'); }
         'Uncaught exception did not preserve its effects, trace and exit status.',
       );
     }
+    // Keep this SDK/specification discrepancy explicit; argument reordering must
+    // not silently move effects ahead of a function expression's evaluation.
+    final getterOrder = File('${temporary.path}/function-getter-order.dart')
+      ..writeAsStringSync('''
+int trace=0;
+int mark(int value){trace=trace*10+value;return value;}
+int target(int x,{int a=0,int z=0})=>x+a+z;
+class C {
+  int Function(int,{int a,int z}) get callback {mark(4);return target;}
+}
+C receiver(){mark(5);return C();}
+void main(){
+  (receiver().callback)(a:mark(2),mark(1));print(trace);
+  trace=0;receiver().callback(a:mark(2),mark(1));print(trace);
+}
+''');
+    final getterOrderExecutable = '${getterOrder.path}.out';
+    await run(
+      driver,
+      compileArguments(getterOrder, getterOrderExecutable),
+      native: compiler != null,
+    );
+    final getterOrderSdk = await capture(sdk, [getterOrder.path]);
+    final getterOrderNative = await capture(
+      getterOrderExecutable,
+      [],
+      environment: {'PATH': '/usr/bin:/bin'},
+      includeParentEnvironment: false,
+    );
+    if (getterOrderSdk.exitCode != 0 ||
+        getterOrderNative.exitCode != 0 ||
+        getterOrderSdk.stdout != '2541\n5214\n' ||
+        getterOrderNative.stdout != '5421\n5214\n' ||
+        getterOrderSdk.stderr != '' ||
+        getterOrderNative.stderr != '')
+      throw StateError('Function getter argument-order discrepancy changed.');
     final diagnosticInputs = <String, String>{
       'scan-diagnostic.dart': "void main() { print('unterminated); }",
       'parse-diagnostic.dart': 'void main( {}',
@@ -2653,6 +2692,22 @@ void main() {
       'int value(int input)=>input; void main(){int Function(Object?) callback=value;print(callback(null));}',
       'int value(int input)=>input; void main(){int Function(int) callback=value;callback();}',
       'void main(){int Function(int)? callback;callback(1);}',
+      'int f({required int value})=>value;void main(){var callback=f;callback();}',
+      'int f([int value=1])=>value;void main(){var callback=f;callback(1,2);}',
+      'int f({int value=1})=>value;void main(){var callback=f;callback(other:2);}',
+      'int f({int value=1})=>value;void main(){var callback=f;callback(value:2,value:3);}',
+      'int f({int value=1})=>value;void main(){var callback=f;callback(2);}',
+      'int f({int value=1})=>value;void unused(){var callback=f;callback(value:"bad");}void main(){}',
+      'int f(int value)=>value;void main(){int Function([int]) callback=f;}',
+      'int f({required int value})=>value;void main(){int Function({int value}) callback=f;}',
+      'int f({required int value,int other=0})=>value;void main(){int Function({int other}) callback=f;}',
+      'int f({int value=1})=>value;void main(){int Function({int other}) callback=f;}',
+      'num f({num value=1})=>value;void main(){int Function({int value}) callback=f;}',
+      'typedef F=void Function({int _value});void main(){}',
+      'typedef F=void Function({int value,int value});void main(){}',
+      'typedef F=void Function([int value=1]);void main(){}',
+      'void main(){var callback=({int value})=>value;}',
+      '// @dart=2.16\nint f(int value,{int extra=0})=>value+extra;void main(){var callback=f;callback(extra:2,3);}',
       'typedef First=Later;typedef Later=First Function(int);void main(){}',
       'void value(){} @value void main(){}',
       "@pragma('dartc:no-gc') void invoke(void Function() callback)=>callback();void target(){print(1);}void main(){invoke(target);}",
@@ -3527,7 +3582,9 @@ void main(List<String> args) {
         );
       await reject(invalid);
     }
-    stdout.writeln('Behavior matches official Dart.');
+    stdout.writeln(
+      'Behavior checks passed; recorded SDK differences checked separately.',
+    );
     succeeded = true;
   } catch (error, stack) {
     exitCode = 1;

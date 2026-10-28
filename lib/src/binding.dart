@@ -1,6 +1,7 @@
 import 'ast.dart';
 import 'source.dart';
 import 'members.dart';
+import 'frontend/parameters.dart';
 
 class LocalVariable {
   String name;
@@ -69,6 +70,7 @@ void bindFunctionTypeParameters(SourceProgram source, AstFunctionType syntax) {
   var i = 0;
   while (i < syntax.parameters.length) {
     var parameter = syntax.parameters[i];
+    checkParameterName(source, syntax.parameters, i);
     var wildcard =
         parameter.kind != astNamedParameter &&
         parameter.name == '_' &&
