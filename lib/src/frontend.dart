@@ -323,6 +323,12 @@ int feRegisterFunction(
   bool local = false,
   List<int> enclosingTypes = const <int>[],
 ]) {
+  if (syntax.abbreviated &&
+      !sourceVersionAtLeast(feSources, feTokens[syntax.token].source, 3, 13))
+    feAstError(
+      syntax.token,
+      'abbreviated constructors require language version 3.13',
+    );
   if (syntax.typeParameters.isNotEmpty && (local || syntax.external))
     feAstError(
       syntax.token,
@@ -485,6 +491,21 @@ void feCollectDeclarations(AstUnit unit) {
   while (i < unit.classes.length) {
     var syntax = unit.classes[i];
     var source = feTokens[syntax.token].source;
+    if ((syntax.hasPrimary || syntax.abbreviatedBody) &&
+        !sourceVersionAtLeast(feSources, source, 3, 13))
+      feAstError(
+        syntax.token,
+        'primary constructors and class semicolons require language version 3.13',
+      );
+    if (syntax.hasPrimary)
+      for (final constructor in syntax.constructors)
+        if (!constructor.primary &&
+            (constructor.initializers.isEmpty ||
+                constructor.initializers[0].kind != astRedirectInitializer))
+          feAstError(
+            constructor.token,
+            'a class with a primary constructor can only add redirecting generative constructors',
+          );
     var owner = classNames.length;
     classType(owner);
     classNames.add(syntax.name);
@@ -617,28 +638,17 @@ void feCollectDeclarations(AstUnit unit) {
     var field = 0;
     while (field < fields.length) {
       var syntax = fields[field];
-      if (syntax.type.name == '')
+      if (syntax.type.name == '' && syntax.declaringParameter == null)
         feAstError(syntax.token, 'field requires a type');
-      var type = resolveType(feSymbols, syntax.type);
+      var type = syntax.type.name == ''
+          ? tDynamic
+          : resolveType(feSymbols, syntax.type);
       feFieldNodes.add(syntax);
       feFieldTypes.add(type);
       feFieldIndices.add(field);
       feLateFieldStates.add(-1);
       feLateFieldGetters.add(-1);
       feLateFieldSetters.add(-1);
-      if ((field & 63) == 0) {
-        classPointerMasks[i].add(0);
-        classTaggedMasks[i].add(0);
-      }
-      var word = field ~/ 64;
-      if (typeIsReference(type)) {
-        classPointerMasks[i][word] =
-            classPointerMasks[i][word] | (1 << (field & 63));
-      }
-      if (typeIsTagged(type)) {
-        classTaggedMasks[i][word] =
-            classTaggedMasks[i][word] | (1 << (field & 63));
-      }
       field++;
     }
     feClassFieldCounts[i] = field;
@@ -647,10 +657,6 @@ void feCollectDeclarations(AstUnit unit) {
       if (fields[index].lateVariable) {
         feLateFieldStates[feClassFieldStarts[i] + index] = storageFields++;
       }
-    }
-    while (classPointerMasks[i].length * 64 < storageFields) {
-      classPointerMasks[i].add(0);
-      classTaggedMasks[i].add(0);
     }
     classSizes[i] = objectHeaderBytes + storageFields * 8;
     i++;
@@ -3611,11 +3617,16 @@ void feLowerConstructor(int function) {
     feOperand(opLoadLocal, 0);
     feOperand(opInt, feFieldIndices[field]);
     if (step.kind == constructorDeclaration) {
-      feLowerInitializer(
-        feFieldNodes[field],
-        feFieldBindings[field],
-        fieldType,
-      );
+      if (syntax.primary) {
+        feBindings = bodyBindings.withReceiver(-1);
+        feLowerInContext(feFieldNodes[field].initializer[0], fieldType);
+      } else {
+        feLowerInitializer(
+          feFieldNodes[field],
+          feFieldBindings[field],
+          fieldType,
+        );
+      }
     } else if (step.kind == constructorFormal) {
       var parameter = 1 + step.index;
       feOperand(opLoadLocal, step.index + 1);
@@ -5415,6 +5426,11 @@ void feLowerStatement(AstStatement statement) {
     return;
   }
   if (kind == astReturnStatement) {
+    if (feConstructors[feFunction] == 1 && statement.expressions.isNotEmpty)
+      feAstError(
+        statement.token,
+        'generative constructor cannot return a value',
+      );
     var returned = feReturnTypes;
     if (returned != null) {
       var type = tNull;
@@ -6234,6 +6250,14 @@ void parseSource(SourceProgram source) {
     feObjectMembers.members.add(member);
   }
   feOwnMembers = feMembers;
+  feConstants = ConstantContext(feSymbols, feGlobalNodes, globalTypes);
+  feConstants.classConstructors = feClassConstructors;
+  feConstants.globalOwners = feGlobalOwners;
+  feConstants.identical = symbolOwnDeclaration(
+    feSymbols,
+    sourceCore,
+    'identical',
+  );
   feMembers = checkClassInterfaces(
     feSymbols,
     feClassNodes,
@@ -6242,34 +6266,45 @@ void parseSource(SourceProgram source) {
     feObjectMembers,
     feFunctionNodes,
     feFieldTypes,
+    feFieldNodes,
+    feConstants,
   );
+  for (var f = 1; f < feFunctionNodes.length; f++) {
+    if (!feFunctionNodes[f].primary) continue;
+    final parameters = feFunctionNodes[f].parameters;
+    for (var p = 0; p < parameters.length; p++)
+      if (parameters[p].fieldFormal && parameters[p].type.name == '')
+        functions[f].parameterTypes[p + 1] =
+            feFieldTypes[feField(
+              feOwners[f],
+              parameters[p].name,
+              parameters[p].token,
+            )];
+  }
   for (final owner in feClassOrder) {
     final parent = classSuperclasses[owner];
+    var prefix = 0;
     if (typeIsClass(parent)) {
       final base = typeArgument(parent);
-      final prefix = (classSizes[base] - objectHeaderBytes) ~/ 8;
-      classSizes[owner] += prefix * 8;
+      prefix = (classSizes[base] - objectHeaderBytes) ~/ 8;
       classPointerMasks[owner] = <int>[...classPointerMasks[base]];
       classTaggedMasks[owner] = <int>[...classTaggedMasks[base]];
-      for (var index = 0; index < feClassFieldCounts[owner]; index++) {
-        final field = feClassFieldStarts[owner] + index;
-        final slot = prefix + index;
-        feFieldIndices[field] = slot;
-        if (feLateFieldStates[field] >= 0) feLateFieldStates[field] += prefix;
-        while (classPointerMasks[owner].length <= slot ~/ 64) {
-          classPointerMasks[owner].add(0);
-          classTaggedMasks[owner].add(0);
-        }
-        if (typeIsReference(feFieldTypes[field]))
-          classPointerMasks[owner][slot ~/ 64] |= 1 << (slot & 63);
-        if (typeIsTagged(feFieldTypes[field]))
-          classTaggedMasks[owner][slot ~/ 64] |= 1 << (slot & 63);
-      }
-      final slots = (classSizes[owner] - objectHeaderBytes) ~/ 8;
-      while (classPointerMasks[owner].length * 64 < slots) {
-        classPointerMasks[owner].add(0);
-        classTaggedMasks[owner].add(0);
-      }
+    }
+    classSizes[owner] += prefix * 8;
+    final slots = (classSizes[owner] - objectHeaderBytes) ~/ 8;
+    while (classPointerMasks[owner].length * 64 < slots) {
+      classPointerMasks[owner].add(0);
+      classTaggedMasks[owner].add(0);
+    }
+    for (var index = 0; index < feClassFieldCounts[owner]; index++) {
+      final field = feClassFieldStarts[owner] + index;
+      final slot = prefix + index;
+      feFieldIndices[field] = slot;
+      if (feLateFieldStates[field] >= 0) feLateFieldStates[field] += prefix;
+      if (typeIsReference(feFieldTypes[field]))
+        classPointerMasks[owner][slot ~/ 64] |= 1 << (slot & 63);
+      if (typeIsTagged(feFieldTypes[field]))
+        classTaggedMasks[owner][slot ~/ 64] |= 1 << (slot & 63);
     }
     final rendered = classImplementation(
       owner,
@@ -6327,6 +6362,9 @@ void parseSource(SourceProgram source) {
             ? null
             : feMembers[feOwners[bindingFunction]],
         feConstructorPlans[bindingFunction].superCall,
+        feFunctionNodes[bindingFunction].primary
+            ? feClassNodes[feOwners[bindingFunction]].fields
+            : const <AstVariable>[],
       ),
     );
     while (localTypeScopes.length < feLocalFunctions.length)
@@ -6335,15 +6373,6 @@ void parseSource(SourceProgram source) {
       feLocalOwners.add(feOwners[bindingFunction]);
     bindingFunction++;
   }
-  feConstants = ConstantContext(feSymbols, feGlobalNodes, globalTypes);
-  feConstants.classMembers = feMembers;
-  feConstants.classConstructors = feClassConstructors;
-  feConstants.globalOwners = feGlobalOwners;
-  feConstants.identical = symbolOwnDeclaration(
-    feSymbols,
-    sourceCore,
-    'identical',
-  );
   feRegisterConstructorConstants();
   feResolvePragma();
   feCheckUnitMetadata(syntax);
@@ -6402,7 +6431,7 @@ void parseSource(SourceProgram source) {
     final end = field + feClassFieldCounts[owner];
     while (field < end) {
       feFieldBindings.add(
-        feFieldNodes[field].lateVariable
+        feFieldNodes[field].lateVariable || feClassNodes[owner].hasPrimary
             ? FunctionBindings(<LocalVariable>[], -1)
             : feBindInitializer(feFieldNodes[field], owner),
       );

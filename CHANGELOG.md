@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Add non-generic primary constructors, declaring parameters with type inference, parameter capture in field initializers, const evaluation, class semicolons and abbreviated generative constructors. Reject values returned from generative constructors.
 - Add `super` parameters to non-generic generative constructors, including inferred types, inherited defaults, named forwarding and const evaluation. Support function-typed field and super parameter declarations.
 - Add non-generic abstract classes, `extends` and `implements`, with interface signature checks, inherited fields, implementation dispatch, runtime subtype tests and actual-implementation defaults. Support `super` member access, constructor chains and inherited const fields. Covariant parameters and `noSuchMethod` forwarding remain unimplemented.
 - Add synchronous `throw`, `try`/`on`/`catch`/`finally` and `rethrow`, with native stack unwinding, cleanup on returns and jumps, typed catch parameters and preserved exception/stack-trace identity. Asynchronous exceptions and catchable runtime errors remain unimplemented.

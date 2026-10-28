@@ -67,6 +67,7 @@ class ConstantContext {
   List<int> typeScope = const <int>[];
   List<ConstantValue> initializerParameters = const <ConstantValue>[];
   bool allowInitializerParameters = false;
+  bool inferringTypes = false;
   List<ConstantValue> aggregates = <ConstantValue>[];
   List<ConstructorConstants?> constructors = <ConstructorConstants?>[];
   List<_ConstantInvocation> invocations = <_ConstantInvocation>[];
@@ -95,6 +96,14 @@ ConstantValue constantWithType(ConstantValue value, int type) {
 int constantValueType(ConstantValue value) {
   if (value.kind == tFunction) return functionValueType(value.integer);
   return value.kind;
+}
+
+int inferConstantType(ConstantContext context, AstExpression expression) {
+  final previous = context.inferringTypes;
+  context.inferringTypes = true;
+  final type = _evaluateConstant(context, expression, false, -1, true).type;
+  context.inferringTypes = previous;
+  return type;
 }
 
 Never _constantError(ConstantContext context, int token, String message) {
@@ -982,16 +991,12 @@ ConstantValue _constantInitializer(
   ConstructorStep step,
   bool active,
 ) {
-  var initializer = owner.syntax.initializers[step.index];
+  final expression = step.kind == constructorDeclaration
+      ? owner.owner.fields[step.index].initializer[0]
+      : owner.syntax.initializers[step.index].expression;
   var type = owner.fieldTypes[step.field];
-  var value = _evaluateConstant(
-    context,
-    initializer.expression,
-    active,
-    type,
-    false,
-  );
-  return _constantChecked(context, value, type, initializer.token, active);
+  var value = _evaluateConstant(context, expression, active, type, false);
+  return _constantChecked(context, value, type, expression.token, active);
 }
 
 ConstructorConstants _constantRedirectTarget(
@@ -1093,7 +1098,7 @@ void checkConstantConstructors(ConstantContext context) {
           _constantDeclaration(context, owner, p, false, true);
         p++;
       }
-      if (target == null) {
+      if (target == null && !owner.syntax.primary) {
         var f = 0;
         while (f < owner.owner.fields.length) {
           if (owner.owner.fields[f].initializer.isNotEmpty)
@@ -1101,7 +1106,9 @@ void checkConstantConstructors(ConstantContext context) {
           f++;
         }
       }
-      if (owner.syntax.initializers.isNotEmpty || parent != null) {
+      if (owner.syntax.primary ||
+          owner.syntax.initializers.isNotEmpty ||
+          parent != null) {
         var parameters = <ConstantValue>[];
         p = 0;
         while (p < owner.parameterTypes.length) {
@@ -1129,7 +1136,8 @@ void checkConstantConstructors(ConstantContext context) {
           var i = 0;
           while (i < owner.plan.steps.length) {
             var step = owner.plan.steps[i];
-            if (step.kind == constructorExplicit)
+            if (step.kind == constructorExplicit ||
+                owner.syntax.primary && step.kind == constructorDeclaration)
               _constantInitializer(context, owner, step, false);
             i++;
           }
@@ -1193,7 +1201,9 @@ ConstantValue _constantInvoke(
     }
     context.invocations.add(_ConstantInvocation(owner, parameters));
     context.lexicalClass = owner.classId;
-    if (owner.syntax.initializers.isNotEmpty || owner.plan.superCall != null)
+    if (owner.syntax.primary ||
+        owner.syntax.initializers.isNotEmpty ||
+        owner.plan.superCall != null)
       context.initializerParameters = _constantParameterFrame(
         owner,
         parameters,
@@ -1221,7 +1231,7 @@ ConstantValue _constantInvoke(
   i = 0;
   while (i < owner.plan.steps.length) {
     var step = owner.plan.steps[i];
-    if (step.kind == constructorDeclaration) {
+    if (step.kind == constructorDeclaration && !owner.syntax.primary) {
       fields[step.field] = _constantDeclaration(
         context,
         owner,
@@ -1339,6 +1349,9 @@ ConstantValue _constantConstructor(
   if (constructor < 0)
     _constantError(context, callee.token, 'unknown constructor');
   var function = context.classConstructors[classId][constructor];
+  // Constructor arguments and const eligibility are checked after declaration
+  // types are complete. Only the instance type is needed for this inference.
+  if (context.inferringTypes) return ConstantValue(classType, tNull, 0, '');
   ConstructorConstants? owner;
   if (function < context.constructors.length)
     owner = context.constructors[function];

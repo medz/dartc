@@ -109,6 +109,12 @@ ConstructorPlan planConstructorInitializers(
   if (syntax.initializers.isNotEmpty &&
       syntax.initializers[0].kind == astRedirectInitializer) {
     var initializer = syntax.initializers[0];
+    if (syntax.primary)
+      _initError(
+        symbols,
+        initializer.token,
+        'primary constructor cannot redirect',
+      );
     if (syntax.initializers.length != 1)
       _initError(
         symbols,
@@ -191,7 +197,8 @@ ConstructorPlan planConstructorInitializers(
         parameter.token,
       );
       if ((initialized[field] & 2) != 0 ||
-          initialized[field] != 0 && owner.fields[field].modifier == 'final' ||
+          initialized[field] != 0 &&
+              (syntax.primary || owner.fields[field].modifier == 'final') ||
           owner.fields[field].lateVariable &&
               owner.fields[field].modifier == 'final' &&
               owner.fields[field].initializer.isNotEmpty)
@@ -230,7 +237,8 @@ ConstructorPlan planConstructorInitializers(
       initializer.token,
     );
     if ((initialized[field] & 6) != 0 ||
-        initialized[field] != 0 && owner.fields[field].modifier == 'final' ||
+        initialized[field] != 0 &&
+            (syntax.primary || owner.fields[field].modifier == 'final') ||
         owner.fields[field].lateVariable &&
             owner.fields[field].modifier == 'final' &&
             owner.fields[field].initializer.isNotEmpty)

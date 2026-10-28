@@ -1176,6 +1176,11 @@ void main(List<String> args) {
     final libraries = {
       'inheritance-parent.dart': r'''
 part 'inheritance-part.dart';
+class const PrimaryPrivate({required final int _value, final String _label='private'}) {
+  final int copied = _value + 1;
+  int read() => _value;
+  String get label => _label;
+}
 const _defaultValues = <int>[2, 4];
 class SuperDefaults {
   static const label = 'parent';
@@ -1203,6 +1208,7 @@ class PartChild extends InheritanceParent { PartChild() : super._private(); }
       'inheritance-imports.dart': r'''
 import 'inheritance-parent.dart' as parent;
 typedef ParentAlias = parent.InheritanceParent;
+class const PrimaryPrivateChild({required super.value, super.label}) extends parent.PrimaryPrivate;
 class SuperDefaultLeaf extends SuperDefaultChild {
   final String own;
   const SuperDefaultLeaf(this.own, {required super.value, super.name, super.values});
@@ -1227,6 +1233,11 @@ void main() {
   print(child.nested()());
   print(child.label);
   print(parent.PartChild().read());
+  const primary = PrimaryPrivateChild(value: 3);
+  print(primary.read());
+  print(primary.copied);
+  print(primary.label);
+  print(identical(primary, const PrimaryPrivateChild(value: 3, label: 'private')));
   const inherited = SuperDefaultLeaf('leaf', value: 3);
   print(inherited.read());
   print(inherited.name);
@@ -1908,6 +1919,40 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      "abstract class A{num get value;set value(int v);}class B(var value) implements A;void main(){print(B(2.5).value);}",
+      "// @dart=3.12\nclass C();void main(){}",
+      "// @dart=3.12\nclass C{new();}void main(){}",
+      "// @dart=3.12\nclass C;void main(){}",
+      "class C{this{}}void main(){}",
+      "class C(){this{}this{}}void main(){}",
+      "class C(){C.named();}void main(){}",
+      "class C(){this:this.named();C.named():this();}void main(){}",
+      "class C(final int x){int x=1;}void main(){}",
+      "class C(int x){int y=x;this:y=x+1;}void main(){}",
+      "class C(this.x){int x=1;}void main(){}",
+      "class const C(){this{}}void main(){}",
+      "class const C(var int x);void main(){}",
+      "class C(){this=>1;}void main(){}",
+      "class C(){this async{}}void main(){}",
+      "class C(int x){int y=(x=2);}void main(){}",
+      "class C(int x){int y;this:y=(x=2);}void main(){}",
+      "class C(int x){int Function() f=(){x=2;return x;};}void main(){}",
+      "class C(int x){Object y=([x]=[2]);}void main(){}",
+      "class C(final int x){int y=this.x;}void main(){}",
+      "class C(int x){int f()=>x;}void main(){}",
+      "class C(int x){static int y=x;}void main(){}",
+      "class C(final x){int f()=>x+1;}void main(){}",
+      "abstract class A{int get value;}class C([final value=1.5]) implements A;void main(){}",
+      "class const C(int n){final List<int> values=[n];}void main(){}",
+      "int f(int n)=>n;class const C(int n){final int value=f(n);}void main(){}",
+      "class C(int x,{required final int _x});void main(){}",
+      "class C({required final int x=1});void main(){}",
+      "class C(final this.x){int x;}void main(){}",
+      "class A{A(int x);}class C(final super.x) extends A;void main(){}",
+      "class C{new new();}void main(){}",
+      "class const C(int n){final int value=10~/n;}const c=C(0);void main(){}",
+      "class C{C(){return C();}}void main(){}",
+      "class C(int n){this{return C(1);}}void main(){}",
       'class C{final int Function() f;C(bool b):f=b ? () => 1 : () => 2;}void main(){}',
       'int Function() f=()=>0;class C{final int Function() g;C():g=f=()=>1;}void main(){}',
       "class C{C(super.x);}void main(){}",

@@ -1717,7 +1717,10 @@ List<AstVariable> parserVariables(Parser parser) {
   return parserVariablesRest(parser, type, name, modifier, token, metadata);
 }
 
-List<AstParameter> parserParameters(Parser parser) {
+List<AstParameter> parserParameters(
+  Parser parser, [
+  List<AstVariable>? declaringFields,
+]) {
   parserExpect(parser, '(');
   List<AstParameter> parameters = <AstParameter>[];
   var kind = astRequiredPositional;
@@ -1754,12 +1757,20 @@ List<AstParameter> parserParameters(Parser parser) {
         required = true;
       }
     }
+    var modifier = '';
+    if (declaringFields != null &&
+        (parserIs(parser, 'final') || parserIs(parser, 'var'))) {
+      modifier = parserPeek(parser);
+      parser.position++;
+    }
     if (parserIs(parser, 'final') || parserIs(parser, 'const')) {
       parserError(parser, 'parameters cannot have final or const modifiers');
     }
     var type = parserDeclarationType(parser, '');
     var fieldFormal = parserTake(parser, 'this');
     final superFormal = !fieldFormal && parserTake(parser, 'super');
+    if (modifier != '' && (fieldFormal || superFormal))
+      parserError(parser, 'declaring parameter requires a plain name');
     var name = '';
     if (fieldFormal || superFormal) {
       parserExpect(parser, '.');
@@ -1767,7 +1778,8 @@ List<AstParameter> parserParameters(Parser parser) {
     } else {
       name = parserName(parser);
     }
-    if ((fieldFormal || superFormal) && parserIs(parser, '(')) {
+    if ((fieldFormal || superFormal || declaringFields != null) &&
+        parserIs(parser, '(')) {
       final result = type.name == ''
           ? AstType('dynamic', const <AstType>[], type.token)
           : type;
@@ -1779,6 +1791,14 @@ List<AstParameter> parserParameters(Parser parser) {
       if (parserTake(parser, '?')) type.name = 'Function?';
     }
     var parameter = AstParameter(type, name, fieldFormal, token);
+    if (modifier != '') {
+      parameter.fieldFormal = true;
+      declaringFields!.add(
+        AstVariable(type, name, const <AstExpression>[], modifier, token)
+          ..declaringParameter = parameter
+          ..metadata = metadata,
+      );
+    }
     parameter.superFormal = superFormal;
     parameter.metadata = metadata;
     parameter.kind = kind;
@@ -1923,9 +1943,19 @@ AstFunction parserFunction(
     }
     if (result.name == '') result = AstType('void', <AstType>[], token);
   }
+  final function =
+      AstFunction(name, result, parameters, null, null, external, token, getter)
+        ..setter = setter
+        ..typeParameters = typeParameters
+        ..constant = constant;
+  parserFunctionBody(parser, function, constructor);
+  return function;
+}
+
+void parserFunctionBody(Parser parser, AstFunction function, bool constructor) {
   List<AstInitializer> initializers = const <AstInitializer>[];
   if (parserIs(parser, ':')) {
-    if (!constructor || external)
+    if (!constructor || function.external)
       parserError(parser, 'initializer list requires a generative constructor');
     initializers = parserInitializers(parser);
   }
@@ -1935,7 +1965,7 @@ AstFunction parserFunction(
     parserError(parser, 'redirecting constructor cannot have a body');
   if (constructor && parserIs(parser, '=>'))
     parserError(parser, 'generative constructor cannot have an arrow body');
-  if (constant && !parserIs(parser, ';'))
+  if (function.constant && !parserIs(parser, ';'))
     parserError(parser, 'const constructor cannot have a body');
   AstStatement? body;
   AstExpression? arrow;
@@ -1946,21 +1976,9 @@ AstFunction parserFunction(
     if (!parserIs(parser, '{')) parserError(parser, 'expected function body');
     body = parseStatement(parser);
   }
-  var function = AstFunction(
-    name,
-    result,
-    parameters,
-    body,
-    arrow,
-    external,
-    token,
-    getter,
-  );
-  function.setter = setter;
-  function.typeParameters = typeParameters;
-  function.constant = constant;
   function.initializers = initializers;
-  return function;
+  function.body = body;
+  function.arrow = arrow;
 }
 
 bool parserConstructorAhead(Parser parser, String name) {
@@ -1973,7 +1991,34 @@ bool parserConstructorAhead(Parser parser, String name) {
 }
 
 AstClass parserClass(Parser parser, int token) {
+  final constant = parserTake(parser, 'const');
   var name = parserTypeDeclarationName(parser);
+  final fields = <AstVariable>[];
+  final constructors = <AstFunction>[];
+  AstFunction? primary;
+  var constructorName = name;
+  if (parserTake(parser, '.')) {
+    if (tokenIsReserved(parser.tokens[parser.position]) &&
+        !parserIs(parser, 'new'))
+      parserError(parser, 'reserved word cannot be a constructor name');
+    constructorName += '.' + parserName(parser);
+  }
+  if (constant || constructorName != name || parserIs(parser, '(')) {
+    primary =
+        AstFunction(
+            constructorName,
+            parserInferredType(token),
+            parserParameters(parser, fields),
+            null,
+            null,
+            false,
+            token,
+            false,
+          )
+          ..primary = true
+          ..constant = constant;
+    constructors.add(primary);
+  }
   final superclass = parserTake(parser, 'extends')
       ? parseAstType(parser)
       : null;
@@ -1983,12 +2028,12 @@ AstClass parserClass(Parser parser, int token) {
       interfaces.add(parseAstType(parser));
     } while (parserTake(parser, ','));
   }
-  parserExpect(parser, '{');
-  List<AstVariable> fields = <AstVariable>[];
+  final abbreviatedBody = parserTake(parser, ';');
+  if (!abbreviatedBody) parserExpect(parser, '{');
   List<AstVariable>? staticFields;
-  List<AstFunction> constructors = <AstFunction>[];
   List<AstFunction> methods = <AstFunction>[];
-  while (!parserIs(parser, '}')) {
+  var primaryBody = false;
+  while (!abbreviatedBody && !parserIs(parser, '}')) {
     var metadata = parserMetadata(parser);
     var memberToken = parser.position;
     var external = parserTake(parser, 'external');
@@ -2004,16 +2049,26 @@ AstClass parserClass(Parser parser, int token) {
       }
     }
     var constant = parserTake(parser, 'const');
-    if (parserConstructorAhead(parser, name)) {
+    if (parserTake(parser, 'this')) {
+      if (primary == null || primaryBody)
+        parserError(parser, 'primary constructor body requires one header');
+      if (external || isStatic || constant)
+        parserError(parser, 'primary constructor body cannot have modifiers');
+      primaryBody = true;
+      primary.metadata = metadata;
+      parserFunctionBody(parser, primary, true);
+    } else if (parserConstructorAhead(parser, name) ||
+        parserIs(parser, 'new')) {
       if (isStatic) parserError(parser, 'constructors cannot be static');
       if (external)
         parserError(parser, 'external constructors are unsupported');
       var constructorToken = parser.position;
-      parser.position++;
+      final abbreviated = parserTake(parser, 'new');
+      if (!abbreviated) parser.position++;
       var constructorName = name;
-      if (parserTake(parser, '.')) {
+      if (abbreviated ? !parserIs(parser, '(') : parserTake(parser, '.')) {
         if (tokenIsReserved(parser.tokens[parser.position]) &&
-            !parserIs(parser, 'new'))
+            (abbreviated || !parserIs(parser, 'new')))
           parserError(parser, 'reserved word cannot be a constructor name');
         constructorName += '.' + parserName(parser);
       }
@@ -2029,6 +2084,7 @@ AstClass parserClass(Parser parser, int token) {
         true,
       );
       constructor.metadata = metadata;
+      constructor.abbreviated = abbreviated;
       constructors.add(constructor);
     } else {
       if (constant && !isStatic)
@@ -2090,8 +2146,9 @@ AstClass parserClass(Parser parser, int token) {
       }
     }
   }
-  parserExpect(parser, '}');
+  if (!abbreviatedBody) parserExpect(parser, '}');
   var result = AstClass(name, fields, constructors, methods, token);
+  result.abbreviatedBody = abbreviatedBody;
   result.superclass = superclass;
   result.interfaces = interfaces;
   if (staticFields != null) result.staticFields = staticFields;

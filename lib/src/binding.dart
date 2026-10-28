@@ -59,6 +59,7 @@ class LocalBinder {
   int outerScope = -1;
   ClassMembers? members;
   final List<LocalVariable> guardVariables = <LocalVariable>[];
+  final List<LocalVariable> initializerVariables = <LocalVariable>[];
   int catchDepth = 0;
 
   LocalBinder(this.source, this.result, this.scopes, this.functions);
@@ -232,9 +233,16 @@ void bindingWrite(
   var declaration = bindingDeclaration(bindings, binding);
   LocalBinder? current = binder;
   // The SDK permits pattern assignments in guards; see specs/patterns.md.
-  while (!patternAssignment && current != null) {
+  while (current != null) {
+    for (final parameter in current.initializerVariables)
+      if (identical(parameter, declaration))
+        sourceError(
+          binder.source,
+          binder.source.tokens[token],
+          'cannot assign a primary parameter during initialization',
+        );
     for (var guarded in current.guardVariables) {
-      if (identical(guarded, declaration))
+      if (!patternAssignment && identical(guarded, declaration))
         sourceError(
           binder.source,
           binder.source.tokens[token],
@@ -899,6 +907,7 @@ FunctionBindings bindFunctionLocals(
   List<LocalFunctionBinding>? functions,
   ClassMembers? members,
   AstExpression? superCall,
+  List<AstVariable> fields = const <AstVariable>[],
 ]) {
   return _bindFunctionLocals(
     source,
@@ -909,6 +918,7 @@ FunctionBindings bindFunctionLocals(
     -1,
     members,
     superCall,
+    fields,
   );
 }
 
@@ -921,6 +931,7 @@ FunctionBindings _bindFunctionLocals(
   int outerScope,
   ClassMembers? members, [
   AstExpression? superCall,
+  List<AstVariable> fields = const <AstVariable>[],
 ]) {
   var result = FunctionBindings(<LocalVariable>[], -1)..outer = outer?.result;
   var binder = LocalBinder(source, result, <BindingScope>[], functions);
@@ -935,7 +946,7 @@ FunctionBindings _bindFunctionLocals(
   );
   var parameters = bindingScope(binder, -1);
   var initializers = -1;
-  if (syntax.initializers.isNotEmpty || superCall != null)
+  if (syntax.primary || syntax.initializers.isNotEmpty || superCall != null)
     initializers = bindingScope(binder, -1);
   if (receiver) {
     result.receiver = bindingDeclare(
@@ -973,6 +984,7 @@ FunctionBindings _bindFunctionLocals(
       );
       variable.finalVariable = initializing;
       result.variables.add(variable);
+      if (syntax.primary) binder.initializerVariables.add(variable);
       if (!initializing)
         binder.scopes[parameters].variables.add(parameter.binding);
       if (initializers >= 0)
@@ -989,6 +1001,9 @@ FunctionBindings _bindFunctionLocals(
       value.binding = parameter.binding;
     }
   }
+  for (final field in fields)
+    if (!field.lateVariable)
+      bindingExpressions(binder, initializers, field.initializer);
   i = 0;
   while (i < syntax.initializers.length) {
     var initializer = syntax.initializers[i];
@@ -997,6 +1012,7 @@ FunctionBindings _bindFunctionLocals(
       bindingExpression(binder, initializers, message);
     i++;
   }
+  binder.initializerVariables.clear();
   if (syntax.body case final body?) bindingStatement(binder, parameters, body);
   if (syntax.arrow case final arrow?)
     bindingExpression(binder, parameters, arrow);

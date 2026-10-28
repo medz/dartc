@@ -1,4 +1,5 @@
 import '../ast.dart';
+import '../constants.dart';
 import '../ir.dart';
 import '../members.dart';
 import '../resolve_type.dart';
@@ -196,6 +197,26 @@ void _copyRole(MemberBinding target, MemberBinding source, int role) {
   }
 }
 
+MemberBinding? _combinedMember(
+  List<MemberBinding> candidates,
+  int role,
+  List<AstFunction> declarations,
+  List<int> fieldTypes,
+) {
+  for (final candidate in candidates) {
+    final signature = classSignature(candidate, role, declarations, fieldTypes);
+    var suitable = true;
+    for (final other in candidates)
+      if (!classSignatureSubtype(
+        signature,
+        classSignature(other, role, declarations, fieldTypes),
+      ))
+        suitable = false;
+    if (suitable) return candidate;
+  }
+  return null;
+}
+
 List<ClassMembers> checkClassInterfaces(
   SymbolTable symbols,
   List<AstClass> classes,
@@ -204,6 +225,8 @@ List<ClassMembers> checkClassInterfaces(
   ClassMembers objectMembers,
   List<AstFunction> declarations,
   List<int> fieldTypes,
+  List<AstVariable> fields,
+  ConstantContext constants,
 ) {
   final views = <ClassMembers>[];
   for (var owner = 0; owner < ownMembers.length; owner++) {
@@ -217,6 +240,7 @@ List<ClassMembers> checkClassInterfaces(
     for (final member in own.members) view.members.add(_copyMember(member));
     views.add(view);
   }
+  constants.classMembers = views;
   Never fail(int owner, String message) {
     sourceError(
       symbols.program,
@@ -254,6 +278,59 @@ List<ClassMembers> checkClassInterfaces(
         member.library,
       );
       final own = ownIndex < 0 ? null : ownMembers[owner].members[ownIndex];
+      final field = own == null ? -1 : own.field;
+      final parameter = field < 0 ? null : fields[field].declaringParameter;
+      if (parameter != null && parameter.type.name == '') {
+        var type = -1;
+        for (var role = classGetter; role <= classSetter; role++) {
+          final candidates = <MemberBinding>[];
+          for (final parent in inherited)
+            if (parent.name == member.name &&
+                (!member.name.startsWith('_') ||
+                    parent.library == member.library) &&
+                hasClassMember(parent, role))
+              candidates.add(parent);
+          if (candidates.isEmpty) continue;
+          final selected = _combinedMember(
+            candidates,
+            role,
+            declarations,
+            fieldTypes,
+          );
+          if (selected == null)
+            fail(
+              owner,
+              'cannot infer field from incompatible inherited signatures',
+            );
+          final signature = classSignature(
+            selected,
+            role,
+            declarations,
+            fieldTypes,
+          );
+          final inferred = role == classGetter
+              ? signature.result
+              : signature.parameters[0];
+          if (type >= 0 && type != inferred)
+            fail(
+              owner,
+              'cannot infer a mutable field from different getter and setter types',
+            );
+          type = inferred;
+          if (fields[field].modifier == 'final') break;
+        }
+        if (type < 0) {
+          final expression = parameter.defaultValue;
+          final scope = constants.lexicalClass;
+          constants.lexicalClass = owner;
+          type = expression == null
+              ? tNull
+              : inferConstantType(constants, expression);
+          constants.lexicalClass = scope;
+          if (type == tNull) type = nullableType(tObject);
+        }
+        fieldTypes[field] = type;
+      }
       for (var role = classMethod; role <= classSetter; role++) {
         final candidates = <MemberBinding>[];
         for (final parent in inherited)
@@ -263,26 +340,12 @@ List<ClassMembers> checkClassInterfaces(
               hasClassMember(parent, role))
             candidates.add(parent);
         if (candidates.isEmpty) continue;
-        MemberBinding? selected;
-        for (final candidate in candidates) {
-          final signature = classSignature(
-            candidate,
-            role,
-            declarations,
-            fieldTypes,
-          );
-          var suitable = true;
-          for (final other in candidates)
-            if (!classSignatureSubtype(
-              signature,
-              classSignature(other, role, declarations, fieldTypes),
-            ))
-              suitable = false;
-          if (suitable) {
-            selected = candidate;
-            break;
-          }
-        }
+        final selected = _combinedMember(
+          candidates,
+          role,
+          declarations,
+          fieldTypes,
+        );
         if (own != null && hasClassMember(own, role)) {
           final function = classMemberFunction(own, role);
           if (function >= 0 && selected == null) {

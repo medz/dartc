@@ -151,6 +151,7 @@ const int astPartOfNameDirective = 6;
 
 class AstVariable {
   List<AstExpression> metadata = const <AstExpression>[];
+  AstParameter? declaringParameter;
   AstType type;
   String name;
   List<AstExpression> initializer;
@@ -282,6 +283,8 @@ class AstFunction {
   bool setter = false;
   bool constant = false;
   bool isStatic = false;
+  bool primary = false;
+  bool abbreviated = false;
 
   AstFunction(
     this.name,
@@ -298,6 +301,7 @@ class AstFunction {
 class AstClass {
   List<AstExpression> metadata = const <AstExpression>[];
   bool isAbstract = false;
+  bool abbreviatedBody = false;
   AstType? superclass;
   List<AstType> interfaces = const <AstType>[];
   String name;
@@ -306,6 +310,8 @@ class AstClass {
   List<AstFunction> constructors;
   List<AstFunction> methods;
   int token;
+
+  bool get hasPrimary => constructors.isNotEmpty && constructors[0].primary;
 
   AstClass(this.name, this.fields, this.constructors, this.methods, this.token);
 }

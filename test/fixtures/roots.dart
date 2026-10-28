@@ -57,18 +57,20 @@ class Wide {
   Wide(this.tail, this.taggedTail, this.p62, this.third);
 }
 
-class DerivedWide extends Wide {
-  Leaf own;
-  Object? ownTagged;
+abstract class WideOwnFields {
+  Leaf get own;
+  Object? get ownTagged;
+}
+
+class DerivedWide(
+  super.tail,
+  super.tagged,
+  super.p62,
+  super.third,
+  var own,
+  var ownTagged,
+) extends Wide implements WideOwnFields {
   late Leaf delayed = Leaf(207);
-  DerivedWide(
-    super.tail,
-    super.tagged,
-    super.p62,
-    super.third,
-    this.own,
-    this.ownTagged,
-  );
 }
 
 class Watch {

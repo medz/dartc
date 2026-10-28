@@ -5874,7 +5874,152 @@ void inheritanceValues() {
   }
 }
 
+class PrimaryMutable(var int value, final String label) {
+  final int Function() initial = () => value;
+  late int Function() current = () => value;
+  this {
+    value += 2;
+  }
+}
+
+int primaryValue = 8;
+
+class PrimaryScope(int primaryValue) {
+  final int copied = primaryValue + 1;
+  final int Function() captured = () => primaryValue;
+  late int lateValue = primaryValue;
+  static int staticValue = primaryValue;
+  this {
+    primaryValue += 5;
+    if (primaryValue == 7) return;
+    PrimaryPoint point() => PrimaryPoint(primaryValue);
+    print(point().sum);
+  }
+}
+
+class const PrimaryPoint(final int x, [final int y = 3]) {
+  final int sum = x + y;
+  const new origin() : this(0, 0);
+}
+
+class PrimaryDefaults([
+  var number = 1,
+  final label = 'primary',
+  final absent,
+  final values = const [2, 3],
+  final point = const PrimaryPoint(4),
+]);
+
+class PrimaryObject(final value);
+
+abstract class PrimaryGetter {
+  num get value;
+}
+
+class PrimaryInferred([final value = 1]) implements PrimaryGetter;
+
+abstract class PrimarySetter {
+  set value(int value);
+}
+
+class PrimaryWrite(var value) implements PrimarySetter;
+
+abstract class PrimaryAccessors {
+  int get value;
+  set value(int value);
+}
+
+class PrimaryBoth(var value) implements PrimaryAccessors;
+
+class PrimarySplitBase {
+  num get value => 1;
+  set value(int value) {
+    print(value);
+  }
+}
+
+class PrimaryFinal(final value) extends PrimarySplitBase;
+
+class PrimaryTyped(this.value) {
+  int value;
+}
+
+class PrimaryCallback([final int callback(int value)?]);
+
+class PrimaryEmpty;
+
+class PrimaryWildcard(_, _);
+
+class PrimaryNamed.new(final int value);
+
+class AbbreviatedConstructor {
+  final int value;
+  new(this.value);
+  new named(int value) : this(value + 1);
+}
+
+class PrimaryOrder(var int input) {
+  final int first = inheritanceMark(input + 1);
+  final int second = inheritanceMark(input + 2);
+  this {
+    print(input);
+  }
+}
+
+void primaryConstructorValues() {
+  final mutable = PrimaryMutable(2, 'mutable');
+  print(mutable.value);
+  print(mutable.label);
+  print(mutable.initial());
+  print(mutable.current());
+  mutable.value = 9;
+  print(mutable.initial());
+  print(mutable.current());
+  final scope = PrimaryScope(2);
+  print(scope.copied);
+  print(scope.captured());
+  print(scope.lateValue);
+  print(PrimaryScope.staticValue);
+  print(PrimaryScope(3).copied);
+  const point = PrimaryPoint(2);
+  print(point.sum);
+  print(const PrimaryPoint(3).sum);
+  print(PrimaryPoint(4).sum);
+  print(identical(const PrimaryPoint.origin(), const PrimaryPoint(0, 0)));
+  final defaults = PrimaryDefaults();
+  print(defaults.number + 2);
+  defaults.number = 4;
+  print(defaults.number);
+  print(defaults.label.length);
+  print(defaults.absent);
+  print(defaults.values[1]);
+  print(defaults.point.sum);
+  print(PrimaryObject(1).value);
+  print(PrimaryObject(null).value);
+  print(PrimaryInferred().value);
+  print(PrimaryInferred(2.5).value);
+  final write = PrimaryWrite(3);
+  print(write.value + 1);
+  write.value = 7;
+  print(write.value);
+  print(PrimaryBoth(4).value + 1);
+  final split = PrimaryFinal(2.5);
+  print(split.value);
+  split.value = 3;
+  print(PrimaryTyped(2).value);
+  print(PrimaryCallback().callback);
+  print(PrimaryCallback((value) => value + 2).callback!(3));
+  print(PrimaryEmpty() is PrimaryEmpty);
+  print(PrimaryWildcard(1, 2) is PrimaryWildcard);
+  print(PrimaryNamed.new(2).value);
+  print(AbbreviatedConstructor(2).value);
+  print(AbbreviatedConstructor.named(2).value);
+  final order = PrimaryOrder(inheritanceMark(30));
+  print(order.first + order.second);
+}
+
 void main(List<String> args) {
+  primaryConstructorValues();
   inheritanceValues();
   interfaceValues();
   finallyValues();
