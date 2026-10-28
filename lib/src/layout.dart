@@ -1,5 +1,5 @@
 // Shared compiler/runtime object layout. Offsets are bytes.
-const int runtimeAbiVersion = 13;
+const int runtimeAbiVersion = 14;
 const int objectHeaderBytes = 16;
 const int objectFlagsOffset = 8;
 // Static objects store a descriptor displacement relative to their own address.
@@ -44,6 +44,7 @@ const int descriptorRefArray = 4;
 const int descriptorIntBox = 5;
 const int descriptorTaggedArray = 6;
 const int descriptorFunction = 7;
+const int descriptorType = 8;
 const int functionTypeOffset = 16;
 const int functionEntryOffset = 24;
 const int functionInstanceBytes = 32;
@@ -86,12 +87,13 @@ const int globalRootBytes = 16;
 const int globalRootAddressOffset = 0;
 const int globalRootKindOffset = 8;
 
-// TypeRefs are native metadata records, separate from managed Dart Type objects.
-const int typeRefBytes = 32;
-const int typeKindOffset = 0;
-const int typeArgumentOffset = 8;
-const int typeClassOffset = 16;
-const int typeValueRepOffset = 24;
+// Internal type records have object headers; they are not public Dart Type values.
+// Child types and class descriptors use displacements from the record base.
+const int typeRefBytes = 48;
+const int typeKindOffset = 16;
+const int typeArgumentOffset = 24;
+const int typeClassOffset = 32;
+const int typeValueRepOffset = 40;
 const int typeKindVoid = 0;
 const int typeKindInt = 1;
 const int typeKindString = 2;

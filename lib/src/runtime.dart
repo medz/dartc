@@ -13,7 +13,7 @@ external int nativeCall1(int function, int value);
 external int nativeCall0(int function);
 external int nativeFramePointer();
 
-const int rtAbiVersion = 13;
+const int rtAbiVersion = 14;
 const int rtArenaHeaderBytes = 48;
 
 int rtArenaHead = 0;
@@ -1956,6 +1956,13 @@ int rtTraceBitmap(
   return count;
 }
 
+@pragma('dartc:no-gc')
+int rtTraceType(int type, int worklist, int count, int capacity) {
+  if ((nativeLoad64(type + objectFlagsOffset) & objectStaticRelative) != 0)
+    return count;
+  return rtRootAppend(type, storageRef, worklist, count, capacity);
+}
+
 // value is an object base supplied by root or object-edge enumeration.
 @pragma('dartc:no-gc')
 int rtTraceObject(int value, int worklist, int capacity) {
@@ -1971,16 +1978,53 @@ int rtTraceObject(int value, int worklist, int capacity) {
     return 0;
   }
   if (kind == descriptorList) {
-    return rtRootAppend(
+    var count = rtRootAppend(
       nativeLoad64(value + listBackingOffset),
       storageRef,
       worklist,
       0,
       capacity,
     );
+    return rtTraceType(
+      nativeLoad64(value + listTypeOffset),
+      worklist,
+      count,
+      capacity,
+    );
+  }
+  if (kind == descriptorType) {
+    // Static types only refer to other static metadata.
+    if ((nativeLoad64(value + objectFlagsOffset) & objectStaticRelative) != 0)
+      return 0;
+    var typeKind = nativeLoad64(value + typeKindOffset);
+    if (typeKind == typeKindList || typeKind == typeKindNullable)
+      return rtTraceType(rtTypeArgument(value), worklist, 0, capacity);
+    if (typeKind != typeKindFunction ||
+        nativeLoad64(value + typeArgumentOffset) == 0)
+      return 0;
+    // A heap function type owns its signature inline, after the type record.
+    var signature = rtTypeArgument(value);
+    var result =
+        signature + nativeLoad64(signature + functionSignatureResultOffset);
+    var count = rtTraceType(result, worklist, 0, capacity);
+    var parameters = nativeLoad64(signature + functionSignatureCountOffset);
+    var i = 0;
+    while (i < parameters) {
+      var entry = signature + functionSignatureParametersOffset + i * 8;
+      count = rtTraceType(
+        entry + nativeLoad64(entry),
+        worklist,
+        count,
+        capacity,
+      );
+      i++;
+    }
+    return count;
   }
   var count = 0;
   if (kind == descriptorClass || kind == descriptorFunction) {
+    if (kind == descriptorFunction)
+      count = rtTraceType(rtFunctionType(value), worklist, count, capacity);
     var fields = nativeLoad64(descriptor + descriptorFieldsOffset);
     var bitmap = nativeLoad64(descriptor + descriptorRefBitmapOffset);
     if (bitmap != 0) {

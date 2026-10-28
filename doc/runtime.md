@@ -2,7 +2,7 @@
 
 [runtime.dart](../lib/src/runtime.dart) 实现目标程序的运行时算法；共享尺寸、偏移和表示由 [layout.dart](../lib/src/layout.dart) 定义。编译器与运行时必须使用匹配的 ABI，改变布局或调用协议时整体重建。
 
-当前 ABI 为 13，函数捕获字段参与描述符扫描，绑定方法使用独立描述符身份表达方法相等性。旧版运行时没有完整的绑定方法相等协议，不能与此类对象混用。
+当前 ABI 为 14。TypeRef 带对象头，List 和函数对象的类型引用参与扫描；ABI 13 的无对象头类型记录不能与此布局混用。
 
 main 使用进程级 bump arena，不执行 GC、空闲块复用或 arena 释放。根枚举和 NoGC 校验提供收集器所需的边界，不代表收集器已启用。收集器、异常展开和线程/调度的目标设计见 [architecture.md](architecture.md)。
 
@@ -14,14 +14,15 @@ main 使用进程级 bump arena，不执行 GC、空闲块复用或 arena 释放
 | --- | --- |
 | 普通实例 | 字段从 `+16` 开始，按声明表示分为 Word、Ref、Tagged |
 | String | `+16` 长度，`+24` 起为 UTF-16 数据；无托管子引用 |
-| List | `+16` 长度、`+24` 容量、`+32` backing Ref、`+40` 原生 TypeRef 地址 |
+| List | `+16` 长度、`+24` 容量、`+32` backing Ref、`+40` TypeRef 引用 |
 | backing array | `+16` 已初始化前缀长度，`+24` 起存元素；Word、Ref、Tagged 分别使用对应描述符，仅扫描有效前缀 |
 | IntBox | `+16` 完整整数负载；无托管子引用 |
-| Function | `+16` 原生结构签名引用、`+24` 调用适配器入口；捕获字段从 `+32` 开始，按描述符位图扫描；无捕获对象仍为 32 字节 |
+| Function | `+16` TypeRef 引用、`+24` 调用适配器入口；类型引用及捕获字段参与扫描，捕获字段从 `+32` 开始；无捕获对象仍为 32 字节 |
+| TypeRef | `+16` 类型种类、`+24` 子类型或函数签名位移、`+32` 类描述符位移、`+40` 值表示；堆记录扫描子类型，类描述符不作托管引用 |
 
 ClassDesc 为 64 字节只读记录，保存实例尺寸、字段数、对象种类、Ref/Tagged 位图、类名及可达的 toString 入口。位图按每 64 字段一个 word 分段，不限制为 64 个字段，全零位图不保留存储。变长对象按描述符种类扫描，不借用普通字段位图。
 
-TypeRef 为 32 字节原生只读记录，描述类型种类、子类型、类描述符和存储表示；它不是托管 Dart Type 对象。类型边、类名和代码入口以相对所属记录的位移编码，编译期实体 ID 不直接写作运行时地址。描述符、类型记录及常量按实际依赖链接。
+TypeRef 的固定部分为 48 字节，是内部类型记录，不直接充当公开的 Dart Type 值。静态记录带 `objectStaticRelative` 标记，只引用静态元数据；堆记录使用普通对象头，其子类型由根遍历保留。List 和函数对象可引用这两种记录，扫描时跳过不持有堆引用的静态类型。函数签名记录保存结果类型、必需参数数和参数类型；堆函数类型将签名内联在固定部分之后，并扫描结果及参数类型。记录内类型边仍以所属记录或条目为基址保存相对位移。描述符、类型记录及常量按实际依赖链接，编译期实体 ID 不直接写作运行时地址。
 
 List 标志 `objectListFixed` / `objectListReadOnly` 分别限制长度变化和内容修改；语言行为见 [表达式](../specs/expressions.md)。更新 List 长度时同步维护 backing 的已初始化前缀，缩短后不扫描前缀之外的旧元素。
 
@@ -82,7 +83,7 @@ NoGC 是静态合同验证，不插入收集器、安全点轮询或运行时注
 | --- | --- |
 | `rtRootMark()` | 返回当前临时根前缀位置 |
 | `rtRootPush(value, kind)` | 按 Ref/Tagged 表示登记临时引用；根缓冲为原始内存 |
-| `rtRootPushValue(value, type)` | 根据原生 TypeRef 的表示登记；Word 不登记 |
+| `rtRootPushValue(value, type)` | 根据 TypeRef 的值表示登记；Word 不登记 |
 | `rtRootRestore(mark)` | 截断临时根活跃前缀，不影响持久槽 |
 | `rtGlobalRootNew(value, kind)` | 创建持久槽，返回从 1 开始的稳定索引 |
 | `rtGlobalRootValue(index)` / `rtGlobalRootSet(index, value)` | 读取或更新持久槽；设为零释放其持有关系，槽索引不复用 |
@@ -149,5 +150,5 @@ UTF-8 编码使用 I/O 层拥有的可复用原始缓冲，按需映射和扩容
 ## 行为验证入口
 
 - [behavior_test.dart](../test/behavior_test.dart)：core/NoGC、函数值、I/O 程序及拒绝/失败用例。
-- [roots.dart](../test/fixtures/roots.dart)：`noGcRoots()`、`runtimeOwnership()`、`builderRoots()`、`constantObjectRoots()`、`closureRoots()`。
+- [roots.dart](../test/fixtures/roots.dart)：`noGcRoots()`、`runtimeOwnership()`、`builderRoots()`、`constantObjectRoots()`、`closureRoots()`、`typeGraphRoots()`。
 - [values.dart](../test/fixtures/values.dart)：String、List、类型与函数值行为。

@@ -663,6 +663,122 @@ void closureRoots(int queue, int edges) {
   check(callbacks[0]() == 1606);
 }
 
+int heapType(int source, [int child = -1]) {
+  var mark = rt.rtRootMark();
+  rt.rtRootPush(source, abi.storageRef);
+  if (child >= 0) rt.rtRootPush(child, abi.storageRef);
+  var result = rt.rtAlloc(abi.typeRefBytes);
+  rt.nativeStore64(result, rt.rtObjectDescriptor(source));
+  rt.nativeStore64(result + abi.objectFlagsOffset, 0);
+  rt.nativeStore64(
+    result + abi.typeKindOffset,
+    rt.nativeLoad64(source + abi.typeKindOffset),
+  );
+  rt.nativeStore64(
+    result + abi.typeArgumentOffset,
+    child < 0 ? 0 : child - result,
+  );
+  var descriptor = rt.nativeLoad64(source + abi.typeClassOffset);
+  rt.nativeStore64(
+    result + abi.typeClassOffset,
+    descriptor == 0 ? 0 : source + descriptor - result,
+  );
+  rt.nativeStore64(
+    result + abi.typeValueRepOffset,
+    rt.nativeLoad64(source + abi.typeValueRepOffset),
+  );
+  rt.rtRootRestore(mark);
+  return result;
+}
+
+int heapFunctionType(int source, int resultType, int parameterType) {
+  var mark = rt.rtRootMark();
+  rt.rtRootPush(source, abi.storageRef);
+  rt.rtRootPush(resultType, abi.storageRef);
+  rt.rtRootPush(parameterType, abi.storageRef);
+  var result = rt.rtAlloc(
+    abi.typeRefBytes + abi.functionSignatureParametersOffset + 8,
+  );
+  rt.nativeStore64(result, rt.rtObjectDescriptor(source));
+  rt.nativeStore64(result + abi.objectFlagsOffset, 0);
+  rt.nativeStore64(result + abi.typeKindOffset, abi.typeKindFunction);
+  rt.nativeStore64(result + abi.typeArgumentOffset, abi.typeRefBytes);
+  rt.nativeStore64(result + abi.typeClassOffset, 0);
+  rt.nativeStore64(result + abi.typeValueRepOffset, abi.storageRef);
+  var signature = result + abi.typeRefBytes;
+  rt.nativeStore64(
+    signature + abi.functionSignatureResultOffset,
+    resultType - signature,
+  );
+  rt.nativeStore64(signature + abi.functionSignatureRequiredOffset, 1);
+  rt.nativeStore64(signature + abi.functionSignatureCountOffset, 1);
+  var parameter = signature + abi.functionSignatureParametersOffset;
+  rt.nativeStore64(parameter, parameterType - parameter);
+  rt.rtRootRestore(mark);
+  return result;
+}
+
+List<int> Function(List<int>) typeGraphCallback(Leaf leaf) =>
+    (List<int> input) => <int>[input[0] + leaf.marker];
+
+void typeGraphRoots(int queue, int edges) {
+  var mark = rt.rtRootMark();
+  var words = <int>[831];
+  var list = captureList(words, 1, queue);
+  var staticListType = rt.nativeLoad64(list + abi.listTypeOffset);
+  check(rt.rtTraceObject(staticListType, 0, 0) == 0);
+  var intType = heapType(rt.rtTypeArgument(staticListType));
+  rt.rtRootPush(intType, abi.storageRef);
+  var listType = heapType(staticListType, intType);
+  rt.nativeStore64(list + abi.listTypeOffset, listType);
+  check(rt.rtTraceObject(list, edges, capacity) == 2);
+  check(contains(edges, 2, listType));
+  check(rt.rtTraceObject(listType, edges, capacity) == 1);
+  check(rt.nativeLoad64(edges) == intType);
+  check(rt.rtTraceObject(intType, 0, 0) == 0);
+  Object value = words;
+  check(value is List<int> && value is! List<String>);
+  words.add(832);
+  check(words.removeLast() == 832 && words[0] == 831);
+  var copied = words.sublist(0);
+  check(copied[0] == 831);
+
+  var nullable = <int?>[null, 833];
+  var nullableList = captureList(nullable, 2, queue);
+  var nullableListType = rt.nativeLoad64(nullableList + abi.listTypeOffset);
+  var nullableType = heapType(rt.rtTypeArgument(nullableListType), intType);
+  rt.rtRootPush(nullableType, abi.storageRef);
+  var nullableCopy = heapType(nullableListType, nullableType);
+  rt.nativeStore64(nullableList + abi.listTypeOffset, nullableCopy);
+  check(rt.rtTraceObject(nullableCopy, edges, capacity) == 1);
+  check(rt.nativeLoad64(edges) == nullableType);
+  check(rt.rtTraceObject(nullableType, edges, capacity) == 1);
+  check(rt.nativeLoad64(edges) == intType);
+  value = nullable;
+  check(value is List<int?> && value is! List<int>);
+  check(nullable[0] == null && nullable[1] == 833);
+
+  var read = typeGraphCallback(Leaf(834));
+  var callbacks = <List<int> Function(List<int>)>[read, read, read];
+  var functions = captureList(callbacks, 3, queue);
+  check(listElements(functions, edges) == 3);
+  var callback = rt.nativeLoad64(edges);
+  var type = heapFunctionType(rt.rtFunctionType(callback), listType, listType);
+  rt.nativeStore64(callback + abi.functionTypeOffset, type);
+  check(rt.rtTraceObject(callback, edges, capacity) == 2);
+  check(contains(edges, 2, type) && findMarker(edges, 2, 834) != 0);
+  check(rt.rtTraceObject(type, edges, capacity) == 2);
+  check(rt.nativeLoad64(edges) == listType);
+  check(rt.nativeLoad64(edges + 8) == listType);
+  value = callbacks[0];
+  check(value is List<int> Function(List<int>));
+  check(value is! List<String> Function(List<int>));
+  check(callbacks[0](words)[0] == 1665);
+  check(rt.rtRootMark() == mark + 2);
+  rt.rtRootRestore(mark);
+  check(rt.rtRootMark() == mark);
+}
+
 void main(List<String> args) {
   if (args.isNotEmpty && args[0] == 'capacity') {
     capacityFailure(Leaf(190));
@@ -670,6 +786,7 @@ void main(List<String> args) {
   }
   var queue = rt.rtMap(capacity * 8);
   var edges = rt.rtMap(capacity * 8);
+  typeGraphRoots(queue, edges);
   listPatternRoots(queue, edges);
   destructuringRoots(queue, edges);
   switchStatementRoots(queue, edges);

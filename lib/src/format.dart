@@ -146,6 +146,7 @@ class ConstantLayout {
   List<_CaptureDescriptor?> closureDescriptors = <_CaptureDescriptor?>[];
   List<_CaptureDescriptor?> captureCellDescriptors = <_CaptureDescriptor?>[];
   int functionDescriptorOffset = -1;
+  int typeDescriptorOffset = -1;
   List<int> refBitmapOffsets = <int>[];
   List<int> taggedBitmapOffsets = <int>[];
   int metadataFeatures = 0;
@@ -434,6 +435,11 @@ ConstantLayout layoutConstants(int start) {
     functionDescriptorOffset = end;
     end += classDescriptorBytes;
   }
+  int typeDescriptorOffset = -1;
+  if (types.isNotEmpty) {
+    typeDescriptorOffset = end;
+    end += classDescriptorBytes;
+  }
   for (var descriptors in <List<_CaptureDescriptor?>>[
     closureDescriptors,
     captureCellDescriptors,
@@ -585,20 +591,20 @@ ConstantLayout layoutConstants(int start) {
     i++;
   }
   return ConstantLayout(
-    stringOffsets,
-    descriptorOffsets,
-    classNameStrings,
-    typeOffsets,
-    stringDescriptorOffset,
-    listDescriptorOffset,
-    wordArrayDescriptorOffset,
-    refArrayDescriptorOffset,
-    taggedArrayDescriptorOffset,
-    intBoxDescriptorOffset,
-    handleTypeOffset,
-    metadataOffset,
-    end,
-  )
+      stringOffsets,
+      descriptorOffsets,
+      classNameStrings,
+      typeOffsets,
+      stringDescriptorOffset,
+      listDescriptorOffset,
+      wordArrayDescriptorOffset,
+      refArrayDescriptorOffset,
+      taggedArrayDescriptorOffset,
+      intBoxDescriptorOffset,
+      handleTypeOffset,
+      metadataOffset,
+      end,
+    )
     ..globalOffsets = globalOffsets
     ..globalBytes = globalBytes
     ..dataOffsets = dataOffsets
@@ -607,6 +613,7 @@ ConstantLayout layoutConstants(int start) {
     ..captureCellDescriptors = captureCellDescriptors
     ..signatureOffsets = signatureOffsets
     ..functionDescriptorOffset = functionDescriptorOffset
+    ..typeDescriptorOffset = typeDescriptorOffset
     ..refBitmapOffsets = refBitmapOffsets
     ..taggedBitmapOffsets = taggedBitmapOffsets
     ..metadataFeatures = features
@@ -1061,6 +1068,9 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
     );
   }
   var functionDescriptor = 0;
+  if (layout.typeDescriptorOffset >= 0) {
+    imageDescriptor(-10, typeRefBytes, 4, 0, descriptorType, 0, 0, 0);
+  }
   while (functionDescriptor < layout.closureDescriptors.length) {
     var captured = layout.closureDescriptors[functionDescriptor];
     if (captured != null) {
@@ -1130,6 +1140,8 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
     int offset = layout.typeOffsets[typeIndex];
     if (offset >= 0) {
       var type = dartTypes[typeIndex];
+      image64(layout.typeDescriptorOffset - offset);
+      image64(objectStaticRelative);
       image64(imageTypeKind(type.kind));
       int argument = 0;
       if (type.kind == kList || type.kind == kNullable) {
