@@ -781,7 +781,7 @@ void bindingSwitch(LocalBinder binder, int scope, AstStatement statement) {
     var shared = start != end;
     for (var i = start; i <= end; i++) {
       var branch = cases[i];
-      var local = bindingScope(binder, scope);
+      var local = scope;
       if (branch.pattern case final pattern?) {
         local = bindingPatternScope(binder, scope, pattern, false);
         branch.bindings = binder.scopes[local].variables;
@@ -953,26 +953,24 @@ void collectWrittenExpression(
   List<bool> seen,
   List<int> written,
 ) {
-  if (expression.kind == astPatternAssignment)
-    collectWrittenPattern(expression.pattern!, seen, written);
-  if (expression.kind == astSwitchExpression) {
-    for (var arm in expression.arms) {
-      if (arm.guard case final guard?)
-        collectWrittenExpression(guard, seen, written);
-      collectWrittenExpression(arm.value, seen, written);
-    }
-  }
-  if (expression.kind == astForElement) {
-    collectWrittenStatement(expression.loop!, seen, written);
-    return;
-  }
-  if (expression.kind == astAssignment ||
-      (expression.kind == astUnary || expression.kind == astPostfix) &&
-          (expression.text == '++' || expression.text == '--')) {
-    var target = expression.children[0];
-    if (target.kind == astName) {
-      collectWrittenBinding(target.binding, seen, written);
-    }
+  switch (expression.kind) {
+    case astPatternAssignment:
+      collectWrittenPattern(expression.pattern!, seen, written);
+    case astSwitchExpression:
+      for (var arm in expression.arms) {
+        if (arm.guard case final guard?)
+          collectWrittenExpression(guard, seen, written);
+        collectWrittenExpression(arm.value, seen, written);
+      }
+    case astForElement:
+      collectWrittenStatement(expression.loop!, seen, written);
+      return;
+    case astAssignment:
+    case astUnary || astPostfix
+        when expression.text == '++' || expression.text == '--':
+      var target = expression.children[0];
+      if (target.kind == astName)
+        collectWrittenBinding(target.binding, seen, written);
   }
   var i = 0;
   while (i < expression.children.length) {
