@@ -21,26 +21,26 @@ class FlowState {
     this.reachability,
     this.reachable,
   );
-}
 
-FlowState flowCreate(int count, [bool soundFlow = true]) {
-  return FlowState(
-    List<int>.filled(count, -1),
-    List<int>.filled(count, flowUnassigned),
-    List<int>.filled(count, 0),
-    <bool>[true],
-    true,
-  )..soundFlow = soundFlow;
-}
+  factory FlowState.create(int count, [bool soundFlow = true]) {
+    return FlowState(
+      List<int>.filled(count, -1),
+      List<int>.filled(count, flowUnassigned),
+      List<int>.filled(count, 0),
+      <bool>[true],
+      true,
+    )..soundFlow = soundFlow;
+  }
 
-FlowState flowCopy(FlowState state) {
-  return FlowState(
-    state.types.sublist(0),
-    state.assignments.sublist(0),
-    state.writes.sublist(0),
-    state.reachability.sublist(0),
-    state.reachable,
-  )..soundFlow = state.soundFlow;
+  factory FlowState.copy(FlowState state) {
+    return FlowState(
+      state.types.sublist(0),
+      state.assignments.sublist(0),
+      state.writes.sublist(0),
+      state.reachability.sublist(0),
+      state.reachable,
+    )..soundFlow = state.soundFlow;
+  }
 }
 
 void flowUnreachable(FlowState state) {
@@ -49,13 +49,13 @@ void flowUnreachable(FlowState state) {
 }
 
 FlowState flowSplit(FlowState state) {
-  var result = flowCopy(state);
+  var result = FlowState.copy(state);
   result.reachability.add(true);
   return result;
 }
 
 FlowState flowUnsplitTo(FlowState state, int depth) {
-  var result = flowCopy(state);
+  var result = FlowState.copy(state);
   while (result.reachability.length > depth) {
     var reached = result.reachability.removeLast();
     var parent = result.reachability.length - 1;
@@ -79,9 +79,9 @@ FlowState flowJoin(FlowState left, FlowState right, List<int> declaredTypes) {
   var rightReachable = right.reachability[depth - 1];
   FlowState result;
   if (!leftReachable && rightReachable) {
-    result = flowCopy(right);
+    result = FlowState.copy(right);
   } else if (!rightReachable && leftReachable) {
-    result = flowCopy(left);
+    result = FlowState.copy(left);
   } else {
     result = FlowState(
       List<int>.filled(left.types.length, -1),
@@ -209,7 +209,7 @@ FlowState flowAttachFinally(
   FlowState beforeFinally,
   FlowState afterFinally,
 ) {
-  final result = flowCopy(afterTry);
+  final result = FlowState.copy(afterTry);
   if (!afterFinally.reachability.last) flowUnreachable(result);
   for (var i = 0; i < result.types.length; i++) {
     final after = afterFinally.types[i];
