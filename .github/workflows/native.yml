@@ -28,15 +28,25 @@ on:
         type: string
 
 jobs:
-  linux-arm64:
-    if: inputs.architecture != 'x64'
-    runs-on: ubuntu-24.04-arm
+  linux:
+    name: linux-${{ matrix.architecture }}
+    runs-on: ${{ matrix.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: >-
+          ${{ fromJSON(inputs.architecture == 'arm64' && '["arm64"]' ||
+                      inputs.architecture == 'x64' && '["x64"]' ||
+                      '["arm64","x64"]') }}
+    env:
+      DARTC_CROSS_SEED: ${{ matrix.architecture == 'arm64' && 'dartc-linux' || 'dartc-linux-x64' }}
+      DARTC_MACOS_OUTPUT: ${{ matrix.architecture == 'arm64' && 'dartc-cross-macos' || 'dartc-cross-macos-x64' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: '${{ inputs.dart_sdk }}'
-          architecture: arm64
+          architecture: ${{ matrix.architecture }}
       - uses: actions/checkout@v7
         if: inputs.cross_ref != ''
         with:
@@ -44,7 +54,7 @@ jobs:
           path: .cross
       - name: Bootstrap from the supplied native seed
         if: inputs.cross_ref != ''
-        run: dart tool/bootstrap.dart --seed .cross/dartc-linux
+        run: dart tool/bootstrap.dart --seed ".cross/$DARTC_CROSS_SEED"
       - name: Cold bootstrap without an existing seed
         if: inputs.cross_ref == ''
         run: dart tool/bootstrap.dart
@@ -54,69 +64,34 @@ jobs:
       - run: dart test/program_benchmark_test.dart --compiler build/dartc-stage2
       - run: dart tool/fuzz.dart --compiler build/dartc-stage2 --count 12
       - name: Package and test the native release
-        if: inputs.package_release
+        if: inputs.package_release && matrix.architecture == 'arm64'
         run: dart tool/package_release.dart --compiler build/dartc-stage2
       - uses: actions/upload-artifact@v7
-        if: inputs.package_release
+        if: inputs.package_release && matrix.architecture == 'arm64'
         with:
           name: dartc-linux-arm64-release
           path: build/release/*
           if-no-files-found: error
           retention-days: 7
       - name: Run the Mac-built Linux compiler
-        if: inputs.cross_ref != ''
+        if: inputs.cross_ref != '' && matrix.architecture == 'arm64'
         env:
           PATH: /usr/bin:/bin
         run: |
-          .cross/dartc-linux "$PWD/bin/dartc.dart" --std "$PWD/lib/src/runtime.dart" -o "$PWD/build/cross-stage1"
+          ".cross/$DARTC_CROSS_SEED" "$PWD/bin/dartc.dart" --std "$PWD/lib/src/runtime.dart" -o "$PWD/build/cross-stage1"
           cmp build/cross-stage1 build/dartc-stage2
-      - name: Cross-compile back to macOS
-        env:
-          PATH: /usr/bin:/bin
-        run: build/dartc-stage2 "$PWD/bin/dartc.dart" --std "$PWD/lib/src/runtime.dart" --target macos-arm64 -o "$PWD/build/dartc-cross-macos"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: dartc-cross-macos
-          path: build/dartc-cross-macos
-          retention-days: 1
-
-  linux-x64:
-    if: inputs.architecture != 'arm64'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dart-lang/setup-dart@v1
-        with:
-          sdk: '${{ inputs.dart_sdk }}'
-          architecture: x64
-      - uses: actions/checkout@v7
-        if: inputs.cross_ref != ''
-        with:
-          ref: ${{ inputs.cross_ref }}
-          path: .cross
-      - name: Bootstrap from the supplied native seed
-        if: inputs.cross_ref != ''
-        run: dart tool/bootstrap.dart --seed .cross/dartc-linux-x64
-      - name: Cold bootstrap without an existing seed
-        if: inputs.cross_ref == ''
-        run: dart tool/bootstrap.dart
-      - run: dart test/differential_test.dart --compiler build/dartc-stage2
-      - run: dart test/measure_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
-      - run: dart test/ssa_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
-      - run: dart test/program_benchmark_test.dart --compiler build/dartc-stage2
-      - run: dart tool/fuzz.dart --compiler build/dartc-stage2 --count 12
       - name: Verify the Mac-built compiler
-        if: inputs.cross_ref != ''
-        run: cmp .cross/dartc-linux-x64 build/dartc-stage2
+        if: inputs.cross_ref != '' && matrix.architecture == 'x64'
+        run: cmp ".cross/$DARTC_CROSS_SEED" build/dartc-stage2
       - name: Cross-compile back to macOS
         env:
           PATH: /usr/bin:/bin
-        run: build/dartc-stage2 bin/dartc.dart --std lib/src/runtime.dart --target macos-arm64 -o build/dartc-cross-macos-x64
+        run: build/dartc-stage2 "$PWD/bin/dartc.dart" --std "$PWD/lib/src/runtime.dart" --target macos-arm64 -o "$PWD/build/$DARTC_MACOS_OUTPUT"
       - name: Package and test the native release
-        if: inputs.package_release
+        if: inputs.package_release && matrix.architecture == 'x64'
         run: dart tool/package_release.dart --compiler build/dartc-stage2
       - uses: actions/upload-artifact@v7
-        if: inputs.package_release
+        if: inputs.package_release && matrix.architecture == 'x64'
         with:
           name: dartc-linux-x64-release
           path: build/release/*
@@ -124,6 +99,6 @@ jobs:
           retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
-          name: dartc-cross-macos-x64
-          path: build/dartc-cross-macos-x64
+          name: ${{ env.DARTC_MACOS_OUTPUT }}
+          path: build/${{ env.DARTC_MACOS_OUTPUT }}
           retention-days: 1
