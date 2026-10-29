@@ -6742,7 +6742,7 @@ void enumValues() {
   if (EnumColor.green case EnumColor.green || EnumColor.blue) print('case');
   EnumColor chosen = .blue;
   print(chosen == EnumColor.blue);
-  EnumColor? maybe;
+  EnumColor? maybe = EnumColor.values.length > 3 ? EnumColor.red : null;
   print(maybe == null);
   maybe = EnumColor.blue;
   print(maybe.name);
