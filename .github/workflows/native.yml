@@ -135,6 +135,8 @@ jobs:
           build/dartc-stage2 bin/dartc.dart --std lib/src/runtime.dart --target macos-arm64 -o build/dartc-cross-macos-arm64
           build/dartc-stage2 bin/dartc.dart --std lib/src/runtime.dart --target linux-x64 -o build/dartc-cross-linux-x64
           build/dartc-stage2 bin/dartc.dart --std lib/src/runtime.dart --target linux-arm64 -o build/dartc-cross-linux-arm64
+          build/dartc-stage2 test/fixtures/values.dart --std lib/src/runtime.dart --target macos-arm64 -o build/values-cross-macos-arm64
+          build/dartc-stage2 test/fixtures/values.dart --std lib/src/runtime.dart --target macos-x64 -o build/values-macos-x64
       - name: Package and test the native release
         if: inputs.package_release
         run: |
@@ -146,6 +148,7 @@ jobs:
           path: |
             build/dartc-stage2
             build/dartc-cross-*
+            build/values-*
             build/release/*
           if-no-files-found: error
           retention-days: 7

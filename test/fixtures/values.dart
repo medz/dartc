@@ -5896,6 +5896,32 @@ void doubleValues() {
     '$floatingConstant',
   ];
   print(constants);
+  const negativeNaN = -double.nan;
+  const nanIdentities = <bool>[
+    identical(double.nan, negativeNaN),
+    identical(negativeNaN, -double.nan),
+    identical(<double>[double.nan], <double>[negativeNaN]),
+    identical(FrozenFloat(double.nan, 1), FrozenFloat(negativeNaN, 1)),
+  ];
+  print(nanIdentities);
+  dynamic nanValue = double.parse('NaN');
+  print([identical(nanValue, nanValue), identical(nanValue, -nanValue)]);
+  const invalidConstants = <double>[
+    0 / 0,
+    double.infinity - double.infinity,
+    double.infinity + double.negativeInfinity,
+    0 * double.infinity,
+  ];
+  final zero = double.parse('0');
+  final infinity = double.parse('Infinity');
+  final invalidResults = <double>[
+    zero / zero,
+    infinity - infinity,
+    infinity + -infinity,
+    zero * infinity,
+  ];
+  for (var i = 0; i < invalidResults.length; i++)
+    print(identical(invalidConstants[i], invalidResults[i]));
   print(1_2.5_0e-1_0);
 }
 

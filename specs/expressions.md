@@ -10,7 +10,7 @@
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
 | §17.1 表达式求值 | 部分实现 | 已支持表达式按规定顺序求值，短路保留副作用；异常完成、异步及完整表达式集合尚缺。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerExpression`；[values.dart](../test/fixtures/values.dart)：`assignmentValues`、`conditionContexts`。 |
-| §17.2 对象身份 | 部分实现 | `identical` 覆盖整数、布尔、null 和对象身份；宽整数装箱不改变整数身份；const 类实例按实际类及规范化字段共享身份，普通构造调用保持新实例；同一顶层函数的值引用跨前缀和导出共享身份。double 身份区分正负零并处理 NaN；记录身份未实现。 | [runtime.dart](../lib/src/runtime.dart)：`rtValueIdentical`；[constants.dart](../lib/src/constants.dart)：`_constantSame`；[values.dart](../test/fixtures/values.dart)：`constantLists`、`constObjects`、`functionValues`、`doubleValues`、`floatingContexts`。 |
+| [§17.2 对象身份][identity] | 部分实现 | `identical` 覆盖整数、布尔、null 和对象身份；宽整数装箱不改变整数身份；const 类实例按实际类及规范化字段共享身份，普通构造调用保持新实例；同一顶层函数的值引用跨前缀和导出共享身份。double 身份按完整位模式比较，区分正负零以及 NaN 的符号和负载；记录身份未实现。 | [runtime.dart](../lib/src/runtime.dart)：`rtValueIdentical`；[constants.dart](../lib/src/constants.dart)：`_constantSame`；[values.dart](../test/fixtures/values.dart)：`constantLists`、`constObjects`、`functionValues`、`doubleValues`、`floatingContexts`。 |
 | §17.3 常量表达式 | 部分实现 | 标量、支持的运算、条件、插值、常量引用、受支持的顶层函数引用与核心 `identical` 可求值；拒绝非常量引用和循环。静态类型与实际负载分开；支持当前生成式构造器子集的 const 实例，与 List 共用规范化身份；Map、Set、完整潜在常量表达式及其他构造形式仍缺。 | [constants.dart](../lib/src/constants.dart)：`evaluateConstant`、`evaluateGlobalConstant`、`checkConstantConstructors`；[values.dart](../test/fixtures/values.dart)：`constObjects`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`、`libraries`。 |
 | §17.3.2 常量上下文 | 部分实现 | 支持顶层和局部 const、嵌套隐式 const List 及上下文元素类型；参数 List 默认值需显式 `const`，不能把普通 `[]` 当默认常量。const 构造实参引入隐式常量上下文；构造器声明默认值和字段初始化仍按自身声明作用域及常量资格检查，不能由调用方上下文放宽。 | [constants.dart](../lib/src/constants.dart)：`_constantList`；[frontend.dart](../lib/src/frontend.dart)：`feResolveDefaults`；[values.dart](../test/fixtures/values.dart)：`constantDefaults`、`constantLists`。 |
 | §17.4 null、§17.6 布尔 | 部分实现 | 有字面量及静态类型，动态布尔消费有检查；`Object`、`bool?` 不能未经转换或提升用作条件。 | [typing.dart](../lib/src/typing.dart)：`typingCondition`；[frontend.dart](../lib/src/frontend.dart)：`feBooleanValue`；[values.dart](../test/fixtures/values.dart)：`valueContexts`、`flowBranches`。 |
@@ -127,7 +127,7 @@ SDK 3.13.7 CFE 接受 `const dynamic value = null; const result = value?[true]`�
 
 [double API](https://api.dart.dev/dart-core/double-class.html) 中已接入下列方法的直接调用：`parse`、`tryParse`、`toString`、`toInt`/`truncate`、`toDouble`、`remainder`、`compareTo`、`isNaN`/`isFinite`/`isInfinite`/`isNegative`，以及五个 double 常量。核心静态成员经类型别名访问、方法值提取和一般动态方法分派仍需补齐。`abs`、`sign`、取整变体、`clamp`、指定精度字符串、hashCode 与公开 Type 等仍是标准库缺口；错误路径尚无可捕获的 FormatException、UnsupportedError 或 TypeError。验证入口为 `doubleValues`、`floatingContexts` 与 `failingValues`。
 
-十进制输入输出、混合整数比较、非有限值及常量/运行时一致性以 SDK 3.13.7 的 macOS ARM64 执行为对照。SDK 的混合数值运算符会先把整数转换为 double：例如 `9007199254740992.0 == 9007199254740993` 为 true；`compareTo` 按精确数值返回 -1。这与 [num.operator == 的数学值描述](https://api.dart.dev/dart-core/num/operator_equals.html)存在边界差异，当前保留 SDK 行为并由用例固定，不把它宣称为完整规范一致性。[compareTo](https://api.dart.dev/dart-core/num/compareTo.html) 的 NaN 总序和正负零规则单独验证。新增浮点路径尚未在 Linux ARM64 执行验证。
+十进制输入输出、混合整数比较、非有限值及常量/运行时一致性以 SDK 3.13.7 的 macOS ARM64 执行为对照。SDK 的混合数值运算符会先把整数转换为 double：例如 `9007199254740992.0 == 9007199254740993` 为 true；`compareTo` 按精确数值返回 -1。这与 [num.operator == 的数学值描述](https://api.dart.dev/dart-core/num/operator_equals.html)存在边界差异，当前保留 SDK 行为并由用例固定，不把它宣称为完整规范一致性。[compareTo](https://api.dart.dev/dart-core/num/compareTo.html) 的 NaN 总序和正负零规则单独验证。非法浮点四则运算产生的 NaN 符号在 ARM64 与 x64 上不同；常量求值按显式输出目标产生对应位模式，`identical` 和常量规范化均保留该区别。`doubleValues` 同时覆盖常量/运行时身份及 const List/对象中的正负 NaN。新增浮点路径尚未在 Linux ARM64 执行验证。
 
 [draft]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex
 [pdf]: https://dart.dev/to/spec-draft
@@ -158,3 +158,5 @@ SDK 3.13.7 CFE 接受 `const dynamic value = null; const result = value?[true]`�
 [null-aware-elements]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.8/null-aware-elements/feature-specification.md
 
 [dot-shorthands]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.10/dot-shorthands/feature-specification.md
+
+[identity]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L7915-L7962

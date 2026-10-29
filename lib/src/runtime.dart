@@ -1882,7 +1882,7 @@ int rtValueIdentical(int left, int right) {
   if (a == typeKindDouble && b == typeKindDouble) {
     final x = rtValueDouble(left);
     final y = rtValueDouble(right);
-    return x == y || binary64IsNaN(x) && binary64IsNaN(y) ? 1 : 0;
+    return x == y ? 1 : 0;
   }
   if (a == typeKindInt &&
       b == typeKindInt &&

@@ -10,6 +10,7 @@ import 'members.dart';
 import 'resolve_type.dart';
 import 'source.dart';
 import 'symbols.dart';
+import 'target.dart';
 import 'types.dart';
 import 'typing.dart';
 
@@ -367,6 +368,13 @@ ConstantValue _constantBinary(
     if (op == '-') integer = hostFloat64Sub(a, b);
     if (op == '*') integer = hostFloat64Mul(a, b);
     if (op == '/') integer = hostFloat64Div(a, b);
+    // Invalid arithmetic produces different NaN signs on ARM64 and x64.
+    // Constant evaluation must follow the output target, not its host.
+    if ((op == '+' || op == '-' || op == '*' || op == '/') &&
+        binary64IsNaN(integer) &&
+        !binary64IsNaN(a) &&
+        !binary64IsNaN(b))
+      integer = targetX64 ? binary64NaN | binary64Sign : binary64NaN;
     if (op == '%') integer = binary64Modulo(a, b);
     if (op == '~/') {
       final quotient = hostFloat64Div(a, b);
@@ -429,10 +437,8 @@ bool _constantSame(ConstantValue left, ConstantValue right) {
   if (left.kind != right.kind) return false;
   if (left.kind == tString) return left.text == right.text;
   if (left.kind == tNull) return true;
-  if (left.kind == tDouble)
-    return left.integer == right.integer ||
-        binary64IsNaN(left.integer) && binary64IsNaN(right.integer);
   if (left.kind == tInt ||
+      left.kind == tDouble ||
       left.kind == tBool ||
       left.kind == tFunction ||
       typeIsList(left.kind) ||

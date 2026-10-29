@@ -6,6 +6,8 @@
 
 ### Fixes
 
+- Preserve double NaN bit patterns in identity checks and constant canonicalization. Cross-compilation uses the output target's NaN representation for invalid floating-point arithmetic.
+
 - Include transitive runtime and core-library source dependencies in native archives, so splitting library implementations into new files does not leave them out of the package.
 
 ### Performance
