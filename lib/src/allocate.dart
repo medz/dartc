@@ -20,7 +20,7 @@ void allocateLiveIntervals(
     int bit = 0;
     while (bits != 0) {
       if ((bits & 1) != 0) {
-        allocateTouch(starts, ends, word * 32 + bit, position);
+        allocateTouch(starts, ends, word * 64 + bit, position);
       }
       bits = bits >>> 1;
       bit = bit + 1;
@@ -312,7 +312,7 @@ void verifyAllocation(MachineFunction function, List<LivenessBlock> blocks) {
       var bits = live[word];
       var bit = 0;
       while (bits != 0) {
-        if ((bits & 1) != 0) use(word * 32 + bit);
+        if ((bits & 1) != 0) use(word * 64 + bit);
         bits >>>= 1;
         bit++;
       }

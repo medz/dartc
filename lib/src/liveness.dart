@@ -1,5 +1,7 @@
 import 'machine.dart';
 
+// Each set packs 64 values per int. Enumerate with unsigned shifts so bit 63
+// participates in liveness just like the other bits.
 class LivenessBlock {
   int start;
   int end;
@@ -19,20 +21,20 @@ class LivenessBlock {
 }
 
 void _define(LivenessBlock block, int value) {
-  final int word = value ~/ 32;
-  block.definitions[word] = block.definitions[word] | (1 << (value & 31));
+  final int word = value ~/ 64;
+  block.definitions[word] = block.definitions[word] | (1 << (value & 63));
 }
 
 void _use(LivenessBlock block, int value) {
-  final int word = value ~/ 32;
-  final int bit = 1 << (value & 31);
+  final int word = value ~/ 64;
+  final int bit = 1 << (value & 63);
   if ((block.definitions[word] & bit) == 0) {
     block.uses[word] = block.uses[word] | bit;
   }
 }
 
 List<LivenessBlock> machineLiveness(MachineFunction function) {
-  final int words = (function.reps.length + 31) ~/ 32;
+  final int words = (function.reps.length + 63) ~/ 64;
   final List<LivenessBlock> blocks = <LivenessBlock>[];
   int position = 0;
   int b = 0;
@@ -103,8 +105,7 @@ List<LivenessBlock> machineLiveness(MachineFunction function) {
         if (term.second.target >= 0) {
           out = out | blocks[term.second.target].liveIn[word];
         }
-        int inside = block.uses[word] | (out & ~block.definitions[word]);
-        inside = inside & 0xffffffff;
+        final int inside = block.uses[word] | (out & ~block.definitions[word]);
         if (block.liveIn[word] != inside || block.liveOut[word] != out) {
           block.liveIn[word] = inside;
           block.liveOut[word] = out;

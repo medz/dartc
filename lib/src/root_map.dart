@@ -17,8 +17,8 @@ class CallRootMap {
 List<CallRootMap> emittedRootMaps = <CallRootMap>[];
 
 void _rootUse(List<int> live, int value) {
-  final word = value ~/ 32;
-  live[word] = live[word] | (1 << (value & 31));
+  final word = value ~/ 64;
+  live[word] = live[word] | (1 << (value & 63));
 }
 
 Never _rootMapError(String message) {
@@ -40,7 +40,7 @@ CallRootMap _callRootMap(
     var bit = 0;
     while (bits != 0) {
       if ((bits & 1) != 0) {
-        final value = word * 32 + bit;
+        final value = word * 64 + bit;
         final rep = function.reps[value];
         if (rep == rRef || rep == rTagged) {
           final location = function.allocation.locations[value];
@@ -98,8 +98,8 @@ List<CallRootMap> buildCallRootMaps(MachineFunction function) {
       final instruction = block.instructions[i];
       if (instruction.output >= 0) {
         final value = instruction.output;
-        final word = value ~/ 32;
-        live[word] = live[word] & ~(1 << (value & 31));
+        final word = value ~/ 64;
+        live[word] = live[word] & ~(1 << (value & 63));
       }
       var input = 0;
       while (input < instruction.inputs.length) {
