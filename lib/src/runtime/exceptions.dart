@@ -25,6 +25,14 @@ Never rtRaiseException(Object value, StackTrace trace) {
   final state = _state;
   state.value = value;
   state.trace = trace;
+  final object = nativeValueBits(value);
+  if (object > valueTrue && (object & 1) == 0) {
+    final offset = nativeLoad64(
+      rtObjectDescriptor(object) + descriptorErrorStackTraceOffset,
+    );
+    if (offset != 0 && nativeLoad64(object + offset) == 0)
+      nativeStore64(object + offset, nativeValueBits(trace));
+  }
   if (state.context == 0) state.context = rtMap(unwindContextBytes);
   final context = state.context;
   nativeCaptureContext(context);

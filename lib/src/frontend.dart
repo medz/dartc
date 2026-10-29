@@ -2056,6 +2056,22 @@ void feCheckExport(ConstantValue value, int function, int global, int token) {
   }
 }
 
+void feResolveCoreError() {
+  final symbol = symbolExportedDeclaration(feSymbols, sourceCore, 'Error');
+  if (symbol < 0 || feSymbols.declarations[symbol].kind != symbolClass) return;
+  final owner = feSymbols.declarations[symbol].target;
+  final members = feOwnMembers[owner];
+  final member = lookupMember(members, 'stackTrace');
+  final field = member < 0 ? -1 : members.members[member].field;
+  if (field < 0)
+    feAstError(
+      feClassNodes[owner].token,
+      'core Error requires a stackTrace field',
+    );
+  coreErrorClass = owner;
+  coreErrorStackTraceOffset = objectHeaderBytes + feFieldIndices[field] * 8;
+}
+
 void feResolvePragma() {
   fePragmaClass = -1;
   fePragmaNameField = -1;
@@ -6755,6 +6771,8 @@ void parseSource(SourceProgram source) {
   classTaggedMasks.clear();
   classToStringFunctions.clear();
   classNames.clear();
+  coreErrorClass = -1;
+  coreErrorStackTraceOffset = 0;
   feClassSources.clear();
   feClassNodes.clear();
   feMembers.clear();
@@ -6966,6 +6984,7 @@ void parseSource(SourceProgram source) {
     classToStringFunctions[owner] =
         rendered == null || rendered.receiverParameter ? -1 : rendered.method;
   }
+  feResolveCoreError();
   feCheckFactoryRedirects();
   var sourceFunctions = functions.length;
   final bodyBindings = <FunctionBindings>[];

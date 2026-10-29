@@ -326,6 +326,8 @@ List<List<int>> classPointerMasks = <List<int>>[];
 List<List<int>> classTaggedMasks = <List<int>>[];
 List<String> classNames = <String>[];
 List<int> classToStringFunctions = <int>[];
+int coreErrorClass = -1;
+int coreErrorStackTraceOffset = 0;
 
 int internString(String text) {
   var i = 0;

@@ -1173,18 +1173,26 @@ void exceptionRootCatch(int queue) {
     check(retained.marker == 970 && value.marker == 971);
     check(trace.toString().indexOf('exceptionRootThrow') >= 0);
   }
+  ArgumentError? retainedError;
   try {
     throw ArgumentError.value(Leaf(972), 'payload', Leaf(973));
   } on ArgumentError catch (error, trace) {
+    retainedError = error;
     final count = snapshot(queue);
     check(contains(queue, count, rt.nativeValueBits(error)));
     check(contains(queue, count, rt.nativeValueBits(trace)));
     final fields = traceObject(rt.nativeValueBits(error), queue);
+    check(contains(queue, fields, rt.nativeValueBits(error.stackTrace)));
+    check(error.stackTrace.toString() == trace.toString());
     check(
       findMarker(queue, fields, 972) == rt.nativeValueBits(error.invalidValue),
     );
     check(findMarker(queue, fields, 973) == rt.nativeValueBits(error.message));
   }
+  heap.rtCollect();
+  check(
+    retainedError!.stackTrace.toString().indexOf('exceptionRootCatch') >= 0,
+  );
 }
 
 void exceptionRoots(int queue) {

@@ -37,7 +37,7 @@ Object rtCaughtException() => rtExceptionValue();
 StackTrace rtCaughtTrace() => rtExceptionTrace();
 int rtClearException() => rtClearPendingException();
 
-const int rtAbiVersion = 17;
+const int rtAbiVersion = 18;
 int rtHostTarget() {
   return nativeTarget();
 }

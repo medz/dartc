@@ -158,8 +158,9 @@ void imageDescriptor(
   int kind,
   int taggedBitmap,
   int name,
-  int toString,
-) {
+  int toString, [
+  int errorStackTrace = 0,
+]) {
   image64(id);
   image64(size);
   image64(fields);
@@ -168,6 +169,16 @@ void imageDescriptor(
   image64(taggedBitmap);
   image64(name);
   image64(toString);
+  image64(errorStackTrace);
+}
+
+int imageErrorStackTraceOffset(int owner) {
+  while (true) {
+    if (owner == coreErrorClass) return coreErrorStackTraceOffset;
+    final parent = classSuperclasses[owner];
+    if (!typeIsClass(parent)) return 0;
+    owner = typeArgument(parent);
+  }
 }
 
 int imageTypeKind(int kind) {
@@ -350,6 +361,7 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
         tagged,
         name,
         toString,
+        imageErrorStackTraceOffset(descriptor),
       );
     }
     descriptor++;

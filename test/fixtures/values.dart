@@ -2391,8 +2391,30 @@ class ErrorMessage {
 }
 
 class ImplementedError implements Error {
-  StackTrace? get stackTrace => null;
+  int marker = 73;
+  int reads = 0;
+  StackTrace? get stackTrace {
+    reads++;
+    return null;
+  }
 }
+
+class ExtendedError extends Error {
+  int reads = 0;
+  StackTrace? get stackTrace {
+    reads++;
+    return null;
+  }
+
+  StackTrace? get originalTrace => super.stackTrace;
+}
+
+class DerivedError extends ExtendedError {
+  final int marker = 79;
+}
+
+Never errorFirstThrow(Error error) => throw error;
+Never errorSecondThrow(Error error) => throw error;
 
 void exceptionValues() {
   print(Error.safeToString(null));
@@ -2504,6 +2526,7 @@ void exceptionValues() {
   } on RangeError catch (error, trace) {
     print(identical(error, range));
     print(trace.toString());
+    print(error.stackTrace.toString() == trace.toString());
   } finally {
     print('trace finally');
   }
@@ -2512,7 +2535,46 @@ void exceptionValues() {
     throw implemented;
   } on Error catch (error) {
     print(identical(error, implemented));
+    print(implemented.marker);
+    print(implemented.reads);
     print(error.stackTrace == null);
+    print(implemented.reads);
+  }
+  final firstError = Error();
+  print(firstError.stackTrace == null);
+  try {
+    errorFirstThrow(firstError);
+  } catch (_, trace) {
+    print(firstError.stackTrace.toString() == trace.toString());
+    print(trace.toString().indexOf('errorFirstThrow') >= 0);
+  }
+  final firstTrace = firstError.stackTrace.toString();
+  try {
+    try {
+      errorSecondThrow(firstError);
+    } catch (_, trace) {
+      print(firstError.stackTrace.toString() == firstTrace);
+      print(trace.toString().indexOf('errorFirstThrow') < 0);
+      print(trace.toString().indexOf('errorSecondThrow') >= 0);
+      rethrow;
+    }
+  } catch (_, trace) {
+    print(firstError.stackTrace.toString() == firstTrace);
+    print(trace.toString().indexOf('errorSecondThrow') >= 0);
+  }
+  try {
+    Error.throwWithStackTrace(firstError, supplied);
+  } catch (_, trace) {
+    print(trace.toString() == supplied.toString());
+    print(firstError.stackTrace.toString() == firstTrace);
+  }
+  final derived = DerivedError();
+  try {
+    throw derived;
+  } catch (_, trace) {
+    print(derived.reads);
+    print(derived.marker);
+    print(derived.originalTrace.toString() == trace.toString());
   }
   for (var value in <Object>[
     0,

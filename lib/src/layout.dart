@@ -1,5 +1,5 @@
 // Shared compiler/runtime object layout. Offsets are bytes.
-const int runtimeAbiVersion = 17;
+const int runtimeAbiVersion = 18;
 const int objectHeaderBytes = 16;
 const int objectFlagsOffset = 8;
 // Static objects store a descriptor displacement relative to their own address.
@@ -10,7 +10,7 @@ const int objectTypeTemplate = 8;
 const int stringLengthOffset = 16;
 const int stringDataOffset = 24;
 
-const int classDescriptorBytes = 64;
+const int classDescriptorBytes = 72;
 const int descriptorSizeOffset = 8;
 const int descriptorFieldsOffset = 16;
 const int descriptorRefBitmapOffset = 24;
@@ -18,6 +18,7 @@ const int descriptorKindOffset = 32;
 const int descriptorTaggedBitmapOffset = 40;
 const int descriptorNameOffset = 48;
 const int descriptorToStringOffset = 56;
+const int descriptorErrorStackTraceOffset = 64;
 const int descriptorClass = 0;
 const int descriptorString = 1;
 const int metadataStringDescriptorOffset = 0;

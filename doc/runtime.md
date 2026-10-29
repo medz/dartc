@@ -2,7 +2,7 @@
 
 [runtime.dart](../lib/src/runtime.dart) 实现目标程序的运行时算法；共享尺寸、偏移和表示由 [layout.dart](../lib/src/layout.dart) 定义。编译器与运行时必须使用匹配的 ABI，改变布局或调用协议时整体重建。
 
-当前源码 ABI 为 17。TypeRef 带对象头，List 和函数对象的类型引用参与扫描；函数值通过只读实参形状和栈向量调用。旧 ABI 的元数据与函数入口不能与此运行时混用。
+当前源码 ABI 为 18。TypeRef 带对象头，List 和函数对象的类型引用参与扫描；函数值通过只读实参形状和栈向量调用。类描述符包含实际 Error 的轨迹槽偏移。旧 ABI 的元数据与函数入口不能与此运行时混用。
 
 当前运行时在单执行域内使用非移动标记清扫收集器，复用空闲块并释放空 arena；连续分配区采用 bump 分配。根枚举和 NoGC 校验共同约束收集期间的对象可达性与分配边界。线程和调度的目标设计见 [architecture.md](architecture.md)。
 
@@ -22,7 +22,7 @@
 | Function | `+16` TypeRef 引用、`+24` 调用适配器入口；类型引用及捕获字段参与扫描，捕获字段从 `+32` 开始；无捕获对象仍为 32 字节 |
 | TypeRef | `+16` 类型种类、`+24` 子类型、函数签名或类子类型表位移、`+32` 类描述符位移、`+40` 值表示；堆记录扫描子类型，类描述符不作托管引用 |
 
-ClassDesc 为 64 字节只读记录，保存实例尺寸、字段数、对象种类、Ref/Tagged 位图、类名及可达的 toString 入口。位图按每 64 字段一个 word 分段，不限制为 64 个字段，全零位图不保留存储。变长对象按描述符种类扫描，不借用普通字段位图。
+ClassDesc 为 72 字节只读记录，保存实例尺寸、字段数、对象种类、Ref/Tagged 位图、类名及可达的 toString 入口；`+64` 保存 Error.stackTrace 相对对象起点的字段偏移，零表示没有该存储。该偏移由核心库 Error 的实际字段绑定和 extends 链确定，不依据接口关系或用户类名。位图按每 64 字段一个 word 分段，不限制为 64 个字段，全零位图不保留存储。变长对象按描述符种类扫描，不借用普通字段位图。
 
 继承对象保留父类字段和状态槽的偏移，描述符覆盖父类与本类的全部负载。toString 入口采用实际类继承或覆写的具体实现；Object 默认文本由 `rtObjectDefaultString` 直接生成，供 super 调用使用，避免再次进入覆写回调。构造链不分配中间父类对象，整条调用链持有同一接收者根。
 
@@ -155,6 +155,8 @@ typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它
 [frames.dart](../lib/src/runtime/frames.dart) 的 `rtFrameDescriptor(pc)` 是 NoGC 二分查找，区间外返回零。`rtStackTraceString(frame)` 从传入帧的调用者开始，查询返回 PC 后才沿 FP 前进，遇到未知 PC 按运行时合同失败终止。捕获期间被访问的调用者帧保持活动，StringBuffer 和结果 String 由普通托管引用保活。该路径只读取调用链，不恢复寄存器或执行异常处理；标准库 API 范围见 [specs/libraries.md](../specs/libraries.md#stacktrace-api)。
 
 ## 同步异常展开
+
+公共抛出入口只在实际 Error 对象的轨迹槽为空时写入本次 StackTrace，覆盖 getter 不影响父类物理槽，implements Error 不参与写入。字段按普通 Ref 位图保活。再次 throw 为 catch 捕获当前轨迹，但不改写对象的首次轨迹；rethrow 保留捕获的轨迹，throwWithStackTrace 使用指定轨迹。
 
 可达调用需要异常后继时，元数据 `+80` 指向 `metadataHandlers` 处理表，并同时保留帧表。每项把精确返回 PC 映射到调用者的异常边入口，按 PC 排序；两地址均为相对表项的位移。没有处理器的调用无需表项，展开器继续查找父帧。
 
