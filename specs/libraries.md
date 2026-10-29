@@ -24,7 +24,7 @@
 | [§6.3 Concurrency][concurrency] | 未实现 | 原生产物没有 isolates、消息端口、spawn 和独立隔离堆；未提供 `dart:isolate` 的程序执行能力。 | [source.dart](../lib/src/source.dart)、[runtime.dart](../lib/src/runtime.dart)；尚无 isolate 原生行为验证 |
 | [§19][libraries]：完整命名空间与 URI 组合 | 待核对 | 导入图、命名空间优先级及 URI 组合的完整一致性覆盖尚缺。 | [behavior_test.dart](../test/behavior_test.dart) |
 
-package v2 的嵌套根约束在配置边界检查。SDK 3.13.5 在未使用重叠包时接受部分无效配置，本实现按[固定 v2 格式][packages]拒绝；行为测试明确区分该差异，不将其报告为 SDK 完全一致。
+package v2 的重复名称、重复规范化根及嵌套根约束在配置边界检查。包数组顺序不影响大小写敏感的名称查找或最深根的文件归属；`behavior_test.dart` 的 package 用例覆盖多层嵌套、相邻目录前缀、根外文件、空配置和乱序配置。SDK 3.13.5 在未使用重叠包时接受部分无效配置，本实现按[固定 v2 格式][packages]拒绝库目录包含嵌套根或位于嵌套根中的两种重叠；行为测试明确区分该差异，不将其报告为 SDK 完全一致。
 
 [behavior_test.dart](../test/behavior_test.dart) 拥有 Dart 库的多文件行为；[library_test.dart](../test/library_test.dart) 拥有原生静态/动态链接调用，两者验证范围不同。
 

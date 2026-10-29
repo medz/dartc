@@ -3765,25 +3765,47 @@ void main() {
     );
     final nestedMain = File('${packageProject.path}/inner/bin/main.dart');
     nestedMain.parent.createSync(recursive: true);
-    nestedMain.writeAsStringSync('int _=7; void main(){int _=2;print(_);}');
+    final nestedPackages = [
+      {'name': 'future', 'rootUri': '../unused/', 'languageVersion': '3.14'},
+      packageEntry,
+      {
+        'name': 'inner',
+        'rootUri': '../inner/',
+        'packageUri': 'lib/',
+        'languageVersion': '3.7',
+      },
+      {
+        'name': 'leaf',
+        'rootUri': '../inner/deep/aa/nested/',
+        'languageVersion': '3.14',
+      },
+      {'name': 'network', 'rootUri': 'https://example.invalid/package/'},
+    ];
+    for (final (name, directory, value, version) in [
+      ('zeta', 'inner/deep', 11, '3.6'),
+      ('Alpha', 'inner/deeper', 13, '3.7'),
+      ('alpha', 'inner/deep/aa', 18, '3.7'),
+    ]) {
+      nestedPackages.add({
+        'name': name,
+        'rootUri': '../$directory/',
+        'packageUri': 'lib/',
+        'languageVersion': version,
+      });
+      final valueFile = File(
+        '${packageProject.path}/$directory/lib/value.dart',
+      );
+      valueFile.parent.createSync(recursive: true);
+      valueFile.writeAsStringSync('const int value=$value;');
+    }
+    const nestedSource =
+        "import 'package:alpha/value.dart' as a;"
+        "import 'package:Alpha/value.dart' as b;"
+        "import 'package:zeta/value.dart' as c;"
+        'int _=7;void main(){int _=2;print(_);print(a.value+b.value+c.value);}';
+    nestedMain.writeAsStringSync(nestedSource);
     packageConfig.writeAsStringSync(
-      jsonEncode({
-        'configVersion': 2,
-        'packages': [
-          packageEntry,
-          {
-            'name': 'inner',
-            'rootUri': '../inner/',
-            'packageUri': 'lib/',
-            'languageVersion': '3.7',
-          },
-          {
-            'name': 'future',
-            'rootUri': '../unused/',
-            'languageVersion': '3.14',
-          },
-        ],
-      }),
+      jsonEncode({'configVersion': 2, 'packages': nestedPackages}),
     );
     await compare(
       packageMain,
@@ -3792,6 +3814,45 @@ void main() {
       options: ['--packages', packageConfig.path],
     );
     await compare(nestedMain, [], workingDirectory: packageCwd.path);
+    // A preceding root may be a descendant of the owner, a sibling, or outside
+    // the file's directory tree. Directory and package-name prefixes differ.
+    for (final path in [
+      '${packageProject.path}/inner/deep/bin/main.dart',
+      '${packageProject.path}/inner/zz.dart',
+      '${packageProject.path}/z.dart',
+      '${packageProject.path}x/main.dart',
+    ]) {
+      final entry = File(path);
+      entry.parent.createSync(recursive: true);
+      entry.writeAsStringSync(nestedSource);
+      await compare(entry, [], options: ['--packages', packageConfig.path]);
+    }
+    packageConfig.writeAsStringSync(
+      jsonEncode({
+        'configVersion': 2,
+        'packages': nestedPackages.reversed.toList(),
+      }),
+    );
+    await compare(
+      File('${packageProject.path}/inner/deep/bin/main.dart'),
+      [],
+      options: ['--packages', packageConfig.path],
+    );
+    for (final name in ['A', 'zzzz', 'network']) {
+      final entry = File('${packageMain.parent.path}/missing-$name.dart')
+        ..writeAsStringSync("import 'package:$name/value.dart';void main(){}");
+      await reject(
+        entry,
+        diagnostic: name == 'network'
+            ? 'unsupported package root URI'
+            : 'unknown package: $name',
+        checkSdk: true,
+        options: ['--packages', packageConfig.path],
+      );
+    }
+    final emptyConfig = File('${packageConfig.parent.path}/empty.json')
+      ..writeAsStringSync('{"configVersion":2,"packages":[]}');
+    await compare(packageTest, [], options: ['--packages', emptyConfig.path]);
     nearestConfig.writeAsStringSync(
       '{"configVersion":2,"packages":[],"unknown":[1,]}',
     );
@@ -3821,7 +3882,15 @@ void main() {
         'configVersion': 2,
         'packages': [
           packageEntry,
-          {...packageEntry, 'name': 'other'},
+          {...packageEntry, 'name': 'other', 'rootUri': '../inner/../'},
+        ],
+      }),
+      'duplicate-names': jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          packageEntry,
+          {'name': 'other', 'rootUri': '../../other/'},
+          {...packageEntry, 'rootUri': '../../different/'},
         ],
       }),
       'overlap': jsonEncode({
@@ -3829,6 +3898,14 @@ void main() {
         'packages': [
           packageEntry,
           {'name': 'nested', 'rootUri': '../lib%20%25/nested/'},
+        ],
+      }),
+      'overlap-enclosing': jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          {'name': 'deep', 'rootUri': '../inner/deep/'},
+          {...packageEntry, 'packageUri': 'inner/deep/lib/'},
+          {'name': 'inner', 'rootUri': '../inner/', 'packageUri': 'lib/'},
         ],
       }),
       'outside': jsonEncode({
@@ -3845,7 +3922,7 @@ void main() {
       await reject(
         packageHeader,
         // SDK 3.13.5 accepts this unused overlap; the pinned v2 format rejects it.
-        checkSdk: entry.key != 'overlap',
+        checkSdk: !entry.key.startsWith('overlap'),
         workingDirectory: packageCwd.path,
         diagnostic: entry.key == 'future-used'
             ? packageHeader.path

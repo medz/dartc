@@ -9,6 +9,7 @@ class SourcePackage {
   final int languageMinor;
   String? rootPath;
   String? packagePath;
+  SourcePackage? _parent;
 
   SourcePackage(
     this.name,
@@ -21,7 +22,9 @@ class SourcePackage {
 
 class PackageConfig {
   final String path;
+  // Name order after parsing; resolved local roots have a separate path index.
   final List<SourcePackage> packages;
+  List<SourcePackage> _roots = <SourcePackage>[];
 
   PackageConfig(this.path, this.packages);
 }
@@ -32,6 +35,46 @@ class _PackageJson {
   int position = 0;
 
   _PackageJson(this.path, this.text);
+}
+
+int _compareText(String a, String b) {
+  final end = a.length < b.length ? a.length : b.length;
+  for (var i = 0; i < end; i++) {
+    final difference = a.codeUnitAt(i) - b.codeUnitAt(i);
+    if (difference != 0) return difference;
+  }
+  return a.length - b.length;
+}
+
+void _sortPackages(List<SourcePackage> packages, bool byRoot) {
+  final length = packages.length;
+  if (length < 2) return;
+  final scratch = List<SourcePackage>.filled(length, packages[0]);
+  for (var width = 1; width < length; width *= 2) {
+    for (var start = 0; start < length; start += width * 2) {
+      final middle = start + width < length ? start + width : length;
+      final end = middle + width < length ? middle + width : length;
+      var left = start;
+      var right = middle;
+      for (var output = start; output < end; output++) {
+        var takeLeft = right == end;
+        if (left < middle && right < end) {
+          final a = packages[left];
+          final b = packages[right];
+          takeLeft =
+              _compareText(
+                byRoot ? a.rootPath! : a.name,
+                byRoot ? b.rootPath! : b.name,
+              ) <=
+              0;
+        }
+        scratch[output] = takeLeft ? packages[left++] : packages[right++];
+      }
+    }
+    for (var i = 0; i < length; i++) {
+      packages[i] = scratch[i];
+    }
+  }
 }
 
 Never _packageError(_PackageJson json, String message) {
@@ -303,19 +346,17 @@ PackageConfig parsePackageConfig(String path, String text) {
   _jsonSpace(json);
   if (!_jsonTake(json, 93)) {
     while (true) {
-      var package = _packageEntry(json);
-      var i = 0;
-      while (i < packages.length) {
-        if (packages[i].name == package.name)
-          _packageError(json, 'duplicate package name ' + package.name);
-        i++;
-      }
-      packages.add(package);
+      packages.add(_packageEntry(json));
       _jsonSpace(json);
       if (_jsonTake(json, 93)) break;
       _jsonRequire(json, 44);
       _jsonSpace(json);
     }
+  }
+  _sortPackages(packages, false);
+  for (var i = 1; i < packages.length; i++) {
+    if (packages[i - 1].name == packages[i].name)
+      _packageError(json, 'duplicate package name ' + packages[i].name);
   }
   return PackageConfig(path, packages);
 }
@@ -333,11 +374,10 @@ String _packageDirectory(String path) {
 }
 
 void resolvePackageConfig(PackageConfig config, String configUri) {
-  var i = 0;
-  while (i < config.packages.length) {
-    var package = config.packages[i];
-    var root = package.rootUri;
-    var library = package.packageUri;
+  final roots = <SourcePackage>[];
+  for (final package in config.packages) {
+    final root = package.rootUri;
+    final library = package.packageUri;
     if (root.indexOf('?') >= 0 || root.indexOf('#') >= 0)
       packageConfigError(config, 'rootUri cannot have a query or fragment');
     if (sourceUriScheme(library) != '' ||
@@ -346,14 +386,14 @@ void resolvePackageConfig(PackageConfig config, String configUri) {
         library.indexOf('?') >= 0 ||
         library.indexOf('#') >= 0)
       packageConfigError(config, 'packageUri must be a relative directory URI');
-    var scheme = sourceUriScheme(root);
+    final scheme = sourceUriScheme(root);
     if (scheme == '' || scheme == 'file') {
-      var rootUri = _packageDirectory(sourceResolveFileUri(configUri, root));
-      var libraryUri = _packageDirectory(
+      final rootUri = _packageDirectory(sourceResolveFileUri(configUri, root));
+      final libraryUri = _packageDirectory(
         sourceResolveFileUri(rootUri, library),
       );
-      var rootPath = sourceUriPath('/', rootUri);
-      var packagePath = sourceUriPath('/', libraryUri);
+      final rootPath = sourceUriPath('/', rootUri);
+      final packagePath = sourceUriPath('/', libraryUri);
       if (!packagePath.startsWith(rootPath))
         packageConfigError(
           config,
@@ -361,64 +401,73 @@ void resolvePackageConfig(PackageConfig config, String configUri) {
         );
       package.rootPath = rootPath;
       package.packagePath = packagePath;
+      roots.add(package);
     }
-    i++;
   }
-  i = 0;
-  while (i < config.packages.length) {
-    var package = config.packages[i];
-    var root = package.rootPath;
-    var library = package.packagePath;
-    if (root != null && library != null) {
-      var j = 0;
-      while (j < config.packages.length) {
-        var other = config.packages[j];
-        var nested = other.rootPath;
-        if (j != i && nested != null) {
-          if (root == nested)
-            packageConfigError(config, 'duplicate package root: ' + root);
-          if (nested.startsWith(root) &&
-              (nested.startsWith(library) || library.startsWith(nested)))
-            packageConfigError(
-              config,
-              'packageUri overlaps nested package: ' + package.name,
-            );
-        }
-        j++;
-      }
+  _sortPackages(roots, true);
+  SourcePackage? parent;
+  for (final package in roots) {
+    final root = package.rootPath!;
+    while (parent != null && !root.startsWith(parent.rootPath!)) {
+      parent = parent._parent;
     }
-    i++;
+    if (parent != null) {
+      if (root == parent.rootPath)
+        packageConfigError(config, 'duplicate package root: ' + root);
+      final library = parent.packagePath!;
+      // A valid parent's library is disjoint from this entire subtree, so
+      // descendants only need to check their nearest containing root.
+      if (root.startsWith(library) || library.startsWith(root))
+        packageConfigError(
+          config,
+          'packageUri overlaps nested package: ' + parent.name,
+        );
+    }
+    package._parent = parent;
+    parent = package;
   }
+  config._roots = roots;
 }
 
 SourcePackage? sourcePackageForFile(PackageConfig config, String path) {
-  SourcePackage? owner;
-  var length = 0;
-  var i = 0;
-  while (i < config.packages.length) {
-    var package = config.packages[i];
-    var root = package.rootPath;
-    if (root != null && root.length > length && path.startsWith(root)) {
-      owner = package;
-      length = root.length;
+  final roots = config._roots;
+  var low = 0;
+  var high = roots.length;
+  while (low < high) {
+    final middle = (low + high) ~/ 2;
+    if (_compareText(roots[middle].rootPath!, path) <= 0) {
+      low = middle + 1;
+    } else {
+      high = middle;
     }
-    i++;
+  }
+  SourcePackage? owner = low == 0 ? null : roots[low - 1];
+  // The preceding root can be a sibling; climb to a containing ancestor.
+  while (owner != null && !path.startsWith(owner.rootPath!)) {
+    owner = owner._parent;
   }
   return owner;
 }
 
 String resolvePackageUri(PackageConfig config, SourcePackageUri uri) {
-  var i = 0;
-  while (i < config.packages.length) {
-    var package = config.packages[i];
-    if (package.name == uri.name) {
-      var directory = package.packagePath;
+  var low = 0;
+  var high = config.packages.length;
+  while (low < high) {
+    final middle = (low + high) ~/ 2;
+    final package = config.packages[middle];
+    final order = _compareText(package.name, uri.name);
+    if (order < 0) {
+      low = middle + 1;
+    } else if (order > 0) {
+      high = middle;
+    } else {
+      final directory = package.packagePath;
       if (directory == null)
         packageConfigError(
           config,
           'unsupported package root URI: ' + package.rootUri,
         );
-      var path = sourceUriPath(directory, './' + uri.path);
+      final path = sourceUriPath(directory, './' + uri.path);
       if (!path.startsWith(directory))
         packageConfigError(
           config,
@@ -426,7 +475,6 @@ String resolvePackageUri(PackageConfig config, SourcePackageUri uri) {
         );
       return path;
     }
-    i++;
   }
   packageConfigError(config, 'unknown package: ' + uri.name);
 }
