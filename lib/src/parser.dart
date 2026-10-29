@@ -1888,6 +1888,8 @@ List<AstParameter> parserParameters(
     if (covariant) parser.position++;
     final modifier = parserParameterModifier(parser);
     final declaring = declaringFields != null && modifier != '';
+    if (declaringFields != null && covariant && modifier != 'var')
+      parserError(parser, 'covariant declaring parameters require var');
     var type = parserDeclarationType(parser, declaring ? '' : modifier);
     var fieldFormal = parserTake(parser, 'this');
     final superFormal = !fieldFormal && parserTake(parser, 'super');
@@ -1916,12 +1918,13 @@ List<AstParameter> parserParameters(
       if (parserTake(parser, '?')) type.name = 'Function?';
     }
     var parameter = AstParameter(type, name, fieldFormal, token);
-    parameter.covariant = covariant;
+    parameter.covariant = covariant && !declaring;
     if (declaringFields != null && modifier != '') {
       parameter.fieldFormal = true;
       declaringFields.add(
         AstVariable(type, name, const <AstExpression>[], modifier, token)
           ..declaringParameter = parameter
+          ..covariant = covariant
           ..metadata = metadata,
       );
     } else {
@@ -2378,6 +2381,10 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
     } else {
       if (constant && !isStatic)
         parserError(parser, 'const requires a constructor declaration');
+      final covariant =
+          parserIs(parser, 'covariant') &&
+          parser.tokens[parser.position + 1].kind == tokenIdentifier;
+      if (covariant) parser.position++;
       var modifier = 'const';
       if (!constant) modifier = parserModifier(parser);
       var getter =
@@ -2388,6 +2395,8 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
           parser.tokens[parser.position + 1].kind == tokenIdentifier;
       var type = parserInferredType(memberToken);
       if (!getter && !setter) type = parserDeclarationType(parser, modifier);
+      if (covariant && modifier == '' && type.name == '')
+        parserError(parser, 'covariant fields require a type or var');
       final operatorToken = parser.position;
       var member = getter || setter ? '' : parserOperatorName(parser);
       final isOperator = member != '';
@@ -2401,7 +2410,7 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
       if (getter || setter || parserIs(parser, '(') || parserIs(parser, '<')) {
         if (constant)
           parserError(parser, 'const requires a constructor declaration');
-        if (modifier != '') {
+        if (modifier != '' || covariant) {
           parserError(parser, 'methods cannot have variable modifiers');
         }
         var method = parserFunction(
@@ -2430,6 +2439,7 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
         );
         var i = 0;
         while (i < variables.length) {
+          variables[i].covariant = covariant;
           if (isStatic)
             (staticFields ??= <AstVariable>[]).add(variables[i]);
           else

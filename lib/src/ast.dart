@@ -156,6 +156,7 @@ class AstVariable {
   String name;
   List<AstExpression> initializer;
   String modifier;
+  bool covariant = false;
   bool lateVariable = false;
   AstFunction? lateInitializer;
   int token;

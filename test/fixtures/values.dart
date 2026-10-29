@@ -6527,6 +6527,44 @@ class StaticCovariantChild extends StaticCovariantBase {
   }
 }
 
+class DeclaredCovariantFields {
+  covariant num first = 1, second = 2;
+  covariant late num lazy;
+  covariant late final num once;
+  covariant() => 19;
+}
+
+class NarrowCovariantFields extends DeclaredCovariantFields {
+  int first = 4, second = 5;
+  late int lazy;
+  late final int once;
+}
+
+class CovariantFieldSetter extends DeclaredCovariantFields {
+  void set second(int value) {
+    print(value);
+  }
+}
+
+class CovariantPrimaryFields(
+  covariant var num value, {
+  required covariant var num count,
+});
+
+class NarrowCovariantPrimary(
+  covariant var int value, {
+  required covariant var int count,
+}) extends CovariantPrimaryFields {
+  this : super(value, count: count);
+}
+
+class InferredCovariantPrimary(covariant var value)
+    extends CovariantPrimaryFields {
+  this : super(value, count: 1);
+}
+
+class CovariantFunctionField(covariant var int callback(int value));
+
 int covariantIncrement(int value) => value + 1;
 
 void covariantValues() {
@@ -6572,6 +6610,24 @@ void covariantValues() {
   VoidCovariantBase voidParameter = VoidCovariant();
   voidParameter.take(17);
   StaticCovariantChild().take(18);
+  DeclaredCovariantFields fields = NarrowCovariantFields();
+  print([fields.first, fields.second]);
+  fields.first = 20;
+  fields.second += 1;
+  fields.lazy = 21;
+  fields.once = 22;
+  print([fields.first, fields.second, fields.lazy, fields.once]);
+  print(fields.covariant());
+  fields = CovariantFieldSetter();
+  fields.second = 23;
+  CovariantPrimaryFields primary = NarrowCovariantPrimary(24, count: 25);
+  primary.value = 26;
+  primary.count = 27;
+  print([primary.value, primary.count]);
+  final inferredField = InferredCovariantPrimary(1);
+  inferredField.value = 2.5;
+  print(inferredField.value);
+  print(CovariantFunctionField(covariantIncrement).callback(28));
 }
 
 class InheritedChild extends InheritedBase {

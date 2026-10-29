@@ -344,9 +344,7 @@ int feRegisterFunction(
         (owner < 0 || syntax.isStatic || constructor || local))
       feAstError(
         parameter.token,
-        syntax.primary && parameter.fieldFormal
-            ? 'covariant fields are not yet supported'
-            : 'covariant parameters require an instance method',
+        'covariant parameters require an instance method',
       );
   }
   if (syntax.external) {

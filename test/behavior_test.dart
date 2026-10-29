@@ -911,6 +911,8 @@ void main() {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "class B { covariant num value = 1; } class C extends B { void set value(int x) { print('body'); } } double rhs() { print('rhs'); return 2.5; } void main() { B value = C(); print('before'); value.value = rhs(); print('after'); }",
+      "class B(covariant var num value); class C(var int value) extends B { this : super(value); } double rhs() { print('rhs'); return 2.5; } void main() { B value = C(1); print('before'); value.value = rhs(); print('after'); }",
       "class B { void f(void x) {} } class C extends B { void f(covariant int x) { print('body'); } } void rhs() { print('rhs'); } void main() { B value = C(); print('before'); value.f(rhs()); print('after'); }",
       "class B { void f(covariant num x, Object? y) {} } class C extends B { void f(int x, Object? y) { print('body'); } } double first() { print('first'); return 2.5; } int second() { print('second'); return 3; } void main() { B value = C(); print('before'); value.f(first(), second()); print('after'); }",
       "class B { void set value(covariant num x) {} } class C extends B { void set value(int x) { print('body'); } } double rhs() { print('rhs'); return 2.5; } void main() { B value = C(); print('before'); value.value = rhs(); print('after'); }",
@@ -3430,6 +3432,19 @@ void main() {
       ),
     );
     final rejectedCovariant = [
+      'class C { covariant final int x = 1; } void main() {}',
+      'class C { covariant late final int x = 1; } void main() {}',
+      'class C { static covariant int x = 1; } void main() {}',
+      'covariant int x = 1; void main() {}',
+      'void main() { covariant var x = 1; }',
+      'class C { covariant void f() {} } void main() {}',
+      'class C { late covariant num x; } void main() {}',
+      'class C { covariant x = 1; } void main() {}',
+      'class C(covariant final int x); void main() {}',
+      'class C(covariant int x); void main() {}',
+      'class C(covariant this.x) { int x; } void main() {}',
+      '// @dart=3.12\nclass C(covariant var int x); void main() {}',
+      'class B { covariant num x = 1; } class C extends B { Object? x; } void main() {}',
       'void f(covariant int x) {} void main() {}',
       'class C { static void f(covariant int x) {} } void main() {}',
       'class B { void f(num x) {} } class C extends B { void f(covariant int x) {} } class D extends B { void f(int x) {} } void main() {}',
@@ -3447,8 +3462,9 @@ void main() {
         ..writeAsStringSync(rejectedCovariant[i]);
       await reject(invalid, checkSdk: true);
     }
-    // CFE accepts these locations; the fixed specification and analyzer reject.
+    // CFE accepts these forms; dartc follows the fixed specification.
     final covariantSyntaxDifferences = [
+      'class C { covariant late final int x, y = 1; } void main() {}',
       'void main() { void f(covariant int x) {} }',
       'void main() { var f = (covariant int x) {}; }',
       'class C { C(covariant int x); } void main() {}',
@@ -3458,7 +3474,7 @@ void main() {
       'typedef void F(covariant int x); void main() {}',
     ];
     for (var i = 0; i < covariantSyntaxDifferences.length; i++) {
-      final invalid = File('${temporary.path}/covariant-location-$i.dart')
+      final invalid = File('${temporary.path}/covariant-syntax-$i.dart')
         ..writeAsStringSync(covariantSyntaxDifferences[i]);
       await run(sdk, [invalid.path]);
       await reject(invalid);

@@ -235,6 +235,8 @@ ClassMembers bindClassMembers(
   i = 0;
   while (i < syntax.fields.length) {
     var field = syntax.fields[i];
+    if (field.covariant && !field.hasSetter)
+      _memberError(source, field.token, 'covariant fields require a setter');
     var member = _memberBinding(
       source,
       syntax,
@@ -251,11 +253,14 @@ ClassMembers bindClassMembers(
     }
     member.field = i;
     if (field.hasSetter) member.fieldSetter = i;
+    if (field.covariant) member.covariantParameters = const <bool>[true];
     i++;
   }
   i = 0;
   while (i < syntax.staticFields.length) {
     var field = syntax.staticFields[i];
+    if (field.covariant)
+      _memberError(source, field.token, 'static fields cannot be covariant');
     _checkStaticInterface(
       source,
       inheritedInstanceMembers,
