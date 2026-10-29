@@ -7122,6 +7122,10 @@ void feGenerateDispatches() {
     final token = feClassNodes[dispatch.owner].token;
     final receiverType = classType(dispatch.owner);
     final role = dispatch.role;
+    final classId = feTemp(tInt);
+    feOperand(opLoadLocal, 0);
+    feBuiltinTyped(bObjectClassId, 1, tInt);
+    feOperand(opStoreLocal, classId);
     for (var c = feClassOrder.length - 1; c >= 0; c--) {
       final owner = feClassOrder[c];
       if (feClassNodes[owner].isAbstract ||
@@ -7139,9 +7143,9 @@ void feGenerateDispatches() {
       )!;
       if (role == classTearoff && member.receiverParameter)
         feAstError(token, 'Object method tear-offs are not yet supported');
-      feOperand(opLoadLocal, 0);
-      feConvertValue(receiverType, tDynamic, token);
-      feOperand(opTypeTest, classType(owner));
+      feOperand(opLoadLocal, classId);
+      feOperand(opInt, owner);
+      feEmit(opEq);
       final next = feJump(opJumpFalse);
       feFlow = .create(0);
       feOperand(opLoadLocal, 0);

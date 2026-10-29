@@ -81,6 +81,7 @@ int runtimeFunction(int builtin, int castType) {
   if (builtin == bObjectNew) return abiFunction('rtObjectNew', 0);
   if (builtin == bObjectGet) return abiFunction('rtObjectGet', 0);
   if (builtin == bObjectSet) return abiFunction('rtObjectSet', 0);
+  if (builtin == bObjectClassId) return abiFunction('rtObjectClassId', 0);
   if (builtin == bBoxInt) return abiFunction('rtBoxInt', 0);
   if (builtin == bBoxBool) return abiFunction('rtBoxBool', 0);
   if (builtin == bValueCast) {

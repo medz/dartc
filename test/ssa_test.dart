@@ -131,6 +131,17 @@ void corrupt(List<SsaFunction> program, String mode) {
       return;
     }
     ssaError('test terminal operation missing');
+  } else if (mode == 'class-id-arity' || mode == 'class-id-receiver' ||
+      mode == 'class-id-result' || mode == 'class-id-effects') {
+    final function = named(program, '#dispatch:Operation.apply');
+    final instruction = operation(function, opBuiltin);
+    if (instruction.target != bObjectClassId) ssaError('class identity missing');
+    if (mode == 'class-id-arity') instruction.inputs.clear();
+    else if (mode == 'class-id-receiver') instruction.inputs[0] = function.arguments[1];
+    else if (mode == 'class-id-result') {
+      instruction.resultType = tBool;
+      function.valueTypes[instruction.value] = tBool;
+    } else instruction.effects = 0;
   } else if (mode == 'late-cell-type') {
     operation(named(program, 'delayed'), opLateCellDescriptor).target = -1;
   } else if (mode == 'late-error-arity') {
@@ -453,6 +464,10 @@ Future<void> main(List<String> args) async {
       'unreachable-edge': 'unused edge',
       'late-cell-type': 'invalid type',
       'late-error-arity': 'operand count',
+      'class-id-arity': 'operand count',
+      'class-id-receiver': 'class identity receiver type',
+      'class-id-result': 'class identity result',
+      'class-id-effects': 'operation effects',
       'double-literal': 'integer constant type',
       'double-arity': 'operand count',
       'double-operand': 'operand type',

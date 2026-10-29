@@ -6217,6 +6217,20 @@ class SuperWild extends SuperWildBase {
 }
 
 void inheritanceValues() {
+  for (final instance in <InheritedBase>[
+    InheritedBase.named(3),
+    InheritedChild(4),
+    InheritedLeaf(5),
+  ]) {
+    print(instance.add(1));
+    print(instance.add(2, 3));
+    final bound = instance.add;
+    print(bound(1));
+    instance.value += 2;
+    print(instance.value);
+    print(instance.read());
+    print(instance.echo(4.5));
+  }
   final child = InheritedLeaf(2);
   InheritedBase base = child;
   print(child.base + child.child);

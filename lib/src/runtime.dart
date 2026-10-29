@@ -1240,6 +1240,9 @@ int rtObjectDescriptor(int object) {
 }
 
 @pragma('dartc:no-gc')
+int rtObjectClassId(int object) => nativeLoad64(rtObjectDescriptor(object));
+
+@pragma('dartc:no-gc')
 int rtFunctionType(int value) {
   var type = nativeLoad64(value + functionTypeOffset);
   if ((nativeLoad64(value + objectFlagsOffset) & objectStaticRelative) != 0) {

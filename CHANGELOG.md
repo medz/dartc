@@ -1,3 +1,9 @@
+## Unreleased
+
+### Performance
+
+- Reduce polymorphic method and property access overhead by reading the receiver's exact class identity once per dispatch, while preserving inherited implementations and target defaults.
+
 ## [0.4.0](https://github.com/medz/dartc/compare/v0.3.0...v0.4.0) — 2026-10-29
 
 This release adds Linux x86-64 binaries and expands native Dart programs with

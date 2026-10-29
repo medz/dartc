@@ -214,7 +214,7 @@ class _SsaVerifier {
       if (callee.parameterTypes.length != count || result != expectedResult)
         fail('call metadata');
     } else if (op == opBuiltin) {
-      if (!(target >= bPrintString && target <= bLateError ||
+      if (!(target >= bPrintString && target <= bObjectClassId ||
           target >= bNativeLoad64 &&
               target <= bNativeResumeContext &&
               target != bNativeMetadataAddress))
@@ -223,7 +223,7 @@ class _SsaVerifier {
       if (target >= bNativeLoad64) count = nativeBuiltinArity(target);
       // These normalized representation operations have explicit SSA shapes.
       // General library/primitive signatures remain owned by their producers.
-      if (target == bLateError) count = 1;
+      if (target == bLateError || target == bObjectClassId) count = 1;
       if (target >= bBoxDouble && target <= bNumberProperty) {
         count =
             target == bDoubleModulo ||
@@ -407,6 +407,10 @@ class _SsaVerifier {
       if (target == bLateError) {
         expectInput(instruction, 0, tInt);
         if (result != tNever) fail('late failure result');
+      } else if (target == bObjectClassId) {
+        if (!typeIsClass(inputType(instruction.inputs[0])))
+          fail('class identity receiver type');
+        if (result != tInt) fail('class identity result');
       } else if (target >= bNativeLoad64) {
         for (var input in instruction.inputs) {
           if (inputType(input) != nativeBuiltinInputType(target))
