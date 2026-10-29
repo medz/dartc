@@ -36,11 +36,26 @@ TypeRef 的固定部分为 48 字节，是内部类型记录，不直接充当�
 
 List 标志 `objectListFixed` / `objectListReadOnly` 分别限制长度变化和内容修改；语言行为见 [表达式](../specs/expressions.md)。更新 List 长度时同步维护 backing 的已初始化前缀，缩短后不扫描前缀之外的旧元素。
 
+## 当前托管调用 ABI
+
+| 项目 | ARM64 | Linux x64 |
+| --- | --- | --- |
+| word 与引用 | 64 位 | 64 位 |
+| 前若干参数 | x0–x7 | rdi、rsi、rdx、rcx、r8、r9 |
+| 其余参数 | 从调用前 SP 起连续排列 | 从调用前 RSP 起连续排列 |
+| 结果 | x0 | rax |
+| 可分配保存寄存器 | x19–x27 | rbx、r12–r15 |
+| 帧指针 | x29 | rbp |
+| 帧头 | FP +0 保存前帧 FP，+8 保存返回 PC | 同左 |
+| 调用前栈对齐 | 16 字节 | 16 字节，不使用 red zone |
+
+隐藏参数和 double 原始位模式参与同一内部参数排列。x64 的整数参数位置与 System V AMD64 一致，但此托管协议不是完整 C ABI；外部 FFI 必须独立分类和转换。x64 的 syscall 参数使用 rdi、rsi、rdx、r10、r8、r9，调用号/结果为 rax，rcx/r11 被破坏；寄存器搬运在机器边界完成，系统调用号及文件服务算法保留在 Dart 运行时中。调用号依据 [Linux v6.12 x86-64 表](https://github.com/torvalds/linux/blob/v6.12/arch/x86/entry/syscalls/syscall_64.tbl)。
+
 ## 数值表示与机器边界
 
-`double` 的语义类型独立于机器表示 `rF64Bits`。已知 double 在内部调用中用通用寄存器和栈槽传递原始 64 位值，前八个参数依次使用 x0–x7，结果为 x0；d0/d1 只在一条浮点机器操作内作临时寄存器，不跨调用或安全点存活。分配器可以把 `rF64Bits` 放入通用寄存器，但根表和对象位图不把它当引用。`num`、`Object`、`dynamic` 与 `double?` 的 double 负载经 DoubleBox 进入 Tagged 表示。
+`double` 的语义类型独立于机器表示 `rF64Bits`。已知 double 在内部调用中用通用寄存器和栈槽传递原始 64 位值，参数和结果使用上表约定；ARM64 的 d0/d1 与 x64 的 xmm0/xmm1 只在一条浮点机器操作内作临时寄存器，不跨调用或安全点存活。分配器可以把 `rF64Bits` 放入通用寄存器，但根表和对象位图不把它当引用。`num`、`Object`、`dynamic` 与 `double?` 的 double 负载经 DoubleBox 进入 Tagged 表示。
 
-四则运算、比较和整数转换由 ARM64 binary64 原语执行。原语以整数位模式收发，比较返回 -1、0、1 或 unordered 的 2；机器转整数采用截断和饱和，Dart 数值入口先拒绝 NaN 与无穷大。独立可执行文件使用进程初始的最近偶数舍入环境。此内部协议不适用于平台 FFI；浮点 FFI 参数、结果和外部浮点环境管理尚未接入。
+四则运算、比较和整数转换由目标机器的 binary64 原语执行。原语以整数位模式收发，比较返回 -1、0、1 或 unordered 的 2；机器转整数采用截断和饱和，Dart 数值入口先拒绝 NaN 与无穷大。独立可执行文件使用进程初始的最近偶数舍入环境。此内部协议不适用于平台 FFI；浮点 FFI 参数、结果和外部浮点环境管理尚未接入。
 
 [binary64.dart](../lib/src/binary64.dart) 由编译器常量求值与目标运行时共用。十进制解析以整数比值执行精确舍入，输出按相邻 binary64 值的舍入区间选择最短十进制表示；余数算法使用整数有效位和指数。算法保持为普通 Dart 源码，原语只提供机器运算。
 
@@ -50,7 +65,7 @@ List 标志 `objectListFixed` / `objectListReadOnly` 分别限制长度变化和
 
 受信原语 `nativeExit(int status)` 的结果类型为 `Never`；绑定与 SSA 验证参数、结果及原生副作用。发码使用目标平台的进程退出入口，系统调用异常返回时触发硬件陷阱。`rtHostExit`、构建结束和致命错误出口均传播不返回的契约，不生成占位返回值或忙等循环。进程终止不提供 Dart 异常捕获与展开。
 
-实现入口：[ir.dart](../lib/src/ir.dart) 的原语签名、[emit.dart](../lib/src/emit.dart) 的 `emitExit()`；行为由 [behavior_test.dart](../test/behavior_test.dart) 的退出状态与先行副作用用例验证，签名及 effects 由 [ssa_test.dart](../test/ssa_test.dart) 验证。
+实现入口：[ir.dart](../lib/src/ir.dart) 的原语签名、[arm64_emit.dart](../lib/src/arm64_emit.dart) 的 `emitExit()` 及 [x64.dart](../lib/src/x64.dart) 的 `xExit()`；行为由 [behavior_test.dart](../test/behavior_test.dart) 的退出状态与先行副作用用例验证，签名及 effects 由 [ssa_test.dart](../test/ssa_test.dart) 验证。
 
 ## NoGC 提示
 
@@ -128,9 +143,9 @@ typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它
 
 ## 帧描述符与同步轨迹
 
-可达代码请求 `metadataFrames` 时，元数据 `+72` 指向只读帧表；未请求时不保留帧表或函数名。表按代码地址排序，每个描述符保存半开代码区间、FP 以下的固定帧字节数、保存寄存器的起始 FP 偏移、x19–x27 位图及函数名。区间和名称用相对描述符的位移表示，表内引用相对表本身，随最终映像一起重定位。
+可达代码请求 `metadataFrames` 时，元数据 `+72` 指向只读帧表；未请求时不保留帧表或函数名。表按代码地址排序，每个描述符保存半开代码区间、FP 以下的固定帧字节数、保存寄存器的起始 FP 偏移、目标保存寄存器位图及函数名。区间和名称用相对描述符的位移表示，表内引用相对表本身，随最终映像一起重定位。
 
-[emit.dart](../lib/src/emit.dart) 从实际发射的 prologue/epilogue 和分配结果记录布局。已保存寄存器按寄存器编号升序排列，占用连续向下的 FP 槽；固定帧大小不含 FP/LR 头和调用期间临时分配的溢出参数区。无帧启动跳板使用负帧大小，遍历在读取其父 FP 前停止。
+各目标发码器从实际发射的 prologue/epilogue 和分配结果记录布局。已保存寄存器按目标寄存器表的顺序排列，占用连续向下的 FP 槽；固定帧大小不含 FP/LR 头和调用期间临时分配的溢出参数区。无帧启动跳板使用负帧大小，遍历在读取其父 FP 前停止。
 
 [frames.dart](../lib/src/runtime/frames.dart) 的 `rtFrameDescriptor(pc)` 是 NoGC 二分查找，区间外返回零。`rtStackTraceString(frame)` 从传入帧的调用者开始，查询返回 PC 后才沿 FP 前进，遇到未知 PC 按运行时合同失败终止。捕获期间被访问的调用者帧保持活动，StringBuffer 和结果 String 由普通托管引用保活。该路径只读取调用链，不恢复寄存器或执行异常处理；标准库 API 范围见 [specs/libraries.md](../specs/libraries.md#stacktrace-api)。
 
@@ -138,7 +153,7 @@ typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它
 
 可达调用需要异常后继时，元数据 `+80` 指向 `metadataHandlers` 处理表，并同时保留帧表。每项把精确返回 PC 映射到调用者的异常边入口，按 PC 排序；两地址均为相对表项的位移。没有处理器的调用无需表项，展开器继续查找父帧。
 
-[exceptions.dart](../lib/src/runtime/exceptions.dart) 拥有当前执行域的待处理对象、StackTrace 和原生恢复上下文。异常对象与轨迹是普通托管字段；catch 或 finally 的异常入口复制到局部根后清空字段，rethrow 使用当前词法 catch 保存的原值。finally 的完成标记、返回值与异常保存由编译器生成，展开器仍只定位处理入口。`nativeCaptureContext` 将 FP、SP、PC、x19–x27 写入 96 字节原始缓冲；`nativeResumeContext` 恢复同一集合并跳转，结果为 Never。缓冲布局由 [layout.dart](../lib/src/layout.dart) 定义，不是平台 FFI 上下文。
+[exceptions.dart](../lib/src/runtime/exceptions.dart) 拥有当前执行域的待处理对象、StackTrace 和原生恢复上下文。异常对象与轨迹是普通托管字段；catch 或 finally 的异常入口复制到局部根后清空字段，rethrow 使用当前词法 catch 保存的原值。finally 的完成标记、返回值与异常保存由编译器生成，展开器仍只定位处理入口。`nativeCaptureContext` 将 FP、SP、PC 和被调用者保存寄存器写入 96 字节原始缓冲；ARM64 的九个寄存器槽依次为 x19–x27，x64 的前五槽为 rbx、r12–r15，其余槽保留且不进入保存位图。`nativeResumeContext` 恢复同一集合并跳转，结果为 Never。缓冲布局由 [layout.dart](../lib/src/layout.dart) 定义，不是平台 FFI 上下文。
 
 展开器按实际保存位图撤销各帧的寄存器保存，找到处理器后以父 FP 和固定帧大小重建 SP，不依赖抛出调用的溢出实参大小。查表和展开为 NoGC 路径。未找到处理器时输出异常与轨迹并以状态 255 退出；未知帧仍按内部合同失败终止。语言范围及缺口见 [specs/statements.md](../specs/statements.md)。
 

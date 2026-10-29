@@ -23,6 +23,7 @@ String driverSource(Uri library) =>
 import '${library.resolve('frontend.dart')}' as frontend;
 import '${library.resolve('host.dart')}' as host;
 import '${library.resolve('ir.dart')}';
+import '${library.resolve('target.dart')}';
 import '${library.resolve('source.dart')}';
 import '${library.resolve('ssa.dart')}';
 import '${library.resolve('optimize.dart')}';
@@ -298,7 +299,7 @@ void corrupt(List<SsaFunction> program, String mode) {
 }
 
 void main(List<String> args) {
-  targetOS = host.hostTarget();
+  compilationTarget = Target.values[host.hostTarget()];
   frontend.parseSource(collectSources(args[0], args[1], null, targetOS));
   if (args[2] == 'ir-function-range') functions[0].end = functions[0].start;
   final program = buildSsa();

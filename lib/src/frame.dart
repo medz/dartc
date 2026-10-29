@@ -27,3 +27,5 @@ class EmittedHandler {
 }
 
 final List<EmittedHandler> emittedHandlers = <EmittedHandler>[];
+
+int alignFrame(int size) => (size + 15) & -16;

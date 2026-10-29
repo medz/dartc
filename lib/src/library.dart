@@ -1,4 +1,4 @@
-import 'arm64.dart';
+import 'code.dart';
 import 'format.dart';
 import 'ir.dart';
 import 'sign.dart';
@@ -43,15 +43,7 @@ void librarySymbols(int codeAddress) {
     image.add(1);
     image.add(0);
     image.add(0);
-    image64(codeAddress + armFunctionOffsets[exportFunctions[i]] * 4);
-    i++;
-  }
-}
-
-void libraryCode() {
-  var i = 0;
-  while (i < machineCode.length) {
-    image32(machineCode[i]);
+    image64(codeAddress + functionOffsets[exportFunctions[i]]);
     i++;
   }
 }
@@ -80,10 +72,7 @@ List<int> libraryExportTrie(int codeAddress) {
   var i = 0;
   while (i < exportNames.length) {
     var terminal = <int>[0];
-    libraryUleb(
-      terminal,
-      codeAddress + armFunctionOffsets[exportFunctions[i]] * 4,
-    );
+    libraryUleb(terminal, codeAddress + functionOffsets[exportFunctions[i]]);
     leafOffsets.add(leaves.length);
     libraryUleb(leaves, terminal.length);
     var j = 0;
@@ -129,7 +118,6 @@ List<int> libraryExportTrie(int codeAddress) {
 }
 
 List<int> libraryObject() {
-  var codeSize = machineCode.length * 4;
   var codeOffset = 232;
   var symbols = alignImage(codeOffset + codeSize, 8);
   var names = symbols + exportNames.length * 16;
@@ -139,7 +127,7 @@ List<int> libraryObject() {
   imageSection('__text', '__TEXT', 0, codeOffset, codeSize, 0x80000400);
   librarySymtab(symbols, names);
   libraryVersion();
-  libraryCode();
+  imageCode();
   imageZeros(symbols - image.length);
   librarySymbols(0);
   libraryStringTable();
@@ -201,7 +189,6 @@ List<int> libraryArchive() {
 
 List<int> libraryDylib(String outputPath) {
   var codeOffset = 1024;
-  var codeSize = machineCode.length * 4;
   var textSize = alignImage(codeOffset + codeSize, 16384);
   var symbols = textSize;
   var names = symbols + exportNames.length * 16;
@@ -248,8 +235,8 @@ List<int> libraryDylib(String outputPath) {
   libraryVersion();
   var hash = 0x811c9dc5;
   var i = 0;
-  while (i < machineCode.length) {
-    hash = ((hash ^ machineCode[i]) * 0x01000193) & 0xffffffff;
+  while (i < codeWords.length) {
+    hash = ((hash ^ codeWords[i]) * 0x01000193) & 0xffffffff;
     i++;
   }
   image32(0x1b);
@@ -279,7 +266,7 @@ List<int> libraryDylib(String outputPath) {
   image32(0);
   imagePatch32(20, image.length - 32);
   imageZeros(codeOffset - image.length);
-  libraryCode();
+  imageCode();
   imageZeros(textSize - image.length);
   librarySymbols(codeOffset);
   libraryStringTable();

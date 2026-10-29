@@ -2,7 +2,7 @@
 
 A native Dart compiler written entirely in Dart.
 
-`dartc` compiles Dart source directly to ARM64 machine code for macOS and Linux, and can rebuild its own compiler. The goal is a complete, independent Dart toolchain whose compiler, runtime and standard libraries can evolve in Dart. Version 0.3 is an early preview.
+`dartc` compiles Dart source directly to native machine code for macOS ARM64 and Linux ARM64/x86-64, and can rebuild its own compiler. The goal is a complete, independent Dart toolchain whose compiler, runtime and standard libraries can evolve in Dart. Version 0.3 is an early preview.
 
 Generated executables include the reachable parts of dartc's own runtime, compiled to native code. Native compiler binaries and generated executables run without the official Dart SDK, VM, JIT or snapshots.
 
@@ -12,6 +12,8 @@ Download the archive for your platform from the [0.3.0 release](https://github.c
 
 - `dartc-0.3.0-macos-arm64.tar.gz`
 - `dartc-0.3.0-linux-arm64.tar.gz`
+
+Linux x86-64 is available from source; the 0.3.0 release does not include an x64 archive.
 
 Save this as `hello.dart`:
 
@@ -88,7 +90,7 @@ Compiler and runtime sources must have matching ABIs. Keep them from the same re
 
 ## Build from source
 
-Development validation uses the installed Dart SDK on macOS/Linux ARM64. Differential and benchmark reports record the SDK version used.
+Development validation uses the installed Dart SDK on macOS ARM64 or Linux ARM64/x86-64. Differential and benchmark reports record the SDK version used.
 
 ```sh
 git clone https://github.com/medz/dartc.git
@@ -111,10 +113,11 @@ The compiler, allocator, runtime algorithms, machine-code generation, executable
 
 ## Other outputs
 
-Choose a different ARM64 target explicitly:
+Choose the output target explicitly:
 
 ```sh
 dartc hello.dart --target linux-arm64 -o hello-linux
+dartc hello.dart --target linux-x64 -o hello-linux-x64
 dartc hello.dart --target macos-arm64 -o hello-macos
 ```
 

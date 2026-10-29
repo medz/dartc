@@ -90,6 +90,8 @@ const int metadataFrames = 16;
 const int metadataHandlers = 32;
 
 // Raw machine context. Restoring it transfers control and does not return.
+// ARM64 stores x19..x27. x64 stores rbx,r12..r15 in the first five register
+// slots; the remaining four are reserved and never selected by its save mask.
 const int unwindContextBytes = 96;
 const int unwindFrameOffset = 0;
 const int unwindStackOffset = 8;
@@ -104,8 +106,8 @@ const int handlerReturnOffset = 0;
 const int handlerLandingOffset = 8;
 
 // Frame ranges are sorted half-open code intervals. All addresses are relative
-// to the containing table or descriptor. Saved x19..x27 occupy descending FP
-// slots in increasing register order, starting at frameSavedOffset.
+// to the containing table or descriptor. Saved target registers occupy
+// descending FP slots in targetRegisters order, starting at frameSavedOffset.
 const int frameTableBytes = 16;
 const int frameTableCountOffset = 0;
 const int frameTableDescriptorsOffset = 8;

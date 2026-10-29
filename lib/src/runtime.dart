@@ -47,6 +47,20 @@ int rtHostTarget() {
 
 int rtSyscall(int n, int a, int b, int c, int d, int e, int f) {
   if (nativeTarget() == 0) return nativeSyscall(n, a, b, c, d, e, f);
+  if (nativeTarget() == 2) {
+    if (n == 1) return nativeSyscall(60, a, b, c, d, e, f);
+    if (n == 3) return nativeSyscall(0, a, b, c, d, e, f);
+    if (n == 4) return nativeSyscall(1, a, b, c, d, e, f);
+    if (n == 6) return nativeSyscall(3, a, b, c, d, e, f);
+    if (n == 73) return nativeSyscall(11, a, b, c, d, e, f);
+    if (n == 197) return nativeSyscall(9, a, b, c, 34, e, f);
+    if (n == 5) {
+      final flags = b == 1537 ? 577 : b;
+      return nativeSyscall(257, -100, a, flags, c, 0, 0);
+    }
+    if (n == 15) return nativeSyscall(268, -100, a, b, 0, 0, 0);
+    return -38;
+  }
   if (n == 1) return nativeSyscall(93, a, b, c, d, e, f);
   if (n == 3) return nativeSyscall(63, a, b, c, d, e, f);
   if (n == 4) return nativeSyscall(64, a, b, c, d, e, f);
@@ -1061,12 +1075,28 @@ int rtHostCurrentDirectory() {
     rtSyscall(6, fd, 0, 0, 0, 0, 0);
     if (status < 0) return rtIoError();
   } else {
-    var status = nativeSyscall(17, bytes, capacity, 0, 0, 0, 0);
+    var status = nativeSyscall(
+      nativeTarget() == 2 ? 79 : 17,
+      bytes,
+      capacity,
+      0,
+      0,
+      0,
+      0,
+    );
     while (status == -34) {
       rtUnmap(bytes, capacity);
       capacity = capacity * 2;
       bytes = rtMap(capacity);
-      status = nativeSyscall(17, bytes, capacity, 0, 0, 0, 0);
+      status = nativeSyscall(
+        nativeTarget() == 2 ? 79 : 17,
+        bytes,
+        capacity,
+        0,
+        0,
+        0,
+        0,
+      );
     }
     if (status < 0) return rtIoError();
   }
@@ -1139,13 +1169,29 @@ int _rtExecutablePath() {
     result = rtStringFromCString(bytes);
   } else {
     var path = rtCStringAcquire(0x65732f636f72702f, 0x6578652f666c, 0, 0);
-    var length = nativeSyscall(78, -100, path, bytes, capacity, 0, 0);
+    var length = nativeSyscall(
+      nativeTarget() == 2 ? 267 : 78,
+      -100,
+      path,
+      bytes,
+      capacity,
+      0,
+      0,
+    );
     // readlinkat does not terminate the result and truncates to capacity.
     while (length == capacity) {
       rtUnmap(bytes, capacity);
       capacity = capacity * 2;
       bytes = rtMap(capacity);
-      length = nativeSyscall(78, -100, path, bytes, capacity, 0, 0);
+      length = nativeSyscall(
+        nativeTarget() == 2 ? 267 : 78,
+        -100,
+        path,
+        bytes,
+        capacity,
+        0,
+        0,
+      );
     }
     rtCStringRelease();
     if (length < 0) return rtIoError();

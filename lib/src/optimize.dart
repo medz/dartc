@@ -1,3 +1,4 @@
+import 'target.dart';
 import 'ir.dart';
 import 'types.dart';
 import 'ssa.dart';
@@ -94,7 +95,7 @@ void sccpInstruction(
   if (op == opBuiltin &&
       instruction.target == bNativeTarget &&
       instruction.effects == 0) {
-    sccpMeet(state, value, 1, targetOS);
+    sccpMeet(state, value, 1, compilationTarget.index);
     return;
   }
   var allowedEffects = 0;

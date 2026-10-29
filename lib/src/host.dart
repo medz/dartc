@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ffi';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -54,7 +55,12 @@ void hostWrite(String path, List<int> bytes) {
 
 Never hostExit(int status) => exit(status);
 
-int hostTarget() => Platform.isLinux ? 1 : 0;
+int hostTarget() => switch (Abi.current()) {
+  Abi.macosArm64 => 0,
+  Abi.linuxArm64 => 1,
+  Abi.linuxX64 => 2,
+  _ => throw UnsupportedError('Compiler host ABI: ${Abi.current()}'),
+};
 
 String hostStdPath() {
   final asset = Isolate.resolvePackageUriSync(

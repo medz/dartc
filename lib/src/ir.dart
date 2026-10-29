@@ -170,7 +170,7 @@ const int bNativeFloat64ToInt = 118;
 const int bNativeValueBits = 119;
 const int bNativeValueFromBits = 120;
 const int bNativeExit = 121;
-// Capture or restore FP/SP/PC and x19..x27 in a raw unwind context.
+// Capture or restore FP/SP/PC and target callee-saved registers.
 const int bNativeCaptureContext = 122;
 const int bNativeResumeContext = 123;
 
@@ -314,7 +314,6 @@ List<String> strings = <String>[];
 
 int entrySource = -1;
 int entryFunction = -1;
-int targetOS = 0;
 
 enum ImageKind { executable, dynamicLibrary, object, staticLibrary }
 

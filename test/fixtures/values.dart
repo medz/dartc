@@ -1457,6 +1457,33 @@ void literalShifts(int value) {
   ]);
 }
 
+void integerDivisions() {
+  const boundaries = <int>[
+    -9223372036854775808,
+    -9223372036854775807,
+    -7,
+    -1,
+    0,
+    1,
+    7,
+    9223372036854775807,
+  ];
+  for (final left in boundaries) {
+    for (final right in boundaries) {
+      if (right == 0) continue;
+      dynamic boxed = left;
+      print([
+        left,
+        right,
+        left ~/ right,
+        left % right,
+        boxed ~/ right,
+        boxed % right,
+      ]);
+    }
+  }
+}
+
 void shiftContexts() {
   const boundaries = <int>[
     (-9_223_372_036_854_775_808),
@@ -1488,6 +1515,7 @@ void shiftContexts() {
   literalShifts(-9223372036854775808);
   literalShifts(9223372036854775807);
   literalShifts(-1);
+  integerDivisions();
 }
 
 const Object constantObject = 1;

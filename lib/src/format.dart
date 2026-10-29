@@ -1,4 +1,7 @@
 import 'arm64.dart';
+import 'x64.dart';
+import 'code.dart';
+import 'target.dart';
 import 'constant_data.dart';
 import 'frame.dart';
 import 'host.dart';
@@ -290,44 +293,44 @@ ConstantLayout layoutConstants(int start) {
   }
   int features = 0;
   i = 0;
-  while (i < addressKinds.length) {
-    if (addressKinds[i] == 0) {
-      stringOffsets[addressTargets[i]] = 0;
-    } else if (addressKinds[i] == 1) {
-      globalOffsets[addressTargets[i]] = 0;
-    } else if (addressKinds[i] == 2) {
-      descriptorOffsets[addressTargets[i]] = 0;
-    } else if (addressKinds[i] == 3) {
-      features = features | addressTargets[i];
-    } else if (addressKinds[i] == 4) {
-      markTypeReference(typeOffsets, types, addressTargets[i]);
-    } else if (addressKinds[i] == 9) {
-      markTypeReference(typeOffsets, types, addressTargets[i], true);
-    } else if (addressKinds[i] == 5) {
-      dataOffsets[addressTargets[i]] = 0;
-    } else if (addressKinds[i] == 6) {
-      callableOffsets[addressTargets[i]] = 0;
-    } else if (addressKinds[i] == 7) {
-      var function = addressTargets[i];
+  while (i < codeAddresses.length) {
+    if (codeAddresses[i].kind == 0) {
+      stringOffsets[codeAddresses[i].target] = 0;
+    } else if (codeAddresses[i].kind == 1) {
+      globalOffsets[codeAddresses[i].target] = 0;
+    } else if (codeAddresses[i].kind == 2) {
+      descriptorOffsets[codeAddresses[i].target] = 0;
+    } else if (codeAddresses[i].kind == 3) {
+      features = features | codeAddresses[i].target;
+    } else if (codeAddresses[i].kind == 4) {
+      markTypeReference(typeOffsets, types, codeAddresses[i].target);
+    } else if (codeAddresses[i].kind == 9) {
+      markTypeReference(typeOffsets, types, codeAddresses[i].target, true);
+    } else if (codeAddresses[i].kind == 5) {
+      dataOffsets[codeAddresses[i].target] = 0;
+    } else if (codeAddresses[i].kind == 6) {
+      callableOffsets[codeAddresses[i].target] = 0;
+    } else if (codeAddresses[i].kind == 7) {
+      var function = codeAddresses[i].target;
       if (closureDescriptors[function] == null)
         closureDescriptors[function] = _captureDescriptor(
           functions[function].closureLayout!.fieldTypes,
           (functionInstanceBytes - objectHeaderBytes) ~/ 8,
         );
-    } else if (addressKinds[i] == 8) {
-      var type = addressTargets[i];
+    } else if (codeAddresses[i].kind == 8) {
+      var type = codeAddresses[i].target;
       if (captureCellDescriptors[type] == null)
         captureCellDescriptors[type] = _captureDescriptor(<int>[type], 0);
-    } else if (addressKinds[i] == 11) {
-      final shape = addressTargets[i];
+    } else if (codeAddresses[i].kind == 11) {
+      final shape = codeAddresses[i].target;
       callShapeOffsets[shape] = 0;
       for (final name in callShapes[shape].names) {
         final string = internString(name);
         while (stringOffsets.length < strings.length) stringOffsets.add(-1);
         stringOffsets[string] = 0;
       }
-    } else if (addressKinds[i] == 10) {
-      final type = addressTargets[i];
+    } else if (codeAddresses[i].kind == 10) {
+      final type = codeAddresses[i].target;
       lateCellDescriptors[type] ??= _captureDescriptor(<int>[
         type,
         tBool,
@@ -766,47 +769,12 @@ List<int> createMachOExecutable() {
   int dataBase = 0x110000000;
   int page = 0x4000;
   int codeOffset = 0x1000;
-  int constantOffset = alignImage(codeOffset + machineCode.length * 4, 8);
+  int constantOffset = alignImage(codeOffset + codeSize, 8);
   ConstantLayout constants = layoutConstants(constantOffset);
   int payloadEnd = constants.end;
   int textSize = alignImage(payloadEnd, page);
   int dataSize = alignImage(constants.globalBytes, page);
-  int site = 0;
-  while (site < addressSites.length) {
-    int target = 0;
-    if (addressKinds[site] == 0) {
-      target = base + constants.stringOffsets[addressTargets[site]];
-    } else if (addressKinds[site] == 1) {
-      target = dataBase + constants.globalOffsets[addressTargets[site]];
-    } else if (addressKinds[site] == 2) {
-      target = base + constants.descriptorOffsets[addressTargets[site]];
-    } else if (addressKinds[site] == 3) {
-      target = base + constants.metadataOffset;
-    } else if (addressKinds[site] == 5) {
-      target = base + constants.dataOffsets[addressTargets[site]];
-    } else if (addressKinds[site] == 6) {
-      target = base + constants.callableOffsets[addressTargets[site]];
-    } else if (addressKinds[site] == 7) {
-      target =
-          base + constants.closureDescriptors[addressTargets[site]]!.offset;
-    } else if (addressKinds[site] == 8) {
-      target =
-          base + constants.captureCellDescriptors[addressTargets[site]]!.offset;
-    } else if (addressKinds[site] == 11) {
-      target = base + constants.callShapeOffsets[addressTargets[site]];
-    } else if (addressKinds[site] == 10) {
-      target =
-          base + constants.lateCellDescriptors[addressTargets[site]]!.offset;
-    } else {
-      target = base + constants.typeOffsets[addressTargets[site]];
-    }
-    int word = addressSites[site];
-    int pc = base + codeOffset + word * 4;
-    int pages = ((target >> 12) - (pc >> 12)) & 0x1fffff;
-    machineCode[word] = 0x90000000 | ((pages & 3) << 29) | ((pages >> 2) << 5);
-    machineCode[word + 1] = 0x91000000 | ((target & 0xfff) << 10);
-    site = site + 1;
-  }
+  imageRelocate(constants, base, dataBase, codeOffset);
 
   image = <int>[];
   image32(0xfeedfacf);
@@ -824,7 +792,7 @@ List<int> createMachOExecutable() {
     '__TEXT',
     base + codeOffset,
     codeOffset,
-    machineCode.length * 4,
+    codeSize,
     0x80000400,
   );
   imageSection(
@@ -861,8 +829,8 @@ List<int> createMachOExecutable() {
 
   int hash = 0x811c9dc5;
   int h = 0;
-  while (h < machineCode.length) {
-    hash = ((hash ^ machineCode[h]) * 0x01000193) & 0xffffffff;
+  while (h < codeWords.length) {
+    hash = ((hash ^ codeWords[h]) * 0x01000193) & 0xffffffff;
     h = h + 1;
   }
   image32(0x1b);
@@ -895,11 +863,7 @@ List<int> createMachOExecutable() {
   image32(0);
   imagePatch32(20, image.length - 32);
   imageZeros(codeOffset - image.length);
-  int instruction = 0;
-  while (instruction < machineCode.length) {
-    image32(machineCode[instruction]);
-    instruction = instruction + 1;
-  }
+  imageCode();
   imageZeros(constantOffset - image.length);
   imageConstants(constants, codeOffset, dataBase - base);
   imageZeros(textSize + 16 - image.length);
@@ -934,48 +898,13 @@ void imageElfSegment(
 List<int> createElfExecutable() {
   int base = 0x400000;
   int codeOffset = 0x1000;
-  int constantOffset = alignImage(codeOffset + machineCode.length * 4, 8);
+  int constantOffset = alignImage(codeOffset + codeSize, 8);
   ConstantLayout constants = layoutConstants(constantOffset);
   int payloadEnd = constants.end;
   int dataOffset = alignImage(payloadEnd, 4096);
   int dataBase = base + dataOffset;
   int dataSize = alignImage(constants.globalBytes, 4096);
-  int site = 0;
-  while (site < addressSites.length) {
-    int target = 0;
-    if (addressKinds[site] == 0) {
-      target = base + constants.stringOffsets[addressTargets[site]];
-    } else if (addressKinds[site] == 1) {
-      target = dataBase + constants.globalOffsets[addressTargets[site]];
-    } else if (addressKinds[site] == 2) {
-      target = base + constants.descriptorOffsets[addressTargets[site]];
-    } else if (addressKinds[site] == 3) {
-      target = base + constants.metadataOffset;
-    } else if (addressKinds[site] == 5) {
-      target = base + constants.dataOffsets[addressTargets[site]];
-    } else if (addressKinds[site] == 6) {
-      target = base + constants.callableOffsets[addressTargets[site]];
-    } else if (addressKinds[site] == 7) {
-      target =
-          base + constants.closureDescriptors[addressTargets[site]]!.offset;
-    } else if (addressKinds[site] == 8) {
-      target =
-          base + constants.captureCellDescriptors[addressTargets[site]]!.offset;
-    } else if (addressKinds[site] == 11) {
-      target = base + constants.callShapeOffsets[addressTargets[site]];
-    } else if (addressKinds[site] == 10) {
-      target =
-          base + constants.lateCellDescriptors[addressTargets[site]]!.offset;
-    } else {
-      target = base + constants.typeOffsets[addressTargets[site]];
-    }
-    int word = addressSites[site];
-    int pc = base + codeOffset + word * 4;
-    int pages = ((target >> 12) - (pc >> 12)) & 0x1fffff;
-    machineCode[word] = 0x90000000 | ((pages & 3) << 29) | ((pages >> 2) << 5);
-    machineCode[word + 1] = 0x91000000 | ((target & 0xfff) << 10);
-    site = site + 1;
-  }
+  imageRelocate(constants, base, dataBase, codeOffset);
   image = <int>[];
   image.add(127);
   imageName('ELF', 3);
@@ -984,7 +913,7 @@ List<int> createElfExecutable() {
   image.add(1);
   imageZeros(9);
   image16(2);
-  image16(183);
+  image16(targetX64 ? 62 : 183);
   image32(1);
   image64(base + codeOffset);
   image64(64);
@@ -1000,11 +929,7 @@ List<int> createElfExecutable() {
   imageElfSegment(1, 6, dataOffset, dataBase, 0, dataSize, 4096);
   imageElfSegment(0x6474e551, 6, 0, 0, 0, 0, 16);
   imageZeros(codeOffset - image.length);
-  int instruction = 0;
-  while (instruction < machineCode.length) {
-    image32(machineCode[instruction]);
-    instruction = instruction + 1;
-  }
+  imageCode();
   imageZeros(constantOffset - image.length);
   imageConstants(constants, codeOffset, dataBase - base);
   imageZeros(dataOffset - image.length);
@@ -1189,10 +1114,10 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
       }
       int callback = classToStringFunctions[descriptor];
       int toString = 0;
-      if (callback >= 0 && armFunctionOffsets[callback] > 0) {
+      if (callback >= 0 && functionOffsets[callback] > 0) {
         toString =
             codeOffset +
-            armFunctionOffsets[callback] * 4 -
+            functionOffsets[callback] -
             layout.descriptorOffsets[descriptor];
       }
       int references = 0;
@@ -1494,7 +1419,7 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
         if (kind == typeKindString) {
           value = layout.stringOffsets[value] - entry;
         } else if (kind == typeKindList || kind == typeKindClass) {
-          value = codeOffset + armFunctionOffsets[value] * 4 - entry;
+          value = codeOffset + functionOffsets[value] - entry;
         } else if (kind == typeKindFunction) {
           value = layout.callableOffsets[value] - entry;
         }
@@ -1514,10 +1439,61 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
       image64(layout.typeOffsets[functionValueType(function)] - offset);
       image64(
         codeOffset +
-            armFunctionOffsets[functions[function].callableAdapter] * 4 -
+            functionOffsets[functions[function].callableAdapter] -
             offset,
       );
     }
     function++;
+  }
+}
+
+void imageCode() {
+  var offset = 0;
+  while (offset + 4 <= codeSize) {
+    image32(codeWords[offset >> 2]);
+    offset += 4;
+  }
+  while (offset < codeSize) {
+    image.add((codeWords[offset >> 2] >>> ((offset & 3) * 8)) & 255);
+    offset++;
+  }
+}
+
+void imageRelocate(
+  ConstantLayout constants,
+  int base,
+  int dataBase,
+  int codeOffset,
+) {
+  for (final address in codeAddresses) {
+    int target = 0;
+    if (address.kind == 0) {
+      target = base + constants.stringOffsets[address.target];
+    } else if (address.kind == 1) {
+      target = dataBase + constants.globalOffsets[address.target];
+    } else if (address.kind == 2) {
+      target = base + constants.descriptorOffsets[address.target];
+    } else if (address.kind == 3) {
+      target = base + constants.metadataOffset;
+    } else if (address.kind == 5) {
+      target = base + constants.dataOffsets[address.target];
+    } else if (address.kind == 6) {
+      target = base + constants.callableOffsets[address.target];
+    } else if (address.kind == 7) {
+      target = base + constants.closureDescriptors[address.target]!.offset;
+    } else if (address.kind == 8) {
+      target = base + constants.captureCellDescriptors[address.target]!.offset;
+    } else if (address.kind == 11) {
+      target = base + constants.callShapeOffsets[address.target];
+    } else if (address.kind == 10) {
+      target = base + constants.lateCellDescriptors[address.target]!.offset;
+    } else {
+      target = base + constants.typeOffsets[address.target];
+    }
+    final offset = address.offset;
+    if (targetX64)
+      xPatchRelative(offset, target - base - codeOffset);
+    else
+      armPatchAddress(offset, base + codeOffset + offset, target);
   }
 }

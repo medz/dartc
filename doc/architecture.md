@@ -1,6 +1,6 @@
 # 纯 Dart 原生编译器架构
 
-dartc 是用 Dart 实现的独立原生 Dart 编译器，目标是完整实现选定版本的 Dart 语言，并让编译器、运行时和标准库能通过自身工具链持续演进。编译器、链接器、标准库和运行时算法采用 Dart，机器指令与跳板由 Dart 编码器生成，运行时按实际依赖链接。原生端口面向 macOS/Linux ARM64，IR 与语言语义不绑定 CPU 或文件格式。
+dartc 是用 Dart 实现的独立原生 Dart 编译器，目标是完整实现选定版本的 Dart 语言，并让编译器、运行时和标准库能通过自身工具链持续演进。编译器、链接器、标准库和运行时算法采用 Dart，机器指令与跳板由 Dart 编码器生成，运行时按实际依赖链接。原生端口面向 macOS ARM64 与 Linux ARM64/x86-64，IR 与语言语义不绑定 CPU 或文件格式。
 
 本文区分目标设计与当前实现。自托管验证工具链能否支撑自身实现；完整语言、标准库、运行时、性能和体积仍需分别验收。
 
@@ -93,7 +93,10 @@ lib/src/
   ir.dart, ssa.dart, verify_ssa.dart               IR、SSA 构造与验证
   optimize.dart, reach.dart                       优化与可达性
   machine.dart, allocate.dart, root_map.dart        Machine IR、分配与根位置
-  arm64.dart, emit.dart                           指令编码与发射
+  target.dart                                    输出目标与寄存器集合
+  code.dart, emit.dart                            共享发码结果与后端选择
+  arm64.dart, arm64_emit.dart                     ARM64 指令编码与发射
+  x64.dart, x64_emit.dart                         x86-64 指令编码与发射
   frame.dart                                     已发射函数的代码区间与栈帧布局
   abi.dart, layout.dart, nogc.dart                 运行时绑定、布局与效果约束
   format.dart, library.dart, sign.dart             映像布局、文件封装与签名
@@ -204,6 +207,16 @@ test/
 编译器通过 `host.dart` 使用文件和进程服务：官方 Dart 冷启动使用 SDK 实现，原生编译器使用受信运行时实现。std 与目标运行时是编译输入；库映射将 dart:core 等名字定位到 lib/src/std 下的源码。宿主入口不导入并执行目标运行时的底层实现，目录位于 lib 中也不会使其自动进入宿主 import 图。
 
 构建入口使用直接函数调用与固定阶段。目标差异在实际需要的位置拆分，不建立通用插件注册框架。
+
+## 目标与发码边界
+
+`target.dart` 保存显式的输出目标；操作系统选择库条件与文件格式，CPU 选择寄存器和指令后端。宿主的 `hostTarget()` 只提供缺省值，命令行 `--target` 可以覆盖。`nativeTarget()` 表示正在生成的程序 ABI，编号为 macOS ARM64 = 0、Linux ARM64 = 1、Linux x64 = 2；不能用编译器进程所在平台替代它。
+
+Machine IR 的比较保存语义条件，各后端映射为自己的条件码。分配器复用活跃区间和 spill 算法，只把非引用值分配到目标的被调用者保存寄存器；Ref/Tagged 仍在调用点保留可描述的根槽。指令的固定寄存器约束、调用参数排列和浮点暂存由对应发码器拥有。
+
+`code.dart` 拥有机器码、函数入口以及调用/数据地址修补记录；所有位置均为字节偏移。存储按 32 位 word 打包以控制 Dart List 的占用，编码器可写入单字节或完整 word。`format.dart` 统一布局常量、全局区及相对元数据，ARM64 与 x64 编码器分别修补地址指令。x64 使用 RIP 相对地址和 rel32 调用/跳转，超出范围时拒绝生成截断的位移。
+
+x64 可执行文件使用 ELF64、基础 x86-64/SSE2 指令和 Linux 原始系统调用；启动直接读取进程栈中的 argc/argv。内部调用、根、安全点和异常恢复的当前协议见 [runtime.md](runtime.md)。Linux 库输出与外部 FFI 入口仍未接入。
 
 ## 前端阶段与语义边界
 
@@ -542,7 +555,7 @@ ClassDesc 是映像中的只读元数据，记录布局、字段表示、扫描�
 
 ### 调用约定
 
-当前内部 ABI 的 double 参数和返回值传递原始 binary64 word，沿用 x0–x7/栈与 x0 的位置规则；浮点暂存寄存器只在机器操作内使用，具体约束见 [数值表示](runtime.md#数值表示与机器边界)。独立浮点寄存器分配需要同步修改调用布局、保存规则及恢复种子。
+当前内部 ABI 的 double 参数和返回值传递原始 binary64 word，沿用各目标的通用寄存器/栈参数与返回位置；浮点暂存寄存器只在机器操作内使用，具体约束见 [数值表示](runtime.md#数值表示与机器边界)。独立浮点寄存器分配需要同步修改调用布局、保存规则及恢复种子。
 
 以下是包含线程上下文和通用动态调用的目标约定；实际函数值适配见 [runtime.md](runtime.md#函数值与调用边界)。内部托管调用与平台 C ABI 分开定义。已知目标使用直接入口，只有动态调用、闭包通用调用和 Function.apply 等路径需要通用入口。
 

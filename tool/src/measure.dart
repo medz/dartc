@@ -42,7 +42,9 @@ class _UsageReader {
   _UsageReader._(this.getUsage, this.free, this.memory);
 
   factory _UsageReader() {
-    if (Abi.current() != Abi.macosArm64 && Abi.current() != Abi.linuxArm64) {
+    if (Abi.current() != Abi.macosArm64 &&
+        Abi.current() != Abi.linuxArm64 &&
+        Abi.current() != Abi.linuxX64) {
       throw UnsupportedError('rusage ABI: ${Abi.current()}');
     }
     final libc = DynamicLibrary.process();
@@ -51,7 +53,7 @@ class _UsageReader {
     );
     final allocate = libc.lookupFunction<_CallocNative, _Calloc>('calloc');
     final free = libc.lookupFunction<_FreeNative, _Free>('free');
-    // ARM64: 2 x 16B timeval + 14 x 8B long, maxrss at +32.
+    // Supported LP64 ABIs: 2 x 16B timeval + 14 x 8B long, maxrss at +32.
     final memory = allocate(1, 144).cast<Uint8>();
     if (memory == nullptr) throw StateError('calloc failed');
     return _UsageReader._(getUsage, free, memory);
@@ -62,7 +64,7 @@ class _UsageReader {
       throw StateError('getrusage(RUSAGE_CHILDREN) failed');
     }
     int word(int offset) => (memory + offset).cast<Int64>().value;
-    // Darwin suseconds_t is Int32 followed by padding; Linux ARM64 uses long.
+    // Darwin suseconds_t is Int32 followed by padding; Linux uses long.
     int micros(int offset) =>
         Platform.isMacOS ? (memory + offset).cast<Int32>().value : word(offset);
     return _Usage([

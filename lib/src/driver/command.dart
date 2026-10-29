@@ -1,3 +1,4 @@
+import '../target.dart';
 import '../allocate.dart';
 import '../diagnostic.dart';
 import '../emit.dart';
@@ -33,7 +34,7 @@ Never _compile(List<String> args) {
 
   if (args.length == 0 || args[0] == '--help') {
     print(
-      'Usage: dartc <source.dart> [-o <file>] [--target macos-arm64|linux-arm64]',
+      'Usage: dartc <source.dart> [-o <file>] [--target macos-arm64|linux-arm64|linux-x64]',
     );
     print(
       '       [--emit exe|dylib|object|static] [--export <FFI binding>] [--std <runtime.dart>]',
@@ -46,7 +47,7 @@ Never _compile(List<String> args) {
   String standard = '';
   String selectedExport = '';
   String? packages;
-  targetOS = hostTarget();
+  compilationTarget = Target.values[hostTarget()];
   imageKind = ImageKind.executable;
   int argument = 1;
   while (argument < args.length) {
@@ -68,9 +69,11 @@ Never _compile(List<String> args) {
       packages = value;
     } else if (option == '--target') {
       if (value == 'macos-arm64') {
-        targetOS = 0;
+        compilationTarget = Target.macosArm64;
       } else if (value == 'linux-arm64') {
-        targetOS = 1;
+        compilationTarget = Target.linuxArm64;
+      } else if (value == 'linux-x64') {
+        compilationTarget = Target.linuxX64;
       } else {
         argumentError('Unsupported target: ' + value);
       }

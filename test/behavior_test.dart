@@ -887,6 +887,8 @@ void main() {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      for (final operation in ['~/', '%'])
+        'int zero() => 0; void main() { print("before"); print(1 $operation zero()); print("after"); }',
       for (final operation in [
         'c[key] = rhs();',
         'c[key] += rhs();',
@@ -1252,11 +1254,12 @@ import '$root/lib/src/diagnostic.dart';
 import '$root/lib/src/frontend.dart';
 import '$root/lib/src/host.dart';
 import '$root/lib/src/ir.dart';
+import '$root/lib/src/target.dart';
 import '$root/lib/src/source.dart';
 import '$root/lib/src/ssa.dart';
 import '$root/lib/src/verify_ssa.dart';
 void main(List<String> args) {
-  targetOS = hostTarget();
+  compilationTarget = Target.values[hostTarget()];
   for (var i = 0; i < args.length - 2; i++) {
     try {
       parseSource(collectSources(args[i], args.last, null, targetOS));

@@ -1,3 +1,4 @@
+import 'target.dart';
 import 'abi.dart';
 import 'host.dart';
 import 'ir.dart';
@@ -19,8 +20,8 @@ const int mLoad64 = 3;
 const int mStore64 = 4;
 const int mLoad8 = 5;
 const int mStore8 = 6;
-// Calls pass the first eight inputs in x0..x7, the rest on the stack.
-// Results return in x0.
+// Calls carry ordered arguments. The target owns registers, stack arguments
+// and the result register.
 const int mCall = 7;
 const int mSyscall = 8;
 const int mAdd = 9;
@@ -37,7 +38,8 @@ const int mUshr = 19;
 const int mNeg = 20;
 const int mBitNot = 21;
 const int mNot = 22;
-// extra stores the ARM64 condition code for a signed comparison.
+// extra stores a signed comparison: equal, not-equal, less, less-or-equal,
+// greater, greater-or-equal (0..5).
 const int mCompare = 23;
 const int mLoad16 = 24;
 const int mStore16 = 25;
@@ -47,8 +49,8 @@ const int mShlImmediate = 28;
 const int mShrImmediate = 29;
 const int mUshrImmediate = 30;
 const int mFramePointer = 31;
-// The internal ABI transports binary64 bits in general registers. d0/d1 are
-// instruction-local scratch, never live across a call or safe point.
+// The internal ABI transports binary64 bits in general registers. Hardware
+// float registers are instruction-local scratch, never live across a call.
 const int mFloat64Add = 32;
 const int mFloat64Sub = 33;
 const int mFloat64Mul = 34;
@@ -307,7 +309,14 @@ void machineSelectInstruction(
     }
     if (target == bNativeTarget) {
       instructions.add(
-        MachineInstruction(mConstant, output, <int>[], targetOS, 0, effects),
+        MachineInstruction(
+          mConstant,
+          output,
+          <int>[],
+          compilationTarget.index,
+          0,
+          effects,
+        ),
       );
       return;
     }
@@ -392,10 +401,10 @@ void machineSelectInstruction(
   if (op >= opEq && op <= opGe) {
     int condition = 0;
     if (op == opNe) condition = 1;
-    if (op == opLt) condition = 11;
-    if (op == opLe) condition = 13;
-    if (op == opGt) condition = 12;
-    if (op == opGe) condition = 10;
+    if (op == opLt) condition = 2;
+    if (op == opLe) condition = 3;
+    if (op == opGt) condition = 4;
+    if (op == opGe) condition = 5;
     instructions.add(
       MachineInstruction(mCompare, output, inputs, 0, condition, effects),
     );

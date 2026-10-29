@@ -1,3 +1,4 @@
+import 'target.dart';
 import 'machine.dart';
 
 class RegisterBlock {
@@ -253,7 +254,8 @@ void allocatePhysicalRegisters(
   List<int> ends,
   List<int> locations,
 ) {
-  final List<int> owners = List<int>.filled(9, -1);
+  final registers = targetRegisters;
+  final List<int> owners = List<int>.filled(registers.length, -1);
   int i = 0;
   while (i < order.length) {
     final int value = order[i];
@@ -277,11 +279,11 @@ void allocatePhysicalRegisters(
         register = register + 1;
       }
       if (available >= 0) {
-        locations[value] = 19 + available;
+        locations[value] = registers[available];
         owners[available] = value;
       } else if (ends[owners[farthest]] > ends[value]) {
         locations[owners[farthest]] = -1;
-        locations[value] = 19 + farthest;
+        locations[value] = registers[farthest];
         owners[farthest] = value;
       }
     }
@@ -329,18 +331,14 @@ void allocateFunction(MachineFunction function) {
   final List<int> locations = List<int>.filled(function.reps.length, -1);
   allocatePhysicalRegisters(function, order, starts, ends, locations);
   final int spills = allocateSpillSlots(order, starts, ends, locations);
-  final List<int> used = List<int>.filled(9, 0);
-  int value = 0;
-  while (value < locations.length) {
-    if (locations[value] >= 19) used[locations[value] - 19] = 1;
-    value = value + 1;
+  var used = 0;
+  for (final location in locations) {
+    if (location >= 0) used |= 1 << location;
   }
-  final List<int> saved = <int>[];
-  int register = 0;
-  while (register < used.length) {
-    if (used[register] != 0) saved.add(19 + register);
-    register = register + 1;
-  }
+  final saved = <int>[
+    for (final register in targetRegisters)
+      if ((used & (1 << register)) != 0) register,
+  ];
   function.allocation = RegisterAllocation(locations, spills, saved);
 }
 

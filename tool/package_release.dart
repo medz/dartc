@@ -35,15 +35,18 @@ void main(List<String> args) {
   final compiler = File(args[1]).absolute;
   final os = Platform.operatingSystem;
   final machine = (run('/usr/bin/uname', ['-m']).stdout as String).trim();
-  if ((os != 'macos' && os != 'linux') ||
-      (machine != 'arm64' && machine != 'aarch64')) {
-    throw StateError('Native release packaging requires macOS/Linux ARM64.');
-  }
+  final architecture = switch (machine) {
+    'arm64' || 'aarch64' => 'arm64',
+    'x86_64' when os == 'linux' => 'x64',
+    _ => throw StateError('Unsupported release host: $os/$machine'),
+  };
+  if (os != 'macos' && os != 'linux')
+    throw StateError('Unsupported release OS: $os');
   final version = RegExp(
     r'^version:\s*(\S+)\s*$',
     multiLine: true,
   ).firstMatch(File('$root/pubspec.yaml').readAsStringSync())!.group(1)!;
-  final name = 'dartc-$version-$os-arm64';
+  final name = 'dartc-$version-$os-$architecture';
   final output = Directory('$root/build/release')..createSync(recursive: true);
   final temporary = Directory.systemTemp.createTempSync('dartc-release-');
   try {
@@ -60,6 +63,7 @@ void main(List<String> args) {
       'lib/src/runtime/exceptions.dart',
       'lib/src/std/core.dart',
       'lib/src/std/core/annotations.dart',
+      'lib/src/std/core/enum.dart',
       'lib/src/std/core/string_buffer.dart',
       'lib/src/std/core/stack_trace.dart',
       'LICENSE',
@@ -70,14 +74,14 @@ void main(List<String> args) {
     }
     File('${bundle.path}/README.md').writeAsStringSync('''# dartc $version
 
-Native Dart compiler for $os ARM64. This is an early preview release.
+Native Dart compiler for $os $architecture. This is an early preview release.
 
 Keep bin/ and lib/ together. Add this bundle's bin directory to PATH,
 then compile with `dartc hello.dart -o hello` and run `./hello`.
 The compiler and output executables do not need the Dart SDK or VM.
 
 Language implementation is in progress; see the specification tracker for
-supported behavior and remaining gaps. Managed storage is retained until process exit.
+supported behavior and remaining gaps. Runtime sources must match the bundled compiler.
 
 Usage: https://github.com/medz/dartc/tree/v$version
 Compatibility: https://github.com/medz/dartc/tree/v$version/specs
