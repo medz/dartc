@@ -204,12 +204,7 @@ int _symbolExportedDeclaration(
       direct >= 0 && _symbolHasFacet(table.declarations[direct], writing)) {
     return direct;
   }
-  var visited = <int>[];
-  var i = 0;
-  while (i < table.program.files.length) {
-    visited.add(0);
-    i++;
-  }
+  final visited = List<int>.filled(table.program.files.length, 0);
   var work = <int>[source];
   var cursor = 0;
   var result = -1;
@@ -233,7 +228,7 @@ int _symbolExportedDeclaration(
     }
     if (current >= 0) {
       var imports = table.program.files[current].imports;
-      i = 0;
+      var i = 0;
       while (i < imports.length) {
         if (imports[i].exported && sourceAllows(imports[i], name)) {
           work.add(imports[i].target);

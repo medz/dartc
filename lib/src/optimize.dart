@@ -321,13 +321,11 @@ void removeDeadEdgeArguments(
 
 void removeDeadValues(SsaFunction function) {
   final List<int> roots = <int>[];
-  final List<List<int>> dependencies = <List<int>>[];
-  final List<int> empty = <int>[];
+  final dependencies = List<List<int>>.filled(
+    function.valueTypes.length,
+    <int>[],
+  );
   var i = 0;
-  while (i < function.valueTypes.length) {
-    dependencies.add(empty);
-    i++;
-  }
   var b = 0;
   while (b < function.blocks.length) {
     final block = function.blocks[b];

@@ -18,23 +18,13 @@ void _reachCallable(List<int> reachable, List<int> work, int target) {
 }
 
 List<int> reachableFunctions(List<SsaFunction> source, [List<int>? roots]) {
-  List<int> reachable = <int>[];
+  final reachable = List<int>.filled(source.length, 0);
   List<int> work = <int>[];
-  List<int> allocated = <int>[];
+  final allocated = List<int>.filled(classSizes.length, 0);
   List<int> classes = <int>[];
   bool indirect = false;
   var i = 0;
-  while (i < source.length) {
-    reachable.add(0);
-    i = i + 1;
-  }
-  i = 0;
-  while (i < classSizes.length) {
-    allocated.add(0);
-    i++;
-  }
   if (roots != null) {
-    i = 0;
     while (i < roots.length) {
       _reachFunction(reachable, work, roots[i]);
       i++;
@@ -47,7 +37,6 @@ List<int> reachableFunctions(List<SsaFunction> source, [List<int>? roots]) {
       _reachFunction(reachable, work, runtimeFunction(bArguments, -1));
     }
   } else {
-    i = 0;
     while (i < exportFunctions.length) {
       _reachFunction(reachable, work, exportFunctions[i]);
       i = i + 1;
