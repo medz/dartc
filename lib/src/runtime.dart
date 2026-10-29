@@ -252,6 +252,8 @@ int rtStringSubstring(int value, int start, int end) {
   if (start < 0 || start > length || end < start || end > length) {
     return rtStringRangeError();
   }
+  if (start == 0 && end == length) return value;
+  if (start == end) return nativeValueBits('');
   final mark = rtRootMark();
   rtRootPush(value, storageRef);
   var result = rtStringAllocate(rtObjectDescriptor(value), end - start);

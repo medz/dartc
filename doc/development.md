@@ -68,6 +68,17 @@ The [native self-hosting workflow](../.github/workflows/native.yml) is manually 
 
 The Intel Mac job runs on `macos-15-intel`, rebuilds the native compiler through three stages, and runs the shared behavior, differential, SSA, resource-measurement, benchmark and fuzz checks. It also executes C callers against object, static and dynamic library output, cross-compiles the compiler for the other three targets, and optionally verifies a relocatable macOS x64 archive. Cross-compiled artifacts still require execution on their target hosts.
 
+## Native archives
+
+Build and check an archive with a native compiler from the same source revision:
+
+```sh
+dart tool/package_release.dart --compiler build/dartc-seed
+dart test/package_release_test.dart --compiler build/dartc-seed
+```
+
+Packaging follows the compiler's runtime and core-library source dependencies, including imports, exports and parts. These inputs must remain inside the checkout. The extracted compiler is checked through direct execution, PATH lookup and a symlink with the SDK removed from PATH. The regression test adds transitive dependencies and compiles against the extracted archive after removing its source checkout.
+
 ## Release notes
 
 Keep `CHANGELOG.md` newest first. Each version has a date, a comparison link and a short description of its user-visible scope. Group entries under Features, Fixes and Upgrade headings as needed; omit empty sections. Combine related commits into one behavior change, and describe fixes by their trigger and observable result.

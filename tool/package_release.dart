@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import '../lib/src/source.dart';
+
 ProcessResult run(
   String executable,
   List<String> arguments, {
@@ -55,25 +57,25 @@ void main(List<String> args) {
     binary.parent.createSync();
     compiler.copySync(binary.path);
     run('/bin/chmod', ['755', binary.path]);
-    for (final relative in [
-      'lib/src/runtime.dart',
-      'lib/src/layout.dart',
-      'lib/src/binary64.dart',
-      'lib/src/runtime/frames.dart',
-      'lib/src/runtime/heap.dart',
-      'lib/src/runtime/roots.dart',
-      'lib/src/runtime/exceptions.dart',
-      'lib/src/std/core.dart',
-      'lib/src/std/core/annotations.dart',
-      'lib/src/std/core/enum.dart',
-      'lib/src/std/core/string_buffer.dart',
-      'lib/src/std/core/stack_trace.dart',
-      'LICENSE',
-    ]) {
+    final runtime = File('$root/lib/src/runtime.dart').uri.toString();
+    final sources = collectSources(
+      runtime,
+      runtime,
+      null,
+      os == 'macos' ? 0 : 1,
+    );
+    for (final source in sources.files) {
+      if (!source.path.startsWith('$root/')) {
+        throw StateError(
+          'Native release dependency is outside the checkout: ${source.path}',
+        );
+      }
+      final relative = source.path.substring(root.length + 1);
       final destination = File('${bundle.path}/$relative');
       destination.parent.createSync(recursive: true);
-      File('$root/$relative').copySync(destination.path);
+      File(source.path).copySync(destination.path);
     }
+    File('$root/LICENSE').copySync('${bundle.path}/LICENSE');
     File('${bundle.path}/README.md').writeAsStringSync('''# dartc $version
 
 Native Dart compiler for $os $architecture. This is an early preview release.
