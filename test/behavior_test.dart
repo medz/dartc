@@ -3444,6 +3444,10 @@ void main() {
       ),
     );
     final rejectedFieldInference = [
+      'class C { var value = 1; } void main() { C().value = "wrong"; }',
+      'class C { late var value = 1; C(String this.value); } void main() {}',
+      'class D { D(int value); } class C { var value = new D("wrong"); } void main() {}',
+      'class D { const D(); } class C { final value = new D(); const C(); } void main() {}',
       'class C { value; } void main() {}',
       'class C { static value = 1; } void main() {}',
       'abstract class I { num get value; void set value(Object? x); } class C implements I { late var value; } void main() {}',

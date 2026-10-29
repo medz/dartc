@@ -6397,6 +6397,53 @@ class PrimaryInferredNumber(num seed) implements InferredNumber {
   var number = seed;
 }
 
+const inferredFieldSeed = inferredFieldTail;
+const inferredFieldTail = 7;
+
+int inferredFieldCallback(int value) => value + 1;
+
+class InferredInitializerFields {
+  static const label = 'inferred';
+  var number = 1 + 2 * 3;
+  final fraction = 1 / 2;
+  var absent = null;
+  var text = label;
+  var seed = inferredFieldSeed;
+  var mixed = true ? 1 : 2.5;
+  var values = [1, 2];
+  var nested = [
+    [1],
+    [2],
+  ];
+  var selected = [
+    if (true) 1 else 2.5,
+    ...[3, 4],
+  ];
+  var empty = [];
+  var first = [1, 2][0];
+  var length = 'hello'.length;
+  var nonnull = null ?? 4;
+  var callback = inferredFieldCallback;
+  var object = new Box(fieldNumberInitializer());
+  late var delayed = Box(fieldNumberInitializer());
+  late var lateText = 'late';
+  late final lateNumber = 1.5;
+}
+
+class InferredInitializerChild extends InferredInitializerFields {
+  var number = 2;
+}
+
+class InferredConstInitializer {
+  final number = 3;
+  const InferredConstInitializer();
+}
+
+class InferredInitializedFormal {
+  late var number = 1;
+  InferredInitializedFormal(this.number);
+}
+
 void interfaceValues() {
   final field = FieldArithmetic(5);
   FieldArithmeticList fields = [field];
@@ -6522,6 +6569,43 @@ void interfaceValues() {
   print(lateFinalNumber.number);
   print([InitializedInferredNumber().number] is List<int>);
   print([PrimaryInferredNumber(6).number] is List<num>);
+  print('before inferred initializers');
+  final initializers = InferredInitializerFields();
+  print('after inferred initializers');
+  print([initializers.number] is List<int>);
+  print([initializers.fraction] is List<double>);
+  print([initializers.text] is List<String>);
+  print([initializers.mixed] is List<num>);
+  print([initializers.mixed] is List<int>);
+  print([initializers.seed, initializers.first, initializers.length]);
+  print([initializers.nonnull] is List<int>);
+  initializers.absent = 'changed';
+  print(initializers.absent);
+  initializers.values.add(3);
+  print(initializers.values);
+  print(initializers.values is List<int>);
+  print(initializers.nested is List<List<int>>);
+  print(initializers.selected is List<num>);
+  initializers.empty.add('dynamic');
+  print(initializers.empty);
+  print(initializers.callback(2));
+  print([initializers.callback] is List<int Function(int)>);
+  print([initializers.object] is List<Box>);
+  print(initializers.object.value);
+  print(initializers.delayed.value);
+  print(initializers.delayed.value);
+  print(initializers.lateText);
+  initializers.lateText = 'changed';
+  print(initializers.lateText);
+  print(initializers.lateNumber);
+  final child = InferredInitializerChild();
+  print([child.number] is List<int>);
+  print(child.number);
+  print(child.values);
+  const constant = InferredConstInitializer();
+  print([constant.number] is List<int>);
+  print(constant.number);
+  print(InferredInitializedFormal(5).number);
 }
 
 class CovariantBase {

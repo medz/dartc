@@ -59,24 +59,24 @@ class ConstantContext {
   List<AstVariable> globals;
   List<int> globalTypes;
   // 0 unseen, 1 visiting, 2 inferred type only, 3 evaluated value.
-  List<int> states = <int>[];
-  List<ConstantValue> values = <ConstantValue>[];
-  List<ConstantValue> locals = <ConstantValue>[];
-  List<int> localTypes = <int>[];
+  var states = <int>[];
+  var values = <ConstantValue>[];
+  var locals = <ConstantValue>[];
+  var localTypes = <int>[];
   ConstantValue? implicitReceiver;
-  List<int> typeScope = const <int>[];
-  List<ConstantValue> initializerParameters = const <ConstantValue>[];
+  var typeScope = const <int>[];
+  var initializerParameters = const <ConstantValue>[];
   bool allowInitializerParameters = false;
   bool inferringTypes = false;
-  List<ConstantValue> aggregates = <ConstantValue>[];
-  List<ConstructorConstants?> constructors = <ConstructorConstants?>[];
-  List<_ConstantInvocation> invocations = <_ConstantInvocation>[];
-  List<ClassMembers> classMembers = const <ClassMembers>[];
-  List<AstClass> classes = const <AstClass>[];
+  var aggregates = <ConstantValue>[];
+  var constructors = <ConstructorConstants?>[];
+  var invocations = <_ConstantInvocation>[];
+  var classMembers = const <ClassMembers>[];
+  var classes = const <AstClass>[];
   void Function(int)? prepareConstructorTypes;
-  List<List<int>> classConstructors = const <List<int>>[];
+  var classConstructors = const <List<int>>[];
   int lexicalClass = -1;
-  List<int> globalOwners = const <int>[];
+  var globalOwners = const <int>[];
   int identical = -1;
 
   ConstantContext(this.symbols, this.globals, this.globalTypes) {
@@ -1355,7 +1355,7 @@ ConstantValue _constantConstructor(
   bool active,
   bool implicitConst,
 ) {
-  if (expression.text == astCallNew)
+  if (expression.text == astCallNew && !context.inferringTypes)
     _constantError(
       context,
       expression.token,

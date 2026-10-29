@@ -454,23 +454,27 @@ List<ClassMembers> checkClassInterfaces(
           if (!fields[field].hasSetter) break;
         }
         if (type < 0) {
+          AstExpression? expression;
           if (parameter == null) {
-            if (fields[field].initializer.isNotEmpty)
-              fail(
-                owner,
-                'field initializer type inference is not yet supported',
-              );
-            type = tDynamic;
+            if (fields[field].initializer.isNotEmpty) {
+              if (classes[owner].hasPrimary)
+                fail(
+                  owner,
+                  'primary field initializer type inference is not yet supported',
+                );
+              expression = fields[field].initializer[0];
+            }
           } else {
-            final expression = parameter.defaultValue;
-            final scope = constants.lexicalClass;
-            constants.lexicalClass = owner;
-            type = expression == null
-                ? tNull
-                : inferConstantType(constants, expression);
-            constants.lexicalClass = scope;
-            if (type == tNull) type = nullableType(tObject);
+            expression = parameter.defaultValue;
           }
+          final scope = constants.lexicalClass;
+          constants.lexicalClass = owner;
+          type = expression == null
+              ? tNull
+              : inferConstantType(constants, expression);
+          constants.lexicalClass = scope;
+          if (type == tNull)
+            type = parameter == null ? tDynamic : nullableType(tObject);
         }
         fieldTypes[field] = type;
         fieldReady[field] = true;
