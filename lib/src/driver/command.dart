@@ -17,21 +17,22 @@ import '../reach.dart';
 import '../ssa.dart';
 import '../build_ssa.dart';
 import '../source.dart';
+import '../source_bundle.dart';
 import '../source_uri.dart';
 import '../utf8.dart';
 import '../verify_ssa.dart';
 import 'packages.dart';
 
-Never runCompiler(List<String> args) {
+Never runCompiler(List<String> args, [SourceBundle? bundle]) {
   try {
-    _compile(args);
+    _compile(args, bundle);
   } on Diagnostic catch (error) {
     print(error.message);
     hostExit(1);
   }
 }
 
-Never _compile(List<String> args) {
+Never _compile(List<String> args, SourceBundle? bundle) {
   Never argumentError(String message) {
     print(message);
     hostExit(64);
@@ -117,10 +118,18 @@ Never _compile(List<String> args) {
     };
   }
   final executable = imageKind == ImageKind.executable;
-  if (standard == '') standard = hostStdPath();
-  final runtime = sourceInputUri(cwd, standard);
+  if (standard != '') bundle = null;
+  final runtime = bundle == null
+      ? sourceInputUri(cwd, standard == '' ? hostStdPath() : standard)
+      : bundle.runtime;
   var config = compilerPackages(inputUri, cwd, packages);
-  SourceProgram sources = collectSources(inputUri, runtime, config, targetOS);
+  SourceProgram sources = collectSources(
+    inputUri,
+    runtime,
+    config,
+    targetOS,
+    bundle,
+  );
   parseSource(sources);
   if (!executable) {
     if (checkedExports.isEmpty)

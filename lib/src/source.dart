@@ -4,6 +4,7 @@ import 'ast.dart';
 import 'diagnostic.dart';
 import 'parser.dart';
 import 'source_uri.dart';
+import 'source_bundle.dart';
 import 'package_config.dart';
 
 const int sourceUnknown = -1;
@@ -60,6 +61,7 @@ class SourceProgram {
   String hostUri;
   int core;
   PackageConfig? packages;
+  SourceBundle? bundle;
   List<String> libraries = const <String>[];
 
   SourceProgram(
@@ -199,9 +201,21 @@ int sourceLoad(
     }
     i++;
   }
+  final config = program.packages;
+  final bundle = program.bundle;
+  String? text;
+  if (bundle != null && implementation) {
+    text = bundle.read(uri);
+    if (text == null) throw Diagnostic('dartc: missing bundled source: ' + uri);
+  } else if (bundle != null &&
+      package != null &&
+      (config == null || sourcePackageNamed(config, package.name) == null)) {
+    text = bundle.read(uri);
+  }
   String path;
-  if (package != null) {
-    var config = program.packages;
+  if (package != null && text != null) {
+    path = uri;
+  } else if (package != null) {
     if (config == null) {
       print('dartc: no package configuration for ' + uri);
       hostExit(1);
@@ -211,10 +225,10 @@ int sourceLoad(
     path = sourceUriPath('/', uri);
   }
   int id = program.files.length;
-  var scanner = Scanner(hostRead(path), <Token>[], 0);
+  var scanner = Scanner(text ?? hostRead(path), <Token>[], 0);
   scanner.path = path;
   var packages = program.packages;
-  if (!implementation && packages != null) {
+  if (text == null && !implementation && packages != null) {
     var package = sourcePackageForFile(packages, path);
     if (package != null && package.languageMajor >= 0) {
       var major = package.languageMajor;
@@ -431,6 +445,7 @@ SourceProgram collectSources(
   String runtime, [
   PackageConfig? packages,
   int target = 0,
+  SourceBundle? bundle,
 ]) {
   String hostUri = '';
   if (runtime != '') hostUri = sourceResolveFileUri(runtime, 'host.dart');
@@ -444,6 +459,7 @@ SourceProgram collectSources(
     -1,
   );
   program.packages = packages;
+  program.bundle = bundle;
   program.libraries = sourceTargetLibraries(target);
   if (runtime != '') {
     int standard = sourceLoad(program, runtime, true);

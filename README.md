@@ -37,9 +37,11 @@ dartc hello.dart -o hello
 
 On Linux, use the same commands with `linux-arm64` or `linux-x64` in place of `macos-arm64`.
 
-Keep the archive's `bin/` and `lib/` directories together. The matching runtime and standard-library sources in `lib/` are compilation inputs; generated executables include the required native runtime code and do not need these source files. `SHA256SUMS` contains the archive checksums.
+For the 0.4.0 archive, keep `bin/` and `lib/` together. Its compiler reads the matching runtime and standard-library sources from `lib/`; generated executables do not need those files. `SHA256SUMS` contains the archive checksums.
 
 Upgrading from 0.3 requires replacing the whole archive: the internal runtime ABI changed from 14 to 17. See the [0.4.0 upgrade notes](CHANGELOG.md#upgrading-from-03).
+
+Native compilers built from the current source embed their runtime and standard-library sources. Copy `build/dartc-stage2` anywhere on PATH as `dartc`; it needs no adjacent `lib/` directory or source checkout.
 
 The pub package uses the Dart SDK as the compiler's host:
 
@@ -78,13 +80,15 @@ dartc bin/main.dart --packages .dart_tool/package_config.json -o app
 
 `dartc` reads local file-backed packages; it does not download packages or solve versions. Use consistent library URIs: package and file references to one physical file can identify different libraries.
 
-To select runtime sources explicitly:
+The native compiler includes `package:dartc/export.dart` for standalone native-library projects. An explicit `dartc` entry in the package configuration takes precedence over that bundled module.
+
+For compiler and runtime development, select external runtime sources explicitly:
 
 ```sh
 dartc main.dart --std /path/to/dartc/lib/src/runtime.dart -o app
 ```
 
-Compiler and runtime sources must have matching ABIs. Keep them from the same release unless following the [bootstrap design](doc/architecture.md).
+`--std` selects the external runtime and standard-library dependency graph for this compilation. Compiler and runtime sources must have matching ABIs; this option is a development interface, not a stable runtime plugin API. See the [bootstrap design](doc/architecture.md).
 
 ## Build from source
 
@@ -99,7 +103,7 @@ build/dartc-stage2 example/hello.dart -o build/hello
 ./build/hello
 ```
 
-Bootstrap starts with the verified local `build/dartc-seed`. Only when no local seed exists does it build an initial seed with official Dart. It checks repeated native builds and behavior before replacing the seed. An existing seed's failure does not fall back to official compilation.
+Bootstrap starts with the verified local `build/dartc-seed`. That seed builds a native source bundler, which generates the compiler entry containing its runtime and standard-library resources. The seed and subsequent native stages compile this entry. Only when no local seed exists does bootstrap build an initial seed with official Dart. It checks repeated native builds and behavior before replacing the seed. An existing seed's failure does not fall back to official compilation.
 
 An extracted native release can also serve as the seed:
 

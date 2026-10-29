@@ -1,7 +1,5 @@
 import 'dart:io';
 
-import '../lib/src/source.dart';
-
 ProcessResult run(
   String executable,
   List<String> arguments, {
@@ -51,41 +49,21 @@ void main(List<String> args) {
   final name = 'dartc-$version-$os-$architecture';
   final output = Directory('$root/build/release')..createSync(recursive: true);
   final temporary = Directory.systemTemp.createTempSync('dartc-release-');
+  var passed = false;
   try {
     final bundle = Directory('${temporary.path}/$name')..createSync();
     final binary = File('${bundle.path}/bin/dartc');
     binary.parent.createSync();
     compiler.copySync(binary.path);
     run('/bin/chmod', ['755', binary.path]);
-    final runtime = File('$root/lib/src/runtime.dart').uri.toString();
-    final sources = collectSources(
-      runtime,
-      runtime,
-      null,
-      os == 'macos' ? 0 : 1,
-    );
-    for (final source in sources.files) {
-      if (!source.path.startsWith('$root/')) {
-        throw StateError(
-          'Native release dependency is outside the checkout: ${source.path}',
-        );
-      }
-      final relative = source.path.substring(root.length + 1);
-      final destination = File('${bundle.path}/$relative');
-      destination.parent.createSync(recursive: true);
-      File(source.path).copySync(destination.path);
-    }
     File('$root/LICENSE').copySync('${bundle.path}/LICENSE');
     File('${bundle.path}/README.md').writeAsStringSync('''# dartc $version
 
 Native Dart compiler for $os $architecture. This is an early preview release.
 
-Keep bin/ and lib/ together. Add this bundle's bin directory to PATH,
-then compile with `dartc hello.dart -o hello` and run `./hello`.
-The compiler and output executables do not need the Dart SDK or VM.
+Copy bin/dartc anywhere on PATH, then compile with `dartc hello.dart -o hello` and run `./hello`. Runtime and standard-library sources are built into the compiler. The compiler and output executables do not need the Dart SDK or VM.
 
-Language implementation is in progress; see the specification tracker for
-supported behavior and remaining gaps. Runtime sources must match the bundled compiler.
+Language implementation is in progress; see the specification tracker for supported behavior and remaining gaps.
 
 Usage: https://github.com/medz/dartc/tree/v$version
 Compatibility: https://github.com/medz/dartc/tree/v$version/specs
@@ -162,7 +140,12 @@ void main() {
     stdout.writeln(
       'Extracted native compiler: direct, PATH and symlink checks passed.',
     );
+    passed = true;
   } finally {
-    temporary.deleteSync(recursive: true);
+    if (passed) {
+      temporary.deleteSync(recursive: true);
+    } else {
+      stderr.writeln('Package failure retained at: ${temporary.path}');
+    }
   }
 }

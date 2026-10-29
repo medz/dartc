@@ -28,6 +28,8 @@ package v2 的重复名称、重复规范化根及嵌套根约束在配置边界
 
 [behavior_test.dart](../test/behavior_test.dart) 拥有 Dart 库的多文件行为；[library_test.dart](../test/library_test.dart) 拥有原生静态/动态链接调用，两者验证范围不同。
 
+原生编译器将运行时与标准库源码内置，仍按上表规则建立 URI、库与 part 身份；存储位置不改变系统库标记和语言版本。没有显式 `dartc` 包映射时，提供内置的 `package:dartc/export.dart`；包配置中的映射优先。`--std` 为开发用途选择外部运行时和标准库图。独立二进制、传递依赖、part、显式覆盖和包映射的行为验证由 [package_release_test.dart](../test/package_release_test.dart) 拥有。
+
 ## StackTrace API
 
 | SDK 条目 | 状态 | 实现与缺口 | 实现与验证入口 |

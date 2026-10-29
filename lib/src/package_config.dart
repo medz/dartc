@@ -449,32 +449,39 @@ SourcePackage? sourcePackageForFile(PackageConfig config, String path) {
   return owner;
 }
 
-String resolvePackageUri(PackageConfig config, SourcePackageUri uri) {
+SourcePackage? sourcePackageNamed(PackageConfig config, String name) {
   var low = 0;
   var high = config.packages.length;
   while (low < high) {
     final middle = (low + high) ~/ 2;
     final package = config.packages[middle];
-    final order = _compareText(package.name, uri.name);
+    final order = _compareText(package.name, name);
     if (order < 0) {
       low = middle + 1;
     } else if (order > 0) {
       high = middle;
     } else {
-      final directory = package.packagePath;
-      if (directory == null)
-        packageConfigError(
-          config,
-          'unsupported package root URI: ' + package.rootUri,
-        );
-      final path = sourceUriPath(directory, './' + uri.path);
-      if (!path.startsWith(directory))
-        packageConfigError(
-          config,
-          'package URI escapes package root: ' + uri.name + '/' + uri.path,
-        );
-      return path;
+      return package;
     }
   }
-  packageConfigError(config, 'unknown package: ' + uri.name);
+  return null;
+}
+
+String resolvePackageUri(PackageConfig config, SourcePackageUri uri) {
+  final package = sourcePackageNamed(config, uri.name);
+  if (package == null)
+    packageConfigError(config, 'unknown package: ' + uri.name);
+  final directory = package.packagePath;
+  if (directory == null)
+    packageConfigError(
+      config,
+      'unsupported package root URI: ' + package.rootUri,
+    );
+  final path = sourceUriPath(directory, './' + uri.path);
+  if (!path.startsWith(directory))
+    packageConfigError(
+      config,
+      'package URI escapes package root: ' + uri.name + '/' + uri.path,
+    );
+  return path;
 }

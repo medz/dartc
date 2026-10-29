@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import '../tool/src/process.dart';
@@ -40,6 +41,7 @@ Future<void> main(List<String> args) async {
     final source = Directory('${work.path}/source bundle')..createSync();
     for (final relative in [
       'tool/package_release.dart',
+      'tool/bundle_compiler.dart',
       'pubspec.yaml',
       'LICENSE',
       for (final file in Directory('$root/lib').listSync(recursive: true))
@@ -77,10 +79,29 @@ Future<void> main(List<String> args) async {
       file.parent.createSync(recursive: true);
       file.writeAsStringSync(entry.value);
     }
+    final build = Directory('${source.path}/build')..createSync();
+    final bundler = '${build.path}/bundle_compiler';
+    final bundledSource = '${build.path}/compiler.dart';
+    final bundledCompiler = '${build.path}/dartc';
+    await run(compiler, [
+      '${source.path}/tool/bundle_compiler.dart',
+      '--std',
+      runtime.path,
+      '-o',
+      bundler,
+    ], native: true);
+    await run(bundler, [source.path, bundledSource], native: true);
+    await run(compiler, [
+      bundledSource,
+      '--std',
+      runtime.path,
+      '-o',
+      bundledCompiler,
+    ], native: true);
     await run(Platform.resolvedExecutable, [
       '${source.path}/tool/package_release.dart',
       '--compiler',
-      compiler,
+      bundledCompiler,
     ]);
     final archive = Directory('${source.path}/build/release')
         .listSync()
@@ -89,22 +110,88 @@ Future<void> main(List<String> args) async {
     final installed = Directory('${work.path}/installed')..createSync();
     await run('/usr/bin/tar', ['-xzf', archive.path, '-C', installed.path]);
     final bundle = installed.listSync().whereType<Directory>().single;
-    source.deleteSync(recursive: true);
+    if (Directory('${bundle.path}/lib').existsSync())
+      throw StateError(
+        'Native archive still contains external library sources.',
+      );
+    final standalone = File('${bundle.path}/bin/dartc')
+        .copySync('${work.path}/dartc');
+    bundle.deleteSync(recursive: true);
+    final external = source.renameSync('${work.path}/external source');
     final app = File('${work.path}/main.dart')
-      ..writeAsStringSync('void main() { print(releaseDependency()); }\n');
+      ..writeAsStringSync('''
+import 'dart:ffi';
+import 'package:dartc/export.dart';
+@Export<Int64 Function(Int64)>()
+int identity(int value) => value;
+void main() { print(identity(releaseDependency())); }
+''');
     final executable = '${work.path}/app';
-    await run('${bundle.path}/bin/dartc', [
-      app.path,
-      '-o',
-      executable,
-    ], native: true);
+    await run(standalone.path, [app.path, '-o', executable], native: true);
     final result = await run(executable, [], native: true);
     if (result.stdout != '73\n' || result.stderr != '') {
       throw StateError('Packaged dependency produced unexpected output.');
     }
+    // Restore the original path with different contents: only explicit --std
+    // may select it; a default build must continue using the embedded sources.
+    external.renameSync(source.path);
+    File('${source.path}/support/release_value_part.dart').writeAsStringSync(
+      "part of 'release%20value.dart';\nconst int partValue = 97;\n",
+    );
+    final overrideApp = File('${work.path}/override.dart')
+      ..writeAsStringSync('void main() { print(releaseDependency()); }\n');
+    for (final override in [false, true, false]) {
+      await run(standalone.path, [
+        overrideApp.path,
+        '-o',
+        executable,
+        if (override) ...['--std', runtime.path],
+      ], native: true);
+      final output = await run(executable, [], native: true);
+      if (output.stdout != (override ? '97\n' : '73\n'))
+        throw StateError(
+          'Explicit runtime source selection was not preserved.',
+        );
+    }
+    source.deleteSync(recursive: true);
+    final values = File('$root/test/fixtures/values.dart')
+        .copySync('${work.path}/values.dart');
+    final expected = await run(Platform.resolvedExecutable, [
+      values.path,
+      'alpha',
+      '你好',
+    ]);
+    await run(standalone.path, [values.path, '-o', executable], native: true);
+    final actual = await run(executable, ['alpha', '你好'], native: true);
+    if (actual.stdout != expected.stdout || actual.stderr != expected.stderr)
+      throw StateError('Standalone compiler values differ from the SDK.');
+    final mapped = Directory('${work.path}/mapped/lib')
+      ..createSync(recursive: true);
+    File('${mapped.path}/export.dart')
+        .writeAsStringSync('int mappedValue() => 118;\n');
+    final config = File('${work.path}/.dart_tool/package_config.json');
+    config.parent.createSync();
+    config.writeAsStringSync(
+      jsonEncode({
+        'configVersion': 2,
+        'packages': [
+          {'name': 'dartc', 'rootUri': '../mapped/', 'packageUri': 'lib/'},
+        ],
+      }),
+    );
+    app.writeAsStringSync(
+      "import 'package:dartc/export.dart';\n"
+      'void main() { print(mappedValue()); }\n',
+    );
+    await run(standalone.path, [app.path, '-o', executable], native: true);
+    final mappedResult = await run(executable, [], native: true);
+    if (mappedResult.stdout != '118\n' || mappedResult.stderr != '')
+      throw StateError(
+        'Embedded package replaced an explicit package mapping.',
+      );
     passed = true;
     stdout.writeln(
-      'Native archive compiles with transitive runtime and core dependencies.',
+      'Standalone native compiler preserves bundled sources, explicit overrides and behavior.',
     );
   } finally {
     if (passed) {

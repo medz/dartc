@@ -2,19 +2,19 @@
 
 ### Features
 
-- Add Intel Mac (`macos-x64`) executables, native compiler builds and release packaging. macOS x64 also supports the existing Int64 FFI object, static library and dynamic library outputs.
-- Replace `--export` and `Pointer.fromFunction` export bindings with `@Export<T>` declarations for macOS object, static and dynamic library outputs. Generate matching C/C++ headers automatically, with an optional `--header` path. macOS ARM64 supports mixed integer, floating-point, boolean and pointer signatures, and scalar read-only data symbols.
+- Add Intel Mac (`macos-x64`) executables, native compiler builds and release packaging.
+- Replace `--export` and `Pointer.fromFunction` export bindings with `@Export<T>` declarations for macOS and Linux object, static and dynamic library outputs on ARM64 and x86-64. Generate matching C/C++ headers automatically, with an optional `--header` path. Support mixed integer, floating-point, boolean and pointer signatures, and scalar read-only data symbols.
 
 ### Tooling
 
+- Embed runtime and standard-library sources in native compiler binaries. The compiler can be moved without an accompanying `lib/` directory; `--std` remains available for explicit source development. Standalone projects can import the bundled `package:dartc/export.dart`, with explicit package mappings taking precedence.
 - Compare baseline and candidate native compilers with their matching runtime sources on the same program, alongside the official SDK. The program benchmark checks behavior and file outputs before reporting compilation, execution, memory and size measurements.
 
 ### Fixes
 
 - Reject source or package-configuration changes during native bootstrap before replacing the verified seed, and retain the original inputs for diagnosis.
-- Preserve double NaN bit patterns in identity checks and constant canonicalization. Cross-compilation uses the output target's NaN representation for invalid floating-point arithmetic.
+- Preserve double NaN bit patterns in identity checks and constant canonicalization. Named constants and constant arithmetic use the output target's NaN representation.
 - Align macOS static-library members for Darwin linkers that require padded archive contents.
-- Include transitive runtime and core-library source dependencies in native archives, so splitting library implementations into new files does not leave them out of the package.
 
 ### Performance
 

@@ -4,7 +4,18 @@ Run these commands from the repository root with your installed Dart SDK on macO
 
 Bootstrap builds stages in a fresh directory and publishes them after the stage2/stage3 byte comparison and behavior checks pass. A code-generation change can make stage1 differ from stage2. Stable self-rebuilds, language behavior and performance each require their own evidence.
 
-Before stage1, bootstrap records the compiler/runtime source dependencies, validation sources and package-configuration search paths. It checks their contents after each stage and after behavior validation; changed inputs prevent publication. On failure, the retained work directory contains the input seed, partial builds and `inputs.json` with the original file contents and SDK version. Keep inputs unchanged throughout the run; these checks occur at phase boundaries.
+Before generating resources, bootstrap records the compiler/runtime source dependencies for both source platforms, the public Export module, validation sources and package-configuration search paths. The native seed compiles `tool/bundle_compiler.dart`; this helper generates an ordinary Dart entry containing the source resources. Bootstrap checks the frozen inputs after generation, each stage and behavior validation; changed inputs prevent publication. On failure, the retained work directory contains the input seed, partial builds and `inputs.json` with the original file contents and SDK version. Keep inputs unchanged throughout the run; these checks occur at phase boundaries.
+
+Successful bootstrap also saves `build/compiler.dart` and `build/bootstrap-inputs.json`. Use that generated entry when cross-compiling the same compiler. To build without an SDK orchestration process, use a matching native seed:
+
+```sh
+mkdir -p build
+build/dartc-seed tool/bundle_compiler.dart --std lib/src/runtime.dart -o build/bundle_compiler
+build/bundle_compiler "$PWD" build/compiler.dart
+build/dartc-seed build/compiler.dart --std lib/src/runtime.dart -o build/dartc
+```
+
+Regenerate the entry after editing bundled sources or moving the checkout. Preserve a verified seed and its source revision together for recovery. `--std` selects external sources for development; the resulting compiler embeds the resources generated above. Native archives contain the binary, license and usage notes. `test/package_release_test.dart` checks the binary alone with the original source path removed, explicit source overrides and package mappings.
 
 Behavior tests compare real compilation and execution with the SDK, including exit status and declared output files. Independent cases run concurrently using the environment's available CPU count. Add cases to the owning fixture or rejection group, give concurrent cases separate source and output paths, and keep tests that mutate shared package configuration in sequence. On failure, active cases finish before the harness preserves sources and process evidence.
 
@@ -81,7 +92,9 @@ Use `dart tool/fuzz.dart --help` for explicit rejection and runtime-failure cont
 
 ## CI
 
-The [native self-hosting workflow](../.github/workflows/native.yml) is manually dispatched. Select Linux ARM64, x64 or both, or `macos-x64` for an Intel Mac, with `architecture`, and the reference SDK version with `dart_sdk`. The Linux jobs bootstrap on the selected hosts, run differential, SSA verification, resource-measurement, program-benchmark and fuzz tests, and cross-compile the compiler for macOS. Release packaging and verification are optional workflow inputs. `cross_ref` supplies matching Mac-built seeds named `dartc-linux` for ARM64 and `dartc-linux-x64` for x64; without a supplied seed, a new checkout uses the SDK for the initial cold bootstrap.
+Run the checks available on the local host and in Docker first. Each supported system requires actual execution; identify emulated runs explicitly. Use CI for remaining platform coverage and appropriate validation batches. Required CI checks must pass before a release.
+
+The [native self-hosting workflow](../.github/workflows/native.yml) is manually dispatched. Select Linux ARM64, x64 or both, or `macos-x64` for an Intel Mac, with `architecture`, and the reference SDK version with `dart_sdk`. The Linux jobs bootstrap on the selected hosts, run native-library, differential, SSA verification, resource-measurement, program-benchmark and fuzz tests, and cross-compile the compiler for macOS. Release packaging and verification are optional workflow inputs. `cross_ref` supplies matching Mac-built seeds named `dartc-linux` for ARM64 and `dartc-linux-x64` for x64; without a supplied seed, a new checkout uses the SDK for the initial cold bootstrap.
 
 The Intel Mac job runs on `macos-15-intel`, rebuilds the native compiler through three stages, and runs the shared behavior, differential, SSA, resource-measurement, benchmark and fuzz checks. It also executes C callers against object, static and dynamic library output, cross-compiles the compiler for the other three targets, and optionally verifies a relocatable macOS x64 archive. Cross-compiled artifacts still require execution on their target hosts.
 
@@ -94,7 +107,7 @@ dart tool/package_release.dart --compiler build/dartc-seed
 dart test/package_release_test.dart --compiler build/dartc-seed
 ```
 
-Packaging follows the compiler's runtime and core-library source dependencies, including imports, exports and parts. These inputs must remain inside the checkout. The extracted compiler is checked through direct execution, PATH lookup and a symlink with the SDK removed from PATH. The regression test adds transitive dependencies and compiles against the extracted archive after removing its source checkout.
+The native compiler already contains its runtime and core-library source dependencies, including imports, exports and parts. The archive adds the license and usage notes. The extracted compiler is checked through direct execution, PATH lookup and a symlink with the SDK removed from PATH. The regression test adds transitive dependencies, builds an archive, and compiles with its binary alone after removing the original source path. It also checks explicit source overrides and package mappings.
 
 ## Release notes
 
@@ -114,15 +127,17 @@ On an ARM64 Mac, keep Linux outputs separate from the Mac seed:
 
 ```sh
 mkdir -p build/linux-x64
-build/dartc-seed bin/dartc.dart --target linux-x64 --std lib/src/runtime.dart -o build/linux-x64/dartc
+build/dartc-seed build/compiler.dart --target linux-x64 --std lib/src/runtime.dart -o build/linux-x64/dartc
 docker run --rm --platform linux/amd64 -v "$PWD:/src:ro" -v "$PWD/build/linux-x64:/out" -w /src dart:3.13.7-sdk bash -ec '
-  env -i PATH=/usr/bin:/bin /out/dartc bin/dartc.dart --std lib/src/runtime.dart -o /out/stage2
-  env -i PATH=/usr/bin:/bin /out/stage2 bin/dartc.dart --std lib/src/runtime.dart -o /out/stage3
+  env -i PATH=/usr/bin:/bin /out/dartc tool/bundle_compiler.dart --std lib/src/runtime.dart -o /out/bundle_compiler
+  env -i PATH=/usr/bin:/bin /out/bundle_compiler /src /out/compiler.dart
+  env -i PATH=/usr/bin:/bin /out/dartc /out/compiler.dart --std lib/src/runtime.dart -o /out/stage2
+  env -i PATH=/usr/bin:/bin /out/stage2 /out/compiler.dart --std lib/src/runtime.dart -o /out/stage3
   cmp /out/stage2 /out/stage3
   dart test/behavior_test.dart --compiler /out/stage2 --std /src/lib/src/runtime.dart
 '
 ```
 
-The SDK runs the validation harness and reference programs; native stages use the supplied compiler. Keep the SDK version aligned with [specs](../specs/README.md). Publish a verified seed only on its matching host platform, with the corresponding runtime sources.
+Repeat with `linux-arm64` outputs and `--platform linux/arm64` for Linux ARM64. The SDK runs the validation harness and reference programs; native stages use the supplied compiler. Keep the SDK version aligned with [specs](../specs/README.md). Publish a verified seed only on its matching host platform, with the corresponding source revision.
 
 Docker on ARM64 executes amd64 programs through emulation. This validates executable behavior and the native build chain; report these runs as emulated. CPU, RSS and timing conclusions about x86-64 hardware require a native x86-64 host.

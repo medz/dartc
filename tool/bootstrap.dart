@@ -9,15 +9,18 @@ Map<String, List<int>?> _bootstrapInputs(String root) {
   final entry = File('$root/bin/dartc.dart');
   final runtime = File('$root/lib/src/runtime.dart');
   final packages = compilerPackages(entry.uri.toString(), root, null);
-  final program = collectSources(
-    entry.uri.toString(),
-    runtime.uri.toString(),
-    packages,
-    Platform.isLinux ? 1 : 0,
-  );
   final paths = {
-    for (final file in program.files) file.path,
+    for (final target in [0, 1])
+      for (final file in collectSources(
+        entry.uri.toString(),
+        runtime.uri.toString(),
+        packages,
+        target,
+      ).files)
+        file.path,
     '$root/lib/src/host.dart',
+    '$root/lib/export.dart',
+    '$root/tool/bundle_compiler.dart',
     '$root/tool/bootstrap.dart',
     '$root/tool/src/process.dart',
     '$root/test/behavior_test.dart',
@@ -112,6 +115,8 @@ Future<void> main(List<String> args) async {
   final stage2 = '${work.path}/dartc-stage2';
   final stage3 = '${work.path}/dartc-stage3';
   final seedCopy = File('${work.path}/dartc-seed');
+  final bundler = '${work.path}/bundle_compiler';
+  final bundledSource = File('${work.path}/compiler.dart');
   var passed = false;
   try {
     final input = File(seed);
@@ -128,21 +133,40 @@ Future<void> main(List<String> args) async {
       await run(sdk, ['compile', 'exe', source, '-o', seedCopy.path]);
     }
     final inputs = _bootstrapInputs(root);
-    File('${work.path}/inputs.json').writeAsStringSync(
-      jsonEncode({
-        'source': source,
-        'runtime': standard,
-        'inputSeed': seed,
-        'sdk': {'path': sdk, 'version': Platform.version},
-        'files': {
-          for (final input in inputs.entries)
-            input.key: input.value == null ? null : base64Encode(input.value!),
-        },
-      }),
-    );
+    void saveInputs() {
+      File('${work.path}/inputs.json').writeAsStringSync(
+        jsonEncode({
+          'source': bundledSource.path,
+          'entry': source,
+          'runtime': standard,
+          'inputSeed': seed,
+          'sdk': {'path': sdk, 'version': Platform.version},
+          'files': {
+            for (final input in inputs.entries)
+              input.key: input.value == null
+                  ? null
+                  : base64Encode(input.value!),
+          },
+        }),
+      );
+    }
+
+    saveInputs();
+    await run(seedCopy.path, [
+      '$root/tool/bundle_compiler.dart',
+      '--std',
+      standard,
+      '-o',
+      bundler,
+    ], native: true);
+    _checkInputs(inputs);
+    await run(bundler, [root, bundledSource.path], native: true);
+    _checkInputs(inputs);
+    inputs[bundledSource.path] = bundledSource.readAsBytesSync();
+    saveInputs();
     Future<void> compile(String compiler, String output) async {
       await run(compiler, [
-        source,
+        bundledSource.path,
         '-o',
         output,
         '--std',
@@ -180,6 +204,9 @@ Future<void> main(List<String> args) async {
       File(stage)
           .copySync('${build.path}/${File(stage).uri.pathSegments.last}');
     }
+    bundledSource.copySync('${build.path}/compiler.dart');
+    File('${work.path}/inputs.json')
+        .copySync('${build.path}/bootstrap-inputs.json');
     File(stage2).copySync(seedCopy.path);
     seedCopy.renameSync(verifiedSeed);
     passed = true;
