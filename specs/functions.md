@@ -22,14 +22,18 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 | §9.2.2 默认值绑定 | 部分实现 | 库/成员默认值在声明库作用域求值；局部函数采用声明处词法常量作用域，可引用此前可见的 outer const，不能偷读调用方名字或普通外层变量。支持当前标量、常量 List、类实例与顶层函数引用子集，不代表完整常量语言。 | [constants.dart](../lib/src/constants.dart) `evaluateConstant()`；[frontend.dart](../lib/src/frontend.dart) `feResolveFunctionDefaults()`；[values.dart](../test/fixtures/values.dart) `positionalArguments()`、`constantDefaults()`；[behavior_test.dart](../test/behavior_test.dart) `program/localFunctions()` |
 | §9.2.2 隐式默认 `null` | 部分实现 | 可空或动态参数允许省略；非空参数缺默认值报错。 | [frontend.dart](../lib/src/frontend.dart) `feLowerArguments()`；[values.dart](../test/fixtures/values.dart) `nullableArguments()`；[behavior_test.dart](../test/behavior_test.dart) `rejected` |
 | §9.2 初始化形式参数 | 部分实现 | 已实现的生成式构造支持 `this.field`、命名默认值及显式子类型到字段表示转换；[私有命名字段形式参数][private-named]要求声明库版本至少 3.12，去掉首个 `_` 后须为合法公共标识符，且声明名和公共名不得与其他形参冲突（含位置形参）。以公共名调用，旧版本调用方不改变声明规则；支持 [super 形参][super-parameters]，具有关联父参数的类型、默认值和初始化作用域；命名 super 形参须为公共名称，包括父参数为私有命名字段形参的情况。字段及 super 形参支持 `int this.f(int x)` 一类函数形式，省略返回注解为 dynamic。[3.13 之前的 final 修饰符][parameter-modifiers]可用于字段及 super 形参，不改变字段本身的可写性；主构造器中的声明参数与初始化作用域见[类](classes.md#主构造器)。生成式重定向不能带字段或 super 形式参数，见[构造器规则](classes.md)。 | [frontend.dart](../lib/src/frontend.dart) `feRegisterFunction()`、`feResolveFunctionDefaults()`；[parameters.dart](../lib/src/frontend/parameters.dart) `parameterName()`、`checkParameterName()`；[values.dart](../test/fixtures/values.dart) `Cell`、`argumentCalls()`；[behavior_test.dart](../test/behavior_test.dart) `version-private.dart`、`version-imports.dart`、`rejected` |
-| §9.2.3 `covariant` 参数 | 未实现 | 未记录此修饰符或建立 override 参数入口检查；List 协变写入检查不能代替它。 | [ast.dart](../lib/src/ast.dart) `AstParameter`；[parser.dart](../lib/src/parser.dart) `parserParameters()`；尚无验证入口 |
+| [§9.2.3 `covariant` 参数][covariant-parameters] | 部分实现 | 支持非泛型用户类的实例方法、setter 和运算符参数，包括可选/命名参数、函数形式参数及已有泛型方法。协变性按参数位置或公共名从所有接口继承；参数可收窄，但必须与每个直接/间接父声明的对应类型可比较，调用形状约束不变。调用仍按静态签名检查，运行时分派在方法体前检查实际实现的参数类型；方法值的运行时签名把协变参数放宽到 Object?，调用适配器保留检查。显式 covariant 字段、泛型类自动协变与完整动态成员查找仍缺。 | [ast.dart](../lib/src/ast.dart) `AstParameter.covariant`；[members.dart](../lib/src/members.dart) `MemberBinding.covariantParameters`；[frontend/classes.dart](../lib/src/frontend/classes.dart) `checkClassInterfaces()`；[frontend.dart](../lib/src/frontend.dart) `feDispatchArgument()`、`feBoundMethodRuntimeType()`；[values.dart](../test/fixtures/values.dart) `covariantValues()`；[behavior_test.dart](../test/behavior_test.dart) `rejectedCovariant`、`covariantSyntaxDifferences`、`failingValues`、`parameter-modifier-imports.dart` |
 | [§9.3 函数类型与函数对象][signature] | 部分实现 | 可执行文件支持非泛型必需/可选位置及命名参数签名的函数值及存储、传参、返回、typed List、调用/`.call`；常量、身份与输出限制见[函数值](#函数值)。 | [frontend.dart](../lib/src/frontend.dart) `feFunctionReference()`、`feLowerValueCall()`；[values.dart](../test/fixtures/values.dart) `functionValues()`；[behavior_test.dart](../test/behavior_test.dart) `program/localFactory()`、`program/localFunctions()`、`program/anonymousFunctions()`、`rejected` |
 | §9.4 外部函数 | 部分实现 | 仅受信运行时中的显式原语签名可连接；没有通用 external 链接或 `NoSuchMethodError` 路径。 | [frontend.dart](../lib/src/frontend.dart) `feRegisterFunction()`；[runtime.dart](../lib/src/runtime.dart) external 声明；[behavior_test.dart](../test/behavior_test.dart) `invalidRuntimes` |
 | §9 异步与生成器 | 未实现 | 无 `async`、`sync*`、`async*` 函数表示、暂停点及调度实现。 | [ast.dart](../lib/src/ast.dart) `AstFunction`；[parser.dart](../lib/src/parser.dart) `parserFunction()`；尚无验证入口 |
 | §17.15 参数求值及绑定 | 部分实现 | 直接调用保留实参源码顺序及形参重排；函数值的读取时机按 callee 形式区分，实例与静态选择器的 SDK 求值顺序见[表达式追踪](expressions.md)。 | [frontend.dart](../lib/src/frontend.dart) `feLowerArguments()`；[values.dart](../test/fixtures/values.dart) `argumentCalls()`、`functionValues()`、`staticMembers()` 的 trace 与寄存器/栈参数 |
 | §19.6 脚本入口的函数调用 | 部分实现 | 显式入口适配器传 CLI 参数、第二位置参数 `null` 并补其余默认值；不是一般函数对象启动模型。 | [frontend.dart](../lib/src/frontend.dart) `feGenerateEntry()`；[behavior_test.dart](../test/behavior_test.dart) `namedEntry`、`twoEntry`、`invalidEntry` |
 
-固定草案 [§9.2.1][formal-modifiers] 禁止 `var this.field`；SDK 3.13.7 的 CFE 和 analyzer 接受 3.12 文件中的这一形式，dartc 按草案拒绝，并由 `var-field-formal.dart` 单独验证，不计为 SDK 一致。带 `final` / `var` 的函数形式参数（如 `final int callback(int n)`，包括对应字段形式）按 SDK 拒绝；显式 `final int Function(int) callback` 在旧版本可用。草案的字段形式产生式仍容纳修饰符和函数尾缀的组合，这部分尚未宣称完全一致；covariant 形参仍缺。
+固定草案 [§9.2.1][formal-modifiers] 禁止 `var this.field`；SDK 3.13.7 的 CFE 和 analyzer 接受 3.12 文件中的这一形式，dartc 按草案拒绝，并由 `var-field-formal.dart` 单独验证，不计为 SDK 一致。带 `final` / `var` 的函数形式参数（如 `final int callback(int n)`，包括对应字段形式）按 SDK 拒绝；显式 `final int Function(int) callback` 在旧版本可用。草案的字段形式产生式仍容纳修饰符和函数尾缀的组合，这部分尚未宣称完全一致。实例参数的 covariant 可与旧版 final / var 组合；修饰符顺序仍按语法检查。
+
+协变参数的[覆写规则][covariant-overrides]与[方法闭包化规则][covariant-closurization]分别约束静态签名和方法值的运行时签名。合并接口时先选择原有函数子类型关系下的签名，再合并所有父签名的协变标记；不能通过放宽覆写检查来改变合并签名。继承具体实现也保留接口引入的协变性，`super.method` 则使用父实现的签名。隐式字段 setter 实现协变接口时按字段类型检查写入。
+
+固定规范与 SDK 3.13.7 analyzer 只允许在实例方法、setter 或运算符形参上写 covariant；该 SDK 的 CFE 还接受局部/匿名函数、普通及工厂构造器、字段形式参数、两种函数 typedef 中的该修饰符。dartc 按规范和 analyzer 拒绝这些位置，`covariantSyntaxDifferences` 单独核实 CFE 接受与 dartc 拒绝。运行时类型错误仍沿用当前失败退出边界，可捕获 TypeError 见[异常缺口](statements.md)。
 
 ## 泛型直接调用
 
@@ -81,7 +85,7 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 可执行文件产物支持将顶层函数、静态方法、绑定实例方法、局部函数和匿名函数作为值存储、传参、返回或放入 typed List，并通过具体的非泛型签名调用或 `.call`。目标文件、静态库和动态库产物不支持 Dart 函数值。非泛型用户类的构造器函数值见[类追踪](classes.md#构造器函数值)。泛型函数值及 dynamic/裸 `Function` 调用尚未实现。
 
-[实例方法闭包化][instance-closurization]支持已绑定类声明的非泛型方法，包括显式/隐式 this、嵌套闭包内提取、跨库可见性及空短路接收者。接收者只求值一次，方法值持续持有该对象；相同对象的同一方法比较相等，不同对象或方法不相等。普通闭包仍按自身身份比较；不规定重复方法提取的 `identical` 结果。实例方法引用不是常量，未使用函数和未执行常量分支也须检查这一义务。支持继承方法和 super 方法值；super 选择父类具体实现，仍绑定原对象。仍以 builtin 分支实现的方法提取及 Function.hashCode 等继承 API 仍缺。验证入口为 [values.dart](../test/fixtures/values.dart) 的 `functionValues`、`inheritanceValues`、[behavior_test.dart](../test/behavior_test.dart) 的 `function-imports.dart`、拒例与失败用例，以及 [roots.dart](../test/fixtures/roots.dart) 的 `closureRoots`。
+[实例方法闭包化][instance-closurization]支持已绑定类声明的非泛型方法，包括显式/隐式 this、嵌套闭包内提取、跨库可见性及空短路接收者。接收者只求值一次，方法值持续持有该对象；相同对象的同一方法且运行时函数类型相同时比较相等，协变接口可能使 `super.method` 与 `this.method` 的运行时类型不同。普通闭包仍按自身身份比较；不规定重复方法提取的 `identical` 结果。实例方法引用不是常量，未使用函数和未执行常量分支也须检查这一义务。支持继承方法和 super 方法值；super 选择父类具体实现，仍绑定原对象。仍以 builtin 分支实现的方法提取及 Function.hashCode 等继承 API 仍缺。验证入口为 [values.dart](../test/fixtures/values.dart) 的 `functionValues`、`inheritanceValues`、[behavior_test.dart](../test/behavior_test.dart) 的 `function-imports.dart`、拒例与失败用例，以及 [roots.dart](../test/fixtures/roots.dart) 的 `closureRoots`。
 
 函数签名区分必需/可选位置参数、命名参数及 `required`，命名顺序不构成类型身份。结构子类型检查参数逆变、结果协变、允许的位置参数区间、命名参数集合及必需命名参数约束；静态检查和运行时 `is`/转换采用同一规则。函数类型别名、上下文推断、上下界合并和外层类型参数代入保留这些形状。依据[函数子类型][function-subtyping]及[上下界规则][function-bounds]。
 
@@ -142,3 +146,7 @@ SDK 3.13.7 CFE 允许未选中常量集合分支及构造实参中的隐式提�
 
 [function-subtyping]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/subtyping.md#L202-L224
 [function-bounds]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/upper-lower-bounds.md
+
+[covariant-parameters]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L2486-L2635
+[covariant-overrides]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L3187-L3204
+[covariant-closurization]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L15272-L15294

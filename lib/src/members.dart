@@ -42,6 +42,7 @@ class MemberBinding {
   int method = -1;
   int getter = -1;
   int setter = -1;
+  List<bool> covariantParameters = const <bool>[];
 
   MemberBinding(this.name, this.library);
 }
@@ -219,6 +220,15 @@ ClassMembers bindClassMembers(
     }
     if (duplicate) {
       _memberError(source, method.token, 'duplicate member ' + method.name);
+    }
+    for (var p = 0; p < method.parameters.length; p++) {
+      if (!method.parameters[p].covariant) continue;
+      if (member.covariantParameters.isEmpty)
+        member.covariantParameters = List<bool>.filled(
+          method.parameters.length,
+          false,
+        );
+      member.covariantParameters[p] = true;
     }
     i++;
   }

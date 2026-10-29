@@ -189,6 +189,7 @@ class AstParameter {
   String name;
   bool fieldFormal;
   bool superFormal = false;
+  bool covariant = false;
   String modifier = '';
   int token;
   int binding = -1;

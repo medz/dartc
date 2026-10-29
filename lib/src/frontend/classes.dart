@@ -68,6 +68,7 @@ class ClassSignature(
   final List<int> parameters,
   final List<AstParameter> formals,
   final List<int> typeParameters,
+  final List<bool> covariantParameters,
 );
 
 ClassSignature classSignature(
@@ -86,6 +87,7 @@ ClassSignature classSignature(
           ? declarations[function].parameters.sublist(1)
           : declarations[function].parameters,
       info.typeParameters,
+      role == classGetter ? const <bool>[] : member.covariantParameters,
     );
   }
   if (role == classGetter)
@@ -94,6 +96,7 @@ ClassSignature classSignature(
       const <int>[],
       const <AstParameter>[],
       const <int>[],
+      const <bool>[],
     );
   return ClassSignature(
     tVoid,
@@ -102,10 +105,20 @@ ClassSignature classSignature(
       AstParameter(AstType('', const <AstType>[], 0), '', false, 0),
     ],
     const <int>[],
+    member.covariantParameters,
   );
 }
 
-bool classSignatureSubtype(ClassSignature actual, ClassSignature expected) {
+bool classCovariantParameter(ClassSignature signature, int parameter) =>
+    parameter >= 0 &&
+    parameter < signature.covariantParameters.length &&
+    signature.covariantParameters[parameter];
+
+bool classSignatureSubtype(
+  ClassSignature actual,
+  ClassSignature expected, [
+  bool overriding = false,
+]) {
   if (actual.typeParameters.length != expected.typeParameters.length)
     return false;
   for (var i = 0; i < actual.typeParameters.length; i++) {
@@ -137,7 +150,12 @@ bool classSignatureSubtype(ClassSignature actual, ClassSignature expected) {
       expected.typeParameters,
       actual.typeParameters,
     );
-    if (!typeIsSubtype(type, actual.parameters[index])) return false;
+    if (!typeIsSubtype(type, actual.parameters[index]) &&
+        !(overriding &&
+            (classCovariantParameter(actual, index) ||
+                classCovariantParameter(expected, i)) &&
+            typeIsSubtype(actual.parameters[index], type)))
+      return false;
   }
   for (var i = 0; i < actual.formals.length; i++) {
     final formal = actual.formals[i];
@@ -160,10 +178,13 @@ MemberBinding _copyMember(MemberBinding member) {
   copy.field = member.field;
   copy.fieldSetter = member.fieldSetter;
   copy.staticField = member.staticField;
+  copy.covariantParameters = member.covariantParameters;
   return copy;
 }
 
 void _copyRole(MemberBinding target, MemberBinding source, int role) {
+  if (role != classGetter)
+    target.covariantParameters = source.covariantParameters;
   if (role == classMethod)
     target.method = source.method;
   else if (role == classGetter) {
@@ -173,6 +194,39 @@ void _copyRole(MemberBinding target, MemberBinding source, int role) {
     target.setter = source.setter;
     target.fieldSetter = source.fieldSetter;
   }
+}
+
+void _inheritCovariance(
+  MemberBinding member,
+  int role,
+  List<MemberBinding> candidates,
+  List<AstFunction> declarations,
+  List<int> fieldTypes,
+) {
+  if (role == classGetter) return;
+  var inherits = false;
+  for (final candidate in candidates)
+    if (candidate.covariantParameters.isNotEmpty) inherits = true;
+  if (!inherits) return;
+  final signature = classSignature(member, role, declarations, fieldTypes);
+  var flags = <bool>[...member.covariantParameters];
+  for (final candidate in candidates) {
+    if (candidate.covariantParameters.isEmpty) continue;
+    final parent = classSignature(candidate, role, declarations, fieldTypes);
+    for (var p = 0; p < parent.formals.length; p++) {
+      if (!classCovariantParameter(parent, p)) continue;
+      final index = correspondingParameter(
+        signature.formals,
+        parent.formals[p],
+        p,
+      );
+      if (index < 0) continue;
+      if (flags.isEmpty)
+        flags = List<bool>.filled(signature.formals.length, false);
+      flags[index] = true;
+    }
+  }
+  member.covariantParameters = flags;
 }
 
 MemberBinding? _combinedMember(
@@ -277,6 +331,66 @@ List<ClassMembers> checkClassInterfaces(
         if (!member.isStatic) inherited.add(member);
     }
     final view = views[owner];
+    void checkCovariance(
+      MemberBinding member,
+      int role,
+      ClassSignature actual,
+    ) {
+      final signature = classSignature(member, role, declarations, fieldTypes);
+      if (signature.covariantParameters.isEmpty &&
+          actual.covariantParameters.isEmpty)
+        return;
+      final visited = List<bool>.filled(classes.length, false);
+      void visit(int ancestor) {
+        if (visited[ancestor]) return;
+        visited[ancestor] = true;
+        final index = lookupMember(
+          ownMembers[ancestor],
+          member.name,
+          member.library,
+        );
+        if (index >= 0 &&
+            !ownMembers[ancestor].members[index].isStatic &&
+            hasClassMember(ownMembers[ancestor].members[index], role)) {
+          final parent = classSignature(
+            ownMembers[ancestor].members[index],
+            role,
+            declarations,
+            fieldTypes,
+          );
+          for (var p = 0; p < actual.formals.length; p++) {
+            final current = correspondingParameter(
+              signature.formals,
+              actual.formals[p],
+              p,
+            );
+            if (!classCovariantParameter(actual, p) &&
+                !classCovariantParameter(signature, current))
+              continue;
+            final other = correspondingParameter(
+              parent.formals,
+              actual.formals[p],
+              p,
+            );
+            if (other < 0) continue;
+            final type = substituteType(
+              parent.parameters[other],
+              parent.typeParameters,
+              actual.typeParameters,
+            );
+            if (!typeIsSubtype(type, actual.parameters[p]) &&
+                !typeIsSubtype(actual.parameters[p], type))
+              fail(owner, 'incompatible covariant parameter of ' + member.name);
+          }
+        }
+        for (final parent in classSupertypes[ancestor])
+          if (typeIsClass(parent)) visit(typeArgument(parent));
+      }
+
+      for (final parent in classSupertypes[owner])
+        if (typeIsClass(parent)) visit(typeArgument(parent));
+    }
+
     for (final member in inherited) {
       var index = lookupMember(view, member.name, member.library);
       if (index < 0) {
@@ -365,6 +479,13 @@ List<ClassMembers> checkClassInterfaces(
           fieldTypes,
         );
         if (own != null && hasClassMember(own, role)) {
+          _inheritCovariance(
+            member,
+            role,
+            candidates,
+            declarations,
+            fieldTypes,
+          );
           final function = classMemberFunction(own, role);
           if (function >= 0 && selected == null) {
             final syntax = declarations[function];
@@ -428,11 +549,17 @@ List<ClassMembers> checkClassInterfaces(
               }
             }
           }
-          final signature = classSignature(own, role, declarations, fieldTypes);
+          final signature = classSignature(
+            member,
+            role,
+            declarations,
+            fieldTypes,
+          );
           for (final parent in candidates)
             if (!classSignatureSubtype(
               signature,
               classSignature(parent, role, declarations, fieldTypes),
+              true,
             ))
               fail(owner, 'invalid override of ' + member.name);
         } else {
@@ -442,6 +569,13 @@ List<ClassMembers> checkClassInterfaces(
               'incompatible inherited member signatures: ' + member.name,
             );
           _copyRole(member, selected, role);
+          _inheritCovariance(
+            member,
+            role,
+            candidates,
+            declarations,
+            fieldTypes,
+          );
         }
       }
       if (member.method >= 0 &&
@@ -450,6 +584,11 @@ List<ClassMembers> checkClassInterfaces(
         fail(owner, 'method conflicts with inherited accessor: ' + member.name);
       for (var role = classMethod; role <= classSetter; role++) {
         if (!hasClassMember(member, role)) continue;
+        checkCovariance(
+          member,
+          role,
+          classSignature(member, role, declarations, fieldTypes),
+        );
         final implementation = classImplementation(
           owner,
           member.name,
@@ -464,7 +603,14 @@ List<ClassMembers> checkClassInterfaces(
             classSignatureSubtype(
               classSignature(implementation, role, declarations, fieldTypes),
               classSignature(member, role, declarations, fieldTypes),
+              true,
             );
+        if (implementation != null)
+          checkCovariance(
+            member,
+            role,
+            classSignature(implementation, role, declarations, fieldTypes),
+          );
         if (!classes[owner].isAbstract && !concrete)
           fail(owner, 'missing concrete implementation of ' + member.name);
       }

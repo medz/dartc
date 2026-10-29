@@ -233,8 +233,8 @@ List<AstParameter> parserFunctionTypeParameters(
     }
     if (required && kind != astNamedParameter)
       parserError(parser, 'required needs a named parameter');
-    if (legacy && parserIs(parser, 'covariant'))
-      parserError(parser, 'covariant function type parameters are unsupported');
+    if (parserParameterModifierAhead(parser, 'covariant'))
+      parserError(parser, 'covariant is not allowed in function types');
     final modifier = legacy ? parserParameterModifier(parser) : '';
     if (parserIs(parser, 'final') ||
         parserIs(parser, 'var') ||
@@ -1834,6 +1834,16 @@ String parserParameterModifier(Parser parser) {
   return modifier;
 }
 
+bool parserParameterModifierAhead(Parser parser, String modifier) {
+  if (!parserIs(parser, modifier)) return false;
+  final next = parser.tokens[parser.position + 1];
+  return !tokenIs(next, ',') &&
+      !tokenIs(next, ')') &&
+      !tokenIs(next, ']') &&
+      !tokenIs(next, '}') &&
+      !tokenIs(next, '=');
+}
+
 List<AstParameter> parserParameters(
   Parser parser, [
   List<AstVariable>? declaringFields,
@@ -1874,6 +1884,8 @@ List<AstParameter> parserParameters(
         required = true;
       }
     }
+    final covariant = parserParameterModifierAhead(parser, 'covariant');
+    if (covariant) parser.position++;
     final modifier = parserParameterModifier(parser);
     final declaring = declaringFields != null && modifier != '';
     var type = parserDeclarationType(parser, declaring ? '' : modifier);
@@ -1904,6 +1916,7 @@ List<AstParameter> parserParameters(
       if (parserTake(parser, '?')) type.name = 'Function?';
     }
     var parameter = AstParameter(type, name, fieldFormal, token);
+    parameter.covariant = covariant;
     if (declaringFields != null && modifier != '') {
       parameter.fieldFormal = true;
       declaringFields.add(

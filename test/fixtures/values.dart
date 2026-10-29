@@ -6405,6 +6405,149 @@ void interfaceValues() {
   print('${DeclaredStringImplementation()}');
 }
 
+class CovariantBase {
+  int take(covariant num value, [covariant Object? extra = 'base']) => 0;
+  int named({covariant num value = 3, covariant Object? extra = 'base'}) => 0;
+  int mixed({covariant num value = 1, String extra = 'base'}) => 0;
+  void set item(covariant num value) {}
+  num operator +(covariant num other) => other;
+  bool operator <(covariant num other) => false;
+  T choose<T extends num>(covariant num value) => value as T;
+}
+
+class CovariantNarrow extends CovariantBase {
+  int take(int value, [String? extra = 'child']) {
+    print(extra);
+    return value + 1;
+  }
+
+  int named({int value = 4, String? extra = 'child'}) {
+    print(extra);
+    return value + 2;
+  }
+
+  int mixed({String extra = 'child', int value = 2}) {
+    print(extra);
+    return value;
+  }
+
+  void set item(int value) {
+    print(value);
+  }
+
+  int operator +(int other) => other + 3;
+  bool operator <(int other) => other > 0;
+  T choose<T extends num>(T value) => value;
+}
+
+abstract class CovariantContract {
+  int method(covariant int value);
+}
+
+abstract class CovariantWideContract {
+  int method(num value);
+}
+
+class CovariantImplementation {
+  int method(int value) => value + 4;
+}
+
+class CovariantCombined extends CovariantImplementation
+    implements CovariantContract, CovariantWideContract {
+  void checkSuper() {
+    print(super.method is int Function(Object?));
+    print(this.method is int Function(Object?));
+    print(super.method == this.method);
+    print(this.method == this.method);
+  }
+}
+
+abstract class CovariantSetter {
+  void set item(covariant num value);
+}
+
+class CovariantField implements CovariantSetter {
+  int item = 1;
+}
+
+class CovariantCallback {
+  int apply(covariant int callback(int value)) => callback(4);
+}
+
+class InferredCovariant extends CovariantBase {
+  int take(value, [extra = 'inferred']) {
+    print(extra);
+    return value as int;
+  }
+}
+
+class VoidCovariantBase {
+  void take(void value) {}
+}
+
+class VoidCovariant extends VoidCovariantBase {
+  void take(covariant int value) {
+    print(value);
+  }
+}
+
+class StaticCovariantBase {
+  static void take(String value) {}
+}
+
+class StaticCovariantChild extends StaticCovariantBase {
+  void take(covariant int value) {
+    print(value);
+  }
+}
+
+int covariantIncrement(int value) => value + 1;
+
+void covariantValues() {
+  int identifier(covariant) => covariant + 1;
+  print(identifier(1));
+  CovariantBase value = CovariantNarrow();
+  print(value.take(2));
+  print(value.take(3, null));
+  print(value.named(extra: 'named', value: 5));
+  print(value.named());
+  value.item = 6;
+  print(value + 7);
+  if (value case < 8) print('covariant pattern');
+  print(value.choose<int>(9));
+  print(value.choose<double>(2.5));
+  var method = value.take;
+  print(method is int Function(Object?, [Object?]));
+  print(method is int Function(String, [List<int>]));
+  print(method(10));
+  var named = value.named;
+  print(named is int Function({Object? value, Object? extra}));
+  print(named(value: 11));
+  var mixed = value.mixed;
+  print(mixed is int Function({Object? value, String extra}));
+  print(mixed is int Function({Object? value, Object? extra}));
+  print(mixed(extra: 'mixed', value: 15));
+  var inferred = InferredCovariant().take;
+  print(inferred is int Function(Object?, [Object?]));
+  print(inferred(16));
+  var combined = CovariantCombined();
+  CovariantWideContract wide = combined;
+  print(wide.method(12));
+  var inherited = combined.method;
+  print(inherited is int Function(Object?));
+  print(inherited(13));
+  combined.checkSuper();
+  print(CovariantImplementation().method is int Function(Object?));
+  var field = CovariantField();
+  CovariantSetter setter = field;
+  setter.item = 14;
+  print(field.item);
+  print(CovariantCallback().apply(covariantIncrement));
+  VoidCovariantBase voidParameter = VoidCovariant();
+  voidParameter.take(17);
+  StaticCovariantChild().take(18);
+}
+
 class InheritedChild extends InheritedBase {
   int value = 10;
   String child = 'child';
@@ -7159,6 +7302,7 @@ void main(List<String> args) {
   primaryConstructorValues();
   inheritanceValues();
   interfaceValues();
+  covariantValues();
   finallyValues();
   exceptionValues();
   stackTraceValues();
