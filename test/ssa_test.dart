@@ -30,6 +30,7 @@ import '${library.resolve('optimize.dart')}';
 import '${library.resolve('types.dart')}';
 import '${library.resolve('verify_ssa.dart')}';
 import '${library.resolve('machine.dart')}';
+import '${library.resolve('select.dart')}';
 import '${library.resolve('allocate.dart')}';
 import '${library.resolve('liveness.dart')}';
 import '${library.resolve('emit.dart')}';

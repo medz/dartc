@@ -8,6 +8,7 @@ import '../host.dart';
 import '../ir.dart';
 import '../library.dart';
 import '../machine.dart';
+import '../select.dart';
 import '../optimize.dart';
 import '../nogc.dart';
 import '../reach.dart';
