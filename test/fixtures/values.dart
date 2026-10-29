@@ -544,7 +544,68 @@ set topConstant(int next) {
   topStorage = next;
 }
 
+int initialZero = 0;
+bool initialFalse = false;
+double initialPositiveZero = 0.0;
+double initialNegativeZero = -0.0;
+Object? initialTaggedZero = 0;
+Object? initialTaggedFalse = false;
+int? initialNull;
+var initialInferredNull = null;
+late int initialLateZero = 0;
+late final int initialLateFinalZero = 0;
+final int initialFinalZero = 0;
+set initialFinalZero(int value) => initialZero = value;
+int initialCalls = 0;
+int initialEffect() {
+  initialCalls++;
+  return 0;
+}
+
+int initialLazyZero = initialEffect();
+int initialSkippedZero = initialEffect();
+
+class InitialStatics {
+  static int value = 0;
+  static bool flag = false;
+  static double positiveZero = 0.0;
+  static Object? nullable;
+}
+
 void topAccessorValues() {
+  print(<Object?>[
+    initialZero,
+    initialFalse,
+    1.0 / initialPositiveZero,
+    1.0 / initialNegativeZero,
+    initialTaggedZero,
+    initialTaggedFalse,
+    initialNull,
+    initialInferredNull,
+    initialLateFinalZero,
+    InitialStatics.flag,
+    1.0 / InitialStatics.positiveZero,
+    InitialStatics.nullable,
+  ]);
+  initialLateZero = 12;
+  InitialStatics.value = 13;
+  initialNull ??= 14;
+  initialInferredNull = 15;
+  initialFinalZero = 16;
+  print(<Object?>[
+    initialLateZero,
+    InitialStatics.value,
+    initialNull,
+    initialInferredNull,
+    initialFinalZero,
+    initialZero,
+  ]);
+  initialSkippedZero = 17;
+  print(initialCalls);
+  print(initialLazyZero);
+  print(initialLazyZero);
+  print(initialSkippedZero);
+  print(initialCalls);
   conditionTrace = '';
   print(topAccess = conditionChoice(2));
   print(conditionTrace);

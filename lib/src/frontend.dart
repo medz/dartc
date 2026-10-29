@@ -56,6 +56,7 @@ class GlobalInitializer {
   int getter;
   int setter;
   int state;
+  bool zeroInitialized = false;
 
   GlobalInitializer(
     this.bindings,
@@ -244,7 +245,6 @@ List<FunctionBindings> feFieldBindings = <FunctionBindings>[];
 List<int> feClassSources = <int>[];
 List<int> feGlobalSources = <int>[];
 List<int> feGlobalOwners = <int>[];
-List<int> feRawGlobals = <int>[];
 List<GlobalInitializer> feGlobalInitializers = <GlobalInitializer>[];
 int feRuntimeTokens = 0;
 List<int> _feLiteralTypes = <int>[];
@@ -802,10 +802,6 @@ int feRegisterGlobal(AstVariable syntax, int owner) {
   feGlobalSources.add(source);
   feGlobalOwners.add(owner);
   feGlobalNodes.add(syntax);
-  if (owner < 0 && feRuntimeTokens > 0 && source == 0 && !syntax.lateVariable)
-    feRawGlobals.add(1);
-  else
-    feRawGlobals.add(0);
   _feLiteralTypes.add(0);
   _feLiteralValues.add(0);
   if (owner < 0) {
@@ -1285,9 +1281,7 @@ int feTypeSymbol(AstType syntax) {
 }
 
 int feGlobalType(int global) {
-  if (globalTypes[global] < 0 &&
-      imageKind == ImageKind.executable &&
-      feRawGlobals[global] == 0) {
+  if (globalTypes[global] < 0 && imageKind == ImageKind.executable) {
     feInferGlobal(global);
   }
   return globalTypes[global];
@@ -1303,9 +1297,13 @@ void feLoadGlobalValue(int global) {
   } else if (feGlobalNodes[global].modifier == 'const') {
     var value = feConstants.values[global];
     feConstantValue(value, value.type, feGlobalNodes[global].token);
-  } else if (imageKind == ImageKind.executable && feRawGlobals[global] == 0) {
+  } else if (imageKind == ImageKind.executable) {
     feGlobalType(global);
-    feCall(feGlobalInitializers[global].getter, 0);
+    final initializer = feGlobalInitializers[global];
+    if (initializer.zeroInitialized)
+      feOperand(opLoadGlobal, global);
+    else
+      feCall(initializer.getter, 0);
   } else {
     feOperand(opLoadGlobal, global);
   }
@@ -1313,7 +1311,7 @@ void feLoadGlobalValue(int global) {
 
 void feStoreGlobalValue(int global) {
   if (imageKind == ImageKind.executable &&
-      feRawGlobals[global] == 0 &&
+      !feGlobalInitializers[global].zeroInitialized &&
       _feLiteralTypes[global] == 0) {
     feCall(feGlobalInitializers[global].setter, 1);
     feEmit(opPop);
@@ -6230,7 +6228,6 @@ void fePrepareGlobals(int count, List<FunctionBindings> bindings) {
       -1,
     );
     if (imageKind == ImageKind.executable &&
-        feRawGlobals[i] == 0 &&
         feGlobalNodes[i].modifier != 'const') {
       var type = globalTypes[i];
       initializer.getter = functions.length;
@@ -6337,6 +6334,15 @@ void feInferGlobal(int global) {
     initializer.code = ir;
     initializer.types = irTypes;
     initializer.locals = feSlotTypes;
+    // A checked zero word already matches the loader-initialized global slot.
+    // Use the lowered representation, not the source value: boxed zero, false
+    // and negative double zero need different bits or allocation. A late
+    // declaration without an initializer must retain its uninitialized state.
+    initializer.zeroInitialized =
+        (!syntax.lateVariable || syntax.initializer.isNotEmpty) &&
+        ir.length == 2 &&
+        (ir[0] == opInt || ir[0] == opDouble) &&
+        ir[1] == 0;
     final getter = functions[initializer.getter];
     getter.result = initializer.result;
     final setter = functions[initializer.setter];
@@ -6376,30 +6382,32 @@ void feGenerateGlobals(int count) {
       getter.start = ir.length;
       feSlotTypes = initializer.locals;
       feNextLocal = initializer.locals.length;
-      feOperand(opLoadGlobal, initializer.state);
-      feOperand(opInt, 2);
-      feEmit(opEq);
-      var incomplete = feJump(opJumpFalse);
-      feOperand(opLoadGlobal, i);
-      feEmit(opReturn);
-      fePatch(incomplete, ir.length);
       final syntax = feGlobalNodes[i];
-      if (syntax.lateVariable && syntax.initializer.isEmpty) feLateFailure(0);
-      feAppendInitializer(initializer);
-      if (syntax.modifier == 'final') {
-        final value = feTemp(globalTypes[i]);
-        feOperand(opStoreLocal, value);
+      if (!initializer.zeroInitialized) {
         feOperand(opLoadGlobal, initializer.state);
         feOperand(opInt, 2);
         feEmit(opEq);
-        final unwritten = feJump(opJumpFalse);
-        feLateFailure(1);
-        fePatch(unwritten, ir.length);
-        feOperand(opLoadLocal, value);
+        var incomplete = feJump(opJumpFalse);
+        feOperand(opLoadGlobal, i);
+        feEmit(opReturn);
+        fePatch(incomplete, ir.length);
+        if (syntax.lateVariable && syntax.initializer.isEmpty) feLateFailure(0);
+        feAppendInitializer(initializer);
+        if (syntax.modifier == 'final') {
+          final value = feTemp(globalTypes[i]);
+          feOperand(opStoreLocal, value);
+          feOperand(opLoadGlobal, initializer.state);
+          feOperand(opInt, 2);
+          feEmit(opEq);
+          final unwritten = feJump(opJumpFalse);
+          feLateFailure(1);
+          fePatch(unwritten, ir.length);
+          feOperand(opLoadLocal, value);
+        }
+        feOperand(opStoreGlobal, i);
+        feOperand(opInt, 2);
+        feOperand(opStoreGlobal, initializer.state);
       }
-      feOperand(opStoreGlobal, i);
-      feOperand(opInt, 2);
-      feOperand(opStoreGlobal, initializer.state);
       feOperand(opLoadGlobal, i);
       feEmit(opReturn);
       getter.locals = feNextLocal;
@@ -6409,7 +6417,9 @@ void feGenerateGlobals(int count) {
       setter.start = ir.length;
       feSlotTypes = <int>[globalTypes[i]];
       feNextLocal = 1;
-      if (syntax.lateVariable && syntax.modifier == 'final') {
+      if (!initializer.zeroInitialized &&
+          syntax.lateVariable &&
+          syntax.modifier == 'final') {
         feOperand(opLoadGlobal, initializer.state);
         feOperand(opInt, 2);
         feEmit(opEq);
@@ -6419,8 +6429,10 @@ void feGenerateGlobals(int count) {
       }
       feOperand(opLoadLocal, 0);
       feOperand(opStoreGlobal, i);
-      feOperand(opInt, 2);
-      feOperand(opStoreGlobal, initializer.state);
+      if (!initializer.zeroInitialized) {
+        feOperand(opInt, 2);
+        feOperand(opStoreGlobal, initializer.state);
+      }
       feOperand(opLoadLocal, 0);
       feEmit(opReturn);
       setter.locals = 1;
@@ -6620,7 +6632,6 @@ void parseSource(SourceProgram source) {
   feGlobalSources.clear();
   feGlobalOwners.clear();
   feGlobalNodes.clear();
-  feRawGlobals.clear();
   feGlobalInitializers.clear();
   _feLiteralTypes.clear();
   _feLiteralValues.clear();

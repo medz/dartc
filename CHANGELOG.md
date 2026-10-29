@@ -2,6 +2,7 @@
 
 ### Performance
 
+- Eliminate lazy initialization checks for globals and static fields whose checked initial value is a zero storage word, including runtime allocation and GC state. Runtime sources follow the same initialization rules as application sources, preserving writes before first read.
 - Reclaim unreachable managed objects in native programs with a non-moving mark-sweep collector. Reuse free blocks and release empty arenas; retain live objects through stack roots, runtime handles and object metadata.
 - Allocate ARM64 floating-point registers to doubles that do not live across calls, reducing transfers in numeric code. Validate allocated locations, live-value conflicts and call clobbers.
 - Inline small, effect-free direct calls before machine lowering, allowing constant propagation across call boundaries while preserving argument evaluation and GC contracts.

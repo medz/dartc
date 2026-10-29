@@ -1266,7 +1266,13 @@ class CollectionThrow {
   String toString() => throw Leaf(1600);
 }
 
+Leaf? collectedGlobal;
+Object? collectedTagged;
+
 void collectionRoots(int queue) {
+  check(collectedGlobal == null && collectedTagged == null);
+  collectedGlobal = Leaf(1601);
+  collectedTagged = Leaf(1602);
   final values = <Leaf>[for (var i = 0; i < 4096; i++) Leaf(i)];
   final first = CollectionNode(Leaf(1500), 9223372036854775807);
   final second = CollectionNode(Leaf(1501), values);
@@ -1286,6 +1292,8 @@ void collectionRoots(int queue) {
     }
     check(sum == 2500000000);
     heap.rtCollect();
+    check(collectedGlobal!.marker == 1601);
+    check((collectedTagged as Leaf).marker == 1602);
     check(first.next!.next == first);
     check(first.tagged == 9223372036854775807);
     check(second.tagged == values);
@@ -1307,6 +1315,8 @@ void collectionRoots(int queue) {
   throwing.clear();
   throwing.add('recovered');
   check(throwing.toString() == '[recovered]');
+  collectedGlobal = null;
+  collectedTagged = null;
 }
 
 void main(List<String> args) {
