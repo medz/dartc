@@ -1,6 +1,6 @@
 import 'errors.dart' show UnsupportedError;
 
-abstract class Exception {
+abstract interface class Exception {
   factory Exception([message]) => _Exception(message);
 }
 

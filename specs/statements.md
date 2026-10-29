@@ -35,7 +35,7 @@ finally 的静态规则依据[流分析规范](https://github.com/dart-lang/lang
 
 依据 SDK [Error](https://api.dart.dev/dart-core/Error-class.html)、[RangeError](https://api.dart.dev/dart-core/RangeError-class.html) 和 [FormatException](https://api.dart.dev/dart-core/FormatException-class.html) API，核心库使用普通 Dart 声明提供 Error、AssertionError、TypeError、ArgumentError、RangeError、IndexError、UnsupportedError、UnimplementedError、StateError、ConcurrentModificationError、Exception、FormatException 和 IntegerDivisionByZeroException 的当前构造与继承关系。对象显式 throw 后沿一般类型关系匹配 catch，实例载荷和 finally 沿已有异常机制处理，编译器不按这些类的拼写接受任意同名声明。
 
-ArgumentError 支持默认、value、notNull 构造及 checkNotNull；RangeError 支持默认、value、range 构造和 checkValueInInterval、checkValidRange、checkNotNegative；IndexError 支持 withLength 与 check。依赖一般动态 `indexable.length` 调用的 IndexError 默认构造、RangeError.index 和 checkValidIndex 仍缺。Exception 的 interface 修饰限制随一般[类修饰符](classes.md)继续补齐；其余未列错误类及完整 Object/Type API 尚缺。
+ArgumentError 支持默认、value、notNull 构造及 checkNotNull；RangeError 支持默认、value、range 构造和 checkValueInInterval、checkValidRange、checkNotNegative；IndexError 支持 withLength 与 check。依赖一般动态 `indexable.length` 调用的 IndexError 默认构造、RangeError.index 和 checkValidIndex 仍缺。Exception 是 abstract interface class，跨库限制遵循一般[类修饰符](classes.md)检查；其余未列错误类及完整 Object/Type API 尚缺。
 
 Error.safeToString 不调用用户对象的 toString，字符串保留转义，List 和函数提供安全概要；概要文字不承诺与 SDK VM 的内部类名一致。FormatException 保留 message/source/offset，并输出相应行、位置及有限长度片段。Error.throwWithStackTrace 可指定捕获的轨迹；Error.stackTrace 的只读存储已声明，实际 extends Error 对象在首次抛出时的自动填充仍缺，implements Error 不应自动填充。运行时检查失败尚未统一生成这些对象，因此显式 throw 的通过不能视为范围、类型、late、解析等自动失败语义完成。
 

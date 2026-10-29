@@ -653,6 +653,18 @@ List<int> resolveClassInterfaces(SymbolTable symbols, List<AstClass> classes) {
       ? classType(symbols.declarations[enumSymbol].target)
       : -1;
   for (final syntax in classes) {
+    if (syntax.modifier != '' &&
+        !sourceVersionAtLeast(
+          symbols.program,
+          symbols.program.tokens[syntax.token].source,
+          3,
+          0,
+        ))
+      sourceError(
+        symbols.program,
+        symbols.program.tokens[syntax.token],
+        'class modifiers require language version 3.0',
+      );
     final scope = classTypeParameters[parents.length];
     final types = <int>[];
     var superclass = tObject;
@@ -726,6 +738,7 @@ List<int> resolveClassInterfaces(SymbolTable symbols, List<AstClass> classes) {
     classSuperclasses[owner] = supers[owner];
   }
   checkTypeApplications(symbols, uses);
+  checkClassModifiers(symbols, classes, order);
   if (enumType >= 0)
     for (var owner = 0; owner < classes.length; owner++) {
       final syntax = classes[owner];
@@ -739,4 +752,77 @@ List<int> resolveClassInterfaces(SymbolTable symbols, List<AstClass> classes) {
         );
     }
   return order;
+}
+
+void checkClassModifiers(
+  SymbolTable symbols,
+  List<AstClass> classes,
+  List<int> order,
+) {
+  final program = symbols.program;
+  // Only library identity matters to the transitive base/final restriction.
+  final restricted = <List<int>>[
+    for (var i = 0; i < classes.length; i++) <int>[],
+  ];
+  for (final owner in order) {
+    final syntax = classes[owner];
+    final token = program.tokens[syntax.token];
+    final library = sourceLibrary(program, token.source);
+    final modern = sourceVersionAtLeast(program, library, 3, 0);
+    final inherited = restricted[owner];
+    for (final type in classSupertypes[owner]) {
+      if (!typeIsClass(type)) continue;
+      final parent = typeArgument(type);
+      final declaration = classes[parent];
+      final parentLibrary = sourceLibrary(
+        program,
+        program.tokens[declaration.token].source,
+      );
+      final foreign = parentLibrary != library;
+      final exempt = !modern && sourceIsSystem(program, parentLibrary);
+      final extendsParent = classSuperclasses[owner] == type;
+      if (foreign &&
+          (declaration.modifier == 'sealed' ||
+              !exempt &&
+                  (declaration.modifier == 'final' ||
+                      extendsParent && declaration.modifier == 'interface')))
+        sourceError(
+          program,
+          token,
+          'cannot subtype ' +
+              declaration.modifier +
+              ' class from another library',
+        );
+      for (final restrictedLibrary in restricted[parent]) {
+        if (!extendsParent &&
+            restrictedLibrary != library &&
+            (modern || !sourceIsSystem(program, restrictedLibrary)))
+          sourceError(
+            program,
+            token,
+            'cannot implement a type with a base or final supertype from another library',
+          );
+        var known = false;
+        for (final previous in inherited)
+          if (previous == restrictedLibrary) known = true;
+        if (!known) inherited.add(restrictedLibrary);
+      }
+    }
+    final protected = syntax.modifier == 'base' || syntax.modifier == 'final';
+    if (modern &&
+        inherited.isNotEmpty &&
+        !protected &&
+        syntax.modifier != 'sealed' &&
+        !syntax.isEnum)
+      sourceError(
+        program,
+        token,
+        'a subtype of a base or final class must be base, final or sealed',
+      );
+    if (protected) {
+      var known = false;
+      for (final previous in inherited) if (previous == library) known = true;
+      if (!known) inherited.add(library);
+    }
+  }
 }

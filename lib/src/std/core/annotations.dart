@@ -1,4 +1,4 @@
-class pragma {
+final class pragma {
   final String name;
   final Object? options;
 

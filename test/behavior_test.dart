@@ -1423,6 +1423,69 @@ void main(List<String> args) {
       File(standard).uri.toString(),
     ]);
     final libraries = {
+      'modifier-library.dart': r'''
+part 'modifier-part.dart';
+base class Base { int get value => 11; }
+interface class Interface { int get value => 22; }
+final class Final { int get value => 33; }
+sealed class Sealed {}
+class Branch extends Sealed {}
+base class FinalChild extends Final {}
+sealed class BaseBranch extends Base {}
+abstract base class AbstractBase {}
+abstract interface class AbstractInterface {}
+abstract final class AbstractFinal {}
+typedef BaseAlias = Base;
+typedef FinalAlias = Final;
+typedef InterfaceAlias = Interface;
+typedef SealedAlias = Sealed;
+''',
+      'modifier-part.dart': r'''
+part of 'modifier-library.dart';
+base class BaseInPart extends Base {}
+final class FinalInPart implements Final { int get value => 34; }
+class InterfaceInPart extends Interface {}
+class SealedInPart extends Sealed {}
+''',
+      'modifier-exports.dart': "export 'modifier-library.dart';",
+      'modifier-legacy.dart': "// @dart=2.19\nimport 'modifier-library.dart'; class Legacy extends Base {}",
+      'modifier-imports.dart': r'''
+import 'modifier-exports.dart' as p;
+base class ExternalBase extends p.BaseAlias {}
+class ExternalInterface implements p.InterfaceAlias { int get value => 23; }
+class ExternalBranch extends p.Branch {}
+base class FinalGrandchild extends p.FinalChild {}
+int match(p.Sealed value) => switch (value) {
+  p.Branch() => 1,
+  p.SealedInPart() => 2,
+};
+void main() {
+  print(ExternalBase().value);
+  print(ExternalInterface().value);
+  print(FinalGrandchild().value);
+  print(p.BaseInPart().value);
+  print(p.FinalInPart().value);
+  print(p.InterfaceInPart().value);
+  print(match(ExternalBranch()));
+  print(match(p.SealedInPart()));
+}
+''',
+      'modifier-legacy-main.dart': "import 'modifier-legacy.dart'; base class Child extends Legacy {} void main() { print(Child().value); }",
+      'modifier-core-legacy.dart': r'''
+// @dart=2.19
+abstract class Legacy extends Exception { factory Legacy() = Concrete; }
+class Concrete implements Legacy {}
+abstract class LegacyPragma extends pragma { factory LegacyPragma() = ConcretePragma; }
+class ConcretePragma implements LegacyPragma {
+  String get name => 'legacy';
+  Object? get options => null;
+}
+void main() {
+  print(Legacy() is Exception);
+  print(LegacyPragma().name);
+  print(ConcretePragma().options);
+}
+''',
       'parameter-modifiers.dart': r'''
 // @dart=3.12
 T retained<T>(final T value) => value;
@@ -2352,6 +2415,8 @@ void main() {
       File('${temporary.path}/${entry.key}').writeAsStringSync(entry.value);
     }
     await parallel([
+      'modifier-imports.dart',
+      'modifier-core-legacy.dart',
       'parameter-modifier-imports.dart',
       'imports.dart',
       'export-names-imports.dart',
@@ -2394,6 +2459,19 @@ void main() {
       'conditional-imports.dart',
       'parts-main.dart',
     ], (name) => compare(File('${temporary.path}/$name'), []));
+    // The modifier specification permits pre-feature descendants of a user
+    // base class without a modifier. The SDK currently rejects this library.
+    final legacyModifier = File('${temporary.path}/modifier-legacy-main.dart');
+    final legacyModifierOutput = '${legacyModifier.path}.out';
+    await run(
+      driver,
+      compileArguments(legacyModifier, legacyModifierOutput),
+      native: compiler != null,
+    );
+    if ((await run(legacyModifierOutput, [], native: true)).stdout != '11\n')
+      throw StateError(
+        'Legacy base descendant did not inherit its implementation.',
+      );
     final rejectedTypeAliases = [
       'typedef int Invalid(int value=1);void main(){}',
       'typedef int Invalid(var value);void main(){}',
@@ -3498,6 +3576,71 @@ void main() {
       '// @dart = 2.12\nenum E { a; int get x => 1; } void main() {}',
     ];
     await rejectCases('rejected-enum', rejectedEnums, checkSdk: true);
+    final rejectedClassModifiers = [
+      'abstract class C extends Exception { factory C() = D; } class D implements C {} void main() {}',
+      'base class C implements pragma { String get name => "user"; Object? get options => null; } void main() {}',
+      'abstract base class C extends pragma { factory C() = D; } base class D implements C { String get name => "user"; Object? get options => null; } void main() {}',
+      for (final modifiers in [
+        'abstract sealed',
+        'base abstract',
+        'final abstract',
+        'sealed abstract',
+        'base base',
+        'base interface',
+        'interface final',
+        'final sealed',
+        'sealed base',
+        'abstract abstract',
+      ])
+        '$modifiers class C {} void main() {}',
+      for (final modifier in ['base', 'interface', 'final', 'sealed'])
+        '// @dart=2.19\n$modifier class C {} void main() {}',
+      for (final modifier in ['base', 'final'])
+        for (final relation in ['extends', 'implements'])
+          '$modifier class B {} class C $relation B {} void main() {}',
+      'base class B {} sealed class S extends B {} class C extends S {} void main() {}',
+      'final class B {} sealed class S implements B {} interface class C implements S {} void main() {}',
+      'sealed class S {} void main() { S(); }',
+      for (final declaration in [
+        'base class C implements p.BaseAlias {}',
+        'base class C extends p.FinalAlias {}',
+        'base class C implements p.FinalAlias {}',
+        'class C extends p.InterfaceAlias {}',
+        'class C extends p.SealedAlias {}',
+        'class C implements p.SealedAlias {}',
+        'base class C implements p.FinalChild {}',
+        'base class Local extends p.Base {} base class C implements Local {}',
+        'class C extends p.Base {}',
+        'class C implements p.AbstractBase {}',
+        'class C extends p.AbstractInterface {}',
+        'base class C implements p.AbstractFinal {}',
+        'class C extends p.BaseBranch {}',
+      ])
+        "import 'modifier-exports.dart' as p; $declaration void main() {}",
+      for (final relation in ['extends', 'implements'])
+        "// @dart=2.19\nimport 'modifier-library.dart'; class C $relation Sealed {} void main() {}",
+      "// @dart=2.19\nimport 'modifier-library.dart'; class C implements Base {} void main() {}",
+      "// @dart=2.19\nimport 'modifier-library.dart'; class C extends Final {} void main() {}",
+      "// @dart=2.19\nimport 'modifier-library.dart'; class C extends Interface {} void main() {}",
+      'sealed class S {} class A extends S {} class B extends S {} int f(S s) => switch(s) { A() => 1 }; void main() {}',
+      'sealed class S {} class A extends S {} class B extends S {} void f(S s) { switch(s) { case A(): print(1); } } void main() {}',
+      'sealed class S {} class A extends S {} int f(S? s) => switch(s) { A() => 1 }; void main() {}',
+      'sealed class S {} class A extends S {} int f(S s) => switch(s) { A() when true => 1 }; void main() {}',
+      'sealed class S {} class A extends S {} class B extends A {} int f(S s) => switch(s) { B() => 1 }; void main() {}',
+      'sealed class S {} abstract class A extends S {} class B extends A {} int f(S s) => switch(s) { B() => 1 }; void main() {}',
+      'sealed class S {} class A extends S {} class B extends S {} int f(S s) => switch(s) { A() && B() => 1 }; void main() {}',
+      'sealed class S {} enum E implements S { a, b } int f(S s) => switch(s) { E.a => 1 }; void main() {}',
+      'sealed class S {} class A extends S { bool get flag => true; } int f(S s) => switch(s) { A(flag: true) => 1 }; void main() {}',
+    ];
+    await rejectCases(
+      'rejected-class-modifier',
+      rejectedClassModifiers,
+      checkSdk: true,
+    );
+    await rejectCases('rejected-legacy-class-modifier', [
+      "import 'modifier-legacy.dart'; base class C implements Legacy {} void main() {}",
+      "import 'modifier-legacy.dart'; class C extends Legacy {} void main() {}",
+    ]);
     final rejectedParameterModifiers = [
       for (final body in [
         'void f(final int value) { value = 1; }',

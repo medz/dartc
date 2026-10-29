@@ -73,6 +73,20 @@ String parserTypeDeclarationName(Parser parser) {
   return parserName(parser);
 }
 
+bool parserClassDeclaration(Parser parser) {
+  var position = parser.position;
+  final source = parser.tokens[position].source;
+  while (tokenIs(parser.tokens[position], 'abstract') ||
+      tokenIs(parser.tokens[position], 'base') ||
+      tokenIs(parser.tokens[position], 'interface') ||
+      tokenIs(parser.tokens[position], 'final') ||
+      tokenIs(parser.tokens[position], 'sealed')) {
+    position++;
+    if (parser.tokens[position].source != source) return false;
+  }
+  return tokenIs(parser.tokens[position], 'class');
+}
+
 bool parserTypeClose(Parser parser) {
   if (parserTake(parser, '>')) return true;
   if (parserTake(parser, '>>')) {
@@ -2641,13 +2655,21 @@ AstUnit parseUnit(
       var directive = parserDirective(parser, kind, token);
       directive.metadata = metadata;
       unit.directives.add(directive);
-    } else if (parserIs(parser, 'class') ||
-        parserIs(parser, 'abstract') &&
-            tokenIs(parser.tokens[parser.position + 1], 'class')) {
-      final isAbstract = parserTake(parser, 'abstract');
+    } else if (parserClassDeclaration(parser)) {
+      var isAbstract = parserTake(parser, 'abstract');
+      var modifier = '';
+      if (parserIs(parser, 'base') ||
+          parserIs(parser, 'interface') ||
+          parserIs(parser, 'final') ||
+          !isAbstract && parserIs(parser, 'sealed')) {
+        modifier = parserPeek(parser);
+        parser.position++;
+        if (modifier == 'sealed') isAbstract = true;
+      }
       parserExpect(parser, 'class');
       var syntax = parserClass(parser, token);
       syntax.isAbstract = isAbstract;
+      syntax.modifier = modifier;
       syntax.metadata = metadata;
       unit.classes.add(syntax);
     } else if (parserTake(parser, 'enum')) {

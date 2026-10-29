@@ -8377,6 +8377,9 @@ int feLowerSwitchExpression(AstExpression expression, int context) {
   var coverage = 0;
   var enumValues = <int>[];
   var lengths = <PatternLengthRange>[];
+  final sealedPatterns = patternIsSealed(feConstants, type)
+      ? <CheckedPattern>[]
+      : null;
   var remaining = type;
   var binding = source.kind == astName ? source.binding : -1;
   if (binding >= 0 && !fePromotable(binding)) binding = -1;
@@ -8418,6 +8421,7 @@ int feLowerSwitchExpression(AstExpression expression, int context) {
       }
     } else {
       coverage |= pattern.coverage;
+      if (sealedPatterns != null) sealedPatterns.add(pattern);
       for (var ordinal in pattern.enumValues) enumValues.add(ordinal);
       for (var range in pattern.lengths) lengths.add(range);
       if (pattern.remaining != tNever) remaining = pattern.remaining;
@@ -8436,6 +8440,9 @@ int feLowerSwitchExpression(AstExpression expression, int context) {
   var required = patternRequiredSpace(type);
   if (patternLengthsCover(lengths, type)) coverage |= patternSpaceOther;
   if (patternEnumCovers(feConstants, type, enumValues))
+    coverage |= patternSpaceOther;
+  if (sealedPatterns != null &&
+      patternSealedCovers(feConstants, type, sealedPatterns))
     coverage |= patternSpaceOther;
   if ((coverage & required) != required)
     feAstError(expression.token, 'switch expression is not exhaustive');
@@ -8534,6 +8541,9 @@ void feLowerSwitch(AstStatement statement) {
   var coverage = 0;
   var enumValues = <int>[];
   var lengths = <PatternLengthRange>[];
+  final sealedPatterns = patternIsSealed(feConstants, type)
+      ? <CheckedPattern>[]
+      : null;
   var remaining = type;
   var binding = source.kind == astName ? source.binding : -1;
   if (binding >= 0 && !fePromotable(binding)) binding = -1;
@@ -8582,6 +8592,7 @@ void feLowerSwitch(AstStatement statement) {
         }
       } else {
         coverage |= pattern.coverage;
+        if (sealedPatterns != null) sealedPatterns.add(pattern);
         for (var ordinal in pattern.enumValues) enumValues.add(ordinal);
         for (var range in pattern.lengths) lengths.add(range);
         if (pattern.remaining != tNever) remaining = pattern.remaining;
@@ -8596,13 +8607,17 @@ void feLowerSwitch(AstStatement statement) {
   if (patternLengthsCover(lengths, type)) coverage |= patternSpaceOther;
   if (patternEnumCovers(feConstants, type, enumValues))
     coverage |= patternSpaceOther;
+  if (sealedPatterns != null &&
+      patternSealedCovers(feConstants, type, sealedPatterns))
+    coverage |= patternSpaceOther;
   var required = patternRequiredSpace(type);
   var complete = (coverage & required) == required;
   var alwaysExhaustive =
       type == tNull ||
       type == tNever ||
       typeNonNullable(type) == tBool ||
-      patternEnumCount(feConstants, type) >= 0;
+      patternEnumCount(feConstants, type) >= 0 ||
+      sealedPatterns != null;
   if (modern && alwaysExhaustive && !complete)
     feAstError(statement.token, 'switch statement is not exhaustive');
   // Before Dart 3 only default removes the unmatched path from flow analysis.

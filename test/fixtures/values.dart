@@ -7831,6 +7831,7 @@ void factoryValues() {
 }
 
 void main(List<String> args) {
+  classModifierValues();
   allocationValues();
   enumValues();
   operatorValues();
@@ -7888,6 +7889,113 @@ void main(List<String> args) {
   bufferValues();
   stringBoundaries();
   listGrowth(args);
+}
+
+base class ModifierBase {
+  int get value => 3;
+}
+
+final class ModifierFinal extends ModifierBase {}
+
+sealed class ModifierProtected extends ModifierBase {}
+
+base class ModifierProtectedLeaf extends ModifierProtected {}
+
+abstract base class ModifierAbstractBase {}
+
+final class ModifierImplementation implements ModifierAbstractBase {}
+
+enum ModifierBaseEnum implements ModifierAbstractBase { value }
+
+interface class ModifierInterface {
+  int get value => 5;
+}
+
+class ModifierInterfaceChild extends ModifierInterface {}
+
+sealed class ModifierRoot {}
+
+sealed class ModifierLeft extends ModifierRoot {}
+
+sealed class ModifierRight extends ModifierRoot {}
+
+class ModifierDiamond implements ModifierLeft, ModifierRight {}
+
+class ModifierLeftLeaf extends ModifierLeft {}
+
+class ModifierRightLeaf extends ModifierRight {}
+
+class ModifierOpen extends ModifierRoot {
+  int get value => 7;
+}
+
+class ModifierOpenChild extends ModifierOpen {
+  int get value => 8;
+}
+
+abstract class ModifierAbstractOpen extends ModifierRoot {}
+
+class ModifierConcreteOpen extends ModifierAbstractOpen {}
+
+enum ModifierToken implements ModifierRoot { first, second }
+
+sealed class ModifierEmpty {}
+
+Never modifierEmpty(ModifierEmpty value) => switch (value) {};
+
+int modifierEmptyNullable(ModifierEmpty? value) => switch (value) {
+  null => 0,
+};
+
+int modifierMatch(ModifierRoot? value) => switch (value) {
+  ModifierDiamond() && ModifierLeft() => 1,
+  ModifierLeftLeaf() || ModifierRightLeaf() => 2,
+  ModifierOpen(value: var number) => number,
+  ModifierAbstractOpen() => 6,
+  ModifierToken.first => 9,
+  ModifierToken.second => 10,
+  null => 0,
+};
+
+int modifierStatement<T extends ModifierRoot>(T value) {
+  int result;
+  switch (value) {
+    case ModifierLeft():
+      result = 1;
+    case ModifierRight():
+      result = 2;
+    case ModifierOpen():
+      result = 3;
+    case ModifierAbstractOpen():
+      result = 4;
+    case ModifierToken():
+      result = 5;
+  }
+  return result;
+}
+
+void classModifierValues() {
+  var base = ModifierFinal();
+  var sealed = ModifierProtectedLeaf();
+  print(base.value + sealed.value);
+  print(ModifierImplementation() is ModifierAbstractBase);
+  print(ModifierBaseEnum.value is ModifierAbstractBase);
+  print(modifierEmptyNullable(null));
+  print(ModifierInterfaceChild().value);
+  for (final value in <ModifierRoot?>[
+    ModifierDiamond(),
+    ModifierLeftLeaf(),
+    ModifierRightLeaf(),
+    ModifierOpen(),
+    ModifierOpenChild(),
+    ModifierConcreteOpen(),
+    ModifierToken.first,
+    ModifierToken.second,
+    null,
+  ]) {
+    print(modifierMatch(value));
+    if (value != null) print(modifierStatement(value));
+  }
 }
 
 class AllocationValue {

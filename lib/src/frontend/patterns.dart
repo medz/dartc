@@ -90,6 +90,86 @@ bool patternEnumCovers(ConstantContext context, int type, List<int> ordinals) {
   return true;
 }
 
+bool patternIsSealed(ConstantContext context, int type) {
+  type = typeNonNullable(typeBound(typeNonNullable(type)));
+  return typeIsClass(type) &&
+      context.classes[typeArgument(type)].modifier == 'sealed';
+}
+
+bool _patternCoversClass(CheckedPattern pattern, int type, int ordinal) {
+  final kind = pattern.syntax.kind;
+  if (kind == patternVariable || kind == patternAssignedVariable)
+    return pattern.tested < 0 || typeIsSubtype(type, pattern.tested);
+  if (kind == patternObject) {
+    if (!typeIsSubtype(type, pattern.tested)) return false;
+    for (final child in pattern.children)
+      if (!patternIsTotal(child)) return false;
+    return true;
+  }
+  if (kind == patternConstant) {
+    final value = pattern.constant!;
+    return ordinal >= 0 &&
+        value.kind == type &&
+        value.elements[0].integer == ordinal;
+  }
+  if (kind == patternAnd)
+    return _patternCoversClass(pattern.children[0], type, ordinal) &&
+        _patternCoversClass(pattern.children[1], type, ordinal);
+  if (kind == patternOr)
+    return _patternCoversClass(pattern.children[0], type, ordinal) ||
+        _patternCoversClass(pattern.children[1], type, ordinal);
+  if (kind == patternCast ||
+      kind == patternNullCheck ||
+      kind == patternNullAssert) {
+    final inner = pattern.children[0];
+    if (kind == patternCast && patternIsTotal(inner)) return true;
+    return _patternCoversClass(inner, type, ordinal);
+  }
+  return false;
+}
+
+bool patternSealedCovers(
+  ConstantContext context,
+  int type,
+  List<CheckedPattern> patterns,
+) {
+  type = typeNonNullable(typeBound(typeNonNullable(type)));
+  final children = <List<int>>[
+    for (var i = 0; i < context.classes.length; i++) <int>[],
+  ];
+  for (var owner = 0; owner < context.classes.length; owner++)
+    for (final parent in classSupertypes[owner])
+      if (typeIsClass(parent)) children[typeArgument(parent)].add(owner);
+  // A diamond can reach the same sealed branch more than once.
+  final covered = List<int>.filled(context.classes.length, -1);
+  bool covers(int owner) {
+    if (covered[owner] >= 0) return covered[owner] == 1;
+    final current = classType(owner);
+    for (final pattern in patterns) {
+      if (_patternCoversClass(pattern, current, -1)) {
+        covered[owner] = 1;
+        return true;
+      }
+    }
+    final syntax = context.classes[owner];
+    var complete = syntax.modifier == 'sealed' || syntax.isEnum;
+    if (syntax.isEnum) {
+      for (var ordinal = 0; ordinal < syntax.enumValues.length; ordinal++) {
+        var matched = false;
+        for (final pattern in patterns)
+          if (_patternCoversClass(pattern, current, ordinal)) matched = true;
+        if (!matched) complete = false;
+      }
+    } else if (syntax.modifier == 'sealed') {
+      for (final child in children[owner]) if (!covers(child)) complete = false;
+    }
+    covered[owner] = complete ? 1 : 0;
+    return complete;
+  }
+
+  return covers(typeArgument(type));
+}
+
 List<int> _patternUnion(List<int> left, List<int> right) => <int>[
   ...left,
   ...right,
