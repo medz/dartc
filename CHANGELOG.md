@@ -4,6 +4,10 @@
 
 - Add Intel Mac (`macos-x64`) executables, native compiler builds and release packaging. macOS x64 also supports the existing Int64 FFI object, static library and dynamic library outputs.
 
+### Tooling
+
+- Compare baseline and candidate native compilers with their matching runtime sources on the same program, alongside the official SDK. The program benchmark checks behavior and file outputs before reporting compilation, execution, memory and size measurements.
+
 ### Fixes
 
 - Preserve double NaN bit patterns in identity checks and constant canonicalization. Cross-compilation uses the output target's NaN representation for invalid floating-point arithmetic.

@@ -253,6 +253,97 @@ void main() { print('before'); host.hostExit(17); }
       equalBytes(report.readAsBytesSync(), accepted),
       'nonzero task replaced the accepted report',
     );
+
+    // Compare two native runtimes with the SDK as the behavior reference.
+    // The native-only package branch calls an ordinary function in each core.
+    File('${app.path}/compare.dart').writeAsStringSync('''
+import 'package:task/value.dart';
+void main() { print(label() + ':' + marker().toString()); }
+''');
+    File('${app.path}/pkg/lib/chosen.dart')
+        .writeAsStringSync(fixture['pkg/lib/chosen.dart']!);
+    File('${app.path}/pkg/lib/fallback.dart').writeAsStringSync(
+      "import 'sub/middle.dart';\nString label() => shared;\nint marker() => benchmarkMarker();\n",
+    );
+    final core = File('${source.path}/lib/src/std/core.dart');
+    final originalCore = core.readAsStringSync();
+    core.writeAsStringSync('$originalCore\nint benchmarkMarker() => 65;\n');
+    final baseline = Directory('${work.path}/baseline lib');
+    for (final file in Directory(
+      '${source.path}/lib',
+    ).listSync(recursive: true).whereType<File>()) {
+      final relative = file.path.substring('${source.path}/lib/'.length);
+      final destination = File('${baseline.path}/$relative');
+      destination.parent.createSync(recursive: true);
+      file.copySync(destination.path);
+    }
+    final comparisonArguments = [
+      '--program',
+      'compare.dart',
+      '--packages',
+      'config-link.json',
+      '--compare',
+      compiler,
+      compiler,
+      '--baseline-std',
+      '${baseline.path}/src/runtime.dart',
+      '--std',
+      '${source.path}/lib/src/runtime.dart',
+    ];
+    completed(await run(comparisonArguments), 0);
+    final comparisonAccepted = report.readAsBytesSync();
+    final comparison = jsonDecode(utf8.decode(comparisonAccepted)) as Map;
+    check(comparison['mode'] == 'program_native_comparison', 'comparison mode');
+    check(comparison['abi'] is String, 'missing measurement ABI');
+    for (final lane in ['official', 'baseline', 'candidate']) {
+      check(comparison['medians'][lane] is Map, 'missing $lane measurements');
+      for (final round in comparison['rounds'] as List) {
+        final outcome = round['run'][lane]['outcome'] as Map;
+        check(outcome['exitCode'] == 0, '$lane execution failed');
+        check(
+          utf8.decode(base64Decode(outcome['stdoutBase64'] as String)) ==
+              'choice:65\n',
+          '$lane output',
+        );
+        check(outcome['stderrBase64'] == '', '$lane stderr');
+      }
+    }
+    for (final item in {
+      'baseline': '${baseline.path}/src/runtime.dart',
+      'candidate': '${source.path}/lib/src/runtime.dart',
+    }.entries) {
+      check(
+        comparison['native_compilers'][item.key]['runtime'] == item.value,
+        '${item.key} runtime identity',
+      );
+      check(
+        (comparison['task']['native_source_uris_by_compiler'][item.key] as List)
+            .contains(File(item.value).uri.toString()),
+        '${item.key} runtime dependencies',
+      );
+    }
+    // A candidate-only behavior change must leave the accepted report intact.
+    core.writeAsStringSync('$originalCore\nint benchmarkMarker() => 66;\n');
+    final comparisonFailure = await run(comparisonArguments);
+    completed(comparisonFailure, 1);
+    check(
+      comparisonFailure.stderr.contains('Program behavior differs'),
+      'candidate mismatch was not detected: ${comparisonFailure.stderr}',
+    );
+    check(
+      equalBytes(report.readAsBytesSync(), comparisonAccepted),
+      'candidate mismatch replaced the accepted report',
+    );
+    for (final invalidOptions in [
+      ['--compare', compiler],
+      ['--compare', compiler, compiler, '--seed', compiler],
+      ['--baseline-std', '${baseline.path}/src/runtime.dart'],
+    ]) {
+      completed(
+        await run(['--program', 'compare.dart', ...invalidOptions]),
+        64,
+      );
+    }
     passed = true;
     stdout.writeln('Program benchmark integration passed.');
   } finally {

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 
 import '../../lib/src/ast.dart';
@@ -175,7 +176,10 @@ Future<void> programBenchmark(List<String> args, String root) async {
       throw UnsupportedError('Benchmark platform.');
     final aliases = <String, String>{};
     var entry = '';
-    var seed = '$root/build/dartc-seed';
+    String? seed;
+    List<String>? comparison;
+    String? runtime;
+    String? baselineRuntime;
     String? explicitPackages;
     final inputNames = <String>[];
     final outputNames = <String>[];
@@ -186,16 +190,25 @@ Future<void> programBenchmark(List<String> args, String root) async {
         arguments = args.sublist(i + 1);
         break;
       }
+      if (option == '--compare') {
+        if (comparison != null || i + 2 >= args.length) {
+          throw ArgumentError('Expected one --compare <baseline> <candidate>.');
+        }
+        comparison = [args[++i], args[++i]];
+        continue;
+      }
       if (![
             '--program',
             '--seed',
+            '--std',
+            '--baseline-std',
             '--packages',
             '--input',
             '--check-output',
           ].contains(option) ||
           ++i == args.length) {
         throw ArgumentError(
-          'Expected --program <entry> [--seed <native>] [--packages <config>] [--input <relative-file>]... [--check-output <relative-file>]... -- [args...]',
+          'Expected --program <entry> [--seed <native> | --compare <baseline> <candidate>] [--std <runtime>] [--baseline-std <runtime>] [--packages <config>] [--input <relative-file>]... [--check-output <relative-file>]... -- [args...]',
         );
       }
       final value = args[i];
@@ -205,6 +218,10 @@ Future<void> programBenchmark(List<String> args, String root) async {
         _file(entry, aliases);
       } else if (option == '--seed') {
         seed = value;
+      } else if (option == '--std') {
+        runtime = value;
+      } else if (option == '--baseline-std') {
+        baselineRuntime = value;
       } else if (option == '--packages') {
         explicitPackages = File(value).absolute.path;
         _file(explicitPackages, aliases);
@@ -215,14 +232,37 @@ Future<void> programBenchmark(List<String> args, String root) async {
       }
     }
     if (entry.isEmpty) throw ArgumentError('Missing --program <entry>.');
+    if (comparison != null && seed != null) {
+      throw ArgumentError('--seed and --compare cannot be combined.');
+    }
+    if (comparison == null && baselineRuntime != null) {
+      throw ArgumentError('--baseline-std requires --compare.');
+    }
     if (inputNames.toSet().length != inputNames.length ||
         outputNames.toSet().length != outputNames.length) {
       throw ArgumentError('Duplicate input/output path.');
     }
-    seed = _file(seed, aliases);
+    final comparing = comparison != null;
+    final compilers = {
+      if (comparison != null) ...{
+        'baseline': _file(comparison[0], aliases),
+        'candidate': _file(comparison[1], aliases),
+      } else
+        'native': _file(seed ?? '$root/build/dartc-seed', aliases),
+    };
     final sdk = _file(Platform.resolvedExecutable);
     final sdkRoot = File(sdk).parent.parent.resolveSymbolicLinksSync();
-    final standard = _file('$root/lib/src/runtime.dart', aliases);
+    final standard = _file(runtime ?? '$root/lib/src/runtime.dart', aliases);
+    final runtimes = {
+      if (comparing) ...{
+        'baseline': _file(
+          baselineRuntime ?? '$root/lib/src/runtime.dart',
+          aliases,
+        ),
+        'candidate': standard,
+      } else
+        'native': standard,
+    };
     final sampler = _file('$root/tool/src/measure.dart');
     final cwd = Directory.current.resolveSymbolicLinksSync();
     final build = Directory('$root/build')..createSync(recursive: true);
@@ -242,12 +282,15 @@ Future<void> programBenchmark(List<String> args, String root) async {
       emptyConfig.writeAsStringSync('{"configVersion":2,"packages":[]}\n');
     final packages = packageConfig?.path ?? emptyConfig.path;
     _file(packages, aliases);
-    final nativeSources = collectSources(
-      File(entry).uri.toString(),
-      File(standard).uri.toString(),
-      packageConfig,
-      Platform.isLinux ? 1 : 0,
-    );
+    final nativeSourceUris = {
+      for (final runtime in runtimes.entries)
+        runtime.key: collectSources(
+          File(entry).uri.toString(),
+          File(runtime.value).uri.toString(),
+          packageConfig,
+          Platform.isLinux ? 1 : 0,
+        ).files.map((file) => file.uri).toSet(),
+    };
     final data = <String, String>{
       for (final name in inputNames) name: _file('$cwd/$name', aliases),
     };
@@ -296,9 +339,9 @@ Future<void> programBenchmark(List<String> args, String root) async {
     }
 
     await pin([
-      seed,
+      ...compilers.values,
       packages,
-      standard,
+      ...runtimes.values,
       ...data.values,
       ...sdkInputs,
       ...implementation,
@@ -339,7 +382,7 @@ Future<void> programBenchmark(List<String> args, String root) async {
           (path) => _file(File(path).isAbsolute ? path : '$cwd/$path', aliases),
         )
         .toSet();
-    final nativeUris = nativeSources.files.map((file) => file.uri).toSet();
+    final nativeUris = {for (final uris in nativeSourceUris.values) ...uris};
     final nativeDependencies = {
       for (final uri in nativeUris)
         _file(_sourcePath(uri, packageConfig), aliases),
@@ -363,6 +406,7 @@ Future<void> programBenchmark(List<String> args, String root) async {
     final manifest = {
       'entry': entry,
       'runtime': standard,
+      'runtimes': runtimes,
       'packages': packages,
       'arguments': arguments,
       'input_files': data,
@@ -370,6 +414,10 @@ Future<void> programBenchmark(List<String> args, String root) async {
       'native_dependencies': nativeDependencies.toList()..sort(),
       'sdk_dependencies': sdkDependencies.toList()..sort(),
       'native_source_uris': nativeUris.toList()..sort(),
+      'native_source_uris_by_compiler': {
+        for (final item in nativeSourceUris.entries)
+          item.key: item.value.toList()..sort(),
+      },
       'selected_local_sources': selectedLocalSources.toList()..sort(),
       'sdk_inputs': sdkInputs.toList()..sort(),
       'implementation_inputs': implementation.toList()..sort(),
@@ -446,19 +494,40 @@ Future<void> programBenchmark(List<String> args, String root) async {
     }
 
     final rounds = <Map<String, Object?>>[];
-    const names = ['official', 'native'];
+    final names = ['official', ...compilers.keys];
+    // In four measured rounds each native lane runs before the other twice,
+    // and all three lanes have the same average position.
+    final orders = comparing
+        ? const [
+            ['official', 'baseline', 'candidate'],
+            ['candidate', 'baseline', 'official'],
+            ['baseline', 'candidate', 'official'],
+            ['official', 'candidate', 'baseline'],
+          ]
+        : const [
+            ['official', 'native'],
+            ['native', 'official'],
+          ];
     for (var iteration = 0; iteration <= 4; iteration++) {
-      final order = iteration.isEven ? names : names.reversed.toList();
+      final order = orders[iteration % orders.length];
       final round = Directory('${work.path}/round-$iteration')..createSync();
       final artifacts = <String, String>{};
       final compilation = <String, Map<String, dynamic>>{};
       for (final name in order) {
         final path = '${round.path}/$name-app';
         final sample = await measure(
-          name == 'official' ? sdk : seed,
+          name == 'official' ? sdk : compilers[name]!,
           name == 'official'
               ? ['compile', 'exe', entry, '--packages', packages, '-o', path]
-              : [entry, '--packages', packages, '--std', standard, '-o', path],
+              : [
+                  entry,
+                  '--packages',
+                  packages,
+                  '--std',
+                  runtimes[name]!,
+                  '-o',
+                  path,
+                ],
           cwd,
         );
         if ((sample['outcome'] as Map)['exitCode'] != 0 ||
@@ -594,15 +663,26 @@ Future<void> programBenchmark(List<String> args, String root) async {
       }
       medians[name] = phases;
     }
+    final identities = {
+      for (final compiler in compilers.entries)
+        compiler.key: {
+          'path': compiler.value,
+          'sha256': pins[compiler.value],
+          'image_bytes': File(compiler.value).lengthSync(),
+          'runtime': runtimes[compiler.key],
+        },
+    };
     final result = {
-      'mode': 'program_official_reference',
+      'mode': comparing
+          ? 'program_native_comparison'
+          : 'program_official_reference',
       'platform': Platform.operatingSystem,
+      'abi': Abi.current().toString(),
       'sdk': {'path': sdk, 'version': Platform.version, 'sha256': pins[sdk]},
-      'native_compiler': {
-        'path': seed,
-        'sha256': pins[seed],
-        'image_bytes': File(seed).lengthSync(),
-      },
+      if (comparing)
+        'native_compilers': identities
+      else
+        'native_compiler': identities['native'],
       'task': manifest,
       'sha256_after': after,
       'dependency_discovery': {
