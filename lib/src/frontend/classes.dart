@@ -283,11 +283,7 @@ List<ClassMembers> checkClassInterfaces(
   }
 
   final states = List<int>.filled(classes.length, 0);
-  final fieldReady = <bool>[
-    for (final field in fields)
-      field.declaringParameter == null ||
-          field.declaringParameter!.type.name != '',
-  ];
+  final fieldReady = <bool>[for (final field in fields) field.type.name != ''];
   late void Function(int) check;
   void prepareConstructor(int function) {
     final info = functions[function];
@@ -295,12 +291,19 @@ List<ClassMembers> checkClassInterfaces(
     final parameters = declarations[function].parameters;
     for (var p = 0; p < parameters.length; p++) {
       final parameter = parameters[p];
-      if (parameter.fieldFormal && parameter.type.name == '') {
+      if (parameter.fieldFormal) {
         final field = ownMembers[owner]
             .members[lookupMember(ownMembers[owner], parameter.name)]
             .field;
         if (!fieldReady[field]) check(owner);
-        info.parameterTypes[p + 1] = fieldTypes[field];
+        if (parameter.type.name == '')
+          info.parameterTypes[p + 1] = fieldTypes[field];
+        else if (!typeIsSubtype(info.parameterTypes[p + 1], fieldTypes[field]))
+          sourceError(
+            symbols.program,
+            symbols.program.tokens[parameter.token],
+            'field-formal type must be a subtype of the field type',
+          );
       }
       if (parameter.superFormal) check(typeArgument(classSuperclasses[owner]));
     }
@@ -411,7 +414,7 @@ List<ClassMembers> checkClassInterfaces(
       final own = ownIndex < 0 ? null : ownMembers[owner].members[ownIndex];
       final field = own == null ? -1 : own.field;
       final parameter = field < 0 ? null : fields[field].declaringParameter;
-      if (parameter != null && parameter.type.name == '') {
+      if (field >= 0 && fields[field].type.name == '') {
         var type = -1;
         for (var role = classGetter; role <= classSetter; role++) {
           final candidates = <MemberBinding>[];
@@ -448,17 +451,26 @@ List<ClassMembers> checkClassInterfaces(
               'cannot infer a mutable field from different getter and setter types',
             );
           type = inferred;
-          if (fields[field].modifier == 'final') break;
+          if (!fields[field].hasSetter) break;
         }
         if (type < 0) {
-          final expression = parameter.defaultValue;
-          final scope = constants.lexicalClass;
-          constants.lexicalClass = owner;
-          type = expression == null
-              ? tNull
-              : inferConstantType(constants, expression);
-          constants.lexicalClass = scope;
-          if (type == tNull) type = nullableType(tObject);
+          if (parameter == null) {
+            if (fields[field].initializer.isNotEmpty)
+              fail(
+                owner,
+                'field initializer type inference is not yet supported',
+              );
+            type = tDynamic;
+          } else {
+            final expression = parameter.defaultValue;
+            final scope = constants.lexicalClass;
+            constants.lexicalClass = owner;
+            type = expression == null
+                ? tNull
+                : inferConstantType(constants, expression);
+            constants.lexicalClass = scope;
+            if (type == tNull) type = nullableType(tObject);
+          }
         }
         fieldTypes[field] = type;
         fieldReady[field] = true;

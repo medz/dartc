@@ -6338,6 +6338,65 @@ int interfaceArgument(int value) {
   return value;
 }
 
+class UntypedOrdinaryFields {
+  var value;
+  final once;
+  late var delayed;
+  UntypedOrdinaryFields(this.once);
+  UntypedOrdinaryFields.narrow(int this.value, this.once);
+  UntypedOrdinaryFields.zero() : this(0);
+}
+
+abstract class InferredNumber {
+  num get number;
+}
+
+abstract class InferredFieldTypes extends InferredNumber {
+  String get text;
+  void set text(String value);
+  double get fraction;
+  List<num> get numbers;
+  String? get optional;
+  void set optional(String? value);
+}
+
+class InferredOrdinaryFields implements InferredFieldTypes {
+  var number;
+  var text;
+  var fraction = 1;
+  var numbers = [1, 2];
+  var optional;
+  InferredOrdinaryFields(this.number, this.text);
+}
+
+class InferredLateText extends InferredOrdinaryFields {
+  late var text;
+  InferredLateText() : super(2, 'base');
+}
+
+class InferredFinalNumber implements InferredNumber {
+  final number;
+  InferredFinalNumber(this.number);
+  InferredFinalNumber.narrow(int this.number);
+}
+
+class InferredLateFinalNumber implements InferredNumber {
+  late final number;
+}
+
+int fieldNumberInitializer() {
+  print('field initializer');
+  return 3;
+}
+
+class InitializedInferredNumber implements InferredNumber {
+  var number = fieldNumberInitializer();
+}
+
+class PrimaryInferredNumber(num seed) implements InferredNumber {
+  var number = seed;
+}
+
 void interfaceValues() {
   final field = FieldArithmetic(5);
   FieldArithmeticList fields = [field];
@@ -6429,6 +6488,40 @@ void interfaceValues() {
   }
   print(DeclaredStringImplementation().toString());
   print('${DeclaredStringImplementation()}');
+  final untyped = UntypedOrdinaryFields('once');
+  print([untyped.value, untyped.once]);
+  untyped.value = 1;
+  untyped.value = 'changed';
+  untyped.delayed = true;
+  print([untyped.value, untyped.delayed, UntypedOrdinaryFields.zero().once]);
+  final narrowUntyped = UntypedOrdinaryFields.narrow(1, null);
+  final dynamicValues = [narrowUntyped.value];
+  print(dynamicValues is List<int>);
+  final inferredFields = InferredOrdinaryFields(2, 'inferred');
+  final inferredNumbers = [inferredFields.number];
+  print(inferredNumbers is List<num>);
+  print(inferredNumbers is List<int>);
+  print([
+    inferredFields.text,
+    inferredFields.fraction,
+    inferredFields.numbers is List<int>,
+    inferredFields.optional,
+  ]);
+  inferredFields.number = 2.5;
+  inferredFields.text = 'updated';
+  inferredFields.optional = 'present';
+  print([inferredFields.number, inferredFields.text, inferredFields.optional]);
+  final lateText = InferredLateText();
+  lateText.text = 'late inferred';
+  print(lateText.text);
+  final finalNumber = InferredFinalNumber.narrow(4);
+  print([finalNumber.number] is List<num>);
+  print([finalNumber.number] is List<int>);
+  final lateFinalNumber = InferredLateFinalNumber();
+  lateFinalNumber.number = 5.5;
+  print(lateFinalNumber.number);
+  print([InitializedInferredNumber().number] is List<int>);
+  print([PrimaryInferredNumber(6).number] is List<num>);
 }
 
 class CovariantBase {

@@ -2395,8 +2395,6 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
           parser.tokens[parser.position + 1].kind == tokenIdentifier;
       var type = parserInferredType(memberToken);
       if (!getter && !setter) type = parserDeclarationType(parser, modifier);
-      if (covariant && modifier == '' && type.name == '')
-        parserError(parser, 'covariant fields require a type or var');
       final operatorToken = parser.position;
       var member = getter || setter ? '' : parserOperatorName(parser);
       final isOperator = member != '';
@@ -2428,6 +2426,8 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
         if (isOperator) parserOperatorCheck(parser, method, operatorToken);
         methods.add(method);
       } else {
+        if (modifier == '' && type.name == '')
+          parserError(parser, 'fields require a type, var or final');
         if (external) parserError(parser, 'external fields are not supported');
         var variables = parserVariablesRest(
           parser,

@@ -430,12 +430,6 @@ int feRegisterFunction(
       type = feFieldTypes[entry];
       if (parameter.type.name != '') {
         type = resolveType(feSymbols, parameter.type, typeScope);
-        if (!typeIsSubtype(type, feFieldTypes[entry])) {
-          feAstError(
-            parameter.token,
-            'field-formal type must be a subtype of the field type',
-          );
-        }
       }
     } else if (parameter.type.name != '') {
       type = resolveType(feSymbols, parameter.type, typeScope);
@@ -665,8 +659,6 @@ void feCollectDeclarations(AstUnit unit) {
     var field = 0;
     while (field < fields.length) {
       var syntax = fields[field];
-      if (syntax.type.name == '' && syntax.declaringParameter == null)
-        feAstError(syntax.token, 'field requires a type');
       var type = syntax.type.name == ''
           ? tDynamic
           : resolveType(feSymbols, syntax.type);
@@ -6779,7 +6771,6 @@ void parseSource(SourceProgram source) {
     feObjectMembers.members.add(member);
   }
   feOwnMembers = feMembers;
-  checkInitializers(feSymbols, syntax);
   var plannedFunction = 0;
   while (plannedFunction < functions.length) {
     var plan = const ConstructorPlan(<ConstructorStep>[], -1);
@@ -6827,6 +6818,18 @@ void parseSource(SourceProgram source) {
     feConstants,
     feConstructorPlans,
   );
+  checkInitializers(feSymbols, syntax, feClassFieldStarts, feFieldTypes);
+  for (var function = 0; function < feConstructorPlans.length; function++) {
+    if (feConstructors[function] != 1) continue;
+    final owner = feOwners[function];
+    checkConstructorInitializers(
+      feSymbols,
+      feClassNodes[owner],
+      feConstructorPlans[function],
+      feFieldTypes,
+      feClassFieldStarts[owner],
+    );
+  }
   for (final owner in feClassOrder) {
     final parent = classSuperclasses[owner];
     var prefix = 0;
@@ -6846,6 +6849,13 @@ void parseSource(SourceProgram source) {
       final field = feClassFieldStarts[owner] + index;
       final slot = prefix + index;
       feFieldIndices[field] = slot;
+      final getter = feLateFieldGetters[field];
+      final setter = feLateFieldSetters[field];
+      if (getter >= 0) functions[getter].result = feFieldTypes[field];
+      if (setter >= 0) {
+        functions[setter].result = feFieldTypes[field];
+        functions[setter].parameterTypes[1] = feFieldTypes[field];
+      }
       if (feLateFieldStates[field] >= 0) feLateFieldStates[field] += prefix;
       if (typeIsReference(feFieldTypes[field]))
         classPointerMasks[owner][slot ~/ 64] |= 1 << (slot & 63);

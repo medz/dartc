@@ -25,14 +25,23 @@ Never _initError(SymbolTable symbols, int token, String message) {
   sourceError(symbols.program, symbols.program.tokens[token], message);
 }
 
-bool _requiresInitializer(SymbolTable symbols, AstVariable variable) {
+bool _requiresInitializer(
+  SymbolTable symbols,
+  AstVariable variable, [
+  int type = -1,
+]) {
   if (variable.lateVariable) return false;
   if (variable.modifier == 'final' || variable.modifier == 'const') return true;
-  return variable.type.name != '' &&
-      !typeCanBeNull(resolveType(symbols, variable.type));
+  if (type < 0 && variable.type.name == '') return false;
+  return !typeCanBeNull(type < 0 ? resolveType(symbols, variable.type) : type);
 }
 
-void checkInitializers(SymbolTable symbols, AstUnit unit) {
+void checkInitializers(
+  SymbolTable symbols,
+  AstUnit unit,
+  List<int> fieldStarts,
+  List<int> fieldTypes,
+) {
   var i = 0;
   while (i < unit.variables.length) {
     var variable = unit.variables[i];
@@ -53,7 +62,7 @@ void checkInitializers(SymbolTable symbols, AstUnit unit) {
       var field = owner.fields[f];
       if (!hasGenerative &&
           field.initializer.isEmpty &&
-          _requiresInitializer(symbols, field))
+          _requiresInitializer(symbols, field, fieldTypes[fieldStarts[i] + f]))
         _initError(
           symbols,
           field.token,
@@ -74,6 +83,30 @@ void checkInitializers(SymbolTable symbols, AstUnit unit) {
     }
     i++;
   }
+}
+
+void checkConstructorInitializers(
+  SymbolTable symbols,
+  AstClass owner,
+  ConstructorPlan plan,
+  List<int> fieldTypes,
+  int fieldStart,
+) {
+  if (plan.redirectTarget >= 0) return;
+  final initialized = List<bool>.filled(owner.fields.length, false);
+  for (final step in plan.steps) initialized[step.field] = true;
+  for (var field = 0; field < owner.fields.length; field++)
+    if (!initialized[field] &&
+        _requiresInitializer(
+          symbols,
+          owner.fields[field],
+          fieldTypes[fieldStart + field],
+        ))
+      _initError(
+        symbols,
+        owner.fields[field].token,
+        'missing field initializer',
+      );
 }
 
 int _initializerField(
@@ -249,12 +282,6 @@ ConstructorPlan planConstructorInitializers(
     initialized[field] |= 4;
     steps.add(ConstructorStep(constructorExplicit, i, field));
     i++;
-  }
-  f = 0;
-  while (f < owner.fields.length) {
-    if (initialized[f] == 0 && _requiresInitializer(symbols, owner.fields[f]))
-      _initError(symbols, owner.fields[f].token, 'missing field initializer');
-    f++;
   }
   final superclass = classSuperclasses[classId];
   var forwarding = false;

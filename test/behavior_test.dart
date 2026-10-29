@@ -911,6 +911,8 @@ void main() {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "abstract class I { num get value; } class C implements I { var value; C(this.value); } dynamic wrong() { print('rhs'); return 'wrong'; } void main() { var c=C(1); print('before'); c.value=wrong(); print('after'); }",
+      "abstract class I { num get value; } class C implements I { final value; C(this.value) { print('body'); } } dynamic wrong() { print('rhs'); return 'wrong'; } void main() { print('before'); C(wrong()); print('after'); }",
       "class B { covariant num value = 1; } class C extends B { void set value(int x) { print('body'); } } double rhs() { print('rhs'); return 2.5; } void main() { B value = C(); print('before'); value.value = rhs(); print('after'); }",
       "class B(covariant var num value); class C(var int value) extends B { this : super(value); } double rhs() { print('rhs'); return 2.5; } void main() { B value = C(1); print('before'); value.value = rhs(); print('after'); }",
       "class B { void f(void x) {} } class C extends B { void f(covariant int x) { print('body'); } } void rhs() { print('rhs'); } void main() { B value = C(); print('before'); value.f(rhs()); print('after'); }",
@@ -3430,6 +3432,22 @@ void main() {
       File('${temporary.path}/var-field-formal.dart')..writeAsStringSync(
         '// @dart=3.12\nclass C { int value; C(var this.value); } void main() {}',
       ),
+    );
+    final rejectedFieldInference = [
+      'class C { value; } void main() {}',
+      'class C { static value = 1; } void main() {}',
+      'abstract class I { num get value; void set value(Object? x); } class C implements I { late var value; } void main() {}',
+      'abstract class I { num get value; void set value(Object? x); } class C implements I { covariant late final value; } void main() {}',
+      'abstract class I { num get value; } class C implements I { var value; C(String this.value); } void main() {}',
+      'abstract class I { int get value; } class C implements I { var value; } void main() {}',
+      'abstract class I { int get value; } abstract class C implements I { var value; factory C() => throw 1; } void main() {}',
+      'abstract class I { double get value; } class C implements I { var value = "wrong"; } void main() {}',
+      'abstract class I { num get value; } class C implements I { var value; C(this.value); } void main() { C(1).value = "wrong"; }',
+    ];
+    await rejectCases(
+      'rejected-field-inference',
+      rejectedFieldInference,
+      checkSdk: true,
     );
     final rejectedCovariant = [
       'class C { covariant final int x = 1; } void main() {}',
