@@ -2386,7 +2386,134 @@ int exceptionReturn(bool fail) {
   }
 }
 
+class ErrorMessage {
+  String toString() => throw 'safeToString must not invoke this';
+}
+
+class ImplementedError implements Error {
+  StackTrace? get stackTrace => null;
+}
+
 void exceptionValues() {
+  print(Error.safeToString(null));
+  print(Error.safeToString(7));
+  print(Error.safeToString(1.5));
+  print(Error.safeToString(true));
+  print(Error.safeToString('a\n"\t\\\u0000\ud800🙂'));
+  print(Error.safeToString(ErrorMessage()));
+  print(Error.safeToString(<int>[1]).indexOf('Instance(length:1)') == 0);
+  print(Error.safeToString(() => 1).indexOf('Closure') == 0);
+  for (final error in <Object>[
+    Error(),
+    AssertionError(),
+    AssertionError('message'),
+    TypeError(),
+    ArgumentError(),
+    ArgumentError('message', 'value'),
+    ArgumentError.value('bad', 'value', 'message'),
+    ArgumentError.notNull('value'),
+    RangeError('message'),
+    RangeError.value(1.5, 'value'),
+    RangeError.range(7, 1, 3),
+    RangeError.range(7, null, 3),
+    RangeError.range(7, 3, null),
+    RangeError.range(7, 3, 3),
+    RangeError.range(7, 3, 1),
+    IndexError.withLength(-1, 3),
+    IndexError.withLength(0, 0),
+    IndexError.withLength(4, 3),
+    UnsupportedError('operation'),
+    UnimplementedError(),
+    UnimplementedError('operation'),
+    StateError('state'),
+    ConcurrentModificationError(),
+    ConcurrentModificationError(ErrorMessage()),
+    Exception(),
+    Exception('message'),
+    const FormatException(),
+    const FormatException('format', 'abc', 1),
+    const FormatException('format', 'a\r\nb\nc', 4),
+    const FormatException('format', 'abc', -1),
+    const FormatException('format', 'abc', 4),
+    const FormatException('format', 42, 3),
+    const IntegerDivisionByZeroException(),
+  ])
+    print(error);
+  final longSource = String.fromCharCodes(List<int>.filled(180, 120));
+  for (final position in <int?>[null, 5, 90, 175, 180])
+    print(FormatException('format', longSource, position));
+  final argument = ArgumentError.value(7, 'value', 'message');
+  print(argument.invalidValue);
+  print(argument.name);
+  print(argument.message);
+  print(argument.stackTrace == null);
+  final range = RangeError.range(7, 1, 3, 'value', 'message');
+  print(range.invalidValue);
+  print(range.start);
+  print(range.end);
+  final indexable = <int>[1, 2];
+  final index = IndexError.withLength(7, 2, indexable: indexable);
+  print(index.invalidValue);
+  print(index.start);
+  print(index.end);
+  print(index.length);
+  print(identical(index.indexable, indexable));
+  print(index is RangeError);
+  print(range is ArgumentError);
+  print(argument is Error);
+  print((argument as Object) is Exception);
+  print(const FormatException() is Exception);
+  print(const IntegerDivisionByZeroException() is UnsupportedError);
+  print(ArgumentError.checkNotNull<int>(7));
+  print(RangeError.checkValueInInterval(2, 1, 3));
+  print(RangeError.checkNotNegative(0));
+  print(RangeError.checkValidRange(1, null, 3));
+  print(RangeError.checkValidRange(1, 2, 3));
+  print(IndexError.check(1, 3));
+  for (final operation in <void Function()>[
+    () {
+      ArgumentError.checkNotNull<int>(null);
+    },
+    () {
+      RangeError.checkValueInInterval(4, 1, 3);
+    },
+    () {
+      RangeError.checkNotNegative(-1);
+    },
+    () {
+      RangeError.checkValidRange(-1, null, 3);
+    },
+    () {
+      RangeError.checkValidRange(1, 4, 3);
+    },
+    () {
+      IndexError.check(4, 3, name: null);
+    },
+  ]) {
+    try {
+      operation();
+    } on ArgumentError catch (error) {
+      print(error);
+    } finally {
+      print('error finally');
+    }
+  }
+  final supplied = StackTrace.fromString('supplied trace');
+  try {
+    Error.throwWithStackTrace(range, supplied);
+  } on RangeError catch (error, trace) {
+    print(identical(error, range));
+    print(trace.toString());
+  } finally {
+    print('trace finally');
+  }
+  final implemented = ImplementedError();
+  try {
+    throw implemented;
+  } on Error catch (error) {
+    print(identical(error, implemented));
+    print(error.stackTrace == null);
+  }
   for (var value in <Object>[
     0,
     9223372036854775807,
