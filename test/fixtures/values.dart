@@ -6114,7 +6114,11 @@ void doubleValues() {
     '1.e2',
     '1e400',
     '5e-324',
+    'NaN',
+    '+NaN',
+    '-NaN',
     '  -NaN ',
+    '\u2000+NaN\ufeff',
     'bad',
     '',
     '0x10',
@@ -6128,6 +6132,13 @@ void doubleValues() {
     print(parsed);
     if (parsed != null) {
       print(double.parse(text));
+      if (parsed.isNaN) {
+        print([
+          identical(parsed, double.nan),
+          identical(parsed, double.parse(text)),
+          identical(-parsed, double.nan),
+        ]);
+      }
     } else {
       try {
         double.parse(text);
@@ -6193,6 +6204,10 @@ void doubleValues() {
     identical(double.nan, 0 * double.infinity),
     identical(<double>[double.nan], <double>[0 / 0]),
     identical(FrozenFloat(double.nan, 1), FrozenFloat(0 / 0, 1)),
+    identical(double.nan, double.infinity % 2),
+    identical(double.nan, 2.0 % 0),
+    identical(-double.nan, (-double.nan) % 2),
+    identical(<double>[-double.nan], <double>[2.0 % (-double.nan)]),
   ];
   print(nanIdentities);
   dynamic nanValue = double.parse('NaN');
@@ -6202,6 +6217,9 @@ void doubleValues() {
     double.infinity - double.infinity,
     double.infinity + double.negativeInfinity,
     0 * double.infinity,
+    double.infinity % 2,
+    2.0 % 0,
+    -double.infinity % double.infinity,
   ];
   final zero = double.parse('0');
   final infinity = double.parse('Infinity');
@@ -6210,10 +6228,26 @@ void doubleValues() {
     infinity - infinity,
     infinity + -infinity,
     zero * infinity,
+    infinity % 2,
+    2.0 % zero,
+    -infinity % infinity,
   ];
   for (var i = 0; i < invalidResults.length; i++) {
     print(identical(invalidConstants[i], invalidResults[i]));
     print(identical(double.nan, invalidResults[i]));
+  }
+  for (final value in <double>[double.nan, -double.nan]) {
+    print(identical(value.remainder(2), value));
+    print(identical(2.0.remainder(value), value));
+    print(identical(value.remainder(-value), value));
+    print(identical(value % 2, value));
+    print(identical(2.0 % value, value));
+    print(identical(value % -value, value));
+    dynamic dynamicNaN = value;
+    print(identical(dynamicNaN % 2, value));
+    print(identical(2 % dynamicNaN, value));
+    print(identical(dynamicNaN.remainder(2), value));
+    print(identical(2.remainder(dynamicNaN), value));
   }
   print(1_2.5_0e-1_0);
 }

@@ -128,13 +128,16 @@ int? binary64Parse(String source) {
   while (end > start && unicodeWhitespace(source.codeUnitAt(end - 1))) end--;
   if (start == end) return null;
   var sign = 0;
-  if (source.codeUnitAt(start) == 45 || source.codeUnitAt(start) == 43) {
-    if (source.codeUnitAt(start) == 45) sign = binary64Sign;
+  final prefix = source.codeUnitAt(start);
+  if (prefix == 45 || prefix == 43) {
+    if (prefix == 45) sign = binary64Sign;
     start++;
   }
   final special = source.substring(start, end);
   if (special == 'Infinity') return sign | binary64Infinity;
-  if (special == 'NaN') return binary64NaN;
+  // The SDK's NaN/-NaN path uses the platform NaN; +NaN parses as positive.
+  if (special == 'NaN')
+    return prefix == 43 ? binary64NaN : hostFloat64Div(0, 0);
   var position = start;
   final digits = <int>[];
   var fraction = 0;
@@ -416,8 +419,9 @@ int _significandBits(int significand, int exponent) {
 int binary64Remainder(int left, int right) {
   final a = left & 0x7fffffffffffffff;
   final b = right & 0x7fffffffffffffff;
-  if (a >= binary64Infinity || b > binary64Infinity || b == 0)
-    return binary64NaN;
+  if (a > binary64Infinity || b > binary64Infinity)
+    return hostFloat64Add(left, right);
+  if (a == binary64Infinity || b == 0) return hostFloat64Div(0, 0);
   if (a < b) return left;
   final sign = left & binary64Sign;
   if (a == b) return sign;
