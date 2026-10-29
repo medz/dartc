@@ -88,7 +88,14 @@ Compatibility: https://github.com/medz/dartc/tree/v$version/specs
 License: MIT (included).
 ''');
     final archive = File('${temporary.path}/$name.tar.gz');
-    run('/usr/bin/tar', ['-czf', archive.path, '-C', temporary.path, name]);
+    run('/usr/bin/tar', [
+      if (os == 'macos') '--no-mac-metadata',
+      '-czf',
+      archive.path,
+      '-C',
+      temporary.path,
+      name,
+    ]);
 
     // Validate the shipped files, with no checkout or SDK path available.
     final unpacked = Directory('${temporary.path}/unpacked')..createSync();
