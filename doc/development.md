@@ -4,6 +4,8 @@ Run these commands from the repository root with your installed Dart SDK on macO
 
 Bootstrap builds stages in a fresh directory and publishes them after the stage2/stage3 byte comparison and behavior checks pass. A code-generation change can make stage1 differ from stage2. Stable self-rebuilds, language behavior and performance each require their own evidence.
 
+Before stage1, bootstrap records the compiler/runtime source dependencies, validation sources and package-configuration search paths. It checks their contents after each stage and after behavior validation; changed inputs prevent publication. On failure, the retained work directory contains the input seed, partial builds and `inputs.json` with the original file contents and SDK version. Keep inputs unchanged throughout the run; these checks occur at phase boundaries.
+
 Behavior tests compare real compilation and execution with the SDK, including exit status and declared output files. Independent cases run concurrently using the environment's available CPU count. Add cases to the owning fixture or rejection group, give concurrent cases separate source and output paths, and keep tests that mutate shared package configuration in sequence. On failure, active cases finish before the harness preserves sources and process evidence.
 
 ## Compare compiler performance

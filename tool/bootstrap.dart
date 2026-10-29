@@ -1,7 +1,66 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../lib/src/driver/packages.dart';
+import '../lib/src/source.dart';
 import 'src/process.dart';
+
+Map<String, List<int>?> _bootstrapInputs(String root) {
+  final entry = File('$root/bin/dartc.dart');
+  final runtime = File('$root/lib/src/runtime.dart');
+  final packages = compilerPackages(entry.uri.toString(), root, null);
+  final program = collectSources(
+    entry.uri.toString(),
+    runtime.uri.toString(),
+    packages,
+    Platform.isLinux ? 1 : 0,
+  );
+  final paths = {
+    for (final file in program.files) file.path,
+    '$root/lib/src/host.dart',
+    '$root/tool/bootstrap.dart',
+    '$root/tool/src/process.dart',
+    '$root/test/behavior_test.dart',
+    for (final file in Directory(
+      '$root/test/fixtures',
+    ).listSync(recursive: true).whereType<File>())
+      file.path,
+  };
+  // A new, nearer configuration changes package mappings and language versions.
+  var directory = entry.parent;
+  while (true) {
+    final path = '${directory.path}/.dart_tool/package_config.json';
+    paths.add(path);
+    if (File(path).existsSync() || directory.parent.path == directory.path)
+      break;
+    directory = directory.parent;
+  }
+  return {
+    for (final path in paths)
+      path: File(path).existsSync() ? File(path).readAsBytesSync() : null,
+  };
+}
+
+void _checkInputs(Map<String, List<int>?> inputs) {
+  for (final input in inputs.entries) {
+    final file = File(input.key);
+    final actual = file.existsSync() ? file.readAsBytesSync() : null;
+    final expected = input.value;
+    var same = actual == null && expected == null;
+    if (actual != null &&
+        expected != null &&
+        actual.length == expected.length) {
+      same = true;
+      for (var i = 0; i < actual.length; i++) {
+        if (actual[i] != expected[i]) {
+          same = false;
+          break;
+        }
+      }
+    }
+    if (!same) throw StateError('Bootstrap input changed: ${input.key}');
+  }
+}
 
 Future<void> run(
   String executable,
@@ -68,6 +127,19 @@ Future<void> main(List<String> args) async {
       );
       await run(sdk, ['compile', 'exe', source, '-o', seedCopy.path]);
     }
+    final inputs = _bootstrapInputs(root);
+    File('${work.path}/inputs.json').writeAsStringSync(
+      jsonEncode({
+        'source': source,
+        'runtime': standard,
+        'inputSeed': seed,
+        'sdk': {'path': sdk, 'version': Platform.version},
+        'files': {
+          for (final input in inputs.entries)
+            input.key: input.value == null ? null : base64Encode(input.value!),
+        },
+      }),
+    );
     Future<void> compile(String compiler, String output) async {
       await run(compiler, [
         source,
@@ -78,6 +150,7 @@ Future<void> main(List<String> args) async {
       ], native: true);
       if (!File(output).existsSync() || File(output).lengthSync() == 0)
         throw StateError('Compiler produced no executable: $output');
+      _checkInputs(inputs);
     }
 
     stdout.writeln('Building stage 1 with the seed copy.');
@@ -102,6 +175,7 @@ Future<void> main(List<String> args) async {
       '--std',
       standard,
     ], timeout: const Duration(minutes: 5));
+    _checkInputs(inputs);
     for (final stage in [stage1, stage2, stage3]) {
       File(stage)
           .copySync('${build.path}/${File(stage).uri.pathSegments.last}');

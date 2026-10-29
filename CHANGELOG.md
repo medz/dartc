@@ -10,6 +10,7 @@
 
 ### Fixes
 
+- Reject source or package-configuration changes during native bootstrap before replacing the verified seed, and retain the original inputs for diagnosis.
 - Preserve double NaN bit patterns in identity checks and constant canonicalization. Cross-compilation uses the output target's NaN representation for invalid floating-point arithmetic.
 - Align macOS static-library members for Darwin linkers that require padded archive contents.
 - Include transitive runtime and core-library source dependencies in native archives, so splitting library implementations into new files does not leave them out of the package.

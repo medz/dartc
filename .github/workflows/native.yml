@@ -60,6 +60,7 @@ jobs:
       - name: Cold bootstrap without an existing seed
         if: inputs.cross_ref == ''
         run: dart tool/bootstrap.dart
+      - run: dart test/bootstrap_test.dart --compiler build/dartc-stage2
       - run: dart test/differential_test.dart --compiler build/dartc-stage2
       - run: dart test/measure_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
       - run: dart test/ssa_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
@@ -122,6 +123,7 @@ jobs:
         run: test "$(uname -m)" = x86_64
       - name: Bootstrap and check native behavior
         run: dart tool/bootstrap.dart
+      - run: dart test/bootstrap_test.dart --compiler build/dartc-stage2
       - run: dart test/library_test.dart build/dartc-stage2
       - run: dart test/differential_test.dart --compiler build/dartc-stage2
       - run: dart test/ssa_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
