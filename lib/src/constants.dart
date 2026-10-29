@@ -1763,7 +1763,9 @@ ConstantValue _evaluateConstant(
           declaration.target == tDouble) {
         final value = binary64Constant(
           expression.text,
-          targetX64 ? binary64NaN | binary64Sign : binary64NaN,
+          compilationTarget == Target.linuxX64
+              ? binary64NaN | binary64Sign
+              : binary64NaN,
         );
         if (value != null) return ConstantValue(tDouble, tDouble, value, '');
       }

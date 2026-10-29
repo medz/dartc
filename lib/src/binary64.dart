@@ -137,7 +137,9 @@ int? binary64Parse(String source) {
   if (special == 'Infinity') return sign | binary64Infinity;
   // The SDK's NaN/-NaN path uses the platform NaN; +NaN parses as positive.
   if (special == 'NaN')
-    return prefix == 43 ? binary64NaN : hostFloat64Div(0, 0);
+    return prefix != 43 && hostTarget() == 2
+        ? binary64NaN | binary64Sign
+        : binary64NaN;
   var position = start;
   final digits = <int>[];
   var fraction = 0;

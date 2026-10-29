@@ -4225,7 +4225,9 @@ int feLowerMember(AstExpression expression) {
         declaration.target == tDouble) {
       final value = binary64Constant(
         expression.text,
-        targetX64 ? binary64NaN | binary64Sign : binary64NaN,
+        compilationTarget == Target.linuxX64
+            ? binary64NaN | binary64Sign
+            : binary64NaN,
       );
       if (value != null) {
         feOperand(opDouble, value);
