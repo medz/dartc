@@ -778,6 +778,18 @@ Future<void> main(List<String> args) async {
         File('$root/test/fixtures/values.dart').readAsStringSync(),
       );
     await compare(values, [for (var i = 0; i < 20; i++) '参数$i🙂']);
+    // Keep enough double arguments live together to exercise floating spills
+    // beyond the short frame-offset encoding, as well as stack arguments.
+    final floatingPressure = File('${temporary.path}/floating-pressure.dart')
+      ..writeAsStringSync('''
+double sum(${[for (var i = 0; i < 48; i++) 'double v$i'].join(',')}) =>
+    ${[for (var i = 0; i < 48; i++) 'v$i'].join('+')};
+void main(List<String> args) {
+  final value = double.parse(args[0]);
+  print(sum(${[for (var i = 0; i < 48; i++) 'value + $i'].join(',')}));
+}
+''');
+    await compare(floatingPressure, ['0.25']);
     final roots = File('${temporary.path}/roots.dart')
       ..writeAsStringSync(
         File('$root/test/fixtures/roots.dart')

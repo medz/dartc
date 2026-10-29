@@ -309,20 +309,59 @@ void corrupt(List<SsaFunction> program, String mode) {
   }
 }
 
+void corruptAllocation(List<MachineFunction> program, String mode) {
+  final name = mode == 'allocation-overlap'
+      ? 'floating'
+      : mode == 'allocation-float-call'
+      ? 'floatingCall'
+      : mode == 'allocation-root-register' ? 'slice' : 'callee';
+  for (var f = 0; f < functions.length; f++) {
+    if (functions[f].name != name) continue;
+    final function = program[f];
+    final locations = function.allocation.locations;
+    final argument = function.arguments[0];
+    if (mode == 'allocation-overlap') {
+      for (final block in function.blocks) {
+        for (final instruction in block.instructions) {
+          if (instruction.op == mFloat64Add) {
+            locations[instruction.inputs[1]] = locations[instruction.inputs[0]];
+          }
+        }
+      }
+    } else if (mode == 'allocation-float-call') {
+      locations[argument] = targetFloatRegisters.last;
+    } else if (mode == 'allocation-float-representation') {
+      locations[argument] = targetFloatRegisters[0];
+    } else if (mode == 'allocation-root-register') {
+      locations[argument] = targetRegisters[0];
+    } else if (mode == 'allocation-spill') {
+      locations[argument] = -1 - function.allocation.spillSlots;
+    } else {
+      locations[argument] = 0;
+    }
+    verifyAllocation(function, allocateLiveness(function));
+    return;
+  }
+  ssaError('allocation test function missing');
+}
+
 void main(List<String> args) {
-  compilationTarget = Target.values[host.hostTarget()];
+  final allocation = args[2].startsWith('allocation-');
+  // Exercise the ARM64 register banks even when the test driver runs on x64.
+  compilationTarget = allocation ? Target.macosArm64 : Target.values[host.hostTarget()];
   frontend.parseSource(collectSources(args[0], args[1], null, targetOS));
   if (args[2] == 'ir-function-range') functions[0].end = functions[0].start;
   final program = buildSsa();
   verifySsa(program);
   optimizeSsa(program);
   verifySsa(program);
-  corrupt(program, args[2]);
+  if (!allocation) corrupt(program, args[2]);
   final format = args[2] == 'format-type-parameter' || args[2] == 'format-schema-hole';
   if (!format) verifySsa(program);
-  if (args[2] == 'valid' || format) {
+  if (args[2] == 'valid' || format || allocation) {
     final selected = selectMachine(program, reachableFunctions(program));
     allocateRegisters(selected);
+    if (allocation) corruptAllocation(selected, args[2]);
     generateCode(selected);
     createExecutable();
   }
@@ -349,6 +388,7 @@ T generic<T extends num>(T value) => value;
 List<T> genericList<T>(T value) => [value];
 T Function(T) genericClosure<T>() => (T value) => value;
 double floating(double value) => value + 0.25;
+double floatingCall(double value) { print(value); return value + 0.25; }
 int Function() delayed(int value) {
   late final int result = value + 1;
   return () => result;
@@ -405,7 +445,8 @@ void main() {
   print(generic<int>(1));
   print(genericList<int>(2));
   print(genericClosure<int>()(3));
-  print(floating(1.5));
+  print((<double Function(double)>[floating])[0](1.5));
+  print(floatingCall(2.5));
   print(order(3));
   print(diamond(true, 4));
   print(loop(3));
@@ -449,6 +490,12 @@ Future<void> main(List<String> args) async {
     );
     const cases = {
       'valid': '',
+      'allocation-register': 'unavailable register',
+      'allocation-overlap': 'overlapping live values',
+      'allocation-spill': 'spill slot out of range',
+      'allocation-root-register': 'managed root in register',
+      'allocation-float-representation': 'floating register representation',
+      'allocation-float-call': 'live floating value across clobber',
       'ir-function-range': 'invalid function IR range',
       'constructor-prefix': 'callable parameter prefix',
       'invoke-edge-result': 'invoke result on exception edge',
@@ -529,7 +576,9 @@ Future<void> main(List<String> args) async {
         completed(result);
         check(result.stdout == 'SSA verified\n', result.stdout);
       } else {
-        final prefix = entry.key == 'ir-function-range'
+        final prefix = entry.key.startsWith('allocation-')
+            ? 'dartc allocation: '
+            : entry.key == 'ir-function-range'
             ? 'dartc SSA: invalid function IR range'
             : (entry.key == 'format-type-parameter' ||
                   entry.key == 'format-schema-hole')

@@ -49,8 +49,8 @@ const int mShlImmediate = 28;
 const int mShrImmediate = 29;
 const int mUshrImmediate = 30;
 const int mFramePointer = 31;
-// The internal ABI transports binary64 bits in general registers. Hardware
-// float registers are instruction-local scratch, never live across a call.
+// The internal ABI transports binary64 bits in general registers. Allocation
+// may keep double values in floating registers between calls.
 const int mFloat64Add = 32;
 const int mFloat64Sub = 33;
 const int mFloat64Mul = 34;
@@ -62,6 +62,13 @@ const int mFloat64Neg = 39;
 const int mExit = 40;
 const int mCaptureContext = 41;
 const int mResumeContext = 42;
+
+bool machineClobbersCallerSaved(int op) =>
+    op == mCall ||
+    op == mCallIndirect ||
+    op == mSyscall ||
+    op == mCaptureContext ||
+    op == mResumeContext;
 
 class RegisterAllocation {
   final List<int> locations;

@@ -5371,7 +5371,48 @@ double manyFloats(
   double i,
   double j,
 ) => a + b + c + d + e + f + g + h + i + j;
+
+double floatingLoop(int count, double left, double right) {
+  for (var i = 0; i < count; i++) {
+    final previous = left;
+    left = right;
+    right = previous + left * 0.25;
+    if ((i & 1) == 0) left = -left;
+  }
+  return left + right;
+}
+
+double floatingTap(double value) {
+  print(value);
+  return manyFloats(value, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+}
+
+double floatingAcrossCall(double value) {
+  final carried = value * 0.75 + 2;
+  try {
+    final result = floatingTap(value);
+    if (value < 0) throw result;
+    return carried + result;
+  } catch (error) {
+    print(error);
+    return carried;
+  } finally {
+    print(carried);
+  }
+}
+
 void doubleValues() {
+  for (final value in <double>[
+    0.0,
+    -0.0,
+    .5,
+    -1.25,
+    double.infinity,
+    double.nan,
+  ]) {
+    print(floatingLoop(9, value, 1.25));
+    print(floatingAcrossCall(value));
+  }
   print([floatingConstant, exactLarge, floatingConstants]);
   const value = FrozenFloat(1.5, 2);
   print([value.value, value.direct]);

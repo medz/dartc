@@ -43,7 +43,10 @@ void emitEdge(MachineEdge edge, MachineFunction function, int fallthrough) {
   int i = 0;
   while (i < edge.arguments.length) {
     if (locations[edge.arguments[i]] != locations[parameters[i]]) {
-      int register = emitOperand(function, edge.arguments[i], 0);
+      final location = locations[edge.arguments[i]];
+      final register = location >= 0
+          ? location
+          : emitOperand(function, edge.arguments[i], 0);
       armPush(register);
     }
     i = i + 1;
@@ -51,7 +54,8 @@ void emitEdge(MachineEdge edge, MachineFunction function, int fallthrough) {
   while (i > 0) {
     i = i - 1;
     if (locations[edge.arguments[i]] != locations[parameters[i]]) {
-      int register = emitDestination(function, parameters[i]);
+      final location = locations[parameters[i]];
+      final register = location >= 0 ? location : 0;
       armPop(register);
       emitStore(function, parameters[i], register);
     }
@@ -79,39 +83,41 @@ void emitInstruction(
     result = emitDestination(function, output);
     armConstant(result, instruction.target);
   } else if (op == mMove) {
-    result = emitOperand(function, inputs[0], 0);
+    final location = function.allocation.locations[inputs[0]];
+    result = location >= 0 ? location : emitOperand(function, inputs[0], 0);
   } else if (op >= mFloat64Add && op <= mFloat64Neg) {
-    final left = emitOperand(function, inputs[0], 0);
-    result = emitDestination(function, output);
-    if (op == mFloat64FromInt) {
-      codeWord(0x9e620000 | (left << 5)); // scvtf d0, xN
-    } else {
-      codeWord(0x9e670000 | (left << 5)); // fmov d0, xN
-    }
+    final left = op == mFloat64FromInt
+        ? emitOperand(function, inputs[0], 0)
+        : emitFloatOperand(function, inputs[0], 0);
+    final integer = op == mFloat64ToInt || op == mFloat64Compare;
+    final location = output >= 0 ? function.allocation.locations[output] : -1;
+    result = integer
+        ? emitDestination(function, output)
+        : location >= floatRegisterBase
+        ? location
+        : floatRegisterBase;
+    final destination = result - floatRegisterBase;
     if (op == mFloat64ToInt) {
-      codeWord(0x9e780000 | result); // fcvtzs xN, d0
+      codeWord(0x9e780000 | (left << 5) | result); // fcvtzs xN, dM
     } else if (op == mFloat64Neg) {
-      codeWord(0x1e614000); // fneg d0, d0
-      codeWord(0x9e660000 | result);
+      codeWord(0x1e614000 | (left << 5) | destination);
     } else if (op == mFloat64FromInt) {
-      codeWord(0x9e660000 | result); // fmov xN, d0
+      codeWord(0x9e620000 | (left << 5) | destination); // scvtf dN, xM
     } else {
-      final right = emitOperand(function, inputs[1], 1);
-      codeWord(0x9e670001 | (right << 5)); // fmov d1, xN
+      final right = emitFloatOperand(function, inputs[1], 1);
       if (op == mFloat64Compare) {
-        codeWord(0x1e612000); // fcmp d0, d1
+        codeWord(0x1e602000 | (right << 16) | (left << 5));
         codeWord(0x9a9f57e9); // cset x9, mi
         codeWord(0x9a9fd7e0 | result); // cset xN, gt
         codeWord(0xcb090000 | (result << 5) | result);
         codeWord(0x9a9f77e9); // cset x9, vs
         codeWord(0xaa090400 | (result << 5) | result);
       } else {
-        var encoding = 0x1e612800;
-        if (op == mFloat64Sub) encoding = 0x1e613800;
-        if (op == mFloat64Mul) encoding = 0x1e610800;
-        if (op == mFloat64Div) encoding = 0x1e611800;
-        codeWord(encoding);
-        codeWord(0x9e660000 | result);
+        var encoding = 0x1e602800;
+        if (op == mFloat64Sub) encoding = 0x1e603800;
+        if (op == mFloat64Mul) encoding = 0x1e600800;
+        if (op == mFloat64Div) encoding = 0x1e601800;
+        codeWord(encoding | (right << 16) | (left << 5) | destination);
       }
     }
   } else if (op == mFramePointer) {
@@ -591,15 +597,22 @@ void generateArm64(List<MachineFunction> program, int features) {
 
 int emitOperand(MachineFunction function, int value, int fallback) {
   int location = function.allocation.locations[value];
-  if (location >= 0) return location;
-  armLoadLocal(-location - 1, fallback);
+  if (location >= 0 && location < floatRegisterBase) return location;
+  emitLoad(function, value, fallback);
+  return fallback;
+}
+
+int emitFloatOperand(MachineFunction function, int value, int fallback) {
+  final location = function.allocation.locations[value];
+  if (location >= floatRegisterBase) return location - floatRegisterBase;
+  emitLoad(function, value, floatRegisterBase + fallback);
   return fallback;
 }
 
 int emitDestination(MachineFunction function, int value) {
   if (value >= 0) {
     int location = function.allocation.locations[value];
-    if (location >= 0) return location;
+    if (location >= 0 && location < floatRegisterBase) return location;
   }
   return 0;
 }

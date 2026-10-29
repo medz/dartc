@@ -1,5 +1,6 @@
 import 'target.dart';
 import 'machine.dart';
+import 'host.dart';
 
 class RegisterBlock {
   int start;
@@ -144,12 +145,13 @@ void allocateLiveIntervals(
   }
 }
 
-void allocateIntervals(
+List<int> allocateIntervals(
   MachineFunction function,
   List<RegisterBlock> blocks,
   List<int> starts,
   List<int> ends,
 ) {
+  final clobbers = <int>[];
   int i = 0;
   while (i < function.arguments.length) {
     allocateTouch(starts, ends, function.arguments[i], 0);
@@ -170,6 +172,7 @@ void allocateIntervals(
     i = 0;
     while (i < source.instructions.length) {
       final MachineInstruction instruction = source.instructions[i];
+      if (machineClobbersCallerSaved(instruction.op)) clobbers.add(position);
       int input = 0;
       while (input < instruction.inputs.length) {
         allocateTouch(starts, ends, instruction.inputs[input], position);
@@ -196,6 +199,7 @@ void allocateIntervals(
     }
     b = b + 1;
   }
+  return clobbers;
 }
 
 bool allocateEarlier(int left, int right, List<int> keys) {
@@ -253,14 +257,28 @@ void allocatePhysicalRegisters(
   List<int> starts,
   List<int> ends,
   List<int> locations,
+  List<int> clobbers,
 ) {
-  final registers = targetRegisters;
-  final List<int> owners = List<int>.filled(registers.length, -1);
+  final generalRegisters = targetRegisters;
+  final floatingRegisters = targetFloatRegisters;
+  final generalOwners = List<int>.filled(generalRegisters.length, -1);
+  final floatingOwners = List<int>.filled(floatingRegisters.length, -1);
+  var nextClobber = 0;
   int i = 0;
   while (i < order.length) {
     final int value = order[i];
     final int rep = function.reps[value];
+    while (nextClobber < clobbers.length &&
+        clobbers[nextClobber] < starts[value])
+      nextClobber++;
     if (rep == rI64 || rep == rI1 || rep == rAddr || rep == rF64Bits) {
+      final floating =
+          rep == rF64Bits &&
+          floatingRegisters.isNotEmpty &&
+          (nextClobber == clobbers.length ||
+              ends[value] <= clobbers[nextClobber]);
+      final registers = floating ? floatingRegisters : generalRegisters;
+      final owners = floating ? floatingOwners : generalOwners;
       int register = 0;
       int available = -1;
       int farthest = 0;
@@ -326,10 +344,10 @@ void allocateFunction(MachineFunction function) {
   final List<RegisterBlock> blocks = allocateLiveness(function);
   final List<int> starts = List<int>.filled(function.reps.length, -1);
   final List<int> ends = List<int>.filled(function.reps.length, -1);
-  allocateIntervals(function, blocks, starts, ends);
+  final clobbers = allocateIntervals(function, blocks, starts, ends);
   final List<int> order = allocateOrder(starts);
   final List<int> locations = List<int>.filled(function.reps.length, -1);
-  allocatePhysicalRegisters(function, order, starts, ends, locations);
+  allocatePhysicalRegisters(function, order, starts, ends, locations, clobbers);
   final int spills = allocateSpillSlots(order, starts, ends, locations);
   var used = 0;
   for (final location in locations) {
@@ -340,6 +358,102 @@ void allocateFunction(MachineFunction function) {
       if ((used & (1 << register)) != 0) register,
   ];
   function.allocation = RegisterAllocation(locations, spills, saved);
+  verifyAllocation(function, blocks);
+}
+
+Never allocationError(String message) {
+  print('dartc allocation: ' + message);
+  hostExit(1);
+}
+
+// Check actual live values backwards through each block, independently of the
+// interval ordering and eviction decisions used by the allocator.
+void verifyAllocation(MachineFunction function, List<RegisterBlock> blocks) {
+  final allocation = function.allocation;
+  final locations = allocation.locations;
+  var general = 0;
+  for (final register in targetRegisters) general |= 1 << register;
+  var floating = 0;
+  for (final register in targetFloatRegisters) floating |= 1 << register;
+  var saved = 0;
+  for (final register in allocation.savedRegisters) {
+    if (register < 0 ||
+        register >= floatRegisterBase ||
+        (general & (1 << register)) == 0 ||
+        (saved & (1 << register)) != 0)
+      allocationError('invalid saved register');
+    saved |= 1 << register;
+  }
+  final owners = List<int>.filled(64 + allocation.spillSlots, -1);
+  int slot(int value) {
+    if (value < 0 || value >= locations.length)
+      allocationError('invalid value');
+    final location = locations[value];
+    if (location < 0) {
+      if (-1 - location >= allocation.spillSlots)
+        allocationError('spill slot out of range');
+      return 63 - location;
+    }
+    final rep = function.reps[value];
+    if (rep == rRef || rep == rTagged)
+      allocationError('managed root in register');
+    if (location >= 64 || ((general | floating) & (1 << location)) == 0)
+      allocationError('unavailable register');
+    if (location >= floatRegisterBase) {
+      if (rep != rF64Bits) allocationError('floating register representation');
+    } else if ((saved & (1 << location)) == 0) {
+      allocationError('missing saved register');
+    }
+    return location;
+  }
+
+  void use(int value) {
+    final location = slot(value);
+    if (owners[location] >= 0 && owners[location] != value)
+      allocationError('overlapping live values');
+    owners[location] = value;
+  }
+
+  void define(int value) {
+    final location = slot(value);
+    if (owners[location] >= 0 && owners[location] != value)
+      allocationError('definition overwrites live value');
+    owners[location] = -1;
+  }
+
+  for (var b = 0; b < blocks.length; b++) {
+    for (var i = 0; i < owners.length; i++) owners[i] = -1;
+    final live = blocks[b].liveOut;
+    for (var word = 0; word < live.length; word++) {
+      var bits = live[word];
+      var bit = 0;
+      while (bits != 0) {
+        if ((bits & 1) != 0) use(word * 32 + bit);
+        bits >>>= 1;
+        bit++;
+      }
+    }
+    final block = function.blocks[b];
+    final end = block.end;
+    if (end.value >= 0) use(end.value);
+    for (final value in end.first.arguments) use(value);
+    for (final value in end.second.arguments) use(value);
+    for (var i = block.instructions.length - 1; i >= 0; i--) {
+      final instruction = block.instructions[i];
+      if (instruction.output >= 0) define(instruction.output);
+      if (machineClobbersCallerSaved(instruction.op)) {
+        for (final register in targetFloatRegisters) {
+          if (owners[register] >= 0)
+            allocationError('live floating value across clobber');
+        }
+      }
+      for (final value in instruction.inputs) use(value);
+    }
+    for (final value in block.parameters) define(value);
+    if (b == 0) {
+      for (final value in function.arguments) define(value);
+    }
+  }
 }
 
 void allocateRegisters(List<MachineFunction> program) {
