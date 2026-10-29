@@ -423,7 +423,8 @@ int binary64Remainder(int left, int right) {
   final b = right & 0x7fffffffffffffff;
   if (a > binary64Infinity || b > binary64Infinity)
     return hostFloat64Add(left, right);
-  if (a == binary64Infinity || b == 0) return hostFloat64Div(0, 0);
+  if (a == binary64Infinity || b == 0)
+    return hostTarget() == 2 ? binary64NaN | binary64Sign : binary64NaN;
   if (a < b) return left;
   final sign = left & binary64Sign;
   if (a == b) return sign;

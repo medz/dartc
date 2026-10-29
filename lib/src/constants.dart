@@ -426,13 +426,15 @@ ConstantValue _constantBinary(
     if (op == '*') integer = hostFloat64Mul(a, b);
     if (op == '/') integer = hostFloat64Div(a, b);
     if (op == '%') integer = binary64Modulo(a, b);
-    // Invalid arithmetic produces different NaN signs on ARM64 and x64.
+    // Invalid arithmetic follows the CPU; modulo follows the platform library.
     // Constant evaluation must follow the output target, not its host.
     if ((op == '+' || op == '-' || op == '*' || op == '/' || op == '%') &&
         binary64IsNaN(integer) &&
         !binary64IsNaN(a) &&
         !binary64IsNaN(b))
-      integer = targetX64 ? binary64NaN | binary64Sign : binary64NaN;
+      integer = targetX64 && (op != '%' || targetOS == 1)
+          ? binary64NaN | binary64Sign
+          : binary64NaN;
     if (op == '~/') {
       final quotient = hostFloat64Div(a, b);
       if ((quotient & 0x7fffffffffffffff) >= binary64Infinity)
