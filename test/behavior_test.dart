@@ -921,6 +921,7 @@ void main() {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "class C { var value = 'wrong' as int; } void main() { print('before'); C(); print('after'); }",
       "abstract class I { num get value; } class C implements I { var value; C(this.value); } dynamic wrong() { print('rhs'); return 'wrong'; } void main() { var c=C(1); print('before'); c.value=wrong(); print('after'); }",
       "abstract class I { num get value; } class C implements I { final value; C(this.value) { print('body'); } } dynamic wrong() { print('rhs'); return 'wrong'; } void main() { print('before'); C(wrong()); print('after'); }",
       "class B { covariant num value = 1; } class C extends B { void set value(int x) { print('body'); } } double rhs() { print('rhs'); return 2.5; } void main() { B value = C(); print('before'); value.value = rhs(); print('after'); }",
@@ -3463,6 +3464,34 @@ void main() {
       rejectedFieldInference,
       checkSdk: true,
     );
+    final rejectedConstantTypes = [
+      'const value = 1 as String; void main() {}',
+      'const value = null as int; void main() {}',
+      'const value = 1 as double; void main() {}',
+      'class C { final int value; const C(Object? input) : value = input as int; } const value = C("wrong"); void main() {}',
+      'const void value = 1; const result = value is int; void main() {}',
+      'const void value = 1; const result = true ? true : (value is int); void main() {}',
+      'void f<T>() { const result = 1 is T; } void main() {}',
+      'void f<T>() { const result = [1] as List<T>; } void main() {}',
+      'int f() => 1; const result = true ? true : (f() is int); void main() {}',
+    ];
+    await rejectCases(
+      'rejected-constant-type',
+      rejectedConstantTypes,
+      checkSdk: true,
+    );
+    // The fixed specification requires a constant target type on dead paths.
+    final constantTypeDifferences = [
+      'void f<T>() { const value = true ? true : (1 is T); } void main() {}',
+      'void f<T>() { const value = true ? 1 : (2 as T); } void main() {}',
+      'void f<T>() { const value = true ? true : ([1] is List<T>); } void main() {}',
+    ];
+    for (var i = 0; i < constantTypeDifferences.length; i++) {
+      final invalid = File('${temporary.path}/constant-type-difference-$i.dart')
+        ..writeAsStringSync(constantTypeDifferences[i]);
+      await run(sdk, [invalid.path]);
+      await reject(invalid);
+    }
     final rejectedCovariant = [
       'class C { covariant final int x = 1; } void main() {}',
       'class C { covariant late final int x = 1; } void main() {}',

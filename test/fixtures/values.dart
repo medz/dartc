@@ -399,6 +399,32 @@ dynamic typeValue(dynamic value) {
   return value;
 }
 
+abstract class ConstantTypeFactory {
+  const factory ConstantTypeFactory(Object? value) = ConstantTypeInitializer;
+}
+
+class ConstantTypeInitializer implements ConstantTypeFactory {
+  final int number;
+  final bool integer;
+  final bool other;
+  const ConstantTypeInitializer(Object? value)
+    : number = value as int,
+      integer = value is int,
+      other = value is! int;
+}
+
+class CastInferredFields {
+  var number = (null as int?) ?? 4;
+  var integer = 1 is int;
+  var widened = 1 as num;
+}
+
+typedef ConstantVoid = void;
+
+void constantTypeDefaults([num value = 1 as num, bool integer = 1 is int]) {
+  print([value, integer]);
+}
+
 void typeChecks() {
   dynamic value = 5;
   print(value is int);
@@ -462,6 +488,65 @@ void typeChecks() {
   typeValue(9) is int;
   typeValue(10) as int;
   print(typeEvaluations);
+  const num wide = 1;
+  const Object? missing = null;
+  const number = wide as num;
+  const nullable = missing as int?;
+  const checks = [
+    wide is int,
+    wide is! double,
+    missing is Null,
+    missing is int,
+    missing is Object?,
+  ];
+  print([number, nullable, checks]);
+  print([number] is List<num>);
+  print([number] is List<int>);
+  const List<num> source = <int>[1, 2];
+  const actualList = source is List<int>;
+  const recoveredList = source as List<int>;
+  const widenedList = <int>[1, 2] as List<num>;
+  print(actualList);
+  print(identical(source, recoveredList));
+  print(identical(source, widenedList));
+  print([widenedList] is List<List<num>>);
+  print([widenedList] is List<List<int>>);
+  const factory = ConstantTypeFactory(3);
+  const actualClass = factory is ConstantTypeInitializer;
+  const recoveredClass = factory as ConstantTypeInitializer;
+  print([
+    actualClass,
+    identical(factory, recoveredClass),
+    recoveredClass.number,
+    recoveredClass.integer,
+    recoveredClass.other,
+  ]);
+  print(ConstantTypeInitializer(5).number);
+  const Object function = functionFromObject;
+  const callback = function as int Function(Object?);
+  const matches = function is int Function(int);
+  const mismatch = function is String Function();
+  print([matches, mismatch, identical(function, callback)]);
+  print(callback(6));
+  const deadCast = true ? 3 : ('wrong' as int);
+  const coalesced = (1 as Object?) ?? ('wrong' as int);
+  const and = false && (('wrong' as int) == 0);
+  const or = true || (null as bool);
+  const bottom = true ? 2 : (1 as Never);
+  print([deadCast, coalesced, and, or, bottom]);
+  const void hidden = 7;
+  const visible = hidden as int;
+  const discarded = 1 as ConstantVoid;
+  const top = 1 is ConstantVoid;
+  print(visible);
+  print(<void>[discarded]);
+  print(top);
+  constantTypeDefaults();
+  final inferred = CastInferredFields();
+  print([inferred.number, inferred.integer, inferred.widened]);
+  print([inferred.number] is List<int>);
+  print([inferred.widened] is List<num>);
+  print([inferred.widened] is List<int>);
 }
 
 int filledTrace = 0;

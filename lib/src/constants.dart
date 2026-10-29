@@ -1554,6 +1554,28 @@ ConstantValue _evaluateConstant(
   if (kind == astString)
     return ConstantValue(tString, tString, 0, expression.text);
   if (kind == astNull) return ConstantValue(tNull, tNull, 0, '');
+  if (kind == astTypeTest || kind == astTypeCast) {
+    final value = _evaluateConstant(
+      context,
+      expression.children[0],
+      active,
+      -1,
+      implicitConst,
+    );
+    final target = _constantType(context, expression.typeArguments[0]);
+    if (kind == astTypeTest && value.type == tVoid)
+      _constantError(context, expression.token, 'void is not a constant value');
+    final type = kind == astTypeCast ? target : tBool;
+    if (!active) return ConstantValue(type, tNull, 0, '');
+    final matches = typeIsSubtype(constantValueType(value), target);
+    if (kind == astTypeCast) {
+      if (!matches)
+        _constantError(context, expression.token, 'invalid constant cast');
+      return constantWithType(value, target);
+    }
+    final result = expression.text == 'is!' ? !matches : matches;
+    return ConstantValue(tBool, tBool, result ? 1 : 0, '');
+  }
   if (kind == astList) {
     return _constantList(context, expression, active, expected, implicitConst);
   }
