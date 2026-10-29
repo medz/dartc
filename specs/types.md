@@ -93,7 +93,7 @@ SDK 3.13.7 对跨库带前缀的泛型别名到非泛型类的 `p.A<int>()` 隐�
 
 [frontend.dart](../lib/src/frontend.dart) 的 `feCheckExport()`、[ffi.dart](../lib/src/ffi.dart) 和 [exports.dart](../lib/src/exports.dart) 拥有检查及交接结果；[behavior_test.dart](../test/behavior_test.dart) 的 `native-annotation-imports.dart`、`rejectedNativeAnnotations` 拥有源语言行为，真正的 C ABI、数据符号和头文件验证归 [library_test.dart](../test/library_test.dart)。通用 metadata 接受不代表库输出已追平可执行产物的 AOT 能力。
 
-macOS ARM64 的 object、static、dylib 输出支持上述整数类型、Float/Double、Bool、Pointer 参数及结果和 Void 结果；支持分别耗尽整数与浮点寄存器后的栈参数、递归内部调用，以及嵌套指针和原生函数指针的传递。导出常量支持整数、浮点和布尔类型；目标位宽转换仅作用于导出副本，不改变 Dart 常量。macOS x64 仍只使用全 word 函数入口，窄整数、浮点和 Bool 函数的 C ABI 适配尚缺。Linux 库输出、结构体/联合体按值传递、可写数据、TLS、对象句柄、托管堆、异常和调度边界尚未完成；不能把已有可执行产物的能力当作库输出已支持的证据。
+macOS 与 Linux 的 ARM64/x64 后端为 object、static、dylib 输出实现上述整数类型、Float/Double、Bool、Pointer 参数及结果和 Void 结果；支持分别耗尽整数与浮点寄存器后的栈参数、递归内部调用，以及嵌套指针和原生函数指针的传递。导出常量支持整数、浮点和布尔类型；目标位宽转换仅作用于导出副本，不改变 Dart 常量。macOS 使用 Mach-O，Linux 使用 ELF64 及 GNU ar，共享库分别为 .dylib 和 .so。macOS ARM64、Linux ARM64/x64 已通过真实 C/C++ 调用；macOS x64 已交叉链接，同一 System V 标量适配在 Linux x64 执行，macOS x64 宿主执行仍待补齐。结构体/联合体按值传递、可写数据、TLS、对象句柄、托管堆、异常和调度边界尚未完成；不能把已有可执行产物的能力当作库输出已支持的证据。
 
 [header.dart](../lib/src/header.dart) 从 CheckedExport 生成固定宽度 C 类型、const 数据和函数指针声明，包含 C++ linkage。非 C 标识符、保留字及生成器保留前缀按 UTF-16 单元编码成无冲突 C 别名，Clang/GCC asm 标签保留外部符号；二进制符号和文件内容按 UTF-8 编码。抽象 NativeType、SizedNativeType、Handle 等指针目标的 C 声明仍缺，不隐式当作 void 指针。[library_test.dart](../test/library_test.dart) 通过 C11、C++17 的真实编译与执行验证头文件、标量边界值、26 个混合参数、函数指针、Unicode/保留名、只读常量和库文件迁移后的链接与 dlopen/dlsym；[native_library.dart](../test/fixtures/native_library.dart) 与 [native_library.c](../test/fixtures/native_library.c) 提供同一 ABI 行为用例。
 

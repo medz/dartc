@@ -1,6 +1,7 @@
 import 'abi.dart';
 import 'allocate.dart';
 import 'code.dart';
+import 'exports.dart';
 import 'frame.dart';
 import 'ir.dart';
 import 'layout.dart';
@@ -10,6 +11,7 @@ import 'root_map.dart';
 import 'target.dart';
 import 'types.dart';
 import 'x64.dart';
+import 'x64_ffi.dart';
 
 void xValueLoad(MachineFunction function, int value, int register) {
   final location = function.allocation.locations[value];
@@ -508,6 +510,15 @@ void generateX64(List<MachineFunction> program, int features) {
           : const <CallRootMap>[];
       functionOffsets[i] = codeSize;
       xFunction(function, rootMaps, frames, i);
+    }
+  }
+  if (imageKind != ImageKind.executable) {
+    for (final declaration in checkedExports) {
+      exportOffsets.add(
+        declaration.function < 0
+            ? -1
+            : emitX64Export(declaration.function, declaration.signature),
+      );
     }
   }
   for (final call in codeCalls)

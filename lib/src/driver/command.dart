@@ -99,9 +99,6 @@ Never _compile(List<String> args) {
     }
     argument = argument + 1;
   }
-  if (imageKind != ImageKind.executable && targetOS != 0) {
-    argumentError('Library output currently supports macOS.');
-  }
   if (imageKind == ImageKind.executable && header != '')
     argumentError('--header requires a library output.');
   var cwd = hostCurrentDirectory();
@@ -114,7 +111,7 @@ Never _compile(List<String> args) {
       output = input + '.out';
     output += switch (imageKind) {
       .executable => '',
-      .dynamicLibrary => '.dylib',
+      .dynamicLibrary => targetOS == 0 ? '.dylib' : '.so',
       .object => '.o',
       .staticLibrary => '.a',
     };

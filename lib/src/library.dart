@@ -1,17 +1,14 @@
 import 'code.dart';
 import 'exports.dart';
-import 'library_abi.dart';
+import 'library_data.dart';
+import 'library_elf.dart';
+import 'format/archive.dart';
 import 'format/image.dart';
 import 'format/macho.dart';
 import 'utf8.dart';
 import 'ir.dart';
 import 'sign.dart';
 import 'target.dart';
-
-List<int> libraryNames = <int>[];
-List<int> libraryNameOffsets = <int>[];
-List<int> libraryData = <int>[];
-List<int> libraryDataOffsets = <int>[];
 
 class _LibraryExportNode {
   int name;
@@ -51,11 +48,6 @@ void librarySymtab(int symbols, int names) {
   image32(names);
   image32(libraryNames.length);
 }
-
-int librarySymbolAddress(int index, int codeAddress, int dataAddress) =>
-    checkedExports[index].function >= 0
-    ? codeAddress + exportOffsets[index]
-    : dataAddress + libraryDataOffsets[index];
 
 void librarySymbols(int codeAddress, int dataAddress) {
   var i = 0;
@@ -211,28 +203,6 @@ List<int> libraryObject() {
   return image;
 }
 
-void libraryArchiveField(String value, int width) {
-  var i = 0;
-  while (i < width) {
-    if (i < value.length)
-      image.add(value.codeUnitAt(i));
-    else
-      image.add(32);
-    i++;
-  }
-}
-
-void libraryArchiveHeader(String name, int length) {
-  libraryArchiveField(name, 16);
-  libraryArchiveField('0', 12);
-  libraryArchiveField('0', 6);
-  libraryArchiveField('0', 6);
-  libraryArchiveField('100644', 8);
-  libraryArchiveField(length.toString(), 10);
-  image.add(96);
-  image.add(10);
-}
-
 List<int> libraryArchive() {
   var object = libraryObject();
   var tableLength = alignImage(
@@ -243,7 +213,7 @@ List<int> libraryArchive() {
   var objectOffset = 8 + 60 + tableLength;
   image = <int>[];
   imageName('!<arch>\n', 8);
-  libraryArchiveHeader('__.SYMDEF', tableLength);
+  imageArchiveHeader('__.SYMDEF', tableLength);
   image32(checkedExports.length * 8);
   var i = 0;
   while (i < checkedExports.length) {
@@ -256,7 +226,7 @@ List<int> libraryArchive() {
   imageZeros(stringLength - libraryNames.length);
   // Darwin archive members include padding to an eight-byte boundary.
   var objectLength = alignImage(object.length, 8);
-  libraryArchiveHeader('dartc.o', objectLength);
+  imageArchiveHeader('dartc.o', objectLength);
   i = 0;
   while (i < object.length) {
     image.add(object[i]);
@@ -395,34 +365,8 @@ List<int> libraryDylib(String outputPath) {
 }
 
 List<int> createLibrary(String outputPath) {
-  libraryNames = <int>[0];
-  libraryNameOffsets = <int>[];
-  libraryData = <int>[];
-  libraryDataOffsets = <int>[];
-  var i = 0;
-  while (i < checkedExports.length) {
-    final declaration = checkedExports[i];
-    if (declaration.function >= 0) {
-      libraryDataOffsets.add(-1);
-    } else {
-      final width = libraryTypeSize(declaration.signature);
-      while (libraryData.length % width != 0) libraryData.add(0);
-      libraryDataOffsets.add(libraryData.length);
-      final bits = libraryConstantBits(declaration);
-      for (var byte = 0; byte < width; byte++)
-        libraryData.add((bits >>> (byte * 8)) & 255);
-    }
-    libraryNameOffsets.add(libraryNames.length);
-    libraryNames.add(95);
-    var name = encodeUtf8(checkedExports[i].symbol);
-    var j = 0;
-    while (j < name.length) {
-      libraryNames.add(name[j]);
-      j++;
-    }
-    libraryNames.add(0);
-    i++;
-  }
+  prepareLibraryData();
+  if (targetOS == 1) return createElfLibrary(outputPath);
   if (imageKind == ImageKind.object) return libraryObject();
   if (imageKind == ImageKind.staticLibrary) return libraryArchive();
   return libraryDylib(outputPath);

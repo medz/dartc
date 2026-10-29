@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:ffi';
 import 'dart:io';
 
 void run(String executable, List<String> arguments, {int expectedExit = 0}) {
@@ -21,6 +20,12 @@ void run(String executable, List<String> arguments, {int expectedExit = 0}) {
 
 void main(List<String> args) {
   final root = File.fromUri(Platform.script).parent.parent.absolute.path;
+  final sharedSuffix = Platform.isMacOS ? 'dylib' : 'so';
+  String cCompiler(String language) => Platform.isMacOS
+      ? '/usr/bin/clang'
+      : language == 'c'
+      ? '/usr/bin/gcc'
+      : '/usr/bin/g++';
   final build = Directory('$root/build')..createSync(recursive: true);
   final temporary = build.createTempSync('library-');
   var succeeded = false;
@@ -63,7 +68,7 @@ void main(List<String> args) {
     }
 
     void link(String source, String library, String output, String language) {
-      run('/usr/bin/clang', [
+      run(cCompiler(language), [
         '-x',
         language,
         language == 'c' ? '-std=c11' : '-std=c++17',
@@ -74,7 +79,7 @@ void main(List<String> args) {
         '-x',
         'none',
         library,
-        '-Wl,-rpath,@loader_path',
+        Platform.isMacOS ? '-Wl,-rpath,@loader_path' : r'-Wl,-rpath,$ORIGIN',
         '-o',
         output,
       ]);
@@ -128,7 +133,7 @@ int main(void) { return check($binding); }
         final suffix = switch (kind) {
           'object' => 'o',
           'static' => 'a',
-          _ => 'dylib',
+          _ => sharedSuffix,
         };
         final library = '${directory.path}/libmath.$suffix';
         compile(binding == 'add' ? '$root/example/math.dart' : wide.path, [
@@ -174,12 +179,13 @@ int main(int argc, char** argv) {
   return result;
 }
 ''');
-      run('/usr/bin/clang', [
+      run(cCompiler('c'), [
         '-std=c11',
         '-Wall',
         '-Wextra',
         '-Werror',
         loader.path,
+        if (Platform.isLinux) '-ldl',
         '-o',
         '${directory.path}/loader',
       ]);
@@ -191,10 +197,10 @@ int main(int argc, char** argv) {
           run('${moved.path}/host-$kind-$language', []);
         }
       }
-      run('${moved.path}/loader', ['${moved.path}/libmath.dylib']);
+      run('${moved.path}/loader', ['${moved.path}/libmath.$sharedSuffix']);
     }
 
-    if (Abi.current() == Abi.macosArm64) {
+    {
       final directory = Directory('${temporary.path}/abi')..createSync();
       final host = File('$root/test/fixtures/native_library.c')
           .copySync('${directory.path}/host.c');
@@ -202,7 +208,7 @@ int main(int argc, char** argv) {
         final suffix = switch (kind) {
           'object' => 'o',
           'static' => 'a',
-          _ => 'dylib',
+          _ => sharedSuffix,
         };
         final library = '${directory.path}/native_library.$suffix';
         compile('$root/test/fixtures/native_library.dart', [
@@ -220,6 +226,47 @@ int main(int argc, char** argv) {
         }
       }
     }
+
+    final namesSource = File('${temporary.path}/库🙂.dart')
+      ..writeAsStringSync('''
+import 'dart:ffi';
+import 'package:dartc/export.dart';
+${List.generate(300, (index) => 299 - index).map((index) => "@Export<Int64 Function()>(symbol: 'e$index') int f$index() => $index;").join('\n')}
+@Export<Int64 Function()>(symbol: '加🙂') int unicode() => 300;
+''');
+    final namesLibrary = '${temporary.path}/库🙂.$sharedSuffix';
+    compile(namesSource.path, ['--emit', 'dylib']);
+    final namesLoader = File('${temporary.path}/names.c')
+      ..writeAsStringSync('''
+#include <dlfcn.h>
+#include <stdint.h>
+#include <stdio.h>
+int main(int argc, char** argv) {
+  if (argc != 2) return 1;
+  void* library = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
+  if (library == NULL) { fprintf(stderr, "%s\\n", dlerror()); return 2; }
+  for (int i = 0; i < 300; ++i) {
+    char name[16]; snprintf(name, sizeof(name), "e%d", i);
+    int64_t (*call)(void) = (int64_t (*)(void)) dlsym(library, name);
+    if (call == NULL || call() != i) return 3;
+  }
+  int64_t (*call)(void) = (int64_t (*)(void)) dlsym(library, "加🙂");
+  if (call == NULL || call() != 300) return 4;
+  return dlclose(library) == 0 ? 0 : 5;
+}
+''');
+    final namesExecutable = '${temporary.path}/names';
+    run(cCompiler('c'), [
+      '-std=c11',
+      '-Wall',
+      '-Wextra',
+      '-Werror',
+      namesLoader.path,
+      if (Platform.isLinux) '-ldl',
+      '-o',
+      namesExecutable,
+    ]);
+    run(namesExecutable, [namesLibrary]);
 
     final constant = File('${temporary.path}/constant.dart')
       ..writeAsStringSync('''

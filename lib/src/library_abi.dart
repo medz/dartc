@@ -4,7 +4,6 @@ import 'machine.dart';
 import 'nogc.dart';
 import 'source.dart';
 import 'ssa.dart';
-import 'target.dart';
 import 'types.dart';
 
 Never _libraryError(String symbol, String message) {
@@ -62,11 +61,6 @@ void checkLibraryExports(
       libraryTypeSize(declaration.signature);
       continue;
     }
-    if (targetX64 && !libraryDirectCall(declaration.signature))
-      _libraryError(
-        declaration.symbol,
-        'this C ABI adapter requires macOS ARM64',
-      );
     if ((effects[function] & ~(ssaRead | ssaWrite | ssaNative)) != 0)
       _libraryError(
         declaration.symbol,

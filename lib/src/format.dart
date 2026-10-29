@@ -5,6 +5,7 @@ import 'target.dart';
 import 'constant_data.dart';
 import 'constant_layout.dart';
 import 'format/image.dart';
+import 'format/elf.dart';
 import 'format/macho.dart';
 import 'frame.dart';
 import 'ir.dart';
@@ -121,25 +122,6 @@ List<int> createMachOExecutable() {
   return image;
 }
 
-void imageElfSegment(
-  int type,
-  int flags,
-  int offset,
-  int address,
-  int fileSize,
-  int memorySize,
-  int alignment,
-) {
-  image32(type);
-  image32(flags);
-  image64(offset);
-  image64(address);
-  image64(address);
-  image64(fileSize);
-  image64(memorySize);
-  image64(alignment);
-}
-
 List<int> createElfExecutable() {
   int base = 0x400000;
   int codeOffset = 0x1000;
@@ -151,25 +133,7 @@ List<int> createElfExecutable() {
   int dataSize = alignImage(constants.globalBytes, 4096);
   imageRelocate(constants, base, dataBase, codeOffset);
   image = <int>[];
-  image.add(127);
-  imageName('ELF', 3);
-  image.add(2);
-  image.add(1);
-  image.add(1);
-  imageZeros(9);
-  image16(2);
-  image16(targetX64 ? 62 : 183);
-  image32(1);
-  image64(base + codeOffset);
-  image64(64);
-  image64(0);
-  image32(0);
-  image16(64);
-  image16(56);
-  image16(3);
-  image16(0);
-  image16(0);
-  image16(0);
+  imageElfHeader(2, base + codeOffset, 64, 0, 3, 0, 0);
   imageElfSegment(1, 5, 0, base, payloadEnd, payloadEnd, 4096);
   imageElfSegment(1, 6, dataOffset, dataBase, 0, dataSize, 4096);
   imageElfSegment(0x6474e551, 6, 0, 0, 0, 0, 16);

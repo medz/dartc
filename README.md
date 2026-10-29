@@ -120,7 +120,7 @@ dartc hello.dart --target macos-arm64 -o hello-macos
 dartc hello.dart --target macos-x64 -o hello-intel-macos
 ```
 
-macOS object files, static libraries and dynamic libraries use `@Export<T>` declarations. `T` is a `dart:ffi` function signature or data type; `symbol` optionally sets the external name. For example, [example/math.dart](example/math.dart) exports a function and a read-only constant:
+macOS and Linux object files, static libraries and dynamic libraries use `@Export<T>` declarations. `T` is a `dart:ffi` function signature or data type; `symbol` optionally sets the external name. For example, [example/math.dart](example/math.dart) exports a function and a read-only constant:
 
 ```dart
 import 'dart:ffi';
@@ -137,11 +137,12 @@ const int answer = 42;
 dartc example/math.dart --emit dylib -o libmath.dylib
 dartc example/math.dart --emit static -o libmath.a
 dartc example/math.dart --emit object -o libmath.o
+dartc example/math.dart --target linux-x64 --emit dylib -o libmath.so
 ```
 
-Each command also writes `libmath.h` for C and C++ callers. Use `--header math.h` to choose its path. Header declarations and binary exports come from the same checked signatures. Symbols that cannot be used as C identifiers receive a `dartc_export_` hexadecimal alias in the header while keeping their original binary symbol.
+Each command also writes `libmath.h` for C and C++ callers. Use `--header math.h` to choose its path. Without `-o`, dynamic libraries use `.dylib` on macOS and `.so` on Linux. Header declarations and binary exports come from the same checked signatures. Symbols that cannot be used as C identifiers receive a `dartc_export_` hexadecimal alias in the header while keeping their original binary symbol.
 
-These output modes currently support functions that need no managed runtime context and scalar read-only data. Runtime-backed exports and Linux library output remain implementation gaps; see the [FFI support and gaps](specs/types.md#ffi-类型与原生导出声明) for target and type coverage.
+These output modes currently support functions that need no managed runtime context and scalar read-only data. Runtime-backed exports remain an implementation gap; see the [FFI support and gaps](specs/types.md#ffi-类型与原生导出声明) for target and type coverage.
 
 ## Contributing
 

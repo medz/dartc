@@ -38,7 +38,8 @@ void _extend(int kind, int target, int source) {
   }
 }
 
-// C uses separate integer/FP argument banks and packed Darwin stack arguments.
+// C uses separate integer/FP banks. Darwin packs stack arguments; Linux uses
+// at least one eight-byte slot per scalar stack argument.
 // Internal Dart calls pass every scalar as a 64-bit word, including doubles.
 int emitArm64Export(int function, int type) {
   if (libraryDirectCall(type)) return functionOffsets[function];
@@ -74,7 +75,8 @@ int emitArm64Export(int function, int type) {
         _extend(kind, 9, register);
       }
     } else {
-      stack = (stack + width - 1) & -width;
+      final slotWidth = targetOS == 0 ? width : 8;
+      stack = (stack + slotWidth - 1) & -slotWidth;
       final opcode = switch (width) {
         1 => 0x39400000,
         2 => 0x79400000,
@@ -89,7 +91,7 @@ int emitArm64Export(int function, int type) {
       } else if (!fp) {
         _extend(kind, 9, 9);
       }
-      stack += width;
+      stack += slotWidth;
     }
     // Spill all incoming values before overwriting any C argument register.
     final slot = i < 8 ? stackWords + i : i - 8;

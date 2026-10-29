@@ -1,6 +1,4 @@
 import 'arm64_emit.dart';
-import 'exports.dart';
-import 'ir.dart';
 import 'x64_emit.dart';
 import 'target.dart';
 import 'code.dart';
@@ -54,10 +52,4 @@ void generateCode(List<MachineFunction> program) {
     generateX64(program, features);
   else
     generateArm64(program, features);
-  if (imageKind != ImageKind.executable && targetX64) {
-    for (final declaration in checkedExports) {
-      final function = declaration.function;
-      exportOffsets.add(function < 0 ? -1 : functionOffsets[function]);
-    }
-  }
 }

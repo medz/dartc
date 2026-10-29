@@ -105,7 +105,9 @@ lib/src/
   constant_layout.dart                           映像常量、全局区与元数据布局
   format.dart, library.dart, sign.dart             映像重定位、文件封装与签名
   format/image.dart                              映像缓冲区与字节写入
-  format/macho.dart                              共用 Mach-O 段与节编码
+  format/macho.dart, format/elf.dart              共用目标格式头、段与节编码
+  format/archive.dart                           共用静态归档成员头
+  library_data.dart, library_elf.dart             导出数据与 ELF 库封装
   runtime.dart                                   目标运行时与受信原语声明
   runtime/heap.dart                              分配区、空闲块与非移动标记清扫
   runtime/roots.dart                             显式根、栈根及对象边扫描
@@ -228,11 +230,13 @@ Machine IR 的比较保存语义条件，各后端映射为自己的条件码。
 
 `code.dart` 拥有机器码、函数入口以及调用/数据地址修补记录；所有位置均为字节偏移。存储按 32 位 word 打包以控制 Dart List 的占用，编码器可写入单字节或完整 word。`constant_layout.dart` 根据已发码引用统一布局常量、全局区及相对元数据，补齐描述符、调用形状和栈帧名称所需的字符串。它返回字节偏移，不写映像缓冲区或选择文件头格式。`format.dart` 消费布局结果完成重定位和写出，ARM64 与 x64 编码器分别修补地址指令。x64 使用 RIP 相对地址和 rel32 调用/跳转，超出范围时拒绝生成截断的位移。
 
-`format/image.dart` 拥有唯一的映像缓冲区和小端字节写入函数；打包 word 的写入显式接收数据及字节长度，不读取后端状态。`format/macho.dart` 拥有可执行文件与库共用的段、节编码。`library.dart` 直接导入这两个定义文件，不依赖可执行文件的常量布局与重定位实现。
+`format/image.dart` 拥有唯一的映像缓冲区和小端字节写入函数；打包 word 的写入显式接收数据及字节长度，不读取后端状态。`format/macho.dart`、`format/elf.dart` 拥有可执行文件与库共用的格式头、段和节编码，`format/archive.dart` 拥有归档成员头。`library_data.dart` 准备导出名称和只读数据副本，Mach-O 与 ELF 库封装器直接消费这些数据，不依赖可执行文件的常量布局与重定位实现。
 
 Mach-O 符号与动态库安装名编码为 UTF-8，长度和偏移均以字节计算。动态库导出使用按字节构造的压缩前缀树；完整名称可以同时是其他名称的前缀，终结地址与子分支分别保存，节点分支数不随导出总数增长。
 
-x64 复用基础 x86-64/SSE2 指令后端。Linux 输出 ELF64，启动从进程栈读取 argc/argv；macOS 输出 x86-64 Mach-O，LC_MAIN 从 rdi/rsi 接收 argc/argv，并在调用前对齐栈。macOS x64 的段和签名散列页使用 4 KiB，ARM64 使用 16 KiB；签名页遵循 [XNU CodeDirectory 校验](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/ubc_subr.c)。常量与全局区使用 RIP 相对地址，签名由同一 Dart 实现生成。操作系统系统调用差异集中在原语边界和 Dart 文件服务中，内部调用、根、安全点和异常恢复协议见 [runtime.md](runtime.md)。macOS 两种架构支持现有 Int64 FFI 绑定的 object/static/dylib 输出；Linux 库输出尚未接入。
+x64 复用基础 x86-64/SSE2 指令后端。Linux 输出 ELF64，启动从进程栈读取 argc/argv；macOS 输出 x86-64 Mach-O，LC_MAIN 从 rdi/rsi 接收 argc/argv，并在调用前对齐栈。macOS x64 的段和签名散列页使用 4 KiB，ARM64 使用 16 KiB；签名页遵循 [XNU CodeDirectory 校验](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/ubc_subr.c)。常量与全局区使用 RIP 相对地址，签名由同一 Dart 实现生成。操作系统系统调用差异集中在原语边界和 Dart 文件服务中，内部调用、根、安全点和异常恢复协议见 [runtime.md](runtime.md)。
+
+Linux 库使用 ELF64 的 ET_REL 目标文件、GNU 符号索引归档或 ET_DYN 共享对象。当前无上下文函数只含库内相对调用，数据导出为独立只读副本；不需要外部重定位或运行时导入。共享对象提供动态符号、SysV hash 和基于文件名的 SONAME，导出名称按原始 UTF-8 编码。装载段只读且可执行，栈不可执行；AArch64 装载对齐兼容 64 KiB 页，x64 使用 4 KiB。格式依据 [ELF 头](https://www.sco.com/developers/gabi/latest/ch4.eheader.html)、[符号表](https://www.sco.com/developers/gabi/latest/ch4.symtab.html)及[动态链接](https://www.sco.com/developers/gabi/latest/ch5.dynamic.html)契约；后续托管数据和外部引用须增加对应重定位与权限布局。
 
 Darwin 静态归档中的 64 位对象按 8 字节边界补齐，成员长度包含尾部填充，与 [LLVM 的 Darwin 归档编码](https://github.com/llvm/llvm-project/blob/main/llvm/lib/Object/ArchiveWriter.cpp) 一致。对象本身的节、符号和字符串长度仍由 Mach-O 头描述。
 
@@ -772,7 +776,7 @@ ForeignFrame 至少保存上一托管帧锚点、原生调用边界和句柄范�
 
 前端按注解声明身份生成 `CheckedExport`：符号、原生类型，以及函数或全局声明的目标。标量 const 额外携带原始整数、binary64 或布尔载荷，不在前端按目标位宽截断。后端消费这一结果检查目标布局、转换、传递效果和运行时边界；工具链从同一结果生成 C 头文件，不重新解析源声明。
 
-内部 Dart 函数入口与 C 导出入口分别保存。macOS ARM64 的 C ABI 独立分配整数与浮点参数寄存器，并按原生宽度放置溢出栈参数；适配入口先保存输入，再将窄整数扩展、Float 转为 binary64，将参数送入内部 word 调用约定，返回时做对应转换。全 word 签名可以复用内部入口。实现遵循 [AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst) 和 [Apple ARM64 调用约定](https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms)；其他目标的不同约定不能沿用这一适配器。
+内部 Dart 函数入口与 C 导出入口分别保存。ARM64 C ABI 分别使用八个整数与浮点参数寄存器；Darwin 按原生宽度紧排溢出栈参数，Linux 每个标量栈参数至少占八字节。x64 的 System V C ABI 分别使用六个整数与八个 SSE 参数寄存器，栈参数按八字节槽排列。适配入口先保存输入，再将窄整数扩展、Float 转为 binary64，送入内部 word 调用约定，返回时做对应转换；全 word 签名可以复用内部入口。实现遵循 [AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst)、[Apple ARM64 调用约定](https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms)和 [System V AMD64 函数调用约定](https://www.ucw.cz/~hubicka/papers/abi/node10.html)。
 
 标量 const 的导出副本位于只读数据节。整数副本保留目标宽度的低位，C 类型决定符号解释；Float 按最近值、偶数舍入转换为 binary32。这些转换不改变 Dart 内部的常量值。可写字段不能用同样的复制办法代替共享存储，也不能通过缩窄 Dart 字段、提前执行惰性初始化或暴露 GC 地址来实现原生数据符号。数据、TLS、结构体布局及其生命周期必须各自完成对应契约。
 
