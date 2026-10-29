@@ -71,6 +71,8 @@ Future<void> main(List<String> args) async {
       'Usage: dart tool/benchmark.dart [--seed <native compiler>]\n'
       '       dart tool/benchmark.dart --compare <baseline-native> <candidate-native>\n'
       '       dart tool/benchmark.dart --program <entry> [--seed <native>] [--packages <config>]\n'
+      '       dart tool/benchmark.dart --program <entry> --compare <baseline> <candidate>\n'
+      '            [--std <runtime>] [--baseline-std <runtime>] [--packages <config>]\n'
       '            [--input <relative-file>]... [--check-output <relative-file>]... -- [args...]',
     );
     exitCode = 64;

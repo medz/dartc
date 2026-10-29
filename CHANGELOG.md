@@ -1,5 +1,9 @@
 ## Unreleased
 
+### Tooling
+
+- Compare baseline and candidate native compilers with their matching runtime sources on the same program, alongside the official SDK. The program benchmark checks behavior and file outputs before reporting compilation, execution, memory and size measurements.
+
 ### Fixes
 
 - Include transitive runtime and core-library source dependencies in native archives, so splitting library implementations into new files does not leave them out of the package.
