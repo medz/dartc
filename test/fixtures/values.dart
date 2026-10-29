@@ -6765,7 +6765,135 @@ class InferredInitializedFormal {
   InferredInitializedFormal(this.number);
 }
 
+abstract class AbstractFieldInterface {
+  @pragma('abstract-fields')
+  abstract int count, other;
+  abstract final String label;
+  abstract covariant num number;
+  abstract int Function(int) callback;
+  abstract final Object? optional;
+  const AbstractFieldInterface();
+}
+
+abstract class InferredAbstractFields extends AbstractFieldInterface {
+  abstract var count, other, number, callback;
+  abstract final label, optional;
+}
+
+class StoredAbstractFields extends InferredAbstractFields {
+  int count = 2;
+  int other = 3;
+  final String label = 'stored';
+  int number = 4;
+  int Function(int) callback = inferredFieldCallback;
+  final Object? optional = null;
+}
+
+class AccessorAbstractFields extends AbstractFieldInterface {
+  int _count = 5;
+  int get count => _count;
+  set count(int value) {
+    print('abstract setter');
+    _count = value;
+  }
+
+  int other = 6;
+  String get label => 'accessor';
+  num number = 7.5;
+  int Function(int) get callback => inferredFieldCallback;
+  set callback(int Function(int) value) {
+    print(value(8));
+  }
+
+  Object? get optional => 'present';
+}
+
+abstract class AbstractFinalFields {
+  abstract final int first, second;
+  const AbstractFinalFields();
+}
+
+class StoredFinalFields extends AbstractFinalFields {
+  final int first, second;
+  const StoredFinalFields(this.first, this.second);
+}
+
+abstract class AbstractFieldSetter {
+  set value(num value);
+}
+
+abstract class InferredAbstractSetter extends AbstractFieldSetter {
+  abstract var value;
+}
+
+class StoredInferredSetter extends InferredAbstractSetter {
+  num value = 9.5;
+}
+
+class ConcreteAbstractFieldBase {
+  int value = 11;
+}
+
+class ConcreteAbstractField extends ConcreteAbstractFieldBase {
+  abstract int value;
+  int readSuper() => super.value;
+}
+
+abstract class UntypedAbstractFields {
+  abstract var value;
+  abstract final once;
+  set once(Object? value) {
+    print(value);
+  }
+}
+
+class StoredUntypedFields extends UntypedAbstractFields {
+  dynamic value = 1;
+  Object? get once => 'once';
+}
+
+void abstractFieldValues() {
+  final stored = StoredAbstractFields();
+  for (final value in <AbstractFieldInterface>[
+    stored,
+    AccessorAbstractFields(),
+  ]) {
+    value.count += value.other;
+    value.other++;
+    print([value.count, value.other, value.label, value.number]);
+    print(value.callback(10));
+    value.callback = inferredFieldCallback;
+    print(value.optional);
+  }
+  AbstractFieldInterface wide = stored;
+  wide.number = 12;
+  print(stored.number);
+  InferredAbstractFields inferred = stored;
+  int count = inferred.count;
+  num number = inferred.number;
+  String label = inferred.label;
+  int Function(int) callback = inferred.callback;
+  print([count, number, label, callback(3)]);
+  AbstractFinalFields constant = const StoredFinalFields(3, 4);
+  print([constant.first, constant.second]);
+  print(identical(const StoredFinalFields(3, 4), constant));
+  InferredAbstractSetter setter = StoredInferredSetter();
+  num value = setter.value;
+  print(value);
+  setter.value = 10.5;
+  print(setter.value);
+  final inherited = ConcreteAbstractField();
+  inherited.value = 13;
+  print(inherited.readSuper());
+  UntypedAbstractFields untyped = StoredUntypedFields();
+  untyped.value = 'dynamic';
+  print(untyped.value);
+  print(untyped.once);
+  untyped.once = 14;
+}
+
 void interfaceValues() {
+  abstractFieldValues();
   final field = FieldArithmetic(5);
   FieldArithmeticList fields = [field];
   print(fields[0].apply(2));

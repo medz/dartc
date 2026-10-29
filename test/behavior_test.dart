@@ -969,6 +969,7 @@ void main() {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "abstract class B { abstract covariant num value; } abstract class I extends B { abstract var value; } class C extends I { int value = 1; } double rhs() { print('rhs'); return 2.5; } void main() { B value = C(); print('before'); value.value = rhs(); print('after'); }",
       "class C { var value = 'wrong' as int; } void main() { print('before'); C(); print('after'); }",
       "abstract class I { num get value; } class C implements I { var value; C(this.value); } dynamic wrong() { print('rhs'); return 'wrong'; } void main() { var c=C(1); print('before'); c.value=wrong(); print('after'); }",
       "abstract class I { num get value; } class C implements I { final value; C(this.value) { print('body'); } } dynamic wrong() { print('rhs'); return 'wrong'; } void main() { print('before'); C(wrong()); print('after'); }",
@@ -1721,17 +1722,25 @@ void main() {
 abstract class PrivateInterface {
   int _read(int value);
   int publicRead();
+  abstract int _value;
+  abstract final int value;
 }
 class PrivateImplementation implements PrivateInterface {
+  int _value = 2;
+  int get value => _value;
   int _read(int value) => value + 10;
   int publicRead() => _read(2);
 }
-int privateRead(PrivateInterface value) => value._read(3);
+int privateRead(PrivateInterface value) {
+  value._value += 4;
+  return value._read(value._value);
+}
 ''',
       'interface-other.dart': r'''
 import 'interface-private.dart' as first;
 abstract class OtherInterface implements first.PrivateInterface {
   String _read(int value);
+  abstract String _value;
   String ownPrivate() => _read(4);
 }
 ''',
@@ -1739,11 +1748,19 @@ abstract class OtherInterface implements first.PrivateInterface {
 import 'interface-private.dart' as first;
 import 'interface-other.dart' as other;
 typedef ImportedInterface = first.PrivateInterface;
+class ImportedImplementation extends first.PrivateImplementation {
+  String _value = 'separate';
+  String read() => _value;
+}
 void main() {
   ImportedInterface value = first.PrivateImplementation();
   print(first.privateRead(value));
   print(value.publicRead());
   print(value is other.OtherInterface);
+  final child = ImportedImplementation();
+  print(first.privateRead(child));
+  print(child.value);
+  print(child.read());
 }
 ''',
       'object-pattern-library.dart': r'''
@@ -3681,6 +3698,56 @@ void main() {
     await reject(
       File('${temporary.path}/var-field-formal.dart')..writeAsStringSync(
         '// @dart=3.12\nclass C { int value; C(var this.value); } void main() {}',
+      ),
+    );
+    final rejectedAbstractFields = [
+      for (final declaration in [
+        'abstract int value = 1;',
+        'abstract int first, second = 1;',
+        'abstract late int value;',
+        'abstract late final int value;',
+        'abstract const int value;',
+        'abstract static int value;',
+        'static abstract int value;',
+        'abstract external int value;',
+        'external abstract int value;',
+        'abstract covariant final int value;',
+        'abstract abstract int value;',
+        'abstract final var value;',
+        'abstract value;',
+        'abstract int get value;',
+        'abstract void set value(int x);',
+        'abstract int value();',
+        'abstract C();',
+        'abstract factory C() => throw 1;',
+        'abstract int value; int get value => 1;',
+        'abstract int value; set value(int x) {}',
+      ])
+        'abstract class C { $declaration } void main() {}',
+      'abstract int value; void main() {}',
+      'void main() { abstract int value; }',
+      'class C { abstract int value; } void main() {}',
+      'abstract class B { abstract int value; } class C extends B {} void main() {}',
+      'abstract class B { abstract int value; B(this.value); } void main() {}',
+      'abstract class B { abstract int value; B() : value = 1; } void main() {}',
+      'abstract class B { abstract int value; } class C extends B { int get value => 1; } void main() {}',
+      'abstract class B { abstract int value; } class C extends B { int value = 1; int read() => super.value; } void main() {}',
+      'abstract class B { abstract final int value; set value(int x) {} } void main() { B b = throw 1; b.value = "wrong"; }',
+      'abstract class B { abstract final int value; } void f(B b) { b.value = 1; } void main() {}',
+      'abstract class B { abstract int value; } class C implements B { String value = "wrong"; } void main() {}',
+      'abstract class B { int get value; } abstract class C implements B { abstract var value; } void f(C c) { c.value = "wrong"; } void main() {}',
+      'abstract class B { num get value; set value(Object? x); } abstract class C implements B { abstract var value; } void main() {}',
+      'abstract class B { num get value; set value(Object? x); } abstract class C implements B { abstract covariant var value; } void main() {}',
+      'abstract class B { @missing abstract int value, other; } void main() {}',
+    ];
+    await rejectCases(
+      'rejected-abstract-field',
+      rejectedAbstractFields,
+      checkSdk: true,
+    );
+    await reject(
+      File('${temporary.path}/abstract-field-legacy.dart')..writeAsStringSync(
+        '// @dart=2.11\nabstract class C { abstract int value; } void main() {}',
       ),
     );
     final rejectedFieldInference = [

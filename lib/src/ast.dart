@@ -272,6 +272,7 @@ class AstInitializer {
 
 class AstFunction {
   int local = -1;
+  AstVariable? abstractField;
   List<AstTypeParameter> typeParameters = const <AstTypeParameter>[];
   List<AstExpression> metadata = const <AstExpression>[];
   String name;

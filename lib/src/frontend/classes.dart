@@ -413,8 +413,13 @@ List<ClassMembers> checkClassInterfaces(
       );
       final own = ownIndex < 0 ? null : ownMembers[owner].members[ownIndex];
       final field = own == null ? -1 : own.field;
-      final parameter = field < 0 ? null : fields[field].declaringParameter;
-      if (field >= 0 && fields[field].type.name == '') {
+      final variable = field >= 0
+          ? fields[field]
+          : own == null || own.getter < 0
+          ? null
+          : declarations[own.getter].abstractField;
+      final parameter = variable?.declaringParameter;
+      if (variable != null && variable.type.name == '') {
         var type = -1;
         for (var role = classGetter; role <= classSetter; role++) {
           final candidates = <MemberBinding>[];
@@ -451,18 +456,18 @@ List<ClassMembers> checkClassInterfaces(
               'cannot infer a mutable field from different getter and setter types',
             );
           type = inferred;
-          if (!fields[field].hasSetter) break;
+          if (!variable.hasSetter) break;
         }
         if (type < 0) {
           AstExpression? expression;
           if (parameter == null) {
-            if (fields[field].initializer.isNotEmpty) {
+            if (variable.initializer.isNotEmpty) {
               if (classes[owner].hasPrimary)
                 fail(
                   owner,
                   'primary field initializer type inference is not yet supported',
                 );
-              expression = fields[field].initializer[0];
+              expression = variable.initializer[0];
             }
           } else {
             expression = parameter.defaultValue;
@@ -476,8 +481,14 @@ List<ClassMembers> checkClassInterfaces(
           if (type == tNull)
             type = parameter == null ? tDynamic : nullableType(tObject);
         }
-        fieldTypes[field] = type;
-        fieldReady[field] = true;
+        if (field >= 0) {
+          fieldTypes[field] = type;
+          fieldReady[field] = true;
+        } else {
+          functions[own!.getter].result = type;
+          if (variable.hasSetter)
+            functions[own.setter].parameterTypes[1] = type;
+        }
       }
       for (var role = classMethod; role <= classSetter; role++) {
         final candidates = <MemberBinding>[];
@@ -532,7 +543,9 @@ List<ClassMembers> checkClassInterfaces(
               }
             }
           }
-          if (function >= 0 && selected != null) {
+          if (function >= 0 &&
+              selected != null &&
+              declarations[function].abstractField == null) {
             final info = functions[function];
             final syntax = declarations[function];
             final parent = classSignature(

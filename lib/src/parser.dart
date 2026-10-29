@@ -2296,6 +2296,10 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
   while (!abbreviatedBody && !parserIs(parser, '}')) {
     var metadata = parserMetadata(parser);
     var memberToken = parser.position;
+    final abstractField =
+        parserIs(parser, 'abstract') &&
+        parser.tokens[parser.position + 1].kind == tokenIdentifier;
+    if (abstractField) parser.position++;
     var external = parserTake(parser, 'external');
     var isStatic = false;
     if (parserIs(parser, 'static')) {
@@ -2309,13 +2313,18 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
       }
     }
     var constant = parserTake(parser, 'const');
+    if (abstractField && (external || isStatic || constant))
+      parserError(parser, 'invalid abstract field modifier');
     if (!isStatic &&
         parserIs(parser, 'factory') &&
         (parser.abbreviatedConstructors ||
             !tokenIs(parser.tokens[parser.position + 1], '(') &&
                 !tokenIs(parser.tokens[parser.position + 1], '<'))) {
-      if (external)
-        parserError(parser, 'external constructors are unsupported');
+      if (external || abstractField)
+        parserError(
+          parser,
+          'abstract or external constructors are unsupported',
+        );
       parser.position++;
       final constructorToken = parser.position;
       var constructorName = name;
@@ -2361,7 +2370,7 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
     } else if (parserTake(parser, 'this')) {
       if (primary == null || primaryBody)
         parserError(parser, 'primary constructor body requires one header');
-      if (external || isStatic || constant)
+      if (external || isStatic || constant || abstractField)
         parserError(parser, 'primary constructor body cannot have modifiers');
       primaryBody = true;
       primary.metadata = metadata;
@@ -2369,8 +2378,11 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
     } else if (parserConstructorAhead(parser, name) ||
         parserIs(parser, 'new')) {
       if (isStatic) parserError(parser, 'constructors cannot be static');
-      if (external)
-        parserError(parser, 'external constructors are unsupported');
+      if (external || abstractField)
+        parserError(
+          parser,
+          'abstract or external constructors are unsupported',
+        );
       var constructorToken = parser.position;
       final abbreviated = parserTake(parser, 'new');
       if (!abbreviated) parser.position++;
@@ -2425,7 +2437,7 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
       if (getter || setter || parserIs(parser, '(') || parserIs(parser, '<')) {
         if (constant)
           parserError(parser, 'const requires a constructor declaration');
-        if (modifier != '' || covariant) {
+        if (modifier != '' || covariant || abstractField) {
           parserError(parser, 'methods cannot have variable modifiers');
         }
         var method = parserFunction(
@@ -2456,11 +2468,50 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
         );
         var i = 0;
         while (i < variables.length) {
-          variables[i].covariant = covariant;
-          if (isStatic)
-            (staticFields ??= <AstVariable>[]).add(variables[i]);
+          final variable = variables[i];
+          variable.covariant = covariant;
+          if (abstractField) {
+            if (variable.lateVariable ||
+                variable.initializer.isNotEmpty ||
+                covariant && !variable.hasSetter)
+              parserError(parser, 'invalid abstract field declaration');
+            methods.add(
+              AstFunction(
+                  variable.name,
+                  variable.type,
+                  const <AstParameter>[],
+                  null,
+                  null,
+                  false,
+                  variable.token,
+                  true,
+                )
+                ..abstractField = variable
+                ..metadata = variable.metadata,
+            );
+            if (variable.hasSetter)
+              methods.add(
+                AstFunction(
+                    variable.name,
+                    AstType('void', const <AstType>[], variable.token),
+                    <AstParameter>[
+                      AstParameter(variable.type, '_', false, variable.token)
+                        ..covariant = covariant,
+                    ],
+                    null,
+                    null,
+                    false,
+                    variable.token,
+                    false,
+                  )
+                  ..setter = true
+                  ..abstractField = variable
+                  ..metadata = variable.metadata,
+              );
+          } else if (isStatic)
+            (staticFields ??= <AstVariable>[]).add(variable);
           else
-            fields.add(variables[i]);
+            fields.add(variable);
           i++;
         }
       }

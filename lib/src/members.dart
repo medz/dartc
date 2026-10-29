@@ -192,6 +192,19 @@ ClassMembers bindClassMembers(
   i = 0;
   while (i < syntax.methods.length) {
     var method = syntax.methods[i];
+    if (method.getter &&
+        method.abstractField != null &&
+        !sourceVersionAtLeast(
+          source,
+          source.tokens[method.token].source,
+          2,
+          12,
+        ))
+      _memberError(
+        source,
+        method.token,
+        'abstract fields require language version 2.12',
+      );
     if (method.isStatic)
       _checkStaticInterface(
         source,
