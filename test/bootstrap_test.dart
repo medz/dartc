@@ -71,7 +71,8 @@ Future<void> main(List<String> args) async {
             if (!edited && line.startsWith(item.value)) {
               edited = true;
               changed.parent.createSync(recursive: true);
-              changed.writeAsBytesSync([
+              final replacement = File('${changed.path}.next');
+              replacement.writeAsBytesSync([
                 if (original != null) ...original,
                 ...utf8.encode(
                   original == null
@@ -79,6 +80,7 @@ Future<void> main(List<String> args) async {
                       : '\n// Edited while bootstrap was running.\n',
                 ),
               ]);
+              replacement.renameSync(changed.path);
             }
             return line;
           })
@@ -86,7 +88,7 @@ Future<void> main(List<String> args) async {
       final errors = process.stderr.transform(utf8.decoder).join();
       await process.stdin.close();
       final status = await process.exitCode.timeout(
-        const Duration(minutes: 7),
+        const Duration(minutes: 12),
         onTimeout: () {
           process.kill(ProcessSignal.sigkill);
           throw StateError('Bootstrap did not finish.');

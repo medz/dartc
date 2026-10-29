@@ -92,7 +92,7 @@ Use `dart tool/fuzz.dart --help` for explicit rejection and runtime-failure cont
 
 ## CI
 
-Run the checks available on the local host and in Docker first. Each supported system requires actual execution; identify emulated runs explicitly. Use CI for remaining platform coverage and appropriate validation batches. Required CI checks must pass before a release.
+Run the checks available on the local host and in Docker first. Each supported system requires actual execution; identify emulated runs explicitly. Use CI for remaining platform coverage and appropriate validation batches. Required CI checks must pass before a release. Validation evidence is stored inside a tar archive so legal source paths such as `a:b.dart` survive artifact upload.
 
 The [native self-hosting workflow](../.github/workflows/native.yml) is manually dispatched. Select Linux ARM64, x64 or both, or `macos-x64` for an Intel Mac, with `architecture`, and the reference SDK version with `dart_sdk`. The Linux jobs bootstrap on the selected hosts, run native-library, differential, SSA verification, resource-measurement, program-benchmark and fuzz tests, and cross-compile the compiler for macOS. Release packaging and verification are optional workflow inputs. `cross_ref` supplies matching Mac-built seeds named `dartc-linux` for ARM64 and `dartc-linux-x64` for x64; without a supplied seed, a new checkout uses the SDK for the initial cold bootstrap.
 

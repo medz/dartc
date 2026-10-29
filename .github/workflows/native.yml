@@ -108,15 +108,23 @@ jobs:
           name: ${{ env.DARTC_MACOS_OUTPUT }}
           path: build/${{ env.DARTC_MACOS_OUTPUT }}
           retention-days: 1
+      - name: Archive failed validation evidence
+        if: failure()
+        run: |
+          shopt -s nullglob
+          paths=()
+          for path in build "$RUNNER_TEMP"/dartc-*; do
+            if test -e "$path"; then paths+=("$path"); fi
+          done
+          if ((${#paths[@]})); then
+            tar -czf "$RUNNER_TEMP/native-evidence.tar.gz" "${paths[@]}"
+          fi
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: dartc-linux-${{ matrix.architecture }}-failure
-          path: |
-            build/bootstrap-*/**
-            build/bootstrap-inputs.json
-            build/compiler.dart
-            ${{ runner.temp }}/dartc-*/**
+          path: ${{ runner.temp }}/native-evidence.tar.gz
+          compression-level: 0
           if-no-files-found: warn
           retention-days: 7
 
@@ -157,19 +165,22 @@ jobs:
         run: |
           dart test/package_release_test.dart --compiler build/dartc-stage2
           dart tool/package_release.dart --compiler build/dartc-stage2
+      - name: Archive validation evidence
+        if: always()
+        run: |
+          shopt -s nullglob
+          paths=()
+          for path in build "$RUNNER_TEMP"/dartc-*; do
+            if test -e "$path"; then paths+=("$path"); fi
+          done
+          if ((${#paths[@]})); then
+            tar -czf "$RUNNER_TEMP/native-evidence.tar.gz" "${paths[@]}"
+          fi
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: dartc-macos-x64-validation
-          path: |
-            build/dartc-stage2
-            build/bootstrap-*/**
-            build/bootstrap-inputs.json
-            build/compiler.dart
-            build/dartc-cross-*
-            build/values-*
-            build/release/*
-            build/library-*/**
-            ${{ runner.temp }}/dartc-*/**
+          path: ${{ runner.temp }}/native-evidence.tar.gz
+          compression-level: 0
           if-no-files-found: error
           retention-days: 7
