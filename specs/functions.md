@@ -33,7 +33,7 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 协变参数的[覆写规则][covariant-overrides]与[方法闭包化规则][covariant-closurization]分别约束静态签名和方法值的运行时签名。合并接口时先选择原有函数子类型关系下的签名，再合并所有父签名的协变标记；不能通过放宽覆写检查来改变合并签名。继承具体实现也保留接口引入的协变性，`super.method` 则使用父实现的签名。隐式字段 setter 实现协变接口时按字段类型检查写入。
 
-普通形参上的 covariant 按固定规范与 SDK 3.13.7 analyzer 限于实例方法、setter 或运算符；主构造器的字段声明参数另按 3.13 规则处理。该 SDK 的 CFE 还接受局部/匿名函数、普通及工厂构造器、字段形式参数、两种函数 typedef 中的该修饰符。dartc 按规范和 analyzer 拒绝这些位置，`covariantSyntaxDifferences` 单独核实 CFE 接受与 dartc 拒绝。运行时类型错误仍沿用当前失败退出边界，可捕获 TypeError 见[异常缺口](statements.md)。
+普通形参上的 covariant 按固定规范与 SDK 3.13.7 analyzer 限于实例方法、setter 或运算符；主构造器的字段声明参数另按 3.13 规则处理。该 SDK 的 CFE 还接受局部/匿名函数、普通及工厂构造器、字段形式参数、两种函数 typedef 中的该修饰符。dartc 按规范和 analyzer 拒绝这些位置，`covariantSyntaxDifferences` 单独核实 CFE 接受与 dartc 拒绝。协变入口的类型检查失败抛出可捕获 TypeError，`failingValues` 验证参数求值顺序、捕获、首次轨迹及 finally；具体诊断文本仍缺，见[异常范围](statements.md)。
 
 ## 内建静态调用
 

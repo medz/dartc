@@ -1197,6 +1197,37 @@ void exceptionRootCatch(int queue) {
 
 void exceptionRoots(int queue) {
   exceptionRootCatch(queue);
+  final mark = roots.rtRootMark();
+  final values = genericRootList<Leaf>(Leaf(974));
+  final wrong = <Leaf>[];
+  final typeOwner = genericRootList<List<Leaf>>(wrong);
+  final list = rt.nativeValueBits(values);
+  final listType = rt.nativeLoad64(list + abi.listTypeOffset);
+  final wrongType = rt.rtListElementType(rt.nativeValueBits(typeOwner));
+  for (var operation = 0; operation < 7; operation++) {
+    try {
+      final value = rt.nativeValueBits(wrong);
+      if (operation == 0) rt.rtListGet(list, 0, wrongType);
+      if (operation == 1) rt.rtListSet(list, 0, value, wrongType);
+      if (operation == 2) rt.rtListAdd(list, value, wrongType);
+      if (operation == 3) rt.rtListInsert(list, 0, value, wrongType);
+      if (operation == 4) rt.rtListFilledChecked(1, value, 1, listType);
+      if (operation == 5) rt.rtListRemoveLast(list, wrongType);
+      if (operation == 6) rt.rtListRemoveAt(list, 0, wrongType);
+      check(false);
+    } on TypeError catch (error, trace) {
+      check(roots.rtRootMark() == mark);
+      heap.rtCollect();
+      final count = snapshot(queue);
+      check(contains(queue, count, rt.nativeValueBits(error)));
+      check(contains(queue, count, rt.nativeValueBits(trace)));
+      check(error.stackTrace.toString() == trace.toString());
+    } finally {
+      check(roots.rtRootMark() == mark);
+    }
+    check(values.length == 1 && values[0].marker == 974);
+    check(identical(typeOwner[0], wrong) && wrong.isEmpty);
+  }
   for (final floating in [false, true]) {
     try {
       final source = 'xinvalid number'.substring(1);

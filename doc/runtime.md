@@ -156,6 +156,8 @@ typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它
 
 ## 同步异常展开
 
+`rtValueCheck`、`rtValueCast` 和基础值解箱在类型不匹配时抛出普通 TypeError。List 元素转换与泛型填充的临时根由 finally 恢复；写入转换完成后即释放转换所需的根，后续扩容自行保留列表与待写值。失败转换不修改列表。错误对象构造和轨迹捕获属于分配效果，不能进入 NoGC 调用链。
+
 公共抛出入口只在实际 Error 对象的轨迹槽为空时写入本次 StackTrace，覆盖 getter 不影响父类物理槽，implements Error 不参与写入。字段按普通 Ref 位图保活。再次 throw 为 catch 捕获当前轨迹，但不改写对象的首次轨迹；rethrow 保留捕获的轨迹，throwWithStackTrace 使用指定轨迹。
 
 可达调用需要异常后继时，元数据 `+80` 指向 `metadataHandlers` 处理表，并同时保留帧表。每项把精确返回 PC 映射到调用者的异常边入口，按 PC 排序；两地址均为相对表项的位移。没有处理器的调用无需表项，展开器继续查找父帧。

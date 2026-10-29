@@ -545,20 +545,25 @@ int rtListGet(int list, int index, int expectedType) {
   if (actualType == expectedType) return value;
   final mark = rtRootMark();
   rtRootPush(expectedType, storageRef);
-  final result = rtValueCast(rtValueBox(value, actualType), expectedType);
-  rtRootRestore(mark);
-  return result;
+  try {
+    return rtValueCast(rtValueBox(value, actualType), expectedType);
+  } finally {
+    rtRootRestore(mark);
+  }
 }
 
 int rtListSet(int list, int index, int value, int sourceType) {
   var stored = value;
   var actualType = rtListElementType(list);
-  var mark = -1;
   if (actualType != sourceType) {
-    mark = rtRootMark();
+    final mark = rtRootMark();
     rtRootPush(list, storageRef);
     rtRootPushValue(value, sourceType);
-    stored = rtValueCast(rtValueBox(value, sourceType), actualType);
+    try {
+      stored = rtValueCast(rtValueBox(value, sourceType), actualType);
+    } finally {
+      rtRootRestore(mark);
+    }
   }
   if ((nativeLoad64(list + objectFlagsOffset) & objectListReadOnly) != 0) {
     return rtListReadOnlyError();
@@ -567,7 +572,6 @@ int rtListSet(int list, int index, int value, int sourceType) {
   if (index < 0 || index >= length) return rtListRangeError();
   var backing = nativeLoad64(list + listBackingOffset);
   nativeStore64(backing + arrayDataOffset + index * 8, stored);
-  if (mark >= 0) rtRootRestore(mark);
   return value;
 }
 
@@ -600,12 +604,15 @@ int rtListGrow(int list, int value, int elementType) {
 int rtListAdd(int list, int value, int sourceType) {
   var stored = value;
   var actualType = rtListElementType(list);
-  var mark = -1;
   if (actualType != sourceType) {
-    mark = rtRootMark();
+    final mark = rtRootMark();
     rtRootPush(list, storageRef);
     rtRootPushValue(value, sourceType);
-    stored = rtValueCast(rtValueBox(value, sourceType), actualType);
+    try {
+      stored = rtValueCast(rtValueBox(value, sourceType), actualType);
+    } finally {
+      rtRootRestore(mark);
+    }
   }
   if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
     return rtListFixedError();
@@ -619,19 +626,21 @@ int rtListAdd(int list, int value, int sourceType) {
   nativeStore64(backing + arrayDataOffset + length * 8, stored);
   nativeStore64(backing + arrayLengthOffset, length + 1);
   nativeStore64(list + listLengthOffset, length + 1);
-  if (mark >= 0) rtRootRestore(mark);
   return 0;
 }
 
 int rtListInsert(int list, int index, int value, int sourceType) {
   var stored = value;
   var actualType = rtListElementType(list);
-  var mark = -1;
   if (actualType != sourceType) {
-    mark = rtRootMark();
+    final mark = rtRootMark();
     rtRootPush(list, storageRef);
     rtRootPushValue(value, sourceType);
-    stored = rtValueCast(rtValueBox(value, sourceType), actualType);
+    try {
+      stored = rtValueCast(rtValueBox(value, sourceType), actualType);
+    } finally {
+      rtRootRestore(mark);
+    }
   }
   if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
     return rtListFixedError();
@@ -653,7 +662,6 @@ int rtListInsert(int list, int index, int value, int sourceType) {
   nativeStore64(backing + arrayDataOffset + index * 8, stored);
   nativeStore64(backing + arrayLengthOffset, length + 1);
   nativeStore64(list + listLengthOffset, length + 1);
-  if (mark >= 0) rtRootRestore(mark);
   return 0;
 }
 
@@ -666,13 +674,16 @@ int rtListRemoveLast(int list, int expectedType) {
     mark = rtRootMark();
     rtRootPush(list, storageRef);
   }
-  var length = nativeLoad64(list + listLengthOffset) - 1;
-  var value = rtListGet(list, length, expectedType);
-  var backing = nativeLoad64(list + listBackingOffset);
-  nativeStore64(backing + arrayLengthOffset, length);
-  nativeStore64(list + listLengthOffset, length);
-  if (mark >= 0) rtRootRestore(mark);
-  return value;
+  try {
+    var length = nativeLoad64(list + listLengthOffset) - 1;
+    var value = rtListGet(list, length, expectedType);
+    var backing = nativeLoad64(list + listBackingOffset);
+    nativeStore64(backing + arrayLengthOffset, length);
+    nativeStore64(list + listLengthOffset, length);
+    return value;
+  } finally {
+    if (mark >= 0) rtRootRestore(mark);
+  }
 }
 
 int rtListRemoveAt(int list, int index, int expectedType) {
@@ -684,20 +695,23 @@ int rtListRemoveAt(int list, int index, int expectedType) {
     mark = rtRootMark();
     rtRootPush(list, storageRef);
   }
-  var value = rtListGet(list, index, expectedType);
-  var length = nativeLoad64(list + listLengthOffset) - 1;
-  var backing = nativeLoad64(list + listBackingOffset);
-  while (index < length) {
-    nativeStore64(
-      backing + arrayDataOffset + index * 8,
-      nativeLoad64(backing + arrayDataOffset + (index + 1) * 8),
-    );
-    index++;
+  try {
+    var value = rtListGet(list, index, expectedType);
+    var length = nativeLoad64(list + listLengthOffset) - 1;
+    var backing = nativeLoad64(list + listBackingOffset);
+    while (index < length) {
+      nativeStore64(
+        backing + arrayDataOffset + index * 8,
+        nativeLoad64(backing + arrayDataOffset + (index + 1) * 8),
+      );
+      index++;
+    }
+    nativeStore64(backing + arrayLengthOffset, length);
+    nativeStore64(list + listLengthOffset, length);
+    return value;
+  } finally {
+    if (mark >= 0) rtRootRestore(mark);
   }
-  nativeStore64(backing + arrayLengthOffset, length);
-  nativeStore64(list + listLengthOffset, length);
-  if (mark >= 0) rtRootRestore(mark);
-  return value;
 }
 
 int rtListClear(int list) {
@@ -1460,7 +1474,7 @@ int rtInstantiateType(int type, int arguments) {
 }
 
 int rtValueCheck(int value, int expected) {
-  if (rtValueMatches(value, expected) == 0) return rtValueTypeError();
+  if (rtValueMatches(value, expected) == 0) throw TypeError();
   return value;
 }
 
@@ -1468,10 +1482,12 @@ int rtListFilledChecked(int length, int value, int growable, int type) {
   var mark = rtRootMark();
   rtRootPush(type, storageRef);
   rtRootPush(value, storageTagged);
-  var stored = rtValueCast(value, rtTypeArgument(type));
-  var result = rtListFilled(length, stored, growable, type);
-  rtRootRestore(mark);
-  return result;
+  try {
+    var stored = rtValueCast(value, rtTypeArgument(type));
+    return rtListFilled(length, stored, growable, type);
+  } finally {
+    rtRootRestore(mark);
+  }
 }
 
 int rtClassSubtype(int descriptor, int expected) {
@@ -1670,13 +1686,13 @@ int rtValueInt(int value) {
     if (kind == descriptorIntBox)
       return nativeLoad64(value + objectHeaderBytes);
   }
-  return rtValueTypeError();
+  throw TypeError();
 }
 
 int rtValueBool(int value) {
   if (value == valueFalse) return 0;
   if (value == valueTrue) return 1;
-  return rtValueTypeError();
+  throw TypeError();
 }
 
 int rtValueBox(int value, int type) {
@@ -1724,7 +1740,7 @@ int rtValueMatches(int value, int expected) {
 }
 
 int rtValueCast(int value, int expected) {
-  if (rtValueMatches(value, expected) == 0) return rtValueTypeError();
+  if (rtValueMatches(value, expected) == 0) throw TypeError();
   var representation = nativeLoad64(expected + typeValueRepOffset);
   if (representation == storageTagged) return value;
   if (value == 0) return 0;
@@ -1749,11 +1765,23 @@ int rtBoxDouble(int bits) {
 }
 
 int rtValueDouble(int value) {
-  if (rtValueKind(value) != typeKindDouble) return rtValueTypeError();
+  if (rtValueKind(value) != typeKindDouble) throw TypeError();
   return nativeLoad64(value + objectHeaderBytes);
 }
 
+int rtNumberKind(int value) {
+  final kind = rtValueKind(value);
+  if (kind != typeKindInt && kind != typeKindDouble) return rtValueTypeError();
+  return kind;
+}
+
 int rtNumberDouble(int value) {
+  if (rtNumberKind(value) == typeKindInt)
+    return hostFloat64FromInt(rtValueInt(value));
+  return nativeLoad64(value + objectHeaderBytes);
+}
+
+int rtValueNumDouble(int value) {
   if (rtValueKind(value) == typeKindInt)
     return hostFloat64FromInt(rtValueInt(value));
   return rtValueDouble(value);
@@ -1768,7 +1796,7 @@ int rtDoubleToInt(int bits) {
 }
 
 int rtNumberToInt(int value) {
-  if (rtValueKind(value) == typeKindInt) return rtValueInt(value);
+  if (rtNumberKind(value) == typeKindInt) return rtValueInt(value);
   return rtDoubleToInt(rtValueDouble(value));
 }
 
@@ -1789,21 +1817,22 @@ int rtDoubleTruncDiv(int left, int right) =>
     rtDoubleToInt(hostFloat64Div(left, right));
 
 int rtValueNeg(int value) {
-  if (rtValueKind(value) == typeKindInt) return rtBoxInt(-rtValueInt(value));
+  if (rtNumberKind(value) == typeKindInt) return rtBoxInt(-rtValueInt(value));
   return rtBoxDouble(rtValueDouble(value) ^ binary64Sign);
 }
 
 bool rtNumberIsIntPair(int left, int right) =>
-    rtValueKind(left) == typeKindInt && rtValueKind(right) == typeKindInt;
+    rtNumberKind(left) == typeKindInt && rtValueKind(right) == typeKindInt;
 
 int rtValueAdd(int left, int right) {
-  if (rtValueKind(left) == typeKindString &&
-      rtValueKind(right) == typeKindString)
+  if (rtValueKind(left) == typeKindString) {
+    if (rtValueKind(right) != typeKindString) throw TypeError();
     return rtStringConcat(left, right);
+  }
   if (rtNumberIsIntPair(left, right))
     return rtBoxInt(rtValueInt(left) + rtValueInt(right));
   return rtBoxDouble(
-    hostFloat64Add(rtNumberDouble(left), rtNumberDouble(right)),
+    hostFloat64Add(rtNumberDouble(left), rtValueNumDouble(right)),
   );
 }
 
@@ -1811,7 +1840,7 @@ int rtValueSub(int left, int right) {
   if (rtNumberIsIntPair(left, right))
     return rtBoxInt(rtValueInt(left) - rtValueInt(right));
   return rtBoxDouble(
-    hostFloat64Sub(rtNumberDouble(left), rtNumberDouble(right)),
+    hostFloat64Sub(rtNumberDouble(left), rtValueNumDouble(right)),
   );
 }
 
@@ -1819,17 +1848,17 @@ int rtValueMul(int left, int right) {
   if (rtNumberIsIntPair(left, right))
     return rtBoxInt(rtValueInt(left) * rtValueInt(right));
   return rtBoxDouble(
-    hostFloat64Mul(rtNumberDouble(left), rtNumberDouble(right)),
+    hostFloat64Mul(rtNumberDouble(left), rtValueNumDouble(right)),
   );
 }
 
 int rtValueFloatDiv(int left, int right) =>
-    rtBoxDouble(hostFloat64Div(rtNumberDouble(left), rtNumberDouble(right)));
+    rtBoxDouble(hostFloat64Div(rtNumberDouble(left), rtValueNumDouble(right)));
 
 int rtValueDiv(int left, int right) {
   if (!rtNumberIsIntPair(left, right))
     return rtBoxInt(
-      rtDoubleTruncDiv(rtNumberDouble(left), rtNumberDouble(right)),
+      rtDoubleTruncDiv(rtNumberDouble(left), rtValueNumDouble(right)),
     );
   final divisor = rtValueInt(right);
   if (divisor == 0) return rtValueTypeError();
@@ -1839,7 +1868,7 @@ int rtValueDiv(int left, int right) {
 int rtValueMod(int left, int right) {
   if (!rtNumberIsIntPair(left, right))
     return rtBoxDouble(
-      binary64Modulo(rtNumberDouble(left), rtNumberDouble(right)),
+      binary64Modulo(rtNumberDouble(left), rtValueNumDouble(right)),
     );
   final divisor = rtValueInt(right);
   if (divisor == 0) return rtValueTypeError();
@@ -1849,7 +1878,7 @@ int rtValueMod(int left, int right) {
 int rtValueRemainder(int left, int right) {
   if (!rtNumberIsIntPair(left, right))
     return rtBoxDouble(
-      binary64Remainder(rtNumberDouble(left), rtNumberDouble(right)),
+      binary64Remainder(rtNumberDouble(left), rtValueNumDouble(right)),
     );
   final a = rtValueInt(left);
   final b = rtValueInt(right);
@@ -1861,7 +1890,7 @@ int rtValueRemainder(int left, int right) {
 }
 
 int rtNumberProperty(int value, int property) {
-  final integer = rtValueKind(value) == typeKindInt;
+  final integer = rtNumberKind(value) == typeKindInt;
   final bits = integer ? 0 : rtValueDouble(value);
   final magnitude = bits & 0x7fffffffffffffff;
   final result = switch (property) {
@@ -1880,6 +1909,7 @@ int rtValueAnd(int left, int right) {
   if (left == valueFalse || left == valueTrue) {
     return rtBoxBool(rtValueBool(left) & rtValueBool(right));
   }
+  if (rtValueKind(left) != typeKindInt) return rtValueTypeError();
   return rtBoxInt(rtValueInt(left) & rtValueInt(right));
 }
 
@@ -1887,6 +1917,7 @@ int rtValueOr(int left, int right) {
   if (left == valueFalse || left == valueTrue) {
     return rtBoxBool(rtValueBool(left) | rtValueBool(right));
   }
+  if (rtValueKind(left) != typeKindInt) return rtValueTypeError();
   return rtBoxInt(rtValueInt(left) | rtValueInt(right));
 }
 
@@ -1894,10 +1925,12 @@ int rtValueXor(int left, int right) {
   if (left == valueFalse || left == valueTrue) {
     return rtBoxBool(rtValueBool(left) ^ rtValueBool(right));
   }
+  if (rtValueKind(left) != typeKindInt) return rtValueTypeError();
   return rtBoxInt(rtValueInt(left) ^ rtValueInt(right));
 }
 
 int rtValueShl(int left, int right) {
+  if (rtValueKind(left) != typeKindInt) return rtValueTypeError();
   var value = rtValueInt(left);
   var count = rtValueInt(right);
   if (count < 0) return rtValueTypeError();
@@ -1906,6 +1939,7 @@ int rtValueShl(int left, int right) {
 }
 
 int rtValueShr(int left, int right) {
+  if (rtValueKind(left) != typeKindInt) return rtValueTypeError();
   var value = rtValueInt(left);
   var count = rtValueInt(right);
   if (count < 0) return rtValueTypeError();
@@ -1917,6 +1951,7 @@ int rtValueShr(int left, int right) {
 }
 
 int rtValueUshr(int left, int right) {
+  if (rtValueKind(left) != typeKindInt) return rtValueTypeError();
   var value = rtValueInt(left);
   var count = rtValueInt(right);
   if (count < 0) return rtValueTypeError();
@@ -1947,7 +1982,8 @@ int rtValueEq(int left, int right) {
       (b == typeKindDouble || b == typeKindInt)) {
     if (a == typeKindInt && b == typeKindInt)
       return rtValueInt(left) == rtValueInt(right) ? 1 : 0;
-    return hostFloat64Compare(rtNumberDouble(left), rtNumberDouble(right)) == 0
+    return hostFloat64Compare(rtNumberDouble(left), rtValueNumDouble(right)) ==
+            0
         ? 1
         : 0;
   }
@@ -1976,11 +2012,11 @@ int rtNumberCompare(int left, int right) {
         ? 1
         : 0;
   }
-  return hostFloat64Compare(rtNumberDouble(left), rtNumberDouble(right));
+  return hostFloat64Compare(rtNumberDouble(left), rtValueNumDouble(right));
 }
 
 int rtNumberCompareTo(int left, int right) {
-  final a = rtValueKind(left);
+  final a = rtNumberKind(left);
   final b = rtValueKind(right);
   if (a == typeKindInt && b == typeKindInt) return rtNumberCompare(left, right);
   if (a == typeKindInt) {

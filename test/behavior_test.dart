@@ -962,10 +962,13 @@ void main() {
       environment: {'PATH': '/usr/bin:/bin'},
       includeParentEnvironment: false,
     );
-    if (expectedEntry.exitCode == 0 ||
-        actualEntry.exitCode != 70 ||
+    if (expectedEntry.exitCode != 255 ||
+        actualEntry.exitCode != expectedEntry.exitCode ||
         expectedEntry.stdout != '' ||
-        actualEntry.stdout != expectedEntry.stdout) {
+        actualEntry.stdout != expectedEntry.stdout ||
+        !actualEntry.stderr.startsWith(
+          "Unhandled exception:\nInstance of 'TypeError'\n",
+        )) {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
@@ -1102,6 +1105,33 @@ void main() {
 
       "String argument(){print('argument');return 'bad';}void main(){dynamic value=1.5;print('before');value.remainder(argument());}",
       "String argument(){print('argument');return 'bad';}void main(){dynamic value=1.5;print('before');value.compareTo(argument());}",
+      for (final operation in [
+        'value - 1',
+        '-value',
+        'value / 1',
+        'value & 1',
+        'value | 1',
+        'value ^ 1',
+        'value << 1',
+        'value >> 1',
+        'value >>> 1',
+        'value.toDouble()',
+        'value.toInt()',
+        'value.remainder(1)',
+        'value.compareTo(1)',
+        'value.isNaN',
+      ])
+        "class Missing {} void main(){dynamic value=Missing();print('before');$operation;print('after');}",
+      for (final operation in [
+        '1 + value',
+        '1 / value',
+        '1 & value',
+        'true & value',
+        '1 << value',
+        '1 < value',
+        "'text' + value",
+      ])
+        "class Missing {} void main(){dynamic value=Missing();print('before');$operation;print('after');}",
       "void main(){print('before');double.nan.toInt();}",
       "void main(){print('before');double.infinity ~/ 1;}",
       "void main(){print('before');1.5 ~/ 0;}",
@@ -1191,6 +1221,7 @@ void main() {
       "void main() { dynamic value = 'wrong'; print('before'); value as int; print('after'); }",
       "void main() { dynamic value = null; print('before'); value as int; print('after'); }",
       "void main() { dynamic value = null; print('before'); value as Never; print('after'); }",
+      "void main() { dynamic value = null; print('before'); throw value; }",
       "Never fail(){dynamic value=1;return value as Never;} void main(){late Never value=fail();print('before');print(value);}",
       "Never fail(){dynamic value=1;return value as Never;} void main(){late Never value=fail();Never read()=>value;print('before');print(read());}",
       'void main() { dynamic value = null; print("before"); value!; print("after"); }',
@@ -1269,11 +1300,28 @@ void main() {
     await parallel(failingValues.asMap().entries, (entry) async {
       final source = File('${temporary.path}/value-error-${entry.key}.dart')
         ..writeAsStringSync(entry.value);
-      final executable = '${source.path}.out';
-      final expected = await capture(sdk, [source.path]);
+      final checked = File('${source.path}.checked.dart')
+        ..writeAsStringSync('''
+import '${source.uri}' as value;
+void main() {
+  var caught = false;
+  try {
+    value.main();
+  } on TypeError catch (error, trace) {
+    caught = true;
+    print('caught TypeError');
+    print(error.stackTrace.toString() == trace.toString());
+  } finally {
+    if (caught) print('type error finally');
+  }
+  print(caught ? 'type error after' : 'unexpected success');
+}
+''');
+      final executable = '${checked.path}.out';
+      final expected = await capture(sdk, [checked.path]);
       await run(
         driver,
-        compileArguments(source, executable),
+        compileArguments(checked, executable),
         native: compiler != null,
       );
       final actual = await capture(
@@ -1282,8 +1330,11 @@ void main() {
         environment: {'PATH': '/usr/bin:/bin'},
         includeParentEnvironment: false,
       );
-      if (expected.exitCode == 0 ||
-          actual.exitCode != 70 ||
+      final catchesTypeError = expected.exitCode == 0;
+      if ((catchesTypeError &&
+              !expected.stdout.toString().endsWith('type error after\n')) ||
+          (!catchesTypeError && expected.exitCode != 255) ||
+          actual.exitCode != (catchesTypeError ? 0 : 70) ||
           !expected.stdout.toString().startsWith('before\n') ||
           actual.stdout != expected.stdout) {
         throw StateError(
@@ -1299,6 +1350,7 @@ Never failure(String mode) {
   try {
     if (mode == 'int') int.parse('invalid');
     if (mode == 'double') double.parse('invalid');
+    if (mode == 'type') { dynamic value = 'invalid'; value as int; }
     throw 'uncaught🙂';
   } finally { print('cleanup'); }
 }
@@ -1314,6 +1366,7 @@ void main(List<String> args) { print('before'); failure(args.isEmpty ? '' : args
       <String>[],
       ['int'],
       ['double'],
+      ['type'],
     ]) {
       final uncaughtExpected = await capture(sdk, [
         uncaught.path,
@@ -1325,7 +1378,11 @@ void main(List<String> args) { print('before'); failure(args.isEmpty ? '' : args
         environment: {'PATH': '/usr/bin:/bin'},
         includeParentEnvironment: false,
       );
-      final prefix = arguments.isEmpty ? 'uncaught🙂\n' : 'FormatException:';
+      final prefix = arguments.isEmpty
+          ? 'uncaught🙂\n'
+          : arguments.first == 'type'
+          ? "Instance of 'TypeError'\n"
+          : 'FormatException:';
       if (uncaughtExpected.exitCode != 255 ||
           uncaughtActual.exitCode != 255 ||
           uncaughtExpected.stdout != 'before\ncleanup\n' ||
