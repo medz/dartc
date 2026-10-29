@@ -90,7 +90,8 @@ lib/src/
   constants.dart, constant_data.dart              常量语义值与只读数据
   binary64.dart                                  编译器与运行时共用的精确数值转换
   frontend.dart                                  声明收集、语义接线与 AST lowering
-  ir.dart, ssa.dart, verify_ssa.dart               IR、SSA 构造与验证
+  ir.dart, ssa.dart, verify_ssa.dart               IR 定义与验证
+  build_ssa.dart                                 栈式 IR 到 SSA 的构造
   optimize.dart, inline.dart, reach.dart           SSA 简化、内联与可达性
   machine.dart, allocate.dart, root_map.dart        Machine IR、分配与根位置
   select.dart                                    SSA 到 Machine IR 的转换
@@ -480,6 +481,8 @@ finally 在结构化 lowering 中形成单个清理体；完成标记选择正�
 IR 验证器检查定义支配使用、块参数、调用签名、表示转换、异常边、安全点约束与 noGC 约束。优化器不能绕过这些规则。开发模式可在每个变换后验证，正常构建至少在表示选择和后端边界验证。
 
 当前 `verify_ssa.dart` 在优化后的 SSA 交给机器表示前检查定义、支配关系、控制流、直接调用、类型与效果元数据；invoke 必须以单个可能抛出的操作结束，结果不能沿异常边或绕过正常后继使用。常规编译在这一消费边界扫描一次。原生回归驱动同时验证 SSA 构造与优化结果，再注入错误检查诊断。完整安全点验证仍待补齐，noGC 约束由 `nogc.dart` 单独拥有。
+
+`ssa.dart` 拥有 SSA 数据结构、效果规则、别名解析和统一错误边界，供构造、优化和验证直接使用。`build_ssa.dart` 拥有从栈式 IR 构造 SSA 的流程及临时控制流、栈形状数据；下游阶段不依赖这些构造细节。效果规则只有一份定义，构造器与验证器使用同一实现。
 
 ## 优化与 Machine IR
 

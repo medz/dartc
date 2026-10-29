@@ -26,6 +26,7 @@ import '${library.resolve('ir.dart')}';
 import '${library.resolve('target.dart')}';
 import '${library.resolve('source.dart')}';
 import '${library.resolve('ssa.dart')}';
+import '${library.resolve('build_ssa.dart')}';
 import '${library.resolve('optimize.dart')}';
 import '${library.resolve('types.dart')}';
 import '${library.resolve('verify_ssa.dart')}';

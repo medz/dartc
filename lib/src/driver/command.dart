@@ -13,6 +13,7 @@ import '../optimize.dart';
 import '../nogc.dart';
 import '../reach.dart';
 import '../ssa.dart';
+import '../build_ssa.dart';
 import '../source.dart';
 import '../source_uri.dart';
 import '../verify_ssa.dart';

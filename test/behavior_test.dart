@@ -1291,7 +1291,7 @@ import '$root/lib/src/host.dart';
 import '$root/lib/src/ir.dart';
 import '$root/lib/src/target.dart';
 import '$root/lib/src/source.dart';
-import '$root/lib/src/ssa.dart';
+import '$root/lib/src/build_ssa.dart';
 import '$root/lib/src/verify_ssa.dart';
 void main(List<String> args) {
   compilationTarget = Target.values[hostTarget()];
