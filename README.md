@@ -35,7 +35,7 @@ dartc hello.dart -o hello
 
 On Linux, use the same commands with `linux-arm64` or `linux-x64` in place of `macos-arm64`.
 
-Keep the archive's `bin/` and `lib/` directories together. Matching dartc runtime sources are included in `lib/` for compilation. `SHA256SUMS` contains the archive checksums.
+Keep the archive's `bin/` and `lib/` directories together. The matching runtime and standard-library sources in `lib/` are compilation inputs; generated executables include the required native runtime code and do not need these source files. `SHA256SUMS` contains the archive checksums.
 
 Upgrading from 0.3 requires replacing the whole archive: the internal runtime ABI changed from 14 to 17. See the [0.4.0 upgrade notes](CHANGELOG.md#upgrading-from-03).
 
@@ -62,7 +62,7 @@ The [specification tracker](specs/README.md) records the reference SDK, current 
 | Constants | Scalar/list constants, canonical const instances, metadata and supported core pragmas |
 | Core APIs | print, command-line arguments, basic String/List operations and StringBuffer object/character writing |
 
-Generic classes, dynamic member calls, mixins, extensions, records, map/record patterns, asynchronous code, isolates and most SDK libraries are not implemented, and enums have no type parameters or mixins. Exceptions are synchronous only. Generic function values, complete generic inference and generic or standard-library constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
+Generic classes, dynamic member calls, mixins, extensions, records, map/record patterns, asynchronous code, isolates and most SDK libraries are not implemented, and enums have no type parameters or mixins. Exceptions are synchronous only. Generic function values, complete generic inference and generic or standard-library constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage uses a non-moving mark-sweep collector; weak references and finalizers are not implemented.
 
 Package configuration v2 supplies local package mappings and default language versions. A leading `// @dart = major.minor` comment can select an implemented versioned rule from 2.12 through 3.13; this is not complete compatibility with those language versions. See [libraries](specs/libraries.md) and [lexical structure](specs/lexical-structure.md).
 
