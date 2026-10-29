@@ -50,7 +50,7 @@ const int descriptorDoubleBox = 9;
 const int functionTypeOffset = 16;
 const int functionEntryOffset = 24;
 const int functionInstanceBytes = 32;
-// A unique descriptor per method identifies bound-method equality.
+// Bound-method equality includes method descriptor, receiver and function type.
 const int boundMethodClassId = -9;
 // Internal capture cells do not belong to the source class namespace.
 const int captureCellClassId = -8;

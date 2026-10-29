@@ -338,8 +338,17 @@ int feRegisterFunction(
       'generic local or external functions are not yet supported',
     );
   final source = feTokens[syntax.token].source;
-  for (final parameter in syntax.parameters)
+  for (final parameter in syntax.parameters) {
     checkParameterModifier(feSources, parameter);
+    if (parameter.covariant &&
+        (owner < 0 || syntax.isStatic || constructor || local))
+      feAstError(
+        parameter.token,
+        syntax.primary && parameter.fieldFormal
+            ? 'covariant fields are not yet supported'
+            : 'covariant parameters require an instance method',
+      );
+  }
   if (syntax.external) {
     final primitive = fePrimitive(syntax.name);
     if (feRuntimeTokens == 0 || source != 0 || primitive == 0) {
@@ -3830,12 +3839,14 @@ void feCheckFactoryRedirects() {
         functions[target].parameterTypes.sublist(feParameterOffset(target)),
         feFunctionNodes[target].parameters,
         const <int>[],
+        const <bool>[],
       ),
       ClassSignature(
         functions[function].result,
         functions[function].parameterTypes,
         syntax.parameters,
         const <int>[],
+        const <bool>[],
       ),
     ))
       feAstError(
@@ -5706,11 +5717,12 @@ int fePrepareFunctionExpression(AstExpression expression, int context) {
   return function;
 }
 
-int feAllocateClosure(int function, int token) {
+int feAllocateClosure(int function, int token, [int runtimeType = -1]) {
   final type = feCallableType(function, token);
+  if (runtimeType < 0) runtimeType = type;
   var signature = -1;
-  if (typeContainsParameters(type)) {
-    feRuntimeType(type);
+  if (runtimeType != type || typeContainsParameters(runtimeType)) {
+    feRuntimeType(runtimeType);
     signature = feTemp(tObject);
     feOperand(opStoreLocal, signature);
   }
@@ -5737,7 +5749,48 @@ int feAllocateClosure(int function, int token) {
   return closure;
 }
 
-int feCreateBoundMethod(int function, int token, [bool direct = false]) {
+int feBoundMethodRuntimeType(int function, int owner) {
+  final syntax = feFunctionNodes[function];
+  final member =
+      feMembers[owner].members[lookupMember(
+        feMembers[owner],
+        syntax.name,
+        sourceLibrary(feSources, feTokens[syntax.token].source),
+      )];
+  final type = functionValueType(function);
+  if (member.covariantParameters.isEmpty) return type;
+  final signature = classSignature(
+    member,
+    classMethod,
+    feFunctionNodes,
+    feFieldTypes,
+  );
+  final info = functions[function];
+  final parameters = info.parameterTypes.sublist(info.parameterOffset);
+  for (var p = 0; p < syntax.parameters.length; p++) {
+    final index = correspondingParameter(
+      signature.formals,
+      syntax.parameters[p],
+      p,
+    );
+    if (classCovariantParameter(signature, index))
+      parameters[p] = nullableType(tObject);
+  }
+  return functionType(
+    info.result,
+    parameters,
+    info.requiredParameters,
+    info.namedParameters,
+    info.requiredNamedParameters,
+  );
+}
+
+int feCreateBoundMethod(
+  int function,
+  int token, [
+  bool direct = false,
+  int covarianceOwner = -1,
+]) {
   if (!direct && feNeedsDispatch(feOwners[function])) {
     final owner = feOwners[function];
     final syntax = feFunctionNodes[function];
@@ -5754,13 +5807,21 @@ int feCreateBoundMethod(int function, int token, [bool direct = false]) {
   final receiverType = functions[function].parameterTypes[0];
   final receiver = feTemp(receiverType);
   feOperand(opStoreLocal, receiver);
-  final closure = feAllocateClosure(function, token);
+  final runtimeType = feBoundMethodRuntimeType(
+    function,
+    covarianceOwner < 0 ? feOwners[function] : covarianceOwner,
+  );
+  final closure = feAllocateClosure(function, token, runtimeType);
   feOperand(opLoadLocal, closure);
   feOperand(opInt, 2);
   feOperand(opLoadLocal, receiver);
   feBuiltinTyped(bObjectSet, 3, receiverType);
   feEmit(opPop);
   feOperand(opLoadLocal, closure);
+  if (covarianceOwner >= 0 && runtimeType != feSlotTypes[closure]) {
+    feBuiltinTyped(bBoxRef, 1, runtimeType);
+    return runtimeType;
+  }
   return feSlotTypes[closure];
 }
 
@@ -7139,6 +7200,17 @@ int feDispatchMethod(int function, AstExpression call) {
   return feDispatchMember(owner, member, classMethod, supplied);
 }
 
+void feDispatchArgument(int actual, int expected, int token) {
+  if (!typingAssignable(actual, expected)) {
+    if (actual == tVoid)
+      feBuiltinTyped(bBoxRef, 1, tDynamic);
+    else
+      feConvertValue(actual, tDynamic, token);
+    actual = tDynamic;
+  }
+  feConvertValue(actual, expected, token);
+}
+
 void feGenerateDispatches() {
   for (final dispatch in feDispatches) {
     final info = functions[dispatch.function];
@@ -7181,7 +7253,7 @@ void feGenerateDispatches() {
       feNarrowValue(receiverType, classType(owner));
       var result = tVoid;
       if (role == classTearoff) {
-        result = feCreateBoundMethod(member.method, token, true);
+        result = feCreateBoundMethod(member.method, token, true, owner);
       } else {
         final function = classMemberFunction(member, role);
         if (function < 0) {
@@ -7198,7 +7270,11 @@ void feGenerateDispatches() {
             if (feLateFieldSetters[field] < 0)
               feOperand(opInt, feFieldIndices[field]);
             feOperand(opLoadLocal, 1);
-            feConvertValue(info.parameterTypes[1], feFieldTypes[field], token);
+            feDispatchArgument(
+              info.parameterTypes[1],
+              feFieldTypes[field],
+              token,
+            );
             if (feLateFieldSetters[field] >= 0)
               feCall(feLateFieldSetters[field], 2);
             else
@@ -7235,7 +7311,7 @@ void feGenerateDispatches() {
             );
             if (slot >= 0) {
               feOperand(opLoadLocal, slot);
-              feConvertValue(info.parameterTypes[slot], expected, token);
+              feDispatchArgument(info.parameterTypes[slot], expected, token);
             } else {
               feConstantValue(
                 feParamDefaults[function][offset + p],

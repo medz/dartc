@@ -911,6 +911,13 @@ void main() {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "class B { void f(void x) {} } class C extends B { void f(covariant int x) { print('body'); } } void rhs() { print('rhs'); } void main() { B value = C(); print('before'); value.f(rhs()); print('after'); }",
+      "class B { void f(covariant num x, Object? y) {} } class C extends B { void f(int x, Object? y) { print('body'); } } double first() { print('first'); return 2.5; } int second() { print('second'); return 3; } void main() { B value = C(); print('before'); value.f(first(), second()); print('after'); }",
+      "class B { void set value(covariant num x) {} } class C extends B { void set value(int x) { print('body'); } } double rhs() { print('rhs'); return 2.5; } void main() { B value = C(); print('before'); value.value = rhs(); print('after'); }",
+      "class B { bool operator <(covariant num x) => true; } class C extends B { bool operator <(int x) { print('body'); return true; } } void main() { B value = C(); print('before'); if (value case < 2.5) print('after'); }",
+      "class C { void f(covariant int x) { print('body'); } } void main() { Object value = C().f; var function = value as void Function(String); print('before'); function('wrong'); print('after'); }",
+      "class B { T f<T extends num>(covariant num x) => x as T; } class C extends B { T f<T extends num>(T x) { print('body'); return x; } } void main() { B value = C(); print('before'); value.f<int>(2.5); print('after'); }",
+      "abstract class I { void set value(covariant num x); } class C implements I { late int value; } void main() { I value = C(); print('before'); value.value = 2.5; print('after'); }",
       "class C { dynamic operator <(int other) { print('operator'); return 1; } } void main() { print('before'); if (C() case < 2) print('matched'); print('after'); }",
       for (final operation in ['~/', '%'])
         'int zero() => 0; void main() { print("before"); print(1 $operation zero()); print("after"); }',
@@ -1349,6 +1356,8 @@ int formal(int callback(final int value)) => callback(2);
 int formalVar(int callback(var value)) => callback(2);
 typedef int LegacyFinal(final int value);
 typedef int LegacyVar(var value);
+typedef void CovariantName(covariant);
+void namedCovariant(covariant) { print(covariant); }
 int mutable(var value) { value = 9; return value; }
 int Function() capture(final int value) => () => value;
 class Parameters {
@@ -1368,6 +1377,12 @@ class Child extends Parent {
   final int _extra;
   const Child(final super.value, {final this._extra = 5});
   int get total => value + _extra;
+}
+class CovariantParameters {
+  int read(covariant final int value, [covariant var extra = 2]) {
+    extra = 3;
+    return value + (extra as int);
+  }
 }
 void runParameters() {
   int local(final int value) => value + 1;
@@ -1392,6 +1407,9 @@ void runParameters() {
   print(value + 1);
   const child = Child(3, extra: 7);
   print(child.total);
+  print(CovariantParameters().read(4));
+  CovariantName namedCallback = namedCovariant;
+  namedCallback(5);
 }
 ''',
       'parameter-modifier-imports.dart': r'''
@@ -3411,6 +3429,40 @@ void main() {
         '// @dart=3.12\nclass C { int value; C(var this.value); } void main() {}',
       ),
     );
+    final rejectedCovariant = [
+      'void f(covariant int x) {} void main() {}',
+      'class C { static void f(covariant int x) {} } void main() {}',
+      'class B { void f(num x) {} } class C extends B { void f(covariant int x) {} } class D extends B { void f(int x) {} } void main() {}',
+      'class B { void f(int x) {} } class C extends B { void f(covariant String x) {} } void main() {}',
+      'class A { void f(covariant int x) {} } class B extends A { void f(Object? x) {} } class C extends B { void f(String x) {} } void main() {}',
+      'abstract class I { void f(covariant int x); } class B { void f(String x) {} } class C extends B implements I {} void main() {}',
+      'class B { void f([covariant num x = 1]) {} } class C extends B { void f(int x) {} } void main() {}',
+      'class B { void f({covariant num x = 1}) {} } class C extends B { void f({required int x}) {} } void main() {}',
+      'class C { void f({covariant required int x}) {} } void main() {}',
+      '// @dart=3.12\nclass C { void f(final covariant int x) {} } void main() {}',
+      'class C { void f(covariant final int x) {} } void main() {}',
+    ];
+    for (var i = 0; i < rejectedCovariant.length; i++) {
+      final invalid = File('${temporary.path}/rejected-covariant-$i.dart')
+        ..writeAsStringSync(rejectedCovariant[i]);
+      await reject(invalid, checkSdk: true);
+    }
+    // CFE accepts these locations; the fixed specification and analyzer reject.
+    final covariantSyntaxDifferences = [
+      'void main() { void f(covariant int x) {} }',
+      'void main() { var f = (covariant int x) {}; }',
+      'class C { C(covariant int x); } void main() {}',
+      'class C { int x; C(covariant this.x); } void main() {}',
+      'class C { factory C(covariant int x) => C.zero(); C.zero(); } void main() {}',
+      'typedef F = void Function(covariant int); void main() {}',
+      'typedef void F(covariant int x); void main() {}',
+    ];
+    for (var i = 0; i < covariantSyntaxDifferences.length; i++) {
+      final invalid = File('${temporary.path}/covariant-location-$i.dart')
+        ..writeAsStringSync(covariantSyntaxDifferences[i]);
+      await run(sdk, [invalid.path]);
+      await reject(invalid);
+    }
     final rejectedOperators = [
       'class C { static const dynamic limit = 1; bool operator <(num other) => true; } void unused(C value) { if (value case < .limit) {} } void main() {}',
       'const dynamic wrong = "wrong"; class C { bool operator <(int other) => true; } void unused(C value) { if (value case < wrong) {} } void main() {}',

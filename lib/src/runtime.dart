@@ -1918,7 +1918,8 @@ int rtValueEq(int left, int right) {
     if (nativeLoad64(descriptor) == boundMethodClassId &&
         descriptor == rtObjectDescriptor(right) &&
         nativeLoad64(left + functionInstanceBytes) ==
-            nativeLoad64(right + functionInstanceBytes))
+            nativeLoad64(right + functionInstanceBytes) &&
+        rtFunctionType(left) == rtFunctionType(right))
       return 1;
   }
   return 0;
