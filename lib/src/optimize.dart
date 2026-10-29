@@ -2,6 +2,7 @@ import 'target.dart';
 import 'ir.dart';
 import 'types.dart';
 import 'ssa.dart';
+import 'inline.dart';
 
 // Lattice states are unknown, one constant, and overdefined.
 class SccpState {
@@ -252,17 +253,6 @@ void addEdgeDependencies(
   }
 }
 
-int resolveValue(List<int> aliases, int value) {
-  var result = value;
-  while (aliases[result] != result) result = aliases[result];
-  while (aliases[value] != value) {
-    final next = aliases[value];
-    aliases[value] = result;
-    value = next;
-  }
-  return result;
-}
-
 List<int> simplifyBlockParameters(
   SsaFunction function,
   List<List<int>> dependencies,
@@ -439,14 +429,6 @@ void removeDeadValues(SsaFunction function) {
   }
 }
 
-void resolveValues(List<int> aliases, List<int> values) {
-  var i = 0;
-  while (i < values.length) {
-    values[i] = resolveValue(aliases, values[i]);
-    i++;
-  }
-}
-
 void simplifyBooleanChecks(SsaFunction function) {
   var boxes = <int>[];
   var b = 0;
@@ -570,19 +552,22 @@ void removeInitialZeroStores(SsaFunction function) {
   while (instructions.length > kept) instructions.removeLast();
 }
 
+void _simplifySsa(SsaFunction function, int id) {
+  simplifyBooleanChecks(function);
+  simplifyInvokes(function);
+  final state = sccpAnalyze(function);
+  sccpRewrite(function, state);
+  simplifyInvokes(function);
+  if (imageKind == ImageKind.executable && id == 0)
+    removeInitialZeroStores(function);
+  removeDeadValues(function);
+}
+
 void optimizeSsa(List<SsaFunction> program) {
-  var i = 0;
-  while (i < program.length) {
-    final function = program[i];
-    simplifyBooleanChecks(function);
-    simplifyInvokes(function);
-    final state = sccpAnalyze(function);
-    sccpRewrite(function, state);
-    simplifyInvokes(function);
-    if (imageKind == ImageKind.executable && i == 0)
-      removeInitialZeroStores(function);
-    removeDeadValues(function);
-    i++;
+  for (var i = 0; i < program.length; i++) _simplifySsa(program[i], i);
+  final changed = inlinePureCalls(program);
+  for (var i = 0; i < program.length; i++) {
+    if (changed[i]) _simplifySsa(program[i], i);
   }
 }
 

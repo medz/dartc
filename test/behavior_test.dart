@@ -2822,6 +2822,7 @@ void main() {
       "@pragma('dartc:no-gc') int bad(dynamic value) => value as int; void main() {}",
       "@pragma('dartc:no-gc') int bad(int value, int other) => (value ~/ other) + (value << other); void main() {}",
       "@pragma('dartc:may-gc') int helper(int value) => value; @pragma('dartc:no-gc') int bad() => helper(1); void main() {}",
+      "@pragma('dartc:managed-allocate') int helper(int value) => value; @pragma('dartc:no-gc') int bad() => helper(1); void main() {}",
       "@pragma('dartc:no-gc') int value = 0; void main() {}",
       "@pragma('dartc:no-gc', true) void bad() {} void main() {}",
       "import '$standard' as rt; @pragma('dartc:no-gc') int bad(int target) => rt.nativeCall0(target); void main() {}",

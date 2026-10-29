@@ -353,7 +353,8 @@ int Function() delayed(int value) {
   late final int result = value + 1;
   return () => result;
 }
-int callee(int value) => value + 1;
+int increment = 1;
+int callee(int value) => value + increment;
 int caught(int value) {
   var result = value;
   try { result = callee(value); } catch (_) { result += 2; }
@@ -409,7 +410,7 @@ void main() {
   print(diamond(true, 4));
   print(loop(3));
   print(checked(7));
-  print(tested(7));
+  print((<bool Function(dynamic)>[tested])[0](7));
   dropped(1);
   print(apply(callee, 8));
   print(applyNamed(({required int value, int other = 0}) => value + 1));

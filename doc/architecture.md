@@ -91,7 +91,7 @@ lib/src/
   binary64.dart                                  编译器与运行时共用的精确数值转换
   frontend.dart                                  声明收集、语义接线与 AST lowering
   ir.dart, ssa.dart, verify_ssa.dart               IR、SSA 构造与验证
-  optimize.dart, reach.dart                       优化与可达性
+  optimize.dart, inline.dart, reach.dart           SSA 简化、内联与可达性
   machine.dart, allocate.dart, root_map.dart        Machine IR、分配与根位置
   target.dart                                    输出目标与寄存器集合
   code.dart, emit.dart                            共享发码结果与后端选择
@@ -472,6 +472,8 @@ IR 验证器检查定义支配使用、块参数、调用签名、表示转换�
 优化采用固定阶段和少量工作队列。分析有明确版本，变换报告 CFG、调用关系、类型或内存行为是否改变，不重复运行未受影响的全程序分析。
 
 变换以类型、效果、支配关系和必要的值范围证明为依据。删除检查须证明失败路径不可达，重写值不得丢失生产者的副作用；后端按 lowering 提供的证明选择指令，不重新猜测语言语义。
+
+`inline.dart` 在类型化 SSA 简化后内联小型、无效果的直接调用，再仅对发生变化的调用者执行常量传播和控制流简化。候选体只含直线计算和返回，实参与形参的 SSA 类型必须一致；泛型环境、分配/GC 契约及有内存、异常或帧观察效果的函数保留调用。内联重映射值定义与使用，实参仍在原调用位置之前求值；常量参数与无用返回可以继续简化，但不能删除实参中的副作用。候选与每个调用者的展开量分别受固定上限约束，候选表在改写前冻结，不递归展开调用图。SSA 校验与后续根、调用关系分析消费改写后的程序。
 
 ```text
 SSA 简化

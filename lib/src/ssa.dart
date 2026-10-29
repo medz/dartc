@@ -99,6 +99,22 @@ Never ssaError(String message) {
   hostExit(1);
 }
 
+int resolveValue(List<int> aliases, int value) {
+  var result = value;
+  while (aliases[result] != result) result = aliases[result];
+  while (aliases[value] != value) {
+    final next = aliases[value];
+    aliases[value] = result;
+    value = next;
+  }
+  return result;
+}
+
+void resolveValues(List<int> aliases, List<int> values) {
+  for (var i = 0; i < values.length; i++)
+    values[i] = resolveValue(aliases, values[i]);
+}
+
 int ssaInputCount(int op, int position) {
   if (op == opCall || op == opGenericCall || op == opBuiltin)
     return ir[position + 2];

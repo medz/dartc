@@ -1389,7 +1389,28 @@ int recursiveArguments(int count, {int total = 1}) {
   return recursiveArguments(count - 1, total: total + count);
 }
 
+int firstArgument(int value, int unused) => value;
+int twiceArgument(int value) => value + value;
+double scaledArgument(double value) => value * 0.5 + 1.0;
+String sameArgument(String value) => value;
+int failedArgument() => throw 'argument failed';
+
 void argumentCalls() {
+  functionTrace = 0;
+  print(firstArgument(functionMark(1), functionMark(2)));
+  print(twiceArgument(functionMark(3)));
+  twiceArgument(functionMark(4));
+  print(functionTrace);
+  print(firstArgument(firstArgument(5, 6), twiceArgument(7)));
+  print(scaledArgument(3.5));
+  print(sameArgument(sameArgument('reference')));
+  try {
+    print(firstArgument(twiceArgument(functionMark(5)), failedArgument()));
+  } catch (value) {
+    print(value);
+  } finally {
+    print(functionTrace);
+  }
   conditionTrace = '';
   print(
     namedArguments(

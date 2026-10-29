@@ -2,6 +2,7 @@
 
 ### Performance
 
+- Inline small, effect-free direct calls before machine lowering, allowing constant propagation across call boundaries while preserving argument evaluation and GC contracts.
 - Reduce polymorphic method and property access overhead by reading the receiver's exact class identity once per dispatch, while preserving inherited implementations and target defaults.
 
 ## [0.4.0](https://github.com/medz/dartc/compare/v0.3.0...v0.4.0) — 2026-10-29
