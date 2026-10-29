@@ -337,8 +337,10 @@ int feRegisterFunction(
       syntax.token,
       'generic local or external functions are not yet supported',
     );
+  final source = feTokens[syntax.token].source;
+  for (final parameter in syntax.parameters)
+    checkParameterModifier(feSources, parameter);
   if (syntax.external) {
-    final source = feTokens[syntax.token].source;
     final primitive = fePrimitive(syntax.name);
     if (feRuntimeTokens == 0 || source != 0 || primitive == 0) {
       feAstError(
@@ -374,7 +376,6 @@ int feRegisterFunction(
   final typeParameters = resolveFunctionTypeParameters(feSymbols, syntax, id);
   final typeScope = local ? enclosingTypes : typeParameters;
   final types = <int>[];
-  final source = feTokens[syntax.token].source;
   var name = syntax.name;
   var result = tDynamic;
   if (constructor)

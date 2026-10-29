@@ -235,9 +235,9 @@ List<AstParameter> parserFunctionTypeParameters(
       parserError(parser, 'required needs a named parameter');
     if (legacy && parserIs(parser, 'covariant'))
       parserError(parser, 'covariant function type parameters are unsupported');
-    if (legacy && parserIs(parser, 'var'))
-      parserError(parser, 'function type parameters cannot have var');
+    final modifier = legacy ? parserParameterModifier(parser) : '';
     if (parserIs(parser, 'final') ||
+        parserIs(parser, 'var') ||
         parserIs(parser, 'const') ||
         parserIs(parser, 'this') ||
         parserIs(parser, 'super')) {
@@ -246,7 +246,7 @@ List<AstParameter> parserFunctionTypeParameters(
     AstType type;
     var name = '';
     if (legacy) {
-      var end = parserDeclarationTypeEnd(parser);
+      var end = modifier == 'var' ? -1 : parserDeclarationTypeEnd(parser);
       type = end < 0
           ? AstType('dynamic', const <AstType>[], token)
           : parseAstType(parser, end);
@@ -256,6 +256,11 @@ List<AstParameter> parserFunctionTypeParameters(
       if (parserIs(parser, '<'))
         parserError(parser, 'generic function types are unsupported');
       if (parserIs(parser, '(')) {
+        if (modifier != '')
+          parserError(
+            parser,
+            'function-formal parameters cannot have modifiers',
+          );
         var nested = AstType('Function', const <AstType>[], type.token);
         nested.function = AstFunctionType(
           type,
@@ -277,6 +282,7 @@ List<AstParameter> parserFunctionTypeParameters(
         'function type parameters cannot have default values',
       );
     var parameter = AstParameter(type, name, false, token);
+    parameter.modifier = modifier;
     parameter.metadata = metadata;
     parameter.kind = kind;
     parameter.required = required;
@@ -1815,6 +1821,19 @@ AstVariable parserVariableInitializer(
   return AstVariable(type, name, initializer, modifier, token);
 }
 
+String parserParameterModifier(Parser parser) {
+  var modifier = '';
+  if (parserIs(parser, 'final') || parserIs(parser, 'var')) {
+    modifier = parserPeek(parser);
+    parser.position++;
+  }
+  if (parserIs(parser, 'final') ||
+      parserIs(parser, 'var') ||
+      parserIs(parser, 'const'))
+    parserError(parser, 'invalid parameter modifier');
+  return modifier;
+}
+
 List<AstParameter> parserParameters(
   Parser parser, [
   List<AstVariable>? declaringFields,
@@ -1855,20 +1874,15 @@ List<AstParameter> parserParameters(
         required = true;
       }
     }
-    var modifier = '';
-    if (declaringFields != null &&
-        (parserIs(parser, 'final') || parserIs(parser, 'var'))) {
-      modifier = parserPeek(parser);
-      parser.position++;
-    }
-    if (parserIs(parser, 'final') || parserIs(parser, 'const')) {
-      parserError(parser, 'parameters cannot have final or const modifiers');
-    }
-    var type = parserDeclarationType(parser, '');
+    final modifier = parserParameterModifier(parser);
+    final declaring = declaringFields != null && modifier != '';
+    var type = parserDeclarationType(parser, declaring ? '' : modifier);
     var fieldFormal = parserTake(parser, 'this');
     final superFormal = !fieldFormal && parserTake(parser, 'super');
-    if (modifier != '' && (fieldFormal || superFormal))
+    if (declaring && (fieldFormal || superFormal))
       parserError(parser, 'declaring parameter requires a plain name');
+    if (modifier == 'var' && (fieldFormal || superFormal))
+      parserError(parser, 'initializing parameters cannot have var');
     var name = '';
     if (fieldFormal || superFormal) {
       parserExpect(parser, '.');
@@ -1877,6 +1891,8 @@ List<AstParameter> parserParameters(
       name = parserName(parser);
     }
     if (parserIs(parser, '(')) {
+      if (!declaring && modifier != '')
+        parserError(parser, 'function-formal parameters cannot have modifiers');
       final result = type.name == ''
           ? AstType('dynamic', const <AstType>[], type.token)
           : type;
@@ -1888,13 +1904,15 @@ List<AstParameter> parserParameters(
       if (parserTake(parser, '?')) type.name = 'Function?';
     }
     var parameter = AstParameter(type, name, fieldFormal, token);
-    if (modifier != '') {
+    if (declaringFields != null && modifier != '') {
       parameter.fieldFormal = true;
-      declaringFields!.add(
+      declaringFields.add(
         AstVariable(type, name, const <AstExpression>[], modifier, token)
           ..declaringParameter = parameter
           ..metadata = metadata,
       );
+    } else {
+      parameter.modifier = modifier;
     }
     parameter.superFormal = superFormal;
     parameter.metadata = metadata;

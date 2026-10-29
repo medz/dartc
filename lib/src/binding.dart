@@ -984,7 +984,7 @@ FunctionBindings _bindFunctionLocals(
         parameter.token,
         parameter.type,
       );
-      variable.finalVariable = initializing;
+      variable.finalVariable = initializing || parameter.modifier == 'final';
       result.variables.add(variable);
       if (syntax.primary) binder.initializerVariables.add(variable);
       if (!initializing)

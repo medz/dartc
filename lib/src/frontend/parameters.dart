@@ -22,6 +22,17 @@ String parameterName(AstParameter parameter) {
   return name;
 }
 
+void checkParameterModifier(SourceProgram source, AstParameter parameter) {
+  if (parameter.modifier == '') return;
+  final token = source.tokens[parameter.token];
+  if (sourceVersionAtLeast(source, token.source, 3, 13))
+    sourceError(
+      source,
+      token,
+      'final and var parameter modifiers require a language version before 3.13',
+    );
+}
+
 void checkParameterName(
   SourceProgram source,
   List<AstParameter> parameters,

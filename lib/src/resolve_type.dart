@@ -1,5 +1,6 @@
 import 'ast.dart';
 import 'binding.dart';
+import 'frontend/parameters.dart';
 import 'source.dart';
 import 'symbols.dart';
 import 'types.dart';
@@ -548,6 +549,7 @@ int _resolveType(
     final names = <String>[];
     final requiredNamed = <bool>[];
     for (var parameter in function.parameters) {
+      checkParameterModifier(symbols.program, parameter);
       if (parameter.metadata.isNotEmpty)
         _typeError(
           symbols,

@@ -1314,6 +1314,65 @@ void main(List<String> args) {
       File(standard).uri.toString(),
     ]);
     final libraries = {
+      'parameter-modifiers.dart': r'''
+// @dart=3.12
+T retained<T>(final T value) => value;
+int positional(final int value, [final int extra = 2]) => value + extra;
+int named({required final int value, final int extra = 3}) => value + extra;
+int callable(final int Function(int) callback, final int value) => callback(value);
+int formal(int callback(final int value)) => callback(2);
+int formalVar(int callback(var value)) => callback(2);
+typedef int LegacyFinal(final int value);
+typedef int LegacyVar(var value);
+int mutable(var value) { value = 9; return value; }
+int Function() capture(final int value) => () => value;
+class Parameters {
+  int value;
+  final int initial;
+  Parameters(final this.value, [final int initial = 4]) : initial = initial {
+    value += 1;
+  }
+  int operator +(final int other) => value + other;
+  set replace(final int next) { value = next; }
+}
+class Parent {
+  final int value;
+  const Parent(this.value);
+}
+class Child extends Parent {
+  final int _extra;
+  const Child(final super.value, {final this._extra = 5});
+  int get total => value + _extra;
+}
+void runParameters() {
+  int local(final int value) => value + 1;
+  int Function(int) inferred = (final value) => value + 2;
+  final assignable = (var value) { value = 6; return value; };
+  print(retained('typed'));
+  print(positional(3));
+  print(named(value: 4));
+  print(callable(local, 5));
+  LegacyFinal increment = (int value) { value++; return value; };
+  LegacyVar dynamicValue = (var value) { value = 4; return value; };
+  print(formal(increment));
+  print(formalVar(dynamicValue));
+  print(inferred(6));
+  print(assignable(0));
+  print(mutable(0));
+  print(capture(7)());
+  final constructor = Parameters.new;
+  final value = constructor(8);
+  print([value.value, value.initial]);
+  value.replace = 10;
+  print(value + 1);
+  const child = Child(3, extra: 7);
+  print(child.total);
+}
+''',
+      'parameter-modifier-imports.dart': r'''
+import 'parameter-modifiers.dart';
+void main() { runParameters(); }
+''',
       'shorthand-library.dart': r"""
 part 'shorthand-part.dart';
 class Value {
@@ -2086,6 +2145,10 @@ void main() {
     for (final entry in libraries.entries) {
       File('${temporary.path}/${entry.key}').writeAsStringSync(entry.value);
     }
+    await compare(
+      File('${temporary.path}/parameter-modifier-imports.dart'),
+      [],
+    );
     await compare(File('${temporary.path}/imports.dart'), []);
     await compare(File('${temporary.path}/shorthand-imports.dart'), []);
     await compare(File('${temporary.path}/interface-imports.dart'), []);
@@ -3163,6 +3226,50 @@ void main() {
         ..writeAsStringSync(rejectedEnums[i]);
       await reject(invalid, checkSdk: true);
     }
+    final rejectedParameterModifiers = [
+      for (final body in [
+        'void f(final int value) { value = 1; }',
+        'void f(final int value) { value += 1; }',
+        'void f(final int value) { value++; }',
+        'void f(final int? value) { value ??= 1; }',
+        'void f(final int value) { void nested() { value = 1; } }',
+        'void f(final int value) { [value] = [1]; }',
+        'void f() { final g = (final int value) { value = 1; }; }',
+        'class C { int value; C(final int parameter) : value = (parameter = 1); }',
+        'void f(var int value) {}',
+        'void f(final var value) {}',
+        'void f(const int value) {}',
+        'void f(final int callback(int value)) {}',
+        'typedef F = int Function(final int value);',
+        'class B { B(int value); } class C extends B { C(var super.value); }',
+      ])
+        '// @dart=3.12\n$body void main() {}',
+      for (final body in [
+        'void f(final int value) {}',
+        'void f(final value) {}',
+        'void f(var value) {}',
+        'void f() { final g = (final int value) => value; }',
+        'class C { int value; C(final this.value); }',
+        'class B { B(int value); } class C extends B { C(final super.value); }',
+        'typedef int F(final int value);',
+        'typedef int F(var value);',
+        'void f(int callback(final int value)) {}',
+        'void f(int callback(var value)) {}',
+      ])
+        '// @dart=3.13\n$body void main() {}',
+    ];
+    for (var i = 0; i < rejectedParameterModifiers.length; i++) {
+      final invalid = File(
+        '${temporary.path}/rejected-parameter-modifier-$i.dart',
+      )..writeAsStringSync(rejectedParameterModifiers[i]);
+      await reject(invalid, checkSdk: true);
+    }
+    // The fixed draft rejects var initializing formals; SDK 3.13.7 accepts them.
+    await reject(
+      File('${temporary.path}/var-field-formal.dart')..writeAsStringSync(
+        '// @dart=3.12\nclass C { int value; C(var this.value); } void main() {}',
+      ),
+    );
     final rejectedOperators = [
       'class C { void unused() { super[0] = 1; } } void main() {}',
       'class B { int operator [](int key) => key; } class C extends B { void unused() { super[0] = 1; } } void main() {}',
