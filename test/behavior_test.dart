@@ -591,6 +591,29 @@ void main(List<String> args) {
 }
 ''';
 
+Future<void> parallel<T>(
+  Iterable<T> cases,
+  Future<void> Function(T) check,
+) async {
+  final iterator = cases.iterator;
+  var failed = false;
+  Future<void> worker() async {
+    while (!failed && iterator.moveNext()) {
+      try {
+        await check(iterator.current);
+      } catch (_) {
+        failed = true;
+        rethrow;
+      }
+    }
+  }
+
+  // Wait for every active case before preserving evidence or deleting files.
+  await Future.wait([
+    for (var i = 0; i < Platform.numberOfProcessors; i++) worker(),
+  ]);
+}
+
 Future<void> main(List<String> args) async {
   final root = File.fromUri(Platform.script).parent.parent.absolute.path;
   String? compiler;
@@ -613,6 +636,7 @@ Future<void> main(List<String> args) async {
   final driver = compiler ?? sdk;
   final processes = <ProcessOutcome>[];
   final identities = <String, Object?>{
+    'parallelism': Platform.numberOfProcessors,
     'sdk': {'executable': sdk, 'version': Platform.version},
     'compiler': {
       'executable': driver,
@@ -1172,9 +1196,9 @@ void main() {
 }
 ''',
     ];
-    for (var i = 0; i < failingValues.length; i++) {
-      final source = File('${temporary.path}/value-error-$i.dart')
-        ..writeAsStringSync(failingValues[i]);
+    await parallel(failingValues.asMap().entries, (entry) async {
+      final source = File('${temporary.path}/value-error-${entry.key}.dart')
+        ..writeAsStringSync(entry.value);
       final executable = '${source.path}.out';
       final expected = await capture(sdk, [source.path]);
       await run(
@@ -1198,7 +1222,7 @@ void main() {
           'Native: ${actual.exitCode} ${actual.stdout}${actual.stderr}',
         );
       }
-    }
+    });
     final uncaught = File('${temporary.path}/uncaught-exception.dart')
       ..writeAsStringSync('''
 Never failure() { try { throw 'uncaught🙂'; } finally { print('cleanup'); } }
@@ -2211,55 +2235,48 @@ void main() {
     for (final entry in libraries.entries) {
       File('${temporary.path}/${entry.key}').writeAsStringSync(entry.value);
     }
-    await compare(
-      File('${temporary.path}/parameter-modifier-imports.dart'),
-      [],
-    );
-    await compare(File('${temporary.path}/imports.dart'), []);
-    await compare(File('${temporary.path}/export-names-imports.dart'), []);
-    await compare(File('${temporary.path}/shorthand-imports.dart'), []);
-    await compare(File('${temporary.path}/interface-imports.dart'), []);
-    await compare(File('${temporary.path}/inheritance-imports.dart'), []);
-    await compare(File('${temporary.path}/factory-method-312.dart'), []);
-    await compare(File('${temporary.path}/object-pattern-imports.dart'), []);
-    await compare(File('${temporary.path}/core.dart'), []);
-    await compare(File('${temporary.path}/priority.dart'), []);
-    await compare(File('${temporary.path}/export-priority.dart'), []);
-    await compare(File('${temporary.path}/prefix-priority.dart'), []);
-    await compare(File('${temporary.path}/prefix-scope.dart'), []);
-    await compare(File('${temporary.path}/core-annotations-imports.dart'), []);
-    await compare(File('${temporary.path}/core-annotations-implicit.dart'), []);
-    await compare(File('${temporary.path}/core-annotations-own.dart'), []);
-    await compare(File('${temporary.path}/core-annotations-filtered.dart'), []);
-    await compare(File('${temporary.path}/nogc-values.dart'), []);
-    await compare(File('${temporary.path}/nogc-user-annotation.dart'), []);
-    await compare(File('${temporary.path}/version-imports.dart'), []);
-    await compare(File('${temporary.path}/version-header.dart'), []);
-    await compare(File('${temporary.path}/version-named.dart'), []);
-    await compare(File('${temporary.path}/version-unnamed.dart'), []);
-    await compare(File('${temporary.path}/version-markers.dart'), []);
-    await compare(File('${temporary.path}/version-bom.dart'), []);
-    await compare(File('${temporary.path}/constant-imports.dart'), []);
-    await compare(File('${temporary.path}/property-imports.dart'), []);
-    await compare(File('${temporary.path}/top-accessor-imports.dart'), []);
-    await compare(File('${temporary.path}/metadata-imports.dart'), []);
-    await compare(
-      File('${temporary.path}/named-constructors-imports.dart'),
-      [],
-    );
-    await compare(File('${temporary.path}/const-class-imports.dart'), []);
-    await compare(File('${temporary.path}/const-class-metadata-only.dart'), []);
-    await compare(
-      File('${temporary.path}/const-class-finite-default.dart'),
-      [],
-    );
-    await compare(File('${temporary.path}/redirect-finite-constant.dart'), []);
-    await compare(File('${temporary.path}/static-members-imports.dart'), []);
-    await compare(File('${temporary.path}/generic-functions-imports.dart'), []);
-    await compare(File('${temporary.path}/generic-aliases-imports.dart'), []);
-    await compare(File('${temporary.path}/function-imports.dart'), []);
-    await compare(File('${temporary.path}/conditional-imports.dart'), []);
-    await compare(File('${temporary.path}/parts-main.dart'), []);
+    await parallel([
+      'parameter-modifier-imports.dart',
+      'imports.dart',
+      'export-names-imports.dart',
+      'shorthand-imports.dart',
+      'interface-imports.dart',
+      'inheritance-imports.dart',
+      'factory-method-312.dart',
+      'object-pattern-imports.dart',
+      'core.dart',
+      'priority.dart',
+      'export-priority.dart',
+      'prefix-priority.dart',
+      'prefix-scope.dart',
+      'core-annotations-imports.dart',
+      'core-annotations-implicit.dart',
+      'core-annotations-own.dart',
+      'core-annotations-filtered.dart',
+      'nogc-values.dart',
+      'nogc-user-annotation.dart',
+      'version-imports.dart',
+      'version-header.dart',
+      'version-named.dart',
+      'version-unnamed.dart',
+      'version-markers.dart',
+      'version-bom.dart',
+      'constant-imports.dart',
+      'property-imports.dart',
+      'top-accessor-imports.dart',
+      'metadata-imports.dart',
+      'named-constructors-imports.dart',
+      'const-class-imports.dart',
+      'const-class-metadata-only.dart',
+      'const-class-finite-default.dart',
+      'redirect-finite-constant.dart',
+      'static-members-imports.dart',
+      'generic-functions-imports.dart',
+      'generic-aliases-imports.dart',
+      'function-imports.dart',
+      'conditional-imports.dart',
+      'parts-main.dart',
+    ], (name) => compare(File('${temporary.path}/$name'), []));
     final rejectedTypeAliases = [
       'typedef int Invalid(int value=1);void main(){}',
       'typedef int Invalid(var value);void main(){}',
@@ -3238,6 +3255,17 @@ void main() {
       }
     }
 
+    Future<void> rejectCases(
+      String name,
+      List<String> sources, {
+      String? diagnostic,
+      bool checkSdk = false,
+    }) => parallel(sources.asMap().entries, (entry) async {
+      final source = File('${temporary.path}/$name-${entry.key}.dart')
+        ..writeAsStringSync(entry.value);
+      await reject(source, diagnostic: diagnostic, checkSdk: checkSdk);
+    });
+
     final rejectedExports = [
       "export 'math.dart'; export 'other.dart';",
       "import 'export-conflict-library.dart' hide shared;",
@@ -3252,15 +3280,12 @@ void main() {
       "export 'export-class-a.dart'; export 'export-class-b.dart';",
       "export 'export-alias-a.dart'; export 'export-alias-b.dart';",
     ];
-    for (var i = 0; i < rejectedExports.length; i++) {
-      final invalid = File('${temporary.path}/rejected-export-$i.dart')
-        ..writeAsStringSync('${rejectedExports[i]} void main() {}');
-      await reject(
-        invalid,
-        diagnostic: 'conflicting exports for ',
-        checkSdk: true,
-      );
-    }
+    await rejectCases(
+      'rejected-export',
+      [for (final source in rejectedExports) '$source void main() {}'],
+      diagnostic: 'conflicting exports for ',
+      checkSdk: true,
+    );
     final rejectedPrefixes = [
       for (final declaration in [
         'int p = 1;',
@@ -3287,11 +3312,7 @@ void main() {
       "// @dart=3.6\nimport 'prefix-target.dart' as _; int _ = 1; void main() {}",
       "import 'math.dart' as p; import 'other.dart' as p; void main() { p.shared(); }",
     ];
-    for (var i = 0; i < rejectedPrefixes.length; i++) {
-      final invalid = File('${temporary.path}/rejected-prefix-$i.dart')
-        ..writeAsStringSync(rejectedPrefixes[i]);
-      await reject(invalid, checkSdk: true);
-    }
+    await rejectCases('rejected-prefix', rejectedPrefixes, checkSdk: true);
     await reject(
       File('${temporary.path}/prefix-part-conflict.dart'),
       checkSdk: true,
@@ -3318,17 +3339,16 @@ void main() {
       "import 'named-constructors-export.dart' as p;const f=true?null:p.NamedLibraryAlias._hidden;void main(){}",
       '// @dart=2.14\nclass C{C.named();}void unused(){var f=C.named;}void main(){}',
     ];
-    for (var i = 0; i < rejectedConstructorValues.length; i++) {
-      final invalid = File(
-        '${temporary.path}/rejected-constructor-value-$i.dart',
-      )..writeAsStringSync(rejectedConstructorValues[i]);
-      await reject(invalid, checkSdk: true);
-    }
-    for (var i = 0; i < rejectedTypeAliases.length; i++) {
-      final invalid = File('${temporary.path}/rejected-type-alias-$i.dart')
-        ..writeAsStringSync(rejectedTypeAliases[i]);
-      await reject(invalid, checkSdk: true);
-    }
+    await rejectCases(
+      'rejected-constructor-value',
+      rejectedConstructorValues,
+      checkSdk: true,
+    );
+    await rejectCases(
+      'rejected-type-alias',
+      rejectedTypeAliases,
+      checkSdk: true,
+    );
     final rejectedEnums = [
       'enum E { a, b } int f(E e) => switch (e) { E.a => 1 }; void main() { print(f(E.a)); }',
       'enum E { a, b } void f(E e) { switch (e) { case E.a: print(1); } } void main() { f(E.a); }',
@@ -3347,11 +3367,7 @@ void main() {
       'class C extends Enum {} void main() {}',
       '// @dart = 2.12\nenum E { a; int get x => 1; } void main() {}',
     ];
-    for (var i = 0; i < rejectedEnums.length; i++) {
-      final invalid = File('${temporary.path}/rejected-enum-$i.dart')
-        ..writeAsStringSync(rejectedEnums[i]);
-      await reject(invalid, checkSdk: true);
-    }
+    await rejectCases('rejected-enum', rejectedEnums, checkSdk: true);
     final rejectedParameterModifiers = [
       for (final body in [
         'void f(final int value) { value = 1; }',
@@ -3384,12 +3400,11 @@ void main() {
       ])
         '// @dart=3.13\n$body void main() {}',
     ];
-    for (var i = 0; i < rejectedParameterModifiers.length; i++) {
-      final invalid = File(
-        '${temporary.path}/rejected-parameter-modifier-$i.dart',
-      )..writeAsStringSync(rejectedParameterModifiers[i]);
-      await reject(invalid, checkSdk: true);
-    }
+    await rejectCases(
+      'rejected-parameter-modifier',
+      rejectedParameterModifiers,
+      checkSdk: true,
+    );
     // The fixed draft rejects var initializing formals; SDK 3.13.7 accepts them.
     await reject(
       File('${temporary.path}/var-field-formal.dart')..writeAsStringSync(
@@ -3444,16 +3459,8 @@ void main() {
       'class C { C operator -(C o) => o; } void main() { print(-C()); }',
       'class C { C operator ~() => this; } void main() { print(~1 + C()); }',
     ];
-    for (var i = 0; i < rejectedOperators.length; i++) {
-      final invalid = File('${temporary.path}/rejected-operator-$i.dart')
-        ..writeAsStringSync(rejectedOperators[i]);
-      await reject(invalid, checkSdk: true);
-    }
-    for (var i = 0; i < rejected.length; i++) {
-      final invalid = File('${temporary.path}/rejected-$i.dart')
-        ..writeAsStringSync(rejected[i]);
-      await reject(invalid);
-    }
+    await rejectCases('rejected-operator', rejectedOperators, checkSdk: true);
+    await rejectCases('rejected', rejected);
     await reject(
       File('${temporary.path}/factory-private.dart'),
       checkSdk: true,
@@ -3488,13 +3495,12 @@ void main() {
       "// @dart=3.13\nlibrary parts.sample;part 'parts-name.dart';void main(){}":
           'parts-name.dart',
     };
-    var partRejection = 0;
-    for (var entry in rejectedParts.entries) {
-      final invalid = File(
-        '${temporary.path}/rejected-part-${partRejection++}.dart',
-      )..writeAsStringSync(entry.key);
+    await parallel(rejectedParts.entries.indexed, (indexed) async {
+      final (index, entry) = indexed;
+      final invalid = File('${temporary.path}/rejected-part-$index.dart')
+        ..writeAsStringSync(entry.key);
       await reject(invalid, diagnostic: '${temporary.path}/${entry.value}');
-    }
+    });
     final conditionalIo = File('${temporary.path}/conditional-target-io.dart')
       ..writeAsStringSync(
         "import 'conditional-io.dart' if(dart.library.io) 'conditional-first.dart';void main(){}",
@@ -4019,20 +4025,17 @@ void main(List<String> args) {
         '${directoryRead.stdout}${directoryRead.stderr}',
       );
     }
-    for (final body in [
-      "void main() { String value = hostReadIfExists('missing'); print(value); }",
-      'void main() { hostReadIfExists(1); }',
-      'void main() { hostReadIfExists(); }',
-      "void main() { hostCurrentDirectory('extra'); }",
-      "@pragma('dartc:no-gc') String? read(String path) => hostReadIfExists(path); void main() {}",
-      "@pragma('dartc:no-gc') String cwd() => hostCurrentDirectory(); void main() {}",
-    ]) {
-      final invalid = File('${temporary.path}/invalid-host.dart')
-        ..writeAsStringSync(
-          "import '${File(standard).parent.path}/host.dart';\n$body",
-        );
-      await reject(invalid);
-    }
+    await rejectCases('invalid-host', [
+      for (final body in [
+        "void main() { String value = hostReadIfExists('missing'); print(value); }",
+        'void main() { hostReadIfExists(1); }',
+        'void main() { hostReadIfExists(); }',
+        "void main() { hostCurrentDirectory('extra'); }",
+        "@pragma('dartc:no-gc') String? read(String path) => hostReadIfExists(path); void main() {}",
+        "@pragma('dartc:no-gc') String cwd() => hostCurrentDirectory(); void main() {}",
+      ])
+        "import '${File(standard).parent.path}/host.dart';\n$body",
+    ]);
     stdout.writeln(
       'Behavior checks passed; recorded SDK differences checked separately.',
     );
