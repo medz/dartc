@@ -37,9 +37,11 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 ## 内建静态调用
 
-依据 §17.15 调用义务及 SDK [`int.parse(String source, {int? radix})`](https://api.dart.dev/stable/3.13.7/dart-core/int/parse.html)，当前已实现的省略 radix 调用在源 API 边界检查一个必需位置 String 实参；缺参、多余位置参数、命名 source、未知命名参数、类型实参和不兼容的静态值类型被拒绝，未使用函数也检查。实参只求值一次，再传给原生解析实现。显式 radix 和静态方法函数值仍未实现；有效字符串范围、溢出、空白和 FormatException 的运行时行为仍有缺口，签名检查不代表这些语义已完成。
+依据 §17.15 调用义务及 SDK [`int.parse(String source, {int? radix})`](https://api.dart.dev/stable/3.13.7/dart-core/int/parse.html)，省略 radix 的调用在源 API 边界检查一个必需位置 String 实参；缺参、多余位置参数、命名 source、未知命名参数、类型实参和不兼容的静态值类型被拒绝，未使用函数也检查。实参只求值一次，再传给原生解析实现。显式 radix 和静态方法函数值仍未实现。
 
-拥有入口为 [frontend.dart](../lib/src/frontend.dart) 的 `feLowerStaticCall()`；行为入口为 [behavior_test.dart](../test/behavior_test.dart) 的 `program/intParseInput()` 与 `rejected`。
+默认解析接受 Unicode 首尾空白、可选正负号、十进制及 `0x`/`0X` 前缀。十进制和负十六进制受有符号 64 位范围约束；正十六进制允许完整 64 位位模式，因此 `0xffffffffffffffff` 为 -1。空输入、没有数字、非法数字或超范围输入抛出普通 FormatException，保留原始 source、非空 message 和可用时的 offset，沿一般 catch/finally 路径处理；错误文案与具体 offset 不承诺复现 SDK 的分块解析细节。
+
+拥有入口为 [frontend.dart](../lib/src/frontend.dart) 的 `feLowerStaticCall()`、[runtime.dart](../lib/src/runtime.dart) 的 `rtIntParse()`；行为入口为 [behavior_test.dart](../test/behavior_test.dart) 的 `program/intParseInput()`、`program/intParsing()`、`uncaught` 与 `rejected`，异常载荷及轨迹的 GC 保活见 [roots.dart](../test/fixtures/roots.dart) 的 `exceptionRoots()`。
 
 ## 泛型直接调用
 

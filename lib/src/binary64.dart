@@ -1,4 +1,5 @@
 import 'host.dart';
+import 'unicode.dart';
 
 // Binary64 values are transported as their 64-bit IEEE bit patterns. Decimal
 // conversion uses exact integer ratios; only arithmetic uses machine primitives.
@@ -120,25 +121,11 @@ int _ratio(List<int> numerator, List<int> denominator) {
   return ((exponent + 1023) << 52) | (significand & binary64Fraction);
 }
 
-bool _space(int unit) =>
-    unit >= 9 && unit <= 13 ||
-    unit == 32 ||
-    unit == 133 ||
-    unit == 160 ||
-    unit == 5760 ||
-    unit >= 8192 && unit <= 8202 ||
-    unit == 8232 ||
-    unit == 8233 ||
-    unit == 8239 ||
-    unit == 8287 ||
-    unit == 12288 ||
-    unit == 65279;
-
 int? binary64Parse(String source) {
   var start = 0;
   var end = source.length;
-  while (start < end && _space(source.codeUnitAt(start))) start++;
-  while (end > start && _space(source.codeUnitAt(end - 1))) end--;
+  while (start < end && unicodeWhitespace(source.codeUnitAt(start))) start++;
+  while (end > start && unicodeWhitespace(source.codeUnitAt(end - 1))) end--;
   if (start == end) return null;
   var sign = 0;
   if (source.codeUnitAt(start) == 45 || source.codeUnitAt(start) == 43) {

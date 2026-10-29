@@ -1189,6 +1189,19 @@ void exceptionRootCatch(int queue) {
 
 void exceptionRoots(int queue) {
   exceptionRootCatch(queue);
+  try {
+    int.parse('xinvalid integer'.substring(1));
+    check(false);
+  } on FormatException catch (error, trace) {
+    heap.rtCollect();
+    final count = snapshot(queue);
+    check(contains(queue, count, rt.nativeValueBits(error)));
+    check(contains(queue, count, rt.nativeValueBits(trace)));
+    final fields = traceObject(rt.nativeValueBits(error), queue);
+    check(contains(queue, fields, rt.nativeValueBits(error.source)));
+    check(error.source == 'invalid integer');
+    check(error.message.isNotEmpty && error.offset == 0);
+  }
   final count = snapshot(queue);
   check(findMarker(queue, count, 970) == 0);
   check(findMarker(queue, count, 971) == 0);

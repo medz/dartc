@@ -5,6 +5,7 @@ import 'runtime/exceptions.dart';
 import 'runtime/frames.dart';
 import 'runtime/heap.dart';
 import 'runtime/roots.dart';
+import 'unicode.dart';
 
 external int nativeLoad64(int p);
 external int nativeStore64(int p, int value);
@@ -373,35 +374,74 @@ int rtIntToString(int value) {
 }
 
 int rtIntParse(int value) {
-  var length = nativeLoad64(value + stringLengthOffset);
+  final length = nativeLoad64(value + stringLengthOffset);
+  var end = length;
+  while (end > 0 && unicodeWhitespace(rtStringRawCodeUnit(value, end - 1)))
+    end--;
+  if (end == 0) return rtIntParseError(value, 'Invalid number', length);
   var i = 0;
-  var sign = 1;
-  if (length > 0 && rtStringRawCodeUnit(value, 0) == 45) {
-    sign = -1;
-    i = 1;
-  } else if (length > 0 && rtStringRawCodeUnit(value, 0) == 43) {
-    i = 1;
+  while (unicodeWhitespace(rtStringRawCodeUnit(value, i))) i++;
+  var negative = false;
+  final first = rtStringRawCodeUnit(value, i);
+  if (first == 45 || first == 43) {
+    negative = first == 45;
+    i++;
   }
   var radix = 10;
-  if (i + 1 < length && rtStringRawCodeUnit(value, i) == 48) {
-    var x = rtStringRawCodeUnit(value, i + 1);
-    if (x == 120 || x == 88) {
+  if (i + 1 < end && rtStringRawCodeUnit(value, i) == 48) {
+    if ((rtStringRawCodeUnit(value, i + 1) | 32) == 120) {
       radix = 16;
-      i = i + 2;
+      i += 2;
     }
   }
+  if (i == end) return rtIntParseError(value, 'Invalid number', i);
+  final unsigned = radix == 16 && !negative;
+  // Accumulate signed values negatively so INT64_MIN remains representable.
+  final limit = negative ? -9223372036854775808 : -9223372036854775807;
+  final threshold = limit ~/ radix;
   var result = 0;
-  while (i < length) {
-    var c = rtStringRawCodeUnit(value, i);
+  while (i < end) {
+    final c = rtStringRawCodeUnit(value, i);
     var digit = c - 48;
     if (c >= 65 && c <= 70) digit = c - 55;
     if (c >= 97 && c <= 102) digit = c - 87;
-    if (digit < 0 || digit >= radix) rtHostExit(65);
-    result = result * radix + digit;
-    i = i + 1;
+    if (digit < 0 || digit >= radix)
+      return rtIntParseError(
+        value,
+        radix == 16 ? 'Invalid radix-16 number' : 'Invalid radix-10 number',
+        i,
+      );
+    if (unsigned) {
+      // The positive 0x form permits all 64 bits, but never discards overflow.
+      if ((result >>> 60) != 0)
+        return rtIntParseError(
+          value,
+          'Positive input exceeds the limit of integer',
+          null,
+        );
+      result = (result << 4) | digit;
+    } else {
+      if (result < threshold || result * radix < limit + digit)
+        return rtIntParseError(
+          value,
+          negative
+              ? 'Negative input exceeds the limit of integer'
+              : 'Positive input exceeds the limit of integer',
+          null,
+        );
+      result = result * radix - digit;
+    }
+    i++;
   }
-  return result * sign;
+  return negative || unsigned ? result : -result;
 }
+
+Never rtIntParseError(int source, String message, int? offset) =>
+    throw FormatException(
+      message,
+      nativeValueFromBits(source) as String,
+      offset,
+    );
 
 Never rtListRangeError() {
   var message = rtCStringAcquire(

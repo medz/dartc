@@ -90,6 +90,49 @@ String intParseInput() {
   return '0xff';
 }
 
+void intParsing() {
+  for (final source in <String>[
+    '0', '-0', '+0', '00042', '-00042',
+    '9223372036854775807', '-9223372036854775808',
+    '0xff', '+0XfF', '-0xff', '-0x8000000000000000',
+    '0x8000000000000000', '0xffffffffffffffff', '+0xffffffffffffffff',
+    '0x000000000000000000000000ffffffffffffffff',
+  ]) {
+    print(int.parse(source));
+  }
+  final spaces = String.fromCharCodes(<int>[
+    9, 10, 11, 12, 13, 32, 133, 160, 5760,
+    8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202,
+    8232, 8233, 8239, 8287, 12288, 65279,
+  ]);
+  print(int.parse('$spaces-42$spaces'));
+  print(int.parse('$spaces+0xFF$spaces'));
+  var caught = 0;
+  var cleaned = 0;
+  for (final source in <String>[
+    '', spaces, '+', '-', '0x', '+0x', '-0X',
+    '9223372036854775808', '-9223372036854775809', '18446744073709551615',
+    '0x10000000000000000', '-0x8000000000000001', '-0xffffffffffffffff',
+    '42x', '1_000', '0b10', '1 2', '0x-1', '1.0', '１２',
+    '\u000042', '\u180e42', '42\u200b', '\u206042',
+  ]) {
+    try {
+      int.parse(source);
+    } on FormatException catch (error, trace) {
+      final offset = error.offset;
+      print(identical(error.source, source) && error.message.isNotEmpty &&
+          (offset == null || offset >= 0 && offset <= source.length) &&
+          trace.toString().isNotEmpty);
+      caught++;
+    } finally {
+      cleaned++;
+    }
+  }
+  print(caught);
+  print(cleaned);
+  print(int.parse('42'));
+}
+
 class Counter {
   int value;
   List<int> values;
@@ -485,6 +528,7 @@ void main(List<String> args) {
   print('${foo$bar}');
   print('$foo${bar}tail');
   print(10000000000 + int.parse(intParseInput()));
+  intParsing();
   print(args.length);
   print(args[1]);
   var info = FunctionInfo('entry', 2, 1, 3, 1, <int>[4, 8], enabled, 13);
@@ -1252,8 +1296,13 @@ void main() {
     });
     final uncaught = File('${temporary.path}/uncaught-exception.dart')
       ..writeAsStringSync('''
-Never failure() { try { throw 'uncaught🙂'; } finally { print('cleanup'); } }
-void main() { print('before'); failure(); print('after'); }
+Never failure(bool parse) {
+  try {
+    if (parse) int.parse('invalid');
+    throw 'uncaught🙂';
+  } finally { print('cleanup'); }
+}
+void main(List<String> args) { print('before'); failure(args.isNotEmpty); print('after'); }
 ''');
     final uncaughtExecutable = '${uncaught.path}.out';
     await run(
@@ -1261,25 +1310,32 @@ void main() { print('before'); failure(); print('after'); }
       compileArguments(uncaught, uncaughtExecutable),
       native: compiler != null,
     );
-    final uncaughtExpected = await capture(sdk, [uncaught.path]);
-    final uncaughtActual = await capture(
-      uncaughtExecutable,
-      [],
-      environment: {'PATH': '/usr/bin:/bin'},
-      includeParentEnvironment: false,
-    );
-    if (uncaughtExpected.exitCode != 255 ||
-        uncaughtActual.exitCode != 255 ||
-        uncaughtExpected.stdout != 'before\ncleanup\n' ||
-        uncaughtActual.stdout != uncaughtExpected.stdout ||
-        !uncaughtActual.stderr.startsWith(
-          'Unhandled exception:\nuncaught🙂\n',
-        ) ||
-        !uncaughtActual.stderr.contains('failure') ||
-        !uncaughtActual.stderr.contains('main')) {
-      throw StateError(
-        'Uncaught exception did not preserve its effects, trace and exit status.',
+    for (final arguments in [
+      <String>[],
+      ['parse'],
+    ]) {
+      final uncaughtExpected = await capture(sdk, [
+        uncaught.path,
+        ...arguments,
+      ]);
+      final uncaughtActual = await capture(
+        uncaughtExecutable,
+        arguments,
+        environment: {'PATH': '/usr/bin:/bin'},
+        includeParentEnvironment: false,
       );
+      final prefix = arguments.isEmpty ? 'uncaught🙂\n' : 'FormatException:';
+      if (uncaughtExpected.exitCode != 255 ||
+          uncaughtActual.exitCode != 255 ||
+          uncaughtExpected.stdout != 'before\ncleanup\n' ||
+          uncaughtActual.stdout != uncaughtExpected.stdout ||
+          !uncaughtActual.stderr.startsWith('Unhandled exception:\n$prefix') ||
+          !uncaughtActual.stderr.contains('failure') ||
+          !uncaughtActual.stderr.contains('main')) {
+        throw StateError(
+          'Uncaught exception did not preserve its effects, trace and exit status.',
+        );
+      }
     }
     // Keep this SDK/specification discrepancy explicit; argument reordering must
     // not silently move effects ahead of a function expression's evaluation.
