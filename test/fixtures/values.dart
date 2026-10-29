@@ -6118,10 +6118,32 @@ void doubleValues() {
     'bad',
     '',
     '0x10',
+    '.',
+    '1e+',
+    '1_000',
+    'infinity',
+    ' \u0085\ufeff',
   ]) {
     final parsed = double.tryParse(text);
     print(parsed);
-    if (parsed != null) print(double.parse(text));
+    if (parsed != null) {
+      print(double.parse(text));
+    } else {
+      try {
+        double.parse(text);
+        print('missing parse error');
+      } on FormatException catch (error, trace) {
+        print(
+          identical(error.source, text) &&
+              error.message.isNotEmpty &&
+              error.offset == null &&
+              trace.toString().isNotEmpty,
+        );
+      } finally {
+        print('double cleanup');
+      }
+      print('double after');
+    }
   }
   double? optional = 1;
   // ignore: dead_code, dead_null_aware_expression

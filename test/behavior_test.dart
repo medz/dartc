@@ -1107,7 +1107,6 @@ void main() {
       "void main(){print('before');1.5 ~/ 0;}",
       "void main(){dynamic value=1;print('before');value as double;}",
       "void main(){dynamic value=1.5;print('before');value as int;}",
-      "void main(){print('before');double.parse('wrong');}",
       "void main(){dynamic value=1.5;print('before');int result=value.toDouble();print(result);}",
       "void main(){dynamic value=1.5;print('before');int result=value.isNaN;print(result);}",
       "void main(){List<num> values=<double>[1];print('before');values.add(2);}",
@@ -1296,13 +1295,14 @@ void main() {
     });
     final uncaught = File('${temporary.path}/uncaught-exception.dart')
       ..writeAsStringSync('''
-Never failure(bool parse) {
+Never failure(String mode) {
   try {
-    if (parse) int.parse('invalid');
+    if (mode == 'int') int.parse('invalid');
+    if (mode == 'double') double.parse('invalid');
     throw 'uncaught🙂';
   } finally { print('cleanup'); }
 }
-void main(List<String> args) { print('before'); failure(args.isNotEmpty); print('after'); }
+void main(List<String> args) { print('before'); failure(args.isEmpty ? '' : args.first); print('after'); }
 ''');
     final uncaughtExecutable = '${uncaught.path}.out';
     await run(
@@ -1312,7 +1312,8 @@ void main(List<String> args) { print('before'); failure(args.isNotEmpty); print(
     );
     for (final arguments in [
       <String>[],
-      ['parse'],
+      ['int'],
+      ['double'],
     ]) {
       final uncaughtExpected = await capture(sdk, [
         uncaught.path,

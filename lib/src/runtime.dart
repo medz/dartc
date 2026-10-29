@@ -1773,8 +1773,9 @@ int rtNumberToInt(int value) {
 }
 
 int rtDoubleParse(int text) {
-  final bits = binary64Parse(nativeValueFromBits(text) as String);
-  if (bits == null) return rtValueTypeError();
+  final source = nativeValueFromBits(text) as String;
+  final bits = binary64Parse(source);
+  if (bits == null) throw FormatException('Invalid double', source);
   return bits;
 }
 
