@@ -86,6 +86,7 @@ lib/src/
     generics.dart                                泛型调用的类型约束与推断
     literals.dart                                数值字面量语义与范围检查
     patterns.dart                                模式类型、常量与覆盖检查
+    enums.dart                                   枚举声明改写为普通类
   constants.dart, constant_data.dart              常量语义值与只读数据
   binary64.dart                                  编译器与运行时共用的精确数值转换
   frontend.dart                                  声明收集、语义接线与 AST lowering
