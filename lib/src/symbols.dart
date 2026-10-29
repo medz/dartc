@@ -187,6 +187,54 @@ int symbolExportedDeclaration(SymbolTable table, int source, String name) {
   return _symbolExportedDeclaration(table, source, name, false);
 }
 
+void checkExportConflicts(SymbolTable table) {
+  final program = table.program;
+  for (var source = 0; source < program.files.length; source++) {
+    final file = program.files[source];
+    final work = <int>[];
+    var token = -1;
+    for (final dependency in file.imports) {
+      if (!dependency.exported) continue;
+      if (token < 0) token = dependency.start;
+      work.add(dependency.target);
+    }
+    if (work.isEmpty) continue;
+    final visited = List<bool>.filled(program.files.length - sourceFfi, false);
+    final names = <String>[];
+    var cursor = 0;
+    while (cursor < work.length) {
+      final current = sourceLibrary(program, work[cursor++]);
+      final scope = current - sourceFfi;
+      if (visited[scope]) continue;
+      visited[scope] = true;
+      if (scope < table.sourceDeclarations.length) {
+        for (final symbol in table.sourceDeclarations[scope]) {
+          final name = table.declarations[symbol].name;
+          if (name.startsWith('_')) continue;
+          var index = 0;
+          while (index < names.length && names[index] != name) index++;
+          if (index == names.length) names.add(name);
+        }
+      }
+      if (current == sourceCore && program.core >= 0) work.add(program.core);
+      if (current >= 0) {
+        for (final dependency in program.files[current].imports) {
+          if (dependency.exported) work.add(dependency.target);
+        }
+      }
+    }
+    for (final name in names) {
+      if (_symbolExportedDeclaration(table, source, name, false) == -2 ||
+          _symbolExportedDeclaration(table, source, name, true) == -2)
+        sourceError(
+          program,
+          file.tokens[token],
+          'conflicting exports for ' + name,
+        );
+    }
+  }
+}
+
 int _symbolExportedDeclaration(
   SymbolTable table,
   int source,

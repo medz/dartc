@@ -618,6 +618,7 @@ void feCollectDeclarations(AstUnit unit) {
     );
     i++;
   }
+  checkExportConflicts(feSymbols);
   resolveTypeAliasDeclarations(feSymbols);
   feClassOrder = resolveClassInterfaces(feSymbols, unit.classes);
   checkTypeAliasDeclarations(feSymbols);

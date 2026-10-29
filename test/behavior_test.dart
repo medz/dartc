@@ -1751,6 +1751,35 @@ void main(){
       'exports.dart':
           "export 'math.dart' show shared, hidden hide hidden;\n"
           "export 'other.dart' show shared hide shared;",
+      'export-left.dart': "export 'math.dart' show shared;",
+      'export-right.dart': "export 'math.dart' show shared;",
+      'export-diamond.dart':
+          "export 'export-left.dart'; export 'export-right.dart';",
+      'export-local.dart': "export 'math.dart'; export 'other.dart'; part 'export-local-part.dart';",
+      'export-local-part.dart':
+          "part of 'export-local.dart'; int shared() => 33;",
+      'export-cycle-a.dart': "export 'export-cycle-b.dart'; int cycleLeft() => 3; int _cycle() => 1;",
+      'export-cycle-b.dart': "export 'export-cycle-a.dart'; int cycleRight() => 4; int _cycle() => 2;",
+      'export-names-imports.dart':
+          "import 'math.dart'; import 'other.dart'; "
+          "import 'export-diamond.dart' as diamond; "
+          "import 'export-local.dart' as own; "
+          "import 'export-cycle-a.dart' as cycle; "
+          'void main() { print(diamond.shared()); print(own.shared()); '
+          'print(cycle.cycleLeft() + cycle.cycleRight()); }',
+      'export-conflict-library.dart':
+          "export 'math.dart'; export 'other.dart';",
+      'export-conflict-cycle-a.dart':
+          "export 'export-conflict-cycle-b.dart'; export 'math.dart';",
+      'export-conflict-cycle-b.dart':
+          "export 'export-conflict-cycle-a.dart'; export 'other.dart';",
+      'export-other-get.dart': 'int get sharedAccess => 9;',
+      'export-other-set.dart': 'set sharedAccess(int value) {}',
+      'export-other-variable.dart': 'int sharedAccess = 1;',
+      'export-class-a.dart': 'class Shared {}',
+      'export-class-b.dart': 'class Shared {}',
+      'export-alias-a.dart': 'typedef Shared = int;',
+      'export-alias-b.dart': 'typedef Shared = String;',
       'host.dart':
           'int hostRead(int value) => value + 4; '
           'int hostReadIfExists(int value) => value + 5; '
@@ -2150,6 +2179,7 @@ void main() {
       [],
     );
     await compare(File('${temporary.path}/imports.dart'), []);
+    await compare(File('${temporary.path}/export-names-imports.dart'), []);
     await compare(File('${temporary.path}/shorthand-imports.dart'), []);
     await compare(File('${temporary.path}/interface-imports.dart'), []);
     await compare(File('${temporary.path}/inheritance-imports.dart'), []);
@@ -3170,6 +3200,29 @@ void main() {
       }
     }
 
+    final rejectedExports = [
+      "export 'math.dart'; export 'other.dart';",
+      "import 'export-conflict-library.dart' hide shared;",
+      "export 'export-conflict-library.dart' hide shared;",
+      "export 'export-conflict-library.dart'; int shared() => 3;",
+      "import 'export-conflict-cycle-a.dart';",
+      "export 'top-accessor-get.dart'; export 'export-other-get.dart';",
+      "export 'top-accessor-set.dart'; export 'export-other-set.dart';",
+      "export 'export-other-variable.dart'; export 'export-other-set.dart';",
+      "export 'top-accessor-get.dart'; export 'export-other-get.dart'; set sharedAccess(int value) {}",
+      "export 'top-accessor-set.dart'; export 'export-other-set.dart'; int get sharedAccess => 1;",
+      "export 'export-class-a.dart'; export 'export-class-b.dart';",
+      "export 'export-alias-a.dart'; export 'export-alias-b.dart';",
+    ];
+    for (var i = 0; i < rejectedExports.length; i++) {
+      final invalid = File('${temporary.path}/rejected-export-$i.dart')
+        ..writeAsStringSync('${rejectedExports[i]} void main() {}');
+      await reject(
+        invalid,
+        diagnostic: 'conflicting exports for ',
+        checkSdk: true,
+      );
+    }
     final rejectedConstructorValues = [
       'class C{C(int x);}void unused(){var f=C.new;f("bad");}void main(){}',
       'class C{C(int x);}void unused(){var f=C.new;f();}void main(){}',
