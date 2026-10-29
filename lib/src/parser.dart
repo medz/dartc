@@ -2098,6 +2098,70 @@ bool parserConstructorAhead(Parser parser, String name) {
       tokenIs(parser.tokens[position + 3], '(');
 }
 
+// Consumes `operator <symbol>` at the parser position and returns the symbol,
+// or '' when the position does not start an operator declaration.
+String parserOperatorName(Parser parser) {
+  if (!parserIs(parser, 'operator')) return '';
+  final first = parser.tokens[parser.position + 1];
+  var name = first.text;
+  var width = 1;
+  if (tokenIs(first, '[')) {
+    if (!tokenIs(parser.tokens[parser.position + 2], ']')) return '';
+    name = '[]';
+    width = 2;
+    if (tokenIs(parser.tokens[parser.position + 3], '=')) {
+      name = '[]=';
+      width = 3;
+    }
+  } else if (first.kind != tokenSymbol ||
+      ' + - * / ~/ % < > <= >= << >> >>> & | ^ ~ == ! != '.indexOf(
+            ' ' + name + ' ',
+          ) <
+          0) {
+    return '';
+  }
+  if (!tokenIs(parser.tokens[parser.position + 1 + width], '(')) return '';
+  parser.position += 1 + width;
+  return name;
+}
+
+// Operators are methods named by their symbol; a unary minus is `unary-`.
+void parserOperatorCheck(Parser parser, AstFunction method, int token) {
+  Never fail(String message) {
+    parser.position = token;
+    parserError(parser, message);
+  }
+
+  final name = method.name;
+  if (name == '!' || name == '!=')
+    fail(name + ' is not a user-definable operator');
+  if (name == '==') fail('operator == is not supported');
+  if (method.isStatic) fail('operators cannot be static');
+  if (method.typeParameters.isNotEmpty)
+    fail('operators cannot have type parameters');
+  for (final parameter in method.parameters)
+    if (parameter.kind != astRequiredPositional ||
+        parameter.fieldFormal ||
+        parameter.superFormal)
+      fail('operators require plain positional parameters');
+  if (name == '-' && method.parameters.isEmpty) method.name = 'unary-';
+  final expected = switch (method.name) {
+    'unary-' || '~' => 0,
+    '[]=' => 2,
+    _ => 1,
+  };
+  if (method.parameters.length != expected)
+    fail(
+      'operator ' + name + ' requires ' + expected.toString() + ' parameters',
+    );
+  if (name == '[]=') {
+    if (method.result.name == '')
+      method.result = AstType('void', const <AstType>[], method.token);
+    else if (method.result.name != 'void' || method.result.arguments.isNotEmpty)
+      fail('operator []= must return void');
+  }
+}
+
 AstEnumValue parserEnumValue(Parser parser, String enumName) {
   final metadata = parserMetadata(parser);
   final token = parser.position;
@@ -2310,7 +2374,10 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
           parser.tokens[parser.position + 1].kind == tokenIdentifier;
       var type = parserInferredType(memberToken);
       if (!getter && !setter) type = parserDeclarationType(parser, modifier);
-      var member = parserName(parser);
+      final operatorToken = parser.position;
+      var member = getter || setter ? '' : parserOperatorName(parser);
+      final isOperator = member != '';
+      if (!isOperator) member = parserName(parser);
       if ((member == 'get' || member == 'set') &&
           parser.tokens[parser.position].kind == tokenIdentifier) {
         getter = member == 'get';
@@ -2335,6 +2402,7 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
         );
         method.metadata = metadata;
         method.isStatic = isStatic;
+        if (isOperator) parserOperatorCheck(parser, method, operatorToken);
         methods.add(method);
       } else {
         if (external) parserError(parser, 'external fields are not supported');

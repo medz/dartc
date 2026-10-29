@@ -1671,6 +1671,61 @@ void constObjects() {
   constObjectDefault();
 }
 
+void operatorIndexing() {
+  final grid = OpGrid();
+  grid[1] = 7;
+  grid[2] = grid[1] + 1;
+  grid[3] += 5;
+  grid[0]++;
+  grid[0]--;
+  grid[1] -= 2;
+  print(grid.cells);
+  print(grid.reads);
+  print(grid[2] = 9);
+  OpCounter c = OpCounter(1);
+  c += 4;
+  c++;
+  c -= 2;
+  --c;
+  print(c.n);
+  OpScale scale = OpBox(2);
+  scale = scale * 3;
+  print(scale.size);
+  scale = OpBigBox(2) * 3;
+  print(scale.size);
+  OpBox box = OpBigBox(1) * 5;
+  print(box.size);
+  final keyed = OpKeyed();
+  print(keyed[2] + keyed[0]);
+  print(keyed.self(opA));
+  dynamic d = opA;
+  print(d is OpVec);
+}
+
+int opPick<T extends OpBase>(T t) => t[2];
+OpBase opBump<T extends OpBase>(T t) => t + 1;
+OpBase opFlip<T extends OpBase>(T t) => -t;
+
+void operatorInheritance() {
+  const d = OpDerived(3);
+  print(d + 1);
+  print(-d);
+  print(~d);
+  print(d[4]);
+  print(d < const OpBase(9));
+  print(opPick(d));
+  print(opPick(const OpBase(1)));
+  print(opBump(d));
+  print(opBump(const OpBase(5)));
+  print(opFlip(d));
+}
+
+void operatorValues() {
+  operatorVectors();
+  operatorIndexing();
+  operatorInheritance();
+}
+
 void bufferValues() {
   boxStrings = 0;
   var buffer = StringBuffer(7);
@@ -2350,6 +2405,70 @@ String stringReceiver() {
   return 'a🙂b';
 }
 
+class OpGrid {
+  final List<int> cells = [0, 0, 0, 0];
+  int reads = 0;
+  int operator [](int i) {
+    reads++;
+    return cells[i];
+  }
+
+  void operator []=(int i, int v) {
+    cells[i] = v;
+  }
+}
+
+class OpCounter {
+  final int n;
+  OpCounter(this.n);
+  OpCounter operator +(int k) => OpCounter(n + k);
+  OpCounter operator -(int k) => OpCounter(n - k);
+}
+
+abstract class OpScale {
+  OpScale operator *(int k);
+  int get size;
+}
+
+class OpBox implements OpScale {
+  final int size;
+  OpBox(this.size);
+  OpBox operator *(int k) => OpBox(size * k);
+}
+
+class OpBigBox extends OpBox {
+  OpBigBox(int size) : super(size);
+  OpBox operator *(int k) => OpBigBox(size * k + 1);
+}
+
+class OpBase {
+  final int v;
+  const OpBase(this.v);
+  OpBase operator +(int k) => OpBase(v + k);
+  OpBase operator -() => OpBase(-v);
+  OpBase operator ~() => OpBase(v + 100);
+  int operator [](int i) => v * 10 + i;
+  bool operator <(OpBase o) => v < o.v;
+  String toString() => 'OpBase($v)';
+}
+
+class OpDerived extends OpBase {
+  const OpDerived(int v) : super(v);
+  OpBase operator +(int k) => super + (k * 2);
+  OpBase operator -() => -super;
+  OpBase operator ~() => ~super;
+  int operator [](int i) => super[i] + 1;
+  bool operator <(OpBase o) => super < o;
+  String toString() => 'OpDerived($v)';
+}
+
+class OpKeyed {
+  final List<String> names = ['a', 'b', 'c'];
+  String operator [](int i) => names[i];
+  OpVec twice(OpVec v) => v + v;
+  OpVec self(OpVec v) => this.twice(v) - v;
+}
+
 void stringBoundaries() {
   print(stringReceiver().substring(1));
   print(stringReceiver().lastIndexOf(''));
@@ -2372,6 +2491,30 @@ void stringBoundaries() {
   print(codes);
   print('tail🙂');
   print('');
+}
+
+void operatorVectors() {
+  print(opA + opB);
+  print(opB - opA);
+  print(-opA);
+  print(~opB);
+  print(opA * 4);
+  print(opA << 3);
+  print(opB >>> 1);
+  print(opB ~/ 2);
+  print(opA < opB);
+  print(opA >= opB);
+  print(opA + opB * 2);
+  print(opA + -opB);
+  print(opA + opB - opA);
+  print(opA[0] + opB[1]);
+  print((opA + opB)[1]);
+  print(-(-opA));
+  if (opA < opB && !(opB < opA)) print('ordered');
+  var count = 0;
+  for (var v = opA; v < opB; v = v + const OpVec(1, 1)) count++;
+  print(count);
+  print('${opA + opB} ${opA[1]}');
 }
 
 void listGrowth(List<String> args) {
@@ -6424,6 +6567,7 @@ void factoryValues() {
 
 void main(List<String> args) {
   enumValues();
+  operatorValues();
   factoryValues();
   shorthandValues();
   shorthandContexts();
@@ -6603,6 +6747,27 @@ void enumValues() {
   maybe = EnumColor.blue;
   print(maybe.name);
 }
+
+class OpVec {
+  final int x;
+  final int y;
+  const OpVec(this.x, this.y);
+  OpVec operator +(OpVec o) => OpVec(x + o.x, y + o.y);
+  OpVec operator -(OpVec o) => OpVec(x - o.x, y - o.y);
+  OpVec operator -() => OpVec(-x, -y);
+  OpVec operator ~() => OpVec(y, x);
+  OpVec operator *(int k) => OpVec(x * k, y * k);
+  OpVec operator <<(int n) => OpVec(x << n, y << n);
+  OpVec operator >>>(int n) => OpVec(x >>> n, y >>> n);
+  OpVec operator ~/(int k) => OpVec(x ~/ k, y ~/ k);
+  bool operator <(OpVec o) => x * x + y * y < o.x * o.x + o.y * o.y;
+  bool operator >=(OpVec o) => !(this < o);
+  int operator [](int i) => i == 0 ? x : y;
+  String toString() => 'OpVec($x, $y)';
+}
+
+const opA = OpVec(1, 2);
+const opB = OpVec(3, 5);
 
 String shorthandTrace = '';
 

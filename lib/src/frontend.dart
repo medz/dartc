@@ -1824,7 +1824,17 @@ int feLowerHint(AstExpression expression, int context) {
       expression.text != '&&' &&
       expression.text != '||' &&
       expression.text != '??') {
+    if (feIsSuper(expression.children[0]) &&
+        expression.text != '==' &&
+        expression.text != '!=')
+      return feLowerSuperOperator(expression, expression.text, <AstExpression>[
+        expression.children[1],
+      ]);
     final left = feLowerExpression(expression.children[0]);
+    final user = feUserOperator(left, expression.text, <AstExpression>[
+      expression.children[1],
+    ], expression.token);
+    if (user >= 0) return user;
     final right = feLowerHint(
       resolveEqualityShorthand(
         feSymbols,
@@ -2480,6 +2490,112 @@ int feFinishGenericCall(int invocation, int token) {
   }
   if (result == tNever) flowUnreachable(feFlow);
   return result;
+}
+
+// Lowers `receiver op arguments` as a call of the operator method declared by
+// the receiver's class. The receiver value is already on the stack. Returns -1
+// when the receiver's class declares no such operator.
+int feUserOperator(
+  int receiver,
+  String name,
+  List<AstExpression> arguments,
+  int token,
+) {
+  final bound = typeBound(receiver);
+  if (!feClassType(bound)) return -1;
+  final function = feMethod(typeArgument(bound), name, false);
+  if (function < 0) return -1;
+  if (bound != receiver) feConvertValue(receiver, bound, token);
+  final callee = AstExpression(
+    astName,
+    name,
+    const <AstExpression>[],
+    const <AstType>[],
+    token,
+  );
+  final call = AstExpression(
+    astCall,
+    astCallValue,
+    <AstExpression>[callee, ...arguments],
+    const <AstType>[],
+    token,
+  );
+  return feInvokeDeclaration(call, function, 1);
+}
+
+// `super op argument`, `op super` and `super[index]` call the inherited
+// operator implementation.
+int feLowerSuperOperator(
+  AstExpression expression,
+  String name,
+  List<AstExpression> arguments,
+) {
+  final call = AstExpression(
+    astCall,
+    astCallValue,
+    <AstExpression>[
+      AstExpression(
+        astName,
+        name,
+        const <AstExpression>[],
+        const <AstType>[],
+        expression.token,
+      ),
+      ...arguments,
+    ],
+    const <AstType>[],
+    expression.token,
+  );
+  return feLowerSuperCall(call, expression.children[0], name, -1);
+}
+
+// The function to call for an operator method, going through the generated
+// dispatcher when subclasses can override it.
+int feOperatorTarget(int function) {
+  final owner = feOwners[function];
+  if (!feNeedsDispatch(owner)) return function;
+  final syntax = feFunctionNodes[function];
+  return feDispatchMember(
+    owner,
+    feMembers[owner].members[lookupMember(feMembers[owner], syntax.name)],
+    classMethod,
+    <int>[for (var i = 0; i < syntax.parameters.length; i++) i],
+  );
+}
+
+FeLvalue feLowerOperatorLvalue(
+  AstExpression expression,
+  int receiverType,
+  bool reading,
+) {
+  final owner = typeArgument(receiverType);
+  final writer = feMethod(owner, '[]=', false);
+  if (writer < 0)
+    feAstError(expression.token, 'indexed assignment requires operator []=');
+  var reader = -1;
+  if (reading) {
+    reader = feMethod(owner, '[]', false);
+    if (reader < 0)
+      feAstError(expression.token, 'indexed read requires operator []');
+  }
+  final offset = feParameterOffset(writer);
+  final indexType = functions[writer].parameterTypes[offset];
+  feLowerInContext(expression.children[1], indexType);
+  final index = feTemp(indexType);
+  feOperand(opStoreLocal, index);
+  final receiver = feTemp(receiverType);
+  feOperand(opStoreLocal, receiver);
+  return FeLvalue(
+      functions[writer].parameterTypes[offset + 1],
+      6,
+      receiver,
+      index,
+      -1,
+      -1,
+    )
+    ..owner = owner
+    ..reader = reader
+    ..setter = writer;
 }
 
 int feInvokeDeclaration(
@@ -4289,6 +4405,8 @@ FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
   }
   var type = tInt;
   if (expression.kind == astIndex) {
+    if (feClassType(receiverType))
+      return feLowerOperatorLvalue(expression, receiverType, reading);
     if (!typeIsList(receiverType))
       feAstError(expression.token, 'indexed assignment requires List');
     feLowerInContext(expression.children[1], tInt);
@@ -4417,6 +4535,23 @@ int feReadLvalue(FeLvalue target, int token) {
     feOperand(opLoadLocal, target.receiver);
     return tNever;
   }
+  if (target.container == 6) {
+    final reader = target.reader;
+    feOperand(opLoadLocal, target.receiver);
+    feConvertValue(
+      feSlotTypes[target.receiver],
+      functions[reader].parameterTypes[0],
+      token,
+    );
+    feOperand(opLoadLocal, target.index);
+    feConvertValue(
+      feSlotTypes[target.index],
+      functions[reader].parameterTypes[feParameterOffset(reader)],
+      token,
+    );
+    feCall(feOperatorTarget(reader), 2);
+    return functions[reader].result;
+  }
   if ((target.container == 0 || target.container == 5) && target.owner >= 0)
     return feReadStaticMember(
       feMembers[target.owner].members[target.member],
@@ -4506,6 +4641,17 @@ void feWriteLvalue(FeLvalue target, int token) {
     feCall(setter, 2);
     return;
   }
+  if (target.container == 6) {
+    feConvertValue(
+      feSlotTypes[target.receiver],
+      functions[target.setter].parameterTypes[0],
+      token,
+    );
+    feOperand(opLoadLocal, target.index);
+    feOperand(opLoadLocal, value);
+    feCall(feOperatorTarget(target.setter), 3);
+    return;
+  }
   feOperand(opLoadLocal, target.index);
   feOperand(opLoadLocal, value);
   if (target.container == 1)
@@ -4540,7 +4686,25 @@ int feLowerAssignment(AstExpression expression, bool postfix) {
     feOperand(opStoreLocal, previous);
   }
   var result = readType;
-  if (increment) {
+  final user = feUserOperator(
+    readType,
+    increment ? (op == '++' ? '+' : '-') : op.substring(0, op.length - 1),
+    <AstExpression>[
+      increment
+          ? AstExpression(
+              astInteger,
+              '1',
+              const <AstExpression>[],
+              const <AstType>[],
+              expression.token,
+            )
+          : expression.children[1],
+    ],
+    expression.token,
+  );
+  if (user >= 0) {
+    result = user;
+  } else if (increment) {
     feOperand(opInt, 1);
     var binary = '+';
     if (op == '--') binary = '-';
@@ -4745,6 +4909,10 @@ int feLowerValue(AstExpression expression) {
     return feLowerCall(expression, -1);
   }
   if (kind == astIndex) {
+    if (feIsSuper(expression.children[0]))
+      return feLowerSuperOperator(expression, '[]', <AstExpression>[
+        expression.children[1],
+      ]);
     var receiver = feNonNullableValue(
       feLowerExpression(expression.children[0]),
       expression.children[0].token,
@@ -4754,6 +4922,10 @@ int feLowerValue(AstExpression expression) {
       feEmit(opPop);
       return tNever;
     }
+    final user = feUserOperator(receiver, '[]', <AstExpression>[
+      expression.children[1],
+    ], expression.token);
+    if (user >= 0) return user;
     feLowerInContext(expression.children[1], tInt);
     if (receiver == tString) {
       feDuplicate(tInt);
@@ -4802,12 +4974,25 @@ int feLowerValue(AstExpression expression) {
       feOperand(opInt, decodeIntegerLiteral(feSources, expression));
       return tInt;
     }
+    if (feIsSuper(expression.children[0]) && (op == '-' || op == '~'))
+      return feLowerSuperOperator(
+        expression,
+        op == '-' ? 'unary-' : op,
+        const <AstExpression>[],
+      );
     var type = feLowerExpression(expression.children[0]);
     if (op == '!') {
       feBooleanValue(type, expression.token);
       feEmit(opNot);
       return tBool;
     }
+    final user = feUserOperator(
+      type,
+      op == '-' ? 'unary-' : op,
+      const <AstExpression>[],
+      expression.token,
+    );
+    if (user >= 0) return user;
     var bound = typeBound(type);
     if (bound != type) type = feConvertValue(type, bound, expression.token);
     var result = typingUnary(op, type);
@@ -4855,7 +5040,15 @@ int feLowerValue(AstExpression expression) {
       feFlow = flowUnsplit(feJoinFlow(feFlow, falseFlow));
       return tBool;
     }
+    if (feIsSuper(expression.children[0]) && op != '==' && op != '!=')
+      return feLowerSuperOperator(expression, op, <AstExpression>[
+        expression.children[1],
+      ]);
     var left = feLowerExpression(expression.children[0]);
+    final user = feUserOperator(left, op, <AstExpression>[
+      expression.children[1],
+    ], expression.token);
+    if (user >= 0) return user;
     var right = feLowerHint(
       resolveEqualityShorthand(feSymbols, op, expression.children[1], left),
       typingBinaryContext(op, left, -1),

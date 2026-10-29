@@ -2059,6 +2059,8 @@ void main() {
       'typedef Invalid<get> = int;void main(){}',
     ];
     final rejected = [
+      // User-defined equality needs dispatch from runtime comparisons.
+      'class C { bool operator ==(Object o) => true; int get hashCode => 1; } void main() {}',
       'void f(double d){if(d case <(.infinity)) print(1);} void main(){}',
       'void f(double d){print(d < .infinity);} void main(){}',
 
@@ -3051,6 +3053,7 @@ void main() {
       'enum E { a; final int index = 1; } void main() {}',
       'enum E { a; static const values = 1; } void main() {}',
       'enum E { a; int get hashCode => 1; } void main() {}',
+      'enum E { a; bool operator ==(Object o) => true; } void main() {}',
       'enum E { a(1); E(this.x) { print(1); } final int x; } void main() {}',
       'enum E { a(1); E(this.x); int x; } void main() {}',
       'enum E { a(1, 2); const E(this.x); final int x; } void main() {}',
@@ -3062,6 +3065,31 @@ void main() {
     for (var i = 0; i < rejectedEnums.length; i++) {
       final invalid = File('${temporary.path}/rejected-enum-$i.dart')
         ..writeAsStringSync(rejectedEnums[i]);
+      await reject(invalid, checkSdk: true);
+    }
+    final rejectedOperators = [
+      'class C { C operator +(C a, C b) => this; } void main() {}',
+      'class C { C operator +() => this; } void main() {}',
+      'class C { C operator +([C? o]) => this; } void main() {}',
+      'class C { C operator +({C? o}) => this; } void main() {}',
+      'class C { int operator []=(int i, int v) => 1; } void main() {}',
+      'class C { static C operator +(C o) => o; } void main() {}',
+      'class C { C operator +<T>(C o) => o; } void main() {}',
+      'class C { bool operator !() => true; } void main() {}',
+      'class C { bool operator !=(Object o) => true; } void main() {}',
+      'class C { int operator [](int a, int b) => 1; } void main() {}',
+      'class C {} void main() { var c = C(); print(c + c); }',
+      'class C { C operator +(C o) => o; } void main() { C() + 1; }',
+      'class C { C operator +(C o) => o; } void main() { C? c; c + C(); }',
+      'class C { int operator [](int i) => i; } void main() { var c = C(); c[0] = 1; }',
+      'class C { void operator []=(int i, int v) {} } void main() { var c = C(); c[0] += 1; }',
+      'class C {} void main() { print(-C()); }',
+      'class C { C operator -(C o) => o; } void main() { print(-C()); }',
+      'class C { C operator ~() => this; } void main() { print(~1 + C()); }',
+    ];
+    for (var i = 0; i < rejectedOperators.length; i++) {
+      final invalid = File('${temporary.path}/rejected-operator-$i.dart')
+        ..writeAsStringSync(rejectedOperators[i]);
       await reject(invalid, checkSdk: true);
     }
     for (var i = 0; i < rejected.length; i++) {
