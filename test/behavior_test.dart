@@ -85,6 +85,11 @@ String updateProbe() {
   return 'next';
 }
 
+String intParseInput() {
+  print('parse-input');
+  return '0xff';
+}
+
 class Counter {
   int value;
   List<int> values;
@@ -479,7 +484,7 @@ void main(List<String> args) {
   print('$foo$bar');
   print('${foo$bar}');
   print('$foo${bar}tail');
-  print(10000000000 + int.parse('0xff'));
+  print(10000000000 + int.parse(intParseInput()));
   print(args.length);
   print(args[1]);
   var info = FunctionInfo('entry', 2, 1, 3, 1, <int>[4, 8], enabled, 13);
@@ -2929,6 +2934,14 @@ void main() {
       '// @dart=2.12\nvoid main(){(List<int>.filled)(1,3);}',
       '// @dart=2.12\nvoid main(){(String.fromCharCodes)(<int>[65]);}',
       "void main(){new int.parse('7');}",
+      'void unused(){int.parse();}void main(){}',
+      "int extra(){print('extra');return 2;}void main(){int.parse('10',extra());}",
+      "void unused(){int.parse('10',2);}void main(){}",
+      "void unused(){int.parse(source:'10');}void main(){}",
+      "void unused(){int.parse('10',other:2);}void main(){}",
+      "void unused(){int.parse<int>('10');}void main(){}",
+      'void unused(){int.parse(10);}void main(){}',
+      'void unused(){int.parse(null);}void main(){}',
       "import 'dart:ffi';typedef Callback=Int64 Function(Int64);int target(int value)=>value;void main(){new Pointer.fromFunction<Callback>(target,0);}",
       'int value()=>1;void main(){new value();}',
       'int target()=>1;int Function() get value=>target;void main(){new value();}',

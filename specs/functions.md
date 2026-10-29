@@ -35,6 +35,12 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 普通形参上的 covariant 按固定规范与 SDK 3.13.7 analyzer 限于实例方法、setter 或运算符；主构造器的字段声明参数另按 3.13 规则处理。该 SDK 的 CFE 还接受局部/匿名函数、普通及工厂构造器、字段形式参数、两种函数 typedef 中的该修饰符。dartc 按规范和 analyzer 拒绝这些位置，`covariantSyntaxDifferences` 单独核实 CFE 接受与 dartc 拒绝。运行时类型错误仍沿用当前失败退出边界，可捕获 TypeError 见[异常缺口](statements.md)。
 
+## 内建静态调用
+
+依据 §17.15 调用义务及 SDK [`int.parse(String source, {int? radix})`](https://api.dart.dev/stable/3.13.7/dart-core/int/parse.html)，当前已实现的省略 radix 调用在源 API 边界检查一个必需位置 String 实参；缺参、多余位置参数、命名 source、未知命名参数、类型实参和不兼容的静态值类型被拒绝，未使用函数也检查。实参只求值一次，再传给原生解析实现。显式 radix 和静态方法函数值仍未实现；有效字符串范围、溢出、空白和 FormatException 的运行时行为仍有缺口，签名检查不代表这些语义已完成。
+
+拥有入口为 [frontend.dart](../lib/src/frontend.dart) 的 `feLowerStaticCall()`；行为入口为 [behavior_test.dart](../test/behavior_test.dart) 的 `program/intParseInput()` 与 `rejected`。
+
 ## 泛型直接调用
 
 [§9 类型参数作用域][generic-scope]和[§17.15 调用][generic-call]部分实现。顶层函数、静态及实例方法（包括 `call`）可声明类型参数、显式上界和必需/可选/命名值参数。参数按声明身份绑定，默认值在声明作用域检查；未使用函数也检查边界、函数体、返回和确定赋值。类型参数可用于 List、可空类型、非泛型函数签名、`is`/`as` 和已支持的模式。类型参数不能用于常量类型实参，构造器和访问器不能声明自身类型参数。

@@ -2986,8 +2986,7 @@ int feBuiltinArgumentType(int builtin, int argument) {
   if (builtin == bHostWrite) return argument == 0 ? tString : listType(tInt);
   if (builtin == bHostExit) return tInt;
   if (builtin == bStringFromCodes) return argument == 0 ? listType(tInt) : tInt;
-  if (builtin == bIntParse ||
-      builtin == bStringIndexOf ||
+  if (builtin == bStringIndexOf ||
       builtin == bStringLastIndexOf ||
       builtin == bStringStartsWith ||
       builtin == bStringEndsWith)
@@ -3210,8 +3209,10 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
   if (declaration.source == sourceCore && name == 'int' && member == 'parse') {
     if (call.text == astCallNew)
       feAstError(call.token, 'new cannot invoke a static method');
-    var count = feLowerBuiltinArguments(call, bIntParse);
-    feBuiltin(bIntParse, count);
+    if (call.children.length != 2 || call.children[1].kind == astNamedArgument)
+      feAstError(call.token, 'int.parse requires one positional String');
+    feLowerInContext(call.children[1], tString);
+    feBuiltin(bIntParse, 1);
     return tInt;
   }
   feAstError(call.token, 'unsupported static call ' + name + '.' + member);
