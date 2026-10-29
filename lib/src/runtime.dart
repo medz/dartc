@@ -228,14 +228,22 @@ int rtStringEqual(int left, int right) {
   if (left == right) return 1;
   var length = nativeLoad64(left + stringLengthOffset);
   if (length != nativeLoad64(right + stringLengthOffset)) return 0;
-  var i = 0;
-  while (i < length) {
-    if (nativeLoad16(left + stringDataOffset + i * 2) !=
-        nativeLoad16(right + stringDataOffset + i * 2))
-      return 0;
-    i = i + 1;
+  left += stringDataOffset;
+  right += stringDataOffset;
+  final end = left + length * 2;
+  // Compare complete words only; padding past the UTF-16 data is unspecified.
+  while (left + 8 <= end) {
+    if (nativeLoad64(left) != nativeLoad64(right)) return 0;
+    left += 8;
+    right += 8;
   }
-  return 1;
+  // At most three code units remain.
+  if (left == end) return 1;
+  if (nativeLoad16(left) != nativeLoad16(right)) return 0;
+  if (left + 2 == end) return 1;
+  if (nativeLoad16(left + 2) != nativeLoad16(right + 2)) return 0;
+  if (left + 4 == end) return 1;
+  return nativeLoad16(left + 4) == nativeLoad16(right + 4) ? 1 : 0;
 }
 
 int rtStringSubstring(int value, int start, int end) {
@@ -260,14 +268,21 @@ int rtStringSubstring(int value, int start, int end) {
 
 int rtStringMatch(int value, int prefix, int start) {
   var n = nativeLoad64(prefix + stringLengthOffset);
-  var i = 0;
-  while (i < n) {
-    if (nativeLoad16(value + stringDataOffset + (start + i) * 2) !=
-        nativeLoad16(prefix + stringDataOffset + i * 2))
-      return 0;
-    i = i + 1;
+  value += stringDataOffset + start * 2;
+  prefix += stringDataOffset;
+  final end = prefix + n * 2;
+  // start may place the source at any UTF-16 code-unit alignment.
+  while (prefix + 8 <= end) {
+    if (nativeLoad64(value) != nativeLoad64(prefix)) return 0;
+    value += 8;
+    prefix += 8;
   }
-  return 1;
+  if (prefix == end) return 1;
+  if (nativeLoad16(value) != nativeLoad16(prefix)) return 0;
+  if (prefix + 2 == end) return 1;
+  if (nativeLoad16(value + 2) != nativeLoad16(prefix + 2)) return 0;
+  if (prefix + 4 == end) return 1;
+  return nativeLoad16(value + 4) == nativeLoad16(prefix + 4) ? 1 : 0;
 }
 
 int rtStringStartsWith(int value, int prefix, int start) {

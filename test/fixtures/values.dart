@@ -2785,6 +2785,71 @@ void stringBoundaries() {
   print(codes.codeUnitAt(1));
   print(codes.codeUnitAt(3));
   print(codes.substring(4));
+  final units = <int>[0, 65, 255, 256, 0xd800, 0xdc00, 0xdfff, 0xffff, 0x4f60];
+  for (final length in <int>[
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    15,
+    16,
+    17,
+    31,
+    32,
+    33,
+    63,
+    64,
+    65,
+    4095,
+    4096,
+    4097,
+  ]) {
+    final data = <int>[];
+    for (var i = 0; i < length; i++) data.add(units[i % units.length]);
+    final left = String.fromCharCodes(data);
+    final same = String.fromCharCodes(data);
+    print(left == same);
+    print(left == left);
+    print(left == same + '!');
+    for (var offset = 0; offset < 4; offset++) {
+      final enclosed = 'abcd'.substring(0, offset) + left;
+      print(enclosed.startsWith(same, offset));
+      print(enclosed.endsWith(same));
+      print(enclosed.indexOf(same, offset));
+      print(enclosed.lastIndexOf(same));
+      print(enclosed.substring(offset) == same);
+    }
+    if (length == 0) continue;
+    final positions = length <= 17
+        ? <int>[for (var i = 0; i < length; i++) i]
+        : <int>[0, 1, 3, 4, length ~/ 2, length - 4, length - 2, length - 1];
+    for (final position in positions) {
+      data[position] ^= 1;
+      final other = String.fromCharCodes(data);
+      data[position] ^= 1;
+      print(left == other);
+      print(left != other);
+      for (var offset = 0; offset < 4; offset++) {
+        final enclosed = 'abcd'.substring(0, offset) + left;
+        print(enclosed.startsWith(other, offset));
+        print(enclosed.endsWith(other));
+        print(enclosed.indexOf(other));
+        print(enclosed.lastIndexOf(other));
+      }
+    }
+  }
+  print('Am\u00e9lie' == 'Ame\u0301lie');
+  print('\ud800\udc00' == String.fromCharCodes(<int>[0x10000]));
+  print(
+    '\ud800x\udfff\uffff' ==
+        String.fromCharCodes(<int>[0xd800, 120, 0xdfff, 0xffff]),
+  );
   var large = String.fromCharCodes(List<int>.filled(65536, 65));
   print(large);
   print(codes);
