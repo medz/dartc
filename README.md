@@ -2,18 +2,19 @@
 
 A native Dart compiler written entirely in Dart.
 
-`dartc` compiles Dart source directly to native machine code for macOS ARM64 and Linux ARM64/x86-64, and can rebuild its own compiler. The goal is a complete, independent Dart toolchain whose compiler, runtime and standard libraries can evolve in Dart. Version 0.3 is an early preview.
+`dartc` compiles Dart source directly to native machine code for macOS ARM64 and Linux ARM64/x86-64, and can rebuild its own compiler. The goal is a complete, independent Dart toolchain whose compiler, runtime and standard libraries can evolve in Dart. Version 0.4 is an early preview.
 
 Generated executables include the reachable parts of dartc's own runtime, compiled to native code. Native compiler binaries and generated executables run without the official Dart SDK, VM, JIT or snapshots.
 
 ## Try the native compiler
 
-Download the archive for your platform from the [0.3.0 release](https://github.com/medz/dartc/releases/tag/v0.3.0):
+Download the archive for your platform from the [0.4.0 release](https://github.com/medz/dartc/releases/tag/v0.4.0):
 
-- `dartc-0.3.0-macos-arm64.tar.gz`
-- `dartc-0.3.0-linux-arm64.tar.gz`
-
-Linux x86-64 is available from source; the 0.3.0 release does not include an x64 archive.
+| Platform | Archive |
+| --- | --- |
+| macOS ARM64 | `dartc-0.4.0-macos-arm64.tar.gz` |
+| Linux ARM64 | `dartc-0.4.0-linux-arm64.tar.gz` |
+| Linux x86-64 | `dartc-0.4.0-linux-x64.tar.gz` |
 
 Save this as `hello.dart`:
 
@@ -26,22 +27,17 @@ void main() {
 Extract the archive, then compile `hello.dart`. On macOS ARM64:
 
 ```sh
-tar -xzf dartc-0.3.0-macos-arm64.tar.gz
-export PATH="$PWD/dartc-0.3.0-macos-arm64/bin:$PATH"
+tar -xzf dartc-0.4.0-macos-arm64.tar.gz
+export PATH="$PWD/dartc-0.4.0-macos-arm64/bin:$PATH"
 dartc hello.dart -o hello
 ./hello
 ```
 
-On Linux ARM64:
-
-```sh
-tar -xzf dartc-0.3.0-linux-arm64.tar.gz
-export PATH="$PWD/dartc-0.3.0-linux-arm64/bin:$PATH"
-dartc hello.dart -o hello
-./hello
-```
+On Linux, use the same commands with `linux-arm64` or `linux-x64` in place of `macos-arm64`.
 
 Keep the archive's `bin/` and `lib/` directories together. Matching dartc runtime sources are included in `lib/` for compilation. `SHA256SUMS` contains the archive checksums.
+
+Upgrading from 0.3 requires replacing the whole archive: the internal runtime ABI changed from 14 to 17. See the [0.4.0 upgrade notes](CHANGELOG.md#upgrading-from-03).
 
 The pub package uses the Dart SDK as the compiler's host:
 
@@ -58,15 +54,15 @@ The [specification tracker](specs/README.md) records the reference SDK, current 
 
 | Area | Implemented behavior |
 | --- | --- |
-| Values | Native integers, booleans, Unicode strings, nullable values, typed lists with conditional/loop/spread and null-aware elements and runtime type checks |
+| Values | Native integers and doubles, booleans, Unicode strings, nullable values, typed lists with conditional/loop/spread and null-aware elements and runtime type checks |
 | Declarations | Local object/List destructuring declarations and assignments, pattern loop bindings, top-level variables, lazy initialization, classes with inheritance, abstract classes and interfaces, enums with fields, constructors and methods, instance/static fields and methods, bound method values, named/unnamed constructors with field initializer lists, getters, setters and generic type aliases |
-| Functions | Generic top-level and method calls with bounds and partial inference, callable objects, recursion, local and anonymous functions with lexical captures, optional/named direct arguments, required-positional function values and structural function types |
-| Control flow | Blocks, assignments, cascades, null-aware member/index chains, conditions and if-case statements/elements, loops, labelled jumps, switch statements/expressions with scalar/object/list patterns and guards, shared case bodies and case-label continue, and returns |
+| Functions | Generic top-level and method calls with bounds and partial inference, callable objects, recursion, local and anonymous functions with value/type captures, optional/named direct and function-value calls, constructor values and structural function types |
+| Control flow | Blocks, assignments, cascades, null-aware member/index chains, conditions and if-case statements/elements, loops, labelled jumps, switch statements/expressions with scalar/object/list patterns and guards, shared case bodies and case-label continue, returns and synchronous exceptions |
 | Libraries | Relative, file/package imports and exports, prefixes, filters, conditional URIs and library parts |
 | Constants | Scalar/list constants, canonical const instances, metadata and supported core pragmas |
 | Core APIs | print, command-line arguments, basic String/List operations and StringBuffer object/character writing |
 
-Generic classes, dynamic member calls, mixins, extensions, records, map/record patterns, asynchronous code, isolates and most SDK libraries are not implemented, and enums have no type parameters or mixins. Exceptions are synchronous only. Generic function values, closures inside generic functions, complete generic inference and generic or standard-library constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
+Generic classes, dynamic member calls, mixins, extensions, records, map/record patterns, asynchronous code, isolates and most SDK libraries are not implemented, and enums have no type parameters or mixins. Exceptions are synchronous only. Generic function values, complete generic inference and generic or standard-library constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage is retained until process exit.
 
 Package configuration v2 supplies local package mappings and default language versions. A leading `// @dart = major.minor` comment can select an implemented versioned rule from 2.12 through 3.13; this is not complete compatibility with those language versions. See [libraries](specs/libraries.md) and [lexical structure](specs/lexical-structure.md).
 

@@ -64,7 +64,17 @@ Use `dart tool/fuzz.dart --help` for explicit rejection and runtime-failure cont
 
 ## CI
 
-The [native self-hosting workflow](../.github/workflows/native.yml) is manually dispatched. Select ARM64, x64 or both with `architecture`, and the reference SDK version with `dart_sdk`. It bootstraps on the selected Linux hosts, runs differential, SSA verification, resource-measurement, program-benchmark and fuzz tests, and cross-compiles the compiler for macOS. Release packaging and verification are optional workflow inputs. For x64, `cross_ref` supplies a matching Mac-built `dartc-linux-x64` seed; without a supplied seed, a new checkout uses the SDK for the initial cold bootstrap.
+The [native self-hosting workflow](../.github/workflows/native.yml) is manually dispatched. Select ARM64, x64 or both with `architecture`, and the reference SDK version with `dart_sdk`. It bootstraps on the selected Linux hosts, runs differential, SSA verification, resource-measurement, program-benchmark and fuzz tests, and cross-compiles the compiler for macOS. Release packaging and verification are optional workflow inputs. `cross_ref` supplies matching Mac-built seeds named `dartc-linux` for ARM64 and `dartc-linux-x64` for x64; without a supplied seed, a new checkout uses the SDK for the initial cold bootstrap.
+
+## Release notes
+
+Keep `CHANGELOG.md` newest first. Each version has a date, a comparison link and a short description of its user-visible scope. Group entries under Features, Fixes and Upgrade headings as needed; omit empty sections. Combine related commits into one behavior change, and describe fixes by their trigger and observable result.
+
+A GitHub Release starts with what the version enables, then expands its main capabilities with short runnable examples. Follow with upgrade steps, platform downloads, installation instructions and links to the full changelog and versioned specs. Patch releases can use a shorter form. Keep the release and changelog consistent without repeating every entry.
+
+Explain breaking changes before the examples when users must act. State the affected versions and the concrete replacement or migration step. For compiler/runtime changes, identify the matching archive or bootstrap seed. Validate every example with the reference SDK and the native compiler before publication.
+
+Only include performance claims backed by the same task and necessary side effects; name the compared versions, platform and measurement scope. Keep raw measurements, build logs and validation records in `build/`. Internal refactors belong in release notes only when their user-visible effect can be explained. Language conformance and gaps remain owned by `specs/`.
 
 ## Docker cross-target validation
 

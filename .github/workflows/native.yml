@@ -37,7 +37,17 @@ jobs:
         with:
           sdk: '${{ inputs.dart_sdk }}'
           architecture: arm64
-      - run: dart tool/bootstrap.dart
+      - uses: actions/checkout@v7
+        if: inputs.cross_ref != ''
+        with:
+          ref: ${{ inputs.cross_ref }}
+          path: .cross
+      - name: Bootstrap from the supplied native seed
+        if: inputs.cross_ref != ''
+        run: dart tool/bootstrap.dart --seed .cross/dartc-linux
+      - name: Cold bootstrap without an existing seed
+        if: inputs.cross_ref == ''
+        run: dart tool/bootstrap.dart
       - run: dart test/differential_test.dart --compiler build/dartc-stage2
       - run: dart test/measure_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
       - run: dart test/ssa_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
@@ -53,11 +63,6 @@ jobs:
           path: build/release/*
           if-no-files-found: error
           retention-days: 7
-      - uses: actions/checkout@v7
-        if: inputs.cross_ref != ''
-        with:
-          ref: ${{ inputs.cross_ref }}
-          path: .cross
       - name: Run the Mac-built Linux compiler
         if: inputs.cross_ref != ''
         env:
