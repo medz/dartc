@@ -101,7 +101,7 @@ Future<void> main(List<String> args) async {
       stage2,
       '--std',
       standard,
-    ], timeout: const Duration(minutes: 5));
+    ], timeout: const Duration(minutes: 10));
     for (final stage in [stage1, stage2, stage3]) {
       File(stage)
           .copySync('${build.path}/${File(stage).uri.pathSegments.last}');
