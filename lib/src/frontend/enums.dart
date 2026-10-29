@@ -108,7 +108,7 @@ void desugarEnum(SourceProgram program, AstClass syntax) {
   if (enhanced &&
       !sourceVersionAtLeast(program, program.tokens[token].source, 2, 17))
     _enumError(program, token, 'enhanced enums require language version 2.17');
-  for (final reserved in const <String>['index', 'values', 'hashCode', '==']) {
+  for (final reserved in const <String>['index', 'values', 'hashCode']) {
     if (_enumDeclares(syntax, reserved))
       _enumError(program, token, 'enum cannot declare ' + reserved);
   }
