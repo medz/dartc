@@ -42,7 +42,8 @@ int rtHostTarget() {
 }
 
 int rtSyscall(int n, int a, int b, int c, int d, int e, int f) {
-  if (nativeTarget() == 0) return nativeSyscall(n, a, b, c, d, e, f);
+  if (nativeTarget() == 0 || nativeTarget() == 3)
+    return nativeSyscall(n, a, b, c, d, e, f);
   if (nativeTarget() == 2) {
     if (n == 1) return nativeSyscall(60, a, b, c, d, e, f);
     if (n == 3) return nativeSyscall(0, a, b, c, d, e, f);
@@ -1031,7 +1032,7 @@ int rtHostReadFile(int path, int optional) {
 int rtHostCurrentDirectory() {
   var capacity = 1024;
   var bytes = rtMap(capacity);
-  if (nativeTarget() == 0) {
+  if (nativeTarget() == 0 || nativeTarget() == 3) {
     // Darwin has no getcwd syscall; F_GETPATH writes a MAXPATHLEN buffer.
     nativeStore64(bytes, 46);
     var fd = rtSyscall(5, bytes, 0, 0, 0, 0, 0);
@@ -1126,7 +1127,7 @@ int _rtExecutablePath() {
   var capacity = 4096;
   var bytes = rtMap(capacity);
   var result = 0;
-  if (nativeTarget() == 0) {
+  if (nativeTarget() == 0 || nativeTarget() == 3) {
     // Darwin proc_info(PIDINFO, getpid(), PIDPATHINFO, 0, buffer, size).
     var pid = nativeSyscall(20, 0, 0, 0, 0, 0, 0);
     var status = nativeSyscall(336, 2, pid, 11, 0, bytes, capacity);

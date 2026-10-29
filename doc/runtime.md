@@ -38,7 +38,7 @@ List 标志 `objectListFixed` / `objectListReadOnly` 分别限制长度变化和
 
 ## 当前托管调用 ABI
 
-| 项目 | ARM64 | Linux x64 |
+| 项目 | ARM64 | x64 |
 | --- | --- | --- |
 | word 与引用 | 64 位 | 64 位 |
 | 前若干参数 | x0–x7 | rdi、rsi、rdx、rcx、r8、r9 |
@@ -49,7 +49,7 @@ List 标志 `objectListFixed` / `objectListReadOnly` 分别限制长度变化和
 | 帧头 | FP +0 保存前帧 FP，+8 保存返回 PC | 同左 |
 | 调用前栈对齐 | 16 字节 | 16 字节，不使用 red zone |
 
-隐藏参数和 double 原始位模式参与同一内部参数排列。x64 的整数参数位置与 System V AMD64 一致，但此托管协议不是完整 C ABI；外部 FFI 必须独立分类和转换。x64 的 syscall 参数使用 rdi、rsi、rdx、r10、r8、r9，调用号/结果为 rax，rcx/r11 被破坏；寄存器搬运在机器边界完成，系统调用号及文件服务算法保留在 Dart 运行时中。调用号依据 [Linux v6.12 x86-64 表](https://github.com/torvalds/linux/blob/v6.12/arch/x86/entry/syscalls/syscall_64.tbl)。
+隐藏参数和 double 原始位模式参与同一内部参数排列。x64 的整数参数位置与 System V AMD64 一致，但此托管协议不是完整 C ABI；外部 FFI 必须独立分类和转换。x64 的 syscall 参数使用 rdi、rsi、rdx、r10、r8、r9，调用号/结果为 rax，rcx/r11 被破坏；寄存器搬运在机器边界完成，系统调用号及文件服务算法保留在 Dart 运行时中。Linux 调用号依据 [Linux v6.12 x86-64 表](https://github.com/torvalds/linux/blob/v6.12/arch/x86/entry/syscalls/syscall_64.tbl)。macOS x64 按 [Darwin syscall 入口](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/custom/SYS.h) 在机器边界添加 UNIX 类别 0x02000000，并将 carry 标记的 errno 转为负值；Dart 运行时与 macOS ARM64 共用 BSD 调用号、F_GETPATH 和 proc_info 文件服务。退出使用 Darwin exit 或 Linux exit_group。
 
 ## 数值表示与机器边界
 

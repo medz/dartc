@@ -16,7 +16,7 @@ import 'types.dart';
 List<int> createMachOExecutable() {
   int base = 0x100000000;
   int dataBase = 0x110000000;
-  int page = 0x4000;
+  int page = targetX64 ? 0x1000 : 0x4000;
   int codeOffset = 0x1000;
   int constantOffset = alignImage(codeOffset + codeSize, 8);
   ConstantLayout constants = layoutConstants(constantOffset);
@@ -27,8 +27,8 @@ List<int> createMachOExecutable() {
 
   image = <int>[];
   image32(0xfeedfacf);
-  image32(0x100000c);
-  image32(0);
+  image32(targetX64 ? 0x1000007 : 0x100000c);
+  image32(targetX64 ? 3 : 0);
   image32(2);
   image32(13);
   image32(0);

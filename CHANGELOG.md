@@ -1,5 +1,9 @@
 ## Unreleased
 
+### Features
+
+- Add Intel Mac (`macos-x64`) executables, native compiler builds and release packaging. macOS x64 also supports the existing Int64 FFI object, static library and dynamic library outputs.
+
 ### Performance
 
 - Eliminate lazy initialization checks for globals and static fields whose checked initial value is a zero storage word, including runtime allocation and GC state. Runtime sources follow the same initialization rules as application sources, preserving writes before first read.

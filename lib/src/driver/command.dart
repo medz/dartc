@@ -36,7 +36,7 @@ Never _compile(List<String> args) {
 
   if (args.length == 0 || args[0] == '--help') {
     print(
-      'Usage: dartc <source.dart> [-o <file>] [--target macos-arm64|linux-arm64|linux-x64]',
+      'Usage: dartc <source.dart> [-o <file>] [--target macos-arm64|macos-x64|linux-arm64|linux-x64]',
     );
     print(
       '       [--emit exe|dylib|object|static] [--export <FFI binding>] [--std <runtime.dart>]',
@@ -72,6 +72,8 @@ Never _compile(List<String> args) {
     } else if (option == '--target') {
       if (value == 'macos-arm64') {
         compilationTarget = Target.macosArm64;
+      } else if (value == 'macos-x64') {
+        compilationTarget = Target.macosX64;
       } else if (value == 'linux-arm64') {
         compilationTarget = Target.linuxArm64;
       } else if (value == 'linux-x64') {
@@ -95,7 +97,7 @@ Never _compile(List<String> args) {
     argument = argument + 1;
   }
   if (imageKind != ImageKind.executable && targetOS != 0) {
-    argumentError('Library output currently supports macOS ARM64.');
+    argumentError('Library output currently supports macOS.');
   }
   if (imageKind != ImageKind.executable && selectedExport == '') {
     argumentError(

@@ -235,7 +235,7 @@ void xInstruction(
     if (outgoing != 0) xImmediate(0, xRsp, outgoing);
   } else if (op == mExit) {
     xValueLoad(function, inputs[0], xRdi);
-    xConstant(xRax, 231);
+    xConstant(xRax, targetOS == 0 ? 0x2000001 : 231);
     codeByte(0x0f);
     codeByte(0x05);
     xTrap();
@@ -244,8 +244,14 @@ void xInstruction(
     xValueLoad(function, inputs[0], xRax);
     for (var i = 1; i < inputs.length; i++)
       xValueLoad(function, inputs[i], xSyscallArguments[i - 1]);
+    if (targetOS == 0) xImmediate(1, xRax, 0x2000000); // Darwin UNIX class
     codeByte(0x0f);
     codeByte(0x05);
+    if (targetOS == 0) {
+      final success = xBranch(3); // carry clear
+      xUnary(3, xRax); // normalize Darwin errno to a negative result
+      xPatchRelative(success, codeSize);
+    }
   } else if (op == mShlImmediate ||
       op == mShrImmediate ||
       op == mUshrImmediate) {
@@ -458,31 +464,42 @@ void xRootBoundary(bool enabled) {
 void generateX64(List<MachineFunction> program, int features) {
   final roots = (features & metadataRoots) != 0;
   final frames = (features & (metadataFrames | metadataHandlers)) != 0;
-  final main = entryFunction;
-  if (functions[main].parameters == 0) {
-    xCall(0);
+  if (imageKind == ImageKind.executable) {
+    // LC_MAIN receives argc/argv in rdi/rsi with a return address on the
+    // stack. Linux enters with a 16-byte-aligned argc/argv process stack.
+    if (targetOS == 0) xPush(xRbp);
+    final main = entryFunction;
+    if (functions[main].parameters == 0) {
+      xCall(0);
+      xRootBoundary(roots);
+    } else {
+      if (targetOS == 1) {
+        xLoad(xRdi, xRsp, 0);
+        xMove(xRsi, xRsp);
+        xImmediate(0, xRsi, 8);
+      }
+      xPush(xRdi);
+      xPush(xRsi);
+      xCall(0);
+      xRootBoundary(roots);
+      xPop(xRsi);
+      xPop(xRdi);
+      xAddress(4, listType(tString));
+      xMove(xRdx, xRax);
+      xCall(runtimeFunction(bArguments, -1));
+      xRootBoundary(roots);
+      xMove(xRdi, xRax);
+    }
+    xCall(main);
     xRootBoundary(roots);
-  } else {
-    xLoad(xRdi, xRsp, 0);
-    xMove(xRsi, xRsp);
-    xImmediate(0, xRsi, 8);
-    xPush(xRdi);
-    xPush(xRsi);
-    xCall(0);
-    xRootBoundary(roots);
-    xPop(xRsi);
-    xPop(xRdi);
-    xAddress(4, listType(tString));
-    xMove(xRdx, xRax);
-    xCall(runtimeFunction(bArguments, -1));
-    xRootBoundary(roots);
-    xMove(xRdi, xRax);
+    xExit(0);
+    if (frames) emittedFrames.add(EmittedFrame(0, codeSize, -1, 0, 0, -1));
   }
-  xCall(main);
-  xRootBoundary(roots);
-  xExit(0);
-  if (frames) emittedFrames.add(EmittedFrame(0, codeSize, -1, 0, 0, -1));
-  for (var i = 0; i < program.length; i++) {
+  for (
+    var i = imageKind == ImageKind.executable ? 0 : 1;
+    i < program.length;
+    i++
+  ) {
     if (program[i].reachable) {
       functionOffsets[i] = codeSize;
       xFunction(program[i], roots, frames, i);

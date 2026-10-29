@@ -1,9 +1,15 @@
-enum Target { macosArm64, linuxArm64, linuxX64 }
+enum Target { macosArm64, linuxArm64, linuxX64, macosX64 }
 
 Target compilationTarget = Target.macosArm64;
 
-int get targetOS => compilationTarget == Target.macosArm64 ? 0 : 1;
-bool get targetX64 => compilationTarget == Target.linuxX64;
+int get targetOS =>
+    compilationTarget == Target.macosArm64 ||
+        compilationTarget == Target.macosX64
+    ? 0
+    : 1;
+bool get targetX64 =>
+    compilationTarget == Target.linuxX64 ||
+    compilationTarget == Target.macosX64;
 
 // General registers are callee-saved. Managed references remain in described
 // stack slots at calls and safe points.

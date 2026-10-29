@@ -43,6 +43,7 @@ class _UsageReader {
 
   factory _UsageReader() {
     if (Abi.current() != Abi.macosArm64 &&
+        Abi.current() != Abi.macosX64 &&
         Abi.current() != Abi.linuxArm64 &&
         Abi.current() != Abi.linuxX64) {
       throw UnsupportedError('rusage ABI: ${Abi.current()}');

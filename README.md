@@ -2,7 +2,7 @@
 
 A native Dart compiler written entirely in Dart.
 
-`dartc` compiles Dart source directly to native machine code for macOS ARM64 and Linux ARM64/x86-64, and can rebuild its own compiler. The goal is a complete, independent Dart toolchain whose compiler, runtime and standard libraries can evolve in Dart. Version 0.4 is an early preview.
+`dartc` compiles Dart source directly to native machine code for macOS and Linux on ARM64/x86-64, and can rebuild its own compiler. The goal is a complete, independent Dart toolchain whose compiler, runtime and standard libraries can evolve in Dart. Version 0.4 is an early preview.
 
 Generated executables include the reachable parts of dartc's own runtime, compiled to native code. Native compiler binaries and generated executables run without the official Dart SDK, VM, JIT or snapshots.
 
@@ -15,6 +15,8 @@ Download the archive for your platform from the [0.4.0 release](https://github.c
 | macOS ARM64 | `dartc-0.4.0-macos-arm64.tar.gz` |
 | Linux ARM64 | `dartc-0.4.0-linux-arm64.tar.gz` |
 | Linux x86-64 | `dartc-0.4.0-linux-x64.tar.gz` |
+
+Intel Mac support is available when [building this source revision](#build-from-source); the 0.4.0 release does not include a macOS x64 archive.
 
 Save this as `hello.dart`:
 
@@ -86,7 +88,7 @@ Compiler and runtime sources must have matching ABIs. Keep them from the same re
 
 ## Build from source
 
-Development validation uses the installed Dart SDK on macOS ARM64 or Linux ARM64/x86-64. Differential and benchmark reports record the SDK version used.
+Development validation uses the installed Dart SDK on macOS or Linux with ARM64/x86-64. Differential and benchmark reports record the SDK version used.
 
 ```sh
 git clone https://github.com/medz/dartc.git
@@ -115,6 +117,7 @@ Choose the output target explicitly:
 dartc hello.dart --target linux-arm64 -o hello-linux
 dartc hello.dart --target linux-x64 -o hello-linux-x64
 dartc hello.dart --target macos-arm64 -o hello-macos
+dartc hello.dart --target macos-x64 -o hello-intel-macos
 ```
 
 Experimental macOS library output accepts an explicitly typed Pointer.fromFunction binding, as shown in [example/math.dart](example/math.dart):

@@ -59,6 +59,7 @@ int hostTarget() => switch (Abi.current()) {
   Abi.macosArm64 => 0,
   Abi.linuxArm64 => 1,
   Abi.linuxX64 => 2,
+  Abi.macosX64 => 3,
   _ => throw UnsupportedError('Compiler host ABI: ${Abi.current()}'),
 };
 

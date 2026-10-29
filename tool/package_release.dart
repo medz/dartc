@@ -37,7 +37,7 @@ void main(List<String> args) {
   final machine = (run('/usr/bin/uname', ['-m']).stdout as String).trim();
   final architecture = switch (machine) {
     'arm64' || 'aarch64' => 'arm64',
-    'x86_64' when os == 'linux' => 'x64',
+    'x86_64' => 'x64',
     _ => throw StateError('Unsupported release host: $os/$machine'),
   };
   if (os != 'macos' && os != 'linux')

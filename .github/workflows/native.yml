@@ -9,7 +9,7 @@ on:
         default: stable
         type: string
       architecture:
-        description: Linux architecture to validate
+        description: Linux architecture or Intel macOS to validate
         required: true
         default: arm64
         type: choice
@@ -17,8 +17,9 @@ on:
           - arm64
           - x64
           - both
+          - macos-x64
       package_release:
-        description: Package and verify the native Linux release archive
+        description: Package and verify the native release archive
         required: false
         default: false
         type: boolean
@@ -29,6 +30,7 @@ on:
 
 jobs:
   linux:
+    if: inputs.architecture != 'macos-x64'
     name: linux-${{ matrix.architecture }}
     runs-on: ${{ matrix.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     strategy:
@@ -102,3 +104,43 @@ jobs:
           name: ${{ env.DARTC_MACOS_OUTPUT }}
           path: build/${{ env.DARTC_MACOS_OUTPUT }}
           retention-days: 1
+
+  macos-x64:
+    if: inputs.architecture == 'macos-x64'
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '${{ inputs.dart_sdk }}'
+          architecture: x64
+      - name: Verify the Intel host
+        run: test "$(uname -m)" = x86_64
+      - name: Bootstrap and check native behavior
+        run: dart tool/bootstrap.dart
+      - run: dart test/differential_test.dart --compiler build/dartc-stage2
+      - run: dart test/ssa_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
+      - run: dart test/measure_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
+      - run: dart test/program_benchmark_test.dart --compiler build/dartc-stage2
+      - run: dart test/library_test.dart build/dartc-stage2
+      - run: dart tool/fuzz.dart --compiler build/dartc-stage2 --count 12
+      - name: Cross-compile the compiler for Apple Silicon and Linux
+        env:
+          PATH: /usr/bin:/bin
+        run: |
+          build/dartc-stage2 bin/dartc.dart --std lib/src/runtime.dart --target macos-arm64 -o build/dartc-cross-macos-arm64
+          build/dartc-stage2 bin/dartc.dart --std lib/src/runtime.dart --target linux-x64 -o build/dartc-cross-linux-x64
+          build/dartc-stage2 bin/dartc.dart --std lib/src/runtime.dart --target linux-arm64 -o build/dartc-cross-linux-arm64
+      - name: Package and test the native release
+        if: inputs.package_release
+        run: dart tool/package_release.dart --compiler build/dartc-stage2
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dartc-macos-x64-validation
+          path: |
+            build/dartc-stage2
+            build/dartc-cross-*
+            build/release/*
+          if-no-files-found: error
+          retention-days: 7

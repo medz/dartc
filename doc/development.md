@@ -1,6 +1,6 @@
 # Developer tooling
 
-Run these commands from the repository root with your installed Dart SDK on macOS ARM64 or Linux ARM64/x86-64. [Build the native compiler](../README.md#build-from-source) first; bootstrap verifies and saves `build/dartc-seed` for subsequent runs. Reports record the SDK version actually used; upgrading the SDK also upgrades the reference compiler for new comparisons.
+Run these commands from the repository root with your installed Dart SDK on macOS or Linux with ARM64/x86-64. [Build the native compiler](../README.md#build-from-source) first; bootstrap verifies and saves `build/dartc-seed` for subsequent runs. Reports record the SDK version actually used; upgrading the SDK also upgrades the reference compiler for new comparisons.
 
 Bootstrap builds stages in a fresh directory and publishes them after the stage2/stage3 byte comparison and behavior checks pass. A code-generation change can make stage1 differ from stage2. Stable self-rebuilds, language behavior and performance each require their own evidence.
 
@@ -64,7 +64,9 @@ Use `dart tool/fuzz.dart --help` for explicit rejection and runtime-failure cont
 
 ## CI
 
-The [native self-hosting workflow](../.github/workflows/native.yml) is manually dispatched. Select ARM64, x64 or both with `architecture`, and the reference SDK version with `dart_sdk`. It bootstraps on the selected Linux hosts, runs differential, SSA verification, resource-measurement, program-benchmark and fuzz tests, and cross-compiles the compiler for macOS. Release packaging and verification are optional workflow inputs. `cross_ref` supplies matching Mac-built seeds named `dartc-linux` for ARM64 and `dartc-linux-x64` for x64; without a supplied seed, a new checkout uses the SDK for the initial cold bootstrap.
+The [native self-hosting workflow](../.github/workflows/native.yml) is manually dispatched. Select Linux ARM64, x64 or both, or `macos-x64` for an Intel Mac, with `architecture`, and the reference SDK version with `dart_sdk`. The Linux jobs bootstrap on the selected hosts, run differential, SSA verification, resource-measurement, program-benchmark and fuzz tests, and cross-compile the compiler for macOS. Release packaging and verification are optional workflow inputs. `cross_ref` supplies matching Mac-built seeds named `dartc-linux` for ARM64 and `dartc-linux-x64` for x64; without a supplied seed, a new checkout uses the SDK for the initial cold bootstrap.
+
+The Intel Mac job runs on `macos-15-intel`, rebuilds the native compiler through three stages, and runs the shared behavior, differential, SSA, resource-measurement, benchmark and fuzz checks. It also executes C callers against object, static and dynamic library output, cross-compiles the compiler for the other three targets, and optionally verifies a relocatable macOS x64 archive. Cross-compiled artifacts still require execution on their target hosts.
 
 ## Release notes
 

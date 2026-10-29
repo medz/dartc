@@ -1,5 +1,6 @@
 import 'code.dart';
 import 'host.dart';
+import 'target.dart';
 
 const int xRax = 0;
 const int xRcx = 1;
@@ -169,7 +170,7 @@ void xTrap() {
 
 void xExit(int status) {
   xConstant(xRdi, status);
-  xConstant(xRax, 231); // Linux exit_group.
+  xConstant(xRax, targetOS == 0 ? 0x2000001 : 231); // exit / exit_group
   codeByte(0x0f);
   codeByte(0x05);
   xTrap();

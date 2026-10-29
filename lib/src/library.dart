@@ -3,14 +3,15 @@ import 'format/image.dart';
 import 'format/macho.dart';
 import 'ir.dart';
 import 'sign.dart';
+import 'target.dart';
 
 List<int> libraryNames = <int>[];
 List<int> libraryNameOffsets = <int>[];
 
 void libraryHeader(int kind, int commands, int size, int flags) {
   image32(0xfeedfacf);
-  image32(0x100000c);
-  image32(0);
+  image32(targetX64 ? 0x1000007 : 0x100000c);
+  image32(targetX64 ? 3 : 0);
   image32(kind);
   image32(commands);
   image32(size);
@@ -190,7 +191,8 @@ List<int> libraryArchive() {
 
 List<int> libraryDylib(String outputPath) {
   var codeOffset = 1024;
-  var textSize = alignImage(codeOffset + codeSize, 16384);
+  var page = targetX64 ? 4096 : 16384;
+  var textSize = alignImage(codeOffset + codeSize, page);
   var symbols = textSize;
   var names = symbols + exportNames.length * 16;
   var trieOffset = alignImage(names + libraryNames.length, 8);
@@ -211,7 +213,7 @@ List<int> libraryDylib(String outputPath) {
   imageSegment(
     '__LINKEDIT',
     textSize,
-    16384,
+    page,
     textSize,
     signatureOffset - textSize,
     1,
