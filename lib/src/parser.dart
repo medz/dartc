@@ -1815,17 +1815,6 @@ AstVariable parserVariableInitializer(
   return AstVariable(type, name, initializer, modifier, token);
 }
 
-List<AstVariable> parserVariables(Parser parser) {
-  var metadata = parserMetadata(parser);
-  if (metadata.isNotEmpty && !parserVariableStatement(parser))
-    parserError(parser, 'metadata must precede a local declaration');
-  var token = parser.position;
-  var modifier = parserModifier(parser);
-  var type = parserDeclarationType(parser, modifier);
-  var name = parserName(parser);
-  return parserVariablesRest(parser, type, name, modifier, token, metadata);
-}
-
 List<AstParameter> parserParameters(
   Parser parser, [
   List<AstVariable>? declaringFields,

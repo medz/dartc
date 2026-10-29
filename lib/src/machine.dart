@@ -86,7 +86,6 @@ class MachineFunction {
   List<int> arguments;
   List<int> reps;
   List<MachineBlock> blocks;
-  int resultRep;
   RegisterAllocation allocation;
   bool reachable;
 
@@ -94,7 +93,6 @@ class MachineFunction {
     this.arguments,
     this.reps,
     this.blocks,
-    this.resultRep,
     this.allocation,
     this.reachable,
   );
@@ -502,7 +500,6 @@ List<MachineFunction> selectMachine(
           <int>[],
           <int>[],
           <MachineBlock>[],
-          machineRep(function.result),
           const RegisterAllocation(<int>[], 0, <int>[]),
           false,
         ),
@@ -571,7 +568,6 @@ List<MachineFunction> selectMachine(
         function.arguments.sublist(0),
         reps,
         blocks,
-        machineRep(function.result),
         const RegisterAllocation(<int>[], 0, <int>[]),
         true,
       ),
