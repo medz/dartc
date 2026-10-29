@@ -822,9 +822,8 @@ Future<void> main(List<String> args) async {
           base64Encode(actual.stderrBytes) !=
               base64Encode(expected.stderrBytes)) {
         throw StateError(
-          '${source.path} differs from official Dart.\n'
-          'Expected stdout:\n${expected.stdout}\nActual stdout:\n${actual.stdout}\n'
-          'Expected stderr:\n${expected.stderr}\nActual stderr:\n${actual.stderr}',
+          '${source.path} differs from official Dart. '
+          'Full stdout and stderr are retained in the process evidence.',
         );
       }
       for (var i = 0; i < outputs.length; i++) {

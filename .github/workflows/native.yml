@@ -45,6 +45,8 @@ jobs:
       DARTC_MACOS_OUTPUT: ${{ matrix.architecture == 'arm64' && 'dartc-cross-macos' || 'dartc-cross-macos-x64' }}
     steps:
       - uses: actions/checkout@v7
+      - name: Keep test failures in the runner temporary directory
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: '${{ inputs.dart_sdk }}'
@@ -106,6 +108,17 @@ jobs:
           name: ${{ env.DARTC_MACOS_OUTPUT }}
           path: build/${{ env.DARTC_MACOS_OUTPUT }}
           retention-days: 1
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: dartc-linux-${{ matrix.architecture }}-failure
+          path: |
+            build/bootstrap-*/**
+            build/bootstrap-inputs.json
+            build/compiler.dart
+            ${{ runner.temp }}/dartc-*/**
+          if-no-files-found: warn
+          retention-days: 7
 
   macos-x64:
     if: inputs.architecture == 'macos-x64'
@@ -113,6 +126,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - name: Keep test failures in the runner temporary directory
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: '${{ inputs.dart_sdk }}'
@@ -148,9 +163,13 @@ jobs:
           name: dartc-macos-x64-validation
           path: |
             build/dartc-stage2
+            build/bootstrap-*/**
+            build/bootstrap-inputs.json
+            build/compiler.dart
             build/dartc-cross-*
             build/values-*
             build/release/*
             build/library-*/**
+            ${{ runner.temp }}/dartc-*/**
           if-no-files-found: error
           retention-days: 7
