@@ -2855,6 +2855,12 @@ void stringBoundaries() {
     print(left.substring(0) == same);
     print(left.substring(0, length) == same);
     print(left.substring(length).isEmpty);
+    if (length > 1) {
+      print(
+        left.substring(1, length - 1) ==
+            String.fromCharCodes(data.sublist(1, length - 1)),
+      );
+    }
     print(left == same);
     print(left == left);
     print(left == same + '!');

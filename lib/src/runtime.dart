@@ -257,6 +257,14 @@ int rtStringSubstring(int value, int start, int end) {
   rtRootPush(value, storageRef);
   var result = rtStringAllocate(rtObjectDescriptor(value), end - start);
   var i = start;
+  // Copy four UTF-16 code units per word without reading past the slice.
+  while (i + 4 <= end) {
+    nativeStore64(
+      result + stringDataOffset + (i - start) * 2,
+      nativeLoad64(value + stringDataOffset + i * 2),
+    );
+    i += 4;
+  }
   while (i < end) {
     nativeStore16(
       result + stringDataOffset + (i - start) * 2,
