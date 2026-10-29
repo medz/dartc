@@ -890,6 +890,41 @@ void main() {
       for (final operation in ['~/', '%'])
         'int zero() => 0; void main() { print("before"); print(1 $operation zero()); print("after"); }',
       for (final operation in [
+        'super[key] = rhs();',
+        'super[key] += rhs();',
+        'print(super[key] += rhs());',
+        'super[key]++;',
+        'print(super[key]++);',
+        '++super[key];',
+        'print(++super[key]);',
+      ])
+        '''
+class Base {
+  int operator [](Object key) { print('read'); return 5; }
+  void operator []=(int key, int value) { print('write'); }
+}
+class Derived extends Base {
+  void run(dynamic key) { $operation }
+}
+int rhs() { print('rhs'); return 9; }
+void main() { print('before'); Derived().run('key'); }
+''',
+      for (final operation in [
+        'super[key] ??= rhs();',
+        'print(super[key] ??= rhs());',
+      ])
+        '''
+class Base {
+  int? operator [](Object key) { print('read'); return null; }
+  void operator []=(int key, int value) { print('write'); }
+}
+class Derived extends Base {
+  void run(dynamic key) { $operation }
+}
+int rhs() { print('rhs'); return 9; }
+void main() { print('before'); Derived().run('key'); }
+''',
+      for (final operation in [
         'c[key] = rhs();',
         'c[key] += rhs();',
         'print(c[key] += rhs());',
@@ -3129,6 +3164,16 @@ void main() {
       await reject(invalid, checkSdk: true);
     }
     final rejectedOperators = [
+      'class C { void unused() { super[0] = 1; } } void main() {}',
+      'class B { int operator [](int key) => key; } class C extends B { void unused() { super[0] = 1; } } void main() {}',
+      'class B { void operator []=(int key, int value) {} } class C extends B { void unused() { super[0] += 1; } } void main() {}',
+      'abstract class B { void operator []=(int key, int value); } abstract class C extends B { void unused() { super[0] = 1; } } void main() {}',
+      'abstract class B { int operator [](int key); void operator []=(int key, int value) {} } abstract class C extends B { void unused() { super[0]++; } } void main() {}',
+      'class B { void operator []=(int key, int value) {} } class C extends B { static void unused() { super[0] = 1; } } void main() {}',
+      'class B { void operator []=(int key, int value) {} } class C extends B { void unused() { super["key"] = 1; } } void main() {}',
+      'class B { void operator []=(int key, int value) {} } class C extends B { void unused() { super[0] = "value"; } } void main() {}',
+      'class B { int operator [](Object key) => 1; void operator []=(int key, int value) {} } class C extends B { void unused() { super["key"] ??= 2; } } void main() {}',
+      'class B { int operator [](int key) => 1; void operator []=(String key, int value) {} } class C extends B { void unused() { super[1] += 2; } } void main() {}',
       'typedef Result = int; class C { Result operator []=(int key, int value) => value; } void main() {}',
       'typedef Result = dynamic; class C { Result operator []=(int key, int value) {} } void main() {}',
       'typedef Result = int; Result set value(int next) => next; void main() {}',

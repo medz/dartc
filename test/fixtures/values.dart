@@ -1833,6 +1833,16 @@ void operatorIndexing() {
   final absent = OpNullableIndex(null);
   absent[1] ??= opIndexValue();
   print(absent[2] ??= opIndexValue());
+
+  final updateSuper = OpSuperIndexLeaf().exercise();
+  opIndexTrace = '';
+  print(updateSuper());
+  print(opIndexTrace);
+  OpSuperNullableIndex(5).exercise('key');
+  OpSuperNullableIndex(null).exercise(2);
+  OpSuperListIndex().exercise();
+  OpSuperFunctionIndex().exercise();
+  print(OpSuperWriteOnly().exercise());
 }
 
 String opIndexTrace = '';
@@ -1921,6 +1931,74 @@ class OpNullableIndex(final int? value) {
   }
 
   void operator []=(int key, int value) => print([key, value]);
+}
+
+class OpSuperIndexMiddle extends OpIndexContracts {
+  int operator [](int key) => super[key] + 1;
+}
+
+class OpSuperIndex extends OpSuperIndexMiddle {
+  int operator [](int key) => -1;
+  void operator []=(Object key, int value) {
+    print('override');
+  }
+
+  int Function() exercise() {
+    opIndexTrace = '';
+    print(super[opIndexKey()] = opIndexValue());
+    print(opIndexTrace);
+    opIndexTrace = '';
+    print(super[opIndexKey()] += opIndexValue());
+    print(opIndexTrace);
+    print(super[3]++);
+    print(++super[4]);
+    print(super[3]--);
+    print(--super[4]);
+    super[2] -= 3;
+    return () => super[opIndexKey()] += opIndexValue();
+  }
+}
+
+class OpSuperIndexLeaf extends OpSuperIndex {}
+
+class OpSuperNullableIndex extends OpNullableIndex {
+  OpSuperNullableIndex(super.value);
+  int operator [](Object key) => -1;
+  void operator []=(int key, int value) {
+    print('override');
+  }
+
+  void exercise(dynamic key) {
+    opIndexTrace = '';
+    print(super[key] ??= opIndexValue());
+    super[key] ??= opIndexValue();
+    print(opIndexTrace);
+  }
+}
+
+class OpSuperListIndex extends OpListIndex {
+  void exercise() {
+    super[[]] += 2;
+  }
+}
+
+class OpSuperFunctionIndex extends OpFunctionIndex {
+  void exercise() {
+    super[OpCallableIndex()] += 2;
+  }
+}
+
+class OpWriteOnly {
+  void operator []=(int key, Object value) {
+    print([key, value]);
+  }
+}
+
+class OpSuperWriteOnly extends OpWriteOnly {
+  List<int> exercise() {
+    final result = [super[2] = 9];
+    return result;
+  }
 }
 
 int opPick<T extends OpBase>(T t) => t[2];

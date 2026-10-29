@@ -1536,6 +1536,7 @@ class FeLvalue {
   int reader = -1;
   int setter = -1;
   int writeIndex = -1;
+  bool direct = false;
   CheckedMemberRead? directRead;
 
   FeLvalue(
@@ -2567,15 +2568,21 @@ int feOperatorTarget(int function) {
 FeLvalue feLowerOperatorLvalue(
   AstExpression expression,
   int receiverType,
-  bool reading,
-) {
-  final owner = typeArgument(receiverType);
-  final writer = feMethod(owner, '[]=', false);
+  bool reading, [
+  bool direct = false,
+]) {
+  final owner = feClassType(receiverType) ? typeArgument(receiverType) : -1;
+  final token = expression.token;
+  final writer = direct
+      ? feSuperImplementation(owner, '[]=', classMethod, token)?.method ?? -1
+      : feMethod(owner, '[]=', false);
   if (writer < 0)
     feAstError(expression.token, 'indexed assignment requires operator []=');
   var reader = -1;
   if (reading) {
-    reader = feMethod(owner, '[]', false);
+    reader = direct
+        ? feSuperImplementation(owner, '[]', classMethod, token)?.method ?? -1
+        : feMethod(owner, '[]', false);
     if (reader < 0)
       feAstError(expression.token, 'indexed read requires operator []');
   }
@@ -2599,7 +2606,8 @@ FeLvalue feLowerOperatorLvalue(
     )
     ..owner = owner
     ..reader = reader
-    ..setter = writer;
+    ..setter = writer
+    ..direct = direct;
 }
 
 void fePrepareIndexWrite(FeLvalue target, int token) {
@@ -4326,8 +4334,14 @@ int feReadBoundMember(int owner, MemberBinding member, int token) {
 
 FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
   expression = feWithReceiver(expression);
-  if (expression.kind == astMember && feIsSuper(expression.children[0]))
-    return feLowerSuperLvalue(expression, reading);
+  if ((expression.kind == astMember || expression.kind == astIndex) &&
+      feIsSuper(expression.children[0])) {
+    if (expression.kind == astMember)
+      return feLowerSuperLvalue(expression, reading);
+    final source = expression.children[0];
+    final type = feLoadSuper(source, feSuperOwner(source));
+    return feLowerOperatorLvalue(expression, type, reading, true);
+  }
   if (expression.kind == astName) {
     var binding = expression.binding;
     if (binding >= 0) {
@@ -4570,7 +4584,7 @@ int feReadLvalue(FeLvalue target, int token) {
       indexType,
       token,
     );
-    feCall(feOperatorTarget(reader), 2);
+    feCall(target.direct ? reader : feOperatorTarget(reader), 2);
     return functions[reader].result;
   }
   if ((target.container == 0 || target.container == 5) && target.owner >= 0)
@@ -4670,7 +4684,7 @@ void feWriteLvalue(FeLvalue target, int token) {
     );
     feOperand(opLoadLocal, target.writeIndex);
     feOperand(opLoadLocal, value);
-    feCall(feOperatorTarget(target.setter), 3);
+    feCall(target.direct ? target.setter : feOperatorTarget(target.setter), 3);
     return;
   }
   feOperand(opLoadLocal, target.index);

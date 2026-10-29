@@ -57,7 +57,11 @@
 
 用户 `[]` 与 `[]=` 的索引参数可以不同。接收者和源码索引各求值一次；简单赋值用写入参数提供上下文，复合赋值、增减及 `??=` 用读取参数提供上下文。读取和写入分别对原始索引检查类型及提取隐式 `call`，一侧的转换不能改变另一侧的输入。`??=` 读取非 null 时跳过 RHS 和写入参数的运行时检查，但仍检查两侧的静态义务，包括未调用函数中的赋值。
 
+支持 [§17.23 的 `super[i]` 赋值](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L16035-L16049)及其复合、`??=`、前后增减形式。读写分别从词法父类查找具体运算符，保留当前 this，绕过子类覆写；闭包捕获同一接收者。简单赋值只要求写入运算符，复合形式还要求读取运算符；索引、RHS 和结果类型沿用上述规则。当前范围为已支持的非泛型类，泛型类、mixin 及 noSuchMethod 转发仍缺。
+
 插入的索引转换按 SDK 3.13.7 的 [compound index lowering](https://github.com/dart-lang/sdk/blob/3.13.7/pkg/front_end/lib/src/type_inference/inference_visitor.dart#L11016) 与 [if-null index lowering](https://github.com/dart-lang/sdk/blob/3.13.7/pkg/front_end/lib/src/type_inference/inference_visitor.dart#L9591) 排序：直接丢弃结果的复合赋值和后缀增减先检查写入索引；消费复合赋值结果时，在读取和 RHS 运算后检查。消费后缀结果时，在读取后、增减运算前检查；前缀增减在运算后检查。`??=` 仅在 null 分支检查写入索引，丢弃结果时先检查再求 RHS，消费结果时顺序相反。表达式语句、for 更新及级联段直接丢弃结果；条件表达式中的赋值仍作为值求解。
+
+`super[i]` 使用同样的转换时序，对应 SDK 的 [super index set](https://github.com/dart-lang/sdk/blob/3.13.7/pkg/front_end/lib/src/type_inference/inference_visitor.dart#L9771-L9852)、[compound super index set](https://github.com/dart-lang/sdk/blob/3.13.7/pkg/front_end/lib/src/type_inference/inference_visitor.dart#L11799-L11962) 和 [if-null super index set](https://github.com/dart-lang/sdk/blob/3.13.7/pkg/front_end/lib/src/type_inference/inference_visitor.dart#L10301-L10469)。
 
 行为入口为 [values.dart](../test/fixtures/values.dart) 的 `operatorIndexing()`，运行时失败前的副作用和未执行代码的拒例分别由 [behavior_test.dart](../test/behavior_test.dart) 的 `failingValues`、`rejectedOperators` 验证。运行时类型错误仍不可捕获，见[异常缺口](statements.md)。
 
