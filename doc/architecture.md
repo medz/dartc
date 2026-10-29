@@ -230,7 +230,7 @@ Machine IR 的比较保存语义条件，各后端映射为自己的条件码。
 
 `format/image.dart` 拥有唯一的映像缓冲区和小端字节写入函数；打包 word 的写入显式接收数据及字节长度，不读取后端状态。`format/macho.dart` 拥有可执行文件与库共用的段、节编码。`library.dart` 直接导入这两个定义文件，不依赖可执行文件的常量布局与重定位实现。
 
-x64 复用基础 x86-64/SSE2 指令后端。Linux 输出 ELF64，启动从进程栈读取 argc/argv；macOS 输出 x86-64 Mach-O，LC_MAIN 从 rdi/rsi 接收 argc/argv，并在调用前对齐栈。macOS x64 的段按 4 KiB 对齐，常量与全局区使用 RIP 相对地址，签名由同一 Dart 实现生成。操作系统系统调用差异集中在原语边界和 Dart 文件服务中，内部调用、根、安全点和异常恢复协议见 [runtime.md](runtime.md)。macOS 两种架构支持现有 Int64 FFI 绑定的 object/static/dylib 输出；Linux 库输出尚未接入。
+x64 复用基础 x86-64/SSE2 指令后端。Linux 输出 ELF64，启动从进程栈读取 argc/argv；macOS 输出 x86-64 Mach-O，LC_MAIN 从 rdi/rsi 接收 argc/argv，并在调用前对齐栈。macOS x64 的段和签名散列页使用 4 KiB，ARM64 使用 16 KiB；签名页遵循 [XNU CodeDirectory 校验](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/ubc_subr.c)。常量与全局区使用 RIP 相对地址，签名由同一 Dart 实现生成。操作系统系统调用差异集中在原语边界和 Dart 文件服务中，内部调用、根、安全点和异常恢复协议见 [runtime.md](runtime.md)。macOS 两种架构支持现有 Int64 FFI 绑定的 object/static/dylib 输出；Linux 库输出尚未接入。
 
 ## 前端阶段与语义边界
 

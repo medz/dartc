@@ -199,10 +199,12 @@ void signMachO(
   int linkeditCommand,
   int textSize,
   int isExecutable,
+  int pageShift,
 ) {
+  var pageSize = 1 << pageShift;
   var identifier = 'dev.medz.dartc';
   var codeLimit = bytes.length;
-  var slots = (codeLimit + 16383) ~/ 16384;
+  var slots = (codeLimit + pageSize - 1) ~/ pageSize;
   var hashOffset = 88 + identifier.length + 1;
   var directoryLength = hashOffset + slots * 32;
   var blobLength = 20 + directoryLength;
@@ -215,7 +217,7 @@ void signMachO(
   signLittle64(
     bytes,
     linkeditCommand + 32,
-    ((fileSize + 16383) ~/ 16384) * 16384,
+    ((fileSize + pageSize - 1) ~/ pageSize) * pageSize,
   );
 
   final signature = List<int>.filled(signatureSize, 0);
@@ -236,7 +238,7 @@ void signMachO(
   signBig32(signature, directory + 32, codeLimit);
   signature[directory + 36] = 32;
   signature[directory + 37] = 2;
-  signature[directory + 39] = 14;
+  signature[directory + 39] = pageShift;
   signBig64(signature, directory + 64, 0);
   signBig64(signature, directory + 72, textSize);
   signBig64(signature, directory + 80, isExecutable);
@@ -247,9 +249,9 @@ void signMachO(
   }
   var page = 0;
   while (page < slots) {
-    var start = page * 16384;
+    var start = page * pageSize;
     var length = codeLimit - start;
-    if (length > 16384) length = 16384;
+    if (length > pageSize) length = pageSize;
     var hash = signHash(bytes, start, length);
     i = 0;
     while (i < 32) {

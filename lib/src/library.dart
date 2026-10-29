@@ -191,7 +191,8 @@ List<int> libraryArchive() {
 
 List<int> libraryDylib(String outputPath) {
   var codeOffset = 1024;
-  var page = targetX64 ? 4096 : 16384;
+  var pageShift = targetX64 ? 12 : 14;
+  var page = 1 << pageShift;
   var textSize = alignImage(codeOffset + codeSize, page);
   var symbols = textSize;
   var names = symbols + exportNames.length * 16;
@@ -280,7 +281,7 @@ List<int> libraryDylib(String outputPath) {
     i++;
   }
   imageZeros(signatureOffset - image.length);
-  signMachO(image, signatureCommand, linkeditCommand, textSize, 0);
+  signMachO(image, signatureCommand, linkeditCommand, textSize, 0, pageShift);
   return image;
 }
 

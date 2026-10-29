@@ -16,7 +16,8 @@ import 'types.dart';
 List<int> createMachOExecutable() {
   int base = 0x100000000;
   int dataBase = 0x110000000;
-  int page = targetX64 ? 0x1000 : 0x4000;
+  int pageShift = targetX64 ? 12 : 14;
+  int page = 1 << pageShift;
   int codeOffset = 0x1000;
   int constantOffset = alignImage(codeOffset + codeSize, 8);
   ConstantLayout constants = layoutConstants(constantOffset);
@@ -116,7 +117,7 @@ List<int> createMachOExecutable() {
   imageZeros(constantOffset - image.length);
   imageConstants(constants, codeOffset, dataBase - base);
   imageZeros(textSize + 16 - image.length);
-  signMachO(image, signatureCommand, linkeditCommand, textSize, 1);
+  signMachO(image, signatureCommand, linkeditCommand, textSize, 1, pageShift);
   return image;
 }
 
