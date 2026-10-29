@@ -31,6 +31,7 @@ import '${library.resolve('types.dart')}';
 import '${library.resolve('verify_ssa.dart')}';
 import '${library.resolve('machine.dart')}';
 import '${library.resolve('allocate.dart')}';
+import '${library.resolve('liveness.dart')}';
 import '${library.resolve('emit.dart')}';
 import '${library.resolve('reach.dart')}';
 import '${library.resolve('format.dart')}';
@@ -339,7 +340,7 @@ void corruptAllocation(List<MachineFunction> program, String mode) {
     } else {
       locations[argument] = 0;
     }
-    verifyAllocation(function, allocateLiveness(function));
+    verifyAllocation(function, machineLiveness(function));
     return;
   }
   ssaError('allocation test function missing');

@@ -93,6 +93,7 @@ lib/src/
   ir.dart, ssa.dart, verify_ssa.dart               IR、SSA 构造与验证
   optimize.dart, inline.dart, reach.dart           SSA 简化、内联与可达性
   machine.dart, allocate.dart, root_map.dart        Machine IR、分配与根位置
+  liveness.dart                                  Machine IR 活跃性分析
   target.dart                                    输出目标与寄存器集合
   code.dart, emit.dart                            共享发码结果与后端选择
   arm64.dart, arm64_emit.dart                     ARM64 指令编码与发射
@@ -217,6 +218,8 @@ test/
 `target.dart` 保存显式的输出目标；操作系统选择库条件与文件格式，CPU 选择寄存器和指令后端。宿主的 `hostTarget()` 只提供缺省值，命令行 `--target` 可以覆盖。`nativeTarget()` 表示正在生成的程序 ABI，编号为 macOS ARM64 = 0、Linux ARM64 = 1、Linux x64 = 2；不能用编译器进程所在平台替代它。
 
 Machine IR 的比较保存语义条件，各后端映射为自己的条件码。分配器复用活跃区间和 spill 算法，将非引用值放入通用保存寄存器；ARM64 的不跨调用 double 也可使用独立浮点寄存器组。Ref/Tagged 仍在调用点保留可描述的根槽。Machine IR 明确调用者保存寄存器的 clobber，目标文件拥有可用寄存器集合，发码器负责参数排列、边界搬运及暂存。
+
+`liveness.dart` 拥有 Machine IR 的块级活跃性分析，分配器与调用点根表直接使用同一实现。分析只读取指令、控制流和值编号，不读取或修改寄存器分配结果；改变指令使用、定义或控制流后需要重新计算。
 
 `code.dart` 拥有机器码、函数入口以及调用/数据地址修补记录；所有位置均为字节偏移。存储按 32 位 word 打包以控制 Dart List 的占用，编码器可写入单字节或完整 word。`format.dart` 统一布局常量、全局区及相对元数据，ARM64 与 x64 编码器分别修补地址指令。x64 使用 RIP 相对地址和 rel32 调用/跳转，超出范围时拒绝生成截断的位移。
 

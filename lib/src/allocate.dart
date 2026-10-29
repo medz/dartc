@@ -1,123 +1,7 @@
 import 'target.dart';
 import 'machine.dart';
+import 'liveness.dart';
 import 'host.dart';
-
-class RegisterBlock {
-  int start;
-  int end;
-  List<int> uses;
-  List<int> definitions;
-  List<int> liveIn;
-  List<int> liveOut;
-
-  RegisterBlock(
-    this.start,
-    this.end,
-    this.uses,
-    this.definitions,
-    this.liveIn,
-    this.liveOut,
-  );
-}
-
-void allocateDefine(RegisterBlock block, int value) {
-  final int word = value ~/ 32;
-  block.definitions[word] = block.definitions[word] | (1 << (value & 31));
-}
-
-void allocateUse(RegisterBlock block, int value) {
-  final int word = value ~/ 32;
-  final int bit = 1 << (value & 31);
-  if ((block.definitions[word] & bit) == 0) {
-    block.uses[word] = block.uses[word] | bit;
-  }
-}
-
-List<RegisterBlock> allocateLiveness(MachineFunction function) {
-  final int words = (function.reps.length + 31) ~/ 32;
-  final List<RegisterBlock> blocks = <RegisterBlock>[];
-  int position = 0;
-  int b = 0;
-  while (b < function.blocks.length) {
-    final MachineBlock source = function.blocks[b];
-    final int end = position + source.instructions.length * 2 + 1;
-    final RegisterBlock block = RegisterBlock(
-      position,
-      end,
-      List<int>.filled(words, 0),
-      List<int>.filled(words, 0),
-      List<int>.filled(words, 0),
-      List<int>.filled(words, 0),
-    );
-    int i = 0;
-    if (b == 0) {
-      while (i < function.arguments.length) {
-        allocateDefine(block, function.arguments[i]);
-        i = i + 1;
-      }
-    }
-    i = 0;
-    while (i < source.parameters.length) {
-      allocateDefine(block, source.parameters[i]);
-      i = i + 1;
-    }
-    i = 0;
-    while (i < source.instructions.length) {
-      final MachineInstruction instruction = source.instructions[i];
-      int input = 0;
-      while (input < instruction.inputs.length) {
-        allocateUse(block, instruction.inputs[input]);
-        input = input + 1;
-      }
-      if (instruction.output >= 0) allocateDefine(block, instruction.output);
-      i = i + 1;
-    }
-    final MachineTerminator term = source.end;
-    if (term.value >= 0) allocateUse(block, term.value);
-    i = 0;
-    while (i < term.first.arguments.length) {
-      allocateUse(block, term.first.arguments[i]);
-      i = i + 1;
-    }
-    i = 0;
-    while (i < term.second.arguments.length) {
-      allocateUse(block, term.second.arguments[i]);
-      i = i + 1;
-    }
-    blocks.add(block);
-    position = end + 1;
-    b = b + 1;
-  }
-  bool changed = true;
-  while (changed) {
-    changed = false;
-    b = blocks.length;
-    while (b > 0) {
-      b = b - 1;
-      final RegisterBlock block = blocks[b];
-      final MachineTerminator term = function.blocks[b].end;
-      int word = 0;
-      while (word < words) {
-        int out = 0;
-        if (term.first.target >= 0) {
-          out = out | blocks[term.first.target].liveIn[word];
-        }
-        if (term.second.target >= 0) {
-          out = out | blocks[term.second.target].liveIn[word];
-        }
-        int inside = block.uses[word] | (out & ~block.definitions[word]);
-        inside = inside & 0xffffffff;
-        if (block.liveIn[word] != inside || block.liveOut[word] != out) {
-          block.liveIn[word] = inside;
-          block.liveOut[word] = out;
-          changed = true;
-        }
-        word = word + 1;
-      }
-    }
-  }
-  return blocks;
-}
 
 void allocateTouch(List<int> starts, List<int> ends, int value, int position) {
   if (starts[value] < 0 || position < starts[value]) starts[value] = position;
@@ -147,7 +31,7 @@ void allocateLiveIntervals(
 
 List<int> allocateIntervals(
   MachineFunction function,
-  List<RegisterBlock> blocks,
+  List<LivenessBlock> blocks,
   List<int> starts,
   List<int> ends,
 ) {
@@ -159,7 +43,7 @@ List<int> allocateIntervals(
   }
   int b = 0;
   while (b < blocks.length) {
-    final RegisterBlock block = blocks[b];
+    final LivenessBlock block = blocks[b];
     final MachineBlock source = function.blocks[b];
     allocateLiveIntervals(block.liveIn, block.start, starts, ends);
     allocateLiveIntervals(block.liveOut, block.end, starts, ends);
@@ -341,7 +225,7 @@ int allocateSpillSlots(
 }
 
 void allocateFunction(MachineFunction function) {
-  final List<RegisterBlock> blocks = allocateLiveness(function);
+  final List<LivenessBlock> blocks = machineLiveness(function);
   final List<int> starts = List<int>.filled(function.reps.length, -1);
   final List<int> ends = List<int>.filled(function.reps.length, -1);
   final clobbers = allocateIntervals(function, blocks, starts, ends);
@@ -368,7 +252,7 @@ Never allocationError(String message) {
 
 // Check actual live values backwards through each block, independently of the
 // interval ordering and eviction decisions used by the allocator.
-void verifyAllocation(MachineFunction function, List<RegisterBlock> blocks) {
+void verifyAllocation(MachineFunction function, List<LivenessBlock> blocks) {
   final allocation = function.allocation;
   final locations = allocation.locations;
   var general = 0;

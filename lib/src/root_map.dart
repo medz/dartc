@@ -1,4 +1,4 @@
-import 'allocate.dart';
+import 'liveness.dart';
 import 'host.dart';
 import 'layout.dart';
 import 'machine.dart';
@@ -72,7 +72,7 @@ CallRootMap _callRootMap(
 }
 
 List<CallRootMap> buildCallRootMaps(MachineFunction function) {
-  final blocks = allocateLiveness(function);
+  final blocks = machineLiveness(function);
   final slots = List<int>.filled(function.allocation.spillSlots, 0);
   final result = <CallRootMap>[];
   var b = 0;
