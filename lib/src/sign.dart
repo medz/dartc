@@ -79,12 +79,8 @@ List<int> signHash(List<int> bytes, int start, int length) {
   var h6 = 0x1f83d9ab;
   var h7 = 0x5be0cd19;
   var padded = ((length + 9 + 63) ~/ 64) * 64;
-  List<int> words = <int>[];
+  final words = List<int>.filled(64, 0);
   var i = 0;
-  while (i < 64) {
-    words.add(0);
-    i = i + 1;
-  }
   var block = 0;
   while (block < padded) {
     i = 0;
@@ -152,13 +148,10 @@ List<int> signHash(List<int> bytes, int start, int length) {
     block = block + 64;
   }
   List<int> state = <int>[h0, h1, h2, h3, h4, h5, h6, h7];
-  List<int> result = <int>[];
+  final result = List<int>.filled(32, 0);
   i = 0;
   while (i < state.length) {
-    result.add((state[i] >>> 24) & 255);
-    result.add((state[i] >>> 16) & 255);
-    result.add((state[i] >>> 8) & 255);
-    result.add(state[i] & 255);
+    signBig32(result, i * 4, state[i]);
     i = i + 1;
   }
   return result;
@@ -225,12 +218,7 @@ void signMachO(
     ((fileSize + 16383) ~/ 16384) * 16384,
   );
 
-  List<int> signature = <int>[];
-  var i = 0;
-  while (i < signatureSize) {
-    signature.add(0);
-    i = i + 1;
-  }
+  final signature = List<int>.filled(signatureSize, 0);
   signBig32(signature, 0, 0xfade0cc0);
   signBig32(signature, 4, blobLength);
   signBig32(signature, 8, 1);
@@ -252,7 +240,7 @@ void signMachO(
   signBig64(signature, directory + 64, 0);
   signBig64(signature, directory + 72, textSize);
   signBig64(signature, directory + 80, isExecutable);
-  i = 0;
+  var i = 0;
   while (i < identifier.length) {
     signature[directory + 88 + i] = identifier.codeUnitAt(i);
     i = i + 1;
