@@ -14,6 +14,7 @@ class SsaFlow {
   int start;
   int end;
   List<int> successors;
+  // Local slot sets, packed into 64-bit words.
   List<int> uses;
   List<int> definitions;
   List<int> live;
@@ -109,6 +110,7 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
   }
   final List<SsaFlow> flows = <SsaFlow>[];
   final blockAt = List<int>.filled(end - info.start + 1, -1);
+  final localWords = (info.locals + 63) ~/ 64;
   i = 0;
   while (i < starts.length) {
     var stop = end;
@@ -119,9 +121,9 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
         starts[i],
         stop,
         <int>[],
-        List<int>.filled(info.locals, 0),
-        List<int>.filled(info.locals, 0),
-        List<int>.filled(info.locals, 0),
+        List<int>.filled(localWords, 0),
+        List<int>.filled(localWords, 0),
+        List<int>.filled(localWords, 0),
         SsaShape(false, <int>[]),
       ),
     );
@@ -137,9 +139,14 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
       final op = ir[position];
       if (op == opLoadLocal) {
         final slot = ir[position + 1];
-        if (flow.definitions[slot] == 0) flow.uses[slot] = 1;
+        final word = slot ~/ 64;
+        final bit = 1 << (slot & 63);
+        if ((flow.definitions[word] & bit) == 0) flow.uses[word] |= bit;
       }
-      if (op == opStoreLocal) flow.definitions[ir[position + 1]] = 1;
+      if (op == opStoreLocal) {
+        final slot = ir[position + 1];
+        flow.definitions[slot ~/ 64] |= 1 << (slot & 63);
+      }
       position = position + irWidth(op);
     }
     final finalOp = ir[last];
@@ -164,7 +171,7 @@ List<SsaFlow> ssaControlFlow(FunctionInfo info, int end) {
   return flows;
 }
 
-void ssaLiveness(List<SsaFlow> flows, int locals) {
+void ssaLiveness(List<SsaFlow> flows) {
   var changed = true;
   while (changed) {
     changed = false;
@@ -172,21 +179,20 @@ void ssaLiveness(List<SsaFlow> flows, int locals) {
     while (i > 0) {
       i = i - 1;
       final flow = flows[i];
-      var slot = 0;
-      while (slot < locals) {
-        var live = flow.uses[slot];
-        if (flow.definitions[slot] == 0) {
-          var edge = 0;
-          while (edge < flow.successors.length) {
-            if (flows[flow.successors[edge]].live[slot] != 0) live = 1;
-            edge = edge + 1;
-          }
+      var word = 0;
+      while (word < flow.live.length) {
+        var outgoing = 0;
+        var edge = 0;
+        while (edge < flow.successors.length) {
+          outgoing |= flows[flow.successors[edge]].live[word];
+          edge = edge + 1;
         }
-        if (flow.live[slot] != live) {
-          flow.live[slot] = live;
+        final live = flow.uses[word] | (outgoing & ~flow.definitions[word]);
+        if (flow.live[word] != live) {
+          flow.live[word] = live;
           changed = true;
         }
-        slot = slot + 1;
+        word = word + 1;
       }
     }
   }
@@ -414,7 +420,7 @@ void ssaTranslateBlock(
 
 SsaFunction ssaBuildFunction(FunctionInfo info, int end) {
   final flows = ssaControlFlow(info, end);
-  ssaLiveness(flows, info.locals);
+  ssaLiveness(flows);
   ssaStackShapes(info, flows);
   final function = SsaFunction(<int>[], <int>[], <SsaBlock>[], info.result);
   var i = 0;
@@ -437,15 +443,22 @@ SsaFunction ssaBuildFunction(FunctionInfo info, int end) {
     if (flow.shape.known) {
       final List<int> parameters = <int>[];
       final List<int> localSlots = <int>[];
-      var slot = 0;
-      while (slot < info.locals) {
-        if (flow.live[slot] != 0) {
-          localSlots.add(slot);
-          parameters.add(ssaValue(function, info.localTypes[slot]));
+      var word = 0;
+      while (word < flow.live.length) {
+        var bits = flow.live[word];
+        var bit = 0;
+        while (bits != 0) {
+          if ((bits & 1) != 0) {
+            final slot = word * 64 + bit;
+            localSlots.add(slot);
+            parameters.add(ssaValue(function, info.localTypes[slot]));
+          }
+          bits >>>= 1;
+          bit = bit + 1;
         }
-        slot = slot + 1;
+        word = word + 1;
       }
-      slot = 0;
+      var slot = 0;
       while (slot < flow.shape.types.length) {
         parameters.add(ssaValue(function, flow.shape.types[slot]));
         slot = slot + 1;

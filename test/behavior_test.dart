@@ -802,15 +802,25 @@ Future<void> main(List<String> args) async {
         File('$root/test/fixtures/values.dart').readAsStringSync(),
       );
     await compare(values, [for (var i = 0; i < 20; i++) '参数$i🙂']);
-    // Keep enough double arguments live together to exercise floating spills
-    // beyond the short frame-offset encoding, as well as stack arguments.
+    // Keep many double arguments live across loop and exception edges, as well
+    // as exercising stack arguments and spills beyond short frame offsets.
     final floatingPressure = File('${temporary.path}/floating-pressure.dart')
       ..writeAsStringSync('''
-double sum(${[for (var i = 0; i < 48; i++) 'double v$i'].join(',')}) =>
-    ${[for (var i = 0; i < 48; i++) 'v$i'].join('+')};
+double sum(${[for (var i = 0; i < 130; i++) 'double v$i'].join(',')}) {
+  var result = 0.0;
+  for (var i = 0; i < 3; i++) {
+    try {
+      if (i == 1) throw i;
+      result += ${[for (var i = 0; i < 130; i++) 'v$i'].join('+')};
+    } catch (_) {
+      result -= ${[for (var i = 0; i < 130; i++) 'v$i'].join('+')};
+    }
+  }
+  return result;
+}
 void main(List<String> args) {
   final value = double.parse(args[0]);
-  print(sum(${[for (var i = 0; i < 48; i++) 'value + $i'].join(',')}));
+  print(sum(${[for (var i = 0; i < 130; i++) 'value + $i'].join(',')}));
 }
 ''');
     await compare(floatingPressure, ['0.25']);
