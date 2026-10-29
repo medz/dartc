@@ -2852,6 +2852,9 @@ void stringBoundaries() {
     for (var i = 0; i < length; i++) data.add(units[i % units.length]);
     final left = String.fromCharCodes(data);
     final same = String.fromCharCodes(data);
+    print(left.substring(0) == same);
+    print(left.substring(0, length) == same);
+    print(left.substring(length).isEmpty);
     print(left == same);
     print(left == left);
     print(left == same + '!');
