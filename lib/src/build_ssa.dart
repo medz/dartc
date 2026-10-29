@@ -292,12 +292,18 @@ void ssaTranslateBlock(
   List<SsaFlow> flows,
   List<int> blockIds,
   int flowId,
+  List<int> locals,
+  List<int> stack,
 ) {
   final flow = flows[flowId];
   final block = function.blocks[blockIds[flowId]];
-  final locals = List<int>.filled(info.locals, -1);
-  final List<int> stack = <int>[];
+  stack.clear();
   var i = 0;
+  while (i < locals.length) {
+    locals[i] = -1;
+    i = i + 1;
+  }
+  i = 0;
   while (i < block.localSlots.length) {
     locals[block.localSlots[i]] = block.parameters[i];
     i = i + 1;
@@ -478,6 +484,7 @@ SsaFunction ssaBuildFunction(FunctionInfo info, int end) {
     flowId = flowId + 1;
   }
   final locals = List<int>.filled(info.locals, -1);
+  final List<int> stack = <int>[];
   i = 0;
   while (i < function.arguments.length) {
     locals[i] = function.arguments[i];
@@ -494,13 +501,13 @@ SsaFunction ssaBuildFunction(FunctionInfo info, int end) {
   function.blocks[0].end = SsaTerminator(
     1,
     -1,
-    ssaTransfer(first, blockIds[0], locals, <int>[]),
+    ssaTransfer(first, blockIds[0], locals, stack),
     SsaEdge(-1, <int>[]),
   );
   flowId = 0;
   while (flowId < flows.length) {
     if (flows[flowId].shape.known) {
-      ssaTranslateBlock(info, function, flows, blockIds, flowId);
+      ssaTranslateBlock(info, function, flows, blockIds, flowId, locals, stack);
     }
     flowId = flowId + 1;
   }
