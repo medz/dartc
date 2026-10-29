@@ -2227,6 +2227,9 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
     parserError(parser, 'enums cannot extend a class');
   if (isEnum && parserIs(parser, 'with'))
     parserError(parser, 'enum mixins are unsupported');
+  final typeParameters = parserIs(parser, '<')
+      ? parserTypeParameters(parser)
+      : const <AstTypeParameter>[];
   final fields = <AstVariable>[];
   final constructors = <AstFunction>[];
   AstFunction? primary;
@@ -2451,6 +2454,7 @@ AstClass parserClass(Parser parser, int token, [bool isEnum = false]) {
   }
   if (!abbreviatedBody) parserExpect(parser, '}');
   var result = AstClass(name, fields, constructors, methods, token);
+  result.typeParameters = typeParameters;
   result.abbreviatedBody = abbreviatedBody;
   result.superclass = superclass;
   result.interfaces = interfaces;

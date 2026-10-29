@@ -5,7 +5,6 @@ import 'source.dart';
 const int symbolFunction = 1;
 const int symbolGlobal = 2;
 const int symbolClass = 3;
-const int symbolNativeType = 4;
 const int symbolBuiltin = 5;
 const int symbolType = 6;
 const int symbolProperty = 7;
@@ -13,14 +12,14 @@ const int symbolAlias = 8;
 const int accessorGetter = 1;
 const int accessorSetter = 2;
 
-class AliasApplication {
+class TypeApplication {
   final int symbol;
   final List<int> arguments;
   final int token;
   final bool raw;
   final bool allowSuperBounded;
 
-  AliasApplication(
+  TypeApplication(
     this.symbol,
     this.arguments,
     this.token,
@@ -34,8 +33,8 @@ class TypeAlias {
   List<AstTypeParameter> syntaxParameters = const <AstTypeParameter>[];
   List<int> parameters = const <int>[];
   List<int> defaultArguments = const <int>[];
-  List<AliasApplication> boundUses = const <AliasApplication>[];
-  List<AliasApplication> bodyUses = const <AliasApplication>[];
+  List<TypeApplication> boundUses = const <TypeApplication>[];
+  List<TypeApplication> bodyUses = const <TypeApplication>[];
   int template = -1;
   int type = -1;
   int simpleBounds = -1;
@@ -54,6 +53,10 @@ class DeclarationSymbol {
   int setter = -1;
   int accessors = 0;
   bool writable = false;
+  AstClass? classSyntax;
+  bool parametersReady = false;
+  bool resolvingParameters = false;
+  List<TypeApplication> boundUses = const <TypeApplication>[];
   List<InterfaceMember> instanceMembers = const <InterfaceMember>[];
 
   DeclarationSymbol(this.source, this.name, this.kind, this.target);

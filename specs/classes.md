@@ -6,7 +6,7 @@ SDK 对照版本见[总览](README.md)；§15 泛型和 §20 类型关系另见[
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
-| §10 类声明 | 部分实现 | 支持非泛型普通类、abstract 类、extends 及 implements 列表；按声明身份解析接口及类型别名，检查重复接口与环；接口使用的别名边界在图检查后验证，直接表示自身类型参数的别名不能作为接口。Function 仍不能作类名。泛型类及其余类修饰符尚缺。 | [ast.dart](../lib/src/ast.dart) `AstClass`；[frontend/classes.dart](../lib/src/frontend/classes.dart) `resolveClassInterfaces()`；[values.dart](../test/fixtures/values.dart) `interfaceValues()`；[behavior_test.dart](../test/behavior_test.dart) `rejected` |
+| §10 类声明 | 部分实现 | 支持非泛型普通类、abstract 类、extends 及 implements 列表；按声明身份解析接口及类型别名，检查重复接口与环；接口使用的别名边界在图检查后验证，直接表示自身类型参数的别名不能作为接口。Function 仍不能作类名。泛型 const 类的当前范围见下文；一般泛型类与其余类修饰符尚缺。 | [ast.dart](../lib/src/ast.dart) `AstClass`；[frontend/classes.dart](../lib/src/frontend/classes.dart) `resolveClassInterfaces()`；[values.dart](../test/fixtures/values.dart) `interfaceValues()`；[behavior_test.dart](../test/behavior_test.dart) `rejected` |
 | §10.1 完整实现接口 | 部分实现 | 非泛型用户类收集父接口的实例签名，读取、写入与方法分别处理；具体类必须声明或继承兼容实现，implements 不继承方法体或字段存储。检查包含未使用类；Object 默认 toString 可满足对应接口。noSuchMethod 转发、其余 Object 默认成员和完整内建接口仍缺。 | [frontend/classes.dart](../lib/src/frontend/classes.dart) `checkClassInterfaces()`；[values.dart](../test/fixtures/values.dart) `interfaceValues()`；[behavior_test.dart](../test/behavior_test.dart) `interface-imports.dart`、`rejected` |
 | §10.2 实例方法 | 部分实现 | 支持已知类 receiver 的方法调用、递归、泛型直接调用和非泛型必需位置方法的值提取。接口调用按实际对象选择实现，省略参数使用该实现的默认值，实参仍按源码顺序求值。覆写检查参数形状、参数逆变、结果协变及泛型边界；可从合并后的父签名推断省略的注解。支持继承实现和直接 super 调用；一般 dynamic 查找尚缺；协变参数规则见[函数](functions.md)，函数值边界见[函数](functions.md#函数值)。 | [frontend/classes.dart](../lib/src/frontend/classes.dart) `classSignatureSubtype()`；[frontend.dart](../lib/src/frontend.dart) `feGenerateDispatches()`；[values.dart](../test/fixtures/values.dart) `interfaceValues()`、`inheritanceValues()`（父类、覆写子类与继承叶类混合调用及方法值）、`Box.arguments()`、`Box.recurse()` |
 | §10.2.1 用户运算符 | 部分实现 | 支持非泛型类的 `operator` 声明：二元 `+ - * / ~/ % < > <= >= << >> >>> & \| ^`、一元 `-`（记为 `unary-`）与 `~`、`[]` 及 `[]=`。声明检查固定参数个数（只能是必需位置参数）、`[]=` 返回类型展开别名后必须为 void、不得 static 或带类型参数，`!`、`!=` 不可定义。左操作数为非空类类型时，二元、一元、索引读写、复合赋值及 `++`/`--` 都按方法调用降级，经子类覆写分派，实参按声明参数类型求值。索引读写保留原始索引值，分别检查和转换；复合赋值及 `??=` 的索引上下文来自读取参数，求值时序见[索引赋值](expressions.md#索引赋值)。上界为类的类型参数接收者，以及 `super + x`、`-super`、`super[i]`，同样调用对应实现。`super[i]` 支持简单、复合、`??=` 赋值及前后增减，读写分别选择词法父类的具体实现，包括继承链和捕获 super 的闭包，不调用子类覆写；缺少所需具体运算符仍诊断。`operator ==` 因运行时相等比较尚不分派用户实现而被拒绝；泛型运算符仍缺。 | [parser.dart](../lib/src/parser.dart) `parserOperatorName()`、`parserOperatorCheck()`；[frontend.dart](../lib/src/frontend.dart) `feUserOperator()`、`feLowerSuperOperator()`、`feLowerOperatorLvalue()`；[values.dart](../test/fixtures/values.dart) `operatorValues()`、`operatorIndexing()`；[behavior_test.dart](../test/behavior_test.dart) `rejectedOperators`、`failingValues` |
@@ -30,7 +30,7 @@ SDK 对照版本见[总览](README.md)；§15 泛型和 §20 类型关系另见[
 | §12 Mixins | 未实现 | 无 mixin 声明、约束或应用展开。 | [ast.dart](../lib/src/ast.dart) `AstUnit`；[parser.dart](../lib/src/parser.dart) `parseUnit()`；尚无验证入口 |
 | §13 Extensions | 未实现 | 无 extension 声明、适用性、优先级及显式调用。 | [ast.dart](../lib/src/ast.dart) `AstUnit`；[parser.dart](../lib/src/parser.dart) `parseUnit()`；尚无验证入口 |
 | §14 Enums、[增强枚举][enhanced-enums] | 部分实现 | 支持无类型参数、无 mixin 的简单与增强枚举：值、可选 implements、字段、命名与重定向的 const 生成式构造、工厂构造、静态成员、方法与访问器，以及 `values`、`index`、`name` 和默认 `toString`（`枚举名.值名`）。生成式构造隐含 const，不能有体，实例字段须 final；实例只能由枚举自己的值创建。声明 `index`、`values`、`hashCode` 被拒绝。`Enum` 是核心库接口，只有枚举和抽象类可以实现。switch 按枚举值求覆盖，Dart 3 文件中的 switch 语句须穷尽。SDK 经 `EnumName` 扩展提供 `name`，这里它是 `Enum` 的接口成员，所以声明同名成员的枚举（例如值名为 `name`）被拒绝，待 §13 extension 支持后对齐。类型参数、mixin、用户 `==` 及 `Enum` 的扩展辅助尚缺。 | [enums.dart](../lib/src/frontend/enums.dart) `desugarEnum()`；[parser.dart](../lib/src/parser.dart) `parserEnumValue()`；[patterns.dart](../lib/src/frontend/patterns.dart) `patternEnumCovers()`；[values.dart](../test/fixtures/values.dart) `enumValues()`；[behavior_test.dart](../test/behavior_test.dart) `rejectedEnums` |
-| §16 Metadata | 部分实现 | 解析并附着声明注解，校验 const-variable 引用身份，支持标量、List、null 及已实现构造子集的类实例；按外围声明作用域、局部绑定及库前缀/导出过滤解析。支持已实现 const 构造器的注解调用，以及真实 core `pragma` 的 name/options 常量值。编译期消费 `dartc:no-gc` 等函数约束，按类声明身份区分同名用户类；合同与验证边界见[运行时文档](../doc/runtime.md)。其他 core 注解、反射和运行时注解表尚缺；内部对象/类型 metadata 不属于此语法能力。 | [parser.dart](../lib/src/parser.dart) `parserMetadata()`；[binding.dart](../lib/src/binding.dart) `bindingStatement()`；[constants.dart](../lib/src/constants.dart) `evaluateMetadataConstant()`；[frontend.dart](../lib/src/frontend.dart) `feCheckMetadata()`；[values.dart](../test/fixtures/values.dart) `metadataValues()`；[behavior_test.dart](../test/behavior_test.dart) `libraries`、`rejected` |
+| §16 Metadata | 部分实现 | 解析并附着声明注解，校验 const-variable 引用身份，支持标量、List、null 及已实现构造子集的类实例；按外围声明作用域、局部绑定及库前缀/导出过滤解析。支持已实现 const 构造器的注解调用，包含 2.14 起的显式类型实参、一般实参推断和泛型 const 身份；具体范围见下文。支持真实 core `pragma` 的 name/options 常量值。编译期消费 `dartc:no-gc` 等函数约束，按类声明身份区分同名用户类；合同与验证边界见[运行时文档](../doc/runtime.md)。其他 core 注解、反射和运行时注解表尚缺；内部对象/类型 metadata 不属于此语法能力。 | [parser.dart](../lib/src/parser.dart) `parserMetadata()`；[binding.dart](../lib/src/binding.dart) `bindingStatement()`；[constants.dart](../lib/src/constants.dart) `evaluateMetadataConstant()`；[frontend.dart](../lib/src/frontend.dart) `feCheckMetadata()`；[values.dart](../test/fixtures/values.dart) `metadataValues()`；[behavior_test.dart](../test/behavior_test.dart) `libraries`、`rejected` |
 
 未注解字段按实际读写能力组合父签名：只有 getter 的 final 字段取 getter 结果类型；可写字段若同时继承 getter/setter，两侧类型必须相同。无初始化器的 late final 字段也有 setter，遵循同样的组合约束。构造器字段形参在字段类型确定后推断或检查显式子类型，必需初始化义务同样使用最终类型。独立初始化器推断使用[声明依赖规则][declaration-inference]中的可用类型；目前只复用已有常量类型分析和构造结果类型，不预先求值普通字段或把可变 List 冻结为常量。一般非恒定声明的依赖图和推断环诊断仍缺。
 
@@ -43,6 +43,14 @@ SDK 对照版本见[总览](README.md)；§15 泛型和 §20 类型关系另见[
 const 工厂只能重定向到 const 构造器，允许声明在抽象类以及拥有可变或 late 字段的类中；字段约束施加于最终生成式目标。常量的静态类型来自调用的类，规范化身份来自实际类和字段负载，经过别名或重定向仍与直接构造相同。经可空类别名的构造结果为非空。普通调用不会因目标声明了 const 而自动规范化。
 
 固定草案还要求目标默认值的类型是工厂对应形参类型的子类型；SDK 3.13.7 的 CFE 与 analyzer 均接受 `factory C([int n]) = D` 转发到 `D([num n = 4.5])`。dartc 跟随 SDK：省略参数时使用 4.5，显式实参仍按 int 检查；普通和常量调用由 `factoryValues()` 验证。可捕获的运行时类型错误仍是[异常语义缺口](statements.md)，不能把当前失败退出当作完整异常实现。
+
+## 泛型 const 类与注解
+
+依据 [§15 类型参数和作用域][type-parameters]、[常量身份][canonical-objects]和 [Dart 2.14 泛型 metadata][generic-metadata]，泛型类具有独立参数身份与上界，const 实例保留实际类型实参。同一类、同一实参和相同字段值才共享常量身份；同类参数协变参与编译期 `is`/`as` 和共同类型计算。支持字段类型中的类参数、普通及生成式重定向 const 构造、显式实参、已实现类型模型下从参数及上下文推断、类别名和库前缀。静态成员不能使用类参数；无效上界、实参、初始化器及 metadata 在未使用声明中也检查。
+
+这些对象目前用于编译期常量计算和普通 metadata；语言层没有按 `Export` 名字放行构造、类型参数或 const 资格。运行时泛型实例分配与重化、实例方法、late 字段、隐式/非 const/工厂构造、泛型父接口和原始递归上界仍是实现缺口，相关入口明确拒绝。完整泛型类目标不因注解可用而完成。泛型常量推断复用现有约束算法，完整 Dart 约束求解仍缺。
+
+拥有行为测试为 [values.dart](../test/fixtures/values.dart) 的 `metadataValues()`，以及 [behavior_test.dart](../test/behavior_test.dart) 的 `generic-metadata-imports.dart`、`rejectedGenericMetadata`；覆盖常量身份、字段实参、推断、别名/前缀/跨库私有性、版本边界与未使用声明。
 
 ## 构造器函数值
 
@@ -127,3 +135,6 @@ Metadata 的资格与作用域依据固定草案 §16。analyzer 对 void 常量
 [field-inference]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/inference.md#L147-L179
 
 [declaration-inference]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/inference.md#L124-L179
+
+[type-parameters]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L7380
+[generic-metadata]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.14/small-features-21Q1/feature-specification.md#allow-type-arguments-on-annotations

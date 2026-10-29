@@ -1901,6 +1901,27 @@ void main() {
   print(hostCurrentDirectory(5));
 }
 ''',
+      'generic-metadata.dart': r'''
+class Tag<T extends num> {
+  final T value;
+  const Tag(this.value);
+  const Tag.named(T value) : this(value);
+  const Tag._private(this.value);
+}
+typedef Alias<T extends num> = Tag<T>;
+const saved = Tag<int>(3);
+''',
+      'generic-metadata-barrel.dart': "export 'generic-metadata.dart';",
+      'generic-metadata-imports.dart': r'''
+import 'generic-metadata.dart' as first;
+import 'generic-metadata-barrel.dart' as second;
+@first.Tag<int>.named(3)
+@second.Alias(3)
+@second.saved
+void unused() {}
+const same = identical(first.saved, second.Alias<int>(3));
+void main() { print(same); }
+''',
       'metadata-notes.dart':
           'const note = <int>[1]; @note int value(int x) => x + 1;',
       'metadata-exports.dart': '@barrelNote export "metadata-notes.dart" show note, value; const barrelNote = 1;',
@@ -2303,6 +2324,7 @@ void main() {
       'property-imports.dart',
       'top-accessor-imports.dart',
       'metadata-imports.dart',
+      'generic-metadata-imports.dart',
       'named-constructors-imports.dart',
       'const-class-imports.dart',
       'const-class-metadata-only.dart',
@@ -3482,6 +3504,130 @@ void main() {
       rejectedFieldInference,
       checkSdk: true,
     );
+    final rejectedGenericMetadata = [
+      'class C<T,T> { const C(); } void main() {}',
+      'class C<T extends T> { const C(); } void main() {}',
+      'class C<T extends U,U extends T> { const C(); } void main() {}',
+      'class C<T extends Missing> { const C(); } void main() {}',
+      'class C<T extends num> { const C(); } @C<String>() void unused() {} void main() {}',
+      'class C<T> { const C(); } @C<int,String>() void unused() {} void main() {}',
+      'class C<T> { final T value; const C(this.value); } @C<int>("bad") void unused() {} void main() {}',
+      'class C<T> { final T value; const C(this.value); } @C<int>() void unused() {} void main() {}',
+      'class C<T> { final T value; const C() : value = 1; } void main() {}',
+      'class C<T> { final T value; const C([this.value]); } void main() {}',
+      'class C<T> { final int value; const C() : value = missing; } void main() {}',
+      'class C<T> { final int value; const C() : value = "bad"; } void main() {}',
+      'class C<T> { static T value; const C(); } void main() {}',
+      'class T { const T(); } class C<T> { const C(); static T? value; } void main() {}',
+      'class T { const T(); } class C<T> { const C(); static void f() { T? value = null; } } void main() {}',
+      'class C<T> { const C(); static U f<U extends T>(U value)=>value; } void main() {}',
+      'class C<T> { const C(); } void f<T>() { @C<T>() void unused() {} } void main() {}',
+      "import 'generic-metadata.dart' as p; @p.Tag<int>._private(2) void unused() {} void main() {}",
+      '// @dart=2.13\nclass C<T> { const C(); } @C<int>() void unused() {} void main() {}',
+    ];
+    await rejectCases(
+      'rejected-generic-metadata',
+      rejectedGenericMetadata,
+      checkSdk: true,
+    );
+    final exportPackages = File('${temporary.path}/export-packages.json')
+      ..writeAsStringSync(
+        jsonEncode({
+          'configVersion': 2,
+          'packages': [
+            {
+              'name': 'dartc',
+              'rootUri': Directory(root).uri.toString(),
+              'packageUri': 'lib/',
+              'languageVersion': '3.13',
+            },
+          ],
+        }),
+      );
+    final exportOptions = ['--packages', exportPackages.path];
+    File('${temporary.path}/native-annotations.dart').writeAsStringSync(r'''
+export 'package:dartc/export.dart';
+import 'dart:ffi';
+import 'package:dartc/export.dart';
+typedef Binary = Int64 Function(Int64, Int64);
+typedef Annotate<T> = Export<T>;
+const saved = Annotate<Binary>(symbol: 'saved_add');
+@Export<Binary>(symbol: 'imported_add')
+int importedAdd(int a, int b) => a + b;
+''');
+    final nativeAnnotations =
+        File('${temporary.path}/native-annotation-imports.dart')
+          ..writeAsStringSync(r'''
+import 'dart:ffi' as ffi;
+import 'native-annotations.dart' as api;
+@api.Export<ffi.Int64 Function(ffi.Int64, ffi.Int64)>(symbol: 'sum_加')
+@api.saved
+int add(int a, int b) => a + b;
+@api.Annotate<ffi.Bool Function(ffi.Bool)>()
+bool inverse(bool value) => !value;
+@api.Export<ffi.Double Function(ffi.Float)>()
+double fraction(double value) => value / 2;
+@api.Export<ffi.Void Function()>()
+void nothing() {}
+@api.Export<ffi.Pointer<ffi.Int8> Function(ffi.Pointer<ffi.Int8>)>()
+ffi.Pointer<ffi.Int8> pointer(ffi.Pointer<ffi.Int8> value) => value;
+@api.Export<ffi.Int64>()
+const answer = 42;
+@api.Export<ffi.Double>(symbol: 'ratio')
+const double half = 0.5;
+@api.Export<ffi.Bool>()
+const enabled = true;
+class Static {
+  @api.Export<ffi.Int32>(symbol: 'static_answer')
+  static const answer = 7;
+  @api.Export<ffi.Int32 Function(ffi.Int16)>(symbol: 'static_add')
+  static int add(int value) => value + 1;
+}
+class Export<T> { const Export(); }
+@Export<String>()
+void ordinaryMetadata() {}
+void main() { print(add(2,3)); print(api.importedAdd(4,5)); print(inverse(false)); print(fraction(3)); print(Static.add(7)); print(answer); print(half); print(enabled); print(Static.answer); }
+''');
+    await compare(nativeAnnotations, [], options: exportOptions);
+    final rejectedNativeAnnotations = [
+      '@Export() int f(int x)=>x;',
+      '@Export<int>() int f(int x)=>x;',
+      '@Export<Int64>() const double value=1.0;',
+      '@Export<Double>() const value=1;',
+      '@Export<Bool>() const value=1;',
+      '@Export<Int64>() final value=1;',
+      '@Export<Int32>() int value=1;',
+      '@Export<Int64 Function()>() const value=1;',
+      '@Export<Int64>(symbol: "same") const value=1; @Export<Int64 Function()>(symbol: "same") int f()=>2;',
+      '@Export<Function>() int f(int x)=>x;',
+      '@Export<int Function(int)>() int f(int x)=>x;',
+      'class Int64 {} @Export<Int64 Function(Int64)>() int f(int x)=>x;',
+      '@Export<Int64 Function([Int64])>() int f(int x)=>x;',
+      '@Export<Int64 Function({required Int64 x})>() int f(int x)=>x;',
+      '@Export<Int64 Function(Void)>() int f(int x)=>x;',
+      '@Export<Int64 Function(Int64)>() double f(int x)=>1.0;',
+      '@Export<Int64 Function(Int32)>() int f(double x)=>1;',
+      '@Export<Int64 Function(Int64)>() int f([int x=0])=>x;',
+      '@Export<Int64 Function(Int64)>() int f({required int x})=>x;',
+      '@Export<Int64 Function(Int64)>() int f<T>(int x)=>x;',
+      '@Export<Int64 Function(Int64)>(symbol: "") int f(int x)=>x;',
+      r'@Export<Int64 Function(Int64)>(symbol: "a\u0000b") int f(int x)=>x;',
+      '@Export<Int64 Function()>(symbol: "same") int a()=>1; @Export<Int64 Function()>(symbol: "same") int b()=>2;',
+      'class C { @Export<Int64 Function(Int64)>() int f(int x)=>x; }',
+      '@Export<Int64 Function()>() int get answer=>1;',
+      'void f() { @Export<Int64 Function()>() int nested()=>1; }',
+      '@Export<Pointer<NativeFunction<int Function()>> Function()>() Pointer<NativeFunction<int Function()>> f()=>throw 1;',
+      '@Export<Int64 Function(Int64)>(symbol: "x") @Export<Int64 Function(Int64)>(symbol: "x") int f(int x)=>x;',
+    ];
+    await parallel(rejectedNativeAnnotations.asMap().entries, (entry) async {
+      final invalid =
+          File(
+            '${temporary.path}/rejected-native-annotation-${entry.key}.dart',
+          )..writeAsStringSync(
+            "import 'dart:ffi'; import 'package:dartc/export.dart'; ${entry.value} void main() {}",
+          );
+      await reject(invalid, options: exportOptions);
+    });
     final rejectedConstantTypes = [
       'const value = 1 as String; void main() {}',
       'const value = null as int; void main() {}',

@@ -1,4 +1,6 @@
 import 'arm64_emit.dart';
+import 'exports.dart';
+import 'ir.dart';
 import 'x64_emit.dart';
 import 'target.dart';
 import 'code.dart';
@@ -45,10 +47,17 @@ void generateCode(List<MachineFunction> program) {
   codeAddresses.clear();
   codeCalls.clear();
   functionOffsets.clear();
+  exportOffsets.clear();
   for (var i = 0; i < program.length; i++) functionOffsets.add(0);
   final features = emitMetadataFeatures(program);
   if (targetX64)
     generateX64(program, features);
   else
     generateArm64(program, features);
+  if (imageKind != ImageKind.executable && targetX64) {
+    for (final declaration in checkedExports) {
+      final function = declaration.function;
+      exportOffsets.add(function < 0 ? -1 : functionOffsets[function]);
+    }
+  }
 }

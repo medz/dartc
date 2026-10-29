@@ -645,7 +645,7 @@ List<ClassMembers> checkClassInterfaces(
 List<int> resolveClassInterfaces(SymbolTable symbols, List<AstClass> classes) {
   final parents = <List<int>>[];
   final supers = <int>[];
-  final uses = <AliasApplication>[];
+  final uses = <TypeApplication>[];
   // Looked up in dart:core itself so a user declaration cannot shadow it.
   final enumSymbol = symbolExportedDeclaration(symbols, sourceCore, 'Enum');
   final enumType =
@@ -653,10 +653,11 @@ List<int> resolveClassInterfaces(SymbolTable symbols, List<AstClass> classes) {
       ? classType(symbols.declarations[enumSymbol].target)
       : -1;
   for (final syntax in classes) {
+    final scope = classTypeParameters[parents.length];
     final types = <int>[];
     var superclass = tObject;
     if (syntax.superclass case final parent?) {
-      superclass = resolveSuperinterface(symbols, parent, uses);
+      superclass = resolveSuperinterface(symbols, parent, uses, scope);
       if (superclass != tObject && !typeIsClass(superclass))
         sourceError(
           symbols.program,
@@ -666,7 +667,7 @@ List<int> resolveClassInterfaces(SymbolTable symbols, List<AstClass> classes) {
     }
     supers.add(superclass);
     for (final interface in syntax.interfaces) {
-      final type = resolveSuperinterface(symbols, interface, uses);
+      final type = resolveSuperinterface(symbols, interface, uses, scope);
       if (syntax.superclass != null && type == superclass)
         sourceError(
           symbols.program,
@@ -724,7 +725,7 @@ List<int> resolveClassInterfaces(SymbolTable symbols, List<AstClass> classes) {
     classSupertypes[owner] = parents[owner];
     classSuperclasses[owner] = supers[owner];
   }
-  checkAliasApplications(symbols, uses);
+  checkTypeApplications(symbols, uses);
   if (enumType >= 0)
     for (var owner = 0; owner < classes.length; owner++) {
       final syntax = classes[owner];

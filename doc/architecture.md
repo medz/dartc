@@ -768,7 +768,13 @@ ForeignFrame 至少保存上一托管帧锚点、原生调用边界和句柄范�
 
 ### 原生库导出与 ABI 描述
 
-向宿主导出普通平台 C ABI，不暴露内部 tagged 编码、ThreadState、类描述符或 GC 对象地址。原生类型与目标由已有 FFI 声明提供，例如带显式 NativeType 签名的 Pointer.fromFunction 绑定；构建选项选择要导出的绑定及符号。普通 Dart int、String 或 Object 签名不能作为编译器猜测原生 ABI 的依据。只进行能够证明等价的表示转换；其他转换及所有权由使用者通过 FFI 显式设置。不另造导出 pragma、原生类型体系或默认的自动绑定生成层。
+向宿主导出普通平台 C ABI，不暴露内部 tagged 编码、ThreadState、类描述符或 GC 对象地址。`package:dartc/export.dart` 的普通泛型注解 `Export<T>` 标记导出声明；`T` 使用已有 `dart:ffi` 函数签名或数据类型，`symbol` 省略时使用声明名。普通 Dart 参数和结果仍保持 Dart 类型，不能仅凭 `int`、`String` 或 `Object` 猜测原生 ABI。
+
+前端按注解声明身份生成 `CheckedExport`：符号、原生类型，以及函数或全局声明的目标。标量 const 额外携带原始整数、binary64 或布尔载荷，不在前端按目标位宽截断。后端消费这一结果检查目标布局、转换、传递效果和运行时边界；工具链从同一结果生成 C 头文件，不重新解析源声明。
+
+内部 Dart 函数入口与 C 导出入口分别保存。macOS ARM64 的 C ABI 独立分配整数与浮点参数寄存器，并按原生宽度放置溢出栈参数；适配入口先保存输入，再将窄整数扩展、Float 转为 binary64，将参数送入内部 word 调用约定，返回时做对应转换。全 word 签名可以复用内部入口。实现遵循 [AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst) 和 [Apple ARM64 调用约定](https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms)；其他目标的不同约定不能沿用这一适配器。
+
+标量 const 的导出副本位于只读数据节。整数副本保留目标宽度的低位，C 类型决定符号解释；Float 按最近值、偶数舍入转换为 binary32。这些转换不改变 Dart 内部的常量值。可写字段不能用同样的复制办法代替共享存储，也不能通过缩窄 Dart 字段、提前执行惰性初始化或暴露 GC 地址来实现原生数据符号。数据、TLS、结构体布局及其生命周期必须各自完成对应契约。
 
 | 导出契约 | 无上下文函数 | 托管组件函数 |
 |---|---|---|

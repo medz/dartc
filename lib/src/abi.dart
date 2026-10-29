@@ -17,10 +17,6 @@ int runtimeFunction(int builtin, int castType) {
   if (builtin == bValueCheck) return abiFunction('rtValueCheck', 0);
   if (builtin == bListNewTyped) return abiFunction('rtListNew', 0);
   if (builtin == bListFilledTyped) return abiFunction('rtListFilledChecked', 0);
-  if (imageKind != ImageKind.executable) {
-    print('Library output cannot use managed runtime operations.');
-    hostExit(1);
-  }
   if (builtin == bLateError) return abiFunction('rtLateError', 0);
   if (builtin == bBoxDouble) return abiFunction('rtBoxDouble', 0);
   if (builtin == bDoubleToString) return abiFunction('rtDoubleToString', 0);

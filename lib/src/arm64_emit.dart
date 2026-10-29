@@ -1,10 +1,11 @@
 import 'arm64.dart';
+import 'arm64_ffi.dart';
+import 'exports.dart';
 import 'allocate.dart';
 import 'code.dart';
 import 'target.dart';
 import 'abi.dart';
 import 'frame.dart';
-import 'host.dart';
 import 'ir.dart';
 import 'layout.dart';
 import 'liveness.dart';
@@ -77,10 +78,6 @@ void emitInstruction(
 ) {
   final MachineInstruction(:op, :output, :inputs) = instruction;
   int result = 0;
-  if (imageKind != ImageKind.executable && op == mAddress) {
-    print('Library functions cannot use globals, strings, or managed objects.');
-    hostExit(1);
-  }
   if (op == mConstant) {
     result = emitDestination(function, output);
     armConstant(result, instruction.target);
@@ -593,6 +590,15 @@ void generateArm64(List<MachineFunction> program, int features) {
       emitFunction(current, roots, framesEnabled, function);
     }
     function = function + 1;
+  }
+  if (imageKind != ImageKind.executable) {
+    for (final declaration in checkedExports) {
+      exportOffsets.add(
+        declaration.function < 0
+            ? -1
+            : emitArm64Export(declaration.function, declaration.signature),
+      );
+    }
   }
   for (final call in codeCalls) {
     final site = call.offset;

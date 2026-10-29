@@ -3,6 +3,7 @@
 ### Features
 
 - Add Intel Mac (`macos-x64`) executables, native compiler builds and release packaging. macOS x64 also supports the existing Int64 FFI object, static library and dynamic library outputs.
+- Replace `--export` and `Pointer.fromFunction` export bindings with `@Export<T>` declarations for macOS object, static and dynamic library outputs. Generate matching C/C++ headers automatically, with an optional `--header` path. macOS ARM64 supports mixed integer, floating-point, boolean and pointer signatures, and scalar read-only data symbols.
 
 ### Tooling
 

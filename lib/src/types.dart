@@ -18,6 +18,27 @@ const int kClass = 14;
 const int kFunction = 15;
 const int kTypeParameter = 16;
 const int kSchemaHole = 17;
+const int kFfi = 18;
+
+const int ffiVoid = 0;
+const int ffiInt8 = 1;
+const int ffiUint8 = 2;
+const int ffiInt16 = 3;
+const int ffiUint16 = 4;
+const int ffiInt32 = 5;
+const int ffiUint32 = 6;
+const int ffiInt64 = 7;
+const int ffiUint64 = 8;
+const int ffiIntPtr = 9;
+const int ffiUintPtr = 10;
+const int ffiFloat = 11;
+const int ffiDouble = 12;
+const int ffiBool = 13;
+const int ffiPointer = 14;
+const int ffiNativeFunction = 15;
+const int ffiNativeType = 16;
+const int ffiSizedNativeType = 17;
+const int ffiHandle = 18;
 
 int schemaHole = -1;
 
@@ -68,12 +89,14 @@ class DartType {
   int nullableType;
   bool containsParameters = false;
   bool containsSchemaHole = false;
+  List<int> arguments = const <int>[];
 
   DartType(this.kind, this.argument, this.listType, this.nullableType);
 }
 
 List<DartType> dartTypes = <DartType>[];
 List<int> classDartTypes = <int>[];
+List<List<int>> classTypeParameters = <List<int>>[];
 List<List<int>> classSupertypes = <List<int>>[];
 List<int> classSuperclasses = <int>[];
 List<FunctionSignature> functionSignatures = <FunctionSignature>[];
@@ -92,6 +115,7 @@ void resetTypes() {
   schemaHole = -1;
   dartTypes.clear();
   classDartTypes.clear();
+  classTypeParameters.clear();
   classSupertypes.clear();
   classSuperclasses.clear();
   functionSignatures.clear();
@@ -208,6 +232,22 @@ int typeCompleteSchema(int schema, int inferred) {
       ),
     );
   }
+  if (kind == kClass || kind == kFfi) {
+    final arguments = <int>[];
+    final context = dartTypes[inferred];
+    final same =
+        context.kind == kind &&
+        context.argument == typeArgument(schema) &&
+        context.arguments.length == dartTypes[schema].arguments.length;
+    for (var i = 0; i < dartTypes[schema].arguments.length; i++)
+      arguments.add(
+        typeCompleteSchema(
+          dartTypes[schema].arguments[i],
+          same ? context.arguments[i] : tDynamic,
+        ),
+      );
+    return _appliedType(kind, typeArgument(schema), arguments);
+  }
   var signature = functionSignature(schema);
   var parameters = <int>[];
   for (var parameter in signature.parameters)
@@ -237,11 +277,52 @@ int classType(int classId) {
   while (classDartTypes.length <= classId) {
     var owner = classDartTypes.length;
     classDartTypes.add(dartTypes.length);
+    classTypeParameters.add(const <int>[]);
     classSupertypes.add(const <int>[]);
     classSuperclasses.add(tObject);
     dartTypes.add(DartType(kClass, owner, -1, -1));
   }
   return classDartTypes[classId];
+}
+
+// Declaration identity stays in argument; applications retain every type argument.
+int _appliedType(int kind, int declaration, List<int> arguments) {
+  for (var type = tDouble + 1; type < dartTypes.length; type++) {
+    final item = dartTypes[type];
+    if (item.kind != kind ||
+        item.argument != declaration ||
+        item.arguments.length != arguments.length)
+      continue;
+    var i = 0;
+    while (i < arguments.length && item.arguments[i] == arguments[i]) i++;
+    if (i == arguments.length) return type;
+  }
+  final item = DartType(kind, declaration, -1, -1);
+  item.arguments = <int>[...arguments];
+  for (final argument in arguments) {
+    if (typeContainsParameters(argument)) item.containsParameters = true;
+    if (typeHasSchemaHole(argument)) item.containsSchemaHole = true;
+  }
+  dartTypes.add(item);
+  return dartTypes.length - 1;
+}
+
+int classInstanceType(int owner, List<int> arguments) => arguments.isEmpty
+    ? classType(owner)
+    : _appliedType(kClass, owner, arguments);
+
+int ffiType(int kind, [int argument = -1]) =>
+    _appliedType(kFfi, kind, argument < 0 ? const <int>[] : <int>[argument]);
+
+int ffiKind(int type) => dartTypes[type].kind == kFfi ? typeArgument(type) : -1;
+
+bool _typeArgumentsSubtype(int actual, int expected) {
+  final source = dartTypes[actual].arguments;
+  final target = dartTypes[expected].arguments;
+  if (source.length != target.length) return false;
+  for (var i = 0; i < source.length; i++)
+    if (!typeIsSubtype(source[i], target[i])) return false;
+  return true;
 }
 
 bool typeIsList(int type) {
@@ -394,8 +475,26 @@ bool typeIsSubtype(int actual, int expected) {
     return typeIsSubtype(typeArgument(actual), typeArgument(expected));
   }
   if (actualKind == kClass && expectedKind == kClass) {
+    if (typeArgument(actual) == typeArgument(expected))
+      return _typeArgumentsSubtype(actual, expected);
     for (final parent in classSupertypes[typeArgument(actual)])
-      if (typeIsSubtype(parent, expected)) return true;
+      if (typeIsSubtype(
+        substituteType(
+          parent,
+          classTypeParameters[typeArgument(actual)],
+          dartTypes[actual].arguments,
+        ),
+        expected,
+      ))
+        return true;
+  }
+  if (actualKind == kFfi && expectedKind == kFfi) {
+    final source = ffiKind(actual);
+    final target = ffiKind(expected);
+    if (target == ffiNativeType) return true;
+    if (target == ffiSizedNativeType)
+      return source >= ffiInt8 && source <= ffiPointer;
+    if (source == target) return _typeArgumentsSubtype(actual, expected);
   }
   return false;
 }
@@ -407,6 +506,14 @@ int joinTypes(int left, int right) {
   if (left == right) return left;
   if (left == tVoid || right == tVoid) return tVoid;
   if (left == tDynamic || right == tDynamic) return tDynamic;
+  if (typeIsClass(left) &&
+      typeIsClass(right) &&
+      typeArgument(left) == typeArgument(right) &&
+      dartTypes[left].arguments.length == dartTypes[right].arguments.length)
+    return classInstanceType(typeArgument(left), <int>[
+      for (var i = 0; i < dartTypes[left].arguments.length; i++)
+        joinTypes(dartTypes[left].arguments[i], dartTypes[right].arguments[i]),
+    ]);
   if (typeIsFunction(left) && typeIsFunction(right)) {
     var a = functionSignature(left);
     var b = functionSignature(right);
@@ -580,6 +687,11 @@ bool typeParametersInScope(int type, List<int> scope) {
   if (typeIsParameter(type)) return typeParameterIndex(scope, type) >= 0;
   if (typeIsList(type) || typeIsNullable(type))
     return typeParametersInScope(typeArgument(type), scope);
+  if (typeIsClass(type) || ffiKind(type) >= 0) {
+    for (final argument in dartTypes[type].arguments)
+      if (!typeParametersInScope(argument, scope)) return false;
+    return true;
+  }
   var signature = functionSignature(type);
   if (!typeParametersInScope(signature.result, scope)) return false;
   for (var parameter in signature.parameters)
@@ -649,6 +761,11 @@ int _substituteType(
     return nullableType(
       _substituteType(typeArgument(type), parameters, upper, lower, variance),
     );
+  if (kind == kClass || kind == kFfi)
+    return _appliedType(kind, typeArgument(type), <int>[
+      for (final argument in dartTypes[type].arguments)
+        _substituteType(argument, parameters, upper, lower, variance),
+    ]);
   var signature = functionSignature(type);
   var result = _substituteType(
     signature.result,
@@ -679,6 +796,12 @@ int _parameterOccurrences(int type, int parameter, int variance) {
   var kind = dartTypes[type].kind;
   if (kind == kList || kind == kNullable)
     return _parameterOccurrences(typeArgument(type), parameter, variance);
+  if (kind == kClass || kind == kFfi) {
+    var found = 0;
+    for (final argument in dartTypes[type].arguments)
+      found |= _parameterOccurrences(argument, parameter, variance);
+    return found;
+  }
   var signature = functionSignature(type);
   var found = _parameterOccurrences(signature.result, parameter, variance);
   for (var input in signature.parameters)
@@ -699,6 +822,11 @@ bool typeContainsAnyParameter(int type, List<int> parameters) {
   var kind = dartTypes[type].kind;
   if (kind == kList || kind == kNullable)
     return typeContainsAnyParameter(typeArgument(type), parameters);
+  if (kind == kClass || kind == kFfi) {
+    for (final argument in dartTypes[type].arguments)
+      if (typeContainsAnyParameter(argument, parameters)) return true;
+    return false;
+  }
   var signature = functionSignature(type);
   if (typeContainsAnyParameter(signature.result, parameters)) return true;
   for (var input in signature.parameters)
@@ -716,6 +844,11 @@ void _parameterDependencies(int type, List<int> parameters, List<int> found) {
   var kind = dartTypes[type].kind;
   if (kind == kList || kind == kNullable) {
     _parameterDependencies(typeArgument(type), parameters, found);
+    return;
+  }
+  if (kind == kClass || kind == kFfi) {
+    for (final argument in dartTypes[type].arguments)
+      _parameterDependencies(argument, parameters, found);
     return;
   }
   var signature = functionSignature(type);
@@ -837,6 +970,11 @@ int superBoundedType(int type, int variance) {
     return listType(superBoundedType(typeArgument(type), variance));
   if (kind == kNullable)
     return nullableType(superBoundedType(typeArgument(type), variance));
+  if (kind == kClass || kind == kFfi)
+    return _appliedType(kind, typeArgument(type), <int>[
+      for (final argument in dartTypes[type].arguments)
+        superBoundedType(argument, variance),
+    ]);
   if (kind == kFunction) {
     var signature = functionSignature(type);
     var inputs = <int>[];

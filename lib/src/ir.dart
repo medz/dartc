@@ -320,9 +320,6 @@ int entryFunction = -1;
 enum ImageKind { executable, dynamicLibrary, object, staticLibrary }
 
 ImageKind imageKind = ImageKind.executable;
-List<String> exportNames = <String>[];
-List<int> exportFunctions = <int>[];
-List<int> exportParameters = <int>[];
 
 List<int> classSizes = <int>[];
 List<List<int>> classPointerMasks = <List<int>>[];

@@ -166,13 +166,13 @@ bool _machineNonnegative(List<MachineInstruction?> definitions, int value) {
   return false;
 }
 
-void checkNoGcMachine(
+List<int> checkNoGcMachine(
   List<MachineFunction> program,
   List<int> obligations,
   SourceProgram sources,
   List<int> checked,
 ) {
-  if (obligations.isEmpty) return;
+  if (obligations.isEmpty) return const <int>[];
   var summaries = List<int>.filled(program.length, 0);
   var f = 0;
   while (f < program.length) {
@@ -242,4 +242,5 @@ void checkNoGcMachine(
     if (checked[f] != 0) _checkBody(sources, f, summaries[f]);
     f++;
   }
+  return summaries;
 }

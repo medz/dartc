@@ -124,26 +124,90 @@ void _prepareAliasParameters(SymbolTable symbols, int symbol) {
 List<int> resolveFunctionTypeParameters(
   SymbolTable symbols,
   AstFunction syntax,
-  int function,
-) {
+  int function, [
+  List<int> enclosing = const <int>[],
+]) {
   var parameters = _declareTypeParameters(
     symbols,
     syntax.typeParameters,
     -function - 1,
   );
-  var uses = <AliasApplication>[];
+  var uses = <TypeApplication>[];
   var i = 0;
   while (i < parameters.length) {
     var bound = syntax.typeParameters[i].bound;
     typeParameterInfo(parameters[i]).bound = bound == null
         ? nullableType(tObject)
-        : _resolveType(symbols, bound, parameters, uses);
+        : _resolveType(symbols, bound, <int>[
+            ...enclosing,
+            ...parameters,
+          ], uses);
     i++;
   }
   _checkParameterCycles(symbols, parameters, syntax.typeParameters);
   for (var use in uses)
-    _checkAliasApplication(symbols, use.symbol, use.arguments, use.token, true);
+    _checkTypeApplication(symbols, use.symbol, use.arguments, use.token, true);
   return parameters;
+}
+
+void _resolveClassParameters(SymbolTable symbols, int symbol) {
+  final declaration = symbols.declarations[symbol];
+  if (declaration.parametersReady || declaration.resolvingParameters) return;
+  declaration.resolvingParameters = true;
+  final syntax = declaration.classSyntax!;
+  final parameters = _declareTypeParameters(
+    symbols,
+    syntax.typeParameters,
+    symbol,
+  );
+  classTypeParameters[declaration.target] = parameters;
+  declaration.boundUses = <TypeApplication>[];
+  for (var i = 0; i < parameters.length; i++) {
+    final bound = syntax.typeParameters[i].bound;
+    typeParameterInfo(parameters[i]).bound = bound == null
+        ? nullableType(tObject)
+        : _resolveType(symbols, bound, parameters, declaration.boundUses);
+  }
+  _checkParameterCycles(symbols, parameters, syntax.typeParameters);
+  declaration.resolvingParameters = false;
+  declaration.parametersReady = true;
+}
+
+void resolveClassTypeParameters(SymbolTable symbols) {
+  for (var i = 0; i < symbols.declarations.length; i++)
+    if (symbols.declarations[i].kind == symbolClass)
+      _resolveClassParameters(symbols, i);
+}
+
+List<int> declarationTypeParameters(SymbolTable symbols, int symbol) {
+  final declaration = symbols.declarations[symbol];
+  return declaration.kind == symbolClass
+      ? classTypeParameters[declaration.target]
+      : symbols.aliases[declaration.target].parameters;
+}
+
+int instantiateDeclarationType(
+  SymbolTable symbols,
+  int symbol,
+  List<int> arguments,
+  int token,
+) {
+  _checkTypeApplication(symbols, symbol, arguments, token, false);
+  final declaration = symbols.declarations[symbol];
+  if (declaration.kind == symbolClass)
+    return classInstanceType(declaration.target, arguments);
+  final alias = symbols.aliases[declaration.target];
+  return substituteType(alias.template, alias.parameters, arguments);
+}
+
+int declarationTypeTemplate(SymbolTable symbols, int symbol) {
+  final declaration = symbols.declarations[symbol];
+  return declaration.kind == symbolClass
+      ? classInstanceType(
+          declaration.target,
+          classTypeParameters[declaration.target],
+        )
+      : symbols.aliases[declaration.target].template;
 }
 
 int _typeSymbol(SymbolTable symbols, AstType syntax, List<int> scope) {
@@ -206,7 +270,7 @@ void _resolveAlias(SymbolTable symbols, int symbol) {
   _prepareAliasParameters(symbols, symbol);
   alias.resolving = true;
   if (alias.parameters.isNotEmpty) {
-    alias.boundUses = <AliasApplication>[];
+    alias.boundUses = <TypeApplication>[];
     var i = 0;
     while (i < alias.parameters.length) {
       var syntax = alias.syntaxParameters[i].bound;
@@ -223,7 +287,7 @@ void _resolveAlias(SymbolTable symbols, int symbol) {
     }
     _checkParameterCycles(symbols, alias.parameters, alias.syntaxParameters);
   }
-  alias.bodyUses = <AliasApplication>[];
+  alias.bodyUses = <TypeApplication>[];
   alias.template = _resolveType(
     symbols,
     alias.syntax,
@@ -255,12 +319,12 @@ int _rawAliasType(TypeAlias alias) {
   return alias.type;
 }
 
-bool _regularAlias(TypeAlias alias, List<int> arguments) {
+bool _regularArguments(List<int> parameters, List<int> arguments) {
   var i = 0;
-  while (i < alias.parameters.length) {
+  while (i < parameters.length) {
     var bound = substituteType(
-      typeParameterInfo(alias.parameters[i]).bound,
-      alias.parameters,
+      typeParameterInfo(parameters[i]).bound,
+      parameters,
       arguments,
     );
     if (!typeIsSubtype(arguments[i], bound)) return false;
@@ -269,15 +333,37 @@ bool _regularAlias(TypeAlias alias, List<int> arguments) {
   return true;
 }
 
-void _checkAliasApplication(
+void _checkTypeApplication(
   SymbolTable symbols,
   int symbol,
   List<int> arguments,
   int token,
   bool allowSuperBounded,
 ) {
+  final declaration = symbols.declarations[symbol];
+  if (declaration.kind == symbolType) {
+    final native = ffiKind(declaration.target);
+    final bound = native == ffiPointer ? ffiType(ffiNativeType) : tFunction;
+    if (!typeIsSubtype(arguments[0], bound))
+      _typeError(
+        symbols,
+        token,
+        'type argument does not satisfy ' + declaration.name + ' bound',
+      );
+    return;
+  }
+  if (declaration.kind == symbolClass) {
+    final parameters = classTypeParameters[declaration.target];
+    if (!_regularArguments(parameters, arguments) &&
+        (!allowSuperBounded ||
+            !_regularArguments(parameters, <int>[
+              for (final argument in arguments) superBoundedType(argument, 1),
+            ])))
+      _typeError(symbols, token, 'type arguments do not satisfy class bounds');
+    return;
+  }
   var alias = symbols.aliases[symbols.declarations[symbol].target];
-  if (!_regularAlias(alias, arguments)) {
+  if (!_regularArguments(alias.parameters, arguments)) {
     var inverted = <int>[];
     if (allowSuperBounded) {
       var i = 0;
@@ -291,7 +377,7 @@ void _checkAliasApplication(
         i++;
       }
     }
-    if (!allowSuperBounded || !_regularAlias(alias, inverted))
+    if (!allowSuperBounded || !_regularArguments(alias.parameters, inverted))
       _typeError(symbols, token, 'type arguments do not satisfy alias bounds');
   }
   for (var use in alias.boundUses)
@@ -304,13 +390,13 @@ void _checkNestedAlias(
   SymbolTable symbols,
   TypeAlias owner,
   List<int> arguments,
-  AliasApplication use,
+  TypeApplication use,
   int token,
 ) {
   var actual = <int>[];
   for (var type in use.arguments)
     actual.add(substituteType(type, owner.parameters, arguments));
-  _checkAliasApplication(symbols, use.symbol, actual, token, true);
+  _checkTypeApplication(symbols, use.symbol, actual, token, true);
 }
 
 bool _simpleAlias(SymbolTable symbols, TypeAlias alias) {
@@ -331,7 +417,20 @@ bool _simpleAlias(SymbolTable symbols, TypeAlias alias) {
   return true;
 }
 
-bool _simpleRawUse(SymbolTable symbols, AliasApplication use) {
+bool _simpleRawUse(SymbolTable symbols, TypeApplication use) {
+  final declaration = symbols.declarations[use.symbol];
+  if (declaration.kind == symbolClass) {
+    final parameters = classTypeParameters[declaration.target];
+    if (use.raw)
+      for (final parameter in parameters)
+        if (typeContainsAnyParameter(
+          typeParameterInfo(parameter).bound,
+          parameters,
+        ))
+          return false;
+    return true;
+  }
+  if (declaration.kind == symbolType) return true;
   var alias = symbols.aliases[symbols.declarations[use.symbol].target];
   if (use.raw && !_simpleAlias(symbols, alias)) return false;
   for (var child in alias.bodyUses)
@@ -353,9 +452,9 @@ void resolveTypeAliasDeclarations(SymbolTable symbols) {
   }
 }
 
-void checkAliasApplications(SymbolTable symbols, List<AliasApplication> uses) {
+void checkTypeApplications(SymbolTable symbols, List<TypeApplication> uses) {
   for (final use in uses)
-    _checkAliasApplication(
+    _checkTypeApplication(
       symbols,
       use.symbol,
       use.arguments,
@@ -367,6 +466,17 @@ void checkAliasApplications(SymbolTable symbols, List<AliasApplication> uses) {
 void checkTypeAliasDeclarations(SymbolTable symbols) {
   var i = 0;
   while (i < symbols.declarations.length) {
+    if (symbols.declarations[i].kind == symbolClass) {
+      final uses = symbols.declarations[i].boundUses;
+      for (final use in uses)
+        if (!_simpleRawUse(symbols, use))
+          _typeError(
+            symbols,
+            use.token,
+            'raw type with non-simple bounds in type parameter bound',
+          );
+      checkTypeApplications(symbols, uses);
+    }
     if (symbols.declarations[i].kind == symbolAlias) {
       var alias = symbols.aliases[symbols.declarations[i].target];
       for (var use in alias.boundUses) {
@@ -377,8 +487,8 @@ void checkTypeAliasDeclarations(SymbolTable symbols) {
             'raw type with non-simple bounds in type parameter bound',
           );
       }
-      checkAliasApplications(symbols, alias.boundUses);
-      checkAliasApplications(symbols, alias.bodyUses);
+      checkTypeApplications(symbols, alias.boundUses);
+      checkTypeApplications(symbols, alias.bodyUses);
     }
     i++;
   }
@@ -388,12 +498,19 @@ void checkTypeAliasDeclarations(SymbolTable symbols) {
 int resolveSuperinterface(
   SymbolTable symbols,
   AstType syntax,
-  List<AliasApplication> uses,
-) {
-  final type = _resolveType(symbols, syntax, const <int>[], uses, false);
+  List<TypeApplication> uses, [
+  List<int> scope = const <int>[],
+]) {
+  final type = _resolveType(symbols, syntax, scope, uses, false);
+  if (typeIsClass(type) && dartTypes[type].arguments.isNotEmpty)
+    _typeError(
+      symbols,
+      syntax.token,
+      'generic superinterfaces are not yet supported',
+    );
   if (type == tObject || typeIsClass(type)) {
     final declaration =
-        symbols.declarations[_typeSymbol(symbols, syntax, const <int>[])];
+        symbols.declarations[_typeSymbol(symbols, syntax, scope)];
     if (declaration.kind == symbolAlias &&
         symbols.aliases[declaration.target].expandsToParameter)
       _typeError(
@@ -460,7 +577,7 @@ int resolveObjectPatternType(
     if (!typeIsSubtype(arguments[i], bound))
       arguments[i] = meetTypes(arguments[i], bound);
   }
-  _checkAliasApplication(symbols, symbol, arguments, syntax.token, true);
+  _checkTypeApplication(symbols, symbol, arguments, syntax.token, true);
   return substituteType(alias.template, alias.parameters, arguments);
 }
 
@@ -538,7 +655,7 @@ int _resolveType(
   SymbolTable symbols,
   AstType syntax,
   List<int> scope,
-  List<AliasApplication>? uses, [
+  List<TypeApplication>? uses, [
   bool allowSuperBounded = true,
 ]) {
   var function = syntax.function;
@@ -633,37 +750,6 @@ int resolveDeclarationType(
   );
 }
 
-bool _nativeContainsParameters(
-  SymbolTable symbols,
-  AstType syntax,
-  List<int> scope,
-  List<AliasApplication>? uses,
-) {
-  var function = syntax.function;
-  if (function != null) {
-    if (_nativeContainsParameters(symbols, function.result, scope, uses))
-      return true;
-    for (var parameter in function.parameters)
-      if (_nativeContainsParameters(symbols, parameter.type, scope, uses))
-        return true;
-    return false;
-  }
-  var name = syntax.name;
-  if (name.endsWith('?')) name = name.substring(0, name.length - 1);
-  if (typeParameterInScope(scope, name) >= 0)
-    return typeContainsParameters(_resolveType(symbols, syntax, scope, uses));
-  if (name == 'void' || name == 'dynamic') return false;
-  var declaration = symbols.declarations[_typeSymbol(symbols, syntax, scope)];
-  if (declaration.kind == symbolNativeType) return false;
-  if (declaration.kind == symbolType && declaration.target == tPointer) {
-    for (var argument in syntax.arguments)
-      if (_nativeContainsParameters(symbols, argument, scope, uses))
-        return true;
-    return false;
-  }
-  return typeContainsParameters(_resolveType(symbols, syntax, scope, uses));
-}
-
 int _resolveDeclarationType(
   SymbolTable symbols,
   int symbol,
@@ -671,10 +757,46 @@ int _resolveDeclarationType(
   int token,
   List<int> scope,
   bool allowSuperBounded,
-  List<AliasApplication>? uses,
+  List<TypeApplication>? uses,
 ) {
   var declaration = symbols.declarations[symbol];
   var count = syntaxArguments.length;
+  if (declaration.kind == symbolClass) {
+    _resolveClassParameters(symbols, symbol);
+    final parameters = classTypeParameters[declaration.target];
+    if (count != 0 && count != parameters.length)
+      _typeError(
+        symbols,
+        token,
+        'wrong number of type arguments for ' + declaration.name,
+      );
+    final raw = count == 0 && parameters.isNotEmpty;
+    if (raw && declaration.resolvingParameters)
+      _typeError(
+        symbols,
+        token,
+        'raw recursive class bounds are not yet supported',
+      );
+    final arguments = raw
+        ? instantiateTypeParameters(parameters)
+        : <int>[
+            for (final argument in syntaxArguments)
+              _resolveType(symbols, argument, scope, uses),
+          ];
+    if (uses != null)
+      uses.add(
+        TypeApplication(symbol, arguments, token, raw, allowSuperBounded),
+      );
+    else
+      _checkTypeApplication(
+        symbols,
+        symbol,
+        arguments,
+        token,
+        allowSuperBounded,
+      );
+    return classInstanceType(declaration.target, arguments);
+  }
   if (declaration.kind == symbolAlias) {
     _resolveAlias(symbols, symbol);
     var alias = symbols.aliases[declaration.target];
@@ -698,10 +820,10 @@ int _resolveDeclarationType(
     }
     if (uses != null)
       uses.add(
-        AliasApplication(symbol, arguments, token, raw, allowSuperBounded),
+        TypeApplication(symbol, arguments, token, raw, allowSuperBounded),
       );
     else
-      _checkAliasApplication(
+      _checkTypeApplication(
         symbols,
         symbol,
         arguments,
@@ -712,14 +834,15 @@ int _resolveDeclarationType(
   }
   var generic =
       declaration.kind == symbolType &&
-      (declaration.target < 0 || declaration.target == tPointer);
+      (declaration.target < 0 ||
+          ffiKind(declaration.target) == ffiPointer ||
+          ffiKind(declaration.target) == ffiNativeFunction);
   if (generic && count > 1 || !generic && count != 0)
     _typeError(
       symbols,
       token,
       'wrong number of type arguments for ' + declaration.name,
     );
-  if (declaration.kind == symbolClass) return classType(declaration.target);
   if (declaration.kind == symbolType) {
     if (declaration.target < 0) {
       var element = tDynamic;
@@ -727,14 +850,19 @@ int _resolveDeclarationType(
         element = _resolveType(symbols, syntaxArguments[0], scope, uses);
       return listType(element);
     }
-    if (declaration.target == tPointer && scope.isNotEmpty) {
-      for (var argument in syntaxArguments)
-        if (_nativeContainsParameters(symbols, argument, scope, uses))
-          _typeError(
-            symbols,
-            token,
-            'generic native type templates are not supported',
-          );
+    final native = ffiKind(declaration.target);
+    if (native == ffiPointer || native == ffiNativeFunction) {
+      final bound = native == ffiPointer ? ffiType(ffiNativeType) : tFunction;
+      final argument = count == 0
+          ? bound
+          : _resolveType(symbols, syntaxArguments[0], scope, uses);
+      if (uses != null)
+        uses.add(
+          TypeApplication(symbol, <int>[argument], token, count == 0, false),
+        );
+      else
+        _checkTypeApplication(symbols, symbol, <int>[argument], token, false);
+      return ffiType(native, argument);
     }
     return declaration.target;
   }

@@ -3284,10 +3284,55 @@ const metadataTag = 1;
 const metadataList = <Object?>[null, '注🙂'];
 const metadataNull = null;
 
+class MetadataValue<T> {
+  final T value;
+  const MetadataValue(this.value);
+  const MetadataValue.named(T value) : this(value);
+  static T identity<T>(T value) => value;
+}
+
+class MetadataBound<T extends num> {
+  final T value;
+  const MetadataBound(this.value);
+}
+
+typedef MetadataAlias<T> = MetadataValue<List<T>>;
+const inferredMetadata = MetadataValue(3);
+const MetadataValue<num> contextualMetadata = MetadataValue(3);
+const genericMetadata = MetadataValue<int>.named(3);
+
+@MetadataBound<int>(4)
+@MetadataAlias([1, 2])
+@genericMetadata
+void unusedGenericMetadata() {}
+
 @metadataTag
 @metadataList
 @metadataNull
 void metadataValues() {
+  print(MetadataValue.identity<int>(6));
+  const inferred = identical(inferredMetadata, MetadataValue<int>(3));
+  const contextual = identical(contextualMetadata, MetadataValue<num>(3));
+  const redirected = identical(genericMetadata, MetadataValue<int>(3));
+  const different = identical(MetadataValue<int>(3), MetadataValue<num>(3));
+  const subtype = MetadataValue<int>(3) is MetadataValue<num>;
+  const merged =
+      [MetadataValue(1), MetadataValue(2.0)] is List<MetadataValue<num>>;
+  const notSubtype = MetadataValue<int>(3) is MetadataValue<String>;
+  const alias = identical(
+    MetadataAlias([1, 2]),
+    MetadataValue<List<int>>([1, 2]),
+  );
+  print(<bool>[
+    inferred,
+    contextual,
+    redirected,
+    different,
+    subtype,
+    merged,
+    notSubtype,
+    alias,
+  ]);
   print(MetadataProbe(3).read(4));
   const localNote = 'local';
   @metadataList

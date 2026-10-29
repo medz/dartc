@@ -1,11 +1,14 @@
 import '../target.dart';
 import '../diagnostic.dart';
 import '../emit.dart';
+import '../exports.dart';
 import '../format.dart';
 import '../frontend.dart';
+import '../header.dart';
 import '../host.dart';
 import '../ir.dart';
 import '../library.dart';
+import '../library_abi.dart';
 import '../machine.dart';
 import '../select.dart';
 import '../optimize.dart';
@@ -15,6 +18,7 @@ import '../ssa.dart';
 import '../build_ssa.dart';
 import '../source.dart';
 import '../source_uri.dart';
+import '../utf8.dart';
 import '../verify_ssa.dart';
 import 'packages.dart';
 
@@ -38,7 +42,7 @@ Never _compile(List<String> args) {
       'Usage: dartc <source.dart> [-o <file>] [--target macos-arm64|macos-x64|linux-arm64|linux-x64]',
     );
     print(
-      '       [--emit exe|dylib|object|static] [--export <FFI binding>] [--std <runtime.dart>]',
+      '       [--emit exe|dylib|object|static] [--header <file.h>] [--std <runtime.dart>]',
     );
     print('       [--packages <package_config.json>]');
     hostExit(0);
@@ -46,7 +50,7 @@ Never _compile(List<String> args) {
   String input = args[0];
   String output = '';
   String standard = '';
-  String selectedExport = '';
+  String header = '';
   String? packages;
   compilationTarget = Target.values[hostTarget()];
   imageKind = ImageKind.executable;
@@ -88,8 +92,8 @@ Never _compile(List<String> args) {
         'static' => ImageKind.staticLibrary,
         _ => argumentError('Unsupported output: ' + value),
       };
-    } else if (option == '--export') {
-      selectedExport = value;
+    } else if (option == '--header') {
+      header = value;
     } else {
       argumentError('Unknown option: ' + option);
     }
@@ -98,11 +102,8 @@ Never _compile(List<String> args) {
   if (imageKind != ImageKind.executable && targetOS != 0) {
     argumentError('Library output currently supports macOS.');
   }
-  if (imageKind != ImageKind.executable && selectedExport == '') {
-    argumentError(
-      'Library output requires --export <Pointer.fromFunction binding>.',
-    );
-  }
+  if (imageKind == ImageKind.executable && header != '')
+    argumentError('--header requires a library output.');
   var cwd = hostCurrentDirectory();
   var inputUri = sourceInputUri(cwd, input);
   input = sourceUriPath('/', inputUri);
@@ -119,29 +120,29 @@ Never _compile(List<String> args) {
     };
   }
   final executable = imageKind == ImageKind.executable;
-  if (executable && standard == '') standard = hostStdPath();
-  String runtime = '';
-  if (executable) runtime = sourceInputUri(cwd, standard);
+  if (standard == '') standard = hostStdPath();
+  final runtime = sourceInputUri(cwd, standard);
   var config = compilerPackages(inputUri, cwd, packages);
   SourceProgram sources = collectSources(inputUri, runtime, config, targetOS);
   parseSource(sources);
-  if (imageKind != ImageKind.executable) {
-    int chosen = -1;
-    int i = 0;
-    while (i < exportNames.length) {
-      if (exportNames[i] == selectedExport) chosen = i;
-      i = i + 1;
+  if (!executable) {
+    if (checkedExports.isEmpty)
+      argumentError('Library output requires an @Export declaration.');
+    if (header == '') {
+      final dot = output.lastIndexOf('.');
+      header =
+          (dot > output.lastIndexOf('/') ? output.substring(0, dot) : output) +
+          '.h';
+      if (header == output) header += '.h';
     }
-    if (chosen < 0) {
-      print('No FFI callback binding named ' + selectedExport);
-      hostExit(64);
-    }
-    String name = exportNames[chosen];
-    int function = exportFunctions[chosen];
-    int parameters = exportParameters[chosen];
-    exportNames = <String>[name];
-    exportFunctions = <int>[function];
-    exportParameters = <int>[parameters];
+    final headerUri = sourceInputUri(cwd, header);
+    if (headerUri == sourceInputUri(cwd, output))
+      argumentError('Header and library output paths must differ.');
+    for (final file in sources.files)
+      if (headerUri == sourceInputUri(cwd, file.path))
+        argumentError(
+          'Header output would overwrite a source file: ' + file.path,
+        );
   }
   List<SsaFunction> ssa = buildSsa();
   optimizeSsa(ssa);
@@ -176,6 +177,11 @@ Never _compile(List<String> args) {
       f++;
     }
   }
+  var headerBytes = <int>[];
+  if (!executable) {
+    checkLibraryExports(ssa, program, sources);
+    headerBytes = encodeUtf8(createCHeader());
+  }
   generateCode(program);
   List<int> bytes = <int>[];
   if (imageKind == ImageKind.executable)
@@ -183,6 +189,7 @@ Never _compile(List<String> args) {
   else
     bytes = createLibrary(output);
   hostWrite(output, bytes);
+  if (!executable) hostWrite(header, headerBytes);
   print(output + ': ' + bytes.length.toString() + ' bytes');
   if (imageKind == ImageKind.executable ||
       imageKind == ImageKind.dynamicLibrary)

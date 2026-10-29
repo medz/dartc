@@ -49,6 +49,21 @@ void constrainGenericTypes(
         covariant,
       );
     }
+  } else if (typeIsClass(template) || ffiKind(template) >= 0) {
+    final source = dartTypes[actual];
+    final target = dartTypes[template];
+    if (source.kind == target.kind &&
+        source.argument == target.argument &&
+        source.arguments.length == target.arguments.length)
+      for (var i = 0; i < target.arguments.length; i++)
+        constrainGenericTypes(
+          target.arguments[i],
+          source.arguments[i],
+          parameters,
+          lower,
+          upper,
+          covariant,
+        );
   } else if (typeIsFunction(template)) {
     var signature = functionSignature(template);
     if (typeIsFunction(actual)) {

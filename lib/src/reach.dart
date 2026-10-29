@@ -1,6 +1,7 @@
 import 'abi.dart';
 import 'ir.dart';
 import 'constant_data.dart';
+import 'exports.dart';
 import 'layout.dart';
 import 'ssa.dart';
 import 'types.dart';
@@ -37,8 +38,9 @@ List<int> reachableFunctions(List<SsaFunction> source, [List<int>? roots]) {
       _reachFunction(reachable, work, runtimeFunction(bArguments, -1));
     }
   } else {
-    while (i < exportFunctions.length) {
-      _reachFunction(reachable, work, exportFunctions[i]);
+    while (i < checkedExports.length) {
+      final function = checkedExports[i].function;
+      if (function >= 0) _reachFunction(reachable, work, function);
       i = i + 1;
     }
   }

@@ -1,48 +1,17 @@
 import 'code.dart';
+import 'exports.dart';
+import 'library_abi.dart';
 import 'format/image.dart';
 import 'format/macho.dart';
-import 'host.dart';
+import 'utf8.dart';
 import 'ir.dart';
 import 'sign.dart';
 import 'target.dart';
 
 List<int> libraryNames = <int>[];
 List<int> libraryNameOffsets = <int>[];
-
-List<int> _libraryUtf8(String value) {
-  final bytes = <int>[];
-  var i = 0;
-  while (i < value.length) {
-    var code = value.codeUnitAt(i++);
-    if (code >= 0xd800 && code <= 0xdbff && i < value.length) {
-      final low = value.codeUnitAt(i);
-      if (low >= 0xdc00 && low <= 0xdfff) {
-        code = 0x10000 + ((code - 0xd800) << 10) + low - 0xdc00;
-        i++;
-      }
-    }
-    if (code >= 0xd800 && code <= 0xdfff) {
-      print('Library name contains an unpaired UTF-16 surrogate.');
-      hostExit(1);
-    }
-    if (code < 0x80) {
-      bytes.add(code);
-    } else {
-      if (code < 0x800) {
-        bytes.add(0xc0 | (code >> 6));
-      } else if (code < 0x10000) {
-        bytes.add(0xe0 | (code >> 12));
-        bytes.add(0x80 | ((code >> 6) & 63));
-      } else {
-        bytes.add(0xf0 | (code >> 18));
-        bytes.add(0x80 | ((code >> 12) & 63));
-        bytes.add(0x80 | ((code >> 6) & 63));
-      }
-      bytes.add(0x80 | (code & 63));
-    }
-  }
-  return bytes;
-}
+List<int> libraryData = <int>[];
+List<int> libraryDataOffsets = <int>[];
 
 class _LibraryExportNode {
   int name;
@@ -78,20 +47,25 @@ void librarySymtab(int symbols, int names) {
   image32(2);
   image32(24);
   image32(symbols);
-  image32(exportNames.length);
+  image32(checkedExports.length);
   image32(names);
   image32(libraryNames.length);
 }
 
-void librarySymbols(int codeAddress) {
+int librarySymbolAddress(int index, int codeAddress, int dataAddress) =>
+    checkedExports[index].function >= 0
+    ? codeAddress + exportOffsets[index]
+    : dataAddress + libraryDataOffsets[index];
+
+void librarySymbols(int codeAddress, int dataAddress) {
   var i = 0;
-  while (i < exportNames.length) {
+  while (i < checkedExports.length) {
     image32(libraryNameOffsets[i]);
     image.add(15);
-    image.add(1);
+    image.add(checkedExports[i].function >= 0 ? 1 : 2);
     image.add(0);
     image.add(0);
-    image64(codeAddress + functionOffsets[exportFunctions[i]]);
+    image64(librarySymbolAddress(i, codeAddress, dataAddress));
     i++;
   }
 }
@@ -114,15 +88,15 @@ void libraryUleb(List<int> bytes, int value) {
   }
 }
 
-List<int> libraryExportTrie(int codeAddress) {
+List<int> libraryExportTrie(int codeAddress, int dataAddress) {
   final root = _LibraryExportNode(0, 0, -1, <_LibraryExportNode>[]);
   final nodes = <_LibraryExportNode>[root];
   var i = 0;
-  while (i < exportNames.length) {
+  while (i < checkedExports.length) {
     final name = libraryNameOffsets[i];
     var length = 0;
     while (libraryNames[name + length] != 0) length++;
-    final address = codeAddress + functionOffsets[exportFunctions[i]];
+    final address = librarySymbolAddress(i, codeAddress, dataAddress);
     var node = root;
     var at = 0;
     while (at < length) {
@@ -203,18 +177,36 @@ List<int> libraryExportTrie(int codeAddress) {
 }
 
 List<int> libraryObject() {
-  var codeOffset = 232;
-  var symbols = alignImage(codeOffset + codeSize, 8);
-  var names = symbols + exportNames.length * 16;
+  final sections = libraryData.isEmpty ? 1 : 2;
+  final codeOffset = 152 + sections * 80;
+  final dataAddress = alignImage(codeSize, 8);
+  final size = libraryData.isEmpty
+      ? codeSize
+      : dataAddress + libraryData.length;
+  final symbols = alignImage(codeOffset + size, 8);
+  final names = symbols + checkedExports.length * 16;
   image = <int>[];
-  libraryHeader(1, 3, 200, 0);
-  imageSegment('', 0, codeSize, codeOffset, codeSize, 7, 1);
+  libraryHeader(1, 3, codeOffset - 32, 0);
+  imageSegment('', 0, size, codeOffset, size, 7, sections);
   imageSection('__text', '__TEXT', 0, codeOffset, codeSize, 0x80000400);
+  if (libraryData.isNotEmpty)
+    imageSection(
+      '__const',
+      '__TEXT',
+      dataAddress,
+      codeOffset + dataAddress,
+      libraryData.length,
+      0,
+    );
   librarySymtab(symbols, names);
   libraryVersion();
   imageWords(codeWords, codeSize);
+  if (libraryData.isNotEmpty) {
+    imageZeros(codeOffset + dataAddress - image.length);
+    for (final byte in libraryData) image.add(byte);
+  }
   imageZeros(symbols - image.length);
-  librarySymbols(0);
+  librarySymbols(0, dataAddress);
   libraryStringTable();
   return image;
 }
@@ -244,17 +236,17 @@ void libraryArchiveHeader(String name, int length) {
 List<int> libraryArchive() {
   var object = libraryObject();
   var tableLength = alignImage(
-    8 + exportNames.length * 8 + libraryNames.length,
+    8 + checkedExports.length * 8 + libraryNames.length,
     8,
   );
-  var stringLength = tableLength - 8 - exportNames.length * 8;
+  var stringLength = tableLength - 8 - checkedExports.length * 8;
   var objectOffset = 8 + 60 + tableLength;
   image = <int>[];
   imageName('!<arch>\n', 8);
   libraryArchiveHeader('__.SYMDEF', tableLength);
-  image32(exportNames.length * 8);
+  image32(checkedExports.length * 8);
   var i = 0;
-  while (i < exportNames.length) {
+  while (i < checkedExports.length) {
     image32(libraryNameOffsets[i]);
     image32(objectOffset);
     i++;
@@ -278,15 +270,29 @@ List<int> libraryDylib(String outputPath) {
   var codeOffset = 1024;
   var pageShift = targetX64 ? 12 : 14;
   var page = 1 << pageShift;
-  var textSize = alignImage(codeOffset + codeSize, page);
+  final dataAddress = codeOffset + alignImage(codeSize, 8);
+  var textSize = alignImage(
+    libraryData.isEmpty
+        ? codeOffset + codeSize
+        : dataAddress + libraryData.length,
+    page,
+  );
   var symbols = textSize;
-  var names = symbols + exportNames.length * 16;
+  var names = symbols + checkedExports.length * 16;
   var trieOffset = alignImage(names + libraryNames.length, 8);
-  var trie = libraryExportTrie(codeOffset);
+  var trie = libraryExportTrie(codeOffset, dataAddress);
   var signatureOffset = alignImage(trieOffset + trie.length, 16);
   image = <int>[];
   libraryHeader(6, 10, 0, 0x85);
-  imageSegment('__TEXT', 0, textSize, 0, textSize, 5, 1);
+  imageSegment(
+    '__TEXT',
+    0,
+    textSize,
+    0,
+    textSize,
+    5,
+    libraryData.isEmpty ? 1 : 2,
+  );
   imageSection(
     '__text',
     '__TEXT',
@@ -295,6 +301,15 @@ List<int> libraryDylib(String outputPath) {
     codeSize,
     0x80000400,
   );
+  if (libraryData.isNotEmpty)
+    imageSection(
+      '__const',
+      '__TEXT',
+      dataAddress,
+      dataAddress,
+      libraryData.length,
+      0,
+    );
   var linkeditCommand = image.length;
   imageSegment(
     '__LINKEDIT',
@@ -305,7 +320,7 @@ List<int> libraryDylib(String outputPath) {
     1,
     0,
   );
-  var name = _libraryUtf8(
+  var name = encodeUtf8(
     '@rpath/' + outputPath.substring(outputPath.lastIndexOf('/') + 1),
   );
   var idSize = alignImage(25 + name.length, 8);
@@ -331,6 +346,8 @@ List<int> libraryDylib(String outputPath) {
     hash = ((hash ^ codeWords[i]) * 0x01000193) & 0xffffffff;
     i++;
   }
+  for (final byte in libraryData)
+    hash = ((hash ^ byte) * 0x01000193) & 0xffffffff;
   image32(0x1b);
   image32(24);
   image32(hash);
@@ -343,8 +360,8 @@ List<int> libraryDylib(String outputPath) {
   image32(0);
   image32(0);
   image32(0);
-  image32(exportNames.length);
-  image32(exportNames.length);
+  image32(checkedExports.length);
+  image32(checkedExports.length);
   imageZeros(52);
   image32(0x80000022);
   image32(48);
@@ -359,8 +376,12 @@ List<int> libraryDylib(String outputPath) {
   imagePatch32(20, image.length - 32);
   imageZeros(codeOffset - image.length);
   imageWords(codeWords, codeSize);
+  if (libraryData.isNotEmpty) {
+    imageZeros(dataAddress - image.length);
+    for (final byte in libraryData) image.add(byte);
+  }
   imageZeros(textSize - image.length);
-  librarySymbols(codeOffset);
+  librarySymbols(codeOffset, dataAddress);
   libraryStringTable();
   imageZeros(trieOffset - image.length);
   i = 0;
@@ -376,11 +397,24 @@ List<int> libraryDylib(String outputPath) {
 List<int> createLibrary(String outputPath) {
   libraryNames = <int>[0];
   libraryNameOffsets = <int>[];
+  libraryData = <int>[];
+  libraryDataOffsets = <int>[];
   var i = 0;
-  while (i < exportNames.length) {
+  while (i < checkedExports.length) {
+    final declaration = checkedExports[i];
+    if (declaration.function >= 0) {
+      libraryDataOffsets.add(-1);
+    } else {
+      final width = libraryTypeSize(declaration.signature);
+      while (libraryData.length % width != 0) libraryData.add(0);
+      libraryDataOffsets.add(libraryData.length);
+      final bits = libraryConstantBits(declaration);
+      for (var byte = 0; byte < width; byte++)
+        libraryData.add((bits >>> (byte * 8)) & 255);
+    }
     libraryNameOffsets.add(libraryNames.length);
     libraryNames.add(95);
-    var name = _libraryUtf8(exportNames[i]);
+    var name = encodeUtf8(checkedExports[i].symbol);
     var j = 0;
     while (j < name.length) {
       libraryNames.add(name[j]);

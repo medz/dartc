@@ -9,6 +9,8 @@ class CodeCall(final int offset, final int function);
 final List<CodeAddress> codeAddresses = <CodeAddress>[];
 final List<CodeCall> codeCalls = <CodeCall>[];
 final List<int> functionOffsets = <int>[];
+// Platform C entries are distinct from internal Dart function entries.
+final List<int> exportOffsets = <int>[];
 
 void codeByte(int value) {
   final shift = (codeSize & 3) * 8;

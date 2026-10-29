@@ -1,7 +1,9 @@
 import 'dart:ffi';
 
-typedef AddNative = Int64 Function(Int64, Int64);
+import 'package:dartc/export.dart';
 
-int addImpl(int a, int b) => a + b;
+@Export<Int64 Function(Int64, Int64)>()
+int add(int a, int b) => a + b;
 
-final add = Pointer.fromFunction<AddNative>(addImpl, 0);
+@Export<Int64>()
+const int answer = 42;

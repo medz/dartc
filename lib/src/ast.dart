@@ -312,6 +312,7 @@ class AstEnumValue(
 
 class AstClass {
   List<AstExpression> metadata = const <AstExpression>[];
+  List<AstTypeParameter> typeParameters = const <AstTypeParameter>[];
   bool isAbstract = false;
   bool isEnum = false;
   List<AstEnumValue> enumValues = const <AstEnumValue>[];

@@ -105,6 +105,10 @@ void _markTypeReference(
     print('dartc: uninstantiated runtime type');
     hostExit(1);
   }
+  if (ffiKind(type) >= 0) {
+    print('dartc: FFI native types do not have runtime type metadata yet');
+    hostExit(1);
+  }
   if (offsets[type] < 0) {
     offsets[type] = 0;
     work.add(type);

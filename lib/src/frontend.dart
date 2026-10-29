@@ -9,6 +9,8 @@ import 'frontend/parameters.dart';
 import 'frontend/patterns.dart';
 import 'binding.dart';
 import 'constants.dart';
+import 'exports.dart';
+import 'ffi.dart';
 import 'constant_data.dart';
 import 'resolve_type.dart';
 import 'flow.dart';
@@ -264,8 +266,6 @@ List<int> feLoopContinues = <int>[];
 int feNextLocal = 0;
 int feFunction = 0;
 List<int> feSlotTypes = <int>[];
-List<String> feNativeNames = <String>[];
-List<int> feNativeParams = <int>[];
 int feInitializingGlobal = -1;
 List<int> feClassFieldCounts = <int>[];
 List<List<int>> feClassConstructors = <List<int>>[];
@@ -380,8 +380,20 @@ int feRegisterFunction(
     return -1;
   }
   final id = functions.length;
-  final typeParameters = resolveFunctionTypeParameters(feSymbols, syntax, id);
-  final typeScope = local ? enclosingTypes : typeParameters;
+  final classParameters = owner < 0
+      ? const <int>[]
+      : classTypeParameters[owner];
+  final typeParameters = resolveFunctionTypeParameters(
+    feSymbols,
+    syntax,
+    id,
+    classParameters,
+  );
+  final typeScope = local
+      ? enclosingTypes
+      : classParameters.isNotEmpty
+      ? <int>[...classParameters, ...typeParameters]
+      : typeParameters;
   final types = <int>[];
   var name = syntax.name;
   var result = tDynamic;
@@ -438,6 +450,19 @@ int feRegisterFunction(
     p++;
   }
   final count = types.length;
+  if (syntax.isStatic) {
+    for (final type in <int>[
+      result,
+      ...types,
+      for (final parameter in typeParameters)
+        typeParameterInfo(parameter).bound,
+    ])
+      if (typeContainsAnyParameter(type, classParameters))
+        feAstError(
+          syntax.token,
+          'class type parameter cannot be used by a static member',
+        );
+  }
   functions.add(
     FunctionInfo(name, 0, count, count, result, types, <int>[], source),
   );
@@ -468,7 +493,11 @@ int feRegisterFunction(
     else
       feSymbols.declarations[symbol].target = id;
   }
-  var callable = typeParameters.isEmpty && !syntax.getter && !syntax.setter;
+  var callable =
+      typeParameters.isEmpty &&
+      !syntax.getter &&
+      !syntax.setter &&
+      (owner < 0 || classTypeParameters[owner].isEmpty);
   p = 0;
   final namedParameters = <String>[];
   final requiredNamedParameters = <bool>[];
@@ -490,23 +519,35 @@ int feRegisterFunction(
   return id;
 }
 
-bool feIsNativeInt64(AstType syntax) {
-  var symbol = feTypeSymbol(syntax);
-  return symbol >= 0 &&
-      feSymbols.declarations[symbol].source == sourceFfi &&
-      feSymbols.declarations[symbol].name == 'Int64';
-}
-
-void feCheckNativeInt64(AstType syntax) {
-  if (!feIsNativeInt64(syntax)) {
-    feAstError(syntax.token, 'FFI callbacks currently require dart:ffi Int64');
-  }
-}
-
 void feCollectDeclarations(AstUnit unit) {
   var i = 0;
   while (i < unit.classes.length) {
     var syntax = unit.classes[i];
+    if (syntax.typeParameters.isNotEmpty) {
+      if (syntax.constructors.isEmpty)
+        feAstError(
+          syntax.token,
+          'generic class implicit constructors are not yet supported',
+        );
+      for (final constructor in syntax.constructors)
+        if (!constructor.constant || constructor.factory)
+          feAstError(
+            constructor.token,
+            'non-const and factory constructors of generic classes are not yet supported',
+          );
+      for (final method in syntax.methods)
+        if (!method.isStatic)
+          feAstError(
+            method.token,
+            'generic class instance methods are not yet supported',
+          );
+      for (final field in syntax.fields)
+        if (field.lateVariable)
+          feAstError(
+            field.token,
+            'generic class late fields are not yet supported',
+          );
+    }
     if (syntax.isEnum) desugarEnum(feSources, syntax);
     var source = feTokens[syntax.token].source;
     if ((syntax.hasPrimary || syntax.abbreviatedBody) &&
@@ -536,7 +577,14 @@ void feCollectDeclarations(AstUnit unit) {
     classPointerMasks.add(<int>[]);
     classTaggedMasks.add(<int>[]);
     classToStringFunctions.add(-1);
-    feDeclare(source, syntax.name, symbolClass, owner, syntax.token);
+    final symbol = feDeclare(
+      source,
+      syntax.name,
+      symbolClass,
+      owner,
+      syntax.token,
+    );
+    feSymbols.declarations[symbol].classSyntax = syntax;
     i++;
   }
   i = 0;
@@ -580,40 +628,14 @@ void feCollectDeclarations(AstUnit unit) {
         syntax.token,
         'non-function type aliases require language version 2.13',
       );
-    var kind = symbolAlias;
-    var target = feSymbols.aliases.length;
-    if (syntax.typeParameters.isEmpty &&
-        signature != null &&
-        feIsNativeInt64(signature.result)) {
-      var p = 0;
-      while (p < signature.parameters.length) {
-        var parameter = signature.parameters[p];
-        if (parameter.kind != astRequiredPositional)
-          feAstError(
-            parameter.token,
-            'FFI callbacks require positional parameters',
-          );
-        feCheckNativeInt64(parameter.type);
-        p++;
-      }
-      if (p > 8)
-        feAstError(
-          syntax.token,
-          'FFI callbacks support up to eight Int64 parameters',
-        );
-      kind = symbolNativeType;
-      target = feNativeNames.length;
-      feNativeNames.add(syntax.name);
-      feNativeParams.add(p);
-    } else {
-      var alias = TypeAlias(syntax.type);
-      alias.syntaxParameters = syntax.typeParameters;
-      feSymbols.aliases.add(alias);
-    }
+    var alias = TypeAlias(syntax.type);
+    alias.syntaxParameters = syntax.typeParameters;
+    final target = feSymbols.aliases.length;
+    feSymbols.aliases.add(alias);
     feDeclare(
       feTokens[syntax.token].source,
       syntax.name,
-      kind,
+      symbolAlias,
       target,
       syntax.token,
     );
@@ -621,6 +643,7 @@ void feCollectDeclarations(AstUnit unit) {
   }
   checkImportPrefixes(feSymbols);
   checkExportConflicts(feSymbols);
+  resolveClassTypeParameters(feSymbols);
   resolveTypeAliasDeclarations(feSymbols);
   feClassOrder = resolveClassInterfaces(feSymbols, unit.classes);
   checkTypeAliasDeclarations(feSymbols);
@@ -634,17 +657,6 @@ void feCollectDeclarations(AstUnit unit) {
   for (final parents in classSupertypes)
     for (final parent in parents)
       if (typeIsClass(parent)) feClassPolymorphic[typeArgument(parent)] = true;
-  for (var alias in feSymbols.aliases) {
-    var signature = alias.syntax.function;
-    if (alias.parameters.isNotEmpty &&
-        signature != null &&
-        typeParameterInScope(alias.parameters, signature.result.name) < 0 &&
-        feIsNativeInt64(signature.result))
-      feAstError(
-        alias.syntax.token,
-        'generic FFI function aliases are not supported',
-      );
-  }
   var object = symbolOwnDeclaration(feSymbols, sourceCore, 'Object');
   var objectMembers = feSymbols.declarations[object].instanceMembers;
   i = 0;
@@ -661,7 +673,7 @@ void feCollectDeclarations(AstUnit unit) {
       var syntax = fields[field];
       var type = syntax.type.name == ''
           ? tDynamic
-          : resolveType(feSymbols, syntax.type);
+          : resolveType(feSymbols, syntax.type, classTypeParameters[i]);
       feFieldNodes.add(syntax);
       feFieldTypes.add(type);
       feFieldIndices.add(field);
@@ -794,7 +806,15 @@ void feCollectDeclarations(AstUnit unit) {
 int feRegisterGlobal(AstVariable syntax, int owner) {
   var source = feTokens[syntax.token].source;
   var type = -1;
-  if (syntax.type.name != '') type = resolveType(feSymbols, syntax.type);
+  if (syntax.type.name != '') {
+    final scope = owner < 0 ? const <int>[] : classTypeParameters[owner];
+    type = resolveType(feSymbols, syntax.type, scope);
+    if (typeContainsAnyParameter(type, scope))
+      feAstError(
+        syntax.token,
+        'class type parameter cannot be used by a static member',
+      );
+  }
   if (type < 0 && syntax.initializer.isEmpty) type = tDynamic;
   var global = globalNames.length;
   var name = syntax.name;
@@ -823,8 +843,24 @@ int feTypeEnvironmentSlot(int function) => functions[function].typeEnvironment;
 
 int feParameterOffset(int function) => functions[function].parameterOffset;
 
-int feResolveType(AstType syntax) =>
-    resolveType(feSymbols, syntax, functions[feFunction].typeScope);
+List<int> feTypeScope(int function) {
+  final scope = functions[function].typeScope;
+  if (function >= feOwners.length) return scope;
+  final owner = feLexicalOwner(function);
+  if (owner < 0 || classTypeParameters[owner].isEmpty) return scope;
+  return <int>[...classTypeParameters[owner], ...scope];
+}
+
+int feResolveType(AstType syntax) {
+  final type = resolveType(feSymbols, syntax, feTypeScope(feFunction));
+  final owner = feLexicalOwner(feFunction);
+  if (owner >= 0 && typeContainsAnyParameter(type, classTypeParameters[owner]))
+    feAstError(
+      syntax.token,
+      'class type parameter cannot be used by a static member',
+    );
+  return type;
+}
 
 void feLoadCurrentTypeEnvironment() {
   if (functions[feFunction].typeParameters.isNotEmpty) {
@@ -841,7 +877,7 @@ int feRuntimeType(int type, [bool instantiate = false]) {
   final position = ir.length;
   feOperand(opTypeReference, type);
   if (typeContainsParameters(type) || instantiate) {
-    if (functions[feFunction].typeScope.isEmpty)
+    if (feTypeScope(feFunction).isEmpty)
       feAstError(feAt, 'type has no runtime type environment');
     feLoadCurrentTypeEnvironment();
     feBuiltinTyped(bTypeInstantiate, 2, tObject);
@@ -1171,7 +1207,7 @@ int feFindFunction(String name) {
 
 int feResolveName(int token, String name, String prefix, bool writing) {
   var head = prefix == '' ? name : prefix;
-  if (typeParameterInScope(functions[feFunction].typeScope, head) >= 0)
+  if (typeParameterInScope(feTypeScope(feFunction), head) >= 0)
     feAstError(token, 'type parameter values are not yet supported');
   var source = feTokens[token].source;
   var symbol = -1;
@@ -1184,8 +1220,7 @@ int feResolveName(int token, String name, String prefix, bool writing) {
 }
 
 bool feHasPrefix(int token, String prefix) {
-  if (typeParameterInScope(functions[feFunction].typeScope, prefix) >= 0)
-    return false;
+  if (typeParameterInScope(feTypeScope(feFunction), prefix) >= 0) return false;
   var source = sourceLibrary(feSources, feTokens[token].source);
   if (symbolWildcardPrefix(feSymbols, source, prefix)) return false;
   var imports = feSources.files[source].imports;
@@ -1284,7 +1319,7 @@ int feTypeSymbol(AstType syntax) {
 }
 
 int feGlobalType(int global) {
-  if (globalTypes[global] < 0 && imageKind == ImageKind.executable) {
+  if (globalTypes[global] < 0) {
     feInferGlobal(global);
   }
   return globalTypes[global];
@@ -1300,21 +1335,18 @@ void feLoadGlobalValue(int global) {
   } else if (feGlobalNodes[global].modifier == 'const') {
     var value = feConstants.values[global];
     feConstantValue(value, value.type, feGlobalNodes[global].token);
-  } else if (imageKind == ImageKind.executable) {
+  } else {
     feGlobalType(global);
     final initializer = feGlobalInitializers[global];
     if (initializer.zeroInitialized)
       feOperand(opLoadGlobal, global);
     else
       feCall(initializer.getter, 0);
-  } else {
-    feOperand(opLoadGlobal, global);
   }
 }
 
 void feStoreGlobalValue(int global) {
-  if (imageKind == ImageKind.executable &&
-      !feGlobalInitializers[global].zeroInitialized &&
+  if (!feGlobalInitializers[global].zeroInitialized &&
       _feLiteralTypes[global] == 0) {
     feCall(feGlobalInitializers[global].setter, 1);
     feEmit(opPop);
@@ -1340,8 +1372,6 @@ int feLoadDeclaration(int symbol, int token) {
 }
 
 int feCallableType(int function, int token) {
-  if (imageKind != ImageKind.executable)
-    feAstError(token, 'library output cannot use Dart function values');
   var type = functionValueType(function);
   if (type < 0)
     feAstError(token, 'generic function values are not yet supported');
@@ -1477,9 +1507,7 @@ void feInstallSymbols() {
     symbolBuiltin,
     bValueIdentical,
   );
-  declareSymbol(feSymbols, sourceFfi, 'Pointer', symbolType, tPointer);
-  declareSymbol(feSymbols, sourceFfi, 'NativeFunction', symbolType, tPointer);
-  declareSymbol(feSymbols, sourceFfi, 'Int64', symbolType, tInt);
+  declareFfiTypes(feSymbols);
   declareSymbol(feSymbols, sourceHost, 'hostRead', symbolBuiltin, bHostRead);
   declareSymbol(
     feSymbols,
@@ -1911,6 +1939,122 @@ int feLowerAssignedValue(AstExpression expression, int context) {
   );
 }
 
+int feExportClass = -1;
+int feExportSymbolField = -1;
+
+void feResolveExport() {
+  feExportClass = -1;
+  feExportSymbolField = -1;
+  for (var source = 0; source < feSources.files.length; source++) {
+    if (feSources.files[source].uri != 'package:dartc/export.dart') continue;
+    final symbol = symbolOwnDeclaration(feSymbols, source, 'Export');
+    if (symbol < 0 || feSymbols.declarations[symbol].kind != symbolClass)
+      return;
+    feExportClass = feSymbols.declarations[symbol].target;
+    final members = feMembers[feExportClass];
+    final field = lookupMember(members, 'symbol');
+    if (field >= 0 && members.members[field].field >= 0)
+      feExportSymbolField =
+          members.members[field].field - feClassFieldStarts[feExportClass];
+    return;
+  }
+}
+
+void feCheckExportSymbol(String symbol, int token) {
+  if (symbol.isEmpty || symbol.indexOf('\u0000') >= 0)
+    feAstError(token, 'Export symbol must be non-empty and contain no NUL');
+  for (final existing in checkedExports)
+    if (existing.symbol == symbol)
+      feAstError(token, 'duplicate native export symbol ' + symbol);
+}
+
+void feAddExport(int function, String symbol, int native, int token) {
+  if (!ffiFunctionType(native))
+    feAstError(
+      token,
+      'Export requires an explicit supported dart:ffi function signature',
+    );
+  if (function < 0 || function >= feLocalStart)
+    feAstError(token, 'Export requires a top-level function or static method');
+  final syntax = feFunctionNodes[function];
+  final info = functions[function];
+  if (feHasReceiver(function) ||
+      feConstructors[function] != 0 ||
+      syntax.getter ||
+      syntax.setter ||
+      syntax.external ||
+      info.typeParameters.isNotEmpty ||
+      syntax.body == null && syntax.arrow == null)
+    feAstError(
+      token,
+      'Export requires a concrete non-generic function or static method',
+    );
+  final signature = functionSignature(native);
+  if (info.result != ffiDartType(signature.result, true) ||
+      info.parameters != signature.parameters.length)
+    feAstError(
+      token,
+      'Export Dart function does not match its native signature',
+    );
+  for (var p = 0; p < syntax.parameters.length; p++)
+    if (syntax.parameters[p].kind != astRequiredPositional ||
+        info.parameterTypes[p] != ffiDartType(signature.parameters[p]))
+      feAstError(
+        token,
+        'Export Dart parameters do not match their native signature',
+      );
+  feCheckExportSymbol(symbol, token);
+  checkedExports.add(CheckedExport(symbol, native, function: function));
+}
+
+void feCheckExport(ConstantValue value, int function, int global, int token) {
+  if (!typeIsClass(value.kind) || typeArgument(value.kind) != feExportClass)
+    return;
+  final arguments = dartTypes[value.kind].arguments;
+  if (arguments.length != 1 || feExportSymbolField < 0)
+    feAstError(
+      token,
+      'Export declaration requires a type parameter and symbol field',
+    );
+  final symbol = value.elements[feExportSymbolField];
+  if (symbol.kind != tNull && symbol.kind != tString)
+    feAstError(token, 'Export symbol must be String or null');
+  if (global >= 0) {
+    final syntax = feGlobalNodes[global];
+    if (syntax.modifier != 'const')
+      feAstError(token, 'non-const native data exports are not yet supported');
+    final constant = evaluateGlobalConstant(feConstants, global);
+    final native = arguments[0];
+    final type = ffiDartType(native);
+    if (type != tInt && type != tDouble && type != tBool)
+      feAstError(
+        token,
+        'native data exports currently require an integer, Float, Double or Bool type',
+      );
+    if (constant.type != type || constant.kind != type)
+      feAstError(token, 'Export constant does not match its native type');
+    final name = symbol.kind == tNull ? syntax.name : symbol.text;
+    feCheckExportSymbol(name, token);
+    checkedExports.add(
+      CheckedExport(
+        name,
+        native,
+        global: global,
+        constantBits: constant.integer,
+      ),
+    );
+  } else {
+    if (function < 0)
+      feAstError(token, 'Export requires a top-level or static declaration');
+    feAddExport(
+      function,
+      symbol.kind == tNull ? feFunctionNodes[function].name : symbol.text,
+      arguments[0],
+      token,
+    );
+  }
+}
+
 void feResolvePragma() {
   fePragmaClass = -1;
   fePragmaNameField = -1;
@@ -1949,17 +2093,22 @@ void feCheckMetadata(
   List<AstExpression> metadata,
   int owner, [
   int function = -1,
+  int global = -1,
 ]) {
   if (metadata.isEmpty) return;
   feConstants.localTypes = feFlow.types;
   var scope = feConstants.lexicalClass;
+  final typeScope = feConstants.typeScope;
   feConstants.lexicalClass = owner;
+  if (owner >= 0 && classTypeParameters[owner].isNotEmpty)
+    feConstants.typeScope = <int>[...classTypeParameters[owner], ...typeScope];
   var flags = 0;
   var token = -1;
   var i = 0;
   while (i < metadata.length) {
     var expression = metadata[i];
     var value = evaluateMetadataConstant(feConstants, expression);
+    feCheckExport(value, function, global, expression.token);
     var annotation = fePragmaFlags(value, expression.token);
     if (annotation != 0) {
       if (function < 0)
@@ -1973,6 +2122,7 @@ void feCheckMetadata(
     i++;
   }
   feConstants.lexicalClass = scope;
+  feConstants.typeScope = typeScope;
   if (flags != 0) functions[function].contract = FunctionContract(flags, token);
 }
 
@@ -1983,8 +2133,8 @@ void feCheckUnitMetadata(AstUnit syntax) {
     i++;
   }
   i = 0;
-  while (i < syntax.variables.length) {
-    feCheckMetadata(syntax.variables[i].metadata, -1);
+  while (i < feGlobalNodes.length) {
+    feCheckMetadata(feGlobalNodes[i].metadata, feGlobalOwners[i], -1, i);
     i++;
   }
   i = 0;
@@ -2017,16 +2167,16 @@ void feCheckUnitMetadata(AstUnit syntax) {
   while (i < syntax.classes.length) {
     var node = syntax.classes[i];
     feCheckMetadata(node.metadata, -1);
+    final typeScope = feConstants.typeScope;
+    feConstants.typeScope = classTypeParameters[i];
+    for (final parameter in node.typeParameters)
+      feCheckMetadata(parameter.metadata, i);
     var field = 0;
     while (field < node.fields.length) {
       feCheckMetadata(node.fields[field].metadata, i);
       field++;
     }
-    field = 0;
-    while (field < node.staticFields.length) {
-      feCheckMetadata(node.staticFields[field].metadata, i);
-      field++;
-    }
+    feConstants.typeScope = typeScope;
     i++;
   }
 }
@@ -2068,7 +2218,7 @@ void feResolveFunctionDefaults(int f) {
   final syntax = feFunctionNodes[f];
   feCheckMetadata(syntax.metadata, owner, f);
   final typeScope = feConstants.typeScope;
-  feConstants.typeScope = functions[f].typeScope;
+  feConstants.typeScope = feTypeScope(f);
   for (var parameter in syntax.typeParameters)
     feCheckMetadata(parameter.metadata, owner);
   feConstants.lexicalClass = owner;
@@ -2174,6 +2324,11 @@ void feDefaultArgument(int function, int parameter, int token) {
 }
 
 int feConstantGetter(ConstantValue value) {
+  if (typeIsClass(value.kind) && dartTypes[value.kind].arguments.isNotEmpty)
+    feAstError(
+      feFunctionNodes[feFunction].token,
+      'runtime generic class instances are not yet supported',
+    );
   var key = value.integer;
   while (feConstantGetters.length <= key) feConstantGetters.add(-1);
   if (feConstantGetters[key] >= 0) return feConstantGetters[key];
@@ -2742,7 +2897,7 @@ int feLowerList(AstExpression expression, int context) {
     element < 0 ? tDynamic : typeCompleteSchema(element, tDynamic),
   );
   var runtimeType = -1;
-  if (functions[feFunction].typeScope.isNotEmpty)
+  if (feTypeScope(feFunction).isNotEmpty)
     runtimeType = feRuntimeType(type, true);
   var allocation = ir.length;
   feBuiltinTyped(
@@ -2903,70 +3058,6 @@ void feLowerListSpread(AstExpression expression, FeListLiteral literal) {
   }
 }
 
-int feLowerPointerBinding(AstExpression call) {
-  if (imageKind == ImageKind.executable || feInitializingGlobal < 0) {
-    feAstError(
-      call.token,
-      'FFI callback bindings require library output and a top-level binding',
-    );
-  }
-  if (call.typeArguments.length != 1 || call.children.length < 2) {
-    feAstError(call.token, 'FFI callback requires a signature and function');
-  }
-  var signature = call.typeArguments[0];
-  var binding = feTypeSymbol(signature);
-  if (binding < 0 || feSymbols.declarations[binding].kind != symbolNativeType) {
-    feAstError(call.token, 'unknown FFI signature ' + signature.name);
-  }
-  var native = feSymbols.declarations[binding].target;
-  var implementation = call.children[1];
-  var target = feExpressionSymbol(implementation, false);
-  if (target < 0 || feSymbols.declarations[target].kind != symbolFunction) {
-    feAstError(
-      implementation.token,
-      'FFI callback requires a function declaration',
-    );
-  }
-  var function = feSymbols.declarations[target].target;
-  if (function < 0) {
-    feAstError(
-      implementation.token,
-      'unknown callback function ' + implementation.text,
-    );
-  }
-  if (functions[function].result != tInt)
-    feAstError(
-      implementation.token,
-      'FFI callbacks currently require an int result',
-    );
-  var parameter = 0;
-  while (parameter < feFunctionNodes[function].parameters.length) {
-    if (feFunctionNodes[function].parameters[parameter].kind ==
-            astNamedParameter ||
-        functions[function].parameterTypes[parameter] != tInt)
-      feAstError(
-        implementation.token,
-        'FFI callbacks currently require positional int parameters',
-      );
-    parameter++;
-  }
-  if (functions[function].parameters != feNativeParams[native]) {
-    feAstError(
-      call.token,
-      'FFI parameter count does not match ' + implementation.text,
-    );
-  }
-  if (call.children.length > 2) {
-    feLowerExpression(call.children[2]);
-    feEmit(opPop);
-  }
-  exportNames.add(globalNames[feInitializingGlobal]);
-  exportFunctions.add(function);
-  exportParameters.add(feNativeParams[native]);
-  feInteger(0, tPointer);
-  return tPointer;
-}
-
 int feMetadataMask(AstExpression expression) {
   feConstants.localTypes = feFlow.types;
   var value = evaluateConstant(feConstants, expression, tInt, false);
@@ -3088,13 +3179,6 @@ int feLowerStaticCall(AstExpression call, int symbol, int context) {
   var declaration = feSymbols.declarations[symbol];
   var name = declaration.name;
   var member = callee.text;
-  if (declaration.source == sourceFfi &&
-      name == 'Pointer' &&
-      member == 'fromFunction') {
-    if (call.text == astCallNew)
-      feAstError(call.token, 'new cannot invoke a static method');
-    return feLowerPointerBinding(call);
-  }
   if (call.typeArguments.length != 0)
     feAstError(call.token, 'nongeneric call does not accept type arguments');
   if (declaration.source == sourceCore &&
@@ -3973,6 +4057,11 @@ int feLowerConstructorCall(
   String rawName,
   int token,
 ) {
+  if (classTypeParameters[owner].isNotEmpty)
+    feAstError(
+      token,
+      'runtime generic class construction is not yet supported',
+    );
   if (call.text == astCallValue)
     feAstError(call.token, 'a type literal is not callable');
   final ordinal = resolveConstructorReference(
@@ -6297,8 +6386,7 @@ void fePrepareGlobals(int count, List<FunctionBindings> bindings) {
       -1,
       -1,
     );
-    if (imageKind == ImageKind.executable &&
-        feGlobalNodes[i].modifier != 'const') {
+    if (feGlobalNodes[i].modifier != 'const') {
       var type = globalTypes[i];
       initializer.getter = functions.length;
       functions.add(
@@ -6517,7 +6605,7 @@ void feBeginFunction(int f, FunctionBindings bindings) {
   feFunction = f;
   feCatches = <FeCatch>[];
   feFinalizers = <FeFinally>[];
-  feConstants.typeScope = functions[f].typeScope;
+  feConstants.typeScope = feTypeScope(f);
   feImplicitReceiverSlot = -1;
   feConstants.lexicalClass = -1;
   final owner = feLexicalOwner(f);
@@ -6692,12 +6780,9 @@ void parseSource(SourceProgram source) {
   feLocalInferred.clear();
   feLocalContexts.clear();
   feReturnTypes = null;
-  exportNames.clear();
-  exportFunctions.clear();
+  checkedExports.clear();
   callShapes.clear();
-  exportParameters.clear();
-  feNativeNames.clear();
-  feNativeParams.clear();
+
   feInitializingGlobal = -1;
   feGlobalSources.clear();
   feGlobalOwners.clear();
@@ -6904,6 +6989,7 @@ void parseSource(SourceProgram source) {
   }
   feRegisterConstructorConstants();
   feResolvePragma();
+  feResolveExport();
   feCheckUnitMetadata(syntax);
   var constant = 0;
   while (constant < feGlobalNodes.length) {
@@ -7035,6 +7121,21 @@ void parseSource(SourceProgram source) {
   var f = 1;
   while (f < sourceFunctions) {
     functions[f].start = ir.length;
+    if (feConstructors[f] == 1 && classTypeParameters[feOwners[f]].isNotEmpty) {
+      // The declaration and its potential constant initializers were checked
+      // above. Runtime instantiation is diagnosed at its use until reification
+      // is implemented; no executable generic constructor is emitted.
+      final info = functions[f];
+      info.parameterTypes = <int>[
+        for (final type in info.parameterTypes) genericBoundaryType(type),
+      ];
+      info.localTypes = <int>[...info.parameterTypes];
+      info.locals = info.parameters;
+      feEmit(opUnreachable);
+      info.end = ir.length;
+      f++;
+      continue;
+    }
     feBeginFunction(f, bodyBindings[f]);
     final functionSyntax = feFunctionNodes[f];
     final expression = functionSyntax.arrow;

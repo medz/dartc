@@ -2,6 +2,7 @@ import 'ast.dart';
 import 'binary64.dart';
 import 'host.dart';
 import 'frontend/arguments.dart';
+import 'frontend/generics.dart';
 import 'frontend/literals.dart';
 import 'frontend/parameters.dart';
 import 'initialization.dart';
@@ -27,6 +28,7 @@ class ConstantValue {
 
 class ConstructorConstants {
   int classId;
+  int instanceType = -1;
   AstClass owner;
   AstFunction syntax;
   List<int> fieldTypes;
@@ -47,6 +49,31 @@ class ConstructorConstants {
     states = List<int>.filled(count, 0);
     values = List<ConstantValue>.filled(count, ConstantValue(-1, tNull, 0, ''));
   }
+}
+
+ConstructorConstants _instantiateConstantConstructor(
+  ConstructorConstants owner,
+  int type,
+) {
+  final parameters = classTypeParameters[owner.classId];
+  if (parameters.isEmpty) return owner;
+  final arguments = dartTypes[type].arguments;
+  final result = ConstructorConstants(
+    owner.classId,
+    owner.owner,
+    owner.syntax,
+    <int>[
+      for (final field in owner.fieldTypes)
+        substituteType(field, parameters, arguments),
+    ],
+    <int>[
+      for (final parameter in owner.parameterTypes)
+        substituteType(parameter, parameters, arguments),
+    ],
+    owner.plan,
+  );
+  result.instanceType = type;
+  return result;
 }
 
 class _ConstantInvocation(
@@ -143,7 +170,9 @@ ConstantValue _constantGlobal(
   var typeScope = context.typeScope;
   var parameters = context.initializerParameters;
   context.lexicalClass = context.globalOwners[global];
-  context.typeScope = const <int>[];
+  context.typeScope = context.lexicalClass < 0
+      ? const <int>[]
+      : classTypeParameters[context.lexicalClass];
   context.initializerParameters = const <ConstantValue>[];
   var value = _evaluateConstant(
     context,
@@ -182,6 +211,34 @@ ConstantValue evaluateMetadataConstant(
   ConstantContext context,
   AstExpression expression,
 ) {
+  var designation = expression;
+  while (designation.kind == astCall || designation.kind == astMember) {
+    if (designation.typeArguments.isNotEmpty &&
+        !sourceVersionAtLeast(
+          context.symbols.program,
+          context.symbols.program.tokens[expression.token].source,
+          2,
+          14,
+        ))
+      _constantError(
+        context,
+        expression.token,
+        'type arguments in metadata require language version 2.14',
+      );
+    designation = designation.children[0];
+  }
+  if (designation.typeArguments.isNotEmpty &&
+      !sourceVersionAtLeast(
+        context.symbols.program,
+        context.symbols.program.tokens[expression.token].source,
+        2,
+        14,
+      ))
+    _constantError(
+      context,
+      expression.token,
+      'type arguments in metadata require language version 2.14',
+    );
   ConstantValue value;
   if (expression.kind == astCall)
     value = _constantConstructor(context, expression, true, true);
@@ -962,7 +1019,7 @@ ConstantValue _constantDeclaration(
   var typeScope = context.typeScope;
   var parameters = context.initializerParameters;
   context.lexicalClass = owner.classId;
-  context.typeScope = const <int>[];
+  context.typeScope = classTypeParameters[owner.classId];
   context.initializerParameters = const <ConstantValue>[];
   var value = ConstantValue(tNull, tNull, 0, '');
   if (expression != null)
@@ -1056,7 +1113,9 @@ ConstructorConstants _constantRedirectTarget(
       owner.syntax.token,
       'const redirect requires a const target',
     );
-  return target;
+  return owner.instanceType < 0
+      ? target
+      : _instantiateConstantConstructor(target, owner.instanceType);
 }
 
 ConstructorConstants _constantSuperTarget(
@@ -1161,9 +1220,11 @@ void checkConstantConstructors(ConstantContext context) {
           p++;
         }
         var scope = context.lexicalClass;
+        var typeScope = context.typeScope;
         var previous = context.initializerParameters;
         var allow = context.allowInitializerParameters;
         context.lexicalClass = owner.classId;
+        context.typeScope = classTypeParameters[owner.classId];
         context.initializerParameters = _constantParameterFrame(
           owner,
           parameters,
@@ -1196,6 +1257,7 @@ void checkConstantConstructors(ConstantContext context) {
             );
         }
         context.lexicalClass = scope;
+        context.typeScope = typeScope;
         context.initializerParameters = previous;
         context.allowInitializerParameters = allow;
       }
@@ -1213,7 +1275,9 @@ ConstantValue _constantInvoke(
   if (!active) {
     // Arguments are checked by the caller; declaration qualification checks the
     // initializer once, without evaluating a nested constructor body.
-    var type = classType(owner.classId);
+    var type = owner.instanceType < 0
+        ? classType(owner.classId)
+        : owner.instanceType;
     return ConstantValue(type, type, -1, '');
   }
   var scope = context.lexicalClass;
@@ -1221,12 +1285,13 @@ ConstantValue _constantInvoke(
   var previous = context.initializerParameters;
   var allow = context.allowInitializerParameters;
   var depth = context.invocations.length;
-  context.typeScope = const <int>[];
+  context.typeScope = classTypeParameters[owner.classId];
   while (true) {
     var call = 0;
     while (call < context.invocations.length) {
       var previousCall = context.invocations[call];
-      if (previousCall.owner == owner) {
+      if (previousCall.owner.syntax == owner.syntax &&
+          previousCall.owner.instanceType == owner.instanceType) {
         var parameter = 0;
         while (parameter < parameters.length &&
             _constantSame(
@@ -1343,7 +1408,9 @@ ConstantValue _constantInvoke(
   context.initializerParameters = previous;
   context.allowInitializerParameters = allow;
   while (context.invocations.length > depth) context.invocations.removeLast();
-  var type = classType(owner.classId);
+  var type = owner.instanceType < 0
+      ? classType(owner.classId)
+      : owner.instanceType;
   var value = ConstantValue(type, type, -1, '');
   value.elements = fields;
   return _constantAggregate(context, value);
@@ -1353,8 +1420,9 @@ ConstantValue _constantConstructor(
   ConstantContext context,
   AstExpression expression,
   bool active,
-  bool implicitConst,
-) {
+  bool implicitConst, [
+  int expected = -1,
+]) {
   if (expression.text == astCallNew && !context.inferringTypes)
     _constantError(
       context,
@@ -1442,6 +1510,71 @@ ConstantValue _constantConstructor(
       expression.token,
       'constant constructor requires const',
     );
+  final typeParameters = declarationTypeParameters(context.symbols, symbol);
+  if (arguments.isEmpty &&
+      classExpression.typeArguments.isEmpty &&
+      typeParameters.isNotEmpty) {
+    final template = declarationTypeTemplate(context.symbols, symbol);
+    final lower = List<int>.filled(typeParameters.length, -1);
+    final upper = List<int>.filled(typeParameters.length, -1);
+    if (expected >= 0 && expected != tDynamic && expected != tVoid)
+      constrainGenericTypes(
+        template,
+        expected,
+        typeParameters,
+        lower,
+        upper,
+        false,
+      );
+    final fixed = <int>[];
+    final schemas = <int>[];
+    for (var i = 0; i < typeParameters.length; i++) {
+      var type = upper[i];
+      final bound = typeParameterInfo(typeParameters[i]).bound;
+      if (type >= 0 && !typeContainsParameters(bound))
+        type = meetTypes(type, bound);
+      fixed.add(type >= 0 && !typeHasSchemaHole(type) ? type : -1);
+      schemas.add(type < 0 ? typeSchemaHole() : type);
+    }
+    final bindings = bindArguments(
+      context.symbols.program,
+      owner.syntax,
+      expression,
+      1,
+    );
+    for (var i = 1; i < expression.children.length; i++) {
+      var argument = expression.children[i];
+      if (argument.kind == astNamedArgument) argument = argument.children[0];
+      final parameter = substituteType(
+        owner.parameterTypes[bindings[i - 1]],
+        classTypeParameters[classId],
+        dartTypes[template].arguments,
+      );
+      final hint = substituteType(parameter, typeParameters, schemas);
+      final value = _evaluateConstant(
+        context,
+        argument,
+        false,
+        typeHasSchemaHole(hint) ? -1 : hint,
+        true,
+      );
+      constrainGenericTypes(
+        parameter,
+        value.type,
+        typeParameters,
+        lower,
+        upper,
+      );
+    }
+    final inferred = inferGenericArguments(typeParameters, lower, upper, fixed);
+    classType = instantiateDeclarationType(
+      context.symbols,
+      symbol,
+      inferred,
+      expression.token,
+    );
+  }
+  owner = _instantiateConstantConstructor(owner, typeNonNullable(classType));
   var parameters = _constantArguments(
     context,
     owner,
@@ -1742,7 +1875,13 @@ ConstantValue _evaluateConstant(
     return ConstantValue(tBool, tBool, integer, '');
   }
   if (kind == astCall)
-    return _constantConstructor(context, expression, active, implicitConst);
+    return _constantConstructor(
+      context,
+      expression,
+      active,
+      implicitConst,
+      expected,
+    );
   if (kind == astUnary) {
     var operand = expression.children[0];
     if (isNegatedIntegerLiteral(expression)) {
