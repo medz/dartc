@@ -40,7 +40,7 @@
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
-| §17.23、§17.36 赋值与可赋值表达式 | 部分实现 | 局部、全局、字段、实例/顶层 setter、List 索引及已有复合赋值；接收者/索引只求值一次，简单赋值保留原 RHS 类型和负载，setter 返回值不替代它；复合赋值独立检查 getter 运算和 setter 写入类型。final/const 存储只读，同名显式 setter 可以接收写入。`??=` 仅 null 时求值并写入 RHS，仍检查读写两侧及未执行的 RHS；原读取/RHS 负载独立于 setter 转换。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerLvalue`、`feLowerAssignment`、`feWriteLvalue`；[values.dart](../test/fixtures/values.dart)：`assignmentValues`、`accessorValues`、`topAccessorValues`、`coalescingAssignmentValues`；[behavior_test.dart](../test/behavior_test.dart)：`neverExpressions`、`rejected`、`failingValues`。 |
+| §17.23、§17.36 赋值与可赋值表达式 | 部分实现 | 局部、全局、字段、实例/顶层 setter、List 与用户运算符索引及已有复合赋值；接收者/索引只求值一次，简单赋值保留原 RHS 类型和负载，setter 返回值不替代它；复合赋值独立检查 getter 运算和 setter 写入类型。final/const 存储只读，同名显式 setter 可以接收写入。`??=` 仅 null 时求值并写入 RHS，仍检查读写两侧及未执行的 RHS；原读取/RHS 负载独立于 setter 转换。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerLvalue`、`feLowerAssignment`、`feWriteLvalue`；[values.dart](../test/fixtures/values.dart)：`assignmentValues`、`accessorValues`、`topAccessorValues`、`coalescingAssignmentValues`、`operatorIndexing`；[behavior_test.dart](../test/behavior_test.dart)：`neverExpressions`、`rejected`、`failingValues`。 |
 | §17.24 条件表达式 | 部分实现 | 仅执行选定分支，两分支均检查并接受上下文类型；结果合并依赖当前有限类型 LUB。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerConditional`；[values.dart](../test/fixtures/values.dart)：`conditionTernary`、`flowContexts`。 |
 | §17.25 `??` | 部分实现 | 左侧一次求值，仅 null 时执行 RHS；两侧静态检查和接收 List 上下文；Null 左侧取 RHS 类型，否则合并非空左类型与 RHS。拒绝 void 左侧，允许 void RHS 并保留选中负载。 | [typing.dart](../lib/src/typing.dart)：`typingCoalescing`；[frontend.dart](../lib/src/frontend.dart)：`feLowerCoalescing`；[constants.dart](../lib/src/constants.dart)：`_constantCoalescing`；[values.dart](../test/fixtures/values.dart)：`coalescingContexts`。 |
 | §17.26 逻辑表达式 | 部分实现 | `&&`、`\|\|` 短路及分支提升；普通布尔值与条件消费均保留副作用和动态 bool 检查。 | [frontend.dart](../lib/src/frontend.dart)：`feConditionJumps`、`feLowerExpression`；[values.dart](../test/fixtures/values.dart)：`conditionContexts`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
@@ -52,6 +52,14 @@
 | 空安全补充：空断言 `e!` | 部分实现 | 操作数只求值一次，仅 null 时运行失败（尚不可捕获），否则保留原值；结果为 NonNull(T)，Null 得 Never，dynamic 仍为 dynamic。透传 List 上下文并提升直接局部读取；void 操作数、常量上下文及作为赋值目标均拒绝。 | [typing.dart](../lib/src/typing.dart)：`typingNullAssertion`；[frontend.dart](../lib/src/frontend.dart)：`feLowerNullAssertion`；[values.dart](../test/fixtures/values.dart)：`nullAssertionValues`；[behavior_test.dart](../test/behavior_test.dart)：`nullAssertion`、`neverAssertion`、`neverExpressions`、`rejected`、`failingValues`；依据[空安全补充][nnbd]。 |
 | §17.39–17.40 类型测试与转换 | 部分实现 | `is`、`is!`、`as` 保留单次求值，覆盖当前类型和完整 List 参数；允许无关静态类型的显式 cast 后在运行时检查；`as` 可消费 void 的实际负载，`is` 和隐式消费不因此放宽。支持已实现函数签名、Function 上界及函数类型参数的运行时实例化；记录及一般泛型类目标未实现。 | [frontend.dart](../lib/src/frontend.dart)：`feLowerExpression`；[runtime.dart](../lib/src/runtime.dart)：`rtValueMatches`、`rtValueCast`；[values.dart](../test/fixtures/values.dart)：`typeChecks`、`valueContexts`、`functionValues`。 |
 | 空安全补充：底类型运算结果 | 部分实现 | 支持的普通运算在 Never 左侧保留底类型；相等、逻辑和 `!` 仍为 bool。具体接收者沿用其结果规则，例如 `int + Never` 为 num。不能因路径不完成而跳过其他操作数的静态检查。 | [typing.dart](../lib/src/typing.dart)：`typingBinary`、`typingUnary`；[frontend.dart](../lib/src/frontend.dart)：`feCombine`；[behavior_test.dart](../test/behavior_test.dart)：`neverNegation`、`neverRelation`、`neverRightArithmetic`、`neverLogical`。 |
+
+## 索引赋值
+
+用户 `[]` 与 `[]=` 的索引参数可以不同。接收者和源码索引各求值一次；简单赋值用写入参数提供上下文，复合赋值、增减及 `??=` 用读取参数提供上下文。读取和写入分别对原始索引检查类型及提取隐式 `call`，一侧的转换不能改变另一侧的输入。`??=` 读取非 null 时跳过 RHS 和写入参数的运行时检查，但仍检查两侧的静态义务，包括未调用函数中的赋值。
+
+插入的索引转换按 SDK 3.13.7 的 [compound index lowering](https://github.com/dart-lang/sdk/blob/3.13.7/pkg/front_end/lib/src/type_inference/inference_visitor.dart#L11016) 与 [if-null index lowering](https://github.com/dart-lang/sdk/blob/3.13.7/pkg/front_end/lib/src/type_inference/inference_visitor.dart#L9591) 排序：直接丢弃结果的复合赋值和后缀增减先检查写入索引；消费复合赋值结果时，在读取和 RHS 运算后检查。消费后缀结果时，在读取后、增减运算前检查；前缀增减在运算后检查。`??=` 仅在 null 分支检查写入索引，丢弃结果时先检查再求 RHS，消费结果时顺序相反。表达式语句、for 更新及级联段直接丢弃结果；条件表达式中的赋值仍作为值求解。
+
+行为入口为 [values.dart](../test/fixtures/values.dart) 的 `operatorIndexing()`，运行时失败前的副作用和未执行代码的拒例分别由 [behavior_test.dart](../test/behavior_test.dart) 的 `failingValues`、`rejectedOperators` 验证。运行时类型错误仍不可捕获，见[异常缺口](statements.md)。
 
 ## 点简写
 

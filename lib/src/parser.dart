@@ -2039,10 +2039,6 @@ AstFunction parserFunction(
   List<AstParameter> parameters = <AstParameter>[];
   if (!getter) parameters = parserParameters(parser);
   if (setter) {
-    if (result.name != '' &&
-        (result.name != 'void' || result.arguments.isNotEmpty)) {
-      parserError(parser, 'setter result must be void');
-    }
     if (parameters.length != 1 ||
         parameters[0].kind != astRequiredPositional ||
         parameters[0].fieldFormal ||
@@ -2157,8 +2153,6 @@ void parserOperatorCheck(Parser parser, AstFunction method, int token) {
   if (name == '[]=') {
     if (method.result.name == '')
       method.result = AstType('void', const <AstType>[], method.token);
-    else if (method.result.name != 'void' || method.result.arguments.isNotEmpty)
-      fail('operator []= must return void');
   }
 }
 

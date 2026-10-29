@@ -887,6 +887,63 @@ void main() {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      for (final operation in [
+        'c[key] = rhs();',
+        'c[key] += rhs();',
+        'print(c[key] += rhs());',
+        'c[key]++;',
+        'print(c[key]++);',
+        '++c[key];',
+        'print(++c[key]);',
+        'true ? (c[key] += rhs()) : 0;',
+        'nullable()?[key] += rhs();',
+        'c..[key] += rhs();',
+        'for (var n = 0; n < 1; c[key] += rhs()) { n++; }',
+      ])
+        '''
+class C {
+  int operator [](Object key) { print('read'); return 5; }
+  void operator []=(int key, int value) { print('write'); }
+}
+int rhs() { print('rhs'); return 9; }
+C? nullable() => C();
+void main() {
+  final c = C();
+  dynamic key = 'key';
+  print('before');
+  $operation
+}
+''',
+      for (final operation in ['print(c[key]++);', '++c[key];'])
+        '''
+class Value {
+  Value operator +(int amount) { print('add'); return this; }
+}
+class C {
+  Value operator [](Object key) { print('read'); return Value(); }
+  void operator []=(int key, Value value) { print('write'); }
+}
+void main() {
+  final c = C();
+  dynamic key = 'key';
+  print('before');
+  $operation
+}
+''',
+      for (final operation in ['c[key] ??= rhs();', 'print(c[key] ??= rhs());'])
+        '''
+class C {
+  int? operator [](Object key) { print('read'); return null; }
+  void operator []=(int key, int value) { print('write'); }
+}
+int rhs() { print('rhs'); return 9; }
+void main() {
+  final c = C();
+  dynamic key = 'key';
+  print('before');
+  $operation
+}
+''',
       'class C{C(int x);}void main(){Object f=C.new;print("before");f as C Function(String);}',
       'class C{C(int x);}void main(){var f=C.new;dynamic x="wrong";print("before");f(x);}',
       "class C{factory C(dynamic value)=>value;}void main(){print('before');C(1);print('after');}",
@@ -3068,6 +3125,12 @@ void main() {
       await reject(invalid, checkSdk: true);
     }
     final rejectedOperators = [
+      'typedef Result = int; class C { Result operator []=(int key, int value) => value; } void main() {}',
+      'typedef Result = dynamic; class C { Result operator []=(int key, int value) {} } void main() {}',
+      'typedef Result = int; Result set value(int next) => next; void main() {}',
+      'typedef Result = int; class C { Result set value(int next) => next; } void main() {}',
+      'class C { int operator [](int key) => 1; void operator []=(String key, int value) {} } void unused() { C()[1] += 2; } void main() {}',
+      'class C { int operator [](Object key) => 1; void operator []=(int key, int value) {} } void unused() { C()["key"] ??= 2; } void main() {}',
       'class C { C operator +(C a, C b) => this; } void main() {}',
       'class C { C operator +() => this; } void main() {}',
       'class C { C operator +([C? o]) => this; } void main() {}',

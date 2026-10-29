@@ -387,6 +387,8 @@ int feRegisterFunction(
       !syntax.getter &&
       !syntax.setter)
     result = tString;
+  if ((syntax.setter || syntax.name == '[]=') && result != tVoid)
+    feAstError(syntax.token, 'setter result must be void');
   if (owner >= 0) {
     if (!constructor) name = classNames[owner] + '.' + syntax.name;
     if (!syntax.isStatic && !syntax.factory) {
@@ -1535,6 +1537,7 @@ class FeLvalue {
   int member = -1;
   int reader = -1;
   int setter = -1;
+  int writeIndex = -1;
   CheckedMemberRead? directRead;
 
   FeLvalue(
@@ -2579,8 +2582,11 @@ FeLvalue feLowerOperatorLvalue(
       feAstError(expression.token, 'indexed read requires operator []');
   }
   final offset = feParameterOffset(writer);
-  final indexType = functions[writer].parameterTypes[offset];
-  feLowerInContext(expression.children[1], indexType);
+  final context = reading
+      ? functions[reader].parameterTypes[feParameterOffset(reader)]
+      : functions[writer].parameterTypes[offset];
+  // Keep the original index: [] and []= can require different conversions.
+  final indexType = feLowerHint(expression.children[1], context);
   final index = feTemp(indexType);
   feOperand(opStoreLocal, index);
   final receiver = feTemp(receiverType);
@@ -2596,6 +2602,21 @@ FeLvalue feLowerOperatorLvalue(
     ..owner = owner
     ..reader = reader
     ..setter = writer;
+}
+
+void fePrepareIndexWrite(FeLvalue target, int token) {
+  if (target.container != 6 || target.writeIndex >= 0) return;
+  final type =
+      functions[target.setter].parameterTypes[feParameterOffset(target.setter)];
+  final actual = feSlotTypes[target.index];
+  if (actual == type) {
+    target.writeIndex = target.index;
+    return;
+  }
+  feOperand(opLoadLocal, target.index);
+  feConvertValue(feImplicitCall(actual, type, token), type, token);
+  target.writeIndex = feTemp(type);
+  feOperand(opStoreLocal, target.writeIndex);
 }
 
 int feInvokeDeclaration(
@@ -4544,9 +4565,11 @@ int feReadLvalue(FeLvalue target, int token) {
       token,
     );
     feOperand(opLoadLocal, target.index);
+    final indexType =
+        functions[reader].parameterTypes[feParameterOffset(reader)];
     feConvertValue(
-      feSlotTypes[target.index],
-      functions[reader].parameterTypes[feParameterOffset(reader)],
+      feImplicitCall(feSlotTypes[target.index], indexType, token),
+      indexType,
       token,
     );
     feCall(feOperatorTarget(reader), 2);
@@ -4647,7 +4670,7 @@ void feWriteLvalue(FeLvalue target, int token) {
       functions[target.setter].parameterTypes[0],
       token,
     );
-    feOperand(opLoadLocal, target.index);
+    feOperand(opLoadLocal, target.writeIndex);
     feOperand(opLoadLocal, value);
     feCall(feOperatorTarget(target.setter), 3);
     return;
@@ -4660,11 +4683,17 @@ void feWriteLvalue(FeLvalue target, int token) {
     feBuiltinTyped(bObjectSet, 3, target.type);
 }
 
-int feLowerAssignment(AstExpression expression, bool postfix) {
+int feLowerAssignment(
+  AstExpression expression,
+  bool postfix, [
+  bool forEffect = false,
+]) {
   var op = expression.text;
   var target = feLowerLvalue(expression.children[0], op != '=');
-  if (op == '??=') return feLowerCoalescingAssignment(expression, target);
+  if (op == '??=')
+    return feLowerCoalescingAssignment(expression, target, forEffect);
   if (op == '=') {
+    fePrepareIndexWrite(target, expression.token);
     var source = expression.children[1];
     var type = feLowerAssignedValue(source, target.type);
     var value = feTemp(type);
@@ -4677,6 +4706,7 @@ int feLowerAssignment(AstExpression expression, bool postfix) {
     feOperand(opLoadLocal, value);
     return type;
   }
+  if (forEffect) fePrepareIndexWrite(target, expression.token);
   var increment = op == '++' || op == '--';
   var previous = -1;
   var readType = feReadLvalue(target, expression.token);
@@ -4684,6 +4714,7 @@ int feLowerAssignment(AstExpression expression, bool postfix) {
     previous = feTemp(readType);
     feDuplicate(readType);
     feOperand(opStoreLocal, previous);
+    fePrepareIndexWrite(target, expression.token);
   }
   var result = readType;
   final user = feUserOperator(
@@ -4729,6 +4760,7 @@ int feLowerAssignment(AstExpression expression, bool postfix) {
   feOperand(opStoreLocal, value);
   feOperand(opLoadLocal, value);
   feConvertValue(result, target.type, expression.token);
+  fePrepareIndexWrite(target, expression.token);
   feWriteLvalue(target, expression.token);
   feWriteFlow(target, result);
   feEmit(opPop);
@@ -4740,7 +4772,11 @@ int feLowerAssignment(AstExpression expression, bool postfix) {
   return result;
 }
 
-int feLowerCoalescingAssignment(AstExpression expression, FeLvalue target) {
+int feLowerCoalescingAssignment(
+  AstExpression expression,
+  FeLvalue target,
+  bool forEffect,
+) {
   var left = feReadLvalue(target, expression.token);
   if (left == tVoid)
     feAstError(expression.token, 'void expression cannot be used as a value');
@@ -4765,6 +4801,7 @@ int feLowerCoalescingAssignment(AstExpression expression, FeLvalue target) {
   var afterLeft = feFlow;
   feFlow = .copy(afterLeft);
   if (feFlow.soundFlow && !typeCanBeNull(left)) flowUnreachable(feFlow);
+  if (forEffect) fePrepareIndexWrite(target, expression.token);
   var source = expression.children[1];
   var context = target.type;
   if (target.binding >= 0) context = left;
@@ -4773,6 +4810,7 @@ int feLowerCoalescingAssignment(AstExpression expression, FeLvalue target) {
   feOperand(opStoreLocal, assigned);
   feOperand(opLoadLocal, assigned);
   feConvertValue(right, target.type, source.token);
+  fePrepareIndexWrite(target, expression.token);
   feWriteLvalue(target, expression.token);
   feWriteFlow(target, right);
   feEmit(opPop);
@@ -4824,15 +4862,15 @@ int feLowerNullAssertion(AstExpression expression, int context) {
   return result;
 }
 
-int feLowerExpression(AstExpression expression) {
+int feLowerExpression(AstExpression expression, [bool forEffect = false]) {
   if (expression.kind == astPatternAssignment)
     return feLowerPatternAssignment(expression);
-  var type = feLowerValue(expression);
+  var type = feLowerValue(expression, forEffect);
   if (type == tNever) flowUnreachable(feFlow);
   return type;
 }
 
-int feLowerValue(AstExpression expression) {
+int feLowerValue(AstExpression expression, [bool forEffect = false]) {
   if (expression.kind == astStaticShorthand) return feLowerHint(expression, -1);
   if (expression.kind == astThrow) {
     final value = expression.children[0];
@@ -4847,7 +4885,7 @@ int feLowerValue(AstExpression expression) {
     return feLowerSwitchExpression(expression, -1);
   expression = feWithReceiver(expression);
   var kind = expression.kind;
-  if (kind == astNullAware) return feLowerNullAware(expression, -1);
+  if (kind == astNullAware) return feLowerNullAware(expression, -1, forEffect);
   if (kind == astCascade) return feLowerCascade(expression, -1);
   if (kind == astImplicitReceiver) {
     feOperand(opLoadLocal, feImplicitReceiverSlot);
@@ -4943,7 +4981,7 @@ int feLowerValue(AstExpression expression) {
   if (kind == astPostfix && expression.text == '!')
     return feLowerNullAssertion(expression, -1);
   if (kind == astAssignment || kind == astPostfix) {
-    return feLowerAssignment(expression, kind == astPostfix);
+    return feLowerAssignment(expression, kind == astPostfix, forEffect);
   }
   if (kind == astTypeTest || kind == astTypeCast) {
     var actual = feLowerExpression(expression.children[0]);
@@ -5096,7 +5134,11 @@ int feNonNullReceiver(int receiver) {
   return slot;
 }
 
-int feLowerNullAware(AstExpression expression, int context) {
+int feLowerNullAware(
+  AstExpression expression,
+  int context, [
+  bool forEffect = false,
+]) {
   var source = expression.children[0];
   var body = expression.children[1];
   var symbol = feExpressionSymbol(source, false);
@@ -5107,7 +5149,9 @@ int feLowerNullAware(AstExpression expression, int context) {
     var access = astImplicitReceiverAccess(body);
     var receiver = access.children[0];
     access.children[0] = source;
-    var type = feLowerHint(body, context);
+    var type = forEffect
+        ? feLowerExpression(body, true)
+        : feLowerHint(body, context);
     access.children[0] = receiver;
     return type;
   }
@@ -5120,7 +5164,9 @@ int feLowerNullAware(AstExpression expression, int context) {
   var skip = feJumpIfNull(receiver);
   var previous = feImplicitReceiverSlot;
   feImplicitReceiverSlot = feNonNullReceiver(receiver);
-  var value = feLowerHint(body, context);
+  var value = forEffect
+      ? feLowerExpression(body, true)
+      : feLowerHint(body, context);
   var result = value == tVoid ? tVoid : nullableType(value);
   feConvertValue(value, result, body.token);
   var done = feJump(opJump);
@@ -5150,7 +5196,7 @@ int feLowerCascade(AstExpression expression, int context) {
   }
   var section = 1;
   while (section < expression.children.length) {
-    feLowerExpression(expression.children[section]);
+    feLowerExpression(expression.children[section], true);
     feEmit(opPop);
     section++;
   }
@@ -5808,7 +5854,7 @@ void feLowerStatement(AstStatement statement) {
     return;
   }
   if (kind == astExpressionStatement) {
-    feLowerExpression(statement.expressions[0]);
+    feLowerExpression(statement.expressions[0], true);
     feEmit(opPop);
     return;
   }
@@ -7471,7 +7517,7 @@ void feLowerWhileFor(
   }
   var updateIndex = 0;
   while (updateIndex < statement.update.length) {
-    feLowerExpression(statement.update[updateIndex]);
+    feLowerExpression(statement.update[updateIndex], true);
     feEmit(opPop);
     updateIndex++;
   }

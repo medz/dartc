@@ -1,6 +1,7 @@
 ## Unreleased
 
-- Add user-defined operators on non-generic classes: binary, unary minus and `~`, `[]` and `[]=`, with operator dispatch through subclasses, compound assignment and `++`/`--`. `operator ==` remains unsupported.
+- Add user-defined operators on non-generic classes: binary, unary minus and `~`, `[]` and `[]=`, with operator dispatch through subclasses, compound assignment and `++`/`--`. Preserve independent read/write index conversions, short-circuiting and side-effect order. `operator ==` remains unsupported.
+- Accept type aliases resolving to `void` as setter and `[]=` return types; check resolved return types even in unused declarations.
 - Add non-generic enums, including simple and enhanced declarations with fields, const and redirecting constructors, factories, methods and static members, plus `values`, `index`, `name` and `toString`. Switches over enum values must be exhaustive in Dart 3 files. Type parameters, mixins and enum members named `name` remain unsupported.
 - Support non-generic user-class constructor values, including factories, redirects, optional and named arguments, constant identity and ordinary type aliases. Resolve inferred field and super parameter types before exposing constructor signatures.
 - Support optional positional and named parameters in non-generic function values, including captures, defaults, structural function types and runtime checks.

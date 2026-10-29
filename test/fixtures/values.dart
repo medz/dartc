@@ -1700,6 +1700,117 @@ void operatorIndexing() {
   print(keyed.self(opA));
   dynamic d = opA;
   print(d is OpVec);
+
+  final contracts = OpIndexContracts();
+  opIndexTrace = '';
+  opIndexReceiver(contracts)[opIndexKey()] += opIndexValue();
+  print(opIndexTrace);
+  print(contracts[3]++);
+  print(++contracts[4]);
+  contracts.value = 7;
+  opAliasValue = 8;
+  OpListIndex()[[]] += 2;
+  OpDoubleIndex()[1] += 2;
+  final callable = OpCallableIndex();
+  OpFunctionIndex()[callable] += 2;
+  OpCallableWriteIndex()[callable] ??= 9;
+  dynamic key = 'key';
+  final present = OpNullableIndex(5);
+  opIndexTrace = '';
+  present[key] ??= opIndexValue();
+  print(present[key] ??= opIndexValue());
+  print(opIndexTrace);
+  final absent = OpNullableIndex(null);
+  absent[1] ??= opIndexValue();
+  print(absent[2] ??= opIndexValue());
+}
+
+String opIndexTrace = '';
+
+OpIndexContracts opIndexReceiver(OpIndexContracts value) {
+  opIndexTrace += 'r';
+  return value;
+}
+
+int opIndexKey() {
+  opIndexTrace += 'i';
+  return 2;
+}
+
+int opIndexValue() {
+  opIndexTrace += 'v';
+  return 3;
+}
+
+typedef OpWriteResult = void;
+
+OpWriteResult set opAliasValue(int value) => print(value);
+
+class OpIndexContracts {
+  int operator [](int key) {
+    opIndexTrace += 'g';
+    return key + 10;
+  }
+
+  OpWriteResult operator []=(Object key, int value) {
+    opIndexTrace += 'w';
+    print([key, value]);
+  }
+
+  OpWriteResult set value(int value) => print(value);
+}
+
+class OpListIndex {
+  int operator [](List<int> key) => key.length;
+  void operator []=(Object key, int value) {
+    print(key is List<int>);
+    print(value);
+  }
+}
+
+class OpDoubleIndex {
+  int operator [](double key) {
+    print(key);
+    return 4;
+  }
+
+  void operator []=(Object key, int value) {
+    print(key is double);
+    print(value);
+  }
+}
+
+class OpCallableIndex {
+  int call() => 4;
+}
+
+class OpFunctionIndex {
+  int operator [](int Function() key) => key();
+  void operator []=(Object key, int value) {
+    print(key is OpCallableIndex);
+    print(value);
+  }
+}
+
+class OpCallableWriteIndex {
+  int? operator [](Object key) {
+    print(key is OpCallableIndex);
+    return null;
+  }
+
+  void operator []=(int Function() key, int value) {
+    print(key());
+    print(value);
+  }
+}
+
+class OpNullableIndex(final int? value) {
+  int? operator [](Object key) {
+    opIndexTrace += 'g';
+    return value;
+  }
+
+  void operator []=(int key, int value) => print([key, value]);
 }
 
 int opPick<T extends OpBase>(T t) => t[2];
