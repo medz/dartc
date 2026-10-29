@@ -102,7 +102,8 @@ lib/src/
   x64.dart, x64_emit.dart                         x86-64 指令编码与发射
   frame.dart                                     已发射函数的代码区间与栈帧布局
   abi.dart, layout.dart, nogc.dart                 运行时绑定、布局与效果约束
-  format.dart, library.dart, sign.dart             映像布局、文件封装与签名
+  constant_layout.dart                           映像常量、全局区与元数据布局
+  format.dart, library.dart, sign.dart             映像重定位、文件封装与签名
   format/image.dart                              映像缓冲区与字节写入
   format/macho.dart                              共用 Mach-O 段与节编码
   runtime.dart                                   目标运行时与受信原语声明
@@ -225,7 +226,7 @@ Machine IR 的比较保存语义条件，各后端映射为自己的条件码。
 
 `liveness.dart` 拥有 Machine IR 的块级活跃性分析，分配器与调用点根表直接使用同一实现。分析只读取指令、控制流和值编号，不读取或修改寄存器分配结果；改变指令使用、定义或控制流后需要重新计算。
 
-`code.dart` 拥有机器码、函数入口以及调用/数据地址修补记录；所有位置均为字节偏移。存储按 32 位 word 打包以控制 Dart List 的占用，编码器可写入单字节或完整 word。`format.dart` 统一布局常量、全局区及相对元数据，ARM64 与 x64 编码器分别修补地址指令。x64 使用 RIP 相对地址和 rel32 调用/跳转，超出范围时拒绝生成截断的位移。
+`code.dart` 拥有机器码、函数入口以及调用/数据地址修补记录；所有位置均为字节偏移。存储按 32 位 word 打包以控制 Dart List 的占用，编码器可写入单字节或完整 word。`constant_layout.dart` 根据已发码引用统一布局常量、全局区及相对元数据，补齐描述符、调用形状和栈帧名称所需的字符串。它返回字节偏移，不写映像缓冲区或选择文件头格式。`format.dart` 消费布局结果完成重定位和写出，ARM64 与 x64 编码器分别修补地址指令。x64 使用 RIP 相对地址和 rel32 调用/跳转，超出范围时拒绝生成截断的位移。
 
 `format/image.dart` 拥有唯一的映像缓冲区和小端字节写入函数；打包 word 的写入显式接收数据及字节长度，不读取后端状态。`format/macho.dart` 拥有可执行文件与库共用的段、节编码。`library.dart` 直接导入这两个定义文件，不依赖可执行文件的常量布局与重定位实现。
 
