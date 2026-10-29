@@ -1,12 +1,58 @@
 import 'code.dart';
 import 'format/image.dart';
 import 'format/macho.dart';
+import 'host.dart';
 import 'ir.dart';
 import 'sign.dart';
 import 'target.dart';
 
 List<int> libraryNames = <int>[];
 List<int> libraryNameOffsets = <int>[];
+
+List<int> _libraryUtf8(String value) {
+  final bytes = <int>[];
+  var i = 0;
+  while (i < value.length) {
+    var code = value.codeUnitAt(i++);
+    if (code >= 0xd800 && code <= 0xdbff && i < value.length) {
+      final low = value.codeUnitAt(i);
+      if (low >= 0xdc00 && low <= 0xdfff) {
+        code = 0x10000 + ((code - 0xd800) << 10) + low - 0xdc00;
+        i++;
+      }
+    }
+    if (code >= 0xd800 && code <= 0xdfff) {
+      print('Library name contains an unpaired UTF-16 surrogate.');
+      hostExit(1);
+    }
+    if (code < 0x80) {
+      bytes.add(code);
+    } else {
+      if (code < 0x800) {
+        bytes.add(0xc0 | (code >> 6));
+      } else if (code < 0x10000) {
+        bytes.add(0xe0 | (code >> 12));
+        bytes.add(0x80 | ((code >> 6) & 63));
+      } else {
+        bytes.add(0xf0 | (code >> 18));
+        bytes.add(0x80 | ((code >> 12) & 63));
+        bytes.add(0x80 | ((code >> 6) & 63));
+      }
+      bytes.add(0x80 | (code & 63));
+    }
+  }
+  return bytes;
+}
+
+class _LibraryExportNode {
+  int name;
+  int length;
+  int address;
+  int offset = 0;
+  List<_LibraryExportNode> children;
+
+  _LibraryExportNode(this.name, this.length, this.address, this.children);
+}
 
 void libraryHeader(int kind, int commands, int size, int flags) {
   image32(0xfeedfacf);
@@ -69,54 +115,91 @@ void libraryUleb(List<int> bytes, int value) {
 }
 
 List<int> libraryExportTrie(int codeAddress) {
-  var leaves = <int>[];
-  var leafOffsets = <int>[];
+  final root = _LibraryExportNode(0, 0, -1, <_LibraryExportNode>[]);
+  final nodes = <_LibraryExportNode>[root];
   var i = 0;
   while (i < exportNames.length) {
-    var terminal = <int>[0];
-    libraryUleb(terminal, codeAddress + functionOffsets[exportFunctions[i]]);
-    leafOffsets.add(leaves.length);
-    libraryUleb(leaves, terminal.length);
-    var j = 0;
-    while (j < terminal.length) {
-      leaves.add(terminal[j]);
-      j++;
+    final name = libraryNameOffsets[i];
+    var length = 0;
+    while (libraryNames[name + length] != 0) length++;
+    final address = codeAddress + functionOffsets[exportFunctions[i]];
+    var node = root;
+    var at = 0;
+    while (at < length) {
+      var child = 0;
+      while (child < node.children.length &&
+          libraryNames[node.children[child].name] != libraryNames[name + at])
+        child++;
+      if (child == node.children.length) {
+        final leaf = _LibraryExportNode(
+          name + at,
+          length - at,
+          address,
+          <_LibraryExportNode>[],
+        );
+        node.children.add(leaf);
+        nodes.add(leaf);
+        node = leaf;
+        break;
+      }
+      final next = node.children[child];
+      var common = 0;
+      while (common < next.length &&
+          at + common < length &&
+          libraryNames[next.name + common] == libraryNames[name + at + common])
+        common++;
+      if (common < next.length) {
+        final suffix = _LibraryExportNode(
+          next.name + common,
+          next.length - common,
+          next.address,
+          next.children,
+        );
+        nodes.add(suffix);
+        next.length = common;
+        next.address = -1;
+        next.children = <_LibraryExportNode>[suffix];
+      }
+      at += common;
+      node = next;
     }
-    leaves.add(0);
+    node.address = address;
     i++;
   }
-  var rootSize = 2;
-  i = 0;
-  while (i < exportNames.length) {
-    rootSize = rootSize + exportNames[i].length + 3;
-    i++;
-  }
-  var root = <int>[];
-  while (true) {
-    root = <int>[0];
-    root.add(exportNames.length);
-    i = 0;
-    while (i < exportNames.length) {
-      root.add(95);
-      var name = exportNames[i];
+  var bytes = <int>[];
+  var changed = true;
+  while (changed) {
+    changed = false;
+    bytes = <int>[];
+    for (final node in nodes) {
+      if (node.offset != bytes.length) {
+        node.offset = bytes.length;
+        changed = true;
+      }
+      final terminal = <int>[];
+      if (node.address >= 0) {
+        terminal.add(0);
+        libraryUleb(terminal, node.address);
+      }
+      libraryUleb(bytes, terminal.length);
       var j = 0;
-      while (j < name.length) {
-        root.add(name.codeUnitAt(j));
+      while (j < terminal.length) {
+        bytes.add(terminal[j]);
         j++;
       }
-      root.add(0);
-      libraryUleb(root, rootSize + leafOffsets[i]);
-      i++;
+      bytes.add(node.children.length);
+      for (final child in node.children) {
+        j = 0;
+        while (j < child.length) {
+          bytes.add(libraryNames[child.name + j]);
+          j++;
+        }
+        bytes.add(0);
+        libraryUleb(bytes, child.offset);
+      }
     }
-    if (root.length == rootSize) break;
-    rootSize = root.length;
   }
-  i = 0;
-  while (i < leaves.length) {
-    root.add(leaves[i]);
-    i++;
-  }
-  return root;
+  return bytes;
 }
 
 List<int> libraryObject() {
@@ -222,7 +305,9 @@ List<int> libraryDylib(String outputPath) {
     1,
     0,
   );
-  var name = '@rpath/' + outputPath.substring(outputPath.lastIndexOf('/') + 1);
+  var name = _libraryUtf8(
+    '@rpath/' + outputPath.substring(outputPath.lastIndexOf('/') + 1),
+  );
   var idSize = alignImage(25 + name.length, 8);
   image32(0xd);
   image32(idSize);
@@ -230,7 +315,8 @@ List<int> libraryDylib(String outputPath) {
   image32(0);
   image32(0x10000);
   image32(0x10000);
-  imageName(name, idSize - 24);
+  for (final byte in name) image.add(byte);
+  imageZeros(idSize - 24 - name.length);
   image32(0xc);
   image32(56);
   image32(24);
@@ -294,10 +380,10 @@ List<int> createLibrary(String outputPath) {
   while (i < exportNames.length) {
     libraryNameOffsets.add(libraryNames.length);
     libraryNames.add(95);
-    var name = exportNames[i];
+    var name = _libraryUtf8(exportNames[i]);
     var j = 0;
     while (j < name.length) {
-      libraryNames.add(name.codeUnitAt(j));
+      libraryNames.add(name[j]);
       j++;
     }
     libraryNames.add(0);
