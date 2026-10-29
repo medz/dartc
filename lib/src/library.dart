@@ -179,13 +179,15 @@ List<int> libraryArchive() {
   image32(stringLength);
   libraryStringTable();
   imageZeros(stringLength - libraryNames.length);
-  libraryArchiveHeader('dartc.o', object.length);
+  // Darwin archive members include padding to an eight-byte boundary.
+  var objectLength = alignImage(object.length, 8);
+  libraryArchiveHeader('dartc.o', objectLength);
   i = 0;
   while (i < object.length) {
     image.add(object[i]);
     i++;
   }
-  if ((object.length & 1) != 0) image.add(10);
+  imageZeros(objectLength - object.length);
   return image;
 }
 

@@ -232,6 +232,8 @@ Machine IR 的比较保存语义条件，各后端映射为自己的条件码。
 
 x64 复用基础 x86-64/SSE2 指令后端。Linux 输出 ELF64，启动从进程栈读取 argc/argv；macOS 输出 x86-64 Mach-O，LC_MAIN 从 rdi/rsi 接收 argc/argv，并在调用前对齐栈。macOS x64 的段和签名散列页使用 4 KiB，ARM64 使用 16 KiB；签名页遵循 [XNU CodeDirectory 校验](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/ubc_subr.c)。常量与全局区使用 RIP 相对地址，签名由同一 Dart 实现生成。操作系统系统调用差异集中在原语边界和 Dart 文件服务中，内部调用、根、安全点和异常恢复协议见 [runtime.md](runtime.md)。macOS 两种架构支持现有 Int64 FFI 绑定的 object/static/dylib 输出；Linux 库输出尚未接入。
 
+Darwin 静态归档中的 64 位对象按 8 字节边界补齐，成员长度包含尾部填充，与 [LLVM 的 Darwin 归档编码](https://github.com/llvm/llvm-project/blob/main/llvm/lib/Object/ArchiveWriter.cpp) 一致。对象本身的节、符号和字符串长度仍由 Mach-O 头描述。
+
 ## 前端阶段与语义边界
 
 扫描、解析和带源码位置的语义失败抛出 `Diagnostic`，诊断文本由发现错误的阶段构造；命令行入口捕获并负责输出与退出。嵌入式调用者可捕获诊断，再从新的源码输入重新建立前端状态。内部 IR、布局和机器合同失败保留独立的致命错误边界。

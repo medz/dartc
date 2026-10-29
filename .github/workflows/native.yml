@@ -122,11 +122,11 @@ jobs:
         run: test "$(uname -m)" = x86_64
       - name: Bootstrap and check native behavior
         run: dart tool/bootstrap.dart
+      - run: dart test/library_test.dart build/dartc-stage2
       - run: dart test/differential_test.dart --compiler build/dartc-stage2
       - run: dart test/ssa_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
       - run: dart test/measure_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
       - run: dart test/program_benchmark_test.dart --compiler build/dartc-stage2
-      - run: dart test/library_test.dart build/dartc-stage2
       - run: dart tool/fuzz.dart --compiler build/dartc-stage2 --count 12
       - name: Cross-compile the compiler for Apple Silicon and Linux
         env:
@@ -143,6 +143,7 @@ jobs:
           dart test/package_release_test.dart --compiler build/dartc-stage2
           dart tool/package_release.dart --compiler build/dartc-stage2
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
           name: dartc-macos-x64-validation
           path: |
@@ -150,5 +151,6 @@ jobs:
             build/dartc-cross-*
             build/values-*
             build/release/*
+            build/library-*/**
           if-no-files-found: error
           retention-days: 7

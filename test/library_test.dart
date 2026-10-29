@@ -18,7 +18,9 @@ void run(String executable, List<String> arguments) {
 
 void main(List<String> args) {
   final root = File.fromUri(Platform.script).parent.parent.absolute.path;
-  final temporary = Directory.systemTemp.createTempSync('dartc-library-');
+  final build = Directory('$root/build')..createSync(recursive: true);
+  final temporary = build.createTempSync('library-');
+  var succeeded = false;
   try {
     final wide = File('${temporary.path}/wide.dart')
       ..writeAsStringSync('''
@@ -76,7 +78,12 @@ final blend = Pointer.fromFunction<Wide>(blendImpl, 0);
     stdout.writeln(
       'C calls two- and eight-argument FFI exports through object, static and dynamic linkage.',
     );
+    succeeded = true;
   } finally {
-    temporary.deleteSync(recursive: true);
+    if (succeeded) {
+      temporary.deleteSync(recursive: true);
+    } else {
+      stderr.writeln('Library failure preserved at ${temporary.path}');
+    }
   }
 }
