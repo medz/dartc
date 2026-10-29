@@ -39,11 +39,15 @@ void _boundary(int arena, int address, int state) {
 }
 
 @pragma('dartc:no-gc')
-int _arenaFor(int address, [int hint = 0]) {
+int _arenaFor(int address, [int hint = 0, int secondHint = 0]) {
   if (hint != 0 &&
       address >= hint + rtArenaHeaderBytes &&
       address < hint + nativeLoad64(hint + 8))
     return hint;
+  if (secondHint != 0 &&
+      address >= secondHint + rtArenaHeaderBytes &&
+      address < secondHint + nativeLoad64(secondHint + 8))
+    return secondHint;
   var arena = rtArenaHead;
   while (arena != 0) {
     if (address >= arena + rtArenaHeaderBytes &&
@@ -164,20 +168,24 @@ void rtCollect() {
   _seal();
   final work = rtTraceBufferNew();
   rtTraceRoots(nativeFramePointer(), work);
-  // No arena is released during marking. Reuse the last lookup while visiting
-  // nearby objects without retaining an address cache across collections.
+  // No arena is released during marking. Reuse the two most recent distinct
+  // arenas without retaining an address cache across collections.
   var hint = 0;
+  var secondHint = 0;
   while (nativeLoad64(work + 8) != 0) {
     final count = nativeLoad64(work + 8) - 1;
     final value = nativeLoad64(nativeLoad64(work) + count * 8);
     nativeStore64(work + 8, count);
-    final arena = _arenaFor(value, hint);
+    final arena = _arenaFor(value, hint, secondHint);
     if (arena == 0) {
       if ((nativeLoad64(value + objectFlagsOffset) & objectStaticRelative) == 0)
         rtRootFailure();
       continue;
     }
-    hint = arena;
+    if (arena != hint) {
+      secondHint = hint;
+      hint = arena;
+    }
     final offset = value - arena - rtArenaHeaderBytes;
     if ((offset & 15) != 0) rtRootFailure();
     final cell = offset ~/ 16;
