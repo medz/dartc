@@ -45,7 +45,7 @@ void machineSelectInstruction(
   SsaInstruction source,
   List<int> types,
   List<int> reps,
-  List<int> counts,
+  List<int> constants,
   List<MachineInstruction> instructions,
 ) {
   var SsaInstruction(:op, value: output, :target, :effects) = source;
@@ -281,12 +281,41 @@ void machineSelectInstruction(
     );
     return;
   }
+  if (op == opDiv || op == opMod) {
+    final divisor = constants[inputs[1]];
+    if (divisor == 1) {
+      instructions.add(
+        MachineInstruction(
+          op == opDiv ? mMove : mConstant,
+          output,
+          op == opDiv ? <int>[inputs[0]] : <int>[],
+          0,
+          0,
+          0,
+        ),
+      );
+      return;
+    }
+    if (op == opMod && divisor > 0 && (divisor & (divisor - 1)) == 0) {
+      // Euclidean remainder modulo 2^k is the low k bits, even for negatives.
+      final mask = reps.length;
+      reps.add(rI64);
+      instructions.add(
+        MachineInstruction(mConstant, mask, <int>[], divisor - 1, 0, 0),
+      );
+      instructions.add(
+        MachineInstruction(mAnd, output, <int>[inputs[0], mask], 0, 0, 0),
+      );
+      return;
+    }
+  }
   int arithmetic = machineArithmetic(op);
   if (arithmetic != 0) {
     var count = 0;
     if ((op == opShl || op == opShr || op == opUshr) &&
-        counts[inputs[1]] >= 0) {
-      count = counts[inputs[1]];
+        constants[inputs[1]] >= 0 &&
+        constants[inputs[1]] <= 63) {
+      count = constants[inputs[1]];
       if (op == opShl) arithmetic = mShlImmediate;
       if (op == opShr) arithmetic = mShrImmediate;
       if (op == opUshr) arithmetic = mUshrImmediate;
@@ -380,7 +409,7 @@ List<MachineFunction> selectMachine(
       i = i + 1;
     }
     final List<MachineBlock> blocks = <MachineBlock>[];
-    final counts = List<int>.filled(function.valueTypes.length, -1);
+    final constants = List<int>.filled(function.valueTypes.length, -1);
     int b = 0;
     while (b < function.blocks.length) {
       final instructions = function.blocks[b].instructions;
@@ -390,9 +419,8 @@ List<MachineFunction> selectMachine(
         if (instruction.op == opInt &&
             instruction.value >= 0 &&
             instruction.effects == 0 &&
-            instruction.target >= 0 &&
-            instruction.target <= 63) {
-          counts[instruction.value] = instruction.target;
+            instruction.target >= 0) {
+          constants[instruction.value] = instruction.target;
         }
         i++;
       }
@@ -408,7 +436,7 @@ List<MachineFunction> selectMachine(
           block.instructions[i],
           function.valueTypes,
           reps,
-          counts,
+          constants,
           instructions,
         );
         i = i + 1;

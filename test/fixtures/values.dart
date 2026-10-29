@@ -1540,17 +1540,55 @@ void literalShifts(int value) {
 }
 
 void integerDivisions() {
+  int operand() {
+    print('division operand');
+    return -17;
+  }
+
+  print(operand() ~/ 1);
+  print(operand() % 1);
   const boundaries = <int>[
     -9223372036854775808,
     -9223372036854775807,
+    -17,
+    -16,
+    -15,
     -7,
+    -2,
     -1,
     0,
     1,
+    2,
     7,
+    15,
+    16,
+    17,
     9223372036854775807,
   ];
   for (final left in boundaries) {
+    print(<int>[
+      left ~/ 1,
+      left % 1,
+      left ~/ 2,
+      left % 2,
+      left ~/ 16,
+      left % 16,
+      left ~/ 2147483648,
+      left % 2147483648,
+      left ~/ 4294967296,
+      left % 4294967296,
+      left ~/ 4611686018427387904,
+      left % 4611686018427387904,
+      left << 64,
+      left >> 64,
+      left >>> 64,
+    ]);
+    try {
+      print(left ~/ 16);
+      print(left % 16);
+    } finally {
+      print(left);
+    }
     for (final right in boundaries) {
       if (right == 0) continue;
       dynamic boxed = left;
