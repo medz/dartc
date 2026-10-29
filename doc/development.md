@@ -72,6 +72,8 @@ Keep `CHANGELOG.md` newest first. Each version has a date, a comparison link and
 
 A GitHub Release starts with what the version enables, then expands its main capabilities with short runnable examples. Follow with upgrade steps, platform downloads, installation instructions and links to the full changelog and versioned specs. Patch releases can use a shorter form. Keep the release and changelog consistent without repeating every entry.
 
+Keep each prose paragraph, list item and blockquote paragraph on one source line so the page can wrap it to the available width. Preserve structural newlines in headings, lists, tables and code blocks.
+
 Explain breaking changes before the examples when users must act. State the affected versions and the concrete replacement or migration step. For compiler/runtime changes, identify the matching archive or bootstrap seed. Validate every example with the reference SDK and the native compiler before publication.
 
 Only include performance claims backed by the same task and necessary side effects; name the compared versions, platform and measurement scope. Keep raw measurements, build logs and validation records in `build/`. Internal refactors belong in release notes only when their user-visible effect can be explained. Language conformance and gaps remain owned by `specs/`.
