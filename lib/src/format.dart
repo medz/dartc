@@ -3,6 +3,8 @@ import 'x64.dart';
 import 'code.dart';
 import 'target.dart';
 import 'constant_data.dart';
+import 'format/image.dart';
+import 'format/macho.dart';
 import 'frame.dart';
 import 'host.dart';
 import 'ir.dart';
@@ -10,95 +12,6 @@ import 'layout.dart';
 import 'root_map.dart';
 import 'sign.dart';
 import 'types.dart';
-
-List<int> image = <int>[];
-
-void image32(int value) {
-  image.add(value & 255);
-  image.add((value >> 8) & 255);
-  image.add((value >> 16) & 255);
-  image.add((value >> 24) & 255);
-}
-
-void image64(int value) {
-  image32(value & 0xffffffff);
-  image32(value >> 32);
-}
-
-void imageName(String name, int width) {
-  int i = 0;
-  while (i < width) {
-    if (i < name.length) {
-      image.add(name.codeUnitAt(i));
-    } else {
-      image.add(0);
-    }
-    i = i + 1;
-  }
-}
-
-void imageZeros(int count) {
-  int i = 0;
-  while (i < count) {
-    image.add(0);
-    i = i + 1;
-  }
-}
-
-void imagePatch32(int offset, int value) {
-  image[offset] = value & 255;
-  image[offset + 1] = (value >> 8) & 255;
-  image[offset + 2] = (value >> 16) & 255;
-  image[offset + 3] = (value >> 24) & 255;
-}
-
-int alignImage(int value, int alignment) {
-  return (value + alignment - 1) & ~(alignment - 1);
-}
-
-void imageSegment(
-  String name,
-  int address,
-  int memorySize,
-  int offset,
-  int fileSize,
-  int protection,
-  int sections,
-) {
-  image32(0x19);
-  image32(72 + sections * 80);
-  imageName(name, 16);
-  image64(address);
-  image64(memorySize);
-  image64(offset);
-  image64(fileSize);
-  image32(protection);
-  image32(protection);
-  image32(sections);
-  image32(0);
-}
-
-void imageSection(
-  String name,
-  String segment,
-  int address,
-  int offset,
-  int size,
-  int flags,
-) {
-  imageName(name, 16);
-  imageName(segment, 16);
-  image64(address);
-  image64(size);
-  image32(offset);
-  image32(3);
-  image32(0);
-  image32(0);
-  image32(flags);
-  image32(0);
-  image32(0);
-  image32(0);
-}
 
 class _CaptureDescriptor {
   final List<int> references;
@@ -863,17 +776,12 @@ List<int> createMachOExecutable() {
   image32(0);
   imagePatch32(20, image.length - 32);
   imageZeros(codeOffset - image.length);
-  imageCode();
+  imageWords(codeWords, codeSize);
   imageZeros(constantOffset - image.length);
   imageConstants(constants, codeOffset, dataBase - base);
   imageZeros(textSize + 16 - image.length);
   signMachO(image, signatureCommand, linkeditCommand, textSize, 1);
   return image;
-}
-
-void image16(int value) {
-  image.add(value & 255);
-  image.add((value >> 8) & 255);
 }
 
 void imageElfSegment(
@@ -929,7 +837,7 @@ List<int> createElfExecutable() {
   imageElfSegment(1, 6, dataOffset, dataBase, 0, dataSize, 4096);
   imageElfSegment(0x6474e551, 6, 0, 0, 0, 0, 16);
   imageZeros(codeOffset - image.length);
-  imageCode();
+  imageWords(codeWords, codeSize);
   imageZeros(constantOffset - image.length);
   imageConstants(constants, codeOffset, dataBase - base);
   imageZeros(dataOffset - image.length);
@@ -1444,18 +1352,6 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
       );
     }
     function++;
-  }
-}
-
-void imageCode() {
-  var offset = 0;
-  while (offset + 4 <= codeSize) {
-    image32(codeWords[offset >> 2]);
-    offset += 4;
-  }
-  while (offset < codeSize) {
-    image.add((codeWords[offset >> 2] >>> ((offset & 3) * 8)) & 255);
-    offset++;
   }
 }
 

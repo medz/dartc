@@ -100,6 +100,8 @@ lib/src/
   frame.dart                                     已发射函数的代码区间与栈帧布局
   abi.dart, layout.dart, nogc.dart                 运行时绑定、布局与效果约束
   format.dart, library.dart, sign.dart             映像布局、文件封装与签名
+  format/image.dart                              映像缓冲区与字节写入
+  format/macho.dart                              共用 Mach-O 段与节编码
   runtime.dart                                   目标运行时与受信原语声明
   runtime/heap.dart                              分配区、空闲块与非移动标记清扫
   runtime/roots.dart                             显式根、栈根及对象边扫描
@@ -217,6 +219,8 @@ test/
 Machine IR 的比较保存语义条件，各后端映射为自己的条件码。分配器复用活跃区间和 spill 算法，将非引用值放入通用保存寄存器；ARM64 的不跨调用 double 也可使用独立浮点寄存器组。Ref/Tagged 仍在调用点保留可描述的根槽。Machine IR 明确调用者保存寄存器的 clobber，目标文件拥有可用寄存器集合，发码器负责参数排列、边界搬运及暂存。
 
 `code.dart` 拥有机器码、函数入口以及调用/数据地址修补记录；所有位置均为字节偏移。存储按 32 位 word 打包以控制 Dart List 的占用，编码器可写入单字节或完整 word。`format.dart` 统一布局常量、全局区及相对元数据，ARM64 与 x64 编码器分别修补地址指令。x64 使用 RIP 相对地址和 rel32 调用/跳转，超出范围时拒绝生成截断的位移。
+
+`format/image.dart` 拥有唯一的映像缓冲区和小端字节写入函数；打包 word 的写入显式接收数据及字节长度，不读取后端状态。`format/macho.dart` 拥有可执行文件与库共用的段、节编码。`library.dart` 直接导入这两个定义文件，不依赖可执行文件的常量布局与重定位实现。
 
 x64 可执行文件使用 ELF64、基础 x86-64/SSE2 指令和 Linux 原始系统调用；启动直接读取进程栈中的 argc/argv。内部调用、根、安全点和异常恢复的当前协议见 [runtime.md](runtime.md)。Linux 库输出与外部 FFI 入口仍未接入。
 

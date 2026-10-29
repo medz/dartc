@@ -1,5 +1,6 @@
 import 'code.dart';
-import 'format.dart';
+import 'format/image.dart';
+import 'format/macho.dart';
 import 'ir.dart';
 import 'sign.dart';
 
@@ -127,7 +128,7 @@ List<int> libraryObject() {
   imageSection('__text', '__TEXT', 0, codeOffset, codeSize, 0x80000400);
   librarySymtab(symbols, names);
   libraryVersion();
-  imageCode();
+  imageWords(codeWords, codeSize);
   imageZeros(symbols - image.length);
   librarySymbols(0);
   libraryStringTable();
@@ -266,7 +267,7 @@ List<int> libraryDylib(String outputPath) {
   image32(0);
   imagePatch32(20, image.length - 32);
   imageZeros(codeOffset - image.length);
-  imageCode();
+  imageWords(codeWords, codeSize);
   imageZeros(textSize - image.length);
   librarySymbols(codeOffset);
   libraryStringTable();
