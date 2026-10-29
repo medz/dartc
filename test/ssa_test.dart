@@ -363,8 +363,13 @@ void main(List<String> args) {
   if (!format) verifySsa(program);
   if (args[2] == 'valid' || format || allocation) {
     final selected = selectMachine(program, reachableFunctions(program));
-    allocateRegisters(selected);
-    if (allocation) corruptAllocation(selected, args[2]);
+    if (allocation) {
+      for (final function in selected) {
+        if (function.reachable)
+          allocateFunction(function, machineLiveness(function));
+      }
+      corruptAllocation(selected, args[2]);
+    }
     generateCode(selected);
     createExecutable();
   }

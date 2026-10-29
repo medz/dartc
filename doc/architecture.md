@@ -224,7 +224,7 @@ Machine IR 的比较保存语义条件，各后端映射为自己的条件码。
 
 `machine.dart` 只拥有机器表示、操作码和 IR 数据定义，不依赖 SSA、语义类型或运行时绑定。`select.dart` 负责从 SSA 选择机器指令、确定值表示并展开运行时调用；驱动直接调用其 `selectMachine` 入口，分配器和发码器直接使用 `machine.dart` 的定义。
 
-`liveness.dart` 拥有 Machine IR 的块级活跃性分析，分配器与调用点根表直接使用同一实现。分析只读取指令、控制流和值编号，不读取或修改寄存器分配结果；改变指令使用、定义或控制流后需要重新计算。
+`liveness.dart` 拥有 Machine IR 的块级活跃性分析。后端逐函数执行活跃性分析、物理位置分配及验证、调用点根表构造和发码；分配器与根表共享同一次分析结果，其生命周期限定在当前函数处理期间。位置分配保持指令、控制流和值编号不变。分析不读取或修改寄存器分配结果；改变指令使用、定义或控制流后需要重新计算。
 
 `code.dart` 拥有机器码、函数入口以及调用/数据地址修补记录；所有位置均为字节偏移。存储按 32 位 word 打包以控制 Dart List 的占用，编码器可写入单字节或完整 word。`constant_layout.dart` 根据已发码引用统一布局常量、全局区及相对元数据，补齐描述符、调用形状和栈帧名称所需的字符串。它返回字节偏移，不写映像缓冲区或选择文件头格式。`format.dart` 消费布局结果完成重定位和写出，ARM64 与 x64 编码器分别修补地址指令。x64 使用 RIP 相对地址和 rel32 调用/跳转，超出范围时拒绝生成截断的位移。
 
@@ -365,7 +365,7 @@ SsaProgram buildSsa(ResolvedProgram program);
 void optimize(SsaProgram program, OptimizationPolicy policy);
 void lowerRepresentations(SsaProgram program, TargetAbi abi);
 MachineProgram selectInstructions(SsaProgram program, TargetAbi abi);
-void allocateRegisters(MachineProgram program, TargetAbi abi);
+void allocateRegisters(MachineFunction function, List<LivenessBlock> live, TargetAbi abi);
 CodeBundle emitCode(MachineProgram program, TargetAbi abi);
 Uint8List writeObject(CodeBundle unit, TargetAbi abi);
 Uint8List writeArchive(List<ObjectFile> units, TargetAbi abi);

@@ -1,8 +1,10 @@
 import 'abi.dart';
+import 'allocate.dart';
 import 'code.dart';
 import 'frame.dart';
 import 'ir.dart';
 import 'layout.dart';
+import 'liveness.dart';
 import 'machine.dart';
 import 'root_map.dart';
 import 'target.dart';
@@ -345,13 +347,10 @@ void xEdge(
 
 void xFunction(
   MachineFunction function,
-  bool rootsEnabled,
+  List<CallRootMap> roots,
   bool framesEnabled,
   int number,
 ) {
-  final roots = rootsEnabled
-      ? buildCallRootMaps(function)
-      : const <CallRootMap>[];
   var nextRoot = 0;
   final start = codeSize;
   final allocation = function.allocation;
@@ -500,9 +499,15 @@ void generateX64(List<MachineFunction> program, int features) {
     i < program.length;
     i++
   ) {
-    if (program[i].reachable) {
+    final function = program[i];
+    if (function.reachable) {
+      final live = machineLiveness(function);
+      allocateFunction(function, live);
+      final rootMaps = roots
+          ? buildCallRootMaps(function, live)
+          : const <CallRootMap>[];
       functionOffsets[i] = codeSize;
-      xFunction(program[i], roots, frames, i);
+      xFunction(function, rootMaps, frames, i);
     }
   }
   for (final call in codeCalls)

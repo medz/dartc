@@ -1,5 +1,4 @@
 import '../target.dart';
-import '../allocate.dart';
 import '../diagnostic.dart';
 import '../emit.dart';
 import '../format.dart';
@@ -177,7 +176,6 @@ Never _compile(List<String> args) {
       f++;
     }
   }
-  allocateRegisters(program);
   generateCode(program);
   List<int> bytes = <int>[];
   if (imageKind == ImageKind.executable)

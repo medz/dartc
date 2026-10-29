@@ -71,8 +71,10 @@ CallRootMap _callRootMap(
   return result;
 }
 
-List<CallRootMap> buildCallRootMaps(MachineFunction function) {
-  final blocks = machineLiveness(function);
+List<CallRootMap> buildCallRootMaps(
+  MachineFunction function,
+  List<LivenessBlock> blocks,
+) {
   final slots = List<int>.filled(function.allocation.spillSlots, 0);
   final result = <CallRootMap>[];
   var b = 0;

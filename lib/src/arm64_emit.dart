@@ -1,4 +1,5 @@
 import 'arm64.dart';
+import 'allocate.dart';
 import 'code.dart';
 import 'target.dart';
 import 'abi.dart';
@@ -6,6 +7,7 @@ import 'frame.dart';
 import 'host.dart';
 import 'ir.dart';
 import 'layout.dart';
+import 'liveness.dart';
 import 'machine.dart';
 import 'root_map.dart';
 import 'types.dart';
@@ -378,12 +380,10 @@ List<int> emitUseCounts(MachineFunction function) {
 
 void emitFunction(
   MachineFunction function,
-  bool rootsEnabled,
+  List<CallRootMap> roots,
   bool framesEnabled,
   int number,
 ) {
-  List<CallRootMap> roots = const <CallRootMap>[];
-  if (rootsEnabled) roots = buildCallRootMaps(function);
   var nextRoot = 0;
   final start = codeSize;
   codeWord(0xa9bf7bfd);
@@ -582,9 +582,15 @@ void generateArm64(List<MachineFunction> program, int features) {
   int function = 0;
   if (imageKind != ImageKind.executable) function = 1;
   while (function < program.length) {
-    if (program[function].reachable) {
+    final current = program[function];
+    if (current.reachable) {
+      final live = machineLiveness(current);
+      allocateFunction(current, live);
+      final roots = rootsEnabled
+          ? buildCallRootMaps(current, live)
+          : const <CallRootMap>[];
       functionOffsets[function] = codeSize;
-      emitFunction(program[function], rootsEnabled, framesEnabled, function);
+      emitFunction(current, roots, framesEnabled, function);
     }
     function = function + 1;
   }

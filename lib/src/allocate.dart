@@ -224,8 +224,7 @@ int allocateSpillSlots(
   return count;
 }
 
-void allocateFunction(MachineFunction function) {
-  final List<LivenessBlock> blocks = machineLiveness(function);
+void allocateFunction(MachineFunction function, List<LivenessBlock> blocks) {
   final List<int> starts = List<int>.filled(function.reps.length, -1);
   final List<int> ends = List<int>.filled(function.reps.length, -1);
   final clobbers = allocateIntervals(function, blocks, starts, ends);
@@ -337,13 +336,5 @@ void verifyAllocation(MachineFunction function, List<LivenessBlock> blocks) {
     if (b == 0) {
       for (final value in function.arguments) define(value);
     }
-  }
-}
-
-void allocateRegisters(List<MachineFunction> program) {
-  int i = 0;
-  while (i < program.length) {
-    if (program[i].reachable) allocateFunction(program[i]);
-    i = i + 1;
   }
 }
