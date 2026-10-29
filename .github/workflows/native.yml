@@ -63,6 +63,9 @@ jobs:
       - run: dart test/ssa_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
       - run: dart test/program_benchmark_test.dart --compiler build/dartc-stage2
       - run: dart tool/fuzz.dart --compiler build/dartc-stage2 --count 12
+      - name: Verify native archive dependencies
+        if: inputs.package_release
+        run: dart test/package_release_test.dart --compiler build/dartc-stage2
       - name: Package and test the native release
         if: inputs.package_release && matrix.architecture == 'arm64'
         run: dart tool/package_release.dart --compiler build/dartc-stage2

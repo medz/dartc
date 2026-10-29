@@ -66,6 +66,17 @@ Use `dart tool/fuzz.dart --help` for explicit rejection and runtime-failure cont
 
 The [native self-hosting workflow](../.github/workflows/native.yml) is manually dispatched. Select ARM64, x64 or both with `architecture`, and the reference SDK version with `dart_sdk`. It bootstraps on the selected Linux hosts, runs differential, SSA verification, resource-measurement, program-benchmark and fuzz tests, and cross-compiles the compiler for macOS. Release packaging and verification are optional workflow inputs. `cross_ref` supplies matching Mac-built seeds named `dartc-linux` for ARM64 and `dartc-linux-x64` for x64; without a supplied seed, a new checkout uses the SDK for the initial cold bootstrap.
 
+## Native archives
+
+Build and check an archive with a native compiler from the same source revision:
+
+```sh
+dart tool/package_release.dart --compiler build/dartc-seed
+dart test/package_release_test.dart --compiler build/dartc-seed
+```
+
+Packaging follows the compiler's runtime and core-library source dependencies, including imports, exports and parts. These inputs must remain inside the checkout. The extracted compiler is checked through direct execution, PATH lookup and a symlink with the SDK removed from PATH. The regression test adds transitive dependencies and compiles against the extracted archive after removing its source checkout.
+
 ## Release notes
 
 Keep `CHANGELOG.md` newest first. Each version has a date, a comparison link and a short description of its user-visible scope. Group entries under Features, Fixes and Upgrade headings as needed; omit empty sections. Combine related commits into one behavior change, and describe fixes by their trigger and observable result.

@@ -1,5 +1,9 @@
 ## Unreleased
 
+### Fixes
+
+- Include transitive runtime and core-library source dependencies in native archives, so splitting library implementations into new files does not leave them out of the package.
+
 ### Performance
 
 - Eliminate lazy initialization checks for globals and static fields whose checked initial value is a zero storage word, including runtime allocation and GC state. Runtime sources follow the same initialization rules as application sources, preserving writes before first read.
