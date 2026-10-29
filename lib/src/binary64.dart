@@ -242,8 +242,8 @@ int? binary64IntegerLiteral(String text) {
   return sign | bits;
 }
 
-int? binary64Constant(String name) => switch (name) {
-  'nan' => binary64NaN,
+int? binary64Constant(String name, int nan) => switch (name) {
+  'nan' => nan,
   'infinity' => binary64Infinity,
   'negativeInfinity' => binary64Sign | binary64Infinity,
   'maxFinite' => 0x7fefffffffffffff,

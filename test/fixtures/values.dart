@@ -6187,6 +6187,12 @@ void doubleValues() {
     identical(negativeNaN, -double.nan),
     identical(<double>[double.nan], <double>[negativeNaN]),
     identical(FrozenFloat(double.nan, 1), FrozenFloat(negativeNaN, 1)),
+    identical(double.nan, 0 / 0),
+    identical(double.nan, double.infinity - double.infinity),
+    identical(double.nan, double.infinity + double.negativeInfinity),
+    identical(double.nan, 0 * double.infinity),
+    identical(<double>[double.nan], <double>[0 / 0]),
+    identical(FrozenFloat(double.nan, 1), FrozenFloat(0 / 0, 1)),
   ];
   print(nanIdentities);
   dynamic nanValue = double.parse('NaN');
@@ -6205,8 +6211,10 @@ void doubleValues() {
     infinity + -infinity,
     zero * infinity,
   ];
-  for (var i = 0; i < invalidResults.length; i++)
+  for (var i = 0; i < invalidResults.length; i++) {
     print(identical(invalidConstants[i], invalidResults[i]));
+    print(identical(double.nan, invalidResults[i]));
+  }
   print(1_2.5_0e-1_0);
 }
 

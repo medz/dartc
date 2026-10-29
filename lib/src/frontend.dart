@@ -24,6 +24,7 @@ import 'typing.dart';
 import 'scanner.dart';
 import 'source.dart';
 import 'symbols.dart';
+import 'target.dart';
 
 class ControlLabel {
   String name;
@@ -4222,7 +4223,10 @@ int feLowerMember(AstExpression expression) {
     if (declaration.source == sourceCore &&
         declaration.kind == symbolType &&
         declaration.target == tDouble) {
-      final value = binary64Constant(expression.text);
+      final value = binary64Constant(
+        expression.text,
+        targetX64 ? binary64NaN | binary64Sign : binary64NaN,
+      );
       if (value != null) {
         feOperand(opDouble, value);
         return tDouble;

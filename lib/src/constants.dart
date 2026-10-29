@@ -1761,7 +1761,10 @@ ConstantValue _evaluateConstant(
       if (declaration.source == sourceCore &&
           declaration.kind == symbolType &&
           declaration.target == tDouble) {
-        final value = binary64Constant(expression.text);
+        final value = binary64Constant(
+          expression.text,
+          targetX64 ? binary64NaN | binary64Sign : binary64NaN,
+        );
         if (value != null) return ConstantValue(tDouble, tDouble, value, '');
       }
     }
