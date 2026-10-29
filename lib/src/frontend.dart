@@ -618,6 +618,7 @@ void feCollectDeclarations(AstUnit unit) {
     );
     i++;
   }
+  checkImportPrefixes(feSymbols);
   checkExportConflicts(feSymbols);
   resolveTypeAliasDeclarations(feSymbols);
   feClassOrder = resolveClassInterfaces(feSymbols, unit.classes);
@@ -1187,6 +1188,7 @@ bool feHasPrefix(int token, String prefix) {
   if (typeParameterInScope(functions[feFunction].typeScope, prefix) >= 0)
     return false;
   var source = sourceLibrary(feSources, feTokens[token].source);
+  if (symbolWildcardPrefix(feSymbols, source, prefix)) return false;
   var imports = feSources.files[source].imports;
   var i = 0;
   while (i < imports.length) {

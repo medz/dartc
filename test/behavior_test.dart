@@ -1859,6 +1859,42 @@ void main() {
           "import 'dart:core' as both show print; import 'ordinary.dart' as both; "
           "import 'combined-export.dart' as combined; import 'dart:core' as core; "
           'void main() { core.print(both.print(5)); core.print(combined.print(5)); }',
+      'prefix-target.dart': 'int value() => 7; class Item { final int value; const Item(this.value); }',
+      'prefix-names.dart':
+          'int p = 3; class Type {} const int fixed = 4; int callable() => 5;',
+      'prefix-old.dart': "// @dart=3.6\nimport 'prefix-target.dart' as _; int oldPrefix() => _.value();",
+      'prefix-wildcards.dart': "// @dart=3.7\nimport 'math.dart' as _; import 'other.dart' as _; int wildcardImports() => 6;",
+      'prefix-scope.dart': r'''
+import 'prefix-names.dart';
+import 'prefix-target.dart' as p;
+import 'prefix-target.dart' as p;
+import 'math.dart' as unused;
+import 'other.dart' as unused;
+import 'prefix-old.dart';
+import 'prefix-wildcards.dart';
+part 'prefix-scope-part.dart';
+int local(p.Item p) => p.value;
+p echo<p>(p value) => value;
+class Holder { int p = 8; int get value => p; }
+void main() {
+  print(p.value());
+  print(local(p.Item(3)));
+  print(partValue());
+  {
+    final p = () => 5;
+    print(p());
+  }
+  print(Holder().value);
+  print(echo<int>(9));
+  print(oldPrefix());
+  print(wildcardImports());
+}
+''',
+      'prefix-scope-part.dart':
+          "part of 'prefix-scope.dart'; int partValue() => p.Item(4).value;",
+      'prefix-part-conflict.dart': "import 'prefix-target.dart' as p; part 'prefix-part-conflict-part.dart'; void main() {}",
+      'prefix-part-conflict-part.dart':
+          "part of 'prefix-part-conflict.dart'; int p = 1;",
       'core-annotations-user.dart':
           'class pragma { final int code; const pragma(this.code); }',
       'core-annotations-export.dart':
@@ -2189,6 +2225,7 @@ void main() {
     await compare(File('${temporary.path}/priority.dart'), []);
     await compare(File('${temporary.path}/export-priority.dart'), []);
     await compare(File('${temporary.path}/prefix-priority.dart'), []);
+    await compare(File('${temporary.path}/prefix-scope.dart'), []);
     await compare(File('${temporary.path}/core-annotations-imports.dart'), []);
     await compare(File('${temporary.path}/core-annotations-implicit.dart'), []);
     await compare(File('${temporary.path}/core-annotations-own.dart'), []);
@@ -3223,6 +3260,41 @@ void main() {
         checkSdk: true,
       );
     }
+    final rejectedPrefixes = [
+      for (final declaration in [
+        'int p = 1;',
+        'int p() => 1;',
+        'int get p => 1;',
+        'set p(int value) {}',
+        'class p {}',
+        'typedef p = int;',
+        'enum p { one }',
+      ])
+        "import 'prefix-target.dart' as p; $declaration void main() {}",
+      for (final use in ['print(p);', 'p = 5;', 'p++;'])
+        "import 'prefix-names.dart'; import 'prefix-target.dart' as p; void main() { $use }",
+      "import 'prefix-target.dart' as p; import 'prefix-names.dart'; void main() { print(p); }",
+      "import 'prefix-names.dart'; import 'prefix-target.dart' as Type; Type? value; void main() {}",
+      "import 'prefix-names.dart'; import 'prefix-target.dart' as fixed; const value = fixed; void main() {}",
+      "import 'prefix-names.dart'; import 'prefix-target.dart' as callable; void main() { callable(); }",
+      "import 'prefix-target.dart' as StringBuffer; void main() { StringBuffer(); }",
+      "import 'prefix-target.dart' as _private; int _private = 1; void main() {}",
+      "// @dart=3.7\nimport 'prefix-target.dart' as _; void main() { print(_.value()); }",
+      "// @dart=3.7\nimport 'prefix-target.dart' as _; _.Item? value; void main() {}",
+      "// @dart=3.7\nimport 'prefix-target.dart' as _; const value = _.Item(1); void main() {}",
+      "// @dart=3.7\nimport 'prefix-target.dart' as _; int _ = 1; void main() {}",
+      "// @dart=3.6\nimport 'prefix-target.dart' as _; int _ = 1; void main() {}",
+      "import 'math.dart' as p; import 'other.dart' as p; void main() { p.shared(); }",
+    ];
+    for (var i = 0; i < rejectedPrefixes.length; i++) {
+      final invalid = File('${temporary.path}/rejected-prefix-$i.dart')
+        ..writeAsStringSync(rejectedPrefixes[i]);
+      await reject(invalid, checkSdk: true);
+    }
+    await reject(
+      File('${temporary.path}/prefix-part-conflict.dart'),
+      checkSdk: true,
+    );
     final rejectedConstructorValues = [
       'class C{C(int x);}void unused(){var f=C.new;f("bad");}void main(){}',
       'class C{C(int x);}void unused(){var f=C.new;f();}void main(){}',

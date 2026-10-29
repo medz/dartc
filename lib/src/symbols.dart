@@ -96,6 +96,26 @@ int symbolOwnDeclaration(SymbolTable table, int source, String name) {
   return -1;
 }
 
+void checkImportPrefixes(SymbolTable table) {
+  final program = table.program;
+  for (var source = 0; source < program.files.length; source++) {
+    final file = program.files[source];
+    for (final dependency in file.imports) {
+      if (!dependency.exported &&
+          dependency.prefix != '' &&
+          symbolOwnDeclaration(table, source, dependency.prefix) >= 0)
+        sourceError(
+          program,
+          file.tokens[dependency.start],
+          'import prefix conflicts with declaration ' + dependency.prefix,
+        );
+    }
+  }
+}
+
+bool symbolWildcardPrefix(SymbolTable table, int source, String prefix) =>
+    prefix == '_' && sourceVersionAtLeast(table.program, source, 3, 7);
+
 int declareSymbol(
   SymbolTable table,
   int source,
@@ -309,6 +329,7 @@ int _resolveSymbol(
   bool writing,
 ) {
   source = sourceLibrary(table.program, source);
+  if (symbolWildcardPrefix(table, source, prefix)) return -1;
   if (prefix == '') {
     var direct = symbolOwnDeclaration(table, source, name);
     if (direct >= 0) return direct;
@@ -320,6 +341,8 @@ int _resolveSymbol(
     var i = 0;
     while (i < imports.length) {
       var dependency = imports[i];
+      if (!dependency.exported && prefix == '' && dependency.prefix == name)
+        return -1;
       if (!dependency.exported && dependency.target == sourceCore) {
         explicitCore = true;
       }
