@@ -887,6 +887,7 @@ void main() {
       throw StateError('Entry argument checks must fail before the main body.');
     }
     final failingValues = [
+      "class C { dynamic operator <(int other) { print('operator'); return 1; } } void main() { print('before'); if (C() case < 2) print('matched'); print('after'); }",
       for (final operation in ['~/', '%'])
         'int zero() => 0; void main() { print("before"); print(1 $operation zero()); print("after"); }',
       for (final operation in [
@@ -3396,6 +3397,18 @@ void main() {
       ),
     );
     final rejectedOperators = [
+      'class C { static const dynamic limit = 1; bool operator <(num other) => true; } void unused(C value) { if (value case < .limit) {} } void main() {}',
+      'const dynamic wrong = "wrong"; class C { bool operator <(int other) => true; } void unused(C value) { if (value case < wrong) {} } void main() {}',
+      'const dynamic number = 1; class C { bool operator <(double other) => true; } void unused(C value) { if (value case < number) {} } void main() {}',
+      'class C {} void unused(C value) { if (value case < 1) {} } void main() {}',
+      'class C { bool operator <(int value) => true; } void unused(C? value) { if (value case < 1) {} } void main() {}',
+      'class C { bool operator <(int value) => true; } void unused(C value) { if (value case < "bad") {} } void main() {}',
+      'class C { int operator <(int value) => 1; } void unused(C value) { if (value case < 1) {} } void main() {}',
+      'class C { bool? operator <(int value) => true; } void unused(C value) { if (value case < 1) {} } void main() {}',
+      'class C { void operator <(int value) {} } void unused(C value) { if (value case < 1) {} } void main() {}',
+      'int limit = 1; class C { bool operator <(int value) => true; } void unused(C value) { if (value case < limit) {} } void main() {}',
+      'class A { const A(); } class C { bool operator <(A value) => true; } void unused(C value) { if (value case < A()) {} } void main() {}',
+      'class A { const A(); int call(int value) => value; } class C { bool operator <(int Function(int) value) => true; } void unused(C value) { if (value case < const A()) {} } void main() {}',
       'class C { void unused() { super[0] = 1; } } void main() {}',
       'class B { int operator [](int key) => key; } class C extends B { void unused() { super[0] = 1; } } void main() {}',
       'class B { void operator []=(int key, int value) {} } class C extends B { void unused() { super[0] += 1; } } void main() {}',

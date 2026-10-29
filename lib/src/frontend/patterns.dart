@@ -32,6 +32,7 @@ class CheckedPattern {
   int variableType = -1;
   bool castInput = false;
   ConstantValue? constant;
+  int operatorMethod = -1;
   // Ordinals of enum values matched when the pattern does not cover the whole
   // input type.
   List<int> enumValues = const <int>[];
@@ -320,23 +321,59 @@ CheckedPattern checkPattern(
     }
   } else if (kind == patternConstant || kind == patternRelational) {
     var expression = syntax.constant!;
-    // SDK 3.13 also supplies the matched namespace for <, <=, > and >=.
+    var argument = kind == patternConstant
+        ? input
+        : syntax.text == '==' || syntax.text == '!='
+        ? nullableType(tObject)
+        : typingBinaryContext(syntax.text, input, -1);
+    final bound = typeBound(input);
     if (kind == patternRelational &&
+        syntax.text != '==' &&
+        syntax.text != '!=' &&
+        typeIsClass(bound)) {
+      final member = readMember(bound, syntax.text, syntax.token);
+      if (member.kind != memberReadMethod)
+        patternError(
+          context,
+          syntax.token,
+          'relational pattern requires an operator',
+        );
+      final signature = functionSignature(member.type);
+      if (!typingCondition(signature.result))
+        patternError(
+          context,
+          syntax.token,
+          'relational operator must return bool',
+        );
+      result.operatorMethod = member.target;
+      argument = signature.parameters[0];
+    }
+    // SDK 3.13 also supplies the matched namespace for <, <=, > and >=.
+    final shorthand =
+        kind == patternRelational &&
         expression.kind == astStaticShorthand &&
-        expression.text != '()')
+        expression.text != '()';
+    if (shorthand)
       expression = resolveStaticShorthand(context.symbols, expression, input);
     var value = evaluateConstant(
       context,
       expression,
-      kind == patternConstant
-          ? input
-          : syntax.text == '==' || syntax.text == '!='
-          ? nullableType(tObject)
-          : typingBinaryContext(syntax.text, input, -1),
+      argument,
       syntax.constantContext,
     );
     result.constant = value;
+    if (result.operatorMethod >= 0 &&
+        (!typingAssignable(value.type, argument) ||
+            !typeIsSubtype(constantValueType(value), argument)))
+      patternError(context, syntax.token, 'invalid relational pattern operand');
+    // CFE also checks a dynamic shorthand constant against its lookup context.
+    if (result.operatorMethod >= 0 &&
+        shorthand &&
+        value.type == tDynamic &&
+        !typeIsSubtype(constantValueType(value), input))
+      patternError(context, syntax.token, 'invalid relational shorthand value');
     if (kind == patternRelational &&
+        result.operatorMethod < 0 &&
         typingBinary(
               syntax.text,
               input == tVoid ? tDynamic : input,

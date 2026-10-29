@@ -8157,8 +8157,17 @@ void feLowerPattern(
       comparison = feCombine('==', constantType, input, token);
     } else {
       fePatternRead(value, input, token);
-      feConstantValue(constant, constantType, token);
-      comparison = feCombine(syntax.text, input, constantType, token);
+      final method = pattern.operatorMethod;
+      if (method >= 0) {
+        final info = functions[method];
+        feConvertValue(input, info.parameterTypes[0], token);
+        feConstantValue(constant, info.parameterTypes[1], token);
+        feCall(feOperatorTarget(method), 2);
+        comparison = info.result;
+      } else {
+        feConstantValue(constant, constantType, token);
+        comparison = feCombine(syntax.text, input, constantType, token);
+      }
     }
     feBooleanValue(comparison, token);
     failed.add(feJump(opJumpFalse));

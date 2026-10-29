@@ -4866,6 +4866,124 @@ int switchStep(int n) {
   return n;
 }
 
+abstract class PatternOrder {
+  bool operator <(num other);
+}
+
+class RelationalPatternValue implements PatternOrder {
+  final int value;
+  const RelationalPatternValue(this.value);
+  static const limit = 5;
+  bool operator <(num other) {
+    switchStep(2);
+    return value < other;
+  }
+
+  bool operator <=(int other) {
+    switchStep(3);
+    return value <= other;
+  }
+
+  dynamic operator >(int other) {
+    switchStep(4);
+    return value > other;
+  }
+
+  bool operator >=(int other) {
+    switchStep(5);
+    return value >= other;
+  }
+}
+
+class ReversedPatternValue extends RelationalPatternValue {
+  const ReversedPatternValue(super.value);
+  bool operator <(num other) {
+    switchStep(6);
+    return value > other;
+  }
+}
+
+class FloatPatternValue {
+  bool operator <(double other) => other == 1.0;
+}
+
+class FunctionPatternValue {
+  bool operator <(int Function(int) other) => other(2) == 3;
+}
+
+class NeverPatternValue {
+  Never operator <(int other) => throw 'relation';
+}
+
+class SelfPatternValue {
+  const SelfPatternValue();
+  static const dynamic limit = SelfPatternValue();
+  bool operator <(SelfPatternValue other) => true;
+}
+
+RelationalPatternValue relationalReceiver() {
+  switchStep(1);
+  return RelationalPatternValue(4);
+}
+
+int relationalDispatch(RelationalPatternValue value) => switch (value) {
+  < 5 => 1,
+  _ => 0,
+};
+int relationalInterface(PatternOrder value) => switch (value) {
+  < 5 => 1,
+  _ => 0,
+};
+int relationalGeneric<T extends RelationalPatternValue>(T value) =>
+    switch (value) {
+      < 5 => 1,
+      _ => 0,
+    };
+int relationalIncrement(int value) => value + 1;
+
+void relationalPatterns() {
+  switchTrace = 0;
+  if (relationalReceiver() case >= 3 && < .limit) print('range');
+  print(switchTrace);
+  switchTrace = 0;
+  if (RelationalPatternValue(0) case >= 3 && < 5) print('skipped');
+  print(switchTrace);
+  switchTrace = 0;
+  if (RelationalPatternValue(1) case > 5 || <= 2) print('alternative');
+  print(switchTrace);
+  switchTrace = 0;
+  switch (RelationalPatternValue(2)) {
+    case <= 3 when switchStep(7) == 7:
+      print('guarded');
+    default:
+      print('default');
+  }
+  print(switchTrace);
+  print(relationalDispatch(RelationalPatternValue(2)));
+  print(relationalDispatch(ReversedPatternValue(8)));
+  print(relationalDispatch(ReversedPatternValue(2)));
+  print(relationalInterface(ReversedPatternValue(8)));
+  print(relationalGeneric(ReversedPatternValue(8)));
+  const dynamic limit = 5;
+  if (RelationalPatternValue(2) case < limit) print('dynamic constant');
+  if (SelfPatternValue() case < .limit) print('dynamic shorthand');
+  if (<RelationalPatternValue>[RelationalPatternValue(2)] case [< 3])
+    print('nested');
+  print(switch (FloatPatternValue()) {
+    < 1 => 1,
+    _ => 0,
+  });
+  print(switch (FunctionPatternValue()) {
+    < relationalIncrement => 1,
+    _ => 0,
+  });
+  try {
+    if (NeverPatternValue() case < 1) print('unreachable');
+  } catch (error) {
+    print(error);
+  }
+}
+
 bool switchGuard(int n) {
   switchStep(n);
   return n == 2;
@@ -7073,6 +7191,7 @@ void main(List<String> args) {
   constObjects();
   functionValues();
   switchExpressions();
+  relationalPatterns();
   genericAliases();
   legacyAliases();
   bufferValues();
