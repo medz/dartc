@@ -3,6 +3,8 @@ import 'binary64.dart';
 import 'host.dart';
 import 'runtime/exceptions.dart';
 import 'runtime/frames.dart';
+import 'runtime/heap.dart';
+import 'runtime/roots.dart';
 
 external int nativeLoad64(int p);
 external int nativeStore64(int p, int value);
@@ -35,12 +37,6 @@ StackTrace rtCaughtTrace() => rtExceptionTrace();
 int rtClearException() => rtClearPendingException();
 
 const int rtAbiVersion = 17;
-const int rtArenaHeaderBytes = 48;
-
-int rtArenaHead = 0;
-int rtArenaNext = 0;
-int rtArenaEnd = 0;
-
 int rtHostTarget() {
   return nativeTarget();
 }
@@ -88,68 +84,6 @@ int rtMap(int bytes) {
 int rtUnmap(int address, int bytes) {
   if (bytes == 0) return 0;
   return rtSyscall(73, address, bytes, 0, 0, 0, 0);
-}
-
-// Raw arena record: next0/mapBytes8/usedBytes16/bitmap24/bitmapBytes32.
-@pragma('dartc:no-gc')
-int rtArenaOpen(int size) {
-  var capacity = 8388608;
-  if (size + rtArenaHeaderBytes > capacity) {
-    capacity = (size + rtArenaHeaderBytes + 16383) & -16384;
-  }
-  var arena = rtMap(capacity);
-  var bitmapBytes = (((capacity - rtArenaHeaderBytes) ~/ 16 + 31) ~/ 32) * 8;
-  var bitmap = rtMap(bitmapBytes);
-  nativeStore64(arena, rtArenaHead);
-  nativeStore64(arena + 8, capacity);
-  nativeStore64(arena + 16, 0);
-  nativeStore64(arena + 24, bitmap);
-  nativeStore64(arena + 32, bitmapBytes);
-  rtArenaHead = arena;
-  rtArenaNext = arena + rtArenaHeaderBytes;
-  rtArenaEnd = arena + capacity;
-  return 0;
-}
-
-@pragma('dartc:managed-allocate')
-@pragma('dartc:no-gc')
-int rtAlloc(int bytes) {
-  var size = (bytes + 15) & -16;
-  if (rtArenaNext + size > rtArenaEnd || rtArenaNext == 0) rtArenaOpen(size);
-  var result = rtArenaNext;
-  var arena = rtArenaHead;
-  var cell = (result - arena - rtArenaHeaderBytes) ~/ 16;
-  var word = nativeLoad64(arena + 24) + (cell ~/ 32) * 8;
-  nativeStore64(word, nativeLoad64(word) | (1 << ((cell * 2) & 63)));
-  rtArenaNext = result + size;
-  nativeStore64(arena + 16, rtArenaNext - arena - rtArenaHeaderBytes);
-  return result;
-}
-
-int rtGrowBuffer(int address, int oldBytes, int newBytes) {
-  var oldSize = (oldBytes + 15) & -16;
-  var newSize = (newBytes + 15) & -16;
-  if (address != 0 &&
-      address + oldSize == rtArenaNext &&
-      address + newSize <= rtArenaEnd) {
-    rtArenaNext = address + newSize;
-    nativeStore64(
-      rtArenaHead + 16,
-      rtArenaNext - rtArenaHead - rtArenaHeaderBytes,
-    );
-    return address;
-  }
-  var result = rtAlloc(newBytes);
-  var offset = 0;
-  while (offset + 8 <= oldBytes) {
-    nativeStore64(result + offset, nativeLoad64(address + offset));
-    offset = offset + 8;
-  }
-  while (offset < oldBytes) {
-    nativeStore8(result + offset, nativeLoad8(address + offset));
-    offset = offset + 1;
-  }
-  return result;
 }
 
 int rtCStringBytes = 0;
@@ -309,6 +243,8 @@ int rtStringSubstring(int value, int start, int end) {
   if (start < 0 || start > length || end < start || end > length) {
     return rtStringRangeError();
   }
+  final mark = rtRootMark();
+  rtRootPush(value, storageRef);
   var result = rtStringAllocate(rtObjectDescriptor(value), end - start);
   var i = start;
   while (i < end) {
@@ -318,6 +254,7 @@ int rtStringSubstring(int value, int start, int end) {
     );
     i = i + 1;
   }
+  rtRootRestore(mark);
   return result;
 }
 
@@ -477,6 +414,8 @@ int rtListNew(int typeRef) {
   var metadata = nativeMetadataAddress(metadataLists);
   var descriptor =
       metadata + nativeLoad64(metadata + metadataListDescriptorOffset);
+  final mark = rtRootMark();
+  rtRootPush(typeRef, storageRef);
   var result = rtAlloc(nativeLoad64(descriptor + descriptorSizeOffset));
   nativeStore64(result, descriptor);
   nativeStore64(result + objectFlagsOffset, 0);
@@ -484,6 +423,7 @@ int rtListNew(int typeRef) {
   nativeStore64(result + listCapacityOffset, 0);
   nativeStore64(result + listBackingOffset, 0);
   nativeStore64(result + listTypeOffset, typeRef);
+  rtRootRestore(mark);
   return result;
 }
 
@@ -537,7 +477,11 @@ int rtListGet(int list, int index, int expectedType) {
   var type = nativeLoad64(list + listTypeOffset);
   var actualType = type + nativeLoad64(type + typeArgumentOffset);
   if (actualType == expectedType) return value;
-  return rtValueCast(rtValueBox(value, actualType), expectedType);
+  final mark = rtRootMark();
+  rtRootPush(expectedType, storageRef);
+  final result = rtValueCast(rtValueBox(value, actualType), expectedType);
+  rtRootRestore(mark);
+  return result;
 }
 
 int rtListSet(int list, int index, int value, int sourceType) {
@@ -760,53 +704,56 @@ int rtListFromData(int data) {
   if (length == 0) return rtListFreeze(result);
   var mark = rtRootMark();
   rtRootPush(result, storageRef);
-  var backing = rtListBackingNew(type, length);
-  nativeStore64(result + listCapacityOffset, length);
-  nativeStore64(result + listBackingOffset, backing);
-  var element = rtTypeArgument(type);
-  var representation = nativeLoad64(element + typeValueRepOffset);
-  var kind = nativeLoad64(element + typeKindOffset);
-  if (kind == typeKindNullable) {
-    kind = nativeLoad64(rtTypeArgument(element) + typeKindOffset);
-  }
-  var stride = 8;
-  if (representation == storageTagged) stride = constantListTaggedEntryBytes;
-  var entry = data + constantListDataOffset;
-  var index = 0;
-  while (index < length) {
-    var value = nativeLoad64(entry);
-    if (representation == storageRef) {
-      if (value != 0) {
-        if (kind == typeKindList || kind == typeKindClass)
+  try {
+    var backing = rtListBackingNew(type, length);
+    nativeStore64(result + listCapacityOffset, length);
+    nativeStore64(result + listBackingOffset, backing);
+    var element = rtTypeArgument(type);
+    var representation = nativeLoad64(element + typeValueRepOffset);
+    var kind = nativeLoad64(element + typeKindOffset);
+    if (kind == typeKindNullable) {
+      kind = nativeLoad64(rtTypeArgument(element) + typeKindOffset);
+    }
+    var stride = 8;
+    if (representation == storageTagged) stride = constantListTaggedEntryBytes;
+    var entry = data + constantListDataOffset;
+    var index = 0;
+    while (index < length) {
+      var value = nativeLoad64(entry);
+      if (representation == storageRef) {
+        if (value != 0) {
+          if (kind == typeKindList || kind == typeKindClass)
+            value = nativeCall0(entry + value);
+          else
+            value = entry + value;
+        }
+      } else if (representation == storageTagged) {
+        var actual = value;
+        value = nativeLoad64(entry + 8);
+        if (actual == typeKindInt)
+          value = rtBoxInt(value);
+        else if (actual == typeKindDouble)
+          value = rtBoxDouble(value);
+        else if (actual == typeKindBool)
+          value = rtBoxBool(value);
+        else if (actual == typeKindNull)
+          value = 0;
+        else if (actual == typeKindList || actual == typeKindClass)
           value = nativeCall0(entry + value);
         else
           value = entry + value;
       }
-    } else if (representation == storageTagged) {
-      var actual = value;
-      value = nativeLoad64(entry + 8);
-      if (actual == typeKindInt)
-        value = rtBoxInt(value);
-      else if (actual == typeKindDouble)
-        value = rtBoxDouble(value);
-      else if (actual == typeKindBool)
-        value = rtBoxBool(value);
-      else if (actual == typeKindNull)
-        value = 0;
-      else if (actual == typeKindList || actual == typeKindClass)
-        value = nativeCall0(entry + value);
-      else
-        value = entry + value;
+      nativeStore64(backing + arrayDataOffset + index * 8, value);
+      nativeStore64(backing + arrayLengthOffset, index + 1);
+      nativeStore64(result + listLengthOffset, index + 1);
+      entry = entry + stride;
+      index = index + 1;
     }
-    nativeStore64(backing + arrayDataOffset + index * 8, value);
-    nativeStore64(backing + arrayLengthOffset, index + 1);
-    nativeStore64(result + listLengthOffset, index + 1);
-    entry = entry + stride;
-    index = index + 1;
+    rtListFreeze(result);
+    return result;
+  } finally {
+    rtRootRestore(mark);
   }
-  rtListFreeze(result);
-  rtRootRestore(mark);
-  return result;
 }
 
 int rtStringFromCodes(int codes) {
@@ -828,6 +775,8 @@ int rtStringFromCodes(int codes) {
     if (code > 65535) units = units + 1;
     i = i + 1;
   }
+  final mark = rtRootMark();
+  rtRootPush(codes, storageRef);
   var result = rtStringNew(units);
   i = 0;
   var count = 0;
@@ -851,6 +800,7 @@ int rtStringFromCodes(int codes) {
     i = i + 1;
   }
   nativeStore64(result + stringLengthOffset, count);
+  rtRootRestore(mark);
   return result;
 }
 
@@ -1280,37 +1230,42 @@ int rtObjectFromData(int data) {
   var result = rtObjectNew(descriptor);
   var mark = rtRootMark();
   rtRootPush(result, storageRef);
-  var bitmap = nativeLoad64(descriptor + descriptorTaggedBitmapOffset);
-  if (bitmap != 0) bitmap = descriptor + bitmap;
-  var entry = data + constantObjectDataOffset;
-  var index = 0;
-  while (index < count) {
-    var kind = nativeLoad64(entry);
-    var value = nativeLoad64(entry + 8);
-    if (kind == typeKindInt || kind == typeKindDouble || kind == typeKindBool) {
-      if (bitmap != 0 &&
-          (nativeLoad64(bitmap + (index ~/ 64) * 8) & (1 << (index & 63))) !=
-              0) {
-        if (kind == typeKindInt)
-          value = rtBoxInt(value);
-        else if (kind == typeKindDouble)
-          value = rtBoxDouble(value);
-        else
-          value = rtBoxBool(value);
+  try {
+    var bitmap = nativeLoad64(descriptor + descriptorTaggedBitmapOffset);
+    if (bitmap != 0) bitmap = descriptor + bitmap;
+    var entry = data + constantObjectDataOffset;
+    var index = 0;
+    while (index < count) {
+      var kind = nativeLoad64(entry);
+      var value = nativeLoad64(entry + 8);
+      if (kind == typeKindInt ||
+          kind == typeKindDouble ||
+          kind == typeKindBool) {
+        if (bitmap != 0 &&
+            (nativeLoad64(bitmap + (index ~/ 64) * 8) & (1 << (index & 63))) !=
+                0) {
+          if (kind == typeKindInt)
+            value = rtBoxInt(value);
+          else if (kind == typeKindDouble)
+            value = rtBoxDouble(value);
+          else
+            value = rtBoxBool(value);
+        }
+      } else if (kind == typeKindNull) {
+        value = 0;
+      } else if (kind == typeKindString || kind == typeKindFunction) {
+        value = entry + value;
+      } else if (kind == typeKindList || kind == typeKindClass) {
+        value = nativeCall0(entry + value);
       }
-    } else if (kind == typeKindNull) {
-      value = 0;
-    } else if (kind == typeKindString || kind == typeKindFunction) {
-      value = entry + value;
-    } else if (kind == typeKindList || kind == typeKindClass) {
-      value = nativeCall0(entry + value);
+      nativeStore64(result + objectHeaderBytes + index * 8, value);
+      entry = entry + constantObjectEntryBytes;
+      index = index + 1;
     }
-    nativeStore64(result + objectHeaderBytes + index * 8, value);
-    entry = entry + constantObjectEntryBytes;
-    index = index + 1;
+    return result;
+  } finally {
+    rtRootRestore(mark);
   }
-  rtRootRestore(mark);
-  return result;
 }
 
 int rtObjectGet(int object, int index) {
@@ -2010,6 +1965,8 @@ int rtStringFromParts(int parts) {
     length = length + rtStringLength(rtListRawGet(parts, i));
     i = i + 1;
   }
+  final mark = rtRootMark();
+  rtRootPush(parts, storageRef);
   var result = rtStringNew(length);
   var position = 0;
   i = 0;
@@ -2027,6 +1984,7 @@ int rtStringFromParts(int parts) {
     }
     i = i + 1;
   }
+  rtRootRestore(mark);
   return result;
 }
 
@@ -2037,9 +1995,11 @@ int rtValueFormat(int value, int handleType) {
   }
   var mark = rtRootMark();
   rtRootPush(value, storageTagged);
-  var result = rtValueFormatCore(value, handleType, kind);
-  rtRootRestore(mark);
-  return result;
+  try {
+    return rtValueFormatCore(value, handleType, kind);
+  } finally {
+    rtRootRestore(mark);
+  }
 }
 
 int rtObjectDefaultString(int value) {
@@ -2096,38 +2056,40 @@ int rtValueFormatCore(int value, int handleType, int kind) {
     i = i + 1;
   }
   var wordType = rtTypeArgument(handleType);
-  rtListAdd(active, value, wordType);
-  var parts = rtListNew(handleType);
-  rtRootPush(parts, storageRef);
-  var opening = rtStringFromWords(91, 0, 0, 0);
-  rtRootPush(opening, storageRef);
-  rtListAdd(parts, opening, wordType);
-  var separator = rtStringFromWords(0x202c, 0, 0, 0);
-  rtRootPush(separator, storageRef);
-  var elementType = rtListElementType(value);
-  i = 0;
-  while (i < length) {
-    var mark = rtRootMark();
-    if (i != 0) rtListAdd(parts, separator, wordType);
-    var element = rtValueBox(rtListRawGet(value, i), elementType);
-    rtRootPush(element, storageTagged);
-    var rendered = rtValueFormat(element, handleType);
-    rtRootPush(rendered, storageRef);
-    if (nativeLoad64(value + listLengthOffset) != length) {
-      return rtListModificationError();
+  try {
+    rtListAdd(active, value, wordType);
+    var parts = rtListNew(handleType);
+    rtRootPush(parts, storageRef);
+    var opening = rtStringFromWords(91, 0, 0, 0);
+    rtRootPush(opening, storageRef);
+    rtListAdd(parts, opening, wordType);
+    var separator = rtStringFromWords(0x202c, 0, 0, 0);
+    rtRootPush(separator, storageRef);
+    var elementType = rtListElementType(value);
+    i = 0;
+    while (i < length) {
+      var mark = rtRootMark();
+      if (i != 0) rtListAdd(parts, separator, wordType);
+      var element = rtValueBox(rtListRawGet(value, i), elementType);
+      rtRootPush(element, storageTagged);
+      var rendered = rtValueFormat(element, handleType);
+      rtRootPush(rendered, storageRef);
+      if (nativeLoad64(value + listLengthOffset) != length) {
+        return rtListModificationError();
+      }
+      rtListAdd(parts, rendered, wordType);
+      rtRootRestore(mark);
+      i = i + 1;
     }
-    rtListAdd(parts, rendered, wordType);
-    rtRootRestore(mark);
-    i = i + 1;
+    var closing = rtStringFromWords(93, 0, 0, 0);
+    rtRootPush(closing, storageRef);
+    rtListAdd(parts, closing, wordType);
+    return rtStringFromParts(parts);
+  } finally {
+    var backing = nativeLoad64(active + listBackingOffset);
+    nativeStore64(backing + arrayLengthOffset, depth);
+    nativeStore64(active + listLengthOffset, depth);
   }
-  var closing = rtStringFromWords(93, 0, 0, 0);
-  rtRootPush(closing, storageRef);
-  rtListAdd(parts, closing, wordType);
-  var result = rtStringFromParts(parts);
-  var backing = nativeLoad64(active + listBackingOffset);
-  nativeStore64(backing + arrayLengthOffset, depth);
-  nativeStore64(active + listLengthOffset, depth);
-  return result;
 }
 
 int rtValueToString(int value) {
@@ -2136,355 +2098,4 @@ int rtValueToString(int value) {
   return rtValueFormat(value, handleType);
 }
 
-Never rtRootFailure() => rtHostExit(70);
-
 Never rtPatternMatchFailure() => rtValueTypeError();
-
-int rtRootValues = 0;
-int rtRootCount = 0;
-int rtRootCapacity = 0;
-int rtGlobalRoots = 0;
-int rtGlobalRootCount = 0;
-int rtGlobalRootCapacity = 0;
-
-@pragma('dartc:no-gc')
-int rtRootBuffer(int previous, int count, int capacity) {
-  var buffer = rtMap(capacity * 16);
-  var i = 0;
-  while (i < count) {
-    nativeStore64(buffer + i * 16, nativeLoad64(previous + i * 16));
-    nativeStore64(buffer + i * 16 + 8, nativeLoad64(previous + i * 16 + 8));
-    i = i + 1;
-  }
-  return buffer;
-}
-
-@pragma('dartc:no-gc')
-int rtRootMark() {
-  return rtRootCount;
-}
-
-@pragma('dartc:no-gc')
-int rtRootPush(int value, int kind) {
-  if (kind == storageRef) {
-    if (value == 0) return 0;
-  } else if (kind == storageTagged) {
-    if (value <= valueTrue || (value & 1) != 0) return 0;
-  } else {
-    return rtRootFailure();
-  }
-  if (rtRootCount == rtRootCapacity) {
-    var capacity = rtRootCapacity * 2;
-    if (capacity == 0) capacity = 1024;
-    var previous = rtRootValues;
-    var oldCapacity = rtRootCapacity;
-    rtRootValues = rtRootBuffer(previous, rtRootCount, capacity);
-    rtRootCapacity = capacity;
-    rtUnmap(previous, oldCapacity * 16);
-  }
-  var slot = rtRootValues + rtRootCount * 16;
-  nativeStore64(slot, value);
-  nativeStore64(slot + 8, kind);
-  rtRootCount = rtRootCount + 1;
-  return 0;
-}
-
-@pragma('dartc:no-gc')
-int rtRootPushValue(int value, int type) {
-  var representation = nativeLoad64(type + typeValueRepOffset);
-  if (representation == storageWord) return 0;
-  return rtRootPush(value, representation);
-}
-
-@pragma('dartc:no-gc')
-int rtRootRestore(int mark) {
-  if (mark < 0 || mark > rtRootCount) return rtRootFailure();
-  rtRootCount = mark;
-  return 0;
-}
-
-@pragma('dartc:no-gc')
-int rtGlobalRootNew(int value, int kind) {
-  if (kind != storageRef && kind != storageTagged) return rtRootFailure();
-  if (rtGlobalRootCount == rtGlobalRootCapacity) {
-    var capacity = rtGlobalRootCapacity * 2;
-    if (capacity == 0) capacity = 1024;
-    var previous = rtGlobalRoots;
-    var oldCapacity = rtGlobalRootCapacity;
-    rtGlobalRoots = rtRootBuffer(previous, rtGlobalRootCount, capacity);
-    rtGlobalRootCapacity = capacity;
-    rtUnmap(previous, oldCapacity * 16);
-  }
-  var slot = rtGlobalRoots + rtGlobalRootCount * 16;
-  nativeStore64(slot, value);
-  nativeStore64(slot + 8, kind);
-  rtGlobalRootCount = rtGlobalRootCount + 1;
-  return rtGlobalRootCount;
-}
-
-@pragma('dartc:no-gc')
-int rtGlobalRootValue(int index) {
-  if (index <= 0 || index > rtGlobalRootCount) return rtRootFailure();
-  return nativeLoad64(rtGlobalRoots + (index - 1) * 16);
-}
-
-@pragma('dartc:no-gc')
-int rtGlobalRootSet(int index, int value) {
-  if (index <= 0 || index > rtGlobalRootCount) return rtRootFailure();
-  nativeStore64(rtGlobalRoots + (index - 1) * 16, value);
-  return 0;
-}
-
-int rtRootAppend(int value, int kind, int worklist, int count, int capacity) {
-  if (kind == storageRef) {
-    if (value == 0) return count;
-  } else if (kind == storageTagged) {
-    if (value <= valueTrue || (value & 1) != 0) return count;
-  } else {
-    return rtRootFailure();
-  }
-  if (count >= capacity) return rtRootFailure();
-  nativeStore64(worklist + count * 8, value);
-  return count + 1;
-}
-
-@pragma('dartc:no-gc')
-int rtTraceRoots(int frame, int worklist, int capacity) {
-  if (frame == 0 || capacity < 0 || capacity != 0 && worklist == 0) {
-    return rtRootFailure();
-  }
-  var metadata = nativeMetadataAddress(metadataRoots);
-  var displacement = nativeLoad64(metadata + metadataRootTableOffset);
-  if (displacement == 0) return rtRootFailure();
-  var table = metadata + displacement;
-  var callCount = nativeLoad64(table + rootTableCallCountOffset);
-  var calls = table + nativeLoad64(table + rootTableCallsOffset);
-  var globalCount = nativeLoad64(table + rootTableGlobalCountOffset);
-  var globals = table + nativeLoad64(table + rootTableGlobalsOffset);
-  var count = 0;
-  var i = 0;
-  while (i < rtGlobalRootCount) {
-    var slot = rtGlobalRoots + i * 16;
-    count = rtRootAppend(
-      nativeLoad64(slot),
-      nativeLoad64(slot + 8),
-      worklist,
-      count,
-      capacity,
-    );
-    i = i + 1;
-  }
-  i = 0;
-  while (i < rtRootCount) {
-    var slot = rtRootValues + i * 16;
-    count = rtRootAppend(
-      nativeLoad64(slot),
-      nativeLoad64(slot + 8),
-      worklist,
-      count,
-      capacity,
-    );
-    i = i + 1;
-  }
-  i = 0;
-  while (i < globalCount) {
-    var record = globals + i * globalRootBytes;
-    var slot = record + nativeLoad64(record + globalRootAddressOffset);
-    count = rtRootAppend(
-      nativeLoad64(slot),
-      nativeLoad64(record + globalRootKindOffset),
-      worklist,
-      count,
-      capacity,
-    );
-    i = i + 1;
-  }
-  while (true) {
-    var pc = nativeLoad64(frame + 8);
-    var low = 0;
-    var high = callCount;
-    while (low < high) {
-      var middle = (low + high) ~/ 2;
-      var record = calls + middle * rootCallBytes;
-      var returnPc = record + nativeLoad64(record + rootCallReturnOffset);
-      if (returnPc < pc)
-        low = middle + 1;
-      else
-        high = middle;
-    }
-    if (low == callCount) return rtRootFailure();
-    var call = calls + low * rootCallBytes;
-    if (call + nativeLoad64(call + rootCallReturnOffset) != pc) {
-      return rtRootFailure();
-    }
-    var roots = nativeLoad64(call + rootCallCountOffset);
-    if (roots == -1) return count;
-    if (roots < 0) return rtRootFailure();
-    var caller = nativeLoad64(frame);
-    if (caller == 0) return rtRootFailure();
-    var slots = call + nativeLoad64(call + rootCallSlotsOffset);
-    i = 0;
-    while (i < roots) {
-      var record = slots + i * rootSlotBytes;
-      var slot = caller + nativeLoad64(record + rootSlotFrameOffset);
-      count = rtRootAppend(
-        nativeLoad64(slot),
-        nativeLoad64(record + rootSlotKindOffset),
-        worklist,
-        count,
-        capacity,
-      );
-      i = i + 1;
-    }
-    frame = caller;
-  }
-}
-
-@pragma('dartc:no-gc')
-int rtTraceBitmap(
-  int value,
-  int fields,
-  int bitmap,
-  int kind,
-  int worklist,
-  int count,
-  int capacity,
-) {
-  var field = 0;
-  while (field < fields) {
-    var bits = nativeLoad64(bitmap + (field ~/ 64) * 8);
-    var end = field + 64;
-    if (end > fields) end = fields;
-    while (bits != 0 && field < end) {
-      if ((bits & 1) != 0) {
-        count = rtRootAppend(
-          nativeLoad64(value + objectHeaderBytes + field * 8),
-          kind,
-          worklist,
-          count,
-          capacity,
-        );
-      }
-      bits = bits >>> 1;
-      field = field + 1;
-    }
-    field = end;
-  }
-  return count;
-}
-
-@pragma('dartc:no-gc')
-int rtTraceType(int type, int worklist, int count, int capacity) {
-  if ((nativeLoad64(type + objectFlagsOffset) & objectStaticRelative) != 0)
-    return count;
-  return rtRootAppend(type, storageRef, worklist, count, capacity);
-}
-
-// value is an object base supplied by root or object-edge enumeration.
-@pragma('dartc:no-gc')
-int rtTraceObject(int value, int worklist, int capacity) {
-  if (capacity < 0 || capacity != 0 && worklist == 0) {
-    return rtRootFailure();
-  }
-  if (value == 0) return 0;
-  var descriptor = rtObjectDescriptor(value);
-  var kind = nativeLoad64(descriptor + descriptorKindOffset);
-  switch (kind) {
-    case descriptorString ||
-        descriptorIntBox ||
-        descriptorDoubleBox ||
-        descriptorWordArray:
-      return 0;
-    case descriptorList:
-      var count = rtRootAppend(
-        nativeLoad64(value + listBackingOffset),
-        storageRef,
-        worklist,
-        0,
-        capacity,
-      );
-      return rtTraceType(
-        nativeLoad64(value + listTypeOffset),
-        worklist,
-        count,
-        capacity,
-      );
-    case descriptorType:
-      // Static types only refer to other static metadata.
-      if ((nativeLoad64(value + objectFlagsOffset) & objectStaticRelative) != 0)
-        return 0;
-      var typeKind = nativeLoad64(value + typeKindOffset);
-      if (typeKind == typeKindList || typeKind == typeKindNullable)
-        return rtTraceType(rtTypeArgument(value), worklist, 0, capacity);
-      if (typeKind != typeKindFunction ||
-          nativeLoad64(value + typeArgumentOffset) == 0)
-        return 0;
-      // A heap function type owns its signature inline, after the type record.
-      var signature = rtTypeArgument(value);
-      var result =
-          signature + nativeLoad64(signature + functionSignatureResultOffset);
-      var count = rtTraceType(result, worklist, 0, capacity);
-      var parameters = nativeLoad64(signature + functionSignatureCountOffset);
-      var i = 0;
-      while (i < parameters) {
-        var entry = signature + functionSignatureParametersOffset + i * 8;
-        count = rtTraceType(
-          entry + nativeLoad64(entry),
-          worklist,
-          count,
-          capacity,
-        );
-        i++;
-      }
-      return count;
-    case descriptorClass || descriptorFunction:
-      var count = 0;
-      if (kind == descriptorFunction)
-        count = rtTraceType(rtFunctionType(value), worklist, count, capacity);
-      var fields = nativeLoad64(descriptor + descriptorFieldsOffset);
-      var bitmap = nativeLoad64(descriptor + descriptorRefBitmapOffset);
-      if (bitmap != 0) {
-        count = rtTraceBitmap(
-          value,
-          fields,
-          descriptor + bitmap,
-          storageRef,
-          worklist,
-          count,
-          capacity,
-        );
-      }
-      bitmap = nativeLoad64(descriptor + descriptorTaggedBitmapOffset);
-      if (bitmap != 0) {
-        count = rtTraceBitmap(
-          value,
-          fields,
-          descriptor + bitmap,
-          storageTagged,
-          worklist,
-          count,
-          capacity,
-        );
-      }
-      return count;
-    case descriptorRefArray || descriptorTaggedArray:
-      var count = 0;
-      var representation = storageRef;
-      if (kind == descriptorTaggedArray) representation = storageTagged;
-      var length = nativeLoad64(value + arrayLengthOffset);
-      var i = 0;
-      while (i < length) {
-        count = rtRootAppend(
-          nativeLoad64(value + arrayDataOffset + i * 8),
-          representation,
-          worklist,
-          count,
-          capacity,
-        );
-        i = i + 1;
-      }
-      return count;
-    default:
-      return rtRootFailure();
-  }
-}

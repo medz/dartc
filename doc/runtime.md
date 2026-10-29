@@ -120,6 +120,8 @@ NoGC 是静态合同验证，不插入收集器、安全点轮询或运行时注
 
 根表示使用 `storageRef` / `storageTagged`；原始 Word 和代码地址不作托管根；持有的 TypeRef 引用按 Ref 登记，静态记录不进入堆对象队列。Ref 的零值和 Tagged 的立即值不加入对象队列。
 
+以下接口由 [roots.dart](../lib/src/runtime/roots.dart) 拥有，使用方直接导入。
+
 | API | 所有权合同 |
 | --- | --- |
 | `rtRootMark()` | 返回当前临时根前缀位置 |
@@ -128,8 +130,9 @@ NoGC 是静态合同验证，不插入收集器、安全点轮询或运行时注
 | `rtRootRestore(mark)` | 截断临时根活跃前缀，不影响持久槽 |
 | `rtGlobalRootNew(value, kind)` | 创建持久槽，返回从 1 开始的稳定索引 |
 | `rtGlobalRootValue(index)` / `rtGlobalRootSet(index, value)` | 读取或更新持久槽；设为零释放其持有关系，槽索引不复用 |
-| `rtTraceRoots(frame, worklist, capacity)` | 将栈、全局和显式根写入调用方原始队列，返回数量 |
-| `rtTraceObject(value, worklist, capacity)` | 从已知对象基址枚举托管子引用，返回数量；不执行递归标记或清扫 |
+| `rtTraceBufferNew()` / `rtTraceBufferFree(buffer)` | 创建和释放原生工作区；记录 data/count/capacity 三个 word，扩容不进入托管分配器 |
+| `rtTraceRoots(frame, buffer)` | 从传入帧的调用者开始，将栈、全局和显式根追加到工作区 |
+| `rtTraceObject(value, buffer)` | 从已知对象基址追加强引用边；不执行递归标记或清扫 |
 
 typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它们误判为全都需要额外根范围。运行时以 `int` 保存的对象基址则不自动成为根；跨托管分配时必须已有其他根 owner，或显式登记。对象内部地址不能单独承担保活责任。
 
@@ -139,7 +142,7 @@ typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它
 
 只有可达的 `nativeMetadataAddress` 请求包含 `metadataRoots` 时才保留根表。调用返回 PC、全局槽和子表引用均用相对各记录基址的位移，和代码、常量及数据段一起布局。相同的有序根槽向量共享只读存储，每个调用点仍保留自己的返回 PC、根数和向量引用；零根及启动边界记录不因共享而省略。
 
-根遍历只增加 `nativeFramePointer` 这一读取当前帧指针的受信机器原语；帧链查找、根值过滤和对象边遍历保持为 Dart 算法。未知返回 PC、非法根种类或队列容量不足会终止。
+根遍历使用 `nativeFramePointer` 读取当前帧指针；帧链查找、根值过滤和对象边遍历保持为 Dart 算法。未知返回 PC 或非法根种类会终止。工作区按需扩大原生映射，不对合法对象图设固定边数上限。
 
 ## 帧描述符与同步轨迹
 
@@ -166,6 +169,7 @@ typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它
 - 来源值和转换后的值分别按其 TypeRef 的 Ref/Tagged 表示登记；Word 不因数值像指针而入根。
 - 新 List 的结果在分配 backing 前保活；扩容前保留已装箱的实际元素。
 - 最后一次需要该对象的分配完成后，才能退出根作用域。
+- 可调用用户代码的常量物化和格式化路径通过 finally 恢复根范围；列表格式化同时恢复循环检测栈，异常不得留下持有关系。
 
 构造器从 reservation 到安全对象头/引用前缀完成之间保持无回收窗口。常量对象物化同样先建立可安全扫描的字段/已初始化前缀，再发布子引用。此后每次分配前，所有需继续访问的对象都必须有根；对象边枚举本身不能证明对象在分配中途仍然存活。
 
@@ -173,13 +177,17 @@ typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它
 
 UTF-8 编码使用 I/O 层拥有的可复用原始缓冲，按需映射和扩容，不消耗托管 arena。打印在同步写出结束后释放借用，路径在 open 或 chmod 返回后释放；后续调用复用容量，扩容时解除旧映射。借用期间没有 Dart 回调或托管分配，toString 回调发生在借用前。该单执行者协议不提供线程、isolate 或异步 I/O 共享借用。
 
-## 托管分配的物理区间
+## 托管分配与回收
 
-每个 arena 在 payload 前保留 48 字节原始记录，保存下一 arena、映射请求长度、已使用长度及边界图。当前 bump arena 是链头，换 arena 后仍保留旧区间的所有权。
+[heap.dart](../lib/src/runtime/heap.dart) 拥有当前单执行域的非移动标记清扫收集器。每个 arena 在 payload 前保留 32 字节原始记录，保存下一 arena、映射请求长度、边界图地址及长度；当前连续分配区可以来自新 arena，也可以来自已回收的空闲块。
 
-边界图为每 16 字节保留 2 bit；当前只将每次 reservation 的起点置为 allocated，内部保持零。物理跨度由下一起点或已使用前缀末尾决定，不从 String 的逻辑长度或 List 的当前元素数反推。最后一个 backing 原位增长只推进同一区间末尾；搬移增长保留新旧两个起点，复制完成后才发布新 backing。
+边界图为每 16 字节保留 2 bit，分别表示内部、已分配、空闲和已标记的起点。物理跨度由下一起点或 arena 末尾决定，不从 String 的逻辑长度或 List 的当前元素数反推。切换连续区或进入收集前，先登记尚未分配的尾部为空闲块；取出空闲块时清除其旧起点，逐次 reservation 只写新的已分配起点。最后一个 backing 可以在当前连续区内原位增长；搬移增长在复制完成前保留旧 backing 的根，之后才发布新地址。
 
-8 MiB arena 的边界图请求为 128 KiB，约为 payload 映射请求的 1.5625%；每个 arena 增加一次原始映射，每次分配写入起点及使用末尾。记录不进入托管对象扫描，普通对象不逐个 mmap。当前没有标记、清扫、空闲块复用或 arena 释放，所有映射仍保留至进程退出；这些记录尚不构成 GC。reservation 到对象头、引用槽及复制前缀安全之间仍必须保持无回收窗口。
+分配慢路径在累计分配超过预算后调用 `rtCollect()`。预算取上次存活字节数与 8 MiB 的较大值；检查发生在申请下一个连续区时。收集器从精确根出发，借助原生工作栈遍历强引用图；标记去重保证循环对象图终止。清扫合并相邻空闲区，完全无存活对象的 arena 连同边界图一起解除映射。小块按 16 字节精确分类至 1024 字节，更大区间使用对数类别；取出的区间继续按 bump 方式分配。
+
+常规 arena 为 8 MiB，边界图请求约占 1.5625%；大对象按实际请求另开 arena。GC 工作区、空闲链表及 arena 记录使用原生映射，不进入托管对象图。空闲块可以包含旧数据：reservation 返回后，对象构造入口必须在下一次托管分配前写好对象头及可扫描引用前缀；普通类字段先清零，List backing 以长度零发布，再逐项扩展已初始化前缀。此初始化窗口不触发回收。
+
+收集保持对象地址不变，调用 ABI、对象头和根表编码未改变。线程、isolate、弱引用及终结处理仍需各自的实现和验证；当前收集器不提供这些能力。
 
 ## 编译器的文件服务
 
@@ -211,5 +219,5 @@ UTF-8 编码使用 I/O 层拥有的可复用原始缓冲，按需映射和扩容
 ## 行为验证入口
 
 - [behavior_test.dart](../test/behavior_test.dart)：core/NoGC、函数值、I/O 程序及拒绝/失败用例。
-- [roots.dart](../test/fixtures/roots.dart)：`noGcRoots()`、`runtimeOwnership()`、`builderRoots()`、`constantObjectRoots()`、`closureRoots()`、`typeGraphRoots()`。
+- [roots.dart](../test/fixtures/roots.dart)：`noGcRoots()`、`runtimeOwnership()`、`builderRoots()`、`constantObjectRoots()`、`closureRoots()`、`typeGraphRoots()`、`collectionRoots()`。
 - [values.dart](../test/fixtures/values.dart)：String、List、类型与函数值行为。

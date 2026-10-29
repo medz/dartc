@@ -1,6 +1,8 @@
 import '../../lib/src/runtime.dart' as rt;
 import '../../lib/src/layout.dart' as abi;
 import '../../lib/src/runtime/frames.dart';
+import '../../lib/src/runtime/roots.dart' as roots;
+import '../../lib/src/runtime/heap.dart' as heap;
 
 const capacity = 2048;
 
@@ -156,19 +158,44 @@ bool hasStringRoot(int queue, int count, int first, int second, int length) {
   return false;
 }
 
+@pragma('dartc:no-gc')
+int copyTrace(int buffer, int output) {
+  final count = rt.nativeLoad64(buffer + 8);
+  if (count > capacity) roots.rtRootFailure();
+  final data = rt.nativeLoad64(buffer);
+  for (var i = 0; i < count; i++)
+    rt.nativeStore64(output + i * 8, rt.nativeLoad64(data + i * 8));
+  roots.rtTraceBufferFree(buffer);
+  return count;
+}
+
+@pragma('dartc:no-gc')
+int traceRoots(int frame, int output) {
+  final buffer = roots.rtTraceBufferNew();
+  roots.rtTraceRoots(frame, buffer);
+  return copyTrace(buffer, output);
+}
+
+@pragma('dartc:no-gc')
+int traceObject(int value, int output) {
+  final buffer = roots.rtTraceBufferNew();
+  roots.rtTraceObject(value, buffer);
+  return copyTrace(buffer, output);
+}
+
 int snapshot(int queue) {
-  return rt.rtTraceRoots(rt.nativeFramePointer(), queue, capacity);
+  return traceRoots(rt.nativeFramePointer(), queue);
 }
 
 int capture(Object? value, int marker, int queue) {
-  var count = rt.rtTraceRoots(rt.nativeFramePointer(), queue, capacity);
+  var count = traceRoots(rt.nativeFramePointer(), queue);
   var object = findMarker(queue, count, marker);
   check(object != 0);
   return object;
 }
 
 int captureList(Object? value, int length, int queue) {
-  var count = rt.rtTraceRoots(rt.nativeFramePointer(), queue, capacity);
+  var count = traceRoots(rt.nativeFramePointer(), queue);
   var i = 0;
   while (i < count) {
     var object = rt.nativeLoad64(queue + i * 8);
@@ -185,9 +212,9 @@ int captureList(Object? value, int length, int queue) {
 }
 
 int listElements(int object, int queue) {
-  check(rt.rtTraceObject(object, queue, capacity) == 1);
+  check(traceObject(object, queue) == 1);
   var backing = rt.nativeLoad64(queue);
-  return rt.rtTraceObject(backing, queue, capacity);
+  return traceObject(backing, queue);
 }
 
 bool formatterEdges(int queue, int count, int edges, int input) {
@@ -235,69 +262,64 @@ int recurse(int depth, int queue) {
   return count;
 }
 
-void capacityFailure(Object? value) {
-  print('before');
-  rt.rtTraceRoots(rt.nativeFramePointer(), 0, 0);
-}
-
 void runtimeOwnership(int queue, int edges) {
-  var mark = rt.rtRootMark();
+  var mark = roots.rtRootMark();
   var first = capture(Leaf(401), 401, queue);
   check(!contains(queue, snapshot(queue), first));
-  rt.rtRootPush(first, abi.storageRef);
+  roots.rtRootPush(first, abi.storageRef);
   check(contains(queue, snapshot(queue), first));
-  var nested = rt.rtRootMark();
+  var nested = roots.rtRootMark();
   var second = capture(Leaf(402), 402, queue);
-  rt.rtRootPush(second, abi.storageTagged);
-  var persistent = rt.rtGlobalRootNew(second, abi.storageRef);
-  rt.rtRootRestore(nested);
+  roots.rtRootPush(second, abi.storageTagged);
+  var persistent = roots.rtGlobalRootNew(second, abi.storageRef);
+  roots.rtRootRestore(nested);
   check(contains(queue, snapshot(queue), second));
-  rt.rtRootRestore(mark);
+  roots.rtRootRestore(mark);
   var count = snapshot(queue);
   check(!contains(queue, count, first) && contains(queue, count, second));
-  rt.rtGlobalRootSet(persistent, first);
-  check(rt.rtGlobalRootValue(persistent) == first);
+  roots.rtGlobalRootSet(persistent, first);
+  check(roots.rtGlobalRootValue(persistent) == first);
   count = snapshot(queue);
   check(contains(queue, count, first) && !contains(queue, count, second));
-  rt.rtGlobalRootSet(persistent, 0);
+  roots.rtGlobalRootSet(persistent, 0);
   check(!contains(queue, snapshot(queue), first));
 
-  rt.rtRootPush(0, abi.storageRef);
-  rt.rtRootPush(0, abi.storageTagged);
-  rt.rtRootPush(abi.valueFalse, abi.storageTagged);
-  rt.rtRootPush(abi.valueTrue, abi.storageTagged);
-  rt.rtRootPush(rt.rtBoxInt(-7), abi.storageTagged);
-  check(rt.rtRootMark() == mark);
+  roots.rtRootPush(0, abi.storageRef);
+  roots.rtRootPush(0, abi.storageTagged);
+  roots.rtRootPush(abi.valueFalse, abi.storageTagged);
+  roots.rtRootPush(abi.valueTrue, abi.storageTagged);
+  roots.rtRootPush(rt.rtBoxInt(-7), abi.storageTagged);
+  check(roots.rtRootMark() == mark);
   var box = rt.rtBoxInt(9223372036854775807);
-  rt.rtRootPush(box, abi.storageTagged);
+  roots.rtRootPush(box, abi.storageTagged);
   check(contains(queue, snapshot(queue), box));
-  rt.rtRootRestore(mark);
+  roots.rtRootRestore(mark);
   check(!contains(queue, snapshot(queue), box));
 
-  rt.rtRootPush(second, abi.storageRef);
+  roots.rtRootPush(second, abi.storageRef);
   var i = 1;
   while (i < 1100) {
-    rt.rtRootPush(first, abi.storageTagged);
+    roots.rtRootPush(first, abi.storageTagged);
     i++;
   }
-  check(rt.rtRootMark() == mark + 1100);
+  check(roots.rtRootMark() == mark + 1100);
   count = snapshot(queue);
   check(contains(queue, count, first) && contains(queue, count, second));
-  rt.rtRootRestore(mark);
+  roots.rtRootRestore(mark);
   count = snapshot(queue);
   check(!contains(queue, count, first) && !contains(queue, count, second));
-  var stable = rt.rtGlobalRootNew(first, abi.storageTagged);
+  var stable = roots.rtGlobalRootNew(first, abi.storageTagged);
   i = 0;
   while (i < 1100) {
-    rt.rtGlobalRootNew(0, abi.storageRef);
+    roots.rtGlobalRootNew(0, abi.storageRef);
     i++;
   }
-  check(rt.rtGlobalRootValue(stable) == first);
-  rt.rtGlobalRootSet(persistent, second);
+  check(roots.rtGlobalRootValue(stable) == first);
+  roots.rtGlobalRootSet(persistent, second);
   count = snapshot(queue);
   check(contains(queue, count, first) && contains(queue, count, second));
-  rt.rtGlobalRootSet(stable, 0);
-  rt.rtGlobalRootSet(persistent, 0);
+  roots.rtGlobalRootSet(stable, 0);
+  roots.rtGlobalRootSet(persistent, 0);
   count = snapshot(queue);
   check(!contains(queue, count, first) && !contains(queue, count, second));
 
@@ -307,18 +329,18 @@ void runtimeOwnership(int queue, int edges) {
   check(
     rendering.toString() == '[watched, 9223372036854775807, tail, true, false]',
   );
-  check(rt.rtRootMark() == mark);
+  check(roots.rtRootMark() == mark);
   Object fallback = Leaf(403);
   check(fallback.toString() == "Instance of 'Leaf'");
-  check(rt.rtRootMark() == mark);
+  check(roots.rtRootMark() == mark);
   var cyclic = <Object>[];
   cyclic.add(cyclic);
   check(cyclic.toString() == '[[...]]');
-  check(rt.rtRootMark() == mark);
+  check(roots.rtRootMark() == mark);
 }
 
 void constantObjectRoots(int queue, int edges) {
-  var mark = rt.rtRootMark();
+  var mark = roots.rtRootMark();
   const child = ConstantLeaf(501, 9223372036854775807, 'const🙂');
   const parent = ConstantLeaf(
     502,
@@ -329,8 +351,8 @@ void constantObjectRoots(int queue, int edges) {
     <Object?>[child, null],
   );
   var parentAddress = capture(parent, 502, queue);
-  check(rt.rtRootMark() == mark);
-  var count = rt.rtTraceObject(parentAddress, edges, capacity);
+  check(roots.rtRootMark() == mark);
+  var count = traceObject(parentAddress, edges);
   var childAddress = findMarker(edges, count, 501);
   var refs = 0;
   var tagged = 0;
@@ -354,7 +376,7 @@ void constantObjectRoots(int queue, int edges) {
   check(rt.nativeLoad64(wide + abi.objectHeaderBytes) == -9223372036854775808);
   check(listElements(refs, edges) == 1 && contains(edges, 1, childAddress));
   check(listElements(tagged, edges) == 1 && contains(edges, 1, childAddress));
-  count = rt.rtTraceObject(childAddress, edges, capacity);
+  count = traceObject(childAddress, edges);
   check(count == 4 && hasStringRoot(edges, count, 99, 111, 7));
   wide = 0;
   i = 0;
@@ -379,28 +401,28 @@ void constantObjectRoots(int queue, int edges) {
   );
   Object value = parent;
   check(value.toString() == 'constant leaf');
-  check(rt.rtRootMark() == mark);
+  check(roots.rtRootMark() == mark);
 }
 
 @pragma('dartc:no-gc')
 int noGcScope(int raw, int queue) {
-  var mark = rt.rtRootMark();
+  var mark = roots.rtRootMark();
   var i = 0;
   while (i < 1100) {
-    rt.rtRootPush(raw, abi.storageRef);
+    roots.rtRootPush(raw, abi.storageRef);
     i++;
   }
-  var count = rt.rtTraceRoots(rt.nativeFramePointer(), queue, capacity);
-  rt.rtRootRestore(mark);
+  var count = traceRoots(rt.nativeFramePointer(), queue);
+  roots.rtRootRestore(mark);
   return count;
 }
 
 void noGcRoots(int queue) {
   var raw = capture(Leaf(601), 601, queue);
-  var mark = rt.rtRootMark();
+  var mark = roots.rtRootMark();
   var count = noGcScope(raw, queue);
   check(contains(queue, count, raw));
-  check(rt.rtRootMark() == mark);
+  check(roots.rtRootMark() == mark);
   check(!contains(queue, snapshot(queue), raw));
 }
 
@@ -415,7 +437,7 @@ void sharedFilledEdges(int list, int value, int edges) {
 }
 
 void builderRoots(int queue, int edges) {
-  var mark = rt.rtRootMark();
+  var mark = roots.rtRootMark();
   var words = <int>[701];
   var wordType = rt.nativeLoad64(
     captureList(words, 1, queue) + abi.listTypeOffset,
@@ -425,7 +447,7 @@ void builderRoots(int queue, int edges) {
   var list = captureList(objects, 0, queue);
   var objectType = rt.nativeLoad64(list + abi.listTypeOffset);
   rt.rtListAdd(list, 9223372036854775807, intType);
-  check(objects.length == 1 && rt.rtRootMark() == mark);
+  check(objects.length == 1 && roots.rtRootMark() == mark);
   var full = rt.nativeLoad64(list + abi.listCapacityOffset);
   var i = 1;
   while (i < full) {
@@ -433,7 +455,7 @@ void builderRoots(int queue, int edges) {
     i++;
   }
   rt.rtListAdd(list, 9223372036854775807, intType);
-  check(objects.length == full + 1 && rt.rtRootMark() == mark);
+  check(objects.length == full + 1 && roots.rtRootMark() == mark);
   var count = listElements(list, edges);
   check(count == 2);
   i = 0;
@@ -455,11 +477,11 @@ void builderRoots(int queue, int edges) {
   );
   var child = capture(refs[0], 702, queue);
   sharedFilledEdges(rt.rtListFilled(3, child, 1, refType), child, edges);
-  check(rt.rtRootMark() == mark);
+  check(roots.rtRootMark() == mark);
   sharedFilledEdges(rt.rtListFilled(3, wide, 1, objectType), wide, edges);
-  check(rt.rtRootMark() == mark);
+  check(roots.rtRootMark() == mark);
   var rawWords = rt.rtListFilled(3, child, 1, wordType);
-  check(listElements(rawWords, edges) == 0 && rt.rtRootMark() == mark);
+  check(listElements(rawWords, edges) == 0 && roots.rtRootMark() == mark);
   check(refs[0].marker == 702 && objects[0] == 9223372036854775807);
 }
 
@@ -523,7 +545,7 @@ bool listPatternGuard(List<Leaf> source, int queue, int edges) {
 }
 
 void listPatternRoots(int queue, int edges) {
-  var mark = rt.rtRootMark();
+  var mark = roots.rtRootMark();
   var source = <Leaf>[Leaf(815), Leaf(816)];
   var selected = switch (source) {
     [_, ...var rest] when listPatternGuard(source, queue, edges) => rest,
@@ -541,7 +563,7 @@ void listPatternRoots(int queue, int edges) {
   var words = <int>[1, 2, 3, 4].sublist(0);
   list = captureList(words, 4, queue);
   check(listElements(list, edges) == 0 && words[3] == 4);
-  check(rt.rtRootMark() == mark);
+  check(roots.rtRootMark() == mark);
 }
 
 class DestructureRoot {
@@ -555,7 +577,7 @@ class DestructureRoot {
 }
 
 void destructuringRoots(int queue, int edges) {
-  var mark = rt.rtRootMark();
+  var mark = roots.rtRootMark();
   final DestructureRoot(:first, :second) = DestructureRoot(queue);
   check(first.marker == 818 && second.marker == 819);
   var [head, ...tail] = <Leaf>[Leaf(820), Leaf(821)];
@@ -565,19 +587,19 @@ void destructuringRoots(int queue, int edges) {
   check(listElements(list, edges) == 2);
   var headRead = rt.nativeLoad64(edges);
   var tailRead = rt.nativeLoad64(edges + 8);
-  check(rt.rtTraceObject(headRead, edges, capacity) == 1);
-  check(rt.rtTraceObject(rt.nativeLoad64(edges), edges, capacity) == 1);
+  check(traceObject(headRead, edges) == 1);
+  check(traceObject(rt.nativeLoad64(edges), edges) == 1);
   check(findMarker(edges, 1, 822) != 0);
-  check(rt.rtTraceObject(tailRead, edges, capacity) == 1);
-  check(rt.rtTraceObject(rt.nativeLoad64(edges), edges, capacity) == 1);
+  check(traceObject(tailRead, edges) == 1);
+  check(traceObject(rt.nativeLoad64(edges), edges) == 1);
   check(listElements(rt.nativeLoad64(edges), edges) == 1);
   check(findMarker(edges, 1, 823) != 0);
   check(reads[0]() == 822 && reads[1]() == 823);
-  check(rt.rtRootMark() == mark);
+  check(roots.rtRootMark() == mark);
 }
 
 void switchStatementRoots(int queue, int edges) {
-  var mark = rt.rtRootMark();
+  var mark = roots.rtRootMark();
   var functions = <int Function()>[];
   Object value = Leaf(824);
   switch (value) {
@@ -590,15 +612,15 @@ void switchStatementRoots(int queue, int edges) {
   check(listElements(list, edges) == 2);
   var guard = rt.nativeLoad64(edges);
   var body = rt.nativeLoad64(edges + 8);
-  check(rt.rtTraceObject(guard, edges, capacity) == 1);
+  check(traceObject(guard, edges) == 1);
   check(findMarker(edges, 1, 824) != 0);
-  check(rt.rtTraceObject(body, edges, capacity) == 1);
+  check(traceObject(body, edges) == 1);
   var cell = rt.nativeLoad64(edges);
   check(rt.nativeLoad64(rt.rtObjectDescriptor(cell)) == abi.captureCellClassId);
-  check(rt.rtTraceObject(cell, edges, capacity) == 1);
+  check(traceObject(cell, edges) == 1);
   check(findMarker(edges, 1, 825) != 0);
   check(functions[0]() == 824 && functions[1]() == 825);
-  check(rt.rtRootMark() == mark);
+  check(roots.rtRootMark() == mark);
 }
 
 void closureRoots(int queue, int edges) {
@@ -636,7 +658,7 @@ void closureRoots(int queue, int edges) {
   check(listElements(namedList, edges) == 1);
   var namedCallback = rt.nativeLoad64(edges);
   var namedType = rt.rtFunctionType(namedCallback);
-  check(rt.rtTraceObject(namedCallback, edges, capacity) == 3);
+  check(traceObject(namedCallback, edges) == 3);
   check(contains(edges, 3, namedType));
   check(findMarker(edges, 3, 850) != 0);
   check(generic(value: Leaf(851)).marker == 851);
@@ -651,7 +673,7 @@ void closureRoots(int queue, int edges) {
   check(owner.reads == 1);
   var objectPatternList = captureList(objectPatterns, 1, queue);
   check(listElements(objectPatternList, edges) == 1);
-  check(rt.rtTraceObject(rt.nativeLoad64(edges), edges, capacity) == 1);
+  check(traceObject(rt.nativeLoad64(edges), edges) == 1);
   check(findMarker(edges, 1, 811) != 0);
   check(objectPatterns[0]() == 811);
   var cases = ifCaseGraph();
@@ -659,12 +681,12 @@ void closureRoots(int queue, int edges) {
   check(listElements(caseList, edges) == 2);
   var guard = rt.nativeLoad64(edges);
   var body = rt.nativeLoad64(edges + 8);
-  check(rt.rtTraceObject(guard, edges, capacity) == 1);
+  check(traceObject(guard, edges) == 1);
   var cell = rt.nativeLoad64(edges);
   check(rt.nativeLoad64(rt.rtObjectDescriptor(cell)) == abi.captureCellClassId);
-  check(rt.rtTraceObject(body, edges, capacity) == 1);
+  check(traceObject(body, edges) == 1);
   check(rt.nativeLoad64(edges) == cell);
-  check(rt.rtTraceObject(cell, edges, capacity) == 1);
+  check(traceObject(cell, edges) == 1);
   check(findMarker(edges, 1, 808) != 0);
   check(cases[0]() == 808 && cases[1]() == 808);
   var patterns = <int Function()>[
@@ -675,14 +697,14 @@ void closureRoots(int queue, int edges) {
   var patternList = captureList(patterns, 1, queue);
   check(listElements(patternList, edges) == 1);
   var pattern = rt.nativeLoad64(edges);
-  check(rt.rtTraceObject(pattern, edges, capacity) == 1);
+  check(traceObject(pattern, edges) == 1);
   check(findMarker(edges, 1, 806) != 0);
   check(patterns[0]() == 806);
   var callables = <int Function()>[Leaf(805)];
   var callableList = captureList(callables, 1, queue);
   check(listElements(callableList, edges) == 1);
   var callable = rt.nativeLoad64(edges);
-  check(rt.rtTraceObject(callable, edges, capacity) == 1);
+  check(traceObject(callable, edges) == 1);
   check(findMarker(edges, 1, 805) != 0);
   check(callables[0]() == 805);
   var methods = <int Function()>[Leaf(804).read];
@@ -691,7 +713,7 @@ void closureRoots(int queue, int edges) {
   var method = rt.nativeLoad64(edges);
   var descriptor = rt.rtObjectDescriptor(method);
   check(rt.nativeLoad64(descriptor) == abi.boundMethodClassId);
-  check(rt.rtTraceObject(method, edges, capacity) == 1);
+  check(traceObject(method, edges) == 1);
   check(findMarker(edges, 1, 804) != 0);
   check(methods[0]() == 804);
   var callbacks = closureGraph();
@@ -699,7 +721,7 @@ void closureRoots(int queue, int edges) {
   check(listElements(list, edges) == 2);
   var read = rt.nativeLoad64(edges);
   var next = rt.nativeLoad64(edges + 8);
-  check(rt.rtTraceObject(read, edges, capacity) == 3);
+  check(traceObject(read, edges) == 3);
   check(findMarker(edges, 3, 802) != 0);
   var shared = 0;
   var cells = 0;
@@ -708,7 +730,7 @@ void closureRoots(int queue, int edges) {
     var descriptor = rt.rtObjectDescriptor(object);
     if (rt.nativeLoad64(descriptor) == abi.captureCellClassId) {
       cells++;
-      var count = rt.rtTraceObject(object, queue, capacity);
+      var count = traceObject(object, queue);
       if (count == 1) {
         check(findMarker(queue, count, 801) != 0);
         shared = object;
@@ -718,10 +740,10 @@ void closureRoots(int queue, int edges) {
     }
   }
   check(cells == 2 && shared != 0);
-  check(rt.rtTraceObject(next, edges, capacity) == 2);
+  check(traceObject(next, edges) == 2);
   check(contains(edges, 2, shared));
   check(callbacks[0]() == 1603 && callbacks[1]() == 1);
-  check(rt.rtTraceObject(shared, edges, capacity) == 1);
+  check(traceObject(shared, edges) == 1);
   check(findMarker(edges, 1, 803) != 0);
   check(callbacks[0]() == 1606);
 }
@@ -774,10 +796,10 @@ void checkNamedArgumentRoots(int queue) {
 }
 
 int heapType(int source, [int child = -1]) {
-  var mark = rt.rtRootMark();
-  rt.rtRootPush(source, abi.storageRef);
-  if (child >= 0) rt.rtRootPush(child, abi.storageRef);
-  var result = rt.rtAlloc(abi.typeRefBytes);
+  var mark = roots.rtRootMark();
+  roots.rtRootPush(source, abi.storageRef);
+  if (child >= 0) roots.rtRootPush(child, abi.storageRef);
+  var result = heap.rtAlloc(abi.typeRefBytes);
   rt.nativeStore64(result, rt.rtObjectDescriptor(source));
   rt.nativeStore64(result + abi.objectFlagsOffset, 0);
   rt.nativeStore64(
@@ -797,16 +819,16 @@ int heapType(int source, [int child = -1]) {
     result + abi.typeValueRepOffset,
     rt.nativeLoad64(source + abi.typeValueRepOffset),
   );
-  rt.rtRootRestore(mark);
+  roots.rtRootRestore(mark);
   return result;
 }
 
 int heapFunctionType(int source, int resultType, int parameterType) {
-  var mark = rt.rtRootMark();
-  rt.rtRootPush(source, abi.storageRef);
-  rt.rtRootPush(resultType, abi.storageRef);
-  rt.rtRootPush(parameterType, abi.storageRef);
-  var result = rt.rtAlloc(
+  var mark = roots.rtRootMark();
+  roots.rtRootPush(source, abi.storageRef);
+  roots.rtRootPush(resultType, abi.storageRef);
+  roots.rtRootPush(parameterType, abi.storageRef);
+  var result = heap.rtAlloc(
     abi.typeRefBytes + abi.functionSignatureParametersOffset + 8,
   );
   rt.nativeStore64(result, rt.rtObjectDescriptor(source));
@@ -825,7 +847,7 @@ int heapFunctionType(int source, int resultType, int parameterType) {
   rt.nativeStore64(signature + abi.functionSignaturePositionalOffset, 1);
   var parameter = signature + abi.functionSignatureParametersOffset;
   rt.nativeStore64(parameter, parameterType - parameter);
-  rt.rtRootRestore(mark);
+  roots.rtRootRestore(mark);
   return result;
 }
 
@@ -833,20 +855,20 @@ List<int> Function(List<int>) typeGraphCallback(Leaf leaf) =>
     (List<int> input) => <int>[input[0] + leaf.marker];
 
 void typeGraphRoots(int queue, int edges) {
-  var mark = rt.rtRootMark();
+  var mark = roots.rtRootMark();
   var words = <int>[831];
   var list = captureList(words, 1, queue);
   var staticListType = rt.nativeLoad64(list + abi.listTypeOffset);
-  check(rt.rtTraceObject(staticListType, 0, 0) == 0);
+  check(traceObject(staticListType, 0) == 0);
   var intType = heapType(rt.rtTypeArgument(staticListType));
-  rt.rtRootPush(intType, abi.storageRef);
+  roots.rtRootPush(intType, abi.storageRef);
   var listType = heapType(staticListType, intType);
   rt.nativeStore64(list + abi.listTypeOffset, listType);
-  check(rt.rtTraceObject(list, edges, capacity) == 2);
+  check(traceObject(list, edges) == 2);
   check(contains(edges, 2, listType));
-  check(rt.rtTraceObject(listType, edges, capacity) == 1);
+  check(traceObject(listType, edges) == 1);
   check(rt.nativeLoad64(edges) == intType);
-  check(rt.rtTraceObject(intType, 0, 0) == 0);
+  check(traceObject(intType, 0) == 0);
   Object value = words;
   check(value is List<int> && value is! List<String>);
   words.add(832);
@@ -858,12 +880,12 @@ void typeGraphRoots(int queue, int edges) {
   var nullableList = captureList(nullable, 2, queue);
   var nullableListType = rt.nativeLoad64(nullableList + abi.listTypeOffset);
   var nullableType = heapType(rt.rtTypeArgument(nullableListType), intType);
-  rt.rtRootPush(nullableType, abi.storageRef);
+  roots.rtRootPush(nullableType, abi.storageRef);
   var nullableCopy = heapType(nullableListType, nullableType);
   rt.nativeStore64(nullableList + abi.listTypeOffset, nullableCopy);
-  check(rt.rtTraceObject(nullableCopy, edges, capacity) == 1);
+  check(traceObject(nullableCopy, edges) == 1);
   check(rt.nativeLoad64(edges) == nullableType);
-  check(rt.rtTraceObject(nullableType, edges, capacity) == 1);
+  check(traceObject(nullableType, edges) == 1);
   check(rt.nativeLoad64(edges) == intType);
   value = nullable;
   check(value is List<int?> && value is! List<int>);
@@ -876,18 +898,18 @@ void typeGraphRoots(int queue, int edges) {
   var callback = rt.nativeLoad64(edges);
   var type = heapFunctionType(rt.rtFunctionType(callback), listType, listType);
   rt.nativeStore64(callback + abi.functionTypeOffset, type);
-  check(rt.rtTraceObject(callback, edges, capacity) == 2);
+  check(traceObject(callback, edges) == 2);
   check(contains(edges, 2, type) && findMarker(edges, 2, 834) != 0);
-  check(rt.rtTraceObject(type, edges, capacity) == 2);
+  check(traceObject(type, edges) == 2);
   check(rt.nativeLoad64(edges) == listType);
   check(rt.nativeLoad64(edges + 8) == listType);
   value = callbacks[0];
   check(value is List<int> Function(List<int>));
   check(value is! List<String> Function(List<int>));
   check(callbacks[0](words)[0] == 1665);
-  check(rt.rtRootMark() == mark + 2);
-  rt.rtRootRestore(mark);
-  check(rt.rtRootMark() == mark);
+  check(roots.rtRootMark() == mark + 2);
+  roots.rtRootRestore(mark);
+  check(roots.rtRootMark() == mark);
 }
 
 List<T> genericRootList<T>(T value) => [value];
@@ -903,7 +925,7 @@ bool Function(Object?) genericNestedRootTypeTest<T>() =>
     genericRootTypeTest<List<T>>();
 
 void genericTypeRoots(int queue, int edges) {
-  var mark = rt.rtRootMark();
+  var mark = roots.rtRootMark();
   var nested = genericRootNested<Leaf>(Leaf(841));
   var outer = captureList(nested, 1, queue);
   var outerType = rt.nativeLoad64(outer + abi.listTypeOffset);
@@ -912,12 +934,12 @@ void genericTypeRoots(int queue, int edges) {
             (abi.objectStaticRelative | abi.objectTypeTemplate)) ==
         0,
   );
-  check(rt.rtTraceObject(outer, edges, capacity) == 2);
+  check(traceObject(outer, edges) == 2);
   check(contains(edges, 2, outerType));
-  check(rt.rtTraceObject(outerType, edges, capacity) == 1);
+  check(traceObject(outerType, edges) == 1);
   var innerType = rt.nativeLoad64(edges);
   check(rt.nativeLoad64(innerType + abi.typeKindOffset) == abi.typeKindList);
-  check(rt.rtTraceObject(innerType, edges, capacity) == 0);
+  check(traceObject(innerType, edges) == 0);
   Object value = nested;
   check(value is List<List<Leaf>> && value is! List<List<int>>);
   check(nested[0][0].marker == 841);
@@ -927,26 +949,26 @@ void genericTypeRoots(int queue, int edges) {
   );
   var list = captureList(callbacks, 3, queue);
   var listType = rt.nativeLoad64(list + abi.listTypeOffset);
-  check(rt.rtTraceObject(listType, edges, capacity) == 1);
+  check(traceObject(listType, edges) == 1);
   var functionType = rt.nativeLoad64(edges);
-  check(rt.rtTraceObject(functionType, edges, capacity) == 2);
+  check(traceObject(functionType, edges) == 2);
   var resultType = rt.nativeLoad64(edges);
   var parameterType = rt.nativeLoad64(edges + 8);
-  check(rt.rtTraceObject(resultType, edges, capacity) == 0);
-  check(rt.rtTraceObject(parameterType, edges, capacity) == 0);
-  check(rt.rtTraceObject(list, edges, capacity) == 2);
+  check(traceObject(resultType, edges) == 0);
+  check(traceObject(parameterType, edges) == 0);
+  check(traceObject(list, edges) == 2);
   var backing = rt.nativeLoad64(list + abi.listBackingOffset);
   check(contains(edges, 2, listType) && contains(edges, 2, backing));
-  check(rt.rtTraceObject(backing, edges, capacity) == 3);
+  check(traceObject(backing, edges) == 3);
   var callback = rt.nativeLoad64(edges);
-  check(rt.rtTraceObject(callback, edges, capacity) == 3);
+  check(traceObject(callback, edges) == 3);
   check(contains(edges, 3, rt.rtFunctionType(callback)));
   check(findMarker(edges, 3, 842) != 0);
   var environment = rt.nativeLoad64(callback + abi.functionInstanceBytes);
   check(contains(edges, 3, environment));
-  check(rt.rtTraceObject(environment, edges, capacity) == 1);
-  check(rt.rtTraceObject(rt.nativeLoad64(edges), edges, capacity) == 1);
-  check(rt.rtTraceObject(rt.nativeLoad64(edges), edges, capacity) == 0);
+  check(traceObject(environment, edges) == 1);
+  check(traceObject(rt.nativeLoad64(edges), edges) == 1);
+  check(traceObject(rt.nativeLoad64(edges), edges) == 0);
   var result = callbacks[0](nested[0]);
   check(result[0].marker == 842 && result[1].marker == 841);
 
@@ -956,16 +978,16 @@ void genericTypeRoots(int queue, int edges) {
   var testList = captureList(tests, 1, queue);
   check(listElements(testList, edges) == 1);
   var test = rt.nativeLoad64(edges);
-  check(rt.rtTraceObject(test, edges, capacity) == 1);
+  check(traceObject(test, edges) == 1);
   environment = rt.nativeLoad64(edges);
-  check(rt.rtTraceObject(environment, edges, capacity) == 1);
+  check(traceObject(environment, edges) == 1);
   var arguments = rt.nativeLoad64(edges);
-  check(rt.rtTraceObject(arguments, edges, capacity) == 1);
+  check(traceObject(arguments, edges) == 1);
   var argument = rt.nativeLoad64(edges);
   check(rt.nativeLoad64(argument + abi.typeKindOffset) == abi.typeKindList);
-  check(rt.rtTraceObject(argument, edges, capacity) == 0);
+  check(traceObject(argument, edges) == 0);
   check(tests[0](<Leaf>[]) && !tests[0](<int>[]));
-  check(rt.rtRootMark() == mark);
+  check(roots.rtRootMark() == mark);
 }
 
 void floatingRoots(int queue, int edges) {
@@ -981,7 +1003,7 @@ void floatingRoots(int queue, int edges) {
   final count = snapshot(queue);
   check(contains(queue, count, address));
   check(!contains(queue, count, raw));
-  check(rt.rtTraceObject(address, edges, capacity) == 0);
+  check(traceObject(address, edges) == 0);
   check(boxed == 1.25 && words[0] == captured());
   final nullable = <double?>[1.5, null];
   final list = rt.nativeValueBits(nullable);
@@ -994,7 +1016,7 @@ void floatingRoots(int queue, int edges) {
         ) ==
         abi.descriptorDoubleBox,
   );
-  check(rt.rtTraceObject(element, edges, capacity) == 0);
+  check(traceObject(element, edges) == 0);
   check(nullable[0] == 1.5);
 }
 
@@ -1027,19 +1049,19 @@ class LateRoot {
 void lateRoots(int queue, int edges) {
   final read = lateRootFactory(Leaf(951));
   final closure = rt.nativeValueBits(read);
-  check(rt.rtTraceObject(closure, edges, capacity) == 1);
+  check(traceObject(closure, edges) == 1);
   final cell = rt.nativeLoad64(edges);
   check(rt.nativeLoad64(rt.rtObjectDescriptor(cell)) == abi.lateCellClassId);
   // Before reading, only the initializer retains the source object.
-  check(rt.rtTraceObject(cell, edges, capacity) == 1);
+  check(traceObject(cell, edges) == 1);
   final initializer = rt.nativeLoad64(edges);
-  check(rt.rtTraceObject(initializer, edges, capacity) == 1);
+  check(traceObject(initializer, edges) == 1);
   final source = findMarker(edges, 1, 951);
   check(source != 0);
   check(contains(queue, snapshot(queue), closure));
   check(read().marker == 952);
   // Successful initialization releases the thunk and keeps the typed payload.
-  check(rt.rtTraceObject(cell, edges, capacity) == 1);
+  check(traceObject(cell, edges) == 1);
   check(findMarker(edges, 1, 952) != 0);
   check(contains(queue, snapshot(queue), closure));
   check(read().marker == 952);
@@ -1047,36 +1069,36 @@ void lateRoots(int queue, int edges) {
   final shared = lateSharedRootFactory();
   final getter = rt.nativeValueBits(shared[0]);
   final setter = rt.nativeValueBits(shared[1]);
-  check(rt.rtTraceObject(getter, edges, capacity) == 1);
+  check(traceObject(getter, edges) == 1);
   final empty = rt.nativeLoad64(edges);
-  check(rt.rtTraceObject(empty, edges, capacity) == 0);
-  check(rt.rtTraceObject(setter, edges, capacity) == 1);
+  check(traceObject(empty, edges) == 0);
+  check(traceObject(setter, edges) == 1);
   check(rt.nativeLoad64(edges) == empty);
   check(shared[1]().marker == 953 && shared[0]().marker == 953);
-  check(rt.rtTraceObject(empty, edges, capacity) == 1);
+  check(traceObject(empty, edges) == 1);
   check(findMarker(edges, 1, 953) != 0);
 
   final tagged = lateTaggedRootFactory(Leaf(954));
-  check(rt.rtTraceObject(rt.nativeValueBits(tagged), edges, capacity) == 1);
+  check(traceObject(rt.nativeValueBits(tagged), edges) == 1);
   final taggedCell = rt.nativeLoad64(edges);
   check(tagged() is Leaf);
-  check(rt.rtTraceObject(taggedCell, edges, capacity) == 1);
+  check(traceObject(taggedCell, edges) == 1);
   check(findMarker(edges, 1, 954) != 0);
   check((tagged() as Leaf).marker == 954);
   final word = lateWordRootFactory(source);
   check(word() == source);
-  check(rt.rtTraceObject(rt.nativeValueBits(word), edges, capacity) == 1);
-  check(rt.rtTraceObject(rt.nativeLoad64(edges), edges, capacity) == 0);
+  check(traceObject(rt.nativeValueBits(word), edges) == 1);
+  check(traceObject(rt.nativeLoad64(edges), edges) == 0);
   check(word() == source);
 
   final object = LateRoot();
   final address = rt.nativeValueBits(object);
-  check(rt.rtTraceObject(address, edges, capacity) == 0);
+  check(traceObject(address, edges) == 0);
   check(object.scalar == 2.5);
-  check(rt.rtTraceObject(address, edges, capacity) == 0);
+  check(traceObject(address, edges) == 0);
   object.tagged = Leaf(956);
   check(object.reference.marker == 955);
-  check(rt.rtTraceObject(address, edges, capacity) == 2);
+  check(traceObject(address, edges) == 2);
   check(findMarker(edges, 2, 955) != 0);
   check(findMarker(edges, 2, 956) != 0);
   check(object.scalar == 2.5 && (object.tagged as Leaf).marker == 956);
@@ -1086,7 +1108,7 @@ void stackTraceRoots(int queue, int edges) {
   final trace = StackTrace.current;
   final text = trace.toString();
   check(text.indexOf('stackTraceRoots') >= 0);
-  check(rt.rtTraceObject(rt.nativeValueBits(trace), edges, capacity) == 1);
+  check(traceObject(rt.nativeValueBits(trace), edges) == 1);
   check(rt.nativeLoad64(edges) == rt.nativeValueBits(text));
   final count = snapshot(queue);
   check(contains(queue, count, rt.nativeValueBits(trace)));
@@ -1233,11 +1255,61 @@ void finallyRoots(int queue) {
   check(!contains(queue, count, finallyTraceBits));
 }
 
-void main(List<String> args) {
-  if (args.isNotEmpty && args[0] == 'capacity') {
-    capacityFailure(Leaf(190));
-    return;
+class CollectionNode {
+  Leaf leaf;
+  CollectionNode? next;
+  Object? tagged;
+  CollectionNode(this.leaf, this.tagged);
+}
+
+class CollectionThrow {
+  String toString() => throw Leaf(1600);
+}
+
+void collectionRoots(int queue) {
+  final values = <Leaf>[for (var i = 0; i < 4096; i++) Leaf(i)];
+  final first = CollectionNode(Leaf(1500), 9223372036854775807);
+  final second = CollectionNode(Leaf(1501), values);
+  first.next = second;
+  second.next = first;
+  var cell = Leaf(1502);
+  final read = () => cell.marker;
+  final bound = first.leaf.read;
+  final mark = roots.rtRootMark();
+  final raw = capture(Leaf(1503), 1503, queue);
+  roots.rtRootPush(raw, abi.storageRef);
+  for (var round = 0; round < 4; round++) {
+    var sum = 0;
+    for (var i = 0; i < 50000; i++) {
+      final discarded = <Leaf>[Leaf(i), Leaf(i + 1)];
+      sum += discarded[0].marker + discarded[1].marker;
+    }
+    check(sum == 2500000000);
+    heap.rtCollect();
+    check(first.next!.next == first);
+    check(first.tagged == 9223372036854775807);
+    check(second.tagged == values);
+    check(bound() == 1500 && read() == 1502 + round);
+    check((rt.nativeValueFromBits(raw) as Leaf).marker == 1503);
+    for (var i = 0; i < values.length; i++) check(values[i].marker == i);
+    cell = Leaf(1503 + round);
   }
+  roots.rtRootRestore(mark);
+  final throwing = <Object>[CollectionThrow()];
+  try {
+    throwing.toString();
+    check(false);
+  } catch (error) {
+    heap.rtCollect();
+    check((error as Leaf).marker == 1600);
+    check(roots.rtRootMark() == mark);
+  }
+  throwing.clear();
+  throwing.add('recovered');
+  check(throwing.toString() == '[recovered]');
+}
+
+void main(List<String> args) {
   var queue = rt.rtMap(capacity * 8);
   var edges = rt.rtMap(capacity * 8);
   finallyRoots(queue);
@@ -1257,7 +1329,7 @@ void main(List<String> args) {
   check(findMarker(queue, count, 111) != 0);
   check(keep.marker == 111);
   var onlyInput = capture(Leaf(110), 110, queue);
-  check(rt.rtTraceObject(onlyInput, edges, capacity) == 0);
+  check(traceObject(onlyInput, edges) == 0);
   count = many(
     Leaf(120),
     Leaf(121),
@@ -1310,12 +1382,12 @@ void main(List<String> args) {
     i++;
   }
   check(boxed != 0);
-  check(rt.rtTraceObject(boxed, edges, capacity) == 0);
+  check(traceObject(boxed, edges) == 0);
   check(listElements(cacheAddress, edges) == 2);
   var first = rt.nativeLoad64(edges);
   var second = rt.nativeLoad64(edges + 8);
   check(listElements(first, edges) == 0);
-  check(rt.rtTraceObject(second, edges, capacity) == 0);
+  check(traceObject(second, edges) == 0);
   final constructWide = WideOwnFields.new;
   var wide = constructWide(
     Leaf(201),
@@ -1327,7 +1399,7 @@ void main(List<String> args) {
   ) as DerivedWide;
   wide.p61 = raw;
   var wideAddress = capture(wide, 200, queue);
-  count = rt.rtTraceObject(wideAddress, edges, capacity);
+  count = traceObject(wideAddress, edges);
   check(count == 6);
   check(findMarker(edges, count, 201) != 0);
   check(findMarker(edges, count, 202) != 0);
@@ -1336,7 +1408,7 @@ void main(List<String> args) {
   check(findMarker(edges, count, 205) != 0);
   check(findMarker(edges, count, 206) != 0);
   check(wide.delayed.marker == 207);
-  count = rt.rtTraceObject(wideAddress, edges, capacity);
+  count = traceObject(wideAddress, edges);
   check(count == 7 && findMarker(edges, count, 207) != 0);
   check(wide.tail.marker == 201);
   var refs = <Leaf?>[Leaf(301), null, Leaf(302)];
@@ -1360,6 +1432,7 @@ void main(List<String> args) {
   floatingRoots(queue, edges);
   runtimeOwnership(queue, edges);
   constantObjectRoots(queue, edges);
+  collectionRoots(queue);
   rt.rtUnmap(edges, capacity * 8);
   rt.rtUnmap(queue, capacity * 8);
   print('roots ok');

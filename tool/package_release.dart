@@ -60,6 +60,8 @@ void main(List<String> args) {
       'lib/src/layout.dart',
       'lib/src/binary64.dart',
       'lib/src/runtime/frames.dart',
+      'lib/src/runtime/heap.dart',
+      'lib/src/runtime/roots.dart',
       'lib/src/runtime/exceptions.dart',
       'lib/src/std/core.dart',
       'lib/src/std/core/annotations.dart',

@@ -800,8 +800,8 @@ void main(List<String> args) {
               "'${File(standard).parent.path}/layout.dart'",
             )
             .replaceAll(
-              "'../../lib/src/runtime/frames.dart'",
-              "'${File(standard).parent.path}/runtime/frames.dart'",
+              "'../../lib/src/runtime/",
+              "'${File(standard).parent.path}/runtime/",
             ),
       );
     final rootsExecutable = '${roots.path}.out';
@@ -817,18 +817,6 @@ void main(List<String> args) {
     if (rootOutput != 'roots ok\n') {
       throw StateError(
         'Unexpected native root enumeration output: $rootOutput',
-      );
-    }
-    final exhaustedRoots = await capture(
-      rootsExecutable,
-      ['capacity'],
-      environment: {'PATH': '/usr/bin:/bin'},
-      includeParentEnvironment: false,
-    );
-    if (exhaustedRoots.exitCode != 70 || exhaustedRoots.stdout != 'before\n') {
-      throw StateError(
-        'Root worklist exhaustion did not fail at the expected boundary: '
-        '${exhaustedRoots.stdout}${exhaustedRoots.stderr}',
       );
     }
     final framesOnly = File('${temporary.path}/frames-only.dart')
@@ -2838,7 +2826,7 @@ void main() {
       "@pragma('dartc:no-gc') int value = 0; void main() {}",
       "@pragma('dartc:no-gc', true) void bad() {} void main() {}",
       "import '$standard' as rt; @pragma('dartc:no-gc') int bad(int target) => rt.nativeCall0(target); void main() {}",
-      "import '$standard' as rt; @pragma('dartc:no-gc') int bad(int bytes) => rt.rtAlloc(bytes); void main() {}",
+      "import '${File(standard).parent.path}/runtime/heap.dart' as heap; @pragma('dartc:no-gc') int bad(int bytes) => heap.rtAlloc(bytes); void main() {}",
       "import '$standard' as rt; @pragma('dartc:no-gc') int bad(int type) => rt.rtListNew(type); void main() {}",
       "import 'dart:core' hide pragma; @pragma('OtherTool:hint') void main() {}",
       "import 'dart:core' as core; @pragma('OtherTool:hint') void main() {}",

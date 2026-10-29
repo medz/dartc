@@ -2,6 +2,7 @@
 
 ### Performance
 
+- Reclaim unreachable managed objects in native programs with a non-moving mark-sweep collector. Reuse free blocks and release empty arenas; retain live objects through stack roots, runtime handles and object metadata.
 - Allocate ARM64 floating-point registers to doubles that do not live across calls, reducing transfers in numeric code. Validate allocated locations, live-value conflicts and call clobbers.
 - Inline small, effect-free direct calls before machine lowering, allowing constant propagation across call boundaries while preserving argument evaluation and GC contracts.
 - Reduce polymorphic method and property access overhead by reading the receiver's exact class identity once per dispatch, while preserving inherited implementations and target defaults.

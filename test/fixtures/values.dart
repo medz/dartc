@@ -6781,6 +6781,7 @@ void factoryValues() {
 }
 
 void main(List<String> args) {
+  allocationValues();
   enumValues();
   operatorValues();
   factoryValues();
@@ -6835,6 +6836,45 @@ void main(List<String> args) {
   bufferValues();
   stringBoundaries();
   listGrowth(args);
+}
+
+class AllocationValue {
+  final int value;
+  AllocationValue? next;
+  AllocationValue(this.value);
+}
+
+T Function() allocationKeep<T>(T value) =>
+    () => value;
+
+void allocationValues() {
+  final values = <AllocationValue>[
+    for (var i = 0; i < 4096; i++) AllocationValue(i),
+  ];
+  values.first.next = values.last;
+  values.last.next = values.first;
+  final keep = allocationKeep<List<AllocationValue>>(values);
+  final spare = List<AllocationValue?>.filled(300000, null, growable: true);
+  spare.clear();
+  final text = String.fromCharCodes([
+    for (var i = 0; i < 512; i++) 65 + i % 26,
+  ]);
+  final tagged = <Object>[text.substring(1, 511), 9223372036854775807, 1.25];
+  var checksum = 0;
+  for (var round = 0; round < 4; round++) {
+    for (var i = 0; i < 50000; i++) {
+      final batch = <AllocationValue>[
+        AllocationValue(i),
+        AllocationValue(i + 1),
+      ];
+      checksum += batch[0].value + batch[1].value;
+    }
+    spare.add(keep()[round]);
+    print([spare.last!.value, keep().last.next!.value, tagged]);
+  }
+  print(checksum);
+  print(values.first.next!.value);
+  print(text.length);
 }
 
 enum EnumColor { red, green, blue }
