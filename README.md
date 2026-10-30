@@ -1,22 +1,28 @@
 # dartc
 
-A native Dart compiler written entirely in Dart.
+A native Dart compiler written in Dart.
 
-`dartc` compiles Dart source directly to native machine code for macOS and Linux on ARM64/x86-64, and can rebuild its own compiler. The goal is a complete, independent Dart toolchain whose compiler, runtime and standard libraries can evolve in Dart. Version 0.4 is an early preview.
+Compile Dart programs into standalone executables for macOS and Linux. Generated programs run without an installed Dart SDK.
 
-Generated executables include the reachable parts of dartc's own runtime, compiled to native code. Native compiler binaries and generated executables run without the official Dart SDK, VM, JIT or snapshots.
+dartc is an early preview. Complete Dart language and standard-library compatibility is the goal; see [language support](specs/README.md) for current capabilities and gaps. Published releases may differ from the source tree.
 
-## Try the native compiler
+## Installation
 
-Download the archive for your platform from the [0.4.0 release](https://github.com/medz/dartc/releases/tag/v0.4.0):
+### Native compiler
 
-| Platform | Archive |
-| --- | --- |
-| macOS ARM64 | `dartc-0.4.0-macos-arm64.tar.gz` |
-| Linux ARM64 | `dartc-0.4.0-linux-arm64.tar.gz` |
-| Linux x86-64 | `dartc-0.4.0-linux-x64.tar.gz` |
+Download the archive for your platform from [GitHub Releases](https://github.com/medz/dartc/releases). Extract it, keep its contents together, and add its `bin` directory to your `PATH`.
 
-Intel Mac support is available when [building this source revision](#build-from-source); the 0.4.0 release does not include a macOS x64 archive.
+See the release notes for available platforms, checksums and upgrade instructions.
+
+### Dart package
+
+With the [Dart SDK](https://dart.dev/get-dart) installed:
+
+```sh
+dart pub global activate dartc
+```
+
+## Quick start
 
 Save this as `hello.dart`:
 
@@ -26,133 +32,40 @@ void main() {
 }
 ```
 
-Extract the archive, then compile `hello.dart`. On macOS ARM64:
+Compile and run it:
 
 ```sh
-tar -xzf dartc-0.4.0-macos-arm64.tar.gz
-export PATH="$PWD/dartc-0.4.0-macos-arm64/bin:$PATH"
 dartc hello.dart -o hello
 ./hello
 ```
 
-On Linux, use the same commands with `linux-arm64` or `linux-x64` in place of `macos-arm64`.
-
-For the 0.4.0 archive, keep `bin/` and `lib/` together. Its compiler reads the matching runtime and standard-library sources from `lib/`; generated executables do not need those files. `SHA256SUMS` contains the archive checksums.
-
-Upgrading from 0.3 requires replacing the whole archive: the internal runtime ABI changed from 14 to 17. See the [0.4.0 upgrade notes](CHANGELOG.md#upgrading-from-03).
-
-Native compilers built from the current source embed their runtime and standard-library sources. Copy `build/dartc-stage2` anywhere on PATH as `dartc`; it needs no adjacent `lib/` directory or source checkout.
-
-The pub package uses the Dart SDK as the compiler's host:
+For a Dart project, resolve its dependencies before compiling the entry point:
 
 ```sh
-dart pub global activate dartc
-dartc hello.dart -o hello
+dart pub get
+dartc bin/main.dart -o app
 ```
 
-The capabilities below refer to this source revision. See [published versions](https://pub.dev/packages/dartc/versions) for older packages.
+Use `dartc --help` for command options. More examples are in [example/](example/).
 
-## Dart compatibility
+## Native libraries
 
-The [specification tracker](specs/README.md) records the reference SDK, current behavior, remaining gaps and owning tests by upstream language clause. Complete Dart language compatibility is the target.
+dartc can also produce object files, static libraries and shared libraries with C/C++ headers. See the [library example](example/math.dart) and [export support](specs/types.md#ffi-类型与原生导出声明) for supported declarations and types.
 
-| Area | Implemented behavior |
-| --- | --- |
-| Values | Native integers and doubles, booleans, Unicode strings, nullable values, typed lists with conditional/loop/spread and null-aware elements and runtime type checks |
-| Declarations | Local object/List destructuring declarations and assignments, pattern loop bindings, top-level variables, lazy initialization, classes with inheritance, abstract classes and interfaces, enums with fields, constructors and methods, instance/static fields and methods, bound method values, named/unnamed constructors with field initializer lists, getters, setters and generic type aliases |
-| Functions | Generic top-level and method calls with bounds and partial inference, callable objects, recursion, local and anonymous functions with value/type captures, optional/named direct and function-value calls, constructor values and structural function types |
-| Control flow | Blocks, assignments, cascades, null-aware member/index chains, conditions and if-case statements/elements, loops, labelled jumps, switch statements/expressions with scalar/object/list patterns and guards, shared case bodies and case-label continue, returns and synchronous exceptions |
-| Libraries | Relative, file/package imports and exports, prefixes, filters, conditional URIs and library parts |
-| Constants | Scalar/list constants, canonical const instances, metadata and supported core pragmas |
-| Core APIs | print, command-line arguments, basic String/List operations and StringBuffer object/character writing |
+## Development
 
-Generic classes, dynamic member calls, mixins, extensions, records, map/record patterns, asynchronous code, isolates and most SDK libraries are not implemented, and enums have no type parameters or mixins. Exceptions are synchronous only. Generic function values, complete generic inference and generic or standard-library constructor tear-offs remain unsupported. Failed runtime checks terminate the process. Managed storage uses a non-moving mark-sweep collector; weak references and finalizers are not implemented.
-
-Package configuration v2 supplies local package mappings and default language versions. A leading `// @dart = major.minor` comment can select an implemented versioned rule from 2.12 through 3.13; this is not complete compatibility with those language versions. See [libraries](specs/libraries.md) and [lexical structure](specs/lexical-structure.md).
-
-## Packages and runtime sources
-
-Run `dart pub get` to resolve dependencies. `dartc` discovers the nearest `.dart_tool/package_config.json` above the entry file, or accepts an explicit configuration:
-
-```sh
-dartc bin/main.dart --packages .dart_tool/package_config.json -o app
-```
-
-`dartc` reads local file-backed packages; it does not download packages or solve versions. Use consistent library URIs: package and file references to one physical file can identify different libraries.
-
-The native compiler includes `package:dartc/export.dart` for standalone native-library projects. An explicit `dartc` entry in the package configuration takes precedence over that bundled module.
-
-For compiler and runtime development, select external runtime sources explicitly:
-
-```sh
-dartc main.dart --std /path/to/dartc/lib/src/legacy/runtime.dart -o app
-```
-
-`--std` selects the external runtime and standard-library dependency graph for this compilation. Compiler and runtime sources must have matching ABIs; this option is a development interface, not a stable runtime plugin API. See the [bootstrap design](.agents/docs/legacy/architecture.md).
-
-## Build from source
-
-The implementation in `lib/src/legacy/` is frozen. Keep a native seed matching its source revision; the legacy test and validation tooling is retired. See [developer tooling](.agents/docs/legacy/development.md) for rebuilding from that seed.
-
-For a new checkout without a matching seed, compile the initial seed once with the official Dart SDK:
+Development requires Dart SDK `^3.13.7`.
 
 ```sh
 git clone https://github.com/medz/dartc.git
 cd dartc
 dart pub get
-mkdir -p build
-dart compile exe bin/dartc.dart -o build/dartc-seed
 ```
 
-With `build/dartc-seed` available, build the native compiler and its embedded sources:
+Bug reports, feature requests and contributions are welcome through [GitHub Issues](https://github.com/medz/dartc/issues). When reporting a compiler problem, include the source program, dartc release or commit, target platform and expected behavior.
 
-```sh
-build/dartc-seed tool/bundle_compiler.dart --std lib/src/legacy/runtime.dart -o build/bundle_compiler
-build/bundle_compiler "$PWD" build/compiler.dart
-build/dartc-seed build/compiler.dart --std lib/src/legacy/runtime.dart -o build/dartc
-```
+See [CHANGELOG.md](CHANGELOG.md) for release changes.
 
-Reuse an existing matching seed when available. If it fails, diagnose the failure; do not replace it implicitly with an official-compiler build.
+## License
 
-The compiler, allocator, runtime algorithms, machine-code generation, executable formats and local Mach-O signatures are implemented in Dart. No C compiler, assembler, linker or signing subprocess is needed to build executables.
-
-## Other outputs
-
-Choose the output target explicitly:
-
-```sh
-dartc hello.dart --target linux-arm64 -o hello-linux
-dartc hello.dart --target linux-x64 -o hello-linux-x64
-dartc hello.dart --target macos-arm64 -o hello-macos
-dartc hello.dart --target macos-x64 -o hello-intel-macos
-```
-
-macOS and Linux object files, static libraries and dynamic libraries use `@Export<T>` declarations. `T` is a `dart:ffi` function signature or data type; `symbol` optionally sets the external name. For example, [example/math.dart](example/math.dart) exports a function and a read-only constant:
-
-```dart
-import 'dart:ffi';
-import 'package:dartc/export.dart';
-
-@Export<Int64 Function(Int64, Int64)>()
-int add(int a, int b) => a + b;
-
-@Export<Int64>()
-const int answer = 42;
-```
-
-```sh
-dartc example/math.dart --emit dylib -o libmath.dylib
-dartc example/math.dart --emit static -o libmath.a
-dartc example/math.dart --emit object -o libmath.o
-dartc example/math.dart --target linux-x64 --emit dylib -o libmath.so
-```
-
-Each command also writes `libmath.h` for C and C++ callers. Use `--header math.h` to choose its path. Without `-o`, dynamic libraries use `.dylib` on macOS and `.so` on Linux. Header declarations and binary exports come from the same checked signatures. Symbols that cannot be used as C identifiers receive a `dartc_export_` hexadecimal alias in the header while keeping their original binary symbol.
-
-`-o` and `--header` take file paths, including literal `%`, `#`, `?` and `file:` characters. Missing parent directories are created. The compiler rejects outputs that refer to a loaded source file or the selected package configuration, including symbolic links, hard links and filesystem case aliases. The library and header paths must differ.
-
-These output modes currently support functions that need no managed runtime context and scalar read-only data. Runtime-backed exports remain an implementation gap; see the [FFI support and gaps](specs/types.md#ffi-类型与原生导出声明) for target and type coverage.
-
-## Contributing
-
-Start language work from the [specification tracker](specs/README.md). See the [legacy architecture](.agents/docs/legacy/architecture.md) for compiler/runtime design, [legacy runtime contracts](.agents/docs/legacy/runtime.md) for memory and ownership rules, and [developer tooling](.agents/docs/legacy/development.md) for native builds and archive creation.
+[MIT](LICENSE).

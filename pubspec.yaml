@@ -10,6 +10,7 @@ dependencies: {}
 
 dev_dependencies:
   lints: ^6.1.0
+  skills: ^1.0.4
   test: ^1.33.0
 
 executables:
