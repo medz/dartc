@@ -3,6 +3,7 @@
 ### Features
 
 - Add `package:dartc/source.dart` for source snapshots, UTF-16 ranges, line and column lookup, and custom source providers.
+- Add `package:dartc/diagnostics.dart` for structured diagnostics with severity, error codes, source ranges, and related notes.
 
 ## [0.5.0](https://github.com/medz/dartc/compare/v0.4.0...v0.5.0) — 2026-10-31
 

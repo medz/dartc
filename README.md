@@ -59,6 +59,7 @@ Use these libraries independently in a Dart application:
 | Library | Purpose | Example |
 | --- | --- | --- |
 | `package:dartc/source.dart` | Source text, UTF-16 ranges, and line and column lookup | [Source locations](example/source.dart) |
+| `package:dartc/diagnostics.dart` | Diagnostics with severity, source ranges, and related notes | [Diagnostics](example/diagnostics.dart) |
 
 These APIs are available from the source repository and have not been released yet.
 
