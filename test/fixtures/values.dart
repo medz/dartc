@@ -566,6 +566,19 @@ bool filledGrowable() {
   return true;
 }
 
+void rejectedListMutation(List<Object> values, void Function() mutate) {
+  try {
+    mutate();
+    print('unexpected mutation');
+  } on UnsupportedError catch (error, trace) {
+    print(error);
+    print(error.stackTrace.toString() == trace.toString());
+  } finally {
+    print(values);
+  }
+  print('list mutation after');
+}
+
 void filledLists() {
   var values = new List<int>.filled(
     filledLength(),
@@ -585,6 +598,34 @@ void filledLists() {
   var dynamicFlag = List<bool>.filled(0, false, growable: growable);
   dynamicFlag.add(true);
   print(dynamicFlag);
+  for (final list in [
+    List<int>.filled(0, 1),
+    List<int>.filled(1, 1),
+    const <int>[],
+    const <int>[1],
+  ]) {
+    rejectedListMutation(list, () => list.add(2));
+    rejectedListMutation(list, () => list.insert(-1, 2));
+    rejectedListMutation(list, () {
+      list.removeLast();
+    });
+    rejectedListMutation(list, () {
+      list.removeAt(-1);
+    });
+    rejectedListMutation(list, () => list.clear());
+  }
+  for (final list in [
+    const <int>[],
+    const <int>[1],
+  ]) {
+    rejectedListMutation(list, () {
+      list[0] = 2;
+    });
+  }
+  List<Object> readOnly = const <int>[1];
+  rejectedListMutation(readOnly, () {
+    readOnly[9] = 2;
+  });
 }
 
 String conditionTrace = '';

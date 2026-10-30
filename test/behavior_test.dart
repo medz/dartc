@@ -1354,8 +1354,6 @@ void main() {
       "void main() { List<Object> view = <num>[1]; print('before'); view[0] = 'wrong'; print('after'); }",
       "void main() { List<Object> view = <int>[1]; print('before'); view.add('wrong'); print('after'); }",
       "void main() { List<Object> view = const<int>[1]; print('before'); view[9] = 'wrong'; print('after'); }",
-      "void main() { List<Object> view = const<int>[1]; print('before'); view[9] = 2; print('after'); }",
-      "void main() { var values = const[<int>[]]; print('before'); values[0].clear(); print('after'); }",
       "void main() { var values = <int>[]; print('before'); print(values[0]); }",
       "void main() { var values = <int>[1]; print('before'); print(values[-1]); }",
       "void main() { var values = <int>[1]; print('before'); values[1] = 2; print('after'); }",
@@ -1363,21 +1361,14 @@ void main() {
       "void main() { var values = <int>[]; print('before'); values.removeLast(); print('after'); }",
       "List<int> receiver() { print('receiver'); return <int>[1]; } int index() { print('index'); return -1; } void main() { print('before'); receiver().removeAt(index()); print('after'); }",
       "void main() { var values = <int>[1]; print('before'); values.removeAt(1); print('after'); }",
-      "void main() { var values = List<int>.filled(1, 1); print('before'); values.removeAt(-1); print('after'); }",
-      "void main() { print('before'); const <int>[].removeAt(0); print('after'); }",
       "dynamic index() { print('index'); return 'wrong'; } void main() { print('before'); const <int>[1].removeAt(index()); print('after'); }",
       "List<int> receiver() { print('receiver'); return <int>[]; } int index() { print('index'); return 1; } int element() { print('element'); return 7; } void main() { print('before'); receiver().insert(index(), element()); print('after'); }",
       "dynamic element() { print('element'); return 'wrong'; } void main() { List<Object> values = const <int>[1]; print('before'); values.insert(-1, element()); print('after'); }",
-      "void main() { var values = List<int>.filled(1, 1); print('before'); values.insert(-1, 7); print('after'); }",
-      "void main() { print('before'); const <int>[].insert(0, 7); print('after'); }",
       "List<int> receiver() { print('receiver'); return <int>[]; } dynamic index() { print('index'); return 'wrong'; } int element() { print('element'); return 7; } void main() { print('before'); receiver().insert(index(), element()); print('after'); }",
       "void main() { var values = <int>[1, 2]; print('before'); for (final value in values) { values.clear(); print(value); } print('after'); }",
       "void main() { var values = <int>[1]; print('before'); for (final value in values) { if (value == 1) values.add(2); print(value); } print('after'); }",
       "void main() { var values = <int>[1]; print('before'); for (final value in values) { values.clear(); print(value); continue; } print('after'); }",
       "void main() { print('before'); var values = List<int>.filled(-1, 0); print(values); }",
-      "void main() { var values = List<int>.filled(0, 0); print('before'); values.add(1); print('after'); }",
-      "void main() { var values = List<int>.filled(0, 0); print('before'); values.clear(); print('after'); }",
-      "void main() { var values = List<int>.filled(0, 0); print('before'); values.removeLast(); print('after'); }",
       for (final change in ['owner.clear();', 'owner.add(2);'])
         '''
 class Mutator {
@@ -1514,6 +1505,8 @@ Never failure(String mode) {
     if (mode == 'int') int.parse('invalid');
     if (mode == 'double') double.parse('invalid');
     if (mode == 'nonfinite') double.nan.toInt();
+    if (mode == 'fixed') List<int>.filled(0, 0).add(1);
+    if (mode == 'readonly') const <int>[].clear();
     if (mode == 'type') { dynamic value = 'invalid'; value as int; }
     throw 'uncaught🙂';
   } finally { print('cleanup'); }
@@ -1531,6 +1524,8 @@ void main(List<String> args) { print('before'); failure(args.isEmpty ? '' : args
       ['int'],
       ['double'],
       ['nonfinite'],
+      ['fixed'],
+      ['readonly'],
       ['type'],
     ]) {
       final uncaughtExpected = await capture(sdk, [
@@ -1549,6 +1544,10 @@ void main(List<String> args) { print('before'); failure(args.isEmpty ? '' : args
           ? "Instance of 'TypeError'\n"
           : arguments.first == 'nonfinite'
           ? 'Unsupported operation: Infinity or NaN toInt\n'
+          : arguments.first == 'fixed'
+          ? 'Unsupported operation: Cannot add to a fixed-length list\n'
+          : arguments.first == 'readonly'
+          ? 'Unsupported operation: Cannot clear an unmodifiable list\n'
           : 'FormatException:';
       if (uncaughtExpected.exitCode != 255 ||
           uncaughtActual.exitCode != 255 ||

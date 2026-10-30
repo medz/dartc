@@ -196,19 +196,10 @@ int capture(Object? value, int marker, int queue) {
 
 int captureList(Object? value, int length, int queue) {
   var count = traceRoots(rt.nativeFramePointer(), queue);
-  var i = 0;
-  while (i < count) {
-    var object = rt.nativeLoad64(queue + i * 8);
-    var descriptor = rt.rtObjectDescriptor(object);
-    if (rt.nativeLoad64(descriptor + abi.descriptorKindOffset) ==
-            abi.descriptorList &&
-        rt.rtListLength(object) == length) {
-      return object;
-    }
-    i++;
-  }
-  check(false);
-  return 0;
+  var object = rt.nativeValueBits(value);
+  check(contains(queue, count, object));
+  check(rt.rtListLength(object) == length);
+  return object;
 }
 
 int listElements(int object, int queue) {
@@ -1227,6 +1218,36 @@ void exceptionRoots(int queue) {
     }
     check(values.length == 1 && values[0].marker == 974);
     check(identical(typeOwner[0], wrong) && wrong.isEmpty);
+  }
+  for (var kind = 0; kind < 2; kind++) {
+    List<Object> fixed = kind == 0
+        ? List<Leaf>.filled(1, Leaf(975))
+        : const <ConstantLeaf>[ConstantLeaf(976, null, null)];
+    final original = fixed[0];
+    for (var operation = kind == 0 ? 1 : 0; operation < 6; operation++) {
+      try {
+        if (operation == 0) fixed[0] = original;
+        if (operation == 1) fixed.add(original);
+        if (operation == 2) fixed.insert(-1, original);
+        if (operation == 3) fixed.removeLast();
+        if (operation == 4) fixed.removeAt(-1);
+        if (operation == 5) fixed.clear();
+        check(false);
+      } on UnsupportedError catch (error, trace) {
+        check(roots.rtRootMark() == mark);
+        heap.rtCollect();
+        final count = snapshot(queue);
+        check(contains(queue, count, rt.nativeValueBits(error)));
+        check(contains(queue, count, rt.nativeValueBits(trace)));
+        check(error.stackTrace.toString() == trace.toString());
+        final fields = traceObject(rt.nativeValueBits(error), queue);
+        check(contains(queue, fields, rt.nativeValueBits(error.message)));
+        check(error.message!.indexOf('Cannot ') == 0);
+      } finally {
+        check(roots.rtRootMark() == mark);
+      }
+      check(fixed.length == 1 && identical(fixed[0], original));
+    }
   }
   for (final floating in [false, true]) {
     try {

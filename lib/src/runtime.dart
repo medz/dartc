@@ -454,26 +454,12 @@ Never rtListRangeError() {
   rtHostExit(70);
 }
 
-Never rtListFixedError() {
-  var message = rtCStringAcquire(
-    0x66203a6374726164,
-    0x73696c2064657869,
-    0x6874676e656c2074,
-    0xa,
-  );
-  rtWriteAll(2, message, 25);
-  rtHostExit(70);
-}
-
-Never rtListReadOnlyError() {
-  var message = rtCStringAcquire(
-    0x69203a6374726164,
-    0x656c626174756d6d,
-    0xa7473696c20,
-    0,
-  );
-  rtWriteAll(2, message, 22);
-  rtHostExit(70);
+Never rtListMutationError(int list, String operation) {
+  final kind =
+      (nativeLoad64(list + objectFlagsOffset) & objectListReadOnly) != 0
+      ? 'an unmodifiable'
+      : 'a fixed-length';
+  throw UnsupportedError('Cannot $operation $kind list');
 }
 
 int rtListNew(int typeRef) {
@@ -566,7 +552,7 @@ int rtListSet(int list, int index, int value, int sourceType) {
     }
   }
   if ((nativeLoad64(list + objectFlagsOffset) & objectListReadOnly) != 0) {
-    return rtListReadOnlyError();
+    return rtListMutationError(list, 'modify');
   }
   var length = nativeLoad64(list + listLengthOffset);
   if (index < 0 || index >= length) return rtListRangeError();
@@ -615,7 +601,7 @@ int rtListAdd(int list, int value, int sourceType) {
     }
   }
   if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
-    return rtListFixedError();
+    return rtListMutationError(list, 'add to');
   }
   var length = nativeLoad64(list + listLengthOffset);
   var capacity = nativeLoad64(list + listCapacityOffset);
@@ -643,7 +629,7 @@ int rtListInsert(int list, int index, int value, int sourceType) {
     }
   }
   if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
-    return rtListFixedError();
+    return rtListMutationError(list, 'add to');
   }
   var length = nativeLoad64(list + listLengthOffset);
   if (index < 0 || index > length) return rtListRangeError();
@@ -667,7 +653,7 @@ int rtListInsert(int list, int index, int value, int sourceType) {
 
 int rtListRemoveLast(int list, int expectedType) {
   if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
-    return rtListFixedError();
+    return rtListMutationError(list, 'remove from');
   }
   var mark = -1;
   if (rtListElementType(list) != expectedType) {
@@ -688,7 +674,7 @@ int rtListRemoveLast(int list, int expectedType) {
 
 int rtListRemoveAt(int list, int index, int expectedType) {
   if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
-    return rtListFixedError();
+    return rtListMutationError(list, 'remove from');
   }
   var mark = -1;
   if (rtListElementType(list) != expectedType) {
@@ -716,7 +702,7 @@ int rtListRemoveAt(int list, int index, int expectedType) {
 
 int rtListClear(int list) {
   if ((nativeLoad64(list + objectFlagsOffset) & objectListFixed) != 0) {
-    return rtListFixedError();
+    return rtListMutationError(list, 'clear');
   }
   var backing = nativeLoad64(list + listBackingOffset);
   if (backing != 0) nativeStore64(backing + arrayLengthOffset, 0);
