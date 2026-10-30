@@ -326,6 +326,13 @@ void main() { print(add(0)); }
         ..writeAsStringSync('previous binary');
       final header = File('${directory.path}/artifact.h')
         ..writeAsStringSync('previous header');
+      Link('${directory.path}/source-link').createSync('main.dart');
+      Link('${directory.path}/source-chain').createSync('source-link');
+      Link('${directory.path}/config-link').createSync(packages.path);
+      Link('${directory.path}/here').createSync('.');
+      Link('${temporary.path}/paths-link').createSync(directory.path);
+      run('/bin/ln', [part.path, '${directory.path}/part-hardlink']);
+      run('/bin/ln', [output.path, '${directory.path}/artifact-hardlink']);
       final originals = {
         for (final file in [input, dependency, part, packages, output, header])
           file.path: base64Encode(file.readAsBytesSync()),
@@ -336,6 +343,12 @@ void main() { print(add(0)); }
           '${directory.path}//dep%#?🙂.h',
           './part.dart',
           packages.path,
+          'source-chain',
+          'part-hardlink',
+          'config-link',
+          '../paths-link/main.dart',
+          'here/missing-$kind/../main.dart',
+          if (File('${directory.path}/MAIN.DART').existsSync()) 'MAIN.DART',
         ];
         final options = [
           for (final target in targets)
@@ -348,6 +361,7 @@ void main() { print(add(0)); }
             for (final target in targets)
               ['-o', output.path, '--header', target],
             ['-o', output.path, '--header', 'sub/../artifact'],
+            ['-o', output.path, '--header', 'artifact-hardlink'],
             ['-o', 'dep%#?🙂.o'], // The default header is an imported source.
           ],
         ];
@@ -367,9 +381,31 @@ void main() { print(add(0)); }
         }
       }
       // Outputs are file paths, so a literal file: prefix is not a URI.
+      // Equal contents alone do not make two files identical.
+      input.copySync('${directory.path}/file:main.dart');
       compile('main.dart', ['-o', 'file:main.dart'], directory: directory.path);
       if (run('${directory.path}/file:main.dart', []).stdout != '42\n')
         throw StateError('Literal output path produced an invalid program.');
+      Link('${directory.path}/new-link').createSync('new-output');
+      compile('main.dart', ['-o', 'new-link'], directory: directory.path);
+      if (run('${directory.path}/new-output', []).stdout != '42\n')
+        throw StateError('New output through a symbolic link failed.');
+      Directory('${directory.path}/other/sub').createSync(recursive: true);
+      Link('${directory.path}/jump').createSync('other/sub');
+      for (final path in ['jump/../main.dart', 'new/deep/program']) {
+        compile('main.dart', ['-o', path], directory: directory.path);
+        if (run('${directory.path}/$path', []).stdout != '42\n')
+          throw StateError('Output directory resolution failed: $path');
+      }
+      Link('${directory.path}/loop-link').createSync('loop-link');
+      final loop = compile(
+        'main.dart',
+        ['-o', 'loop-link'],
+        expectedExit: 74,
+        directory: directory.path,
+      );
+      if (loop.stdout != '' || loop.stderr == '')
+        throw StateError('File inspection errors must use stderr.');
       final host = File('${directory.path}/host.c')
         ..writeAsStringSync('''
 #include "file:main.dart"
@@ -390,7 +426,23 @@ int main(void) { return add(0) == 42 ? 0 : 1; }
           link(host.path, library, executable, language);
           run(executable, []);
         }
+        // Creating the library can make a dangling header alias resolve to it.
+        final pending = '${directory.path}/pending.$kind';
+        final alias = '$pending.h';
+        Link(alias).createSync(pending);
+        compile(
+          'main.dart',
+          ['--emit', kind, '-o', pending, '--header', alias],
+          expectedExit: 64,
+          directory: directory.path,
+        );
+        final executable = '${directory.path}/pending-$kind';
+        link(host.path, pending, executable, 'c');
+        run(executable, []);
       }
+      for (final file in [input, dependency, part, packages])
+        if (base64Encode(file.readAsBytesSync()) != originals[file.path])
+          throw StateError('Output changed input ${file.path}.');
     }
 
     final unsupported = <String, String>{

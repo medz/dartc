@@ -6,6 +6,7 @@ import '../format.dart';
 import '../frontend.dart';
 import '../header.dart';
 import '../host.dart';
+import '../host/files_native.dart' if (dart.library.io) '../host/files.dart';
 import '../ir.dart';
 import '../library.dart';
 import '../library_abi.dart';
@@ -118,10 +119,8 @@ Never _compile(List<String> args, SourceBundle? bundle) {
     };
   }
   final executable = imageKind == ImageKind.executable;
-  final outputPath = sourcePath(
-    output.startsWith('/') ? output : cwd + '/' + output,
-  );
-  var headerPath = '';
+  if (output.indexOf('\u0000') >= 0 || header.indexOf('\u0000') >= 0)
+    argumentError('Output paths cannot contain NUL.');
   if (!executable) {
     if (header == '') {
       final dot = output.lastIndexOf('.');
@@ -130,10 +129,7 @@ Never _compile(List<String> args, SourceBundle? bundle) {
           '.h';
       if (header == output) header += '.h';
     }
-    headerPath = sourcePath(
-      header.startsWith('/') ? header : cwd + '/' + header,
-    );
-    if (headerPath == outputPath)
+    if (header == output)
       argumentError('Header and library output paths must differ.');
   }
   if (standard != '') bundle = null;
@@ -141,11 +137,6 @@ Never _compile(List<String> args, SourceBundle? bundle) {
       ? sourceInputUri(cwd, standard == '' ? hostStdPath() : standard)
       : bundle.runtime;
   var config = compilerPackages(inputUri, cwd, packages);
-  if (config != null &&
-      (outputPath == config.path || headerPath == config.path))
-    argumentError(
-      'Output would overwrite the package configuration: ' + config.path,
-    );
   SourceProgram sources = collectSources(
     inputUri,
     runtime,
@@ -153,9 +144,6 @@ Never _compile(List<String> args, SourceBundle? bundle) {
     targetOS,
     bundle,
   );
-  for (final file in sources.files)
-    if (outputPath == file.input.path || headerPath == file.input.path)
-      argumentError('Output would overwrite a source file: ' + file.input.path);
   parseSource(sources);
   if (!executable && checkedExports.isEmpty)
     argumentError('Library output requires an @Export declaration.');
@@ -203,8 +191,27 @@ Never _compile(List<String> args, SourceBundle? bundle) {
     bytes = createExecutable();
   else
     bytes = createLibrary(output);
+  prepareOutput(output);
+  if (!executable) prepareOutput(header);
+  if (config != null &&
+      (identicalFiles(output, config.path) ||
+          !executable && identicalFiles(header, config.path)))
+    argumentError(
+      'Output would overwrite the package configuration: ' + config.path,
+    );
+  for (final file in sources.files)
+    if (identicalFiles(output, file.input.path) ||
+        !executable && identicalFiles(header, file.input.path))
+      argumentError('Output would overwrite a source file: ' + file.input.path);
+  if (!executable && identicalFiles(header, output))
+    argumentError('Header and library output paths must differ.');
   hostWrite(output, bytes);
-  if (!executable) hostWrite(header, headerBytes);
+  if (!executable) {
+    // A dangling header link can start resolving when the library is created.
+    if (identicalFiles(header, output))
+      argumentError('Header and library output paths must differ.');
+    hostWrite(header, headerBytes);
+  }
   print(output + ': ' + bytes.length.toString() + ' bytes');
   if (imageKind == ImageKind.executable ||
       imageKind == ImageKind.dynamicLibrary)
