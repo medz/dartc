@@ -1867,7 +1867,7 @@ int rtDoubleToString(int bits) => nativeValueBits(binary64Format(bits));
 
 int rtDoubleToInt(int bits) {
   if ((bits & 0x7fffffffffffffff) >= binary64Infinity)
-    return rtValueTypeError();
+    throw UnsupportedError('Infinity or NaN toInt');
   return hostFloat64ToInt(bits);
 }
 

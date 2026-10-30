@@ -1231,9 +1231,6 @@ void main() {
         "'text' + value",
       ])
         "class Missing {} void main(){dynamic value=Missing();print('before');$operation;print('after');}",
-      "void main(){print('before');double.nan.toInt();}",
-      "void main(){print('before');double.infinity ~/ 1;}",
-      "void main(){print('before');1.5 ~/ 0;}",
       "void main(){dynamic value=1;print('before');value as double;}",
       "void main(){dynamic value=1.5;print('before');value as int;}",
       "void main(){dynamic value=1.5;print('before');int result=value.toDouble();print(result);}",
@@ -1516,6 +1513,7 @@ Never failure(String mode) {
   try {
     if (mode == 'int') int.parse('invalid');
     if (mode == 'double') double.parse('invalid');
+    if (mode == 'nonfinite') double.nan.toInt();
     if (mode == 'type') { dynamic value = 'invalid'; value as int; }
     throw 'uncaught🙂';
   } finally { print('cleanup'); }
@@ -1532,6 +1530,7 @@ void main(List<String> args) { print('before'); failure(args.isEmpty ? '' : args
       <String>[],
       ['int'],
       ['double'],
+      ['nonfinite'],
       ['type'],
     ]) {
       final uncaughtExpected = await capture(sdk, [
@@ -1548,6 +1547,8 @@ void main(List<String> args) { print('before'); failure(args.isEmpty ? '' : args
           ? 'uncaught🙂\n'
           : arguments.first == 'type'
           ? "Instance of 'TypeError'\n"
+          : arguments.first == 'nonfinite'
+          ? 'Unsupported operation: Infinity or NaN toInt\n'
           : 'FormatException:';
       if (uncaughtExpected.exitCode != 255 ||
           uncaughtActual.exitCode != 255 ||

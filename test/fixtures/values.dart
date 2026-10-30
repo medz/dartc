@@ -6139,6 +6139,18 @@ double floatingAcrossCall(double value) {
   }
 }
 
+void floatingIntegerConversion(int Function() convert) {
+  try {
+    print(convert());
+  } on UnsupportedError catch (error, trace) {
+    print(error);
+    print(error.stackTrace.toString() == trace.toString());
+  } finally {
+    print('integer conversion cleanup');
+  }
+  print('integer conversion after');
+}
+
 void doubleValues() {
   for (final value in <double>[
     0.0,
@@ -6170,6 +6182,12 @@ void doubleValues() {
   for (final a in doubles) {
     print([a, a.isNaN, a.isFinite, a.isInfinite, a.isNegative, -a]);
     dynamic dynamicA = a;
+    floatingIntegerConversion(() => a.toInt());
+    floatingIntegerConversion(() => a.truncate());
+    floatingIntegerConversion(() => dynamicA.toInt());
+    floatingIntegerConversion(() => dynamicA.truncate());
+    floatingIntegerConversion(() => a ~/ 1);
+    floatingIntegerConversion(() => dynamicA ~/ 1);
     print([
       -dynamicA,
       identical(a, dynamicA),
@@ -6289,6 +6307,12 @@ void doubleValues() {
   print(floatingIdentity<double>(1.25));
   print(floatingIdentity<num>(-0.0));
   print([7.5 ~/ 2, -7.5 ~/ 2, 7 ~/ 2.5, -7 ~/ 2.5]);
+  floatingIntegerConversion(() => 1.5 ~/ 0);
+  floatingIntegerConversion(() => 0.0 ~/ 0);
+  floatingIntegerConversion(() => 1 ~/ 0.0);
+  dynamic dynamicInteger = 1;
+  dynamic dynamicZero = 0.0;
+  floatingIntegerConversion(() => dynamicInteger ~/ dynamicZero);
   const constants = <Object>[
     1 / 0,
     0 / 0,
