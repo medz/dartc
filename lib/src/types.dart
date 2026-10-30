@@ -739,6 +739,38 @@ int newTypeParameter(
   return dartTypes.length - 1;
 }
 
+// The enclosing declaration's parameters are fixed types, not inference
+// variables for a new application of that same declaration.
+List<int> freshTypeParameters(List<int> parameters, List<int> scope) {
+  var overlaps = false;
+  for (final parameter in parameters)
+    if (typeParameterIndex(scope, parameter) >= 0) overlaps = true;
+  if (!overlaps) return parameters;
+  final fresh = <int>[];
+  for (final parameter in parameters) {
+    final type = typeParameterInfo(parameter);
+    fresh.add(
+      newTypeParameter(
+        type.owner,
+        type.ordinal,
+        type.name,
+        type.bindsName,
+        type.hasBound,
+      ),
+    );
+  }
+  for (var i = 0; i < fresh.length; i++) {
+    final type = typeParameterInfo(parameters[i]);
+    typeParameterInfo(fresh[i]).bound = substituteType(
+      type.bound,
+      parameters,
+      fresh,
+    );
+    typeParameterInfo(fresh[i]).variance = type.variance;
+  }
+  return fresh;
+}
+
 int typeParameterInScope(List<int> scope, String name) {
   var i = scope.length;
   while (i > 0) {

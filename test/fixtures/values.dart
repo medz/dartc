@@ -5321,6 +5321,63 @@ class PatternPair {
   PatternPair(this.left, this.right);
 }
 
+class PatternValue<T> {
+  final T value;
+  PatternValue(this.value);
+
+  PatternValue<T> copy() {
+    final PatternValue(value: value) = this;
+    return PatternValue(value);
+  }
+}
+
+class PatternNumber<T extends num> {
+  final T value;
+  PatternNumber(this.value);
+}
+
+class PatternEntries<A, B> {
+  final A first;
+  final B second;
+  PatternEntries(this.first, this.second);
+}
+
+typedef PatternValueAlias<T> = PatternValue<T>;
+typedef PatternValueList<T> = PatternValue<List<T>>;
+typedef PatternValueCallback<T> = PatternValue<T Function(T)>;
+typedef PatternSameEntries<T> = PatternEntries<T, T>;
+
+void objectPatternRaw(Object input) {
+  if (input case PatternValue(:var value)) {
+    print([value] is List<int>);
+    // ignore: unnecessary_type_check
+    print([value] is List<dynamic>);
+  }
+  if (input case PatternNumber(:var value)) {
+    print([value] is List<int>);
+    // ignore: unnecessary_type_check
+    print([value] is List<num>);
+  }
+}
+
+void objectPatternBound<U extends PatternValue<int>>(U input) {
+  if (input case PatternValue(:var value)) {
+    print([value] is List<int>);
+    // ignore: unnecessary_type_check
+    print([value] is List<dynamic>);
+  }
+}
+
+List<T> objectPatternParameter<T>(PatternValue<T> input) {
+  final PatternValue(value: value) = input;
+  return [value];
+}
+
+int objectPatternNullable(PatternValue<int>? input) => switch (input) {
+  PatternValue(:var value) => value + 2,
+  null => 0,
+};
+
 typedef PatternItems<T> = List<T>;
 typedef PatternNestedItems<T> = List<List<T>>;
 typedef PatternBoundItems<T extends num> = List<T>;
@@ -5465,6 +5522,76 @@ void objectPatterns() {
   }
   if (callback case Function()) print('function');
   if (callback case Function(int) read) print(read(5));
+  final original = PatternValue<int>(1);
+  if (original case PatternValue(:var value)) {
+    print(value + 1);
+    // ignore: unnecessary_type_check
+    print([value] is List<int>);
+  }
+  if (original case PatternValueAlias(:var value)) {
+    // ignore: unnecessary_type_check
+    print([value] is List<int>);
+  }
+  print(original.copy().value);
+  // ignore: unnecessary_type_check
+  print(original.copy() is PatternValue<int>);
+  objectPatternRaw(original);
+  objectPatternRaw(PatternNumber<int>(3));
+  objectPatternBound(original);
+  // ignore: unnecessary_type_check
+  print(objectPatternParameter(original) is List<int>);
+  print(objectPatternNullable(original));
+  print(objectPatternNullable(null));
+  if (PatternValue<List<String>>(['nested']) case PatternValueList(
+    :var value,
+  )) {
+    print(value);
+    // ignore: unnecessary_type_check
+    print([value] is List<List<String>>);
+  }
+  if (PatternEntries<int, int>(4, 5) case PatternSameEntries(
+    :var first,
+    :var second,
+  )) {
+    // ignore: unnecessary_type_check
+    print([first, second] is List<int>);
+    print(first + second);
+  }
+  if (PatternEntries<int, num>(4, 5) case PatternSameEntries(
+    :var first,
+    :var second,
+  ))
+    print(first + second);
+  else
+    print('distinct arguments');
+  if (PatternValue<int Function(int)>(callback) case PatternValueCallback(
+    value: var read,
+  )) {
+    print(read(6));
+    // ignore: unnecessary_type_check
+    print([read] is List<int Function(int)>);
+  }
+  if (PatternValue<Null>(null) case PatternValue(:var value))
+    print([value] is List<Null>);
+  if (PatternValue<int?>(null) case PatternValue(:var value)) {
+    // ignore: unnecessary_type_check
+    print([value] is List<int?>);
+    print([value] is List<Null>);
+  }
+  final PatternValue(value: value) = original;
+  // ignore: unnecessary_type_check
+  print([value] is List<int>);
+  print(switch (original) {
+    PatternValue(:var value) => value + 10,
+  });
+  final captured = <int Function()>[];
+  for (final PatternValue(value: value) in [
+    PatternValue(11),
+    PatternValue(12),
+  ]) {
+    captured.add(() => value);
+  }
+  print([captured[0](), captured[1]()]);
 }
 
 var ifCaseGlobal = [if (3 case int value) value + 1];

@@ -545,48 +545,38 @@ int resolveObjectPatternType(
     return resolved;
   var symbol = _typeSymbol(symbols, syntax, scope);
   var declaration = symbols.declarations[symbol];
-  if (typeIsClass(resolved) &&
-      (declaration.kind == symbolClass || declaration.kind == symbolAlias) &&
-      declarationTypeParameters(symbols, symbol).isNotEmpty)
-    _typeError(
-      symbols,
-      syntax.token,
-      'generic class object patterns require explicit type arguments',
-    );
   if (declaration.kind == symbolType && declaration.target < 0) {
     var context = typeNonNullable(input);
     if (typeIsList(context) && !typeIsSubtype(typeArgument(context), tNull))
       return context;
     return resolved;
   }
-  if (declaration.kind != symbolAlias) return resolved;
-  var alias = symbols.aliases[declaration.target];
-  if (alias.parameters.isEmpty) return resolved;
-  var upper = List<int>.filled(alias.parameters.length, -1);
-  var lower = List<int>.filled(alias.parameters.length, -1);
-  _objectPatternConstraints(
-    alias.template,
-    input,
-    alias.parameters,
-    upper,
-    lower,
-    true,
-  );
+  if (declaration.kind != symbolAlias && declaration.kind != symbolClass)
+    return resolved;
+  final original = declarationTypeParameters(symbols, symbol);
+  if (original.isEmpty) return resolved;
+  final parameters = freshTypeParameters(original, scope);
+  var template = declarationTypeTemplate(symbols, symbol);
+  if (parameters != original)
+    template = substituteType(template, original, parameters);
+  var upper = List<int>.filled(parameters.length, -1);
+  var lower = List<int>.filled(parameters.length, -1);
+  _objectPatternConstraints(template, input, parameters, upper, lower, true);
   var inferred = <int>[];
   for (var i = 0; i < upper.length; i++)
     inferred.add(upper[i] >= 0 ? upper[i] : lower[i]);
-  var arguments = instantiateTypeParameters(alias.parameters, inferred);
+  var arguments = instantiateTypeParameters(parameters, inferred);
   for (var i = 0; i < arguments.length; i++) {
     var bound = substituteType(
-      typeParameterInfo(alias.parameters[i]).bound,
-      alias.parameters,
+      typeParameterInfo(parameters[i]).bound,
+      parameters,
       arguments,
     );
     if (!typeIsSubtype(arguments[i], bound))
       arguments[i] = meetTypes(arguments[i], bound);
   }
   _checkTypeApplication(symbols, symbol, arguments, syntax.token, true);
-  return substituteType(alias.template, alias.parameters, arguments);
+  return substituteType(template, parameters, arguments);
 }
 
 void _objectPatternConstraints(
@@ -635,6 +625,20 @@ void _objectPatternConstraints(
       lower,
       covariant,
     );
+  } else if (typeIsClass(template) &&
+      typeIsClass(context) &&
+      typeArgument(template) == typeArgument(context)) {
+    final source = dartTypes[template].arguments;
+    final target = dartTypes[context].arguments;
+    for (var i = 0; i < source.length; i++)
+      _objectPatternConstraints(
+        source[i],
+        target[i],
+        parameters,
+        upper,
+        lower,
+        covariant,
+      );
   } else if (typeIsFunction(template) && typeIsFunction(context)) {
     var source = functionSignature(template);
     var target = functionSignature(context);

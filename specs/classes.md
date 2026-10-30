@@ -62,7 +62,7 @@ const 工厂只能重定向到 const 构造器，允许声明在抽象类以及�
 
 [由类参数产生的协变检查][covariant-by-class]在进入实例成员前按实际对象的实参检查相关形参，包含隐式字段 setter 与索引写入。读取函数类型等不安全的协变视图时也执行所需检查。这一性质不授予收窄覆写形参的权限：[正确覆写][override-covariance]仍要求显式或继承的 `covariant` 声明。未使用的非法覆写同样拒绝。
 
-泛型类的工厂构造、late 字段、自身再声明类型参数的实例方法、方法及构造器提取、泛型父接口代入、完整 F-bound 和其余约束求解仍缺；相关构造入口明确诊断。默认对象文本目前不显示具体类型实参；泛型对象模式目前要求显式类型实参；公开 `Type` 值和完整模式推断仍缺。这些缺口不改变完整 Dart 兼容目标。
+泛型类的工厂构造、late 字段、自身再声明类型参数的实例方法、方法及构造器提取、泛型父接口代入、完整 F-bound 和其余约束求解仍缺；相关构造入口明确诊断。泛型对象模式可从匹配值推断省略的实参，具体范围及测试见[模式](patterns.md)。默认对象文本目前不显示具体类型实参；公开 `Type` 值和完整模式推断仍缺。这些缺口不改变完整 Dart 兼容目标。
 
 实现入口为 [frontend.dart](../lib/src/frontend.dart) 的构造及实例调用、[types.dart](../lib/src/types.dart) 的 `substituteClassType()`、[initialization.dart](../lib/src/initialization.dart) 的字段初始化义务，以及 [runtime.dart](../lib/src/runtime.dart) 的实际类型检查。拥有行为测试为 [values.dart](../test/fixtures/values.dart) 的 `runtimeGenericClasses()`、[behavior_test.dart](../test/behavior_test.dart) 的 `runtime-generics-imports.dart` 和 `rejectedRuntimeGenerics`；[roots.dart](../test/fixtures/roots.dart) 的 `genericTypeRoots()` 验证实例类型环境、常量物化和捕获闭包的 GC 存活。
 

@@ -2496,36 +2496,9 @@ FeCallArguments fePrepareInferredArguments(
   bool suppliedOnly,
 ) {
   var info = functions[function];
-  // A recursive call infers new arguments; the caller's same declaration
-  // parameters are fixed types, not inference variables for that call.
-  var recursive = false;
-  for (final parameter in signature.typeParameters)
-    if (typeParameterIndex(functions[feFunction].typeScope, parameter) >= 0)
-      recursive = true;
-  if (recursive) {
-    final original = signature.typeParameters;
-    final fresh = <int>[];
-    for (final parameter in original) {
-      final type = typeParameterInfo(parameter);
-      fresh.add(
-        newTypeParameter(
-          type.owner,
-          type.ordinal,
-          type.name,
-          type.bindsName,
-          type.hasBound,
-        ),
-      );
-    }
-    for (var i = 0; i < fresh.length; i++) {
-      final type = typeParameterInfo(original[i]);
-      typeParameterInfo(fresh[i]).bound = substituteType(
-        type.bound,
-        original,
-        fresh,
-      );
-      typeParameterInfo(fresh[i]).variance = type.variance;
-    }
+  final original = signature.typeParameters;
+  final fresh = freshTypeParameters(original, functions[feFunction].typeScope);
+  if (fresh != original) {
     signature = FeCallSignature(fresh, <int>[
       for (final parameter in signature.parameters)
         substituteType(parameter, original, fresh),

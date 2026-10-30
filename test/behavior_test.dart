@@ -2124,6 +2124,12 @@ class PatternBox {
   int read() => _value;
 }
 typedef PatternAlias = PatternBox;
+class PatternGeneric<T> {
+  final T _value;
+  PatternGeneric(this._value);
+  T get value => _value;
+}
+typedef PatternGenericAlias<T> = PatternGeneric<T>;
 ''',
       'object-pattern-part.dart': r'''
 part of 'object-pattern-library.dart';
@@ -2131,6 +2137,10 @@ int readPattern(Object value) => switch(value) {
   PatternBox(_value: var n) => n,
   _ => -1,
 };
+List<T> readGenericPattern<T>(PatternGeneric<T> input) {
+  final PatternGeneric(_value: value) = input;
+  return [value];
+}
 ''',
       'object-pattern-imports.dart': r'''
 import 'object-pattern-library.dart' as p;
@@ -2138,6 +2148,10 @@ void main() {
   Object value = p.PatternBox(12);
   if(value case p.PatternAlias(:var value, :var read)) print(value + read());
   print(p.readPattern(value));
+  final generic = p.PatternGeneric<int>(13);
+  if (generic case p.PatternGeneric(:var value)) print([value] is List<int>);
+  if (generic case p.PatternGenericAlias(:var value)) print(value + 1);
+  print(p.readGenericPattern(generic) is List<int>);
 }
 ''',
       'generic-aliases-library.dart': r'''
@@ -4285,6 +4299,11 @@ void main() {
       checkSdk: true,
     );
     final rejectedRuntimeGenerics = [
+      "class C<T>{final T x;C(this.x);} void unused(C<int> c){if(c case C(x:var n)){String s=n;print(s);}}void main(){}",
+      "class C<T>{final T x;C(this.x);} typedef A<T>=C<List<T>>;void unused(C<List<String>> c){if(c case A(x:var n)){List<int> s=n;print(s);}}void main(){}",
+      "class C<T>{final T x;C(this.x);void unused(){if(this case C(x:var n)){int s=n;print(s);}}}void main(){}",
+      "class C<T>{final T x;C(this.x);} void unused<U extends num>(C<U> c){if(c case C(x:var n)){String s=n;print(s);}}void main(){}",
+      "class C<T extends num>{final T x;C(this.x);} void unused(Object c){if(c case C(x:var n)){int s=n;print(s);}}void main(){}",
       'abstract class I { void write(num value); } class C<T extends num> implements I { C(); void write(T value) {} } void main() {}',
       'abstract class I { set value(num value); } class C<T extends num> implements I { C(); set value(T value) {} } void main() {}',
       'abstract class I { num get value; set value(num value); } class C<T extends num> implements I { T value; C(this.value); } void main() {}',
@@ -4312,9 +4331,6 @@ void main() {
       rejectedRuntimeGenerics,
       checkSdk: true,
     );
-    await rejectCases('unsupported-runtime-generics', [
-      'class C<T> { final T value; C(this.value); } void main() { final value = C<int>(1); if (value case C(value: var field)) print(field); }',
-    ]);
     final exportPackages = File('${temporary.path}/export-packages.json')
       ..writeAsStringSync(
         jsonEncode({
