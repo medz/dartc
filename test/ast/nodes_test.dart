@@ -1,21 +1,7 @@
 import 'package:dartc/ast.dart';
-import 'package:dartc/source.dart';
 import 'package:test/test.dart';
 
 import 'fixtures.dart';
-
-void checkTree(AstNode root) {
-  for (final node in walk(root)) {
-    expect(node.source, same(root.source));
-    expect(node.span, SourceSpan(root.source, node.start, node.end));
-    expect(node.text, root.source.text.substring(node.start, node.end));
-    expect(() => node.childAt(-1), throwsRangeError);
-    expect(() => node.childAt(node.childCount), throwsRangeError);
-    for (var index = 0; index < node.childCount; index++) {
-      expect(node.childAt(index), same(node.childAt(index)));
-    }
-  }
-}
 
 void main() {
   group('type syntax', () {

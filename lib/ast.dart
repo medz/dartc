@@ -1,4 +1,4 @@
-/// Immutable Dart type, metadata, and basic expression nodes.
+/// Immutable Dart type, metadata, and expression nodes.
 ///
 /// Nodes refer to one source snapshot and use UTF-16 ranges. Constructing a
 /// node checks its ranges and children; it does not parse or type-check Dart.

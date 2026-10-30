@@ -1,5 +1,6 @@
 import 'package:dartc/ast.dart';
 import 'package:dartc/source.dart';
+import 'package:test/test.dart';
 
 final class SyntaxFixture(String text) {
   final SourceFile source = SourceFile(Uri.parse('memory:syntax.dart'), text);
@@ -33,6 +34,25 @@ final class SyntaxFixture(String text) {
       start: identifier.start,
       end: identifier.end,
       identifier: identifier,
+    );
+  }
+
+  InvocationExpression emptyCall(String name, [int from = 0]) {
+    final callee = reference(name, from);
+    if (source.text.substring(callee.end, callee.end + 2) != '()') {
+      throw StateError('Expected empty arguments after $name');
+    }
+    return InvocationExpression(
+      source: source,
+      start: callee.start,
+      end: callee.end + 2,
+      callee: callee,
+      arguments: ArgumentList(
+        source: source,
+        start: callee.end,
+        end: callee.end + 2,
+        arguments: [],
+      ),
     );
   }
 
@@ -134,4 +154,17 @@ FunctionTypeAnnotation functionTypeFixture() {
       ],
     ),
   );
+}
+
+void checkTree(AstNode root) {
+  for (final node in walk(root)) {
+    expect(node.source, same(root.source));
+    expect(node.span, SourceSpan(root.source, node.start, node.end));
+    expect(node.text, root.source.text.substring(node.start, node.end));
+    expect(() => node.childAt(-1), throwsRangeError);
+    expect(() => node.childAt(node.childCount), throwsRangeError);
+    for (var index = 0; index < node.childCount; index++) {
+      expect(node.childAt(index), same(node.childAt(index)));
+    }
+  }
 }

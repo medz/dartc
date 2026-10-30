@@ -1,8 +1,12 @@
 import '../source/source_file.dart';
 import '../source/source_span.dart';
 
+part 'nodes/access.dart';
 part 'nodes/annotations.dart';
+part 'nodes/cascades.dart';
 part 'nodes/expressions.dart';
+part 'nodes/operations.dart';
+part 'nodes/shorthands.dart';
 part 'nodes/type_annotations.dart';
 
 /// An immutable syntax node within one source snapshot.
