@@ -285,7 +285,7 @@ ConstantLayout layoutConstants(int start) {
         typeOffsets,
         types,
         type,
-        functions[i].closureLayout?.typeParameters.isNotEmpty ?? false,
+        functions[i].typeScope.isNotEmpty,
       );
     }
     i++;
@@ -333,6 +333,13 @@ ConstantLayout layoutConstants(int start) {
       );
     } else if (type.kind == kClass) {
       descriptorOffsets[type.argument] = 0;
+      for (final argument in type.arguments)
+        _markTypeReference(
+          typeOffsets,
+          types,
+          argument,
+          type.containsParameters,
+        );
     } else if (type.kind == kFunction) {
       signatureOffsets[type.argument] = 0;
       var signature = functionSignatures[type.argument];
@@ -391,7 +398,9 @@ ConstantLayout layoutConstants(int start) {
   while (i < classSizes.length) {
     if (descriptorOffsets[i] == 0) {
       descriptorOffsets[i] = end;
-      end = end + classDescriptorBytes;
+      end += classTypeArgumentOffsets[i] == 0
+          ? classDescriptorBytes
+          : genericClassDescriptorBytes;
     }
     i++;
   }
@@ -485,6 +494,9 @@ ConstantLayout layoutConstants(int start) {
     if (typeOffsets[i] == 0) {
       typeOffsets[i] = end;
       end = end + typeRefBytes;
+      final type = dartTypes[i];
+      if (type.kind == kClass && type.arguments.isNotEmpty)
+        end += 8 + type.arguments.length * 8;
     }
     i++;
   }

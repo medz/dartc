@@ -2399,6 +2399,40 @@ typedef Alias<T extends num> = Tag<T>;
 const saved = Tag<int>(3);
 ''',
       'generic-metadata-barrel.dart': "export 'generic-metadata.dart';",
+      'runtime-generics.dart': r'''
+part 'runtime-generics-part.dart';
+class Value<T extends num> {
+  T _value;
+  Value(this._value);
+  Value.named({required T value}) : this(value);
+  Value._private(this._value);
+  T read() => _value;
+  void write(T value) { _value = value; }
+}
+typedef Alias<T extends num> = Value<T>;
+''',
+      'runtime-generics-part.dart': r'''
+part of 'runtime-generics.dart';
+Value<T> fromPart<T extends num>(T value) => Value<T>._private(value);
+''',
+      'runtime-generics-barrel.dart':
+          "export 'runtime-generics.dart' show Value, Alias, fromPart;",
+      'runtime-generics-imports.dart': r'''
+import 'runtime-generics.dart' as first;
+import 'runtime-generics-barrel.dart' as second;
+typedef NestedAlias<T extends num> = second.Alias<T>;
+void main() {
+  final value = first.Value.named(value: 3);
+  print(value is second.Alias<int>);
+  value.write(4);
+  print(value.read());
+  final second.Value<double> context = second.Alias(1);
+  print(context.read());
+  print(context is first.Value<double>);
+  print(new NestedAlias<int>(5).read());
+  print(second.fromPart<double>(2.5).read());
+}
+''',
       'generic-metadata-imports.dart': r'''
 import 'generic-metadata.dart' as first;
 import 'generic-metadata-barrel.dart' as second;
@@ -2814,6 +2848,7 @@ void main() {
       'top-accessor-imports.dart',
       'metadata-imports.dart',
       'generic-metadata-imports.dart',
+      'runtime-generics-imports.dart',
       'named-constructors-imports.dart',
       'const-class-imports.dart',
       'const-class-metadata-only.dart',
@@ -4249,6 +4284,37 @@ void main() {
       rejectedGenericMetadata,
       checkSdk: true,
     );
+    final rejectedRuntimeGenerics = [
+      'abstract class I { void write(num value); } class C<T extends num> implements I { C(); void write(T value) {} } void main() {}',
+      'abstract class I { set value(num value); } class C<T extends num> implements I { C(); set value(T value) {} } void main() {}',
+      'abstract class I { num get value; set value(num value); } class C<T extends num> implements I { T value; C(this.value); } void main() {}',
+      'class C<T> { T value; C(this.value); } void main() { C<int>("bad"); }',
+      'class C<T extends num> { final T value; C(this.value); } void main() { C<String>("bad"); }',
+      'class C<T> { T value; C(); } void main() {}',
+      'class C<T> { T value = 1; } void main() {}',
+      'class C<T> { T value = null; } void main() {}',
+      'class C<T> { C(); T read() => 1; } void main() {}',
+      'class C<T> { C(); List<T> make() => const <T>[]; } void main() {}',
+      'class C<T> { final T? value; const C([this.value]); C<T> make() => const C<T>(); } void main() {}',
+      'class C<T> { final T value; C(this.value); } void main() { C<int>(1).value = 2; }',
+      'class C<T> { T value; C(this.value); void write(T next) { value = next; } } void main() { C<int>(1).write("bad"); }',
+      'class C<T> { C(); void take(List<T> values) {} } void main() { C<int>().take(<String>[]); }',
+      'class C<T> { T value; C(this.value); T operator [](int key) => value; void operator []=(int key, T next) { value = next; } } void main() { C<int>(1)[0] = "bad"; }',
+      'class C<T> { T value; C(this.value); T operator [](T key) => value; void operator []=(T key, T next) { value = next; } } void main() { C<int>(1)["bad"]++; }',
+      'class C<T> { C(); static bool test(Object? value) => value is T; } void main() {}',
+      'class C<T> { C(); static Object make() => C<T>(); } void main() {}',
+      "import 'runtime-generics.dart' as p; void main() { p.Value<int>._private(1); }",
+      "import 'runtime-generics.dart' as p; void main() { print(p.Value<int>(1)._value); }",
+      "import 'runtime-generics.dart' as p; void main() { p.Alias<String>('bad'); }",
+    ];
+    await rejectCases(
+      'rejected-runtime-generics',
+      rejectedRuntimeGenerics,
+      checkSdk: true,
+    );
+    await rejectCases('unsupported-runtime-generics', [
+      'class C<T> { final T value; C(this.value); } void main() { final value = C<int>(1); if (value case C(value: var field)) print(field); }',
+    ]);
     final exportPackages = File('${temporary.path}/export-packages.json')
       ..writeAsStringSync(
         jsonEncode({

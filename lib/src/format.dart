@@ -357,12 +357,16 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
         classSizes[descriptor],
         (classSizes[descriptor] - objectHeaderBytes) ~/ 8,
         references,
-        descriptorClass,
+        classTypeArgumentOffsets[descriptor] == 0
+            ? descriptorClass
+            : descriptorGenericClass,
         tagged,
         name,
         toString,
         imageErrorStackTraceOffset(descriptor),
       );
+      if (classTypeArgumentOffsets[descriptor] != 0)
+        image64(classTypeArgumentOffsets[descriptor]);
     }
     descriptor++;
   }
@@ -497,14 +501,17 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
       image64(layout.typeDescriptorOffset - offset);
       image64(
         objectStaticRelative |
-            (typeContainsParameters(typeIndex) ? objectTypeTemplate : 0),
+            (typeContainsParameters(typeIndex) ? objectTypeTemplate : 0) |
+            (type.kind == kClass && type.arguments.isNotEmpty
+                ? objectTypeArguments
+                : 0),
       );
       image64(imageTypeKind(type.kind));
       int argument = 0;
       if (type.kind == kList || type.kind == kNullable) {
         argument = layout.typeOffsets[type.argument] - offset;
       } else if (type.kind == kTypeParameter) {
-        argument = typeParameterInfo(typeIndex).ordinal;
+        argument = runtimeTypeParameterIndex(typeIndex);
       } else if (type.kind == kFunction) {
         argument = layout.signatureOffsets[type.argument] - offset;
       } else if (type.kind == kClass &&
@@ -524,6 +531,14 @@ void imageConstants(ConstantLayout layout, int codeOffset, int dataBaseOffset) {
         representation = storageRef;
       }
       image64(representation);
+      if (type.kind == kClass && type.arguments.isNotEmpty) {
+        image64(type.arguments.length);
+        for (var i = 0; i < type.arguments.length; i++)
+          image64(
+            layout.typeOffsets[type.arguments[i]] -
+                (offset + classTypeArgumentsOffset + i * 8),
+          );
+      }
     }
     typeIndex++;
   }

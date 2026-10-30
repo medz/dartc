@@ -33,7 +33,10 @@ bool _requiresInitializer(
   if (variable.lateVariable) return false;
   if (variable.modifier == 'final' || variable.modifier == 'const') return true;
   if (type < 0 && variable.type.name == '') return false;
-  return !typeCanBeNull(type < 0 ? resolveType(symbols, variable.type) : type);
+  return !typeIsSubtype(
+    tNull,
+    type < 0 ? resolveType(symbols, variable.type) : type,
+  );
 }
 
 void checkInitializers(

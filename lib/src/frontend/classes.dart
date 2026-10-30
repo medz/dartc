@@ -114,6 +114,14 @@ bool classCovariantParameter(ClassSignature signature, int parameter) =>
     parameter < signature.covariantParameters.length &&
     signature.covariantParameters[parameter];
 
+bool classCovariantType(int type, List<int> parameters) {
+  for (final parameter in parameters)
+    if (typeContainsAnyParameter(type, <int>[parameter]) &&
+        typeParameterVariance(type, parameter) >= 0)
+      return true;
+  return false;
+}
+
 bool classSignatureSubtype(
   ClassSignature actual,
   ClassSignature expected, [
@@ -473,11 +481,14 @@ List<ClassMembers> checkClassInterfaces(
             expression = parameter.defaultValue;
           }
           final scope = constants.lexicalClass;
+          final typeScope = constants.typeScope;
           constants.lexicalClass = owner;
+          constants.typeScope = classTypeParameters[owner];
           type = expression == null
               ? tNull
               : inferConstantType(constants, expression);
           constants.lexicalClass = scope;
+          constants.typeScope = typeScope;
           if (type == tNull)
             type = parameter == null ? tDynamic : nullableType(tObject);
         }

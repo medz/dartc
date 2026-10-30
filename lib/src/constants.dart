@@ -607,7 +607,7 @@ int _constantStaticOwner(ConstantContext context, AstExpression expression) {
 
 int _constantType(ConstantContext context, AstType syntax) {
   var type = resolveType(context.symbols, syntax, context.typeScope);
-  if (typeContainsParameters(type))
+  if (!context.inferringTypes && typeContainsParameters(type))
     _constantError(
       context,
       syntax.token,
@@ -641,7 +641,7 @@ int _constantConstructorType(
       token,
       'type parameter alias has no constructor namespace',
     );
-  if (typeContainsParameters(type))
+  if (!context.inferringTypes && typeContainsParameters(type))
     _constantError(
       context,
       token,

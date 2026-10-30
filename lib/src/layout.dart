@@ -1,5 +1,5 @@
 // Shared compiler/runtime object layout. Offsets are bytes.
-const int runtimeAbiVersion = 18;
+const int runtimeAbiVersion = 19;
 const int objectHeaderBytes = 16;
 const int objectFlagsOffset = 8;
 // Static objects store a descriptor displacement relative to their own address.
@@ -7,6 +7,7 @@ const int objectStaticRelative = 1;
 const int objectListFixed = 2;
 const int objectListReadOnly = 4;
 const int objectTypeTemplate = 8;
+const int objectTypeArguments = 16;
 const int stringLengthOffset = 16;
 const int stringDataOffset = 24;
 
@@ -19,7 +20,11 @@ const int descriptorTaggedBitmapOffset = 40;
 const int descriptorNameOffset = 48;
 const int descriptorToStringOffset = 56;
 const int descriptorErrorStackTraceOffset = 64;
+// Only generic-class descriptors append the physical type-environment slot.
+const int genericClassDescriptorBytes = 80;
+const int descriptorTypeArgumentsOffset = 72;
 const int descriptorClass = 0;
+const int descriptorGenericClass = 10;
 const int descriptorString = 1;
 const int metadataStringDescriptorOffset = 0;
 
@@ -148,6 +153,9 @@ const int classSubtypeCountOffset = 0;
 const int classSubtypeEntriesOffset = 8;
 const int typeClassOffset = 32;
 const int typeValueRepOffset = 40;
+// Class TypeRefs with objectTypeArguments append count and entry-relative types.
+const int classTypeArgumentCountOffset = 48;
+const int classTypeArgumentsOffset = 56;
 const int typeKindVoid = 0;
 const int typeKindInt = 1;
 const int typeKindString = 2;

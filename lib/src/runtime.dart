@@ -37,7 +37,7 @@ Object rtCaughtException() => rtExceptionValue();
 StackTrace rtCaughtTrace() => rtExceptionTrace();
 int rtClearException() => rtClearPendingException();
 
-const int rtAbiVersion = 18;
+const int rtAbiVersion = 19;
 int rtHostTarget() {
   return nativeTarget();
 }
@@ -1370,11 +1370,39 @@ int rtObjectNew(int descriptor) {
   return object;
 }
 
+int rtObjectNewTyped(int descriptor, int arguments) {
+  final mark = rtRootMark();
+  rtRootPush(arguments, storageRef);
+  final result = rtObjectNew(descriptor);
+  nativeStore64(
+    result + nativeLoad64(descriptor + descriptorTypeArgumentsOffset),
+    arguments,
+  );
+  rtRootRestore(mark);
+  return result;
+}
+
+@pragma('dartc:no-gc')
+int rtObjectTypeArguments(int object) => nativeLoad64(
+  object +
+      nativeLoad64(rtObjectDescriptor(object) + descriptorTypeArgumentsOffset),
+);
+
 int rtObjectFromData(int data) {
   var type = data + nativeLoad64(data + constantObjectTypeOffset);
   var descriptor = type + nativeLoad64(type + typeClassOffset);
   var count = nativeLoad64(data + constantObjectLengthOffset);
-  var result = rtObjectNew(descriptor);
+  var environmentOffset = 0;
+  var result = 0;
+  if (nativeLoad64(descriptor + descriptorKindOffset) ==
+      descriptorGenericClass) {
+    environmentOffset = nativeLoad64(
+      descriptor + descriptorTypeArgumentsOffset,
+    );
+    result = rtObjectNewTyped(descriptor, rtClassTypeEnvironment(type));
+  } else {
+    result = rtObjectNew(descriptor);
+  }
   var mark = rtRootMark();
   rtRootPush(result, storageRef);
   try {
@@ -1382,14 +1410,17 @@ int rtObjectFromData(int data) {
     if (bitmap != 0) bitmap = descriptor + bitmap;
     var entry = data + constantObjectDataOffset;
     var index = 0;
+    var offset = objectHeaderBytes;
     while (index < count) {
+      if (offset == environmentOffset) offset += 8;
+      final field = (offset - objectHeaderBytes) ~/ 8;
       var kind = nativeLoad64(entry);
       var value = nativeLoad64(entry + 8);
       if (kind == typeKindInt ||
           kind == typeKindDouble ||
           kind == typeKindBool) {
         if (bitmap != 0 &&
-            (nativeLoad64(bitmap + (index ~/ 64) * 8) & (1 << (index & 63))) !=
+            (nativeLoad64(bitmap + (field ~/ 64) * 8) & (1 << (field & 63))) !=
                 0) {
           if (kind == typeKindInt)
             value = rtBoxInt(value);
@@ -1405,7 +1436,8 @@ int rtObjectFromData(int data) {
       } else if (kind == typeKindList || kind == typeKindClass) {
         value = nativeCall0(entry + value);
       }
-      nativeStore64(result + objectHeaderBytes + index * 8, value);
+      nativeStore64(result + offset, value);
+      offset += 8;
       entry = entry + constantObjectEntryBytes;
       index = index + 1;
     }
@@ -1440,6 +1472,35 @@ int rtTypeArgument(int type) {
   return type + nativeLoad64(type + typeArgumentOffset);
 }
 
+@pragma('dartc:no-gc')
+int rtClassTypeArgumentCount(int type) {
+  if ((nativeLoad64(type + objectFlagsOffset) & objectTypeArguments) == 0)
+    return 0;
+  return nativeLoad64(type + classTypeArgumentCountOffset);
+}
+
+@pragma('dartc:no-gc')
+int rtClassTypeArgument(int type, int index) {
+  final entry = type + classTypeArgumentsOffset + index * 8;
+  return entry + nativeLoad64(entry);
+}
+
+int rtClassTypeEnvironment(int type) {
+  final mark = rtRootMark();
+  rtRootPush(type, storageRef);
+  try {
+    final arguments = <Object>[];
+    final count = rtClassTypeArgumentCount(type);
+    for (var i = 0; i < count; i++)
+      arguments.add(
+        nativeValueFromBits(rtClassTypeArgument(type, i)) as Object,
+      );
+    return nativeValueBits(arguments);
+  } finally {
+    rtRootRestore(mark);
+  }
+}
+
 int rtInstantiateType(int type, int arguments) {
   if ((nativeLoad64(type + objectFlagsOffset) & objectTypeTemplate) == 0)
     return type;
@@ -1464,6 +1525,34 @@ int rtInstantiateType(int type, int arguments) {
         nativeLoad64(child + typeValueRepOffset) != storageRef)
       representation = storageTagged;
     nativeStore64(result + typeValueRepOffset, representation);
+  } else if (kind == typeKindClass) {
+    final count = rtClassTypeArgumentCount(type);
+    result = rtAlloc(classTypeArgumentsOffset + count * 8);
+    nativeStore64(result, rtObjectDescriptor(type));
+    nativeStore64(result + objectFlagsOffset, objectTypeArguments);
+    nativeStore64(result + typeKindOffset, typeKindClass);
+    final subtypes = nativeLoad64(type + typeArgumentOffset);
+    nativeStore64(
+      result + typeArgumentOffset,
+      subtypes == 0 ? 0 : type + subtypes - result,
+    );
+    nativeStore64(
+      result + typeClassOffset,
+      type + nativeLoad64(type + typeClassOffset) - result,
+    );
+    nativeStore64(result + typeValueRepOffset, storageRef);
+    nativeStore64(result + classTypeArgumentCountOffset, count);
+    for (var i = 0; i < count; i++) {
+      final entry = result + classTypeArgumentsOffset + i * 8;
+      nativeStore64(entry, rtClassTypeArgument(type, i) - entry);
+    }
+    // Every edge is valid before a recursive instantiation can enter GC.
+    rtRootPush(result, storageRef);
+    for (var i = 0; i < count; i++) {
+      final child = rtInstantiateType(rtClassTypeArgument(type, i), arguments);
+      final entry = result + classTypeArgumentsOffset + i * 8;
+      nativeStore64(entry, child - entry);
+    }
   } else {
     var source = rtTypeArgument(type);
     var count = nativeLoad64(source + functionSignatureCountOffset);
@@ -1606,7 +1695,21 @@ int rtTypeSubtype(int actual, int expected) {
   }
   if (source == typeKindClass) {
     var left = actual + nativeLoad64(actual + typeClassOffset);
-    return rtClassSubtype(left, expected);
+    if (rtClassSubtype(left, expected) == 0) return 0;
+    final count = rtClassTypeArgumentCount(expected);
+    if (count == 0) return 1;
+    if (left != expected + nativeLoad64(expected + typeClassOffset) ||
+        count != rtClassTypeArgumentCount(actual))
+      return 0;
+    for (var i = 0; i < count; i++) {
+      if (rtTypeSubtype(
+            rtClassTypeArgument(actual, i),
+            rtClassTypeArgument(expected, i),
+          ) ==
+          0)
+        return 0;
+    }
+    return 1;
   }
   if (source == typeKindFunction) {
     var targetSignature = nativeLoad64(expected + typeArgumentOffset);
@@ -1801,7 +1904,25 @@ int rtValueMatches(int value, int expected) {
     return rtTypeSubtype(rtFunctionType(value), expected);
   }
   if (kind == typeKindClass) {
-    return rtClassSubtype(rtObjectDescriptor(value), expected);
+    final descriptor = rtObjectDescriptor(value);
+    if (rtClassSubtype(descriptor, expected) == 0) return 0;
+    final count = rtClassTypeArgumentCount(expected);
+    if (count == 0) return 1;
+    if (descriptor != expected + nativeLoad64(expected + typeClassOffset) ||
+        nativeLoad64(descriptor + descriptorKindOffset) !=
+            descriptorGenericClass)
+      return 0;
+    final arguments = rtObjectTypeArguments(value);
+    if (count != rtListLength(arguments)) return 0;
+    for (var i = 0; i < count; i++) {
+      if (rtTypeSubtype(
+            rtListRawGet(arguments, i),
+            rtClassTypeArgument(expected, i),
+          ) ==
+          0)
+        return 0;
+    }
+    return 1;
   }
   return 1;
 }

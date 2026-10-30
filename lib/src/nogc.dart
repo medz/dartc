@@ -108,6 +108,7 @@ List<int> checkNoGcSsa(
           var target = instruction.target;
           if (_builtinThrows(target)) effects |= ssaThrow;
           if (target == bObjectNew ||
+              target == bObjectNewTyped ||
               target == bListNew ||
               target == bTypeInstantiate ||
               target == bListNewTyped ||

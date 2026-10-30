@@ -158,7 +158,7 @@ void _resolveClassParameters(SymbolTable symbols, int symbol) {
   final parameters = _declareTypeParameters(
     symbols,
     syntax.typeParameters,
-    symbol,
+    declaration.target,
   );
   classTypeParameters[declaration.target] = parameters;
   declaration.boundUses = <TypeApplication>[];
@@ -545,6 +545,14 @@ int resolveObjectPatternType(
     return resolved;
   var symbol = _typeSymbol(symbols, syntax, scope);
   var declaration = symbols.declarations[symbol];
+  if (typeIsClass(resolved) &&
+      (declaration.kind == symbolClass || declaration.kind == symbolAlias) &&
+      declarationTypeParameters(symbols, symbol).isNotEmpty)
+    _typeError(
+      symbols,
+      syntax.token,
+      'generic class object patterns require explicit type arguments',
+    );
   if (declaration.kind == symbolType && declaration.target < 0) {
     var context = typeNonNullable(input);
     if (typeIsList(context) && !typeIsSubtype(typeArgument(context), tNull))

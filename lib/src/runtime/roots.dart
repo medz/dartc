@@ -243,6 +243,10 @@ void rtTraceObject(int value, int buffer) {
       final typeKind = nativeLoad64(value + typeKindOffset);
       if (typeKind == typeKindList || typeKind == typeKindNullable) {
         rtTraceType(rtTypeArgument(value), buffer);
+      } else if (typeKind == typeKindClass) {
+        final count = rtClassTypeArgumentCount(value);
+        for (var i = 0; i < count; i++)
+          rtTraceType(rtClassTypeArgument(value, i), buffer);
       } else if (typeKind == typeKindFunction &&
           nativeLoad64(value + typeArgumentOffset) != 0) {
         final signature = rtTypeArgument(value);
@@ -256,7 +260,7 @@ void rtTraceObject(int value, int buffer) {
           rtTraceType(entry + nativeLoad64(entry), buffer);
         }
       }
-    case descriptorClass || descriptorFunction:
+    case descriptorClass || descriptorGenericClass || descriptorFunction:
       if (kind == descriptorFunction)
         rtTraceType(rtFunctionType(value), buffer);
       final fields = nativeLoad64(descriptor + descriptorFieldsOffset);

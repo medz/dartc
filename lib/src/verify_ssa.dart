@@ -71,6 +71,20 @@ class _SsaVerifier {
   void definitions() {
     final info = functions[number];
     final closure = info.closureLayout;
+    if (info.receiverTypeParameters.isNotEmpty) {
+      if (info.receiverParameter < 0 ||
+          info.receiverParameter >= info.parameterTypes.length ||
+          !typeIsClass(info.parameterTypes[info.receiverParameter]))
+        fail('generic receiver parameter');
+      final owner = typeArgument(info.parameterTypes[info.receiverParameter]);
+      if (classTypeParameters[owner].length !=
+          info.receiverTypeParameters.length)
+        fail('generic receiver scope');
+      for (var i = 0; i < info.receiverTypeParameters.length; i++) {
+        if (info.receiverTypeParameters[i] != classTypeParameters[owner][i])
+          fail('generic receiver identity');
+      }
+    }
     if (closure != null && closure.typeParameters.isNotEmpty) {
       if (info.typeParameters.isNotEmpty ||
           closure.boundReceiver ||
@@ -80,6 +94,7 @@ class _SsaVerifier {
           info.parameterTypes[0] != tFunction)
         fail('closure type environment layout');
       var enclosing = -1;
+      var receiverOwner = -1;
       for (var i = 0; i < closure.typeParameters.length; i++) {
         final parameter = closure.typeParameters[i];
         if (parameter < 0 ||
@@ -87,17 +102,35 @@ class _SsaVerifier {
             !typeIsParameter(parameter))
           fail('closure type environment parameter');
         final declaration = typeParameterInfo(parameter);
-        final owner = -declaration.owner - 1;
-        if (i == 0) enclosing = owner;
-        if (owner < 0 ||
-            owner >= functions.length ||
-            owner != enclosing ||
-            functions[owner].typeParameters.length !=
-                closure.typeParameters.length ||
-            functions[owner].typeParameters[i] != parameter ||
-            declaration.ordinal != i)
-          fail('closure type environment scope');
+        if (declaration.owner >= 0) {
+          final owner = declaration.owner;
+          if (i == 0) receiverOwner = owner;
+          if (owner >= classTypeParameters.length ||
+              owner != receiverOwner ||
+              enclosing >= 0 ||
+              i >= classTypeParameters[owner].length ||
+              classTypeParameters[owner][i] != parameter ||
+              declaration.ordinal != i)
+            fail('closure type environment scope');
+        } else {
+          final owner = -declaration.owner - 1;
+          if (enclosing < 0) enclosing = owner;
+          if (owner >= functions.length || owner != enclosing)
+            fail('closure type environment owner');
+          final scope = functions[owner].typeScope;
+          if (scope.length != closure.typeParameters.length ||
+              scope[i] != parameter ||
+              runtimeTypeParameterIndex(parameter) != i)
+            fail('closure type environment scope');
+          for (var p = 0; p < i; p++)
+            if (scope[p] != closure.typeParameters[p])
+              fail('closure type environment prefix');
+        }
       }
+      if (enclosing < 0 &&
+          classTypeParameters[receiverOwner].length !=
+              closure.typeParameters.length)
+        fail('closure receiver type environment count');
     }
     if (info.typeParameters.isNotEmpty &&
         (info.typeEnvironment < 0 ||
@@ -194,27 +227,28 @@ class _SsaVerifier {
       var expectedResult = callee.result;
       if (op == opGenericCall) {
         var arguments = genericCalls[target].typeArguments;
-        if (callee.typeParameters.isEmpty ||
-            arguments.length != callee.typeParameters.length)
+        final scope = callee.typeScope;
+        if (scope.isEmpty || arguments.length != scope.length)
           fail('generic argument count');
         for (var argument in arguments) type(argument);
         for (var i = 0; i < arguments.length; i++) {
           var bound = substituteType(
-            typeParameterInfo(callee.typeParameters[i]).bound,
-            callee.typeParameters,
+            typeParameterInfo(scope[i]).bound,
+            scope,
             arguments,
           );
           if (!typeIsSubtype(arguments[i], bound))
             fail('generic argument bound');
         }
         expectedResult = genericBoundaryType(expectedResult);
-      } else if (callee.typeParameters.isNotEmpty) {
+      } else if (callee.typeParameters.isNotEmpty ||
+          callee.receiverTypeParameters.isNotEmpty) {
         fail('generic call requires type arguments');
       }
       if (callee.parameterTypes.length != count || result != expectedResult)
         fail('call metadata');
     } else if (op == opBuiltin) {
-      if (!(target >= bPrintString && target <= bHostWriteError ||
+      if (!(target >= bPrintString && target <= bObjectTypeArguments ||
           target >= bNativeLoad64 &&
               target <= bNativeResumeContext &&
               target != bNativeMetadataAddress))
@@ -223,7 +257,10 @@ class _SsaVerifier {
       if (target >= bNativeLoad64) count = nativeBuiltinArity(target);
       // These normalized representation operations have explicit SSA shapes.
       // General library/primitive signatures remain owned by their producers.
-      if (target == bLateError || target == bObjectClassId) count = 1;
+      if (target == bLateError ||
+          target == bObjectClassId ||
+          target == bObjectTypeArguments)
+        count = 1;
       if (target >= bBoxDouble && target <= bNumberProperty) {
         count =
             target == bDoubleModulo ||
@@ -242,7 +279,9 @@ class _SsaVerifier {
         fail('invoke operand count');
       } else if (target == bListSublist) {
         count = 4;
-      } else if (target == bTypeInstantiate || target == bValueCheck) {
+      } else if (target == bTypeInstantiate ||
+          target == bValueCheck ||
+          target == bObjectNewTyped) {
         count = 2;
       } else if (target == bListNewTyped) {
         count = 1;
@@ -411,6 +450,19 @@ class _SsaVerifier {
         if (!typeIsClass(inputType(instruction.inputs[0])))
           fail('class identity receiver type');
         if (result != tInt) fail('class identity result');
+      } else if (target == bObjectNewTyped) {
+        expectInput(instruction, 0, tPointer);
+        expectInput(instruction, 1, listType(tObject));
+        if (!typeIsClass(result) ||
+            classTypeParameters[typeArgument(result)].isEmpty)
+          fail('generic object result');
+      } else if (target == bObjectTypeArguments) {
+        final receiver = inputType(instruction.inputs[0]);
+        if (!typeIsClass(receiver) ||
+            classTypeParameters[typeArgument(receiver)].isEmpty)
+          fail('generic object environment receiver');
+        if (result != listType(tObject))
+          fail('generic object environment result');
       } else if (target >= bNativeLoad64) {
         for (var input in instruction.inputs) {
           if (inputType(input) != nativeBuiltinInputType(target))

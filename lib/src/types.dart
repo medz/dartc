@@ -324,6 +324,12 @@ int classInstanceType(int owner, List<int> arguments) => arguments.isEmpty
     ? classType(owner)
     : _appliedType(kClass, owner, arguments);
 
+int substituteClassType(int type, int receiver) => substituteType(
+  type,
+  classTypeParameters[typeArgument(receiver)],
+  dartTypes[receiver].arguments,
+);
+
 int ffiType(int kind, [int argument = -1]) =>
     _appliedType(kFfi, kind, argument < 0 ? const <int>[] : <int>[argument]);
 
@@ -684,6 +690,10 @@ bool typeContainsParameters(int type) => dartTypes[type].containsParameters;
 int genericBoundaryType(int type) {
   if (!typeContainsParameters(type)) return type;
   if (typeIsList(type)) return listType(tDynamic);
+  if (typeIsClass(type))
+    return classInstanceType(typeArgument(type), <int>[
+      for (final _ in dartTypes[type].arguments) tDynamic,
+    ]);
   if (typeIsFunction(type)) return tFunction;
   if (typeIsNullable(type) && typeIsReference(type))
     return nullableType(genericBoundaryType(typeArgument(type)));

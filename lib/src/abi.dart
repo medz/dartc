@@ -76,6 +76,9 @@ int runtimeFunction(int builtin, int castType) {
   if (builtin == bArguments) return abiFunction('rtArguments', 0);
   if (builtin == bHostTarget) return abiFunction('rtHostTarget', 0);
   if (builtin == bObjectNew) return abiFunction('rtObjectNew', 0);
+  if (builtin == bObjectNewTyped) return abiFunction('rtObjectNewTyped', 0);
+  if (builtin == bObjectTypeArguments)
+    return abiFunction('rtObjectTypeArguments', 0);
   if (builtin == bObjectGet) return abiFunction('rtObjectGet', 0);
   if (builtin == bObjectSet) return abiFunction('rtObjectSet', 0);
   if (builtin == bObjectClassId) return abiFunction('rtObjectClassId', 0);

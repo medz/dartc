@@ -148,6 +148,8 @@ const int bLateError = 86;
 const int bObjectClassId = 87;
 const int bHostReadSource = 88;
 const int bHostWriteError = 89;
+const int bObjectNewTyped = 90;
+const int bObjectTypeArguments = 91;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;
@@ -233,6 +235,9 @@ class ClosureLayout(
 
 class FunctionInfo {
   List<int> typeParameters = const <int>[];
+  // Class parameters precede the method's own parameters in its environment.
+  int receiverParameter = -1;
+  List<int> receiverTypeParameters = const <int>[];
   int typeEnvironment = -1;
   String name;
   int start;
@@ -254,9 +259,12 @@ class FunctionInfo {
   int callableAdapter = -1;
   ClosureLayout? closureLayout;
 
-  List<int> get typeScope => typeParameters.isNotEmpty
-      ? typeParameters
-      : closureLayout?.typeParameters ?? const <int>[];
+  List<int> get typeScope {
+    if (closureLayout != null && closureLayout!.typeParameters.isNotEmpty)
+      return closureLayout!.typeParameters;
+    if (receiverTypeParameters.isEmpty) return typeParameters;
+    return <int>[...receiverTypeParameters, ...typeParameters];
+  }
 
   FunctionInfo(
     this.name,
@@ -302,6 +310,7 @@ int internCallShape(int positional, List<String> names) {
 // This call crosses the shared body's representation boundary explicitly.
 class GenericCall {
   final int function;
+  // Receiver class arguments, followed by the function's own arguments.
   final List<int> typeArguments;
 
   GenericCall(this.function, this.typeArguments);
@@ -324,12 +333,20 @@ enum ImageKind { executable, dynamicLibrary, object, staticLibrary }
 ImageKind imageKind = ImageKind.executable;
 
 List<int> classSizes = <int>[];
+List<int> classTypeArgumentOffsets = <int>[];
 List<List<int>> classPointerMasks = <List<int>>[];
 List<List<int>> classTaggedMasks = <List<int>>[];
 List<String> classNames = <String>[];
 List<int> classToStringFunctions = <int>[];
 int coreErrorClass = -1;
 int coreErrorStackTraceOffset = 0;
+
+int runtimeTypeParameterIndex(int parameter) {
+  final declaration = typeParameterInfo(parameter);
+  if (declaration.owner >= 0) return declaration.ordinal;
+  return functions[-declaration.owner - 1].receiverTypeParameters.length +
+      declaration.ordinal;
+}
 
 int internString(String text) {
   var i = 0;

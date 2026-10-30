@@ -98,7 +98,10 @@ int ssaEffects(int op, int target) {
     if (target >= bNativeFloat64Add && target <= bNativeValueFromBits) return 0;
     if (target == bFunctionEntry || target == bFunctionType)
       return ssaRead | ssaNative;
-    if (target == bValueIdentical || target == bObjectClassId) return ssaRead;
+    if (target == bValueIdentical ||
+        target == bObjectClassId ||
+        target == bObjectTypeArguments)
+      return ssaRead;
     if (target == bBoxRef || target == bBoxBool) return 0;
     if (target == bNativeTarget) return 0;
     if (target == bNativeFramePointer) return ssaRead | ssaNative;

@@ -13,6 +13,19 @@ class Leaf {
   int call() => marker;
 }
 
+class GenericRootBase {
+  final int marker;
+  const GenericRootBase(this.marker);
+}
+
+class GenericRootBox<T> extends GenericRootBase {
+  final T value;
+  const GenericRootBox(this.value) : super(860);
+  bool accepts(Object? candidate) => candidate is T;
+  bool Function(Object?) predicate() =>
+      (candidate) => candidate is T;
+}
+
 class ConstantLeaf {
   final int marker;
   final Object? wide;
@@ -57,6 +70,12 @@ class Wide {
   int p119 = 0, p120 = 0, p121 = 0, p122 = 0, p123 = 0, p124 = 0, p125 = 0;
   Leaf third;
   Wide(this.tail, this.taggedTail, this.p62, this.third);
+}
+
+class GenericRootWide<T> extends Wide {
+  final T value;
+  GenericRootWide(this.value)
+    : super(Leaf(863), Leaf(864), Leaf(865), Leaf(866));
 }
 
 abstract class WideOwnFields {
@@ -914,6 +933,11 @@ bool Function(Object?) genericRootTypeTest<T>() =>
     (value) => value is T;
 bool Function(Object?) genericNestedRootTypeTest<T>() =>
     genericRootTypeTest<List<T>>();
+List<GenericRootBox<List<T>>> genericRootBoxes<T>(T value) => [
+  GenericRootBox<List<T>>([value]),
+];
+bool Function(Object?) genericRootBoxPredicate<T>(T value) =>
+    GenericRootBox<T>(value).predicate();
 
 void genericTypeRoots(int queue, int edges) {
   var mark = roots.rtRootMark();
@@ -978,6 +1002,53 @@ void genericTypeRoots(int queue, int edges) {
   check(rt.nativeLoad64(argument + abi.typeKindOffset) == abi.typeKindList);
   check(traceObject(argument, edges) == 0);
   check(tests[0](<Leaf>[]) && !tests[0](<int>[]));
+
+  final boxes = genericRootBoxes<Leaf>(Leaf(861));
+  final boxesRaw = rt.nativeValueBits(boxes);
+  final boxesType = rt.nativeLoad64(boxesRaw + abi.listTypeOffset);
+  final boxType = rt.rtTypeArgument(boxesType);
+  check(traceObject(boxType, edges) == 1);
+  final elementType = rt.nativeLoad64(edges);
+  check(rt.nativeLoad64(elementType + abi.typeKindOffset) == abi.typeKindList);
+  check(rt.rtClassTypeArgumentCount(boxType) == 1);
+  check(rt.rtClassTypeArgument(boxType, 0) == elementType);
+  final box = rt.nativeValueBits(boxes[0]);
+  final descriptor = rt.rtObjectDescriptor(box);
+  check(
+    rt.nativeLoad64(descriptor + abi.descriptorKindOffset) ==
+        abi.descriptorGenericClass,
+  );
+  final classEnvironment = rt.rtObjectTypeArguments(box);
+  check(traceObject(box, edges) == 2);
+  check(contains(edges, 2, classEnvironment));
+  check(contains(edges, 2, rt.nativeValueBits(boxes[0].value)));
+  check(traceObject(classEnvironment, edges) == 1);
+  check(traceObject(rt.nativeLoad64(edges), edges) == 1);
+  final actualArgument = rt.nativeLoad64(edges);
+  check(rt.rtTypeSubtype(actualArgument, elementType) == 1);
+
+  final predicate = genericRootBoxPredicate<List<Leaf>>(<Leaf>[]);
+  final constant = const GenericRootBox<int>(862);
+  final wide = GenericRootWide<List<Leaf>>(<Leaf>[Leaf(867)]);
+  final wideAddress = rt.nativeValueBits(wide);
+  final wideEdges = traceObject(wideAddress, edges);
+  check(contains(edges, wideEdges, rt.rtObjectTypeArguments(wideAddress)));
+  check(contains(edges, wideEdges, rt.nativeValueBits(wide.value)));
+  heap.rtCollect();
+  check(boxes[0].marker == 860 && boxes[0].value[0].marker == 861);
+  value = boxes[0];
+  check(value is GenericRootBox<List<Leaf>>);
+  check(value is GenericRootBox<List<Object>>);
+  check(value is! GenericRootBox<List<int>>);
+  final GenericRootBox<List<Object>> widened = boxes[0];
+  check(widened.accepts(<Leaf>[]) && !widened.accepts(<int>[]));
+  check(predicate(<Leaf>[]) && !predicate(<int>[]));
+  check(constant.marker == 860 && constant.value == 862);
+  value = constant;
+  check(value is GenericRootBox<int> && value is! GenericRootBox<String>);
+  check(wide.tail.marker == 863 && (wide.taggedTail as Leaf).marker == 864);
+  check(wide.p62.marker == 865 && wide.third.marker == 866);
+  check(wide.value[0].marker == 867);
   check(roots.rtRootMark() == mark);
 }
 

@@ -276,8 +276,8 @@ List<int> feFieldTypes = <int>[];
 List<int> feFieldIndices = <int>[];
 List<int> feLateFieldStates = <int>[];
 List<int> feLateFieldGetters = <int>[];
-List<int> feLateFieldSetters = <int>[];
-List<int> feLateFunctionFields = <int>[];
+List<int> feFieldSetters = <int>[];
+List<int> feAccessorFields = <int>[];
 List<int> feOwners = <int>[];
 // 0 ordinary function, 1 generative constructor, 2 factory constructor.
 List<int> feConstructors = <int>[];
@@ -400,7 +400,7 @@ int feRegisterFunction(
   var name = syntax.name;
   var result = tDynamic;
   if (constructor)
-    result = classType(owner);
+    result = classInstanceType(owner, classParameters);
   else if (syntax.result.name != '')
     result = resolveType(feSymbols, syntax.result, typeScope);
   else if (owner >= 0 &&
@@ -414,7 +414,7 @@ int feRegisterFunction(
   if (owner >= 0) {
     if (!constructor) name = classNames[owner] + '.' + syntax.name;
     if (!syntax.isStatic && !syntax.factory) {
-      types.add(classType(owner));
+      types.add(classInstanceType(owner, classParameters));
     }
   }
   if (typeParameters.isNotEmpty) types.add(listType(tObject));
@@ -469,6 +469,10 @@ int feRegisterFunction(
     FunctionInfo(name, 0, count, count, result, types, <int>[], source),
   );
   functions[id].typeParameters = typeParameters;
+  if (owner >= 0 && !syntax.isStatic && !syntax.factory) {
+    functions[id].receiverParameter = 0;
+    functions[id].receiverTypeParameters = classParameters;
+  }
   functions[id].parameterOffset = count - syntax.parameters.length;
   if (typeParameters.isNotEmpty)
     functions[id].typeEnvironment = owner >= 0 && !syntax.isStatic ? 1 : 0;
@@ -481,7 +485,7 @@ int feRegisterFunction(
   feParamDefaults.add(<ConstantValue>[]);
   feFunctionNodes.add(syntax);
   feOwners.add(owner);
-  feLateFunctionFields.add(-1);
+  feAccessorFields.add(-1);
   if (constructor) {
     feConstructors.add(syntax.factory ? 2 : 1);
     feClassConstructors[owner].add(id);
@@ -526,22 +530,17 @@ void feCollectDeclarations(AstUnit unit) {
   while (i < unit.classes.length) {
     var syntax = unit.classes[i];
     if (syntax.typeParameters.isNotEmpty) {
-      if (syntax.constructors.isEmpty)
-        feAstError(
-          syntax.token,
-          'generic class implicit constructors are not yet supported',
-        );
       for (final constructor in syntax.constructors)
-        if (!constructor.constant || constructor.factory)
+        if (constructor.factory)
           feAstError(
             constructor.token,
-            'non-const and factory constructors of generic classes are not yet supported',
+            'generic class factory constructors are not yet supported',
           );
       for (final method in syntax.methods)
-        if (!method.isStatic)
+        if (!method.isStatic && method.typeParameters.isNotEmpty)
           feAstError(
             method.token,
-            'generic class instance methods are not yet supported',
+            'generic methods of generic classes are not yet supported',
           );
       for (final field in syntax.fields)
         if (field.lateVariable)
@@ -576,6 +575,7 @@ void feCollectDeclarations(AstUnit unit) {
     feClassFieldCounts.add(0);
     feClassConstructors.add(<int>[]);
     classSizes.add(objectHeaderBytes);
+    classTypeArgumentOffsets.add(0);
     classPointerMasks.add(<int>[]);
     classTaggedMasks.add(<int>[]);
     classToStringFunctions.add(-1);
@@ -681,7 +681,7 @@ void feCollectDeclarations(AstUnit unit) {
       feFieldIndices.add(field);
       feLateFieldStates.add(-1);
       feLateFieldGetters.add(-1);
-      feLateFieldSetters.add(-1);
+      feFieldSetters.add(-1);
       field++;
     }
     feClassFieldCounts[i] = field;
@@ -756,23 +756,25 @@ void feCollectDeclarations(AstUnit unit) {
     for (var index = 0; index < syntax.fields.length; index++) {
       final field = feClassFieldStarts[i] + index;
       final variable = syntax.fields[index];
-      if (!variable.lateVariable) continue;
-      final getter = AstFunction(
-        '#lateGet:' + variable.name,
-        variable.type,
-        const <AstParameter>[],
-        null,
-        variable.initializer.isEmpty ? null : variable.initializer[0],
-        false,
-        variable.token,
-        true,
-      );
-      final get = feRegisterFunction(getter, i, false);
-      feLateFunctionFields[get] = field;
-      feLateFieldGetters[field] = get;
+      if (!variable.lateVariable && classTypeParameters[i].isEmpty) continue;
+      if (variable.lateVariable) {
+        final getter = AstFunction(
+          '#lateGet:' + variable.name,
+          variable.type,
+          const <AstParameter>[],
+          null,
+          variable.initializer.isEmpty ? null : variable.initializer[0],
+          false,
+          variable.token,
+          true,
+        );
+        final get = feRegisterFunction(getter, i, false);
+        feAccessorFields[get] = field;
+        feLateFieldGetters[field] = get;
+      }
       if (variable.hasSetter) {
         final setter = AstFunction(
-          '#lateSet:' + variable.name,
+          '#fieldSet:' + variable.name,
           variable.type,
           <AstParameter>[
             AstParameter(variable.type, '#value', false, variable.token),
@@ -784,8 +786,8 @@ void feCollectDeclarations(AstUnit unit) {
           true,
         );
         final set = feRegisterFunction(setter, i, false);
-        feLateFunctionFields[set] = field;
-        feLateFieldSetters[field] = set;
+        feAccessorFields[set] = field;
+        feFieldSetters[field] = set;
       }
     }
     var toString = feMethod(i, 'toString', false);
@@ -850,13 +852,17 @@ List<int> feTypeScope(int function) {
   if (function >= feOwners.length) return scope;
   final owner = feLexicalOwner(function);
   if (owner < 0 || classTypeParameters[owner].isEmpty) return scope;
+  if (typeParameterIndex(scope, classTypeParameters[owner][0]) >= 0)
+    return scope;
   return <int>[...classTypeParameters[owner], ...scope];
 }
 
 int feResolveType(AstType syntax) {
   final type = resolveType(feSymbols, syntax, feTypeScope(feFunction));
   final owner = feLexicalOwner(feFunction);
-  if (owner >= 0 && typeContainsAnyParameter(type, classTypeParameters[owner]))
+  if (owner >= 0 &&
+      typeContainsAnyParameter(type, classTypeParameters[owner]) &&
+      !typeParametersInScope(type, functions[feFunction].typeScope))
     feAstError(
       syntax.token,
       'class type parameter cannot be used by a static member',
@@ -867,6 +873,9 @@ int feResolveType(AstType syntax) {
 void feLoadCurrentTypeEnvironment() {
   if (functions[feFunction].typeParameters.isNotEmpty) {
     feOperand(opLoadLocal, feTypeEnvironmentSlot(feFunction));
+  } else if (functions[feFunction].receiverTypeParameters.isNotEmpty) {
+    feOperand(opLoadLocal, functions[feFunction].receiverParameter);
+    feBuiltinTyped(bObjectTypeArguments, 1, listType(tObject));
   } else {
     feOperand(opLoadLocal, 0);
     feOperand(opInt, 2);
@@ -1167,9 +1176,14 @@ int feConstructorType(int symbol, List<AstType> arguments, int token) {
     symbol,
     arguments,
     token,
-    const <int>[],
+    feTypeScope(feFunction),
     false,
   );
+  final owner = feLexicalOwner(feFunction);
+  if (owner >= 0 &&
+      typeContainsAnyParameter(type, classTypeParameters[owner]) &&
+      !typeParametersInScope(type, functions[feFunction].typeScope))
+    feAstError(token, 'class type parameter cannot be used by a static member');
   if (declaration.kind == symbolAlias &&
       feSymbols.aliases[declaration.target].expandsToParameter)
     feAstError(token, 'type parameter alias has no constructor namespace');
@@ -2357,11 +2371,6 @@ void feDefaultArgument(int function, int parameter, int token) {
 }
 
 int feConstantGetter(ConstantValue value) {
-  if (typeIsClass(value.kind) && dartTypes[value.kind].arguments.isNotEmpty)
-    feAstError(
-      feFunctionNodes[feFunction].token,
-      'runtime generic class instances are not yet supported',
-    );
   var key = value.integer;
   while (feConstantGetters.length <= key) feConstantGetters.add(-1);
   if (feConstantGetters[key] >= 0) return feConstantGetters[key];
@@ -2471,14 +2480,58 @@ void feLoadTypeEnvironment(List<int> arguments) {
   feOperand(opLoadLocal, environment);
 }
 
-int fePrepareInferredArguments(
+class FeCallSignature(
+  final List<int> typeParameters,
+  final List<int> parameters,
+  final int result,
+);
+
+class FeCallArguments(final List<int> types, final List<int> slots);
+
+FeCallArguments fePrepareInferredArguments(
   AstExpression call,
   int function,
+  FeCallSignature signature,
   int context,
   bool suppliedOnly,
 ) {
   var info = functions[function];
-  var parameters = info.typeParameters;
+  // A recursive call infers new arguments; the caller's same declaration
+  // parameters are fixed types, not inference variables for that call.
+  var recursive = false;
+  for (final parameter in signature.typeParameters)
+    if (typeParameterIndex(functions[feFunction].typeScope, parameter) >= 0)
+      recursive = true;
+  if (recursive) {
+    final original = signature.typeParameters;
+    final fresh = <int>[];
+    for (final parameter in original) {
+      final type = typeParameterInfo(parameter);
+      fresh.add(
+        newTypeParameter(
+          type.owner,
+          type.ordinal,
+          type.name,
+          type.bindsName,
+          type.hasBound,
+        ),
+      );
+    }
+    for (var i = 0; i < fresh.length; i++) {
+      final type = typeParameterInfo(original[i]);
+      typeParameterInfo(fresh[i]).bound = substituteType(
+        type.bound,
+        original,
+        fresh,
+      );
+      typeParameterInfo(fresh[i]).variance = type.variance;
+    }
+    signature = FeCallSignature(fresh, <int>[
+      for (final parameter in signature.parameters)
+        substituteType(parameter, original, fresh),
+    ], substituteType(signature.result, original, fresh));
+  }
+  var parameters = signature.typeParameters;
   final usingBounds = sourceVersionAtLeast(
     feSources,
     feTokens[call.token].source,
@@ -2489,7 +2542,7 @@ int fePrepareInferredArguments(
   var upper = List<int>.filled(parameters.length, -1);
   if (context >= 0 && context != tDynamic && context != tVoid)
     constrainGenericTypes(
-      info.result,
+      signature.result,
       context,
       parameters,
       lower,
@@ -2515,7 +2568,7 @@ int fePrepareInferredArguments(
   var offset = feParameterOffset(function);
   var bindings = bindArguments(feSources, syntax, call, 1);
   final templates = <int>[
-    for (final binding in bindings) info.parameterTypes[offset + binding],
+    for (final binding in bindings) signature.parameters[binding],
   ];
   final stages = genericArgumentStages(
     call,
@@ -2578,14 +2631,16 @@ int fePrepareInferredArguments(
         'inferred type argument does not satisfy function bound',
       );
   }
-  var invocation = genericCalls.length;
-  genericCalls.add(GenericCall(function, arguments));
   var values = List<int>.filled(syntax.parameters.length, -1);
   var ready = feJump(opJump);
   for (var i = 0; i < actualSlots.length; i++) {
     fePatch(checks[i], ir.length);
     var declared = info.parameterTypes[offset + bindings[i]];
-    var expected = substituteType(declared, parameters, arguments);
+    var expected = substituteType(
+      signature.parameters[bindings[i]],
+      parameters,
+      arguments,
+    );
     var token = call.children[i + 1].token;
     feOperand(opLoadLocal, actualSlots[i]);
     feConvertValue(actualTypes[i], expected, token);
@@ -2600,22 +2655,95 @@ int fePrepareInferredArguments(
     feOperand(opJump, continuations[i]);
   }
   fePatch(ready, ir.length);
-  feLoadTypeEnvironment(arguments);
-  for (var i = 0; i < values.length; i++) {
-    if (values[i] >= 0) {
-      feOperand(opLoadLocal, values[i]);
-    } else if (!suppliedOnly) {
-      var declared = info.parameterTypes[offset + i];
-      var expected = substituteType(declared, parameters, arguments);
-      feConstantValue(
-        feParamDefaults[function][offset + i],
-        expected,
-        call.token,
-      );
-      feConvertValue(expected, genericBoundaryType(declared), call.token);
-    }
+  feCompleteCallArguments(
+    call,
+    function,
+    signature,
+    arguments,
+    values,
+    suppliedOnly,
+  );
+  return FeCallArguments(arguments, values);
+}
+
+void feCompleteCallArguments(
+  AstExpression call,
+  int function,
+  FeCallSignature signature,
+  List<int> arguments,
+  List<int> values,
+  bool suppliedOnly,
+) {
+  if (suppliedOnly) return;
+  final info = functions[function];
+  final offset = info.parameterOffset;
+  for (var p = 0; p < values.length; p++) {
+    if (values[p] >= 0) continue;
+    final expected = substituteType(
+      signature.parameters[p],
+      signature.typeParameters,
+      arguments,
+    );
+    final boundary = genericBoundaryType(info.parameterTypes[offset + p]);
+    feConstantValue(
+      feParamDefaults[function][offset + p],
+      expected,
+      call.token,
+    );
+    feConvertValue(expected, boundary, call.token);
+    values[p] = feTemp(boundary);
+    feOperand(opStoreLocal, values[p]);
   }
-  return invocation;
+}
+
+FeCallArguments fePrepareResolvedArguments(
+  AstExpression call,
+  int function,
+  FeCallSignature signature,
+  List<int> arguments,
+  bool suppliedOnly,
+) {
+  final info = functions[function];
+  final parameters = feFunctionNodes[function].parameters;
+  final offset = feParameterOffset(function);
+  final bindings = bindArguments(feSources, feFunctionNodes[function], call, 1);
+  final values = List<int>.filled(parameters.length, -1);
+  for (final i in argumentOrder(feSources, call, 1)) {
+    var expression = call.children[i];
+    if (expression.kind == astNamedArgument)
+      expression = expression.children[0];
+    final parameter = bindings[i - 1];
+    final type = substituteType(
+      signature.parameters[parameter],
+      signature.typeParameters,
+      arguments,
+    );
+    final actual = feLowerInContext(expression, type);
+    final boundary = genericBoundaryType(
+      info.parameterTypes[offset + parameter],
+    );
+    if (actual == tVoid && boundary == tDynamic)
+      feBuiltinTyped(bBoxRef, 1, boundary);
+    else
+      feConvertValue(actual, boundary, expression.token);
+    values[parameter] = feTemp(boundary);
+    feOperand(opStoreLocal, values[parameter]);
+  }
+  feCompleteCallArguments(
+    call,
+    function,
+    signature,
+    arguments,
+    values,
+    suppliedOnly,
+  );
+  return FeCallArguments(arguments, values);
+}
+
+void feLoadCallArguments(FeCallArguments arguments) {
+  for (final slot in arguments.slots) {
+    if (slot >= 0) feOperand(opLoadLocal, slot);
+  }
 }
 
 int fePrepareGenericArguments(
@@ -2624,63 +2752,55 @@ int fePrepareGenericArguments(
   int context = -1,
   bool suppliedOnly = false,
 ]) {
-  if (call.typeArguments.isEmpty)
-    return fePrepareInferredArguments(call, function, context, suppliedOnly);
-  var info = functions[function];
-  if (call.typeArguments.length != info.typeParameters.length)
-    feAstError(call.token, 'generic type argument count');
-  var arguments = <int>[];
-  for (var syntax in call.typeArguments) arguments.add(feResolveType(syntax));
-  for (var i = 0; i < arguments.length; i++) {
-    var bound = substituteType(
-      typeParameterInfo(info.typeParameters[i]).bound,
-      info.typeParameters,
-      arguments,
+  final info = functions[function];
+  final signature = FeCallSignature(
+    info.typeParameters,
+    info.parameterTypes.sublist(info.parameterOffset),
+    info.result,
+  );
+  FeCallArguments prepared;
+  if (call.typeArguments.isEmpty) {
+    prepared = fePrepareInferredArguments(
+      call,
+      function,
+      signature,
+      context,
+      suppliedOnly,
     );
-    if (!typeIsSubtype(arguments[i], bound))
-      feAstError(
-        call.typeArguments[i].token,
-        'type argument does not satisfy function bound',
+  } else {
+    if (call.typeArguments.length != info.typeParameters.length)
+      feAstError(call.token, 'generic type argument count');
+    final arguments = <int>[];
+    for (final syntax in call.typeArguments)
+      arguments.add(feResolveType(syntax));
+    for (var i = 0; i < arguments.length; i++) {
+      final bound = substituteType(
+        typeParameterInfo(info.typeParameters[i]).bound,
+        info.typeParameters,
+        arguments,
       );
-  }
-  var invocation = genericCalls.length;
-  genericCalls.add(GenericCall(function, arguments));
-  feLoadTypeEnvironment(arguments);
-  var parameters = feFunctionNodes[function].parameters;
-  var offset = feParameterOffset(function);
-  var bindings = bindArguments(feSources, feFunctionNodes[function], call, 1);
-  var values = List<int>.filled(parameters.length, -1);
-  for (final i in argumentOrder(feSources, call, 1)) {
-    var expression = call.children[i];
-    if (expression.kind == astNamedArgument)
-      expression = expression.children[0];
-    var parameter = bindings[i - 1];
-    var declared = info.parameterTypes[offset + parameter];
-    var type = substituteType(declared, info.typeParameters, arguments);
-    var actual = feLowerInContext(expression, type);
-    var boundary = genericBoundaryType(declared);
-    if (actual == tVoid && boundary == tDynamic)
-      feBuiltinTyped(bBoxRef, 1, boundary);
-    else
-      feConvertValue(actual, boundary, expression.token);
-    var slot = feTemp(boundary);
-    feOperand(opStoreLocal, slot);
-    values[parameter] = slot;
-  }
-  for (var i = 0; i < parameters.length; i++) {
-    if (values[i] >= 0) {
-      feOperand(opLoadLocal, values[i]);
-    } else if (!suppliedOnly) {
-      var declared = info.parameterTypes[offset + i];
-      var type = substituteType(declared, info.typeParameters, arguments);
-      feConstantValue(feParamDefaults[function][offset + i], type, call.token);
-      feConvertValue(type, genericBoundaryType(declared), call.token);
+      if (!typeIsSubtype(arguments[i], bound))
+        feAstError(
+          call.typeArguments[i].token,
+          'type argument does not satisfy function bound',
+        );
     }
+    prepared = fePrepareResolvedArguments(
+      call,
+      function,
+      signature,
+      arguments,
+      suppliedOnly,
+    );
   }
+  final invocation = genericCalls.length;
+  genericCalls.add(GenericCall(function, prepared.types));
+  feLoadTypeEnvironment(prepared.types);
+  feLoadCallArguments(prepared);
   return invocation;
 }
 
-int feFinishGenericCall(int invocation, int token) {
+int feEmitGenericCall(int invocation) {
   var call = genericCalls[invocation];
   var info = functions[call.function];
   var boundary = genericBoundaryType(info.result);
@@ -2688,11 +2808,18 @@ int feFinishGenericCall(int invocation, int token) {
   irTypes[ir.length - 1] = boundary;
   feWord(invocation);
   feWord(info.parameters);
-  var result = substituteType(
-    info.result,
-    info.typeParameters,
-    call.typeArguments,
-  );
+  return boundary;
+}
+
+int feFinishGenericCall(int invocation, int token) {
+  final call = genericCalls[invocation];
+  final info = functions[call.function];
+  final boundary = feEmitGenericCall(invocation);
+  var result = substituteType(info.result, info.typeScope, call.typeArguments);
+  return feConvertGenericResult(boundary, result, token);
+}
+
+int feConvertGenericResult(int boundary, int result, int token) {
   if (boundary != result) {
     if (typingAssignable(boundary, result)) {
       feConvertValue(boundary, result, token);
@@ -2733,7 +2860,7 @@ int feUserOperator(
     const <AstType>[],
     token,
   );
-  return feInvokeDeclaration(call, function, 1);
+  return feInvokeDeclaration(call, function, 1, -1, false, bound);
 }
 
 // `super op argument`, `op super` and `super[index]` call the inherited
@@ -2798,9 +2925,12 @@ FeLvalue feLowerOperatorLvalue(
       feAstError(expression.token, 'indexed read requires operator []');
   }
   final offset = feParameterOffset(writer);
-  final context = reading
-      ? functions[reader].parameterTypes[feParameterOffset(reader)]
-      : functions[writer].parameterTypes[offset];
+  final context = substituteClassType(
+    reading
+        ? functions[reader].parameterTypes[feParameterOffset(reader)]
+        : functions[writer].parameterTypes[offset],
+    receiverType,
+  );
   // Keep the original index: [] and []= can require different conversions.
   final indexType = feLowerHint(expression.children[1], context);
   final index = feTemp(indexType);
@@ -2808,7 +2938,10 @@ FeLvalue feLowerOperatorLvalue(
   final receiver = feTemp(receiverType);
   feOperand(opStoreLocal, receiver);
   return FeLvalue(
-      functions[writer].parameterTypes[offset + 1],
+      substituteClassType(
+        functions[writer].parameterTypes[offset + 1],
+        receiverType,
+      ),
       6,
       receiver,
       index,
@@ -2823,8 +2956,10 @@ FeLvalue feLowerOperatorLvalue(
 
 void fePrepareIndexWrite(FeLvalue target, int token) {
   if (target.container != 6 || target.writeIndex >= 0) return;
-  final type =
-      functions[target.setter].parameterTypes[feParameterOffset(target.setter)];
+  final type = substituteClassType(
+    functions[target.setter].parameterTypes[feParameterOffset(target.setter)],
+    feSlotTypes[target.receiver],
+  );
   final actual = feSlotTypes[target.index];
   if (actual == type) {
     target.writeIndex = target.index;
@@ -2842,8 +2977,41 @@ int feInvokeDeclaration(
   int receiver = 0,
   int context = -1,
   bool direct = false,
+  int receiverType = -1,
 ]) {
   final owner = receiver == 0 ? -1 : feOwners[function];
+  final info = functions[function];
+  if (info.receiverTypeParameters.isNotEmpty) {
+    if (call.typeArguments.isNotEmpty)
+      feAstError(
+        call.token,
+        'nongeneric method does not accept type arguments',
+      );
+    if (receiverType < 0) receiverType = info.parameterTypes[0];
+    feConvertValue(
+      receiverType,
+      genericBoundaryType(info.parameterTypes[0]),
+      call.token,
+    );
+    final signature = FeCallSignature(const <int>[], <int>[
+      for (final parameter in info.parameterTypes.sublist(info.parameterOffset))
+        substituteClassType(parameter, receiverType),
+    ], substituteClassType(info.result, receiverType));
+    final arguments = fePrepareResolvedArguments(
+      call,
+      function,
+      signature,
+      const <int>[],
+      false,
+    );
+    feLoadCallArguments(arguments);
+    return feInvokeInstanceBody(
+      function,
+      receiverType,
+      call.token,
+      info.parameters,
+    );
+  }
   final dispatch = !direct && owner >= 0 && feNeedsDispatch(owner)
       ? feDispatchMethod(function, call)
       : -1;
@@ -2864,6 +3032,16 @@ int feInvokeDeclaration(
   var count = feLowerArguments(call, 1, function, dispatch >= 0);
   feCall(dispatch >= 0 ? dispatch : function, count + receiver);
   return functions[function].result;
+}
+
+int feInvokeInstanceBody(int function, int receiverType, int token, int count) {
+  if (functions[function].receiverTypeParameters.isEmpty) {
+    feCall(function, count);
+    return functions[function].result;
+  }
+  final invocation = genericCalls.length;
+  genericCalls.add(GenericCall(function, dartTypes[receiverType].arguments));
+  return feFinishGenericCall(invocation, token);
 }
 
 int feLowerArguments(
@@ -3447,7 +3625,7 @@ int feLowerValueCall(AstExpression call, int type, [int context = -1]) {
   if (feClassType(type)) {
     var method = feMethod(typeArgument(type), 'call', false);
     if (method >= 0) {
-      return feInvokeDeclaration(call, method, 1, context);
+      return feInvokeDeclaration(call, method, 1, context, false, type);
     }
   }
   var signature = feCallSignature(call, type);
@@ -3474,14 +3652,45 @@ int feLowerMemberValueCall(
     value = feFieldTypes[binding.field];
   else
     feAstError(call.token, 'member has no getter: ' + member);
+  value = substituteClassType(value, type);
   if (value == tNever) {
     feLowerNeverArguments(call);
     feOperand(opLoadLocal, receiver);
-    return feReadBoundMember(owner, binding, call.token);
+    return feReadBoundMember(owner, binding, call.token, type);
   }
   if (feClassType(value)) {
     var method = feMethod(typeArgument(value), 'call', false);
     if (method >= 0) {
+      final info = functions[method];
+      if (info.receiverTypeParameters.isNotEmpty) {
+        if (call.typeArguments.isNotEmpty)
+          feAstError(
+            call.token,
+            'nongeneric method does not accept type arguments',
+          );
+        final signature = FeCallSignature(const <int>[], <int>[
+          for (final parameter in info.parameterTypes.sublist(
+            info.parameterOffset,
+          ))
+            substituteClassType(parameter, value),
+        ], substituteClassType(info.result, value));
+        final arguments = fePrepareResolvedArguments(
+          call,
+          method,
+          signature,
+          const <int>[],
+          false,
+        );
+        feOperand(opLoadLocal, receiver);
+        feReadBoundMember(owner, binding, call.token, type);
+        feConvertValue(
+          value,
+          genericBoundaryType(info.parameterTypes[0]),
+          call.token,
+        );
+        feLoadCallArguments(arguments);
+        return feInvokeInstanceBody(method, value, call.token, info.parameters);
+      }
       var invocation = -1;
       var count = 0;
       if (functions[method].typeParameters.isNotEmpty) {
@@ -3500,7 +3709,7 @@ int feLowerMemberValueCall(
         i--;
       }
       feOperand(opLoadLocal, receiver);
-      feReadBoundMember(owner, binding, call.token);
+      feReadBoundMember(owner, binding, call.token, type);
       for (var argument in arguments) feOperand(opLoadLocal, argument);
       if (invocation >= 0) return feFinishGenericCall(invocation, call.token);
       feCall(method, count + 1);
@@ -3510,7 +3719,7 @@ int feLowerMemberValueCall(
   var signature = feCallSignature(call, value);
   final arguments = feLowerValueArguments(call, signature);
   feOperand(opLoadLocal, receiver);
-  feReadBoundMember(owner, binding, call.token);
+  feReadBoundMember(owner, binding, call.token, type);
   fePrepareFunctionCall(value);
   return feInvokeFunction(call, signature, arguments);
 }
@@ -3738,7 +3947,7 @@ int feLowerMemberCall(
       if (value == tNever) return feLowerNeverArguments(call);
       return feLowerValueCall(call, value, context);
     }
-    return feInvokeDeclaration(call, function, 1, context);
+    return feInvokeDeclaration(call, function, 1, context, false, type);
   }
   if (call.typeArguments.length != 0)
     feAstError(call.token, 'nongeneric call does not accept type arguments');
@@ -3905,9 +4114,17 @@ void feLateFieldStore(int field, int value) {
   feEmit(opPop);
 }
 
-void feLowerLateField(int function, int field) {
-  if (function == feLateFieldSetters[field]) {
-    feLateFieldStore(field, 1);
+void feLowerFieldAccessor(int function, int field) {
+  if (function == feFieldSetters[field]) {
+    if (feFieldNodes[field].lateVariable) {
+      feLateFieldStore(field, 1);
+    } else {
+      feOperand(opLoadLocal, 0);
+      feOperand(opInt, feFieldIndices[field]);
+      feOperand(opLoadLocal, 1);
+      feBuiltinTyped(bObjectSet, 3, feFieldTypes[field]);
+      feEmit(opPop);
+    }
     feOperand(opLoadLocal, 1);
   } else {
     feLateFieldState(field);
@@ -4057,7 +4274,12 @@ void feLowerConstructor(int function) {
     feBindings = bodyBindings.withReceiver(-1);
     feOperand(opLoadLocal, 0);
     var count = feLowerArguments(call, 1, plan.redirectTarget);
-    feCall(plan.redirectTarget, count + 1);
+    feInvokeInstanceBody(
+      plan.redirectTarget,
+      functions[function].parameterTypes[0],
+      call.token,
+      count + 1,
+    );
     feBindings = bodyBindings;
     feEmit(opReturn);
     return;
@@ -4126,15 +4348,14 @@ void feLowerConstructor(int function) {
 
 int feLowerConstructorCall(
   AstExpression call,
-  int owner,
+  int declaration,
+  int type,
   String rawName,
   int token,
+  int context,
+  bool inferred,
 ) {
-  if (classTypeParameters[owner].isNotEmpty)
-    feAstError(
-      token,
-      'runtime generic class construction is not yet supported',
-    );
+  var owner = resolvedTypeClassOwner(type);
   if (call.text == astCallValue)
     feAstError(call.token, 'a type literal is not callable');
   final ordinal = resolveConstructorReference(
@@ -4148,6 +4369,58 @@ int feLowerConstructorCall(
   var constructor = feClassConstructors[owner][ordinal];
   final contract = constructor;
   final result = classType(owner);
+  if (classTypeParameters[owner].isNotEmpty) {
+    if (feClassNodes[owner].isAbstract)
+      feAstError(token, 'cannot instantiate an abstract class');
+    if (call.typeArguments.isNotEmpty)
+      feAstError(
+        call.token,
+        'constructor selector does not accept type arguments',
+      );
+    final info = functions[constructor];
+    final template = inferred
+        ? typeNonNullable(declarationTypeTemplate(feSymbols, declaration))
+        : typeNonNullable(type);
+    final parameters = inferred
+        ? declarationTypeParameters(feSymbols, declaration)
+        : const <int>[];
+    final signature = FeCallSignature(parameters, <int>[
+      for (final parameter in info.parameterTypes.sublist(info.parameterOffset))
+        substituteClassType(parameter, template),
+    ], template);
+    final prepared = inferred
+        ? fePrepareInferredArguments(
+            call,
+            constructor,
+            signature,
+            context,
+            false,
+          )
+        : fePrepareResolvedArguments(
+            call,
+            constructor,
+            signature,
+            const <int>[],
+            false,
+          );
+    if (inferred)
+      type = instantiateDeclarationType(
+        feSymbols,
+        declaration,
+        prepared.types,
+        token,
+      );
+    type = typeNonNullable(type);
+    final arguments = dartTypes[type].arguments;
+    feOperand(opDescriptor, owner);
+    feLoadTypeEnvironment(arguments);
+    feBuiltinTyped(bObjectNewTyped, 2, type);
+    feConvertValue(type, genericBoundaryType(info.parameterTypes[0]), token);
+    feLoadCallArguments(prepared);
+    final invocation = genericCalls.length;
+    genericCalls.add(GenericCall(constructor, arguments));
+    return feFinishGenericCall(invocation, token);
+  }
   while (feFunctionNodes[constructor].factoryRedirect != null)
     constructor = feConstructorPlans[constructor].redirectTarget;
   owner = feOwners[constructor];
@@ -4209,7 +4482,15 @@ int feLowerCall(AstExpression call, int context) {
         const <AstType>[],
         call.token,
       );
-    return feLowerConstructorCall(physicalCall, classOwner, '', callee.token);
+    return feLowerConstructorCall(
+      physicalCall,
+      symbol,
+      classType,
+      '',
+      callee.token,
+      context,
+      classArguments.isEmpty,
+    );
   }
   var staticOwner = feStaticOwner(callee);
   if (staticOwner >= 0) {
@@ -4233,9 +4514,12 @@ int feLowerCall(AstExpression call, int context) {
         return feLowerValueCall(call, feLowerMember(callee), context);
       var type = feLowerConstructorCall(
         call,
-        classOwner,
+        owner,
+        classType,
         callee.text,
         callee.token,
+        context,
+        receiver.typeArguments.isEmpty,
       );
       var declaration = feSymbols.declarations[owner];
       if (call.text != astCallNew && declaration.kind == symbolAlias)
@@ -4362,7 +4646,7 @@ CheckedMemberRead feCheckMemberRead(int type, String member, int token) {
     var binding = feMembers[owner].members[index];
     if (binding.isStatic)
       feAstError(token, 'static member cannot be accessed through an instance');
-    return feCheckBoundMember(owner, binding, token);
+    return feCheckBoundMember(owner, binding, token, false, type);
   }
   if ((type == tInt || type == tDouble || type == tNum || type == tDynamic) &&
       (member == 'isNaN' ||
@@ -4407,8 +4691,9 @@ CheckedMemberRead feCheckBoundMember(
   MemberBinding member,
   int token, [
   bool direct = false,
+  int receiverType = -1,
 ]) {
-  var receiver = classType(owner);
+  var receiver = receiverType < 0 ? classType(owner) : receiverType;
   if (!direct &&
       feNeedsDispatch(owner) &&
       member.method < 0 &&
@@ -4434,7 +4719,7 @@ CheckedMemberRead feCheckBoundMember(
     var getter = member.getter;
     return CheckedMemberRead(
       receiver,
-      functions[getter].result,
+      substituteClassType(functions[getter].result, receiver),
       memberReadGetter,
       getter,
     );
@@ -4443,11 +4728,12 @@ CheckedMemberRead feCheckBoundMember(
     var field = member.field;
     return CheckedMemberRead(
       receiver,
-      feFieldTypes[field],
+      substituteClassType(feFieldTypes[field], receiver),
       feFieldNodes[field].lateVariable ? memberReadGetter : memberReadField,
       feFieldNodes[field].lateVariable
           ? feLateFieldGetters[field]
           : feFieldIndices[field],
+      genericBoundaryType(feFieldTypes[field]),
     );
   }
   feAstError(token, 'member has no getter: ' + member.name);
@@ -4462,7 +4748,7 @@ int feReadCheckedMember(
   if (kind == memberReadMethod || kind == memberReadGetter)
     feConvertValue(
       member.receiver,
-      functions[member.target].parameterTypes[0],
+      genericBoundaryType(functions[member.target].parameterTypes[0]),
       token,
     );
   if (kind == memberReadNumberProperty) {
@@ -4474,10 +4760,12 @@ int feReadCheckedMember(
   if (kind == memberReadMethod)
     return feCreateBoundMethod(member.target, token, direct);
   if (kind == memberReadGetter) {
-    feCall(member.target, 1);
+    feInvokeInstanceBody(member.target, member.receiver, token, 1);
   } else if (kind == memberReadField) {
     feOperand(opInt, member.target);
-    feBuiltinTyped(bObjectGet, 2, member.type);
+    final storage = member.storageType < 0 ? member.type : member.storageType;
+    feBuiltinTyped(bObjectGet, 2, storage);
+    feConvertGenericResult(storage, member.type, token);
   } else if (kind == memberReadLength ||
       kind == memberReadIsEmpty ||
       kind == memberReadIsNotEmpty) {
@@ -4500,9 +4788,17 @@ int feReadCheckedMember(
   return member.type;
 }
 
-int feReadBoundMember(int owner, MemberBinding member, int token) {
+int feReadBoundMember(
+  int owner,
+  MemberBinding member,
+  int token, [
+  int receiverType = -1,
+]) {
   if (member.isStatic) return feReadStaticMember(member, token);
-  return feReadCheckedMember(feCheckBoundMember(owner, member, token), token);
+  return feReadCheckedMember(
+    feCheckBoundMember(owner, member, token, false, receiverType),
+    token,
+  );
 }
 
 FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
@@ -4654,7 +4950,7 @@ FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
       var receiver = feTemp(receiverType);
       feOperand(opStoreLocal, receiver);
       var target = FeLvalue(
-        functions[setter].parameterTypes[1],
+        substituteClassType(functions[setter].parameterTypes[1], receiverType),
         4,
         receiver,
         -1,
@@ -4668,20 +4964,34 @@ FeLvalue feLowerLvalue(AstExpression expression, bool reading) {
     if (member.fieldSetter < 0)
       feAstError(expression.token, 'member has no setter: ' + member.name);
     var field = member.fieldSetter;
-    if (feFieldNodes[field].lateVariable) {
+    if (feFieldSetters[field] >= 0) {
       final receiver = feTemp(receiverType);
       feOperand(opStoreLocal, receiver);
-      return FeLvalue(feFieldTypes[field], 4, receiver, -1, -1, -1)
+      return FeLvalue(
+          substituteClassType(feFieldTypes[field], receiverType),
+          4,
+          receiver,
+          -1,
+          -1,
+          -1,
+        )
         ..owner = owner
         ..member = entry
-        ..setter = feLateFieldSetters[field];
+        ..setter = feFieldSetters[field];
     }
     feOperand(opInt, feFieldIndices[field]);
     final index = feTemp(tInt);
     feOperand(opStoreLocal, index);
     final receiver = feTemp(receiverType);
     feOperand(opStoreLocal, receiver);
-    return FeLvalue(feFieldTypes[field], 2, receiver, index, -1, -1)
+    return FeLvalue(
+        substituteClassType(feFieldTypes[field], receiverType),
+        2,
+        receiver,
+        index,
+        -1,
+        -1,
+      )
       ..owner = owner
       ..member = entry;
   }
@@ -4718,7 +5028,7 @@ FeLvalue feLowerSuperLvalue(AstExpression expression, bool reading) {
     feOperand(opInt, feFieldIndices[field]);
     feOperand(opStoreLocal, index);
   }
-  final setter = function >= 0 ? function : feLateFieldSetters[field];
+  final setter = function >= 0 ? function : feFieldSetters[field];
   final target = FeLvalue(
     function >= 0 ? functions[function].parameterTypes[1] : feFieldTypes[field],
     setter >= 0 ? 4 : 2,
@@ -4743,22 +5053,29 @@ int feReadLvalue(FeLvalue target, int token) {
   }
   if (target.container == 6) {
     final reader = target.reader;
+    final receiverType = feSlotTypes[target.receiver];
     feOperand(opLoadLocal, target.receiver);
     feConvertValue(
-      feSlotTypes[target.receiver],
-      functions[reader].parameterTypes[0],
+      receiverType,
+      genericBoundaryType(functions[reader].parameterTypes[0]),
       token,
     );
     feOperand(opLoadLocal, target.index);
-    final indexType =
+    final declaredIndex =
         functions[reader].parameterTypes[feParameterOffset(reader)];
+    final indexType = substituteClassType(declaredIndex, receiverType);
     feConvertValue(
       feImplicitCall(feSlotTypes[target.index], indexType, token),
       indexType,
       token,
     );
-    feCall(target.direct ? reader : feOperatorTarget(reader), 2);
-    return functions[reader].result;
+    feConvertValue(indexType, genericBoundaryType(declaredIndex), token);
+    return feInvokeInstanceBody(
+      target.direct ? reader : feOperatorTarget(reader),
+      receiverType,
+      token,
+      2,
+    );
   }
   if ((target.container == 0 || target.container == 5) && target.owner >= 0)
     return feReadStaticMember(
@@ -4778,6 +5095,7 @@ int feReadLvalue(FeLvalue target, int token) {
       target.owner,
       feMembers[target.owner].members[target.member],
       token,
+      feSlotTypes[target.receiver],
     );
   }
   feOperand(opLoadLocal, target.receiver);
@@ -4842,22 +5160,44 @@ void feWriteLvalue(FeLvalue target, int token) {
         : feMembers[target.owner].members[target.member].setter;
     feConvertValue(
       feSlotTypes[target.receiver],
-      functions[setter].parameterTypes[0],
+      genericBoundaryType(functions[setter].parameterTypes[0]),
       token,
     );
     feOperand(opLoadLocal, value);
-    feCall(setter, 2);
+    feConvertValue(
+      target.type,
+      genericBoundaryType(functions[setter].parameterTypes[1]),
+      token,
+    );
+    feInvokeInstanceBody(setter, feSlotTypes[target.receiver], token, 2);
     return;
   }
   if (target.container == 6) {
+    final writer = target.setter;
+    final offset = feParameterOffset(writer);
     feConvertValue(
       feSlotTypes[target.receiver],
-      functions[target.setter].parameterTypes[0],
+      genericBoundaryType(functions[writer].parameterTypes[0]),
       token,
     );
     feOperand(opLoadLocal, target.writeIndex);
+    feConvertValue(
+      feSlotTypes[target.writeIndex],
+      genericBoundaryType(functions[writer].parameterTypes[offset]),
+      token,
+    );
     feOperand(opLoadLocal, value);
-    feCall(target.direct ? target.setter : feOperatorTarget(target.setter), 3);
+    feConvertValue(
+      target.type,
+      genericBoundaryType(functions[writer].parameterTypes[offset + 1]),
+      token,
+    );
+    feInvokeInstanceBody(
+      target.direct ? writer : feOperatorTarget(writer),
+      feSlotTypes[target.receiver],
+      token,
+      3,
+    );
     return;
   }
   feOperand(opLoadLocal, target.index);
@@ -6745,6 +7085,23 @@ void feBeginFunction(int f, FunctionBindings bindings) {
     feTemp(functions[f].parameterTypes[p]);
     p++;
   }
+  if (feConstructors[f] == 0 &&
+      functions[f].receiverTypeParameters.isNotEmpty) {
+    for (
+      var parameter = functions[f].parameterOffset;
+      parameter < functions[f].parameters;
+      parameter++
+    ) {
+      final type = functions[f].parameterTypes[parameter];
+      if (!classCovariantType(type, functions[f].receiverTypeParameters))
+        continue;
+      feOperand(opLoadLocal, parameter);
+      feConvertValue(type, tDynamic, functionSyntax.token);
+      feRuntimeType(type);
+      feBuiltinTyped(bValueCheck, 2, type);
+      feOperand(opStoreLocal, parameter);
+    }
+  }
   p = context == null ? 0 : 1;
   while (p < functions[f].parameters) {
     if (functions[f].typeParameters.isNotEmpty &&
@@ -6825,6 +7182,7 @@ void parseSource(SourceProgram source) {
   globalTypes.clear();
   strings.clear();
   classSizes.clear();
+  classTypeArgumentOffsets.clear();
   classPointerMasks.clear();
   classTaggedMasks.clear();
   classToStringFunctions.clear();
@@ -6847,8 +7205,8 @@ void parseSource(SourceProgram source) {
   feFieldIndices.clear();
   feLateFieldStates.clear();
   feLateFieldGetters.clear();
-  feLateFieldSetters.clear();
-  feLateFunctionFields.clear();
+  feFieldSetters.clear();
+  feAccessorFields.clear();
   feOwners.clear();
   feConstructors.clear();
   feFunctionNodes.clear();
@@ -6905,7 +7263,7 @@ void parseSource(SourceProgram source) {
   );
   feParamDefaults.add(<ConstantValue>[]);
   feOwners.add(-1);
-  feLateFunctionFields.add(-1);
+  feAccessorFields.add(-1);
   feConstructors.add(0);
   feSources = source;
   entrySource = source.entry;
@@ -7007,18 +7365,26 @@ void parseSource(SourceProgram source) {
       classPointerMasks[owner] = <int>[...classPointerMasks[base]];
       classTaggedMasks[owner] = <int>[...classTaggedMasks[base]];
     }
+    if (classTypeParameters[owner].isNotEmpty) {
+      classTypeArgumentOffsets[owner] = objectHeaderBytes + prefix * 8;
+      prefix++;
+    }
     classSizes[owner] += prefix * 8;
     final slots = (classSizes[owner] - objectHeaderBytes) ~/ 8;
     while (classPointerMasks[owner].length * 64 < slots) {
       classPointerMasks[owner].add(0);
       classTaggedMasks[owner].add(0);
     }
+    if (classTypeParameters[owner].isNotEmpty) {
+      final slot = prefix - 1;
+      classPointerMasks[owner][slot ~/ 64] |= 1 << (slot & 63);
+    }
     for (var index = 0; index < feClassFieldCounts[owner]; index++) {
       final field = feClassFieldStarts[owner] + index;
       final slot = prefix + index;
       feFieldIndices[field] = slot;
       final getter = feLateFieldGetters[field];
-      final setter = feLateFieldSetters[field];
+      final setter = feFieldSetters[field];
       if (getter >= 0) functions[getter].result = feFieldTypes[field];
       if (setter >= 0) {
         functions[setter].result = feFieldTypes[field];
@@ -7065,7 +7431,7 @@ void parseSource(SourceProgram source) {
       ),
     );
     while (localTypeScopes.length < feLocalFunctions.length)
-      localTypeScopes.add(functions[bindingFunction].typeParameters);
+      localTypeScopes.add(functions[bindingFunction].typeScope);
     while (feLocalOwners.length < feLocalFunctions.length)
       feLocalOwners.add(feOwners[bindingFunction]);
     bindingFunction++;
@@ -7121,6 +7487,8 @@ void parseSource(SourceProgram source) {
         feGlobalOwners[initializer],
       ),
     );
+    while (localTypeScopes.length < feLocalFunctions.length)
+      localTypeScopes.add(const <int>[]);
     initializer++;
   }
   var owner = 0;
@@ -7133,6 +7501,8 @@ void parseSource(SourceProgram source) {
             ? FunctionBindings(<LocalVariable>[], -1)
             : feBindInitializer(feFieldNodes[field], owner),
       );
+      while (localTypeScopes.length < feLocalFunctions.length)
+        localTypeScopes.add(classTypeParameters[owner]);
       field++;
     }
     owner++;
@@ -7204,26 +7574,11 @@ void parseSource(SourceProgram source) {
   var f = 1;
   while (f < sourceFunctions) {
     functions[f].start = ir.length;
-    if (feConstructors[f] == 1 && classTypeParameters[feOwners[f]].isNotEmpty) {
-      // The declaration and its potential constant initializers were checked
-      // above. Runtime instantiation is diagnosed at its use until reification
-      // is implemented; no executable generic constructor is emitted.
-      final info = functions[f];
-      info.parameterTypes = <int>[
-        for (final type in info.parameterTypes) genericBoundaryType(type),
-      ];
-      info.localTypes = <int>[...info.parameterTypes];
-      info.locals = info.parameters;
-      feEmit(opUnreachable);
-      info.end = ir.length;
-      f++;
-      continue;
-    }
     feBeginFunction(f, bodyBindings[f]);
     final functionSyntax = feFunctionNodes[f];
     final expression = functionSyntax.arrow;
-    if (feLateFunctionFields[f] >= 0) {
-      feLowerLateField(f, feLateFunctionFields[f]);
+    if (feAccessorFields[f] >= 0) {
+      feLowerFieldAccessor(f, feAccessorFields[f]);
     } else if (feConstructors[f] == 1) {
       feLowerConstructor(f);
     } else if (functionSyntax.factoryRedirect != null) {
@@ -7443,7 +7798,11 @@ void feGenerateDispatches() {
       final next = feJump(opJumpFalse);
       feFlow = .create(0);
       feOperand(opLoadLocal, 0);
-      feNarrowValue(receiverType, classType(owner));
+      final classArguments = instantiateTypeParameters(
+        classTypeParameters[owner],
+      );
+      final implementationType = classInstanceType(owner, classArguments);
+      feNarrowValue(receiverType, implementationType);
       var result = tVoid;
       if (role == classTearoff) {
         result = feCreateBoundMethod(member.method, token, true, owner);
@@ -7456,32 +7815,48 @@ void feGenerateDispatches() {
               feCall(feLateFieldGetters[field], 1);
             else {
               feOperand(opInt, feFieldIndices[field]);
-              feBuiltinTyped(bObjectGet, 2, feFieldTypes[field]);
+              feBuiltinTyped(
+                bObjectGet,
+                2,
+                genericBoundaryType(feFieldTypes[field]),
+              );
             }
-            result = feFieldTypes[field];
+            result = genericBoundaryType(feFieldTypes[field]);
           } else {
-            if (feLateFieldSetters[field] < 0)
+            if (feFieldSetters[field] < 0)
               feOperand(opInt, feFieldIndices[field]);
             feOperand(opLoadLocal, 1);
             feDispatchArgument(
               info.parameterTypes[1],
-              feFieldTypes[field],
+              genericBoundaryType(feFieldTypes[field]),
               token,
             );
-            if (feLateFieldSetters[field] >= 0)
-              feCall(feLateFieldSetters[field], 2);
-            else
+            if (feFieldSetters[field] >= 0) {
+              final setter = feFieldSetters[field];
+              if (functions[setter].receiverTypeParameters.isNotEmpty) {
+                final invocation = genericCalls.length;
+                genericCalls.add(GenericCall(setter, classArguments));
+                feEmitGenericCall(invocation);
+              } else {
+                feCall(setter, 2);
+              }
+            } else
               feBuiltinTyped(bObjectSet, 3, feFieldTypes[field]);
             feEmit(opPop);
             feInteger(0, tVoid);
           }
         } else {
           final target = functions[function];
-          feConvertValue(classType(owner), target.parameterTypes[0], token);
+          feConvertValue(
+            implementationType,
+            genericBoundaryType(target.parameterTypes[0]),
+            token,
+          );
           final formals = member.receiverParameter
               ? feFunctionNodes[function].parameters.sublist(1)
               : feFunctionNodes[function].parameters;
           final generic = target.typeParameters.isNotEmpty;
+          final genericReceiver = target.receiverTypeParameters.isNotEmpty;
           final offset = generic ? 2 : 1;
           if (generic) feOperand(opLoadLocal, 1);
           for (var p = 0; p < formals.length; p++) {
@@ -7497,11 +7872,13 @@ void feGenerateDispatches() {
                 slot = i + offset;
             }
             final declared = target.parameterTypes[offset + p];
-            final expected = substituteType(
-              declared,
-              target.typeParameters,
-              info.typeParameters,
-            );
+            final expected = genericReceiver
+                ? genericBoundaryType(declared)
+                : substituteType(
+                    declared,
+                    target.typeParameters,
+                    info.typeParameters,
+                  );
             if (slot >= 0) {
               feOperand(opLoadLocal, slot);
               feDispatchArgument(info.parameterTypes[slot], expected, token);
@@ -7515,7 +7892,16 @@ void feGenerateDispatches() {
             if (generic)
               feConvertValue(expected, genericBoundaryType(declared), token);
           }
-          if (generic) {
+          if (genericReceiver) {
+            final invocation = genericCalls.length;
+            genericCalls.add(
+              GenericCall(function, <int>[
+                ...classArguments,
+                ...info.typeParameters,
+              ]),
+            );
+            result = feEmitGenericCall(invocation);
+          } else if (generic) {
             final invocation = genericCalls.length;
             genericCalls.add(GenericCall(function, info.typeParameters));
             result = feFinishGenericCall(invocation, token);
@@ -7525,7 +7911,7 @@ void feGenerateDispatches() {
           }
         }
       }
-      feConvertValue(result, info.result, token);
+      feConvertGenericResult(result, info.result, token);
       feEmit(opReturn);
       fePatch(next, ir.length);
     }

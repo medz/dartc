@@ -19,8 +19,9 @@ class CheckedMemberRead(
   final int receiver,
   final int type,
   final int kind,
-  final int target,
-);
+  final int target, [
+  final int storageType = -1,
+]);
 
 class const InterfaceMember(
   final String name,

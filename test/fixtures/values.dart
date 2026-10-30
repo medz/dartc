@@ -3437,6 +3437,284 @@ void listGrowth(List<String> args) {
   print(args[0]);
 }
 
+class RuntimeBox<T> {
+  T value;
+  final List<T> values = <T>[];
+  RuntimeBox(this.value) {
+    values.add(value);
+  }
+  RuntimeBox.named({required T value}) : this(value);
+  T get current => value;
+  set current(T next) {
+    value = next;
+  }
+
+  T replace(T next) {
+    final previous = value;
+    value = next;
+    return previous;
+  }
+
+  bool accepts(Object? candidate) => candidate is T;
+  T call(T next) => next;
+  T? optional([T? next]) => next;
+  RuntimeBox<T> copy() => RuntimeBox(value);
+  static U identity<U>(U value) => value;
+  List<T> Function() capture() =>
+      () => <T>[value];
+  void consume(void Function(T) callback) {
+    callback(value);
+  }
+}
+
+class RuntimeConstant<T> {
+  final T value;
+  const RuntimeConstant(this.value);
+}
+
+class RuntimeEmpty<T> {
+  T? value;
+  final values = <T>[];
+}
+
+class RuntimeBound<T extends num> {
+  final T value;
+  RuntimeBound(this.value);
+  num twice() => value + value;
+}
+
+class RuntimeCallback<T> {
+  final T Function(T) callback;
+  RuntimeCallback(this.callback);
+}
+
+typedef RuntimeAlias<T> = RuntimeBox<List<T>>;
+RuntimeBox<T> runtimeMake<T>(T value) => RuntimeBox<T>(value);
+Object runtimeGrow<T>(T value, int depth) {
+  if (depth == 0) return RuntimeBox<T>(value);
+  return runtimeGrow<List<T>>(<T>[value], depth - 1);
+}
+
+abstract class RuntimeNumberView {
+  num get current;
+  set current(num value);
+  num read();
+  void write(num value);
+  Object Function(Never) get callback;
+}
+
+class RuntimeNumberBox<T extends num> implements RuntimeNumberView {
+  T value;
+  RuntimeNumberBox(this.value);
+  T get current => value;
+  set current(covariant T value) {
+    this.value = value;
+  }
+
+  T read() => value;
+  void write(covariant T value) {
+    this.value = value;
+  }
+
+  T Function(T) get callback =>
+      (value) => value;
+}
+
+abstract class RuntimeFieldView {
+  num get value;
+  set value(num value);
+}
+
+class RuntimeFieldBox<T extends num> implements RuntimeFieldView {
+  covariant T value;
+  RuntimeFieldBox(this.value);
+}
+
+class RuntimePrimary<T>(final T value) {
+  List<T> get values => <T>[value];
+}
+
+class RuntimeApply<T> {
+  final T value;
+  RuntimeApply(T source, T Function(T) callback) : value = callback(source);
+}
+
+class RuntimeDefaults<T> {
+  final T? value;
+  final List<T> values;
+  RuntimeDefaults([this.value]) : values = <T>[];
+}
+
+class RuntimeIndex<K, T> {
+  T value;
+  RuntimeIndex(this.value);
+  T operator [](K key) => value;
+  void operator []=(K key, T next) {
+    value = next;
+  }
+
+  T operator +(T next) => next;
+  T operator -() => value;
+}
+
+class RuntimeArguments<T> {
+  final List<T> values;
+  RuntimeArguments(this.values, int ignored);
+}
+
+void runtimeGenericClasses() {
+  RuntimeNumberView view = RuntimeNumberBox<int>(10);
+  print(view.read());
+  view.current = 11;
+  view.write(12);
+  print(view.current);
+  print(view.callback is int Function(int));
+  for (var mode = 0; mode < 2; mode++) {
+    try {
+      if (mode == 0)
+        view.current = 1.5;
+      else
+        view.write(1.5);
+      print('missed interface');
+    } on TypeError {
+      print('interface checked');
+    }
+  }
+  print(view.read());
+  RuntimeFieldView field = RuntimeFieldBox<int>(13);
+  print(field.value);
+  field.value = 14;
+  try {
+    field.value = 2.5;
+  } on TypeError {
+    print('field interface checked');
+  }
+  print(field.value);
+  final primary = RuntimePrimary(15);
+  print(primary.value);
+  print(primary.values is List<int>);
+  print(RuntimeApply(16, (value) => value + 1).value);
+  print(RuntimeDefaults<int>().value);
+  print(RuntimeDefaults<int>().values is List<int>);
+
+  final indexed = RuntimeIndex<int, int>(17);
+  print(indexed[0]++);
+  print(indexed[0] += 2);
+  print(indexed + 21);
+  print(-indexed);
+  RuntimeIndex<num, num> wideIndex = indexed;
+  for (var mode = 0; mode < 3; mode++) {
+    try {
+      if (mode == 0)
+        wideIndex[1.5] = 22;
+      else if (mode == 1)
+        wideIndex[0] = 2.5;
+      else
+        print(wideIndex[1.5]);
+      print('missed index');
+    } on TypeError {
+      print('index checked');
+    }
+  }
+  print(indexed[0]);
+  final optionalIndex = RuntimeIndex<int, int?>(null);
+  print(optionalIndex[0] ??= 23);
+  print(optionalIndex[0] ??= 24);
+
+  var effects = 0;
+  int later() => ++effects;
+  dynamic wrongValues = 'bad';
+  for (var mode = 0; mode < 2; mode++) {
+    try {
+      if (mode == 0)
+        RuntimeArguments<int>(wrongValues, later());
+      else {
+        RuntimeArguments<int> inferred = RuntimeArguments(wrongValues, later());
+        print(inferred.values);
+      }
+      print('missed argument');
+    } on TypeError {
+      print(effects);
+    }
+  }
+
+  final box = RuntimeBox(3);
+  print(box is RuntimeBox<int>);
+  print(box.values is List<int>);
+  print(box.replace(4));
+  print(box.current);
+  box.current = 5;
+  print(box.value);
+  print(box.accepts(6));
+  print(box.accepts(6.5));
+  print(box(6));
+  print(RuntimeBox(box).value(7));
+  print(box.optional());
+  print(box.optional(8));
+  print(box.copy().value);
+  print(box.copy() is RuntimeBox<int>);
+  print(RuntimeBox.identity(9));
+  Object matched = box;
+  if (matched case RuntimeBox<int>(value: var value)) print(value + 1);
+  if (matched case RuntimeBox<String>()) print('missed pattern');
+  final captured = box.capture();
+  print(captured() is List<int>);
+  print(captured());
+  RuntimeBox<num> wide = box;
+  for (var mode = 0; mode < 3; mode++) {
+    try {
+      if (mode == 0)
+        wide.value = 2.5;
+      else if (mode == 1)
+        wide.current = 2.5;
+      else
+        wide.replace(2.5);
+      print('missed');
+    } on TypeError {
+      print('checked');
+    }
+  }
+  print(box.value);
+  wide.consume((num value) {
+    print(value);
+  });
+  final named = RuntimeBox.named(value: 'named');
+  print(named.current);
+  RuntimeBox<num> context = RuntimeBox(7);
+  print(context is RuntimeBox<int>);
+  print(context is RuntimeBox<num>);
+  final alias = RuntimeAlias<int>(<int>[8]);
+  print(alias.current);
+  print(alias is RuntimeBox<List<int>>);
+  print(RuntimeAlias(<int>[8]) is RuntimeBox<List<int>>);
+  final made = runtimeMake<String>('made');
+  print(made.current);
+  print(made is RuntimeBox<String>);
+  final grown = runtimeGrow<int>(1, 2);
+  print(grown is RuntimeBox<List<List<int>>>);
+  print(grown is RuntimeBox<List<List<num>>>);
+  print(grown is RuntimeBox<List<int>>);
+  print((grown as RuntimeBox<List<List<int>>>).value);
+  const first = RuntimeConstant<int>(9);
+  const same = RuntimeConstant<int>(9);
+  const different = RuntimeConstant<num>(9);
+  print(first.value);
+  print(first is RuntimeConstant<int>);
+  print(identical(first, same));
+  print(identical(first, different));
+  print(identical(first, RuntimeConstant<int>(9)));
+  final empty = RuntimeEmpty<String>();
+  print(empty.value);
+  print(empty.values is List<String>);
+  print(RuntimeBound(6).twice());
+  RuntimeCallback<num> callback = RuntimeCallback<int>((value) => value + 1);
+  try {
+    print(callback.callback(1.5));
+  } on TypeError {
+    print('read checked');
+  }
+}
+
 @metadataTag
 class MetadataProbe {
   @metadataList
@@ -8409,6 +8687,7 @@ void main(List<String> args) {
   namedConstructors();
   constructorInitializers();
   metadataValues();
+  runtimeGenericClasses();
   objectValues();
   valueContexts();
   assignmentValues();

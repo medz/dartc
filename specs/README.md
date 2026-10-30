@@ -21,8 +21,8 @@
 | §6 Overview；§7 Errors and Warnings；§21 Reference | [词法、作用域与诊断](lexical-structure.md)、[并发边界](libraries.md) | 部分实现；isolate 并发未实现 |
 | §8 Variables | [变量](variables.md) | 部分实现 |
 | §9 Functions | [函数](functions.md) | 部分实现 |
-| §10 Classes；§11 Interfaces；§12 Mixins；§13 Extensions；§14 Enums；§16 Metadata | [类及相关声明](classes.md) | 非泛型类、继承、接口、工厂构造、枚举和元数据部分实现；mixin 和 extension 仍缺 |
-| §15 Generics；§20 Types | [类型与泛型](types.md) | 核心类型、List 实参、泛型别名与泛型函数直接调用部分实现；泛型 const metadata 部分实现；一般运行时泛型类与泛型函数值仍缺 |
+| §10 Classes；§11 Interfaces；§12 Mixins；§13 Extensions；§14 Enums；§16 Metadata | [类及相关声明](classes.md) | 普通及泛型类、非泛型父接口、工厂构造、枚举和元数据部分实现；mixin 和 extension 仍缺 |
+| §15 Generics；§20 Types | [类型与泛型](types.md) | 核心类型、List 实参、泛型别名与泛型函数直接调用部分实现；普通及 const 泛型实例、成员代入和实际类型检查部分实现；泛型父接口与泛型函数值仍缺 |
 | §17 Expressions | [表达式](expressions.md) | 部分实现 |
 | §18 Statements | [语句](statements.md) | 部分实现 |
 | §19 Libraries and Scripts | [库与脚本](libraries.md) | 相对库依赖与入口部分实现 |
@@ -40,12 +40,12 @@
 | [类修饰符](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/class-modifiers/feature-specification.md)、[Extension types](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.3/extension-types/feature-specification.md) | [类](classes.md)、[类型](types.md) | 未实现 |
 | [数字分隔符](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.6/digit-separators/feature-specification.md) | [词法](lexical-structure.md) | 部分实现；整数、小数及指数中的数字分隔符可用 |
 | [通配变量](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/wildcard-variables/feature-specification.md) | [变量](variables.md) | 已有局部绑定行为，完整声明位置规则待核对 |
-| [基于界限的推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/inference-using-bounds/design-document.md) | [类型](types.md)、[函数](functions.md#基于界限的推断) | 3.7 起在普通泛型调用和泛型 const 推断中组合下界与声明上界，支持 List、可空及函数签名；完整 F-bound 与泛型父接口仍缺 |
+| [基于界限的推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/inference-using-bounds/design-document.md) | [类型](types.md)、[函数](functions.md#基于界限的推断) | 3.7 起在普通泛型调用和普通及 const 泛型构造推断中组合下界与声明上界，支持 List、可空及函数签名；完整 F-bound 与泛型父接口仍缺 |
 | [Null-aware elements](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.8/null-aware-elements/feature-specification.md) | [表达式](expressions.md) | List 的运行时及常量元素已支持；Set/Map 未实现 |
 | [Constructor tear-offs](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.15/constructor-tearoffs/feature-specification.md) | [类](classes.md#构造器函数值)、[函数](functions.md#函数值) | 非泛型用户类构造器、工厂、重定向及普通类别名提取已支持；泛型类/别名及 builtin 标准库构造器提取仍缺 |
 | [Dot shorthands](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.10/dot-shorthands/feature-specification.md) | [表达式](expressions.md#点简写)、[模式](patterns.md) | 已有构造器与静态成员的上下文简写、选择器链、常量、相等操作数和模式已支持；非泛型用户类构造器函数值可用于常量模式；泛型类及未实现声明类别仍缺 |
 | [私有命名形参](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.12/private-named-parameters/feature-specification.md) | [函数](functions.md) | 字段形参和主构造器声明参数的公共名映射、冲突校验及 super 形参公共名称关联 |
-| [Primary constructors](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.13/primary-constructors/feature-specification.md) | [类](classes.md#主构造器) | 非泛型类的主构造器、字段声明参数与推断、初始化作用域、常量求值及生成式/工厂构造简写已支持；泛型类及其余声明类别仍缺 |
+| [Primary constructors](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.13/primary-constructors/feature-specification.md) | [类](classes.md#主构造器) | 普通及泛型类的主构造器、字段声明参数与推断、初始化作用域、常量求值及生成式/工厂构造简写已支持；泛型父类及其余声明类别仍缺 |
 
 ## 状态与证据
 
