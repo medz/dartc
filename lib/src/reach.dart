@@ -34,9 +34,13 @@ List<int> reachableFunctions(List<SsaFunction> source, [List<int>? roots]) {
     _reachFunction(reachable, work, 0);
     var main = entryFunction;
     _reachFunction(reachable, work, main);
-    if (functions[main].parameters > 0) {
-      _reachFunction(reachable, work, runtimeFunction(bArguments, -1));
-    }
+    _reachFunction(
+      reachable,
+      work,
+      functions[main].parameters == 0
+          ? abiFunction('rtValidateArguments', 0)
+          : runtimeFunction(bArguments, -1),
+    );
   } else {
     while (i < checkedExports.length) {
       final function = checkedExports[i].function;

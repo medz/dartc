@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ffi';
 import 'dart:isolate';
@@ -35,6 +36,18 @@ int hostFloat64ToInt(int bits) {
 }
 
 String hostRead(String path) => File(path).readAsStringSync();
+
+String hostReadSource(String path) {
+  final bytes = File(path).readAsBytesSync();
+  final text = utf8.decode(bytes, allowMalformed: true);
+  // Source offsets and script-tag recognition include the leading BOM.
+  if (bytes.length >= 3 &&
+      bytes[0] == 0xef &&
+      bytes[1] == 0xbb &&
+      bytes[2] == 0xbf)
+    return '\ufeff' + text;
+  return text;
+}
 
 String? hostReadIfExists(String path) {
   try {

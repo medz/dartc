@@ -12,6 +12,7 @@
 
 ### Fixes
 
+- Keep source BOMs and malformed UTF-8 replacement consistent between SDK-hosted and native builds. Reject invalid UTF-8 in package configurations and process arguments, including programs with a parameterless `main`.
 - Reject source or package-configuration changes during native bootstrap before replacing the verified seed, and retain the original inputs for diagnosis.
 - Preserve double NaN bit patterns in identity checks and constant canonicalization. Named constants and constant arithmetic use the output target's NaN representation.
 - Align macOS static-library members for Darwin linkers that require padded archive contents.

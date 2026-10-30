@@ -24,7 +24,7 @@ on:
         default: false
         type: boolean
       cross_ref:
-        description: Commit or branch containing matching Mac-built Linux seeds
+        description: Commit or branch containing matching native target seeds
         required: false
         type: string
 
@@ -142,7 +142,18 @@ jobs:
           architecture: x64
       - name: Verify the Intel host
         run: test "$(uname -m)" = x86_64
-      - name: Bootstrap and check native behavior
+      - uses: actions/checkout@v7
+        if: inputs.cross_ref != ''
+        with:
+          ref: ${{ inputs.cross_ref }}
+          path: .cross
+      - name: Bootstrap from the supplied Intel seed
+        if: inputs.cross_ref != ''
+        run: |
+          shasum -a 256 .cross/dartc-macos-x64
+          dart tool/bootstrap.dart --seed .cross/dartc-macos-x64
+      - name: Cold bootstrap without an existing seed
+        if: inputs.cross_ref == ''
         run: dart tool/bootstrap.dart
       - run: dart test/bootstrap_test.dart --compiler build/dartc-stage2
       - run: dart test/library_test.dart build/dartc-stage2

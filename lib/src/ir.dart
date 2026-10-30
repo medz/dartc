@@ -146,6 +146,7 @@ const int bNumberProperty = 85;
 const int bLateError = 86;
 // Exact descriptor class ID of a checked, non-null class receiver.
 const int bObjectClassId = 87;
+const int bHostReadSource = 88;
 
 const int bNativeLoad64 = 100;
 const int bNativeStore64 = 101;

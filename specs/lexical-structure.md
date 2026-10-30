@@ -7,7 +7,7 @@
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
-| [§21.1 Lexical Rules][lexical]：字符与 token | 部分实现 | token 保留来源和 UTF-16 区间；已有整数、double、字符串及所支持运算符扫描，完整词法及非法输入边界尚未覆盖。 | [scanner.dart](../lib/src/scanner.dart)；[behavior_test.dart](../test/behavior_test.dart) |
+| [§21.1 Lexical Rules][lexical]：字符与 token | 部分实现 | token 保留来源和 UTF-16 区间；源码按 UTF-8 容错解码，非法序列按最长合法前缀替换为 U+FFFD，保留起始 BOM；字符串与注释可含替换字符，标识符中的替换字符被拒绝。已有整数、double、字符串及所支持运算符扫描，完整词法与诊断分类尚未覆盖。 | [host.dart](../lib/src/host.dart) `hostReadSource()`；[runtime.dart](../lib/src/runtime.dart) `rtHostReadSource()`；[scanner.dart](../lib/src/scanner.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 `utf8-source.dart`、`utf8-identifier.dart` |
 | [§21.1 Lexical Rules][lexical]：字面量扫描 | 部分实现 | 支持 raw、三引号、转义、插值与相邻字符串；支持小数与指数形式；转义范围和换行边界仍需逐项核对。字面量语义归表达式章节。 | [scanner.dart](../lib/src/scanner.dart)、[parser.dart](../lib/src/parser.dart)；[values.dart](../test/fixtures/values.dart) |
 | [Dart 3.6 数字分隔符][separators] | 部分实现 | 文件版本至少 3.6 时，十进制/十六进制整数及小数/指数的数字间允许一个或多个下划线；前缀后、尾部及非数字边界被拒绝。token 保留原 UTF-16 区间，数值文本在扫描边界去除分隔符；字符串 `int.parse`、`double.parse` 不因该词法特性改变。 | [scanner.dart](../lib/src/scanner.dart)；[values.dart](../test/fixtures/values.dart) 的 `Box.arguments`、`staticContexts`、`doubleValues`；[behavior_test.dart](../test/behavior_test.dart) 的拒绝用例 |
 | [§21.1.1 Reserved Words][reserved] | 部分实现 | 类、typedef 与类型参数的声明名共用 typeIdentifier 的保留字和内建标识符限制；上下文标识符仍可作名。其余文法位置的限制尚不完整。 | [scanner.dart](../lib/src/scanner.dart)：`tokenIsTypeDeclarationIdentifier`；[parser.dart](../lib/src/parser.dart)；[behavior_test.dart](../test/behavior_test.dart) |
@@ -19,12 +19,14 @@
 | [§6.1 Scoping][scoping]：库与成员名称 | 部分实现 | 库名解析、局部到成员及已支持继承层次的查找已有路径；扩展成员和完整泛型查找仍缺失。库命名空间另见[库与脚本](libraries.md)。 | [symbols.dart](../lib/src/symbols.dart)、[frontend.dart](../lib/src/frontend.dart)；[behavior_test.dart](../test/behavior_test.dart) |
 | [§6.2 Privacy][privacy] | 部分实现 | 按库身份限制下划线私有名，主文件与 parts 共享私有顶层名和实例成员，导入私有名仍被拒绝；继承成员和 super 构造按声明库检查，同名私有成员不会跨库覆写。扩展组合仍缺。 | [symbols.dart](../lib/src/symbols.dart)、[frontend.dart](../lib/src/frontend.dart)；[behavior_test.dart](../test/behavior_test.dart) 的 `_private`、`parts-main.dart`、`inheritance-imports.dart` 用例 |
 | [§7 Errors and Warnings][errors]：编译期诊断 | 部分实现 | 解析、语义及版本错误可带源路径与偏移；部分扫描错误仅报告偏移。现有拒绝用例不覆盖全部规范错误，错误分类与警告机制尚不完整。 | [source.dart](../lib/src/source.dart)、[parser.dart](../lib/src/parser.dart)、[scanner.dart](../lib/src/scanner.dart)；[behavior_test.dart](../test/behavior_test.dart) 的拒绝用例 |
-| [§7 Errors and Warnings][errors]：动态错误 | 部分实现 | 范围、类型、只读 List、late 读写等边界有失败行为测试；当前终止进程，尚无规范异常对象、捕获与栈展开语义。 | [runtime.dart](../lib/src/runtime.dart)；[behavior_test.dart](../test/behavior_test.dart) 的运行失败用例 |
+| [§7 Errors and Warnings][errors]：动态错误 | 部分实现 | 同步 throw/rethrow、catch/finally 及部分运行时错误已有对象与栈展开；各操作的支持与未实现异常边界见[表达式](expressions.md)和[语句](statements.md)，完整动态错误语义仍未完成。 | [runtime.dart](../lib/src/runtime.dart)；[behavior_test.dart](../test/behavior_test.dart) 的运行失败用例 |
 | [§21.1][lexical]、[§7][errors]：完整一致性覆盖 | 待核对 | 尚无覆盖全部合法和非法 token、关键字位置及诊断类别的规范测试集；真实程序成功不等同于完整词法兼容。 | [test/](../test/) |
 
 数字扫描区分十六进制整数与十进制小数/指数形式，支持 `.5`；小数点不吞并成员访问或级联。整数、小数和指数中的分隔符均要求 3.6 及以上版本并位于数字之间。未使用函数中的非法指数或分隔符也必须诊断；语义范围与精确转换规则见[数字表达式](expressions.md)。
 
 ## 文件头与验证边界
+
+源文件解码与普通文件文本读取分别定义：源码保留起始 BOM 供词法判断，非法 UTF-8 在字符串和注释中的容错行为对照 [SDK 3.13.7 源码扫描器][utf8-scanner]及 [Utf8Decoder][utf8-decoder]。普通文件文本使用严格 UTF-8 并移除起始 BOM；argv 接受编码的 UTF-16 surrogate，但拒绝其他非法序列。`behavior_test.dart` 的 `io.dart` 与原始 argv 用例核对这些边界；普通文件失败仍沿宿主 I/O 错误出口终止，尚未实现可捕获的 `FileSystemException`，不等同于完整 `dart:io` 支持。
 
 文件起始可有 BOM，或从 UTF-16 偏移 0 开始的 `#!` script tag；BOM 后的 `#!` 不被当作 script tag。初始空白及注释之后的 token 仍保留原始位置。规范允许版本标记中的空格和 tab；SDK 3.13.5 CFE 对所测含 tab 标记未选择该版本，本实现采用[版本规范][versioning]的空白规则。此处只记录兼容差异，不判定上游缺陷。
 
@@ -43,3 +45,5 @@
 
 [versioning]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.8/language-versioning/feature-specification.md
 [features]: https://github.com/dart-lang/sdk/blob/3.13.5/tools/experimental_features.yaml
+[utf8-scanner]: https://github.com/dart-lang/sdk/blob/3.13.7/pkg/_fe_analyzer_shared/lib/src/scanner/utf8_bytes_scanner.dart
+[utf8-decoder]: https://api.dart.dev/dart-convert/Utf8Decoder/convert.html

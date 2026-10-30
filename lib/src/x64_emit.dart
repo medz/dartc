@@ -470,27 +470,26 @@ void generateX64(List<MachineFunction> program, int features) {
     // stack. Linux enters with a 16-byte-aligned argc/argv process stack.
     if (targetOS == 0) xPush(xRbp);
     final main = entryFunction;
+    if (targetOS == 1) {
+      xLoad(xRdi, xRsp, 0);
+      xMove(xRsi, xRsp);
+      xImmediate(0, xRsi, 8);
+    }
+    xPush(xRdi);
+    xPush(xRsi);
+    xCall(0);
+    xRootBoundary(roots);
+    xPop(xRsi);
+    xPop(xRdi);
     if (functions[main].parameters == 0) {
-      xCall(0);
-      xRootBoundary(roots);
+      xCall(abiFunction('rtValidateArguments', 0));
     } else {
-      if (targetOS == 1) {
-        xLoad(xRdi, xRsp, 0);
-        xMove(xRsi, xRsp);
-        xImmediate(0, xRsi, 8);
-      }
-      xPush(xRdi);
-      xPush(xRsi);
-      xCall(0);
-      xRootBoundary(roots);
-      xPop(xRsi);
-      xPop(xRdi);
       xAddress(4, listType(tString));
       xMove(xRdx, xRax);
       xCall(runtimeFunction(bArguments, -1));
-      xRootBoundary(roots);
-      xMove(xRdi, xRax);
     }
+    xRootBoundary(roots);
+    if (functions[main].parameters > 0) xMove(xRdi, xRax);
     xCall(main);
     xRootBoundary(roots);
     xExit(0);

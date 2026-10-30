@@ -966,6 +966,7 @@ int feBuiltinType(int id) {
       id == bStringSubstring ||
       id == bStringFromCodes ||
       id == bHostRead ||
+      id == bHostReadSource ||
       id == bHostCurrentDirectory ||
       id == bHostStdPath)
     return tString;
@@ -1510,6 +1511,13 @@ void feInstallSymbols() {
   );
   declareFfiTypes(feSymbols);
   declareSymbol(feSymbols, sourceHost, 'hostRead', symbolBuiltin, bHostRead);
+  declareSymbol(
+    feSymbols,
+    sourceHost,
+    'hostReadSource',
+    symbolBuiltin,
+    bHostReadSource,
+  );
   declareSymbol(
     feSymbols,
     sourceHost,
@@ -3081,6 +3089,7 @@ int feMetadataMask(AstExpression expression) {
 
 int feBuiltinArgumentType(int builtin, int argument) {
   if (builtin == bHostRead ||
+      builtin == bHostReadSource ||
       builtin == bHostReadIfExists ||
       builtin == bHostFinish)
     return argument == 0 ? tString : tInt;
@@ -3111,7 +3120,8 @@ int feLowerBuiltinArguments(AstExpression call, int builtin) {
 int feLowerBuiltinCall(AstExpression call, int builtin) {
   if (call.typeArguments.length != 0)
     feAstError(call.token, 'nongeneric call does not accept type arguments');
-  if (builtin == bHostReadIfExists && call.children.length != 2 ||
+  if ((builtin == bHostReadIfExists || builtin == bHostReadSource) &&
+          call.children.length != 2 ||
       builtin == bHostCurrentDirectory && call.children.length != 1)
     feAstError(call.token, 'host argument count');
   if (builtin == bValueIdentical) {

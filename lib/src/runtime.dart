@@ -884,54 +884,86 @@ int rtStringFromCodes(int codes) {
   return result;
 }
 
-int rtStringDecodeUtf8(int bytes, int length) {
-  var result = rtStringNew(length);
+const int _utf8Strict = 0;
+const int _utf8Source = 1;
+const int _utf8Wtf8 = 2;
+
+// Returns the UTF-16 length, or -1 for malformed strict/WTF-8 input. A zero
+// output validates without writing; source mode replaces invalid subsequences.
+@pragma('dartc:no-gc')
+int _rtDecodeUtf8(int bytes, int length, int mode, int output) {
   var i = 0;
   var count = 0;
   while (i < length) {
     var c = nativeLoad8(bytes + i);
     i = i + 1;
-    if (c >= 192 && c < 224) {
-      c = ((c & 31) << 6) | (nativeLoad8(bytes + i) & 63);
-      i = i + 1;
-    } else if (c >= 224 && c < 240) {
-      c =
-          ((c & 15) << 12) |
-          ((nativeLoad8(bytes + i) & 63) << 6) |
-          (nativeLoad8(bytes + i + 1) & 63);
-      i = i + 2;
-    } else if (c >= 240) {
-      c =
-          ((c & 7) << 18) |
-          ((nativeLoad8(bytes + i) & 63) << 12) |
-          ((nativeLoad8(bytes + i + 1) & 63) << 6) |
-          (nativeLoad8(bytes + i + 2) & 63);
-      i = i + 3;
+    if (c >= 128) {
+      var remaining = 0;
+      var low = 128;
+      var high = 191;
+      if (c >= 194 && c <= 223) {
+        remaining = 1;
+        c = c & 31;
+      } else if (c >= 224 && c <= 239) {
+        remaining = 2;
+        if (c == 224) low = 160;
+        if (c == 237 && mode != _utf8Wtf8) high = 159;
+        c = c & 15;
+      } else if (c >= 240 && c <= 244) {
+        remaining = 3;
+        if (c == 240) low = 144;
+        if (c == 244) high = 143;
+        c = c & 7;
+      }
+      var valid = remaining != 0;
+      while (remaining > 0) {
+        if (i == length) break;
+        var next = nativeLoad8(bytes + i);
+        if (next < low || next > high) break;
+        c = (c << 6) | (next & 63);
+        i = i + 1;
+        remaining = remaining - 1;
+        low = 128;
+        high = 191;
+      }
+      if (!valid || remaining != 0) {
+        if (mode != _utf8Source) return -1;
+        c = 65533;
+      }
     }
     if (c > 65535) {
-      var scalar = c - 65536;
-      nativeStore16(
-        result + stringDataOffset + count * 2,
-        55296 + (scalar >> 10),
-      );
-      nativeStore16(
-        result + stringDataOffset + 2 + count * 2,
-        56320 + (scalar & 1023),
-      );
+      if (output != 0) {
+        var scalar = c - 65536;
+        nativeStore16(output + count * 2, 55296 + (scalar >> 10));
+        nativeStore16(output + 2 + count * 2, 56320 + (scalar & 1023));
+      }
       count = count + 2;
     } else {
-      nativeStore16(result + stringDataOffset + count * 2, c);
+      if (output != 0) nativeStore16(output + count * 2, c);
       count = count + 1;
     }
   }
+  return count;
+}
+
+// Callers own BOM handling and error reporting. Zero denotes malformed input.
+int rtStringDecodeUtf8(int bytes, int length, int mode) {
+  var result = rtStringNew(length);
+  var count = _rtDecodeUtf8(bytes, length, mode, result + stringDataOffset);
+  if (count < 0) return 0;
   nativeStore64(result + stringLengthOffset, count);
   return result;
 }
 
-int rtStringFromCString(int bytes) {
+@pragma('dartc:no-gc')
+int _rtCStringLength(int bytes) {
   var length = 0;
   while (nativeLoad8(bytes + length) != 0) length = length + 1;
-  return rtStringDecodeUtf8(bytes, length);
+  return length;
+}
+
+int rtStringFromCString(int bytes) {
+  return rtStringDecodeUtf8(bytes, _rtCStringLength(bytes), _utf8Wtf8);
 }
 
 int rtStringFromWords(int a, int b, int c, int d) {
@@ -1049,14 +1081,18 @@ int rtPrintBool(int value) {
 }
 
 int rtHostRead(int path) {
-  return rtHostReadFile(path, 0);
+  return rtHostReadFile(path, 0, 0);
 }
 
 int rtHostReadIfExists(int path) {
-  return rtHostReadFile(path, 1);
+  return rtHostReadFile(path, 1, 0);
 }
 
-int rtHostReadFile(int path, int optional) {
+int rtHostReadSource(int path) {
+  return rtHostReadFile(path, 0, 1);
+}
+
+int rtHostReadFile(int path, int optional, int source) {
   var encoded = rtStringEncodeUtf8(path);
   var fd = rtSyscall(5, encoded + 8, 0, 0, 0, 0, 0);
   rtUtf8Release();
@@ -1088,8 +1124,24 @@ int rtHostReadFile(int path, int optional) {
     length = length + count;
   }
   rtSyscall(6, fd, 0, 0, 0, 0, 0);
-  var result = rtStringDecodeUtf8(bytes, length);
+  var offset = 0;
+  if (source == 0 &&
+      length >= 3 &&
+      nativeLoad8(bytes) == 239 &&
+      nativeLoad8(bytes + 1) == 187 &&
+      nativeLoad8(bytes + 2) == 191) {
+    offset = 3;
+  }
+  final mark = rtRootMark();
+  rtRootPush(path, storageRef);
+  var result = rtStringDecodeUtf8(
+    bytes + offset,
+    length - offset,
+    source != 0 ? _utf8Source : _utf8Strict,
+  );
+  rtRootRestore(mark);
   rtUnmap(bytes, capacity);
+  if (result == 0) return rtIoError(path);
   return result;
 }
 
@@ -1132,6 +1184,7 @@ int rtHostCurrentDirectory() {
   }
   var result = rtStringFromCString(bytes);
   rtUnmap(bytes, capacity);
+  if (result == 0) return rtIoError();
   return result;
 }
 
@@ -1169,6 +1222,30 @@ int rtHostWrite(int path, int bytes) {
   return 0;
 }
 
+@pragma('dartc:no-gc')
+Never _rtInvalidArgument() {
+  var message = rtCStringAcquire(
+    0x69203a6374726164,
+    0x552064696c61766e,
+    0x67726120382d4654,
+    0xa746e656d75,
+  );
+  rtWriteAll(2, message, 30);
+  rtHostExit(255);
+}
+
+@pragma('dartc:no-gc')
+int rtValidateArguments(int argc, int argv) {
+  var i = 1;
+  while (i < argc) {
+    var bytes = nativeLoad64(argv + i * 8);
+    if (_rtDecodeUtf8(bytes, _rtCStringLength(bytes), _utf8Wtf8, 0) < 0)
+      _rtInvalidArgument();
+    i = i + 1;
+  }
+  return 0;
+}
+
 int rtArguments(int argc, int argv, int typeRef) {
   var result = rtListNew(typeRef);
   if (argc <= 1) return result;
@@ -1176,11 +1253,9 @@ int rtArguments(int argc, int argv, int typeRef) {
   rtRootPush(result, storageRef);
   var i = 1;
   while (i < argc) {
-    rtListAdd(
-      result,
-      rtStringFromCString(nativeLoad64(argv + i * 8)),
-      rtTypeArgument(typeRef),
-    );
+    var value = rtStringFromCString(nativeLoad64(argv + i * 8));
+    if (value == 0) _rtInvalidArgument();
+    rtListAdd(result, value, rtTypeArgument(typeRef));
     i = i + 1;
   }
   rtRootRestore(mark);
@@ -1225,9 +1300,10 @@ int _rtExecutablePath() {
     }
     rtCStringRelease();
     if (length < 0) return rtIoError();
-    result = rtStringDecodeUtf8(bytes, length);
+    result = rtStringDecodeUtf8(bytes, length, _utf8Wtf8);
   }
   rtUnmap(bytes, capacity);
+  if (result == 0) return rtIoError();
   return result;
 }
 

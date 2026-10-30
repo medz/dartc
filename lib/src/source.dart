@@ -225,7 +225,7 @@ int sourceLoad(
     path = sourceUriPath('/', uri);
   }
   int id = program.files.length;
-  var scanner = Scanner(text ?? hostRead(path), <Token>[], 0);
+  var scanner = Scanner(text ?? hostReadSource(path), <Token>[], 0);
   scanner.path = path;
   var packages = program.packages;
   if (text == null && !implementation && packages != null) {

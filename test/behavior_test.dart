@@ -845,6 +845,105 @@ Future<void> main(List<String> args) async {
     }
 
     await compare(source, ['alpha', '你好']);
+    final malformedUtf8 = <List<int>>[
+      [0xc0, 0xaf],
+      [0xe2, 0x28, 0xa1],
+      [0xe0, 0x80, 0x80],
+      [0xed, 0xa0, 0x80],
+      [0xf0, 0x80, 0x80, 0x80],
+      [0xf4, 0x90, 0x80, 0x80],
+      [0xff],
+      [0x80],
+      [0xc2],
+      [0xe2, 0x82],
+      [0xf0, 0x90, 0x80],
+    ];
+    final validUtf8 = utf8.encode(
+      String.fromCharCodes([
+        0x7f,
+        0x80,
+        0x7ff,
+        0x800,
+        0xd7ff,
+        0xe000,
+        0xffff,
+        0x10000,
+        0x10ffff,
+      ]),
+    );
+    File('${temporary.path}/utf8-library.dart').writeAsBytesSync([
+      ...utf8.encode("const imported = '"),
+      ...malformedUtf8.first,
+      ...utf8.encode("';\n"),
+    ]);
+    final utf8Source = File('${temporary.path}/utf8-source.dart')
+      ..writeAsBytesSync([
+        ...utf8.encode('''\ufeffimport 'utf8-library.dart';
+void units(String text) {
+  print(text.length);
+  for (var i = 0; i < text.length; i++) print(text.codeUnitAt(i));
+}
+void main() {
+  units(imported);
+'''),
+        for (final bytes in [
+          validUtf8,
+          [0xef, 0xbb, 0xbf],
+          ...malformedUtf8,
+        ]) ...[
+          ...utf8.encode("  units('"),
+          ...bytes,
+          ...utf8.encode("'); // "),
+          ...bytes,
+          10,
+        ],
+        ...utf8.encode('}\n//'),
+        ...malformedUtf8.last,
+      ]);
+    final utf8SdkExecutable = '${utf8Source.path}.sdk';
+    // Compare decoded values after native compilation, separately from source
+    // diagnostics emitted when the SDK loads malformed literals from kernel.
+    await run(sdk, [
+      'compile',
+      'exe',
+      utf8Source.path,
+      '-o',
+      utf8SdkExecutable,
+    ]);
+    final utf8Expected = await run(utf8SdkExecutable, []);
+    final utf8Executable = '${utf8Source.path}.out';
+    await run(
+      driver,
+      compileArguments(utf8Source, utf8Executable),
+      native: compiler != null,
+    );
+    final utf8Actual = await run(utf8Executable, [], native: true);
+    if (utf8Actual.stdout != utf8Expected.stdout ||
+        utf8Actual.stderr != utf8Expected.stderr)
+      throw StateError('Source UTF-8 code units differ from official Dart.');
+    final utf8Identifier = File('${temporary.path}/utf8-identifier.dart')
+      ..writeAsBytesSync([
+        ...utf8.encode('void main(){int x'),
+        0x80,
+        ...utf8.encode('=1;}'),
+      ]);
+    for (final command in [
+      [
+        sdk,
+        'compile',
+        'kernel',
+        utf8Identifier.path,
+        '-o',
+        '${utf8Identifier.path}.dill',
+      ],
+      [
+        driver,
+        ...compileArguments(utf8Identifier, '${utf8Identifier.path}.out'),
+      ],
+    ]) {
+      if ((await capture(command.first, command.sublist(1))).exitCode == 0)
+        throw StateError('Malformed UTF-8 identifier was accepted.');
+    }
     final values = File('${temporary.path}/values.dart')
       ..writeAsStringSync(
         File('$root/test/fixtures/values.dart').readAsStringSync(),
@@ -4529,16 +4628,25 @@ void main() { print(add(2,3)); print(api.importedAdd(4,5)); print(inverse(false)
     }
     final core = Directory('${temporary.path}/std/core')
       ..createSync(recursive: true);
-    // These fixtures deliberately provide no managed runtime. Their core
-    // declarations must not import the production runtime through StackTrace.
+    // These fixtures deliberately provide no managed runtime and only accept
+    // an empty argument list. Core must not import runtime through StackTrace.
     File('${File(standard).parent.path}/std/core/annotations.dart')
         .copySync('${core.path}/annotations.dart');
     File('${temporary.path}/std/core.dart')
         .writeAsStringSync("export 'core/annotations.dart';");
     final empty = File('${temporary.path}/empty.dart')
       ..writeAsStringSync('void main() {}');
+    final minimalRuntime =
+        '''
+const int rtAbiVersion = $runtimeAbiVersion;
+external Never nativeExit(int status);
+int rtValidateArguments(int argc, int argv) {
+  if (argc != 1) nativeExit(64);
+  return 0;
+}
+''';
     final emptyRuntime = File('${temporary.path}/runtime-empty.dart')
-      ..writeAsStringSync('const int rtAbiVersion = $runtimeAbiVersion;');
+      ..writeAsStringSync(minimalRuntime);
     final emptyExecutable = '${empty.path}.out';
     await run(
       driver,
@@ -4550,6 +4658,8 @@ void main() { print(add(2,3)); print(api.importedAdd(4,5)); print(inverse(false)
         'Empty program with no runtime storage produced output.',
       );
     }
+    if ((await capture(emptyExecutable, ['unsupported'])).exitCode != 64)
+      throw StateError('Minimal runtime accepted unsupported arguments.');
     const scalarInitializers = r'''int zero = 0;
 bool flag = false;
 int calls = 0;
@@ -4579,11 +4689,7 @@ int verify() {
       );
     await compare(scalar, []);
     final scalarRuntime = File('${temporary.path}/runtime-scalar.dart')
-      ..writeAsStringSync(
-        'const int rtAbiVersion = $runtimeAbiVersion;\n'
-                'external Never nativeExit(int status);\n' +
-            scalarInitializers,
-      );
+      ..writeAsStringSync(minimalRuntime + scalarInitializers);
     final scalarEntry = File('${temporary.path}/scalar-runtime.dart')
       ..writeAsStringSync(
         "import 'runtime-scalar.dart' as rt; "
@@ -4667,6 +4773,11 @@ void main(List<String> args) {
       }
       exitChoice(true, status);
       print('after');
+    } else if (args[1] == 'units' || args[1] == 'argv') {
+      final text = args[1] == 'argv' ? args[2] : hostRead(args[0]);
+      print(text.length);
+      for (var i = 0; i < text.length; i++) print(text.codeUnitAt(i));
+      if (args[1] == 'units') print(hostReadIfExists(args[0]) == text);
     } else if (args[1] == 'cwd')
       print(hostCurrentDirectory());
     else {
@@ -4710,6 +4821,81 @@ void main(List<String> args) {
     );
     final cwd = Directory('${temporary.path}/cwd-你好🙂 %')..createSync();
     final ioExecutable = '${io.path}.out';
+    final rawArguments = File('${temporary.path}/raw-argv.sh');
+    for (final bytes in [
+      <int>[],
+      validUtf8,
+      [0xef, 0xbb, 0xbf],
+      [0xed, 0xa0, 0x80],
+      [0xed, 0xbf, 0xbf],
+      [0xed, 0xa0, 0x80, 0xed, 0xb0, 0x80],
+      ...malformedUtf8,
+    ]) {
+      // POSIX shell literals preserve bytes that Process's String arguments
+      // cannot express. None of these byte sequences contains a quote or NUL.
+      rawArguments.writeAsBytesSync([
+        ...utf8.encode('exec "\$@" '),
+        39,
+        ...bytes,
+        39,
+        10,
+      ]);
+      for (final (sdkCommand, nativeCommand) in [
+        ([sdk, io.path, 'unused', 'argv'], [ioExecutable, 'unused', 'argv']),
+        ([utf8SdkExecutable], [utf8Executable]),
+      ]) {
+        final expected = await capture('/bin/sh', [
+          rawArguments.path,
+          ...sdkCommand,
+        ]);
+        final actual = await capture(
+          '/bin/sh',
+          [rawArguments.path, ...nativeCommand],
+          environment: {'PATH': '/usr/bin:/bin'},
+          includeParentEnvironment: false,
+        );
+        if (actual.exitCode != expected.exitCode ||
+            actual.stdout != expected.stdout ||
+            (expected.exitCode == 0
+                ? actual.stderr != expected.stderr
+                : expected.exitCode != 255 ||
+                      !expected.stderr.contains('valid UTF-8') ||
+                      !actual.stderr.contains('UTF-8')))
+          throw StateError(
+            'Raw argument UTF-8 behavior differs from official Dart.',
+          );
+      }
+    }
+    for (final bytes in [
+      <int>[],
+      [0xef, 0xbb, 0xbf],
+      validUtf8,
+      [0xef, 0xbb, 0xbf, ...validUtf8, 0xef, 0xbb, 0xbf, 0],
+    ]) {
+      final input = File('${temporary.path}/utf8-text')
+        ..writeAsBytesSync(bytes);
+      final expected = await run(sdk, [io.path, input.path, 'units']);
+      final actual = await run(ioExecutable, [
+        input.path,
+        'units',
+      ], native: true);
+      if (actual.stdout != expected.stdout || actual.stderr != expected.stderr)
+        throw StateError('Text UTF-8 code units differ from official Dart.');
+    }
+    for (final bytes in malformedUtf8) {
+      final input = File('${temporary.path}/utf8-invalid')
+        ..writeAsBytesSync(bytes);
+      final expected = await capture(sdk, [io.path, input.path, 'read']);
+      final actual = await capture(ioExecutable, [input.path, 'read']);
+      if (expected.exitCode == 0 ||
+          !expected.stderr.contains('FileSystemException') ||
+          actual.exitCode != 74 ||
+          actual.stdout != 'before\n' ||
+          !actual.stderr.contains(input.path))
+        throw StateError(
+          'Malformed UTF-8 text did not fail at the read boundary.',
+        );
+    }
     for (final arguments in [
       for (final status in [0, 7, 255, 256, -1]) [status.toString(), 'exit'],
       for (final mode in ['arguments', 'closure', 'generic', 'wide'])

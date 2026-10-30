@@ -548,27 +548,26 @@ void generateArm64(List<MachineFunction> program, int features) {
   final framesEnabled = (features & (metadataFrames | metadataHandlers)) != 0;
   if (imageKind == ImageKind.executable) {
     int main = entryFunction;
+    if (targetOS == 1) {
+      codeWord(0xf94003e0);
+      codeWord(0x910023e1);
+    }
+    armPush(0);
+    armPush(1);
+    armCall(0);
+    emitRootBoundary(rootsEnabled);
+    armPop(1);
+    armPop(0);
     if (functions[main].parameters == 0) {
-      armCall(0);
-      emitRootBoundary(rootsEnabled);
+      armCall(abiFunction('rtValidateArguments', 0));
     } else {
-      if (targetOS == 1) {
-        codeWord(0xf94003e0);
-        codeWord(0x910023e1);
-      }
-      armPush(0);
-      armPush(1);
-      armCall(0);
-      emitRootBoundary(rootsEnabled);
-      armPop(1);
-      armPop(0);
       armMove(9, 0);
       armAddress(4, listType(tString));
       armMove(2, 0);
       armMove(0, 9);
       armCall(runtimeFunction(bArguments, -1));
-      emitRootBoundary(rootsEnabled);
     }
+    emitRootBoundary(rootsEnabled);
     armCall(main);
     emitRootBoundary(rootsEnabled);
     armConstant(0, 0);

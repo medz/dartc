@@ -82,7 +82,7 @@ void _bundle(List<String> args) {
     output.write('  BundledSource(');
     _literal(output, file.uri);
     output.write(', ');
-    _literal(output, hostRead(file.path));
+    _literal(output, hostReadSource(file.path));
     output.writeln('),');
   }
   output.write('  BundledSource(');
@@ -90,7 +90,9 @@ void _bundle(List<String> args) {
   output.write(', ');
   _literal(
     output,
-    hostRead(sourceUriPath('/', sourceResolveFileUri(root, 'lib/export.dart'))),
+    hostReadSource(
+      sourceUriPath('/', sourceResolveFileUri(root, 'lib/export.dart')),
+    ),
   );
   output.writeln('),\n]);');
   output.writeln('void main(List<String> args) => runCompiler(args, sources);');
