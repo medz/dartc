@@ -1150,6 +1150,7 @@ void main() {
       "void call<T>(List<T> values,int last){} int later(){print('later');return 1;}void main(){dynamic values=<String>['wrong'];print('before');call<int>(values,later());}",
       "void call<T>(T value,int last){} int later(){print('later');return 1;}void main(){dynamic value='wrong';print('before');call<int>(value,later());}",
       "T call<T>(T value,int last)=>value;int later(){print('later');return 1;}void main(){dynamic value='wrong';print('before');int result=call(value,later());print(result);}",
+      "void call<T>(List<T> values){} void main(){dynamic values=1;print('before');call(values);}",
       "List<T> one<T>(T value)=>[value];void main(){List<Object> values=one<int>(1);print('before');values.add('wrong');}",
       "void main(){print('before');switch(<int?>[null]){case [var n!]:print(n);}}",
       "void main(){print('before');switch(<Object>['wrong']){case [var n as int]:print(n);}}",
@@ -1344,6 +1345,72 @@ void main() {
         );
       }
     });
+    // SDK 3.13.7 omits inferred compound-argument casts in these calls.
+    // Explicit instantiation gives the same types and checks the required cast.
+    final genericChecks = File('${temporary.path}/generic-dynamic-checks.dart')
+      ..writeAsStringSync('''
+void positional<T>(List<T> values, T last) {}
+void named<T>(List<T> values, {required T last}) {}
+void bounded<T extends num>(List<T> values, int last) {}
+void function<T>(T Function(T) callback) {}
+int later() { print('later'); return 1; }
+int increment(int value) => value + 1;
+void main(List<String> args) {
+  dynamic values = <String>['wrong'];
+  dynamic callback = increment;
+  final explicit = args.isNotEmpty;
+  for (var mode = 0; mode < 4; mode++) {
+    try {
+      switch (mode) {
+        case 0:
+          if (explicit) positional<int>(values, later());
+          else positional(values, later());
+        case 1:
+          if (explicit) named<int>(values, last: later());
+          else named(values, last: later());
+        case 2:
+          if (explicit) bounded<num>(values, later());
+          else bounded(values, later());
+        case 3:
+          if (explicit) function<dynamic>(callback);
+          else function(callback);
+      }
+      print('missed');
+    } on TypeError { print('checked'); }
+  }
+}
+''');
+    final genericChecksExecutable = '${genericChecks.path}.out';
+    await run(
+      driver,
+      compileArguments(genericChecks, genericChecksExecutable),
+      native: compiler != null,
+    );
+    final genericChecksExplicit = await run(sdk, [
+      genericChecks.path,
+      'explicit',
+    ]);
+    if (genericChecksExplicit.stdout != 'checked\n' * 4)
+      throw StateError('Explicit generic argument checks changed.');
+    for (final arguments in [
+      <String>[],
+      ['explicit'],
+    ]) {
+      final actual = await run(
+        genericChecksExecutable,
+        arguments,
+        native: true,
+      );
+      if (actual.stdout != genericChecksExplicit.stdout || actual.stderr != '')
+        throw StateError(
+          'Inferred generic argument checks differ from explicit calls.',
+        );
+    }
+    final genericChecksInferred = await run(sdk, [genericChecks.path]);
+    if (genericChecksInferred.stdout != 'later\nmissed\n' * 3 + 'missed\n')
+      throw StateError(
+        'SDK inferred generic argument check discrepancy changed.',
+      );
     final uncaught = File('${temporary.path}/uncaught-exception.dart')
       ..writeAsStringSync('''
 Never failure(String mode) {

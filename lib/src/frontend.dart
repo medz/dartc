@@ -2513,13 +2513,6 @@ int fePrepareInferredArguments(
       }
     }
     var actual = feLowerHint(expression, schema);
-    if (actual == tDynamic &&
-        typeHasSchemaHole(schema) &&
-        !typeIsParameter(template))
-      feAstError(
-        expression.token,
-        'generic inference from dynamic compound arguments is not yet supported',
-      );
     constrainGenericTypes(template, actual, parameters, lower, upper);
     var slot = feTemp(actual);
     feOperand(opStoreLocal, slot);

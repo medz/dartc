@@ -49,7 +49,11 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 显式调用检查实参数量和代入后的上界。省略类型实参时，支持已有类型模型中的上下文、普通实参及带类型回调约束；返回上下文与参数上下文保持独立，例如 `print` 的 `Object?` 参数参与向下推断。没有约束时采用实例化到界。实参求值、必要检查和命名重排保持源码顺序；调用成员 getter 的时序遵守已有调用规则。
 
-泛型局部/匿名函数、泛型函数值及 tear-off、泛型函数类型、未确定回调参数的水平推断、动态复合实参的向上推断、完整基于上界的推断和 `T & S` 交叉类型提升仍缺。泛型 `main` 当前仅支持无值参数、默认类型实参满足边界的声明。类型参数作为公开 `Type` 值尚未实现。这些限制是实现缺口，不改变语言兼容目标。
+`dynamic` 实参可传给 `List<T>`、嵌套 List、可空复合类型及非泛型函数签名等含类型参数的形参；类型实参仍由静态约束、返回上下文和默认边界决定，不读取实参对象的运行时类型来推断。依照[子类型约束生成与求解][generic-inference]，无法从 dynamic 分解复合类型时不产生内部类型参数约束；推断完成后再检查实际值，并保持该检查早于下一实参的求值。行为入口为 [values.dart](../test/fixtures/values.dart) 的 `genericDynamicArguments()` 及 `failingValues` 的非 List 实参。
+
+SDK 3.13.7 对未显式给出类型实参的上述调用存在检查差异：虽然从其他实参推断出 `int`，仍可让 dynamic 持有的 `List<String>` 进入 `List<int>` 形参；从上界或默认类型得到的 List/函数参数同样可能漏检。dartc 按[实参与形参绑定规则](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L13352-L13369)保留类型检查；[behavior_test.dart](../test/behavior_test.dart) 的 `generic-dynamic-checks.dart` 分别验证推断和显式调用，以 SDK 显式调用为检查对照，并单独记录隐式调用差异。
+
+泛型局部/匿名函数、泛型函数值及 tear-off、泛型函数类型、未确定回调参数的水平推断、完整基于上界的推断和 `T & S` 交叉类型提升仍缺。泛型 `main` 当前仅支持无值参数、默认类型实参满足边界的声明。类型参数作为公开 `Type` 值尚未实现。这些限制是实现缺口，不改变语言兼容目标。
 
 实现入口为 [resolve_type.dart](../lib/src/resolve_type.dart) 的 `resolveFunctionTypeParameters`、[generics.dart](../lib/src/frontend/generics.dart) 的约束收集及求解、[frontend.dart](../lib/src/frontend.dart) 的 `fePrepareGenericArguments`。行为入口为 [values.dart](../test/fixtures/values.dart) 的 `genericFunctions`、[behavior_test.dart](../test/behavior_test.dart) 的 `generic-functions-imports.dart`、`generic-entry.dart`、`rejected` 与 `failingValues`。推断依据[类型推断规则][generic-inference]，运行时类型图的存活检查由 [roots.dart](../test/fixtures/roots.dart) 的 `genericTypeRoots` 拥有。
 

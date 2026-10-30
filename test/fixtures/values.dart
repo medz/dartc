@@ -5826,6 +5826,55 @@ int genericHead<T extends List<int>>(T values) {
 }
 
 List<T> genericCopy<T>(List<T> values) => [for (var value in values) value];
+List<T> genericNumericCopy<T extends num>(List<T> values) => [
+  for (final value in values) value,
+];
+List<T> genericFlatten<T>(List<List<T>> values) => [
+  for (final list in values) ...list,
+];
+List<T> genericOptionalCopy<T>(List<T>? values) => [
+  if (values != null) ...values,
+];
+List<T> genericCallbackTypes<T>(T Function(T) callback) => [];
+dynamic genericDynamicIdentity(dynamic value) => value;
+
+void genericDynamicArguments() {
+  dynamic values = <int>[1, 2];
+  Object copied = genericCopy(values);
+  print(copied);
+  print(copied is List<int>);
+  print(copied is List<dynamic>);
+  List<num> contextual = genericCopy(values);
+  print(contextual);
+  print(contextual is List<int>);
+  copied = genericNumericCopy(values);
+  print(copied is List<int>);
+  print(copied is List<num>);
+  dynamic nested = <List<int>>[
+    <int>[3],
+    <int>[4],
+  ];
+  copied = genericFlatten(nested);
+  print(copied);
+  print(copied is List<int>);
+  copied = genericOptionalCopy(values);
+  print(copied);
+  print(copied is List<int>);
+  values = null;
+  copied = genericOptionalCopy(values);
+  print(copied);
+  print(copied is List<int>);
+  dynamic callback = genericDynamicIdentity;
+  copied = genericCallbackTypes(callback);
+  print(copied is List<int>);
+  print(copied is List<dynamic>);
+  callback = genericIncrement;
+  var applied = genericApply(callback, 5);
+  print(applied);
+  int contextualCall = genericApply(callback, 6);
+  print(contextualCall);
+}
+
 T genericPattern<T>(List<T> values) {
   if (values case [T first, ...]) return first;
   return values[0];
@@ -5968,6 +6017,7 @@ void genericClosures() {
 
 void genericFunctions() {
   genericClosures();
+  genericDynamicArguments();
   print(genericIdentity<int>(42));
   print(genericIdentity(true));
   print(genericIdentity('generic'));
