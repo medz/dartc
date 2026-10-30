@@ -146,6 +146,8 @@ dartc example/math.dart --target linux-x64 --emit dylib -o libmath.so
 
 Each command also writes `libmath.h` for C and C++ callers. Use `--header math.h` to choose its path. Without `-o`, dynamic libraries use `.dylib` on macOS and `.so` on Linux. Header declarations and binary exports come from the same checked signatures. Symbols that cannot be used as C identifiers receive a `dartc_export_` hexadecimal alias in the header while keeping their original binary symbol.
 
+`-o` and `--header` take file paths, including literal `%`, `#`, `?` and `file:` characters. The compiler rejects paths that normalize to a loaded source file or the selected package configuration, and the library and header paths must differ.
+
 These output modes currently support functions that need no managed runtime context and scalar read-only data. Runtime-backed exports remain an implementation gap; see the [FFI support and gaps](specs/types.md#ffi-类型与原生导出声明) for target and type coverage.
 
 ## Contributing

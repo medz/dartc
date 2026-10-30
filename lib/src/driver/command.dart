@@ -118,22 +118,11 @@ Never _compile(List<String> args, SourceBundle? bundle) {
     };
   }
   final executable = imageKind == ImageKind.executable;
-  if (standard != '') bundle = null;
-  final runtime = bundle == null
-      ? sourceInputUri(cwd, standard == '' ? hostStdPath() : standard)
-      : bundle.runtime;
-  var config = compilerPackages(inputUri, cwd, packages);
-  SourceProgram sources = collectSources(
-    inputUri,
-    runtime,
-    config,
-    targetOS,
-    bundle,
+  final outputPath = sourcePath(
+    output.startsWith('/') ? output : cwd + '/' + output,
   );
-  parseSource(sources);
+  var headerPath = '';
   if (!executable) {
-    if (checkedExports.isEmpty)
-      argumentError('Library output requires an @Export declaration.');
     if (header == '') {
       final dot = output.lastIndexOf('.');
       header =
@@ -141,15 +130,35 @@ Never _compile(List<String> args, SourceBundle? bundle) {
           '.h';
       if (header == output) header += '.h';
     }
-    final headerUri = sourceInputUri(cwd, header);
-    if (headerUri == sourceInputUri(cwd, output))
+    headerPath = sourcePath(
+      header.startsWith('/') ? header : cwd + '/' + header,
+    );
+    if (headerPath == outputPath)
       argumentError('Header and library output paths must differ.');
-    for (final file in sources.files)
-      if (headerUri == sourceInputUri(cwd, file.input.path))
-        argumentError(
-          'Header output would overwrite a source file: ' + file.input.path,
-        );
   }
+  if (standard != '') bundle = null;
+  final runtime = bundle == null
+      ? sourceInputUri(cwd, standard == '' ? hostStdPath() : standard)
+      : bundle.runtime;
+  var config = compilerPackages(inputUri, cwd, packages);
+  if (config != null &&
+      (outputPath == config.path || headerPath == config.path))
+    argumentError(
+      'Output would overwrite the package configuration: ' + config.path,
+    );
+  SourceProgram sources = collectSources(
+    inputUri,
+    runtime,
+    config,
+    targetOS,
+    bundle,
+  );
+  for (final file in sources.files)
+    if (outputPath == file.input.path || headerPath == file.input.path)
+      argumentError('Output would overwrite a source file: ' + file.input.path);
+  parseSource(sources);
+  if (!executable && checkedExports.isEmpty)
+    argumentError('Library output requires an @Export declaration.');
   List<SsaFunction> ssa = buildSsa();
   optimizeSsa(ssa);
   verifySsa(ssa);

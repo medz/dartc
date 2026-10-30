@@ -1,10 +1,16 @@
 import 'dart:convert';
 import 'dart:io';
 
-void run(String executable, List<String> arguments, {int expectedExit = 0}) {
+ProcessResult run(
+  String executable,
+  List<String> arguments, {
+  int expectedExit = 0,
+  String? directory,
+}) {
   final result = Process.runSync(
     executable,
     arguments,
+    workingDirectory: directory,
     environment: {'PATH': '/usr/bin:/bin', 'TMPDIR': Directory.systemTemp.path},
     includeParentEnvironment: false,
   );
@@ -16,6 +22,7 @@ void run(String executable, List<String> arguments, {int expectedExit = 0}) {
       result.exitCode,
     );
   }
+  return result;
 }
 
 void main(List<String> args) {
@@ -44,7 +51,12 @@ void main(List<String> args) {
           ],
         }),
       );
-    void compile(String source, List<String> options, {int expectedExit = 0}) {
+    ProcessResult compile(
+      String source,
+      List<String> options, {
+      int expectedExit = 0,
+      String? directory,
+    }) {
       final arguments = [
         source,
         '--packages',
@@ -54,15 +66,18 @@ void main(List<String> args) {
         ...options,
       ];
       if (args.isEmpty) {
-        run(Platform.resolvedExecutable, [
-          '$root/bin/dartc.dart',
-          ...arguments,
-        ], expectedExit: expectedExit);
+        return run(
+          Platform.resolvedExecutable,
+          ['$root/bin/dartc.dart', ...arguments],
+          expectedExit: expectedExit,
+          directory: directory,
+        );
       } else {
-        run(
+        return run(
           File(args.single).absolute.path,
           arguments,
           expectedExit: expectedExit,
+          directory: directory,
         );
       }
     }
@@ -287,6 +302,94 @@ int main(void) { return answer == 42 ? 0 : 1; }
         final executable = '${temporary.path}/constant-$kind-$language';
         link(constantHost.path, library, executable, language);
         run(executable, []);
+      }
+    }
+
+    {
+      final directory = Directory('${temporary.path}/paths')..createSync();
+      Directory('${directory.path}/sub').createSync();
+      final input = File('${directory.path}/main.dart')
+        ..writeAsStringSync('''
+import 'dart:ffi';
+import 'package:dartc/export.dart';
+import 'dep%25%23%3F%F0%9F%99%82.h';
+part 'part.dart';
+@Export<Int64 Function(Int64)>()
+int add(int value) => value + left + right;
+void main() { print(add(0)); }
+''');
+      final dependency = File('${directory.path}/dep%#?🙂.h')
+        ..writeAsStringSync('const left = 20;');
+      final part = File('${directory.path}/part.dart')
+        ..writeAsStringSync("part of 'main.dart'; const right = 22;");
+      final output = File('${directory.path}/artifact')
+        ..writeAsStringSync('previous binary');
+      final header = File('${directory.path}/artifact.h')
+        ..writeAsStringSync('previous header');
+      final originals = {
+        for (final file in [input, dependency, part, packages, output, header])
+          file.path: base64Encode(file.readAsBytesSync()),
+      };
+      for (final kind in ['exe', 'object', 'static', 'dylib']) {
+        final targets = [
+          'sub/../main.dart',
+          '${directory.path}//dep%#?🙂.h',
+          './part.dart',
+          packages.path,
+        ];
+        final options = [
+          for (final target in targets)
+            [
+              '-o',
+              target,
+              if (kind != 'exe') ...['--header', header.path],
+            ],
+          if (kind != 'exe') ...[
+            for (final target in targets)
+              ['-o', output.path, '--header', target],
+            ['-o', output.path, '--header', 'sub/../artifact'],
+            ['-o', 'dep%#?🙂.o'], // The default header is an imported source.
+          ],
+        ];
+        for (final option in options) {
+          final result = compile(
+            'main.dart',
+            ['--emit', kind, ...option],
+            expectedExit: 64,
+            directory: directory.path,
+          );
+          if (result.stdout != '' || result.stderr == '')
+            throw StateError('Output path errors must use stderr.');
+          for (final original in originals.entries)
+            if (base64Encode(File(original.key).readAsBytesSync()) !=
+                original.value)
+              throw StateError('Rejected output changed ${original.key}.');
+        }
+      }
+      // Outputs are file paths, so a literal file: prefix is not a URI.
+      compile('main.dart', ['-o', 'file:main.dart'], directory: directory.path);
+      if (run('${directory.path}/file:main.dart', []).stdout != '42\n')
+        throw StateError('Literal output path produced an invalid program.');
+      final host = File('${directory.path}/host.c')
+        ..writeAsStringSync('''
+#include "file:main.dart"
+int main(void) { return add(0) == 42 ? 0 : 1; }
+''');
+      for (final kind in ['object', 'static', 'dylib']) {
+        final library = '${directory.path}/file:artifact.$kind';
+        compile('main.dart', [
+          '--emit',
+          kind,
+          '-o',
+          library,
+          '--header',
+          'file:main.dart',
+        ], directory: directory.path);
+        for (final language in ['c', 'c++']) {
+          final executable = '${directory.path}/host-$kind-$language';
+          link(host.path, library, executable, language);
+          run(executable, []);
+        }
       }
     }
 
