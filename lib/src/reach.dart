@@ -51,6 +51,7 @@ List<int> reachableFunctions(List<SsaFunction> source, [List<int>? roots]) {
   var cursor = 0;
   while (cursor < work.length) {
     var function = source[work[cursor]];
+    List<int?>? constants;
     var b = 0;
     while (b < function.blocks.length) {
       var instructions = function.blocks[b].instructions;
@@ -59,6 +60,14 @@ List<int> reachableFunctions(List<SsaFunction> source, [List<int>? roots]) {
         var instruction = instructions[i];
         if (instruction.op == opCall) {
           _reachFunction(reachable, work, instruction.target);
+        } else if (instruction.op == opDiv || instruction.op == opMod) {
+          constants ??= ssaIntegerConstants(function);
+          if ((constants[instruction.inputs[1]] ?? 0) == 0)
+            _reachFunction(
+              reachable,
+              work,
+              abiFunction('rtIntegerDivisionByZero', 0),
+            );
         } else if (instruction.op == opGenericCall) {
           _reachFunction(
             reachable,

@@ -2043,13 +2043,16 @@ int rtValueMul(int left, int right) {
 int rtValueFloatDiv(int left, int right) =>
     rtBoxDouble(hostFloat64Div(rtNumberDouble(left), rtValueNumDouble(right)));
 
+// The SDK still throws this exception for integer arithmetic.
+// ignore: deprecated_member_use
+Never rtIntegerDivisionByZero() => throw const IntegerDivisionByZeroException();
+
 int rtValueDiv(int left, int right) {
   if (!rtNumberIsIntPair(left, right))
     return rtBoxInt(
       rtDoubleTruncDiv(rtNumberDouble(left), rtValueNumDouble(right)),
     );
   final divisor = rtValueInt(right);
-  if (divisor == 0) return rtValueTypeError();
   return rtBoxInt(rtValueInt(left) ~/ divisor);
 }
 
@@ -2059,7 +2062,6 @@ int rtValueMod(int left, int right) {
       binary64Modulo(rtNumberDouble(left), rtValueNumDouble(right)),
     );
   final divisor = rtValueInt(right);
-  if (divisor == 0) return rtValueTypeError();
   return rtBoxInt(rtValueInt(left) % divisor);
 }
 
@@ -2070,7 +2072,6 @@ int rtValueRemainder(int left, int right) {
     );
   final a = rtValueInt(left);
   final b = rtValueInt(right);
-  if (b == 0) return rtValueTypeError();
   final remainder = a % b;
   return rtBoxInt(
     a < 0 && remainder != 0 ? remainder - (b < 0 ? -b : b) : remainder,

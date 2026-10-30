@@ -29,17 +29,6 @@ void emitExit() {
   codeWord(0xd4200000); // brk #0
 }
 
-void armRequireNonzero(int register) {
-  final branch = codeSize;
-  codeWord(0);
-  armConstant(0, 70);
-  emitExit();
-  codePatchWord(
-    branch,
-    0xb5000000 | (((codeSize - branch) ~/ 4) << 5) | register,
-  );
-}
-
 void emitEdge(MachineEdge edge, MachineFunction function, int fallthrough) {
   List<int> parameters = function.blocks[edge.target].parameters;
   List<int> locations = function.allocation.locations;
@@ -302,7 +291,6 @@ void emitInstruction(
   } else if (op == mMod) {
     emitLoad(function, inputs[0], 0);
     emitLoad(function, inputs[1], 1);
-    armRequireNonzero(1);
     codeWord(0x9ac10c02);
     codeWord(0x9b018040);
     codeWord(0xf100001f);
@@ -319,10 +307,7 @@ void emitInstruction(
     if (op == mAdd) codeWord(0x8b000000 | registers);
     if (op == mSub) codeWord(0xcb000000 | registers);
     if (op == mMul) codeWord(0x9b007c00 | registers);
-    if (op == mDiv) {
-      armRequireNonzero(right);
-      codeWord(0x9ac00c00 | registers);
-    }
+    if (op == mDiv) codeWord(0x9ac00c00 | registers);
     if (op == mAnd) codeWord(0x8a000000 | registers);
     if (op == mOr) codeWord(0xaa000000 | registers);
     if (op == mXor) codeWord(0xca000000 | registers);

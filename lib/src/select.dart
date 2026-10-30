@@ -45,7 +45,7 @@ void machineSelectInstruction(
   SsaInstruction source,
   List<int> types,
   List<int> reps,
-  List<int> constants,
+  List<int?> constants,
   List<MachineInstruction> instructions,
 ) {
   var SsaInstruction(:op, value: output, :target, :effects) = source;
@@ -282,7 +282,10 @@ void machineSelectInstruction(
     return;
   }
   if (op == opDiv || op == opMod) {
-    final divisor = constants[inputs[1]];
+    // Selection has either proved the divisor nonzero or split its failure
+    // into an ordinary Never call. The remaining arithmetic cannot throw.
+    effects = 0;
+    final divisor = constants[inputs[1]] ?? 0;
     if (divisor == 1) {
       instructions.add(
         MachineInstruction(
@@ -312,10 +315,11 @@ void machineSelectInstruction(
   int arithmetic = machineArithmetic(op);
   if (arithmetic != 0) {
     var count = 0;
+    final shift = inputs.length == 2 ? constants[inputs[1]] ?? -1 : -1;
     if ((op == opShl || op == opShr || op == opUshr) &&
-        constants[inputs[1]] >= 0 &&
-        constants[inputs[1]] <= 63) {
-      count = constants[inputs[1]];
+        shift >= 0 &&
+        shift <= 63) {
+      count = shift;
       if (op == opShl) arithmetic = mShlImmediate;
       if (op == opShr) arithmetic = mShrImmediate;
       if (op == opUshr) arithmetic = mUshrImmediate;
@@ -408,43 +412,15 @@ List<MachineFunction> selectMachine(
       i = i + 1;
     }
     final List<MachineBlock> blocks = <MachineBlock>[];
-    final constants = List<int>.filled(function.valueTypes.length, -1);
+    final constants = ssaIntegerConstants(function);
     int b = 0;
     while (b < function.blocks.length) {
-      final instructions = function.blocks[b].instructions;
-      i = 0;
-      while (i < instructions.length) {
-        final instruction = instructions[i];
-        if (instruction.op == opInt &&
-            instruction.value >= 0 &&
-            instruction.effects == 0 &&
-            instruction.target >= 0) {
-          constants[instruction.value] = instruction.target;
-        }
-        i++;
-      }
-      b++;
-    }
-    b = 0;
-    while (b < function.blocks.length) {
-      final SsaBlock block = function.blocks[b];
-      final List<MachineInstruction> instructions = <MachineInstruction>[];
-      i = 0;
-      while (i < block.instructions.length) {
-        machineSelectInstruction(
-          block.instructions[i],
-          function.valueTypes,
-          reps,
-          constants,
-          instructions,
-        );
-        i = i + 1;
-      }
-      final SsaTerminator end = block.end;
+      final block = function.blocks[b];
+      final end = block.end;
       blocks.add(
         MachineBlock(
           block.parameters.sublist(0),
-          instructions,
+          <MachineInstruction>[],
           MachineTerminator(
             end.kind,
             end.value,
@@ -453,6 +429,73 @@ List<MachineFunction> selectMachine(
           ),
         ),
       );
+      b++;
+    }
+    b = 0;
+    while (b < function.blocks.length) {
+      final SsaBlock block = function.blocks[b];
+      var selected = blocks[b];
+      i = 0;
+      while (i < block.instructions.length) {
+        final instruction = block.instructions[i];
+        if (instruction.op == opDiv || instruction.op == opMod) {
+          final divisor = instruction.inputs[1];
+          final end = selected.end;
+          final invoke = i + 1 == block.instructions.length && end.kind == 5;
+          final handler = invoke ? end.second : MachineEdge(-1, <int>[]);
+          if (invoke)
+            selected.end = MachineTerminator(
+              1,
+              -1,
+              end.first,
+              MachineEdge(-1, <int>[]),
+            );
+          if ((constants[divisor] ?? 0) == 0) {
+            final continuation = MachineBlock(
+              <int>[],
+              <MachineInstruction>[],
+              selected.end,
+            );
+            selected.end = MachineTerminator(
+              2,
+              divisor,
+              MachineEdge(blocks.length, <int>[]),
+              MachineEdge(blocks.length + 1, <int>[]),
+            );
+            blocks.add(continuation);
+            blocks.add(
+              MachineBlock(
+                <int>[],
+                <MachineInstruction>[
+                  MachineInstruction(
+                    mCall,
+                    -1,
+                    <int>[],
+                    abiFunction('rtIntegerDivisionByZero', 0),
+                    0,
+                    ssaEffects(opCall, 0),
+                  ),
+                ],
+                MachineTerminator(
+                  invoke ? 6 : 4,
+                  -1,
+                  MachineEdge(-1, <int>[]),
+                  handler,
+                ),
+              ),
+            );
+            selected = continuation;
+          }
+        }
+        machineSelectInstruction(
+          instruction,
+          function.valueTypes,
+          reps,
+          constants,
+          selected.instructions,
+        );
+        i = i + 1;
+      }
       b = b + 1;
     }
     machineRemoveUnusedConstants(blocks, reps.length);

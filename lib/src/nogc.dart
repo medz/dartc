@@ -127,10 +127,11 @@ List<int> checkNoGcSsa(
           }
         } else {
           var local = instruction.effects & _forbidden;
-          if (((op == opDiv || op == opMod) &&
-                  _ssaConstant(definitions, instruction.inputs[1], true)) ||
-              ((op == opShl || op == opShr || op == opUshr) &&
-                  _ssaNonnegative(definitions, instruction.inputs[1]))) {
+          if ((op == opDiv || op == opMod) &&
+              _ssaConstant(definitions, instruction.inputs[1], true)) {
+            local &= ~(ssaAllocate | ssaThrow | ssaGc);
+          } else if ((op == opShl || op == opShr || op == opUshr) &&
+              _ssaNonnegative(definitions, instruction.inputs[1])) {
             local &= ~ssaThrow;
           }
           effects |= local;

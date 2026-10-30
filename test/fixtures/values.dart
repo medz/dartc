@@ -1665,7 +1665,84 @@ void literalShifts(int value) {
   ]);
 }
 
+void integerDivisionFailure(num Function() calculate) {
+  try {
+    print(calculate());
+  } on IntegerDivisionByZeroException catch (error, trace) {
+    print(error);
+    print(error.message);
+    print(error.stackTrace == null);
+    print(error is Exception && error is UnsupportedError && error is Error);
+    print(trace.toString().isNotEmpty);
+  } on UnsupportedError catch (error, trace) {
+    print(error.message);
+    print(error.stackTrace.toString() == trace.toString());
+  } on TypeError {
+    print('division operand type');
+  } finally {
+    print('division cleanup');
+  }
+  print('division after');
+}
+
+void integerDivisionFailures() {
+  int integer(String side, int value) {
+    print(side);
+    return value;
+  }
+
+  dynamic boxed(String side, dynamic value) {
+    print(side);
+    return value;
+  }
+
+  for (final left in [7, -7, -9223372036854775808]) {
+    integerDivisionFailure(() => integer('left', left) ~/ integer('right', 0));
+    integerDivisionFailure(() => integer('left', left) % integer('right', 0));
+    integerDivisionFailure(
+      () => integer('left', left).remainder(integer('right', 0)),
+    );
+    for (final right in <dynamic>[0, 0.0, 'wrong']) {
+      integerDivisionFailure(
+        () => boxed('left', left) ~/ boxed('right', right),
+      );
+      integerDivisionFailure(() => boxed('left', left) % boxed('right', right));
+      integerDivisionFailure(
+        () => boxed('left', left).remainder(boxed('right', right)),
+      );
+    }
+  }
+  for (final modulo in [false, true]) {
+    var value = 7;
+    integerDivisionFailure(() {
+      if (modulo) return value %= integer('right', 0);
+      return value ~/= integer('right', 0);
+    });
+    print(value);
+  }
+  num number = 7;
+  integerDivisionFailure(() => number ~/ integer('right', 0));
+  integerDivisionFailure(() => number % integer('right', 0));
+  integerDivisionFailure(() => number.remainder(integer('right', 0)));
+  integerDivisionFailure(() {
+    7 ~/ integer('right', 0);
+    return 99;
+  });
+  integerDivisionFailure(() {
+    7 % integer('right', 0);
+    return 99;
+  });
+  integerDivisionFailure(() => 7.0 ~/ integer('right', 0));
+  integerDivisionFailure(() => 7 ~/ boxed('right', 0.0));
+  for (final right in [1, -1, 3, -3]) {
+    final first = integer('left', -7) ~/ integer('right', right);
+    final second = integer('left', -7) % integer('right', right);
+    print([first, second, (-7).remainder(right)]);
+  }
+}
+
 void integerDivisions() {
+  integerDivisionFailures();
   int operand() {
     print('division operand');
     return -17;

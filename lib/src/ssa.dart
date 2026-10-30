@@ -85,12 +85,23 @@ void resolveValues(List<int> aliases, List<int> values) {
     values[i] = resolveValue(aliases, values[i]);
 }
 
+List<int?> ssaIntegerConstants(SsaFunction function) {
+  final result = List<int?>.filled(function.valueTypes.length, null);
+  for (final block in function.blocks) {
+    for (final instruction in block.instructions) {
+      if (instruction.op == opInt && instruction.value >= 0)
+        result[instruction.value] = instruction.target;
+    }
+  }
+  return result;
+}
+
 int ssaEffects(int op, int target) {
   if (op == opTypeCast) return ssaRead | ssaAllocate | ssaThrow | ssaGc;
   if (op == opLoadGlobal) return ssaRead;
   if (op == opStoreGlobal) return ssaWrite;
-  if (op == opDiv || op == opMod || op == opShl || op == opShr || op == opUshr)
-    return ssaThrow;
+  if (op == opDiv || op == opMod) return ssaAllocate | ssaThrow | ssaGc;
+  if (op == opShl || op == opShr || op == opUshr) return ssaThrow;
   if (op == opCall || op == opGenericCall) {
     return ssaRead | ssaWrite | ssaAllocate | ssaThrow | ssaGc | ssaNative;
   }

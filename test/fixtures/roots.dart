@@ -1257,10 +1257,58 @@ void exceptionRootCatch(int queue) {
   );
 }
 
+int integerRootFailure(int operation, int divisor) {
+  final mark = roots.rtRootMark();
+  roots.rtRootPush(rt.nativeValueBits(Leaf(977)), abi.storageRef);
+  dynamic left = 7;
+  dynamic right = divisor;
+  try {
+    return switch (operation) {
+      2 => 7 ~/ divisor,
+      3 => 7 % divisor,
+      4 => left ~/ right,
+      5 => left % right,
+      _ => left.remainder(right),
+    };
+  } finally {
+    roots.rtRootRestore(mark);
+  }
+}
+
 void exceptionRoots(int queue) {
   exceptionRootCatch(queue);
   final mark = roots.rtRootMark();
   final values = genericRootList<Leaf>(Leaf(974));
+  final divisor = values.length - 1;
+  for (var operation = 0; operation < 7; operation++) {
+    final kept = Leaf(978);
+    Object tagged = Leaf(979);
+    try {
+      if (operation == 0) {
+        print(7 ~/ divisor);
+      } else if (operation == 1) {
+        print(7 % divisor);
+      } else {
+        integerRootFailure(operation, divisor);
+      }
+      check(false);
+    } on IntegerDivisionByZeroException catch (error, trace) {
+      check(roots.rtRootMark() == mark);
+      heap.rtCollect();
+      final count = snapshot(queue);
+      check(contains(queue, count, rt.nativeValueBits(error)));
+      check(contains(queue, count, rt.nativeValueBits(trace)));
+      check(findMarker(queue, count, 978) == rt.nativeValueBits(kept));
+      check(findMarker(queue, count, 979) == rt.nativeValueBits(tagged));
+      check(findMarker(queue, count, 977) == 0);
+      check(error.stackTrace == null);
+      check(error.message == 'Division resulted in non-finite value');
+      check(trace.toString().indexOf('exceptionRoots') >= 0);
+    } finally {
+      check(roots.rtRootMark() == mark);
+    }
+    check(kept.marker == 978 && (tagged as Leaf).marker == 979);
+  }
   final wrong = <Leaf>[];
   final typeOwner = genericRootList<List<Leaf>>(wrong);
   final list = rt.nativeValueBits(values);

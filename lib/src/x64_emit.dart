@@ -113,10 +113,6 @@ void xFloatInstruction(
 }
 
 void xDivision(bool modulo) {
-  xRegister(0x85, xR10, xR10);
-  final nonzero = xBranch(5);
-  xExit(70);
-  xPatchRelative(nonzero, codeSize);
   xImmediate(7, xR10, -1);
   final ordinary = xBranch(5);
   xConstant(xR11, 0x8000000000000000);

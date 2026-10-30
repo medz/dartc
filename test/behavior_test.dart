@@ -1131,8 +1131,6 @@ void main() {
       "class B { T f<T extends num>(covariant num x) => x as T; } class C extends B { T f<T extends num>(T x) { print('body'); return x; } } void main() { B value = C(); print('before'); value.f<int>(2.5); print('after'); }",
       "abstract class I { void set value(covariant num x); } class C implements I { late int value; } void main() { I value = C(); print('before'); value.value = 2.5; print('after'); }",
       "class C { dynamic operator <(int other) { print('operator'); return 1; } } void main() { print('before'); if (C() case < 2) print('matched'); print('after'); }",
-      for (final operation in ['~/', '%'])
-        'int zero() => 0; void main() { print("before"); print(1 $operation zero()); print("after"); }',
       for (final operation in [
         'super[key] = rhs();',
         'super[key] += rhs();',
@@ -1617,6 +1615,10 @@ Never failure(String mode) {
     if (mode == 'int') int.parse('invalid');
     if (mode == 'double') double.parse('invalid');
     if (mode == 'nonfinite') double.nan.toInt();
+    final zero = mode.length - mode.length;
+    if (mode == 'divide') print(7 ~/ zero);
+    if (mode == 'modulo') print(7 % zero);
+    if (mode == 'remainder') { dynamic value = 7; print(value.remainder(zero)); }
     if (mode == 'fixed') List<int>.filled(0, 0).add(1);
     if (mode == 'readonly') const <int>[].clear();
     if (mode == 'format') {
@@ -1643,6 +1645,9 @@ void main(List<String> args) { print('before'); failure(args.isEmpty ? '' : args
       ['int'],
       ['double'],
       ['nonfinite'],
+      ['divide'],
+      ['modulo'],
+      ['remainder'],
       ['fixed'],
       ['readonly'],
       ['format'],
@@ -1664,6 +1669,10 @@ void main(List<String> args) { print('before'); failure(args.isEmpty ? '' : args
           ? 'uncaught🙂\n'
           : arguments.first == 'type'
           ? "Instance of 'TypeError'\n"
+          : arguments.first == 'divide' ||
+                arguments.first == 'modulo' ||
+                arguments.first == 'remainder'
+          ? 'IntegerDivisionByZeroException\n'
           : arguments.first == 'nonfinite'
           ? 'Unsupported operation: Infinity or NaN toInt\n'
           : arguments.first == 'fixed'
@@ -2567,7 +2576,8 @@ int odd(int value) { if (value == 0) return 0; return even(value - 1); }
 @noGc
 int compute(int value) {
   print('nogc-static');
-  return pure(value ~/ 3) + even(value & 7) + (value << (value & 63));
+  return pure(value ~/ 3) + (value ~/ -3) + (value % -3) +
+      (value % 16) + even(value & 7) + (value << (value & 63));
 }
 @core.pragma('dartc:no-gc')
 Object box(bool value) => value;
@@ -3642,6 +3652,9 @@ void main() {
       "Object value = 1; @pragma('dartc:no-gc') Object bad() => value; void main() {}",
       "@pragma('dartc:no-gc') int bad(dynamic value) => value as int; void main() {}",
       "@pragma('dartc:no-gc') int bad(int value, int other) => (value ~/ other) + (value << other); void main() {}",
+      "@pragma('dartc:no-gc') int bad(int value, int other) => value % other; void main() {}",
+      "@pragma('dartc:no-gc') int bad(int value) => value ~/ 0; void main() {}",
+      "@pragma('dartc:no-gc') int bad(int value) { try { return value % 0; } catch (_) { return 0; } } void main() {}",
       "@pragma('dartc:may-gc') int helper(int value) => value; @pragma('dartc:no-gc') int bad() => helper(1); void main() {}",
       "@pragma('dartc:managed-allocate') int helper(int value) => value; @pragma('dartc:no-gc') int bad() => helper(1); void main() {}",
       "@pragma('dartc:no-gc') int value = 0; void main() {}",

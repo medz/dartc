@@ -100,11 +100,9 @@ void sccpInstruction(
     return;
   }
   var allowedEffects = 0;
-  if (op == opDiv ||
-      op == opMod ||
-      op == opShl ||
-      op == opShr ||
-      op == opUshr) {
+  if (op == opDiv || op == opMod) {
+    allowedEffects = ssaAllocate | ssaThrow | ssaGc;
+  } else if (op == opShl || op == opShr || op == opUshr) {
     allowedEffects = ssaThrow;
   }
   if (!sccpArithmetic(op) || (instruction.effects & ~allowedEffects) != 0) {
