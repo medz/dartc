@@ -88,11 +88,11 @@ For compiler and runtime development, select external runtime sources explicitly
 dartc main.dart --std /path/to/dartc/lib/src/legacy/runtime.dart -o app
 ```
 
-`--std` selects the external runtime and standard-library dependency graph for this compilation. Compiler and runtime sources must have matching ABIs; this option is a development interface, not a stable runtime plugin API. See the [bootstrap design](doc/architecture.md).
+`--std` selects the external runtime and standard-library dependency graph for this compilation. Compiler and runtime sources must have matching ABIs; this option is a development interface, not a stable runtime plugin API. See the [bootstrap design](.agents/docs/legacy/architecture.md).
 
 ## Build from source
 
-The implementation in `lib/src/legacy/` is frozen. Keep a native seed matching its source revision; the legacy test and validation tooling is retired. See [developer tooling](doc/development.md) for rebuilding from that seed.
+The implementation in `lib/src/legacy/` is frozen. Keep a native seed matching its source revision; the legacy test and validation tooling is retired. See [developer tooling](.agents/docs/legacy/development.md) for rebuilding from that seed.
 
 For a new checkout without a matching seed, compile the initial seed once with the official Dart SDK:
 
@@ -155,4 +155,4 @@ These output modes currently support functions that need no managed runtime cont
 
 ## Contributing
 
-Start language work from the [specification tracker](specs/README.md). See the [architecture](doc/architecture.md) for compiler/runtime design, [runtime contracts](doc/runtime.md) for memory and ownership rules, and [developer tooling](doc/development.md) for native builds and archive creation.
+Start language work from the [specification tracker](specs/README.md). See the [legacy architecture](.agents/docs/legacy/architecture.md) for compiler/runtime design, [legacy runtime contracts](.agents/docs/legacy/runtime.md) for memory and ownership rules, and [developer tooling](.agents/docs/legacy/development.md) for native builds and archive creation.

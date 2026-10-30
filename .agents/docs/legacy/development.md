@@ -15,7 +15,7 @@ build/dartc-seed build/compiler.dart --std lib/src/legacy/runtime.dart -o build/
 
 The native seed compiles the source bundler. That bundler generates an ordinary Dart entry containing the runtime and standard-library source dependencies. The final command compiles the entry into a standalone native compiler. These commands do not run tests or replace the preserved seed.
 
-Regenerate `build/compiler.dart` after moving the checkout because its imports contain source paths. If no matching seed exists, use the explicit [cold-start instructions](../README.md#build-from-source). An existing seed's failure must not trigger an official-compiler fallback.
+Regenerate `build/compiler.dart` after moving the checkout because its imports contain source paths. If no matching seed exists, use the explicit [cold-start instructions](../../../README.md#build-from-source). An existing seed's failure must not trigger an official-compiler fallback.
 
 ## Native archives
 

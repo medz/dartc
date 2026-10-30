@@ -2,7 +2,7 @@
 
 本文描述冻结的 `lib/src/legacy/` 实现；测试链接仅指向冻结提交中的历史行为证据。
 
-[runtime.dart](../lib/src/legacy/runtime.dart) 实现目标程序的运行时算法；共享尺寸、偏移和表示由 [layout.dart](../lib/src/legacy/layout.dart) 定义。编译器与运行时必须使用匹配的 ABI，改变布局或调用协议时整体重建。
+[runtime.dart](../../../lib/src/legacy/runtime.dart) 实现目标程序的运行时算法；共享尺寸、偏移和表示由 [layout.dart](../../../lib/src/legacy/layout.dart) 定义。编译器与运行时必须使用匹配的 ABI，改变布局或调用协议时整体重建。
 
 当前源码 ABI 为 19。TypeRef 带对象头，List 和函数对象的类型引用参与扫描；函数值通过只读实参形状和栈向量调用。类描述符包含实际 Error 的轨迹槽偏移。旧 ABI 的元数据与函数入口不能与此运行时混用。
 
@@ -41,7 +41,7 @@ TypeRef 的固定部分为 48 字节，是内部类型记录，不直接充当�
 
 共享泛型函数在实例接收者后、普通参数前传入 `List<Object>` 类型环境。实例方法的类参数来自接收者；仅使用类参数的方法不增加隐藏形参。`FunctionInfo.receiverParameter` 和 `receiverTypeParameters` 显式描述接收者及其类作用域，完整环境按类参数、方法自身参数排列；闭包捕获同序环境。`GenericCall.typeArguments` 对应完整作用域，构造器不重复传入类环境。语义类型参数的值使用 Tagged；复合 List、类和函数值保持 Ref。`rtValueCheck` 按实际 TypeRef 检查并保留原负载，具体调用方再按已知结果类型转换；`rtListFilledChecked` 按实际元素类型取得存储表示。类型环境和实例化属于分配效果，不能因被调函数体简单而从 NoGC 检查中省略。
 
-List 标志 `objectListFixed` / `objectListReadOnly` 分别限制长度变化和内容修改；语言行为见 [表达式](../specs/expressions.md)。更新 List 长度时同步维护 backing 的已初始化前缀，缩短后不扫描前缀之外的旧元素。
+List 标志 `objectListFixed` / `objectListReadOnly` 分别限制长度变化和内容修改；语言行为见 [表达式](../../../specs/expressions.md)。更新 List 长度时同步维护 backing 的已初始化前缀，缩短后不扫描前缀之外的旧元素。
 
 ## 当前托管调用 ABI
 
@@ -64,7 +64,7 @@ List 标志 `objectListFixed` / `objectListReadOnly` 分别限制长度变化和
 
 四则运算、比较和整数转换由目标机器的 binary64 原语执行。原语以整数位模式收发，比较返回 -1、0、1 或 unordered 的 2；机器转整数采用截断和饱和，Dart 数值入口先拒绝 NaN 与无穷大。独立可执行文件使用进程初始的最近偶数舍入环境。此内部协议不适用于平台 FFI；浮点 FFI 参数、结果和外部浮点环境管理尚未接入。
 
-[binary64.dart](../lib/src/legacy/binary64.dart) 由编译器常量求值与目标运行时共用。十进制解析以整数比值执行精确舍入，输出按相邻 binary64 值的舍入区间选择最短十进制表示；余数算法使用整数有效位和指数。算法保持为普通 Dart 源码，原语只提供机器运算。
+[binary64.dart](../../../lib/src/legacy/binary64.dart) 由编译器常量求值与目标运行时共用。十进制解析以整数比值执行精确舍入，输出按相邻 binary64 值的舍入区间选择最短十进制表示；余数算法使用整数有效位和指数。算法保持为普通 Dart 源码，原语只提供机器运算。
 
 `nativeValueBits(Object?)` 暴露内部 Tagged word；`nativeValueFromBits(int)` 恢复同一表示。恢复的 word 必须来自合法的当前 ABI 值，不能把任意地址或浮点位模式当对象。转换本身不分配、不建立根，也不转移所有权。暴露的对象地址跨可能 GC 的调用前，调用方必须保留对应托管引用或登记 runtime root；转换的两侧各按自身表示参与根分析。数值字符串入口通过这个边界连接普通 Dart String 与原有的运行时地址接口。
 
@@ -72,7 +72,7 @@ List 标志 `objectListFixed` / `objectListReadOnly` 分别限制长度变化和
 
 受信原语 `nativeExit(int status)` 的结果类型为 `Never`；绑定与 SSA 验证参数、结果及原生副作用。发码使用目标平台的进程退出入口，系统调用异常返回时触发硬件陷阱。`rtHostExit`、构建结束和致命错误出口均传播不返回的契约，不生成占位返回值或忙等循环。进程终止不提供 Dart 异常捕获与展开。
 
-实现入口：[ir.dart](../lib/src/legacy/ir.dart) 的原语签名、[arm64_emit.dart](../lib/src/legacy/arm64_emit.dart) 的 `emitExit()` 及 [x64.dart](../lib/src/legacy/x64.dart) 的 `xExit()`；行为由 [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) 的退出状态与先行副作用用例验证，签名及 effects 由 [ssa_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/ssa_test.dart) 验证。
+实现入口：[ir.dart](../../../lib/src/legacy/ir.dart) 的原语签名、[arm64_emit.dart](../../../lib/src/legacy/arm64_emit.dart) 的 `emitExit()` 及 [x64.dart](../../../lib/src/legacy/x64.dart) 的 `xExit()`；行为由 [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) 的退出状态与先行副作用用例验证，签名及 effects 由 [ssa_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/ssa_test.dart) 验证。
 
 ## NoGC 提示
 
@@ -121,13 +121,13 @@ NoGC 是静态合同验证，不插入收集器、安全点轮询或运行时注
 
 当前支持范围限原生可执行文件。静态/动态库产物路径尚不装载 core pragma 入口。
 
-实现入口：[frontend.dart](../lib/src/legacy/frontend.dart) 的 `fePragmaFlags()`、`feCheckMetadata()`；[nogc.dart](../lib/src/legacy/nogc.dart) 的 `checkNoGcSsa()`、`checkNoGcMachine()`。core 声明入口是 [core.dart](../lib/src/legacy/std/core.dart)，不等同于完整 SDK core 库。
+实现入口：[frontend.dart](../../../lib/src/legacy/frontend.dart) 的 `fePragmaFlags()`、`feCheckMetadata()`；[nogc.dart](../../../lib/src/legacy/nogc.dart) 的 `checkNoGcSsa()`、`checkNoGcMachine()`。core 声明入口是 [core.dart](../../../lib/src/legacy/std/core.dart)，不等同于完整 SDK core 库。
 
 ## 根所有权
 
 根表示使用 `storageRef` / `storageTagged`；原始 Word 和代码地址不作托管根；持有的 TypeRef 引用按 Ref 登记，静态记录不进入堆对象队列。Ref 的零值和 Tagged 的立即值不加入对象队列。
 
-以下接口由 [roots.dart](../lib/src/legacy/runtime/roots.dart) 拥有，使用方直接导入。
+以下接口由 [roots.dart](../../../lib/src/legacy/runtime/roots.dart) 拥有，使用方直接导入。
 
 | API | 所有权合同 |
 | --- | --- |
@@ -147,7 +147,7 @@ typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它
 
 ### 根表生成与编码
 
-[root_map.dart](../lib/src/legacy/root_map.dart) 复用块级活跃性分析，反向计算每个直接或间接调用之前的活跃值，再使用寄存器分配确定的实际 FP 槽，区分 Ref 与 Tagged。发射器在真实调用指令之后记录返回 PC，按发射顺序形成有序调用根表。零根调用仍保留记录；启动跳板的无帧调用使用边界记录终止遍历。全局根按槽的 Ref/Tagged 表示列出，整数、布尔和原生地址不作根。
+[root_map.dart](../../../lib/src/legacy/root_map.dart) 复用块级活跃性分析，反向计算每个直接或间接调用之前的活跃值，再使用寄存器分配确定的实际 FP 槽，区分 Ref 与 Tagged。发射器在真实调用指令之后记录返回 PC，按发射顺序形成有序调用根表。零根调用仍保留记录；启动跳板的无帧调用使用边界记录终止遍历。全局根按槽的 Ref/Tagged 表示列出，整数、布尔和原生地址不作根。
 
 只有可达的 `nativeMetadataAddress` 请求包含 `metadataRoots` 时才保留根表。调用返回 PC、全局槽和子表引用均用相对各记录基址的位移，和代码、常量及数据段一起布局。相同的有序根槽向量共享只读存储，每个调用点仍保留自己的返回 PC、根数和向量引用；零根及启动边界记录不因共享而省略。
 
@@ -159,7 +159,7 @@ typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它
 
 各目标发码器从实际发射的 prologue/epilogue 和分配结果记录布局。已保存寄存器按目标寄存器表的顺序排列，占用连续向下的 FP 槽；固定帧大小不含 FP/LR 头和调用期间临时分配的溢出参数区。无帧启动跳板使用负帧大小，遍历在读取其父 FP 前停止。
 
-[frames.dart](../lib/src/legacy/runtime/frames.dart) 的 `rtFrameDescriptor(pc)` 是 NoGC 二分查找，区间外返回零。`rtStackTraceString(frame)` 从传入帧的调用者开始，查询返回 PC 后才沿 FP 前进，遇到未知 PC 按运行时合同失败终止。捕获期间被访问的调用者帧保持活动，StringBuffer 和结果 String 由普通托管引用保活。该路径只读取调用链，不恢复寄存器或执行异常处理；标准库 API 范围见 [specs/libraries.md](../specs/libraries.md#stacktrace-api)。
+[frames.dart](../../../lib/src/legacy/runtime/frames.dart) 的 `rtFrameDescriptor(pc)` 是 NoGC 二分查找，区间外返回零。`rtStackTraceString(frame)` 从传入帧的调用者开始，查询返回 PC 后才沿 FP 前进，遇到未知 PC 按运行时合同失败终止。捕获期间被访问的调用者帧保持活动，StringBuffer 和结果 String 由普通托管引用保活。该路径只读取调用链，不恢复寄存器或执行异常处理；标准库 API 范围见 [specs/libraries.md](../../../specs/libraries.md#stacktrace-api)。
 
 ## 同步异常展开
 
@@ -169,9 +169,9 @@ typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它
 
 可达调用需要异常后继时，元数据 `+80` 指向 `metadataHandlers` 处理表，并同时保留帧表。每项把精确返回 PC 映射到调用者的异常边入口，按 PC 排序；两地址均为相对表项的位移。没有处理器的调用无需表项，展开器继续查找父帧。
 
-[exceptions.dart](../lib/src/legacy/runtime/exceptions.dart) 拥有当前执行域的待处理对象、StackTrace 和原生恢复上下文。异常对象与轨迹是普通托管字段；catch 或 finally 的异常入口复制到局部根后清空字段，rethrow 使用当前词法 catch 保存的原值。finally 的完成标记、返回值与异常保存由编译器生成，展开器仍只定位处理入口。`nativeCaptureContext` 将 FP、SP、PC 和被调用者保存寄存器写入 96 字节原始缓冲；ARM64 的九个寄存器槽依次为 x19–x27，x64 的前五槽为 rbx、r12–r15，其余槽保留且不进入保存位图。`nativeResumeContext` 恢复同一集合并跳转，结果为 Never。缓冲布局由 [layout.dart](../lib/src/legacy/layout.dart) 定义，不是平台 FFI 上下文。
+[exceptions.dart](../../../lib/src/legacy/runtime/exceptions.dart) 拥有当前执行域的待处理对象、StackTrace 和原生恢复上下文。异常对象与轨迹是普通托管字段；catch 或 finally 的异常入口复制到局部根后清空字段，rethrow 使用当前词法 catch 保存的原值。finally 的完成标记、返回值与异常保存由编译器生成，展开器仍只定位处理入口。`nativeCaptureContext` 将 FP、SP、PC 和被调用者保存寄存器写入 96 字节原始缓冲；ARM64 的九个寄存器槽依次为 x19–x27，x64 的前五槽为 rbx、r12–r15，其余槽保留且不进入保存位图。`nativeResumeContext` 恢复同一集合并跳转，结果为 Never。缓冲布局由 [layout.dart](../../../lib/src/legacy/layout.dart) 定义，不是平台 FFI 上下文。
 
-展开器按实际保存位图撤销各帧的寄存器保存，找到处理器后以父 FP 和固定帧大小重建 SP，不依赖抛出调用的溢出实参大小。查表和展开为 NoGC 路径。未找到处理器时输出异常与轨迹并以状态 255 退出；未知帧仍按内部合同失败终止。语言范围及缺口见 [specs/statements.md](../specs/statements.md)。
+展开器按实际保存位图撤销各帧的寄存器保存，找到处理器后以父 FP 和固定帧大小重建 SP，不依赖抛出调用的溢出实参大小。查表和展开为 NoGC 路径。未找到处理器时输出异常与轨迹并以状态 255 退出；未知帧仍按内部合同失败终止。语言范围及缺口见 [specs/statements.md](../../../specs/statements.md)。
 
 ## 原始缓冲与构建期间的根
 
@@ -190,11 +190,11 @@ typed Ref/Tagged 参数及活跃临时值由编译器根槽保活；不能把它
 
 UTF-8 编码使用 I/O 层拥有的可复用原始缓冲，按需映射和扩容，不消耗托管 arena。打印在同步写出结束后释放借用，路径在 open 或 chmod 返回后释放；后续调用复用容量，扩容时解除旧映射。借用期间没有 Dart 回调或托管分配，toString 回调发生在借用前。该单执行者协议不提供线程、isolate 或异步 I/O 共享借用。
 
-UTF-8 解码核心只在给定字节长度内读取，检查续字节、最短编码及 Unicode 范围；它是 NoGC 函数，可写入调用者提供的 UTF-16 缓冲，或只验证输入。字符串包装层拥有分配，源码、普通文本和 CString 入口选择各自的替换、surrogate 与 BOM 规则，行为边界见[词法规范跟踪](../specs/lexical-structure.md)。文件读取在解码分配期间保留路径根，并在报告解码失败前释放原始映射。所有可执行入口均验证 argv；无参 main 只保留不分配托管对象的验证路径，不引入参数 List。
+UTF-8 解码核心只在给定字节长度内读取，检查续字节、最短编码及 Unicode 范围；它是 NoGC 函数，可写入调用者提供的 UTF-16 缓冲，或只验证输入。字符串包装层拥有分配，源码、普通文本和 CString 入口选择各自的替换、surrogate 与 BOM 规则，行为边界见[词法规范跟踪](../../../specs/lexical-structure.md)。文件读取在解码分配期间保留路径根，并在报告解码失败前释放原始映射。所有可执行入口均验证 argv；无参 main 只保留不分配托管对象的验证路径，不引入参数 List。
 
 ## 托管分配与回收
 
-[heap.dart](../lib/src/legacy/runtime/heap.dart) 拥有当前单执行域的非移动标记清扫收集器。每个 arena 在 payload 前保留 32 字节原始记录，保存下一 arena、映射请求长度、边界图地址及长度；当前连续分配区可以来自新 arena，也可以来自已回收的空闲块。
+[heap.dart](../../../lib/src/legacy/runtime/heap.dart) 拥有当前单执行域的非移动标记清扫收集器。每个 arena 在 payload 前保留 32 字节原始记录，保存下一 arena、映射请求长度、边界图地址及长度；当前连续分配区可以来自新 arena，也可以来自已回收的空闲块。
 
 标记期间复用最近两个不同 arena 的查找结果，未命中时遍历 arena 链表。提示仅在本次标记期间有效；标记期间不释放 arena，清扫及下一次收集不继承这些地址。
 
@@ -208,7 +208,7 @@ UTF-8 解码核心只在给定字节长度内读取，检查续字节、最短�
 
 ## 编译器的宿主服务
 
-[host.dart](../lib/src/legacy/host.dart) 定义编译器的宿主接口；官方 Dart 运行时使用 SDK 实现，原生 dartc 通过受信模块的声明身份连接到普通 Dart 运行时函数。同名用户函数仍按用户声明调用。
+[host.dart](../../../lib/src/legacy/host.dart) 定义编译器的宿主接口；官方 Dart 运行时使用 SDK 实现，原生 dartc 通过受信模块的声明身份连接到普通 Dart 运行时函数。同名用户函数仍按用户声明调用。
 
 - `hostReadIfExists(path)` 返回 `String?`。仅在 open 返回 `ENOENT` 或 `ENOTDIR` 时返回 null；空文件返回空字符串。权限、目录读取及其他 I/O 失败仍终止，路径与错误写入 stderr，保留调用方的 stdout。
 - `hostWriteError(message)` 将 String 编码为 UTF-8 写入 stderr，不自动追加换行；不分配托管对象，成功写入后释放 UTF-8 临时缓冲，可用于 NoGC 调用。写入失败沿既有宿主 I/O 出口处理。
@@ -216,11 +216,11 @@ UTF-8 解码核心只在给定字节长度内读取，检查续字节、最短�
 - `hostStdPath()` 按实际运行的可执行文件位置查找 `../lib/src/legacy/runtime.dart`，支持 PATH 与符号链接启动。macOS 读取进程可执行路径，Linux 读取 `/proc/self/exe`；显式 `--std` 跳过自动发现。
 - 文件和工作目录的原始缓冲在解码后释放；托管 String 或 null 使用现有 Ref 表示。两项服务可能创建托管 String，不能作为 NoGC 接口。
 
-这些内部接口服务于[源码和包配置加载](../specs/libraries.md)，不构成完整 `dart:io`。
+这些内部接口服务于[源码和包配置加载](../../../specs/libraries.md)，不构成完整 `dart:io`。
 
 ## 函数值与调用边界
 
-无捕获函数值在映像中使用只读对象，按实际声明或语法节点保存身份，不按静态函数类型复制对象。对象沿用 16 字节头，后续两个 word 分别引用结构签名和调用适配器；只读字段相对对象基址编码，不预留空捕获环境。语言支持范围及身份规则见 [函数](../specs/functions.md)。
+无捕获函数值在映像中使用只读对象，按实际声明或语法节点保存身份，不按静态函数类型复制对象。对象沿用 16 字节头，后续两个 word 分别引用结构签名和调用适配器；只读字段相对对象基址编码，不预留空捕获环境。语言支持范围及身份规则见 [函数](../../../specs/functions.md)。
 
 函数 TypeRef 与代码声明 ID 分开。bare `Function` 使用上界记录；具体签名按 `layout.dart` 保存结果、必需位置参数数、总参数数、位置参数数和参数 TypeRef。命名参数排在位置参数之后，按公共名称排序；尾部条目保存静态名称 String 的相对位移和 required 标记。堆签名实例化复制形状，仅递归替换类型边；名称来自只读映像，不形成堆边。子类型检查包含位置参数区间、命名集合、required 约束、参数逆变和结果协变。
 
@@ -228,7 +228,7 @@ UTF-8 解码核心只在给定字节长度内读取，检查续字节、最短�
 
 栈向量不分配托管 List，不能逃逸调用。Machine IR 的间接调用显式标记该协议；发码为向量分配对齐的临时栈空间，并把每个 Tagged 槽登记为调用点根。原 SSA 活跃值仍按通常协议保留；代码地址、形状地址和借用指针不是托管根。正常返回回收向量，异常恢复到处理帧的栈位置。原生地址调用原语继续遵循自己的固定签名。
 
-未知函数值调用保守拒绝用于 NoGC；适配器不继承目标函数的 NoGC 提示。提取只读函数对象与调用它的效果不同。堆闭包在固定函数前缀后保存捕获字段，描述符扫描 Ref/Tagged 捕获。可变绑定使用共享单元；单元保存声明类型的值并按该表示扫描，稳定捕获直接保存值。函数体接收隐藏 callable Ref，源码签名不含它。只读函数对象没有捕获字段，仍按叶处理。调用求值规则见 [表达式](../specs/expressions.md)。
+未知函数值调用保守拒绝用于 NoGC；适配器不继承目标函数的 NoGC 提示。提取只读函数对象与调用它的效果不同。堆闭包在固定函数前缀后保存捕获字段，描述符扫描 Ref/Tagged 捕获。可变绑定使用共享单元；单元保存声明类型的值并按该表示扫描，稳定捕获直接保存值。函数体接收隐藏 callable Ref，源码签名不含它。只读函数对象没有捕获字段，仍按叶处理。调用求值规则见 [表达式](../../../specs/expressions.md)。
 
 捕获外层类型参数的闭包在 `+32` 保存类型环境 Ref，普通值捕获随后排列；类型环境保留外层调用的实际 TypeRef，闭包体和调用适配器共享它。先实例化签名并以活跃 Ref 保留，再分配闭包；固定函数前缀写入完成前不执行托管分配。不能用带自由类型参数的模板代替可见函数类型。描述符枚举环境与普通捕获，函数对象额外枚举托管签名；类型环境的 List/backing 继续持有类型实参。这些边在外层函数返回后仍存在。
 

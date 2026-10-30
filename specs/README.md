@@ -4,7 +4,7 @@
 
 本目录当前支持事实描述冻结的 `lib/src/legacy/` 实现。测试链接固定到冻结提交，仅作为既有行为证据；工作区不再保留或运行这套测试。
 
-编译器结构、IR、ABI、运行时和自举设计见 [architecture.md](../doc/architecture.md)，安装与使用见 [README](../README.md)。
+编译器结构、IR、ABI、运行时和自举设计见 [architecture.md](../.agents/docs/legacy/architecture.md)，安装与使用见 [README](../README.md)。
 
 ## 规范来源
 
@@ -56,7 +56,7 @@
 - **待核对**：当前证据不足，先核对规范、源码和实际运行，再确定状态。
 - **已实现**：所引用的明确条款范围、必要行为及错误规则均已核对，并附验证证据；不将此状态扩展到整章或整个语言。当前各章仍有缺口，尚无整章符合性结论。
 
-代码链接定位实现，测试链接定位行为证据；有限测试或自编译成功均不代表整章兼容。平台能力以对应目标程序的实际执行为依据，仿真执行与原生硬件测量分别标明。macOS 与 Linux 的 ARM64/x86-64 目标共用本目录的语言条款和行为测试，不设按架构缩减的语法目标。历史行为证据见冻结提交中的 [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)、[ssa_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/ssa_test.dart) 和 [differential_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/differential_test.dart)；目标及 ABI 由[架构与运行时文档](../doc/architecture.md#目标与发码边界)定义。
+代码链接定位实现，测试链接定位行为证据；有限测试或自编译成功均不代表整章兼容。平台能力以对应目标程序的实际执行为依据，仿真执行与原生硬件测量分别标明。macOS 与 Linux 的 ARM64/x86-64 目标共用本目录的语言条款和行为测试，不设按架构缩减的语法目标。历史行为证据见冻结提交中的 [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)、[ssa_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/ssa_test.dart) 和 [differential_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/differential_test.dart)；目标及 ABI 由[架构与运行时文档](../.agents/docs/legacy/architecture.md#目标与发码边界)定义。
 
 ## 维护要求
 

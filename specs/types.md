@@ -7,7 +7,7 @@
 ## 依据与状态
 
 - [空安全提案][nnbd]位于官方 `accepted/2.12`；[类型推断][inference]和[流分析][flow]为同一版本的官方补充文档，文档自身仍标为 Draft。
-- 对象表示、TypeRef 布局、GC 与引导机制见[架构设计](../doc/architecture.md)；表达式规则见[表达式](expressions.md)。
+- 对象表示、TypeRef 布局、GC 与引导机制见[架构设计](../.agents/docs/legacy/architecture.md)；表达式规则见[表达式](expressions.md)。
 
 ## 当前实现
 
