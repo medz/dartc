@@ -6,6 +6,10 @@
 - Add `package:dartc/diagnostics.dart` for structured diagnostics with severity, error codes, source ranges, and related notes.
 - Add `package:dartc/scanner.dart` for source-preserving Dart tokens, nested string interpolation and comments, and recoverable lexical diagnostics.
 
+### Performance
+
+- Reduce temporary allocations when scanning identifiers and speed up scanning of whitespace runs.
+
 ## [0.5.0](https://github.com/medz/dartc/compare/v0.4.0...v0.5.0) — 2026-10-31
 
 This release adds generic classes, automatic memory reclamation, native-library export declarations and Intel Mac support. Native compiler downloads now work as a single executable. Dart language and standard-library support remains incomplete; see the [versioned specification tracker](https://github.com/medz/dartc/tree/v0.5.0/specs) for supported behavior and gaps.

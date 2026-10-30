@@ -55,6 +55,71 @@ void main() {
       );
     });
 
+    test('recognizes keywords at a nonzero offset and at end of source', () {
+      for (final kind in TokenKind.values.where((kind) => kind.isKeyword)) {
+        final word = kind.spelling!;
+        for (final prefix in ['', 'name; ']) {
+          final result = scanText('$prefix$word');
+          expect(result.hasErrors, isFalse, reason: word);
+          final token = result.tokens[result.tokens.length - 2];
+          expect(token.kind, kind, reason: word);
+          expect(token.lexeme, word);
+          expect(token.start, prefix.length);
+          expect(token.end, prefix.length + word.length);
+          expect(result.tokens.last.start, token.end);
+        }
+      }
+    });
+
+    test('distinguishes whole keywords from similar identifiers', () {
+      final names = <String>[];
+      for (final kind in TokenKind.values.where((kind) => kind.isKeyword)) {
+        final word = kind.spelling!;
+        names.addAll(['_$word', '${word}x', '${word}0', '$word\$']);
+        for (var index = 0; index < word.length; index++) {
+          names.add(word.replaceRange(index, index + 1, '_'));
+        }
+      }
+      names.add('a' * 100000);
+      final result = scanText(names.join(' '));
+      expect(result.hasErrors, isFalse);
+      expect(result.tokens.map((token) => token.lexeme), [...names, '']);
+      expect(
+        result.tokens.take(names.length).map((token) => token.kind),
+        everyElement(TokenKind.identifier),
+      );
+    });
+
+    test('skips whitespace runs without consuming other characters', () {
+      final gap = ' \t\r\n' * 4096;
+      for (final character in [
+        '\u000B',
+        '\u000C',
+        '\u0085',
+        '\u00A0',
+        '\u2028',
+        '\u2029',
+        '\uFEFF',
+      ]) {
+        final result = scanText('a$gap$character${gap}b$gap');
+        expect(result.tokens.map((token) => token.kind), <TokenKind>[
+          .identifier,
+          .invalid,
+          .identifier,
+          .eof,
+        ]);
+        expect(result.tokens.map((token) => token.start), [
+          0,
+          gap.length + 1,
+          gap.length * 2 + 2,
+          gap.length * 3 + 3,
+        ]);
+        expect(result.tokens[1].lexeme, character);
+        expect(result.diagnostics.single.code, 'scanner.unexpected_character');
+        expect(result.diagnostics.single.span, result.tokens[1].span);
+      }
+    });
+
     test('takes the longest punctuation token', () {
       const cases = <String, TokenKind>{
         '(': .leftParen,

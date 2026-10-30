@@ -108,19 +108,35 @@ final class _Scanner(final SourceFile source) {
   }
 
   void _identifier({bool allowDollar = true}) {
-    final start = _offset++;
-    while (_isIdentifierStart(_peek(), allowDollar: allowDollar) ||
-        _isDigit(_peek())) {
-      _offset++;
+    final start = _offset;
+    var end = start + 1;
+    while (end < _text.length) {
+      final code = _text.codeUnitAt(end);
+      final lower = code | 0x20;
+      if ((lower >= 0x61 && lower <= 0x7A) ||
+          (code >= 0x30 && code <= 0x39) ||
+          code == 0x5F ||
+          (allowDollar && code == 0x24)) {
+        end++;
+      } else {
+        break;
+      }
     }
-    _emit(keywordKind(_text.substring(start, _offset)), start);
+    _offset = end;
+    _emit(keywordKind(_text, start, end), start);
   }
 
   void _token() {
     final start = _offset;
     final code = _peek();
     if (code == 0x20 || code == 0x09 || code == 0x0A || code == 0x0D) {
-      _offset++;
+      var end = _offset + 1;
+      while (end < _text.length) {
+        final next = _text.codeUnitAt(end);
+        if (next != 0x20 && next != 0x09 && next != 0x0A && next != 0x0D) break;
+        end++;
+      }
+      _offset = end;
       return;
     }
     if (code == 0x27 || code == 0x22) {
