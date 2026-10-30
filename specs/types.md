@@ -9,6 +9,19 @@
 - [空安全提案][nnbd]位于官方 `accepted/2.12`；[类型推断][inference]和[流分析][flow]为同一版本的官方补充文档，文档自身仍标为 Draft。
 - 表达式规则见[表达式](expressions.md)。
 
+## 类型语法表示
+
+`package:dartc/ast.dart` 可构造和检查下列类型语法树。当前验证覆盖手工构造的节点及其源码范围，尚未提供从文本解析这些节点、名称绑定或类型检查的 API。
+
+| 语言条款 | 可表示的语法 | 验证 |
+| --- | --- | --- |
+| §20 Types、[空安全][nnbd] | 类型名称、导入前缀、嵌套类型实参和 `?`；保留 `void`、`dynamic` 等原始名称 | [nodes_test.dart](../test/ast/nodes_test.dart) 类型与范围用例 |
+| [§15 Generics][type-parameters] | 有序类型参数、元数据、`extends` 上界 | [nodes_test.dart](../test/ast/nodes_test.dart) 泛型函数类型用例 |
+| [§20.5 Function Types][function-types] | `Function` 类型、可省略的返回类型、泛型参数、必需及可选位置参数、可选及必需命名参数、参数名称与元数据 | [nodes_test.dart](../test/ast/nodes_test.dart) 函数类型用例 |
+| [Record types][records] | 位置字段、可选位置字段名、命名字段区、字段元数据、嵌套类型和可空 record 类型 | [nodes_test.dart](../test/ast/nodes_test.dart) record 类型用例 |
+
+类型别名及其他声明节点尚未实现。语法树中出现一种类型不表示已支持其静态或运行时语义；编译器的类型规则仍以下表为准。
+
 ## 类型规则
 
 | 规范条目 | 状态 | 支持范围与缺口 | 验证 |
@@ -77,6 +90,7 @@ SDK 3.13.7 对跨库带前缀的泛型别名到非泛型类的 `p.A<int>()` 隐�
 
 [aliases]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.13/nonfunction-type-aliases/feature-specification.md
 [function-types]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L22447-L22501
+[records]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/records/feature-specification.md
 [anonymous-inference]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/inference.md#L263-L372
 
 [type-parameters]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L7413-L7478

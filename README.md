@@ -4,7 +4,7 @@ A native Dart compiler written in Dart.
 
 Compile Dart programs into standalone executables for macOS and Linux. Generated programs run without an installed Dart SDK.
 
-dartc is an early preview. Complete Dart language and standard-library compatibility is the goal; see [language support](specs/README.md) for current capabilities and gaps. Published releases may differ from the source tree.
+dartc is an early preview. Complete Dart language and standard-library compatibility is the goal; see [language support](https://github.com/medz/dartc/blob/main/specs/README.md) for current capabilities and gaps. Published releases may differ from the source tree.
 
 ## Installation
 
@@ -46,11 +46,11 @@ dart pub get
 dartc bin/main.dart -o app
 ```
 
-Use `dartc --help` for command options. More examples are in [example/](example/).
+Use `dartc --help` for command options. More examples are in [example/](https://github.com/medz/dartc/tree/main/example).
 
 ## Native libraries
 
-dartc can also produce object files, static libraries and shared libraries with C/C++ headers. See [export support](specs/types.md#ffi-类型与原生导出声明) for supported declarations and types.
+dartc can also produce object files, static libraries and shared libraries with C/C++ headers. See [export support](https://github.com/medz/dartc/blob/main/specs/types.md#ffi-类型与原生导出声明) for supported declarations and types.
 
 ## Package APIs
 
@@ -58,9 +58,10 @@ Use these libraries independently in a Dart application:
 
 | Library | Purpose | Example |
 | --- | --- | --- |
-| `package:dartc/source.dart` | Source text, UTF-16 ranges, and line and column lookup | [Source locations](example/source.dart) |
-| `package:dartc/diagnostics.dart` | Diagnostics with severity, source ranges, and related notes | [Diagnostics](example/diagnostics.dart) |
-| `package:dartc/scanner.dart` | Dart tokens, comments, and lexical errors | [Scanning](example/scanner.dart) |
+| `package:dartc/source.dart` | Source text, UTF-16 ranges, and line and column lookup | [Source locations](https://github.com/medz/dartc/blob/main/example/source.dart) |
+| `package:dartc/diagnostics.dart` | Diagnostics with severity, source ranges, and related notes | [Diagnostics](https://github.com/medz/dartc/blob/main/example/diagnostics.dart) |
+| `package:dartc/scanner.dart` | Dart tokens, comments, and lexical errors | [Scanning](https://github.com/medz/dartc/blob/main/example/scanner.dart) |
+| `package:dartc/ast.dart` | Type annotations, metadata, and basic expression syntax trees | [Inspecting syntax](https://github.com/medz/dartc/blob/main/example/ast.dart) |
 
 These APIs are available from the source repository and have not been released yet.
 
@@ -76,8 +77,8 @@ dart pub get
 
 Bug reports, feature requests and contributions are welcome through [GitHub Issues](https://github.com/medz/dartc/issues). When reporting a compiler problem, include the source program, dartc release or commit, target platform and expected behavior.
 
-See [CHANGELOG.md](CHANGELOG.md) for release changes.
+See [CHANGELOG.md](https://github.com/medz/dartc/blob/main/CHANGELOG.md) for release changes.
 
 ## License
 
-[MIT](LICENSE).
+[MIT](https://github.com/medz/dartc/blob/main/LICENSE).
