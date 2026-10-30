@@ -1,3 +1,5 @@
+import 'graph.dart';
+
 const int tVoid = 0;
 const int tInt = 1;
 const int tString = 2;
@@ -213,6 +215,17 @@ int typeSchemaHole() {
 }
 
 bool typeHasSchemaHole(int type) => dartTypes[type].containsSchemaHole;
+
+int typeSchemaClosure(int type, bool greatest) {
+  if (!typeHasSchemaHole(type)) return type;
+  return _substituteType(
+    type,
+    <int>[schemaHole],
+    <int>[nullableType(tObject)],
+    <int>[tNever],
+    greatest ? 1 : -1,
+  );
+}
 
 int typeCompleteSchema(int schema, int inferred) {
   if (!typeHasSchemaHole(schema)) return schema;
@@ -746,8 +759,8 @@ int _substituteType(
   List<int> lower,
   int variance,
 ) {
-  if (!typeContainsParameters(type)) return type;
-  if (typeIsParameter(type)) {
+  if (!typeContainsParameters(type) && !typeHasSchemaHole(type)) return type;
+  if (typeIsParameter(type) || type == schemaHole) {
     var i = typeParameterIndex(parameters, type);
     if (i < 0) return type;
     return variance < 0 ? lower[i] : upper[i];
@@ -874,44 +887,8 @@ List<int> instantiateTypeParameters(
     _parameterDependencies(bound, parameters, dependencies);
     edges.add(dependencies);
   }
-  final indices = List<int>.filled(edges.length, -1);
-  final low = List<int>.filled(edges.length, -1);
-  final active = List<int>.filled(edges.length, 0);
-  final stack = <int>[];
-  final groups = <List<int>>[];
-  var next = 0;
-
-  void visit(int vertex) {
-    indices[vertex] = next;
-    low[vertex] = next;
-    next++;
-    stack.add(vertex);
-    active[vertex] = 1;
-    for (var target in edges[vertex]) {
-      if (indices[target] < 0) {
-        visit(target);
-        if (low[target] < low[vertex]) low[vertex] = low[target];
-      } else if (active[target] != 0 && indices[target] < low[vertex]) {
-        low[vertex] = indices[target];
-      }
-    }
-    if (low[vertex] == indices[vertex]) {
-      var group = <int>[];
-      var item = -1;
-      while (item != vertex) {
-        item = stack.removeLast();
-        active[item] = 0;
-        group.add(item);
-      }
-      groups.add(group);
-    }
-  }
-
+  final groups = stronglyConnectedComponents(edges);
   var i = 0;
-  while (i < parameters.length) {
-    if (indices[i] < 0) visit(i);
-    i++;
-  }
   for (var group in groups) {
     if (group.length > 1 ||
         typeParameterIndex(edges[group[0]], group[0]) >= 0) {

@@ -3,6 +3,32 @@ import '../source.dart';
 import '../types.dart';
 import 'parameters.dart';
 
+// Function literals can be deferred without moving observable argument effects.
+List<int> argumentOrder(SourceProgram source, AstExpression call, int start) {
+  final deferFunctions = sourceVersionAtLeast(
+    source,
+    source.tokens[call.token].source,
+    2,
+    18,
+  );
+  final order = <int>[];
+  for (var i = start; i < call.children.length; i++) {
+    var expression = call.children[i];
+    if (expression.kind == astNamedArgument)
+      expression = expression.children[0];
+    if (!deferFunctions || expression.function == null) order.add(i);
+  }
+  if (deferFunctions) {
+    for (var i = start; i < call.children.length; i++) {
+      var expression = call.children[i];
+      if (expression.kind == astNamedArgument)
+        expression = expression.children[0];
+      if (expression.function != null) order.add(i);
+    }
+  }
+  return order;
+}
+
 void checkArgumentOrder(SourceProgram source, AstExpression call) {
   if (sourceVersionAtLeast(source, source.tokens[call.token].source, 2, 17))
     return;

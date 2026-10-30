@@ -53,9 +53,17 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 SDK 3.13.7 对未显式给出类型实参的上述调用存在检查差异：虽然从其他实参推断出 `int`，仍可让 dynamic 持有的 `List<String>` 进入 `List<int>` 形参；从上界或默认类型得到的 List/函数参数同样可能漏检。dartc 按[实参与形参绑定规则](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L13352-L13369)保留类型检查；[behavior_test.dart](../test/behavior_test.dart) 的 `generic-dynamic-checks.dart` 分别验证推断和显式调用，以 SDK 显式调用为检查对照，并单独记录隐式调用差异。
 
-泛型局部/匿名函数、泛型函数值及 tear-off、泛型函数类型、未确定回调参数的水平推断、完整基于上界的推断和 `T & S` 交叉类型提升仍缺。泛型 `main` 当前仅支持无值参数、默认类型实参满足边界的声明。类型参数作为公开 `Type` 值尚未实现。这些限制是实现缺口，不改变语言兼容目标。
+泛型局部/匿名函数、泛型函数值及 tear-off、泛型函数类型、完整基于上界的推断和 `T & S` 交叉类型提升仍缺。泛型 `main` 当前仅支持无值参数、默认类型实参满足边界的声明。类型参数作为公开 `Type` 值尚未实现。这些限制是实现缺口，不改变语言兼容目标。
 
 实现入口为 [resolve_type.dart](../lib/src/resolve_type.dart) 的 `resolveFunctionTypeParameters`、[generics.dart](../lib/src/frontend/generics.dart) 的约束收集及求解、[frontend.dart](../lib/src/frontend.dart) 的 `fePrepareGenericArguments`。行为入口为 [values.dart](../test/fixtures/values.dart) 的 `genericFunctions`、[behavior_test.dart](../test/behavior_test.dart) 的 `generic-functions-imports.dart`、`generic-entry.dart`、`rejected` 与 `failingValues`。推断依据[类型推断规则][generic-inference]，运行时类型图的存活检查由 [roots.dart](../test/fixtures/roots.dart) 的 `genericTypeRoots` 拥有。
+
+### 回调水平推断
+
+按 [Dart 2.18 水平推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.18/horizontal-inference/feature-specification.md)，普通泛型函数与方法的直接调用支持从其他实参推断函数字面量中未标注的参数。回调之间按类型依赖分阶段，循环依赖留在同一阶段；同阶段共享进入该阶段时的上下文，阶段结束后固定已确定的类型。命名参数、可选参数及括号包住的直接函数字面量遵守相同规则，条件表达式等间接产生的函数值不会借此推迟推断。旧于 2.18 的调用库仍使用原来的同阶段推断。
+
+普通实参保持源码求值及检查顺序，直接函数字面量在其后分析和构造。普通声明的非泛型调用、显式泛型调用、构造器调用及具体函数值调用也延后函数字面量，允许它捕获由其他实参完成初始化的变量。未得到约束的回调参数使用类型 schema 的最大闭包，未知类型取 Object?，嵌套函数参数按逆变方向取 Never；不会自动退化为 dynamic。回调结果仍由函数体和返回上下文推断。捕获写入与类型提升仍受[词法捕获](#词法捕获)所列流分析边界限制，仍经专用 builtin 路径的调用及 dynamic 调用尚未统一到这一路径。
+
+实现入口为 [generics.dart](../lib/src/frontend/generics.dart) 的 `genericArgumentStages()` 与 `inferGenericArguments()`、[arguments.dart](../lib/src/frontend/arguments.dart) 的 `argumentOrder()` 和 [types.dart](../lib/src/types.dart) 的 `typeSchemaClosure()`。行为入口为 [values.dart](../test/fixtures/values.dart) 的 `horizontalInference()`、[behavior_test.dart](../test/behavior_test.dart) 的 `horizontal-2.17.dart` / `horizontal-2.18.dart` 及对应拒例。
 
 ## 局部函数
 

@@ -2495,40 +2495,49 @@ int fePrepareInferredArguments(
   var syntax = feFunctionNodes[function];
   var offset = feParameterOffset(function);
   var bindings = bindArguments(feSources, syntax, call, 1);
-  var actualTypes = <int>[];
-  var actualSlots = <int>[];
-  var checks = <int>[];
-  var continuations = <int>[];
-  for (var i = 1; i < call.children.length; i++) {
-    var expression = call.children[i];
-    if (expression.kind == astNamedArgument)
-      expression = expression.children[0];
-    var template = info.parameterTypes[offset + bindings[i - 1]];
-    var schema = substituteType(template, parameters, schemaArguments);
-    var closure = expression.function;
-    if (closure != null && typeIsFunction(schema)) {
-      final signature = functionSignature(schema);
-      for (var p = 0; p < closure.parameters.length; p++) {
-        final parameter = closure.parameters[p];
-        final index = functionParameterIndex(signature, parameter, p);
-        if (parameter.type.name == '' &&
-            index >= 0 &&
-            typeHasSchemaHole(signature.parameters[index]))
-          feAstError(
-            closure.parameters[p].token,
-            'generic inference for untyped callback parameters is not yet supported',
-          );
+  final templates = <int>[
+    for (final binding in bindings) info.parameterTypes[offset + binding],
+  ];
+  final stages = genericArgumentStages(
+    call,
+    templates,
+    parameters,
+    sourceVersionAtLeast(feSources, feTokens[call.token].source, 2, 18),
+  );
+  final actualTypes = List<int>.filled(bindings.length, -1);
+  final actualSlots = List<int>.filled(bindings.length, -1);
+  final checks = List<int>.filled(bindings.length, -1);
+  final continuations = List<int>.filled(bindings.length, -1);
+  for (var stage = 0; stage < stages.length; stage++) {
+    for (final i in stages[stage]) {
+      var expression = call.children[i + 1];
+      if (expression.kind == astNamedArgument)
+        expression = expression.children[0];
+      final template = templates[i];
+      final schema = substituteType(template, parameters, schemaArguments);
+      final actual = feLowerHint(expression, schema);
+      constrainGenericTypes(template, actual, parameters, lower, upper);
+      final slot = feTemp(actual);
+      feOperand(opStoreLocal, slot);
+      actualTypes[i] = actual;
+      actualSlots[i] = slot;
+      // Only function literals move; checks precede the next argument effect.
+      checks[i] = feJump(opJump);
+      continuations[i] = ir.length;
+    }
+    if (stage + 1 < stages.length) {
+      schemaArguments = inferGenericArguments(
+        parameters,
+        lower,
+        upper,
+        fixed,
+        false,
+      );
+      for (var i = 0; i < parameters.length; i++) {
+        if (!typeHasSchemaHole(schemaArguments[i]))
+          fixed[i] = schemaArguments[i];
       }
     }
-    var actual = feLowerHint(expression, schema);
-    constrainGenericTypes(template, actual, parameters, lower, upper);
-    var slot = feTemp(actual);
-    feOperand(opStoreLocal, slot);
-    actualTypes.add(actual);
-    actualSlots.add(slot);
-    // The inferred check still executes before the next source argument.
-    checks.add(feJump(opJump));
-    continuations.add(ir.length);
   }
   var arguments = inferGenericArguments(parameters, lower, upper, fixed);
   for (var i = 0; i < arguments.length; i++) {
@@ -2615,7 +2624,7 @@ int fePrepareGenericArguments(
   var offset = feParameterOffset(function);
   var bindings = bindArguments(feSources, feFunctionNodes[function], call, 1);
   var values = List<int>.filled(parameters.length, -1);
-  for (var i = 1; i < call.children.length; i++) {
+  for (final i in argumentOrder(feSources, call, 1)) {
     var expression = call.children[i];
     if (expression.kind == astNamedArgument)
       expression = expression.children[0];
@@ -2843,7 +2852,23 @@ int feLowerArguments(
   var parameters = feFunctionNodes[function].parameters;
   if (parameterStart != 0) parameters = parameters.sublist(parameterStart);
   var offset = feParameterOffset(function) + parameterStart;
-  if (call.children.length - start == parameters.length &&
+  var unchanged = true;
+  if (sourceVersionAtLeast(feSources, feTokens[call.token].source, 2, 18)) {
+    var functionSeen = false;
+    for (var i = start; i < call.children.length; i++) {
+      var expression = call.children[i];
+      if (expression.kind == astNamedArgument)
+        expression = expression.children[0];
+      if (expression.function != null)
+        functionSeen = true;
+      else if (functionSeen) {
+        unchanged = false;
+        break;
+      }
+    }
+  }
+  if (unchanged &&
+      call.children.length - start == parameters.length &&
       (parameters.isEmpty || parameters.last.kind != astNamedParameter)) {
     var argument = start;
     while (argument < call.children.length) {
@@ -2869,8 +2894,7 @@ int feLowerArguments(
     parameterStart,
   );
   var values = List<int>.filled(parameters.length, -1);
-  var argument = start;
-  while (argument < call.children.length) {
+  for (final argument in argumentOrder(feSources, call, start)) {
     var expression = call.children[argument];
     if (expression.kind == astNamedArgument)
       expression = expression.children[0];
@@ -2880,7 +2904,6 @@ int feLowerArguments(
     var value = feTemp(type);
     feOperand(opStoreLocal, value);
     values[parameter] = value;
-    argument++;
   }
   var parameter = 0;
   while (parameter < parameters.length) {
@@ -3354,8 +3377,9 @@ List<int> feLowerValueArguments(
 ) {
   final mapping = bindFunctionArguments(feSources, signature, call);
   final slots = List<int>.filled(signature.parameters.length, -1);
-  for (var i = 0; i < mapping.length; i++) {
-    final argument = call.children[i + 1];
+  for (final index in argumentOrder(feSources, call, 1)) {
+    final i = index - 1;
+    final argument = call.children[index];
     final expression = argument.kind == astNamedArgument
         ? argument.children[0]
         : argument;
@@ -5718,7 +5742,9 @@ void feInferLocalResult(int local) {
   } finally {
     previous.restore();
   }
-  if (context >= 0 && (context == tVoid || !typeIsSubtype(result, context)))
+  if (context >= 0 &&
+      !typeHasSchemaHole(context) &&
+      (context == tVoid || !typeIsSubtype(result, context)))
     result = context;
   functions[function].result = result;
   functions[function].callableType = -1;
@@ -5809,7 +5835,7 @@ int fePrepareFunctionExpression(AstExpression expression, int context) {
       final parameter = syntax.parameters[p];
       final index = functionParameterIndex(signature, parameter, p);
       if (index >= 0 && parameter.type.name == '') {
-        var type = signature.parameters[index];
+        var type = typeSchemaClosure(signature.parameters[index], true);
         if (typeIsSubtype(type, tNull)) type = nullableType(tObject);
         functions[function].parameterTypes[p + feParameterOffset(function)] =
             type;

@@ -1032,6 +1032,19 @@ void main() {
     final genericEntry = File('${temporary.path}/generic-entry.dart')
       ..writeAsStringSync('void main<T extends num>() { print(1 is T); }');
     await compare(genericEntry, []);
+    for (final version in ['2.17', '2.18']) {
+      final horizontal = File('${temporary.path}/horizontal-$version.dart')
+        ..writeAsStringSync('''
+// @dart=$version
+List<T> infer<T>(T Function(T) callback, T value) => [callback(value)];
+void main() {
+  var result = infer((value) => value, 1);
+  print(result is List<int>);
+  print(result);
+}
+''');
+      await compare(horizontal, []);
+    }
     final namedEntry = File('${temporary.path}/named-entry.dart')
       ..writeAsStringSync(
         "void main({String label = 'named', bool flag = true, List<List<int>> values = const [[]]}) { "
@@ -3042,6 +3055,14 @@ void main() {
       "void invalid<T extends Missing>(){}void main(){}",
       "void invalid<T>(){const values=<T>[];}void main(){}",
       "T apply<T>(T Function(T) fn,T value)=>fn(value);int inc(int value)=>value+1;void main(){print(apply(inc,1));}",
+      "List<T> infer<T>(T Function(T) fn)=>[];void unused(){infer((value){int result=value;return result;});}void main(){}",
+      "List<T> infer<T extends num>(T Function(T) fn)=>[];void unused(){infer((value)=>value+1);}void main(){}",
+      "T infer<T>(T Function(T) fn,T value)=>fn(value);void unused(bool choose){var result=infer(choose?(value)=>value+1:(value)=>value+2,1);}void main(){}",
+      "void read(int first,int second,int Function(int) fn){}void unused(int? value){read(value+1,value=2,(value)=>value);}void main(){}",
+      "T read<T>(T Function() fn,T value)=>fn();void unused(){int value;read(()=>value,1);}void main(){}",
+      "// @dart=2.17\nT infer<T>(T Function(T) fn,T value)=>fn(value);void unused(){var value=infer((value)=>value+1,1);}void main(){}",
+      "void infer<T>(T value,void Function(T) fn){}void unused(){infer(1,(String value){});}void main(){}",
+      "T infer<T>(T value,T Function(T) fn)=>fn(value);void unused(){var result=infer(1,(value)=>1.5);}void main(){}",
       "void main(){switch(1){label:case int a:print(a);}}",
       "void main(){switch(1){case 0:continue label;label:case int a:print(a);}}",
       "void main(){switch(1){case int a:case final int a:print(a);}}",

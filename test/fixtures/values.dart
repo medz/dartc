@@ -5916,6 +5916,77 @@ void genericDynamicArguments() {
   print(contextualCall);
 }
 
+R genericTransform<T, R>(R Function(T) convert, T Function() produce) =>
+    convert(produce());
+R genericPipeline<T, U, R>(
+  R Function(U) finish,
+  U Function(T) middle,
+  T Function() start,
+) => finish(middle(start()));
+List<T> genericCycle<T, U>(T Function(U) first, U Function(T) second) => [];
+List<T> genericFunctionSchema<T>(void Function(T Function(T)) callback) => [];
+T genericNamedCallback<T>(
+  T value,
+  T Function({required T value, T? fallback}) callback,
+) => callback(value: value);
+T genericOptionalCallback<T>(T Function(T, [T?]) callback, T value) =>
+    callback(value);
+int horizontalRead(int Function() callback, int ignored) => callback();
+T genericRead<T>(T Function() callback, T ignored) => callback();
+
+class HorizontalBox {
+  final int Function() read;
+  HorizontalBox(this.read, int ignored);
+}
+
+void horizontalInference() {
+  var applied = genericApply(((value) => value + 1), 4);
+  print(applied);
+  var transformed = genericTransform((value) => value + 2, () => 5);
+  print(transformed);
+  var pipeline = genericPipeline(
+    (value) => value.length,
+    (value) => 'pipeline:$value',
+    () => 6,
+  );
+  print(pipeline);
+  Object cycle = genericCycle((value) => 7, (value) => 'cycle');
+  print(cycle is List<int>);
+  Object nested = genericFunctionSchema((callback) {
+    Object? Function(Never) view = callback;
+    print(view is Function);
+  });
+  print(nested is List<Never>);
+  var named = genericNamedCallback(
+    8,
+    ({required value, fallback}) => value + (fallback ?? 2),
+  );
+  print(named);
+  var optional = genericOptionalCallback(
+    (value, [fallback]) => value + (fallback ?? 3),
+    9,
+  );
+  print(optional);
+  genericTrace = '';
+  var traced = genericApply((value) {
+    genericTrace = genericTrace + 'call';
+    return value + 1;
+  }, genericNext(1));
+  print(traced);
+  print(genericTrace);
+  int initialized;
+  print(horizontalRead(() => initialized, initialized = 11));
+  final int finalValue;
+  print(HorizontalBox(() => finalValue, finalValue = 12).read());
+  int explicit;
+  print(genericRead<int>(() => explicit, explicit = 13));
+  int throughValue;
+  int Function(int Function(), int) reader = horizontalRead;
+  print(reader(() => throughValue, throughValue = 14));
+  var method = GenericCalls().apply((value) => value + 1, 15);
+  print(method);
+}
+
 T genericPattern<T>(List<T> values) {
   if (values case [T first, ...]) return first;
   return values[0];
@@ -5944,6 +6015,7 @@ class GenericCalls {
       () => value;
   T pick<T>(T value, {T? other}) => other ?? value;
   T call<T>(T value, {T? other}) => other ?? value;
+  T apply<T>(T Function(T) callback, T value) => callback(value);
 
   T Function() keep<T>(T value) =>
       () => pick<T>(value);
@@ -6059,6 +6131,7 @@ void genericClosures() {
 void genericFunctions() {
   genericClosures();
   genericDynamicArguments();
+  horizontalInference();
   print(genericIdentity<int>(42));
   print(genericIdentity(true));
   print(genericIdentity('generic'));
