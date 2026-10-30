@@ -53,7 +53,7 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 SDK 3.13.7 对未显式给出类型实参的上述调用存在检查差异：虽然从其他实参推断出 `int`，仍可让 dynamic 持有的 `List<String>` 进入 `List<int>` 形参；从上界或默认类型得到的 List/函数参数同样可能漏检。dartc 按[实参与形参绑定规则](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L13352-L13369)保留类型检查；[behavior_test.dart](../test/behavior_test.dart) 的 `generic-dynamic-checks.dart` 分别验证推断和显式调用，以 SDK 显式调用为检查对照，并单独记录隐式调用差异。
 
-泛型局部/匿名函数、泛型函数值及 tear-off、泛型函数类型、完整基于上界的推断和 `T & S` 交叉类型提升仍缺。泛型 `main` 当前仅支持无值参数、默认类型实参满足边界的声明。类型参数作为公开 `Type` 值尚未实现。这些限制是实现缺口，不改变语言兼容目标。
+泛型局部/匿名函数、泛型函数值及 tear-off、泛型函数类型、一般泛型父接口参与的界限推断和 `T & S` 交叉类型提升仍缺。泛型 `main` 当前仅支持无值参数、默认类型实参满足边界的声明。类型参数作为公开 `Type` 值尚未实现。这些限制是实现缺口，不改变语言兼容目标。
 
 实现入口为 [resolve_type.dart](../lib/src/resolve_type.dart) 的 `resolveFunctionTypeParameters`、[generics.dart](../lib/src/frontend/generics.dart) 的约束收集及求解、[frontend.dart](../lib/src/frontend.dart) 的 `fePrepareGenericArguments`。行为入口为 [values.dart](../test/fixtures/values.dart) 的 `genericFunctions`、[behavior_test.dart](../test/behavior_test.dart) 的 `generic-functions-imports.dart`、`generic-entry.dart`、`rejected` 与 `failingValues`。推断依据[类型推断规则][generic-inference]，运行时类型图的存活检查由 [roots.dart](../test/fixtures/roots.dart) 的 `genericTypeRoots` 拥有。
 
@@ -64,6 +64,14 @@ SDK 3.13.7 对未显式给出类型实参的上述调用存在检查差异：虽
 普通实参保持源码求值及检查顺序，直接函数字面量在其后分析和构造。普通声明的非泛型调用、显式泛型调用、构造器调用及具体函数值调用也延后函数字面量，允许它捕获由其他实参完成初始化的变量。未得到约束的回调参数使用类型 schema 的最大闭包，未知类型取 Object?，嵌套函数参数按逆变方向取 Never；不会自动退化为 dynamic。回调结果仍由函数体和返回上下文推断。捕获写入与类型提升仍受[词法捕获](#词法捕获)所列流分析边界限制，仍经专用 builtin 路径的调用及 dynamic 调用尚未统一到这一路径。
 
 实现入口为 [generics.dart](../lib/src/frontend/generics.dart) 的 `genericArgumentStages()` 与 `inferGenericArguments()`、[arguments.dart](../lib/src/frontend/arguments.dart) 的 `argumentOrder()` 和 [types.dart](../lib/src/types.dart) 的 `typeSchemaClosure()`。行为入口为 [values.dart](../test/fixtures/values.dart) 的 `horizontalInference()`、[behavior_test.dart](../test/behavior_test.dart) 的 `horizontal-2.17.dart` / `horizontal-2.18.dart` 及对应拒例。
+
+### 基于界限的推断
+
+调用库从 3.7 起按[基于界限的推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/inference-using-bounds/design-document.md)组合已有下界约束与声明上界。例如 `X extends List<Y>` 的 X 从实参得到 `List<int>` 时，继续为 Y 生成 int 约束；支持当前类型模型中的嵌套 List、可空界限、函数结果及参数逆变、多级界限链。普通泛型直接调用与泛型 const 构造、类别名使用同一规则；版本取调用所在库，不取被调用声明的版本。
+
+向下上下文、水平推断阶段与最终求解都按类型参数声明顺序处理，前阶段已经固定的解不重新选择。部分求解仅在该参数的约束解已知时使用界限，最终求解也处理含未知部分的下界；没有可分解的下界时不凭运行时值补充类型。最终阶段中已处理的参数不会因后面的界限产生新约束而回头重解，因此没有其他 Y 约束时，`<Y, X extends List<Y>>` 与相反声明顺序可能得到不同结果。界限关系不会向回调水平推断的依赖图添加额外边，仅依赖 Y 的回调不会因另一个参数的类型是 X 而自动推迟。
+
+实现入口为 [generics.dart](../lib/src/frontend/generics.dart) 的 `constrainGenericBound()`、`genericConstraintSolution()`、`inferGenericArguments()`，调用与常量上下文分别由 [frontend.dart](../lib/src/frontend.dart) 和 [constants.dart](../lib/src/constants.dart) 接入。行为入口为 [values.dart](../test/fixtures/values.dart) 的 `genericBoundInference()`、`metadataValues()`，以及 [behavior_test.dart](../test/behavior_test.dart) 的 `bounds-3.6.dart` / `bounds-3.7.dart` 和泛型拒例。一般泛型类及其父接口、完整 F-bound 约束生成与其余约束求解缺口仍待实现。
 
 ## 局部函数
 

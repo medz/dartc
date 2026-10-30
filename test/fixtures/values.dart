@@ -3442,6 +3442,11 @@ class MetadataBound<T extends num> {
   const MetadataBound(this.value);
 }
 
+class MetadataElementBound<X extends List<Y>, Y> {
+  final X value;
+  const MetadataElementBound(this.value);
+}
+
 typedef MetadataAlias<T> = MetadataValue<List<T>>;
 const inferredMetadata = MetadataValue(3);
 const MetadataValue<num> contextualMetadata = MetadataValue(3);
@@ -3465,6 +3470,10 @@ void metadataValues() {
   const merged =
       [MetadataValue(1), MetadataValue(2.0)] is List<MetadataValue<num>>;
   const notSubtype = MetadataValue<int>(3) is MetadataValue<String>;
+  const bounded = identical(
+    MetadataElementBound([1]),
+    MetadataElementBound<List<int>, int>([1]),
+  );
   const alias = identical(
     MetadataAlias([1, 2]),
     MetadataValue<List<int>>([1, 2]),
@@ -3477,6 +3486,7 @@ void metadataValues() {
     subtype,
     merged,
     notSubtype,
+    bounded,
     alias,
   ]);
   print(MetadataProbe(3).read(4));
@@ -6030,6 +6040,51 @@ void horizontalInference() {
   print(method);
 }
 
+List<Y> genericListBound<X extends List<Y>, Y>(X values) => [values[0]];
+List<Y> genericNestedBound<X extends List<List<Y>>, Y>(X values) => values[0];
+List<Y> genericNullableBound<X extends List<Y>?, Y>(X values) => [];
+List<Y> genericResultBound<X extends Y Function(), Y>(X callback) => [];
+List<Y> genericInputBound<X extends void Function(Y), Y>(X callback) => [];
+List<Z> genericBoundChain<X extends List<Y>, Y extends List<Z>, Z>(X values) =>
+    [values[0][0]];
+R genericBoundCallback<X extends List<Y>, Y, R>(
+  X values,
+  R Function(X, Y?) callback,
+) => callback(values, null);
+List<int>? genericNullableInput() => [1];
+int genericBoundResult() => 1;
+void genericBoundInput(num value) {}
+
+void genericBoundInference() {
+  Object result = genericListBound(<int>[1]);
+  print(result);
+  print(result is List<int>);
+  result = genericDependent(<int>[2]);
+  print(result is List<int>);
+  result = genericNestedBound(<List<int>>[
+    [3],
+  ]);
+  print(result is List<int>);
+  result = genericNullableBound(genericNullableInput());
+  print(result is List<int>);
+  result = genericResultBound(genericBoundResult);
+  print(result is List<int>);
+  result = genericInputBound(genericBoundInput);
+  print(result is List<num>);
+  print(result is List<int>);
+  result = genericBoundChain(<List<int>>[
+    [4],
+  ]);
+  print(result);
+  print(result is List<int>);
+  var horizontal = genericBoundCallback(<int>[
+    5,
+  ], (values, element) => values[0] + (element ?? 2));
+  print(horizontal);
+  result = GenericCalls().elements(values: <String>['bound']);
+  print(result is List<String>);
+}
+
 T genericPattern<T>(List<T> values) {
   if (values case [T first, ...]) return first;
   return values[0];
@@ -6059,6 +6114,7 @@ class GenericCalls {
   T pick<T>(T value, {T? other}) => other ?? value;
   T call<T>(T value, {T? other}) => other ?? value;
   T apply<T>(T Function(T) callback, T value) => callback(value);
+  List<Y> elements<X extends List<Y>, Y>({required X values}) => [values[0]];
 
   T Function() keep<T>(T value) =>
       () => pick<T>(value);
@@ -6175,6 +6231,7 @@ void genericFunctions() {
   genericClosures();
   genericDynamicArguments();
   horizontalInference();
+  genericBoundInference();
   print(genericIdentity<int>(42));
   print(genericIdentity(true));
   print(genericIdentity('generic'));

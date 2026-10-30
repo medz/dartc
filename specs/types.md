@@ -34,6 +34,7 @@
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
+| [3.7 基于界限的推断][bounds-inference] | 部分实现 | 在向下、水平及最终求解阶段，由已收集的下界与声明上界继续生成约束；覆盖 List、可空类型与非泛型函数签名，函数参数保持逆变。按参数声明顺序求解，前阶段已固定的解不变；调用库版本控制普通泛型调用、泛型 const 构造及类别名。完整 F-bound、泛型父接口和其余约束算法仍缺，细则见[函数](functions.md#基于界限的推断)。 | [generics.dart](../lib/src/frontend/generics.dart)：`constrainGenericBound`、`genericConstraintSolution`；[values.dart](../test/fixtures/values.dart)：`genericBoundInference`、`metadataValues`；[behavior_test.dart](../test/behavior_test.dart)：`bounds-3.6.dart` / `bounds-3.7.dart`、泛型拒例。 |
 | 可空与非空类型 | 部分实现 | 识别 `T?`，拒绝未经提升的可空成员、索引和算术消费；`== null` 真分支不直接把类型变成 `Null`；空断言的结果去除空性，Null 结果为 Never，dynamic 保留 dynamic。空短路访问按非空接收者检查链内操作，再将结果变为可空；类型限定的静态访问不添加空性。 | [types.dart](../lib/src/types.dart)：`nullableType`、`typeCanBeNull`；[flow.dart](../lib/src/flow.dart)：`flowNull`；[values.dart](../test/fixtures/values.dart)：`flowBranches`、`nullAssertionValues`、`nullAwareValues`；[behavior_test.dart](../test/behavior_test.dart)：`rejected`。 |
 | 空安全底类型 `Never` | 部分实现 | 作为子类型与合并的底类型，`Never?` 规范化为 `Null`；空 `List<Never>` 可协变读取，写入仍按实际元素类型检查。没有 `Never` 实例；未初始化的普通及 late 局部存储不触发 Never 求值，读取仍受赋值及延迟初始化规则约束。完整类型参数及交集类型规则尚缺。 | [types.dart](../lib/src/types.dart)：`typeIsSubtype`、`joinTypes`、`nullableType`；[runtime.dart](../lib/src/runtime.dart)：`rtTypeSubtype`、`rtValueMatches`；[values.dart](../test/fixtures/values.dart)：`neverContexts`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
 | 隐式赋值兼容 | 部分实现 | `Object`、可空类型不能直接下转为具体值；`dynamic` 可以检查转换。赋值目标的转换与表达式自身结果类型分别处理；赋值边界先做[可调用对象的隐式提取](functions.md#可调用对象)，表达式结果保留所得函数类型；`??=` 再合并非空读取类型与 RHS 类型，目标存储的装箱或检查转换不改变结果类型。 | [typing.dart](../lib/src/typing.dart)：`typingAssignable`；[frontend.dart](../lib/src/frontend.dart)：`feLowerAssignment`；[values.dart](../test/fixtures/values.dart)：`assignmentValues`、`staticContexts`、`coalescingAssignmentValues`。 |
@@ -70,6 +71,7 @@ SDK 3.13.7 对跨库带前缀的泛型别名到非泛型类的 `p.A<int>()` 隐�
 [entry]: https://dart.dev/resources/language/spec
 [nnbd]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md
 [inference]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/inference.md
+[bounds-inference]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/inference-using-bounds/design-document.md
 [flow]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/flow-analysis.md
 
 [features]: https://github.com/dart-lang/sdk/blob/3.13.5/tools/experimental_features.yaml

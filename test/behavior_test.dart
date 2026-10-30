@@ -1045,6 +1045,39 @@ void main() {
 ''');
       await compare(horizontal, []);
     }
+    for (final version in ['3.6', '3.7']) {
+      final declarationVersion = version == '3.6' ? '3.7' : '3.6';
+      File('${temporary.path}/bounds-library-$version.dart')
+        ..writeAsStringSync('''
+// @dart=$declarationVersion
+List<Y> infer<X extends List<Y>, Y>(X value) => [];
+Y Function(X) contextual<X extends List<Y>, Y>() {
+  print(<Y>[] is List<int>);
+  return (value) => value[0];
+}
+class Bound<X extends List<Y>, Y> {
+  final X value;
+  const Bound(this.value);
+}
+typedef Alias<X extends List<Y>, Y> = Bound<X, Y>;
+''');
+      final bounds = File('${temporary.path}/bounds-$version.dart')
+        ..writeAsStringSync('''
+// @dart=$version
+import 'bounds-library-$version.dart';
+void main() {
+  Object result = infer(<int>[1]);
+  print(result is List<int>);
+  const direct = identical(Bound([1]), Bound<List<int>, int>([1]));
+  const alias = identical(Alias([1]), Bound<List<int>, int>([1]));
+  print(direct);
+  print(alias);
+  Object? Function(List<int>) callback = contextual();
+  print(callback([1]));
+}
+''');
+      await compare(bounds, []);
+    }
     final namedEntry = File('${temporary.path}/named-entry.dart')
       ..writeAsStringSync(
         "void main({String label = 'named', bool flag = true, List<List<int>> values = const [[]]}) { "
@@ -3061,6 +3094,12 @@ void main() {
       "// @dart=2.17\nT infer<T>(T Function(T) fn,T value)=>fn(value);void unused(){var value=infer((value)=>value+1,1);}void main(){}",
       "void infer<T>(T value,void Function(T) fn){}void unused(){infer(1,(String value){});}void main(){}",
       "T infer<T>(T value,T Function(T) fn)=>fn(value);void unused(){var result=infer(1,(value)=>1.5);}void main(){}",
+      "// @dart=3.6\nvoid consume(num value){}List<Y> infer<X extends void Function(Y),Y>(X value)=>[];void main(){var result=infer(consume);}",
+      "// @dart=3.6\nR infer<X extends List<Y>,Y,R>(X value,R Function(X,Y?) fn)=>fn(value,null);void main(){print(infer([1],(values,element)=>values[0]+(element??2)));}",
+      "R infer<X extends List<Y>,Y,R>(X value,R Function(Y) fn)=>fn(value[0]);void main(){print(infer([1],(value)=>value+1));}",
+      "List<Y> infer<X extends List<Y>,Y extends num>(X value)=>[];void main(){var result=infer(<String>['wrong']);}",
+      "List<Y> infer<X extends List<Y>,Y>(X value)=>[];void main(){List<String> result=infer(<int>[1]);}",
+      "void consume(int value){}void infer<X extends void Function(Y),Y>(X fn,Y value){}void main(){infer(consume,1.5);}",
       "void main(){switch(1){label:case int a:print(a);}}",
       "void main(){switch(1){case 0:continue label;label:case int a:print(a);}}",
       "void main(){switch(1){case int a:case final int a:print(a);}}",

@@ -177,26 +177,47 @@ void constrainGenericTypes(
   }
 }
 
+int genericConstraintSolution(int lower, int upper) {
+  if (lower < 0 ||
+      typeHasSchemaHole(lower) && upper >= 0 && !typeHasSchemaHole(upper))
+    return upper;
+  return lower;
+}
+
+// Call in declaration order before fixing each parameter's solution.
+void constrainGenericBound(
+  int index,
+  List<int> parameters,
+  List<int> lower,
+  List<int> upper,
+  bool complete,
+) {
+  final info = typeParameterInfo(parameters[index]);
+  if (info.hasBound &&
+      lower[index] >= 0 &&
+      (complete ||
+          !typeHasSchemaHole(lower[index]) ||
+          upper[index] >= 0 && !typeHasSchemaHole(upper[index])))
+    constrainGenericTypes(info.bound, lower[index], parameters, lower, upper);
+}
+
 List<int> inferGenericArguments(
   List<int> parameters,
   List<int> lower,
   List<int> upper,
-  List<int> fixed, [
+  List<int> fixed,
+  bool usingBounds, [
   bool complete = true,
 ]) {
   var inferred = <int>[];
   for (var i = 0; i < parameters.length; i++) {
     var value = fixed[i];
+    if (value < 0 && usingBounds)
+      constrainGenericBound(i, parameters, lower, upper, complete);
     var fromUpper = false;
     if (value < 0) {
-      value = lower[i];
-      if (value < 0 ||
-          typeHasSchemaHole(value) &&
-              upper[i] >= 0 &&
-              !typeHasSchemaHole(upper[i])) {
-        value = upper[i];
-        fromUpper = true;
-      }
+      value = genericConstraintSolution(lower[i], upper[i]);
+      fromUpper = value != lower[i];
     }
     if (value == tDynamic) {
       if (upper[i] >= 0 && upper[i] != tDynamic) {

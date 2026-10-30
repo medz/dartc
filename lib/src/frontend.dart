@@ -2479,6 +2479,12 @@ int fePrepareInferredArguments(
 ) {
   var info = functions[function];
   var parameters = info.typeParameters;
+  final usingBounds = sourceVersionAtLeast(
+    feSources,
+    feTokens[call.token].source,
+    3,
+    7,
+  );
   var lower = List<int>.filled(parameters.length, -1);
   var upper = List<int>.filled(parameters.length, -1);
   if (context >= 0 && context != tDynamic && context != tVoid)
@@ -2493,7 +2499,12 @@ int fePrepareInferredArguments(
   var fixed = <int>[];
   var schemaArguments = <int>[];
   for (var i = 0; i < parameters.length; i++) {
-    var type = upper[i] >= 0 ? upper[i] : lower[i];
+    if (usingBounds) constrainGenericBound(i, parameters, lower, upper, false);
+    var type = usingBounds
+        ? genericConstraintSolution(lower[i], upper[i])
+        : upper[i] >= 0
+        ? upper[i]
+        : lower[i];
     var bound = typeParameterInfo(parameters[i]).bound;
     if (type >= 0 && !typeContainsParameters(bound))
       type = meetTypes(type, bound);
@@ -2539,6 +2550,7 @@ int fePrepareInferredArguments(
         lower,
         upper,
         fixed,
+        usingBounds,
         false,
       );
       for (var i = 0; i < parameters.length; i++) {
@@ -2547,7 +2559,13 @@ int fePrepareInferredArguments(
       }
     }
   }
-  var arguments = inferGenericArguments(parameters, lower, upper, fixed);
+  var arguments = inferGenericArguments(
+    parameters,
+    lower,
+    upper,
+    fixed,
+    usingBounds,
+  );
   for (var i = 0; i < arguments.length; i++) {
     var bound = substituteType(
       typeParameterInfo(parameters[i]).bound,

@@ -50,9 +50,9 @@ const 工厂只能重定向到 const 构造器，允许声明在抽象类以及�
 
 依据 [§15 类型参数和作用域][type-parameters]、[常量身份][canonical-objects]和 [Dart 2.14 泛型 metadata][generic-metadata]，泛型类具有独立参数身份与上界，const 实例保留实际类型实参。同一类、同一实参和相同字段值才共享常量身份；同类参数协变参与编译期 `is`/`as` 和共同类型计算。支持字段类型中的类参数、普通及生成式重定向 const 构造、显式实参、已实现类型模型下从参数及上下文推断、类别名和库前缀。静态成员不能使用类参数；无效上界、实参、初始化器及 metadata 在未使用声明中也检查。
 
-这些对象目前用于编译期常量计算和普通 metadata；语言层没有按 `Export` 名字放行构造、类型参数或 const 资格。运行时泛型实例分配与重化、实例方法、late 字段、隐式/非 const/工厂构造、泛型父接口和原始递归上界仍是实现缺口，相关入口明确拒绝。完整泛型类目标不因注解可用而完成。泛型常量推断复用现有约束算法，完整 Dart 约束求解仍缺。
+这些对象目前用于编译期常量计算和普通 metadata；语言层没有按 `Export` 名字放行构造、类型参数或 const 资格。运行时泛型实例分配与重化、实例方法、late 字段、隐式/非 const/工厂构造、泛型父接口和原始递归上界仍是实现缺口，相关入口明确拒绝。完整泛型类目标不因注解可用而完成。泛型常量推断复用现有约束算法，调用库从 3.7 起使用[基于界限的推断](functions.md#基于界限的推断)，包括经类别名及跨库调用的构造；完整 Dart 约束求解仍缺。
 
-拥有行为测试为 [values.dart](../test/fixtures/values.dart) 的 `metadataValues()`，以及 [behavior_test.dart](../test/behavior_test.dart) 的 `generic-metadata-imports.dart`、`rejectedGenericMetadata`；覆盖常量身份、字段实参、推断、别名/前缀/跨库私有性、版本边界与未使用声明。
+拥有行为测试为 [values.dart](../test/fixtures/values.dart) 的 `metadataValues()`，以及 [behavior_test.dart](../test/behavior_test.dart) 的 `generic-metadata-imports.dart`、`bounds-3.6.dart` / `bounds-3.7.dart`、`rejectedGenericMetadata`；覆盖常量身份、字段实参、推断、别名/前缀/跨库私有性、版本边界与未使用声明。
 
 ## 构造器函数值
 

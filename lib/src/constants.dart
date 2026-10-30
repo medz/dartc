@@ -1516,6 +1516,12 @@ ConstantValue _constantConstructor(
   if (arguments.isEmpty &&
       classExpression.typeArguments.isEmpty &&
       typeParameters.isNotEmpty) {
+    final usingBounds = sourceVersionAtLeast(
+      context.symbols.program,
+      context.symbols.program.tokens[expression.token].source,
+      3,
+      7,
+    );
     final template = declarationTypeTemplate(context.symbols, symbol);
     final lower = List<int>.filled(typeParameters.length, -1);
     final upper = List<int>.filled(typeParameters.length, -1);
@@ -1531,7 +1537,11 @@ ConstantValue _constantConstructor(
     final fixed = <int>[];
     final schemas = <int>[];
     for (var i = 0; i < typeParameters.length; i++) {
-      var type = upper[i];
+      if (usingBounds)
+        constrainGenericBound(i, typeParameters, lower, upper, false);
+      var type = usingBounds
+          ? genericConstraintSolution(lower[i], upper[i])
+          : upper[i];
       final bound = typeParameterInfo(typeParameters[i]).bound;
       if (type >= 0 && !typeContainsParameters(bound))
         type = meetTypes(type, bound);
@@ -1568,7 +1578,13 @@ ConstantValue _constantConstructor(
         upper,
       );
     }
-    final inferred = inferGenericArguments(typeParameters, lower, upper, fixed);
+    final inferred = inferGenericArguments(
+      typeParameters,
+      lower,
+      upper,
+      fixed,
+      usingBounds,
+    );
     classType = instantiateDeclarationType(
       context.symbols,
       symbol,
