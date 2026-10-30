@@ -14,6 +14,8 @@ class StringBuffer {
   }
 
   void writeCharCode(int charCode) {
+    if (charCode < 0 || charCode > 0x10ffff)
+      throw RangeError.range(charCode, 0, 0x10ffff);
     this.write(String.fromCharCodes(<int>[charCode]));
   }
 

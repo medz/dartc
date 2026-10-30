@@ -829,14 +829,11 @@ int rtStringFromCodes(int codes) {
   while (i < length) {
     var code = rtListRawGet(codes, i);
     if (code < 0 || code > 1114111) {
-      var message = rtCStringAcquire(
-        0x69203a6374726164,
-        0x632064696c61766e,
-        0x7265746361726168,
-        0xa65646f6320,
+      throw ArgumentError.value(
+        nativeValueFromBits(codes),
+        'charCodes',
+        'Contains invalid character code, not 0 <= code <= 0x10FFFF',
       );
-      rtWriteAll(2, message, 30);
-      rtHostExit(70);
     }
     if (code > 65535) units = units + 1;
     i = i + 1;

@@ -2214,6 +2214,33 @@ void bufferValues() {
   print(<Object>[codes.length, codes.isEmpty, codes.isNotEmpty]);
   codes.clear();
   print(<Object>[codes.length, codes.isEmpty, codes.isNotEmpty]);
+  for (final code in [
+    -9223372036854775808,
+    -1,
+    0x110000,
+    0xffffffff,
+    4611686018427387904,
+    9223372036854775807,
+  ]) {
+    final kept = StringBuffer('kept');
+    try {
+      kept.writeCharCode(code);
+      print('missed code point error');
+    } on RangeError catch (error, trace) {
+      print(error.invalidValue);
+      print(error.start);
+      print(error.end);
+      print(error.name);
+      print(error.message);
+      print(error.stackTrace.toString() == trace.toString());
+    } finally {
+      print('code point finally');
+      print(kept.length);
+      print(kept.toString());
+    }
+    kept.writeCharCode(0x1f642);
+    print(kept.toString());
+  }
 }
 
 StackTrace stackTraceRead() => StackTrace.current;

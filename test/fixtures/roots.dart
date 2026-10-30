@@ -1249,6 +1249,52 @@ void exceptionRoots(int queue) {
       check(fixed.length == 1 && identical(fixed[0], original));
     }
   }
+  for (final code in [-1, 0x110000, 9223372036854775807]) {
+    for (final bufferFailure in [false, true]) {
+      final input = <int>[65, code, 66];
+      final buffer = StringBuffer('kept');
+      try {
+        if (bufferFailure) {
+          buffer.writeCharCode(code);
+        } else {
+          String.fromCharCodes(input);
+        }
+        check(false);
+      } on ArgumentError catch (error, trace) {
+        check(roots.rtRootMark() == mark);
+        heap.rtCollect();
+        final count = snapshot(queue);
+        check(contains(queue, count, rt.nativeValueBits(error)));
+        check(contains(queue, count, rt.nativeValueBits(trace)));
+        check(error.stackTrace.toString() == trace.toString());
+        final fields = traceObject(rt.nativeValueBits(error), queue);
+        if (bufferFailure) {
+          final range = error as RangeError;
+          check(range.invalidValue == code);
+          check(range.start == 0 && range.end == 0x10ffff);
+          if (code == 9223372036854775807)
+            check(
+              contains(queue, fields, rt.nativeValueBits(error.invalidValue)),
+            );
+        } else {
+          check(error is! RangeError);
+          check(identical(error.invalidValue, input));
+          check(error.name == 'charCodes');
+          check(contains(queue, fields, rt.nativeValueBits(input)));
+          check(
+            error.message ==
+                'Contains invalid character code, not 0 <= code <= 0x10FFFF',
+          );
+        }
+      } finally {
+        check(roots.rtRootMark() == mark);
+      }
+      check(input.length == 3 && input[1] == code);
+      check(buffer.toString() == 'kept' && buffer.length == 4);
+      buffer.writeCharCode(65);
+      check(buffer.toString() == 'keptA');
+    }
+  }
   for (final floating in [false, true]) {
     try {
       final source = 'xinvalid number'.substring(1);

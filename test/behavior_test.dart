@@ -1356,10 +1356,6 @@ void main() {
       "void main() { print('before'); print('abc'.indexOf('', 4)); }",
       "void main() { print('before'); print('abc'.lastIndexOf('', -1)); }",
       "void main() { print('before'); print('abc'.startsWith('', 4)); }",
-      "void main() { print('before'); print(String.fromCharCodes(<int>[-1])); }",
-      "void main() { print('before'); print(String.fromCharCodes(<int>[1114112])); }",
-      "void main() { var buffer = StringBuffer('kept'); print('before'); buffer.writeCharCode(-1); print('after'); }",
-      "void main() { var buffer = StringBuffer('kept'); print('before'); buffer.writeCharCode(1114112); print('after'); }",
       "bool side() { print('rhs'); return true; } void main() { dynamic value = 1; print('before'); if (value && side()) print('after'); }",
       "void main() { dynamic value = 'wrong'; print('before'); value as int; print('after'); }",
       "void main() { dynamic value = null; print('before'); value as int; print('after'); }",
@@ -1463,6 +1459,86 @@ void main() {
         );
       }
     });
+    // SDK List diagnostics depend on its integer representation. Keep those
+    // observations separate from the general Iterable payload used by dartc.
+    const badCodes = [
+      -9223372036854775808,
+      -1,
+      0x110000,
+      0xffffffff,
+      4611686018427387904,
+      9223372036854775807,
+    ];
+    final codeErrorBody =
+        '''
+void main() {
+  for (final code in <int>$badCodes) {
+    final input = codeValues(code);
+    print(code);
+    try {
+      String.fromCharCodes(input);
+      print('missed');
+    } on ArgumentError catch (error, trace) {
+      print(error is RangeError);
+      print(error.name);
+      print(error.invalidValue == null);
+      print(identical(error.invalidValue, input));
+      print(identical(error.message, input) ? 'input' : error.message);
+      print(error.stackTrace.toString() == trace.toString());
+    } finally { print('codes finally'); }
+    print(input.length);
+    print(input.first);
+    print(input.last);
+    print('codes after');
+  }
+}
+''';
+    final codeErrors = File('${temporary.path}/character-code-errors.dart')
+      ..writeAsStringSync(
+        'List<int> codeValues(int code) => <int>[65, code, 66];\n'
+        '$codeErrorBody',
+      );
+    final iterableCodeErrors =
+        File('${temporary.path}/iterable-code-errors.dart')..writeAsStringSync(
+          'Iterable<int> codeValues(int code) sync* { yield 65; yield code; yield 66; }\n'
+          '$codeErrorBody',
+        );
+    final codeErrorsExecutable = '${codeErrors.path}.out';
+    await run(
+      driver,
+      compileArguments(codeErrors, codeErrorsExecutable),
+      native: compiler != null,
+    );
+    final codeErrorsActual = await run(codeErrorsExecutable, [], native: true);
+    final codeErrorsSdkList = await run(sdk, [codeErrors.path]);
+    final codeErrorsSdkIterable = await run(sdk, [iterableCodeErrors.path]);
+    const codeErrorTail = 'true\ncodes finally\n3\n65\n66\ncodes after\n';
+    final codeErrorsExpected = [
+      for (final code in badCodes)
+        '$code\nfalse\ncharCodes\nfalse\ntrue\n'
+            'Contains invalid character code, not 0 <= code <= 0x10FFFF\n'
+            '$codeErrorTail',
+    ].join();
+    const sdkCodeMessages = [
+      'input',
+      'input',
+      'null',
+      'null',
+      'input',
+      'input',
+    ];
+    final codeErrorsSdkExpected = [
+      for (var i = 0; i < badCodes.length; i++)
+        '${badCodes[i]}\nfalse\nnull\ntrue\nfalse\n'
+            '${sdkCodeMessages[i]}\n$codeErrorTail',
+    ].join();
+    if (codeErrorsActual.stdout != codeErrorsExpected ||
+        codeErrorsSdkIterable.stdout != codeErrorsExpected ||
+        codeErrorsSdkList.stdout != codeErrorsSdkExpected) {
+      throw StateError(
+        'Character-code error fields, unwinding or SDK List/Iterable diagnostics changed.',
+      );
+    }
     // SDK 3.13.7 omits inferred compound-argument casts in these calls.
     // Explicit instantiation gives the same types and checks the required cast.
     final genericChecks = File('${temporary.path}/generic-dynamic-checks.dart')
@@ -1548,6 +1624,8 @@ Never failure(String mode) {
       owner.add(Mutator(owner));
       owner.toString();
     }
+    if (mode == 'codes') String.fromCharCodes(<int>[65, -1, 66]);
+    if (mode == 'charcode') StringBuffer('kept').writeCharCode(0x110000);
     if (mode == 'type') { dynamic value = 'invalid'; value as int; }
     throw 'uncaught🙂';
   } finally { print('cleanup'); }
@@ -1568,6 +1646,8 @@ void main(List<String> args) { print('before'); failure(args.isEmpty ? '' : args
       ['fixed'],
       ['readonly'],
       ['format'],
+      ['codes'],
+      ['charcode'],
       ['type'],
     ]) {
       final uncaughtExpected = await capture(sdk, [
@@ -1592,6 +1672,10 @@ void main(List<String> args) { print('before'); failure(args.isEmpty ? '' : args
           ? 'Unsupported operation: Cannot clear an unmodifiable list\n'
           : arguments.first == 'format'
           ? 'Concurrent modification during iteration:'
+          : arguments.first == 'codes'
+          ? 'Invalid argument (charCodes): Contains invalid character code'
+          : arguments.first == 'charcode'
+          ? 'RangeError: Invalid value: Not in inclusive range 0..1114111: 1114112\n'
           : 'FormatException:';
       if (uncaughtExpected.exitCode != 255 ||
           uncaughtActual.exitCode != 255 ||

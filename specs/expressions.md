@@ -98,13 +98,19 @@
 | [`insert`](https://api.dart.dev/dart-core/List/insert.html) | 部分实现 | 在 `0..length` 插入并保持后续元素顺序，返回 void；接收者、索引、元素按序求值。元素按实际类型检查，再拒绝固定/只读列表及非法范围；类型检查失败抛出可捕获 TypeError，固定/只读变更抛出 UnsupportedError，范围失败仍终止进程。 | [runtime.dart](../lib/src/runtime.dart)：`rtListInsert`、`rtListGrow`；[values.dart](../test/fixtures/values.dart)：`listGrowth`、`filledLists`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`、NoGC 拒例。 |
 | [`toString`](https://api.dart.dev/stable/3.13.7/dart-core/List/toString.html) | 部分实现 | 按序格式化元素，保留嵌套列表并处理循环引用。元素回调改变当前列表长度时抛出 ConcurrentModificationError，modifiedObject 保留实际被修改的列表；支持首次轨迹、finally、GC 保活及异常后再次格式化。替换元素和回调返回前恢复原长度可继续。当前边界与 SDK 3.13.7 的 List 格式化行为对照；for-in 的可捕获并发修改错误和一般 Iterable/Iterator 仍缺。 | [runtime.dart](../lib/src/runtime.dart)：`rtValueFormat`、`rtValueFormatCore`；[values.dart](../test/fixtures/values.dart)：`listGrowth`；[roots.dart](../test/fixtures/roots.dart)：`collectionRoots`；[behavior_test.dart](../test/behavior_test.dart)：`uncaught`；[ConcurrentModificationError.modifiedObject](https://api.dart.dev/stable/3.13.7/dart-core/ConcurrentModificationError/modifiedObject.html)。 |
 
+## String API 边界
+
+[`String.fromCharCodes`](https://api.dart.dev/dart-core/String/String.fromCharCodes.html) 当前接受 List<int>，按 UTF-16 保留 16 位码元并将补充码点拆为代理对。小于 0 或大于 0x10FFFF 的元素抛出 ArgumentError.value：invalidValue 为原列表，name 为 `charCodes`，message 为 `Contains invalid character code, not 0 <= code <= 0x10FFFF`。支持首次轨迹、finally、继续执行和异常载荷 GC 保活，失败不改变输入列表；一般 Iterable、可选 start/end 及 fromCharCode 尚缺。
+
+错误类型和展开行为与 SDK 3.13.7 对照，载荷采用其[一般 Iterable 路径](https://github.com/dart-lang/sdk/blob/3.13.7/sdk/lib/_internal/vm/lib/string_patch.dart)的合同。SDK VM 的 List 路径存在可观察差异：负值或非 Smi 整数使 message 指向原列表；正的超 Unicode Smi 值使 message 为 null；两者 name 和 invalidValue 都为 null。dartc 对上述输入统一保留原列表于 invalidValue 并提供参数名及说明，不复刻 VM 整数表示造成的字段差异。实现入口为 [runtime.dart](../lib/src/runtime.dart) `rtStringFromCodes`；[behavior_test.dart](../test/behavior_test.dart) `codeErrors`、`iterableCodeErrors` 分别固定 native、SDK List 与 SDK 一般 Iterable 的字段结果并验证展开，`uncaught` 验证退出255与清理；[roots.dart](../test/fixtures/roots.dart) `exceptionRoots` 验证载荷及轨迹保活。成功边界仍由 [values.dart](../test/fixtures/values.dart) `stringBoundaries` 拥有。
+
 ## StringBuffer API 边界
 
 这些条目属于标准库 API，不代表完整标准库已实现。
 
 | 规范条目 | 状态 | 实现与缺口 | 实现与验证入口 |
 | --- | --- | --- | --- |
-| [`writeCharCode`](https://api.dart.dev/stable/3.13.5/dart-core/StringBuffer/writeCharCode.html)、[`isNotEmpty`](https://api.dart.dev/stable/3.13.5/dart-core/StringBuffer/isNotEmpty.html) | 部分实现 | 支持 0..0x10FFFF，补充字符拆为 UTF-16 代理对，保留孤代理项；长度按 UTF-16 单元计算，clear 后查询为空。非法码点沿用运行时终止边界，尚无可捕获的 RangeError 对象；writeAll 等 API 尚未实现。 | [string_buffer.dart](../lib/src/std/core/string_buffer.dart)：`writeCharCode`、`isNotEmpty`；[values.dart](../test/fixtures/values.dart)：`bufferValues`；[behavior_test.dart](../test/behavior_test.dart)：`failingValues`。 |
+| [`writeCharCode`](https://api.dart.dev/dart-core/StringBuffer/writeCharCode.html)、[`isNotEmpty`](https://api.dart.dev/dart-core/StringBuffer/isNotEmpty.html) | 部分实现 | 支持 0..0x10FFFF，补充字符拆为 UTF-16 代理对，保留孤代理项；长度按 UTF-16 单元计算，clear 后查询为空。非法码点在 API 入口抛出 RangeError.range，保留非法值和 0..0x10FFFF 边界，失败不改变内容或长度；支持首次轨迹、finally、GC 保活及继续写入。writeAll 等 API 尚未实现。 | [string_buffer.dart](../lib/src/std/core/string_buffer.dart)：`writeCharCode`、`isNotEmpty`；[values.dart](../test/fixtures/values.dart)：`bufferValues`；[roots.dart](../test/fixtures/roots.dart)：`exceptionRoots`；[behavior_test.dart](../test/behavior_test.dart)：`uncaught`。 |
 
 ## 尚缺与待核验
 
