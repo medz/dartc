@@ -36,9 +36,7 @@ This release adds generic classes, automatic memory reclamation, native-library 
 
 ## [0.4.0](https://github.com/medz/dartc/compare/v0.3.0...v0.4.0) — 2026-10-29
 
-This release adds Linux x86-64 binaries and expands native Dart programs with
-class hierarchies, enums, custom operators, doubles and synchronous exceptions.
-It remains an early preview, with Dart SDK 3.13.7 as the behavior reference.
+This release adds Linux x86-64 binaries and expands native Dart programs with class hierarchies, enums, custom operators, doubles and synchronous exceptions. It remains an early preview, with Dart SDK 3.13.7 as the behavior reference.
 
 ### Features
 
@@ -61,20 +59,15 @@ It remains an early preview, with Dart SDK 3.13.7 as the behavior reference.
 
 ### Upgrading from 0.3
 
-Replace the complete native archive, keeping its `bin/` and `lib/` directories
-together. The runtime ABI changes from 14 to 17; compiler, runtime, layout and
-standard-library files must come from the same release.
+Replace the complete native archive, keeping its `bin/` and `lib/` directories together. The runtime ABI changes from 14 to 17; compiler, runtime, layout and standard-library files must come from the same release.
 
-For a source build, use the 0.4.0 native compiler for your host as the bootstrap
-seed. A 0.3 compiler does not understand all the syntax now used by dartc itself:
+For a source build, use the 0.4.0 native compiler for your host as the bootstrap seed. A 0.3 compiler does not understand all the syntax now used by dartc itself:
 
 ```sh
 dart tool/bootstrap.dart --seed /path/to/dartc-0.4.0-macos-arm64/bin/dartc
 ```
 
-The SDK-hosted package can be updated with `dart pub global activate dartc 0.4.0`.
-Language implementation remains incomplete; detailed behavior and gaps are in
-[specs](https://github.com/medz/dartc/tree/v0.4.0/specs).
+The SDK-hosted package can be updated with `dart pub global activate dartc 0.4.0`. Language implementation remains incomplete; detailed behavior and gaps are in [specs](https://github.com/medz/dartc/tree/v0.4.0/specs).
 
 ## 0.3.0
 
@@ -86,10 +79,8 @@ Early preview release for macOS and Linux ARM64, with Dart SDK 3.13.7 as the beh
 - Support switch expressions, if-case, object/List patterns, destructuring declarations and assignments, pattern loops and pattern switch statements with guards and shared case bodies.
 - Support cascades, null-aware member/index chains and List conditional, loop, spread and null-aware elements.
 - Add static members, named and const constructors, field initializer lists, generative redirection, explicit `new` and constructor aliases.
-- Implement `List.insert`, `List.removeAt`, `List.sublist`, `StringBuffer.writeCharCode` and `StringBuffer.isNotEmpty` in Dart.
+- Implement `List.insert`, `List.removeAt`, `List.sublist`, `StringBuffer.writeCharCode` and `StringBuffer.isNotEmpty`.
 - Update the native runtime ABI from 11 to 14 for captured values, bound methods and heap type metadata. Use the compiler and runtime sources from the same release.
-- Verify SSA types, definitions, control flow and dominance before machine lowering; extend root enumeration to captured values and runtime type graphs.
-- Add SDK/hosted/native differential generation with saved-case replay and reduction, compiler CPU/RSS sampling and program compilation/execution benchmarks that check behavior and output files.
 - Reject stale artifacts and incomplete validation evidence; bootstrap keeps the existing verified seed when rebuilding or validation fails.
 
 Language implementation remains incomplete. Current behavior and remaining gaps are tracked in [specs/](specs/README.md).
@@ -102,7 +93,7 @@ Early preview release for macOS and Linux ARM64.
 - Support simple classes, accessors, nullable/reified value checks, canonical const instances and lazy top-level initialization.
 - Add noncapturing local and anonymous functions, structural function types and nongeneric type aliases.
 - Resolve package configuration v2, language versions, file/package URIs, conditional imports and library parts.
-- Check runtime NoGC contracts and retain runtime components according to actual dependencies.
+- Include only the runtime components required by the program.
 
 Captures, inheritance, general generics, exceptions, async code and most SDK libraries remain unsupported. Runtime sources and native compiler binaries from older releases must not be mixed with this version.
 

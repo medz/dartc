@@ -1,10 +1,23 @@
 # Dart 语言兼容性
 
-本目录按 Dart Language Specification 跟踪 dartc 的语言实现。兼容目标为 Dart 原生语言语义，官方 SDK 对照随开发机安装版本升级，当前为 **Dart SDK 3.13.7**。这里只记录条款引用、当前实现、缺口和验证入口，不保存或改写官方规范副本。
+本目录跟踪 Dart 语言条款、dartc 的支持范围、缺口和行为验证。当前兼容基线为 **Dart SDK 3.13.7**；完整语言及所需标准库尚未实现。
 
-本目录当前支持事实描述冻结的 `lib/src/legacy/` 实现。测试链接固定到冻结提交，仅作为既有行为证据；工作区不再保留或运行这套测试。
+编译与执行支持对应 dartc 0.5 的编译器，测试链接固定到相关源码版本。
 
-编译器结构、IR、ABI、运行时和自举设计见 [architecture.md](../.agents/docs/legacy/architecture.md)，安装与使用见 [README](../README.md)。
+安装与使用见 [README](../README.md)。
+
+## 目标范围
+
+以本目录的语言条款和目标标准库为实现范围，以下两类能力明确排除：
+
+- **全部 JavaScript 互操作**：包括 `dart:js`、`dart:js_util`、`package:js`、`dart:js_interop`、`dart:js_interop_unsafe`，以及这些 API 的兼容实现。此范围也适用于后续 Wasm 目标。
+- **动态反射**：不实现 `dart:mirrors` 及其运行时枚举声明、按反射对象访问和调用成员的能力。
+
+这两项是项目明确的范围选择，不作为待补齐的实现缺口。其他尚缺的语言或目标标准库能力仍按实现缺口跟踪。`Type`、`runtimeType`、`is`/`as`、泛型类型信息、`dynamic` 调用、`noSuchMethod` 和元数据注解继续按 Dart 语义实现；排除 `dart:mirrors` 不删除这些要求。原生 `dart:ffi` 与库导出仍在目标范围内。
+
+Wasm 是后续输出目标，尚不代表已经实现或验证。其模块导入/导出和宿主 ABI 按目标设计；提供 Wasm 输出不自动恢复上述 JS 互操作库支持。
+
+上游与本项目的范围应区分：官方已弃用[旧 JS 互操作机制](https://dart.dev/interop/js-interop/past-js-interop)，现代 `dart:js_interop` 仍由[官方 Wasm 工具链](https://dart.dev/web/wasm)支持；全部排除 JS 互操作是 dartc 的项目选择。[Dart 官方公告](https://groups.google.com/a/dartlang.org/g/announce)列出的 `dart:mirrors` 计划为 Dart 3.14 弃用、Dart 4.0 移除，不表示当前 3.13.7 基线已经删除该库。
 
 ## 规范来源
 
@@ -44,7 +57,7 @@
 | [通配变量](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/wildcard-variables/feature-specification.md) | [变量](variables.md) | 已有局部绑定行为，完整声明位置规则待核对 |
 | [基于界限的推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/inference-using-bounds/design-document.md) | [类型](types.md)、[函数](functions.md#基于界限的推断) | 3.7 起在普通泛型调用和普通及 const 泛型构造推断中组合下界与声明上界，支持 List、可空及函数签名；完整 F-bound 与泛型父接口仍缺 |
 | [Null-aware elements](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.8/null-aware-elements/feature-specification.md) | [表达式](expressions.md) | List 的运行时及常量元素已支持；Set/Map 未实现 |
-| [Constructor tear-offs](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.15/constructor-tearoffs/feature-specification.md) | [类](classes.md#构造器函数值)、[函数](functions.md#函数值) | 非泛型用户类构造器、工厂、重定向及普通类别名提取已支持；泛型类/别名及 builtin 标准库构造器提取仍缺 |
+| [Constructor tear-offs](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.15/constructor-tearoffs/feature-specification.md) | [类](classes.md#构造器函数值)、[函数](functions.md#函数值) | 非泛型用户类构造器、工厂、重定向及普通类别名提取已支持；泛型类/别名及标准库构造器提取仍缺 |
 | [Dot shorthands](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.10/dot-shorthands/feature-specification.md) | [表达式](expressions.md#点简写)、[模式](patterns.md) | 已有构造器与静态成员的上下文简写、选择器链、常量、相等操作数和模式已支持；非泛型用户类构造器函数值可用于常量模式；泛型类及未实现声明类别仍缺 |
 | [私有命名形参](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.12/private-named-parameters/feature-specification.md) | [函数](functions.md) | 字段形参和主构造器声明参数的公共名映射、冲突校验及 super 形参公共名称关联 |
 | [Primary constructors](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.13/primary-constructors/feature-specification.md) | [类](classes.md#主构造器) | 普通及泛型类的主构造器、字段声明参数与推断、初始化作用域、常量求值及生成式/工厂构造简写已支持；泛型父类及其余声明类别仍缺 |
@@ -53,11 +66,8 @@
 
 - **部分实现**：已列出的行为有实现或行为测试，后面明确保留缺口；不表示整条规范符合。
 - **未实现**：尚无相应语言实现。解析失败或主动拒绝不等于已正确实现其静态错误规则。
+- **明确排除**：仅指[目标范围](#目标范围)中明确列出的能力，不代表已实现或已验证其拒绝行为。
 - **待核对**：当前证据不足，先核对规范、源码和实际运行，再确定状态。
 - **已实现**：所引用的明确条款范围、必要行为及错误规则均已核对，并附验证证据；不将此状态扩展到整章或整个语言。当前各章仍有缺口，尚无整章符合性结论。
 
-代码链接定位实现，测试链接定位行为证据；有限测试或自编译成功均不代表整章兼容。平台能力以对应目标程序的实际执行为依据，仿真执行与原生硬件测量分别标明。macOS 与 Linux 的 ARM64/x86-64 目标共用本目录的语言条款和行为测试，不设按架构缩减的语法目标。历史行为证据见冻结提交中的 [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)、[ssa_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/ssa_test.dart) 和 [differential_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/differential_test.dart)；目标及 ABI 由[架构与运行时文档](../.agents/docs/legacy/architecture.md#目标与发码边界)定义。
-
-## 维护要求
-
-语言变更应同步更新所属条目的支持范围、缺口、上游引用和行为测试入口。绑定、类型检查、流分析与运行时约束必须随语法一起落实；冻结实现的历史证据不自动证明后续实现的行为。
+测试链接定位各条目的行为证据，不代表整章兼容。macOS 与 Linux 的 ARM64/x86-64 目标采用相同的语言兼容目标。

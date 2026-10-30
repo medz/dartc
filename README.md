@@ -50,7 +50,7 @@ Use `dartc --help` for command options. More examples are in [example/](example/
 
 ## Native libraries
 
-dartc can also produce object files, static libraries and shared libraries with C/C++ headers. See the [library example](example/math.dart) and [export support](specs/types.md#ffi-类型与原生导出声明) for supported declarations and types.
+dartc can also produce object files, static libraries and shared libraries with C/C++ headers. See [export support](specs/types.md#ffi-类型与原生导出声明) for supported declarations and types.
 
 ## Development
 
