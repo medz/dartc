@@ -2241,7 +2241,7 @@ int rtValueFormatCore(int value, int handleType, int kind) {
       var rendered = rtValueFormat(element, handleType);
       rtRootPush(rendered, storageRef);
       if (nativeLoad64(value + listLengthOffset) != length) {
-        return rtListModificationError();
+        throw ConcurrentModificationError(nativeValueFromBits(value));
       }
       rtListAdd(parts, rendered, wordType);
       rtRootRestore(mark);

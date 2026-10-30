@@ -1359,6 +1359,22 @@ class CollectionThrow {
   String toString() => throw Leaf(1600);
 }
 
+class CollectionMutator {
+  List<Object> owner;
+  bool grow;
+  CollectionMutator(this.owner, this.grow);
+
+  String toString() {
+    if (grow) {
+      owner.add(Leaf(1603));
+    } else {
+      owner.clear();
+    }
+    heap.rtCollect();
+    return 'changed';
+  }
+}
+
 Leaf? collectedGlobal;
 Object? collectedTagged;
 
@@ -1408,6 +1424,31 @@ void collectionRoots(int queue) {
   throwing.clear();
   throwing.add('recovered');
   check(throwing.toString() == '[recovered]');
+  for (final grow in [false, true]) {
+    final owner = <Object>[];
+    owner.add(CollectionMutator(owner, grow));
+    final rendering = <Object>[owner];
+    try {
+      rendering.toString();
+      check(false);
+    } on ConcurrentModificationError catch (error, trace) {
+      check(roots.rtRootMark() == mark);
+      heap.rtCollect();
+      check(identical(error.modifiedObject, owner));
+      final count = snapshot(queue);
+      check(contains(queue, count, rt.nativeValueBits(error)));
+      check(contains(queue, count, rt.nativeValueBits(trace)));
+      check(error.stackTrace.toString() == trace.toString());
+      final fields = traceObject(rt.nativeValueBits(error), queue);
+      check(contains(queue, fields, rt.nativeValueBits(owner)));
+      if (grow) check((owner[1] as Leaf).marker == 1603);
+    } finally {
+      check(roots.rtRootMark() == mark);
+    }
+    owner.clear();
+    owner.add('recovered');
+    check(rendering.toString() == '[[recovered]]');
+  }
   collectedGlobal = null;
   collectedTagged = null;
 }

@@ -1382,21 +1382,6 @@ void main() {
       "void main() { var values = <int>[1]; print('before'); for (final value in values) { if (value == 1) values.add(2); print(value); } print('after'); }",
       "void main() { var values = <int>[1]; print('before'); for (final value in values) { values.clear(); print(value); continue; } print('after'); }",
       "void main() { print('before'); var values = List<int>.filled(-1, 0); print(values); }",
-      for (final change in ['owner.clear();', 'owner.add(2);'])
-        '''
-class Mutator {
-  List<dynamic> owner;
-  Mutator(this.owner);
-  String toString() { $change return 'changed'; }
-}
-void main() {
-  var values = <dynamic>[];
-  values.add(Mutator(values));
-  print('before');
-  print(values);
-  print('after');
-}
-''',
     ];
     await parallel(failingValues.asMap().entries, (entry) async {
       final source = File('${temporary.path}/value-error-${entry.key}.dart')
@@ -1513,6 +1498,11 @@ void main(List<String> args) {
       );
     final uncaught = File('${temporary.path}/uncaught-exception.dart')
       ..writeAsStringSync('''
+class Mutator {
+  List<Object> owner;
+  Mutator(this.owner);
+  String toString() { owner.clear(); return 'changed'; }
+}
 Never failure(String mode) {
   try {
     if (mode == 'int') int.parse('invalid');
@@ -1520,6 +1510,11 @@ Never failure(String mode) {
     if (mode == 'nonfinite') double.nan.toInt();
     if (mode == 'fixed') List<int>.filled(0, 0).add(1);
     if (mode == 'readonly') const <int>[].clear();
+    if (mode == 'format') {
+      final owner = <Object>[];
+      owner.add(Mutator(owner));
+      owner.toString();
+    }
     if (mode == 'type') { dynamic value = 'invalid'; value as int; }
     throw 'uncaught🙂';
   } finally { print('cleanup'); }
@@ -1539,6 +1534,7 @@ void main(List<String> args) { print('before'); failure(args.isEmpty ? '' : args
       ['nonfinite'],
       ['fixed'],
       ['readonly'],
+      ['format'],
       ['type'],
     ]) {
       final uncaughtExpected = await capture(sdk, [
@@ -1561,6 +1557,8 @@ void main(List<String> args) { print('before'); failure(args.isEmpty ? '' : args
           ? 'Unsupported operation: Cannot add to a fixed-length list\n'
           : arguments.first == 'readonly'
           ? 'Unsupported operation: Cannot clear an unmodifiable list\n'
+          : arguments.first == 'format'
+          ? 'Concurrent modification during iteration:'
           : 'FormatException:';
       if (uncaughtExpected.exitCode != 255 ||
           uncaughtActual.exitCode != 255 ||

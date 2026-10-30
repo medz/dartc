@@ -3243,6 +3243,29 @@ void operatorVectors() {
   print('${opA + opB} ${opA[1]}');
 }
 
+class ListFormatMutator {
+  List<Object> owner;
+  int operation;
+  bool changed = false;
+  int calls = 0;
+  ListFormatMutator(this.owner, this.operation);
+
+  String toString() {
+    calls++;
+    if (!changed) {
+      changed = true;
+      if (operation == 0) owner.clear();
+      if (operation == 1) owner.add(2);
+      if (operation == 2) owner[0] = 42;
+      if (operation == 3) {
+        owner.add(2);
+        owner.removeLast();
+      }
+    }
+    return 'changed';
+  }
+}
+
 void listGrowth(List<String> args) {
   var values = <int>[];
   values.clear();
@@ -3363,6 +3386,26 @@ void listGrowth(List<String> args) {
   print(assignmentStorage);
   print(<void>[inserted.insert(0, 9)]);
   print(inserted[0]);
+  for (var operation = 0; operation < 4; operation++) {
+    for (var nesting = 0; nesting < 3; nesting++) {
+      final owner = <Object>[];
+      final mutator = ListFormatMutator(owner, operation);
+      owner.add(nesting == 2 ? <Object>[mutator] : mutator);
+      final rendering = nesting == 1 ? <Object>[owner] : owner;
+      try {
+        print(rendering.toString());
+      } on ConcurrentModificationError catch (error, trace) {
+        print(identical(error.modifiedObject, owner));
+        print(error.stackTrace.toString() == trace.toString());
+      } finally {
+        print('format finally');
+        print(owner.length);
+      }
+      print(owner.toString());
+      print(mutator.calls);
+      print('format after');
+    }
+  }
   print(args.length);
   print(args[0]);
 }
