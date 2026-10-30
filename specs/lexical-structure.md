@@ -5,6 +5,20 @@
 
 状态含义见[总览](README.md#状态与证据)。
 
+## 扫描 API
+
+以下为 `package:dartc/scanner.dart` 的词法支持范围。编译与执行支持见下一节。
+
+| 规范条目 | 状态 | 支持范围与缺口 | 验证 |
+| --- | --- | --- | --- |
+| [§21.1 Lexical Rules][lexical]：字符与 token | 部分实现 | ASCII 标识符、当前稳定关键词、标点及运算符按最长匹配扫描，包括 `[]`、`[]=` 和 `>>>`。保留原始文本与 UTF-16 范围；非法字符产生诊断并保留 invalid token，扫描继续到 EOF。UTF-8 解码由源码提供方负责。 | [scanner_test.dart](../test/scanner/scanner_test.dart)；[token_test.dart](../test/scanner/token_test.dart) |
+| [§21.1][lexical]、[数字分隔符][separators]：数字 | 部分实现 | 十进制和十六进制整数、小数、指数、数字间连续下划线；小数点与成员访问、级联分开。缺失数字和非法分隔符有独立错误代码。扫描不转换数值、不判断数值范围。 | [numbers_test.dart](../test/scanner/numbers_test.dart) |
+| [字符串与插值][strings] | 部分实现 | 单双引号、raw、三引号、转义形状与 Unicode 范围检查；简单插值与表达式插值有明确边界，支持嵌套插值。相邻字符串分别保留，字符串值解码、拼接和插值求值尚未接入。 | [strings_test.dart](../test/scanner/strings_test.dart) |
+| [§21.1.2 Comments][comments]、文件头 | 部分实现 | 支持单行、文档与嵌套块注释。仅跳过偏移 0 的 BOM，仅在偏移 0 识别 script tag。版本标记保留为注释，尚未选择或限制文件语言版本。 | [scanner_test.dart](../test/scanner/scanner_test.dart) |
+| [§7 Errors and Warnings][errors]：词法诊断 | 部分实现 | 错误带稳定代码和源码区间；未闭合注释、字符串、插值及非法转义分别报告。未闭合字符串只返回实际存在的文本，不补造引号或花括号。括号配对、关键字位置限制和语法恢复尚未实现。 | [scanner_test.dart](../test/scanner/scanner_test.dart)；[strings_test.dart](../test/scanner/strings_test.dart) |
+
+旧语言版本的特性限制、语法解析及字面量求值尚未接入此 API。
+
 ## 编译与执行
 
 | 规范条目 | 状态 | 支持范围与缺口 | 验证 |
