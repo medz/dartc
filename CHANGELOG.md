@@ -1,3 +1,9 @@
+## Unreleased
+
+### Features
+
+- Add `package:dartc/source.dart` for source snapshots, UTF-16 ranges, line and column lookup, and custom source providers.
+
 ## [0.5.0](https://github.com/medz/dartc/compare/v0.4.0...v0.5.0) — 2026-10-31
 
 This release adds generic classes, automatic memory reclamation, native-library export declarations and Intel Mac support. Native compiler downloads now work as a single executable. Dart language and standard-library support remains incomplete; see the [versioned specification tracker](https://github.com/medz/dartc/tree/v0.5.0/specs) for supported behavior and gaps.

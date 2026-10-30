@@ -52,6 +52,16 @@ Use `dartc --help` for command options. More examples are in [example/](example/
 
 dartc can also produce object files, static libraries and shared libraries with C/C++ headers. See [export support](specs/types.md#ffi-类型与原生导出声明) for supported declarations and types.
 
+## Package APIs
+
+Use these libraries independently in a Dart application:
+
+| Library | Purpose | Example |
+| --- | --- | --- |
+| `package:dartc/source.dart` | Source text, UTF-16 ranges, and line and column lookup | [Source locations](example/source.dart) |
+
+These APIs are available from the source repository and have not been released yet.
+
 ## Development
 
 Development requires Dart SDK `^3.13.7`.
