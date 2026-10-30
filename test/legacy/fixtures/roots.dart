@@ -1,8 +1,8 @@
-import '../../lib/src/runtime.dart' as rt;
-import '../../lib/src/layout.dart' as abi;
-import '../../lib/src/runtime/frames.dart';
-import '../../lib/src/runtime/roots.dart' as roots;
-import '../../lib/src/runtime/heap.dart' as heap;
+import '../../../lib/src/legacy/runtime.dart' as rt;
+import '../../../lib/src/legacy/layout.dart' as abi;
+import '../../../lib/src/legacy/runtime/frames.dart';
+import '../../../lib/src/legacy/runtime/roots.dart' as roots;
+import '../../../lib/src/legacy/runtime/heap.dart' as heap;
 
 const capacity = 2048;
 

@@ -16,12 +16,12 @@ bool equalBytes(List<int> left, List<int> right) {
 Future<void> main(List<String> args) async {
   if (args.length != 2 || args[0] != '--compiler') {
     stderr.writeln(
-      'Usage: dart test/bootstrap_test.dart --compiler <native compiler>',
+      'Usage: dart test/legacy/bootstrap_test.dart --compiler <native compiler>',
     );
     exitCode = 64;
     return;
   }
-  final root = File.fromUri(Platform.script).parent.parent.path;
+  final root = File.fromUri(Platform.script).parent.parent.parent.path;
   final seed = File(args[1]).absolute;
   final work = Directory.systemTemp.createTempSync('dartc-bootstrap-test-');
   var passed = false;
@@ -48,8 +48,8 @@ Future<void> main(List<String> args) async {
     ];
     final before = seed.readAsBytesSync();
     for (final item in {
-      'lib/src/runtime.dart': 'Building stage 1 with the seed copy.',
-      'test/fixtures/values.dart': 'Stage 2 and stage 3 are identical (',
+      'lib/src/legacy/runtime.dart': 'Building stage 1 with the seed copy.',
+      'test/legacy/fixtures/values.dart': 'Stage 2 and stage 3 are identical (',
       'bin/.dart_tool/package_config.json':
           'Building stage 1 with the seed copy.',
     }.entries) {
@@ -110,7 +110,7 @@ Future<void> main(List<String> args) async {
         status == 1 && stderrText.contains('Bootstrap input changed:'),
         'Bootstrap accepted an edited input ($relative):\n$stdoutText\n$stderrText',
       );
-      if (relative == 'test/fixtures/values.dart') {
+      if (relative == 'test/legacy/fixtures/values.dart') {
         check(
           stdoutText.contains('Behavior checks passed'),
           'Did not exercise rejection after successful behavior validation.',

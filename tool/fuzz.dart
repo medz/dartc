@@ -231,7 +231,7 @@ Future<void> main(List<String> arguments) async {
     final session = await DifferentialSession.create(
       root,
       File(options['--compiler'] ?? '$root/build/dartc-seed').absolute.path,
-      File(options['--std'] ?? '$root/lib/src/runtime.dart').absolute.path,
+      File(options['--std'] ?? '$root/lib/src/legacy/runtime.dart').absolute.path,
       timeout: Duration(seconds: number('--timeout', 30)),
     );
     var passed = 0;

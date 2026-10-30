@@ -62,16 +62,16 @@ jobs:
       - name: Cold bootstrap without an existing seed
         if: inputs.cross_ref == ''
         run: dart tool/bootstrap.dart
-      - run: dart test/bootstrap_test.dart --compiler build/dartc-stage2
-      - run: dart test/library_test.dart build/dartc-stage2
-      - run: dart test/differential_test.dart --compiler build/dartc-stage2
-      - run: dart test/measure_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
-      - run: dart test/ssa_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
-      - run: dart test/program_benchmark_test.dart --compiler build/dartc-stage2
+      - run: dart test/legacy/bootstrap_test.dart --compiler build/dartc-stage2
+      - run: dart test/legacy/library_test.dart build/dartc-stage2
+      - run: dart test/legacy/differential_test.dart --compiler build/dartc-stage2
+      - run: dart test/legacy/measure_test.dart --compiler build/dartc-stage2 --std lib/src/legacy/runtime.dart
+      - run: dart test/legacy/ssa_test.dart --compiler build/dartc-stage2 --std lib/src/legacy/runtime.dart
+      - run: dart test/legacy/program_benchmark_test.dart --compiler build/dartc-stage2
       - run: dart tool/fuzz.dart --compiler build/dartc-stage2 --count 12
       - name: Verify native archive dependencies
         if: inputs.package_release
-        run: dart test/package_release_test.dart --compiler build/dartc-stage2
+        run: dart test/legacy/package_release_test.dart --compiler build/dartc-stage2
       - name: Package and test the native release
         if: inputs.package_release && matrix.architecture == 'arm64'
         run: dart tool/package_release.dart --compiler build/dartc-stage2
@@ -87,12 +87,12 @@ jobs:
         env:
           PATH: /usr/bin:/bin
         run: |
-          ".cross/$DARTC_CROSS_SEED" "$PWD/build/compiler.dart" --std "$PWD/lib/src/runtime.dart" -o "$PWD/build/cross-stage1"
+          ".cross/$DARTC_CROSS_SEED" "$PWD/build/compiler.dart" --std "$PWD/lib/src/legacy/runtime.dart" -o "$PWD/build/cross-stage1"
           cmp build/cross-stage1 build/dartc-stage2
       - name: Cross-compile back to macOS
         env:
           PATH: /usr/bin:/bin
-        run: build/dartc-stage2 "$PWD/build/compiler.dart" --std "$PWD/lib/src/runtime.dart" --target macos-arm64 -o "$PWD/build/$DARTC_MACOS_OUTPUT"
+        run: build/dartc-stage2 "$PWD/build/compiler.dart" --std "$PWD/lib/src/legacy/runtime.dart" --target macos-arm64 -o "$PWD/build/$DARTC_MACOS_OUTPUT"
       - name: Package and test the native release
         if: inputs.package_release && matrix.architecture == 'x64'
         run: dart tool/package_release.dart --compiler build/dartc-stage2
@@ -155,26 +155,26 @@ jobs:
       - name: Cold bootstrap without an existing seed
         if: inputs.cross_ref == ''
         run: dart tool/bootstrap.dart
-      - run: dart test/bootstrap_test.dart --compiler build/dartc-stage2
-      - run: dart test/library_test.dart build/dartc-stage2
-      - run: dart test/differential_test.dart --compiler build/dartc-stage2
-      - run: dart test/ssa_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
-      - run: dart test/measure_test.dart --compiler build/dartc-stage2 --std lib/src/runtime.dart
-      - run: dart test/program_benchmark_test.dart --compiler build/dartc-stage2
+      - run: dart test/legacy/bootstrap_test.dart --compiler build/dartc-stage2
+      - run: dart test/legacy/library_test.dart build/dartc-stage2
+      - run: dart test/legacy/differential_test.dart --compiler build/dartc-stage2
+      - run: dart test/legacy/ssa_test.dart --compiler build/dartc-stage2 --std lib/src/legacy/runtime.dart
+      - run: dart test/legacy/measure_test.dart --compiler build/dartc-stage2 --std lib/src/legacy/runtime.dart
+      - run: dart test/legacy/program_benchmark_test.dart --compiler build/dartc-stage2
       - run: dart tool/fuzz.dart --compiler build/dartc-stage2 --count 12
       - name: Cross-compile the compiler for Apple Silicon and Linux
         env:
           PATH: /usr/bin:/bin
         run: |
-          build/dartc-stage2 build/compiler.dart --std lib/src/runtime.dart --target macos-arm64 -o build/dartc-cross-macos-arm64
-          build/dartc-stage2 build/compiler.dart --std lib/src/runtime.dart --target linux-x64 -o build/dartc-cross-linux-x64
-          build/dartc-stage2 build/compiler.dart --std lib/src/runtime.dart --target linux-arm64 -o build/dartc-cross-linux-arm64
-          build/dartc-stage2 test/fixtures/values.dart --std lib/src/runtime.dart --target macos-arm64 -o build/values-cross-macos-arm64
-          build/dartc-stage2 test/fixtures/values.dart --std lib/src/runtime.dart --target macos-x64 -o build/values-macos-x64
+          build/dartc-stage2 build/compiler.dart --std lib/src/legacy/runtime.dart --target macos-arm64 -o build/dartc-cross-macos-arm64
+          build/dartc-stage2 build/compiler.dart --std lib/src/legacy/runtime.dart --target linux-x64 -o build/dartc-cross-linux-x64
+          build/dartc-stage2 build/compiler.dart --std lib/src/legacy/runtime.dart --target linux-arm64 -o build/dartc-cross-linux-arm64
+          build/dartc-stage2 test/legacy/fixtures/values.dart --std lib/src/legacy/runtime.dart --target macos-arm64 -o build/values-cross-macos-arm64
+          build/dartc-stage2 test/legacy/fixtures/values.dart --std lib/src/legacy/runtime.dart --target macos-x64 -o build/values-macos-x64
       - name: Package and test the native release
         if: inputs.package_release
         run: |
-          dart test/package_release_test.dart --compiler build/dartc-stage2
+          dart test/legacy/package_release_test.dart --compiler build/dartc-stage2
           dart tool/package_release.dart --compiler build/dartc-stage2
       - name: Archive validation evidence
         if: always()

@@ -1,10 +1,10 @@
-import '../lib/src/diagnostic.dart';
-import '../lib/src/driver/packages.dart';
-import '../lib/src/driver/diagnostics.dart';
-import '../lib/src/host.dart';
-import '../lib/src/source.dart';
-import '../lib/src/source_uri.dart';
-import '../lib/src/utf8.dart';
+import '../lib/src/legacy/diagnostic.dart';
+import '../lib/src/legacy/driver/packages.dart';
+import '../lib/src/legacy/driver/diagnostics.dart';
+import '../lib/src/legacy/host.dart';
+import '../lib/src/legacy/source.dart';
+import '../lib/src/legacy/source_uri.dart';
+import '../lib/src/legacy/utf8.dart';
 
 void _literal(StringBuffer output, String value) {
   const digits = '0123456789abcdef';
@@ -46,7 +46,7 @@ void _bundle(List<String> args) {
   final cwd = hostCurrentDirectory();
   var root = sourceInputUri(cwd, args[0]);
   if (!root.endsWith('/')) root += '/';
-  final runtime = sourceResolveFileUri(root, 'lib/src/runtime.dart');
+  final runtime = sourceResolveFileUri(root, 'lib/src/legacy/runtime.dart');
   final config = compilerPackages(runtime, cwd, null);
   final files = <SourceFile>[];
   // Include the dependency closure for each supported source platform.
@@ -64,8 +64,8 @@ void _bundle(List<String> args) {
     '// Generated from the compiler source closure.\n',
   );
   for (final relative in const <String>[
-    'lib/src/driver/command.dart',
-    'lib/src/source_bundle.dart',
+    'lib/src/legacy/driver/command.dart',
+    'lib/src/legacy/source_bundle.dart',
   ]) {
     output.write('import ');
     _literal(output, sourceResolveFileUri(root, relative));

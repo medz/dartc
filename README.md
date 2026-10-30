@@ -85,7 +85,7 @@ The native compiler includes `package:dartc/export.dart` for standalone native-l
 For compiler and runtime development, select external runtime sources explicitly:
 
 ```sh
-dartc main.dart --std /path/to/dartc/lib/src/runtime.dart -o app
+dartc main.dart --std /path/to/dartc/lib/src/legacy/runtime.dart -o app
 ```
 
 `--std` selects the external runtime and standard-library dependency graph for this compilation. Compiler and runtime sources must have matching ABIs; this option is a development interface, not a stable runtime plugin API. See the [bootstrap design](doc/architecture.md).

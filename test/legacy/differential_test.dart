@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
-import '../tool/src/differential.dart';
-import '../tool/src/process.dart';
+import '../../tool/src/differential.dart';
+import '../../tool/src/process.dart';
 
 void check(bool condition, String message) {
   if (!condition) throw StateError(message);
@@ -26,9 +26,9 @@ void checkStages(DifferentialResult result, Map<String, int?> codes) {
 }
 
 Future<void> main(List<String> args) async {
-  final root = File.fromUri(Platform.script).parent.parent.absolute.path;
+  final root = File.fromUri(Platform.script).parent.parent.parent.absolute.path;
   var compiler = '$root/build/dartc-seed';
-  var standard = '$root/lib/src/runtime.dart';
+  var standard = '$root/lib/src/legacy/runtime.dart';
   final options = <String>{};
   for (var i = 0; i < args.length; i++) {
     final option = args[i];
@@ -36,7 +36,7 @@ Future<void> main(List<String> args) async {
         !options.add(option) ||
         i + 1 == args.length) {
       stderr.writeln(
-        'Usage: dart test/differential_test.dart '
+        'Usage: dart test/legacy/differential_test.dart '
         '[--compiler <native dartc>] [--std <runtime.dart>]',
       );
       exitCode = 64;

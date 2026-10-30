@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import '../tool/src/process.dart';
+import '../../tool/src/process.dart';
 
 void check(bool condition, String message) {
   if (!condition) throw StateError(message);
@@ -29,12 +29,12 @@ void completed(ProcessOutcome outcome, int expected) {
 Future<void> main(List<String> args) async {
   if (args.length != 2 || args[0] != '--compiler') {
     stderr.writeln(
-      'Usage: dart test/program_benchmark_test.dart --compiler <native compiler>',
+      'Usage: dart test/legacy/program_benchmark_test.dart --compiler <native compiler>',
     );
     exitCode = 64;
     return;
   }
-  final root = File.fromUri(Platform.script).parent.parent.path;
+  final root = File.fromUri(Platform.script).parent.parent.parent.path;
   final compilerInput = File(args[1]).absolute.resolveSymbolicLinksSync();
   final work = Directory(
     Directory.systemTemp
@@ -72,7 +72,7 @@ Future<void> main(List<String> args) async {
 import 'package:task/value.dart';
 import 'dependency.dart';
 import 'present.dart' if (dart.library.html) 'absent.dart';
-import '../source/lib/src/host.dart' as host;
+import '../source/lib/src/legacy/host.dart' as host;
 void main(List<String> args) {
   final text = host.hostRead(args[0]);
   host.hostWrite(args[1], <int>[text.length, marker(), 255, 0]);
@@ -101,7 +101,7 @@ void main(List<String> args) {
       'pkg/lib/shared.dart': "const String shared = 'choice';\n",
       'data/input.txt': '你好🙂\n',
       'exit17.dart': '''
-import '../source/lib/src/host.dart' as host;
+import '../source/lib/src/legacy/host.dart' as host;
 void main() { print('before'); host.hostExit(17); }
 ''',
     };
@@ -218,7 +218,7 @@ void main() { print('before'); host.hostExit(17); }
         [
           '${app.path}/exit17.dart',
           '--std',
-          '${source.path}/lib/src/runtime.dart',
+          '${source.path}/lib/src/legacy/runtime.dart',
           '-o',
           failingNative,
         ],
@@ -265,7 +265,7 @@ void main() { print(label() + ':' + marker().toString()); }
     File('${app.path}/pkg/lib/fallback.dart').writeAsStringSync(
       "import 'sub/middle.dart';\nString label() => shared;\nint marker() => benchmarkMarker();\n",
     );
-    final core = File('${source.path}/lib/src/std/core.dart');
+    final core = File('${source.path}/lib/src/legacy/std/core.dart');
     final originalCore = core.readAsStringSync();
     core.writeAsStringSync('$originalCore\nint benchmarkMarker() => 65;\n');
     final baseline = Directory('${work.path}/baseline lib');
@@ -286,9 +286,9 @@ void main() { print(label() + ':' + marker().toString()); }
       compiler,
       compiler,
       '--baseline-std',
-      '${baseline.path}/src/runtime.dart',
+      '${baseline.path}/src/legacy/runtime.dart',
       '--std',
-      '${source.path}/lib/src/runtime.dart',
+      '${source.path}/lib/src/legacy/runtime.dart',
     ];
     completed(await run(comparisonArguments), 0);
     final comparisonAccepted = report.readAsBytesSync();
@@ -309,8 +309,8 @@ void main() { print(label() + ':' + marker().toString()); }
       }
     }
     for (final item in {
-      'baseline': '${baseline.path}/src/runtime.dart',
-      'candidate': '${source.path}/lib/src/runtime.dart',
+      'baseline': '${baseline.path}/src/legacy/runtime.dart',
+      'candidate': '${source.path}/lib/src/legacy/runtime.dart',
     }.entries) {
       check(
         comparison['native_compilers'][item.key]['runtime'] == item.value,
@@ -337,7 +337,7 @@ void main() { print(label() + ':' + marker().toString()); }
     for (final invalidOptions in [
       ['--compare', compiler],
       ['--compare', compiler, compiler, '--seed', compiler],
-      ['--baseline-std', '${baseline.path}/src/runtime.dart'],
+      ['--baseline-std', '${baseline.path}/src/legacy/runtime.dart'],
     ]) {
       completed(
         await run(['--program', 'compare.dart', ...invalidOptions]),

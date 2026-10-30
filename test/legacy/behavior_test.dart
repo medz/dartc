@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
-import '../lib/src/layout.dart';
-import '../tool/src/process.dart';
+import '../../lib/src/legacy/layout.dart';
+import '../../tool/src/process.dart';
 
 const program = r'''
 Never neverStops() { while (true) {} }
@@ -664,14 +664,14 @@ Future<void> parallel<T>(
 }
 
 Future<void> main(List<String> args) async {
-  final root = File.fromUri(Platform.script).parent.parent.absolute.path;
+  final root = File.fromUri(Platform.script).parent.parent.parent.absolute.path;
   String? compiler;
-  var standard = '$root/lib/src/runtime.dart';
+  var standard = '$root/lib/src/legacy/runtime.dart';
   for (var i = 0; i < args.length; i++) {
     if ((args[i] != '--compiler' && args[i] != '--std') ||
         i + 1 == args.length) {
       stderr.writeln(
-        'Usage: dart test/behavior_test.dart [--compiler <path>] [--std <runtime.dart>]',
+        'Usage: dart test/legacy/behavior_test.dart [--compiler <path>] [--std <runtime.dart>]',
       );
       exit(64);
     }
@@ -946,7 +946,7 @@ void main() {
     }
     final values = File('${temporary.path}/values.dart')
       ..writeAsStringSync(
-        File('$root/test/fixtures/values.dart').readAsStringSync(),
+        File('$root/test/legacy/fixtures/values.dart').readAsStringSync(),
       );
     await compare(values, [for (var i = 0; i < 20; i++) '参数$i🙂']);
     // Keep many double arguments live across loop and exception edges, as well
@@ -973,15 +973,15 @@ void main(List<String> args) {
     await compare(floatingPressure, ['0.25']);
     final roots = File('${temporary.path}/roots.dart')
       ..writeAsStringSync(
-        File('$root/test/fixtures/roots.dart')
+        File('$root/test/legacy/fixtures/roots.dart')
             .readAsStringSync()
-            .replaceAll("'../../lib/src/runtime.dart'", "'$standard'")
+            .replaceAll("'../../../lib/src/legacy/runtime.dart'", "'$standard'")
             .replaceAll(
-              "'../../lib/src/layout.dart'",
+              "'../../../lib/src/legacy/layout.dart'",
               "'${File(standard).parent.path}/layout.dart'",
             )
             .replaceAll(
-              "'../../lib/src/runtime/",
+              "'../../../lib/src/legacy/runtime/",
               "'${File(standard).parent.path}/runtime/",
             ),
       );
@@ -1754,14 +1754,14 @@ void main(){
     }
     final diagnostics = File('${temporary.path}/diagnostics.dart')
       ..writeAsStringSync('''
-import '$root/lib/src/diagnostic.dart';
-import '$root/lib/src/frontend.dart';
-import '$root/lib/src/host.dart';
-import '$root/lib/src/ir.dart';
-import '$root/lib/src/target.dart';
-import '$root/lib/src/source.dart';
-import '$root/lib/src/build_ssa.dart';
-import '$root/lib/src/verify_ssa.dart';
+import '$root/lib/src/legacy/diagnostic.dart';
+import '$root/lib/src/legacy/frontend.dart';
+import '$root/lib/src/legacy/host.dart';
+import '$root/lib/src/legacy/ir.dart';
+import '$root/lib/src/legacy/target.dart';
+import '$root/lib/src/legacy/source.dart';
+import '$root/lib/src/legacy/build_ssa.dart';
+import '$root/lib/src/legacy/verify_ssa.dart';
 void main(List<String> args) {
   compilationTarget = Target.values[hostTarget()];
   for (var i = 0; i < args.length - 2; i++) {

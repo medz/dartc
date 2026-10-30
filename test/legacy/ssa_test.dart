@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import '../tool/src/process.dart';
+import '../../tool/src/process.dart';
 
 void check(bool condition, String message) {
   if (!condition) throw StateError(message);
@@ -482,19 +482,19 @@ void main() {
 Future<void> main(List<String> args) async {
   if (args.length != 4 || args[0] != '--compiler' || args[2] != '--std') {
     stderr.writeln(
-      'Usage: dart test/ssa_test.dart --compiler <native compiler> --std <runtime.dart>',
+      'Usage: dart test/legacy/ssa_test.dart --compiler <native compiler> --std <runtime.dart>',
     );
     exitCode = 64;
     return;
   }
-  final root = File.fromUri(Platform.script).parent.parent;
+  final root = File.fromUri(Platform.script).parent.parent.parent;
   final compiler = File(args[1]).absolute.path;
   final standard = File(args[3]).absolute.path;
   final work = Directory.systemTemp.createTempSync('dartc-ssa-test-');
   var passed = false;
   try {
     final driver = File('${work.path}/driver.dart');
-    driver.writeAsStringSync(driverSource(root.uri.resolve('lib/src/')));
+    driver.writeAsStringSync(driverSource(root.uri.resolve('lib/src/legacy/')));
     final source = File('${work.path}/task.dart');
     source.writeAsStringSync(taskSource);
     final executable = '${work.path}/driver';

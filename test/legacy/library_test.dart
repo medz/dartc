@@ -26,7 +26,7 @@ ProcessResult run(
 }
 
 void main(List<String> args) {
-  final root = File.fromUri(Platform.script).parent.parent.absolute.path;
+  final root = File.fromUri(Platform.script).parent.parent.parent.absolute.path;
   final sharedSuffix = Platform.isMacOS ? 'dylib' : 'so';
   String cCompiler(String language) => Platform.isMacOS
       ? '/usr/bin/clang'
@@ -62,7 +62,7 @@ void main(List<String> args) {
         '--packages',
         packages.path,
         '--std',
-        '$root/lib/src/runtime.dart',
+        '$root/lib/src/legacy/runtime.dart',
         ...options,
       ];
       if (args.isEmpty) {
@@ -217,7 +217,7 @@ int main(int argc, char** argv) {
 
     {
       final directory = Directory('${temporary.path}/abi')..createSync();
-      final host = File('$root/test/fixtures/native_library.c')
+      final host = File('$root/test/legacy/fixtures/native_library.c')
           .copySync('${directory.path}/host.c');
       for (final kind in ['object', 'static', 'dylib']) {
         final suffix = switch (kind) {
@@ -226,7 +226,7 @@ int main(int argc, char** argv) {
           _ => sharedSuffix,
         };
         final library = '${directory.path}/native_library.$suffix';
-        compile('$root/test/fixtures/native_library.dart', [
+        compile('$root/test/legacy/fixtures/native_library.dart', [
           '--emit',
           kind,
           '-o',

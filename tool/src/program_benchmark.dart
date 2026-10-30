@@ -2,14 +2,14 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 
-import '../../lib/src/ast.dart';
-import '../../lib/src/driver/packages.dart';
-import '../../lib/src/package_config.dart';
-import '../../lib/src/parser.dart';
-import '../../lib/src/scanner.dart';
-import '../../lib/src/source.dart';
-import '../../lib/src/source_text.dart';
-import '../../lib/src/source_uri.dart';
+import '../../lib/src/legacy/ast.dart';
+import '../../lib/src/legacy/driver/packages.dart';
+import '../../lib/src/legacy/package_config.dart';
+import '../../lib/src/legacy/parser.dart';
+import '../../lib/src/legacy/scanner.dart';
+import '../../lib/src/legacy/source.dart';
+import '../../lib/src/legacy/source_text.dart';
+import '../../lib/src/legacy/source_uri.dart';
 import 'process.dart';
 
 String _file(String path, [Map<String, String>? aliases]) {
@@ -253,11 +253,11 @@ Future<void> programBenchmark(List<String> args, String root) async {
     };
     final sdk = _file(Platform.resolvedExecutable);
     final sdkRoot = File(sdk).parent.parent.resolveSymbolicLinksSync();
-    final standard = _file(runtime ?? '$root/lib/src/runtime.dart', aliases);
+    final standard = _file(runtime ?? '$root/lib/src/legacy/runtime.dart', aliases);
     final runtimes = {
       if (comparing) ...{
         'baseline': _file(
-          baselineRuntime ?? '$root/lib/src/runtime.dart',
+          baselineRuntime ?? '$root/lib/src/legacy/runtime.dart',
           aliases,
         ),
         'candidate': standard,

@@ -66,11 +66,11 @@ dartc 是用 Dart 实现的独立原生 Dart 编译器，目标是完整实现�
 
 ### 当前源码组织
 
-编译器主要文件仍平铺在 `lib/src`，构建协调与包配置发现位于 `driver`，参数声明与实参绑定位于 `frontend`，标准库源码位于独立的 `std` 目录；目标运行时主要集中在 `runtime.dart`。以下按实际职责归组：
+现有编译器实现集中在 `lib/src/legacy`，CLI 与构建工具使用此目录，构建协调与包配置发现位于 `driver`，参数声明与实参绑定位于 `frontend`，标准库源码位于独立的 `std` 目录；目标运行时主要集中在 `runtime.dart`。以下按实际职责归组：
 
 ```text
 bin/dartc.dart
-lib/src/
+lib/src/legacy/
   host.dart                                      宿主服务
   host/files.dart, host/files_native.dart         SDK 与原生输出目录及文件身份检查
   driver/
@@ -118,9 +118,10 @@ lib/src/
   runtime/frames.dart                            帧查找与同步栈轨迹
   runtime/exceptions.dart                        待处理异常、处理表查找与栈展开
   std/core.dart, std/core/                        目标标准库源码
-test/
+test/legacy/
   behavior_test.dart, differential_test.dart, library_test.dart
   measure_test.dart, program_benchmark_test.dart, ssa_test.dart
+  bootstrap_test.dart, package_release_test.dart
   fixtures/
 tool/
   bootstrap.dart, benchmark.dart, package_release.dart, fuzz.dart
@@ -223,7 +224,7 @@ test/
 
 写入前先创建输出父目录，再检查输出与已加载源码、包配置及伴生文件的实际身份。输出路径保留操作系统对目录链接及 `..` 的解析，不先做词法折叠。库写入后再次检查头文件，因为创建库可能使悬空链接成为同一文件；此时失败会保留已生成的库，不写入头文件。这不是多文件原子提交，也不防护其他进程同时改写路径。
 
-宿主服务绑定生成编译器二进制时的 ABI；`--target` 不能改变正在运行的宿主系统调用。std 与 `--std` 指定的目标运行时是编译输入，不在宿主进程中装入执行。库映射将 dart:core 等名字定位到 lib/src/std 下的源码，目录位于 lib 中不会自动赋予宿主或原语权限。
+宿主服务绑定生成编译器二进制时的 ABI；`--target` 不能改变正在运行的宿主系统调用。std 与 `--std` 指定的目标运行时是编译输入，不在宿主进程中装入执行。库映射将 dart:core 等名字定位到 lib/src/legacy/std 下的源码，目录位于 lib 中不会自动赋予宿主或原语权限。
 
 `SourceText` 保存一次解码得到的文本与路径，扫描、解析和语义诊断引用同一输入。`Diagnostic` 携带消息、UTF-16 范围与退出码，CLI 在错误路径计算行列并写入 stderr；正常编译不建立行号表，诊断不重读可能已变化的文件。资源生成复用已装载的源码文本。
 
@@ -558,7 +559,7 @@ GC 根位置在表示选择、活跃性分析、溢出和栈布局确定后生�
 
 ### 唯一定义来源
 
-ABI 使用普通 Dart 常量与数据定义描述以下内容；实际布局定义的拥有者是 [layout.dart](../lib/src/layout.dart)：
+ABI 使用普通 Dart 常量与数据定义描述以下内容；实际布局定义的拥有者是 [layout.dart](../lib/src/legacy/layout.dart)：
 
 ```text
 AbiVersion

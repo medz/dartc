@@ -143,7 +143,7 @@ Future<void> main(List<String> args) async {
     };
     final sdk = Platform.resolvedExecutable;
     final source = '$root/bin/dartc.dart';
-    final standard = '$root/lib/src/runtime.dart';
+    final standard = '$root/lib/src/legacy/runtime.dart';
     final sourceBefore = await sourceHash(root);
     final sampler = '$root/tool/src/measure.dart';
     final processHelper = '$root/tool/src/process.dart';

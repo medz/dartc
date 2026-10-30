@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import '../tool/src/process.dart';
+import '../../tool/src/process.dart';
 
 void check(bool condition, String message) {
   if (!condition) throw StateError(message);
@@ -21,12 +21,12 @@ void completed(ProcessOutcome result) {
 Future<void> main(List<String> args) async {
   if (args.length != 4 || args[0] != '--compiler' || args[2] != '--std') {
     stderr.writeln(
-      'Usage: dart test/measure_test.dart --compiler <native compiler> --std <runtime.dart>',
+      'Usage: dart test/legacy/measure_test.dart --compiler <native compiler> --std <runtime.dart>',
     );
     exitCode = 64;
     return;
   }
-  final root = File.fromUri(Platform.script).parent.parent.path;
+  final root = File.fromUri(Platform.script).parent.parent.parent.path;
   final compiler = File(args[1]).absolute.path;
   final standard = File(args[3]).absolute;
   final work = Directory.systemTemp.createTempSync('dartc-measure-test-');

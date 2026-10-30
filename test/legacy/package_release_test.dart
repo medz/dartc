@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import '../tool/src/process.dart';
+import '../../tool/src/process.dart';
 
 Future<ProcessOutcome> run(
   String executable,
@@ -28,13 +28,13 @@ Future<ProcessOutcome> run(
 Future<void> main(List<String> args) async {
   if (args.length != 2 || args[0] != '--compiler') {
     stderr.writeln(
-      'Usage: dart test/package_release_test.dart --compiler <native dartc>',
+      'Usage: dart test/legacy/package_release_test.dart --compiler <native dartc>',
     );
     exitCode = 64;
     return;
   }
   final compiler = File(args[1]).absolute.path;
-  final root = File.fromUri(Platform.script).parent.parent.path;
+  final root = File.fromUri(Platform.script).parent.parent.parent.path;
   final work = Directory.systemTemp.createTempSync('dartc-package-test-');
   var passed = false;
   try {
@@ -52,20 +52,20 @@ Future<void> main(List<String> args) async {
       destination.parent.createSync(recursive: true);
       File('$root/$relative').copySync(destination.path);
     }
-    final runtime = File('${source.path}/lib/src/runtime.dart');
+    final runtime = File('${source.path}/lib/src/legacy/runtime.dart');
     runtime.writeAsStringSync(
       "import 'runtime/release_dependency.dart';\n${runtime.readAsStringSync()}",
     );
-    File('${source.path}/lib/src/std/core.dart').writeAsStringSync(
+    File('${source.path}/lib/src/legacy/std/core.dart').writeAsStringSync(
       "\nexport 'core/release_dependency.dart';\n",
       mode: FileMode.append,
     );
     final dependencies = {
-      'lib/src/runtime/release_dependency.dart':
-          "import '../../../support/release%20value.dart';\n"
-          'int rtReleaseDependency() => releaseValue();\n',
-      'lib/src/std/core/release_dependency.dart':
+      'lib/src/legacy/runtime/release_dependency.dart':
           "import '../../../../support/release%20value.dart';\n"
+          'int rtReleaseDependency() => releaseValue();\n',
+      'lib/src/legacy/std/core/release_dependency.dart':
+          "import '../../../../../support/release%20value.dart';\n"
           'int releaseDependency() => releaseValue();\n',
       'support/release value.dart':
           "part 'release_value_part.dart';\n"
@@ -154,7 +154,7 @@ void main() { print(identity(releaseDependency())); }
         );
     }
     source.deleteSync(recursive: true);
-    final values = File('$root/test/fixtures/values.dart')
+    final values = File('$root/test/legacy/fixtures/values.dart')
         .copySync('${work.path}/values.dart');
     final expected = await run(Platform.resolvedExecutable, [
       values.path,

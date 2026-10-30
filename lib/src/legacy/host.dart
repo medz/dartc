@@ -80,12 +80,12 @@ int hostTarget() => switch (Abi.current()) {
 
 String hostStdPath() {
   final asset = Isolate.resolvePackageUriSync(
-    Uri.parse('package:dartc/src/runtime.dart'),
+    Uri.parse('package:dartc/src/legacy/runtime.dart'),
   );
   if (asset != null) return asset.toFilePath();
   var folder = File.fromUri(Platform.script).absolute.parent.path;
   while (folder != '/') {
-    final candidate = folder + '/lib/src/runtime.dart';
+    final candidate = folder + '/lib/src/legacy/runtime.dart';
     if (File(candidate).existsSync()) return candidate;
     folder = Directory(folder).parent.path;
   }

@@ -1,13 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
 
-import '../lib/src/driver/packages.dart';
-import '../lib/src/source.dart';
+import '../lib/src/legacy/driver/packages.dart';
+import '../lib/src/legacy/source.dart';
 import 'src/process.dart';
 
 Map<String, List<int>?> _bootstrapInputs(String root) {
   final entry = File('$root/bin/dartc.dart');
-  final runtime = File('$root/lib/src/runtime.dart');
+  final runtime = File('$root/lib/src/legacy/runtime.dart');
   final packages = compilerPackages(entry.uri.toString(), root, null);
   final paths = {
     for (final target in [0, 1])
@@ -18,14 +18,14 @@ Map<String, List<int>?> _bootstrapInputs(String root) {
         target,
       ).files)
         file.input.path,
-    '$root/lib/src/host.dart',
+    '$root/lib/src/legacy/host.dart',
     '$root/lib/export.dart',
     '$root/tool/bundle_compiler.dart',
     '$root/tool/bootstrap.dart',
     '$root/tool/src/process.dart',
-    '$root/test/behavior_test.dart',
+    '$root/test/legacy/behavior_test.dart',
     for (final file in Directory(
-      '$root/test/fixtures',
+      '$root/test/legacy/fixtures',
     ).listSync(recursive: true).whereType<File>())
       file.path,
   };
@@ -99,7 +99,7 @@ Future<void> main(List<String> args) async {
   final build = Directory('$root/build')..createSync(recursive: true);
   final sdk = Platform.resolvedExecutable;
   final source = '$root/bin/dartc.dart';
-  final standard = '$root/lib/src/runtime.dart';
+  final standard = '$root/lib/src/legacy/runtime.dart';
   final verifiedSeed = '${build.path}/dartc-seed';
   var seed = verifiedSeed;
   if (args.length == 2 && args[0] == '--seed') {
@@ -193,7 +193,7 @@ Future<void> main(List<String> args) async {
     }
     stdout.writeln('Stage 2 and stage 3 are identical (${a.length} bytes).');
     await run(sdk, [
-      '$root/test/behavior_test.dart',
+      '$root/test/legacy/behavior_test.dart',
       '--compiler',
       stage2,
       '--std',

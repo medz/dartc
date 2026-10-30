@@ -89,8 +89,8 @@ class DifferentialSession {
       File('${folder.path}/collect-inputs.dart').writeAsStringSync(r'''
 import 'dart:convert';
 import 'dart:io';
-import 'compiler/lib/src/driver/packages.dart';
-import 'compiler/lib/src/source.dart';
+import 'compiler/lib/src/legacy/driver/packages.dart';
+import 'compiler/lib/src/legacy/source.dart';
 
 void main(List<String> args) {
   final program = collectSources(
