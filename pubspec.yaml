@@ -1,6 +1,6 @@
 name: dartc
 description: A native Dart compiler written in Dart, producing standalone executables.
-version: 0.4.0
+version: 0.5.0
 repository: https://github.com/medz/dartc
 
 environment:

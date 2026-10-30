@@ -1,33 +1,38 @@
-## Unreleased
+## [0.5.0](https://github.com/medz/dartc/compare/v0.4.0...v0.5.0) — 2026-10-31
+
+This release adds generic classes, automatic memory reclamation, native-library export declarations and Intel Mac support. Native compiler downloads now work as a single executable. Dart language and standard-library support remains incomplete; see the [versioned specification tracker](https://github.com/medz/dartc/tree/v0.5.0/specs) for supported behavior and gaps.
 
 ### Features
 
-- Add Intel Mac (`macos-x64`) executables, native compiler builds and release packaging.
-- Replace `--export` and `Pointer.fromFunction` export bindings with `@Export<T>` declarations for macOS and Linux object, static and dynamic library outputs on ARM64 and x86-64. Generate matching C/C++ headers automatically, with an optional `--header` path. Support mixed integer, floating-point, boolean and pointer signatures, and scalar read-only data symbols.
-
-### Tooling
-
-- Compiler diagnostics use stderr and report file, line, UTF-16 column and source text, including scanner errors, imported files and parts. Help and successful build output remain on stdout.
-- Embed runtime and standard-library sources in native compiler binaries. The compiler can be moved without an accompanying `lib/` directory; `--std` remains available for explicit source development. Standalone projects can import the bundled `package:dartc/export.dart`, with explicit package mappings taking precedence.
-- Compare baseline and candidate native compilers with their matching runtime sources on the same program, alongside the official SDK. The program benchmark checks behavior and file outputs before reporting compilation, execution, memory and size measurements.
+- Support generic class instances and const objects, constructor type inference, runtime type-argument checks and generic object patterns.
+- Add class modifiers and sealed-class exhaustiveness checking, covariant instance parameters and fields, abstract instance fields, and field-type inference from initializers and interfaces.
+- Improve generic call inference using declared bounds and callback context. Support user-defined relational operators in patterns and indexed assignments through `super`.
+- Add core error and exception classes. Invalid integer/double parsing, integer division and modulo by zero, supported type checks, invalid character codes and unsupported list mutations now throw catchable Dart errors or exceptions. Preserve the first stack trace attached to an `Error`.
+- Add Intel Mac (`macos-x64`) compiler and executable support alongside macOS ARM64 and Linux ARM64/x86-64.
+- Export functions and scalar read-only data with `@Export<T>` for macOS and Linux object files, static libraries and shared libraries on ARM64/x86-64. Generate matching C/C++ headers, including mixed integer, double, boolean and pointer signatures.
+- Embed required library sources in native compiler binaries, so the compiler can be moved without an accompanying `lib/` directory. Include `package:dartc/export.dart` for native-library projects.
+- Report source diagnostics on stderr with file, line, column and source text, including errors in imports and parts. Help and successful build output use stdout.
 
 ### Fixes
 
-- Reject executable, library and header outputs that would overwrite loaded source files or the selected package configuration, including symbolic links, hard links and filesystem case aliases. Treat output paths as literal file paths when checking collisions.
-- Create missing output directories in native builds, matching SDK-hosted compilation.
-- Keep source BOMs and malformed UTF-8 replacement consistent between SDK-hosted and native builds. Reject invalid UTF-8 in package configurations and process arguments, including programs with a parameterless `main`.
-- Reject source or package-configuration changes during native bootstrap before replacing the verified seed, and retain the original inputs for diagnosis.
-- Preserve double NaN bit patterns in identity checks and constant canonicalization. Named constants and constant arithmetic use the output target's NaN representation.
-- Align macOS static-library members for Darwin linkers that require padded archive contents.
+- Reject output paths that would overwrite source files or package configuration, including symbolic links, hard links and case aliases. Create missing output directories in native builds.
+- Preserve source BOMs and handle malformed UTF-8 consistently; reject invalid UTF-8 in package configuration and process arguments.
+- Preserve double NaN identity, signs and payloads, including target-specific constants during cross-compilation.
+- Fix macOS library export-name encoding and static-archive alignment for Darwin linkers.
+- Distinguish bound-method runtime signatures during function type checks.
 
 ### Performance
 
-- Reduce package configuration validation and lookup costs for projects with many dependencies, while preserving nested-root and language-version checks.
-- Eliminate lazy initialization checks for globals and static fields whose checked initial value is a zero storage word, including runtime allocation and GC state. Runtime sources follow the same initialization rules as application sources, preserving writes before first read.
-- Reclaim unreachable managed objects in native programs with a non-moving mark-sweep collector. Reuse free blocks and release empty arenas; retain live objects through stack roots, runtime handles and object metadata.
-- Allocate ARM64 floating-point registers to doubles that do not live across calls, reducing transfers in numeric code. Validate allocated locations, live-value conflicts and call clobbers.
-- Inline small, effect-free direct calls before machine lowering, allowing constant propagation across call boundaries while preserving argument evaluation and GC contracts.
-- Reduce polymorphic method and property access overhead by reading the receiver's exact class identity once per dispatch, while preserving inherited implementations and target defaults.
+- Reclaim unreachable managed objects, reuse freed storage and release empty allocation regions instead of retaining all allocations until process exit.
+- Improve polymorphic calls, ARM64 double register use, common string operations and small pure calls.
+- Reduce repeated package lookups, liveness analysis and compiler-buffer allocation during compilation.
+
+### Upgrading from 0.4
+
+- Replace the previous native installation with the 0.5.0 archive. Its `bin/dartc` can be copied anywhere on `PATH`; no adjacent `lib/` directory is required.
+- Replace `--export` and `Pointer.fromFunction` export bindings with `@Export<T>` declarations from `package:dartc/export.dart`. Use `--header` to choose the generated header path.
+- The SDK-hosted package and source development now require Dart SDK `^3.13.7`.
+- The old bootstrap-validation, benchmark and fuzz commands are no longer distributed. Source development uses the standard Dart package tools.
 
 ## [0.4.0](https://github.com/medz/dartc/compare/v0.3.0...v0.4.0) — 2026-10-29
 
