@@ -8,6 +8,7 @@ import '../../lib/src/package_config.dart';
 import '../../lib/src/parser.dart';
 import '../../lib/src/scanner.dart';
 import '../../lib/src/source.dart';
+import '../../lib/src/source_text.dart';
 import '../../lib/src/source_uri.dart';
 import 'process.dart';
 
@@ -133,10 +134,10 @@ Set<String> _localClosure(
     final path = _file(_sourcePath(uri, packages), aliases);
     if (path.startsWith('$sdkRoot/') || !path.endsWith('.dart')) continue;
     files.add(path);
-    final tokens = scanTokens(
-      Scanner(File(path).readAsStringSync(), <Token>[], 0),
-    );
-    final parser = Parser(tokens, 0, 0, <String>[path]);
+    final input = SourceText(path, File(path).readAsStringSync());
+    final tokens = scanTokens(Scanner(input, <Token>[], 0));
+    for (final token in tokens) token.source = 0;
+    final parser = Parser(tokens, 0, 0, <SourceText>[input]);
     while (parser.tokens[parser.position].kind != tokenEnd) {
       parserMetadata(parser);
       final start = parser.position;

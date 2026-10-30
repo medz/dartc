@@ -1,6 +1,6 @@
 import 'target.dart';
 import 'abi.dart';
-import 'host.dart';
+import 'diagnostic.dart';
 import 'ir.dart';
 import 'types.dart';
 import 'ssa.dart';
@@ -327,8 +327,7 @@ void machineSelectInstruction(
     );
     return;
   }
-  print('Unsupported SSA operation: ' + op.toString());
-  hostExit(1);
+  throw Diagnostic('Unsupported SSA operation: ' + op.toString());
 }
 
 void machineRemoveUnusedConstants(List<MachineBlock> blocks, int count) {

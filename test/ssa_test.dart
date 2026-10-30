@@ -22,6 +22,8 @@ String driverSource(Uri library) =>
     '''
 import '${library.resolve('frontend.dart')}' as frontend;
 import '${library.resolve('host.dart')}' as host;
+import '${library.resolve('diagnostic.dart')}';
+import '${library.resolve('driver/diagnostics.dart')}';
 import '${library.resolve('ir.dart')}';
 import '${library.resolve('target.dart')}';
 import '${library.resolve('source.dart')}';
@@ -349,6 +351,15 @@ void corruptAllocation(List<MachineFunction> program, String mode) {
 }
 
 void main(List<String> args) {
+  try {
+    verifyInput(args);
+  } on Diagnostic catch (error) {
+    host.hostWriteError(formatDiagnostic(error));
+    host.hostExit(error.exitCode);
+  }
+}
+
+void verifyInput(List<String> args) {
   final allocation = args[2].startsWith('allocation-');
   // Exercise the ARM64 register banks even when the test driver runs on x64.
   compilationTarget = allocation ? Target.macosArm64 : Target.values[host.hostTarget()];
@@ -585,17 +596,18 @@ Future<void> main(List<String> args) async {
         check(result.stdout == 'SSA verified\n', result.stdout);
       } else {
         final prefix = entry.key.startsWith('allocation-')
-            ? 'dartc allocation: '
+            ? 'dartc: allocation: '
             : entry.key == 'ir-function-range'
-            ? 'dartc SSA: invalid function IR range'
+            ? 'dartc: SSA: invalid function IR range'
             : (entry.key == 'format-type-parameter' ||
                   entry.key == 'format-schema-hole')
             ? 'dartc: uninstantiated runtime type'
-            : 'dartc SSA: verify ';
+            : 'dartc: SSA: verify ';
         check(
           result.exitCode == 1 &&
-              result.stdout.startsWith(prefix) &&
-              result.stdout.contains(entry.value),
+              result.stdout.isEmpty &&
+              result.stderr.startsWith(prefix) &&
+              result.stderr.contains(entry.value),
           '${entry.key}: ${jsonEncode(result.toJson())}',
         );
       }

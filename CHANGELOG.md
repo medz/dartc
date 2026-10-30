@@ -7,6 +7,7 @@
 
 ### Tooling
 
+- Compiler diagnostics use stderr and report file, line, UTF-16 column and source text, including scanner errors, imported files and parts. Help and successful build output remain on stdout.
 - Embed runtime and standard-library sources in native compiler binaries. The compiler can be moved without an accompanying `lib/` directory; `--std` remains available for explicit source development. Standalone projects can import the bundled `package:dartc/export.dart`, with explicit package mappings taking precedence.
 - Compare baseline and candidate native compilers with their matching runtime sources on the same program, alongside the official SDK. The program benchmark checks behavior and file outputs before reporting compilation, execution, memory and size measurements.
 

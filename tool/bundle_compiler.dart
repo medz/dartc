@@ -1,5 +1,6 @@
 import '../lib/src/diagnostic.dart';
 import '../lib/src/driver/packages.dart';
+import '../lib/src/driver/diagnostics.dart';
 import '../lib/src/host.dart';
 import '../lib/src/source.dart';
 import '../lib/src/source_uri.dart';
@@ -39,7 +40,7 @@ void _literal(StringBuffer output, String value) {
 
 void _bundle(List<String> args) {
   if (args.length != 2) {
-    print('Usage: bundle_compiler <checkout> <entry.dart>');
+    hostWriteError('Usage: bundle_compiler <checkout> <entry.dart>\n');
     hostExit(64);
   }
   final cwd = hostCurrentDirectory();
@@ -74,15 +75,15 @@ void _bundle(List<String> args) {
   _literal(output, runtime);
   output.writeln(', <BundledSource>[');
   for (final file in files) {
-    final fileUri = sourceFileUri(file.path);
+    final fileUri = sourceFileUri(file.input.path);
     if (!fileUri.startsWith(root))
       throw Diagnostic(
-        'dartc: bundled dependency is outside the checkout: ' + file.path,
+        'bundled dependency is outside the checkout: ' + file.input.path,
       );
     output.write('  BundledSource(');
     _literal(output, file.uri);
     output.write(', ');
-    _literal(output, hostReadSource(file.path));
+    _literal(output, file.input.text);
     output.writeln('),');
   }
   output.write('  BundledSource(');
@@ -104,7 +105,7 @@ void main(List<String> args) {
   try {
     _bundle(args);
   } on Diagnostic catch (error) {
-    print(error.message);
-    hostExit(1);
+    hostWriteError(formatDiagnostic(error));
+    hostExit(error.exitCode);
   }
 }

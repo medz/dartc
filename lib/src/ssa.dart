@@ -1,4 +1,4 @@
-import 'host.dart';
+import 'diagnostic.dart';
 import 'ir.dart';
 
 const int ssaRead = 1;
@@ -66,8 +66,7 @@ class SsaTerminator {
 }
 
 Never ssaError(String message) {
-  print('dartc SSA: ' + message);
-  hostExit(1);
+  throw Diagnostic('SSA: ' + message);
 }
 
 int resolveValue(List<int> aliases, int value) {

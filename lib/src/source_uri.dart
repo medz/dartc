@@ -1,8 +1,7 @@
-import 'host.dart';
+import 'diagnostic.dart';
 
 Never _sourceUriError(String reference, String message) {
-  print('dartc URI: ' + message + ': ' + reference);
-  hostExit(65);
+  throw Diagnostic('URI: ' + message + ': ' + reference, exitCode: 65);
 }
 
 // Raw POSIX paths keep %, #, ? and backslashes as file-name characters.

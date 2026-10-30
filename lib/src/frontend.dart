@@ -23,6 +23,7 @@ import 'types.dart';
 import 'typing.dart';
 import 'scanner.dart';
 import 'source.dart';
+import 'source_text.dart';
 import 'symbols.dart';
 import 'target.dart';
 
@@ -1511,6 +1512,13 @@ void feInstallSymbols() {
   );
   declareFfiTypes(feSymbols);
   declareSymbol(feSymbols, sourceHost, 'hostRead', symbolBuiltin, bHostRead);
+  declareSymbol(
+    feSymbols,
+    sourceHost,
+    'hostWriteError',
+    symbolBuiltin,
+    bHostWriteError,
+  );
   declareSymbol(
     feSymbols,
     sourceHost,
@@ -3112,6 +3120,7 @@ int feMetadataMask(AstExpression expression) {
 
 int feBuiltinArgumentType(int builtin, int argument) {
   if (builtin == bHostRead ||
+      builtin == bHostWriteError ||
       builtin == bHostReadSource ||
       builtin == bHostReadIfExists ||
       builtin == bHostFinish)
@@ -3143,7 +3152,9 @@ int feLowerBuiltinArguments(AstExpression call, int builtin) {
 int feLowerBuiltinCall(AstExpression call, int builtin) {
   if (call.typeArguments.length != 0)
     feAstError(call.token, 'nongeneric call does not accept type arguments');
-  if ((builtin == bHostReadIfExists || builtin == bHostReadSource) &&
+  if ((builtin == bHostReadIfExists ||
+              builtin == bHostReadSource ||
+              builtin == bHostWriteError) &&
           call.children.length != 2 ||
       builtin == bHostCurrentDirectory && call.children.length != 1)
     feAstError(call.token, 'host argument count');
@@ -6885,9 +6896,9 @@ void parseSource(SourceProgram source) {
   feTokens = source.tokens;
   feAt = 0;
   feRuntimeTokens = source.runtimeTokens;
-  final paths = <String>[for (var file in source.files) file.path];
+  final inputs = <SourceText>[for (var file in source.files) file.input];
   final syntax = parseUnit(
-    Parser(feTokens, 0, 0, paths),
+    Parser(feTokens, 0, 0, inputs),
     <bool>[for (var file in source.files) file.languageMajor >= 3],
     <bool>[
       for (var file in source.files)

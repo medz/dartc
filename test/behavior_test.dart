@@ -3711,9 +3711,8 @@ void main() {
         includeParentEnvironment: compiler == null,
       );
       if (result.exitCode != status ||
-          !'${result.stdout}${result.stderr}'.contains(
-            diagnostic ?? invalid.path,
-          )) {
+          result.stdout.isNotEmpty ||
+          !result.stderr.contains(diagnostic ?? invalid.path)) {
         throw StateError(
           'Expected source diagnostic for ${invalid.path}: '
           '${result.stdout}${result.stderr}',
@@ -3731,6 +3730,95 @@ void main() {
         ..writeAsStringSync(entry.value);
       await reject(source, diagnostic: diagnostic, checkSdk: checkSdk);
     });
+
+    final help = await run(driver, [
+      if (compiler == null) '$root/bin/dartc.dart',
+      '--help',
+    ], native: compiler != null);
+    if (!help.stdout.startsWith('Usage: dartc ') || help.stderr.isNotEmpty)
+      throw StateError('Help must be written to stdout.');
+    await reject(
+      source,
+      status: 64,
+      options: ['--target', 'unknown'],
+      diagnostic: 'dartc: Unsupported target: unknown\n',
+    );
+    final invalidUri = File('${temporary.path}/diagnostic-uri.dart')
+      ..writeAsStringSync(
+        "import 'https://example.invalid/library.dart'; void main() {}",
+      );
+    await reject(
+      invalidUri,
+      diagnostic:
+          '${invalidUri.path}:1:1: unsupported library URI '
+          'https://example.invalid/library.dart\n'
+          "import 'https://example.invalid/library.dart'; void main() {}\n",
+    );
+
+    for (final (name, text, diagnostic) in [
+      (
+        'scan-escape',
+        "// 空🙂\r\nvoid main() {\r\n\tprint('\\xG1');\r\n}\r\n",
+        "3:11: invalid hexadecimal digit\n\tprint('\\xG1');\n",
+      ),
+      (
+        'comment',
+        'void main() {}\r/* 未闭合🙂',
+        '2:1: unterminated comment\n/* 未闭合🙂\n',
+      ),
+      (
+        'parser',
+        "void main() {\n  print('😀'); var = 1;\n}\n",
+        "2:20: expected identifier\n  print('😀'); var = 1;\n",
+      ),
+      ('eof', 'void main() {\r\n', '2:1: expected identifier\n\n'),
+      (
+        'semantic',
+        "// 中文🙂\rvoid unused() {\r\tint value = 'bad';\r}\rvoid main() {}\r",
+        "3:2: incompatible value type\n\tint value = 'bad';\n",
+      ),
+      (
+        'bom',
+        '\ufeffvoid main() { var = 1; }\n',
+        '1:20: expected identifier\n\ufeffvoid main() { var = 1; }\n',
+      ),
+      ('empty', '', '1:1: entry library must expose a main function\n\n'),
+    ]) {
+      final invalid = File('${temporary.path}/diagnostic-$name.dart')
+        ..writeAsStringSync(text);
+      await reject(
+        invalid,
+        diagnostic: '${invalid.path}:$diagnostic',
+        checkSdk: true,
+      );
+      if (File('${invalid.path}.out').existsSync())
+        throw StateError('Invalid input produced an output: ${invalid.path}');
+    }
+    final diagnosticLibrary = File('${temporary.path}/diagnostic-库🙂.dart')
+      ..writeAsStringSync("void unused() {\n  int value = 'bad';\n}\n");
+    final diagnosticEntry = File('${temporary.path}/diagnostic-import.dart')
+      ..writeAsStringSync("import 'diagnostic-库🙂.dart';\nvoid main() {}\n");
+    await reject(
+      diagnosticEntry,
+      diagnostic:
+          '${diagnosticLibrary.path}:2:3: incompatible value type\n'
+          "  int value = 'bad';\n",
+      checkSdk: true,
+    );
+    final diagnosticPart = File('${temporary.path}/diagnostic-part.dart')
+      ..writeAsStringSync(
+        "part of 'diagnostic-import.dart';\r\nvoid unused() {\r\n  var = 1;\r\n}\r\n",
+      );
+    diagnosticEntry.writeAsStringSync(
+      "part 'diagnostic-part.dart';\nvoid main() {}\n",
+    );
+    await reject(
+      diagnosticEntry,
+      diagnostic:
+          '${diagnosticPart.path}:3:7: expected identifier\n'
+          '  var = 1;\n',
+      checkSdk: true,
+    );
 
     final rejectedExports = [
       "export 'math.dart'; export 'other.dart';",
@@ -4770,9 +4858,19 @@ int exitChoice(bool stop, int status) {
   if (stop) terminate(status);
   return 42;
 }
+@pragma('dartc:no-gc')
+void writeError(String value) => hostWriteError(value);
 void main(List<String> args) {
   if (args.length > 1) {
-    if (args[1] == 'exit') {
+    if (args[1] == 'stderr') {
+      print('before');
+      writeError('');
+      writeError('错误🙂');
+      writeError(String.fromCharCodes([0, 0xfeff, 0xd800]));
+      writeError(String.fromCharCodes(List<int>.filled(70001, 65)));
+      writeError('\n');
+      print('after');
+    } else if (args[1] == 'exit') {
       print('before');
       print(exitChoice(false, 0));
       final status = int.parse(args[0]);
@@ -4830,6 +4928,7 @@ void main(List<String> args) {
 ''',
       );
     final outputPrefix = '${temporary.path}/io-你好🙂-';
+    await compare(io, [outputPrefix, 'stderr']);
     await compare(
       io,
       [outputPrefix],
@@ -4996,6 +5095,12 @@ void main(List<String> args) {
         'void main() { hostReadIfExists(1); }',
         'void main() { hostReadIfExists(); }',
         "void main() { hostCurrentDirectory('extra'); }",
+        'void main() { hostWriteError(); }',
+        "void unused() { hostWriteError('one', 'two'); } void main() {}",
+        'void main() { hostWriteError(7); }',
+        "void main() { hostWriteError(message: 'error'); }",
+        "void main() { hostWriteError<String>('error'); }",
+        "void main() { int value = hostWriteError('error'); print(value); }",
         "@pragma('dartc:no-gc') String? read(String path) => hostReadIfExists(path); void main() {}",
         "@pragma('dartc:no-gc') String cwd() => hostCurrentDirectory(); void main() {}",
       ])

@@ -74,10 +74,11 @@ lib/src/
   host.dart                                      宿主服务
   driver/
     command.dart, packages.dart                    构建协调与包配置发现
+    diagnostics.dart                              CLI 诊断显示
   source.dart, source_uri.dart, package_config.dart 源文件、库依赖与包配置
-  source_bundle.dart                    内置源码资源与读取
+  source_text.dart, source_bundle.dart           原始源码文本与内置资源
   scanner.dart, ast.dart, parser.dart             词法与语法结构
-  diagnostic.dart                                前端诊断值
+  diagnostic.dart                                结构化诊断值
   symbols.dart, binding.dart, members.dart         库、局部与成员声明绑定
   types.dart, resolve_type.dart, typing.dart       语义类型与类型规则
   graph.dart                                      共用强连通分量算法
@@ -218,6 +219,8 @@ test/
 依赖只沿数据流向下，analysis 和 optimize 依赖 ir，frontend 与 format 不互相导入。运行时入口的签名和效果由 abi 定义。运行时实现不能导入编译器前端、优化器或后端。
 
 编译器通过 `host.dart` 使用文件和进程服务：官方 Dart 冷启动使用 SDK 实现，原生编译器使用受信运行时实现。std 与目标运行时是编译输入；库映射将 dart:core 等名字定位到 lib/src/std 下的源码。宿主入口不导入并执行目标运行时的底层实现，目录位于 lib 中也不会使其自动进入宿主 import 图。
+
+`SourceText` 保存一次解码得到的文本与路径，扫描、解析和语义诊断引用同一输入。`Diagnostic` 携带消息、UTF-16 范围与退出码，CLI 在错误路径计算行列并写入 stderr；正常编译不建立行号表，诊断不重读可能已变化的文件。资源生成复用已装载的源码文本。
 
 源码装载与资源生成共用 `hostReadSource()`，在字节到文本的边界完成 UTF-8 容错解码并保留 BOM；扫描器负责文件头语法及 UTF-16 位置。配置等普通文本仍通过严格的 `hostRead()` 读取。运行时解码器检查序列长度与字节范围，源码、文本和进程参数的策略由各自入口选择，不由后续名称查找或代码生成补救。
 

@@ -1,4 +1,5 @@
-import 'host.dart';
+import 'diagnostic.dart';
+import 'source_text.dart';
 import 'source_uri.dart';
 
 class SourcePackage {
@@ -78,15 +79,12 @@ void _sortPackages(List<SourcePackage> packages, bool byRoot) {
 }
 
 Never _packageError(_PackageJson json, String message) {
-  print(
-    'dartc: ' +
-        json.path +
-        ': ' +
-        message +
-        ' at offset ' +
-        json.position.toString(),
+  throw Diagnostic(
+    message,
+    source: SourceText(json.path, json.text),
+    start: json.position,
+    end: json.position,
   );
-  hostExit(1);
 }
 
 bool _jsonDigit(int value) => value >= 48 && value <= 57;
@@ -364,8 +362,7 @@ PackageConfig parsePackageConfig(String path, String text) {
 Never packageConfigError(PackageConfig config, String message) {
   var location = '';
   if (config.path != '') location = config.path + ': ';
-  print('dartc: ' + location + message);
-  hostExit(1);
+  throw Diagnostic(location + message);
 }
 
 String _packageDirectory(String path) {

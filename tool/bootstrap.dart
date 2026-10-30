@@ -17,7 +17,7 @@ Map<String, List<int>?> _bootstrapInputs(String root) {
         packages,
         target,
       ).files)
-        file.path,
+        file.input.path,
     '$root/lib/src/host.dart',
     '$root/lib/export.dart',
     '$root/tool/bundle_compiler.dart',

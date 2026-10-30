@@ -22,20 +22,20 @@ import '../source_uri.dart';
 import '../utf8.dart';
 import '../verify_ssa.dart';
 import 'packages.dart';
+import 'diagnostics.dart';
 
 Never runCompiler(List<String> args, [SourceBundle? bundle]) {
   try {
     _compile(args, bundle);
   } on Diagnostic catch (error) {
-    print(error.message);
-    hostExit(1);
+    hostWriteError(formatDiagnostic(error));
+    hostExit(error.exitCode);
   }
 }
 
 Never _compile(List<String> args, SourceBundle? bundle) {
   Never argumentError(String message) {
-    print(message);
-    hostExit(64);
+    throw Diagnostic(message, exitCode: 64);
   }
 
   if (args.length == 0 || args[0] == '--help') {
@@ -145,9 +145,9 @@ Never _compile(List<String> args, SourceBundle? bundle) {
     if (headerUri == sourceInputUri(cwd, output))
       argumentError('Header and library output paths must differ.');
     for (final file in sources.files)
-      if (headerUri == sourceInputUri(cwd, file.path))
+      if (headerUri == sourceInputUri(cwd, file.input.path))
         argumentError(
-          'Header output would overwrite a source file: ' + file.path,
+          'Header output would overwrite a source file: ' + file.input.path,
         );
   }
   List<SsaFunction> ssa = buildSsa();

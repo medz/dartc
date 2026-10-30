@@ -155,12 +155,18 @@ Future<void> main(List<String> args) async {
     for (final lane in ['host', 'native']) {
       final process = rejected.stages['$lane.compile']!;
       check(
-        (process.stdout + process.stderr).contains(
-          '${invalid.path}/project/main.dart',
-        ),
+        process.stdout.isEmpty &&
+            process.stderr.startsWith(
+              '${invalid.path}/project/main.dart:1:20: ',
+            ),
         '$lane rejection must identify the actual source.',
       );
     }
+    check(
+      rejected.stages['host.compile']!.stderr ==
+          rejected.stages['native.compile']!.stderr,
+      'Hosted and native source diagnostics must match.',
+    );
 
     final unsupported = makeCase(
       'unsupported',
@@ -169,7 +175,10 @@ Future<void> main(List<String> args) async {
         'nativeDiagnostic':
             'async and generator function expressions are unsupported',
       },
-      {'main.dart': 'void main(){var callback=()async=>7;print(7);}'},
+      {
+        'main.dart':
+            'void main(){/* dartc: SSA: */var callback=()async=>7;print(7);}',
+      },
     );
     final gap = await active.evaluate(unsupported);
     check(gap.verdict == 'capability-gap' && !gap.failed, 'Declared async gap');
@@ -183,12 +192,12 @@ Future<void> main(List<String> args) async {
       gap.stages['reference.run']!.stdout == '7\n',
       'SDK async function declaration',
     );
-    // A real exit 1 without the contracted source diagnostic is not a gap.
+    // The excerpt is source data, not the diagnostic message.
     final gapDescriptor = File('${unsupported.path}/case.json');
     final originalGap = gapDescriptor.readAsStringSync();
     try {
       final contract = (jsonDecode(originalGap) as Map).cast<String, Object?>();
-      contract['nativeDiagnostic'] = 'dartc SSA:';
+      contract['nativeDiagnostic'] = 'dartc: SSA:';
       writeJson(gapDescriptor, contract);
       final mismatch = await active.evaluate(unsupported);
       check(

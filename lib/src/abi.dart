@@ -1,4 +1,4 @@
-import 'host.dart';
+import 'diagnostic.dart';
 import 'ir.dart';
 import 'types.dart';
 
@@ -8,8 +8,7 @@ int abiFunction(String name, int source) {
     if (functions[i].name == name && functions[i].source == source) return i;
     i = i + 1;
   }
-  print('Missing native function: ' + name);
-  hostExit(1);
+  throw Diagnostic('Missing native function: ' + name);
 }
 
 int runtimeFunction(int builtin, int castType) {
@@ -64,6 +63,7 @@ int runtimeFunction(int builtin, int castType) {
   if (builtin == bValueIdentical) return abiFunction('rtValueIdentical', 0);
   if (builtin == bHostRead) return abiFunction('rtHostRead', 0);
   if (builtin == bHostReadSource) return abiFunction('rtHostReadSource', 0);
+  if (builtin == bHostWriteError) return abiFunction('rtHostWriteError', 0);
   if (builtin == bHostReadIfExists) return abiFunction('rtHostReadIfExists', 0);
   if (builtin == bHostCurrentDirectory)
     return abiFunction('rtHostCurrentDirectory', 0);
@@ -106,6 +106,5 @@ int runtimeFunction(int builtin, int castType) {
   if (builtin == bValueGt) return abiFunction('rtValueGt', 0);
   if (builtin == bValueGe) return abiFunction('rtValueGe', 0);
   if (builtin == bValueToString) return abiFunction('rtValueToString', 0);
-  print('Unknown native builtin: ' + builtin.toString());
-  hostExit(1);
+  throw Diagnostic('Unknown native builtin: ' + builtin.toString());
 }

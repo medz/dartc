@@ -1,5 +1,5 @@
 import 'liveness.dart';
-import 'host.dart';
+import 'diagnostic.dart';
 import 'layout.dart';
 import 'machine.dart';
 
@@ -22,8 +22,7 @@ void _rootUse(List<int> live, int value) {
 }
 
 Never _rootMapError(String message) {
-  print('dartc root map: ' + message);
-  hostExit(1);
+  throw Diagnostic('root map: ' + message);
 }
 
 CallRootMap _callRootMap(

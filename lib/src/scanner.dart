@@ -1,4 +1,5 @@
 import 'diagnostic.dart';
+import 'source_text.dart';
 
 const int tokenSymbol = 0;
 const int tokenIdentifier = 1;
@@ -39,15 +40,14 @@ bool tokenIsTypeDeclarationIdentifier(Token token) {
 }
 
 class Scanner {
-  String source;
+  final SourceText input;
   List<Token> tokens;
   int position;
   int languageMajor = 3;
   int languageMinor = 13;
   int languageOffset = -1;
-  String path = '';
 
-  Scanner(this.source, this.tokens, this.position);
+  Scanner(this.input, this.tokens, this.position);
 }
 
 bool tokenIs(Token token, String text) {
@@ -57,12 +57,8 @@ bool tokenIs(Token token, String text) {
       token.text == text;
 }
 
-Never scanError(String message, int offset, [String path = '']) {
-  var location = '';
-  if (path != '') location = path + ':';
-  throw Diagnostic(
-    'dartc: ' + location + message + ' at offset ' + offset.toString(),
-  );
+Never scanError(SourceText source, String message, int offset) {
+  throw Diagnostic(message, source: source, start: offset, end: offset);
 }
 
 bool scanDigit(int c) {
@@ -73,14 +69,15 @@ bool scanLetter(int c) {
   return c >= 65 && c <= 90 || c >= 97 && c <= 122 || c == 95 || c == 36;
 }
 
-int scanHex(int c, int offset) {
+int scanHex(SourceText source, int c, int offset) {
   if (c >= 48 && c <= 57) return c - 48;
   if (c >= 65 && c <= 70) return c - 55;
   if (c >= 97 && c <= 102) return c - 87;
-  scanError('invalid hexadecimal digit', offset);
+  scanError(source, 'invalid hexadecimal digit', offset);
 }
 
-String scanSeparatedInteger(String source, int start, int end) {
+String scanSeparatedInteger(SourceText input, int start, int end) {
+  final source = input.text;
   var hexadecimal =
       end - start >= 2 &&
       source.codeUnitAt(start) == 48 &&
@@ -99,16 +96,17 @@ String scanSeparatedInteger(String source, int start, int end) {
     var c = source.codeUnitAt(i);
     if (c == 95) {
       var separator = i;
-      if (!digit) scanError('digit separators must be between digits', i);
+      if (!digit)
+        scanError(input, 'digit separators must be between digits', i);
       while (i < end && source.codeUnitAt(i) == 95) i++;
       if (i == end)
-        scanError('digit separators must be between digits', separator);
+        scanError(input, 'digit separators must be between digits', separator);
       digit = false;
       continue;
     }
     if (!scanDigit(c) &&
         (!hexadecimal || !(c >= 65 && c <= 70 || c >= 97 && c <= 102))) {
-      scanError('invalid integer literal with digit separators', i);
+      scanError(input, 'invalid integer literal with digit separators', i);
     }
     units.add(c);
     digit = true;
@@ -122,7 +120,8 @@ bool scanVersionAtLeast(Scanner scanner, int major, int minor) {
       scanner.languageMajor == major && scanner.languageMinor >= minor;
 }
 
-int scanComment(String source, int start) {
+int scanComment(SourceText input, int start) {
+  final source = input.text;
   var i = start + 2;
   if (source.codeUnitAt(start + 1) == 47) {
     while (i < source.length &&
@@ -143,13 +142,13 @@ int scanComment(String source, int start) {
       i++;
     }
   }
-  if (depth != 0) scanError('unterminated comment', start);
+  if (depth != 0) scanError(input, 'unterminated comment', start);
   return i;
 }
 
 void scanLanguageVersion(Scanner scanner, int start, int end) {
   if (scanner.languageOffset >= 0) return;
-  var source = scanner.source;
+  var source = scanner.input.text;
   var i = start + 2;
   while (i < end && (source.codeUnitAt(i) == 32 || source.codeUnitAt(i) == 9))
     i++;
@@ -191,7 +190,7 @@ void scanLanguageVersion(Scanner scanner, int start, int end) {
 }
 
 void scanHeader(Scanner scanner) {
-  var source = scanner.source;
+  var source = scanner.input.text;
   var i = scanner.position;
   if (i == 0 && i < source.length && source.codeUnitAt(i) == 65279) i++;
   if (i == 0 &&
@@ -210,7 +209,7 @@ void scanHeader(Scanner scanner) {
     } else if (c == 47 &&
         i + 1 < source.length &&
         (source.codeUnitAt(i + 1) == 47 || source.codeUnitAt(i + 1) == 42)) {
-      var end = scanComment(source, i);
+      var end = scanComment(scanner.input, i);
       if (source.codeUnitAt(i + 1) == 47) scanLanguageVersion(scanner, i, end);
       i = end;
     } else {
@@ -221,7 +220,7 @@ void scanHeader(Scanner scanner) {
 }
 
 void scanString(Scanner scanner, bool raw, int tokenStart) {
-  var source = scanner.source;
+  var source = scanner.input.text;
   var tokens = scanner.tokens;
   var i = scanner.position;
   var quote = source.codeUnitAt(i);
@@ -268,7 +267,8 @@ void scanString(Scanner scanner, bool raw, int tokenStart) {
         scanner.position = i;
         scanCode(scanner, true);
         i = scanner.position;
-        if (i == source.length) scanError('unterminated interpolation', start);
+        if (i == source.length)
+          scanError(scanner.input, 'unterminated interpolation', start);
         tokens.add(Token(tokenInterpolationEnd, '}', i, i + 1, -1));
         i++;
       } else {
@@ -289,7 +289,8 @@ void scanString(Scanner scanner, bool raw, int tokenStart) {
     }
     i++;
     if (!raw && c == 92) {
-      if (i == source.length) scanError('unterminated escape', tokenStart);
+      if (i == source.length)
+        scanError(scanner.input, 'unterminated escape', tokenStart);
       c = source.codeUnitAt(i);
       i++;
       if (c == 110) {
@@ -315,13 +316,13 @@ void scanString(Scanner scanner, bool raw, int tokenStart) {
         while (i < source.length &&
             (braces && source.codeUnitAt(i) != 125 ||
                 !braces && digits < count)) {
-          c = c * 16 + scanHex(source.codeUnitAt(i), i);
+          c = c * 16 + scanHex(scanner.input, source.codeUnitAt(i), i);
           i++;
           digits++;
         }
         if (braces) {
           if (i == source.length)
-            scanError('unterminated unicode escape', tokenStart);
+            scanError(scanner.input, 'unterminated unicode escape', tokenStart);
           i++;
         }
       }
@@ -334,11 +335,11 @@ void scanString(Scanner scanner, bool raw, int tokenStart) {
       units.add(c);
     }
   }
-  scanError('unterminated string', tokenStart);
+  scanError(scanner.input, 'unterminated string', tokenStart);
 }
 
 void scanCode(Scanner scanner, bool interpolation) {
-  var source = scanner.source;
+  var source = scanner.input.text;
   var tokens = scanner.tokens;
   var i = scanner.position;
   var braces = 0;
@@ -356,7 +357,7 @@ void scanCode(Scanner scanner, bool interpolation) {
     if (c == 47 &&
         i + 1 < source.length &&
         (source.codeUnitAt(i + 1) == 47 || source.codeUnitAt(i + 1) == 42)) {
-      i = scanComment(source, i);
+      i = scanComment(scanner.input, i);
       continue;
     }
     var raw = false;
@@ -432,12 +433,12 @@ void scanCode(Scanner scanner, bool interpolation) {
       if (text.indexOf('_') >= 0) {
         if (!scanVersionAtLeast(scanner, 3, 6))
           scanError(
+            scanner.input,
             'digit separators require language version 3.6',
             start,
-            scanner.path,
           );
         if (!floating) {
-          text = scanSeparatedInteger(source, start, i);
+          text = scanSeparatedInteger(scanner.input, start, i);
         } else {
           final units = <int>[];
           var at = 0;
@@ -450,16 +451,16 @@ void scanCode(Scanner scanner, bool interpolation) {
             final separator = at;
             if (at == 0 || !scanDigit(text.codeUnitAt(at - 1)))
               scanError(
+                scanner.input,
                 'digit separators must be between digits',
                 start + at,
-                scanner.path,
               );
             while (at < text.length && text.codeUnitAt(at) == 95) at++;
             if (at == text.length || !scanDigit(text.codeUnitAt(at)))
               scanError(
+                scanner.input,
                 'digit separators must be between digits',
                 start + separator,
-                scanner.path,
               );
           }
           text = String.fromCharCodes(units);
@@ -530,7 +531,7 @@ void scanCode(Scanner scanner, bool interpolation) {
 }
 
 List<Token> scanTokens(Scanner scanner) {
-  var source = scanner.source;
+  var source = scanner.input.text;
   scanCode(scanner, false);
   scanner.tokens.add(Token(tokenEnd, '', source.length, source.length, -1));
   return scanner.tokens;

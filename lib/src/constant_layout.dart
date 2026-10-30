@@ -1,7 +1,7 @@
 import 'code.dart';
 import 'constant_data.dart';
 import 'frame.dart';
-import 'host.dart';
+import 'diagnostic.dart';
 import 'ir.dart';
 import 'layout.dart';
 import 'root_map.dart';
@@ -102,12 +102,10 @@ void _markTypeReference(
   bool template = false,
 ]) {
   if (typeHasSchemaHole(type) || typeContainsParameters(type) && !template) {
-    print('dartc: uninstantiated runtime type');
-    hostExit(1);
+    throw Diagnostic('uninstantiated runtime type');
   }
   if (ffiKind(type) >= 0) {
-    print('dartc: FFI native types do not have runtime type metadata yet');
-    hostExit(1);
+    throw Diagnostic('FFI native types do not have runtime type metadata yet');
   }
   if (offsets[type] < 0) {
     offsets[type] = 0;

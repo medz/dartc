@@ -1,5 +1,5 @@
 import 'exports.dart';
-import 'host.dart';
+import 'diagnostic.dart';
 import 'machine.dart';
 import 'nogc.dart';
 import 'source.dart';
@@ -7,10 +7,9 @@ import 'ssa.dart';
 import 'types.dart';
 
 Never _libraryError(String symbol, String message) {
-  print(
+  throw Diagnostic(
     (symbol.isEmpty ? 'Library output' : 'Export ' + symbol) + ': ' + message,
   );
-  hostExit(1);
 }
 
 int libraryTypeSize(int type) => switch (ffiKind(type)) {

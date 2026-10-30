@@ -1,5 +1,5 @@
 import 'code.dart';
-import 'host.dart';
+import 'diagnostic.dart';
 import 'target.dart';
 
 const int xRax = 0;
@@ -177,6 +177,5 @@ void xExit(int status) {
 }
 
 Never xCodeError(String message) {
-  print('dartc x64: ' + message);
-  hostExit(1);
+  throw Diagnostic('x64: ' + message);
 }

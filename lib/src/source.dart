@@ -5,6 +5,7 @@ import 'diagnostic.dart';
 import 'parser.dart';
 import 'source_uri.dart';
 import 'source_bundle.dart';
+import 'source_text.dart';
 import 'package_config.dart';
 
 const int sourceUnknown = -1;
@@ -33,7 +34,7 @@ class SourceImport {
 }
 
 class SourceFile {
-  String path;
+  final SourceText input;
   String uri = '';
   int library = -1;
   String libraryName = '';
@@ -44,7 +45,7 @@ class SourceFile {
   int languageMinor = 13;
   int languageOffset = -1;
 
-  SourceFile(this.path, this.tokens, this.imports);
+  SourceFile(this.input, this.tokens, this.imports);
 }
 
 int sourceLibrary(SourceProgram program, int source) {
@@ -138,8 +139,7 @@ bool sourceAllows(SourceImport dependency, String name) {
 // FFI advertises its existing restricted declarations, not the complete SDK API.
 List<String> sourceTargetLibraries(int target) {
   if (target == 0 || target == 1) return const <String>['core', 'ffi'];
-  print('Unsupported source target: ' + target.toString());
-  hostExit(1);
+  throw Diagnostic('Unsupported source target: ' + target.toString());
 }
 
 String sourceDirectiveUri(SourceProgram program, AstDirective directive) {
@@ -206,7 +206,7 @@ int sourceLoad(
   String? text;
   if (bundle != null && implementation) {
     text = bundle.read(uri);
-    if (text == null) throw Diagnostic('dartc: missing bundled source: ' + uri);
+    if (text == null) throw Diagnostic('missing bundled source: ' + uri);
   } else if (bundle != null &&
       package != null &&
       (config == null || sourcePackageNamed(config, package.name) == null)) {
@@ -217,16 +217,15 @@ int sourceLoad(
     path = uri;
   } else if (package != null) {
     if (config == null) {
-      print('dartc: no package configuration for ' + uri);
-      hostExit(1);
+      throw Diagnostic('no package configuration for ' + uri);
     }
     path = resolvePackageUri(config, package);
   } else {
     path = sourceUriPath('/', uri);
   }
   int id = program.files.length;
-  var scanner = Scanner(text ?? hostReadSource(path), <Token>[], 0);
-  scanner.path = path;
+  final input = SourceText(path, text ?? hostReadSource(path));
+  var scanner = Scanner(input, <Token>[], 0);
   var packages = program.packages;
   if (text == null && !implementation && packages != null) {
     var package = sourcePackageForFile(packages, path);
@@ -254,7 +253,7 @@ int sourceLoad(
   }
   scanHeader(scanner);
   List<SourceImport> imports = <SourceImport>[];
-  var file = SourceFile(path, scanner.tokens, imports);
+  var file = SourceFile(input, scanner.tokens, imports);
   file.uri = uri;
   file.library = id;
   if (library >= 0) file.library = library;
@@ -280,13 +279,13 @@ int sourceLoad(
     tokens[i].source = id;
     i++;
   }
-  var paths = <String>[];
+  var inputs = <SourceText>[];
   i = 0;
   while (i < program.files.length) {
-    paths.add(program.files[i].path);
+    inputs.add(program.files[i].input);
     i++;
   }
-  var parser = Parser(tokens, 0, 0, paths);
+  var parser = Parser(tokens, 0, 0, inputs);
   var partOf = false;
   var librarySeen = false;
   var partsSeen = false;
@@ -503,11 +502,9 @@ SourceProgram collectSources(
 
 Never sourceError(SourceProgram program, Token token, String message) {
   throw Diagnostic(
-    'dartc: ' +
-        program.files[token.source].path +
-        ':' +
-        token.start.toString() +
-        ': ' +
-        message,
+    message,
+    source: program.files[token.source].input,
+    start: token.start,
+    end: token.end,
   );
 }

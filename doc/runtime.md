@@ -199,11 +199,12 @@ UTF-8 解码核心只在给定字节长度内读取，检查续字节、最短�
 
 收集保持对象地址不变，调用 ABI、对象头和根表编码未改变。线程、isolate、弱引用及终结处理仍需各自的实现和验证；当前收集器不提供这些能力。
 
-## 编译器的文件服务
+## 编译器的宿主服务
 
 [host.dart](../lib/src/host.dart) 定义编译器的宿主接口；官方 Dart 运行时使用 SDK 实现，原生 dartc 通过受信模块的声明身份连接到普通 Dart 运行时函数。同名用户函数仍按用户声明调用。
 
 - `hostReadIfExists(path)` 返回 `String?`。仅在 open 返回 `ENOENT` 或 `ENOTDIR` 时返回 null；空文件返回空字符串。权限、目录读取及其他 I/O 失败仍终止，路径与错误写入 stderr，保留调用方的 stdout。
+- `hostWriteError(message)` 将 String 编码为 UTF-8 写入 stderr，不自动追加换行；不分配托管对象，成功写入后释放 UTF-8 临时缓冲，可用于 NoGC 调用。写入失败沿既有宿主 I/O 出口处理。
 - `hostCurrentDirectory()` 返回实际工作目录，不读取 `PWD`，也不从可执行文件推断。macOS 使用 open/fcntl 的 [F_GETPATH](https://github.com/apple-oss-distributions/Libc/blob/main/gen/FreeBSD/getcwd.c) 路径，Linux 使用 [getcwd 系统调用](https://github.com/torvalds/linux/blob/master/tools/include/uapi/asm-generic/unistd.h)并在缓冲不足时重试。超出这些系统接口能表示的路径会报告 I/O 错误；尚无 libc 的长路径遍历回退。
 - `hostStdPath()` 按实际运行的可执行文件位置查找 `../lib/src/runtime.dart`，支持 PATH 与符号链接启动。macOS 读取进程可执行路径，Linux 读取 `/proc/self/exe`；显式 `--std` 跳过自动发现。
 - 文件和工作目录的原始缓冲在解码后释放；托管 String 或 null 使用现有 Ref 表示。两项服务可能创建托管 String，不能作为 NoGC 接口。

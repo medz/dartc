@@ -1,7 +1,7 @@
 import 'target.dart';
 import 'machine.dart';
 import 'liveness.dart';
-import 'host.dart';
+import 'diagnostic.dart';
 
 void allocateTouch(List<int> starts, List<int> ends, int value, int position) {
   if (starts[value] < 0 || position < starts[value]) starts[value] = position;
@@ -245,8 +245,7 @@ void allocateFunction(MachineFunction function, List<LivenessBlock> blocks) {
 }
 
 Never allocationError(String message) {
-  print('dartc allocation: ' + message);
-  hostExit(1);
+  throw Diagnostic('allocation: ' + message);
 }
 
 // Check actual live values backwards through each block, independently of the

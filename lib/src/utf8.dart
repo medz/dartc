@@ -14,9 +14,7 @@ List<int> encodeUtf8(String value) {
       }
     }
     if (code >= 0xd800 && code <= 0xdfff)
-      throw Diagnostic(
-        'dartc: UTF-8 output contains an unpaired UTF-16 surrogate',
-      );
+      throw Diagnostic('UTF-8 output contains an unpaired UTF-16 surrogate');
     if (code < 0x80) {
       bytes.add(code);
     } else {

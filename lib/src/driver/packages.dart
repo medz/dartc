@@ -1,4 +1,5 @@
 import '../host.dart';
+import '../diagnostic.dart';
 import '../package_config.dart';
 import '../source_uri.dart';
 
@@ -8,15 +9,16 @@ PackageConfig? compilerPackages(String inputUri, String cwd, String? explicit) {
   String? text;
   if (explicit != null) {
     if (explicit == '') {
-      print('Missing value for --packages');
-      hostExit(64);
+      throw Diagnostic('Missing value for --packages', exitCode: 64);
     }
     uri = sourceInputUri(cwd, explicit);
     path = sourceUriPath('/', uri);
     text = hostReadIfExists(path);
     if (text == null) {
-      print('Package configuration not found: ' + path);
-      hostExit(64);
+      throw Diagnostic(
+        'Package configuration not found: ' + path,
+        exitCode: 64,
+      );
     }
   } else {
     var directory = inputUri.substring(0, inputUri.lastIndexOf('/') + 1);

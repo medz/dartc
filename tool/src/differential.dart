@@ -99,7 +99,7 @@ void main(List<String> args) {
     compilerPackages(args[0], Directory.current.path, args[2]),
     Platform.isLinux ? 1 : 0,
   );
-  print(jsonEncode([for (final file in program.files) file.path]));
+  print(jsonEncode([for (final file in program.files) file.input.path]));
 }
 ''');
       File(engine).copySync('${folder.path}/engine');
@@ -487,14 +487,9 @@ String _classify(
   return equal(expected, actual) ? 'pass' : 'reference-divergence:run';
 }
 
-String _compilerDiagnostic(String text) => text.replaceAllMapped(
-  RegExp(r'^dartc: ([^\n]+?\.dart):\d+:', multiLine: true),
-  (match) => 'dartc: ${match[1]}:<offset>:',
-);
-
 String _compileStdout(ProcessOutcome result) {
   final index = result.arguments.indexOf('-o');
-  var text = _compilerDiagnostic(result.stdout);
+  var text = result.stdout;
   if (index >= 0 && index + 1 < result.arguments.length) {
     final output = result.arguments[index + 1];
     text = text.replaceAll(
@@ -508,15 +503,15 @@ String _compileStdout(ProcessOutcome result) {
 
 bool _sourceRejection(ProcessOutcome result, Map<String, Object?> contract) {
   final expected = contract['nativeDiagnostic'];
-  if (result.exitCode != 1 || expected is! String || expected.isEmpty)
+  if (result.exitCode != 1 ||
+      result.stdout.isNotEmpty ||
+      expected is! String ||
+      expected.isEmpty)
     return false;
-  final text = result.stdout + result.stderr;
   final path = RegExp.escape(result.workingDirectory + '/');
-  return text.contains(expected) &&
-      RegExp(
-        '^dartc(?: parser)?: $path[^\\n]+(?::[0-9]+:| at offset [0-9]+)',
-        multiLine: true,
-      ).hasMatch(text);
+  final diagnostic = RegExp('^$path[^\\n]+:[1-9][0-9]*:[1-9][0-9]*: ([^\\n]*)')
+      .firstMatch(result.stderr);
+  return diagnostic != null && diagnostic[1]!.contains(expected);
 }
 
 class DifferentialResult {
@@ -592,7 +587,7 @@ class DifferentialResult {
 
   // A generated result needs the same labelled observation and prior trace.
   // A compiler exception needs the same preamble and compiler-owned frame.
-  // Other outcomes retain their complete observations; source offsets may move.
+  // Other outcomes retain their complete observations, including source locations.
   String get fingerprint => jsonEncode({
     'kind': kind,
     'verdict': verdict,
@@ -613,7 +608,7 @@ class DifferentialResult {
           'stderr': entry.key.endsWith('.compile')
               ? (witness != null && witness!['phase'] == entry.key
                     ? '<witness>'
-                    : _compilerDiagnostic(entry.value.stderr))
+                    : entry.value.stderr)
               : base64Encode(entry.value.stderrBytes),
         },
     },

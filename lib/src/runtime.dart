@@ -1066,6 +1066,14 @@ int rtPrintBool(int value) {
   return 0;
 }
 
+@pragma('dartc:no-gc')
+int rtHostWriteError(int value) {
+  var encoded = rtStringEncodeUtf8(value);
+  rtWriteAll(2, encoded + 8, nativeLoad64(encoded));
+  rtUtf8Release();
+  return 0;
+}
+
 int rtHostRead(int path) {
   return rtHostReadFile(path, 0, 0);
 }

@@ -1,6 +1,7 @@
 import 'ast.dart';
 import 'diagnostic.dart';
 import 'scanner.dart';
+import 'source_text.dart';
 
 class Parser {
   List<Token> tokens;
@@ -11,21 +12,18 @@ class Parser {
   bool restrictedExpression = false;
   bool patterns = true;
   bool abbreviatedConstructors = true;
-  List<String> paths;
+  final List<SourceText> sources;
 
-  Parser(this.tokens, this.position, this.pendingClosers, this.paths);
+  Parser(this.tokens, this.position, this.pendingClosers, this.sources);
 }
 
 Never parserError(Parser parser, String message) {
   var token = parser.tokens[parser.position];
-  var location = '';
-  if (token.source >= 0) location = parser.paths[token.source] + ':';
   throw Diagnostic(
-    'dartc parser: ' +
-        location +
-        message +
-        ' at offset ' +
-        parser.tokens[parser.position].start.toString(),
+    message,
+    source: token.source >= 0 ? parser.sources[token.source] : null,
+    start: token.start,
+    end: token.end,
   );
 }
 
@@ -681,7 +679,7 @@ AstPattern parserUnaryPattern(Parser parser, int context) {
   var op = parserPeek(parser);
   var typedList = false;
   if (parserIs(parser, '<')) {
-    var look = Parser(parser.tokens, token, 0, parser.paths);
+    var look = Parser(parser.tokens, token, 0, parser.sources);
     typedList = parserLookTypeArguments(look) && parserIs(look, '[');
   }
   if (!typedList &&
@@ -880,7 +878,7 @@ bool parserObjectPatternAhead(Parser parser) {
       parserIs(parser, 'const') ||
       parserIs(parser, 'void'))
     return false;
-  var look = Parser(parser.tokens, parser.position + 1, 0, parser.paths);
+  var look = Parser(parser.tokens, parser.position + 1, 0, parser.sources);
   if (parserTake(look, '.')) {
     if (look.tokens[look.position].kind != tokenIdentifier) return false;
     look.position++;
@@ -1511,7 +1509,7 @@ bool parserIndexIsConditional(Parser parser) {
           tokenIs(token, '?..'))
         return false;
       if (tokenIs(token, '<')) {
-        var look = Parser(parser.tokens, position, 0, parser.paths);
+        var look = Parser(parser.tokens, position, 0, parser.sources);
         if (parserLookTypeArguments(look) &&
             look.pendingClosers == 0 &&
             !look.pendingEquals &&
@@ -1523,7 +1521,7 @@ bool parserIndexIsConditional(Parser parser) {
       if (tokenIs(token, 'as') || tokenIs(token, 'is')) {
         var start = position + 1;
         if (tokenIs(parser.tokens[start], '!')) start++;
-        var look = Parser(parser.tokens, start, 0, parser.paths);
+        var look = Parser(parser.tokens, start, 0, parser.sources);
         if (parserLookType(look)) {
           if (tokenIs(parser.tokens[look.position - 1], '?') &&
               !parserNullableTypeEnd(look))
@@ -1634,7 +1632,7 @@ int parserOuterPatternEnd(Parser parser, [int offset = 0]) {
       }
     }
     if (tokenIs(tokens[position], '<')) {
-      var look = Parser(tokens, position, 0, parser.paths);
+      var look = Parser(tokens, position, 0, parser.sources);
       if (!parserLookTypeArguments(look) ||
           look.pendingClosers != 0 ||
           look.pendingEquals)

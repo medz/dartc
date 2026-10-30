@@ -108,7 +108,7 @@ String _declaration(int type, String name, [bool constant = false]) {
     ffiDouble => 'double',
     ffiBool => 'bool',
     _ => throw Diagnostic(
-      'dartc: C header generation for this FFI type is not implemented',
+      'C header generation for this FFI type is not implemented',
     ),
   };
   return (constant ? 'const ' : '') + spelling + ' ' + name;

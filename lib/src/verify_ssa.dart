@@ -214,7 +214,7 @@ class _SsaVerifier {
       if (callee.parameterTypes.length != count || result != expectedResult)
         fail('call metadata');
     } else if (op == opBuiltin) {
-      if (!(target >= bPrintString && target <= bHostReadSource ||
+      if (!(target >= bPrintString && target <= bHostWriteError ||
           target >= bNativeLoad64 &&
               target <= bNativeResumeContext &&
               target != bNativeMetadataAddress))

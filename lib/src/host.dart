@@ -61,6 +61,8 @@ String? hostReadIfExists(String path) {
 
 String hostCurrentDirectory() => Directory.current.path;
 
+void hostWriteError(String message) => stderr.write(message);
+
 void hostWrite(String path, List<int> bytes) {
   File(path).parent.createSync(recursive: true);
   File(path).writeAsBytesSync(bytes);
