@@ -10,6 +10,8 @@ dartc 是用 Dart 实现的独立原生 Dart 编译器，目标是完整实现�
 
 ## 当前实现边界
 
+`lib/src/legacy/` 已冻结，作为参考与引导恢复源码保留；不再修改或运行其测试、基准、自举校验及打包验证。下文的当前实现描述指该冻结实现，目标设计仍可修订。
+
 | 领域 | 当前边界 |
 |---|---|
 | 前端 | 独立扫描与 AST、库/成员/局部绑定、有限类型和流分析；lowering 通过带类型的栈 IR 构造 SSA，尚无完整 ResolvedProgram |
@@ -118,17 +120,9 @@ lib/src/legacy/
   runtime/frames.dart                            帧查找与同步栈轨迹
   runtime/exceptions.dart                        待处理异常、处理表查找与栈展开
   std/core.dart, std/core/                        目标标准库源码
-test/legacy/
-  behavior_test.dart, differential_test.dart, library_test.dart
-  measure_test.dart, program_benchmark_test.dart, ssa_test.dart
-  bootstrap_test.dart, package_release_test.dart
-  fixtures/
 tool/
-  bootstrap.dart, benchmark.dart, package_release.dart, fuzz.dart
-  src/
-    process.dart, differential.dart, fuzz_program.dart 进程捕获、差分执行与生成模型
-    measure.dart                                 原生任务资源采样
-    program_benchmark.dart                       普通程序的 SDK/native 编译与运行对照
+  bundle_compiler.dart                           生成含内置源码的编译器入口
+  package_release.dart                           归档编译器、许可与使用说明
 ```
 
 `frontend.dart`、`runtime.dart` 和 `format.dart` 仍跨越多个职责。已有独立文件是后续拆分的定义拥有者，不能把大文件的状态复制进新文件后形成第二套实现。

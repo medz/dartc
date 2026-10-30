@@ -1,18 +1,7 @@
 import 'dart:io';
 
-ProcessResult run(
-  String executable,
-  List<String> arguments, {
-  String? directory,
-  bool native = false,
-}) {
-  final result = Process.runSync(
-    executable,
-    arguments,
-    workingDirectory: directory,
-    environment: native ? {'PATH': '/usr/bin:/bin'} : null,
-    includeParentEnvironment: !native,
-  );
+ProcessResult run(String executable, List<String> arguments) {
+  final result = Process.runSync(executable, arguments);
   if (result.exitCode != 0) {
     throw ProcessException(
       executable,
@@ -49,7 +38,7 @@ void main(List<String> args) {
   final name = 'dartc-$version-$os-$architecture';
   final output = Directory('$root/build/release')..createSync(recursive: true);
   final temporary = Directory.systemTemp.createTempSync('dartc-release-');
-  var passed = false;
+  var completed = false;
   try {
     final bundle = Directory('${temporary.path}/$name')..createSync();
     final binary = File('${bundle.path}/bin/dartc');
@@ -79,54 +68,6 @@ License: MIT (included).
       name,
     ]);
 
-    // Validate the shipped files, with no checkout or SDK path available.
-    final unpacked = Directory('${temporary.path}/unpacked')..createSync();
-    run('/usr/bin/tar', ['-xzf', archive.path, '-C', unpacked.path]);
-    final installed = '${unpacked.path}/$name';
-    final work = Directory('${temporary.path}/project')..createSync();
-    File('${work.path}/hello.dart').writeAsStringSync('''
-void main() {
-  try {
-    throw 'release';
-  } on String catch (value, trace) {
-    if (value != 'release' || trace.toString().indexOf('main') < 0) {
-      print('release failed');
-      return;
-    }
-  }
-  final trace = StackTrace.current.toString();
-  if (trace.indexOf('main') < 0 || double.parse('1.25') != 1.25) {
-    print('release failed');
-    return;
-  }
-  print('release ok');
-}
-''');
-    final aliases = Directory('${temporary.path}/aliases')..createSync();
-    Link('${aliases.path}/dartc').createSync('$installed/bin/dartc');
-    for (final command in [
-      ['$installed/bin/dartc'],
-      ['/usr/bin/env', 'PATH=$installed/bin:/usr/bin:/bin', 'dartc'],
-      ['/usr/bin/env', 'PATH=${aliases.path}:/usr/bin:/bin', 'dartc'],
-    ]) {
-      run(
-        command.first,
-        [...command.skip(1), 'hello.dart', '-o', 'hello'],
-        directory: work.path,
-        native: true,
-      );
-      final result = run(
-        '${work.path}/hello',
-        [],
-        directory: work.path,
-        native: true,
-      );
-      if (result.stdout != 'release ok\n') {
-        throw StateError(
-          'Extracted native compiler produced unexpected output.',
-        );
-      }
-    }
     final hash = run(os == 'macos' ? '/usr/bin/shasum' : '/usr/bin/sha256sum', [
       if (os == 'macos') ...['-a', '256'],
       archive.path,
@@ -137,12 +78,9 @@ void main() {
     File('${published.path}.sha256')
         .writeAsStringSync('$digest  $name.tar.gz\n');
     stdout.writeln(published.path);
-    stdout.writeln(
-      'Extracted native compiler: direct, PATH and symlink checks passed.',
-    );
-    passed = true;
+    completed = true;
   } finally {
-    if (passed) {
+    if (completed) {
       temporary.deleteSync(recursive: true);
     } else {
       stderr.writeln('Package failure retained at: ${temporary.path}');

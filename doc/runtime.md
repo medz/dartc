@@ -1,5 +1,7 @@
 # 运行时接口与所有权
 
+本文描述冻结的 `lib/src/legacy/` 实现；测试链接仅指向冻结提交中的历史行为证据。
+
 [runtime.dart](../lib/src/legacy/runtime.dart) 实现目标程序的运行时算法；共享尺寸、偏移和表示由 [layout.dart](../lib/src/legacy/layout.dart) 定义。编译器与运行时必须使用匹配的 ABI，改变布局或调用协议时整体重建。
 
 当前源码 ABI 为 19。TypeRef 带对象头，List 和函数对象的类型引用参与扫描；函数值通过只读实参形状和栈向量调用。类描述符包含实际 Error 的轨迹槽偏移。旧 ABI 的元数据与函数入口不能与此运行时混用。
@@ -70,7 +72,7 @@ List 标志 `objectListFixed` / `objectListReadOnly` 分别限制长度变化和
 
 受信原语 `nativeExit(int status)` 的结果类型为 `Never`；绑定与 SSA 验证参数、结果及原生副作用。发码使用目标平台的进程退出入口，系统调用异常返回时触发硬件陷阱。`rtHostExit`、构建结束和致命错误出口均传播不返回的契约，不生成占位返回值或忙等循环。进程终止不提供 Dart 异常捕获与展开。
 
-实现入口：[ir.dart](../lib/src/legacy/ir.dart) 的原语签名、[arm64_emit.dart](../lib/src/legacy/arm64_emit.dart) 的 `emitExit()` 及 [x64.dart](../lib/src/legacy/x64.dart) 的 `xExit()`；行为由 [behavior_test.dart](../test/legacy/behavior_test.dart) 的退出状态与先行副作用用例验证，签名及 effects 由 [ssa_test.dart](../test/legacy/ssa_test.dart) 验证。
+实现入口：[ir.dart](../lib/src/legacy/ir.dart) 的原语签名、[arm64_emit.dart](../lib/src/legacy/arm64_emit.dart) 的 `emitExit()` 及 [x64.dart](../lib/src/legacy/x64.dart) 的 `xExit()`；行为由 [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) 的退出状态与先行副作用用例验证，签名及 effects 由 [ssa_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/ssa_test.dart) 验证。
 
 ## NoGC 提示
 
@@ -232,8 +234,8 @@ UTF-8 解码核心只在给定字节长度内读取，检查续字节、最短�
 
 绑定方法沿用函数对象前缀，`+32` 保存接收者 Ref；描述符的内部类 ID 为 `boundMethodClassId`，每个方法拥有唯一描述符。相等比较先判断该标记，再比较描述符地址、接收者身份及解析后的运行时函数类型，不调用接收者的相等运算。链接不能把不同方法的描述符合并为同一身份。调用适配器从捕获字段取出接收者，再进入原方法的直接入口；方法本体仍接收普通 this 参数。`ClosureLayout.boundReceiver` 拥有这一区别，SSA 检查接收者字段的数量和类型。提取期间接收者与尚未完成初始化的函数对象分别由活跃局部根持有；分配器先将引用字段置零再允许后续分配。
 
-## 行为验证入口
+## 历史行为证据
 
-- [behavior_test.dart](../test/legacy/behavior_test.dart)：core/NoGC、函数值、I/O 程序及拒绝/失败用例。
-- [roots.dart](../test/legacy/fixtures/roots.dart)：`noGcRoots()`、`runtimeOwnership()`、`builderRoots()`、`constantObjectRoots()`、`closureRoots()`、`typeGraphRoots()`、`collectionRoots()`。
-- [values.dart](../test/legacy/fixtures/values.dart)：String、List、类型与函数值行为。
+- [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)：core/NoGC、函数值、I/O 程序及拒绝/失败用例。
+- [roots.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/roots.dart)：`noGcRoots()`、`runtimeOwnership()`、`builderRoots()`、`constantObjectRoots()`、`closureRoots()`、`typeGraphRoots()`、`collectionRoots()`。
+- [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart)：String、List、类型与函数值行为。

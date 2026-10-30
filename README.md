@@ -92,24 +92,27 @@ dartc main.dart --std /path/to/dartc/lib/src/legacy/runtime.dart -o app
 
 ## Build from source
 
-Development validation uses the installed Dart SDK on macOS or Linux with ARM64/x86-64. Differential and benchmark reports record the SDK version used.
+The implementation in `lib/src/legacy/` is frozen. Keep a native seed matching its source revision; the legacy test and validation tooling is retired. See [developer tooling](doc/development.md) for rebuilding from that seed.
+
+For a new checkout without a matching seed, compile the initial seed once with the official Dart SDK:
 
 ```sh
 git clone https://github.com/medz/dartc.git
 cd dartc
 dart pub get
-dart tool/bootstrap.dart
-build/dartc-stage2 example/hello.dart -o build/hello
-./build/hello
+mkdir -p build
+dart compile exe bin/dartc.dart -o build/dartc-seed
 ```
 
-Bootstrap starts with the verified local `build/dartc-seed`. That seed builds a native source bundler, which generates the compiler entry containing its runtime and standard-library resources. The seed and subsequent native stages compile this entry. Only when no local seed exists does bootstrap build an initial seed with official Dart. It checks repeated native builds and behavior before replacing the seed. An existing seed's failure does not fall back to official compilation.
-
-An extracted native release can also serve as the seed:
+With `build/dartc-seed` available, build the native compiler and its embedded sources:
 
 ```sh
-dart tool/bootstrap.dart --seed /path/to/dartc-release/bin/dartc
+build/dartc-seed tool/bundle_compiler.dart --std lib/src/legacy/runtime.dart -o build/bundle_compiler
+build/bundle_compiler "$PWD" build/compiler.dart
+build/dartc-seed build/compiler.dart --std lib/src/legacy/runtime.dart -o build/dartc
 ```
+
+Reuse an existing matching seed when available. If it fails, diagnose the failure; do not replace it implicitly with an official-compiler build.
 
 The compiler, allocator, runtime algorithms, machine-code generation, executable formats and local Mach-O signatures are implemented in Dart. No C compiler, assembler, linker or signing subprocess is needed to build executables.
 
@@ -152,4 +155,4 @@ These output modes currently support functions that need no managed runtime cont
 
 ## Contributing
 
-Start language work from the [specification tracker](specs/README.md). See the [architecture](doc/architecture.md) for compiler/runtime design, [runtime contracts](doc/runtime.md) for memory and ownership rules, and [developer tooling](doc/development.md) for compiler/program benchmarks and differential testing.
+Start language work from the [specification tracker](specs/README.md). See the [architecture](doc/architecture.md) for compiler/runtime design, [runtime contracts](doc/runtime.md) for memory and ownership rules, and [developer tooling](doc/development.md) for native builds and archive creation.

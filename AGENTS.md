@@ -1,5 +1,6 @@
 # Development
 
+- `lib/src/legacy/` is frozen reference and recovery code. Do not modify it or run legacy tests, benchmarks, bootstrap validation or package validation. Preserve existing native seeds and published release assets.
 - Keep the implementation direct and small. Use native Dart and avoid unnecessary dependencies or abstractions.
 - Keep module ownership explicit. Import definitions from their owning files; do not hide internal dependencies behind barrel exports.
 - Work toward genuine native self-hosting. Do not substitute an official-compiler wrapper or interpreter for compiling Dart source to native instructions.

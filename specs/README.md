@@ -2,6 +2,8 @@
 
 本目录按 Dart Language Specification 跟踪 dartc 的语言实现。兼容目标为 Dart 原生语言语义，官方 SDK 对照随开发机安装版本升级，当前为 **Dart SDK 3.13.7**。这里只记录条款引用、当前实现、缺口和验证入口，不保存或改写官方规范副本。
 
+本目录当前支持事实描述冻结的 `lib/src/legacy/` 实现。测试链接固定到冻结提交，仅作为既有行为证据；工作区不再保留或运行这套测试。
+
 编译器结构、IR、ABI、运行时和自举设计见 [architecture.md](../doc/architecture.md)，安装与使用见 [README](../README.md)。
 
 ## 规范来源
@@ -54,8 +56,8 @@
 - **待核对**：当前证据不足，先核对规范、源码和实际运行，再确定状态。
 - **已实现**：所引用的明确条款范围、必要行为及错误规则均已核对，并附验证证据；不将此状态扩展到整章或整个语言。当前各章仍有缺口，尚无整章符合性结论。
 
-代码链接定位实现，测试链接定位行为证据；有限测试或自编译成功均不代表整章兼容。平台能力以对应目标程序的实际执行为依据，仿真执行与原生硬件测量分别标明。macOS 与 Linux 的 ARM64/x86-64 目标共用本目录的语言条款和行为测试，不设按架构缩减的语法目标。验证入口为 `test/legacy/behavior_test.dart`、`test/legacy/ssa_test.dart` 和 `test/legacy/differential_test.dart`；目标及 ABI 由[架构与运行时文档](../doc/architecture.md#目标与发码边界)定义。
+代码链接定位实现，测试链接定位行为证据；有限测试或自编译成功均不代表整章兼容。平台能力以对应目标程序的实际执行为依据，仿真执行与原生硬件测量分别标明。macOS 与 Linux 的 ARM64/x86-64 目标共用本目录的语言条款和行为测试，不设按架构缩减的语法目标。历史行为证据见冻结提交中的 [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)、[ssa_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/ssa_test.dart) 和 [differential_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/differential_test.dart)；目标及 ABI 由[架构与运行时文档](../doc/architecture.md#目标与发码边界)定义。
 
 ## 维护要求
 
-语言变更应同步更新所属条目的支持范围、缺口、上游引用和行为测试入口。绑定、类型检查、流分析与运行时约束必须随语法一起落实；验证复用现有编译执行测试，并对照实际使用的 SDK 的成功与拒绝行为。
+语言变更应同步更新所属条目的支持范围、缺口、上游引用和行为测试入口。绑定、类型检查、流分析与运行时约束必须随语法一起落实；冻结实现的历史证据不自动证明后续实现的行为。
