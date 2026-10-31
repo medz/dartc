@@ -2,7 +2,15 @@
 
 本目录跟踪 Dart 语言条款、dartc 的支持范围、缺口和行为验证。当前兼容基线为 **Dart SDK 3.13.7**；完整语言及所需标准库尚未实现。
 
-编译与执行支持对应 dartc 0.5 的编译器，测试链接固定到相关源码版本。[扫描 API](lexical-structure.md#扫描-api) 的词法支持和 AST 的[类型](types.md#类型语法表示)、[元数据](classes.md#元数据语法表示)、[表达式](expressions.md#表达式语法表示)支持分别记录；它们不代表编译器已经支持相应程序的编译或执行。
+编译与执行支持对应 dartc 0.5 的编译器，测试链接固定到相关源码版本。新 API 的语法支持单独列出，不代表相应程序已能编译或执行：
+
+| API | 支持范围与验证 |
+| --- | --- |
+| 扫描 | [词法规则、token 与词法诊断](lexical-structure.md#扫描-api) |
+| AST：编译单元与声明 | [库指令](libraries.md#编译单元与库指令语法表示)、[类及相关声明](classes.md#类与成员语法表示)、[元数据](classes.md#元数据语法表示)、[函数](functions.md#函数语法表示)、[变量](variables.md#变量语法表示) |
+| AST：类型与程序体 | [类型](types.md#类型语法表示)、[表达式](expressions.md#表达式语法表示)、[语句](statements.md#语句语法表示)、[模式](patterns.md#模式语法表示) |
+
+AST API 接受手工构造的节点，检查源码范围、快照归属和子节点顺序。文本解析、名称绑定、类型检查和执行尚未接入这些节点。
 
 安装与使用见 [README](../README.md)。
 
@@ -52,7 +60,7 @@ Wasm 是后续输出目标，尚不代表已经实现或验证。其模块导入
 | [增强枚举](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.17/enhanced-enums/feature-specification.md) | [类](classes.md) | 非泛型枚举的值、字段、const 与重定向构造、工厂构造、方法、静态成员和 implements 已支持；类型参数、mixin 及值名为 `name` 的枚举仍缺 |
 | [super 形参](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.17/super-parameters/feature-specification.md) | [类](classes.md) | 非泛型生成式构造中的类型推断、默认值继承与参数转发已支持；泛型类情形仍缺 |
 | [Records](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/records/feature-specification.md)、[Patterns](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md)及[穷尽性](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/exhaustiveness.md) | [类型](types.md)、[模式、switch 与 if-case](patterns.md)、[语句](statements.md) | switch 表达式、if-case、标量/对象/List 模式、局部解构声明/赋值及模式循环头部分实现；模式 switch 语句部分实现；Map/record 解构未实现 |
-| [类修饰符](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/class-modifiers/feature-specification.md)、[Extension types](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.3/extension-types/feature-specification.md) | [类](classes.md)、[类型](types.md) | 未实现 |
+| [类修饰符](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/class-modifiers/feature-specification.md)、[Extension types](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.3/extension-types/feature-specification.md) | [类](classes.md)、[类型](types.md) | 类修饰符部分实现；extension type 的静态及运行时语义未实现 |
 | [数字分隔符](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.6/digit-separators/feature-specification.md) | [词法](lexical-structure.md) | 部分实现；整数、小数及指数中的数字分隔符可用 |
 | [通配变量](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/wildcard-variables/feature-specification.md) | [变量](variables.md) | 已有局部绑定行为，完整声明位置规则待核对 |
 | [基于界限的推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/inference-using-bounds/design-document.md) | [类型](types.md)、[函数](functions.md#基于界限的推断) | 3.7 起在普通泛型调用和普通及 const 泛型构造推断中组合下界与声明上界，支持 List、可空及函数签名；完整 F-bound 与泛型父接口仍缺 |

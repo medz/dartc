@@ -10,7 +10,7 @@ dartc is an early preview. Complete Dart language and standard-library compatibi
 
 ### Native compiler
 
-Download the archive for your platform from [GitHub Releases](https://github.com/medz/dartc/releases). Extract it, keep its contents together, and add its `bin` directory to your `PATH`.
+Download the archive for your platform from [GitHub Releases](https://github.com/medz/dartc/releases). Extract it and add its `bin` directory to your `PATH`.
 
 See the release notes for available platforms, checksums and upgrade instructions.
 
