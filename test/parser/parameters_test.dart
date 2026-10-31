@@ -268,10 +268,12 @@ void main() {
 
   test('handles deeply nested function-form parameters iteratively', () {
     const depth = 12000;
-    final text = '(${"void f(" * depth}int x${")" * depth})';
-    final tree = parsed(text);
-    expect(tree.text, text);
-    expect(walk(tree).whereType<FunctionParameterSuffix>(), hasLength(depth));
+    for (final head in ['void f(', 'void Function(', 'void Function<T>(']) {
+      final text = '(${head * depth}int x${")" * depth})';
+      final tree = parsed(text);
+      expect(tree.text, text);
+      expect(walk(tree).whereType<FunctionParameterSuffix>(), hasLength(depth));
+    }
   });
 
   test('recovers malformed parameters without modifying input or ranges', () {

@@ -372,6 +372,32 @@ final class _ParameterReader(
   }
 }
 
+extension on _Parser {
+  bool functionParameterAfterName() {
+    var opening = cursor + 1;
+    if (tokens[opening].kind == .less) {
+      final child = _Parser.nested(this)..advance();
+      if (_TypeReader(child).read(parameters: true) == null) return false;
+      opening = child.cursor;
+    }
+    if (tokens[opening].kind != .leftParen) return false;
+    final closing = lookahead.delimiters.closing(opening);
+    if (closing == null) return false;
+    var following = closing + 1;
+    if (tokens[following].kind == .question) following++;
+    return switch (tokens[following].kind) {
+      .comma ||
+      .rightParen ||
+      .rightBracket ||
+      .rightBrace ||
+      .assign ||
+      .colon ||
+      .eof => true,
+      _ => false,
+    };
+  }
+}
+
 extension on TokenKind {
   bool get isFormalModifier =>
       isVariableModifier ||

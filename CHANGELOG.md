@@ -25,7 +25,7 @@
 
 - Reduce temporary allocations when scanning identifiers and speed up scanning of whitespace runs.
 - Reduce parsing time and memory use for long chains of ambiguous null-aware index expressions, including subsequent member access, calls and indexes.
-- Improve parser scaling for deeply nested collections, blocks and incomplete delimiters.
+- Improve parser scaling for deeply nested collections, blocks, function-form parameters and incomplete delimiters.
 - Reduce unnecessary work when parsing declarations.
 
 ## [0.5.0](https://github.com/medz/dartc/compare/v0.4.0...v0.5.0) — 2026-10-31

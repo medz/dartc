@@ -92,6 +92,7 @@ final class _TypeReader(
           return value;
         }
         if (beforeParameter && frames.isEmpty) {
+          if (parser.functionParameterAfterName()) return value;
           parameterFallback = (value, parser.cursor);
         }
         value = beginFunction(value);
