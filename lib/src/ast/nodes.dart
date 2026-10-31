@@ -6,11 +6,17 @@ part 'nodes/annotations.dart';
 part 'nodes/cascades.dart';
 part 'nodes/collections.dart';
 part 'nodes/expressions.dart';
+part 'nodes/loops.dart';
 part 'nodes/operations.dart';
+part 'nodes/pattern_collections.dart';
+part 'nodes/pattern_operations.dart';
+part 'nodes/patterns.dart';
 part 'nodes/records.dart';
 part 'nodes/shorthands.dart';
 part 'nodes/strings.dart';
+part 'nodes/switches.dart';
 part 'nodes/type_annotations.dart';
+part 'nodes/variables.dart';
 
 /// An immutable syntax node within one source snapshot.
 ///
@@ -62,7 +68,7 @@ final class Identifier({
   required super.source,
   required super.start,
   required super.end,
-}) extends AstNode;
+}) extends AstNode implements ForInTarget;
 
 List<T> _freeze<T>(List<T> values) =>
     values.isEmpty ? const [] : List.unmodifiable(values);

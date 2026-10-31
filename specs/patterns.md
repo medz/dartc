@@ -4,6 +4,22 @@ sealed 验证归 [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107
 
 本页跟踪 Dart 3.0 的[模式特性规范][patterns]与[穷尽性分析][exhaustiveness]。兼容目标及 SDK 版本见[总览](README.md)；记录类型见[类型](types.md)，switch 语句见[语句](statements.md)。
 
+## 模式语法表示
+
+`package:dartc/ast.dart` 可构造下列模式及其使用位置的语法树。构造器检查源码范围、快照归属和子节点顺序；尚未提供模式解析、绑定、类型推断、合法性检查或匹配执行。
+
+| 语言条款 | 可表示的语法 | 验证 |
+| --- | --- | --- |
+| 常量、identifier、variable、wildcard patterns | 常量表达式与显式 `const`、未绑定的裸名字、带类型或 `var` / `final` 的变量、带类型或不带类型的 `_` | [patterns_test.dart](../test/ast/patterns_test.dart) |
+| Logical、relational、parenthesized、cast、null-check、null-assert patterns | `&&` / `||`、六种关系运算符、括号、`as`、`?`、`!`；保留分支、操作数和写出的类型 | [patterns_test.dart](../test/ast/patterns_test.dart) |
+| List、Map、record、object patterns | 显式类型实参、List rest 与可选子模式、Map 键值条目、位置和命名字段、对象类型及省略名称的字段；名称推断与匹配类型尚未检查 | [patterns_test.dart](../test/ast/patterns_test.dart) |
+| 模式声明与赋值 | `var` / `final` 模式声明、元数据、初始化表达式、循环头中的模式绑定和解构赋值；不把裸名字提前解析为声明或常量 | [patterns_test.dart](../test/ast/patterns_test.dart)、[loops_test.dart](../test/ast/loops_test.dart) |
+| Guard、if-case element、switch expression | `when` 守卫、集合 if-case、按源码顺序排列的 switch 表达式分支；保留选择值、模式、守卫和结果各自的范围 | [loops_test.dart](../test/ast/loops_test.dart)、[switches_test.dart](../test/ast/switches_test.dart) |
+
+模式构造、范围检查和遍历不证明模式合法或 switch 穷尽；可诊断的错误结构也能保留在树中。语句形式的 if-case、switch 及其标签和语句体尚无 AST 节点。编译与执行支持以下表为准。
+
+## 编译与执行
+
 | 规范条目 | 状态 | 支持范围与缺口 | 验证 |
 | --- | --- | --- | --- |
 | Switch expression | 部分实现 | 文件语言版本至少 3.0；选择值只求值一次，按源码顺序尝试模式、守卫和结果。只执行匹配且守卫为真的结果；结果接受下行类型上下文，各臂类型合并后显式转换。switch 表达式不是常量表达式。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart)：`switchExpressions`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)：`rejected` |

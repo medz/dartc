@@ -37,6 +37,16 @@ final class SyntaxFixture(String text) {
     );
   }
 
+  IdentifierPattern patternName(String name, [int from = 0]) {
+    final identifier = id(name, from);
+    return IdentifierPattern(
+      source: source,
+      start: identifier.start,
+      end: identifier.end,
+      name: identifier,
+    );
+  }
+
   InvocationExpression emptyCall(String name, [int from = 0]) {
     final callee = reference(name, from);
     if (source.text.substring(callee.end, callee.end + 2) != '()') {

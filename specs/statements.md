@@ -3,6 +3,14 @@
 按[固定草案源码](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)的 §18 建立索引；条款目录见[官方草案 PDF](https://dart.dev/to/spec-draft)。
 SDK 对照版本见[总览](README.md)；switch 语句及表达式的模式、共享绑定和穷尽性实现见[模式](patterns.md)。
 
+## 声明与循环头语法表示
+
+`package:dartc/ast.dart` 可构造变量声明列表、单变量与可选初始化式、元数据、写出的类型及 `late` / `var` / `final` / `const`，以及 `var` / `final` 模式声明。传统 `for` 头保留初始化、可省略的条件和有序更新；`for-in` 头区分已有标识符、新声明及模式绑定，并保留 iterable 表达式。验证见 [loops_test.dart](../test/ast/loops_test.dart)。
+
+这些节点只表示语法片段，构造和遍历不建立作用域、绑定、确定赋值或执行顺序。声明语句、循环语句及其他语句节点尚未提供；集合中的循环与 if-case 见[表达式语法表示](expressions.md#表达式语法表示)。
+
+## 编译与执行
+
 | 规范条目 | 状态 | 支持范围与缺口 | 验证 |
 | --- | --- | --- | --- |
 | §18.0.1 语句完成方式 | 部分实现 | 支持正常结束、return、break、continue 和同步异常，并在离开 try/catch 时执行 finally；异步完成仍缺。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `flowContexts()`、`exceptionValues()` |

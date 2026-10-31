@@ -14,6 +14,8 @@
 | §17.7 字符串与插值 | 普通、raw、多行字符串，`$name` / `$this` / `${expression}`、嵌套插值及相邻字符串；保留原始转义、分隔符、UTF-16 和换行，尚未解码或求值 | [strings_test.dart](../test/ast/strings_test.dart) |
 | [Record 字面量][record-literals] | 空 record、单位置字段、位置与命名字段交错、显式 `const`；保留字段书写顺序，区分 `(value)` 与 `(value,)` | [records_test.dart](../test/ast/records_test.dart) |
 | [集合元素][collection-elements]与[空感知元素][null-aware-elements] | List 与未判定 Set/Map 的大括号字面量、显式类型实参与 `const`、普通元素、键值条目、`...` / `...?`、嵌套 `if` / `else`、`?expression`、独立的空感知键和值；集合类型推断和常量资格尚未检查 | [collections_test.dart](../test/ast/collections_test.dart) |
+| 集合循环与[模式](patterns.md#模式语法表示) | `for`、`for-in`、`await for`、if-case 与守卫；循环头保留声明或表达式初始化、可省略的条件、多条更新、已有变量及模式绑定 | [loops_test.dart](../test/ast/loops_test.dart) |
+| [Switch 表达式与模式赋值](patterns.md#模式语法表示) | 选择表达式、有序分支、可选 `when`、解构赋值目标与右值；尚未进行绑定、穷尽性或可写性检查 | [switches_test.dart](../test/ast/switches_test.dart)、[patterns_test.dart](../test/ast/patterns_test.dart) |
 | 调用、实例创建与[显式实例化][constructor-tearoffs] | 位置及命名实参、调用类型实参、`new` / `const`、`f<T>`、`C<T>.new` 等未绑定引用；区分 `f<T>(x)` 和 `(f<T>)(x)` | [nodes_test.dart](../test/ast/nodes_test.dart)、[expressions_test.dart](../test/ast/expressions_test.dart) |
 | 赋值、增减与成员访问 | 简单、复合、`??=` 赋值，前后 `++` / `--`，`this` / `super`，属性和索引；目标保留一次，尚未检查是否可写 | [expressions_test.dart](../test/ast/expressions_test.dart) |
 | [空安全选择器][null-aware] | `?.`、`?[]`、后缀 `!`，以及链中的括号边界 | [expressions_test.dart](../test/ast/expressions_test.dart)、[access_test.dart](../test/ast/access_test.dart) |
@@ -21,7 +23,7 @@
 | [级联][cascades] | 一个接收者、有序分段、首段 `?..`、属性及索引起始选择器、段内调用与赋值、带括号的嵌套级联 | [access_test.dart](../test/ast/access_test.dart) |
 | [点简写][dot-shorthands] | `.name` / `.new`、显式 `const .name(...)` / `const .new(...)` 及其后续选择链；完整链保留独立的上下文边界，尚未推断目标命名空间 | [access_test.dart](../test/ast/access_test.dart) |
 
-集合中的 `for` / `for-in` / `await for`、`if-case`、函数表达式、switch 表达式和模式赋值等节点仍有缺口。编译与执行行为以下表为准。
+函数表达式及其参数和函数体节点仍有缺口。上述表达式节点尚无文本解析和语义检查 API，编译与执行行为以下表为准。
 
 ## 求值、常量与字面量
 

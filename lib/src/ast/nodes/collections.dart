@@ -138,8 +138,11 @@ final class IfElement({
   required super.start,
   required super.end,
 
-  /// The boolean condition expression.
+  /// The expression used as a boolean condition or matched by [casePattern].
   required final Expression condition,
+
+  /// The pattern following `case`, with its optional guard, or `null`.
+  final CasePattern? casePattern,
 
   /// The element selected when the condition is true.
   required final CollectionElement thenElement,
@@ -152,12 +155,46 @@ final class IfElement({
   }
 
   @override
-  int get childCount => elseElement == null ? 2 : 3;
+  int get childCount =>
+      2 + (casePattern == null ? 0 : 1) + (elseElement == null ? 0 : 1);
+  @override
+  AstNode childAt(int index) {
+    RangeError.checkValidIndex(index, this, 'index', childCount);
+    if (index == 0) return condition;
+    index--;
+    if (casePattern != null) {
+      if (index == 0) return casePattern!;
+      index--;
+    }
+    return index == 0 ? thenElement : elseElement!;
+  }
+}
+
+/// A collection element with a `for` or `await for` loop.
+final class ForElement({
+  required super.source,
+  required super.start,
+  required super.end,
+
+  /// Whether `await` precedes `for`.
+  final bool isAwait = false,
+
+  /// The syntax within the loop header's parentheses.
+  required final ForLoopParts parts,
+
+  /// The collection element after the loop header.
+  required final CollectionElement body,
+}) extends AstNode implements CollectionElement {
+  this {
+    _checkChildren(this);
+  }
+
+  @override
+  int get childCount => 2;
   @override
   AstNode childAt(int index) => switch (index) {
-    0 => condition,
-    1 => thenElement,
-    2 when elseElement != null => elseElement!,
+    0 => parts,
+    1 => body,
     _ => super.childAt(index),
   };
 }

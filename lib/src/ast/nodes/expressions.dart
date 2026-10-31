@@ -5,7 +5,7 @@ sealed class Expression({
   required super.source,
   required super.start,
   required super.end,
-}) extends AstNode implements CollectionElement, RecordField;
+}) extends AstNode implements CollectionElement, RecordField, ForInitializer;
 
 /// A reference written as one identifier.
 final class IdentifierExpression({
