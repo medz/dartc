@@ -144,10 +144,10 @@ final class IfElement({
   /// The pattern following `case`, with its optional guard, or `null`.
   final CasePattern? casePattern,
 
-  /// The element selected when the condition is true.
+  /// The element following the condition and optional case pattern.
   required final CollectionElement thenElement,
 
-  /// The element selected when the condition is false, or `null` when absent.
+  /// The written else element, or `null` when absent.
   final CollectionElement? elseElement,
 }) extends AstNode implements CollectionElement {
   this {

@@ -3,6 +3,20 @@
 按[固定草案源码](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)的 §9.1–§9.4 建立索引；条款目录见[官方草案 PDF](https://dart.dev/to/spec-draft)。
 SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15，类成员另见[类追踪](classes.md)。
 
+## 函数语法表示
+
+`package:dartc/ast.dart` 可构造以下函数语法。构造器检查源码范围、快照归属及子节点顺序，不解析文本或执行语义检查。
+
+| 语言条款 | 可表示的语法 | 验证 |
+| --- | --- | --- |
+| §9.2 形参 | 必需与可选位置参数、必需与可选命名参数、元数据、`covariant`、写出的类型、名字和默认表达式；保留 `this.` / `super.` 前缀、函数形式参数的类型参数、嵌套形参与 `?` | [parameters_test.dart](../test/ast/parameters_test.dart) |
+| §9 函数体、§17.14 函数表达式 | 匿名函数的类型参数与形参；同步块、`async` / `sync*` / `async*` 块、可选 `async` 的箭头体及声明的分号体；区分箭头表达式与声明结尾的分号范围 | [functions_test.dart](../test/ast/functions_test.dart) |
+| §9.1、§18.4 局部函数声明 | 元数据、可省略返回类型、名字、类型参数、形参和函数体 | [functions_test.dart](../test/ast/functions_test.dart) |
+
+形参节点也保留 `var` / `final` / `const` 修饰符及旧式默认值分隔符 `:`，供后续版本和上下文检查；可构造节点不表示这些写法在任意语言版本或声明位置合法。顶层函数、访问器和类成员声明节点尚未提供。作用域、参数绑定、默认值常量检查、闭包捕获、返回与生成器规则均未接入这些节点；编译与执行支持以下表为准。
+
+## 编译与执行
+
 | 规范条目 | 状态 | 支持范围与缺口 | 验证 |
 | --- | --- | --- | --- |
 | §9 函数体 | 部分实现 | 支持同步块体和 `=>`；异步与生成器函数体未实现。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `integer()`、`argumentCalls()` |

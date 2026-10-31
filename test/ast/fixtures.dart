@@ -96,6 +96,60 @@ final class SyntaxFixture(String text) {
     name: [id(name)],
   );
 
+  FormalParameter parameter(
+    String name, {
+    FormalParameterKind kind = .requiredPositional,
+    TypeAnnotation? type,
+    int from = 0,
+  }) {
+    final identifier = id(name, type?.end ?? from);
+    return FormalParameter(
+      source: source,
+      start: type?.start ?? identifier.start,
+      end: identifier.end,
+      kind: kind,
+      type: type,
+      name: identifier,
+    );
+  }
+
+  FormalParameterList emptyParameters(int offset) {
+    if (source.text.substring(offset, offset + 2) != '()') {
+      throw StateError('Expected empty parameters at $offset');
+    }
+    return FormalParameterList(
+      source: source,
+      start: offset,
+      end: offset + 2,
+      parameters: [],
+    );
+  }
+
+  BlockStatement emptyBlock(int offset) {
+    if (source.text.substring(offset, offset + 2) != '{}') {
+      throw StateError('Expected empty block at $offset');
+    }
+    return BlockStatement(
+      source: source,
+      start: offset,
+      end: offset + 2,
+      statements: [],
+    );
+  }
+
+  ExpressionStatement callStatement(String name, [int from = 0]) {
+    final expression = emptyCall(name, from);
+    if (source.text[expression.end] != ';') {
+      throw StateError('Expected semicolon after $name');
+    }
+    return ExpressionStatement(
+      source: source,
+      start: expression.start,
+      end: expression.end + 1,
+      expression: expression,
+    );
+  }
+
   BinaryExpression binary(
     Expression left,
     BinaryOperator op,

@@ -16,6 +16,7 @@
 | [集合元素][collection-elements]与[空感知元素][null-aware-elements] | List 与未判定 Set/Map 的大括号字面量、显式类型实参与 `const`、普通元素、键值条目、`...` / `...?`、嵌套 `if` / `else`、`?expression`、独立的空感知键和值；集合类型推断和常量资格尚未检查 | [collections_test.dart](../test/ast/collections_test.dart) |
 | 集合循环与[模式](patterns.md#模式语法表示) | `for`、`for-in`、`await for`、if-case 与守卫；循环头保留声明或表达式初始化、可省略的条件、多条更新、已有变量及模式绑定 | [loops_test.dart](../test/ast/loops_test.dart) |
 | [Switch 表达式与模式赋值](patterns.md#模式语法表示) | 选择表达式、有序分支、可选 `when`、解构赋值目标与右值；尚未进行绑定、穷尽性或可写性检查 | [switches_test.dart](../test/ast/switches_test.dart)、[patterns_test.dart](../test/ast/patterns_test.dart) |
+| §17.14 [函数表达式](functions.md#函数语法表示) | 可选类型参数、形参列表、同步或异步箭头体、块体及 `async` / `sync*` / `async*`；未推断返回类型或建立捕获关系 | [functions_test.dart](../test/ast/functions_test.dart)、[parameters_test.dart](../test/ast/parameters_test.dart) |
 | 调用、实例创建与[显式实例化][constructor-tearoffs] | 位置及命名实参、调用类型实参、`new` / `const`、`f<T>`、`C<T>.new` 等未绑定引用；区分 `f<T>(x)` 和 `(f<T>)(x)` | [nodes_test.dart](../test/ast/nodes_test.dart)、[expressions_test.dart](../test/ast/expressions_test.dart) |
 | 赋值、增减与成员访问 | 简单、复合、`??=` 赋值，前后 `++` / `--`，`this` / `super`，属性和索引；目标保留一次，尚未检查是否可写 | [expressions_test.dart](../test/ast/expressions_test.dart) |
 | [空安全选择器][null-aware] | `?.`、`?[]`、后缀 `!`，以及链中的括号边界 | [expressions_test.dart](../test/ast/expressions_test.dart)、[access_test.dart](../test/ast/access_test.dart) |
@@ -23,7 +24,7 @@
 | [级联][cascades] | 一个接收者、有序分段、首段 `?..`、属性及索引起始选择器、段内调用与赋值、带括号的嵌套级联 | [access_test.dart](../test/ast/access_test.dart) |
 | [点简写][dot-shorthands] | `.name` / `.new`、显式 `const .name(...)` / `const .new(...)` 及其后续选择链；完整链保留独立的上下文边界，尚未推断目标命名空间 | [access_test.dart](../test/ast/access_test.dart) |
 
-函数表达式及其参数和函数体节点仍有缺口。上述表达式节点尚无文本解析和语义检查 API，编译与执行行为以下表为准。
+上述表达式节点尚无文本解析和语义检查 API；构造与遍历不证明表达式合法、类型正确或求值行为已实现。编译与执行行为以下表为准。
 
 ## 求值、常量与字面量
 

@@ -3,11 +3,19 @@
 按[固定草案源码](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)的 §18 建立索引；条款目录见[官方草案 PDF](https://dart.dev/to/spec-draft)。
 SDK 对照版本见[总览](README.md)；switch 语句及表达式的模式、共享绑定和穷尽性实现见[模式](patterns.md)。
 
-## 声明与循环头语法表示
+## 语句语法表示
 
-`package:dartc/ast.dart` 可构造变量声明列表、单变量与可选初始化式、元数据、写出的类型及 `late` / `var` / `final` / `const`，以及 `var` / `final` 模式声明。传统 `for` 头保留初始化、可省略的条件和有序更新；`for-in` 头区分已有标识符、新声明及模式绑定，并保留 iterable 表达式。验证见 [loops_test.dart](../test/ast/loops_test.dart)。
+`package:dartc/ast.dart` 可构造以下语句及其组成部分。构造器检查源码范围、快照归属和子节点顺序；遍历顺序为源码书写顺序。
 
-这些节点只表示语法片段，构造和遍历不建立作用域、绑定、确定赋值或执行顺序。声明语句、循环语句及其他语句节点尚未提供；集合中的循环与 if-case 见[表达式语法表示](expressions.md#表达式语法表示)。
+| 语言条款 | 可表示的语法 | 验证 |
+| --- | --- | --- |
+| §18.1–18.4 块、空语句、表达式与局部声明 | 有序语句、分号、变量列表及可选初始化式、元数据、类型与 `late` / `var` / `final` / `const`、模式声明、[局部函数](functions.md#函数语法表示) | [statements_test.dart](../test/ast/statements_test.dart)、[functions_test.dart](../test/ast/functions_test.dart) |
+| §18.5–18.8 分支与循环 | `if` / `else`、if-case 与守卫、`while`、`do-while`、`for`、`for-in`、`await for`；循环头保留可省略条件和有序更新，区分已有变量、新声明和模式绑定 | [statements_test.dart](../test/ast/statements_test.dart)、[loops_test.dart](../test/ast/loops_test.dart) |
+| §18.9 Switch | 选择值、case 模式与守卫、default、标签、有序语句与空 case；未合并连续分支或解析跳转目标 | [switches_test.dart](../test/ast/switches_test.dart) |
+| §18.10–18.11 异常语句 | `try`、有序 `on` / `catch`、显式异常与堆栈参数、可选 `finally`、`rethrow`；省略的类型、参数和清理块保持缺省 | [exceptions_test.dart](../test/ast/exceptions_test.dart) |
+| §18.12–18.18 返回、标签、跳转、生成器与断言 | 有值或无值 `return`、多个标签、带或不带标签的 `break` / `continue`、`yield` / `yield*`、带或不带消息的 `assert` | [statements_test.dart](../test/ast/statements_test.dart) |
+
+这些节点尚无文本解析和语义检查 API；构造与遍历不建立作用域、绑定、确定赋值、完成方式、异常传播或异步执行。集合中的循环与 if-case 见[表达式语法表示](expressions.md#表达式语法表示)，编译与执行行为以下表为准。
 
 ## 编译与执行
 

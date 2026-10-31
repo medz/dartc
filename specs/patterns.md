@@ -16,7 +16,7 @@ sealed 验证归 [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107
 | 模式声明与赋值 | `var` / `final` 模式声明、元数据、初始化表达式、循环头中的模式绑定和解构赋值；不把裸名字提前解析为声明或常量 | [patterns_test.dart](../test/ast/patterns_test.dart)、[loops_test.dart](../test/ast/loops_test.dart) |
 | Guard、if-case element、switch expression | `when` 守卫、集合 if-case、按源码顺序排列的 switch 表达式分支；保留选择值、模式、守卫和结果各自的范围 | [loops_test.dart](../test/ast/loops_test.dart)、[switches_test.dart](../test/ast/switches_test.dart) |
 
-模式构造、范围检查和遍历不证明模式合法或 switch 穷尽；可诊断的错误结构也能保留在树中。语句形式的 if-case、switch 及其标签和语句体尚无 AST 节点。编译与执行支持以下表为准。
+模式构造、范围检查和遍历不证明模式合法或 switch 穷尽；可诊断的错误结构也能保留在树中。语句形式的 if-case、switch、标签和语句体见[语句语法表示](statements.md#语句语法表示)。编译与执行支持以下表为准。
 
 ## 编译与执行
 
