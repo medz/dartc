@@ -23,6 +23,7 @@ part 'variables.dart';
 part 'throw_expression.dart';
 part 'parameters.dart';
 part 'annotations.dart';
+part 'function_bodies.dart';
 
 /// The syntax and diagnostics produced by parsing a source snapshot.
 ///
@@ -81,6 +82,7 @@ final class _Parser {
       current = parent.tokens[parent.cursor + 1],
       diagnostics = [],
       trialStart = parent.cursor + 1,
+      functionModifier = parent.functionModifier,
       _lookahead = parent.lookahead;
 
   final SourceFile source;
@@ -109,6 +111,12 @@ final class _Parser {
   // A terminal postfix assertion cannot be followed by a tighter selector.
   Expression? postfixTarget;
   _NullableForInitializer? nullableForInitializer;
+  FunctionBodyModifier? functionModifier;
+
+  bool get inAsync =>
+      functionModifier == .asyncKeyword || functionModifier == .asyncStar;
+  bool get inGenerator =>
+      functionModifier == .syncStar || functionModifier == .asyncStar;
 
   int get operatorBase => frames.isEmpty ? 0 : frames.last.operatorBase;
 
@@ -222,6 +230,19 @@ final class _Parser {
 
   void parseOperand() {
     final token = current;
+    if (token.kind == .keywordAwait && functionModifier != null) {
+      if (!inAsync) {
+        error(
+          'await_in_sync',
+          'An await expression requires an asynchronous context.',
+          token,
+        );
+      }
+      prefixes.add(operators.length);
+      operators.add(token);
+      advance();
+      return;
+    }
     if (token.kind == .keywordAwait && tokens[cursor + 1].kind.isIdentifier) {
       error(
         'await_in_sync',
@@ -678,6 +699,16 @@ final class _Parser {
             isPrefix: true,
           ),
         );
+      } else if (token.kind == .keywordAwait) {
+        checkValue(right);
+        values.add(
+          AwaitExpression(
+            source: source,
+            start: token.start,
+            end: right.end,
+            expression: right,
+          ),
+        );
       } else {
         if (token.kind == .bang) checkValue(right);
         values.add(
@@ -792,8 +823,18 @@ final class _Parser {
     }
   }
 
-  Identifier identifier(Token token) =>
-      Identifier(source: source, start: token.start, end: token.end);
+  Identifier identifier(Token token, {bool inType = false}) {
+    if (!inType &&
+        functionModifier != null &&
+        (token.kind == .keywordAwait || token.kind == .keywordYield)) {
+      error(
+        'async_keyword_as_identifier',
+        'This word cannot be an identifier in an asynchronous or generator body.',
+        token,
+      );
+    }
+    return Identifier(source: source, start: token.start, end: token.end);
+  }
 
   void checkAssignable(Expression expression, Token operator) {
     if (expression is DotShorthandExpression) {

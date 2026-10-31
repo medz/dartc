@@ -5,6 +5,13 @@ part of '../nodes.dart';
 /// An unmodified block is represented directly by [BlockStatement].
 sealed class FunctionBody implements ConstructorBody;
 
+/// A zero-width function body where recovery expected one.
+final class MissingFunctionBody({required super.source, required int offset})
+    extends AstNode
+    implements FunctionBody {
+  this : super(start: offset, end: offset);
+}
+
 /// The written modifier before a block function body.
 enum FunctionBodyModifier { asyncKeyword, syncStar, asyncStar }
 

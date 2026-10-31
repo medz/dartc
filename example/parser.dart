@@ -101,4 +101,12 @@ void main() {
   print(count.name.text); // count
   print(count.kind.name); // optionalNamed
   print(count.defaultClause!.value.text); // 1
+
+  final parsedBody = parseFunctionBody(
+    scan(SourceFile(Uri.parse('memory:body'), 'async => await work();')),
+  );
+  if (parsedBody.hasErrors) return;
+  final arrow = parsedBody.node as ExpressionFunctionBody;
+  print(arrow.isAsync); // true
+  print(arrow.expression.text); // await work()
 }

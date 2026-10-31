@@ -193,6 +193,13 @@ extension on _Parser {
         final parts = closeForHeader(frame);
         switch (frame) {
           case _ForElementHeader():
+            if (frame.element.isAwait && parts is! ForInParts) {
+              error(
+                'invalid_await_for',
+                'An await-for requires a for-in header.',
+                frame.element.token,
+              );
+            }
             frame.element.parts = parts;
           case _ForStatementHeader():
             frame.parts = parts;

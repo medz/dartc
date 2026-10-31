@@ -105,6 +105,7 @@ final class _StatementReader(final _Parser parser) {
       return MissingStatement(source: source, offset: token.start);
     }
     if (token.kind.isIdentifier &&
+        token.kind != .keywordAwait &&
         parser.tokens[parser.cursor + 1].kind == .colon) {
       final labels = <Label>[];
       do {
@@ -149,15 +150,24 @@ final class _StatementReader(final _Parser parser) {
               parser.tokens[parser.cursor + 1].kind == .keywordFor:
         final isAwait = token.kind == .keywordAwait;
         if (isAwait) {
-          parser.error(
-            'await_in_sync',
-            'An await-for requires an asynchronous context.',
-            token,
-          );
+          if (!parser.inAsync) {
+            parser.error(
+              'await_in_sync',
+              'An await-for requires an asynchronous context.',
+              token,
+            );
+          }
           parser.advance();
         }
         parser.advance();
         final parts = parser.readForStatementHeader();
+        if (isAwait && parts is! ForInParts) {
+          parser.error(
+            'invalid_await_for',
+            'An await-for requires a for-in header.',
+            token,
+          );
+        }
         frames.add(_ForStatement(token, parts, isAwait));
         return null;
       case .keywordTry:
@@ -173,6 +183,13 @@ final class _StatementReader(final _Parser parser) {
             ? null
             : parser.readEmbeddedExpression();
         final end = parser.expect(.semicolon);
+        if (expression != null && parser.inGenerator) {
+          parser.error(
+            'generator_return_value',
+            'A generator cannot return a value.',
+            token,
+          );
+        }
         return ReturnStatement(
           source: source,
           start: token.start,
@@ -209,6 +226,25 @@ final class _StatementReader(final _Parser parser) {
         );
       case .keywordAssert:
         return assertion();
+      case .keywordYield when parser.functionModifier != null:
+        parser.advance();
+        final isStar = current.kind == .star;
+        if (isStar) parser.advance();
+        final expression = parser.readEmbeddedExpression();
+        if (!parser.inGenerator) {
+          parser.error(
+            'yield_outside_generator',
+            'A yield statement requires a generator.',
+            token,
+          );
+        }
+        return YieldStatement(
+          source: source,
+          start: token.start,
+          end: parser.expect(.semicolon),
+          isStar: isStar,
+          expression: expression,
+        );
       case .keywordSwitch || .at:
         parser.error(
           'unsupported_syntax',
@@ -218,7 +254,10 @@ final class _StatementReader(final _Parser parser) {
         parser.advance();
         return MissingStatement(source: source, offset: token.start);
       default:
-        final declarations = parser.readVariableDeclarations();
+        final declarations =
+            token.kind == .keywordAwait && parser.functionModifier != null
+            ? null
+            : parser.readVariableDeclarations();
         if (declarations != null) return variables(declarations);
         final start = parser.cursor;
         final expression = parser.readEmbeddedExpression();

@@ -9,6 +9,7 @@
 - Add `package:dartc/parser.dart` to parse expressions and type annotations from scanner results. Supports operators, generic calls and function values, explicit constructor calls, type tests and casts, super receivers, member and index access, cascades, contextual dot shorthands, Symbol and interpolated string literals, records with optional `const`, collection literals with spreads and control-flow elements, and named, function and record types. Return structured diagnostics and source-preserving recovery nodes for incomplete input.
 - Add `parseStatement` for blocks, local variable declarations, branches, loops, labels, jumps, assertions and try/catch/finally. Parse `throw` expressions and retain written conditions, optional initializers and catch parameters.
 - Add `parseFormalParameterList` for positional and named parameters, written defaults, metadata, receiver prefixes and nested function-form parameters with generic bounds.
+- Add `parseFunctionBody` for block, arrow and empty declaration bodies, including asynchronous and generator modifiers. Parse `await`, `yield`, `yield*` and `await for` in their function context and report invalid modifier combinations.
 
 ### Performance
 

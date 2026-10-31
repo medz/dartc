@@ -47,7 +47,7 @@ extension on _TypeReader {
         );
         return null;
       }
-      final name = frame.name = parser.identifier(current);
+      final name = frame.name = parser.identifier(current, inType: true);
       parser.advance();
       if (current.kind == .keywordExtends) {
         parser.advance();

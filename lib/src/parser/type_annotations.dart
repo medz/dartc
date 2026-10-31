@@ -136,8 +136,7 @@ final class _TypeReader(
         case final _FunctionTypes frame:
           Identifier? name;
           if (current.kind.isIdentifier) {
-            name = parser.identifier(current);
-            parser.advance();
+            name = readName();
           }
           final named = frame.kind == .optionalNamed;
           if (named && name == null) {
@@ -158,8 +157,7 @@ final class _TypeReader(
         case final _RecordTypes frame:
           Identifier? name;
           if (current.kind.isIdentifier) {
-            name = parser.identifier(current);
-            parser.advance();
+            name = readName();
           }
           if (frame.namedOpening == null) {
             frame.positional.add(
@@ -223,7 +221,7 @@ final class _TypeReader(
       );
       return null;
     }
-    var name = parser.identifier(token);
+    var name = parser.identifier(token, inType: true);
     parser.advance();
     Identifier? prefix;
     if (current.kind == .dot && token.kind != .keywordVoid) {
@@ -233,7 +231,7 @@ final class _TypeReader(
         fail('expected_type', 'Expected a qualified type name.');
         return null;
       }
-      name = parser.identifier(current);
+      name = parser.identifier(current, inType: true);
       parser.advance();
     }
     final head = _TypeName(
@@ -319,6 +317,19 @@ final class _TypeReader(
 
   void fail(String code, String message) {
     failure ??= (code, message, current);
+  }
+
+  Identifier readName() {
+    if (parser.functionModifier != null &&
+        (current.kind == .keywordAwait || current.kind == .keywordYield)) {
+      fail(
+        'async_keyword_as_identifier',
+        'This word cannot name a parameter or record field in an asynchronous or generator body.',
+      );
+    }
+    final name = parser.identifier(current, inType: true);
+    parser.advance();
+    return name;
   }
 }
 

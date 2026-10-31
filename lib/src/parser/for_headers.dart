@@ -54,11 +54,13 @@ extension on _Parser {
     final token = current;
     final isAwait = token.kind == .keywordAwait;
     if (isAwait) {
-      error(
-        'await_in_sync',
-        'An await-for requires an asynchronous context.',
-        token,
-      );
+      if (!inAsync) {
+        error(
+          'await_in_sync',
+          'An await-for requires an asynchronous context.',
+          token,
+        );
+      }
       advance();
     }
     advance();
