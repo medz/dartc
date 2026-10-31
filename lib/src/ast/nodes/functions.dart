@@ -3,7 +3,7 @@ part of '../nodes.dart';
 /// A block, marked block, arrow expression, or semicolon function body.
 ///
 /// An unmodified block is represented directly by [BlockStatement].
-sealed class FunctionBody implements AstNode;
+sealed class FunctionBody implements ConstructorBody;
 
 /// The written modifier before a block function body.
 enum FunctionBodyModifier { asyncKeyword, syncStar, asyncStar }

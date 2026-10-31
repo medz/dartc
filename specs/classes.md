@@ -4,6 +4,22 @@
 SDK 对照版本见[总览](README.md)；§15 泛型和 §20 类型关系另见[类型追踪](types.md)。
 字段的空安全初始化约束还依据[空安全补充][nnbd]，不能只用旧草案章节判定兼容。
 
+## 类与成员语法表示
+
+`package:dartc/ast.dart` 可构造以下声明语法。构造器检查源码范围、快照归属及子节点顺序，不解析文本或执行语义检查。
+
+| 语言条款 | 可表示的语法 | 验证 |
+| --- | --- | --- |
+| §10 类、[类修饰符][class-modifiers] | 元数据、有序修饰符、名字、类型参数、`extends`、`with`、`implements` 和有序成员；区分 `{}` 与 `;`，不补入隐式父类或构造器 | [classes_test.dart](../test/ast/classes_test.dart) |
+| §12 Mixins、§14 Mixin Application | mixin 的 `base`、类型参数、`on` 约束、接口及成员；具名 mixin application 的 `class C = B with M;` 形式 | [classes_test.dart](../test/ast/classes_test.dart) |
+| §10.2–§10.8 成员 | 实例及静态方法、泛型方法、getter、setter、运算符和字段；保留 `external`、字段的 `abstract` / `covariant` 及共享变量声明，不生成隐式访问器 | [members_test.dart](../test/ast/members_test.dart) |
+| §10.7 构造器 | 传统及 `new` / `factory` 简写、`const`、`external`、形参、有序字段初始化、assert、super 调用和 this 重定向；factory 的表达式/块体与 `=` 重定向分别保留 | [constructors_test.dart](../test/ast/constructors_test.dart) |
+| [主构造器][primary] | 类头的 `const`、可选名称及声明/初始化/普通参数；类体中单独出现的 `this` 初始化列表与函数体，不展开声明参数或移动成员 | [classes_test.dart](../test/ast/classes_test.dart)、[constructors_test.dart](../test/ast/constructors_test.dart)、[parameters_test.dart](../test/ast/parameters_test.dart) |
+
+枚举、extension 和 extension type 声明节点尚未提供。名称绑定、继承关系、成员冲突、修饰符合法性和初始化规则尚未接入这些节点；构造成功不代表声明合法。编译与执行支持以下表为准。
+
+## 编译与执行
+
 | 规范条目 | 状态 | 支持范围与缺口 | 验证 |
 | --- | --- | --- | --- |
 | §10 类声明 | 部分实现 | 支持普通类、泛型类和 abstract 类，以及非泛型父类的 extends / implements 列表；按声明身份解析接口及类型别名，检查重复接口与环；接口使用的别名边界在图检查后验证，直接表示自身类型参数的别名不能作为接口。Function 仍不能作类名。泛型构造、成员和运行时检查的当前范围见[下文](#泛型运行时实例)；类修饰符见下行。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `interfaceValues()`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) `rejected` |

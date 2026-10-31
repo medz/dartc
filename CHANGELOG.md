@@ -5,7 +5,7 @@
 - Add `package:dartc/source.dart` for source snapshots, UTF-16 ranges, line and column lookup, and custom source providers.
 - Add `package:dartc/diagnostics.dart` for structured diagnostics with severity, error codes, source ranges, and related notes.
 - Add `package:dartc/scanner.dart` for source-preserving Dart tokens, nested string interpolation and comments, and recoverable lexical diagnostics.
-- Add `package:dartc/ast.dart` for immutable syntax trees with checked source ranges and depth-first traversal. Includes compilation units, library directives, top-level functions and variables, type aliases, expressions, patterns, and statements.
+- Add `package:dartc/ast.dart` for immutable syntax trees with checked source ranges and depth-first traversal. Includes compilation units, library directives, classes, mixins, constructors, functions, variables, type aliases, expressions, patterns, and statements.
 
 ### Performance
 

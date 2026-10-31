@@ -5,9 +5,9 @@ SDK 对照版本与状态含义见[总览](README.md#状态与证据)。空安�
 
 ## 变量语法表示
 
-`package:dartc/ast.dart` 可表示顶层、局部及循环头中的普通变量声明：元数据、`late`、`var` / `final` / `const`、共享的可选类型，以及有序变量名和可选初始化表达式。顶层声明另保留 `external` 与结尾分号。构造器检查源码范围、快照归属和子节点顺序；字段声明、名称绑定、类型推断和初始化规则尚未接入这些节点。
+`package:dartc/ast.dart` 可表示顶层、字段、局部及循环头中的普通变量声明：元数据、`late`、`var` / `final` / `const`、共享的可选类型，以及有序变量名和可选初始化表达式。顶层声明另保留 `external` 与结尾分号；字段声明保留 `static`、`abstract`、`external`、`covariant` 与结尾分号。构造器检查源码范围、快照归属和子节点顺序；名称绑定、类型推断和初始化规则尚未接入这些节点。
 
-验证见 [declarations_test.dart](../test/ast/declarations_test.dart)、[statements_test.dart](../test/ast/statements_test.dart) 和 [loops_test.dart](../test/ast/loops_test.dart)。模式变量声明见[模式](patterns.md)；编译与执行支持以下表为准。
+验证见 [declarations_test.dart](../test/ast/declarations_test.dart)、[members_test.dart](../test/ast/members_test.dart)、[statements_test.dart](../test/ast/statements_test.dart) 和 [loops_test.dart](../test/ast/loops_test.dart)。模式变量声明见[模式](patterns.md)；编译与执行支持以下表为准。
 
 ## 编译与执行
 
