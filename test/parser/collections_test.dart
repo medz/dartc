@@ -161,6 +161,10 @@ void main() {
       'a?[i] : b = c': '(?: a (list i) (= b c))',
       'a?[i] + b?[j] : c': '(?: (+ (?[] a i) b) (list j) c)',
       'a?[i] ? b : a?[i]?[j] : c': '(?: a (?: (list i) b (?[] (?[] a i) j)) c)',
+      'a?[i]?[j]?[k]: c': '(?: a (?[] (?[] (list i) j) k) c)',
+      'a[i]?[j]?[k]: c': '(?: (?[] ([] a i) j) (list k) c)',
+      '(a)()?[i]?[j]: c': '(?: (?[] (call (group a)) i) (list j) c)',
+      'a?[i,]?[j]?[k]: c': '(?: a (?[] (?[] (list i) j) k) c)',
       '[a?[i], b?[j] : c]': '(list (?[] a i) (?: b (list j) c))',
     };
     for (final MapEntry(:key, :value) in cases.entries) {
@@ -171,6 +175,46 @@ void main() {
     expect(parse('a?[i]?[j] : c').hasErrors, isTrue);
     expect(parse('f(x)?[i]?[j] : c').hasErrors, isTrue);
     expect(parse('a?[i] :').hasErrors, isTrue);
+    final invalid = parse('a?[i]:b?[j]?[k]`');
+    expect(shape(invalid.node), '(?[] (?[] (?[] a i) j) k)');
+    expect(invalid.diagnostics.map((d) => d.code), [
+      'scanner.unexpected_character',
+      'parser.unexpected_token',
+      'parser.unexpected_token',
+    ]);
+  });
+
+  test(
+    'reports diagnostics from selected index and conditional branches once',
+    () {
+      const text = 'a?[1=2]?[3=4]?[5=6]:7=8';
+      final result = parse(text);
+      expect(result.node, isA<ConditionalExpression>());
+      expect(
+        result.diagnostics.map((d) => d.code),
+        List.filled(4, 'parser.invalid_assignment_target'),
+      );
+      expect(
+        result.diagnostics.map((d) => d.span!.start),
+        RegExp('=').allMatches(text).map((match) => match.start),
+      );
+    },
+  );
+
+  test('parses long ambiguous index chains with the same selector context', () {
+    const length = 12001;
+    final text = 'a${'?[i]' * length}:c';
+    final conditional = parsed(text) as ConditionalExpression;
+    expect(conditional.text, text);
+    expect(conditional.condition.text, 'a');
+    expect(conditional.elseExpression.text, 'c');
+    expect(
+      walk(conditional.thenExpression).whereType<IndexExpression>().length,
+      length - 1,
+    );
+    final invalid = parse('a${'?[i]' * (length - 1)}:c');
+    expect(invalid.hasErrors, isTrue);
+    expect(walk(invalid.node).whereType<IndexExpression>().length, length - 1);
   });
 
   test('diagnoses invalid elements, headers, and remaining grammar gaps', () {

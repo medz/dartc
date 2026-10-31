@@ -272,6 +272,20 @@ extension on _Parser {
         frame.controls.isNotEmpty) {
       finishCollectionElement(frame);
     }
+    if (trialStart != null &&
+        frame.opening == tokens[trialStart!] &&
+        current.kind == .rightBracket &&
+        !hasSyntaxError &&
+        tokens[cursor - 1].kind != .comma) {
+      if (frame.elements case [final Expression expression]) {
+        lookahead.indexContents[trialStart!] = _IndexContent(
+          expression,
+          end,
+          cursor + 1,
+          diagnostics.isEmpty ? const [] : List<Diagnostic>.of(diagnostics),
+        );
+      }
+    }
     return CollectionExpression(
       source: source,
       start: frame.start,

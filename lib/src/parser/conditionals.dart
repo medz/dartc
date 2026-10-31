@@ -8,6 +8,83 @@ final class _Lookahead(final List<Token> tokens) {
   late final int lastColon = tokens.lastIndexWhere((t) => t.kind == .colon);
   late final Map<int, (TypeArgumentList, int, Token)?> typeArguments = {};
   late final Map<int, _ConditionalResult> conditionals = {};
+  late final Map<int, _IndexContent> indexContents = {};
+  late final Map<int, _IndexRun> indexRuns = {};
+
+  _IndexRun? indexRun(int start) {
+    final pending = <(int, _IndexContent)>[];
+    var cursor = start;
+    var tail = indexRuns[cursor];
+    while (tail == null &&
+        tokens[cursor].kind == .question &&
+        tokens[cursor + 1].kind == .leftBracket) {
+      final content = indexContents[cursor + 1];
+      if (content == null) return null;
+      pending.add((cursor, content));
+      cursor = content.cursor;
+      tail = indexRuns[cursor];
+    }
+    final end = tail?.cursor ?? cursor;
+    for (var i = pending.length - 1; i >= 0; i--) {
+      final (question, content) = pending[i];
+      tail = _IndexRun(content, tail, end);
+      indexRuns[question] = tail;
+    }
+    return tail;
+  }
+}
+
+// Only a single expression with no trailing comma is also valid index syntax.
+final class _IndexContent(
+  final Expression expression,
+  final int end,
+  final int cursor,
+  final List<Diagnostic> diagnostics,
+);
+
+// Suffixes share their tails; the receiver is supplied only after selection.
+final class _IndexRun(
+  final _IndexContent content,
+  final _IndexRun? next,
+  final int cursor,
+);
+
+sealed class _Branch(final List<Diagnostic> diagnostics) {
+  Expression materialize(List<Diagnostic> destination);
+}
+
+final class _ParsedBranch(final Expression expression, super.diagnostics)
+    extends _Branch {
+  @override
+  Expression materialize(List<Diagnostic> destination) {
+    destination.addAll(diagnostics);
+    return expression;
+  }
+}
+
+final class _IndexedBranch(
+  final Expression receiver,
+  final _IndexRun suffix,
+  super.diagnostics,
+) extends _Branch {
+  @override
+  Expression materialize(List<Diagnostic> destination) {
+    destination.addAll(diagnostics);
+    var expression = receiver;
+    for (_IndexRun? run = suffix; run != null; run = run.next) {
+      final content = run.content;
+      destination.addAll(content.diagnostics);
+      expression = IndexExpression(
+        source: receiver.source,
+        start: receiver.start,
+        end: content.end,
+        target: expression,
+        index: content.expression,
+        isNullAware: true,
+      );
+    }
+    return expression;
+  }
 }
 
 sealed class _ConditionalResult;
@@ -15,17 +92,32 @@ sealed class _ConditionalResult;
 enum _NotConditional implements _ConditionalResult { invalid, stableFailure }
 
 final class _ConditionalBranches(
-  final Expression thenExpression,
-  final Expression elseExpression,
+  final _Branch thenBranch,
+  final _Branch elseBranch,
   final int cursor,
   final Token current,
-  final List<Diagnostic> diagnostics,
 ) implements _ConditionalResult;
 
 final class _ConditionalTrial(final _Parser parent) {
   final int question = parent.cursor;
   final _Parser reader = _Parser.trial(parent);
-  Expression? thenExpression;
+  _Branch? thenBranch;
+
+  _ConditionalResult? finishBranch(_Branch branch) {
+    if (thenBranch == null) {
+      if (reader.current.kind != .colon) return reader.conditionalFailure;
+      thenBranch = branch;
+      reader.advance();
+      reader.expectsOperand = true;
+      return null;
+    }
+    return _ConditionalBranches(
+      thenBranch!,
+      branch,
+      reader.cursor,
+      reader.current,
+    );
+  }
 }
 
 extension on _Parser {
@@ -34,7 +126,7 @@ extension on _Parser {
     var parser = initial.reader;
     final trials = [initial];
     while (true) {
-      _ConditionalResult result;
+      _ConditionalResult? result;
       if (parser.run(trial: parser != this)) {
         final cached = parser.lookahead.conditionals[parser.cursor];
         if (cached == null) {
@@ -43,63 +135,40 @@ extension on _Parser {
           parser = trial.reader;
           continue;
         }
-        if (cached != _NotConditional.stableFailure ||
-            trials.isEmpty ||
-            trials.last.thenExpression != null ||
-            parser.delimiters.isNotEmpty) {
-          parser.acceptConditional(cached);
-          continue;
-        }
-        result = parser.conditionalFailure;
+        result = parser.resumeConditional(
+          cached,
+          trials.isEmpty ? null : trials.last,
+        );
+        if (result == null) continue;
       } else {
         if (parser == this) return;
         final trial = trials.last;
         if (parser.hasSyntaxError || parser.current.kind == .invalid) {
-          result = trial.thenExpression == null
+          result = trial.thenBranch == null
               ? _NotConditional.invalid
               : parser.conditionalFailure;
         } else {
           final expression = parser.finishExpression(0, 0);
           if (parser.hasSyntaxError) {
-            result = trial.thenExpression == null
+            result = trial.thenBranch == null
                 ? _NotConditional.invalid
                 : parser.conditionalFailure;
-          } else if (trial.thenExpression == null) {
-            if (parser.current.kind == .colon) {
-              trial.thenExpression = expression;
-              parser.advance();
-              parser.expectsOperand = true;
-              continue;
-            }
-            result = parser.conditionalFailure;
           } else {
-            result = _ConditionalBranches(
-              trial.thenExpression!,
-              expression,
-              parser.cursor,
-              parser.current,
-              parser.diagnostics,
+            result = trial.finishBranch(
+              _ParsedBranch(expression, parser.takeDiagnostics()),
             );
+            if (result == null) continue;
           }
         }
       }
-      while (true) {
+      while (result != null) {
         final trial = trials.removeLast();
         parser = trial.parent;
         parser.lookahead.conditionals[trial.question] = result;
-        // Replacing the leading list with an index must end at an operator.
-        // Otherwise it can change how a subsequent ?[ selector is parsed and
-        // release a colon that the trial consumed. Delimiters and else branches
-        // also change the expression boundary, so they are resumed normally.
-        if (result == _NotConditional.stableFailure &&
-            trials.isNotEmpty &&
-            trials.last.thenExpression == null &&
-            parser.delimiters.isEmpty) {
-          result = parser.conditionalFailure;
-          continue;
-        }
-        parser.acceptConditional(result);
-        break;
+        result = parser.resumeConditional(
+          result,
+          trials.isEmpty ? null : trials.last,
+        );
       }
     }
   }
@@ -107,6 +176,67 @@ extension on _Parser {
   _NotConditional get conditionalFailure => initialOperatorBoundary
       ? _NotConditional.stableFailure
       : _NotConditional.invalid;
+
+  List<Diagnostic> takeDiagnostics() {
+    if (diagnostics.isEmpty) return const [];
+    final result = List<Diagnostic>.of(diagnostics);
+    diagnostics.clear();
+    return result;
+  }
+
+  _ConditionalResult? resumeConditional(
+    _ConditionalResult result,
+    _ConditionalTrial? trial,
+  ) {
+    if (trial != null && delimiters.isEmpty) {
+      if (trial.thenBranch == null) {
+        // Only an operator boundary preserves a failed trial when its leading
+        // list becomes an index. Selector chains can instead release a colon.
+        if (result == _NotConditional.stableFailure) return conditionalFailure;
+        // The selected inner conditional ends this first branch without a
+        // colon. Its AST would be discarded by the enclosing trial.
+        if (result is _ConditionalBranches && result.current.kind != .colon) {
+          return questions.isEmpty
+              ? conditionalFailure
+              : _NotConditional.invalid;
+        }
+      }
+      if (result is _NotConditional) {
+        final branch = indexedBranch();
+        if (branch != null) return trial.finishBranch(branch);
+      }
+    }
+    acceptConditional(result);
+    return null;
+  }
+
+  _IndexedBranch? indexedBranch() {
+    if (operators.isNotEmpty || values.length != 1 || hasSyntaxError) {
+      return null;
+    }
+    final receiver = values.single;
+    if (receiver == selectorTarget && !checkedNullAware ||
+        receiver is CastExpression ||
+        receiver is TypeTestExpression) {
+      return null;
+    }
+    final run = lookahead.indexRun(cursor);
+    if (run == null) return null;
+    final next = tokens[run.cursor];
+    if (next.kind == .invalid ||
+        next.kind != .colon &&
+            !next.kind.endsExpression &&
+            next.kind.continuesExpression) {
+      return null;
+    }
+    // Match the ordinary index path, including its diagnostic token.
+    advance();
+    checkSelector();
+    values.clear();
+    cursor = run.cursor;
+    current = next;
+    return _IndexedBranch(receiver, run, takeDiagnostics());
+  }
 
   void acceptConditional(_ConditionalResult result) {
     if (nullableForInitializer case final checkpoint?) {
@@ -124,19 +254,20 @@ extension on _Parser {
     if (result case _ConditionalBranches()) {
       reduceBefore(current);
       final condition = values.removeLast();
+      final thenExpression = result.thenBranch.materialize(diagnostics);
+      final elseExpression = result.elseBranch.materialize(diagnostics);
       values.add(
         ConditionalExpression(
           source: source,
           start: condition.start,
-          end: result.elseExpression.end,
+          end: elseExpression.end,
           condition: condition,
-          thenExpression: result.thenExpression,
-          elseExpression: result.elseExpression,
+          thenExpression: thenExpression,
+          elseExpression: elseExpression,
         ),
       );
       cursor = result.cursor;
       current = result.current;
-      diagnostics.addAll(result.diagnostics);
       expectsOperand = false;
     } else {
       advance();

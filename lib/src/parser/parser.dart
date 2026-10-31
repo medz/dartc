@@ -111,7 +111,6 @@ final class _Parser {
   // Returns true when an ambiguous expression or declaration needs a trial.
   bool run({required bool trial}) {
     while (current.kind != .eof || delimiters.isNotEmpty) {
-      if (nullableForInitializer != null) return true;
       final token = current;
       if (trial) {
         if (hasSyntaxError || token.kind == .invalid) return false;
@@ -164,7 +163,10 @@ final class _Parser {
           if (!finishCollectionElement(frame)) unexpected();
           continue;
         }
-        if (expectsOperand && parseElementPrefix(frame)) continue;
+        if (expectsOperand && parseElementPrefix(frame)) {
+          if (nullableForInitializer != null) return true;
+          continue;
+        }
       }
       if (expectsOperand) {
         if (frame case _Sequence()
