@@ -7,9 +7,15 @@ final class _CollectionPatternReader(
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final start = parser.current.start;
-    final arguments = parser.current.kind == .less
-        ? parser.readTypeArguments()
-        : null;
+    TypeArgumentList? arguments;
+    if (parser.current.kind == .less) {
+      final reader = _TypeReader(parser);
+      if (!reader.start(arguments: true)) yield _TypeTask(reader);
+      arguments = reader.result as TypeArgumentList?;
+      if (reader.failure case final failure?) {
+        parser.error(failure.$1, failure.$2, failure.$3);
+      }
+    }
     final opening = parser.current;
     if (opening.kind == .emptyBrackets ||
         opening.kind == .emptyBracketsAssign) {

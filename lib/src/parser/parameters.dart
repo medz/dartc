@@ -10,13 +10,16 @@ part of 'parser.dart';
 /// `final`, `this.` or `super.` is permitted by that declaration is not checked.
 /// Duplicate names, field binding, types and constant defaults need analysis.
 /// Recovery preserves input tokens and can return an incomplete parameter list.
-ParseResult<FormalParameterList> parseFormalParameterList(ScanResult input) {
-  final parser = _Parser(input);
+ParseResult<FormalParameterList> parseFormalParameterList(
+  ScanResult input, {
+  LanguageVersion languageVersion = LanguageVersion.current,
+}) {
+  final parser = _Parser(input, languageVersion: languageVersion);
   final node = _ParameterReader(parser).finish();
   while (parser.current.kind != .eof) {
     parser.unexpected();
   }
-  return ParseResult._(node, parser.diagnostics);
+  return parser.finishResult(node);
 }
 
 final class _ParameterList(final Token opening, {final _Formal? owner}) {
@@ -46,6 +49,7 @@ final class _Formal(
 final class _ParameterReader(
   final _Parser parser, {
   final bool function = false,
+  final bool allowCovariant = true,
 }) extends _Reader<FormalParameterList> {
   final List<_ParameterList> frames = [];
 
@@ -85,12 +89,13 @@ final class _ParameterReader(
           yield reader;
           metadata = reader.result;
         }
-        final formal = frame.pending = head(frame, start, metadata);
+        yield* head(frame, start, metadata);
+        final formal = frame.pending!;
         if (current.kind == .less) {
           final start = current.start;
           final reader = _TypeReader(parser);
-          formal.typeParameters =
-              reader.read(parameters: true) as TypeParameterList?;
+          if (!reader.start(parameters: true)) yield _TypeTask(reader);
+          formal.typeParameters = reader.result as TypeParameterList?;
           if (reader.failure case final failure?) {
             parser.error(failure.$1, failure.$2, failure.$3);
           }
@@ -166,7 +171,11 @@ final class _ParameterReader(
     return false;
   }
 
-  _Formal head(_ParameterList frame, int start, List<Annotation> metadata) {
+  Iterable<_Reader<Object?>> head(
+    _ParameterList frame,
+    int start,
+    List<Annotation> metadata,
+  ) sync* {
     var required = false;
     var covariant = false;
     var keyword = VariableKeyword.none;
@@ -178,8 +187,9 @@ final class _ParameterReader(
       if (token.kind.isIdentifier && next.kind == .leftParen) {
         final index = parser.cursor;
         parser.advance();
-        final parsed =
-            _TypeReader(parser).read(beforeParameter: true) as TypeAnnotation?;
+        final reader = _TypeReader(parser);
+        if (!reader.start(beforeParameter: true)) yield _TypeTask(reader);
+        final parsed = reader.result as TypeAnnotation?;
         if (parsed == null ||
             !(current.kind.isIdentifier ||
                 current.kind == .keywordThis ||
@@ -214,6 +224,13 @@ final class _ParameterReader(
           }
           required = true;
         case .keywordCovariant:
+          if (!allowCovariant && frame.owner == null) {
+            parser.error(
+              'invalid_covariant_parameter',
+              'This declaration cannot have a covariant parameter.',
+              token,
+            );
+          }
           if (covariant) {
             parser.error(
               'duplicate_modifier',
@@ -264,8 +281,9 @@ final class _ParameterReader(
         current.kind != .keywordSuper) {
       final index = parser.cursor;
       final token = current;
-      final parsed =
-          _TypeReader(parser).read(beforeParameter: true) as TypeAnnotation?;
+      final reader = _TypeReader(parser);
+      if (!reader.start(beforeParameter: true)) yield _TypeTask(reader);
+      final parsed = reader.result as TypeAnnotation?;
       if (parsed != null &&
           (current.kind.isIdentifier ||
               current.kind == .keywordThis ||
@@ -283,7 +301,7 @@ final class _ParameterReader(
       parser.expect(.dot);
     }
     final name = parser.readVariableName();
-    return _Formal(
+    frame.pending = _Formal(
       start,
       metadata,
       required && frame.kind == .optionalNamed ? .requiredNamed : frame.kind,
@@ -373,12 +391,23 @@ final class _ParameterReader(
 }
 
 extension on _Parser {
+  void checkSetterParameters(FormalParameterList parameters) {
+    if (parameters.parameters.length != 1 ||
+        parameters.parameters.single.kind != .requiredPositional) {
+      error(
+        'invalid_setter_parameters',
+        'A setter requires exactly one required positional parameter.',
+        Token(.invalid, source, parameters.start, parameters.end),
+      );
+    }
+  }
+
   bool functionParameterAfterName() {
     var opening = cursor + 1;
     if (tokens[opening].kind == .less) {
-      final child = _Parser.nested(this)..advance();
-      if (_TypeReader(child).read(parameters: true) == null) return false;
-      opening = child.cursor;
+      final end = lookahead.delimiters.afterTypeArguments(opening);
+      if (end == null) return false;
+      opening = end;
     }
     if (tokens[opening].kind != .leftParen) return false;
     final closing = lookahead.delimiters.closing(opening);

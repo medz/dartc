@@ -8,8 +8,10 @@ import 'package:dartc/source.dart';
 import 'selector_tail.dart';
 import 'string_sequence.dart';
 import 'delimiter_index.dart';
+import 'language_version.dart';
 
 part 'delimiters.dart';
+part 'language_features.dart';
 part 'operators.dart';
 part 'type_annotations.dart';
 part 'type_expressions.dart';
@@ -72,8 +74,10 @@ final class ParseResult<T extends AstNode> {
 /// Recovery preserves the input tokens and uses zero-width [MissingExpression]
 /// nodes for omitted operands. With errors, the returned node may cover only
 /// part of the input.
-ParseResult<Expression> parseExpression(ScanResult input) =>
-    _Parser(input).parse();
+ParseResult<Expression> parseExpression(
+  ScanResult input, {
+  LanguageVersion languageVersion = LanguageVersion.current,
+}) => _Parser(input, languageVersion: languageVersion).parse();
 
 sealed class _Frame(final int valueBase, final int operatorBase);
 
@@ -89,7 +93,7 @@ enum _ParseBoundary {
 enum _ExpressionStop { complete, conditional, syntax }
 
 final class _Parser {
-  _Parser(ScanResult input)
+  _Parser(ScanResult input, {this.languageVersion = LanguageVersion.current})
     : source = input.source,
       tokens = input.tokens,
       current = input.tokens.first,
@@ -97,7 +101,8 @@ final class _Parser {
       diagnostics = [...input.diagnostics];
 
   _Parser.trial(_Parser parent)
-    : source = parent.source,
+    : languageVersion = parent.languageVersion,
+      source = parent.source,
       tokens = parent.tokens,
       cursor = parent.cursor + 1,
       current = parent.tokens[parent.cursor + 1],
@@ -107,7 +112,8 @@ final class _Parser {
       _lookahead = parent.lookahead;
 
   _Parser.nested(_Parser parent)
-    : source = parent.source,
+    : languageVersion = parent.languageVersion,
+      source = parent.source,
       tokens = parent.tokens,
       cursor = parent.cursor,
       current = parent.current,
@@ -116,6 +122,7 @@ final class _Parser {
       functionModifier = parent.functionModifier,
       _lookahead = parent.lookahead;
 
+  final LanguageVersion languageVersion;
   final SourceFile source;
   final List<Token> tokens;
   final List<Diagnostic> diagnostics;
@@ -143,6 +150,8 @@ final class _Parser {
   Expression? postfixTarget;
   _NullableForInitializer? nullableForInitializer;
   FunctionBodyModifier? functionModifier;
+  int loopDepth = 0;
+  int switchDepth = 0;
   _Reader<void>? pendingSyntax;
 
   bool get inAsync =>
@@ -163,7 +172,7 @@ final class _Parser {
         ? finishExpression(0, 0)
         : _ExpressionReader(this, boundary: .input, stop: stop).finish();
     assert(prefixes.isEmpty && questions.isEmpty);
-    return ParseResult._(node, diagnostics);
+    return finishResult(node);
   }
 
   _ExpressionStop run({required bool trial, _ParseBoundary boundary = .input}) {
@@ -286,6 +295,7 @@ final class _Parser {
         }
       } else {
         if (parseContinuation()) return .conditional;
+        if (pendingSyntax != null) return .syntax;
       }
     }
     return .complete;
@@ -334,7 +344,7 @@ final class _Parser {
         case .keywordConst:
           switch (tokens[cursor + 1].kind) {
             case .dot:
-              openShorthand();
+              pendingSyntax = _SyntaxTask(readShorthand());
             case .leftParen:
               advance();
               frames.add(
@@ -351,13 +361,13 @@ final class _Parser {
                 .emptyBrackets ||
                 .emptyBracketsAssign ||
                 .leftBrace:
-              parseCollectionPrefix();
+              pendingSyntax = _SyntaxTask(readCollectionPrefix());
             default:
-              parseConstruction();
+              pendingSyntax = _SyntaxTask(readConstruction());
           }
           return;
         case .keywordNew:
-          parseConstruction();
+          pendingSyntax = _SyntaxTask(readConstruction());
           return;
         case .keywordSwitch:
           final child = _Parser.nested(this);
@@ -371,11 +381,11 @@ final class _Parser {
           openThrow();
           return;
         case .dot:
-          openShorthand();
+          pendingSyntax = _SyntaxTask(readShorthand());
           return;
         case .less:
           if (allowFunction && parseFunctionExpression()) return;
-          parseCollectionPrefix();
+          pendingSyntax = _SyntaxTask(readCollectionPrefix());
           return;
         case .hash:
           parseSymbol();
@@ -542,7 +552,7 @@ final class _Parser {
     expectsOperand = false;
   }
 
-  bool parseContinuation() {
+  bool parseContinuation({bool skipTypeArguments = false}) {
     final token = current;
     if (values.last is CascadeExpression &&
         token.kind != .cascade &&
@@ -558,9 +568,7 @@ final class _Parser {
         openCascade();
         return false;
       case .less:
-        final frame = frames.lastOrNull;
-        if (tryTypeArguments()) {
-          if (frame is _Shorthand) frame.pendingBang = null;
+        if (!skipTypeArguments && tryTypeArguments()) {
           return false;
         }
         if (frames.lastOrNull case final _Shorthand frame) {
@@ -572,7 +580,7 @@ final class _Parser {
           return false;
         }
       case .keywordAs || .keywordIs:
-        parseTypeOperator();
+        pendingSyntax = _SyntaxTask(readTypeOperator());
         return false;
       case .dot || .nullAwareAccess:
         checkSelector();

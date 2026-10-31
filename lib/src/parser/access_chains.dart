@@ -158,7 +158,7 @@ extension on _Parser {
     expectsOperand = false;
   }
 
-  void openShorthand() {
+  Iterable<_Reader<Object?>> readShorthand() sync* {
     final keyword = current.kind == .keywordConst ? current : null;
     if (keyword != null) advance();
     final dot = current;
@@ -190,7 +190,9 @@ extension on _Parser {
     if (current.kind == .less) {
       final start = cursor;
       final remainder = current;
-      types = _TypeReader(this).read(arguments: true) as TypeArgumentList?;
+      final reader = _TypeReader(this);
+      if (!reader.start(arguments: true)) yield _TypeTask(reader);
+      types = reader.result as TypeArgumentList?;
       if (types == null || !current.kind.followsTypeArguments) {
         cursor = start;
         current = remainder;

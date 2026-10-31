@@ -12,7 +12,7 @@
 - Add `parseFunctionBody` for block, arrow and empty declaration bodies, including asynchronous and generator modifiers. Parse `await`, `yield`, `yield*` and `await for` in their function context and report invalid modifier combinations.
 - Parse anonymous functions and local function declarations with generic parameters, annotations, defaults and nested asynchronous or generator bodies.
 - Add `parseCompilationUnit` for library directives, top-level declarations, classes, mixins, enums, extensions, extension types and their members. Preserve primary and abbreviated constructors, initializer lists, factory redirections and type metadata.
-
+- Add `LanguageVersion` and the optional `languageVersion` argument to each parser entry point for versioned syntax checks.
 - Add `parsePattern` with matching, declaration and assignment contexts. Parse structural and logical patterns, guards, if-case, switch expressions and statements, destructuring assignments and pattern loop headers. Preserve metadata on local and loop declarations.
 
 ### Fixes
@@ -20,7 +20,8 @@
 - Parse functions named with contextual keywords such as `import`, `external` and `mixin`, and generic methods named `factory`.
 - Parse function-form parameters named `Function`, including generic, nullable and nested forms.
 - Return syntax diagnostics for unfinished constructor assertions and switch labels without throwing or consuming subsequent declarations.
-- Avoid stack overflow when type metadata recursively contains annotated types as type arguments.
+- Avoid stack overflow when annotated types nest through metadata arguments, functions, declarations, collections and patterns.
+- Diagnose invalid jump contexts, parameter modifiers, setter signatures, enum argument lists and declaration names while preserving recovery nodes.
 
 ### Performance
 

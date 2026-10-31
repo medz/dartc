@@ -16,21 +16,23 @@ extension on _Parser {
   int? outerPatternEnd() {
     var opening = cursor;
     if (current.kind == .less) {
-      final child = _Parser.nested(this);
-      final reader = _TypeReader(child);
-      if (reader.read(arguments: true) == null || reader.failure != null) {
-        return null;
-      }
-      opening = child.cursor;
+      final end = lookahead.delimiters.afterTypeArguments(opening);
+      if (end == null) return null;
+      opening = end;
     } else if (current.kind.isIdentifier) {
-      final child = _Parser.nested(this);
-      final reader = _TypeReader(child);
-      if (reader.read() is! NamedTypeAnnotation ||
-          reader.failure != null ||
-          child.current.kind != .leftParen) {
-        return null;
+      opening++;
+      if (tokens[opening].kind == .dot) {
+        opening++;
+        if (!tokens[opening].kind.isTypeName) return null;
+        opening++;
       }
-      opening = child.cursor;
+      if (tokens[opening].kind == .less) {
+        final end = lookahead.delimiters.afterTypeArguments(opening);
+        if (end == null) return null;
+        opening = end;
+      }
+      if (tokens[opening].kind == .question) opening++;
+      if (tokens[opening].kind != .leftParen) return null;
     }
     if (tokens[opening].kind == .emptyBrackets ||
         tokens[opening].kind == .emptyBracketsAssign) {
@@ -144,7 +146,7 @@ final class _ForDeclarationReader(final _Parser parent, final _ForHeader frame)
     }
     if (!child.isPatternDeclaration) {
       parent.adopt(child);
-      parent.initializeForVariables(frame);
+      yield* parent.readForVariables(frame);
       if (frame.declarations == null && frame.metadata.isNotEmpty) {
         parent.error(
           'expected_declaration',

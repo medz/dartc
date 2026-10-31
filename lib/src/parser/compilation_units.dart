@@ -6,10 +6,13 @@ part of 'parser.dart';
 /// remain written URIs; parsing does not load dependencies or bind names.
 /// Invalid or incomplete members produce diagnostics. Check
 /// [ParseResult.hasErrors] before treating a unit as valid syntax.
-ParseResult<CompilationUnit> parseCompilationUnit(ScanResult input) {
-  final parser = _Parser(input);
+ParseResult<CompilationUnit> parseCompilationUnit(
+  ScanResult input, {
+  LanguageVersion languageVersion = LanguageVersion.current,
+}) {
+  final parser = _Parser(input, languageVersion: languageVersion);
   final node = _UnitReader(parser).finish();
-  return ParseResult._(node, parser.diagnostics);
+  return parser.finishResult(node);
 }
 
 final class _UnitReader(final _Parser parser) extends _Reader<CompilationUnit> {

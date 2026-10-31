@@ -6,15 +6,20 @@ part of 'parser.dart';
 /// try/catch/finally retain their written order. Expressions use the same
 /// synchronous context as [parseExpression]. Local functions retain their own
 /// body context. Case patterns, guards, switches and destructuring preserve
-/// their written structure. Binding, types and jump targets are not checked.
+/// their written structure. Unlabeled jumps require an enclosing loop or switch;
+/// nested function bodies start a new jump context. Label binding, types and
+/// resolved jump targets require analysis.
 /// Recovery may return only part of invalid input.
-ParseResult<Statement> parseStatement(ScanResult input) {
-  final parser = _Parser(input);
+ParseResult<Statement> parseStatement(
+  ScanResult input, {
+  LanguageVersion languageVersion = LanguageVersion.current,
+}) {
+  final parser = _Parser(input, languageVersion: languageVersion);
   final node = _StatementReader(parser).finish();
   while (parser.current.kind != .eof) {
     parser.unexpected();
   }
-  return ParseResult._(node, parser.diagnostics);
+  return parser.finishResult(node);
 }
 
 sealed class _StatementFrame(final Token opening);
@@ -155,11 +160,13 @@ final class _StatementReader(
             final reader = _ConditionReader(parser);
             yield reader;
             frames.add(_WhileStatement(token, reader.result));
+            parser.loopDepth++;
             value = null;
             continue;
           case .keywordDo:
             parser.advance();
             frames.add(_DoStatement(token));
+            parser.loopDepth++;
             value = null;
             continue;
           case .keywordFor || .keywordAwait
@@ -188,6 +195,7 @@ final class _StatementReader(
               );
             }
             frames.add(_ForStatement(token, parts, isAwait));
+            parser.loopDepth++;
             value = null;
             continue;
           case .keywordTry:
@@ -228,6 +236,27 @@ final class _StatementReader(
               parser.advance();
             }
             final end = parser.expect(.semicolon);
+            if (token.kind == .keywordBreak &&
+                label == null &&
+                parser.loopDepth == 0 &&
+                parser.switchDepth == 0) {
+              parser.error(
+                'break_outside_loop_or_switch',
+                'An unlabeled break requires an enclosing loop or switch.',
+                token,
+              );
+            }
+            if (token.kind == .keywordContinue && parser.loopDepth == 0) {
+              if (parser.switchDepth == 0 || label == null) {
+                parser.error(
+                  'invalid_continue_context',
+                  parser.switchDepth == 0
+                      ? 'A continue requires an enclosing loop or switch.'
+                      : 'A continue in a switch requires a label.',
+                  token,
+                );
+              }
+            }
             value = token.kind == .keywordBreak
                 ? BreakStatement(
                     source: source,
@@ -305,7 +334,7 @@ final class _StatementReader(
               );
             } else {
               final reader = _VariableReader(parser);
-              if (!reader.start()) yield reader;
+              yield reader;
               if (reader.result case final declarations?) {
                 yield* variables(declarations, metadata: metadata.result);
               } else {
@@ -331,10 +360,11 @@ final class _StatementReader(
               continue;
             }
             _VariableDeclarations? declarations;
-            if (token.kind != .keywordAwait ||
-                parser.functionModifier == null) {
+            if ((token.kind != .keywordAwait ||
+                    parser.functionModifier == null) &&
+                parser.canStartVariableDeclaration) {
               final reader = _VariableReader(parser);
-              if (!reader.start()) yield reader;
+              yield reader;
               declarations = reader.result;
             }
             if (declarations != null) {
@@ -409,6 +439,7 @@ final class _StatementReader(
               );
             }
           case _WhileStatement():
+            parser.loopDepth--;
             statement = WhileStatement(
               source: source,
               start: frame.opening.start,
@@ -417,6 +448,7 @@ final class _StatementReader(
               body: statement,
             );
           case _DoStatement():
+            parser.loopDepth--;
             parser.expect(.keywordWhile);
             final reader = _ConditionReader(parser);
             yield reader;
@@ -429,6 +461,7 @@ final class _StatementReader(
               condition: test,
             );
           case _ForStatement():
+            parser.loopDepth--;
             statement = ForStatement(
               source: source,
               start: frame.opening.start,
@@ -474,7 +507,7 @@ final class _StatementReader(
                 frame.body = block;
               }
               if (current.kind == .keywordOn || current.kind == .keywordCatch) {
-                frame.handler = catchHeader();
+                yield* catchHeader(frame);
                 value = null;
                 continue;
               }
@@ -549,7 +582,7 @@ final class _StatementReader(
     );
   }
 
-  _CatchHeader catchHeader() {
+  Iterable<_Reader<Object?>> catchHeader(_TryStatement frame) sync* {
     final keyword = current;
     TypeAnnotation? type;
     Identifier? exception;
@@ -558,8 +591,9 @@ final class _StatementReader(
       parser.advance();
       final start = current.start;
       final reader = _TypeReader(parser);
+      if (!reader.start()) yield _TypeTask(reader);
       type =
-          reader.read() as TypeAnnotation? ??
+          reader.result as TypeAnnotation? ??
           MissingTypeAnnotation(source: source, offset: start);
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
@@ -575,7 +609,7 @@ final class _StatementReader(
       }
       parser.expect(.rightParen);
     }
-    return _CatchHeader(keyword, type, exception, stackTrace);
+    frame.handler = _CatchHeader(keyword, type, exception, stackTrace);
   }
 }
 

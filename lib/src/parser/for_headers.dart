@@ -89,14 +89,15 @@ extension on _Parser {
       pendingSyntax = _ForDeclarationReader(this, frame);
       return;
     }
-    initializeForVariables(frame);
+    if (canStartVariableDeclaration) {
+      pendingSyntax = _SyntaxTask(readForVariables(frame));
+    }
   }
 
-  void initializeForVariables(_ForHeader frame) {
+  Iterable<_Reader<Object?>> readForVariables(_ForHeader frame) sync* {
     final start = cursor;
     final reader = _VariableReader(this, forLoop: true);
-    final complete = reader.start();
-    assert(complete);
+    yield reader;
     frame.declarations = reader.result;
     if (frame.declarations
         case _VariableDeclarations(

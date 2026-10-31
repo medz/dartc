@@ -15,9 +15,17 @@
 | [§21.1][lexical]、[数字分隔符][separators]：数字 | 部分实现 | 十进制和十六进制整数、小数、指数、数字间连续下划线；小数点与成员访问、级联分开。缺失数字和非法分隔符有独立错误代码。扫描不转换数值、不判断数值范围。 | [numbers_test.dart](../test/scanner/numbers_test.dart) |
 | [字符串与插值][strings] | 部分实现 | 单双引号、raw、三引号、转义形状与 Unicode 范围检查；简单插值与表达式插值有明确边界，支持嵌套插值。相邻字符串分别保留，字符串值解码、拼接和插值求值尚未接入。 | [strings_test.dart](../test/scanner/strings_test.dart) |
 | [§21.1.2 Comments][comments]、文件头 | 部分实现 | 支持单行、文档与嵌套块注释。仅跳过偏移 0 的 BOM，仅在偏移 0 识别 script tag。版本标记保留为注释，尚未选择或限制文件语言版本。 | [scanner_test.dart](../test/scanner/scanner_test.dart) |
-| [§7 Errors and Warnings][errors]：词法诊断 | 部分实现 | 错误带稳定代码和源码区间；未闭合注释、字符串、插值及非法转义分别报告。未闭合字符串只返回实际存在的文本，不补造引号或花括号。括号配对、关键字位置限制和语法恢复尚未实现。 | [scanner_test.dart](../test/scanner/scanner_test.dart)；[strings_test.dart](../test/scanner/strings_test.dart) |
+| [§7 Errors and Warnings][errors]：词法诊断 | 部分实现 | 错误带稳定代码和源码区间；未闭合注释、字符串、插值及非法转义分别报告。未闭合字符串只返回实际存在的文本，不补造引号或花括号。括号配对、关键字位置限制和语法恢复由 parser 负责。 | [scanner_test.dart](../test/scanner/scanner_test.dart)；[strings_test.dart](../test/scanner/strings_test.dart) |
 
 旧语言版本的特性限制、语法解析及字面量求值尚未接入此 API。
+
+## 解析语言版本
+
+`package:dartc/parser.dart` 的各解析入口接受 `languageVersion: LanguageVersion(major, minor)`，默认 `LanguageVersion.current`，当前为 3.13。支持选择 2.12–3.13；超出范围返回诊断和可恢复的语法树。调用方根据文件与包配置选择版本，parser 不读取包配置，也不自行解释 `// @dart` 注释。
+
+版本检查覆盖非函数类型别名、泛型元数据、无符号右移、函数与构造器 tear-off 的明确语法、super 形参、命名实参后的位置实参、增强枚举、无名 library、类修饰符、record、模式、扩展类型、数字分隔符、空感知集合元素、点简写、主构造器及空声明体。旧版 switch 的 case 使用常量表达式文法。验证见 [language_versions_test.dart](../test/parser/language_versions_test.dart)。
+
+需要名称或类型信息才能判断的版本规则仍归语义分析，包括通配名字的绑定、私有命名参数的公开名称，以及推断和提升规则。版本检查不把解析成功等同于完整旧语言兼容。
 
 ## 编译与执行
 

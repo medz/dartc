@@ -14,7 +14,7 @@
 
 AST API 接受手工构造的节点，检查源码范围、快照归属和子节点顺序。parser API 已接入编译单元、声明、类型、形参、函数体、表达式和语句；模式、if-case 和 switch 均已接入文本解析。名称绑定、类型检查和执行尚未接入这些节点。
 
-整文件组合语法及截断输入验证见 [language_test.dart](../test/parser/language_test.dart)：涵盖库指令、类和扩展、泛型与函数类型、构造器、同步与异步函数体、集合、模式及控制流。调用方可通过 `parseCompilationUnit(scan(source))` 获取整文件 AST 和诊断，并使用 `walk` 遍历语法节点。`hasErrors == false` 仅表示未发现词法或语法错误，不能作为名称、类型或运行行为正确的依据。
+整文件组合语法及截断输入验证见 [language_test.dart](../test/parser/language_test.dart)：涵盖库指令、类和扩展、泛型与函数类型、构造器、同步与异步函数体、集合、模式及控制流。调用方可通过 `parseCompilationUnit(scan(source))` 获取整文件 AST 和诊断，或用 `languageVersion` 指定[解析语言版本](lexical-structure.md#解析语言版本)，并使用 `walk` 遍历语法节点。`hasErrors == false` 仅表示未发现词法或语法错误，不能作为名称、类型或运行行为正确的依据。
 
 安装与使用见 [README](../README.md)。
 

@@ -5,9 +5,8 @@ extension on _Parser {
     final next = tokens[cursor + 1].kind;
     if (next == .leftParen) return true;
     if (next != .less) return false;
-    final child = _Parser.nested(this)..advance();
-    return _TypeReader(child).read(parameters: true) != null &&
-        child.current.kind == .leftParen;
+    final end = lookahead.delimiters.afterTypeArguments(cursor + 1);
+    return end != null && tokens[end].kind == .leftParen;
   }
 }
 
@@ -18,13 +17,17 @@ final class _DeclarationName(final _Parser parser) {
   TypeParameterList? typeParameters;
   DeclaredOperator? op;
 
-  void read({bool alias = false, bool member = false}) {
+  Iterable<_Reader<Object?>> read({
+    bool alias = false,
+    bool member = false,
+  }) sync* {
     final initial = parser.cursor;
     final first = parser.current;
     if (!(first.kind == .keywordGet || first.kind == .keywordSet) &&
         parser.canStartTypeBeforeName) {
-      final parsed =
-          _TypeReader(parser, beforeFunction: true).read() as TypeAnnotation?;
+      final reader = _TypeReader(parser, beforeFunction: true);
+      if (!reader.start()) yield _TypeTask(reader);
+      final parsed = reader.result as TypeAnnotation?;
       if (parsed != null && parser.current.kind.isIdentifier) {
         type = parsed;
       } else {
@@ -74,7 +77,8 @@ final class _DeclarationName(final _Parser parser) {
     name = parser.readVariableName();
     if (parser.current.kind == .less) {
       final reader = _TypeReader(parser);
-      typeParameters = reader.read(parameters: true) as TypeParameterList?;
+      if (!reader.start(parameters: true)) yield _TypeTask(reader);
+      typeParameters = reader.result as TypeParameterList?;
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
       }
@@ -104,10 +108,13 @@ final class _TopLevelReader(
         parser.current.kind == .keywordExternal &&
         !parser.hasParametersAfterName;
     if (external) parser.advance();
-    final variable = _VariableReader(parser, allowConditional: false);
-    final complete = variable.start();
-    assert(complete);
-    if (variable.result case final declarations?) {
+    _VariableDeclarations? variables;
+    if (parser.canStartVariableDeclaration) {
+      final reader = _VariableReader(parser, allowConditional: false);
+      yield reader;
+      variables = reader.result;
+    }
+    if (variables case final declarations?) {
       final reader = _VariablesReader(parser, declarations, metadata: metadata);
       yield reader;
       result = TopLevelVariableDeclaration(
@@ -120,7 +127,8 @@ final class _TopLevelReader(
       return;
     }
     final initial = parser.cursor;
-    final header = _DeclarationName(parser)..read();
+    final header = _DeclarationName(parser);
+    yield* header.read();
     if (header.name.start == header.name.end) {
       parser.error(
         'expected_declaration',
@@ -135,9 +143,16 @@ final class _TopLevelReader(
     }
     FormalParameterList? parameters;
     if (header.accessor != .keywordGet) {
-      final reader = _ParameterReader(parser, function: true);
+      final reader = _ParameterReader(
+        parser,
+        function: true,
+        allowCovariant: false,
+      );
       yield reader;
       parameters = reader.result;
+      if (header.accessor == .keywordSet) {
+        parser.checkSetterParameters(parameters);
+      }
     }
     final body = _BodyReader(parser);
     yield body;
@@ -208,13 +223,15 @@ final class _TopLevelReader(
 
   Iterable<_Reader<Object?>> alias() sync* {
     parser.advance();
-    final header = _DeclarationName(parser)..read(alias: true);
+    final header = _DeclarationName(parser);
+    yield* header.read(alias: true);
     if (parser.current.kind == .assign) {
       parser.advance();
       final typeStart = parser.current.start;
       final reader = _TypeReader(parser);
+      if (!reader.start()) yield _TypeTask(reader);
       final type =
-          reader.read() as TypeAnnotation? ??
+          reader.result as TypeAnnotation? ??
           MissingTypeAnnotation(source: parser.source, offset: typeStart);
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);

@@ -30,6 +30,8 @@ SDK 对照版本见[总览](README.md)；switch 语句及表达式的模式、�
 
 异步与生成器体通过[函数体解析](functions.md#函数体解析-api)接入 `await for`、`yield` 与 `yield*`；独立 `parseStatement` 入口使用同步上下文。[局部函数声明](functions.md#函数表达式与局部声明解析)保留元数据、返回类型、泛型和函数体。变量声明元数据、模式声明与赋值、if-case 及 switch 已接入，范围与验证见[模式解析](patterns.md#模式解析-api)。名称绑定、类型、常量资格、确定赋值、跳转目标及 `rethrow` 的 catch 上下文合法性尚未检查。解析不回写输入 token；缺失语句使用零宽节点恢复。深层嵌套与损坏输入的源码范围检查见 [statements_test.dart](../test/parser/statements_test.dart) 和 [nesting_test.dart](../test/parser/nesting_test.dart)。
 
+无标签 `break` 要求外围有循环或 switch；`continue` 要求循环，或带标签且位于 switch 中。嵌套函数建立独立上下文，结束后恢复外围上下文。标签名字和目标是否存在、`rethrow` 的合法位置、返回类型和控制流语义仍由分析阶段检查。验证见 [contexts_test.dart](../test/parser/contexts_test.dart)。
+
 ## 编译与执行
 
 | 规范条目 | 状态 | 支持范围与缺口 | 验证 |

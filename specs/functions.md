@@ -29,7 +29,7 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 在形参列表中，`int Function(int value)` 表示名为 `Function` 的函数形式形参；`int Function(int value) callback` 表示具有函数类型的普通形参。泛型、可空尾缀和嵌套函数形式均保留对应结构，验证见 [parameters_test.dart](../test/parser/parameters_test.dart)。
 
-此入口不接收外围声明，因此保留 `var` / `final` 等声明信息，但尚未检查它们及 `covariant`、`this.`、`super.` 在具体函数、方法或构造器位置是否合法。重复参数、字段绑定、类型与默认值的语义检查也未接入。类型内部的元数据已接入；文档注释留在扫描结果中。解析不修改输入 token，损坏输入和深层嵌套验证见 [parameters_test.dart](../test/parser/parameters_test.dart)。
+此入口不接收外围声明，因此保留 `var` / `final` 等声明信息，但尚未检查它们及 `covariant`、`this.`、`super.` 在具体函数、方法或构造器位置是否合法。重复参数、字段绑定、类型与默认值的语义检查也未接入。 整文件入口检查顶层、局部函数和静态成员中的 `covariant` 参数，以及普通构造器中的字段声明修饰符；主构造器仍可使用 `final` / `var` 声明字段。验证见 [contexts_test.dart](../test/parser/contexts_test.dart)。类型内部的元数据已接入；文档注释留在扫描结果中。解析不修改输入 token，损坏输入和深层嵌套验证见 [parameters_test.dart](../test/parser/parameters_test.dart)。
 
 ## 函数体解析 API
 
@@ -42,7 +42,7 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 | §18.6.3、§18.16–18.17 | 异步体中的语句与集合 `await for`、生成器中的 `yield` / `yield*`；拒绝普通 `for` 头前的 `await`、非生成器的 yield、生成器的带值 return 和箭头体 | [function_bodies_test.dart](../test/parser/function_bodies_test.dart) 循环与生成器用例 |
 | §17.38 标识符引用 | 同步体保留 `await` / `yield` 标识符；异步或生成器体检查值名称、声明名称、成员与实参名称中的关键字使用；类型名称保持未绑定形式 | [function_bodies_test.dart](../test/parser/function_bodies_test.dart) 名称用例 |
 
-函数体内部沿用已支持的表达式和语句语法。同步语句直接以 `await:` 起始时，当前按 SDK 3.13.7 报告诊断；已有标签后的 `await:` 可解析。模式及 switch 仍是解析缺口；未绑定捕获、跳转目标或检查返回与生成类型。此入口不检查外围声明能否省略实现，也不把解析成功当作函数可执行的证明。损坏输入、深层 await 和块嵌套验证见 [function_bodies_test.dart](../test/parser/function_bodies_test.dart)。
+函数体内部沿用已支持的表达式和语句语法。同步语句直接以 `await:` 起始时，当前按 SDK 3.13.7 报告诊断；已有标签后的 `await:` 可解析。模式及 switch 已接入；未绑定捕获、跳转目标或检查返回与生成类型。此入口不检查外围声明能否省略实现，也不把解析成功当作函数可执行的证明。损坏输入、深层 await 和块嵌套验证见 [function_bodies_test.dart](../test/parser/function_bodies_test.dart)。
 
 ## 函数表达式与局部声明解析
 

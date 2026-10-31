@@ -27,7 +27,7 @@ final class _ConstructorReader(
           names.add(parser.readConstructorName());
         }
       }
-      final reader = _ParameterReader(parser);
+      final reader = _ParameterReader(parser, function: true);
       yield reader;
       parameters = reader.result;
     }
@@ -39,7 +39,15 @@ final class _ConstructorReader(
         parser.advance();
         target.add(parser.readConstructorName());
       }
-      final types = parser.readTypeArguments();
+      TypeArgumentList? types;
+      if (parser.current.kind == .less) {
+        final reader = _TypeReader(parser);
+        if (!reader.start(arguments: true)) yield _TypeTask(reader);
+        types = reader.result as TypeArgumentList?;
+        if (reader.failure case final failure?) {
+          parser.error(failure.$1, failure.$2, failure.$3);
+        }
+      }
       Identifier? suffix;
       if (parser.current.kind == .dot) {
         parser.advance();

@@ -6,10 +6,14 @@ part of 'parser.dart';
 /// nullable markers and metadata retain their source ranges.
 /// Invalid input produces diagnostics; when a type cannot be
 /// completed, the result contains a [MissingTypeAnnotation].
-ParseResult<TypeAnnotation> parseTypeAnnotation(ScanResult input) {
-  final parser = _Parser(input);
+ParseResult<TypeAnnotation> parseTypeAnnotation(
+  ScanResult input, {
+  LanguageVersion languageVersion = LanguageVersion.current,
+}) {
+  final parser = _Parser(input, languageVersion: languageVersion);
   final reader = _TypeReader(parser);
-  final node = reader.read() as TypeAnnotation?;
+  if (!reader.start()) _TypeTask(reader).finish();
+  final node = reader.result as TypeAnnotation?;
   if (reader.failure case final failure?) {
     parser.error(failure.$1, failure.$2, failure.$3);
   } else {
@@ -17,13 +21,12 @@ ParseResult<TypeAnnotation> parseTypeAnnotation(ScanResult input) {
       parser.unexpected();
     }
   }
-  return ParseResult._(
+  return parser.finishResult(
     node ??
         MissingTypeAnnotation(
           source: input.source,
           offset: input.tokens.first.start,
         ),
-    parser.diagnostics,
   );
 }
 
@@ -66,21 +69,6 @@ final class _TypeReader(
   SourceFile get source => parser.source;
   Token get current => parser.current;
   Token get next => parser.tokens[parser.cursor + 1];
-
-  AstNode? read({
-    bool arguments = false,
-    bool parameters = false,
-    bool beforeParameter = false,
-  }) {
-    if (!start(
-      arguments: arguments,
-      parameters: parameters,
-      beforeParameter: beforeParameter,
-    )) {
-      _TypeTask(this).finish();
-    }
-    return result;
-  }
 
   bool start({
     bool arguments = false,
@@ -481,6 +469,61 @@ extension on TokenKind {
 }
 
 extension on _Parser {
+  // Finds only the outer boundary. Contents of type argument lists, record
+  // fields and function parameters are checked by the type reader after the
+  // surrounding declaration or pattern has been selected.
+  int? possibleTypeEnd(int index, {bool beforeFunction = false}) {
+    final first = tokens[index].kind;
+    var bareFunction = first == .keywordFunction;
+    if (first == .leftParen) {
+      final end = lookahead.delimiters.closing(index);
+      if (end == null) return null;
+      index = end + 1;
+    } else {
+      if (!first.isTypeName &&
+          !(first.isIdentifier && tokens[index + 1].kind == .dot)) {
+        return null;
+      }
+      index++;
+      if (tokens[index].kind == .dot) {
+        bareFunction = false;
+        index++;
+        if (!tokens[index].kind.isTypeName) return null;
+        index++;
+      }
+      if (tokens[index].kind == .less) {
+        final end = lookahead.delimiters.afterTypeArguments(index);
+        if (end == null) return null;
+        index = end;
+      }
+      if (bareFunction && tokens[index].kind == .leftParen) {
+        final end = lookahead.delimiters.closing(index);
+        if (end == null) return null;
+        index = end + 1;
+      }
+    }
+    if (tokens[index].kind == .question) index++;
+    while (tokens[index].kind == .keywordFunction) {
+      if (beforeFunction &&
+          functionBodyAfterName(nameIndex: index, allowEmpty: true)) {
+        return index;
+      }
+      final suffix = index;
+      index++;
+      if (tokens[index].kind == .less) {
+        final end = lookahead.delimiters.afterTypeArguments(index);
+        if (end == null) return null;
+        index = end;
+      }
+      if (tokens[index].kind != .leftParen) return suffix;
+      final end = lookahead.delimiters.closing(index);
+      if (end == null) return null;
+      index = end + 1;
+      if (tokens[index].kind == .question) index++;
+    }
+    return index;
+  }
+
   // This only excludes prefixes that cannot be followed by a declaration name.
   // Records, function types and generic/nullable types still use the type reader.
   bool get canStartTypeBeforeName {
@@ -498,5 +541,21 @@ extension on _Parser {
     }
     final next = tokens[index].kind;
     return next.isIdentifier || next == .less || next == .question;
+  }
+}
+
+final class _RequiredTypeReader(final _Parser parser)
+    extends _Reader<TypeAnnotation> {
+  @override
+  Iterable<_Reader<Object?>> read() sync* {
+    final offset = parser.current.start;
+    final reader = _TypeReader(parser);
+    if (!reader.start()) yield _TypeTask(reader);
+    if (reader.failure case final failure?) {
+      parser.error(failure.$1, failure.$2, failure.$3);
+    }
+    result =
+        reader.result as TypeAnnotation? ??
+        MissingTypeAnnotation(source: parser.source, offset: offset);
   }
 }

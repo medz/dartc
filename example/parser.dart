@@ -13,6 +13,11 @@ void main() {
     ),
   );
   if (unit.hasErrors) return;
+  final older = parseExpression(
+    scan(SourceFile(Uri.parse('memory:older'), '(1, 2)')),
+    languageVersion: const LanguageVersion(2, 19),
+  );
+  print(older.hasErrors); // true: records require Dart 3.0.
   final declaration = unit.node.members.last as TopLevelFunctionDeclaration;
   print(declaration.name.text); // add
   print(declaration.parameters.parameters.length); // 2

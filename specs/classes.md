@@ -35,6 +35,8 @@ SDK 对照版本见[总览](README.md)；§15 泛型和 §20 类型关系另见[
 
 修饰符、构造器体及初始化形式包含语法检查；字段绑定、继承关系、成员冲突、参数类型和表示类型资格需要后续分析。方法和初始化表达式使用[表达式](expressions.md#表达式解析-api)、[语句](statements.md#语句解析-api)入口的语法。`factory<T>(T value)` 保留为泛型方法，区别于 factory 构造器。缺失成员用 `MissingClassMember` 恢复；未写完的断言初始化式返回诊断并保留后续成员，验证见同一测试文件。
 
+解析检查 setter 必须有一个必需位置参数、枚举常量的类型实参及构造器后缀后必须有实参列表、普通成员不得与外围声明同名，以及 mixin 和普通 extension 不得声明构造器。静态成员和 extension / extension type 的形参不允许 `covariant`；普通构造器不允许声明字段的 `var` / `final` 参数，主构造器保留这两种形式。验证见 [contexts_test.dart](../test/parser/contexts_test.dart)。
+
 ## 编译与执行
 
 | 规范条目 | 状态 | 支持范围与缺口 | 验证 |

@@ -20,7 +20,8 @@ final class _VariableReader(
   int? expressionStart;
   int? declarationEnd;
 
-  bool start() {
+  @override
+  Iterable<_Reader<Object?>> read() sync* {
     final initialCursor = parser.cursor;
     final first = parser.current;
     var isLate = false;
@@ -29,14 +30,16 @@ final class _VariableReader(
     if (parser.current.kind.isVariableModifier &&
         parser.tokens[parser.cursor + 1].kind == .leftParen) {
       parser.advance();
-      type = _TypeReader(parser).read() as TypeAnnotation?;
+      final reader = _TypeReader(parser);
+      if (!reader.start()) yield _TypeTask(reader);
+      type = reader.result as TypeAnnotation?;
       if (type == null ||
           !parser.current.kind.isIdentifier ||
           !parser.tokens[parser.cursor + 1].kind.followsVariableName) {
         parser.cursor = initialCursor;
         parser.current = first;
         result = null;
-        return true;
+        return;
       }
       isLate = first.kind == .keywordLate;
       if (forLoop || !isLate) {
@@ -86,10 +89,13 @@ final class _VariableReader(
 
     if (type == null &&
         keyword != .varKeyword &&
-        parser.canStartTypeBeforeName) {
+        parser.canStartTypeBeforeName &&
+        possibleVariableType()) {
       final index = parser.cursor;
       final token = parser.current;
-      final parsed = _TypeReader(parser).read() as TypeAnnotation?;
+      final reader = _TypeReader(parser);
+      if (!reader.start()) yield _TypeTask(reader);
+      final parsed = reader.result as TypeAnnotation?;
       if (parsed != null &&
           parser.current.kind.isIdentifier &&
           parser.tokens[parser.cursor + 1].kind.followsVariableName) {
@@ -108,13 +114,13 @@ final class _VariableReader(
       parser.cursor = initialCursor;
       parser.current = first;
       result = null;
-      return true;
+      return;
     }
     if (type == null && keyword == .none && !isLate) {
       parser.cursor = initialCursor;
       parser.current = first;
       result = null;
-      return true;
+      return;
     }
     if (isLate && type == null && keyword == .none) {
       parser.error(
@@ -145,10 +151,14 @@ final class _VariableReader(
       declarationEnd = parser.cursor;
       parser.cursor = question;
       parser.current = parser.tokens[question];
-      final branches = parser.lookahead.conditionals[question];
-      if (branches == null) return false;
+      var branches = parser.lookahead.conditionals[question];
+      if (branches == null) {
+        final reader = _ConditionalReader(parser);
+        yield reader;
+        branches = reader.result;
+      }
       select(branches);
-      return true;
+      return;
     }
     result = _VariableDeclarations(
       first.start,
@@ -157,14 +167,14 @@ final class _VariableReader(
       type,
       parser.readVariableName(),
     );
-    return true;
+    return;
   }
 
-  @override
-  Iterable<_Reader<Object?>> read() sync* {
-    final reader = _ConditionalReader(parser);
-    yield reader;
-    select(reader.result);
+  bool possibleVariableType() {
+    final end = parser.possibleTypeEnd(parser.cursor);
+    return end == null ||
+        parser.tokens[end].kind.isIdentifier &&
+            parser.tokens[end + 1].kind.followsVariableName;
   }
 
   void select(_ConditionalResult branches) {
@@ -179,6 +189,20 @@ final class _VariableReader(
 }
 
 extension on _Parser {
+  bool get canStartVariableDeclaration {
+    if (current.kind == .keywordVar ||
+        current.kind == .keywordFinal ||
+        current.kind == .keywordConst ||
+        current.kind.isVariableModifier) {
+      return true;
+    }
+    if (!canStartTypeBeforeName) return false;
+    final end = possibleTypeEnd(cursor);
+    return end == null ||
+        tokens[end].kind.isIdentifier &&
+            tokens[end + 1].kind.followsVariableName;
+  }
+
   Identifier readVariableName() {
     final token = current;
     if (!token.kind.isIdentifier) {

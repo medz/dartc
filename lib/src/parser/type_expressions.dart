@@ -1,7 +1,7 @@
 part of 'parser.dart';
 
 extension on _Parser {
-  void parseConstruction() {
+  Iterable<_Reader<Object?>> readConstruction() sync* {
     final keyword = current;
     advance();
     Identifier readName({bool continuation = false}) {
@@ -31,7 +31,8 @@ extension on _Parser {
     TypeArgumentList? types;
     if (current.kind == .less) {
       final reader = _TypeReader(this);
-      types = reader.read(arguments: true) as TypeArgumentList?;
+      if (!reader.start(arguments: true)) yield _TypeTask(reader);
+      types = reader.result as TypeArgumentList?;
       if (reader.failure case final failure?) {
         error(failure.$1, failure.$2, failure.$3);
       }
@@ -124,8 +125,41 @@ extension on _Parser {
       cursor = cached.$2;
       current = cached.$3;
     } else {
-      arguments = _TypeReader(this).read(arguments: true) as TypeArgumentList?;
+      final reader = _TypeReader(this);
+      if (!reader.start(arguments: true)) {
+        pendingSyntax = _SyntaxTask(
+          readTypeArgumentSuffix(reader, start, remainder, afterPrefix),
+        );
+        return true;
+      }
+      arguments = reader.result as TypeArgumentList?;
     }
+    return acceptTypeArguments(arguments, start, remainder, afterPrefix);
+  }
+
+  Iterable<_Reader<Object?>> readTypeArgumentSuffix(
+    _TypeReader reader,
+    int start,
+    Token remainder,
+    bool afterPrefix,
+  ) sync* {
+    yield _TypeTask(reader);
+    if (!acceptTypeArguments(
+      reader.result as TypeArgumentList?,
+      start,
+      remainder,
+      afterPrefix,
+    )) {
+      parseContinuation(skipTypeArguments: true);
+    }
+  }
+
+  bool acceptTypeArguments(
+    TypeArgumentList? arguments,
+    int start,
+    Token remainder,
+    bool afterPrefix,
+  ) {
     if (arguments == null || !current.kind.followsTypeArguments) {
       cursor = start;
       current = remainder;
@@ -134,7 +168,10 @@ extension on _Parser {
     // A successful trial is the syntax tree; it is not parsed a second time.
     if (afterPrefix) reduce();
     checkSelector();
-    target = values.removeLast();
+    if (frames.lastOrNull case final _Shorthand frame) {
+      frame.pendingBang = null;
+    }
+    final target = values.removeLast();
     if (current.kind == .leftParen) {
       frames.add(
         _Call(
@@ -164,7 +201,7 @@ extension on _Parser {
     return true;
   }
 
-  void parseTypeOperator() {
+  Iterable<_Reader<Object?>> readTypeOperator() sync* {
     final token = current;
     while (operators.length > operatorBase) {
       final previous = operators.last;
@@ -189,8 +226,9 @@ extension on _Parser {
     if (negated) advance();
     final first = current;
     final reader = _TypeReader(this, afterIsOrAs: true);
+    if (!reader.start()) yield _TypeTask(reader);
     final type =
-        reader.read() as TypeAnnotation? ??
+        reader.result as TypeAnnotation? ??
         MissingTypeAnnotation(source: source, offset: first.start);
     if (reader.failure case final failure?) {
       error(failure.$1, failure.$2, failure.$3);
