@@ -9,7 +9,7 @@
 | 块、空语句、表达式语句 | ✅ | ❌ | 🟡 | 表达式自身仍受支持子集限制。 |
 | 局部变量与同步非泛型局部函数 | ✅ | ❌ | 🟡 | 绑定、final/late、捕获见[变量](variables.md)和[函数](functions.md)。 |
 | if/else、while、do、普通 for | ✅ | ❌ | 🟡 | 支持短路、部分流合并；完整流分析仍缺。 |
-| for-in | ✅ | ❌ | 🟡 | 限 List；无一般 Iterable/Iterator 和可捕获并发修改错误。 |
+| for-in | ✅ | ❌ | 🟡 | CLI 限 List，无一般 Iterable/Iterator 和可捕获并发修改错误；parser 接受表达式来源，不检查 Iterable/Iterator 类型。 |
 | if-case、模式声明及循环头 | ✅ | ❌ | 🟡 | CLI 不含 Map/record 解构；parser 可解析，见[模式](patterns.md)。 |
 | switch、守卫、共享 case、隐式 break | ✅ | ❌ | 🟡 | 按语言版本区分常量 case 和模式规则。 |
 | 标签、break、continue | ✅ | ❌ | 🟡 | parser 检查部分外围循环/switch 上下文，不绑定标签目标；CLI 绑定目标。 |
