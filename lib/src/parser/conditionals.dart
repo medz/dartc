@@ -142,13 +142,19 @@ extension on _Parser {
     if (tail != null) lookahead.selectorTails[content.cursor] = tail;
   }
 
-  void parseWithTrials() {
+  void parseWithTrials({_ParseBoundary boundary = .input}) {
+    do {
+      acceptConditional(lookahead.conditionals[cursor] ?? resolveConditional());
+    } while (run(trial: false, boundary: boundary));
+  }
+
+  _ConditionalResult resolveConditional() {
     final initial = _ConditionalTrial(this);
     var parser = initial.reader;
     final trials = [initial];
     while (true) {
       _ConditionalResult? result;
-      if (parser.run(trial: parser != this)) {
+      if (parser.run(trial: true)) {
         final cached = parser.lookahead.conditionals[parser.cursor];
         if (cached == null) {
           final trial = _ConditionalTrial(parser);
@@ -162,7 +168,6 @@ extension on _Parser {
         );
         if (result == null) continue;
       } else {
-        if (parser == this) return;
         final trial = trials.last;
         if (parser.hasSyntaxError || parser.current.kind == .invalid) {
           result = trial.thenBranch == null
@@ -186,6 +191,7 @@ extension on _Parser {
         final trial = trials.removeLast();
         parser = trial.parent;
         parser.lookahead.conditionals[trial.question] = result;
+        if (trials.isEmpty) return result;
         result = parser.resumeConditional(
           result,
           trials.isEmpty ? null : trials.last,
@@ -319,7 +325,22 @@ extension on TokenKind {
     .interpolationEnd ||
     .keywordElse ||
     .keywordIn ||
-    .keywordCase => true,
+    .keywordCase ||
+    .keywordIf ||
+    .keywordWhile ||
+    .keywordDo ||
+    .keywordFor ||
+    .keywordSwitch ||
+    .keywordReturn ||
+    .keywordBreak ||
+    .keywordContinue ||
+    .keywordRethrow ||
+    .keywordTry ||
+    .keywordCatch ||
+    .keywordFinally ||
+    .keywordAssert ||
+    .keywordVar ||
+    .keywordFinal => true,
     _ => false,
   };
 

@@ -15,7 +15,20 @@ SDK 对照版本见[总览](README.md)；switch 语句及表达式的模式、�
 | §18.10–18.11 异常语句 | `try`、有序 `on` / `catch`、显式异常与堆栈参数、可选 `finally`、`rethrow`；省略的类型、参数和清理块保持缺省 | [exceptions_test.dart](../test/ast/exceptions_test.dart) |
 | §18.12–18.18 返回、标签、跳转、生成器与断言 | 有值或无值 `return`、多个标签、带或不带标签的 `break` / `continue`、`yield` / `yield*`、带或不带消息的 `assert` | [statements_test.dart](../test/ast/statements_test.dart) |
 
-这些节点尚无文本解析和语义检查 API；构造与遍历不建立作用域、绑定、确定赋值、完成方式、异常传播或异步执行。集合中的循环与 if-case 见[表达式语法表示](expressions.md#表达式语法表示)，编译与执行行为以下表为准。
+文本解析范围见[语句解析 API](#语句解析-api)。构造与遍历不建立作用域、绑定、确定赋值、完成方式、异常传播或异步执行。集合中的循环与 if-case 见[表达式语法表示](expressions.md#表达式语法表示)，编译与执行行为以下表为准。
+
+## 语句解析 API
+
+`package:dartc/parser.dart` 的 `parseStatement(ScanResult)` 解析一个语句，包括块中的嵌套语句。输入应包含该语句所需的分号和括号；多条顶层语句需要用块包围。返回的 `ParseResult<Statement>` 包含节点、词法诊断和语法诊断，调用方通过 `hasErrors` 判断是否成功。表达式使用[同步解析上下文](expressions.md#表达式解析-api)。
+
+| 语言条款 | 当前解析支持 | 验证 |
+| --- | --- | --- |
+| §18.1–18.3 块、空语句、表达式与局部变量 | 保留大括号、分号和语句顺序；声明包含可选类型、`late` / `var` / `final` / `const`、多个变量和可省略初始化式；检查修饰符组合，区分可空类型声明与条件表达式 | [statements_test.dart](../test/parser/statements_test.dart) 块与变量用例 |
+| §18.5–18.8 分支与循环 | `if` / `else`、`while`、`do-while`、`for`、`for-in`；`else` 关联最近的未完成 `if`，循环保留书写顺序、可省略初始化与条件、多条更新及新声明或已有变量 | [statements_test.dart](../test/parser/statements_test.dart) 分支与循环用例 |
+| §18.10–18.11 异常语句 | `rethrow`、`try`、有序 `on` / `catch`、可选异常类型及异常和堆栈参数、`finally`；不补造省略的类型或参数 | [statements_test.dart](../test/parser/statements_test.dart) 异常用例 |
+| §18.12–18.18 返回、标签、跳转与断言 | 有值或无值 `return`、多个标签、可选标签的 `break` / `continue`、带或不带消息及尾逗号的 `assert` | [statements_test.dart](../test/parser/statements_test.dart) 跳转与断言用例 |
+
+缺口：局部函数、声明元数据、模式声明与赋值、case 条件、switch、异步与生成器语句。名称绑定、类型、常量资格、确定赋值、跳转目标及 `rethrow` 的 catch 上下文合法性尚未检查。解析不回写输入 token；缺失语句使用零宽节点恢复。深层嵌套与损坏输入的源码范围检查见 [statements_test.dart](../test/parser/statements_test.dart)。
 
 ## 编译与执行
 

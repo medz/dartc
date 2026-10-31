@@ -7,6 +7,7 @@
 - Add `package:dartc/scanner.dart` for source-preserving Dart tokens, nested string interpolation and comments, and recoverable lexical diagnostics.
 - Add `package:dartc/ast.dart` for immutable syntax trees with checked source ranges and depth-first traversal. Includes compilation units, library directives, classes, mixins, enums, extensions, extension types, constructors, functions, variables, type aliases, expressions, patterns, and statements.
 - Add `package:dartc/parser.dart` to parse expressions and type annotations from scanner results. Supports operators, generic calls and function values, explicit constructor calls, type tests and casts, super receivers, member and index access, cascades, contextual dot shorthands, Symbol and interpolated string literals, records with optional `const`, collection literals with spreads and control-flow elements, and named, function and record types. Return structured diagnostics and source-preserving recovery nodes for incomplete input.
+- Add `parseStatement` for blocks, local variable declarations, branches, loops, labels, jumps, assertions and try/catch/finally. Parse `throw` expressions and retain written conditions, optional initializers and catch parameters.
 
 ### Performance
 

@@ -185,7 +185,13 @@ extension on _Parser {
         if (matched) advance();
         return;
       case _ForHeader():
-        closeForHeader(frame);
+        final parts = closeForHeader(frame);
+        switch (frame) {
+          case _ForElementHeader():
+            frame.element.parts = parts;
+          case _ForStatementHeader():
+            frame.parts = parts;
+        }
         frames.removeLast();
         expectsOperand = true;
         if (matched) advance();

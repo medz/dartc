@@ -62,7 +62,7 @@ Use these libraries independently in a Dart application:
 | `package:dartc/diagnostics.dart` | Diagnostics with severity, source ranges, and related notes | [Diagnostics](https://github.com/medz/dartc/blob/main/example/diagnostics.dart) |
 | `package:dartc/scanner.dart` | Dart tokens, comments, and lexical errors | [Scanning](https://github.com/medz/dartc/blob/main/example/scanner.dart) |
 | `package:dartc/ast.dart` | Compilation units, directives, declarations, types, expressions, statements, and patterns | [Inspecting syntax](https://github.com/medz/dartc/blob/main/example/ast.dart) |
-| `package:dartc/parser.dart` | Expression and type syntax trees with syntax diagnostics | [Parsing syntax](https://github.com/medz/dartc/blob/main/example/parser.dart) |
+| `package:dartc/parser.dart` | Expression, statement and type syntax trees with syntax diagnostics | [Parsing syntax](https://github.com/medz/dartc/blob/main/example/parser.dart) |
 
 These APIs are available from the source repository and have not been released yet.
 

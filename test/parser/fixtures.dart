@@ -56,6 +56,7 @@ String shape(AstNode node) {
     DotShorthandExpression() => form('context'),
     DotShorthandReferenceExpression() => form('dot'),
     ConstDotShorthandExpression() => form('const dot'),
+    ThrowExpression() => form('throw'),
     ArgumentList() => form('arguments'),
     NamedRecordField(:final name, :final value) =>
       '(${name.text}: ${shape(value)})',

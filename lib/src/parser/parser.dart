@@ -15,9 +15,12 @@ part 'type_expressions.dart';
 part 'function_types.dart';
 part 'record_types.dart';
 part 'collections.dart';
-part 'collection_loops.dart';
+part 'for_headers.dart';
 part 'conditionals.dart';
 part 'access_chains.dart';
+part 'statements.dart';
+part 'variables.dart';
+part 'throw_expression.dart';
 
 /// The syntax and diagnostics produced by parsing a source snapshot.
 ///
@@ -44,7 +47,8 @@ final class ParseResult<T extends AstNode> {
 /// The context is synchronous: `await` and `yield` can be identifiers. Supported
 /// forms include scalar literals, strings with interpolation and adjacency,
 /// records, operators, generic calls, explicit constructor calls, type tests and
-/// casts, super receivers, member access, indexing, cascades, dot shorthands,
+/// casts, throw expressions, super receivers, member access, indexing, cascades,
+/// dot shorthands,
 /// and collection literals with spreads, null-aware elements, if/else, and
 /// ordinary for/for-in headers.
 /// Other forms produce diagnostics until their grammar is implemented. Parsing
@@ -57,6 +61,8 @@ ParseResult<Expression> parseExpression(ScanResult input) =>
     _Parser(input).parse();
 
 sealed class _Frame(final int valueBase, final int operatorBase);
+
+enum _ParseBoundary { input, expression, header }
 
 final class _Parser {
   _Parser(ScanResult input)
@@ -116,12 +122,26 @@ final class _Parser {
   }
 
   // Returns true when an ambiguous expression or declaration needs a trial.
-  bool run({required bool trial}) {
+  bool run({required bool trial, _ParseBoundary boundary = .input}) {
     while (current.kind != .eof || frames.isNotEmpty) {
       final token = current;
       final frame = frames.isEmpty ? null : frames.last;
+      if (!trial && frame == null) {
+        if (boundary == .header) return false;
+        if (boundary == .expression &&
+            (token.kind.endsExpression ||
+                token.kind == .colon && questions.isEmpty ||
+                !expectsOperand &&
+                    token.kind != .colon &&
+                    token.kind != .cascade &&
+                    token.kind != .nullAwareCascade &&
+                    !token.kind.continuesExpression)) {
+          return false;
+        }
+      }
       if (frame is _Shorthand && endShorthandAtBoundary(frame)) continue;
       if (frame is _Cascade && endCascadeAtBoundary(frame)) continue;
+      if (frame is _Throw && endThrowAtBoundary(frame)) continue;
       if (trial) {
         if (hasSyntaxError || token.kind == .invalid) return false;
         if (frames.isEmpty &&
@@ -251,6 +271,9 @@ final class _Parser {
           return;
         case .keywordNew:
           parseConstruction();
+          return;
+        case .keywordThrow:
+          openThrow();
           return;
         case .dot:
           openShorthand();
@@ -818,7 +841,6 @@ final class _Parser {
   }
 
   bool isUnsupported(TokenKind kind) => switch (kind) {
-    .keywordThrow ||
     .keywordSwitch ||
     .leftBracket ||
     .emptyBrackets ||

@@ -72,4 +72,19 @@ void main() {
   final shorthand = assignment.right as DotShorthandExpression;
   print(shorthand.expression.text); // .blue
   print(cascade.sections.last.text); // ..build()
+
+  final statement = parseStatement(
+    scan(
+      SourceFile(
+        Uri.parse('memory:statement'),
+        'while (ready) { process(); if (done) break; }',
+      ),
+    ),
+  );
+  if (statement.hasErrors) return;
+  final whileLoop = statement.node as WhileStatement;
+  print(whileLoop.condition.text); // ready
+  final body = whileLoop.body as BlockStatement;
+  print(body.statements.first.text); // process();
+  print((body.statements.last as IfStatement).thenStatement.text); // break;
 }

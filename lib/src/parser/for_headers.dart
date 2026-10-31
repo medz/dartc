@@ -14,15 +14,14 @@ final class _NullableForInitializer(
   final Token remainder,
 );
 
-final class _ForHeader(
+sealed class _ForHeader(
   super.opening,
   super.valueBase,
   super.operatorBase,
-  final _ForElement element,
   final int start,
 ) extends _Delimiter {
   _ForPhase phase = .initializer;
-  _ForDeclarations? declarations;
+  _VariableDeclarations? declarations;
   ForInitializer? initializer;
   Expression? condition;
   ForInTarget? target;
@@ -33,16 +32,21 @@ final class _ForHeader(
   TokenKind get closing => .rightParen;
 }
 
-final class _ForDeclarations(
-  final int start,
-  final VariableKeyword keyword,
-  final bool isLate,
-  final TypeAnnotation? type,
-  Identifier name,
-) {
-  Identifier name = name;
-  bool initializing = false;
-  final List<VariableDeclaration> variables = [];
+final class _ForElementHeader(
+  super.opening,
+  super.valueBase,
+  super.operatorBase,
+  final _ForElement element,
+  super.start,
+) extends _ForHeader;
+
+final class _ForStatementHeader(
+  super.opening,
+  super.valueBase,
+  super.operatorBase,
+  super.start,
+) extends _ForHeader {
+  late ForLoopParts parts;
 }
 
 extension on _Parser {
@@ -66,7 +70,7 @@ extension on _Parser {
     }
     final control = _ForElement(token, isAwait: isAwait);
     collection.controls.add(control);
-    final frame = _ForHeader(
+    final frame = _ForElementHeader(
       opening,
       values.length,
       operators.length,
@@ -74,10 +78,14 @@ extension on _Parser {
       current.start,
     );
     frames.add(frame);
+    initializeForHeader(frame);
+  }
+
+  void initializeForHeader(_ForHeader frame) {
     final start = cursor;
-    frame.declarations = readForDeclarations();
+    frame.declarations = readVariableDeclarations(forLoop: true);
     if (frame.declarations
-        case _ForDeclarations(
+        case _VariableDeclarations(
           keyword: .none,
           isLate: false,
           type: NamedTypeAnnotation(isNullable: true) ||
@@ -94,77 +102,6 @@ extension on _Parser {
       current = tokens[cursor];
       assert(current.kind == .question);
     }
-  }
-
-  _ForDeclarations? readForDeclarations() {
-    final initialCursor = cursor;
-    final first = current;
-    var isLate = false;
-    while (current.kind.isInvalidForModifier &&
-        tokens[cursor + 1].kind != .keywordIn &&
-        (tokens[cursor + 1].kind.isKeyword ||
-            tokens[cursor + 1].kind.isIdentifier)) {
-      isLate = isLate || current.kind == .keywordLate;
-      error(
-        'invalid_for_modifier',
-        'This modifier cannot be used on a for-loop variable.',
-        current,
-      );
-      advance();
-    }
-    final keyword = switch (current.kind) {
-      .keywordVar => VariableKeyword.varKeyword,
-      .keywordFinal => VariableKeyword.finalKeyword,
-      .keywordConst => VariableKeyword.constKeyword,
-      _ => VariableKeyword.none,
-    };
-    if (keyword != .none) advance();
-    TypeAnnotation? type;
-    if (keyword != .varKeyword) {
-      final index = cursor;
-      final token = current;
-      final parsed = _TypeReader(this).read() as TypeAnnotation?;
-      if (parsed != null &&
-          current.kind.isIdentifier &&
-          tokens[cursor + 1].kind.followsForVariableName) {
-        type = parsed;
-      } else {
-        cursor = index;
-        current = token;
-      }
-    }
-    if (type == null && keyword == .none && !isLate) {
-      cursor = initialCursor;
-      current = first;
-      return null;
-    }
-    if (current.kind == .leftParen ||
-        current.kind == .leftBracket ||
-        current.kind == .leftBrace ||
-        current.kind == .emptyBrackets) {
-      error(
-        'unsupported_syntax',
-        'Pattern declarations are not yet supported.',
-        current,
-      );
-    }
-    return _ForDeclarations(
-      first.start,
-      keyword,
-      isLate,
-      type,
-      readVariableName(),
-    );
-  }
-
-  Identifier readVariableName() {
-    final token = current;
-    if (!token.kind.isIdentifier) {
-      error('expected_identifier', 'Expected a variable name.', token);
-      return Identifier(source: source, start: token.start, end: token.start);
-    }
-    advance();
-    return identifier(token);
   }
 
   bool hasForExpression(_ForHeader frame) =>
@@ -312,17 +249,16 @@ extension on _Parser {
     return false;
   }
 
-  void closeForHeader(_ForHeader frame) {
+  ForLoopParts closeForHeader(_ForHeader frame) {
     if (frame.phase == .iterable) {
       final iterable = finishExpression(frame.valueBase, frame.operatorBase);
-      frame.element.parts = ForInParts(
+      return ForInParts(
         source: source,
         start: frame.start,
         end: iterable.end,
         target: frame.target!,
         iterable: iterable,
       );
-      return;
     }
     if (frame.phase != .updaters) {
       error(
@@ -340,7 +276,7 @@ extension on _Parser {
       frame.updaters.add(finishExpression(frame.valueBase, frame.operatorBase));
       frame.end = frame.updaters.last.end;
     }
-    frame.element.parts = ForParts(
+    return ForParts(
       source: source,
       start: frame.start,
       end: frame.end,
@@ -349,25 +285,4 @@ extension on _Parser {
       updaters: frame.updaters,
     );
   }
-}
-
-extension on TokenKind {
-  bool get isInvalidForModifier => switch (this) {
-    .keywordAbstract ||
-    .keywordCovariant ||
-    .keywordExternal ||
-    .keywordLate ||
-    .keywordRequired ||
-    .keywordStatic => true,
-    _ => false,
-  };
-  bool get followsForVariableName => switch (this) {
-    .assign ||
-    .comma ||
-    .semicolon ||
-    .keywordIn ||
-    .rightParen ||
-    .eof => true,
-    _ => false,
-  };
 }
