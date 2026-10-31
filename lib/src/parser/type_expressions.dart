@@ -12,10 +12,8 @@ extension on _Parser {
         return identifier(token);
       }
       error(
-        token.kind == .dot ? 'unsupported_syntax' : 'expected_identifier',
-        token.kind == .dot
-            ? 'Dot shorthand parsing is not yet supported.'
-            : 'Expected a constructor or type name.',
+        'expected_identifier',
+        'Expected a constructor or type name.',
         token,
       );
       if (token.kind.isKeyword) {
@@ -70,7 +68,7 @@ extension on _Parser {
       expectsOperand = false;
       return;
     }
-    delimiters.add(
+    frames.add(
       _Construction(
         current,
         values.length,
@@ -86,6 +84,28 @@ extension on _Parser {
   }
 
   bool tryTypeArguments() {
+    var target = values.last;
+    var assertions = 0;
+    while (true) {
+      if (target is NullAssertionExpression) {
+        assertions++;
+        target = target.operand;
+      } else if (target is DotShorthandExpression) {
+        target = target.expression;
+      } else {
+        break;
+      }
+    }
+    final frame = frames.lastOrNull;
+    final afterPrefix =
+        (target is ConstDotShorthandExpression || assertions > 1) &&
+        !(frame is _Cascade && !frame.assigned);
+    if (afterPrefix &&
+        !(operators.length > operatorBase &&
+            prefixes.isNotEmpty &&
+            prefixes.last == operators.length - 1)) {
+      return false;
+    }
     final first = tokens[cursor + 1];
     if (!first.kind.isTypeName &&
         first.kind != .leftParen &&
@@ -112,10 +132,11 @@ extension on _Parser {
       return false;
     }
     // A successful trial is the syntax tree; it is not parsed a second time.
+    if (afterPrefix) reduce();
     checkSelector();
-    final target = values.removeLast();
+    target = values.removeLast();
     if (current.kind == .leftParen) {
-      delimiters.add(
+      frames.add(
         _Call(
           current,
           values.length,

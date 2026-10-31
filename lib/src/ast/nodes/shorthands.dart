@@ -48,30 +48,37 @@ final class DotShorthandReferenceExpression({
   };
 }
 
-/// An explicit `const .name(...)` or `const .new(...)` shorthand head.
+/// A shorthand head with an explicit `const` prefix.
 ///
-/// The constructor and constant arguments are resolved during analysis.
+/// The referenced member or constructor and constant arguments are resolved
+/// during analysis. An omitted argument list is retained as a reference.
 final class ConstDotShorthandExpression({
   required super.source,
   required super.start,
   required super.end,
 
-  /// The written constructor name, including `new` when present.
+  /// The written member or constructor name, including `new` when present.
   required final Identifier name,
 
-  /// The constructor arguments in source order.
-  required final ArgumentList arguments,
+  /// Explicit type arguments, retained for later constructor checks.
+  final TypeArgumentList? typeArguments,
+
+  /// The written constructor arguments, or `null` for a reference.
+  final ArgumentList? arguments,
 }) extends Expression {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  int get childCount =>
+      1 + (typeArguments == null ? 0 : 1) + (arguments == null ? 0 : 1);
   @override
   AstNode childAt(int index) => switch (index) {
     0 => name,
-    1 => arguments,
+    1 when typeArguments != null || arguments != null =>
+      typeArguments ?? arguments!,
+    2 when typeArguments != null && arguments != null => arguments!,
     _ => super.childAt(index),
   };
 }

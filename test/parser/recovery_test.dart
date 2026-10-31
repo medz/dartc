@@ -82,9 +82,7 @@ void main() {
     () {
       for (final text in [
         '(a) = b',
-        'a..b()',
         'throw a',
-        '.new()',
         '() => a',
         'switch (a) { _ => b }',
       ]) {

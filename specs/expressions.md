@@ -22,7 +22,7 @@
 | [空安全选择器][null-aware] | `?.`、`?[]`、后缀 `!`，以及链中的括号边界 | [expressions_test.dart](../test/ast/expressions_test.dart)、[access_test.dart](../test/ast/access_test.dart) |
 | 类型测试、转换、异步与抛出 | `is` / `is!`、`as`、`await`、`throw`；保留写出的类型与操作数 | [expressions_test.dart](../test/ast/expressions_test.dart) |
 | [级联][cascades] | 一个接收者、有序分段、首段 `?..`、属性及索引起始选择器、段内调用与赋值、带括号的嵌套级联 | [access_test.dart](../test/ast/access_test.dart) |
-| [点简写][dot-shorthands] | `.name` / `.new`、显式 `const .name(...)` / `const .new(...)` 及其后续选择链；完整链保留独立的上下文边界，尚未推断目标命名空间 | [access_test.dart](../test/ast/access_test.dart) |
+| [点简写][dot-shorthands] | `.name` / `.new`、显式 `const` 前缀、可选类型实参与调用实参及后续选择链；完整链保留独立的上下文边界，无实参列表时保持引用形式，尚未推断目标命名空间 | [access_test.dart](../test/ast/access_test.dart) |
 
 构造与遍历不证明表达式合法、类型正确或求值行为已实现。解析支持如下；编译与执行行为见后续各表。
 
@@ -38,6 +38,8 @@
 | §17 运算表达式 | 前缀 `-` / `!` / `~`、二元运算及优先级、括号分组、条件分支和赋值的结合性；关系与相等运算的连续同级使用需要括号 | [expressions_test.dart](../test/parser/expressions_test.dart)、[recovery_test.dart](../test/parser/recovery_test.dart) |
 | 赋值与增减 | 简单、复合、`??=` 赋值及前后 `++` / `--`；检查目标语法形式，保留目标一次；未解析声明或检查 final、const、类型及成员可写性 | [expressions_test.dart](../test/parser/expressions_test.dart)、[recovery_test.dart](../test/parser/recovery_test.dart) |
 | 调用、属性与[空安全选择器][null-aware] | 位置和命名实参交错、尾逗号、`.` / `?.`、`[]` / `?[]`、后缀 `!`；保留链中的括号和书写顺序，未绑定函数、构造器或成员 | [expressions_test.dart](../test/parser/expressions_test.dart) |
+| [级联][cascades] | `..`、首段 `?..`、属性或索引起始的分段、段内选择器、泛型调用与赋值；接收者只出现一次，保留分段顺序与条件表达式的结合边界；拒绝后续 `?..` 及未加括号的级联后续运算 | [access_test.dart](../test/parser/access_test.dart) 级联用例 |
+| [点简写][dot-shorthands] | `.name` / `.new`、调用、显式类型实参与 `const` 前缀；保留完整选择链的上下文范围，区分段内空断言与上下文外的赋值、更新和普通运算；按 SDK 3.13.7 接受 `const .name` 引用，不补造实参列表；目标类型、成员查找与常量资格留待分析 | [access_test.dart](../test/parser/access_test.dart) 点简写与上下文边界用例 |
 | [显式实例化][constructor-tearoffs]与泛型调用 | `f<T>`、`f<T>(x)`、`C<T>.named(x)`；保留嵌套类型实参，与关系运算及移位区分；未进行名称绑定或判断调用对象类别 | [types_test.dart](../test/parser/types_test.dart) 泛型调用、函数值、比较与移位用例 |
 | 显式实例创建 | `new` / `const`、限定名称、类型实参、命名构造器及 `.new`；保持实参顺序，名称中的库前缀与构造器歧义留待绑定；缺少实参列表时用零宽实参列表恢复并报告诊断，不检查构造器存在性或 const 资格 | [primaries_test.dart](../test/parser/primaries_test.dart) 构造调用用例 |
 | `super` 接收者 | 成员、索引、调用及可用的运算符位置；拒绝将裸 `super` 用作普通值及 `super?.member`；父类查找、可调用性和成员类型留待分析 | [primaries_test.dart](../test/parser/primaries_test.dart) super 用例 |
@@ -48,7 +50,7 @@
 | 集合循环 | 同步 `for` 和 `for-in`；表达式或普通变量声明初始化、可省略的条件、多条更新、已有或声明的迭代变量；保留类型、变量关键字和源顺序，不补写空条件 | [collections_test.dart](../test/parser/collections_test.dart) |
 | 不完整或无效的输入 | 报告缺少的操作数、名称、冒号和闭合括号；以零宽节点恢复操作数，继续处理后续实参；不修改源文本或输入 token | [recovery_test.dart](../test/parser/recovery_test.dart) |
 
-尚缺级联、点简写、函数表达式、模式赋值、switch、`throw` 和异步上下文。集合中的 if-case、模式循环头和声明元数据尚未解析；`await for` 在当前同步上下文中报告诊断。这些缺口产生的诊断不表示相应 Dart 写法非法。
+尚缺函数表达式、模式赋值、switch、`throw` 和异步上下文。集合中的 if-case、模式循环头和声明元数据尚未解析；`await for` 在当前同步上下文中报告诊断。这些缺口产生的诊断不表示相应 Dart 写法非法。
 
 错误结果可能只覆盖部分输入，不能直接当作合法表达式使用。解析不进行名称绑定、类型检查、常量求值或执行，也不改变下述已发布编译器的支持范围。
 

@@ -17,6 +17,7 @@ part 'record_types.dart';
 part 'collections.dart';
 part 'collection_loops.dart';
 part 'conditionals.dart';
+part 'access_chains.dart';
 
 /// The syntax and diagnostics produced by parsing a source snapshot.
 ///
@@ -43,8 +44,9 @@ final class ParseResult<T extends AstNode> {
 /// The context is synchronous: `await` and `yield` can be identifiers. Supported
 /// forms include scalar literals, strings with interpolation and adjacency,
 /// records, operators, generic calls, explicit constructor calls, type tests and
-/// casts, super receivers, member access, indexing, and collection literals with
-/// spreads, null-aware elements, if/else, and ordinary for/for-in headers.
+/// casts, super receivers, member access, indexing, cascades, dot shorthands,
+/// and collection literals with spreads, null-aware elements, if/else, and
+/// ordinary for/for-in headers.
 /// Other forms produce diagnostics until their grammar is implemented. Parsing
 /// does not resolve names or check types.
 ///
@@ -53,6 +55,8 @@ final class ParseResult<T extends AstNode> {
 /// part of the input.
 ParseResult<Expression> parseExpression(ScanResult input) =>
     _Parser(input).parse();
+
+sealed class _Frame(final int valueBase, final int operatorBase);
 
 final class _Parser {
   _Parser(ScanResult input)
@@ -80,7 +84,7 @@ final class _Parser {
   final List<int> prefixes = [];
   // Operator indices awaiting ':', limited by the current delimiter's base.
   final List<int> questions = [];
-  final List<_Delimiter> delimiters = [];
+  final List<_Frame> frames = [];
   final int? trialStart;
   bool initialOperatorBoundary = false;
   int cursor = 0;
@@ -94,9 +98,11 @@ final class _Parser {
   // as indexes. Other primaries and selectors start a new chain.
   Expression? selectorTarget;
   bool checkedNullAware = false;
+  // A terminal postfix assertion cannot be followed by a tighter selector.
+  Expression? postfixTarget;
   _NullableForInitializer? nullableForInitializer;
 
-  int get operatorBase => delimiters.isEmpty ? 0 : delimiters.last.operatorBase;
+  int get operatorBase => frames.isEmpty ? 0 : frames.last.operatorBase;
 
   void advance() {
     current = tokens[++cursor];
@@ -111,11 +117,14 @@ final class _Parser {
 
   // Returns true when an ambiguous expression or declaration needs a trial.
   bool run({required bool trial}) {
-    while (current.kind != .eof || delimiters.isNotEmpty) {
+    while (current.kind != .eof || frames.isNotEmpty) {
       final token = current;
+      final frame = frames.isEmpty ? null : frames.last;
+      if (frame is _Shorthand && endShorthandAtBoundary(frame)) continue;
+      if (frame is _Cascade && endCascadeAtBoundary(frame)) continue;
       if (trial) {
         if (hasSyntaxError || token.kind == .invalid) return false;
-        if (delimiters.isEmpty &&
+        if (frames.isEmpty &&
             (token.kind == .colon && questions.isEmpty ||
                 token.kind.endsExpression ||
                 !expectsOperand &&
@@ -129,14 +138,13 @@ final class _Parser {
           token.kind == .rightBracket ||
           token.kind == .rightBrace ||
           token.kind == .interpolationEnd) {
-        if (delimiters.isNotEmpty) {
+        if (frames.isNotEmpty) {
           closeDelimiter();
         } else {
           unexpected();
         }
         continue;
       }
-      final frame = delimiters.isEmpty ? null : delimiters.last;
       if (frame is _ForHeader && parseForSeparator(frame)) continue;
       if (token.kind == .comma) {
         if (frame is _Collection) {
@@ -218,9 +226,11 @@ final class _Parser {
           return;
         case .keywordConst:
           switch (tokens[cursor + 1].kind) {
+            case .dot:
+              openShorthand();
             case .leftParen:
               advance();
-              delimiters.add(
+              frames.add(
                 _Group(
                   current,
                   values.length,
@@ -242,6 +252,9 @@ final class _Parser {
         case .keywordNew:
           parseConstruction();
           return;
+        case .dot:
+          openShorthand();
+          return;
         case .less:
           parseCollectionPrefix();
           return;
@@ -249,7 +262,7 @@ final class _Parser {
           parseSymbol();
           return;
         case .leftParen:
-          delimiters.add(_Group(token, values.length, operators.length));
+          frames.add(_Group(token, values.length, operators.length));
           advance();
           return;
         case .minus || .bang || .tilde || .increment || .decrement:
@@ -355,7 +368,7 @@ final class _Parser {
           );
           advance();
         case .interpolationStart:
-          delimiters.add(
+          frames.add(
             _Interpolation(token, values.length, operators.length, strings),
           );
           advance();
@@ -411,9 +424,33 @@ final class _Parser {
 
   bool parseContinuation() {
     final token = current;
+    if (values.last is CascadeExpression &&
+        token.kind != .cascade &&
+        token.kind != .nullAwareCascade) {
+      error(
+        'invalid_cascade_continuation',
+        'Parenthesize the cascade before this operation.',
+        token,
+      );
+    }
     switch (token.kind) {
+      case .cascade || .nullAwareCascade:
+        openCascade();
+        return false;
       case .less:
-        if (tryTypeArguments()) return false;
+        final frame = frames.lastOrNull;
+        if (tryTypeArguments()) {
+          if (frame is _Shorthand) frame.pendingBang = null;
+          return false;
+        }
+        if (frames.lastOrNull case final _Shorthand frame) {
+          closeShorthand(frame);
+          return false;
+        }
+        if (frames.lastOrNull case final _Cascade frame when !frame.assigned) {
+          closeCascade(frame);
+          return false;
+        }
       case .keywordAs || .keywordIs:
         parseTypeOperator();
         return false;
@@ -456,7 +493,7 @@ final class _Parser {
       case .leftParen:
         checkSelector();
         final callee = values.removeLast();
-        delimiters.add(
+        frames.add(
           _Call(
             token,
             values.length,
@@ -488,6 +525,20 @@ final class _Parser {
           return false;
         }
       case .bang:
+        final isSelector = tokens[cursor + 1].kind.followsSelectorBang;
+        if (values.last == postfixTarget && isSelector) {
+          if (operators.length > operatorBase &&
+              prefixes.isNotEmpty &&
+              prefixes.last == operators.length - 1) {
+            reduce();
+          } else {
+            error(
+              'invalid_selector',
+              'Parenthesize the assertion before this selector.',
+              token,
+            );
+          }
+        }
         final operand = values.removeLast();
         checkValue(operand);
         values.add(
@@ -498,6 +549,15 @@ final class _Parser {
             operand: operand,
           ),
         );
+        if (frames.lastOrNull case final _Shorthand frame) {
+          frame.pendingBang = values.last as NullAssertionExpression;
+        }
+        final frame = frames.lastOrNull;
+        if (!isSelector &&
+            !(frame is _Shorthand && !frame.isConst) &&
+            !(frame is _Cascade && !frame.assigned)) {
+          postfixTarget = values.last;
+        }
         advance();
         return false;
       case .increment || .decrement:
@@ -524,6 +584,9 @@ final class _Parser {
       return false;
     }
     reduceBefore(token);
+    if (precedence == _assignmentPrecedence) {
+      if (frames.lastOrNull case final _Cascade frame) frame.assigned = true;
+    }
     if (token.kind == .question) questions.add(operators.length);
     operators.add(token);
     advance();
@@ -648,7 +711,9 @@ final class _Parser {
     checkValue(right);
     if (token.kind.precedence == _assignmentPrecedence) {
       if (token.kind == .assign &&
-          (left is ParenthesizedExpression || left is RecordExpression)) {
+          (left is ParenthesizedExpression ||
+              left is RecordExpression ||
+              left is CollectionExpression)) {
         error(
           'unsupported_syntax',
           'Pattern assignment parsing is not yet supported.',
@@ -706,9 +771,14 @@ final class _Parser {
       Identifier(source: source, start: token.start, end: token.end);
 
   void checkAssignable(Expression expression, Token operator) {
+    if (expression is DotShorthandExpression) {
+      expression = expression.expression;
+    }
     if (expression is! IdentifierExpression &&
         expression is! PropertyAccessExpression &&
         expression is! IndexExpression &&
+        expression is! CascadePropertyExpression &&
+        expression is! CascadeIndexExpression &&
         expression is! MissingExpression) {
       error(
         'invalid_assignment_target',
@@ -753,9 +823,6 @@ final class _Parser {
     .leftBracket ||
     .emptyBrackets ||
     .leftBrace ||
-    .cascade ||
-    .nullAwareCascade ||
-    .dot ||
     .arrow => true,
     _ => false,
   };

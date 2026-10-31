@@ -73,7 +73,7 @@ extension on _Parser {
       control,
       current.start,
     );
-    delimiters.add(frame);
+    frames.add(frame);
     final start = cursor;
     frame.declarations = readForDeclarations();
     if (frame.declarations

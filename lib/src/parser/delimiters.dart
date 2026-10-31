@@ -2,9 +2,9 @@ part of 'parser.dart';
 
 sealed class _Delimiter(
   final Token opening,
-  final int valueBase,
-  final int operatorBase,
-) {
+  super.valueBase,
+  super.operatorBase,
+) extends _Frame {
   TokenKind get closing;
 }
 
@@ -100,7 +100,7 @@ extension on _Parser {
       return;
     }
     advance();
-    delimiters.add(
+    frames.add(
       _Index(
         token,
         values.length,
@@ -145,7 +145,7 @@ extension on _Parser {
   }
 
   void closeDelimiter() {
-    final frame = delimiters.last;
+    final frame = frames.last as _Delimiter;
     final matched = current.kind == frame.closing;
     final end = matched ? current.end : current.start;
     if (!matched) {
@@ -157,6 +157,13 @@ extension on _Parser {
     }
     final Expression expression;
     switch (frame) {
+      case _CascadeIndex():
+        expression = CascadeIndexExpression(
+          source: source,
+          start: frame.marker.start,
+          end: end,
+          index: finishExpression(frame.valueBase, frame.operatorBase),
+        );
       case _Interpolation():
         frame.strings.addInterpolation(
           frame.opening,
@@ -164,7 +171,7 @@ extension on _Parser {
           end,
           isBraced: true,
         );
-        delimiters.removeLast();
+        frames.removeLast();
         if (matched) advance();
         parseStrings(frame.strings);
         return;
@@ -173,13 +180,13 @@ extension on _Parser {
           frame.valueBase,
           frame.operatorBase,
         );
-        delimiters.removeLast();
+        frames.removeLast();
         expectsOperand = true;
         if (matched) advance();
         return;
       case _ForHeader():
         closeForHeader(frame);
-        delimiters.removeLast();
+        frames.removeLast();
         expectsOperand = true;
         if (matched) advance();
         return;
@@ -250,6 +257,19 @@ extension on _Parser {
               arguments: frame.arguments,
             ),
           ),
+          _ConstShorthand() => ConstDotShorthandExpression(
+            source: source,
+            start: frame.keyword.start,
+            end: end,
+            name: frame.member,
+            typeArguments: frame.typeArguments,
+            arguments: ArgumentList(
+              source: source,
+              start: frame.opening.start,
+              end: end,
+              arguments: frame.arguments,
+            ),
+          ),
           _Group(
             fields: [final Expression value],
             hasComma: false,
@@ -270,19 +290,23 @@ extension on _Parser {
           ),
         };
     }
-    delimiters.removeLast();
+    frames.removeLast();
     values.add(expression);
     switch (frame) {
       case _Call(:final checkedNullAware, :final callee)
           when callee is! IdentifierExpression &&
               callee is! PropertyAccessExpression &&
               callee is! ThisExpression &&
-              callee is! SuperExpression:
+              callee is! SuperExpression &&
+              callee is! DotShorthandReferenceExpression:
         selectorTarget = expression;
         this.checkedNullAware = checkedNullAware;
       case _Index(:final checkedNullAware):
         selectorTarget = expression;
         this.checkedNullAware = checkedNullAware;
+      case _CascadeIndex():
+        selectorTarget = expression;
+        checkedNullAware = false;
       default:
         break;
     }

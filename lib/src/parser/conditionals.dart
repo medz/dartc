@@ -209,7 +209,7 @@ extension on _Parser {
     _ConditionalResult result,
     _ConditionalTrial? trial,
   ) {
-    if (trial != null && delimiters.isEmpty) {
+    if (trial != null && frames.isEmpty) {
       if (trial.thenBranch == null) {
         // Only an operator boundary preserves a failed trial when its leading
         // list becomes an index. Selector chains can instead release a colon.
@@ -273,6 +273,7 @@ extension on _Parser {
       return;
     }
     if (result case _ConditionalBranches()) {
+      prepareConditional();
       reduceBefore(current);
       final condition = values.removeLast();
       checkValue(condition);

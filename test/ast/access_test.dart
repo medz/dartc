@@ -280,7 +280,22 @@ void main() {
     checkTree(root);
     expect(walk(root).whereType<DotShorthandReferenceExpression>(), isEmpty);
     expect(head.name.text, 'new');
-    expect(head.arguments.text, '(1)');
+    expect(head.arguments!.text, '(1)');
+  });
+
+  test('keeps explicit const references without synthetic argument lists', () {
+    final f = SyntaxFixture('const .value');
+    final head = ConstDotShorthandExpression(
+      source: f.source,
+      start: 0,
+      end: f.source.length,
+      name: f.id('value'),
+    );
+    checkTree(head);
+    expect(head.arguments, isNull);
+    expect(head.childCount, 1);
+    expect(head.childAt(0), same(head.name));
+    expect(() => head.childAt(1), throwsRangeError);
   });
 
   test(

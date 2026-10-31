@@ -59,4 +59,17 @@ void main() {
   print(constructor.name.map((n) => n.text).join('.')); // p.Box
   print(constructor.typeArguments!.text); // <int>
   print(constructor.constructorName!.text); // named
+
+  final configured = parseExpression(
+    scan(
+      SourceFile(Uri.parse('memory:cascade'), 'make()..color = .blue..build()'),
+    ),
+  );
+  if (configured.hasErrors) return;
+  final cascade = configured.node as CascadeExpression;
+  print(cascade.target.text); // make()
+  final assignment = cascade.sections.first as AssignmentExpression;
+  final shorthand = assignment.right as DotShorthandExpression;
+  print(shorthand.expression.text); // .blue
+  print(cascade.sections.last.text); // ..build()
 }

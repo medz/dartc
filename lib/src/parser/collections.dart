@@ -89,7 +89,7 @@ extension on _Parser {
       expectsOperand = false;
       return;
     }
-    delimiters.add(
+    frames.add(
       _Collection(
         token,
         values.length,
@@ -144,7 +144,7 @@ extension on _Parser {
         } else {
           error('expected_opener', "Expected '(' after 'if'.", opening);
         }
-        delimiters.add(
+        frames.add(
           _IfHeader(opening, values.length, operators.length, control),
         );
         return true;

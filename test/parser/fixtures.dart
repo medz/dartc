@@ -48,6 +48,14 @@ String shape(AstNode node) {
       hasConstKeyword ? 'const record' : 'record',
     ),
     InstanceCreationExpression(:final kind) => form(kind.name),
+    CascadeExpression(:final isNullAware) => form(
+      isNullAware ? '?cascade' : 'cascade',
+    ),
+    CascadePropertyExpression() => form('..'),
+    CascadeIndexExpression() => form('..[]'),
+    DotShorthandExpression() => form('context'),
+    DotShorthandReferenceExpression() => form('dot'),
+    ConstDotShorthandExpression() => form('const dot'),
     ArgumentList() => form('arguments'),
     NamedRecordField(:final name, :final value) =>
       '(${name.text}: ${shape(value)})',
