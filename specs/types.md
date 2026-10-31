@@ -97,7 +97,7 @@ void main() {
 
 ## FFI 类型与原生导出声明
 
-`Int8`、`Uint8`、`Int16`、`Uint16`、`Int32`、`Uint32`、`Int64`、`Uint64`、`IntPtr`、`UintPtr`、`Float`、`Double`、`Bool`、`Void`、`Pointer<T>` 保留独立类型身份，不能把 Int64 当成 Dart int 别名。Pointer 的 NativeType 上界、NativeFunction 的 Function 上界按普通类型应用检查。FFI 别名共用一般展开和上界检查，Native/Dart ABI 映射在导出边界验证。
+`Int8`、`Uint8`、`Int16`、`Uint16`、`Int32`、`Uint32`、`Int64`、`Uint64`、`IntPtr`、`UintPtr`、`Float`、`Double`、`Bool`、`Void`、`Pointer<T>` 保留独立类型身份，不能把 Int64 当成 Dart int 别名。Pointer 的 NativeType 上界、[`NativeFunction<T>`](https://api.dart.dev/stable/3.13.7/dart-ffi/NativeFunction-class.html) 的 Function 上界按普通类型应用检查。FFI 别名共用一般展开和上界检查，Native/Dart ABI 映射在导出边界验证。
 
 用 `package:dartc/export.dart` 的 `@Export<T>` 声明原生导出。函数签名必须闭合且仅含必需位置参数，Dart int/double/bool/Pointer 参数和结果必须符合 FFI 映射；const 标量数据需对应 FFI 数据类型。Dart int 本身不指定 C 位宽。
 
