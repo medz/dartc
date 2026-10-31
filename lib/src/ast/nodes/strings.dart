@@ -5,7 +5,7 @@ sealed class StringExpression({
   required super.source,
   required super.start,
   required super.end,
-}) extends Expression;
+}) extends Expression implements PartOfTarget;
 
 /// One non-interpolated string literal, including its prefix and delimiters.
 ///

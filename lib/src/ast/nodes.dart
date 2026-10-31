@@ -6,6 +6,8 @@ part 'nodes/annotations.dart';
 part 'nodes/cascades.dart';
 part 'nodes/collections.dart';
 part 'nodes/control_flow.dart';
+part 'nodes/declarations.dart';
+part 'nodes/directives.dart';
 part 'nodes/exceptions.dart';
 part 'nodes/expressions.dart';
 part 'nodes/functions.dart';
@@ -21,6 +23,8 @@ part 'nodes/statements.dart';
 part 'nodes/strings.dart';
 part 'nodes/switches.dart';
 part 'nodes/type_annotations.dart';
+part 'nodes/type_aliases.dart';
+part 'nodes/unit.dart';
 part 'nodes/variables.dart';
 
 /// An immutable syntax node within one source snapshot.
@@ -80,7 +84,8 @@ List<T> _freeze<T>(List<T> values) =>
 
 void _checkChildren(AstNode node) {
   var end = node.start;
-  for (var i = 0; i < node.childCount; i++) {
+  final count = node.childCount;
+  for (var i = 0; i < count; i++) {
     final child = node.childAt(i);
     if (!identical(child.source, node.source)) {
       throw ArgumentError('Children must belong to the same source snapshot.');

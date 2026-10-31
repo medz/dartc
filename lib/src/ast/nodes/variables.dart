@@ -5,7 +5,8 @@ enum VariableKeyword { none, varKeyword, finalKeyword, constKeyword }
 
 /// Variable declarations sharing metadata, modifiers, and a written type.
 ///
-/// The terminating semicolon belongs to the enclosing statement or loop.
+/// The terminating semicolon belongs to the enclosing declaration, statement,
+/// or loop.
 final class VariableDeclarationList({
   required super.source,
   required super.start,

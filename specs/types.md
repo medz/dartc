@@ -19,8 +19,9 @@
 | [§15 Generics][type-parameters] | 有序类型参数、元数据、`extends` 上界 | [nodes_test.dart](../test/ast/nodes_test.dart) 泛型函数类型用例 |
 | [§20.5 Function Types][function-types] | `Function` 类型、可省略的返回类型、泛型参数、必需及可选位置参数、可选及必需命名参数、参数名称与元数据 | [nodes_test.dart](../test/ast/nodes_test.dart) 函数类型用例 |
 | [Record types][records] | 位置字段、可选位置字段名、命名字段区、字段元数据、嵌套类型和可空 record 类型 | [nodes_test.dart](../test/ast/nodes_test.dart) record 类型用例 |
+| [§20.3 类型别名][aliases] | 现代 `typedef Name<T> = Type;` 与旧式函数 typedef；保留元数据、别名的类型参数、右侧类型或写出的返回类型及形参，不补入省略的类型 | [type_aliases_test.dart](../test/ast/type_aliases_test.dart) |
 
-类型别名及其他声明节点尚未实现。语法树中出现一种类型不表示已支持其静态或运行时语义；编译器的类型规则仍以下表为准。
+类型别名的解析、绑定与展开尚未接入这些节点，类等声明节点尚未提供。语法树中出现一种类型不表示已支持其静态或运行时语义；编译器的类型规则仍以下表为准。
 
 ## 类型规则
 

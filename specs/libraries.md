@@ -5,6 +5,21 @@
 
 状态含义见[总览](README.md#状态与证据)。
 
+## 编译单元与库指令语法表示
+
+`package:dartc/ast.dart` 可构造以下语法。构造器检查源码范围、快照归属和子节点顺序，不解析文本或检查库结构是否合法。
+
+| 语言条款 | 可表示的语法 | 验证 |
+| --- | --- | --- |
+| §19 库与编译单元、§19.6 脚本 | 完整文件范围、可选 `#!` 脚本标记、按源码顺序排列的指令和顶层声明；保留空文件、注释、BOM 和行尾范围 | [unit_test.dart](../test/ast/unit_test.dart) |
+| §19 库声明 | 元数据、具名 `library a.b;` 与无名 `library;` | [directives_test.dart](../test/ast/directives_test.dart) |
+| §19.1 导入、§19.3 导出 | 元数据、URI、条件 URI、可选 `deferred` 与导入前缀、有序 `show` / `hide` 名单；保留重复名称及省略的条件比较值 | [directives_test.dart](../test/ast/directives_test.dart) |
+| §19.5 Parts | `part` 的 URI，以及 `part of` 的 URI 或点分库名；URI 保留相邻字符串结构 | [directives_test.dart](../test/ast/directives_test.dart) |
+
+错误位置的指令和 URI 中的插值也可保留为语法节点，供后续诊断；这不表示语言允许这些写法。URI 解码、条件选择、库装入、命名空间与 part 归属检查尚未接入这些节点。编译与执行支持以下表为准。
+
+## 编译与执行
+
 | 规范条目 | 状态 | 支持范围与缺口 | 验证 |
 | --- | --- | --- | --- |
 | [§19 Libraries and Scripts][libraries]：编译单元 | 部分实现 | 库与物理源文件分别保留身份、声明和依赖；支持具名 `library` 声明，`library;` 要求[文件版本至少 2.19][features]。元数据覆盖[已实现声明子集](classes.md)，文件头的 script tag 范围见[词法结构](lexical-structure.md)；完整顶层声明文法未覆盖。 | [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) |

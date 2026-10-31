@@ -3,6 +3,14 @@
 按[固定草案源码](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)的 §8、§8.1、§8.2 建立索引；条款目录见[官方草案 PDF](https://dart.dev/to/spec-draft)。
 SDK 对照版本与状态含义见[总览](README.md#状态与证据)。空安全下的延迟初始化及赋值规则以 [NNBD 特性规范][late]补充主草案。
 
+## 变量语法表示
+
+`package:dartc/ast.dart` 可表示顶层、局部及循环头中的普通变量声明：元数据、`late`、`var` / `final` / `const`、共享的可选类型，以及有序变量名和可选初始化表达式。顶层声明另保留 `external` 与结尾分号。构造器检查源码范围、快照归属和子节点顺序；字段声明、名称绑定、类型推断和初始化规则尚未接入这些节点。
+
+验证见 [declarations_test.dart](../test/ast/declarations_test.dart)、[statements_test.dart](../test/ast/statements_test.dart) 和 [loops_test.dart](../test/ast/loops_test.dart)。模式变量声明见[模式](patterns.md)；编译与执行支持以下表为准。
+
+## 编译与执行
+
 | 规范条目 | 状态 | 支持范围与缺口 | 验证 |
 | --- | --- | --- | --- |
 | §8 变量声明及初始化 | 部分实现 | 支持显式类型、`var`、逗号分隔声明；局部模式声明及赋值见[模式](patterns.md)。类型范围受当前类型系统限制。 | [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) `program/main()` |
