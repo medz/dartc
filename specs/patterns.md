@@ -1,89 +1,123 @@
 # 模式、switch 与 if-case
 
-sealed 验证归 [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) 的 `classModifierValues()`、`modifierMatch()`、`modifierStatement()`，跨库及拒绝用例归 [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) 的 `modifier-imports.dart`、`rejectedClassModifiers`。
+本页说明 Dart 3 模式匹配、解构、守卫和穷尽性。[状态与阶段含义](README.md#如何读矩阵)适用于下表；语义分析 API 当前未提供，CLI 的绑定、匹配类型和覆盖检查不代表新 AST 已有公开分析器。
 
-本页跟踪 Dart 3.0 的[模式特性规范][patterns]与[穷尽性分析][exhaustiveness]。兼容目标及 SDK 版本见[总览](README.md)；记录类型见[类型](types.md)，switch 语句见[语句](statements.md)。
+## 特性支持
 
-## 模式语法表示
-
-`package:dartc/ast.dart` 可构造下列模式及其使用位置的语法树。构造器检查源码范围、快照归属和子节点顺序；文本解析范围见下表；绑定、类型推断、常量求值和匹配执行属于后续分析与编译。
-
-| 语言条款 | 可表示的语法 | 验证 |
-| --- | --- | --- |
-| 常量、identifier、variable、wildcard patterns | 常量表达式与显式 `const`、未绑定的裸名字、带类型或 `var` / `final` 的变量、带类型或不带类型的 `_` | [patterns_test.dart](../test/ast/patterns_test.dart) |
-| Logical、relational、parenthesized、cast、null-check、null-assert patterns | `&&` / `||`、六种关系运算符、括号、`as`、`?`、`!`；保留分支、操作数和写出的类型 | [patterns_test.dart](../test/ast/patterns_test.dart) |
-| List、Map、record、object patterns | 显式类型实参、List rest 与可选子模式、Map 键值条目、位置和命名字段、对象类型及省略名称的字段；名称推断与匹配类型尚未检查 | [patterns_test.dart](../test/ast/patterns_test.dart) |
-| 模式声明与赋值 | `var` / `final` 模式声明、元数据、初始化表达式、循环头中的模式绑定和解构赋值；不把裸名字提前解析为声明或常量 | [patterns_test.dart](../test/ast/patterns_test.dart)、[loops_test.dart](../test/ast/loops_test.dart) |
-| Guard、if-case element、switch expression | `when` 守卫、集合 if-case、按源码顺序排列的 switch 表达式分支；保留选择值、模式、守卫和结果各自的范围 | [loops_test.dart](../test/ast/loops_test.dart)、[switches_test.dart](../test/ast/switches_test.dart) |
-
-模式构造、范围检查和遍历不证明模式合法或 switch 穷尽；可诊断的错误结构也能保留在树中。语句形式的 if-case、switch、标签和语句体见[语句语法表示](statements.md#语句语法表示)。编译与执行支持以下表为准。
+| 特性 | 语法解析 | 语义分析 API | 编译/运行 | 使用限制 |
+| --- | --- | --- | --- | --- |
+| 常量、变量、类型、通配、括号模式 | 支持 | 未支持 | 部分 | 类型和常量限当前模型；模式 `_` 不引入绑定。 |
+| 逻辑与/或、关系模式 | 支持 | 未支持 | 部分 | 用户关系运算符限非泛型类及有界参数；用户 ==/!= 未支持。 |
+| cast、null-check、null-assert 模式 | 支持 | 未支持 | 部分 | cast/空断言失败无可捕获错误对象；null-check 失败只是不匹配。 |
+| 对象模式、字段名推导 | 支持 | 未支持 | 部分 | 已有属性/方法值可读；动态/扩展成员、泛型父接口仍缺。 |
+| List 模式及 rest | 支持 | 未支持 | 部分 | 支持嵌套与切片；一般 List 子类型覆写仍有限制。 |
+| Map、record 模式 | 支持 | 未支持 | 未支持 | 没有解构、匹配缓存和空间运算。 |
+| switch 表达式 | 支持 | 未支持 | 部分 | 从 3.0 起，不是常量表达式。 |
+| 语句和 List 元素 if-case | 支持 | 未支持 | 部分 | 运行时 List 可用，Set/Map 与常量 if-case 未支持。 |
+| 局部模式声明/赋值 | 支持 | 未支持 | 部分 | 对象/List 等子集，赋值仅限已有局部变量/参数。 |
+| for/for-in 模式循环头 | 支持 | 未支持 | 部分 | for-in 限 List，每轮独立绑定；late 未支持。 |
+| switch 语句、guard、共享 case | 支持 | 未支持 | 部分 | Dart 3 隐式 break；旧版常量 case 规则另见正文。 |
+| bool/Null/Never/枚举穷尽性 | — | 未支持 | 部分 | 守卫与关系模式不贡献覆盖。 |
+| 非泛型 sealed 层次穷尽性 | — | 未支持 | 部分 | 泛型父接口和完整解构字段空间仍缺。 |
+| List 长度与对象属性空间覆盖 | — | 未支持 | 部分 | 有限长度联合/全属性覆盖，不是完整空间代数。 |
+| 完整不可达 case 诊断 | — | 未支持 | 未支持 | 不可达臂仍检查名称、类型及其他静态义务。 |
 
 ## 模式解析 API
 
-`parsePattern(ScanResult, context: PatternContext.matching)` 解析一个模式，返回 `ParseResult<DartPattern>`。`declaration` 用于外层已有 `var` / `final` 的声明；`assignment` 用于向已有变量赋值。裸名字保留为 `IdentifierPattern`，其绑定含义由使用位置决定。
+`parsePattern(ScanResult, context: PatternContext.matching)` 解析一个模式。`declaration` 用于外层已有 var/final 的声明，`assignment` 用于给已有变量赋值。裸名字保留为 IdentifierPattern，含义留给使用位置，不提前绑定为常量或声明。
 
-| 语言条款 | 当前解析支持 | 验证 |
-| --- | --- | --- |
-| 常量、变量与通配模式 | 字面量、限定常量名称、显式 `const`、`const (expression)`、点简写、变量关键字及类型、`_`；检查声明与赋值上下文的变量语法 | [patterns_test.dart](../test/parser/patterns_test.dart) |
-| 组合及一元模式 | `&&` / `||` 优先级、关系模式及表达式操作数、括号、`as`、`?`、`!`；连续一元后缀需要括号 | [patterns_test.dart](../test/parser/patterns_test.dart) |
-| 结构模式 | List、Map、record、对象模式、类型实参、rest、位置及命名字段、省略名称的字段；字段名称推断留待分析 | [patterns_test.dart](../test/parser/patterns_test.dart) |
-| 声明与赋值 | 局部及循环头的 `var` / `final` 模式声明、声明元数据、模式 for-in 绑定、解构赋值；保留初始化式和右值 | [patterns_test.dart](../test/parser/patterns_test.dart) |
-| if-case 与 switch | 语句及集合 if-case、`when` 守卫、switch 表达式及语句、标签、default、连续空分支与各分支语句 | [patterns_test.dart](../test/parser/patterns_test.dart) |
+parser 接受常量/点简写、变量、通配、关系、&&/||、括号、as/?/!、List/Map/record/对象模式，保留显式类型、rest 和省略名字段。连续一元后缀需要括号。缺失模式以零宽 MissingPattern 恢复；不求值常量、不推断字段名或类型、不检查穷尽性。
 
-缺少模式时使用零宽 `MissingPattern` 恢复。解析保留选择值、模式、守卫和结果各自的源码范围，不进行名称绑定、匹配类型检查、常量求值或穷尽性分析。深层嵌套与损坏输入的恢复验证见同一测试文件。
+模式声明/赋值、语句/集合 if-case、模式循环头、switch 语句/表达式及 when 已接入相应文件/语句/表达式入口。**Map/record 可解析不表示 CLI 能匹配**。元数据、选择值、守卫和结果保留源码范围，调用方仍须检查 hasErrors。
 
-## 编译与执行
+## 匹配、守卫与绑定
 
-| 规范条目 | 状态 | 支持范围与缺口 | 验证 |
-| --- | --- | --- | --- |
-| Switch expression | 部分实现 | 文件语言版本至少 3.0；选择值只求值一次，按源码顺序尝试模式、守卫和结果。只执行匹配且守卫为真的结果；结果接受下行类型上下文，各臂类型合并后显式转换。switch 表达式不是常量表达式。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart)：`switchExpressions`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)：`rejected` |
-| If-case statement and element | 部分实现 | 文件语言版本至少 3.0，支持语句和运行时 List 元素的 `if (expression case pattern when guard)`，模式范围同本表。选择表达式无模式提供的下行上下文，只求值一次；匹配失败跳过守卫，守卫失败进入 else。模式变量只在守卫和 then 可见，非 final 变量在 then 可修改，then 内可再声明同名变量。语句、集合、全局及字段/构造器初始化共用绑定与匹配实现；常量集合边界见下文，Set/Map 仍缺。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart)：`ifCaseValues`、`IfCaseBox`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)：`rejected`、`failingValues` |
-| Constant、variable、wildcard、parenthesized patterns | 部分实现 | 支持现有常量表达式、命名常量、`const (expression)` 及其隐式常量上下文、`var`/`final`、显式类型变量、带或不带类型的 `_` 与括号。常量在比较左侧，类型模式先检查后绑定；显式变量类型保留声明类型，不隐式收窄为选择值类型；无类型变量匹配 Null 时推为 dynamic。模式内的 `_` 从 3.0 起就是通配符。完整常量、用户运算符和类型体系仍有各自缺口。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart)：`switchTyped`、`switchConstants` |
-| [Relational][relational-patterns]、logical-and、logical-or patterns | 部分实现 | 支持关系运算、`&&`、`||` 的优先级和短路；关系右侧必须为常量并检查运算类型。`&&` 禁止重复变量；`||` 两侧必须绑定同名、同 final 性质及同声明类型的变量，匹配值写入共同绑定。支持当前非泛型用户类及其有界类型参数的 `<`、`<=`、`>`、`>=`，沿已有继承/接口分派调用实际实现；常量右值使用运算符参数上下文，结果须可赋给 bool，dynamic 结果在运行时检查。用户 `==` / `!=`、dynamic 接收者的用户方法分派、扩展运算符及完整匹配类型推导仍缺。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart)：`switchChoose`、`switchOrBound`、`relationalPatterns`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)：`rejectedOperators`、`failingValues` |
-| Cast、null-check、null-assert patterns | 部分实现 | `as Type` 检查后进入内部模式；`?` 对 null 匹配失败，`!` 对 null 运行时失败。内部变量按检查后的类型推导；不改变选择值已缓存一次的事实。模式检查失败仍终止进程，尚无对应的可捕获错误对象。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart)：`switchNonNull`、`switchAsserted`、`switchCasted`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)：`failingValues` |
-| Case scopes、guards、pattern variable flow | 部分实现 | 每臂先建立变量作用域，再绑定模式、守卫和结果，局部名可遮蔽模式中的类型及常量；`as`、`when` 不能作为模式变量名或裸常量名。switch 表达式的模式变量在守卫和结果中只读，闭包同样受约束；捕获保留对应匹配的值，包括守卫失败后逃逸的闭包。守卫写入原选择变量后，后续模式仍匹配缓存值，但不能据此继续提升已被写入的变量。完整模式流分析及字段提升仍缺。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart)：`switchPromote`、`switchCapturePattern`、`switchExpressions`；[roots.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/roots.dart)：`closureRoots`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)：`rejected` |
-| Exhaustiveness、unreachable cases | 部分实现 | 检查 bool、Null、可空类型及全覆盖变量/类型模式；Never 允许零臂。守卫和关系模式不贡献穷尽性，`== true`/`== false`、`!= null` 不能代替对应的常量/类型覆盖。不可达臂及未调用函数仍执行静态检查。对象模式在每个子模式覆盖完整属性类型时贡献类型覆盖；List 模式在元素和 rest 子模式全覆盖时按长度区间求联合，支持 `[]` 加 `[_, ...]` 等完整长度覆盖；空性仍独立检查。尚不能证明 `Box(flag: true)` 与 `Box(flag: false)` 的字段空间联合覆盖。枚举按常量模式的值序号求覆盖：或模式取并集，守卫臂不计入，可空枚举另需 null 臂；嵌套在对象或 List 模式中的枚举常量不贡献覆盖。sealed 非泛型层次按同库直接子类型递归展开，开放分支要求整体覆盖，枚举叶按常量值覆盖；支持菱形接口、nullable、有界类型参数、逻辑与/或及全属性覆盖的对象模式。守卫不贡献覆盖；sealed 空层次允许零臂。泛型父接口、记录与完整解构字段空间分析尚缺，也未提供完整不可达 case 诊断。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart)：`switchNullable`、`switchEmpty`、`switchExpressions`、`listPatternLengths`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)：`rejected` |
-| Object patterns、named field inference | 部分实现 | 支持命名类型、导入前缀及别名，显式或省略类型实参；从匹配值推导 List、泛型类及别名的 List/类/函数结构，保留外层参数身份，未约束参数按界实例化。支持字段、getter、方法值和已有 String/List 属性，子模式可嵌套、组合并使用 `:var name` / `:final name` 及其一元包装。成员按模式声明类型检查，遵守库私有性；无构造器调用。重复字段、不可读成员、错误绑定及未使用分支均检查。动态成员分派、扩展成员、泛型父接口代入及完整约束求解仍缺。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart)：`objectPatterns`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)：`object-pattern-imports.dart`、`rejected`、`failingValues` |
-| Side effects and exhaustiveness：匹配读取快照 | 部分实现 | 同一次 if-case、switch 表达式或 switch 语句按根与调用路径共享首次读取，包含嵌套模式、逻辑组合及守卫失败后的后续臂；不同路径即使指向同一对象仍分别读取。严格保持首次读取的源码顺序与短路，通配符属性也调用 getter；守卫不能刷新缓存。单次读取保留原类型，多次读取通过带初始化标志的 tagged 槽保存，进入下一次匹配时重建。List 长度与对象 length 属性共享键；首部索引、距尾索引、rest 的首尾截取数量分别定键，同一运行时下标不合并首尾键。无匹配 rest 不切片，无类型通配元素不索引。用户运算符、扩展、Map/record 的调用键尚未接入。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart)：`patternNested`、`patternFields`、`objectPatterns`、`listPatterns`；[roots.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/roots.dart)：`objectPatternGuard`、`closureRoots`、`listPatternRoots` |
-| [List patterns][list-patterns] | 部分实现 | 支持显式元素类型或从匹配值推导、嵌套元素、单个任意位置 rest 及可选 rest 子模式。先检查 List 类型和长度，再按源码顺序匹配；rest 切片使用 `sublist`，保留实际元素类型，产生独立可增长列表。`[...]` 不读长度、不分配；匹配 rest 才切片。绑定、守卫、捕获、未调用代码的静态义务共用模式实现。一般 List 子类型与覆盖方法依赖继承/动态分派；受限元素的完整空间运算仍缺。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart)：`listPatterns`、`sublistValues`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)：`rejected`、`failingValues` |
-| Map、record patterns | 未实现 | 尚无对应解构、匹配缓存和空间运算。 | 待补充 |
-| Pattern variable declaration、pattern assignment、pattern-for | 部分实现 | 支持局部 `var` / `final` 模式声明、现有局部变量/参数的模式赋值、语句及 List 元素的 for / for-in 解构；文件版本至少 3.0。复用对象、List、括号、逻辑与、cast 和空断言模式。支持声明元数据、嵌套上下文推导、确定赋值、final 首次写入、词法捕获与每轮独立绑定；RHS 只求值一次，赋值表达式保留其值及类型。拒绝 refutable 模式、重复名字、声明前引用、非局部赋值及赋值中的类型声明，未调用代码同样检查。Map/record、late、一般 Iterable 和模式检查失败的错误对象仍依赖对应缺失能力。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart)：`destructuringValues`；[roots.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/roots.dart)：`destructuringRoots`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)：`rejected`、`failingValues` |
-| Pattern switch statements、shared case scope、implicit break | 部分实现 | Dart 3 的 switch 语句共用标量、对象、List 及组合模式和读取缓存，支持守卫、空 case 共享 body、隐式 break 和 case 标签 continue。同一 body 的同名变量必须在每个入口具有相同声明类型及 finality；guard 各有独立绑定，共享 body 使用新绑定，单 case 则直接使用原绑定。缺失、类型/finality 不一致或带标签/default 的变量遮蔽外层同名变量，使用时诊断，未使用可保留。支持共享变量的守卫提升合流、词法捕获及每次进入时独立的变量绑定。bool、Null、Never、枚举及 sealed 类型（含可空形式）要求穷尽；非穷尽的其他已实现类型允许正常结束。case 跳转跨越 finally 时执行清理，见[语句](statements.md)。泛型 sealed 层次、记录空间及未实现模式仍有缺口。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart)：`patternSwitchStatements`、`statementBoolean`、`statementSharedPromotion`；[roots.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/roots.dart)：`switchStatementRoots`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart)：`rejected`、`failingValues`、`version-switch-legacy.dart` |
+```dart
+int firstPositive(Object input) => switch (input) {
+  [int first, ...] when first > 0 => first,
+  _ => 0,
+};
 
-[点简写](expressions.md#点简写)的常量模式使用匹配值类型查找声明。SDK 3.13.7 的 CFE/analyzer 为所有直接简写关系模式提供匹配值的命名空间，固定点简写规范只单列了 ==/!=；dartc 跟随 SDK，因此 double 匹配值的 `< .infinity` 有效，`< (.infinity)` 则在 num 命名空间查找并被拒绝。括号内表达式使用运算符参数类型的上下文；普通比较表达式不扩大这个模式特例。常量资格和可访问性沿用普通常量路径；`shorthandContexts()` 验证常量实例、关系操作、if-case 及显式常量表达式中的简写，`rejected` 验证括号边界。
+void show(Object input) {
+  if (input case [int first, ...] when first > 0) {
+    print(first);
+  }
+}
+```
 
-`if-case` 的守卫禁止用普通赋值修改当前 case 的模式变量，包括守卫内部的闭包；SDK 对模式赋值的差异见下文。普通外层变量和嵌套作用域的新变量仍可写。守卫与 then 共享该 case 的绑定身份，捕获必须观察 then 中的后续修改；每次执行匹配产生独立的变量绑定。逻辑或两侧同名变量在匹配成功后表示同一个变量。成功、失败和守卫失败分别保留流状态，合流不能保留守卫已撤销的选择变量提升；全覆盖模式可以建立确定赋值。验证：`ifCaseValues`、[roots.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/roots.dart) 的 `ifCaseGraph` / `closureRoots` 及 `rejected`。
+CLI 从 3.0 起支持 switch 表达式和 if-case。选择值只求一次，按源码顺序尝试模式、守卫、结果；匹配失败不执行守卫，守卫失败继续下一臂或进入 else。switch 各结果接受下行上下文，再合并结果类型并转换。if-case 的选择表达式不从模式获得下行上下文，模式变量仅在 guard/then 可见，then 可以修改非 final 变量或另声明同名变量。
 
-case 标签跳转直接进入其关联的非空 body，跳过模式及 guard；即使标签未被引用，也不能在该 body 使用原 case 的模式变量。标签只接受 continue，普通外层循环 continue 和带标签的 switch break 保持各自目标。标签入口撤销整个 switch 写集合涉及的提升及确定未赋值事实；未初始化变量不能因另一 case 的写入变得可读。重复标签、越界标签及非法 break 均诊断。验证：`patternSwitchStatements` 和 `rejected`。
+常量模式将常量放在比较左侧；关系 RHS 必须是常量，按运算符参数上下文检查实际值类型。显式变量类型是声明类型，不隐式缩成选择值类型；无类型变量匹配 Null 时推为 dynamic。var/final/带类型的 `_` 都是通配模式，模式 `_` 从 3.0 起不绑定，不受普通通配变量 3.7 门槛影响。
 
-小于 3.0 的文件仍把 case 解析为隐式常量表达式，包含算术、`_` 常量及 List 字面量的身份匹配；case 静态类型必须是选择值类型的子类型。旧版最后一个 body 可正常结束，之前的非空 body 仍要求退出；只有 default 消除未匹配的确定赋值路径。SDK 3.13.7 CFE 与 analyzer 也接受 `// @dart=2.19` 下的 `when` 并执行 guard，虽然该语法来自 Dart 3 模式提案；当前保持此参考行为。`version-switch-legacy.dart` 与旧版本 `rejected` 保存这些差异。
+&&/|| 保留优先级和短路。&& 禁止重复变量；|| 两侧须绑定同名、同 final 性质和同声明类型的变量，成功后表示共同绑定。as 检查后进入内部模式，? 对 null 匹配失败，! 对 null 失败；内部变量取检查后类型，但**cast/空断言模式检查失败仍可直接终止进程**，没有对应可捕获错误对象。
 
-声明及赋值上下文中的显式类型构成向下推导 schema；未注解的变量保留未知项，List 子模式按最大下界合并，cast 子模式不提供上下文，空断言提供可空上下文。输入为 dynamic 时执行隐式类型检查，否则要求匹配值是所需类型的子类型；解构本身不隐式提取 `call`。模式赋值不会根据匹配元素类型提升目标变量。`destructuringValues` 通过实际 List 实例检查嵌套、nullable、const、List.filled、spread 和条件表达式推导；完整泛型推导仍缺。
+每个 switch 表达式臂先建立模式变量作用域再绑定模式、guard、结果，因此局部名可遮蔽模式中的类型/常量。as/when 不能作模式变量名或裸常量名。switch 表达式模式变量在 guard 和结果中只读，闭包也受限制；捕获保留本次匹配值，包括 guard 失败后逃逸的闭包。
 
-固定规范的 Runtime semantics / Pattern assignment 要求匹配完毕后统一写回。SDK 3.13.7 CFE 实际按子模式顺序写回：`C(a: x, b: y) = value` 的 `b` getter 可看到已更新的 `x`，后续空断言失败也不撤销它。当前采用 SDK 行为；`destructuringValues` 与 `failingValues` 保留 getter 观察用例。不能把此差异解释为规范要求非原子赋值。空断言失败仍直接终止进程，该失败后的 catch 观察尚无本编译器证据。
+if-case 的 guard 禁止普通赋值修改本 case 模式变量，包括 guard 内闭包；then 仍可改非 final 变量，guard 捕获必须观察后续修改，每次匹配有独立绑定。guard 可写普通外层变量，但写原选择变量后，后续模式仍匹配缓存值，不能继续提升已写变量。成功、失败、guard 失败分别合并流状态，全覆盖模式可建立确定赋值。
 
-SDK 3.13.7 CFE 与 analyzer 均允许 guard 中的 `[x] = [value]` 修改本 case 的模式变量，包含嵌套闭包；普通 `x = value` 则拒绝。当前采用该静态边界，`destructuringValues` 同时覆盖两种模式写入，既有 `rejected` 保留普通写入。固定规范对 guard 写入的限制没有说明这一例外，仍保留该差异。对 `var ([a] && [List<int> b]) = [[]]`，CFE 使用共同的 List<int> 元素上下文，analyzer 却以 List<dynamic> 报不匹配；当前遵循 CFE，测试只忽略这一 analyzer 诊断。
+## 对象与 List 模式
 
-字符串常量按 token 种类识别，不把 `'=='`、`'<'` 等内容当作关系模式，也不把 `'when'`、`'as'` 当作模式关键字；验证：[values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) 的 `switchOperatorText`。
+对象模式不是构造器调用。支持命名类型、前缀和别名，显式或推断实参；可读字段、getter、方法值以及已有 String/List 属性可参与。成员按模式声明类型查找并检查私有性，重复字段、不可读成员及错误绑定在未使用分支也检查。`:var name`、`:final name` 及其一元包装可推导字段名。
 
-SDK 3.13.7 CFE 接受 void 选择值，并允许用 `var` 模式把它绑定为 void；也接受关系模式引用 void 常量。analyzer 报告 `use_of_void_result`。dartc 采用 CFE 行为，绑定值仍受原有 void 消费规则约束。[values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) 的 `switchVoidMatch`、`switchVoidRelation` 保留该差异及逐行诊断忽略。
+省略 List、泛型类或别名实参时，按匹配值向下推导，保留外层参数身份；类参数按协变收约束，嵌套函数参数反转，重复约束合并，未约束参数按界实例化。上下文 C<U> 保留已绑定 U，匹配值本身是类型参数时不展开其上界来推断实参；类内匹配同一泛型类时使用新的推断身份。SDK 3.13.7 对 Null/Never 上下文不保留该约束，如 List<Null> 匹配 List(first: var value) 后 value 推导为 dynamic。泛型父接口代入、动态/扩展成员及完整约束求解仍缺。
 
-依据[对象模式类型检查][object-pattern-inference]，省略 List、泛型类或别名实参时，匹配值提供向下推导上下文，未约束参数按边界实例化。类参数按协变方向收集约束，嵌套函数的参数反转方向；重复参数约束合并；`C<U>` 上下文保留已绑定的 U，匹配值本身为类型参数时则不展开其上界来推断类实参。类内匹配同一泛型类时，推断变量使用新的身份，不把已绑定的类参数当作待求解参数。SDK 3.13.7 对 Null/Never 上下文不保留该参数约束，例如 `List<Null>` 匹配 `List(first: var value)` 后的 `[value]` 为 List<dynamic>；`objectPatterns` 用实际创建的 List 检查结果，覆盖类别名、边界默认值、可空匹配、声明/循环及捕获；`object-pattern-imports.dart` 验证前缀、别名与 part 内私有字段，`rejectedRuntimeGenerics` 验证未调用函数中的泛型字段静态类型。不能仅凭 dynamic 可隐式转换的赋值认定推导类型正确。泛型父接口代入与完整泛型推导仍有类型体系中的缺口。
+List 模式支持显式元素类型、推导、嵌套、任意位置的单个 rest 及 rest 子模式。先检查 List 类型和必要长度，再按源码顺序匹配。匹配 rest 用 sublist 产生独立可增长列表，保留实际元素类型；无匹配 rest 不切片，`[...]` 不读长度或分配。
 
-SDK 3.13.7 CFE 不通过逻辑与合并 List 长度空间：`[] || [_]` 与 `[_, ...] && [_, _, ...]` 两臂仍报非穷尽；`([] || [_, ...]) && List<int>()` 单臂也被拒绝。当前保留该静态边界，运行时逻辑与正常匹配；`listPatternIntersection` 带兜底臂验证运行行为，`rejected` 保留无兜底的反例。固定穷尽性文档定义了空间交集，完整解构空间与参考实现差异仍需解决，不能将当前拒绝解释为这些组合不覆盖所有列表。
+### 匹配读取快照
 
-List 模式的调用省略遵循 SDK 3.13.7：`_`、`var _`、`final _` 及其括号形式均不读取元素或生成 rest 切片；带类型的通配模式仍读取。固定规范的运行时条款仅明确列出 identifier wildcard，当前参考实现的范围更宽。`listPatterns` 用守卫清空源列表后继续匹配的行为验证无类型通配符不读取；缓存按每次匹配独立初始化。
+同一次 if-case/switch 匹配按根和访问路径共享首次读取，包含嵌套、逻辑组合和 guard 失败后的后续臂；不同路径即使指向同一对象也分别读取。首次读取保持源码顺序与短路，**对象通配符属性也调用 getter**；guard 不能刷新缓存，下一次执行匹配重新读取。
 
-固定模式文档的命名推导还列出 identifier pattern；SDK 3.13.7 CFE 在匹配上下文拒绝 `const x = 1; ... C(:x)`，要求显式字段名或变量模式。当前采用该拒绝行为，并在 `rejected` 保留；不据此宣称固定文档禁止 identifier 的命名推导。
+List 长度与对象 length 属性共用路径键；从首部索引、从尾部索引、rest 的首尾截取数量各自成键，即使实际下标相同也不合并。无类型 `_`、var _、final _ 及其括号形式不读取元素或生成 rest 切片，带类型通配符仍读取。这采用 SDK 3.13.7 比固定规范 identifier wildcard 更宽的调用省略范围。Map/record、扩展等调用键未提供。
 
-常量 List 中的 `if-case` 尚未实现，不能把当前拒绝当作已核实的语言静态错误。SDK 3.13.7 CFE 对 `const values = [if (true case false) 1 else 2]` 报内部错误 `Unhandled IfCaseElement`，对未执行的嵌套 if-case 也一样；analyzer 接受该 bool 示例，对非 bool 选择值报告 `non_bool_condition`，引用模式变量的示例则异常退出。常量语义与参考实现差异待核对；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) 的 `rejected` 保留当前拒绝边界。
+## 穷尽性与不可达分支
 
-用户关系运算符的常量参数在编译期检查实际值的类型，包括声明为 dynamic 的常量；不兼容的值不能推迟到匹配执行时才报错。SDK 3.13.7 CFE 还将 dynamic 点简写常量转换到匹配值类型：`C.limit` 可以作为 num 参数时，`< .limit` 仍可能因该常量不是 C 而被拒绝；analyzer 不报告这一常量转换错误，dartc 跟随 CFE。返回 dynamic 的运算符仍在调用后检查 bool，显式抛出则正常传播。`relationalPatterns`、`rejectedOperators` 和 `failingValues` 分别验证成功匹配、静态拒绝与运行时结果检查。
+switch 表达式在当前类型空间内检查覆盖，Never 可零臂。支持 bool、Null、可空类型及全覆盖变量/类型模式；可空性独立计算。守卫和关系模式不贡献穷尽性，`== true`/`== false`、`!= null` 不能替代对应常量/类型模式。不可达臂和未调用函数仍作静态检查，但完整不可达 case 诊断未提供。
 
-[patterns]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md
-[exhaustiveness]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/exhaustiveness.md
+- 对象模式仅在每个子模式覆盖完整属性类型时贡献类型覆盖，不能证明 `Box(flag: true)` 与 `Box(flag: false)` 的字段空间联合覆盖。
+- List 模式在元素及 rest 子模式全覆盖时按长度区间联合，可识别 `[]` 加 `[_, ...]`，受限元素的完整空间运算未支持。
+- 枚举按常量值序号覆盖，或模式取并集，guard 不计；可空枚举另需 null。嵌套对象/List 内的枚举常量不贡献覆盖。
+- sealed 非泛型层次按同库直接子类型递归展开，开放分支须整体覆盖，枚举叶按值覆盖；支持菱形、nullable、有界参数、逻辑与/或和全属性对象模式。sealed 空层次可零臂；泛型层次、record 和完整字段空间分析仍缺。
 
-[list-patterns]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md#list-pattern
-[relational-patterns]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md#relational-pattern
+SDK 3.13.7 CFE 不通过逻辑与合并 List 长度空间，例如 `[] || [_]` 和 `[_, ...] && [_, _, ...]` 两臂仍报非穷尽，`([] || [_, ...]) && List<int>()` 单臂也拒绝。dartc 保留该静态边界，运行时 && 正常匹配；固定空间规范定义交集，不能把当前拒绝解释为这些组合数学上不覆盖列表。
 
-[object-pattern-inference]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md#L2118-L2141
+## 声明、赋值与循环解构
+
+```dart
+void main() {
+  var [head, ...tail] = <int>[1, 2, 3];
+  [head, ...tail] = <int>[4, 5];
+  print(head); // 4。
+  print(tail); // [5]。
+}
+```
+
+从 3.0 起支持局部 var/final 模式声明、已有局部变量/参数的模式赋值，以及语句/List 元素 for/for-in 解构，复用对象、List、括号、逻辑与、cast 和空断言模式。支持元数据、上下文 schema、确定赋值、final 首次写入及逐轮捕获；RHS 一次求值，赋值表达式保留其值和类型。拒绝 refutable 模式、重复名、声明前引用、非局部赋值及赋值中的类型声明。late、Map/record、一般 Iterable 和失败错误对象仍缺。
+
+显式类型提供下行 schema，未注解变量留未知项，List 子模式按最大下界合并，cast 不提供上下文，空断言提供可空上下文。dynamic 输入有隐式检查，其他输入须为所需类型子类型；解构不隐式提取 call，模式赋值不按元素类型提升目标变量。
+
+**赋值当前非原子**：按 SDK 3.13.7 CFE 子模式顺序写回，`C(a: x, b: y) = value` 的 b getter 能看见新 x，后续空断言失败不撤销已写值。固定规范要求匹配完成后统一写回；当前不遵循该原子性描述，且失败后 catch 观察不受支持。
+
+SDK 3.13.7 CFE/analyzer 允许 guard 中 `[x] = [value]` 修改本 case 变量（含闭包），但拒绝普通 `x = value`；dartc 采用该区别，固定规范没有说明此例外。对 `var ([a] && [List<int> b]) = [[]]`，CFE 使用共同 List<int> 元素上下文，analyzer 用 List<dynamic> 报错，dartc 采用 CFE 上下文。
+
+## switch 语句与共享绑定
+
+Dart 3 switch 语句支持模式/guard、空 case 共用 body、正常结束隐式 break 和 case 标签 continue。同一 body 的同名变量须在各入口有相同声明类型及 finality；guard 各自独立绑定，共享 body 使用新绑定，单 case 直接使用原绑定。缺失、不一致或带标签/default 的同名变量仍遮蔽外层，使用时才诊断，未使用可保留。
+
+支持共享变量的 guard 提升合流、捕获与每次进入独立绑定。bool、Null、Never、枚举、sealed（含可空）要求穷尽，其他已支持类型非穷尽可正常结束；泛型 sealed/record/未实现模式不据此承诺可用。
+
+case 标签 continue 直接入其非空 body，不重试模式/guard，即使标签未被引用也不能在该 body 用原 case 模式变量。标签入口撤销整个 switch 写集合涉及的提升和确定未赋值事实，其他 case 写入不使未初始化变量可读。跨 finally 跳转仍执行清理，普通循环 continue 和外层 switch break 保持各自目标。
+
+小于 3.0 的文件将 case 解释为隐式常量表达式，包括算术、`_` 常量和 List 身份匹配；case 静态类型须是选择值类型子类型。最后 body 可正常结束，之前非空 body 须退出；只有 default 排除未匹配赋值路径。SDK 3.13.7 CFE/analyzer 也接受 2.19 文件的 when 并执行 guard，dartc 保留此参考行为，而非把模式语义全部用于旧文件。
+
+## 其他使用限制与 SDK 差异
+
+- 点简写常量模式用匹配值命名空间；关系模式的直接简写也跟随 SDK 3.13.7 扩大到全部关系运算，虽固定点简写规范只单列 ==/!=。double 匹配值的 `< .infinity` 可用，`< (.infinity)` 改用运算符参数 num 上下文并被拒绝；普通比较表达式不扩大此特例。
+- 用户 `< <= > >=` 支持当前非泛型类及有界参数，经继承/接口分派；结果须可赋给 bool，dynamic 结果运行时检查。常量参数按实际值编译期检查，不因声明 dynamic 延后；CFE 对 dynamic 简写常量还可能转换到匹配值类型，dartc 跟随，analyzer 可不报错。用户 ==/!=、dynamic 用户方法分派和扩展运算符未支持。
+- 字符串常量 `'=='`、`'<'`、`'when'`、`'as'` 仍是字符串，不按内容当运算符或模式关键字。
+- SDK 3.13.7 CFE 接受 void 选择值及 var 绑定、void 关系常量，analyzer 报 use_of_void_result。dartc 采用 CFE，所得值仍受 void 消费限制。
+- 固定文档列出 identifier pattern 的字段名推导，但 SDK 3.13.7 CFE 拒绝匹配中的 `C(:x)` 常量引用；dartc 也要求显式字段名或变量模式。
+- 常量 List if-case 未支持，当前拒绝不表示已核实语言非法。SDK 3.13.7 CFE 对活跃和未执行 if-case 都可能内部错误，analyzer 对 bool 示例接受、非 bool 报错或涉及变量时异常退出，常量语义仍待确认。
+
+## 规范依据
+
+[模式特性规范](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md)、[穷尽性](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/exhaustiveness.md)、[对象模式类型推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md#L2118-L2141)。
