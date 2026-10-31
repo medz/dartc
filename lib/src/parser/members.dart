@@ -124,7 +124,8 @@ final class _MemberReader(
     final token = parser.tokens[index];
     final isConstructor =
         token.kind == .keywordNew ||
-        token.kind == .keywordFactory ||
+        token.kind == .keywordFactory &&
+            parser.tokens[index + 1].kind != .less ||
         token.kind == .keywordThis ||
         className != null &&
             index + 1 < parser.tokens.length &&

@@ -282,6 +282,10 @@ final class _TypeDeclarationReader(
 
 extension on _Parser {
   bool get startsTypeDeclaration {
+    if ((current.kind == .keywordMixin || current.kind == .keywordExtension) &&
+        hasParametersAfterName) {
+      return false;
+    }
     var index = cursor;
     while (tokens[index].kind.classModifier != null) {
       if (tokens[index].kind == .keywordMixin) return true;

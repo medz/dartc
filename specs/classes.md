@@ -33,7 +33,7 @@ SDK 对照版本见[总览](README.md)；§15 泛型和 §20 类型关系另见[
 | 构造器 | 普通、const、factory、命名及简写构造器；字段／断言／super 初始化、this 重定向和 factory 等号重定向 | [type_declarations_test.dart](../test/parser/type_declarations_test.dart) 构造器用例 |
 | 主构造器与空体 | 类、enum 和 extension type 的主构造器参数；类体中的 this 初始化与实现体；分号声明体 | [type_declarations_test.dart](../test/parser/type_declarations_test.dart) 主构造器用例 |
 
-修饰符、构造器体及初始化形式包含语法检查；字段绑定、继承关系、成员冲突、参数类型和表示类型资格需要后续分析。方法和初始化表达式仍受[表达式](expressions.md#表达式解析-api)、[语句](statements.md#语句解析-api)中列出的解析缺口约束。缺失成员用 `MissingClassMember` 恢复；损坏输入验证见同一测试文件。
+修饰符、构造器体及初始化形式包含语法检查；字段绑定、继承关系、成员冲突、参数类型和表示类型资格需要后续分析。方法和初始化表达式使用[表达式](expressions.md#表达式解析-api)、[语句](statements.md#语句解析-api)入口的语法。`factory<T>(T value)` 保留为泛型方法，区别于 factory 构造器。缺失成员用 `MissingClassMember` 恢复；未写完的断言初始化式返回诊断并保留后续成员，验证见同一测试文件。
 
 ## 编译与执行
 

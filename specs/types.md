@@ -21,7 +21,7 @@
 | [Record types][records] | 位置字段、可选位置字段名、命名字段区、字段元数据、嵌套类型和可空 record 类型 | [nodes_test.dart](../test/ast/nodes_test.dart) record 类型用例 |
 | [§20.3 类型别名][aliases] | 现代 `typedef Name<T> = Type;` 与旧式函数 typedef；保留元数据、别名的类型参数、右侧类型或写出的返回类型及形参，不补入省略的类型 | [type_aliases_test.dart](../test/ast/type_aliases_test.dart) |
 
-类型别名的解析、绑定与展开尚未接入这些节点；类、mixin、枚举及扩展声明的语法见[类与成员](classes.md#类与成员语法表示)。语法树中出现一种类型不表示已支持其静态或运行时语义；编译器的类型规则仍以下表为准。
+类型别名已接入文本解析，绑定与展开尚未接入这些节点；类、mixin、枚举及扩展声明的语法见[类与成员](classes.md#类与成员语法表示)。语法树中出现一种类型不表示已支持其静态或运行时语义；编译器的类型规则仍以下表为准。
 
 ## 类型解析 API
 

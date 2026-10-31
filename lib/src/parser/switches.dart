@@ -85,8 +85,14 @@ final class _SwitchStatementReader(final _Parser parser)
           "Expected 'case' or 'default'.",
           parser.current,
         );
-        parser.unexpected();
-        continue;
+        if (labels.isEmpty) {
+          parser.unexpected();
+          continue;
+        }
+        pattern = MissingPattern(
+          source: parser.source,
+          offset: parser.current.start,
+        );
       }
       var end = parser.expect(.colon);
       final statements = <Statement>[];

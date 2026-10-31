@@ -58,7 +58,7 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 `parseCompilationUnit` 解析顶层函数、getter、setter、变量及两种 typedef。函数保留元数据、external、返回类型、类型参数、形参和函数体；检查非 external 顶层函数缺少实现以及 external 函数包含实现的写法。变量保留 late、var/final/const、共享类型及各个初始化表达式。
 
-验证见 [compilation_units_test.dart](../test/parser/compilation_units_test.dart)。名称绑定、类型、常量资格和初始化行为仍需分析与执行阶段实现；程序体语法缺口见本页的函数体解析范围。
+`import`、`export`、`library`、`part`、`typedef`、`extension`、`mixin` 和 `external` 也可作为函数名，包括泛型函数；它们与同名指令、修饰符和声明按上下文区分。验证见 [compilation_units_test.dart](../test/parser/compilation_units_test.dart)。名称绑定、类型、常量资格和初始化行为仍需分析与执行阶段实现；程序体语法见本页的函数体解析范围。
 
 ## 编译与执行
 

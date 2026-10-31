@@ -15,6 +15,11 @@
 
 - Add `parsePattern` with matching, declaration and assignment contexts. Parse structural and logical patterns, guards, if-case, switch expressions and statements, destructuring assignments and pattern loop headers. Preserve metadata on local and loop declarations.
 
+### Fixes
+
+- Parse functions named with contextual keywords such as `import`, `external` and `mixin`, and generic methods named `factory`.
+- Return syntax diagnostics for unfinished constructor assertions and switch labels without throwing or consuming subsequent declarations.
+
 ### Performance
 
 - Reduce temporary allocations when scanning identifiers and speed up scanning of whitespace runs.

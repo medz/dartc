@@ -20,6 +20,64 @@ CompilationUnit parsed(String text) {
 }
 
 void main() {
+  test('contextual declaration words can name top-level functions', () {
+    for (final name in [
+      'import',
+      'export',
+      'library',
+      'part',
+      'typedef',
+      'extension',
+      'mixin',
+      'external',
+      'abstract',
+      'base',
+      'interface',
+      'sealed',
+      'async',
+      'sync',
+    ]) {
+      for (final signature in ['$name()', '$name<T>(T value)']) {
+        final unit = parsed('@deprecated $signature => 0;');
+        final function = unit.members.single as TopLevelFunctionDeclaration;
+        expect(function.name.text, name);
+        expect(function.isExternal, isFalse);
+        expect(function.metadata.single.text, '@deprecated');
+        expect(function.returnType, isNull);
+        expect(function.body.text, '=> 0;');
+      }
+    }
+    final unit = parsed('external external<T>(T value);');
+    final function = unit.members.single as TopLevelFunctionDeclaration;
+    expect(function.isExternal, isTrue);
+    expect(function.name.text, 'external');
+  });
+
+  test(
+    'incomplete contextual functions do not swallow following declarations',
+    () {
+      for (final name in [
+        'import',
+        'export',
+        'library',
+        'part',
+        'typedef',
+        'mixin',
+        'extension',
+        'external',
+      ]) {
+        final result = parse('$name()\nint following = 1;');
+        expect(result.hasErrors, isTrue, reason: name);
+        final function =
+            result.node.members.first as TopLevelFunctionDeclaration;
+        expect(function.name.text, name);
+        expect(function.body, isA<MissingFunctionBody>());
+        final next = result.node.members.last as TopLevelVariableDeclaration;
+        expect(next.variables.declarations.single.name.text, 'following');
+      }
+    },
+  );
+
   test('unit ranges include trivia and preserve the script tag', () {
     expect(parsed(' // empty\n ').members, isEmpty);
     final text = '#!/usr/bin/env dart\n// comment\nvoid main() {}\n';

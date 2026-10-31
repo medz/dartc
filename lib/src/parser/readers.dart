@@ -77,9 +77,19 @@ final class _ArgumentsReader(final _Parser parser)
     extends _Reader<ArgumentList> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
+    final opening = parser.current;
+    parser.expect(.leftParen);
+    if (opening.kind != .leftParen) {
+      result = ArgumentList(
+        source: parser.source,
+        start: opening.start,
+        end: opening.start,
+        arguments: const [],
+      );
+      return;
+    }
     parser.beginExpression();
-    final arguments = _ArgumentList(parser.current, 0, 0);
-    parser.advance();
+    final arguments = _ArgumentList(opening, 0, 0);
     parser.frames.add(arguments);
     yield* parser.readExpressionSyntax(boundary: .header);
     assert(

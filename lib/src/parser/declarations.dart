@@ -1,5 +1,16 @@
 part of 'parser.dart';
 
+extension on _Parser {
+  bool get hasParametersAfterName {
+    final next = tokens[cursor + 1].kind;
+    if (next == .leftParen) return true;
+    if (next != .less) return false;
+    final child = _Parser.nested(this)..advance();
+    return _TypeReader(child).read(parameters: true) != null &&
+        child.current.kind == .leftParen;
+  }
+}
+
 final class _DeclarationName(final _Parser parser) {
   TypeAnnotation? type;
   late Identifier name;
@@ -83,11 +94,14 @@ final class _TopLevelReader(
       result = reader.result;
       return;
     }
-    if (parser.current.kind == .keywordTypedef) {
+    if (parser.current.kind == .keywordTypedef &&
+        !parser.hasParametersAfterName) {
       yield* alias();
       return;
     }
-    final external = parser.current.kind == .keywordExternal;
+    final external =
+        parser.current.kind == .keywordExternal &&
+        !parser.hasParametersAfterName;
     if (external) parser.advance();
     final variable = _VariableReader(parser, allowConditional: false);
     final complete = variable.start();

@@ -36,10 +36,11 @@ final class _UnitReader(final _Parser parser) extends _Reader<CompilationUnit> {
       yield annotations;
       final metadata = annotations.result;
       final kind = parser.current.kind;
-      if (kind == .keywordLibrary ||
-          kind == .keywordImport ||
-          kind == .keywordExport ||
-          kind == .keywordPart) {
+      if ((kind == .keywordLibrary ||
+              kind == .keywordImport ||
+              kind == .keywordExport ||
+              kind == .keywordPart) &&
+          !parser.hasParametersAfterName) {
         if (declarations ||
             partOf ||
             kind == .keywordLibrary && members.isNotEmpty ||

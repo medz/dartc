@@ -148,7 +148,6 @@ final class _InitializersReader(final _Parser parser)
       final token = parser.current;
       if (token.kind == .keywordAssert) {
         parser.advance();
-        parser.expectInitializerArguments();
         final reader = _ArgumentsReader(parser);
         yield reader;
         final arguments = reader.result.arguments;
@@ -238,14 +237,6 @@ final class _InitializersReader(final _Parser parser)
       }
       if (parser.current.kind != .comma) break;
       parser.advance();
-    }
-  }
-}
-
-extension on _Parser {
-  void expectInitializerArguments() {
-    if (current.kind != .leftParen) {
-      error('expected_token', "Expected '('.", current);
     }
   }
 }

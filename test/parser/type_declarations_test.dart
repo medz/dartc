@@ -21,6 +21,42 @@ TopLevelDeclaration declaration(String text) {
 }
 
 void main() {
+  test('unfinished assertion initializers return diagnostics and syntax', () {
+    for (final text in [
+      'class C { C() : assert',
+      'class C { C() : assert(',
+      'class C() { this : assert',
+      'class C { C() : assert; int following = 1; }',
+    ]) {
+      final result = parse(text);
+      expect(result.hasErrors, isTrue, reason: text);
+      final assertion = walk(result.node).whereType<AssertInitializer>().single;
+      expect(assertion.condition, isA<MissingExpression>());
+      expect(assertion.end, lessThanOrEqualTo(text.length));
+      if (text.endsWith('}')) {
+        final field = walk(result.node).whereType<FieldDeclaration>().single;
+        expect(field.variables.declarations.single.name.text, 'following');
+      }
+    }
+  });
+
+  test('generic factory methods remain methods in every member container', () {
+    for (final text in [
+      'class C { factory<T>(T value) => value; }',
+      'mixin M { factory<T>(T value) => value; }',
+      'enum E { one; factory<T>(T value) => value; }',
+      'extension X on int { factory<T>(T value) => value; }',
+      'extension type E(int value) { factory<T>(T value) => value; }',
+    ]) {
+      final result = declaration(text);
+      final method = walk(result).whereType<MethodDeclaration>().single;
+      expect(method.name.text, 'factory');
+      expect(method.typeParameters!.text, '<T>');
+      expect(method.parameters.text, '(T value)');
+      expect(walk(result).whereType<ConstructorDeclaration>(), isEmpty);
+    }
+  });
+
   test('covariant setters retain their modifier', () {
     final cls = declaration(
       'abstract class C { covariant set x(int value); }',
