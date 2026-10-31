@@ -21,7 +21,8 @@ final class _DeclarationName(final _Parser parser) {
   void read({bool alias = false, bool member = false}) {
     final initial = parser.cursor;
     final first = parser.current;
-    if (!(first.kind == .keywordGet || first.kind == .keywordSet)) {
+    if (!(first.kind == .keywordGet || first.kind == .keywordSet) &&
+        parser.canStartTypeBeforeName) {
       final parsed =
           _TypeReader(parser, beforeFunction: true).read() as TypeAnnotation?;
       if (parsed != null && parser.current.kind.isIdentifier) {

@@ -37,7 +37,7 @@ final class _LocalFunctionReader(
     final headToken = parser.current;
     final untyped = parser.functionBodyAfterName();
     if (headToken.kind.isVariableModifier && !untyped) return false;
-    final parsed = untyped
+    final parsed = untyped || !parser.canStartTypeBeforeName
         ? null
         : _TypeReader(parser, beforeFunction: true).read() as TypeAnnotation?;
     if (parsed != null && parser.current.kind.isIdentifier) {
@@ -154,6 +154,12 @@ extension on _Parser {
         current.kind != .keywordFunction &&
         tokens[cursor + 1].kind == .leftParen &&
         !functionBodyFollows(cursor + 1)) {
+      return null;
+    }
+    if (current.kind != .at &&
+        !canStartTypeBeforeName &&
+        tokens[cursor + 1].kind != .leftParen &&
+        tokens[cursor + 1].kind != .less) {
       return null;
     }
     final child = _Parser.nested(this);

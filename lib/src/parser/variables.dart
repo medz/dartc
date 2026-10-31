@@ -84,7 +84,9 @@ final class _VariableReader(
       );
     }
 
-    if (type == null && keyword != .varKeyword) {
+    if (type == null &&
+        keyword != .varKeyword &&
+        parser.canStartTypeBeforeName) {
       final index = parser.cursor;
       final token = parser.current;
       final parsed = _TypeReader(parser).read() as TypeAnnotation?;

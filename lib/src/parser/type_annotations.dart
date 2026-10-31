@@ -405,3 +405,24 @@ extension on TokenKind {
     _ => false,
   };
 }
+
+extension on _Parser {
+  // This only excludes prefixes that cannot be followed by a declaration name.
+  // Records, function types and generic/nullable types still use the type reader.
+  bool get canStartTypeBeforeName {
+    final kind = current.kind;
+    if (kind == .leftParen || kind == .keywordFunction) return true;
+    var index = cursor + 1;
+    if (!kind.isTypeName &&
+        !(kind.isIdentifier && tokens[index].kind == .dot)) {
+      return false;
+    }
+    if (tokens[index].kind == .dot && kind != .keywordVoid) {
+      index++;
+      if (!tokens[index].kind.isTypeName) return false;
+      index++;
+    }
+    final next = tokens[index].kind;
+    return next.isIdentifier || next == .less || next == .question;
+  }
+}

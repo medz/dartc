@@ -124,6 +124,47 @@ void main() {
     expect(declaration.initializer, isA<VariableDeclarationList>());
   });
 
+  test(
+    'distinguishes typed declarations from call and assignment prefixes',
+    () {
+      for (final type in [
+        'T',
+        'prefix.Type',
+        'prefix.Type<Argument>?',
+        'T Function<U>(U)',
+        'Function<T>(T)',
+        'void Function()',
+        '(T, {int count})',
+        '(T,) Function(U)',
+      ]) {
+        for (final modifier in ['', 'final ']) {
+          final statement = parsed(
+            '$modifier$type value = input;',
+          ) as VariableDeclarationStatement;
+          expect(statement.variables.type!.text, type);
+          expect(statement.variables.declarations.single.name.text, 'value');
+          expect(
+            statement.variables.declarations.single.initializer!.text,
+            'input',
+          );
+        }
+      }
+      for (final text in [
+        'value = other;',
+        'value += other;',
+        'value.member(argument);',
+        'prefix.Constructor<Argument>();',
+        'value?.member(argument);',
+        'value?[index] = other;',
+        'value.member<Type>(argument);',
+        'value ? left : right;',
+      ]) {
+        final statement = parsed(text) as ExpressionStatement;
+        expect(statement.expression.text, text.substring(0, text.length - 1));
+      }
+    },
+  );
+
   test('keeps const expressions distinct from variable declarations', () {
     for (final text in [
       'late(a);',
