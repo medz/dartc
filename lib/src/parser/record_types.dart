@@ -6,6 +6,7 @@ final class _RecordTypes(final Token opening) extends _TypeFrame {
   Token? namedOpening;
   RecordTypeNamedFields? namedFields;
   bool hasComma = false;
+  List<Annotation> metadata = const [];
 }
 
 extension on _TypeReader {
@@ -36,6 +37,7 @@ extension on _TypeReader {
       return finishRecord(frame);
     }
     if (current.kind == .rightParen) return finishRecord(frame);
+    frame.metadata = readMetadata();
     return null;
   }
 

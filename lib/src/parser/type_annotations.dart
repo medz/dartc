@@ -3,8 +3,8 @@ part of 'parser.dart';
 /// Parses one written type through the end of [input].
 ///
 /// Names remain unresolved. Nested type arguments, function types, record types,
-/// and nullable markers retain their source ranges. Metadata parsing is not yet
-/// supported. Invalid input produces diagnostics; when a type cannot be
+/// nullable markers and metadata retain their source ranges.
+/// Invalid input produces diagnostics; when a type cannot be
 /// completed, the result contains a [MissingTypeAnnotation].
 ParseResult<TypeAnnotation> parseTypeAnnotation(ScanResult input) {
   final parser = _Parser(input);
@@ -83,7 +83,7 @@ final class _TypeReader(
           (next.kind == .leftParen || next.kind == .less)) {
         if (beforeFunction &&
             frames.isEmpty &&
-            parser.functionBodyAfterName()) {
+            parser.functionBodyAfterName(allowEmpty: true)) {
           return value;
         }
         value = beginFunction(value);
@@ -131,7 +131,10 @@ final class _TypeReader(
           frame.parameters.add(
             TypeParameter(
               source: source,
-              start: name.start,
+              start: frame.metadata.isEmpty
+                  ? name.start
+                  : frame.metadata.first.start,
+              metadata: frame.metadata,
               end: value.end,
               name: name,
               bound: value,
@@ -155,6 +158,7 @@ final class _TypeReader(
               end: name?.end ?? value.end,
               kind: frame.requiredKeyword ? .requiredNamed : frame.kind,
               isCovariant: frame.covariantKeyword,
+              metadata: frame.metadata,
               type: value,
               name: name,
             ),
@@ -169,7 +173,10 @@ final class _TypeReader(
             frame.positional.add(
               PositionalRecordTypeField(
                 source: source,
-                start: value.start,
+                start: frame.metadata.isEmpty
+                    ? value.start
+                    : frame.metadata.first.start,
+                metadata: frame.metadata,
                 end: name?.end ?? value.end,
                 type: value,
                 name: name,
@@ -179,7 +186,10 @@ final class _TypeReader(
             frame.named.add(
               NamedRecordTypeField(
                 source: source,
-                start: value.start,
+                start: frame.metadata.isEmpty
+                    ? value.start
+                    : frame.metadata.first.start,
+                metadata: frame.metadata,
                 end: name.end,
                 type: value,
                 name: name,
@@ -219,12 +229,7 @@ final class _TypeReader(
     }
     if (!token.kind.isTypeName &&
         !(token.kind.isIdentifier && next.kind == .dot)) {
-      fail(
-        token.kind == .at ? 'unsupported_syntax' : 'expected_type',
-        token.kind == .at
-            ? 'Type metadata parsing is not yet supported.'
-            : 'Expected a type.',
-      );
+      fail('expected_type', 'Expected a type.');
       return null;
     }
     var name = parser.identifier(token, inType: true);
@@ -266,6 +271,24 @@ final class _TypeReader(
       return null;
     }
     return namedType(head, null);
+  }
+
+  List<Annotation> readMetadata() {
+    if (current.kind != .at) return const [];
+    final child = _Parser.nested(parser);
+    final metadata = _MetadataReader(child).finish();
+    parser.cursor = child.cursor;
+    parser.current = child.current;
+    if (child.diagnostics.isNotEmpty) {
+      final diagnostic = child.diagnostics.first;
+      final span = diagnostic.span!;
+      failure = (
+        diagnostic.code.substring('parser.'.length),
+        diagnostic.message,
+        Token(.invalid, source, span.start, span.end),
+      );
+    }
+    return metadata;
   }
 
   TypeAnnotation namedType(_TypeName head, TypeArgumentList? arguments) {

@@ -11,6 +11,7 @@ final class _FunctionTypes(
   TokenKind? optionalClose;
   int groupStart = 0;
   int parameterStart = 0;
+  List<Annotation> metadata = const [];
   bool requiredKeyword = false;
   bool covariantKeyword = false;
   bool groupClosed = false;
@@ -20,6 +21,7 @@ final class _TypeVariables(final Token opening) extends _TypeFrame {
   final List<TypeParameter> parameters = [];
   Identifier? name;
   Token? boundStart;
+  List<Annotation> metadata = const [];
 }
 
 extension on _TypeReader {
@@ -38,13 +40,10 @@ extension on _TypeReader {
 
   TypeAnnotation? prepareVariable(_TypeVariables frame) {
     while (failure == null) {
+      frame.metadata = readMetadata();
+      if (failure != null) return null;
       if (!current.kind.isTypeParameterName) {
-        fail(
-          current.kind == .at ? 'unsupported_syntax' : 'expected_identifier',
-          current.kind == .at
-              ? 'Type metadata parsing is not yet supported.'
-              : 'Expected a type parameter name.',
-        );
+        fail('expected_identifier', 'Expected a type parameter name.');
         return null;
       }
       final name = frame.name = parser.identifier(current, inType: true);
@@ -57,7 +56,10 @@ extension on _TypeReader {
       frame.parameters.add(
         TypeParameter(
           source: source,
-          start: name.start,
+          start: frame.metadata.isEmpty
+              ? name.start
+              : frame.metadata.first.start,
+          metadata: frame.metadata,
           end: name.end,
           name: name,
         ),
@@ -140,6 +142,7 @@ extension on _TypeReader {
       return finishFunction(frame);
     }
     frame.parameterStart = current.start;
+    frame.metadata = readMetadata();
     frame.requiredKeyword = current.kind == .keywordRequired;
     if (frame.requiredKeyword) {
       if (frame.kind != .optionalNamed) {

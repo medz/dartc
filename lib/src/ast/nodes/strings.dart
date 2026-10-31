@@ -7,6 +7,14 @@ sealed class StringExpression({
   required super.end,
 }) extends Expression implements PartOfTarget;
 
+/// A zero-width string where recovery expected a literal.
+final class MissingStringExpression({
+  required super.source,
+  required int offset,
+}) extends StringExpression {
+  this : super(start: offset, end: offset);
+}
+
 /// One non-interpolated string literal, including its prefix and delimiters.
 ///
 /// Raw strings, escape sequences, line endings, and multiline delimiters remain

@@ -18,6 +18,18 @@
 
 错误位置的指令和 URI 中的插值也可保留为语法节点，供后续诊断；这不表示语言允许这些写法。URI 解码、条件选择、库装入、命名空间与 part 归属检查尚未接入这些节点。编译与执行支持以下表为准。
 
+## 编译单元解析 API
+
+`package:dartc/parser.dart` 的 `parseCompilationUnit(ScanResult)` 返回 `ParseResult<CompilationUnit>`，保留完整文件范围、脚本标记和源码顺序中的指令与声明。
+
+| 语言条款 | 当前解析支持 | 验证 |
+| --- | --- | --- |
+| §19、§19.6 | 完整文件、空文件、`#!` 脚本标记、具名或无名 library；声明元数据 | [compilation_units_test.dart](../test/parser/compilation_units_test.dart) 文件与指令用例 |
+| §19.1、§19.3、§19.7 | import/export、条件 URI、deferred/as 前缀、show/hide；字符串保留 raw、多行与相邻形式，拒绝插值 | [compilation_units_test.dart](../test/parser/compilation_units_test.dart) URI 与命名空间用例 |
+| §19.5 | part、URI 或点分名称的 part of；检查指令顺序，保留误放的指令并报告诊断 | [compilation_units_test.dart](../test/parser/compilation_units_test.dart) part 与恢复用例 |
+
+解析不加载依赖或解析 URI，不检查命名空间冲突和 part 的实际归属。文件内的表达式与语句沿用各自的解析范围，模式和 switch 仍是缺口。缺失声明和字符串分别以 `MissingTopLevelDeclaration`、`MissingStringExpression` 表示；调用方须检查 `hasErrors`。
+
 ## 编译与执行
 
 | 规范条目 | 状态 | 支持范围与缺口 | 验证 |

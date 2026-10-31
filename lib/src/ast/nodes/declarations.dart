@@ -7,6 +7,14 @@ sealed class TopLevelDeclaration({
   required super.end,
 }) extends AstNode implements CompilationUnitMember;
 
+/// A zero-width declaration where recovery expected a top-level member.
+final class MissingTopLevelDeclaration({
+  required super.source,
+  required int offset,
+}) extends TopLevelDeclaration {
+  this : super(start: offset, end: offset);
+}
+
 /// A top-level function with its written signature and body.
 final class TopLevelFunctionDeclaration({
   required super.source,

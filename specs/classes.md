@@ -19,7 +19,21 @@ SDK 对照版本见[总览](README.md)；§15 泛型和 §20 类型关系另见[
 | §13 Extensions、[主构造器语法更新][primary] | 具名及匿名 extension、类型参数、`on` 类型、成员和分号体；函数、记录及可空类型均可作为接收者类型。显式应用保留为未绑定的调用与成员访问 | [extensions_test.dart](../test/ast/extensions_test.dart) |
 | [Extension types][extension-types]、[主构造器][primary] | extension type 的名字、类型参数、`const`、构造器后缀、表示参数、接口与成员；保留参数元数据和显式修饰符，不生成表示字段 | [extensions_test.dart](../test/ast/extensions_test.dart) |
 
-名称绑定、继承关系、成员冲突、修饰符合法性、初始化规则及 extension 适用性尚未接入这些节点。结构可表示不代表声明合法，例如 extension type 的 `var` 表示参数或多个表示参数仍需诊断。文本解析尚未提供；编译与执行支持以下表为准。
+名称绑定、继承关系、成员冲突、修饰符合法性、初始化规则及 extension 适用性尚未接入这些节点。结构可表示不代表声明合法，例如 extension type 的 `var` 表示参数或多个表示参数仍需诊断。文本解析支持见下文；编译与执行支持以下表为准。
+
+## 类与成员解析
+
+`parseCompilationUnit` 可解析下列声明。类、构造器和成员保留写出的类型与名称，不添加隐式字段、构造器或父类。
+
+| 语言条款 | 当前解析支持 | 验证 |
+| --- | --- | --- |
+| §10、§11、§12 类、mixin、enum | 修饰符组合、类型参数、extends/with/implements/on、具名 mixin application；enum 常量的元数据、类型实参、构造器后缀及实参 | [type_declarations_test.dart](../test/parser/type_declarations_test.dart) 声明头与 enum 用例 |
+| Extension、extension type | 具名或无名 extension、on 类型；extension type 的主构造器、表示参数与 implements | [type_declarations_test.dart](../test/parser/type_declarations_test.dart) extension 用例 |
+| 类成员 | 字段、方法、getter/setter、可重载运算符、类型参数、元数据和函数体；保留字段与 setter 的 covariant | [type_declarations_test.dart](../test/parser/type_declarations_test.dart) 成员用例 |
+| 构造器 | 普通、const、factory、命名及简写构造器；字段／断言／super 初始化、this 重定向和 factory 等号重定向 | [type_declarations_test.dart](../test/parser/type_declarations_test.dart) 构造器用例 |
+| 主构造器与空体 | 类、enum 和 extension type 的主构造器参数；类体中的 this 初始化与实现体；分号声明体 | [type_declarations_test.dart](../test/parser/type_declarations_test.dart) 主构造器用例 |
+
+修饰符、构造器体及初始化形式包含语法检查；字段绑定、继承关系、成员冲突、参数类型和表示类型资格需要后续分析。方法和初始化表达式仍受[表达式](expressions.md#表达式解析-api)、[语句](statements.md#语句解析-api)中列出的解析缺口约束。缺失成员用 `MissingClassMember` 恢复；损坏输入验证见同一测试文件。
 
 ## 编译与执行
 

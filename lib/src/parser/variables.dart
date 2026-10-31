@@ -12,8 +12,11 @@ final class _VariableDeclarations(
   final List<VariableDeclaration> variables = [];
 }
 
-final class _VariableReader(final _Parser parser, {final bool forLoop = false})
-    extends _Reader<_VariableDeclarations?> {
+final class _VariableReader(
+  final _Parser parser, {
+  final bool forLoop = false,
+  final bool allowConditional = true,
+}) extends _Reader<_VariableDeclarations?> {
   int? expressionStart;
   int? declarationEnd;
 
@@ -128,7 +131,8 @@ final class _VariableReader(final _Parser parser, {final bool forLoop = false})
         parser.current,
       );
     }
-    if (!forLoop &&
+    if (allowConditional &&
+        !forLoop &&
         !isLate &&
         keyword == .none &&
         (type is NamedTypeAnnotation || type is RecordTypeAnnotation) &&
@@ -213,4 +217,45 @@ extension on TokenKind {
     .eof => true,
     _ => false,
   };
+}
+
+final class _VariablesReader(
+  final _Parser parser,
+  final _VariableDeclarations declarations, {
+  final List<Annotation> metadata = const [],
+}) extends _Reader<VariableDeclarationList> {
+  @override
+  Iterable<_Reader<Object?>> read() sync* {
+    while (true) {
+      Expression? initializer;
+      if (parser.current.kind == .assign) {
+        parser.advance();
+        final reader = _ExpressionReader(parser);
+        if (!reader.start()) yield reader;
+        initializer = reader.result;
+      }
+      declarations.variables.add(
+        VariableDeclaration(
+          source: parser.source,
+          start: declarations.name.start,
+          end: initializer?.end ?? declarations.name.end,
+          name: declarations.name,
+          initializer: initializer,
+        ),
+      );
+      if (parser.current.kind != .comma) break;
+      parser.advance();
+      declarations.name = parser.readVariableName();
+    }
+    result = VariableDeclarationList(
+      source: parser.source,
+      start: metadata.isEmpty ? declarations.start : metadata.first.start,
+      metadata: metadata,
+      end: declarations.variables.last.end,
+      keyword: declarations.keyword,
+      isLate: declarations.isLate,
+      type: declarations.type,
+      declarations: declarations.variables,
+    );
+  }
 }

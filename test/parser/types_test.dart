@@ -130,7 +130,34 @@ void main() {
     );
   });
 
-  test('rejects malformed type grammar and diagnoses pending metadata', () {
+  test(
+    'retains type variable, function parameter and record field metadata',
+    () {
+      for (final text in [
+        'Function<@tag T>()',
+        'int Function(@tag int x)',
+        '(@tag int,)',
+        '({@tag int x})',
+        'T Function<@A(() => 1) T extends Object>({@B() required T x})',
+      ]) {
+        final result = parseType(text);
+        expect(result.diagnostics, isEmpty, reason: text);
+        expect(walk(result.node).whereType<Annotation>(), isNotEmpty);
+      }
+      final function =
+          parseType('int Function(@tag int x)').node as FunctionTypeAnnotation;
+      expect(
+        function.parameters.parameters.single.metadata.single.text,
+        '@tag',
+      );
+      final record = parseType('({@tag int x})').node as RecordTypeAnnotation;
+      expect(record.namedFields!.fields.single.metadata.single.text, '@tag');
+      expect(parseType('List<@tag int>').hasErrors, isTrue);
+      expect(parseType('Function<@A( T>()').hasErrors, isTrue);
+    },
+  );
+
+  test('rejects malformed type grammar', () {
     for (final text in [
       '',
       'void?',
@@ -170,16 +197,6 @@ void main() {
       'get',
     ]) {
       expect(parseType(text).hasErrors, isTrue, reason: text);
-    }
-    for (final text in [
-      'Function<@tag T>()',
-      'int Function(@tag int x)',
-      '(@tag int,)',
-    ]) {
-      expect(
-        parseType(text).diagnostics.map((d) => d.code),
-        contains('parser.unsupported_syntax'),
-      );
     }
     final missing = parseType('List<');
     expect(missing.node, isA<MissingTypeAnnotation>());

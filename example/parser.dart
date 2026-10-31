@@ -4,6 +4,19 @@ import 'package:dartc/scanner.dart';
 import 'package:dartc/source.dart';
 
 void main() {
+  final unit = parseCompilationUnit(
+    scan(
+      SourceFile(
+        Uri.parse('memory:library'),
+        'library; int add(int a, int b) => a + b;',
+      ),
+    ),
+  );
+  if (unit.hasErrors) return;
+  final declaration = unit.node.members.last as TopLevelFunctionDeclaration;
+  print(declaration.name.text); // add
+  print(declaration.parameters.parameters.length); // 2
+
   final source = SourceFile(Uri.parse('memory:example'), 'price * count + fee');
   final result = parseExpression(scan(source));
   if (result.hasErrors) {

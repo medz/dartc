@@ -491,43 +491,15 @@ final class _StatementReader(final _Parser parser) extends _Reader<Statement> {
   Iterable<_Reader<Object?>> variables(
     _VariableDeclarations declarations,
   ) sync* {
-    while (true) {
-      Expression? initializer;
-      if (current.kind == .assign) {
-        parser.advance();
-        final reader = _ExpressionReader(parser);
-        if (!reader.start()) yield reader;
-        initializer = reader.result;
-      }
-      declarations.variables.add(
-        VariableDeclaration(
-          source: source,
-          start: declarations.name.start,
-          end: initializer?.end ?? declarations.name.end,
-          name: declarations.name,
-          initializer: initializer,
-        ),
-      );
-      if (current.kind != .comma) break;
-      parser.advance();
-      declarations.name = parser.readVariableName();
-    }
-    final variables = VariableDeclarationList(
-      source: source,
-      start: declarations.start,
-      end: declarations.variables.last.end,
-      keyword: declarations.keyword,
-      isLate: declarations.isLate,
-      type: declarations.type,
-      declarations: declarations.variables,
-    );
+    final reader = _VariablesReader(parser, declarations);
+    yield reader;
+    final variables = reader.result;
     value = VariableDeclarationStatement(
       source: source,
       start: variables.start,
       end: parser.expect(.semicolon),
       variables: variables,
     );
-    return;
   }
 
   _CatchHeader catchHeader() {

@@ -26,6 +26,12 @@ part 'annotations.dart';
 part 'function_bodies.dart';
 part 'function_expressions.dart';
 part 'readers.dart';
+part 'compilation_units.dart';
+part 'directives.dart';
+part 'declarations.dart';
+part 'type_declarations.dart';
+part 'members.dart';
+part 'constructors.dart';
 
 /// The syntax and diagnostics produced by parsing a source snapshot.
 ///

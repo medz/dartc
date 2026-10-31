@@ -9,6 +9,10 @@ SDK 对照版本与状态含义见[总览](README.md#状态与证据)。空安�
 
 验证见 [declarations_test.dart](../test/ast/declarations_test.dart)、[members_test.dart](../test/ast/members_test.dart)、[statements_test.dart](../test/ast/statements_test.dart) 和 [loops_test.dart](../test/ast/loops_test.dart)。模式变量声明见[模式](patterns.md)；编译与执行支持以下表为准。
 
+## 声明解析
+
+`parseCompilationUnit` 接入带元数据、修饰符、共享类型及初始化表达式的顶层变量和字段。字段保留 static、abstract、external 与 covariant；验证见 [compilation_units_test.dart](../test/parser/compilation_units_test.dart) 和 [type_declarations_test.dart](../test/parser/type_declarations_test.dart)。局部变量及循环声明的范围见[语句解析](statements.md#语句解析-api)。初始化时序、确定赋值、类型与常量资格尚未分析。
+
 ## 编译与执行
 
 | 规范条目 | 状态 | 支持范围与缺口 | 验证 |

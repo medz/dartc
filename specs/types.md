@@ -33,7 +33,7 @@
 | [§20.5 Function Types][function-types]、[§15 Generics][type-parameters] | `Function` 类型，可省略或嵌套的返回类型、泛型参数与 `extends` 上界、必需及可选位置参数、可选及必需命名参数、参数名称及 `covariant` | [types_test.dart](../test/parser/types_test.dart) 函数类型用例 |
 | [Record types][records] | 空 record、位置字段及可选名称、命名字段区、嵌套类型、可空 record | [types_test.dart](../test/parser/types_test.dart) record 类型用例 |
 
-元数据和类型别名声明的解析仍缺。无法完成的类型返回 `MissingTypeAnnotation` 并报告错误；多余 token 也会产生诊断。重复声明、名称是否存在、泛型边界、类型关系及其他静态语义尚未检查。验证包括不完整输入、错误分隔符、深层嵌套和重复解析同一快照。
+类型参数、函数类型参数和 record 字段的元数据已支持，见 [types_test.dart](../test/parser/types_test.dart)。`parseCompilationUnit` 接入现代与函数形式的 typedef，见 [compilation_units_test.dart](../test/parser/compilation_units_test.dart)。无法完成的类型返回 `MissingTypeAnnotation` 并报告错误；多余 token 也会产生诊断。重复声明、名称是否存在、泛型边界、类型关系及其他静态语义尚未检查。验证包括不完整输入、错误分隔符、深层嵌套和重复解析同一快照。
 
 ## 类型规则
 

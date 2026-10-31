@@ -1,4 +1,4 @@
-/// Dart expression, statement, type, parameter and function body parsing.
+/// Dart compilation unit, declaration, expression, statement and type parsing.
 ///
 /// Parsing consumes an existing scan result without changing its tokens.
 /// Syntax nodes retain the source snapshot; name resolution and type checking
@@ -14,4 +14,5 @@ export 'src/parser/parser.dart'
         parseTypeAnnotation,
         parseFormalParameterList,
         parseFunctionBody,
+        parseCompilationUnit,
         ParseResult;

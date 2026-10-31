@@ -88,32 +88,35 @@ final class _LocalFunctionReader(
 }
 
 extension on _Parser {
-  bool functionBodyAfterName() {
+  bool functionBodyAfterName({bool allowEmpty = false}) {
     if (!current.kind.isIdentifier) return false;
     var opening = cursor + 1;
     if (tokens[cursor + 1].kind != .less) {
-      if (!functionBodyFollows(opening)) return false;
+      if (!functionBodyFollows(opening, allowEmpty: allowEmpty)) return false;
     } else {
       final child = _Parser.nested(this)..advance();
       if (_TypeReader(child).read(parameters: true) == null ||
-          !child.functionBodyFollows(child.cursor)) {
+          !child.functionBodyFollows(child.cursor, allowEmpty: allowEmpty)) {
         return false;
       }
       opening = child.cursor;
     }
     if (current.kind == .keywordFunction || current.kind.isVariableModifier) {
       final following = tokens[lookahead.closeParenthesis(opening)! + 1].kind;
-      return following == .arrow || following == .leftBrace;
+      return following == .arrow ||
+          following == .leftBrace ||
+          allowEmpty && following == .semicolon;
     }
     return true;
   }
 
-  bool functionBodyFollows(int opening) {
+  bool functionBodyFollows(int opening, {bool allowEmpty = false}) {
     if (tokens[opening].kind != .leftParen) return false;
     final end = lookahead.closeParenthesis(opening);
     if (end == null) return false;
     return switch (tokens[end + 1].kind) {
       .arrow || .leftBrace || .keywordAsync || .keywordSync => true,
+      .semicolon => allowEmpty,
       _ => false,
     };
   }

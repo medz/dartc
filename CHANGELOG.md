@@ -13,6 +13,8 @@
 
 - Parse anonymous functions and local function declarations with generic parameters, annotations, defaults and nested asynchronous or generator bodies.
 
+- Add `parseCompilationUnit` for library directives, top-level declarations, classes, mixins, enums, extensions, extension types and their members. Preserve primary and abbreviated constructors, initializer lists, factory redirections and type metadata.
+
 ### Performance
 
 - Reduce temporary allocations when scanning identifiers and speed up scanning of whitespace runs.

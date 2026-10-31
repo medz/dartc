@@ -7,6 +7,12 @@ sealed class ClassMember({
   required super.end,
 }) extends AstNode;
 
+/// A zero-width member where recovery expected a class member.
+final class MissingClassMember({required super.source, required int offset})
+    extends ClassMember {
+  this : super(start: offset, end: offset);
+}
+
 /// A field declaration with its written modifiers and terminating semicolon.
 final class FieldDeclaration({
   required super.source,
@@ -237,6 +243,9 @@ final class SetterDeclaration({
 
   /// Whether `static` is written on the declaration.
   final bool isStatic = false,
+
+  /// Whether `covariant` is written on the setter.
+  final bool isCovariant = false,
 
   /// The written return type, or `null` when omitted.
   final TypeAnnotation? returnType,
