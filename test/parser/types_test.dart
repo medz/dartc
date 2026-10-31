@@ -203,6 +203,66 @@ void main() {
     expect(missing.node.start, missing.node.end);
   });
 
+  test('parses deeply nested type arguments inside type metadata', () {
+    const depth = 5000;
+    for (final (opening, closing) in [
+      ('void Function(@A<', '>() int value)'),
+      ('Function<@A<', '>() T>()'),
+      ('(@A<', '>() int,)'),
+    ]) {
+      final text = '${opening * depth}int${closing * depth}';
+      final input = scan(SourceFile(Uri.parse('memory:metadata'), text));
+      final tokens = [...input.tokens];
+      final result = parseTypeAnnotation(input);
+      expect(result.diagnostics, isEmpty);
+      expect(result.node.text, text);
+      expect(walk(result.node).whereType<Annotation>(), hasLength(depth));
+      expect(input.tokens, orderedEquals(tokens));
+      expect(
+        walk(result.node).every((n) => identical(n.source, input.source)),
+        isTrue,
+      );
+      final invalid = parseType('${opening * depth}${closing * depth}');
+      expect(invalid.hasErrors, isTrue);
+      expect(invalid.node, isA<MissingTypeAnnotation>());
+    }
+  });
+
+  test('retains types nested through annotation argument expressions', () {
+    for (final (opening, closing) in [
+      ('void Function(@A(const B<', '>()) int value)'),
+      ('void Function(@A(f<', '>()) int value)'),
+      ('void Function(@A(null as ', ') int value)'),
+      ('void Function(@A((', ' value) => 0) int outer)'),
+    ]) {
+      final text = '${opening * 8}int${closing * 8}';
+      final node = type(text);
+      expect(node.text, text);
+      expect(walk(node).whereType<Annotation>(), hasLength(8));
+    }
+  });
+
+  test('type metadata belongs only to the following parameter or field', () {
+    final variables =
+        type('Function<@A<int>() T, U>()') as FunctionTypeAnnotation;
+    expect(
+      variables.typeParameters!.parameters.first.metadata.single.text,
+      '@A<int>()',
+    );
+    expect(variables.typeParameters!.parameters.last.metadata, isEmpty);
+    final function = type(
+      'void Function(@A<int>() int x, String y)',
+    ) as FunctionTypeAnnotation;
+    expect(
+      function.parameters.parameters.first.metadata.single.text,
+      '@A<int>()',
+    );
+    expect(function.parameters.parameters.last.metadata, isEmpty);
+    final record = type('(@A<int>() int, String)') as RecordTypeAnnotation;
+    expect(record.positionalFields.first.metadata.single.text, '@A<int>()');
+    expect(record.positionalFields.last.metadata, isEmpty);
+  });
+
   test('splits closing angles locally and preserves scanner snapshots', () {
     final input = scan(
       SourceFile(Uri.parse('memory:tokens'), 'Map<A, B<C<D>>>'),

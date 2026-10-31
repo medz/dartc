@@ -35,6 +35,8 @@
 
 类型参数、函数类型参数和 record 字段的元数据已支持，见 [types_test.dart](../test/parser/types_test.dart)。`parseCompilationUnit` 接入现代与函数形式的 typedef，见 [compilation_units_test.dart](../test/parser/compilation_units_test.dart)。无法完成的类型返回 `MissingTypeAnnotation` 并报告错误；多余 token 也会产生诊断。重复声明、名称是否存在、泛型边界、类型关系及其他静态语义尚未检查。验证包括不完整输入、错误分隔符、深层嵌套和重复解析同一快照。
 
+类型元数据的类型实参可继续嵌套带元数据的类型，深层输入及缺失类型实参的恢复见同一测试文件。已知缺口：注解实参中的构造器调用、泛型调用、类型转换或闭包再次包含带注解的类型时，超深嵌套仍可能触发栈溢出。
+
 ## 类型规则
 
 | 规范条目 | 状态 | 支持范围与缺口 | 验证 |

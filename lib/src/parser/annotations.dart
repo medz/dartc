@@ -29,7 +29,8 @@ final class _MetadataReader(final _Parser parser)
         }
         final start = parser.current.start;
         final reader = _TypeReader(parser);
-        typeArguments = reader.read(arguments: true) as TypeArgumentList?;
+        if (!reader.start(arguments: true)) yield _TypeTask(reader);
+        typeArguments = reader.result as TypeArgumentList?;
         if (reader.failure case final failure?) {
           parser.error(failure.$1, failure.$2, failure.$3);
         }

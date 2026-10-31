@@ -19,6 +19,16 @@ abstract class _Reader<T> {
   }
 }
 
+final class _TypeTask(final _TypeReader type) extends _Reader<void> {
+  @override
+  Iterable<_Reader<Object?>> read() sync* {
+    do {
+      yield type.pendingMetadata!.$2;
+    } while (!type.resumeMetadata());
+    result = null;
+  }
+}
+
 final class _ExpressionReader(
   final _Parser parser, {
   final _ParseBoundary boundary = .expression,

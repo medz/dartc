@@ -29,6 +29,10 @@ ParseResult<TypeAnnotation> parseTypeAnnotation(ScanResult input) {
 
 sealed class _TypeFrame;
 
+sealed class _AnnotatedTypeFrame extends _TypeFrame {
+  List<Annotation> metadata = const [];
+}
+
 final class _TypeArguments(
   final Token opening,
   final int index, {
@@ -54,6 +58,10 @@ final class _TypeReader(
   (String, String, Token)? failure;
   (_TypeName, int)? relationalFallback;
   TypeParameterList? completedParameters;
+  AstNode? result;
+  bool beforeParameter = false;
+  (TypeAnnotation, int)? parameterFallback;
+  (_AnnotatedTypeFrame, _MetadataReader)? pendingMetadata;
 
   SourceFile get source => parser.source;
   Token get current => parser.current;
@@ -64,9 +72,24 @@ final class _TypeReader(
     bool parameters = false,
     bool beforeParameter = false,
   }) {
+    if (!start(
+      arguments: arguments,
+      parameters: parameters,
+      beforeParameter: beforeParameter,
+    )) {
+      _TypeTask(this).finish();
+    }
+    return result;
+  }
+
+  bool start({
+    bool arguments = false,
+    bool parameters = false,
+    bool beforeParameter = false,
+  }) {
     assert(!arguments || !parameters);
+    this.beforeParameter = beforeParameter;
     TypeAnnotation? value;
-    (TypeAnnotation, int)? parameterFallback;
     if (arguments) {
       frames.add(_TypeArguments(current, parser.cursor));
       parser.advance();
@@ -76,9 +99,19 @@ final class _TypeReader(
       frames.add(frame);
       parser.advance();
       value = prepareVariable(frame);
-      if (completedParameters != null) return completedParameters;
+      if (completedParameters != null) return complete(completedParameters);
     }
+    return resume(value);
+  }
+
+  bool complete(AstNode? node) {
+    result = node;
+    return true;
+  }
+
+  bool resume(TypeAnnotation? value) {
     while (failure == null) {
+      if (pendingMetadata != null) return false;
       if (value == null) {
         value = readHead();
         if (failure != null) break;
@@ -89,10 +122,10 @@ final class _TypeReader(
         if (beforeFunction &&
             frames.isEmpty &&
             parser.functionBodyAfterName(allowEmpty: true)) {
-          return value;
+          return complete(value);
         }
         if (beforeParameter && frames.isEmpty) {
-          if (parser.functionParameterAfterName()) return value;
+          if (parser.functionParameterAfterName()) return complete(value);
           parameterFallback = (value, parser.cursor);
         }
         value = beginFunction(value);
@@ -105,7 +138,7 @@ final class _TypeReader(
             current.kind != .keywordSuper) {
           break;
         }
-        return value;
+        return complete(value);
       }
       switch (frames.last) {
         case final _TypeArguments frame:
@@ -130,7 +163,7 @@ final class _TypeReader(
             parser.current,
           );
           final owner = frame.owner;
-          if (owner == null) return arguments;
+          if (owner == null) return complete(arguments);
           if (frames.isEmpty) relationalFallback = null;
           value = namedType(owner, arguments);
         case final _TypeVariables frame:
@@ -158,7 +191,7 @@ final class _TypeReader(
             ),
           );
           value = continueVariables(frame);
-          if (completedParameters != null) return completedParameters;
+          if (completedParameters != null) return complete(completedParameters);
         case final _FunctionTypes frame:
           Identifier? name;
           if (current.kind.isIdentifier) {
@@ -229,15 +262,15 @@ final class _TypeReader(
       parser.cursor = index;
       parser.current = parser.tokens[index];
       failure = null;
-      return type;
+      return complete(type);
     }
     if (relationalFallback case (final head, final index)) {
       parser.cursor = index;
       parser.current = parser.tokens[index];
       failure = null;
-      return namedType(head, null);
+      return complete(namedType(head, null));
     }
-    return null;
+    return complete(null);
   }
 
   TypeAnnotation? readHead() {
@@ -298,10 +331,20 @@ final class _TypeReader(
     return namedType(head, null);
   }
 
-  List<Annotation> readMetadata() {
-    if (current.kind != .at) return const [];
-    final child = _Parser.nested(parser);
-    final metadata = _MetadataReader(child).finish();
+  bool readMetadata(_AnnotatedTypeFrame frame) {
+    if (current.kind != .at) {
+      frame.metadata = const [];
+      return true;
+    }
+    pendingMetadata = (frame, _MetadataReader(_Parser.nested(parser)));
+    return false;
+  }
+
+  bool resumeMetadata() {
+    final (frame, metadata) = pendingMetadata!;
+    pendingMetadata = null;
+    final child = metadata.parser;
+    frame.metadata = metadata.result;
     parser.cursor = child.cursor;
     parser.current = child.current;
     if (child.diagnostics.isNotEmpty) {
@@ -313,7 +356,13 @@ final class _TypeReader(
         Token(.invalid, source, span.start, span.end),
       );
     }
-    return metadata;
+    final value = switch (frame) {
+      _TypeVariables() => prepareVariable(frame, afterMetadata: true),
+      _FunctionTypes() => prepareParameterModifiers(frame),
+      _RecordTypes() => null,
+    };
+    if (completedParameters != null) return complete(completedParameters);
+    return resume(value);
   }
 
   TypeAnnotation namedType(_TypeName head, TypeArgumentList? arguments) {

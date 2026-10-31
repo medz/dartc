@@ -3,7 +3,7 @@ part of 'parser.dart';
 final class _FunctionTypes(
   final Token function,
   final TypeAnnotation? returnType,
-) extends _TypeFrame {
+) extends _AnnotatedTypeFrame {
   TypeParameterList? typeParameters;
   Token? opening;
   final List<FunctionTypeParameter> parameters = [];
@@ -11,17 +11,15 @@ final class _FunctionTypes(
   TokenKind? optionalClose;
   int groupStart = 0;
   int parameterStart = 0;
-  List<Annotation> metadata = const [];
   bool requiredKeyword = false;
   bool covariantKeyword = false;
   bool groupClosed = false;
 }
 
-final class _TypeVariables(final Token opening) extends _TypeFrame {
+final class _TypeVariables(final Token opening) extends _AnnotatedTypeFrame {
   final List<TypeParameter> parameters = [];
   Identifier? name;
   Token? boundStart;
-  List<Annotation> metadata = const [];
 }
 
 extension on _TypeReader {
@@ -38,10 +36,13 @@ extension on _TypeReader {
     return beginParameters(frame);
   }
 
-  TypeAnnotation? prepareVariable(_TypeVariables frame) {
+  TypeAnnotation? prepareVariable(
+    _TypeVariables frame, {
+    bool afterMetadata = false,
+  }) {
     while (failure == null) {
-      frame.metadata = readMetadata();
-      if (failure != null) return null;
+      if (!afterMetadata && !readMetadata(frame)) return null;
+      afterMetadata = false;
       if (!current.kind.isTypeParameterName) {
         fail('expected_identifier', 'Expected a type parameter name.');
         return null;
@@ -142,7 +143,11 @@ extension on _TypeReader {
       return finishFunction(frame);
     }
     frame.parameterStart = current.start;
-    frame.metadata = readMetadata();
+    if (!readMetadata(frame)) return null;
+    return prepareParameterModifiers(frame);
+  }
+
+  TypeAnnotation? prepareParameterModifiers(_FunctionTypes frame) {
     frame.requiredKeyword = current.kind == .keywordRequired;
     if (frame.requiredKeyword) {
       if (frame.kind != .optionalNamed) {

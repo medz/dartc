@@ -20,6 +20,7 @@
 - Parse functions named with contextual keywords such as `import`, `external` and `mixin`, and generic methods named `factory`.
 - Parse function-form parameters named `Function`, including generic, nullable and nested forms.
 - Return syntax diagnostics for unfinished constructor assertions and switch labels without throwing or consuming subsequent declarations.
+- Avoid stack overflow when type metadata recursively contains annotated types as type arguments.
 
 ### Performance
 
