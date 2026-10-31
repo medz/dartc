@@ -16,7 +16,7 @@
 | §19.1 导入、§19.3 导出 | 元数据、URI、条件 URI、可选 `deferred` 与导入前缀、有序 `show` / `hide` 名单；保留重复名称及省略的条件比较值 | [directives_test.dart](../test/ast/directives_test.dart) |
 | §19.5 Parts | `part` 的 URI，以及 `part of` 的 URI 或点分库名；URI 保留相邻字符串结构 | [directives_test.dart](../test/ast/directives_test.dart) |
 
-错误位置的指令和 URI 中的插值也可保留为语法节点，供后续诊断；这不表示语言允许这些写法。URI 解码、条件选择、库装入、命名空间与 part 归属检查尚未接入这些节点。编译与执行支持以下表为准。
+错误位置的指令和 URI 中的插值也可保留为语法节点，供后续诊断；这不表示语言允许这些写法。URI 解码、条件选择与 part 归属检查见[库装入 API](#库装入-api)；命名空间绑定尚未接入这些节点。编译与执行支持以下表为准。
 
 ## 编译单元解析 API
 
@@ -29,6 +29,23 @@
 | §19.5 | part、URI 或点分名称的 part of；检查指令顺序，保留误放的指令并报告诊断 | [compilation_units_test.dart](../test/parser/compilation_units_test.dart) part 与恢复用例 |
 
 解析不加载依赖或解析 URI，不检查命名空间冲突和 part 的实际归属。文件内的表达式、语句、模式和 switch 沿用各自的解析范围。缺失声明和字符串分别以 `MissingTopLevelDeclaration`、`MissingStringExpression` 表示；调用方须检查 `hasErrors`。
+
+## 库装入 API
+
+`package:dartc/project.dart` 的 `ProjectLoader.load` 从绝对入口 URI 装入库图，返回不可变的 `Project`、各库的定义单元与有序 parts、选中的依赖边及诊断。输入由 `SourceProvider` 提供；`dart:` 源码与条件环境由调用方明确提供，不从宿主运行时推断可用库。文件提供者 `readFileSource` 按 UTF-8 读取，保留 BOM 和行结束符，损坏编码转为替换字符。
+
+| 语言条款 | 当前装入支持 | 验证 |
+| --- | --- | --- |
+| §19.7 URI、[包配置 v2][package-config] | 相对 URI、`file:`、`package:`、`dart:` 与自定义来源；按 URI 规则解析路径、转义和包映射，保留逻辑 URI，不用符号链接或物理路径合并库身份。包配置支持相对根、暴露目录、嵌套包归属和语言版本；重复名称与冲突目录产生错误 | [uris_test.dart](../test/project/uris_test.dart)、[packages_test.dart](../test/project/packages_test.dart)、[files_test.dart](../test/project/files_test.dart) |
+| §19.1、§19.3 导入与导出 | 装入选中库，保留 deferred、前缀和 show/hide 的 AST；未显式导入 `dart:core` 的非 core 库加入隐式 core 依赖。合法循环与共享依赖不会重复装入 | [loading_test.dart](../test/project/loading_test.dart)、[graph_test.dart](../test/project/graph_test.dart) |
+| §19.7 条件 URI | 按源码顺序选择首个匹配分支，无匹配使用默认 URI；未定义环境值视为空字符串，省略比较值时与 `"true"` 比较。只读取选中来源，其余分支仍接受词法与语法检查 | [loading_test.dart](../test/project/loading_test.dart) |
+| §19.5 Parts | 以 URI 或库名检查 part-of 归属，检查缺失 part-of、重复包含、跨库共用、导入 part、part 中的非法指令及语言版本不一致 | [parts_test.dart](../test/project/parts_test.dart)、[versions_test.dart](../test/project/versions_test.dart) |
+
+`findPackageConfiguration` 从入口目录逐级向上寻找最近的 `.dart_tool/package_config.json`；找到但无效时报告错误，不退回更远配置。旧 `.packages` 格式不在此 API 的支持范围。URI 和 JSON 格式错误使用 `FormatException`；装入过程中的缺失文件、读取异常和源程序错误收集为诊断，调用方须检查 `Project.hasErrors`。
+
+同一 loader 的配置固定；每次装入重新读取可达源码，内容和语言版本未变时复用同一 `LibraryUnit` 与源码快照。每份结果独立保留自己的 AST 和诊断，只有最新启动的装入更新缓存；旧异步请求不能覆盖新缓存。缓存只保留该次可达文件，`clear` 释放缓存。验证见 [reuse_test.dart](../test/project/reuse_test.dart)。
+
+库图尚未执行命名空间合并、名称绑定、类型与常量检查。装入 deferred 依赖表示其源码可供静态检查，不代表已实现执行时的延迟加载；读取 SDK 源码也不代表相应标准库已经能够编译执行。
 
 ## 编译与执行
 
@@ -91,3 +108,5 @@ package v2 的重复名称、重复规范化根及嵌套根约束在配置边界
 [conditional]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L21006-L21071
 
 [wildcard-imports]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/wildcard-variables/feature-specification.md#imports
+
+[package-config]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.8/language-versioning/package-config-file-v2.md

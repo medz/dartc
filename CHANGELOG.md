@@ -14,6 +14,7 @@
 - Add `parseCompilationUnit` for library directives, top-level declarations, classes, mixins, enums, extensions, extension types and their members. Preserve primary and abbreviated constructors, initializer lists, factory redirections and type metadata.
 - Add `LanguageVersion` and the optional `languageVersion` argument to each parser entry point for versioned syntax checks.
 - Add `parsePattern` with matching, declaration and assignment contexts. Parse structural and logical patterns, guards, if-case, switch expressions and statements, destructuring assignments and pattern loop headers. Preserve metadata on local and loop declarations.
+- Add `package:dartc/project.dart` for loading library graphs from files or custom source providers. Resolve package configurations, conditional imports and exports, parts and language versions, with diagnostics for missing sources and invalid library relationships. Reuse unchanged parsed files across loads.
 
 ### Fixes
 

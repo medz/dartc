@@ -17,7 +17,7 @@
 | [§21.1.2 Comments][comments]、文件头 | 部分实现 | 支持单行、文档与嵌套块注释。仅跳过偏移 0 的 BOM，仅在偏移 0 识别 script tag。版本标记保留为注释，尚未选择或限制文件语言版本。 | [scanner_test.dart](../test/scanner/scanner_test.dart) |
 | [§7 Errors and Warnings][errors]：词法诊断 | 部分实现 | 错误带稳定代码和源码区间；未闭合注释、字符串、插值及非法转义分别报告。未闭合字符串只返回实际存在的文本，不补造引号或花括号。括号配对、关键字位置限制和语法恢复由 parser 负责。 | [scanner_test.dart](../test/scanner/scanner_test.dart)；[strings_test.dart](../test/scanner/strings_test.dart) |
 
-旧语言版本的特性限制、语法解析及字面量求值尚未接入此 API。
+版本选择归 project，版本语法检查归 parser；字面量求值归后续分析。
 
 ## 解析语言版本
 
@@ -26,6 +26,12 @@
 版本检查覆盖非函数类型别名、泛型元数据、无符号右移、函数与构造器 tear-off 的明确语法、super 形参、命名实参后的位置实参、增强枚举、无名 library、类修饰符、record、模式、扩展类型、数字分隔符、空感知集合元素、点简写、主构造器及空声明体。旧版 switch 的 case 使用常量表达式文法。验证见 [language_versions_test.dart](../test/parser/language_versions_test.dart)。
 
 需要名称或类型信息才能判断的版本规则仍归语义分析，包括通配名字的绑定、私有命名参数的公开名称，以及推断和提升规则。版本检查不把解析成功等同于完整旧语言兼容。
+
+## 文件版本选择 API
+
+`ProjectLoader` 按[语言版本规范][versioning]和[包配置 v2][package-config]选择每个文件的版本：先取所属包的 `languageVersion`，无配置时使用 loader 的默认版本，再应用文件头第一个有效的 `// @dart = major.minor` 标记。标记必须位于首个语言 token 之前，允许前置 script tag、BOM、其他注释以及标记内的空格或 tab；块注释内、文档注释内及代码之后的内容不作为版本标记。源文件标记可以高于包默认版本；超出支持范围或数值不可表示时产生诊断。
+
+定义库与 part 分别按自身所属包和文件头选择版本，随后检查实际版本及显式标记是否一致；仅有一侧写出标记也会产生错误，即使版本值等于默认值。解析器只接收最终选定的版本。验证见 [versions_test.dart](../test/project/versions_test.dart)、[parts_test.dart](../test/project/parts_test.dart) 和 [packages_test.dart](../test/project/packages_test.dart)。
 
 ## 编译与执行
 
@@ -67,3 +73,5 @@
 
 [versioning]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.8/language-versioning/feature-specification.md
 [features]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.14/triple-shift-operator/feature-specification.md
+
+[package-config]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.8/language-versioning/package-config-file-v2.md
