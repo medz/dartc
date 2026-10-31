@@ -11,17 +11,29 @@
 
 ## 类型语法表示
 
-`package:dartc/ast.dart` 可构造和检查下列类型语法树。当前验证覆盖手工构造的节点及其源码范围，尚未提供从文本解析这些节点、名称绑定或类型检查的 API。
+`package:dartc/ast.dart` 可构造和检查下列类型语法树。验证覆盖手工构造的节点及其源码范围；文本解析范围见[类型解析 API](#类型解析-api)。名称绑定或类型检查尚未接入这些节点。
 
 | 语言条款 | 可表示的语法 | 验证 |
 | --- | --- | --- |
 | §20 Types、[空安全][nnbd] | 类型名称、导入前缀、嵌套类型实参和 `?`；保留 `void`、`dynamic` 等原始名称 | [nodes_test.dart](../test/ast/nodes_test.dart) 类型与范围用例 |
 | [§15 Generics][type-parameters] | 有序类型参数、元数据、`extends` 上界 | [nodes_test.dart](../test/ast/nodes_test.dart) 泛型函数类型用例 |
-| [§20.5 Function Types][function-types] | `Function` 类型、可省略的返回类型、泛型参数、必需及可选位置参数、可选及必需命名参数、参数名称与元数据 | [nodes_test.dart](../test/ast/nodes_test.dart) 函数类型用例 |
+| [§20.5 Function Types][function-types] | `Function` 类型、可省略的返回类型、泛型参数、必需及可选位置参数、可选及必需命名参数、参数名称、`covariant` 与元数据 | [nodes_test.dart](../test/ast/nodes_test.dart) 函数类型用例 |
 | [Record types][records] | 位置字段、可选位置字段名、命名字段区、字段元数据、嵌套类型和可空 record 类型 | [nodes_test.dart](../test/ast/nodes_test.dart) record 类型用例 |
 | [§20.3 类型别名][aliases] | 现代 `typedef Name<T> = Type;` 与旧式函数 typedef；保留元数据、别名的类型参数、右侧类型或写出的返回类型及形参，不补入省略的类型 | [type_aliases_test.dart](../test/ast/type_aliases_test.dart) |
 
 类型别名的解析、绑定与展开尚未接入这些节点；类、mixin、枚举及扩展声明的语法见[类与成员](classes.md#类与成员语法表示)。语法树中出现一种类型不表示已支持其静态或运行时语义；编译器的类型规则仍以下表为准。
+
+## 类型解析 API
+
+`package:dartc/parser.dart` 的 `parseTypeAnnotation(ScanResult)` 解析一个完整类型并返回类型节点及诊断。名称保持未绑定，输入 token 和源码快照保持不变。
+
+| 语言条款 | 已解析的语法 | 验证 |
+| --- | --- | --- |
+| §20 Types、[空安全][nnbd] | 类型名、导入前缀、嵌套类型实参、可空 `?`、`void` 与 `dynamic` | [types_test.dart](../test/parser/types_test.dart) 名称、嵌套实参、范围及 token 保持用例 |
+| [§20.5 Function Types][function-types]、[§15 Generics][type-parameters] | `Function` 类型，可省略或嵌套的返回类型、泛型参数与 `extends` 上界、必需及可选位置参数、可选及必需命名参数、参数名称及 `covariant` | [types_test.dart](../test/parser/types_test.dart) 函数类型用例 |
+| [Record types][records] | 空 record、位置字段及可选名称、命名字段区、嵌套类型、可空 record | [types_test.dart](../test/parser/types_test.dart) record 类型用例 |
+
+元数据和类型别名声明的解析仍缺。无法完成的类型返回 `MissingTypeAnnotation` 并报告错误；多余 token 也会产生诊断。重复声明、名称是否存在、泛型边界、类型关系及其他静态语义尚未检查。验证包括不完整输入、错误分隔符、深层嵌套和重复解析同一快照。
 
 ## 类型规则
 

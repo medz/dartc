@@ -205,6 +205,9 @@ final class FunctionTypeParameter({
   /// The parameter's position and optionality.
   required final FunctionTypeParameterKind kind,
 
+  /// Whether `covariant` is written on the parameter.
+  final bool isCovariant = false,
+
   /// The written type.
   required final TypeAnnotation type,
 

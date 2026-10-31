@@ -26,8 +26,9 @@ final class _Call(
   super.opening,
   super.valueBase,
   super.operatorBase,
-  final Expression callee,
-) extends _Sequence {
+  final Expression callee, {
+  final TypeArgumentList? typeArguments,
+}) extends _Sequence {
   final List<Argument> arguments = [];
 }
 
@@ -47,7 +48,7 @@ extension on _Parser {
     checkSelector();
     final token = current;
     final target = values.removeLast();
-    cursor++;
+    advance();
     if (token.kind == .emptyBrackets) {
       error('expected_expression', 'Expected an index expression.', token);
       values.add(
@@ -140,6 +141,7 @@ extension on _Parser {
             start: frame.callee.start,
             end: end,
             callee: frame.callee,
+            typeArguments: frame.typeArguments,
             arguments: ArgumentList(
               source: source,
               start: frame.opening.start,
@@ -165,6 +167,6 @@ extension on _Parser {
     delimiters.removeLast();
     values.add(expression);
     expectsOperand = false;
-    if (matched) cursor++;
+    if (matched) advance();
   }
 }

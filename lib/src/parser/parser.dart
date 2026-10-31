@@ -10,6 +10,10 @@ import '../source/source_span.dart';
 
 part 'delimiters.dart';
 part 'operators.dart';
+part 'type_annotations.dart';
+part 'type_expressions.dart';
+part 'function_types.dart';
+part 'record_types.dart';
 
 /// The syntax and diagnostics produced by parsing a source snapshot.
 ///
@@ -34,9 +38,10 @@ final class ParseResult<T extends AstNode> {
 /// Parses one expression through the end of [input], without a semicolon.
 ///
 /// The context is synchronous: `await` and `yield` can be identifiers. Supported
-/// forms include scalar and plain string literals, records, operators, calls,
-/// member access, and indexing. Other forms produce diagnostics until their
-/// grammar is implemented. Parsing does not resolve names or check types.
+/// forms include scalar and plain string literals, records, operators, generic
+/// calls, type tests and casts, member access, and indexing. Other forms produce
+/// diagnostics until their grammar is implemented. Parsing does not resolve
+/// names or check types.
 ///
 /// Recovery preserves the input tokens and uses zero-width [MissingExpression]
 /// nodes for omitted operands. With errors, the returned node may cover only
@@ -48,6 +53,7 @@ final class _Parser {
   _Parser(ScanResult input)
     : source = input.source,
       tokens = input.tokens,
+      current = input.tokens.first,
       diagnostics = [...input.diagnostics];
 
   final SourceFile source;
@@ -61,10 +67,17 @@ final class _Parser {
   final List<int> questions = [];
   final List<_Delimiter> delimiters = [];
   int cursor = 0;
+  // Either tokens[cursor] or its unconsumed suffix after a closing type angle.
+  Token current;
+  // Completed and failed angle-bracket trials, confined to this source parse.
+  Map<int, (TypeArgumentList, int, Token)?>? typeArguments;
   bool expectsOperand = true;
 
-  Token get current => tokens[cursor];
   int get operatorBase => delimiters.isEmpty ? 0 : delimiters.last.operatorBase;
+
+  void advance() {
+    current = tokens[++cursor];
+  }
 
   ParseResult<Expression> parse() {
     while (current.kind != .eof || delimiters.isNotEmpty) {
@@ -84,7 +97,7 @@ final class _Parser {
           final frame = delimiters.last as _Sequence;
           finishElement(frame);
           if (frame is _Group) frame.hasComma = true;
-          cursor++;
+          advance();
         } else {
           unexpected();
         }
@@ -103,7 +116,8 @@ final class _Parser {
                 token.kind.isIdentifier &&
                 tokens[cursor + 1].kind == .colon) {
           frame.name = identifier(token);
-          cursor += 2;
+          advance();
+          advance();
         } else {
           parseOperand();
         }
@@ -131,12 +145,12 @@ final class _Parser {
       switch (token.kind) {
         case .leftParen:
           delimiters.add(_Group(token, values.length, operators.length));
-          cursor++;
+          advance();
           return;
         case .minus || .bang || .tilde || .increment || .decrement:
           prefixes.add(operators.length);
           operators.add(token);
-          cursor++;
+          advance();
           return;
         case .integer ||
             .hexadecimalInteger ||
@@ -166,14 +180,14 @@ final class _Parser {
           expectsOperand = false;
           return;
         case .invalid:
-          cursor++;
+          advance();
           return;
         default:
           unexpected(unsupported: isUnsupported(token.kind));
           return;
       }
     }
-    cursor++;
+    advance();
     expectsOperand = false;
   }
 
@@ -181,7 +195,7 @@ final class _Parser {
     StringLiteralExpression literal(Token t) =>
         StringLiteralExpression(source: source, start: t.start, end: t.end);
     final first = literal(current);
-    cursor++;
+    advance();
     if (current.kind != .stringLiteral) {
       values.add(first);
       return;
@@ -189,7 +203,7 @@ final class _Parser {
     final strings = <StringExpression>[first];
     do {
       strings.add(literal(current));
-      cursor++;
+      advance();
     } while (current.kind == .stringLiteral);
     values.add(
       AdjacentStringsExpression(
@@ -204,15 +218,20 @@ final class _Parser {
   void parseContinuation() {
     final token = current;
     switch (token.kind) {
+      case .less:
+        if (tryTypeArguments()) return;
+      case .keywordAs || .keywordIs:
+        parseTypeOperator();
+        return;
       case .dot || .nullAwareAccess:
         checkSelector();
-        cursor++;
+        advance();
         final name = current;
         final valid = name.kind.isIdentifier || name.kind == .keywordNew;
         if (!valid) {
           error('expected_identifier', 'Expected a member name.', name);
         } else {
-          cursor++;
+          advance();
         }
         final target = values.removeLast();
         values.add(
@@ -236,7 +255,7 @@ final class _Parser {
         checkSelector();
         final callee = values.removeLast();
         delimiters.add(_Call(token, values.length, operators.length, callee));
-        cursor++;
+        advance();
         expectsOperand = true;
         return;
       case .leftBracket || .emptyBrackets:
@@ -255,7 +274,7 @@ final class _Parser {
               token,
             );
           }
-          cursor++;
+          advance();
           openIndex(isNullAware: true);
           return;
         }
@@ -269,7 +288,7 @@ final class _Parser {
             operand: operand,
           ),
         );
-        cursor++;
+        advance();
         return;
       case .increment || .decrement:
         final operand = values.removeLast();
@@ -284,7 +303,7 @@ final class _Parser {
             isPrefix: false,
           ),
         );
-        cursor++;
+        advance();
         return;
       default:
         break;
@@ -319,7 +338,7 @@ final class _Parser {
     }
     if (token.kind == .question) questions.add(operators.length);
     operators.add(token);
-    cursor++;
+    advance();
     expectsOperand = true;
   }
 
@@ -333,7 +352,7 @@ final class _Parser {
     while (operators.length - 1 > question) {
       reduce();
     }
-    cursor++;
+    advance();
     expectsOperand = true;
   }
 
@@ -489,8 +508,6 @@ final class _Parser {
   }
 
   bool isUnsupported(TokenKind kind) => switch (kind) {
-    .keywordAs ||
-    .keywordIs ||
     .keywordNew ||
     .keywordConst ||
     .keywordSuper ||
@@ -518,7 +535,7 @@ final class _Parser {
         current,
       );
     }
-    cursor++;
+    advance();
   }
 
   void error(String code, String message, Token token) {

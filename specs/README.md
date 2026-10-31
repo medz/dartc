@@ -9,9 +9,9 @@
 | 扫描 | [词法规则、token 与词法诊断](lexical-structure.md#扫描-api) |
 | AST：编译单元与声明 | [库指令](libraries.md#编译单元与库指令语法表示)、[类及相关声明](classes.md#类与成员语法表示)、[元数据](classes.md#元数据语法表示)、[函数](functions.md#函数语法表示)、[变量](variables.md#变量语法表示) |
 | AST：类型与程序体 | [类型](types.md#类型语法表示)、[表达式](expressions.md#表达式语法表示)、[语句](statements.md#语句语法表示)、[模式](patterns.md#模式语法表示) |
-| 解析 | [表达式解析、诊断与缺口](expressions.md#表达式解析-api) |
+| 解析 | [表达式](expressions.md#表达式解析-api)、[类型](types.md#类型解析-api)的解析、诊断与缺口 |
 
-AST API 接受手工构造的节点，检查源码范围、快照归属和子节点顺序。parser API 已接入部分表达式语法；完整文本解析、名称绑定、类型检查和执行尚未接入这些节点。
+AST API 接受手工构造的节点，检查源码范围、快照归属和子节点顺序。parser API 已接入部分表达式及类型语法；完整文本解析、名称绑定、类型检查和执行尚未接入这些节点。
 
 安装与使用见 [README](../README.md)。
 

@@ -16,4 +16,14 @@ void main() {
   print(sum.op.spelling); // +
   print(sum.left.text); // price * count
   print(sum.right.text); // fee
+
+  final signature = SourceFile(
+    Uri.parse('memory:signature'),
+    'List<int> Function(String input)',
+  );
+  final parsedType = parseTypeAnnotation(scan(signature));
+  if (parsedType.hasErrors) return;
+  final function = parsedType.node as FunctionTypeAnnotation;
+  print(function.returnType!.text); // List<int>
+  print(function.parameters.parameters.single.name!.text); // input
 }
