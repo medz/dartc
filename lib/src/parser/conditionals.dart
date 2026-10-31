@@ -160,12 +160,13 @@ final class _ConditionalReader(final _Parser parent)
     final trials = [initial];
     while (true) {
       _ConditionalResult? result;
-      final stop = parser.run(trial: true);
-      if (stop == .function) {
-        final function = parser.pendingFunction!;
-        parser.pendingFunction = null;
-        yield function;
-        parser.acceptFunction(function);
+      final stop = parser.nullableForInitializer == null
+          ? parser.run(trial: true)
+          : _ExpressionStop.conditional;
+      if (stop == .syntax) {
+        final syntax = parser.pendingSyntax!;
+        parser.pendingSyntax = null;
+        yield syntax;
         continue;
       }
       if (stop == .conditional) {
@@ -366,7 +367,6 @@ extension on TokenKind {
     .keywordWhile ||
     .keywordDo ||
     .keywordFor ||
-    .keywordSwitch ||
     .keywordReturn ||
     .keywordBreak ||
     .keywordContinue ||

@@ -4,8 +4,8 @@ part of 'parser.dart';
 ///
 /// The unit spans the whole source, including comments and whitespace. Imports
 /// remain written URIs; parsing does not load dependencies or bind names.
-/// Unsupported or incomplete members produce diagnostics. Check [ParseResult.hasErrors]
-/// before treating a unit as valid syntax.
+/// Invalid or incomplete members produce diagnostics. Check
+/// [ParseResult.hasErrors] before treating a unit as valid syntax.
 ParseResult<CompilationUnit> parseCompilationUnit(ScanResult input) {
   final parser = _Parser(input);
   final node = _UnitReader(parser).finish();

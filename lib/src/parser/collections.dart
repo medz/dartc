@@ -23,6 +23,7 @@ sealed class _ElementControl(final Token token);
 
 final class _IfElement(super.token) extends _ElementControl {
   late Expression condition;
+  CasePattern? casePattern;
   CollectionElement? thenElement;
 }
 
@@ -60,8 +61,8 @@ extension on _Parser {
       );
     } else {
       error(
-        'unsupported_syntax',
-        'Only a collection literal is supported after this prefix.',
+        'expected_collection_literal',
+        'Expected a collection literal after type arguments.',
         first,
       );
     }
@@ -233,6 +234,7 @@ extension on _Parser {
             start: control.token.start,
             end: element.end,
             condition: control.condition,
+            casePattern: control.casePattern,
             thenElement: control.thenElement ?? element,
             elseElement: control.thenElement == null ? null : element,
           );

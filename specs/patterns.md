@@ -6,7 +6,7 @@ sealed 验证归 [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107
 
 ## 模式语法表示
 
-`package:dartc/ast.dart` 可构造下列模式及其使用位置的语法树。构造器检查源码范围、快照归属和子节点顺序；尚未提供模式解析、绑定、类型推断、合法性检查或匹配执行。
+`package:dartc/ast.dart` 可构造下列模式及其使用位置的语法树。构造器检查源码范围、快照归属和子节点顺序；文本解析范围见下表；绑定、类型推断、常量求值和匹配执行属于后续分析与编译。
 
 | 语言条款 | 可表示的语法 | 验证 |
 | --- | --- | --- |
@@ -17,6 +17,20 @@ sealed 验证归 [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107
 | Guard、if-case element、switch expression | `when` 守卫、集合 if-case、按源码顺序排列的 switch 表达式分支；保留选择值、模式、守卫和结果各自的范围 | [loops_test.dart](../test/ast/loops_test.dart)、[switches_test.dart](../test/ast/switches_test.dart) |
 
 模式构造、范围检查和遍历不证明模式合法或 switch 穷尽；可诊断的错误结构也能保留在树中。语句形式的 if-case、switch、标签和语句体见[语句语法表示](statements.md#语句语法表示)。编译与执行支持以下表为准。
+
+## 模式解析 API
+
+`parsePattern(ScanResult, context: PatternContext.matching)` 解析一个模式，返回 `ParseResult<DartPattern>`。`declaration` 用于外层已有 `var` / `final` 的声明；`assignment` 用于向已有变量赋值。裸名字保留为 `IdentifierPattern`，其绑定含义由使用位置决定。
+
+| 语言条款 | 当前解析支持 | 验证 |
+| --- | --- | --- |
+| 常量、变量与通配模式 | 字面量、限定常量名称、显式 `const`、`const (expression)`、点简写、变量关键字及类型、`_`；检查声明与赋值上下文的变量语法 | [patterns_test.dart](../test/parser/patterns_test.dart) |
+| 组合及一元模式 | `&&` / `||` 优先级、关系模式及表达式操作数、括号、`as`、`?`、`!`；连续一元后缀需要括号 | [patterns_test.dart](../test/parser/patterns_test.dart) |
+| 结构模式 | List、Map、record、对象模式、类型实参、rest、位置及命名字段、省略名称的字段；字段名称推断留待分析 | [patterns_test.dart](../test/parser/patterns_test.dart) |
+| 声明与赋值 | 局部及循环头的 `var` / `final` 模式声明、声明元数据、模式 for-in 绑定、解构赋值；保留初始化式和右值 | [patterns_test.dart](../test/parser/patterns_test.dart) |
+| if-case 与 switch | 语句及集合 if-case、`when` 守卫、switch 表达式及语句、标签、default、连续空分支与各分支语句 | [patterns_test.dart](../test/parser/patterns_test.dart) |
+
+缺少模式时使用零宽 `MissingPattern` 恢复。解析保留选择值、模式、守卫和结果各自的源码范围，不进行名称绑定、匹配类型检查、常量求值或穷尽性分析。深层嵌套与损坏输入的恢复验证见同一测试文件。
 
 ## 编译与执行
 

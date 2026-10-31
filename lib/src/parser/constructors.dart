@@ -222,7 +222,7 @@ final class _InitializersReader(final _Parser parser)
             end: parser.current.start,
           );
           parser.expect(.assign);
-          final reader = _ExpressionReader(parser);
+          final reader = _ExpressionReader(parser, boundary: .initializer);
           if (!reader.start()) yield reader;
           result.add(
             FieldInitializer(

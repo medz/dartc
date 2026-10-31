@@ -121,16 +121,6 @@ final class _VariableReader(
         parser.current,
       );
     }
-    if (parser.current.kind == .leftParen ||
-        parser.current.kind == .leftBracket ||
-        parser.current.kind == .leftBrace ||
-        parser.current.kind == .emptyBrackets) {
-      parser.error(
-        'unsupported_syntax',
-        'Pattern declarations are not yet supported.',
-        parser.current,
-      );
-    }
     if (allowConditional &&
         !forLoop &&
         !isLate &&

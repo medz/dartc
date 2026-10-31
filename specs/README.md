@@ -10,9 +10,9 @@
 | 文本解析：编译单元与声明 | [文件与指令](libraries.md#编译单元解析-api)、[类及成员](classes.md#类与成员解析)、[顶层声明](functions.md#顶层声明解析) |
 | AST：编译单元与声明 | [库指令](libraries.md#编译单元与库指令语法表示)、[类及相关声明](classes.md#类与成员语法表示)、[元数据](classes.md#元数据语法表示)、[函数](functions.md#函数语法表示)、[变量](variables.md#变量语法表示) |
 | AST：类型与程序体 | [类型](types.md#类型语法表示)、[表达式](expressions.md#表达式语法表示)、[语句](statements.md#语句语法表示)、[模式](patterns.md#模式语法表示) |
-| 解析 | [表达式](expressions.md#表达式解析-api)、[类型](types.md#类型解析-api)、[语句](statements.md#语句解析-api)、[形参](functions.md#形参解析-api)、[函数体](functions.md#函数体解析-api)的解析、诊断与缺口 |
+| 解析 | [表达式](expressions.md#表达式解析-api)、[类型](types.md#类型解析-api)、[语句](statements.md#语句解析-api)、[形参](functions.md#形参解析-api)、[函数体](functions.md#函数体解析-api)、[模式](patterns.md#模式解析-api)的解析、诊断与边界 |
 
-AST API 接受手工构造的节点，检查源码范围、快照归属和子节点顺序。parser API 已接入编译单元、声明、类型、形参、函数体及部分表达式和语句；模式、switch 等文本解析仍有缺口。名称绑定、类型检查和执行尚未接入这些节点。
+AST API 接受手工构造的节点，检查源码范围、快照归属和子节点顺序。parser API 已接入编译单元、声明、类型、形参、函数体、表达式和语句；模式、if-case 和 switch 均已接入文本解析。名称绑定、类型检查和执行尚未接入这些节点。
 
 安装与使用见 [README](../README.md)。
 

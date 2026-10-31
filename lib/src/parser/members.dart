@@ -101,7 +101,7 @@ final class _MemberReader(
         parser.current.kind == .keywordAbstract ||
         parser.current.kind == .keywordCovariant) {
       final token = parser.current;
-      if (parser.tokens[parser.cursor + 1].kind == .leftParen) break;
+      if (parser.functionBodyAfterName(allowEmpty: true)) break;
       if (!modifiers.add(token.kind)) {
         parser.error('duplicate_modifier', 'Repeated member modifier.', token);
       }

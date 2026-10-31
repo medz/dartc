@@ -10,10 +10,10 @@
 - Add `parseStatement` for blocks, local variable declarations, branches, loops, labels, jumps, assertions and try/catch/finally. Parse `throw` expressions and retain written conditions, optional initializers and catch parameters.
 - Add `parseFormalParameterList` for positional and named parameters, written defaults, metadata, receiver prefixes and nested function-form parameters with generic bounds.
 - Add `parseFunctionBody` for block, arrow and empty declaration bodies, including asynchronous and generator modifiers. Parse `await`, `yield`, `yield*` and `await for` in their function context and report invalid modifier combinations.
-
 - Parse anonymous functions and local function declarations with generic parameters, annotations, defaults and nested asynchronous or generator bodies.
-
 - Add `parseCompilationUnit` for library directives, top-level declarations, classes, mixins, enums, extensions, extension types and their members. Preserve primary and abbreviated constructors, initializer lists, factory redirections and type metadata.
+
+- Add `parsePattern` with matching, declaration and assignment contexts. Parse structural and logical patterns, guards, if-case, switch expressions and statements, destructuring assignments and pattern loop headers. Preserve metadata on local and loop declarations.
 
 ### Performance
 

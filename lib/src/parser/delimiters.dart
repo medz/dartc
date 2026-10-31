@@ -221,13 +221,6 @@ extension on _Parser {
           isNullAware: frame.isNullAware,
         );
       case _Sequence():
-        if (frame is _Group && matched && followsFunctionParameters()) {
-          error(
-            'unsupported_syntax',
-            'Function expression parsing is not yet supported.',
-            frame.opening,
-          );
-        }
         if (values.length > frame.valueBase ||
             operators.length > frame.operatorBase ||
             frame.name != null) {
@@ -344,16 +337,5 @@ extension on _Parser {
     }
     expectsOperand = false;
     if (matched) advance();
-  }
-
-  bool followsFunctionParameters() {
-    final next = tokens[cursor + 1].kind;
-    return next == .leftBrace ||
-        next == .arrow ||
-        next == .keywordAsync ||
-        next == .keywordSync ||
-        (next.isKeyword || next.isIdentifier) &&
-            (tokens[cursor + 2].kind == .leftBrace ||
-                tokens[cursor + 2].kind == .arrow);
   }
 }

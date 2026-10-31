@@ -17,6 +17,23 @@ void main() {
   print(declaration.name.text); // add
   print(declaration.parameters.parameters.length); // 2
 
+  final pattern = parsePattern(
+    scan(SourceFile(Uri.parse('memory:pattern'), '[var head, ...var tail]')),
+  );
+  if (pattern.hasErrors) return;
+  print((pattern.node as ListPattern).elements.length); // 2
+
+  final match = parseExpression(
+    scan(
+      SourceFile(
+        Uri.parse('memory:match'),
+        'switch (value) { int x when x > 0 => x, _ => 0 }',
+      ),
+    ),
+  );
+  if (match.hasErrors) return;
+  print((match.node as SwitchExpression).cases.length); // 2
+
   final source = SourceFile(Uri.parse('memory:example'), 'price * count + fee');
   final result = parseExpression(scan(source));
   if (result.hasErrors) {

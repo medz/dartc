@@ -22,6 +22,7 @@ sealed class _ForHeader(
 ) extends _Delimiter {
   _ForPhase phase = .initializer;
   _VariableDeclarations? declarations;
+  List<Annotation> metadata = const [];
   ForInitializer? initializer;
   Expression? condition;
   ForInTarget? target;
@@ -84,6 +85,14 @@ extension on _Parser {
   }
 
   void initializeForHeader(_ForHeader frame) {
+    if (current.kind == .at || isPatternDeclaration) {
+      pendingSyntax = _ForDeclarationReader(this, frame);
+      return;
+    }
+    initializeForVariables(frame);
+  }
+
+  void initializeForVariables(_ForHeader frame) {
     final start = cursor;
     final reader = _VariableReader(this, forLoop: true);
     final complete = reader.start();
@@ -143,7 +152,8 @@ extension on _Parser {
       finishVariable(frame);
       frame.initializer = VariableDeclarationList(
         source: source,
-        start: declarations.start,
+        start: frame.metadata.firstOrNull?.start ?? declarations.start,
+        metadata: frame.metadata,
         end: declarations.variables.last.end,
         keyword: declarations.keyword,
         isLate: declarations.isLate,
@@ -181,7 +191,8 @@ extension on _Parser {
         }
         frame.target = DeclaredIdentifier(
           source: source,
-          start: declarations.start,
+          start: frame.metadata.firstOrNull?.start ?? declarations.start,
+          metadata: frame.metadata,
           end: declarations.name.end,
           keyword: declarations.keyword,
           type: declarations.type,

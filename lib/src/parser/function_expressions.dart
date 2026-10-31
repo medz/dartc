@@ -135,7 +135,11 @@ extension on _Parser {
         return false;
       }
     }
-    pendingFunction = _ClosureReader(child, start, typeParameters);
+    pendingSyntax = _OperandReader(
+      this,
+      child,
+      _ClosureReader(child, start, typeParameters),
+    );
     return true;
   }
 

@@ -44,7 +44,12 @@ final class _ExpressionReader(
   }
 }
 
-final class _ConditionReader(final _Parser parser) extends _Reader<Expression> {
+final class _ConditionReader(
+  final _Parser parser, {
+  final bool allowCase = false,
+}) extends _Reader<Expression> {
+  CasePattern? casePattern;
+
   @override
   Iterable<_Reader<Object?>> read() sync* {
     parser.expect(.leftParen);
@@ -52,13 +57,17 @@ final class _ConditionReader(final _Parser parser) extends _Reader<Expression> {
     if (!reader.start()) yield reader;
     result = reader.result;
     if (parser.current.kind == .keywordCase) {
-      parser.error(
-        'unsupported_syntax',
-        'Case pattern parsing is not yet supported.',
-        parser.current,
-      );
+      if (!allowCase) {
+        parser.error(
+          'unexpected_case',
+          'This condition cannot contain a case pattern.',
+          parser.current,
+        );
+      }
       parser.advance();
-      yield _ExpressionReader(parser);
+      final pattern = _CasePatternReader(parser, condition: true);
+      yield pattern;
+      casePattern = pattern.result;
     }
     parser.expect(.rightParen);
   }
@@ -117,17 +126,18 @@ extension on _Parser {
     _ExpressionStop? stop,
   }) sync* {
     while (true) {
-      stop ??= nullableForInitializer == null
+      stop ??= pendingSyntax != null
+          ? _ExpressionStop.syntax
+          : nullableForInitializer == null
           ? run(trial: false, boundary: boundary)
           : _ExpressionStop.conditional;
       switch (stop) {
         case .complete:
           return;
-        case .function:
-          final function = pendingFunction!;
-          pendingFunction = null;
-          yield function;
-          acceptFunction(function);
+        case .syntax:
+          final syntax = pendingSyntax!;
+          pendingSyntax = null;
+          yield syntax;
         case .conditional:
           var branches = lookahead.conditionals[cursor];
           if (branches == null) {
@@ -141,15 +151,23 @@ extension on _Parser {
     }
   }
 
-  void acceptFunction(_ClosureReader function) {
-    adopt(function.parser);
-    values.add(function.result);
-    expectsOperand = false;
-  }
-
   void adopt(_Parser child) {
     cursor = child.cursor;
     current = child.current;
     diagnostics.addAll(child.diagnostics);
+  }
+}
+
+final class _OperandReader(
+  final _Parser parent,
+  final _Parser child,
+  final _Reader<Expression> expression,
+) extends _Reader<void> {
+  @override
+  Iterable<_Reader<Object?>> read() sync* {
+    yield expression;
+    parent.adopt(child);
+    parent.values.add(expression.result);
+    parent.expectsOperand = false;
   }
 }

@@ -248,8 +248,6 @@ void main() {
       'var x =;',
       'const .;',
       'assert(a, b, c);',
-      'switch(x) {}',
-      'var (a,b) = value;',
     ]) {
       expect(parse(text).hasErrors, isTrue, reason: text);
     }

@@ -5,9 +5,9 @@ part of 'parser.dart';
 /// Blocks, local variables, loops, branches, labels, jumps, assertions and
 /// try/catch/finally retain their written order. Expressions use the same
 /// synchronous context as [parseExpression]. Local functions retain their own
-/// body context. Patterns and switch statements are not yet parsed. Binding,
-/// types and jump targets are
-/// not checked. Recovery may return only part of invalid input.
+/// body context. Case patterns, guards, switches and destructuring preserve
+/// their written structure. Binding, types and jump targets are not checked.
+/// Recovery may return only part of invalid input.
 ParseResult<Statement> parseStatement(ScanResult input) {
   final parser = _Parser(input);
   final node = _StatementReader(parser).finish();
@@ -23,8 +23,11 @@ final class _Block(super.opening) extends _StatementFrame {
   final List<Statement> statements = [];
 }
 
-final class _IfStatement(super.opening, final Expression condition)
-    extends _StatementFrame {
+final class _IfStatement(
+  super.opening,
+  final Expression condition,
+  final CasePattern? casePattern,
+) extends _StatementFrame {
   Statement? thenStatement;
 }
 
@@ -56,7 +59,10 @@ final class _TryStatement(super.opening) extends _StatementFrame {
   bool isFinally = false;
 }
 
-final class _StatementReader(final _Parser parser) extends _Reader<Statement> {
+final class _StatementReader(
+  final _Parser parser, {
+  final bool requireBlock = false,
+}) extends _Reader<Statement> {
   final List<_StatementFrame> frames = [];
   Statement? value;
 
@@ -121,7 +127,10 @@ final class _StatementReader(final _Parser parser) extends _Reader<Statement> {
           continue;
         }
         switch (token.kind) {
-          case .leftBrace:
+          case .leftBrace
+              when frame is _TryStatement ||
+                  requireBlock && frames.isEmpty ||
+                  !parser.startsPatternAssignment:
             parser.advance();
             frames.add(_Block(token));
             value = null;
@@ -136,9 +145,9 @@ final class _StatementReader(final _Parser parser) extends _Reader<Statement> {
             continue;
           case .keywordIf:
             parser.advance();
-            final reader = _ConditionReader(parser);
+            final reader = _ConditionReader(parser, allowCase: true);
             yield reader;
-            frames.add(_IfStatement(token, reader.result));
+            frames.add(_IfStatement(token, reader.result, reader.casePattern));
             value = null;
             continue;
           case .keywordWhile:
@@ -266,26 +275,61 @@ final class _StatementReader(final _Parser parser) extends _Reader<Statement> {
               expression: expression,
             );
             continue;
-          case .keywordSwitch || .at:
-            if (token.kind == .at) {
-              final function = parser.localFunction();
-              if (function != null) {
-                yield function;
-                if (function.result != null) {
-                  value = function.result;
-                  continue;
-                }
+          case .keywordSwitch:
+            final reader = _SwitchStatementReader(parser);
+            yield reader;
+            value = reader.result;
+            continue;
+          case .at:
+            final function = parser.localFunction();
+            if (function != null) {
+              yield function;
+              if (function.result != null) {
+                value = function.result;
+                continue;
               }
             }
-            parser.error(
-              'unsupported_syntax',
-              'This statement syntax is not yet supported.',
-              token,
-            );
-            parser.advance();
-            value = MissingStatement(source: source, offset: token.start);
+            final metadata = _MetadataReader(parser);
+            yield metadata;
+            if (parser.isPatternDeclaration) {
+              final reader = _PatternDeclarationReader(
+                parser,
+                metadata: metadata.result,
+              );
+              yield reader;
+              value = PatternVariableDeclarationStatement(
+                source: source,
+                start: token.start,
+                end: parser.expect(.semicolon),
+                declaration: reader.result,
+              );
+            } else {
+              final reader = _VariableReader(parser);
+              if (!reader.start()) yield reader;
+              if (reader.result case final declarations?) {
+                yield* variables(declarations, metadata: metadata.result);
+              } else {
+                parser.error(
+                  'expected_declaration',
+                  'Expected a declaration after metadata.',
+                  current,
+                );
+                value = MissingStatement(source: source, offset: current.start);
+              }
+            }
             continue;
           default:
+            if (parser.isPatternDeclaration) {
+              final reader = _PatternDeclarationReader(parser);
+              yield reader;
+              value = PatternVariableDeclarationStatement(
+                source: source,
+                start: token.start,
+                end: parser.expect(.semicolon),
+                declaration: reader.result,
+              );
+              continue;
+            }
             _VariableDeclarations? declarations;
             if (token.kind != .keywordAwait ||
                 parser.functionModifier == null) {
@@ -350,6 +394,7 @@ final class _StatementReader(final _Parser parser) extends _Reader<Statement> {
                 start: frame.opening.start,
                 end: statement.end,
                 condition: frame.condition,
+                casePattern: frame.casePattern,
                 thenStatement: statement,
               );
             } else {
@@ -358,6 +403,7 @@ final class _StatementReader(final _Parser parser) extends _Reader<Statement> {
                 start: frame.opening.start,
                 end: statement.end,
                 condition: frame.condition,
+                casePattern: frame.casePattern,
                 thenStatement: frame.thenStatement!,
                 elseStatement: statement,
               );
@@ -489,9 +535,10 @@ final class _StatementReader(final _Parser parser) extends _Reader<Statement> {
   }
 
   Iterable<_Reader<Object?>> variables(
-    _VariableDeclarations declarations,
-  ) sync* {
-    final reader = _VariablesReader(parser, declarations);
+    _VariableDeclarations declarations, {
+    List<Annotation> metadata = const [],
+  }) sync* {
+    final reader = _VariablesReader(parser, declarations, metadata: metadata);
     yield reader;
     final variables = reader.result;
     value = VariableDeclarationStatement(

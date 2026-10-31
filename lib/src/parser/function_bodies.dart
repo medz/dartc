@@ -8,8 +8,8 @@ part of 'parser.dart';
 ///
 /// The enclosing declaration is unknown: whether it permits an empty body is
 /// not checked. Name binding, return types and yielded types need analysis.
-/// Unsupported statement and expression forms produce diagnostics. A missing
-/// body produces a zero-width [MissingFunctionBody].
+/// Invalid syntax produces diagnostics. A missing body produces a zero-width
+/// [MissingFunctionBody].
 ParseResult<FunctionBody> parseFunctionBody(ScanResult input) {
   final parser = _Parser(input);
   final body = _BodyReader(parser).finish();
@@ -91,7 +91,7 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
           );
           return;
         case .leftBrace:
-          final reader = _StatementReader(parser);
+          final reader = _StatementReader(parser, requireBlock: true);
           yield reader;
           final block = reader.result as BlockStatement;
           final modifier = parser.functionModifier;

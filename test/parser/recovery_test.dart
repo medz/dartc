@@ -77,18 +77,10 @@ void main() {
     expect(parse('(a < b) == (c > d)').hasErrors, isFalse);
   });
 
-  test(
-    'diagnoses grammar that is not implemented instead of accepting a prefix',
-    () {
-      for (final text in ['(a) = b', 'switch (a) { _ => b }']) {
-        expect(parse(text).hasErrors, isTrue, reason: text);
-      }
-      expect(
-        parse('(a) = b').diagnostics.single.code,
-        'parser.unsupported_syntax',
-      );
-    },
-  );
+  test('parses parenthesized assignment patterns and switch expressions', () {
+    expect(parsed('(a) = b'), isA<PatternAssignmentExpression>());
+    expect(parsed('switch (a) { _ => b }'), isA<SwitchExpression>());
+  });
 
   test('retains lexical diagnostics and immutable error snapshots', () {
     final input = scan(SourceFile(Uri.parse('memory:error'), 'a + `'));

@@ -23,7 +23,8 @@ final class _DeclarationName(final _Parser parser) {
     if (member &&
         parser.current.kind == .keywordOperator &&
         parser.tokens[parser.cursor + 1].kind != .leftParen &&
-        parser.tokens[parser.cursor + 1].kind != .less) {
+        (parser.tokens[parser.cursor + 1].kind != .less ||
+            parser.tokens[parser.cursor + 2].kind == .leftParen)) {
       accessor = .keywordOperator;
       parser.advance();
       final token = parser.current;

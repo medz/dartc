@@ -217,7 +217,7 @@ void main() {
     expect(walk(invalid.node).whereType<IndexExpression>().length, length - 1);
   });
 
-  test('diagnoses invalid elements, headers, and remaining grammar gaps', () {
+  test('diagnoses invalid elements and headers', () {
     for (final text in [
       '[,]',
       '[a,,b]',
@@ -239,13 +239,9 @@ void main() {
       '[for (late var x in xs) x]',
       '[for (late final int i=0;;) i]',
       '[await for (x in xs) x]',
-      '[if (a case var b) b]',
-      '[for (var (a,b) in xs) a]',
       '[?.]',
       '{a: ?.}',
-      '[]=a',
       'a[]=b',
-      '[if (a) (b) else {}]',
     ]) {
       expect(parse(text).hasErrors, isTrue, reason: text);
     }

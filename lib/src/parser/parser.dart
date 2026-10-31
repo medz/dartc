@@ -32,6 +32,10 @@ part 'declarations.dart';
 part 'type_declarations.dart';
 part 'members.dart';
 part 'constructors.dart';
+part 'patterns.dart';
+part 'pattern_collections.dart';
+part 'pattern_declarations.dart';
+part 'switches.dart';
 
 /// The syntax and diagnostics produced by parsing a source snapshot.
 ///
@@ -60,10 +64,9 @@ final class ParseResult<T extends AstNode> {
 /// records, operators, generic calls, explicit constructor calls, type tests and
 /// casts, throw expressions, super receivers, member access, indexing, cascades,
 /// dot shorthands, function expressions with their own body context,
-/// and collection literals with spreads, null-aware elements, if/else, and
-/// ordinary for/for-in headers.
-/// Other forms produce diagnostics until their grammar is implemented. Parsing
-/// does not resolve names or check types.
+/// switch expressions, pattern assignments and collection literals with spreads,
+/// null-aware elements, if/else, if-case and for/for-in headers.
+/// Parsing does not resolve names or check types.
 ///
 /// Recovery preserves the input tokens and uses zero-width [MissingExpression]
 /// nodes for omitted operands. With errors, the returned node may cover only
@@ -73,9 +76,16 @@ ParseResult<Expression> parseExpression(ScanResult input) =>
 
 sealed class _Frame(final int valueBase, final int operatorBase);
 
-enum _ParseBoundary { input, expression, header }
+enum _ParseBoundary {
+  input,
+  expression,
+  header,
+  patternConstant,
+  patternRelation,
+  initializer,
+}
 
-enum _ExpressionStop { complete, conditional, function }
+enum _ExpressionStop { complete, conditional, syntax }
 
 final class _Parser {
   _Parser(ScanResult input)
@@ -132,7 +142,7 @@ final class _Parser {
   Expression? postfixTarget;
   _NullableForInitializer? nullableForInitializer;
   FunctionBodyModifier? functionModifier;
-  _ClosureReader? pendingFunction;
+  _Reader<void>? pendingSyntax;
 
   bool get inAsync =>
       functionModifier == .asyncKeyword || functionModifier == .asyncStar;
@@ -161,7 +171,7 @@ final class _Parser {
       final frame = frames.isEmpty ? null : frames.last;
       if (!trial && frame == null) {
         if (boundary == .header) return .complete;
-        if (boundary == .expression &&
+        if (boundary != .input &&
             (token.kind.endsExpression ||
                 token.kind == .colon && questions.isEmpty ||
                 !expectsOperand &&
@@ -171,6 +181,29 @@ final class _Parser {
                     !token.kind.continuesExpression)) {
           return .complete;
         }
+      }
+      if (frame == null &&
+          !expectsOperand &&
+          (boundary == .patternConstant || boundary == .patternRelation)) {
+        if (token.kind == .keywordAs ||
+            token.kind == .keywordIs ||
+            token.kind == .bang ||
+            token.kind == .cascade ||
+            token.kind == .nullAwareCascade ||
+            token.kind.precedence != 0 &&
+                token.kind.precedence <
+                    (boundary == .patternRelation ? 8 : 14)) {
+          return .complete;
+        }
+      }
+      if (frame is _IfHeader && token.kind == .keywordCase) {
+        frame.element.condition = finishExpression(
+          frame.valueBase,
+          frame.operatorBase,
+        );
+        advance();
+        pendingSyntax = _CollectionCaseReader(this, frame);
+        return .syntax;
       }
       if (frame is _Shorthand && endShorthandAtBoundary(frame)) continue;
       if (frame is _Cascade && endCascadeAtBoundary(frame)) continue;
@@ -228,6 +261,7 @@ final class _Parser {
         }
         if (expectsOperand && parseElementPrefix(frame)) {
           if (nullableForInitializer != null) return .conditional;
+          if (pendingSyntax != null) return .syntax;
           continue;
         }
       }
@@ -242,8 +276,12 @@ final class _Parser {
           advance();
           advance();
         } else {
-          parseOperand();
-          if (pendingFunction != null) return .function;
+          parseOperand(
+            allowFunction:
+                (boundary != .patternConstant && boundary != .initializer) ||
+                frames.isNotEmpty,
+          );
+          if (pendingSyntax != null) return .syntax;
         }
       } else {
         if (parseContinuation()) return .conditional;
@@ -252,8 +290,9 @@ final class _Parser {
     return .complete;
   }
 
-  void parseOperand() {
+  void parseOperand({bool allowFunction = true}) {
     final token = current;
+    if (parsePatternAssignment()) return;
     if (token.kind == .keywordAwait && functionModifier != null) {
       if (!inAsync) {
         error(
@@ -319,6 +358,14 @@ final class _Parser {
         case .keywordNew:
           parseConstruction();
           return;
+        case .keywordSwitch:
+          final child = _Parser.nested(this);
+          pendingSyntax = _OperandReader(
+            this,
+            child,
+            _SwitchExpressionReader(child),
+          );
+          return;
         case .keywordThrow:
           openThrow();
           return;
@@ -326,14 +373,14 @@ final class _Parser {
           openShorthand();
           return;
         case .less:
-          if (parseFunctionExpression()) return;
+          if (allowFunction && parseFunctionExpression()) return;
           parseCollectionPrefix();
           return;
         case .hash:
           parseSymbol();
           return;
         case .leftParen:
-          if (parseFunctionExpression()) return;
+          if (allowFunction && parseFunctionExpression()) return;
           frames.add(_Group(token, values.length, operators.length));
           advance();
           return;
@@ -376,7 +423,7 @@ final class _Parser {
           advance();
           return;
         default:
-          unexpected(unsupported: isUnsupported(token.kind));
+          unexpected();
           return;
       }
     }
@@ -652,7 +699,7 @@ final class _Parser {
     }
     final precedence = token.kind.precedence;
     if (precedence == 0) {
-      unexpected(unsupported: isUnsupported(token.kind));
+      unexpected();
       return false;
     }
     reduceBefore(token);
@@ -792,19 +839,7 @@ final class _Parser {
     final left = values.removeLast();
     checkValue(right);
     if (token.kind.precedence == _assignmentPrecedence) {
-      if (token.kind == .assign &&
-          (left is ParenthesizedExpression ||
-              left is RecordExpression ||
-              left is CollectionExpression)) {
-        error(
-          'unsupported_syntax',
-          'Pattern assignment parsing is not yet supported.',
-          token,
-          preventsConditional: false,
-        );
-      } else {
-        checkAssignable(left, token);
-      }
+      checkAssignable(left, token);
       values.add(
         AssignmentExpression(
           source: source,
@@ -909,24 +944,9 @@ final class _Parser {
     }
   }
 
-  bool isUnsupported(TokenKind kind) => switch (kind) {
-    .keywordSwitch ||
-    .leftBracket ||
-    .emptyBrackets ||
-    .leftBrace ||
-    .arrow => true,
-    _ => false,
-  };
-
-  void unexpected({bool unsupported = false}) {
+  void unexpected() {
     if (current.kind != .invalid) {
-      error(
-        unsupported ? 'unsupported_syntax' : 'unexpected_token',
-        unsupported
-            ? 'This syntax is not yet supported by the expression parser.'
-            : 'Unexpected token in expression.',
-        current,
-      );
+      error('unexpected_token', 'Unexpected token in expression.', current);
     }
     advance();
   }
