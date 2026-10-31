@@ -7,10 +7,10 @@
 | 特性 | 语法解析 | 语义分析 API | 编译/运行 | 使用限制 |
 | --- | --- | --- | --- | --- |
 | 顶层函数、同步块体与箭头体 | ✅ | ❌ | 🟡 | 支持直接调用、递归和跨库绑定。 |
-| 必需/可选位置、命名、required 参数 | ✅ | ❌ | 🟡 | 默认值限当前常量子集；按源码顺序求值实参。 |
-| 字段、super、私有命名形参 | ✅ | ❌ | 🟡 | 构造器类别、声明版本及泛型父类有限制。 |
-| `covariant` 参数 | 🟡 | ❌ | 🟡 | 语义位置限实例方法、setter、运算符；字段声明参数另有规则。 |
-| 顶层 getter/setter | ✅ | ❌ | 🟡 | 读写类型独立从 3.9 起；完整命名空间组合仍缺。 |
+| 必需/可选位置、命名、required 参数 | ✅ | ❌ | 🟡 | 命名实参后的位置实参要求 2.17；默认值限当前常量子集。 |
+| 字段、super、私有命名形参 | ✅ | ❌ | 🟡 | parser 的 super 形参要求 2.17；字段绑定、公共名及构造器类别仍需语义检查。 |
+| `covariant` 参数 | 🟡 | ❌ | 🟡 | parser 仅检查部分声明位置；CLI 限实例方法、setter、运算符，字段声明参数另有规则。 |
+| 顶层 getter/setter | ✅ | ❌ | 🟡 | parser 检查 setter 恰有一个必需位置参数；CLI 读写类型独立从 3.9 起。 |
 | 同步非泛型局部/匿名函数 | ✅ | ❌ | 🟡 | 支持捕获、自递归、上下文及返回推断。 |
 | 泛型顶层函数、方法的直接调用 | ✅ | ❌ | 🟡 | 泛型类的泛型实例方法、完整界限推断仍缺。 |
 | 泛型局部/匿名函数 | ✅ | ❌ | ❌ | 非泛型闭包捕获外层类型参数不等于自身可泛型化。 |
@@ -29,11 +29,15 @@
 
 所有入口保留写出的类型、元数据、默认表达式、参数分组和函数体，不补入省略类型或默认值，不绑定捕获或检查返回类型。`int Function(int value)` 在形参列表中是名为 Function 的函数形式形参；`int Function(int value) callback` 才是具有函数类型的普通形参。
 
-独立形参入口可保留 `var`/`final`、旧式默认分隔符 `:`、`this.`/`super.` 和 covariant，不能由此判断它们在外围声明是否合法。局部及匿名函数解析拒绝参数上的 var/final/const；CLI 的旧文件兼容规则与之分开。
+各入口均可传入显式[语言版本](lexical-structure.md#解析语言版本)，默认 3.13；例如 super 形参要求 2.17，明确的 `f<T>` 实例化/tear-off 语法要求 2.15。
+
+独立形参入口可保留 `var`/`final`、旧式命名默认分隔符 `:`、`this.`/`super.` 和 covariant，不能由此判断它们在外围声明是否合法。解析函数和普通构造器声明时拒绝参数上的 var/final/const；主构造器仍可用 var/final 声明字段。CLI 的旧文件形参兼容规则与之分开，不能因选了旧版本就假定新 parser 接受这些旧修饰符。
+
+声明上下文会限制直接形参的 covariant：顶层函数/setter、具名局部函数、静态成员和普通 extension/extension type 成员在该位置会诊断；实例方法/setter 可解析。检查并不覆盖所有语义位置，匿名 `(covariant int x) {}`、普通构造器的 covariant 形参仍可解析。`void f(this.x) {}` 也仍可解析，不表示顶层函数可以绑定字段形参。重复参数、字段绑定、类型和默认值常量资格均未检查。解析 setter 声明时检查恰有一个必需位置参数，不检查返回类型；单独的形参入口不知道它是否用于 setter。
 
 异步体解析 await、语句/集合 await for；生成器体解析 yield/yield*，拒绝带值 return 和生成器箭头体。嵌套函数独立设置 async/generator 上下文，参数元数据与默认值沿用外层上下文。同步体中 await/yield 可作标识符；同步语句直接以 `await:` 起始当前会诊断，已有标签后的该形式可解析。模式与 switch 已接入函数体解析，但不绑定跳转目标或进行穷尽性分析。
 
-顶层非 external 函数缺实现、external 函数含实现有语法诊断。import/export/library/part/typedef/extension/mixin/external 在相应上下文仍可作函数名；关键字拼写不单独决定它是指令还是声明。
+单独的 `parseFunctionBody` 不判断外围声明能否省略实现；解析完整声明时，顶层非 external 函数缺实现、external 函数含实现有语法诊断。import/export/library/part/typedef/extension/mixin/external 在相应上下文仍可作函数名；关键字拼写不单独决定它是指令还是声明。
 
 ## 参数、默认值与返回
 
@@ -66,7 +70,7 @@ return 和箭头结果按声明类型检查/转换。可空、dynamic、void 同
 
 调用按静态签名检查，实际方法体前检查实现参数类型；失败抛 TypeError。方法值的运行时签名把协变参数放宽为 Object?，调用仍检查实际类型；super.method 用父实现签名。由类参数产生的检查不是显式 covariant，不自动授权收窄覆写。
 
-普通 covariant 形参限上述实例位置，主构造器字段声明参数另按 3.13 规则。SDK 3.13.7 CFE 还接受局部/匿名函数、普通/工厂构造、字段形参和 typedef 中的 covariant，dartc 按固定规范与 analyzer 拒绝这些位置。
+CLI 的普通 covariant 形参限上述实例位置，主构造器字段声明参数另按 3.13 规则。SDK 3.13.7 CFE 还接受局部/匿名函数、普通/工厂构造、字段形参和 typedef 中的 covariant，CLI 按固定规范与 analyzer 拒绝这些位置；新 parser 的部分位置检查不等于这些语义规则均已实现。
 
 顶层 getter/setter 可配对或单独存在。3.9 起读结果与写参数类型独立；此前 getter 结果须是 setter 参数子类型，版本取声明库。未注解为 dynamic；setter 结果须省略或别名展开后为 void，且恰有一个必需位置参数。未使用声明也检查这些规则。
 

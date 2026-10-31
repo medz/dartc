@@ -6,7 +6,7 @@
 
 | 特性 | 语法解析 | 语义分析 API | 编译/运行 | 使用限制 |
 | --- | --- | --- | --- | --- |
-| 编译单元、具名/无名 library、脚本标记 | ✅ | ❌ | 🟡 | CLI 的 library; 要求至少 2.19；顶层声明并非全部可编译。 |
+| 编译单元、具名/无名 library、脚本标记 | ✅ | ❌ | 🟡 | parser 与 CLI 的 library; 均要求至少 2.19；顶层声明并非全部可编译。 |
 | import、as 前缀、显式/隐式 core | ✅ | ❌ | 🟡 | 仅受支持 SDK 子集，非完整 dart:core。 |
 | 条件 import/export | ✅ | ❌ | 🟡 | 环境来自目标，不继承编译宿主；仅装入选中分支。 |
 | export、再导出、show/hide | ✅ | ❌ | 🟡 | 保留来源身份；扩展命名空间仍缺。 |
@@ -32,6 +32,8 @@ part 'implementation.dart';
 ```
 
 parser 支持元数据、无名 library、条件 URI、deferred/as、顺序 show/hide、part 和 URI/点分名 part of，检查部分指令顺序。URI 可用 raw、多行、相邻字符串，但拒绝插值。它**不解码或解析 URI、不装入依赖、不选择条件、不检查命名空间或 part 实际归属**。模式和 switch 已可在文件内解析。
+
+可用 `languageVersion` 显式指定[解析语言版本](lexical-structure.md#解析语言版本)；文件内的声明、表达式、语句和模式均沿用该选项。parser 不读取 pubspec 或包配置，不解释 `// @dart`；以下包与文件版本的自动选择是 CLI 的独立能力。
 
 ## 导入、导出与命名空间
 

@@ -5,6 +5,44 @@ import 'package:dartc/source.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'type metadata yields through every nested expression and declaration',
+    () {
+      const depth = 2500;
+      for (final (opening, closing) in [
+        ('void Function(@A(const B<', '>()) int value)'),
+        ('void Function(@A(f<', '>()) int value)'),
+        ('void Function(@A(null as ', ') int value)'),
+        ('void Function(@A((', ' value) => 0) int outer)'),
+        ('void Function(@A(<', '>[]) int value)'),
+        ('void Function(@A(const .named<', '>()) int value)'),
+        ('void Function(@A(<T extends ', '>(T x) => x) int value)'),
+        ('void Function(@A(() { ', ' x; }) int value)'),
+        ('void Function(@A(() { @tag ', ' x; }) int value)'),
+        ('void Function(@A(() { ', ' f() => null; }) int value)'),
+        ('void Function(@A(() { try {} on ', ' {} }) int value)'),
+        ('void Function(@A(switch (x) { _ as ', ' => 0 }) int value)'),
+        ('void Function(@A(switch (x) { C<', '>() => 0 }) int value)'),
+        ('void Function(@A(switch (x) { ', ' y => 0 }) int value)'),
+        ('void Function(@A(switch (x) { <', '>[_] => 0 }) int value)'),
+        ('void Function(@A(() { for (', ' x in xs) {} }) int value)'),
+      ]) {
+        final text = '${opening * depth}int${closing * depth}';
+        final source = SourceFile(Uri.parse('memory:metadata'), text);
+        final input = scan(source);
+        final tokens = [...input.tokens];
+        final result = parseTypeAnnotation(input);
+        expect(result.diagnostics, isEmpty, reason: opening);
+        expect(result.node.text, text);
+        expect(
+          walk(result.node).whereType<Annotation>(),
+          hasLength(depth * (opening.contains('@tag') ? 2 : 1)),
+        );
+        expect(input.tokens, orderedEquals(tokens));
+      }
+    },
+  );
+
   test('deep collections retain every level and the innermost value', () {
     const depth = 20000;
     final source = SourceFile(

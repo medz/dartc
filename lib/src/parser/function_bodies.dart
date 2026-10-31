@@ -10,13 +10,16 @@ part of 'parser.dart';
 /// not checked. Name binding, return types and yielded types need analysis.
 /// Invalid syntax produces diagnostics. A missing body produces a zero-width
 /// [MissingFunctionBody].
-ParseResult<FunctionBody> parseFunctionBody(ScanResult input) {
-  final parser = _Parser(input);
+ParseResult<FunctionBody> parseFunctionBody(
+  ScanResult input, {
+  LanguageVersion languageVersion = LanguageVersion.current,
+}) {
+  final parser = _Parser(input, languageVersion: languageVersion);
   final body = _BodyReader(parser).finish();
   while (parser.current.kind != .eof) {
     parser.unexpected();
   }
-  return ParseResult._(body, parser.diagnostics);
+  return parser.finishResult(body);
 }
 
 final class _BodyReader(final _Parser parser, {final bool declaration = true})
@@ -25,7 +28,11 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
   Iterable<_Reader<Object?>> read() sync* {
     final start = parser.current.start;
     final previous = parser.functionModifier;
+    final previousLoops = parser.loopDepth;
+    final previousSwitches = parser.switchDepth;
     parser.functionModifier = null;
+    parser.loopDepth = 0;
+    parser.switchDepth = 0;
     if (parser.current.kind == .keywordAsync ||
         parser.current.kind == .keywordSync) {
       final token = parser.current;
@@ -118,6 +125,8 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
       }
     } finally {
       parser.functionModifier = previous;
+      parser.loopDepth = previousLoops;
+      parser.switchDepth = previousSwitches;
     }
   }
 }

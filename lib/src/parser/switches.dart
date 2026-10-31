@@ -49,6 +49,7 @@ final class _SwitchStatementReader(final _Parser parser)
     yield condition;
     parser.expect(.leftBrace);
     final members = <SwitchStatementMember>[];
+    parser.switchDepth++;
     var hasDefault = false;
     while (parser.current.kind != .rightBrace && parser.current.kind != .eof) {
       final start = parser.current.start;
@@ -66,7 +67,10 @@ final class _SwitchStatementReader(final _Parser parser)
       CasePattern? pattern;
       if (parser.current.kind == .keywordCase) {
         parser.advance();
-        final reader = _CasePatternReader(parser);
+        final reader = _CasePatternReader(
+          parser,
+          constantExpression: parser.before(3, 0),
+        );
         yield reader;
         pattern = reader.result;
       } else if (parser.current.kind == .keywordDefault) {
@@ -117,6 +121,7 @@ final class _SwitchStatementReader(final _Parser parser)
         ),
       );
     }
+    parser.switchDepth--;
     result = SwitchStatement(
       source: parser.source,
       start: token.start,

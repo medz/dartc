@@ -19,6 +19,12 @@ abstract class _Reader<T> {
   }
 }
 
+final class _SyntaxTask(final Iterable<_Reader<Object?>> steps)
+    extends _Reader<void> {
+  @override
+  Iterable<_Reader<Object?>> read() => steps;
+}
+
 final class _TypeTask(final _TypeReader type) extends _Reader<void> {
   @override
   Iterable<_Reader<Object?>> read() sync* {

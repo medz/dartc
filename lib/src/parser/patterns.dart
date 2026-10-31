@@ -19,13 +19,14 @@ enum PatternContext {
 ParseResult<DartPattern> parsePattern(
   ScanResult input, {
   PatternContext context = .matching,
+  LanguageVersion languageVersion = LanguageVersion.current,
 }) {
-  final parser = _Parser(input);
+  final parser = _Parser(input, languageVersion: languageVersion);
   final node = _PatternReader(parser, context: context).finish();
   while (parser.current.kind != .eof) {
     parser.unexpected();
   }
-  return ParseResult._(node, parser.diagnostics);
+  return parser.finishResult(node);
 }
 
 final class _PatternReader(
@@ -54,7 +55,9 @@ final class _PatternReader(
         }
         parser.advance();
         if (token.kind == .keywordAs) {
-          final type = parser.readType();
+          final reader = _RequiredTypeReader(parser);
+          yield reader;
+          final type = reader.result;
           result = CastPattern(
             source: source,
             start: result.start,
@@ -123,7 +126,8 @@ final class _PatternReader(
           ? PatternVariableKeyword.varKeyword
           : PatternVariableKeyword.finalKeyword;
       parser.advance();
-      final type = variableType();
+      yield* readVariableType();
+      final type = variableType;
       if (type != null && keyword == .varKeyword) {
         parser.error(
           'type_after_var',
@@ -136,15 +140,16 @@ final class _PatternReader(
     }
     var typedCollection = false;
     if (token.kind == .less) {
-      final child = _Parser.nested(parser);
-      final reader = _TypeReader(child);
+      final end = parser.lookahead.delimiters.afterTypeArguments(parser.cursor);
       typedCollection =
-          reader.read(arguments: true) != null &&
-          reader.failure == null &&
-          (child.current.kind == .leftBracket ||
-              child.current.kind == .emptyBrackets ||
-              child.current.kind == .emptyBracketsAssign ||
-              child.current.kind == .leftBrace);
+          end != null &&
+          switch (parser.tokens[end].kind) {
+            .leftBracket ||
+            .emptyBrackets ||
+            .emptyBracketsAssign ||
+            .leftBrace => true,
+            _ => false,
+          };
     }
     if (typedCollection ||
         token.kind == .leftBracket ||
@@ -178,7 +183,8 @@ final class _PatternReader(
       );
       return;
     }
-    final type = variableType();
+    yield* readVariableType();
+    final type = variableType;
     if (type != null) {
       variable(token, .none, type);
       return;
@@ -206,7 +212,8 @@ final class _PatternReader(
     if (token.kind.isIdentifier) {
       final child = _Parser.nested(parser);
       final typeReader = _TypeReader(child);
-      final candidate = typeReader.read();
+      if (!typeReader.start()) yield _TypeTask(typeReader);
+      final candidate = typeReader.result;
       if (candidate is NamedTypeAnnotation &&
           !candidate.isNullable &&
           child.current.kind == .leftParen &&
@@ -262,24 +269,35 @@ final class _PatternReader(
     );
   }
 
-  TypeAnnotation? variableType() {
+  TypeAnnotation? variableType;
+
+  Iterable<_Reader<Object?>> readVariableType() sync* {
+    variableType = null;
     if (current.kind.isIdentifier &&
         parser.tokens[parser.cursor + 1].kind == .keywordWhen) {
-      return null;
+      return;
     }
-    if (!current.kind.isTypeName && current.kind != .leftParen) return null;
+    if (!current.kind.isTypeName && current.kind != .leftParen) return;
+    final end = parser.possibleTypeEnd(parser.cursor);
+    if (end != null &&
+        (!parser.tokens[end].kind.isIdentifier ||
+            parser.tokens[end].kind == .keywordWhen ||
+            parser.tokens[end].kind == .keywordAs)) {
+      return;
+    }
     final child = _Parser.nested(parser);
     final reader = _TypeReader(child);
-    final type = reader.read();
+    if (!reader.start()) yield _TypeTask(reader);
+    final type = reader.result;
     if (type is! TypeAnnotation ||
         reader.failure != null ||
         !child.current.kind.isIdentifier ||
         child.current.kind == .keywordWhen ||
         child.current.kind == .keywordAs) {
-      return null;
+      return;
     }
     parser.adopt(child);
-    return type;
+    variableType = type;
   }
 
   void variable(
@@ -352,6 +370,7 @@ final class _PatternReader(
 final class _CasePatternReader(
   final _Parser parser, {
   final bool condition = false,
+  final bool constantExpression = false,
 }) extends _Reader<CasePattern> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
@@ -362,18 +381,32 @@ final class _CasePatternReader(
         parser.current,
       );
     }
-    final pattern = _PatternReader(parser);
-    yield pattern;
-    result = pattern.result;
+    DartPattern pattern;
+    if (constantExpression) {
+      final reader = _ExpressionReader(parser);
+      if (!reader.start()) yield reader;
+      final expression = reader.result;
+      pattern = ConstantPattern(
+        source: parser.source,
+        start: expression.start,
+        end: expression.end,
+        expression: expression,
+      );
+    } else {
+      final reader = _PatternReader(parser);
+      yield reader;
+      pattern = reader.result;
+    }
+    result = pattern;
     if (parser.current.kind == .keywordWhen) {
       parser.advance();
       final guard = _ExpressionReader(parser);
       if (!guard.start()) yield guard;
       result = GuardedPattern(
         source: parser.source,
-        start: pattern.result.start,
+        start: pattern.start,
         end: guard.result.end,
-        pattern: pattern.result,
+        pattern: pattern,
         guard: guard.result,
       );
     }

@@ -38,14 +38,15 @@ final class _IfHeader(
 }
 
 extension on _Parser {
-  void parseCollectionPrefix() {
+  Iterable<_Reader<Object?>> readCollectionPrefix() sync* {
     final first = current;
     final hasConst = first.kind == .keywordConst;
     if (hasConst) advance();
     TypeArgumentList? arguments;
     if (current.kind == .less) {
       final reader = _TypeReader(this);
-      arguments = reader.read(arguments: true) as TypeArgumentList?;
+      if (!reader.start(arguments: true)) yield _TypeTask(reader);
+      arguments = reader.result as TypeArgumentList?;
       if (reader.failure case final failure?) {
         error(failure.$1, failure.$2, failure.$3);
       }

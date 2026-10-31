@@ -7,7 +7,7 @@
 | 特性 | 语法解析 | 语义分析 API | 编译/运行 | 使用限制 |
 | --- | --- | --- | --- | --- |
 | 普通、abstract 类 | ✅ | ❌ | 🟡 | 支持非泛型父接口及部分 Object 行为。 |
-| base/interface/final/sealed 修饰符 | ✅ | ❌ | 🟡 | 按库检查限制；mixin class 未支持。 |
+| base/interface/final/sealed 修饰符 | ✅ | ❌ | 🟡 | parser 要求 3.0；CLI 按库检查限制，mixin class 未支持。 |
 | 字段、方法、getter/setter、静态成员 | ✅ | ❌ | 🟡 | 一般动态查找、完整字段推断仍缺。 |
 | 抽象成员与 abstract 字段 | ✅ | ❌ | 🟡 | 具体类须实现；外部成员/字段仍缺。 |
 | 用户算术、关系、一元及索引运算符 | ✅ | ❌ | 🟡 | 不含 operator ==；泛型父接口代入仍缺。 |
@@ -15,13 +15,13 @@
 | 普通、命名、生成式重定向构造 | ✅ | ❌ | 🟡 | 初始化义务、作用域与执行顺序见正文。 |
 | const 生成式构造 | ✅ | ❌ | 🟡 | 包含泛型类；assert initializer 未支持。 |
 | 工厂与重定向工厂 | ✅ | ❌ | 🟡 | 非泛型类可用，泛型类及 external 工厂仍缺。 |
-| this/super 形参 | ✅ | ❌ | 🟡 | super 转发限非泛型父类，含默认值及公共名关联。 |
-| 主构造器及 new/factory 简写 | ✅ | ❌ | 🟡 | CLI 从 3.13 起支持普通/泛型类；enum、extension type 相关能力仍缺。 |
+| this/super 形参 | ✅ | ❌ | 🟡 | parser 的 super 形参要求 2.17；CLI 转发限非泛型父类，含默认值及公共名关联。 |
+| 主构造器及 new/factory 简写 | ✅ | ❌ | 🟡 | parser 要求 3.13；CLI 支持普通/泛型类，enum、extension type 相关能力仍缺。 |
 | 构造器函数值 | ✅ | ❌ | 🟡 | 限非泛型用户类/普通别名；标准库及泛型提取仍缺。 |
 | 泛型实例、成员代入和协变检查 | ✅ | ❌ | 🟡 | 泛型父接口、late 字段、工厂及方法值仍缺。 |
-| 简单与增强枚举 | ✅ | ❌ | 🟡 | 不支持类型参数、mixin 和值名为 name 的枚举。 |
-| 元数据注解 | ✅ | ❌ | 🟡 | 支持部分常量和 pragma；无运行时反射访问。 |
-| mixin、mixin application、extension、extension type | ✅ | ❌ | ❌ | 解析声明/成员不代表可应用、查找或执行。 |
+| 简单与增强枚举 | ✅ | ❌ | 🟡 | parser 的增强枚举要求 2.17；CLI 不支持类型参数、mixin 和值名为 name 的枚举。 |
+| 元数据注解 | ✅ | ❌ | 🟡 | parser 的泛型元数据要求 2.14；CLI 支持部分常量和 pragma，无运行时反射访问。 |
+| mixin、mixin application、extension、extension type | ✅ | ❌ | ❌ | parser 的 extension type 要求 3.3；解析不代表可应用、查找或执行。 |
 | 构造器 assert initializer | ✅ | ❌ | ❌ | 不提供初始化断言的编译/运行。 |
 
 ## 类与成员解析
@@ -30,7 +30,13 @@
 
 构造语法包括传统形式、const/factory、命名与简写、主构造器参数、this 初始化体、字段/assert/super 初始化及 this/factory 重定向。parser 有部分修饰符和体形式检查，但不查字段绑定、继承、成员冲突、表示类型资格或参数类型。`factory<T>(T value)` 保留为名叫 factory 的泛型方法，不是工厂构造器。
 
-以下示例处于 CLI 已支持的普通类与 const 构造子集：
+parser 检查以下声明上下文，但不替代语义分析：
+
+- setter 须恰有一个必需位置参数；枚举常量写出类型实参或构造器后缀后，须有实参列表，例如 `a<int>.named()`，不能只有 `a<int>.named`。
+- 普通字段、方法或访问器不能与外围声明同名；mixin 和普通 extension 不能声明构造器，extension type 不受这条构造器禁令限制。
+- 静态成员不能带 covariant 成员修饰符；静态成员及 extension/extension type 成员的直接形参不能带 covariant。普通构造器不能用 var/final 形参声明字段，主构造器仍可使用这两种形式。[形参检查仍有明确边界](functions.md#解析入口)，并非所有非法位置都会诊断。
+
+各入口按[所选语言版本](lexical-structure.md#解析语言版本)检查语法；class、enum、mixin 和普通 extension 的分号空声明体要求 3.13，不影响函数分号空体的既有规则。以下示例处于 CLI 已支持的普通类与 const 构造子集：
 
 ```dart
 class Point {

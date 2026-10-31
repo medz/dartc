@@ -26,6 +26,8 @@
 
 `parsePattern(ScanResult, context: PatternContext.matching)` 解析一个模式。`declaration` 用于外层已有 var/final 的声明，`assignment` 用于给已有变量赋值。裸名字保留为 IdentifierPattern，含义留给使用位置，不提前绑定为常量或声明。
 
+该入口与文件、语句、表达式入口均接受显式[语言版本](lexical-structure.md#解析语言版本)，默认 3.13。Dart 3 专用模式结构（如变量、List、对象、逻辑模式）、if-case、模式声明/赋值和 switch 表达式要求 3.0；点简写模式还要求 3.10。独立入口不会仅因常量或裸标识符使用了模式节点就一律要求 3.0。小于 3.0 时，switch **语句**的 case 改用常量表达式文法，保留算术和常量引用的结构，但不求值或绑定它们。
+
 parser 接受常量/点简写、变量、通配、关系、&&/||、括号、as/?/!、List/Map/record/对象模式，保留显式类型、rest 和省略名字段。连续一元后缀需要括号。缺失模式以零宽 MissingPattern 恢复；不求值常量、不推断字段名或类型、不检查穷尽性。
 
 模式声明/赋值、语句/集合 if-case、模式循环头、switch 语句/表达式及 when 已接入相应文件/语句/表达式入口。**Map/record 可解析不表示 CLI 能匹配**。元数据、选择值、守卫和结果保留源码范围，调用方仍须检查 hasErrors。
@@ -107,7 +109,7 @@ Dart 3 switch 语句支持模式/guard、空 case 共用 body、正常结束隐�
 
 case 标签 continue 直接入其非空 body，不重试模式/guard，即使标签未被引用也不能在该 body 用原 case 模式变量。标签入口撤销整个 switch 写集合涉及的提升和确定未赋值事实，其他 case 写入不使未初始化变量可读。跨 finally 跳转仍执行清理，普通循环 continue 和外层 switch break 保持各自目标。
 
-小于 3.0 的文件将 case 解释为隐式常量表达式，包括算术、`_` 常量和 List 身份匹配；case 静态类型须是选择值类型子类型。最后 body 可正常结束，之前非空 body 须退出；只有 default 排除未匹配赋值路径。SDK 3.13.7 CFE/analyzer 也接受 2.19 文件的 when 并执行 guard，dartc 保留此参考行为，而非把模式语义全部用于旧文件。
+CLI 对小于 3.0 的文件将 case 解释为隐式常量表达式，包括算术、`_` 常量和 List 身份匹配；case 静态类型须是选择值类型子类型。最后 body 可正常结束，之前非空 body 须退出；只有 default 排除未匹配赋值路径。SDK 3.13.7 CFE/analyzer 也接受 2.19 文件的 when 并执行 guard，CLI 保留此参考行为，而非把模式语义全部用于旧文件。新 parser 的旧版本常量 case 也可保留 when，但不检查 guard 类型或执行它。
 
 ## 其他使用限制与 SDK 差异
 

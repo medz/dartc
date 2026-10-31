@@ -12,7 +12,7 @@
 | for-in | ✅ | ❌ | 🟡 | 限 List；无一般 Iterable/Iterator 和可捕获并发修改错误。 |
 | if-case、模式声明及循环头 | ✅ | ❌ | 🟡 | 不含 Map/record 解构，见[模式](patterns.md)。 |
 | switch、守卫、共享 case、隐式 break | ✅ | ❌ | 🟡 | 按语言版本区分常量 case 和模式规则。 |
-| 标签、break、continue | ✅ | ❌ | 🟡 | CLI 绑定目标；parser 不检查目标存在或种类。 |
+| 标签、break、continue | ✅ | ❌ | 🟡 | parser 检查部分外围循环/switch 上下文，不绑定标签目标；CLI 绑定目标。 |
 | return 与正常完成检查 | ✅ | ❌ | 🟡 | 非空结果不能正常落空，生成器执行未支持。 |
 | try/on/catch、rethrow、finally | ✅ | ❌ | 🟡 | 仅同步展开，自动错误未全部对象化。 |
 | await for | ✅ | ❌ | ❌ | 仅异步函数体上下文可解析；无 Stream 暂停/取消。 |
@@ -25,9 +25,13 @@
 
 parser 保留块与语句顺序、声明/模式、循环初始化和多条更新、可省略条件、case/标签、异常类型及 catch 参数。else 关联最近未完成的 if。缺失语句以零宽节点恢复，调用方须检查 hasErrors。它不绑定名称、标签和捕获，不检查类型、确定赋值、穷尽性或 rethrow 是否处于合法 catch 上下文。
 
+无标签 break 要求外围有循环或 switch。continue 要求外围有循环，或者带标签且位于 switch 内；这些检查不解析标签名字或目标种类。嵌套函数不能借用外围的循环/switch 上下文，解析结束后恢复外围上下文。`break missing;` 和 catch 外的 `rethrow;` 仍可通过解析，不表示它们是合法程序。
+
+入口接受显式[语言版本](lexical-structure.md#解析语言版本)。小于 3.0 时，switch 的 case 使用常量表达式文法；模式声明、if-case 等语法则要求 3.0。
+
 ## 分支、循环与跳转
 
-块顺序执行并引入局部作用域；表达式语句可丢弃结果，但保留副作用和可能失败的操作。if 检查布尔条件并合并两支流事实，while/for 的可能写入撤销失效提升。for 支持声明或表达式初始化、可省略条件、多条更新；do 先执行体，continue 跳到条件。
+CLI 中，块顺序执行并引入局部作用域；表达式语句可丢弃结果，但保留副作用和可能失败的操作。if 检查布尔条件并合并两支流事实，while/for 的可能写入撤销失效提升。for 支持声明或表达式初始化、可省略条件、多条更新；do 先执行体，continue 跳到条件。
 
 ```dart
 int sum(List<int> values) {
@@ -42,9 +46,9 @@ int sum(List<int> values) {
 
 for 声明的闭包绑定每轮独立，更新前复制当前值；for-in 的声明变量也逐轮独立，使用外部已有变量则共享绑定。模式循环头共用[模式绑定规则](patterns.md#声明赋值与循环解构)。
 
-for-in 当前按 List 长度与索引迭代，来源一次求值，dynamic 来源须为 List，逐元素检查类型。每次迭代步先检查初始长度，长度发生变化会在下次取元素/判定结束前失败，break 后不再检查；替换元素或步间恢复原长度可继续。这同时适用于语句和集合。**长度失败仍终止进程，不能捕获 ConcurrentModificationError**，与 List.toString 的已支持错误对象不同。
+for-in 当前按 List 长度与索引迭代，来源一次求值，dynamic 来源须为 List，逐元素检查类型。每次迭代步先检查初始长度，长度增加或减少都会在下次取元素/判定结束前失败，break 后不再检查；替换元素或步间恢复原长度可继续。这同时适用于语句和集合。**长度失败仍终止进程，不能捕获 ConcurrentModificationError**，与 List.toString 的已支持错误对象不同。
 
-标签支持嵌套查找、块 break 和循环 continue；switch case 标签只接受 continue，不能 break。重复/不可见 case 标签及错误目标被诊断。跨越 try/catch 的跳转执行对应 finally，在块内跳转不提前清理；case 跳转不重新匹配模式或守卫。
+CLI 的标签支持嵌套查找、块 break 和循环 continue；switch case 标签只接受 continue，不能 break。重复/不可见 case 标签及错误目标被诊断。跨越 try/catch 的跳转执行对应 finally，在块内跳转不提前清理；case 跳转不重新匹配模式或守卫。
 
 ## switch 与返回
 

@@ -2,9 +2,9 @@ part of 'parser.dart';
 
 final class _MembersReader(
   final _Parser parser,
-  final String? className, {
-  final bool isEnum = false,
-}) extends _Reader<List<ClassMember>> {
+  final String? className,
+  final _TypeDeclarationKind kind,
+) extends _Reader<List<ClassMember>> {
   late int end;
   bool semicolon = false;
   bool separator = false;
@@ -20,7 +20,7 @@ final class _MembersReader(
       return;
     }
     parser.expect(.leftBrace);
-    if (isEnum) {
+    if (kind == .enumKind) {
       while (parser.current.kind != .rightBrace &&
           parser.current.kind != .semicolon &&
           parser.current.kind != .eof) {
@@ -33,7 +33,15 @@ final class _MembersReader(
           metadata = annotations.result;
         }
         final name = parser.readVariableName();
-        final types = parser.readTypeArguments();
+        TypeArgumentList? types;
+        if (parser.current.kind == .less) {
+          final reader = _TypeReader(parser);
+          if (!reader.start(arguments: true)) yield _TypeTask(reader);
+          types = reader.result as TypeArgumentList?;
+          if (reader.failure case final failure?) {
+            parser.error(failure.$1, failure.$2, failure.$3);
+          }
+        }
         Identifier? constructor;
         if (parser.current.kind == .dot) {
           parser.advance();
@@ -44,6 +52,12 @@ final class _MembersReader(
           final reader = _ArgumentsReader(parser);
           yield reader;
           arguments = reader.result;
+        } else if (types != null || constructor != null) {
+          parser.error(
+            'expected_enum_arguments',
+            'Expected arguments after the enum type arguments or constructor name.',
+            parser.current,
+          );
         }
         constants.add(
           EnumConstantDeclaration(
@@ -77,7 +91,7 @@ final class _MembersReader(
         yield annotations;
         metadata = annotations.result;
       }
-      final reader = _MemberReader(parser, className, start, metadata);
+      final reader = _MemberReader(parser, className, start, metadata, kind);
       yield reader;
       result.add(reader.result);
       if (parser.cursor == initial) parser.unexpected();
@@ -91,6 +105,7 @@ final class _MemberReader(
   final String? className,
   final int start,
   final List<Annotation> metadata,
+  final _TypeDeclarationKind kind,
 ) extends _Reader<ClassMember> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
@@ -123,6 +138,13 @@ final class _MemberReader(
       parser.advance();
     }
     var index = parser.cursor;
+    if (isStatic && covariant) {
+      parser.error(
+        'static_covariant_member',
+        'A static member cannot be covariant.',
+        Token(.invalid, parser.source, start, parser.current.start),
+      );
+    }
     if (parser.tokens[index].kind == .keywordConst) index++;
     final token = parser.tokens[index];
     final isConstructor =
@@ -138,6 +160,13 @@ final class _MemberReader(
                     index + 3 < parser.tokens.length &&
                     parser.tokens[index + 3].kind == .leftParen);
     if (isConstructor) {
+      if (kind == .mixin || kind == .extension) {
+        parser.error(
+          'constructor_not_allowed',
+          'This declaration cannot contain a constructor.',
+          token,
+        );
+      }
       if (isStatic || isAbstract || covariant) {
         parser.error(
           'invalid_constructor_modifier',
@@ -154,14 +183,25 @@ final class _MemberReader(
       );
       yield reader;
       result = reader.result;
+      if (result
+          case ConstructorDeclaration(keyword: .factoryKeyword, :final name)
+          when name.isEmpty || name.first.text != className) {
+        parser.requireFeature(result, 3, 13, 'Abbreviated constructors');
+      }
       return;
     }
-    final variable = _VariableReader(parser, allowConditional: false);
-    final complete = variable.start();
-    assert(complete);
-    if (variable.result case final declarations?) {
+    _VariableDeclarations? variables;
+    if (parser.canStartVariableDeclaration) {
+      final reader = _VariableReader(parser, allowConditional: false);
+      yield reader;
+      variables = reader.result;
+    }
+    if (variables case final declarations?) {
       final reader = _VariablesReader(parser, declarations, metadata: metadata);
       yield reader;
+      for (final variable in reader.result.declarations) {
+        checkMemberName(variable.name);
+      }
       result = FieldDeclaration(
         source: parser.source,
         start: start,
@@ -174,7 +214,8 @@ final class _MemberReader(
       );
       return;
     }
-    final header = _DeclarationName(parser)..read(member: true);
+    final header = _DeclarationName(parser);
+    yield* header.read(member: true);
     if (isAbstract || covariant && header.accessor != .keywordSet) {
       parser.error(
         'invalid_member_modifier',
@@ -199,11 +240,20 @@ final class _MemberReader(
       result = MissingClassMember(source: parser.source, offset: start);
       return;
     }
+    if (header.accessor != .keywordOperator) checkMemberName(header.name);
     FormalParameterList? parameters;
     if (header.accessor != .keywordGet) {
-      final reader = _ParameterReader(parser, function: true);
+      final reader = _ParameterReader(
+        parser,
+        function: true,
+        allowCovariant:
+            !isStatic && kind != .extension && kind != .extensionType,
+      );
       yield reader;
       parameters = reader.result;
+      if (header.accessor == .keywordSet) {
+        parser.checkSetterParameters(parameters);
+      }
     }
     final body = _BodyReader(parser);
     yield body;
@@ -287,5 +337,14 @@ final class _MemberReader(
         body: body.result,
       ),
     };
+  }
+
+  void checkMemberName(Identifier name) {
+    if (name.text != className) return;
+    parser.error(
+      'member_with_class_name',
+      'A non-constructor member cannot have the enclosing declaration name.',
+      Token(.invalid, parser.source, name.start, name.end),
+    );
   }
 }
