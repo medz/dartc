@@ -10,6 +10,7 @@ final class _Lookahead(final List<Token> tokens) {
   late final Map<int, _ConditionalResult> conditionals = {};
   late final Map<int, _IndexContent> indexContents = {};
   late final Map<int, _IndexRun> indexRuns = {};
+  late final Map<int, SelectorTail> selectorTails = {};
 
   _IndexRun? indexRun(int start) {
     final pending = <(int, _IndexContent)>[];
@@ -24,10 +25,11 @@ final class _Lookahead(final List<Token> tokens) {
       cursor = content.cursor;
       tail = indexRuns[cursor];
     }
-    final end = tail?.cursor ?? cursor;
+    final selectors = tail?.selectors ?? selectorTails[cursor];
+    final end = tail?.cursor ?? selectors?.cursor ?? cursor;
     for (var i = pending.length - 1; i >= 0; i--) {
       final (question, content) = pending[i];
-      tail = _IndexRun(content, tail, end);
+      tail = _IndexRun(content, tail, end, selectors);
       indexRuns[question] = tail;
     }
     return tail;
@@ -47,6 +49,7 @@ final class _IndexRun(
   final _IndexContent content,
   final _IndexRun? next,
   final int cursor,
+  final SelectorTail? selectors,
 );
 
 sealed class _Branch(final List<Diagnostic> diagnostics) {
@@ -83,7 +86,7 @@ final class _IndexedBranch(
         isNullAware: true,
       );
     }
-    return expression;
+    return suffix.selectors?.apply(expression) ?? expression;
   }
 }
 
@@ -105,6 +108,7 @@ final class _ConditionalTrial(final _Parser parent) {
 
   _ConditionalResult? finishBranch(_Branch branch) {
     if (thenBranch == null) {
+      if (branch is _ParsedBranch) reader.cacheSelectorTail(branch);
       if (reader.current.kind != .colon) return reader.conditionalFailure;
       thenBranch = branch;
       reader.advance();
@@ -121,6 +125,23 @@ final class _ConditionalTrial(final _Parser parent) {
 }
 
 extension on _Parser {
+  void cacheSelectorTail(_ParsedBranch branch) {
+    if (branch.diagnostics.isNotEmpty) return;
+    final content = lookahead.indexContents[trialStart];
+    if (content == null ||
+        lookahead.selectorTails.containsKey(content.cursor)) {
+      return;
+    }
+    final tail = SelectorTail.capture(
+      branch.expression,
+      receiverStart: tokens[trialStart!].start,
+      receiverEnd: content.end,
+      cursor: cursor,
+      current: current,
+    );
+    if (tail != null) lookahead.selectorTails[content.cursor] = tail;
+  }
+
   void parseWithTrials() {
     final initial = _ConditionalTrial(this);
     var parser = initial.reader;
@@ -222,7 +243,7 @@ extension on _Parser {
     }
     final run = lookahead.indexRun(cursor);
     if (run == null) return null;
-    final next = tokens[run.cursor];
+    final next = run.selectors?.current ?? tokens[run.cursor];
     if (next.kind == .invalid ||
         next.kind != .colon &&
             !next.kind.endsExpression &&

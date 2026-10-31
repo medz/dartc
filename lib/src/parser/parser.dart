@@ -5,6 +5,8 @@ import 'package:dartc/diagnostics.dart';
 import 'package:dartc/scanner.dart';
 import 'package:dartc/source.dart';
 
+import 'selector_tail.dart';
+
 part 'delimiters.dart';
 part 'operators.dart';
 part 'type_annotations.dart';
