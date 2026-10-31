@@ -1,5 +1,5 @@
-import '../source/source_file.dart';
-import '../source/source_span.dart';
+import 'package:dartc/source.dart';
+
 import 'token_kind.dart';
 
 /// A token referring to an unchanged range in a source snapshot.

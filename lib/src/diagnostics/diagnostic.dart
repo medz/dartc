@@ -1,4 +1,5 @@
-import '../source/source_span.dart';
+import 'package:dartc/source.dart';
+
 import 'diagnostic_severity.dart';
 
 /// An immutable report of a problem or information for the caller.

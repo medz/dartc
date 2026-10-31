@@ -1,8 +1,8 @@
 import 'dart:collection';
 
-import '../diagnostics/diagnostic.dart';
-import '../source/source_file.dart';
-import '../source/source_span.dart';
+import 'package:dartc/diagnostics.dart';
+import 'package:dartc/source.dart';
+
 import 'keywords.dart';
 import 'token.dart';
 import 'token_kind.dart';

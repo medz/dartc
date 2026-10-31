@@ -1,12 +1,9 @@
 import 'dart:collection';
 
-import '../ast/nodes.dart';
-import '../diagnostics/diagnostic.dart';
-import '../scanner/scanner.dart';
-import '../scanner/token.dart';
-import '../scanner/token_kind.dart';
-import '../source/source_file.dart';
-import '../source/source_span.dart';
+import 'package:dartc/ast.dart';
+import 'package:dartc/diagnostics.dart';
+import 'package:dartc/scanner.dart';
+import 'package:dartc/source.dart';
 
 part 'delimiters.dart';
 part 'operators.dart';

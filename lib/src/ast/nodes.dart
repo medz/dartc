@@ -1,5 +1,4 @@
-import '../source/source_file.dart';
-import '../source/source_span.dart';
+import 'package:dartc/source.dart';
 
 part 'nodes/access.dart';
 part 'nodes/annotations.dart';
