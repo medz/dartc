@@ -59,9 +59,14 @@ final class _TypeReader(
   Token get current => parser.current;
   Token get next => parser.tokens[parser.cursor + 1];
 
-  AstNode? read({bool arguments = false, bool parameters = false}) {
+  AstNode? read({
+    bool arguments = false,
+    bool parameters = false,
+    bool beforeParameter = false,
+  }) {
     assert(!arguments || !parameters);
     TypeAnnotation? value;
+    (TypeAnnotation, int)? parameterFallback;
     if (arguments) {
       frames.add(_TypeArguments(current, parser.cursor));
       parser.advance();
@@ -86,10 +91,21 @@ final class _TypeReader(
             parser.functionBodyAfterName(allowEmpty: true)) {
           return value;
         }
+        if (beforeParameter && frames.isEmpty) {
+          parameterFallback = (value, parser.cursor);
+        }
         value = beginFunction(value);
         continue;
       }
-      if (frames.isEmpty) return value;
+      if (frames.isEmpty) {
+        if (parameterFallback != null &&
+            !current.kind.isIdentifier &&
+            current.kind != .keywordThis &&
+            current.kind != .keywordSuper) {
+          break;
+        }
+        return value;
+      }
       switch (frames.last) {
         case final _TypeArguments frame:
           frame.arguments.add(value);
@@ -205,6 +221,14 @@ final class _TypeReader(
       if (frame is _TypeArguments) {
         parser._lookahead?.typeArguments[frame.index] = null;
       }
+    }
+    // Without a following parameter name, the last outer Function starts a
+    // function-form parameter, as in `int Function(int value)`.
+    if (parameterFallback case (final type, final index)) {
+      parser.cursor = index;
+      parser.current = parser.tokens[index];
+      failure = null;
+      return type;
     }
     if (relationalFallback case (final head, final index)) {
       parser.cursor = index;

@@ -178,7 +178,8 @@ final class _ParameterReader(
       if (token.kind.isIdentifier && next.kind == .leftParen) {
         final index = parser.cursor;
         parser.advance();
-        final parsed = _TypeReader(parser).read() as TypeAnnotation?;
+        final parsed =
+            _TypeReader(parser).read(beforeParameter: true) as TypeAnnotation?;
         if (parsed == null ||
             !(current.kind.isIdentifier ||
                 current.kind == .keywordThis ||
@@ -263,7 +264,8 @@ final class _ParameterReader(
         current.kind != .keywordSuper) {
       final index = parser.cursor;
       final token = current;
-      final parsed = _TypeReader(parser).read() as TypeAnnotation?;
+      final parsed =
+          _TypeReader(parser).read(beforeParameter: true) as TypeAnnotation?;
       if (parsed != null &&
           (current.kind.isIdentifier ||
               current.kind == .keywordThis ||

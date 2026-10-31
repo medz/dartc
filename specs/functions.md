@@ -27,6 +27,8 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 | §9.2 默认值 | 可选参数的 `=`、命名参数的旧式 `:`；拒绝必需位置参数的默认值、位置参数的 `:` 和嵌套函数形式参数中的默认值；表达式范围同[表达式解析](expressions.md#表达式解析-api)，尚未检查常量资格 | [parameters_test.dart](../test/parser/parameters_test.dart) 默认值用例 |
 | §16 形参元数据 | 常量名称引用、限定名称、类型实参、构造器名称及实参；遵循[注解实参的相邻规则](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/records/feature-specification.md#ambiguity-with-metadata-annotations)，与后续 record 类型区分 | [parameters_test.dart](../test/parser/parameters_test.dart) 元数据用例 |
 
+在形参列表中，`int Function(int value)` 表示名为 `Function` 的函数形式形参；`int Function(int value) callback` 表示具有函数类型的普通形参。泛型、可空尾缀和嵌套函数形式均保留对应结构，验证见 [parameters_test.dart](../test/parser/parameters_test.dart)。
+
 此入口不接收外围声明，因此保留 `var` / `final` 等声明信息，但尚未检查它们及 `covariant`、`this.`、`super.` 在具体函数、方法或构造器位置是否合法。重复参数、字段绑定、类型与默认值的语义检查也未接入。类型内部的元数据已接入；文档注释留在扫描结果中。解析不修改输入 token，损坏输入和深层嵌套验证见 [parameters_test.dart](../test/parser/parameters_test.dart)。
 
 ## 函数体解析 API

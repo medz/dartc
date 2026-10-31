@@ -107,6 +107,44 @@ void main() {
     );
   });
 
+  test('distinguishes function-form parameters named Function from types', () {
+    for (final (text, returnType) in [
+      ('(int Function(int value))', 'int'),
+      ('({required int Function(int value)})', 'int'),
+      ('([int Function(int value)?])', 'int'),
+      ('(T Function<T extends Object>(T value))', 'T'),
+      ('((int, String) Function(int value))', '(int, String)'),
+      ('(int Function(int) Function(int value))', 'int Function(int)'),
+      ('(int Function(int)? Function(int value)?)', 'int Function(int)?'),
+    ]) {
+      final parameter = parsed(text).parameters.single;
+      expect(parameter.type!.text, returnType, reason: text);
+      expect(parameter.name.text, 'Function', reason: text);
+      final suffix = parameter.functionSuffix!;
+      expect(suffix.parameters.parameters.single.name.text, 'value');
+      expect(suffix.questionOffset != null, text.contains('value)?'));
+    }
+    final nested = parsed('(int outer(int Function(int value)))')
+        .parameters
+        .single
+        .functionSuffix!
+        .parameters
+        .parameters
+        .single;
+    expect(nested.name.text, 'Function');
+    expect(nested.type!.text, 'int');
+    expect(
+      nested.functionSuffix!.parameters.parameters.single.name.text,
+      'value',
+    );
+    final typed = parsed('(int Function(int value) Function)')
+        .parameters
+        .single;
+    expect(typed.name.text, 'Function');
+    expect(typed.type, isA<FunctionTypeAnnotation>());
+    expect(typed.functionSuffix, isNull);
+  });
+
   test('retains metadata names, arguments and their original positions', () {
     final parameter = parsed(
       '(@tag @p.Mark<int>.named(1, label: "yes") int value)',
@@ -211,8 +249,11 @@ void main() {
         '(late x)',
         '(final var x)',
         '(void f([x=1]))',
+        '(void Function([x=1]))',
         '(void f<T,>(T value))',
+        '(void Function<T,>(T value))',
         '(void f<T extends void>(T value))',
+        '(void Function<T extends void>(T value))',
         '(int f<T>)',
         '(this x)',
         '(@)',

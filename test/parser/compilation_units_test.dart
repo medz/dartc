@@ -20,6 +20,27 @@ CompilationUnit parsed(String text) {
 }
 
 void main() {
+  test('parses declarations with function-form parameters named Function', () {
+    final unit = parsed('''
+int visit(int Function(int value)) => Function(1);
+class Service {
+  int apply({required T Function<T>(T value)}) => Function<int>(2);
+}
+''');
+    final visit = unit.members.first as TopLevelFunctionDeclaration;
+    expect(visit.parameters.parameters.single.name.text, 'Function');
+    expect(visit.parameters.parameters.single.type!.text, 'int');
+    final service = unit.members.last as ClassDeclaration;
+    final apply = service.members.single as MethodDeclaration;
+    final parameter = apply.parameters.parameters.single;
+    expect(parameter.name.text, 'Function');
+    expect(parameter.kind, FormalParameterKind.requiredNamed);
+    expect(
+      parameter.functionSuffix!.typeParameters!.parameters.single.name.text,
+      'T',
+    );
+  });
+
   test('metadata belongs only to the following declaration or enum value', () {
     final unit = parsed(
       '@a class C { @b int first; int second; @c int third; } '

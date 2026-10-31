@@ -73,7 +73,7 @@ SDK 对照版本见[总览](README.md)；§15 泛型和 §20 类型关系另见[
 
 `package:dartc/ast.dart` 可表示 §16 的常量引用注解、限定名称、显式类型实参、构造器后缀和调用实参。名称的各部分保留原始拼写；前缀、类型与成员的绑定，以及实参的常量资格尚未检查。验证见 [nodes_test.dart](../test/ast/nodes_test.dart) 的注解实参和类型参数元数据用例。
 
-注解可附在[类及相关声明](#类与成员语法表示)、成员、函数声明、变量声明、形参、类型参数及记录类型字段上。[形参解析](functions.md#形参解析-api)已接入形参元数据；其他位置的文本解析和常量检查尚未接入。编译器的元数据行为见下文的[泛型 const 类与注解](#泛型-const-类与注解)。
+注解已接入库指令、[类及相关声明](#类与成员语法表示)、成员、enum 常量、函数与变量声明、形参、类型参数及记录类型字段的文本解析；注解只归属紧随其后的声明或字段。验证见 [compilation_units_test.dart](../test/parser/compilation_units_test.dart)、[parameters_test.dart](../test/parser/parameters_test.dart) 和 [types_test.dart](../test/parser/types_test.dart)。名称绑定与常量检查尚未接入新 AST；编译器的元数据行为见下文的[泛型 const 类与注解](#泛型-const-类与注解)。
 
 ## 工厂构造器
 
