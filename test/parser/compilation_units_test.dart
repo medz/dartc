@@ -20,6 +20,33 @@ CompilationUnit parsed(String text) {
 }
 
 void main() {
+  test('metadata belongs only to the following declaration or enum value', () {
+    final unit = parsed(
+      '@a class C { @b int first; int second; @c int third; } '
+      'class D; @e enum E { @f first, second, @g third }',
+    );
+    final cls = unit.members.first as ClassDeclaration;
+    expect(cls.metadata.single.text, '@a');
+    final fields = cls.members.cast<FieldDeclaration>();
+    expect(fields[0].variables.metadata.single.text, '@b');
+    expect(fields[1].variables.metadata, isEmpty);
+    expect(fields[2].variables.metadata.single.text, '@c');
+    expect((unit.members[1] as ClassDeclaration).metadata, isEmpty);
+    final enumeration = unit.members.last as EnumDeclaration;
+    expect(enumeration.metadata.single.text, '@e');
+    expect(enumeration.constants[0].metadata.single.text, '@f');
+    expect(enumeration.constants[1].metadata, isEmpty);
+    expect(enumeration.constants[2].metadata.single.text, '@g');
+    expect(walk(unit).whereType<Annotation>().map((a) => a.text), [
+      '@a',
+      '@b',
+      '@c',
+      '@e',
+      '@f',
+      '@g',
+    ]);
+  });
+
   test('contextual declaration words can name top-level functions', () {
     for (final name in [
       'import',

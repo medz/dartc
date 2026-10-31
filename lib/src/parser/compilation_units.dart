@@ -32,9 +32,12 @@ final class _UnitReader(final _Parser parser) extends _Reader<CompilationUnit> {
     while (parser.current.kind != .eof) {
       final initial = parser.cursor;
       final start = parser.current.start;
-      final annotations = _MetadataReader(parser);
-      yield annotations;
-      final metadata = annotations.result;
+      List<Annotation> metadata = const [];
+      if (parser.current.kind == .at) {
+        final annotations = _MetadataReader(parser);
+        yield annotations;
+        metadata = annotations.result;
+      }
       final kind = parser.current.kind;
       if ((kind == .keywordLibrary ||
               kind == .keywordImport ||

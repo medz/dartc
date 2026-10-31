@@ -26,8 +26,12 @@ final class _MembersReader(
           parser.current.kind != .eof) {
         final initial = parser.cursor;
         final start = parser.current.start;
-        final annotations = _MetadataReader(parser);
-        yield annotations;
+        List<Annotation> metadata = const [];
+        if (parser.current.kind == .at) {
+          final annotations = _MetadataReader(parser);
+          yield annotations;
+          metadata = annotations.result;
+        }
         final name = parser.readVariableName();
         final types = parser.readTypeArguments();
         Identifier? constructor;
@@ -46,7 +50,7 @@ final class _MembersReader(
             source: parser.source,
             start: start,
             end: arguments?.end ?? constructor?.end ?? types?.end ?? name.end,
-            metadata: annotations.result,
+            metadata: metadata,
             name: name,
             typeArguments: types,
             constructorName: constructor,
@@ -67,14 +71,13 @@ final class _MembersReader(
     while (parser.current.kind != .rightBrace && parser.current.kind != .eof) {
       final initial = parser.cursor;
       final start = parser.current.start;
-      final annotations = _MetadataReader(parser);
-      yield annotations;
-      final reader = _MemberReader(
-        parser,
-        className,
-        start,
-        annotations.result,
-      );
+      List<Annotation> metadata = const [];
+      if (parser.current.kind == .at) {
+        final annotations = _MetadataReader(parser);
+        yield annotations;
+        metadata = annotations.result;
+      }
+      final reader = _MemberReader(parser, className, start, metadata);
       yield reader;
       result.add(reader.result);
       if (parser.cursor == initial) parser.unexpected();
