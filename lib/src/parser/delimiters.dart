@@ -28,6 +28,7 @@ final class _Call(
   super.operatorBase,
   final Expression callee, {
   final TypeArgumentList? typeArguments,
+  final bool checkedNullAware = false,
 }) extends _Sequence {
   final List<Argument> arguments = [];
 }
@@ -38,6 +39,7 @@ final class _Index(
   super.operatorBase,
   final Expression target, {
   required final bool isNullAware,
+  required final bool checkedNullAware,
 }) extends _Delimiter {
   @override
   TokenKind get closing => .rightBracket;
@@ -48,21 +50,29 @@ extension on _Parser {
     checkSelector();
     final token = current;
     final target = values.removeLast();
-    advance();
-    if (token.kind == .emptyBrackets) {
+    final checked = target == selectorTarget ? checkedNullAware : isNullAware;
+    if (isNullAware &&
+        (target is CastExpression || target is TypeTestExpression)) {
+      values.add(target);
+      checkTypeContinuation(current);
+      values.removeLast();
+    }
+    if (token.kind == .emptyBrackets || token.kind == .emptyBracketsAssign) {
       error('expected_expression', 'Expected an index expression.', token);
       values.add(
         IndexExpression(
           source: source,
           start: target.start,
-          end: token.end,
+          end: token.start + 2,
           target: target,
           index: MissingExpression(source: source, offset: token.start + 1),
           isNullAware: isNullAware,
         ),
       );
+      consumeEmptyBrackets();
       return;
     }
+    advance();
     delimiters.add(
       _Index(
         token,
@@ -70,6 +80,7 @@ extension on _Parser {
         operators.length,
         target,
         isNullAware: isNullAware,
+        checkedNullAware: checked,
       ),
     );
     expectsOperand = true;
@@ -119,6 +130,23 @@ extension on _Parser {
     }
     final Expression expression;
     switch (frame) {
+      case _IfHeader():
+        frame.element.condition = finishExpression(
+          frame.valueBase,
+          frame.operatorBase,
+        );
+        delimiters.removeLast();
+        expectsOperand = true;
+        if (matched) advance();
+        return;
+      case _ForHeader():
+        closeForHeader(frame);
+        delimiters.removeLast();
+        expectsOperand = true;
+        if (matched) advance();
+        return;
+      case _Collection():
+        expression = closeCollection(frame, end);
       case _Index():
         final index = finishExpression(frame.valueBase, frame.operatorBase);
         expression = IndexExpression(
@@ -130,6 +158,13 @@ extension on _Parser {
           isNullAware: frame.isNullAware,
         );
       case _Sequence():
+        if (frame is _Group && matched && followsFunctionParameters()) {
+          error(
+            'unsupported_syntax',
+            'Function expression parsing is not yet supported.',
+            frame.opening,
+          );
+        }
         if (values.length > frame.valueBase ||
             operators.length > frame.operatorBase ||
             frame.name != null) {
@@ -166,7 +201,30 @@ extension on _Parser {
     }
     delimiters.removeLast();
     values.add(expression);
+    switch (frame) {
+      case _Call(:final checkedNullAware, :final callee)
+          when callee is! IdentifierExpression &&
+              callee is! PropertyAccessExpression:
+        selectorTarget = expression;
+        this.checkedNullAware = checkedNullAware;
+      case _Index(:final checkedNullAware):
+        selectorTarget = expression;
+        this.checkedNullAware = checkedNullAware;
+      default:
+        break;
+    }
     expectsOperand = false;
     if (matched) advance();
+  }
+
+  bool followsFunctionParameters() {
+    final next = tokens[cursor + 1].kind;
+    return next == .leftBrace ||
+        next == .arrow ||
+        next == .keywordAsync ||
+        next == .keywordSync ||
+        (next.isKeyword || next.isIdentifier) &&
+            (tokens[cursor + 2].kind == .leftBrace ||
+                tokens[cursor + 2].kind == .arrow);
   }
 }

@@ -14,6 +14,9 @@ part 'type_annotations.dart';
 part 'type_expressions.dart';
 part 'function_types.dart';
 part 'record_types.dart';
+part 'collections.dart';
+part 'collection_loops.dart';
+part 'conditionals.dart';
 
 /// The syntax and diagnostics produced by parsing a source snapshot.
 ///
@@ -39,9 +42,10 @@ final class ParseResult<T extends AstNode> {
 ///
 /// The context is synchronous: `await` and `yield` can be identifiers. Supported
 /// forms include scalar and plain string literals, records, operators, generic
-/// calls, type tests and casts, member access, and indexing. Other forms produce
-/// diagnostics until their grammar is implemented. Parsing does not resolve
-/// names or check types.
+/// calls, type tests and casts, member access, indexing, and collection literals
+/// with spreads, null-aware elements, if/else, and ordinary for/for-in headers.
+/// Other forms produce diagnostics until their grammar is implemented. Parsing
+/// does not resolve names or check types.
 ///
 /// Recovery preserves the input tokens and uses zero-width [MissingExpression]
 /// nodes for omitted operands. With errors, the returned node may cover only
@@ -54,7 +58,17 @@ final class _Parser {
     : source = input.source,
       tokens = input.tokens,
       current = input.tokens.first,
+      trialStart = null,
       diagnostics = [...input.diagnostics];
+
+  _Parser.trial(_Parser parent)
+    : source = parent.source,
+      tokens = parent.tokens,
+      cursor = parent.cursor + 1,
+      current = parent.tokens[parent.cursor + 1],
+      diagnostics = [],
+      trialStart = parent.cursor + 1,
+      _lookahead = parent.lookahead;
 
   final SourceFile source;
   final List<Token> tokens;
@@ -66,12 +80,20 @@ final class _Parser {
   // Operator indices awaiting ':', limited by the current delimiter's base.
   final List<int> questions = [];
   final List<_Delimiter> delimiters = [];
+  final int? trialStart;
+  bool initialOperatorBoundary = false;
   int cursor = 0;
   // Either tokens[cursor] or its unconsumed suffix after a closing type angle.
   Token current;
-  // Completed and failed angle-bracket trials, confined to this source parse.
-  Map<int, (TypeArgumentList, int, Token)?>? typeArguments;
+  _Lookahead? _lookahead;
+  _Lookahead get lookahead => _lookahead ??= _Lookahead(tokens);
   bool expectsOperand = true;
+  bool hasSyntaxError = false;
+  // The last call/index chain and whether its ?[ selectors are already fixed
+  // as indexes. Other primaries and selectors start a new chain.
+  Expression? selectorTarget;
+  bool checkedNullAware = false;
+  _NullableForInitializer? nullableForInitializer;
 
   int get operatorBase => delimiters.isEmpty ? 0 : delimiters.last.operatorBase;
 
@@ -80,11 +102,32 @@ final class _Parser {
   }
 
   ParseResult<Expression> parse() {
+    if (run(trial: false)) parseWithTrials();
+    final node = finishExpression(0, 0);
+    assert(prefixes.isEmpty && questions.isEmpty);
+    return ParseResult._(node, diagnostics);
+  }
+
+  // Returns true when an ambiguous expression or declaration needs a trial.
+  bool run({required bool trial}) {
     while (current.kind != .eof || delimiters.isNotEmpty) {
+      if (nullableForInitializer != null) return true;
       final token = current;
+      if (trial) {
+        if (hasSyntaxError || token.kind == .invalid) return false;
+        if (delimiters.isEmpty &&
+            (token.kind == .colon && questions.isEmpty ||
+                token.kind.endsExpression ||
+                !expectsOperand &&
+                    token.kind != .colon &&
+                    !token.kind.continuesExpression)) {
+          return false;
+        }
+      }
       if (token.kind == .eof ||
           token.kind == .rightParen ||
-          token.kind == .rightBracket) {
+          token.kind == .rightBracket ||
+          token.kind == .rightBrace) {
         if (delimiters.isNotEmpty) {
           closeDelimiter();
         } else {
@@ -92,9 +135,13 @@ final class _Parser {
         }
         continue;
       }
+      final frame = delimiters.isEmpty ? null : delimiters.last;
+      if (frame is _ForHeader && parseForSeparator(frame)) continue;
       if (token.kind == .comma) {
-        if (delimiters.isNotEmpty && delimiters.last is _Sequence) {
-          final frame = delimiters.last as _Sequence;
+        if (frame is _Collection) {
+          finishCollectionElement(frame);
+          advance();
+        } else if (frame is _Sequence) {
           finishElement(frame);
           if (frame is _Group) frame.hasComma = true;
           advance();
@@ -104,11 +151,22 @@ final class _Parser {
         continue;
       }
       if (token.kind == .colon) {
-        parseColon();
+        if (frame is _Collection &&
+            (questions.isEmpty || questions.last < operatorBase)) {
+          parseMapKey(frame);
+        } else {
+          parseColon();
+        }
         continue;
       }
+      if (frame is _Collection) {
+        if (token.kind == .keywordElse) {
+          if (!finishCollectionElement(frame)) unexpected();
+          continue;
+        }
+        if (expectsOperand && parseElementPrefix(frame)) continue;
+      }
       if (expectsOperand) {
-        final frame = delimiters.isEmpty ? null : delimiters.last;
         if (frame case _Sequence()
             when frame.name == null &&
                 values.length == frame.valueBase &&
@@ -122,16 +180,21 @@ final class _Parser {
           parseOperand();
         }
       } else {
-        parseContinuation();
+        if (parseContinuation()) return true;
       }
     }
-    final node = finishExpression(0, 0);
-    assert(prefixes.isEmpty && questions.isEmpty);
-    return ParseResult._(node, diagnostics);
+    return false;
   }
 
   void parseOperand() {
     final token = current;
+    if (token.kind == .keywordAwait && tokens[cursor + 1].kind.isIdentifier) {
+      error(
+        'await_in_sync',
+        'An await expression requires an asynchronous context.',
+        token,
+      );
+    }
     if (token.kind.isIdentifier) {
       values.add(
         IdentifierExpression(
@@ -143,6 +206,15 @@ final class _Parser {
       );
     } else {
       switch (token.kind) {
+        case .leftBracket ||
+            .emptyBrackets ||
+            .emptyBracketsAssign ||
+            .leftBrace:
+          openCollection();
+          return;
+        case .keywordConst || .less:
+          parseCollectionPrefix();
+          return;
         case .leftParen:
           delimiters.add(_Group(token, values.length, operators.length));
           advance();
@@ -215,14 +287,14 @@ final class _Parser {
     );
   }
 
-  void parseContinuation() {
+  bool parseContinuation() {
     final token = current;
     switch (token.kind) {
       case .less:
-        if (tryTypeArguments()) return;
+        if (tryTypeArguments()) return false;
       case .keywordAs || .keywordIs:
         parseTypeOperator();
-        return;
+        return false;
       case .dot || .nullAwareAccess:
         checkSelector();
         advance();
@@ -250,33 +322,40 @@ final class _Parser {
             isNullAware: token.kind == .nullAwareAccess,
           ),
         );
-        return;
+        return false;
       case .leftParen:
         checkSelector();
         final callee = values.removeLast();
-        delimiters.add(_Call(token, values.length, operators.length, callee));
+        delimiters.add(
+          _Call(
+            token,
+            values.length,
+            operators.length,
+            callee,
+            checkedNullAware: callee == selectorTarget && checkedNullAware,
+          ),
+        );
         advance();
         expectsOperand = true;
-        return;
-      case .leftBracket || .emptyBrackets:
+        return false;
+      case .leftBracket || .emptyBrackets || .emptyBracketsAssign:
         openIndex(isNullAware: false);
-        return;
+        return false;
       case .question:
-        if (tokens[cursor + 1].kind == .leftBracket ||
-            tokens[cursor + 1].kind == .emptyBrackets) {
-          // A nested conditional can take priority over an index here. Its
-          // then-branch starts with a list literal, whose grammar is pending.
-          if (questions.isNotEmpty && questions.last >= operatorBase) {
-            error(
-              'unsupported_syntax',
-              'List and null-aware index disambiguation in conditional '
-                  'branches is not yet supported.',
-              token,
-            );
+        if (_lookahead?.conditionals[cursor]
+            case final _ConditionalBranches branches
+            when tokens[cursor + 1].kind != .leftBracket) {
+          acceptConditional(branches);
+          return false;
+        }
+        if (tokens[cursor + 1].kind == .leftBracket) {
+          if (!(values.last == selectorTarget && checkedNullAware) &&
+              cursor < lookahead.lastColon) {
+            return true;
           }
           advance();
           openIndex(isNullAware: true);
-          return;
+          return false;
         }
       case .bang:
         final operand = values.removeLast();
@@ -289,7 +368,7 @@ final class _Parser {
           ),
         );
         advance();
-        return;
+        return false;
       case .increment || .decrement:
         final operand = values.removeLast();
         checkAssignable(operand, token);
@@ -304,15 +383,25 @@ final class _Parser {
           ),
         );
         advance();
-        return;
+        return false;
       default:
         break;
     }
     final precedence = token.kind.precedence;
     if (precedence == 0) {
       unexpected(unsupported: isUnsupported(token.kind));
-      return;
+      return false;
     }
+    reduceBefore(token);
+    if (token.kind == .question) questions.add(operators.length);
+    operators.add(token);
+    advance();
+    expectsOperand = true;
+    return false;
+  }
+
+  void reduceBefore(Token token) {
+    final precedence = token.kind.precedence;
     while (operators.length > operatorBase) {
       final previous = operators.last;
       final previousPrecedence =
@@ -336,10 +425,6 @@ final class _Parser {
       }
       reduce();
     }
-    if (token.kind == .question) questions.add(operators.length);
-    operators.add(token);
-    advance();
-    expectsOperand = true;
   }
 
   void parseColon() {
@@ -432,6 +517,7 @@ final class _Parser {
           'unsupported_syntax',
           'Pattern assignment parsing is not yet supported.',
           token,
+          preventsConditional: false,
         );
       } else {
         checkAssignable(left, token);
@@ -489,6 +575,7 @@ final class _Parser {
         'invalid_assignment_target',
         'Expected an assignable expression.',
         operator,
+        preventsConditional: false,
       );
     }
   }
@@ -503,6 +590,7 @@ final class _Parser {
         'invalid_selector',
         'Parenthesize the update before accessing its result.',
         current,
+        preventsConditional: false,
       );
     }
   }
@@ -538,7 +626,13 @@ final class _Parser {
     advance();
   }
 
-  void error(String code, String message, Token token) {
+  void error(
+    String code,
+    String message,
+    Token token, {
+    bool preventsConditional = true,
+  }) {
+    if (preventsConditional) hasSyntaxError = true;
     diagnostics.add(
       Diagnostic(
         code: 'parser.$code',

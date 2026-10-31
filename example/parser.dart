@@ -26,4 +26,18 @@ void main() {
   final function = parsedType.node as FunctionTypeAnnotation;
   print(function.returnType!.text); // List<int>
   print(function.parameters.parameters.single.name!.text); // input
+
+  final collection = parseExpression(
+    scan(
+      SourceFile(
+        Uri.parse('memory:collection'),
+        '[for (var item in items) if (item != null) item]',
+      ),
+    ),
+  );
+  if (collection.hasErrors) return;
+  final list = collection.node as CollectionExpression;
+  final loop = list.elements.single as ForElement;
+  print((loop.parts as ForInParts).iterable.text); // items
+  print((loop.body as IfElement).condition.text); // item != null
 }

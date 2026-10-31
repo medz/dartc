@@ -82,8 +82,6 @@ void main() {
     () {
       for (final text in [
         '(a) = b',
-        '[a]',
-        '{a: b}',
         '#name',
         'new C()',
         'const C()',
@@ -103,15 +101,6 @@ void main() {
       );
     },
   );
-
-  test('reports the pending list and conditional disambiguation', () {
-    for (final text in ['a ? b?[i] : c', 'a ? b?[i]++ : c']) {
-      expect(
-        parse(text).diagnostics.map((d) => d.code),
-        contains('parser.unsupported_syntax'),
-      );
-    }
-  });
 
   test('retains lexical diagnostics and immutable error snapshots', () {
     final input = scan(SourceFile(Uri.parse('memory:error'), 'a + `'));

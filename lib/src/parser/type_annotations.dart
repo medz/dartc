@@ -92,7 +92,7 @@ final class _TypeReader(
             end: end,
             arguments: frame.arguments,
           );
-          parser.typeArguments?[frame.index] = (
+          parser._lookahead?.typeArguments[frame.index] = (
             arguments,
             parser.cursor,
             parser.current,
@@ -178,7 +178,9 @@ final class _TypeReader(
       }
     }
     for (final frame in frames) {
-      if (frame is _TypeArguments) parser.typeArguments?[frame.index] = null;
+      if (frame is _TypeArguments) {
+        parser._lookahead?.typeArguments[frame.index] = null;
+      }
     }
     if (relationalFallback case (final head, final index)) {
       parser.cursor = index;
@@ -230,7 +232,7 @@ final class _TypeReader(
       isVoid: token.kind == .keywordVoid && prefix == null,
     );
     if (current.kind == .less && !head.isVoid) {
-      final cache = parser.typeArguments;
+      final cache = parser._lookahead?.typeArguments;
       if (cache != null && cache.containsKey(parser.cursor)) {
         final cached = cache[parser.cursor];
         if (cached == null) {

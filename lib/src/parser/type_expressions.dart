@@ -8,9 +8,10 @@ extension on _Parser {
         !(first.kind.isIdentifier && tokens[cursor + 2].kind == .dot)) {
       return false;
     }
+    if (cursor >= lookahead.lastTypeArgumentCloser) return false;
     final start = cursor;
     final remainder = current;
-    final cache = typeArguments ??= {};
+    final cache = lookahead.typeArguments;
     TypeArgumentList? arguments;
     if (cache.containsKey(start)) {
       final cached = cache[start];
@@ -37,6 +38,7 @@ extension on _Parser {
           operators.length,
           target,
           typeArguments: arguments,
+          checkedNullAware: target == selectorTarget && checkedNullAware,
         ),
       );
       advance();
@@ -51,6 +53,7 @@ extension on _Parser {
           typeArguments: arguments,
         ),
       );
+      if (target == selectorTarget) selectorTarget = values.last;
     }
     return true;
   }
@@ -139,9 +142,6 @@ extension on _Parser {
         token.kind == .leftParen ||
         token.kind == .leftBracket ||
         token.kind == .emptyBrackets ||
-        token.kind == .question &&
-            (tokens[cursor + 1].kind == .leftBracket ||
-                tokens[cursor + 1].kind == .emptyBrackets) ||
         token.kind == .bang ||
         token.kind == .increment ||
         token.kind == .decrement) {

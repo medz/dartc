@@ -39,9 +39,12 @@
 | [显式实例化][constructor-tearoffs]与泛型调用 | `f<T>`、`f<T>(x)`、`C<T>.named(x)`；保留嵌套类型实参，与关系运算及移位区分；未进行名称绑定或判断调用对象类别 | [types_test.dart](../test/parser/types_test.dart) 泛型调用、函数值、比较与移位用例 |
 | 类型测试与转换 | `is`、`is!`、`as`，包括泛型、函数及 record 类型；区分可空类型标记与条件表达式，检查运算的语法结合规则 | [types_test.dart](../test/parser/types_test.dart) 类型运算用例；类型语法范围见[类型解析](types.md#类型解析-api) |
 | [Record 字面量][record-literals] | 空 record、单位置字段的尾逗号、交错的位置和命名字段；区分 `(value)` 与 `(value,)`，尚不接受显式 `const` | [expressions_test.dart](../test/parser/expressions_test.dart) |
+| [集合字面量与元素][collection-elements] | List、大括号字面量、显式 `const` 和类型实参、尾逗号、普通元素和键值条目、`...` / `...?`、嵌套 `if` / `else`；Set/Map 分类、类型推断和常量资格留待分析 | [collections_test.dart](../test/parser/collections_test.dart) |
+| [空感知集合元素][null-aware-elements] | `?expression`、独立的空感知键和值；`?[...]` 与条件表达式按上下文消歧，保留赋值目标错误的诊断 | [collections_test.dart](../test/parser/collections_test.dart) |
+| 集合循环 | 同步 `for` 和 `for-in`；表达式或普通变量声明初始化、可省略的条件、多条更新、已有或声明的迭代变量；保留类型、变量关键字和源顺序，不补写空条件 | [collections_test.dart](../test/parser/collections_test.dart) |
 | 不完整或无效的输入 | 报告缺少的操作数、名称、冒号和闭合括号；以零宽节点恢复操作数，继续处理后续实参；不修改源文本或输入 token | [recovery_test.dart](../test/parser/recovery_test.dart) |
 
-尚缺字符串插值、Symbol、集合字面量及元素、显式 `new` / `const`、`super`、级联、点简写、函数表达式、模式赋值、switch、`throw` 和异步上下文。条件分支中未加括号的 `?[...]` 还需要集合语法参与消歧，当前报告 `parser.unsupported_syntax`；`a ? (b?[i]) : c` 可解析。这些缺口产生的诊断不表示相应 Dart 写法非法。
+尚缺字符串插值、Symbol、显式实例创建、const record、`super`、级联、点简写、函数表达式、模式赋值、switch、`throw` 和异步上下文。集合中的 if-case、模式循环头和声明元数据尚未解析；`await for` 在当前同步上下文中报告诊断。这些缺口产生的诊断不表示相应 Dart 写法非法。
 
 错误结果可能只覆盖部分输入，不能直接当作合法表达式使用。解析不进行名称绑定、类型检查、常量求值或执行，也不改变下述已发布编译器的支持范围。
 

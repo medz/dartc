@@ -48,6 +48,19 @@ String shape(AstNode node) {
       '(${name.text}: ${shape(value)})',
     AdjacentStringsExpression() => form('strings'),
     MissingExpression() => '<missing>',
+    CollectionExpression(:final kind) => form(
+      kind == .list ? 'list' : 'braces',
+    ),
+    SpreadElement(:final isNullAware) => form(isNullAware ? '...?' : '...'),
+    NullAwareElement() => form('?'),
+    MapEntryElement(:final isNullAwareKey, :final isNullAwareValue) => form(
+      '${isNullAwareKey ? '?' : ''}:${isNullAwareValue ? '?' : ''}',
+    ),
+    IfElement() => form('if'),
+    ForElement() => form('for'),
+    ForParts() => form('parts'),
+    ForInParts() => form('in'),
+    DeclaredIdentifier(:final keyword) => form(keyword.name),
     _ => throw StateError('Unhandled test node ${node.runtimeType}'),
   };
 }
