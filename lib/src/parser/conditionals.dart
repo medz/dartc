@@ -275,6 +275,7 @@ extension on _Parser {
     if (result case _ConditionalBranches()) {
       reduceBefore(current);
       final condition = values.removeLast();
+      checkValue(condition);
       final thenExpression = result.thenBranch.materialize(diagnostics);
       final elseExpression = result.elseBranch.materialize(diagnostics);
       values.add(

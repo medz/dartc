@@ -25,7 +25,8 @@ String shape(AstNode node) {
     Identifier() ||
     LiteralExpression() ||
     StringLiteralExpression() ||
-    ThisExpression() => node.text,
+    ThisExpression() ||
+    SuperExpression() => node.text,
     BinaryExpression(:final op) => form(op.spelling),
     AssignmentExpression(:final op) => form(op.spelling),
     UnaryExpression(:final op) => form(op.spelling),
@@ -43,7 +44,11 @@ String shape(AstNode node) {
       '(call ${shape(callee)}${arguments.arguments.map((a) => ' ${shape(a)}').join()})',
     Argument(:final name, :final value) =>
       name == null ? shape(value) : '(${name.text}: ${shape(value)})',
-    RecordExpression() => form('record'),
+    RecordExpression(:final hasConstKeyword) => form(
+      hasConstKeyword ? 'const record' : 'record',
+    ),
+    InstanceCreationExpression(:final kind) => form(kind.name),
+    ArgumentList() => form('arguments'),
     NamedRecordField(:final name, :final value) =>
       '(${name.text}: ${shape(value)})',
     AdjacentStringsExpression() => form('strings'),

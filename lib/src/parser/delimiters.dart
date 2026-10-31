@@ -16,10 +16,19 @@ sealed class _Sequence(super.opening, super.valueBase, super.operatorBase)
   TokenKind get closing => .rightParen;
 }
 
-final class _Group(super.opening, super.valueBase, super.operatorBase)
-    extends _Sequence {
+final class _Group(
+  super.opening,
+  super.valueBase,
+  super.operatorBase, {
+  final Token? constKeyword,
+}) extends _Sequence {
   final List<RecordField> fields = [];
   bool hasComma = false;
+}
+
+sealed class _Arguments(super.opening, super.valueBase, super.operatorBase)
+    extends _Sequence {
+  final List<Argument> arguments = [];
 }
 
 final class _Call(
@@ -29,9 +38,17 @@ final class _Call(
   final Expression callee, {
   final TypeArgumentList? typeArguments,
   final bool checkedNullAware = false,
-}) extends _Sequence {
-  final List<Argument> arguments = [];
-}
+}) extends _Arguments;
+
+final class _Construction(
+  super.opening,
+  super.valueBase,
+  super.operatorBase,
+  final Token keyword,
+  final List<Identifier> components,
+  final TypeArgumentList? typeArguments,
+  final Identifier? constructorName,
+) extends _Arguments;
 
 final class _Index(
   super.opening,
@@ -100,7 +117,7 @@ extension on _Parser {
     final value = finishExpression(frame.valueBase, frame.operatorBase);
     final name = frame.name;
     switch (frame) {
-      case _Call():
+      case _Arguments():
         frame.arguments.add(
           Argument(
             source: source,
@@ -191,6 +208,17 @@ extension on _Parser {
             frame.name != null) {
           finishElement(frame);
         }
+        if (frame case _Group(
+          constKeyword: final Token keyword,
+          fields: [Expression()],
+          hasComma: false,
+        )) {
+          error(
+            'expected_record_comma',
+            'A record with one positional field needs a trailing comma.',
+            keyword,
+          );
+        }
         expression = switch (frame) {
           _Call() => InvocationExpression(
             source: source,
@@ -205,7 +233,28 @@ extension on _Parser {
               arguments: frame.arguments,
             ),
           ),
-          _Group(fields: [final Expression value], hasComma: false) =>
+          _Construction() => InstanceCreationExpression(
+            source: source,
+            start: frame.keyword.start,
+            end: end,
+            kind: frame.keyword.kind == .keywordConst
+                ? .constKeyword
+                : .newKeyword,
+            name: frame.components,
+            typeArguments: frame.typeArguments,
+            constructorName: frame.constructorName,
+            arguments: ArgumentList(
+              source: source,
+              start: frame.opening.start,
+              end: end,
+              arguments: frame.arguments,
+            ),
+          ),
+          _Group(
+            fields: [final Expression value],
+            hasComma: false,
+            constKeyword: null,
+          ) =>
             ParenthesizedExpression(
               source: source,
               start: frame.opening.start,
@@ -214,8 +263,9 @@ extension on _Parser {
             ),
           _Group() => RecordExpression(
             source: source,
-            start: frame.opening.start,
+            start: frame.constKeyword?.start ?? frame.opening.start,
             end: end,
+            hasConstKeyword: frame.constKeyword != null,
             fields: frame.fields,
           ),
         };
@@ -225,7 +275,9 @@ extension on _Parser {
     switch (frame) {
       case _Call(:final checkedNullAware, :final callee)
           when callee is! IdentifierExpression &&
-              callee is! PropertyAccessExpression:
+              callee is! PropertyAccessExpression &&
+              callee is! ThisExpression &&
+              callee is! SuperExpression:
         selectorTarget = expression;
         this.checkedNullAware = checkedNullAware;
       case _Index(:final checkedNullAware):

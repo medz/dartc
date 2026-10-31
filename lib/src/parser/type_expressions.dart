@@ -1,6 +1,90 @@
 part of 'parser.dart';
 
 extension on _Parser {
+  void parseConstruction() {
+    final keyword = current;
+    advance();
+    Identifier readName({bool continuation = false}) {
+      final token = current;
+      if (token.kind.isIdentifier ||
+          continuation && token.kind == .keywordNew) {
+        advance();
+        return identifier(token);
+      }
+      error(
+        token.kind == .dot ? 'unsupported_syntax' : 'expected_identifier',
+        token.kind == .dot
+            ? 'Dot shorthand parsing is not yet supported.'
+            : 'Expected a constructor or type name.',
+        token,
+      );
+      if (token.kind.isKeyword) {
+        advance();
+        return identifier(token);
+      }
+      return Identifier(source: source, start: token.start, end: token.start);
+    }
+
+    final components = [readName()];
+    if (current.kind == .dot) {
+      advance();
+      components.add(readName(continuation: true));
+    }
+    TypeArgumentList? types;
+    if (current.kind == .less) {
+      final reader = _TypeReader(this);
+      types = reader.read(arguments: true) as TypeArgumentList?;
+      if (reader.failure case final failure?) {
+        error(failure.$1, failure.$2, failure.$3);
+      }
+    }
+    Identifier? constructorName;
+    if (current.kind == .dot) {
+      advance();
+      final name = readName(continuation: true);
+      if (types == null) {
+        components.add(name);
+      } else {
+        constructorName = name;
+      }
+    }
+    if (current.kind != .leftParen) {
+      error('expected_arguments', 'Expected constructor arguments.', current);
+      values.add(
+        InstanceCreationExpression(
+          source: source,
+          start: keyword.start,
+          end: current.start,
+          kind: keyword.kind == .keywordConst ? .constKeyword : .newKeyword,
+          name: components,
+          typeArguments: types,
+          constructorName: constructorName,
+          arguments: ArgumentList(
+            source: source,
+            start: current.start,
+            end: current.start,
+            arguments: const [],
+          ),
+        ),
+      );
+      expectsOperand = false;
+      return;
+    }
+    delimiters.add(
+      _Construction(
+        current,
+        values.length,
+        operators.length,
+        keyword,
+        components,
+        types,
+        constructorName,
+      ),
+    );
+    advance();
+    expectsOperand = true;
+  }
+
   bool tryTypeArguments() {
     final first = tokens[cursor + 1];
     if (!first.kind.isTypeName &&
@@ -44,6 +128,7 @@ extension on _Parser {
       advance();
       expectsOperand = true;
     } else {
+      checkValue(target);
       values.add(
         TypeInstantiationExpression(
           source: source,
@@ -70,6 +155,7 @@ extension on _Parser {
       reduce();
     }
     final expression = values.removeLast();
+    checkValue(expression);
     if (expression is CastExpression || expression is TypeTestExpression) {
       error(
         'chained_type_operator',

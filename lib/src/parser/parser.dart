@@ -42,9 +42,9 @@ final class ParseResult<T extends AstNode> {
 ///
 /// The context is synchronous: `await` and `yield` can be identifiers. Supported
 /// forms include scalar literals, strings with interpolation and adjacency,
-/// records, operators, generic calls, type tests and casts, member access,
-/// indexing, and collection literals with spreads, null-aware elements, if/else,
-/// and ordinary for/for-in headers.
+/// records, operators, generic calls, explicit constructor calls, type tests and
+/// casts, super receivers, member access, indexing, and collection literals with
+/// spreads, null-aware elements, if/else, and ordinary for/for-in headers.
 /// Other forms produce diagnostics until their grammar is implemented. Parsing
 /// does not resolve names or check types.
 ///
@@ -216,8 +216,37 @@ final class _Parser {
             .leftBrace:
           openCollection();
           return;
-        case .keywordConst || .less:
+        case .keywordConst:
+          switch (tokens[cursor + 1].kind) {
+            case .leftParen:
+              advance();
+              delimiters.add(
+                _Group(
+                  current,
+                  values.length,
+                  operators.length,
+                  constKeyword: token,
+                ),
+              );
+              advance();
+            case .less ||
+                .leftBracket ||
+                .emptyBrackets ||
+                .emptyBracketsAssign ||
+                .leftBrace:
+              parseCollectionPrefix();
+            default:
+              parseConstruction();
+          }
+          return;
+        case .keywordNew:
+          parseConstruction();
+          return;
+        case .less:
           parseCollectionPrefix();
+          return;
+        case .hash:
+          parseSymbol();
           return;
         case .leftParen:
           delimiters.add(_Group(token, values.length, operators.length));
@@ -250,6 +279,10 @@ final class _Parser {
         case .keywordThis:
           values.add(
             ThisExpression(source: source, start: token.start, end: token.end),
+          );
+        case .keywordSuper:
+          values.add(
+            SuperExpression(source: source, start: token.start, end: token.end),
           );
         case .stringLiteral || .stringStart:
           parseStrings();
@@ -336,6 +369,46 @@ final class _Parser {
     }
   }
 
+  void parseSymbol() {
+    final hash = current;
+    advance();
+    var end = current.start;
+    if (current.kind.isSymbolOperator || current.kind == .keywordVoid) {
+      end = current.end;
+      advance();
+    } else {
+      while (true) {
+        if (current.kind.isIdentifier) {
+          end = current.end;
+          advance();
+        } else {
+          error(
+            'expected_identifier',
+            'Expected a symbol name or operator.',
+            current,
+          );
+          if (current.kind.isKeyword) {
+            end = current.end;
+            advance();
+          }
+          break;
+        }
+        if (current.kind != .dot) break;
+        end = current.end;
+        advance();
+      }
+    }
+    values.add(
+      LiteralExpression(
+        source: source,
+        start: hash.start,
+        end: end,
+        kind: .symbol,
+      ),
+    );
+    expectsOperand = false;
+  }
+
   bool parseContinuation() {
     final token = current;
     switch (token.kind) {
@@ -355,6 +428,14 @@ final class _Parser {
           advance();
         }
         final target = values.removeLast();
+        if (target is SuperExpression && token.kind == .nullAwareAccess) {
+          error(
+            'null_aware_super',
+            "A super member access cannot use '?.'.",
+            token,
+            preventsConditional: false,
+          );
+        }
         values.add(
           PropertyAccessExpression(
             source: source,
@@ -408,6 +489,7 @@ final class _Parser {
         }
       case .bang:
         final operand = values.removeLast();
+        checkValue(operand);
         values.add(
           NullAssertionExpression(
             source: source,
@@ -509,6 +591,7 @@ final class _Parser {
           ),
         );
       } else {
+        if (token.kind == .bang) checkValue(right);
         values.add(
           UnaryExpression(
             source: source,
@@ -546,6 +629,9 @@ final class _Parser {
         );
       }
       final condition = values.removeLast();
+      checkValue(condition);
+      checkValue(thenExpression);
+      checkValue(elseExpression);
       values.add(
         ConditionalExpression(
           source: source,
@@ -559,6 +645,7 @@ final class _Parser {
       return;
     }
     final left = values.removeLast();
+    checkValue(right);
     if (token.kind.precedence == _assignmentPrecedence) {
       if (token.kind == .assign &&
           (left is ParenthesizedExpression || left is RecordExpression)) {
@@ -582,6 +669,7 @@ final class _Parser {
         ),
       );
     } else {
+      if (token.kind.precedence < _equalityPrecedence) checkValue(left);
       values.add(
         BinaryExpression(
           source: source,
@@ -601,7 +689,9 @@ final class _Parser {
       reduce();
     }
     assert(values.length == valueBase + 1);
-    return values.removeLast();
+    final value = values.removeLast();
+    checkValue(value);
+    return value;
   }
 
   void ensureOperand() {
@@ -629,6 +719,19 @@ final class _Parser {
     }
   }
 
+  void checkValue(Expression expression) {
+    if (expression is SuperExpression) invalidSuperValue(expression);
+  }
+
+  void invalidSuperValue(SuperExpression expression) {
+    error(
+      'invalid_super_value',
+      'Use super as a member receiver or an operator receiver.',
+      Token(.keywordSuper, source, expression.start, expression.end),
+      preventsConditional: false,
+    );
+  }
+
   void checkSelector() {
     var target = values.last;
     while (target is NullAssertionExpression) {
@@ -645,15 +748,11 @@ final class _Parser {
   }
 
   bool isUnsupported(TokenKind kind) => switch (kind) {
-    .keywordNew ||
-    .keywordConst ||
-    .keywordSuper ||
     .keywordThrow ||
     .keywordSwitch ||
     .leftBracket ||
     .emptyBrackets ||
     .leftBrace ||
-    .hash ||
     .cascade ||
     .nullAwareCascade ||
     .dot ||

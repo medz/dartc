@@ -48,4 +48,15 @@ void main() {
   final string = message.node as InterpolatedStringExpression;
   final interpolation = string.parts[1] as StringInterpolation;
   print(interpolation.expression.text); // price * count
+
+  final creation = parseExpression(
+    scan(
+      SourceFile(Uri.parse('memory:creation'), 'new p.Box<int>.named(value)'),
+    ),
+  );
+  if (creation.hasErrors) return;
+  final constructor = creation.node as InstanceCreationExpression;
+  print(constructor.name.map((n) => n.text).join('.')); // p.Box
+  print(constructor.typeArguments!.text); // <int>
+  print(constructor.constructorName!.text); // named
 }

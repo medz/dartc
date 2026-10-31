@@ -7,6 +7,30 @@ const _relationalPrecedence = 7;
 const _prefixPrecedence = 14;
 
 extension on TokenKind {
+  bool get isSymbolOperator => switch (this) {
+    .plus ||
+    .minus ||
+    .star ||
+    .slash ||
+    .truncateDivide ||
+    .percent ||
+    .ampersand ||
+    .bar ||
+    .caret ||
+    .tilde ||
+    .less ||
+    .lessEqual ||
+    .greater ||
+    .greaterEqual ||
+    .shiftLeft ||
+    .shiftRight ||
+    .unsignedShiftRight ||
+    .equal ||
+    .emptyBrackets ||
+    .emptyBracketsAssign => true,
+    _ => false,
+  };
+
   int get precedence => switch (this) {
     .assign ||
     .starAssign ||

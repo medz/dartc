@@ -82,12 +82,8 @@ void main() {
     () {
       for (final text in [
         '(a) = b',
-        '#name',
-        'new C()',
-        'const C()',
         'a..b()',
         'throw a',
-        'super.x',
         '.new()',
         '() => a',
         'switch (a) { _ => b }',
