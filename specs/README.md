@@ -22,11 +22,11 @@
 
 | 标记 | 含义 |
 | --- | --- |
-| 支持 | 支持该行明确限定的能力，不扩展到整条语言规范。 |
-| 部分 | 仅支持正文列出的子集；限制同样是使用约束。 |
-| 未支持 | 当前不提供该能力；解析接受或编译拒绝都不等于实现其语义。 |
-| 待确认 | 不能据现有信息作出支持承诺。 |
-| — | 该阶段不适用；例如库装入没有独立的表达式解析操作。 |
+| ✅ 支持 | 支持该行明确限定的能力，不扩展到整条语言规范。 |
+| 🟡 部分 | 仅支持正文列出的子集；限制同样是使用约束。 |
+| ❌ 未支持 | 当前不提供该能力；解析接受或编译拒绝都不等于实现其语义。 |
+| ❓ 待确认 | 不能据现有信息作出支持承诺。 |
+| ➖ 不适用 | 该特性不适用该阶段，例如名称绑定不属于语法解析；不表示能力未实现或 API 未提供。 |
 
 三列互不替代：
 
@@ -47,6 +47,6 @@ Wasm 是后续目标，当前不提供 Wasm 输出。以下能力明确排除，
 
 ## 规范依据
 
-- [官方规范入口](https://dart.dev/resources/language/spec)指出 Dart 3 主规范尚未覆盖全部特性。章节编号使用 [2026-10-14 草案](https://dart.dev/to/spec-draft)的条款名；封面的 `Version 2.13-dev` 不是完整 Dart 3 规范。
+- [官方规范入口](https://dart.dev/resources/language/spec)指出 Dart 3 主规范尚未覆盖全部特性。[当前官方草案](https://dart.dev/to/spec-draft)便于查阅条款名和章节编号，但地址内容会更新，不等同于下列固定源码快照；封面的 `Version 2.13-dev` 不是完整 Dart 3 规范。
 - 可追溯的主规范固定为 [dart-lang/language@6a254a68](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)，新特性使用该版本的 [accepted 规范](https://github.com/dart-lang/language/tree/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted)。未接受提案和 `future-releases` 不自动进入兼容目标。
 - 各页保留影响用户程序的规范与 SDK 差异，并注明涉及的 SDK 版本。实现几个标准库方法不代表语言条款已完整符合。

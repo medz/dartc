@@ -6,21 +6,21 @@
 
 | 特性 | 语法解析 | 语义分析 API | 编译/运行 | 使用限制 |
 | --- | --- | --- | --- | --- |
-| 常量、变量、类型、通配、括号模式 | 支持 | 未支持 | 部分 | 类型和常量限当前模型；模式 `_` 不引入绑定。 |
-| 逻辑与/或、关系模式 | 支持 | 未支持 | 部分 | 用户关系运算符限非泛型类及有界参数；用户 ==/!= 未支持。 |
-| cast、null-check、null-assert 模式 | 支持 | 未支持 | 部分 | cast/空断言失败无可捕获错误对象；null-check 失败只是不匹配。 |
-| 对象模式、字段名推导 | 支持 | 未支持 | 部分 | 已有属性/方法值可读；动态/扩展成员、泛型父接口仍缺。 |
-| List 模式及 rest | 支持 | 未支持 | 部分 | 支持嵌套与切片；一般 List 子类型覆写仍有限制。 |
-| Map、record 模式 | 支持 | 未支持 | 未支持 | 没有解构、匹配缓存和空间运算。 |
-| switch 表达式 | 支持 | 未支持 | 部分 | 从 3.0 起，不是常量表达式。 |
-| 语句和 List 元素 if-case | 支持 | 未支持 | 部分 | 运行时 List 可用，Set/Map 与常量 if-case 未支持。 |
-| 局部模式声明/赋值 | 支持 | 未支持 | 部分 | 对象/List 等子集，赋值仅限已有局部变量/参数。 |
-| for/for-in 模式循环头 | 支持 | 未支持 | 部分 | for-in 限 List，每轮独立绑定；late 未支持。 |
-| switch 语句、guard、共享 case | 支持 | 未支持 | 部分 | Dart 3 隐式 break；旧版常量 case 规则另见正文。 |
-| bool/Null/Never/枚举穷尽性 | — | 未支持 | 部分 | 守卫与关系模式不贡献覆盖。 |
-| 非泛型 sealed 层次穷尽性 | — | 未支持 | 部分 | 泛型父接口和完整解构字段空间仍缺。 |
-| List 长度与对象属性空间覆盖 | — | 未支持 | 部分 | 有限长度联合/全属性覆盖，不是完整空间代数。 |
-| 完整不可达 case 诊断 | — | 未支持 | 未支持 | 不可达臂仍检查名称、类型及其他静态义务。 |
+| 常量、变量、类型、通配、括号模式 | ✅ | ❌ | 🟡 | 类型和常量限当前模型；模式 `_` 不引入绑定。 |
+| 逻辑与/或、关系模式 | ✅ | ❌ | 🟡 | 用户关系运算符限非泛型类及有界参数；用户 ==/!= 未支持。 |
+| cast、null-check、null-assert 模式 | ✅ | ❌ | 🟡 | cast/空断言失败抛可捕获 TypeError；null-check 失败只是不匹配。 |
+| 对象模式、字段名推导 | ✅ | ❌ | 🟡 | 已有属性/方法值可读；动态/扩展成员、泛型父接口仍缺。 |
+| List 模式及 rest | ✅ | ❌ | 🟡 | 支持嵌套与切片；一般 List 子类型覆写仍有限制。 |
+| Map、record 模式 | ✅ | ❌ | ❌ | 没有解构、匹配缓存和空间运算。 |
+| switch 表达式 | ✅ | ❌ | 🟡 | 从 3.0 起，不是常量表达式。 |
+| 语句和 List 元素 if-case | ✅ | ❌ | 🟡 | 运行时 List 可用，Set/Map 与常量 if-case 未支持。 |
+| 局部模式声明/赋值 | ✅ | ❌ | 🟡 | 对象/List 等子集，赋值仅限已有局部变量/参数。 |
+| for/for-in 模式循环头 | ✅ | ❌ | 🟡 | for-in 限 List，每轮独立绑定；late 未支持。 |
+| switch 语句、guard、共享 case | ✅ | ❌ | 🟡 | Dart 3 隐式 break；旧版常量 case 规则另见正文。 |
+| bool/Null/Never/枚举穷尽性 | ➖ | ❌ | 🟡 | 守卫与关系模式不贡献覆盖。 |
+| 非泛型 sealed 层次穷尽性 | ➖ | ❌ | 🟡 | 泛型父接口和完整解构字段空间仍缺。 |
+| List 长度与对象属性空间覆盖 | ➖ | ❌ | 🟡 | 有限长度联合/全属性覆盖，不是完整空间代数。 |
+| 完整不可达 case 诊断 | ➖ | ❌ | ❌ | 不可达臂仍检查名称、类型及其他静态义务。 |
 
 ## 模式解析 API
 
@@ -49,7 +49,7 @@ CLI 从 3.0 起支持 switch 表达式和 if-case。选择值只求一次，按�
 
 常量模式将常量放在比较左侧；关系 RHS 必须是常量，按运算符参数上下文检查实际值类型。显式变量类型是声明类型，不隐式缩成选择值类型；无类型变量匹配 Null 时推为 dynamic。var/final/带类型的 `_` 都是通配模式，模式 `_` 从 3.0 起不绑定，不受普通通配变量 3.7 门槛影响。
 
-&&/|| 保留优先级和短路。&& 禁止重复变量；|| 两侧须绑定同名、同 final 性质和同声明类型的变量，成功后表示共同绑定。as 检查后进入内部模式，? 对 null 匹配失败，! 对 null 失败；内部变量取检查后类型，但**cast/空断言模式检查失败仍可直接终止进程**，没有对应可捕获错误对象。
+&&/|| 保留优先级和短路。&& 禁止重复变量；|| 两侧须绑定同名、同 final 性质和同声明类型的变量，成功后表示共同绑定。as 检查后进入内部模式，类型不符时抛出可捕获 TypeError；? 对 null 只是不匹配，! 对 null 抛出可捕获 TypeError。内部变量取检查后类型；这些转换/空断言错误与解构的结构不匹配不同，后者仍会直接终止进程。
 
 每个 switch 表达式臂先建立模式变量作用域再绑定模式、guard、结果，因此局部名可遮蔽模式中的类型/常量。as/when 不能作模式变量名或裸常量名。switch 表达式模式变量在 guard 和结果中只读，闭包也受限制；捕获保留本次匹配值，包括 guard 失败后逃逸的闭包。
 
@@ -91,11 +91,11 @@ void main() {
 }
 ```
 
-从 3.0 起支持局部 var/final 模式声明、已有局部变量/参数的模式赋值，以及语句/List 元素 for/for-in 解构，复用对象、List、括号、逻辑与、cast 和空断言模式。支持元数据、上下文 schema、确定赋值、final 首次写入及逐轮捕获；RHS 一次求值，赋值表达式保留其值和类型。拒绝 refutable 模式、重复名、声明前引用、非局部赋值及赋值中的类型声明。late、Map/record、一般 Iterable 和失败错误对象仍缺。
+从 3.0 起支持局部 var/final 模式声明、已有局部变量/参数的模式赋值，以及语句/List 元素 for/for-in 解构，复用对象、List、括号、逻辑与、cast 和空断言模式。支持元数据、上下文 schema、确定赋值、final 首次写入及逐轮捕获；RHS 一次求值，赋值表达式保留其值和类型。拒绝 refutable 模式、重复名、声明前引用、非局部赋值及赋值中的类型声明。late、Map/record 和一般 Iterable 仍缺；解构的结构不匹配（如 List 长度不符）仍直接终止进程，没有可捕获错误对象，不能依赖 catch/finally。
 
 显式类型提供下行 schema，未注解变量留未知项，List 子模式按最大下界合并，cast 不提供上下文，空断言提供可空上下文。dynamic 输入有隐式检查，其他输入须为所需类型子类型；解构不隐式提取 call，模式赋值不按元素类型提升目标变量。
 
-**赋值当前非原子**：按 SDK 3.13.7 CFE 子模式顺序写回，`C(a: x, b: y) = value` 的 b getter 能看见新 x，后续空断言失败不撤销已写值。固定规范要求匹配完成后统一写回；当前不遵循该原子性描述，且失败后 catch 观察不受支持。
+**赋值当前非原子**：按 SDK 3.13.7 CFE 子模式顺序写回，`C(a: x, b: y) = value` 的 b getter 能看见新 x，后续空断言失败抛出可捕获 TypeError，但不撤销已写值。固定规范要求匹配完成后统一写回，当前不遵循该原子性描述；这不改变结构不匹配仍不可捕获的限制。
 
 SDK 3.13.7 CFE/analyzer 允许 guard 中 `[x] = [value]` 修改本 case 变量（含闭包），但拒绝普通 `x = value`；dartc 采用该区别，固定规范没有说明此例外。对 `var ([a] && [List<int> b]) = [[]]`，CFE 使用共同 List<int> 元素上下文，analyzer 用 List<dynamic> 报错，dartc 采用 CFE 上下文。
 
@@ -120,4 +120,4 @@ case 标签 continue 直接入其非空 body，不重试模式/guard，即使标
 
 ## 规范依据
 
-[模式特性规范](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md)、[穷尽性](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/exhaustiveness.md)、[对象模式类型推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md#L2118-L2141)。
+[模式特性规范](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md)、[穷尽性](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/exhaustiveness.md)、[对象模式类型推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md#type-checking-and-pattern-required-type)。

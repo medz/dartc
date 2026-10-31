@@ -6,18 +6,18 @@
 
 | 特性 | 语法解析 | 语义分析 API | 编译/运行 | 使用限制 |
 | --- | --- | --- | --- | --- |
-| 块、空语句、表达式语句 | 支持 | 未支持 | 部分 | 表达式自身仍受支持子集限制。 |
-| 局部变量与同步非泛型局部函数 | 支持 | 未支持 | 部分 | 绑定、final/late、捕获见[变量](variables.md)和[函数](functions.md)。 |
-| if/else、while、do、普通 for | 支持 | 未支持 | 部分 | 支持短路、部分流合并；完整流分析仍缺。 |
-| for-in | 支持 | 未支持 | 部分 | 限 List；无一般 Iterable/Iterator 和可捕获并发修改错误。 |
-| if-case、模式声明及循环头 | 支持 | 未支持 | 部分 | 不含 Map/record 解构，见[模式](patterns.md)。 |
-| switch、守卫、共享 case、隐式 break | 支持 | 未支持 | 部分 | 按语言版本区分常量 case 和模式规则。 |
-| 标签、break、continue | 支持 | 未支持 | 部分 | CLI 绑定目标；parser 不检查目标存在或种类。 |
-| return 与正常完成检查 | 支持 | 未支持 | 部分 | 非空结果不能正常落空，生成器执行未支持。 |
-| try/on/catch、rethrow、finally | 支持 | 未支持 | 部分 | 仅同步展开，自动错误未全部对象化。 |
-| await for | 支持 | 未支持 | 未支持 | 仅异步函数体上下文可解析；无 Stream 暂停/取消。 |
-| yield/yield* | 支持 | 未支持 | 未支持 | 仅生成器体上下文可解析；无惰性 Iterable/Stream 输出。 |
-| assert | 支持 | 未支持 | 未支持 | 无断言启用模式或自动 AssertionError 抛出。 |
+| 块、空语句、表达式语句 | ✅ | ❌ | 🟡 | 表达式自身仍受支持子集限制。 |
+| 局部变量与同步非泛型局部函数 | ✅ | ❌ | 🟡 | 绑定、final/late、捕获见[变量](variables.md)和[函数](functions.md)。 |
+| if/else、while、do、普通 for | ✅ | ❌ | 🟡 | 支持短路、部分流合并；完整流分析仍缺。 |
+| for-in | ✅ | ❌ | 🟡 | 限 List；无一般 Iterable/Iterator 和可捕获并发修改错误。 |
+| if-case、模式声明及循环头 | ✅ | ❌ | 🟡 | 不含 Map/record 解构，见[模式](patterns.md)。 |
+| switch、守卫、共享 case、隐式 break | ✅ | ❌ | 🟡 | 按语言版本区分常量 case 和模式规则。 |
+| 标签、break、continue | ✅ | ❌ | 🟡 | CLI 绑定目标；parser 不检查目标存在或种类。 |
+| return 与正常完成检查 | ✅ | ❌ | 🟡 | 非空结果不能正常落空，生成器执行未支持。 |
+| try/on/catch、rethrow、finally | ✅ | ❌ | 🟡 | 仅同步展开，自动错误未全部对象化。 |
+| await for | ✅ | ❌ | ❌ | 仅异步函数体上下文可解析；无 Stream 暂停/取消。 |
+| yield/yield* | ✅ | ❌ | ❌ | 仅生成器体上下文可解析；无惰性 Iterable/Stream 输出。 |
+| assert | ✅ | ❌ | ❌ | 无断言启用模式或自动 AssertionError 抛出。 |
 
 ## 语句解析 API
 
@@ -42,7 +42,7 @@ int sum(List<int> values) {
 
 for 声明的闭包绑定每轮独立，更新前复制当前值；for-in 的声明变量也逐轮独立，使用外部已有变量则共享绑定。模式循环头共用[模式绑定规则](patterns.md#声明赋值与循环解构)。
 
-for-in 当前按 List 长度与索引迭代，来源一次求值，dynamic 来源须为 List，逐元素检查类型。每次迭代步先检查初始长度，改长在下次取元素/判定结束前失败，break 后不再检查；替换元素或步间恢复原长度可继续。这同时适用于语句和集合。**长度失败仍终止进程，不能捕获 ConcurrentModificationError**，与 List.toString 的已支持错误对象不同。
+for-in 当前按 List 长度与索引迭代，来源一次求值，dynamic 来源须为 List，逐元素检查类型。每次迭代步先检查初始长度，长度发生变化会在下次取元素/判定结束前失败，break 后不再检查；替换元素或步间恢复原长度可继续。这同时适用于语句和集合。**长度失败仍终止进程，不能捕获 ConcurrentModificationError**，与 List.toString 的已支持错误对象不同。
 
 标签支持嵌套查找、块 break 和循环 continue；switch case 标签只接受 continue，不能 break。重复/不可见 case 标签及错误目标被诊断。跨越 try/catch 的跳转执行对应 finally，在块内跳转不提前清理；case 跳转不重新匹配模式或守卫。
 
@@ -95,14 +95,14 @@ CLI 提供 Error、AssertionError、TypeError、ArgumentError、RangeError、Ind
 
 | 自动失败来源 | 当前行为 |
 | --- | --- |
-| 已支持类型转换、动态 bool 条件、空断言、dynamic null throw、协变写入/入口 | 抛可捕获 TypeError；文案尚缺实际值、目标类型或参数名。 |
+| 已支持类型转换、动态 bool 条件、空断言（含模式 cast/空断言）、dynamic null throw、协变写入/入口 | 抛可捕获 TypeError；文案尚缺实际值、目标类型或参数名。 |
 | 非有限数值转整数、非有限浮点整除 | 抛 UnsupportedError。 |
 | 固定长度/只读 List 的已支持变更 | 抛 UnsupportedError，类型检查先于只读性和范围，失败不改列表。 |
 | List 格式化回调改长 | 抛 ConcurrentModificationError，载荷保留实际列表。 |
 | String.fromCharCodes 非法码点 | 抛 ArgumentError，保留原输入，详见[字符串 API](expressions.md#string-api-边界)。 |
 | StringBuffer.writeCharCode 非法码点 | 抛 RangeError，原内容保持不变。 |
 | 整数 ~/、%、remainder 零除 | 抛 IntegerDivisionByZeroException，普通 catch/finally 可处理，自身 stackTrace 不填充。 |
-| List 范围、for-in 改长、late 初始化及模式检查失败 | 尚未统一生成对应错误对象，不能依赖可捕获或 finally。 |
+| List 范围、for-in 长度变化、late 初始化及解构结构不匹配 | 尚未统一生成对应错误对象，不能依赖可捕获或 finally。 |
 
 ArgumentError 支持默认/value/notNull 构造和 checkNotNull。RangeError 支持默认/value/range、checkValueInInterval/checkValidRange/checkNotNegative；IndexError 支持 withLength/check。依赖一般动态 indexable.length 的 IndexError 默认构造、RangeError.index/checkValidIndex 未支持。Exception 是 abstract interface class，跨库限制同[类修饰符](classes.md#类修饰符枚举与元数据)。
 

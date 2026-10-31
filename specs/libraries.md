@@ -6,18 +6,18 @@
 
 | 特性 | 语法解析 | 语义分析 API | 编译/运行 | 使用限制 |
 | --- | --- | --- | --- | --- |
-| 编译单元、具名/无名 library、脚本标记 | 支持 | 未支持 | 部分 | CLI 的 library; 要求至少 2.19；顶层声明并非全部可编译。 |
-| import、as 前缀、显式/隐式 core | 支持 | 未支持 | 部分 | 仅受支持 SDK 子集，非完整 dart:core。 |
-| 条件 import/export | 支持 | 未支持 | 部分 | 环境来自目标，不继承编译宿主；仅装入选中分支。 |
-| export、再导出、show/hide | 支持 | 未支持 | 部分 | 保留来源身份；扩展命名空间仍缺。 |
-| 命名空间冲突与读写查找 | — | 未支持 | 部分 | import 按使用诊断，export 在声明收集后检查；完整一致性未确认。 |
-| deferred import | 支持 | 未支持 | 未支持 | CLI 拒绝，无 loadLibrary 或加载状态。 |
-| part、URI/具名 part of | 支持 | 未支持 | 部分 | CLI 检查归属、版本和重复使用；augmentation 未支持。 |
-| 相对、file:、package: URI | 支持 | 未支持 | 部分 | parser 只解析字符串，CLI 才装入和检查包根。 |
-| package configuration v2 | — | 未支持 | 部分 | 不解析 pubspec/旧 .packages，不求解或下载依赖。 |
-| main 入口 | 支持 | 未支持 | 部分 | 最多两个必需位置参数，第二实参固定 null。 |
-| StackTrace API | 支持 | 未支持 | 部分 | 按普通调用解析；运行轨迹仅同步函数名。 |
-| isolate、消息端口与 spawn | 部分 | 未支持 | 未支持 | 可解析普通名称/调用不代表提供 dart:isolate。 |
+| 编译单元、具名/无名 library、脚本标记 | ✅ | ❌ | 🟡 | CLI 的 library; 要求至少 2.19；顶层声明并非全部可编译。 |
+| import、as 前缀、显式/隐式 core | ✅ | ❌ | 🟡 | 仅受支持 SDK 子集，非完整 dart:core。 |
+| 条件 import/export | ✅ | ❌ | 🟡 | 环境来自目标，不继承编译宿主；仅装入选中分支。 |
+| export、再导出、show/hide | ✅ | ❌ | 🟡 | 保留来源身份；扩展命名空间仍缺。 |
+| 命名空间冲突与读写查找 | ➖ | ❌ | 🟡 | import 按使用诊断，export 在声明收集后检查；完整一致性未确认。 |
+| deferred import | ✅ | ❌ | ❌ | CLI 拒绝，无 loadLibrary 或加载状态。 |
+| part、URI/具名 part of | ✅ | ❌ | 🟡 | CLI 检查归属、版本和重复使用；augmentation 未支持。 |
+| 相对、file:、package: URI | ✅ | ❌ | 🟡 | parser 只解析字符串，CLI 才装入和检查包根。 |
+| package configuration v2 | ➖ | ❌ | 🟡 | 不解析 pubspec/旧 .packages，不求解或下载依赖。 |
+| main 入口 | ✅ | ❌ | 🟡 | 最多两个必需位置参数，第二实参固定 null，即使该参数可选或有默认值。 |
+| StackTrace API | ✅ | ❌ | 🟡 | 按普通调用解析；运行轨迹仅同步函数名。 |
+| isolate、消息端口与 spawn | 🟡 | ❌ | ❌ | 可解析普通名称/调用不代表提供 dart:isolate。 |
 
 ## 编译单元解析 API
 
@@ -69,7 +69,7 @@ CLI 从入口目录向上找最近 package configuration v2，也可用 --packag
 
 ## 脚本入口与并发
 
-CLI 从导出空间查找 main。支持至多两个必需位置参数，以及其余可选/命名默认值：第一位置实参为 List<String> 命令行参数，第二固定 null，不是 isolate 启动载荷。
+CLI 从导出空间查找 main，支持至多两个必需位置参数。声明了位置参数时，第一实参为 List<String> 命令行参数，第二固定为 null，不是 isolate 启动载荷。第二参数即使可选或声明了默认值，也仍收到 null；若其类型非空，可能在进入函数体前因类型检查失败。只有第三个及以后可选位置参数和命名参数使用声明默认值。
 
 ```dart
 void main(List<String> args) {
