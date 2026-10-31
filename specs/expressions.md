@@ -6,7 +6,7 @@
 
 ## 表达式语法表示
 
-`package:dartc/ast.dart` 可构造和检查下列表达式语法树。验证覆盖手工构造的节点、源码范围和子节点顺序；尚未提供文本解析、类型检查或求值 API。
+`package:dartc/ast.dart` 可构造和检查下列表达式语法树。验证覆盖手工构造的节点、源码范围和子节点顺序；文本解析范围见[解析 API](#表达式解析-api)，类型检查和求值尚未接入这些节点。
 
 | 语言条款 | 可表示的语法 | 验证 |
 | --- | --- | --- |
@@ -24,7 +24,24 @@
 | [级联][cascades] | 一个接收者、有序分段、首段 `?..`、属性及索引起始选择器、段内调用与赋值、带括号的嵌套级联 | [access_test.dart](../test/ast/access_test.dart) |
 | [点简写][dot-shorthands] | `.name` / `.new`、显式 `const .name(...)` / `const .new(...)` 及其后续选择链；完整链保留独立的上下文边界，尚未推断目标命名空间 | [access_test.dart](../test/ast/access_test.dart) |
 
-上述表达式节点尚无文本解析和语义检查 API；构造与遍历不证明表达式合法、类型正确或求值行为已实现。编译与执行行为以下表为准。
+构造与遍历不证明表达式合法、类型正确或求值行为已实现。解析支持如下；编译与执行行为见后续各表。
+
+## 表达式解析 API
+
+`package:dartc/parser.dart` 的 `parseExpression(ScanResult)` 将一次扫描结果解析为表达式 AST。输入应为一个不带末尾分号的表达式；当前使用同步上下文，`await` 与 `yield` 可作为标识符。返回的 `ParseResult<Expression>` 包含节点、词法诊断和语法诊断，调用方通过 `hasErrors` 判断是否成功。
+
+| 语言条款 | 当前解析支持 | 验证 |
+| --- | --- | --- |
+| 名称、§17.4–17.7 字面量与 §17.12 `this` | 标识符及该位置合法的内置和上下文关键字；整数、double、布尔、null；普通、raw、多行及相邻的无插值字符串；保留原始拼写，未转换字面量值 | [expressions_test.dart](../test/parser/expressions_test.dart) |
+| §17 运算表达式 | 前缀 `-` / `!` / `~`、二元运算及优先级、括号分组、条件分支和赋值的结合性；关系与相等运算的连续同级使用需要括号 | [expressions_test.dart](../test/parser/expressions_test.dart)、[recovery_test.dart](../test/parser/recovery_test.dart) |
+| 赋值与增减 | 简单、复合、`??=` 赋值及前后 `++` / `--`；检查目标语法形式，保留目标一次；未解析声明或检查 final、const、类型及成员可写性 | [expressions_test.dart](../test/parser/expressions_test.dart)、[recovery_test.dart](../test/parser/recovery_test.dart) |
+| 调用、属性与[空安全选择器][null-aware] | 无显式类型实参的调用、位置和命名实参交错、尾逗号、`.` / `?.`、`[]` / `?[]`、后缀 `!`；保留链中的括号和书写顺序，未绑定函数、构造器或成员 | [expressions_test.dart](../test/parser/expressions_test.dart) |
+| [Record 字面量][record-literals] | 空 record、单位置字段的尾逗号、交错的位置和命名字段；区分 `(value)` 与 `(value,)`，尚不接受显式 `const` | [expressions_test.dart](../test/parser/expressions_test.dart) |
+| 不完整或无效的输入 | 报告缺少的操作数、名称、冒号和闭合括号；以零宽节点恢复操作数，继续处理后续实参；不修改源文本或输入 token | [recovery_test.dart](../test/parser/recovery_test.dart) |
+
+尚缺类型实参、`is` / `as`、字符串插值、Symbol、集合字面量及元素、显式 `new` / `const`、`super`、级联、点简写、函数表达式、模式赋值、switch、`throw` 和异步上下文。条件分支中未加括号的 `?[...]` 还需要集合语法参与消歧，当前报告 `parser.unsupported_syntax`；`a ? (b?[i]) : c` 可解析。这些缺口产生的诊断不表示相应 Dart 写法非法。
+
+错误结果可能只覆盖部分输入，不能直接当作合法表达式使用。解析不进行名称绑定、类型检查、常量求值或执行，也不改变下述已发布编译器的支持范围。
 
 ## 求值、常量与字面量
 
