@@ -11,33 +11,7 @@ final class _Lookahead(final List<Token> tokens) {
   late final Map<int, _IndexContent> indexContents = {};
   late final Map<int, _IndexRun> indexRuns = {};
   late final Map<int, SelectorTail> selectorTails = {};
-  late final Map<int, int?> parenthesisEnds = {};
-
-  int? closeParenthesis(int start) {
-    if (tokens[start + 1].kind == .rightParen) return start + 1;
-    if (tokens[start + 1].kind != .leftParen &&
-        start + 2 < tokens.length &&
-        tokens[start + 2].kind == .rightParen) {
-      return start + 2;
-    }
-    if (parenthesisEnds.containsKey(start)) return parenthesisEnds[start];
-    final pending = [start];
-    for (var index = start + 1; index < tokens.length; index++) {
-      switch (tokens[index].kind) {
-        case .leftParen:
-          pending.add(index);
-        case .rightParen:
-          parenthesisEnds[pending.removeLast()] = index;
-          if (pending.isEmpty) return index;
-        default:
-          break;
-      }
-    }
-    for (final opening in pending) {
-      parenthesisEnds[opening] = null;
-    }
-    return null;
-  }
+  late final delimiters = DelimiterIndex(tokens);
 
   _IndexRun? indexRun(int start) {
     final pending = <(int, _IndexContent)>[];

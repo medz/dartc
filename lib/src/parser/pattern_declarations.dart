@@ -41,7 +41,7 @@ extension on _Parser {
         tokens[opening].kind != .leftBrace) {
       return null;
     }
-    return lookahead.closePattern(opening);
+    return lookahead.delimiters.closing(opening);
   }
 
   bool get startsPatternAssignment {
@@ -85,22 +85,6 @@ extension on _Parser {
       _PatternAssignmentReader(child),
     );
     return true;
-  }
-}
-
-extension on _Lookahead {
-  int? closePattern(int start) {
-    if (tokens[start].kind == .leftParen) return closeParenthesis(start);
-    var depth = 1;
-    final opening = tokens[start].kind;
-    final closing = opening == .leftBracket
-        ? TokenKind.rightBracket
-        : TokenKind.rightBrace;
-    for (var index = start + 1; index < tokens.length; index++) {
-      if (tokens[index].kind == opening) depth++;
-      if (tokens[index].kind == closing && --depth == 0) return index;
-    }
-    return null;
   }
 }
 

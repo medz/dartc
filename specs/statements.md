@@ -28,7 +28,7 @@ SDK 对照版本见[总览](README.md)；switch 语句及表达式的模式、�
 | §18.10–18.11 异常语句 | `rethrow`、`try`、有序 `on` / `catch`、可选异常类型及异常和堆栈参数、`finally`；不补造省略的类型或参数 | [statements_test.dart](../test/parser/statements_test.dart) 异常用例 |
 | §18.12–18.18 返回、标签、跳转与断言 | 有值或无值 `return`、多个标签、可选标签的 `break` / `continue`、带或不带消息及尾逗号的 `assert` | [statements_test.dart](../test/parser/statements_test.dart) 跳转与断言用例 |
 
-异步与生成器体通过[函数体解析](functions.md#函数体解析-api)接入 `await for`、`yield` 与 `yield*`；独立 `parseStatement` 入口使用同步上下文。[局部函数声明](functions.md#函数表达式与局部声明解析)保留元数据、返回类型、泛型和函数体。变量声明元数据、模式声明与赋值、if-case 及 switch 已接入，范围与验证见[模式解析](patterns.md#模式解析-api)。名称绑定、类型、常量资格、确定赋值、跳转目标及 `rethrow` 的 catch 上下文合法性尚未检查。解析不回写输入 token；缺失语句使用零宽节点恢复。深层嵌套与损坏输入的源码范围检查见 [statements_test.dart](../test/parser/statements_test.dart)。
+异步与生成器体通过[函数体解析](functions.md#函数体解析-api)接入 `await for`、`yield` 与 `yield*`；独立 `parseStatement` 入口使用同步上下文。[局部函数声明](functions.md#函数表达式与局部声明解析)保留元数据、返回类型、泛型和函数体。变量声明元数据、模式声明与赋值、if-case 及 switch 已接入，范围与验证见[模式解析](patterns.md#模式解析-api)。名称绑定、类型、常量资格、确定赋值、跳转目标及 `rethrow` 的 catch 上下文合法性尚未检查。解析不回写输入 token；缺失语句使用零宽节点恢复。深层嵌套与损坏输入的源码范围检查见 [statements_test.dart](../test/parser/statements_test.dart) 和 [nesting_test.dart](../test/parser/nesting_test.dart)。
 
 ## 编译与执行
 

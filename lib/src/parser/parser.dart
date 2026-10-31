@@ -7,6 +7,7 @@ import 'package:dartc/source.dart';
 
 import 'selector_tail.dart';
 import 'string_sequence.dart';
+import 'delimiter_index.dart';
 
 part 'delimiters.dart';
 part 'operators.dart';

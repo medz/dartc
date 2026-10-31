@@ -102,7 +102,7 @@ extension on _Parser {
       opening = child.cursor;
     }
     if (current.kind == .keywordFunction || current.kind.isVariableModifier) {
-      final following = tokens[lookahead.closeParenthesis(opening)! + 1].kind;
+      final following = tokens[lookahead.delimiters.closing(opening)! + 1].kind;
       return following == .arrow ||
           following == .leftBrace ||
           allowEmpty && following == .semicolon;
@@ -112,7 +112,7 @@ extension on _Parser {
 
   bool functionBodyFollows(int opening, {bool allowEmpty = false}) {
     if (tokens[opening].kind != .leftParen) return false;
-    final end = lookahead.closeParenthesis(opening);
+    final end = lookahead.delimiters.closing(opening);
     if (end == null) return false;
     return switch (tokens[end + 1].kind) {
       .arrow || .leftBrace || .keywordAsync || .keywordSync => true,
