@@ -314,6 +314,7 @@ extension on TokenKind {
     .rightParen ||
     .rightBracket ||
     .rightBrace ||
+    .interpolationEnd ||
     .keywordElse ||
     .keywordIn ||
     .keywordCase => true,

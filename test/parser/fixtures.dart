@@ -47,6 +47,9 @@ String shape(AstNode node) {
     NamedRecordField(:final name, :final value) =>
       '(${name.text}: ${shape(value)})',
     AdjacentStringsExpression() => form('strings'),
+    InterpolatedStringExpression() => form('string'),
+    StringText() => node.text,
+    StringInterpolation(:final isBraced) => form(isBraced ? r'${}' : r'$'),
     MissingExpression() => '<missing>',
     CollectionExpression(:final kind) => form(
       kind == .list ? 'list' : 'braces',

@@ -6,6 +6,7 @@ import 'package:dartc/scanner.dart';
 import 'package:dartc/source.dart';
 
 import 'selector_tail.dart';
+import 'string_sequence.dart';
 
 part 'delimiters.dart';
 part 'operators.dart';
@@ -40,9 +41,10 @@ final class ParseResult<T extends AstNode> {
 /// Parses one expression through the end of [input], without a semicolon.
 ///
 /// The context is synchronous: `await` and `yield` can be identifiers. Supported
-/// forms include scalar and plain string literals, records, operators, generic
-/// calls, type tests and casts, member access, indexing, and collection literals
-/// with spreads, null-aware elements, if/else, and ordinary for/for-in headers.
+/// forms include scalar literals, strings with interpolation and adjacency,
+/// records, operators, generic calls, type tests and casts, member access,
+/// indexing, and collection literals with spreads, null-aware elements, if/else,
+/// and ordinary for/for-in headers.
 /// Other forms produce diagnostics until their grammar is implemented. Parsing
 /// does not resolve names or check types.
 ///
@@ -125,7 +127,8 @@ final class _Parser {
       if (token.kind == .eof ||
           token.kind == .rightParen ||
           token.kind == .rightBracket ||
-          token.kind == .rightBrace) {
+          token.kind == .rightBrace ||
+          token.kind == .interpolationEnd) {
         if (delimiters.isNotEmpty) {
           closeDelimiter();
         } else {
@@ -248,9 +251,8 @@ final class _Parser {
           values.add(
             ThisExpression(source: source, start: token.start, end: token.end),
           );
-        case .stringLiteral:
+        case .stringLiteral || .stringStart:
           parseStrings();
-          expectsOperand = false;
           return;
         case .invalid:
           advance();
@@ -264,28 +266,74 @@ final class _Parser {
     expectsOperand = false;
   }
 
-  void parseStrings() {
+  void parseStrings([StringSequence? sequence]) {
     StringLiteralExpression literal(Token t) =>
         StringLiteralExpression(source: source, start: t.start, end: t.end);
-    final first = literal(current);
-    advance();
-    if (current.kind != .stringLiteral) {
-      values.add(first);
-      return;
-    }
-    final strings = <StringExpression>[first];
-    do {
-      strings.add(literal(current));
+    if (sequence == null && current.kind == .stringLiteral) {
+      final first = literal(current);
       advance();
-    } while (current.kind == .stringLiteral);
-    values.add(
-      AdjacentStringsExpression(
-        source: source,
-        start: first.start,
-        end: strings.last.end,
-        strings: strings,
-      ),
-    );
+      if (current.kind != .stringLiteral && current.kind != .stringStart) {
+        values.add(first);
+        expectsOperand = false;
+        return;
+      }
+      sequence = StringSequence()..addLiteral(first);
+    }
+    final strings = sequence ?? StringSequence();
+    while (true) {
+      final token = current;
+      switch (token.kind) {
+        case .stringLiteral:
+          strings.addLiteral(literal(token));
+          advance();
+        case .stringStart || .stringMiddle || .stringEnd:
+          strings.addText(token);
+          advance();
+        case .interpolationIdentifier:
+          advance();
+          final name = current;
+          final Expression expression;
+          if (name.kind == .keywordThis) {
+            expression = ThisExpression(
+              source: source,
+              start: name.start,
+              end: name.end,
+            );
+          } else if (name.kind.isIdentifier) {
+            expression = IdentifierExpression(
+              source: source,
+              start: name.start,
+              end: name.end,
+              identifier: identifier(name),
+            );
+          } else {
+            error(
+              'expected_identifier',
+              'Expected an identifier or this.',
+              name,
+            );
+            expression = MissingExpression(source: source, offset: name.start);
+          }
+          strings.addInterpolation(
+            token,
+            expression,
+            name.end,
+            isBraced: false,
+          );
+          advance();
+        case .interpolationStart:
+          delimiters.add(
+            _Interpolation(token, values.length, operators.length, strings),
+          );
+          advance();
+          expectsOperand = true;
+          return;
+        default:
+          values.add(strings.finish(current.start));
+          expectsOperand = false;
+          return;
+      }
+    }
   }
 
   bool parseContinuation() {
@@ -605,7 +653,6 @@ final class _Parser {
     .leftBracket ||
     .emptyBrackets ||
     .leftBrace ||
-    .stringStart ||
     .hash ||
     .cascade ||
     .nullAwareCascade ||

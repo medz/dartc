@@ -45,6 +45,16 @@ final class _Index(
   TokenKind get closing => .rightBracket;
 }
 
+final class _Interpolation(
+  super.opening,
+  super.valueBase,
+  super.operatorBase,
+  final StringSequence strings,
+) extends _Delimiter {
+  @override
+  TokenKind get closing => .interpolationEnd;
+}
+
 extension on _Parser {
   void openIndex({required bool isNullAware}) {
     checkSelector();
@@ -130,6 +140,17 @@ extension on _Parser {
     }
     final Expression expression;
     switch (frame) {
+      case _Interpolation():
+        frame.strings.addInterpolation(
+          frame.opening,
+          finishExpression(frame.valueBase, frame.operatorBase),
+          end,
+          isBraced: true,
+        );
+        delimiters.removeLast();
+        if (matched) advance();
+        parseStrings(frame.strings);
+        return;
       case _IfHeader():
         frame.element.condition = finishExpression(
           frame.valueBase,

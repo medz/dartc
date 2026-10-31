@@ -86,7 +86,6 @@ void main() {
         'new C()',
         'const C()',
         'a..b()',
-        r'"$a"',
         'throw a',
         'super.x',
         '.new()',

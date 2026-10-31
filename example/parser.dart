@@ -40,4 +40,12 @@ void main() {
   final loop = list.elements.single as ForElement;
   print((loop.parts as ForInParts).iterable.text); // items
   print((loop.body as IfElement).condition.text); // item != null
+
+  final message = parseExpression(
+    scan(SourceFile(Uri.parse('memory:message'), r'"Total: ${price * count}"')),
+  );
+  if (message.hasErrors) return;
+  final string = message.node as InterpolatedStringExpression;
+  final interpolation = string.parts[1] as StringInterpolation;
+  print(interpolation.expression.text); // price * count
 }

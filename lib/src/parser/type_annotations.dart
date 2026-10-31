@@ -340,6 +340,7 @@ extension on TokenKind {
     .rightParen ||
     .rightBracket ||
     .rightBrace ||
+    .interpolationEnd ||
     .question ||
     .ifNull ||
     .comma ||

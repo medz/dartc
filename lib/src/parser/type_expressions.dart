@@ -163,6 +163,7 @@ extension on TokenKind {
     .rightParen ||
     .rightBracket ||
     .rightBrace ||
+    .interpolationEnd ||
     .semicolon ||
     .colon ||
     .comma ||

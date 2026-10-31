@@ -32,7 +32,8 @@
 
 | 语言条款 | 当前解析支持 | 验证 |
 | --- | --- | --- |
-| 名称、§17.4–17.7 字面量与 §17.12 `this` | 标识符及该位置合法的内置和上下文关键字；整数、double、布尔、null；普通、raw、多行及相邻的无插值字符串；保留原始拼写，未转换字面量值 | [expressions_test.dart](../test/parser/expressions_test.dart) |
+| 名称、§17.4–17.6 字面量与 §17.12 `this` | 标识符及该位置合法的内置和上下文关键字；整数、double、布尔、null；保留原始拼写，未转换字面量值 | [expressions_test.dart](../test/parser/expressions_test.dart) |
+| §17.7 字符串与插值 | 普通、raw、多行和相邻字符串，`$name` / `$this` / `${expression}` 及嵌套插值；保留文本段、空段、原始转义、分隔符、UTF-16 和换行，不解码或求值；嵌入表达式的解析范围同本表 | [strings_test.dart](../test/parser/strings_test.dart) |
 | §17 运算表达式 | 前缀 `-` / `!` / `~`、二元运算及优先级、括号分组、条件分支和赋值的结合性；关系与相等运算的连续同级使用需要括号 | [expressions_test.dart](../test/parser/expressions_test.dart)、[recovery_test.dart](../test/parser/recovery_test.dart) |
 | 赋值与增减 | 简单、复合、`??=` 赋值及前后 `++` / `--`；检查目标语法形式，保留目标一次；未解析声明或检查 final、const、类型及成员可写性 | [expressions_test.dart](../test/parser/expressions_test.dart)、[recovery_test.dart](../test/parser/recovery_test.dart) |
 | 调用、属性与[空安全选择器][null-aware] | 位置和命名实参交错、尾逗号、`.` / `?.`、`[]` / `?[]`、后缀 `!`；保留链中的括号和书写顺序，未绑定函数、构造器或成员 | [expressions_test.dart](../test/parser/expressions_test.dart) |
@@ -44,7 +45,7 @@
 | 集合循环 | 同步 `for` 和 `for-in`；表达式或普通变量声明初始化、可省略的条件、多条更新、已有或声明的迭代变量；保留类型、变量关键字和源顺序，不补写空条件 | [collections_test.dart](../test/parser/collections_test.dart) |
 | 不完整或无效的输入 | 报告缺少的操作数、名称、冒号和闭合括号；以零宽节点恢复操作数，继续处理后续实参；不修改源文本或输入 token | [recovery_test.dart](../test/parser/recovery_test.dart) |
 
-尚缺字符串插值、Symbol、显式实例创建、const record、`super`、级联、点简写、函数表达式、模式赋值、switch、`throw` 和异步上下文。集合中的 if-case、模式循环头和声明元数据尚未解析；`await for` 在当前同步上下文中报告诊断。这些缺口产生的诊断不表示相应 Dart 写法非法。
+尚缺 Symbol、显式实例创建、const record、`super`、级联、点简写、函数表达式、模式赋值、switch、`throw` 和异步上下文。集合中的 if-case、模式循环头和声明元数据尚未解析；`await for` 在当前同步上下文中报告诊断。这些缺口产生的诊断不表示相应 Dart 写法非法。
 
 错误结果可能只覆盖部分输入，不能直接当作合法表达式使用。解析不进行名称绑定、类型检查、常量求值或执行，也不改变下述已发布编译器的支持范围。
 
