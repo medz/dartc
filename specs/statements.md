@@ -1,73 +1,119 @@
-# 语句：§18 Statements
+# 语句
 
-按[固定草案源码](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)的 §18 建立索引；条款目录见[官方草案 PDF](https://dart.dev/to/spec-draft)。
-SDK 对照版本见[总览](README.md)；switch 语句及表达式的模式、共享绑定和穷尽性实现见[模式](patterns.md)。
+本页说明控制流、跳转、异常与清理，对应主规范 §18。[状态与阶段含义](README.md#如何读矩阵)适用于下表；语义分析 API 当前未提供，正文的赋值/可达性检查属于 CLI 编译管线。
 
-## 语句语法表示
+## 特性支持
 
-`package:dartc/ast.dart` 可构造以下语句及其组成部分。构造器检查源码范围、快照归属和子节点顺序；遍历顺序为源码书写顺序。
-
-| 语言条款 | 可表示的语法 | 验证 |
-| --- | --- | --- |
-| §18.1–18.4 块、空语句、表达式与局部声明 | 有序语句、分号、变量列表及可选初始化式、元数据、类型与 `late` / `var` / `final` / `const`、模式声明、[局部函数](functions.md#函数语法表示) | [statements_test.dart](../test/ast/statements_test.dart)、[functions_test.dart](../test/ast/functions_test.dart) |
-| §18.5–18.8 分支与循环 | `if` / `else`、if-case 与守卫、`while`、`do-while`、`for`、`for-in`、`await for`；循环头保留可省略条件和有序更新，区分已有变量、新声明和模式绑定 | [statements_test.dart](../test/ast/statements_test.dart)、[loops_test.dart](../test/ast/loops_test.dart) |
-| §18.9 Switch | 选择值、case 模式与守卫、default、标签、有序语句与空 case；未合并连续分支或解析跳转目标 | [switches_test.dart](../test/ast/switches_test.dart) |
-| §18.10–18.11 异常语句 | `try`、有序 `on` / `catch`、显式异常与堆栈参数、可选 `finally`、`rethrow`；省略的类型、参数和清理块保持缺省 | [exceptions_test.dart](../test/ast/exceptions_test.dart) |
-| §18.12–18.18 返回、标签、跳转、生成器与断言 | 有值或无值 `return`、多个标签、带或不带标签的 `break` / `continue`、`yield` / `yield*`、带或不带消息的 `assert` | [statements_test.dart](../test/ast/statements_test.dart) |
-
-文本解析范围见[语句解析 API](#语句解析-api)。构造与遍历不建立作用域、绑定、确定赋值、完成方式、异常传播或异步执行。集合中的循环与 if-case 见[表达式语法表示](expressions.md#表达式语法表示)，编译与执行行为以下表为准。
+| 特性 | 语法解析 | 语义分析 API | 编译/运行 | 使用限制 |
+| --- | --- | --- | --- | --- |
+| 块、空语句、表达式语句 | ✅ | ❌ | 🟡 | 表达式自身仍受支持子集限制。 |
+| 局部变量与同步非泛型局部函数 | ✅ | ❌ | 🟡 | 绑定、final/late、捕获见[变量](variables.md)和[函数](functions.md)。 |
+| if/else、while、do、普通 for | ✅ | ❌ | 🟡 | 支持短路、部分流合并；完整流分析仍缺。 |
+| for-in | ✅ | ❌ | 🟡 | CLI 限 List，无一般 Iterable/Iterator 和可捕获并发修改错误；parser 接受表达式来源，不检查 Iterable/Iterator 类型。 |
+| if-case、模式声明及循环头 | ✅ | ❌ | 🟡 | CLI 不含 Map/record 解构；parser 可解析，见[模式](patterns.md)。 |
+| switch、守卫、共享 case、隐式 break | ✅ | ❌ | 🟡 | 按语言版本区分常量 case 和模式规则。 |
+| 标签、break、continue | ✅ | ❌ | 🟡 | parser 检查部分外围循环/switch 上下文，不绑定标签目标；CLI 绑定目标。 |
+| return 与正常完成检查 | ✅ | ❌ | 🟡 | 非空结果不能正常落空，生成器执行未支持。 |
+| try/on/catch、rethrow、finally | ✅ | ❌ | 🟡 | 仅同步展开，自动错误未全部对象化。 |
+| await for | ✅ | ❌ | ❌ | 仅异步函数体上下文可解析；无 Stream 暂停/取消。 |
+| yield/yield* | ✅ | ❌ | ❌ | 仅生成器体上下文可解析；无惰性 Iterable/Stream 输出。 |
+| assert | ✅ | ❌ | ❌ | 无断言启用模式或自动 AssertionError 抛出。 |
 
 ## 语句解析 API
 
-`package:dartc/parser.dart` 的 `parseStatement(ScanResult)` 解析一个语句，包括块中的嵌套语句。输入应包含该语句所需的分号和括号；多条顶层语句需要用块包围。返回的 `ParseResult<Statement>` 包含节点、词法诊断和语法诊断，调用方通过 `hasErrors` 判断是否成功。表达式使用[同步解析上下文](expressions.md#表达式解析-api)。
+`parseStatement(ScanResult)` 解析一个语句，包含必需的分号和括号。多条语句须放在块中；独立入口使用同步上下文。异步 await for 和生成器 yield/yield* 通过[函数体入口](functions.md#解析入口)解析。
 
-| 语言条款 | 当前解析支持 | 验证 |
-| --- | --- | --- |
-| §18.1–18.3 块、空语句、表达式与局部变量 | 保留大括号、分号和语句顺序；声明包含可选类型、`late` / `var` / `final` / `const`、多个变量和可省略初始化式；检查修饰符组合，区分可空类型声明与条件表达式 | [statements_test.dart](../test/parser/statements_test.dart) 块与变量用例 |
-| §18.5–18.8 分支与循环 | `if` / `else`、`while`、`do-while`、`for`、`for-in`；`else` 关联最近的未完成 `if`，循环保留书写顺序、可省略初始化与条件、多条更新及新声明或已有变量 | [statements_test.dart](../test/parser/statements_test.dart) 分支与循环用例 |
-| §18.10–18.11 异常语句 | `rethrow`、`try`、有序 `on` / `catch`、可选异常类型及异常和堆栈参数、`finally`；不补造省略的类型或参数 | [statements_test.dart](../test/parser/statements_test.dart) 异常用例 |
-| §18.12–18.18 返回、标签、跳转与断言 | 有值或无值 `return`、多个标签、可选标签的 `break` / `continue`、带或不带消息及尾逗号的 `assert` | [statements_test.dart](../test/parser/statements_test.dart) 跳转与断言用例 |
+parser 保留块与语句顺序、声明/模式、循环初始化和多条更新、可省略条件、case/标签、异常类型及 catch 参数。else 关联最近未完成的 if。缺失语句以零宽节点恢复，调用方须检查 hasErrors。它不绑定名称、标签和捕获，不检查类型、确定赋值、穷尽性或 rethrow 是否处于合法 catch 上下文。
 
-异步与生成器体通过[函数体解析](functions.md#函数体解析-api)接入 `await for`、`yield` 与 `yield*`；独立 `parseStatement` 入口使用同步上下文。[局部函数声明](functions.md#函数表达式与局部声明解析)保留元数据、返回类型、泛型和函数体。变量声明元数据、模式声明与赋值、if-case 及 switch 已接入，范围与验证见[模式解析](patterns.md#模式解析-api)。名称绑定、类型、常量资格、确定赋值、跳转目标及 `rethrow` 的 catch 上下文合法性尚未检查。解析不回写输入 token；缺失语句使用零宽节点恢复。深层嵌套与损坏输入的源码范围检查见 [statements_test.dart](../test/parser/statements_test.dart) 和 [nesting_test.dart](../test/parser/nesting_test.dart)。
+无标签 break 要求外围有循环或 switch。continue 要求外围有循环，或者带标签且位于 switch 内；这些检查不解析标签名字或目标种类。嵌套函数不能借用外围的循环/switch 上下文，解析结束后恢复外围上下文。`break missing;` 和 catch 外的 `rethrow;` 仍可通过解析，不表示它们是合法程序。
 
-无标签 `break` 要求外围有循环或 switch；`continue` 要求循环，或带标签且位于 switch 中。嵌套函数建立独立上下文，结束后恢复外围上下文。标签名字和目标是否存在、`rethrow` 的合法位置、返回类型和控制流语义仍由分析阶段检查。验证见 [contexts_test.dart](../test/parser/contexts_test.dart)。
+入口接受显式[语言版本](lexical-structure.md#解析语言版本)。小于 3.0 时，switch 的 case 使用常量表达式文法；模式声明、if-case 等语法则要求 3.0。
 
-## 编译与执行
+## 分支、循环与跳转
 
-| 规范条目 | 状态 | 支持范围与缺口 | 验证 |
-| --- | --- | --- | --- |
-| §18.0.1 语句完成方式 | 部分实现 | 支持正常结束、return、break、continue 和同步异常，并在离开 try/catch 时执行 finally；异步完成仍缺。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `flowContexts()`、`exceptionValues()` |
-| §18.1 块 | 部分实现 | 顺序执行并创建局部作用域；局部函数有独立参数与函数体作用域；局部模式声明见[模式](patterns.md)。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `localBindings()` |
-| §18.2 空及表达式语句 | 部分实现 | 可丢弃结果但保留有副作用或可能失败的操作；表达式集合仍有实现缺口。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `coalescingContexts()`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) `failingValues` |
-| §18.3 局部变量声明 | 部分实现 | 有绑定、类型转换和确定赋值；`final` 与 `late` 规则见[变量追踪](variables.md)。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `localBindings()`、`flowContexts()` |
-| §18.4 局部函数声明 | 部分实现 | 支持声明、词法捕获、自递归与函数值，按声明身份绑定；返回推断和捕获范围见[函数](functions.md)。 | [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) 的 `localFunctions()`、`rejected` |
-| §18.5 `if` | 部分实现 | 支持布尔检查、短路条件和两支流状态合并；支持 Dart 3 的 if-case、守卫和 then 绑定，范围见[模式](patterns.md)；异步流仍缺。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `conditionCase()`、`flowBranches()`、`ifCaseValues()` |
-| §18.6.1 `for` | 部分实现 | 支持声明或表达式初始化、条件、多条更新及跳转；声明变量的闭包绑定逐轮独立，更新前复制当前值；使用外层变量时继续共享绑定，见[词法捕获](functions.md#词法捕获)。模式循环头及其每轮绑定见[模式](patterns.md)。 | [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) `program/main()`、`program/capturedFunctions()` |
-| §18.6.2 `for-in` | 部分实现 | 当前按 List 长度和索引迭代，支持动态来源的 List 并逐项检查元素类型，iterable 只求值一次；每次迭代步先检查初始长度，长度变化在下次取元素或判定结束前失败，break 不再检查。元素替换及步间恢复原长度可继续；声明变量的捕获绑定逐轮独立，也可对已有可写标识符逐轮赋值；上述行为同时适用于语句与集合中的 for-in。没有一般 Iterable/Iterator 协议或可捕获的 ConcurrentModificationError。模式循环头及其每轮绑定见[模式](patterns.md)。 | [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) `program/sequence()`、`program/main()`、`failingValues`；[values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `collectionValues()` |
-| §18.6.3 异步 `for-in` | 未实现 | 无 `await for`、Stream 订阅、暂停或取消语义。 | 待补充 |
-| §18.7 `while` | 部分实现 | 支持条件短路、break/continue 与循环写入后的提升撤销；完整流分析仍待扩展。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `conditionLoops()`、`flowBranches()` |
-| §18.8 `do` | 部分实现 | 先执行循环体，continue 跳到条件，并保留条件求值顺序。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `conditionLoops()` |
-| §18.9 switch | 部分实现 | Dart 3 文件支持模式、守卫、当前类型范围的穷尽性及未匹配路径；旧文件保留常量 case 的解释、类型检查和流规则，跨版本差异见[模式](patterns.md)。未实现的类型及模式仍是缺口。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `patternSwitchStatements()`、`statementBoolean()`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) `version-imports.dart`、`rejected` |
-| §18.9.1 case 完成及跳转 | 部分实现 | 空 case 共用后续 body；Dart 3 的非空 body 完成后隐式 break，旧版除最后一个 body 外要求退出。支持 case 标签及跨 case continue，跳转不重做模式与 guard；共享绑定规则见[模式](patterns.md)。跨 finally 的跳转执行对应清理，块内跳转不提前清理。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `patternSwitchStatements()`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) `rejected` |
-| §18.10 `rethrow` | 部分实现 | 在同一函数中重新抛出词法上最近 catch 的异常对象与原 StackTrace，保留身份；内层 catch 完成后恢复外层上下文，嵌套函数不能借用外层上下文。异步重抛仍缺。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `exceptionValues()`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) `rejected` |
-| §18.11 `try`、`on`、`catch` | 部分实现 | 同步调用按源码顺序匹配处理器，支持当前类型系统的 on 类型与类型参数；省略 on 时异常参数静态类型为 Object，轨迹参数为核心库 StackTrace，两者为 final。catch 有独立参数作用域；try 中可能写入的变量在 catch 入口撤销提升并合并确定赋值。支持直接、闭包和方法值调用的跨帧展开。普通核心错误与异常类及自动错误的当前范围见下文；范围、late 等错误对象、完整类层次及异步路径仍缺。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `exceptionValues()`；[roots.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/roots.dart) `exceptionRoots()`；[ssa_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/ssa_test.dart) invoke 合同；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) `rejected`、未捕获异常 |
-| §18.11 `finally` | 部分实现 | 正常结束、return、break、continue、throw/rethrow 共用清理入口；返回值先求值并保存，异常对象与原轨迹保活，清理中的新退出覆盖原完成方式。支持嵌套清理、catch 后清理、标签与 case 跳转、闭包捕获。finally 的词法作用域不包含同级 catch 参数或 rethrow 上下文。同步流分析按保守入口及正常出口组合 DA/DU 与提升；异步、生成器及运行时 Error 异常化仍缺。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `finallyValues()`、`finallyFlow()`；[roots.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/roots.dart) `finallyRoots()`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) `rejected`、未捕获异常 |
-| §18.12 `return` | 部分实现 | 支持显式值、无值、构造返回及类型检查；Never 表达式终止正常路径，仍检查后续源码。空感知集合元素与空 `List<Never>` 的迭代/展开可以正常完成，不豁免非空函数的返回义务。生成器返回和完整不可正常完成分析未实现。 | [values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `flowExit()`、`valueContexts()`；[behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) `rejected` |
-| §18.13–18.15 标签、break、continue | 部分实现 | 有嵌套标签查找、块 break、循环 continue 及目标检查；支持 switch case 标签 continue，禁止对 case 标签 break；重复或不可见的 case 标签诊断。 | [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) `program/main()` 的 `outer`、`finish`；[values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) `patternSwitchStatements()` |
-| §18.16–18.17 `yield`、`yield*` | 未实现 | 无生成器状态、惰性 Iterable 或 Stream 输出。 | 待补充 |
-| §18.18 `assert` | 未实现 | 无断言语句、启用模式或自动 AssertionError 抛出。 | 待补充 |
+CLI 中，块顺序执行并引入局部作用域；表达式语句可丢弃结果，但保留副作用和可能失败的操作。if 检查布尔条件并合并两支流事实，while/for 的可能写入撤销失效提升。for 支持声明或表达式初始化、可省略条件、多条更新；do 先执行体，continue 跳到条件。
 
-bool switch 的确定赋值穷尽性依据 [Dart 3 模式与穷尽性补充规范](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md)及跨版本 SDK 行为；旧文件的 case 解释与流规则保持其语言版本语义。
-异常的静态规则同时以 SDK 3.13.7 验证；固定草案中省略 on 等价于 dynamic 的描述需结合空安全规则，当前 SDK 的异常参数为 Object。同步展开不提供异步或生成器执行机制。
+```dart
+int sum(List<int> values) {
+  var result = 0;
+  outer: for (final value in values) {
+    if (value < 0) continue outer;
+    result += value;
+  }
+  return result;
+}
+```
 
-finally 的静态规则依据[流分析规范](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/flow-analysis.md#statements)的 `attachFinally` 与 SDK 3.13.7：入口包含 try 中任意位置抛出时的保守状态，因此 try 内的赋值不保证 finally 内可读。正常结束后可继承 try 或 finally 的确定赋值，清理中可能写入的变量不能保留失效提升。break/continue 的静态目标状态取跳转处的事实，不附加 finally 的赋值；例如 `int x; while (true) { try { break; } finally { x = 1; } } print(x);` 在该 SDK 中仍是静态错误。
+for 声明的闭包绑定每轮独立，更新前复制当前值；for-in 的声明变量也逐轮独立，使用外部已有变量则共享绑定。模式循环头共用[模式绑定规则](patterns.md#声明赋值与循环解构)。
+
+for-in 当前按 List 长度与索引迭代，来源一次求值，dynamic 来源须为 List，逐元素检查类型。每次迭代步先检查初始长度，长度增加或减少都会在下次取元素/判定结束前失败，break 后不再检查；替换元素或步间恢复原长度可继续。这同时适用于语句和集合。**长度失败仍终止进程，不能捕获 ConcurrentModificationError**，与 List.toString 的已支持错误对象不同。
+
+CLI 的标签支持嵌套查找、块 break 和循环 continue；switch case 标签只接受 continue，不能 break。重复/不可见 case 标签及错误目标被诊断。跨越 try/catch 的跳转执行对应 finally，在块内跳转不提前清理；case 跳转不重新匹配模式或守卫。
+
+## switch 与返回
+
+Dart 3 switch 语句支持当前模式、守卫及有限穷尽性，空 case 共享后续 body，非空 body 正常结束后隐式 break。旧文件按常量 case 解释、检查类型，除最后 body 外要求显式退出，只有 default 消除未匹配赋值路径。共享模式变量、标签入口和版本差异详见[模式](patterns.md#switch-语句与共享绑定)。
+
+return 支持显式值、无值和构造器返回限制，结果检查见[函数](functions.md#参数默认值与返回)。Never 表达式终止正常路径，但后续源码仍作静态检查。空感知 List 元素、空 List<Never> 的迭代/展开可能正常完成，不能据此省略非空结果函数的返回。
+
+## 同步异常与 finally
+
+```dart
+int recover() {
+  try {
+    throw StateError('failed');
+  } on StateError catch (error, stack) {
+    print(error);
+    return 1;
+  } finally {
+    print('cleanup');
+  }
+}
+```
+
+throw 单次求值，支持直接、闭包、方法值调用的同步跨帧展开。on 处理器按源码顺序匹配当前类型系统支持的类型及类型参数；省略 on 时异常参数静态类型为 Object，轨迹参数为核心 StackTrace，两者 final，catch 有独立参数作用域。try 中可能写入的变量在 catch 入口撤销提升并保守合并赋值事实。固定旧草案省略 on 等价 dynamic 的描述须结合空安全，不能直接照用。
+
+rethrow 在同一函数中使用词法最近 catch 的异常对象和原 StackTrace，保留身份。内层 catch 完成后恢复外层上下文，嵌套函数不能借用外围 catch；同级 finally 也没有 catch 参数或该 rethrow 上下文。
+
+finally 覆盖正常结束、return、break、continue、throw/rethrow。返回值先求值并保存，清理中的新退出覆盖原完成方式；支持嵌套清理、catch 后清理及 case/标签跳转。**只适用于已经进入同步异常机制的失败**，不能把直接进程退出当成保证执行 finally。
+
+流分析为 finally 使用 try 中任意位置可能抛出时的保守入口，因此 try 内赋值不保证 finally 中可读。正常结束后可继承 try 或 finally 的确定赋值，清理可能写入的变量不能保留失效提升。break/continue 的目标状态仍取跳转处事实，不追加 finally 赋值，例如 SDK 3.13.7 与 dartc 都不将下例视作已赋值：
+
+```dart
+int x;
+while (true) {
+  try {
+    break;
+  } finally {
+    x = 1;
+  }
+}
+// 此处读取 x 仍是静态错误。
+```
+
+异步/生成器展开、完整流分析及所有运行时失败的错误对象化未完成。
 
 ## 核心错误与异常对象
 
-依据 SDK [Error](https://api.dart.dev/dart-core/Error-class.html)、[RangeError](https://api.dart.dev/dart-core/RangeError-class.html) 和 [FormatException](https://api.dart.dev/dart-core/FormatException-class.html) API，支持 Error、AssertionError、TypeError、ArgumentError、RangeError、IndexError、UnsupportedError、UnimplementedError、StateError、ConcurrentModificationError、Exception、FormatException 和 IntegerDivisionByZeroException 的当前构造与继承关系。对象显式 throw 后沿一般类型关系匹配 catch，实例载荷和 finally 沿已有异常机制处理。
+CLI 提供 Error、AssertionError、TypeError、ArgumentError、RangeError、IndexError、UnsupportedError、UnimplementedError、StateError、ConcurrentModificationError、Exception、FormatException、IntegerDivisionByZeroException 的当前构造和继承子集。显式 throw 这些对象走普通 catch/finally，不等于对应操作均会自动抛该对象。
 
-ArgumentError 支持默认、value、notNull 构造及 checkNotNull；RangeError 支持默认、value、range 构造和 checkValueInInterval、checkValidRange、checkNotNegative；IndexError 支持 withLength 与 check。依赖一般动态 `indexable.length` 调用的 IndexError 默认构造、RangeError.index 和 checkValidIndex 仍缺。Exception 是 abstract interface class，跨库限制遵循一般[类修饰符](classes.md)检查；其余未列错误类及完整 Object/Type API 尚缺。
+| 自动失败来源 | 当前行为 |
+| --- | --- |
+| 已支持类型转换、动态 bool 条件、空断言（含模式 cast/空断言）、dynamic null throw、协变写入/入口 | 抛可捕获 TypeError；文案尚缺实际值、目标类型或参数名。 |
+| 非有限数值转整数、非有限浮点整除 | 抛 UnsupportedError。 |
+| 固定长度/只读 List 的已支持变更 | 抛 UnsupportedError，类型检查先于只读性和范围，失败不改列表。 |
+| List 格式化回调改长 | 抛 ConcurrentModificationError，载荷保留实际列表。 |
+| String.fromCharCodes 非法码点 | 抛 ArgumentError，保留原输入，详见[字符串 API](expressions.md#string-api-边界)。 |
+| StringBuffer.writeCharCode 非法码点 | 抛 RangeError，原内容保持不变。 |
+| 整数 ~/、%、remainder 零除 | 抛 IntegerDivisionByZeroException，普通 catch/finally 可处理，自身 stackTrace 不填充。 |
+| List 范围、for-in 长度变化、late 初始化及解构结构不匹配 | 尚未统一生成对应错误对象，不能依赖可捕获或 finally。 |
 
-Error.safeToString 不调用用户对象的 toString，字符串保留转义，List 和函数提供安全概要；概要文字不承诺与 SDK VM 的内部类名一致。FormatException 保留 message/source/offset，并输出相应行、位置及有限长度片段。依据 [Error.stackTrace](https://api.dart.dev/dart-core/Error/stackTrace.html) 与 [Error.throwWithStackTrace](https://api.dart.dev/dart-core/Error/throwWithStackTrace.html)，实际 extends Error 对象在首次抛出时填入轨迹，后续 throw、rethrow 或指定轨迹不覆盖该字段；普通重复 throw 的 catch 轨迹仍来自本次抛出。子类 getter 覆写不改变父类存储，implements Error 不自动填充。指定轨迹只比较内容，不承诺 StackTrace 对象身份。已实现类型的转换、布尔条件、空断言、dynamic 空值 throw 和协变写入失败自动抛出 TypeError，并沿同一同步展开路径处理；诊断文本仍缺实际值、目标类型和参数名。非有限数值转整数及非有限浮点整除结果抛出 UnsupportedError，沿同一错误对象与同步展开路径处理；具体边界见[数值 API](expressions.md)。固定长度及只读 List 的已支持变更操作抛出 UnsupportedError，保持元素类型检查先于只读性和范围检查，失败不改变列表。List 格式化回调改变列表长度时抛出 ConcurrentModificationError，保留实际列表载荷；for-in 的同类自动错误仍未接入。String.fromCharCodes 的非法码点抛出带原输入的 ArgumentError，StringBuffer.writeCharCode 的非法码点抛出 RangeError 并保持原内容；字段合同及 SDK List/Iterable 差异见[字符串 API](expressions.md#string-api-边界)。整数 ~/、% 和 remainder 的零除抛出 IntegerDivisionByZeroException，保留普通 catch、finally 和未捕获清理；该类只实现 Error 接口，自身 stackTrace 不填充。其余范围、late 等自动失败尚未统一生成对应错误对象。
+ArgumentError 支持默认/value/notNull 构造和 checkNotNull。RangeError 支持默认/value/range、checkValueInInterval/checkValidRange/checkNotNegative；IndexError 支持 withLength/check。依赖一般动态 indexable.length 的 IndexError 默认构造、RangeError.index/checkValidIndex 未支持。Exception 是 abstract interface class，跨库限制同[类修饰符](classes.md#类修饰符枚举与元数据)。
 
-验证：[values.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/values.dart) 的 `exceptionValues()`、[roots.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/fixtures/roots.dart) 的 `exceptionRoots()`（异常对象、首次轨迹及其载荷的根），以及 [behavior_test.dart](https://github.com/medz/dartc/blob/c3394a9fb38107ccde2e200d744db96aea2c276f/test/legacy/behavior_test.dart) 的 `failingValues`、`uncaught` 和 `rejected`。
+Error.safeToString 不调用用户 toString，字符串转义，List/函数提供安全概要，不承诺 VM 内部类名。FormatException 保留 message/source/offset，并输出行、位置和有限片段。
+
+实际 extends Error 的对象首次抛出时填充 Error.stackTrace，后续 throw/rethrow/throwWithStackTrace 不覆盖该字段；普通重复 throw 的 catch 轨迹仍来自本次抛出。子类 getter 覆写不改父存储，implements Error 不自动填充。指定轨迹只保证内容，不承诺 StackTrace 对象身份；同步轨迹文本范围见[库](libraries.md#stacktrace-api)。
+
+## 规范依据
+
+[主规范 §18](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)、[模式规范](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md)、[流分析](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/flow-analysis.md#statements)、[Error API](https://api.dart.dev/stable/3.13.7/dart-core/Error-class.html)。
