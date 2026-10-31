@@ -70,6 +70,15 @@ final class SyntaxFixture(String text) {
     );
   }
 
+  StringLiteralExpression string(String text, [int from = 0]) {
+    final start = at(text, from);
+    return StringLiteralExpression(
+      source: source,
+      start: start,
+      end: start + text.length,
+    );
+  }
+
   Annotation annotation(String name) => Annotation(
     source: source,
     start: at('@$name'),

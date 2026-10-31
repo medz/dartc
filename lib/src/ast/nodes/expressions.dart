@@ -5,7 +5,7 @@ sealed class Expression({
   required super.source,
   required super.start,
   required super.end,
-}) extends AstNode;
+}) extends AstNode implements CollectionElement, RecordField;
 
 /// A reference written as one identifier.
 final class IdentifierExpression({
@@ -29,20 +29,13 @@ final class IdentifierExpression({
   };
 }
 
-/// The lexical form of a non-interpolated literal.
-enum LiteralKind {
-  integer,
-  doubleLiteral,
-  boolean,
-  nullLiteral,
-  string,
-  symbol,
-}
+/// The lexical form of a non-string literal.
+enum LiteralKind { integer, doubleLiteral, boolean, nullLiteral, symbol }
 
 /// A literal whose original spelling is available through [text].
 ///
-/// Numeric conversion and string-escape decoding are not performed by this
-/// node. Interpolated strings require a structured interpolation node.
+/// Numeric conversion is not performed by this node. String syntax is
+/// represented by [StringExpression].
 final class LiteralExpression({
   required super.source,
   required super.start,

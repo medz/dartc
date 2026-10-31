@@ -10,7 +10,10 @@
 
 | 语言条款 | 可表示的语法 | 验证 |
 | --- | --- | --- |
-| §17 的名称、字面量与运算 | 名称引用、非插值字面量、括号、前缀 `-` / `!` / `~`、二元运算、条件表达式；保留原始拼写和分组 | [nodes_test.dart](../test/ast/nodes_test.dart) |
+| §17 的名称、字面量与运算 | 名称引用、非字符串字面量、括号、前缀 `-` / `!` / `~`、二元运算、条件表达式；保留原始拼写和分组 | [nodes_test.dart](../test/ast/nodes_test.dart) |
+| §17.7 字符串与插值 | 普通、raw、多行字符串，`$name` / `$this` / `${expression}`、嵌套插值及相邻字符串；保留原始转义、分隔符、UTF-16 和换行，尚未解码或求值 | [strings_test.dart](../test/ast/strings_test.dart) |
+| [Record 字面量][record-literals] | 空 record、单位置字段、位置与命名字段交错、显式 `const`；保留字段书写顺序，区分 `(value)` 与 `(value,)` | [records_test.dart](../test/ast/records_test.dart) |
+| [集合元素][collection-elements]与[空感知元素][null-aware-elements] | List 与未判定 Set/Map 的大括号字面量、显式类型实参与 `const`、普通元素、键值条目、`...` / `...?`、嵌套 `if` / `else`、`?expression`、独立的空感知键和值；集合类型推断和常量资格尚未检查 | [collections_test.dart](../test/ast/collections_test.dart) |
 | 调用、实例创建与[显式实例化][constructor-tearoffs] | 位置及命名实参、调用类型实参、`new` / `const`、`f<T>`、`C<T>.new` 等未绑定引用；区分 `f<T>(x)` 和 `(f<T>)(x)` | [nodes_test.dart](../test/ast/nodes_test.dart)、[expressions_test.dart](../test/ast/expressions_test.dart) |
 | 赋值、增减与成员访问 | 简单、复合、`??=` 赋值，前后 `++` / `--`，`this` / `super`，属性和索引；目标保留一次，尚未检查是否可写 | [expressions_test.dart](../test/ast/expressions_test.dart) |
 | [空安全选择器][null-aware] | `?.`、`?[]`、后缀 `!`，以及链中的括号边界 | [expressions_test.dart](../test/ast/expressions_test.dart)、[access_test.dart](../test/ast/access_test.dart) |
@@ -18,7 +21,7 @@
 | [级联][cascades] | 一个接收者、有序分段、首段 `?..`、属性及索引起始选择器、段内调用与赋值、带括号的嵌套级联 | [access_test.dart](../test/ast/access_test.dart) |
 | [点简写][dot-shorthands] | `.name` / `.new`、显式 `const .name(...)` / `const .new(...)` 及其后续选择链；完整链保留独立的上下文边界，尚未推断目标命名空间 | [access_test.dart](../test/ast/access_test.dart) |
 
-插值与相邻字符串、集合及其控制流元素、record 字面量、函数表达式、switch 表达式和模式赋值等节点仍有缺口。编译与执行行为以下表为准。
+集合中的 `for` / `for-in` / `await for`、`if-case`、函数表达式、switch 表达式和模式赋值等节点仍有缺口。编译与执行行为以下表为准。
 
 ## 求值、常量与字面量
 
@@ -181,6 +184,7 @@ SDK 3.13.7 CFE 接受 `const dynamic value = null; const result = value?[true]`�
 
 [cascades]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L14640-L14690
 [constructor-tearoffs]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.15/constructor-tearoffs/feature-specification.md
+[record-literals]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/records/feature-specification.md#record-expressions
 
 [null-aware]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md
 
