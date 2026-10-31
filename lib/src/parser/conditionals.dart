@@ -11,6 +11,33 @@ final class _Lookahead(final List<Token> tokens) {
   late final Map<int, _IndexContent> indexContents = {};
   late final Map<int, _IndexRun> indexRuns = {};
   late final Map<int, SelectorTail> selectorTails = {};
+  late final Map<int, int?> parenthesisEnds = {};
+
+  int? closeParenthesis(int start) {
+    if (tokens[start + 1].kind == .rightParen) return start + 1;
+    if (tokens[start + 1].kind != .leftParen &&
+        start + 2 < tokens.length &&
+        tokens[start + 2].kind == .rightParen) {
+      return start + 2;
+    }
+    if (parenthesisEnds.containsKey(start)) return parenthesisEnds[start];
+    final pending = [start];
+    for (var index = start + 1; index < tokens.length; index++) {
+      switch (tokens[index].kind) {
+        case .leftParen:
+          pending.add(index);
+        case .rightParen:
+          parenthesisEnds[pending.removeLast()] = index;
+          if (pending.isEmpty) return index;
+        default:
+          break;
+      }
+    }
+    for (final opening in pending) {
+      parenthesisEnds[opening] = null;
+    }
+    return null;
+  }
 
   _IndexRun? indexRun(int start) {
     final pending = <(int, _IndexContent)>[];
@@ -124,37 +151,24 @@ final class _ConditionalTrial(final _Parser parent) {
   }
 }
 
-extension on _Parser {
-  void cacheSelectorTail(_ParsedBranch branch) {
-    if (branch.diagnostics.isNotEmpty) return;
-    final content = lookahead.indexContents[trialStart];
-    if (content == null ||
-        lookahead.selectorTails.containsKey(content.cursor)) {
-      return;
-    }
-    final tail = SelectorTail.capture(
-      branch.expression,
-      receiverStart: tokens[trialStart!].start,
-      receiverEnd: content.end,
-      cursor: cursor,
-      current: current,
-    );
-    if (tail != null) lookahead.selectorTails[content.cursor] = tail;
-  }
-
-  void parseWithTrials({_ParseBoundary boundary = .input}) {
-    do {
-      acceptConditional(lookahead.conditionals[cursor] ?? resolveConditional());
-    } while (run(trial: false, boundary: boundary));
-  }
-
-  _ConditionalResult resolveConditional() {
-    final initial = _ConditionalTrial(this);
+final class _ConditionalReader(final _Parser parent)
+    extends _Reader<_ConditionalResult> {
+  @override
+  Iterable<_Reader<Object?>> read() sync* {
+    final initial = _ConditionalTrial(parent);
     var parser = initial.reader;
     final trials = [initial];
     while (true) {
       _ConditionalResult? result;
-      if (parser.run(trial: true)) {
+      final stop = parser.run(trial: true);
+      if (stop == .function) {
+        final function = parser.pendingFunction!;
+        parser.pendingFunction = null;
+        yield function;
+        parser.acceptFunction(function);
+        continue;
+      }
+      if (stop == .conditional) {
         final cached = parser.lookahead.conditionals[parser.cursor];
         if (cached == null) {
           final trial = _ConditionalTrial(parser);
@@ -191,13 +205,35 @@ extension on _Parser {
         final trial = trials.removeLast();
         parser = trial.parent;
         parser.lookahead.conditionals[trial.question] = result;
-        if (trials.isEmpty) return result;
+        if (trials.isEmpty) {
+          this.result = result;
+          return;
+        }
         result = parser.resumeConditional(
           result,
           trials.isEmpty ? null : trials.last,
         );
       }
     }
+  }
+}
+
+extension on _Parser {
+  void cacheSelectorTail(_ParsedBranch branch) {
+    if (branch.diagnostics.isNotEmpty) return;
+    final content = lookahead.indexContents[trialStart];
+    if (content == null ||
+        lookahead.selectorTails.containsKey(content.cursor)) {
+      return;
+    }
+    final tail = SelectorTail.capture(
+      branch.expression,
+      receiverStart: tokens[trialStart!].start,
+      receiverEnd: content.end,
+      cursor: cursor,
+      current: current,
+    );
+    if (tail != null) lookahead.selectorTails[content.cursor] = tail;
   }
 
   _NotConditional get conditionalFailure => initialOperatorBoundary

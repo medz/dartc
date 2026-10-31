@@ -51,7 +51,7 @@
 | 集合循环 | 同步 `for` 和 `for-in`；表达式或普通变量声明初始化、可省略的条件、多条更新、已有或声明的迭代变量；保留类型、变量关键字和源顺序，不补写空条件 | [collections_test.dart](../test/parser/collections_test.dart) |
 | 不完整或无效的输入 | 报告缺少的操作数、名称、冒号和闭合括号；以零宽节点恢复操作数，继续处理后续实参；不修改源文本或输入 token | [recovery_test.dart](../test/parser/recovery_test.dart) |
 
-尚缺函数表达式、模式赋值和 switch。集合中的 if-case、模式循环头和声明元数据尚未解析。[函数体解析](functions.md#函数体解析-api)已接入异步上下文中的 `await` 和集合 `await for`；独立 `parseExpression` 入口仍使用同步上下文。这些缺口产生的诊断不表示相应 Dart 写法非法。
+[函数表达式](functions.md#函数表达式与局部声明解析)已接入可选泛型、形参和独立的函数体上下文。尚缺模式赋值和 switch。集合中的 if-case、模式循环头和声明元数据尚未解析。[函数体解析](functions.md#函数体解析-api)已接入异步上下文中的 `await` 和集合 `await for`；独立 `parseExpression` 入口仍使用同步上下文。这些缺口产生的诊断不表示相应 Dart 写法非法。
 
 错误结果可能只覆盖部分输入，不能直接当作合法表达式使用。解析不进行名称绑定、类型检查、常量求值或执行，也不改变下述已发布编译器的支持范围。
 

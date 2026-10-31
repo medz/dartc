@@ -11,6 +11,8 @@
 - Add `parseFormalParameterList` for positional and named parameters, written defaults, metadata, receiver prefixes and nested function-form parameters with generic bounds.
 - Add `parseFunctionBody` for block, arrow and empty declaration bodies, including asynchronous and generator modifiers. Parse `await`, `yield`, `yield*` and `await for` in their function context and report invalid modifier combinations.
 
+- Parse anonymous functions and local function declarations with generic parameters, annotations, defaults and nested asynchronous or generator bodies.
+
 ### Performance
 
 - Reduce temporary allocations when scanning identifiers and speed up scanning of whitespace runs.

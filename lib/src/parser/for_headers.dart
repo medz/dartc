@@ -85,7 +85,10 @@ extension on _Parser {
 
   void initializeForHeader(_ForHeader frame) {
     final start = cursor;
-    frame.declarations = readVariableDeclarations(forLoop: true);
+    final reader = _VariableReader(this, forLoop: true);
+    final complete = reader.start();
+    assert(complete);
+    frame.declarations = reader.result;
     if (frame.declarations
         case _VariableDeclarations(
           keyword: .none,

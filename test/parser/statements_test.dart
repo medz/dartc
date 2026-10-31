@@ -250,7 +250,6 @@ void main() {
       'assert(a, b, c);',
       'switch(x) {}',
       'var (a,b) = value;',
-      'void f() {}',
     ]) {
       expect(parse(text).hasErrors, isTrue, reason: text);
     }

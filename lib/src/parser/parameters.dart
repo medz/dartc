@@ -12,7 +12,7 @@ part of 'parser.dart';
 /// Recovery preserves input tokens and can return an incomplete parameter list.
 ParseResult<FormalParameterList> parseFormalParameterList(ScanResult input) {
   final parser = _Parser(input);
-  final node = _ParameterReader(parser).read();
+  final node = _ParameterReader(parser).finish();
   while (parser.current.kind != .eof) {
     parser.unexpected();
   }
@@ -43,21 +43,28 @@ final class _Formal(
   int get end => suffix?.end ?? name.end;
 }
 
-final class _ParameterReader(final _Parser parser) {
+final class _ParameterReader(
+  final _Parser parser, {
+  final bool function = false,
+}) extends _Reader<FormalParameterList> {
   final List<_ParameterList> frames = [];
 
   SourceFile get source => parser.source;
   Token get current => parser.current;
   Token get next => parser.tokens[parser.cursor + 1];
 
-  FormalParameterList read() {
+  @override
+  Iterable<_Reader<Object?>> read() sync* {
     open();
     while (true) {
       final frame = frames.last;
       if (frame.pending == null) {
         if (prepare(frame)) {
           final result = close(frame);
-          if (frames.isEmpty) return result;
+          if (frames.isEmpty) {
+            this.result = result;
+            return;
+          }
           final owner = frame.owner!;
           final question = current.kind == .question ? current.start : null;
           if (question != null) parser.advance();
@@ -71,7 +78,14 @@ final class _ParameterReader(final _Parser parser) {
           );
           continue;
         }
-        final formal = frame.pending = head(frame);
+        final start = current.start;
+        List<Annotation> metadata = const [];
+        if (current.kind == .at) {
+          final reader = _MetadataReader(parser);
+          yield reader;
+          metadata = reader.result;
+        }
+        final formal = frame.pending = head(frame, start, metadata);
         if (current.kind == .less) {
           final start = current.start;
           final reader = _TypeReader(parser);
@@ -92,7 +106,7 @@ final class _ParameterReader(final _Parser parser) {
           continue;
         }
       }
-      finish(frame);
+      yield* finishParameter(frame);
     }
   }
 
@@ -152,9 +166,7 @@ final class _ParameterReader(final _Parser parser) {
     return false;
   }
 
-  _Formal head(_ParameterList frame) {
-    final start = current.start;
-    final metadata = parser.readMetadata();
+  _Formal head(_ParameterList frame, int start, List<Annotation> metadata) {
     var required = false;
     var covariant = false;
     var keyword = VariableKeyword.none;
@@ -229,10 +241,10 @@ final class _ParameterReader(final _Parser parser) {
               token,
             );
           }
-          if (frame.owner != null) {
+          if (frame.owner != null || function) {
             parser.error(
               'invalid_parameter_modifier',
-              'A function-form parameter cannot declare fields.',
+              'A function parameter cannot declare fields.',
               token,
             );
           }
@@ -281,7 +293,7 @@ final class _ParameterReader(final _Parser parser) {
     );
   }
 
-  void finish(_ParameterList frame) {
+  Iterable<_Reader<Object?>> finishParameter(_ParameterList frame) sync* {
     final formal = frame.pending!;
     ParameterDefault? defaultClause;
     if (current.kind == .assign || current.kind == .colon) {
@@ -296,7 +308,9 @@ final class _ParameterReader(final _Parser parser) {
         );
       }
       parser.advance();
-      final value = parser.readEmbeddedExpression();
+      final reader = _ExpressionReader(parser);
+      if (!reader.start()) yield reader;
+      final value = reader.result;
       defaultClause = ParameterDefault(
         source: source,
         start: separator.start,

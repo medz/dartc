@@ -24,6 +24,8 @@ part 'throw_expression.dart';
 part 'parameters.dart';
 part 'annotations.dart';
 part 'function_bodies.dart';
+part 'function_expressions.dart';
+part 'readers.dart';
 
 /// The syntax and diagnostics produced by parsing a source snapshot.
 ///
@@ -51,7 +53,7 @@ final class ParseResult<T extends AstNode> {
 /// forms include scalar literals, strings with interpolation and adjacency,
 /// records, operators, generic calls, explicit constructor calls, type tests and
 /// casts, throw expressions, super receivers, member access, indexing, cascades,
-/// dot shorthands,
+/// dot shorthands, function expressions with their own body context,
 /// and collection literals with spreads, null-aware elements, if/else, and
 /// ordinary for/for-in headers.
 /// Other forms produce diagnostics until their grammar is implemented. Parsing
@@ -66,6 +68,8 @@ ParseResult<Expression> parseExpression(ScanResult input) =>
 sealed class _Frame(final int valueBase, final int operatorBase);
 
 enum _ParseBoundary { input, expression, header }
+
+enum _ExpressionStop { complete, conditional, function }
 
 final class _Parser {
   _Parser(ScanResult input)
@@ -82,6 +86,16 @@ final class _Parser {
       current = parent.tokens[parent.cursor + 1],
       diagnostics = [],
       trialStart = parent.cursor + 1,
+      functionModifier = parent.functionModifier,
+      _lookahead = parent.lookahead;
+
+  _Parser.nested(_Parser parent)
+    : source = parent.source,
+      tokens = parent.tokens,
+      cursor = parent.cursor,
+      current = parent.current,
+      diagnostics = [],
+      trialStart = null,
       functionModifier = parent.functionModifier,
       _lookahead = parent.lookahead;
 
@@ -112,6 +126,7 @@ final class _Parser {
   Expression? postfixTarget;
   _NullableForInitializer? nullableForInitializer;
   FunctionBodyModifier? functionModifier;
+  _ClosureReader? pendingFunction;
 
   bool get inAsync =>
       functionModifier == .asyncKeyword || functionModifier == .asyncStar;
@@ -125,19 +140,21 @@ final class _Parser {
   }
 
   ParseResult<Expression> parse() {
-    if (run(trial: false)) parseWithTrials();
-    final node = finishExpression(0, 0);
+    beginExpression();
+    final stop = run(trial: false);
+    final node = stop == .complete
+        ? finishExpression(0, 0)
+        : _ExpressionReader(this, boundary: .input, stop: stop).finish();
     assert(prefixes.isEmpty && questions.isEmpty);
     return ParseResult._(node, diagnostics);
   }
 
-  // Returns true when an ambiguous expression or declaration needs a trial.
-  bool run({required bool trial, _ParseBoundary boundary = .input}) {
+  _ExpressionStop run({required bool trial, _ParseBoundary boundary = .input}) {
     while (current.kind != .eof || frames.isNotEmpty) {
       final token = current;
       final frame = frames.isEmpty ? null : frames.last;
       if (!trial && frame == null) {
-        if (boundary == .header) return false;
+        if (boundary == .header) return .complete;
         if (boundary == .expression &&
             (token.kind.endsExpression ||
                 token.kind == .colon && questions.isEmpty ||
@@ -146,21 +163,21 @@ final class _Parser {
                     token.kind != .cascade &&
                     token.kind != .nullAwareCascade &&
                     !token.kind.continuesExpression)) {
-          return false;
+          return .complete;
         }
       }
       if (frame is _Shorthand && endShorthandAtBoundary(frame)) continue;
       if (frame is _Cascade && endCascadeAtBoundary(frame)) continue;
       if (frame is _Throw && endThrowAtBoundary(frame)) continue;
       if (trial) {
-        if (hasSyntaxError || token.kind == .invalid) return false;
+        if (hasSyntaxError || token.kind == .invalid) return .complete;
         if (frames.isEmpty &&
             (token.kind == .colon && questions.isEmpty ||
                 token.kind.endsExpression ||
                 !expectsOperand &&
                     token.kind != .colon &&
                     !token.kind.continuesExpression)) {
-          return false;
+          return .complete;
         }
       }
       if (token.kind == .eof ||
@@ -204,7 +221,7 @@ final class _Parser {
           continue;
         }
         if (expectsOperand && parseElementPrefix(frame)) {
-          if (nullableForInitializer != null) return true;
+          if (nullableForInitializer != null) return .conditional;
           continue;
         }
       }
@@ -220,12 +237,13 @@ final class _Parser {
           advance();
         } else {
           parseOperand();
+          if (pendingFunction != null) return .function;
         }
       } else {
-        if (parseContinuation()) return true;
+        if (parseContinuation()) return .conditional;
       }
     }
-    return false;
+    return .complete;
   }
 
   void parseOperand() {
@@ -302,12 +320,14 @@ final class _Parser {
           openShorthand();
           return;
         case .less:
+          if (parseFunctionExpression()) return;
           parseCollectionPrefix();
           return;
         case .hash:
           parseSymbol();
           return;
         case .leftParen:
+          if (parseFunctionExpression()) return;
           frames.add(_Group(token, values.length, operators.length));
           advance();
           return;

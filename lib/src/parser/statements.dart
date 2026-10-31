@@ -4,12 +4,13 @@ part of 'parser.dart';
 ///
 /// Blocks, local variables, loops, branches, labels, jumps, assertions and
 /// try/catch/finally retain their written order. Expressions use the same
-/// synchronous context as [parseExpression]. Patterns, local functions and
-/// switch statements are not yet parsed. Binding, types and jump targets are
+/// synchronous context as [parseExpression]. Local functions retain their own
+/// body context. Patterns and switch statements are not yet parsed. Binding,
+/// types and jump targets are
 /// not checked. Recovery may return only part of invalid input.
 ParseResult<Statement> parseStatement(ScanResult input) {
   final parser = _Parser(input);
-  final node = _StatementReader(parser).read();
+  final node = _StatementReader(parser).finish();
   while (parser.current.kind != .eof) {
     parser.unexpected();
   }
@@ -55,270 +56,448 @@ final class _TryStatement(super.opening) extends _StatementFrame {
   bool isFinally = false;
 }
 
-final class _StatementReader(final _Parser parser) {
+final class _StatementReader(final _Parser parser) extends _Reader<Statement> {
   final List<_StatementFrame> frames = [];
+  Statement? value;
 
   SourceFile get source => parser.source;
   Token get current => parser.current;
 
-  Statement read() {
-    Statement? result;
+  @override
+  Iterable<_Reader<Object?>> read() sync* {
     while (true) {
-      result ??= start();
-      if (result == null) continue;
-      if (frames.isEmpty) return result;
-      result = finish(result);
-    }
-  }
-
-  Statement? start() {
-    final frame = frames.lastOrNull;
-    final token = current;
-    if (frame is _Block &&
-        (token.kind == .rightBrace ||
-            token.kind == .eof ||
-            token.kind == .keywordElse ||
-            token.kind == .keywordCatch ||
-            token.kind == .keywordFinally)) {
-      final end = parser.expect(.rightBrace);
-      frames.removeLast();
-      return BlockStatement(
-        source: source,
-        start: frame.opening.start,
-        end: end,
-        statements: frame.statements,
-      );
-    }
-    if (frame is _TryStatement && token.kind != .leftBrace) {
-      parser.error('expected_block', 'Expected a block.', token);
-      return BlockStatement(
-        source: source,
-        start: token.start,
-        end: token.start,
-        statements: const [],
-      );
-    }
-    if (token.kind == .eof ||
-        token.kind == .rightBrace ||
-        token.kind == .keywordElse && frame is _IfStatement) {
-      parser.error('expected_statement', 'Expected a statement.', token);
-      return MissingStatement(source: source, offset: token.start);
-    }
-    if (token.kind.isIdentifier &&
-        token.kind != .keywordAwait &&
-        parser.tokens[parser.cursor + 1].kind == .colon) {
-      final labels = <Label>[];
-      do {
-        final name = parser.identifier(current);
-        parser.advance();
-        final end = current.end;
-        parser.advance();
-        labels.add(
-          Label(source: source, start: name.start, end: end, name: name),
-        );
-      } while (current.kind.isIdentifier &&
-          parser.tokens[parser.cursor + 1].kind == .colon);
-      frames.add(_Labels(token, labels));
-      return null;
-    }
-    switch (token.kind) {
-      case .leftBrace:
-        parser.advance();
-        frames.add(_Block(token));
-        return null;
-      case .semicolon:
-        parser.advance();
-        return EmptyStatement(
-          source: source,
-          start: token.start,
-          end: token.end,
-        );
-      case .keywordIf:
-        parser.advance();
-        frames.add(_IfStatement(token, condition()));
-        return null;
-      case .keywordWhile:
-        parser.advance();
-        frames.add(_WhileStatement(token, condition()));
-        return null;
-      case .keywordDo:
-        parser.advance();
-        frames.add(_DoStatement(token));
-        return null;
-      case .keywordFor || .keywordAwait
-          when token.kind == .keywordFor ||
-              parser.tokens[parser.cursor + 1].kind == .keywordFor:
-        final isAwait = token.kind == .keywordAwait;
-        if (isAwait) {
-          if (!parser.inAsync) {
+      if (value == null) {
+        final frame = frames.lastOrNull;
+        final token = current;
+        if (frame is _Block &&
+            (token.kind == .rightBrace ||
+                token.kind == .eof ||
+                token.kind == .keywordElse ||
+                token.kind == .keywordCatch ||
+                token.kind == .keywordFinally)) {
+          final end = parser.expect(.rightBrace);
+          frames.removeLast();
+          value = BlockStatement(
+            source: source,
+            start: frame.opening.start,
+            end: end,
+            statements: frame.statements,
+          );
+          continue;
+        }
+        if (frame is _TryStatement && token.kind != .leftBrace) {
+          parser.error('expected_block', 'Expected a block.', token);
+          value = BlockStatement(
+            source: source,
+            start: token.start,
+            end: token.start,
+            statements: const [],
+          );
+          continue;
+        }
+        if (token.kind == .eof ||
+            token.kind == .rightBrace ||
+            token.kind == .keywordElse && frame is _IfStatement) {
+          parser.error('expected_statement', 'Expected a statement.', token);
+          value = MissingStatement(source: source, offset: token.start);
+          continue;
+        }
+        if (token.kind.isIdentifier &&
+            token.kind != .keywordAwait &&
+            parser.tokens[parser.cursor + 1].kind == .colon) {
+          final labels = <Label>[];
+          do {
+            final name = parser.identifier(current);
+            parser.advance();
+            final end = current.end;
+            parser.advance();
+            labels.add(
+              Label(source: source, start: name.start, end: end, name: name),
+            );
+          } while (current.kind.isIdentifier &&
+              parser.tokens[parser.cursor + 1].kind == .colon);
+          frames.add(_Labels(token, labels));
+          value = null;
+          continue;
+        }
+        switch (token.kind) {
+          case .leftBrace:
+            parser.advance();
+            frames.add(_Block(token));
+            value = null;
+            continue;
+          case .semicolon:
+            parser.advance();
+            value = EmptyStatement(
+              source: source,
+              start: token.start,
+              end: token.end,
+            );
+            continue;
+          case .keywordIf:
+            parser.advance();
+            final reader = _ConditionReader(parser);
+            yield reader;
+            frames.add(_IfStatement(token, reader.result));
+            value = null;
+            continue;
+          case .keywordWhile:
+            parser.advance();
+            final reader = _ConditionReader(parser);
+            yield reader;
+            frames.add(_WhileStatement(token, reader.result));
+            value = null;
+            continue;
+          case .keywordDo:
+            parser.advance();
+            frames.add(_DoStatement(token));
+            value = null;
+            continue;
+          case .keywordFor || .keywordAwait
+              when token.kind == .keywordFor ||
+                  parser.tokens[parser.cursor + 1].kind == .keywordFor:
+            final isAwait = token.kind == .keywordAwait;
+            if (isAwait) {
+              if (!parser.inAsync) {
+                parser.error(
+                  'await_in_sync',
+                  'An await-for requires an asynchronous context.',
+                  token,
+                );
+              }
+              parser.advance();
+            }
+            parser.advance();
+            final reader = _ForHeaderReader(parser);
+            yield reader;
+            final parts = reader.result;
+            if (isAwait && parts is! ForInParts) {
+              parser.error(
+                'invalid_await_for',
+                'An await-for requires a for-in header.',
+                token,
+              );
+            }
+            frames.add(_ForStatement(token, parts, isAwait));
+            value = null;
+            continue;
+          case .keywordTry:
+            parser.advance();
+            frames.add(_TryStatement(token));
+            value = null;
+            continue;
+          case .keywordReturn:
+            parser.advance();
+            Expression? expression;
+            if (current.kind != .semicolon &&
+                current.kind != .rightBrace &&
+                current.kind != .eof) {
+              final reader = _ExpressionReader(parser);
+              if (!reader.start()) yield reader;
+              expression = reader.result;
+            }
+            final end = parser.expect(.semicolon);
+            if (expression != null && parser.inGenerator) {
+              parser.error(
+                'generator_return_value',
+                'A generator cannot return a value.',
+                token,
+              );
+            }
+            value = ReturnStatement(
+              source: source,
+              start: token.start,
+              end: end,
+              expression: expression,
+            );
+            continue;
+          case .keywordBreak || .keywordContinue:
+            parser.advance();
+            Identifier? label;
+            if (current.kind.isIdentifier) {
+              label = parser.identifier(current);
+              parser.advance();
+            }
+            final end = parser.expect(.semicolon);
+            value = token.kind == .keywordBreak
+                ? BreakStatement(
+                    source: source,
+                    start: token.start,
+                    end: end,
+                    label: label,
+                  )
+                : ContinueStatement(
+                    source: source,
+                    start: token.start,
+                    end: end,
+                    label: label,
+                  );
+            continue;
+          case .keywordRethrow:
+            parser.advance();
+            value = RethrowStatement(
+              source: source,
+              start: token.start,
+              end: parser.expect(.semicolon),
+            );
+            continue;
+          case .keywordAssert:
+            yield* assertion();
+            continue;
+          case .keywordYield when parser.functionModifier != null:
+            parser.advance();
+            final isStar = current.kind == .star;
+            if (isStar) parser.advance();
+            final reader = _ExpressionReader(parser);
+            if (!reader.start()) yield reader;
+            final expression = reader.result;
+            if (!parser.inGenerator) {
+              parser.error(
+                'yield_outside_generator',
+                'A yield statement requires a generator.',
+                token,
+              );
+            }
+            value = YieldStatement(
+              source: source,
+              start: token.start,
+              end: parser.expect(.semicolon),
+              isStar: isStar,
+              expression: expression,
+            );
+            continue;
+          case .keywordSwitch || .at:
+            if (token.kind == .at) {
+              final function = parser.localFunction();
+              if (function != null) {
+                yield function;
+                if (function.result != null) {
+                  value = function.result;
+                  continue;
+                }
+              }
+            }
             parser.error(
-              'await_in_sync',
-              'An await-for requires an asynchronous context.',
+              'unsupported_syntax',
+              'This statement syntax is not yet supported.',
               token,
             );
-          }
-          parser.advance();
+            parser.advance();
+            value = MissingStatement(source: source, offset: token.start);
+            continue;
+          default:
+            _VariableDeclarations? declarations;
+            if (token.kind != .keywordAwait ||
+                parser.functionModifier == null) {
+              final reader = _VariableReader(parser);
+              if (!reader.start()) yield reader;
+              declarations = reader.result;
+            }
+            if (declarations != null) {
+              yield* variables(declarations);
+              continue;
+            }
+            if (token.kind != .keywordAwait ||
+                parser.functionModifier == null) {
+              final function = parser.localFunction();
+              if (function != null) {
+                yield function;
+                if (function.result != null) {
+                  value = function.result;
+                  continue;
+                }
+              }
+            }
+            final start = parser.cursor;
+            final reader = _ExpressionReader(parser);
+            if (!reader.start()) yield reader;
+            final expression = reader.result;
+            final end = parser.expect(.semicolon);
+            if (parser.cursor == start && current.kind != .eof) {
+              parser.unexpected();
+            }
+            value = ExpressionStatement(
+              source: source,
+              start: expression.start,
+              end: end,
+              expression: expression,
+            );
+            continue;
         }
-        parser.advance();
-        final parts = parser.readForStatementHeader();
-        if (isAwait && parts is! ForInParts) {
-          parser.error(
-            'invalid_await_for',
-            'An await-for requires a for-in header.',
-            token,
-          );
+      } else {
+        if (frames.isEmpty) {
+          result = value!;
+          return;
         }
-        frames.add(_ForStatement(token, parts, isAwait));
-        return null;
-      case .keywordTry:
-        parser.advance();
-        frames.add(_TryStatement(token));
-        return null;
-      case .keywordReturn:
-        parser.advance();
-        final expression =
-            current.kind == .semicolon ||
-                current.kind == .rightBrace ||
-                current.kind == .eof
-            ? null
-            : parser.readEmbeddedExpression();
-        final end = parser.expect(.semicolon);
-        if (expression != null && parser.inGenerator) {
-          parser.error(
-            'generator_return_value',
-            'A generator cannot return a value.',
-            token,
-          );
-        }
-        return ReturnStatement(
-          source: source,
-          start: token.start,
-          end: end,
-          expression: expression,
-        );
-      case .keywordBreak || .keywordContinue:
-        parser.advance();
-        Identifier? label;
-        if (current.kind.isIdentifier) {
-          label = parser.identifier(current);
-          parser.advance();
-        }
-        final end = parser.expect(.semicolon);
-        return token.kind == .keywordBreak
-            ? BreakStatement(
+        var statement = value!;
+
+        final frame = frames.last;
+        switch (frame) {
+          case _Block():
+            frame.statements.add(statement);
+            value = null;
+            continue;
+          case _IfStatement():
+            if (frame.thenStatement == null) {
+              frame.thenStatement = statement;
+              if (current.kind == .keywordElse) {
+                parser.advance();
+                value = null;
+                continue;
+              }
+              statement = IfStatement(
                 source: source,
-                start: token.start,
-                end: end,
-                label: label,
-              )
-            : ContinueStatement(
-                source: source,
-                start: token.start,
-                end: end,
-                label: label,
+                start: frame.opening.start,
+                end: statement.end,
+                condition: frame.condition,
+                thenStatement: statement,
               );
-      case .keywordRethrow:
-        parser.advance();
-        return RethrowStatement(
-          source: source,
-          start: token.start,
-          end: parser.expect(.semicolon),
-        );
-      case .keywordAssert:
-        return assertion();
-      case .keywordYield when parser.functionModifier != null:
-        parser.advance();
-        final isStar = current.kind == .star;
-        if (isStar) parser.advance();
-        final expression = parser.readEmbeddedExpression();
-        if (!parser.inGenerator) {
-          parser.error(
-            'yield_outside_generator',
-            'A yield statement requires a generator.',
-            token,
-          );
+            } else {
+              statement = IfStatement(
+                source: source,
+                start: frame.opening.start,
+                end: statement.end,
+                condition: frame.condition,
+                thenStatement: frame.thenStatement!,
+                elseStatement: statement,
+              );
+            }
+          case _WhileStatement():
+            statement = WhileStatement(
+              source: source,
+              start: frame.opening.start,
+              end: statement.end,
+              condition: frame.condition,
+              body: statement,
+            );
+          case _DoStatement():
+            parser.expect(.keywordWhile);
+            final reader = _ConditionReader(parser);
+            yield reader;
+            final test = reader.result;
+            statement = DoStatement(
+              source: source,
+              start: frame.opening.start,
+              end: parser.expect(.semicolon),
+              body: statement,
+              condition: test,
+            );
+          case _ForStatement():
+            statement = ForStatement(
+              source: source,
+              start: frame.opening.start,
+              end: statement.end,
+              isAwait: frame.isAwait,
+              parts: frame.parts,
+              body: statement,
+            );
+          case _Labels():
+            statement = LabeledStatement(
+              source: source,
+              start: frame.opening.start,
+              end: statement.end,
+              labels: frame.labels,
+              statement: statement,
+            );
+          case _TryStatement():
+            final block = statement as BlockStatement;
+            if (frame.isFinally) {
+              statement = TryStatement(
+                source: source,
+                start: frame.opening.start,
+                end: block.end,
+                body: frame.body!,
+                catchClauses: frame.clauses,
+                finallyBlock: block,
+              );
+            } else {
+              if (frame.handler case final handler?) {
+                frame.clauses.add(
+                  CatchClause(
+                    source: source,
+                    start: handler.opening.start,
+                    end: block.end,
+                    exceptionType: handler.type,
+                    exceptionParameter: handler.exception,
+                    stackTraceParameter: handler.stackTrace,
+                    body: block,
+                  ),
+                );
+                frame.handler = null;
+              } else {
+                frame.body = block;
+              }
+              if (current.kind == .keywordOn || current.kind == .keywordCatch) {
+                frame.handler = catchHeader();
+                value = null;
+                continue;
+              }
+              if (current.kind == .keywordFinally) {
+                parser.advance();
+                frame.isFinally = true;
+                value = null;
+                continue;
+              }
+              if (frame.clauses.isEmpty) {
+                parser.error(
+                  'expected_handler',
+                  'Expected an on, catch, or finally clause.',
+                  current,
+                );
+              }
+              statement = TryStatement(
+                source: source,
+                start: frame.opening.start,
+                end: block.end,
+                body: frame.body!,
+                catchClauses: frame.clauses,
+              );
+            }
         }
-        return YieldStatement(
-          source: source,
-          start: token.start,
-          end: parser.expect(.semicolon),
-          isStar: isStar,
-          expression: expression,
-        );
-      case .keywordSwitch || .at:
-        parser.error(
-          'unsupported_syntax',
-          'This statement syntax is not yet supported.',
-          token,
-        );
-        parser.advance();
-        return MissingStatement(source: source, offset: token.start);
-      default:
-        final declarations =
-            token.kind == .keywordAwait && parser.functionModifier != null
-            ? null
-            : parser.readVariableDeclarations();
-        if (declarations != null) return variables(declarations);
-        final start = parser.cursor;
-        final expression = parser.readEmbeddedExpression();
-        final end = parser.expect(.semicolon);
-        if (parser.cursor == start && current.kind != .eof) parser.unexpected();
-        return ExpressionStatement(
-          source: source,
-          start: expression.start,
-          end: end,
-          expression: expression,
-        );
+        frames.removeLast();
+        value = statement;
+      }
     }
   }
 
-  Expression condition() {
-    parser.expect(.leftParen);
-    final expression = parser.readEmbeddedExpression();
-    if (current.kind == .keywordCase) {
-      parser.error(
-        'unsupported_syntax',
-        'Case pattern parsing is not yet supported.',
-        current,
-      );
-      // Continue to the header boundary without treating pattern tokens as
-      // a valid boolean condition.
-      parser.advance();
-      parser.readEmbeddedExpression();
-    }
-    parser.expect(.rightParen);
-    return expression;
-  }
-
-  Statement assertion() {
+  Iterable<_Reader<Object?>> assertion() sync* {
     final keyword = current;
     parser.advance();
     parser.expect(.leftParen);
-    final expression = parser.readEmbeddedExpression();
+    final reader = _ExpressionReader(parser);
+    if (!reader.start()) yield reader;
+    final expression = reader.result;
     Expression? message;
     if (current.kind == .comma) {
       parser.advance();
       if (current.kind != .rightParen) {
-        message = parser.readEmbeddedExpression();
+        final reader = _ExpressionReader(parser);
+        if (!reader.start()) yield reader;
+        message = reader.result;
         if (current.kind == .comma) parser.advance();
       }
     }
     parser.expect(.rightParen);
-    return AssertStatement(
+    value = AssertStatement(
       source: source,
       start: keyword.start,
       end: parser.expect(.semicolon),
       condition: expression,
       message: message,
     );
+    return;
   }
 
-  Statement variables(_VariableDeclarations declarations) {
+  Iterable<_Reader<Object?>> variables(
+    _VariableDeclarations declarations,
+  ) sync* {
     while (true) {
       Expression? initializer;
       if (current.kind == .assign) {
         parser.advance();
-        initializer = parser.readEmbeddedExpression();
+        final reader = _ExpressionReader(parser);
+        if (!reader.start()) yield reader;
+        initializer = reader.result;
       }
       declarations.variables.add(
         VariableDeclaration(
@@ -342,134 +521,13 @@ final class _StatementReader(final _Parser parser) {
       type: declarations.type,
       declarations: declarations.variables,
     );
-    return VariableDeclarationStatement(
+    value = VariableDeclarationStatement(
       source: source,
       start: variables.start,
       end: parser.expect(.semicolon),
       variables: variables,
     );
-  }
-
-  Statement? finish(Statement statement) {
-    final frame = frames.last;
-    switch (frame) {
-      case _Block():
-        frame.statements.add(statement);
-        return null;
-      case _IfStatement():
-        if (frame.thenStatement == null) {
-          frame.thenStatement = statement;
-          if (current.kind == .keywordElse) {
-            parser.advance();
-            return null;
-          }
-          statement = IfStatement(
-            source: source,
-            start: frame.opening.start,
-            end: statement.end,
-            condition: frame.condition,
-            thenStatement: statement,
-          );
-        } else {
-          statement = IfStatement(
-            source: source,
-            start: frame.opening.start,
-            end: statement.end,
-            condition: frame.condition,
-            thenStatement: frame.thenStatement!,
-            elseStatement: statement,
-          );
-        }
-      case _WhileStatement():
-        statement = WhileStatement(
-          source: source,
-          start: frame.opening.start,
-          end: statement.end,
-          condition: frame.condition,
-          body: statement,
-        );
-      case _DoStatement():
-        parser.expect(.keywordWhile);
-        final test = condition();
-        statement = DoStatement(
-          source: source,
-          start: frame.opening.start,
-          end: parser.expect(.semicolon),
-          body: statement,
-          condition: test,
-        );
-      case _ForStatement():
-        statement = ForStatement(
-          source: source,
-          start: frame.opening.start,
-          end: statement.end,
-          isAwait: frame.isAwait,
-          parts: frame.parts,
-          body: statement,
-        );
-      case _Labels():
-        statement = LabeledStatement(
-          source: source,
-          start: frame.opening.start,
-          end: statement.end,
-          labels: frame.labels,
-          statement: statement,
-        );
-      case _TryStatement():
-        final block = statement as BlockStatement;
-        if (frame.isFinally) {
-          statement = TryStatement(
-            source: source,
-            start: frame.opening.start,
-            end: block.end,
-            body: frame.body!,
-            catchClauses: frame.clauses,
-            finallyBlock: block,
-          );
-        } else {
-          if (frame.handler case final handler?) {
-            frame.clauses.add(
-              CatchClause(
-                source: source,
-                start: handler.opening.start,
-                end: block.end,
-                exceptionType: handler.type,
-                exceptionParameter: handler.exception,
-                stackTraceParameter: handler.stackTrace,
-                body: block,
-              ),
-            );
-            frame.handler = null;
-          } else {
-            frame.body = block;
-          }
-          if (current.kind == .keywordOn || current.kind == .keywordCatch) {
-            frame.handler = catchHeader();
-            return null;
-          }
-          if (current.kind == .keywordFinally) {
-            parser.advance();
-            frame.isFinally = true;
-            return null;
-          }
-          if (frame.clauses.isEmpty) {
-            parser.error(
-              'expected_handler',
-              'Expected an on, catch, or finally clause.',
-              current,
-            );
-          }
-          statement = TryStatement(
-            source: source,
-            start: frame.opening.start,
-            end: block.end,
-            body: frame.body!,
-            catchClauses: frame.clauses,
-          );
-        }
-    }
-    frames.removeLast();
-    return statement;
+    return;
   }
 
   _CatchHeader catchHeader() {
@@ -511,37 +569,5 @@ extension on _Parser {
     }
     error('expected_token', "Expected '${kind.spelling}'.", token);
     return token.start;
-  }
-
-  Expression readEmbeddedExpression() {
-    assert(frames.isEmpty && values.isEmpty && operators.isEmpty);
-    expectsOperand = true;
-    hasSyntaxError = false;
-    selectorTarget = null;
-    postfixTarget = null;
-    checkedNullAware = false;
-    if (run(trial: false, boundary: .expression)) {
-      parseWithTrials(boundary: .expression);
-    }
-    final result = finishExpression(0, 0);
-    assert(prefixes.isEmpty && questions.isEmpty);
-    return result;
-  }
-
-  ForLoopParts readForStatementHeader() {
-    assert(frames.isEmpty && values.isEmpty && operators.isEmpty);
-    final opening = current;
-    expect(.leftParen);
-    final header = _ForStatementHeader(opening, 0, 0, current.start);
-    frames.add(header);
-    expectsOperand = true;
-    hasSyntaxError = false;
-    initializeForHeader(header);
-    if (nullableForInitializer != null ||
-        run(trial: false, boundary: .header)) {
-      parseWithTrials(boundary: .header);
-    }
-    assert(frames.isEmpty && values.isEmpty && operators.isEmpty);
-    return header.parts;
   }
 }

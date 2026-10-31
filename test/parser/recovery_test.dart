@@ -80,7 +80,7 @@ void main() {
   test(
     'diagnoses grammar that is not implemented instead of accepting a prefix',
     () {
-      for (final text in ['(a) = b', '() => a', 'switch (a) { _ => b }']) {
+      for (final text in ['(a) = b', 'switch (a) { _ => b }']) {
         expect(parse(text).hasErrors, isTrue, reason: text);
       }
       expect(

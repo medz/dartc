@@ -1,67 +1,74 @@
 part of 'parser.dart';
 
-extension on _Parser {
-  List<Annotation> readMetadata() {
-    if (current.kind != .at) return const [];
+final class _MetadataReader(final _Parser parser)
+    extends _Reader<List<Annotation>> {
+  @override
+  Iterable<_Reader<Object?>> read() sync* {
+    if (parser.current.kind != .at) {
+      result = const [];
+      return;
+    }
     final metadata = <Annotation>[];
     do {
-      final at = current;
-      advance();
-      final name = <Identifier>[readVariableName()];
-      while (current.kind == .dot && name.length < 3) {
-        advance();
-        name.add(readAnnotationMember());
+      final at = parser.current;
+      parser.advance();
+      final name = <Identifier>[parser.readVariableName()];
+      while (parser.current.kind == .dot && name.length < 3) {
+        parser.advance();
+        name.add(parser.readAnnotationMember());
       }
       TypeArgumentList? typeArguments;
       Identifier? constructorName;
-      if (current.kind == .less) {
+      if (parser.current.kind == .less) {
         if (name.length > 2) {
-          error(
+          parser.error(
             'invalid_annotation_type_arguments',
             'Type arguments must follow the annotation type name.',
-            current,
+            parser.current,
           );
         }
-        final start = current.start;
-        final reader = _TypeReader(this);
+        final start = parser.current.start;
+        final reader = _TypeReader(parser);
         typeArguments = reader.read(arguments: true) as TypeArgumentList?;
         if (reader.failure case final failure?) {
-          error(failure.$1, failure.$2, failure.$3);
+          parser.error(failure.$1, failure.$2, failure.$3);
         }
         typeArguments ??= TypeArgumentList(
-          source: source,
+          source: parser.source,
           start: start,
-          end: current.start,
+          end: parser.current.start,
           arguments: const [],
         );
-        if (current.kind == .dot) {
-          advance();
-          constructorName = readAnnotationMember();
+        if (parser.current.kind == .dot) {
+          parser.advance();
+          constructorName = parser.readAnnotationMember();
         }
       }
       ArgumentList? arguments;
       final nameEnd =
           constructorName?.end ?? typeArguments?.end ?? name.last.end;
-      if (current.kind == .leftParen &&
-          (current.start == nameEnd || typeArguments != null)) {
-        if (current.start != nameEnd) {
-          error(
+      if (parser.current.kind == .leftParen &&
+          (parser.current.start == nameEnd || typeArguments != null)) {
+        if (parser.current.start != nameEnd) {
+          parser.error(
             'annotation_argument_space',
             'Annotation arguments must immediately follow the name.',
-            current,
+            parser.current,
           );
         }
-        arguments = readArgumentList();
+        final reader = _ArgumentsReader(parser);
+        yield reader;
+        arguments = reader.result;
       } else if (typeArguments != null) {
-        error(
+        parser.error(
           'expected_annotation_arguments',
           'Expected arguments after the annotation type arguments.',
-          current,
+          parser.current,
         );
       }
       metadata.add(
         Annotation(
-          source: source,
+          source: parser.source,
           start: at.start,
           end:
               arguments?.end ??
@@ -74,10 +81,12 @@ extension on _Parser {
           arguments: arguments,
         ),
       );
-    } while (current.kind == .at);
-    return metadata;
+    } while (parser.current.kind == .at);
+    result = metadata;
   }
+}
 
+extension on _Parser {
   Identifier readAnnotationMember() {
     if (current.kind == .keywordNew) {
       final result = identifier(current);
@@ -85,19 +94,5 @@ extension on _Parser {
       return result;
     }
     return readVariableName();
-  }
-
-  ArgumentList readArgumentList() {
-    assert(frames.isEmpty && values.isEmpty && operators.isEmpty);
-    final arguments = _ArgumentList(current, 0, 0);
-    advance();
-    frames.add(arguments);
-    expectsOperand = true;
-    hasSyntaxError = false;
-    if (run(trial: false, boundary: .header)) {
-      parseWithTrials(boundary: .header);
-    }
-    assert(frames.isEmpty && values.isEmpty && operators.isEmpty);
-    return arguments.result;
   }
 }

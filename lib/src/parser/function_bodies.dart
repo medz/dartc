@@ -12,28 +12,33 @@ part of 'parser.dart';
 /// body produces a zero-width [MissingFunctionBody].
 ParseResult<FunctionBody> parseFunctionBody(ScanResult input) {
   final parser = _Parser(input);
-  final body = parser.readFunctionBody();
+  final body = _BodyReader(parser).finish();
   while (parser.current.kind != .eof) {
     parser.unexpected();
   }
   return ParseResult._(body, parser.diagnostics);
 }
 
-extension on _Parser {
-  FunctionBody readFunctionBody() {
-    final start = current.start;
-    final previous = functionModifier;
-    functionModifier = null;
-    if (current.kind == .keywordAsync || current.kind == .keywordSync) {
-      final token = current;
-      advance();
-      if (current.kind == .star) {
-        functionModifier = token.kind == .keywordAsync ? .asyncStar : .syncStar;
-        advance();
+final class _BodyReader(final _Parser parser, {final bool declaration = true})
+    extends _Reader<FunctionBody> {
+  @override
+  Iterable<_Reader<Object?>> read() sync* {
+    final start = parser.current.start;
+    final previous = parser.functionModifier;
+    parser.functionModifier = null;
+    if (parser.current.kind == .keywordAsync ||
+        parser.current.kind == .keywordSync) {
+      final token = parser.current;
+      parser.advance();
+      if (parser.current.kind == .star) {
+        parser.functionModifier = token.kind == .keywordAsync
+            ? .asyncStar
+            : .syncStar;
+        parser.advance();
       } else if (token.kind == .keywordAsync) {
-        functionModifier = .asyncKeyword;
+        parser.functionModifier = .asyncKeyword;
       } else {
-        error(
+        parser.error(
           'invalid_sync_modifier',
           "The sync modifier requires '*'.",
           token,
@@ -41,57 +46,78 @@ extension on _Parser {
       }
     }
     try {
-      switch (current.kind) {
+      switch (parser.current.kind) {
         case .semicolon:
-          final token = current;
-          if (functionModifier != null) {
-            error(
+          final token = parser.current;
+          if (!declaration) {
+            parser.error(
+              'expected_function_body',
+              'A function expression requires a body.',
+              token,
+            );
+          }
+          if (parser.functionModifier != null) {
+            parser.error(
               'modified_empty_body',
               'An empty body cannot have a function modifier.',
               token,
             );
           }
-          advance();
-          return EmptyFunctionBody(
-            source: source,
+          parser.advance();
+          result = EmptyFunctionBody(
+            source: parser.source,
             start: start,
             end: token.end,
           );
+          return;
         case .arrow:
-          if (inGenerator) {
-            error(
+          if (parser.inGenerator) {
+            parser.error(
               'generator_arrow_body',
               'A generator requires a block body.',
-              current,
+              parser.current,
             );
           }
-          advance();
-          final expression = readEmbeddedExpression();
-          return ExpressionFunctionBody(
-            source: source,
+          parser.advance();
+          final reader = _ExpressionReader(parser);
+          if (!reader.start()) yield reader;
+          final expression = reader.result;
+          result = ExpressionFunctionBody(
+            source: parser.source,
             start: start,
-            end: expect(.semicolon),
-            isAsync: inAsync,
+            end: declaration ? parser.expect(.semicolon) : expression.end,
+            isAsync: parser.inAsync,
             expression: expression,
           );
+          return;
         case .leftBrace:
-          final block = _StatementReader(this).read() as BlockStatement;
-          final modifier = functionModifier;
-          return modifier == null
+          final reader = _StatementReader(parser);
+          yield reader;
+          final block = reader.result as BlockStatement;
+          final modifier = parser.functionModifier;
+          result = modifier == null
               ? block
               : ModifiedBlockFunctionBody(
-                  source: source,
+                  source: parser.source,
                   start: start,
                   end: block.end,
                   modifier: modifier,
                   block: block,
                 );
+          return;
         default:
-          error('expected_function_body', 'Expected a function body.', current);
-          return MissingFunctionBody(source: source, offset: current.start);
+          parser.error(
+            'expected_function_body',
+            'Expected a function body.',
+            parser.current,
+          );
+          result = MissingFunctionBody(
+            source: parser.source,
+            offset: parser.current.start,
+          );
       }
     } finally {
-      functionModifier = previous;
+      parser.functionModifier = previous;
     }
   }
 }

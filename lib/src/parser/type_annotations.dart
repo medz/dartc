@@ -48,6 +48,7 @@ final class _TypeName(
 final class _TypeReader(
   final _Parser parser, {
   final bool afterIsOrAs = false,
+  final bool beforeFunction = false,
 }) {
   final List<_TypeFrame> frames = [];
   (String, String, Token)? failure;
@@ -80,6 +81,11 @@ final class _TypeReader(
       }
       if (current.kind == .keywordFunction &&
           (next.kind == .leftParen || next.kind == .less)) {
+        if (beforeFunction &&
+            frames.isEmpty &&
+            parser.functionBodyAfterName()) {
+          return value;
+        }
         value = beginFunction(value);
         continue;
       }

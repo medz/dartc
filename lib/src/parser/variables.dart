@@ -12,27 +12,32 @@ final class _VariableDeclarations(
   final List<VariableDeclaration> variables = [];
 }
 
-extension on _Parser {
-  _VariableDeclarations? readVariableDeclarations({bool forLoop = false}) {
-    final initialCursor = cursor;
-    final first = current;
+final class _VariableReader(final _Parser parser, {final bool forLoop = false})
+    extends _Reader<_VariableDeclarations?> {
+  int? expressionStart;
+  int? declarationEnd;
+
+  bool start() {
+    final initialCursor = parser.cursor;
+    final first = parser.current;
     var isLate = false;
     TypeAnnotation? type;
     // Modifier words can also name functions, followed by a call's arguments.
-    if (current.kind.isVariableModifier &&
-        tokens[cursor + 1].kind == .leftParen) {
-      advance();
-      type = _TypeReader(this).read() as TypeAnnotation?;
+    if (parser.current.kind.isVariableModifier &&
+        parser.tokens[parser.cursor + 1].kind == .leftParen) {
+      parser.advance();
+      type = _TypeReader(parser).read() as TypeAnnotation?;
       if (type == null ||
-          !current.kind.isIdentifier ||
-          !tokens[cursor + 1].kind.followsVariableName) {
-        cursor = initialCursor;
-        current = first;
-        return null;
+          !parser.current.kind.isIdentifier ||
+          !parser.tokens[parser.cursor + 1].kind.followsVariableName) {
+        parser.cursor = initialCursor;
+        parser.current = first;
+        result = null;
+        return true;
       }
       isLate = first.kind == .keywordLate;
       if (forLoop || !isLate) {
-        error(
+        parser.error(
           forLoop ? 'invalid_for_modifier' : 'invalid_variable_modifier',
           'This modifier cannot be used on this variable.',
           first,
@@ -40,77 +45,87 @@ extension on _Parser {
       }
     }
     while (type == null &&
-        current.kind.isVariableModifier &&
-        tokens[cursor + 1].kind != .keywordIn &&
-        (tokens[cursor + 1].kind.isKeyword ||
-            tokens[cursor + 1].kind.isIdentifier)) {
-      if (isLate && current.kind == .keywordLate) {
-        error('duplicate_modifier', 'Repeated late modifier.', current);
-      }
-      isLate = isLate || current.kind == .keywordLate;
-      if (forLoop || current.kind != .keywordLate) {
-        error(
-          forLoop ? 'invalid_for_modifier' : 'invalid_variable_modifier',
-          'This modifier cannot be used on this variable.',
-          current,
+        parser.current.kind.isVariableModifier &&
+        parser.tokens[parser.cursor + 1].kind != .keywordIn &&
+        (parser.tokens[parser.cursor + 1].kind.isKeyword ||
+            parser.tokens[parser.cursor + 1].kind.isIdentifier)) {
+      if (isLate && parser.current.kind == .keywordLate) {
+        parser.error(
+          'duplicate_modifier',
+          'Repeated late modifier.',
+          parser.current,
         );
       }
-      advance();
+      isLate = isLate || parser.current.kind == .keywordLate;
+      if (forLoop || parser.current.kind != .keywordLate) {
+        parser.error(
+          forLoop ? 'invalid_for_modifier' : 'invalid_variable_modifier',
+          'This modifier cannot be used on this variable.',
+          parser.current,
+        );
+      }
+      parser.advance();
     }
-    final keyword = switch (current.kind) {
+    final keyword = switch (parser.current.kind) {
       .keywordVar => VariableKeyword.varKeyword,
       .keywordFinal => VariableKeyword.finalKeyword,
       .keywordConst => VariableKeyword.constKeyword,
       _ => VariableKeyword.none,
     };
-    if (keyword != .none) advance();
+    if (keyword != .none) parser.advance();
     if (isLate && keyword == .constKeyword) {
-      error('conflicting_modifiers', 'A constant cannot be late.', first);
+      parser.error(
+        'conflicting_modifiers',
+        'A constant cannot be late.',
+        first,
+      );
     }
 
     if (type == null && keyword != .varKeyword) {
-      final index = cursor;
-      final token = current;
-      final parsed = _TypeReader(this).read() as TypeAnnotation?;
+      final index = parser.cursor;
+      final token = parser.current;
+      final parsed = _TypeReader(parser).read() as TypeAnnotation?;
       if (parsed != null &&
-          current.kind.isIdentifier &&
-          tokens[cursor + 1].kind.followsVariableName) {
+          parser.current.kind.isIdentifier &&
+          parser.tokens[parser.cursor + 1].kind.followsVariableName) {
         type = parsed;
       } else {
-        cursor = index;
-        current = token;
+        parser.cursor = index;
+        parser.current = token;
       }
     }
     if (!forLoop &&
         !isLate &&
         keyword == .constKeyword &&
         type == null &&
-        (!current.kind.isIdentifier ||
-            !tokens[cursor + 1].kind.followsVariableName)) {
-      cursor = initialCursor;
-      current = first;
-      return null;
+        (!parser.current.kind.isIdentifier ||
+            !parser.tokens[parser.cursor + 1].kind.followsVariableName)) {
+      parser.cursor = initialCursor;
+      parser.current = first;
+      result = null;
+      return true;
     }
     if (type == null && keyword == .none && !isLate) {
-      cursor = initialCursor;
-      current = first;
-      return null;
+      parser.cursor = initialCursor;
+      parser.current = first;
+      result = null;
+      return true;
     }
     if (isLate && type == null && keyword == .none) {
-      error(
+      parser.error(
         'expected_variable_type',
         'Expected a type, var, or final after late.',
-        current,
+        parser.current,
       );
     }
-    if (current.kind == .leftParen ||
-        current.kind == .leftBracket ||
-        current.kind == .leftBrace ||
-        current.kind == .emptyBrackets) {
-      error(
+    if (parser.current.kind == .leftParen ||
+        parser.current.kind == .leftBracket ||
+        parser.current.kind == .leftBrace ||
+        parser.current.kind == .emptyBrackets) {
+      parser.error(
         'unsupported_syntax',
         'Pattern declarations are not yet supported.',
-        current,
+        parser.current,
       );
     }
     if (!forLoop &&
@@ -118,32 +133,56 @@ extension on _Parser {
         keyword == .none &&
         (type is NamedTypeAnnotation || type is RecordTypeAnnotation) &&
         type!.start == first.start &&
-        current.kind.isIdentifier &&
-        tokens[cursor + 1].kind == .assign &&
-        tokens[cursor - 1].kind == .question &&
-        cursor < lookahead.lastColon) {
-      final declarationCursor = cursor;
-      final name = current;
-      cursor--;
-      current = tokens[cursor];
-      final result = lookahead.conditionals[cursor] ?? resolveConditional();
-      if (result is _ConditionalBranches) {
-        cursor = initialCursor;
-        current = first;
-        return null;
-      }
-      cursor = declarationCursor;
-      current = name;
+        parser.current.kind.isIdentifier &&
+        parser.tokens[parser.cursor + 1].kind == .assign &&
+        parser.tokens[parser.cursor - 1].kind == .question &&
+        parser.cursor < parser.lookahead.lastColon) {
+      expressionStart = initialCursor;
+      final question = parser.cursor - 1;
+      result = _VariableDeclarations(
+        first.start,
+        keyword,
+        isLate,
+        type,
+        parser.readVariableName(),
+      );
+      declarationEnd = parser.cursor;
+      parser.cursor = question;
+      parser.current = parser.tokens[question];
+      final branches = parser.lookahead.conditionals[question];
+      if (branches == null) return false;
+      select(branches);
+      return true;
     }
-    return _VariableDeclarations(
+    result = _VariableDeclarations(
       first.start,
       keyword,
       isLate,
       type,
-      readVariableName(),
+      parser.readVariableName(),
     );
+    return true;
   }
 
+  @override
+  Iterable<_Reader<Object?>> read() sync* {
+    final reader = _ConditionalReader(parser);
+    yield reader;
+    select(reader.result);
+  }
+
+  void select(_ConditionalResult branches) {
+    if (branches is _ConditionalBranches) {
+      parser.cursor = expressionStart!;
+      result = null;
+    } else {
+      parser.cursor = declarationEnd!;
+    }
+    parser.current = parser.tokens[parser.cursor];
+  }
+}
+
+extension on _Parser {
   Identifier readVariableName() {
     final token = current;
     if (!token.kind.isIdentifier) {

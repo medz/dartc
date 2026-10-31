@@ -27,7 +27,7 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 | §9.2 默认值 | 可选参数的 `=`、命名参数的旧式 `:`；拒绝必需位置参数的默认值、位置参数的 `:` 和嵌套函数形式参数中的默认值；表达式范围同[表达式解析](expressions.md#表达式解析-api)，尚未检查常量资格 | [parameters_test.dart](../test/parser/parameters_test.dart) 默认值用例 |
 | §16 形参元数据 | 常量名称引用、限定名称、类型实参、构造器名称及实参；遵循[注解实参的相邻规则](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/records/feature-specification.md#ambiguity-with-metadata-annotations)，与后续 record 类型区分 | [parameters_test.dart](../test/parser/parameters_test.dart) 元数据用例 |
 
-此入口不接收外围声明，因此保留 `var` / `final` 等声明信息，但尚未检查它们及 `covariant`、`this.`、`super.` 在具体函数、方法或构造器位置是否合法。重复参数、字段绑定、类型与默认值的语义检查也未接入。类型内部的元数据、函数表达式及完整声明解析仍是缺口；文档注释留在扫描结果中。解析不修改输入 token，损坏输入和深层嵌套验证见 [parameters_test.dart](../test/parser/parameters_test.dart)。
+此入口不接收外围声明，因此保留 `var` / `final` 等声明信息，但尚未检查它们及 `covariant`、`this.`、`super.` 在具体函数、方法或构造器位置是否合法。重复参数、字段绑定、类型与默认值的语义检查也未接入。类型内部的元数据及完整声明解析仍是缺口；文档注释留在扫描结果中。解析不修改输入 token，损坏输入和深层嵌套验证见 [parameters_test.dart](../test/parser/parameters_test.dart)。
 
 ## 函数体解析 API
 
@@ -40,7 +40,19 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 | §18.6.3、§18.16–18.17 | 异步体中的语句与集合 `await for`、生成器中的 `yield` / `yield*`；拒绝普通 `for` 头前的 `await`、非生成器的 yield、生成器的带值 return 和箭头体 | [function_bodies_test.dart](../test/parser/function_bodies_test.dart) 循环与生成器用例 |
 | §17.38 标识符引用 | 同步体保留 `await` / `yield` 标识符；异步或生成器体检查值名称、声明名称、成员与实参名称中的关键字使用；类型名称保持未绑定形式 | [function_bodies_test.dart](../test/parser/function_bodies_test.dart) 名称用例 |
 
-函数体内部沿用已支持的表达式和语句语法。同步语句直接以 `await:` 起始时，当前按 SDK 3.13.7 报告诊断；已有标签后的 `await:` 可解析。嵌套函数声明、函数表达式、模式及 switch 仍是解析缺口；未绑定捕获、跳转目标或检查返回与生成类型。此入口不检查外围声明能否省略实现，也不把解析成功当作函数可执行的证明。损坏输入、深层 await 和块嵌套验证见 [function_bodies_test.dart](../test/parser/function_bodies_test.dart)。
+函数体内部沿用已支持的表达式和语句语法。同步语句直接以 `await:` 起始时，当前按 SDK 3.13.7 报告诊断；已有标签后的 `await:` 可解析。模式及 switch 仍是解析缺口；未绑定捕获、跳转目标或检查返回与生成类型。此入口不检查外围声明能否省略实现，也不把解析成功当作函数可执行的证明。损坏输入、深层 await 和块嵌套验证见 [function_bodies_test.dart](../test/parser/function_bodies_test.dart)。
+
+## 函数表达式与局部声明解析
+
+`parseExpression` 接受匿名函数，`parseStatement` 接受局部函数声明；这两种函数也可嵌套在函数体、实参、默认值和元数据中。
+
+| 语言条款 | 当前解析支持 | 验证 |
+| --- | --- | --- |
+| §17.14 匿名函数 | 可选类型参数与上界、形参、同步及异步箭头体、同步及生成器块体；保留表达式范围，不吞入外围分号 | [functions_test.dart](../test/parser/functions_test.dart) 闭包与表达式边界用例 |
+| §9.1、§18.4 局部函数 | 元数据、可省略返回类型、名字、类型参数与形参；箭头声明包含末尾分号 | [functions_test.dart](../test/parser/functions_test.dart) 局部声明与类型消歧用例 |
+| §9 函数上下文 | 嵌套函数体独立设置 async/generator 上下文；参数元数据及默认值沿用外层上下文；拒绝函数参数的 `var` / `final` / `const` | [functions_test.dart](../test/parser/functions_test.dart) 上下文与非法语法用例 |
+
+捕获、参数绑定、默认值常量资格、返回类型和生成类型由后续分析检查；解析成功不代表函数可执行。深层嵌套及损坏输入的源码范围验证见 [functions_test.dart](../test/parser/functions_test.dart)。
 
 ## 编译与执行
 
