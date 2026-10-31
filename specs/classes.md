@@ -11,12 +11,15 @@ SDK 对照版本见[总览](README.md)；§15 泛型和 §20 类型关系另见[
 | 语言条款 | 可表示的语法 | 验证 |
 | --- | --- | --- |
 | §10 类、[类修饰符][class-modifiers] | 元数据、有序修饰符、名字、类型参数、`extends`、`with`、`implements` 和有序成员；区分 `{}` 与 `;`，不补入隐式父类或构造器 | [classes_test.dart](../test/ast/classes_test.dart) |
-| §12 Mixins、§14 Mixin Application | mixin 的 `base`、类型参数、`on` 约束、接口及成员；具名 mixin application 的 `class C = B with M;` 形式 | [classes_test.dart](../test/ast/classes_test.dart) |
+| §12 Mixins | mixin 的 `base`、类型参数、`on` 约束、接口及成员；具名 mixin application 的 `class C = B with M;` 形式 | [classes_test.dart](../test/ast/classes_test.dart) |
 | §10.2–§10.8 成员 | 实例及静态方法、泛型方法、getter、setter、运算符和字段；保留 `external`、字段的 `abstract` / `covariant` 及共享变量声明，不生成隐式访问器 | [members_test.dart](../test/ast/members_test.dart) |
 | §10.7 构造器 | 传统及 `new` / `factory` 简写、`const`、`external`、形参、有序字段初始化、assert、super 调用和 this 重定向；factory 的表达式/块体与 `=` 重定向分别保留 | [constructors_test.dart](../test/ast/constructors_test.dart) |
 | [主构造器][primary] | 类头的 `const`、可选名称及声明/初始化/普通参数；类体中单独出现的 `this` 初始化列表与函数体，不展开声明参数或移动成员 | [classes_test.dart](../test/ast/classes_test.dart)、[constructors_test.dart](../test/ast/constructors_test.dart)、[parameters_test.dart](../test/ast/parameters_test.dart) |
+| §14 Enums、[增强枚举][enhanced-enums]、[主构造器][primary] | 枚举头、类型参数、mixin、接口、常量与成员；常量保留元数据、类型实参、构造器后缀及省略或显式的实参列表。区分 `{}`、`{;}` 与 `;`，不补入隐式 `const`、构造器或枚举成员 | [enums_test.dart](../test/ast/enums_test.dart) |
+| §13 Extensions、[主构造器语法更新][primary] | 具名及匿名 extension、类型参数、`on` 类型、成员和分号体；函数、记录及可空类型均可作为接收者类型。显式应用保留为未绑定的调用与成员访问 | [extensions_test.dart](../test/ast/extensions_test.dart) |
+| [Extension types][extension-types]、[主构造器][primary] | extension type 的名字、类型参数、`const`、构造器后缀、表示参数、接口与成员；保留参数元数据和显式修饰符，不生成表示字段 | [extensions_test.dart](../test/ast/extensions_test.dart) |
 
-枚举、extension 和 extension type 声明节点尚未提供。名称绑定、继承关系、成员冲突、修饰符合法性和初始化规则尚未接入这些节点；构造成功不代表声明合法。编译与执行支持以下表为准。
+名称绑定、继承关系、成员冲突、修饰符合法性、初始化规则及 extension 适用性尚未接入这些节点。结构可表示不代表声明合法，例如 extension type 的 `var` 表示参数或多个表示参数仍需诊断。文本解析尚未提供；编译与执行支持以下表为准。
 
 ## 编译与执行
 
@@ -162,6 +165,7 @@ Metadata 的资格与作用域依据固定草案 §16。analyzer 对 void 常量
 
 [constructor-values]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.15/constructor-tearoffs/feature-specification.md
 [enhanced-enums]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.17/enhanced-enums/feature-specification.md
+[extension-types]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.3/extension-types/feature-specification.md
 
 [covariant-fields]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L3955-L3969
 [covariant-declaring]: https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.13/primary-constructors/feature-specification.md#L919-L924
