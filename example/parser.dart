@@ -87,4 +87,18 @@ void main() {
   final body = whileLoop.body as BlockStatement;
   print(body.statements.first.text); // process();
   print((body.statements.last as IfStatement).thenStatement.text); // break;
+
+  final parameters = parseFormalParameterList(
+    scan(
+      SourceFile(
+        Uri.parse('memory:parameters'),
+        '(String name, {int count = 1})',
+      ),
+    ),
+  );
+  if (parameters.hasErrors) return;
+  final count = parameters.node.parameters.last;
+  print(count.name.text); // count
+  print(count.kind.name); // optionalNamed
+  print(count.defaultClause!.value.text); // 1
 }

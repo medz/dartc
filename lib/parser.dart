@@ -1,4 +1,4 @@
-/// Dart expression, statement and type parsing with ranges and diagnostics.
+/// Dart expression, statement, type and parameter parsing with diagnostics.
 ///
 /// Parsing consumes an existing scan result without changing its tokens.
 /// Syntax nodes retain the source snapshot; name resolution and type checking
@@ -8,4 +8,9 @@
 library;
 
 export 'src/parser/parser.dart'
-    show parseExpression, parseStatement, parseTypeAnnotation, ParseResult;
+    show
+        parseExpression,
+        parseStatement,
+        parseTypeAnnotation,
+        parseFormalParameterList,
+        ParseResult;

@@ -31,6 +31,11 @@ sealed class _Arguments(super.opening, super.valueBase, super.operatorBase)
   final List<Argument> arguments = [];
 }
 
+final class _ArgumentList(super.opening, super.valueBase, super.operatorBase)
+    extends _Arguments {
+  late ArgumentList result;
+}
+
 final class _Call(
   super.opening,
   super.valueBase,
@@ -232,69 +237,83 @@ extension on _Parser {
             keyword,
           );
         }
-        expression = switch (frame) {
-          _Call() => InvocationExpression(
-            source: source,
-            start: frame.callee.start,
-            end: end,
-            callee: frame.callee,
-            typeArguments: frame.typeArguments,
-            arguments: ArgumentList(
+        switch (frame) {
+          case _ArgumentList():
+            frame.result = ArgumentList(
               source: source,
               start: frame.opening.start,
               end: end,
               arguments: frame.arguments,
-            ),
-          ),
-          _Construction() => InstanceCreationExpression(
-            source: source,
-            start: frame.keyword.start,
-            end: end,
-            kind: frame.keyword.kind == .keywordConst
-                ? .constKeyword
-                : .newKeyword,
-            name: frame.components,
-            typeArguments: frame.typeArguments,
-            constructorName: frame.constructorName,
-            arguments: ArgumentList(
+            );
+            frames.removeLast();
+            if (matched) advance();
+            return;
+          case _Call():
+            expression = InvocationExpression(
               source: source,
-              start: frame.opening.start,
+              start: frame.callee.start,
               end: end,
-              arguments: frame.arguments,
-            ),
-          ),
-          _ConstShorthand() => ConstDotShorthandExpression(
-            source: source,
-            start: frame.keyword.start,
-            end: end,
-            name: frame.member,
-            typeArguments: frame.typeArguments,
-            arguments: ArgumentList(
+              callee: frame.callee,
+              typeArguments: frame.typeArguments,
+              arguments: ArgumentList(
+                source: source,
+                start: frame.opening.start,
+                end: end,
+                arguments: frame.arguments,
+              ),
+            );
+          case _Construction():
+            expression = InstanceCreationExpression(
               source: source,
-              start: frame.opening.start,
+              start: frame.keyword.start,
               end: end,
-              arguments: frame.arguments,
-            ),
-          ),
-          _Group(
+              kind: frame.keyword.kind == .keywordConst
+                  ? .constKeyword
+                  : .newKeyword,
+              name: frame.components,
+              typeArguments: frame.typeArguments,
+              constructorName: frame.constructorName,
+              arguments: ArgumentList(
+                source: source,
+                start: frame.opening.start,
+                end: end,
+                arguments: frame.arguments,
+              ),
+            );
+          case _ConstShorthand():
+            expression = ConstDotShorthandExpression(
+              source: source,
+              start: frame.keyword.start,
+              end: end,
+              name: frame.member,
+              typeArguments: frame.typeArguments,
+              arguments: ArgumentList(
+                source: source,
+                start: frame.opening.start,
+                end: end,
+                arguments: frame.arguments,
+              ),
+            );
+          case _Group(
             fields: [final Expression value],
             hasComma: false,
             constKeyword: null,
-          ) =>
-            ParenthesizedExpression(
+          ):
+            expression = ParenthesizedExpression(
               source: source,
               start: frame.opening.start,
               end: end,
               expression: value,
-            ),
-          _Group() => RecordExpression(
-            source: source,
-            start: frame.constKeyword?.start ?? frame.opening.start,
-            end: end,
-            hasConstKeyword: frame.constKeyword != null,
-            fields: frame.fields,
-          ),
-        };
+            );
+          case _Group():
+            expression = RecordExpression(
+              source: source,
+              start: frame.constKeyword?.start ?? frame.opening.start,
+              end: end,
+              hasConstKeyword: frame.constKeyword != null,
+              fields: frame.fields,
+            );
+        }
     }
     frames.removeLast();
     values.add(expression);

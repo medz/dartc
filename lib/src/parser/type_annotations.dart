@@ -52,16 +52,25 @@ final class _TypeReader(
   final List<_TypeFrame> frames = [];
   (String, String, Token)? failure;
   (_TypeName, int)? relationalFallback;
+  TypeParameterList? completedParameters;
 
   SourceFile get source => parser.source;
   Token get current => parser.current;
   Token get next => parser.tokens[parser.cursor + 1];
 
-  AstNode? read({bool arguments = false}) {
+  AstNode? read({bool arguments = false, bool parameters = false}) {
+    assert(!arguments || !parameters);
     TypeAnnotation? value;
     if (arguments) {
       frames.add(_TypeArguments(current, parser.cursor));
       parser.advance();
+    }
+    if (parameters) {
+      final frame = _TypeVariables(current);
+      frames.add(frame);
+      parser.advance();
+      value = prepareVariable(frame);
+      if (completedParameters != null) return completedParameters;
     }
     while (failure == null) {
       if (value == null) {
@@ -123,6 +132,7 @@ final class _TypeReader(
             ),
           );
           value = continueVariables(frame);
+          if (completedParameters != null) return completedParameters;
         case final _FunctionTypes frame:
           Identifier? name;
           if (current.kind.isIdentifier) {

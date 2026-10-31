@@ -16,6 +16,19 @@ SDK 对照版本见[总览](README.md)；调用求值的关联条款为 §17.15�
 
 形参节点也保留 `var` / `final` / `const` 修饰符及旧式默认值分隔符 `:`，供后续版本和上下文检查；可构造节点不表示这些写法在任意语言版本或声明位置合法。类成员声明的语法表示见[类与成员](classes.md#类与成员语法表示)。作用域、参数绑定、默认值常量检查、闭包捕获、返回与生成器规则均未接入这些节点；编译与执行支持以下表为准。
 
+## 形参解析 API
+
+`package:dartc/parser.dart` 的 `parseFormalParameterList(ScanResult)` 解析包含圆括号的声明形参列表，返回 `ParseResult<FormalParameterList>`。调用方通过 `hasErrors` 检查词法和语法诊断；类型、默认值及接收者前缀保留写出的形式，不补造省略的类型或默认值。
+
+| 语言条款 | 当前解析支持 | 验证 |
+| --- | --- | --- |
+| §9.2 必需与可选形参 | 必需位置、可选位置、必需与可选命名参数、尾逗号；检查可选组边界和修饰符顺序 | [parameters_test.dart](../test/parser/parameters_test.dart) 分组与修饰符用例 |
+| §9.2 类型、名字与函数形式参数 | 可省略类型、命名／函数／record 类型、`covariant`、`this.` / `super.` 前缀；函数形式参数保留类型参数、上界、嵌套形参和 `?` | [parameters_test.dart](../test/parser/parameters_test.dart) 类型与函数形式参数用例 |
+| §9.2 默认值 | 可选参数的 `=`、命名参数的旧式 `:`；拒绝必需位置参数的默认值、位置参数的 `:` 和嵌套函数形式参数中的默认值；表达式范围同[表达式解析](expressions.md#表达式解析-api)，尚未检查常量资格 | [parameters_test.dart](../test/parser/parameters_test.dart) 默认值用例 |
+| §16 形参元数据 | 常量名称引用、限定名称、类型实参、构造器名称及实参；遵循[注解实参的相邻规则](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/records/feature-specification.md#ambiguity-with-metadata-annotations)，与后续 record 类型区分 | [parameters_test.dart](../test/parser/parameters_test.dart) 元数据用例 |
+
+此入口不接收外围声明，因此保留 `var` / `final` 等声明信息，但尚未检查它们及 `covariant`、`this.`、`super.` 在具体函数、方法或构造器位置是否合法。重复参数、字段绑定、类型与默认值的语义检查也未接入。类型内部的元数据、函数表达式、函数体及完整声明解析仍是缺口；文档注释留在扫描结果中。解析不修改输入 token，损坏输入和深层嵌套验证见 [parameters_test.dart](../test/parser/parameters_test.dart)。
+
 ## 编译与执行
 
 | 规范条目 | 状态 | 支持范围与缺口 | 验证 |

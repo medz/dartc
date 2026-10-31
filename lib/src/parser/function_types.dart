@@ -83,13 +83,18 @@ extension on _TypeReader {
     final end = closeAngle();
     if (failure != null) return null;
     frames.removeLast();
-    final function = frames.last as _FunctionTypes;
-    function.typeParameters = TypeParameterList(
+    final parameters = TypeParameterList(
       source: source,
       start: frame.opening.start,
       end: end,
       parameters: frame.parameters,
     );
+    if (frames.isEmpty) {
+      completedParameters = parameters;
+      return null;
+    }
+    final function = frames.last as _FunctionTypes;
+    function.typeParameters = parameters;
     return beginParameters(function);
   }
 

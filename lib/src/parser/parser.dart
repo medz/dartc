@@ -21,6 +21,8 @@ part 'access_chains.dart';
 part 'statements.dart';
 part 'variables.dart';
 part 'throw_expression.dart';
+part 'parameters.dart';
+part 'annotations.dart';
 
 /// The syntax and diagnostics produced by parsing a source snapshot.
 ///
