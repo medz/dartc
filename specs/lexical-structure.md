@@ -13,10 +13,10 @@
 | 单行、文档及嵌套块注释 | ✅ | ➖ | 🟡 | 未闭合块注释报错；CLI 的全部换行边界未确认。 |
 | BOM 与 `#!` 文件头 | ✅ | ➖ | 🟡 | `#!` 仅在偏移 0 识别，不能放在 BOM 后。 |
 | 按显式所选版本检查语法 | ✅ | ❌ | 🟡 | parser 接受 2.12–2.19、3.0–3.13，覆盖下列语法门控；不代表完整旧版本语义。 |
-| 自动解释 `// @dart` 选择语言版本 | ❌ | ❌ | 🟡 | scanner 只保留注释；parser 的版本由调用方传入。CLI 仍独立按文件选择版本。 |
+| 自动解释 `// @dart` 选择语言版本 | ❌ | ❌ | 🟡 | 裸 scanner/parser 不提供；公开 ProjectLoader 支持[自动选择](#文件版本选择-api)，CLI 仍独立选择。 |
 | 局部作用域、遮蔽及声明前引用 | ➖ | ❌ | 🟡 | CLI 检查部分名称规则，不提供公开绑定结果。 |
 | 按库划分的下划线私有名 | ➖ | ❌ | 🟡 | 主文件与 part 共享私有性；扩展组合仍缺。 |
-| 带源码位置的诊断 | ✅ | ❌ | 🟡 | 新 API 只报告词法/语法错误；CLI 的警告与错误分类不完整。 |
+| 带源码位置的诊断 | ✅ | ❌ | 🟡 | scanner/parser 报告词法/语法错误，ProjectLoader 另报告装入错误；CLI 的警告与错误分类不完整。 |
 
 ## 扫描 API
 
@@ -51,7 +51,7 @@ void main() {
 
 `package:dartc/parser.dart` 公开导出 `LanguageVersion`。七个入口 `parseCompilationUnit`、`parseExpression`、`parseStatement`、`parseTypeAnnotation`、`parseFormalParameterList`、`parseFunctionBody` 和 `parsePattern` 均接受可选命名参数 `languageVersion`，默认 `LanguageVersion.current`，当前为 3.13。
 
-支持的显式版本为 **2.12–2.19 和 3.0–3.13**。不支持的版本（如 2.11、2.20、3.14）产生 `parser.unsupported_language_version` 诊断，仍返回可恢复 AST。调用方负责根据文件与包配置选择版本；parser 不读取 pubspec、package configuration，也不解释 `// @dart`，scanner 仅保留该注释。
+支持的显式版本为 **2.12–2.19 和 3.0–3.13**。不支持的版本（如 2.11、2.20、3.14）产生 `parser.unsupported_language_version` 诊断，仍返回可恢复 AST。裸 parser 不读取 pubspec、package configuration，也不解释 `// @dart`，scanner 仅保留该注释。调用方可自行选版本，或使用 [ProjectLoader 自动选择](#文件版本选择-api)后交给 parser。
 
 ```dart
 import 'package:dartc/parser.dart';
@@ -89,6 +89,19 @@ void main() {
 
 小于 3.0 时，switch 语句的 case 使用常量表达式文法，而不是模式文法。版本检查不解析名称，不能从普通属性访问确定它是否为 tear-off；通配名字的绑定、私有命名参数的公共名、推断和提升等语义规则也不在其范围内。显式版本选项不是完整旧语言兼容保证，更不扩展 CLI 的编译/运行支持。
 
+## 文件版本选择 API
+
+`package:dartc/project.dart` 的 [ProjectLoader](libraries.md#库装入-api) 为每个文件自动选择版本，再通过 `languageVersion` 传入 parser：
+
+1. 先取所属包的 `languageVersion`。包未指定版本或文件不属于已配置的包时，使用 loader 的 `defaultLanguageVersion`，默认 3.13。`package:` 文件按包名查归属，其他源码位置按最深包根查找，包含包内的 bin/test 文件。
+2. 再应用首个语言 token 之前、第一个完整匹配的 `// @dart = major.minor` 注释。允许空格、tab、数字前导零及前置的其他注释；BOM 和 script tag 仍受[文件头规则](#文件头与语言版本)约束。块注释、文档注释、代码或指令之后的标记，以及带补丁号或尾随内容的写法不生效。后续标记不覆盖首个匹配标记。
+
+调用方须把包配置传给 loader；可先调用 `findPackageConfiguration` [发现配置](libraries.md#项目包配置与源码-uri)。`ProjectLoader` 本身不搜索配置，裸 scanner/parser 也不会执行这些步骤。导入方的版本不覆盖被导入文件；文件标记可以高于包默认版本。
+
+`LibraryUnit.languageVersion` 是最终解析版本，`versionOverride` 和 `versionMarker` 分别保留显式覆盖值及注释范围。可表示但不受支持的版本仍传入 parser，产生 `parser.unsupported_language_version`，不会退回默认版本掩盖错误。标记的数字不可表示时产生 `project.invalid_language_version`，保留标记范围并按包/loader 默认版本继续解析；此时仍有错误，不能当成成功装入。
+
+定义库与每个 part 分别按自身包和文件头选版本，再检查最终版本、显式覆盖值及是否存在版本标记一致。即使最终版本相同，仅一侧写出标记仍产生 `project.part_language_version`。这些是装入期检查，不包含名称、类型或流分析，也不表示 parser 已实现完整旧版本语义。
+
 ## 文件头与语言版本
 
 仅文件起始的 BOM 被跳过；`#!` 必须从 UTF-16 偏移 0 开始。初始空白和注释不改变后续 token 的原始位置。
@@ -103,7 +116,7 @@ final count = 1__000;
 - 只采用代码或指令前首个完整的 `// @dart = M.m`。允许空格和 tab；`///`、块注释、补丁号或尾随内容不构成标记，后续标记不覆盖首个有效标记。
 - 未标记时采用[所属包的默认版本](libraries.md#包配置与-uri)，未配置时为 3.13。导入方的版本不覆盖被导入文件。
 - 数字分隔符要求 3.6；`>>>`、`>>>=` 要求 2.14。嵌套泛型的连续右尖括号仍按类型语法解释。其余版本化语法并非全部实现。
-- 上述自动版本选择属于 CLI；新 parser 仅按调用方显式传入的版本进行[语法门控](#解析语言版本)。SDK 3.13.5 CFE 未识别含 tab 的版本标记，CLI 按版本规范接受。
+- 上述是旧 CLI 的版本选择规则；公开 ProjectLoader 的[自动文件版本选择](#文件版本选择-api)与之分开，裸 parser 仅按传入版本进行[语法门控](#解析语言版本)。SDK 3.13.5 CFE 未识别含 tab 的版本标记，CLI 按版本规范接受。
 
 ## 作用域与私有性
 

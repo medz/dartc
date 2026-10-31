@@ -63,6 +63,7 @@ Use these libraries independently in a Dart application:
 | `package:dartc/scanner.dart` | Dart tokens, comments, and lexical errors | [Scanning](https://github.com/medz/dartc/blob/main/example/scanner.dart) |
 | `package:dartc/ast.dart` | Compilation units, directives, declarations, types, expressions, statements, and patterns | [Inspecting syntax](https://github.com/medz/dartc/blob/main/example/ast.dart) |
 | `package:dartc/parser.dart` | Compilation units, declarations, expressions, statements, patterns and types with syntax diagnostics | [Parsing syntax](https://github.com/medz/dartc/blob/main/example/parser.dart) |
+| `package:dartc/project.dart` | Package resolution, source loading, language versions and library dependency graphs | [Loading libraries](https://github.com/medz/dartc/blob/main/example/project.dart) |
 
 These APIs are available from the source repository and have not been released yet.
 

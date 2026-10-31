@@ -1,6 +1,6 @@
 # Dart 语言兼容性
 
-这里说明 dartc 用户可以解析、编译和运行哪些 Dart 特性，以及使用时的限制。兼容目标为 **Dart SDK 3.13.7**，不是完整 Dart 或完整标准库的实现。安装和命令行用法见[项目首页](../README.md)。
+这里说明 dartc 用户可以装入、解析、编译和运行哪些 Dart 特性，以及使用时的限制。兼容目标为 **Dart SDK 3.13.7**，不是完整 Dart 或完整标准库的实现。安装和命令行用法见[项目首页](../README.md)。
 
 ## 按特性查支持情况
 
@@ -8,14 +8,14 @@
 
 | 主题 | 可查内容 |
 | --- | --- |
-| [词法结构、作用域与错误](lexical-structure.md) | token、字符串、数字分隔符、文件版本、私有性与诊断 |
+| [词法结构、作用域与错误](lexical-structure.md) | token、字符串、数字分隔符、[文件版本选择 API](lexical-structure.md#文件版本选择-api)、私有性与诊断 |
 | [类型与泛型](types.md) | 空安全、类型关系、推断、typedef、[FFI 与原生导出](types.md#ffi-类型与原生导出声明) |
 | [变量](variables.md) | 绑定、确定赋值、`final`、`const`、`late` 与惰性初始化 |
 | [表达式](expressions.md) | 字面量、运算、集合、调用顺序、空短路、级联与点简写 |
 | [语句](statements.md) | 分支、循环、跳转、异常与清理 |
 | [函数](functions.md) | 参数、返回、泛型调用、闭包与函数值 |
 | [类及相关声明](classes.md) | 成员、继承、构造器、枚举、修饰符、元数据与扩展 |
-| [库与脚本](libraries.md) | import/export、part、URI、包配置、入口与并发边界 |
+| [库与脚本](libraries.md) | [ProjectLoader 库装入 API](libraries.md#库装入-api)、import/export、part、URI、包配置、入口与并发边界 |
 | [模式、switch 与 if-case](patterns.md) | 模式类别、解构、守卫、绑定与穷尽性 |
 
 ## 如何读矩阵
@@ -33,6 +33,8 @@
 - **语法解析**：公开 scanner/parser API 能从文本得到语法树及词法、语法诊断，检查部分声明和跳转上下文。七个解析入口都接受显式 `languageVersion`，默认 3.13；各页的解析支持以默认版本为准，较旧版本受[语法版本门控](lexical-structure.md#解析语言版本)限制。parser 不自动读取包配置或解释 `// @dart`，不绑定名称、不检查类型、不执行程序，也不保证完整旧语言兼容。
 - **语义分析 API**：指面向上述语法树的公开名称解析、类型检查、推断及流分析能力，**当前尚未提供**。`ParseResult.hasErrors == false` 只表示未发现词法或语法错误。
 - **编译/运行**：指 CLI 使用的旧编译管线及原生产物。它包含部分静态检查，但不是公开语义分析 API。该列保留 0.5 编译器的已记录支持边界，历史行为基线为 [c3394a9f](https://github.com/medz/dartc/tree/c3394a9fb38107ccde2e200d744db96aea2c276f)；新 parser 的支持不会自动扩展该列。
+
+独立的 [ProjectLoader](libraries.md#库装入-api) 在扫描/解析之上提供源码装入、URI 与包配置解析、依赖图和[自动文件版本选择](lexical-structure.md#文件版本选择-api)，能力另列于库页的装入矩阵。它不是语义分析器：`Project.hasErrors == false` 也不保证名称、类型或运行行为正确。装入能力不会扩展编译/运行列。
 
 原生目标为 macOS/Linux 的 ARM64、x86-64。可执行文件的能力不能自动用于 object、static、dylib 输出；尤其函数值、托管对象和异常有额外边界，见[函数值](functions.md#函数值)与[FFI](types.md#ffi-类型与原生导出声明)。
 
