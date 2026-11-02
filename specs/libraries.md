@@ -37,7 +37,7 @@ parser 支持元数据、无名 library、条件 URI、deferred/as、顺序 show
 
 ## 库装入 API
 
-`package:dartc/project.dart` 的 `ProjectLoader.load(Uri entry)` 从**绝对入口 URI** 异步装入库图，返回不可变 `Project`。`Project.libraries` 按发现顺序、以逻辑 URI 索引各个 `Library`；每个库包含定义单元 `unit`、按指令顺序排列的 `parts` 和选中的 import/export `dependencies`。`LibraryUnit` 保留 AST、源码快照、所选语言版本及诊断。
+`package:dartc/project.dart` 的 `ProjectLoader.load(Uri entry)` 从**绝对入口 URI** 异步装入库图，返回不可变 `Project`。`Project.libraries` 按发现顺序、以逻辑 URI 索引各个 `Library`；每个库包含定义单元 `unit`、按指令顺序排列的 `parts` 和选中的 import/export `dependencies`。`LibraryUnit.tree` 提供索引和游标，`node` 是同一棵树的 `CompilationUnit` 根节点。每个单元保留源码快照、所选语言版本及诊断。
 
 以下状态仅指公开项目装入 API，不改变上表的三个阶段：
 
@@ -106,9 +106,11 @@ part 按 URI 或点分库名核对 part-of 归属。缺失/不匹配 part-of、�
 
 ### 重复装入与缓存
 
-同一 loader 的包配置、环境和默认版本固定；改变这些选项应创建新 loader。每次 `load` 重新读取可达来源，文本和所选语言版本未变时复用同一 `LibraryUnit` 与源码快照；库关系和 part 一致性仍按本次装入检查。旧 `Project` 保留自己的结果，不随后续源码改变。
+包配置、环境或默认语言版本改变时应创建新 loader。每次 `load(entry)` 重新读取可达来源，文本未变就复用同一 `LibraryUnit`。编辑器等掌握完整变更记录的调用方可用 `update(previous, changedSources: uris)`。传入从 `previous` 起新增、修改和删除的绝对来源 URI，重命名同时传入新旧位置。可使用提供者收到的 URI 或映射到它的 `package:` URI。相同来源即使有多个库身份也只读一次。变更记录不完整时应使用 `load`。
 
-只有最新启动的装入能更新缓存；较早的异步调用仍返回自己的结果，由调用方决定采用哪份。缓存只保留该次可达文件，不是所有历史来源。`clear()` 释放缓存而不使旧结果失效，也阻止已经进行中的装入重新填充被清空的缓存。缓存不提供文件监听、自动重装入或无限历史保留。
+增量更新从入口重新确定依赖和 part 归属，读取可达的变更来源、新发现的单元和上次读取失败的来源。当最新快照无错误且变更为空时，直接返回该快照。传入旧快照、其他 loader 的快照或已被 `clear()` 清除的快照时，按入口完整装入。变更 URI 非法或 `package:` URI 未配置时抛出 `FormatException`。
+
+每份返回的 `Project` 都保留自己的图和诊断。只有最新启动的请求能替换 loader 保留的快照，`clear()` 同时阻止正在进行的请求重新填充它。
 
 ## 导入、导出与命名空间
 

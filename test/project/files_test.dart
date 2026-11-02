@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dartc/project.dart';
 import 'package:test/test.dart';
@@ -27,6 +28,19 @@ void main() {
         readFileSource(directory.uri),
         throwsA(isA<FileSystemException>()),
       );
+    },
+  );
+
+  test(
+    'respects file overrides in the caller zone during concurrent reads',
+    () async {
+      await IOOverrides.runZoned(() async {
+        final values = await Future.wait([
+          for (var i = 0; i < 4; i++)
+            readFileSource(directory.uri.resolve('override-$i.dart')),
+        ]);
+        expect(values, everyElement('override'));
+      }, createFile: _VirtualFile.new);
     },
   );
 
@@ -68,4 +82,13 @@ void main() {
       expect(result.libraries, contains(Uri.parse('package:app/value.dart')));
     },
   );
+}
+
+final class _VirtualFile(String _) implements File {
+  @override
+  Future<Uint8List> readAsBytes() async =>
+      Uint8List.fromList('override'.codeUnits);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

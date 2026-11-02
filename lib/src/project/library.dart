@@ -4,9 +4,11 @@ import 'package:dartc/parser.dart';
 import 'package:dartc/source.dart';
 
 /// A parsed file with its selected language version and source snapshot.
+///
+/// Construct a unit from the result of [parseCompilationUnit].
 final class LibraryUnit({
-  /// The immutable syntax tree and its source snapshot.
-  required final CompilationUnit node,
+  required ParseResult<CompilationUnit> syntax,
+  Uri? location,
 
   /// The language version used to parse this file.
   required final LanguageVersion languageVersion,
@@ -17,13 +19,24 @@ final class LibraryUnit({
   /// The version comment, including a malformed version reported in diagnostics.
   final SourceSpan? versionMarker,
 
-  required List<Diagnostic> diagnostics,
+  Diagnostic? versionDiagnostic,
 }) {
-  /// The lexical, syntactic and file-version diagnostics, in discovery order.
-  final List<Diagnostic> diagnostics = List.unmodifiable(diagnostics);
+  /// The location read by the source provider, after package resolution.
+  final Uri location = location ?? syntax.tree.source.uri;
+
+  /// The indexed syntax tree produced by the parser.
+  final SyntaxTree tree = syntax.tree;
+
+  /// The typed root of [tree].
+  final CompilationUnit node = syntax.node;
+
+  /// The file-version diagnostic, if present, followed by the parser diagnostics.
+  final List<Diagnostic> diagnostics = versionDiagnostic == null
+      ? syntax.diagnostics
+      : List.unmodifiable([versionDiagnostic, ...syntax.diagnostics]);
 
   /// The source snapshot shared by all nodes in this file.
-  SourceFile get source => node.source;
+  SourceFile get source => tree.source;
 }
 
 /// A selected import or export edge, before namespace resolution.
