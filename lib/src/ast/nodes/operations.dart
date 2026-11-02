@@ -41,19 +41,15 @@ final class AssignmentExpression({
 
   /// The right operand.
   required final Expression right,
-}) extends Expression {
+}) extends Expression with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => left;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => left,
-    1 => right,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => right;
 }
 
 /// An increment or decrement operator.
@@ -81,18 +77,13 @@ final class UpdateExpression({
 
   /// Whether the operator precedes the operand.
   required final bool isPrefix,
-}) extends Expression {
+}) extends Expression with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => operand,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => operand;
 }
 
 /// An explicit type conversion written with `as`.
@@ -106,19 +97,15 @@ final class CastExpression({
 
   /// The written target type.
   required final TypeAnnotation type,
-}) extends Expression {
+}) extends Expression with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => expression;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => expression,
-    1 => type,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => type;
 }
 
 /// A type test written with `is` or `is!`.
@@ -135,19 +122,15 @@ final class TypeTestExpression({
 
   /// Whether the test uses `is!`.
   final bool isNegated = false,
-}) extends Expression {
+}) extends Expression with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => expression;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => expression,
-    1 => type,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => type;
 }
 
 /// An expression preceded by `await`.
@@ -158,18 +141,13 @@ final class AwaitExpression({
 
   /// The operand of `await`.
   required final Expression expression,
-}) extends Expression {
+}) extends Expression with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => expression,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => expression;
 }
 
 /// An expression preceded by `throw`.
@@ -180,18 +158,13 @@ final class ThrowExpression({
 
   /// The expression producing the thrown object.
   required final Expression expression,
-}) extends Expression {
+}) extends Expression with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => expression,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => expression;
 }
 
 /// A prefix operator that does not assign to its operand.
@@ -217,18 +190,13 @@ final class UnaryExpression({
 
   /// The operand expression.
   required final Expression operand,
-}) extends Expression {
+}) extends Expression with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => operand,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => operand;
 }
 
 /// A binary operator whose two operands are expressions.
@@ -275,19 +243,15 @@ final class BinaryExpression({
 
   /// The right operand.
   required final Expression right,
-}) extends Expression {
+}) extends Expression with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => left;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => left,
-    1 => right,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => right;
 }
 
 /// A conditional expression written with `?` and `:`.

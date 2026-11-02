@@ -7,5 +7,5 @@
 library;
 
 export 'src/scanner/scanner.dart'
-    show CommentRetention, scan, ScanResult, Token;
+    show CommentRetention, scan, scanFragment, ScanResult, Token, TokenSequence;
 export 'src/scanner/token_kind.dart';

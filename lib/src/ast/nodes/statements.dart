@@ -50,18 +50,13 @@ final class ExpressionStatement({
 
   /// The written expression.
   required final Expression expression,
-}) extends Statement {
+}) extends Statement with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => expression,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => expression;
 }
 
 /// A variable declaration list with its terminating semicolon.
@@ -72,18 +67,13 @@ final class VariableDeclarationStatement({
 
   /// The variable declaration list, excluding the semicolon.
   required final VariableDeclarationList variables,
-}) extends Statement {
+}) extends Statement with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => variables,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => variables;
 }
 
 /// A pattern variable declaration with its terminating semicolon.
@@ -94,18 +84,13 @@ final class PatternVariableDeclarationStatement({
 
   /// The pattern declaration, excluding the semicolon.
   required final PatternVariableDeclaration declaration,
-}) extends Statement {
+}) extends Statement with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => declaration,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => declaration;
 }
 
 /// A `break` statement with an optional label.
@@ -185,18 +170,13 @@ final class YieldStatement({
 
   /// The written yielded expression.
   required final Expression expression,
-}) extends Statement {
+}) extends Statement with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => expression,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => expression;
 }
 
 /// An assert statement with an optional message.

@@ -161,19 +161,15 @@ final class FieldInitializer({
 
   /// The written initializer expression.
   required final Expression value,
-}) extends ConstructorInitializer {
+}) extends ConstructorInitializer with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => name;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => name,
-    1 => value,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => value;
 }
 
 /// An assertion in a constructor initializer list, without a semicolon.

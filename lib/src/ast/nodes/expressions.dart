@@ -15,18 +15,13 @@ final class IdentifierExpression({
 
   /// The referenced name.
   required final Identifier identifier,
-}) extends Expression {
+}) extends Expression with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => identifier,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => identifier;
 }
 
 /// The lexical form of a non-string literal.
@@ -53,18 +48,13 @@ final class ParenthesizedExpression({
 
   /// The expression inside the parentheses.
   required final Expression expression,
-}) extends Expression {
+}) extends Expression with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => expression,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => expression;
 }
 
 /// The explicit `this` receiver.

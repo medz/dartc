@@ -46,7 +46,7 @@ extension on _Parser {
     if (current.kind == .less) {
       final reader = _TypeReader(this);
       if (!reader.start(arguments: true)) yield _TypeTask(reader);
-      arguments = arena.asTypeArgumentListOrNull(reader.result);
+      arguments = reader.result;
       if (reader.failure case final failure?) {
         error(failure.$1, failure.$2, failure.$3);
       }
@@ -77,7 +77,7 @@ extension on _Parser {
     final token = current;
     if (token.kind == .emptyBrackets || token.kind == .emptyBracketsAssign) {
       values.add(
-        arena.putCollectionExpression(
+        arena.collectionExpression(
           start: start ?? token.start,
           end: token.start + 2,
           kind: .list,
@@ -187,9 +187,9 @@ extension on _Parser {
     final key = frame.key;
     int element;
     if (key != null) {
-      element = arena.putMapEntryElement(
-        start: frame.keyPrefix?.start ?? arena.rStart(key),
-        end: arena.rEnd(expression),
+      element = arena.mapEntryElement(
+        start: frame.keyPrefix?.start ?? arena.start(key),
+
         key: key,
         value: expression,
         isNullAwareKey:
@@ -199,17 +199,13 @@ extension on _Parser {
       );
     } else if (prefix != null) {
       element = prefix.kind == .spread || prefix.kind == .nullAwareSpread
-          ? arena.putSpreadElement(
+          ? arena.spreadElement(
               start: prefix.start,
-              end: arena.rEnd(expression),
+
               expression: expression,
               isNullAware: prefix.kind == .nullAwareSpread,
             )
-          : arena.putNullAwareElement(
-              start: prefix.start,
-              end: arena.rEnd(expression),
-              expression: expression,
-            );
+          : arena.nullAwareElement(start: prefix.start, expression: expression);
     } else {
       element = expression;
     }
@@ -226,18 +222,18 @@ extension on _Parser {
             advance();
             return true;
           }
-          element = arena.putIfElement(
+          element = arena.ifElement(
             start: control.token.start,
-            end: arena.rEnd(element),
+            end: arena.end(element),
             condition: control.condition,
             casePattern: control.casePattern,
             thenElement: control.thenElement ?? element,
             elseElement: control.thenElement == null ? null : element,
           );
         case _ForElement():
-          element = arena.putForElement(
+          element = arena.forElement(
             start: control.token.start,
-            end: arena.rEnd(element),
+
             isAwait: control.isAwait,
             parts: control.parts,
             body: element,
@@ -257,7 +253,7 @@ extension on _Parser {
         frame.controls.isNotEmpty) {
       finishCollectionElement(frame);
     }
-    final node = arena.putCollectionExpression(
+    final node = arena.collectionExpression(
       start: frame.start,
       end: end,
       kind: frame.opening.kind == .leftBrace ? .setOrMap : .list,

@@ -12,18 +12,13 @@ final class DotShorthandExpression({
 
   /// The shorthand head and any following selectors.
   required final Expression expression,
-}) extends Expression {
+}) extends Expression with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => expression,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => expression;
 }
 
 /// A leading `.name` or `.new` in a dot shorthand.
@@ -34,18 +29,13 @@ final class DotShorthandReferenceExpression({
 
   /// The written name, including `new` for an unnamed constructor reference.
   required final Identifier name,
-}) extends Expression {
+}) extends Expression with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => name,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => name;
 }
 
 /// A shorthand head with an explicit `const` prefix.

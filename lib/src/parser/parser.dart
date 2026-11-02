@@ -6,13 +6,10 @@ import 'package:dartc/diagnostics.dart';
 import 'package:dartc/scanner.dart';
 import 'package:dartc/source.dart';
 
-import '../ast/nodes.dart' show AstArena;
-import '../ast/row_fields.dart';
-import '../scanner/scanner.dart' show scanFrom, tokensForParsing;
-import 'string_sequence.dart';
 import 'delimiter_index.dart';
 import 'language_version.dart';
 
+part 'string_sequence.dart';
 part 'delimiters.dart';
 part 'language_features.dart';
 part 'operators.dart';
@@ -49,13 +46,8 @@ part 'switches.dart';
 /// A node is returned even when recovery was necessary. Check [hasErrors]
 /// before using the result as valid syntax.
 final class ParseResult<T extends AstNode> {
-  ParseResult._(
-    AstArena arena,
-    int root,
-    List<Diagnostic> diagnostics,
-    this.languageVersion,
-  ) : tree = arena.finish(root),
-      diagnostics = diagnostics.isEmpty
+  ParseResult._(this.tree, List<Diagnostic> diagnostics, this.languageVersion)
+    : diagnostics = diagnostics.isEmpty
           ? const []
           : UnmodifiableListView(diagnostics);
 
@@ -94,6 +86,18 @@ ParseResult<Expression> parseExpression(
   LanguageVersion languageVersion = LanguageVersion.current,
 }) => _Parser(input, languageVersion: languageVersion).parse();
 
+extension on SyntaxTreeBuilder {
+  bool isKind(int? node, SyntaxKind expected) =>
+      node != null && kind(node) == expected;
+  bool isExpression(int? node) => node != null && kind(node).isExpression;
+  bool isDartPattern(int? node) => node != null && kind(node).isPattern;
+  bool isTypeAnnotation(int? node) =>
+      node != null && kind(node).isTypeAnnotation;
+  int? startOf(int? node) => node == null ? null : start(node);
+  int? endOf(int? node) => node == null ? null : end(node);
+  String? textOf(int? node) => node == null ? null : text(node);
+}
+
 sealed class _Frame(final int valueBase, final int operatorBase);
 
 enum _ParseBoundary {
@@ -112,9 +116,10 @@ final class _Parser {
     ScanResult input, {
     LanguageVersion languageVersion = LanguageVersion.current,
   }) {
-    final diagnostics = [...input.diagnostics];
-    final tokens = tokensForParsing(input, diagnostics);
-    return _Parser._(input.source, tokens, languageVersion, diagnostics);
+    final recovered = input.recovered();
+    return _Parser._(input.source, recovered.tokens, languageVersion, [
+      ...recovered.diagnostics,
+    ]);
   }
 
   _Parser._(
@@ -122,8 +127,9 @@ final class _Parser {
     this.tokens,
     this.languageVersion,
     this.diagnostics, [
-    AstArena? prefix,
-  ]) : arena = prefix ?? AstArena(source, tokens.length),
+    SyntaxTreeBuilder? prefix,
+  ]) : arena =
+           prefix ?? SyntaxTreeBuilder(source, expectedTokens: tokens.length),
        lookahead = DelimiterIndex(tokens),
        current = tokens.first,
        trialStart = null;
@@ -151,9 +157,9 @@ final class _Parser {
       lookahead = parent.lookahead;
 
   final LanguageVersion languageVersion;
-  final AstArena arena;
+  final SyntaxTreeBuilder arena;
   SourceFile get source => arena.source;
-  final List<Token> tokens;
+  final TokenSequence tokens;
   final List<Diagnostic> diagnostics;
   final List<int> values = [];
   final List<Token> operators = [];
@@ -359,13 +365,7 @@ final class _Parser {
       );
     }
     if (kind.isIdentifier) {
-      values.add(
-        arena.putIdentifierExpression(
-          start: token.start,
-          end: token.end,
-          identifier: identifier(token),
-        ),
-      );
+      values.add(arena.identifierExpression(identifier(token)));
     } else {
       switch (kind) {
         case .leftBracket ||
@@ -440,7 +440,7 @@ final class _Parser {
             .keywordFalse ||
             .keywordNull:
           values.add(
-            arena.putLiteralExpression(
+            arena.literalExpression(
               start: token.start,
               end: token.end,
               kind: switch (kind) {
@@ -452,13 +452,9 @@ final class _Parser {
             ),
           );
         case .keywordThis:
-          values.add(
-            arena.putThisExpression(start: token.start, end: token.end),
-          );
+          values.add(arena.thisExpression(start: token.start, end: token.end));
         case .keywordSuper:
-          values.add(
-            arena.putSuperExpression(start: token.start, end: token.end),
-          );
+          values.add(arena.superExpression(start: token.start, end: token.end));
         case .stringLiteral || .stringStart:
           parseStrings();
           return;
@@ -474,9 +470,9 @@ final class _Parser {
     expectsOperand = false;
   }
 
-  void parseStrings([StringSequence? sequence]) {
+  void parseStrings([_StringSequence? sequence]) {
     int literal(Token t) =>
-        arena.putStringLiteralExpression(start: t.start, end: t.end);
+        arena.stringLiteralExpression(start: t.start, end: t.end);
     if (sequence == null && current.kind == .stringLiteral) {
       final first = literal(current);
       advance();
@@ -485,9 +481,9 @@ final class _Parser {
         expectsOperand = false;
         return;
       }
-      sequence = StringSequence(arena)..addLiteral(first);
+      sequence = _StringSequence(arena)..addLiteral(first);
     }
-    final strings = sequence ?? StringSequence(arena);
+    final strings = sequence ?? _StringSequence(arena);
     while (true) {
       final token = current;
       switch (token.kind) {
@@ -502,23 +498,16 @@ final class _Parser {
           final name = current;
           final int expression;
           if (name.kind == .keywordThis) {
-            expression = arena.putThisExpression(
-              start: name.start,
-              end: name.end,
-            );
+            expression = arena.thisExpression(start: name.start, end: name.end);
           } else if (name.kind.isIdentifier) {
-            expression = arena.putIdentifierExpression(
-              start: name.start,
-              end: name.end,
-              identifier: identifier(name),
-            );
+            expression = arena.identifierExpression(identifier(name));
           } else {
             error(
               'expected_identifier',
               'Expected an identifier or this.',
               name,
             );
-            expression = arena.putMissingExpression(offset: name.start);
+            expression = arena.missingExpression(offset: name.start);
           }
           strings.addInterpolation(
             token,
@@ -572,14 +561,14 @@ final class _Parser {
       }
     }
     values.add(
-      arena.putLiteralExpression(start: hash.start, end: end, kind: .symbol),
+      arena.literalExpression(start: hash.start, end: end, kind: .symbol),
     );
     expectsOperand = false;
   }
 
   bool parseContinuation({bool skipTypeArguments = false}) {
     final token = current;
-    if (arena.hasKind(values.last, .cascadeExpression) &&
+    if (arena.isKind(values.last, .cascadeExpression) &&
         token.kind != .cascade &&
         token.kind != .nullAwareCascade) {
       error(
@@ -618,7 +607,7 @@ final class _Parser {
           advance();
         }
         final target = values.removeLast();
-        if (arena.hasKind(target, .superExpression) &&
+        if (arena.isKind(target, .superExpression) &&
             token.kind == .nullAwareAccess) {
           error(
             'null_aware_super',
@@ -628,13 +617,11 @@ final class _Parser {
           );
         }
         values.add(
-          arena.putPropertyAccessExpression(
-            start: arena.rStart(target),
-            end: valid ? name.end : name.start,
+          arena.propertyAccessExpression(
             target: target,
             property: valid
                 ? identifier(name)
-                : arena.putIdentifier(start: name.start, end: name.start),
+                : arena.identifier(start: name.start, end: name.start),
             isNullAware: token.kind == .nullAwareAccess,
           ),
         );
@@ -701,14 +688,10 @@ final class _Parser {
         final operand = values.removeLast();
         checkValue(operand);
         values.add(
-          arena.putNullAssertionExpression(
-            start: arena.rStart(operand),
-            end: token.end,
-            operand: operand,
-          ),
+          arena.nullAssertionExpression(end: token.end, operand: operand),
         );
         if (frames.lastOrNull case final _Shorthand frame) {
-          frame.pendingBang = arena.asNullAssertionExpression(values.last);
+          frame.pendingBang = values.last;
         }
         final frame = frames.lastOrNull;
         if (!isSelector &&
@@ -722,8 +705,8 @@ final class _Parser {
         final operand = values.removeLast();
         checkAssignable(operand, token);
         values.add(
-          arena.putUpdateExpression(
-            start: arena.rStart(operand),
+          arena.updateExpression(
+            start: arena.start(operand),
             end: token.end,
             operand: operand,
             op: token.kind == .increment ? .increment : .decrement,
@@ -801,9 +784,9 @@ final class _Parser {
       if (token.kind == .increment || token.kind == .decrement) {
         checkAssignable(right, token);
         values.add(
-          arena.putUpdateExpression(
+          arena.updateExpression(
             start: token.start,
-            end: arena.rEnd(right),
+            end: arena.end(right),
             operand: right,
             op: token.kind == .increment ? .increment : .decrement,
             isPrefix: true,
@@ -812,18 +795,14 @@ final class _Parser {
       } else if (token.kind == .keywordAwait) {
         checkValue(right);
         values.add(
-          arena.putAwaitExpression(
-            start: token.start,
-            end: arena.rEnd(right),
-            expression: right,
-          ),
+          arena.awaitExpression(start: token.start, expression: right),
         );
       } else {
         if (token.kind == .bang) checkValue(right);
         values.add(
-          arena.putUnaryExpression(
+          arena.unaryExpression(
             start: token.start,
-            end: arena.rEnd(right),
+
             operand: right,
             op: switch (token.kind) {
               .minus => .negate,
@@ -850,16 +829,14 @@ final class _Parser {
           current,
         );
         thenExpression = right;
-        elseExpression = arena.putMissingExpression(offset: current.start);
+        elseExpression = arena.missingExpression(offset: current.start);
       }
       final condition = values.removeLast();
       checkValue(condition);
       checkValue(thenExpression);
       checkValue(elseExpression);
       values.add(
-        arena.putConditionalExpression(
-          start: arena.rStart(condition),
-          end: arena.rEnd(elseExpression),
+        arena.conditionalExpression(
           condition: condition,
           thenExpression: thenExpression,
           elseExpression: elseExpression,
@@ -872,9 +849,7 @@ final class _Parser {
     if (token.kind.precedence == _assignmentPrecedence) {
       checkAssignable(left, token);
       values.add(
-        arena.putAssignmentExpression(
-          start: arena.rStart(left),
-          end: arena.rEnd(right),
+        arena.assignmentExpression(
           left: left,
           op: token.kind.assignmentOperator,
           right: right,
@@ -883,9 +858,7 @@ final class _Parser {
     } else {
       if (token.kind.precedence < _equalityPrecedence) checkValue(left);
       values.add(
-        arena.putBinaryExpression(
-          start: arena.rStart(left),
-          end: arena.rEnd(right),
+        arena.binaryExpression(
           left: left,
           op: token.kind.binaryOperator,
           right: right,
@@ -908,7 +881,7 @@ final class _Parser {
   void ensureOperand() {
     if (expectsOperand) {
       error('expected_expression', 'Expected an expression.', current);
-      values.add(arena.putMissingExpression(offset: current.start));
+      values.add(arena.missingExpression(offset: current.start));
       expectsOperand = false;
     }
   }
@@ -923,14 +896,16 @@ final class _Parser {
         token,
       );
     }
-    return arena.putIdentifier(start: token.start, end: token.end);
+    return arena.identifier(start: token.start, end: token.end);
   }
 
   void checkAssignable(int expression, Token operator) {
-    if (arena.hasKind(expression, .dotShorthandExpression)) {
-      expression = arena.rDotShorthandExpressionExpression(expression);
+    if (arena.isKind(expression, .dotShorthandExpression)) {
+      expression = arena.indexOf(
+        arena.view<DotShorthandExpression>(expression).expression,
+      );
     }
-    if (arena.kindAt(expression)
+    if (arena.kind(expression)
         case .identifierExpression ||
             .propertyAccessExpression ||
             .indexExpression ||
@@ -948,7 +923,7 @@ final class _Parser {
   }
 
   void checkValue(int expression) {
-    if (arena.hasKind(expression, .superExpression)) {
+    if (arena.isKind(expression, .superExpression)) {
       invalidSuperValue(expression);
     }
   }
@@ -960,8 +935,8 @@ final class _Parser {
       Token(
         .keywordSuper,
         source,
-        arena.rStart(expression),
-        arena.rEnd(expression),
+        arena.start(expression),
+        arena.end(expression),
       ),
       preventsConditional: false,
     );
@@ -969,11 +944,13 @@ final class _Parser {
 
   void checkSelector() {
     var target = values.last;
-    while (arena.hasKind(target, .nullAssertionExpression)) {
-      target = arena.rNullAssertionExpressionOperand(target);
+    while (arena.isKind(target, .nullAssertionExpression)) {
+      target = arena.indexOf(
+        arena.view<NullAssertionExpression>(target).operand,
+      );
     }
-    if (arena.kindAt(target) == .updateExpression &&
-        !arena.updateIsPrefix(target)) {
+    if (arena.kind(target) == .updateExpression &&
+        !arena.view<UpdateExpression>(target).isPrefix) {
       error(
         'invalid_selector',
         'Parenthesize the update before accessing its result.',

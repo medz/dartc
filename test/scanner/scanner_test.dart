@@ -9,6 +9,30 @@ ScanResult scanText(String text) =>
 
 void main() {
   group('scan', () {
+    test('a fragment stops at whitespace boundaries and completes a crossing string', () {
+      final source = SourceFile(
+        Uri.parse('memory:fragment'),
+        r'  "abc${x + 1}def" tail',
+      );
+      final spaces = scanFragment(SourceSpan(source, 0, 1));
+      expect(spaces.tokens.single.start, 1);
+      final fragment = scanFragment(SourceSpan(source, 2, 9));
+      expect(fragment.diagnostics, isEmpty);
+      expect(fragment.tokens.last.start, source.text.indexOf(' tail'));
+      expect(fragment.tokens.first.start, 2);
+      final bom = SourceFile(source.uri, '\ufeffx');
+      expect(scanFragment(SourceSpan(bom, 0, 0)).tokens.single.start, 0);
+    });
+
+    test('lexical recovery keeps the strict tokens and reports intact', () {
+      final input = scanText('x\u0085y');
+      final recovered = input.recovered();
+      expect(input.tokens.map((t) => t.lexeme), ['x', '\u0085', 'y', '']);
+      expect(recovered.tokens.map((t) => t.lexeme), ['x\u0085y', '']);
+      expect(recovered.diagnostics, orderedEquals(input.diagnostics));
+      expect(recovered.recovered(), same(recovered));
+    });
+
     test(
       'leading comments match a full scan up to the first language token',
       () {
@@ -358,7 +382,8 @@ void main() {
       expect(next.hasErrors, isFalse);
       expect(next.comments, isEmpty);
       expect(first.diagnostics, hasLength(1));
-      expect(() => first.tokens.clear(), throwsUnsupportedError);
+      expect(first.tokens, isNot(isA<List<Token>>()));
+      first.tokens.toList().clear();
       expect(() => first.comments.clear(), throwsUnsupportedError);
       expect(() => first.diagnostics.clear(), throwsUnsupportedError);
     });

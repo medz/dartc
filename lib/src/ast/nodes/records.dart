@@ -41,17 +41,13 @@ final class NamedRecordField({
 
   /// The expression producing the field's value.
   required final Expression value,
-}) extends AstNode implements RecordField {
+}) extends AstNode with _TwoChildren implements RecordField {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => name;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => name,
-    1 => value,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => value;
 }

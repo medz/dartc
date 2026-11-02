@@ -71,7 +71,7 @@ final class _Interpolation(
   super.opening,
   super.valueBase,
   super.operatorBase,
-  final StringSequence strings,
+  final _StringSequence strings,
 ) extends _Delimiter {
   @override
   TokenKind get closing => .interpolationEnd;
@@ -84,8 +84,8 @@ extension on _Parser {
     final target = values.removeLast();
     final checked = target == selectorTarget ? checkedNullAware : isNullAware;
     if (isNullAware &&
-        (arena.hasKind(target, .castExpression) ||
-            arena.hasKind(target, .typeTestExpression))) {
+        (arena.isKind(target, .castExpression) ||
+            arena.isKind(target, .typeTestExpression))) {
       values.add(target);
       checkTypeContinuation(current);
       values.removeLast();
@@ -93,11 +93,10 @@ extension on _Parser {
     if (token.kind == .emptyBrackets || token.kind == .emptyBracketsAssign) {
       error('expected_expression', 'Expected an index expression.', token);
       values.add(
-        arena.putIndexExpression(
-          start: arena.rStart(target),
+        arena.indexExpression(
           end: token.start + 2,
           target: target,
-          index: arena.putMissingExpression(offset: token.start + 1),
+          index: arena.missingExpression(offset: token.start + 1),
           isNullAware: isNullAware,
         ),
       );
@@ -123,24 +122,12 @@ extension on _Parser {
     final name = frame.name;
     switch (frame) {
       case _Arguments():
-        frame.arguments.add(
-          arena.putArgument(
-            start: arena.rStartOrNull(name) ?? arena.rStart(value),
-            end: arena.rEnd(value),
-            name: name,
-            value: value,
-          ),
-        );
+        frame.arguments.add(arena.argument(name: name, value: value));
       case _Group():
         frame.fields.add(
           name == null
               ? value
-              : arena.putNamedRecordField(
-                  start: arena.rStart(name),
-                  end: arena.rEnd(value),
-                  name: name,
-                  value: value,
-                ),
+              : arena.namedRecordField(name: name, value: value),
         );
     }
     frame.name = null;
@@ -161,7 +148,7 @@ extension on _Parser {
     final int expression;
     switch (frame) {
       case _CascadeIndex():
-        expression = arena.putCascadeIndexExpression(
+        expression = arena.cascadeIndexExpression(
           start: frame.marker.start,
           end: end,
           index: finishExpression(frame.valueBase, frame.operatorBase),
@@ -190,7 +177,7 @@ extension on _Parser {
         final parts = closeForHeader(frame);
         switch (frame) {
           case _ForElementHeader():
-            if (frame.element.isAwait && !arena.hasKind(parts, .forInParts)) {
+            if (frame.element.isAwait && !arena.isKind(parts, .forInParts)) {
               error(
                 'invalid_await_for',
                 'An await-for requires a for-in header.',
@@ -209,8 +196,7 @@ extension on _Parser {
         expression = closeCollection(frame, end);
       case _Index():
         final index = finishExpression(frame.valueBase, frame.operatorBase);
-        expression = arena.putIndexExpression(
-          start: arena.rStart(frame.target),
+        expression = arena.indexExpression(
           end: end,
           target: frame.target,
           index: index,
@@ -237,7 +223,7 @@ extension on _Parser {
         }
         switch (frame) {
           case _ArgumentList():
-            frame.result = arena.putArgumentList(
+            frame.result = arena.argumentList(
               start: frame.opening.start,
               end: end,
               arguments: frame.arguments,
@@ -246,19 +232,18 @@ extension on _Parser {
             if (matched) advance();
             return;
           case _Call():
-            expression = arena.putInvocationExpression(
-              start: arena.rStart(frame.callee),
+            expression = arena.invocationExpression(
               end: end,
               callee: frame.callee,
               typeArguments: frame.typeArguments,
-              arguments: arena.putArgumentList(
+              arguments: arena.argumentList(
                 start: frame.opening.start,
                 end: end,
                 arguments: frame.arguments,
               ),
             );
           case _Construction():
-            expression = arena.putInstanceCreationExpression(
+            expression = arena.instanceCreationExpression(
               start: frame.keyword.start,
               end: end,
               kind: frame.keyword.kind == .keywordConst
@@ -267,19 +252,19 @@ extension on _Parser {
               name: frame.components,
               typeArguments: frame.typeArguments,
               constructorName: frame.constructorName,
-              arguments: arena.putArgumentList(
+              arguments: arena.argumentList(
                 start: frame.opening.start,
                 end: end,
                 arguments: frame.arguments,
               ),
             );
           case _ConstShorthand():
-            expression = arena.putConstDotShorthandExpression(
+            expression = arena.constDotShorthandExpression(
               start: frame.keyword.start,
               end: end,
               name: frame.member,
               typeArguments: frame.typeArguments,
-              arguments: arena.putArgumentList(
+              arguments: arena.argumentList(
                 start: frame.opening.start,
                 end: end,
                 arguments: frame.arguments,
@@ -291,13 +276,13 @@ extension on _Parser {
                 constKeyword: null,
               )
               when arena.isExpression(value):
-            expression = arena.putParenthesizedExpression(
+            expression = arena.parenthesizedExpression(
               start: frame.opening.start,
               end: end,
               expression: value,
             );
           case _Group():
-            expression = arena.putRecordExpression(
+            expression = arena.recordExpression(
               start: frame.constKeyword?.start ?? frame.opening.start,
               end: end,
               hasConstKeyword: frame.constKeyword != null,
@@ -309,11 +294,11 @@ extension on _Parser {
     values.add(expression);
     switch (frame) {
       case _Call(:final checkedNullAware, :final callee)
-          when !arena.hasKind(callee, .identifierExpression) &&
-              !arena.hasKind(callee, .propertyAccessExpression) &&
-              !arena.hasKind(callee, .thisExpression) &&
-              !arena.hasKind(callee, .superExpression) &&
-              !arena.hasKind(callee, .dotShorthandReferenceExpression):
+          when !arena.isKind(callee, .identifierExpression) &&
+              !arena.isKind(callee, .propertyAccessExpression) &&
+              !arena.isKind(callee, .thisExpression) &&
+              !arena.isKind(callee, .superExpression) &&
+              !arena.isKind(callee, .dotShorthandReferenceExpression):
         selectorTarget = expression;
         this.checkedNullAware = checkedNullAware;
       case _Index(:final checkedNullAware):

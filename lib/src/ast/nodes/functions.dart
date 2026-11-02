@@ -58,18 +58,13 @@ final class ModifiedBlockFunctionBody({
 
   /// The block, including its braces.
   required final BlockStatement block,
-}) extends AstNode implements FunctionBody {
+}) extends AstNode with _SingleChild implements FunctionBody {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => block,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => block;
 }
 
 /// An arrow function body with an optional `async` modifier.
@@ -86,18 +81,13 @@ final class ExpressionFunctionBody({
 
   /// The expression following `=>`.
   required final Expression expression,
-}) extends AstNode implements FunctionBody {
+}) extends AstNode with _SingleChild implements FunctionBody {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => expression,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => expression;
 }
 
 /// A function body written as a semicolon.

@@ -148,7 +148,6 @@ final class ProjectLoader({
         return LibraryUnit(
           syntax: syntax,
           location: location,
-          languageVersion: syntax.languageVersion,
           versionOverride: previous.versionOverride,
           versionMarker: marker == null
               ? null
@@ -614,7 +613,6 @@ LibraryUnit _parseUnit(
   return LibraryUnit(
     syntax: parseCompilationUnit(input, languageVersion: version),
     location: location,
-    languageVersion: version,
     versionOverride: override?.$1,
     versionMarker: override?.$2,
     versionDiagnostic: override != null && override.$1 == null

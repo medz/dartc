@@ -150,16 +150,11 @@ final class ParameterDefault({
 
   /// The written default, before constant evaluation.
   required final Expression value,
-}) extends AstNode {
+}) extends AstNode with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => value,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => value;
 }

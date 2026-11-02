@@ -25,19 +25,15 @@ final class LogicalPattern({
 
   /// The pattern after the operator.
   required final DartPattern right,
-}) extends DartPattern {
+}) extends DartPattern with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => left;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => left,
-    1 => right,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => right;
 }
 
 /// An equality or ordering operator in a relational pattern.
@@ -66,18 +62,13 @@ final class RelationalPattern({
 
   /// The written operand, before constant evaluation.
   required final Expression operand,
-}) extends DartPattern {
+}) extends DartPattern with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => operand,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => operand;
 }
 
 /// A pattern followed by `as` and a written type.
@@ -91,19 +82,15 @@ final class CastPattern({
 
   /// The written target type.
   required final TypeAnnotation type,
-}) extends DartPattern {
+}) extends DartPattern with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => pattern;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => pattern,
-    1 => type,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => type;
 }
 
 /// A pattern followed by a null check `?`.
@@ -114,18 +101,13 @@ final class NullCheckPattern({
 
   /// The pattern before `?`.
   required final DartPattern pattern,
-}) extends DartPattern {
+}) extends DartPattern with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => pattern,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => pattern;
 }
 
 /// A pattern followed by a null assertion `!`.
@@ -136,16 +118,11 @@ final class NullAssertPattern({
 
   /// The pattern before `!`.
   required final DartPattern pattern,
-}) extends DartPattern {
+}) extends DartPattern with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => pattern,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => pattern;
 }

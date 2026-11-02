@@ -106,19 +106,15 @@ final class MapPatternEntry({
 
   /// The pattern after `:`.
   required final DartPattern value,
-}) extends AstNode implements MapPatternElement {
+}) extends AstNode with _TwoChildren implements MapPatternElement {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => key;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => key,
-    1 => value,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => value;
 }
 
 /// A record pattern, including its parentheses.

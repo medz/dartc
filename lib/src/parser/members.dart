@@ -34,7 +34,7 @@ final class _MembersReader(
         if (parser.current.kind == .less) {
           final reader = _TypeReader(parser);
           if (!reader.start(arguments: true)) _TypeTask(reader).finish();
-          types = parser.arena.asTypeArgumentListOrNull(reader.result);
+          types = reader.result;
           if (reader.failure case final failure?) {
             parser.error(failure.$1, failure.$2, failure.$3);
           }
@@ -55,13 +55,13 @@ final class _MembersReader(
           );
         }
         constants.add(
-          parser.arena.putEnumConstantDeclaration(
+          parser.arena.enumConstantDeclaration(
             start: start,
             end:
-                parser.arena.rEndOrNull(arguments) ??
-                parser.arena.rEndOrNull(constructor) ??
-                parser.arena.rEndOrNull(types) ??
-                parser.arena.rEnd(name),
+                parser.arena.endOf(arguments) ??
+                parser.arena.endOf(constructor) ??
+                parser.arena.endOf(types) ??
+                parser.arena.end(name),
             metadata: metadata,
             name: name,
             typeArguments: types,
@@ -177,7 +177,7 @@ final class _MemberReader(
         external: external,
       );
       if (parser.before(3, 13)) {
-        final member = parser.arena.at(result);
+        final member = parser.arena.view(result);
         if (member
             case ConstructorDeclaration(keyword: .factoryKeyword, :final name)
             when name.isEmpty || name.first.text != className) {
@@ -197,9 +197,13 @@ final class _MemberReader(
         metadata: metadata,
       ).finish();
       for (final variable in declarations.variables) {
-        checkMemberName(parser.arena.rVariableDeclarationName(variable));
+        checkMemberName(
+          parser.arena.indexOf(
+            parser.arena.view<VariableDeclaration>(variable).name,
+          ),
+        );
       }
-      return parser.arena.putFieldDeclaration(
+      return parser.arena.fieldDeclaration(
         start: start,
         end: parser.expect(.semicolon),
         isStatic: isStatic,
@@ -226,13 +230,13 @@ final class _MemberReader(
       );
     }
     if (header.accessor != .keywordOperator &&
-        parser.arena.rStart(header.name) == parser.arena.rEnd(header.name)) {
+        parser.arena.start(header.name) == parser.arena.end(header.name)) {
       parser.error(
         'expected_member',
         'Expected a class member.',
         parser.current,
       );
-      return parser.arena.putMissingClassMember(offset: start);
+      return parser.arena.missingClassMember(offset: start);
     }
     if (header.accessor != .keywordOperator) checkMemberName(header.name);
     int? parameters;
@@ -249,15 +253,15 @@ final class _MemberReader(
     }
     final body = _BodyReader(parser);
     final bodyNode = body.finish();
-    if (external && !parser.arena.hasKind(bodyNode, .emptyFunctionBody)) {
+    if (external && !parser.arena.isKind(bodyNode, .emptyFunctionBody)) {
       parser.error(
         'external_body',
         'An external member cannot have a body.',
         Token(
           .invalid,
           parser.source,
-          parser.arena.rStart(bodyNode),
-          parser.arena.rEnd(bodyNode),
+          parser.arena.start(bodyNode),
+          parser.arena.end(bodyNode),
         ),
       );
     }
@@ -268,28 +272,28 @@ final class _MemberReader(
         Token(
           .less,
           parser.source,
-          parser.arena.rStart(header.typeParameters!),
-          parser.arena.rEnd(header.typeParameters!),
+          parser.arena.start(header.typeParameters!),
+          parser.arena.end(header.typeParameters!),
         ),
       );
     }
     if (isStatic &&
         !external &&
-        parser.arena.hasKind(bodyNode, .emptyFunctionBody)) {
+        parser.arena.isKind(bodyNode, .emptyFunctionBody)) {
       parser.error(
         'missing_function_body',
         'A static member requires a body.',
         Token(
           .semicolon,
           parser.source,
-          parser.arena.rStart(bodyNode),
-          parser.arena.rEnd(bodyNode),
+          parser.arena.start(bodyNode),
+          parser.arena.end(bodyNode),
         ),
       );
     }
-    final end = parser.arena.rEnd(bodyNode);
+    final end = parser.arena.end(bodyNode);
     return switch (header.accessor) {
-      .keywordGet => parser.arena.putGetterDeclaration(
+      .keywordGet => parser.arena.getterDeclaration(
         start: start,
         end: end,
         metadata: metadata,
@@ -299,7 +303,7 @@ final class _MemberReader(
         name: header.name,
         body: bodyNode,
       ),
-      .keywordSet => parser.arena.putSetterDeclaration(
+      .keywordSet => parser.arena.setterDeclaration(
         start: start,
         end: end,
         metadata: metadata,
@@ -312,7 +316,7 @@ final class _MemberReader(
         body: bodyNode,
       ),
       .keywordOperator when header.op != null =>
-        parser.arena.putOperatorDeclaration(
+        parser.arena.operatorDeclaration(
           start: start,
           end: end,
           metadata: metadata,
@@ -323,8 +327,8 @@ final class _MemberReader(
           parameters: parameters!,
           body: bodyNode,
         ),
-      .keywordOperator => parser.arena.putMissingClassMember(offset: start),
-      _ => parser.arena.putMethodDeclaration(
+      .keywordOperator => parser.arena.missingClassMember(offset: start),
+      _ => parser.arena.methodDeclaration(
         start: start,
         end: end,
         metadata: metadata,
@@ -347,7 +351,7 @@ final class _MemberReader(
   }
 
   void checkMemberName(int name) {
-    if (!hasClassName(parser.arena.rStart(name), parser.arena.rEnd(name))) {
+    if (!hasClassName(parser.arena.start(name), parser.arena.end(name))) {
       return;
     }
     parser.error(
@@ -356,8 +360,8 @@ final class _MemberReader(
       Token(
         .invalid,
         parser.source,
-        parser.arena.rStart(name),
-        parser.arena.rEnd(name),
+        parser.arena.start(name),
+        parser.arena.end(name),
       ),
     );
   }

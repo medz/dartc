@@ -76,9 +76,14 @@ ParseResult<CompilationUnit>? _tryReparse(
   if (end == 0) return null;
   final delimiter = after.codeUnitAt(end - 1);
   if (delimiter != 59 && delimiter != 125) return null;
-  final suffix = scanFrom(source, end);
-  if (suffix.hasErrors) return null;
-  final arena = AstArena.prefix(previous, source, last, suffix.tokens.length);
+  final suffix = scanFragment(SourceSpan(source, end, source.length));
+  if (suffix.diagnostics.isNotEmpty) return null;
+  final arena = previous.copyPrefix(
+    source,
+    through: last,
+    expectedTokens: suffix.tokens.length,
+  );
+  if (arena == null) return null;
   final parser = _Parser._(source, suffix.tokens, languageVersion, [], arena);
   final unit = _readUnit(parser, members, scriptTag);
   if (parser.diagnostics.isNotEmpty) return null;
@@ -141,23 +146,22 @@ ParseResult<CompilationUnit>? _editFunctionBody(
           suffix) {
         return null;
       }
-      final body = scanFrom(source, start, newEnd);
-      if (body.hasErrors || body.tokens.last.start != newEnd) return null;
-      var first = child;
-      while (tree.childCount(first) != 0) {
-        first = tree.childAt(first, 0);
+      final body = scanFragment(SourceSpan(source, start, newEnd));
+      if (body.diagnostics.isNotEmpty || body.tokens.last.start != newEnd) {
+        return null;
       }
-      final arena = AstArena.edit(tree, source, first);
+      final arena = tree.editSubtree(child, source, changeStart: change);
+      if (arena == null) return null;
       final parser = _Parser._(source, body.tokens, version, [], arena);
       final replacement = _BodyReader(parser).finish();
       if (parser.current.kind != .eof ||
           parser.diagnostics.isNotEmpty ||
-          arena.rStart(replacement) != start ||
-          arena.rEnd(replacement) != newEnd ||
-          !arena.finishEdit(tree, child, replacement)) {
+          arena.start(replacement) != start ||
+          arena.end(replacement) != newEnd) {
         return null;
       }
-      return parser.finishResult(tree.root);
+      final result = arena.finishReplacement(replacement);
+      return result == null ? null : parser.checkedResult(result);
     }
     row = child;
   }
@@ -167,11 +171,11 @@ ParseResult<CompilationUnit>? _editFunctionBody(
 int _readUnit(_Parser parser, [List<int>? prefix, int? scriptTag]) {
   if (parser.current.kind == .scriptTag) {
     final token = parser.current;
-    scriptTag = parser.arena.putScriptTag(start: token.start, end: token.end);
+    scriptTag = parser.arena.scriptTag(start: token.start, end: token.end);
     parser.advance();
   }
   final members = prefix ?? <int>[];
-  final lastKind = members.isEmpty ? null : parser.arena.kindAt(members.last);
+  final lastKind = members.isEmpty ? null : parser.arena.kind(members.last);
   var parts = lastKind == .partDirective || lastKind == .partOfDirective;
   var partOf = lastKind == .partOfDirective;
   var declarations =
@@ -225,8 +229,5 @@ int _readUnit(_Parser parser, [List<int>? prefix, int? scriptTag]) {
       parser.unexpected();
     }
   }
-  return parser.arena.putCompilationUnit(
-    scriptTag: scriptTag,
-    members: members,
-  );
+  return parser.arena.compilationUnit(scriptTag: scriptTag, members: members);
 }

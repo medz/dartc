@@ -43,18 +43,13 @@ final class CascadePropertyExpression({
 
   /// The name selected on the enclosing cascade's receiver.
   required final Identifier property,
-}) extends Expression {
+}) extends Expression with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => property,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => property;
 }
 
 /// The first index selector of a cascade section, including `..` or `?..`.

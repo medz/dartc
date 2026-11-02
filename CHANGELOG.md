@@ -16,6 +16,12 @@
 - Add `parsePattern` with matching, declaration and assignment contexts. Parse structural and logical patterns, guards, if-case, switch expressions and statements, destructuring assignments and pattern loop headers. Preserve metadata on local and loop declarations.
 - Add `package:dartc/project.dart` for loading library graphs from files or custom source providers. Resolve package configurations, conditional imports and exports, parts and language versions, with diagnostics for missing sources and invalid library relationships. Read the indexed AST through `LibraryUnit.tree`. With a complete list of changed source URIs, use `ProjectLoader.update` to reload edits and discover new dependencies.
 
+### API changes
+
+- Build indexed ASTs with `SyntaxTreeBuilder` and use `tree.view<T>(index)` to read a typed node.
+- `ScanResult.tokens` is a read-only `TokenSequence`. Index or iterate it directly, or call `toList()` for a mutable copy. Use `result.recovered()` for recovery tokens and `scanFragment(range)` to scan from a known token boundary.
+- Omit `languageVersion` when constructing a `LibraryUnit`. The unit uses the version recorded in its parser result.
+
 ### Fixes
 
 - Parse functions named with contextual keywords such as `import`, `external` and `mixin`, and generic methods named `factory`.

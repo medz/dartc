@@ -32,7 +32,7 @@ final class _ParameterList(final Token opening, {final _Formal? owner}) {
 }
 
 final class _Formal(
-  final AstArena arena,
+  final SyntaxTreeBuilder arena,
   final int start,
   final List<int> metadata,
   final FormalParameterKind kind,
@@ -44,7 +44,7 @@ final class _Formal(
 ) {
   int? typeParameters;
   int? suffix;
-  int get end => arena.rEndOrNull(suffix) ?? arena.rEnd(name);
+  int get end => arena.endOf(suffix) ?? arena.end(name);
 }
 
 final class _ParameterReader(
@@ -73,11 +73,11 @@ final class _ParameterReader(
           final owner = frame.owner!;
           final question = current.kind == .question ? current.start : null;
           if (question != null) parser.advance();
-          owner.suffix = parser.arena.putFunctionParameterSuffix(
+          owner.suffix = parser.arena.functionParameterSuffix(
             start:
-                parser.arena.rStartOrNull(owner.typeParameters) ??
-                parser.arena.rStart(result),
-            end: question == null ? parser.arena.rEnd(result) : question + 1,
+                parser.arena.startOf(owner.typeParameters) ??
+                parser.arena.start(result),
+            end: question == null ? parser.arena.end(result) : question + 1,
             typeParameters: owner.typeParameters,
             parameters: result,
             questionOffset: question,
@@ -97,13 +97,11 @@ final class _ParameterReader(
           final start = current.start;
           final reader = _TypeReader(parser);
           if (!reader.start(parameters: true)) yield _TypeTask(reader);
-          formal.typeParameters = parser.arena.asTypeParameterListOrNull(
-            reader.result,
-          );
+          formal.typeParameters = reader.result;
           if (reader.failure case final failure?) {
             parser.error(failure.$1, failure.$2, failure.$3);
           }
-          formal.typeParameters ??= parser.arena.putTypeParameterList(
+          formal.typeParameters ??= parser.arena.typeParameterList(
             start: start,
             end: current.start,
             parameters: const [],
@@ -131,9 +129,9 @@ final class _ParameterReader(
         final reader = _ExpressionReader(parser);
         if (!reader.start()) yield reader;
         final value = reader.result;
-        defaultClause = parser.arena.putParameterDefault(
+        defaultClause = parser.arena.parameterDefault(
           start: separator.start,
-          end: parser.arena.rEnd(value),
+
           separator: separator.kind == .assign ? .equals : .colon,
           value: value,
         );
@@ -216,7 +214,7 @@ final class _ParameterReader(
         parser.advance();
         final reader = _TypeReader(parser);
         if (!reader.start(beforeParameter: true)) yield _TypeTask(reader);
-        final parsed = parser.arena.asTypeAnnotationOrNull(reader.result);
+        final parsed = reader.result;
         if (parsed == null ||
             !(current.kind.isIdentifier ||
                 current.kind == .keywordThis ||
@@ -308,7 +306,7 @@ final class _ParameterReader(
       final token = current;
       final reader = _TypeReader(parser);
       if (!reader.start(beforeParameter: true)) yield _TypeTask(reader);
-      final parsed = parser.arena.asTypeAnnotationOrNull(reader.result);
+      final parsed = reader.result;
       if (parsed != null &&
           (current.kind.isIdentifier ||
               current.kind == .keywordThis ||
@@ -342,9 +340,9 @@ final class _ParameterReader(
   void finishParameter(_ParameterList frame, int? defaultClause) {
     final formal = frame.pending!;
     frame.parameters.add(
-      parser.arena.putFormalParameter(
+      parser.arena.formalParameter(
         start: formal.start,
-        end: parser.arena.rEndOrNull(defaultClause) ?? formal.end,
+        end: parser.arena.endOf(defaultClause) ?? formal.end,
         metadata: formal.metadata,
         kind: formal.kind,
         prefix: formal.prefix,
@@ -382,7 +380,7 @@ final class _ParameterReader(
     }
     final end = parser.expect(.rightParen);
     frames.removeLast();
-    return parser.arena.putFormalParameterList(
+    return parser.arena.formalParameterList(
       start: frame.opening.start,
       end: end,
       parameters: frame.parameters,
@@ -393,17 +391,12 @@ final class _ParameterReader(
 extension on _Parser {
   void checkSetterParameters(int parameters) {
     if (arena.childCount(parameters) != 1 ||
-        arena.rFormalParameterKind(arena.childIndex(parameters, 0)) !=
+        arena.view<FormalParameter>(arena.childAt(parameters, 0)).kind !=
             .requiredPositional) {
       error(
         'invalid_setter_parameters',
         'A setter requires exactly one required positional parameter.',
-        Token(
-          .invalid,
-          source,
-          arena.rStart(parameters),
-          arena.rEnd(parameters),
-        ),
+        Token(.invalid, source, arena.start(parameters), arena.end(parameters)),
       );
     }
   }

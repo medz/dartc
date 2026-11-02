@@ -50,12 +50,12 @@ extension on _TypeReader {
         return null;
       }
       frame.parameters.add(
-        parser.arena.putTypeParameter(
+        parser.arena.typeParameter(
           start: frame.metadata.isEmpty
-              ? parser.arena.rStart(name)
-              : parser.arena.rStart(frame.metadata.first),
+              ? parser.arena.start(name)
+              : parser.arena.start(frame.metadata.first),
           metadata: frame.metadata,
-          end: parser.arena.rEnd(name),
+          end: parser.arena.end(name),
           name: name,
         ),
       );
@@ -80,7 +80,7 @@ extension on _TypeReader {
     final end = closeAngle();
     if (failure != null) return null;
     frames.removeLast();
-    final parameters = parser.arena.putTypeParameterList(
+    final parameters = parser.arena.typeParameterList(
       start: frame.opening.start,
       end: end,
       parameters: frame.parameters,
@@ -186,14 +186,13 @@ extension on _TypeReader {
     parser.advance();
     frames.removeLast();
     final question = nullableOffset();
-    return parser.arena.putFunctionTypeAnnotation(
-      start:
-          parser.arena.rStartOrNull(frame.returnType) ?? frame.function.start,
+    return parser.arena.functionTypeAnnotation(
+      start: parser.arena.startOf(frame.returnType) ?? frame.function.start,
       end: question == null ? end : question + 1,
       questionOffset: question,
       returnType: frame.returnType,
       typeParameters: frame.typeParameters,
-      parameters: parser.arena.putFunctionTypeParameterList(
+      parameters: parser.arena.functionTypeParameterList(
         start: frame.opening!.start,
         end: end,
         parameters: frame.parameters,

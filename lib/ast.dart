@@ -6,5 +6,5 @@
 /// {@example /example/ast.dart}
 library;
 
-export 'src/ast/nodes.dart' hide AstArena;
+export 'src/ast/nodes.dart';
 export 'src/ast/walk.dart';

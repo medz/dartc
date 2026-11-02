@@ -49,19 +49,15 @@ final class WhileStatement({
 
   /// The loop body.
   required final Statement body,
-}) extends Statement {
+}) extends Statement with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => condition;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => condition,
-    1 => body,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => body;
 }
 
 /// A do-while statement with its body before its condition.
@@ -75,19 +71,15 @@ final class DoStatement({
 
   /// The written condition after `while`.
   required final Expression condition,
-}) extends Statement {
+}) extends Statement with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => body;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => body,
-    1 => condition,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => condition;
 }
 
 /// A for or await-for statement.
@@ -104,19 +96,15 @@ final class ForStatement({
 
   /// The loop body.
   required final Statement body,
-}) extends Statement {
+}) extends Statement with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => parts;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => parts,
-    1 => body,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => body;
 }
 
 /// A label definition, including its colon.
@@ -127,18 +115,13 @@ final class Label({
 
   /// The written label name, before target resolution.
   required final Identifier name,
-}) extends AstNode {
+}) extends AstNode with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => name,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => name;
 }
 
 /// One or more labels preceding a statement.

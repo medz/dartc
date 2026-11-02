@@ -31,10 +31,36 @@ enum CommentRetention {
 ScanResult scan(SourceFile source, {CommentRetention comments = .all}) =>
     _Scanner(source, headerOnly: comments == .leading).scan();
 
-/// Scans ordinary code starting at a token boundary. A token crossing [end]
-/// is scanned to its real end so a caller can reject a stale boundary.
-ScanResult scanFrom(SourceFile source, int offset, [int? end]) =>
-    (_Scanner(source, headerOnly: true).._offset = offset).scan(end);
+/// Scans a range starting at a normal Dart token boundary outside a string or interpolation.
+///
+/// Offsets refer to the original snapshot. A token that crosses the requested
+/// end is scanned through its lexical boundary, including any interpolations.
+/// The EOF offset gives the
+/// actual end, which callers can compare with [range].
+({TokenSequence tokens, List<Diagnostic> diagnostics}) scanFragment(
+  SourceSpan range,
+) {
+  final scanner = _Scanner(range.source, headerOnly: true)
+    .._offset = range.start;
+  final result = scanner.scan(range.end);
+  return (tokens: result.tokens, diagnostics: result.diagnostics);
+}
+
+/// A read-only, random-access sequence of tokens from one scan.
+final class TokenSequence._(final List<Token> _items) extends Iterable<Token> {
+  /// Returns the token at [index].
+  Token operator [](int index) => _items[index];
+  @override
+  Token elementAt(int index) => _items[index];
+  @override
+  int get length => _items.length;
+  @override
+  Token get first => _items.first;
+  @override
+  Token get last => _items.last;
+  @override
+  Iterator<Token> get iterator => _items.iterator;
+}
 
 /// The immutable tokens, comments, and diagnostics from one source snapshot.
 final class ScanResult {
@@ -42,8 +68,7 @@ final class ScanResult {
   final SourceFile source;
 
   /// Source-ordered tokens, including a final EOF token.
-  final List<Token> tokens;
-  final List<Token> _tokens;
+  final TokenSequence tokens;
 
   /// Source-ordered line and block comments, including documentation comments.
   final List<Token> comments;
@@ -51,16 +76,24 @@ final class ScanResult {
   /// Lexical errors in discovery order.
   final List<Diagnostic> diagnostics;
 
-  ScanResult._(
-    this.source,
-    this._tokens,
-    List<Token> comments,
-    List<Diagnostic>? diagnostics,
-  ) : tokens = UnmodifiableListView(_tokens),
-      comments = UnmodifiableListView(comments),
-      diagnostics = diagnostics == null
-          ? const []
-          : UnmodifiableListView(diagnostics);
+  ScanResult._(this.source, this.tokens, this.comments, this.diagnostics);
+
+  /// Returns tokens suitable for syntax recovery, preserving lexical diagnostics.
+  ///
+  /// The strict tokens in this result retain every invalid character.
+  ScanResult recovered() {
+    if (!hasErrors) return this;
+    final reports = [...diagnostics];
+    final items = _recoverTokens(this, reports);
+    return identical(items, tokens._items)
+        ? this
+        : ScanResult._(
+            source,
+            TokenSequence._(items),
+            comments,
+            UnmodifiableListView(reports),
+          );
+  }
 
   /// Whether scanning found a lexical error.
   bool get hasErrors => diagnostics.isNotEmpty;
@@ -80,9 +113,20 @@ final class _Scanner(
 
   ScanResult scan([int? end]) {
     final limit = end ?? _text.length;
-    if (_offset == 0 && _peek() == 0xFEFF) _offset++;
-    while (_offset < limit) {
-      _token();
+    if (_offset == 0 && limit > 0 && _peek() == 0xFEFF) _offset++;
+    if (end == null) {
+      while (_offset < limit) {
+        _token();
+      }
+    } else {
+      while (_offset < _text.length &&
+          (_offset < limit || _interpolation != null)) {
+        if (_isSpace(_text.codeUnitAt(_offset))) {
+          _offset++;
+        } else {
+          _token();
+        }
+      }
     }
     for (var state = _interpolation; state != null; state = state.parent) {
       _report(
@@ -93,7 +137,12 @@ final class _Scanner(
       );
     }
     _emit(.eof, _offset);
-    return ScanResult._(source, _tokens, _comments, _diagnostics);
+    return ScanResult._(
+      source,
+      TokenSequence._(_tokens),
+      _comments.isEmpty ? const [] : UnmodifiableListView(_comments),
+      _diagnostics == null ? const [] : UnmodifiableListView(_diagnostics!),
+    );
   }
 
   int _peek([int ahead = 0]) {
@@ -126,20 +175,21 @@ final class _Scanner(
     final start = _offset;
     var end = start + 1;
     final steps = _keywords.steps;
-    var state = steps[first];
-    while (state != _identifierState && end < _text.length) {
+    var state = first < 64 ? 0 : steps[first & 63];
+    while (state != 0 && end < _text.length) {
       final code = _text.codeUnitAt(end);
-      if (code >= 128 || (code == 0x24 && !allowDollar)) break;
-      final next = steps[state * 128 + code];
+      final next = code >> 6 == 1 ? steps[state * 64 + (code & 63)] : 0;
       if (next == 0) break;
       state = next;
       end++;
     }
-    if (state == _identifierState) {
-      while (end < _text.length &&
-          _isIdentifierPart(_text.codeUnitAt(end), allowDollar)) {
+    if (end < _text.length &&
+        _isIdentifierPart(_text.codeUnitAt(end), allowDollar)) {
+      state = 0;
+      do {
         end++;
-      }
+      } while (end < _text.length &&
+          _isIdentifierPart(_text.codeUnitAt(end), allowDollar));
     }
     _offset = end;
     _emit(_keywords.kinds[state] ?? .identifier, start);

@@ -107,7 +107,7 @@ extension on _Parser {
         )
         when current.kind == .assign &&
             cursor < lookahead.lastColon &&
-            switch (arena.at(t)) {
+            switch (arena.view(t)) {
               NamedTypeAnnotation(isNullable: true) ||
               RecordTypeAnnotation(isNullable: true) => true,
               _ => false,
@@ -141,9 +141,7 @@ extension on _Parser {
       initializer = finishExpression(frame.valueBase, frame.operatorBase);
     }
     declarations.variables.add(
-      arena.putVariableDeclaration(
-        start: arena.rStart(declarations.name),
-        end: arena.rEndOrNull(initializer) ?? arena.rEnd(declarations.name),
+      arena.variableDeclaration(
         name: declarations.name,
         initializer: initializer,
       ),
@@ -155,12 +153,10 @@ extension on _Parser {
   void finishForInitializer(_ForHeader frame) {
     if (frame.declarations case final declarations?) {
       finishVariable(frame);
-      frame.initializer = arena.putVariableDeclarationList(
-        start:
-            arena.rStartOrNull(frame.metadata.firstOrNull) ??
-            declarations.start,
+      frame.initializer = arena.variableDeclarationList(
+        start: arena.startOf(frame.metadata.firstOrNull) ?? declarations.start,
         metadata: frame.metadata,
-        end: arena.rEnd(declarations.variables.last),
+        end: arena.end(declarations.variables.last),
         keyword: declarations.keyword,
         isLate: declarations.isLate,
         type: declarations.type,
@@ -187,9 +183,9 @@ extension on _Parser {
       if (frame.declarations case final declarations?) {
         finishVariable(frame);
         if (declarations.variables.length != 1 ||
-            arena.rVariableDeclarationInitializer(
-                  declarations.variables.single,
-                ) !=
+            arena
+                    .view<VariableDeclaration>(declarations.variables.single)
+                    .initializer !=
                 null ||
             declarations.isLate) {
           error(
@@ -198,12 +194,11 @@ extension on _Parser {
             token,
           );
         }
-        frame.target = arena.putDeclaredIdentifier(
+        frame.target = arena.declaredIdentifier(
           start:
-              arena.rStartOrNull(frame.metadata.firstOrNull) ??
-              declarations.start,
+              arena.startOf(frame.metadata.firstOrNull) ?? declarations.start,
           metadata: frame.metadata,
-          end: arena.rEnd(declarations.name),
+
           keyword: declarations.keyword,
           type: declarations.type,
           name: declarations.name,
@@ -213,17 +208,17 @@ extension on _Parser {
           frame.valueBase,
           frame.operatorBase,
         );
-        if (arena.kindAt(expression) == .identifierExpression) {
-          frame.target = arena.childIndex(expression, 0);
+        if (arena.kind(expression) == .identifierExpression) {
+          frame.target = arena.childAt(expression, 0);
         } else {
           error(
             'invalid_for_in_target',
             'Expected an identifier before in.',
             token,
           );
-          frame.target = arena.putIdentifier(
-            start: arena.rStart(expression),
-            end: arena.rStart(expression),
+          frame.target = arena.identifier(
+            start: arena.start(expression),
+            end: arena.start(expression),
           );
         }
       }
@@ -263,7 +258,7 @@ extension on _Parser {
         frame.updaters.add(
           finishExpression(frame.valueBase, frame.operatorBase),
         );
-        frame.end = arena.rEnd(frame.updaters.last);
+        frame.end = arena.end(frame.updaters.last);
         advance();
         expectsOperand = true;
       } else {
@@ -277,9 +272,9 @@ extension on _Parser {
   int closeForHeader(_ForHeader frame) {
     if (frame.phase == .iterable) {
       final iterable = finishExpression(frame.valueBase, frame.operatorBase);
-      return arena.putForInParts(
+      return arena.forInParts(
         start: frame.start,
-        end: arena.rEnd(iterable),
+
         target: frame.target!,
         iterable: iterable,
       );
@@ -298,9 +293,9 @@ extension on _Parser {
       frame.end = current.start;
     } else if (hasForExpression(frame)) {
       frame.updaters.add(finishExpression(frame.valueBase, frame.operatorBase));
-      frame.end = arena.rEnd(frame.updaters.last);
+      frame.end = arena.end(frame.updaters.last);
     }
-    return arena.putForParts(
+    return arena.forParts(
       start: frame.start,
       end: frame.end,
       initializer: frame.initializer,
