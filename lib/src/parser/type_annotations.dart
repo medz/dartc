@@ -496,7 +496,7 @@ extension on _Parser {
 
   // This only excludes prefixes that cannot be followed by a declaration name.
   // Records, function types and generic/nullable types still use the type reader.
-  bool get canStartTypeBeforeName {
+  bool canStartTypeBeforeName({bool allowReceiver = false}) {
     final kind = current.kind;
     if (kind == .leftParen || kind == .keywordFunction) return true;
     var index = cursor + 1;
@@ -510,7 +510,10 @@ extension on _Parser {
       index++;
     }
     final next = tokens[index].kind;
-    return next.isIdentifier || next == .less || next == .question;
+    return next.isIdentifier ||
+        next == .less ||
+        next == .question ||
+        allowReceiver && (next == .keywordThis || next == .keywordSuper);
   }
 }
 

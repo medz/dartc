@@ -2,6 +2,10 @@ part of 'nodes.dart';
 
 // shortcut: rows use 32-bit indices, widen the columns for larger inputs.
 const _nil = 0xffffffff;
+const _formalType = 1,
+    _formalSuffix = 2,
+    _formalDefault = 4,
+    _formalCovariant = 8;
 
 final class _Words(int cap) {
   Uint32List cells = Uint32List(cap > _nil ? _nil : cap);
@@ -9,20 +13,47 @@ final class _Words(int cap) {
   int reserve(int n) {
     final start = used;
     final end = start + n;
-    if (end > cells.length) _grow(end);
+    if (end > cells.length) _grow(end, used);
     used = end;
     return start;
   }
 
-  void _grow(int end) {
+  void _grow(int end, int keep) {
     if (end > _nil) throw RangeError('Syntax payload exceeds 32-bit indices');
     final size = (cells.length * 2 + 16).clamp(end, _nil);
-    cells = Uint32List(size)..setRange(0, used, cells);
+    cells = Uint32List(size)..setRange(0, keep, cells);
   }
 
   void add(int value) {
     final p = reserve(1);
     cells[p] = value;
+  }
+}
+
+// Edges become visible together after every child has passed its range check.
+final class _Children(final AstArena arena, final int start, final int end) {
+  int _next = arena.edges.used;
+  int _previous = start;
+  this {
+    arena._checkRange(start, end);
+  }
+  void add(int? child) {
+    if (child == null) return;
+    _previous = arena._checkEdge(child, _previous, end);
+    final edges = arena.edges;
+    if (_next == edges.cells.length) edges._grow(_next + 1, _next);
+    edges.cells[_next++] = child;
+  }
+
+  void addAll(List<int> children) {
+    for (var i = 0; i < children.length; i++) {
+      add(children[i]);
+    }
+  }
+
+  int finish(SyntaxKind kind) {
+    arena.edges.used = _next;
+    return arena._finishRow(kind, start, end);
   }
 }
 
@@ -39,9 +70,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
       ends = Uint32List(capacity),
       edgeOffsets = Uint32List(capacity + 1),
       offsets = Uint32List(capacity);
-  final edges = _Words(capacity),
-      fields = _Words(tokenCount),
-      extra = _Words(tokenCount >> 3);
+  final edges = _Words(capacity), fields = _Words(tokenCount);
   void grow() {
     final n = count * 2 + 16;
     tags = Uint8List(n)..setRange(0, count, tags);
@@ -52,7 +81,9 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }
 
   void _checkRange(int start, int end) {
-    RangeError.checkValidRange(start, end, source.length);
+    if (start < 0 || start > end || end > source.length) {
+      RangeError.checkValidRange(start, end, source.length);
+    }
     if (end >= _nil || count == _nil) {
       throw RangeError('Syntax range or node index exceeds 32 bits');
     }
@@ -75,7 +106,9 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }
 
   int _checkEdge(int id, int start, int end) {
-    RangeError.checkValidIndex(id, this, 'child', count);
+    if (id < 0 || id >= count) {
+      RangeError.checkValidIndex(id, this, 'child', count);
+    }
     final childEnd = ends[id];
     if (starts[id] < start || childEnd > end) {
       throw ArgumentError('Child outside range');
@@ -100,13 +133,12 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     return _finishRow(kind, start, end);
   }
 
+  int childCount(int row) => edgeOffsets[row + 1] - edgeOffsets[row];
   int childIndex(int row, int index) => edges.cells[edgeOffsets[row] + index];
   int trailingChild(int row, int fromEnd) =>
       edges.cells[edgeOffsets[row + 1] - fromEnd];
   int? optionalChild(int row, int index, int fullCount) =>
-      edgeOffsets[row + 1] - edgeOffsets[row] == fullCount
-      ? childIndex(row, index)
-      : null;
+      childCount(row) == fullCount ? childIndex(row, index) : null;
 
   int _appendOptional(
     SyntaxKind kind,
@@ -135,30 +167,6 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     edgeOffsets[row],
     edgeOffsets[row + 1],
   );
-
-  int _appendEdges(
-    SyntaxKind kind,
-    int start,
-    int end,
-    int length,
-    int Function(int) child,
-  ) {
-    _checkRange(start, end);
-    final base = edges.used;
-    try {
-      edges.reserve(length);
-      var previous = start;
-      for (var i = 0; i < length; i++) {
-        final id = child(i);
-        previous = _checkEdge(id, previous, end);
-        edges.cells[base + i] = id;
-      }
-    } catch (_) {
-      edges.used = base;
-      rethrow;
-    }
-    return _finishRow(kind, start, end);
-  }
 
   int _appendList(SyntaxKind kind, int start, int end, List<int> children) {
     _checkRange(start, end);
@@ -194,31 +202,17 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? constructorName,
     int? arguments,
   }) {
-    final arity =
-        name.length +
-        (typeArguments == null ? 0 : 1) +
-        (constructorName == null ? 0 : 1) +
-        (arguments == null ? 0 : 1);
-    int child(int ix) {
-      if (ix < name.length) return name[ix];
-      ix -= name.length;
-      if (typeArguments != null) {
-        if (ix == 0) return typeArguments;
-        ix--;
-      }
-      if (constructorName != null) {
-        if (ix == 0) return constructorName;
-        ix--;
-      }
-      return arguments!;
-    }
-
-    final row = _appendEdges(.annotation, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(name)
+      ..add(typeArguments)
+      ..add(constructorName)
+      ..add(arguments);
+    final row = children.finish(.annotation);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = rawRef(typeArguments);
     fields.cells[fieldOffset + 1] = rawRef(constructorName);
     fields.cells[fieldOffset + 2] = rawRef(arguments);
-    fields.cells[fieldOffset + 3] = rawRefs(name);
+    fields.cells[fieldOffset + 3] = name.length;
     return row;
   }
 
@@ -310,20 +304,14 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     bool isNullAware = false,
     required List<int> sections,
   }) {
-    final arity = 1 + sections.length;
-    int child(int ix) {
-      return ix == 0 ? target : sections[ix - 1];
-    }
-
-    final row = _appendEdges(.cascadeExpression, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(target)
+      ..addAll(sections);
+    final row = children.finish(.cascadeExpression);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(target);
-    fields.cells[fieldOffset + 1] = isNullAware == true
-        ? 1
-        : isNullAware == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 2] = rawRefs(sections);
+    fields.cells[fieldOffset + 1] = isNullAware ? 1 : 0;
+    fields.cells[fieldOffset + 2] = sections.length;
     return row;
   }
 
@@ -369,28 +357,12 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? stackTraceParameter,
     required int body,
   }) {
-    final arity =
-        (exceptionType == null ? 0 : 1) +
-        (exceptionParameter == null ? 0 : 1) +
-        (stackTraceParameter == null ? 0 : 1) +
-        1;
-    int child(int ix) {
-      if (exceptionType != null) {
-        if (ix == 0) return exceptionType;
-        ix--;
-      }
-      if (exceptionParameter != null) {
-        if (ix == 0) return exceptionParameter;
-        ix--;
-      }
-      if (stackTraceParameter != null) {
-        if (ix == 0) return stackTraceParameter;
-        ix--;
-      }
-      return body;
-    }
-
-    final row = _appendEdges(.catchClause, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(exceptionType)
+      ..add(exceptionParameter)
+      ..add(stackTraceParameter)
+      ..add(body);
+    final row = children.finish(.catchClause);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = rawRef(exceptionType);
     fields.cells[fieldOffset + 1] = rawRef(exceptionParameter);
@@ -415,70 +387,33 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     bool isSemicolonBody = false,
     List<int> members = const [],
   }) {
-    final arity =
-        metadata.length +
-        1 +
-        (typeParameters == null ? 0 : 1) +
-        (primaryConstructorName == null ? 0 : 1) +
-        (primaryParameters == null ? 0 : 1) +
-        (extendsClause == null ? 0 : 1) +
-        (withClause == null ? 0 : 1) +
-        (implementsClause == null ? 0 : 1) +
-        members.length;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (ix == 0) return name;
-      ix--;
-      if (typeParameters != null) {
-        if (ix == 0) return typeParameters;
-        ix--;
-      }
-      if (primaryConstructorName != null) {
-        if (ix == 0) return primaryConstructorName;
-        ix--;
-      }
-      if (primaryParameters != null) {
-        if (ix == 0) return primaryParameters;
-        ix--;
-      }
-      if (extendsClause != null) {
-        if (ix == 0) return extendsClause;
-        ix--;
-      }
-      if (withClause != null) {
-        if (ix == 0) return withClause;
-        ix--;
-      }
-      if (implementsClause != null) {
-        if (ix == 0) return implementsClause;
-        ix--;
-      }
-      return members[ix];
-    }
-
-    final row = _appendEdges(.classDeclaration, start, end, arity, child);
-    final fieldOffset = fields.reserve(12);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(name)
+      ..add(typeParameters)
+      ..add(primaryConstructorName)
+      ..add(primaryParameters)
+      ..add(extendsClause)
+      ..add(withClause)
+      ..add(implementsClause)
+      ..addAll(members);
+    final row = children.finish(.classDeclaration);
+    final fieldOffset = fields.reserve(12 + modifiers.length);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 2] = isConst == true
-        ? 1
-        : isConst == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 2] = isConst ? 1 : 0;
     fields.cells[fieldOffset + 3] = rawRef(primaryConstructorName);
     fields.cells[fieldOffset + 4] = rawRef(primaryParameters);
     fields.cells[fieldOffset + 5] = rawRef(extendsClause);
     fields.cells[fieldOffset + 6] = rawRef(withClause);
     fields.cells[fieldOffset + 7] = rawRef(implementsClause);
-    fields.cells[fieldOffset + 8] = isSemicolonBody == true
-        ? 1
-        : isSemicolonBody == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 9] = rawRefs(metadata);
-    fields.cells[fieldOffset + 10] = rawRefs(modifiers);
-    fields.cells[fieldOffset + 11] = rawRefs(members);
+    fields.cells[fieldOffset + 8] = isSemicolonBody ? 1 : 0;
+    fields.cells[fieldOffset + 9] = metadata.length;
+    fields.cells[fieldOffset + 10] = modifiers.length;
+    fields.cells[fieldOffset + 11] = members.length;
+    for (var i = 0; i < modifiers.length; i++) {
+      fields.cells[fieldOffset + 12 + i] = modifiers[i].index;
+    }
     return row;
   }
 
@@ -493,39 +428,25 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int withClause,
     int? implementsClause,
   }) {
-    final arity =
-        metadata.length +
-        3 +
-        (typeParameters == null ? 0 : 1) +
-        (implementsClause == null ? 0 : 1);
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (ix == 0) return name;
-      ix--;
-      if (typeParameters != null) {
-        if (ix == 0) return typeParameters;
-        ix--;
-      }
-      if (ix == 0) return superclass;
-      return ix == 1 ? withClause : implementsClause!;
-    }
-
-    final row = _appendEdges(
-      .classTypeAliasDeclaration,
-      start,
-      end,
-      arity,
-      child,
-    );
-    final fieldOffset = fields.reserve(7);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(name)
+      ..add(typeParameters)
+      ..add(superclass)
+      ..add(withClause)
+      ..add(implementsClause);
+    final row = children.finish(.classTypeAliasDeclaration);
+    final fieldOffset = fields.reserve(7 + modifiers.length);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(typeParameters);
     fields.cells[fieldOffset + 2] = rawRef(superclass);
     fields.cells[fieldOffset + 3] = rawRef(withClause);
     fields.cells[fieldOffset + 4] = rawRef(implementsClause);
-    fields.cells[fieldOffset + 5] = rawRefs(metadata);
-    fields.cells[fieldOffset + 6] = rawRefs(modifiers);
+    fields.cells[fieldOffset + 5] = metadata.length;
+    fields.cells[fieldOffset + 6] = modifiers.length;
+    for (var i = 0; i < modifiers.length; i++) {
+      fields.cells[fieldOffset + 7 + i] = modifiers[i].index;
+    }
     return row;
   }
 
@@ -537,44 +458,28 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? typeArguments,
     required List<int> elements,
   }) {
-    final arity = elements.length + (typeArguments == null ? 0 : 1);
-    int child(int ix) {
-      if (typeArguments != null) {
-        if (ix == 0) return typeArguments;
-        ix--;
-      }
-      return elements[ix];
-    }
-
-    final row = _appendEdges(.collectionExpression, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(typeArguments)
+      ..addAll(elements);
+    final row = children.finish(.collectionExpression);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = kind.index;
-    fields.cells[fieldOffset + 1] = hasConstKeyword == true
-        ? 1
-        : hasConstKeyword == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 1] = hasConstKeyword ? 1 : 0;
     fields.cells[fieldOffset + 2] = rawRef(typeArguments);
-    fields.cells[fieldOffset + 3] = rawRefs(elements);
+    fields.cells[fieldOffset + 3] = elements.length;
     return row;
   }
 
   int putCompilationUnit({int? scriptTag, required List<int> members}) {
     final start = 0;
     final end = source.length;
-    final arity = (scriptTag == null ? 0 : 1) + members.length;
-    int child(int ix) {
-      if (scriptTag != null) {
-        if (ix == 0) return scriptTag;
-        ix--;
-      }
-      return members[ix];
-    }
-
-    final row = _appendEdges(.compilationUnit, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(scriptTag)
+      ..addAll(members);
+    final row = children.finish(.compilationUnit);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(scriptTag);
-    fields.cells[fieldOffset + 1] = rawRefs(members);
+    fields.cells[fieldOffset + 1] = members.length;
     return row;
   }
 
@@ -585,14 +490,11 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int thenExpression,
     required int elseExpression,
   }) {
-    final arity = 3;
-    int child(int ix) => switch (ix) {
-      0 => condition,
-      1 => thenExpression,
-      2 => elseExpression,
-      _ => (throw RangeError.value(ix)),
-    };
-    return _appendEdges(.conditionalExpression, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(condition)
+      ..add(thenExpression)
+      ..add(elseExpression);
+    return children.finish(.conditionalExpression);
   }
 
   int putConditionalUri({
@@ -612,22 +514,11 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? typeArguments,
     int? arguments,
   }) {
-    final arity =
-        1 + (typeArguments == null ? 0 : 1) + (arguments == null ? 0 : 1);
-    int child(int ix) => switch (ix) {
-      0 => name,
-      1 when typeArguments != null || arguments != null =>
-        typeArguments ?? arguments!,
-      2 when typeArguments != null && arguments != null => arguments,
-      _ => (throw RangeError.value(ix)),
-    };
-    final row = _appendEdges(
-      .constDotShorthandExpression,
-      start,
-      end,
-      arity,
-      child,
-    );
+    final children = _Children(this, start, end)
+      ..add(name)
+      ..add(typeArguments)
+      ..add(arguments);
+    final row = children.finish(.constDotShorthandExpression);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(typeArguments);
@@ -643,11 +534,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }) {
     final row = _appendOne(.constantPattern, start, end, expression);
     final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = hasConstKeyword == true
-        ? 1
-        : hasConstKeyword == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = hasConstKeyword ? 1 : 0;
     return row;
   }
 
@@ -663,35 +550,22 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     List<int> initializers = const [],
     required int body,
   }) {
-    final arity = metadata.length + name.length + initializers.length + 2;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (ix < name.length) return name[ix];
-      ix -= name.length;
-      if (ix == 0) return parameters;
-      ix--;
-      return ix < initializers.length ? initializers[ix] : body;
-    }
-
-    final row = _appendEdges(.constructorDeclaration, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..addAll(name)
+      ..add(parameters)
+      ..addAll(initializers)
+      ..add(body);
+    final row = children.finish(.constructorDeclaration);
     final fieldOffset = fields.reserve(8);
-    fields.cells[fieldOffset + 0] = isExternal == true
-        ? 1
-        : isExternal == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 1] = isConst == true
-        ? 1
-        : isConst == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
+    fields.cells[fieldOffset + 1] = isConst ? 1 : 0;
     fields.cells[fieldOffset + 2] = keyword.index;
     fields.cells[fieldOffset + 3] = rawRef(parameters);
     fields.cells[fieldOffset + 4] = rawRef(body);
-    fields.cells[fieldOffset + 5] = rawRefs(metadata);
-    fields.cells[fieldOffset + 6] = rawRefs(name);
-    fields.cells[fieldOffset + 7] = rawRefs(initializers);
+    fields.cells[fieldOffset + 5] = metadata.length;
+    fields.cells[fieldOffset + 6] = name.length;
+    fields.cells[fieldOffset + 7] = initializers.length;
     return row;
   }
 
@@ -707,19 +581,16 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? type,
     required int name,
   }) {
-    final arity = metadata.length + (type == null ? 0 : 1) + 1;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      return type != null && ix == 0 ? type : name;
-    }
-
-    final row = _appendEdges(.declaredIdentifier, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(type)
+      ..add(name);
+    final row = children.finish(.declaredIdentifier);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = keyword.index;
     fields.cells[fieldOffset + 1] = rawRef(type);
     fields.cells[fieldOffset + 2] = rawRef(name);
-    fields.cells[fieldOffset + 3] = rawRefs(metadata);
+    fields.cells[fieldOffset + 3] = metadata.length;
     return row;
   }
 
@@ -773,41 +644,19 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? constructorName,
     int? arguments,
   }) {
-    final arity =
-        metadata.length +
-        1 +
-        (typeArguments == null ? 0 : 1) +
-        (constructorName == null ? 0 : 1) +
-        (arguments == null ? 0 : 1);
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (ix == 0) return name;
-      ix--;
-      if (typeArguments != null) {
-        if (ix == 0) return typeArguments;
-        ix--;
-      }
-      if (constructorName != null) {
-        if (ix == 0) return constructorName;
-        ix--;
-      }
-      return arguments!;
-    }
-
-    final row = _appendEdges(
-      .enumConstantDeclaration,
-      start,
-      end,
-      arity,
-      child,
-    );
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(name)
+      ..add(typeArguments)
+      ..add(constructorName)
+      ..add(arguments);
+    final row = children.finish(.enumConstantDeclaration);
     final fieldOffset = fields.reserve(5);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(typeArguments);
     fields.cells[fieldOffset + 2] = rawRef(constructorName);
     fields.cells[fieldOffset + 3] = rawRef(arguments);
-    fields.cells[fieldOffset + 4] = rawRefs(metadata);
+    fields.cells[fieldOffset + 4] = metadata.length;
     return row;
   }
 
@@ -827,71 +676,30 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     List<int> constants = const [],
     List<int> members = const [],
   }) {
-    final arity =
-        metadata.length +
-        1 +
-        (typeParameters == null ? 0 : 1) +
-        (primaryConstructorName == null ? 0 : 1) +
-        (primaryParameters == null ? 0 : 1) +
-        (withClause == null ? 0 : 1) +
-        (implementsClause == null ? 0 : 1) +
-        constants.length +
-        members.length;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (ix == 0) return name;
-      ix--;
-      if (typeParameters != null) {
-        if (ix == 0) return typeParameters;
-        ix--;
-      }
-      if (primaryConstructorName != null) {
-        if (ix == 0) return primaryConstructorName;
-        ix--;
-      }
-      if (primaryParameters != null) {
-        if (ix == 0) return primaryParameters;
-        ix--;
-      }
-      if (withClause != null) {
-        if (ix == 0) return withClause;
-        ix--;
-      }
-      if (implementsClause != null) {
-        if (ix == 0) return implementsClause;
-        ix--;
-      }
-      if (ix < constants.length) return constants[ix];
-      return members[ix - constants.length];
-    }
-
-    final row = _appendEdges(.enumDeclaration, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(name)
+      ..add(typeParameters)
+      ..add(primaryConstructorName)
+      ..add(primaryParameters)
+      ..add(withClause)
+      ..add(implementsClause)
+      ..addAll(constants)
+      ..addAll(members);
+    final row = children.finish(.enumDeclaration);
     final fieldOffset = fields.reserve(12);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 2] = isConst == true
-        ? 1
-        : isConst == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 2] = isConst ? 1 : 0;
     fields.cells[fieldOffset + 3] = rawRef(primaryConstructorName);
     fields.cells[fieldOffset + 4] = rawRef(primaryParameters);
     fields.cells[fieldOffset + 5] = rawRef(withClause);
     fields.cells[fieldOffset + 6] = rawRef(implementsClause);
-    fields.cells[fieldOffset + 7] = isSemicolonBody == true
-        ? 1
-        : isSemicolonBody == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 8] = hasMemberSeparator == true
-        ? 1
-        : hasMemberSeparator == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 9] = rawRefs(metadata);
-    fields.cells[fieldOffset + 10] = rawRefs(constants);
-    fields.cells[fieldOffset + 11] = rawRefs(members);
+    fields.cells[fieldOffset + 7] = isSemicolonBody ? 1 : 0;
+    fields.cells[fieldOffset + 8] = hasMemberSeparator ? 1 : 0;
+    fields.cells[fieldOffset + 9] = metadata.length;
+    fields.cells[fieldOffset + 10] = constants.length;
+    fields.cells[fieldOffset + 11] = members.length;
     return row;
   }
 
@@ -903,23 +711,17 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     List<int> configurations = const [],
     List<int> combinators = const [],
   }) {
-    final arity =
-        metadata.length + 1 + configurations.length + combinators.length;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (ix == 0) return uri;
-      ix--;
-      if (ix < configurations.length) return configurations[ix];
-      return combinators[ix - configurations.length];
-    }
-
-    final row = _appendEdges(.exportDirective, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(uri)
+      ..addAll(configurations)
+      ..addAll(combinators);
+    final row = children.finish(.exportDirective);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = rawRef(uri);
-    fields.cells[fieldOffset + 1] = rawRefs(configurations);
-    fields.cells[fieldOffset + 2] = rawRefs(combinators);
-    fields.cells[fieldOffset + 3] = rawRefs(metadata);
+    fields.cells[fieldOffset + 1] = configurations.length;
+    fields.cells[fieldOffset + 2] = combinators.length;
+    fields.cells[fieldOffset + 3] = metadata.length;
     return row;
   }
 
@@ -931,11 +733,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }) {
     final row = _appendOne(.expressionFunctionBody, start, end, expression);
     final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isAsync == true
-        ? 1
-        : isAsync == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isAsync ? 1 : 0;
     return row;
   }
 
@@ -965,38 +763,20 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     bool isSemicolonBody = false,
     List<int> members = const [],
   }) {
-    final arity =
-        metadata.length +
-        (name == null ? 0 : 1) +
-        (typeParameters == null ? 0 : 1) +
-        1 +
-        members.length;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (name != null) {
-        if (ix == 0) return name;
-        ix--;
-      }
-      if (typeParameters != null) {
-        if (ix == 0) return typeParameters;
-        ix--;
-      }
-      return ix == 0 ? onType : members[ix - 1];
-    }
-
-    final row = _appendEdges(.extensionDeclaration, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(name)
+      ..add(typeParameters)
+      ..add(onType)
+      ..addAll(members);
+    final row = children.finish(.extensionDeclaration);
     final fieldOffset = fields.reserve(6);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(typeParameters);
     fields.cells[fieldOffset + 2] = rawRef(onType);
-    fields.cells[fieldOffset + 3] = isSemicolonBody == true
-        ? 1
-        : isSemicolonBody == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 4] = rawRefs(metadata);
-    fields.cells[fieldOffset + 5] = rawRefs(members);
+    fields.cells[fieldOffset + 3] = isSemicolonBody ? 1 : 0;
+    fields.cells[fieldOffset + 4] = metadata.length;
+    fields.cells[fieldOffset + 5] = members.length;
     return row;
   }
 
@@ -1013,60 +793,25 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     bool isSemicolonBody = false,
     List<int> members = const [],
   }) {
-    final arity =
-        metadata.length +
-        2 +
-        (typeParameters == null ? 0 : 1) +
-        (primaryConstructorName == null ? 0 : 1) +
-        (implementsClause == null ? 0 : 1) +
-        members.length;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (ix == 0) return name;
-      ix--;
-      if (typeParameters != null) {
-        if (ix == 0) return typeParameters;
-        ix--;
-      }
-      if (primaryConstructorName != null) {
-        if (ix == 0) return primaryConstructorName;
-        ix--;
-      }
-      if (ix == 0) return primaryParameters;
-      ix--;
-      if (implementsClause != null) {
-        if (ix == 0) return implementsClause;
-        ix--;
-      }
-      return members[ix];
-    }
-
-    final row = _appendEdges(
-      .extensionTypeDeclaration,
-      start,
-      end,
-      arity,
-      child,
-    );
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(name)
+      ..add(typeParameters)
+      ..add(primaryConstructorName)
+      ..add(primaryParameters)
+      ..add(implementsClause)
+      ..addAll(members);
+    final row = children.finish(.extensionTypeDeclaration);
     final fieldOffset = fields.reserve(9);
-    fields.cells[fieldOffset + 0] = isConst == true
-        ? 1
-        : isConst == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isConst ? 1 : 0;
     fields.cells[fieldOffset + 1] = rawRef(name);
     fields.cells[fieldOffset + 2] = rawRef(typeParameters);
     fields.cells[fieldOffset + 3] = rawRef(primaryConstructorName);
     fields.cells[fieldOffset + 4] = rawRef(primaryParameters);
     fields.cells[fieldOffset + 5] = rawRef(implementsClause);
-    fields.cells[fieldOffset + 6] = isSemicolonBody == true
-        ? 1
-        : isSemicolonBody == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 7] = rawRefs(metadata);
-    fields.cells[fieldOffset + 8] = rawRefs(members);
+    fields.cells[fieldOffset + 6] = isSemicolonBody ? 1 : 0;
+    fields.cells[fieldOffset + 7] = metadata.length;
+    fields.cells[fieldOffset + 8] = members.length;
     return row;
   }
 
@@ -1077,23 +822,15 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? typeArguments,
     int? constructorName,
   }) {
-    final arity =
-        name.length +
-        (typeArguments == null ? 0 : 1) +
-        (constructorName == null ? 0 : 1);
-    int child(int ix) {
-      if (ix < name.length) return name[ix];
-      ix -= name.length;
-      return typeArguments != null && ix == 0
-          ? typeArguments
-          : constructorName!;
-    }
-
-    final row = _appendEdges(.factoryRedirectBody, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(name)
+      ..add(typeArguments)
+      ..add(constructorName);
+    final row = children.finish(.factoryRedirectBody);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(typeArguments);
     fields.cells[fieldOffset + 1] = rawRef(constructorName);
-    fields.cells[fieldOffset + 2] = rawRefs(name);
+    fields.cells[fieldOffset + 2] = name.length;
     return row;
   }
 
@@ -1108,26 +845,10 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }) {
     final row = _appendOne(.fieldDeclaration, start, end, variables);
     final fieldOffset = fields.reserve(4);
-    fields.cells[fieldOffset + 0] = isStatic == true
-        ? 1
-        : isStatic == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 1] = isAbstract == true
-        ? 1
-        : isAbstract == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 2] = isExternal == true
-        ? 1
-        : isExternal == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 3] = isCovariant == true
-        ? 1
-        : isCovariant == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isStatic ? 1 : 0;
+    fields.cells[fieldOffset + 1] = isAbstract ? 1 : 0;
+    fields.cells[fieldOffset + 2] = isExternal ? 1 : 0;
+    fields.cells[fieldOffset + 3] = isCovariant ? 1 : 0;
     return row;
   }
 
@@ -1140,11 +861,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }) {
     final row = _appendTwo(.fieldInitializer, start, end, name, value);
     final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = hasThis == true
-        ? 1
-        : hasThis == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = hasThis ? 1 : 0;
     return row;
   }
 
@@ -1157,11 +874,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }) {
     final row = _appendTwo(.forElement, start, end, parts, body);
     final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isAwait == true
-        ? 1
-        : isAwait == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isAwait ? 1 : 0;
     return row;
   }
 
@@ -1181,27 +894,15 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? condition,
     List<int> updaters = const [],
   }) {
-    final arity =
-        (initializer == null ? 0 : 1) +
-        (condition == null ? 0 : 1) +
-        updaters.length;
-    int child(int ix) {
-      if (initializer != null) {
-        if (ix == 0) return initializer;
-        ix--;
-      }
-      if (condition != null) {
-        if (ix == 0) return condition;
-        ix--;
-      }
-      return updaters[ix];
-    }
-
-    final row = _appendEdges(.forParts, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(initializer)
+      ..add(condition)
+      ..addAll(updaters);
+    final row = children.finish(.forParts);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(initializer);
     fields.cells[fieldOffset + 1] = rawRef(condition);
-    fields.cells[fieldOffset + 2] = rawRefs(updaters);
+    fields.cells[fieldOffset + 2] = updaters.length;
     return row;
   }
 
@@ -1214,11 +915,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }) {
     final row = _appendTwo(.forStatement, start, end, parts, body);
     final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isAwait == true
-        ? 1
-        : isAwait == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isAwait ? 1 : 0;
     return row;
   }
 
@@ -1235,43 +932,23 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? functionSuffix,
     int? defaultClause,
   }) {
-    final arity =
-        metadata.length +
-        (type == null ? 0 : 1) +
-        1 +
-        (functionSuffix == null ? 0 : 1) +
-        (defaultClause == null ? 0 : 1);
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (type != null) {
-        if (ix == 0) return type;
-        ix--;
-      }
-      if (ix == 0) return name;
-      ix--;
-      if (functionSuffix != null) {
-        if (ix == 0) return functionSuffix;
-        ix--;
-      }
-      return defaultClause!;
-    }
-
-    final row = _appendEdges(.formalParameter, start, end, arity, child);
-    final fieldOffset = fields.reserve(9);
-    fields.cells[fieldOffset + 0] = kind.index;
-    fields.cells[fieldOffset + 1] = prefix.index;
-    fields.cells[fieldOffset + 2] = keyword.index;
-    fields.cells[fieldOffset + 3] = isCovariant == true
-        ? 1
-        : isCovariant == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 4] = rawRef(type);
-    fields.cells[fieldOffset + 5] = rawRef(name);
-    fields.cells[fieldOffset + 6] = rawRef(functionSuffix);
-    fields.cells[fieldOffset + 7] = rawRef(defaultClause);
-    fields.cells[fieldOffset + 8] = rawRefs(metadata);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(type)
+      ..add(name)
+      ..add(functionSuffix)
+      ..add(defaultClause);
+    final row = children.finish(.formalParameter);
+    final at = fields.reserve(5);
+    fields.cells[at] = kind.index;
+    fields.cells[at + 1] = prefix.index;
+    fields.cells[at + 2] = keyword.index;
+    fields.cells[at + 3] =
+        (type == null ? 0 : _formalType) |
+        (functionSuffix == null ? 0 : _formalSuffix) |
+        (defaultClause == null ? 0 : _formalDefault) |
+        (isCovariant ? _formalCovariant : 0);
+    fields.cells[at + 4] = metadata.length;
     return row;
   }
 
@@ -1336,36 +1013,19 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? typeParameters,
     required int parameters,
   }) {
-    final arity =
-        metadata.length +
-        (returnType == null ? 0 : 1) +
-        (typeParameters == null ? 0 : 1) +
-        2;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (returnType != null) {
-        if (ix == 0) return returnType;
-        ix--;
-      }
-      if (ix == 0) return name;
-      ix--;
-      return typeParameters != null && ix == 0 ? typeParameters : parameters;
-    }
-
-    final row = _appendEdges(
-      .functionTypeAliasDeclaration,
-      start,
-      end,
-      arity,
-      child,
-    );
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(returnType)
+      ..add(name)
+      ..add(typeParameters)
+      ..add(parameters);
+    final row = children.finish(.functionTypeAliasDeclaration);
     final fieldOffset = fields.reserve(5);
     fields.cells[fieldOffset + 0] = rawRef(returnType);
     fields.cells[fieldOffset + 1] = rawRef(name);
     fields.cells[fieldOffset + 2] = rawRef(typeParameters);
     fields.cells[fieldOffset + 3] = rawRef(parameters);
-    fields.cells[fieldOffset + 4] = rawRefs(metadata);
+    fields.cells[fieldOffset + 4] = metadata.length;
     return row;
   }
 
@@ -1385,21 +1045,11 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
         "questionOffset",
       );
     }
-    final arity =
-        (returnType == null ? 0 : 1) + (typeParameters == null ? 0 : 1) + 1;
-    int child(int ix) {
-      if (returnType != null) {
-        if (ix == 0) return returnType;
-        ix--;
-      }
-      if (typeParameters != null) {
-        if (ix == 0) return typeParameters;
-        ix--;
-      }
-      return parameters;
-    }
-
-    final row = _appendEdges(.functionTypeAnnotation, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(returnType)
+      ..add(typeParameters)
+      ..add(parameters);
+    final row = children.finish(.functionTypeAnnotation);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = rawRef(returnType);
     fields.cells[fieldOffset + 1] = rawRef(typeParameters);
@@ -1417,23 +1067,17 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int type,
     int? name,
   }) {
-    final arity = metadata.length + 1 + (name == null ? 0 : 1);
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      return ix == metadata.length ? type : name!;
-    }
-
-    final row = _appendEdges(.functionTypeParameter, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(type)
+      ..add(name);
+    final row = children.finish(.functionTypeParameter);
     final fieldOffset = fields.reserve(5);
     fields.cells[fieldOffset + 0] = kind.index;
-    fields.cells[fieldOffset + 1] = isCovariant == true
-        ? 1
-        : isCovariant == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 1] = isCovariant ? 1 : 0;
     fields.cells[fieldOffset + 2] = rawRef(type);
     fields.cells[fieldOffset + 3] = rawRef(name);
-    fields.cells[fieldOffset + 4] = rawRefs(metadata);
+    fields.cells[fieldOffset + 4] = metadata.length;
     return row;
   }
 
@@ -1455,34 +1099,19 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int name,
     required int body,
   }) {
-    final arity = metadata.length + (returnType == null ? 0 : 1) + 2;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (returnType != null) {
-        if (ix == 0) return returnType;
-        ix--;
-      }
-      if (ix == 0) return name;
-      return body;
-    }
-
-    final row = _appendEdges(.getterDeclaration, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(returnType)
+      ..add(name)
+      ..add(body);
+    final row = children.finish(.getterDeclaration);
     final fieldOffset = fields.reserve(6);
-    fields.cells[fieldOffset + 0] = isExternal == true
-        ? 1
-        : isExternal == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 1] = isStatic == true
-        ? 1
-        : isStatic == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
+    fields.cells[fieldOffset + 1] = isStatic ? 1 : 0;
     fields.cells[fieldOffset + 2] = rawRef(returnType);
     fields.cells[fieldOffset + 3] = rawRef(name);
     fields.cells[fieldOffset + 4] = rawRef(body);
-    fields.cells[fieldOffset + 5] = rawRefs(metadata);
+    fields.cells[fieldOffset + 5] = metadata.length;
     return row;
   }
 
@@ -1523,19 +1152,12 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int thenElement,
     int? elseElement,
   }) {
-    final arity =
-        2 + (casePattern == null ? 0 : 1) + (elseElement == null ? 0 : 1);
-    int child(int ix) {
-      if (ix == 0) return condition;
-      ix--;
-      if (casePattern != null) {
-        if (ix == 0) return casePattern;
-        ix--;
-      }
-      return ix == 0 ? thenElement : elseElement!;
-    }
-
-    final row = _appendEdges(.ifElement, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(condition)
+      ..add(casePattern)
+      ..add(thenElement)
+      ..add(elseElement);
+    final row = children.finish(.ifElement);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = rawRef(condition);
     fields.cells[fieldOffset + 1] = rawRef(casePattern);
@@ -1552,19 +1174,12 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int thenStatement,
     int? elseStatement,
   }) {
-    final arity =
-        2 + (casePattern == null ? 0 : 1) + (elseStatement == null ? 0 : 1);
-    int child(int ix) {
-      if (ix == 0) return condition;
-      ix--;
-      if (casePattern != null) {
-        if (ix == 0) return casePattern;
-        ix--;
-      }
-      return ix == 0 ? thenStatement : elseStatement!;
-    }
-
-    final row = _appendEdges(.ifStatement, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(condition)
+      ..add(casePattern)
+      ..add(thenStatement)
+      ..add(elseStatement);
+    final row = children.finish(.ifStatement);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = rawRef(condition);
     fields.cells[fieldOffset + 1] = rawRef(casePattern);
@@ -1583,38 +1198,20 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? prefix,
     List<int> combinators = const [],
   }) {
-    final arity =
-        metadata.length +
-        1 +
-        configurations.length +
-        (prefix == null ? 0 : 1) +
-        combinators.length;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (ix == 0) return uri;
-      ix--;
-      if (ix < configurations.length) return configurations[ix];
-      ix -= configurations.length;
-      if (prefix != null) {
-        if (ix == 0) return prefix;
-        ix--;
-      }
-      return combinators[ix];
-    }
-
-    final row = _appendEdges(.importDirective, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(uri)
+      ..addAll(configurations)
+      ..add(prefix)
+      ..addAll(combinators);
+    final row = children.finish(.importDirective);
     final fieldOffset = fields.reserve(6);
     fields.cells[fieldOffset + 0] = rawRef(uri);
-    fields.cells[fieldOffset + 1] = isDeferred == true
-        ? 1
-        : isDeferred == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 1] = isDeferred ? 1 : 0;
     fields.cells[fieldOffset + 2] = rawRef(prefix);
-    fields.cells[fieldOffset + 3] = rawRefs(configurations);
-    fields.cells[fieldOffset + 4] = rawRefs(combinators);
-    fields.cells[fieldOffset + 5] = rawRefs(metadata);
+    fields.cells[fieldOffset + 3] = configurations.length;
+    fields.cells[fieldOffset + 4] = combinators.length;
+    fields.cells[fieldOffset + 5] = metadata.length;
     return row;
   }
 
@@ -1627,11 +1224,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }) {
     final row = _appendTwo(.indexExpression, start, end, target, index);
     final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isNullAware == true
-        ? 1
-        : isNullAware == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isNullAware ? 1 : 0;
     return row;
   }
 
@@ -1644,35 +1237,18 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? constructorName,
     required int arguments,
   }) {
-    final arity =
-        name.length +
-        (typeArguments == null ? 0 : 1) +
-        (constructorName == null ? 0 : 1) +
-        1;
-    int child(int ix) {
-      if (ix < name.length) return name[ix];
-      ix -= name.length;
-      if (typeArguments != null) {
-        if (ix == 0) return typeArguments;
-        ix--;
-      }
-      if (constructorName != null && ix == 0) return constructorName;
-      return arguments;
-    }
-
-    final row = _appendEdges(
-      .instanceCreationExpression,
-      start,
-      end,
-      arity,
-      child,
-    );
+    final children = _Children(this, start, end)
+      ..addAll(name)
+      ..add(typeArguments)
+      ..add(constructorName)
+      ..add(arguments);
+    final row = children.finish(.instanceCreationExpression);
     final fieldOffset = fields.reserve(5);
     fields.cells[fieldOffset + 0] = kind.index;
     fields.cells[fieldOffset + 1] = rawRef(typeArguments);
     fields.cells[fieldOffset + 2] = rawRef(constructorName);
     fields.cells[fieldOffset + 3] = rawRef(arguments);
-    fields.cells[fieldOffset + 4] = rawRefs(name);
+    fields.cells[fieldOffset + 4] = name.length;
     return row;
   }
 
@@ -1711,15 +1287,13 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required List<int> labels,
     required int statement,
   }) {
-    final arity = labels.length + 1;
-    int child(int ix) {
-      return ix < labels.length ? labels[ix] : statement;
-    }
-
-    final row = _appendEdges(.labeledStatement, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(labels)
+      ..add(statement);
+    final row = children.finish(.labeledStatement);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(statement);
-    fields.cells[fieldOffset + 1] = rawRefs(labels);
+    fields.cells[fieldOffset + 1] = labels.length;
     return row;
   }
 
@@ -1729,15 +1303,13 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     List<int> metadata = const [],
     int? name,
   }) {
-    final arity = metadata.length + (name == null ? 0 : 1);
-    int child(int ix) {
-      return ix < metadata.length ? metadata[ix] : name!;
-    }
-
-    final row = _appendEdges(.libraryDirective, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(name);
+    final row = children.finish(.libraryDirective);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRefs(metadata);
+    fields.cells[fieldOffset + 1] = metadata.length;
     return row;
   }
 
@@ -1747,19 +1319,13 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? typeArguments,
     required List<int> elements,
   }) {
-    final arity = elements.length + (typeArguments == null ? 0 : 1);
-    int child(int ix) {
-      if (typeArguments != null) {
-        if (ix == 0) return typeArguments;
-        ix--;
-      }
-      return elements[ix];
-    }
-
-    final row = _appendEdges(.listPattern, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(typeArguments)
+      ..addAll(elements);
+    final row = children.finish(.listPattern);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(typeArguments);
-    fields.cells[fieldOffset + 1] = rawRefs(elements);
+    fields.cells[fieldOffset + 1] = elements.length;
     return row;
   }
 
@@ -1784,41 +1350,21 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int parameters,
     required int body,
   }) {
-    final arity =
-        metadata.length +
-        (returnType == null ? 0 : 1) +
-        (typeParameters == null ? 0 : 1) +
-        3;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (returnType != null) {
-        if (ix == 0) return returnType;
-        ix--;
-      }
-      if (ix == 0) return name;
-      ix--;
-      if (typeParameters != null) {
-        if (ix == 0) return typeParameters;
-        ix--;
-      }
-      return ix == 0 ? parameters : body;
-    }
-
-    final row = _appendEdges(
-      .localFunctionDeclaration,
-      start,
-      end,
-      arity,
-      child,
-    );
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(returnType)
+      ..add(name)
+      ..add(typeParameters)
+      ..add(parameters)
+      ..add(body);
+    final row = children.finish(.localFunctionDeclaration);
     final fieldOffset = fields.reserve(6);
     fields.cells[fieldOffset + 0] = rawRef(returnType);
     fields.cells[fieldOffset + 1] = rawRef(name);
     fields.cells[fieldOffset + 2] = rawRef(typeParameters);
     fields.cells[fieldOffset + 3] = rawRef(parameters);
     fields.cells[fieldOffset + 4] = rawRef(body);
-    fields.cells[fieldOffset + 5] = rawRefs(metadata);
+    fields.cells[fieldOffset + 5] = metadata.length;
     return row;
   }
 
@@ -1845,16 +1391,8 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }) {
     final row = _appendTwo(.mapEntryElement, start, end, key, value);
     final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = isNullAwareKey == true
-        ? 1
-        : isNullAwareKey == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 1] = isNullAwareValue == true
-        ? 1
-        : isNullAwareValue == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isNullAwareKey ? 1 : 0;
+    fields.cells[fieldOffset + 1] = isNullAwareValue ? 1 : 0;
     return row;
   }
 
@@ -1864,19 +1402,13 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? typeArguments,
     required List<int> elements,
   }) {
-    final arity = elements.length + (typeArguments == null ? 0 : 1);
-    int child(int ix) {
-      if (typeArguments != null) {
-        if (ix == 0) return typeArguments;
-        ix--;
-      }
-      return elements[ix];
-    }
-
-    final row = _appendEdges(.mapPattern, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(typeArguments)
+      ..addAll(elements);
+    final row = children.finish(.mapPattern);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(typeArguments);
-    fields.cells[fieldOffset + 1] = rawRefs(elements);
+    fields.cells[fieldOffset + 1] = elements.length;
     return row;
   }
 
@@ -1901,45 +1433,23 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int parameters,
     required int body,
   }) {
-    final arity =
-        metadata.length +
-        (returnType == null ? 0 : 1) +
-        (typeParameters == null ? 0 : 1) +
-        3;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (returnType != null) {
-        if (ix == 0) return returnType;
-        ix--;
-      }
-      if (ix == 0) return name;
-      ix--;
-      if (typeParameters != null) {
-        if (ix == 0) return typeParameters;
-        ix--;
-      }
-      return ix == 0 ? parameters : body;
-    }
-
-    final row = _appendEdges(.methodDeclaration, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(returnType)
+      ..add(name)
+      ..add(typeParameters)
+      ..add(parameters)
+      ..add(body);
+    final row = children.finish(.methodDeclaration);
     final fieldOffset = fields.reserve(8);
-    fields.cells[fieldOffset + 0] = isExternal == true
-        ? 1
-        : isExternal == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 1] = isStatic == true
-        ? 1
-        : isStatic == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
+    fields.cells[fieldOffset + 1] = isStatic ? 1 : 0;
     fields.cells[fieldOffset + 2] = rawRef(returnType);
     fields.cells[fieldOffset + 3] = rawRef(name);
     fields.cells[fieldOffset + 4] = rawRef(typeParameters);
     fields.cells[fieldOffset + 5] = rawRef(parameters);
     fields.cells[fieldOffset + 6] = rawRef(body);
-    fields.cells[fieldOffset + 7] = rawRefs(metadata);
+    fields.cells[fieldOffset + 7] = metadata.length;
     return row;
   }
 
@@ -2015,51 +1525,23 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     bool isSemicolonBody = false,
     List<int> members = const [],
   }) {
-    final arity =
-        metadata.length +
-        1 +
-        (typeParameters == null ? 0 : 1) +
-        (onClause == null ? 0 : 1) +
-        (implementsClause == null ? 0 : 1) +
-        members.length;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (ix == 0) return name;
-      ix--;
-      if (typeParameters != null) {
-        if (ix == 0) return typeParameters;
-        ix--;
-      }
-      if (onClause != null) {
-        if (ix == 0) return onClause;
-        ix--;
-      }
-      if (implementsClause != null) {
-        if (ix == 0) return implementsClause;
-        ix--;
-      }
-      return members[ix];
-    }
-
-    final row = _appendEdges(.mixinDeclaration, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(name)
+      ..add(typeParameters)
+      ..add(onClause)
+      ..add(implementsClause)
+      ..addAll(members);
+    final row = children.finish(.mixinDeclaration);
     final fieldOffset = fields.reserve(8);
-    fields.cells[fieldOffset + 0] = isBase == true
-        ? 1
-        : isBase == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isBase ? 1 : 0;
     fields.cells[fieldOffset + 1] = rawRef(name);
     fields.cells[fieldOffset + 2] = rawRef(typeParameters);
     fields.cells[fieldOffset + 3] = rawRef(onClause);
     fields.cells[fieldOffset + 4] = rawRef(implementsClause);
-    fields.cells[fieldOffset + 5] = isSemicolonBody == true
-        ? 1
-        : isSemicolonBody == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 6] = rawRefs(metadata);
-    fields.cells[fieldOffset + 7] = rawRefs(members);
+    fields.cells[fieldOffset + 5] = isSemicolonBody ? 1 : 0;
+    fields.cells[fieldOffset + 6] = metadata.length;
+    fields.cells[fieldOffset + 7] = members.length;
     return row;
   }
 
@@ -2100,17 +1582,15 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int type,
     required int name,
   }) {
-    final arity = metadata.length + 1 + (1);
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      return ix == metadata.length ? type : name;
-    }
-
-    final row = _appendEdges(.namedRecordTypeField, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(type)
+      ..add(name);
+    final row = children.finish(.namedRecordTypeField);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(type);
-    fields.cells[fieldOffset + 2] = rawRefs(metadata);
+    fields.cells[fieldOffset + 2] = metadata.length;
     return row;
   }
 
@@ -2211,15 +1691,13 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int type,
     required List<int> fields,
   }) {
-    final arity = 1 + fields.length;
-    int child(int ix) {
-      return ix == 0 ? type : fields[ix - 1];
-    }
-
-    final row = _appendEdges(.objectPattern, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(type)
+      ..addAll(fields);
+    final row = children.finish(.objectPattern);
     final fieldOffset = this.fields.reserve(2);
     this.fields.cells[fieldOffset + 0] = rawRef(type);
-    this.fields.cells[fieldOffset + 1] = rawRefs(fields);
+    this.fields.cells[fieldOffset + 1] = fields.length;
     return row;
   }
 
@@ -2234,34 +1712,20 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int parameters,
     required int body,
   }) {
-    final arity = metadata.length + (returnType == null ? 0 : 1) + 2;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (returnType != null) {
-        if (ix == 0) return returnType;
-        ix--;
-      }
-      return ix == 0 ? parameters : body;
-    }
-
-    final row = _appendEdges(.operatorDeclaration, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(returnType)
+      ..add(parameters)
+      ..add(body);
+    final row = children.finish(.operatorDeclaration);
     final fieldOffset = fields.reserve(7);
-    fields.cells[fieldOffset + 0] = isExternal == true
-        ? 1
-        : isExternal == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 1] = isStatic == true
-        ? 1
-        : isStatic == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
+    fields.cells[fieldOffset + 1] = isStatic ? 1 : 0;
     fields.cells[fieldOffset + 2] = rawRef(returnType);
     fields.cells[fieldOffset + 3] = op.index;
     fields.cells[fieldOffset + 4] = rawRef(parameters);
     fields.cells[fieldOffset + 5] = rawRef(body);
-    fields.cells[fieldOffset + 6] = rawRefs(metadata);
+    fields.cells[fieldOffset + 6] = metadata.length;
     return row;
   }
 
@@ -2299,15 +1763,13 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     List<int> metadata = const [],
     required int uri,
   }) {
-    final arity = metadata.length + 1;
-    int child(int ix) {
-      return ix < metadata.length ? metadata[ix] : uri;
-    }
-
-    final row = _appendEdges(.partDirective, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(uri);
+    final row = children.finish(.partDirective);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(uri);
-    fields.cells[fieldOffset + 1] = rawRefs(metadata);
+    fields.cells[fieldOffset + 1] = metadata.length;
     return row;
   }
 
@@ -2317,15 +1779,13 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     List<int> metadata = const [],
     required int target,
   }) {
-    final arity = metadata.length + 1;
-    int child(int ix) {
-      return ix < metadata.length ? metadata[ix] : target;
-    }
-
-    final row = _appendEdges(.partOfDirective, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(target);
+    final row = children.finish(.partOfDirective);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(target);
-    fields.cells[fieldOffset + 1] = rawRefs(metadata);
+    fields.cells[fieldOffset + 1] = metadata.length;
     return row;
   }
 
@@ -2345,20 +1805,14 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required bool isFinal,
     required int pattern,
   }) {
-    final arity = metadata.length + 1;
-    int child(int ix) {
-      return ix < metadata.length ? metadata[ix] : pattern;
-    }
-
-    final row = _appendEdges(.patternForInBinding, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(pattern);
+    final row = children.finish(.patternForInBinding);
     final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = isFinal == true
-        ? 1
-        : isFinal == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isFinal ? 1 : 0;
     fields.cells[fieldOffset + 1] = rawRef(pattern);
-    fields.cells[fieldOffset + 2] = rawRefs(metadata);
+    fields.cells[fieldOffset + 2] = metadata.length;
     return row;
   }
 
@@ -2370,28 +1824,16 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int pattern,
     required int initializer,
   }) {
-    final arity = metadata.length + 2;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      return ix == metadata.length ? pattern : initializer;
-    }
-
-    final row = _appendEdges(
-      .patternVariableDeclaration,
-      start,
-      end,
-      arity,
-      child,
-    );
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(pattern)
+      ..add(initializer);
+    final row = children.finish(.patternVariableDeclaration);
     final fieldOffset = fields.reserve(4);
-    fields.cells[fieldOffset + 0] = isFinal == true
-        ? 1
-        : isFinal == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isFinal ? 1 : 0;
     fields.cells[fieldOffset + 1] = rawRef(pattern);
     fields.cells[fieldOffset + 2] = rawRef(initializer);
-    fields.cells[fieldOffset + 3] = rawRefs(metadata);
+    fields.cells[fieldOffset + 3] = metadata.length;
     return row;
   }
 
@@ -2415,23 +1857,15 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int type,
     int? name,
   }) {
-    final arity = metadata.length + 1 + (name == null ? 0 : 1);
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      return ix == metadata.length ? type : name!;
-    }
-
-    final row = _appendEdges(
-      .positionalRecordTypeField,
-      start,
-      end,
-      arity,
-      child,
-    );
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(type)
+      ..add(name);
+    final row = children.finish(.positionalRecordTypeField);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(type);
-    fields.cells[fieldOffset + 2] = rawRefs(metadata);
+    fields.cells[fieldOffset + 2] = metadata.length;
     return row;
   }
 
@@ -2442,18 +1876,15 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     List<int> initializers = const [],
     required int body,
   }) {
-    final arity = metadata.length + initializers.length + 1;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      return ix < initializers.length ? initializers[ix] : body;
-    }
-
-    final row = _appendEdges(.primaryConstructorBody, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..addAll(initializers)
+      ..add(body);
+    final row = children.finish(.primaryConstructorBody);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(body);
-    fields.cells[fieldOffset + 1] = rawRefs(metadata);
-    fields.cells[fieldOffset + 2] = rawRefs(initializers);
+    fields.cells[fieldOffset + 1] = metadata.length;
+    fields.cells[fieldOffset + 2] = initializers.length;
     return row;
   }
 
@@ -2472,11 +1903,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
       property,
     );
     final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isNullAware == true
-        ? 1
-        : isNullAware == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isNullAware ? 1 : 0;
     return row;
   }
 
@@ -2488,11 +1915,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }) {
     final row = _appendList(.recordExpression, start, end, fields);
     final fieldOffset = this.fields.reserve(1);
-    this.fields.cells[fieldOffset + 0] = hasConstKeyword == true
-        ? 1
-        : hasConstKeyword == false
-        ? 0
-        : _nil;
+    this.fields.cells[fieldOffset + 0] = hasConstKeyword ? 1 : 0;
     return row;
   }
 
@@ -2519,15 +1942,13 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
         "questionOffset",
       );
     }
-    final arity = positionalFields.length + (namedFields == null ? 0 : 1);
-    int child(int ix) {
-      return ix < positionalFields.length ? positionalFields[ix] : namedFields!;
-    }
-
-    final row = _appendEdges(.recordTypeAnnotation, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(positionalFields)
+      ..add(namedFields);
+    final row = children.finish(.recordTypeAnnotation);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(namedFields);
-    fields.cells[fieldOffset + 1] = rawRefs(positionalFields);
+    fields.cells[fieldOffset + 1] = positionalFields.length;
     fields.cells[fieldOffset + 2] = questionOffset ?? _nil;
     return row;
   }
@@ -2603,41 +2024,22 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int parameters,
     required int body,
   }) {
-    final arity = metadata.length + (returnType == null ? 0 : 1) + 3;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (returnType != null) {
-        if (ix == 0) return returnType;
-        ix--;
-      }
-      if (ix == 0) return name;
-      ix--;
-      return ix == 0 ? parameters : body;
-    }
-
-    final row = _appendEdges(.setterDeclaration, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(returnType)
+      ..add(name)
+      ..add(parameters)
+      ..add(body);
+    final row = children.finish(.setterDeclaration);
     final fieldOffset = fields.reserve(8);
-    fields.cells[fieldOffset + 0] = isExternal == true
-        ? 1
-        : isExternal == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 1] = isStatic == true
-        ? 1
-        : isStatic == false
-        ? 0
-        : _nil;
-    fields.cells[fieldOffset + 2] = isCovariant == true
-        ? 1
-        : isCovariant == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
+    fields.cells[fieldOffset + 1] = isStatic ? 1 : 0;
+    fields.cells[fieldOffset + 2] = isCovariant ? 1 : 0;
     fields.cells[fieldOffset + 3] = rawRef(returnType);
     fields.cells[fieldOffset + 4] = rawRef(name);
     fields.cells[fieldOffset + 5] = rawRef(parameters);
     fields.cells[fieldOffset + 6] = rawRef(body);
-    fields.cells[fieldOffset + 7] = rawRefs(metadata);
+    fields.cells[fieldOffset + 7] = metadata.length;
     return row;
   }
 
@@ -2649,11 +2051,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }) {
     final row = _appendOne(.spreadElement, start, end, expression);
     final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isNullAware == true
-        ? 1
-        : isNullAware == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isNullAware ? 1 : 0;
     return row;
   }
 
@@ -2665,11 +2063,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }) {
     final row = _appendOne(.stringInterpolation, start, end, expression);
     final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isBraced == true
-        ? 1
-        : isBraced == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isBraced ? 1 : 0;
     return row;
   }
 
@@ -2706,15 +2100,13 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int expression,
     required List<int> cases,
   }) {
-    final arity = 1 + cases.length;
-    int child(int ix) {
-      return ix == 0 ? expression : cases[ix - 1];
-    }
-
-    final row = _appendEdges(.switchExpression, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(expression)
+      ..addAll(cases);
+    final row = children.finish(.switchExpression);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(expression);
-    fields.cells[fieldOffset + 1] = rawRefs(cases);
+    fields.cells[fieldOffset + 1] = cases.length;
     return row;
   }
 
@@ -2733,15 +2125,13 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int expression,
     required List<int> members,
   }) {
-    final arity = 1 + members.length;
-    int child(int ix) {
-      return ix == 0 ? expression : members[ix - 1];
-    }
-
-    final row = _appendEdges(.switchStatement, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(expression)
+      ..addAll(members);
+    final row = children.finish(.switchStatement);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(expression);
-    fields.cells[fieldOffset + 1] = rawRefs(members);
+    fields.cells[fieldOffset + 1] = members.length;
     return row;
   }
 
@@ -2752,22 +2142,15 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? pattern,
     required List<int> statements,
   }) {
-    final arity = labels.length + (pattern == null ? 0 : 1) + statements.length;
-    int child(int ix) {
-      if (ix < labels.length) return labels[ix];
-      ix -= labels.length;
-      if (pattern != null) {
-        if (ix == 0) return pattern;
-        ix--;
-      }
-      return statements[ix];
-    }
-
-    final row = _appendEdges(.switchStatementMember, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(labels)
+      ..add(pattern)
+      ..addAll(statements);
+    final row = children.finish(.switchStatementMember);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(pattern);
-    fields.cells[fieldOffset + 1] = rawRefs(labels);
-    fields.cells[fieldOffset + 2] = rawRefs(statements);
+    fields.cells[fieldOffset + 1] = labels.length;
+    fields.cells[fieldOffset + 2] = statements.length;
     return row;
   }
 
@@ -2794,46 +2177,22 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int parameters,
     required int body,
   }) {
-    final arity =
-        metadata.length +
-        (returnType == null ? 0 : 1) +
-        (typeParameters == null ? 0 : 1) +
-        3;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (returnType != null) {
-        if (ix == 0) return returnType;
-        ix--;
-      }
-      if (ix == 0) return name;
-      ix--;
-      if (typeParameters != null) {
-        if (ix == 0) return typeParameters;
-        ix--;
-      }
-      return ix == 0 ? parameters : body;
-    }
-
-    final row = _appendEdges(
-      .topLevelFunctionDeclaration,
-      start,
-      end,
-      arity,
-      child,
-    );
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(returnType)
+      ..add(name)
+      ..add(typeParameters)
+      ..add(parameters)
+      ..add(body);
+    final row = children.finish(.topLevelFunctionDeclaration);
     final fieldOffset = fields.reserve(7);
-    fields.cells[fieldOffset + 0] = isExternal == true
-        ? 1
-        : isExternal == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
     fields.cells[fieldOffset + 1] = rawRef(returnType);
     fields.cells[fieldOffset + 2] = rawRef(name);
     fields.cells[fieldOffset + 3] = rawRef(typeParameters);
     fields.cells[fieldOffset + 4] = rawRef(parameters);
     fields.cells[fieldOffset + 5] = rawRef(body);
-    fields.cells[fieldOffset + 6] = rawRefs(metadata);
+    fields.cells[fieldOffset + 6] = metadata.length;
     return row;
   }
 
@@ -2846,35 +2205,18 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int name,
     required int body,
   }) {
-    final arity = metadata.length + (returnType == null ? 0 : 1) + 2;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (returnType != null) {
-        if (ix == 0) return returnType;
-        ix--;
-      }
-      if (ix == 0) return name;
-      return body;
-    }
-
-    final row = _appendEdges(
-      .topLevelGetterDeclaration,
-      start,
-      end,
-      arity,
-      child,
-    );
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(returnType)
+      ..add(name)
+      ..add(body);
+    final row = children.finish(.topLevelGetterDeclaration);
     final fieldOffset = fields.reserve(5);
-    fields.cells[fieldOffset + 0] = isExternal == true
-        ? 1
-        : isExternal == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
     fields.cells[fieldOffset + 1] = rawRef(returnType);
     fields.cells[fieldOffset + 2] = rawRef(name);
     fields.cells[fieldOffset + 3] = rawRef(body);
-    fields.cells[fieldOffset + 4] = rawRefs(metadata);
+    fields.cells[fieldOffset + 4] = metadata.length;
     return row;
   }
 
@@ -2888,37 +2230,20 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int parameters,
     required int body,
   }) {
-    final arity = metadata.length + (returnType == null ? 0 : 1) + 3;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (returnType != null) {
-        if (ix == 0) return returnType;
-        ix--;
-      }
-      if (ix == 0) return name;
-      ix--;
-      return ix == 0 ? parameters : body;
-    }
-
-    final row = _appendEdges(
-      .topLevelSetterDeclaration,
-      start,
-      end,
-      arity,
-      child,
-    );
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(returnType)
+      ..add(name)
+      ..add(parameters)
+      ..add(body);
+    final row = children.finish(.topLevelSetterDeclaration);
     final fieldOffset = fields.reserve(6);
-    fields.cells[fieldOffset + 0] = isExternal == true
-        ? 1
-        : isExternal == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
     fields.cells[fieldOffset + 1] = rawRef(returnType);
     fields.cells[fieldOffset + 2] = rawRef(name);
     fields.cells[fieldOffset + 3] = rawRef(parameters);
     fields.cells[fieldOffset + 4] = rawRef(body);
-    fields.cells[fieldOffset + 5] = rawRefs(metadata);
+    fields.cells[fieldOffset + 5] = metadata.length;
     return row;
   }
 
@@ -2930,11 +2255,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }) {
     final row = _appendOne(.topLevelVariableDeclaration, start, end, variables);
     final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isExternal == true
-        ? 1
-        : isExternal == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
     return row;
   }
 
@@ -2945,18 +2266,15 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     List<int> catchClauses = const [],
     int? finallyBlock,
   }) {
-    final arity = 1 + catchClauses.length + (finallyBlock == null ? 0 : 1);
-    int child(int ix) {
-      if (ix == 0) return body;
-      ix--;
-      return ix < catchClauses.length ? catchClauses[ix] : finallyBlock!;
-    }
-
-    final row = _appendEdges(.tryStatement, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..add(body)
+      ..addAll(catchClauses)
+      ..add(finallyBlock);
+    final row = children.finish(.tryStatement);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(body);
     fields.cells[fieldOffset + 1] = rawRef(finallyBlock);
-    fields.cells[fieldOffset + 2] = rawRefs(catchClauses);
+    fields.cells[fieldOffset + 2] = catchClauses.length;
     return row;
   }
 
@@ -2968,21 +2286,17 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? typeParameters,
     required int type,
   }) {
-    final arity = metadata.length + 2 + (typeParameters == null ? 0 : 1);
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (ix == 0) return name;
-      ix--;
-      return typeParameters != null && ix == 0 ? typeParameters : type;
-    }
-
-    final row = _appendEdges(.typeAliasDeclaration, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(name)
+      ..add(typeParameters)
+      ..add(type);
+    final row = children.finish(.typeAliasDeclaration);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(typeParameters);
     fields.cells[fieldOffset + 2] = rawRef(type);
-    fields.cells[fieldOffset + 3] = rawRefs(metadata);
+    fields.cells[fieldOffset + 3] = metadata.length;
     return row;
   }
 
@@ -3028,17 +2342,15 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int name,
     int? bound,
   }) {
-    final arity = metadata.length + 1 + (bound == null ? 0 : 1);
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      return ix == metadata.length ? name : bound!;
-    }
-
-    final row = _appendEdges(.typeParameter, start, end, arity, child);
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(name)
+      ..add(bound);
+    final row = children.finish(.typeParameter);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(bound);
-    fields.cells[fieldOffset + 2] = rawRefs(metadata);
+    fields.cells[fieldOffset + 2] = metadata.length;
     return row;
   }
 
@@ -3059,11 +2371,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }) {
     final row = _appendTwo(.typeTestExpression, start, end, expression, type);
     final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isNegated == true
-        ? 1
-        : isNegated == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isNegated ? 1 : 0;
     return row;
   }
 
@@ -3089,11 +2397,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     final row = _appendOne(.updateExpression, start, end, operand);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = op.index;
-    fields.cells[fieldOffset + 1] = isPrefix == true
-        ? 1
-        : isPrefix == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 1] = isPrefix ? 1 : 0;
     return row;
   }
 
@@ -3115,35 +2419,17 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? type,
     required List<int> declarations,
   }) {
-    final arity =
-        metadata.length + (type == null ? 0 : 1) + declarations.length;
-    int child(int ix) {
-      if (ix < metadata.length) return metadata[ix];
-      ix -= metadata.length;
-      if (type != null) {
-        if (ix == 0) return type;
-        ix--;
-      }
-      return declarations[ix];
-    }
-
-    final row = _appendEdges(
-      .variableDeclarationList,
-      start,
-      end,
-      arity,
-      child,
-    );
+    final children = _Children(this, start, end)
+      ..addAll(metadata)
+      ..add(type)
+      ..addAll(declarations);
+    final row = children.finish(.variableDeclarationList);
     final fieldOffset = fields.reserve(5);
     fields.cells[fieldOffset + 0] = keyword.index;
-    fields.cells[fieldOffset + 1] = isLate == true
-        ? 1
-        : isLate == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 1] = isLate ? 1 : 0;
     fields.cells[fieldOffset + 2] = rawRef(type);
-    fields.cells[fieldOffset + 3] = rawRefs(metadata);
-    fields.cells[fieldOffset + 4] = rawRefs(declarations);
+    fields.cells[fieldOffset + 3] = metadata.length;
+    fields.cells[fieldOffset + 4] = declarations.length;
     return row;
   }
 
@@ -3197,38 +2483,16 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   }) {
     final row = _appendOne(.yieldStatement, start, end, expression);
     final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isStar == true
-        ? 1
-        : isStar == false
-        ? 0
-        : _nil;
+    fields.cells[fieldOffset + 0] = isStar ? 1 : 0;
     return row;
   }
 
   int rawRef(int? id) {
     if (id == null) return _nil;
-    RangeError.checkValidIndex(id, this, 'node', count);
-    return id;
-  }
-
-  int rawRefs(List<Object?> list) {
-    if (list.isEmpty) return _nil;
-    final p = extra.reserve(list.length + 1);
-    extra.cells[p] = list.length;
-    for (var i = 0; i < list.length; i++) {
-      final v = list[i];
-      extra.cells[p + 1 + i] = v is Enum ? v.index : rawRef(v as int);
+    if (id < 0 || id >= count) {
+      RangeError.checkValidIndex(id, this, 'node', count);
     }
-    return p;
-  }
-
-  List<int> refList(int off) {
-    if (off == _nil) return const [];
-    return Uint32List.sublistView(
-      extra.cells,
-      off + 1,
-      off + 1 + extra.cells[off],
-    );
+    return id;
   }
 
   int? nullable(int n) => n == _nil ? null : n;

@@ -247,32 +247,7 @@ extension on _Parser {
 }
 
 extension on TokenKind {
-  bool get endsExpression => switch (this) {
-    .comma ||
-    .semicolon ||
-    .rightParen ||
-    .rightBracket ||
-    .rightBrace ||
-    .interpolationEnd ||
-    .keywordElse ||
-    .keywordIn ||
-    .keywordCase ||
-    .keywordIf ||
-    .keywordWhile ||
-    .keywordDo ||
-    .keywordFor ||
-    .keywordReturn ||
-    .keywordBreak ||
-    .keywordContinue ||
-    .keywordRethrow ||
-    .keywordTry ||
-    .keywordCatch ||
-    .keywordFinally ||
-    .keywordAssert ||
-    .keywordVar ||
-    .keywordFinal => true,
-    _ => false,
-  };
+  bool get endsExpression => (_grammar[index] & 32) != 0;
 
   bool get continuesExpression =>
       precedence != 0 ||

@@ -31,7 +31,7 @@ final class SyntaxTree._(final AstArena _data, final int root) {
   /// The number of direct children of [node].
   int childCount(int node) {
     final i = _check(node);
-    return _data.edgeOffsets[i + 1] - _data.edgeOffsets[i];
+    return _data.childCount(i);
   }
 
   /// The child index at source-order position [index] in [node].
@@ -76,7 +76,7 @@ final class SyntaxCursor._(final AstArena _data, this._next)
   SyntaxKind get kind => _data.kindAt(_id);
   int get start => _data.starts[_id];
   int get end => _data.ends[_id];
-  int get childCount => _data.edgeOffsets[_id + 1] - _data.edgeOffsets[_id];
+  int get childCount => _data.childCount(_id);
   AstNode get view => _data.at(_id);
 
   @override

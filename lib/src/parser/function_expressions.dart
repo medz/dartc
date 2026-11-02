@@ -56,7 +56,7 @@ final class _LocalFunctionReader(
       }
     }
     int? parsed;
-    if (!untyped && parser.canStartTypeBeforeName) {
+    if (!untyped && parser.canStartTypeBeforeName()) {
       final reader = _TypeReader(parser, beforeFunction: true);
       if (!reader.start()) yield _TypeTask(reader);
       parsed = parser.arena.asTypeAnnotationOrNull(reader.result);
@@ -176,7 +176,7 @@ extension on _Parser {
       return null;
     }
     if (current.kind != .at &&
-        !canStartTypeBeforeName &&
+        !canStartTypeBeforeName() &&
         tokens[cursor + 1].kind != .leftParen &&
         tokens[cursor + 1].kind != .less) {
       return null;

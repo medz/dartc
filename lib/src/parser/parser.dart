@@ -220,37 +220,40 @@ final class _Parser {
   }
 
   _ExpressionStop run({required bool trial, _ParseBoundary boundary = .input}) {
-    while (current.kind != .eof || frames.isNotEmpty) {
+    for (
+      var kind = current.kind;
+      kind != .eof || frames.isNotEmpty;
+      kind = current.kind
+    ) {
       final token = current;
       final frame = frames.isEmpty ? null : frames.last;
       if (!trial && frame == null) {
         if (boundary == .header) return .complete;
         if (boundary != .input &&
-            (token.kind.endsExpression ||
-                token.kind == .colon && questions.isEmpty ||
+            (kind.endsExpression ||
+                kind == .colon && questions.isEmpty ||
                 !expectsOperand &&
-                    token.kind != .colon &&
-                    token.kind != .cascade &&
-                    token.kind != .nullAwareCascade &&
-                    !token.kind.continuesExpression)) {
+                    kind != .colon &&
+                    kind != .cascade &&
+                    kind != .nullAwareCascade &&
+                    !kind.continuesExpression)) {
           return .complete;
         }
       }
       if (frame == null &&
           !expectsOperand &&
           (boundary == .patternConstant || boundary == .patternRelation)) {
-        if (token.kind == .keywordAs ||
-            token.kind == .keywordIs ||
-            token.kind == .bang ||
-            token.kind == .cascade ||
-            token.kind == .nullAwareCascade ||
-            token.kind.precedence != 0 &&
-                token.kind.precedence <
-                    (boundary == .patternRelation ? 8 : 14)) {
+        if (kind == .keywordAs ||
+            kind == .keywordIs ||
+            kind == .bang ||
+            kind == .cascade ||
+            kind == .nullAwareCascade ||
+            kind.precedence != 0 &&
+                kind.precedence < (boundary == .patternRelation ? 8 : 14)) {
           return .complete;
         }
       }
-      if (frame is _IfHeader && token.kind == .keywordCase) {
+      if (frame is _IfHeader && kind == .keywordCase) {
         frame.element.condition = finishExpression(
           frame.valueBase,
           frame.operatorBase,
@@ -263,21 +266,21 @@ final class _Parser {
       if (frame is _Cascade && endCascadeAtBoundary(frame)) continue;
       if (frame is _Throw && endThrowAtBoundary(frame)) continue;
       if (trial) {
-        if (hasSyntaxError || token.kind == .invalid) return .complete;
+        if (hasSyntaxError || kind == .invalid) return .complete;
         if (frames.isEmpty &&
-            (token.kind == .colon && questions.isEmpty ||
-                token.kind.endsExpression ||
+            (kind == .colon && questions.isEmpty ||
+                kind.endsExpression ||
                 !expectsOperand &&
-                    token.kind != .colon &&
-                    !token.kind.continuesExpression)) {
+                    kind != .colon &&
+                    !kind.continuesExpression)) {
           return .complete;
         }
       }
-      if (token.kind == .eof ||
-          token.kind == .rightParen ||
-          token.kind == .rightBracket ||
-          token.kind == .rightBrace ||
-          token.kind == .interpolationEnd) {
+      if (kind == .eof ||
+          kind == .rightParen ||
+          kind == .rightBracket ||
+          kind == .rightBrace ||
+          kind == .interpolationEnd) {
         if (frames.isNotEmpty) {
           closeDelimiter();
         } else {
@@ -286,7 +289,7 @@ final class _Parser {
         continue;
       }
       if (frame is _ForHeader && parseForSeparator(frame)) continue;
-      if (token.kind == .comma) {
+      if (kind == .comma) {
         if (frame is _Collection) {
           finishCollectionElement(frame);
           advance();
@@ -299,7 +302,7 @@ final class _Parser {
         }
         continue;
       }
-      if (token.kind == .colon) {
+      if (kind == .colon) {
         if (frame is _Collection &&
             (questions.isEmpty || questions.last < operatorBase)) {
           parseMapKey(frame);
@@ -309,7 +312,7 @@ final class _Parser {
         continue;
       }
       if (frame is _Collection) {
-        if (token.kind == .keywordElse) {
+        if (kind == .keywordElse) {
           if (!finishCollectionElement(frame)) unexpected();
           continue;
         }
@@ -324,7 +327,7 @@ final class _Parser {
             when frame.name == null &&
                 values.length == frame.valueBase &&
                 operators.length == frame.operatorBase &&
-                token.kind.isIdentifier &&
+                kind.isIdentifier &&
                 tokens[cursor + 1].kind == .colon) {
           frame.name = identifier(token);
           advance();
@@ -347,8 +350,9 @@ final class _Parser {
 
   void parseOperand({bool allowFunction = true}) {
     final token = current;
+    final kind = token.kind;
     if (parsePatternAssignment()) return;
-    if (token.kind == .keywordAwait && functionModifier != null) {
+    if (kind == .keywordAwait && functionModifier != null) {
       if (!inAsync) {
         error(
           'await_in_sync',
@@ -361,14 +365,14 @@ final class _Parser {
       advance();
       return;
     }
-    if (token.kind == .keywordAwait && tokens[cursor + 1].kind.isIdentifier) {
+    if (kind == .keywordAwait && tokens[cursor + 1].kind.isIdentifier) {
       error(
         'await_in_sync',
         'An await expression requires an asynchronous context.',
         token,
       );
     }
-    if (token.kind.isIdentifier) {
+    if (kind.isIdentifier) {
       values.add(
         arena.putIdentifierExpression(
           start: token.start,
@@ -377,7 +381,7 @@ final class _Parser {
         ),
       );
     } else {
-      switch (token.kind) {
+      switch (kind) {
         case .leftBracket ||
             .emptyBrackets ||
             .emptyBracketsAssign ||
@@ -453,7 +457,7 @@ final class _Parser {
             arena.putLiteralExpression(
               start: token.start,
               end: token.end,
-              kind: switch (token.kind) {
+              kind: switch (kind) {
                 .integer || .hexadecimalInteger => .integer,
                 .doubleLiteral => .doubleLiteral,
                 .keywordNull => .nullLiteral,

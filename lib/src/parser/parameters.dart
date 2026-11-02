@@ -114,7 +114,31 @@ final class _ParameterReader(
           continue;
         }
       }
-      yield* finishParameter(frame);
+      final formal = frame.pending!;
+      int? defaultClause;
+      if (current.kind == .assign || current.kind == .colon) {
+        final separator = current;
+        if (formal.kind == .requiredPositional ||
+            formal.kind == .optionalPositional && separator.kind == .colon ||
+            frame.owner != null) {
+          parser.error(
+            'invalid_parameter_default',
+            'This parameter cannot have this default clause.',
+            separator,
+          );
+        }
+        parser.advance();
+        final reader = _ExpressionReader(parser);
+        if (!reader.start()) yield reader;
+        final value = reader.result;
+        defaultClause = parser.arena.putParameterDefault(
+          start: separator.start,
+          end: parser.arena.rEnd(value),
+          separator: separator.kind == .assign ? .equals : .colon,
+          value: value,
+        );
+      }
+      finishParameter(frame, defaultClause);
     }
   }
 
@@ -279,9 +303,7 @@ final class _ParameterReader(
       if (type != null) break;
       parser.advance();
     }
-    if (type == null &&
-        current.kind != .keywordThis &&
-        current.kind != .keywordSuper) {
+    if (type == null && parser.canStartTypeBeforeName(allowReceiver: true)) {
       final index = parser.cursor;
       final token = current;
       final reader = _TypeReader(parser);
@@ -317,31 +339,8 @@ final class _ParameterReader(
     );
   }
 
-  Iterable<_Reader<Object?>> finishParameter(_ParameterList frame) sync* {
+  void finishParameter(_ParameterList frame, int? defaultClause) {
     final formal = frame.pending!;
-    int? defaultClause;
-    if (current.kind == .assign || current.kind == .colon) {
-      final separator = current;
-      if (formal.kind == .requiredPositional ||
-          formal.kind == .optionalPositional && separator.kind == .colon ||
-          frame.owner != null) {
-        parser.error(
-          'invalid_parameter_default',
-          'This parameter cannot have this default clause.',
-          separator,
-        );
-      }
-      parser.advance();
-      final reader = _ExpressionReader(parser);
-      if (!reader.start()) yield reader;
-      final value = reader.result;
-      defaultClause = parser.arena.putParameterDefault(
-        start: separator.start,
-        end: parser.arena.rEnd(value),
-        separator: separator.kind == .assign ? .equals : .colon,
-        value: value,
-      );
-    }
     frame.parameters.add(
       parser.arena.putFormalParameter(
         start: formal.start,
@@ -393,10 +392,8 @@ final class _ParameterReader(
 
 extension on _Parser {
   void checkSetterParameters(int parameters) {
-    if (arena.rFormalParameterListParameters(parameters).length != 1 ||
-        arena.rFormalParameterKind(
-              arena.rFormalParameterListParameters(parameters).single,
-            ) !=
+    if (arena.childCount(parameters) != 1 ||
+        arena.rFormalParameterKind(arena.childIndex(parameters, 0)) !=
             .requiredPositional) {
       error(
         'invalid_setter_parameters',

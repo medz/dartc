@@ -18,13 +18,10 @@ extension ArenaFields on AstArena {
   int? rVariableDeclarationInitializer(int? id) => optionalChild(id!, 1, 2);
   int? rNullAssertionExpressionOperandOrNull(int? id) =>
       id == null ? null : rNullAssertionExpressionOperand(id);
-  List<int> rFormalParameterListParameters(int? id) => childrenOf(id!);
   FormalParameterKind rFormalParameterKind(int? id) =>
       FormalParameterKind.values[fields.cells[offsets[id!] + 0]];
   String? rTextOrNull(int? id) =>
       id == null ? null : source.text.substring(starts[id], ends[id]);
-  List<int> rVariableDeclarationListDeclarations(int? id) =>
-      refList(fields.cells[offsets[id!] + 4]);
   int rVariableDeclarationName(int? id) => childIndex(id!, 0);
   bool rExpressionFunctionBodyIsAsync(int? id) =>
       (fields.cells[offsets[id!] + 0] == 1);

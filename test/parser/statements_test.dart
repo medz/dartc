@@ -22,6 +22,20 @@ Statement parsed(String text) {
 }
 
 void main() {
+  test(
+    'resumes a declaration list after a closure and a switch expression',
+    () {
+      final statement = parsed(
+        'final a = (int x) { return x; }, b = switch (0) { _ => 1 }, c = 2;',
+      ) as VariableDeclarationStatement;
+      final variables = statement.variables.declarations;
+      expect(variables.map((v) => v.name.text), ['a', 'b', 'c']);
+      expect(variables[0].initializer, isA<FunctionExpression>());
+      expect(variables[1].initializer, isA<SwitchExpression>());
+      expect(variables[2].initializer!.text, '2');
+    },
+  );
+
   test('retains block braces, empty statements and source order', () {
     final block = parsed('{; a(); { b(); } ;}') as BlockStatement;
     expect(block.statements.map((s) => s.text), [';', 'a();', '{ b(); }', ';']);

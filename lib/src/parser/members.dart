@@ -4,20 +4,19 @@ final class _MembersReader(
   final _Parser parser,
   final String? className,
   final _TypeDeclarationKind kind,
-) extends _Reader<List<int>> {
+) {
   late int end;
   bool semicolon = false;
   bool separator = false;
   final List<int> constants = [];
 
-  @override
-  Iterable<_Reader<Object?>> read() sync* {
-    result = [];
+  List<int> read() {
+    final result = <int>[];
     if (parser.current.kind == .semicolon) {
       semicolon = true;
       end = parser.current.end;
       parser.advance();
-      return;
+      return result;
     }
     parser.expect(.leftBrace);
     if (kind == .enumKind) {
@@ -28,15 +27,13 @@ final class _MembersReader(
         final start = parser.current.start;
         List<int> metadata = const [];
         if (parser.current.kind == .at) {
-          final annotations = _MetadataReader(parser);
-          yield annotations;
-          metadata = annotations.result;
+          metadata = _MetadataReader(parser).finish();
         }
         final name = parser.readVariableName();
         int? types;
         if (parser.current.kind == .less) {
           final reader = _TypeReader(parser);
-          if (!reader.start(arguments: true)) yield _TypeTask(reader);
+          if (!reader.start(arguments: true)) _TypeTask(reader).finish();
           types = parser.arena.asTypeArgumentListOrNull(reader.result);
           if (reader.failure case final failure?) {
             parser.error(failure.$1, failure.$2, failure.$3);
@@ -49,9 +46,7 @@ final class _MembersReader(
         }
         int? arguments;
         if (parser.current.kind == .leftParen) {
-          final reader = _ArgumentsReader(parser);
-          yield reader;
-          arguments = reader.result;
+          arguments = _ArgumentsReader(parser).finish();
         } else if (types != null || constructor != null) {
           parser.error(
             'expected_enum_arguments',
@@ -90,16 +85,20 @@ final class _MembersReader(
       final start = parser.current.start;
       List<int> metadata = const [];
       if (parser.current.kind == .at) {
-        final annotations = _MetadataReader(parser);
-        yield annotations;
-        metadata = annotations.result;
+        metadata = _MetadataReader(parser).finish();
       }
-      final reader = _MemberReader(parser, className, start, metadata, kind);
-      yield reader;
-      result.add(reader.result);
+      final member = _MemberReader(
+        parser,
+        className,
+        start,
+        metadata,
+        kind,
+      ).read();
+      result.add(member);
       if (parser.cursor == initial) parser.unexpected();
     }
     end = parser.expect(.rightBrace);
+    return result;
   }
 }
 
@@ -109,9 +108,8 @@ final class _MemberReader(
   final int start,
   final List<int> metadata,
   final _TypeDeclarationKind kind,
-) extends _Reader<int> {
-  @override
-  Iterable<_Reader<Object?>> read() sync* {
+) {
+  int read() {
     const externalBit = 1, staticBit = 2, abstractBit = 4, covariantBit = 8;
     var modifiers = 0;
     while (true) {
@@ -151,11 +149,11 @@ final class _MemberReader(
         token.kind == .keywordThis ||
         className != null &&
             index + 1 < parser.tokens.length &&
-            token.lexeme == className &&
             (parser.tokens[index + 1].kind == .leftParen ||
                 parser.tokens[index + 1].kind == .dot &&
                     index + 3 < parser.tokens.length &&
-                    parser.tokens[index + 3].kind == .leftParen);
+                    parser.tokens[index + 3].kind == .leftParen) &&
+            hasClassName(token.start, token.end);
     if (isConstructor) {
       if (kind == .mixin || kind == .extension) {
         parser.error(
@@ -172,14 +170,12 @@ final class _MemberReader(
         );
       }
 
-      final reader = _ConstructorReader(
+      final result = _readConstructor(
         parser,
         start,
         metadata,
         external: external,
       );
-      yield reader;
-      result = reader.result;
       if (parser.before(3, 13)) {
         final member = parser.arena.at(result);
         if (member
@@ -188,35 +184,33 @@ final class _MemberReader(
           parser.requireFeature(member, 3, 13, 'Abbreviated constructors');
         }
       }
-      return;
+      return result;
     }
     _VariableDeclarations? variables;
     if (parser.canStartVariableDeclaration) {
-      final reader = _VariableReader(parser, allowConditional: false);
-      yield reader;
-      variables = reader.result;
+      variables = _VariableReader(parser, allowConditional: false).finish();
     }
     if (variables case final declarations?) {
-      final reader = _VariablesReader(parser, declarations, metadata: metadata);
-      yield reader;
-      for (final variable in parser.arena.rVariableDeclarationListDeclarations(
-        reader.result,
-      )) {
+      final list = _VariablesReader(
+        parser,
+        declarations,
+        metadata: metadata,
+      ).finish();
+      for (final variable in declarations.variables) {
         checkMemberName(parser.arena.rVariableDeclarationName(variable));
       }
-      result = parser.arena.putFieldDeclaration(
+      return parser.arena.putFieldDeclaration(
         start: start,
         end: parser.expect(.semicolon),
         isStatic: isStatic,
         isAbstract: isAbstract,
         isExternal: external,
         isCovariant: covariant,
-        variables: reader.result,
+        variables: list,
       );
-      return;
     }
     final header = _DeclarationName(parser);
-    yield* header.read(member: true);
+    header.read(member: true);
     if (isAbstract || covariant && header.accessor != .keywordSet) {
       parser.error(
         'invalid_member_modifier',
@@ -238,35 +232,32 @@ final class _MemberReader(
         'Expected a class member.',
         parser.current,
       );
-      result = parser.arena.putMissingClassMember(offset: start);
-      return;
+      return parser.arena.putMissingClassMember(offset: start);
     }
     if (header.accessor != .keywordOperator) checkMemberName(header.name);
     int? parameters;
     if (header.accessor != .keywordGet) {
-      final reader = _ParameterReader(
+      parameters = _ParameterReader(
         parser,
         function: true,
         allowCovariant:
             !isStatic && kind != .extension && kind != .extensionType,
-      );
-      yield reader;
-      parameters = reader.result;
+      ).finish();
       if (header.accessor == .keywordSet) {
         parser.checkSetterParameters(parameters);
       }
     }
     final body = _BodyReader(parser);
-    yield body;
-    if (external && !parser.arena.hasKind(body.result, .emptyFunctionBody)) {
+    final bodyNode = body.finish();
+    if (external && !parser.arena.hasKind(bodyNode, .emptyFunctionBody)) {
       parser.error(
         'external_body',
         'An external member cannot have a body.',
         Token(
           .invalid,
           parser.source,
-          parser.arena.rStart(body.result),
-          parser.arena.rEnd(body.result),
+          parser.arena.rStart(bodyNode),
+          parser.arena.rEnd(bodyNode),
         ),
       );
     }
@@ -284,20 +275,20 @@ final class _MemberReader(
     }
     if (isStatic &&
         !external &&
-        parser.arena.hasKind(body.result, .emptyFunctionBody)) {
+        parser.arena.hasKind(bodyNode, .emptyFunctionBody)) {
       parser.error(
         'missing_function_body',
         'A static member requires a body.',
         Token(
           .semicolon,
           parser.source,
-          parser.arena.rStart(body.result),
-          parser.arena.rEnd(body.result),
+          parser.arena.rStart(bodyNode),
+          parser.arena.rEnd(bodyNode),
         ),
       );
     }
-    final end = parser.arena.rEnd(body.result);
-    result = switch (header.accessor) {
+    final end = parser.arena.rEnd(bodyNode);
+    return switch (header.accessor) {
       .keywordGet => parser.arena.putGetterDeclaration(
         start: start,
         end: end,
@@ -306,7 +297,7 @@ final class _MemberReader(
         isStatic: isStatic,
         returnType: header.type,
         name: header.name,
-        body: body.result,
+        body: bodyNode,
       ),
       .keywordSet => parser.arena.putSetterDeclaration(
         start: start,
@@ -318,7 +309,7 @@ final class _MemberReader(
         returnType: header.type,
         name: header.name,
         parameters: parameters!,
-        body: body.result,
+        body: bodyNode,
       ),
       .keywordOperator when header.op != null =>
         parser.arena.putOperatorDeclaration(
@@ -330,7 +321,7 @@ final class _MemberReader(
           returnType: header.type,
           op: header.op!,
           parameters: parameters!,
-          body: body.result,
+          body: bodyNode,
         ),
       .keywordOperator => parser.arena.putMissingClassMember(offset: start),
       _ => parser.arena.putMethodDeclaration(
@@ -343,13 +334,22 @@ final class _MemberReader(
         name: header.name,
         typeParameters: header.typeParameters,
         parameters: parameters!,
-        body: body.result,
+        body: bodyNode,
       ),
     };
   }
 
+  bool hasClassName(int start, int end) {
+    final name = className;
+    return name != null &&
+        end - start == name.length &&
+        parser.source.text.startsWith(name, start);
+  }
+
   void checkMemberName(int name) {
-    if (parser.arena.rText(name) != className) return;
+    if (!hasClassName(parser.arena.rStart(name), parser.arena.rEnd(name))) {
+      return;
+    }
     parser.error(
       'member_with_class_name',
       'A non-constructor member cannot have the enclosing declaration name.',

@@ -21,7 +21,7 @@ sealed class _Row(this._owner, this._row) implements AstNode {
   @override
   SourceSpan get span => SourceSpan(source, start, end);
   @override
-  int get childCount => _owner.edgeOffsets[_row + 1] - _owner.edgeOffsets[_row];
+  int get childCount => _owner.childCount(_row);
   @override
   AstNode childAt(int i) {
     RangeError.checkValidIndex(i, this, 'index', childCount);
@@ -61,31 +61,27 @@ sealed class _Row(this._owner, this._row) implements AstNode {
     return (v == _nil ? null : v != 0) as T;
   }
 
-  List<T> nodes<T>(int f) {
-    final v = word(f);
-    return v == _nil
-        ? const []
-        : _RowList<T>(
-            _owner,
-            _owner.extra.cells,
-            v + 1,
-            _owner.extra.cells[v],
-            null,
-          );
-  }
-
-  List<T> enums<T>(int f, List<Enum> values) {
-    final v = word(f);
-    return v == _nil
-        ? const []
-        : _RowList<T>(
-            _owner,
-            _owner.extra.cells,
-            v + 1,
-            _owner.extra.cells[v],
-            values,
-          );
-  }
+  List<T> firstChildren<T>(int length) => childSlice(0, length);
+  List<T> lastChildren<T>(int length, [int skip = 0]) =>
+      childSlice(childCount - skip - length, length);
+  List<T> childSlice<T>(int from, int length) => length == 0
+      ? const []
+      : _RowList<T>(
+          _owner,
+          _owner.edges.cells,
+          _owner.edgeOffsets[_row] + from,
+          length,
+          null,
+        );
+  List<T> enums<T>(int offset, int length, List<Enum> values) => length == 0
+      ? const []
+      : _RowList<T>(
+          _owner,
+          _owner.fields.cells,
+          _owner.offsets[_row] + offset,
+          length,
+          values,
+        );
 }
 
 final class _RowList<T>(
@@ -127,7 +123,7 @@ final class _RowAnnotation(super._owner, super._row)
   @override
   get arguments => node(2);
   @override
-  get name => nodes(3);
+  get name => firstChildren(word(3));
 }
 
 final class _RowArgument(super._owner, super._row)
@@ -215,7 +211,7 @@ final class _RowCascadeExpression(super._owner, super._row)
   @override
   get isNullAware => flag(1);
   @override
-  get sections => nodes(2);
+  get sections => lastChildren(word(2));
 }
 
 final class _RowCascadeIndexExpression(super._owner, super._row)
@@ -285,11 +281,11 @@ final class _RowClassDeclaration(super._owner, super._row)
   @override
   get isSemicolonBody => flag(8);
   @override
-  get metadata => nodes(9);
+  get metadata => firstChildren(word(9));
   @override
-  get modifiers => enums(10, ClassModifier.values);
+  get modifiers => enums(12, word(10), ClassModifier.values);
   @override
-  get members => nodes(11);
+  get members => lastChildren(word(11));
 }
 
 final class _RowClassTypeAliasDeclaration(super._owner, super._row)
@@ -306,9 +302,9 @@ final class _RowClassTypeAliasDeclaration(super._owner, super._row)
   @override
   get implementsClause => node(4);
   @override
-  get metadata => nodes(5);
+  get metadata => firstChildren(word(5));
   @override
-  get modifiers => enums(6, ClassModifier.values);
+  get modifiers => enums(7, word(6), ClassModifier.values);
 }
 
 final class _RowCollectionExpression(super._owner, super._row)
@@ -321,7 +317,7 @@ final class _RowCollectionExpression(super._owner, super._row)
   @override
   get typeArguments => node(2);
   @override
-  get elements => nodes(3);
+  get elements => lastChildren(word(3));
 }
 
 final class _RowCompilationUnit(super._owner, super._row)
@@ -330,7 +326,7 @@ final class _RowCompilationUnit(super._owner, super._row)
   @override
   get scriptTag => node(0);
   @override
-  get members => nodes(1);
+  get members => lastChildren(word(1));
 }
 
 final class _RowConditionalExpression(super._owner, super._row)
@@ -389,11 +385,11 @@ final class _RowConstructorDeclaration(super._owner, super._row)
   @override
   get body => node(4);
   @override
-  get metadata => nodes(5);
+  get metadata => firstChildren(word(5));
   @override
-  get name => nodes(6);
+  get name => childSlice(word(5), word(6));
   @override
-  get initializers => nodes(7);
+  get initializers => lastChildren(word(7), 1);
 }
 
 final class _RowContinueStatement(super._owner, super._row)
@@ -413,7 +409,7 @@ final class _RowDeclaredIdentifier(super._owner, super._row)
   @override
   get name => node(2);
   @override
-  get metadata => nodes(3);
+  get metadata => firstChildren(word(3));
 }
 
 final class _RowDoStatement(super._owner, super._row)
@@ -466,7 +462,7 @@ final class _RowEnumConstantDeclaration(super._owner, super._row)
   @override
   get arguments => node(3);
   @override
-  get metadata => nodes(4);
+  get metadata => firstChildren(word(4));
 }
 
 final class _RowEnumDeclaration(super._owner, super._row)
@@ -491,11 +487,11 @@ final class _RowEnumDeclaration(super._owner, super._row)
   @override
   get hasMemberSeparator => flag(8);
   @override
-  get metadata => nodes(9);
+  get metadata => firstChildren(word(9));
   @override
-  get constants => nodes(10);
+  get constants => lastChildren(word(10), word(11));
   @override
-  get members => nodes(11);
+  get members => lastChildren(word(11));
 }
 
 final class _RowExportDirective(super._owner, super._row)
@@ -504,11 +500,11 @@ final class _RowExportDirective(super._owner, super._row)
   @override
   get uri => node(0);
   @override
-  get configurations => nodes(1);
+  get configurations => lastChildren(word(1), word(2));
   @override
-  get combinators => nodes(2);
+  get combinators => lastChildren(word(2));
   @override
-  get metadata => nodes(3);
+  get metadata => firstChildren(word(3));
 }
 
 final class _RowExpressionFunctionBody(super._owner, super._row)
@@ -546,9 +542,9 @@ final class _RowExtensionDeclaration(super._owner, super._row)
   @override
   get isSemicolonBody => flag(3);
   @override
-  get metadata => nodes(4);
+  get metadata => firstChildren(word(4));
   @override
-  get members => nodes(5);
+  get members => lastChildren(word(5));
 }
 
 final class _RowExtensionTypeDeclaration(super._owner, super._row)
@@ -569,9 +565,9 @@ final class _RowExtensionTypeDeclaration(super._owner, super._row)
   @override
   get isSemicolonBody => flag(6);
   @override
-  get metadata => nodes(7);
+  get metadata => firstChildren(word(7));
   @override
-  get members => nodes(8);
+  get members => lastChildren(word(8));
 }
 
 final class _RowFactoryRedirectBody(super._owner, super._row)
@@ -582,7 +578,7 @@ final class _RowFactoryRedirectBody(super._owner, super._row)
   @override
   get constructorName => node(1);
   @override
-  get name => nodes(2);
+  get name => firstChildren(word(2));
 }
 
 final class _RowFieldDeclaration(super._owner, super._row)
@@ -639,7 +635,7 @@ final class _RowForParts(super._owner, super._row)
   @override
   get condition => node(1);
   @override
-  get updaters => nodes(2);
+  get updaters => lastChildren(word(2));
 }
 
 final class _RowForStatement(super._owner, super._row)
@@ -662,18 +658,21 @@ final class _RowFormalParameter(super._owner, super._row)
   ParameterPrefix get prefix => ParameterPrefix.values[word(1)];
   @override
   VariableKeyword get keyword => VariableKeyword.values[word(2)];
+  bool _has(int flag) => word(3) & flag != 0;
+  int get _nameIndex => word(4) + (_has(_formalType) ? 1 : 0);
+
   @override
-  get isCovariant => flag(3);
+  get isCovariant => _has(_formalCovariant);
   @override
-  get type => node(4);
+  get type => _has(_formalType) ? fixedChild(word(4)) : null;
   @override
-  get name => node(5);
+  get name => fixedChild(_nameIndex);
   @override
-  get functionSuffix => node(6);
+  get functionSuffix => _has(_formalSuffix) ? fixedChild(_nameIndex + 1) : null;
   @override
-  get defaultClause => node(7);
+  get defaultClause => _has(_formalDefault) ? trailingChild(1) : null;
   @override
-  get metadata => nodes(8);
+  get metadata => firstChildren(word(4));
 }
 
 final class _RowFormalParameterList(super._owner, super._row)
@@ -717,7 +716,7 @@ final class _RowFunctionTypeAliasDeclaration(super._owner, super._row)
   @override
   get parameters => node(3);
   @override
-  get metadata => nodes(4);
+  get metadata => firstChildren(word(4));
 }
 
 final class _RowFunctionTypeAnnotation(super._owner, super._row)
@@ -748,7 +747,7 @@ final class _RowFunctionTypeParameter(super._owner, super._row)
   @override
   get name => node(3);
   @override
-  get metadata => nodes(4);
+  get metadata => firstChildren(word(4));
 }
 
 final class _RowFunctionTypeParameterList(super._owner, super._row)
@@ -772,7 +771,7 @@ final class _RowGetterDeclaration(super._owner, super._row)
   @override
   get body => node(4);
   @override
-  get metadata => nodes(5);
+  get metadata => firstChildren(word(5));
 }
 
 final class _RowGuardedPattern(super._owner, super._row)
@@ -838,11 +837,11 @@ final class _RowImportDirective(super._owner, super._row)
   @override
   get prefix => node(2);
   @override
-  get configurations => nodes(3);
+  get configurations => childSlice(word(5) + 1, word(3));
   @override
-  get combinators => nodes(4);
+  get combinators => lastChildren(word(4));
   @override
-  get metadata => nodes(5);
+  get metadata => firstChildren(word(5));
 }
 
 final class _RowIndexExpression(super._owner, super._row)
@@ -868,7 +867,7 @@ final class _RowInstanceCreationExpression(super._owner, super._row)
   @override
   get arguments => node(3);
   @override
-  get name => nodes(4);
+  get name => firstChildren(word(4));
 }
 
 final class _RowInterpolatedStringExpression(super._owner, super._row)
@@ -900,7 +899,7 @@ final class _RowLabeledStatement(super._owner, super._row)
   @override
   get statement => node(0);
   @override
-  get labels => nodes(1);
+  get labels => firstChildren(word(1));
 }
 
 final class _RowLibraryDirective(super._owner, super._row)
@@ -909,7 +908,7 @@ final class _RowLibraryDirective(super._owner, super._row)
   @override
   get name => node(0);
   @override
-  get metadata => nodes(1);
+  get metadata => firstChildren(word(1));
 }
 
 final class _RowListPattern(super._owner, super._row)
@@ -918,7 +917,7 @@ final class _RowListPattern(super._owner, super._row)
   @override
   get typeArguments => node(0);
   @override
-  get elements => nodes(1);
+  get elements => lastChildren(word(1));
 }
 
 final class _RowLiteralExpression(super._owner, super._row)
@@ -942,7 +941,7 @@ final class _RowLocalFunctionDeclaration(super._owner, super._row)
   @override
   get body => node(4);
   @override
-  get metadata => nodes(5);
+  get metadata => firstChildren(word(5));
 }
 
 final class _RowLogicalPattern(super._owner, super._row)
@@ -975,7 +974,7 @@ final class _RowMapPattern(super._owner, super._row)
   @override
   get typeArguments => node(0);
   @override
-  get elements => nodes(1);
+  get elements => lastChildren(word(1));
 }
 
 final class _RowMapPatternEntry(super._owner, super._row)
@@ -1005,7 +1004,7 @@ final class _RowMethodDeclaration(super._owner, super._row)
   @override
   get body => node(6);
   @override
-  get metadata => nodes(7);
+  get metadata => firstChildren(word(7));
 }
 
 final class _RowMissingClassMember(super._owner, super._row)
@@ -1061,9 +1060,9 @@ final class _RowMixinDeclaration(super._owner, super._row)
   @override
   get isSemicolonBody => flag(5);
   @override
-  get metadata => nodes(6);
+  get metadata => firstChildren(word(6));
   @override
-  get members => nodes(7);
+  get members => lastChildren(word(7));
 }
 
 final class _RowModifiedBlockFunctionBody(super._owner, super._row)
@@ -1101,7 +1100,7 @@ final class _RowNamedRecordTypeField(super._owner, super._row)
   @override
   get type => node(1);
   @override
-  get metadata => nodes(2);
+  get metadata => firstChildren(word(2));
 }
 
 final class _RowNamedTypeAnnotation(super._owner, super._row)
@@ -1168,7 +1167,7 @@ final class _RowObjectPattern(super._owner, super._row)
   @override
   get type => node(0);
   @override
-  get fields => nodes(1);
+  get fields => lastChildren(word(1));
 }
 
 final class _RowOperatorDeclaration(super._owner, super._row)
@@ -1187,7 +1186,7 @@ final class _RowOperatorDeclaration(super._owner, super._row)
   @override
   get body => node(5);
   @override
-  get metadata => nodes(6);
+  get metadata => firstChildren(word(6));
 }
 
 final class _RowParameterDefault(super._owner, super._row)
@@ -1220,7 +1219,7 @@ final class _RowPartDirective(super._owner, super._row)
   @override
   get uri => node(0);
   @override
-  get metadata => nodes(1);
+  get metadata => firstChildren(word(1));
 }
 
 final class _RowPartOfDirective(super._owner, super._row)
@@ -1229,7 +1228,7 @@ final class _RowPartOfDirective(super._owner, super._row)
   @override
   get target => node(0);
   @override
-  get metadata => nodes(1);
+  get metadata => firstChildren(word(1));
 }
 
 final class _RowPatternAssignmentExpression(super._owner, super._row)
@@ -1249,7 +1248,7 @@ final class _RowPatternForInBinding(super._owner, super._row)
   @override
   get pattern => node(1);
   @override
-  get metadata => nodes(2);
+  get metadata => firstChildren(word(2));
 }
 
 final class _RowPatternVariableDeclaration(super._owner, super._row)
@@ -1262,7 +1261,7 @@ final class _RowPatternVariableDeclaration(super._owner, super._row)
   @override
   get initializer => node(2);
   @override
-  get metadata => nodes(3);
+  get metadata => firstChildren(word(3));
 }
 
 final class _RowPatternVariableDeclarationStatement(super._owner, super._row)
@@ -1280,7 +1279,7 @@ final class _RowPositionalRecordTypeField(super._owner, super._row)
   @override
   get type => node(1);
   @override
-  get metadata => nodes(2);
+  get metadata => firstChildren(word(2));
 }
 
 final class _RowPrimaryConstructorBody(super._owner, super._row)
@@ -1289,9 +1288,9 @@ final class _RowPrimaryConstructorBody(super._owner, super._row)
   @override
   get body => node(0);
   @override
-  get metadata => nodes(1);
+  get metadata => firstChildren(word(1));
   @override
-  get initializers => nodes(2);
+  get initializers => lastChildren(word(2), 1);
 }
 
 final class _RowPropertyAccessExpression(super._owner, super._row)
@@ -1327,7 +1326,7 @@ final class _RowRecordTypeAnnotation(super._owner, super._row)
   @override
   get namedFields => node(0);
   @override
-  get positionalFields => nodes(1);
+  get positionalFields => firstChildren(word(1));
   @override
   get questionOffset => integer(2);
   @override
@@ -1399,7 +1398,7 @@ final class _RowSetterDeclaration(super._owner, super._row)
   @override
   get body => node(6);
   @override
-  get metadata => nodes(7);
+  get metadata => firstChildren(word(7));
 }
 
 final class _RowSpreadElement(super._owner, super._row)
@@ -1447,7 +1446,7 @@ final class _RowSwitchExpression(super._owner, super._row)
   @override
   get expression => node(0);
   @override
-  get cases => nodes(1);
+  get cases => lastChildren(word(1));
 }
 
 final class _RowSwitchExpressionCase(super._owner, super._row)
@@ -1465,7 +1464,7 @@ final class _RowSwitchStatement(super._owner, super._row)
   @override
   get expression => node(0);
   @override
-  get members => nodes(1);
+  get members => lastChildren(word(1));
 }
 
 final class _RowSwitchStatementMember(super._owner, super._row)
@@ -1474,9 +1473,9 @@ final class _RowSwitchStatementMember(super._owner, super._row)
   @override
   get pattern => node(0);
   @override
-  get labels => nodes(1);
+  get labels => firstChildren(word(1));
   @override
-  get statements => nodes(2);
+  get statements => lastChildren(word(2));
 }
 
 final class _RowThisExpression(super._owner, super._row)
@@ -1506,7 +1505,7 @@ final class _RowTopLevelFunctionDeclaration(super._owner, super._row)
   @override
   get body => node(5);
   @override
-  get metadata => nodes(6);
+  get metadata => firstChildren(word(6));
 }
 
 final class _RowTopLevelGetterDeclaration(super._owner, super._row)
@@ -1521,7 +1520,7 @@ final class _RowTopLevelGetterDeclaration(super._owner, super._row)
   @override
   get body => node(3);
   @override
-  get metadata => nodes(4);
+  get metadata => firstChildren(word(4));
 }
 
 final class _RowTopLevelSetterDeclaration(super._owner, super._row)
@@ -1538,7 +1537,7 @@ final class _RowTopLevelSetterDeclaration(super._owner, super._row)
   @override
   get body => node(4);
   @override
-  get metadata => nodes(5);
+  get metadata => firstChildren(word(5));
 }
 
 final class _RowTopLevelVariableDeclaration(super._owner, super._row)
@@ -1558,7 +1557,7 @@ final class _RowTryStatement(super._owner, super._row)
   @override
   get finallyBlock => node(1);
   @override
-  get catchClauses => nodes(2);
+  get catchClauses => childSlice(1, word(2));
 }
 
 final class _RowTypeAliasDeclaration(super._owner, super._row)
@@ -1571,7 +1570,7 @@ final class _RowTypeAliasDeclaration(super._owner, super._row)
   @override
   get type => node(2);
   @override
-  get metadata => nodes(3);
+  get metadata => firstChildren(word(3));
 }
 
 final class _RowTypeArgumentList(super._owner, super._row)
@@ -1607,7 +1606,7 @@ final class _RowTypeParameter(super._owner, super._row)
   @override
   get bound => node(1);
   @override
-  get metadata => nodes(2);
+  get metadata => firstChildren(word(2));
 }
 
 final class _RowTypeParameterList(super._owner, super._row)
@@ -1667,9 +1666,9 @@ final class _RowVariableDeclarationList(super._owner, super._row)
   @override
   get type => node(2);
   @override
-  get metadata => nodes(3);
+  get metadata => firstChildren(word(3));
   @override
-  get declarations => nodes(4);
+  get declarations => lastChildren(word(4));
 }
 
 final class _RowVariableDeclarationStatement(super._owner, super._row)

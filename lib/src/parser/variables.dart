@@ -89,7 +89,7 @@ final class _VariableReader(
 
     if (type == null &&
         keyword != .varKeyword &&
-        parser.canStartTypeBeforeName &&
+        parser.canStartTypeBeforeName() &&
         possibleVariableType()) {
       final index = parser.cursor;
       final token = parser.current;
@@ -190,7 +190,7 @@ extension on _Parser {
         current.kind.isVariableModifier) {
       return true;
     }
-    if (!canStartTypeBeforeName) return false;
+    if (!canStartTypeBeforeName()) return false;
     final end = possibleTypeEnd(cursor);
     return end == null ||
         tokens[end].kind.isIdentifier &&
@@ -235,13 +235,25 @@ final class _VariablesReader(
   final List<int> metadata = const [],
 }) extends _Reader<int> {
   @override
-  Iterable<_Reader<Object?>> read() sync* {
+  Iterable<_Reader<Object?>> read() {
+    final pending = _variables(null);
+    return pending == null ? const [] : _resume(pending);
+  }
+
+  Iterable<_Reader<Object?>> _resume(_ExpressionReader reader) sync* {
+    _ExpressionReader? pending = reader;
+    while (pending != null) {
+      yield pending;
+      pending = _variables(pending.result);
+    }
+  }
+
+  _ExpressionReader? _variables(int? initializer) {
     while (true) {
-      int? initializer;
-      if (parser.current.kind == .assign) {
+      if (initializer == null && parser.current.kind == .assign) {
         parser.advance();
         final reader = _ExpressionReader(parser);
-        if (!reader.start()) yield reader;
+        if (!reader.start()) return reader;
         initializer = reader.result;
       }
       declarations.variables.add(
@@ -255,6 +267,7 @@ final class _VariablesReader(
         ),
       );
       if (parser.current.kind != .comma) break;
+      initializer = null;
       parser.advance();
       declarations.name = parser.readVariableName();
     }
@@ -269,5 +282,6 @@ final class _VariablesReader(
       type: declarations.type,
       declarations: declarations.variables,
     );
+    return null;
   }
 }

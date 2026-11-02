@@ -17,16 +17,13 @@ final class _DeclarationName(final _Parser parser) {
   int? typeParameters;
   DeclaredOperator? op;
 
-  Iterable<_Reader<Object?>> read({
-    bool alias = false,
-    bool member = false,
-  }) sync* {
+  void read({bool alias = false, bool member = false}) {
     final initial = parser.cursor;
     final first = parser.current;
     if (!(first.kind == .keywordGet || first.kind == .keywordSet) &&
-        parser.canStartTypeBeforeName) {
+        parser.canStartTypeBeforeName()) {
       final reader = _TypeReader(parser, beforeFunction: true);
-      if (!reader.start()) yield _TypeTask(reader);
+      if (!reader.start()) _TypeTask(reader).finish();
       final parsed = parser.arena.asTypeAnnotationOrNull(reader.result);
       if (parsed != null && parser.current.kind.isIdentifier) {
         type = parsed;
@@ -77,7 +74,7 @@ final class _DeclarationName(final _Parser parser) {
     name = parser.readVariableName();
     if (parser.current.kind == .less) {
       final reader = _TypeReader(parser);
-      if (!reader.start(parameters: true)) yield _TypeTask(reader);
+      if (!reader.start(parameters: true)) _TypeTask(reader).finish();
       typeParameters = parser.arena.asTypeParameterListOrNull(reader.result);
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
@@ -90,19 +87,14 @@ final class _TopLevelReader(
   final _Parser parser,
   final int start,
   final List<int> metadata,
-) extends _Reader<int> {
-  @override
-  Iterable<_Reader<Object?>> read() sync* {
+) {
+  int read() {
     if (parser.startsTypeDeclaration) {
-      final reader = _TypeDeclarationReader(parser, start, metadata);
-      yield reader;
-      result = reader.result;
-      return;
+      return _readTypeDeclaration(parser, start, metadata);
     }
     if (parser.current.kind == .keywordTypedef &&
         !parser.hasParametersAfterName) {
-      yield* alias();
-      return;
+      return alias();
     }
     final external =
         parser.current.kind == .keywordExternal &&
@@ -110,24 +102,24 @@ final class _TopLevelReader(
     if (external) parser.advance();
     _VariableDeclarations? variables;
     if (parser.canStartVariableDeclaration) {
-      final reader = _VariableReader(parser, allowConditional: false);
-      yield reader;
-      variables = reader.result;
+      variables = _VariableReader(parser, allowConditional: false).finish();
     }
     if (variables case final declarations?) {
-      final reader = _VariablesReader(parser, declarations, metadata: metadata);
-      yield reader;
-      result = parser.arena.putTopLevelVariableDeclaration(
+      final list = _VariablesReader(
+        parser,
+        declarations,
+        metadata: metadata,
+      ).finish();
+      return parser.arena.putTopLevelVariableDeclaration(
         start: start,
         end: parser.expect(.semicolon),
         isExternal: external,
-        variables: reader.result,
+        variables: list,
       );
-      return;
     }
     final initial = parser.cursor;
     final header = _DeclarationName(parser);
-    yield* header.read();
+    header.read();
     if (parser.arena.rStart(header.name) == parser.arena.rEnd(header.name)) {
       parser.error(
         'expected_declaration',
@@ -137,45 +129,42 @@ final class _TopLevelReader(
       if (parser.cursor == initial && parser.current.kind != .eof) {
         parser.advance();
       }
-      result = parser.arena.putMissingTopLevelDeclaration(offset: start);
-      return;
+      return parser.arena.putMissingTopLevelDeclaration(offset: start);
     }
     int? parameters;
     if (header.accessor != .keywordGet) {
-      final reader = _ParameterReader(
+      parameters = _ParameterReader(
         parser,
         function: true,
         allowCovariant: false,
-      );
-      yield reader;
-      parameters = reader.result;
+      ).finish();
       if (header.accessor == .keywordSet) {
         parser.checkSetterParameters(parameters);
       }
     }
     final body = _BodyReader(parser);
-    yield body;
-    if (parser.arena.hasKind(body.result, .emptyFunctionBody) && !external) {
+    final bodyNode = body.finish();
+    if (parser.arena.hasKind(bodyNode, .emptyFunctionBody) && !external) {
       parser.error(
         'missing_function_body',
         'A function without external requires a body.',
         Token(
           .semicolon,
           parser.source,
-          parser.arena.rStart(body.result),
-          parser.arena.rEnd(body.result),
+          parser.arena.rStart(bodyNode),
+          parser.arena.rEnd(bodyNode),
         ),
       );
     }
-    if (external && !parser.arena.hasKind(body.result, .emptyFunctionBody)) {
+    if (external && !parser.arena.hasKind(bodyNode, .emptyFunctionBody)) {
       parser.error(
         'external_body',
         'An external declaration cannot have a body.',
         Token(
           .invalid,
           parser.source,
-          parser.arena.rStart(body.result),
-          parser.arena.rEnd(body.result),
+          parser.arena.rStart(bodyNode),
+          parser.arena.rEnd(bodyNode),
         ),
       );
     }
@@ -191,8 +180,8 @@ final class _TopLevelReader(
         ),
       );
     }
-    final end = parser.arena.rEnd(body.result);
-    result = switch (header.accessor) {
+    final end = parser.arena.rEnd(bodyNode);
+    return switch (header.accessor) {
       .keywordGet => parser.arena.putTopLevelGetterDeclaration(
         start: start,
         end: end,
@@ -200,7 +189,7 @@ final class _TopLevelReader(
         isExternal: external,
         returnType: header.type,
         name: header.name,
-        body: body.result,
+        body: bodyNode,
       ),
       .keywordSet => parser.arena.putTopLevelSetterDeclaration(
         start: start,
@@ -210,7 +199,7 @@ final class _TopLevelReader(
         returnType: header.type,
         name: header.name,
         parameters: parameters!,
-        body: body.result,
+        body: bodyNode,
       ),
       _ => parser.arena.putTopLevelFunctionDeclaration(
         start: start,
@@ -221,20 +210,20 @@ final class _TopLevelReader(
         name: header.name,
         typeParameters: header.typeParameters,
         parameters: parameters!,
-        body: body.result,
+        body: bodyNode,
       ),
     };
   }
 
-  Iterable<_Reader<Object?>> alias() sync* {
+  int alias() {
     parser.advance();
     final header = _DeclarationName(parser);
-    yield* header.read(alias: true);
+    header.read(alias: true);
     if (parser.current.kind == .assign) {
       parser.advance();
       final typeStart = parser.current.start;
       final reader = _TypeReader(parser);
-      if (!reader.start()) yield _TypeTask(reader);
+      if (!reader.start()) _TypeTask(reader).finish();
       final type =
           parser.arena.asTypeAnnotationOrNull(reader.result) ??
           parser.arena.putMissingTypeAnnotation(offset: typeStart);
@@ -253,7 +242,7 @@ final class _TopLevelReader(
           ),
         );
       }
-      result = parser.arena.putTypeAliasDeclaration(
+      return parser.arena.putTypeAliasDeclaration(
         start: start,
         end: parser.expect(.semicolon),
         metadata: metadata,
@@ -262,16 +251,15 @@ final class _TopLevelReader(
         type: type,
       );
     } else {
-      final reader = _ParameterReader(parser, function: true);
-      yield reader;
-      result = parser.arena.putFunctionTypeAliasDeclaration(
+      final formals = _ParameterReader(parser, function: true).finish();
+      return parser.arena.putFunctionTypeAliasDeclaration(
         start: start,
         end: parser.expect(.semicolon),
         metadata: metadata,
         returnType: header.type,
         name: header.name,
         typeParameters: header.typeParameters,
-        parameters: reader.result,
+        parameters: formals,
       );
     }
   }

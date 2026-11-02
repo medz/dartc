@@ -6,13 +6,16 @@ abstract class _Reader<T> {
   Iterable<_Reader<Object?>> read();
 
   T finish() {
-    final pending = [read().iterator];
-    while (pending.isNotEmpty) {
-      final iterator = pending.last;
-      if (iterator.moveNext()) {
-        pending.add(iterator.current.read().iterator);
+    var task = read().iterator;
+    List<Iterator<_Reader<Object?>>>? parents;
+    while (true) {
+      if (task.moveNext()) {
+        (parents ??= []).add(task);
+        task = task.current.read().iterator;
+      } else if (parents != null && parents.isNotEmpty) {
+        task = parents.removeLast();
       } else {
-        pending.removeLast();
+        break;
       }
     }
     return result;

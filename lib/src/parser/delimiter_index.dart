@@ -15,7 +15,8 @@ final class DelimiterIndex {
     var next = 0;
     var available = 0, last = -1;
     for (var i = tokens.length - 1; i >= 0; i--) {
-      switch (tokens[i].kind) {
+      final kind = tokens[i].kind;
+      switch (kind) {
         case .greater ||
             .greaterEqual ||
             .shiftRight ||
@@ -36,7 +37,7 @@ final class DelimiterIndex {
           };
           next = used == count ? _links[end - 1] : end | (used << shift);
         case .rightParen || .rightBracket || .rightBrace:
-          final stack = switch (tokens[i].kind) {
+          final stack = switch (kind) {
             .rightParen => parentheses,
             .rightBracket => brackets,
             _ => braces,
@@ -46,7 +47,7 @@ final class DelimiterIndex {
           _links[i] = next;
           next = available = 0;
         case .leftParen || .leftBracket || .leftBrace:
-          final stack = switch (tokens[i].kind) {
+          final stack = switch (kind) {
             .leftParen => parentheses,
             .leftBracket => brackets,
             _ => braces,

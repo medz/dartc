@@ -5,21 +5,20 @@ extension on _Parser {
     if (current.kind != .keywordVar && current.kind != .keywordFinal) {
       return false;
     }
-    final child = _Parser.nested(this)..advance();
-    final end = child.outerPatternEnd();
+    final next = cursor + 1;
+    final end = outerPatternEnd(next, tokens[next].kind);
     return end != null &&
-        (child.tokens[end].kind == .emptyBracketsAssign ||
-            child.tokens[end + 1].kind == .assign ||
-            child.tokens[end + 1].kind == .keywordIn);
+        (tokens[end].kind == .emptyBracketsAssign ||
+            tokens[end + 1].kind == .assign ||
+            tokens[end + 1].kind == .keywordIn);
   }
 
-  int? outerPatternEnd() {
-    var opening = cursor;
-    if (current.kind == .less) {
+  int? outerPatternEnd(int opening, TokenKind kind) {
+    if (kind == .less) {
       final end = lookahead.afterTypeArguments(opening);
       if (end == null) return null;
       opening = end;
-    } else if (current.kind.isIdentifier) {
+    } else if (kind.isIdentifier) {
       opening++;
       if (tokens[opening].kind == .dot) {
         opening++;
@@ -47,25 +46,25 @@ extension on _Parser {
   }
 
   bool get startsPatternAssignment {
-    final end = outerPatternEnd();
+    final end = outerPatternEnd(cursor, current.kind);
     return end != null &&
         (tokens[end].kind == .emptyBracketsAssign ||
             tokens[end + 1].kind == .assign);
   }
 
   bool parsePatternAssignment() {
-    if (current.kind != .leftParen &&
-        current.kind != .leftBracket &&
-        current.kind != .leftBrace &&
-        current.kind != .emptyBracketsAssign &&
-        current.kind != .less &&
-        !(current.kind.isIdentifier &&
-            (tokens[cursor + 1].kind == .leftParen ||
-                tokens[cursor + 1].kind == .dot ||
-                tokens[cursor + 1].kind == .less))) {
+    final kind = current.kind;
+    if (kind.isIdentifier) {
+      final next = tokens[cursor + 1].kind;
+      if (next != .leftParen && next != .dot && next != .less) return false;
+    } else if (kind != .leftParen &&
+        kind != .leftBracket &&
+        kind != .leftBrace &&
+        kind != .emptyBracketsAssign &&
+        kind != .less) {
       return false;
     }
-    final end = outerPatternEnd();
+    final end = outerPatternEnd(cursor, kind);
     if (end == null ||
         tokens[end].kind != .emptyBracketsAssign &&
             tokens[end + 1].kind != .assign) {
