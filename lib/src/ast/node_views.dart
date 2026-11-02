@@ -28,6 +28,16 @@ sealed class _Row(this._owner, this._row) implements AstNode {
     return _owner.at(_owner.edges.cells[_owner.edgeOffsets[_row] + i]);
   }
 
+  T fixedChild<T>(int position) =>
+      _owner.at(_owner.edges.cells[_owner.edgeOffsets[_row] + position]) as T;
+  List<T> allChildren<T>() => _RowList<T>(
+    _owner,
+    _owner.edges.cells,
+    _owner.edgeOffsets[_row],
+    childCount,
+    null,
+  );
+
   int word(int f) => _owner.fields.cells[_owner.offsets[_row] + f];
   T node<T>(int f) {
     final v = word(f);
@@ -46,28 +56,46 @@ sealed class _Row(this._owner, this._row) implements AstNode {
 
   List<T> nodes<T>(int f) {
     final v = word(f);
-    return v == _nil ? const [] : _RowList<T>(_owner, v, null);
+    return v == _nil
+        ? const []
+        : _RowList<T>(
+            _owner,
+            _owner.extra.cells,
+            v + 1,
+            _owner.extra.cells[v],
+            null,
+          );
   }
 
   List<T> enums<T>(int f, List<Enum> values) {
     final v = word(f);
-    return v == _nil ? const [] : _RowList<T>(_owner, v, values);
+    return v == _nil
+        ? const []
+        : _RowList<T>(
+            _owner,
+            _owner.extra.cells,
+            v + 1,
+            _owner.extra.cells[v],
+            values,
+          );
   }
 }
 
 final class _RowList<T>(
   final AstArena _owner,
+  final Uint32List cells,
   final int off,
+  final int count,
   final List<Enum>? values,
 ) extends ListBase<T> {
   @override
-  int get length => _owner.extra.cells[off];
+  int get length => count;
   @override
   set length(int n) => throw UnsupportedError('immutable');
   @override
   T operator [](int i) {
     RangeError.checkValidIndex(i, this);
-    final v = _owner.extra.cells[off + 1 + i];
+    final v = cells[off + i];
     return (values == null ? _owner.at(v) : values![v]) as T;
   }
 
@@ -79,7 +107,7 @@ final class _RowAdjacentStringsExpression(super._owner, super._row)
     extends _Row
     implements AdjacentStringsExpression {
   @override
-  get strings => nodes(0);
+  get strings => allChildren();
 }
 
 final class _RowAnnotation(super._owner, super._row)
@@ -108,7 +136,7 @@ final class _RowArgumentList(super._owner, super._row)
     extends _Row
     implements ArgumentList {
   @override
-  get arguments => nodes(0);
+  get arguments => allChildren();
 }
 
 final class _RowAssertInitializer(super._owner, super._row)
@@ -133,36 +161,36 @@ final class _RowAssignmentExpression(super._owner, super._row)
     extends _Row
     implements AssignmentExpression {
   @override
-  get left => node(0);
+  get left => fixedChild(0);
   @override
-  AssignmentOperator get op => AssignmentOperator.values[word(1)];
+  AssignmentOperator get op => AssignmentOperator.values[word(0)];
   @override
-  get right => node(2);
+  get right => fixedChild(1);
 }
 
 final class _RowAwaitExpression(super._owner, super._row)
     extends _Row
     implements AwaitExpression {
   @override
-  get expression => node(0);
+  get expression => fixedChild(0);
 }
 
 final class _RowBinaryExpression(super._owner, super._row)
     extends _Row
     implements BinaryExpression {
   @override
-  get left => node(0);
+  get left => fixedChild(0);
   @override
-  BinaryOperator get op => BinaryOperator.values[word(1)];
+  BinaryOperator get op => BinaryOperator.values[word(0)];
   @override
-  get right => node(2);
+  get right => fixedChild(1);
 }
 
 final class _RowBlockStatement(super._owner, super._row)
     extends _Row
     implements BlockStatement {
   @override
-  get statements => nodes(0);
+  get statements => allChildren();
 }
 
 final class _RowBreakStatement(super._owner, super._row)
@@ -187,32 +215,32 @@ final class _RowCascadeIndexExpression(super._owner, super._row)
     extends _Row
     implements CascadeIndexExpression {
   @override
-  get index => node(0);
+  get index => fixedChild(0);
 }
 
 final class _RowCascadePropertyExpression(super._owner, super._row)
     extends _Row
     implements CascadePropertyExpression {
   @override
-  get property => node(0);
+  get property => fixedChild(0);
 }
 
 final class _RowCastExpression(super._owner, super._row)
     extends _Row
     implements CastExpression {
   @override
-  get expression => node(0);
+  get expression => fixedChild(0);
   @override
-  get type => node(1);
+  get type => fixedChild(1);
 }
 
 final class _RowCastPattern(super._owner, super._row)
     extends _Row
     implements CastPattern {
   @override
-  get pattern => node(0);
+  get pattern => fixedChild(0);
   @override
-  get type => node(1);
+  get type => fixedChild(1);
 }
 
 final class _RowCatchClause(super._owner, super._row)
@@ -302,11 +330,11 @@ final class _RowConditionalExpression(super._owner, super._row)
     extends _Row
     implements ConditionalExpression {
   @override
-  get condition => node(0);
+  get condition => fixedChild(0);
   @override
-  get thenExpression => node(1);
+  get thenExpression => fixedChild(1);
   @override
-  get elseExpression => node(2);
+  get elseExpression => fixedChild(2);
 }
 
 final class _RowConditionalUri(super._owner, super._row)
@@ -337,7 +365,7 @@ final class _RowConstantPattern(super._owner, super._row)
   @override
   get hasConstKeyword => flag(0);
   @override
-  get expression => node(1);
+  get expression => fixedChild(0);
 }
 
 final class _RowConstructorDeclaration(super._owner, super._row)
@@ -385,30 +413,30 @@ final class _RowDoStatement(super._owner, super._row)
     extends _Row
     implements DoStatement {
   @override
-  get body => node(0);
+  get body => fixedChild(0);
   @override
-  get condition => node(1);
+  get condition => fixedChild(1);
 }
 
 final class _RowDotShorthandExpression(super._owner, super._row)
     extends _Row
     implements DotShorthandExpression {
   @override
-  get expression => node(0);
+  get expression => fixedChild(0);
 }
 
 final class _RowDotShorthandReferenceExpression(super._owner, super._row)
     extends _Row
     implements DotShorthandReferenceExpression {
   @override
-  get name => node(0);
+  get name => fixedChild(0);
 }
 
 final class _RowDottedName(super._owner, super._row)
     extends _Row
     implements DottedName {
   @override
-  get components => nodes(0);
+  get components => allChildren();
 }
 
 final class _RowEmptyFunctionBody(super._owner, super._row)
@@ -482,21 +510,21 @@ final class _RowExpressionFunctionBody(super._owner, super._row)
   @override
   get isAsync => flag(0);
   @override
-  get expression => node(1);
+  get expression => fixedChild(0);
 }
 
 final class _RowExpressionStatement(super._owner, super._row)
     extends _Row
     implements ExpressionStatement {
   @override
-  get expression => node(0);
+  get expression => fixedChild(0);
 }
 
 final class _RowExtendsClause(super._owner, super._row)
     extends _Row
     implements ExtendsClause {
   @override
-  get superclass => node(0);
+  get superclass => fixedChild(0);
 }
 
 final class _RowExtensionDeclaration(super._owner, super._row)
@@ -562,7 +590,7 @@ final class _RowFieldDeclaration(super._owner, super._row)
   @override
   get isCovariant => flag(3);
   @override
-  get variables => node(4);
+  get variables => fixedChild(0);
 }
 
 final class _RowFieldInitializer(super._owner, super._row)
@@ -571,9 +599,9 @@ final class _RowFieldInitializer(super._owner, super._row)
   @override
   get hasThis => flag(0);
   @override
-  get name => node(1);
+  get name => fixedChild(0);
   @override
-  get value => node(2);
+  get value => fixedChild(1);
 }
 
 final class _RowForElement(super._owner, super._row)
@@ -582,18 +610,18 @@ final class _RowForElement(super._owner, super._row)
   @override
   get isAwait => flag(0);
   @override
-  get parts => node(1);
+  get parts => fixedChild(0);
   @override
-  get body => node(2);
+  get body => fixedChild(1);
 }
 
 final class _RowForInParts(super._owner, super._row)
     extends _Row
     implements ForInParts {
   @override
-  get target => node(0);
+  get target => fixedChild(0);
   @override
-  get iterable => node(1);
+  get iterable => fixedChild(1);
 }
 
 final class _RowForParts(super._owner, super._row)
@@ -613,9 +641,9 @@ final class _RowForStatement(super._owner, super._row)
   @override
   get isAwait => flag(0);
   @override
-  get parts => node(1);
+  get parts => fixedChild(0);
   @override
-  get body => node(2);
+  get body => fixedChild(1);
 }
 
 final class _RowFormalParameter(super._owner, super._row)
@@ -645,7 +673,7 @@ final class _RowFormalParameterList(super._owner, super._row)
     extends _Row
     implements FormalParameterList {
   @override
-  get parameters => nodes(0);
+  get parameters => allChildren();
 }
 
 final class _RowFunctionExpression(super._owner, super._row)
@@ -720,7 +748,7 @@ final class _RowFunctionTypeParameterList(super._owner, super._row)
     extends _Row
     implements FunctionTypeParameterList {
   @override
-  get parameters => nodes(0);
+  get parameters => allChildren();
 }
 
 final class _RowGetterDeclaration(super._owner, super._row)
@@ -744,9 +772,9 @@ final class _RowGuardedPattern(super._owner, super._row)
     extends _Row
     implements GuardedPattern {
   @override
-  get pattern => node(0);
+  get pattern => fixedChild(0);
   @override
-  get guard => node(1);
+  get guard => fixedChild(1);
 }
 
 final class _RowIdentifier(super._owner, super._row)
@@ -757,14 +785,14 @@ final class _RowIdentifierExpression(super._owner, super._row)
     extends _Row
     implements IdentifierExpression {
   @override
-  get identifier => node(0);
+  get identifier => fixedChild(0);
 }
 
 final class _RowIdentifierPattern(super._owner, super._row)
     extends _Row
     implements IdentifierPattern {
   @override
-  get name => node(0);
+  get name => fixedChild(0);
 }
 
 final class _RowIfElement(super._owner, super._row)
@@ -814,11 +842,11 @@ final class _RowIndexExpression(super._owner, super._row)
     extends _Row
     implements IndexExpression {
   @override
-  get target => node(0);
+  get target => fixedChild(0);
   @override
-  get index => node(1);
+  get index => fixedChild(1);
   @override
-  get isNullAware => flag(2);
+  get isNullAware => flag(0);
 }
 
 final class _RowInstanceCreationExpression(super._owner, super._row)
@@ -840,7 +868,7 @@ final class _RowInterpolatedStringExpression(super._owner, super._row)
     extends _Row
     implements InterpolatedStringExpression {
   @override
-  get parts => nodes(0);
+  get parts => allChildren();
 }
 
 final class _RowInvocationExpression(super._owner, super._row)
@@ -856,7 +884,7 @@ final class _RowInvocationExpression(super._owner, super._row)
 
 final class _RowLabel(super._owner, super._row) extends _Row implements Label {
   @override
-  get name => node(0);
+  get name => fixedChild(0);
 }
 
 final class _RowLabeledStatement(super._owner, super._row)
@@ -914,24 +942,24 @@ final class _RowLogicalPattern(super._owner, super._row)
     extends _Row
     implements LogicalPattern {
   @override
-  get left => node(0);
+  get left => fixedChild(0);
   @override
-  LogicalPatternOperator get op => LogicalPatternOperator.values[word(1)];
+  LogicalPatternOperator get op => LogicalPatternOperator.values[word(0)];
   @override
-  get right => node(2);
+  get right => fixedChild(1);
 }
 
 final class _RowMapEntryElement(super._owner, super._row)
     extends _Row
     implements MapEntryElement {
   @override
-  get key => node(0);
+  get key => fixedChild(0);
   @override
-  get value => node(1);
+  get value => fixedChild(1);
   @override
-  get isNullAwareKey => flag(2);
+  get isNullAwareKey => flag(0);
   @override
-  get isNullAwareValue => flag(3);
+  get isNullAwareValue => flag(1);
 }
 
 final class _RowMapPattern(super._owner, super._row)
@@ -947,9 +975,9 @@ final class _RowMapPatternEntry(super._owner, super._row)
     extends _Row
     implements MapPatternEntry {
   @override
-  get key => node(0);
+  get key => fixedChild(0);
   @override
-  get value => node(1);
+  get value => fixedChild(1);
 }
 
 final class _RowMethodDeclaration(super._owner, super._row)
@@ -1037,7 +1065,7 @@ final class _RowModifiedBlockFunctionBody(super._owner, super._row)
   @override
   FunctionBodyModifier get modifier => FunctionBodyModifier.values[word(0)];
   @override
-  get block => node(1);
+  get block => fixedChild(0);
 }
 
 final class _RowNamedPatternField(super._owner, super._row)
@@ -1053,9 +1081,9 @@ final class _RowNamedRecordField(super._owner, super._row)
     extends _Row
     implements NamedRecordField {
   @override
-  get name => node(0);
+  get name => fixedChild(0);
   @override
-  get value => node(1);
+  get value => fixedChild(1);
 }
 
 final class _RowNamedRecordTypeField(super._owner, super._row)
@@ -1090,35 +1118,35 @@ final class _RowNamespaceCombinator(super._owner, super._row)
   @override
   NamespaceCombinatorKind get kind => NamespaceCombinatorKind.values[word(0)];
   @override
-  get names => nodes(1);
+  get names => allChildren();
 }
 
 final class _RowNullAssertPattern(super._owner, super._row)
     extends _Row
     implements NullAssertPattern {
   @override
-  get pattern => node(0);
+  get pattern => fixedChild(0);
 }
 
 final class _RowNullAssertionExpression(super._owner, super._row)
     extends _Row
     implements NullAssertionExpression {
   @override
-  get operand => node(0);
+  get operand => fixedChild(0);
 }
 
 final class _RowNullAwareElement(super._owner, super._row)
     extends _Row
     implements NullAwareElement {
   @override
-  get expression => node(0);
+  get expression => fixedChild(0);
 }
 
 final class _RowNullCheckPattern(super._owner, super._row)
     extends _Row
     implements NullCheckPattern {
   @override
-  get pattern => node(0);
+  get pattern => fixedChild(0);
 }
 
 final class _RowObjectPattern(super._owner, super._row)
@@ -1156,21 +1184,21 @@ final class _RowParameterDefault(super._owner, super._row)
   ParameterDefaultSeparator get separator =>
       ParameterDefaultSeparator.values[word(0)];
   @override
-  get value => node(1);
+  get value => fixedChild(0);
 }
 
 final class _RowParenthesizedExpression(super._owner, super._row)
     extends _Row
     implements ParenthesizedExpression {
   @override
-  get expression => node(0);
+  get expression => fixedChild(0);
 }
 
 final class _RowParenthesizedPattern(super._owner, super._row)
     extends _Row
     implements ParenthesizedPattern {
   @override
-  get pattern => node(0);
+  get pattern => fixedChild(0);
 }
 
 final class _RowPartDirective(super._owner, super._row)
@@ -1195,9 +1223,9 @@ final class _RowPatternAssignmentExpression(super._owner, super._row)
     extends _Row
     implements PatternAssignmentExpression {
   @override
-  get pattern => node(0);
+  get pattern => fixedChild(0);
   @override
-  get value => node(1);
+  get value => fixedChild(1);
 }
 
 final class _RowPatternForInBinding(super._owner, super._row)
@@ -1228,7 +1256,7 @@ final class _RowPatternVariableDeclarationStatement(super._owner, super._row)
     extends _Row
     implements PatternVariableDeclarationStatement {
   @override
-  get declaration => node(0);
+  get declaration => fixedChild(0);
 }
 
 final class _RowPositionalRecordTypeField(super._owner, super._row)
@@ -1257,11 +1285,11 @@ final class _RowPropertyAccessExpression(super._owner, super._row)
     extends _Row
     implements PropertyAccessExpression {
   @override
-  get target => node(0);
+  get target => fixedChild(0);
   @override
-  get property => node(1);
+  get property => fixedChild(1);
   @override
-  get isNullAware => flag(2);
+  get isNullAware => flag(0);
 }
 
 final class _RowRecordExpression(super._owner, super._row)
@@ -1270,14 +1298,14 @@ final class _RowRecordExpression(super._owner, super._row)
   @override
   get hasConstKeyword => flag(0);
   @override
-  get fields => nodes(1);
+  get fields => allChildren();
 }
 
 final class _RowRecordPattern(super._owner, super._row)
     extends _Row
     implements RecordPattern {
   @override
-  get fields => nodes(0);
+  get fields => allChildren();
 }
 
 final class _RowRecordTypeAnnotation(super._owner, super._row)
@@ -1297,7 +1325,7 @@ final class _RowRecordTypeNamedFields(super._owner, super._row)
     extends _Row
     implements RecordTypeNamedFields {
   @override
-  get fields => nodes(0);
+  get fields => allChildren();
 }
 
 final class _RowRedirectingConstructorInitializer(super._owner, super._row)
@@ -1315,7 +1343,7 @@ final class _RowRelationalPattern(super._owner, super._row)
   @override
   RelationalPatternOperator get op => RelationalPatternOperator.values[word(0)];
   @override
-  get operand => node(1);
+  get operand => fixedChild(0);
 }
 
 final class _RowRestPatternElement(super._owner, super._row)
@@ -1365,18 +1393,18 @@ final class _RowSpreadElement(super._owner, super._row)
     extends _Row
     implements SpreadElement {
   @override
-  get expression => node(0);
+  get expression => fixedChild(0);
   @override
-  get isNullAware => flag(1);
+  get isNullAware => flag(0);
 }
 
 final class _RowStringInterpolation(super._owner, super._row)
     extends _Row
     implements StringInterpolation {
   @override
-  get expression => node(0);
+  get expression => fixedChild(0);
   @override
-  get isBraced => flag(1);
+  get isBraced => flag(0);
 }
 
 final class _RowStringLiteralExpression(super._owner, super._row)
@@ -1413,9 +1441,9 @@ final class _RowSwitchExpressionCase(super._owner, super._row)
     extends _Row
     implements SwitchExpressionCase {
   @override
-  get pattern => node(0);
+  get pattern => fixedChild(0);
   @override
-  get value => node(1);
+  get value => fixedChild(1);
 }
 
 final class _RowSwitchStatement(super._owner, super._row)
@@ -1446,7 +1474,7 @@ final class _RowThrowExpression(super._owner, super._row)
     extends _Row
     implements ThrowExpression {
   @override
-  get expression => node(0);
+  get expression => fixedChild(0);
 }
 
 final class _RowTopLevelFunctionDeclaration(super._owner, super._row)
@@ -1506,7 +1534,7 @@ final class _RowTopLevelVariableDeclaration(super._owner, super._row)
   @override
   get isExternal => flag(0);
   @override
-  get variables => node(1);
+  get variables => fixedChild(0);
 }
 
 final class _RowTryStatement(super._owner, super._row)
@@ -1537,16 +1565,16 @@ final class _RowTypeArgumentList(super._owner, super._row)
     extends _Row
     implements TypeArgumentList {
   @override
-  get arguments => nodes(0);
+  get arguments => allChildren();
 }
 
 final class _RowTypeInstantiationExpression(super._owner, super._row)
     extends _Row
     implements TypeInstantiationExpression {
   @override
-  get expression => node(0);
+  get expression => fixedChild(0);
   @override
-  get typeArguments => node(1);
+  get typeArguments => fixedChild(1);
 }
 
 final class _RowTypeListClause(super._owner, super._row)
@@ -1555,7 +1583,7 @@ final class _RowTypeListClause(super._owner, super._row)
   @override
   TypeListClauseKind get kind => TypeListClauseKind.values[word(0)];
   @override
-  get types => nodes(1);
+  get types => allChildren();
 }
 
 final class _RowTypeParameter(super._owner, super._row)
@@ -1573,18 +1601,18 @@ final class _RowTypeParameterList(super._owner, super._row)
     extends _Row
     implements TypeParameterList {
   @override
-  get parameters => nodes(0);
+  get parameters => allChildren();
 }
 
 final class _RowTypeTestExpression(super._owner, super._row)
     extends _Row
     implements TypeTestExpression {
   @override
-  get expression => node(0);
+  get expression => fixedChild(0);
   @override
-  get type => node(1);
+  get type => fixedChild(1);
   @override
-  get isNegated => flag(2);
+  get isNegated => flag(0);
 }
 
 final class _RowUnaryExpression(super._owner, super._row)
@@ -1593,18 +1621,18 @@ final class _RowUnaryExpression(super._owner, super._row)
   @override
   UnaryOperator get op => UnaryOperator.values[word(0)];
   @override
-  get operand => node(1);
+  get operand => fixedChild(0);
 }
 
 final class _RowUpdateExpression(super._owner, super._row)
     extends _Row
     implements UpdateExpression {
   @override
-  get operand => node(0);
+  get operand => fixedChild(0);
   @override
-  UpdateOperator get op => UpdateOperator.values[word(1)];
+  UpdateOperator get op => UpdateOperator.values[word(0)];
   @override
-  get isPrefix => flag(2);
+  get isPrefix => flag(1);
 }
 
 final class _RowVariableDeclaration(super._owner, super._row)
@@ -1635,7 +1663,7 @@ final class _RowVariableDeclarationStatement(super._owner, super._row)
     extends _Row
     implements VariableDeclarationStatement {
   @override
-  get variables => node(0);
+  get variables => fixedChild(0);
 }
 
 final class _RowVariablePattern(super._owner, super._row)
@@ -1653,9 +1681,9 @@ final class _RowWhileStatement(super._owner, super._row)
     extends _Row
     implements WhileStatement {
   @override
-  get condition => node(0);
+  get condition => fixedChild(0);
   @override
-  get body => node(1);
+  get body => fixedChild(1);
 }
 
 final class _RowWildcardPattern(super._owner, super._row)
@@ -1673,5 +1701,5 @@ final class _RowYieldStatement(super._owner, super._row)
   @override
   get isStar => flag(0);
   @override
-  get expression => node(1);
+  get expression => fixedChild(0);
 }

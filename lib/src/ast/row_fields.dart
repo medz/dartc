@@ -6,19 +6,15 @@ extension ArenaFields on AstArena {
   int childIndex(int id, int i) => edges.cells[edgeOffsets[id] + i];
   int rStart(int? id) => starts[id!];
   int rEnd(int? id) => ends[id!];
-  int rDotShorthandExpressionExpression(int? id) =>
-      fields.cells[offsets[id!] + 0];
-  int rNullAssertionExpressionOperand(int? id) =>
-      fields.cells[offsets[id!] + 0];
+  int rDotShorthandExpressionExpression(int? id) => childIndex(id!, 0);
+  int rNullAssertionExpressionOperand(int? id) => childIndex(id!, 0);
   int? rStartOrNull(int? id) => id == null ? null : starts[id];
   int rTypeAliasDeclarationType(int? id) => fields.cells[offsets[id!] + 2];
   int? rAnnotationTypeArguments(int? id) =>
       nullable(fields.cells[offsets[id!] + 0]);
-  int rPropertyAccessExpressionProperty(int? id) =>
-      fields.cells[offsets[id!] + 1];
+  int rPropertyAccessExpressionProperty(int? id) => childIndex(id!, 1);
   String rText(int? id) => source.text.substring(starts[id!], ends[id]);
-  List<int> rArgumentListArguments(int? id) =>
-      refList(fields.cells[offsets[id!] + 0]);
+  List<int> rArgumentListArguments(int? id) => childrenOf(id!);
   int? rArgumentName(int? id) => nullable(fields.cells[offsets[id!] + 0]);
   int? rLibraryDirectiveName(int? id) =>
       nullable(fields.cells[offsets[id!] + 0]);
@@ -42,27 +38,23 @@ extension ArenaFields on AstArena {
       nullable(fields.cells[offsets[id!] + 1]);
   int rChildcount(int? id) => edgeOffsets[id! + 1] - edgeOffsets[id];
   int rInvocationExpressionCallee(int? id) => fields.cells[offsets[id!] + 0];
-  int rPropertyAccessExpressionTarget(int? id) =>
-      fields.cells[offsets[id!] + 0];
+  int rPropertyAccessExpressionTarget(int? id) => childIndex(id!, 0);
   int? rNamedTypeAnnotationPrefix(int? id) =>
       nullable(fields.cells[offsets[id!] + 0]);
   int? rEndOrNull(int? id) => id == null ? null : ends[id];
-  int rCastExpressionExpression(int? id) => fields.cells[offsets[id!] + 0];
-  int rTypeTestExpressionExpression(int? id) => fields.cells[offsets[id!] + 0];
+  int rCastExpressionExpression(int? id) => childIndex(id!, 0);
+  int rTypeTestExpressionExpression(int? id) => childIndex(id!, 0);
   BinaryOperator rBinaryExpressionOp(int? id) =>
-      BinaryOperator.values[fields.cells[offsets[id!] + 1]];
+      BinaryOperator.values[fields.cells[offsets[id!] + 0]];
   int? rVariableDeclarationInitializer(int? id) =>
       nullable(fields.cells[offsets[id!] + 1]);
-  int rIdentifierExpressionIdentifier(int? id) =>
-      fields.cells[offsets[id!] + 0];
-  int rBinaryExpressionLeft(int? id) => fields.cells[offsets[id!] + 0];
-  int rIndexExpressionTarget(int? id) => fields.cells[offsets[id!] + 0];
-  int rTypeInstantiationExpressionExpression(int? id) =>
-      fields.cells[offsets[id!] + 0];
+  int rIdentifierExpressionIdentifier(int? id) => childIndex(id!, 0);
+  int rBinaryExpressionLeft(int? id) => childIndex(id!, 0);
+  int rIndexExpressionTarget(int? id) => childIndex(id!, 0);
+  int rTypeInstantiationExpressionExpression(int? id) => childIndex(id!, 0);
   int? rNullAssertionExpressionOperandOrNull(int? id) =>
-      id == null ? null : fields.cells[offsets[id] + 0];
-  List<int> rFormalParameterListParameters(int? id) =>
-      refList(fields.cells[offsets[id!] + 0]);
+      id == null ? null : rNullAssertionExpressionOperand(id);
+  List<int> rFormalParameterListParameters(int? id) => childrenOf(id!);
   FormalParameterKind rFormalParameterKind(int? id) =>
       FormalParameterKind.values[fields.cells[offsets[id!] + 0]];
   String? rTextOrNull(int? id) =>

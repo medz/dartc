@@ -44,4 +44,26 @@ void main() {
       throwsArgumentError,
     );
   });
+
+  test(
+    'typed argument lists and binary operands refer to their child rows',
+    () {
+      final parsed = parseExpression(
+        scan(SourceFile(Uri.parse('memory:call'), 'f(a + b, g())')),
+      );
+      final tree = parsed.tree;
+      final args = (parsed.node as InvocationExpression).arguments;
+      final list = tree.indexOf(args);
+      expect(args.arguments.map(tree.indexOf), [
+        tree.childAt(list, 0),
+        tree.childAt(list, 1),
+      ]);
+      final sum = args.arguments.first.value as BinaryExpression;
+      expect(sum.op, BinaryOperator.add);
+      expect(tree.indexOf(sum.right), tree.childAt(tree.indexOf(sum), 1));
+      final nested = args.arguments.last.value as InvocationExpression;
+      expect(nested.arguments.arguments, isEmpty);
+      expect(args.arguments.clear, throwsUnsupportedError);
+    },
+  );
 }
