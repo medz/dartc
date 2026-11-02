@@ -1,6 +1,7 @@
 import 'package:dartc/ast.dart';
 
 String uriLiteral(StringExpression expression) {
+  if (expression is StringLiteralExpression) return _literal(expression.text);
   final output = StringBuffer();
   final pending = <StringExpression>[expression];
   while (pending.isNotEmpty) {
@@ -44,6 +45,9 @@ String _literal(String text) {
     } else if (line < end && text.codeUnitAt(line) == 10) {
       start = line + 1;
     }
+  }
+  if (!text.contains('\r') && (raw || !text.contains(r'\'))) {
+    return text.substring(start, end);
   }
   final output = StringBuffer();
   for (var index = start; index < end; index++) {

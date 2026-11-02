@@ -8,7 +8,7 @@
 library;
 
 export 'src/project/load.dart' show ProjectLoader;
-export 'src/project/project.dart';
+export 'src/project/project.dart' show Project;
 export 'src/project/library.dart';
 export 'src/project/packages/configuration.dart';
 export 'src/project/packages/discovery.dart';

@@ -121,6 +121,19 @@ void main() {
     expect(result.diagnostics, isEmpty);
   });
 
+  test('reads long zero-padded version components without rounding', () async {
+    final project = await loader(
+      sources({
+        'main.dart': '// @dart=000000000000000000003.000000000000000000013\nvoid main() {}',
+      }),
+    ).load(uri('main.dart'));
+    expect(project.diagnostics, isEmpty);
+    expect(
+      project.libraries[uri('main.dart')]!.unit.languageVersion.toString(),
+      '3.13',
+    );
+  });
+
   test(
     'diagnoses unsupported overrides rather than falling back to the default',
     () async {

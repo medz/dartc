@@ -51,9 +51,9 @@ sealed class _Row(this._owner, this._row) implements AstNode {
     return (v == _nil ? null : _owner.at(v)) as T;
   }
 
-  T integer<T>(int f) {
-    final v = word(f);
-    return (v == _nil ? null : v) as T;
+  int? questionAt(int field) {
+    final distance = word(field);
+    return distance == _nil ? null : end - distance;
   }
 
   T flag<T>(int f) {
@@ -701,7 +701,7 @@ final class _RowFunctionParameterSuffix(super._owner, super._row)
   @override
   get parameters => trailingChild(1);
   @override
-  get questionOffset => integer(0);
+  get questionOffset => questionAt(0);
 }
 
 final class _RowFunctionTypeAliasDeclaration(super._owner, super._row)
@@ -729,7 +729,7 @@ final class _RowFunctionTypeAnnotation(super._owner, super._row)
   @override
   get parameters => node(2);
   @override
-  get questionOffset => integer(3);
+  get questionOffset => questionAt(3);
   @override
   bool get isNullable => questionOffset != null;
 }
@@ -1039,9 +1039,9 @@ final class _RowMissingTypeAnnotation(super._owner, super._row)
     extends _Row
     implements MissingTypeAnnotation {
   @override
-  get questionOffset => integer(0);
+  int? get questionOffset => null;
   @override
-  bool get isNullable => questionOffset != null;
+  bool get isNullable => false;
 }
 
 final class _RowMixinDeclaration(super._owner, super._row)
@@ -1328,7 +1328,7 @@ final class _RowRecordTypeAnnotation(super._owner, super._row)
   @override
   get positionalFields => firstChildren(word(1));
   @override
-  get questionOffset => integer(2);
+  get questionOffset => questionAt(2);
   @override
   bool get isNullable => questionOffset != null;
 }

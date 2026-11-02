@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'dart:convert';
 
 import 'package:dartc/ast.dart';
@@ -8,6 +10,71 @@ import 'package:test/test.dart';
 import 'fixtures.dart';
 
 void main() {
+  test(
+    'an earlier provider error propagates while a later part is pending',
+    () async {
+      final entry = uri('main.dart');
+      final wait = Completer<String?>(), first = Completer<String?>();
+      final files = sources({
+        'main.dart':
+            "part 'a.dart'; part 'b.dart'; part 'c.dart'; part 'd.dart';",
+        'c.dart': "part of 'main.dart';",
+        'd.dart': "part of 'main.dart';",
+      });
+      final error = StateError('first part failed');
+      final loader = ProjectLoader(
+        readSource: (u) {
+          if (u == uri('a.dart')) return first.future;
+          if (u == uri('b.dart')) return wait.future;
+          return files[u];
+        },
+      );
+      final load = loader.load(entry);
+      final check = expectLater(load, throwsA(same(error)));
+      await Future<void>.delayed(Duration.zero);
+      first.completeError(error);
+      try {
+        await check.timeout(const Duration(seconds: 5));
+      } finally {
+        wait.complete("part of 'main.dart';");
+      }
+    },
+  );
+
+  test('keeps part order when reads complete in reverse order', () async {
+    final names = ['a', 'b', 'c', 'd'];
+    final gates = {for (final n in names) uri('$n.dart'): Completer<String?>()};
+    final allStarted = Completer<void>();
+    final requested = <Uri>{};
+    final loader = ProjectLoader(
+      readSource: (u) {
+        if (u == uri('main.dart')) {
+          return names.map((n) => "part '$n.dart';").join();
+        }
+        if (u == uri('dart:core')) return '';
+        if (!requested.add(u)) throw StateError('Duplicate read for $u');
+        if (requested.length == gates.length) allStarted.complete();
+        return gates[u]!.future;
+      },
+    );
+    final future = loader.load(uri('main.dart'));
+    await allStarted.future;
+    for (final n in names.reversed) {
+      gates[uri('$n.dart')]!.complete(
+        n == 'b' || n == 'c' ? null : "part of 'main.dart';",
+      );
+    }
+    final project = await future;
+    expect(
+      project.libraries[uri('main.dart')]!.parts.map((p) => p.source.uri),
+      [uri('a.dart'), uri('d.dart')],
+    );
+    expect(project.diagnostics.map((d) => d.span!.text), [
+      "'b.dart'",
+      "'c.dart'",
+    ]);
+  });
+
   test(
     'an undefined conditional environment value is the empty string',
     () async {
@@ -160,13 +227,14 @@ void main() {
         'lib/b.dart': '',
       });
       final reads = <Uri, int>{};
-      final result = await ProjectLoader(
+      final loader = ProjectLoader(
         packages: config,
         readSource: (uri) {
           reads.update(uri, (n) => n + 1, ifAbsent: () => 1);
           return files[uri];
         },
-      ).load(uri('main.dart'));
+      );
+      final result = await loader.load(uri('main.dart'));
       expect(result.diagnostics, isEmpty);
       expect(result.libraries, contains(Uri.parse('package:app/b.dart')));
       expect(result.libraries, contains(uri('lib/b.dart')));
@@ -174,6 +242,22 @@ void main() {
       final unit = result.libraries[Uri.parse('package:app/a.dart')]!.unit;
       expect(unit.languageVersion, const LanguageVersion(3, 12));
       expect(unit.source.uri, Uri.parse('package:app/a.dart'));
+      final logical = unit.source.uri, location = uri('lib/a.dart');
+      expect(unit.location, location);
+      var previous = result;
+      for (final changed in [logical, location]) {
+        reads.clear();
+        files[location] = 'class C {} // $changed';
+        final next = await loader.update(previous, changedSources: [changed]);
+        expect(reads, {location: 1});
+        for (final identity in [logical, location]) {
+          final updated = next.libraries[identity]!.unit;
+          expect(updated.source.text, files[location]);
+          expect(updated.tree.source.uri, identity);
+          expect(updated, isNot(same(previous.libraries[identity]!.unit)));
+        }
+        previous = next;
+      }
     },
   );
 

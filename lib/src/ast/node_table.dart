@@ -7,6 +7,8 @@ const _formalType = 1,
     _formalDefault = 4,
     _formalCovariant = 8;
 
+int _nextCapacity(int size) => size + (size < 2048 ? size : size >> 2) + 16;
+
 final class _Words(int cap) {
   Uint32List cells = Uint32List(cap > _nil ? _nil : cap);
   int used = 0;
@@ -20,7 +22,7 @@ final class _Words(int cap) {
 
   void _grow(int end, int keep) {
     if (end > _nil) throw RangeError('Syntax payload exceeds 32-bit indices');
-    final size = (cells.length * 2 + 16).clamp(end, _nil);
+    final size = _nextCapacity(cells.length).clamp(end, _nil);
     cells = Uint32List(size)..setRange(0, keep, cells);
   }
 
@@ -60,7 +62,92 @@ final class _Children(final AstArena arena, final int start, final int end) {
 final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
   // A name can produce both an identifier row and an expression or type row.
   factory AstArena(SourceFile source, int tokenCount) =>
-      AstArena._(source, tokenCount + (tokenCount >> 2), tokenCount);
+      AstArena._(source, tokenCount + tokenCount ~/ 6, tokenCount);
+
+  /// Copies complete rows through [last] into an arena owned by [source].
+  factory AstArena.prefix(
+    SyntaxTree tree,
+    SourceFile source,
+    int last,
+    int suffixTokens,
+  ) {
+    final old = tree._data;
+    final rows = last + 1;
+    final edges = old.edgeOffsets[rows];
+    final fields = old.offsets[rows];
+    return _copy(
+      old,
+      source,
+      rows,
+      edges,
+      fields,
+      rows + suffixTokens + suffixTokens ~/ 6,
+      fields + suffixTokens,
+    );
+  }
+
+  /// Keeps row indices outside the rewritten body stable in a private copy.
+  factory AstArena.edit(SyntaxTree tree, SourceFile source, int first) {
+    final old = tree._data;
+    final arena = _copy(
+      old,
+      source,
+      old.count,
+      old.edges.used,
+      old.fields.used,
+      old.count,
+      old.fields.used,
+    );
+    arena.count = first;
+    arena.edges.used = old.edgeOffsets[first];
+    arena.fields.used = old.offsets[first];
+    return arena;
+  }
+
+  static AstArena _copy(
+    AstArena old,
+    SourceFile source,
+    int rows,
+    int edges,
+    int fields,
+    int rowCapacity,
+    int fieldCapacity,
+  ) {
+    final arena = AstArena._(source, rowCapacity, fieldCapacity);
+    arena.tags.setRange(0, rows, old.tags);
+    arena.starts.setRange(0, rows, old.starts);
+    arena.ends.setRange(0, rows, old.ends);
+    arena.offsets.setRange(0, rows, old.offsets);
+    arena.edgeOffsets.setRange(0, rows + 1, old.edgeOffsets);
+    arena.edges.reserve(edges);
+    arena.edges.cells.setRange(0, edges, old.edges.cells);
+    arena.fields.reserve(fields);
+    arena.fields.cells.setRange(0, fields, old.fields.cells);
+    arena.count = rows;
+    return arena;
+  }
+
+  bool finishEdit(SyntaxTree tree, int oldRoot, int newRoot) {
+    final old = tree._data;
+    if (oldRoot != newRoot ||
+        old.edgeOffsets[oldRoot + 1] != edges.used ||
+        old.offsets[oldRoot + 1] != fields.used) {
+      return false;
+    }
+    final delta = source.length - old.source.length;
+    if (delta != 0) {
+      // Payload positions are end-relative. Only row ranges need to move.
+      final boundary = old.ends[oldRoot];
+      for (var i = oldRoot + 1; i < old.count; i++) {
+        if (starts[i] >= boundary) starts[i] += delta;
+        if (ends[i] >= boundary) ends[i] += delta;
+      }
+    }
+    count = old.count;
+    edges.used = old.edges.used;
+    fields.used = old.fields.used;
+    return true;
+  }
 
   SyntaxTree finish(int root) => SyntaxTree._(this, rawRef(root));
 
@@ -72,7 +159,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
       offsets = Uint32List(capacity);
   final edges = _Words(capacity), fields = _Words(tokenCount);
   void grow() {
-    final n = count * 2 + 16;
+    final n = _nextCapacity(count);
     tags = Uint8List(n)..setRange(0, count, tags);
     starts = Uint32List(n)..setRange(0, count, starts);
     ends = Uint32List(n)..setRange(0, count, ends);
@@ -1000,7 +1087,9 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
       parameters,
     );
     final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = questionOffset ?? _nil;
+    fields.cells[fieldOffset + 0] = questionOffset == null
+        ? _nil
+        : end - questionOffset;
     return row;
   }
 
@@ -1054,7 +1143,9 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     fields.cells[fieldOffset + 0] = rawRef(returnType);
     fields.cells[fieldOffset + 1] = rawRef(typeParameters);
     fields.cells[fieldOffset + 2] = rawRef(parameters);
-    fields.cells[fieldOffset + 3] = questionOffset ?? _nil;
+    fields.cells[fieldOffset + 3] = questionOffset == null
+        ? _nil
+        : end - questionOffset;
     return row;
   }
 
@@ -1495,23 +1586,8 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     return _leaf(.missingTopLevelDeclaration, start, end);
   }
 
-  int putMissingTypeAnnotation({required int offset}) {
-    final start = offset;
-    final end = offset;
-    const int? questionOffset = null;
-    if (questionOffset != null) {
-      RangeError.checkValueInInterval(
-        questionOffset,
-        start,
-        end - 1,
-        "questionOffset",
-      );
-    }
-    final row = _leaf(.missingTypeAnnotation, start, end);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = questionOffset ?? _nil;
-    return row;
-  }
+  int putMissingTypeAnnotation({required int offset}) =>
+      _leaf(.missingTypeAnnotation, offset, offset);
 
   int putMixinDeclaration({
     required int start,
@@ -1604,7 +1680,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     final field = offsets[row];
     return fields.cells[field] & _typeQuestion == 0
         ? null
-        : fields.cells[field + 1];
+        : ends[row] - fields.cells[field + 1];
   }
 
   int putNamedTypeAnnotation({
@@ -1637,7 +1713,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
         (prefix == null ? 0 : _typePrefix) |
         (typeArguments == null ? 0 : _typeArguments) |
         (nullable ? _typeQuestion : 0);
-    if (nullable) fields.cells[field + 1] = questionOffset;
+    if (nullable) fields.cells[field + 1] = end - questionOffset;
     return row;
   }
 
@@ -1949,7 +2025,9 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(namedFields);
     fields.cells[fieldOffset + 1] = positionalFields.length;
-    fields.cells[fieldOffset + 2] = questionOffset ?? _nil;
+    fields.cells[fieldOffset + 2] = questionOffset == null
+        ? _nil
+        : end - questionOffset;
     return row;
   }
 

@@ -8,7 +8,7 @@ import 'package:dartc/source.dart';
 
 import '../ast/nodes.dart' show AstArena;
 import '../ast/row_fields.dart';
-import '../scanner/scanner.dart' show tokensForParsing;
+import '../scanner/scanner.dart' show scanFrom, tokensForParsing;
 import 'string_sequence.dart';
 import 'delimiter_index.dart';
 import 'language_version.dart';
@@ -114,11 +114,12 @@ final class _Parser {
     SourceFile source,
     this.tokens,
     this.languageVersion,
-    this.diagnostics,
-  ) : arena = AstArena(source, tokens.length),
-      lookahead = DelimiterIndex(tokens),
-      current = tokens.first,
-      trialStart = null;
+    this.diagnostics, [
+    AstArena? prefix,
+  ]) : arena = prefix ?? AstArena(source, tokens.length),
+       lookahead = DelimiterIndex(tokens),
+       current = tokens.first,
+       trialStart = null;
 
   _Parser.trial(_Parser parent, int question)
     : arena = parent.arena,

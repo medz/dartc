@@ -156,7 +156,7 @@ final class PackageConfiguration {
   /// Finds the package owning [uri], including files outside its `lib/` directory.
   Package? packageFor(Uri uri) {
     if (uri.scheme == 'package') return packages[packageName(uri)];
-    if (!uri.hasScheme) return null;
+    if (_roots.isEmpty || !uri.hasScheme) return null;
     var directory = uri.resolve('.');
     while (true) {
       if (_roots[directory] case final package?) return package;

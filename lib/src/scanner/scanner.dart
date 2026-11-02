@@ -21,6 +21,15 @@ part 'token.dart';
 /// literal value conversion belong to later stages.
 ScanResult scan(SourceFile source) => _Scanner(source).scan();
 
+/// Scans tokens and the header comments used to select a language version.
+ScanResult scanUnit(SourceFile source) =>
+    _Scanner(source, headerOnly: true).scan();
+
+/// Scans ordinary code starting at a token boundary. A token crossing [end]
+/// is scanned to its real end so a caller can reject a stale boundary.
+ScanResult scanFrom(SourceFile source, int offset, [int? end]) =>
+    (_Scanner(source, headerOnly: true).._offset = offset).scan(end);
+
 /// The immutable tokens, comments, and diagnostics from one source snapshot.
 final class ScanResult {
   /// The scanned source snapshot.
@@ -28,6 +37,7 @@ final class ScanResult {
 
   /// Source-ordered tokens, including a final EOF token.
   final List<Token> tokens;
+  final List<Token>? _parserTokens;
 
   /// Source-ordered line and block comments, including documentation comments.
   final List<Token> comments;
@@ -39,18 +49,26 @@ final class ScanResult {
     this.source,
     List<Token> tokens,
     List<Token> comments,
-    List<Diagnostic>? diagnostics,
-  ) : tokens = List.unmodifiable(tokens),
-      comments = UnmodifiableListView(comments),
-      diagnostics = diagnostics == null
-          ? const []
-          : UnmodifiableListView(diagnostics);
+    List<Diagnostic>? diagnostics, {
+    required bool forParser,
+  }) : _parserTokens = forParser ? tokens : null,
+       tokens = forParser
+           ? UnmodifiableListView(tokens)
+           : List.unmodifiable(tokens),
+       comments = UnmodifiableListView(comments),
+       diagnostics = diagnostics == null
+           ? const []
+           : UnmodifiableListView(diagnostics);
 
   /// Whether scanning found a lexical error.
   bool get hasErrors => diagnostics.isNotEmpty;
 }
 
-final class _Scanner(final SourceFile source, {final bool recovering = false}) {
+final class _Scanner(
+  final SourceFile source, {
+  final bool recovering = false,
+  final bool headerOnly = false,
+}) {
   final String _text = source.text;
   final _tokens = <Token>[];
   final _comments = <Token>[];
@@ -58,9 +76,10 @@ final class _Scanner(final SourceFile source, {final bool recovering = false}) {
   _Interpolation? _interpolation;
   var _offset = 0;
 
-  ScanResult scan() {
-    if (_peek() == 0xFEFF) _offset++;
-    while (_offset < _text.length) {
+  ScanResult scan([int? end]) {
+    final limit = end ?? _text.length;
+    if (_offset == 0 && _peek() == 0xFEFF) _offset++;
+    while (_offset < limit) {
       _token();
     }
     for (var state = _interpolation; state != null; state = state.parent) {
@@ -72,7 +91,13 @@ final class _Scanner(final SourceFile source, {final bool recovering = false}) {
       );
     }
     _emit(.eof, _offset);
-    return ScanResult._(source, _tokens, _comments, _diagnostics);
+    return ScanResult._(
+      source,
+      _tokens,
+      _comments,
+      _diagnostics,
+      forParser: headerOnly,
+    );
   }
 
   int _peek([int ahead = 0]) {
@@ -332,9 +357,13 @@ final class _Scanner(final SourceFile source, {final bool recovering = false}) {
 
   void _comment({required bool line}) {
     final start = _offset;
+    final keep =
+        !headerOnly ||
+        _tokens.isEmpty ||
+        _tokens.length == 1 && _tokens.first.kind == .scriptTag;
     if (line) {
       final end = _lineEnd(start + 2);
-      _comments.add(Token._scanned(.lineComment, source, start, end));
+      if (keep) _comments.add(Token._scanned(.lineComment, source, start, end));
       _offset = end < _text.length ? end + 1 : end;
       return;
     }
@@ -360,7 +389,9 @@ final class _Scanner(final SourceFile source, {final bool recovering = false}) {
         _offset,
       );
     }
-    _comments.add(Token._scanned(.blockComment, source, start, _offset));
+    if (keep) {
+      _comments.add(Token._scanned(.blockComment, source, start, _offset));
+    }
   }
 }
 
