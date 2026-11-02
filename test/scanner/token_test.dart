@@ -22,4 +22,21 @@ void main() {
     }
     expect(Token(.eof, source, 3, 3).lexeme, '');
   });
+
+  test('preserves short and long ranges throughout a large source', () {
+    const boundary = 0x1000000;
+    final source = SourceFile(
+      Uri.parse('memory:large.dart'),
+      'x' * (boundary + 256),
+    );
+    for (final start in [0, 0x800000, boundary - 1, boundary]) {
+      for (final length in [0, 1, 255, 256]) {
+        final end = start + length;
+        final token = Token(.identifier, source, start, end);
+        expect((token.start, token.end, token.length), (start, end, length));
+        expect(token.lexeme, 'x' * length);
+        expect(token.span, SourceSpan(source, start, end));
+      }
+    }
+  });
 }

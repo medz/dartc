@@ -5,6 +5,7 @@ final class _Interpolation(
   final int quote,
   final int width,
   final int interpolationStart,
+  final _Interpolation? parent,
 ) {
   int braceDepth = 0;
 }
@@ -128,13 +129,20 @@ extension _LiteralScanning on _Scanner {
           segmentStart,
         );
         final dollar = _offset++;
-        if (_take(0x7B)) {
+        if (next == 0x7B) {
+          _offset++;
           _emit(.interpolationStart, dollar);
-          _interpolations.add(_Interpolation(start, quote, width, dollar));
+          _interpolation = _Interpolation(
+            start,
+            quote,
+            width,
+            dollar,
+            _interpolation,
+          );
           return;
         }
         _emit(.interpolationIdentifier, dollar);
-        _identifier(allowDollar: false);
+        _identifier(next, allowDollar: false);
         segmentStart = _offset;
       } else {
         _offset++;

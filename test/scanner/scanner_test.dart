@@ -305,6 +305,22 @@ void main() {
       expect(result.diagnostics.single.span, result.comments.single.span);
     });
 
+    test('line comments end at the first CR or LF at any offset', () {
+      for (final eol in ['\r', '\n', '\r\n', '']) {
+        for (var n = 0; n < 8; n++) {
+          final comment = '//\u0000\t\u{1F600}${'x' * n}';
+          final result = scanText('$comment$eol${eol.isEmpty ? '' : 'if'}');
+          expect(result.diagnostics, isEmpty);
+          expect(result.comments.single.lexeme, comment);
+          expect(result.tokens.first.start, comment.length + eol.length);
+          expect(
+            result.tokens.first.kind,
+            eol.isEmpty ? TokenKind.eof : TokenKind.keywordIf,
+          );
+        }
+      }
+    });
+
     test('nested block comments use bounded call depth', () {
       final text =
           '${List.filled(10000, '/*').join()} body '

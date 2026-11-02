@@ -1,54 +1,32 @@
-import 'token_kind.dart';
+part of 'scanner.dart';
 
+const _identifierState = 1;
 final _keywords = _buildKeywords();
 
-TokenKind keywordKind(String text, int start, int end) {
-  final length = end - start;
-  if (length < 2 || length > _keywords.maximumLength) return .identifier;
-  final entries = _keywords.entries;
-  var index = _hash(text, start, end, _keywords.shift);
-  var kind = entries[index];
-  while (kind != null) {
-    final spelling = kind.spelling!;
-    if (spelling.length == length && text.startsWith(spelling, start)) {
-      return kind;
-    }
-    index = (index + 1) & (entries.length - 1);
-    kind = entries[index];
+({Uint16List steps, List<TokenKind?> kinds}) _buildKeywords() {
+  final words = TokenKind.values.where((kind) => kind.isKeyword);
+  final capacity = words.fold(2, (n, kind) => n + kind.spelling!.length);
+  // A missing keyword edge either ends the token (zero) or continues a name.
+  final row = Uint16List(128);
+  for (var code = 0; code < row.length; code++) {
+    if (_isIdentifierPart(code, true)) row[code] = _identifierState;
   }
-  return .identifier;
-}
-
-({List<TokenKind?> entries, int shift, int maximumLength}) _buildKeywords() {
-  final words = [
-    for (final kind in TokenKind.values)
-      if (kind.isKeyword) kind,
-  ];
-  var size = 1;
-  var shift = 32;
-  while (size < words.length * 2) {
-    size *= 2;
-    shift--;
-  }
-  final entries = List<TokenKind?>.filled(size, null);
-  var maximumLength = 0;
+  final steps = Uint16List(capacity * 128);
+  steps.setRange(0, 128, row);
+  final kinds = List<TokenKind?>.filled(capacity, null);
+  var used = 2;
   for (final kind in words) {
-    final spelling = kind.spelling!;
-    if (spelling.length > maximumLength) maximumLength = spelling.length;
-    var index = _hash(spelling, 0, spelling.length, shift);
-    while (entries[index] != null) {
-      index = (index + 1) & (size - 1);
+    var state = 0;
+    for (final code in kind.spelling!.codeUnits) {
+      final slot = state * 128 + code;
+      if (steps[slot] == _identifierState) {
+        steps[slot] = used++;
+        final first = steps[slot] * 128;
+        steps.setRange(first, first + 128, row);
+      }
+      state = steps[slot];
     }
-    entries[index] = kind;
+    kinds[state] = kind;
   }
-  return (entries: entries, shift: shift, maximumLength: maximumLength);
-}
-
-int _hash(String text, int start, int end, int shift) {
-  final key =
-      text.codeUnitAt(start) |
-      text.codeUnitAt(start + 1) << 8 |
-      text.codeUnitAt(end - 1) << 16 |
-      (end - start) << 24;
-  return ((key * 0x9E3779B9) & 0xFFFFFFFF) >>> shift;
+  return (steps: steps, kinds: kinds);
 }

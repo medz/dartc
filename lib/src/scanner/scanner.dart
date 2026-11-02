@@ -1,13 +1,14 @@
 import 'dart:collection';
+import 'dart:typed_data';
 
 import 'package:dartc/diagnostics.dart';
 import 'package:dartc/source.dart';
 
-import 'keywords.dart';
-import 'token.dart';
 import 'token_kind.dart';
 
+part 'keywords.dart';
 part 'literals.dart';
+part 'token.dart';
 
 /// Scans [source] using current Dart lexical rules.
 ///
@@ -37,10 +38,12 @@ final class ScanResult {
     this.source,
     List<Token> tokens,
     List<Token> comments,
-    List<Diagnostic> diagnostics,
+    List<Diagnostic>? diagnostics,
   ) : tokens = List.unmodifiable(tokens),
       comments = UnmodifiableListView(comments),
-      diagnostics = UnmodifiableListView(diagnostics);
+      diagnostics = diagnostics == null
+          ? const []
+          : UnmodifiableListView(diagnostics);
 
   /// Whether scanning found a lexical error.
   bool get hasErrors => diagnostics.isNotEmpty;
@@ -50,8 +53,8 @@ final class _Scanner(final SourceFile source) {
   final String _text = source.text;
   final _tokens = <Token>[];
   final _comments = <Token>[];
-  final _diagnostics = <Diagnostic>[];
-  final _interpolations = <_Interpolation>[];
+  List<Diagnostic>? _diagnostics;
+  _Interpolation? _interpolation;
   var _offset = 0;
 
   ScanResult scan() {
@@ -59,8 +62,7 @@ final class _Scanner(final SourceFile source) {
     while (_offset < _text.length) {
       _token();
     }
-    while (_interpolations.isNotEmpty) {
-      final state = _interpolations.removeLast();
+    for (var state = _interpolation; state != null; state = state.parent) {
       _report(
         'scanner.unterminated_interpolation',
         "Expected '}' to end the string interpolation.",
@@ -84,11 +86,11 @@ final class _Scanner(final SourceFile source) {
   }
 
   void _emit(TokenKind kind, int start) {
-    _tokens.add(Token(kind, source, start, _offset));
+    _tokens.add(Token._scanned(kind, source, start, _offset));
   }
 
   void _report(String code, String message, int start, int end) {
-    _diagnostics.add(
+    (_diagnostics ??= []).add(
       Diagnostic(
         code: code,
         severity: .error,
@@ -98,57 +100,67 @@ final class _Scanner(final SourceFile source) {
     );
   }
 
-  void _identifier({bool allowDollar = true}) {
+  void _identifier(int first, {bool allowDollar = true}) {
     final start = _offset;
     var end = start + 1;
-    while (end < _text.length) {
+    final steps = _keywords.steps;
+    var state = steps[first];
+    while (state != _identifierState && end < _text.length) {
       final code = _text.codeUnitAt(end);
-      final lower = code | 0x20;
-      if ((lower >= 0x61 && lower <= 0x7A) ||
-          (code >= 0x30 && code <= 0x39) ||
-          code == 0x5F ||
-          (allowDollar && code == 0x24)) {
+      if (code >= 128 || (code == 0x24 && !allowDollar)) break;
+      final next = steps[state * 128 + code];
+      if (next == 0) break;
+      state = next;
+      end++;
+    }
+    if (state == _identifierState) {
+      while (end < _text.length &&
+          _isIdentifierPart(_text.codeUnitAt(end), allowDollar)) {
         end++;
-      } else {
-        break;
       }
     }
     _offset = end;
-    _emit(keywordKind(_text, start, end), start);
+    _emit(_keywords.kinds[state] ?? .identifier, start);
   }
 
   void _token() {
-    final start = _offset;
-    final code = _text.codeUnitAt(start);
-    if (code == 0x20 || code == 0x09 || code == 0x0A || code == 0x0D) {
-      var end = _offset + 1;
-      while (end < _text.length) {
-        final next = _text.codeUnitAt(end);
-        if (next != 0x20 && next != 0x09 && next != 0x0A && next != 0x0D) break;
-        end++;
-      }
-      _offset = end;
-      return;
+    var start = _offset;
+    var code = _text.codeUnitAt(start);
+    if (_isSpace(code)) {
+      do {
+        if (++start == _text.length) {
+          _offset = start;
+          return;
+        }
+        code = _text.codeUnitAt(start);
+      } while (_isSpace(code));
+      _offset = start;
     }
     if (code == 0x27 || code == 0x22) {
       _startString(raw: false);
       return;
     }
-    if (code == 0x72 && (_peek(1) == 0x27 || _peek(1) == 0x22)) {
-      _startString(raw: true);
-      return;
+    if (code == 0x72) {
+      final next = _peek(1);
+      if (next == 0x27 || next == 0x22) {
+        _startString(raw: true);
+        return;
+      }
     }
     if (_isIdentifierStart(code)) {
-      _identifier();
+      _identifier(code);
       return;
     }
     if (_isDigit(code) || (code == 0x2E && _isDigit(_peek(1)))) {
       _number();
       return;
     }
-    if (code == 0x2F && (_peek(1) == 0x2F || _peek(1) == 0x2A)) {
-      _comment();
-      return;
+    if (code == 0x2F) {
+      final next = _peek(1);
+      if (next == 0x2F || next == 0x2A) {
+        _comment(line: next == 0x2F);
+        return;
+      }
     }
     if (start == 0 && code == 0x23 && _peek(1) == 0x21) {
       _offset = _lineEnd(_offset);
@@ -172,13 +184,12 @@ final class _Scanner(final SourceFile source) {
       case 0x5D:
         kind = .rightBracket;
       case 0x7B:
-        if (_interpolations.isNotEmpty) _interpolations.last.braceDepth++;
+        _interpolation?.braceDepth++;
         kind = .leftBrace;
       case 0x7D:
-        if (_interpolations.isNotEmpty) {
-          final state = _interpolations.last;
+        if (_interpolation case final state?) {
           if (state.braceDepth == 0) {
-            _interpolations.removeLast();
+            _interpolation = state.parent;
             _emit(.interpolationEnd, start);
             _stringContent(
               state.stringStart,
@@ -295,43 +306,48 @@ final class _Scanner(final SourceFile source) {
   }
 
   int _lineEnd(int offset) {
+    while (offset + 2 <= _text.length) {
+      if (_isLineBreak(_text.codeUnitAt(offset))) return offset;
+      if (_isLineBreak(_text.codeUnitAt(offset + 1))) return offset + 1;
+      offset += 2;
+    }
     while (offset < _text.length && !_isLineBreak(_text.codeUnitAt(offset))) {
       offset++;
     }
     return offset;
   }
 
-  void _comment() {
+  void _comment({required bool line}) {
     final start = _offset;
-    final line = _peek(1) == 0x2F;
-    _offset += 2;
     if (line) {
-      _offset = _lineEnd(_offset);
-    } else {
-      var depth = 1;
-      while (_offset < _text.length && depth > 0) {
-        if (_peek() == 0x2F && _peek(1) == 0x2A) {
-          depth++;
-          _offset += 2;
-        } else if (_peek() == 0x2A && _peek(1) == 0x2F) {
-          depth--;
-          _offset += 2;
-        } else {
-          _offset++;
-        }
-      }
-      if (depth != 0) {
-        _report(
-          'scanner.unterminated_comment',
-          "Expected '*/' to end the block comment.",
-          start,
-          _offset,
-        );
+      final end = _lineEnd(start + 2);
+      _comments.add(Token._scanned(.lineComment, source, start, end));
+      _offset = end < _text.length ? end + 1 : end;
+      return;
+    }
+    _offset += 2;
+    var depth = 1;
+    while (_offset < _text.length && depth > 0) {
+      final code = _text.codeUnitAt(_offset);
+      if (code == 0x2F && _peek(1) == 0x2A) {
+        depth++;
+        _offset += 2;
+      } else if (code == 0x2A && _peek(1) == 0x2F) {
+        depth--;
+        _offset += 2;
+      } else {
+        _offset++;
       }
     }
-    _comments.add(
-      Token(line ? .lineComment : .blockComment, source, start, _offset),
-    );
+    if (depth != 0) {
+      _report(
+        'scanner.unterminated_comment',
+        "Expected '*/' to end the block comment.",
+        start,
+        _offset,
+      );
+    }
+    _comments.add(Token._scanned(.blockComment, source, start, _offset));
   }
 }
 
@@ -342,10 +358,16 @@ bool _isHexDigit(int code) =>
     (code >= 0x41 && code <= 0x46) ||
     (code >= 0x61 && code <= 0x66);
 
-bool _isIdentifierStart(int code, {bool allowDollar = true}) =>
-    (code >= 0x41 && code <= 0x5A) ||
-    (code >= 0x61 && code <= 0x7A) ||
-    code == 0x5F ||
-    (allowDollar && code == 0x24);
+bool _isIdentifierStart(int code, {bool allowDollar = true}) {
+  final lower = code | 0x20;
+  return (lower >= 0x61 && lower <= 0x7A) ||
+      code == 0x5F ||
+      (allowDollar && code == 0x24);
+}
+
+bool _isIdentifierPart(int code, bool allowDollar) =>
+    _isIdentifierStart(code, allowDollar: allowDollar) || _isDigit(code);
 
 bool _isLineBreak(int code) => code == 0x0A || code == 0x0D;
+
+bool _isSpace(int code) => code == 0x20 || code == 0x09 || _isLineBreak(code);
