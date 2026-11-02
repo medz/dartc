@@ -256,18 +256,6 @@ extension on _Parser {
   }
 
   CollectionExpression closeCollection(_Collection frame, int end) {
-    if (trialStart != null &&
-        frame.opening == tokens[trialStart!] &&
-        current.kind == .rightBracket) {
-      final following = tokens[cursor + 1].kind;
-      initialOperatorBoundary =
-          following.precedence != 0 &&
-          following != .less &&
-          (following != .question ||
-              tokens[cursor + 2].kind != .leftBracket &&
-                  tokens[cursor + 2].kind != .emptyBrackets &&
-                  tokens[cursor + 2].kind != .emptyBracketsAssign);
-    }
     if (values.length > frame.valueBase ||
         operators.length > frame.operatorBase ||
         frame.prefix != null ||
@@ -275,21 +263,7 @@ extension on _Parser {
         frame.controls.isNotEmpty) {
       finishCollectionElement(frame);
     }
-    if (trialStart != null &&
-        frame.opening == tokens[trialStart!] &&
-        current.kind == .rightBracket &&
-        !hasSyntaxError &&
-        tokens[cursor - 1].kind != .comma) {
-      if (frame.elements case [final Expression expression]) {
-        lookahead.indexContents[trialStart!] = _IndexContent(
-          expression,
-          end,
-          cursor + 1,
-          diagnostics.isEmpty ? const [] : List<Diagnostic>.of(diagnostics),
-        );
-      }
-    }
-    return CollectionExpression(
+    final node = CollectionExpression(
       source: source,
       start: frame.start,
       end: end,
@@ -298,5 +272,15 @@ extension on _Parser {
       typeArguments: frame.typeArguments,
       elements: frame.elements,
     );
+    if (trialStart != null &&
+        frame.opening == tokens[trialStart!] &&
+        current.kind == .rightBracket &&
+        !hasSyntaxError &&
+        tokens[cursor - 1].kind != .comma &&
+        frame.elements.length == 1 &&
+        frame.elements.single is Expression) {
+      leadingList = node;
+    }
+    return node;
   }
 }

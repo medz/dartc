@@ -5,7 +5,7 @@ extension on _Parser {
     final next = tokens[cursor + 1].kind;
     if (next == .leftParen) return true;
     if (next != .less) return false;
-    final end = lookahead.delimiters.afterTypeArguments(cursor + 1);
+    final end = lookahead.afterTypeArguments(cursor + 1);
     return end != null && tokens[end].kind == .leftParen;
   }
 }

@@ -165,13 +165,9 @@ extension on _Parser {
           pendingSyntax = null;
           yield syntax;
         case .conditional:
-          var branches = lookahead.conditionals[cursor];
-          if (branches == null) {
-            final reader = _ConditionalReader(this);
-            yield reader;
-            branches = reader.result;
-          }
-          acceptConditional(branches);
+          final reader = _ConditionalReader(this);
+          yield reader;
+          acceptConditional(reader.result);
       }
       stop = null;
     }

@@ -16,7 +16,7 @@ extension on _Parser {
   int? outerPatternEnd() {
     var opening = cursor;
     if (current.kind == .less) {
-      final end = lookahead.delimiters.afterTypeArguments(opening);
+      final end = lookahead.afterTypeArguments(opening);
       if (end == null) return null;
       opening = end;
     } else if (current.kind.isIdentifier) {
@@ -27,7 +27,7 @@ extension on _Parser {
         opening++;
       }
       if (tokens[opening].kind == .less) {
-        final end = lookahead.delimiters.afterTypeArguments(opening);
+        final end = lookahead.afterTypeArguments(opening);
         if (end == null) return null;
         opening = end;
       }
@@ -43,7 +43,7 @@ extension on _Parser {
         tokens[opening].kind != .leftBrace) {
       return null;
     }
-    return lookahead.delimiters.closing(opening);
+    return lookahead.closing(opening);
   }
 
   bool get startsPatternAssignment {

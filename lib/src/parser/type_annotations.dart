@@ -36,11 +36,8 @@ sealed class _AnnotatedTypeFrame extends _TypeFrame {
   List<Annotation> metadata = const [];
 }
 
-final class _TypeArguments(
-  final Token opening,
-  final int index, {
-  final _TypeName? owner,
-}) extends _TypeFrame {
+final class _TypeArguments(final Token opening, {final _TypeName? owner})
+    extends _TypeFrame {
   final List<TypeAnnotation> arguments = [];
 }
 
@@ -79,7 +76,7 @@ final class _TypeReader(
     this.beforeParameter = beforeParameter;
     TypeAnnotation? value;
     if (arguments) {
-      frames.add(_TypeArguments(current, parser.cursor));
+      frames.add(_TypeArguments(current));
       parser.advance();
     }
     if (parameters) {
@@ -144,11 +141,6 @@ final class _TypeReader(
             start: frame.opening.start,
             end: end,
             arguments: frame.arguments,
-          );
-          parser._lookahead?.typeArguments[frame.index] = (
-            arguments,
-            parser.cursor,
-            parser.current,
           );
           final owner = frame.owner;
           if (owner == null) return complete(arguments);
@@ -239,11 +231,6 @@ final class _TypeReader(
           value = continueRecord(frame);
       }
     }
-    for (final frame in frames) {
-      if (frame is _TypeArguments) {
-        parser._lookahead?.typeArguments[frame.index] = null;
-      }
-    }
     // Without a following parameter name, the last outer Function starts a
     // function-form parameter, as in `int Function(int value)`.
     if (parameterFallback case (final type, final index)) {
@@ -297,22 +284,10 @@ final class _TypeReader(
       isVoid: token.kind == .keywordVoid && prefix == null,
     );
     if (current.kind == .less && !head.isVoid) {
-      final cache = parser._lookahead?.typeArguments;
-      if (cache != null && cache.containsKey(parser.cursor)) {
-        final cached = cache[parser.cursor];
-        if (cached == null) {
-          if (afterIsOrAs && frames.isEmpty) return namedType(head, null);
-          fail('expected_type', 'Expected a complete type argument list.');
-          return null;
-        }
-        parser.cursor = cached.$2;
-        parser.current = cached.$3;
-        return namedType(head, cached.$1);
-      }
       if (afterIsOrAs && frames.isEmpty) {
         relationalFallback = (head, parser.cursor);
       }
-      frames.add(_TypeArguments(current, parser.cursor, owner: head));
+      frames.add(_TypeArguments(current, owner: head));
       parser.advance();
       return null;
     }
@@ -476,7 +451,7 @@ extension on _Parser {
     final first = tokens[index].kind;
     var bareFunction = first == .keywordFunction;
     if (first == .leftParen) {
-      final end = lookahead.delimiters.closing(index);
+      final end = lookahead.closing(index);
       if (end == null) return null;
       index = end + 1;
     } else {
@@ -492,12 +467,12 @@ extension on _Parser {
         index++;
       }
       if (tokens[index].kind == .less) {
-        final end = lookahead.delimiters.afterTypeArguments(index);
+        final end = lookahead.afterTypeArguments(index);
         if (end == null) return null;
         index = end;
       }
       if (bareFunction && tokens[index].kind == .leftParen) {
-        final end = lookahead.delimiters.closing(index);
+        final end = lookahead.closing(index);
         if (end == null) return null;
         index = end + 1;
       }
@@ -511,12 +486,12 @@ extension on _Parser {
       final suffix = index;
       index++;
       if (tokens[index].kind == .less) {
-        final end = lookahead.delimiters.afterTypeArguments(index);
+        final end = lookahead.afterTypeArguments(index);
         if (end == null) return null;
         index = end;
       }
       if (tokens[index].kind != .leftParen) return suffix;
-      final end = lookahead.delimiters.closing(index);
+      final end = lookahead.closing(index);
       if (end == null) return null;
       index = end + 1;
       if (tokens[index].kind == .question) index++;

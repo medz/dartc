@@ -1,11 +1,11 @@
 import 'dart:collection';
+import 'dart:typed_data';
 
 import 'package:dartc/ast.dart';
 import 'package:dartc/diagnostics.dart';
 import 'package:dartc/scanner.dart';
 import 'package:dartc/source.dart';
 
-import 'selector_tail.dart';
 import 'string_sequence.dart';
 import 'delimiter_index.dart';
 import 'language_version.dart';
@@ -20,6 +20,7 @@ part 'record_types.dart';
 part 'collections.dart';
 part 'for_headers.dart';
 part 'conditionals.dart';
+part 'index_sequence.dart';
 part 'access_chains.dart';
 part 'statements.dart';
 part 'variables.dart';
@@ -96,20 +97,21 @@ final class _Parser {
   _Parser(ScanResult input, {this.languageVersion = LanguageVersion.current})
     : source = input.source,
       tokens = input.tokens,
+      lookahead = DelimiterIndex(input.tokens),
       current = input.tokens.first,
       trialStart = null,
       diagnostics = [...input.diagnostics];
 
-  _Parser.trial(_Parser parent)
+  _Parser.trial(_Parser parent, int question)
     : languageVersion = parent.languageVersion,
       source = parent.source,
       tokens = parent.tokens,
-      cursor = parent.cursor + 1,
-      current = parent.tokens[parent.cursor + 1],
+      cursor = question + 1,
+      current = parent.tokens[question + 1],
       diagnostics = [],
-      trialStart = parent.cursor + 1,
+      trialStart = question + 1,
       functionModifier = parent.functionModifier,
-      _lookahead = parent.lookahead;
+      lookahead = parent.lookahead;
 
   _Parser.nested(_Parser parent)
     : languageVersion = parent.languageVersion,
@@ -120,7 +122,7 @@ final class _Parser {
       diagnostics = [],
       trialStart = null,
       functionModifier = parent.functionModifier,
-      _lookahead = parent.lookahead;
+      lookahead = parent.lookahead;
 
   final LanguageVersion languageVersion;
   final SourceFile source;
@@ -134,12 +136,13 @@ final class _Parser {
   final List<int> questions = [];
   final List<_Frame> frames = [];
   final int? trialStart;
-  bool initialOperatorBoundary = false;
+  (int, _ConditionalBranches)? pendingBranches;
+  List<_IndexSequence>? indexSequences;
+  CollectionExpression? leadingList;
   int cursor = 0;
   // Either tokens[cursor] or its unconsumed suffix after a closing type angle.
   Token current;
-  _Lookahead? _lookahead;
-  _Lookahead get lookahead => _lookahead ??= _Lookahead(tokens);
+  final DelimiterIndex lookahead;
   bool expectsOperand = true;
   bool hasSyntaxError = false;
   // The last call/index chain and whether its ?[ selectors are already fixed
@@ -637,15 +640,25 @@ final class _Parser {
         openIndex(isNullAware: false);
         return false;
       case .question:
-        if (_lookahead?.conditionals[cursor]
-            case final _ConditionalBranches branches
-            when tokens[cursor + 1].kind != .leftBracket) {
+        if (pendingBranches case (final question, final branches)
+            when cursor == question) {
+          pendingBranches = null;
           acceptConditional(branches);
           return false;
         }
         if (tokens[cursor + 1].kind == .leftBracket) {
-          if (!(values.last == selectorTarget && checkedNullAware) &&
-              cursor < lookahead.lastColon) {
+          final sequence = indexSequences?.lastOrNull;
+          if (sequence != null && sequence.question == cursor) {
+            final arm = sequence.take();
+            if (arm != null &&
+                !(values.last == selectorTarget && checkedNullAware)) {
+              indexSequences!.removeLast();
+              pendingSyntax = _ChosenConditional(this, sequence, arm);
+              return false;
+            }
+            if (sequence.isDone) indexSequences!.removeLast();
+          } else if (!(values.last == selectorTarget && checkedNullAware) &&
+              lookahead.allowsConditional(cursor)) {
             return true;
           }
           advance();

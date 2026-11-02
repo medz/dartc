@@ -109,34 +109,28 @@ final class _MemberReader(
 ) extends _Reader<ClassMember> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
-    var external = false;
-    var isStatic = false;
-    var isAbstract = false;
-    var covariant = false;
-    final modifiers = <TokenKind>{};
-    while (parser.current.kind == .keywordExternal ||
-        parser.current.kind == .keywordStatic ||
-        parser.current.kind == .keywordAbstract ||
-        parser.current.kind == .keywordCovariant) {
+    const externalBit = 1, staticBit = 2, abstractBit = 4, covariantBit = 8;
+    var modifiers = 0;
+    while (true) {
       final token = parser.current;
-      if (parser.functionBodyAfterName(allowEmpty: true)) break;
-      if (!modifiers.add(token.kind)) {
+      final bit = switch (token.kind) {
+        .keywordExternal => externalBit,
+        .keywordStatic => staticBit,
+        .keywordAbstract => abstractBit,
+        .keywordCovariant => covariantBit,
+        _ => 0,
+      };
+      if (bit == 0 || parser.functionBodyAfterName(allowEmpty: true)) break;
+      if (modifiers & bit != 0) {
         parser.error('duplicate_modifier', 'Repeated member modifier.', token);
       }
-      switch (token.kind) {
-        case .keywordExternal:
-          external = true;
-        case .keywordStatic:
-          isStatic = true;
-        case .keywordAbstract:
-          isAbstract = true;
-        case .keywordCovariant:
-          covariant = true;
-        default:
-          break;
-      }
+      modifiers |= bit;
       parser.advance();
     }
+    final external = modifiers & externalBit != 0;
+    final isStatic = modifiers & staticBit != 0;
+    final isAbstract = modifiers & abstractBit != 0;
+    final covariant = modifiers & covariantBit != 0;
     var index = parser.cursor;
     if (isStatic && covariant) {
       parser.error(

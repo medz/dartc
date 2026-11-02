@@ -51,9 +51,7 @@ final class _LocalFunctionReader(
         if (!parser.tokens[end].kind.isIdentifier) return;
         var opening = end + 1;
         if (parser.tokens[opening].kind == .less) {
-          opening =
-              parser.lookahead.delimiters.afterTypeArguments(opening) ??
-              opening;
+          opening = parser.lookahead.afterTypeArguments(opening) ?? opening;
         }
         if (!parser.functionBodyFollows(opening)) return;
       }
@@ -126,14 +124,14 @@ extension on _Parser {
     if (tokens[index + 1].kind != .less) {
       if (!functionBodyFollows(opening, allowEmpty: allowEmpty)) return false;
     } else {
-      final end = lookahead.delimiters.afterTypeArguments(opening);
+      final end = lookahead.afterTypeArguments(opening);
       if (end == null || !functionBodyFollows(end, allowEmpty: allowEmpty)) {
         return false;
       }
       opening = end;
     }
     if (kind == .keywordFunction || kind.isVariableModifier) {
-      final following = tokens[lookahead.delimiters.closing(opening)! + 1].kind;
+      final following = tokens[lookahead.closing(opening)! + 1].kind;
       return following == .arrow ||
           following == .leftBrace ||
           allowEmpty && following == .semicolon;
@@ -143,7 +141,7 @@ extension on _Parser {
 
   bool functionBodyFollows(int opening, {bool allowEmpty = false}) {
     if (tokens[opening].kind != .leftParen) return false;
-    final end = lookahead.delimiters.closing(opening);
+    final end = lookahead.closing(opening);
     if (end == null) return false;
     return switch (tokens[end + 1].kind) {
       .arrow || .leftBrace || .keywordAsync || .keywordSync => true,
@@ -159,7 +157,7 @@ extension on _Parser {
     final start = current.start;
     final child = _Parser.nested(this);
     if (child.current.kind == .less) {
-      final end = lookahead.delimiters.afterTypeArguments(cursor);
+      final end = lookahead.afterTypeArguments(cursor);
       if (end == null || !functionBodyFollows(end)) return false;
     }
     pendingSyntax = _OperandReader(this, child, _ClosureReader(child, start));

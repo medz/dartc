@@ -140,7 +140,7 @@ final class _PatternReader(
     }
     var typedCollection = false;
     if (token.kind == .less) {
-      final end = parser.lookahead.delimiters.afterTypeArguments(parser.cursor);
+      final end = parser.lookahead.afterTypeArguments(parser.cursor);
       typedCollection =
           end != null &&
           switch (parser.tokens[end].kind) {

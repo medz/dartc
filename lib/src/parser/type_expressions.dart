@@ -113,28 +113,23 @@ extension on _Parser {
         !(first.kind.isIdentifier && tokens[cursor + 2].kind == .dot)) {
       return false;
     }
-    if (cursor >= lookahead.lastTypeArgumentCloser) return false;
+    final end = lookahead.afterTypeArguments(cursor);
+    if (end == null || !tokens[end].kind.followsTypeArguments) return false;
     final start = cursor;
     final remainder = current;
-    final cache = lookahead.typeArguments;
-    TypeArgumentList? arguments;
-    if (cache.containsKey(start)) {
-      final cached = cache[start];
-      if (cached == null) return false;
-      arguments = cached.$1;
-      cursor = cached.$2;
-      current = cached.$3;
-    } else {
-      final reader = _TypeReader(this);
-      if (!reader.start(arguments: true)) {
-        pendingSyntax = _SyntaxTask(
-          readTypeArgumentSuffix(reader, start, remainder, afterPrefix),
-        );
-        return true;
-      }
-      arguments = reader.result as TypeArgumentList?;
+    final reader = _TypeReader(this);
+    if (!reader.start(arguments: true)) {
+      pendingSyntax = _SyntaxTask(
+        readTypeArgumentSuffix(reader, start, remainder, afterPrefix),
+      );
+      return true;
     }
-    return acceptTypeArguments(arguments, start, remainder, afterPrefix);
+    return acceptTypeArguments(
+      reader.result as TypeArgumentList?,
+      start,
+      remainder,
+      afterPrefix,
+    );
   }
 
   Iterable<_Reader<Object?>> readTypeArgumentSuffix(

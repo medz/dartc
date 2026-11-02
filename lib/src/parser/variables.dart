@@ -17,9 +17,6 @@ final class _VariableReader(
   final bool forLoop = false,
   final bool allowConditional = true,
 }) extends _Reader<_VariableDeclarations?> {
-  int? expressionStart;
-  int? declarationEnd;
-
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final initialCursor = parser.cursor;
@@ -139,7 +136,6 @@ final class _VariableReader(
         parser.tokens[parser.cursor + 1].kind == .assign &&
         parser.tokens[parser.cursor - 1].kind == .question &&
         parser.cursor < parser.lookahead.lastColon) {
-      expressionStart = initialCursor;
       final question = parser.cursor - 1;
       result = _VariableDeclarations(
         first.start,
@@ -148,16 +144,19 @@ final class _VariableReader(
         type,
         parser.readVariableName(),
       );
-      declarationEnd = parser.cursor;
+      final declarationEnd = parser.cursor;
       parser.cursor = question;
       parser.current = parser.tokens[question];
-      var branches = parser.lookahead.conditionals[question];
-      if (branches == null) {
-        final reader = _ConditionalReader(parser);
-        yield reader;
-        branches = reader.result;
+      final reader = _ConditionalReader(parser);
+      yield reader;
+      if (reader.result case final _ConditionalBranches branches) {
+        parser.pendingBranches = (question, branches);
+        parser.cursor = initialCursor;
+        result = null;
+      } else {
+        parser.cursor = declarationEnd;
       }
-      select(branches);
+      parser.current = parser.tokens[parser.cursor];
       return;
     }
     result = _VariableDeclarations(
@@ -175,16 +174,6 @@ final class _VariableReader(
     return end == null ||
         parser.tokens[end].kind.isIdentifier &&
             parser.tokens[end + 1].kind.followsVariableName;
-  }
-
-  void select(_ConditionalResult branches) {
-    if (branches is _ConditionalBranches) {
-      parser.cursor = expressionStart!;
-      result = null;
-    } else {
-      parser.cursor = declarationEnd!;
-    }
-    parser.current = parser.tokens[parser.cursor];
   }
 }
 

@@ -405,12 +405,12 @@ extension on _Parser {
   bool functionParameterAfterName() {
     var opening = cursor + 1;
     if (tokens[opening].kind == .less) {
-      final end = lookahead.delimiters.afterTypeArguments(opening);
+      final end = lookahead.afterTypeArguments(opening);
       if (end == null) return false;
       opening = end;
     }
     if (tokens[opening].kind != .leftParen) return false;
-    final closing = lookahead.delimiters.closing(opening);
+    final closing = lookahead.closing(opening);
     if (closing == null) return false;
     var following = closing + 1;
     if (tokens[following].kind == .question) following++;
