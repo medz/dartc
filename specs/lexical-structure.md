@@ -20,7 +20,7 @@
 
 ## 扫描 API
 
-`package:dartc/scanner.dart` 接受源码快照，保留原始拼写及 UTF-16 区间。调用方负责提供已解码的文本。非法字符会产生诊断并保留 invalid token，扫描继续到 EOF。
+`package:dartc/scanner.dart` 接受源码快照，保留原始拼写及 UTF-16 区间。调用方负责提供已解码的文本。非法字符会产生诊断并保留 invalid token，扫描继续到 EOF。parser 在恢复时跳过非法空白。U+001F 等非法标识符字符则计入恢复后的名字区间。两种情况都保留原始词法诊断。
 
 ```dart
 import 'package:dartc/scanner.dart';

@@ -1,14 +1,14 @@
 part of 'parser.dart';
 
 final class _ClosureReader(final _Parser parser, final int start)
-    extends _Reader<FunctionExpression> {
+    extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
-    TypeParameterList? typeParameters;
+    int? typeParameters;
     if (parser.current.kind == .less) {
       final reader = _TypeReader(parser);
       if (!reader.start(parameters: true)) yield _TypeTask(reader);
-      typeParameters = reader.result as TypeParameterList?;
+      typeParameters = parser.arena.asTypeParameterListOrNull(reader.result);
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
       }
@@ -17,10 +17,9 @@ final class _ClosureReader(final _Parser parser, final int start)
     yield parameters;
     final body = _BodyReader(parser, declaration: false);
     yield body;
-    result = FunctionExpression(
-      source: parser.source,
+    result = parser.arena.putFunctionExpression(
       start: start,
-      end: body.result.end,
+      end: parser.arena.rEnd(body.result),
       typeParameters: typeParameters,
       parameters: parameters.result,
       body: body.result,
@@ -32,11 +31,11 @@ final class _LocalFunctionReader(
   final _Parser parent,
   final _Parser parser,
   final int start,
-) extends _Reader<LocalFunctionDeclaration?> {
-  List<Annotation> metadata = const [];
-  TypeAnnotation? returnType;
-  Identifier? name;
-  TypeParameterList? typeParameters;
+) extends _Reader<int?> {
+  List<int> metadata = const [];
+  int? returnType;
+  int? name;
+  int? typeParameters;
 
   bool hasHead = false;
 
@@ -51,18 +50,16 @@ final class _LocalFunctionReader(
         if (!parser.tokens[end].kind.isIdentifier) return;
         var opening = end + 1;
         if (parser.tokens[opening].kind == .less) {
-          opening =
-              parser.lookahead.delimiters.afterTypeArguments(opening) ??
-              opening;
+          opening = parser.lookahead.afterTypeArguments(opening) ?? opening;
         }
         if (!parser.functionBodyFollows(opening)) return;
       }
     }
-    TypeAnnotation? parsed;
-    if (!untyped && parser.canStartTypeBeforeName) {
+    int? parsed;
+    if (!untyped && parser.canStartTypeBeforeName()) {
       final reader = _TypeReader(parser, beforeFunction: true);
       if (!reader.start()) yield _TypeTask(reader);
-      parsed = reader.result as TypeAnnotation?;
+      parsed = parser.arena.asTypeAnnotationOrNull(reader.result);
     }
     if (parsed != null && parser.current.kind.isIdentifier) {
       returnType = parsed;
@@ -76,7 +73,7 @@ final class _LocalFunctionReader(
     if (parser.current.kind == .less) {
       final reader = _TypeReader(parser);
       if (!reader.start(parameters: true)) yield _TypeTask(reader);
-      typeParameters = reader.result as TypeParameterList?;
+      typeParameters = parser.arena.asTypeParameterListOrNull(reader.result);
       if (typeParameters == null) return;
     }
     hasHead = parser.functionBodyFollows(parser.cursor);
@@ -102,10 +99,9 @@ final class _LocalFunctionReader(
     yield parameters;
     final body = _BodyReader(parser);
     yield body;
-    result = LocalFunctionDeclaration(
-      source: parser.source,
+    result = parser.arena.putLocalFunctionDeclaration(
       start: start,
-      end: body.result.end,
+      end: parser.arena.rEnd(body.result),
       metadata: metadata,
       returnType: returnType,
       name: name!,
@@ -126,14 +122,14 @@ extension on _Parser {
     if (tokens[index + 1].kind != .less) {
       if (!functionBodyFollows(opening, allowEmpty: allowEmpty)) return false;
     } else {
-      final end = lookahead.delimiters.afterTypeArguments(opening);
+      final end = lookahead.afterTypeArguments(opening);
       if (end == null || !functionBodyFollows(end, allowEmpty: allowEmpty)) {
         return false;
       }
       opening = end;
     }
     if (kind == .keywordFunction || kind.isVariableModifier) {
-      final following = tokens[lookahead.delimiters.closing(opening)! + 1].kind;
+      final following = tokens[lookahead.closing(opening)! + 1].kind;
       return following == .arrow ||
           following == .leftBrace ||
           allowEmpty && following == .semicolon;
@@ -143,7 +139,7 @@ extension on _Parser {
 
   bool functionBodyFollows(int opening, {bool allowEmpty = false}) {
     if (tokens[opening].kind != .leftParen) return false;
-    final end = lookahead.delimiters.closing(opening);
+    final end = lookahead.closing(opening);
     if (end == null) return false;
     return switch (tokens[end + 1].kind) {
       .arrow || .leftBrace || .keywordAsync || .keywordSync => true,
@@ -159,7 +155,7 @@ extension on _Parser {
     final start = current.start;
     final child = _Parser.nested(this);
     if (child.current.kind == .less) {
-      final end = lookahead.delimiters.afterTypeArguments(cursor);
+      final end = lookahead.afterTypeArguments(cursor);
       if (end == null || !functionBodyFollows(end)) return false;
     }
     pendingSyntax = _OperandReader(this, child, _ClosureReader(child, start));
@@ -180,7 +176,7 @@ extension on _Parser {
       return null;
     }
     if (current.kind != .at &&
-        !canStartTypeBeforeName &&
+        !canStartTypeBeforeName() &&
         tokens[cursor + 1].kind != .leftParen &&
         tokens[cursor + 1].kind != .less) {
       return null;

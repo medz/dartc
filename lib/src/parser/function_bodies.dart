@@ -23,7 +23,7 @@ ParseResult<FunctionBody> parseFunctionBody(
 }
 
 final class _BodyReader(final _Parser parser, {final bool declaration = true})
-    extends _Reader<FunctionBody> {
+    extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final start = parser.current.start;
@@ -71,8 +71,7 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
             );
           }
           parser.advance();
-          result = EmptyFunctionBody(
-            source: parser.source,
+          result = parser.arena.putEmptyFunctionBody(
             start: start,
             end: token.end,
           );
@@ -89,10 +88,11 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
           final reader = _ExpressionReader(parser);
           if (!reader.start()) yield reader;
           final expression = reader.result;
-          result = ExpressionFunctionBody(
-            source: parser.source,
+          result = parser.arena.putExpressionFunctionBody(
             start: start,
-            end: declaration ? parser.expect(.semicolon) : expression.end,
+            end: declaration
+                ? parser.expect(.semicolon)
+                : parser.arena.rEnd(expression),
             isAsync: parser.inAsync,
             expression: expression,
           );
@@ -100,14 +100,13 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
         case .leftBrace:
           final reader = _StatementReader(parser, requireBlock: true);
           yield reader;
-          final block = reader.result as BlockStatement;
+          final block = parser.arena.asBlockStatement(reader.result);
           final modifier = parser.functionModifier;
           result = modifier == null
               ? block
-              : ModifiedBlockFunctionBody(
-                  source: parser.source,
+              : parser.arena.putModifiedBlockFunctionBody(
                   start: start,
-                  end: block.end,
+                  end: parser.arena.rEnd(block),
                   modifier: modifier,
                   block: block,
                 );
@@ -118,8 +117,7 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
             'Expected a function body.',
             parser.current,
           );
-          result = MissingFunctionBody(
-            source: parser.source,
+          result = parser.arena.putMissingFunctionBody(
             offset: parser.current.start,
           );
       }

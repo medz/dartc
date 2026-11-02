@@ -2,91 +2,122 @@ import 'dart:typed_data';
 
 import 'package:dartc/scanner.dart';
 
-// Parser lookahead only: pairing does not diagnose mismatched delimiters.
-// Different delimiter kinds stay independent so recovery can find a closer
-// beyond an unmatched delimiter of another kind.
-final class DelimiterIndex(final List<Token> _tokens) {
-  // Skips a possible type argument/parameter list without parsing annotations.
-  // The type reader still validates the candidate. Parentheses, brackets and
-  // braces hide expression operators from the angle count.
-  int? afterTypeArguments(int start) {
-    if (_typeEnds.containsKey(start)) return _typeEnds[start];
-    final pending = [start];
-    for (var index = start + 1; index < _tokens.length; index++) {
-      final kind = _tokens[index].kind;
-      if (kind == .leftParen || kind == .leftBracket || kind == .leftBrace) {
-        final end = closing(index);
-        if (end == null) break;
-        index = end;
-      } else if (kind == .less) {
-        pending.add(index);
-      } else {
-        final count = switch (kind) {
-          .greater || .greaterEqual => 1,
-          .shiftRight || .shiftRightAssign => 2,
-          .unsignedShiftRight || .unsignedShiftRightAssign => 3,
-          _ => 0,
-        };
-        for (var consumed = 1; consumed <= count; consumed++) {
-          final opening = pending.removeLast();
-          final end = consumed == _tokens[index].length ? index + 1 : null;
-          _typeEnds[opening] = end;
-          if (pending.isEmpty) return end;
-        }
-        if (kind == .semicolon ||
-            kind == .rightParen ||
-            kind == .rightBracket ||
-            kind == .rightBrace ||
-            kind == .eof) {
+// Opening tokens point past their closer. A zero link means no complete pair.
+final class DelimiterIndex {
+  DelimiterIndex(List<Token> tokens)
+    : _links = tokens.length < 1 << 30
+          ? Uint32List(tokens.length)
+          : Uint64List(tokens.length) {
+    final parentheses = <int>[], brackets = <int>[], braces = <int>[];
+    // The high bits count consumed '>' characters in a compound token.
+    final shift = tokens.length < 1 << 30 ? 30 : 60;
+    final mask = (1 << shift) - 1;
+    var next = 0;
+    var available = 0, last = -1;
+    for (var i = tokens.length - 1; i >= 0; i--) {
+      final kind = tokens[i].kind;
+      switch (kind) {
+        case .greater ||
+            .greaterEqual ||
+            .shiftRight ||
+            .shiftRightAssign ||
+            .unsignedShiftRight ||
+            .unsignedShiftRightAssign:
+          _links[i] = next;
+          next = i + 1;
+        case .less when next != 0:
+          final end = next & mask;
+          final token = tokens[end - 1];
+          final used = (next >> shift) + 1;
+          if (used == token.length) _links[i] = end;
+          final count = switch (token.kind) {
+            .greater || .greaterEqual => 1,
+            .shiftRight || .shiftRightAssign => 2,
+            _ => 3,
+          };
+          next = used == count ? _links[end - 1] : end | (used << shift);
+        case .rightParen || .rightBracket || .rightBrace:
+          final stack = switch (kind) {
+            .rightParen => parentheses,
+            .rightBracket => brackets,
+            _ => braces,
+          };
+          stack.add(i);
+          stack.add(available);
+          _links[i] = next;
+          next = available = 0;
+        case .leftParen || .leftBracket || .leftBrace:
+          final stack = switch (kind) {
+            .leftParen => parentheses,
+            .leftBracket => brackets,
+            _ => braces,
+          };
+          if (stack.isEmpty) {
+            next = available = 0;
+          } else {
+            available = stack.removeLast();
+            final close = stack.removeLast();
+            _links[i] = close + 1;
+            next = _links[close];
+          }
+        case .colon:
+          if (last < 0) last = i;
+          _links[i] = available;
+          available = i + 1;
+        case .question:
+          _links[i] = available;
+          // An ordinary conditional consumes a colon before an outer trial can use it.
+          if (available != 0 && i > 0 && _plainQuestion(tokens, i)) {
+            available = _links[available - 1];
+          }
+        case .semicolon:
+          next = available = 0;
+        default:
           break;
-        }
       }
     }
-    for (final opening in pending) {
-      _typeEnds[opening] = null;
-    }
-    return null;
+    lastColon = last;
   }
 
-  late final Map<int, int?> _typeEnds = {};
+  late final int lastColon;
+  final List<int> _links;
 
-  // Returns the matching token index, or null for an unclosed delimiter.
-  int? closing(int start) {
-    final opening = _tokens[start].kind;
-    final closing = switch (opening) {
-      TokenKind.leftParen => TokenKind.rightParen,
-      TokenKind.leftBracket => TokenKind.rightBracket,
-      TokenKind.leftBrace => TokenKind.rightBrace,
-      _ => throw ArgumentError.value(
-        start,
-        'start',
-        'Expected an opening delimiter.',
-      ),
-    };
-    if (_tokens[start + 1].kind == closing) return start + 1;
-    if (_tokens[start + 1].kind != opening &&
-        start + 2 < _tokens.length &&
-        _tokens[start + 2].kind == closing) {
-      return start + 2;
-    }
-    final known = _ends[start];
-    if (known != 0) return known == -1 ? null : known - 1;
-    final pending = [start];
-    for (var index = start + 1; index < _tokens.length; index++) {
-      final kind = _tokens[index].kind;
-      if (kind == opening) {
-        pending.add(index);
-      } else if (kind == closing) {
-        _ends[pending.removeLast()] = index + 1;
-        if (pending.isEmpty) return index;
-      }
-    }
-    for (final index in pending) {
-      _ends[index] = -1;
-    }
-    return null;
+  bool allowsConditional(int question) => _links[question] != 0;
+
+  int? afterTypeArguments(int opening) {
+    final end = _links[opening];
+    return end == 0 ? null : end;
   }
 
-  // Zero is unknown, -1 is unclosed, and a positive value is the end plus one.
-  late final Int64List _ends = Int64List(_tokens.length);
+  int? closing(int opening) {
+    final end = _links[opening];
+    return end == 0 ? null : end - 1;
+  }
+}
+
+bool _plainQuestion(List<Token> tokens, int i) {
+  final left = tokens[i - 1].kind;
+  final right = tokens[i + 1].kind;
+  if (left == .rightBracket && right != .leftBracket) return true;
+  if (left != .identifier) return false;
+  if (right == .integer ||
+      right == .doubleLiteral ||
+      right == .hexadecimalInteger ||
+      right == .keywordTrue ||
+      right == .keywordFalse ||
+      right == .keywordNull) {
+    return true;
+  }
+  if (right != .identifier) return false;
+  return switch (tokens[i + 2].kind) {
+    .assign ||
+    .semicolon ||
+    .comma ||
+    .keywordIn ||
+    .rightParen ||
+    .rightBrace ||
+    .rightBracket ||
+    .eof => false,
+    _ => true,
+  };
 }

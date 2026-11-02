@@ -23,7 +23,7 @@ ParseResult<FormalParameterList> parseFormalParameterList(
 }
 
 final class _ParameterList(final Token opening, {final _Formal? owner}) {
-  final List<FormalParameter> parameters = [];
+  final List<int> parameters = [];
   FormalParameterKind kind = .requiredPositional;
   TokenKind? optionalClose;
   int groupStart = 0;
@@ -32,25 +32,26 @@ final class _ParameterList(final Token opening, {final _Formal? owner}) {
 }
 
 final class _Formal(
+  final AstArena arena,
   final int start,
-  final List<Annotation> metadata,
+  final List<int> metadata,
   final FormalParameterKind kind,
   final ParameterPrefix prefix,
   final VariableKeyword keyword,
   final bool isCovariant,
-  final TypeAnnotation? type,
-  final Identifier name,
+  final int? type,
+  final int name,
 ) {
-  TypeParameterList? typeParameters;
-  FunctionParameterSuffix? suffix;
-  int get end => suffix?.end ?? name.end;
+  int? typeParameters;
+  int? suffix;
+  int get end => arena.rEndOrNull(suffix) ?? arena.rEnd(name);
 }
 
 final class _ParameterReader(
   final _Parser parser, {
   final bool function = false,
   final bool allowCovariant = true,
-}) extends _Reader<FormalParameterList> {
+}) extends _Reader<int> {
   final List<_ParameterList> frames = [];
 
   SourceFile get source => parser.source;
@@ -72,10 +73,11 @@ final class _ParameterReader(
           final owner = frame.owner!;
           final question = current.kind == .question ? current.start : null;
           if (question != null) parser.advance();
-          owner.suffix = FunctionParameterSuffix(
-            source: source,
-            start: owner.typeParameters?.start ?? result.start,
-            end: question == null ? result.end : question + 1,
+          owner.suffix = parser.arena.putFunctionParameterSuffix(
+            start:
+                parser.arena.rStartOrNull(owner.typeParameters) ??
+                parser.arena.rStart(result),
+            end: question == null ? parser.arena.rEnd(result) : question + 1,
             typeParameters: owner.typeParameters,
             parameters: result,
             questionOffset: question,
@@ -83,7 +85,7 @@ final class _ParameterReader(
           continue;
         }
         final start = current.start;
-        List<Annotation> metadata = const [];
+        List<int> metadata = const [];
         if (current.kind == .at) {
           final reader = _MetadataReader(parser);
           yield reader;
@@ -95,12 +97,13 @@ final class _ParameterReader(
           final start = current.start;
           final reader = _TypeReader(parser);
           if (!reader.start(parameters: true)) yield _TypeTask(reader);
-          formal.typeParameters = reader.result as TypeParameterList?;
+          formal.typeParameters = parser.arena.asTypeParameterListOrNull(
+            reader.result,
+          );
           if (reader.failure case final failure?) {
             parser.error(failure.$1, failure.$2, failure.$3);
           }
-          formal.typeParameters ??= TypeParameterList(
-            source: source,
+          formal.typeParameters ??= parser.arena.putTypeParameterList(
             start: start,
             end: current.start,
             parameters: const [],
@@ -111,7 +114,31 @@ final class _ParameterReader(
           continue;
         }
       }
-      yield* finishParameter(frame);
+      final formal = frame.pending!;
+      int? defaultClause;
+      if (current.kind == .assign || current.kind == .colon) {
+        final separator = current;
+        if (formal.kind == .requiredPositional ||
+            formal.kind == .optionalPositional && separator.kind == .colon ||
+            frame.owner != null) {
+          parser.error(
+            'invalid_parameter_default',
+            'This parameter cannot have this default clause.',
+            separator,
+          );
+        }
+        parser.advance();
+        final reader = _ExpressionReader(parser);
+        if (!reader.start()) yield reader;
+        final value = reader.result;
+        defaultClause = parser.arena.putParameterDefault(
+          start: separator.start,
+          end: parser.arena.rEnd(value),
+          separator: separator.kind == .assign ? .equals : .colon,
+          value: value,
+        );
+      }
+      finishParameter(frame, defaultClause);
     }
   }
 
@@ -174,12 +201,12 @@ final class _ParameterReader(
   Iterable<_Reader<Object?>> head(
     _ParameterList frame,
     int start,
-    List<Annotation> metadata,
+    List<int> metadata,
   ) sync* {
     var required = false;
     var covariant = false;
     var keyword = VariableKeyword.none;
-    TypeAnnotation? type;
+    int? type;
     var modifierOrder = -1;
     while (current.kind.isFormalModifier &&
         current.kind.isWrittenModifier(next.kind)) {
@@ -189,7 +216,7 @@ final class _ParameterReader(
         parser.advance();
         final reader = _TypeReader(parser);
         if (!reader.start(beforeParameter: true)) yield _TypeTask(reader);
-        final parsed = reader.result as TypeAnnotation?;
+        final parsed = parser.arena.asTypeAnnotationOrNull(reader.result);
         if (parsed == null ||
             !(current.kind.isIdentifier ||
                 current.kind == .keywordThis ||
@@ -276,14 +303,12 @@ final class _ParameterReader(
       if (type != null) break;
       parser.advance();
     }
-    if (type == null &&
-        current.kind != .keywordThis &&
-        current.kind != .keywordSuper) {
+    if (type == null && parser.canStartTypeBeforeName(allowReceiver: true)) {
       final index = parser.cursor;
       final token = current;
       final reader = _TypeReader(parser);
       if (!reader.start(beforeParameter: true)) yield _TypeTask(reader);
-      final parsed = reader.result as TypeAnnotation?;
+      final parsed = parser.arena.asTypeAnnotationOrNull(reader.result);
       if (parsed != null &&
           (current.kind.isIdentifier ||
               current.kind == .keywordThis ||
@@ -302,6 +327,7 @@ final class _ParameterReader(
     }
     final name = parser.readVariableName();
     frame.pending = _Formal(
+      parser.arena,
       start,
       metadata,
       required && frame.kind == .optionalNamed ? .requiredNamed : frame.kind,
@@ -313,37 +339,12 @@ final class _ParameterReader(
     );
   }
 
-  Iterable<_Reader<Object?>> finishParameter(_ParameterList frame) sync* {
+  void finishParameter(_ParameterList frame, int? defaultClause) {
     final formal = frame.pending!;
-    ParameterDefault? defaultClause;
-    if (current.kind == .assign || current.kind == .colon) {
-      final separator = current;
-      if (formal.kind == .requiredPositional ||
-          formal.kind == .optionalPositional && separator.kind == .colon ||
-          frame.owner != null) {
-        parser.error(
-          'invalid_parameter_default',
-          'This parameter cannot have this default clause.',
-          separator,
-        );
-      }
-      parser.advance();
-      final reader = _ExpressionReader(parser);
-      if (!reader.start()) yield reader;
-      final value = reader.result;
-      defaultClause = ParameterDefault(
-        source: source,
-        start: separator.start,
-        end: value.end,
-        separator: separator.kind == .assign ? .equals : .colon,
-        value: value,
-      );
-    }
     frame.parameters.add(
-      FormalParameter(
-        source: source,
+      parser.arena.putFormalParameter(
         start: formal.start,
-        end: defaultClause?.end ?? formal.end,
+        end: parser.arena.rEndOrNull(defaultClause) ?? formal.end,
         metadata: formal.metadata,
         kind: formal.kind,
         prefix: formal.prefix,
@@ -375,14 +376,13 @@ final class _ParameterReader(
     }
   }
 
-  FormalParameterList close(_ParameterList frame) {
+  int close(_ParameterList frame) {
     if (frame.optionalClose != null && !frame.groupClosed) {
       parser.expect(frame.optionalClose!);
     }
     final end = parser.expect(.rightParen);
     frames.removeLast();
-    return FormalParameterList(
-      source: source,
+    return parser.arena.putFormalParameterList(
       start: frame.opening.start,
       end: end,
       parameters: frame.parameters,
@@ -391,13 +391,19 @@ final class _ParameterReader(
 }
 
 extension on _Parser {
-  void checkSetterParameters(FormalParameterList parameters) {
-    if (parameters.parameters.length != 1 ||
-        parameters.parameters.single.kind != .requiredPositional) {
+  void checkSetterParameters(int parameters) {
+    if (arena.childCount(parameters) != 1 ||
+        arena.rFormalParameterKind(arena.childIndex(parameters, 0)) !=
+            .requiredPositional) {
       error(
         'invalid_setter_parameters',
         'A setter requires exactly one required positional parameter.',
-        Token(.invalid, source, parameters.start, parameters.end),
+        Token(
+          .invalid,
+          source,
+          arena.rStart(parameters),
+          arena.rEnd(parameters),
+        ),
       );
     }
   }
@@ -405,12 +411,12 @@ extension on _Parser {
   bool functionParameterAfterName() {
     var opening = cursor + 1;
     if (tokens[opening].kind == .less) {
-      final end = lookahead.delimiters.afterTypeArguments(opening);
+      final end = lookahead.afterTypeArguments(opening);
       if (end == null) return false;
       opening = end;
     }
     if (tokens[opening].kind != .leftParen) return false;
-    final closing = lookahead.delimiters.closing(opening);
+    final closing = lookahead.closing(opening);
     if (closing == null) return false;
     var following = closing + 1;
     if (tokens[following].kind == .question) following++;

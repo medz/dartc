@@ -5,21 +5,20 @@ extension on _Parser {
     if (current.kind != .keywordVar && current.kind != .keywordFinal) {
       return false;
     }
-    final child = _Parser.nested(this)..advance();
-    final end = child.outerPatternEnd();
+    final next = cursor + 1;
+    final end = outerPatternEnd(next, tokens[next].kind);
     return end != null &&
-        (child.tokens[end].kind == .emptyBracketsAssign ||
-            child.tokens[end + 1].kind == .assign ||
-            child.tokens[end + 1].kind == .keywordIn);
+        (tokens[end].kind == .emptyBracketsAssign ||
+            tokens[end + 1].kind == .assign ||
+            tokens[end + 1].kind == .keywordIn);
   }
 
-  int? outerPatternEnd() {
-    var opening = cursor;
-    if (current.kind == .less) {
-      final end = lookahead.delimiters.afterTypeArguments(opening);
+  int? outerPatternEnd(int opening, TokenKind kind) {
+    if (kind == .less) {
+      final end = lookahead.afterTypeArguments(opening);
       if (end == null) return null;
       opening = end;
-    } else if (current.kind.isIdentifier) {
+    } else if (kind.isIdentifier) {
       opening++;
       if (tokens[opening].kind == .dot) {
         opening++;
@@ -27,7 +26,7 @@ extension on _Parser {
         opening++;
       }
       if (tokens[opening].kind == .less) {
-        final end = lookahead.delimiters.afterTypeArguments(opening);
+        final end = lookahead.afterTypeArguments(opening);
         if (end == null) return null;
         opening = end;
       }
@@ -43,29 +42,29 @@ extension on _Parser {
         tokens[opening].kind != .leftBrace) {
       return null;
     }
-    return lookahead.delimiters.closing(opening);
+    return lookahead.closing(opening);
   }
 
   bool get startsPatternAssignment {
-    final end = outerPatternEnd();
+    final end = outerPatternEnd(cursor, current.kind);
     return end != null &&
         (tokens[end].kind == .emptyBracketsAssign ||
             tokens[end + 1].kind == .assign);
   }
 
   bool parsePatternAssignment() {
-    if (current.kind != .leftParen &&
-        current.kind != .leftBracket &&
-        current.kind != .leftBrace &&
-        current.kind != .emptyBracketsAssign &&
-        current.kind != .less &&
-        !(current.kind.isIdentifier &&
-            (tokens[cursor + 1].kind == .leftParen ||
-                tokens[cursor + 1].kind == .dot ||
-                tokens[cursor + 1].kind == .less))) {
+    final kind = current.kind;
+    if (kind.isIdentifier) {
+      final next = tokens[cursor + 1].kind;
+      if (next != .leftParen && next != .dot && next != .less) return false;
+    } else if (kind != .leftParen &&
+        kind != .leftBracket &&
+        kind != .leftBrace &&
+        kind != .emptyBracketsAssign &&
+        kind != .less) {
       return false;
     }
-    final end = outerPatternEnd();
+    final end = outerPatternEnd(cursor, kind);
     if (end == null ||
         tokens[end].kind != .emptyBracketsAssign &&
             tokens[end + 1].kind != .assign) {
@@ -91,7 +90,7 @@ extension on _Parser {
 }
 
 final class _PatternAssignmentReader(final _Parser parser)
-    extends _Reader<Expression> {
+    extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final pattern = _PatternReader(parser, context: .assignment);
@@ -99,10 +98,9 @@ final class _PatternAssignmentReader(final _Parser parser)
     parser.expect(.assign);
     final value = _ExpressionReader(parser);
     if (!value.start()) yield value;
-    result = PatternAssignmentExpression(
-      source: parser.source,
-      start: pattern.result.start,
-      end: value.result.end,
+    result = parser.arena.putPatternAssignmentExpression(
+      start: parser.arena.rStart(pattern.result),
+      end: parser.arena.rEnd(value.result),
       pattern: pattern.result,
       value: value.result,
     );
@@ -111,8 +109,8 @@ final class _PatternAssignmentReader(final _Parser parser)
 
 final class _PatternDeclarationReader(
   final _Parser parser, {
-  final List<Annotation> metadata = const [],
-}) extends _Reader<PatternVariableDeclaration> {
+  final List<int> metadata = const [],
+}) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final token = parser.current;
@@ -122,10 +120,9 @@ final class _PatternDeclarationReader(
     parser.expect(.assign);
     final value = _ExpressionReader(parser);
     if (!value.start()) yield value;
-    result = PatternVariableDeclaration(
-      source: parser.source,
-      start: metadata.firstOrNull?.start ?? token.start,
-      end: value.result.end,
+    result = parser.arena.putPatternVariableDeclaration(
+      start: parser.arena.rStartOrNull(metadata.firstOrNull) ?? token.start,
+      end: parser.arena.rEnd(value.result),
       metadata: metadata,
       isFinal: token.kind == .keywordFinal,
       pattern: pattern.result,
@@ -160,12 +157,12 @@ final class _ForDeclarationReader(final _Parser parent, final _ForHeader frame)
     child.advance();
     final pattern = _PatternReader(child, context: .declaration);
     yield pattern;
-    final start = frame.metadata.firstOrNull?.start ?? token.start;
+    final start =
+        parent.arena.rStartOrNull(frame.metadata.firstOrNull) ?? token.start;
     if (child.current.kind == .keywordIn) {
-      frame.target = PatternForInBinding(
-        source: child.source,
+      frame.target = parent.arena.putPatternForInBinding(
         start: start,
-        end: pattern.result.end,
+        end: parent.arena.rEnd(pattern.result),
         metadata: frame.metadata,
         isFinal: token.kind == .keywordFinal,
         pattern: pattern.result,
@@ -176,10 +173,9 @@ final class _ForDeclarationReader(final _Parser parent, final _ForHeader frame)
       child.expect(.assign);
       final value = _ExpressionReader(child);
       if (!value.start()) yield value;
-      frame.initializer = PatternVariableDeclaration(
-        source: child.source,
+      frame.initializer = parent.arena.putPatternVariableDeclaration(
         start: start,
-        end: value.result.end,
+        end: parent.arena.rEnd(value.result),
         metadata: frame.metadata,
         isFinal: token.kind == .keywordFinal,
         pattern: pattern.result,

@@ -21,6 +21,31 @@ TopLevelDeclaration declaration(String text) {
 }
 
 void main() {
+  test(
+    'enum metadata, constants and members select their own child ranges',
+    () {
+      final node = declaration(
+        '@A @B enum E { first, second; const E(); int get tag => 0; }',
+      ) as EnumDeclaration;
+      expect(node.metadata.map((n) => n.text), ['@A', '@B']);
+      expect(node.constants.map((n) => n.name.text), ['first', 'second']);
+      expect(node.members.map((n) => n.text), [
+        'const E();',
+        'int get tag => 0;',
+      ]);
+      expect(List.generate(node.childCount, node.childAt), [
+        ...node.metadata,
+        node.name,
+        ...node.constants,
+        ...node.members,
+      ]);
+      expect(
+        () => node.constants[0] = node.constants[1],
+        throwsUnsupportedError,
+      );
+    },
+  );
+
   test('unfinished assertion initializers return diagnostics and syntax', () {
     for (final text in [
       'class C { C() : assert',

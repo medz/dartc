@@ -10,7 +10,7 @@ sealed class _Delimiter(
 
 sealed class _Sequence(super.opening, super.valueBase, super.operatorBase)
     extends _Delimiter {
-  Identifier? name;
+  int? name;
 
   @override
   TokenKind get closing => .rightParen;
@@ -22,26 +22,26 @@ final class _Group(
   super.operatorBase, {
   final Token? constKeyword,
 }) extends _Sequence {
-  final List<RecordField> fields = [];
+  final List<int> fields = [];
   bool hasComma = false;
 }
 
 sealed class _Arguments(super.opening, super.valueBase, super.operatorBase)
     extends _Sequence {
-  final List<Argument> arguments = [];
+  final List<int> arguments = [];
 }
 
 final class _ArgumentList(super.opening, super.valueBase, super.operatorBase)
     extends _Arguments {
-  late ArgumentList result;
+  late int result;
 }
 
 final class _Call(
   super.opening,
   super.valueBase,
   super.operatorBase,
-  final Expression callee, {
-  final TypeArgumentList? typeArguments,
+  final int callee, {
+  final int? typeArguments,
   final bool checkedNullAware = false,
 }) extends _Arguments;
 
@@ -50,16 +50,16 @@ final class _Construction(
   super.valueBase,
   super.operatorBase,
   final Token keyword,
-  final List<Identifier> components,
-  final TypeArgumentList? typeArguments,
-  final Identifier? constructorName,
+  final List<int> components,
+  final int? typeArguments,
+  final int? constructorName,
 ) extends _Arguments;
 
 final class _Index(
   super.opening,
   super.valueBase,
   super.operatorBase,
-  final Expression target, {
+  final int target, {
   required final bool isNullAware,
   required final bool checkedNullAware,
 }) extends _Delimiter {
@@ -84,7 +84,8 @@ extension on _Parser {
     final target = values.removeLast();
     final checked = target == selectorTarget ? checkedNullAware : isNullAware;
     if (isNullAware &&
-        (target is CastExpression || target is TypeTestExpression)) {
+        (arena.hasKind(target, .castExpression) ||
+            arena.hasKind(target, .typeTestExpression))) {
       values.add(target);
       checkTypeContinuation(current);
       values.removeLast();
@@ -92,12 +93,11 @@ extension on _Parser {
     if (token.kind == .emptyBrackets || token.kind == .emptyBracketsAssign) {
       error('expected_expression', 'Expected an index expression.', token);
       values.add(
-        IndexExpression(
-          source: source,
-          start: target.start,
+        arena.putIndexExpression(
+          start: arena.rStart(target),
           end: token.start + 2,
           target: target,
-          index: MissingExpression(source: source, offset: token.start + 1),
+          index: arena.putMissingExpression(offset: token.start + 1),
           isNullAware: isNullAware,
         ),
       );
@@ -124,10 +124,9 @@ extension on _Parser {
     switch (frame) {
       case _Arguments():
         frame.arguments.add(
-          Argument(
-            source: source,
-            start: name?.start ?? value.start,
-            end: value.end,
+          arena.putArgument(
+            start: arena.rStartOrNull(name) ?? arena.rStart(value),
+            end: arena.rEnd(value),
             name: name,
             value: value,
           ),
@@ -136,10 +135,9 @@ extension on _Parser {
         frame.fields.add(
           name == null
               ? value
-              : NamedRecordField(
-                  source: source,
-                  start: name.start,
-                  end: value.end,
+              : arena.putNamedRecordField(
+                  start: arena.rStart(name),
+                  end: arena.rEnd(value),
                   name: name,
                   value: value,
                 ),
@@ -160,11 +158,10 @@ extension on _Parser {
         current,
       );
     }
-    final Expression expression;
+    final int expression;
     switch (frame) {
       case _CascadeIndex():
-        expression = CascadeIndexExpression(
-          source: source,
+        expression = arena.putCascadeIndexExpression(
           start: frame.marker.start,
           end: end,
           index: finishExpression(frame.valueBase, frame.operatorBase),
@@ -193,7 +190,7 @@ extension on _Parser {
         final parts = closeForHeader(frame);
         switch (frame) {
           case _ForElementHeader():
-            if (frame.element.isAwait && parts is! ForInParts) {
+            if (frame.element.isAwait && !arena.hasKind(parts, .forInParts)) {
               error(
                 'invalid_await_for',
                 'An await-for requires a for-in header.',
@@ -212,9 +209,8 @@ extension on _Parser {
         expression = closeCollection(frame, end);
       case _Index():
         final index = finishExpression(frame.valueBase, frame.operatorBase);
-        expression = IndexExpression(
-          source: source,
-          start: frame.target.start,
+        expression = arena.putIndexExpression(
+          start: arena.rStart(frame.target),
           end: end,
           target: frame.target,
           index: index,
@@ -226,11 +222,13 @@ extension on _Parser {
             frame.name != null) {
           finishElement(frame);
         }
-        if (frame case _Group(
-          constKeyword: final Token keyword,
-          fields: [Expression()],
-          hasComma: false,
-        )) {
+        if (frame
+            case _Group(
+              constKeyword: final Token keyword,
+              fields: [final entry],
+              hasComma: false,
+            )
+            when arena.isExpression(entry)) {
           error(
             'expected_record_comma',
             'A record with one positional field needs a trailing comma.',
@@ -239,8 +237,7 @@ extension on _Parser {
         }
         switch (frame) {
           case _ArgumentList():
-            frame.result = ArgumentList(
-              source: source,
+            frame.result = arena.putArgumentList(
               start: frame.opening.start,
               end: end,
               arguments: frame.arguments,
@@ -249,22 +246,19 @@ extension on _Parser {
             if (matched) advance();
             return;
           case _Call():
-            expression = InvocationExpression(
-              source: source,
-              start: frame.callee.start,
+            expression = arena.putInvocationExpression(
+              start: arena.rStart(frame.callee),
               end: end,
               callee: frame.callee,
               typeArguments: frame.typeArguments,
-              arguments: ArgumentList(
-                source: source,
+              arguments: arena.putArgumentList(
                 start: frame.opening.start,
                 end: end,
                 arguments: frame.arguments,
               ),
             );
           case _Construction():
-            expression = InstanceCreationExpression(
-              source: source,
+            expression = arena.putInstanceCreationExpression(
               start: frame.keyword.start,
               end: end,
               kind: frame.keyword.kind == .keywordConst
@@ -273,41 +267,37 @@ extension on _Parser {
               name: frame.components,
               typeArguments: frame.typeArguments,
               constructorName: frame.constructorName,
-              arguments: ArgumentList(
-                source: source,
+              arguments: arena.putArgumentList(
                 start: frame.opening.start,
                 end: end,
                 arguments: frame.arguments,
               ),
             );
           case _ConstShorthand():
-            expression = ConstDotShorthandExpression(
-              source: source,
+            expression = arena.putConstDotShorthandExpression(
               start: frame.keyword.start,
               end: end,
               name: frame.member,
               typeArguments: frame.typeArguments,
-              arguments: ArgumentList(
-                source: source,
+              arguments: arena.putArgumentList(
                 start: frame.opening.start,
                 end: end,
                 arguments: frame.arguments,
               ),
             );
           case _Group(
-            fields: [final Expression value],
-            hasComma: false,
-            constKeyword: null,
-          ):
-            expression = ParenthesizedExpression(
-              source: source,
+                fields: [final value],
+                hasComma: false,
+                constKeyword: null,
+              )
+              when arena.isExpression(value):
+            expression = arena.putParenthesizedExpression(
               start: frame.opening.start,
               end: end,
               expression: value,
             );
           case _Group():
-            expression = RecordExpression(
-              source: source,
+            expression = arena.putRecordExpression(
               start: frame.constKeyword?.start ?? frame.opening.start,
               end: end,
               hasConstKeyword: frame.constKeyword != null,
@@ -319,11 +309,11 @@ extension on _Parser {
     values.add(expression);
     switch (frame) {
       case _Call(:final checkedNullAware, :final callee)
-          when callee is! IdentifierExpression &&
-              callee is! PropertyAccessExpression &&
-              callee is! ThisExpression &&
-              callee is! SuperExpression &&
-              callee is! DotShorthandReferenceExpression:
+          when !arena.hasKind(callee, .identifierExpression) &&
+              !arena.hasKind(callee, .propertyAccessExpression) &&
+              !arena.hasKind(callee, .thisExpression) &&
+              !arena.hasKind(callee, .superExpression) &&
+              !arena.hasKind(callee, .dotShorthandReferenceExpression):
         selectorTarget = expression;
         this.checkedNullAware = checkedNullAware;
       case _Index(:final checkedNullAware):

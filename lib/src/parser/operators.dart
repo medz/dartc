@@ -31,35 +31,7 @@ extension on TokenKind {
     _ => false,
   };
 
-  int get precedence => switch (this) {
-    .assign ||
-    .starAssign ||
-    .slashAssign ||
-    .truncateDivideAssign ||
-    .percentAssign ||
-    .plusAssign ||
-    .minusAssign ||
-    .shiftLeftAssign ||
-    .shiftRightAssign ||
-    .unsignedShiftRightAssign ||
-    .andAssign ||
-    .xorAssign ||
-    .orAssign ||
-    .ifNullAssign => _assignmentPrecedence,
-    .question => _conditionalPrecedence,
-    .ifNull => 3,
-    .logicalOr => 4,
-    .logicalAnd => 5,
-    .bar => 8,
-    .caret => 9,
-    .ampersand => 10,
-    .equal || .notEqual => _equalityPrecedence,
-    .less || .lessEqual || .greater || .greaterEqual => _relationalPrecedence,
-    .shiftLeft || .shiftRight || .unsignedShiftRight => 11,
-    .plus || .minus => 12,
-    .star || .slash || .truncateDivide || .percent => 13,
-    _ => 0,
-  };
+  int get precedence => _grammar[index] & 15;
 
   BinaryOperator get binaryOperator => switch (this) {
     .plus => .add,
@@ -104,43 +76,109 @@ extension on TokenKind {
     _ => throw StateError('Not an assignment operator: $this'),
   };
 
-  bool get isIdentifier => switch (this) {
-    .identifier ||
-    .keywordAbstract ||
-    .keywordAs ||
-    .keywordAsync ||
-    .keywordAwait ||
-    .keywordBase ||
-    .keywordCovariant ||
-    .keywordDeferred ||
-    .keywordDynamic ||
-    .keywordExport ||
-    .keywordExtension ||
-    .keywordExternal ||
-    .keywordFactory ||
-    .keywordFunction ||
-    .keywordGet ||
-    .keywordHide ||
-    .keywordImplements ||
-    .keywordImport ||
-    .keywordInterface ||
-    .keywordLate ||
-    .keywordLibrary ||
-    .keywordMixin ||
-    .keywordOf ||
-    .keywordOn ||
-    .keywordOperator ||
-    .keywordPart ||
-    .keywordRequired ||
-    .keywordSealed ||
-    .keywordSet ||
-    .keywordShow ||
-    .keywordStatic ||
-    .keywordSync ||
-    .keywordType ||
-    .keywordTypedef ||
-    .keywordWhen ||
-    .keywordYield => true,
-    _ => false,
-  };
+  bool get isIdentifier => (_grammar[index] & 16) != 0;
 }
+
+int _precedenceOf(TokenKind kind) => switch (kind) {
+  .assign ||
+  .starAssign ||
+  .slashAssign ||
+  .truncateDivideAssign ||
+  .percentAssign ||
+  .plusAssign ||
+  .minusAssign ||
+  .shiftLeftAssign ||
+  .shiftRightAssign ||
+  .unsignedShiftRightAssign ||
+  .andAssign ||
+  .xorAssign ||
+  .orAssign ||
+  .ifNullAssign => _assignmentPrecedence,
+  .question => _conditionalPrecedence,
+  .ifNull => 3,
+  .logicalOr => 4,
+  .logicalAnd => 5,
+  .bar => 8,
+  .caret => 9,
+  .ampersand => 10,
+  .equal || .notEqual => _equalityPrecedence,
+  .less || .lessEqual || .greater || .greaterEqual => _relationalPrecedence,
+  .shiftLeft || .shiftRight || .unsignedShiftRight => 11,
+  .plus || .minus => 12,
+  .star || .slash || .truncateDivide || .percent => 13,
+  _ => 0,
+};
+
+bool _isIdentifierOf(TokenKind kind) => switch (kind) {
+  .identifier ||
+  .keywordAbstract ||
+  .keywordAs ||
+  .keywordAsync ||
+  .keywordAwait ||
+  .keywordBase ||
+  .keywordCovariant ||
+  .keywordDeferred ||
+  .keywordDynamic ||
+  .keywordExport ||
+  .keywordExtension ||
+  .keywordExternal ||
+  .keywordFactory ||
+  .keywordFunction ||
+  .keywordGet ||
+  .keywordHide ||
+  .keywordImplements ||
+  .keywordImport ||
+  .keywordInterface ||
+  .keywordLate ||
+  .keywordLibrary ||
+  .keywordMixin ||
+  .keywordOf ||
+  .keywordOn ||
+  .keywordOperator ||
+  .keywordPart ||
+  .keywordRequired ||
+  .keywordSealed ||
+  .keywordSet ||
+  .keywordShow ||
+  .keywordStatic ||
+  .keywordSync ||
+  .keywordType ||
+  .keywordTypedef ||
+  .keywordWhen ||
+  .keywordYield => true,
+  _ => false,
+};
+
+bool _endsExpressionOf(TokenKind kind) => switch (kind) {
+  .comma ||
+  .semicolon ||
+  .rightParen ||
+  .rightBracket ||
+  .rightBrace ||
+  .interpolationEnd ||
+  .keywordElse ||
+  .keywordIn ||
+  .keywordCase ||
+  .keywordIf ||
+  .keywordWhile ||
+  .keywordDo ||
+  .keywordFor ||
+  .keywordReturn ||
+  .keywordBreak ||
+  .keywordContinue ||
+  .keywordRethrow ||
+  .keywordTry ||
+  .keywordCatch ||
+  .keywordFinally ||
+  .keywordAssert ||
+  .keywordVar ||
+  .keywordFinal => true,
+  _ => false,
+};
+
+final _grammar = Uint8List.fromList([
+  for (final k in TokenKind.values)
+    _precedenceOf(k) |
+        (_isIdentifierOf(k) ? 16 : 0) |
+        (_endsExpressionOf(k) ? 32 : 0),
+]);

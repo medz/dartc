@@ -6,12 +6,12 @@ final class _Collection(
   super.operatorBase, {
   required final int start,
   required final bool hasConstKeyword,
-  required final TypeArgumentList? typeArguments,
+  required final int? typeArguments,
 }) extends _Delimiter {
-  final List<CollectionElement> elements = [];
+  final List<int> elements = [];
   final List<_ElementControl> controls = [];
   Token? prefix;
-  Expression? key;
+  int? key;
   Token? keyPrefix;
 
   @override
@@ -22,9 +22,9 @@ final class _Collection(
 sealed class _ElementControl(final Token token);
 
 final class _IfElement(super.token) extends _ElementControl {
-  late Expression condition;
-  CasePattern? casePattern;
-  CollectionElement? thenElement;
+  late int condition;
+  int? casePattern;
+  int? thenElement;
 }
 
 final class _IfHeader(
@@ -42,11 +42,11 @@ extension on _Parser {
     final first = current;
     final hasConst = first.kind == .keywordConst;
     if (hasConst) advance();
-    TypeArgumentList? arguments;
+    int? arguments;
     if (current.kind == .less) {
       final reader = _TypeReader(this);
       if (!reader.start(arguments: true)) yield _TypeTask(reader);
-      arguments = reader.result as TypeArgumentList?;
+      arguments = arena.asTypeArgumentListOrNull(reader.result);
       if (reader.failure case final failure?) {
         error(failure.$1, failure.$2, failure.$3);
       }
@@ -72,13 +72,12 @@ extension on _Parser {
   void openCollection({
     int? start,
     bool hasConstKeyword = false,
-    TypeArgumentList? typeArguments,
+    int? typeArguments,
   }) {
     final token = current;
     if (token.kind == .emptyBrackets || token.kind == .emptyBracketsAssign) {
       values.add(
-        CollectionExpression(
-          source: source,
+        arena.putCollectionExpression(
           start: start ?? token.start,
           end: token.start + 2,
           kind: .list,
@@ -186,12 +185,11 @@ extension on _Parser {
     final expression = finishExpression(frame.valueBase, frame.operatorBase);
     final prefix = frame.prefix;
     final key = frame.key;
-    CollectionElement element;
+    int element;
     if (key != null) {
-      element = MapEntryElement(
-        source: source,
-        start: frame.keyPrefix?.start ?? key.start,
-        end: expression.end,
+      element = arena.putMapEntryElement(
+        start: frame.keyPrefix?.start ?? arena.rStart(key),
+        end: arena.rEnd(expression),
         key: key,
         value: expression,
         isNullAwareKey:
@@ -201,17 +199,15 @@ extension on _Parser {
       );
     } else if (prefix != null) {
       element = prefix.kind == .spread || prefix.kind == .nullAwareSpread
-          ? SpreadElement(
-              source: source,
+          ? arena.putSpreadElement(
               start: prefix.start,
-              end: expression.end,
+              end: arena.rEnd(expression),
               expression: expression,
               isNullAware: prefix.kind == .nullAwareSpread,
             )
-          : NullAwareElement(
-              source: source,
+          : arena.putNullAwareElement(
               start: prefix.start,
-              end: expression.end,
+              end: arena.rEnd(expression),
               expression: expression,
             );
     } else {
@@ -230,20 +226,18 @@ extension on _Parser {
             advance();
             return true;
           }
-          element = IfElement(
-            source: source,
+          element = arena.putIfElement(
             start: control.token.start,
-            end: element.end,
+            end: arena.rEnd(element),
             condition: control.condition,
             casePattern: control.casePattern,
             thenElement: control.thenElement ?? element,
             elseElement: control.thenElement == null ? null : element,
           );
         case _ForElement():
-          element = ForElement(
-            source: source,
+          element = arena.putForElement(
             start: control.token.start,
-            end: element.end,
+            end: arena.rEnd(element),
             isAwait: control.isAwait,
             parts: control.parts,
             body: element,
@@ -255,19 +249,7 @@ extension on _Parser {
     return false;
   }
 
-  CollectionExpression closeCollection(_Collection frame, int end) {
-    if (trialStart != null &&
-        frame.opening == tokens[trialStart!] &&
-        current.kind == .rightBracket) {
-      final following = tokens[cursor + 1].kind;
-      initialOperatorBoundary =
-          following.precedence != 0 &&
-          following != .less &&
-          (following != .question ||
-              tokens[cursor + 2].kind != .leftBracket &&
-                  tokens[cursor + 2].kind != .emptyBrackets &&
-                  tokens[cursor + 2].kind != .emptyBracketsAssign);
-    }
+  int closeCollection(_Collection frame, int end) {
     if (values.length > frame.valueBase ||
         operators.length > frame.operatorBase ||
         frame.prefix != null ||
@@ -275,22 +257,7 @@ extension on _Parser {
         frame.controls.isNotEmpty) {
       finishCollectionElement(frame);
     }
-    if (trialStart != null &&
-        frame.opening == tokens[trialStart!] &&
-        current.kind == .rightBracket &&
-        !hasSyntaxError &&
-        tokens[cursor - 1].kind != .comma) {
-      if (frame.elements case [final Expression expression]) {
-        lookahead.indexContents[trialStart!] = _IndexContent(
-          expression,
-          end,
-          cursor + 1,
-          diagnostics.isEmpty ? const [] : List<Diagnostic>.of(diagnostics),
-        );
-      }
-    }
-    return CollectionExpression(
-      source: source,
+    final node = arena.putCollectionExpression(
       start: frame.start,
       end: end,
       kind: frame.opening.kind == .leftBrace ? .setOrMap : .list,
@@ -298,5 +265,15 @@ extension on _Parser {
       typeArguments: frame.typeArguments,
       elements: frame.elements,
     );
+    if (trialStart != null &&
+        frame.opening == tokens[trialStart!] &&
+        current.kind == .rightBracket &&
+        !hasSyntaxError &&
+        tokens[cursor - 1].kind != .comma &&
+        frame.elements.length == 1 &&
+        arena.isExpression(frame.elements.single)) {
+      leadingList = node;
+    }
+    return node;
   }
 }

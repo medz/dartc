@@ -6,13 +6,16 @@ abstract class _Reader<T> {
   Iterable<_Reader<Object?>> read();
 
   T finish() {
-    final pending = [read().iterator];
-    while (pending.isNotEmpty) {
-      final iterator = pending.last;
-      if (iterator.moveNext()) {
-        pending.add(iterator.current.read().iterator);
+    var task = read().iterator;
+    List<Iterator<_Reader<Object?>>>? parents;
+    while (true) {
+      if (task.moveNext()) {
+        (parents ??= []).add(task);
+        task = task.current.read().iterator;
+      } else if (parents != null && parents.isNotEmpty) {
+        task = parents.removeLast();
       } else {
-        pending.removeLast();
+        break;
       }
     }
     return result;
@@ -39,7 +42,7 @@ final class _ExpressionReader(
   final _Parser parser, {
   final _ParseBoundary boundary = .expression,
   _ExpressionStop? stop,
-}) extends _Reader<Expression> {
+}) extends _Reader<int> {
   _ExpressionStop? stop = stop;
 
   bool start() {
@@ -63,8 +66,8 @@ final class _ExpressionReader(
 final class _ConditionReader(
   final _Parser parser, {
   final bool allowCase = false,
-}) extends _Reader<Expression> {
-  CasePattern? casePattern;
+}) extends _Reader<int> {
+  int? casePattern;
 
   @override
   Iterable<_Reader<Object?>> read() sync* {
@@ -89,15 +92,13 @@ final class _ConditionReader(
   }
 }
 
-final class _ArgumentsReader(final _Parser parser)
-    extends _Reader<ArgumentList> {
+final class _ArgumentsReader(final _Parser parser) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final opening = parser.current;
     parser.expect(.leftParen);
     if (opening.kind != .leftParen) {
-      result = ArgumentList(
-        source: parser.source,
+      result = parser.arena.putArgumentList(
         start: opening.start,
         end: opening.start,
         arguments: const [],
@@ -117,8 +118,7 @@ final class _ArgumentsReader(final _Parser parser)
   }
 }
 
-final class _ForHeaderReader(final _Parser parser)
-    extends _Reader<ForLoopParts> {
+final class _ForHeaderReader(final _Parser parser) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     parser.beginExpression();
@@ -165,13 +165,9 @@ extension on _Parser {
           pendingSyntax = null;
           yield syntax;
         case .conditional:
-          var branches = lookahead.conditionals[cursor];
-          if (branches == null) {
-            final reader = _ConditionalReader(this);
-            yield reader;
-            branches = reader.result;
-          }
-          acceptConditional(branches);
+          final reader = _ConditionalReader(this);
+          yield reader;
+          acceptConditional(reader.result);
       }
       stop = null;
     }
@@ -187,7 +183,7 @@ extension on _Parser {
 final class _OperandReader(
   final _Parser parent,
   final _Parser child,
-  final _Reader<Expression> expression,
+  final _Reader<int> expression,
 ) extends _Reader<void> {
   @override
   Iterable<_Reader<Object?>> read() sync* {

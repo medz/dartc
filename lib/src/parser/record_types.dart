@@ -1,15 +1,15 @@
 part of 'parser.dart';
 
 final class _RecordTypes(final Token opening) extends _AnnotatedTypeFrame {
-  final List<PositionalRecordTypeField> positional = [];
-  final List<NamedRecordTypeField> named = [];
+  final List<int> positional = [];
+  final List<int> named = [];
   Token? namedOpening;
-  RecordTypeNamedFields? namedFields;
+  int? namedFields;
   bool hasComma = false;
 }
 
 extension on _TypeReader {
-  TypeAnnotation? prepareRecord(_RecordTypes frame) {
+  int? prepareRecord(_RecordTypes frame) {
     if (current.kind == .leftBrace) {
       if (frame.namedOpening != null) {
         fail(
@@ -26,8 +26,7 @@ extension on _TypeReader {
         fail('expected_type', 'Expected a named record field.');
         return null;
       }
-      frame.namedFields = RecordTypeNamedFields(
-        source: source,
+      frame.namedFields = parser.arena.putRecordTypeNamedFields(
         start: frame.namedOpening!.start,
         end: current.end,
         fields: frame.named,
@@ -40,7 +39,7 @@ extension on _TypeReader {
     return null;
   }
 
-  TypeAnnotation? continueRecord(_RecordTypes frame) {
+  int? continueRecord(_RecordTypes frame) {
     if (current.kind == .comma) {
       frame.hasComma = true;
       parser.advance();
@@ -50,7 +49,7 @@ extension on _TypeReader {
     return finishRecord(frame);
   }
 
-  TypeAnnotation? finishRecord(_RecordTypes frame) {
+  int? finishRecord(_RecordTypes frame) {
     if (current.kind != .rightParen ||
         frame.namedOpening != null && frame.namedFields == null) {
       fail('expected_closer', 'Expected the end of the record type.');
@@ -69,8 +68,7 @@ extension on _TypeReader {
     parser.advance();
     frames.removeLast();
     final question = nullableOffset();
-    return RecordTypeAnnotation(
-      source: source,
+    return parser.arena.putRecordTypeAnnotation(
       start: frame.opening.start,
       end: question == null ? end : question + 1,
       questionOffset: question,

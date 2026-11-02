@@ -1,139 +1,134 @@
 part of 'parser.dart';
 
-// Lookahead belongs to one token stream, including its speculative cursors.
-final class _Lookahead(final List<Token> tokens) {
-  late final int lastTypeArgumentCloser = tokens.lastIndexWhere(
-    (token) => token.kind.closesTypeArgumentList,
-  );
-  late final int lastColon = tokens.lastIndexWhere((t) => t.kind == .colon);
-  late final Map<int, (TypeArgumentList, int, Token)?> typeArguments = {};
-  late final Map<int, _ConditionalResult> conditionals = {};
-  late final Map<int, _IndexContent> indexContents = {};
-  late final Map<int, _IndexRun> indexRuns = {};
-  late final Map<int, SelectorTail> selectorTails = {};
-  late final delimiters = DelimiterIndex(tokens);
-
-  _IndexRun? indexRun(int start) {
-    final pending = <(int, _IndexContent)>[];
-    var cursor = start;
-    var tail = indexRuns[cursor];
-    while (tail == null &&
-        tokens[cursor].kind == .question &&
-        tokens[cursor + 1].kind == .leftBracket) {
-      final content = indexContents[cursor + 1];
-      if (content == null) return null;
-      pending.add((cursor, content));
-      cursor = content.cursor;
-      tail = indexRuns[cursor];
-    }
-    final selectors = tail?.selectors ?? selectorTails[cursor];
-    final end = tail?.cursor ?? selectors?.cursor ?? cursor;
-    for (var i = pending.length - 1; i >= 0; i--) {
-      final (question, content) = pending[i];
-      tail = _IndexRun(content, tail, end, selectors);
-      indexRuns[question] = tail;
-    }
-    return tail;
-  }
-}
-
-// Only a single expression with no trailing comma is also valid index syntax.
-final class _IndexContent(
-  final Expression expression,
-  final int end,
-  final int cursor,
-  final List<Diagnostic> diagnostics,
-);
-
-// Suffixes share their tails; the receiver is supplied only after selection.
-final class _IndexRun(
-  final _IndexContent content,
-  final _IndexRun? next,
-  final int cursor,
-  final SelectorTail? selectors,
-);
-
-sealed class _Branch(final List<Diagnostic> diagnostics) {
-  Expression materialize(List<Diagnostic> destination);
-}
-
-final class _ParsedBranch(final Expression expression, super.diagnostics)
-    extends _Branch {
-  @override
-  Expression materialize(List<Diagnostic> destination) {
-    destination.addAll(diagnostics);
-    return expression;
-  }
-}
-
-final class _IndexedBranch(
-  final Expression receiver,
-  final _IndexRun suffix,
-  super.diagnostics,
-) extends _Branch {
-  @override
-  Expression materialize(List<Diagnostic> destination) {
-    destination.addAll(diagnostics);
-    var expression = receiver;
-    for (_IndexRun? run = suffix; run != null; run = run.next) {
-      final content = run.content;
-      destination.addAll(content.diagnostics);
-      expression = IndexExpression(
-        source: receiver.source,
-        start: receiver.start,
-        end: content.end,
-        target: expression,
-        index: content.expression,
-        isNullAware: true,
-      );
-    }
-    return suffix.selectors?.apply(expression) ?? expression;
-  }
-}
-
-sealed class _ConditionalResult;
-
-enum _NotConditional implements _ConditionalResult { invalid, stableFailure }
+sealed class _QuestionResolution;
 
 final class _ConditionalBranches(
-  final _Branch thenBranch,
-  final _Branch elseBranch,
+  final int thenBranch,
+  final int elseBranch,
+  final List<Diagnostic> diagnostics,
   final int cursor,
   final Token current,
-) implements _ConditionalResult;
+) implements _QuestionResolution;
 
-final class _ConditionalTrial(final _Parser parent) {
-  final int question = parent.cursor;
-  final _Parser reader = _Parser.trial(parent);
-  _Branch? thenBranch;
-
-  _ConditionalResult? finishBranch(_Branch branch) {
-    if (thenBranch == null) {
-      if (branch is _ParsedBranch) reader.cacheSelectorTail(branch);
-      if (reader.current.kind != .colon) return reader.conditionalFailure;
-      thenBranch = branch;
-      reader.advance();
-      reader.expectsOperand = true;
-      return null;
-    }
-    return _ConditionalBranches(
-      thenBranch!,
-      branch,
-      reader.cursor,
-      reader.current,
-    );
-  }
+final class _ConditionalTrial(_Parser parent, int question) {
+  final _Parser reader = _Parser.trial(parent, question);
+  int? thenBranch;
+  bool? inherits;
+  bool tracked = false;
+  int colon = -1;
+  int thenDiagnostics = 0;
 }
 
 final class _ConditionalReader(final _Parser parent)
-    extends _Reader<_ConditionalResult> {
+    extends _Reader<_QuestionResolution?> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
-    final initial = _ConditionalTrial(parent);
-    var parser = initial.reader;
-    final trials = [initial];
+    final trials = [_ConditionalTrial(parent, parent.cursor)];
+    while (trials.isNotEmpty) {
+      final trial = trials.last;
+      final reader = trial.reader;
+      final stop = reader.nullableForInitializer == null
+          ? reader.run(trial: true)
+          : _ExpressionStop.conditional;
+      if (stop == .syntax) {
+        final syntax = reader.pendingSyntax!;
+        reader.pendingSyntax = null;
+        yield syntax;
+        continue;
+      }
+      if (stop == .conditional) {
+        trial.inherits = trial.thenBranch == null
+            ? reader.indexContinuation()
+            : null;
+        trial.tracked =
+            reader.values.isNotEmpty &&
+            reader.values.last == reader.selectorTarget;
+        trials.add(_ConditionalTrial(reader, reader.cursor));
+        continue;
+      }
+      _ConditionalBranches? branches;
+      int? head = trial.thenBranch;
+      if (!reader.hasSyntaxError && reader.current.kind != .invalid) {
+        final expression = reader.finishExpression(0, 0);
+        if (!reader.hasSyntaxError) {
+          if (trial.thenBranch case final first?) {
+            branches = _ConditionalBranches(
+              first,
+              expression,
+              reader.diagnostics,
+              reader.cursor,
+              reader.current,
+            );
+          } else {
+            head = expression;
+            if (reader.current.kind == .colon) {
+              trial.thenBranch = expression;
+              trial.colon = reader.cursor;
+              trial.thenDiagnostics = reader.diagnostics.length;
+              reader.advance();
+              reader.expectsOperand = true;
+              continue;
+            }
+          }
+        }
+      }
+      _QuestionResolution? outcome = branches;
+      var first = trials.length - 1;
+      final list = reader.leadingList;
+      if (first != 0 &&
+          list != null &&
+          _selectorLink(reader.arena, head, list) != null) {
+        while (first > 0 && trials[first - 1].inherits != null) {
+          first--;
+        }
+        if (first < trials.length - 1) {
+          final arms = <_ElseArm>[];
+          if (branches != null) {
+            arms.add(
+              _ElseArm(
+                trial.colon,
+                branches.elseBranch,
+                branches.diagnostics.sublist(trial.thenDiagnostics),
+                branches.cursor,
+                branches.current,
+              ),
+            );
+            while (arms.last.current.kind == .colon &&
+                arms.length < trials.length - first) {
+              final colon = arms.last.cursor;
+              final arm = _BranchExpression(_Parser.trial(parent, colon));
+              yield arm;
+              if (arm.result == null) break;
+              arms.add(
+                _ElseArm(
+                  colon,
+                  arm.result!,
+                  arm.parser.diagnostics,
+                  arm.parser.cursor,
+                  arm.parser.current,
+                ),
+              );
+            }
+          }
+          outcome = _IndexSequence.reduce(trials, first, arms);
+          trials.removeRange(first + 1, trials.length);
+        }
+      }
+      trials.removeLast();
+      if (trials.isEmpty) {
+        result = outcome;
+        return;
+      }
+      trials.last.reader.acceptConditional(outcome);
+    }
+  }
+}
+
+// A branch ends at a grammar boundary, including the colon of its caller.
+final class _BranchExpression(final _Parser parser) extends _Reader<int?> {
+  @override
+  Iterable<_Reader<Object?>> read() sync* {
     while (true) {
-      _ConditionalResult? result;
       final stop = parser.nullableForInitializer == null
           ? parser.run(trial: true)
           : _ExpressionStop.conditional;
@@ -141,146 +136,83 @@ final class _ConditionalReader(final _Parser parent)
         final syntax = parser.pendingSyntax!;
         parser.pendingSyntax = null;
         yield syntax;
-        continue;
-      }
-      if (stop == .conditional) {
-        final cached = parser.lookahead.conditionals[parser.cursor];
-        if (cached == null) {
-          final trial = _ConditionalTrial(parser);
-          trials.add(trial);
-          parser = trial.reader;
-          continue;
-        }
-        result = parser.resumeConditional(
-          cached,
-          trials.isEmpty ? null : trials.last,
-        );
-        if (result == null) continue;
+      } else if (stop == .conditional) {
+        final choice = _ConditionalReader(parser);
+        yield choice;
+        parser.acceptConditional(choice.result);
       } else {
-        final trial = trials.last;
-        if (parser.hasSyntaxError || parser.current.kind == .invalid) {
-          result = trial.thenBranch == null
-              ? _NotConditional.invalid
-              : parser.conditionalFailure;
-        } else {
-          final expression = parser.finishExpression(0, 0);
-          if (parser.hasSyntaxError) {
-            result = trial.thenBranch == null
-                ? _NotConditional.invalid
-                : parser.conditionalFailure;
-          } else {
-            result = trial.finishBranch(
-              _ParsedBranch(expression, parser.takeDiagnostics()),
-            );
-            if (result == null) continue;
-          }
+        result = null;
+        if (!parser.hasSyntaxError && parser.current.kind != .invalid) {
+          final value = parser.finishExpression(0, 0);
+          if (!parser.hasSyntaxError) result = value;
         }
-      }
-      while (result != null) {
-        final trial = trials.removeLast();
-        parser = trial.parent;
-        parser.lookahead.conditionals[trial.question] = result;
-        if (trials.isEmpty) {
-          this.result = result;
-          return;
-        }
-        result = parser.resumeConditional(
-          result,
-          trials.isEmpty ? null : trials.last,
-        );
+        return;
       }
     }
   }
 }
 
+final class _ChosenConditional(
+  final _Parser parent,
+  final _IndexSequence sequence,
+  final _ElseArm arm,
+) extends _Reader<void> {
+  @override
+  Iterable<_Reader<Object?>> read() sync* {
+    final child = _Parser.trial(parent, parent.cursor);
+    if (!sequence.isDone) {
+      child.indexSequences = [sequence];
+    }
+    final then = _BranchExpression(child);
+    yield then;
+    if (then.result != null &&
+        child.cursor == arm.colon &&
+        child.current.kind == .colon) {
+      child.diagnostics.addAll(arm.diagnostics);
+      parent.acceptConditional(
+        _ConditionalBranches(
+          then.result!,
+          arm.value,
+          child.diagnostics,
+          arm.cursor,
+          arm.current,
+        ),
+      );
+    } else if (then.result != null && child.current.kind == .colon) {
+      final other = _BranchExpression(_Parser.trial(child, child.cursor));
+      yield other;
+      if (other.result case final expression?) {
+        child.diagnostics.addAll(other.parser.diagnostics);
+        parent.acceptConditional(
+          _ConditionalBranches(
+            then.result!,
+            expression,
+            child.diagnostics,
+            other.parser.cursor,
+            other.parser.current,
+          ),
+        );
+      } else {
+        parent.acceptConditional(null);
+      }
+    } else {
+      parent.acceptConditional(null);
+    }
+  }
+}
+
 extension on _Parser {
-  void cacheSelectorTail(_ParsedBranch branch) {
-    if (branch.diagnostics.isNotEmpty) return;
-    final content = lookahead.indexContents[trialStart];
-    if (content == null ||
-        lookahead.selectorTails.containsKey(content.cursor)) {
+  void acceptConditional(_QuestionResolution? outcome) {
+    if (outcome is _IndexSequence) {
+      (indexSequences ??= []).add(outcome);
       return;
     }
-    final tail = SelectorTail.capture(
-      branch.expression,
-      receiverStart: tokens[trialStart!].start,
-      receiverEnd: content.end,
-      cursor: cursor,
-      current: current,
-    );
-    if (tail != null) lookahead.selectorTails[content.cursor] = tail;
-  }
-
-  _NotConditional get conditionalFailure => initialOperatorBoundary
-      ? _NotConditional.stableFailure
-      : _NotConditional.invalid;
-
-  List<Diagnostic> takeDiagnostics() {
-    if (diagnostics.isEmpty) return const [];
-    final result = List<Diagnostic>.of(diagnostics);
-    diagnostics.clear();
-    return result;
-  }
-
-  _ConditionalResult? resumeConditional(
-    _ConditionalResult result,
-    _ConditionalTrial? trial,
-  ) {
-    if (trial != null && frames.isEmpty) {
-      if (trial.thenBranch == null) {
-        // Only an operator boundary preserves a failed trial when its leading
-        // list becomes an index. Selector chains can instead release a colon.
-        if (result == _NotConditional.stableFailure) return conditionalFailure;
-        // The selected inner conditional ends this first branch without a
-        // colon. Its AST would be discarded by the enclosing trial.
-        if (result is _ConditionalBranches && result.current.kind != .colon) {
-          return questions.isEmpty
-              ? conditionalFailure
-              : _NotConditional.invalid;
-        }
-      }
-      if (result is _NotConditional) {
-        final branch = indexedBranch();
-        if (branch != null) return trial.finishBranch(branch);
-      }
-    }
-    acceptConditional(result);
-    return null;
-  }
-
-  _IndexedBranch? indexedBranch() {
-    if (operators.isNotEmpty || values.length != 1 || hasSyntaxError) {
-      return null;
-    }
-    final receiver = values.single;
-    if (receiver == selectorTarget && !checkedNullAware ||
-        receiver is CastExpression ||
-        receiver is TypeTestExpression) {
-      return null;
-    }
-    final run = lookahead.indexRun(cursor);
-    if (run == null) return null;
-    final next = run.selectors?.current ?? tokens[run.cursor];
-    if (next.kind == .invalid ||
-        next.kind != .colon &&
-            !next.kind.endsExpression &&
-            next.kind.continuesExpression) {
-      return null;
-    }
-    // Match the ordinary index path, including its diagnostic token.
-    advance();
-    checkSelector();
-    values.clear();
-    cursor = run.cursor;
-    current = next;
-    return _IndexedBranch(receiver, run, takeDiagnostics());
-  }
-
-  void acceptConditional(_ConditionalResult result) {
+    final result = outcome as _ConditionalBranches?;
     if (nullableForInitializer case final checkpoint?) {
       nullableForInitializer = null;
-      if (result is _ConditionalBranches) {
+      if (result != null) {
         checkpoint.frame.declarations = null;
+        pendingBranches = (cursor, result);
         cursor = checkpoint.start;
         current = tokens[cursor];
       } else {
@@ -289,21 +221,19 @@ extension on _Parser {
       }
       return;
     }
-    if (result case _ConditionalBranches()) {
+    if (result != null) {
       prepareConditional();
       reduceBefore(current);
       final condition = values.removeLast();
       checkValue(condition);
-      final thenExpression = result.thenBranch.materialize(diagnostics);
-      final elseExpression = result.elseBranch.materialize(diagnostics);
+      diagnostics.addAll(result.diagnostics);
       values.add(
-        ConditionalExpression(
-          source: source,
-          start: condition.start,
-          end: elseExpression.end,
+        arena.putConditionalExpression(
+          start: arena.rStart(condition),
+          end: arena.rEnd(result.elseBranch),
           condition: condition,
-          thenExpression: thenExpression,
-          elseExpression: elseExpression,
+          thenExpression: result.thenBranch,
+          elseExpression: result.elseBranch,
         ),
       );
       cursor = result.cursor;
@@ -317,42 +247,7 @@ extension on _Parser {
 }
 
 extension on TokenKind {
-  bool get closesTypeArgumentList => switch (this) {
-    .greater ||
-    .greaterEqual ||
-    .shiftRight ||
-    .shiftRightAssign ||
-    .unsignedShiftRight ||
-    .unsignedShiftRightAssign => true,
-    _ => false,
-  };
-
-  bool get endsExpression => switch (this) {
-    .comma ||
-    .semicolon ||
-    .rightParen ||
-    .rightBracket ||
-    .rightBrace ||
-    .interpolationEnd ||
-    .keywordElse ||
-    .keywordIn ||
-    .keywordCase ||
-    .keywordIf ||
-    .keywordWhile ||
-    .keywordDo ||
-    .keywordFor ||
-    .keywordReturn ||
-    .keywordBreak ||
-    .keywordContinue ||
-    .keywordRethrow ||
-    .keywordTry ||
-    .keywordCatch ||
-    .keywordFinally ||
-    .keywordAssert ||
-    .keywordVar ||
-    .keywordFinal => true,
-    _ => false,
-  };
+  bool get endsExpression => (_grammar[index] & 32) != 0;
 
   bool get continuesExpression =>
       precedence != 0 ||

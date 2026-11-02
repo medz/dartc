@@ -5,7 +5,7 @@ extension on _Parser {
       languageVersion.major < major ||
       languageVersion.major == major && languageVersion.minor < minor;
 
-  ParseResult<T> finishResult<T extends AstNode>(T node) {
+  ParseResult<T> finishResult<T extends AstNode>(int node) {
     if (before(2, 12) ||
         languageVersion.major == 2 && languageVersion.minor > 19 ||
         languageVersion.minor < 0 ||
@@ -18,7 +18,7 @@ extension on _Parser {
     } else if (languageVersion != LanguageVersion.current) {
       checkLanguageFeatures(node);
     }
-    return ParseResult._(node, diagnostics);
+    return ParseResult._(arena, node, diagnostics);
   }
 
   void requireFeature(AstNode node, int major, int minor, String feature) {
@@ -30,12 +30,13 @@ extension on _Parser {
     );
   }
 
-  void checkLanguageFeatures(AstNode root) {
+  void checkLanguageFeatures(int root) {
     // The call target distinguishes a generic named constructor invocation from
     // a tear-off without binding its unresolved names.
-    final pending = <(AstNode, bool)>[(root, false)];
+    final pending = <(int, bool)>[(root, false)];
     while (pending.isNotEmpty) {
-      final (node, called) = pending.removeLast();
+      final (id, called) = pending.removeLast();
+      final node = arena.at(id);
       switch (node) {
         case TypeAliasDeclaration(:final type)
             when type is! FunctionTypeAnnotation:
@@ -148,15 +149,11 @@ extension on _Parser {
         default:
           break;
       }
+      final firstIsTarget =
+          node is InvocationExpression ||
+          (called && node is PropertyAccessExpression);
       for (var i = node.childCount - 1; i >= 0; i--) {
-        final child = node.childAt(i);
-        final isTarget = switch (node) {
-          InvocationExpression(:final callee) => identical(child, callee),
-          PropertyAccessExpression(:final target) =>
-            called && identical(child, target),
-          _ => false,
-        };
-        pending.add((child, isTarget));
+        pending.add((arena.childIndex(id, i), i == 0 && firstIsTarget));
       }
     }
   }

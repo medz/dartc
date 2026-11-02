@@ -20,6 +20,111 @@ CompilationUnit parsed(String text) {
 }
 
 void main() {
+  test(
+    'recovers malformed identifier ranges without changing scanned tokens',
+    () {
+      for (final bad in ['\u001f', '\u007f', '\u0085', 'é', '😀']) {
+        final source = SourceFile(
+          Uri.parse('memory:unit'),
+          '@a${bad}1 class${bad}C {}',
+        );
+        final input = scan(source);
+        final tokens = input.tokens.toList();
+        final result = parseCompilationUnit(input);
+        expect(result.diagnostics, orderedEquals(input.diagnostics));
+        expect(
+          input.tokens.where((t) => t.kind == .invalid).map((t) => t.lexeme),
+          [bad, bad],
+        );
+        expect(input.tokens, orderedEquals(tokens));
+        final cls = result.node.members.single as ClassDeclaration;
+        expect(cls.metadata.single.name.single.text, 'a${bad}1');
+        expect(cls.name.text, '${bad}C');
+
+        final operand = scan(SourceFile(source.uri, bad));
+        final expression = parseExpression(operand);
+        expect(expression.diagnostics, orderedEquals(operand.diagnostics));
+        expect((expression.node as IdentifierExpression).identifier.text, bad);
+      }
+    },
+  );
+
+  test(
+    'recovers across illegal separators and retains the original tokens',
+    () {
+      final source = SourceFile(
+        Uri.parse('memory:unit'),
+        "\u00a0import 'a'; @deprecated\u200b class C {}\u000c int f() => 1;",
+      );
+      final input = scan(source);
+      final result = parseCompilationUnit(input);
+      expect(result.diagnostics, orderedEquals(input.diagnostics));
+      expect(
+        input.tokens
+            .where((t) => t.kind == TokenKind.invalid)
+            .map((t) => t.lexeme),
+        ['\u00a0', '\u200b', '\u000c'],
+      );
+      expect(result.node.members, [
+        isA<ImportDirective>(),
+        isA<ClassDeclaration>(),
+        isA<TopLevelFunctionDeclaration>(),
+      ]);
+      final declaration = result.node.members[1] as ClassDeclaration;
+      expect(declaration.metadata.single.text, '@deprecated');
+      expect(declaration.name.text, 'C');
+      final missing = parseExpression(
+        scan(SourceFile(source.uri, 'a + \u00a0')),
+      );
+      expect(missing.diagnostics.map((d) => d.code), [
+        'scanner.unexpected_character',
+        'parser.expected_expression',
+      ]);
+    },
+  );
+
+  test('reports a newly exposed escape when a malformed name consumes r', () {
+    final source = SourceFile(
+      Uri.parse('memory:unit'),
+      "final x = \u001fr'\\xZ';",
+    );
+    final input = scan(source);
+    expect(input.diagnostics.map((d) => d.code), [
+      'scanner.unexpected_character',
+    ]);
+    expect(
+      input.tokens.firstWhere((t) => t.kind == .stringLiteral).lexeme,
+      r"r'\xZ'",
+    );
+    final result = parseCompilationUnit(input);
+    expect(result.diagnostics.first, same(input.diagnostics.single));
+    final escape = result.diagnostics.singleWhere(
+      (d) => d.code == 'scanner.invalid_escape',
+    );
+    expect(escape.span!.text, r'\x');
+  });
+
+  test('keeps enclosing interpolations when recovery splits an exponent', () {
+    for (final number in ['3', '3.25']) {
+      final source = SourceFile(
+        Uri.parse('memory:unit'),
+        r'final text = "outer ${"inner ${name'
+        '\u001f1e-$number'
+        r'}"}"; class Tail {}',
+      );
+      final input = scan(source);
+      final result = parseCompilationUnit(input);
+      expect(result.diagnostics, orderedEquals(input.diagnostics));
+      expect((result.node.members.last as ClassDeclaration).name.text, 'Tail');
+      final nodes = walk(result.node);
+      expect(nodes.whereType<InterpolatedStringExpression>(), hasLength(2));
+      final subtraction = nodes.whereType<BinaryExpression>().single;
+      expect(subtraction.op, BinaryOperator.subtract);
+      expect(subtraction.left.text, 'name\u001f1e');
+      expect(subtraction.right.text, number);
+    }
+  });
+
   test('parses declarations with function-form parameters named Function', () {
     final unit = parsed('''
 int visit(int Function(int value)) => Function(1);

@@ -3,15 +3,15 @@ part of 'parser.dart';
 final class _CollectionPatternReader(
   final _Parser parser,
   final PatternContext context,
-) extends _Reader<DartPattern> {
+) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final start = parser.current.start;
-    TypeArgumentList? arguments;
+    int? arguments;
     if (parser.current.kind == .less) {
       final reader = _TypeReader(parser);
       if (!reader.start(arguments: true)) yield _TypeTask(reader);
-      arguments = reader.result as TypeArgumentList?;
+      arguments = parser.arena.asTypeArgumentListOrNull(reader.result);
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
       }
@@ -20,8 +20,7 @@ final class _CollectionPatternReader(
     if (opening.kind == .emptyBrackets ||
         opening.kind == .emptyBracketsAssign) {
       parser.consumeEmptyBrackets();
-      result = ListPattern(
-        source: parser.source,
+      result = parser.arena.putListPattern(
         start: start,
         end: opening.start + 2,
         typeArguments: arguments,
@@ -32,7 +31,7 @@ final class _CollectionPatternReader(
     final isMap = opening.kind == .leftBrace;
     final closing = isMap ? TokenKind.rightBrace : TokenKind.rightBracket;
     parser.expect(isMap ? .leftBrace : .leftBracket);
-    final elements = <AstNode>[];
+    final elements = <int>[];
     var hasRest = false;
     while (parser.current.kind != closing && parser.current.kind != .eof) {
       final cursor = parser.cursor;
@@ -54,22 +53,21 @@ final class _CollectionPatternReader(
           );
         }
         parser.advance();
-        DartPattern? pattern;
+        int? pattern;
         if (parser.current.kind != .comma && parser.current.kind != closing) {
           final reader = _PatternReader(parser, context: context);
           yield reader;
           pattern = reader.result;
         }
         elements.add(
-          RestPatternElement(
-            source: parser.source,
+          parser.arena.putRestPatternElement(
             start: token.start,
-            end: pattern?.end ?? token.end,
+            end: parser.arena.rEndOrNull(pattern) ?? token.end,
             pattern: pattern,
           ),
         );
       } else {
-        Expression? key;
+        int? key;
         if (isMap) {
           final reader = _ExpressionReader(parser);
           if (!reader.start()) yield reader;
@@ -82,10 +80,9 @@ final class _CollectionPatternReader(
         elements.add(
           key == null
               ? pattern
-              : MapPatternEntry(
-                  source: parser.source,
-                  start: key.start,
-                  end: pattern.end,
+              : parser.arena.putMapPatternEntry(
+                  start: parser.arena.rStart(key),
+                  end: parser.arena.rEnd(pattern),
                   key: key,
                   value: pattern,
                 ),
@@ -97,19 +94,17 @@ final class _CollectionPatternReader(
     }
     final end = parser.expect(closing);
     result = isMap
-        ? MapPattern(
-            source: parser.source,
+        ? parser.arena.putMapPattern(
             start: start,
             end: end,
             typeArguments: arguments,
-            elements: elements.cast<MapPatternElement>(),
+            elements: elements.cast<int>(),
           )
-        : ListPattern(
-            source: parser.source,
+        : parser.arena.putListPattern(
             start: start,
             end: end,
             typeArguments: arguments,
-            elements: elements.cast<ListPatternElement>(),
+            elements: elements.cast<int>(),
           );
   }
 }
@@ -118,17 +113,17 @@ final class _PatternFieldsReader(
   final _Parser parser,
   final PatternContext context, {
   final bool object = false,
-}) extends _Reader<List<PatternField>> {
+}) extends _Reader<List<int>> {
   bool hasComma = false;
   late int end;
 
   @override
   Iterable<_Reader<Object?>> read() sync* {
     parser.expect(.leftParen);
-    final fields = <PatternField>[];
+    final fields = <int>[];
     while (parser.current.kind != .rightParen && parser.current.kind != .eof) {
       final token = parser.current;
-      Identifier? name;
+      int? name;
       if (token.kind.isIdentifier &&
           parser.tokens[parser.cursor + 1].kind == .colon) {
         name = parser.identifier(token);
@@ -141,10 +136,9 @@ final class _PatternFieldsReader(
       final pattern = reader.result;
       if (isNamed) {
         fields.add(
-          NamedPatternField(
-            source: parser.source,
+          parser.arena.putNamedPatternField(
             start: token.start,
-            end: pattern.end,
+            end: parser.arena.rEnd(pattern),
             name: name,
             pattern: pattern,
           ),

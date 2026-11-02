@@ -4,6 +4,25 @@ import 'package:test/test.dart';
 import 'fixtures.dart';
 
 void main() {
+  test('assigns each colon to its conditional across calls and indexes', () {
+    for (final (text, expected) in [
+      (
+        'a?[i] + f(x)?[j] : first : second',
+        '(?: a (?: (+ (list i) (call f x)) (list j) first) second)',
+      ),
+      ('a[i]?[j](v)?[k]:c', '(?: (call (?[] ([] a i) j) v) (list k) c)'),
+      ('a?[i]?[j].p?[k]:c', '(?: (. (?[] (?[] a i) j) p) (list k) c)'),
+    ]) {
+      expect(shape(parsed(text)), expected, reason: text);
+    }
+    final chain = '${'a?[i] + ' * 2000}f(x)?[j]:first:second';
+    final branches = walk(parsed(chain)).whereType<ConditionalExpression>();
+    expect(branches.map((branch) => branch.elseExpression.text), [
+      'second',
+      'first',
+    ]);
+  });
+
   test('preserves selectors after an ambiguous index chain', () {
     for (final suffix in [
       '.x',

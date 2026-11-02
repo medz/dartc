@@ -1,12 +1,10 @@
 part of 'parser.dart';
 
-final class _FunctionTypes(
-  final Token function,
-  final TypeAnnotation? returnType,
-) extends _AnnotatedTypeFrame {
-  TypeParameterList? typeParameters;
+final class _FunctionTypes(final Token function, final int? returnType)
+    extends _AnnotatedTypeFrame {
+  int? typeParameters;
   Token? opening;
-  final List<FunctionTypeParameter> parameters = [];
+  final List<int> parameters = [];
   FunctionTypeParameterKind kind = .requiredPositional;
   TokenKind? optionalClose;
   int groupStart = 0;
@@ -17,13 +15,13 @@ final class _FunctionTypes(
 }
 
 final class _TypeVariables(final Token opening) extends _AnnotatedTypeFrame {
-  final List<TypeParameter> parameters = [];
-  Identifier? name;
+  final List<int> parameters = [];
+  int? name;
   Token? boundStart;
 }
 
 extension on _TypeReader {
-  TypeAnnotation? beginFunction(TypeAnnotation? returnType) {
+  int? beginFunction(int? returnType) {
     final frame = _FunctionTypes(current, returnType);
     frames.add(frame);
     parser.advance();
@@ -36,10 +34,7 @@ extension on _TypeReader {
     return beginParameters(frame);
   }
 
-  TypeAnnotation? prepareVariable(
-    _TypeVariables frame, {
-    bool afterMetadata = false,
-  }) {
+  int? prepareVariable(_TypeVariables frame, {bool afterMetadata = false}) {
     while (failure == null) {
       if (!afterMetadata && !readMetadata(frame)) return null;
       afterMetadata = false;
@@ -55,13 +50,12 @@ extension on _TypeReader {
         return null;
       }
       frame.parameters.add(
-        TypeParameter(
-          source: source,
+        parser.arena.putTypeParameter(
           start: frame.metadata.isEmpty
-              ? name.start
-              : frame.metadata.first.start,
+              ? parser.arena.rStart(name)
+              : parser.arena.rStart(frame.metadata.first),
           metadata: frame.metadata,
-          end: name.end,
+          end: parser.arena.rEnd(name),
           name: name,
         ),
       );
@@ -74,7 +68,7 @@ extension on _TypeReader {
     return null;
   }
 
-  TypeAnnotation? continueVariables(_TypeVariables frame) {
+  int? continueVariables(_TypeVariables frame) {
     if (current.kind == .comma) {
       parser.advance();
       return prepareVariable(frame);
@@ -82,12 +76,11 @@ extension on _TypeReader {
     return finishVariables(frame);
   }
 
-  TypeAnnotation? finishVariables(_TypeVariables frame) {
+  int? finishVariables(_TypeVariables frame) {
     final end = closeAngle();
     if (failure != null) return null;
     frames.removeLast();
-    final parameters = TypeParameterList(
-      source: source,
+    final parameters = parser.arena.putTypeParameterList(
       start: frame.opening.start,
       end: end,
       parameters: frame.parameters,
@@ -101,7 +94,7 @@ extension on _TypeReader {
     return beginParameters(function);
   }
 
-  TypeAnnotation? beginParameters(_FunctionTypes frame) {
+  int? beginParameters(_FunctionTypes frame) {
     if (current.kind != .leftParen) {
       fail(
         'expected_opener',
@@ -114,7 +107,7 @@ extension on _TypeReader {
     return prepareParameter(frame);
   }
 
-  TypeAnnotation? prepareParameter(_FunctionTypes frame) {
+  int? prepareParameter(_FunctionTypes frame) {
     if (current.kind == .rightParen) return finishFunction(frame);
     if (current.kind == .leftBracket || current.kind == .leftBrace) {
       if (frame.optionalClose != null) {
@@ -147,7 +140,7 @@ extension on _TypeReader {
     return prepareParameterModifiers(frame);
   }
 
-  TypeAnnotation? prepareParameterModifiers(_FunctionTypes frame) {
+  int? prepareParameterModifiers(_FunctionTypes frame) {
     frame.requiredKeyword = current.kind == .keywordRequired;
     if (frame.requiredKeyword) {
       if (frame.kind != .optionalNamed) {
@@ -161,7 +154,7 @@ extension on _TypeReader {
     return null;
   }
 
-  TypeAnnotation? continueParameters(_FunctionTypes frame) {
+  int? continueParameters(_FunctionTypes frame) {
     if (current.kind == .comma) {
       parser.advance();
       return prepareParameter(frame);
@@ -174,7 +167,7 @@ extension on _TypeReader {
     return finishFunction(frame);
   }
 
-  TypeAnnotation? finishFunction(_FunctionTypes frame) {
+  int? finishFunction(_FunctionTypes frame) {
     if (frame.optionalClose != null && !frame.groupClosed) {
       fail(
         'expected_closer',
@@ -193,15 +186,14 @@ extension on _TypeReader {
     parser.advance();
     frames.removeLast();
     final question = nullableOffset();
-    return FunctionTypeAnnotation(
-      source: source,
-      start: frame.returnType?.start ?? frame.function.start,
+    return parser.arena.putFunctionTypeAnnotation(
+      start:
+          parser.arena.rStartOrNull(frame.returnType) ?? frame.function.start,
       end: question == null ? end : question + 1,
       questionOffset: question,
       returnType: frame.returnType,
       typeParameters: frame.typeParameters,
-      parameters: FunctionTypeParameterList(
-        source: source,
+      parameters: parser.arena.putFunctionTypeParameterList(
         start: frame.opening!.start,
         end: end,
         parameters: frame.parameters,

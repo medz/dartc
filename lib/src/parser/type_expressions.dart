@@ -4,7 +4,7 @@ extension on _Parser {
   Iterable<_Reader<Object?>> readConstruction() sync* {
     final keyword = current;
     advance();
-    Identifier readName({bool continuation = false}) {
+    int readName({bool continuation = false}) {
       final token = current;
       if (token.kind.isIdentifier ||
           continuation && token.kind == .keywordNew) {
@@ -20,7 +20,7 @@ extension on _Parser {
         advance();
         return identifier(token);
       }
-      return Identifier(source: source, start: token.start, end: token.start);
+      return arena.putIdentifier(start: token.start, end: token.start);
     }
 
     final components = [readName()];
@@ -28,16 +28,16 @@ extension on _Parser {
       advance();
       components.add(readName(continuation: true));
     }
-    TypeArgumentList? types;
+    int? types;
     if (current.kind == .less) {
       final reader = _TypeReader(this);
       if (!reader.start(arguments: true)) yield _TypeTask(reader);
-      types = reader.result as TypeArgumentList?;
+      types = arena.asTypeArgumentListOrNull(reader.result);
       if (reader.failure case final failure?) {
         error(failure.$1, failure.$2, failure.$3);
       }
     }
-    Identifier? constructorName;
+    int? constructorName;
     if (current.kind == .dot) {
       advance();
       final name = readName(continuation: true);
@@ -50,16 +50,14 @@ extension on _Parser {
     if (current.kind != .leftParen) {
       error('expected_arguments', 'Expected constructor arguments.', current);
       values.add(
-        InstanceCreationExpression(
-          source: source,
+        arena.putInstanceCreationExpression(
           start: keyword.start,
           end: current.start,
           kind: keyword.kind == .keywordConst ? .constKeyword : .newKeyword,
           name: components,
           typeArguments: types,
           constructorName: constructorName,
-          arguments: ArgumentList(
-            source: source,
+          arguments: arena.putArgumentList(
             start: current.start,
             end: current.start,
             arguments: const [],
@@ -88,18 +86,19 @@ extension on _Parser {
     var target = values.last;
     var assertions = 0;
     while (true) {
-      if (target is NullAssertionExpression) {
+      if (arena.hasKind(target, .nullAssertionExpression)) {
         assertions++;
-        target = target.operand;
-      } else if (target is DotShorthandExpression) {
-        target = target.expression;
+        target = arena.rNullAssertionExpressionOperand(target);
+      } else if (arena.hasKind(target, .dotShorthandExpression)) {
+        target = arena.rDotShorthandExpressionExpression(target);
       } else {
         break;
       }
     }
     final frame = frames.lastOrNull;
     final afterPrefix =
-        (target is ConstDotShorthandExpression || assertions > 1) &&
+        (arena.hasKind(target, .constDotShorthandExpression) ||
+            assertions > 1) &&
         !(frame is _Cascade && !frame.assigned);
     if (afterPrefix &&
         !(operators.length > operatorBase &&
@@ -113,28 +112,23 @@ extension on _Parser {
         !(first.kind.isIdentifier && tokens[cursor + 2].kind == .dot)) {
       return false;
     }
-    if (cursor >= lookahead.lastTypeArgumentCloser) return false;
+    final end = lookahead.afterTypeArguments(cursor);
+    if (end == null || !tokens[end].kind.followsTypeArguments) return false;
     final start = cursor;
     final remainder = current;
-    final cache = lookahead.typeArguments;
-    TypeArgumentList? arguments;
-    if (cache.containsKey(start)) {
-      final cached = cache[start];
-      if (cached == null) return false;
-      arguments = cached.$1;
-      cursor = cached.$2;
-      current = cached.$3;
-    } else {
-      final reader = _TypeReader(this);
-      if (!reader.start(arguments: true)) {
-        pendingSyntax = _SyntaxTask(
-          readTypeArgumentSuffix(reader, start, remainder, afterPrefix),
-        );
-        return true;
-      }
-      arguments = reader.result as TypeArgumentList?;
+    final reader = _TypeReader(this);
+    if (!reader.start(arguments: true)) {
+      pendingSyntax = _SyntaxTask(
+        readTypeArgumentSuffix(reader, start, remainder, afterPrefix),
+      );
+      return true;
     }
-    return acceptTypeArguments(arguments, start, remainder, afterPrefix);
+    return acceptTypeArguments(
+      arena.asTypeArgumentListOrNull(reader.result),
+      start,
+      remainder,
+      afterPrefix,
+    );
   }
 
   Iterable<_Reader<Object?>> readTypeArgumentSuffix(
@@ -145,7 +139,7 @@ extension on _Parser {
   ) sync* {
     yield _TypeTask(reader);
     if (!acceptTypeArguments(
-      reader.result as TypeArgumentList?,
+      arena.asTypeArgumentListOrNull(reader.result),
       start,
       remainder,
       afterPrefix,
@@ -155,7 +149,7 @@ extension on _Parser {
   }
 
   bool acceptTypeArguments(
-    TypeArgumentList? arguments,
+    int? arguments,
     int start,
     Token remainder,
     bool afterPrefix,
@@ -188,10 +182,9 @@ extension on _Parser {
     } else {
       checkValue(target);
       values.add(
-        TypeInstantiationExpression(
-          source: source,
-          start: target.start,
-          end: arguments.end,
+        arena.putTypeInstantiationExpression(
+          start: arena.rStart(target),
+          end: arena.rEnd(arguments),
           expression: target,
           typeArguments: arguments,
         ),
@@ -214,7 +207,8 @@ extension on _Parser {
     }
     final expression = values.removeLast();
     checkValue(expression);
-    if (expression is CastExpression || expression is TypeTestExpression) {
+    if (arena.hasKind(expression, .castExpression) ||
+        arena.hasKind(expression, .typeTestExpression)) {
       error(
         'chained_type_operator',
         'Parenthesize the type test or cast before another type operator.',
@@ -228,29 +222,27 @@ extension on _Parser {
     final reader = _TypeReader(this, afterIsOrAs: true);
     if (!reader.start()) yield _TypeTask(reader);
     final type =
-        reader.result as TypeAnnotation? ??
-        MissingTypeAnnotation(source: source, offset: first.start);
+        arena.asTypeAnnotationOrNull(reader.result) ??
+        arena.putMissingTypeAnnotation(offset: first.start);
     if (reader.failure case final failure?) {
       error(failure.$1, failure.$2, failure.$3);
     }
     if (first.kind == .keywordVoid &&
-        type is NamedTypeAnnotation &&
-        type.prefix == null) {
+        arena.hasKind(type, .namedTypeAnnotation) &&
+        arena.rNamedTypeAnnotationPrefix(type) == null) {
       error('invalid_void_type', 'A type test or cast cannot use void.', first);
     }
     values.add(
       token.kind == .keywordAs
-          ? CastExpression(
-              source: source,
-              start: expression.start,
-              end: type.end,
+          ? arena.putCastExpression(
+              start: arena.rStart(expression),
+              end: arena.rEnd(type),
               expression: expression,
               type: type,
             )
-          : TypeTestExpression(
-              source: source,
-              start: expression.start,
-              end: type.end,
+          : arena.putTypeTestExpression(
+              start: arena.rStart(expression),
+              end: arena.rEnd(type),
               expression: expression,
               type: type,
               isNegated: negated,
@@ -262,18 +254,15 @@ extension on _Parser {
   void checkTypeContinuation(Token token) {
     if (token.kind.precedence == _relationalPrecedence) {
       var operand = values.last;
-      while (operand is CastExpression || operand is TypeTestExpression) {
-        operand = switch (operand) {
-          CastExpression(:final expression) => expression,
-          TypeTestExpression(:final expression) => expression,
-          _ => operand,
-        };
+      while (arena.hasKind(operand, .castExpression) ||
+          arena.hasKind(operand, .typeTestExpression)) {
+        operand = arena.childIndex(operand, 0);
       }
-      if (operand is BinaryExpression &&
-          (operand.op == .less ||
-              operand.op == .lessEqual ||
-              operand.op == .greater ||
-              operand.op == .greaterEqual)) {
+      if (arena.hasKind(operand, .binaryExpression) &&
+          switch (arena.rBinaryExpressionOp(operand)) {
+            .less || .lessEqual || .greater || .greaterEqual => true,
+            _ => false,
+          }) {
         error(
           'chained_comparison',
           'Parenthesize this comparison operand.',

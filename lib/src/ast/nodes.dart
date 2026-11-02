@@ -1,5 +1,11 @@
+import 'dart:collection';
+import 'dart:typed_data';
+
 import 'package:dartc/source.dart';
 
+part 'syntax_tree.dart';
+part 'node_table.dart';
+part 'node_views.dart';
 part 'nodes/access.dart';
 part 'nodes/annotations.dart';
 part 'nodes/cascades.dart';
@@ -33,12 +39,16 @@ part 'nodes/variables.dart';
 
 /// An immutable syntax node within one source snapshot.
 ///
+/// Parsed views of the same row compare equal. Use [SyntaxTree.indexOf] to
+/// address that row directly.
+///
 /// Ranges are half-open UTF-16 offsets. Constructors throw [RangeError] for an
 /// invalid range and [ArgumentError] when children belong to another snapshot,
 /// overlap, occur out of order, or extend outside their parent.
 ///
 /// Empty ranges can represent missing syntax. Grammar validity and the meaning
-/// of names belong to the parser and analyzer. Nodes retain identity equality.
+/// of names belong to the parser and analyzer. Nodes created with a public
+/// constructor use object identity.
 sealed class AstNode({
   /// The source snapshot containing this syntax.
   required final SourceFile source,
@@ -67,8 +77,8 @@ sealed class AstNode({
 
   /// Returns the child at [index], in source order.
   ///
-  /// Punctuation and comments are not child nodes. Repeated access returns the
-  /// same node. Throws [RangeError] unless `0 <= index < childCount`.
+  /// Punctuation and comments are not child nodes. Repeated access returns equal
+  /// views of the same parsed child. Throws [RangeError] unless `0 <= index < childCount`.
   AstNode childAt(int index) =>
       throw RangeError.index(index, this, 'index', null, childCount);
 }

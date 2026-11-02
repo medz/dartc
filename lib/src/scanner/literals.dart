@@ -1,17 +1,13 @@
 part of 'scanner.dart';
 
-final class _StringState(
-  final int start,
+final class _Interpolation(
+  final int stringStart,
   final int quote,
   final int width,
-  final bool raw,
+  final int interpolationStart,
+  final _Interpolation? parent,
 ) {
-  var segmentStart = start;
-  var interpolated = false;
-  int? expressionStart;
-  var braceDepth = 0;
-
-  bool get inExpression => expressionStart != null;
+  int braceDepth = 0;
 }
 
 extension _LiteralScanning on _Scanner {
@@ -90,30 +86,33 @@ extension _LiteralScanning on _Scanner {
     final quote = _peek();
     final width = _peek(1) == quote && _peek(2) == quote ? 3 : 1;
     _offset += width;
-    _strings.add(_StringState(start, quote, width, raw));
+    _stringContent(start, quote, width, raw: raw, segmentStart: start);
   }
 
-  void _stringContent(_StringState state) {
+  void _stringContent(
+    int start,
+    int quote,
+    int width, {
+    required bool raw,
+    required int segmentStart,
+  }) {
     while (_offset < _text.length) {
       final code = _peek();
-      if (code == state.quote &&
-          (state.width == 1 || (_peek(1) == code && _peek(2) == code))) {
-        _offset += state.width;
+      if (code == quote &&
+          (width == 1 || (_peek(1) == code && _peek(2) == code))) {
+        _offset += width;
         _emit(
-          state.interpolated ? .stringEnd : .stringLiteral,
-          state.segmentStart,
+          segmentStart != start ? .stringEnd : .stringLiteral,
+          segmentStart,
         );
-        _strings.removeLast();
         return;
       }
-      if (state.width == 1 && _isLineBreak(code)) {
-        _unterminatedString(state);
-        _strings.removeLast();
-        return;
+      if (width == 1 && _isLineBreak(code)) {
+        break;
       }
-      if (!state.raw && code == 0x5C) {
-        _escape(state.width == 3);
-      } else if (!state.raw && code == 0x24) {
+      if (!raw && code == 0x5C) {
+        _escape(width == 3);
+      } else if (!raw && code == 0x24) {
         final next = _peek(1);
         if (next != 0x7B && !_isIdentifierStart(next, allowDollar: false)) {
           _report(
@@ -126,36 +125,36 @@ extension _LiteralScanning on _Scanner {
           continue;
         }
         _emit(
-          state.interpolated ? .stringMiddle : .stringStart,
-          state.segmentStart,
+          segmentStart != start ? .stringMiddle : .stringStart,
+          segmentStart,
         );
-        state.interpolated = true;
-        final start = _offset++;
-        if (_take(0x7B)) {
-          _emit(.interpolationStart, start);
-          state.expressionStart = start;
-          state.braceDepth = 0;
+        final dollar = _offset++;
+        if (next == 0x7B) {
+          _offset++;
+          _emit(.interpolationStart, dollar);
+          _interpolation = _Interpolation(
+            start,
+            quote,
+            width,
+            dollar,
+            _interpolation,
+          );
           return;
         }
-        _emit(.interpolationIdentifier, start);
-        _identifier(allowDollar: false);
-        state.segmentStart = _offset;
+        _emit(.interpolationIdentifier, dollar);
+        _identifier(next, allowDollar: false);
+        segmentStart = _offset;
       } else {
         _offset++;
       }
     }
-    _unterminatedString(state);
-    _strings.removeLast();
-  }
-
-  void _unterminatedString(_StringState state) {
     _report(
       'scanner.unterminated_string',
       'Expected a closing string delimiter.',
-      state.start,
+      start,
       _offset,
     );
-    _emit(state.interpolated ? .stringEnd : .stringLiteral, state.segmentStart);
+    _emit(segmentStart != start ? .stringEnd : .stringLiteral, segmentStart);
   }
 
   void _escape(bool multiline) {
