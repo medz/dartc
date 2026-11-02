@@ -20,6 +20,40 @@ CompilationUnit parsed(String text) {
 }
 
 void main() {
+  test(
+    'recovers across illegal separators and retains the original tokens',
+    () {
+      final source = SourceFile(
+        Uri.parse('memory:unit'),
+        "\u00a0import 'a'; @deprecated\u200b class C {}\u000c int f() => 1;",
+      );
+      final input = scan(source);
+      final result = parseCompilationUnit(input);
+      expect(result.diagnostics, orderedEquals(input.diagnostics));
+      expect(
+        input.tokens
+            .where((t) => t.kind == TokenKind.invalid)
+            .map((t) => t.lexeme),
+        ['\u00a0', '\u200b', '\u000c'],
+      );
+      expect(result.node.members, [
+        isA<ImportDirective>(),
+        isA<ClassDeclaration>(),
+        isA<TopLevelFunctionDeclaration>(),
+      ]);
+      final declaration = result.node.members[1] as ClassDeclaration;
+      expect(declaration.metadata.single.text, '@deprecated');
+      expect(declaration.name.text, 'C');
+      final missing = parseExpression(
+        scan(SourceFile(source.uri, 'a + \u00a0')),
+      );
+      expect(missing.diagnostics.map((d) => d.code), [
+        'scanner.unexpected_character',
+        'parser.expected_expression',
+      ]);
+    },
+  );
+
   test('parses declarations with function-form parameters named Function', () {
     final unit = parsed('''
 int visit(int Function(int value)) => Function(1);
