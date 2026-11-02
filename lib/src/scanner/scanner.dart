@@ -33,13 +33,12 @@ final class ScanResult {
   /// Lexical errors in discovery order.
   final List<Diagnostic> diagnostics;
 
-  // The scanner transfers ownership of these lists.
   ScanResult._(
     this.source,
     List<Token> tokens,
     List<Token> comments,
     List<Diagnostic> diagnostics,
-  ) : tokens = UnmodifiableListView(tokens),
+  ) : tokens = List.unmodifiable(tokens),
       comments = UnmodifiableListView(comments),
       diagnostics = UnmodifiableListView(diagnostics);
 
@@ -52,30 +51,22 @@ final class _Scanner(final SourceFile source) {
   final _tokens = <Token>[];
   final _comments = <Token>[];
   final _diagnostics = <Diagnostic>[];
-  final _strings = <_StringState>[];
+  final _interpolations = <_Interpolation>[];
   var _offset = 0;
 
   ScanResult scan() {
     if (_peek() == 0xFEFF) _offset++;
     while (_offset < _text.length) {
-      if (_strings.isNotEmpty && !_strings.last.inExpression) {
-        _stringContent(_strings.last);
-      } else {
-        _token();
-      }
+      _token();
     }
-    while (_strings.isNotEmpty) {
-      final state = _strings.removeLast();
-      if (state.inExpression) {
-        _report(
-          'scanner.unterminated_interpolation',
-          "Expected '}' to end the string interpolation.",
-          state.expressionStart!,
-          _offset,
-        );
-      } else {
-        _unterminatedString(state);
-      }
+    while (_interpolations.isNotEmpty) {
+      final state = _interpolations.removeLast();
+      _report(
+        'scanner.unterminated_interpolation',
+        "Expected '}' to end the string interpolation.",
+        state.interpolationStart,
+        _offset,
+      );
     }
     _emit(.eof, _offset);
     return ScanResult._(source, _tokens, _comments, _diagnostics);
@@ -128,7 +119,7 @@ final class _Scanner(final SourceFile source) {
 
   void _token() {
     final start = _offset;
-    final code = _peek();
+    final code = _text.codeUnitAt(start);
     if (code == 0x20 || code == 0x09 || code == 0x0A || code == 0x0D) {
       var end = _offset + 1;
       while (end < _text.length) {
@@ -160,9 +151,7 @@ final class _Scanner(final SourceFile source) {
       return;
     }
     if (start == 0 && code == 0x23 && _peek(1) == 0x21) {
-      while (_offset < _text.length && !_isLineBreak(_peek())) {
-        _offset++;
-      }
+      _offset = _lineEnd(_offset);
       _emit(.scriptTag, start);
       return;
     }
@@ -183,18 +172,26 @@ final class _Scanner(final SourceFile source) {
       case 0x5D:
         kind = .rightBracket;
       case 0x7B:
-        if (_strings.isNotEmpty) _strings.last.braceDepth++;
+        if (_interpolations.isNotEmpty) _interpolations.last.braceDepth++;
         kind = .leftBrace;
       case 0x7D:
-        if (_strings.isNotEmpty && _strings.last.braceDepth == 0) {
-          final state = _strings.last;
-          state.expressionStart = null;
-          state.segmentStart = _offset;
-          kind = .interpolationEnd;
-        } else {
-          if (_strings.isNotEmpty) _strings.last.braceDepth--;
-          kind = .rightBrace;
+        if (_interpolations.isNotEmpty) {
+          final state = _interpolations.last;
+          if (state.braceDepth == 0) {
+            _interpolations.removeLast();
+            _emit(.interpolationEnd, start);
+            _stringContent(
+              state.stringStart,
+              state.quote,
+              state.width,
+              raw: false,
+              segmentStart: _offset,
+            );
+            return;
+          }
+          state.braceDepth--;
         }
+        kind = .rightBrace;
       case 0x2C:
         kind = .comma;
       case 0x3A:
@@ -297,14 +294,19 @@ final class _Scanner(final SourceFile source) {
     _emit(kind, start);
   }
 
+  int _lineEnd(int offset) {
+    while (offset < _text.length && !_isLineBreak(_text.codeUnitAt(offset))) {
+      offset++;
+    }
+    return offset;
+  }
+
   void _comment() {
     final start = _offset;
     final line = _peek(1) == 0x2F;
     _offset += 2;
     if (line) {
-      while (_offset < _text.length && !_isLineBreak(_peek())) {
-        _offset++;
-      }
+      _offset = _lineEnd(_offset);
     } else {
       var depth = 1;
       while (_offset < _text.length && depth > 0) {
