@@ -12,7 +12,7 @@
 - Add `parseFunctionBody` for block, arrow and empty declaration bodies, including asynchronous and generator modifiers. Parse `await`, `yield`, `yield*` and `await for` in their function context and report invalid modifier combinations.
 - Parse anonymous functions and local function declarations with generic parameters, annotations, defaults and nested asynchronous or generator bodies.
 - Add `parseCompilationUnit` for library directives, top-level declarations, classes, mixins, enums, extensions, extension types and their members. Preserve primary and abbreviated constructors, initializer lists, factory redirections and type metadata.
-- Add `LanguageVersion` and the optional `languageVersion` argument to each parser entry point for versioned syntax checks.
+- Add `LanguageVersion` and the optional `languageVersion` argument to each parser entry point for versioned syntax checks. Call `result.reparse(source)` after editing a compilation unit.
 - Add `parsePattern` with matching, declaration and assignment contexts. Parse structural and logical patterns, guards, if-case, switch expressions and statements, destructuring assignments and pattern loop headers. Preserve metadata on local and loop declarations.
 - Add `package:dartc/project.dart` for loading library graphs from files or custom source providers. Resolve package configurations, conditional imports and exports, parts and language versions, with diagnostics for missing sources and invalid library relationships. Read the indexed AST through `LibraryUnit.tree`. With a complete list of changed source URIs, use `ProjectLoader.update` to reload edits and discover new dependencies.
 

@@ -9,6 +9,27 @@ ScanResult scanText(String text) =>
 
 void main() {
   group('scan', () {
+    test(
+      'leading comments match a full scan up to the first language token',
+      () {
+        for (final header in ['', '\ufeff', '#!dart\r\n', ' \t']) {
+          final source = SourceFile(
+            Uri.parse('memory:header'),
+            '$header/* a /* b */ */ // c\r\nint x; // body',
+          );
+          final full = scan(source), leading = scan(source, comments: .leading);
+          final comments = leading.comments;
+          expect(comments.map((t) => t.lexeme), ['/* a /* b */ */', '// c']);
+          expect(
+            leading.tokens.map((t) => t.lexeme),
+            full.tokens.map((t) => t.lexeme),
+          );
+          expect(full.comments.length, comments.length + 1);
+          expect(comments.clear, throwsUnsupportedError);
+        }
+      },
+    );
+
     test('returns one EOF and preserves the source snapshot', () {
       for (final text in ['', ' \t\r\n', 'final answer = 42;']) {
         final source = SourceFile(Uri.parse('memory:test.dart'), text);

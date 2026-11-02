@@ -7,7 +7,8 @@ import 'package:dartc/source.dart';
 ///
 /// Construct a unit from the result of [parseCompilationUnit].
 final class LibraryUnit({
-  required ParseResult<CompilationUnit> syntax,
+  /// The syntax, diagnostics and language version produced by the parser.
+  required final ParseResult<CompilationUnit> syntax,
   Uri? location,
 
   /// The language version used to parse this file.
@@ -25,7 +26,7 @@ final class LibraryUnit({
   final Uri location = location ?? syntax.tree.source.uri;
 
   /// The indexed syntax tree produced by the parser.
-  final SyntaxTree tree = syntax.tree;
+  SyntaxTree get tree => syntax.tree;
 
   /// The typed root of [tree].
   final CompilationUnit node = syntax.node;

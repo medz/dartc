@@ -18,7 +18,7 @@ extension on _Parser {
     } else if (languageVersion != LanguageVersion.current) {
       checkLanguageFeatures(node);
     }
-    return ParseResult._(arena, node, diagnostics);
+    return ParseResult._(arena, node, diagnostics, languageVersion);
   }
 
   void requireFeature(AstNode node, int major, int minor, String feature) {

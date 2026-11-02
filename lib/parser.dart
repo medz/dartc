@@ -17,6 +17,7 @@ export 'src/parser/parser.dart'
         parseFormalParameterList,
         parseFunctionBody,
         parseCompilationUnit,
+        CompilationUnitParsing,
         parsePattern,
         PatternContext,
         ParseResult;

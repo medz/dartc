@@ -20,7 +20,7 @@ _InvalidRole _invalidRole(int code) => switch (code) {
 };
 
 List<Token> tokensForParsing(ScanResult input, List<Diagnostic> diagnostics) {
-  final tokens = input._parserTokens ?? input.tokens;
+  final tokens = input._tokens;
   if (!input.hasErrors) return tokens;
   final first = tokens.indexWhere(
     (token) =>

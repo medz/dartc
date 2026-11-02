@@ -6,10 +6,9 @@ import 'dart:isolate';
 import 'package:dartc/ast.dart';
 import 'package:dartc/diagnostics.dart';
 import 'package:dartc/parser.dart';
+import 'package:dartc/scanner.dart';
 import 'package:dartc/source.dart';
 
-import '../parser/parser.dart' show reparseCompilationUnit;
-import '../scanner/scanner.dart' show scanUnit;
 import 'language_version.dart';
 import 'library.dart';
 import 'packages/configuration.dart';
@@ -143,17 +142,13 @@ final class ProjectLoader({
   ) {
     final source = SourceFile(uri, text);
     if (previous != null && previous.diagnostics.isEmpty) {
-      final syntax = reparseCompilationUnit(
-        source,
-        previous.tree,
-        previous.languageVersion,
-      );
+      final syntax = previous.syntax.tryReparse(source);
       if (syntax != null) {
         final marker = previous.versionMarker;
         return LibraryUnit(
           syntax: syntax,
           location: location,
-          languageVersion: previous.languageVersion,
+          languageVersion: syntax.languageVersion,
           versionOverride: previous.versionOverride,
           versionMarker: marker == null
               ? null
@@ -613,8 +608,8 @@ LibraryUnit _parseUnit(
   Uri location,
   LanguageVersion fallback,
 ) {
-  final input = scanUnit(source);
-  final override = versionOverride(input);
+  final input = scan(source, comments: .leading);
+  final override = versionOverride(input.comments);
   final version = override?.$1 ?? fallback;
   return LibraryUnit(
     syntax: parseCompilationUnit(input, languageVersion: version),

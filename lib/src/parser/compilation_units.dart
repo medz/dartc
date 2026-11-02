@@ -15,20 +15,48 @@ ParseResult<CompilationUnit> parseCompilationUnit(
   return parser.finishResult(node);
 }
 
-/// Reparses a change to a clean tree, keeping all ranges in the new snapshot.
-/// Returns null if the edit needs the full scanner or parser recovery context.
-ParseResult<CompilationUnit>? reparseCompilationUnit(
+/// Incremental parsing of a previously parsed compilation unit.
+extension CompilationUnitParsing on ParseResult<CompilationUnit> {
+  /// Parses [source], reusing unchanged syntax when the file and version match.
+  ///
+  /// Defaults to the previous language version. The result belongs to [source],
+  /// even when its text is unchanged. Errors have the same recovery and
+  /// diagnostics as a fresh parse.
+  ParseResult<CompilationUnit> reparse(
+    SourceFile source, {
+    LanguageVersion? languageVersion,
+  }) {
+    final version = languageVersion ?? this.languageVersion;
+    if (version == this.languageVersion) {
+      final result = tryReparse(source);
+      if (result != null) return result;
+    }
+    return parseCompilationUnit(
+      scan(source, comments: .leading),
+      languageVersion: version,
+    );
+  }
+
+  /// Reuses a clean unit when the edit preserves its header and parser context.
+  ///
+  /// Returns `null` when a fresh scan is needed. A project loader can then
+  /// read version comments from that scan before choosing the language version.
+  ParseResult<CompilationUnit>? tryReparse(SourceFile source) {
+    if (diagnostics.isNotEmpty || tree.source.uri != source.uri) return null;
+    return identical(source, tree.source)
+        ? this
+        : _tryReparse(source, tree, languageVersion);
+  }
+}
+
+ParseResult<CompilationUnit>? _tryReparse(
   SourceFile source,
   SyntaxTree previous,
   LanguageVersion languageVersion,
 ) {
   final before = previous.source.text, after = source.text;
   final limit = before.length < after.length ? before.length : after.length;
-  var prefix = 0;
-  while (prefix < limit &&
-      before.codeUnitAt(prefix) == after.codeUnitAt(prefix)) {
-    prefix++;
-  }
+  final prefix = _matchingLength(before, 0, after, 0, limit);
   final edited = _editFunctionBody(source, previous, prefix, languageVersion);
   if (edited != null) return edited;
   final members = <int>[];
@@ -55,6 +83,22 @@ ParseResult<CompilationUnit>? reparseCompilationUnit(
   final unit = _readUnit(parser, members, scriptTag);
   if (parser.diagnostics.isNotEmpty) return null;
   return parser.finishResult(unit);
+}
+
+// Compare four UTF-16 units per loop without copying either source range.
+int _matchingLength(String a, int startA, String b, int startB, int length) {
+  var i = 0;
+  while (i + 4 <= length &&
+      a.codeUnitAt(startA + i) == b.codeUnitAt(startB + i) &&
+      a.codeUnitAt(startA + i + 1) == b.codeUnitAt(startB + i + 1) &&
+      a.codeUnitAt(startA + i + 2) == b.codeUnitAt(startB + i + 2) &&
+      a.codeUnitAt(startA + i + 3) == b.codeUnitAt(startB + i + 3)) {
+    i += 4;
+  }
+  while (i < length && a.codeUnitAt(startA + i) == b.codeUnitAt(startB + i)) {
+    i++;
+  }
+  return i;
 }
 
 ParseResult<CompilationUnit>? _editFunctionBody(
@@ -92,8 +136,10 @@ ParseResult<CompilationUnit>? _editFunctionBody(
       final before = tree.source.text, after = source.text;
       final delta = after.length - before.length, newEnd = end + delta;
       if (newEnd <= change) return null;
-      for (var i = end - 1; i < before.length; i++) {
-        if (before.codeUnitAt(i) != after.codeUnitAt(i + delta)) return null;
+      final suffix = before.length - end + 1;
+      if (_matchingLength(before, end - 1, after, newEnd - 1, suffix) !=
+          suffix) {
+        return null;
       }
       final body = scanFrom(source, start, newEnd);
       if (body.hasErrors || body.tokens.last.start != newEnd) return null;

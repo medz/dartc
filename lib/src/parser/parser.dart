@@ -49,11 +49,18 @@ part 'switches.dart';
 /// A node is returned even when recovery was necessary. Check [hasErrors]
 /// before using the result as valid syntax.
 final class ParseResult<T extends AstNode> {
-  ParseResult._(AstArena arena, int root, List<Diagnostic> diagnostics)
-    : tree = arena.finish(root),
+  ParseResult._(
+    AstArena arena,
+    int root,
+    List<Diagnostic> diagnostics,
+    this.languageVersion,
+  ) : tree = arena.finish(root),
       diagnostics = diagnostics.isEmpty
           ? const []
           : UnmodifiableListView(diagnostics);
+
+  /// The language version used to check this syntax.
+  final LanguageVersion languageVersion;
 
   /// The indexed syntax tree, including any recovery placeholders.
   final SyntaxTree tree;

@@ -11,6 +11,15 @@ part 'literals.dart';
 part 'recovery.dart';
 part 'token.dart';
 
+/// Which comments a scan retains alongside its tokens.
+enum CommentRetention {
+  /// All line and block comments in the source.
+  all,
+
+  /// Only comments before the first language token, after any script tag.
+  leading,
+}
+
 /// Scans [source] using current Dart lexical rules.
 ///
 /// Reports malformed input and continues without rewriting the source or
@@ -19,11 +28,8 @@ part 'token.dart';
 /// Tokens from an unterminated string contain only the available source text.
 /// Bracket matching, keyword restrictions, language-version selection, and
 /// literal value conversion belong to later stages.
-ScanResult scan(SourceFile source) => _Scanner(source).scan();
-
-/// Scans tokens and the header comments used to select a language version.
-ScanResult scanUnit(SourceFile source) =>
-    _Scanner(source, headerOnly: true).scan();
+ScanResult scan(SourceFile source, {CommentRetention comments = .all}) =>
+    _Scanner(source, headerOnly: comments == .leading).scan();
 
 /// Scans ordinary code starting at a token boundary. A token crossing [end]
 /// is scanned to its real end so a caller can reject a stale boundary.
@@ -37,7 +43,7 @@ final class ScanResult {
 
   /// Source-ordered tokens, including a final EOF token.
   final List<Token> tokens;
-  final List<Token>? _parserTokens;
+  final List<Token> _tokens;
 
   /// Source-ordered line and block comments, including documentation comments.
   final List<Token> comments;
@@ -47,18 +53,14 @@ final class ScanResult {
 
   ScanResult._(
     this.source,
-    List<Token> tokens,
+    this._tokens,
     List<Token> comments,
-    List<Diagnostic>? diagnostics, {
-    required bool forParser,
-  }) : _parserTokens = forParser ? tokens : null,
-       tokens = forParser
-           ? UnmodifiableListView(tokens)
-           : List.unmodifiable(tokens),
-       comments = UnmodifiableListView(comments),
-       diagnostics = diagnostics == null
-           ? const []
-           : UnmodifiableListView(diagnostics);
+    List<Diagnostic>? diagnostics,
+  ) : tokens = UnmodifiableListView(_tokens),
+      comments = UnmodifiableListView(comments),
+      diagnostics = diagnostics == null
+          ? const []
+          : UnmodifiableListView(diagnostics);
 
   /// Whether scanning found a lexical error.
   bool get hasErrors => diagnostics.isNotEmpty;
@@ -91,13 +93,7 @@ final class _Scanner(
       );
     }
     _emit(.eof, _offset);
-    return ScanResult._(
-      source,
-      _tokens,
-      _comments,
-      _diagnostics,
-      forParser: headerOnly,
-    );
+    return ScanResult._(source, _tokens, _comments, _diagnostics);
   }
 
   int _peek([int ahead = 0]) {
