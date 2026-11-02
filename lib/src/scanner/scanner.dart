@@ -307,7 +307,8 @@ final class _Scanner(final SourceFile source, {final bool recovering = false}) {
             case _InvalidRole.skip:
               return;
             case _InvalidRole.identifier:
-              _recoverIdentifier(start);
+              _offset = _identifierEnd(_text, _offset);
+              _appendIdentifier(_tokens, source, start, _offset);
               return;
             case _InvalidRole.other:
               break;

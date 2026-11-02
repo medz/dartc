@@ -104,6 +104,27 @@ void main() {
     expect(escape.span!.text, r'\x');
   });
 
+  test('keeps enclosing interpolations when recovery splits an exponent', () {
+    for (final number in ['3', '3.25']) {
+      final source = SourceFile(
+        Uri.parse('memory:unit'),
+        r'final text = "outer ${"inner ${name'
+        '\u001f1e-$number'
+        r'}"}"; class Tail {}',
+      );
+      final input = scan(source);
+      final result = parseCompilationUnit(input);
+      expect(result.diagnostics, orderedEquals(input.diagnostics));
+      expect((result.node.members.last as ClassDeclaration).name.text, 'Tail');
+      final nodes = walk(result.node);
+      expect(nodes.whereType<InterpolatedStringExpression>(), hasLength(2));
+      final subtraction = nodes.whereType<BinaryExpression>().single;
+      expect(subtraction.op, BinaryOperator.subtract);
+      expect(subtraction.left.text, 'name\u001f1e');
+      expect(subtraction.right.text, number);
+    }
+  });
+
   test('parses declarations with function-form parameters named Function', () {
     final unit = parsed('''
 int visit(int Function(int value)) => Function(1);
