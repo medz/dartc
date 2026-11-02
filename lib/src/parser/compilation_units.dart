@@ -21,11 +21,7 @@ final class _UnitReader(final _Parser parser) extends _Reader<int> {
     int? scriptTag;
     if (parser.current.kind == .scriptTag) {
       final token = parser.current;
-      scriptTag = parser.arena.putScriptTag(
-        source: parser.source,
-        start: token.start,
-        end: token.end,
-      );
+      scriptTag = parser.arena.putScriptTag(start: token.start, end: token.end);
       parser.advance();
     }
     final members = <int>[];
@@ -84,7 +80,6 @@ final class _UnitReader(final _Parser parser) extends _Reader<int> {
       }
     }
     result = parser.arena.putCompilationUnit(
-      source: parser.source,
       scriptTag: scriptTag,
       members: members,
     );

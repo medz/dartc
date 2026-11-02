@@ -79,29 +79,21 @@ extension on _Parser {
 bool? _selectorLink(AstArena arena, int? expression, int list) {
   var inherits = true;
   while (expression != null) {
-    switch ((arena.maybe(expression) as Expression)) {
-      case BinaryExpression(refLeft: final left):
+    switch (arena.kindAt(expression)) {
+      case .binaryExpression ||
+          .castExpression ||
+          .typeTestExpression ||
+          .propertyAccessExpression ||
+          .nullAssertionExpression:
         inherits = false;
-        expression = left;
-      case CastExpression(refExpression: final operand) ||
-          TypeTestExpression(refExpression: final operand):
-        inherits = false;
-        expression = operand;
-      case PropertyAccessExpression(refTarget: final target):
-        inherits = false;
-        expression = target;
-      case NullAssertionExpression(refOperand: final operand):
-        inherits = false;
-        expression = operand;
-      case InvocationExpression(refCallee: final callee):
-        expression = callee;
-      case IndexExpression(refTarget: final target, isNullAware: false):
-        expression = target;
-      case TypeInstantiationExpression(refExpression: final next):
-        expression = next;
+      case .invocationExpression || .typeInstantiationExpression:
+        break;
+      case .indexExpression when !arena.indexIsNullAware(expression):
+        break;
       default:
         return expression == list ? inherits : null;
     }
+    expression = arena.childIndex(expression, 0);
   }
   return null;
 }

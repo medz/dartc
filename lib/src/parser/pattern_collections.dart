@@ -21,7 +21,6 @@ final class _CollectionPatternReader(
         opening.kind == .emptyBracketsAssign) {
       parser.consumeEmptyBrackets();
       result = parser.arena.putListPattern(
-        source: parser.source,
         start: start,
         end: opening.start + 2,
         typeArguments: arguments,
@@ -62,7 +61,6 @@ final class _CollectionPatternReader(
         }
         elements.add(
           parser.arena.putRestPatternElement(
-            source: parser.source,
             start: token.start,
             end: parser.arena.rEndOrNull(pattern) ?? token.end,
             pattern: pattern,
@@ -83,7 +81,6 @@ final class _CollectionPatternReader(
           key == null
               ? pattern
               : parser.arena.putMapPatternEntry(
-                  source: parser.source,
                   start: parser.arena.rStart(key),
                   end: parser.arena.rEnd(pattern),
                   key: key,
@@ -98,14 +95,12 @@ final class _CollectionPatternReader(
     final end = parser.expect(closing);
     result = isMap
         ? parser.arena.putMapPattern(
-            source: parser.source,
             start: start,
             end: end,
             typeArguments: arguments,
             elements: elements.cast<int>(),
           )
         : parser.arena.putListPattern(
-            source: parser.source,
             start: start,
             end: end,
             typeArguments: arguments,
@@ -142,7 +137,6 @@ final class _PatternFieldsReader(
       if (isNamed) {
         fields.add(
           parser.arena.putNamedPatternField(
-            source: parser.source,
             start: token.start,
             end: parser.arena.rEnd(pattern),
             name: name,

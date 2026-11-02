@@ -12,13 +12,7 @@ final class StringSequence(final AstArena arena) {
 
   void addText(Token token) {
     if (token.kind == .stringStart) _opening = token;
-    _parts.add(
-      arena.putStringText(
-        source: token.source,
-        start: token.start,
-        end: token.end,
-      ),
-    );
+    _parts.add(arena.putStringText(start: token.start, end: token.end));
     if (token.kind == .stringEnd) _finishString(token.end);
   }
 
@@ -30,7 +24,6 @@ final class StringSequence(final AstArena arena) {
   }) {
     _parts.add(
       arena.putStringInterpolation(
-        source: marker.source,
         start: marker.start,
         end: end,
         expression: expression,
@@ -43,7 +36,6 @@ final class StringSequence(final AstArena arena) {
     final opening = _opening!;
     _strings.add(
       arena.putInterpolatedStringExpression(
-        source: opening.source,
         start: opening.start,
         end: end,
         parts: _parts,
@@ -58,7 +50,6 @@ final class StringSequence(final AstArena arena) {
     if (_opening != null) _finishString(end);
     if (_strings.length == 1) return _strings.single;
     return arena.putAdjacentStringsExpression(
-      source: arena.rSource(_strings.first),
       start: arena.rStart(_strings.first),
       end: arena.rEnd(_strings.last),
       strings: _strings,

@@ -40,7 +40,7 @@ final class _PatternReader(
   @override
   Iterable<_Reader<Object?>> read() sync* {
     yield* primary();
-    var permitsUnary = !parser.arena.isRelationalPattern(result);
+    var permitsUnary = !parser.arena.hasKind(result, .relationalPattern);
     while (true) {
       final token = current;
       if (token.kind == .keywordAs ||
@@ -59,7 +59,6 @@ final class _PatternReader(
           yield reader;
           final type = reader.result;
           result = parser.arena.putCastPattern(
-            source: source,
             start: parser.arena.rStart(result),
             end: parser.arena.rEnd(type),
             pattern: result,
@@ -67,14 +66,12 @@ final class _PatternReader(
           );
         } else if (token.kind == .question) {
           result = parser.arena.putNullCheckPattern(
-            source: source,
             start: parser.arena.rStart(result),
             end: token.end,
             pattern: result,
           );
         } else {
           result = parser.arena.putNullAssertPattern(
-            source: source,
             start: parser.arena.rStart(result),
             end: token.end,
             pattern: result,
@@ -97,7 +94,6 @@ final class _PatternReader(
       );
       yield right;
       result = parser.arena.putLogicalPattern(
-        source: source,
         start: parser.arena.rStart(result),
         end: parser.arena.rEnd(right.result),
         left: result,
@@ -118,10 +114,7 @@ final class _PatternReader(
         token.kind == .colon ||
         token.kind == .arrow) {
       parser.error('expected_pattern', 'Expected a pattern.', token);
-      result = parser.arena.putMissingPattern(
-        source: source,
-        offset: token.start,
-      );
+      result = parser.arena.putMissingPattern(offset: token.start);
       return;
     }
     if (token.kind == .keywordVar || token.kind == .keywordFinal) {
@@ -178,7 +171,6 @@ final class _PatternReader(
       final expression = _ExpressionReader(parser, boundary: .patternRelation);
       if (!expression.start()) yield expression;
       result = parser.arena.putRelationalPattern(
-        source: source,
         start: token.start,
         end: parser.arena.rEnd(expression.result),
         op: relation,
@@ -201,13 +193,11 @@ final class _PatternReader(
               parser.arena.isDartPattern(items.single) &&
               !fields.hasComma
           ? parser.arena.putParenthesizedPattern(
-              source: source,
               start: token.start,
               end: fields.end,
               pattern: parser.arena.asDartPattern(items.single),
             )
           : parser.arena.putRecordPattern(
-              source: source,
               start: token.start,
               end: fields.end,
               fields: items,
@@ -219,7 +209,7 @@ final class _PatternReader(
       final typeReader = _TypeReader(child);
       if (!typeReader.start()) yield _TypeTask(typeReader);
       final candidate = typeReader.result;
-      if (parser.arena.isNamedTypeAnnotation(candidate) &&
+      if (parser.arena.hasKind(candidate, .namedTypeAnnotation) &&
           !parser.arena.rNamedTypeAnnotationIsNullable(candidate) &&
           child.current.kind == .leftParen &&
           typeReader.failure == null) {
@@ -227,7 +217,6 @@ final class _PatternReader(
         final fields = _PatternFieldsReader(parser, context, object: true);
         yield fields;
         result = parser.arena.putObjectPattern(
-          source: source,
           start: token.start,
           end: fields.end,
           type: candidate!,
@@ -249,9 +238,7 @@ final class _PatternReader(
     final expression = _ExpressionReader(parser, boundary: .patternConstant);
     if (!expression.start()) yield expression;
     final value = expression.result;
-    if ((parser.arena.maybe(value) as Expression) case DotShorthandExpression(
-      expression: ConstDotShorthandExpression(refArguments: null),
-    )) {
+    if (_isUninvokedConstShorthand(parser.arena, value)) {
       parser.error(
         'invalid_const_prefix',
         'A const shorthand must invoke a constructor.',
@@ -266,7 +253,6 @@ final class _PatternReader(
       );
     }
     result = parser.arena.putConstantPattern(
-      source: source,
       start: token.start,
       end: parser.arena.rEnd(value),
       hasConstKeyword: hasConst,
@@ -331,7 +317,6 @@ final class _PatternReader(
     }
     result = parser.arena.rText(name) == '_'
         ? parser.arena.putWildcardPattern(
-            source: source,
             start: first.start,
             end: parser.arena.rEnd(name),
             keyword: keyword,
@@ -339,13 +324,11 @@ final class _PatternReader(
           )
         : keyword == .none && type == null
         ? parser.arena.putIdentifierPattern(
-            source: source,
             start: first.start,
             end: parser.arena.rEnd(name),
             name: name,
           )
         : parser.arena.putVariablePattern(
-            source: source,
             start: first.start,
             end: parser.arena.rEnd(name),
             keyword: keyword,
@@ -354,8 +337,7 @@ final class _PatternReader(
           );
   }
 
-  bool validConstant(int value) => switch ((parser.arena.maybe(value)
-      as Expression)) {
+  bool validConstant(int value) => switch (parser.arena.at(value)) {
     LiteralExpression() || StringExpression() || IdentifierExpression() => true,
     PropertyAccessExpression() ||
     IndexExpression() ||
@@ -390,7 +372,6 @@ final class _CasePatternReader(
       if (!reader.start()) yield reader;
       final expression = reader.result;
       pattern = parser.arena.putConstantPattern(
-        source: parser.source,
         start: parser.arena.rStart(expression),
         end: parser.arena.rEnd(expression),
         expression: expression,
@@ -406,7 +387,6 @@ final class _CasePatternReader(
       final guard = _ExpressionReader(parser);
       if (!guard.start()) yield guard;
       result = parser.arena.putGuardedPattern(
-        source: parser.source,
         start: parser.arena.rStart(pattern),
         end: parser.arena.rEnd(guard.result),
         pattern: pattern,
@@ -429,4 +409,11 @@ final class _CollectionCaseReader(final _Parser parent, final _IfHeader frame)
     parent.frames.removeLast();
     parent.expectsOperand = true;
   }
+}
+
+bool _isUninvokedConstShorthand(AstArena arena, int shorthand) {
+  if (arena.kindAt(shorthand) != .dotShorthandExpression) return false;
+  final reference = arena.childIndex(shorthand, 0);
+  return arena.kindAt(reference) == .constDotShorthandExpression &&
+      arena.rConstDotShorthandExpressionArguments(reference) == null;
 }

@@ -133,8 +133,8 @@ final class _VariableReader(
         !forLoop &&
         !isLate &&
         keyword == .none &&
-        (parser.arena.isNamedTypeAnnotation(type) ||
-            parser.arena.isRecordTypeAnnotation(type)) &&
+        (parser.arena.hasKind(type, .namedTypeAnnotation) ||
+            parser.arena.hasKind(type, .recordTypeAnnotation)) &&
         parser.arena.rStart(type!) == first.start &&
         parser.current.kind.isIdentifier &&
         parser.tokens[parser.cursor + 1].kind == .assign &&
@@ -201,11 +201,7 @@ extension on _Parser {
     final token = current;
     if (!token.kind.isIdentifier) {
       error('expected_identifier', 'Expected a variable name.', token);
-      return arena.putIdentifier(
-        source: source,
-        start: token.start,
-        end: token.start,
-      );
+      return arena.putIdentifier(start: token.start, end: token.start);
     }
     advance();
     return identifier(token);
@@ -250,7 +246,6 @@ final class _VariablesReader(
       }
       declarations.variables.add(
         parser.arena.putVariableDeclaration(
-          source: parser.source,
           start: parser.arena.rStart(declarations.name),
           end:
               parser.arena.rEndOrNull(initializer) ??
@@ -264,7 +259,6 @@ final class _VariablesReader(
       declarations.name = parser.readVariableName();
     }
     result = parser.arena.putVariableDeclarationList(
-      source: parser.source,
       start: metadata.isEmpty
           ? declarations.start
           : parser.arena.rStart(metadata.first),

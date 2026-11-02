@@ -84,8 +84,8 @@ extension on _Parser {
     final target = values.removeLast();
     final checked = target == selectorTarget ? checkedNullAware : isNullAware;
     if (isNullAware &&
-        (arena.isCastExpression(target) ||
-            arena.isTypeTestExpression(target))) {
+        (arena.hasKind(target, .castExpression) ||
+            arena.hasKind(target, .typeTestExpression))) {
       values.add(target);
       checkTypeContinuation(current);
       values.removeLast();
@@ -94,14 +94,10 @@ extension on _Parser {
       error('expected_expression', 'Expected an index expression.', token);
       values.add(
         arena.putIndexExpression(
-          source: source,
           start: arena.rStart(target),
           end: token.start + 2,
           target: target,
-          index: arena.putMissingExpression(
-            source: source,
-            offset: token.start + 1,
-          ),
+          index: arena.putMissingExpression(offset: token.start + 1),
           isNullAware: isNullAware,
         ),
       );
@@ -129,7 +125,6 @@ extension on _Parser {
       case _Arguments():
         frame.arguments.add(
           arena.putArgument(
-            source: source,
             start: arena.rStartOrNull(name) ?? arena.rStart(value),
             end: arena.rEnd(value),
             name: name,
@@ -141,7 +136,6 @@ extension on _Parser {
           name == null
               ? value
               : arena.putNamedRecordField(
-                  source: source,
                   start: arena.rStart(name),
                   end: arena.rEnd(value),
                   name: name,
@@ -168,7 +162,6 @@ extension on _Parser {
     switch (frame) {
       case _CascadeIndex():
         expression = arena.putCascadeIndexExpression(
-          source: source,
           start: frame.marker.start,
           end: end,
           index: finishExpression(frame.valueBase, frame.operatorBase),
@@ -197,7 +190,7 @@ extension on _Parser {
         final parts = closeForHeader(frame);
         switch (frame) {
           case _ForElementHeader():
-            if (frame.element.isAwait && !arena.isForInParts(parts)) {
+            if (frame.element.isAwait && !arena.hasKind(parts, .forInParts)) {
               error(
                 'invalid_await_for',
                 'An await-for requires a for-in header.',
@@ -217,7 +210,6 @@ extension on _Parser {
       case _Index():
         final index = finishExpression(frame.valueBase, frame.operatorBase);
         expression = arena.putIndexExpression(
-          source: source,
           start: arena.rStart(frame.target),
           end: end,
           target: frame.target,
@@ -246,7 +238,6 @@ extension on _Parser {
         switch (frame) {
           case _ArgumentList():
             frame.result = arena.putArgumentList(
-              source: source,
               start: frame.opening.start,
               end: end,
               arguments: frame.arguments,
@@ -256,13 +247,11 @@ extension on _Parser {
             return;
           case _Call():
             expression = arena.putInvocationExpression(
-              source: source,
               start: arena.rStart(frame.callee),
               end: end,
               callee: frame.callee,
               typeArguments: frame.typeArguments,
               arguments: arena.putArgumentList(
-                source: source,
                 start: frame.opening.start,
                 end: end,
                 arguments: frame.arguments,
@@ -270,7 +259,6 @@ extension on _Parser {
             );
           case _Construction():
             expression = arena.putInstanceCreationExpression(
-              source: source,
               start: frame.keyword.start,
               end: end,
               kind: frame.keyword.kind == .keywordConst
@@ -280,7 +268,6 @@ extension on _Parser {
               typeArguments: frame.typeArguments,
               constructorName: frame.constructorName,
               arguments: arena.putArgumentList(
-                source: source,
                 start: frame.opening.start,
                 end: end,
                 arguments: frame.arguments,
@@ -288,13 +275,11 @@ extension on _Parser {
             );
           case _ConstShorthand():
             expression = arena.putConstDotShorthandExpression(
-              source: source,
               start: frame.keyword.start,
               end: end,
               name: frame.member,
               typeArguments: frame.typeArguments,
               arguments: arena.putArgumentList(
-                source: source,
                 start: frame.opening.start,
                 end: end,
                 arguments: frame.arguments,
@@ -307,14 +292,12 @@ extension on _Parser {
               )
               when arena.isExpression(value):
             expression = arena.putParenthesizedExpression(
-              source: source,
               start: frame.opening.start,
               end: end,
               expression: value,
             );
           case _Group():
             expression = arena.putRecordExpression(
-              source: source,
               start: frame.constKeyword?.start ?? frame.opening.start,
               end: end,
               hasConstKeyword: frame.constKeyword != null,
@@ -326,11 +309,11 @@ extension on _Parser {
     values.add(expression);
     switch (frame) {
       case _Call(:final checkedNullAware, :final callee)
-          when !arena.isIdentifierExpression(callee) &&
-              !arena.isPropertyAccessExpression(callee) &&
-              !arena.isThisExpression(callee) &&
-              !arena.isSuperExpression(callee) &&
-              !arena.isDotShorthandReferenceExpression(callee):
+          when !arena.hasKind(callee, .identifierExpression) &&
+              !arena.hasKind(callee, .propertyAccessExpression) &&
+              !arena.hasKind(callee, .thisExpression) &&
+              !arena.hasKind(callee, .superExpression) &&
+              !arena.hasKind(callee, .dotShorthandReferenceExpression):
         selectorTarget = expression;
         this.checkedNullAware = checkedNullAware;
       case _Index(:final checkedNullAware):

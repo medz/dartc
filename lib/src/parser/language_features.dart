@@ -21,12 +21,12 @@ extension on _Parser {
     return ParseResult._(arena, node, diagnostics);
   }
 
-  void requireFeature(int node, int major, int minor, String feature) {
+  void requireFeature(AstNode node, int major, int minor, String feature) {
     if (!before(major, minor)) return;
     error(
       'language_feature_disabled',
       '$feature requires language version $major.$minor or later.',
-      Token(.invalid, source, arena.rStart(node), arena.rEnd(node)),
+      Token(.invalid, source, node.start, node.end),
     );
   }
 
@@ -35,12 +35,13 @@ extension on _Parser {
     // a tear-off without binding its unresolved names.
     final pending = <(int, bool)>[(root, false)];
     while (pending.isNotEmpty) {
-      final (node, called) = pending.removeLast();
-      switch ((arena.maybe(node) as AstNode)) {
-        case TypeAliasDeclaration(refType: final type)
-            when !arena.isFunctionTypeAnnotation(type):
+      final (id, called) = pending.removeLast();
+      final node = arena.at(id);
+      switch (node) {
+        case TypeAliasDeclaration(:final type)
+            when type is! FunctionTypeAnnotation:
           requireFeature(node, 2, 13, 'Non-function type aliases');
-        case Annotation(refTypeArguments: final arguments?):
+        case Annotation(typeArguments: final arguments?):
           requireFeature(arguments, 2, 14, 'Generic metadata');
         case BinaryExpression(op: .unsignedShiftRight) ||
             AssignmentExpression(op: .unsignedShiftRight) ||
@@ -48,15 +49,15 @@ extension on _Parser {
           requireFeature(node, 2, 14, 'Unsigned right shift');
         case TypeInstantiationExpression() when !called:
           requireFeature(node, 2, 15, 'Function and constructor tear-offs');
-        case PropertyAccessExpression(refProperty: final property)
-            when arena.rText(property) == 'new':
+        case PropertyAccessExpression(:final property)
+            when property.text == 'new':
           requireFeature(property, 2, 15, 'Constructor tear-offs');
         case FormalParameter(prefix: .superKeyword):
           requireFeature(node, 2, 17, 'Super parameters');
-        case ArgumentList(refArguments: final arguments) when before(2, 17):
+        case ArgumentList(:final arguments) when before(2, 17):
           var named = false;
           for (final argument in arguments) {
-            if (arena.rArgumentName(argument) != null) {
+            if (argument.name != null) {
               named = true;
             } else if (named) {
               requireFeature(
@@ -67,11 +68,11 @@ extension on _Parser {
               );
             }
           }
-        case LibraryDirective(refName: null):
+        case LibraryDirective(name: null):
           requireFeature(node, 2, 19, 'Unnamed libraries');
         case ClassDeclaration(
           :final modifiers,
-          refPrimaryParameters: final primaryParameters,
+          :final primaryParameters,
           :final isSemicolonBody,
         ):
           if (modifiers.any((m) => m != .abstractKeyword)) {
@@ -96,11 +97,11 @@ extension on _Parser {
         case ExtensionTypeDeclaration():
           requireFeature(node, 3, 3, 'Extension types');
         case EnumDeclaration(
-          refTypeParameters: final typeParameters,
-          refWithClause: final withClause,
-          refImplementsClause: final implementsClause,
+          :final typeParameters,
+          :final withClause,
+          :final implementsClause,
           :final hasMemberSeparator,
-          refPrimaryParameters: final primaryParameters,
+          :final primaryParameters,
           :final isSemicolonBody,
         ):
           if (typeParameters != null ||
@@ -112,9 +113,9 @@ extension on _Parser {
           if (primaryParameters != null || isSemicolonBody) {
             requireFeature(node, 3, 13, 'Primary constructors');
           }
-        case EnumConstantDeclaration(refTypeArguments: final arguments?):
+        case EnumConstantDeclaration(typeArguments: final arguments?):
           requireFeature(arguments, 2, 17, 'Enhanced enums');
-        case EnumConstantDeclaration(refArguments: final arguments?):
+        case EnumConstantDeclaration(arguments: final arguments?):
           requireFeature(arguments, 2, 17, 'Enhanced enums');
         case ConstructorDeclaration(keyword: .newKeyword):
           requireFeature(node, 3, 13, 'Abbreviated constructors');
@@ -128,14 +129,13 @@ extension on _Parser {
             PatternForInBinding():
           requireFeature(node, 3, 0, 'Patterns');
         case DartPattern()
-            when !arena.isConstantPattern(node) &&
-                !arena.isIdentifierPattern(node):
+            when node is! ConstantPattern && node is! IdentifierPattern:
           requireFeature(node, 3, 0, 'Patterns');
-        case IfStatement(refCasePattern: final pattern?) ||
-            IfElement(refCasePattern: final pattern?):
+        case IfStatement(casePattern: final pattern?) ||
+            IfElement(casePattern: final pattern?):
           requireFeature(pattern, 3, 0, 'If-case');
         case LiteralExpression(kind: .integer || .doubleLiteral):
-          if (arena.rText(node).contains('_')) {
+          if (node.text.contains('_')) {
             requireFeature(node, 3, 6, 'Digit separators');
           }
         case NullAwareElement():
@@ -149,18 +149,11 @@ extension on _Parser {
         default:
           break;
       }
-      for (var i = arena.rChildcount(node) - 1; i >= 0; i--) {
-        final child = arena.childIndex(node, i);
-        final isTarget = switch ((arena.maybe(node) as AstNode)) {
-          InvocationExpression(refCallee: final callee) => identical(
-            child,
-            callee,
-          ),
-          PropertyAccessExpression(refTarget: final target) =>
-            called && identical(child, target),
-          _ => false,
-        };
-        pending.add((child, isTarget));
+      final firstIsTarget =
+          node is InvocationExpression ||
+          (called && node is PropertyAccessExpression);
+      for (var i = node.childCount - 1; i >= 0; i--) {
+        pending.add((arena.childIndex(id, i), i == 0 && firstIsTarget));
       }
     }
   }

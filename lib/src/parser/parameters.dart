@@ -74,7 +74,6 @@ final class _ParameterReader(
           final question = current.kind == .question ? current.start : null;
           if (question != null) parser.advance();
           owner.suffix = parser.arena.putFunctionParameterSuffix(
-            source: source,
             start:
                 parser.arena.rStartOrNull(owner.typeParameters) ??
                 parser.arena.rStart(result),
@@ -105,7 +104,6 @@ final class _ParameterReader(
             parser.error(failure.$1, failure.$2, failure.$3);
           }
           formal.typeParameters ??= parser.arena.putTypeParameterList(
-            source: source,
             start: start,
             end: current.start,
             parameters: const [],
@@ -338,7 +336,6 @@ final class _ParameterReader(
       if (!reader.start()) yield reader;
       final value = reader.result;
       defaultClause = parser.arena.putParameterDefault(
-        source: source,
         start: separator.start,
         end: parser.arena.rEnd(value),
         separator: separator.kind == .assign ? .equals : .colon,
@@ -347,7 +344,6 @@ final class _ParameterReader(
     }
     frame.parameters.add(
       parser.arena.putFormalParameter(
-        source: source,
         start: formal.start,
         end: parser.arena.rEndOrNull(defaultClause) ?? formal.end,
         metadata: formal.metadata,
@@ -388,7 +384,6 @@ final class _ParameterReader(
     final end = parser.expect(.rightParen);
     frames.removeLast();
     return parser.arena.putFormalParameterList(
-      source: source,
       start: frame.opening.start,
       end: end,
       parameters: frame.parameters,

@@ -20,11 +20,7 @@ extension on _Parser {
         advance();
         return identifier(token);
       }
-      return arena.putIdentifier(
-        source: source,
-        start: token.start,
-        end: token.start,
-      );
+      return arena.putIdentifier(start: token.start, end: token.start);
     }
 
     final components = [readName()];
@@ -55,7 +51,6 @@ extension on _Parser {
       error('expected_arguments', 'Expected constructor arguments.', current);
       values.add(
         arena.putInstanceCreationExpression(
-          source: source,
           start: keyword.start,
           end: current.start,
           kind: keyword.kind == .keywordConst ? .constKeyword : .newKeyword,
@@ -63,7 +58,6 @@ extension on _Parser {
           typeArguments: types,
           constructorName: constructorName,
           arguments: arena.putArgumentList(
-            source: source,
             start: current.start,
             end: current.start,
             arguments: const [],
@@ -92,10 +86,10 @@ extension on _Parser {
     var target = values.last;
     var assertions = 0;
     while (true) {
-      if (arena.isNullAssertionExpression(target)) {
+      if (arena.hasKind(target, .nullAssertionExpression)) {
         assertions++;
         target = arena.rNullAssertionExpressionOperand(target);
-      } else if (arena.isDotShorthandExpression(target)) {
+      } else if (arena.hasKind(target, .dotShorthandExpression)) {
         target = arena.rDotShorthandExpressionExpression(target);
       } else {
         break;
@@ -103,7 +97,8 @@ extension on _Parser {
     }
     final frame = frames.lastOrNull;
     final afterPrefix =
-        (arena.isConstDotShorthandExpression(target) || assertions > 1) &&
+        (arena.hasKind(target, .constDotShorthandExpression) ||
+            assertions > 1) &&
         !(frame is _Cascade && !frame.assigned);
     if (afterPrefix &&
         !(operators.length > operatorBase &&
@@ -188,7 +183,6 @@ extension on _Parser {
       checkValue(target);
       values.add(
         arena.putTypeInstantiationExpression(
-          source: source,
           start: arena.rStart(target),
           end: arena.rEnd(arguments),
           expression: target,
@@ -213,8 +207,8 @@ extension on _Parser {
     }
     final expression = values.removeLast();
     checkValue(expression);
-    if (arena.isCastExpression(expression) ||
-        arena.isTypeTestExpression(expression)) {
+    if (arena.hasKind(expression, .castExpression) ||
+        arena.hasKind(expression, .typeTestExpression)) {
       error(
         'chained_type_operator',
         'Parenthesize the type test or cast before another type operator.',
@@ -229,26 +223,24 @@ extension on _Parser {
     if (!reader.start()) yield _TypeTask(reader);
     final type =
         arena.asTypeAnnotationOrNull(reader.result) ??
-        arena.putMissingTypeAnnotation(source: source, offset: first.start);
+        arena.putMissingTypeAnnotation(offset: first.start);
     if (reader.failure case final failure?) {
       error(failure.$1, failure.$2, failure.$3);
     }
     if (first.kind == .keywordVoid &&
-        arena.isNamedTypeAnnotation(type) &&
+        arena.hasKind(type, .namedTypeAnnotation) &&
         arena.rNamedTypeAnnotationPrefix(type) == null) {
       error('invalid_void_type', 'A type test or cast cannot use void.', first);
     }
     values.add(
       token.kind == .keywordAs
           ? arena.putCastExpression(
-              source: source,
               start: arena.rStart(expression),
               end: arena.rEnd(type),
               expression: expression,
               type: type,
             )
           : arena.putTypeTestExpression(
-              source: source,
               start: arena.rStart(expression),
               end: arena.rEnd(type),
               expression: expression,
@@ -262,19 +254,15 @@ extension on _Parser {
   void checkTypeContinuation(Token token) {
     if (token.kind.precedence == _relationalPrecedence) {
       var operand = values.last;
-      while (arena.isCastExpression(operand) ||
-          arena.isTypeTestExpression(operand)) {
-        operand = switch ((arena.maybe(operand) as Expression)) {
-          CastExpression(refExpression: final expression) => expression,
-          TypeTestExpression(refExpression: final expression) => expression,
-          _ => operand,
-        };
+      while (arena.hasKind(operand, .castExpression) ||
+          arena.hasKind(operand, .typeTestExpression)) {
+        operand = arena.childIndex(operand, 0);
       }
-      if (arena.isBinaryExpression(operand) &&
-          (arena.rBinaryExpressionOp(operand) == .less ||
-              arena.rBinaryExpressionOp(operand) == .lessEqual ||
-              arena.rBinaryExpressionOp(operand) == .greater ||
-              arena.rBinaryExpressionOp(operand) == .greaterEqual)) {
+      if (arena.hasKind(operand, .binaryExpression) &&
+          switch (arena.rBinaryExpressionOp(operand)) {
+            .less || .lessEqual || .greater || .greaterEqual => true,
+            _ => false,
+          }) {
         error(
           'chained_comparison',
           'Parenthesize this comparison operand.',

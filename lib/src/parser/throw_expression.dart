@@ -46,7 +46,6 @@ extension on _Parser {
     frames.removeLast();
     values.add(
       arena.putThrowExpression(
-        source: source,
         start: frame.keyword.start,
         end: arena.rEnd(expression),
         expression: expression,

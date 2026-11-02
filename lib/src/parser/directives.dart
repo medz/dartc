@@ -6,10 +6,7 @@ final class _StringReader(final _Parser parser) extends _Reader<int> {
     final token = parser.current;
     if (token.kind != .stringLiteral && token.kind != .stringStart) {
       parser.error('expected_string', 'Expected a string literal.', token);
-      result = parser.arena.putMissingStringExpression(
-        source: parser.source,
-        offset: token.start,
-      );
+      result = parser.arena.putMissingStringExpression(offset: token.start);
       return;
     }
     parser.beginExpression();
@@ -18,7 +15,7 @@ final class _StringReader(final _Parser parser) extends _Reader<int> {
     result = parser.arena.asStringExpression(parser.finishExpression(0, 0));
     if (parser.arena
         .walkIds(result)
-        .any((node) => parser.arena.isStringInterpolation(node))) {
+        .any((node) => parser.arena.hasKind(node, .stringInterpolation))) {
       parser.error(
         'interpolated_uri',
         'A directive string cannot contain interpolation.',
@@ -42,7 +39,6 @@ final class _DirectiveReader(
           ? null
           : parser.readDottedName();
       result = parser.arena.putLibraryDirective(
-        source: parser.source,
         start: start,
         end: parser.expect(.semicolon),
         metadata: metadata,
@@ -62,7 +58,6 @@ final class _DirectiveReader(
         target = parser.readDottedName();
       }
       result = parser.arena.putPartOfDirective(
-        source: parser.source,
         start: start,
         end: parser.expect(.semicolon),
         metadata: metadata,
@@ -75,7 +70,6 @@ final class _DirectiveReader(
     final uri = uriReader.result;
     if (kind == .keywordPart) {
       result = parser.arena.putPartDirective(
-        source: parser.source,
         start: start,
         end: parser.expect(.semicolon),
         metadata: metadata,
@@ -101,7 +95,6 @@ final class _DirectiveReader(
       yield reader;
       configurations.add(
         parser.arena.putConditionalUri(
-          source: parser.source,
           start: opening.start,
           end: parser.arena.rEnd(reader.result),
           name: name,
@@ -135,7 +128,6 @@ final class _DirectiveReader(
       }
       combinators.add(
         parser.arena.putNamespaceCombinator(
-          source: parser.source,
           start: opening.start,
           end: parser.arena.rEnd(names.last),
           kind: opening.kind == .keywordShow ? .show : .hide,
@@ -146,7 +138,6 @@ final class _DirectiveReader(
     final end = parser.expect(.semicolon);
     result = kind == .keywordImport
         ? parser.arena.putImportDirective(
-            source: parser.source,
             start: start,
             end: end,
             metadata: metadata,
@@ -157,7 +148,6 @@ final class _DirectiveReader(
             combinators: combinators,
           )
         : parser.arena.putExportDirective(
-            source: parser.source,
             start: start,
             end: end,
             metadata: metadata,
@@ -177,7 +167,6 @@ extension on _Parser {
       components.add(readVariableName());
     }
     return arena.putDottedName(
-      source: source,
       start: arena.rStart(first),
       end: arena.rEnd(components.last),
       components: components,

@@ -61,7 +61,6 @@ final class _MembersReader(
         }
         constants.add(
           parser.arena.putEnumConstantDeclaration(
-            source: parser.source,
             start: start,
             end:
                 parser.arena.rEndOrNull(arguments) ??
@@ -181,13 +180,13 @@ final class _MemberReader(
       );
       yield reader;
       result = reader.result;
-      if ((parser.arena.maybe(result) as ClassMember)
-          case ConstructorDeclaration(
-            keyword: .factoryKeyword,
-            refName: final name,
-          )
-          when name.isEmpty || parser.arena.rText(name.first) != className) {
-        parser.requireFeature(result, 3, 13, 'Abbreviated constructors');
+      if (parser.before(3, 13)) {
+        final member = parser.arena.at(result);
+        if (member
+            case ConstructorDeclaration(keyword: .factoryKeyword, :final name)
+            when name.isEmpty || name.first.text != className) {
+          parser.requireFeature(member, 3, 13, 'Abbreviated constructors');
+        }
       }
       return;
     }
@@ -206,7 +205,6 @@ final class _MemberReader(
         checkMemberName(parser.arena.rVariableDeclarationName(variable));
       }
       result = parser.arena.putFieldDeclaration(
-        source: parser.source,
         start: start,
         end: parser.expect(.semicolon),
         isStatic: isStatic,
@@ -240,10 +238,7 @@ final class _MemberReader(
         'Expected a class member.',
         parser.current,
       );
-      result = parser.arena.putMissingClassMember(
-        source: parser.source,
-        offset: start,
-      );
+      result = parser.arena.putMissingClassMember(offset: start);
       return;
     }
     if (header.accessor != .keywordOperator) checkMemberName(header.name);
@@ -263,7 +258,7 @@ final class _MemberReader(
     }
     final body = _BodyReader(parser);
     yield body;
-    if (external && !parser.arena.isEmptyFunctionBody(body.result)) {
+    if (external && !parser.arena.hasKind(body.result, .emptyFunctionBody)) {
       parser.error(
         'external_body',
         'An external member cannot have a body.',
@@ -289,7 +284,7 @@ final class _MemberReader(
     }
     if (isStatic &&
         !external &&
-        parser.arena.isEmptyFunctionBody(body.result)) {
+        parser.arena.hasKind(body.result, .emptyFunctionBody)) {
       parser.error(
         'missing_function_body',
         'A static member requires a body.',
@@ -301,11 +296,9 @@ final class _MemberReader(
         ),
       );
     }
-    final source = parser.source;
     final end = parser.arena.rEnd(body.result);
     result = switch (header.accessor) {
       .keywordGet => parser.arena.putGetterDeclaration(
-        source: source,
         start: start,
         end: end,
         metadata: metadata,
@@ -316,7 +309,6 @@ final class _MemberReader(
         body: body.result,
       ),
       .keywordSet => parser.arena.putSetterDeclaration(
-        source: source,
         start: start,
         end: end,
         metadata: metadata,
@@ -330,7 +322,6 @@ final class _MemberReader(
       ),
       .keywordOperator when header.op != null =>
         parser.arena.putOperatorDeclaration(
-          source: source,
           start: start,
           end: end,
           metadata: metadata,
@@ -341,12 +332,8 @@ final class _MemberReader(
           parameters: parameters!,
           body: body.result,
         ),
-      .keywordOperator => parser.arena.putMissingClassMember(
-        source: source,
-        offset: start,
-      ),
+      .keywordOperator => parser.arena.putMissingClassMember(offset: start),
       _ => parser.arena.putMethodDeclaration(
-        source: source,
         start: start,
         end: end,
         metadata: metadata,

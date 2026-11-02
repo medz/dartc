@@ -79,13 +79,9 @@ extension on _Parser {
       error('expected_expression', 'Expected an index expression.', token);
       values.add(
         arena.putCascadeIndexExpression(
-          source: source,
           start: marker.start,
           end: token.start + 2,
-          index: arena.putMissingExpression(
-            source: source,
-            offset: token.start + 1,
-          ),
+          index: arena.putMissingExpression(offset: token.start + 1),
         ),
       );
       consumeEmptyBrackets();
@@ -98,16 +94,11 @@ extension on _Parser {
       }
       values.add(
         arena.putCascadePropertyExpression(
-          source: source,
           start: marker.start,
           end: valid ? token.end : token.start,
           property: valid
               ? identifier(token)
-              : arena.putIdentifier(
-                  source: source,
-                  start: token.start,
-                  end: token.start,
-                ),
+              : arena.putIdentifier(start: token.start, end: token.start),
         ),
       );
     }
@@ -150,7 +141,6 @@ extension on _Parser {
     frames.removeLast();
     values.add(
       arena.putCascadeExpression(
-        source: source,
         start: arena.rStart(frame.target),
         end: arena.rEnd(frame.sections.last),
         target: frame.target,
@@ -170,11 +160,7 @@ extension on _Parser {
     final valid = token.kind.isIdentifier || token.kind == .keywordNew;
     final name = valid
         ? identifier(token)
-        : arena.putIdentifier(
-            source: source,
-            start: token.start,
-            end: token.start,
-          );
+        : arena.putIdentifier(start: token.start, end: token.start);
     if (valid) {
       advance();
     } else {
@@ -184,7 +170,6 @@ extension on _Parser {
     if (keyword == null) {
       values.add(
         arena.putDotShorthandReferenceExpression(
-          source: source,
           start: dot.start,
           end: arena.rEnd(name),
           name: name,
@@ -222,7 +207,6 @@ extension on _Parser {
     } else {
       values.add(
         arena.putConstDotShorthandExpression(
-          source: source,
           start: keyword.start,
           end: arena.rEndOrNull(types) ?? arena.rEnd(name),
           name: name,
@@ -263,7 +247,6 @@ extension on _Parser {
     final expression =
         arena.rNullAssertionExpressionOperandOrNull(bang) ?? value;
     final shorthand = arena.putDotShorthandExpression(
-      source: source,
       start: arena.rStart(expression),
       end: arena.rEnd(expression),
       expression: expression,
@@ -273,7 +256,6 @@ extension on _Parser {
       bang == null
           ? shorthand
           : arena.putNullAssertionExpression(
-              source: source,
               start: arena.rStart(shorthand),
               end: arena.rEnd(bang),
               operand: shorthand,

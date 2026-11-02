@@ -54,7 +54,6 @@ final class _ConstructorReader(
         suffix = parser.readConstructorName();
       }
       final body = parser.arena.putFactoryRedirectBody(
-        source: parser.source,
         start: token.start,
         end: parser.expect(.semicolon),
         name: target,
@@ -69,13 +68,9 @@ final class _ConstructorReader(
         );
       }
       if (primaryBody) {
-        result = parser.arena.putMissingClassMember(
-          source: parser.source,
-          offset: start,
-        );
+        result = parser.arena.putMissingClassMember(offset: start);
       } else {
         result = parser.arena.putConstructorDeclaration(
-          source: parser.source,
           start: start,
           end: parser.arena.rEnd(body),
           metadata: metadata,
@@ -107,7 +102,7 @@ final class _ConstructorReader(
     yield body;
     if (keyword == .factoryKeyword &&
         !external &&
-        parser.arena.isEmptyFunctionBody(body.result)) {
+        parser.arena.hasKind(body.result, .emptyFunctionBody)) {
       parser.error(
         'missing_function_body',
         'A factory requires a body or redirection.',
@@ -119,8 +114,8 @@ final class _ConstructorReader(
         ),
       );
     }
-    if (parser.arena.isModifiedBlockFunctionBody(body.result) ||
-        parser.arena.isExpressionFunctionBody(body.result) &&
+    if (parser.arena.hasKind(body.result, .modifiedBlockFunctionBody) ||
+        parser.arena.hasKind(body.result, .expressionFunctionBody) &&
             parser.arena.rExpressionFunctionBodyIsAsync(
               (parser.arena.asExpressionFunctionBody(body.result)),
             )) {
@@ -137,7 +132,6 @@ final class _ConstructorReader(
     }
     result = primaryBody
         ? parser.arena.putPrimaryConstructorBody(
-            source: parser.source,
             start: start,
             end: parser.arena.rEnd(body.result),
             metadata: metadata,
@@ -145,7 +139,6 @@ final class _ConstructorReader(
             body: body.result,
           )
         : parser.arena.putConstructorDeclaration(
-            source: parser.source,
             start: start,
             end: parser.arena.rEnd(body.result),
             metadata: metadata,
@@ -185,12 +178,10 @@ final class _InitializersReader(final _Parser parser)
         }
         result.add(
           parser.arena.putAssertInitializer(
-            source: parser.source,
             start: token.start,
             end: parser.arena.rEnd(reader.result),
             condition: arguments.isEmpty
                 ? parser.arena.putMissingExpression(
-                    source: parser.source,
                     offset: parser.arena.rStart(reader.result),
                   )
                 : parser.arena.rArgumentValue(arguments.first),
@@ -218,14 +209,12 @@ final class _InitializersReader(final _Parser parser)
           result.add(
             hasSuper
                 ? parser.arena.putSuperConstructorInitializer(
-                    source: parser.source,
                     start: token.start,
                     end: parser.arena.rEnd(reader.result),
                     name: name,
                     arguments: reader.result,
                   )
                 : parser.arena.putRedirectingConstructorInitializer(
-                    source: parser.source,
                     start: token.start,
                     end: parser.arena.rEnd(reader.result),
                     name: name,
@@ -241,7 +230,6 @@ final class _InitializersReader(final _Parser parser)
             );
           }
           name ??= parser.arena.putIdentifier(
-            source: parser.source,
             start: parser.current.start,
             end: parser.current.start,
           );
@@ -250,7 +238,6 @@ final class _InitializersReader(final _Parser parser)
           if (!reader.start()) yield reader;
           result.add(
             parser.arena.putFieldInitializer(
-              source: parser.source,
               start: token.start,
               end: parser.arena.rEnd(reader.result),
               hasThis: hasThis,

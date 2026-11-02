@@ -78,7 +78,6 @@ extension on _Parser {
     if (token.kind == .emptyBrackets || token.kind == .emptyBracketsAssign) {
       values.add(
         arena.putCollectionExpression(
-          source: source,
           start: start ?? token.start,
           end: token.start + 2,
           kind: .list,
@@ -189,7 +188,6 @@ extension on _Parser {
     int element;
     if (key != null) {
       element = arena.putMapEntryElement(
-        source: source,
         start: frame.keyPrefix?.start ?? arena.rStart(key),
         end: arena.rEnd(expression),
         key: key,
@@ -202,14 +200,12 @@ extension on _Parser {
     } else if (prefix != null) {
       element = prefix.kind == .spread || prefix.kind == .nullAwareSpread
           ? arena.putSpreadElement(
-              source: source,
               start: prefix.start,
               end: arena.rEnd(expression),
               expression: expression,
               isNullAware: prefix.kind == .nullAwareSpread,
             )
           : arena.putNullAwareElement(
-              source: source,
               start: prefix.start,
               end: arena.rEnd(expression),
               expression: expression,
@@ -231,7 +227,6 @@ extension on _Parser {
             return true;
           }
           element = arena.putIfElement(
-            source: source,
             start: control.token.start,
             end: arena.rEnd(element),
             condition: control.condition,
@@ -241,7 +236,6 @@ extension on _Parser {
           );
         case _ForElement():
           element = arena.putForElement(
-            source: source,
             start: control.token.start,
             end: arena.rEnd(element),
             isAwait: control.isAwait,
@@ -264,7 +258,6 @@ extension on _Parser {
       finishCollectionElement(frame);
     }
     final node = arena.putCollectionExpression(
-      source: source,
       start: frame.start,
       end: end,
       kind: frame.opening.kind == .leftBrace ? .setOrMap : .list,

@@ -27,7 +27,6 @@ extension on _TypeReader {
         return null;
       }
       frame.namedFields = parser.arena.putRecordTypeNamedFields(
-        source: source,
         start: frame.namedOpening!.start,
         end: current.end,
         fields: frame.named,
@@ -70,7 +69,6 @@ extension on _TypeReader {
     frames.removeLast();
     final question = nullableOffset();
     return parser.arena.putRecordTypeAnnotation(
-      source: source,
       start: frame.opening.start,
       end: question == null ? end : question + 1,
       questionOffset: question,

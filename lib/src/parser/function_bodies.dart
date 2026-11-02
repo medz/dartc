@@ -72,7 +72,6 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
           }
           parser.advance();
           result = parser.arena.putEmptyFunctionBody(
-            source: parser.source,
             start: start,
             end: token.end,
           );
@@ -90,7 +89,6 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
           if (!reader.start()) yield reader;
           final expression = reader.result;
           result = parser.arena.putExpressionFunctionBody(
-            source: parser.source,
             start: start,
             end: declaration
                 ? parser.expect(.semicolon)
@@ -107,7 +105,6 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
           result = modifier == null
               ? block
               : parser.arena.putModifiedBlockFunctionBody(
-                  source: parser.source,
                   start: start,
                   end: parser.arena.rEnd(block),
                   modifier: modifier,
@@ -121,7 +118,6 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
             parser.current,
           );
           result = parser.arena.putMissingFunctionBody(
-            source: parser.source,
             offset: parser.current.start,
           );
       }

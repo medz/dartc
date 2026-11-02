@@ -138,7 +138,6 @@ final class _TypeDeclarationReader(
         implementsClause = reader.result;
       }
       result = parser.arena.putClassTypeAliasDeclaration(
-        source: parser.source,
         start: start,
         end: parser.expect(.semicolon),
         metadata: metadata,
@@ -169,7 +168,6 @@ final class _TypeDeclarationReader(
       yield reader;
       final type = reader.result;
       extendsClause = parser.arena.putExtendsClause(
-        source: parser.source,
         start: token.start,
         end: parser.arena.rEnd(type),
         superclass: type,
@@ -230,10 +228,8 @@ final class _TypeDeclarationReader(
     }
     final body = _MembersReader(parser, parser.arena.rTextOrNull(name), kind);
     yield body;
-    final source = parser.source;
     result = switch (kind) {
       .classKind => parser.arena.putClassDeclaration(
-        source: source,
         start: start,
         end: body.end,
         metadata: metadata,
@@ -250,7 +246,6 @@ final class _TypeDeclarationReader(
         members: body.result,
       ),
       .mixin => parser.arena.putMixinDeclaration(
-        source: source,
         start: start,
         end: body.end,
         metadata: metadata,
@@ -263,7 +258,6 @@ final class _TypeDeclarationReader(
         members: body.result,
       ),
       .enumKind => parser.arena.putEnumDeclaration(
-        source: source,
         start: start,
         end: body.end,
         metadata: metadata,
@@ -280,7 +274,6 @@ final class _TypeDeclarationReader(
         members: body.result,
       ),
       .extension => parser.arena.putExtensionDeclaration(
-        source: source,
         start: start,
         end: body.end,
         metadata: metadata,
@@ -291,7 +284,6 @@ final class _TypeDeclarationReader(
         members: body.result,
       ),
       .extensionType => parser.arena.putExtensionTypeDeclaration(
-        source: source,
         start: start,
         end: body.end,
         metadata: metadata,
@@ -329,11 +321,7 @@ extension on _Parser {
     if (current.kind != .keywordNew) return readVariableName();
     final token = current;
     advance();
-    return arena.putIdentifier(
-      source: source,
-      start: token.start,
-      end: token.end,
-    );
+    return arena.putIdentifier(start: token.start, end: token.end);
   }
 }
 
@@ -368,7 +356,6 @@ final class _TypeListReader(final _Parser parser, final TypeListClauseKind kind)
       parser.advance();
     } while (true);
     result = parser.arena.putTypeListClause(
-      source: parser.source,
       start: start,
       end: parser.arena.rEnd(types.last),
       kind: kind,

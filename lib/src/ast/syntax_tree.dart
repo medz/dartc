@@ -11,7 +11,7 @@ final class SyntaxTree._(final AstArena _data, final int root) {
   SourceFile get source => _data.source;
 
   /// The grammar kind of [node].
-  SyntaxKind kind(int node) => SyntaxKind.values[_data.tags[_check(node)]];
+  SyntaxKind kind(int node) => _data.kindAt(_check(node));
 
   /// The index of a typed node obtained from this snapshot.
   int indexOf(AstNode node) {
@@ -37,26 +37,33 @@ final class SyntaxTree._(final AstArena _data, final int root) {
   /// The child index at source-order position [index] in [node].
   int childAt(int node, int index) {
     RangeError.checkValidIndex(index, this, 'index', childCount(node));
-    return _data.edges.cells[_data.edgeOffsets[node] + index];
+    return _data.childIndex(node, index);
   }
 
-  /// Starts a depth-first traversal in source order.
-  SyntaxCursor cursor() => SyntaxCursor._(_data, root);
+  /// Starts a depth-first traversal of [node] and its descendants in source order.
+  ///
+  /// The traversal starts at [root] when [node] is omitted.
+  SyntaxCursor cursor([int? node]) =>
+      SyntaxCursor._(_data, node == null ? root : _check(node));
 
-  /// Iterates over reachable indices in source order.
-  Iterable<int> walk() => _IndexWalk(this);
+  /// Iterates over [node] and its descendants, starting at [root] by default.
+  Iterable<int> walk([int? node]) =>
+      _IndexWalk(_data, node == null ? root : _check(node));
   int _check(int id) {
     RangeError.checkValidIndex(id, this, 'node', _data.count);
     return id;
   }
 }
 
-final class _IndexWalk(final SyntaxTree tree) extends Iterable<int> {
+final class _IndexWalk(final AstArena data, final int root)
+    extends Iterable<int> {
   @override
-  Iterator<int> get iterator => tree.cursor();
+  Iterator<int> get iterator => SyntaxCursor._(data, root);
 }
 
 /// Reads the current syntax row during a source-order traversal.
+///
+/// Call [moveNext] to select a row before reading its kind, range or view.
 final class SyntaxCursor._(final AstArena _data, this._next)
     implements Iterator<int> {
   final List<int> _ranges = [];
@@ -66,7 +73,7 @@ final class SyntaxCursor._(final AstArena _data, this._next)
   @override
   int get current =>
       _id >= 0 ? _id : throw StateError('No current syntax node');
-  SyntaxKind get kind => SyntaxKind.values[_data.tags[_id]];
+  SyntaxKind get kind => _data.kindAt(_id);
   int get start => _data.starts[_id];
   int get end => _data.ends[_id];
   int get childCount => _data.edgeOffsets[_id + 1] - _data.edgeOffsets[_id];

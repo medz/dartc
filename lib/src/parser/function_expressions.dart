@@ -18,7 +18,6 @@ final class _ClosureReader(final _Parser parser, final int start)
     final body = _BodyReader(parser, declaration: false);
     yield body;
     result = parser.arena.putFunctionExpression(
-      source: parser.source,
       start: start,
       end: parser.arena.rEnd(body.result),
       typeParameters: typeParameters,
@@ -101,7 +100,6 @@ final class _LocalFunctionReader(
     final body = _BodyReader(parser);
     yield body;
     result = parser.arena.putLocalFunctionDeclaration(
-      source: parser.source,
       start: start,
       end: parser.arena.rEnd(body.result),
       metadata: metadata,

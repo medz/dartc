@@ -23,10 +23,7 @@ ParseResult<TypeAnnotation> parseTypeAnnotation(
   }
   return parser.finishResult(
     node ??
-        parser.arena.putMissingTypeAnnotation(
-          source: input.source,
-          offset: input.tokens.first.start,
-        ),
+        parser.arena.putMissingTypeAnnotation(offset: input.tokens.first.start),
   );
 }
 
@@ -138,7 +135,6 @@ final class _TypeReader(
           if (failure != null) break;
           frames.removeLast();
           final arguments = parser.arena.putTypeArgumentList(
-            source: source,
             start: frame.opening.start,
             end: end,
             arguments: frame.arguments,
@@ -149,7 +145,7 @@ final class _TypeReader(
           value = namedType(owner, arguments);
         case final _TypeVariables frame:
           if (frame.boundStart!.kind == .keywordVoid &&
-              parser.arena.isNamedTypeAnnotation(value) &&
+              parser.arena.hasKind(value, .namedTypeAnnotation) &&
               parser.arena.rNamedTypeAnnotationPrefix(value) == null) {
             failure = (
               'invalid_void_type',
@@ -161,7 +157,6 @@ final class _TypeReader(
           final name = frame.name!;
           frame.parameters.add(
             parser.arena.putTypeParameter(
-              source: source,
               start: frame.metadata.isEmpty
                   ? parser.arena.rStart(name)
                   : parser.arena.rStart(frame.metadata.first),
@@ -184,7 +179,6 @@ final class _TypeReader(
           }
           frame.parameters.add(
             parser.arena.putFunctionTypeParameter(
-              source: source,
               start: frame.parameterStart,
               end: parser.arena.rEndOrNull(name) ?? parser.arena.rEnd(value),
               kind: frame.requiredKeyword ? .requiredNamed : frame.kind,
@@ -203,7 +197,6 @@ final class _TypeReader(
           if (frame.namedOpening == null) {
             frame.positional.add(
               parser.arena.putPositionalRecordTypeField(
-                source: source,
                 start: frame.metadata.isEmpty
                     ? parser.arena.rStart(value)
                     : parser.arena.rStart(frame.metadata.first),
@@ -216,7 +209,6 @@ final class _TypeReader(
           } else if (name != null) {
             frame.named.add(
               parser.arena.putNamedRecordTypeField(
-                source: source,
                 start: frame.metadata.isEmpty
                     ? parser.arena.rStart(value)
                     : parser.arena.rStart(frame.metadata.first),
@@ -333,7 +325,6 @@ final class _TypeReader(
   int namedType(_TypeName head, int? arguments) {
     final question = head.isVoid ? null : nullableOffset();
     return parser.arena.putNamedTypeAnnotation(
-      source: source,
       start: head.start,
       end: question == null
           ? parser.arena.rEndOrNull(arguments) ?? parser.arena.rEnd(head.name)
@@ -534,9 +525,6 @@ final class _RequiredTypeReader(final _Parser parser) extends _Reader<int> {
     }
     result =
         parser.arena.asTypeAnnotationOrNull(reader.result) ??
-        parser.arena.putMissingTypeAnnotation(
-          source: parser.source,
-          offset: offset,
-        );
+        parser.arena.putMissingTypeAnnotation(offset: offset);
   }
 }

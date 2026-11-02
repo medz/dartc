@@ -34,7 +34,6 @@ final class _MetadataReader(final _Parser parser) extends _Reader<List<int>> {
           parser.error(failure.$1, failure.$2, failure.$3);
         }
         typeArguments ??= parser.arena.putTypeArgumentList(
-          source: parser.source,
           start: start,
           end: parser.current.start,
           arguments: const [],
@@ -70,7 +69,6 @@ final class _MetadataReader(final _Parser parser) extends _Reader<List<int>> {
       }
       metadata.add(
         parser.arena.putAnnotation(
-          source: parser.source,
           start: at.start,
           end:
               parser.arena.rEndOrNull(arguments) ??

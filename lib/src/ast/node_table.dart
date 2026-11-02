@@ -4,18 +4,20 @@ part of 'nodes.dart';
 const _nil = 0xffffffff;
 
 final class _Words(int cap) {
-  Uint32List cells = Uint32List(cap);
+  Uint32List cells = Uint32List(cap > _nil ? _nil : cap);
   int used = 0;
   int reserve(int n) {
-    final p = used;
-    if (n > _nil - p) throw RangeError('Syntax payload exceeds 32-bit indices');
-    used += n;
-    if (used > cells.length) {
-      var size = cells.length * 2 + 16;
-      if (size < used) size = used;
-      cells = Uint32List(size)..setRange(0, p, cells);
-    }
-    return p;
+    final start = used;
+    final end = start + n;
+    if (end > cells.length) _grow(end);
+    used = end;
+    return start;
+  }
+
+  void _grow(int end) {
+    if (end > _nil) throw RangeError('Syntax payload exceeds 32-bit indices');
+    final size = (cells.length * 2 + 16).clamp(end, _nil);
+    cells = Uint32List(size)..setRange(0, used, cells);
   }
 
   void add(int value) {
@@ -24,11 +26,10 @@ final class _Words(int cap) {
   }
 }
 
-final class AstArena(final SourceFile source, int capacity) {
-  static (AstArena, int) locate(AstNode node) {
-    final row = node as _Row;
-    return (row._owner, row._row);
-  }
+final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
+  // A name can produce both an identifier row and an expression or type row.
+  factory AstArena(SourceFile source, int tokenCount) =>
+      AstArena._(source, tokenCount + (tokenCount >> 2), tokenCount);
 
   SyntaxTree finish(int root) => SyntaxTree._(this, rawRef(root));
 
@@ -39,8 +40,8 @@ final class AstArena(final SourceFile source, int capacity) {
       edgeOffsets = Uint32List(capacity + 1),
       offsets = Uint32List(capacity);
   final edges = _Words(capacity),
-      fields = _Words(capacity * 2),
-      extra = _Words(capacity);
+      fields = _Words(tokenCount),
+      extra = _Words(tokenCount >> 3);
   void grow() {
     final n = count * 2 + 16;
     tags = Uint8List(n)..setRange(0, count, tags);
@@ -50,32 +51,17 @@ final class AstArena(final SourceFile source, int capacity) {
     edgeOffsets = Uint32List(n + 1)..setRange(0, count + 1, edgeOffsets);
   }
 
-  int ref(AstNode? n) {
-    if (n == null) return _nil;
-    if (n is! _Row || !identical(n._owner, this)) {
-      throw StateError('Foreign or unrecorded ${n.runtimeType}');
-    }
-    return n._row;
-  }
-
-  int refs(List<Object?> values) {
-    if (values.isEmpty) return _nil;
-    final off = extra.reserve(values.length + 1);
-    extra.cells[off] = values.length;
-    for (var i = 0; i < values.length; i++) {
-      final x = values[i];
-      extra.cells[off + 1 + i] = x is Enum ? x.index : ref(x as AstNode);
-    }
-    return off;
-  }
-
-  int _appendRow(int tag, int start, int end) {
+  void _checkRange(int start, int end) {
+    RangeError.checkValidRange(start, end, source.length);
     if (end >= _nil || count == _nil) {
       throw RangeError('Syntax range or node index exceeds 32 bits');
     }
+  }
+
+  int _finishRow(SyntaxKind kind, int start, int end) {
     if (count == tags.length) grow();
     final row = count++;
-    tags[row] = tag;
+    tags[row] = kind.index;
     starts[row] = start;
     ends[row] = end;
     edgeOffsets[row + 1] = edges.used;
@@ -83,25 +69,65 @@ final class AstArena(final SourceFile source, int capacity) {
     return row;
   }
 
+  int _leaf(SyntaxKind kind, int start, int end) {
+    _checkRange(start, end);
+    return _finishRow(kind, start, end);
+  }
+
   int _checkEdge(int id, int start, int end) {
     RangeError.checkValidIndex(id, this, 'child', count);
-    if (starts[id] < start || ends[id] > end) {
+    final childEnd = ends[id];
+    if (starts[id] < start || childEnd > end) {
       throw ArgumentError('Child outside range');
     }
-    return ends[id];
+    return childEnd;
   }
 
-  void _appendOne(int start, int end, int id) {
+  int _appendOne(SyntaxKind kind, int start, int end, int id) {
+    _checkRange(start, end);
     _checkEdge(id, start, end);
     edges.add(id);
+    return _finishRow(kind, start, end);
   }
 
-  void _appendTwo(int start, int end, int first, int second) {
+  int _appendTwo(SyntaxKind kind, int start, int end, int first, int second) {
+    _checkRange(start, end);
     final next = _checkEdge(first, start, end);
     _checkEdge(second, next, end);
     final base = edges.reserve(2);
     edges.cells[base] = first;
     edges.cells[base + 1] = second;
+    return _finishRow(kind, start, end);
+  }
+
+  int childIndex(int row, int index) => edges.cells[edgeOffsets[row] + index];
+  int trailingChild(int row, int fromEnd) =>
+      edges.cells[edgeOffsets[row + 1] - fromEnd];
+  int? optionalChild(int row, int index, int fullCount) =>
+      edgeOffsets[row + 1] - edgeOffsets[row] == fullCount
+      ? childIndex(row, index)
+      : null;
+
+  int _appendOptional(
+    SyntaxKind kind,
+    int start,
+    int end,
+    int? a, [
+    int? b,
+    int? c,
+  ]) {
+    _checkRange(start, end);
+    var next = start;
+    if (a != null) next = _checkEdge(a, next, end);
+    if (b != null) next = _checkEdge(b, next, end);
+    if (c != null) _checkEdge(c, next, end);
+    final length =
+        (a == null ? 0 : 1) + (b == null ? 0 : 1) + (c == null ? 0 : 1);
+    var slot = edges.reserve(length);
+    if (a != null) edges.cells[slot++] = a;
+    if (b != null) edges.cells[slot++] = b;
+    if (c != null) edges.cells[slot] = c;
+    return _finishRow(kind, start, end);
   }
 
   Uint32List childrenOf(int row) => Uint32List.sublistView(
@@ -110,7 +136,14 @@ final class AstArena(final SourceFile source, int capacity) {
     edgeOffsets[row + 1],
   );
 
-  void _appendEdges(int start, int end, int length, int Function(int) child) {
+  int _appendEdges(
+    SyntaxKind kind,
+    int start,
+    int end,
+    int length,
+    int Function(int) child,
+  ) {
+    _checkRange(start, end);
     final base = edges.used;
     try {
       edges.reserve(length);
@@ -124,25 +157,36 @@ final class AstArena(final SourceFile source, int capacity) {
       edges.used = base;
       rethrow;
     }
+    return _finishRow(kind, start, end);
+  }
+
+  int _appendList(SyntaxKind kind, int start, int end, List<int> children) {
+    _checkRange(start, end);
+    final base = edges.used;
+    try {
+      edges.reserve(children.length);
+      var previous = start;
+      for (var i = 0; i < children.length; i++) {
+        final id = children[i];
+        previous = _checkEdge(id, previous, end);
+        edges.cells[base + i] = id;
+      }
+    } catch (_) {
+      edges.used = base;
+      rethrow;
+    }
+    return _finishRow(kind, start, end);
   }
 
   int putAdjacentStringsExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required List<int> strings,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = strings.length;
-    int child(int ix) => strings[ix];
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(0, start, end);
-    return row;
+    return _appendList(.adjacentStringsExpression, start, end, strings);
   }
 
   int putAnnotation({
-    required SourceFile source,
     required int start,
     required int end,
     required List<int> name,
@@ -150,8 +194,6 @@ final class AstArena(final SourceFile source, int capacity) {
     int? constructorName,
     int? arguments,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         name.length +
         (typeArguments == null ? 0 : 1) +
@@ -171,8 +213,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return arguments!;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(1, start, end);
+    final row = _appendEdges(.annotation, start, end, arity, child);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = rawRef(typeArguments);
     fields.cells[fieldOffset + 1] = rawRef(constructorName);
@@ -182,187 +223,99 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putArgument({
-    required SourceFile source,
     required int start,
     required int end,
     int? name,
     required int value,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = name == null ? 1 : 2;
-    int child(int ix) {
-      return name != null && ix == 0 ? name : value;
-    }
-
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(2, start, end);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(value);
-    return row;
+    return _appendOptional(.argument, start, end, name, value);
   }
 
   int putArgumentList({
-    required SourceFile source,
     required int start,
     required int end,
     required List<int> arguments,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = arguments.length;
-    int child(int ix) => arguments[ix];
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(3, start, end);
-    return row;
+    return _appendList(.argumentList, start, end, arguments);
   }
 
   int putAssertInitializer({
-    required SourceFile source,
     required int start,
     required int end,
     required int condition,
     int? message,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = message == null ? 1 : 2;
-    int child(int ix) => switch (ix) {
-      0 => condition,
-      1 when message != null => message,
-      _ => (throw RangeError.value(ix)),
-    };
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(4, start, end);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(condition);
-    fields.cells[fieldOffset + 1] = rawRef(message);
-    return row;
+    return _appendOptional(.assertInitializer, start, end, condition, message);
   }
 
   int putAssertStatement({
-    required SourceFile source,
     required int start,
     required int end,
     required int condition,
     int? message,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = message == null ? 1 : 2;
-    int child(int ix) => switch (ix) {
-      0 => condition,
-      1 when message != null => message,
-      _ => (throw RangeError.value(ix)),
-    };
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(5, start, end);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(condition);
-    fields.cells[fieldOffset + 1] = rawRef(message);
-    return row;
+    return _appendOptional(.assertStatement, start, end, condition, message);
   }
 
   int putAssignmentExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int left,
     required AssignmentOperator op,
     required int right,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, left, right);
-    final row = _appendRow(6, start, end);
+    final row = _appendTwo(.assignmentExpression, start, end, left, right);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = op.index;
     return row;
   }
 
   int putAwaitExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int expression,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, expression);
-    final row = _appendRow(7, start, end);
-    return row;
+    return _appendOne(.awaitExpression, start, end, expression);
   }
 
   int putBinaryExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int left,
     required BinaryOperator op,
     required int right,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, left, right);
-    final row = _appendRow(8, start, end);
+    final row = _appendTwo(.binaryExpression, start, end, left, right);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = op.index;
     return row;
   }
 
   int putBlockStatement({
-    required SourceFile source,
     required int start,
     required int end,
     required List<int> statements,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = statements.length;
-    int child(int ix) => statements[ix];
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(9, start, end);
-    return row;
+    return _appendList(.blockStatement, start, end, statements);
   }
 
-  int putBreakStatement({
-    required SourceFile source,
-    required int start,
-    required int end,
-    int? label,
-  }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = label == null ? 0 : 1;
-    int child(int ix) => switch (ix) {
-      0 when label != null => label,
-      _ => (throw RangeError.value(ix)),
-    };
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(10, start, end);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = rawRef(label);
-    return row;
+  int putBreakStatement({required int start, required int end, int? label}) {
+    return _appendOptional(.breakStatement, start, end, label);
   }
 
   int putCascadeExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int target,
     bool isNullAware = false,
     required List<int> sections,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = 1 + sections.length;
     int child(int ix) {
       return ix == 0 ? target : sections[ix - 1];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(11, start, end);
+    final row = _appendEdges(.cascadeExpression, start, end, arity, child);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(target);
     fields.cells[fieldOffset + 1] = isNullAware == true
@@ -375,61 +328,40 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putCascadeIndexExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int index,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, index);
-    final row = _appendRow(12, start, end);
-    return row;
+    return _appendOne(.cascadeIndexExpression, start, end, index);
   }
 
   int putCascadePropertyExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int property,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, property);
-    final row = _appendRow(13, start, end);
-    return row;
+    return _appendOne(.cascadePropertyExpression, start, end, property);
   }
 
   int putCastExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int expression,
     required int type,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, expression, type);
-    final row = _appendRow(14, start, end);
-    return row;
+    return _appendTwo(.castExpression, start, end, expression, type);
   }
 
   int putCastPattern({
-    required SourceFile source,
     required int start,
     required int end,
     required int pattern,
     required int type,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, pattern, type);
-    final row = _appendRow(15, start, end);
-    return row;
+    return _appendTwo(.castPattern, start, end, pattern, type);
   }
 
   int putCatchClause({
-    required SourceFile source,
     required int start,
     required int end,
     int? exceptionType,
@@ -437,8 +369,6 @@ final class AstArena(final SourceFile source, int capacity) {
     int? stackTraceParameter,
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         (exceptionType == null ? 0 : 1) +
         (exceptionParameter == null ? 0 : 1) +
@@ -460,8 +390,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return body;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(16, start, end);
+    final row = _appendEdges(.catchClause, start, end, arity, child);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = rawRef(exceptionType);
     fields.cells[fieldOffset + 1] = rawRef(exceptionParameter);
@@ -471,7 +400,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putClassDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -487,8 +415,6 @@ final class AstArena(final SourceFile source, int capacity) {
     bool isSemicolonBody = false,
     List<int> members = const [],
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length +
         1 +
@@ -531,8 +457,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return members[ix];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(17, start, end);
+    final row = _appendEdges(.classDeclaration, start, end, arity, child);
     final fieldOffset = fields.reserve(12);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(typeParameters);
@@ -558,7 +483,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putClassTypeAliasDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -569,8 +493,6 @@ final class AstArena(final SourceFile source, int capacity) {
     required int withClause,
     int? implementsClause,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length +
         3 +
@@ -589,8 +511,13 @@ final class AstArena(final SourceFile source, int capacity) {
       return ix == 1 ? withClause : implementsClause!;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(18, start, end);
+    final row = _appendEdges(
+      .classTypeAliasDeclaration,
+      start,
+      end,
+      arity,
+      child,
+    );
     final fieldOffset = fields.reserve(7);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(typeParameters);
@@ -603,7 +530,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putCollectionExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required CollectionLiteralKind kind,
@@ -611,8 +537,6 @@ final class AstArena(final SourceFile source, int capacity) {
     int? typeArguments,
     required List<int> elements,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = elements.length + (typeArguments == null ? 0 : 1);
     int child(int ix) {
       if (typeArguments != null) {
@@ -622,8 +546,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return elements[ix];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(19, start, end);
+    final row = _appendEdges(.collectionExpression, start, end, arity, child);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = kind.index;
     fields.cells[fieldOffset + 1] = hasConstKeyword == true
@@ -636,15 +559,9 @@ final class AstArena(final SourceFile source, int capacity) {
     return row;
   }
 
-  int putCompilationUnit({
-    required SourceFile source,
-    int? scriptTag,
-    required List<int> members,
-  }) {
+  int putCompilationUnit({int? scriptTag, required List<int> members}) {
     final start = 0;
     final end = source.length;
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = (scriptTag == null ? 0 : 1) + members.length;
     int child(int ix) {
       if (scriptTag != null) {
@@ -654,8 +571,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return members[ix];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(20, start, end);
+    final row = _appendEdges(.compilationUnit, start, end, arity, child);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(scriptTag);
     fields.cells[fieldOffset + 1] = rawRefs(members);
@@ -663,15 +579,12 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putConditionalExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int condition,
     required int thenExpression,
     required int elseExpression,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = 3;
     int child(int ix) => switch (ix) {
       0 => condition,
@@ -679,46 +592,26 @@ final class AstArena(final SourceFile source, int capacity) {
       2 => elseExpression,
       _ => (throw RangeError.value(ix)),
     };
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(21, start, end);
-    return row;
+    return _appendEdges(.conditionalExpression, start, end, arity, child);
   }
 
   int putConditionalUri({
-    required SourceFile source,
     required int start,
     required int end,
     required int name,
     int? value,
     required int uri,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = value == null ? 2 : 3;
-    int child(int ix) {
-      if (ix == 0) return name;
-      return value != null && ix == 1 ? value : uri;
-    }
-
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(22, start, end);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(value);
-    fields.cells[fieldOffset + 2] = rawRef(uri);
-    return row;
+    return _appendOptional(.conditionalUri, start, end, name, value, uri);
   }
 
   int putConstDotShorthandExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int name,
     int? typeArguments,
     int? arguments,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         1 + (typeArguments == null ? 0 : 1) + (arguments == null ? 0 : 1);
     int child(int ix) => switch (ix) {
@@ -728,8 +621,13 @@ final class AstArena(final SourceFile source, int capacity) {
       2 when typeArguments != null && arguments != null => arguments,
       _ => (throw RangeError.value(ix)),
     };
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(23, start, end);
+    final row = _appendEdges(
+      .constDotShorthandExpression,
+      start,
+      end,
+      arity,
+      child,
+    );
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(typeArguments);
@@ -738,16 +636,12 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putConstantPattern({
-    required SourceFile source,
     required int start,
     required int end,
     bool hasConstKeyword = false,
     required int expression,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, expression);
-    final row = _appendRow(24, start, end);
+    final row = _appendOne(.constantPattern, start, end, expression);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = hasConstKeyword == true
         ? 1
@@ -758,7 +652,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putConstructorDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -770,8 +663,6 @@ final class AstArena(final SourceFile source, int capacity) {
     List<int> initializers = const [],
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + name.length + initializers.length + 2;
     int child(int ix) {
       if (ix < metadata.length) return metadata[ix];
@@ -783,8 +674,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return ix < initializers.length ? initializers[ix] : body;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(25, start, end);
+    final row = _appendEdges(.constructorDeclaration, start, end, arity, child);
     final fieldOffset = fields.reserve(8);
     fields.cells[fieldOffset + 0] = isExternal == true
         ? 1
@@ -805,28 +695,11 @@ final class AstArena(final SourceFile source, int capacity) {
     return row;
   }
 
-  int putContinueStatement({
-    required SourceFile source,
-    required int start,
-    required int end,
-    int? label,
-  }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = label == null ? 0 : 1;
-    int child(int ix) => switch (ix) {
-      0 when label != null => label,
-      _ => (throw RangeError.value(ix)),
-    };
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(26, start, end);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = rawRef(label);
-    return row;
+  int putContinueStatement({required int start, required int end, int? label}) {
+    return _appendOptional(.continueStatement, start, end, label);
   }
 
   int putDeclaredIdentifier({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -834,8 +707,6 @@ final class AstArena(final SourceFile source, int capacity) {
     int? type,
     required int name,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + (type == null ? 0 : 1) + 1;
     int child(int ix) {
       if (ix < metadata.length) return metadata[ix];
@@ -843,8 +714,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return type != null && ix == 0 ? type : name;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(27, start, end);
+    final row = _appendEdges(.declaredIdentifier, start, end, arity, child);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = keyword.index;
     fields.cells[fieldOffset + 1] = rawRef(type);
@@ -854,84 +724,47 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putDoStatement({
-    required SourceFile source,
     required int start,
     required int end,
     required int body,
     required int condition,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, body, condition);
-    final row = _appendRow(28, start, end);
-    return row;
+    return _appendTwo(.doStatement, start, end, body, condition);
   }
 
   int putDotShorthandExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int expression,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, expression);
-    final row = _appendRow(29, start, end);
-    return row;
+    return _appendOne(.dotShorthandExpression, start, end, expression);
   }
 
   int putDotShorthandReferenceExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int name,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, name);
-    final row = _appendRow(30, start, end);
-    return row;
+    return _appendOne(.dotShorthandReferenceExpression, start, end, name);
   }
 
   int putDottedName({
-    required SourceFile source,
     required int start,
     required int end,
     required List<int> components,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = components.length;
-    int child(int ix) => components[ix];
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(31, start, end);
-    return row;
+    return _appendList(.dottedName, start, end, components);
   }
 
-  int putEmptyFunctionBody({
-    required SourceFile source,
-    required int start,
-    required int end,
-  }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(32, start, end);
-    return row;
+  int putEmptyFunctionBody({required int start, required int end}) {
+    return _leaf(.emptyFunctionBody, start, end);
   }
 
-  int putEmptyStatement({
-    required SourceFile source,
-    required int start,
-    required int end,
-  }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(33, start, end);
-    return row;
+  int putEmptyStatement({required int start, required int end}) {
+    return _leaf(.emptyStatement, start, end);
   }
 
   int putEnumConstantDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -940,8 +773,6 @@ final class AstArena(final SourceFile source, int capacity) {
     int? constructorName,
     int? arguments,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length +
         1 +
@@ -964,8 +795,13 @@ final class AstArena(final SourceFile source, int capacity) {
       return arguments!;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(34, start, end);
+    final row = _appendEdges(
+      .enumConstantDeclaration,
+      start,
+      end,
+      arity,
+      child,
+    );
     final fieldOffset = fields.reserve(5);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(typeArguments);
@@ -976,7 +812,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putEnumDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -992,8 +827,6 @@ final class AstArena(final SourceFile source, int capacity) {
     List<int> constants = const [],
     List<int> members = const [],
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length +
         1 +
@@ -1033,8 +866,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return members[ix - constants.length];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(35, start, end);
+    final row = _appendEdges(.enumDeclaration, start, end, arity, child);
     final fieldOffset = fields.reserve(12);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(typeParameters);
@@ -1064,7 +896,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putExportDirective({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1072,8 +903,6 @@ final class AstArena(final SourceFile source, int capacity) {
     List<int> configurations = const [],
     List<int> combinators = const [],
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length + 1 + configurations.length + combinators.length;
     int child(int ix) {
@@ -1085,8 +914,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return combinators[ix - configurations.length];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(36, start, end);
+    final row = _appendEdges(.exportDirective, start, end, arity, child);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = rawRef(uri);
     fields.cells[fieldOffset + 1] = rawRefs(configurations);
@@ -1096,16 +924,12 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putExpressionFunctionBody({
-    required SourceFile source,
     required int start,
     required int end,
     bool isAsync = false,
     required int expression,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, expression);
-    final row = _appendRow(37, start, end);
+    final row = _appendOne(.expressionFunctionBody, start, end, expression);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = isAsync == true
         ? 1
@@ -1116,33 +940,22 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putExpressionStatement({
-    required SourceFile source,
     required int start,
     required int end,
     required int expression,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, expression);
-    final row = _appendRow(38, start, end);
-    return row;
+    return _appendOne(.expressionStatement, start, end, expression);
   }
 
   int putExtendsClause({
-    required SourceFile source,
     required int start,
     required int end,
     required int superclass,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, superclass);
-    final row = _appendRow(39, start, end);
-    return row;
+    return _appendOne(.extendsClause, start, end, superclass);
   }
 
   int putExtensionDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1152,8 +965,6 @@ final class AstArena(final SourceFile source, int capacity) {
     bool isSemicolonBody = false,
     List<int> members = const [],
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length +
         (name == null ? 0 : 1) +
@@ -1174,8 +985,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return ix == 0 ? onType : members[ix - 1];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(40, start, end);
+    final row = _appendEdges(.extensionDeclaration, start, end, arity, child);
     final fieldOffset = fields.reserve(6);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(typeParameters);
@@ -1191,7 +1001,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putExtensionTypeDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1204,8 +1013,6 @@ final class AstArena(final SourceFile source, int capacity) {
     bool isSemicolonBody = false,
     List<int> members = const [],
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length +
         2 +
@@ -1235,8 +1042,13 @@ final class AstArena(final SourceFile source, int capacity) {
       return members[ix];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(41, start, end);
+    final row = _appendEdges(
+      .extensionTypeDeclaration,
+      start,
+      end,
+      arity,
+      child,
+    );
     final fieldOffset = fields.reserve(9);
     fields.cells[fieldOffset + 0] = isConst == true
         ? 1
@@ -1259,15 +1071,12 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putFactoryRedirectBody({
-    required SourceFile source,
     required int start,
     required int end,
     required List<int> name,
     int? typeArguments,
     int? constructorName,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         name.length +
         (typeArguments == null ? 0 : 1) +
@@ -1280,8 +1089,7 @@ final class AstArena(final SourceFile source, int capacity) {
           : constructorName!;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(42, start, end);
+    final row = _appendEdges(.factoryRedirectBody, start, end, arity, child);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(typeArguments);
     fields.cells[fieldOffset + 1] = rawRef(constructorName);
@@ -1290,7 +1098,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putFieldDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     bool isStatic = false,
@@ -1299,10 +1106,7 @@ final class AstArena(final SourceFile source, int capacity) {
     bool isCovariant = false,
     required int variables,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, variables);
-    final row = _appendRow(43, start, end);
+    final row = _appendOne(.fieldDeclaration, start, end, variables);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = isStatic == true
         ? 1
@@ -1328,17 +1132,13 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putFieldInitializer({
-    required SourceFile source,
     required int start,
     required int end,
     bool hasThis = false,
     required int name,
     required int value,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, name, value);
-    final row = _appendRow(44, start, end);
+    final row = _appendTwo(.fieldInitializer, start, end, name, value);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = hasThis == true
         ? 1
@@ -1349,17 +1149,13 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putForElement({
-    required SourceFile source,
     required int start,
     required int end,
     bool isAwait = false,
     required int parts,
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, parts, body);
-    final row = _appendRow(45, start, end);
+    final row = _appendTwo(.forElement, start, end, parts, body);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = isAwait == true
         ? 1
@@ -1370,29 +1166,21 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putForInParts({
-    required SourceFile source,
     required int start,
     required int end,
     required int target,
     required int iterable,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, target, iterable);
-    final row = _appendRow(46, start, end);
-    return row;
+    return _appendTwo(.forInParts, start, end, target, iterable);
   }
 
   int putForParts({
-    required SourceFile source,
     required int start,
     required int end,
     int? initializer,
     int? condition,
     List<int> updaters = const [],
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         (initializer == null ? 0 : 1) +
         (condition == null ? 0 : 1) +
@@ -1409,8 +1197,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return updaters[ix];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(47, start, end);
+    final row = _appendEdges(.forParts, start, end, arity, child);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(initializer);
     fields.cells[fieldOffset + 1] = rawRef(condition);
@@ -1419,17 +1206,13 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putForStatement({
-    required SourceFile source,
     required int start,
     required int end,
     bool isAwait = false,
     required int parts,
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, parts, body);
-    final row = _appendRow(48, start, end);
+    final row = _appendTwo(.forStatement, start, end, parts, body);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = isAwait == true
         ? 1
@@ -1440,7 +1223,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putFormalParameter({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1453,8 +1235,6 @@ final class AstArena(final SourceFile source, int capacity) {
     int? functionSuffix,
     int? defaultClause,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length +
         (type == null ? 0 : 1) +
@@ -1477,8 +1257,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return defaultClause!;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(49, start, end);
+    final row = _appendEdges(.formalParameter, start, end, arity, child);
     final fieldOffset = fields.reserve(9);
     fields.cells[fieldOffset + 0] = kind.index;
     fields.cells[fieldOffset + 1] = prefix.index;
@@ -1497,58 +1276,37 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putFormalParameterList({
-    required SourceFile source,
     required int start,
     required int end,
     required List<int> parameters,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = parameters.length;
-    int child(int ix) => parameters[ix];
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(50, start, end);
-    return row;
+    return _appendList(.formalParameterList, start, end, parameters);
   }
 
   int putFunctionExpression({
-    required SourceFile source,
     required int start,
     required int end,
     int? typeParameters,
     required int parameters,
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = typeParameters == null ? 2 : 3;
-    int child(int ix) {
-      if (typeParameters != null) {
-        if (ix == 0) return typeParameters;
-        ix--;
-      }
-      return ix == 0 ? parameters : body;
-    }
-
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(51, start, end);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 1] = rawRef(parameters);
-    fields.cells[fieldOffset + 2] = rawRef(body);
-    return row;
+    return _appendOptional(
+      .functionExpression,
+      start,
+      end,
+      typeParameters,
+      parameters,
+      body,
+    );
   }
 
   int putFunctionParameterSuffix({
-    required SourceFile source,
     required int start,
     required int end,
     int? typeParameters,
     required int parameters,
     int? questionOffset,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     if (questionOffset != null) {
       RangeError.checkValueInInterval(
         questionOffset,
@@ -1557,22 +1315,19 @@ final class AstArena(final SourceFile source, int capacity) {
         "questionOffset",
       );
     }
-    final arity = typeParameters == null ? 1 : 2;
-    int child(int ix) {
-      return typeParameters != null && ix == 0 ? typeParameters : parameters;
-    }
-
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(52, start, end);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 1] = rawRef(parameters);
-    fields.cells[fieldOffset + 2] = questionOffset ?? _nil;
+    final row = _appendOptional(
+      .functionParameterSuffix,
+      start,
+      end,
+      typeParameters,
+      parameters,
+    );
+    final fieldOffset = fields.reserve(1);
+    fields.cells[fieldOffset + 0] = questionOffset ?? _nil;
     return row;
   }
 
   int putFunctionTypeAliasDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1581,8 +1336,6 @@ final class AstArena(final SourceFile source, int capacity) {
     int? typeParameters,
     required int parameters,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length +
         (returnType == null ? 0 : 1) +
@@ -1600,8 +1353,13 @@ final class AstArena(final SourceFile source, int capacity) {
       return typeParameters != null && ix == 0 ? typeParameters : parameters;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(53, start, end);
+    final row = _appendEdges(
+      .functionTypeAliasDeclaration,
+      start,
+      end,
+      arity,
+      child,
+    );
     final fieldOffset = fields.reserve(5);
     fields.cells[fieldOffset + 0] = rawRef(returnType);
     fields.cells[fieldOffset + 1] = rawRef(name);
@@ -1612,7 +1370,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putFunctionTypeAnnotation({
-    required SourceFile source,
     required int start,
     required int end,
     int? questionOffset,
@@ -1620,8 +1377,6 @@ final class AstArena(final SourceFile source, int capacity) {
     int? typeParameters,
     required int parameters,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     if (questionOffset != null) {
       RangeError.checkValueInInterval(
         questionOffset,
@@ -1644,8 +1399,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return parameters;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(54, start, end);
+    final row = _appendEdges(.functionTypeAnnotation, start, end, arity, child);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = rawRef(returnType);
     fields.cells[fieldOffset + 1] = rawRef(typeParameters);
@@ -1655,7 +1409,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putFunctionTypeParameter({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1664,16 +1417,13 @@ final class AstArena(final SourceFile source, int capacity) {
     required int type,
     int? name,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + 1 + (name == null ? 0 : 1);
     int child(int ix) {
       if (ix < metadata.length) return metadata[ix];
       return ix == metadata.length ? type : name!;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(55, start, end);
+    final row = _appendEdges(.functionTypeParameter, start, end, arity, child);
     final fieldOffset = fields.reserve(5);
     fields.cells[fieldOffset + 0] = kind.index;
     fields.cells[fieldOffset + 1] = isCovariant == true
@@ -1688,22 +1438,14 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putFunctionTypeParameterList({
-    required SourceFile source,
     required int start,
     required int end,
     required List<int> parameters,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = parameters.length;
-    int child(int ix) => parameters[ix];
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(56, start, end);
-    return row;
+    return _appendList(.functionTypeParameterList, start, end, parameters);
   }
 
   int putGetterDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1713,8 +1455,6 @@ final class AstArena(final SourceFile source, int capacity) {
     required int name,
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + (returnType == null ? 0 : 1) + 2;
     int child(int ix) {
       if (ix < metadata.length) return metadata[ix];
@@ -1727,8 +1467,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return body;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(57, start, end);
+    final row = _appendEdges(.getterDeclaration, start, end, arity, child);
     final fieldOffset = fields.reserve(6);
     fields.cells[fieldOffset + 0] = isExternal == true
         ? 1
@@ -1748,58 +1487,35 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putGuardedPattern({
-    required SourceFile source,
     required int start,
     required int end,
     required int pattern,
     required int guard,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, pattern, guard);
-    final row = _appendRow(58, start, end);
-    return row;
+    return _appendTwo(.guardedPattern, start, end, pattern, guard);
   }
 
-  int putIdentifier({
-    required SourceFile source,
-    required int start,
-    required int end,
-  }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(59, start, end);
-    return row;
+  int putIdentifier({required int start, required int end}) {
+    return _leaf(.identifier, start, end);
   }
 
   int putIdentifierExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int identifier,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, identifier);
-    final row = _appendRow(60, start, end);
-    return row;
+    return _appendOne(.identifierExpression, start, end, identifier);
   }
 
   int putIdentifierPattern({
-    required SourceFile source,
     required int start,
     required int end,
     required int name,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, name);
-    final row = _appendRow(61, start, end);
-    return row;
+    return _appendOne(.identifierPattern, start, end, name);
   }
 
   int putIfElement({
-    required SourceFile source,
     required int start,
     required int end,
     required int condition,
@@ -1807,8 +1523,6 @@ final class AstArena(final SourceFile source, int capacity) {
     required int thenElement,
     int? elseElement,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         2 + (casePattern == null ? 0 : 1) + (elseElement == null ? 0 : 1);
     int child(int ix) {
@@ -1821,8 +1535,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return ix == 0 ? thenElement : elseElement!;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(62, start, end);
+    final row = _appendEdges(.ifElement, start, end, arity, child);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = rawRef(condition);
     fields.cells[fieldOffset + 1] = rawRef(casePattern);
@@ -1832,7 +1545,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putIfStatement({
-    required SourceFile source,
     required int start,
     required int end,
     required int condition,
@@ -1840,8 +1552,6 @@ final class AstArena(final SourceFile source, int capacity) {
     required int thenStatement,
     int? elseStatement,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         2 + (casePattern == null ? 0 : 1) + (elseStatement == null ? 0 : 1);
     int child(int ix) {
@@ -1854,8 +1564,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return ix == 0 ? thenStatement : elseStatement!;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(63, start, end);
+    final row = _appendEdges(.ifStatement, start, end, arity, child);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = rawRef(condition);
     fields.cells[fieldOffset + 1] = rawRef(casePattern);
@@ -1865,7 +1574,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putImportDirective({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1875,8 +1583,6 @@ final class AstArena(final SourceFile source, int capacity) {
     int? prefix,
     List<int> combinators = const [],
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length +
         1 +
@@ -1897,8 +1603,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return combinators[ix];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(64, start, end);
+    final row = _appendEdges(.importDirective, start, end, arity, child);
     final fieldOffset = fields.reserve(6);
     fields.cells[fieldOffset + 0] = rawRef(uri);
     fields.cells[fieldOffset + 1] = isDeferred == true
@@ -1914,17 +1619,13 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putIndexExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int target,
     required int index,
     bool isNullAware = false,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, target, index);
-    final row = _appendRow(65, start, end);
+    final row = _appendTwo(.indexExpression, start, end, target, index);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = isNullAware == true
         ? 1
@@ -1935,7 +1636,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putInstanceCreationExpression({
-    required SourceFile source,
     required int start,
     required int end,
     InstanceCreationKind kind = .implicit,
@@ -1944,8 +1644,6 @@ final class AstArena(final SourceFile source, int capacity) {
     int? constructorName,
     required int arguments,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         name.length +
         (typeArguments == null ? 0 : 1) +
@@ -1962,8 +1660,13 @@ final class AstArena(final SourceFile source, int capacity) {
       return arguments;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(66, start, end);
+    final row = _appendEdges(
+      .instanceCreationExpression,
+      start,
+      end,
+      arity,
+      child,
+    );
     final fieldOffset = fields.reserve(5);
     fields.cells[fieldOffset + 0] = kind.index;
     fields.cells[fieldOffset + 1] = rawRef(typeArguments);
@@ -1974,74 +1677,46 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putInterpolatedStringExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required List<int> parts,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = parts.length;
-    int child(int ix) => parts[ix];
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(67, start, end);
-    return row;
+    return _appendList(.interpolatedStringExpression, start, end, parts);
   }
 
   int putInvocationExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int callee,
     int? typeArguments,
     required int arguments,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = typeArguments == null ? 2 : 3;
-    int child(int ix) {
-      if (ix == 0) return callee;
-      return typeArguments != null && ix == 1 ? typeArguments : arguments;
-    }
-
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(68, start, end);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(callee);
-    fields.cells[fieldOffset + 1] = rawRef(typeArguments);
-    fields.cells[fieldOffset + 2] = rawRef(arguments);
-    return row;
+    return _appendOptional(
+      .invocationExpression,
+      start,
+      end,
+      callee,
+      typeArguments,
+      arguments,
+    );
   }
 
-  int putLabel({
-    required SourceFile source,
-    required int start,
-    required int end,
-    required int name,
-  }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, name);
-    final row = _appendRow(69, start, end);
-    return row;
+  int putLabel({required int start, required int end, required int name}) {
+    return _appendOne(.label, start, end, name);
   }
 
   int putLabeledStatement({
-    required SourceFile source,
     required int start,
     required int end,
     required List<int> labels,
     required int statement,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = labels.length + 1;
     int child(int ix) {
       return ix < labels.length ? labels[ix] : statement;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(70, start, end);
+    final row = _appendEdges(.labeledStatement, start, end, arity, child);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(statement);
     fields.cells[fieldOffset + 1] = rawRefs(labels);
@@ -2049,21 +1724,17 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putLibraryDirective({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
     int? name,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + (name == null ? 0 : 1);
     int child(int ix) {
       return ix < metadata.length ? metadata[ix] : name!;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(71, start, end);
+    final row = _appendEdges(.libraryDirective, start, end, arity, child);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRefs(metadata);
@@ -2071,14 +1742,11 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putListPattern({
-    required SourceFile source,
     required int start,
     required int end,
     int? typeArguments,
     required List<int> elements,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = elements.length + (typeArguments == null ? 0 : 1);
     int child(int ix) {
       if (typeArguments != null) {
@@ -2088,8 +1756,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return elements[ix];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(72, start, end);
+    final row = _appendEdges(.listPattern, start, end, arity, child);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(typeArguments);
     fields.cells[fieldOffset + 1] = rawRefs(elements);
@@ -2097,21 +1764,17 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putLiteralExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required LiteralKind kind,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(73, start, end);
+    final row = _leaf(.literalExpression, start, end);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = kind.index;
     return row;
   }
 
   int putLocalFunctionDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -2121,8 +1784,6 @@ final class AstArena(final SourceFile source, int capacity) {
     required int parameters,
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length +
         (returnType == null ? 0 : 1) +
@@ -2144,8 +1805,13 @@ final class AstArena(final SourceFile source, int capacity) {
       return ix == 0 ? parameters : body;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(74, start, end);
+    final row = _appendEdges(
+      .localFunctionDeclaration,
+      start,
+      end,
+      arity,
+      child,
+    );
     final fieldOffset = fields.reserve(6);
     fields.cells[fieldOffset + 0] = rawRef(returnType);
     fields.cells[fieldOffset + 1] = rawRef(name);
@@ -2157,24 +1823,19 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putLogicalPattern({
-    required SourceFile source,
     required int start,
     required int end,
     required int left,
     required LogicalPatternOperator op,
     required int right,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, left, right);
-    final row = _appendRow(75, start, end);
+    final row = _appendTwo(.logicalPattern, start, end, left, right);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = op.index;
     return row;
   }
 
   int putMapEntryElement({
-    required SourceFile source,
     required int start,
     required int end,
     required int key,
@@ -2182,10 +1843,7 @@ final class AstArena(final SourceFile source, int capacity) {
     bool isNullAwareKey = false,
     bool isNullAwareValue = false,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, key, value);
-    final row = _appendRow(76, start, end);
+    final row = _appendTwo(.mapEntryElement, start, end, key, value);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = isNullAwareKey == true
         ? 1
@@ -2201,14 +1859,11 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putMapPattern({
-    required SourceFile source,
     required int start,
     required int end,
     int? typeArguments,
     required List<int> elements,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = elements.length + (typeArguments == null ? 0 : 1);
     int child(int ix) {
       if (typeArguments != null) {
@@ -2218,8 +1873,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return elements[ix];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(77, start, end);
+    final row = _appendEdges(.mapPattern, start, end, arity, child);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(typeArguments);
     fields.cells[fieldOffset + 1] = rawRefs(elements);
@@ -2227,21 +1881,15 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putMapPatternEntry({
-    required SourceFile source,
     required int start,
     required int end,
     required int key,
     required int value,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, key, value);
-    final row = _appendRow(78, start, end);
-    return row;
+    return _appendTwo(.mapPatternEntry, start, end, key, value);
   }
 
   int putMethodDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -2253,8 +1901,6 @@ final class AstArena(final SourceFile source, int capacity) {
     required int parameters,
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length +
         (returnType == null ? 0 : 1) +
@@ -2276,8 +1922,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return ix == 0 ? parameters : body;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(79, start, end);
+    final row = _appendEdges(.methodDeclaration, start, end, arity, child);
     final fieldOffset = fields.reserve(8);
     fields.cells[fieldOffset + 0] = isExternal == true
         ? 1
@@ -2298,87 +1943,52 @@ final class AstArena(final SourceFile source, int capacity) {
     return row;
   }
 
-  int putMissingClassMember({required SourceFile source, required int offset}) {
+  int putMissingClassMember({required int offset}) {
     final start = offset;
     final end = offset;
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(80, start, end);
-    return row;
+    return _leaf(.missingClassMember, start, end);
   }
 
-  int putMissingExpression({required SourceFile source, required int offset}) {
+  int putMissingExpression({required int offset}) {
     final start = offset;
     final end = offset;
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(81, start, end);
-    return row;
+    return _leaf(.missingExpression, start, end);
   }
 
-  int putMissingFunctionBody({
-    required SourceFile source,
-    required int offset,
-  }) {
+  int putMissingFunctionBody({required int offset}) {
     final start = offset;
     final end = offset;
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(82, start, end);
-    return row;
+    return _leaf(.missingFunctionBody, start, end);
   }
 
-  int putMissingPattern({required SourceFile source, required int offset}) {
+  int putMissingPattern({required int offset}) {
     final start = offset;
     final end = offset;
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(83, start, end);
-    return row;
+    return _leaf(.missingPattern, start, end);
   }
 
-  int putMissingStatement({required SourceFile source, required int offset}) {
+  int putMissingStatement({required int offset}) {
     final start = offset;
     final end = offset;
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(84, start, end);
-    return row;
+    return _leaf(.missingStatement, start, end);
   }
 
-  int putMissingStringExpression({
-    required SourceFile source,
-    required int offset,
-  }) {
+  int putMissingStringExpression({required int offset}) {
     final start = offset;
     final end = offset;
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(85, start, end);
-    return row;
+    return _leaf(.missingStringExpression, start, end);
   }
 
-  int putMissingTopLevelDeclaration({
-    required SourceFile source,
-    required int offset,
-  }) {
+  int putMissingTopLevelDeclaration({required int offset}) {
     final start = offset;
     final end = offset;
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(86, start, end);
-    return row;
+    return _leaf(.missingTopLevelDeclaration, start, end);
   }
 
-  int putMissingTypeAnnotation({
-    required SourceFile source,
-    required int offset,
-  }) {
+  int putMissingTypeAnnotation({required int offset}) {
     final start = offset;
     final end = offset;
     const int? questionOffset = null;
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     if (questionOffset != null) {
       RangeError.checkValueInInterval(
         questionOffset,
@@ -2387,14 +1997,13 @@ final class AstArena(final SourceFile source, int capacity) {
         "questionOffset",
       );
     }
-    final row = _appendRow(87, start, end);
+    final row = _leaf(.missingTypeAnnotation, start, end);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = questionOffset ?? _nil;
     return row;
   }
 
   int putMixinDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -2406,8 +2015,6 @@ final class AstArena(final SourceFile source, int capacity) {
     bool isSemicolonBody = false,
     List<int> members = const [],
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length +
         1 +
@@ -2435,8 +2042,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return members[ix];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(88, start, end);
+    final row = _appendEdges(.mixinDeclaration, start, end, arity, child);
     final fieldOffset = fields.reserve(8);
     fields.cells[fieldOffset + 0] = isBase == true
         ? 1
@@ -2458,75 +2064,49 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putModifiedBlockFunctionBody({
-    required SourceFile source,
     required int start,
     required int end,
     required FunctionBodyModifier modifier,
     required int block,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, block);
-    final row = _appendRow(89, start, end);
+    final row = _appendOne(.modifiedBlockFunctionBody, start, end, block);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = modifier.index;
     return row;
   }
 
   int putNamedPatternField({
-    required SourceFile source,
     required int start,
     required int end,
     int? name,
     required int pattern,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = name == null ? 1 : 2;
-    int child(int ix) {
-      return name != null && ix == 0 ? name : pattern;
-    }
-
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(90, start, end);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(pattern);
-    return row;
+    return _appendOptional(.namedPatternField, start, end, name, pattern);
   }
 
   int putNamedRecordField({
-    required SourceFile source,
     required int start,
     required int end,
     required int name,
     required int value,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, name, value);
-    final row = _appendRow(91, start, end);
-    return row;
+    return _appendTwo(.namedRecordField, start, end, name, value);
   }
 
   int putNamedRecordTypeField({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
     required int type,
     required int name,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + 1 + (1);
     int child(int ix) {
       if (ix < metadata.length) return metadata[ix];
       return ix == metadata.length ? type : name;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(92, start, end);
+    final row = _appendEdges(.namedRecordTypeField, start, end, arity, child);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(type);
@@ -2534,8 +2114,20 @@ final class AstArena(final SourceFile source, int capacity) {
     return row;
   }
 
+  // The name follows the optional prefix, so bit zero is also its child index.
+  static const _typePrefix = 1, _typeArguments = 2, _typeQuestion = 4;
+
+  int? namedTypePrefix(int row) =>
+      fields.cells[offsets[row]] & _typePrefix == 0 ? null : childIndex(row, 0);
+
+  int? namedTypeQuestion(int row) {
+    final field = offsets[row];
+    return fields.cells[field] & _typeQuestion == 0
+        ? null
+        : fields.cells[field + 1];
+  }
+
   int putNamedTypeAnnotation({
-    required SourceFile source,
     required int start,
     required int end,
     int? questionOffset,
@@ -2543,8 +2135,6 @@ final class AstArena(final SourceFile source, int capacity) {
     required int name,
     int? typeArguments,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     if (questionOffset != null) {
       RangeError.checkValueInInterval(
         questionOffset,
@@ -2553,112 +2143,80 @@ final class AstArena(final SourceFile source, int capacity) {
         "questionOffset",
       );
     }
-    final arity =
-        (prefix == null ? 0 : 1) + 1 + (typeArguments == null ? 0 : 1);
-    int child(int ix) {
-      if (prefix != null) {
-        if (ix == 0) return prefix;
-        ix--;
-      }
-      return ix == 0 ? name : typeArguments!;
-    }
-
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(93, start, end);
-    final fieldOffset = fields.reserve(4);
-    fields.cells[fieldOffset + 0] = rawRef(prefix);
-    fields.cells[fieldOffset + 1] = rawRef(name);
-    fields.cells[fieldOffset + 2] = rawRef(typeArguments);
-    fields.cells[fieldOffset + 3] = questionOffset ?? _nil;
+    final row = _appendOptional(
+      .namedTypeAnnotation,
+      start,
+      end,
+      prefix,
+      name,
+      typeArguments,
+    );
+    final nullable = questionOffset != null;
+    final field = fields.reserve(nullable ? 2 : 1);
+    fields.cells[field] =
+        (prefix == null ? 0 : _typePrefix) |
+        (typeArguments == null ? 0 : _typeArguments) |
+        (nullable ? _typeQuestion : 0);
+    if (nullable) fields.cells[field + 1] = questionOffset;
     return row;
   }
 
   int putNamespaceCombinator({
-    required SourceFile source,
     required int start,
     required int end,
     required NamespaceCombinatorKind kind,
     required List<int> names,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = names.length;
-    int child(int ix) => names[ix];
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(94, start, end);
+    final row = _appendList(.namespaceCombinator, start, end, names);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = kind.index;
     return row;
   }
 
   int putNullAssertPattern({
-    required SourceFile source,
     required int start,
     required int end,
     required int pattern,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, pattern);
-    final row = _appendRow(95, start, end);
-    return row;
+    return _appendOne(.nullAssertPattern, start, end, pattern);
   }
 
   int putNullAssertionExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int operand,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, operand);
-    final row = _appendRow(96, start, end);
-    return row;
+    return _appendOne(.nullAssertionExpression, start, end, operand);
   }
 
   int putNullAwareElement({
-    required SourceFile source,
     required int start,
     required int end,
     required int expression,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, expression);
-    final row = _appendRow(97, start, end);
-    return row;
+    return _appendOne(.nullAwareElement, start, end, expression);
   }
 
   int putNullCheckPattern({
-    required SourceFile source,
     required int start,
     required int end,
     required int pattern,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, pattern);
-    final row = _appendRow(98, start, end);
-    return row;
+    return _appendOne(.nullCheckPattern, start, end, pattern);
   }
 
   int putObjectPattern({
-    required SourceFile source,
     required int start,
     required int end,
     required int type,
     required List<int> fields,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = 1 + fields.length;
     int child(int ix) {
       return ix == 0 ? type : fields[ix - 1];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(99, start, end);
+    final row = _appendEdges(.objectPattern, start, end, arity, child);
     final fieldOffset = this.fields.reserve(2);
     this.fields.cells[fieldOffset + 0] = rawRef(type);
     this.fields.cells[fieldOffset + 1] = rawRefs(fields);
@@ -2666,7 +2224,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putOperatorDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -2677,8 +2234,6 @@ final class AstArena(final SourceFile source, int capacity) {
     required int parameters,
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + (returnType == null ? 0 : 1) + 2;
     int child(int ix) {
       if (ix < metadata.length) return metadata[ix];
@@ -2690,8 +2245,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return ix == 0 ? parameters : body;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(100, start, end);
+    final row = _appendEdges(.operatorDeclaration, start, end, arity, child);
     final fieldOffset = fields.reserve(7);
     fields.cells[fieldOffset + 0] = isExternal == true
         ? 1
@@ -2712,63 +2266,45 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putParameterDefault({
-    required SourceFile source,
     required int start,
     required int end,
     ParameterDefaultSeparator separator = .equals,
     required int value,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, value);
-    final row = _appendRow(101, start, end);
+    final row = _appendOne(.parameterDefault, start, end, value);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = separator.index;
     return row;
   }
 
   int putParenthesizedExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int expression,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, expression);
-    final row = _appendRow(102, start, end);
-    return row;
+    return _appendOne(.parenthesizedExpression, start, end, expression);
   }
 
   int putParenthesizedPattern({
-    required SourceFile source,
     required int start,
     required int end,
     required int pattern,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, pattern);
-    final row = _appendRow(103, start, end);
-    return row;
+    return _appendOne(.parenthesizedPattern, start, end, pattern);
   }
 
   int putPartDirective({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
     required int uri,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + 1;
     int child(int ix) {
       return ix < metadata.length ? metadata[ix] : uri;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(104, start, end);
+    final row = _appendEdges(.partDirective, start, end, arity, child);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(uri);
     fields.cells[fieldOffset + 1] = rawRefs(metadata);
@@ -2776,21 +2312,17 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putPartOfDirective({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
     required int target,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + 1;
     int child(int ix) {
       return ix < metadata.length ? metadata[ix] : target;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(105, start, end);
+    final row = _appendEdges(.partOfDirective, start, end, arity, child);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(target);
     fields.cells[fieldOffset + 1] = rawRefs(metadata);
@@ -2798,36 +2330,27 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putPatternAssignmentExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int pattern,
     required int value,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, pattern, value);
-    final row = _appendRow(106, start, end);
-    return row;
+    return _appendTwo(.patternAssignmentExpression, start, end, pattern, value);
   }
 
   int putPatternForInBinding({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
     required bool isFinal,
     required int pattern,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + 1;
     int child(int ix) {
       return ix < metadata.length ? metadata[ix] : pattern;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(107, start, end);
+    final row = _appendEdges(.patternForInBinding, start, end, arity, child);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = isFinal == true
         ? 1
@@ -2840,7 +2363,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putPatternVariableDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -2848,16 +2370,19 @@ final class AstArena(final SourceFile source, int capacity) {
     required int pattern,
     required int initializer,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + 2;
     int child(int ix) {
       if (ix < metadata.length) return metadata[ix];
       return ix == metadata.length ? pattern : initializer;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(108, start, end);
+    final row = _appendEdges(
+      .patternVariableDeclaration,
+      start,
+      end,
+      arity,
+      child,
+    );
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = isFinal == true
         ? 1
@@ -2871,36 +2396,38 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putPatternVariableDeclarationStatement({
-    required SourceFile source,
     required int start,
     required int end,
     required int declaration,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, declaration);
-    final row = _appendRow(109, start, end);
-    return row;
+    return _appendOne(
+      .patternVariableDeclarationStatement,
+      start,
+      end,
+      declaration,
+    );
   }
 
   int putPositionalRecordTypeField({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
     required int type,
     int? name,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + 1 + (name == null ? 0 : 1);
     int child(int ix) {
       if (ix < metadata.length) return metadata[ix];
       return ix == metadata.length ? type : name!;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(110, start, end);
+    final row = _appendEdges(
+      .positionalRecordTypeField,
+      start,
+      end,
+      arity,
+      child,
+    );
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(type);
@@ -2909,15 +2436,12 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putPrimaryConstructorBody({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
     List<int> initializers = const [],
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + initializers.length + 1;
     int child(int ix) {
       if (ix < metadata.length) return metadata[ix];
@@ -2925,8 +2449,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return ix < initializers.length ? initializers[ix] : body;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(111, start, end);
+    final row = _appendEdges(.primaryConstructorBody, start, end, arity, child);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(body);
     fields.cells[fieldOffset + 1] = rawRefs(metadata);
@@ -2935,17 +2458,19 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putPropertyAccessExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int target,
     required int property,
     bool isNullAware = false,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, target, property);
-    final row = _appendRow(112, start, end);
+    final row = _appendTwo(
+      .propertyAccessExpression,
+      start,
+      end,
+      target,
+      property,
+    );
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = isNullAware == true
         ? 1
@@ -2956,18 +2481,12 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putRecordExpression({
-    required SourceFile source,
     required int start,
     required int end,
     bool hasConstKeyword = false,
     required List<int> fields,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = fields.length;
-    int child(int ix) => fields[ix];
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(113, start, end);
+    final row = _appendList(.recordExpression, start, end, fields);
     final fieldOffset = this.fields.reserve(1);
     this.fields.cells[fieldOffset + 0] = hasConstKeyword == true
         ? 1
@@ -2978,30 +2497,20 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putRecordPattern({
-    required SourceFile source,
     required int start,
     required int end,
     required List<int> fields,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = fields.length;
-    int child(int ix) => fields[ix];
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(114, start, end);
-    return row;
+    return _appendList(.recordPattern, start, end, fields);
   }
 
   int putRecordTypeAnnotation({
-    required SourceFile source,
     required int start,
     required int end,
     int? questionOffset,
     List<int> positionalFields = const [],
     int? namedFields,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     if (questionOffset != null) {
       RangeError.checkValueInInterval(
         questionOffset,
@@ -3015,8 +2524,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return ix < positionalFields.length ? positionalFields[ix] : namedFields!;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(115, start, end);
+    final row = _appendEdges(.recordTypeAnnotation, start, end, arity, child);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(namedFields);
     fields.cells[fieldOffset + 1] = rawRefs(positionalFields);
@@ -3025,122 +2533,65 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putRecordTypeNamedFields({
-    required SourceFile source,
     required int start,
     required int end,
     required List<int> fields,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = fields.length;
-    int child(int ix) => fields[ix];
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(116, start, end);
-    return row;
+    return _appendList(.recordTypeNamedFields, start, end, fields);
   }
 
   int putRedirectingConstructorInitializer({
-    required SourceFile source,
     required int start,
     required int end,
     int? name,
     required int arguments,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = name == null ? 1 : 2;
-    int child(int ix) {
-      return name != null && ix == 0 ? name : arguments;
-    }
-
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(117, start, end);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(arguments);
-    return row;
+    return _appendOptional(
+      .redirectingConstructorInitializer,
+      start,
+      end,
+      name,
+      arguments,
+    );
   }
 
   int putRelationalPattern({
-    required SourceFile source,
     required int start,
     required int end,
     required RelationalPatternOperator op,
     required int operand,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, operand);
-    final row = _appendRow(118, start, end);
+    final row = _appendOne(.relationalPattern, start, end, operand);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = op.index;
     return row;
   }
 
   int putRestPatternElement({
-    required SourceFile source,
     required int start,
     required int end,
     int? pattern,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = pattern == null ? 0 : 1;
-    int child(int ix) => switch (ix) {
-      0 when pattern != null => pattern,
-      _ => (throw RangeError.value(ix)),
-    };
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(119, start, end);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = rawRef(pattern);
-    return row;
+    return _appendOptional(.restPatternElement, start, end, pattern);
   }
 
-  int putRethrowStatement({
-    required SourceFile source,
-    required int start,
-    required int end,
-  }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(120, start, end);
-    return row;
+  int putRethrowStatement({required int start, required int end}) {
+    return _leaf(.rethrowStatement, start, end);
   }
 
   int putReturnStatement({
-    required SourceFile source,
     required int start,
     required int end,
     int? expression,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = expression == null ? 0 : 1;
-    int child(int ix) => switch (ix) {
-      0 when expression != null => expression,
-      _ => (throw RangeError.value(ix)),
-    };
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(121, start, end);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = rawRef(expression);
-    return row;
+    return _appendOptional(.returnStatement, start, end, expression);
   }
 
-  int putScriptTag({
-    required SourceFile source,
-    required int start,
-    required int end,
-  }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(122, start, end);
-    return row;
+  int putScriptTag({required int start, required int end}) {
+    return _leaf(.scriptTag, start, end);
   }
 
   int putSetterDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -3152,8 +2603,6 @@ final class AstArena(final SourceFile source, int capacity) {
     required int parameters,
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + (returnType == null ? 0 : 1) + 3;
     int child(int ix) {
       if (ix < metadata.length) return metadata[ix];
@@ -3167,8 +2616,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return ix == 0 ? parameters : body;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(123, start, end);
+    final row = _appendEdges(.setterDeclaration, start, end, arity, child);
     final fieldOffset = fields.reserve(8);
     fields.cells[fieldOffset + 0] = isExternal == true
         ? 1
@@ -3194,16 +2642,12 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putSpreadElement({
-    required SourceFile source,
     required int start,
     required int end,
     required int expression,
     bool isNullAware = false,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, expression);
-    final row = _appendRow(124, start, end);
+    final row = _appendOne(.spreadElement, start, end, expression);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = isNullAware == true
         ? 1
@@ -3214,16 +2658,12 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putStringInterpolation({
-    required SourceFile source,
     required int start,
     required int end,
     required int expression,
     required bool isBraced,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, expression);
-    final row = _appendRow(125, start, end);
+    final row = _appendOne(.stringInterpolation, start, end, expression);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = isBraced == true
         ? 1
@@ -3233,77 +2673,45 @@ final class AstArena(final SourceFile source, int capacity) {
     return row;
   }
 
-  int putStringLiteralExpression({
-    required SourceFile source,
-    required int start,
-    required int end,
-  }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(126, start, end);
-    return row;
+  int putStringLiteralExpression({required int start, required int end}) {
+    return _leaf(.stringLiteralExpression, start, end);
   }
 
-  int putStringText({
-    required SourceFile source,
-    required int start,
-    required int end,
-  }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(127, start, end);
-    return row;
+  int putStringText({required int start, required int end}) {
+    return _leaf(.stringText, start, end);
   }
 
   int putSuperConstructorInitializer({
-    required SourceFile source,
     required int start,
     required int end,
     int? name,
     required int arguments,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = name == null ? 1 : 2;
-    int child(int ix) {
-      return name != null && ix == 0 ? name : arguments;
-    }
-
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(128, start, end);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(arguments);
-    return row;
+    return _appendOptional(
+      .superConstructorInitializer,
+      start,
+      end,
+      name,
+      arguments,
+    );
   }
 
-  int putSuperExpression({
-    required SourceFile source,
-    required int start,
-    required int end,
-  }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(129, start, end);
-    return row;
+  int putSuperExpression({required int start, required int end}) {
+    return _leaf(.superExpression, start, end);
   }
 
   int putSwitchExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int expression,
     required List<int> cases,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = 1 + cases.length;
     int child(int ix) {
       return ix == 0 ? expression : cases[ix - 1];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(130, start, end);
+    final row = _appendEdges(.switchExpression, start, end, arity, child);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(expression);
     fields.cells[fieldOffset + 1] = rawRefs(cases);
@@ -3311,35 +2719,26 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putSwitchExpressionCase({
-    required SourceFile source,
     required int start,
     required int end,
     required int pattern,
     required int value,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, pattern, value);
-    final row = _appendRow(131, start, end);
-    return row;
+    return _appendTwo(.switchExpressionCase, start, end, pattern, value);
   }
 
   int putSwitchStatement({
-    required SourceFile source,
     required int start,
     required int end,
     required int expression,
     required List<int> members,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = 1 + members.length;
     int child(int ix) {
       return ix == 0 ? expression : members[ix - 1];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(132, start, end);
+    final row = _appendEdges(.switchStatement, start, end, arity, child);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = rawRef(expression);
     fields.cells[fieldOffset + 1] = rawRefs(members);
@@ -3347,15 +2746,12 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putSwitchStatementMember({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> labels = const [],
     int? pattern,
     required List<int> statements,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = labels.length + (pattern == null ? 0 : 1) + statements.length;
     int child(int ix) {
       if (ix < labels.length) return labels[ix];
@@ -3367,8 +2763,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return statements[ix];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(133, start, end);
+    final row = _appendEdges(.switchStatementMember, start, end, arity, child);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(pattern);
     fields.cells[fieldOffset + 1] = rawRefs(labels);
@@ -3376,32 +2771,19 @@ final class AstArena(final SourceFile source, int capacity) {
     return row;
   }
 
-  int putThisExpression({
-    required SourceFile source,
-    required int start,
-    required int end,
-  }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final row = _appendRow(134, start, end);
-    return row;
+  int putThisExpression({required int start, required int end}) {
+    return _leaf(.thisExpression, start, end);
   }
 
   int putThrowExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int expression,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, expression);
-    final row = _appendRow(135, start, end);
-    return row;
+    return _appendOne(.throwExpression, start, end, expression);
   }
 
   int putTopLevelFunctionDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -3412,8 +2794,6 @@ final class AstArena(final SourceFile source, int capacity) {
     required int parameters,
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length +
         (returnType == null ? 0 : 1) +
@@ -3435,8 +2815,13 @@ final class AstArena(final SourceFile source, int capacity) {
       return ix == 0 ? parameters : body;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(136, start, end);
+    final row = _appendEdges(
+      .topLevelFunctionDeclaration,
+      start,
+      end,
+      arity,
+      child,
+    );
     final fieldOffset = fields.reserve(7);
     fields.cells[fieldOffset + 0] = isExternal == true
         ? 1
@@ -3453,7 +2838,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putTopLevelGetterDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -3462,8 +2846,6 @@ final class AstArena(final SourceFile source, int capacity) {
     required int name,
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + (returnType == null ? 0 : 1) + 2;
     int child(int ix) {
       if (ix < metadata.length) return metadata[ix];
@@ -3476,8 +2858,13 @@ final class AstArena(final SourceFile source, int capacity) {
       return body;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(137, start, end);
+    final row = _appendEdges(
+      .topLevelGetterDeclaration,
+      start,
+      end,
+      arity,
+      child,
+    );
     final fieldOffset = fields.reserve(5);
     fields.cells[fieldOffset + 0] = isExternal == true
         ? 1
@@ -3492,7 +2879,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putTopLevelSetterDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -3502,8 +2888,6 @@ final class AstArena(final SourceFile source, int capacity) {
     required int parameters,
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + (returnType == null ? 0 : 1) + 3;
     int child(int ix) {
       if (ix < metadata.length) return metadata[ix];
@@ -3517,8 +2901,13 @@ final class AstArena(final SourceFile source, int capacity) {
       return ix == 0 ? parameters : body;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(138, start, end);
+    final row = _appendEdges(
+      .topLevelSetterDeclaration,
+      start,
+      end,
+      arity,
+      child,
+    );
     final fieldOffset = fields.reserve(6);
     fields.cells[fieldOffset + 0] = isExternal == true
         ? 1
@@ -3534,16 +2923,12 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putTopLevelVariableDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     bool isExternal = false,
     required int variables,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, variables);
-    final row = _appendRow(139, start, end);
+    final row = _appendOne(.topLevelVariableDeclaration, start, end, variables);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = isExternal == true
         ? 1
@@ -3554,15 +2939,12 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putTryStatement({
-    required SourceFile source,
     required int start,
     required int end,
     required int body,
     List<int> catchClauses = const [],
     int? finallyBlock,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = 1 + catchClauses.length + (finallyBlock == null ? 0 : 1);
     int child(int ix) {
       if (ix == 0) return body;
@@ -3570,8 +2952,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return ix < catchClauses.length ? catchClauses[ix] : finallyBlock!;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(140, start, end);
+    final row = _appendEdges(.tryStatement, start, end, arity, child);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(body);
     fields.cells[fieldOffset + 1] = rawRef(finallyBlock);
@@ -3580,7 +2961,6 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putTypeAliasDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -3588,8 +2968,6 @@ final class AstArena(final SourceFile source, int capacity) {
     int? typeParameters,
     required int type,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + 2 + (typeParameters == null ? 0 : 1);
     int child(int ix) {
       if (ix < metadata.length) return metadata[ix];
@@ -3599,8 +2977,7 @@ final class AstArena(final SourceFile source, int capacity) {
       return typeParameters != null && ix == 0 ? typeParameters : type;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(141, start, end);
+    final row = _appendEdges(.typeAliasDeclaration, start, end, arity, child);
     final fieldOffset = fields.reserve(4);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(typeParameters);
@@ -3610,70 +2987,54 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putTypeArgumentList({
-    required SourceFile source,
     required int start,
     required int end,
     required List<int> arguments,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = arguments.length;
-    int child(int ix) => arguments[ix];
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(142, start, end);
-    return row;
+    return _appendList(.typeArgumentList, start, end, arguments);
   }
 
   int putTypeInstantiationExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int expression,
     required int typeArguments,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, expression, typeArguments);
-    final row = _appendRow(143, start, end);
-    return row;
+    return _appendTwo(
+      .typeInstantiationExpression,
+      start,
+      end,
+      expression,
+      typeArguments,
+    );
   }
 
   int putTypeListClause({
-    required SourceFile source,
     required int start,
     required int end,
     required TypeListClauseKind kind,
     required List<int> types,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = types.length;
-    int child(int ix) => types[ix];
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(144, start, end);
+    final row = _appendList(.typeListClause, start, end, types);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = kind.index;
     return row;
   }
 
   int putTypeParameter({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
     required int name,
     int? bound,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity = metadata.length + 1 + (bound == null ? 0 : 1);
     int child(int ix) {
       if (ix < metadata.length) return metadata[ix];
       return ix == metadata.length ? name : bound!;
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(145, start, end);
+    final row = _appendEdges(.typeParameter, start, end, arity, child);
     final fieldOffset = fields.reserve(3);
     fields.cells[fieldOffset + 0] = rawRef(name);
     fields.cells[fieldOffset + 1] = rawRef(bound);
@@ -3682,32 +3043,21 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putTypeParameterList({
-    required SourceFile source,
     required int start,
     required int end,
     required List<int> parameters,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = parameters.length;
-    int child(int ix) => parameters[ix];
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(146, start, end);
-    return row;
+    return _appendList(.typeParameterList, start, end, parameters);
   }
 
   int putTypeTestExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int expression,
     required int type,
     bool isNegated = false,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, expression, type);
-    final row = _appendRow(147, start, end);
+    final row = _appendTwo(.typeTestExpression, start, end, expression, type);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = isNegated == true
         ? 1
@@ -3718,33 +3068,25 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putUnaryExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required UnaryOperator op,
     required int operand,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, operand);
-    final row = _appendRow(148, start, end);
+    final row = _appendOne(.unaryExpression, start, end, operand);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = op.index;
     return row;
   }
 
   int putUpdateExpression({
-    required SourceFile source,
     required int start,
     required int end,
     required int operand,
     required UpdateOperator op,
     required bool isPrefix,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, operand);
-    final row = _appendRow(149, start, end);
+    final row = _appendOne(.updateExpression, start, end, operand);
     final fieldOffset = fields.reserve(2);
     fields.cells[fieldOffset + 0] = op.index;
     fields.cells[fieldOffset + 1] = isPrefix == true
@@ -3756,30 +3098,15 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putVariableDeclaration({
-    required SourceFile source,
     required int start,
     required int end,
     required int name,
     int? initializer,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = initializer == null ? 1 : 2;
-    int child(int ix) => switch (ix) {
-      0 => name,
-      1 when initializer != null => initializer,
-      _ => (throw RangeError.value(ix)),
-    };
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(150, start, end);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(initializer);
-    return row;
+    return _appendOptional(.variableDeclaration, start, end, name, initializer);
   }
 
   int putVariableDeclarationList({
-    required SourceFile source,
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -3788,8 +3115,6 @@ final class AstArena(final SourceFile source, int capacity) {
     int? type,
     required List<int> declarations,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
     final arity =
         metadata.length + (type == null ? 0 : 1) + declarations.length;
     int child(int ix) {
@@ -3802,8 +3127,13 @@ final class AstArena(final SourceFile source, int capacity) {
       return declarations[ix];
     }
 
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(151, start, end);
+    final row = _appendEdges(
+      .variableDeclarationList,
+      start,
+      end,
+      arity,
+      child,
+    );
     final fieldOffset = fields.reserve(5);
     fields.cells[fieldOffset + 0] = keyword.index;
     fields.cells[fieldOffset + 1] = isLate == true
@@ -3818,89 +3148,54 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int putVariableDeclarationStatement({
-    required SourceFile source,
     required int start,
     required int end,
     required int variables,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, variables);
-    final row = _appendRow(152, start, end);
-    return row;
+    return _appendOne(.variableDeclarationStatement, start, end, variables);
   }
 
   int putVariablePattern({
-    required SourceFile source,
     required int start,
     required int end,
     PatternVariableKeyword keyword = .none,
     int? type,
     required int name,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = type == null ? 1 : 2;
-    int child(int ix) {
-      return type != null && ix == 0 ? type : name;
-    }
-
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(153, start, end);
-    final fieldOffset = fields.reserve(3);
+    final row = _appendOptional(.variablePattern, start, end, type, name);
+    final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = keyword.index;
-    fields.cells[fieldOffset + 1] = rawRef(type);
-    fields.cells[fieldOffset + 2] = rawRef(name);
     return row;
   }
 
   int putWhileStatement({
-    required SourceFile source,
     required int start,
     required int end,
     required int condition,
     required int body,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendTwo(start, end, condition, body);
-    final row = _appendRow(154, start, end);
-    return row;
+    return _appendTwo(.whileStatement, start, end, condition, body);
   }
 
   int putWildcardPattern({
-    required SourceFile source,
     required int start,
     required int end,
     PatternVariableKeyword keyword = .none,
     int? type,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    final arity = type == null ? 0 : 1;
-    int child(int ix) => switch (ix) {
-      0 when type != null => type,
-      _ => (throw RangeError.value(ix)),
-    };
-    _appendEdges(start, end, arity, child);
-    final row = _appendRow(155, start, end);
-    final fieldOffset = fields.reserve(2);
+    final row = _appendOptional(.wildcardPattern, start, end, type);
+    final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = keyword.index;
-    fields.cells[fieldOffset + 1] = rawRef(type);
     return row;
   }
 
   int putYieldStatement({
-    required SourceFile source,
     required int start,
     required int end,
     bool isStar = false,
     required int expression,
   }) {
-    if (!identical(source, this.source)) throw ArgumentError("source");
-    RangeError.checkValidRange(start, end, source.length);
-    _appendOne(start, end, expression);
-    final row = _appendRow(156, start, end);
+    final row = _appendOne(.yieldStatement, start, end, expression);
     final fieldOffset = fields.reserve(1);
     fields.cells[fieldOffset + 0] = isStar == true
         ? 1
@@ -3937,167 +3232,176 @@ final class AstArena(final SourceFile source, int capacity) {
   }
 
   int? nullable(int n) => n == _nil ? null : n;
-  AstNode? maybe(int? id) => id == null ? null : at(id);
-  Iterable<int> walkIds(int root) => _IndexWalk(SyntaxTree._(this, root));
+  bool indexIsNullAware(int row) => fields.cells[offsets[row]] != 0;
+  bool updateIsPrefix(int row) => fields.cells[offsets[row] + 1] != 0;
+  Iterable<int> walkIds(int root) => _IndexWalk(this, root);
 
-  AstNode at(int id) => switch (tags[id]) {
-    0 => _RowAdjacentStringsExpression(this, id),
-    1 => _RowAnnotation(this, id),
-    2 => _RowArgument(this, id),
-    3 => _RowArgumentList(this, id),
-    4 => _RowAssertInitializer(this, id),
-    5 => _RowAssertStatement(this, id),
-    6 => _RowAssignmentExpression(this, id),
-    7 => _RowAwaitExpression(this, id),
-    8 => _RowBinaryExpression(this, id),
-    9 => _RowBlockStatement(this, id),
-    10 => _RowBreakStatement(this, id),
-    11 => _RowCascadeExpression(this, id),
-    12 => _RowCascadeIndexExpression(this, id),
-    13 => _RowCascadePropertyExpression(this, id),
-    14 => _RowCastExpression(this, id),
-    15 => _RowCastPattern(this, id),
-    16 => _RowCatchClause(this, id),
-    17 => _RowClassDeclaration(this, id),
-    18 => _RowClassTypeAliasDeclaration(this, id),
-    19 => _RowCollectionExpression(this, id),
-    20 => _RowCompilationUnit(this, id),
-    21 => _RowConditionalExpression(this, id),
-    22 => _RowConditionalUri(this, id),
-    23 => _RowConstDotShorthandExpression(this, id),
-    24 => _RowConstantPattern(this, id),
-    25 => _RowConstructorDeclaration(this, id),
-    26 => _RowContinueStatement(this, id),
-    27 => _RowDeclaredIdentifier(this, id),
-    28 => _RowDoStatement(this, id),
-    29 => _RowDotShorthandExpression(this, id),
-    30 => _RowDotShorthandReferenceExpression(this, id),
-    31 => _RowDottedName(this, id),
-    32 => _RowEmptyFunctionBody(this, id),
-    33 => _RowEmptyStatement(this, id),
-    34 => _RowEnumConstantDeclaration(this, id),
-    35 => _RowEnumDeclaration(this, id),
-    36 => _RowExportDirective(this, id),
-    37 => _RowExpressionFunctionBody(this, id),
-    38 => _RowExpressionStatement(this, id),
-    39 => _RowExtendsClause(this, id),
-    40 => _RowExtensionDeclaration(this, id),
-    41 => _RowExtensionTypeDeclaration(this, id),
-    42 => _RowFactoryRedirectBody(this, id),
-    43 => _RowFieldDeclaration(this, id),
-    44 => _RowFieldInitializer(this, id),
-    45 => _RowForElement(this, id),
-    46 => _RowForInParts(this, id),
-    47 => _RowForParts(this, id),
-    48 => _RowForStatement(this, id),
-    49 => _RowFormalParameter(this, id),
-    50 => _RowFormalParameterList(this, id),
-    51 => _RowFunctionExpression(this, id),
-    52 => _RowFunctionParameterSuffix(this, id),
-    53 => _RowFunctionTypeAliasDeclaration(this, id),
-    54 => _RowFunctionTypeAnnotation(this, id),
-    55 => _RowFunctionTypeParameter(this, id),
-    56 => _RowFunctionTypeParameterList(this, id),
-    57 => _RowGetterDeclaration(this, id),
-    58 => _RowGuardedPattern(this, id),
-    59 => _RowIdentifier(this, id),
-    60 => _RowIdentifierExpression(this, id),
-    61 => _RowIdentifierPattern(this, id),
-    62 => _RowIfElement(this, id),
-    63 => _RowIfStatement(this, id),
-    64 => _RowImportDirective(this, id),
-    65 => _RowIndexExpression(this, id),
-    66 => _RowInstanceCreationExpression(this, id),
-    67 => _RowInterpolatedStringExpression(this, id),
-    68 => _RowInvocationExpression(this, id),
-    69 => _RowLabel(this, id),
-    70 => _RowLabeledStatement(this, id),
-    71 => _RowLibraryDirective(this, id),
-    72 => _RowListPattern(this, id),
-    73 => _RowLiteralExpression(this, id),
-    74 => _RowLocalFunctionDeclaration(this, id),
-    75 => _RowLogicalPattern(this, id),
-    76 => _RowMapEntryElement(this, id),
-    77 => _RowMapPattern(this, id),
-    78 => _RowMapPatternEntry(this, id),
-    79 => _RowMethodDeclaration(this, id),
-    80 => _RowMissingClassMember(this, id),
-    81 => _RowMissingExpression(this, id),
-    82 => _RowMissingFunctionBody(this, id),
-    83 => _RowMissingPattern(this, id),
-    84 => _RowMissingStatement(this, id),
-    85 => _RowMissingStringExpression(this, id),
-    86 => _RowMissingTopLevelDeclaration(this, id),
-    87 => _RowMissingTypeAnnotation(this, id),
-    88 => _RowMixinDeclaration(this, id),
-    89 => _RowModifiedBlockFunctionBody(this, id),
-    90 => _RowNamedPatternField(this, id),
-    91 => _RowNamedRecordField(this, id),
-    92 => _RowNamedRecordTypeField(this, id),
-    93 => _RowNamedTypeAnnotation(this, id),
-    94 => _RowNamespaceCombinator(this, id),
-    95 => _RowNullAssertPattern(this, id),
-    96 => _RowNullAssertionExpression(this, id),
-    97 => _RowNullAwareElement(this, id),
-    98 => _RowNullCheckPattern(this, id),
-    99 => _RowObjectPattern(this, id),
-    100 => _RowOperatorDeclaration(this, id),
-    101 => _RowParameterDefault(this, id),
-    102 => _RowParenthesizedExpression(this, id),
-    103 => _RowParenthesizedPattern(this, id),
-    104 => _RowPartDirective(this, id),
-    105 => _RowPartOfDirective(this, id),
-    106 => _RowPatternAssignmentExpression(this, id),
-    107 => _RowPatternForInBinding(this, id),
-    108 => _RowPatternVariableDeclaration(this, id),
-    109 => _RowPatternVariableDeclarationStatement(this, id),
-    110 => _RowPositionalRecordTypeField(this, id),
-    111 => _RowPrimaryConstructorBody(this, id),
-    112 => _RowPropertyAccessExpression(this, id),
-    113 => _RowRecordExpression(this, id),
-    114 => _RowRecordPattern(this, id),
-    115 => _RowRecordTypeAnnotation(this, id),
-    116 => _RowRecordTypeNamedFields(this, id),
-    117 => _RowRedirectingConstructorInitializer(this, id),
-    118 => _RowRelationalPattern(this, id),
-    119 => _RowRestPatternElement(this, id),
-    120 => _RowRethrowStatement(this, id),
-    121 => _RowReturnStatement(this, id),
-    122 => _RowScriptTag(this, id),
-    123 => _RowSetterDeclaration(this, id),
-    124 => _RowSpreadElement(this, id),
-    125 => _RowStringInterpolation(this, id),
-    126 => _RowStringLiteralExpression(this, id),
-    127 => _RowStringText(this, id),
-    128 => _RowSuperConstructorInitializer(this, id),
-    129 => _RowSuperExpression(this, id),
-    130 => _RowSwitchExpression(this, id),
-    131 => _RowSwitchExpressionCase(this, id),
-    132 => _RowSwitchStatement(this, id),
-    133 => _RowSwitchStatementMember(this, id),
-    134 => _RowThisExpression(this, id),
-    135 => _RowThrowExpression(this, id),
-    136 => _RowTopLevelFunctionDeclaration(this, id),
-    137 => _RowTopLevelGetterDeclaration(this, id),
-    138 => _RowTopLevelSetterDeclaration(this, id),
-    139 => _RowTopLevelVariableDeclaration(this, id),
-    140 => _RowTryStatement(this, id),
-    141 => _RowTypeAliasDeclaration(this, id),
-    142 => _RowTypeArgumentList(this, id),
-    143 => _RowTypeInstantiationExpression(this, id),
-    144 => _RowTypeListClause(this, id),
-    145 => _RowTypeParameter(this, id),
-    146 => _RowTypeParameterList(this, id),
-    147 => _RowTypeTestExpression(this, id),
-    148 => _RowUnaryExpression(this, id),
-    149 => _RowUpdateExpression(this, id),
-    150 => _RowVariableDeclaration(this, id),
-    151 => _RowVariableDeclarationList(this, id),
-    152 => _RowVariableDeclarationStatement(this, id),
-    153 => _RowVariablePattern(this, id),
-    154 => _RowWhileStatement(this, id),
-    155 => _RowWildcardPattern(this, id),
-    156 => _RowYieldStatement(this, id),
-    _ => throw StateError('invalid tag'),
+  SyntaxKind kindAt(int id) => SyntaxKind.values[tags[id]];
+
+  AstNode at(int id) => switch (kindAt(id)) {
+    .adjacentStringsExpression => _RowAdjacentStringsExpression(this, id),
+    .annotation => _RowAnnotation(this, id),
+    .argument => _RowArgument(this, id),
+    .argumentList => _RowArgumentList(this, id),
+    .assertInitializer => _RowAssertInitializer(this, id),
+    .assertStatement => _RowAssertStatement(this, id),
+    .assignmentExpression => _RowAssignmentExpression(this, id),
+    .awaitExpression => _RowAwaitExpression(this, id),
+    .binaryExpression => _RowBinaryExpression(this, id),
+    .blockStatement => _RowBlockStatement(this, id),
+    .breakStatement => _RowBreakStatement(this, id),
+    .cascadeExpression => _RowCascadeExpression(this, id),
+    .cascadeIndexExpression => _RowCascadeIndexExpression(this, id),
+    .cascadePropertyExpression => _RowCascadePropertyExpression(this, id),
+    .castExpression => _RowCastExpression(this, id),
+    .castPattern => _RowCastPattern(this, id),
+    .catchClause => _RowCatchClause(this, id),
+    .classDeclaration => _RowClassDeclaration(this, id),
+    .classTypeAliasDeclaration => _RowClassTypeAliasDeclaration(this, id),
+    .collectionExpression => _RowCollectionExpression(this, id),
+    .compilationUnit => _RowCompilationUnit(this, id),
+    .conditionalExpression => _RowConditionalExpression(this, id),
+    .conditionalUri => _RowConditionalUri(this, id),
+    .constDotShorthandExpression => _RowConstDotShorthandExpression(this, id),
+    .constantPattern => _RowConstantPattern(this, id),
+    .constructorDeclaration => _RowConstructorDeclaration(this, id),
+    .continueStatement => _RowContinueStatement(this, id),
+    .declaredIdentifier => _RowDeclaredIdentifier(this, id),
+    .doStatement => _RowDoStatement(this, id),
+    .dotShorthandExpression => _RowDotShorthandExpression(this, id),
+    .dotShorthandReferenceExpression => _RowDotShorthandReferenceExpression(
+      this,
+      id,
+    ),
+    .dottedName => _RowDottedName(this, id),
+    .emptyFunctionBody => _RowEmptyFunctionBody(this, id),
+    .emptyStatement => _RowEmptyStatement(this, id),
+    .enumConstantDeclaration => _RowEnumConstantDeclaration(this, id),
+    .enumDeclaration => _RowEnumDeclaration(this, id),
+    .exportDirective => _RowExportDirective(this, id),
+    .expressionFunctionBody => _RowExpressionFunctionBody(this, id),
+    .expressionStatement => _RowExpressionStatement(this, id),
+    .extendsClause => _RowExtendsClause(this, id),
+    .extensionDeclaration => _RowExtensionDeclaration(this, id),
+    .extensionTypeDeclaration => _RowExtensionTypeDeclaration(this, id),
+    .factoryRedirectBody => _RowFactoryRedirectBody(this, id),
+    .fieldDeclaration => _RowFieldDeclaration(this, id),
+    .fieldInitializer => _RowFieldInitializer(this, id),
+    .forElement => _RowForElement(this, id),
+    .forInParts => _RowForInParts(this, id),
+    .forParts => _RowForParts(this, id),
+    .forStatement => _RowForStatement(this, id),
+    .formalParameter => _RowFormalParameter(this, id),
+    .formalParameterList => _RowFormalParameterList(this, id),
+    .functionExpression => _RowFunctionExpression(this, id),
+    .functionParameterSuffix => _RowFunctionParameterSuffix(this, id),
+    .functionTypeAliasDeclaration => _RowFunctionTypeAliasDeclaration(this, id),
+    .functionTypeAnnotation => _RowFunctionTypeAnnotation(this, id),
+    .functionTypeParameter => _RowFunctionTypeParameter(this, id),
+    .functionTypeParameterList => _RowFunctionTypeParameterList(this, id),
+    .getterDeclaration => _RowGetterDeclaration(this, id),
+    .guardedPattern => _RowGuardedPattern(this, id),
+    .identifier => _RowIdentifier(this, id),
+    .identifierExpression => _RowIdentifierExpression(this, id),
+    .identifierPattern => _RowIdentifierPattern(this, id),
+    .ifElement => _RowIfElement(this, id),
+    .ifStatement => _RowIfStatement(this, id),
+    .importDirective => _RowImportDirective(this, id),
+    .indexExpression => _RowIndexExpression(this, id),
+    .instanceCreationExpression => _RowInstanceCreationExpression(this, id),
+    .interpolatedStringExpression => _RowInterpolatedStringExpression(this, id),
+    .invocationExpression => _RowInvocationExpression(this, id),
+    .label => _RowLabel(this, id),
+    .labeledStatement => _RowLabeledStatement(this, id),
+    .libraryDirective => _RowLibraryDirective(this, id),
+    .listPattern => _RowListPattern(this, id),
+    .literalExpression => _RowLiteralExpression(this, id),
+    .localFunctionDeclaration => _RowLocalFunctionDeclaration(this, id),
+    .logicalPattern => _RowLogicalPattern(this, id),
+    .mapEntryElement => _RowMapEntryElement(this, id),
+    .mapPattern => _RowMapPattern(this, id),
+    .mapPatternEntry => _RowMapPatternEntry(this, id),
+    .methodDeclaration => _RowMethodDeclaration(this, id),
+    .missingClassMember => _RowMissingClassMember(this, id),
+    .missingExpression => _RowMissingExpression(this, id),
+    .missingFunctionBody => _RowMissingFunctionBody(this, id),
+    .missingPattern => _RowMissingPattern(this, id),
+    .missingStatement => _RowMissingStatement(this, id),
+    .missingStringExpression => _RowMissingStringExpression(this, id),
+    .missingTopLevelDeclaration => _RowMissingTopLevelDeclaration(this, id),
+    .missingTypeAnnotation => _RowMissingTypeAnnotation(this, id),
+    .mixinDeclaration => _RowMixinDeclaration(this, id),
+    .modifiedBlockFunctionBody => _RowModifiedBlockFunctionBody(this, id),
+    .namedPatternField => _RowNamedPatternField(this, id),
+    .namedRecordField => _RowNamedRecordField(this, id),
+    .namedRecordTypeField => _RowNamedRecordTypeField(this, id),
+    .namedTypeAnnotation => _RowNamedTypeAnnotation(this, id),
+    .namespaceCombinator => _RowNamespaceCombinator(this, id),
+    .nullAssertPattern => _RowNullAssertPattern(this, id),
+    .nullAssertionExpression => _RowNullAssertionExpression(this, id),
+    .nullAwareElement => _RowNullAwareElement(this, id),
+    .nullCheckPattern => _RowNullCheckPattern(this, id),
+    .objectPattern => _RowObjectPattern(this, id),
+    .operatorDeclaration => _RowOperatorDeclaration(this, id),
+    .parameterDefault => _RowParameterDefault(this, id),
+    .parenthesizedExpression => _RowParenthesizedExpression(this, id),
+    .parenthesizedPattern => _RowParenthesizedPattern(this, id),
+    .partDirective => _RowPartDirective(this, id),
+    .partOfDirective => _RowPartOfDirective(this, id),
+    .patternAssignmentExpression => _RowPatternAssignmentExpression(this, id),
+    .patternForInBinding => _RowPatternForInBinding(this, id),
+    .patternVariableDeclaration => _RowPatternVariableDeclaration(this, id),
+    .patternVariableDeclarationStatement =>
+      _RowPatternVariableDeclarationStatement(this, id),
+    .positionalRecordTypeField => _RowPositionalRecordTypeField(this, id),
+    .primaryConstructorBody => _RowPrimaryConstructorBody(this, id),
+    .propertyAccessExpression => _RowPropertyAccessExpression(this, id),
+    .recordExpression => _RowRecordExpression(this, id),
+    .recordPattern => _RowRecordPattern(this, id),
+    .recordTypeAnnotation => _RowRecordTypeAnnotation(this, id),
+    .recordTypeNamedFields => _RowRecordTypeNamedFields(this, id),
+    .redirectingConstructorInitializer => _RowRedirectingConstructorInitializer(
+      this,
+      id,
+    ),
+    .relationalPattern => _RowRelationalPattern(this, id),
+    .restPatternElement => _RowRestPatternElement(this, id),
+    .rethrowStatement => _RowRethrowStatement(this, id),
+    .returnStatement => _RowReturnStatement(this, id),
+    .scriptTag => _RowScriptTag(this, id),
+    .setterDeclaration => _RowSetterDeclaration(this, id),
+    .spreadElement => _RowSpreadElement(this, id),
+    .stringInterpolation => _RowStringInterpolation(this, id),
+    .stringLiteralExpression => _RowStringLiteralExpression(this, id),
+    .stringText => _RowStringText(this, id),
+    .superConstructorInitializer => _RowSuperConstructorInitializer(this, id),
+    .superExpression => _RowSuperExpression(this, id),
+    .switchExpression => _RowSwitchExpression(this, id),
+    .switchExpressionCase => _RowSwitchExpressionCase(this, id),
+    .switchStatement => _RowSwitchStatement(this, id),
+    .switchStatementMember => _RowSwitchStatementMember(this, id),
+    .thisExpression => _RowThisExpression(this, id),
+    .throwExpression => _RowThrowExpression(this, id),
+    .topLevelFunctionDeclaration => _RowTopLevelFunctionDeclaration(this, id),
+    .topLevelGetterDeclaration => _RowTopLevelGetterDeclaration(this, id),
+    .topLevelSetterDeclaration => _RowTopLevelSetterDeclaration(this, id),
+    .topLevelVariableDeclaration => _RowTopLevelVariableDeclaration(this, id),
+    .tryStatement => _RowTryStatement(this, id),
+    .typeAliasDeclaration => _RowTypeAliasDeclaration(this, id),
+    .typeArgumentList => _RowTypeArgumentList(this, id),
+    .typeInstantiationExpression => _RowTypeInstantiationExpression(this, id),
+    .typeListClause => _RowTypeListClause(this, id),
+    .typeParameter => _RowTypeParameter(this, id),
+    .typeParameterList => _RowTypeParameterList(this, id),
+    .typeTestExpression => _RowTypeTestExpression(this, id),
+    .unaryExpression => _RowUnaryExpression(this, id),
+    .updateExpression => _RowUpdateExpression(this, id),
+    .variableDeclaration => _RowVariableDeclaration(this, id),
+    .variableDeclarationList => _RowVariableDeclarationList(this, id),
+    .variableDeclarationStatement => _RowVariableDeclarationStatement(this, id),
+    .variablePattern => _RowVariablePattern(this, id),
+    .whileStatement => _RowWhileStatement(this, id),
+    .wildcardPattern => _RowWildcardPattern(this, id),
+    .yieldStatement => _RowYieldStatement(this, id),
   };
 }

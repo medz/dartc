@@ -21,6 +21,15 @@ void main() {
       tree.childAt(right, 0),
     ]);
     expect(tree.source, same(source));
+    expect(tree.walk(left), [left, tree.childAt(left, 0)]);
+    final subtree = tree.cursor(right);
+    expect(subtree.moveNext(), isTrue);
+    expect(subtree.current, right);
+    expect(subtree.moveNext(), isTrue);
+    expect(subtree.current, tree.childAt(right, 0));
+    expect(subtree.moveNext(), isFalse);
+    expect(() => tree.walk(-1), throwsRangeError);
+    expect(() => tree.cursor(-1), throwsRangeError);
     final cursor = tree.cursor();
     expect(() => cursor.current, throwsStateError);
     for (final id in tree.walk()) {
@@ -66,4 +75,26 @@ void main() {
       expect(args.arguments.clear, throwsUnsupportedError);
     },
   );
+
+  test('named types retain their prefix, arguments and nullable offset', () {
+    for (final prefix in ['', 'p.']) {
+      for (final arguments in ['', '<int>']) {
+        for (final suffix in ['', '?']) {
+          final text = '${prefix}T$arguments$suffix';
+          final parsed = parseTypeAnnotation(
+            scan(SourceFile(Uri.parse('memory:type'), text)),
+          );
+          final type = parsed.node as NamedTypeAnnotation;
+          expect(parsed.diagnostics, isEmpty);
+          expect(type.prefix?.text, prefix.isEmpty ? null : 'p');
+          expect(type.name.text, 'T');
+          expect(
+            type.typeArguments?.text,
+            arguments.isEmpty ? null : arguments,
+          );
+          expect(type.questionOffset, suffix.isEmpty ? null : text.length - 1);
+        }
+      }
+    }
+  });
 }
