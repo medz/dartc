@@ -3,8 +3,8 @@ part of 'parser.dart';
 sealed class _QuestionResolution;
 
 final class _ConditionalBranches(
-  final Expression thenBranch,
-  final Expression elseBranch,
+  final int thenBranch,
+  final int elseBranch,
   final List<Diagnostic> diagnostics,
   final int cursor,
   final Token current,
@@ -12,7 +12,7 @@ final class _ConditionalBranches(
 
 final class _ConditionalTrial(_Parser parent, int question) {
   final _Parser reader = _Parser.trial(parent, question);
-  Expression? thenBranch;
+  int? thenBranch;
   bool? inherits;
   bool tracked = false;
   int colon = -1;
@@ -47,7 +47,7 @@ final class _ConditionalReader(final _Parser parent)
         continue;
       }
       _ConditionalBranches? branches;
-      Expression? head = trial.thenBranch;
+      int? head = trial.thenBranch;
       if (!reader.hasSyntaxError && reader.current.kind != .invalid) {
         final expression = reader.finishExpression(0, 0);
         if (!reader.hasSyntaxError) {
@@ -75,7 +75,9 @@ final class _ConditionalReader(final _Parser parent)
       _QuestionResolution? outcome = branches;
       var first = trials.length - 1;
       final list = reader.leadingList;
-      if (first != 0 && list != null && _selectorLink(head, list) != null) {
+      if (first != 0 &&
+          list != null &&
+          _selectorLink(reader.arena, head, list) != null) {
         while (first > 0 && trials[first - 1].inherits != null) {
           first--;
         }
@@ -123,8 +125,7 @@ final class _ConditionalReader(final _Parser parent)
 }
 
 // A branch ends at a grammar boundary, including the colon of its caller.
-final class _BranchExpression(final _Parser parser)
-    extends _Reader<Expression?> {
+final class _BranchExpression(final _Parser parser) extends _Reader<int?> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     while (true) {
@@ -159,7 +160,9 @@ final class _ChosenConditional(
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final child = _Parser.trial(parent, parent.cursor);
-    if (!sequence.isDone) child.indexSequences = [sequence];
+    if (!sequence.isDone) {
+      child.indexSequences = [sequence];
+    }
     final then = _BranchExpression(child);
     yield then;
     if (then.result != null &&
@@ -225,10 +228,10 @@ extension on _Parser {
       checkValue(condition);
       diagnostics.addAll(result.diagnostics);
       values.add(
-        ConditionalExpression(
+        arena.putConditionalExpression(
           source: source,
-          start: condition.start,
-          end: result.elseBranch.end,
+          start: arena.rStart(condition),
+          end: arena.rEnd(result.elseBranch),
           condition: condition,
           thenExpression: result.thenBranch,
           elseExpression: result.elseBranch,

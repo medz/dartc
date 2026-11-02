@@ -45,10 +45,10 @@ extension on _Parser {
     final expression = finishExpression(frame.valueBase, frame.operatorBase);
     frames.removeLast();
     values.add(
-      ThrowExpression(
+      arena.putThrowExpression(
         source: source,
         start: frame.keyword.start,
-        end: expression.end,
+        end: arena.rEnd(expression),
         expression: expression,
       ),
     );

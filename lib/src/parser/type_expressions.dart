@@ -4,7 +4,7 @@ extension on _Parser {
   Iterable<_Reader<Object?>> readConstruction() sync* {
     final keyword = current;
     advance();
-    Identifier readName({bool continuation = false}) {
+    int readName({bool continuation = false}) {
       final token = current;
       if (token.kind.isIdentifier ||
           continuation && token.kind == .keywordNew) {
@@ -20,7 +20,11 @@ extension on _Parser {
         advance();
         return identifier(token);
       }
-      return Identifier(source: source, start: token.start, end: token.start);
+      return arena.putIdentifier(
+        source: source,
+        start: token.start,
+        end: token.start,
+      );
     }
 
     final components = [readName()];
@@ -28,16 +32,16 @@ extension on _Parser {
       advance();
       components.add(readName(continuation: true));
     }
-    TypeArgumentList? types;
+    int? types;
     if (current.kind == .less) {
       final reader = _TypeReader(this);
       if (!reader.start(arguments: true)) yield _TypeTask(reader);
-      types = reader.result as TypeArgumentList?;
+      types = arena.asTypeArgumentListOrNull(reader.result);
       if (reader.failure case final failure?) {
         error(failure.$1, failure.$2, failure.$3);
       }
     }
-    Identifier? constructorName;
+    int? constructorName;
     if (current.kind == .dot) {
       advance();
       final name = readName(continuation: true);
@@ -50,7 +54,7 @@ extension on _Parser {
     if (current.kind != .leftParen) {
       error('expected_arguments', 'Expected constructor arguments.', current);
       values.add(
-        InstanceCreationExpression(
+        arena.putInstanceCreationExpression(
           source: source,
           start: keyword.start,
           end: current.start,
@@ -58,7 +62,7 @@ extension on _Parser {
           name: components,
           typeArguments: types,
           constructorName: constructorName,
-          arguments: ArgumentList(
+          arguments: arena.putArgumentList(
             source: source,
             start: current.start,
             end: current.start,
@@ -88,18 +92,18 @@ extension on _Parser {
     var target = values.last;
     var assertions = 0;
     while (true) {
-      if (target is NullAssertionExpression) {
+      if (arena.isNullAssertionExpression(target)) {
         assertions++;
-        target = target.operand;
-      } else if (target is DotShorthandExpression) {
-        target = target.expression;
+        target = arena.rNullAssertionExpressionOperand(target);
+      } else if (arena.isDotShorthandExpression(target)) {
+        target = arena.rDotShorthandExpressionExpression(target);
       } else {
         break;
       }
     }
     final frame = frames.lastOrNull;
     final afterPrefix =
-        (target is ConstDotShorthandExpression || assertions > 1) &&
+        (arena.isConstDotShorthandExpression(target) || assertions > 1) &&
         !(frame is _Cascade && !frame.assigned);
     if (afterPrefix &&
         !(operators.length > operatorBase &&
@@ -125,7 +129,7 @@ extension on _Parser {
       return true;
     }
     return acceptTypeArguments(
-      reader.result as TypeArgumentList?,
+      arena.asTypeArgumentListOrNull(reader.result),
       start,
       remainder,
       afterPrefix,
@@ -140,7 +144,7 @@ extension on _Parser {
   ) sync* {
     yield _TypeTask(reader);
     if (!acceptTypeArguments(
-      reader.result as TypeArgumentList?,
+      arena.asTypeArgumentListOrNull(reader.result),
       start,
       remainder,
       afterPrefix,
@@ -150,7 +154,7 @@ extension on _Parser {
   }
 
   bool acceptTypeArguments(
-    TypeArgumentList? arguments,
+    int? arguments,
     int start,
     Token remainder,
     bool afterPrefix,
@@ -183,10 +187,10 @@ extension on _Parser {
     } else {
       checkValue(target);
       values.add(
-        TypeInstantiationExpression(
+        arena.putTypeInstantiationExpression(
           source: source,
-          start: target.start,
-          end: arguments.end,
+          start: arena.rStart(target),
+          end: arena.rEnd(arguments),
           expression: target,
           typeArguments: arguments,
         ),
@@ -209,7 +213,8 @@ extension on _Parser {
     }
     final expression = values.removeLast();
     checkValue(expression);
-    if (expression is CastExpression || expression is TypeTestExpression) {
+    if (arena.isCastExpression(expression) ||
+        arena.isTypeTestExpression(expression)) {
       error(
         'chained_type_operator',
         'Parenthesize the type test or cast before another type operator.',
@@ -223,29 +228,29 @@ extension on _Parser {
     final reader = _TypeReader(this, afterIsOrAs: true);
     if (!reader.start()) yield _TypeTask(reader);
     final type =
-        reader.result as TypeAnnotation? ??
-        MissingTypeAnnotation(source: source, offset: first.start);
+        arena.asTypeAnnotationOrNull(reader.result) ??
+        arena.putMissingTypeAnnotation(source: source, offset: first.start);
     if (reader.failure case final failure?) {
       error(failure.$1, failure.$2, failure.$3);
     }
     if (first.kind == .keywordVoid &&
-        type is NamedTypeAnnotation &&
-        type.prefix == null) {
+        arena.isNamedTypeAnnotation(type) &&
+        arena.rNamedTypeAnnotationPrefix(type) == null) {
       error('invalid_void_type', 'A type test or cast cannot use void.', first);
     }
     values.add(
       token.kind == .keywordAs
-          ? CastExpression(
+          ? arena.putCastExpression(
               source: source,
-              start: expression.start,
-              end: type.end,
+              start: arena.rStart(expression),
+              end: arena.rEnd(type),
               expression: expression,
               type: type,
             )
-          : TypeTestExpression(
+          : arena.putTypeTestExpression(
               source: source,
-              start: expression.start,
-              end: type.end,
+              start: arena.rStart(expression),
+              end: arena.rEnd(type),
               expression: expression,
               type: type,
               isNegated: negated,
@@ -257,18 +262,19 @@ extension on _Parser {
   void checkTypeContinuation(Token token) {
     if (token.kind.precedence == _relationalPrecedence) {
       var operand = values.last;
-      while (operand is CastExpression || operand is TypeTestExpression) {
-        operand = switch (operand) {
-          CastExpression(:final expression) => expression,
-          TypeTestExpression(:final expression) => expression,
+      while (arena.isCastExpression(operand) ||
+          arena.isTypeTestExpression(operand)) {
+        operand = switch ((arena.maybe(operand) as Expression)) {
+          CastExpression(refExpression: final expression) => expression,
+          TypeTestExpression(refExpression: final expression) => expression,
           _ => operand,
         };
       }
-      if (operand is BinaryExpression &&
-          (operand.op == .less ||
-              operand.op == .lessEqual ||
-              operand.op == .greater ||
-              operand.op == .greaterEqual)) {
+      if (arena.isBinaryExpression(operand) &&
+          (arena.rBinaryExpressionOp(operand) == .less ||
+              arena.rBinaryExpressionOp(operand) == .lessEqual ||
+              arena.rBinaryExpressionOp(operand) == .greater ||
+              arena.rBinaryExpressionOp(operand) == .greaterEqual)) {
         error(
           'chained_comparison',
           'Parenthesize this comparison operand.',

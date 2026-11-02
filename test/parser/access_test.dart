@@ -147,8 +147,8 @@ void main() {
       expect(head.typeArguments!.text, '<T>');
       expect(head.arguments!.arguments.map((n) => n.text), ['x', 'flag: y']);
       expect(head.childCount, 3);
-      expect(head.childAt(1), same(head.typeArguments));
-      expect(head.childAt(2), same(head.arguments));
+      expect(head.childAt(1), equals(head.typeArguments));
+      expect(head.childAt(2), equals(head.arguments));
       final asserted = parsed('const .new()!') as NullAssertionExpression;
       expect(asserted.operand, isA<DotShorthandExpression>());
       expect(asserted.operand.text, 'const .new()');

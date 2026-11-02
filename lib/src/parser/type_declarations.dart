@@ -11,8 +11,8 @@ enum _TypeDeclarationKind {
 final class _TypeDeclarationReader(
   final _Parser parser,
   final int start,
-  final List<Annotation> metadata,
-) extends _Reader<TopLevelDeclaration> {
+  final List<int> metadata,
+) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final modifiers = <ClassModifier>[];
@@ -83,17 +83,17 @@ final class _TypeDeclarationReader(
             (parser.current.kind == .keywordOn || parser.current.kind == .less)
         ? null
         : parser.readVariableName();
-    TypeParameterList? typeParameters;
+    int? typeParameters;
     if (parser.current.kind == .less) {
       final reader = _TypeReader(parser);
       if (!reader.start(parameters: true)) yield _TypeTask(reader);
-      typeParameters = reader.result as TypeParameterList?;
+      typeParameters = parser.arena.asTypeParameterListOrNull(reader.result);
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
       }
     }
-    Identifier? primaryName;
-    FormalParameterList? primaryParameters;
+    int? primaryName;
+    int? primaryParameters;
     if (parser.current.kind == .dot) {
       parser.advance();
       primaryName = parser.readConstructorName();
@@ -131,13 +131,13 @@ final class _TypeDeclarationReader(
       yield superclass;
       final withClause = _TypeListReader(parser, .withKeyword);
       yield withClause;
-      TypeListClause? implementsClause;
+      int? implementsClause;
       if (parser.current.kind == .keywordImplements) {
         final reader = _TypeListReader(parser, .implementsKeyword);
         yield reader;
         implementsClause = reader.result;
       }
-      result = ClassTypeAliasDeclaration(
+      result = parser.arena.putClassTypeAliasDeclaration(
         source: parser.source,
         start: start,
         end: parser.expect(.semicolon),
@@ -151,11 +151,11 @@ final class _TypeDeclarationReader(
       );
       return;
     }
-    TypeAnnotation? onType;
-    ExtendsClause? extendsClause;
-    TypeListClause? onClause;
-    TypeListClause? withClause;
-    TypeListClause? implementsClause;
+    int? onType;
+    int? extendsClause;
+    int? onClause;
+    int? withClause;
+    int? implementsClause;
     if (kind == .extension) {
       parser.expect(.keywordOn);
       final reader = _RequiredTypeReader(parser);
@@ -168,10 +168,10 @@ final class _TypeDeclarationReader(
       final reader = _RequiredTypeReader(parser);
       yield reader;
       final type = reader.result;
-      extendsClause = ExtendsClause(
+      extendsClause = parser.arena.putExtendsClause(
         source: parser.source,
         start: token.start,
-        end: type.end,
+        end: parser.arena.rEnd(type),
         superclass: type,
       );
       if (kind != .classKind) {
@@ -208,7 +208,12 @@ final class _TypeDeclarationReader(
       parser.error(
         'invalid_with_clause',
         'This declaration cannot apply mixins.',
-        Token(.keywordWith, parser.source, withClause.start, withClause.end),
+        Token(
+          .keywordWith,
+          parser.source,
+          parser.arena.rStart(withClause),
+          parser.arena.rEnd(withClause),
+        ),
       );
     }
     if (implementsClause != null && kind == .extension) {
@@ -218,16 +223,16 @@ final class _TypeDeclarationReader(
         Token(
           .keywordImplements,
           parser.source,
-          implementsClause.start,
-          implementsClause.end,
+          parser.arena.rStart(implementsClause),
+          parser.arena.rEnd(implementsClause),
         ),
       );
     }
-    final body = _MembersReader(parser, name?.text, kind);
+    final body = _MembersReader(parser, parser.arena.rTextOrNull(name), kind);
     yield body;
     final source = parser.source;
     result = switch (kind) {
-      .classKind => ClassDeclaration(
+      .classKind => parser.arena.putClassDeclaration(
         source: source,
         start: start,
         end: body.end,
@@ -244,7 +249,7 @@ final class _TypeDeclarationReader(
         isSemicolonBody: body.semicolon,
         members: body.result,
       ),
-      .mixin => MixinDeclaration(
+      .mixin => parser.arena.putMixinDeclaration(
         source: source,
         start: start,
         end: body.end,
@@ -257,7 +262,7 @@ final class _TypeDeclarationReader(
         isSemicolonBody: body.semicolon,
         members: body.result,
       ),
-      .enumKind => EnumDeclaration(
+      .enumKind => parser.arena.putEnumDeclaration(
         source: source,
         start: start,
         end: body.end,
@@ -274,7 +279,7 @@ final class _TypeDeclarationReader(
         constants: body.constants,
         members: body.result,
       ),
-      .extension => ExtensionDeclaration(
+      .extension => parser.arena.putExtensionDeclaration(
         source: source,
         start: start,
         end: body.end,
@@ -285,7 +290,7 @@ final class _TypeDeclarationReader(
         isSemicolonBody: body.semicolon,
         members: body.result,
       ),
-      .extensionType => ExtensionTypeDeclaration(
+      .extensionType => parser.arena.putExtensionTypeDeclaration(
         source: source,
         start: start,
         end: body.end,
@@ -320,11 +325,15 @@ extension on _Parser {
     };
   }
 
-  Identifier readConstructorName() {
+  int readConstructorName() {
     if (current.kind != .keywordNew) return readVariableName();
     final token = current;
     advance();
-    return Identifier(source: source, start: token.start, end: token.end);
+    return arena.putIdentifier(
+      source: source,
+      start: token.start,
+      end: token.end,
+    );
   }
 }
 
@@ -341,7 +350,7 @@ extension on TokenKind {
 }
 
 final class _TypeListReader(final _Parser parser, final TypeListClauseKind kind)
-    extends _Reader<TypeListClause> {
+    extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final start = parser.current.start;
@@ -350,7 +359,7 @@ final class _TypeListReader(final _Parser parser, final TypeListClauseKind kind)
       .implementsKeyword => .keywordImplements,
       .onKeyword => .keywordOn,
     });
-    final types = <TypeAnnotation>[];
+    final types = <int>[];
     do {
       final reader = _RequiredTypeReader(parser);
       yield reader;
@@ -358,10 +367,10 @@ final class _TypeListReader(final _Parser parser, final TypeListClauseKind kind)
       if (parser.current.kind != .comma) break;
       parser.advance();
     } while (true);
-    result = TypeListClause(
+    result = parser.arena.putTypeListClause(
       source: parser.source,
       start: start,
-      end: types.last.end,
+      end: parser.arena.rEnd(types.last),
       kind: kind,
       types: types,
     );

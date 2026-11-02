@@ -15,27 +15,27 @@ ParseResult<CompilationUnit> parseCompilationUnit(
   return parser.finishResult(node);
 }
 
-final class _UnitReader(final _Parser parser) extends _Reader<CompilationUnit> {
+final class _UnitReader(final _Parser parser) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
-    ScriptTag? scriptTag;
+    int? scriptTag;
     if (parser.current.kind == .scriptTag) {
       final token = parser.current;
-      scriptTag = ScriptTag(
+      scriptTag = parser.arena.putScriptTag(
         source: parser.source,
         start: token.start,
         end: token.end,
       );
       parser.advance();
     }
-    final members = <CompilationUnitMember>[];
+    final members = <int>[];
     var declarations = false;
     var parts = false;
     var partOf = false;
     while (parser.current.kind != .eof) {
       final initial = parser.cursor;
       final start = parser.current.start;
-      List<Annotation> metadata = const [];
+      List<int> metadata = const [];
       if (parser.current.kind == .at) {
         final annotations = _MetadataReader(parser);
         yield annotations;
@@ -83,7 +83,7 @@ final class _UnitReader(final _Parser parser) extends _Reader<CompilationUnit> {
         parser.unexpected();
       }
     }
-    result = CompilationUnit(
+    result = parser.arena.putCompilationUnit(
       source: parser.source,
       scriptTag: scriptTag,
       members: members,

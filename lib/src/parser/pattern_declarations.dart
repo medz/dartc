@@ -91,7 +91,7 @@ extension on _Parser {
 }
 
 final class _PatternAssignmentReader(final _Parser parser)
-    extends _Reader<Expression> {
+    extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final pattern = _PatternReader(parser, context: .assignment);
@@ -99,10 +99,10 @@ final class _PatternAssignmentReader(final _Parser parser)
     parser.expect(.assign);
     final value = _ExpressionReader(parser);
     if (!value.start()) yield value;
-    result = PatternAssignmentExpression(
+    result = parser.arena.putPatternAssignmentExpression(
       source: parser.source,
-      start: pattern.result.start,
-      end: value.result.end,
+      start: parser.arena.rStart(pattern.result),
+      end: parser.arena.rEnd(value.result),
       pattern: pattern.result,
       value: value.result,
     );
@@ -111,8 +111,8 @@ final class _PatternAssignmentReader(final _Parser parser)
 
 final class _PatternDeclarationReader(
   final _Parser parser, {
-  final List<Annotation> metadata = const [],
-}) extends _Reader<PatternVariableDeclaration> {
+  final List<int> metadata = const [],
+}) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final token = parser.current;
@@ -122,10 +122,10 @@ final class _PatternDeclarationReader(
     parser.expect(.assign);
     final value = _ExpressionReader(parser);
     if (!value.start()) yield value;
-    result = PatternVariableDeclaration(
+    result = parser.arena.putPatternVariableDeclaration(
       source: parser.source,
-      start: metadata.firstOrNull?.start ?? token.start,
-      end: value.result.end,
+      start: parser.arena.rStartOrNull(metadata.firstOrNull) ?? token.start,
+      end: parser.arena.rEnd(value.result),
       metadata: metadata,
       isFinal: token.kind == .keywordFinal,
       pattern: pattern.result,
@@ -160,12 +160,13 @@ final class _ForDeclarationReader(final _Parser parent, final _ForHeader frame)
     child.advance();
     final pattern = _PatternReader(child, context: .declaration);
     yield pattern;
-    final start = frame.metadata.firstOrNull?.start ?? token.start;
+    final start =
+        parent.arena.rStartOrNull(frame.metadata.firstOrNull) ?? token.start;
     if (child.current.kind == .keywordIn) {
-      frame.target = PatternForInBinding(
+      frame.target = parent.arena.putPatternForInBinding(
         source: child.source,
         start: start,
-        end: pattern.result.end,
+        end: parent.arena.rEnd(pattern.result),
         metadata: frame.metadata,
         isFinal: token.kind == .keywordFinal,
         pattern: pattern.result,
@@ -176,10 +177,10 @@ final class _ForDeclarationReader(final _Parser parent, final _ForHeader frame)
       child.expect(.assign);
       final value = _ExpressionReader(child);
       if (!value.start()) yield value;
-      frame.initializer = PatternVariableDeclaration(
+      frame.initializer = parent.arena.putPatternVariableDeclaration(
         source: child.source,
         start: start,
-        end: value.result.end,
+        end: parent.arena.rEnd(value.result),
         metadata: frame.metadata,
         isFinal: token.kind == .keywordFinal,
         pattern: pattern.result,

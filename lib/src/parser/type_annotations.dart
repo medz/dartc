@@ -13,7 +13,7 @@ ParseResult<TypeAnnotation> parseTypeAnnotation(
   final parser = _Parser(input, languageVersion: languageVersion);
   final reader = _TypeReader(parser);
   if (!reader.start()) _TypeTask(reader).finish();
-  final node = reader.result as TypeAnnotation?;
+  final node = parser.arena.asTypeAnnotationOrNull(reader.result);
   if (reader.failure case final failure?) {
     parser.error(failure.$1, failure.$2, failure.$3);
   } else {
@@ -23,7 +23,7 @@ ParseResult<TypeAnnotation> parseTypeAnnotation(
   }
   return parser.finishResult(
     node ??
-        MissingTypeAnnotation(
+        parser.arena.putMissingTypeAnnotation(
           source: input.source,
           offset: input.tokens.first.start,
         ),
@@ -33,20 +33,21 @@ ParseResult<TypeAnnotation> parseTypeAnnotation(
 sealed class _TypeFrame;
 
 sealed class _AnnotatedTypeFrame extends _TypeFrame {
-  List<Annotation> metadata = const [];
+  List<int> metadata = const [];
 }
 
 final class _TypeArguments(final Token opening, {final _TypeName? owner})
     extends _TypeFrame {
-  final List<TypeAnnotation> arguments = [];
+  final List<int> arguments = [];
 }
 
 final class _TypeName(
-  final Identifier name, {
-  final Identifier? prefix,
+  final AstArena arena,
+  final int name, {
+  final int? prefix,
   final bool isVoid = false,
 }) {
-  int get start => prefix?.start ?? name.start;
+  int get start => arena.rStartOrNull(prefix) ?? arena.rStart(name);
 }
 
 final class _TypeReader(
@@ -57,10 +58,10 @@ final class _TypeReader(
   final List<_TypeFrame> frames = [];
   (String, String, Token)? failure;
   (_TypeName, int)? relationalFallback;
-  TypeParameterList? completedParameters;
-  AstNode? result;
+  int? completedParameters;
+  int? result;
   bool beforeParameter = false;
-  (TypeAnnotation, int)? parameterFallback;
+  (int, int)? parameterFallback;
   (_AnnotatedTypeFrame, _MetadataReader)? pendingMetadata;
 
   SourceFile get source => parser.source;
@@ -74,7 +75,7 @@ final class _TypeReader(
   }) {
     assert(!arguments || !parameters);
     this.beforeParameter = beforeParameter;
-    TypeAnnotation? value;
+    int? value;
     if (arguments) {
       frames.add(_TypeArguments(current));
       parser.advance();
@@ -89,12 +90,12 @@ final class _TypeReader(
     return resume(value);
   }
 
-  bool complete(AstNode? node) {
+  bool complete(int? node) {
     result = node;
     return true;
   }
 
-  bool resume(TypeAnnotation? value) {
+  bool resume(int? value) {
     while (failure == null) {
       if (pendingMetadata != null) return false;
       if (value == null) {
@@ -136,7 +137,7 @@ final class _TypeReader(
           final end = closeAngle();
           if (failure != null) break;
           frames.removeLast();
-          final arguments = TypeArgumentList(
+          final arguments = parser.arena.putTypeArgumentList(
             source: source,
             start: frame.opening.start,
             end: end,
@@ -148,8 +149,8 @@ final class _TypeReader(
           value = namedType(owner, arguments);
         case final _TypeVariables frame:
           if (frame.boundStart!.kind == .keywordVoid &&
-              value is NamedTypeAnnotation &&
-              value.prefix == null) {
+              parser.arena.isNamedTypeAnnotation(value) &&
+              parser.arena.rNamedTypeAnnotationPrefix(value) == null) {
             failure = (
               'invalid_void_type',
               'A type parameter bound cannot be void.',
@@ -159,13 +160,13 @@ final class _TypeReader(
           }
           final name = frame.name!;
           frame.parameters.add(
-            TypeParameter(
+            parser.arena.putTypeParameter(
               source: source,
               start: frame.metadata.isEmpty
-                  ? name.start
-                  : frame.metadata.first.start,
+                  ? parser.arena.rStart(name)
+                  : parser.arena.rStart(frame.metadata.first),
               metadata: frame.metadata,
-              end: value.end,
+              end: parser.arena.rEnd(value),
               name: name,
               bound: value,
             ),
@@ -173,7 +174,7 @@ final class _TypeReader(
           value = continueVariables(frame);
           if (completedParameters != null) return complete(completedParameters);
         case final _FunctionTypes frame:
-          Identifier? name;
+          int? name;
           if (current.kind.isIdentifier) {
             name = readName();
           }
@@ -182,10 +183,10 @@ final class _TypeReader(
             fail('expected_identifier', 'Expected a named parameter name.');
           }
           frame.parameters.add(
-            FunctionTypeParameter(
+            parser.arena.putFunctionTypeParameter(
               source: source,
               start: frame.parameterStart,
-              end: name?.end ?? value.end,
+              end: parser.arena.rEndOrNull(name) ?? parser.arena.rEnd(value),
               kind: frame.requiredKeyword ? .requiredNamed : frame.kind,
               isCovariant: frame.covariantKeyword,
               metadata: frame.metadata,
@@ -195,32 +196,32 @@ final class _TypeReader(
           );
           value = continueParameters(frame);
         case final _RecordTypes frame:
-          Identifier? name;
+          int? name;
           if (current.kind.isIdentifier) {
             name = readName();
           }
           if (frame.namedOpening == null) {
             frame.positional.add(
-              PositionalRecordTypeField(
+              parser.arena.putPositionalRecordTypeField(
                 source: source,
                 start: frame.metadata.isEmpty
-                    ? value.start
-                    : frame.metadata.first.start,
+                    ? parser.arena.rStart(value)
+                    : parser.arena.rStart(frame.metadata.first),
                 metadata: frame.metadata,
-                end: name?.end ?? value.end,
+                end: parser.arena.rEndOrNull(name) ?? parser.arena.rEnd(value),
                 type: value,
                 name: name,
               ),
             );
           } else if (name != null) {
             frame.named.add(
-              NamedRecordTypeField(
+              parser.arena.putNamedRecordTypeField(
                 source: source,
                 start: frame.metadata.isEmpty
-                    ? value.start
-                    : frame.metadata.first.start,
+                    ? parser.arena.rStart(value)
+                    : parser.arena.rStart(frame.metadata.first),
                 metadata: frame.metadata,
-                end: name.end,
+                end: parser.arena.rEnd(name),
                 type: value,
                 name: name,
               ),
@@ -248,7 +249,7 @@ final class _TypeReader(
     return complete(null);
   }
 
-  TypeAnnotation? readHead() {
+  int? readHead() {
     final token = current;
     if (token.kind == .leftParen) {
       final frame = _RecordTypes(token);
@@ -267,7 +268,7 @@ final class _TypeReader(
     }
     var name = parser.identifier(token, inType: true);
     parser.advance();
-    Identifier? prefix;
+    int? prefix;
     if (current.kind == .dot && token.kind != .keywordVoid) {
       prefix = name;
       parser.advance();
@@ -279,6 +280,7 @@ final class _TypeReader(
       parser.advance();
     }
     final head = _TypeName(
+      parser.arena,
       name,
       prefix: prefix,
       isVoid: token.kind == .keywordVoid && prefix == null,
@@ -328,12 +330,14 @@ final class _TypeReader(
     return resume(value);
   }
 
-  TypeAnnotation namedType(_TypeName head, TypeArgumentList? arguments) {
+  int namedType(_TypeName head, int? arguments) {
     final question = head.isVoid ? null : nullableOffset();
-    return NamedTypeAnnotation(
+    return parser.arena.putNamedTypeAnnotation(
       source: source,
       start: head.start,
-      end: question == null ? arguments?.end ?? head.name.end : question + 1,
+      end: question == null
+          ? parser.arena.rEndOrNull(arguments) ?? parser.arena.rEnd(head.name)
+          : question + 1,
       questionOffset: question,
       prefix: head.prefix,
       name: head.name,
@@ -385,7 +389,7 @@ final class _TypeReader(
     failure ??= (code, message, current);
   }
 
-  Identifier readName() {
+  int readName() {
     if (parser.functionModifier != null &&
         (current.kind == .keywordAwait || current.kind == .keywordYield)) {
       fail(
@@ -519,8 +523,7 @@ extension on _Parser {
   }
 }
 
-final class _RequiredTypeReader(final _Parser parser)
-    extends _Reader<TypeAnnotation> {
+final class _RequiredTypeReader(final _Parser parser) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final offset = parser.current.start;
@@ -530,7 +533,10 @@ final class _RequiredTypeReader(final _Parser parser)
       parser.error(failure.$1, failure.$2, failure.$3);
     }
     result =
-        reader.result as TypeAnnotation? ??
-        MissingTypeAnnotation(source: parser.source, offset: offset);
+        parser.arena.asTypeAnnotationOrNull(reader.result) ??
+        parser.arena.putMissingTypeAnnotation(
+          source: parser.source,
+          offset: offset,
+        );
   }
 }

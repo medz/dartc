@@ -2,7 +2,7 @@ part of 'parser.dart';
 
 final class _ForElement(super.token, {required final bool isAwait})
     extends _ElementControl {
-  late ForLoopParts parts;
+  late int parts;
 }
 
 enum _ForPhase { initializer, condition, updaters, iterable }
@@ -22,11 +22,11 @@ sealed class _ForHeader(
 ) extends _Delimiter {
   _ForPhase phase = .initializer;
   _VariableDeclarations? declarations;
-  List<Annotation> metadata = const [];
-  ForInitializer? initializer;
-  Expression? condition;
-  ForInTarget? target;
-  final List<Expression> updaters = [];
+  List<int> metadata = const [];
+  int? initializer;
+  int? condition;
+  int? target;
+  final List<int> updaters = [];
   int end = start;
 
   @override
@@ -47,7 +47,7 @@ final class _ForStatementHeader(
   super.operatorBase,
   super.start,
 ) extends _ForHeader {
-  late ForLoopParts parts;
+  late int parts;
 }
 
 extension on _Parser {
@@ -103,10 +103,14 @@ extension on _Parser {
         case _VariableDeclarations(
           keyword: .none,
           isLate: false,
-          type: NamedTypeAnnotation(isNullable: true) ||
-              RecordTypeAnnotation(isNullable: true),
+          type: final int t,
         )
-        when current.kind == .assign && cursor < lookahead.lastColon) {
+        when (arena.isNamedTypeAnnotation(t) ||
+                arena.isRecordTypeAnnotation(t)) &&
+            arena.at(t) is TypeAnnotation &&
+            (arena.at(t) as TypeAnnotation).isNullable &&
+            current.kind == .assign &&
+            cursor < lookahead.lastColon) {
       nullableForInitializer = _NullableForInitializer(
         frame,
         start,
@@ -124,7 +128,7 @@ extension on _Parser {
 
   void finishVariable(_ForHeader frame) {
     final declarations = frame.declarations!;
-    Expression? initializer;
+    int? initializer;
     if (declarations.initializing || hasForExpression(frame)) {
       if (!declarations.initializing) {
         error(
@@ -136,10 +140,10 @@ extension on _Parser {
       initializer = finishExpression(frame.valueBase, frame.operatorBase);
     }
     declarations.variables.add(
-      VariableDeclaration(
+      arena.putVariableDeclaration(
         source: source,
-        start: declarations.name.start,
-        end: initializer?.end ?? declarations.name.end,
+        start: arena.rStart(declarations.name),
+        end: arena.rEndOrNull(initializer) ?? arena.rEnd(declarations.name),
         name: declarations.name,
         initializer: initializer,
       ),
@@ -151,11 +155,13 @@ extension on _Parser {
   void finishForInitializer(_ForHeader frame) {
     if (frame.declarations case final declarations?) {
       finishVariable(frame);
-      frame.initializer = VariableDeclarationList(
+      frame.initializer = arena.putVariableDeclarationList(
         source: source,
-        start: frame.metadata.firstOrNull?.start ?? declarations.start,
+        start:
+            arena.rStartOrNull(frame.metadata.firstOrNull) ??
+            declarations.start,
         metadata: frame.metadata,
-        end: declarations.variables.last.end,
+        end: arena.rEnd(declarations.variables.last),
         keyword: declarations.keyword,
         isLate: declarations.isLate,
         type: declarations.type,
@@ -182,7 +188,10 @@ extension on _Parser {
       if (frame.declarations case final declarations?) {
         finishVariable(frame);
         if (declarations.variables.length != 1 ||
-            declarations.variables.single.initializer != null ||
+            arena.rVariableDeclarationInitializer(
+                  declarations.variables.single,
+                ) !=
+                null ||
             declarations.isLate) {
           error(
             'invalid_for_in_declaration',
@@ -190,11 +199,13 @@ extension on _Parser {
             token,
           );
         }
-        frame.target = DeclaredIdentifier(
+        frame.target = arena.putDeclaredIdentifier(
           source: source,
-          start: frame.metadata.firstOrNull?.start ?? declarations.start,
+          start:
+              arena.rStartOrNull(frame.metadata.firstOrNull) ??
+              declarations.start,
           metadata: frame.metadata,
-          end: declarations.name.end,
+          end: arena.rEnd(declarations.name),
           keyword: declarations.keyword,
           type: declarations.type,
           name: declarations.name,
@@ -204,7 +215,9 @@ extension on _Parser {
           frame.valueBase,
           frame.operatorBase,
         );
-        if (expression case IdentifierExpression(:final identifier)) {
+        if ((arena.maybe(expression) as Expression) case IdentifierExpression(
+          refIdentifier: final identifier,
+        )) {
           frame.target = identifier;
         } else {
           error(
@@ -212,10 +225,10 @@ extension on _Parser {
             'Expected an identifier before in.',
             token,
           );
-          frame.target = Identifier(
+          frame.target = arena.putIdentifier(
             source: source,
-            start: expression.start,
-            end: expression.start,
+            start: arena.rStart(expression),
+            end: arena.rStart(expression),
           );
         }
       }
@@ -255,7 +268,7 @@ extension on _Parser {
         frame.updaters.add(
           finishExpression(frame.valueBase, frame.operatorBase),
         );
-        frame.end = frame.updaters.last.end;
+        frame.end = arena.rEnd(frame.updaters.last);
         advance();
         expectsOperand = true;
       } else {
@@ -266,13 +279,13 @@ extension on _Parser {
     return false;
   }
 
-  ForLoopParts closeForHeader(_ForHeader frame) {
+  int closeForHeader(_ForHeader frame) {
     if (frame.phase == .iterable) {
       final iterable = finishExpression(frame.valueBase, frame.operatorBase);
-      return ForInParts(
+      return arena.putForInParts(
         source: source,
         start: frame.start,
-        end: iterable.end,
+        end: arena.rEnd(iterable),
         target: frame.target!,
         iterable: iterable,
       );
@@ -291,9 +304,9 @@ extension on _Parser {
       frame.end = current.start;
     } else if (hasForExpression(frame)) {
       frame.updaters.add(finishExpression(frame.valueBase, frame.operatorBase));
-      frame.end = frame.updaters.last.end;
+      frame.end = arena.rEnd(frame.updaters.last);
     }
-    return ForParts(
+    return arena.putForParts(
       source: source,
       start: frame.start,
       end: frame.end,

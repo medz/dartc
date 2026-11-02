@@ -4,12 +4,12 @@ final class _VariableDeclarations(
   final int start,
   final VariableKeyword keyword,
   final bool isLate,
-  final TypeAnnotation? type,
-  Identifier name,
+  final int? type,
+  int name,
 ) {
-  Identifier name = name;
+  int name = name;
   bool initializing = false;
-  final List<VariableDeclaration> variables = [];
+  final List<int> variables = [];
 }
 
 final class _VariableReader(
@@ -17,19 +17,22 @@ final class _VariableReader(
   final bool forLoop = false,
   final bool allowConditional = true,
 }) extends _Reader<_VariableDeclarations?> {
+  int? expressionStart;
+  int? declarationEnd;
+
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final initialCursor = parser.cursor;
     final first = parser.current;
     var isLate = false;
-    TypeAnnotation? type;
+    int? type;
     // Modifier words can also name functions, followed by a call's arguments.
     if (parser.current.kind.isVariableModifier &&
         parser.tokens[parser.cursor + 1].kind == .leftParen) {
       parser.advance();
       final reader = _TypeReader(parser);
       if (!reader.start()) yield _TypeTask(reader);
-      type = reader.result as TypeAnnotation?;
+      type = parser.arena.asTypeAnnotationOrNull(reader.result);
       if (type == null ||
           !parser.current.kind.isIdentifier ||
           !parser.tokens[parser.cursor + 1].kind.followsVariableName) {
@@ -92,7 +95,7 @@ final class _VariableReader(
       final token = parser.current;
       final reader = _TypeReader(parser);
       if (!reader.start()) yield _TypeTask(reader);
-      final parsed = reader.result as TypeAnnotation?;
+      final parsed = parser.arena.asTypeAnnotationOrNull(reader.result);
       if (parsed != null &&
           parser.current.kind.isIdentifier &&
           parser.tokens[parser.cursor + 1].kind.followsVariableName) {
@@ -130,12 +133,14 @@ final class _VariableReader(
         !forLoop &&
         !isLate &&
         keyword == .none &&
-        (type is NamedTypeAnnotation || type is RecordTypeAnnotation) &&
-        type!.start == first.start &&
+        (parser.arena.isNamedTypeAnnotation(type) ||
+            parser.arena.isRecordTypeAnnotation(type)) &&
+        parser.arena.rStart(type!) == first.start &&
         parser.current.kind.isIdentifier &&
         parser.tokens[parser.cursor + 1].kind == .assign &&
         parser.tokens[parser.cursor - 1].kind == .question &&
         parser.cursor < parser.lookahead.lastColon) {
+      expressionStart = initialCursor;
       final question = parser.cursor - 1;
       result = _VariableDeclarations(
         first.start,
@@ -144,17 +149,17 @@ final class _VariableReader(
         type,
         parser.readVariableName(),
       );
-      final declarationEnd = parser.cursor;
+      declarationEnd = parser.cursor;
       parser.cursor = question;
       parser.current = parser.tokens[question];
       final reader = _ConditionalReader(parser);
       yield reader;
       if (reader.result case final _ConditionalBranches branches) {
         parser.pendingBranches = (question, branches);
-        parser.cursor = initialCursor;
+        parser.cursor = expressionStart!;
         result = null;
       } else {
-        parser.cursor = declarationEnd;
+        parser.cursor = declarationEnd!;
       }
       parser.current = parser.tokens[parser.cursor];
       return;
@@ -192,11 +197,15 @@ extension on _Parser {
             tokens[end + 1].kind.followsVariableName;
   }
 
-  Identifier readVariableName() {
+  int readVariableName() {
     final token = current;
     if (!token.kind.isIdentifier) {
       error('expected_identifier', 'Expected a variable name.', token);
-      return Identifier(source: source, start: token.start, end: token.start);
+      return arena.putIdentifier(
+        source: source,
+        start: token.start,
+        end: token.start,
+      );
     }
     advance();
     return identifier(token);
@@ -227,12 +236,12 @@ extension on TokenKind {
 final class _VariablesReader(
   final _Parser parser,
   final _VariableDeclarations declarations, {
-  final List<Annotation> metadata = const [],
-}) extends _Reader<VariableDeclarationList> {
+  final List<int> metadata = const [],
+}) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     while (true) {
-      Expression? initializer;
+      int? initializer;
       if (parser.current.kind == .assign) {
         parser.advance();
         final reader = _ExpressionReader(parser);
@@ -240,10 +249,12 @@ final class _VariablesReader(
         initializer = reader.result;
       }
       declarations.variables.add(
-        VariableDeclaration(
+        parser.arena.putVariableDeclaration(
           source: parser.source,
-          start: declarations.name.start,
-          end: initializer?.end ?? declarations.name.end,
+          start: parser.arena.rStart(declarations.name),
+          end:
+              parser.arena.rEndOrNull(initializer) ??
+              parser.arena.rEnd(declarations.name),
           name: declarations.name,
           initializer: initializer,
         ),
@@ -252,11 +263,13 @@ final class _VariablesReader(
       parser.advance();
       declarations.name = parser.readVariableName();
     }
-    result = VariableDeclarationList(
+    result = parser.arena.putVariableDeclarationList(
       source: parser.source,
-      start: metadata.isEmpty ? declarations.start : metadata.first.start,
+      start: metadata.isEmpty
+          ? declarations.start
+          : parser.arena.rStart(metadata.first),
       metadata: metadata,
-      end: declarations.variables.last.end,
+      end: parser.arena.rEnd(declarations.variables.last),
       keyword: declarations.keyword,
       isLate: declarations.isLate,
       type: declarations.type,

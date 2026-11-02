@@ -3,9 +3,9 @@ part of 'parser.dart';
 final class _ConstructorReader(
   final _Parser parser,
   final int start,
-  final List<Annotation> metadata, {
+  final List<int> metadata, {
   final bool external = false,
-}) extends _Reader<ClassMember> {
+}) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final isConst = parser.current.kind == .keywordConst;
@@ -17,8 +17,8 @@ final class _ConstructorReader(
       _ => ConstructorKeyword.none,
     };
     if (keyword != .none || primaryBody) parser.advance();
-    final names = <Identifier>[];
-    FormalParameterList? parameters;
+    final names = <int>[];
+    int? parameters;
     if (!primaryBody) {
       if (parser.current.kind != .leftParen) {
         names.add(parser.readConstructorName());
@@ -39,21 +39,21 @@ final class _ConstructorReader(
         parser.advance();
         target.add(parser.readConstructorName());
       }
-      TypeArgumentList? types;
+      int? types;
       if (parser.current.kind == .less) {
         final reader = _TypeReader(parser);
         if (!reader.start(arguments: true)) yield _TypeTask(reader);
-        types = reader.result as TypeArgumentList?;
+        types = parser.arena.asTypeArgumentListOrNull(reader.result);
         if (reader.failure case final failure?) {
           parser.error(failure.$1, failure.$2, failure.$3);
         }
       }
-      Identifier? suffix;
+      int? suffix;
       if (parser.current.kind == .dot) {
         parser.advance();
         suffix = parser.readConstructorName();
       }
-      final body = FactoryRedirectBody(
+      final body = parser.arena.putFactoryRedirectBody(
         source: parser.source,
         start: token.start,
         end: parser.expect(.semicolon),
@@ -69,12 +69,15 @@ final class _ConstructorReader(
         );
       }
       if (primaryBody) {
-        result = MissingClassMember(source: parser.source, offset: start);
+        result = parser.arena.putMissingClassMember(
+          source: parser.source,
+          offset: start,
+        );
       } else {
-        result = ConstructorDeclaration(
+        result = parser.arena.putConstructorDeclaration(
           source: parser.source,
           start: start,
-          end: body.end,
+          end: parser.arena.rEnd(body),
           metadata: metadata,
           isExternal: external,
           isConst: isConst,
@@ -95,8 +98,8 @@ final class _ConstructorReader(
         Token(
           .invalid,
           parser.source,
-          initializers.result.first.start,
-          initializers.result.last.end,
+          parser.arena.rStart(initializers.result.first),
+          parser.arena.rEnd(initializers.result.last),
         ),
       );
     }
@@ -104,35 +107,47 @@ final class _ConstructorReader(
     yield body;
     if (keyword == .factoryKeyword &&
         !external &&
-        body.result is EmptyFunctionBody) {
+        parser.arena.isEmptyFunctionBody(body.result)) {
       parser.error(
         'missing_function_body',
         'A factory requires a body or redirection.',
-        Token(.semicolon, parser.source, body.result.start, body.result.end),
+        Token(
+          .semicolon,
+          parser.source,
+          parser.arena.rStart(body.result),
+          parser.arena.rEnd(body.result),
+        ),
       );
     }
-    if (body.result is ModifiedBlockFunctionBody ||
-        body.result is ExpressionFunctionBody &&
-            (body.result as ExpressionFunctionBody).isAsync) {
+    if (parser.arena.isModifiedBlockFunctionBody(body.result) ||
+        parser.arena.isExpressionFunctionBody(body.result) &&
+            parser.arena.rExpressionFunctionBodyIsAsync(
+              (parser.arena.asExpressionFunctionBody(body.result)),
+            )) {
       parser.error(
         'async_constructor',
         'Constructors cannot be asynchronous or generators.',
-        Token(.invalid, parser.source, body.result.start, body.result.end),
+        Token(
+          .invalid,
+          parser.source,
+          parser.arena.rStart(body.result),
+          parser.arena.rEnd(body.result),
+        ),
       );
     }
     result = primaryBody
-        ? PrimaryConstructorBody(
+        ? parser.arena.putPrimaryConstructorBody(
             source: parser.source,
             start: start,
-            end: body.result.end,
+            end: parser.arena.rEnd(body.result),
             metadata: metadata,
             initializers: initializers.result,
             body: body.result,
           )
-        : ConstructorDeclaration(
+        : parser.arena.putConstructorDeclaration(
             source: parser.source,
             start: start,
-            end: body.result.end,
+            end: parser.arena.rEnd(body.result),
             metadata: metadata,
             isExternal: external,
             isConst: isConst,
@@ -146,7 +161,7 @@ final class _ConstructorReader(
 }
 
 final class _InitializersReader(final _Parser parser)
-    extends _Reader<List<ConstructorInitializer>> {
+    extends _Reader<List<int>> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     result = [];
@@ -158,10 +173,10 @@ final class _InitializersReader(final _Parser parser)
         parser.advance();
         final reader = _ArgumentsReader(parser);
         yield reader;
-        final arguments = reader.result.arguments;
+        final arguments = parser.arena.rArgumentListArguments(reader.result);
         if (arguments.isEmpty ||
             arguments.length > 2 ||
-            arguments.any((a) => a.name != null)) {
+            arguments.any((a) => parser.arena.rArgumentName(a) != null)) {
           parser.error(
             'invalid_assert',
             'An assertion requires a condition and an optional message.',
@@ -169,23 +184,25 @@ final class _InitializersReader(final _Parser parser)
           );
         }
         result.add(
-          AssertInitializer(
+          parser.arena.putAssertInitializer(
             source: parser.source,
             start: token.start,
-            end: reader.result.end,
+            end: parser.arena.rEnd(reader.result),
             condition: arguments.isEmpty
-                ? MissingExpression(
+                ? parser.arena.putMissingExpression(
                     source: parser.source,
-                    offset: reader.result.start,
+                    offset: parser.arena.rStart(reader.result),
                   )
-                : arguments.first.value,
-            message: arguments.length < 2 ? null : arguments[1].value,
+                : parser.arena.rArgumentValue(arguments.first),
+            message: arguments.length < 2
+                ? null
+                : parser.arena.rArgumentValue(arguments[1]),
           ),
         );
       } else {
         final hasThis = token.kind == .keywordThis;
         final hasSuper = token.kind == .keywordSuper;
-        Identifier? name;
+        int? name;
         if (hasThis || hasSuper) {
           parser.advance();
           if (parser.current.kind == .dot) {
@@ -200,17 +217,17 @@ final class _InitializersReader(final _Parser parser)
           yield reader;
           result.add(
             hasSuper
-                ? SuperConstructorInitializer(
+                ? parser.arena.putSuperConstructorInitializer(
                     source: parser.source,
                     start: token.start,
-                    end: reader.result.end,
+                    end: parser.arena.rEnd(reader.result),
                     name: name,
                     arguments: reader.result,
                   )
-                : RedirectingConstructorInitializer(
+                : parser.arena.putRedirectingConstructorInitializer(
                     source: parser.source,
                     start: token.start,
-                    end: reader.result.end,
+                    end: parser.arena.rEnd(reader.result),
                     name: name,
                     arguments: reader.result,
                   ),
@@ -223,7 +240,7 @@ final class _InitializersReader(final _Parser parser)
               token,
             );
           }
-          name ??= Identifier(
+          name ??= parser.arena.putIdentifier(
             source: parser.source,
             start: parser.current.start,
             end: parser.current.start,
@@ -232,10 +249,10 @@ final class _InitializersReader(final _Parser parser)
           final reader = _ExpressionReader(parser, boundary: .initializer);
           if (!reader.start()) yield reader;
           result.add(
-            FieldInitializer(
+            parser.arena.putFieldInitializer(
               source: parser.source,
               start: token.start,
-              end: reader.result.end,
+              end: parser.arena.rEnd(reader.result),
               hasThis: hasThis,
               name: name,
               value: reader.result,

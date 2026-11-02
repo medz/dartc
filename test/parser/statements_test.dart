@@ -53,8 +53,8 @@ void main() {
     final loop = parsed('do { work(); } while (check());') as DoStatement;
     expect(loop.body.text, '{ work(); }');
     expect(loop.condition.text, 'check()');
-    expect(loop.childAt(0), same(loop.body));
-    expect(loop.childAt(1), same(loop.condition));
+    expect(loop.childAt(0), equals(loop.body));
+    expect(loop.childAt(1), equals(loop.condition));
     expect(loop.text.endsWith(';'), isTrue);
   });
 

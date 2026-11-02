@@ -1,13 +1,12 @@
 part of 'parser.dart';
 
-final class _StringReader(final _Parser parser)
-    extends _Reader<StringExpression> {
+final class _StringReader(final _Parser parser) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final token = parser.current;
     if (token.kind != .stringLiteral && token.kind != .stringStart) {
       parser.error('expected_string', 'Expected a string literal.', token);
-      result = MissingStringExpression(
+      result = parser.arena.putMissingStringExpression(
         source: parser.source,
         offset: token.start,
       );
@@ -16,8 +15,10 @@ final class _StringReader(final _Parser parser)
     parser.beginExpression();
     parser.parseStrings();
     yield* parser.readExpressionSyntax(boundary: .header);
-    result = parser.finishExpression(0, 0) as StringExpression;
-    if (walk(result).any((node) => node is StringInterpolation)) {
+    result = parser.arena.asStringExpression(parser.finishExpression(0, 0));
+    if (parser.arena
+        .walkIds(result)
+        .any((node) => parser.arena.isStringInterpolation(node))) {
       parser.error(
         'interpolated_uri',
         'A directive string cannot contain interpolation.',
@@ -30,8 +31,8 @@ final class _StringReader(final _Parser parser)
 final class _DirectiveReader(
   final _Parser parser,
   final int start,
-  final List<Annotation> metadata,
-) extends _Reader<Directive> {
+  final List<int> metadata,
+) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final kind = parser.current.kind;
@@ -40,7 +41,7 @@ final class _DirectiveReader(
       final name = parser.current.kind == .semicolon
           ? null
           : parser.readDottedName();
-      result = LibraryDirective(
+      result = parser.arena.putLibraryDirective(
         source: parser.source,
         start: start,
         end: parser.expect(.semicolon),
@@ -51,7 +52,7 @@ final class _DirectiveReader(
     }
     if (kind == .keywordPart && parser.current.kind == .keywordOf) {
       parser.advance();
-      final PartOfTarget target;
+      final int target;
       if (parser.current.kind == .stringLiteral ||
           parser.current.kind == .stringStart) {
         final reader = _StringReader(parser);
@@ -60,7 +61,7 @@ final class _DirectiveReader(
       } else {
         target = parser.readDottedName();
       }
-      result = PartOfDirective(
+      result = parser.arena.putPartOfDirective(
         source: parser.source,
         start: start,
         end: parser.expect(.semicolon),
@@ -73,7 +74,7 @@ final class _DirectiveReader(
     yield uriReader;
     final uri = uriReader.result;
     if (kind == .keywordPart) {
-      result = PartDirective(
+      result = parser.arena.putPartDirective(
         source: parser.source,
         start: start,
         end: parser.expect(.semicolon),
@@ -82,13 +83,13 @@ final class _DirectiveReader(
       );
       return;
     }
-    final configurations = <ConditionalUri>[];
+    final configurations = <int>[];
     while (parser.current.kind == .keywordIf) {
       final opening = parser.current;
       parser.advance();
       parser.expect(.leftParen);
       final name = parser.readDottedName();
-      StringExpression? value;
+      int? value;
       if (parser.current.kind == .equal) {
         parser.advance();
         final reader = _StringReader(parser);
@@ -99,10 +100,10 @@ final class _DirectiveReader(
       final reader = _StringReader(parser);
       yield reader;
       configurations.add(
-        ConditionalUri(
+        parser.arena.putConditionalUri(
           source: parser.source,
           start: opening.start,
-          end: reader.result.end,
+          end: parser.arena.rEnd(reader.result),
           name: name,
           value: value,
           uri: reader.result,
@@ -110,7 +111,7 @@ final class _DirectiveReader(
       );
     }
     var deferred = false;
-    Identifier? prefix;
+    int? prefix;
     if (kind == .keywordImport) {
       if (parser.current.kind == .keywordDeferred) {
         deferred = true;
@@ -122,7 +123,7 @@ final class _DirectiveReader(
         prefix = parser.readVariableName();
       }
     }
-    final combinators = <NamespaceCombinator>[];
+    final combinators = <int>[];
     while (parser.current.kind == .keywordShow ||
         parser.current.kind == .keywordHide) {
       final opening = parser.current;
@@ -133,10 +134,10 @@ final class _DirectiveReader(
         names.add(parser.readVariableName());
       }
       combinators.add(
-        NamespaceCombinator(
+        parser.arena.putNamespaceCombinator(
           source: parser.source,
           start: opening.start,
-          end: names.last.end,
+          end: parser.arena.rEnd(names.last),
           kind: opening.kind == .keywordShow ? .show : .hide,
           names: names,
         ),
@@ -144,7 +145,7 @@ final class _DirectiveReader(
     }
     final end = parser.expect(.semicolon);
     result = kind == .keywordImport
-        ? ImportDirective(
+        ? parser.arena.putImportDirective(
             source: parser.source,
             start: start,
             end: end,
@@ -155,7 +156,7 @@ final class _DirectiveReader(
             prefix: prefix,
             combinators: combinators,
           )
-        : ExportDirective(
+        : parser.arena.putExportDirective(
             source: parser.source,
             start: start,
             end: end,
@@ -168,17 +169,17 @@ final class _DirectiveReader(
 }
 
 extension on _Parser {
-  DottedName readDottedName() {
+  int readDottedName() {
     final first = readVariableName();
     final components = [first];
     while (current.kind == .dot) {
       advance();
       components.add(readVariableName());
     }
-    return DottedName(
+    return arena.putDottedName(
       source: source,
-      start: first.start,
-      end: components.last.end,
+      start: arena.rStart(first),
+      end: arena.rEnd(components.last),
       components: components,
     );
   }

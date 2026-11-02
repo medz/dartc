@@ -25,41 +25,38 @@ ParseResult<Statement> parseStatement(
 sealed class _StatementFrame(final Token opening);
 
 final class _Block(super.opening) extends _StatementFrame {
-  final List<Statement> statements = [];
+  final List<int> statements = [];
 }
 
 final class _IfStatement(
   super.opening,
-  final Expression condition,
-  final CasePattern? casePattern,
+  final int condition,
+  final int? casePattern,
 ) extends _StatementFrame {
-  Statement? thenStatement;
+  int? thenStatement;
 }
 
-final class _WhileStatement(super.opening, final Expression condition)
+final class _WhileStatement(super.opening, final int condition)
     extends _StatementFrame;
 
 final class _DoStatement(super.opening) extends _StatementFrame;
 
-final class _ForStatement(
-  super.opening,
-  final ForLoopParts parts,
-  final bool isAwait,
-) extends _StatementFrame;
+final class _ForStatement(super.opening, final int parts, final bool isAwait)
+    extends _StatementFrame;
 
-final class _Labels(super.opening, final List<Label> labels)
+final class _Labels(super.opening, final List<int> labels)
     extends _StatementFrame;
 
 final class _CatchHeader(
   final Token opening,
-  final TypeAnnotation? type,
-  final Identifier? exception,
-  final Identifier? stackTrace,
+  final int? type,
+  final int? exception,
+  final int? stackTrace,
 );
 
 final class _TryStatement(super.opening) extends _StatementFrame {
-  BlockStatement? body;
-  final List<CatchClause> clauses = [];
+  int? body;
+  final List<int> clauses = [];
   _CatchHeader? handler;
   bool isFinally = false;
 }
@@ -67,9 +64,9 @@ final class _TryStatement(super.opening) extends _StatementFrame {
 final class _StatementReader(
   final _Parser parser, {
   final bool requireBlock = false,
-}) extends _Reader<Statement> {
+}) extends _Reader<int> {
   final List<_StatementFrame> frames = [];
-  Statement? value;
+  int? value;
 
   SourceFile get source => parser.source;
   Token get current => parser.current;
@@ -88,7 +85,7 @@ final class _StatementReader(
                 token.kind == .keywordFinally)) {
           final end = parser.expect(.rightBrace);
           frames.removeLast();
-          value = BlockStatement(
+          value = parser.arena.putBlockStatement(
             source: source,
             start: frame.opening.start,
             end: end,
@@ -98,7 +95,7 @@ final class _StatementReader(
         }
         if (frame is _TryStatement && token.kind != .leftBrace) {
           parser.error('expected_block', 'Expected a block.', token);
-          value = BlockStatement(
+          value = parser.arena.putBlockStatement(
             source: source,
             start: token.start,
             end: token.start,
@@ -110,20 +107,28 @@ final class _StatementReader(
             token.kind == .rightBrace ||
             token.kind == .keywordElse && frame is _IfStatement) {
           parser.error('expected_statement', 'Expected a statement.', token);
-          value = MissingStatement(source: source, offset: token.start);
+          value = parser.arena.putMissingStatement(
+            source: source,
+            offset: token.start,
+          );
           continue;
         }
         if (token.kind.isIdentifier &&
             token.kind != .keywordAwait &&
             parser.tokens[parser.cursor + 1].kind == .colon) {
-          final labels = <Label>[];
+          final labels = <int>[];
           do {
             final name = parser.identifier(current);
             parser.advance();
             final end = current.end;
             parser.advance();
             labels.add(
-              Label(source: source, start: name.start, end: end, name: name),
+              parser.arena.putLabel(
+                source: source,
+                start: parser.arena.rStart(name),
+                end: end,
+                name: name,
+              ),
             );
           } while (current.kind.isIdentifier &&
               parser.tokens[parser.cursor + 1].kind == .colon);
@@ -142,7 +147,7 @@ final class _StatementReader(
             continue;
           case .semicolon:
             parser.advance();
-            value = EmptyStatement(
+            value = parser.arena.putEmptyStatement(
               source: source,
               start: token.start,
               end: token.end,
@@ -187,7 +192,7 @@ final class _StatementReader(
             final reader = _ForHeaderReader(parser);
             yield reader;
             final parts = reader.result;
-            if (isAwait && parts is! ForInParts) {
+            if (isAwait && !parser.arena.isForInParts(parts)) {
               parser.error(
                 'invalid_await_for',
                 'An await-for requires a for-in header.',
@@ -205,7 +210,7 @@ final class _StatementReader(
             continue;
           case .keywordReturn:
             parser.advance();
-            Expression? expression;
+            int? expression;
             if (current.kind != .semicolon &&
                 current.kind != .rightBrace &&
                 current.kind != .eof) {
@@ -221,7 +226,7 @@ final class _StatementReader(
                 token,
               );
             }
-            value = ReturnStatement(
+            value = parser.arena.putReturnStatement(
               source: source,
               start: token.start,
               end: end,
@@ -230,7 +235,7 @@ final class _StatementReader(
             continue;
           case .keywordBreak || .keywordContinue:
             parser.advance();
-            Identifier? label;
+            int? label;
             if (current.kind.isIdentifier) {
               label = parser.identifier(current);
               parser.advance();
@@ -258,13 +263,13 @@ final class _StatementReader(
               }
             }
             value = token.kind == .keywordBreak
-                ? BreakStatement(
+                ? parser.arena.putBreakStatement(
                     source: source,
                     start: token.start,
                     end: end,
                     label: label,
                   )
-                : ContinueStatement(
+                : parser.arena.putContinueStatement(
                     source: source,
                     start: token.start,
                     end: end,
@@ -273,7 +278,7 @@ final class _StatementReader(
             continue;
           case .keywordRethrow:
             parser.advance();
-            value = RethrowStatement(
+            value = parser.arena.putRethrowStatement(
               source: source,
               start: token.start,
               end: parser.expect(.semicolon),
@@ -296,7 +301,7 @@ final class _StatementReader(
                 token,
               );
             }
-            value = YieldStatement(
+            value = parser.arena.putYieldStatement(
               source: source,
               start: token.start,
               end: parser.expect(.semicolon),
@@ -326,7 +331,7 @@ final class _StatementReader(
                 metadata: metadata.result,
               );
               yield reader;
-              value = PatternVariableDeclarationStatement(
+              value = parser.arena.putPatternVariableDeclarationStatement(
                 source: source,
                 start: token.start,
                 end: parser.expect(.semicolon),
@@ -343,7 +348,10 @@ final class _StatementReader(
                   'Expected a declaration after metadata.',
                   current,
                 );
-                value = MissingStatement(source: source, offset: current.start);
+                value = parser.arena.putMissingStatement(
+                  source: source,
+                  offset: current.start,
+                );
               }
             }
             continue;
@@ -351,7 +359,7 @@ final class _StatementReader(
             if (parser.isPatternDeclaration) {
               final reader = _PatternDeclarationReader(parser);
               yield reader;
-              value = PatternVariableDeclarationStatement(
+              value = parser.arena.putPatternVariableDeclarationStatement(
                 source: source,
                 start: token.start,
                 end: parser.expect(.semicolon),
@@ -390,9 +398,9 @@ final class _StatementReader(
             if (parser.cursor == start && current.kind != .eof) {
               parser.unexpected();
             }
-            value = ExpressionStatement(
+            value = parser.arena.putExpressionStatement(
               source: source,
-              start: expression.start,
+              start: parser.arena.rStart(expression),
               end: end,
               expression: expression,
             );
@@ -419,19 +427,19 @@ final class _StatementReader(
                 value = null;
                 continue;
               }
-              statement = IfStatement(
+              statement = parser.arena.putIfStatement(
                 source: source,
                 start: frame.opening.start,
-                end: statement.end,
+                end: parser.arena.rEnd(statement),
                 condition: frame.condition,
                 casePattern: frame.casePattern,
                 thenStatement: statement,
               );
             } else {
-              statement = IfStatement(
+              statement = parser.arena.putIfStatement(
                 source: source,
                 start: frame.opening.start,
-                end: statement.end,
+                end: parser.arena.rEnd(statement),
                 condition: frame.condition,
                 casePattern: frame.casePattern,
                 thenStatement: frame.thenStatement!,
@@ -440,10 +448,10 @@ final class _StatementReader(
             }
           case _WhileStatement():
             parser.loopDepth--;
-            statement = WhileStatement(
+            statement = parser.arena.putWhileStatement(
               source: source,
               start: frame.opening.start,
-              end: statement.end,
+              end: parser.arena.rEnd(statement),
               condition: frame.condition,
               body: statement,
             );
@@ -453,7 +461,7 @@ final class _StatementReader(
             final reader = _ConditionReader(parser);
             yield reader;
             final test = reader.result;
-            statement = DoStatement(
+            statement = parser.arena.putDoStatement(
               source: source,
               start: frame.opening.start,
               end: parser.expect(.semicolon),
@@ -462,29 +470,29 @@ final class _StatementReader(
             );
           case _ForStatement():
             parser.loopDepth--;
-            statement = ForStatement(
+            statement = parser.arena.putForStatement(
               source: source,
               start: frame.opening.start,
-              end: statement.end,
+              end: parser.arena.rEnd(statement),
               isAwait: frame.isAwait,
               parts: frame.parts,
               body: statement,
             );
           case _Labels():
-            statement = LabeledStatement(
+            statement = parser.arena.putLabeledStatement(
               source: source,
               start: frame.opening.start,
-              end: statement.end,
+              end: parser.arena.rEnd(statement),
               labels: frame.labels,
               statement: statement,
             );
           case _TryStatement():
-            final block = statement as BlockStatement;
+            final block = parser.arena.asBlockStatement(statement);
             if (frame.isFinally) {
-              statement = TryStatement(
+              statement = parser.arena.putTryStatement(
                 source: source,
                 start: frame.opening.start,
-                end: block.end,
+                end: parser.arena.rEnd(block),
                 body: frame.body!,
                 catchClauses: frame.clauses,
                 finallyBlock: block,
@@ -492,10 +500,10 @@ final class _StatementReader(
             } else {
               if (frame.handler case final handler?) {
                 frame.clauses.add(
-                  CatchClause(
+                  parser.arena.putCatchClause(
                     source: source,
                     start: handler.opening.start,
-                    end: block.end,
+                    end: parser.arena.rEnd(block),
                     exceptionType: handler.type,
                     exceptionParameter: handler.exception,
                     stackTraceParameter: handler.stackTrace,
@@ -524,10 +532,10 @@ final class _StatementReader(
                   current,
                 );
               }
-              statement = TryStatement(
+              statement = parser.arena.putTryStatement(
                 source: source,
                 start: frame.opening.start,
-                end: block.end,
+                end: parser.arena.rEnd(block),
                 body: frame.body!,
                 catchClauses: frame.clauses,
               );
@@ -546,7 +554,7 @@ final class _StatementReader(
     final reader = _ExpressionReader(parser);
     if (!reader.start()) yield reader;
     final expression = reader.result;
-    Expression? message;
+    int? message;
     if (current.kind == .comma) {
       parser.advance();
       if (current.kind != .rightParen) {
@@ -557,7 +565,7 @@ final class _StatementReader(
       }
     }
     parser.expect(.rightParen);
-    value = AssertStatement(
+    value = parser.arena.putAssertStatement(
       source: source,
       start: keyword.start,
       end: parser.expect(.semicolon),
@@ -569,14 +577,14 @@ final class _StatementReader(
 
   Iterable<_Reader<Object?>> variables(
     _VariableDeclarations declarations, {
-    List<Annotation> metadata = const [],
+    List<int> metadata = const [],
   }) sync* {
     final reader = _VariablesReader(parser, declarations, metadata: metadata);
     yield reader;
     final variables = reader.result;
-    value = VariableDeclarationStatement(
+    value = parser.arena.putVariableDeclarationStatement(
       source: source,
-      start: variables.start,
+      start: parser.arena.rStart(variables),
       end: parser.expect(.semicolon),
       variables: variables,
     );
@@ -584,17 +592,17 @@ final class _StatementReader(
 
   Iterable<_Reader<Object?>> catchHeader(_TryStatement frame) sync* {
     final keyword = current;
-    TypeAnnotation? type;
-    Identifier? exception;
-    Identifier? stackTrace;
+    int? type;
+    int? exception;
+    int? stackTrace;
     if (current.kind == .keywordOn) {
       parser.advance();
       final start = current.start;
       final reader = _TypeReader(parser);
       if (!reader.start()) yield _TypeTask(reader);
       type =
-          reader.result as TypeAnnotation? ??
-          MissingTypeAnnotation(source: source, offset: start);
+          parser.arena.asTypeAnnotationOrNull(reader.result) ??
+          parser.arena.putMissingTypeAnnotation(source: source, offset: start);
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
       }

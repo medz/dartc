@@ -1,14 +1,14 @@
 part of 'parser.dart';
 
 final class _ClosureReader(final _Parser parser, final int start)
-    extends _Reader<FunctionExpression> {
+    extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
-    TypeParameterList? typeParameters;
+    int? typeParameters;
     if (parser.current.kind == .less) {
       final reader = _TypeReader(parser);
       if (!reader.start(parameters: true)) yield _TypeTask(reader);
-      typeParameters = reader.result as TypeParameterList?;
+      typeParameters = parser.arena.asTypeParameterListOrNull(reader.result);
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
       }
@@ -17,10 +17,10 @@ final class _ClosureReader(final _Parser parser, final int start)
     yield parameters;
     final body = _BodyReader(parser, declaration: false);
     yield body;
-    result = FunctionExpression(
+    result = parser.arena.putFunctionExpression(
       source: parser.source,
       start: start,
-      end: body.result.end,
+      end: parser.arena.rEnd(body.result),
       typeParameters: typeParameters,
       parameters: parameters.result,
       body: body.result,
@@ -32,11 +32,11 @@ final class _LocalFunctionReader(
   final _Parser parent,
   final _Parser parser,
   final int start,
-) extends _Reader<LocalFunctionDeclaration?> {
-  List<Annotation> metadata = const [];
-  TypeAnnotation? returnType;
-  Identifier? name;
-  TypeParameterList? typeParameters;
+) extends _Reader<int?> {
+  List<int> metadata = const [];
+  int? returnType;
+  int? name;
+  int? typeParameters;
 
   bool hasHead = false;
 
@@ -56,11 +56,11 @@ final class _LocalFunctionReader(
         if (!parser.functionBodyFollows(opening)) return;
       }
     }
-    TypeAnnotation? parsed;
+    int? parsed;
     if (!untyped && parser.canStartTypeBeforeName) {
       final reader = _TypeReader(parser, beforeFunction: true);
       if (!reader.start()) yield _TypeTask(reader);
-      parsed = reader.result as TypeAnnotation?;
+      parsed = parser.arena.asTypeAnnotationOrNull(reader.result);
     }
     if (parsed != null && parser.current.kind.isIdentifier) {
       returnType = parsed;
@@ -74,7 +74,7 @@ final class _LocalFunctionReader(
     if (parser.current.kind == .less) {
       final reader = _TypeReader(parser);
       if (!reader.start(parameters: true)) yield _TypeTask(reader);
-      typeParameters = reader.result as TypeParameterList?;
+      typeParameters = parser.arena.asTypeParameterListOrNull(reader.result);
       if (typeParameters == null) return;
     }
     hasHead = parser.functionBodyFollows(parser.cursor);
@@ -100,10 +100,10 @@ final class _LocalFunctionReader(
     yield parameters;
     final body = _BodyReader(parser);
     yield body;
-    result = LocalFunctionDeclaration(
+    result = parser.arena.putLocalFunctionDeclaration(
       source: parser.source,
       start: start,
-      end: body.result.end,
+      end: parser.arena.rEnd(body.result),
       metadata: metadata,
       returnType: returnType,
       name: name!,

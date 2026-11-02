@@ -1,29 +1,35 @@
-import 'package:dartc/ast.dart';
 import 'package:dartc/scanner.dart';
 
-final class StringSequence {
-  final List<StringExpression> _strings = [];
-  final List<StringPart> _parts = [];
+import '../ast/nodes.dart' show AstArena;
+import '../ast/row_fields.dart';
+
+final class StringSequence(final AstArena arena) {
+  final List<int> _strings = [];
+  final List<int> _parts = [];
   Token? _opening;
 
-  void addLiteral(StringLiteralExpression literal) => _strings.add(literal);
+  void addLiteral(int literal) => _strings.add(literal);
 
   void addText(Token token) {
     if (token.kind == .stringStart) _opening = token;
     _parts.add(
-      StringText(source: token.source, start: token.start, end: token.end),
+      arena.putStringText(
+        source: token.source,
+        start: token.start,
+        end: token.end,
+      ),
     );
     if (token.kind == .stringEnd) _finishString(token.end);
   }
 
   void addInterpolation(
     Token marker,
-    Expression expression,
+    int expression,
     int end, {
     required bool isBraced,
   }) {
     _parts.add(
-      StringInterpolation(
+      arena.putStringInterpolation(
         source: marker.source,
         start: marker.start,
         end: end,
@@ -36,7 +42,7 @@ final class StringSequence {
   void _finishString(int end) {
     final opening = _opening!;
     _strings.add(
-      InterpolatedStringExpression(
+      arena.putInterpolatedStringExpression(
         source: opening.source,
         start: opening.start,
         end: end,
@@ -47,14 +53,14 @@ final class StringSequence {
     _opening = null;
   }
 
-  StringExpression finish(int end) {
+  int finish(int end) {
     // Recovery can reach EOF before the scanner emits a closing text segment.
     if (_opening != null) _finishString(end);
     if (_strings.length == 1) return _strings.single;
-    return AdjacentStringsExpression(
-      source: _strings.first.source,
-      start: _strings.first.start,
-      end: _strings.last.end,
+    return arena.putAdjacentStringsExpression(
+      source: arena.rSource(_strings.first),
+      start: arena.rStart(_strings.first),
+      end: arena.rEnd(_strings.last),
       strings: _strings,
     );
   }

@@ -3,10 +3,10 @@ part of 'parser.dart';
 final class _Cascade(
   super.valueBase,
   super.operatorBase,
-  final Expression target,
+  final int target,
   final bool isNullAware,
 ) extends _Frame {
-  final List<Expression> sections = [];
+  final List<int> sections = [];
   bool assigned = false;
 }
 
@@ -22,7 +22,7 @@ final class _CascadeIndex(
 
 final class _Shorthand(super.valueBase, super.operatorBase, final bool isConst)
     extends _Frame {
-  NullAssertionExpression? pendingBang;
+  int? pendingBang;
 }
 
 final class _ConstShorthand(
@@ -30,8 +30,8 @@ final class _ConstShorthand(
   super.valueBase,
   super.operatorBase,
   final Token keyword,
-  final Identifier member,
-  final TypeArgumentList? typeArguments,
+  final int member,
+  final int? typeArguments,
 ) extends _Arguments;
 
 extension on _Parser {
@@ -78,11 +78,14 @@ extension on _Parser {
     if (token.kind == .emptyBrackets || token.kind == .emptyBracketsAssign) {
       error('expected_expression', 'Expected an index expression.', token);
       values.add(
-        CascadeIndexExpression(
+        arena.putCascadeIndexExpression(
           source: source,
           start: marker.start,
           end: token.start + 2,
-          index: MissingExpression(source: source, offset: token.start + 1),
+          index: arena.putMissingExpression(
+            source: source,
+            offset: token.start + 1,
+          ),
         ),
       );
       consumeEmptyBrackets();
@@ -94,13 +97,13 @@ extension on _Parser {
         error('expected_identifier', 'Expected a cascade member name.', token);
       }
       values.add(
-        CascadePropertyExpression(
+        arena.putCascadePropertyExpression(
           source: source,
           start: marker.start,
           end: valid ? token.end : token.start,
           property: valid
               ? identifier(token)
-              : Identifier(
+              : arena.putIdentifier(
                   source: source,
                   start: token.start,
                   end: token.start,
@@ -146,10 +149,10 @@ extension on _Parser {
     frame.sections.add(finishExpression(frame.valueBase, frame.operatorBase));
     frames.removeLast();
     values.add(
-      CascadeExpression(
+      arena.putCascadeExpression(
         source: source,
-        start: frame.target.start,
-        end: frame.sections.last.end,
+        start: arena.rStart(frame.target),
+        end: arena.rEnd(frame.sections.last),
         target: frame.target,
         isNullAware: frame.isNullAware,
         sections: frame.sections,
@@ -167,7 +170,11 @@ extension on _Parser {
     final valid = token.kind.isIdentifier || token.kind == .keywordNew;
     final name = valid
         ? identifier(token)
-        : Identifier(source: source, start: token.start, end: token.start);
+        : arena.putIdentifier(
+            source: source,
+            start: token.start,
+            end: token.start,
+          );
     if (valid) {
       advance();
     } else {
@@ -176,23 +183,23 @@ extension on _Parser {
     frames.add(_Shorthand(values.length, operators.length, keyword != null));
     if (keyword == null) {
       values.add(
-        DotShorthandReferenceExpression(
+        arena.putDotShorthandReferenceExpression(
           source: source,
           start: dot.start,
-          end: name.end,
+          end: arena.rEnd(name),
           name: name,
         ),
       );
       expectsOperand = false;
       return;
     }
-    TypeArgumentList? types;
+    int? types;
     if (current.kind == .less) {
       final start = cursor;
       final remainder = current;
       final reader = _TypeReader(this);
       if (!reader.start(arguments: true)) yield _TypeTask(reader);
-      types = reader.result as TypeArgumentList?;
+      types = arena.asTypeArgumentListOrNull(reader.result);
       if (types == null || !current.kind.followsTypeArguments) {
         cursor = start;
         current = remainder;
@@ -214,10 +221,10 @@ extension on _Parser {
       expectsOperand = true;
     } else {
       values.add(
-        ConstDotShorthandExpression(
+        arena.putConstDotShorthandExpression(
           source: source,
           start: keyword.start,
-          end: types?.end ?? name.end,
+          end: arena.rEndOrNull(types) ?? arena.rEnd(name),
           name: name,
           typeArguments: types,
         ),
@@ -253,21 +260,22 @@ extension on _Parser {
   void closeShorthand(_Shorthand frame) {
     final value = finishExpression(frame.valueBase, frame.operatorBase);
     final bang = frame.isConst ? frame.pendingBang : null;
-    final expression = bang?.operand ?? value;
-    final shorthand = DotShorthandExpression(
+    final expression =
+        arena.rNullAssertionExpressionOperandOrNull(bang) ?? value;
+    final shorthand = arena.putDotShorthandExpression(
       source: source,
-      start: expression.start,
-      end: expression.end,
+      start: arena.rStart(expression),
+      end: arena.rEnd(expression),
       expression: expression,
     );
     frames.removeLast();
     values.add(
       bang == null
           ? shorthand
-          : NullAssertionExpression(
+          : arena.putNullAssertionExpression(
               source: source,
-              start: shorthand.start,
-              end: bang.end,
+              start: arena.rStart(shorthand),
+              end: arena.rEnd(bang),
               operand: shorthand,
             ),
     );

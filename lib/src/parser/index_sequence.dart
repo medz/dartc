@@ -46,7 +46,7 @@ final class _IndexSequence implements _QuestionResolution {
 
 final class _ElseArm(
   final int colon,
-  final Expression value,
+  final int value,
   final List<Diagnostic> diagnostics,
   final int cursor,
   final Token current,
@@ -66,41 +66,41 @@ extension on _Parser {
       return null;
     }
     if (operators.isEmpty && values.length == 1) {
-      return _selectorLink(values.single, list);
+      return _selectorLink(arena, values.single, list);
     }
     if (operators.any((op) => !op.kind.independentInfix)) return null;
-    return _selectorLink(values.first, list) != null && values.length > 1
+    return _selectorLink(arena, values.first, list) != null && values.length > 1
         ? false
         : null;
   }
 }
 
 // A property or postfix assertion starts a fresh receiver for the next '?['.
-bool? _selectorLink(Expression? expression, CollectionExpression list) {
+bool? _selectorLink(AstArena arena, int? expression, int list) {
   var inherits = true;
   while (expression != null) {
-    switch (expression) {
-      case BinaryExpression(:final left):
+    switch ((arena.maybe(expression) as Expression)) {
+      case BinaryExpression(refLeft: final left):
         inherits = false;
         expression = left;
-      case CastExpression(expression: final operand) ||
-          TypeTestExpression(expression: final operand):
+      case CastExpression(refExpression: final operand) ||
+          TypeTestExpression(refExpression: final operand):
         inherits = false;
         expression = operand;
-      case PropertyAccessExpression(:final target):
+      case PropertyAccessExpression(refTarget: final target):
         inherits = false;
         expression = target;
-      case NullAssertionExpression(:final operand):
+      case NullAssertionExpression(refOperand: final operand):
         inherits = false;
         expression = operand;
-      case InvocationExpression(:final callee):
+      case InvocationExpression(refCallee: final callee):
         expression = callee;
-      case IndexExpression(:final target, isNullAware: false):
+      case IndexExpression(refTarget: final target, isNullAware: false):
         expression = target;
-      case TypeInstantiationExpression(expression: final next):
+      case TypeInstantiationExpression(refExpression: final next):
         expression = next;
       default:
-        return identical(expression, list) ? inherits : null;
+        return expression == list ? inherits : null;
     }
   }
   return null;

@@ -6,6 +6,8 @@ import 'package:dartc/diagnostics.dart';
 import 'package:dartc/scanner.dart';
 import 'package:dartc/source.dart';
 
+import '../ast/nodes.dart' show AstArena;
+import '../ast/row_fields.dart';
 import 'string_sequence.dart';
 import 'delimiter_index.dart';
 import 'language_version.dart';
@@ -46,13 +48,17 @@ part 'switches.dart';
 /// A node is returned even when recovery was necessary. Check [hasErrors]
 /// before using the result as valid syntax.
 final class ParseResult<T extends AstNode> {
-  ParseResult._(this.node, List<Diagnostic> diagnostics)
-    : diagnostics = diagnostics.isEmpty
+  ParseResult._(AstArena arena, int root, List<Diagnostic> diagnostics)
+    : tree = arena.finish(root),
+      diagnostics = diagnostics.isEmpty
           ? const []
           : UnmodifiableListView(diagnostics);
 
-  /// The parsed node, possibly containing recovery placeholders.
-  final T node;
+  /// The indexed syntax tree, including any recovery placeholders.
+  final SyntaxTree tree;
+
+  /// A typed view of the root. Views of the same row compare equal.
+  T get node => tree.view(tree.root) as T;
 
   /// Lexical diagnostics followed by syntax diagnostics in discovery order.
   final List<Diagnostic> diagnostics;
@@ -95,7 +101,8 @@ enum _ExpressionStop { complete, conditional, syntax }
 
 final class _Parser {
   _Parser(ScanResult input, {this.languageVersion = LanguageVersion.current})
-    : source = input.source,
+    : arena = AstArena(input.source, input.tokens.length),
+      source = input.source,
       tokens = input.tokens,
       lookahead = DelimiterIndex(input.tokens),
       current = input.tokens.first,
@@ -103,7 +110,8 @@ final class _Parser {
       diagnostics = [...input.diagnostics];
 
   _Parser.trial(_Parser parent, int question)
-    : languageVersion = parent.languageVersion,
+    : arena = parent.arena,
+      languageVersion = parent.languageVersion,
       source = parent.source,
       tokens = parent.tokens,
       cursor = question + 1,
@@ -114,7 +122,8 @@ final class _Parser {
       lookahead = parent.lookahead;
 
   _Parser.nested(_Parser parent)
-    : languageVersion = parent.languageVersion,
+    : arena = parent.arena,
+      languageVersion = parent.languageVersion,
       source = parent.source,
       tokens = parent.tokens,
       cursor = parent.cursor,
@@ -125,10 +134,11 @@ final class _Parser {
       lookahead = parent.lookahead;
 
   final LanguageVersion languageVersion;
+  final AstArena arena;
   final SourceFile source;
   final List<Token> tokens;
   final List<Diagnostic> diagnostics;
-  final List<Expression> values = [];
+  final List<int> values = [];
   final List<Token> operators = [];
   // Operator indices used as prefixes, including the ambiguous '-' token.
   final List<int> prefixes = [];
@@ -138,7 +148,7 @@ final class _Parser {
   final int? trialStart;
   (int, _ConditionalBranches)? pendingBranches;
   List<_IndexSequence>? indexSequences;
-  CollectionExpression? leadingList;
+  int? leadingList;
   int cursor = 0;
   // Either tokens[cursor] or its unconsumed suffix after a closing type angle.
   Token current;
@@ -147,10 +157,10 @@ final class _Parser {
   bool hasSyntaxError = false;
   // The last call/index chain and whether its ?[ selectors are already fixed
   // as indexes. Other primaries and selectors start a new chain.
-  Expression? selectorTarget;
+  int? selectorTarget;
   bool checkedNullAware = false;
   // A terminal postfix assertion cannot be followed by a tighter selector.
-  Expression? postfixTarget;
+  int? postfixTarget;
   _NullableForInitializer? nullableForInitializer;
   FunctionBodyModifier? functionModifier;
   int loopDepth = 0;
@@ -329,7 +339,7 @@ final class _Parser {
     }
     if (token.kind.isIdentifier) {
       values.add(
-        IdentifierExpression(
+        arena.putIdentifierExpression(
           source: source,
           start: token.start,
           end: token.end,
@@ -410,7 +420,7 @@ final class _Parser {
             .keywordFalse ||
             .keywordNull:
           values.add(
-            LiteralExpression(
+            arena.putLiteralExpression(
               source: source,
               start: token.start,
               end: token.end,
@@ -424,11 +434,19 @@ final class _Parser {
           );
         case .keywordThis:
           values.add(
-            ThisExpression(source: source, start: token.start, end: token.end),
+            arena.putThisExpression(
+              source: source,
+              start: token.start,
+              end: token.end,
+            ),
           );
         case .keywordSuper:
           values.add(
-            SuperExpression(source: source, start: token.start, end: token.end),
+            arena.putSuperExpression(
+              source: source,
+              start: token.start,
+              end: token.end,
+            ),
           );
         case .stringLiteral || .stringStart:
           parseStrings();
@@ -446,8 +464,11 @@ final class _Parser {
   }
 
   void parseStrings([StringSequence? sequence]) {
-    StringLiteralExpression literal(Token t) =>
-        StringLiteralExpression(source: source, start: t.start, end: t.end);
+    int literal(Token t) => arena.putStringLiteralExpression(
+      source: source,
+      start: t.start,
+      end: t.end,
+    );
     if (sequence == null && current.kind == .stringLiteral) {
       final first = literal(current);
       advance();
@@ -456,9 +477,9 @@ final class _Parser {
         expectsOperand = false;
         return;
       }
-      sequence = StringSequence()..addLiteral(first);
+      sequence = StringSequence(arena)..addLiteral(first);
     }
-    final strings = sequence ?? StringSequence();
+    final strings = sequence ?? StringSequence(arena);
     while (true) {
       final token = current;
       switch (token.kind) {
@@ -471,15 +492,15 @@ final class _Parser {
         case .interpolationIdentifier:
           advance();
           final name = current;
-          final Expression expression;
+          final int expression;
           if (name.kind == .keywordThis) {
-            expression = ThisExpression(
+            expression = arena.putThisExpression(
               source: source,
               start: name.start,
               end: name.end,
             );
           } else if (name.kind.isIdentifier) {
-            expression = IdentifierExpression(
+            expression = arena.putIdentifierExpression(
               source: source,
               start: name.start,
               end: name.end,
@@ -491,7 +512,10 @@ final class _Parser {
               'Expected an identifier or this.',
               name,
             );
-            expression = MissingExpression(source: source, offset: name.start);
+            expression = arena.putMissingExpression(
+              source: source,
+              offset: name.start,
+            );
           }
           strings.addInterpolation(
             token,
@@ -545,7 +569,7 @@ final class _Parser {
       }
     }
     values.add(
-      LiteralExpression(
+      arena.putLiteralExpression(
         source: source,
         start: hash.start,
         end: end,
@@ -557,7 +581,7 @@ final class _Parser {
 
   bool parseContinuation({bool skipTypeArguments = false}) {
     final token = current;
-    if (values.last is CascadeExpression &&
+    if (arena.isCascadeExpression(values.last) &&
         token.kind != .cascade &&
         token.kind != .nullAwareCascade) {
       error(
@@ -596,7 +620,7 @@ final class _Parser {
           advance();
         }
         final target = values.removeLast();
-        if (target is SuperExpression && token.kind == .nullAwareAccess) {
+        if (arena.isSuperExpression(target) && token.kind == .nullAwareAccess) {
           error(
             'null_aware_super',
             "A super member access cannot use '?.'.",
@@ -605,14 +629,14 @@ final class _Parser {
           );
         }
         values.add(
-          PropertyAccessExpression(
+          arena.putPropertyAccessExpression(
             source: source,
-            start: target.start,
+            start: arena.rStart(target),
             end: valid ? name.end : name.start,
             target: target,
             property: valid
                 ? identifier(name)
-                : Identifier(
+                : arena.putIdentifier(
                     source: source,
                     start: name.start,
                     end: name.start,
@@ -683,15 +707,15 @@ final class _Parser {
         final operand = values.removeLast();
         checkValue(operand);
         values.add(
-          NullAssertionExpression(
+          arena.putNullAssertionExpression(
             source: source,
-            start: operand.start,
+            start: arena.rStart(operand),
             end: token.end,
             operand: operand,
           ),
         );
         if (frames.lastOrNull case final _Shorthand frame) {
-          frame.pendingBang = values.last as NullAssertionExpression;
+          frame.pendingBang = arena.asNullAssertionExpression(values.last);
         }
         final frame = frames.lastOrNull;
         if (!isSelector &&
@@ -705,9 +729,9 @@ final class _Parser {
         final operand = values.removeLast();
         checkAssignable(operand, token);
         values.add(
-          UpdateExpression(
+          arena.putUpdateExpression(
             source: source,
-            start: operand.start,
+            start: arena.rStart(operand),
             end: token.end,
             operand: operand,
             op: token.kind == .increment ? .increment : .decrement,
@@ -785,10 +809,10 @@ final class _Parser {
       if (token.kind == .increment || token.kind == .decrement) {
         checkAssignable(right, token);
         values.add(
-          UpdateExpression(
+          arena.putUpdateExpression(
             source: source,
             start: token.start,
-            end: right.end,
+            end: arena.rEnd(right),
             operand: right,
             op: token.kind == .increment ? .increment : .decrement,
             isPrefix: true,
@@ -797,20 +821,20 @@ final class _Parser {
       } else if (token.kind == .keywordAwait) {
         checkValue(right);
         values.add(
-          AwaitExpression(
+          arena.putAwaitExpression(
             source: source,
             start: token.start,
-            end: right.end,
+            end: arena.rEnd(right),
             expression: right,
           ),
         );
       } else {
         if (token.kind == .bang) checkValue(right);
         values.add(
-          UnaryExpression(
+          arena.putUnaryExpression(
             source: source,
             start: token.start,
-            end: right.end,
+            end: arena.rEnd(right),
             operand: right,
             op: switch (token.kind) {
               .minus => .negate,
@@ -823,8 +847,8 @@ final class _Parser {
       return;
     }
     if (token.kind == .question) {
-      final Expression thenExpression;
-      final Expression elseExpression;
+      final int thenExpression;
+      final int elseExpression;
       if (questions.isEmpty || questions.last != operatorIndex) {
         thenExpression = values.removeLast();
         elseExpression = right;
@@ -837,7 +861,7 @@ final class _Parser {
           current,
         );
         thenExpression = right;
-        elseExpression = MissingExpression(
+        elseExpression = arena.putMissingExpression(
           source: source,
           offset: current.start,
         );
@@ -847,10 +871,10 @@ final class _Parser {
       checkValue(thenExpression);
       checkValue(elseExpression);
       values.add(
-        ConditionalExpression(
+        arena.putConditionalExpression(
           source: source,
-          start: condition.start,
-          end: elseExpression.end,
+          start: arena.rStart(condition),
+          end: arena.rEnd(elseExpression),
           condition: condition,
           thenExpression: thenExpression,
           elseExpression: elseExpression,
@@ -863,10 +887,10 @@ final class _Parser {
     if (token.kind.precedence == _assignmentPrecedence) {
       checkAssignable(left, token);
       values.add(
-        AssignmentExpression(
+        arena.putAssignmentExpression(
           source: source,
-          start: left.start,
-          end: right.end,
+          start: arena.rStart(left),
+          end: arena.rEnd(right),
           left: left,
           op: token.kind.assignmentOperator,
           right: right,
@@ -875,10 +899,10 @@ final class _Parser {
     } else {
       if (token.kind.precedence < _equalityPrecedence) checkValue(left);
       values.add(
-        BinaryExpression(
+        arena.putBinaryExpression(
           source: source,
-          start: left.start,
-          end: right.end,
+          start: arena.rStart(left),
+          end: arena.rEnd(right),
           left: left,
           op: token.kind.binaryOperator,
           right: right,
@@ -887,7 +911,7 @@ final class _Parser {
     }
   }
 
-  Expression finishExpression(int valueBase, int operatorBase) {
+  int finishExpression(int valueBase, int operatorBase) {
     ensureOperand();
     while (operators.length > operatorBase) {
       reduce();
@@ -901,12 +925,14 @@ final class _Parser {
   void ensureOperand() {
     if (expectsOperand) {
       error('expected_expression', 'Expected an expression.', current);
-      values.add(MissingExpression(source: source, offset: current.start));
+      values.add(
+        arena.putMissingExpression(source: source, offset: current.start),
+      );
       expectsOperand = false;
     }
   }
 
-  Identifier identifier(Token token, {bool inType = false}) {
+  int identifier(Token token, {bool inType = false}) {
     if (!inType &&
         functionModifier != null &&
         (token.kind == .keywordAwait || token.kind == .keywordYield)) {
@@ -916,19 +942,23 @@ final class _Parser {
         token,
       );
     }
-    return Identifier(source: source, start: token.start, end: token.end);
+    return arena.putIdentifier(
+      source: source,
+      start: token.start,
+      end: token.end,
+    );
   }
 
-  void checkAssignable(Expression expression, Token operator) {
-    if (expression is DotShorthandExpression) {
-      expression = expression.expression;
+  void checkAssignable(int expression, Token operator) {
+    if (arena.isDotShorthandExpression(expression)) {
+      expression = arena.rDotShorthandExpressionExpression(expression);
     }
-    if (expression is! IdentifierExpression &&
-        expression is! PropertyAccessExpression &&
-        expression is! IndexExpression &&
-        expression is! CascadePropertyExpression &&
-        expression is! CascadeIndexExpression &&
-        expression is! MissingExpression) {
+    if (!arena.isIdentifierExpression(expression) &&
+        !arena.isPropertyAccessExpression(expression) &&
+        !arena.isIndexExpression(expression) &&
+        !arena.isCascadePropertyExpression(expression) &&
+        !arena.isCascadeIndexExpression(expression) &&
+        !arena.isMissingExpression(expression)) {
       error(
         'invalid_assignment_target',
         'Expected an assignable expression.',
@@ -938,25 +968,32 @@ final class _Parser {
     }
   }
 
-  void checkValue(Expression expression) {
-    if (expression is SuperExpression) invalidSuperValue(expression);
+  void checkValue(int expression) {
+    if (arena.isSuperExpression(expression)) invalidSuperValue(expression);
   }
 
-  void invalidSuperValue(SuperExpression expression) {
+  void invalidSuperValue(int expression) {
     error(
       'invalid_super_value',
       'Use super as a member receiver or an operator receiver.',
-      Token(.keywordSuper, source, expression.start, expression.end),
+      Token(
+        .keywordSuper,
+        source,
+        arena.rStart(expression),
+        arena.rEnd(expression),
+      ),
       preventsConditional: false,
     );
   }
 
   void checkSelector() {
     var target = values.last;
-    while (target is NullAssertionExpression) {
-      target = target.operand;
+    while (arena.isNullAssertionExpression(target)) {
+      target = arena.rNullAssertionExpressionOperand(target);
     }
-    if (target case UpdateExpression(isPrefix: false)) {
+    if ((arena.maybe(target) as Expression) case UpdateExpression(
+      isPrefix: false,
+    )) {
       error(
         'invalid_selector',
         'Parenthesize the update before accessing its result.',

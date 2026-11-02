@@ -1,7 +1,6 @@
 part of 'parser.dart';
 
-final class _SwitchExpressionReader(final _Parser parser)
-    extends _Reader<Expression> {
+final class _SwitchExpressionReader(final _Parser parser) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final token = parser.current;
@@ -9,7 +8,7 @@ final class _SwitchExpressionReader(final _Parser parser)
     final condition = _ConditionReader(parser);
     yield condition;
     parser.expect(.leftBrace);
-    final cases = <SwitchExpressionCase>[];
+    final cases = <int>[];
     while (parser.current.kind != .rightBrace && parser.current.kind != .eof) {
       final start = parser.current.start;
       final pattern = _CasePatternReader(parser);
@@ -18,10 +17,10 @@ final class _SwitchExpressionReader(final _Parser parser)
       final value = _ExpressionReader(parser);
       if (!value.start()) yield value;
       cases.add(
-        SwitchExpressionCase(
+        parser.arena.putSwitchExpressionCase(
           source: parser.source,
           start: start,
-          end: value.result.end,
+          end: parser.arena.rEnd(value.result),
           pattern: pattern.result,
           value: value.result,
         ),
@@ -29,7 +28,7 @@ final class _SwitchExpressionReader(final _Parser parser)
       if (parser.current.kind != .comma) break;
       parser.advance();
     }
-    result = SwitchExpression(
+    result = parser.arena.putSwitchExpression(
       source: parser.source,
       start: token.start,
       end: parser.expect(.rightBrace),
@@ -39,8 +38,7 @@ final class _SwitchExpressionReader(final _Parser parser)
   }
 }
 
-final class _SwitchStatementReader(final _Parser parser)
-    extends _Reader<Statement> {
+final class _SwitchStatementReader(final _Parser parser) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     final token = parser.current;
@@ -48,12 +46,12 @@ final class _SwitchStatementReader(final _Parser parser)
     final condition = _ConditionReader(parser);
     yield condition;
     parser.expect(.leftBrace);
-    final members = <SwitchStatementMember>[];
+    final members = <int>[];
     parser.switchDepth++;
     var hasDefault = false;
     while (parser.current.kind != .rightBrace && parser.current.kind != .eof) {
       final start = parser.current.start;
-      final labels = <Label>[];
+      final labels = <int>[];
       while (parser.current.kind.isIdentifier &&
           parser.tokens[parser.cursor + 1].kind == .colon) {
         final name = parser.identifier(parser.current);
@@ -61,10 +59,15 @@ final class _SwitchStatementReader(final _Parser parser)
         final end = parser.current.end;
         parser.advance();
         labels.add(
-          Label(source: parser.source, start: name.start, end: end, name: name),
+          parser.arena.putLabel(
+            source: parser.source,
+            start: parser.arena.rStart(name),
+            end: end,
+            name: name,
+          ),
         );
       }
-      CasePattern? pattern;
+      int? pattern;
       if (parser.current.kind == .keywordCase) {
         parser.advance();
         final reader = _CasePatternReader(
@@ -93,13 +96,13 @@ final class _SwitchStatementReader(final _Parser parser)
           parser.unexpected();
           continue;
         }
-        pattern = MissingPattern(
+        pattern = parser.arena.putMissingPattern(
           source: parser.source,
           offset: parser.current.start,
         );
       }
       var end = parser.expect(.colon);
-      final statements = <Statement>[];
+      final statements = <int>[];
       while (!parser.startsSwitchMember &&
           parser.current.kind != .rightBrace &&
           parser.current.kind != .eof) {
@@ -107,11 +110,11 @@ final class _SwitchStatementReader(final _Parser parser)
         final statement = _StatementReader(parser);
         yield statement;
         statements.add(statement.result);
-        end = statement.result.end;
+        end = parser.arena.rEnd(statement.result);
         if (parser.cursor == cursor) parser.unexpected();
       }
       members.add(
-        SwitchStatementMember(
+        parser.arena.putSwitchStatementMember(
           source: parser.source,
           start: start,
           end: end,
@@ -122,7 +125,7 @@ final class _SwitchStatementReader(final _Parser parser)
       );
     }
     parser.switchDepth--;
-    result = SwitchStatement(
+    result = parser.arena.putSwitchStatement(
       source: parser.source,
       start: token.start,
       end: parser.expect(.rightBrace),

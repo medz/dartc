@@ -11,10 +11,10 @@ extension on _Parser {
 }
 
 final class _DeclarationName(final _Parser parser) {
-  TypeAnnotation? type;
-  late Identifier name;
+  int? type;
+  late int name;
   TokenKind? accessor;
-  TypeParameterList? typeParameters;
+  int? typeParameters;
   DeclaredOperator? op;
 
   Iterable<_Reader<Object?>> read({
@@ -27,7 +27,7 @@ final class _DeclarationName(final _Parser parser) {
         parser.canStartTypeBeforeName) {
       final reader = _TypeReader(parser, beforeFunction: true);
       if (!reader.start()) yield _TypeTask(reader);
-      final parsed = reader.result as TypeAnnotation?;
+      final parsed = parser.arena.asTypeAnnotationOrNull(reader.result);
       if (parsed != null && parser.current.kind.isIdentifier) {
         type = parsed;
       } else {
@@ -78,7 +78,7 @@ final class _DeclarationName(final _Parser parser) {
     if (parser.current.kind == .less) {
       final reader = _TypeReader(parser);
       if (!reader.start(parameters: true)) yield _TypeTask(reader);
-      typeParameters = reader.result as TypeParameterList?;
+      typeParameters = parser.arena.asTypeParameterListOrNull(reader.result);
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
       }
@@ -89,8 +89,8 @@ final class _DeclarationName(final _Parser parser) {
 final class _TopLevelReader(
   final _Parser parser,
   final int start,
-  final List<Annotation> metadata,
-) extends _Reader<TopLevelDeclaration> {
+  final List<int> metadata,
+) extends _Reader<int> {
   @override
   Iterable<_Reader<Object?>> read() sync* {
     if (parser.startsTypeDeclaration) {
@@ -117,7 +117,7 @@ final class _TopLevelReader(
     if (variables case final declarations?) {
       final reader = _VariablesReader(parser, declarations, metadata: metadata);
       yield reader;
-      result = TopLevelVariableDeclaration(
+      result = parser.arena.putTopLevelVariableDeclaration(
         source: parser.source,
         start: start,
         end: parser.expect(.semicolon),
@@ -129,7 +129,7 @@ final class _TopLevelReader(
     final initial = parser.cursor;
     final header = _DeclarationName(parser);
     yield* header.read();
-    if (header.name.start == header.name.end) {
+    if (parser.arena.rStart(header.name) == parser.arena.rEnd(header.name)) {
       parser.error(
         'expected_declaration',
         'Expected a top-level declaration.',
@@ -138,10 +138,13 @@ final class _TopLevelReader(
       if (parser.cursor == initial && parser.current.kind != .eof) {
         parser.advance();
       }
-      result = MissingTopLevelDeclaration(source: parser.source, offset: start);
+      result = parser.arena.putMissingTopLevelDeclaration(
+        source: parser.source,
+        offset: start,
+      );
       return;
     }
-    FormalParameterList? parameters;
+    int? parameters;
     if (header.accessor != .keywordGet) {
       final reader = _ParameterReader(
         parser,
@@ -156,18 +159,28 @@ final class _TopLevelReader(
     }
     final body = _BodyReader(parser);
     yield body;
-    if (body.result is EmptyFunctionBody && !external) {
+    if (parser.arena.isEmptyFunctionBody(body.result) && !external) {
       parser.error(
         'missing_function_body',
         'A function without external requires a body.',
-        Token(.semicolon, parser.source, body.result.start, body.result.end),
+        Token(
+          .semicolon,
+          parser.source,
+          parser.arena.rStart(body.result),
+          parser.arena.rEnd(body.result),
+        ),
       );
     }
-    if (external && body.result is! EmptyFunctionBody) {
+    if (external && !parser.arena.isEmptyFunctionBody(body.result)) {
       parser.error(
         'external_body',
         'An external declaration cannot have a body.',
-        Token(.invalid, parser.source, body.result.start, body.result.end),
+        Token(
+          .invalid,
+          parser.source,
+          parser.arena.rStart(body.result),
+          parser.arena.rEnd(body.result),
+        ),
       );
     }
     if (header.accessor != null && header.typeParameters != null) {
@@ -177,15 +190,15 @@ final class _TopLevelReader(
         Token(
           .less,
           parser.source,
-          header.typeParameters!.start,
-          header.typeParameters!.end,
+          parser.arena.rStart(header.typeParameters!),
+          parser.arena.rEnd(header.typeParameters!),
         ),
       );
     }
     final source = parser.source;
-    final end = body.result.end;
+    final end = parser.arena.rEnd(body.result);
     result = switch (header.accessor) {
-      .keywordGet => TopLevelGetterDeclaration(
+      .keywordGet => parser.arena.putTopLevelGetterDeclaration(
         source: source,
         start: start,
         end: end,
@@ -195,7 +208,7 @@ final class _TopLevelReader(
         name: header.name,
         body: body.result,
       ),
-      .keywordSet => TopLevelSetterDeclaration(
+      .keywordSet => parser.arena.putTopLevelSetterDeclaration(
         source: source,
         start: start,
         end: end,
@@ -206,7 +219,7 @@ final class _TopLevelReader(
         parameters: parameters!,
         body: body.result,
       ),
-      _ => TopLevelFunctionDeclaration(
+      _ => parser.arena.putTopLevelFunctionDeclaration(
         source: source,
         start: start,
         end: end,
@@ -231,8 +244,11 @@ final class _TopLevelReader(
       final reader = _TypeReader(parser);
       if (!reader.start()) yield _TypeTask(reader);
       final type =
-          reader.result as TypeAnnotation? ??
-          MissingTypeAnnotation(source: parser.source, offset: typeStart);
+          parser.arena.asTypeAnnotationOrNull(reader.result) ??
+          parser.arena.putMissingTypeAnnotation(
+            source: parser.source,
+            offset: typeStart,
+          );
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
       }
@@ -240,10 +256,15 @@ final class _TopLevelReader(
         parser.error(
           'invalid_alias',
           'A type alias cannot have a return type before its name.',
-          Token(.invalid, parser.source, header.type!.start, header.type!.end),
+          Token(
+            .invalid,
+            parser.source,
+            parser.arena.rStart(header.type!),
+            parser.arena.rEnd(header.type!),
+          ),
         );
       }
-      result = TypeAliasDeclaration(
+      result = parser.arena.putTypeAliasDeclaration(
         source: parser.source,
         start: start,
         end: parser.expect(.semicolon),
@@ -255,7 +276,7 @@ final class _TopLevelReader(
     } else {
       final reader = _ParameterReader(parser, function: true);
       yield reader;
-      result = FunctionTypeAliasDeclaration(
+      result = parser.arena.putFunctionTypeAliasDeclaration(
         source: parser.source,
         start: start,
         end: parser.expect(.semicolon),

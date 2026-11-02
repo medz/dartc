@@ -5,7 +5,7 @@ extension on _Parser {
       languageVersion.major < major ||
       languageVersion.major == major && languageVersion.minor < minor;
 
-  ParseResult<T> finishResult<T extends AstNode>(T node) {
+  ParseResult<T> finishResult<T extends AstNode>(int node) {
     if (before(2, 12) ||
         languageVersion.major == 2 && languageVersion.minor > 19 ||
         languageVersion.minor < 0 ||
@@ -18,29 +18,29 @@ extension on _Parser {
     } else if (languageVersion != LanguageVersion.current) {
       checkLanguageFeatures(node);
     }
-    return ParseResult._(node, diagnostics);
+    return ParseResult._(arena, node, diagnostics);
   }
 
-  void requireFeature(AstNode node, int major, int minor, String feature) {
+  void requireFeature(int node, int major, int minor, String feature) {
     if (!before(major, minor)) return;
     error(
       'language_feature_disabled',
       '$feature requires language version $major.$minor or later.',
-      Token(.invalid, source, node.start, node.end),
+      Token(.invalid, source, arena.rStart(node), arena.rEnd(node)),
     );
   }
 
-  void checkLanguageFeatures(AstNode root) {
+  void checkLanguageFeatures(int root) {
     // The call target distinguishes a generic named constructor invocation from
     // a tear-off without binding its unresolved names.
-    final pending = <(AstNode, bool)>[(root, false)];
+    final pending = <(int, bool)>[(root, false)];
     while (pending.isNotEmpty) {
       final (node, called) = pending.removeLast();
-      switch (node) {
-        case TypeAliasDeclaration(:final type)
-            when type is! FunctionTypeAnnotation:
+      switch ((arena.maybe(node) as AstNode)) {
+        case TypeAliasDeclaration(refType: final type)
+            when !arena.isFunctionTypeAnnotation(type):
           requireFeature(node, 2, 13, 'Non-function type aliases');
-        case Annotation(typeArguments: final arguments?):
+        case Annotation(refTypeArguments: final arguments?):
           requireFeature(arguments, 2, 14, 'Generic metadata');
         case BinaryExpression(op: .unsignedShiftRight) ||
             AssignmentExpression(op: .unsignedShiftRight) ||
@@ -48,15 +48,15 @@ extension on _Parser {
           requireFeature(node, 2, 14, 'Unsigned right shift');
         case TypeInstantiationExpression() when !called:
           requireFeature(node, 2, 15, 'Function and constructor tear-offs');
-        case PropertyAccessExpression(:final property)
-            when property.text == 'new':
+        case PropertyAccessExpression(refProperty: final property)
+            when arena.rText(property) == 'new':
           requireFeature(property, 2, 15, 'Constructor tear-offs');
         case FormalParameter(prefix: .superKeyword):
           requireFeature(node, 2, 17, 'Super parameters');
-        case ArgumentList(:final arguments) when before(2, 17):
+        case ArgumentList(refArguments: final arguments) when before(2, 17):
           var named = false;
           for (final argument in arguments) {
-            if (argument.name != null) {
+            if (arena.rArgumentName(argument) != null) {
               named = true;
             } else if (named) {
               requireFeature(
@@ -67,11 +67,11 @@ extension on _Parser {
               );
             }
           }
-        case LibraryDirective(name: null):
+        case LibraryDirective(refName: null):
           requireFeature(node, 2, 19, 'Unnamed libraries');
         case ClassDeclaration(
           :final modifiers,
-          :final primaryParameters,
+          refPrimaryParameters: final primaryParameters,
           :final isSemicolonBody,
         ):
           if (modifiers.any((m) => m != .abstractKeyword)) {
@@ -96,11 +96,11 @@ extension on _Parser {
         case ExtensionTypeDeclaration():
           requireFeature(node, 3, 3, 'Extension types');
         case EnumDeclaration(
-          :final typeParameters,
-          :final withClause,
-          :final implementsClause,
+          refTypeParameters: final typeParameters,
+          refWithClause: final withClause,
+          refImplementsClause: final implementsClause,
           :final hasMemberSeparator,
-          :final primaryParameters,
+          refPrimaryParameters: final primaryParameters,
           :final isSemicolonBody,
         ):
           if (typeParameters != null ||
@@ -112,9 +112,9 @@ extension on _Parser {
           if (primaryParameters != null || isSemicolonBody) {
             requireFeature(node, 3, 13, 'Primary constructors');
           }
-        case EnumConstantDeclaration(typeArguments: final arguments?):
+        case EnumConstantDeclaration(refTypeArguments: final arguments?):
           requireFeature(arguments, 2, 17, 'Enhanced enums');
-        case EnumConstantDeclaration(arguments: final arguments?):
+        case EnumConstantDeclaration(refArguments: final arguments?):
           requireFeature(arguments, 2, 17, 'Enhanced enums');
         case ConstructorDeclaration(keyword: .newKeyword):
           requireFeature(node, 3, 13, 'Abbreviated constructors');
@@ -128,13 +128,14 @@ extension on _Parser {
             PatternForInBinding():
           requireFeature(node, 3, 0, 'Patterns');
         case DartPattern()
-            when node is! ConstantPattern && node is! IdentifierPattern:
+            when !arena.isConstantPattern(node) &&
+                !arena.isIdentifierPattern(node):
           requireFeature(node, 3, 0, 'Patterns');
-        case IfStatement(casePattern: final pattern?) ||
-            IfElement(casePattern: final pattern?):
+        case IfStatement(refCasePattern: final pattern?) ||
+            IfElement(refCasePattern: final pattern?):
           requireFeature(pattern, 3, 0, 'If-case');
         case LiteralExpression(kind: .integer || .doubleLiteral):
-          if (node.text.contains('_')) {
+          if (arena.rText(node).contains('_')) {
             requireFeature(node, 3, 6, 'Digit separators');
           }
         case NullAwareElement():
@@ -148,11 +149,14 @@ extension on _Parser {
         default:
           break;
       }
-      for (var i = node.childCount - 1; i >= 0; i--) {
-        final child = node.childAt(i);
-        final isTarget = switch (node) {
-          InvocationExpression(:final callee) => identical(child, callee),
-          PropertyAccessExpression(:final target) =>
+      for (var i = arena.rChildcount(node) - 1; i >= 0; i--) {
+        final child = arena.childIndex(node, i);
+        final isTarget = switch ((arena.maybe(node) as AstNode)) {
+          InvocationExpression(refCallee: final callee) => identical(
+            child,
+            callee,
+          ),
+          PropertyAccessExpression(refTarget: final target) =>
             called && identical(child, target),
           _ => false,
         };
