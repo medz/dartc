@@ -8,6 +8,7 @@ import 'token_kind.dart';
 
 part 'keywords.dart';
 part 'literals.dart';
+part 'recovery.dart';
 part 'token.dart';
 
 /// Scans [source] using current Dart lexical rules.
@@ -49,7 +50,7 @@ final class ScanResult {
   bool get hasErrors => diagnostics.isNotEmpty;
 }
 
-final class _Scanner(final SourceFile source) {
+final class _Scanner(final SourceFile source, {final bool recovering = false}) {
   final String _text = source.text;
   final _tokens = <Token>[];
   final _comments = <Token>[];
@@ -301,6 +302,17 @@ final class _Scanner(final SourceFile source) {
           start,
           _offset,
         );
+        if (recovering) {
+          switch (_invalidRole(code)) {
+            case _InvalidRole.skip:
+              return;
+            case _InvalidRole.identifier:
+              _recoverIdentifier(start);
+              return;
+            case _InvalidRole.other:
+              break;
+          }
+        }
     }
     _emit(kind, start);
   }

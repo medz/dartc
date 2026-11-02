@@ -21,6 +21,35 @@ CompilationUnit parsed(String text) {
 
 void main() {
   test(
+    'recovers malformed identifier ranges without changing scanned tokens',
+    () {
+      for (final bad in ['\u001f', '\u007f', '\u0085', 'é', '😀']) {
+        final source = SourceFile(
+          Uri.parse('memory:unit'),
+          '@a${bad}1 class${bad}C {}',
+        );
+        final input = scan(source);
+        final tokens = input.tokens.toList();
+        final result = parseCompilationUnit(input);
+        expect(result.diagnostics, orderedEquals(input.diagnostics));
+        expect(
+          input.tokens.where((t) => t.kind == .invalid).map((t) => t.lexeme),
+          [bad, bad],
+        );
+        expect(input.tokens, orderedEquals(tokens));
+        final cls = result.node.members.single as ClassDeclaration;
+        expect(cls.metadata.single.name.single.text, 'a${bad}1');
+        expect(cls.name.text, '${bad}C');
+
+        final operand = scan(SourceFile(source.uri, bad));
+        final expression = parseExpression(operand);
+        expect(expression.diagnostics, orderedEquals(operand.diagnostics));
+        expect((expression.node as IdentifierExpression).identifier.text, bad);
+      }
+    },
+  );
+
+  test(
     'recovers across illegal separators and retains the original tokens',
     () {
       final source = SourceFile(
@@ -53,6 +82,27 @@ void main() {
       ]);
     },
   );
+
+  test('reports a newly exposed escape when a malformed name consumes r', () {
+    final source = SourceFile(
+      Uri.parse('memory:unit'),
+      "final x = \u001fr'\\xZ';",
+    );
+    final input = scan(source);
+    expect(input.diagnostics.map((d) => d.code), [
+      'scanner.unexpected_character',
+    ]);
+    expect(
+      input.tokens.firstWhere((t) => t.kind == .stringLiteral).lexeme,
+      r"r'\xZ'",
+    );
+    final result = parseCompilationUnit(input);
+    expect(result.diagnostics.first, same(input.diagnostics.single));
+    final escape = result.diagnostics.singleWhere(
+      (d) => d.code == 'scanner.invalid_escape',
+    );
+    expect(escape.span!.text, r'\x');
+  });
 
   test('parses declarations with function-form parameters named Function', () {
     final unit = parsed('''

@@ -8,6 +8,7 @@ import 'package:dartc/source.dart';
 
 import '../ast/nodes.dart' show AstArena;
 import '../ast/row_fields.dart';
+import '../scanner/scanner.dart' show tokensForParsing;
 import 'string_sequence.dart';
 import 'delimiter_index.dart';
 import 'language_version.dart';
@@ -99,48 +100,25 @@ enum _ParseBoundary {
 
 enum _ExpressionStop { complete, conditional, syntax }
 
-// Keep scanner diagnostics and offsets while recovering past illegal separators.
-List<Token> _syntaxTokens(ScanResult input) {
-  final tokens = input.tokens;
-  if (!input.hasErrors) return tokens;
-  final first = tokens.indexWhere(_isInvalidSeparator);
-  if (first == -1) return tokens;
-  return [
-    ...tokens.getRange(0, first),
-    for (var i = first + 1; i < tokens.length; i++)
-      if (!_isInvalidSeparator(tokens[i])) tokens[i],
-  ];
-}
-
-bool _isInvalidSeparator(Token token) =>
-    token.kind == .invalid &&
-    switch (token.source.text.codeUnitAt(token.start)) {
-      < 0x1f ||
-      0xa0 ||
-      0x1680 ||
-      0x180e ||
-      >= 0x2000 && <= 0x200b ||
-      0x2028 ||
-      0x2029 ||
-      0x202f ||
-      0x205f ||
-      0x3000 ||
-      0xfeff => true,
-      _ => false,
-    };
-
 final class _Parser {
-  _Parser(
+  factory _Parser(
     ScanResult input, {
     LanguageVersion languageVersion = LanguageVersion.current,
-  }) : this._(input, _syntaxTokens(input), languageVersion);
+  }) {
+    final diagnostics = [...input.diagnostics];
+    final tokens = tokensForParsing(input, diagnostics);
+    return _Parser._(input.source, tokens, languageVersion, diagnostics);
+  }
 
-  _Parser._(ScanResult input, this.tokens, this.languageVersion)
-    : arena = AstArena(input.source, tokens.length),
+  _Parser._(
+    SourceFile source,
+    this.tokens,
+    this.languageVersion,
+    this.diagnostics,
+  ) : arena = AstArena(source, tokens.length),
       lookahead = DelimiterIndex(tokens),
       current = tokens.first,
-      trialStart = null,
-      diagnostics = [...input.diagnostics];
+      trialStart = null;
 
   _Parser.trial(_Parser parent, int question)
     : arena = parent.arena,
