@@ -22,7 +22,8 @@ export 'src/ir/block.dart'
         Unreachable;
 export 'src/ir/function.dart' show IrFunction;
 export 'src/ir/program.dart' show IrClass, IrProgram;
-export 'src/ir/signature.dart' show FunctionKind, FunctionTarget, InstanceField;
+export 'src/ir/signature.dart'
+    show FunctionKind, FunctionTarget, InstanceField, MemberSelector;
 export 'src/ir/type.dart' show ClassType, RecordType, ValueType;
 export 'src/ir/value.dart'
     show
@@ -32,9 +33,11 @@ export 'src/ir/value.dart'
         DirectCall,
         Equals,
         Instruction,
+        InstanceCall,
         IntBinary,
         IntOperator,
         MakeRecord,
+        LoadField,
         NullCheck,
         RecordConstant,
         RecordGet,

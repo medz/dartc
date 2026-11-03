@@ -18,15 +18,30 @@ IrClass lowerClass(
   final element = declaration.declaredFragment!.element;
   final type = bindings.classType(element, unit, declaration);
   final fields = <InstanceField>[];
+  final members = <FunctionTarget>[];
   for (final field in element.fields) {
     if (field.isOriginGetterSetter) continue;
-    if (field.isStatic ||
-        field.isLate ||
-        field.isAbstract ||
-        field.isExternal) {
+    if (field.isStatic || field.isLate || field.isExternal) {
       unsupported(unit, declaration, 'field ${field.displayName}');
     }
-    fields.add(bindings.field(field, unit, declaration));
+    final slot = field.isAbstract
+        ? null
+        : bindings.field(field, unit, declaration);
+    if (slot != null) fields.add(slot);
+    for (final accessor in [field.getter, field.setter].nonNulls) {
+      final target = bindings.target(accessor, unit, declaration);
+      members.add(target);
+      if (target.isAbstract) continue;
+      final entry = Block(target.parameterTypes);
+      final receiver = entry.parameters.first;
+      if (accessor is GetterElement) {
+        entry.finish(Return(entry.emit(LoadField(slot!, receiver))));
+      } else {
+        entry.emit(StoreField(slot!, receiver, entry.parameters[1]));
+        entry.finish(const Return());
+      }
+      functions.add(IrFunction(target, [entry]));
+    }
   }
 
   void constructor(
@@ -72,26 +87,21 @@ IrClass lowerClass(
         );
       case ast.FieldDeclaration() || ast.PrimaryConstructorBody():
         break;
-      case ast.MethodDeclaration(
-        isStatic: true,
-        isGetter: false,
-        isSetter: false,
-        :final body,
-      ):
-        functions.add(
-          FunctionLowering(
-            unit,
-            bindings,
-            member.declaredFragment!.element,
-            member,
-            body,
-          ).run(),
-        );
-      default:
-        unsupported(unit, member, 'class member');
+      case ast.MethodDeclaration(:final body):
+        final method = member.declaredFragment!.element;
+        if (method.isStatic && method is PropertyAccessorElement) {
+          unsupported(unit, member, 'static accessor');
+        }
+        final target = bindings.target(method, unit, member);
+        if (target.kind.isVirtual) members.add(target);
+        if (!target.isAbstract) {
+          functions.add(
+            FunctionLowering(unit, bindings, method, member, body).run(),
+          );
+        }
     }
   }
-  return IrClass(type, fields);
+  return IrClass(type, fields, members: members);
 }
 
 void _initialize(

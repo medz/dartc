@@ -1,9 +1,6 @@
 import 'package:analyzer/dart/ast/ast.dart' as ast;
-import 'package:analyzer/dart/ast/token.dart' show Token;
-import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
 
-import 'bindings.dart';
 import 'function_context.dart';
 
 /// Reads a record slot, reusing its stored operand when the construction is visible.
@@ -39,73 +36,4 @@ Value? lowerRecord(
     fields[slot] = value;
   }
   return context.emit(MakeRecord(type, fields.cast<Value>()));
-}
-
-/// Lowers field getters and postfix assertions in one null-shorting chain.
-Value? lowerSelectors(
-  FunctionContext context,
-  ast.Expression root,
-  Value? Function(ast.Expression) evaluate,
-) {
-  JumpTarget? skipped;
-  Value? visit(ast.Expression node) {
-    if (node case ast.PostfixExpression(
-      operator: Token(type: .BANG),
-      :final operand,
-    )) {
-      final value = visit(operand);
-      return value == null ? null : context.normal(context.checkNotNull(value));
-    }
-    final field = switch (node) {
-      ast.PrefixedIdentifier(:final prefix, :final identifier)
-          when prefix.staticType is dart.RecordType =>
-        (prefix, identifier.name, false),
-      ast.PropertyAccess(
-        target: final target?,
-        :final propertyName,
-        :final isNullAware,
-        isCascaded: false,
-      )
-          when target.staticType is dart.RecordType =>
-        (target, propertyName.name, isNullAware),
-      _ => null,
-    };
-    if (field == null) {
-      if (identical(node, root)) {
-        unsupported(context.unit, node, 'property access');
-      }
-      return evaluate(node);
-    }
-    final (receiver, name, nullAware) = field;
-    final value = visit(receiver);
-    if (value == null) return null;
-    if (nullAware) {
-      skipped ??= JumpTarget(context, [context.typeOf(root.staticType!, root)]);
-      context.guard(
-        context.testType(value, .nullType, negated: true),
-        skipped!,
-        [const Constant.nullValue()],
-      );
-      if (context.current == null) return null;
-    }
-    final known = context.refined(value);
-    final owner = switch (known.type.nonNullable) {
-      final RecordType type => type,
-      _ =>
-        context.typeOf(receiver.staticType!, receiver).nonNullable
-            as RecordType,
-    };
-    final slot = owner.slots[name];
-    if (slot == null) unsupported(context.unit, node, 'record member $name');
-    final record = context.normal(context.cast(known, owner));
-    return record == null
-        ? null
-        : context.normal(readRecordField(context, record, slot));
-  }
-
-  final result = visit(root);
-  final exit = skipped;
-  if (exit == null || !exit.hasIncoming) return result;
-  if (result != null) exit.jump([result]);
-  return exit.enter()!.parameters.first;
 }

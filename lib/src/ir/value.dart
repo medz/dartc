@@ -76,13 +76,77 @@ sealed class Instruction(super.type) extends Value {
   /// Whether evaluation can transfer control to a Dart exception handler.
   bool get mayThrow => switch (this) {
     DirectCall() ||
+    InstanceCall() ||
     Construct() ||
     TypeCast() ||
     NullCheck() ||
     MakeRecord() => true,
     Equals(:final mayCallUserCode) => mayCallUserCode,
-    IntBinary() || TypeTest() || RecordGet() || StoreField() => false,
+    IntBinary() ||
+    TypeTest() ||
+    RecordGet() ||
+    StoreField() ||
+    LoadField() => false,
   };
+}
+
+/// Reads storage selected by its declaring class, without invoking a getter.
+final class LoadField(
+  /// The declared slot to read.
+  final InstanceField field,
+
+  /// The object containing the slot.
+  final Value receiver,
+) extends Instruction {
+  this : super(field.type) {
+    if (!field.owner.accepts(receiver.type)) {
+      throw ArgumentError('Incompatible field receiver.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [receiver];
+}
+
+/// Invokes a member on the runtime class with the arguments supplied by the caller.
+///
+/// The implementation supplies its own optional defaults and performs its
+/// parameter type checks before entering the body.
+final class InstanceCall(
+  /// The statically resolved member and signature.
+  final FunctionTarget member,
+
+  /// The evaluated dispatch receiver.
+  final Value receiver,
+  Iterable<Value> positional, [
+  Map<String, Value> named = const {},
+]) extends Instruction {
+  /// Explicit positional arguments.
+  final List<Value> positional = .unmodifiable(positional);
+
+  /// Explicit named arguments, in their source order.
+  final Map<String, Value> named = .unmodifiable(named);
+  this : super(member.returnType) {
+    if (!member.kind.isVirtual || !member.owner!.accepts(receiver.type)) {
+      throw ArgumentError('Incompatible dispatch receiver.');
+    }
+    final values = member.bind<Value?>(
+      this.positional,
+      this.named,
+      (_) => null,
+    );
+    for (final (i, value) in values.indexed) {
+      if (value != null && !member.parameterTypes[i + 1].accepts(value.type)) {
+        throw ArgumentError('Incompatible argument to ${member.name}.');
+      }
+    }
+  }
+
+  @override
+  Iterable<Value> get inputs sync* {
+    yield receiver;
+    yield* positional;
+    yield* named.values;
+  }
 }
 
 /// Allocates a fresh object, runs [initializer] on it and returns it on success.
@@ -322,6 +386,9 @@ final class DirectCall(
   ///
   /// Throws [ArgumentError] for a wrong argument count or an incompatible type.
   this : super(target.returnType) {
+    if (target.isAbstract) {
+      throw ArgumentError('Cannot directly invoke an abstract member.');
+    }
     checkArguments(target.parameterTypes, inputs);
   }
 }

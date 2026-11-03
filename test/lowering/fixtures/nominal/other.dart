@@ -5,3 +5,8 @@ class Item {
 }
 
 class Empty {}
+
+class Hidden {
+  int _read() => 3;
+  int via() => _read();
+}

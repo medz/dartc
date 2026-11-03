@@ -8,6 +8,7 @@ import 'function_context.dart';
 import 'operators.dart';
 import 'pattern.dart';
 import 'record.dart';
+import 'selectors.dart';
 
 /// Returns the emitted operand, or `null` when [expression] cannot complete normally.
 Value? lowerExpression(FunctionContext context, ast.Expression expression) =>
@@ -161,6 +162,10 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
     case ast.PrefixedIdentifier() ||
         ast.PropertyAccess() ||
         ast.PostfixExpression(operator: Token(type: .BANG)):
+    case ast.SimpleIdentifier(element: GetterElement(isStatic: false)):
+    case ast.MethodInvocation(
+      methodName: ast.SimpleIdentifier(element: MethodElement(isStatic: false)),
+    ):
       return lowerSelectors(
         context,
         expression,

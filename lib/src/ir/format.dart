@@ -24,9 +24,20 @@ void writeFunction(
   };
   String edge(Jump e) =>
       '${labels[e.target]}(${e.arguments.map(value).join(', ')})';
-  String symbol(FunctionTarget t) =>
-      '${t.library}::${t.owner == null ? '' : '${t.owner!.dartName}.'}${t.name}';
+  String symbol(FunctionTarget t) {
+    final prefix = switch (t.kind) {
+      .getter => 'get ',
+      .setter => 'set ',
+      _ => '',
+    };
+    return '${t.library}::${t.owner == null ? '' : '${t.owner!.dartName}.'}$prefix${t.name}';
+  }
+
   String operation(Instruction op) => switch (op) {
+    LoadField() =>
+      'load ${value(op.receiver)}.${op.field.owner.dartName}::${op.field.name}',
+    InstanceCall() =>
+      'dispatch ${value(op.receiver)} ${symbol(op.member)}(${[...op.positional.map(value), for (final e in op.named.entries) '${e.key}: ${value(e.value)}'].join(', ')})',
     Construct() =>
       'new ${symbol(op.initializer)}(${op.inputs.map(value).join(', ')})',
     StoreField() =>

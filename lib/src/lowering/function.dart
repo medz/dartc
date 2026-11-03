@@ -37,31 +37,36 @@ final class FunctionLowering(
       unsupported(context.unit, site, 'async or generator bodies');
     }
     context.current = context.addBlock(_target.parameterTypes);
-    final hasReceiver = _target.kind == .initializer;
+    final hasReceiver = _target.kind.hasReceiver;
     if (hasReceiver) context.receiver = context.current!.parameters.first;
     for (final (i, parameter) in element.formalParameters.indexed) {
       final input = context.current!.parameters[i + (hasReceiver ? 1 : 0)];
       context.declare(parameter, input.type, input);
     }
     initialize?.call(context);
-    if (context.current == null) return .new(_target, context.blocks);
-    switch (body) {
-      case null || ast.EmptyFunctionBody() when hasReceiver:
-        _return(null);
-      case ast.ExpressionFunctionBody(:final expression):
-        _return(lowerExpression(context, expression));
-      case ast.BlockFunctionBody(:final block):
-        _statement(block);
-        if (context.current != null) {
-          if (!_target.returnType.accepts(.nullType)) {
-            unsupported(context.unit, body, 'implicit return');
-          }
+    if (context.current != null) {
+      switch (body) {
+        case null || ast.EmptyFunctionBody() when _target.kind == .initializer:
           _return(null);
-        }
-      default:
-        unsupported(context.unit, site, 'function body');
+        case ast.ExpressionFunctionBody(:final expression):
+          _return(lowerExpression(context, expression));
+        case ast.BlockFunctionBody(:final block):
+          _statement(block);
+          if (context.current != null) {
+            if (!_target.returnType.accepts(.nullType)) {
+              unsupported(context.unit, body, 'implicit return');
+            }
+            _return(null);
+          }
+        default:
+          unsupported(context.unit, site, 'function body');
+      }
     }
-    return .new(_target, context.blocks);
+    return .new(
+      _target,
+      context.blocks,
+      defaults: context.bindings.defaults(element),
+    );
   }
 
   void _return(Value? value) {

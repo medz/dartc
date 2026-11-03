@@ -12,6 +12,7 @@ import 'fixtures/finalizers.dart' as finalizers;
 import 'fixtures/functions.dart' as dart;
 import 'fixtures/loops.dart' as loops;
 import 'fixtures/nominal/constructors.dart' as nominal;
+import 'fixtures/nominal/members.dart' as members;
 import 'fixtures/nullability.dart' as nullable;
 import 'fixtures/patterns.dart' as patterns;
 import 'fixtures/records.dart' as records;
@@ -44,6 +45,7 @@ void main() {
       'exceptions.dart',
       'finalizers.dart',
       'nominal/constructors.dart',
+      'nominal/members.dart',
       'nominal/other.dart',
       'scalar_constants.dart',
     ]);
@@ -482,6 +484,24 @@ void main() {
         flag,
       ], () => nominal.separateLibraries(flag));
       compare('typedException', [flag], () => nominal.typedException(flag));
+    }
+  });
+
+  test('virtual calls bind defaults to the selected implementation and keep private selectors separate', () {
+    compare('hiddenMembers', [], members.hiddenMembers);
+    for (final flag in [false, true]) {
+      for (final n in [-1, 0, 3]) {
+        compare('selected', [flag, n], () => members.selected(flag, n));
+        compare('optionalMember', [
+          flag,
+          n,
+        ], () => members.optionalMember(flag, n));
+        compare('equalTokens', [n, 3], () => members.equalTokens(n, 3));
+      }
+    }
+    for (final value in [3, 'wrong']) {
+      compare('promotedField', [value], () => members.promotedField(value));
+      compare('checkedArgument', [value], () => members.checkedArgument(value));
     }
   });
 

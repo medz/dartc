@@ -29,6 +29,9 @@ final class Bindings() {
       final kind = switch (element) {
         ConstructorElement(:final isFactory) =>
           isFactory ? FunctionKind.factory : FunctionKind.initializer,
+        GetterElement(isStatic: false) => FunctionKind.getter,
+        SetterElement(isStatic: false) => FunctionKind.setter,
+        MethodElement(isStatic: false) => FunctionKind.method,
         _ => FunctionKind.function,
       };
       if (element.typeParameters.isNotEmpty) {
@@ -51,9 +54,27 @@ final class Bindings() {
         parameters.map((p) => valueType(p.type, unit, site)),
         owner: owner,
         kind: kind,
+        isAbstract: kind.isVirtual && element.isAbstract,
+        optionalPositional: parameters
+            .where((p) => p.isOptionalPositional)
+            .length,
+        namedParameters: {
+          for (final p in parameters)
+            if (p.isNamed) p.name!: p.isRequiredNamed,
+        },
       );
     });
   }
+
+  /// The declaration defaults used by calls that dispatch to [element].
+  Map<int, Constant> defaults(ExecutableElement element) => {
+    for (final p in element.formalParameters)
+      if (_parameters[p.baseElement] case (
+        slot: final i,
+        fallback: final value?,
+      ))
+        i: value,
+  };
 
   /// Evaluates explicit [arguments] in source order, then fills omitted slots.
   List<Value>? arguments(

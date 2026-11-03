@@ -2,32 +2,70 @@ import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
 final class FixtureRunner(
-  IrProgram program,
+  final IrProgram program,
   final Map<(Uri, String), Object? Function(int)> imports,
 ) {
   final bodies = {for (final f in program.functions) f.target: f};
 
+  Object? _constant(Constant value) => switch (value) {
+    ScalarConstant(:final value) => value,
+    RecordConstant(:final type, :final fields) => _RecordValue(
+      type as RecordType,
+      fields.map(_constant).toList(),
+    ),
+  };
+
+  Object? _callMember(
+    _Instance receiver,
+    FunctionTarget target,
+    List<Object?> positional,
+    Map<String, Object?> named,
+  ) {
+    final implementation = bodies[target]!;
+    final arguments = target.bind<Object?>(
+      positional,
+      named,
+      (i) => _constant(implementation.defaults[i]!),
+    );
+    for (final (i, arg) in arguments.indexed) {
+      _typeOperation(target.parameterTypes[i + 1], arg, cast: true);
+    }
+    return run(implementation, [receiver, ...arguments]);
+  }
+
   Object? run(IrFunction function, List<Object?> args) {
     final values = <Value, Object?>{};
     Object? read(Value v) => switch (v) {
-      ScalarConstant(:final value) => value,
-      RecordConstant(:final type, :final fields) => _RecordValue(
-        type as RecordType,
-        fields.map(read).toList(),
-      ),
+      Constant() => _constant(v),
       TestedValue(:final test) => read(test.operand),
       _ => values[v],
     };
     void execute(Instruction op) {
       switch (op) {
         case Construct(:final initializer, :final inputs):
-          final instance = _Instance(initializer.owner!);
+          final instance = _Instance(initializer.owner!, this);
           if (initializer.owner != ValueType.object) {
             run(bodies[initializer]!, [instance, ...inputs.map(read)]);
           }
           values[op] = instance;
         case StoreField(:final field, :final receiver, :final value):
           (read(receiver) as _Instance).fields[field] = read(value);
+        case LoadField(:final field, :final receiver):
+          values[op] = (read(receiver) as _Instance).fields[field];
+        case InstanceCall(
+          :final member,
+          :final receiver,
+          :final positional,
+          :final named,
+        ):
+          final instance = read(receiver) as _Instance;
+          final target = program.dispatch(instance.type, member)!;
+          values[op] = _callMember(
+            instance,
+            target,
+            positional.map(read).toList(),
+            {for (final e in named.entries) e.key: read(e.value)},
+          );
         case MakeRecord(:final type, :final inputs):
           values[op] = _RecordValue(
             type as RecordType,
@@ -171,8 +209,28 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
   };
 }
 
-final class _Instance(final ClassType type) {
+final class _Instance(final ClassType type, final FixtureRunner runner) {
   final fields = <InstanceField, Object?>{};
+
+  static final _equality = FunctionTarget(
+    ValueType.object.library,
+    '==',
+    .boolean,
+    [.object],
+    owner: ValueType.object,
+    kind: .method,
+  );
+
+  @override
+  bool operator ==(Object other) {
+    final target = runner.program.dispatch(type, _equality);
+    return target == null
+        ? identical(this, other)
+        : runner._callMember(this, target, [other], const {}) as bool;
+  }
+
+  @override
+  int get hashCode => identityHashCode(this);
 }
 
 final class _RecordValue(final RecordType type, final List<Object?> fields) {

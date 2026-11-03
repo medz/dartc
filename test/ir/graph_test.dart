@@ -171,6 +171,47 @@ void main() {
     },
   );
 
+  test('instance calls validate receiver and supplied argument shape before dispatch', () {
+    final owner = ClassType(f.library, 'Service');
+    final target = FunctionTarget(
+      f.library,
+      'pick',
+      .integer,
+      [.integer, ValueType.string.nullable],
+      owner: owner,
+      kind: .method,
+      isAbstract: true,
+      namedParameters: {'name': true},
+    );
+    final instance = Block([owner]).parameters.single;
+    expect(
+      () => InstanceCall(
+        target,
+        instance,
+        [one],
+        {'name': const Constant.nullValue()},
+      ),
+      returnsNormally,
+    );
+    expect(() => InstanceCall(target, instance, [one]), throwsArgumentError);
+    expect(
+      () => InstanceCall(target, instance, [one], {'other': one}),
+      throwsArgumentError,
+    );
+    expect(
+      () => InstanceCall(target, instance, [one], {'name': one}),
+      throwsArgumentError,
+    );
+    expect(
+      () => InstanceCall(target, one, [one], {'name': one}),
+      throwsArgumentError,
+    );
+    expect(
+      () => DirectCall(target, [instance, one, const Constant.nullValue()]),
+      throwsArgumentError,
+    );
+  });
+
   test('a protected operation and its exception have distinct SSA edges', () {
     final target = FunctionTarget(f.library, 'invoke', .object, [.object]);
     final entry = Block(target.parameterTypes);

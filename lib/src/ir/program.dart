@@ -6,10 +6,30 @@ import 'type.dart';
 final class IrClass(
   /// The nominal identity shared with its members and uses.
   final ClassType type,
-  Iterable<InstanceField> fields,
-) {
+  Iterable<InstanceField> fields, {
+  Iterable<FunctionTarget> members = const [],
+}) {
   /// Declared fields in initialization order, excluding inherited storage.
   final List<InstanceField> fields = .unmodifiable(fields);
+
+  /// Instance members declared here, including implicit accessors and abstract members.
+  final Map<MemberSelector, FunctionTarget> members = _members(type, members);
+
+  static Map<MemberSelector, FunctionTarget> _members(
+    ClassType type,
+    Iterable<FunctionTarget> declarations,
+  ) {
+    final result = <MemberSelector, FunctionTarget>{};
+    for (final member in declarations) {
+      if (member.owner != type ||
+          !member.kind.isVirtual ||
+          result.containsKey(member.selector)) {
+        throw ArgumentError('Foreign or repeated instance member.');
+      }
+      result[member.selector] = member;
+    }
+    return .unmodifiable(result);
+  }
 
   this {
     final names = <String>{};
@@ -33,6 +53,22 @@ final class IrProgram(
 
   /// The verified bodies supplied by the input libraries.
   final List<IrFunction> functions = .unmodifiable(functions);
+  late final _definitions = {for (final c in classes) c.type: c};
+
+  /// Resolves [member] on [receiver], returning `null` if the batch supplies no implementation.
+  FunctionTarget? dispatch(ClassType receiver, FunctionTarget member) {
+    if (!member.kind.isVirtual || !member.owner!.accepts(receiver)) {
+      throw ArgumentError('Incompatible dispatch receiver.');
+    }
+    final selector = member.selector;
+    for (ClassType? type = receiver; type != null; type = type.superclass) {
+      final definition = _definitions[type];
+      if (definition == null) return null;
+      final target = definition.members[selector];
+      if (target != null && !target.isAbstract) return target;
+    }
+    return null;
+  }
 
   /// Writes declared storage and the control-flow graph of each body to [output].
   void writeTo(StringSink output) {
@@ -72,6 +108,19 @@ final class IrProgram(
       }
       if (!names.add((t.library, owner, t.kind, t.name))) {
         throw ArgumentError('Repeated callable body.');
+      }
+      if (t.kind.isVirtual && _definitions[owner]?.members[t.selector] != t) {
+        throw ArgumentError(
+          'Instance body does not match the declared member.',
+        );
+      }
+    }
+    final bodies = {for (final function in this.functions) function.target};
+    for (final c in this.classes) {
+      for (final member in c.members.values) {
+        if (!member.isAbstract && !bodies.contains(member)) {
+          throw ArgumentError('Missing member body.');
+        }
       }
     }
   }
