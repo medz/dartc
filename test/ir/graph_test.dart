@@ -240,6 +240,53 @@ void main() {
     expect(() => DirectCall(redirect([.integer]), [one]), throwsArgumentError);
   });
 
+  test(
+    'function types compare accepted calls, parameter variance and results',
+    () {
+      final narrow = FunctionType(
+        .number,
+        [.integer, .string],
+        namedParameters: {'label': true},
+      );
+      final wide = FunctionType(
+        .integer,
+        [.number, .boolean, .object],
+        namedParameters: {'debug': false, 'label': false},
+      );
+      expect(narrow.accepts(wide), isTrue);
+      expect(wide.accepts(narrow), isFalse);
+      final reordered = FunctionType(
+        .integer,
+        [.number, .object, .boolean],
+        namedParameters: {'label': false, 'debug': false},
+      );
+      expect(wide, reordered);
+      expect(wide.hashCode, reordered.hashCode);
+      expect(ValueType.function.accepts(narrow), isTrue);
+      final optional = FunctionType(.voidType, [
+        .integer,
+        .integer,
+      ], optionalPositional: 1);
+      expect(
+        optional.accepts(
+          FunctionType(.integer, [.number, .number], optionalPositional: 2),
+        ),
+        isTrue,
+      );
+      expect(
+        optional.accepts(FunctionType(.integer, [.number, .number])),
+        isFalse,
+      );
+      final fn = Block([narrow]).parameters.single;
+      expect(() => FunctionCall(fn, [one]), throwsArgumentError);
+      expect(
+        () => FunctionCall(fn, [one], {'label': one}),
+        throwsArgumentError,
+      );
+      expect(() => FunctionCall(one, []), throwsArgumentError);
+    },
+  );
+
   test('a protected operation and its exception have distinct SSA edges', () {
     final target = FunctionTarget(f.library, 'invoke', .object, [.object]);
     final entry = Block(target.parameterTypes);

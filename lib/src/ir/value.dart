@@ -28,6 +28,19 @@ sealed class const Constant(super.type) extends Value {
   const factory nullValue() = ScalarConstant._nullValue;
 }
 
+/// A canonical tear-off of a top-level function, static method or constructor.
+final class FunctionConstant(
+  /// The referenced declaration, including the source factory for a redirect.
+  final FunctionTarget target,
+) extends Constant {
+  this : super(target.signature) {
+    if (target.kind.isVirtual ||
+        target.kind == .initializer && target.owner!.isAbstract) {
+      throw ArgumentError('Expected a callable without a bound receiver.');
+    }
+  }
+}
+
 /// A scalar literal with its Dart value and static type.
 final class const ScalarConstant._(
   /// The Dart scalar represented by this operand.
@@ -77,6 +90,8 @@ sealed class Instruction(super.type) extends Value {
   bool get mayThrow => switch (this) {
     DirectCall() ||
     InstanceCall() ||
+    FunctionCall() ||
+    BindMethod() ||
     Construct() ||
     TypeCast() ||
     NullCheck() ||
@@ -85,6 +100,64 @@ sealed class Instruction(super.type) extends Value {
     IntBinary(:final operator) => operator.mayThrow,
     TypeTest() || RecordGet() || StoreField() || LoadField() => false,
   };
+}
+
+/// Binds a method to its evaluated receiver, performing virtual selection at extraction.
+final class BindMethod(
+  /// The method selected statically at this access.
+  final FunctionTarget method,
+
+  /// The receiver retained for subsequent calls.
+  final Value receiver, {
+
+  /// Whether `super` has already selected the implementation.
+  final bool direct = false,
+}) extends Instruction {
+  this : super(method.signature) {
+    if (method.kind != .method ||
+        !method.owner!.accepts(receiver.type) ||
+        direct && method.isAbstract) {
+      throw ArgumentError('Invalid method tear-off.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [receiver];
+}
+
+/// Invokes a function value with the supplied arguments and the destination's defaults.
+final class FunctionCall(
+  /// The evaluated function value.
+  final Value function,
+  Iterable<Value> positional, [
+  Map<String, Value> named = const {},
+]) extends Instruction {
+  /// Supplied positional arguments.
+  final List<Value> positional = .unmodifiable(positional);
+
+  /// Supplied named arguments.
+  final Map<String, Value> named = .unmodifiable(named);
+  this
+    : super(switch (function.type) {
+        FunctionType(:final result) => result,
+        _ => throw ArgumentError('Expected a non-nullable function signature.'),
+      }) {
+    _checkCall(function.type as FunctionType, this.positional, this.named);
+  }
+  @override
+  Iterable<Value> get inputs => [function, ...positional, ...named.values];
+}
+
+void _checkCall(
+  FunctionType signature,
+  List<Value> positional,
+  Map<String, Value> named,
+) {
+  final slots = signature.bind<Value?>(positional, named, (_) => null);
+  for (final (i, value) in slots.indexed) {
+    if (value != null && !signature.parameters[i].accepts(value.type)) {
+      throw ArgumentError('Incompatible argument for ${signature.dartName}.');
+    }
+  }
 }
 
 /// Reads storage selected by its declaring class, without invoking a getter.
@@ -126,16 +199,7 @@ final class InstanceCall(
     if (!member.kind.isVirtual || !member.owner!.accepts(receiver.type)) {
       throw ArgumentError('Incompatible dispatch receiver.');
     }
-    final values = member.bind<Value?>(
-      this.positional,
-      this.named,
-      (_) => null,
-    );
-    for (final (i, value) in values.indexed) {
-      if (value != null && !member.parameterTypes[i + 1].accepts(value.type)) {
-        throw ArgumentError('Incompatible argument to ${member.name}.');
-      }
-    }
+    _checkCall(member.signature, this.positional, this.named);
   }
 
   @override

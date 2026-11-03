@@ -19,6 +19,52 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
   switch (expression) {
     case ast.ThisExpression():
       return context.receiver!;
+    case ast.ImplicitCallReference(
+      :final expression,
+      :final element,
+      typeArgumentTypes: [],
+    ):
+      final receiver = lowerExpression(context, expression);
+      if (receiver == null) return null;
+      if (element == null || element.enclosingElement is! ClassElement) {
+        unsupported(unit, expression, 'implicit call tear-off');
+      }
+      return context.emit(
+        BindMethod(
+          context.bindings.target(element, unit, expression),
+          receiver,
+        ),
+      );
+    case ast.ConstructorReference(:final constructorName):
+      if (constructorName.type.importPrefix?.element
+          case final PrefixElement prefix
+          when prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
+        unsupported(unit, expression, 'deferred constructor tear-off');
+      }
+      return FunctionConstant(
+        context.bindings.target(constructorName.element!, unit, expression),
+      );
+    case ast.Identifier(element: final ExecutableElement callee)
+        when callee is TopLevelFunctionElement ||
+            callee is MethodElement && callee.isStatic:
+      if (expression is ast.PrefixedIdentifier && expression.isDeferred) {
+        unsupported(unit, expression, 'deferred function tear-off');
+      }
+      return FunctionConstant(
+        context.bindings.target(callee, unit, expression),
+      );
+    case ast.PropertyAccess(
+          propertyName: ast.SimpleIdentifier(
+            element: final MethodElement method,
+          ),
+          target: final target?,
+        )
+        when method.isStatic &&
+            target is ast.PrefixedIdentifier &&
+            !target.isDeferred:
+      return FunctionConstant(
+        context.bindings.target(method, unit, expression),
+      );
     case ast.InstanceCreationExpression(
       :final constructorName,
       :final argumentList,
@@ -191,6 +237,13 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
     case ast.PrefixedIdentifier() ||
         ast.PropertyAccess() ||
         ast.SimpleIdentifier(element: GetterElement(isStatic: false)) ||
+        ast.SimpleIdentifier(element: MethodElement(isStatic: false)) ||
+        ast.FunctionExpressionInvocation() ||
+        ast.MethodInvocation(
+          methodName: ast.SimpleIdentifier(
+            element: null || GetterElement(isStatic: false),
+          ),
+        ) ||
         ast.MethodInvocation(
           methodName: ast.SimpleIdentifier(
             element: MethodElement(isStatic: false),

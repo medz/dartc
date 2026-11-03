@@ -55,8 +55,9 @@ final class FunctionTarget(
   final FunctionKind kind = .function,
 
   /// The number of trailing positional parameters that may be omitted.
-  final int optionalPositional = 0,
+  int optionalPositional = 0,
   Map<String, bool> namedParameters = const {},
+  Iterable<int> covariantParameters = const [],
 
   /// Whether the instance member is declared without an implementation.
   final bool isAbstract = false,
@@ -64,20 +65,39 @@ final class FunctionTarget(
   /// The constructor named by a redirecting factory declaration.
   final FunctionTarget? redirect,
 }) {
-  /// The entry parameter types, including the receiver when present.
-  final List<ValueType> parameterTypes = .unmodifiable([
-    if (kind.hasReceiver && owner != null) owner,
-    ...parameters,
-  ]);
+  /// The Dart call signature, excluding the receiver and returning the instance for constructors.
+  final FunctionType signature = .new(
+    kind == .initializer && owner != null ? owner : returnType,
+    parameters,
+    optionalPositional: optionalPositional,
+    namedParameters: namedParameters,
+  );
 
-  /// Named parameters in declaration order, with `true` for required names.
-  final Map<String, bool> namedParameters = .unmodifiable(namedParameters);
+  /// The SSA entry parameter types, including the receiver when present.
+  late final List<ValueType> parameterTypes = kind.hasReceiver
+      ? .unmodifiable([owner!, ...signature.parameters])
+      : signature.parameters;
 
-  /// The number of explicit positional parameters.
-  int get positionalCount =>
-      parameterTypes.length -
-      (kind.hasReceiver ? 1 : 0) -
-      namedParameters.length;
+  /// Explicit method parameters checked covariantly at entry.
+  final Set<int> covariantParameters = .unmodifiable(covariantParameters);
+
+  /// The runtime type of a tear-off. Covariant parameters reify as `Object?`.
+  late final FunctionType reifiedSignature = covariantParameters.isEmpty
+      ? signature
+      : .new(
+          signature.result,
+          [
+            for (final (i, type) in signature.parameters.indexed)
+              covariantParameters.contains(i)
+                  ? ValueType.object.nullable
+                  : type,
+          ],
+          optionalPositional:
+              signature.positionalCount - signature.requiredPositional,
+          namedParameters: {
+            for (final e in signature.named.entries) e.key: e.value.required,
+          },
+        );
 
   /// The name used for instance lookup after the receiver has been evaluated.
   MemberSelector get selector => (
@@ -95,58 +115,18 @@ final class FunctionTarget(
     return target;
   }
 
-  /// The explicit parameter slots that require a default on omission.
-  Iterable<int> get optionalSlots sync* {
-    final count = positionalCount;
-    for (var i = count - optionalPositional; i < count; i++) {
-      yield i;
-    }
-    for (final (i, required) in namedParameters.values.indexed) {
-      if (!required) yield count + i;
-    }
-  }
-
-  /// Places supplied arguments in this declaration's order and fills omitted slots.
-  List<T> bind<T>(
-    List<T> positional,
-    Map<String, T> named,
-    T Function(int) omitted,
-  ) {
-    final count = positionalCount;
-    if (positional.length < count - optionalPositional ||
-        positional.length > count ||
-        named.keys.any((name) => !namedParameters.containsKey(name))) {
-      throw ArgumentError('Arguments do not match $name.');
-    }
-    final result = <T>[...positional];
-    while (result.length < count) {
-      result.add(omitted(result.length));
-    }
-    for (final MapEntry(:key, value: required) in namedParameters.entries) {
-      if (named.containsKey(key)) {
-        result.add(named[key] as T);
-      } else if (required) {
-        throw ArgumentError('Missing required argument $key.');
-      } else {
-        result.add(omitted(result.length));
-      }
-    }
-    return result;
-  }
-
   this {
     if ((owner != null && owner!.library != library) ||
         (kind != .function && owner == null) ||
+        this.covariantParameters.any(
+          (i) => !kind.isVirtual || i < 0 || i >= signature.parameters.length,
+        ) ||
         (kind == .initializer && returnType != .voidType) ||
         (kind == .factory && returnType != owner) ||
-        optionalPositional < 0 ||
-        optionalPositional > positionalCount ||
-        optionalPositional > 0 && namedParameters.isNotEmpty ||
         isAbstract && !kind.isVirtual ||
-        kind == .getter &&
-            (positionalCount != 0 || namedParameters.isNotEmpty) ||
+        kind == .getter && signature.parameters.isNotEmpty ||
         kind == .setter &&
-            (positionalCount != 1 ||
+            (signature.positionalCount != 1 ||
                 optionalPositional != 0 ||
                 namedParameters.isNotEmpty ||
                 returnType != .voidType)) {
@@ -161,26 +141,8 @@ final class FunctionTarget(
           !returnType.accepts(target.owner!)) {
         throw ArgumentError('Invalid redirecting factory target.');
       }
-      final positional = parameterTypes.take(positionalCount).toList();
-      final named = {
-        for (final (i, name) in namedParameters.keys.indexed)
-          name: parameterTypes[positionalCount + i],
-      };
-      // Both the smallest legal call and the full parameter list must forward.
-      target.bind<ValueType?>(
-        positional.take(positionalCount - optionalPositional).toList(),
-        {
-          for (final e in named.entries)
-            if (namedParameters[e.key]!) e.key: e.value,
-        },
-        (_) => null,
-      );
-      final slots = target.bind<ValueType?>(positional, named, (_) => null);
-      final offset = target.kind.hasReceiver ? 1 : 0;
-      for (final (i, type) in slots.indexed) {
-        if (type != null && !target.parameterTypes[offset + i].accepts(type)) {
-          throw ArgumentError('Incompatible forwarded parameter.');
-        }
+      if (!signature.accepts(target.signature)) {
+        throw ArgumentError('Incompatible redirecting factory signature.');
       }
     }
   }

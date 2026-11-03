@@ -12,18 +12,6 @@ void writeFunction(
 ) {
   final labels = {for (final (i, b) in blocks.indexed) b: 'b$i'};
   final ids = <Value, int>{};
-  String value(Value v) => switch (v) {
-    ScalarConstant(value: final String s) => jsonEncode(s),
-    ScalarConstant(:final value) => '$value',
-    RecordConstant(:final type, :final fields) =>
-      'const ${type.dartName}[${fields.map(value).join(', ')}]',
-    TestedValue(:final test, :final type) =>
-      '${value(test.operand)} as ${type.dartName}',
-    UnwindValue() => v == UnwindValue.exception ? 'exception' : 'stackTrace',
-    _ => '%${ids.putIfAbsent(v, () => ids.length)}',
-  };
-  String edge(Jump e) =>
-      '${labels[e.target]}(${e.arguments.map(value).join(', ')})';
   String symbol(FunctionTarget t) {
     final prefix = switch (t.kind) {
       .getter => 'get ',
@@ -33,11 +21,32 @@ void writeFunction(
     return '${t.library}::${t.owner == null ? '' : '${t.owner!.dartName}.'}$prefix${t.name}';
   }
 
+  String value(Value v) => switch (v) {
+    ScalarConstant(value: final String s) => jsonEncode(s),
+    ScalarConstant(:final value) => '$value',
+    FunctionConstant(:final target) => 'tearoff ${symbol(target)}',
+    RecordConstant(:final type, :final fields) =>
+      'const ${type.dartName}[${fields.map(value).join(', ')}]',
+    TestedValue(:final test, :final type) =>
+      '${value(test.operand)} as ${type.dartName}',
+    UnwindValue() => v == UnwindValue.exception ? 'exception' : 'stackTrace',
+    _ => '%${ids.putIfAbsent(v, () => ids.length)}',
+  };
+  String edge(Jump e) =>
+      '${labels[e.target]}(${e.arguments.map(value).join(', ')})';
+  String arguments(List<Value> positional, Map<String, Value> named) => [
+    ...positional.map(value),
+    for (final e in named.entries) '${e.key}: ${value(e.value)}',
+  ].join(', ');
   String operation(Instruction op) => switch (op) {
+    BindMethod() =>
+      'bind ${op.direct ? 'super ' : ''}${value(op.receiver)} ${symbol(op.method)}',
+    FunctionCall() =>
+      'callValue ${value(op.function)}(${arguments(op.positional, op.named)})',
     LoadField() =>
       'load ${value(op.receiver)}.${op.field.owner.dartName}::${op.field.name}',
     InstanceCall() =>
-      'dispatch ${value(op.receiver)} ${symbol(op.member)}(${[...op.positional.map(value), for (final e in op.named.entries) '${e.key}: ${value(e.value)}'].join(', ')})',
+      'dispatch ${value(op.receiver)} ${symbol(op.member)}(${arguments(op.positional, op.named)})',
     Construct() =>
       'new ${symbol(op.initializer)}(${op.inputs.map(value).join(', ')})',
     StoreField() =>

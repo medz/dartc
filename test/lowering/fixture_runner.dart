@@ -7,30 +7,50 @@ final class FixtureRunner(
 ) {
   final bodies = {for (final f in program.functions) f.target: f};
 
+  final _staticFunctions = <FunctionTarget, _FunctionValue>{};
+
   Object? _constant(Constant value) => switch (value) {
     ScalarConstant(:final value) => value,
+    FunctionConstant(:final target) => _staticFunctions.putIfAbsent(
+      target,
+      () => _FunctionValue(target),
+    ),
     RecordConstant(:final type, :final fields) => _RecordValue(
       type as RecordType,
       fields.map(_constant).toList(),
     ),
   };
 
-  Object? _callMember(
-    _Instance receiver,
-    FunctionTarget target,
+  Object? _enter(FunctionTarget target, List<Object?> arguments) {
+    final body = bodies[target];
+    return body != null
+        ? run(body, arguments)
+        : imports[(target.library, target.name)]!(arguments.single as int);
+  }
+
+  _Instance _construct(FunctionTarget init, List<Object?> arguments) {
+    final instance = _Instance(init.owner!, this);
+    if (init.owner != ValueType.object) _enter(init, [instance, ...arguments]);
+    return instance;
+  }
+
+  Object? _invoke(
+    _FunctionValue fn,
     List<Object?> positional,
     Map<String, Object?> named,
   ) {
-    final implementation = bodies[target]!;
-    final arguments = target.bind<Object?>(
+    final target = fn.target.implementation;
+    final arguments = target.signature.bind<Object?>(
       positional,
       named,
-      (i) => _constant(implementation.defaults[i]!),
+      (i) => _constant(bodies[target]!.defaults[i]!),
     );
     for (final (i, arg) in arguments.indexed) {
-      _typeOperation(target.parameterTypes[i + 1], arg, cast: true);
+      _typeOperation(target.signature.parameters[i], arg, cast: true);
     }
-    return run(implementation, [receiver, ...arguments]);
+    return target.kind == .initializer
+        ? _construct(target, arguments)
+        : _enter(target, [?fn.receiver, ...arguments]);
   }
 
   Object? run(IrFunction function, List<Object?> args) {
@@ -43,11 +63,19 @@ final class FixtureRunner(
     void execute(Instruction op) {
       switch (op) {
         case Construct(:final initializer, :final inputs):
-          final instance = _Instance(initializer.owner!, this);
-          if (initializer.owner != ValueType.object) {
-            run(bodies[initializer]!, [instance, ...inputs.map(read)]);
-          }
-          values[op] = instance;
+          values[op] = _construct(initializer, inputs.map(read).toList());
+        case BindMethod(:final method, :final receiver, :final direct):
+          final instance = read(receiver) as _Instance;
+          values[op] = _FunctionValue(
+            direct ? method : program.dispatch(instance.type, method)!,
+            instance,
+          );
+        case FunctionCall(:final function, :final positional, :final named):
+          values[op] = _invoke(
+            read(function) as _FunctionValue,
+            positional.map(read).toList(),
+            {for (final e in named.entries) e.key: read(e.value)},
+          );
         case StoreField(:final field, :final receiver, :final value):
           (read(receiver) as _Instance).fields[field] = read(value);
         case LoadField(:final field, :final receiver):
@@ -60,9 +88,8 @@ final class FixtureRunner(
         ):
           final instance = read(receiver) as _Instance;
           final target = program.dispatch(instance.type, member)!;
-          values[op] = _callMember(
-            instance,
-            target,
+          values[op] = _invoke(
+            _FunctionValue(target, instance),
             positional.map(read).toList(),
             {for (final e in named.entries) e.key: read(e.value)},
           );
@@ -106,11 +133,7 @@ final class FixtureRunner(
           values[op] = (read(left) == read(right)) != negated;
         case DirectCall(:final target, :final inputs):
           final arguments = inputs.map(read).toList();
-          values[op] = bodies.containsKey(target)
-              ? run(bodies[target]!, arguments)
-              : imports[(target.library, target.name)]!(
-                  arguments.single as int,
-                );
+          values[op] = _enter(target, arguments);
       }
     }
 
@@ -166,8 +189,15 @@ final class FixtureRunner(
 Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
   Object? run<T>() => cast ? value as T : value is T;
   Object? scalar<T>() => type == type.nonNullable ? run<T>() : run<T?>();
-  if (value is _Instance) {
-    final ok = type.accepts(value.type);
+  final actual = switch (value) {
+    _Instance(:final type) => type,
+    _FunctionValue(:final target) => target.reifiedSignature,
+    _ => null,
+  };
+  if (actual != null || type.nonNullable is FunctionType) {
+    final ok = actual != null
+        ? type.accepts(actual)
+        : value == null && type.accepts(.nullType);
     if (!cast) return ok;
     if (!ok) throw TypeError();
     return value;
@@ -203,6 +233,7 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     ValueType.string => scalar<String>(),
     ValueType.boolean => scalar<bool>(),
     ValueType.object => scalar<Object>(),
+    ValueType.function => scalar<Function>(),
     ValueType.error => scalar<Error>(),
     ValueType.typeError => scalar<TypeError>(),
     ValueType.stackTrace => scalar<StackTrace>(),
@@ -216,6 +247,19 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
           : value == null && type.accepts(.nullType),
     _ => throw StateError('Unexpected fixture type ${type.dartName}'),
   };
+}
+
+final class _FunctionValue(
+  final FunctionTarget target, [
+  final _Instance? receiver,
+]) {
+  @override
+  bool operator ==(Object other) =>
+      other is _FunctionValue &&
+      target == other.target &&
+      identical(receiver, other.receiver);
+  @override
+  int get hashCode => Object.hash(target, identityHashCode(receiver));
 }
 
 final class _Instance(final ClassType type, final FixtureRunner runner) {
@@ -235,7 +279,8 @@ final class _Instance(final ClassType type, final FixtureRunner runner) {
     final target = runner.program.dispatch(type, _equality);
     return target == null
         ? identical(this, other)
-        : runner._callMember(this, target, [other], const {}) as bool;
+        : runner._invoke(_FunctionValue(target, this), [other], const {})
+              as bool;
   }
 
   @override

@@ -27,7 +27,7 @@ final class IrFunction(
   /// sealed and reachable, and each SSA definition must dominate its uses.
   /// Each return must supply a compatible value; a bare return supplies `null`.
   this {
-    final optional = target.optionalSlots;
+    final optional = target.signature.optionalSlots;
     final offset = target.kind.hasReceiver ? 1 : 0;
     if (target.isAbstract ||
         target.redirect != null ||

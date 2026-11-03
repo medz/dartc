@@ -21,6 +21,9 @@ sealed class const ValueType() {
   /// The common supertype of all Dart record shapes.
   static const ClassType record = ClassType._core('Record', object, true);
 
+  /// The supertype of all function values.
+  static const ClassType function = ClassType._core('Function', object, true);
+
   /// The Dart trace paired with a caught exception.
   static const ClassType stackTrace = ClassType._core(
     'StackTrace',
@@ -68,6 +71,12 @@ sealed class const ValueType() {
       return type == nullType ||
           nonNullable == object ||
           nonNullable.accepts(type.nonNullable);
+    }
+    if (type is FunctionType) {
+      final target = this;
+      return target is FunctionType
+          ? target._accepts(type)
+          : target == function || target == object;
     }
     if (type is RecordType) {
       final target = this;
@@ -153,6 +162,158 @@ final class RecordType._(
     Object.hashAll(slots.keys),
     Object.hashAll(fields),
   );
+}
+
+/// A non-generic Dart function type with positional and named parameter slots.
+final class FunctionType._(
+  /// The result visible at a call site.
+  final ValueType result,
+
+  /// Explicit parameter types in declaration order.
+  final List<ValueType> parameters,
+
+  /// The number of positional parameters, including optional ones.
+  final int positionalCount,
+
+  /// The number of positional arguments that must be supplied.
+  final int requiredPositional,
+
+  /// Named parameter slots and requiredness.
+  final Map<String, ({int slot, bool required})> named,
+) extends ValueType {
+  /// Builds a signature. Named parameters occupy the last slots in map order.
+  factory(
+    ValueType result,
+    Iterable<ValueType> parameters, {
+    int optionalPositional = 0,
+    Map<String, bool> namedParameters = const {},
+  }) {
+    final types = List<ValueType>.unmodifiable(parameters);
+    final count = types.length - namedParameters.length;
+    if (optionalPositional < 0 ||
+        optionalPositional > count ||
+        optionalPositional > 0 && namedParameters.isNotEmpty) {
+      throw ArgumentError('Invalid optional and named parameter counts.');
+    }
+    return ._(
+      result,
+      types,
+      count,
+      count - optionalPositional,
+      .unmodifiable({
+        for (final (i, e) in namedParameters.entries.indexed)
+          e.key: (slot: count + i, required: e.value),
+      }),
+    );
+  }
+
+  /// Slots whose values can be supplied by the destination's defaults.
+  Iterable<int> get optionalSlots sync* {
+    for (var i = requiredPositional; i < positionalCount; i++) {
+      yield i;
+    }
+    for (final p in named.values) {
+      if (!p.required) yield p.slot;
+    }
+  }
+
+  /// Places supplied arguments in declaration order and fills omitted slots.
+  List<T> bind<T>(
+    List<T> positional,
+    Map<String, T> supplied,
+    T Function(int) omitted,
+  ) {
+    if (positional.length < requiredPositional ||
+        positional.length > positionalCount ||
+        supplied.keys.any((name) => !named.containsKey(name))) {
+      throw ArgumentError('Arguments do not match $dartName.');
+    }
+    final values = <T>[...positional];
+    while (values.length < positionalCount) {
+      values.add(omitted(values.length));
+    }
+    for (final MapEntry(:key, value: p) in named.entries) {
+      if (supplied.containsKey(key)) {
+        values.add(supplied[key] as T);
+      } else if (p.required) {
+        throw ArgumentError('Missing required argument $key.');
+      } else {
+        values.add(omitted(p.slot));
+      }
+    }
+    return values;
+  }
+
+  bool _accepts(FunctionType actual) {
+    if (!result.accepts(actual.result) ||
+        actual.requiredPositional > requiredPositional ||
+        actual.positionalCount < positionalCount) {
+      return false;
+    }
+    for (var i = 0; i < positionalCount; i++) {
+      if (!actual.parameters[i].accepts(parameters[i])) return false;
+    }
+    for (final MapEntry(:key, value: p) in named.entries) {
+      final q = actual.named[key];
+      if (q == null || !actual.parameters[q.slot].accepts(parameters[p.slot])) {
+        return false;
+      }
+    }
+    return actual.named.entries.every(
+      (e) => !e.value.required || named[e.key]?.required == true,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FunctionType &&
+          result == other.result &&
+          positionalCount == other.positionalCount &&
+          requiredPositional == other.requiredPositional &&
+          named.length == other.named.length &&
+          parameters
+              .take(positionalCount)
+              .indexed
+              .every((p) => p.$2 == other.parameters[p.$1]) &&
+          named.entries.every((e) {
+            final p = other.named[e.key];
+            return p != null &&
+                p.required == e.value.required &&
+                parameters[e.value.slot] == other.parameters[p.slot];
+          });
+
+  @override
+  int get hashCode => Object.hash(
+    result,
+    requiredPositional,
+    Object.hashAll(parameters.take(positionalCount)),
+    Object.hashAllUnordered(
+      named.entries.map(
+        (e) => Object.hash(e.key, e.value.required, parameters[e.value.slot]),
+      ),
+    ),
+  );
+
+  @override
+  String get dartName {
+    final parts = [
+      for (final p in parameters.take(requiredPositional)) p.dartName,
+    ];
+    if (requiredPositional < positionalCount) {
+      parts.add(
+        '[${parameters.getRange(requiredPositional, positionalCount).map((p) => p.dartName).join(', ')}]',
+      );
+    }
+    if (named.isNotEmpty) {
+      final fields = [
+        for (final MapEntry(:key, value: p) in named.entries)
+          '${p.required ? 'required ' : ''}${parameters[p.slot].dartName} $key',
+      ];
+      parts.add('{${fields.join(', ')}}');
+    }
+    return '${result.dartName} Function(${parts.join(', ')})';
+  }
 }
 
 /// A nominal Dart class shared by its declarations, value types and runtime tests.

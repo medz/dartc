@@ -3,6 +3,7 @@ import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
 import 'fixture_runner.dart';
+import 'fixtures/callables.dart' as callables;
 import 'fixtures/conditionals.dart' as conditionals;
 import 'fixtures/defaults.dart' as defaults;
 import 'fixtures/destructure.dart' as destructure;
@@ -34,6 +35,7 @@ void main() {
   setUpAll(() async {
     final result = await _lower([
       'functions.dart',
+      'callables.dart',
       'updates.dart',
       'loops.dart',
       'nullability.dart',
@@ -551,6 +553,39 @@ void main() {
       }
     }
   });
+
+  test(
+    'tear-offs retain their receiver, call shape, defaults and equality',
+    () {
+      for (final mode in [0, 1, 2, 3, 4]) {
+        for (final n in [-1, 0, 3]) {
+          compare('indirect', [mode, n], () => callables.indirect(mode, n));
+        }
+        compare('sameMethods', [mode], () => callables.sameMethods(mode));
+      }
+      compare('sameCallable', [], callables.sameCallable);
+      compare('selfDefault', [], callables.selfDefault);
+      for (final n in [-1, 4]) {
+        compare('parenthesizedGetter', [
+          n,
+        ], () => callables.parenthesizedGetter(n));
+        compare('getterCall', [n], () => callables.getterCall(n));
+        compare('objectCall', [n], () => callables.objectCall(n));
+      }
+      for (final x in [null, 4, 'x']) {
+        compare('covariantValue', [x], () => callables.covariantValue(x));
+      }
+      for (final flag in [false, true]) {
+        compare('factoryValue', [flag], () => callables.factoryValue(flag));
+        for (final n in [-1, 4]) {
+          compare('selectedCall', [
+            flag,
+            n,
+          ], () => callables.selectedCall(flag, n));
+        }
+      }
+    },
+  );
 
   for (final (file, line) in [
     ('index_update.dart', 3),

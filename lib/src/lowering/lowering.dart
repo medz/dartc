@@ -21,6 +21,8 @@ abstract final class Lowering() {
     for (final unit in input.libraries.expand((library) => library.units)) {
       for (final node in unit.unit.declarations) {
         switch (node) {
+          case ast.TypeAlias():
+            break;
           case ast.ClassDeclaration():
             classes.add(lowerClass(unit, bindings, node, functions));
           case ast.FunctionDeclaration(

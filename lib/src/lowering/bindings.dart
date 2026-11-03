@@ -20,62 +20,68 @@ final class Bindings() {
     Set<ConstructorElement>? redirects,
   }) {
     element = element.baseElement;
-    return _targets.putIfAbsent(element, () {
-      final parameters = element.formalParameters;
-      final enclosing = element.enclosingElement;
-      final owner = enclosing is InterfaceElement
-          ? classType(enclosing, unit, site)
-          : null;
-      final kind = switch (element) {
-        ConstructorElement(:final isFactory) =>
-          isFactory ? FunctionKind.factory : FunctionKind.initializer,
-        GetterElement(isStatic: false) => FunctionKind.getter,
-        SetterElement(isStatic: false) => FunctionKind.setter,
-        MethodElement(isStatic: false) => FunctionKind.method,
-        _ => FunctionKind.function,
-      };
-      if (element.typeParameters.isNotEmpty) {
-        unsupported(unit, site, 'generic functions');
-      }
-      FunctionTarget? destination;
-      if (element case final ConstructorElement ctor
-          when ctor.isFactory && ctor.redirectedConstructor != null) {
-        final path = redirects ?? <ConstructorElement>{};
-        if (!path.add(ctor)) unsupported(unit, site, 'cyclic factory redirect');
-        destination = target(
-          ctor.redirectedConstructor!,
-          unit,
-          site,
-          redirects: path,
-        );
-      }
-      final function = FunctionTarget(
-        element.library.uri,
-        element.name!,
-        kind == .initializer
-            ? .voidType
-            : valueType(element.returnType, unit, site),
-        parameters.map((p) => valueType(p.type, unit, site)),
-        owner: owner,
-        kind: kind,
-        redirect: destination,
-        isAbstract: kind.isVirtual && element.isAbstract,
-        optionalPositional: parameters
-            .where((p) => p.isOptionalPositional)
-            .length,
-        namedParameters: {
-          for (final p in parameters)
-            if (p.isNamed) p.name!: p.isRequiredNamed,
-        },
+    final previous = _targets[element];
+    if (previous != null) return previous;
+    final parameters = element.formalParameters;
+    final enclosing = element.enclosingElement;
+    final owner = enclosing is InterfaceElement
+        ? classType(enclosing, unit, site)
+        : null;
+    final kind = switch (element) {
+      ConstructorElement(:final isFactory) =>
+        isFactory ? FunctionKind.factory : FunctionKind.initializer,
+      GetterElement(isStatic: false) => FunctionKind.getter,
+      SetterElement(isStatic: false) => FunctionKind.setter,
+      MethodElement(isStatic: false) => FunctionKind.method,
+      _ => FunctionKind.function,
+    };
+    if (element.typeParameters.isNotEmpty) {
+      unsupported(unit, site, 'generic functions');
+    }
+    FunctionTarget? destination;
+    if (element case final ConstructorElement ctor
+        when ctor.isFactory && ctor.redirectedConstructor != null) {
+      final path = redirects ?? <ConstructorElement>{};
+      if (!path.add(ctor)) unsupported(unit, site, 'cyclic factory redirect');
+      destination = target(
+        ctor.redirectedConstructor!,
+        unit,
+        site,
+        redirects: path,
       );
-      if (destination == null && parameters.any((p) => p.isOptional)) {
-        _defaults[function] = {
+    }
+    final function = FunctionTarget(
+      element.library.uri,
+      element.name!,
+      kind == .initializer
+          ? .voidType
+          : valueType(element.returnType, unit, site),
+      parameters.map((p) => valueType(p.type, unit, site)),
+      owner: owner,
+      kind: kind,
+      redirect: destination,
+      covariantParameters: [
+        if (kind.isVirtual)
           for (final (i, p) in parameters.indexed)
-            if (p.isOptional) i: constantOf(p, unit, site),
-        };
-      }
-      return function;
-    });
+            if (p.isCovariant) i,
+      ],
+      isAbstract: kind.isVirtual && element.isAbstract,
+      optionalPositional: parameters
+          .where((p) => p.isOptionalPositional)
+          .length,
+      namedParameters: {
+        for (final p in parameters)
+          if (p.isNamed) p.name!: p.isRequiredNamed,
+      },
+    );
+    _targets[element] = function;
+    if (destination == null && parameters.any((p) => p.isOptional)) {
+      _defaults[function] = {
+        for (final (i, p) in parameters.indexed)
+          if (p.isOptional) i: constantOf(p, unit, site),
+      };
+    }
+    return function;
   }
 
   /// Defaults supplied by an executable declaration.
@@ -83,8 +89,9 @@ final class Bindings() {
       _defaults[target] ?? const {};
 
   /// Binds evaluated arguments to their destination, including its declared defaults.
-  List<Value> bind(FunctionTarget target, EvaluatedArguments args) =>
-      target.bind(args.positional, args.named, (i) => _defaults[target]![i]!);
+  List<Value> bind(FunctionTarget target, EvaluatedArguments args) => target
+      .signature
+      .bind(args.positional, args.named, (i) => _defaults[target]![i]!);
 
   /// Returns the same slot for every use of this field declaration.
   InstanceField field(
@@ -129,6 +136,9 @@ final class Bindings() {
       if (value.toBoolValue() case final b?) return .boolean(b);
       if (value.toDoubleValue() case final d?) return .floating(d);
       if (value.toStringValue() case final s?) return .string(s);
+      if (value.toFunctionValue() case final executable?) {
+        return FunctionConstant(target(executable, unit, site));
+      }
       if (value.toRecordValue() case final record?) {
         final type = valueType(value.type!, unit, site);
         if (type is RecordType) {
@@ -153,6 +163,22 @@ final class Bindings() {
     final ValueType base = switch (type) {
       dart.VoidType() => .voidType,
       dart.NeverType() => .never,
+      dart.FunctionType(
+        :final formalParameters,
+        :final returnType,
+        typeParameters: [],
+      ) =>
+        FunctionType(
+          valueType(returnType, unit, site),
+          formalParameters.map((p) => valueType(p.type, unit, site)),
+          optionalPositional: formalParameters
+              .where((p) => p.isOptionalPositional)
+              .length,
+          namedParameters: {
+            for (final p in formalParameters)
+              if (p.isNamed) p.name!: p.isRequiredNamed,
+          },
+        ),
       dart.RecordType(:final positionalFields, :final namedFields) =>
         RecordType(
           positionalFields.map((field) => valueType(field.type, unit, site)),
@@ -187,6 +213,7 @@ final class Bindings() {
         'String' => ValueType.string,
         'bool' => ValueType.boolean,
         'Record' => ValueType.record,
+        'Function' => ValueType.function,
         _ => null,
       };
       if (builtin != null) return builtin;

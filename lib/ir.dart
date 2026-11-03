@@ -24,15 +24,18 @@ export 'src/ir/function.dart' show IrFunction;
 export 'src/ir/program.dart' show IrClass, IrProgram;
 export 'src/ir/signature.dart'
     show FunctionKind, FunctionTarget, InstanceField, MemberSelector;
-export 'src/ir/type.dart' show ClassType, RecordType, ValueType;
+export 'src/ir/type.dart' show ClassType, FunctionType, RecordType, ValueType;
 export 'src/ir/value.dart'
     show
+        BindMethod,
         BlockParameter,
         Constant,
         Construct,
         DirectCall,
         Equals,
         Instruction,
+        FunctionCall,
+        FunctionConstant,
         InstanceCall,
         IntBinary,
         IntOperator,

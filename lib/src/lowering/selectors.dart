@@ -55,7 +55,72 @@ final class SelectorChain(
     return context.refined(value);
   }
 
-  Value? _visit(ast.Expression node) {
+  Value? _visit(
+    ast.Expression node, {
+    ast.ArgumentList? getterArguments,
+    MethodElement? getterCall,
+  }) {
+    Value? invokeValue(
+      Value? input,
+      ast.ArgumentList arguments, [
+      MethodElement? callMethod,
+      Value? Function(Value)? getFunction,
+    ]) {
+      if (input == null) return null;
+      final args = evaluateArguments(arguments, evaluate);
+      if (args == null) return null;
+      final function = getFunction == null ? input : getFunction(input);
+      if (function == null) return null;
+      if (callMethod != null) {
+        final method = context.bindings.target(callMethod, context.unit, node);
+        return context.normal(
+          context.emit(
+            InstanceCall(method, function, args.positional, args.named),
+          ),
+        );
+      }
+      if (function.type is! FunctionType) {
+        unsupported(context.unit, node, 'untyped function invocation');
+      }
+      return context.normal(
+        context.emit(FunctionCall(function, args.positional, args.named)),
+      );
+    }
+
+    if (node case ast.FunctionExpressionInvocation(
+      :final function,
+      :final argumentList,
+      :final element,
+    )) {
+      if (function
+          case ast.Identifier(element: GetterElement(isStatic: false)) ||
+              ast.PropertyAccess(
+                propertyName: ast.SimpleIdentifier(
+                  element: GetterElement(isStatic: false),
+                ),
+              )) {
+        return _visit(
+          function,
+          getterArguments: argumentList,
+          getterCall: element is MethodElement ? element : null,
+        );
+      }
+      return invokeValue(
+        _visit(function),
+        argumentList,
+        element is MethodElement ? element : null,
+      );
+    }
+    if (node
+        case ast.MethodInvocation(
+          methodName: ast.SimpleIdentifier(name: 'call', element: null),
+          target: final target?,
+          :final isNullAware,
+          :final argumentList,
+        )
+        when target.staticType is dart.FunctionType) {
+      return invokeValue(_receiver(target, isNullAware), argumentList);
+    }
     if (node case ast.PostfixExpression(
       operator: Token(type: .BANG),
       :final operand,
@@ -86,8 +151,10 @@ final class SelectorChain(
     final (receiver, name, member, arguments, nullAware) = switch (node) {
       ast.PrefixedIdentifier(:final prefix, :final identifier)
           when prefix.staticType is dart.RecordType ||
-              identifier.element is GetterElement &&
-                  !(identifier.element as GetterElement).isStatic =>
+              prefix.staticType is dart.FunctionType &&
+                  identifier.name == 'call' ||
+              identifier.element is ExecutableElement &&
+                  !(identifier.element as ExecutableElement).isStatic =>
         (prefix, identifier.name, identifier.element, null, false),
       ast.PropertyAccess(
         target: final target?,
@@ -99,6 +166,18 @@ final class SelectorChain(
       ast.SimpleIdentifier(element: final GetterElement getter)
           when !getter.isStatic =>
         (null, node.name, getter, null, false),
+      ast.SimpleIdentifier(element: final MethodElement method)
+          when !method.isStatic =>
+        (null, node.name, method, null, false),
+      ast.MethodInvocation(
+        methodName: ast.SimpleIdentifier(element: final GetterElement getter),
+        :final target,
+        :final argumentList,
+        :final isNullAware,
+        isCascaded: false,
+      )
+          when !getter.isStatic =>
+        (target, getter.name!, getter, argumentList, isNullAware),
       ast.MethodInvocation(
         methodName: ast.SimpleIdentifier(element: final MethodElement method),
         :final target,
@@ -119,6 +198,11 @@ final class SelectorChain(
     final direct = receiver is ast.SuperExpression;
     final known = _receiver(receiver, nullAware);
     if (known == null) return null;
+    if (receiver?.staticType is dart.FunctionType &&
+        member == null &&
+        name == 'call') {
+      return known;
+    }
     if (receiver?.staticType is dart.RecordType && member == null) {
       final owner = known.type.nonNullable is RecordType
           ? known.type.nonNullable as RecordType
@@ -137,6 +221,24 @@ final class SelectorChain(
       unsupported(context.unit, node, 'member $name');
     }
     final target = context.bindings.target(member, context.unit, node);
+    if (member is MethodElement && arguments == null) {
+      return context.emit(BindMethod(target, known, direct: direct));
+    }
+    final invocation = getterArguments ?? arguments;
+    if (member is GetterElement && invocation != null) {
+      return invokeValue(
+        known,
+        invocation,
+        getterCall,
+        (receiver) => context.callPositionalMember(
+          member,
+          receiver,
+          [],
+          node,
+          direct: direct,
+        ),
+      );
+    }
     Value? result(Instruction call) {
       final value = context.normal(context.emit(call));
       if (value == null || member is! GetterElement) return value;
