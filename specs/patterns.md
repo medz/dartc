@@ -14,8 +14,8 @@
 | 语句和 List 元素 if-case | 支持语句中的 if-case、when 和 else。集合元素待实现。 |
 | 局部模式声明/赋值 | 待实现。 |
 | for/for-in 模式循环头 | 待实现。 |
-| switch 语句、guard、共享 case | 待实现。 |
-| bool/Null/Never/枚举穷尽性 | 输入由 analyzer 检查穷尽性。IR 已验证 bool? 的 true、false、null 三个分支，枚举声明待实现。 |
+| switch 语句、guard、共享 case | 支持上述模式与 when。多个 case 共享分支体时，传递相应 case 中一致绑定的变量值。带标签的 continue 直接进入分支体。 |
+| bool/Null/Never/枚举穷尽性 | analyzer 检查输入的穷尽性。IR 行为对照涵盖 bool? 的 true、false、null 以及 num 的 int、double 分支。枚举声明待实现。 |
 | 非泛型 sealed 层次穷尽性 | 待实现。 |
 | List 长度与对象属性空间覆盖 | 待实现。 |
 | 完整不可达 case 诊断 | 待实现。 |

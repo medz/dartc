@@ -9,6 +9,7 @@ import 'fixtures/functions.dart' as dart;
 import 'fixtures/loops.dart' as loops;
 import 'fixtures/nullability.dart' as nullable;
 import 'fixtures/patterns.dart' as patterns;
+import 'fixtures/switch_statements.dart' as switches;
 import 'fixtures/type_checks.dart' as types;
 import 'fixtures/updates.dart' as updates;
 
@@ -29,6 +30,7 @@ void main() {
       'loops.dart',
       'nullability.dart',
       'patterns.dart',
+      'switch_statements.dart',
       'type_checks.dart',
       'conditionals.dart',
       'defaults.dart',
@@ -361,6 +363,29 @@ void main() {
       }
     }
   });
+
+  test(
+    'switch statements share case bodies and continue directly to labels',
+    () {
+      for (final n in [-1, 0, 1, 3]) {
+        for (final x in [null, -2, 0, 3, 1.5, 'hit', 'miss', true, false]) {
+          compare('shared', [x, n], () => switches.shared(x, n));
+        }
+      }
+      for (final x in [-1, 0, 1, 2, 3, 4, 9]) {
+        compare('partial', [x], () => switches.partial(x));
+        for (final stop in [true, false]) {
+          compare('labels', [x, stop], () => switches.labels(x, stop));
+        }
+      }
+      for (final flag in [true, false, null]) {
+        compare('allFlags', [flag], () => switches.allFlags(flag));
+      }
+      for (final number in [3, -1, 0.5, double.nan]) {
+        compare('allNumbers', [number], () => switches.allNumbers(number));
+      }
+    },
+  );
 
   for (final (file, line) in [
     ('index_update.dart', 3),

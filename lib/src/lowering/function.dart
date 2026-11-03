@@ -7,6 +7,7 @@ import 'bindings.dart';
 import 'expression.dart';
 import 'function_context.dart';
 import 'pattern.dart';
+import 'switch_statement.dart';
 
 /// Builds the blocks and local bindings for a resolved synchronous function.
 final class FunctionLowering(
@@ -21,7 +22,7 @@ final class FunctionLowering(
     body.isPotentiallyMutatedInScope,
   );
   final _breaks = <ast.AstNode, JumpTarget>{};
-  final _continues = <ast.AstNode, JumpTarget>{};
+  final _continues = <ast.AstNode, void Function()>{};
   late final _target = context.bindings.target(element, context.unit, body);
 
   /// Lowers the body and verifies the resulting function before returning it.
@@ -154,17 +155,20 @@ final class FunctionLowering(
         );
       case ast.LabeledStatement(:final statement):
         _breakable(statement);
-      case ast.WhileStatement() || ast.DoStatement() || ast.ForStatement():
+      case ast.WhileStatement() ||
+          ast.DoStatement() ||
+          ast.ForStatement() ||
+          ast.SwitchStatement():
         _breakable(statement);
       case ast.BreakStatement(:final target) ||
           ast.ContinueStatement(:final target):
-        final destination = statement is ast.BreakStatement
-            ? _breaks[target]
+        final jump = statement is ast.BreakStatement
+            ? _breaks[target]?.jump
             : _continues[target];
-        if (destination == null) {
+        if (jump == null) {
           unsupported(context.unit, statement, 'jump target');
         }
-        destination.jump();
+        jump();
       default:
         unsupported(
           context.unit,
@@ -177,6 +181,8 @@ final class FunctionLowering(
   void _breakable(ast.Statement statement) {
     final exit = _breaks[statement] = JumpTarget(context);
     switch (statement) {
+      case ast.SwitchStatement():
+        lowerSwitchStatement(context, statement, exit, _continues, _statement);
       case ast.WhileStatement(:final body, :final condition):
         _loop(statement, body, condition, exit);
       case ast.DoStatement(:final body, :final condition):
@@ -225,9 +231,10 @@ final class FunctionLowering(
     final header = JumpTarget(context)
       ..jump()
       ..enter();
-    final next = _continues[statement] = testAfterBody || updates.isNotEmpty
+    final next = testAfterBody || updates.isNotEmpty
         ? JumpTarget(context)
         : header;
+    _continues[statement] = next.jump;
     if (!testAfterBody && condition != null) {
       context.guard(lowerExpression(context, condition), exit);
     }

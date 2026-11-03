@@ -10,7 +10,7 @@ Direct calls accept optional positional and named parameters with scalar default
 
 Nullable core types can pass through calls and branches. Lowering supports `??`, local `??=`, postfix `!`, and type tests and casts on core types. Synchronous `throw` and calls returning `Never` end evaluation of the current path.
 
-Use scalar patterns and `when` guards in `if-case` statements and `switch` expressions, including alternatives that bind the same variable.
+Use scalar patterns and `when` guards in `if-case`, `switch` statements and `switch` expressions. Switch statements support shared case bodies, implicit breaks and labeled `continue`.
 
 The `package:dartc/ir.dart` and `package:dartc/lowering.dart` libraries expose SSA functions and lowering from checked Dart libraries.
 

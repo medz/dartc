@@ -6,8 +6,8 @@ import 'bindings.dart';
 import 'function_context.dart';
 import 'operators.dart';
 
-/// Matches [subject] once and exposes bindings only after the whole pattern succeeds.
-void matchGuarded(
+/// Matches [subject] and returns the declarations visible on the successful path.
+Iterable<PatternVariableElement> matchGuarded(
   FunctionContext context,
   ast.GuardedPattern guarded,
   Value subject,
@@ -17,7 +17,7 @@ void matchGuarded(
   final bindings = <PatternVariableElement, Value>{};
   final matcher = _Matcher(context);
   matcher.match(guarded.pattern, subject, failure, bindings);
-  if (context.current == null) return;
+  if (context.current == null) return const [];
   for (final MapEntry(:key, :value) in bindings.entries) {
     context.declare(
       key,
@@ -28,6 +28,7 @@ void matchGuarded(
   if (guarded.whenClause case final clause?) {
     context.guard(evaluate(clause.expression), failure);
   }
+  return bindings.keys;
 }
 
 final class _Matcher(final FunctionContext context) {
