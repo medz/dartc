@@ -5,6 +5,7 @@ import 'package:dartc/ir.dart';
 import 'bindings.dart';
 import 'function_context.dart';
 
+/// Emits [expression] and leaves [context] at its normal continuation block.
 Value lowerExpression(FunctionContext context, ast.Expression expression) {
   final unit = context.unit;
   switch (expression) {
@@ -23,16 +24,17 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
       ),
     ):
       if (expression.target case final receiver?) {
-        if (receiver is! ast.SimpleIdentifier ||
-            receiver.element is! PrefixElement ||
-            (receiver.element as PrefixElement).imports.any(
-              (i) => i.prefix?.isDeferred == true,
-            )) {
+        final prefix = receiver is ast.SimpleIdentifier
+            ? receiver.element
+            : null;
+        if (prefix is! PrefixElement ||
+            prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
           unsupported(unit, expression, 'call receiver');
         }
       }
       final target = context.bindings.target(callee, unit, expression);
       final values = List<Value?>.filled(target.parameterTypes.length, null);
+      // Named arguments have source-order effects but declaration-order slots.
       for (final argument in expression.argumentList.arguments) {
         final slot = context.bindings.slotOf(argument.correspondingParameter);
         if (slot == null) unsupported(unit, argument, 'argument binding');
@@ -46,8 +48,7 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
     ):
       final left = lowerExpression(context, leftOperand);
       if (operator.lexeme == '&&' || operator.lexeme == '||') {
-        final rhs = context.addBlock(),
-            join = context.addBlock([ValueType.boolean]);
+        final rhs = context.addBlock(), join = context.addBlock([.boolean]);
         final evaluate = Jump(rhs), skip = Jump(join, [left]);
         final and = operator.lexeme == '&&';
         context.current!.finish(
@@ -59,16 +60,15 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
         context.current = join;
         return join.parameters.single;
       }
-      final op = switch (operator.lexeme) {
-        '+' => IntOperator.add,
-        '-' => IntOperator.subtract,
-        '*' => IntOperator.multiply,
-        '<' => IntOperator.lessThan,
+      final IntOperator op = switch (operator.lexeme) {
+        '+' => .add,
+        '-' => .subtract,
+        '*' => .multiply,
+        '<' => .lessThan,
         _ => unsupported(unit, expression, operator.lexeme),
       };
-      if (left.type != ValueType.integer ||
-          valueType(rightOperand.staticType!, unit, rightOperand) !=
-              ValueType.integer) {
+      if (left.type != .integer ||
+          valueType(rightOperand.staticType!, unit, rightOperand) != .integer) {
         unsupported(unit, expression, 'non-integer operator');
       }
       final right = lowerExpression(context, rightOperand);

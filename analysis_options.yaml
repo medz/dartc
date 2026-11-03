@@ -4,3 +4,11 @@ analyzer:
   exclude:
     - build/**
     - .worktrees/**
+
+linter:
+  rules:
+    - comment_references
+    - unnecessary_primary_constructor_body
+    - unnecessary_type_name_in_constructor
+    - use_declaring_parameters
+    - use_primary_constructors

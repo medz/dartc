@@ -2,6 +2,7 @@ import 'block.dart';
 import 'signature.dart';
 import 'value.dart';
 
+/// Writes a graph labeled with function-local block and value numbers to [output].
 void writeFunction(
   StringSink output,
   FunctionTarget target,

@@ -5,13 +5,23 @@ import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/file_system/overlay_file_system.dart';
 import 'package:analyzer/file_system/physical_file_system.dart';
 
-/// Resolved libraries checked in one SDK language context before any IR is built.
-final class CheckedLibraries {
-  final List<ResolvedLibraryResult> libraries;
-  CheckedLibraries._(this.libraries);
-
-  /// Resolves all paths in the first library's package context and keeps its
-  /// analyzer session alive until [consume] has finished with the ASTs.
+/// A batch of Dart libraries whose units have passed static error checks.
+///
+/// Access the analyzer results during the callback to [read].
+final class CheckedLibraries._(
+  /// The resolved libraries in the order of the input paths.
+  final List<ResolvedLibraryResult> libraries,
+) {
+  /// Resolves [paths] and returns the result of [consume].
+  ///
+  /// Paths use the first library's package context. Every unit of every input
+  /// library is checked before [consume] runs, including parts and unused
+  /// declarations. Source and editor suppressions cannot hide language errors.
+  /// The analysis session remains open until [consume] completes.
+  ///
+  /// Throws [ArgumentError] for an empty list or duplicate normalized paths.
+  /// Throws [FormatException] for a non-library input or a reported language
+  /// error.
   static Future<T> read<T>(
     List<String> paths,
     FutureOr<T> Function(CheckedLibraries) consume,
@@ -58,7 +68,7 @@ final class CheckedLibraries {
         }
         libraries.add(result);
       }
-      return await consume(CheckedLibraries._(List.unmodifiable(libraries)));
+      return await consume(CheckedLibraries._(.unmodifiable(libraries)));
     } finally {
       await contexts.dispose();
     }

@@ -2,7 +2,7 @@
 
 A native Dart compiler written in Dart.
 
-The development version uses the official Dart analyzer and lowers resolved functions to a typed intermediate representation. See the [language support tracker](specs/README.md) for the constructs you can try today.
+The development version uses the official Dart analyzer and lowers resolved functions to a typed intermediate representation. See the [language support tracker](https://github.com/medz/dartc/blob/main/specs/README.md) for the constructs you can try today.
 
 Use `package:dartc/ir.dart` to build, verify and print SSA functions. Use `package:dartc/lowering.dart` to produce those functions from checked Dart libraries.
 
@@ -14,10 +14,11 @@ Use Dart SDK `^3.13.7` and run:
 
 ```sh
 dart pub get
+dart analyze --fatal-infos
 dart test
 dart run tool/print_ir.dart test/lowering/fixtures/functions.dart
 ```
 
 The last command prints the basic blocks, calls and branches for each function in the file's library.
 
-[Release notes](CHANGELOG.md) · [MIT license](LICENSE)
+[Release notes](https://github.com/medz/dartc/blob/main/CHANGELOG.md) · [MIT license](https://github.com/medz/dartc/blob/main/LICENSE)

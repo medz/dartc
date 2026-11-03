@@ -1,18 +1,36 @@
-enum ValueType { boolean, integer, voidType }
+/// The Dart type of an IR operand or function result.
+enum ValueType() {
+  /// A non-nullable Dart `bool`.
+  boolean,
 
-/// A resolved top-level declaration. Calls share this identity with its body.
-final class FunctionTarget {
-  final Uri library;
-  final String name;
-  final ValueType returnType;
-  final List<ValueType> parameterTypes;
+  /// A non-nullable Dart `int`.
+  integer,
 
-  FunctionTarget(
-    this.library,
-    this.name,
-    this.returnType,
-    Iterable<ValueType> parameters,
-  ) : parameterTypes = List.unmodifiable(parameters) {
+  /// The declared result of a `void` function, which can still return a value.
+  voidType,
+}
+
+/// The identity and signature of a directly callable top-level function.
+///
+/// Use the same target object for a function's definition and all its calls.
+final class FunctionTarget(
+  /// The URI of the library that declares the function.
+  final Uri library,
+
+  /// The declared name within [library].
+  final String name,
+
+  /// The static type of the result.
+  final ValueType returnType,
+  Iterable<ValueType> parameters,
+) {
+  /// The parameter types in declaration order.
+  final List<ValueType> parameterTypes = .unmodifiable(parameters);
+
+  /// Creates a target with a snapshot of [parameters].
+  ///
+  /// Throws [ArgumentError] if a parameter has type [ValueType.voidType].
+  this {
     if (parameterTypes.contains(ValueType.voidType)) {
       throw ArgumentError('A parameter must carry a value.');
     }

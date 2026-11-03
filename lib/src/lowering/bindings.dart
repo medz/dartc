@@ -5,12 +5,14 @@ import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/ir.dart';
 
 /// Maps analyzer declarations and formal parameters to their IR identities.
-final class TargetBindings {
+final class TargetBindings() {
   final _targets = <TopLevelFunctionElement, FunctionTarget>{};
   final _slots = <FormalParameterElement, int>{};
 
+  /// The declaration-order slot of [parameter], once its target has been bound.
   int? slotOf(FormalParameterElement? parameter) => _slots[parameter];
 
+  /// Returns the shared target for [element] and records its parameter slots.
   FunctionTarget target(
     TopLevelFunctionElement element,
     ResolvedUnitResult unit,
@@ -25,7 +27,7 @@ final class TargetBindings {
       for (var i = 0; i < parameters.length; i++) {
         _slots[parameters[i]] = i;
       }
-      return FunctionTarget(
+      return .new(
         element.library.uri,
         element.name!,
         valueType(element.returnType, unit, site, returnType: true),
@@ -35,6 +37,7 @@ final class TargetBindings {
   }
 }
 
+/// Reports an unimplemented [feature] at the start of [node] in [unit].
 Never unsupported(ResolvedUnitResult unit, ast.AstNode node, String feature) {
   final location = unit.lineInfo.getLocation(node.offset);
   throw UnsupportedError(
@@ -42,16 +45,17 @@ Never unsupported(ResolvedUnitResult unit, ast.AstNode node, String feature) {
   );
 }
 
+/// Maps [type] to an IR type, allowing `void` only in return position.
 ValueType valueType(
   DartType type,
   ResolvedUnitResult unit,
   ast.AstNode site, {
   bool returnType = false,
 }) {
-  if (returnType && type is VoidType) return ValueType.voidType;
+  if (returnType && type is VoidType) return .voidType;
   if (type.nullabilitySuffix == .none) {
-    if (type.isDartCoreInt) return ValueType.integer;
-    if (type.isDartCoreBool) return ValueType.boolean;
+    if (type.isDartCoreInt) return .integer;
+    if (type.isDartCoreBool) return .boolean;
   }
   unsupported(unit, site, type.getDisplayString());
 }

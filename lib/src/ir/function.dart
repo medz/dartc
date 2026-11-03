@@ -3,19 +3,28 @@ import 'format.dart';
 import 'signature.dart';
 import 'verify.dart';
 
-/// A verified SSA graph. The first block receives the function arguments.
-final class IrFunction {
-  final FunctionTarget target;
-  final List<Block> blocks;
+/// A verified SSA control-flow graph for one function.
+final class IrFunction(
+  /// The declaration that callers reference.
+  final FunctionTarget target,
+  Iterable<Block> blocks,
+) {
+  /// The reachable blocks in the supplied order, starting with [entry].
+  final List<Block> blocks = .unmodifiable(blocks);
+
+  /// The block whose parameters receive the function arguments.
   Block get entry => blocks.first;
 
-  /// All blocks must be finished and reachable. Every SSA use must be dominated
-  /// by its definition, and each edge must supply the target's parameter types.
-  IrFunction(this.target, Iterable<Block> blocks)
-    : blocks = List.unmodifiable(blocks) {
+  /// Verifies the graph rooted at the first of [blocks].
+  ///
+  /// Throws [ArgumentError] when the entry parameters differ from the signature.
+  /// Throws [StateError] for an empty or malformed graph. Every block must be
+  /// sealed and reachable, and each SSA definition must dominate its uses.
+  /// A function with a non-`void` result must return an operand of that type.
+  this {
     verifyFunction(target, this.blocks);
   }
 
-  /// Writes the typed blocks and their successors in a human-readable form.
+  /// Writes the typed blocks, instructions and outgoing edges to [output].
   void writeTo(StringSink output) => writeFunction(output, target, blocks);
 }

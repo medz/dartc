@@ -7,21 +7,19 @@ import 'bindings.dart';
 import 'expression.dart';
 import 'function_context.dart';
 
-final class FunctionLowering {
-  final FunctionContext context;
-  final TopLevelFunctionElement element;
-  final ast.FunctionBody body;
+/// Builds the blocks and local bindings for a resolved synchronous function.
+final class FunctionLowering(
+  ResolvedUnitResult unit,
+  TargetBindings bindings,
+  final TopLevelFunctionElement element,
+  final ast.FunctionBody body,
+) {
+  final FunctionContext context = .new(unit, bindings);
   final _locals = <VariableElement>[];
   final _mutable = <VariableElement>[];
   late final _target = context.bindings.target(element, context.unit, body);
 
-  FunctionLowering(
-    ResolvedUnitResult unit,
-    TargetBindings bindings,
-    this.element,
-    this.body,
-  ) : context = FunctionContext(unit, bindings);
-
+  /// Lowers the body and verifies the resulting function before returning it.
   IrFunction run() {
     if (body.isAsynchronous || body.isGenerator) {
       unsupported(context.unit, body, 'async or generator bodies');
@@ -36,7 +34,7 @@ final class FunctionLowering {
       case ast.BlockFunctionBody(:final block):
         _statement(block);
         if (context.current != null) {
-          if (_target.returnType != ValueType.voidType) {
+          if (_target.returnType != .voidType) {
             unsupported(context.unit, body, 'implicit return');
           }
           _return(null);
@@ -44,7 +42,7 @@ final class FunctionLowering {
       default:
         unsupported(context.unit, body, 'function body');
     }
-    return IrFunction(_target, context.blocks);
+    return .new(_target, context.blocks);
   }
 
   void _return(Value? value) {
@@ -147,7 +145,7 @@ final class FunctionLowering {
       return;
     }
     final yes = context.addBlock(), no = context.addBlock();
-    context.current!.finish(Branch(condition, Jump(yes), Jump(no)));
+    context.current!.finish(Branch(condition, .new(yes), .new(no)));
     final before = _state();
     context.current = yes;
     _scoped(statement.thenStatement);
@@ -180,6 +178,7 @@ final class FunctionLowering {
     final header = context.addBlock(initial.map((v) => v.type));
     context.current!.finish(Jump(header, initial));
     context.current = header;
+    // The condition must read loop-carried values, including on the backedge.
     _restore(header.parameters);
     final condition = lowerExpression(context, statement.condition);
     if (condition case Constant(value: false)) return;
@@ -188,7 +187,7 @@ final class FunctionLowering {
         ? null
         : context.addBlock();
     context.current!.finish(
-      exit == null ? Jump(loop) : Branch(condition, Jump(loop), Jump(exit)),
+      exit == null ? Jump(loop) : Branch(condition, .new(loop), .new(exit)),
     );
     context.current = loop;
     _scoped(statement.body);

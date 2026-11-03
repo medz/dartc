@@ -2,6 +2,7 @@ import 'block.dart';
 import 'signature.dart';
 import 'value.dart';
 
+/// Checks control flow, argument and return types, and SSA definition dominance.
 void verifyFunction(FunctionTarget target, List<Block> blocks) {
   if (blocks.isEmpty) throw StateError('Function has no entry.');
   final entry = blocks.first;
@@ -65,7 +66,7 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
     }
     switch (block.end) {
       case Return(:final value):
-        if (target.returnType != ValueType.voidType &&
+        if (target.returnType != .voidType &&
             value?.type != target.returnType) {
           throw StateError('Return type does not match the function.');
         }
@@ -114,6 +115,7 @@ Map<Block, Block> _dominators(
       for (var incoming in predecessors[block]!) {
         if (!idom.containsKey(incoming)) continue;
         parent ??= incoming;
+        // A strict dominator has a larger DFS postorder number than its descendants.
         while (parent != incoming) {
           if (order[parent]! < order[incoming]!) {
             parent = idom[parent]!;

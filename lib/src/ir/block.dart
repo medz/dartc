@@ -3,61 +3,95 @@ import 'dart:collection';
 import 'signature.dart';
 import 'value.dart';
 
-sealed class Terminator {
-  const Terminator();
-}
+/// The control transfer executed after a block's last instruction.
+sealed class const Terminator();
 
-final class Return extends Terminator {
-  /// A bare return yields null. A function declared void can still return a value.
-  final Value? value;
-  const Return([this.value]);
-}
+/// A transfer back to the caller with an optional result.
+///
+/// A function declared `void` can still forward a value to its caller.
+final class const Return([
+  /// The returned operand, or `null` for a bare return.
+  final Value? value,
+]) extends Terminator;
 
-/// Transfers control to [target], binding its parameters to [arguments] in order.
-final class Jump extends Terminator {
-  final Block target;
-  final List<Value> arguments;
-  Jump(this.target, [Iterable<Value> arguments = const []])
-    : arguments = List.unmodifiable(arguments) {
+/// A control-flow edge that binds the destination block's parameters.
+final class Jump(
+  /// The block entered by this edge.
+  final Block target, [
+  Iterable<Value> arguments = const [],
+]) extends Terminator {
+  /// The incoming value for each parameter of [target], in order.
+  final List<Value> arguments = .unmodifiable(arguments);
+
+  /// Creates an edge to [target] with a snapshot of [arguments].
+  ///
+  /// Throws [ArgumentError] if their count or types differ from the parameters.
+  this {
     checkArguments(target.parameters.map((p) => p.type), this.arguments);
   }
 }
 
-final class Branch extends Terminator {
-  final Value condition;
-  final Jump ifTrue;
-  final Jump ifFalse;
-  Branch(this.condition, this.ifTrue, this.ifFalse) {
-    if (condition.type != ValueType.boolean) {
+/// A conditional transfer that takes exactly one of two edges.
+final class Branch(
+  /// The boolean operand that selects the edge.
+  final Value condition,
+
+  /// The edge taken when [condition] is `true`.
+  final Jump ifTrue,
+
+  /// The edge taken when [condition] is `false`.
+  final Jump ifFalse,
+) extends Terminator {
+  /// Creates a branch on [condition].
+  ///
+  /// Throws [ArgumentError] if [condition] has any type other than [ValueType.boolean].
+  this {
+    if (condition.type != .boolean) {
       throw ArgumentError('Boolean condition required.');
     }
   }
 }
 
-/// An ordered sequence of instructions. Call [finish] once to seal the block.
-final class Block {
-  final List<BlockParameter> parameters;
+/// A basic block with ordered instructions and a single terminator.
+///
+/// Each parameter type creates one fresh SSA value. Construction throws
+/// [ArgumentError] for [ValueType.voidType]. Append instructions with [emit]
+/// and seal the block with [finish].
+final class Block([Iterable<ValueType> types = const []]) {
+  /// The values bound on entry, in the order given to [Block.new].
+  final List<BlockParameter> parameters = blockParameters(types);
   final _instructions = <Instruction>[];
-  late final instructions = UnmodifiableListView(_instructions);
+
+  /// A read-only view in execution order that reflects subsequent calls to [emit].
+  late final UnmodifiableListView<Instruction> instructions = .new(
+    _instructions,
+  );
   Terminator? _end;
+
+  /// The control transfer set by [finish].
+  ///
+  /// Reading this before [finish] throws [StateError].
   Terminator get end => _end ?? (throw StateError('Unterminated block.'));
 
-  Block([Iterable<ValueType> types = const []])
-    : parameters = blockParameters(types);
-
-  /// Normal control-flow edges, with the true edge first for a conditional.
+  /// The outgoing edges of [end], in true-then-false order for a [Branch].
   Iterable<Jump> get successors => switch (end) {
     Return() => const [],
     final Jump jump => [jump],
     Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],
   };
 
+  /// Appends [instruction] and returns the same object for use as an SSA operand.
+  ///
+  /// Throws [StateError] if the block is already sealed.
   T emit<T extends Instruction>(T instruction) {
     if (_end != null) throw StateError('Block already terminated.');
     _instructions.add(instruction);
     return instruction;
   }
 
+  /// Seals the instruction sequence with [end].
+  ///
+  /// Throws [StateError] if the block already has a terminator.
   void finish(Terminator end) {
     if (_end != null) throw StateError('Block already terminated.');
     _end = end;

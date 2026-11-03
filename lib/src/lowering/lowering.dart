@@ -6,10 +6,12 @@ import 'bindings.dart';
 import 'checked_libraries.dart';
 import 'function.dart';
 
-/// Converts checked functions to typed SSA in the order of their declarations.
-abstract final class Lowering {
-  /// Throws [UnsupportedError] with a source location for a Dart construct that
-  /// has no IR translation yet.
+/// The translation from resolved Dart declarations to executable IR operations.
+abstract final class Lowering() {
+  /// Returns verified functions in the declaration order of [input].
+  ///
+  /// Calls to the same declaration share a target throughout the batch. Throws
+  /// [UnsupportedError] at the first source construct without an IR translation.
   static List<IrFunction> lower(CheckedLibraries input) {
     final bindings = TargetBindings();
     return [
