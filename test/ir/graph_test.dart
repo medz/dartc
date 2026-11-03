@@ -1,4 +1,4 @@
-import 'package:dartc/src/_internal/ir/ir.dart';
+import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
 void main() {

@@ -7,7 +7,14 @@ import 'package:test/test.dart';
 void main() {
   test('libraries have acyclic imports and the IR owns its model', () {
     final lib = Directory('lib').absolute.uri;
-    final ir = lib.resolve('src/_internal/ir/').toString();
+    final ir = lib.resolve('ir.dart');
+    final lowering = lib.resolve('lowering.dart');
+    final irSources = lib.resolve('src/ir/').toString();
+    final loweringSources = lib.resolve('src/lowering/').toString();
+    bool ownsIr(Uri file) =>
+        file == ir || file.toString().startsWith(irSources);
+    bool ownsLowering(Uri file) =>
+        file == lowering || file.toString().startsWith(loweringSources);
     final edges = <Uri, Set<Uri>>{};
     for (final file in Directory.fromUri(
       lib,
@@ -36,14 +43,19 @@ void main() {
               uri.scheme == 'package' && uri.pathSegments.first == 'dartc'
               ? lib.resolve(uri.pathSegments.skip(1).join('/'))
               : source.resolveUri(uri);
-          if (source.toString().startsWith(ir)) {
-            expect(target.toString(), startsWith(ir), reason: file.path);
+          if (ownsIr(source)) {
+            expect(ownsIr(target), isTrue, reason: '$source -> $target');
+          } else if (source == lowering && d is ExportDirective) {
+            expect(ownsLowering(target), isTrue, reason: '$source -> $target');
+          } else if (ownsLowering(source) && ownsIr(target)) {
+            expect(d, isA<ImportDirective>(), reason: file.path);
+            expect(uri.toString(), 'package:dartc/ir.dart', reason: file.path);
           }
           if (target.toString().startsWith(lib.toString())) links.add(target);
         }
       }
     }
-    expect(edges.keys.any((f) => f.toString().startsWith(ir)), isTrue);
+    expect(edges.keys, containsAll([ir, lowering]));
     final done = <Uri>{}, visiting = <Uri>{};
     void visit(Uri source) {
       if (done.contains(source)) return;

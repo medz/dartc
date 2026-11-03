@@ -1,22 +1,22 @@
-import 'dart:io';
-
-import 'package:dartc/src/_internal/checked_libraries.dart';
-import 'package:dartc/src/_internal/ir/ir.dart';
-import 'package:dartc/src/_internal/lowering/dart_lowering.dart';
+import 'package:dartc/ir.dart';
+import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
 import 'fixtures/effects.dart' as effects;
 import 'fixtures/functions.dart' as dart;
 
-Future<List<IrFunction>> _lower(List<String> paths) =>
-    CheckedLibraries.read(paths, DartLowering.lower);
+const _fixtures = 'test/lowering/fixtures';
+
+Future<List<IrFunction>> _lower(List<String> names) => CheckedLibraries.read([
+  for (final name in names) '$_fixtures/$name',
+], Lowering.lower);
 
 void main() {
   late Map<String, IrFunction> functions;
   late Map<FunctionTarget, IrFunction> bodies;
   late Map<FunctionTarget, Object? Function(int)> imports;
   setUpAll(() async {
-    final result = await _lower(['test/ir/fixtures/functions.dart']);
+    final result = await _lower(['functions.dart']);
     functions = {for (final f in result) f.target.name: f};
     bodies = {for (final f in result) f.target: f};
     imports = {
@@ -133,18 +133,8 @@ void main() {
     }
   });
   test('an unused invalid declaration in a part prevents lowering', () async {
-    final dir = await Directory.systemTemp.createTemp('dartc_ir_');
-    addTearDown(() => dir.delete(recursive: true));
-    final entry = File('${dir.path}/entry.dart')
-      ..writeAsStringSync("part 'other.dart'; int entry() => 1;");
-    File('${dir.path}/analysis_options.yaml').writeAsStringSync(
-      'analyzer:\n  errors:\n    return_of_invalid_type: ignore\n',
-    );
-    File('${dir.path}/other.dart').writeAsStringSync(
-      "part of 'entry.dart';\n// ignore_for_file: return_of_invalid_type\nint unused() { return 1; return false; }",
-    );
     await expectLater(
-      _lower([entry.path]),
+      _lower(['invalid_part/entry.dart']),
       throwsA(
         isA<FormatException>().having(
           (e) => e.message,
@@ -154,31 +144,26 @@ void main() {
       ),
     );
   });
-  test('same-named imports keep distinct declaration identities', () async {
-    final dir = await Directory.systemTemp.createTemp('dartc_ir_imports_');
-    addTearDown(() => dir.delete(recursive: true));
-    final files = [
-      File('${dir.path}/client.dart')..writeAsStringSync(
-        "import 'a.dart' as a; import 'b.dart' as b; int both() => a.f() - b.f();",
-      ),
-      File('${dir.path}/a.dart')..writeAsStringSync('int f() => 10;'),
-      File('${dir.path}/b.dart')..writeAsStringSync('int f() => 4;'),
-    ];
-    final paths = [for (final file in files) file.path];
-    final [client, a, b] = await _lower(paths);
-    expect(
-      client.entry.instructions.whereType<DirectCall>().map((c) => c.target),
-      [a.target, b.target],
-    );
-    await expectLater(_lower([paths.first, paths.first]), throwsArgumentError);
-  });
-  test('lazy locals remain an explicit gap with a source location', () async {
-    final dir = await Directory.systemTemp.createTemp('dartc_ir_late_');
-    addTearDown(() => dir.delete(recursive: true));
-    final file = File('${dir.path}/lazy.dart')
-      ..writeAsStringSync('int f() {\n  late int v = 1;\n  return v;\n}');
+
+  test('different libraries can bind functions with the same name', () async {
+    final [client, left, right] = await _lower([
+      'package/entry.dart',
+      'dependency/lib/left.dart',
+      'dependency/lib/right.dart',
+    ]);
+    final calls = client.entry.instructions.whereType<DirectCall>();
+    expect(calls.map((c) => c.target), [same(left.target), same(right.target)]);
+    expect(left.target.library, Uri.parse('package:demo/left.dart'));
+    expect(right.target.library, Uri.parse('package:demo/right.dart'));
     await expectLater(
-      _lower([file.path]),
+      _lower(['package/entry.dart', 'package/entry.dart']),
+      throwsArgumentError,
+    );
+  });
+
+  test('lazy locals remain an explicit gap with a source location', () async {
+    await expectLater(
+      _lower(['lazy.dart']),
       throwsA(
         isA<UnsupportedError>().having(
           (e) => e.message,
@@ -188,31 +173,20 @@ void main() {
       ),
     );
   });
-  test(
-    'analysis keeps the package language version and package URI bindings',
-    () async {
-      final dir = await Directory.systemTemp.createTemp('dartc_ir_package_');
-      addTearDown(() => dir.delete(recursive: true));
-      Directory('${dir.path}/.dart_tool').createSync();
-      Directory('${dir.path}/lib').createSync();
-      File('${dir.path}/.dart_tool/package_config.json').writeAsStringSync(
-        '{"configVersion":2,"packages":[{"name":"demo","rootUri":"../","packageUri":"lib/","languageVersion":"3.5"}]}',
-      );
-      final other = File('${dir.path}/lib/other.dart')
-        ..writeAsStringSync('int getValue() => 1;');
-      final entry = File('${dir.path}/entry.dart')
-        ..writeAsStringSync(
-          "import 'package:demo/other.dart'; int f() => getValue();",
-        );
-      final [f, dependency] = await _lower([entry.path, other.path]);
-      final call = f.entry.instructions.single as DirectCall;
-      expect(call.target.library.toString(), 'package:demo/other.dart');
-      expect(call.target, same(dependency.target));
-      other.writeAsStringSync('int getValue() => 1_000;');
-      await expectLater(
-        _lower([entry.path, other.path]),
-        throwsA(isA<FormatException>()),
-      );
-    },
-  );
+
+  test('package language version gates syntax in imported libraries', () async {
+    await expectLater(
+      _lower([
+        'package/use_newer_syntax.dart',
+        'dependency/lib/newer_syntax.dart',
+      ]),
+      throwsA(
+        isA<FormatException>().having(
+          (e) => e.message,
+          'diagnostic location',
+          contains('newer_syntax.dart'),
+        ),
+      ),
+    );
+  });
 }

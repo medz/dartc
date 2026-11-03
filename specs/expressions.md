@@ -23,7 +23,7 @@
 | throw | 待实现。 |
 | await、泛型函数值实例化 | 待实现。 |
 
-[IR 行为对照](../test/ir/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/expressions.md)。
+[IR 行为对照](../test/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/expressions.md)。
 
 ## 规范依据
 

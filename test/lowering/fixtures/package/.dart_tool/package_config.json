@@ -1,0 +1,11 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "demo",
+      "rootUri": "../../dependency/",
+      "packageUri": "lib/",
+      "languageVersion": "3.5"
+    }
+  ]
+}

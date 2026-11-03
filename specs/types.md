@@ -19,7 +19,7 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 | `Future`、`FutureOr` 与异步类型规则 | 待实现。 |
 | FFI 标量、指针与原生导出 | 待实现。 |
 
-[IR 行为对照](../test/ir/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/types.md)。
+[IR 行为对照](../test/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/types.md)。
 
 ## 规范依据
 
