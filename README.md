@@ -2,9 +2,9 @@
 
 A native Dart compiler written in Dart.
 
-The development version uses the official Dart analyzer and lowers resolved functions to a typed intermediate representation. See the [language support tracker](https://github.com/medz/dartc/blob/main/specs/README.md) for the constructs you can try today.
+The development version uses the official Dart analyzer and lowers checked libraries to a typed intermediate representation. See the [language support tracker](https://github.com/medz/dartc/blob/main/specs/README.md) for the constructs you can try today.
 
-Use `package:dartc/ir.dart` to build, verify and print SSA functions. Use `package:dartc/lowering.dart` to produce those functions from checked Dart libraries.
+Use `package:dartc/lowering.dart` to produce an `IrProgram` with class declarations and function bodies. Use `package:dartc/ir.dart` to inspect the program or build and verify SSA functions.
 
 For a working native compiler, download [dartc 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0). Its [usage guide](https://github.com/medz/dartc/blob/v0.5.0/README.md) applies to the release binaries.
 

@@ -1,7 +1,8 @@
 /// Translation from checked Dart libraries to the compiler's typed IR.
 ///
 /// [CheckedLibraries.read] runs [Lowering.lower] while the analysis session is
-/// open. The returned functions can be inspected after the session closes.
+/// open. The resulting class declarations and function bodies are independent
+/// of the analyzer session.
 ///
 /// {@example /tool/print_ir.dart#lower_libraries}
 ///

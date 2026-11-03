@@ -6,7 +6,7 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 | --- | --- |
 | 类型名、前缀、嵌套实参、可空类型 | 支持下列核心类型的可空形式，包括参数、返回、变量和分支汇合。嵌套类型实参待实现。 |
 | 核心标量、`Object`、`dynamic`、`void`、`Never` | int、double、num、bool、String、Object、Null、void 和 Never。Never 没有正常返回值，Never? 等价于 Null。dynamic 待实现。 |
-| 异常及栈轨迹 | 支持 Error、TypeError 和 StackTrace，用于类型检查、捕获和传递。用户定义的异常类待实现。 |
+| 异常及栈轨迹 | 支持 Error、TypeError、StackTrace，以及按用户声明的非泛型类和接口捕获异常。 |
 | `List<T>` 及实际类型检查 | 待实现。 |
 | 非泛型函数签名 | 顶层函数的必需和可选参数；直接调用会补齐缺省实参。函数值待实现。 |
 | 泛型函数类型与泛型函数值签名 | 待实现。 |

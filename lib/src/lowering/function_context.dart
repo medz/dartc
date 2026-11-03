@@ -1,5 +1,7 @@
 import 'package:analyzer/dart/analysis/results.dart';
+import 'package:analyzer/dart/ast/ast.dart' show AstNode;
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart' show DartType;
 import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
@@ -10,11 +12,18 @@ final class FunctionContext(
   final ResolvedUnitResult unit,
 
   /// The call targets shared by all functions in this batch.
-  final TargetBindings bindings,
+  final Bindings bindings,
   final bool Function(VariableElement) _isWritten,
 ) {
   /// The blocks created so far, with the function entry first.
   final blocks = <Block>[];
+
+  /// The instance being initialized or invoked, when the entry has a receiver.
+  Value? receiver;
+
+  /// Resolves [type] in the same declaration table as the rest of the program.
+  ValueType typeOf(DartType type, AstNode site) =>
+      bindings.valueType(type, unit, site);
 
   /// The SSA value of each in-scope variable on the current path.
   final locals = <VariableElement, Value>{};

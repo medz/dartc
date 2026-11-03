@@ -94,15 +94,41 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
       }
     }
 
+    void checkOperation(Instruction op, int position) {
+      switch (op) {
+        case StoreField(:final field, :final receiver) when field.isFinal:
+          if (target.kind != .initializer ||
+              target.owner != field.owner ||
+              receiver != entry.parameters.first) {
+            throw StateError(
+              'Final field write outside its declaring initializer.',
+            );
+          }
+        case DirectCall(target: final callee, :final inputs)
+            when callee.kind == .initializer:
+          if (target.kind != .initializer ||
+              inputs.first != entry.parameters.first ||
+              (callee.owner != target.owner &&
+                  callee.owner != target.owner!.superclass)) {
+            throw StateError(
+              'An initializer can only delegate on its own receiver.',
+            );
+          }
+        default:
+          break;
+      }
+      for (final input in op.inputs) {
+        use(input, position);
+      }
+    }
+
     for (var i = 0; i < count; i++) {
       final op = block.instructions[i];
       if (op.type == .never &&
           (i + 1 != count || end is! Unreachable || end.cause != op)) {
         throw StateError('A Never instruction must end its block.');
       }
-      for (final input in op.inputs) {
-        use(input, i);
-      }
+      checkOperation(op, i);
     }
     switch (end) {
       case Return(:final value):
@@ -119,9 +145,7 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
       case ExhaustivenessFailure(:final onThrow):
         if (onThrow != null) useEdge(onThrow, unwinding: true);
       case Invoke(:final operation, :final onReturn, :final onThrow):
-        for (final input in operation.inputs) {
-          use(input, count);
-        }
+        checkOperation(operation, count);
         if (onReturn != null) useEdge(onReturn, result: operation);
         useEdge(onThrow, unwinding: true);
       case Branch(:final condition, :final ifTrue, :final ifFalse):

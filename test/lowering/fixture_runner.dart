@@ -2,10 +2,10 @@ import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
 final class FixtureRunner(
-  List<IrFunction> functions,
+  IrProgram program,
   final Map<(Uri, String), Object? Function(int)> imports,
 ) {
-  final bodies = {for (final f in functions) f.target: f};
+  final bodies = {for (final f in program.functions) f.target: f};
 
   Object? run(IrFunction function, List<Object?> args) {
     final values = <Value, Object?>{};
@@ -20,6 +20,14 @@ final class FixtureRunner(
     };
     void execute(Instruction op) {
       switch (op) {
+        case Construct(:final initializer, :final inputs):
+          final instance = _Instance(initializer.owner!);
+          if (initializer.owner != ValueType.object) {
+            run(bodies[initializer]!, [instance, ...inputs.map(read)]);
+          }
+          values[op] = instance;
+        case StoreField(:final field, :final receiver, :final value):
+          (read(receiver) as _Instance).fields[field] = read(value);
         case MakeRecord(:final type, :final inputs):
           values[op] = _RecordValue(
             type as RecordType,
@@ -111,6 +119,12 @@ final class FixtureRunner(
 Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
   Object? run<T>() => cast ? value as T : value is T;
   Object? scalar<T>() => type == type.nonNullable ? run<T>() : run<T?>();
+  if (value is _Instance) {
+    final ok = type.accepts(value.type);
+    if (!cast) return ok;
+    if (!ok) throw TypeError();
+    return value;
+  }
   if (type.nonNullable case final RecordType target) {
     final ok = value == null
         ? type.accepts(.nullType)
@@ -147,8 +161,18 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     ValueType.stackTrace => scalar<StackTrace>(),
     ValueType.never => run<Never>(),
     ValueType.voidType => cast ? value : true,
+    ClassType() =>
+      cast
+          ? (value == null && type.accepts(.nullType)
+                ? null
+                : throw TypeError())
+          : value == null && type.accepts(.nullType),
     _ => throw StateError('Unexpected fixture type ${type.dartName}'),
   };
+}
+
+final class _Instance(final ClassType type) {
+  final fields = <InstanceField, Object?>{};
 }
 
 final class _RecordValue(final RecordType type, final List<Object?> fields) {

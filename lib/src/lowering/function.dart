@@ -13,31 +13,41 @@ import 'switch_statement.dart';
 /// Builds the blocks and local bindings for a resolved synchronous function.
 final class FunctionLowering(
   ResolvedUnitResult unit,
-  TargetBindings bindings,
-  final TopLevelFunctionElement element,
-  final ast.FunctionBody body,
+  Bindings bindings,
+  final ExecutableElement element,
+  final ast.AstNode site,
+  final ast.FunctionBody? body,
 ) {
   final FunctionContext context = .new(
     unit,
     bindings,
-    body.isPotentiallyMutatedInScope,
+    element is ConstructorElement || body == null
+        ? (variable) => !variable.isFinal
+        : body.isPotentiallyMutatedInScope,
   );
   final _breaks = <ast.AstNode, JumpTarget>{};
   final _continues = <ast.AstNode, void Function()>{};
   FinallyRegion? _finally;
-  late final _target = context.bindings.target(element, context.unit, body);
+  late final _target = context.bindings.target(element, context.unit, site);
 
   /// Lowers the body and verifies the resulting function before returning it.
-  IrFunction run() {
-    if (body.isAsynchronous || body.isGenerator) {
-      unsupported(context.unit, body, 'async or generator bodies');
+  IrFunction run([void Function(FunctionContext)? initialize]) {
+    final body = this.body;
+    if (body != null && (body.isAsynchronous || body.isGenerator)) {
+      unsupported(context.unit, site, 'async or generator bodies');
     }
     context.current = context.addBlock(_target.parameterTypes);
+    final hasReceiver = _target.kind == .initializer;
+    if (hasReceiver) context.receiver = context.current!.parameters.first;
     for (final (i, parameter) in element.formalParameters.indexed) {
-      final input = context.current!.parameters[i];
+      final input = context.current!.parameters[i + (hasReceiver ? 1 : 0)];
       context.declare(parameter, input.type, input);
     }
+    initialize?.call(context);
+    if (context.current == null) return .new(_target, context.blocks);
     switch (body) {
+      case null || ast.EmptyFunctionBody() when hasReceiver:
+        _return(null);
       case ast.ExpressionFunctionBody(:final expression):
         _return(lowerExpression(context, expression));
       case ast.BlockFunctionBody(:final block):
@@ -49,7 +59,7 @@ final class FunctionLowering(
           _return(null);
         }
       default:
-        unsupported(context.unit, body, 'function body');
+        unsupported(context.unit, site, 'function body');
     }
     return .new(_target, context.blocks);
   }
@@ -114,7 +124,7 @@ final class FunctionLowering(
     for (final variable in declarations.variables) {
       final initializer = variable.initializer;
       final local = variable.declaredFragment!.element;
-      final type = valueType(local.type, context.unit, variable);
+      final type = context.typeOf(local.type, variable);
       if (variable.isLate ||
           (initializer == null && !type.accepts(.nullType))) {
         unsupported(
@@ -125,7 +135,11 @@ final class FunctionLowering(
       }
       final value = switch (initializer) {
         null => const Constant.nullValue(),
-        _ when local.isConst => constantOf(local, context.unit, initializer),
+        _ when local.isConst => context.bindings.constantOf(
+          local,
+          context.unit,
+          initializer,
+        ),
         _ => lowerExpression(context, initializer),
       };
       if (value == null) return;

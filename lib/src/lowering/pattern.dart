@@ -35,7 +35,7 @@ Iterable<PatternVariableElement> declarePattern(
   _Matcher(context).match(pattern, subject, failure, bindings);
   if (context.current == null) return const [];
   for (final MapEntry(:key, :value) in bindings.entries) {
-    context.declare(key, valueType(key.type, context.unit, pattern), value);
+    context.declare(key, context.typeOf(key.type, pattern), value);
   }
   return bindings.keys;
 }
@@ -77,13 +77,13 @@ final class _Matcher(final FunctionContext context) {
         match(pattern, value, failure, bindings);
       case ast.WildcardPattern(:final type):
         if (type != null) {
-          _require(value, valueType(type.type!, context.unit, type), failure);
+          _require(value, context.typeOf(type.type!, type), failure);
         }
       case ast.DeclaredVariablePattern():
         final variable = pattern.declaredFragment!.element;
         final bound = _require(
           value,
-          valueType(variable.type, context.unit, pattern),
+          context.typeOf(variable.type, pattern),
           failure,
         );
         if (bound != null) bindings[variable] = bound;
@@ -91,7 +91,7 @@ final class _Matcher(final FunctionContext context) {
           when context.locals.containsKey(variable):
         final bound = _require(
           value,
-          valueType(variable.type, context.unit, pattern),
+          context.typeOf(variable.type, pattern),
           null,
         );
         if (bound != null) bindings[variable] = bound;
@@ -125,14 +125,14 @@ final class _Matcher(final FunctionContext context) {
           if (context.current == null) return;
         }
       case ast.ConstantPattern(:final expression):
-        final constant = constantValue(
+        final constant = context.bindings.constantValue(
           expression.computeConstantValue()?.value,
           context.unit,
           pattern,
         );
         context.guard(lowerEquality(context, constant, value), failure!);
       case ast.RelationalPattern(:final operand, :final operator):
-        final constant = constantValue(
+        final constant = context.bindings.constantValue(
           operand.computeConstantValue()?.value,
           context.unit,
           operand,
@@ -143,7 +143,7 @@ final class _Matcher(final FunctionContext context) {
         );
       case ast.CastPattern(:final pattern, :final type):
         final cast = context.normal(
-          context.cast(value, valueType(type.type!, context.unit, type)),
+          context.cast(value, context.typeOf(type.type!, type)),
         );
         if (cast != null) match(pattern, cast, failure, bindings);
       case ast.NullAssertPattern(:final pattern):
@@ -199,8 +199,7 @@ final class _Matcher(final FunctionContext context) {
       return;
     }
     final done = next.sibling([
-      for (final variable in left.keys)
-        valueType(variable.type, context.unit, pattern),
+      for (final variable in left.keys) context.typeOf(variable.type, pattern),
     ]);
     done.jump(left.values.toList());
     next.enter();

@@ -57,8 +57,7 @@ void lowerSwitchStatement(
     if (body.entry == null) {
       body.variables = values.keys.toList();
       body.entry = exit.sibling([
-        for (final v in body.variables)
-          valueType(v.type, context.unit, body.member),
+        for (final v in body.variables) context.typeOf(v.type, body.member),
       ]);
       pending.add(body);
     }
@@ -105,7 +104,7 @@ void lowerSwitchStatement(
             if (context.current != null) reach(body, bindings);
           });
         case ast.SwitchCase(:final expression):
-          final constant = constantValue(
+          final constant = context.bindings.constantValue(
             expression.computeConstantValue()?.value,
             context.unit,
             expression,

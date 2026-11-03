@@ -16,6 +16,39 @@ Value? lowerExpression(FunctionContext context, ast.Expression expression) =>
 Value? _lower(FunctionContext context, ast.Expression expression) {
   final unit = context.unit;
   switch (expression) {
+    case ast.ThisExpression():
+      return context.receiver!;
+    case ast.InstanceCreationExpression(
+      :final constructorName,
+      :final argumentList,
+    ):
+      if (expression.isConst) {
+        return context.bindings.constantValue(
+          expression.computeConstantValue()?.value,
+          unit,
+          expression,
+        );
+      }
+      final ctor = constructorName.element!;
+      if (constructorName.type.importPrefix?.element
+          case final PrefixElement prefix
+          when prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
+        unsupported(unit, expression, 'deferred constructor');
+      }
+      final target = context.bindings.target(ctor, unit, expression);
+      final args = context.bindings.arguments(
+        ctor,
+        argumentList,
+        unit,
+        (e) => lowerExpression(context, e),
+      );
+      return args == null
+          ? null
+          : context.emit(
+              ctor.isFactory
+                  ? DirectCall(target, args)
+                  : Construct(target, args),
+            );
     case ast.BooleanLiteral(:final value):
       return Constant.boolean(value);
     case ast.IntegerLiteral():
@@ -56,14 +89,14 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           ? null
           : context.testType(
               input,
-              valueType(type.type!, unit, type),
+              context.typeOf(type.type!, type),
               negated: notOperator != null,
             );
     case ast.AsExpression(:final expression, :final type):
       final input = lowerExpression(context, expression);
       return input == null
           ? null
-          : context.cast(input, valueType(type.type!, unit, type));
+          : context.cast(input, context.typeOf(type.type!, type));
     case ast.ThrowExpression(:final expression):
       final exception = lowerExpression(context, expression);
       if (exception != null) context.raise(exception);
@@ -83,13 +116,13 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         test,
         () => lowerExpression(context, thenExpression),
         () => lowerExpression(context, elseExpression),
-        valueType(expression.staticType!, unit, expression),
+        context.typeOf(expression.staticType!, expression),
       );
     case ast.SwitchExpression():
       final subject = lowerExpression(context, expression.expression);
       if (subject == null) return null;
       final done = JumpTarget(context, [
-        valueType(expression.staticType!, unit, expression),
+        context.typeOf(expression.staticType!, expression),
       ]);
       for (final arm in expression.cases) {
         final next = JumpTarget(context);
@@ -113,7 +146,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         when context.locals.containsKey(variable):
       return context.cast(
         context.locals[variable]!,
-        valueType(expression.staticType!, unit, expression),
+        context.typeOf(expression.staticType!, expression),
       );
     case ast.Identifier(
           element: GetterElement(
@@ -124,7 +157,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       if (expression is ast.PrefixedIdentifier && expression.isDeferred) {
         unsupported(unit, expression, 'deferred constant');
       }
-      return constantOf(variable, unit, expression);
+      return context.bindings.constantOf(variable, unit, expression);
     case ast.PrefixedIdentifier() ||
         ast.PropertyAccess() ||
         ast.PostfixExpression(operator: Token(type: .BANG)):
@@ -136,16 +169,28 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
     case ast.CompoundAssignmentExpression():
       return _updateLocal(context, expression);
     case ast.MethodInvocation(
-      methodName: ast.SimpleIdentifier(
-        element: final TopLevelFunctionElement callee,
-      ),
-    ):
+          methodName: ast.SimpleIdentifier(
+            element: final ExecutableElement callee,
+          ),
+        )
+        when callee is TopLevelFunctionElement ||
+            callee is MethodElement &&
+                callee.isStatic &&
+                callee.enclosingElement is ClassElement:
       if (expression.target case final receiver?) {
         final prefix = receiver is ast.SimpleIdentifier
             ? receiver.element
             : null;
-        if (prefix is! PrefixElement ||
-            prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
+        final valid = switch (receiver) {
+          _ when prefix is PrefixElement => !prefix.imports.any(
+            (i) => i.prefix?.isDeferred == true,
+          ),
+          ast.Identifier(element: ClassElement())
+              when callee is MethodElement =>
+            receiver is! ast.PrefixedIdentifier || !receiver.isDeferred,
+          _ => false,
+        };
+        if (!valid) {
           unsupported(unit, expression, 'call receiver');
         }
       }
@@ -210,7 +255,7 @@ Value? _coalesce(
     test,
     evaluateWhen: true,
     skipped: test.refinement(false) ?? known,
-    resultType: valueType(site.staticType!, context.unit, site),
+    resultType: context.typeOf(site.staticType!, site),
     right: () => lowerExpression(context, rhs),
   );
 }
@@ -257,10 +302,7 @@ Value? _updateLocal(
   // the receiver of a compound operator and the result of a postfix update.
   final read = operator.type == .EQ
       ? old
-      : context.cast(
-          old,
-          valueType(expression.readType!, context.unit, expression),
-        );
+      : context.cast(old, context.typeOf(expression.readType!, expression));
   final value = switch (operator.type) {
     .EQ => lowerExpression(context, rhs!),
     .QUESTION_QUESTION_EQ => _coalesce(context, expression, read, rhs!),
@@ -273,7 +315,7 @@ Value? _updateLocal(
     ),
   };
   if (value == null) return null;
-  if (!valueType(variable.type, context.unit, expression).accepts(value.type)) {
+  if (!context.typeOf(variable.type, expression).accepts(value.type)) {
     unsupported(context.unit, expression, 'implicit conversion');
   }
   context.locals[variable] = value;

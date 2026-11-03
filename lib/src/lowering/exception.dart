@@ -1,7 +1,6 @@
 import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:dartc/ir.dart';
 
-import 'bindings.dart';
 import 'function_context.dart';
 
 /// Checks catch clauses in source order and preserves the original throw on a miss.
@@ -24,7 +23,7 @@ void lowerTryCatch(
     final next = JumpTarget(context);
     final filter = clause.exceptionType;
     if (filter != null) {
-      final type = valueType(filter.type!, context.unit, filter);
+      final type = context.typeOf(filter.type!, filter);
       context.guard(context.testType(exception, type), next);
     }
     if (context.current != null) {
@@ -33,7 +32,7 @@ void lowerTryCatch(
       context.inScope(() {
         if (clause.exceptionParameter?.declaredFragment?.element
             case final e?) {
-          final type = valueType(e.type, context.unit, clause);
+          final type = context.typeOf(e.type, clause);
           context.declare(e, type, context.cast(exception, type));
         }
         if (clause.stackTraceParameter?.declaredFragment?.element

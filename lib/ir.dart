@@ -21,12 +21,14 @@ export 'src/ir/block.dart'
         Throw,
         Unreachable;
 export 'src/ir/function.dart' show IrFunction;
-export 'src/ir/signature.dart' show FunctionTarget;
-export 'src/ir/type.dart' show RecordType, ValueType;
+export 'src/ir/program.dart' show IrClass, IrProgram;
+export 'src/ir/signature.dart' show FunctionKind, FunctionTarget, InstanceField;
+export 'src/ir/type.dart' show ClassType, RecordType, ValueType;
 export 'src/ir/value.dart'
     show
         BlockParameter,
         Constant,
+        Construct,
         DirectCall,
         Equals,
         Instruction,
@@ -37,6 +39,7 @@ export 'src/ir/value.dart'
         RecordConstant,
         RecordGet,
         ScalarConstant,
+        StoreField,
         TestedValue,
         TypeCast,
         TypeTest,

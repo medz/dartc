@@ -21,14 +21,13 @@ Value? lowerRecord(
   Value? Function(ast.Expression) evaluate,
 ) {
   if (literal.isConst) {
-    return constantValue(
+    return context.bindings.constantValue(
       literal.computeConstantValue()?.value,
       context.unit,
       literal,
     );
   }
-  final type =
-      valueType(literal.staticType!, context.unit, literal) as RecordType;
+  final type = context.typeOf(literal.staticType!, literal) as RecordType;
   final fields = List<Value?>.filled(type.fields.length, null);
   var positional = 0;
   for (final field in literal.fields) {
@@ -81,9 +80,7 @@ Value? lowerSelectors(
     final value = visit(receiver);
     if (value == null) return null;
     if (nullAware) {
-      skipped ??= JumpTarget(context, [
-        valueType(root.staticType!, context.unit, root),
-      ]);
+      skipped ??= JumpTarget(context, [context.typeOf(root.staticType!, root)]);
       context.guard(
         context.testType(value, .nullType, negated: true),
         skipped!,
@@ -95,7 +92,7 @@ Value? lowerSelectors(
     final owner = switch (known.type.nonNullable) {
       final RecordType type => type,
       _ =>
-        valueType(receiver.staticType!, context.unit, receiver).nonNullable
+        context.typeOf(receiver.staticType!, receiver).nonNullable
             as RecordType,
     };
     final slot = owner.slots[name];

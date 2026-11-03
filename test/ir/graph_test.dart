@@ -115,6 +115,62 @@ void main() {
     expect(() => RecordGet(record, 3), throwsRangeError);
   });
 
+  test(
+    'nominal owners distinguish fields, allocation and in-place initialization',
+    () {
+      final api = ClassType(f.library, 'Item', isAbstract: true);
+      final sub = ClassType(f.library, 'Sub', interfaces: [api]);
+      final other = ClassType(Uri.parse('memory:other'), 'Item');
+      expect(api.accepts(sub), isTrue);
+      expect(other.accepts(sub), isFalse);
+      final field = InstanceField(sub, 'x', .integer, isFinal: true);
+      expect(() => IrClass(other, [field]), throwsArgumentError);
+      final init = FunctionTarget(
+        sub.library,
+        'new',
+        .voidType,
+        [],
+        owner: sub,
+        kind: .initializer,
+      );
+      final abstractInit = FunctionTarget(
+        api.library,
+        'new',
+        .voidType,
+        [],
+        owner: api,
+        kind: .initializer,
+      );
+      expect(() => Construct(abstractInit, []), throwsArgumentError);
+      final legal = Block(init.parameterTypes);
+      legal.emit(StoreField(field, legal.parameters.single, one));
+      legal.finish(const Return());
+      expect(
+        () => IrProgram(
+          [
+            IrClass(sub, [field]),
+          ],
+          [
+            IrFunction(init, [legal]),
+          ],
+        ),
+        returnsNormally,
+      );
+      final create = FunctionTarget(f.library, 'create', sub, []);
+      for (final initializeAgain in [true, false]) {
+        final entry = Block();
+        final object = entry.emit(Construct(init, []));
+        entry.emit(
+          initializeAgain
+              ? DirectCall(init, [object])
+              : StoreField(field, object, one),
+        );
+        entry.finish(Return(object));
+        expect(() => IrFunction(create, [entry]), throwsStateError);
+      }
+    },
+  );
+
   test('a protected operation and its exception have distinct SSA edges', () {
     final target = FunctionTarget(f.library, 'invoke', .object, [.object]);
     final entry = Block(target.parameterTypes);

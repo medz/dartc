@@ -16,7 +16,7 @@ Synchronous functions can catch explicit throws, failed type checks and exceptio
 
 Use scalar and record patterns with `when` guards in `if-case`, `switch` statements and `switch` expressions. Switch statements support shared case bodies, implicit breaks and labeled `continue`.
 
-The `package:dartc/ir.dart` and `package:dartc/lowering.dart` libraries expose SSA functions and lowering from checked Dart libraries.
+`Lowering.lower` returns an `IrProgram` with `classes` and `functions`. Non-generic classes support generative constructors, constructor redirection, factory bodies and static methods. Runtime type tests and catch clauses distinguish classes by declaration and follow their superclass and interfaces.
 
 The development checkout uses the official Dart analyzer and can print compiler IR. Native executables, libraries and the `Export` API remain available in [release 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).
 

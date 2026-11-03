@@ -75,10 +75,58 @@ sealed class Instruction(super.type) extends Value {
 
   /// Whether evaluation can transfer control to a Dart exception handler.
   bool get mayThrow => switch (this) {
-    DirectCall() || TypeCast() || NullCheck() || MakeRecord() => true,
+    DirectCall() ||
+    Construct() ||
+    TypeCast() ||
+    NullCheck() ||
+    MakeRecord() => true,
     Equals(:final mayCallUserCode) => mayCallUserCode,
-    IntBinary() || TypeTest() || RecordGet() => false,
+    IntBinary() || TypeTest() || RecordGet() || StoreField() => false,
   };
+}
+
+/// Allocates a fresh object, runs [initializer] on it and returns it on success.
+///
+/// Nullable instance slots without an initializer start as `null`.
+final class Construct(
+  /// The generative constructor of the allocated class.
+  final FunctionTarget initializer,
+  Iterable<Value> arguments,
+) extends Instruction {
+  @override
+  final List<Value> inputs = .unmodifiable(arguments);
+
+  this
+    : super(
+        initializer.owner ?? (throw ArgumentError('Expected a constructor.')),
+      ) {
+    if (initializer.kind != .initializer || initializer.owner!.isAbstract) {
+      throw ArgumentError('Expected a concrete generative constructor.');
+    }
+    checkArguments(initializer.parameterTypes.skip(1), inputs);
+  }
+}
+
+/// Stores [value] directly in [field] during instance initialization.
+final class StoreField(
+  /// The slot selected by its declaring class.
+  final InstanceField field,
+
+  /// The object containing the slot.
+  final Value receiver,
+
+  /// The value written to the slot.
+  final Value value,
+) extends Instruction {
+  this : super(.voidType) {
+    if (!field.owner.accepts(receiver.type) ||
+        !field.type.accepts(value.type)) {
+      throw ArgumentError('Incompatible instance field write.');
+    }
+  }
+
+  @override
+  Iterable<Value> get inputs => [receiver, value];
 }
 
 /// Constructs a record from evaluated fields in slot order.

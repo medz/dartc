@@ -10,9 +10,8 @@ Future<void> main(List<String> args) async {
   }
   try {
     // #region lower_libraries
-    for (final function in await CheckedLibraries.read(args, Lowering.lower)) {
-      function.writeTo(stdout);
-    }
+    final program = await CheckedLibraries.read(args, Lowering.lower);
+    program.writeTo(stdout);
     // #endregion lower_libraries
   } on FormatException catch (error) {
     stderr.writeln(error);

@@ -1,43 +1,47 @@
 /// A Dart type carried by an SSA value, a block parameter or a function signature.
 sealed class const ValueType() {
   /// The non-nullable `Object` type.
-  static const ValueType object = _CoreType('Object');
+  static const ClassType object = ClassType._core('Object', null, false);
 
   /// The common supertype of `int` and `double`.
-  static const ValueType number = _CoreType('num', object);
+  static const ClassType number = ClassType._core('num', object, true);
 
   /// The non-nullable `int` type.
-  static const ValueType integer = _CoreType('int', number);
+  static const ClassType integer = ClassType._core('int', number, true);
 
   /// The non-nullable `double` type.
-  static const ValueType floating = _CoreType('double', number);
+  static const ClassType floating = ClassType._core('double', number, true);
 
   /// The non-nullable `bool` type.
-  static const ValueType boolean = _CoreType('bool', object);
+  static const ClassType boolean = ClassType._core('bool', object, true);
 
   /// The non-nullable `String` type.
-  static const ValueType string = _CoreType('String', object);
+  static const ClassType string = ClassType._core('String', object, true);
 
   /// The common supertype of all Dart record shapes.
-  static const ValueType record = _CoreType('Record', object);
+  static const ClassType record = ClassType._core('Record', object, true);
 
   /// The Dart trace paired with a caught exception.
-  static const ValueType stackTrace = _CoreType('StackTrace', object);
+  static const ClassType stackTrace = ClassType._core(
+    'StackTrace',
+    object,
+    true,
+  );
 
   /// The superclass of Dart runtime errors.
-  static const ValueType error = _CoreType('Error', object);
+  static const ClassType error = ClassType._core('Error', object, false);
 
   /// The error raised by failed runtime type checks.
-  static const ValueType typeError = _CoreType('TypeError', error);
+  static const ClassType typeError = ClassType._core('TypeError', error, false);
 
   /// The type whose only value is `null`.
-  static const ValueType nullType = _CoreType('Null');
+  static const ValueType nullType = _SpecialType('Null');
 
   /// The type with no values.
-  static const ValueType never = _CoreType('Never');
+  static const ValueType never = _SpecialType('Never');
 
   /// The top type whose uses Dart restricts statically.
-  static const ValueType voidType = _CoreType('void');
+  static const ValueType voidType = _SpecialType('void');
 
   /// The spelling used in a Dart type annotation.
   String get dartName;
@@ -71,7 +75,9 @@ sealed class const ValueType() {
       return target.sameShape(type) &&
           target.fields.indexed.every((p) => p.$2.accepts(type.fields[p.$1]));
     }
-    return type is _CoreType && type.parent != null && accepts(type.parent!);
+    return this is ClassType &&
+        type is ClassType &&
+        type._inherits(this as ClassType);
   }
 }
 
@@ -149,10 +155,53 @@ final class RecordType._(
   );
 }
 
-final class const _CoreType(
-  @override final String dartName, [
-  final ValueType? parent,
-]) extends ValueType;
+/// A nominal Dart class shared by its declarations, value types and runtime tests.
+final class const ClassType._(
+  final Uri? _library,
+  @override final String dartName,
+
+  /// The immediate superclass, absent only for `Object`.
+  final ClassType? superclass,
+
+  /// The directly implemented interfaces, excluding [superclass].
+  final List<ClassType> interfaces,
+
+  /// Whether direct allocation of this class is forbidden.
+  final bool isAbstract,
+) extends ValueType {
+  /// Creates a class identity with [superclass] and directly implemented [interfaces].
+  new(
+    Uri library,
+    String name, {
+    ClassType superclass = ValueType.object,
+    Iterable<ClassType> interfaces = const [],
+    bool isAbstract = false,
+  }) : this._(library, name, superclass, .unmodifiable(interfaces), isAbstract);
+
+  const new _core(String name, ClassType? parent, bool isAbstract)
+    : this._(null, name, parent, const [], isAbstract);
+
+  static final _coreLibrary = Uri.parse('dart:core');
+
+  /// The URI of the declaring library.
+  Uri get library => _library ?? _coreLibrary;
+
+  bool _inherits(ClassType target, [Set<ClassType>? visited]) {
+    for (ClassType? type = this; type != null; type = type.superclass) {
+      if (identical(type, target)) return true;
+      if (type.interfaces.isEmpty) continue;
+      visited ??= {};
+      if (!visited.add(type)) return false;
+      for (final interface in type.interfaces) {
+        if (interface._inherits(target, visited)) return true;
+      }
+    }
+    return false;
+  }
+}
+
+final class const _SpecialType(@override final String dartName)
+    extends ValueType;
 
 final class const _NullableType(@override final ValueType nonNullable)
     extends ValueType {

@@ -24,8 +24,13 @@ void writeFunction(
   };
   String edge(Jump e) =>
       '${labels[e.target]}(${e.arguments.map(value).join(', ')})';
-  String symbol(FunctionTarget t) => '${t.library}::${t.name}';
+  String symbol(FunctionTarget t) =>
+      '${t.library}::${t.owner == null ? '' : '${t.owner!.dartName}.'}${t.name}';
   String operation(Instruction op) => switch (op) {
+    Construct() =>
+      'new ${symbol(op.initializer)}(${op.inputs.map(value).join(', ')})',
+    StoreField() =>
+      'store ${value(op.receiver)}.${op.field.owner.dartName}::${op.field.name}, ${value(op.value)}',
     MakeRecord() =>
       'record ${op.type.dartName}[${op.inputs.map(value).join(', ')}]',
     RecordGet() => 'field ${value(op.record)}[${op.slot}]',

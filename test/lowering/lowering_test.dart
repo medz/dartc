@@ -11,6 +11,7 @@ import 'fixtures/exceptions.dart' as exceptions;
 import 'fixtures/finalizers.dart' as finalizers;
 import 'fixtures/functions.dart' as dart;
 import 'fixtures/loops.dart' as loops;
+import 'fixtures/nominal/constructors.dart' as nominal;
 import 'fixtures/nullability.dart' as nullable;
 import 'fixtures/patterns.dart' as patterns;
 import 'fixtures/records.dart' as records;
@@ -20,7 +21,7 @@ import 'fixtures/updates.dart' as updates;
 
 const _fixtures = 'test/lowering/fixtures';
 
-Future<List<IrFunction>> _lower(List<String> names) => CheckedLibraries.read([
+Future<IrProgram> _lower(List<String> names) => CheckedLibraries.read([
   for (final name in names) '$_fixtures/$name',
 ], Lowering.lower);
 
@@ -42,9 +43,14 @@ void main() {
       'destructure.dart',
       'exceptions.dart',
       'finalizers.dart',
+      'nominal/constructors.dart',
+      'nominal/other.dart',
       'scalar_constants.dart',
     ]);
-    functions = {for (final f in result) f.target.name: f};
+    functions = {
+      for (final f in result.functions)
+        if (f.target.owner == null) f.target.name: f,
+    };
     final library = Uri.base.resolve('$_fixtures/effects.dart');
     runner = FixtureRunner(result, {
       (library, 'tick'): effects.tick,
@@ -466,6 +472,19 @@ void main() {
     },
   );
 
+  test('constructors share nominal identities and initialize each instance in order', () {
+    for (final n in [-1, 0, 3]) {
+      compare('construct', [n], () => nominal.construct(n));
+      compare('primary', [n], () => nominal.primary(n));
+    }
+    for (final flag in [false, true]) {
+      compare('separateLibraries', [
+        flag,
+      ], () => nominal.separateLibraries(flag));
+      compare('typedException', [flag], () => nominal.typedException(flag));
+    }
+  });
+
   for (final (file, line) in [
     ('index_update.dart', 3),
     ('lazy.dart', 2),
@@ -501,7 +520,7 @@ void main() {
   });
 
   test('different libraries can bind functions with the same name', () async {
-    final [client, left, right] = await _lower([
+    final IrProgram(functions: [client, left, right]) = await _lower([
       'package/entry.dart',
       'dependency/lib/left.dart',
       'dependency/lib/right.dart',
