@@ -5,6 +5,7 @@ import 'package:dartc/ir.dart';
 import 'bindings.dart';
 import 'function_context.dart';
 import 'operators.dart';
+import 'record.dart';
 
 /// Matches [subject] and returns the declarations visible on the successful path.
 Iterable<PatternVariableElement> matchGuarded(
@@ -14,29 +15,60 @@ Iterable<PatternVariableElement> matchGuarded(
   JumpTarget failure,
   Value? Function(ast.Expression) evaluate,
 ) {
-  final bindings = <PatternVariableElement, Value>{};
-  final matcher = _Matcher(context);
-  matcher.match(guarded.pattern, subject, failure, bindings);
+  final bindings = declarePattern(context, guarded.pattern, subject, failure);
   if (context.current == null) return const [];
-  for (final MapEntry(:key, :value) in bindings.entries) {
-    context.declare(
-      key,
-      valueType(key.type, context.unit, guarded.pattern),
-      value,
-    );
-  }
   if (guarded.whenClause case final clause?) {
     context.guard(evaluate(clause.expression), failure);
+  }
+  return bindings;
+}
+
+/// Destructures [subject] before introducing any local declarations.
+Iterable<PatternVariableElement> declarePattern(
+  FunctionContext context,
+  ast.DartPattern pattern,
+  Value? subject, [
+  JumpTarget? failure,
+]) {
+  if (subject == null) return const [];
+  final bindings = <PatternVariableElement, Value>{};
+  _Matcher(context).match(pattern, subject, failure, bindings);
+  if (context.current == null) return const [];
+  for (final MapEntry(:key, :value) in bindings.entries) {
+    context.declare(key, valueType(key.type, context.unit, pattern), value);
   }
   return bindings.keys;
 }
 
+/// Commits local writes together after every field has matched, then returns [subject].
+Value? assignPattern(
+  FunctionContext context,
+  ast.DartPattern pattern,
+  Value? subject,
+) {
+  if (subject == null) return null;
+  final writes = <VariableElement, Value>{};
+  _Matcher(context).match(pattern, subject, null, writes);
+  if (context.current == null) return null;
+  context.locals.addAll(writes);
+  return subject;
+}
+
 final class _Matcher(final FunctionContext context) {
+  Value? _require(Value value, ValueType type, JumpTarget? failure) {
+    if (type.accepts(value.type)) return context.normal(value);
+    if (failure != null) {
+      context.guard(context.testType(value, type), failure);
+      if (context.current == null) return null;
+    }
+    return context.normal(context.cast(value, type));
+  }
+
   void match(
     ast.DartPattern pattern,
     Value input,
-    JumpTarget failure,
-    Map<PatternVariableElement, Value> bindings,
+    JumpTarget? failure,
+    Map<VariableElement, Value> bindings,
   ) {
     if (context.current == null) return;
     final value = context.refined(input);
@@ -45,17 +77,52 @@ final class _Matcher(final FunctionContext context) {
         match(pattern, value, failure, bindings);
       case ast.WildcardPattern(:final type):
         if (type != null) {
-          context.guard(
-            context.testType(value, valueType(type.type!, context.unit, type)),
-            failure,
-          );
+          _require(value, valueType(type.type!, context.unit, type), failure);
         }
       case ast.DeclaredVariablePattern():
         final variable = pattern.declaredFragment!.element;
-        final type = valueType(variable.type, context.unit, pattern);
-        context.guard(context.testType(value, type), failure);
-        if (context.current != null) {
-          bindings[variable] = context.cast(value, type);
+        final bound = _require(
+          value,
+          valueType(variable.type, context.unit, pattern),
+          failure,
+        );
+        if (bound != null) bindings[variable] = bound;
+      case ast.AssignedVariablePattern(element: final VariableElement variable)
+          when context.locals.containsKey(variable):
+        final bound = _require(
+          value,
+          valueType(variable.type, context.unit, pattern),
+          null,
+        );
+        if (bound != null) bindings[variable] = bound;
+      case ast.RecordPattern(:final fields):
+        final any = ValueType.object.nullable;
+        final required = RecordType(
+          [
+            for (final field in fields)
+              if (field.name == null) any,
+          ],
+          {
+            for (final field in fields)
+              if (field.name != null) field.effectiveName!: any,
+          },
+        );
+        final record = _require(value, required, failure);
+        if (record == null) return;
+        var positional = 0;
+        for (final field in fields) {
+          final slot = field.name == null
+              ? positional++
+              : required.slots[field.effectiveName!]!;
+          if (field.pattern.unParenthesized case ast.WildcardPattern(
+            type: null,
+          )) {
+            continue;
+          }
+          final item = context.normal(readRecordField(context, record, slot));
+          if (item == null) return;
+          match(field.pattern, item, failure, bindings);
+          if (context.current == null) return;
         }
       case ast.ConstantPattern(:final expression):
         final constant = constantValue(
@@ -63,7 +130,7 @@ final class _Matcher(final FunctionContext context) {
           context.unit,
           pattern,
         );
-        context.guard(lowerEquality(context, constant, value), failure);
+        context.guard(lowerEquality(context, constant, value), failure!);
       case ast.RelationalPattern(:final operand, :final operator):
         final constant = constantValue(
           operand.computeConstantValue()?.value,
@@ -72,7 +139,7 @@ final class _Matcher(final FunctionContext context) {
         );
         context.guard(
           lowerBinary(context, pattern, operator, value, constant),
-          failure,
+          failure!,
         );
       case ast.CastPattern(:final pattern, :final type):
         final cast = context.normal(
@@ -85,14 +152,14 @@ final class _Matcher(final FunctionContext context) {
       case ast.NullCheckPattern(:final pattern):
         context.guard(
           context.testType(value, .nullType, negated: true),
-          failure,
+          failure!,
         );
         match(pattern, value, failure, bindings);
       case ast.LogicalAndPattern(:final leftOperand, :final rightOperand):
         match(leftOperand, value, failure, bindings);
         match(rightOperand, value, failure, bindings);
       case ast.LogicalOrPattern():
-        _or(pattern, value, failure, bindings);
+        _or(pattern, value, failure!, bindings);
       default:
         unsupported(
           context.unit,
@@ -106,7 +173,7 @@ final class _Matcher(final FunctionContext context) {
     ast.LogicalOrPattern pattern,
     Value value,
     JumpTarget failure,
-    Map<PatternVariableElement, Value> bindings,
+    Map<VariableElement, Value> bindings,
   ) {
     Map<PatternVariableElement, Value> arm(
       ast.DartPattern operand,

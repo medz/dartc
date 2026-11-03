@@ -40,6 +40,12 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         expression,
         (e) => lowerExpression(context, e),
       );
+    case ast.PatternAssignment(:final pattern, :final expression):
+      return assignPattern(
+        context,
+        pattern,
+        lowerExpression(context, expression),
+      );
     case ast.StringLiteral(stringValue: final value?):
       return Constant.string(value);
     case ast.ParenthesizedExpression(:final expression):

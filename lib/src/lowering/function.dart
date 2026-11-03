@@ -101,6 +101,14 @@ final class FunctionLowering(
     }
   }
 
+  void _patternDeclaration(ast.PatternVariableDeclaration declaration) {
+    declarePattern(
+      context,
+      declaration.pattern,
+      lowerExpression(context, declaration.expression),
+    );
+  }
+
   void _statement(ast.Statement statement) {
     switch (statement) {
       case ast.Block():
@@ -113,6 +121,8 @@ final class FunctionLowering(
         );
       case ast.VariableDeclarationStatement(:final variables):
         _variables(variables);
+      case ast.PatternVariableDeclarationStatement(:final declaration):
+        _patternDeclaration(declaration);
       case ast.ExpressionStatement(:final expression):
         lowerExpression(context, expression);
       case ast.IfStatement(caseClause: ast.CaseClause(:final guardedPattern)):
@@ -195,8 +205,8 @@ final class FunctionLowering(
               if (initialization != null) {
                 lowerExpression(context, initialization);
               }
-            case ast.ForPartsWithPattern():
-              unsupported(context.unit, parts, 'for pattern initializer');
+            case ast.ForPartsWithPattern(:final variables):
+              _patternDeclaration(variables);
           }
           _loop(
             statement,

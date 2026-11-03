@@ -8,11 +8,11 @@ Conditional expressions now select one branch and preserve its result, including
 
 Direct calls accept optional positional and named parameters with scalar defaults. Lowering also supports string, double and null literals and scalar constants declared locally or at library scope.
 
-Records can be constructed, returned, compared and used as constants or parameter defaults. Named and positional fields support ordinary and null-aware reads, including in nested records.
+Records can be constructed, returned, compared and used as constants or parameter defaults. Named and positional fields support ordinary and null-aware reads. Nested record patterns can declare locals, swap existing variables and initialize `for` loops.
 
 Nullable core types can pass through calls and branches. Lowering supports `??`, local `??=`, postfix `!`, and type tests and casts on core types. Synchronous `throw` and calls returning `Never` end evaluation of the current path.
 
-Use scalar patterns and `when` guards in `if-case`, `switch` statements and `switch` expressions. Switch statements support shared case bodies, implicit breaks and labeled `continue`.
+Use scalar and record patterns with `when` guards in `if-case`, `switch` statements and `switch` expressions. Switch statements support shared case bodies, implicit breaks and labeled `continue`.
 
 The `package:dartc/ir.dart` and `package:dartc/lowering.dart` libraries expose SSA functions and lowering from checked Dart libraries.
 

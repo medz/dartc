@@ -4,7 +4,7 @@
 
 | 特性 | 当前 IR 范围 |
 | --- | --- |
-| 显式类型、`var`、多变量声明 | 带初值的核心类型局部声明，以及无初值的非 late 可空局部变量。可空变量缺省为 null。 |
+| 显式类型、`var`、多变量声明 | 支持带初值的核心类型和 record 局部变量，以及无初值的非 late 可空局部变量。可空变量缺省为 null。 |
 | 顶层、静态、实例和局部变量 | 局部变量、参数和顶层标量或 record const，其余存储待实现。 |
 | 局部遮蔽、捕获、声明前引用 | 待实现。 |
 | 通配变量 `_` | 待实现。 |
@@ -14,7 +14,7 @@
 | `const` 与常量对象 | 顶层和局部 const 支持 int、bool、double、String、null 和含这些值的嵌套 record。类实例和集合常量待实现。 |
 | `late`、`late final` | 待实现。 |
 | 库变量和静态字段惰性初始化 | 待实现。 |
-| 模式变量声明与赋值 | 待实现。 |
+| 模式变量声明与赋值 | 支持用 record 模式声明局部变量、交换已有变量及在三段式 for 中解构。同一次模式赋值在解构成功后写入目标。见[解构样本](../test/lowering/fixtures/destructure.dart)。 |
 
 [IR 行为对照](../test/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/variables.md)。
 

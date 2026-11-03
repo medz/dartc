@@ -5,6 +5,7 @@ import 'package:test/test.dart';
 import 'fixture_runner.dart';
 import 'fixtures/conditionals.dart' as conditionals;
 import 'fixtures/defaults.dart' as defaults;
+import 'fixtures/destructure.dart' as destructure;
 import 'fixtures/effects.dart' as effects;
 import 'fixtures/functions.dart' as dart;
 import 'fixtures/loops.dart' as loops;
@@ -36,6 +37,7 @@ void main() {
       'type_checks.dart',
       'conditionals.dart',
       'defaults.dart',
+      'destructure.dart',
       'scalar_constants.dart',
     ]);
     functions = {for (final f in result) f.target.name: f};
@@ -371,6 +373,43 @@ void main() {
       }
     },
   );
+
+  test('record patterns preserve field order, staged assignment and alternative bindings', () {
+    for (final n in [-1, 0, 2, 6]) {
+      compare('namedBindings', [n], () => destructure.namedBindings(n));
+      compare('loopBindings', [n], () => destructure.loopBindings(n));
+      for (final (a, b) in [(0, 3), (4, 0), (0, 0), (2, 3), (-1, 4)]) {
+        compare('swap', [a, b], () => destructure.swap(a, b));
+        compare('chooseField', [
+          a,
+          b,
+          n,
+        ], () => destructure.chooseField(a, b, n));
+      }
+    }
+    for (final kind in [0, 1, 2, 3]) {
+      for (final value in [null, 3, 4, 'x']) {
+        compare('matchShape', [
+          kind,
+          value,
+        ], () => destructure.matchShape(kind, value));
+      }
+    }
+    for (final flag in [false, true]) {
+      for (final value in [null, 1, 'x']) {
+        compare('patternOrder', [
+          flag,
+          value,
+        ], () => destructure.patternOrder(flag, value));
+      }
+      for (final b in [null, false, true]) {
+        compare('exhaustivePair', [
+          flag,
+          b,
+        ], () => destructure.exhaustivePair(flag, b));
+      }
+    }
+  });
 
   for (final (file, line) in [
     ('index_update.dart', 3),
