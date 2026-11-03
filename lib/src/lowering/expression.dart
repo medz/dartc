@@ -66,6 +66,35 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       operand: ast.DoubleLiteral(:final value),
     ):
       return Constant.floating(-value);
+    case ast.PrefixExpression(:final operand, :final operator, :final element)
+        when operator.type == .MINUS ||
+            operator.type == .TILDE ||
+            operator.type == .BANG:
+      final direct = operand is ast.SuperExpression;
+      final value = direct
+          ? context.receiver
+          : lowerExpression(context, operand);
+      if (value == null) return null;
+      if (operator.type == .BANG) {
+        final condition = context.normal(context.cast(value, .boolean));
+        return condition == null
+            ? null
+            : context.emit(Equals(condition, const Constant.boolean(false)));
+      }
+      if (value.type == .integer && element?.library.isDartCore == true) {
+        return context.emit(
+          operator.type == .TILDE
+              ? IntBinary(.bitXor, value, const Constant.integer(-1))
+              : IntBinary(.subtract, const Constant.integer(0), value),
+        );
+      }
+      return context.callPositionalMember(
+        element,
+        value,
+        [],
+        expression,
+        direct: direct,
+      );
     case ast.NullLiteral():
       return const Constant.nullValue();
     case ast.RecordLiteral():
@@ -161,18 +190,19 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       return context.bindings.constantOf(variable, unit, expression);
     case ast.PrefixedIdentifier() ||
         ast.PropertyAccess() ||
-        ast.PostfixExpression(operator: Token(type: .BANG)):
-    case ast.SimpleIdentifier(element: GetterElement(isStatic: false)):
-    case ast.MethodInvocation(
-      methodName: ast.SimpleIdentifier(element: MethodElement(isStatic: false)),
-    ):
-      return lowerSelectors(
+        ast.SimpleIdentifier(element: GetterElement(isStatic: false)) ||
+        ast.MethodInvocation(
+          methodName: ast.SimpleIdentifier(
+            element: MethodElement(isStatic: false),
+          ),
+        ) ||
+        ast.IndexExpression() ||
+        ast.CompoundAssignmentExpression():
+      return SelectorChain(
         context,
         expression,
         (e) => lowerExpression(context, e),
-      );
-    case ast.CompoundAssignmentExpression():
-      return _updateLocal(context, expression);
+      ).lower();
     case ast.MethodInvocation(
           methodName: ast.SimpleIdentifier(
             element: final ExecutableElement callee,
@@ -212,10 +242,16 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       :final rightOperand,
       :final operator,
     ):
-      final left = lowerExpression(context, leftOperand);
+      final left = leftOperand is ast.SuperExpression
+          ? context.receiver
+          : lowerExpression(context, leftOperand);
       if (left == null) return null;
       if (operator.type == .QUESTION_QUESTION) {
-        return _coalesce(context, expression, left, rightOperand);
+        return context.ifNull(
+          left,
+          context.typeOf(expression.staticType!, expression),
+          () => lowerExpression(context, rightOperand),
+        );
       }
       if (operator.type == .AMPERSAND_AMPERSAND || operator.type == .BAR_BAR) {
         final and = operator.type == .AMPERSAND_AMPERSAND;
@@ -246,25 +282,6 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
   }
 }
 
-Value? _coalesce(
-  FunctionContext context,
-  ast.Expression site,
-  Value left,
-  ast.Expression rhs,
-) {
-  final known = context.refined(left);
-  if (known.type == .nullType) return lowerExpression(context, rhs);
-  if (!known.type.accepts(.nullType)) return known;
-  final test = context.current!.emit(TypeTest(known, .nullType));
-  return context.shortCircuit(
-    test,
-    evaluateWhen: true,
-    skipped: test.refinement(false) ?? known,
-    resultType: context.typeOf(site.staticType!, site),
-    right: () => lowerExpression(context, rhs),
-  );
-}
-
 Constant _integerLiteral(
   FunctionContext context,
   ast.Expression site,
@@ -279,50 +296,4 @@ Constant _integerLiteral(
     return .integer(i);
   }
   unsupported(context.unit, site, 'numeric literal');
-}
-
-Value? _updateLocal(
-  FunctionContext context,
-  ast.CompoundAssignmentExpression expression,
-) {
-  final (operator, rhs) = switch (expression) {
-    ast.AssignmentExpression(:final operator, :final rightHandSide) => (
-      operator,
-      rightHandSide,
-    ),
-    ast.PrefixExpression(:final operator) ||
-    ast.PostfixExpression(:final operator)
-        when operator.type == .PLUS_PLUS || operator.type == .MINUS_MINUS =>
-      (operator, null),
-    _ => unsupported(context.unit, expression, 'operator expression'),
-  };
-  final variable = expression.writeElement;
-  final old = context.locals[variable];
-  if (variable is! VariableElement ||
-      old == null ||
-      (operator.type != .EQ && expression.readElement != variable)) {
-    unsupported(context.unit, expression, 'non-local assignment');
-  }
-  // The right operand can write the same local. Its previous value remains
-  // the receiver of a compound operator and the result of a postfix update.
-  final read = operator.type == .EQ
-      ? old
-      : context.cast(old, context.typeOf(expression.readType!, expression));
-  final value = switch (operator.type) {
-    .EQ => lowerExpression(context, rhs!),
-    .QUESTION_QUESTION_EQ => _coalesce(context, expression, read, rhs!),
-    _ => lowerBinary(
-      context,
-      expression,
-      operator,
-      read,
-      rhs == null ? const Constant.integer(1) : lowerExpression(context, rhs),
-    ),
-  };
-  if (value == null) return null;
-  if (!context.typeOf(variable.type, expression).accepts(value.type)) {
-    unsupported(context.unit, expression, 'implicit conversion');
-  }
-  context.locals[variable] = value;
-  return expression is ast.PostfixExpression ? read : value;
 }

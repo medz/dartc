@@ -1,6 +1,6 @@
 ## Unreleased
 
-The IR listing supports assignments to local variables and parameters inside expressions, including integer `+=`, `-=`, `*=`, and prefix and postfix increment and decrement.
+Assignments can target local variables, parameters, instance properties and user-defined index operators. Compound assignments preserve getter and setter order, including the conditional write in `??=`. Integer expressions support division, modulo, bitwise operators and shifts.
 
 Lowering supports ordinary `for` and `do-while` loops, including `break` and `continue` across nested loops and `break` from labeled statements.
 

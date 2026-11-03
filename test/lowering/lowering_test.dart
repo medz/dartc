@@ -13,6 +13,7 @@ import 'fixtures/functions.dart' as dart;
 import 'fixtures/loops.dart' as loops;
 import 'fixtures/nominal/constructors.dart' as nominal;
 import 'fixtures/nominal/members.dart' as members;
+import 'fixtures/nominal/updates.dart' as object_updates;
 import 'fixtures/nullability.dart' as nullable;
 import 'fixtures/patterns.dart' as patterns;
 import 'fixtures/records.dart' as records;
@@ -46,6 +47,7 @@ void main() {
       'finalizers.dart',
       'nominal/constructors.dart',
       'nominal/members.dart',
+      'nominal/updates.dart',
       'nominal/other.dart',
       'scalar_constants.dart',
     ]);
@@ -80,7 +82,11 @@ void main() {
       () => runner.run(functions[name]!, args),
     );
     expect(error, expectedError);
-    expect(actual, expected);
+    if (expected is double && expected.isNaN) {
+      expect(actual, isNaN);
+    } else {
+      expect(actual, expected);
+    }
     if (expected is double) {
       expect(actual, isA<double>());
       if (expected == 0) {
@@ -502,6 +508,36 @@ void main() {
     for (final value in [3, 'wrong']) {
       compare('promotedField', [value], () => members.promotedField(value));
       compare('checkedArgument', [value], () => members.checkedArgument(value));
+    }
+  });
+
+  test('property and index updates preserve evaluation, shorting and assignment results', () {
+    for (final n in [-4, -1, 0, 3]) {
+      for (final mode in [0, 1, 2, 3, 4, 5]) {
+        compare('locations', [
+          n,
+          mode,
+        ], () => object_updates.locations(n, mode));
+      }
+      for (final missing in [false, true]) {
+        for (final initial in [null, 4]) {
+          compare('optionalWrite', [
+            missing,
+            initial,
+            n,
+          ], () => object_updates.optionalWrite(missing, initial, n));
+        }
+      }
+      compare('overloaded', [n], () => object_updates.overloaded(n));
+      for (final b in [-1, 0, 2, 63, 65]) {
+        compare('integerOps', [n, b], () => object_updates.integerOps(n, b));
+        compare('quotient', [n, b], () => object_updates.quotient(n, b));
+      }
+    }
+    for (final other in [null, 1, 'x']) {
+      compare('compareSuper', [
+        other,
+      ], () => object_updates.compareSuper(other));
     }
   });
 

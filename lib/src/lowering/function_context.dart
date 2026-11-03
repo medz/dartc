@@ -25,6 +25,29 @@ final class FunctionContext(
   ValueType typeOf(DartType type, AstNode site) =>
       bindings.valueType(type, unit, site);
 
+  /// Calls a resolved getter, setter or operator with its evaluated operands.
+  Value? callPositionalMember(
+    ExecutableElement? member,
+    Value receiver,
+    List<Value> args,
+    AstNode site, {
+    bool direct = false,
+  }) {
+    if (member == null ||
+        member.isStatic ||
+        member.enclosingElement is! ClassElement) {
+      unsupported(unit, site, 'instance member binding');
+    }
+    final target = bindings.target(member, unit, site);
+    return normal(
+      emit(
+        direct
+            ? DirectCall(target, [receiver, ...args])
+            : InstanceCall(target, receiver, args),
+      ),
+    );
+  }
+
   /// The SSA value of each in-scope variable on the current path.
   final locals = <VariableElement, Value>{};
   final _declared = <VariableElement>[];
@@ -248,6 +271,21 @@ final class FunctionContext(
     yesEnd.finish(fromYes);
     noEnd.finish(fromNo);
     return resultType == null ? null : current!.parameters.first;
+  }
+
+  /// Evaluates [fallback] only when [left] is null.
+  Value? ifNull(Value left, ValueType resultType, Value? Function() fallback) {
+    final known = refined(left);
+    if (known.type == .nullType) return fallback();
+    if (!known.type.accepts(.nullType)) return known;
+    final test = current!.emit(TypeTest(known, .nullType));
+    return shortCircuit(
+      test,
+      evaluateWhen: true,
+      skipped: test.refinement(false) ?? known,
+      resultType: resultType,
+      right: fallback,
+    );
   }
 
   /// Evaluates [right] only on the selected edge and forwards [skipped] on the other.

@@ -82,11 +82,8 @@ sealed class Instruction(super.type) extends Value {
     NullCheck() ||
     MakeRecord() => true,
     Equals(:final mayCallUserCode) => mayCallUserCode,
-    IntBinary() ||
-    TypeTest() ||
-    RecordGet() ||
-    StoreField() ||
-    LoadField() => false,
+    IntBinary(:final operator) => operator.mayThrow,
+    TypeTest() || RecordGet() || StoreField() || LoadField() => false,
   };
 }
 
@@ -312,6 +309,33 @@ enum IntOperator(
   /// Integer multiplication.
   multiply(.integer),
 
+  /// IEEE division of the two integers.
+  divide(.floating),
+
+  /// Division truncated toward zero.
+  truncateDivide(.integer),
+
+  /// Euclidean modulo.
+  modulo(.integer),
+
+  /// Bitwise conjunction.
+  bitAnd(.integer),
+
+  /// Bitwise disjunction.
+  bitOr(.integer),
+
+  /// Bitwise exclusive or.
+  bitXor(.integer),
+
+  /// Left shift by a non-negative count.
+  shiftLeft(.integer),
+
+  /// Sign-extending right shift.
+  shiftRight(.integer),
+
+  /// Zero-extending right shift.
+  unsignedShiftRight(.integer),
+
   /// Whether the left operand is smaller than the right.
   lessThan(.boolean),
 
@@ -322,7 +346,17 @@ enum IntOperator(
   greaterThan(.boolean),
 
   /// Whether the left operand is greater than or equal to the right.
-  greaterOrEqual(.boolean),
+  greaterOrEqual(.boolean);
+
+  /// Whether the operands can trigger a Dart arithmetic or shift error.
+  bool get mayThrow => switch (this) {
+    truncateDivide ||
+    modulo ||
+    shiftLeft ||
+    shiftRight ||
+    unsignedShiftRight => true,
+    _ => false,
+  };
 }
 
 /// Dart equality, including the null rule and dispatch on the left operand.
