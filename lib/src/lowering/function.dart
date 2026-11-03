@@ -6,6 +6,7 @@ import 'package:dartc/ir.dart';
 import 'bindings.dart';
 import 'expression.dart';
 import 'function_context.dart';
+import 'pattern.dart';
 
 /// Builds the blocks and local bindings for a resolved synchronous function.
 final class FunctionLowering(
@@ -14,8 +15,11 @@ final class FunctionLowering(
   final TopLevelFunctionElement element,
   final ast.FunctionBody body,
 ) {
-  final FunctionContext context = .new(unit, bindings);
-  final _locals = <VariableElement>[];
+  final FunctionContext context = .new(
+    unit,
+    bindings,
+    body.isPotentiallyMutatedInScope,
+  );
   final _breaks = <ast.AstNode, JumpTarget>{};
   final _continues = <ast.AstNode, JumpTarget>{};
   late final _target = context.bindings.target(element, context.unit, body);
@@ -28,7 +32,7 @@ final class FunctionLowering(
     context.current = context.addBlock(_target.parameterTypes);
     for (final (i, parameter) in element.formalParameters.indexed) {
       final input = context.current!.parameters[i];
-      _declare(parameter, input.type, input);
+      context.declare(parameter, input.type, input);
     }
     switch (body) {
       case ast.ExpressionFunctionBody(:final expression):
@@ -52,27 +56,9 @@ final class FunctionLowering(
     context.current = null;
   }
 
-  void _declare(VariableElement variable, ValueType type, Value initial) {
-    context.locals[variable] = initial;
-    _locals.add(variable);
-    if (body.isPotentiallyMutatedInScope(variable)) {
-      context.mutableLocals.add((variable, type));
-    }
-  }
-
-  void _inScope(void Function() lower) {
-    final mark = _locals.length;
-    final mutableMark = context.mutableLocals.length;
-    lower();
-    while (_locals.length > mark) {
-      context.locals.remove(_locals.removeLast());
-    }
-    context.mutableLocals.length = mutableMark;
-  }
-
   void _scoped(ast.Statement? statement) {
     if (statement == null) return;
-    _inScope(() {
+    context.inScope(() {
       if (statement is ast.Block) {
         for (final child in statement.statements) {
           if (context.current == null) break;
@@ -114,7 +100,7 @@ final class FunctionLowering(
           'implicit conversion',
         );
       }
-      _declare(local, type, value);
+      context.declare(local, type, value);
     }
   }
 
@@ -132,6 +118,26 @@ final class FunctionLowering(
         _variables(variables);
       case ast.ExpressionStatement(:final expression):
         lowerExpression(context, expression);
+      case ast.IfStatement(caseClause: ast.CaseClause(:final guardedPattern)):
+        final subject = lowerExpression(context, statement.expression);
+        if (subject == null) return;
+        final failed = JumpTarget(context), done = JumpTarget(context);
+        context.inScope(() {
+          matchGuarded(
+            context,
+            guardedPattern,
+            subject,
+            failed,
+            (e) => lowerExpression(context, e),
+          );
+          if (context.current != null) _scoped(statement.thenStatement);
+        });
+        if (failed.hasIncoming) {
+          done.jump();
+          failed.enter();
+          _scoped(statement.elseStatement);
+          done.enter();
+        }
       case ast.IfStatement(caseClause: null):
         final condition = lowerExpression(context, statement.expression);
         if (condition == null) return;
@@ -179,7 +185,7 @@ final class FunctionLowering(
         :final body,
         forLoopParts: final ast.ForParts parts,
       ):
-        _inScope(() {
+        context.inScope(() {
           switch (parts) {
             case ast.ForPartsWithDeclarations(:final variables):
               _variables(variables);
@@ -222,7 +228,9 @@ final class FunctionLowering(
     final next = _continues[statement] = testAfterBody || updates.isNotEmpty
         ? JumpTarget(context)
         : header;
-    if (!testAfterBody && condition != null) _guard(condition, exit);
+    if (!testAfterBody && condition != null) {
+      context.guard(lowerExpression(context, condition), exit);
+    }
     if (context.current != null) {
       _scoped(body);
       if (next != header) next.enter();
@@ -230,23 +238,12 @@ final class FunctionLowering(
         for (final update in updates) {
           if (lowerExpression(context, update) == null) break;
         }
-        if (testAfterBody) _guard(condition!, exit);
+        if (testAfterBody) {
+          context.guard(lowerExpression(context, condition!), exit);
+        }
         header.jump();
       }
     }
     _continues.remove(statement);
-  }
-
-  void _guard(ast.Expression expression, JumpTarget exit) {
-    final condition = lowerExpression(context, expression);
-    if (condition == null) return;
-    if (condition case Constant(value: final bool passes)) {
-      if (!passes) exit.jump();
-    } else {
-      final origin = context.current!, leave = exit.edge();
-      origin.finish(
-        Branch(condition, context.enterArm(condition, true), leave),
-      );
-    }
   }
 }

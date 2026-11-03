@@ -10,7 +10,15 @@
 library;
 
 export 'src/ir/block.dart'
-    show Block, Branch, Jump, Return, Terminator, Throw, Unreachable;
+    show
+        Block,
+        Branch,
+        ExhaustivenessFailure,
+        Jump,
+        Return,
+        Terminator,
+        Throw,
+        Unreachable;
 export 'src/ir/function.dart' show IrFunction;
 export 'src/ir/signature.dart' show FunctionTarget;
 export 'src/ir/type.dart' show ValueType;
@@ -23,6 +31,7 @@ export 'src/ir/value.dart'
         IntBinary,
         IntOperator,
         NullCheck,
+        ScalarEquals,
         TestedValue,
         TypeCast,
         TypeTest,

@@ -8,6 +8,7 @@ import 'fixtures/effects.dart' as effects;
 import 'fixtures/functions.dart' as dart;
 import 'fixtures/loops.dart' as loops;
 import 'fixtures/nullability.dart' as nullable;
+import 'fixtures/patterns.dart' as patterns;
 import 'fixtures/type_checks.dart' as types;
 import 'fixtures/updates.dart' as updates;
 
@@ -27,6 +28,7 @@ void main() {
       'updates.dart',
       'loops.dart',
       'nullability.dart',
+      'patterns.dart',
       'type_checks.dart',
       'conditionals.dart',
       'defaults.dart',
@@ -77,7 +79,12 @@ void main() {
               .subtract => a - b,
               .multiply => a * b,
               .lessThan => a < b,
+              .lessOrEqual => a <= b,
+              .greaterThan => a > b,
+              .greaterOrEqual => a >= b,
             };
+          case ScalarEquals(:final left, :final right, :final negated):
+            values[op] = (read(left) == read(right)) != negated;
           case DirectCall(:final target, :final inputs):
             final arguments = inputs.map(read).toList();
             values[op] = bodies.containsKey(target)
@@ -90,6 +97,9 @@ void main() {
       final edge = switch (end) {
         Throw(:final exception) => throw read(exception)!,
         Unreachable() => throw StateError('Reached a Never continuation'),
+        ExhaustivenessFailure() => fail(
+          'Exhaustive fixture had no matching case',
+        ),
         Jump() => end,
         Branch() => read(end.condition) as bool ? end.ifTrue : end.ifFalse,
         Return() => throw StateError('Already returned'),
@@ -320,11 +330,44 @@ void main() {
     },
   );
 
+  test('patterns share bindings only after a match and preserve effects of failed guards', () {
+    for (final x in [
+      null,
+      -1,
+      0,
+      2,
+      8,
+      1.0,
+      1.5,
+      double.nan,
+      'yes',
+      false,
+      _UnexpectedEquality(),
+    ]) {
+      for (final initial in [0, 3]) {
+        compare('matchCases', [
+          x,
+          initial,
+        ], () => patterns.matchCases(x, initial));
+        compare('matchIf', [x, initial], () => patterns.matchIf(x, initial));
+      }
+      compare('checkedPattern', [x], () => patterns.checkedPattern(x));
+      compare('alternatives', [x], () => patterns.alternatives(x));
+    }
+    for (final flag in [null, false, true]) {
+      compare('exhaustive', [flag], () => patterns.exhaustive(flag));
+      if (flag != null) {
+        compare('throwCase', [flag], () => patterns.throwCase(flag));
+      }
+    }
+  });
+
   for (final (file, line) in [
     ('index_update.dart', 3),
     ('lazy.dart', 2),
     ('deferred_constant.dart', 3),
     ('object_default.dart', 1),
+    ('extension_operator.dart', 1),
   ]) {
     test('reports the unsupported operation in $file at its source', () async {
       await expectLater(
@@ -401,4 +444,12 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     ValueType.voidType => cast ? value : true,
     _ => throw StateError('Unexpected fixture type ${type.dartName}'),
   };
+}
+
+final class _UnexpectedEquality() {
+  @override
+  bool operator ==(Object other) => throw StateError('Wrong equality receiver');
+
+  @override
+  int get hashCode => 0;
 }

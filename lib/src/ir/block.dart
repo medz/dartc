@@ -36,6 +36,9 @@ final class Throw(
   }
 }
 
+/// The runtime error if execution reaches the end of an exhaustive switch.
+final class const ExhaustivenessFailure() extends Terminator;
+
 /// A control-flow edge that binds the destination block's parameters.
 final class Jump(
   /// The block entered by this edge.
@@ -96,7 +99,7 @@ final class Block([Iterable<ValueType> types = const []]) {
 
   /// The outgoing edges of [end], in true-then-false order for a [Branch].
   Iterable<Jump> get successors => switch (end) {
-    Return() || Unreachable() || Throw() => const [],
+    Return() || Unreachable() || Throw() || ExhaustivenessFailure() => const [],
     final Jump jump => [jump],
     Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],
   };

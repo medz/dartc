@@ -99,6 +99,8 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
         use(exception, count);
       case Unreachable(:final cause):
         use(cause, count);
+      case ExhaustivenessFailure():
+        break;
       case Branch(:final condition, :final ifTrue, :final ifFalse):
         use(condition, count);
         final test = condition is TypeTest ? condition : null;

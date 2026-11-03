@@ -11,12 +11,14 @@ final class FunctionContext(
 
   /// The call targets shared by all functions in this batch.
   final TargetBindings bindings,
+  final bool Function(VariableElement) _isWritten,
 ) {
   /// The blocks created so far, with the function entry first.
   final blocks = <Block>[];
 
   /// The SSA value of each in-scope variable on the current path.
   final locals = <VariableElement, Value>{};
+  final _declared = <VariableElement>[];
 
   /// Writable bindings and their declared types, in edge-argument order.
   final mutableLocals = <(VariableElement, ValueType)>[];
@@ -24,6 +26,44 @@ final class FunctionContext(
   /// The block receiving instructions, or `null` after a terminating transfer.
   Block? current;
   _Refinement? _facts;
+
+  /// Binds a declaration in the current lexical scope.
+  void declare(VariableElement variable, ValueType type, Value initial) {
+    locals[variable] = initial;
+    _declared.add(variable);
+    if (_isWritten(variable)) mutableLocals.add((variable, type));
+  }
+
+  /// Removes declarations introduced by [lower] when its scope ends.
+  void inScope(void Function() lower) {
+    final mark = _declared.length, mutableMark = mutableLocals.length;
+    lower();
+    while (_declared.length > mark) {
+      locals.remove(_declared.removeLast());
+    }
+    mutableLocals.length = mutableMark;
+  }
+
+  /// Ends the current block when [value] has no normal continuation.
+  Value? normal(Value? value) {
+    if (value != null && value.type == .never) {
+      current!.finish(Unreachable(value));
+      current = null;
+      return null;
+    }
+    return value;
+  }
+
+  /// Jumps to [failure] on a false [condition] and keeps the true path open.
+  void guard(Value? condition, JumpTarget failure) {
+    if (condition == null) return;
+    if (condition case Constant(value: final bool passes)) {
+      if (!passes) failure.jump();
+    } else {
+      final origin = current!, leave = failure.edge();
+      origin.finish(Branch(condition, enterArm(condition, true), leave));
+    }
+  }
 
   /// The narrower operand established on the current path, if any.
   Value refined(Value value) {
@@ -92,9 +132,9 @@ final class FunctionContext(
   }
 
   /// Restores [values] at the same lexical scope in which they were captured.
-  void restoreLocals(List<Value> values) {
+  void restoreLocals(List<Value> values, [int offset = 0]) {
     for (final (i, (variable, _)) in mutableLocals.indexed) {
-      locals[variable] = values[i];
+      locals[variable] = values[offset + i];
     }
   }
 
@@ -202,35 +242,49 @@ final class _Refinement(
 );
 
 /// A jump destination carrying only the mutable locals visible at its boundary.
-final class JumpTarget(final FunctionContext _context) {
-  final _localCount = _context.mutableLocals.length;
-  final _facts = _context._facts;
+final class JumpTarget._(
+  final FunctionContext _context,
+  final int _localCount,
+  final _Refinement? _facts,
+  final List<ValueType> _inputs,
+) {
+  new(FunctionContext context, [List<ValueType> inputs = const []])
+    : this._(context, context.mutableLocals.length, context._facts, inputs);
   Block? _block;
 
+  /// Creates a second destination dominated by the same facts and declarations.
+  JumpTarget sibling(List<ValueType> inputs) =>
+      ._(_context, _localCount, _facts, inputs);
+
+  /// Whether a path has already jumped here.
+  bool get hasIncoming => _block != null;
+
   /// Creates the destination on its first incoming edge.
-  Jump edge() {
+  Jump edge([List<Value> inputs = const []]) {
     final values = _context.saveLocals(_localCount);
     return .new(
-      _block ??= _context.addBlock(
-        _context.mutableLocals.take(_localCount).map((v) => v.$2),
-      ),
-      values,
+      _block ??= _context.addBlock([
+        ..._inputs,
+        for (var i = 0; i < _localCount; i++) _context.mutableLocals[i].$2,
+      ]),
+      inputs.isEmpty ? values : [...inputs, ...values],
     );
   }
 
   /// Transfers the open path, if any, to this target.
-  void jump() {
-    _context.current?.finish(edge());
+  void jump([List<Value> inputs = const []]) {
+    _context.current?.finish(edge(inputs));
     _context.current = null;
   }
 
   /// Merges incoming jumps with fallthrough in the target's lexical scope.
-  void enter() {
+  Block? enter() {
     final block = _block;
-    if (block == null) return;
+    if (block == null) return null;
     _context.current?.finish(edge());
     _context.current = block;
     _context._facts = _facts;
-    _context.restoreLocals(block.parameters);
+    _context.restoreLocals(block.parameters, _inputs.length);
+    return block;
   }
 }

@@ -136,6 +136,35 @@ enum IntOperator(
 
   /// Whether the left operand is smaller than the right.
   lessThan(.boolean),
+
+  /// Whether the left operand is smaller than or equal to the right.
+  lessOrEqual(.boolean),
+
+  /// Whether the left operand is greater than the right.
+  greaterThan(.boolean),
+
+  /// Whether the left operand is greater than or equal to the right.
+  greaterOrEqual(.boolean),
+}
+
+/// Dart equality with a core scalar receiver and an arbitrary right operand.
+final class ScalarEquals(
+  /// The receiver that determines the equality implementation.
+  final Value left,
+
+  /// The value compared to [left].
+  final Value right, {
+
+  /// Whether to invert the result for `!=`.
+  final bool negated = false,
+}) extends Instruction {
+  this : super(.boolean) {
+    if (!left.type.hasScalarEquality) {
+      throw ArgumentError('Expected a scalar equality receiver.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [left, right];
 }
 
 /// An arithmetic or comparison instruction on two integers.

@@ -30,6 +30,8 @@ void writeFunction(
     output.writeln('${labels[b]}($parameters):');
     for (final op in b.instructions) {
       final rhs = switch (op) {
+        ScalarEquals() =>
+          '${value(op.left)} ${op.negated ? '!=' : '=='} ${value(op.right)}',
         TypeTest() =>
           '${value(op.operand)} ${op.negated ? 'is!' : 'is'} ${op.testedType.dartName}',
         TypeCast() => '${value(op.operand)} as ${op.type.dartName}',
@@ -45,6 +47,7 @@ void writeFunction(
       Return(value: final v?) => '  return ${value(v)}',
       Return() => '  return',
       Throw(:final exception) => '  throw ${value(exception)}',
+      ExhaustivenessFailure() => '  exhaustivenessError',
       Unreachable(:final cause) => '  unreachable ${value(cause)}',
       final Jump j => '  jump ${edge(j)}',
       Branch(:final condition, :final ifTrue, :final ifFalse) =>

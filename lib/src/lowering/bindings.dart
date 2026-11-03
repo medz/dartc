@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart' as ast;
+import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/ir.dart';
@@ -72,20 +73,29 @@ Constant scalarConstant(
   ast.AstNode site,
 ) {
   final value = variable.computeConstantValue();
-  if (value == null) {
-    if (variable is FormalParameterElement &&
-        variable.isOptional &&
-        !variable.hasDefaultValue) {
-      return const .nullValue();
-    }
-  } else {
+  if (value == null &&
+      variable is FormalParameterElement &&
+      variable.isOptional &&
+      !variable.hasDefaultValue) {
+    return const .nullValue();
+  }
+  return scalarValue(value, unit, site);
+}
+
+/// Converts an analyzer constant into a scalar IR operand.
+Constant scalarValue(
+  DartObject? value,
+  ResolvedUnitResult unit,
+  ast.AstNode site,
+) {
+  if (value != null) {
     if (value.isNull) return const .nullValue();
     if (value.toIntValue() case final i?) return .integer(i);
     if (value.toBoolValue() case final b?) return .boolean(b);
     if (value.toDoubleValue() case final d?) return .floating(d);
     if (value.toStringValue() case final s?) return .string(s);
   }
-  unsupported(unit, site, 'constant value of ${variable.name}');
+  unsupported(unit, site, 'non-scalar constant');
 }
 
 /// Reports an unimplemented [feature] at the start of [node] in [unit].
