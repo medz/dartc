@@ -66,10 +66,11 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           : context.cast(input, valueType(type.type!, unit, type));
     case ast.ThrowExpression(:final expression):
       final exception = lowerExpression(context, expression);
-      if (exception != null) {
-        context.current!.finish(Throw(exception));
-        context.current = null;
-      }
+      if (exception != null) context.raise(exception);
+      return null;
+    case ast.RethrowExpression():
+      final (exception, trace) = context.caught!;
+      context.raise(exception, trace);
       return null;
     case ast.ConditionalExpression(
       :final condition,
@@ -106,8 +107,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         });
         if (next.enter() == null) break;
       }
-      context.current?.finish(const ExhaustivenessFailure());
-      context.current = null;
+      context.exhaustivenessFailure();
       return done.enter()?.parameters.first;
     case ast.SimpleIdentifier(element: final VariableElement variable)
         when context.locals.containsKey(variable):
@@ -156,9 +156,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         unit,
         (e) => lowerExpression(context, e),
       );
-      return args == null
-          ? null
-          : context.current!.emit(DirectCall(target, args));
+      return args == null ? null : context.emit(DirectCall(target, args));
     case ast.BinaryExpression(
       :final leftOperand,
       :final rightOperand,

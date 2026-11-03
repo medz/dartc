@@ -21,6 +21,15 @@ sealed class const ValueType() {
   /// The common supertype of all Dart record shapes.
   static const ValueType record = _CoreType('Record', object);
 
+  /// The Dart trace paired with a caught exception.
+  static const ValueType stackTrace = _CoreType('StackTrace', object);
+
+  /// The superclass of Dart runtime errors.
+  static const ValueType error = _CoreType('Error', object);
+
+  /// The error raised by failed runtime type checks.
+  static const ValueType typeError = _CoreType('TypeError', error);
+
   /// The type whose only value is `null`.
   static const ValueType nullType = _CoreType('Null');
 

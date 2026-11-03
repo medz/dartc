@@ -14,7 +14,7 @@
 | `const` 与常量对象 | 顶层和局部 const 支持 int、bool、double、String、null 和含这些值的嵌套 record。类实例和集合常量待实现。 |
 | `late`、`late final` | 待实现。 |
 | 库变量和静态字段惰性初始化 | 待实现。 |
-| 模式变量声明与赋值 | 支持用 record 模式声明局部变量、交换已有变量及在三段式 for 中解构。同一次模式赋值在解构成功后写入目标。见[解构样本](../test/lowering/fixtures/destructure.dart)。 |
+| 模式变量声明与赋值 | 支持用 record 模式声明局部变量、交换已有变量及在三段式 for 中解构。后续字段断言抛错时，catch 仍可读到目标变量的原值。见[解构](../test/lowering/fixtures/destructure.dart)和[失败赋值样本](../test/lowering/fixtures/exceptions.dart)。 |
 
 [IR 行为对照](../test/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/variables.md)。
 

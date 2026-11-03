@@ -24,20 +24,55 @@ final class Unreachable(
   }
 }
 
-/// An exceptional transfer carrying [exception] out of the function.
+/// Throws [exception] to [onThrow], or unwinds to the caller.
 final class Throw(
   /// The exception object from the Dart `throw` expression.
-  final Value exception,
-) extends Terminator {
+  final Value exception, {
+
+  /// The original trace for a rethrow, or `null` to start a new throw.
+  final Value? stackTrace,
+
+  /// The exceptional edge to the innermost local handler, if any.
+  final Jump? onThrow,
+}) extends Terminator {
   this {
     if (!ValueType.object.accepts(exception.type)) {
       throw ArgumentError('Expected a non-null exception object.');
+    }
+    if (stackTrace case final trace?
+        when !ValueType.stackTrace.accepts(trace.type)) {
+      throw ArgumentError('Expected a StackTrace operand.');
     }
   }
 }
 
 /// The runtime error if execution reaches the end of an exhaustive switch.
-final class const ExhaustivenessFailure() extends Terminator;
+final class const ExhaustivenessFailure([
+  /// The local handler for the error, if any.
+  final Jump? onThrow,
+]) extends Terminator;
+
+/// Evaluates [operation] and transfers control according to its outcome.
+///
+/// Only [onReturn] can pass the result as an edge argument. Only [onThrow]
+/// can pass [UnwindValue.exception] or [UnwindValue.stackTrace].
+final class Invoke(
+  /// The operation performed once at the end of the block.
+  final Instruction operation, {
+
+  /// The success edge, absent for an operation returning `Never`.
+  required final Jump? onReturn,
+
+  /// The handler edge used if evaluation throws.
+  required final Jump onThrow,
+}) extends Terminator {
+  this {
+    if (!operation.mayThrow ||
+        (operation.type == .never) != (onReturn == null)) {
+      throw ArgumentError('Invalid continuations for the invoked operation.');
+    }
+  }
+}
 
 /// A control-flow edge that binds the destination block's parameters.
 final class Jump(
@@ -97,9 +132,12 @@ final class Block([Iterable<ValueType> types = const []]) {
   /// Reading this before [finish] throws [StateError].
   Terminator get end => _end ?? (throw StateError('Unterminated block.'));
 
-  /// The outgoing edges of [end], in true-then-false order for a [Branch].
+  /// The outgoing edges of [end], with the exceptional edge last when present.
   Iterable<Jump> get successors => switch (end) {
-    Return() || Unreachable() || Throw() || ExhaustivenessFailure() => const [],
+    Return() || Unreachable() => const [],
+    Throw(:final onThrow) ||
+    ExhaustivenessFailure(:final onThrow) => [?onThrow],
+    Invoke(:final onReturn, :final onThrow) => [?onReturn, onThrow],
     final Jump jump => [jump],
     Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],
   };

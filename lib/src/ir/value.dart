@@ -55,6 +55,15 @@ final class RecordConstant(RecordType type, Iterable<Constant> fields)
 /// A value supplied on entry to a block by the caller or an incoming jump.
 final class BlockParameter._(super.type) extends Value;
 
+/// An operand supplied by the runtime only on an exceptional edge.
+final class const UnwindValue._(super.type) extends Value {
+  /// The non-null exception that caused control to leave the operation.
+  static const exception = UnwindValue._(.object);
+
+  /// The stack trace associated with that throw.
+  static const stackTrace = UnwindValue._(.stackTrace);
+}
+
 /// Allocates a distinct SSA parameter for each entry in [types].
 List<BlockParameter> blockParameters(Iterable<ValueType> types) =>
     .unmodifiable(types.map(BlockParameter._));
@@ -63,6 +72,13 @@ List<BlockParameter> blockParameters(Iterable<ValueType> types) =>
 sealed class Instruction(super.type) extends Value {
   /// The SSA operands consumed by the operation.
   Iterable<Value> get inputs;
+
+  /// Whether evaluation can transfer control to a Dart exception handler.
+  bool get mayThrow => switch (this) {
+    DirectCall() || TypeCast() || NullCheck() || MakeRecord() => true,
+    Equals(:final mayCallUserCode) => mayCallUserCode,
+    IntBinary() || TypeTest() || RecordGet() => false,
+  };
 }
 
 /// Constructs a record from evaluated fields in slot order.

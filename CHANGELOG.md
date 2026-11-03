@@ -12,6 +12,8 @@ Records can be constructed, returned, compared and used as constants or paramete
 
 Nullable core types can pass through calls and branches. Lowering supports `??`, local `??=`, postfix `!`, and type tests and casts on core types. Synchronous `throw` and calls returning `Never` end evaluation of the current path.
 
+Synchronous functions can catch explicit throws, failed type checks and exceptions from calls. Typed catch clauses can bind the exception and stack trace, and `rethrow` preserves both.
+
 Use scalar and record patterns with `when` guards in `if-case`, `switch` statements and `switch` expressions. Switch statements support shared case bodies, implicit breaks and labeled `continue`.
 
 The `package:dartc/ir.dart` and `package:dartc/lowering.dart` libraries expose SSA functions and lowering from checked Dart libraries.

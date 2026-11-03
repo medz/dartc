@@ -115,6 +115,44 @@ void main() {
     expect(() => RecordGet(record, 3), throwsRangeError);
   });
 
+  test('a protected operation and its exception have distinct SSA edges', () {
+    final target = FunctionTarget(f.library, 'invoke', .object, [.object]);
+    final entry = Block(target.parameterTypes);
+    final normal = Block([.integer]), handler = Block([.object, .stackTrace]);
+    final cast = TypeCast(entry.parameters.single, .integer);
+    final returned = Jump(normal, [cast]);
+    final caught = Jump(handler, [
+      UnwindValue.exception,
+      UnwindValue.stackTrace,
+    ]);
+    entry.finish(Invoke(cast, onReturn: returned, onThrow: caught));
+    normal.finish(Return(normal.parameters.single));
+    handler.finish(Return(handler.parameters.first));
+    final graph = IrFunction(target, [entry, normal, handler]);
+    final out = StringBuffer();
+    graph.writeTo(out);
+    expect(out.toString(), contains('unwind b2(exception, stackTrace)'));
+
+    final bad = Block(target.parameterTypes);
+    final checked = TypeCast(bad.parameters.single, .integer);
+    bad.finish(
+      Invoke(
+        checked,
+        onReturn: Jump(normal, [checked]),
+        onThrow: Jump(handler, [checked, UnwindValue.stackTrace]),
+      ),
+    );
+    expect(() => IrFunction(target, [bad, normal, handler]), throwsStateError);
+    final misplaced = Block(target.parameterTypes)
+      ..finish(Return(UnwindValue.exception));
+    expect(() => IrFunction(target, [misplaced]), throwsStateError);
+    expect(
+      () => Invoke(cast, onReturn: null, onThrow: caught),
+      throwsArgumentError,
+    );
+    expect(() => Throw(one, stackTrace: one), throwsArgumentError);
+  });
+
   test('a nullable value narrows only on the matching null-test edge', () {
     final maybeInt = ValueType.integer.nullable;
     final target = FunctionTarget(f.library, 'pick', .number, [maybeInt]);

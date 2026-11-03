@@ -141,6 +141,18 @@ ValueType valueType(
     _ when type.isDartCoreNum => .number,
     _ when type.isDartCoreObject => .object,
     _ when type.isDartCoreRecord => .record,
+    dart.InterfaceType(
+      element: ClassElement(
+        library: LibraryElement(isDartCore: true),
+        :final name,
+      ),
+    ) =>
+      switch (name) {
+        'Error' => .error,
+        'TypeError' => .typeError,
+        'StackTrace' => .stackTrace,
+        _ => unsupported(unit, site, type.getDisplayString()),
+      },
     _ => unsupported(unit, site, type.getDisplayString()),
   };
   return type.nullabilitySuffix == .question ? base.nullable : base;

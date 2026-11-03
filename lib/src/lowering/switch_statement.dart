@@ -121,8 +121,7 @@ void lowerSwitchStatement(
       reach(fallback);
     } else if (context.unit.unit.featureSet.isEnabled(Feature.patterns) &&
         requiresExhaustiveSwitch(statement.expression.staticType!)) {
-      context.current!.finish(const ExhaustivenessFailure());
-      context.current = null;
+      context.exhaustivenessFailure();
     } else {
       exit.jump();
     }

@@ -18,7 +18,7 @@ Value lowerEquality(
   if (right.type == .nullType) {
     return context.testType(left, .nullType, negated: negated);
   }
-  return context.current!.emit(Equals(left, right, negated: negated));
+  return context.emit(Equals(left, right, negated: negated));
 }
 
 /// Applies [operator] after both operands have been evaluated.

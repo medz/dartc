@@ -12,7 +12,7 @@
 | switch、守卫、共享 case、隐式 break | 支持标量与 record 模式、when、default 和多个 case 共享的分支体。分支体正常结束时退出 switch。非穷尽类型未命中时继续执行 switch 后的语句。见[switch 语句样本](../test/lowering/fixtures/switch_statements.dart)。 |
 | 标签、break、continue | 支持循环和 switch 的 break，以及从带标签的语句中 break。continue 可跳到目标循环的继续点或 switch 标签对应的分支体。跳向 case 时跳过其模式与守卫。 |
 | return 与正常完成检查 | 函数返回与声明兼容的值。void 和可空返回类型允许隐式返回 null；抛出或调用返回 Never 的函数会结束当前路径。 |
-| try/on/catch、rethrow、finally | 待实现。 |
+| try/on/catch、rethrow、finally | 同步函数按源码顺序选择首个匹配的 on/catch。调用、运行时类型检查和显式 throw 产生的异常均可捕获。catch 可读取抛出时的局部变量、异常对象及栈轨迹。rethrow 传递原异常和轨迹。finally 待实现。见[异常样本](../test/lowering/fixtures/exceptions.dart)。 |
 | await for | 待实现。 |
 | yield/yield* | 待实现。 |
 | assert | 待实现。 |

@@ -14,6 +14,7 @@ export 'src/ir/block.dart'
         Block,
         Branch,
         ExhaustivenessFailure,
+        Invoke,
         Jump,
         Return,
         Terminator,
@@ -39,4 +40,5 @@ export 'src/ir/value.dart'
         TestedValue,
         TypeCast,
         TypeTest,
+        UnwindValue,
         Value;

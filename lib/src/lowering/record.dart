@@ -39,7 +39,7 @@ Value? lowerRecord(
         : positional++;
     fields[slot] = value;
   }
-  return context.current!.emit(MakeRecord(type, fields.cast<Value>()));
+  return context.emit(MakeRecord(type, fields.cast<Value>()));
 }
 
 /// Lowers field getters and postfix assertions in one null-shorting chain.

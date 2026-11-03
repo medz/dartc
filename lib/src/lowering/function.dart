@@ -4,6 +4,7 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
+import 'exception.dart';
 import 'expression.dart';
 import 'function_context.dart';
 import 'pattern.dart';
@@ -125,6 +126,8 @@ final class FunctionLowering(
         _patternDeclaration(declaration);
       case ast.ExpressionStatement(:final expression):
         lowerExpression(context, expression);
+      case ast.TryStatement(finallyBlock: null):
+        lowerTryCatch(context, statement, _scoped);
       case ast.IfStatement(caseClause: ast.CaseClause(:final guardedPattern)):
         final subject = lowerExpression(context, statement.expression);
         if (subject == null) return;

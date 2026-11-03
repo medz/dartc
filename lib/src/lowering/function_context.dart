@@ -27,6 +27,42 @@ final class FunctionContext(
   Block? current;
   _Refinement? _facts;
 
+  /// The innermost handler for exceptions leaving the current operation.
+  JumpTarget? handler;
+
+  /// The exception and original trace in scope for a Dart `rethrow`.
+  (Value, Value)? caught;
+
+  Jump? get _unwind =>
+      handler?.edge([UnwindValue.exception, UnwindValue.stackTrace]);
+
+  /// Emits [operation], capturing the local values at this site if it can throw.
+  Value emit(Instruction operation) {
+    if (handler == null || !operation.mayThrow) return current!.emit(operation);
+    final next = operation.type == .never ? null : addBlock([operation.type]);
+    current!.finish(
+      Invoke(
+        operation,
+        onReturn: next == null ? null : Jump(next, [operation]),
+        onThrow: _unwind!,
+      ),
+    );
+    current = next;
+    return next?.parameters.single ?? operation;
+  }
+
+  /// Throws to the active handler or caller, preserving [stackTrace] for a rethrow.
+  void raise(Value exception, [Value? stackTrace]) {
+    current!.finish(Throw(exception, stackTrace: stackTrace, onThrow: _unwind));
+    current = null;
+  }
+
+  /// Raises the Dart error on a reachable exhaustive-switch miss.
+  void exhaustivenessFailure() {
+    current?.finish(ExhaustivenessFailure(_unwind));
+    current = null;
+  }
+
   /// Binds a declaration in the current lexical scope.
   void declare(VariableElement variable, ValueType type, Value initial) {
     locals[variable] = initial;
@@ -47,7 +83,7 @@ final class FunctionContext(
   /// Ends the current block when [value] has no normal continuation.
   Value? normal(Value? value) {
     if (value != null && value.type == .never) {
-      current!.finish(Unreachable(value));
+      current?.finish(Unreachable(value));
       current = null;
       return null;
     }
@@ -81,7 +117,7 @@ final class FunctionContext(
   Value checkNotNull(Value value) {
     final known = refined(value);
     if (!known.type.accepts(.nullType)) return known;
-    final checked = current!.emit(NullCheck(known));
+    final checked = emit(NullCheck(known));
     _facts = _Refinement(value, checked, _facts);
     return checked;
   }
@@ -91,7 +127,7 @@ final class FunctionContext(
     if (type.accepts(value.type)) return value;
     final known = refined(value);
     if (type.accepts(known.type)) return known;
-    final cast = current!.emit(TypeCast(known, type));
+    final cast = emit(TypeCast(known, type));
     if (known.type.accepts(type)) _facts = _Refinement(known, cast, _facts);
     return cast;
   }

@@ -7,6 +7,7 @@ import 'fixtures/conditionals.dart' as conditionals;
 import 'fixtures/defaults.dart' as defaults;
 import 'fixtures/destructure.dart' as destructure;
 import 'fixtures/effects.dart' as effects;
+import 'fixtures/exceptions.dart' as exceptions;
 import 'fixtures/functions.dart' as dart;
 import 'fixtures/loops.dart' as loops;
 import 'fixtures/nullability.dart' as nullable;
@@ -38,19 +39,14 @@ void main() {
       'conditionals.dart',
       'defaults.dart',
       'destructure.dart',
+      'exceptions.dart',
       'scalar_constants.dart',
     ]);
     functions = {for (final f in result) f.target.name: f};
+    final library = Uri.base.resolve('$_fixtures/effects.dart');
     runner = FixtureRunner(result, {
-      for (final f in result)
-        for (final b in f.blocks)
-          for (final call in b.instructions.whereType<DirectCall>())
-            if (call.target.library.path.endsWith('/effects.dart'))
-              call.target: switch (call.target.name) {
-                'tick' => effects.tick,
-                'probe' => effects.probe,
-                _ => throw StateError('Unknown fixture import'),
-              },
+      (library, 'tick'): effects.tick,
+      (library, 'probe'): effects.probe,
     });
   });
 
@@ -410,6 +406,33 @@ void main() {
       }
     }
   });
+
+  test(
+    'handlers see writes at the throw site and rethrow the original exception',
+    () {
+      for (final n in [-1, 0, 1, 4]) {
+        compare('siteLocals', [n], () => exceptions.siteLocals(n));
+      }
+      for (final value in [null, 8]) {
+        compare('atomic', [3, 4, value], () => exceptions.atomic(3, 4, value));
+      }
+      for (final value in [3, 'message', false]) {
+        for (final again in [true, false]) {
+          compare('filter', [
+            value,
+            again,
+          ], () => exceptions.filter(value, again));
+        }
+        compare('sameThrow', [value], () => exceptions.sameThrow(value));
+      }
+      for (final value in [null, 2, 3, 'other', _UnexpectedEquality()]) {
+        compare('implicitThrow', [
+          value,
+          2,
+        ], () => exceptions.implicitThrow(value, 2));
+      }
+    },
+  );
 
   for (final (file, line) in [
     ('index_update.dart', 3),

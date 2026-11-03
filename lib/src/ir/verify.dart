@@ -33,6 +33,9 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
     for (var i = 0; i < block.instructions.length; i++) {
       define(block.instructions[i], i);
     }
+    if (block.end case Invoke(:final operation)) {
+      define(operation, block.instructions.length);
+    }
     for (final next in block.successors) {
       final incoming = predecessors[next.target];
       if (incoming == null || next.target == entry) {
@@ -50,6 +53,9 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
         throw StateError('Value defined outside this function.');
       }
       final (owner, index) = definition;
+      if (index == owner.instructions.length) {
+        throw StateError('Invoke result used outside its normal edge.');
+      }
       if (owner == block) {
         if (index >= position) {
           throw StateError('Value used before its definition.');
@@ -67,8 +73,17 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
 
     final count = block.instructions.length;
     final end = block.end;
-    void useEdge(Jump edge, [TypeTest? test, bool? outcome]) {
+    void useEdge(
+      Jump edge, {
+      TypeTest? test,
+      bool? outcome,
+      Instruction? result,
+      bool unwinding = false,
+    }) {
       for (final value in edge.arguments) {
+        if (identical(value, result) || (unwinding && value is UnwindValue)) {
+          continue;
+        }
         if (value is TestedValue &&
             value.test == test &&
             value.outcome == outcome) {
@@ -95,17 +110,25 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
           throw StateError('Return type does not match the function.');
         }
         if (value != null) use(value, count);
-      case Throw(:final exception):
+      case Throw(:final exception, :final stackTrace, :final onThrow):
         use(exception, count);
+        if (stackTrace != null) use(stackTrace, count);
+        if (onThrow != null) useEdge(onThrow, unwinding: true);
       case Unreachable(:final cause):
         use(cause, count);
-      case ExhaustivenessFailure():
-        break;
+      case ExhaustivenessFailure(:final onThrow):
+        if (onThrow != null) useEdge(onThrow, unwinding: true);
+      case Invoke(:final operation, :final onReturn, :final onThrow):
+        for (final input in operation.inputs) {
+          use(input, count);
+        }
+        if (onReturn != null) useEdge(onReturn, result: operation);
+        useEdge(onThrow, unwinding: true);
       case Branch(:final condition, :final ifTrue, :final ifFalse):
         use(condition, count);
         final test = condition is TypeTest ? condition : null;
-        useEdge(ifTrue, test, true);
-        useEdge(ifFalse, test, false);
+        useEdge(ifTrue, test: test, outcome: true);
+        useEdge(ifFalse, test: test, outcome: false);
       case final Jump edge:
         useEdge(edge);
     }

@@ -19,11 +19,28 @@ void writeFunction(
       'const ${type.dartName}[${fields.map(value).join(', ')}]',
     TestedValue(:final test, :final type) =>
       '${value(test.operand)} as ${type.dartName}',
+    UnwindValue() => v == UnwindValue.exception ? 'exception' : 'stackTrace',
     _ => '%${ids.putIfAbsent(v, () => ids.length)}',
   };
   String edge(Jump e) =>
       '${labels[e.target]}(${e.arguments.map(value).join(', ')})';
   String symbol(FunctionTarget t) => '${t.library}::${t.name}';
+  String operation(Instruction op) => switch (op) {
+    MakeRecord() =>
+      'record ${op.type.dartName}[${op.inputs.map(value).join(', ')}]',
+    RecordGet() => 'field ${value(op.record)}[${op.slot}]',
+    Equals() =>
+      '${value(op.left)} ${op.negated ? '!=' : '=='} ${value(op.right)}',
+    TypeTest() =>
+      '${value(op.operand)} ${op.negated ? 'is!' : 'is'} ${op.testedType.dartName}',
+    TypeCast() => '${value(op.operand)} as ${op.type.dartName}',
+    NullCheck() => 'checkNotNull ${value(op.operand)}',
+    IntBinary() => '${op.operator.name} ${value(op.left)}, ${value(op.right)}',
+    DirectCall() =>
+      'call ${symbol(op.target)}(${op.inputs.map(value).join(', ')})',
+  };
+  String unwind(Jump? handler) =>
+      handler == null ? '' : ' unwind ${edge(handler)}';
   output.writeln('${symbol(target)} -> ${target.returnType.dartName}');
   for (final b in blocks) {
     final parameters = b.parameters
@@ -31,28 +48,19 @@ void writeFunction(
         .join(', ');
     output.writeln('${labels[b]}($parameters):');
     for (final op in b.instructions) {
-      final rhs = switch (op) {
-        MakeRecord() =>
-          'record ${op.type.dartName}[${op.inputs.map(value).join(', ')}]',
-        RecordGet() => 'field ${value(op.record)}[${op.slot}]',
-        Equals() =>
-          '${value(op.left)} ${op.negated ? '!=' : '=='} ${value(op.right)}',
-        TypeTest() =>
-          '${value(op.operand)} ${op.negated ? 'is!' : 'is'} ${op.testedType.dartName}',
-        TypeCast() => '${value(op.operand)} as ${op.type.dartName}',
-        NullCheck() => 'checkNotNull ${value(op.operand)}',
-        IntBinary() =>
-          '${op.operator.name} ${value(op.left)}, ${value(op.right)}',
-        DirectCall() =>
-          'call ${symbol(op.target)}(${op.inputs.map(value).join(', ')})',
-      };
-      output.writeln('  ${value(op)} = $rhs');
+      output.writeln('  ${value(op)} = ${operation(op)}');
     }
     output.writeln(switch (b.end) {
       Return(value: final v?) => '  return ${value(v)}',
       Return() => '  return',
-      Throw(:final exception) => '  throw ${value(exception)}',
-      ExhaustivenessFailure() => '  exhaustivenessError',
+      Throw(:final exception, stackTrace: final trace?, :final onThrow) =>
+        '  rethrow ${value(exception)}, ${value(trace)}${unwind(onThrow)}',
+      Throw(:final exception, :final onThrow) =>
+        '  throw ${value(exception)}${unwind(onThrow)}',
+      ExhaustivenessFailure(:final onThrow) =>
+        '  exhaustivenessError${unwind(onThrow)}',
+      Invoke(operation: final op, :final onReturn, :final onThrow) =>
+        '  ${value(op)} = invoke ${operation(op)}${onReturn == null ? '' : ' return ${edge(onReturn)}'}${unwind(onThrow)}',
       Unreachable(:final cause) => '  unreachable ${value(cause)}',
       final Jump j => '  jump ${edge(j)}',
       Branch(:final condition, :final ifTrue, :final ifFalse) =>
