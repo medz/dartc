@@ -3,10 +3,8 @@ library;
 
 import 'dart:io';
 
-import 'package:dartc/ast.dart';
-import 'package:dartc/parser.dart';
-import 'package:dartc/scanner.dart';
-import 'package:dartc/source.dart';
+import 'package:analyzer/dart/analysis/utilities.dart';
+import 'package:analyzer/dart/ast/ast.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -35,23 +33,12 @@ void main() {
           entry,
           ...files.where((f) => f.path.endsWith('.dart')),
         ]) {
-          final unit = parseCompilationUnit(
-            scan(
-              SourceFile(file.uri, file.readAsStringSync()),
-              comments: .leading,
-            ),
+          final parsed = parseString(
+            content: file.readAsStringSync(),
+            path: file.path,
           );
-          for (final directive in unit.node.members.whereType<Directive>()) {
-            for (final literal in _uris(directive)) {
-              final spelling = literal.text;
-              final match = _path.firstMatch(spelling);
-              expect(
-                match,
-                isNotNull,
-                reason:
-                    'Use a literal dependency URI in ${file.path}: $spelling',
-              );
-              final uri = Uri.parse(match![2]!);
+          for (final directive in parsed.unit.directives) {
+            for (final uri in _uris(directive)) {
               final target =
                   uri.scheme == 'package' &&
                       uri.pathSegments.firstOrNull == 'dartc'
@@ -99,17 +86,47 @@ void main() {
       }
     },
   );
+
+  test('dependency URIs use the decoded values of Dart literals', () {
+    final library = parseString(
+      content: r"""
+import 'local\u002Edart' if (dart.library.io) 'package:dartc/\x61st.dart';
+export r'package:dartc/src/' '\u{73}canner/scanner.dart';
+part '''unit.dart''';
+""",
+    );
+    final part = parseString(content: r"part of 'entry\u002Edart';");
+    expect(
+      [...library.unit.directives, ...part.unit.directives].expand(_uris),
+      [
+        'local.dart',
+        'package:dartc/ast.dart',
+        'package:dartc/src/scanner/scanner.dart',
+        'unit.dart',
+        'entry.dart',
+      ].map(Uri.parse),
+    );
+  });
 }
 
-final _path = RegExp(r'''^r?(['"])([a-zA-Z0-9_./:%-]+)\1$''');
-
-Iterable<StringExpression> _uris(Directive directive) => switch (directive) {
-  ImportDirective(:final uri, :final configurations) ||
-  ExportDirective(
-    :final uri,
-    :final configurations,
-  ) => [uri, for (final c in configurations) c.uri],
-  PartDirective(:final uri) => [uri],
-  PartOfDirective(target: final StringExpression uri) => [uri],
-  _ => const [],
-};
+Iterable<Uri> _uris(Directive directive) sync* {
+  final List<StringLiteral> literals = switch (directive) {
+    NamespaceDirective(:final uri, :final configurations) => [
+      uri,
+      for (final c in configurations) c.uri,
+    ],
+    PartDirective(:final uri) => [uri],
+    PartOfDirective(uri: final uri?) => [uri],
+    _ => const [],
+  };
+  for (final literal in literals) {
+    final value = literal.stringValue;
+    if (value == null) {
+      throw FormatException(
+        'Expected a non-interpolated directive URI.',
+        literal.toSource(),
+      );
+    }
+    yield Uri.parse(value);
+  }
+}
