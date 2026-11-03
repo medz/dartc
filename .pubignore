@@ -1,9 +1,0 @@
-AGENTS.md
-.github/
-.dart_tool/
-.agents/
-.codex/
-.worktrees/
-build/
-pubspec.lock
-*.dSYM/

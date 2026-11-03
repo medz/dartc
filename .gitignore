@@ -2,4 +2,4 @@
 pubspec.lock
 build/
 *.dSYM/
-.agents/
+/.worktrees/
