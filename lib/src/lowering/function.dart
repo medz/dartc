@@ -16,7 +16,6 @@ final class FunctionLowering(
 ) {
   final FunctionContext context = .new(unit, bindings);
   final _locals = <VariableElement>[];
-  final _mutable = <VariableElement>[];
   late final _target = context.bindings.target(element, context.unit, body);
 
   /// Lowers the body and verifies the resulting function before returning it.
@@ -53,12 +52,14 @@ final class FunctionLowering(
   void _declare(VariableElement variable, Value initial) {
     context.locals[variable] = initial;
     _locals.add(variable);
-    if (body.isPotentiallyMutatedInScope(variable)) _mutable.add(variable);
+    if (body.isPotentiallyMutatedInScope(variable)) {
+      context.mutableLocals.add(variable);
+    }
   }
 
   void _scoped(ast.Statement? statement) {
     final mark = _locals.length;
-    final mutableMark = _mutable.length;
+    final mutableMark = context.mutableLocals.length;
     if (statement is ast.Block) {
       for (final child in statement.statements) {
         if (context.current == null) break;
@@ -70,7 +71,7 @@ final class FunctionLowering(
     while (_locals.length > mark) {
       context.locals.remove(_locals.removeLast());
     }
-    _mutable.length = mutableMark;
+    context.mutableLocals.length = mutableMark;
   }
 
   void _statement(ast.Statement statement) {
@@ -98,23 +99,7 @@ final class FunctionLowering(
           _declare(local, value);
         }
       case ast.ExpressionStatement(:final expression):
-        if (expression
-            case ast.AssignmentExpression(
-              :final writeElement,
-              :final operator,
-              :final rightHandSide,
-            )
-            when operator.lexeme == '=' &&
-                writeElement is VariableElement &&
-                context.locals.containsKey(writeElement)) {
-          final value = lowerExpression(context, rightHandSide);
-          if (value.type != context.locals[writeElement]!.type) {
-            unsupported(context.unit, expression, 'implicit conversion');
-          }
-          context.locals[writeElement] = value;
-        } else {
-          lowerExpression(context, expression);
-        }
+        lowerExpression(context, expression);
       case ast.IfStatement(caseClause: null):
         _if(statement);
       case ast.WhileStatement():
@@ -128,16 +113,6 @@ final class FunctionLowering(
     }
   }
 
-  List<Value> _state() => [
-    for (final variable in _mutable) context.locals[variable]!,
-  ];
-
-  void _restore(List<Value> state) {
-    for (var i = 0; i < _mutable.length; i++) {
-      context.locals[_mutable[i]] = state[i];
-    }
-  }
-
   void _if(ast.IfStatement statement) {
     final condition = lowerExpression(context, statement.expression);
     if (condition case Constant(value: final bool taken)) {
@@ -146,40 +121,32 @@ final class FunctionLowering(
     }
     final yes = context.addBlock(), no = context.addBlock();
     context.current!.finish(Branch(condition, .new(yes), .new(no)));
-    final before = _state();
+    final before = context.saveLocals();
     context.current = yes;
     _scoped(statement.thenStatement);
-    final yesEnd = context.current, yesValues = _state();
+    final yesEnd = context.current, yesValues = context.saveLocals();
     context.current = no;
-    _restore(before);
+    context.restoreLocals(before);
     _scoped(statement.elseStatement);
     if (yesEnd == null) return;
-    if (context.current == null) {
+    final noEnd = context.current;
+    if (noEnd == null) {
       context.current = yesEnd;
-      _restore(yesValues);
+      context.restoreLocals(yesValues);
       return;
     }
-    final noValues = _state();
-    final changed = [
-      for (var i = 0; i < _mutable.length; i++)
-        if (yesValues[i] != noValues[i]) i,
-    ];
-    final join = context.addBlock(changed.map((i) => yesValues[i].type));
-    yesEnd.finish(Jump(join, changed.map((i) => yesValues[i])));
-    context.current!.finish(Jump(join, changed.map((i) => noValues[i])));
-    for (final (p, i) in changed.indexed) {
-      context.locals[_mutable[i]] = join.parameters[p];
-    }
-    context.current = join;
+    final (fromYes, fromNo) = context.join(yesValues);
+    yesEnd.finish(fromYes);
+    noEnd.finish(fromNo);
   }
 
   void _while(ast.WhileStatement statement) {
-    final initial = _state();
+    final initial = context.saveLocals();
     final header = context.addBlock(initial.map((v) => v.type));
     context.current!.finish(Jump(header, initial));
     context.current = header;
     // The condition must read loop-carried values, including on the backedge.
-    _restore(header.parameters);
+    context.restoreLocals(header.parameters);
     final condition = lowerExpression(context, statement.condition);
     if (condition case Constant(value: false)) return;
     final loop = context.addBlock();
@@ -189,10 +156,11 @@ final class FunctionLowering(
     context.current!.finish(
       exit == null ? Jump(loop) : Branch(condition, .new(loop), .new(exit)),
     );
+    final afterCondition = exit == null ? null : context.saveLocals();
     context.current = loop;
     _scoped(statement.body);
-    context.current?.finish(Jump(header, _state()));
-    _restore(header.parameters);
+    context.current?.finish(Jump(header, context.saveLocals()));
+    if (afterCondition != null) context.restoreLocals(afterCondition);
     context.current = exit;
   }
 }

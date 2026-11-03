@@ -4,6 +4,7 @@ import 'package:test/test.dart';
 
 import 'fixtures/effects.dart' as effects;
 import 'fixtures/functions.dart' as dart;
+import 'fixtures/updates.dart' as updates;
 
 const _fixtures = 'test/lowering/fixtures';
 
@@ -16,7 +17,7 @@ void main() {
   late Map<FunctionTarget, IrFunction> bodies;
   late Map<FunctionTarget, Object? Function(int)> imports;
   setUpAll(() async {
-    final result = await _lower(['functions.dart']);
+    final result = await _lower(['functions.dart', 'updates.dart']);
     functions = {for (final f in result) f.target.name: f};
     bodies = {for (final f in result) f.target: f};
     imports = {
@@ -132,6 +133,52 @@ void main() {
       compare('early', [flag], () => dart.early(flag));
     }
   });
+  test(
+    'local writes preserve prefix, postfix and compound assignment values',
+    () {
+      for (final x in [-3, 0, 4, 0x7fffffffffffffff]) {
+        compare('readAndWrite', [x], () => updates.readAndWrite(x));
+        compare('argumentWrites', [x], () => updates.argumentWrites(x));
+      }
+    },
+  );
+
+  test('short circuit merges only the writes on the executed path', () {
+    for (final x in [-1, 0, 4]) {
+      compare('knownGuards', [true, x], () => updates.knownGuards(true, x));
+    }
+    for (final first in [false, true]) {
+      for (final second in [false, true]) {
+        for (final x in [-1, 0, 4]) {
+          compare('shortCircuitWrites', [
+            first,
+            second,
+            x,
+          ], () => updates.shortCircuitWrites(first, second, x));
+        }
+      }
+    }
+  });
+
+  test('leaving a loop retains the writes made by its final condition', () {
+    for (final limit in [-1, 0, 1, 2, 8]) {
+      compare('loopWrites', [limit], () => updates.loopWrites(limit));
+    }
+  });
+
+  test('an indexed update needs its own read and write operations', () async {
+    await expectLater(
+      _lower(['index_update.dart']),
+      throwsA(
+        isA<UnsupportedError>().having(
+          (e) => e.message,
+          'assignment location',
+          contains('index_update.dart:3:'),
+        ),
+      ),
+    );
+  });
+
   test('an unused invalid declaration in a part prevents lowering', () async {
     await expectLater(
       _lower(['invalid_part/entry.dart']),

@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/ast/ast.dart' as ast;
+import 'package:analyzer/dart/ast/token.dart' show Token;
 import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
 
@@ -18,6 +19,8 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
     case ast.SimpleIdentifier(element: final VariableElement variable)
         when context.locals.containsKey(variable):
       return context.locals[variable]!;
+    case ast.CompoundAssignmentExpression():
+      return _updateLocal(context, expression);
     case ast.MethodInvocation(
       methodName: ast.SimpleIdentifier(
         element: final TopLevelFunctionElement callee,
@@ -47,32 +50,29 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
       :final operator,
     ):
       final left = lowerExpression(context, leftOperand);
-      if (operator.lexeme == '&&' || operator.lexeme == '||') {
-        final rhs = context.addBlock(), join = context.addBlock([.boolean]);
-        final evaluate = Jump(rhs), skip = Jump(join, [left]);
-        final and = operator.lexeme == '&&';
-        context.current!.finish(
-          Branch(left, and ? evaluate : skip, and ? skip : evaluate),
-        );
+      if (operator.type == .AMPERSAND_AMPERSAND || operator.type == .BAR_BAR) {
+        final and = operator.type == .AMPERSAND_AMPERSAND;
+        if (left case Constant(value: final bool value)) {
+          return value == and ? lowerExpression(context, rightOperand) : left;
+        }
+        final branch = context.current!, saved = context.saveLocals();
+        final rhs = context.addBlock();
         context.current = rhs;
         final right = lowerExpression(context, rightOperand);
-        context.current!.finish(Jump(join, [right]));
-        context.current = join;
-        return join.parameters.single;
+        final rhsEnd = context.current!;
+        final (skip, evaluated) = context.join(saved, (left, right));
+        final enter = Jump(rhs);
+        branch.finish(Branch(left, and ? enter : skip, and ? skip : enter));
+        rhsEnd.finish(evaluated);
+        return skip.target.parameters.first;
       }
-      final IntOperator op = switch (operator.lexeme) {
-        '+' => .add,
-        '-' => .subtract,
-        '*' => .multiply,
-        '<' => .lessThan,
-        _ => unsupported(unit, expression, operator.lexeme),
-      };
-      if (left.type != .integer ||
-          valueType(rightOperand.staticType!, unit, rightOperand) != .integer) {
-        unsupported(unit, expression, 'non-integer operator');
-      }
-      final right = lowerExpression(context, rightOperand);
-      return context.current!.emit(IntBinary(op, left, right));
+      return _integerOperation(
+        context,
+        expression,
+        operator,
+        left,
+        rightOperand,
+      );
     default:
       unsupported(
         unit,
@@ -80,4 +80,63 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
         'expression starting with ${expression.beginToken.lexeme}',
       );
   }
+}
+
+Value _updateLocal(
+  FunctionContext context,
+  ast.CompoundAssignmentExpression expression,
+) {
+  final (operator, rhs) = switch (expression) {
+    ast.AssignmentExpression(:final operator, :final rightHandSide) => (
+      operator,
+      rightHandSide,
+    ),
+    ast.PrefixExpression(:final operator) ||
+    ast.PostfixExpression(:final operator)
+        when operator.type == .PLUS_PLUS || operator.type == .MINUS_MINUS =>
+      (operator, null),
+    _ => unsupported(context.unit, expression, 'operator expression'),
+  };
+  final variable = expression.writeElement;
+  final old = context.locals[variable];
+  if (variable is! VariableElement ||
+      old == null ||
+      (operator.type != .EQ && expression.readElement != variable)) {
+    unsupported(context.unit, expression, 'non-local assignment');
+  }
+  // The right operand can write the same local. Its previous value remains
+  // the receiver of a compound operator and the result of a postfix update.
+  final value = operator.type == .EQ
+      ? lowerExpression(context, rhs!)
+      : _integerOperation(context, expression, operator, old, rhs);
+  if (value.type != old.type) {
+    unsupported(context.unit, expression, 'implicit conversion');
+  }
+  context.locals[variable] = value;
+  return expression is ast.PostfixExpression ? old : value;
+}
+
+Value _integerOperation(
+  FunctionContext context,
+  ast.Expression site,
+  Token operator,
+  Value left,
+  ast.Expression? rhs,
+) {
+  final IntOperator op = switch (operator.type) {
+    .PLUS || .PLUS_EQ || .PLUS_PLUS => .add,
+    .MINUS || .MINUS_EQ || .MINUS_MINUS => .subtract,
+    .STAR || .STAR_EQ => .multiply,
+    .LT => .lessThan,
+    _ => unsupported(context.unit, site, operator.lexeme),
+  };
+  if (left.type != .integer ||
+      (rhs != null &&
+          valueType(rhs.staticType!, context.unit, rhs) != .integer)) {
+    unsupported(context.unit, site, 'non-integer operator');
+  }
+  final right = rhs == null
+      ? const Constant.integer(1)
+      : lowerExpression(context, rhs);
+  return context.current!.emit(IntBinary(op, left, right));
 }
