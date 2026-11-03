@@ -26,7 +26,7 @@ extension on _TypeReader {
         fail('expected_type', 'Expected a named record field.');
         return null;
       }
-      frame.namedFields = parser.arena.putRecordTypeNamedFields(
+      frame.namedFields = parser.arena.recordTypeNamedFields(
         start: frame.namedOpening!.start,
         end: current.end,
         fields: frame.named,
@@ -68,7 +68,7 @@ extension on _TypeReader {
     parser.advance();
     frames.removeLast();
     final question = nullableOffset();
-    return parser.arena.putRecordTypeAnnotation(
+    return parser.arena.recordTypeAnnotation(
       start: frame.opening.start,
       end: question == null ? end : question + 1,
       questionOffset: question,

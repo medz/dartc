@@ -21,18 +21,13 @@ final class IdentifierPattern({
 
   /// The written name.
   required final Identifier name,
-}) extends DartPattern {
+}) extends DartPattern with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => name,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => name;
 }
 
 /// The explicit keyword on a variable or wildcard pattern.
@@ -102,18 +97,13 @@ final class ConstantPattern({
 
   /// The written expression, including any parentheses.
   required final Expression expression,
-}) extends DartPattern {
+}) extends DartPattern with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => expression,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => expression;
 }
 
 /// A parenthesized pattern, including its parentheses.
@@ -124,18 +114,13 @@ final class ParenthesizedPattern({
 
   /// The pattern inside the parentheses.
   required final DartPattern pattern,
-}) extends DartPattern {
+}) extends DartPattern with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => pattern,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => pattern;
 }
 
 /// A pattern followed by a `when` expression.
@@ -149,19 +134,15 @@ final class GuardedPattern({
 
   /// The written guard expression.
   required final Expression guard,
-}) extends AstNode implements CasePattern {
+}) extends AstNode with _TwoChildren implements CasePattern {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => pattern;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => pattern,
-    1 => guard,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => guard;
 }
 
 /// A zero-width placeholder for a missing pattern.
@@ -181,17 +162,13 @@ final class PatternAssignmentExpression({
 
   /// The expression being assigned.
   required final Expression value,
-}) extends Expression {
+}) extends Expression with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => pattern;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => pattern,
-    1 => value,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => value;
 }

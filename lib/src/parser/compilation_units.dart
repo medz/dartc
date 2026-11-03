@@ -15,20 +15,48 @@ ParseResult<CompilationUnit> parseCompilationUnit(
   return parser.finishResult(node);
 }
 
-/// Reparses a change to a clean tree, keeping all ranges in the new snapshot.
-/// Returns null if the edit needs the full scanner or parser recovery context.
-ParseResult<CompilationUnit>? reparseCompilationUnit(
+/// Incremental parsing of a previously parsed compilation unit.
+extension CompilationUnitParsing on ParseResult<CompilationUnit> {
+  /// Parses [source], reusing unchanged syntax when the file and version match.
+  ///
+  /// Defaults to the previous language version. The result belongs to [source],
+  /// even when its text is unchanged. Errors have the same recovery and
+  /// diagnostics as a fresh parse.
+  ParseResult<CompilationUnit> reparse(
+    SourceFile source, {
+    LanguageVersion? languageVersion,
+  }) {
+    final version = languageVersion ?? this.languageVersion;
+    if (version == this.languageVersion) {
+      final result = tryReparse(source);
+      if (result != null) return result;
+    }
+    return parseCompilationUnit(
+      scan(source, comments: .leading),
+      languageVersion: version,
+    );
+  }
+
+  /// Reuses a clean unit when the edit preserves its header and parser context.
+  ///
+  /// Returns `null` when a fresh scan is needed. A project loader can then
+  /// read version comments from that scan before choosing the language version.
+  ParseResult<CompilationUnit>? tryReparse(SourceFile source) {
+    if (diagnostics.isNotEmpty || tree.source.uri != source.uri) return null;
+    return identical(source, tree.source)
+        ? this
+        : _tryReparse(source, tree, languageVersion);
+  }
+}
+
+ParseResult<CompilationUnit>? _tryReparse(
   SourceFile source,
   SyntaxTree previous,
   LanguageVersion languageVersion,
 ) {
   final before = previous.source.text, after = source.text;
   final limit = before.length < after.length ? before.length : after.length;
-  var prefix = 0;
-  while (prefix < limit &&
-      before.codeUnitAt(prefix) == after.codeUnitAt(prefix)) {
-    prefix++;
-  }
+  final prefix = _matchingLength(before, 0, after, 0, limit);
   final edited = _editFunctionBody(source, previous, prefix, languageVersion);
   if (edited != null) return edited;
   final members = <int>[];
@@ -48,13 +76,34 @@ ParseResult<CompilationUnit>? reparseCompilationUnit(
   if (end == 0) return null;
   final delimiter = after.codeUnitAt(end - 1);
   if (delimiter != 59 && delimiter != 125) return null;
-  final suffix = scanFrom(source, end);
-  if (suffix.hasErrors) return null;
-  final arena = AstArena.prefix(previous, source, last, suffix.tokens.length);
+  final suffix = scanFragment(SourceSpan(source, end, source.length));
+  if (suffix.diagnostics.isNotEmpty) return null;
+  final arena = previous.copyPrefix(
+    source,
+    through: last,
+    expectedTokens: suffix.tokens.length,
+  );
+  if (arena == null) return null;
   final parser = _Parser._(source, suffix.tokens, languageVersion, [], arena);
   final unit = _readUnit(parser, members, scriptTag);
   if (parser.diagnostics.isNotEmpty) return null;
   return parser.finishResult(unit);
+}
+
+// Compare four UTF-16 units per loop without copying either source range.
+int _matchingLength(String a, int startA, String b, int startB, int length) {
+  var i = 0;
+  while (i + 4 <= length &&
+      a.codeUnitAt(startA + i) == b.codeUnitAt(startB + i) &&
+      a.codeUnitAt(startA + i + 1) == b.codeUnitAt(startB + i + 1) &&
+      a.codeUnitAt(startA + i + 2) == b.codeUnitAt(startB + i + 2) &&
+      a.codeUnitAt(startA + i + 3) == b.codeUnitAt(startB + i + 3)) {
+    i += 4;
+  }
+  while (i < length && a.codeUnitAt(startA + i) == b.codeUnitAt(startB + i)) {
+    i++;
+  }
+  return i;
 }
 
 ParseResult<CompilationUnit>? _editFunctionBody(
@@ -92,26 +141,27 @@ ParseResult<CompilationUnit>? _editFunctionBody(
       final before = tree.source.text, after = source.text;
       final delta = after.length - before.length, newEnd = end + delta;
       if (newEnd <= change) return null;
-      for (var i = end - 1; i < before.length; i++) {
-        if (before.codeUnitAt(i) != after.codeUnitAt(i + delta)) return null;
+      final suffix = before.length - end + 1;
+      if (_matchingLength(before, end - 1, after, newEnd - 1, suffix) !=
+          suffix) {
+        return null;
       }
-      final body = scanFrom(source, start, newEnd);
-      if (body.hasErrors || body.tokens.last.start != newEnd) return null;
-      var first = child;
-      while (tree.childCount(first) != 0) {
-        first = tree.childAt(first, 0);
+      final body = scanFragment(SourceSpan(source, start, newEnd));
+      if (body.diagnostics.isNotEmpty || body.tokens.last.start != newEnd) {
+        return null;
       }
-      final arena = AstArena.edit(tree, source, first);
+      final arena = tree.editSubtree(child, source, changeStart: change);
+      if (arena == null) return null;
       final parser = _Parser._(source, body.tokens, version, [], arena);
       final replacement = _BodyReader(parser).finish();
       if (parser.current.kind != .eof ||
           parser.diagnostics.isNotEmpty ||
-          arena.rStart(replacement) != start ||
-          arena.rEnd(replacement) != newEnd ||
-          !arena.finishEdit(tree, child, replacement)) {
+          arena.start(replacement) != start ||
+          arena.end(replacement) != newEnd) {
         return null;
       }
-      return parser.finishResult(tree.root);
+      final result = arena.finishReplacement(replacement);
+      return result == null ? null : parser.checkedResult(result);
     }
     row = child;
   }
@@ -121,11 +171,11 @@ ParseResult<CompilationUnit>? _editFunctionBody(
 int _readUnit(_Parser parser, [List<int>? prefix, int? scriptTag]) {
   if (parser.current.kind == .scriptTag) {
     final token = parser.current;
-    scriptTag = parser.arena.putScriptTag(start: token.start, end: token.end);
+    scriptTag = parser.arena.scriptTag(start: token.start, end: token.end);
     parser.advance();
   }
   final members = prefix ?? <int>[];
-  final lastKind = members.isEmpty ? null : parser.arena.kindAt(members.last);
+  final lastKind = members.isEmpty ? null : parser.arena.kind(members.last);
   var parts = lastKind == .partDirective || lastKind == .partOfDirective;
   var partOf = lastKind == .partOfDirective;
   var declarations =
@@ -179,8 +229,5 @@ int _readUnit(_Parser parser, [List<int>? prefix, int? scriptTag]) {
       parser.unexpected();
     }
   }
-  return parser.arena.putCompilationUnit(
-    scriptTag: scriptTag,
-    members: members,
-  );
+  return parser.arena.compilationUnit(scriptTag: scriptTag, members: members);
 }

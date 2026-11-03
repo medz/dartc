@@ -61,18 +61,13 @@ final class NullAwareElement({
 
   /// The expression whose non-null result is inserted.
   required final Expression expression,
-}) extends AstNode implements CollectionElement {
+}) extends AstNode with _SingleChild implements CollectionElement {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => expression,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => expression;
 }
 
 /// A map entry with optional null-aware markers on its key and value.
@@ -92,19 +87,15 @@ final class MapEntryElement({
 
   /// Whether `?` precedes the value expression.
   final bool isNullAwareValue = false,
-}) extends AstNode implements CollectionElement {
+}) extends AstNode with _TwoChildren implements CollectionElement {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => key;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => key,
-    1 => value,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => value;
 }
 
 /// A spread written as `...expression` or `...?expression`.
@@ -118,18 +109,13 @@ final class SpreadElement({
 
   /// Whether the spread uses `...?`.
   final bool isNullAware = false,
-}) extends AstNode implements CollectionElement {
+}) extends AstNode with _SingleChild implements CollectionElement {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => expression,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => expression;
 }
 
 /// A conditional collection element, with an optional `else` element.
@@ -184,17 +170,13 @@ final class ForElement({
 
   /// The collection element after the loop header.
   required final CollectionElement body,
-}) extends AstNode implements CollectionElement {
+}) extends AstNode with _TwoChildren implements CollectionElement {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => parts;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => parts,
-    1 => body,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => body;
 }

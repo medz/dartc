@@ -81,7 +81,7 @@ int _readTypeDeclaration(_Parser parser, int start, List<int> metadata) {
   if (parser.current.kind == .less) {
     final reader = _TypeReader(parser);
     if (!reader.start(parameters: true)) _TypeTask(reader).finish();
-    typeParameters = parser.arena.asTypeParameterListOrNull(reader.result);
+    typeParameters = reader.result;
     if (reader.failure case final failure?) {
       parser.error(failure.$1, failure.$2, failure.$3);
     }
@@ -125,7 +125,7 @@ int _readTypeDeclaration(_Parser parser, int start, List<int> metadata) {
     if (parser.current.kind == .keywordImplements) {
       implementsClause = _readTypeList(parser, .implementsKeyword);
     }
-    return parser.arena.putClassTypeAliasDeclaration(
+    return parser.arena.classTypeAliasDeclaration(
       start: start,
       end: parser.expect(.semicolon),
       metadata: metadata,
@@ -150,9 +150,9 @@ int _readTypeDeclaration(_Parser parser, int start, List<int> metadata) {
     final token = parser.current;
     parser.advance();
     final type = _RequiredTypeReader(parser).finish();
-    extendsClause = parser.arena.putExtendsClause(
+    extendsClause = parser.arena.extendsClause(
       start: token.start,
-      end: parser.arena.rEnd(type),
+
       superclass: type,
     );
     if (kind != .classKind) {
@@ -186,8 +186,8 @@ int _readTypeDeclaration(_Parser parser, int start, List<int> metadata) {
       Token(
         .keywordWith,
         parser.source,
-        parser.arena.rStart(withClause),
-        parser.arena.rEnd(withClause),
+        parser.arena.start(withClause),
+        parser.arena.end(withClause),
       ),
     );
   }
@@ -198,15 +198,15 @@ int _readTypeDeclaration(_Parser parser, int start, List<int> metadata) {
       Token(
         .keywordImplements,
         parser.source,
-        parser.arena.rStart(implementsClause),
-        parser.arena.rEnd(implementsClause),
+        parser.arena.start(implementsClause),
+        parser.arena.end(implementsClause),
       ),
     );
   }
-  final body = _MembersReader(parser, parser.arena.rTextOrNull(name), kind);
+  final body = _MembersReader(parser, parser.arena.textOf(name), kind);
   final bodyNode = body.read();
   return switch (kind) {
-    .classKind => parser.arena.putClassDeclaration(
+    .classKind => parser.arena.classDeclaration(
       start: start,
       end: body.end,
       metadata: metadata,
@@ -222,7 +222,7 @@ int _readTypeDeclaration(_Parser parser, int start, List<int> metadata) {
       isSemicolonBody: body.semicolon,
       members: bodyNode,
     ),
-    .mixin => parser.arena.putMixinDeclaration(
+    .mixin => parser.arena.mixinDeclaration(
       start: start,
       end: body.end,
       metadata: metadata,
@@ -234,7 +234,7 @@ int _readTypeDeclaration(_Parser parser, int start, List<int> metadata) {
       isSemicolonBody: body.semicolon,
       members: bodyNode,
     ),
-    .enumKind => parser.arena.putEnumDeclaration(
+    .enumKind => parser.arena.enumDeclaration(
       start: start,
       end: body.end,
       metadata: metadata,
@@ -250,7 +250,7 @@ int _readTypeDeclaration(_Parser parser, int start, List<int> metadata) {
       constants: body.constants,
       members: bodyNode,
     ),
-    .extension => parser.arena.putExtensionDeclaration(
+    .extension => parser.arena.extensionDeclaration(
       start: start,
       end: body.end,
       metadata: metadata,
@@ -260,7 +260,7 @@ int _readTypeDeclaration(_Parser parser, int start, List<int> metadata) {
       isSemicolonBody: body.semicolon,
       members: bodyNode,
     ),
-    .extensionType => parser.arena.putExtensionTypeDeclaration(
+    .extensionType => parser.arena.extensionTypeDeclaration(
       start: start,
       end: body.end,
       metadata: metadata,
@@ -297,7 +297,7 @@ extension on _Parser {
     if (current.kind != .keywordNew) return readVariableName();
     final token = current;
     advance();
-    return arena.putIdentifier(start: token.start, end: token.end);
+    return arena.identifier(start: token.start, end: token.end);
   }
 }
 
@@ -327,9 +327,9 @@ int _readTypeList(_Parser parser, TypeListClauseKind kind) {
     if (parser.current.kind != .comma) break;
     parser.advance();
   } while (true);
-  return parser.arena.putTypeListClause(
+  return parser.arena.typeListClause(
     start: start,
-    end: parser.arena.rEnd(types.last),
+    end: parser.arena.end(types.last),
     kind: kind,
     types: types,
   );

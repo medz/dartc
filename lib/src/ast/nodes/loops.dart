@@ -69,17 +69,13 @@ final class ForInParts({
 
   /// The expression after `in`.
   required final Expression iterable,
-}) extends ForLoopParts {
+}) extends ForLoopParts with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => target;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => target,
-    1 => iterable,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => iterable;
 }

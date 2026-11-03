@@ -98,9 +98,7 @@ final class _PatternAssignmentReader(final _Parser parser)
     parser.expect(.assign);
     final value = _ExpressionReader(parser);
     if (!value.start()) yield value;
-    result = parser.arena.putPatternAssignmentExpression(
-      start: parser.arena.rStart(pattern.result),
-      end: parser.arena.rEnd(value.result),
+    result = parser.arena.patternAssignmentExpression(
       pattern: pattern.result,
       value: value.result,
     );
@@ -120,9 +118,9 @@ final class _PatternDeclarationReader(
     parser.expect(.assign);
     final value = _ExpressionReader(parser);
     if (!value.start()) yield value;
-    result = parser.arena.putPatternVariableDeclaration(
-      start: parser.arena.rStartOrNull(metadata.firstOrNull) ?? token.start,
-      end: parser.arena.rEnd(value.result),
+    result = parser.arena.patternVariableDeclaration(
+      start: parser.arena.startOf(metadata.firstOrNull) ?? token.start,
+      end: parser.arena.end(value.result),
       metadata: metadata,
       isFinal: token.kind == .keywordFinal,
       pattern: pattern.result,
@@ -158,11 +156,11 @@ final class _ForDeclarationReader(final _Parser parent, final _ForHeader frame)
     final pattern = _PatternReader(child, context: .declaration);
     yield pattern;
     final start =
-        parent.arena.rStartOrNull(frame.metadata.firstOrNull) ?? token.start;
+        parent.arena.startOf(frame.metadata.firstOrNull) ?? token.start;
     if (child.current.kind == .keywordIn) {
-      frame.target = parent.arena.putPatternForInBinding(
+      frame.target = parent.arena.patternForInBinding(
         start: start,
-        end: parent.arena.rEnd(pattern.result),
+        end: parent.arena.end(pattern.result),
         metadata: frame.metadata,
         isFinal: token.kind == .keywordFinal,
         pattern: pattern.result,
@@ -173,9 +171,9 @@ final class _ForDeclarationReader(final _Parser parent, final _ForHeader frame)
       child.expect(.assign);
       final value = _ExpressionReader(child);
       if (!value.start()) yield value;
-      frame.initializer = parent.arena.putPatternVariableDeclaration(
+      frame.initializer = parent.arena.patternVariableDeclaration(
         start: start,
-        end: parent.arena.rEnd(value.result),
+        end: parent.arena.end(value.result),
         metadata: frame.metadata,
         isFinal: token.kind == .keywordFinal,
         pattern: pattern.result,

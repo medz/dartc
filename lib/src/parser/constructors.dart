@@ -39,7 +39,7 @@ int _readConstructor(
     if (parser.current.kind == .less) {
       final reader = _TypeReader(parser);
       if (!reader.start(arguments: true)) _TypeTask(reader).finish();
-      types = parser.arena.asTypeArgumentListOrNull(reader.result);
+      types = reader.result;
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
       }
@@ -49,7 +49,7 @@ int _readConstructor(
       parser.advance();
       suffix = parser.readConstructorName();
     }
-    final body = parser.arena.putFactoryRedirectBody(
+    final body = parser.arena.factoryRedirectBody(
       start: token.start,
       end: parser.expect(.semicolon),
       name: target,
@@ -64,11 +64,11 @@ int _readConstructor(
       );
     }
     if (primaryBody) {
-      return parser.arena.putMissingClassMember(offset: start);
+      return parser.arena.missingClassMember(offset: start);
     } else {
-      return parser.arena.putConstructorDeclaration(
+      return parser.arena.constructorDeclaration(
         start: start,
-        end: parser.arena.rEnd(body),
+
         metadata: metadata,
         isExternal: external,
         isConst: isConst,
@@ -87,53 +87,51 @@ int _readConstructor(
       Token(
         .invalid,
         parser.source,
-        parser.arena.rStart(initializers.first),
-        parser.arena.rEnd(initializers.last),
+        parser.arena.start(initializers.first),
+        parser.arena.end(initializers.last),
       ),
     );
   }
   final bodyNode = _BodyReader(parser).finish();
   if (keyword == .factoryKeyword &&
       !external &&
-      parser.arena.hasKind(bodyNode, .emptyFunctionBody)) {
+      parser.arena.isKind(bodyNode, .emptyFunctionBody)) {
     parser.error(
       'missing_function_body',
       'A factory requires a body or redirection.',
       Token(
         .semicolon,
         parser.source,
-        parser.arena.rStart(bodyNode),
-        parser.arena.rEnd(bodyNode),
+        parser.arena.start(bodyNode),
+        parser.arena.end(bodyNode),
       ),
     );
   }
-  if (parser.arena.hasKind(bodyNode, .modifiedBlockFunctionBody) ||
-      parser.arena.hasKind(bodyNode, .expressionFunctionBody) &&
-          parser.arena.rExpressionFunctionBodyIsAsync(
-            (parser.arena.asExpressionFunctionBody(bodyNode)),
-          )) {
+  if (parser.arena.isKind(bodyNode, .modifiedBlockFunctionBody) ||
+      parser.arena.isKind(bodyNode, .expressionFunctionBody) &&
+          parser.arena.view<ExpressionFunctionBody>(bodyNode).isAsync) {
     parser.error(
       'async_constructor',
       'Constructors cannot be asynchronous or generators.',
       Token(
         .invalid,
         parser.source,
-        parser.arena.rStart(bodyNode),
-        parser.arena.rEnd(bodyNode),
+        parser.arena.start(bodyNode),
+        parser.arena.end(bodyNode),
       ),
     );
   }
   return primaryBody
-      ? parser.arena.putPrimaryConstructorBody(
+      ? parser.arena.primaryConstructorBody(
           start: start,
-          end: parser.arena.rEnd(bodyNode),
+
           metadata: metadata,
           initializers: initializers,
           body: bodyNode,
         )
-      : parser.arena.putConstructorDeclaration(
+      : parser.arena.constructorDeclaration(
           start: start,
-          end: parser.arena.rEnd(bodyNode),
+
           metadata: metadata,
           isExternal: external,
           isConst: isConst,
@@ -154,10 +152,10 @@ List<int> _readInitializers(_Parser parser) {
     if (token.kind == .keywordAssert) {
       parser.advance();
       final argumentList = _ArgumentsReader(parser).finish();
-      final arguments = parser.arena.rArgumentListArguments(argumentList);
+      final arguments = parser.arena.view<ArgumentList>(argumentList).arguments;
       if (arguments.isEmpty ||
           arguments.length > 2 ||
-          arguments.any((a) => parser.arena.rArgumentName(a) != null)) {
+          arguments.any((a) => a.name != null)) {
         parser.error(
           'invalid_assert',
           'An assertion requires a condition and an optional message.',
@@ -165,17 +163,17 @@ List<int> _readInitializers(_Parser parser) {
         );
       }
       result.add(
-        parser.arena.putAssertInitializer(
+        parser.arena.assertInitializer(
           start: token.start,
-          end: parser.arena.rEnd(argumentList),
+          end: parser.arena.end(argumentList),
           condition: arguments.isEmpty
-              ? parser.arena.putMissingExpression(
-                  offset: parser.arena.rStart(argumentList),
+              ? parser.arena.missingExpression(
+                  offset: parser.arena.start(argumentList),
                 )
-              : parser.arena.rArgumentValue(arguments.first),
+              : parser.arena.indexOf(arguments.first.value),
           message: arguments.length < 2
               ? null
-              : parser.arena.rArgumentValue(arguments[1]),
+              : parser.arena.indexOf(arguments[1].value),
         ),
       );
     } else {
@@ -195,15 +193,15 @@ List<int> _readInitializers(_Parser parser) {
         final argumentList = _ArgumentsReader(parser).finish();
         result.add(
           hasSuper
-              ? parser.arena.putSuperConstructorInitializer(
+              ? parser.arena.superConstructorInitializer(
                   start: token.start,
-                  end: parser.arena.rEnd(argumentList),
+
                   name: name,
                   arguments: argumentList,
                 )
-              : parser.arena.putRedirectingConstructorInitializer(
+              : parser.arena.redirectingConstructorInitializer(
                   start: token.start,
-                  end: parser.arena.rEnd(argumentList),
+
                   name: name,
                   arguments: argumentList,
                 ),
@@ -216,7 +214,7 @@ List<int> _readInitializers(_Parser parser) {
             token,
           );
         }
-        name ??= parser.arena.putIdentifier(
+        name ??= parser.arena.identifier(
           start: parser.current.start,
           end: parser.current.start,
         );
@@ -224,9 +222,9 @@ List<int> _readInitializers(_Parser parser) {
         final reader = _ExpressionReader(parser, boundary: .initializer);
         if (!reader.start()) reader.finish();
         result.add(
-          parser.arena.putFieldInitializer(
+          parser.arena.fieldInitializer(
             start: token.start,
-            end: parser.arena.rEnd(reader.result),
+
             hasThis: hasThis,
             name: name,
             value: reader.result,

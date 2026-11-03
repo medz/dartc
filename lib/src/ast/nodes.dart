@@ -83,6 +83,27 @@ sealed class AstNode({
       throw RangeError.index(index, this, 'index', null, childCount);
 }
 
+// A traversal helper must not add a subtype to the sealed AST hierarchy.
+mixin _SingleChild {
+  AstNode get _firstChild;
+  int get childCount => 1;
+  AstNode childAt(int index) {
+    if (index != 0) throw RangeError.index(index, this, 'index', null, 1);
+    return _firstChild;
+  }
+}
+
+mixin _TwoChildren {
+  AstNode get _firstChild;
+  AstNode get _secondChild;
+  int get childCount => 2;
+  AstNode childAt(int index) => switch (index) {
+    0 => _firstChild,
+    1 => _secondChild,
+    _ => throw RangeError.index(index, this, 'index', null, 2),
+  };
+}
+
 /// An identifier or a keyword used in a name position.
 ///
 /// An empty range represents a missing name during error recovery. Whether

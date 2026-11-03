@@ -6,5 +6,6 @@
 /// {@example /example/scanner.dart}
 library;
 
-export 'src/scanner/scanner.dart' show scan, ScanResult, Token;
+export 'src/scanner/scanner.dart'
+    show CommentRetention, scan, scanFragment, ScanResult, Token, TokenSequence;
 export 'src/scanner/token_kind.dart';

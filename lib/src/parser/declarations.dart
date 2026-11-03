@@ -24,7 +24,7 @@ final class _DeclarationName(final _Parser parser) {
         parser.canStartTypeBeforeName()) {
       final reader = _TypeReader(parser, beforeFunction: true);
       if (!reader.start()) _TypeTask(reader).finish();
-      final parsed = parser.arena.asTypeAnnotationOrNull(reader.result);
+      final parsed = reader.result;
       if (parsed != null && parser.current.kind.isIdentifier) {
         type = parsed;
       } else {
@@ -75,7 +75,7 @@ final class _DeclarationName(final _Parser parser) {
     if (parser.current.kind == .less) {
       final reader = _TypeReader(parser);
       if (!reader.start(parameters: true)) _TypeTask(reader).finish();
-      typeParameters = parser.arena.asTypeParameterListOrNull(reader.result);
+      typeParameters = reader.result;
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
       }
@@ -110,7 +110,7 @@ final class _TopLevelReader(
         declarations,
         metadata: metadata,
       ).finish();
-      return parser.arena.putTopLevelVariableDeclaration(
+      return parser.arena.topLevelVariableDeclaration(
         start: start,
         end: parser.expect(.semicolon),
         isExternal: external,
@@ -120,7 +120,7 @@ final class _TopLevelReader(
     final initial = parser.cursor;
     final header = _DeclarationName(parser);
     header.read();
-    if (parser.arena.rStart(header.name) == parser.arena.rEnd(header.name)) {
+    if (parser.arena.start(header.name) == parser.arena.end(header.name)) {
       parser.error(
         'expected_declaration',
         'Expected a top-level declaration.',
@@ -129,7 +129,7 @@ final class _TopLevelReader(
       if (parser.cursor == initial && parser.current.kind != .eof) {
         parser.advance();
       }
-      return parser.arena.putMissingTopLevelDeclaration(offset: start);
+      return parser.arena.missingTopLevelDeclaration(offset: start);
     }
     int? parameters;
     if (header.accessor != .keywordGet) {
@@ -144,27 +144,27 @@ final class _TopLevelReader(
     }
     final body = _BodyReader(parser);
     final bodyNode = body.finish();
-    if (parser.arena.hasKind(bodyNode, .emptyFunctionBody) && !external) {
+    if (parser.arena.isKind(bodyNode, .emptyFunctionBody) && !external) {
       parser.error(
         'missing_function_body',
         'A function without external requires a body.',
         Token(
           .semicolon,
           parser.source,
-          parser.arena.rStart(bodyNode),
-          parser.arena.rEnd(bodyNode),
+          parser.arena.start(bodyNode),
+          parser.arena.end(bodyNode),
         ),
       );
     }
-    if (external && !parser.arena.hasKind(bodyNode, .emptyFunctionBody)) {
+    if (external && !parser.arena.isKind(bodyNode, .emptyFunctionBody)) {
       parser.error(
         'external_body',
         'An external declaration cannot have a body.',
         Token(
           .invalid,
           parser.source,
-          parser.arena.rStart(bodyNode),
-          parser.arena.rEnd(bodyNode),
+          parser.arena.start(bodyNode),
+          parser.arena.end(bodyNode),
         ),
       );
     }
@@ -175,14 +175,14 @@ final class _TopLevelReader(
         Token(
           .less,
           parser.source,
-          parser.arena.rStart(header.typeParameters!),
-          parser.arena.rEnd(header.typeParameters!),
+          parser.arena.start(header.typeParameters!),
+          parser.arena.end(header.typeParameters!),
         ),
       );
     }
-    final end = parser.arena.rEnd(bodyNode);
+    final end = parser.arena.end(bodyNode);
     return switch (header.accessor) {
-      .keywordGet => parser.arena.putTopLevelGetterDeclaration(
+      .keywordGet => parser.arena.topLevelGetterDeclaration(
         start: start,
         end: end,
         metadata: metadata,
@@ -191,7 +191,7 @@ final class _TopLevelReader(
         name: header.name,
         body: bodyNode,
       ),
-      .keywordSet => parser.arena.putTopLevelSetterDeclaration(
+      .keywordSet => parser.arena.topLevelSetterDeclaration(
         start: start,
         end: end,
         metadata: metadata,
@@ -201,7 +201,7 @@ final class _TopLevelReader(
         parameters: parameters!,
         body: bodyNode,
       ),
-      _ => parser.arena.putTopLevelFunctionDeclaration(
+      _ => parser.arena.topLevelFunctionDeclaration(
         start: start,
         end: end,
         metadata: metadata,
@@ -225,8 +225,8 @@ final class _TopLevelReader(
       final reader = _TypeReader(parser);
       if (!reader.start()) _TypeTask(reader).finish();
       final type =
-          parser.arena.asTypeAnnotationOrNull(reader.result) ??
-          parser.arena.putMissingTypeAnnotation(offset: typeStart);
+          reader.result ??
+          parser.arena.missingTypeAnnotation(offset: typeStart);
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
       }
@@ -237,12 +237,12 @@ final class _TopLevelReader(
           Token(
             .invalid,
             parser.source,
-            parser.arena.rStart(header.type!),
-            parser.arena.rEnd(header.type!),
+            parser.arena.start(header.type!),
+            parser.arena.end(header.type!),
           ),
         );
       }
-      return parser.arena.putTypeAliasDeclaration(
+      return parser.arena.typeAliasDeclaration(
         start: start,
         end: parser.expect(.semicolon),
         metadata: metadata,
@@ -252,7 +252,7 @@ final class _TopLevelReader(
       );
     } else {
       final formals = _ParameterReader(parser, function: true).finish();
-      return parser.arena.putFunctionTypeAliasDeclaration(
+      return parser.arena.functionTypeAliasDeclaration(
         start: start,
         end: parser.expect(.semicolon),
         metadata: metadata,

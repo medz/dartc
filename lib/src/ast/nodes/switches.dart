@@ -106,17 +106,13 @@ final class SwitchExpressionCase({
 
   /// The expression after `=>`.
   required final Expression value,
-}) extends AstNode {
+}) extends AstNode with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => pattern;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => pattern,
-    1 => value,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => value;
 }

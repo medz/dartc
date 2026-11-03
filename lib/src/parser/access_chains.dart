@@ -78,10 +78,10 @@ extension on _Parser {
     if (token.kind == .emptyBrackets || token.kind == .emptyBracketsAssign) {
       error('expected_expression', 'Expected an index expression.', token);
       values.add(
-        arena.putCascadeIndexExpression(
+        arena.cascadeIndexExpression(
           start: marker.start,
           end: token.start + 2,
-          index: arena.putMissingExpression(offset: token.start + 1),
+          index: arena.missingExpression(offset: token.start + 1),
         ),
       );
       consumeEmptyBrackets();
@@ -93,12 +93,12 @@ extension on _Parser {
         error('expected_identifier', 'Expected a cascade member name.', token);
       }
       values.add(
-        arena.putCascadePropertyExpression(
+        arena.cascadePropertyExpression(
           start: marker.start,
           end: valid ? token.end : token.start,
           property: valid
               ? identifier(token)
-              : arena.putIdentifier(start: token.start, end: token.start),
+              : arena.identifier(start: token.start, end: token.start),
         ),
       );
     }
@@ -140,9 +140,8 @@ extension on _Parser {
     frame.sections.add(finishExpression(frame.valueBase, frame.operatorBase));
     frames.removeLast();
     values.add(
-      arena.putCascadeExpression(
-        start: arena.rStart(frame.target),
-        end: arena.rEnd(frame.sections.last),
+      arena.cascadeExpression(
+        end: arena.end(frame.sections.last),
         target: frame.target,
         isNullAware: frame.isNullAware,
         sections: frame.sections,
@@ -160,7 +159,7 @@ extension on _Parser {
     final valid = token.kind.isIdentifier || token.kind == .keywordNew;
     final name = valid
         ? identifier(token)
-        : arena.putIdentifier(start: token.start, end: token.start);
+        : arena.identifier(start: token.start, end: token.start);
     if (valid) {
       advance();
     } else {
@@ -169,11 +168,7 @@ extension on _Parser {
     frames.add(_Shorthand(values.length, operators.length, keyword != null));
     if (keyword == null) {
       values.add(
-        arena.putDotShorthandReferenceExpression(
-          start: dot.start,
-          end: arena.rEnd(name),
-          name: name,
-        ),
+        arena.dotShorthandReferenceExpression(start: dot.start, name: name),
       );
       expectsOperand = false;
       return;
@@ -184,7 +179,7 @@ extension on _Parser {
       final remainder = current;
       final reader = _TypeReader(this);
       if (!reader.start(arguments: true)) yield _TypeTask(reader);
-      types = arena.asTypeArgumentListOrNull(reader.result);
+      types = reader.result;
       if (types == null || !current.kind.followsTypeArguments) {
         cursor = start;
         current = remainder;
@@ -206,9 +201,9 @@ extension on _Parser {
       expectsOperand = true;
     } else {
       values.add(
-        arena.putConstDotShorthandExpression(
+        arena.constDotShorthandExpression(
           start: keyword.start,
-          end: arena.rEndOrNull(types) ?? arena.rEnd(name),
+          end: arena.endOf(types) ?? arena.end(name),
           name: name,
           typeArguments: types,
         ),
@@ -244,20 +239,14 @@ extension on _Parser {
   void closeShorthand(_Shorthand frame) {
     final value = finishExpression(frame.valueBase, frame.operatorBase);
     final bang = frame.isConst ? frame.pendingBang : null;
-    final expression =
-        arena.rNullAssertionExpressionOperandOrNull(bang) ?? value;
-    final shorthand = arena.putDotShorthandExpression(
-      start: arena.rStart(expression),
-      end: arena.rEnd(expression),
-      expression: expression,
-    );
+    final expression = bang == null ? value : arena.childAt(bang, 0);
+    final shorthand = arena.dotShorthandExpression(expression: expression);
     frames.removeLast();
     values.add(
       bang == null
           ? shorthand
-          : arena.putNullAssertionExpression(
-              start: arena.rStart(shorthand),
-              end: arena.rEnd(bang),
+          : arena.nullAssertionExpression(
+              end: arena.end(bang),
               operand: shorthand,
             ),
     );

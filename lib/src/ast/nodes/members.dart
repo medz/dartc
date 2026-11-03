@@ -33,18 +33,13 @@ final class FieldDeclaration({
 
   /// The variables, including their metadata and excluding the semicolon.
   required final VariableDeclarationList variables,
-}) extends ClassMember {
+}) extends ClassMember with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => variables,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => variables;
 }
 
 /// An operator symbol that can be declared by a Dart class.

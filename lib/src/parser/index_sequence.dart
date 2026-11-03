@@ -76,10 +76,10 @@ extension on _Parser {
 }
 
 // A property or postfix assertion starts a fresh receiver for the next '?['.
-bool? _selectorLink(AstArena arena, int? expression, int list) {
+bool? _selectorLink(SyntaxTreeBuilder arena, int? expression, int list) {
   var inherits = true;
   while (expression != null) {
-    switch (arena.kindAt(expression)) {
+    switch (arena.kind(expression)) {
       case .binaryExpression ||
           .castExpression ||
           .typeTestExpression ||
@@ -88,12 +88,13 @@ bool? _selectorLink(AstArena arena, int? expression, int list) {
         inherits = false;
       case .invocationExpression || .typeInstantiationExpression:
         break;
-      case .indexExpression when !arena.indexIsNullAware(expression):
+      case .indexExpression
+          when !arena.view<IndexExpression>(expression).isNullAware:
         break;
       default:
         return expression == list ? inherits : null;
     }
-    expression = arena.childIndex(expression, 0);
+    expression = arena.childAt(expression, 0);
   }
   return null;
 }

@@ -21,6 +21,48 @@ CompilationUnit parsed(String text) {
 
 void main() {
   test(
+    'reparsing selects the new snapshot and respects its language version',
+    () {
+      final uri = Uri.parse('memory:unit');
+      final first = parse('int f() => 1; class C;');
+      for (final (source, version) in [
+        (SourceFile(uri, first.tree.source.text), LanguageVersion.current),
+        (SourceFile(uri, 'int f() => ; class C;'), LanguageVersion.current),
+        (SourceFile(uri, first.tree.source.text), const LanguageVersion(3, 12)),
+        (
+          SourceFile(Uri.parse('memory:other'), 'int g() => 3;'),
+          LanguageVersion.current,
+        ),
+      ]) {
+        final next = first.reparse(source, languageVersion: version);
+        final fresh = parseCompilationUnit(
+          scan(source),
+          languageVersion: version,
+        );
+        expect(next.tree.source, same(source));
+        expect(next.languageVersion, version);
+        expect(
+          next.diagnostics.map((d) => (d.code, d.span)),
+          fresh.diagnostics.map((d) => (d.code, d.span)),
+        );
+        expect(
+          next.node.members.map((m) => m.text),
+          fresh.node.members.map((m) => m.text),
+        );
+        expect(next.reparse(source).languageVersion, version);
+      }
+      expect(
+        first.tryReparse(
+          SourceFile(uri, '// @dart=3.12\n${first.tree.source.text}'),
+        ),
+        isNull,
+      );
+      expect(first.node.members.first.text, 'int f() => 1;');
+      expect(first.diagnostics, isEmpty);
+    },
+  );
+
+  test(
     'recovers malformed identifier ranges without changing scanned tokens',
     () {
       for (final bad in ['\u001f', '\u007f', '\u0085', 'é', '😀']) {

@@ -9,6 +9,51 @@ ScanResult scanText(String text) =>
 
 void main() {
   group('scan', () {
+    test('a fragment stops at whitespace boundaries and completes a crossing string', () {
+      final source = SourceFile(
+        Uri.parse('memory:fragment'),
+        r'  "abc${x + 1}def" tail',
+      );
+      final spaces = scanFragment(SourceSpan(source, 0, 1));
+      expect(spaces.tokens.single.start, 1);
+      final fragment = scanFragment(SourceSpan(source, 2, 9));
+      expect(fragment.diagnostics, isEmpty);
+      expect(fragment.tokens.last.start, source.text.indexOf(' tail'));
+      expect(fragment.tokens.first.start, 2);
+      final bom = SourceFile(source.uri, '\ufeffx');
+      expect(scanFragment(SourceSpan(bom, 0, 0)).tokens.single.start, 0);
+    });
+
+    test('lexical recovery keeps the strict tokens and reports intact', () {
+      final input = scanText('x\u0085y');
+      final recovered = input.recovered();
+      expect(input.tokens.map((t) => t.lexeme), ['x', '\u0085', 'y', '']);
+      expect(recovered.tokens.map((t) => t.lexeme), ['x\u0085y', '']);
+      expect(recovered.diagnostics, orderedEquals(input.diagnostics));
+      expect(recovered.recovered(), same(recovered));
+    });
+
+    test(
+      'leading comments match a full scan up to the first language token',
+      () {
+        for (final header in ['', '\ufeff', '#!dart\r\n', ' \t']) {
+          final source = SourceFile(
+            Uri.parse('memory:header'),
+            '$header/* a /* b */ */ // c\r\nint x; // body',
+          );
+          final full = scan(source), leading = scan(source, comments: .leading);
+          final comments = leading.comments;
+          expect(comments.map((t) => t.lexeme), ['/* a /* b */ */', '// c']);
+          expect(
+            leading.tokens.map((t) => t.lexeme),
+            full.tokens.map((t) => t.lexeme),
+          );
+          expect(full.comments.length, comments.length + 1);
+          expect(comments.clear, throwsUnsupportedError);
+        }
+      },
+    );
+
     test('returns one EOF and preserves the source snapshot', () {
       for (final text in ['', ' \t\r\n', 'final answer = 42;']) {
         final source = SourceFile(Uri.parse('memory:test.dart'), text);
@@ -337,7 +382,8 @@ void main() {
       expect(next.hasErrors, isFalse);
       expect(next.comments, isEmpty);
       expect(first.diagnostics, hasLength(1));
-      expect(() => first.tokens.clear(), throwsUnsupportedError);
+      expect(first.tokens, isNot(isA<List<Token>>()));
+      first.tokens.toList().clear();
       expect(() => first.comments.clear(), throwsUnsupportedError);
       expect(() => first.diagnostics.clear(), throwsUnsupportedError);
     });

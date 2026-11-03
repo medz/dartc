@@ -71,10 +71,7 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
             );
           }
           parser.advance();
-          result = parser.arena.putEmptyFunctionBody(
-            start: start,
-            end: token.end,
-          );
+          result = parser.arena.emptyFunctionBody(start: start, end: token.end);
           return;
         case .arrow:
           if (parser.inGenerator) {
@@ -88,11 +85,11 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
           final reader = _ExpressionReader(parser);
           if (!reader.start()) yield reader;
           final expression = reader.result;
-          result = parser.arena.putExpressionFunctionBody(
+          result = parser.arena.expressionFunctionBody(
             start: start,
             end: declaration
                 ? parser.expect(.semicolon)
-                : parser.arena.rEnd(expression),
+                : parser.arena.end(expression),
             isAsync: parser.inAsync,
             expression: expression,
           );
@@ -100,13 +97,13 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
         case .leftBrace:
           final reader = _StatementReader(parser, requireBlock: true);
           yield reader;
-          final block = parser.arena.asBlockStatement(reader.result);
+          final block = reader.result;
           final modifier = parser.functionModifier;
           result = modifier == null
               ? block
-              : parser.arena.putModifiedBlockFunctionBody(
+              : parser.arena.modifiedBlockFunctionBody(
                   start: start,
-                  end: parser.arena.rEnd(block),
+
                   modifier: modifier,
                   block: block,
                 );
@@ -117,7 +114,7 @@ final class _BodyReader(final _Parser parser, {final bool declaration = true})
             'Expected a function body.',
             parser.current,
           );
-          result = parser.arena.putMissingFunctionBody(
+          result = parser.arena.missingFunctionBody(
             offset: parser.current.start,
           );
       }

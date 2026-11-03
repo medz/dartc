@@ -11,7 +11,7 @@ final class _CollectionPatternReader(
     if (parser.current.kind == .less) {
       final reader = _TypeReader(parser);
       if (!reader.start(arguments: true)) yield _TypeTask(reader);
-      arguments = parser.arena.asTypeArgumentListOrNull(reader.result);
+      arguments = reader.result;
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
       }
@@ -20,7 +20,7 @@ final class _CollectionPatternReader(
     if (opening.kind == .emptyBrackets ||
         opening.kind == .emptyBracketsAssign) {
       parser.consumeEmptyBrackets();
-      result = parser.arena.putListPattern(
+      result = parser.arena.listPattern(
         start: start,
         end: opening.start + 2,
         typeArguments: arguments,
@@ -60,9 +60,9 @@ final class _CollectionPatternReader(
           pattern = reader.result;
         }
         elements.add(
-          parser.arena.putRestPatternElement(
+          parser.arena.restPatternElement(
             start: token.start,
-            end: parser.arena.rEndOrNull(pattern) ?? token.end,
+            end: parser.arena.endOf(pattern) ?? token.end,
             pattern: pattern,
           ),
         );
@@ -80,12 +80,7 @@ final class _CollectionPatternReader(
         elements.add(
           key == null
               ? pattern
-              : parser.arena.putMapPatternEntry(
-                  start: parser.arena.rStart(key),
-                  end: parser.arena.rEnd(pattern),
-                  key: key,
-                  value: pattern,
-                ),
+              : parser.arena.mapPatternEntry(key: key, value: pattern),
         );
       }
       if (parser.current.kind != .comma) break;
@@ -94,13 +89,13 @@ final class _CollectionPatternReader(
     }
     final end = parser.expect(closing);
     result = isMap
-        ? parser.arena.putMapPattern(
+        ? parser.arena.mapPattern(
             start: start,
             end: end,
             typeArguments: arguments,
             elements: elements.cast<int>(),
           )
-        : parser.arena.putListPattern(
+        : parser.arena.listPattern(
             start: start,
             end: end,
             typeArguments: arguments,
@@ -136,9 +131,9 @@ final class _PatternFieldsReader(
       final pattern = reader.result;
       if (isNamed) {
         fields.add(
-          parser.arena.putNamedPatternField(
+          parser.arena.namedPatternField(
             start: token.start,
-            end: parser.arena.rEnd(pattern),
+
             name: name,
             pattern: pattern,
           ),

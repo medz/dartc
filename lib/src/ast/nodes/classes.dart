@@ -18,18 +18,13 @@ final class ExtendsClause({
 
   /// The written type, before name resolution.
   required final TypeAnnotation superclass,
-}) extends AstNode {
+}) extends AstNode with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => superclass,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => superclass;
 }
 
 /// The keyword introducing a list of superclass constraints or interfaces.

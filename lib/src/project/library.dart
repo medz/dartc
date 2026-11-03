@@ -5,13 +5,12 @@ import 'package:dartc/source.dart';
 
 /// A parsed file with its selected language version and source snapshot.
 ///
-/// Construct a unit from the result of [parseCompilationUnit].
+/// Construct a unit from the result of [parseCompilationUnit]. Its language
+/// version comes from that result.
 final class LibraryUnit({
-  required ParseResult<CompilationUnit> syntax,
+  /// The syntax, diagnostics and language version produced by the parser.
+  required final ParseResult<CompilationUnit> syntax,
   Uri? location,
-
-  /// The language version used to parse this file.
-  required final LanguageVersion languageVersion,
 
   /// The first file version override, or `null` when absent or malformed.
   final LanguageVersion? versionOverride,
@@ -24,8 +23,11 @@ final class LibraryUnit({
   /// The location read by the source provider, after package resolution.
   final Uri location = location ?? syntax.tree.source.uri;
 
+  /// The language version used to parse this file.
+  LanguageVersion get languageVersion => syntax.languageVersion;
+
   /// The indexed syntax tree produced by the parser.
-  final SyntaxTree tree = syntax.tree;
+  SyntaxTree get tree => syntax.tree;
 
   /// The typed root of [tree].
   final CompilationUnit node = syntax.node;

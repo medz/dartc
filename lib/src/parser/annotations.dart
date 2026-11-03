@@ -29,11 +29,11 @@ final class _MetadataReader(final _Parser parser) extends _Reader<List<int>> {
         final start = parser.current.start;
         final reader = _TypeReader(parser);
         if (!reader.start(arguments: true)) yield _TypeTask(reader);
-        typeArguments = parser.arena.asTypeArgumentListOrNull(reader.result);
+        typeArguments = reader.result;
         if (reader.failure case final failure?) {
           parser.error(failure.$1, failure.$2, failure.$3);
         }
-        typeArguments ??= parser.arena.putTypeArgumentList(
+        typeArguments ??= parser.arena.typeArgumentList(
           start: start,
           end: parser.current.start,
           arguments: const [],
@@ -45,9 +45,9 @@ final class _MetadataReader(final _Parser parser) extends _Reader<List<int>> {
       }
       int? arguments;
       final nameEnd =
-          parser.arena.rEndOrNull(constructorName) ??
-          parser.arena.rEndOrNull(typeArguments) ??
-          parser.arena.rEnd(name.last);
+          parser.arena.endOf(constructorName) ??
+          parser.arena.endOf(typeArguments) ??
+          parser.arena.end(name.last);
       if (parser.current.kind == .leftParen &&
           (parser.current.start == nameEnd || typeArguments != null)) {
         if (parser.current.start != nameEnd) {
@@ -68,13 +68,13 @@ final class _MetadataReader(final _Parser parser) extends _Reader<List<int>> {
         );
       }
       metadata.add(
-        parser.arena.putAnnotation(
+        parser.arena.annotation(
           start: at.start,
           end:
-              parser.arena.rEndOrNull(arguments) ??
-              parser.arena.rEndOrNull(constructorName) ??
-              parser.arena.rEndOrNull(typeArguments) ??
-              parser.arena.rEnd(name.last),
+              parser.arena.endOf(arguments) ??
+              parser.arena.endOf(constructorName) ??
+              parser.arena.endOf(typeArguments) ??
+              parser.arena.end(name.last),
           name: name,
           typeArguments: typeArguments,
           constructorName: constructorName,

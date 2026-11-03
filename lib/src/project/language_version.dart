@@ -2,12 +2,12 @@ import 'package:dartc/parser.dart';
 import 'package:dartc/scanner.dart';
 import 'package:dartc/source.dart';
 
-(LanguageVersion?, SourceSpan)? versionOverride(ScanResult input) {
-  final first = input.tokens.first.kind == .scriptTag
-      ? input.tokens[1].start
-      : input.tokens.first.start;
-  for (final comment in input.comments) {
-    if (comment.start >= first) break;
+(LanguageVersion?, SourceSpan)? versionOverride(List<Token> leadingComments) {
+  for (final comment in leadingComments) {
+    if (comment.kind != .lineComment ||
+        comment.source.text.startsWith('///', comment.start)) {
+      continue;
+    }
     final match = _marker.firstMatch(comment.lexeme);
     if (match == null) continue;
     final major = _component(match[1]!);

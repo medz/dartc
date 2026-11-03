@@ -5,7 +5,10 @@ extension on _Parser {
       languageVersion.major < major ||
       languageVersion.major == major && languageVersion.minor < minor;
 
-  ParseResult<T> finishResult<T extends AstNode>(int node) {
+  ParseResult<T> finishResult<T extends AstNode>(int node) =>
+      checkedResult(arena.finish(node));
+
+  ParseResult<T> checkedResult<T extends AstNode>(SyntaxTree tree) {
     if (before(2, 12) ||
         languageVersion.major == 2 && languageVersion.minor > 19 ||
         languageVersion.minor < 0 ||
@@ -16,9 +19,9 @@ extension on _Parser {
         Token(.invalid, source, 0, 0),
       );
     } else if (languageVersion != LanguageVersion.current) {
-      checkLanguageFeatures(node);
+      checkLanguageFeatures(tree.root);
     }
-    return ParseResult._(arena, node, diagnostics);
+    return ParseResult._(tree, diagnostics, languageVersion);
   }
 
   void requireFeature(AstNode node, int major, int minor, String feature) {
@@ -36,7 +39,7 @@ extension on _Parser {
     final pending = <(int, bool)>[(root, false)];
     while (pending.isNotEmpty) {
       final (id, called) = pending.removeLast();
-      final node = arena.at(id);
+      final node = arena.view(id);
       switch (node) {
         case TypeAliasDeclaration(:final type)
             when type is! FunctionTypeAnnotation:
@@ -153,7 +156,7 @@ extension on _Parser {
           node is InvocationExpression ||
           (called && node is PropertyAccessExpression);
       for (var i = node.childCount - 1; i >= 0; i--) {
-        pending.add((arena.childIndex(id, i), i == 0 && firstIsTarget));
+        pending.add((arena.childAt(id, i), i == 0 && firstIsTarget));
       }
     }
   }

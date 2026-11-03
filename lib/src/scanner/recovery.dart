@@ -19,9 +19,8 @@ _InvalidRole _invalidRole(int code) => switch (code) {
   _ => .other,
 };
 
-List<Token> tokensForParsing(ScanResult input, List<Diagnostic> diagnostics) {
-  final tokens = input._parserTokens ?? input.tokens;
-  if (!input.hasErrors) return tokens;
+List<Token> _recoverTokens(ScanResult input, List<Diagnostic> diagnostics) {
+  final tokens = input.tokens._items;
   final first = tokens.indexWhere(
     (token) =>
         token.kind == .invalid &&
@@ -72,7 +71,7 @@ List<Token> tokensForParsing(ScanResult input, List<Diagnostic> diagnostics) {
             if (fragment == null) {
               final recovered = _Scanner(input.source, recovering: true).scan();
               includeErrors(recovered.diagnostics);
-              return recovered.tokens;
+              return recovered.tokens._items;
             }
             for (final token in fragment._tokens) {
               emit(token);

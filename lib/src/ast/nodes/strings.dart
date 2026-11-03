@@ -94,16 +94,11 @@ final class StringInterpolation({
 
   /// Whether the interpolation uses `${...}` rather than `$name` or `$this`.
   required final bool isBraced,
-}) extends StringPart {
+}) extends StringPart with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => expression,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => expression;
 }

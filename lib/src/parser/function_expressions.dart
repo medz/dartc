@@ -8,7 +8,7 @@ final class _ClosureReader(final _Parser parser, final int start)
     if (parser.current.kind == .less) {
       final reader = _TypeReader(parser);
       if (!reader.start(parameters: true)) yield _TypeTask(reader);
-      typeParameters = parser.arena.asTypeParameterListOrNull(reader.result);
+      typeParameters = reader.result;
       if (reader.failure case final failure?) {
         parser.error(failure.$1, failure.$2, failure.$3);
       }
@@ -17,9 +17,9 @@ final class _ClosureReader(final _Parser parser, final int start)
     yield parameters;
     final body = _BodyReader(parser, declaration: false);
     yield body;
-    result = parser.arena.putFunctionExpression(
+    result = parser.arena.functionExpression(
       start: start,
-      end: parser.arena.rEnd(body.result),
+
       typeParameters: typeParameters,
       parameters: parameters.result,
       body: body.result,
@@ -59,7 +59,7 @@ final class _LocalFunctionReader(
     if (!untyped && parser.canStartTypeBeforeName()) {
       final reader = _TypeReader(parser, beforeFunction: true);
       if (!reader.start()) yield _TypeTask(reader);
-      parsed = parser.arena.asTypeAnnotationOrNull(reader.result);
+      parsed = reader.result;
     }
     if (parsed != null && parser.current.kind.isIdentifier) {
       returnType = parsed;
@@ -73,7 +73,7 @@ final class _LocalFunctionReader(
     if (parser.current.kind == .less) {
       final reader = _TypeReader(parser);
       if (!reader.start(parameters: true)) yield _TypeTask(reader);
-      typeParameters = parser.arena.asTypeParameterListOrNull(reader.result);
+      typeParameters = reader.result;
       if (typeParameters == null) return;
     }
     hasHead = parser.functionBodyFollows(parser.cursor);
@@ -99,9 +99,9 @@ final class _LocalFunctionReader(
     yield parameters;
     final body = _BodyReader(parser);
     yield body;
-    result = parser.arena.putLocalFunctionDeclaration(
+    result = parser.arena.localFunctionDeclaration(
       start: start,
-      end: parser.arena.rEnd(body.result),
+
       metadata: metadata,
       returnType: returnType,
       name: name!,

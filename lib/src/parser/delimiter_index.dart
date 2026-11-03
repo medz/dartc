@@ -4,7 +4,7 @@ import 'package:dartc/scanner.dart';
 
 // Opening tokens point past their closer. A zero link means no complete pair.
 final class DelimiterIndex {
-  DelimiterIndex(List<Token> tokens)
+  DelimiterIndex(TokenSequence tokens)
     : _links = tokens.length < 1 << 30
           ? Uint32List(tokens.length)
           : Uint64List(tokens.length) {
@@ -95,7 +95,7 @@ final class DelimiterIndex {
   }
 }
 
-bool _plainQuestion(List<Token> tokens, int i) {
+bool _plainQuestion(TokenSequence tokens, int i) {
   final left = tokens[i - 1].kind;
   final right = tokens[i + 1].kind;
   if (left == .rightBracket && right != .leftBracket) return true;

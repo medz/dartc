@@ -26,6 +26,19 @@ final class _Words(int cap) {
     cells = Uint32List(size)..setRange(0, keep, cells);
   }
 
+  void addPair(int first, int second) {
+    final p = reserve(2);
+    cells[p] = first;
+    cells[p + 1] = second;
+  }
+
+  void addTriple(int first, int second, int third) {
+    final p = reserve(3);
+    cells[p] = first;
+    cells[p + 1] = second;
+    cells[p + 2] = third;
+  }
+
   void add(int value) {
     final p = reserve(1);
     cells[p] = value;
@@ -33,79 +46,81 @@ final class _Words(int cap) {
 }
 
 // Edges become visible together after every child has passed its range check.
-final class _Children(final AstArena arena, final int start, final int end) {
-  int _next = arena.edges.used;
+final class _Children(
+  final SyntaxTreeBuilder arena,
+  final int start,
+  final int end,
+) {
+  int _next = arena._edges.used;
   int _previous = start;
   this {
     arena._checkRange(start, end);
   }
-  void add(int? child) {
+  void add(int? child, _ChildType expected) {
     if (child == null) return;
-    _previous = arena._checkEdge(child, _previous, end);
-    final edges = arena.edges;
+    _previous = arena._checkEdge(child, _previous, end, expected);
+    final edges = arena._edges;
     if (_next == edges.cells.length) edges._grow(_next + 1, _next);
     edges.cells[_next++] = child;
   }
 
-  void addAll(List<int> children) {
-    for (var i = 0; i < children.length; i++) {
-      add(children[i]);
+  int addAll(List<int> children, _ChildType expected) {
+    arena._writable = false;
+    try {
+      final length = RangeError.checkNotNegative(children.length, 'length');
+      final edges = arena._edges;
+      final limit = _next + length;
+      if (limit > edges.cells.length) edges._grow(limit, _next);
+      for (var i = 0; i < length; i++) {
+        final child = children[i];
+        _previous = arena._checkEdge(child, _previous, end, expected);
+        edges.cells[_next++] = child;
+      }
+      return length;
+    } finally {
+      arena._writable = true;
     }
   }
 
   int finish(SyntaxKind kind) {
-    arena.edges.used = _next;
+    arena._edges.used = _next;
     return arena._finishRow(kind, start, end);
   }
 }
 
-final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
-  // A name can produce both an identifier row and an expression or type row.
-  factory AstArena(SourceFile source, int tokenCount) =>
-      AstArena._(source, tokenCount + tokenCount ~/ 6, tokenCount);
+/// Builds an indexed syntax tree for one source snapshot.
+///
+/// Each node method returns a local index. Supply children before their parent,
+/// in source order. Their kinds and ranges are checked on insertion.
+/// Method names match the typed node classes. Child indices must belong to this
+/// builder. An integer from another builder denotes the local row with that
+/// number. Use [indexOf] to check the owner of a typed node.
+/// [finish] seals the builder and publishes an immutable tree.
+///
+/// {@example /example/indexed_syntax.dart#build}
+final class SyntaxTreeBuilder._(
+  final SourceFile source,
+  int capacity,
+  int tokenCount,
+) with _SyntaxAccess {
+  @override
+  SyntaxTreeBuilder get _data => this;
+  bool _writable = true;
+  (SyntaxTree, int, int, int)? _replacement;
 
-  /// Copies complete rows through [last] into an arena owned by [source].
-  factory AstArena.prefix(
-    SyntaxTree tree,
-    SourceFile source,
-    int last,
-    int suffixTokens,
-  ) {
-    final old = tree._data;
-    final rows = last + 1;
-    final edges = old.edgeOffsets[rows];
-    final fields = old.offsets[rows];
-    return _copy(
-      old,
+  /// Creates a builder for [source]. [expectedTokens] is an optional capacity hint.
+  factory SyntaxTreeBuilder(SourceFile source, {int expectedTokens = 0}) {
+    RangeError.checkNotNegative(expectedTokens, 'expectedTokens');
+    expectedTokens = expectedTokens.clamp(0, source.length + 1);
+    return SyntaxTreeBuilder._(
       source,
-      rows,
-      edges,
-      fields,
-      rows + suffixTokens + suffixTokens ~/ 6,
-      fields + suffixTokens,
+      expectedTokens + expectedTokens ~/ 8,
+      expectedTokens - expectedTokens ~/ 4,
     );
   }
 
-  /// Keeps row indices outside the rewritten body stable in a private copy.
-  factory AstArena.edit(SyntaxTree tree, SourceFile source, int first) {
-    final old = tree._data;
-    final arena = _copy(
-      old,
-      source,
-      old.count,
-      old.edges.used,
-      old.fields.used,
-      old.count,
-      old.fields.used,
-    );
-    arena.count = first;
-    arena.edges.used = old.edgeOffsets[first];
-    arena.fields.used = old.offsets[first];
-    return arena;
-  }
-
-  static AstArena _copy(
-    AstArena old,
+  static SyntaxTreeBuilder _copy(
+    SyntaxTreeBuilder old,
     SourceFile source,
     int rows,
     int edges,
@@ -113,77 +128,159 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int rowCapacity,
     int fieldCapacity,
   ) {
-    final arena = AstArena._(source, rowCapacity, fieldCapacity);
-    arena.tags.setRange(0, rows, old.tags);
-    arena.starts.setRange(0, rows, old.starts);
-    arena.ends.setRange(0, rows, old.ends);
-    arena.offsets.setRange(0, rows, old.offsets);
-    arena.edgeOffsets.setRange(0, rows + 1, old.edgeOffsets);
-    arena.edges.reserve(edges);
-    arena.edges.cells.setRange(0, edges, old.edges.cells);
-    arena.fields.reserve(fields);
-    arena.fields.cells.setRange(0, fields, old.fields.cells);
-    arena.count = rows;
+    final arena = SyntaxTreeBuilder._(source, rowCapacity, fieldCapacity);
+    arena._tags.setRange(0, rows, old._tags);
+    if (old._rangeShift == arena._rangeShift) {
+      arena._ranges.setRange(0, rows << arena._rangeShift, old._ranges);
+    } else {
+      for (var i = 0; i < rows; i++) {
+        arena._setRange(i, old._start(i), old._end(i));
+      }
+    }
+    arena._offsets.setRange(0, rows, old._offsets);
+    arena._edgeOffsets.setRange(0, rows + 1, old._edgeOffsets);
+    arena._edges.reserve(edges);
+    arena._edges.cells.setRange(0, edges, old._edges.cells);
+    arena._fields.reserve(fields);
+    arena._fields.cells.setRange(0, fields, old._fields.cells);
+    arena._count = rows;
     return arena;
   }
 
-  bool finishEdit(SyntaxTree tree, int oldRoot, int newRoot) {
+  /// Restores the rest of the tree if [replacement] preserves its referenced rows.
+  ///
+  /// Seals the builder on success. Returns null when a different layout
+  /// requires rebuilding the parent.
+  SyntaxTree? finishReplacement(int replacement) {
+    final edit = _replacement;
+    _checkWritable();
+    if (edit == null) throw StateError('No pending replacement.');
+    final (tree, node, first, change) = edit;
     final old = tree._data;
-    if (oldRoot != newRoot ||
-        old.edgeOffsets[oldRoot + 1] != edges.used ||
-        old.offsets[oldRoot + 1] != fields.used) {
-      return false;
+    if (replacement != node ||
+        _count != node + 1 ||
+        node + 1 >= old._count ||
+        old._edgeOffsets[node + 1] != _edges.used ||
+        old._offsets[node + 1] != _fields.used) {
+      return null;
     }
-    final delta = source.length - old.source.length;
-    if (delta != 0) {
-      // Payload positions are end-relative. Only row ranges need to move.
-      final boundary = old.ends[oldRoot];
-      for (var i = oldRoot + 1; i < old.count; i++) {
-        if (starts[i] >= boundary) starts[i] += delta;
-        if (ends[i] >= boundary) ends[i] += delta;
+    final delta = source.length - tree.source.length;
+    int move(int offset) {
+      if (offset <= change || delta == 0) return offset;
+      final shifted = offset + delta;
+      return shifted < change ? change : shifted;
+    }
+
+    // Other rows may reference any of these indices, including shared children.
+    for (var i = first; i <= node; i++) {
+      if (_tags[i] != old._tags[i] ||
+          _start(i) != move(old._start(i)) ||
+          _end(i) != move(old._end(i))) {
+        return null;
       }
     }
-    count = old.count;
-    edges.used = old.edges.used;
-    fields.used = old.fields.used;
-    return true;
+    if (delta != 0) {
+      for (var i = node + 1; i < old._count; i++) {
+        final oldStart = old._start(i), oldEnd = old._end(i);
+        if (oldStart > change && oldStart + delta >= change) {
+          _setRange(i, oldStart + delta, oldEnd + delta);
+          continue;
+        }
+        final kind = old._kindAt(i);
+        final start = move(oldStart);
+        final end = kind == .compilationUnit ? source.length : move(oldEnd);
+        if (end - start != oldEnd - oldStart &&
+            (kind == .functionParameterSuffix ||
+                kind == .functionTypeAnnotation ||
+                kind == .namedTypeAnnotation ||
+                kind == .recordTypeAnnotation)) {
+          return null;
+        }
+        _setRange(i, start, end);
+      }
+    }
+    _count = old._count;
+    _edges.used = old._edges.used;
+    _fields.used = old._fields.used;
+    _replacement = null;
+    return finish(tree.root);
   }
 
-  SyntaxTree finish(int root) => SyntaxTree._(this, rawRef(root));
+  /// Visits a subtree in depth-first source order.
+  Iterable<int> walk(int node) => _IndexWalk(this, _check(node));
 
-  int count = 0;
-  Uint8List tags = Uint8List(capacity);
-  Uint32List starts = Uint32List(capacity),
-      ends = Uint32List(capacity),
-      edgeOffsets = Uint32List(capacity + 1),
-      offsets = Uint32List(capacity);
-  final edges = _Words(capacity), fields = _Words(tokenCount);
-  void grow() {
-    final n = _nextCapacity(count);
-    tags = Uint8List(n)..setRange(0, count, tags);
-    starts = Uint32List(n)..setRange(0, count, starts);
-    ends = Uint32List(n)..setRange(0, count, ends);
-    offsets = Uint32List(n)..setRange(0, count, offsets);
-    edgeOffsets = Uint32List(n + 1)..setRange(0, count + 1, edgeOffsets);
+  /// The source text covered by [node].
+  String text(int node) {
+    _check(node);
+    return source.text.substring(_start(node), _end(node));
+  }
+
+  /// Publishes the tree rooted at [root] and closes this builder to writes.
+  SyntaxTree finish(int root) {
+    if (!_writable || _replacement != null) {
+      throw StateError('The builder cannot finish.');
+    }
+    final node = _check(root);
+    _writable = false;
+    return SyntaxTree._(this, node);
+  }
+
+  int _count = 0;
+  Uint8List _tags = Uint8List(capacity);
+  // A short snapshot fits both UTF-16 offsets in one 32-bit word.
+  final int _rangeShift = source.length <= 0xffff ? 0 : 1;
+  Uint32List _ranges = Uint32List(
+    capacity << (source.length <= 0xffff ? 0 : 1),
+  );
+  Uint32List _edgeOffsets = Uint32List(capacity + 1),
+      _offsets = Uint32List(capacity);
+  int _start(int row) =>
+      _rangeShift == 0 ? _ranges[row] >>> 16 : _ranges[row * 2];
+  int _end(int row) =>
+      _rangeShift == 0 ? _ranges[row] & 0xffff : _ranges[row * 2 + 1];
+  void _setRange(int row, int start, int end) {
+    if (_rangeShift == 0) {
+      _ranges[row] = start << 16 | end;
+    } else {
+      _ranges[row * 2] = start;
+      _ranges[row * 2 + 1] = end;
+    }
+  }
+
+  final _edges = _Words(capacity), _fields = _Words(tokenCount);
+  void _grow() {
+    if (_count == _nil) {
+      throw RangeError('Syntax tree exceeds 32-bit node indices');
+    }
+    final n = _nextCapacity(_count).clamp(0, _nil);
+    _tags = Uint8List(n)..setRange(0, _count, _tags);
+    _ranges = Uint32List(n << _rangeShift)
+      ..setRange(0, _count << _rangeShift, _ranges);
+    _offsets = Uint32List(n)..setRange(0, _count, _offsets);
+    _edgeOffsets = Uint32List(n + 1)..setRange(0, _count + 1, _edgeOffsets);
+  }
+
+  void _checkWritable() {
+    if (!_writable) throw StateError('The syntax builder is closed to writes.');
   }
 
   void _checkRange(int start, int end) {
+    _checkWritable();
     if (start < 0 || start > end || end > source.length) {
       RangeError.checkValidRange(start, end, source.length);
     }
-    if (end >= _nil || count == _nil) {
+    if (end >= _nil) {
       throw RangeError('Syntax range or node index exceeds 32 bits');
     }
   }
 
   int _finishRow(SyntaxKind kind, int start, int end) {
-    if (count == tags.length) grow();
-    final row = count++;
-    tags[row] = kind.index;
-    starts[row] = start;
-    ends[row] = end;
-    edgeOffsets[row + 1] = edges.used;
-    offsets[row] = fields.used;
+    if (_count == _tags.length) _grow();
+    final row = _count++;
+    _tags[row] = kind.index;
+    _setRange(row, start, end);
+    _edgeOffsets[row + 1] = _edges.used;
+    _offsets[row] = _fields.used;
     return row;
   }
 
@@ -192,96 +289,140 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     return _finishRow(kind, start, end);
   }
 
-  int _checkEdge(int id, int start, int end) {
-    if (id < 0 || id >= count) {
-      RangeError.checkValidIndex(id, this, 'child', count);
+  void _checkKind(int id, _ChildType expected) {
+    if (id < 0 || id >= _count) {
+      RangeError.checkValidIndex(id, this, 'child', _count);
     }
-    final childEnd = ends[id];
-    if (starts[id] < start || childEnd > end) {
+    final tag = _tags[id];
+    if (!expected.accepts(tag)) {
+      throw ArgumentError.value(
+        id,
+        'child',
+        'Expected ${expected.name}, found ${SyntaxKind.values[tag].name}.',
+      );
+    }
+  }
+
+  int _checkEdge(int id, int start, int end, _ChildType expected) {
+    _checkKind(id, expected);
+    final childEnd = _end(id);
+    if (_start(id) < start || childEnd > end) {
       throw ArgumentError('Child outside range');
     }
     return childEnd;
   }
 
-  int _appendOne(SyntaxKind kind, int start, int end, int id) {
+  int _cover(
+    SyntaxKind kind,
+    int first,
+    _ChildType firstKind, [
+    int? last,
+    _ChildType? lastKind,
+  ]) {
+    _checkWritable();
+    _checkKind(first, firstKind);
+    var end = _end(first);
+    if (last == null) {
+      _edges.add(first);
+    } else {
+      _checkKind(last, lastKind!);
+      if (_start(last) < end) throw ArgumentError('Child ranges overlap.');
+      end = _end(last);
+      final slot = _edges.reserve(2);
+      _edges.cells[slot] = first;
+      _edges.cells[slot + 1] = last;
+    }
+    return _finishRow(kind, _start(first), end);
+  }
+
+  int _appendOne(
+    SyntaxKind kind,
+    int start,
+    int end,
+    int id,
+    _ChildType expected,
+  ) {
     _checkRange(start, end);
-    _checkEdge(id, start, end);
-    edges.add(id);
+    _checkEdge(id, start, end, expected);
+    _edges.add(id);
     return _finishRow(kind, start, end);
   }
 
-  int _appendTwo(SyntaxKind kind, int start, int end, int first, int second) {
+  int _appendTwo(
+    SyntaxKind kind,
+    int start,
+    int end,
+    int first,
+    _ChildType firstKind,
+    int second,
+    _ChildType secondKind,
+  ) {
     _checkRange(start, end);
-    final next = _checkEdge(first, start, end);
-    _checkEdge(second, next, end);
-    final base = edges.reserve(2);
-    edges.cells[base] = first;
-    edges.cells[base + 1] = second;
+    final next = _checkEdge(first, start, end, firstKind);
+    _checkEdge(second, next, end, secondKind);
+    final base = _edges.reserve(2);
+    _edges.cells[base] = first;
+    _edges.cells[base + 1] = second;
     return _finishRow(kind, start, end);
   }
 
-  int childCount(int row) => edgeOffsets[row + 1] - edgeOffsets[row];
-  int childIndex(int row, int index) => edges.cells[edgeOffsets[row] + index];
-  int trailingChild(int row, int fromEnd) =>
-      edges.cells[edgeOffsets[row + 1] - fromEnd];
-  int? optionalChild(int row, int index, int fullCount) =>
-      childCount(row) == fullCount ? childIndex(row, index) : null;
+  int _childCount(int row) => _edgeOffsets[row + 1] - _edgeOffsets[row];
+  int _childIndex(int row, int index) =>
+      _edges.cells[_edgeOffsets[row] + index];
+  int _trailingChild(int row, int fromEnd) =>
+      _edges.cells[_edgeOffsets[row + 1] - fromEnd];
+  int? _optionalChild(int row, int index, int fullCount) =>
+      _childCount(row) == fullCount ? _childIndex(row, index) : null;
 
   int _appendOptional(
     SyntaxKind kind,
     int start,
     int end,
-    int? a, [
+    int? a,
+    _ChildType aKind, [
     int? b,
+    _ChildType? bKind,
     int? c,
+    _ChildType? cKind,
   ]) {
     _checkRange(start, end);
     var next = start;
-    if (a != null) next = _checkEdge(a, next, end);
-    if (b != null) next = _checkEdge(b, next, end);
-    if (c != null) _checkEdge(c, next, end);
+    if (a != null) next = _checkEdge(a, next, end, aKind);
+    if (b != null) next = _checkEdge(b, next, end, bKind!);
+    if (c != null) _checkEdge(c, next, end, cKind!);
     final length =
         (a == null ? 0 : 1) + (b == null ? 0 : 1) + (c == null ? 0 : 1);
-    var slot = edges.reserve(length);
-    if (a != null) edges.cells[slot++] = a;
-    if (b != null) edges.cells[slot++] = b;
-    if (c != null) edges.cells[slot] = c;
+    var slot = _edges.reserve(length);
+    if (a != null) _edges.cells[slot++] = a;
+    if (b != null) _edges.cells[slot++] = b;
+    if (c != null) _edges.cells[slot] = c;
     return _finishRow(kind, start, end);
   }
 
-  Uint32List childrenOf(int row) => Uint32List.sublistView(
-    edges.cells,
-    edgeOffsets[row],
-    edgeOffsets[row + 1],
-  );
-
-  int _appendList(SyntaxKind kind, int start, int end, List<int> children) {
-    _checkRange(start, end);
-    final base = edges.used;
-    try {
-      edges.reserve(children.length);
-      var previous = start;
-      for (var i = 0; i < children.length; i++) {
-        final id = children[i];
-        previous = _checkEdge(id, previous, end);
-        edges.cells[base + i] = id;
-      }
-    } catch (_) {
-      edges.used = base;
-      rethrow;
-    }
-    return _finishRow(kind, start, end);
+  int _appendList(
+    SyntaxKind kind,
+    int start,
+    int end,
+    List<int> items,
+    _ChildType expected,
+  ) {
+    final children = _Children(this, start, end)..addAll(items, expected);
+    return children.finish(kind);
   }
 
-  int putAdjacentStringsExpression({
+  int adjacentStringsExpression({
     required int start,
     required int end,
     required List<int> strings,
-  }) {
-    return _appendList(.adjacentStringsExpression, start, end, strings);
-  }
+  }) => _appendList(
+    .adjacentStringsExpression,
+    start,
+    end,
+    strings,
+    .stringExpression,
+  );
 
-  int putAnnotation({
+  int annotation({
     required int start,
     required int end,
     required List<int> name,
@@ -289,176 +430,164 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? constructorName,
     int? arguments,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(name)
-      ..add(typeArguments)
-      ..add(constructorName)
-      ..add(arguments);
+    final children = _Children(this, start, end);
+    final nameCount = children.addAll(name, .identifier);
+    children.add(typeArguments, .typeArgumentList);
+    children.add(constructorName, .identifier);
+    children.add(arguments, .argumentList);
     final row = children.finish(.annotation);
-    final fieldOffset = fields.reserve(4);
-    fields.cells[fieldOffset + 0] = rawRef(typeArguments);
-    fields.cells[fieldOffset + 1] = rawRef(constructorName);
-    fields.cells[fieldOffset + 2] = rawRef(arguments);
-    fields.cells[fieldOffset + 3] = name.length;
+    final fieldOffset = _fields.reserve(4);
+    _fields.cells[fieldOffset] = typeArguments ?? _nil;
+    _fields.cells[fieldOffset + 1] = constructorName ?? _nil;
+    _fields.cells[fieldOffset + 2] = arguments ?? _nil;
+    _fields.cells[fieldOffset + 3] = nameCount;
     return row;
   }
 
-  int putArgument({
-    required int start,
-    required int end,
-    int? name,
-    required int value,
-  }) {
-    return _appendOptional(.argument, start, end, name, value);
-  }
+  /// Adds an argument spanning its optional name and its value.
+  int argument({int? name, required int value}) => name == null
+      ? _cover(.argument, value, .expression)
+      : _cover(.argument, name, .identifier, value, .expression);
 
-  int putArgumentList({
+  int argumentList({
     required int start,
     required int end,
     required List<int> arguments,
-  }) {
-    return _appendList(.argumentList, start, end, arguments);
-  }
+  }) => _appendList(.argumentList, start, end, arguments, .argument);
 
-  int putAssertInitializer({
+  int assertInitializer({
     required int start,
     required int end,
     required int condition,
     int? message,
-  }) {
-    return _appendOptional(.assertInitializer, start, end, condition, message);
-  }
+  }) => _appendOptional(
+    .assertInitializer,
+    start,
+    end,
+    condition,
+    .expression,
+    message,
+    .expression,
+  );
 
-  int putAssertStatement({
+  int assertStatement({
     required int start,
     required int end,
     required int condition,
     int? message,
-  }) {
-    return _appendOptional(.assertStatement, start, end, condition, message);
-  }
+  }) => _appendOptional(
+    .assertStatement,
+    start,
+    end,
+    condition,
+    .expression,
+    message,
+    .expression,
+  );
 
-  int putAssignmentExpression({
-    required int start,
-    required int end,
+  int assignmentExpression({
     required int left,
     required AssignmentOperator op,
     required int right,
   }) {
-    final row = _appendTwo(.assignmentExpression, start, end, left, right);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = op.index;
+    final row = _cover(
+      .assignmentExpression,
+      left,
+      .expression,
+      right,
+      .expression,
+    );
+    _fields.add(op.index);
     return row;
   }
 
-  int putAwaitExpression({
-    required int start,
-    required int end,
-    required int expression,
-  }) {
-    return _appendOne(.awaitExpression, start, end, expression);
+  int awaitExpression({required int start, required int expression}) {
+    final end = this.end(expression);
+    return _appendOne(.awaitExpression, start, end, expression, .expression);
   }
 
-  int putBinaryExpression({
-    required int start,
-    required int end,
+  int binaryExpression({
     required int left,
     required BinaryOperator op,
     required int right,
   }) {
-    final row = _appendTwo(.binaryExpression, start, end, left, right);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = op.index;
+    final row = _cover(
+      .binaryExpression,
+      left,
+      .expression,
+      right,
+      .expression,
+    );
+    _fields.add(op.index);
     return row;
   }
 
-  int putBlockStatement({
+  int blockStatement({
     required int start,
     required int end,
     required List<int> statements,
-  }) {
-    return _appendList(.blockStatement, start, end, statements);
-  }
+  }) => _appendList(.blockStatement, start, end, statements, .statement);
 
-  int putBreakStatement({required int start, required int end, int? label}) {
-    return _appendOptional(.breakStatement, start, end, label);
-  }
+  int breakStatement({required int start, required int end, int? label}) =>
+      _appendOptional(.breakStatement, start, end, label, .identifier);
 
-  int putCascadeExpression({
-    required int start,
+  int cascadeExpression({
     required int end,
     required int target,
     bool isNullAware = false,
     required List<int> sections,
   }) {
-    final children = _Children(this, start, end)
-      ..add(target)
-      ..addAll(sections);
+    final start = this.start(target);
+    final children = _Children(this, start, end);
+    children.add(target, .expression);
+    final sectionsCount = children.addAll(sections, .expression);
     final row = children.finish(.cascadeExpression);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(target);
-    fields.cells[fieldOffset + 1] = isNullAware ? 1 : 0;
-    fields.cells[fieldOffset + 2] = sections.length;
+    _fields.addTriple(target, isNullAware ? 1 : 0, sectionsCount);
     return row;
   }
 
-  int putCascadeIndexExpression({
+  int cascadeIndexExpression({
     required int start,
     required int end,
     required int index,
-  }) {
-    return _appendOne(.cascadeIndexExpression, start, end, index);
-  }
+  }) => _appendOne(.cascadeIndexExpression, start, end, index, .expression);
 
-  int putCascadePropertyExpression({
+  int cascadePropertyExpression({
     required int start,
     required int end,
     required int property,
-  }) {
-    return _appendOne(.cascadePropertyExpression, start, end, property);
-  }
+  }) =>
+      _appendOne(.cascadePropertyExpression, start, end, property, .identifier);
 
-  int putCastExpression({
-    required int start,
-    required int end,
-    required int expression,
-    required int type,
-  }) {
-    return _appendTwo(.castExpression, start, end, expression, type);
-  }
+  int castExpression({required int expression, required int type}) =>
+      _cover(.castExpression, expression, .expression, type, .typeAnnotation);
 
-  int putCastPattern({
-    required int start,
-    required int end,
-    required int pattern,
-    required int type,
-  }) {
-    return _appendTwo(.castPattern, start, end, pattern, type);
-  }
+  int castPattern({required int pattern, required int type}) =>
+      _cover(.castPattern, pattern, .dartPattern, type, .typeAnnotation);
 
-  int putCatchClause({
+  int catchClause({
     required int start,
-    required int end,
     int? exceptionType,
     int? exceptionParameter,
     int? stackTraceParameter,
     required int body,
   }) {
-    final children = _Children(this, start, end)
-      ..add(exceptionType)
-      ..add(exceptionParameter)
-      ..add(stackTraceParameter)
-      ..add(body);
+    final end = this.end(body);
+    final children = _Children(this, start, end);
+    children.add(exceptionType, .typeAnnotation);
+    children.add(exceptionParameter, .identifier);
+    children.add(stackTraceParameter, .identifier);
+    children.add(body, .blockStatement);
     final row = children.finish(.catchClause);
-    final fieldOffset = fields.reserve(4);
-    fields.cells[fieldOffset + 0] = rawRef(exceptionType);
-    fields.cells[fieldOffset + 1] = rawRef(exceptionParameter);
-    fields.cells[fieldOffset + 2] = rawRef(stackTraceParameter);
-    fields.cells[fieldOffset + 3] = rawRef(body);
+    final fieldOffset = _fields.reserve(4);
+    _fields.cells[fieldOffset] = exceptionType ?? _nil;
+    _fields.cells[fieldOffset + 1] = exceptionParameter ?? _nil;
+    _fields.cells[fieldOffset + 2] = stackTraceParameter ?? _nil;
+    _fields.cells[fieldOffset + 3] = body;
     return row;
   }
 
-  int putClassDeclaration({
+  int classDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -474,37 +603,38 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     bool isSemicolonBody = false,
     List<int> members = const [],
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(name)
-      ..add(typeParameters)
-      ..add(primaryConstructorName)
-      ..add(primaryParameters)
-      ..add(extendsClause)
-      ..add(withClause)
-      ..add(implementsClause)
-      ..addAll(members);
+    final copiedModifiers = _freeze(modifiers);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(name, .identifier);
+    children.add(typeParameters, .typeParameterList);
+    children.add(primaryConstructorName, .identifier);
+    children.add(primaryParameters, .formalParameterList);
+    children.add(extendsClause, .extendsClause);
+    children.add(withClause, .typeListClause);
+    children.add(implementsClause, .typeListClause);
+    final membersCount = children.addAll(members, .classMember);
     final row = children.finish(.classDeclaration);
-    final fieldOffset = fields.reserve(12 + modifiers.length);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 2] = isConst ? 1 : 0;
-    fields.cells[fieldOffset + 3] = rawRef(primaryConstructorName);
-    fields.cells[fieldOffset + 4] = rawRef(primaryParameters);
-    fields.cells[fieldOffset + 5] = rawRef(extendsClause);
-    fields.cells[fieldOffset + 6] = rawRef(withClause);
-    fields.cells[fieldOffset + 7] = rawRef(implementsClause);
-    fields.cells[fieldOffset + 8] = isSemicolonBody ? 1 : 0;
-    fields.cells[fieldOffset + 9] = metadata.length;
-    fields.cells[fieldOffset + 10] = modifiers.length;
-    fields.cells[fieldOffset + 11] = members.length;
-    for (var i = 0; i < modifiers.length; i++) {
-      fields.cells[fieldOffset + 12 + i] = modifiers[i].index;
+    final fieldOffset = _fields.reserve(12 + copiedModifiers.length);
+    _fields.cells[fieldOffset] = name;
+    _fields.cells[fieldOffset + 1] = typeParameters ?? _nil;
+    _fields.cells[fieldOffset + 2] = isConst ? 1 : 0;
+    _fields.cells[fieldOffset + 3] = primaryConstructorName ?? _nil;
+    _fields.cells[fieldOffset + 4] = primaryParameters ?? _nil;
+    _fields.cells[fieldOffset + 5] = extendsClause ?? _nil;
+    _fields.cells[fieldOffset + 6] = withClause ?? _nil;
+    _fields.cells[fieldOffset + 7] = implementsClause ?? _nil;
+    _fields.cells[fieldOffset + 8] = isSemicolonBody ? 1 : 0;
+    _fields.cells[fieldOffset + 9] = metadataCount;
+    _fields.cells[fieldOffset + 10] = copiedModifiers.length;
+    _fields.cells[fieldOffset + 11] = membersCount;
+    for (var i = 0; i < copiedModifiers.length; i++) {
+      _fields.cells[fieldOffset + 12 + i] = copiedModifiers[i].index;
     }
     return row;
   }
 
-  int putClassTypeAliasDeclaration({
+  int classTypeAliasDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -515,29 +645,30 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int withClause,
     int? implementsClause,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(name)
-      ..add(typeParameters)
-      ..add(superclass)
-      ..add(withClause)
-      ..add(implementsClause);
+    final copiedModifiers = _freeze(modifiers);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(name, .identifier);
+    children.add(typeParameters, .typeParameterList);
+    children.add(superclass, .typeAnnotation);
+    children.add(withClause, .typeListClause);
+    children.add(implementsClause, .typeListClause);
     final row = children.finish(.classTypeAliasDeclaration);
-    final fieldOffset = fields.reserve(7 + modifiers.length);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 2] = rawRef(superclass);
-    fields.cells[fieldOffset + 3] = rawRef(withClause);
-    fields.cells[fieldOffset + 4] = rawRef(implementsClause);
-    fields.cells[fieldOffset + 5] = metadata.length;
-    fields.cells[fieldOffset + 6] = modifiers.length;
-    for (var i = 0; i < modifiers.length; i++) {
-      fields.cells[fieldOffset + 7 + i] = modifiers[i].index;
+    final fieldOffset = _fields.reserve(7 + copiedModifiers.length);
+    _fields.cells[fieldOffset] = name;
+    _fields.cells[fieldOffset + 1] = typeParameters ?? _nil;
+    _fields.cells[fieldOffset + 2] = superclass;
+    _fields.cells[fieldOffset + 3] = withClause;
+    _fields.cells[fieldOffset + 4] = implementsClause ?? _nil;
+    _fields.cells[fieldOffset + 5] = metadataCount;
+    _fields.cells[fieldOffset + 6] = copiedModifiers.length;
+    for (var i = 0; i < copiedModifiers.length; i++) {
+      _fields.cells[fieldOffset + 7 + i] = copiedModifiers[i].index;
     }
     return row;
   }
 
-  int putCollectionExpression({
+  int collectionExpression({
     required int start,
     required int end,
     required CollectionLiteralKind kind,
@@ -545,89 +676,98 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? typeArguments,
     required List<int> elements,
   }) {
-    final children = _Children(this, start, end)
-      ..add(typeArguments)
-      ..addAll(elements);
+    final children = _Children(this, start, end);
+    children.add(typeArguments, .typeArgumentList);
+    final elementsCount = children.addAll(elements, .collectionElement);
     final row = children.finish(.collectionExpression);
-    final fieldOffset = fields.reserve(4);
-    fields.cells[fieldOffset + 0] = kind.index;
-    fields.cells[fieldOffset + 1] = hasConstKeyword ? 1 : 0;
-    fields.cells[fieldOffset + 2] = rawRef(typeArguments);
-    fields.cells[fieldOffset + 3] = elements.length;
+    final fieldOffset = _fields.reserve(4);
+    _fields.cells[fieldOffset] = kind.index;
+    _fields.cells[fieldOffset + 1] = hasConstKeyword ? 1 : 0;
+    _fields.cells[fieldOffset + 2] = typeArguments ?? _nil;
+    _fields.cells[fieldOffset + 3] = elementsCount;
     return row;
   }
 
-  int putCompilationUnit({int? scriptTag, required List<int> members}) {
+  int compilationUnit({int? scriptTag, required List<int> members}) {
     final start = 0;
     final end = source.length;
-    final children = _Children(this, start, end)
-      ..add(scriptTag)
-      ..addAll(members);
+    final children = _Children(this, start, end);
+    children.add(scriptTag, .scriptTag);
+    final membersCount = children.addAll(members, .compilationUnitMember);
     final row = children.finish(.compilationUnit);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(scriptTag);
-    fields.cells[fieldOffset + 1] = members.length;
+    _fields.addPair(scriptTag ?? _nil, membersCount);
     return row;
   }
 
-  int putConditionalExpression({
-    required int start,
-    required int end,
+  int conditionalExpression({
     required int condition,
     required int thenExpression,
     required int elseExpression,
   }) {
-    final children = _Children(this, start, end)
-      ..add(condition)
-      ..add(thenExpression)
-      ..add(elseExpression);
+    final end = this.end(elseExpression);
+    final start = this.start(condition);
+    final children = _Children(this, start, end);
+    children.add(condition, .expression);
+    children.add(thenExpression, .expression);
+    children.add(elseExpression, .expression);
     return children.finish(.conditionalExpression);
   }
 
-  int putConditionalUri({
+  int conditionalUri({
     required int start,
-    required int end,
     required int name,
     int? value,
     required int uri,
   }) {
-    return _appendOptional(.conditionalUri, start, end, name, value, uri);
+    final end = this.end(uri);
+    return _appendOptional(
+      .conditionalUri,
+      start,
+      end,
+      name,
+      .dottedName,
+      value,
+      .stringExpression,
+      uri,
+      .stringExpression,
+    );
   }
 
-  int putConstDotShorthandExpression({
+  int constDotShorthandExpression({
     required int start,
     required int end,
     required int name,
     int? typeArguments,
     int? arguments,
   }) {
-    final children = _Children(this, start, end)
-      ..add(name)
-      ..add(typeArguments)
-      ..add(arguments);
+    final children = _Children(this, start, end);
+    children.add(name, .identifier);
+    children.add(typeArguments, .typeArgumentList);
+    children.add(arguments, .argumentList);
     final row = children.finish(.constDotShorthandExpression);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(typeArguments);
-    fields.cells[fieldOffset + 2] = rawRef(arguments);
+    _fields.addTriple(name, typeArguments ?? _nil, arguments ?? _nil);
     return row;
   }
 
-  int putConstantPattern({
+  int constantPattern({
     required int start,
-    required int end,
     bool hasConstKeyword = false,
     required int expression,
   }) {
-    final row = _appendOne(.constantPattern, start, end, expression);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = hasConstKeyword ? 1 : 0;
+    final end = this.end(expression);
+    final row = _appendOne(
+      .constantPattern,
+      start,
+      end,
+      expression,
+      .expression,
+    );
+    _fields.add(hasConstKeyword ? 1 : 0);
     return row;
   }
 
-  int putConstructorDeclaration({
+  int constructorDeclaration({
     required int start,
-    required int end,
     List<int> metadata = const [],
     bool isExternal = false,
     bool isConst = false,
@@ -637,92 +777,95 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     List<int> initializers = const [],
     required int body,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..addAll(name)
-      ..add(parameters)
-      ..addAll(initializers)
-      ..add(body);
+    final end = this.end(body);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    final nameCount = children.addAll(name, .identifier);
+    children.add(parameters, .formalParameterList);
+    final initializersCount = children.addAll(
+      initializers,
+      .constructorInitializer,
+    );
+    children.add(body, .constructorBody);
     final row = children.finish(.constructorDeclaration);
-    final fieldOffset = fields.reserve(8);
-    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
-    fields.cells[fieldOffset + 1] = isConst ? 1 : 0;
-    fields.cells[fieldOffset + 2] = keyword.index;
-    fields.cells[fieldOffset + 3] = rawRef(parameters);
-    fields.cells[fieldOffset + 4] = rawRef(body);
-    fields.cells[fieldOffset + 5] = metadata.length;
-    fields.cells[fieldOffset + 6] = name.length;
-    fields.cells[fieldOffset + 7] = initializers.length;
+    final fieldOffset = _fields.reserve(8);
+    _fields.cells[fieldOffset] = isExternal ? 1 : 0;
+    _fields.cells[fieldOffset + 1] = isConst ? 1 : 0;
+    _fields.cells[fieldOffset + 2] = keyword.index;
+    _fields.cells[fieldOffset + 3] = parameters;
+    _fields.cells[fieldOffset + 4] = body;
+    _fields.cells[fieldOffset + 5] = metadataCount;
+    _fields.cells[fieldOffset + 6] = nameCount;
+    _fields.cells[fieldOffset + 7] = initializersCount;
     return row;
   }
 
-  int putContinueStatement({required int start, required int end, int? label}) {
-    return _appendOptional(.continueStatement, start, end, label);
-  }
+  int continueStatement({required int start, required int end, int? label}) =>
+      _appendOptional(.continueStatement, start, end, label, .identifier);
 
-  int putDeclaredIdentifier({
+  int declaredIdentifier({
     required int start,
-    required int end,
     List<int> metadata = const [],
     VariableKeyword keyword = .none,
     int? type,
     required int name,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(type)
-      ..add(name);
+    final end = this.end(name);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(type, .typeAnnotation);
+    children.add(name, .identifier);
     final row = children.finish(.declaredIdentifier);
-    final fieldOffset = fields.reserve(4);
-    fields.cells[fieldOffset + 0] = keyword.index;
-    fields.cells[fieldOffset + 1] = rawRef(type);
-    fields.cells[fieldOffset + 2] = rawRef(name);
-    fields.cells[fieldOffset + 3] = metadata.length;
+    final fieldOffset = _fields.reserve(4);
+    _fields.cells[fieldOffset] = keyword.index;
+    _fields.cells[fieldOffset + 1] = type ?? _nil;
+    _fields.cells[fieldOffset + 2] = name;
+    _fields.cells[fieldOffset + 3] = metadataCount;
     return row;
   }
 
-  int putDoStatement({
+  int doStatement({
     required int start,
     required int end,
     required int body,
     required int condition,
-  }) {
-    return _appendTwo(.doStatement, start, end, body, condition);
+  }) => _appendTwo(
+    .doStatement,
+    start,
+    end,
+    body,
+    .statement,
+    condition,
+    .expression,
+  );
+
+  int dotShorthandExpression({required int expression}) =>
+      _cover(.dotShorthandExpression, expression, .expression);
+
+  int dotShorthandReferenceExpression({required int start, required int name}) {
+    final end = this.end(name);
+    return _appendOne(
+      .dotShorthandReferenceExpression,
+      start,
+      end,
+      name,
+      .identifier,
+    );
   }
 
-  int putDotShorthandExpression({
-    required int start,
-    required int end,
-    required int expression,
-  }) {
-    return _appendOne(.dotShorthandExpression, start, end, expression);
-  }
-
-  int putDotShorthandReferenceExpression({
-    required int start,
-    required int end,
-    required int name,
-  }) {
-    return _appendOne(.dotShorthandReferenceExpression, start, end, name);
-  }
-
-  int putDottedName({
+  int dottedName({
     required int start,
     required int end,
     required List<int> components,
-  }) {
-    return _appendList(.dottedName, start, end, components);
-  }
+  }) => _appendList(.dottedName, start, end, components, .identifier);
 
-  int putEmptyFunctionBody({required int start, required int end}) {
-    return _leaf(.emptyFunctionBody, start, end);
-  }
+  int emptyFunctionBody({required int start, required int end}) =>
+      _leaf(.emptyFunctionBody, start, end);
 
-  int putEmptyStatement({required int start, required int end}) {
-    return _leaf(.emptyStatement, start, end);
-  }
+  int emptyStatement({required int start, required int end}) =>
+      _leaf(.emptyStatement, start, end);
 
-  int putEnumConstantDeclaration({
+  int enumConstantDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -731,23 +874,23 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? constructorName,
     int? arguments,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(name)
-      ..add(typeArguments)
-      ..add(constructorName)
-      ..add(arguments);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(name, .identifier);
+    children.add(typeArguments, .typeArgumentList);
+    children.add(constructorName, .identifier);
+    children.add(arguments, .argumentList);
     final row = children.finish(.enumConstantDeclaration);
-    final fieldOffset = fields.reserve(5);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(typeArguments);
-    fields.cells[fieldOffset + 2] = rawRef(constructorName);
-    fields.cells[fieldOffset + 3] = rawRef(arguments);
-    fields.cells[fieldOffset + 4] = metadata.length;
+    final fieldOffset = _fields.reserve(5);
+    _fields.cells[fieldOffset] = name;
+    _fields.cells[fieldOffset + 1] = typeArguments ?? _nil;
+    _fields.cells[fieldOffset + 2] = constructorName ?? _nil;
+    _fields.cells[fieldOffset + 3] = arguments ?? _nil;
+    _fields.cells[fieldOffset + 4] = metadataCount;
     return row;
   }
 
-  int putEnumDeclaration({
+  int enumDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -763,34 +906,34 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     List<int> constants = const [],
     List<int> members = const [],
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(name)
-      ..add(typeParameters)
-      ..add(primaryConstructorName)
-      ..add(primaryParameters)
-      ..add(withClause)
-      ..add(implementsClause)
-      ..addAll(constants)
-      ..addAll(members);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(name, .identifier);
+    children.add(typeParameters, .typeParameterList);
+    children.add(primaryConstructorName, .identifier);
+    children.add(primaryParameters, .formalParameterList);
+    children.add(withClause, .typeListClause);
+    children.add(implementsClause, .typeListClause);
+    final constantsCount = children.addAll(constants, .enumConstantDeclaration);
+    final membersCount = children.addAll(members, .classMember);
     final row = children.finish(.enumDeclaration);
-    final fieldOffset = fields.reserve(12);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 2] = isConst ? 1 : 0;
-    fields.cells[fieldOffset + 3] = rawRef(primaryConstructorName);
-    fields.cells[fieldOffset + 4] = rawRef(primaryParameters);
-    fields.cells[fieldOffset + 5] = rawRef(withClause);
-    fields.cells[fieldOffset + 6] = rawRef(implementsClause);
-    fields.cells[fieldOffset + 7] = isSemicolonBody ? 1 : 0;
-    fields.cells[fieldOffset + 8] = hasMemberSeparator ? 1 : 0;
-    fields.cells[fieldOffset + 9] = metadata.length;
-    fields.cells[fieldOffset + 10] = constants.length;
-    fields.cells[fieldOffset + 11] = members.length;
+    final fieldOffset = _fields.reserve(12);
+    _fields.cells[fieldOffset] = name;
+    _fields.cells[fieldOffset + 1] = typeParameters ?? _nil;
+    _fields.cells[fieldOffset + 2] = isConst ? 1 : 0;
+    _fields.cells[fieldOffset + 3] = primaryConstructorName ?? _nil;
+    _fields.cells[fieldOffset + 4] = primaryParameters ?? _nil;
+    _fields.cells[fieldOffset + 5] = withClause ?? _nil;
+    _fields.cells[fieldOffset + 6] = implementsClause ?? _nil;
+    _fields.cells[fieldOffset + 7] = isSemicolonBody ? 1 : 0;
+    _fields.cells[fieldOffset + 8] = hasMemberSeparator ? 1 : 0;
+    _fields.cells[fieldOffset + 9] = metadataCount;
+    _fields.cells[fieldOffset + 10] = constantsCount;
+    _fields.cells[fieldOffset + 11] = membersCount;
     return row;
   }
 
-  int putExportDirective({
+  int exportDirective({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -798,49 +941,57 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     List<int> configurations = const [],
     List<int> combinators = const [],
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(uri)
-      ..addAll(configurations)
-      ..addAll(combinators);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(uri, .stringExpression);
+    final configurationsCount = children.addAll(
+      configurations,
+      .conditionalUri,
+    );
+    final combinatorsCount = children.addAll(combinators, .namespaceCombinator);
     final row = children.finish(.exportDirective);
-    final fieldOffset = fields.reserve(4);
-    fields.cells[fieldOffset + 0] = rawRef(uri);
-    fields.cells[fieldOffset + 1] = configurations.length;
-    fields.cells[fieldOffset + 2] = combinators.length;
-    fields.cells[fieldOffset + 3] = metadata.length;
+    final fieldOffset = _fields.reserve(4);
+    _fields.cells[fieldOffset] = uri;
+    _fields.cells[fieldOffset + 1] = configurationsCount;
+    _fields.cells[fieldOffset + 2] = combinatorsCount;
+    _fields.cells[fieldOffset + 3] = metadataCount;
     return row;
   }
 
-  int putExpressionFunctionBody({
+  int expressionFunctionBody({
     required int start,
     required int end,
     bool isAsync = false,
     required int expression,
   }) {
-    final row = _appendOne(.expressionFunctionBody, start, end, expression);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isAsync ? 1 : 0;
+    final row = _appendOne(
+      .expressionFunctionBody,
+      start,
+      end,
+      expression,
+      .expression,
+    );
+    _fields.add(isAsync ? 1 : 0);
     return row;
   }
 
-  int putExpressionStatement({
-    required int start,
-    required int end,
-    required int expression,
-  }) {
-    return _appendOne(.expressionStatement, start, end, expression);
+  int expressionStatement({required int end, required int expression}) {
+    final start = this.start(expression);
+    return _appendOne(
+      .expressionStatement,
+      start,
+      end,
+      expression,
+      .expression,
+    );
   }
 
-  int putExtendsClause({
-    required int start,
-    required int end,
-    required int superclass,
-  }) {
-    return _appendOne(.extendsClause, start, end, superclass);
+  int extendsClause({required int start, required int superclass}) {
+    final end = this.end(superclass);
+    return _appendOne(.extendsClause, start, end, superclass, .typeAnnotation);
   }
 
-  int putExtensionDeclaration({
+  int extensionDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -850,24 +1001,24 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     bool isSemicolonBody = false,
     List<int> members = const [],
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(name)
-      ..add(typeParameters)
-      ..add(onType)
-      ..addAll(members);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(name, .identifier);
+    children.add(typeParameters, .typeParameterList);
+    children.add(onType, .typeAnnotation);
+    final membersCount = children.addAll(members, .classMember);
     final row = children.finish(.extensionDeclaration);
-    final fieldOffset = fields.reserve(6);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 2] = rawRef(onType);
-    fields.cells[fieldOffset + 3] = isSemicolonBody ? 1 : 0;
-    fields.cells[fieldOffset + 4] = metadata.length;
-    fields.cells[fieldOffset + 5] = members.length;
+    final fieldOffset = _fields.reserve(6);
+    _fields.cells[fieldOffset] = name ?? _nil;
+    _fields.cells[fieldOffset + 1] = typeParameters ?? _nil;
+    _fields.cells[fieldOffset + 2] = onType;
+    _fields.cells[fieldOffset + 3] = isSemicolonBody ? 1 : 0;
+    _fields.cells[fieldOffset + 4] = metadataCount;
+    _fields.cells[fieldOffset + 5] = membersCount;
     return row;
   }
 
-  int putExtensionTypeDeclaration({
+  int extensionTypeDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -880,48 +1031,49 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     bool isSemicolonBody = false,
     List<int> members = const [],
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(name)
-      ..add(typeParameters)
-      ..add(primaryConstructorName)
-      ..add(primaryParameters)
-      ..add(implementsClause)
-      ..addAll(members);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(name, .identifier);
+    children.add(typeParameters, .typeParameterList);
+    children.add(primaryConstructorName, .identifier);
+    children.add(primaryParameters, .formalParameterList);
+    children.add(implementsClause, .typeListClause);
+    final membersCount = children.addAll(members, .classMember);
     final row = children.finish(.extensionTypeDeclaration);
-    final fieldOffset = fields.reserve(9);
-    fields.cells[fieldOffset + 0] = isConst ? 1 : 0;
-    fields.cells[fieldOffset + 1] = rawRef(name);
-    fields.cells[fieldOffset + 2] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 3] = rawRef(primaryConstructorName);
-    fields.cells[fieldOffset + 4] = rawRef(primaryParameters);
-    fields.cells[fieldOffset + 5] = rawRef(implementsClause);
-    fields.cells[fieldOffset + 6] = isSemicolonBody ? 1 : 0;
-    fields.cells[fieldOffset + 7] = metadata.length;
-    fields.cells[fieldOffset + 8] = members.length;
+    final fieldOffset = _fields.reserve(9);
+    _fields.cells[fieldOffset] = isConst ? 1 : 0;
+    _fields.cells[fieldOffset + 1] = name;
+    _fields.cells[fieldOffset + 2] = typeParameters ?? _nil;
+    _fields.cells[fieldOffset + 3] = primaryConstructorName ?? _nil;
+    _fields.cells[fieldOffset + 4] = primaryParameters;
+    _fields.cells[fieldOffset + 5] = implementsClause ?? _nil;
+    _fields.cells[fieldOffset + 6] = isSemicolonBody ? 1 : 0;
+    _fields.cells[fieldOffset + 7] = metadataCount;
+    _fields.cells[fieldOffset + 8] = membersCount;
     return row;
   }
 
-  int putFactoryRedirectBody({
+  int factoryRedirectBody({
     required int start,
     required int end,
     required List<int> name,
     int? typeArguments,
     int? constructorName,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(name)
-      ..add(typeArguments)
-      ..add(constructorName);
+    final children = _Children(this, start, end);
+    final nameCount = children.addAll(name, .identifier);
+    children.add(typeArguments, .typeArgumentList);
+    children.add(constructorName, .identifier);
     final row = children.finish(.factoryRedirectBody);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(typeArguments);
-    fields.cells[fieldOffset + 1] = rawRef(constructorName);
-    fields.cells[fieldOffset + 2] = name.length;
+    _fields.addTriple(
+      typeArguments ?? _nil,
+      constructorName ?? _nil,
+      nameCount,
+    );
     return row;
   }
 
-  int putFieldDeclaration({
+  int fieldDeclaration({
     required int start,
     required int end,
     bool isStatic = false,
@@ -930,83 +1082,115 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     bool isCovariant = false,
     required int variables,
   }) {
-    final row = _appendOne(.fieldDeclaration, start, end, variables);
-    final fieldOffset = fields.reserve(4);
-    fields.cells[fieldOffset + 0] = isStatic ? 1 : 0;
-    fields.cells[fieldOffset + 1] = isAbstract ? 1 : 0;
-    fields.cells[fieldOffset + 2] = isExternal ? 1 : 0;
-    fields.cells[fieldOffset + 3] = isCovariant ? 1 : 0;
+    final row = _appendOne(
+      .fieldDeclaration,
+      start,
+      end,
+      variables,
+      .variableDeclarationList,
+    );
+    final fieldOffset = _fields.reserve(4);
+    _fields.cells[fieldOffset] = isStatic ? 1 : 0;
+    _fields.cells[fieldOffset + 1] = isAbstract ? 1 : 0;
+    _fields.cells[fieldOffset + 2] = isExternal ? 1 : 0;
+    _fields.cells[fieldOffset + 3] = isCovariant ? 1 : 0;
     return row;
   }
 
-  int putFieldInitializer({
+  int fieldInitializer({
     required int start,
-    required int end,
     bool hasThis = false,
     required int name,
     required int value,
   }) {
-    final row = _appendTwo(.fieldInitializer, start, end, name, value);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = hasThis ? 1 : 0;
+    final end = this.end(value);
+    final row = _appendTwo(
+      .fieldInitializer,
+      start,
+      end,
+      name,
+      .identifier,
+      value,
+      .expression,
+    );
+    _fields.add(hasThis ? 1 : 0);
     return row;
   }
 
-  int putForElement({
+  int forElement({
     required int start,
-    required int end,
     bool isAwait = false,
     required int parts,
     required int body,
   }) {
-    final row = _appendTwo(.forElement, start, end, parts, body);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isAwait ? 1 : 0;
+    final end = this.end(body);
+    final row = _appendTwo(
+      .forElement,
+      start,
+      end,
+      parts,
+      .forLoopParts,
+      body,
+      .collectionElement,
+    );
+    _fields.add(isAwait ? 1 : 0);
     return row;
   }
 
-  int putForInParts({
+  int forInParts({
     required int start,
-    required int end,
     required int target,
     required int iterable,
   }) {
-    return _appendTwo(.forInParts, start, end, target, iterable);
+    final end = this.end(iterable);
+    return _appendTwo(
+      .forInParts,
+      start,
+      end,
+      target,
+      .forInTarget,
+      iterable,
+      .expression,
+    );
   }
 
-  int putForParts({
+  int forParts({
     required int start,
     required int end,
     int? initializer,
     int? condition,
     List<int> updaters = const [],
   }) {
-    final children = _Children(this, start, end)
-      ..add(initializer)
-      ..add(condition)
-      ..addAll(updaters);
+    final children = _Children(this, start, end);
+    children.add(initializer, .forInitializer);
+    children.add(condition, .expression);
+    final updatersCount = children.addAll(updaters, .expression);
     final row = children.finish(.forParts);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(initializer);
-    fields.cells[fieldOffset + 1] = rawRef(condition);
-    fields.cells[fieldOffset + 2] = updaters.length;
+    _fields.addTriple(initializer ?? _nil, condition ?? _nil, updatersCount);
     return row;
   }
 
-  int putForStatement({
+  int forStatement({
     required int start,
-    required int end,
     bool isAwait = false,
     required int parts,
     required int body,
   }) {
-    final row = _appendTwo(.forStatement, start, end, parts, body);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isAwait ? 1 : 0;
+    final end = this.end(body);
+    final row = _appendTwo(
+      .forStatement,
+      start,
+      end,
+      parts,
+      .forLoopParts,
+      body,
+      .statement,
+    );
+    _fields.add(isAwait ? 1 : 0);
     return row;
   }
 
-  int putFormalParameter({
+  int formalParameter({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1019,52 +1203,59 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? functionSuffix,
     int? defaultClause,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(type)
-      ..add(name)
-      ..add(functionSuffix)
-      ..add(defaultClause);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(type, .typeAnnotation);
+    children.add(name, .identifier);
+    children.add(functionSuffix, .functionParameterSuffix);
+    children.add(defaultClause, .parameterDefault);
     final row = children.finish(.formalParameter);
-    final at = fields.reserve(5);
-    fields.cells[at] = kind.index;
-    fields.cells[at + 1] = prefix.index;
-    fields.cells[at + 2] = keyword.index;
-    fields.cells[at + 3] =
+    final at = _fields.reserve(5);
+    _fields.cells[at] = kind.index;
+    _fields.cells[at + 1] = prefix.index;
+    _fields.cells[at + 2] = keyword.index;
+    _fields.cells[at + 3] =
         (type == null ? 0 : _formalType) |
         (functionSuffix == null ? 0 : _formalSuffix) |
         (defaultClause == null ? 0 : _formalDefault) |
         (isCovariant ? _formalCovariant : 0);
-    fields.cells[at + 4] = metadata.length;
+    _fields.cells[at + 4] = metadataCount;
     return row;
   }
 
-  int putFormalParameterList({
+  int formalParameterList({
     required int start,
     required int end,
     required List<int> parameters,
-  }) {
-    return _appendList(.formalParameterList, start, end, parameters);
-  }
+  }) => _appendList(
+    .formalParameterList,
+    start,
+    end,
+    parameters,
+    .formalParameter,
+  );
 
-  int putFunctionExpression({
+  int functionExpression({
     required int start,
-    required int end,
     int? typeParameters,
     required int parameters,
     required int body,
   }) {
+    final end = this.end(body);
     return _appendOptional(
       .functionExpression,
       start,
       end,
       typeParameters,
+      .typeParameterList,
       parameters,
+      .formalParameterList,
       body,
+      .functionBody,
     );
   }
 
-  int putFunctionParameterSuffix({
+  int functionParameterSuffix({
     required int start,
     required int end,
     int? typeParameters,
@@ -1074,7 +1265,7 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     if (questionOffset != null) {
       RangeError.checkValueInInterval(
         questionOffset,
-        ends[parameters],
+        _end(parameters),
         end - 1,
         "questionOffset",
       );
@@ -1084,16 +1275,15 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
       start,
       end,
       typeParameters,
+      .typeParameterList,
       parameters,
+      .formalParameterList,
     );
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = questionOffset == null
-        ? _nil
-        : end - questionOffset;
+    _fields.add(questionOffset == null ? _nil : end - questionOffset);
     return row;
   }
 
-  int putFunctionTypeAliasDeclaration({
+  int functionTypeAliasDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1102,23 +1292,23 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? typeParameters,
     required int parameters,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(returnType)
-      ..add(name)
-      ..add(typeParameters)
-      ..add(parameters);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(returnType, .typeAnnotation);
+    children.add(name, .identifier);
+    children.add(typeParameters, .typeParameterList);
+    children.add(parameters, .formalParameterList);
     final row = children.finish(.functionTypeAliasDeclaration);
-    final fieldOffset = fields.reserve(5);
-    fields.cells[fieldOffset + 0] = rawRef(returnType);
-    fields.cells[fieldOffset + 1] = rawRef(name);
-    fields.cells[fieldOffset + 2] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 3] = rawRef(parameters);
-    fields.cells[fieldOffset + 4] = metadata.length;
+    final fieldOffset = _fields.reserve(5);
+    _fields.cells[fieldOffset] = returnType ?? _nil;
+    _fields.cells[fieldOffset + 1] = name;
+    _fields.cells[fieldOffset + 2] = typeParameters ?? _nil;
+    _fields.cells[fieldOffset + 3] = parameters;
+    _fields.cells[fieldOffset + 4] = metadataCount;
     return row;
   }
 
-  int putFunctionTypeAnnotation({
+  int functionTypeAnnotation({
     required int start,
     required int end,
     int? questionOffset,
@@ -1134,22 +1324,22 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
         "questionOffset",
       );
     }
-    final children = _Children(this, start, end)
-      ..add(returnType)
-      ..add(typeParameters)
-      ..add(parameters);
+    final children = _Children(this, start, end);
+    children.add(returnType, .typeAnnotation);
+    children.add(typeParameters, .typeParameterList);
+    children.add(parameters, .functionTypeParameterList);
     final row = children.finish(.functionTypeAnnotation);
-    final fieldOffset = fields.reserve(4);
-    fields.cells[fieldOffset + 0] = rawRef(returnType);
-    fields.cells[fieldOffset + 1] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 2] = rawRef(parameters);
-    fields.cells[fieldOffset + 3] = questionOffset == null
+    final fieldOffset = _fields.reserve(4);
+    _fields.cells[fieldOffset] = returnType ?? _nil;
+    _fields.cells[fieldOffset + 1] = typeParameters ?? _nil;
+    _fields.cells[fieldOffset + 2] = parameters;
+    _fields.cells[fieldOffset + 3] = questionOffset == null
         ? _nil
         : end - questionOffset;
     return row;
   }
 
-  int putFunctionTypeParameter({
+  int functionTypeParameter({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1158,29 +1348,33 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int type,
     int? name,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(type)
-      ..add(name);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(type, .typeAnnotation);
+    children.add(name, .identifier);
     final row = children.finish(.functionTypeParameter);
-    final fieldOffset = fields.reserve(5);
-    fields.cells[fieldOffset + 0] = kind.index;
-    fields.cells[fieldOffset + 1] = isCovariant ? 1 : 0;
-    fields.cells[fieldOffset + 2] = rawRef(type);
-    fields.cells[fieldOffset + 3] = rawRef(name);
-    fields.cells[fieldOffset + 4] = metadata.length;
+    final fieldOffset = _fields.reserve(5);
+    _fields.cells[fieldOffset] = kind.index;
+    _fields.cells[fieldOffset + 1] = isCovariant ? 1 : 0;
+    _fields.cells[fieldOffset + 2] = type;
+    _fields.cells[fieldOffset + 3] = name ?? _nil;
+    _fields.cells[fieldOffset + 4] = metadataCount;
     return row;
   }
 
-  int putFunctionTypeParameterList({
+  int functionTypeParameterList({
     required int start,
     required int end,
     required List<int> parameters,
-  }) {
-    return _appendList(.functionTypeParameterList, start, end, parameters);
-  }
+  }) => _appendList(
+    .functionTypeParameterList,
+    start,
+    end,
+    parameters,
+    .functionTypeParameter,
+  );
 
-  int putGetterDeclaration({
+  int getterDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1190,52 +1384,38 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int name,
     required int body,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(returnType)
-      ..add(name)
-      ..add(body);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(returnType, .typeAnnotation);
+    children.add(name, .identifier);
+    children.add(body, .functionBody);
     final row = children.finish(.getterDeclaration);
-    final fieldOffset = fields.reserve(6);
-    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
-    fields.cells[fieldOffset + 1] = isStatic ? 1 : 0;
-    fields.cells[fieldOffset + 2] = rawRef(returnType);
-    fields.cells[fieldOffset + 3] = rawRef(name);
-    fields.cells[fieldOffset + 4] = rawRef(body);
-    fields.cells[fieldOffset + 5] = metadata.length;
+    final fieldOffset = _fields.reserve(6);
+    _fields.cells[fieldOffset] = isExternal ? 1 : 0;
+    _fields.cells[fieldOffset + 1] = isStatic ? 1 : 0;
+    _fields.cells[fieldOffset + 2] = returnType ?? _nil;
+    _fields.cells[fieldOffset + 3] = name;
+    _fields.cells[fieldOffset + 4] = body;
+    _fields.cells[fieldOffset + 5] = metadataCount;
     return row;
   }
 
-  int putGuardedPattern({
-    required int start,
-    required int end,
-    required int pattern,
-    required int guard,
-  }) {
-    return _appendTwo(.guardedPattern, start, end, pattern, guard);
+  int guardedPattern({required int pattern, required int guard}) =>
+      _cover(.guardedPattern, pattern, .dartPattern, guard, .expression);
+
+  int identifier({required int start, required int end}) =>
+      _leaf(.identifier, start, end);
+
+  /// Wraps an identifier using its existing source range.
+  int identifierExpression(int identifier) =>
+      _cover(.identifierExpression, identifier, .identifier);
+
+  int identifierPattern({required int start, required int name}) {
+    final end = this.end(name);
+    return _appendOne(.identifierPattern, start, end, name, .identifier);
   }
 
-  int putIdentifier({required int start, required int end}) {
-    return _leaf(.identifier, start, end);
-  }
-
-  int putIdentifierExpression({
-    required int start,
-    required int end,
-    required int identifier,
-  }) {
-    return _appendOne(.identifierExpression, start, end, identifier);
-  }
-
-  int putIdentifierPattern({
-    required int start,
-    required int end,
-    required int name,
-  }) {
-    return _appendOne(.identifierPattern, start, end, name);
-  }
-
-  int putIfElement({
+  int ifElement({
     required int start,
     required int end,
     required int condition,
@@ -1243,21 +1423,21 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int thenElement,
     int? elseElement,
   }) {
-    final children = _Children(this, start, end)
-      ..add(condition)
-      ..add(casePattern)
-      ..add(thenElement)
-      ..add(elseElement);
+    final children = _Children(this, start, end);
+    children.add(condition, .expression);
+    children.add(casePattern, .casePattern);
+    children.add(thenElement, .collectionElement);
+    children.add(elseElement, .collectionElement);
     final row = children.finish(.ifElement);
-    final fieldOffset = fields.reserve(4);
-    fields.cells[fieldOffset + 0] = rawRef(condition);
-    fields.cells[fieldOffset + 1] = rawRef(casePattern);
-    fields.cells[fieldOffset + 2] = rawRef(thenElement);
-    fields.cells[fieldOffset + 3] = rawRef(elseElement);
+    final fieldOffset = _fields.reserve(4);
+    _fields.cells[fieldOffset] = condition;
+    _fields.cells[fieldOffset + 1] = casePattern ?? _nil;
+    _fields.cells[fieldOffset + 2] = thenElement;
+    _fields.cells[fieldOffset + 3] = elseElement ?? _nil;
     return row;
   }
 
-  int putIfStatement({
+  int ifStatement({
     required int start,
     required int end,
     required int condition,
@@ -1265,21 +1445,21 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int thenStatement,
     int? elseStatement,
   }) {
-    final children = _Children(this, start, end)
-      ..add(condition)
-      ..add(casePattern)
-      ..add(thenStatement)
-      ..add(elseStatement);
+    final children = _Children(this, start, end);
+    children.add(condition, .expression);
+    children.add(casePattern, .casePattern);
+    children.add(thenStatement, .statement);
+    children.add(elseStatement, .statement);
     final row = children.finish(.ifStatement);
-    final fieldOffset = fields.reserve(4);
-    fields.cells[fieldOffset + 0] = rawRef(condition);
-    fields.cells[fieldOffset + 1] = rawRef(casePattern);
-    fields.cells[fieldOffset + 2] = rawRef(thenStatement);
-    fields.cells[fieldOffset + 3] = rawRef(elseStatement);
+    final fieldOffset = _fields.reserve(4);
+    _fields.cells[fieldOffset] = condition;
+    _fields.cells[fieldOffset + 1] = casePattern ?? _nil;
+    _fields.cells[fieldOffset + 2] = thenStatement;
+    _fields.cells[fieldOffset + 3] = elseStatement ?? _nil;
     return row;
   }
 
-  int putImportDirective({
+  int importDirective({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1289,37 +1469,47 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? prefix,
     List<int> combinators = const [],
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(uri)
-      ..addAll(configurations)
-      ..add(prefix)
-      ..addAll(combinators);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(uri, .stringExpression);
+    final configurationsCount = children.addAll(
+      configurations,
+      .conditionalUri,
+    );
+    children.add(prefix, .identifier);
+    final combinatorsCount = children.addAll(combinators, .namespaceCombinator);
     final row = children.finish(.importDirective);
-    final fieldOffset = fields.reserve(6);
-    fields.cells[fieldOffset + 0] = rawRef(uri);
-    fields.cells[fieldOffset + 1] = isDeferred ? 1 : 0;
-    fields.cells[fieldOffset + 2] = rawRef(prefix);
-    fields.cells[fieldOffset + 3] = configurations.length;
-    fields.cells[fieldOffset + 4] = combinators.length;
-    fields.cells[fieldOffset + 5] = metadata.length;
+    final fieldOffset = _fields.reserve(6);
+    _fields.cells[fieldOffset] = uri;
+    _fields.cells[fieldOffset + 1] = isDeferred ? 1 : 0;
+    _fields.cells[fieldOffset + 2] = prefix ?? _nil;
+    _fields.cells[fieldOffset + 3] = configurationsCount;
+    _fields.cells[fieldOffset + 4] = combinatorsCount;
+    _fields.cells[fieldOffset + 5] = metadataCount;
     return row;
   }
 
-  int putIndexExpression({
-    required int start,
+  int indexExpression({
     required int end,
     required int target,
     required int index,
     bool isNullAware = false,
   }) {
-    final row = _appendTwo(.indexExpression, start, end, target, index);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isNullAware ? 1 : 0;
+    final start = this.start(target);
+    final row = _appendTwo(
+      .indexExpression,
+      start,
+      end,
+      target,
+      .expression,
+      index,
+      .expression,
+    );
+    _fields.add(isNullAware ? 1 : 0);
     return row;
   }
 
-  int putInstanceCreationExpression({
+  int instanceCreationExpression({
     required int start,
     required int end,
     InstanceCreationKind kind = .implicit,
@@ -1328,112 +1518,112 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? constructorName,
     required int arguments,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(name)
-      ..add(typeArguments)
-      ..add(constructorName)
-      ..add(arguments);
+    final children = _Children(this, start, end);
+    final nameCount = children.addAll(name, .identifier);
+    children.add(typeArguments, .typeArgumentList);
+    children.add(constructorName, .identifier);
+    children.add(arguments, .argumentList);
     final row = children.finish(.instanceCreationExpression);
-    final fieldOffset = fields.reserve(5);
-    fields.cells[fieldOffset + 0] = kind.index;
-    fields.cells[fieldOffset + 1] = rawRef(typeArguments);
-    fields.cells[fieldOffset + 2] = rawRef(constructorName);
-    fields.cells[fieldOffset + 3] = rawRef(arguments);
-    fields.cells[fieldOffset + 4] = name.length;
+    final fieldOffset = _fields.reserve(5);
+    _fields.cells[fieldOffset] = kind.index;
+    _fields.cells[fieldOffset + 1] = typeArguments ?? _nil;
+    _fields.cells[fieldOffset + 2] = constructorName ?? _nil;
+    _fields.cells[fieldOffset + 3] = arguments;
+    _fields.cells[fieldOffset + 4] = nameCount;
     return row;
   }
 
-  int putInterpolatedStringExpression({
+  int interpolatedStringExpression({
     required int start,
     required int end,
     required List<int> parts,
-  }) {
-    return _appendList(.interpolatedStringExpression, start, end, parts);
-  }
+  }) => _appendList(
+    .interpolatedStringExpression,
+    start,
+    end,
+    parts,
+    .stringPart,
+  );
 
-  int putInvocationExpression({
-    required int start,
+  int invocationExpression({
     required int end,
     required int callee,
     int? typeArguments,
     required int arguments,
   }) {
+    final start = this.start(callee);
     return _appendOptional(
       .invocationExpression,
       start,
       end,
       callee,
+      .expression,
       typeArguments,
+      .typeArgumentList,
       arguments,
+      .argumentList,
     );
   }
 
-  int putLabel({required int start, required int end, required int name}) {
-    return _appendOne(.label, start, end, name);
+  int label({required int end, required int name}) {
+    final start = this.start(name);
+    return _appendOne(.label, start, end, name, .identifier);
   }
 
-  int putLabeledStatement({
+  int labeledStatement({
     required int start,
-    required int end,
     required List<int> labels,
     required int statement,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(labels)
-      ..add(statement);
+    final end = this.end(statement);
+    final children = _Children(this, start, end);
+    final labelsCount = children.addAll(labels, .label);
+    children.add(statement, .statement);
     final row = children.finish(.labeledStatement);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(statement);
-    fields.cells[fieldOffset + 1] = labels.length;
+    _fields.addPair(statement, labelsCount);
     return row;
   }
 
-  int putLibraryDirective({
+  int libraryDirective({
     required int start,
     required int end,
     List<int> metadata = const [],
     int? name,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(name);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(name, .dottedName);
     final row = children.finish(.libraryDirective);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = metadata.length;
+    _fields.addPair(name ?? _nil, metadataCount);
     return row;
   }
 
-  int putListPattern({
+  int listPattern({
     required int start,
     required int end,
     int? typeArguments,
     required List<int> elements,
   }) {
-    final children = _Children(this, start, end)
-      ..add(typeArguments)
-      ..addAll(elements);
+    final children = _Children(this, start, end);
+    children.add(typeArguments, .typeArgumentList);
+    final elementsCount = children.addAll(elements, .listPatternElement);
     final row = children.finish(.listPattern);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(typeArguments);
-    fields.cells[fieldOffset + 1] = elements.length;
+    _fields.addPair(typeArguments ?? _nil, elementsCount);
     return row;
   }
 
-  int putLiteralExpression({
+  int literalExpression({
     required int start,
     required int end,
     required LiteralKind kind,
   }) {
     final row = _leaf(.literalExpression, start, end);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = kind.index;
+    _fields.add(kind.index);
     return row;
   }
 
-  int putLocalFunctionDeclaration({
+  int localFunctionDeclaration({
     required int start,
-    required int end,
     List<int> metadata = const [],
     int? returnType,
     required int name,
@@ -1441,78 +1631,80 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int parameters,
     required int body,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(returnType)
-      ..add(name)
-      ..add(typeParameters)
-      ..add(parameters)
-      ..add(body);
+    final end = this.end(body);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(returnType, .typeAnnotation);
+    children.add(name, .identifier);
+    children.add(typeParameters, .typeParameterList);
+    children.add(parameters, .formalParameterList);
+    children.add(body, .functionBody);
     final row = children.finish(.localFunctionDeclaration);
-    final fieldOffset = fields.reserve(6);
-    fields.cells[fieldOffset + 0] = rawRef(returnType);
-    fields.cells[fieldOffset + 1] = rawRef(name);
-    fields.cells[fieldOffset + 2] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 3] = rawRef(parameters);
-    fields.cells[fieldOffset + 4] = rawRef(body);
-    fields.cells[fieldOffset + 5] = metadata.length;
+    final fieldOffset = _fields.reserve(6);
+    _fields.cells[fieldOffset] = returnType ?? _nil;
+    _fields.cells[fieldOffset + 1] = name;
+    _fields.cells[fieldOffset + 2] = typeParameters ?? _nil;
+    _fields.cells[fieldOffset + 3] = parameters;
+    _fields.cells[fieldOffset + 4] = body;
+    _fields.cells[fieldOffset + 5] = metadataCount;
     return row;
   }
 
-  int putLogicalPattern({
-    required int start,
-    required int end,
+  int logicalPattern({
     required int left,
     required LogicalPatternOperator op,
     required int right,
   }) {
-    final row = _appendTwo(.logicalPattern, start, end, left, right);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = op.index;
+    final row = _cover(
+      .logicalPattern,
+      left,
+      .dartPattern,
+      right,
+      .dartPattern,
+    );
+    _fields.add(op.index);
     return row;
   }
 
-  int putMapEntryElement({
+  int mapEntryElement({
     required int start,
-    required int end,
     required int key,
     required int value,
     bool isNullAwareKey = false,
     bool isNullAwareValue = false,
   }) {
-    final row = _appendTwo(.mapEntryElement, start, end, key, value);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = isNullAwareKey ? 1 : 0;
-    fields.cells[fieldOffset + 1] = isNullAwareValue ? 1 : 0;
+    final end = this.end(value);
+    final row = _appendTwo(
+      .mapEntryElement,
+      start,
+      end,
+      key,
+      .expression,
+      value,
+      .expression,
+    );
+    _fields.addPair(isNullAwareKey ? 1 : 0, isNullAwareValue ? 1 : 0);
     return row;
   }
 
-  int putMapPattern({
+  int mapPattern({
     required int start,
     required int end,
     int? typeArguments,
     required List<int> elements,
   }) {
-    final children = _Children(this, start, end)
-      ..add(typeArguments)
-      ..addAll(elements);
+    final children = _Children(this, start, end);
+    children.add(typeArguments, .typeArgumentList);
+    final elementsCount = children.addAll(elements, .mapPatternElement);
     final row = children.finish(.mapPattern);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(typeArguments);
-    fields.cells[fieldOffset + 1] = elements.length;
+    _fields.addPair(typeArguments ?? _nil, elementsCount);
     return row;
   }
 
-  int putMapPatternEntry({
-    required int start,
-    required int end,
-    required int key,
-    required int value,
-  }) {
-    return _appendTwo(.mapPatternEntry, start, end, key, value);
-  }
+  int mapPatternEntry({required int key, required int value}) =>
+      _cover(.mapPatternEntry, key, .expression, value, .dartPattern);
 
-  int putMethodDeclaration({
+  int methodDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1524,72 +1716,72 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int parameters,
     required int body,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(returnType)
-      ..add(name)
-      ..add(typeParameters)
-      ..add(parameters)
-      ..add(body);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(returnType, .typeAnnotation);
+    children.add(name, .identifier);
+    children.add(typeParameters, .typeParameterList);
+    children.add(parameters, .formalParameterList);
+    children.add(body, .functionBody);
     final row = children.finish(.methodDeclaration);
-    final fieldOffset = fields.reserve(8);
-    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
-    fields.cells[fieldOffset + 1] = isStatic ? 1 : 0;
-    fields.cells[fieldOffset + 2] = rawRef(returnType);
-    fields.cells[fieldOffset + 3] = rawRef(name);
-    fields.cells[fieldOffset + 4] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 5] = rawRef(parameters);
-    fields.cells[fieldOffset + 6] = rawRef(body);
-    fields.cells[fieldOffset + 7] = metadata.length;
+    final fieldOffset = _fields.reserve(8);
+    _fields.cells[fieldOffset] = isExternal ? 1 : 0;
+    _fields.cells[fieldOffset + 1] = isStatic ? 1 : 0;
+    _fields.cells[fieldOffset + 2] = returnType ?? _nil;
+    _fields.cells[fieldOffset + 3] = name;
+    _fields.cells[fieldOffset + 4] = typeParameters ?? _nil;
+    _fields.cells[fieldOffset + 5] = parameters;
+    _fields.cells[fieldOffset + 6] = body;
+    _fields.cells[fieldOffset + 7] = metadataCount;
     return row;
   }
 
-  int putMissingClassMember({required int offset}) {
+  int missingClassMember({required int offset}) {
     final start = offset;
     final end = offset;
     return _leaf(.missingClassMember, start, end);
   }
 
-  int putMissingExpression({required int offset}) {
+  int missingExpression({required int offset}) {
     final start = offset;
     final end = offset;
     return _leaf(.missingExpression, start, end);
   }
 
-  int putMissingFunctionBody({required int offset}) {
+  int missingFunctionBody({required int offset}) {
     final start = offset;
     final end = offset;
     return _leaf(.missingFunctionBody, start, end);
   }
 
-  int putMissingPattern({required int offset}) {
+  int missingPattern({required int offset}) {
     final start = offset;
     final end = offset;
     return _leaf(.missingPattern, start, end);
   }
 
-  int putMissingStatement({required int offset}) {
+  int missingStatement({required int offset}) {
     final start = offset;
     final end = offset;
     return _leaf(.missingStatement, start, end);
   }
 
-  int putMissingStringExpression({required int offset}) {
+  int missingStringExpression({required int offset}) {
     final start = offset;
     final end = offset;
     return _leaf(.missingStringExpression, start, end);
   }
 
-  int putMissingTopLevelDeclaration({required int offset}) {
+  int missingTopLevelDeclaration({required int offset}) {
     final start = offset;
     final end = offset;
     return _leaf(.missingTopLevelDeclaration, start, end);
   }
 
-  int putMissingTypeAnnotation({required int offset}) =>
+  int missingTypeAnnotation({required int offset}) =>
       _leaf(.missingTypeAnnotation, offset, offset);
 
-  int putMixinDeclaration({
+  int mixinDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1601,89 +1793,91 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     bool isSemicolonBody = false,
     List<int> members = const [],
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(name)
-      ..add(typeParameters)
-      ..add(onClause)
-      ..add(implementsClause)
-      ..addAll(members);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(name, .identifier);
+    children.add(typeParameters, .typeParameterList);
+    children.add(onClause, .typeListClause);
+    children.add(implementsClause, .typeListClause);
+    final membersCount = children.addAll(members, .classMember);
     final row = children.finish(.mixinDeclaration);
-    final fieldOffset = fields.reserve(8);
-    fields.cells[fieldOffset + 0] = isBase ? 1 : 0;
-    fields.cells[fieldOffset + 1] = rawRef(name);
-    fields.cells[fieldOffset + 2] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 3] = rawRef(onClause);
-    fields.cells[fieldOffset + 4] = rawRef(implementsClause);
-    fields.cells[fieldOffset + 5] = isSemicolonBody ? 1 : 0;
-    fields.cells[fieldOffset + 6] = metadata.length;
-    fields.cells[fieldOffset + 7] = members.length;
+    final fieldOffset = _fields.reserve(8);
+    _fields.cells[fieldOffset] = isBase ? 1 : 0;
+    _fields.cells[fieldOffset + 1] = name;
+    _fields.cells[fieldOffset + 2] = typeParameters ?? _nil;
+    _fields.cells[fieldOffset + 3] = onClause ?? _nil;
+    _fields.cells[fieldOffset + 4] = implementsClause ?? _nil;
+    _fields.cells[fieldOffset + 5] = isSemicolonBody ? 1 : 0;
+    _fields.cells[fieldOffset + 6] = metadataCount;
+    _fields.cells[fieldOffset + 7] = membersCount;
     return row;
   }
 
-  int putModifiedBlockFunctionBody({
+  int modifiedBlockFunctionBody({
     required int start,
-    required int end,
     required FunctionBodyModifier modifier,
     required int block,
   }) {
-    final row = _appendOne(.modifiedBlockFunctionBody, start, end, block);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = modifier.index;
+    final end = this.end(block);
+    final row = _appendOne(
+      .modifiedBlockFunctionBody,
+      start,
+      end,
+      block,
+      .blockStatement,
+    );
+    _fields.add(modifier.index);
     return row;
   }
 
-  int putNamedPatternField({
-    required int start,
-    required int end,
-    int? name,
-    required int pattern,
-  }) {
-    return _appendOptional(.namedPatternField, start, end, name, pattern);
+  int namedPatternField({required int start, int? name, required int pattern}) {
+    final end = this.end(pattern);
+    return _appendOptional(
+      .namedPatternField,
+      start,
+      end,
+      name,
+      .identifier,
+      pattern,
+      .dartPattern,
+    );
   }
 
-  int putNamedRecordField({
-    required int start,
-    required int end,
-    required int name,
-    required int value,
-  }) {
-    return _appendTwo(.namedRecordField, start, end, name, value);
-  }
+  int namedRecordField({required int name, required int value}) =>
+      _cover(.namedRecordField, name, .identifier, value, .expression);
 
-  int putNamedRecordTypeField({
+  int namedRecordTypeField({
     required int start,
-    required int end,
     List<int> metadata = const [],
     required int type,
     required int name,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(type)
-      ..add(name);
+    final end = this.end(name);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(type, .typeAnnotation);
+    children.add(name, .identifier);
     final row = children.finish(.namedRecordTypeField);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(type);
-    fields.cells[fieldOffset + 2] = metadata.length;
+    _fields.addTriple(name, type, metadataCount);
     return row;
   }
 
   // The name follows the optional prefix, so bit zero is also its child index.
   static const _typePrefix = 1, _typeArguments = 2, _typeQuestion = 4;
 
-  int? namedTypePrefix(int row) =>
-      fields.cells[offsets[row]] & _typePrefix == 0 ? null : childIndex(row, 0);
+  int? _namedTypePrefix(int row) =>
+      _fields.cells[_offsets[row]] & _typePrefix == 0
+      ? null
+      : _childIndex(row, 0);
 
-  int? namedTypeQuestion(int row) {
-    final field = offsets[row];
-    return fields.cells[field] & _typeQuestion == 0
+  int? _namedTypeQuestion(int row) {
+    final field = _offsets[row];
+    return _fields.cells[field] & _typeQuestion == 0
         ? null
-        : ends[row] - fields.cells[field + 1];
+        : _end(row) - _fields.cells[field + 1];
   }
 
-  int putNamedTypeAnnotation({
+  int namedTypeAnnotation({
     required int start,
     required int end,
     int? questionOffset,
@@ -1704,80 +1898,80 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
       start,
       end,
       prefix,
+      .identifier,
       name,
+      .identifier,
       typeArguments,
+      .typeArgumentList,
     );
     final nullable = questionOffset != null;
-    final field = fields.reserve(nullable ? 2 : 1);
-    fields.cells[field] =
+    final field = _fields.reserve(nullable ? 2 : 1);
+    _fields.cells[field] =
         (prefix == null ? 0 : _typePrefix) |
         (typeArguments == null ? 0 : _typeArguments) |
         (nullable ? _typeQuestion : 0);
-    if (nullable) fields.cells[field + 1] = end - questionOffset;
+    if (nullable) _fields.cells[field + 1] = end - questionOffset;
     return row;
   }
 
-  int putNamespaceCombinator({
+  int namespaceCombinator({
     required int start,
     required int end,
     required NamespaceCombinatorKind kind,
     required List<int> names,
   }) {
-    final row = _appendList(.namespaceCombinator, start, end, names);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = kind.index;
+    final row = _appendList(
+      .namespaceCombinator,
+      start,
+      end,
+      names,
+      .identifier,
+    );
+    _fields.add(kind.index);
     return row;
   }
 
-  int putNullAssertPattern({
-    required int start,
-    required int end,
-    required int pattern,
-  }) {
-    return _appendOne(.nullAssertPattern, start, end, pattern);
+  int nullAssertPattern({required int end, required int pattern}) {
+    final start = this.start(pattern);
+    return _appendOne(.nullAssertPattern, start, end, pattern, .dartPattern);
   }
 
-  int putNullAssertionExpression({
-    required int start,
-    required int end,
-    required int operand,
-  }) {
-    return _appendOne(.nullAssertionExpression, start, end, operand);
+  int nullAssertionExpression({required int end, required int operand}) {
+    final start = this.start(operand);
+    return _appendOne(
+      .nullAssertionExpression,
+      start,
+      end,
+      operand,
+      .expression,
+    );
   }
 
-  int putNullAwareElement({
-    required int start,
-    required int end,
-    required int expression,
-  }) {
-    return _appendOne(.nullAwareElement, start, end, expression);
+  int nullAwareElement({required int start, required int expression}) {
+    final end = this.end(expression);
+    return _appendOne(.nullAwareElement, start, end, expression, .expression);
   }
 
-  int putNullCheckPattern({
-    required int start,
-    required int end,
-    required int pattern,
-  }) {
-    return _appendOne(.nullCheckPattern, start, end, pattern);
+  int nullCheckPattern({required int end, required int pattern}) {
+    final start = this.start(pattern);
+    return _appendOne(.nullCheckPattern, start, end, pattern, .dartPattern);
   }
 
-  int putObjectPattern({
+  int objectPattern({
     required int start,
     required int end,
     required int type,
     required List<int> fields,
   }) {
-    final children = _Children(this, start, end)
-      ..add(type)
-      ..addAll(fields);
+    final children = _Children(this, start, end);
+    children.add(type, .namedTypeAnnotation);
+    final fieldsCount = children.addAll(fields, .patternField);
     final row = children.finish(.objectPattern);
-    final fieldOffset = this.fields.reserve(2);
-    this.fields.cells[fieldOffset + 0] = rawRef(type);
-    this.fields.cells[fieldOffset + 1] = fields.length;
+    _fields.addPair(type, fieldsCount);
     return row;
   }
 
-  int putOperatorDeclaration({
+  int operatorDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1788,111 +1982,100 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int parameters,
     required int body,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(returnType)
-      ..add(parameters)
-      ..add(body);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(returnType, .typeAnnotation);
+    children.add(parameters, .formalParameterList);
+    children.add(body, .functionBody);
     final row = children.finish(.operatorDeclaration);
-    final fieldOffset = fields.reserve(7);
-    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
-    fields.cells[fieldOffset + 1] = isStatic ? 1 : 0;
-    fields.cells[fieldOffset + 2] = rawRef(returnType);
-    fields.cells[fieldOffset + 3] = op.index;
-    fields.cells[fieldOffset + 4] = rawRef(parameters);
-    fields.cells[fieldOffset + 5] = rawRef(body);
-    fields.cells[fieldOffset + 6] = metadata.length;
+    final fieldOffset = _fields.reserve(7);
+    _fields.cells[fieldOffset] = isExternal ? 1 : 0;
+    _fields.cells[fieldOffset + 1] = isStatic ? 1 : 0;
+    _fields.cells[fieldOffset + 2] = returnType ?? _nil;
+    _fields.cells[fieldOffset + 3] = op.index;
+    _fields.cells[fieldOffset + 4] = parameters;
+    _fields.cells[fieldOffset + 5] = body;
+    _fields.cells[fieldOffset + 6] = metadataCount;
     return row;
   }
 
-  int putParameterDefault({
+  int parameterDefault({
     required int start,
-    required int end,
     ParameterDefaultSeparator separator = .equals,
     required int value,
   }) {
-    final row = _appendOne(.parameterDefault, start, end, value);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = separator.index;
+    final end = this.end(value);
+    final row = _appendOne(.parameterDefault, start, end, value, .expression);
+    _fields.add(separator.index);
     return row;
   }
 
-  int putParenthesizedExpression({
+  int parenthesizedExpression({
     required int start,
     required int end,
     required int expression,
-  }) {
-    return _appendOne(.parenthesizedExpression, start, end, expression);
-  }
+  }) =>
+      _appendOne(.parenthesizedExpression, start, end, expression, .expression);
 
-  int putParenthesizedPattern({
+  int parenthesizedPattern({
     required int start,
     required int end,
     required int pattern,
-  }) {
-    return _appendOne(.parenthesizedPattern, start, end, pattern);
-  }
+  }) => _appendOne(.parenthesizedPattern, start, end, pattern, .dartPattern);
 
-  int putPartDirective({
+  int partDirective({
     required int start,
     required int end,
     List<int> metadata = const [],
     required int uri,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(uri);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(uri, .stringExpression);
     final row = children.finish(.partDirective);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(uri);
-    fields.cells[fieldOffset + 1] = metadata.length;
+    _fields.addPair(uri, metadataCount);
     return row;
   }
 
-  int putPartOfDirective({
+  int partOfDirective({
     required int start,
     required int end,
     List<int> metadata = const [],
     required int target,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(target);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(target, .partOfTarget);
     final row = children.finish(.partOfDirective);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(target);
-    fields.cells[fieldOffset + 1] = metadata.length;
+    _fields.addPair(target, metadataCount);
     return row;
   }
 
-  int putPatternAssignmentExpression({
-    required int start,
-    required int end,
-    required int pattern,
-    required int value,
-  }) {
-    return _appendTwo(.patternAssignmentExpression, start, end, pattern, value);
-  }
+  int patternAssignmentExpression({required int pattern, required int value}) =>
+      _cover(
+        .patternAssignmentExpression,
+        pattern,
+        .dartPattern,
+        value,
+        .expression,
+      );
 
-  int putPatternForInBinding({
+  int patternForInBinding({
     required int start,
     required int end,
     List<int> metadata = const [],
     required bool isFinal,
     required int pattern,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(pattern);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(pattern, .dartPattern);
     final row = children.finish(.patternForInBinding);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = isFinal ? 1 : 0;
-    fields.cells[fieldOffset + 1] = rawRef(pattern);
-    fields.cells[fieldOffset + 2] = metadata.length;
+    _fields.addTriple(isFinal ? 1 : 0, pattern, metadataCount);
     return row;
   }
 
-  int putPatternVariableDeclaration({
+  int patternVariableDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -1900,110 +2083,106 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int pattern,
     required int initializer,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(pattern)
-      ..add(initializer);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(pattern, .dartPattern);
+    children.add(initializer, .expression);
     final row = children.finish(.patternVariableDeclaration);
-    final fieldOffset = fields.reserve(4);
-    fields.cells[fieldOffset + 0] = isFinal ? 1 : 0;
-    fields.cells[fieldOffset + 1] = rawRef(pattern);
-    fields.cells[fieldOffset + 2] = rawRef(initializer);
-    fields.cells[fieldOffset + 3] = metadata.length;
+    final fieldOffset = _fields.reserve(4);
+    _fields.cells[fieldOffset] = isFinal ? 1 : 0;
+    _fields.cells[fieldOffset + 1] = pattern;
+    _fields.cells[fieldOffset + 2] = initializer;
+    _fields.cells[fieldOffset + 3] = metadataCount;
     return row;
   }
 
-  int putPatternVariableDeclarationStatement({
+  int patternVariableDeclarationStatement({
     required int start,
     required int end,
     required int declaration,
-  }) {
-    return _appendOne(
-      .patternVariableDeclarationStatement,
-      start,
-      end,
-      declaration,
-    );
-  }
+  }) => _appendOne(
+    .patternVariableDeclarationStatement,
+    start,
+    end,
+    declaration,
+    .patternVariableDeclaration,
+  );
 
-  int putPositionalRecordTypeField({
+  int positionalRecordTypeField({
     required int start,
     required int end,
     List<int> metadata = const [],
     required int type,
     int? name,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(type)
-      ..add(name);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(type, .typeAnnotation);
+    children.add(name, .identifier);
     final row = children.finish(.positionalRecordTypeField);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(type);
-    fields.cells[fieldOffset + 2] = metadata.length;
+    _fields.addTriple(name ?? _nil, type, metadataCount);
     return row;
   }
 
-  int putPrimaryConstructorBody({
+  int primaryConstructorBody({
     required int start,
-    required int end,
     List<int> metadata = const [],
     List<int> initializers = const [],
     required int body,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..addAll(initializers)
-      ..add(body);
+    final end = this.end(body);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    final initializersCount = children.addAll(
+      initializers,
+      .constructorInitializer,
+    );
+    children.add(body, .functionBody);
     final row = children.finish(.primaryConstructorBody);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(body);
-    fields.cells[fieldOffset + 1] = metadata.length;
-    fields.cells[fieldOffset + 2] = initializers.length;
+    _fields.addTriple(body, metadataCount, initializersCount);
     return row;
   }
 
-  int putPropertyAccessExpression({
-    required int start,
-    required int end,
+  int propertyAccessExpression({
     required int target,
     required int property,
     bool isNullAware = false,
   }) {
-    final row = _appendTwo(
+    final row = _cover(
       .propertyAccessExpression,
-      start,
-      end,
       target,
+      .expression,
       property,
+      .identifier,
     );
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isNullAware ? 1 : 0;
+    _fields.add(isNullAware ? 1 : 0);
     return row;
   }
 
-  int putRecordExpression({
+  int recordExpression({
     required int start,
     required int end,
     bool hasConstKeyword = false,
     required List<int> fields,
   }) {
-    final row = _appendList(.recordExpression, start, end, fields);
-    final fieldOffset = this.fields.reserve(1);
-    this.fields.cells[fieldOffset + 0] = hasConstKeyword ? 1 : 0;
+    final row = _appendList(
+      .recordExpression,
+      start,
+      end,
+      fields,
+      .recordField,
+    );
+    _fields.add(hasConstKeyword ? 1 : 0);
     return row;
   }
 
-  int putRecordPattern({
+  int recordPattern({
     required int start,
     required int end,
     required List<int> fields,
-  }) {
-    return _appendList(.recordPattern, start, end, fields);
-  }
+  }) => _appendList(.recordPattern, start, end, fields, .patternField);
 
-  int putRecordTypeAnnotation({
+  int recordTypeAnnotation({
     required int start,
     required int end,
     int? questionOffset,
@@ -2018,79 +2197,86 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
         "questionOffset",
       );
     }
-    final children = _Children(this, start, end)
-      ..addAll(positionalFields)
-      ..add(namedFields);
+    final children = _Children(this, start, end);
+    final positionalFieldsCount = children.addAll(
+      positionalFields,
+      .positionalRecordTypeField,
+    );
+    children.add(namedFields, .recordTypeNamedFields);
     final row = children.finish(.recordTypeAnnotation);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(namedFields);
-    fields.cells[fieldOffset + 1] = positionalFields.length;
-    fields.cells[fieldOffset + 2] = questionOffset == null
-        ? _nil
-        : end - questionOffset;
+    _fields.addTriple(
+      namedFields ?? _nil,
+      positionalFieldsCount,
+      questionOffset == null ? _nil : end - questionOffset,
+    );
     return row;
   }
 
-  int putRecordTypeNamedFields({
+  int recordTypeNamedFields({
     required int start,
     required int end,
     required List<int> fields,
-  }) {
-    return _appendList(.recordTypeNamedFields, start, end, fields);
-  }
+  }) => _appendList(
+    .recordTypeNamedFields,
+    start,
+    end,
+    fields,
+    .namedRecordTypeField,
+  );
 
-  int putRedirectingConstructorInitializer({
+  int redirectingConstructorInitializer({
     required int start,
-    required int end,
     int? name,
     required int arguments,
   }) {
+    final end = this.end(arguments);
     return _appendOptional(
       .redirectingConstructorInitializer,
       start,
       end,
       name,
+      .identifier,
       arguments,
+      .argumentList,
     );
   }
 
-  int putRelationalPattern({
+  int relationalPattern({
     required int start,
-    required int end,
     required RelationalPatternOperator op,
     required int operand,
   }) {
-    final row = _appendOne(.relationalPattern, start, end, operand);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = op.index;
+    final end = this.end(operand);
+    final row = _appendOne(
+      .relationalPattern,
+      start,
+      end,
+      operand,
+      .expression,
+    );
+    _fields.add(op.index);
     return row;
   }
 
-  int putRestPatternElement({
+  int restPatternElement({
     required int start,
     required int end,
     int? pattern,
-  }) {
-    return _appendOptional(.restPatternElement, start, end, pattern);
-  }
+  }) => _appendOptional(.restPatternElement, start, end, pattern, .dartPattern);
 
-  int putRethrowStatement({required int start, required int end}) {
-    return _leaf(.rethrowStatement, start, end);
-  }
+  int rethrowStatement({required int start, required int end}) =>
+      _leaf(.rethrowStatement, start, end);
 
-  int putReturnStatement({
+  int returnStatement({
     required int start,
     required int end,
     int? expression,
-  }) {
-    return _appendOptional(.returnStatement, start, end, expression);
-  }
+  }) => _appendOptional(.returnStatement, start, end, expression, .expression);
 
-  int putScriptTag({required int start, required int end}) {
-    return _leaf(.scriptTag, start, end);
-  }
+  int scriptTag({required int start, required int end}) =>
+      _leaf(.scriptTag, start, end);
 
-  int putSetterDeclaration({
+  int setterDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -2102,149 +2288,149 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int parameters,
     required int body,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(returnType)
-      ..add(name)
-      ..add(parameters)
-      ..add(body);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(returnType, .typeAnnotation);
+    children.add(name, .identifier);
+    children.add(parameters, .formalParameterList);
+    children.add(body, .functionBody);
     final row = children.finish(.setterDeclaration);
-    final fieldOffset = fields.reserve(8);
-    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
-    fields.cells[fieldOffset + 1] = isStatic ? 1 : 0;
-    fields.cells[fieldOffset + 2] = isCovariant ? 1 : 0;
-    fields.cells[fieldOffset + 3] = rawRef(returnType);
-    fields.cells[fieldOffset + 4] = rawRef(name);
-    fields.cells[fieldOffset + 5] = rawRef(parameters);
-    fields.cells[fieldOffset + 6] = rawRef(body);
-    fields.cells[fieldOffset + 7] = metadata.length;
+    final fieldOffset = _fields.reserve(8);
+    _fields.cells[fieldOffset] = isExternal ? 1 : 0;
+    _fields.cells[fieldOffset + 1] = isStatic ? 1 : 0;
+    _fields.cells[fieldOffset + 2] = isCovariant ? 1 : 0;
+    _fields.cells[fieldOffset + 3] = returnType ?? _nil;
+    _fields.cells[fieldOffset + 4] = name;
+    _fields.cells[fieldOffset + 5] = parameters;
+    _fields.cells[fieldOffset + 6] = body;
+    _fields.cells[fieldOffset + 7] = metadataCount;
     return row;
   }
 
-  int putSpreadElement({
+  int spreadElement({
     required int start,
-    required int end,
     required int expression,
     bool isNullAware = false,
   }) {
-    final row = _appendOne(.spreadElement, start, end, expression);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isNullAware ? 1 : 0;
+    final end = this.end(expression);
+    final row = _appendOne(.spreadElement, start, end, expression, .expression);
+    _fields.add(isNullAware ? 1 : 0);
     return row;
   }
 
-  int putStringInterpolation({
+  int stringInterpolation({
     required int start,
     required int end,
     required int expression,
     required bool isBraced,
   }) {
-    final row = _appendOne(.stringInterpolation, start, end, expression);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isBraced ? 1 : 0;
+    final row = _appendOne(
+      .stringInterpolation,
+      start,
+      end,
+      expression,
+      .expression,
+    );
+    _fields.add(isBraced ? 1 : 0);
     return row;
   }
 
-  int putStringLiteralExpression({required int start, required int end}) {
-    return _leaf(.stringLiteralExpression, start, end);
-  }
+  int stringLiteralExpression({required int start, required int end}) =>
+      _leaf(.stringLiteralExpression, start, end);
 
-  int putStringText({required int start, required int end}) {
-    return _leaf(.stringText, start, end);
-  }
+  int stringText({required int start, required int end}) =>
+      _leaf(.stringText, start, end);
 
-  int putSuperConstructorInitializer({
+  int superConstructorInitializer({
     required int start,
-    required int end,
     int? name,
     required int arguments,
   }) {
+    final end = this.end(arguments);
     return _appendOptional(
       .superConstructorInitializer,
       start,
       end,
       name,
+      .identifier,
       arguments,
+      .argumentList,
     );
   }
 
-  int putSuperExpression({required int start, required int end}) {
-    return _leaf(.superExpression, start, end);
-  }
+  int superExpression({required int start, required int end}) =>
+      _leaf(.superExpression, start, end);
 
-  int putSwitchExpression({
+  int switchExpression({
     required int start,
     required int end,
     required int expression,
     required List<int> cases,
   }) {
-    final children = _Children(this, start, end)
-      ..add(expression)
-      ..addAll(cases);
+    final children = _Children(this, start, end);
+    children.add(expression, .expression);
+    final casesCount = children.addAll(cases, .switchExpressionCase);
     final row = children.finish(.switchExpression);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(expression);
-    fields.cells[fieldOffset + 1] = cases.length;
+    _fields.addPair(expression, casesCount);
     return row;
   }
 
-  int putSwitchExpressionCase({
+  int switchExpressionCase({
     required int start,
-    required int end,
     required int pattern,
     required int value,
   }) {
-    return _appendTwo(.switchExpressionCase, start, end, pattern, value);
+    final end = this.end(value);
+    return _appendTwo(
+      .switchExpressionCase,
+      start,
+      end,
+      pattern,
+      .casePattern,
+      value,
+      .expression,
+    );
   }
 
-  int putSwitchStatement({
+  int switchStatement({
     required int start,
     required int end,
     required int expression,
     required List<int> members,
   }) {
-    final children = _Children(this, start, end)
-      ..add(expression)
-      ..addAll(members);
+    final children = _Children(this, start, end);
+    children.add(expression, .expression);
+    final membersCount = children.addAll(members, .switchStatementMember);
     final row = children.finish(.switchStatement);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = rawRef(expression);
-    fields.cells[fieldOffset + 1] = members.length;
+    _fields.addPair(expression, membersCount);
     return row;
   }
 
-  int putSwitchStatementMember({
+  int switchStatementMember({
     required int start,
     required int end,
     List<int> labels = const [],
     int? pattern,
     required List<int> statements,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(labels)
-      ..add(pattern)
-      ..addAll(statements);
+    final children = _Children(this, start, end);
+    final labelsCount = children.addAll(labels, .label);
+    children.add(pattern, .casePattern);
+    final statementsCount = children.addAll(statements, .statement);
     final row = children.finish(.switchStatementMember);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(pattern);
-    fields.cells[fieldOffset + 1] = labels.length;
-    fields.cells[fieldOffset + 2] = statements.length;
+    _fields.addTriple(pattern ?? _nil, labelsCount, statementsCount);
     return row;
   }
 
-  int putThisExpression({required int start, required int end}) {
-    return _leaf(.thisExpression, start, end);
+  int thisExpression({required int start, required int end}) =>
+      _leaf(.thisExpression, start, end);
+
+  int throwExpression({required int start, required int expression}) {
+    final end = this.end(expression);
+    return _appendOne(.throwExpression, start, end, expression, .expression);
   }
 
-  int putThrowExpression({
-    required int start,
-    required int end,
-    required int expression,
-  }) {
-    return _appendOne(.throwExpression, start, end, expression);
-  }
-
-  int putTopLevelFunctionDeclaration({
+  int topLevelFunctionDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -2255,26 +2441,26 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int parameters,
     required int body,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(returnType)
-      ..add(name)
-      ..add(typeParameters)
-      ..add(parameters)
-      ..add(body);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(returnType, .typeAnnotation);
+    children.add(name, .identifier);
+    children.add(typeParameters, .typeParameterList);
+    children.add(parameters, .formalParameterList);
+    children.add(body, .functionBody);
     final row = children.finish(.topLevelFunctionDeclaration);
-    final fieldOffset = fields.reserve(7);
-    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
-    fields.cells[fieldOffset + 1] = rawRef(returnType);
-    fields.cells[fieldOffset + 2] = rawRef(name);
-    fields.cells[fieldOffset + 3] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 4] = rawRef(parameters);
-    fields.cells[fieldOffset + 5] = rawRef(body);
-    fields.cells[fieldOffset + 6] = metadata.length;
+    final fieldOffset = _fields.reserve(7);
+    _fields.cells[fieldOffset] = isExternal ? 1 : 0;
+    _fields.cells[fieldOffset + 1] = returnType ?? _nil;
+    _fields.cells[fieldOffset + 2] = name;
+    _fields.cells[fieldOffset + 3] = typeParameters ?? _nil;
+    _fields.cells[fieldOffset + 4] = parameters;
+    _fields.cells[fieldOffset + 5] = body;
+    _fields.cells[fieldOffset + 6] = metadataCount;
     return row;
   }
 
-  int putTopLevelGetterDeclaration({
+  int topLevelGetterDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -2283,22 +2469,22 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int name,
     required int body,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(returnType)
-      ..add(name)
-      ..add(body);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(returnType, .typeAnnotation);
+    children.add(name, .identifier);
+    children.add(body, .functionBody);
     final row = children.finish(.topLevelGetterDeclaration);
-    final fieldOffset = fields.reserve(5);
-    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
-    fields.cells[fieldOffset + 1] = rawRef(returnType);
-    fields.cells[fieldOffset + 2] = rawRef(name);
-    fields.cells[fieldOffset + 3] = rawRef(body);
-    fields.cells[fieldOffset + 4] = metadata.length;
+    final fieldOffset = _fields.reserve(5);
+    _fields.cells[fieldOffset] = isExternal ? 1 : 0;
+    _fields.cells[fieldOffset + 1] = returnType ?? _nil;
+    _fields.cells[fieldOffset + 2] = name;
+    _fields.cells[fieldOffset + 3] = body;
+    _fields.cells[fieldOffset + 4] = metadataCount;
     return row;
   }
 
-  int putTopLevelSetterDeclaration({
+  int topLevelSetterDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -2308,55 +2494,57 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     required int parameters,
     required int body,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(returnType)
-      ..add(name)
-      ..add(parameters)
-      ..add(body);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(returnType, .typeAnnotation);
+    children.add(name, .identifier);
+    children.add(parameters, .formalParameterList);
+    children.add(body, .functionBody);
     final row = children.finish(.topLevelSetterDeclaration);
-    final fieldOffset = fields.reserve(6);
-    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
-    fields.cells[fieldOffset + 1] = rawRef(returnType);
-    fields.cells[fieldOffset + 2] = rawRef(name);
-    fields.cells[fieldOffset + 3] = rawRef(parameters);
-    fields.cells[fieldOffset + 4] = rawRef(body);
-    fields.cells[fieldOffset + 5] = metadata.length;
+    final fieldOffset = _fields.reserve(6);
+    _fields.cells[fieldOffset] = isExternal ? 1 : 0;
+    _fields.cells[fieldOffset + 1] = returnType ?? _nil;
+    _fields.cells[fieldOffset + 2] = name;
+    _fields.cells[fieldOffset + 3] = parameters;
+    _fields.cells[fieldOffset + 4] = body;
+    _fields.cells[fieldOffset + 5] = metadataCount;
     return row;
   }
 
-  int putTopLevelVariableDeclaration({
+  int topLevelVariableDeclaration({
     required int start,
     required int end,
     bool isExternal = false,
     required int variables,
   }) {
-    final row = _appendOne(.topLevelVariableDeclaration, start, end, variables);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isExternal ? 1 : 0;
+    final row = _appendOne(
+      .topLevelVariableDeclaration,
+      start,
+      end,
+      variables,
+      .variableDeclarationList,
+    );
+    _fields.add(isExternal ? 1 : 0);
     return row;
   }
 
-  int putTryStatement({
+  int tryStatement({
     required int start,
     required int end,
     required int body,
     List<int> catchClauses = const [],
     int? finallyBlock,
   }) {
-    final children = _Children(this, start, end)
-      ..add(body)
-      ..addAll(catchClauses)
-      ..add(finallyBlock);
+    final children = _Children(this, start, end);
+    children.add(body, .blockStatement);
+    final catchClausesCount = children.addAll(catchClauses, .catchClause);
+    children.add(finallyBlock, .blockStatement);
     final row = children.finish(.tryStatement);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(body);
-    fields.cells[fieldOffset + 1] = rawRef(finallyBlock);
-    fields.cells[fieldOffset + 2] = catchClauses.length;
+    _fields.addTriple(body, finallyBlock ?? _nil, catchClausesCount);
     return row;
   }
 
-  int putTypeAliasDeclaration({
+  int typeAliasDeclaration({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -2364,131 +2552,119 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? typeParameters,
     required int type,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(name)
-      ..add(typeParameters)
-      ..add(type);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(name, .identifier);
+    children.add(typeParameters, .typeParameterList);
+    children.add(type, .typeAnnotation);
     final row = children.finish(.typeAliasDeclaration);
-    final fieldOffset = fields.reserve(4);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(typeParameters);
-    fields.cells[fieldOffset + 2] = rawRef(type);
-    fields.cells[fieldOffset + 3] = metadata.length;
+    final fieldOffset = _fields.reserve(4);
+    _fields.cells[fieldOffset] = name;
+    _fields.cells[fieldOffset + 1] = typeParameters ?? _nil;
+    _fields.cells[fieldOffset + 2] = type;
+    _fields.cells[fieldOffset + 3] = metadataCount;
     return row;
   }
 
-  int putTypeArgumentList({
+  int typeArgumentList({
     required int start,
     required int end,
     required List<int> arguments,
-  }) {
-    return _appendList(.typeArgumentList, start, end, arguments);
-  }
+  }) => _appendList(.typeArgumentList, start, end, arguments, .typeAnnotation);
 
-  int putTypeInstantiationExpression({
-    required int start,
-    required int end,
+  int typeInstantiationExpression({
     required int expression,
     required int typeArguments,
-  }) {
-    return _appendTwo(
-      .typeInstantiationExpression,
-      start,
-      end,
-      expression,
-      typeArguments,
-    );
-  }
+  }) => _cover(
+    .typeInstantiationExpression,
+    expression,
+    .expression,
+    typeArguments,
+    .typeArgumentList,
+  );
 
-  int putTypeListClause({
+  int typeListClause({
     required int start,
     required int end,
     required TypeListClauseKind kind,
     required List<int> types,
   }) {
-    final row = _appendList(.typeListClause, start, end, types);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = kind.index;
+    final row = _appendList(
+      .typeListClause,
+      start,
+      end,
+      types,
+      .typeAnnotation,
+    );
+    _fields.add(kind.index);
     return row;
   }
 
-  int putTypeParameter({
+  int typeParameter({
     required int start,
     required int end,
     List<int> metadata = const [],
     required int name,
     int? bound,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(name)
-      ..add(bound);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(name, .identifier);
+    children.add(bound, .typeAnnotation);
     final row = children.finish(.typeParameter);
-    final fieldOffset = fields.reserve(3);
-    fields.cells[fieldOffset + 0] = rawRef(name);
-    fields.cells[fieldOffset + 1] = rawRef(bound);
-    fields.cells[fieldOffset + 2] = metadata.length;
+    _fields.addTriple(name, bound ?? _nil, metadataCount);
     return row;
   }
 
-  int putTypeParameterList({
+  int typeParameterList({
     required int start,
     required int end,
     required List<int> parameters,
-  }) {
-    return _appendList(.typeParameterList, start, end, parameters);
-  }
+  }) => _appendList(.typeParameterList, start, end, parameters, .typeParameter);
 
-  int putTypeTestExpression({
-    required int start,
-    required int end,
+  int typeTestExpression({
     required int expression,
     required int type,
     bool isNegated = false,
   }) {
-    final row = _appendTwo(.typeTestExpression, start, end, expression, type);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isNegated ? 1 : 0;
+    final row = _cover(
+      .typeTestExpression,
+      expression,
+      .expression,
+      type,
+      .typeAnnotation,
+    );
+    _fields.add(isNegated ? 1 : 0);
     return row;
   }
 
-  int putUnaryExpression({
+  int unaryExpression({
     required int start,
-    required int end,
     required UnaryOperator op,
     required int operand,
   }) {
-    final row = _appendOne(.unaryExpression, start, end, operand);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = op.index;
+    final end = this.end(operand);
+    final row = _appendOne(.unaryExpression, start, end, operand, .expression);
+    _fields.add(op.index);
     return row;
   }
 
-  int putUpdateExpression({
+  int updateExpression({
     required int start,
     required int end,
     required int operand,
     required UpdateOperator op,
     required bool isPrefix,
   }) {
-    final row = _appendOne(.updateExpression, start, end, operand);
-    final fieldOffset = fields.reserve(2);
-    fields.cells[fieldOffset + 0] = op.index;
-    fields.cells[fieldOffset + 1] = isPrefix ? 1 : 0;
+    final row = _appendOne(.updateExpression, start, end, operand, .expression);
+    _fields.addPair(op.index, isPrefix ? 1 : 0);
     return row;
   }
 
-  int putVariableDeclaration({
-    required int start,
-    required int end,
-    required int name,
-    int? initializer,
-  }) {
-    return _appendOptional(.variableDeclaration, start, end, name, initializer);
-  }
+  int variableDeclaration({required int name, int? initializer}) =>
+      _cover(.variableDeclaration, name, .identifier, initializer, .expression);
 
-  int putVariableDeclarationList({
+  int variableDeclarationList({
     required int start,
     required int end,
     List<int> metadata = const [],
@@ -2497,253 +2673,172 @@ final class AstArena._(final SourceFile source, int capacity, int tokenCount) {
     int? type,
     required List<int> declarations,
   }) {
-    final children = _Children(this, start, end)
-      ..addAll(metadata)
-      ..add(type)
-      ..addAll(declarations);
+    final children = _Children(this, start, end);
+    final metadataCount = children.addAll(metadata, .annotation);
+    children.add(type, .typeAnnotation);
+    final declarationsCount = children.addAll(
+      declarations,
+      .variableDeclaration,
+    );
     final row = children.finish(.variableDeclarationList);
-    final fieldOffset = fields.reserve(5);
-    fields.cells[fieldOffset + 0] = keyword.index;
-    fields.cells[fieldOffset + 1] = isLate ? 1 : 0;
-    fields.cells[fieldOffset + 2] = rawRef(type);
-    fields.cells[fieldOffset + 3] = metadata.length;
-    fields.cells[fieldOffset + 4] = declarations.length;
+    final fieldOffset = _fields.reserve(5);
+    _fields.cells[fieldOffset] = keyword.index;
+    _fields.cells[fieldOffset + 1] = isLate ? 1 : 0;
+    _fields.cells[fieldOffset + 2] = type ?? _nil;
+    _fields.cells[fieldOffset + 3] = metadataCount;
+    _fields.cells[fieldOffset + 4] = declarationsCount;
     return row;
   }
 
-  int putVariableDeclarationStatement({
-    required int start,
-    required int end,
-    required int variables,
-  }) {
-    return _appendOne(.variableDeclarationStatement, start, end, variables);
+  int variableDeclarationStatement({required int end, required int variables}) {
+    final start = this.start(variables);
+    return _appendOne(
+      .variableDeclarationStatement,
+      start,
+      end,
+      variables,
+      .variableDeclarationList,
+    );
   }
 
-  int putVariablePattern({
+  int variablePattern({
     required int start,
-    required int end,
     PatternVariableKeyword keyword = .none,
     int? type,
     required int name,
   }) {
-    final row = _appendOptional(.variablePattern, start, end, type, name);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = keyword.index;
+    final end = this.end(name);
+    final row = _appendOptional(
+      .variablePattern,
+      start,
+      end,
+      type,
+      .typeAnnotation,
+      name,
+      .identifier,
+    );
+    _fields.add(keyword.index);
     return row;
   }
 
-  int putWhileStatement({
+  int whileStatement({
     required int start,
-    required int end,
     required int condition,
     required int body,
   }) {
-    return _appendTwo(.whileStatement, start, end, condition, body);
+    final end = this.end(body);
+    return _appendTwo(
+      .whileStatement,
+      start,
+      end,
+      condition,
+      .expression,
+      body,
+      .statement,
+    );
   }
 
-  int putWildcardPattern({
+  int wildcardPattern({
     required int start,
     required int end,
     PatternVariableKeyword keyword = .none,
     int? type,
   }) {
-    final row = _appendOptional(.wildcardPattern, start, end, type);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = keyword.index;
+    final row = _appendOptional(
+      .wildcardPattern,
+      start,
+      end,
+      type,
+      .typeAnnotation,
+    );
+    _fields.add(keyword.index);
     return row;
   }
 
-  int putYieldStatement({
+  int yieldStatement({
     required int start,
     required int end,
     bool isStar = false,
     required int expression,
   }) {
-    final row = _appendOne(.yieldStatement, start, end, expression);
-    final fieldOffset = fields.reserve(1);
-    fields.cells[fieldOffset + 0] = isStar ? 1 : 0;
+    final row = _appendOne(
+      .yieldStatement,
+      start,
+      end,
+      expression,
+      .expression,
+    );
+    _fields.add(isStar ? 1 : 0);
     return row;
   }
 
-  int rawRef(int? id) {
-    if (id == null) return _nil;
-    if (id < 0 || id >= count) {
-      RangeError.checkValidIndex(id, this, 'node', count);
-    }
-    return id;
+  SyntaxKind _kindAt(int id) => SyntaxKind.values[_tags[id]];
+}
+
+enum _ChildType {
+  annotation.exact(SyntaxKind.annotation),
+  argument.exact(SyntaxKind.argument),
+  argumentList.exact(SyntaxKind.argumentList),
+  blockStatement.exact(SyntaxKind.blockStatement),
+  casePattern.family(_isCasePattern),
+  catchClause.exact(SyntaxKind.catchClause),
+  classMember.family(_isClassMember),
+  collectionElement.family(_isCollectionElement),
+  compilationUnitMember.family(_isCompilationUnitMember),
+  conditionalUri.exact(SyntaxKind.conditionalUri),
+  constructorBody.family(_isConstructorBody),
+  constructorInitializer.family(_isConstructorInitializer),
+  dartPattern.family(_isDartPattern),
+  dottedName.exact(SyntaxKind.dottedName),
+  enumConstantDeclaration.exact(SyntaxKind.enumConstantDeclaration),
+  expression.family(_isExpression),
+  extendsClause.exact(SyntaxKind.extendsClause),
+  forInTarget.family(_isForInTarget),
+  forInitializer.family(_isForInitializer),
+  forLoopParts.family(_isForLoopParts),
+  formalParameter.exact(SyntaxKind.formalParameter),
+  formalParameterList.exact(SyntaxKind.formalParameterList),
+  functionBody.family(_isFunctionBody),
+  functionParameterSuffix.exact(SyntaxKind.functionParameterSuffix),
+  functionTypeParameter.exact(SyntaxKind.functionTypeParameter),
+  functionTypeParameterList.exact(SyntaxKind.functionTypeParameterList),
+  identifier.exact(SyntaxKind.identifier),
+  label.exact(SyntaxKind.label),
+  listPatternElement.family(_isListPatternElement),
+  mapPatternElement.family(_isMapPatternElement),
+  namedRecordTypeField.exact(SyntaxKind.namedRecordTypeField),
+  namedTypeAnnotation.exact(SyntaxKind.namedTypeAnnotation),
+  namespaceCombinator.exact(SyntaxKind.namespaceCombinator),
+  parameterDefault.exact(SyntaxKind.parameterDefault),
+  partOfTarget.family(_isPartOfTarget),
+  patternField.family(_isPatternField),
+  patternVariableDeclaration.exact(SyntaxKind.patternVariableDeclaration),
+  positionalRecordTypeField.exact(SyntaxKind.positionalRecordTypeField),
+  recordField.family(_isRecordField),
+  recordTypeNamedFields.exact(SyntaxKind.recordTypeNamedFields),
+  scriptTag.exact(SyntaxKind.scriptTag),
+  statement.family(_isStatement),
+  stringExpression.family(_isStringExpression),
+  stringPart.family(_isStringPart),
+  switchExpressionCase.exact(SyntaxKind.switchExpressionCase),
+  switchStatementMember.exact(SyntaxKind.switchStatementMember),
+  typeAnnotation.family(_isTypeAnnotation),
+  typeArgumentList.exact(SyntaxKind.typeArgumentList),
+  typeListClause.exact(SyntaxKind.typeListClause),
+  typeParameter.exact(SyntaxKind.typeParameter),
+  typeParameterList.exact(SyntaxKind.typeParameterList),
+  variableDeclaration.exact(SyntaxKind.variableDeclaration),
+  variableDeclarationList.exact(SyntaxKind.variableDeclarationList);
+
+  const _ChildType.exact(this.kind) : roles = 0;
+  const _ChildType.family(this.roles) : kind = null;
+  final SyntaxKind? kind;
+  final int roles;
+
+  bool accepts(int tag) {
+    final exact = kind;
+    return exact == null
+        ? SyntaxKind.values[tag]._roles & roles != 0
+        : tag == exact.index;
   }
-
-  int? nullable(int n) => n == _nil ? null : n;
-  bool indexIsNullAware(int row) => fields.cells[offsets[row]] != 0;
-  bool updateIsPrefix(int row) => fields.cells[offsets[row] + 1] != 0;
-  Iterable<int> walkIds(int root) => _IndexWalk(this, root);
-
-  SyntaxKind kindAt(int id) => SyntaxKind.values[tags[id]];
-
-  AstNode at(int id) => switch (kindAt(id)) {
-    .adjacentStringsExpression => _RowAdjacentStringsExpression(this, id),
-    .annotation => _RowAnnotation(this, id),
-    .argument => _RowArgument(this, id),
-    .argumentList => _RowArgumentList(this, id),
-    .assertInitializer => _RowAssertInitializer(this, id),
-    .assertStatement => _RowAssertStatement(this, id),
-    .assignmentExpression => _RowAssignmentExpression(this, id),
-    .awaitExpression => _RowAwaitExpression(this, id),
-    .binaryExpression => _RowBinaryExpression(this, id),
-    .blockStatement => _RowBlockStatement(this, id),
-    .breakStatement => _RowBreakStatement(this, id),
-    .cascadeExpression => _RowCascadeExpression(this, id),
-    .cascadeIndexExpression => _RowCascadeIndexExpression(this, id),
-    .cascadePropertyExpression => _RowCascadePropertyExpression(this, id),
-    .castExpression => _RowCastExpression(this, id),
-    .castPattern => _RowCastPattern(this, id),
-    .catchClause => _RowCatchClause(this, id),
-    .classDeclaration => _RowClassDeclaration(this, id),
-    .classTypeAliasDeclaration => _RowClassTypeAliasDeclaration(this, id),
-    .collectionExpression => _RowCollectionExpression(this, id),
-    .compilationUnit => _RowCompilationUnit(this, id),
-    .conditionalExpression => _RowConditionalExpression(this, id),
-    .conditionalUri => _RowConditionalUri(this, id),
-    .constDotShorthandExpression => _RowConstDotShorthandExpression(this, id),
-    .constantPattern => _RowConstantPattern(this, id),
-    .constructorDeclaration => _RowConstructorDeclaration(this, id),
-    .continueStatement => _RowContinueStatement(this, id),
-    .declaredIdentifier => _RowDeclaredIdentifier(this, id),
-    .doStatement => _RowDoStatement(this, id),
-    .dotShorthandExpression => _RowDotShorthandExpression(this, id),
-    .dotShorthandReferenceExpression => _RowDotShorthandReferenceExpression(
-      this,
-      id,
-    ),
-    .dottedName => _RowDottedName(this, id),
-    .emptyFunctionBody => _RowEmptyFunctionBody(this, id),
-    .emptyStatement => _RowEmptyStatement(this, id),
-    .enumConstantDeclaration => _RowEnumConstantDeclaration(this, id),
-    .enumDeclaration => _RowEnumDeclaration(this, id),
-    .exportDirective => _RowExportDirective(this, id),
-    .expressionFunctionBody => _RowExpressionFunctionBody(this, id),
-    .expressionStatement => _RowExpressionStatement(this, id),
-    .extendsClause => _RowExtendsClause(this, id),
-    .extensionDeclaration => _RowExtensionDeclaration(this, id),
-    .extensionTypeDeclaration => _RowExtensionTypeDeclaration(this, id),
-    .factoryRedirectBody => _RowFactoryRedirectBody(this, id),
-    .fieldDeclaration => _RowFieldDeclaration(this, id),
-    .fieldInitializer => _RowFieldInitializer(this, id),
-    .forElement => _RowForElement(this, id),
-    .forInParts => _RowForInParts(this, id),
-    .forParts => _RowForParts(this, id),
-    .forStatement => _RowForStatement(this, id),
-    .formalParameter => _RowFormalParameter(this, id),
-    .formalParameterList => _RowFormalParameterList(this, id),
-    .functionExpression => _RowFunctionExpression(this, id),
-    .functionParameterSuffix => _RowFunctionParameterSuffix(this, id),
-    .functionTypeAliasDeclaration => _RowFunctionTypeAliasDeclaration(this, id),
-    .functionTypeAnnotation => _RowFunctionTypeAnnotation(this, id),
-    .functionTypeParameter => _RowFunctionTypeParameter(this, id),
-    .functionTypeParameterList => _RowFunctionTypeParameterList(this, id),
-    .getterDeclaration => _RowGetterDeclaration(this, id),
-    .guardedPattern => _RowGuardedPattern(this, id),
-    .identifier => _RowIdentifier(this, id),
-    .identifierExpression => _RowIdentifierExpression(this, id),
-    .identifierPattern => _RowIdentifierPattern(this, id),
-    .ifElement => _RowIfElement(this, id),
-    .ifStatement => _RowIfStatement(this, id),
-    .importDirective => _RowImportDirective(this, id),
-    .indexExpression => _RowIndexExpression(this, id),
-    .instanceCreationExpression => _RowInstanceCreationExpression(this, id),
-    .interpolatedStringExpression => _RowInterpolatedStringExpression(this, id),
-    .invocationExpression => _RowInvocationExpression(this, id),
-    .label => _RowLabel(this, id),
-    .labeledStatement => _RowLabeledStatement(this, id),
-    .libraryDirective => _RowLibraryDirective(this, id),
-    .listPattern => _RowListPattern(this, id),
-    .literalExpression => _RowLiteralExpression(this, id),
-    .localFunctionDeclaration => _RowLocalFunctionDeclaration(this, id),
-    .logicalPattern => _RowLogicalPattern(this, id),
-    .mapEntryElement => _RowMapEntryElement(this, id),
-    .mapPattern => _RowMapPattern(this, id),
-    .mapPatternEntry => _RowMapPatternEntry(this, id),
-    .methodDeclaration => _RowMethodDeclaration(this, id),
-    .missingClassMember => _RowMissingClassMember(this, id),
-    .missingExpression => _RowMissingExpression(this, id),
-    .missingFunctionBody => _RowMissingFunctionBody(this, id),
-    .missingPattern => _RowMissingPattern(this, id),
-    .missingStatement => _RowMissingStatement(this, id),
-    .missingStringExpression => _RowMissingStringExpression(this, id),
-    .missingTopLevelDeclaration => _RowMissingTopLevelDeclaration(this, id),
-    .missingTypeAnnotation => _RowMissingTypeAnnotation(this, id),
-    .mixinDeclaration => _RowMixinDeclaration(this, id),
-    .modifiedBlockFunctionBody => _RowModifiedBlockFunctionBody(this, id),
-    .namedPatternField => _RowNamedPatternField(this, id),
-    .namedRecordField => _RowNamedRecordField(this, id),
-    .namedRecordTypeField => _RowNamedRecordTypeField(this, id),
-    .namedTypeAnnotation => _RowNamedTypeAnnotation(this, id),
-    .namespaceCombinator => _RowNamespaceCombinator(this, id),
-    .nullAssertPattern => _RowNullAssertPattern(this, id),
-    .nullAssertionExpression => _RowNullAssertionExpression(this, id),
-    .nullAwareElement => _RowNullAwareElement(this, id),
-    .nullCheckPattern => _RowNullCheckPattern(this, id),
-    .objectPattern => _RowObjectPattern(this, id),
-    .operatorDeclaration => _RowOperatorDeclaration(this, id),
-    .parameterDefault => _RowParameterDefault(this, id),
-    .parenthesizedExpression => _RowParenthesizedExpression(this, id),
-    .parenthesizedPattern => _RowParenthesizedPattern(this, id),
-    .partDirective => _RowPartDirective(this, id),
-    .partOfDirective => _RowPartOfDirective(this, id),
-    .patternAssignmentExpression => _RowPatternAssignmentExpression(this, id),
-    .patternForInBinding => _RowPatternForInBinding(this, id),
-    .patternVariableDeclaration => _RowPatternVariableDeclaration(this, id),
-    .patternVariableDeclarationStatement =>
-      _RowPatternVariableDeclarationStatement(this, id),
-    .positionalRecordTypeField => _RowPositionalRecordTypeField(this, id),
-    .primaryConstructorBody => _RowPrimaryConstructorBody(this, id),
-    .propertyAccessExpression => _RowPropertyAccessExpression(this, id),
-    .recordExpression => _RowRecordExpression(this, id),
-    .recordPattern => _RowRecordPattern(this, id),
-    .recordTypeAnnotation => _RowRecordTypeAnnotation(this, id),
-    .recordTypeNamedFields => _RowRecordTypeNamedFields(this, id),
-    .redirectingConstructorInitializer => _RowRedirectingConstructorInitializer(
-      this,
-      id,
-    ),
-    .relationalPattern => _RowRelationalPattern(this, id),
-    .restPatternElement => _RowRestPatternElement(this, id),
-    .rethrowStatement => _RowRethrowStatement(this, id),
-    .returnStatement => _RowReturnStatement(this, id),
-    .scriptTag => _RowScriptTag(this, id),
-    .setterDeclaration => _RowSetterDeclaration(this, id),
-    .spreadElement => _RowSpreadElement(this, id),
-    .stringInterpolation => _RowStringInterpolation(this, id),
-    .stringLiteralExpression => _RowStringLiteralExpression(this, id),
-    .stringText => _RowStringText(this, id),
-    .superConstructorInitializer => _RowSuperConstructorInitializer(this, id),
-    .superExpression => _RowSuperExpression(this, id),
-    .switchExpression => _RowSwitchExpression(this, id),
-    .switchExpressionCase => _RowSwitchExpressionCase(this, id),
-    .switchStatement => _RowSwitchStatement(this, id),
-    .switchStatementMember => _RowSwitchStatementMember(this, id),
-    .thisExpression => _RowThisExpression(this, id),
-    .throwExpression => _RowThrowExpression(this, id),
-    .topLevelFunctionDeclaration => _RowTopLevelFunctionDeclaration(this, id),
-    .topLevelGetterDeclaration => _RowTopLevelGetterDeclaration(this, id),
-    .topLevelSetterDeclaration => _RowTopLevelSetterDeclaration(this, id),
-    .topLevelVariableDeclaration => _RowTopLevelVariableDeclaration(this, id),
-    .tryStatement => _RowTryStatement(this, id),
-    .typeAliasDeclaration => _RowTypeAliasDeclaration(this, id),
-    .typeArgumentList => _RowTypeArgumentList(this, id),
-    .typeInstantiationExpression => _RowTypeInstantiationExpression(this, id),
-    .typeListClause => _RowTypeListClause(this, id),
-    .typeParameter => _RowTypeParameter(this, id),
-    .typeParameterList => _RowTypeParameterList(this, id),
-    .typeTestExpression => _RowTypeTestExpression(this, id),
-    .unaryExpression => _RowUnaryExpression(this, id),
-    .updateExpression => _RowUpdateExpression(this, id),
-    .variableDeclaration => _RowVariableDeclaration(this, id),
-    .variableDeclarationList => _RowVariableDeclarationList(this, id),
-    .variableDeclarationStatement => _RowVariableDeclarationStatement(this, id),
-    .variablePattern => _RowVariablePattern(this, id),
-    .whileStatement => _RowWhileStatement(this, id),
-    .wildcardPattern => _RowWildcardPattern(this, id),
-    .yieldStatement => _RowYieldStatement(this, id),
-  };
 }

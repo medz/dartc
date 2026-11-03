@@ -40,7 +40,7 @@ final class _PatternReader(
   @override
   Iterable<_Reader<Object?>> read() sync* {
     yield* primary();
-    var permitsUnary = !parser.arena.hasKind(result, .relationalPattern);
+    var permitsUnary = !parser.arena.isKind(result, .relationalPattern);
     while (true) {
       final token = current;
       if (token.kind == .keywordAs ||
@@ -58,21 +58,14 @@ final class _PatternReader(
           final reader = _RequiredTypeReader(parser);
           yield reader;
           final type = reader.result;
-          result = parser.arena.putCastPattern(
-            start: parser.arena.rStart(result),
-            end: parser.arena.rEnd(type),
-            pattern: result,
-            type: type,
-          );
+          result = parser.arena.castPattern(pattern: result, type: type);
         } else if (token.kind == .question) {
-          result = parser.arena.putNullCheckPattern(
-            start: parser.arena.rStart(result),
+          result = parser.arena.nullCheckPattern(
             end: token.end,
             pattern: result,
           );
         } else {
-          result = parser.arena.putNullAssertPattern(
-            start: parser.arena.rStart(result),
+          result = parser.arena.nullAssertPattern(
             end: token.end,
             pattern: result,
           );
@@ -93,9 +86,7 @@ final class _PatternReader(
         precedence: level + 1,
       );
       yield right;
-      result = parser.arena.putLogicalPattern(
-        start: parser.arena.rStart(result),
-        end: parser.arena.rEnd(right.result),
+      result = parser.arena.logicalPattern(
         left: result,
         op: token.kind == .logicalAnd ? .and : .or,
         right: right.result,
@@ -114,7 +105,7 @@ final class _PatternReader(
         token.kind == .colon ||
         token.kind == .arrow) {
       parser.error('expected_pattern', 'Expected a pattern.', token);
-      result = parser.arena.putMissingPattern(offset: token.start);
+      result = parser.arena.missingPattern(offset: token.start);
       return;
     }
     if (token.kind == .keywordVar || token.kind == .keywordFinal) {
@@ -170,9 +161,9 @@ final class _PatternReader(
       parser.advance();
       final expression = _ExpressionReader(parser, boundary: .patternRelation);
       if (!expression.start()) yield expression;
-      result = parser.arena.putRelationalPattern(
+      result = parser.arena.relationalPattern(
         start: token.start,
-        end: parser.arena.rEnd(expression.result),
+
         op: relation,
         operand: expression.result,
       );
@@ -192,12 +183,12 @@ final class _PatternReader(
           items.length == 1 &&
               parser.arena.isDartPattern(items.single) &&
               !fields.hasComma
-          ? parser.arena.putParenthesizedPattern(
+          ? parser.arena.parenthesizedPattern(
               start: token.start,
               end: fields.end,
-              pattern: parser.arena.asDartPattern(items.single),
+              pattern: items.single,
             )
-          : parser.arena.putRecordPattern(
+          : parser.arena.recordPattern(
               start: token.start,
               end: fields.end,
               fields: items,
@@ -209,17 +200,18 @@ final class _PatternReader(
       final typeReader = _TypeReader(child);
       if (!typeReader.start()) yield _TypeTask(typeReader);
       final candidate = typeReader.result;
-      if (parser.arena.hasKind(candidate, .namedTypeAnnotation) &&
-          !parser.arena.rNamedTypeAnnotationIsNullable(candidate) &&
+      if (candidate != null &&
+          parser.arena.kind(candidate) == .namedTypeAnnotation &&
+          !parser.arena.view<NamedTypeAnnotation>(candidate).isNullable &&
           child.current.kind == .leftParen &&
           typeReader.failure == null) {
         parser.adopt(child);
         final fields = _PatternFieldsReader(parser, context, object: true);
         yield fields;
-        result = parser.arena.putObjectPattern(
+        result = parser.arena.objectPattern(
           start: token.start,
           end: fields.end,
-          type: candidate!,
+          type: candidate,
           fields: fields.result,
         );
         return;
@@ -252,9 +244,9 @@ final class _PatternReader(
         token,
       );
     }
-    result = parser.arena.putConstantPattern(
+    result = parser.arena.constantPattern(
       start: token.start,
-      end: parser.arena.rEnd(value),
+
       hasConstKeyword: hasConst,
       expression: value,
     );
@@ -307,37 +299,32 @@ final class _PatternReader(
       );
     }
     final name = parser.readVariableName();
-    if (parser.arena.rText(name) == 'when' ||
-        parser.arena.rText(name) == 'as') {
+    if (parser.arena.text(name) == 'when' || parser.arena.text(name) == 'as') {
       parser.error(
         'invalid_pattern_identifier',
         'This identifier is reserved in patterns.',
         first,
       );
     }
-    result = parser.arena.rText(name) == '_'
-        ? parser.arena.putWildcardPattern(
+    result = parser.arena.text(name) == '_'
+        ? parser.arena.wildcardPattern(
             start: first.start,
-            end: parser.arena.rEnd(name),
+            end: parser.arena.end(name),
             keyword: keyword,
             type: type,
           )
         : keyword == .none && type == null
-        ? parser.arena.putIdentifierPattern(
+        ? parser.arena.identifierPattern(start: first.start, name: name)
+        : parser.arena.variablePattern(
             start: first.start,
-            end: parser.arena.rEnd(name),
-            name: name,
-          )
-        : parser.arena.putVariablePattern(
-            start: first.start,
-            end: parser.arena.rEnd(name),
+
             keyword: keyword,
             type: type,
             name: name,
           );
   }
 
-  bool validConstant(int value) => switch (parser.arena.at(value)) {
+  bool validConstant(int value) => switch (parser.arena.view(value)) {
     LiteralExpression() || StringExpression() || IdentifierExpression() => true,
     PropertyAccessExpression() ||
     IndexExpression() ||
@@ -371,9 +358,9 @@ final class _CasePatternReader(
       final reader = _ExpressionReader(parser);
       if (!reader.start()) yield reader;
       final expression = reader.result;
-      pattern = parser.arena.putConstantPattern(
-        start: parser.arena.rStart(expression),
-        end: parser.arena.rEnd(expression),
+      pattern = parser.arena.constantPattern(
+        start: parser.arena.start(expression),
+
         expression: expression,
       );
     } else {
@@ -386,9 +373,7 @@ final class _CasePatternReader(
       parser.advance();
       final guard = _ExpressionReader(parser);
       if (!guard.start()) yield guard;
-      result = parser.arena.putGuardedPattern(
-        start: parser.arena.rStart(pattern),
-        end: parser.arena.rEnd(guard.result),
+      result = parser.arena.guardedPattern(
         pattern: pattern,
         guard: guard.result,
       );
@@ -411,9 +396,9 @@ final class _CollectionCaseReader(final _Parser parent, final _IfHeader frame)
   }
 }
 
-bool _isUninvokedConstShorthand(AstArena arena, int shorthand) {
-  if (arena.kindAt(shorthand) != .dotShorthandExpression) return false;
-  final reference = arena.childIndex(shorthand, 0);
-  return arena.kindAt(reference) == .constDotShorthandExpression &&
-      arena.rConstDotShorthandExpressionArguments(reference) == null;
+bool _isUninvokedConstShorthand(SyntaxTreeBuilder arena, int shorthand) {
+  if (arena.kind(shorthand) != .dotShorthandExpression) return false;
+  final reference = arena.childAt(shorthand, 0);
+  return arena.kind(reference) == .constDotShorthandExpression &&
+      arena.view<ConstDotShorthandExpression>(reference).arguments == null;
 }

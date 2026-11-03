@@ -1,9 +1,6 @@
-import 'package:dartc/scanner.dart';
+part of 'parser.dart';
 
-import '../ast/nodes.dart' show AstArena;
-import '../ast/row_fields.dart';
-
-final class StringSequence(final AstArena arena) {
+final class _StringSequence(final SyntaxTreeBuilder arena) {
   final List<int> _strings = [];
   final List<int> _parts = [];
   Token? _opening;
@@ -12,7 +9,7 @@ final class StringSequence(final AstArena arena) {
 
   void addText(Token token) {
     if (token.kind == .stringStart) _opening = token;
-    _parts.add(arena.putStringText(start: token.start, end: token.end));
+    _parts.add(arena.stringText(start: token.start, end: token.end));
     if (token.kind == .stringEnd) _finishString(token.end);
   }
 
@@ -23,7 +20,7 @@ final class StringSequence(final AstArena arena) {
     required bool isBraced,
   }) {
     _parts.add(
-      arena.putStringInterpolation(
+      arena.stringInterpolation(
         start: marker.start,
         end: end,
         expression: expression,
@@ -35,7 +32,7 @@ final class StringSequence(final AstArena arena) {
   void _finishString(int end) {
     final opening = _opening!;
     _strings.add(
-      arena.putInterpolatedStringExpression(
+      arena.interpolatedStringExpression(
         start: opening.start,
         end: end,
         parts: _parts,
@@ -49,9 +46,9 @@ final class StringSequence(final AstArena arena) {
     // Recovery can reach EOF before the scanner emits a closing text segment.
     if (_opening != null) _finishString(end);
     if (_strings.length == 1) return _strings.single;
-    return arena.putAdjacentStringsExpression(
-      start: arena.rStart(_strings.first),
-      end: arena.rEnd(_strings.last),
+    return arena.adjacentStringsExpression(
+      start: arena.start(_strings.first),
+      end: arena.end(_strings.last),
       strings: _strings,
     );
   }

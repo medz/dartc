@@ -98,7 +98,7 @@ final class _ArgumentsReader(final _Parser parser) extends _Reader<int> {
     final opening = parser.current;
     parser.expect(.leftParen);
     if (opening.kind != .leftParen) {
-      result = parser.arena.putArgumentList(
+      result = parser.arena.argumentList(
         start: opening.start,
         end: opening.start,
         arguments: const [],

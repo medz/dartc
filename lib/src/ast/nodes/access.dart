@@ -37,18 +37,13 @@ final class NullAssertionExpression({
 
   /// The expression before `!`.
   required final Expression operand,
-}) extends Expression {
+}) extends Expression with _SingleChild {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 1;
-  @override
-  AstNode childAt(int index) => switch (index) {
-    0 => operand,
-    _ => super.childAt(index),
-  };
+  AstNode get _firstChild => operand;
 }
 
 /// Explicit type arguments following an expression without call arguments.
@@ -66,19 +61,15 @@ final class TypeInstantiationExpression({
 
   /// The explicit type arguments.
   required final TypeArgumentList typeArguments,
-}) extends Expression {
+}) extends Expression with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => expression;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => expression,
-    1 => typeArguments,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => typeArguments;
 }
 
 /// An explicit property access through `.` or `?.`.
@@ -95,19 +86,15 @@ final class PropertyAccessExpression({
 
   /// Whether the access uses `?.`.
   final bool isNullAware = false,
-}) extends Expression {
+}) extends Expression with _TwoChildren {
   this {
     _checkChildren(this);
   }
 
   @override
-  int get childCount => 2;
+  AstNode get _firstChild => target;
   @override
-  AstNode childAt(int index) => switch (index) {
-    0 => target,
-    1 => property,
-    _ => super.childAt(index),
-  };
+  AstNode get _secondChild => property;
 }
 
 /// A call with optional explicit type arguments.

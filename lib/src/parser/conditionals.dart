@@ -228,9 +228,7 @@ extension on _Parser {
       checkValue(condition);
       diagnostics.addAll(result.diagnostics);
       values.add(
-        arena.putConditionalExpression(
-          start: arena.rStart(condition),
-          end: arena.rEnd(result.elseBranch),
+        arena.conditionalExpression(
           condition: condition,
           thenExpression: result.thenBranch,
           elseExpression: result.elseBranch,
