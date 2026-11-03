@@ -24,6 +24,7 @@ final class FunctionLowering(
   );
   final _breaks = <ast.AstNode, JumpTarget>{};
   final _continues = <ast.AstNode, void Function()>{};
+  FinallyRegion? _finally;
   late final _target = context.bindings.target(element, context.unit, body);
 
   /// Lowers the body and verifies the resulting function before returning it.
@@ -54,8 +55,45 @@ final class FunctionLowering(
   }
 
   void _return(Value? value) {
-    context.current?.finish(Return(value));
+    if (context.current == null) return;
+    if (_finally case final region?) {
+      region.returnValue(value);
+      return;
+    }
+    context.current!.finish(Return(value));
     context.current = null;
+  }
+
+  void _jump(ast.AstNode target, void Function() jump) {
+    if (_finally?.interceptJump(target, jump) != true) jump();
+  }
+
+  void _try(ast.TryStatement statement) {
+    void body() {
+      if (statement.catchClauses.isEmpty) {
+        _scoped(statement.body);
+      } else {
+        lowerTryCatch(context, statement, _scoped);
+      }
+    }
+
+    final finalizer = statement.finallyBlock;
+    if (finalizer == null || finalizer.statements.isEmpty) {
+      body();
+      return;
+    }
+    final enclosing = _finally;
+    final region = FinallyRegion(context, statement, _target.returnType);
+    region.lower(
+      () {
+        _finally = region;
+        body();
+        _finally = enclosing;
+      },
+      () => _scoped(finalizer),
+      _return,
+      _jump,
+    );
   }
 
   void _scoped(ast.Statement? statement) {
@@ -126,8 +164,8 @@ final class FunctionLowering(
         _patternDeclaration(declaration);
       case ast.ExpressionStatement(:final expression):
         lowerExpression(context, expression);
-      case ast.TryStatement(finallyBlock: null):
-        lowerTryCatch(context, statement, _scoped);
+      case ast.TryStatement():
+        _try(statement);
       case ast.IfStatement(caseClause: ast.CaseClause(:final guardedPattern)):
         final subject = lowerExpression(context, statement.expression);
         if (subject == null) return;
@@ -177,7 +215,7 @@ final class FunctionLowering(
         if (jump == null) {
           unsupported(context.unit, statement, 'jump target');
         }
-        jump();
+        _jump(target!, jump);
       default:
         unsupported(
           context.unit,

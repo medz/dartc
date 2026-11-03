@@ -8,6 +8,7 @@ import 'fixtures/defaults.dart' as defaults;
 import 'fixtures/destructure.dart' as destructure;
 import 'fixtures/effects.dart' as effects;
 import 'fixtures/exceptions.dart' as exceptions;
+import 'fixtures/finalizers.dart' as finalizers;
 import 'fixtures/functions.dart' as dart;
 import 'fixtures/loops.dart' as loops;
 import 'fixtures/nullability.dart' as nullable;
@@ -40,6 +41,7 @@ void main() {
       'defaults.dart',
       'destructure.dart',
       'exceptions.dart',
+      'finalizers.dart',
       'scalar_constants.dart',
     ]);
     functions = {for (final f in result) f.target.name: f};
@@ -430,6 +432,36 @@ void main() {
           value,
           2,
         ], () => exceptions.implicitThrow(value, 2));
+      }
+    },
+  );
+
+  test(
+    'finally preserves or replaces the pending return, exception or jump',
+    () {
+      for (final n in [-5, -1, 0, 1, 4]) {
+        compare('savedReturn', [n], () => finalizers.savedReturn(n));
+        compare('forwardThroughCleanup', [
+          n,
+        ], () => Function.apply(finalizers.forwardThroughCleanup, [n]));
+        compare('loopExits', [n], () => finalizers.loopExits(n));
+        compare('toCase', [n], () => finalizers.toCase(n));
+      }
+      for (final kind in [0, 1, 2]) {
+        compare('replaceReturnWithJump', [
+          kind,
+        ], () => finalizers.replaceReturnWithJump(kind));
+      }
+      for (final stop in [true, false]) {
+        compare('leaveTry', [stop], () => finalizers.leaveTry(stop));
+      }
+      for (final action in [-1, 0, 1, 2]) {
+        for (final replace in [-1, 0, 1, 2]) {
+          compare('overrideCompletion', [
+            action,
+            replace,
+          ], () => finalizers.overrideCompletion(action, replace));
+        }
       }
     },
   );

@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/ast/ast.dart' as ast;
+import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
 import 'function_context.dart';
@@ -48,4 +49,63 @@ void lowerTryCatch(
   }
   if (context.current != null) context.raise(exception, trace);
   done.enter();
+}
+
+/// Routes transfers that leave a try statement through its `finally` block.
+final class FinallyRegion(
+  final FunctionContext _context,
+  final ast.TryStatement _statement,
+  ValueType resultType,
+) {
+  final JumpTarget _normal = .new(_context);
+  final JumpTarget _throw = .new(_context, [.object, .stackTrace]);
+  final JumpTarget _return = .new(_context, [resultType]);
+  final _jumps = <(ast.AstNode, void Function()), JumpTarget>{};
+
+  /// Saves the result before the finalizer can change its source variables.
+  void returnValue(Value? result) =>
+      _return.jump([result ?? const Constant.nullValue()]);
+
+  /// Returns true when reaching [target] requires running this finalizer.
+  bool interceptJump(ast.AstNode target, void Function() jump) {
+    for (var parent = target.parent; parent != null; parent = parent.parent) {
+      if (parent == _statement) return false;
+    }
+    (_jumps[(target, jump)] ??= _normal.sibling(const [])).jump();
+    return true;
+  }
+
+  /// Runs cleanup for each reachable destination, sharing sites with the same exit.
+  void lower(
+    void Function() protected,
+    void Function() cleanup,
+    void Function(Value) resumeReturn,
+    void Function(ast.AstNode, void Function()) resumeJump,
+  ) {
+    final outer = _context.handler;
+    _context.handler = _throw;
+    protected();
+    _context.handler = outer;
+    if (!_throw.hasIncoming && !_return.hasIncoming && _jumps.isEmpty) {
+      if (_context.current != null) cleanup();
+      return;
+    }
+    _normal.jump();
+    if (_throw.enter() case final entry?) {
+      cleanup();
+      if (_context.current != null) {
+        _context.raise(entry.parameters[0], entry.parameters[1]);
+      }
+    }
+    if (_return.enter() case final entry?) {
+      cleanup();
+      if (_context.current != null) resumeReturn(entry.parameters.first);
+    }
+    for (final MapEntry(key: (target, jump), value: entry) in _jumps.entries) {
+      entry.enter();
+      cleanup();
+      if (_context.current != null) resumeJump(target, jump);
+    }
+    if (_normal.enter() != null) cleanup();
+  }
 }
