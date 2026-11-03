@@ -1,41 +1,6 @@
 ## Unreleased
 
-### Features
-
-- Add `package:dartc/source.dart` for source snapshots, UTF-16 ranges, line and column lookup, and custom source providers.
-- Add `package:dartc/diagnostics.dart` for structured diagnostics with severity, error codes, source ranges, and related notes.
-- Add `package:dartc/scanner.dart` for source-preserving Dart tokens, nested string interpolation and comments, and recoverable lexical diagnostics.
-- Add `package:dartc/ast.dart` for immutable syntax trees with checked source ranges. Parser results expose typed nodes and tree-local indices. Use `tree.walk(node)` or `tree.cursor(node)` to traverse a single subtree in source order.
-- Add `package:dartc/parser.dart` to parse expressions and type annotations from scanner results. Supports operators, generic calls and function values, explicit constructor calls, type tests and casts, super receivers, member and index access, cascades, contextual dot shorthands, Symbol and interpolated string literals, records with optional `const`, collection literals with spreads and control-flow elements, and named, function and record types. Return structured diagnostics and source-preserving recovery nodes for incomplete input.
-- Add `parseStatement` for blocks, local variable declarations, branches, loops, labels, jumps, assertions and try/catch/finally. Parse `throw` expressions and retain written conditions, optional initializers and catch parameters.
-- Add `parseFormalParameterList` for positional and named parameters, written defaults, metadata, receiver prefixes and nested function-form parameters with generic bounds.
-- Add `parseFunctionBody` for block, arrow and empty declaration bodies, including asynchronous and generator modifiers. Parse `await`, `yield`, `yield*` and `await for` in their function context and report invalid modifier combinations.
-- Parse anonymous functions and local function declarations with generic parameters, annotations, defaults and nested asynchronous or generator bodies.
-- Add `parseCompilationUnit` for library directives, top-level declarations, classes, mixins, enums, extensions, extension types and their members. Preserve primary and abbreviated constructors, initializer lists, factory redirections and type metadata.
-- Add `LanguageVersion` and the optional `languageVersion` argument to each parser entry point for versioned syntax checks. Call `result.reparse(source)` after editing a compilation unit.
-- Add `parsePattern` with matching, declaration and assignment contexts. Parse structural and logical patterns, guards, if-case, switch expressions and statements, destructuring assignments and pattern loop headers. Preserve metadata on local and loop declarations.
-- Add `package:dartc/project.dart` for loading library graphs from files or custom source providers. Resolve package configurations, conditional imports and exports, parts and language versions, with diagnostics for missing sources and invalid library relationships. Read the indexed AST through `LibraryUnit.tree`. With a complete list of changed source URIs, use `ProjectLoader.update` to reload edits and discover new dependencies.
-
-### API changes
-
-- Build indexed ASTs with `SyntaxTreeBuilder` and use `tree.view<T>(index)` to read a typed node.
-- `ScanResult.tokens` is a read-only `TokenSequence`. Index or iterate it directly, or call `toList()` for a mutable copy. Use `result.recovered()` for recovery tokens and `scanFragment(range)` to scan from a known token boundary.
-- Omit `languageVersion` when constructing a `LibraryUnit`. The unit uses the version recorded in its parser result.
-
-### Fixes
-
-- Parse functions named with contextual keywords such as `import`, `external` and `mixin`, and generic methods named `factory`.
-- Parse function-form parameters named `Function`, including generic, nullable and nested forms.
-- Return syntax diagnostics for unfinished constructor assertions and switch labels without throwing or consuming subsequent declarations.
-- Avoid stack overflow when annotated types nest through metadata arguments, functions, declarations, collections and patterns.
-- Diagnose invalid jump contexts, parameter modifiers, setter signatures, enum argument lists and declaration names while preserving recovery nodes.
-
-### Performance
-
-- Reduce temporary allocations when scanning identifiers and speed up scanning of whitespace runs.
-- Reduce parsing time and memory use for long chains of ambiguous null-aware index expressions, including subsequent member access, calls and indexes.
-- Improve parser scaling for deeply nested collections, blocks, function-form parameters and incomplete delimiters.
-- Reduce unnecessary work when parsing declarations.
+The development checkout uses the official Dart analyzer and can print compiler IR. Native executables, libraries and the `Export` API remain available in [release 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).
 
 ## [0.5.0](https://github.com/medz/dartc/compare/v0.4.0...v0.5.0) — 2026-10-31
 
