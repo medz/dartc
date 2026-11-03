@@ -2,6 +2,8 @@
 
 The IR listing supports assignments to local variables and parameters inside expressions, including integer `+=`, `-=`, `*=`, and prefix and postfix increment and decrement.
 
+Lowering supports ordinary `for` and `do-while` loops, including `break` and `continue` across nested loops and `break` from labeled statements.
+
 The `package:dartc/ir.dart` and `package:dartc/lowering.dart` libraries expose SSA functions and lowering from checked Dart libraries.
 
 The development checkout uses the official Dart analyzer and can print compiler IR. Native executables, libraries and the `Export` API remain available in [release 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).

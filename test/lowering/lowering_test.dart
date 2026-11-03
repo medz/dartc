@@ -4,6 +4,7 @@ import 'package:test/test.dart';
 
 import 'fixtures/effects.dart' as effects;
 import 'fixtures/functions.dart' as dart;
+import 'fixtures/loops.dart' as loops;
 import 'fixtures/updates.dart' as updates;
 
 const _fixtures = 'test/lowering/fixtures';
@@ -17,7 +18,11 @@ void main() {
   late Map<FunctionTarget, IrFunction> bodies;
   late Map<FunctionTarget, Object? Function(int)> imports;
   setUpAll(() async {
-    final result = await _lower(['functions.dart', 'updates.dart']);
+    final result = await _lower([
+      'functions.dart',
+      'updates.dart',
+      'loops.dart',
+    ]);
     functions = {for (final f in result) f.target.name: f};
     bodies = {for (final f in result) f.target: f};
     imports = {
@@ -163,6 +168,23 @@ void main() {
   test('leaving a loop retains the writes made by its final condition', () {
     for (final limit in [-1, 0, 1, 2, 8]) {
       compare('loopWrites', [limit], () => updates.loopWrites(limit));
+    }
+  });
+
+  test('loop transfers preserve destination locals and effect order', () {
+    for (final n in [-1, 0, 1, 3, 5]) {
+      compare('whileTransfers', [n], () => loops.whileTransfers(n));
+      compare('firstIteration', [n], () => loops.firstIteration(n));
+      for (final stop in [false, true]) {
+        compare('doTransfers', [n, stop], () => loops.doTransfers(n, stop));
+        compare('forever', [n, stop], () => loops.forever(n, stop));
+      }
+      for (final stop in [0, 15, 500]) {
+        compare('nestedTransfers', [
+          n,
+          stop,
+        ], () => loops.nestedTransfers(n, stop));
+      }
     }
   });
 

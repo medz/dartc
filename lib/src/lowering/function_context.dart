@@ -32,9 +32,12 @@ final class FunctionContext(
   }
 
   /// Captures the bindings that may differ when another path reaches this point.
-  List<Value> saveLocals() => mutableLocals.isEmpty
-      ? const []
-      : [for (final variable in mutableLocals) locals[variable]!];
+  List<Value> saveLocals([int? count]) {
+    final end = count ?? mutableLocals.length;
+    return end == 0
+        ? const []
+        : [for (var i = 0; i < end; i++) locals[mutableLocals[i]]!];
+  }
 
   /// Restores [values] at the same lexical scope in which they were captured.
   void restoreLocals(List<Value> values) {
@@ -65,5 +68,35 @@ final class FunctionContext(
     }
     current = block;
     return (.new(block, first), .new(block, second));
+  }
+}
+
+/// A jump destination carrying only the mutable locals visible at its boundary.
+final class JumpTarget(final FunctionContext _context) {
+  final _localCount = _context.mutableLocals.length;
+  Block? _block;
+
+  /// Creates the destination on its first incoming edge.
+  Jump edge() {
+    final values = _context.saveLocals(_localCount);
+    return .new(
+      _block ??= _context.addBlock(values.map((v) => v.type)),
+      values,
+    );
+  }
+
+  /// Transfers the open path, if any, to this target.
+  void jump() {
+    _context.current?.finish(edge());
+    _context.current = null;
+  }
+
+  /// Merges incoming jumps with fallthrough in the target's lexical scope.
+  void enter() {
+    final block = _block;
+    if (block == null) return;
+    _context.current?.finish(edge());
+    _context.current = block;
+    _context.restoreLocals(block.parameters);
   }
 }
