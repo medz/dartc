@@ -145,26 +145,13 @@ final class SelectorChain(
       );
     }
 
-    if (direct) {
-      final args = context.bindings.arguments(
-        member,
-        arguments,
-        context.unit,
-        evaluate,
-      );
-      return args == null ? null : result(DirectCall(target, [known, ...args]));
-    }
-    final positional = <Value>[], named = <String, Value>{};
-    for (final argument in arguments?.arguments ?? const <ast.Argument>[]) {
-      final value = evaluate(argument.argumentExpression);
-      if (value == null) return null;
-      if (argument is ast.NamedArgument) {
-        named[argument.name.lexeme] = value;
-      } else {
-        positional.add(value);
-      }
-    }
-    return result(InstanceCall(target, known, positional, named));
+    final args = evaluateArguments(arguments, evaluate);
+    if (args == null) return null;
+    return result(
+      direct
+          ? DirectCall(target, [known, ...context.bindings.bind(target, args)])
+          : InstanceCall(target, known, args.positional, args.named),
+    );
   }
 
   Value? _update(ast.CompoundAssignmentExpression site) {

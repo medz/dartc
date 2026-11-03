@@ -19,6 +19,7 @@ IrClass lowerClass(
   final type = bindings.classType(element, unit, declaration);
   final fields = <InstanceField>[];
   final members = <FunctionTarget>[];
+  final constructors = <FunctionTarget>[];
   for (final field in element.fields) {
     if (field.isOriginGetterSetter) continue;
     if (field.isStatic || field.isLate || field.isExternal) {
@@ -50,10 +51,10 @@ IrClass lowerClass(
     ast.FunctionBody? body,
     List<ast.ConstructorInitializer> initializers,
   ) {
-    if (ctor.isExternal ||
-        ctor.isFactory && ctor.redirectedConstructor != null) {
-      unsupported(unit, site, 'external or redirecting factory constructor');
-    }
+    final target = bindings.target(ctor, unit, site);
+    constructors.add(target);
+    if (target.redirect != null) return;
+    if (ctor.isExternal) unsupported(unit, site, 'external constructor');
     final lowering = FunctionLowering(unit, bindings, ctor, site, body);
     functions.add(
       lowering.run(
@@ -101,7 +102,7 @@ IrClass lowerClass(
         }
     }
   }
-  return IrClass(type, fields, members: members);
+  return IrClass(type, fields, members: members, constructors: constructors);
 }
 
 void _initialize(
@@ -127,10 +128,8 @@ void _initialize(
     bool forwardSuper = false,
   }) {
     final init = bindings.target(target, unit, arguments ?? declaration);
-    final args = bindings.arguments(
-      target,
+    final args = evaluateArguments(
       arguments,
-      unit,
       evaluate,
       forwarded: {
         if (forwardSuper)
@@ -140,7 +139,7 @@ void _initialize(
       },
     );
     if (args != null && !target.enclosingElement.thisType.isDartCoreObject) {
-      context.emit(DirectCall(init, [receiver, ...args]));
+      context.emit(DirectCall(init, [receiver, ...bindings.bind(init, args)]));
     }
   }
 

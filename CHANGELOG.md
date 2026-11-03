@@ -16,7 +16,7 @@ Synchronous functions can catch explicit throws, failed type checks and exceptio
 
 Use scalar and record patterns with `when` guards in `if-case`, `switch` statements and `switch` expressions. Switch statements support shared case bodies, implicit breaks and labeled `continue`.
 
-`Lowering.lower` returns an `IrProgram` with `classes` and `functions`. Non-generic classes support generative constructors, constructor redirection, factory bodies and static methods. Instance methods and getters dispatch on the receiver, including overrides with different defaults and covariant parameters. Runtime type tests and catch clauses follow superclass and interface declarations.
+`Lowering.lower` returns an `IrProgram` with `classes` and `functions`. Non-generic classes support generative and factory constructors, including redirects to named constructors with optional arguments. Instance methods and getters dispatch on the receiver, including overrides with different defaults and covariant parameters. Runtime type tests and catch clauses follow superclass and interface declarations.
 
 The development checkout uses the official Dart analyzer and can print compiler IR. Native executables, libraries and the `Export` API remain available in [release 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).
 

@@ -65,7 +65,7 @@ final class FunctionLowering(
     return .new(
       _target,
       context.blocks,
-      defaults: context.bindings.defaults(element),
+      defaults: context.bindings.defaults(_target),
     );
   }
 

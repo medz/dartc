@@ -30,6 +30,7 @@ final class IrFunction(
     final optional = target.optionalSlots;
     final offset = target.kind.hasReceiver ? 1 : 0;
     if (target.isAbstract ||
+        target.redirect != null ||
         optional.length != this.defaults.length ||
         optional.any(
           (slot) =>

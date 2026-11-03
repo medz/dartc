@@ -148,7 +148,7 @@ void main() {
       expect(
         () => IrProgram(
           [
-            IrClass(sub, [field]),
+            IrClass(sub, [field], constructors: [init]),
           ],
           [
             IrFunction(init, [legal]),
@@ -210,6 +210,34 @@ void main() {
       () => DirectCall(target, [instance, one, const Constant.nullValue()]),
       throwsArgumentError,
     );
+  });
+
+  test('a factory redirect must accept every call its declaration permits', () {
+    final parent = ClassType(f.library, 'Parent', isAbstract: true);
+    final child = ClassType(f.library, 'Child', superclass: parent);
+    final target = FunctionTarget(
+      f.library,
+      'new',
+      .voidType,
+      [.integer],
+      owner: child,
+      kind: .initializer,
+    );
+    FunctionTarget redirect(List<ValueType> types, {int optional = 0}) =>
+        FunctionTarget(
+          f.library,
+          'build',
+          parent,
+          types,
+          owner: parent,
+          kind: .factory,
+          optionalPositional: optional,
+          redirect: target,
+        );
+    expect(redirect([.integer]).implementation, same(target));
+    expect(() => redirect([.integer], optional: 1), throwsArgumentError);
+    expect(() => redirect([.object]), throwsArgumentError);
+    expect(() => DirectCall(redirect([.integer]), [one]), throwsArgumentError);
   });
 
   test('a protected operation and its exception have distinct SSA edges', () {

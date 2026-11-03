@@ -36,20 +36,20 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           when prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
         unsupported(unit, expression, 'deferred constructor');
       }
-      final target = context.bindings.target(ctor, unit, expression);
-      final args = context.bindings.arguments(
-        ctor,
+      final target = context.bindings
+          .target(ctor, unit, expression)
+          .implementation;
+      final args = evaluateArguments(
         argumentList,
-        unit,
         (e) => lowerExpression(context, e),
       );
-      return args == null
-          ? null
-          : context.emit(
-              ctor.isFactory
-                  ? DirectCall(target, args)
-                  : Construct(target, args),
-            );
+      if (args == null) return null;
+      final bound = context.bindings.bind(target, args);
+      return context.emit(
+        target.kind == .factory
+            ? DirectCall(target, bound)
+            : Construct(target, bound),
+      );
     case ast.BooleanLiteral(:final value):
       return Constant.boolean(value);
     case ast.IntegerLiteral():
@@ -230,13 +230,15 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         }
       }
       final target = context.bindings.target(callee, unit, expression);
-      final args = context.bindings.arguments(
-        callee,
+      final args = evaluateArguments(
         expression.argumentList,
-        unit,
         (e) => lowerExpression(context, e),
       );
-      return args == null ? null : context.emit(DirectCall(target, args));
+      return args == null
+          ? null
+          : context.emit(
+              DirectCall(target, context.bindings.bind(target, args)),
+            );
     case ast.BinaryExpression(
       :final leftOperand,
       :final rightOperand,

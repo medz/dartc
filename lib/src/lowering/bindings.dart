@@ -10,15 +10,15 @@ final class Bindings() {
   final _targets = <ExecutableElement, FunctionTarget>{};
   final _classes = <InterfaceElement, ClassType>{};
   final _fields = <FieldElement, InstanceField>{};
-  final _parameters =
-      <FormalParameterElement, ({int slot, Constant? fallback})>{};
+  final _defaults = <FunctionTarget, Map<int, Constant>>{};
 
-  /// Returns the shared target for [element] and records its parameter slots.
+  /// Returns the shared signature and constructor binding for [element].
   FunctionTarget target(
     ExecutableElement element,
     ResolvedUnitResult unit,
-    ast.AstNode site,
-  ) {
+    ast.AstNode site, {
+    Set<ConstructorElement>? redirects,
+  }) {
     element = element.baseElement;
     return _targets.putIfAbsent(element, () {
       final parameters = element.formalParameters;
@@ -37,15 +37,19 @@ final class Bindings() {
       if (element.typeParameters.isNotEmpty) {
         unsupported(unit, site, 'generic functions');
       }
-      for (final (i, parameter) in parameters.indexed) {
-        _parameters[parameter] = (
-          slot: i,
-          fallback: parameter.isOptional
-              ? constantOf(parameter, unit, site)
-              : null,
+      FunctionTarget? destination;
+      if (element case final ConstructorElement ctor
+          when ctor.isFactory && ctor.redirectedConstructor != null) {
+        final path = redirects ?? <ConstructorElement>{};
+        if (!path.add(ctor)) unsupported(unit, site, 'cyclic factory redirect');
+        destination = target(
+          ctor.redirectedConstructor!,
+          unit,
+          site,
+          redirects: path,
         );
       }
-      return .new(
+      final function = FunctionTarget(
         element.library.uri,
         element.name!,
         kind == .initializer
@@ -54,6 +58,7 @@ final class Bindings() {
         parameters.map((p) => valueType(p.type, unit, site)),
         owner: owner,
         kind: kind,
+        redirect: destination,
         isAbstract: kind.isVirtual && element.isAbstract,
         optionalPositional: parameters
             .where((p) => p.isOptionalPositional)
@@ -63,48 +68,23 @@ final class Bindings() {
             if (p.isNamed) p.name!: p.isRequiredNamed,
         },
       );
+      if (destination == null && parameters.any((p) => p.isOptional)) {
+        _defaults[function] = {
+          for (final (i, p) in parameters.indexed)
+            if (p.isOptional) i: constantOf(p, unit, site),
+        };
+      }
+      return function;
     });
   }
 
-  /// The declaration defaults used by calls that dispatch to [element].
-  Map<int, Constant> defaults(ExecutableElement element) => {
-    for (final p in element.formalParameters)
-      if (_parameters[p.baseElement] case (
-        slot: final i,
-        fallback: final value?,
-      ))
-        i: value,
-  };
+  /// Defaults supplied by an executable declaration.
+  Map<int, Constant> defaults(FunctionTarget target) =>
+      _defaults[target] ?? const {};
 
-  /// Evaluates explicit [arguments] in source order, then fills omitted slots.
-  List<Value>? arguments(
-    ExecutableElement callee,
-    ast.ArgumentList? arguments,
-    ResolvedUnitResult unit,
-    Value? Function(ast.Expression) evaluate, {
-    Map<FormalParameterElement, Value> forwarded = const {},
-  }) {
-    final parameters = callee.formalParameters;
-    final values = List<Value?>.filled(parameters.length, null);
-    for (final MapEntry(:key, :value) in forwarded.entries) {
-      values[_parameters[key.baseElement]!.slot] = value;
-    }
-    for (final argument in arguments?.arguments ?? const <ast.Argument>[]) {
-      final binding = _parameters[argument.correspondingParameter?.baseElement];
-      if (binding == null) unsupported(unit, argument, 'argument binding');
-      final value = evaluate(argument.argumentExpression);
-      if (value == null) return null;
-      values[binding.slot] = value;
-    }
-    if ((arguments?.arguments.length ?? 0) + forwarded.length < values.length) {
-      for (final (i, parameter) in parameters.indexed) {
-        values[i] ??=
-            _parameters[parameter]?.fallback ??
-            unsupported(unit, arguments ?? unit.unit, 'missing argument');
-      }
-    }
-    return values.cast<Value>();
-  }
+  /// Binds evaluated arguments to their destination, including its declared defaults.
+  List<Value> bind(FunctionTarget target, EvaluatedArguments args) =>
+      target.bind(args.positional, args.named, (i) => _defaults[target]![i]!);
 
   /// Returns the same slot for every use of this field declaration.
   InstanceField field(
@@ -232,6 +212,38 @@ final class Bindings() {
       );
     });
   }
+}
+
+/// Explicit arguments after their source-order evaluation.
+typedef EvaluatedArguments = ({
+  List<Value> positional,
+  Map<String, Value> named,
+});
+
+/// Evaluates each argument once, retaining omissions and names for the dispatch target.
+EvaluatedArguments? evaluateArguments(
+  ast.ArgumentList? arguments,
+  Value? Function(ast.Expression) evaluate, {
+  Map<FormalParameterElement, Value> forwarded = const {},
+}) {
+  final positional = <Value>[], named = <String, Value>{};
+  for (final MapEntry(key: parameter, :value) in forwarded.entries) {
+    if (parameter.isNamed) {
+      named[parameter.name!] = value;
+    } else {
+      positional.add(value);
+    }
+  }
+  for (final argument in arguments?.arguments ?? const <ast.Argument>[]) {
+    final value = evaluate(argument.argumentExpression);
+    if (value == null) return null;
+    if (argument is ast.NamedArgument) {
+      named[argument.correspondingParameter!.name!] = value;
+    } else {
+      positional.add(value);
+    }
+  }
+  return (positional: positional, named: named);
 }
 
 /// Reports an unimplemented [feature] at the start of [node] in [unit].

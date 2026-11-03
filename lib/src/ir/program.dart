@@ -8,12 +8,19 @@ final class IrClass(
   final ClassType type,
   Iterable<InstanceField> fields, {
   Iterable<FunctionTarget> members = const [],
+  Iterable<FunctionTarget> constructors = const [],
 }) {
   /// Declared fields in initialization order, excluding inherited storage.
   final List<InstanceField> fields = .unmodifiable(fields);
 
   /// Instance members declared here, including implicit accessors and abstract members.
   final Map<MemberSelector, FunctionTarget> members = _members(type, members);
+
+  /// Declared generative and factory constructors, including redirects without a body.
+  final Map<String, FunctionTarget> constructors = _constructors(
+    type,
+    constructors,
+  );
 
   static Map<MemberSelector, FunctionTarget> _members(
     ClassType type,
@@ -27,6 +34,22 @@ final class IrClass(
         throw ArgumentError('Foreign or repeated instance member.');
       }
       result[member.selector] = member;
+    }
+    return .unmodifiable(result);
+  }
+
+  static Map<String, FunctionTarget> _constructors(
+    ClassType type,
+    Iterable<FunctionTarget> declarations,
+  ) {
+    final result = <String, FunctionTarget>{};
+    for (final ctor in declarations) {
+      if (ctor.owner != type ||
+          (ctor.kind != .initializer && ctor.kind != .factory) ||
+          result.containsKey(ctor.name)) {
+        throw ArgumentError('Foreign or repeated constructor.');
+      }
+      result[ctor.name] = ctor;
     }
     return .unmodifiable(result);
   }
@@ -87,6 +110,13 @@ final class IrProgram(
           '  ${field.isFinal ? 'final ' : ''}${field.type.dartName} ${field.name}',
         );
       }
+      for (final ctor in declaration.constructors.values) {
+        if (ctor.redirect case final destination?) {
+          output.writeln(
+            '  factory ${ctor.name} = ${label(destination.owner!)}.${destination.name}',
+          );
+        }
+      }
     }
     for (final function in functions) {
       function.writeTo(output);
@@ -114,9 +144,27 @@ final class IrProgram(
           'Instance body does not match the declared member.',
         );
       }
+      if ((t.kind == .factory || t.kind == .initializer) &&
+          _definitions[owner]!.constructors[t.name] != t) {
+        throw ArgumentError('Body does not match a declared constructor.');
+      }
     }
     final bodies = {for (final function in this.functions) function.target};
     for (final c in this.classes) {
+      for (final ctor in c.constructors.values) {
+        final destination = ctor.redirect;
+        final definition = _definitions[destination?.owner];
+        if (destination != null &&
+            definition != null &&
+            definition.constructors[destination.name] != destination) {
+          throw ArgumentError(
+            'Factory redirects to an undeclared constructor.',
+          );
+        }
+        if (ctor.redirect == null && !bodies.contains(ctor)) {
+          throw ArgumentError('Missing constructor body.');
+        }
+      }
       for (final member in c.members.values) {
         if (!member.isAbstract && !bodies.contains(member)) {
           throw ArgumentError('Missing member body.');

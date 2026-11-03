@@ -60,6 +60,9 @@ final class FunctionTarget(
 
   /// Whether the instance member is declared without an implementation.
   final bool isAbstract = false,
+
+  /// The constructor named by a redirecting factory declaration.
+  final FunctionTarget? redirect,
 }) {
   /// The entry parameter types, including the receiver when present.
   final List<ValueType> parameterTypes = .unmodifiable([
@@ -82,6 +85,15 @@ final class FunctionTarget(
     name: name,
     privateLibrary: name.startsWith('_') ? library : null,
   );
+
+  /// The constructor whose body or initializer runs after factory redirection.
+  FunctionTarget get implementation {
+    var target = this;
+    while (target.redirect != null) {
+      target = target.redirect!;
+    }
+    return target;
+  }
 
   /// The explicit parameter slots that require a default on omission.
   Iterable<int> get optionalSlots sync* {
@@ -141,6 +153,35 @@ final class FunctionTarget(
       throw ArgumentError(
         'Inconsistent callable owner or constructor signature.',
       );
+    }
+    if (redirect case final target?) {
+      if (kind != .factory ||
+          !(target.kind == .factory ||
+              target.kind == .initializer && !target.owner!.isAbstract) ||
+          !returnType.accepts(target.owner!)) {
+        throw ArgumentError('Invalid redirecting factory target.');
+      }
+      final positional = parameterTypes.take(positionalCount).toList();
+      final named = {
+        for (final (i, name) in namedParameters.keys.indexed)
+          name: parameterTypes[positionalCount + i],
+      };
+      // Both the smallest legal call and the full parameter list must forward.
+      target.bind<ValueType?>(
+        positional.take(positionalCount - optionalPositional).toList(),
+        {
+          for (final e in named.entries)
+            if (namedParameters[e.key]!) e.key: e.value,
+        },
+        (_) => null,
+      );
+      final slots = target.bind<ValueType?>(positional, named, (_) => null);
+      final offset = target.kind.hasReceiver ? 1 : 0;
+      for (final (i, type) in slots.indexed) {
+        if (type != null && !target.parameterTypes[offset + i].accepts(type)) {
+          throw ArgumentError('Incompatible forwarded parameter.');
+        }
+      }
     }
   }
 }

@@ -31,6 +31,12 @@ final class Primary(final int n, {super.bias = 7}) extends Base {
   }
 }
 
+class Inherited(super.value, {super.bias}) extends Base {
+  this : super.named();
+}
+
+int inheritedDefault(int n) => Inherited(n).first;
+
 sealed class Choice();
 
 class First() extends Choice;

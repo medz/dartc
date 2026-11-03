@@ -12,6 +12,7 @@ import 'fixtures/finalizers.dart' as finalizers;
 import 'fixtures/functions.dart' as dart;
 import 'fixtures/loops.dart' as loops;
 import 'fixtures/nominal/constructors.dart' as nominal;
+import 'fixtures/nominal/factories.dart' as factories;
 import 'fixtures/nominal/members.dart' as members;
 import 'fixtures/nominal/updates.dart' as object_updates;
 import 'fixtures/nullability.dart' as nullable;
@@ -46,6 +47,7 @@ void main() {
       'exceptions.dart',
       'finalizers.dart',
       'nominal/constructors.dart',
+      'nominal/factories.dart',
       'nominal/members.dart',
       'nominal/updates.dart',
       'nominal/other.dart',
@@ -484,6 +486,7 @@ void main() {
     for (final n in [-1, 0, 3]) {
       compare('construct', [n], () => nominal.construct(n));
       compare('primary', [n], () => nominal.primary(n));
+      compare('inheritedDefault', [n], () => nominal.inheritedDefault(n));
     }
     for (final flag in [false, true]) {
       compare('separateLibraries', [
@@ -538,6 +541,14 @@ void main() {
       compare('compareSuper', [
         other,
       ], () => object_updates.compareSuper(other));
+    }
+  });
+
+  test('factory redirects preserve omitted arguments through a chain', () {
+    for (final mode in [0, 1, 2, 3, 4, 5]) {
+      for (final n in [-1, 0, 6]) {
+        compare('redirected', [mode, n], () => factories.redirected(mode, n));
+      }
     }
   });
 

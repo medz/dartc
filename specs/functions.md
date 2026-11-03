@@ -5,7 +5,7 @@
 | 特性 | 当前 IR 范围 |
 | --- | --- |
 | 顶层函数、同步块体与箭头体 | 非泛型顶层函数，可直接调用其他库中已解析的顶层函数。 |
-| 必需/可选位置、命名、required 参数 | 顶层直接调用支持必需和可选位置、命名参数。省略实参时使用声明的标量或 record 常量，无显式默认值时传 null。见[默认参数样本](../test/lowering/fixtures/defaults.dart)。 |
+| 必需/可选位置、命名、required 参数 | 支持顶层、静态和实例调用，以及构造器。按源码顺序计算实际传入的参数，省略的参数由最终调用目标补齐。默认值支持标量和 record。见[默认参数](../test/lowering/fixtures/defaults.dart)和[工厂转发样本](../test/lowering/fixtures/nominal/factories.dart)。 |
 | 字段、super、私有命名形参 | 支持构造器中绑定到实例字段或父类形参的参数。私有命名形参的行为对照待补。 |
 | `covariant` 参数 | 非泛型实例分派按选中的实现检查形参类型。协变收窄失败在进入方法体前抛出 TypeError。 |
 | 顶层 getter/setter | 待实现。 |

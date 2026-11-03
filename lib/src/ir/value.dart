@@ -420,6 +420,9 @@ final class DirectCall(
   ///
   /// Throws [ArgumentError] for a wrong argument count or an incompatible type.
   this : super(target.returnType) {
+    if (target.redirect != null) {
+      throw ArgumentError('Bind arguments to the redirect destination.');
+    }
     if (target.isAbstract) {
       throw ArgumentError('Cannot directly invoke an abstract member.');
     }
