@@ -87,6 +87,34 @@ void main() {
     expect(() => IrFunction(target, [narrowed]), throwsArgumentError);
   });
 
+  test('record shape and slots stay fixed when caller-owned fields change', () {
+    final names = <String, ValueType>{'z': .string, 'a': .integer};
+    final type = RecordType([.boolean], names);
+    names.clear();
+    expect(type.slots, {r'$1': 0, 'a': 1, 'z': 2});
+    expect(type.dartName, '(bool, {int a, String z})');
+    final reordered = RecordType([.boolean], {'a': .integer, 'z': .string});
+    expect(type, reordered);
+    expect(type.hashCode, reordered.hashCode);
+    final wide = RecordType([.boolean], {'a': .number, 'z': .object});
+    expect(wide.accepts(type), isTrue);
+    expect(type.accepts(wide), isFalse);
+    expect(wide.accepts(RecordType([.boolean], {'a': .integer})), isFalse);
+    expect(
+      () => RecordType([.boolean], {r'$1': .integer}),
+      throwsArgumentError,
+    );
+    expect(() => MakeRecord(type, [one]), throwsArgumentError);
+    expect(() => RecordGet(one, 0), throwsArgumentError);
+    final record = MakeRecord(type, [
+      const Constant.boolean(false),
+      one,
+      const Constant.string('z'),
+    ]);
+    expect(RecordGet(record, 1).type, ValueType.integer);
+    expect(() => RecordGet(record, 3), throwsRangeError);
+  });
+
   test('a nullable value narrows only on the matching null-test edge', () {
     final maybeInt = ValueType.integer.nullable;
     final target = FunctionTarget(f.library, 'pick', .number, [maybeInt]);

@@ -13,8 +13,10 @@ void writeFunction(
   final labels = {for (final (i, b) in blocks.indexed) b: 'b$i'};
   final ids = <Value, int>{};
   String value(Value v) => switch (v) {
-    Constant(value: final String s) => jsonEncode(s),
-    Constant(:final value) => '$value',
+    ScalarConstant(value: final String s) => jsonEncode(s),
+    ScalarConstant(:final value) => '$value',
+    RecordConstant(:final type, :final fields) =>
+      'const ${type.dartName}[${fields.map(value).join(', ')}]',
     TestedValue(:final test, :final type) =>
       '${value(test.operand)} as ${type.dartName}',
     _ => '%${ids.putIfAbsent(v, () => ids.length)}',
@@ -30,7 +32,10 @@ void writeFunction(
     output.writeln('${labels[b]}($parameters):');
     for (final op in b.instructions) {
       final rhs = switch (op) {
-        ScalarEquals() =>
+        MakeRecord() =>
+          'record ${op.type.dartName}[${op.inputs.map(value).join(', ')}]',
+        RecordGet() => 'field ${value(op.record)}[${op.slot}]',
+        Equals() =>
           '${value(op.left)} ${op.negated ? '!=' : '=='} ${value(op.right)}',
         TypeTest() =>
           '${value(op.operand)} ${op.negated ? 'is!' : 'is'} ${op.testedType.dartName}',

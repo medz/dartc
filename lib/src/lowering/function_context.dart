@@ -55,12 +55,16 @@ final class FunctionContext(
   }
 
   /// Jumps to [failure] on a false [condition] and keeps the true path open.
-  void guard(Value? condition, JumpTarget failure) {
+  void guard(
+    Value? condition,
+    JumpTarget failure, [
+    List<Value> onFailure = const [],
+  ]) {
     if (condition == null) return;
-    if (condition case Constant(value: final bool passes)) {
-      if (!passes) failure.jump();
+    if (condition case ScalarConstant(value: final bool passes)) {
+      if (!passes) failure.jump(onFailure);
     } else {
-      final origin = current!, leave = failure.edge();
+      final origin = current!, leave = failure.edge(onFailure);
       origin.finish(Branch(condition, enterArm(condition, true), leave));
     }
   }
@@ -171,7 +175,7 @@ final class FunctionContext(
     Value? Function() ifFalse, [
     ValueType? resultType,
   ]) {
-    if (condition case Constant(value: final bool taken)) {
+    if (condition case ScalarConstant(value: final bool taken)) {
       return taken ? ifTrue() : ifFalse();
     }
     final origin = current!, before = saveLocals(), facts = _facts;

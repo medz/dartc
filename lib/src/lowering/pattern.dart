@@ -58,17 +58,14 @@ final class _Matcher(final FunctionContext context) {
           bindings[variable] = context.cast(value, type);
         }
       case ast.ConstantPattern(:final expression):
-        final constant = scalarValue(
+        final constant = constantValue(
           expression.computeConstantValue()?.value,
           context.unit,
           pattern,
         );
-        context.guard(
-          lowerEquality(context, pattern, constant, value),
-          failure,
-        );
+        context.guard(lowerEquality(context, constant, value), failure);
       case ast.RelationalPattern(:final operand, :final operator):
-        final constant = scalarValue(
+        final constant = constantValue(
           operand.computeConstantValue()?.value,
           context.unit,
           operand,

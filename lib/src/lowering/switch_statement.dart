@@ -105,30 +105,22 @@ void lowerSwitchStatement(
             if (context.current != null) reach(body, bindings);
           });
         case ast.SwitchCase(:final expression):
-          final constant = scalarValue(
+          final constant = constantValue(
             expression.computeConstantValue()?.value,
             context.unit,
             expression,
           );
-          context.guard(
-            lowerEquality(context, member, constant, subject),
-            next,
-          );
+          context.guard(lowerEquality(context, constant, subject), next);
           if (context.current != null) reach(body);
       }
       next.enter();
     }
   }
   if (context.current != null) {
-    final type = statement.expression.staticType!;
-    final exhaustive = switch (type.element) {
-      EnumElement() || ClassElement(isSealed: true) => true,
-      _ => type.isDartCoreBool || type.isDartCoreNull,
-    };
     if (fallback != null) {
       reach(fallback);
     } else if (context.unit.unit.featureSet.isEnabled(Feature.patterns) &&
-        exhaustive) {
+        requiresExhaustiveSwitch(statement.expression.staticType!)) {
       context.current!.finish(const ExhaustivenessFailure());
       context.current = null;
     } else {

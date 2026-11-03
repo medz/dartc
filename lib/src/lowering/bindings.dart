@@ -2,7 +2,7 @@ import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
-import 'package:analyzer/dart/element/type.dart';
+import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
 
 /// Maps analyzer declarations and formal parameters to their IR identities.
@@ -26,7 +26,7 @@ final class TargetBindings() {
         _parameters[parameter] = (
           slot: i,
           fallback: parameter.isOptional
-              ? scalarConstant(parameter, unit, site)
+              ? constantOf(parameter, unit, site)
               : null,
         );
       }
@@ -66,8 +66,8 @@ final class TargetBindings() {
   }
 }
 
-/// Reads a resolved scalar constant or optional parameter's default value.
-Constant scalarConstant(
+/// Reads a resolved constant or optional parameter's default value.
+Constant constantOf(
   VariableElement variable,
   ResolvedUnitResult unit,
   ast.AstNode site,
@@ -79,11 +79,11 @@ Constant scalarConstant(
       !variable.hasDefaultValue) {
     return const .nullValue();
   }
-  return scalarValue(value, unit, site);
+  return constantValue(value, unit, site);
 }
 
-/// Converts an analyzer constant into a scalar IR operand.
-Constant scalarValue(
+/// Converts an analyzer constant into an independent IR operand.
+Constant constantValue(
   DartObject? value,
   ResolvedUnitResult unit,
   ast.AstNode site,
@@ -94,8 +94,19 @@ Constant scalarValue(
     if (value.toBoolValue() case final b?) return .boolean(b);
     if (value.toDoubleValue() case final d?) return .floating(d);
     if (value.toStringValue() case final s?) return .string(s);
+    if (value.toRecordValue() case final record?) {
+      final type = valueType(value.type!, unit, site);
+      if (type is RecordType) {
+        return RecordConstant(type, [
+          for (final field in record.positional)
+            constantValue(field, unit, site),
+          for (final name in type.slots.keys.skip(type.positionalCount))
+            constantValue(record.named[name]!, unit, site),
+        ]);
+      }
+    }
   }
-  unsupported(unit, site, 'non-scalar constant');
+  unsupported(unit, site, 'constant ${value?.type}');
 }
 
 /// Reports an unimplemented [feature] at the start of [node] in [unit].
@@ -107,10 +118,21 @@ Never unsupported(ResolvedUnitResult unit, ast.AstNode node, String feature) {
 }
 
 /// Maps the resolved Dart [type] to its IR type.
-ValueType valueType(DartType type, ResolvedUnitResult unit, ast.AstNode site) {
+ValueType valueType(
+  dart.DartType type,
+  ResolvedUnitResult unit,
+  ast.AstNode site,
+) {
   final ValueType base = switch (type) {
-    VoidType() => .voidType,
-    NeverType() => .never,
+    dart.VoidType() => .voidType,
+    dart.NeverType() => .never,
+    dart.RecordType(:final positionalFields, :final namedFields) => RecordType(
+      positionalFields.map((field) => valueType(field.type, unit, site)),
+      {
+        for (final field in namedFields)
+          field.name: valueType(field.type, unit, site),
+      },
+    ),
     _ when type.isDartCoreNull => .nullType,
     _ when type.isDartCoreInt => .integer,
     _ when type.isDartCoreBool => .boolean,
@@ -118,7 +140,18 @@ ValueType valueType(DartType type, ResolvedUnitResult unit, ast.AstNode site) {
     _ when type.isDartCoreString => .string,
     _ when type.isDartCoreNum => .number,
     _ when type.isDartCoreObject => .object,
+    _ when type.isDartCoreRecord => .record,
     _ => unsupported(unit, site, type.getDisplayString()),
   };
   return type.nullabilitySuffix == .question ? base.nullable : base;
 }
+
+/// Whether a switch without a default must cover every value of [type].
+bool requiresExhaustiveSwitch(dart.DartType type) => switch (type) {
+  dart.RecordType(:final namedFields, :final positionalFields) =>
+    positionalFields.every((f) => requiresExhaustiveSwitch(f.type)) &&
+        namedFields.every((f) => requiresExhaustiveSwitch(f.type)),
+  dart.InterfaceType(element: EnumElement() || ClassElement(isSealed: true)) =>
+    true,
+  _ => type.isDartCoreBool || type.isDartCoreNull,
+};

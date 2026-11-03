@@ -7,6 +7,7 @@ import 'bindings.dart';
 import 'function_context.dart';
 import 'operators.dart';
 import 'pattern.dart';
+import 'record.dart';
 
 /// Returns the emitted operand, or `null` when [expression] cannot complete normally.
 Value? lowerExpression(FunctionContext context, ast.Expression expression) =>
@@ -33,6 +34,12 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       return Constant.floating(-value);
     case ast.NullLiteral():
       return const Constant.nullValue();
+    case ast.RecordLiteral():
+      return lowerRecord(
+        context,
+        expression,
+        (e) => lowerExpression(context, e),
+      );
     case ast.StringLiteral(stringValue: final value?):
       return Constant.string(value);
     case ast.ParenthesizedExpression(:final expression):
@@ -51,9 +58,6 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       return input == null
           ? null
           : context.cast(input, valueType(type.type!, unit, type));
-    case ast.PostfixExpression(operator: Token(type: .BANG), :final operand):
-      final value = lowerExpression(context, operand);
-      return value == null ? null : context.checkNotNull(value);
     case ast.ThrowExpression(:final expression):
       final exception = lowerExpression(context, expression);
       if (exception != null) {
@@ -114,7 +118,15 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       if (expression is ast.PrefixedIdentifier && expression.isDeferred) {
         unsupported(unit, expression, 'deferred constant');
       }
-      return scalarConstant(variable, unit, expression);
+      return constantOf(variable, unit, expression);
+    case ast.PrefixedIdentifier() ||
+        ast.PropertyAccess() ||
+        ast.PostfixExpression(operator: Token(type: .BANG)):
+      return lowerSelectors(
+        context,
+        expression,
+        (e) => lowerExpression(context, e),
+      );
     case ast.CompoundAssignmentExpression():
       return _updateLocal(context, expression);
     case ast.MethodInvocation(
@@ -153,7 +165,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       }
       if (operator.type == .AMPERSAND_AMPERSAND || operator.type == .BAR_BAR) {
         final and = operator.type == .AMPERSAND_AMPERSAND;
-        if (left case Constant(value: final bool value)) {
+        if (left case ScalarConstant(value: final bool value)) {
           return value == and ? lowerExpression(context, rightOperand) : left;
         }
         return context.shortCircuit(

@@ -86,11 +86,7 @@ final class FunctionLowering(
       }
       final value = switch (initializer) {
         null => const Constant.nullValue(),
-        _ when local.isConst => scalarConstant(
-          local,
-          context.unit,
-          initializer,
-        ),
+        _ when local.isConst => constantOf(local, context.unit, initializer),
         _ => lowerExpression(context, initializer),
       };
       if (value == null) return;

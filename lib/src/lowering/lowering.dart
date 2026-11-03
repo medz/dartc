@@ -10,8 +10,8 @@ import 'function.dart';
 abstract final class Lowering() {
   /// Returns verified functions in the declaration order of [input].
   ///
-  /// Calls to the same declaration share a target throughout the batch. Scalar
-  /// constants appear as operands at their uses. Throws
+  /// Calls to the same declaration share a target throughout the batch.
+  /// Constants appear as operands at their uses. Throws
   /// [UnsupportedError] at the first source construct without an IR translation.
   static List<IrFunction> lower(CheckedLibraries input) {
     final bindings = TargetBindings();
@@ -34,11 +34,7 @@ abstract final class Lowering() {
           case ast.TopLevelVariableDeclaration(variables: final declarations)
               when declarations.isConst:
             for (final variable in declarations.variables) {
-              scalarConstant(
-                variable.declaredFragment!.element,
-                unit,
-                variable,
-              );
+              constantOf(variable.declaredFragment!.element, unit, variable);
             }
           default:
             unsupported(unit, node, 'declaration');

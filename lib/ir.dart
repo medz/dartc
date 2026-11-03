@@ -21,17 +21,21 @@ export 'src/ir/block.dart'
         Unreachable;
 export 'src/ir/function.dart' show IrFunction;
 export 'src/ir/signature.dart' show FunctionTarget;
-export 'src/ir/type.dart' show ValueType;
+export 'src/ir/type.dart' show RecordType, ValueType;
 export 'src/ir/value.dart'
     show
         BlockParameter,
         Constant,
         DirectCall,
+        Equals,
         Instruction,
         IntBinary,
         IntOperator,
+        MakeRecord,
         NullCheck,
-        ScalarEquals,
+        RecordConstant,
+        RecordGet,
+        ScalarConstant,
         TestedValue,
         TypeCast,
         TypeTest,

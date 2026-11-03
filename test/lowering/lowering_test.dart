@@ -2,6 +2,7 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
+import 'fixture_runner.dart';
 import 'fixtures/conditionals.dart' as conditionals;
 import 'fixtures/defaults.dart' as defaults;
 import 'fixtures/effects.dart' as effects;
@@ -9,6 +10,7 @@ import 'fixtures/functions.dart' as dart;
 import 'fixtures/loops.dart' as loops;
 import 'fixtures/nullability.dart' as nullable;
 import 'fixtures/patterns.dart' as patterns;
+import 'fixtures/records.dart' as records;
 import 'fixtures/switch_statements.dart' as switches;
 import 'fixtures/type_checks.dart' as types;
 import 'fixtures/updates.dart' as updates;
@@ -21,8 +23,7 @@ Future<List<IrFunction>> _lower(List<String> names) => CheckedLibraries.read([
 
 void main() {
   late Map<String, IrFunction> functions;
-  late Map<FunctionTarget, IrFunction> bodies;
-  late Map<FunctionTarget, Object? Function(int)> imports;
+  late FixtureRunner runner;
   setUpAll(() async {
     final result = await _lower([
       'functions.dart',
@@ -30,6 +31,7 @@ void main() {
       'loops.dart',
       'nullability.dart',
       'patterns.dart',
+      'records.dart',
       'switch_statements.dart',
       'type_checks.dart',
       'conditionals.dart',
@@ -37,8 +39,7 @@ void main() {
       'scalar_constants.dart',
     ]);
     functions = {for (final f in result) f.target.name: f};
-    bodies = {for (final f in result) f.target: f};
-    imports = {
+    runner = FixtureRunner(result, {
       for (final f in result)
         for (final b in f.blocks)
           for (final call in b.instructions.whereType<DirectCall>())
@@ -48,71 +49,8 @@ void main() {
                 'probe' => effects.probe,
                 _ => throw StateError('Unknown fixture import'),
               },
-    };
+    });
   });
-
-  Object? execute(IrFunction function, List<Object?> args) {
-    final values = <Value, Object?>{};
-    Object? read(Value v) => switch (v) {
-      Constant(:final value) => value,
-      TestedValue(:final test) => read(test.operand),
-      _ => values[v],
-    };
-    var block = function.entry;
-    for (var steps = 0; steps < 1000; steps++) {
-      for (final (i, p) in block.parameters.indexed) {
-        values[p] = args[i];
-      }
-      for (final op in block.instructions) {
-        switch (op) {
-          case TypeTest(:final operand, :final testedType, :final negated):
-            values[op] =
-                (_typeOperation(testedType, read(operand), cast: false)
-                    as bool) !=
-                negated;
-          case TypeCast(:final operand, :final type):
-            values[op] = _typeOperation(type, read(operand), cast: true);
-          case NullCheck(:final operand):
-            values[op] = read(operand)!;
-          case IntBinary(:final operator, :final left, :final right):
-            final a = read(left) as int, b = read(right) as int;
-            values[op] = switch (operator) {
-              .add => a + b,
-              .subtract => a - b,
-              .multiply => a * b,
-              .lessThan => a < b,
-              .lessOrEqual => a <= b,
-              .greaterThan => a > b,
-              .greaterOrEqual => a >= b,
-            };
-          case ScalarEquals(:final left, :final right, :final negated):
-            values[op] = (read(left) == read(right)) != negated;
-          case DirectCall(:final target, :final inputs):
-            final arguments = inputs.map(read).toList();
-            values[op] = bodies.containsKey(target)
-                ? execute(bodies[target]!, arguments)
-                : imports[target]!(arguments.single as int);
-        }
-      }
-      final end = block.end;
-      if (end is Return) return end.value == null ? null : read(end.value!);
-      final edge = switch (end) {
-        Throw(:final exception) => throw read(exception)!,
-        Unreachable() => throw StateError('Reached a Never continuation'),
-        ExhaustivenessFailure() => fail(
-          'Exhaustive fixture had no matching case',
-        ),
-        Jump() => end,
-        Branch() => read(end.condition) as bool ? end.ifTrue : end.ifFalse,
-        Return() => throw StateError('Already returned'),
-      };
-      args = edge.arguments.map(read).toList();
-      block = edge.target;
-    }
-    fail(
-      'Fixture did not return in 1000 block visits: ${function.target.name}',
-    );
-  }
 
   void compare(String name, List<Object?> args, Object? Function() sdk) {
     (Object?, Object?, List<int>) observe(Object? Function() run) {
@@ -131,7 +69,7 @@ void main() {
 
     final (expected, expectedError, trace) = observe(sdk);
     final (actual, error, calls) = observe(
-      () => execute(functions[name]!, args),
+      () => runner.run(functions[name]!, args),
     );
     expect(error, expectedError);
     expect(actual, expected);
@@ -387,6 +325,53 @@ void main() {
     },
   );
 
+  test(
+    'record fields preserve source order, structural types and null-shortening',
+    () {
+      compare('constantRecord', [], records.constantRecord);
+      compare('castRecord', [3], () => records.castRecord(3));
+      for (final run in [
+        () => records.castRecord('wrong'),
+        () => runner.run(functions['castRecord']!, ['wrong']),
+      ]) {
+        effects.calls.clear();
+        expect(run, throwsA(isA<TypeError>()));
+        expect(effects.calls, [7]);
+      }
+      for (final n in [-1, 0, 4]) {
+        compare('fieldOrder', [n], () => records.fieldOrder(n));
+        compare('stopInMiddle', [n], () => records.stopInMiddle(n));
+        compare('unusualNames', [n], () => records.unusualNames(n));
+      }
+      for (final value in [null, 2, 1.5, 'ok', _UnexpectedEquality()]) {
+        for (final flag in [false, true]) {
+          compare('recordShape', [
+            value,
+            flag,
+          ], () => records.recordShape(value, flag));
+        }
+        compare('equalFields', [value, 2], () => records.equalFields(value, 2));
+      }
+      for (final n in [null, 3]) {
+        for (final missing in [false, true]) {
+          compare('shortChain', [
+            missing,
+            n,
+          ], () => records.shortChain(missing, n));
+          compare('parenthesized', [
+            missing,
+            n,
+          ], () => records.parenthesized(missing, n));
+        }
+      }
+      for (final empty in [true, false]) {
+        compare('emptyOrSingleton', [
+          empty,
+        ], () => records.emptyOrSingleton(empty));
+      }
+    },
+  );
+
   for (final (file, line) in [
     ('index_update.dart', 3),
     ('lazy.dart', 2),
@@ -452,23 +437,6 @@ void main() {
       ),
     );
   });
-}
-
-Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
-  Object? run<T>() => cast ? value as T : value is T;
-  Object? scalar<T>() => type == type.nonNullable ? run<T>() : run<T?>();
-  if (type == .nullType) return run<Null>();
-  return switch (type.nonNullable) {
-    ValueType.integer => scalar<int>(),
-    ValueType.floating => scalar<double>(),
-    ValueType.number => scalar<num>(),
-    ValueType.string => scalar<String>(),
-    ValueType.boolean => scalar<bool>(),
-    ValueType.object => scalar<Object>(),
-    ValueType.never => run<Never>(),
-    ValueType.voidType => cast ? value : true,
-    _ => throw StateError('Unexpected fixture type ${type.dartName}'),
-  };
 }
 
 final class _UnexpectedEquality() {

@@ -10,26 +10,46 @@ sealed class const Value(
   final ValueType type,
 );
 
-/// A scalar constant that requires no instruction to produce it.
-final class const Constant._(
-  /// The Dart value represented by this operand.
-  final Object? value,
-  super.type,
-) extends Value {
+/// A compile-time value that can be used in any block.
+sealed class const Constant(super.type) extends Value {
   /// Creates an integer literal with the value [value].
-  const new integer(int value) : this._(value, .integer);
+  const factory integer(int value) = ScalarConstant._integer;
 
   /// Creates a boolean literal with the value [value].
-  const new boolean(bool value) : this._(value, .boolean);
+  const factory boolean(bool value) = ScalarConstant._boolean;
 
   /// Creates a double literal, preserving the sign of zero.
-  const new floating(double value) : this._(value, .floating);
+  const factory floating(double value) = ScalarConstant._floating;
 
   /// Creates a string literal from its decoded [value].
-  const new string(String value) : this._(value, .string);
+  const factory string(String value) = ScalarConstant._string;
 
   /// Creates the Dart `null` value.
-  const new nullValue() : this._(null, .nullType);
+  const factory nullValue() = ScalarConstant._nullValue;
+}
+
+/// A scalar literal with its Dart value and static type.
+final class const ScalarConstant._(
+  /// The Dart scalar represented by this operand.
+  final Object? value,
+  super.type,
+) extends Constant {
+  const new _integer(int value) : this._(value, .integer);
+  const new _boolean(bool value) : this._(value, .boolean);
+  const new _floating(double value) : this._(value, .floating);
+  const new _string(String value) : this._(value, .string);
+  const new _nullValue() : this._(null, .nullType);
+}
+
+/// A constant record with a constant operand for each slot in its type.
+final class RecordConstant(RecordType type, Iterable<Constant> fields)
+    extends Constant {
+  /// The constant fields in slot order.
+  final List<Constant> fields = .unmodifiable(fields);
+
+  this : super(type) {
+    checkArguments(type.fields, this.fields);
+  }
 }
 
 /// A value supplied on entry to a block by the caller or an incoming jump.
@@ -43,6 +63,36 @@ List<BlockParameter> blockParameters(Iterable<ValueType> types) =>
 sealed class Instruction(super.type) extends Value {
   /// The SSA operands consumed by the operation.
   Iterable<Value> get inputs;
+}
+
+/// Constructs a record from evaluated fields in slot order.
+///
+/// Runtime type checks use the actual field values. The static [type] may be wider.
+final class MakeRecord(RecordType type, Iterable<Value> fields)
+    extends Instruction {
+  @override
+  final List<Value> inputs = .unmodifiable(fields);
+  this : super(type) {
+    checkArguments(type.fields, inputs);
+  }
+}
+
+/// Reads an immutable field from a statically known record shape.
+final class RecordGet(
+  /// The record that supplies the field.
+  final Value record,
+
+  /// The index in the record type's field list.
+  final int slot,
+) extends Instruction {
+  this
+    : super(switch (record.type) {
+        RecordType(:final fields) => fields[slot],
+        _ => throw ArgumentError('Expected a record with a known shape.'),
+      });
+
+  @override
+  Iterable<Value> get inputs => [record];
 }
 
 /// A Dart `is` or `is!` test on an already evaluated operand.
@@ -147,8 +197,10 @@ enum IntOperator(
   greaterOrEqual(.boolean),
 }
 
-/// Dart equality with a core scalar receiver and an arbitrary right operand.
-final class ScalarEquals(
+/// Dart equality, including the null rule and dispatch on the left operand.
+///
+/// Comparing records can invoke user-defined equality on their fields.
+final class Equals(
   /// The receiver that determines the equality implementation.
   final Value left,
 
@@ -158,11 +210,10 @@ final class ScalarEquals(
   /// Whether to invert the result for `!=`.
   final bool negated = false,
 }) extends Instruction {
-  this : super(.boolean) {
-    if (!left.type.hasScalarEquality) {
-      throw ArgumentError('Expected a scalar equality receiver.');
-    }
-  }
+  this : super(.boolean);
+
+  /// Whether the comparison may call a user-defined equality operator.
+  bool get mayCallUserCode => !left.type.hasScalarEquality;
   @override
   Iterable<Value> get inputs => [left, right];
 }

@@ -8,7 +8,6 @@ import 'function_context.dart';
 /// Compares evaluated operands using Dart's null rule or the left receiver.
 Value lowerEquality(
   FunctionContext context,
-  ast.AstNode site,
   Value left,
   Value right, {
   bool negated = false,
@@ -19,14 +18,7 @@ Value lowerEquality(
   if (right.type == .nullType) {
     return context.testType(left, .nullType, negated: negated);
   }
-  if (!left.type.hasScalarEquality) {
-    unsupported(
-      context.unit,
-      site,
-      'equality dispatch on ${left.type.dartName}',
-    );
-  }
-  return context.current!.emit(ScalarEquals(left, right, negated: negated));
+  return context.current!.emit(Equals(left, right, negated: negated));
 }
 
 /// Applies [operator] after both operands have been evaluated.
@@ -41,7 +33,6 @@ Value? lowerBinary(
   if (operator.type == .EQ_EQ || operator.type == .BANG_EQ) {
     return lowerEquality(
       context,
-      site,
       left,
       right,
       negated: operator.type == .BANG_EQ,
