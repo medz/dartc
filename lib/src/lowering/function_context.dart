@@ -28,7 +28,7 @@ final class FunctionContext(
   /// The narrower operand established on the current path, if any.
   Value refined(Value value) {
     for (var fact = _facts; fact != null; fact = fact.previous) {
-      if (fact.operand == value) return fact.narrowed;
+      if (fact.operand == value) return refined(fact.narrowed);
     }
     return value;
   }
@@ -42,19 +42,38 @@ final class FunctionContext(
     return checked;
   }
 
-  /// Opens an arm of [condition] and binds the value established by a null test.
+  /// Checks [value] against [type] if its current binding does not establish the type.
+  Value cast(Value value, ValueType type) {
+    if (type.accepts(value.type)) return value;
+    final known = refined(value);
+    if (type.accepts(known.type)) return known;
+    final cast = current!.emit(TypeCast(known, type));
+    if (known.type.accepts(type)) _facts = _Refinement(known, cast, _facts);
+    return cast;
+  }
+
+  /// Tests the runtime type of [value] after its effects have been evaluated.
+  Value testType(Value value, ValueType type, {bool negated = false}) {
+    final known = refined(value);
+    if (type.accepts(known.type)) return Constant.boolean(!negated);
+    if (type == .never ||
+        known.type == .nullType ||
+        (type == .nullType && !known.type.accepts(.nullType))) {
+      return Constant.boolean(negated);
+    }
+    return current!.emit(TypeTest(known, type, negated: negated));
+  }
+
+  /// Opens an arm of [condition] and binds the value established by a type test.
   Jump enterArm(Value condition, bool taken) {
-    final test = condition is NullTest ? condition : null;
-    final proof = test != null && test.negated == taken ? test.nonNull : null;
-    final block = addBlock([if (proof != null) proof.type]);
-    if (test != null) {
-      final known = proof == null
-          ? const Constant.nullValue()
-          : block.parameters.single;
-      _facts = _Refinement(test.operand, known, _facts);
+    final proof = condition is TypeTest ? condition.refinement(taken) : null;
+    final block = addBlock([if (proof is TestedValue) proof.type]);
+    if (condition is TypeTest && proof != null && proof != condition.operand) {
+      final known = proof is TestedValue ? block.parameters.single : proof;
+      _facts = _Refinement(condition.operand, known, _facts);
     }
     current = block;
-    return .new(block, [?proof]);
+    return .new(block, [if (proof is TestedValue) proof]);
   }
 
   /// Appends an open block with parameters of [types] and returns it.

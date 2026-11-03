@@ -15,7 +15,8 @@ void writeFunction(
   String value(Value v) => switch (v) {
     Constant(value: final String s) => jsonEncode(s),
     Constant(:final value) => '$value',
-    NonNullValue(:final test) => 'nonNull(${value(test.operand)})',
+    TestedValue(:final test, :final type) =>
+      '${value(test.operand)} as ${type.dartName}',
     _ => '%${ids.putIfAbsent(v, () => ids.length)}',
   };
   String edge(Jump e) =>
@@ -29,8 +30,9 @@ void writeFunction(
     output.writeln('${labels[b]}($parameters):');
     for (final op in b.instructions) {
       final rhs = switch (op) {
-        NullTest() =>
-          '${op.negated ? 'isNotNull' : 'isNull'} ${value(op.operand)}',
+        TypeTest() =>
+          '${value(op.operand)} ${op.negated ? 'is!' : 'is'} ${op.testedType.dartName}',
+        TypeCast() => '${value(op.operand)} as ${op.type.dartName}',
         NullCheck() => 'checkNotNull ${value(op.operand)}',
         IntBinary() =>
           '${op.operator.name} ${value(op.left)}, ${value(op.right)}',

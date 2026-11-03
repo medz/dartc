@@ -22,7 +22,8 @@ export 'src/ir/value.dart'
         Instruction,
         IntBinary,
         IntOperator,
-        NonNullValue,
         NullCheck,
-        NullTest,
+        TestedValue,
+        TypeCast,
+        TypeTest,
         Value;

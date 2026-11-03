@@ -8,7 +8,7 @@ Conditional expressions now select one branch and preserve its result, including
 
 Direct calls accept optional positional and named parameters with scalar defaults. Lowering also supports string, double and null literals and scalar constants declared locally or at library scope.
 
-Nullable core types can pass through calls and branches. Lowering supports `??`, local `??=`, postfix `!` and synchronous `throw`. A call returning `Never` ends evaluation of the current path.
+Nullable core types can pass through calls and branches. Lowering supports `??`, local `??=`, postfix `!`, and type tests and casts on core types. Synchronous `throw` and calls returning `Never` end evaluation of the current path.
 
 The `package:dartc/ir.dart` and `package:dartc/lowering.dart` libraries expose SSA functions and lowering from checked Dart libraries.
 

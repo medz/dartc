@@ -42,6 +42,20 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       return Constant.string(value);
     case ast.ParenthesizedExpression(:final expression):
       return lowerExpression(context, expression);
+    case ast.IsExpression(:final expression, :final type, :final notOperator):
+      final input = lowerExpression(context, expression);
+      return input == null
+          ? null
+          : context.testType(
+              input,
+              valueType(type.type!, unit, type),
+              negated: notOperator != null,
+            );
+    case ast.AsExpression(:final expression, :final type):
+      final input = lowerExpression(context, expression);
+      return input == null
+          ? null
+          : context.cast(input, valueType(type.type!, unit, type));
     case ast.PostfixExpression(operator: Token(type: .BANG), :final operand):
       final value = lowerExpression(context, operand);
       return value == null ? null : context.checkNotNull(value);
@@ -67,9 +81,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       );
     case ast.SimpleIdentifier(element: final VariableElement variable)
         when context.locals.containsKey(variable):
-      return _readAs(
-        context,
-        expression,
+      return context.cast(
         context.locals[variable]!,
         valueType(expression.staticType!, unit, expression),
       );
@@ -128,10 +140,11 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
             ? left
             : null;
         if (operand == null) unsupported(unit, expression, 'non-null equality');
-        final negated = operator.type == .BANG_EQ;
-        if (operand.type == .nullType) return Constant.boolean(!negated);
-        if (!operand.type.accepts(.nullType)) return Constant.boolean(negated);
-        return context.current!.emit(NullTest(operand, negated: negated));
+        return context.testType(
+          operand,
+          .nullType,
+          negated: operator.type == .BANG_EQ,
+        );
       }
       if (operator.type == .AMPERSAND_AMPERSAND || operator.type == .BAR_BAR) {
         final and = operator.type == .AMPERSAND_AMPERSAND;
@@ -168,29 +181,17 @@ Value? _coalesce(
   Value left,
   ast.Expression rhs,
 ) {
-  if (left.type == .nullType) return lowerExpression(context, rhs);
-  if (!left.type.accepts(.nullType)) return left;
-  final test = context.current!.emit(NullTest(left));
+  final known = context.refined(left);
+  if (known.type == .nullType) return lowerExpression(context, rhs);
+  if (!known.type.accepts(.nullType)) return known;
+  final test = context.current!.emit(TypeTest(known, .nullType));
   return context.shortCircuit(
     test,
     evaluateWhen: true,
-    skipped: test.nonNull,
+    skipped: test.refinement(false) ?? known,
     resultType: valueType(site.staticType!, context.unit, site),
     right: () => lowerExpression(context, rhs),
   );
-}
-
-Value _readAs(
-  FunctionContext context,
-  ast.Expression site,
-  Value value,
-  ValueType type,
-) {
-  if (type.accepts(value.type)) return value;
-  final known = context.refined(value);
-  if (type.accepts(known.type)) return known;
-  if (type.accepts(known.type.nonNullable)) return context.checkNotNull(known);
-  unsupported(context.unit, site, 'promotion to ${type.dartName}');
 }
 
 Constant _integerLiteral(
@@ -235,9 +236,7 @@ Value? _updateLocal(
   // the receiver of a compound operator and the result of a postfix update.
   final read = operator.type == .EQ
       ? old
-      : _readAs(
-          context,
-          expression,
+      : context.cast(
           old,
           valueType(expression.readType!, context.unit, expression),
         );

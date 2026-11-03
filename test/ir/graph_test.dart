@@ -94,15 +94,17 @@ void main() {
     final entry = Block(target.parameterTypes);
     final input = entry.parameters.single;
     expect(() => Jump(join, [input]), throwsArgumentError);
-    final test = entry.emit(NullTest(input));
-    entry.finish(Branch(test, .new(join, [one]), .new(join, [test.nonNull])));
+    final test = entry.emit(TypeTest(input, .nullType));
+    entry.finish(
+      Branch(test, .new(join, [one]), .new(join, [test.refinement(false)!])),
+    );
     expect(() => IrFunction(target, [entry, join]), returnsNormally);
 
     final wrong = Block([maybeInt]);
     final inverted = wrong.emit(
-      NullTest(wrong.parameters.single, negated: true),
+      TypeTest(wrong.parameters.single, .nullType, negated: true),
     );
-    final illicit = Jump(join, [inverted.nonNull]);
+    final illicit = Jump(join, [inverted.refinement(true)!]);
     wrong.finish(Branch(inverted, illicit, illicit));
     expect(() => IrFunction(target, [wrong, join]), throwsStateError);
     expect(() => Unreachable(one), throwsArgumentError);

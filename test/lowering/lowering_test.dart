@@ -8,6 +8,7 @@ import 'fixtures/effects.dart' as effects;
 import 'fixtures/functions.dart' as dart;
 import 'fixtures/loops.dart' as loops;
 import 'fixtures/nullability.dart' as nullable;
+import 'fixtures/type_checks.dart' as types;
 import 'fixtures/updates.dart' as updates;
 
 const _fixtures = 'test/lowering/fixtures';
@@ -26,6 +27,7 @@ void main() {
       'updates.dart',
       'loops.dart',
       'nullability.dart',
+      'type_checks.dart',
       'conditionals.dart',
       'defaults.dart',
       'scalar_constants.dart',
@@ -49,7 +51,7 @@ void main() {
     final values = <Value, Object?>{};
     Object? read(Value v) => switch (v) {
       Constant(:final value) => value,
-      NonNullValue(:final test) => read(test.operand),
+      TestedValue(:final test) => read(test.operand),
       _ => values[v],
     };
     var block = function.entry;
@@ -59,8 +61,13 @@ void main() {
       }
       for (final op in block.instructions) {
         switch (op) {
-          case NullTest(:final operand, :final negated):
-            values[op] = (read(operand) == null) != negated;
+          case TypeTest(:final operand, :final testedType, :final negated):
+            values[op] =
+                (_typeOperation(testedType, read(operand), cast: false)
+                    as bool) !=
+                negated;
+          case TypeCast(:final operand, :final type):
+            values[op] = _typeOperation(type, read(operand), cast: true);
           case NullCheck(:final operand):
             values[op] = read(operand)!;
           case IntBinary(:final operator, :final left, :final right):
@@ -288,8 +295,28 @@ void main() {
       final guarded = functions['promoted']!.blocks.expand(
         (b) => b.instructions,
       );
-      expect(guarded.whereType<NullTest>(), hasLength(1));
+      expect(guarded.whereType<TypeTest>(), hasLength(1));
       expect(guarded.whereType<NullCheck>(), isEmpty);
+    },
+  );
+
+  test(
+    'type tests narrow the selected arm and casts throw before later effects',
+    () {
+      for (final value in [null, 4, 1.5, 'hello', false, <int>[]]) {
+        compare('classify', [value], () => types.classify(value));
+        compare('nestedTest', [value], () => types.nestedTest(value));
+        compare('castBeforeCall', [value], () => types.castBeforeCall(value));
+        compare('impossible', [value], () => types.impossible(value));
+        for (final string in [false, true]) {
+          compare('nullableCast', [
+            value,
+            string,
+          ], () => types.nullableCast(value, string));
+        }
+      }
+      final ops = functions['nestedTest']!.blocks.expand((b) => b.instructions);
+      expect(ops.whereType<TypeCast>(), isEmpty);
     },
   );
 
@@ -357,4 +384,21 @@ void main() {
       ),
     );
   });
+}
+
+Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
+  Object? run<T>() => cast ? value as T : value is T;
+  Object? scalar<T>() => type == type.nonNullable ? run<T>() : run<T?>();
+  if (type == .nullType) return run<Null>();
+  return switch (type.nonNullable) {
+    ValueType.integer => scalar<int>(),
+    ValueType.floating => scalar<double>(),
+    ValueType.number => scalar<num>(),
+    ValueType.string => scalar<String>(),
+    ValueType.boolean => scalar<bool>(),
+    ValueType.object => scalar<Object>(),
+    ValueType.never => run<Never>(),
+    ValueType.voidType => cast ? value : true,
+    _ => throw StateError('Unexpected fixture type ${type.dartName}'),
+  };
 }

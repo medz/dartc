@@ -67,9 +67,11 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
 
     final count = block.instructions.length;
     final end = block.end;
-    void useEdge(Jump edge, [NullTest? nonNullTest]) {
+    void useEdge(Jump edge, [TypeTest? test, bool? outcome]) {
       for (final value in edge.arguments) {
-        if (value is NonNullValue && identical(value.test, nonNullTest)) {
+        if (value is TestedValue &&
+            value.test == test &&
+            value.outcome == outcome) {
           use(value.test, count);
         } else {
           use(value, count);
@@ -99,9 +101,9 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
         use(cause, count);
       case Branch(:final condition, :final ifTrue, :final ifFalse):
         use(condition, count);
-        final test = condition is NullTest ? condition : null;
-        useEdge(ifTrue, test != null && test.negated ? test : null);
-        useEdge(ifFalse, test != null && !test.negated ? test : null);
+        final test = condition is TypeTest ? condition : null;
+        useEdge(ifTrue, test, true);
+        useEdge(ifFalse, test, false);
       case final Jump edge:
         useEdge(edge);
     }

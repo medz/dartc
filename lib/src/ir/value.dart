@@ -45,32 +45,68 @@ sealed class Instruction(super.type) extends Value {
   Iterable<Value> get inputs;
 }
 
-/// A test for the Dart null value which never invokes an equality operator.
-final class NullTest(
+/// A Dart `is` or `is!` test on an already evaluated operand.
+final class TypeTest(
   /// The already evaluated operand.
-  final Value operand, {
+  final Value operand,
 
-  /// Whether the result is true when [operand] is non-null.
+  /// The runtime type to match.
+  final ValueType testedType, {
+
+  /// Whether to invert the result of the match.
   final bool negated = false,
 }) extends Instruction {
   this : super(.boolean);
 
-  /// The same operand with its non-null type, valid only on the non-null edge.
-  late final NonNullValue nonNull = ._(this);
+  /// The value known on the edge with [outcome], or `null` if its type is unchanged.
+  Value? refinement(bool outcome) {
+    final source = operand.type;
+    final ValueType narrowed;
+    if (outcome != negated) {
+      if (testedType == .nullType) return const Constant.nullValue();
+      if (testedType.accepts(source)) return null;
+      if (testedType.accepts(source.nonNullable)) {
+        narrowed = source.nonNullable;
+      } else {
+        narrowed = source.accepts(.nullType)
+            ? testedType
+            : testedType.nonNullable;
+      }
+    } else if (testedType.accepts(.nullType)) {
+      narrowed = source.nonNullable;
+    } else if (testedType.accepts(source.nonNullable)) {
+      return const Constant.nullValue();
+    } else {
+      return null;
+    }
+    return narrowed == source ? null : TestedValue._(this, outcome, narrowed);
+  }
 
   @override
   Iterable<Value> get inputs => [operand];
 }
 
-/// The non-null operand passed by a branch on [test].
+/// A narrower view of an operand on one outgoing edge of [test].
 ///
-/// Only a jump on the non-null side of that branch may use this value as an
+/// Only a jump on the side selected by [outcome] may use this value as an
 /// argument. Its destination reads an ordinary block parameter.
-final class NonNullValue._(
+final class TestedValue._(
   /// The test that establishes this value's type.
-  final NullTest test,
-) extends Value {
-  this : super(test.operand.type.nonNullable);
+  final TypeTest test,
+
+  /// The boolean result required for this refinement.
+  final bool outcome,
+  super.type,
+) extends Value;
+
+/// A Dart `as` cast that throws a type error if [operand] does not match [type].
+final class TypeCast(
+  /// The value returned unchanged on success.
+  final Value operand,
+  super.type,
+) extends Instruction {
+  @override
+  Iterable<Value> get inputs => [operand];
 }
 
 /// A postfix null assertion that throws a Dart type error when [operand] is null.
