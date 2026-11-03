@@ -7,10 +7,8 @@ import 'package:dartc/ir.dart';
 /// Maps analyzer declarations and formal parameters to their IR identities.
 final class TargetBindings() {
   final _targets = <TopLevelFunctionElement, FunctionTarget>{};
-  final _slots = <FormalParameterElement, int>{};
-
-  /// The declaration-order slot of [parameter], once its target has been bound.
-  int? slotOf(FormalParameterElement? parameter) => _slots[parameter];
+  final _parameters =
+      <FormalParameterElement, ({int slot, Constant? fallback})>{};
 
   /// Returns the shared target for [element] and records its parameter slots.
   FunctionTarget target(
@@ -20,12 +18,16 @@ final class TargetBindings() {
   ) {
     return _targets.putIfAbsent(element, () {
       final parameters = element.formalParameters;
-      if (element.typeParameters.isNotEmpty ||
-          parameters.any((p) => p.isOptional)) {
-        unsupported(unit, site, 'generic functions or optional parameters');
+      if (element.typeParameters.isNotEmpty) {
+        unsupported(unit, site, 'generic functions');
       }
-      for (var i = 0; i < parameters.length; i++) {
-        _slots[parameters[i]] = i;
+      for (final (i, parameter) in parameters.indexed) {
+        _parameters[parameter] = (
+          slot: i,
+          fallback: parameter.isOptional
+              ? scalarConstant(parameter, unit, site)
+              : null,
+        );
       }
       return .new(
         element.library.uri,
@@ -35,6 +37,53 @@ final class TargetBindings() {
       );
     });
   }
+
+  /// Evaluates explicit [arguments] in source order, then fills omitted slots.
+  List<Value> arguments(
+    TopLevelFunctionElement callee,
+    ast.ArgumentList arguments,
+    ResolvedUnitResult unit,
+    Value Function(ast.Expression) evaluate,
+  ) {
+    final parameters = callee.formalParameters;
+    final values = List<Value?>.filled(parameters.length, null);
+    for (final argument in arguments.arguments) {
+      final binding = _parameters[argument.correspondingParameter];
+      if (binding == null) unsupported(unit, argument, 'argument binding');
+      values[binding.slot] = evaluate(argument.argumentExpression);
+    }
+    if (arguments.arguments.length < values.length) {
+      for (final (i, parameter) in parameters.indexed) {
+        values[i] ??=
+            _parameters[parameter]?.fallback ??
+            unsupported(unit, arguments, 'missing argument');
+      }
+    }
+    return values.cast<Value>();
+  }
+}
+
+/// Reads a resolved scalar constant or optional parameter's default value.
+Constant scalarConstant(
+  VariableElement variable,
+  ResolvedUnitResult unit,
+  ast.AstNode site,
+) {
+  final value = variable.computeConstantValue();
+  if (value == null) {
+    if (variable is FormalParameterElement &&
+        variable.isOptional &&
+        !variable.hasDefaultValue) {
+      return const .nullValue();
+    }
+  } else {
+    if (value.isNull) return const .nullValue();
+    if (value.toIntValue() case final i?) return .integer(i);
+    if (value.toBoolValue() case final b?) return .boolean(b);
+    if (value.toDoubleValue() case final d?) return .floating(d);
+    if (value.toStringValue() case final s?) return .string(s);
+  }
+  unsupported(unit, site, 'constant value of ${variable.name}');
 }
 
 /// Reports an unimplemented [feature] at the start of [node] in [unit].
@@ -48,9 +97,12 @@ Never unsupported(ResolvedUnitResult unit, ast.AstNode node, String feature) {
 /// Maps the resolved Dart [type] to its IR type.
 ValueType valueType(DartType type, ResolvedUnitResult unit, ast.AstNode site) {
   if (type is VoidType) return .voidType;
+  if (type.isDartCoreNull) return .nullType;
   if (type.nullabilitySuffix == .none) {
     if (type.isDartCoreInt) return .integer;
     if (type.isDartCoreBool) return .boolean;
+    if (type.isDartCoreDouble) return .floating;
+    if (type.isDartCoreString) return .string;
   }
   unsupported(unit, site, type.getDisplayString());
 }

@@ -9,10 +9,10 @@ sealed class const Value(
   final ValueType type,
 );
 
-/// An integer or boolean literal that requires no instruction to produce it.
+/// A scalar constant that requires no instruction to produce it.
 final class const Constant._(
-  /// The Dart `int` or `bool` represented by this operand.
-  final Object value,
+  /// The Dart value represented by this operand.
+  final Object? value,
   super.type,
 ) extends Value {
   /// Creates an integer literal with the value [value].
@@ -20,6 +20,15 @@ final class const Constant._(
 
   /// Creates a boolean literal with the value [value].
   const new boolean(bool value) : this._(value, .boolean);
+
+  /// Creates a double literal, preserving the sign of zero.
+  const new floating(double value) : this._(value, .floating);
+
+  /// Creates a string literal from its decoded [value].
+  const new string(String value) : this._(value, .string);
+
+  /// Creates the Dart `null` value.
+  const new nullValue() : this._(null, .nullType);
 }
 
 /// A value supplied on entry to a block by the caller or an incoming jump.

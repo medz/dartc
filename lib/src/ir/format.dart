@@ -1,3 +1,5 @@
+import 'dart:convert' show jsonEncode;
+
 import 'block.dart';
 import 'signature.dart';
 import 'value.dart';
@@ -8,22 +10,20 @@ void writeFunction(
   FunctionTarget target,
   List<Block> blocks,
 ) {
-  String type(ValueType t) => switch (t) {
-    .integer => 'int',
-    .boolean => 'bool',
-    .voidType => 'void',
-  };
   final labels = {for (final (i, b) in blocks.indexed) b: 'b$i'};
   final ids = <Value, int>{};
-  String value(Value v) =>
-      v is Constant ? '${v.value}' : '%${ids.putIfAbsent(v, () => ids.length)}';
+  String value(Value v) => switch (v) {
+    Constant(value: final String s) => jsonEncode(s),
+    Constant(:final value) => '$value',
+    _ => '%${ids.putIfAbsent(v, () => ids.length)}',
+  };
   String edge(Jump e) =>
       '${labels[e.target]}(${e.arguments.map(value).join(', ')})';
   String symbol(FunctionTarget t) => '${t.library}::${t.name}';
-  output.writeln('${symbol(target)} -> ${type(target.returnType)}');
+  output.writeln('${symbol(target)} -> ${target.returnType.dartName}');
   for (final b in blocks) {
     final parameters = b.parameters
-        .map((p) => '${value(p)}: ${type(p.type)}')
+        .map((p) => '${value(p)}: ${p.type.dartName}')
         .join(', ');
     output.writeln('${labels[b]}($parameters):');
     for (final op in b.instructions) {

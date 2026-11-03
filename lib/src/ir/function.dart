@@ -20,7 +20,7 @@ final class IrFunction(
   /// Throws [ArgumentError] when the entry parameters differ from the signature.
   /// Throws [StateError] for an empty or malformed graph. Every block must be
   /// sealed and reachable, and each SSA definition must dominate its uses.
-  /// A function with a non-`void` result must return an operand of that type.
+  /// Each return must supply a compatible value; a bare return supplies `null`.
   this {
     verifyFunction(target, this.blocks);
   }

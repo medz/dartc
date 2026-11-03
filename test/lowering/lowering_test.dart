@@ -3,6 +3,7 @@ import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
 import 'fixtures/conditionals.dart' as conditionals;
+import 'fixtures/defaults.dart' as defaults;
 import 'fixtures/effects.dart' as effects;
 import 'fixtures/functions.dart' as dart;
 import 'fixtures/loops.dart' as loops;
@@ -24,6 +25,8 @@ void main() {
       'updates.dart',
       'loops.dart',
       'conditionals.dart',
+      'defaults.dart',
+      'scalar_constants.dart',
     ]);
     functions = {for (final f in result) f.target.name: f};
     bodies = {for (final f in result) f.target: f};
@@ -81,18 +84,27 @@ void main() {
   }
 
   void compare(String name, List<Object?> args, Object? Function() sdk) {
-    (Object?, List<int>) observe(Object? Function() run) {
+    (Object?, String?, List<int>) observe(Object? Function() run) {
       effects.calls.clear();
       try {
-        return (run(), List.of(effects.calls));
+        return (run(), null, List.of(effects.calls));
       } on StateError catch (e) {
-        return (e.message, List.of(effects.calls));
+        return (null, e.message, List.of(effects.calls));
       }
     }
 
-    final (expected, trace) = observe(sdk);
-    final (actual, calls) = observe(() => execute(functions[name]!, args));
+    final (expected, expectedError, trace) = observe(sdk);
+    final (actual, error, calls) = observe(
+      () => execute(functions[name]!, args),
+    );
+    expect(error, expectedError);
     expect(actual, expected);
+    if (expected is double) {
+      expect(actual, isA<double>());
+      if (expected == 0) {
+        expect((actual as double).isNegative, expected.isNegative);
+      }
+    }
     expect(calls, trace);
   }
 
@@ -211,18 +223,45 @@ void main() {
     }
   });
 
-  test('an indexed update needs its own read and write operations', () async {
-    await expectLater(
-      _lower(['index_update.dart']),
-      throwsA(
-        isA<UnsupportedError>().having(
-          (e) => e.message,
-          'assignment location',
-          contains('index_update.dart:3:'),
-        ),
-      ),
-    );
+  test('omitted arguments use the declaration constant, explicit arguments keep source order', () {
+    compare('minInt', [], defaults.minInt);
+    compare('fallthrough', [], defaults.fallthrough);
+    for (final flag in [true, false]) {
+      compare('pickText', [flag], () => defaults.pickText(flag));
+      compare('pickNull', [
+        flag,
+      ], () => Function.apply(defaults.pickNull, [flag]));
+      for (final n in [-1, 0, 2]) {
+        compare('callDefaults', [
+          flag,
+          n,
+        ], () => defaults.callDefaults(flag, n));
+      }
+    }
+    for (final n in [-1, 0, 2]) {
+      compare('pickNumber', [n], () => defaults.pickNumber(n));
+    }
   });
+
+  for (final (file, line) in [
+    ('index_update.dart', 3),
+    ('lazy.dart', 2),
+    ('deferred_constant.dart', 3),
+    ('object_default.dart', 1),
+  ]) {
+    test('reports the unsupported operation in $file at its source', () async {
+      await expectLater(
+        _lower([file]),
+        throwsA(
+          isA<UnsupportedError>().having(
+            (e) => e.message,
+            'location',
+            contains('$file:$line:'),
+          ),
+        ),
+      );
+    });
+  }
 
   test('an unused invalid declaration in a part prevents lowering', () async {
     await expectLater(
@@ -250,19 +289,6 @@ void main() {
     await expectLater(
       _lower(['package/entry.dart', 'package/entry.dart']),
       throwsArgumentError,
-    );
-  });
-
-  test('lazy locals remain an explicit gap with a source location', () async {
-    await expectLater(
-      _lower(['lazy.dart']),
-      throwsA(
-        isA<UnsupportedError>().having(
-          (e) => e.message,
-          'source location',
-          contains('lazy.dart:2:'),
-        ),
-      ),
     );
   });
 

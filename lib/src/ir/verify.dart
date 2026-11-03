@@ -73,8 +73,7 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
     }
     switch (block.end) {
       case Return(:final value):
-        if (target.returnType != .voidType &&
-            value?.type != target.returnType) {
+        if (!target.returnType.accepts(value?.type ?? .nullType)) {
           throw StateError('Return type does not match the function.');
         }
         if (value != null) use(value, count);

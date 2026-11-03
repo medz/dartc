@@ -6,6 +6,8 @@ Lowering supports ordinary `for` and `do-while` loops, including `break` and `co
 
 Conditional expressions now select one branch and preserve its result, including values passed through `void` parameters and locals.
 
+Direct calls accept optional positional and named parameters with scalar defaults. Lowering also supports string, double and null literals and scalar constants declared locally or at library scope.
+
 The `package:dartc/ir.dart` and `package:dartc/lowering.dart` libraries expose SSA functions and lowering from checked Dart libraries.
 
 The development checkout uses the official Dart analyzer and can print compiler IR. Native executables, libraries and the `Export` API remain available in [release 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).

@@ -36,7 +36,7 @@ final class FunctionLowering(
       case ast.BlockFunctionBody(:final block):
         _statement(block);
         if (context.current != null) {
-          if (_target.returnType != .voidType) {
+          if (!_target.returnType.accepts(.nullType)) {
             unsupported(context.unit, body, 'implicit return');
           }
           _return(null);
@@ -92,7 +92,9 @@ final class FunctionLowering(
       }
       final local = variable.declaredFragment!.element;
       final type = valueType(local.type, context.unit, variable);
-      final value = lowerExpression(context, initializer);
+      final value = local.isConst
+          ? scalarConstant(local, context.unit, initializer)
+          : lowerExpression(context, initializer);
       if (!type.accepts(value.type)) {
         unsupported(context.unit, initializer, 'implicit conversion');
       }

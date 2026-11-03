@@ -11,7 +11,7 @@
 | if-case、模式声明及循环头 | 待实现。 |
 | switch、守卫、共享 case、隐式 break | 待实现。 |
 | 标签、break、continue | 循环中的无标签跳转、跳到外层循环的标签，以及从带标签的语句中 break。for 的 continue 执行更新段，do-while 的 continue 执行末尾条件。跳向 switch 的分支待实现。 |
-| return 与正常完成检查 | 返回非空 int、bool 或从 void 函数返回。 |
+| return 与正常完成检查 | 返回标量或从 void 函数返回。Null 和 void 函数可以隐式返回 null。 |
 | try/on/catch、rethrow、finally | 待实现。 |
 | await for | 待实现。 |
 | yield/yield* | 待实现。 |

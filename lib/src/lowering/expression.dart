@@ -12,8 +12,24 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
   switch (expression) {
     case ast.BooleanLiteral(:final value):
       return Constant.boolean(value);
-    case ast.IntegerLiteral(value: final value?):
-      return Constant.integer(value);
+    case ast.IntegerLiteral():
+      return _integerLiteral(context, expression, expression, negated: false);
+    case ast.PrefixExpression(
+      operator: Token(type: .MINUS),
+      operand: final ast.IntegerLiteral literal,
+    ):
+      return _integerLiteral(context, expression, literal, negated: true);
+    case ast.DoubleLiteral(:final value):
+      return Constant.floating(value);
+    case ast.PrefixExpression(
+      operator: Token(type: .MINUS),
+      operand: ast.DoubleLiteral(:final value),
+    ):
+      return Constant.floating(-value);
+    case ast.NullLiteral():
+      return const Constant.nullValue();
+    case ast.StringLiteral(stringValue: final value?):
+      return Constant.string(value);
     case ast.ParenthesizedExpression(:final expression):
       return lowerExpression(context, expression);
     case ast.ConditionalExpression(
@@ -30,6 +46,16 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
     case ast.SimpleIdentifier(element: final VariableElement variable)
         when context.locals.containsKey(variable):
       return context.locals[variable]!;
+    case ast.Identifier(
+          element: GetterElement(
+            variable: final TopLevelVariableElement variable,
+          ),
+        )
+        when variable.isConst:
+      if (expression is ast.PrefixedIdentifier && expression.isDeferred) {
+        unsupported(unit, expression, 'deferred constant');
+      }
+      return scalarConstant(variable, unit, expression);
     case ast.CompoundAssignmentExpression():
       return _updateLocal(context, expression);
     case ast.MethodInvocation(
@@ -47,14 +73,13 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
         }
       }
       final target = context.bindings.target(callee, unit, expression);
-      final values = List<Value?>.filled(target.parameterTypes.length, null);
-      // Named arguments have source-order effects but declaration-order slots.
-      for (final argument in expression.argumentList.arguments) {
-        final slot = context.bindings.slotOf(argument.correspondingParameter);
-        if (slot == null) unsupported(unit, argument, 'argument binding');
-        values[slot] = lowerExpression(context, argument.argumentExpression);
-      }
-      return context.current!.emit(DirectCall(target, values.cast<Value>()));
+      final args = context.bindings.arguments(
+        callee,
+        expression.argumentList,
+        unit,
+        (e) => lowerExpression(context, e),
+      );
+      return context.current!.emit(DirectCall(target, args));
     case ast.BinaryExpression(
       :final leftOperand,
       :final rightOperand,
@@ -91,6 +116,22 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
         'expression starting with ${expression.beginToken.lexeme}',
       );
   }
+}
+
+Constant _integerLiteral(
+  FunctionContext context,
+  ast.Expression site,
+  ast.IntegerLiteral literal, {
+  required bool negated,
+}) {
+  if (site.staticType!.isDartCoreDouble) {
+    if (literal.parseDoubleValue(negated: negated) case final d?) {
+      return .floating(d);
+    }
+  } else if (literal.parseIntValue(negated: negated) case final i?) {
+    return .integer(i);
+  }
+  unsupported(context.unit, site, 'numeric literal');
 }
 
 Value _updateLocal(
