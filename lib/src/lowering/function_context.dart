@@ -1,10 +1,11 @@
 import 'package:analyzer/dart/analysis/results.dart';
-import 'package:analyzer/dart/ast/ast.dart' show AstNode;
+import 'package:analyzer/dart/ast/ast.dart' show AstNode, FunctionExpression;
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart' show DartType;
 import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
+import 'closures.dart';
 
 /// The open control-flow graph and local bindings for one function.
 final class FunctionContext(
@@ -14,6 +15,7 @@ final class FunctionContext(
   /// The call targets shared by all functions in this batch.
   final Bindings bindings,
   final bool Function(VariableElement) _isWritten,
+  final ClosurePlan _closures,
 ) {
   /// The blocks created so far, with the function entry first.
   final blocks = <Block>[];
@@ -49,8 +51,8 @@ final class FunctionContext(
   }
 
   /// The SSA value of each in-scope variable on the current path.
-  final locals = <VariableElement, Value>{};
-  final _declared = <VariableElement>[];
+  final _locals = <Element, Value>{};
+  final _declared = <Element>[];
 
   /// Writable bindings and their declared types, in edge-argument order.
   final mutableLocals = <(VariableElement, ValueType)>[];
@@ -95,11 +97,75 @@ final class FunctionContext(
     current = null;
   }
 
+  bool hasLocal(Element? element) => _locals.containsKey(element);
+
+  /// Reads a lexical value at the current program point.
+  Value readLocal(Element element) {
+    final stored = _locals[element]!;
+    return stored.type is CellType ? current!.emit(ReadCell(stored)) : stored;
+  }
+
+  /// Writes the binding or its shared captured storage.
+  void writeLocal(VariableElement variable, Value value) {
+    final stored = _locals[variable]!;
+    if (stored.type is CellType) {
+      current!.emit(WriteCell(stored, value));
+    } else {
+      _locals[variable] = value;
+    }
+  }
+
   /// Binds a declaration in the current lexical scope.
   void declare(VariableElement variable, ValueType type, Value initial) {
-    locals[variable] = initial;
     _declared.add(variable);
-    if (_isWritten(variable)) mutableLocals.add((variable, type));
+    if (_closures.boxed.contains(variable)) {
+      _locals[variable] = emit(NewCell(CellType(type), initial));
+    } else {
+      _locals[variable] = initial;
+      if (_isWritten(variable)) mutableLocals.add((variable, type));
+    }
+  }
+
+  /// Binds the lexical function itself or a capture supplied by the caller.
+  void bindCapture(Element? element, Value value) {
+    if (element == null) {
+      receiver = value;
+    } else {
+      _locals[element] = value;
+      _declared.add(element);
+    }
+  }
+
+  /// Instantiates a function using this activation's values and shared cells.
+  Value close(FunctionExpression syntax) {
+    final fn = _closures.functions[syntax.declaredFragment!.element]!;
+    return emit(
+      MakeClosure(fn.target, [
+        for (final key in fn.captures) key == null ? receiver! : _locals[key]!,
+      ]),
+    );
+  }
+
+  /// Identifies header cells that must move to a fresh binding on each for iteration.
+  List<VariableElement> forInitializer(void Function() initialize) {
+    final mark = _declared.length;
+    initialize();
+    final variables = <VariableElement>[];
+    for (final variable in _declared.skip(mark).whereType<VariableElement>()) {
+      if (_locals[variable]!.type case final CellType type) {
+        variables.add(variable);
+        mutableLocals.add((variable, type));
+      }
+    }
+    return variables;
+  }
+
+  /// Copies a for-header binding before running the update expressions.
+  void nextIteration(VariableElement variable) {
+    final cell = _locals[variable]!;
+    _locals[variable] = emit(
+      NewCell(cell.type as CellType, current!.emit(ReadCell(cell))),
+    );
   }
 
   /// Removes declarations introduced by [lower] when its scope ends.
@@ -107,7 +173,7 @@ final class FunctionContext(
     final mark = _declared.length, mutableMark = mutableLocals.length;
     lower();
     while (_declared.length > mark) {
-      locals.remove(_declared.removeLast());
+      _locals.remove(_declared.removeLast());
     }
     mutableLocals.length = mutableMark;
   }
@@ -200,13 +266,13 @@ final class FunctionContext(
     final end = count ?? mutableLocals.length;
     return end == 0
         ? const []
-        : [for (var i = 0; i < end; i++) locals[mutableLocals[i].$1]!];
+        : [for (var i = 0; i < end; i++) _locals[mutableLocals[i].$1]!];
   }
 
   /// Restores [values] at the same lexical scope in which they were captured.
   void restoreLocals(List<Value> values, [int offset = 0]) {
     for (final (i, (variable, _)) in mutableLocals.indexed) {
-      locals[variable] = values[offset + i];
+      _locals[variable] = values[offset + i];
     }
   }
 
@@ -220,7 +286,7 @@ final class FunctionContext(
     final second = <Value>[if (result != null) result.$3];
     final changed = <VariableElement>[];
     for (final (i, (variable, type)) in mutableLocals.indexed) {
-      final value = locals[variable]!;
+      final value = _locals[variable]!;
       if (saved[i] == value) continue;
       types.add(type);
       first.add(saved[i]);
@@ -230,7 +296,7 @@ final class FunctionContext(
     final block = addBlock(types);
     var slot = result == null ? 0 : 1;
     for (final variable in changed) {
-      locals[variable] = block.parameters[slot++];
+      _locals[variable] = block.parameters[slot++];
     }
     current = block;
     return (.new(block, first), .new(block, second));

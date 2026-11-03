@@ -50,7 +50,9 @@ Value? assignPattern(
   final writes = <VariableElement, Value>{};
   _Matcher(context).match(pattern, subject, null, writes);
   if (context.current == null) return null;
-  context.locals.addAll(writes);
+  for (final MapEntry(:key, :value) in writes.entries) {
+    context.writeLocal(key, value);
+  }
   return subject;
 }
 
@@ -88,7 +90,7 @@ final class _Matcher(final FunctionContext context) {
         );
         if (bound != null) bindings[variable] = bound;
       case ast.AssignedVariablePattern(element: final VariableElement variable)
-          when context.locals.containsKey(variable):
+          when context.hasLocal(variable):
         final bound = _require(
           value,
           context.typeOf(variable.type, pattern),

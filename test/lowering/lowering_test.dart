@@ -4,6 +4,7 @@ import 'package:test/test.dart';
 
 import 'fixture_runner.dart';
 import 'fixtures/callables.dart' as callables;
+import 'fixtures/closures.dart' as closures;
 import 'fixtures/conditionals.dart' as conditionals;
 import 'fixtures/defaults.dart' as defaults;
 import 'fixtures/destructure.dart' as destructure;
@@ -36,6 +37,7 @@ void main() {
     final result = await _lower([
       'functions.dart',
       'callables.dart',
+      'closures.dart',
       'updates.dart',
       'loops.dart',
       'nullability.dart',
@@ -57,7 +59,8 @@ void main() {
     ]);
     functions = {
       for (final f in result.functions)
-        if (f.target.owner == null) f.target.name: f,
+        if (f.target.owner == null && f.target.enclosing == null)
+          f.target.name: f,
     };
     final library = Uri.base.resolve('$_fixtures/effects.dart');
     runner = FixtureRunner(result, {
@@ -586,6 +589,27 @@ void main() {
       }
     },
   );
+
+  test('lexical closures preserve shared variables, receivers and per-iteration bindings', () {
+    compare('updateBindings', [], closures.updateBindings);
+    for (final n in [-1, 0, 2, 4]) {
+      compare('sharedCounter', [n], () => closures.sharedCounter(n));
+      compare('transitive', [n], () => closures.transitive(n));
+      compare('recursive', [n], () => closures.recursive(n));
+      compare('destructuredLoop', [n], () => closures.destructuredLoop(n));
+      compare('capturedReceiver', [n], () => closures.capturedReceiver(n));
+      compare('capturedSuperGetter', [
+        n,
+      ], () => closures.capturedSuperGetter(n));
+      compare('inConstructors', [n], () => closures.inConstructors(n));
+      compare('inGuards', [n], () => closures.inGuards(n));
+      compare('scoped', [n], () => closures.scoped(n));
+    }
+    for (final flag in [false, true]) {
+      compare('afterExit', [flag], () => closures.afterExit(flag));
+      compare('iteration', [flag], () => closures.iteration(flag));
+    }
+  });
 
   for (final (file, line) in [
     ('index_update.dart', 3),

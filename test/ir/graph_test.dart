@@ -287,6 +287,40 @@ void main() {
     },
   );
 
+  test('captured storage stays internal and lexical bodies must be linked', () {
+    final cell = CellType(.integer);
+    final local = FunctionTarget(
+      f.library,
+      'read',
+      .integer,
+      [],
+      kind: .closure,
+      enclosing: f,
+      sourceOffset: 4,
+      captures: [cell],
+    );
+    final entry = Block(f.parameterTypes);
+    final stored = entry.emit(NewCell(cell, one));
+    entry.emit(MakeClosure(local, [stored]));
+    entry.finish(const Return(one));
+    expect(() => MakeClosure(local, [one]), throwsArgumentError);
+    expect(() => TypeCast(stored, .object), throwsArgumentError);
+    expect(() => FunctionConstant(local), throwsArgumentError);
+    final body = IrFunction(f, [entry]);
+    expect(() => IrProgram([], [body]), throwsArgumentError);
+    final closure = Block(local.parameterTypes);
+    closure.finish(Return(closure.emit(ReadCell(closure.parameters[1]))));
+    expect(
+      () => IrProgram([], [
+        body,
+        IrFunction(local, [closure]),
+      ]),
+      returnsNormally,
+    );
+    expect(ValueType.object.nullable.accepts(cell), isFalse);
+    expect(cell.accepts(CellType(.number)), isFalse);
+  });
+
   test('a protected operation and its exception have distinct SSA edges', () {
     final target = FunctionTarget(f.library, 'invoke', .object, [.object]);
     final entry = Block(target.parameterTypes);

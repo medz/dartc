@@ -24,7 +24,8 @@ export 'src/ir/function.dart' show IrFunction;
 export 'src/ir/program.dart' show IrClass, IrProgram;
 export 'src/ir/signature.dart'
     show FunctionKind, FunctionTarget, InstanceField, MemberSelector;
-export 'src/ir/type.dart' show ClassType, FunctionType, RecordType, ValueType;
+export 'src/ir/type.dart'
+    show CellType, ClassType, FunctionType, RecordType, ValueType;
 export 'src/ir/value.dart'
     show
         BindMethod,
@@ -39,7 +40,10 @@ export 'src/ir/value.dart'
         InstanceCall,
         IntBinary,
         IntOperator,
+        MakeClosure,
         MakeRecord,
+        NewCell,
+        ReadCell,
         LoadField,
         NullCheck,
         RecordConstant,
@@ -50,4 +54,5 @@ export 'src/ir/value.dart'
         TypeCast,
         TypeTest,
         UnwindValue,
+        WriteCell,
         Value;

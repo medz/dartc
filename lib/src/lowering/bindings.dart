@@ -18,18 +18,22 @@ final class Bindings() {
     ResolvedUnitResult unit,
     ast.AstNode site, {
     Set<ConstructorElement>? redirects,
+    FunctionTarget? enclosing,
+    int? sourceOffset,
+    Iterable<ValueType> captures = const [],
   }) {
     element = element.baseElement;
-    final previous = _targets[element];
+    final previous = enclosing == null ? _targets[element] : null;
     if (previous != null) return previous;
     final parameters = element.formalParameters;
-    final enclosing = element.enclosingElement;
-    final owner = enclosing is InterfaceElement
-        ? classType(enclosing, unit, site)
+    final container = element.enclosingElement;
+    final owner = container is InterfaceElement
+        ? classType(container, unit, site)
         : null;
     final kind = switch (element) {
       ConstructorElement(:final isFactory) =>
         isFactory ? FunctionKind.factory : FunctionKind.initializer,
+      LocalFunctionElement() => FunctionKind.closure,
       GetterElement(isStatic: false) => FunctionKind.getter,
       SetterElement(isStatic: false) => FunctionKind.setter,
       MethodElement(isStatic: false) => FunctionKind.method,
@@ -52,7 +56,7 @@ final class Bindings() {
     }
     final function = FunctionTarget(
       element.library.uri,
-      element.name!,
+      element.name ?? '<anonymous>',
       kind == .initializer
           ? .voidType
           : valueType(element.returnType, unit, site),
@@ -60,6 +64,9 @@ final class Bindings() {
       owner: owner,
       kind: kind,
       redirect: destination,
+      enclosing: enclosing,
+      sourceOffset: sourceOffset,
+      captures: captures,
       covariantParameters: [
         if (kind.isVirtual)
           for (final (i, p) in parameters.indexed)
@@ -74,7 +81,7 @@ final class Bindings() {
           if (p.isNamed) p.name!: p.isRequiredNamed,
       },
     );
-    _targets[element] = function;
+    if (enclosing == null) _targets[element] = function;
     if (destination == null && parameters.any((p) => p.isOptional)) {
       _defaults[function] = {
         for (final (i, p) in parameters.indexed)

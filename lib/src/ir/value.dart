@@ -34,7 +34,8 @@ final class FunctionConstant(
   final FunctionTarget target,
 ) extends Constant {
   this : super(target.signature) {
-    if (target.kind.isVirtual ||
+    if (target.kind == .closure ||
+        target.kind.isVirtual ||
         target.kind == .initializer && target.owner!.isAbstract) {
       throw ArgumentError('Expected a callable without a bound receiver.');
     }
@@ -92,14 +93,86 @@ sealed class Instruction(super.type) extends Value {
     InstanceCall() ||
     FunctionCall() ||
     BindMethod() ||
+    MakeClosure() ||
+    NewCell() ||
     Construct() ||
     TypeCast() ||
     NullCheck() ||
     MakeRecord() => true,
     Equals(:final mayCallUserCode) => mayCallUserCode,
     IntBinary(:final operator) => operator.mayThrow,
-    TypeTest() || RecordGet() || StoreField() || LoadField() => false,
+    ReadCell() ||
+    WriteCell() ||
+    TypeTest() ||
+    RecordGet() ||
+    StoreField() ||
+    LoadField() => false,
   };
+}
+
+/// Creates a local function value retaining its capture slots by identity.
+final class MakeClosure(
+  /// The body executed by this closure.
+  final FunctionTarget target,
+  Iterable<Value> captures,
+) extends Instruction {
+  /// The captured values or shared cells in entry order.
+  @override
+  final List<Value> inputs = .unmodifiable(captures);
+  this : super(target.signature) {
+    if (target.kind != .closure) {
+      throw ArgumentError('Expected a lexical function.');
+    }
+    checkArguments(target.captures, inputs);
+  }
+}
+
+/// Allocates shared storage for one activation of a captured variable.
+final class NewCell(
+  CellType type,
+
+  /// The starting value for this activation.
+  final Value initial,
+) extends Instruction {
+  this : super(type) {
+    if (!type.content.accepts(initial.type)) {
+      throw ArgumentError('Incorrect capture initializer.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [initial];
+}
+
+/// Reads the current value of a captured variable.
+final class ReadCell(
+  /// The shared storage to read.
+  final Value cell,
+) extends Instruction {
+  this
+    : super(switch (cell.type) {
+        CellType(:final content) => content,
+        _ => throw ArgumentError('Expected capture storage.'),
+      });
+  @override
+  Iterable<Value> get inputs => [cell];
+}
+
+/// Replaces the value observed by all closures sharing [cell].
+final class WriteCell(
+  /// The shared storage to write.
+  final Value cell,
+
+  /// The new variable value.
+  final Value value,
+) extends Instruction {
+  this : super(.voidType) {
+    final type = cell.type;
+    if (type is! CellType || !type.content.accepts(value.type)) {
+      throw ArgumentError('Incorrect capture write.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [cell, value];
 }
 
 /// Binds a method to its evaluated receiver, performing virtual selection at extraction.
@@ -295,7 +368,11 @@ final class TypeTest(
   /// Whether to invert the result of the match.
   final bool negated = false,
 }) extends Instruction {
-  this : super(.boolean);
+  this : super(.boolean) {
+    if (operand.type is CellType || testedType is CellType) {
+      throw ArgumentError('A Dart type test cannot inspect storage.');
+    }
+  }
 
   /// The value known on the edge with [outcome], or `null` if its type is unchanged.
   Value? refinement(bool outcome) {
@@ -344,6 +421,12 @@ final class TypeCast(
   final Value operand,
   super.type,
 ) extends Instruction {
+  this {
+    if (operand.type is CellType || type is CellType) {
+      throw ArgumentError('A Dart cast cannot expose storage.');
+    }
+  }
+
   @override
   Iterable<Value> get inputs => [operand];
 }
@@ -484,6 +567,9 @@ final class DirectCall(
   ///
   /// Throws [ArgumentError] for a wrong argument count or an incompatible type.
   this : super(target.returnType) {
+    if (target.kind == .closure) {
+      throw ArgumentError('A lexical invocation requires its closure.');
+    }
     if (target.redirect != null) {
       throw ArgumentError('Bind arguments to the redirect destination.');
     }

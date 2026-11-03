@@ -17,6 +17,9 @@ final class IrFunction(
   /// Default values indexed by explicit parameter slot, excluding the receiver.
   final Map<int, Constant> defaults = .unmodifiable(defaults);
 
+  /// The local bodies that this graph can instantiate.
+  late final Set<FunctionTarget> closures;
+
   /// The block whose parameters receive the function arguments.
   Block get entry => blocks.first;
 
@@ -28,7 +31,7 @@ final class IrFunction(
   /// Each return must supply a compatible value; a bare return supplies `null`.
   this {
     final optional = target.signature.optionalSlots;
-    final offset = target.kind.hasReceiver ? 1 : 0;
+    final offset = target.argumentOffset;
     if (target.isAbstract ||
         target.redirect != null ||
         optional.length != this.defaults.length ||
@@ -41,7 +44,7 @@ final class IrFunction(
         )) {
       throw ArgumentError('Invalid body or defaults for ${target.name}.');
     }
-    verifyFunction(target, this.blocks);
+    closures = verifyFunction(target, this.blocks);
   }
 
   /// Writes the typed blocks, instructions and outgoing edges to [output].

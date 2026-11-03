@@ -17,6 +17,25 @@ Value? lowerExpression(FunctionContext context, ast.Expression expression) =>
 Value? _lower(FunctionContext context, ast.Expression expression) {
   final unit = context.unit;
   switch (expression) {
+    case ast.FunctionExpression():
+      return context.close(expression);
+    case ast.SimpleIdentifier(element: final LocalFunctionElement local):
+      return context.readLocal(local);
+    case ast.MethodInvocation(
+      methodName: ast.SimpleIdentifier(
+        element: final LocalFunctionElement local,
+      ),
+      target: null,
+      :final argumentList,
+    ):
+      final function = context.readLocal(local);
+      final args = evaluateArguments(
+        argumentList,
+        (e) => lowerExpression(context, e),
+      );
+      return args == null
+          ? null
+          : context.emit(FunctionCall(function, args.positional, args.named));
     case ast.ThisExpression():
       return context.receiver!;
     case ast.ImplicitCallReference(
@@ -219,9 +238,9 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       context.exhaustivenessFailure();
       return done.enter()?.parameters.first;
     case ast.SimpleIdentifier(element: final VariableElement variable)
-        when context.locals.containsKey(variable):
+        when context.hasLocal(variable):
       return context.cast(
-        context.locals[variable]!,
+        context.readLocal(variable),
         context.typeOf(expression.staticType!, expression),
       );
     case ast.Identifier(

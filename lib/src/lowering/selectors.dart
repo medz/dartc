@@ -226,18 +226,16 @@ final class SelectorChain(
     }
     final invocation = getterArguments ?? arguments;
     if (member is GetterElement && invocation != null) {
-      return invokeValue(
-        known,
-        invocation,
-        getterCall,
-        (receiver) => context.callPositionalMember(
-          member,
-          receiver,
-          [],
-          node,
-          direct: direct,
-        ),
+      Value? get(Value receiver) => context.callPositionalMember(
+        member,
+        receiver,
+        [],
+        node,
+        direct: direct,
       );
+      return direct
+          ? invokeValue(get(known), invocation, getterCall)
+          : invokeValue(known, invocation, getterCall, get);
     }
     Value? result(Instruction call) {
       final value = context.normal(context.emit(call));
@@ -305,13 +303,12 @@ final class SelectorChain(
     }
 
     final destination = site.writeElement;
-    if (destination is VariableElement &&
-        context.locals.containsKey(destination)) {
-      return apply(() => context.locals[destination], (value) {
+    if (destination is VariableElement && context.hasLocal(destination)) {
+      return apply(() => context.readLocal(destination), (value) {
         if (!context.typeOf(destination.type, site).accepts(value.type)) {
           unsupported(context.unit, site, 'implicit conversion');
         }
-        context.locals[destination] = value;
+        context.writeLocal(destination, value);
       });
     }
     if (destination is! ExecutableElement ||

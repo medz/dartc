@@ -1,9 +1,11 @@
 import 'block.dart';
 import 'signature.dart';
+import 'type.dart';
 import 'value.dart';
 
 /// Checks control flow, argument and return types, and SSA definition dominance.
-void verifyFunction(FunctionTarget target, List<Block> blocks) {
+Set<FunctionTarget> verifyFunction(FunctionTarget target, List<Block> blocks) {
+  Set<FunctionTarget>? closures;
   if (blocks.isEmpty) throw StateError('Function has no entry.');
   final entry = blocks.first;
   if (target.parameterTypes.length != entry.parameters.length ||
@@ -96,6 +98,11 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
 
     void checkOperation(Instruction op, int position) {
       switch (op) {
+        case MakeClosure(target: final child):
+          if (child.enclosing != target) {
+            throw StateError('Closure created outside its lexical parent.');
+          }
+          (closures ??= {}).add(child);
         case StoreField(:final field, :final receiver) when field.isFinal:
           if (target.kind != .initializer ||
               target.owner != field.owner ||
@@ -118,6 +125,12 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
           break;
       }
       for (final input in op.inputs) {
+        if (input.type is CellType &&
+            op is! ReadCell &&
+            op is! WriteCell &&
+            op is! MakeClosure) {
+          throw StateError('Capture storage used as a Dart value.');
+        }
         use(input, position);
       }
     }
@@ -157,6 +170,7 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
         useEdge(edge);
     }
   }
+  return closures == null ? const {} : Set.unmodifiable(closures!);
 }
 
 Map<Block, Block> _dominators(

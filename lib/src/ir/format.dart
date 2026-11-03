@@ -13,6 +13,9 @@ void writeFunction(
   final labels = {for (final (i, b) in blocks.indexed) b: 'b$i'};
   final ids = <Value, int>{};
   String symbol(FunctionTarget t) {
+    if (t.enclosing case final outer?) {
+      return '${symbol(outer)}::${t.name}@${t.sourceOffset}';
+    }
     final prefix = switch (t.kind) {
       .getter => 'get ',
       .setter => 'set ',
@@ -39,6 +42,11 @@ void writeFunction(
     for (final e in named.entries) '${e.key}: ${value(e.value)}',
   ].join(', ');
   String operation(Instruction op) => switch (op) {
+    MakeClosure() =>
+      'close ${symbol(op.target)}(${op.inputs.map(value).join(', ')})',
+    NewCell() => 'cell ${value(op.initial)}',
+    ReadCell() => 'readCell ${value(op.cell)}',
+    WriteCell() => 'writeCell ${value(op.cell)}, ${value(op.value)}',
     BindMethod() =>
       'bind ${op.direct ? 'super ' : ''}${value(op.receiver)} ${symbol(op.method)}',
     FunctionCall() =>

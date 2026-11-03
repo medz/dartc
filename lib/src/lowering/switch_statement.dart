@@ -52,7 +52,7 @@ void lowerSwitchStatement(
       if (shared is JoinPatternVariableElement && !shared.isConsistent) {
         continue;
       }
-      values[shared] = context.locals[variable]!;
+      values[shared] = context.readLocal(variable);
     }
     if (body.entry == null) {
       body.variables = values.keys.toList();

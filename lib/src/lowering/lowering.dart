@@ -29,14 +29,13 @@ abstract final class Lowering() {
             declaredFragment: TopLevelFunctionFragment(:final element),
             :final functionExpression,
           ):
-            functions.add(
-              FunctionLowering(
-                unit,
-                bindings,
-                element,
-                node,
-                functionExpression.body,
-              ).run(),
+            FunctionLowering.append(
+              functions,
+              unit,
+              bindings,
+              element,
+              node,
+              functionExpression.body,
             );
           case ast.TopLevelVariableDeclaration(variables: final declarations)
               when declarations.isConst:

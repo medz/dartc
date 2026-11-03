@@ -5,8 +5,8 @@
 | 特性 | 当前 IR 范围 |
 | --- | --- |
 | 块、空语句、表达式语句 | 同步块、空语句和已支持的表达式。 |
-| 局部变量与同步非泛型局部函数 | 支持[变量](variables.md)中列出的局部声明。局部函数待实现。 |
-| if/else、while、do、普通 for | 普通 if/else、while、do-while 和三段式 for。for 支持变量声明、表达式或空初始段，以及多个按序求值的更新表达式。循环退出后保留最后一次条件或循环体实际写入的值。 |
+| 局部变量与同步非泛型局部函数 | 支持[局部变量](variables.md)和可递归调用、捕获外部变量的[局部函数](functions.md)。 |
+| if/else、while、do、普通 for | 普通 if/else、while、do-while 和三段式 for。for 支持变量声明、表达式或空初始段，以及多个按序求值的更新表达式。每轮更新前为循环头声明的变量建立新绑定，闭包保留所捕获那一轮的绑定。见[循环闭包样本](../test/lowering/fixtures/closures.dart)。 |
 | for-in | 待实现。 |
 | if-case、模式声明及循环头 | if-case 支持标量与 record 模式及守卫。局部声明和三段式 for 可使用 record 解构。见[模式](patterns.md)。 |
 | switch、守卫、共享 case、隐式 break | 支持标量与 record 模式、when、default 和多个 case 共享的分支体。分支体正常结束时退出 switch。非穷尽类型未命中时继续执行 switch 后的语句。见[switch 语句样本](../test/lowering/fixtures/switch_statements.dart)。 |

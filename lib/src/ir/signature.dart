@@ -5,6 +5,9 @@ enum FunctionKind() {
   /// A top-level function or static method.
   function,
 
+  /// A lexical function paired with its captured environment.
+  closure,
+
   /// A generative constructor initializing its first operand in place.
   initializer,
 
@@ -62,6 +65,13 @@ final class FunctionTarget(
   /// Whether the instance member is declared without an implementation.
   final bool isAbstract = false,
 
+  /// The immediately enclosing function of a local declaration or literal.
+  final FunctionTarget? enclosing,
+
+  /// The lexical source offset of that local function.
+  final int? sourceOffset,
+  Iterable<ValueType> captures = const [],
+
   /// The constructor named by a redirecting factory declaration.
   final FunctionTarget? redirect,
 }) {
@@ -73,10 +83,22 @@ final class FunctionTarget(
     namedParameters: namedParameters,
   );
 
-  /// The SSA entry parameter types, including the receiver when present.
-  late final List<ValueType> parameterTypes = kind.hasReceiver
-      ? .unmodifiable([owner!, ...signature.parameters])
-      : signature.parameters;
+  /// The capture slots, in the order supplied when the closure is created.
+  final List<ValueType> captures = .unmodifiable(captures);
+
+  /// The entry types. A local function receives itself and its captures before explicit arguments.
+  late final List<ValueType> parameterTypes = switch (kind) {
+    .closure => .unmodifiable([
+      signature,
+      ...captures,
+      ...signature.parameters,
+    ]),
+    _ when kind.hasReceiver => .unmodifiable([owner!, ...signature.parameters]),
+    _ => signature.parameters,
+  };
+
+  /// The entry slot of the first explicit Dart parameter.
+  int get argumentOffset => parameterTypes.length - signature.parameters.length;
 
   /// Explicit method parameters checked covariantly at entry.
   final Set<int> covariantParameters = .unmodifiable(covariantParameters);
@@ -117,7 +139,16 @@ final class FunctionTarget(
 
   this {
     if ((owner != null && owner!.library != library) ||
-        (kind != .function && owner == null) ||
+        (kind != .function && kind != .closure && owner == null) ||
+        (kind == .closure
+            ? enclosing == null ||
+                  enclosing!.library != library ||
+                  owner != null ||
+                  sourceOffset == null ||
+                  sourceOffset! < 0
+            : enclosing != null ||
+                  sourceOffset != null ||
+                  this.captures.isNotEmpty) ||
         this.covariantParameters.any(
           (i) => !kind.isVirtual || i < 0 || i >= signature.parameters.length,
         ) ||
@@ -161,4 +192,10 @@ final class InstanceField(
 
   /// Whether writes are restricted to initialization.
   final bool isFinal = false,
-});
+}) {
+  this {
+    if (type is CellType) {
+      throw ArgumentError('An instance field must hold a Dart value.');
+    }
+  }
+}

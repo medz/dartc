@@ -50,7 +50,12 @@ final class FixtureRunner(
     }
     return target.kind == .initializer
         ? _construct(target, arguments)
-        : _enter(target, [?fn.receiver, ...arguments]);
+        : _enter(target, [
+            if (target.kind == .closure) fn,
+            ...fn.captures,
+            ?fn.receiver,
+            ...arguments,
+          ]);
   }
 
   Object? run(IrFunction function, List<Object?> args) {
@@ -64,6 +69,14 @@ final class FixtureRunner(
       switch (op) {
         case Construct(:final initializer, :final inputs):
           values[op] = _construct(initializer, inputs.map(read).toList());
+        case MakeClosure(:final target, :final inputs):
+          values[op] = _FunctionValue(target, null, inputs.map(read).toList());
+        case NewCell(:final initial):
+          values[op] = _Cell(read(initial));
+        case ReadCell(:final cell):
+          values[op] = (read(cell) as _Cell).value;
+        case WriteCell(:final cell, :final value):
+          (read(cell) as _Cell).value = read(value);
         case BindMethod(:final method, :final receiver, :final direct):
           final instance = read(receiver) as _Instance;
           values[op] = _FunctionValue(
@@ -249,17 +262,24 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
   };
 }
 
+final class _Cell(var Object? value);
+
 final class _FunctionValue(
   final FunctionTarget target, [
   final _Instance? receiver,
+  final List<Object?> captures = const [],
 ]) {
   @override
   bool operator ==(Object other) =>
-      other is _FunctionValue &&
-      target == other.target &&
-      identical(receiver, other.receiver);
+      identical(this, other) ||
+      target.kind != .closure &&
+          other is _FunctionValue &&
+          target == other.target &&
+          identical(receiver, other.receiver);
   @override
-  int get hashCode => Object.hash(target, identityHashCode(receiver));
+  int get hashCode => target.kind == .closure
+      ? identityHashCode(this)
+      : Object.hash(target, identityHashCode(receiver));
 }
 
 final class _Instance(final ClassType type, final FixtureRunner runner) {

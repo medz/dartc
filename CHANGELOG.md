@@ -8,7 +8,7 @@ Conditional expressions now select one branch and preserve its result, including
 
 Direct calls accept optional positional and named parameters with scalar defaults. Lowering also supports string, double and null literals and scalar constants declared locally or at library scope.
 
-Pass top-level functions, bound methods and constructors as values. Indirect calls preserve optional defaults and covariant entry checks.
+Pass top-level functions, bound methods and constructors as values. Indirect calls preserve optional defaults and covariant entry checks. Local functions and anonymous closures can retain and update captured variables after the enclosing call returns. Closures created in a `for` loop retain their iteration's bindings.
 
 Records can be constructed, returned, compared and used as constants or parameter defaults. Named and positional fields support ordinary and null-aware reads. Nested record patterns can declare locals, swap existing variables and initialize `for` loops.
 

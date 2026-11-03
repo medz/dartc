@@ -55,14 +55,24 @@ IrClass lowerClass(
     constructors.add(target);
     if (target.redirect != null) return;
     if (ctor.isExternal) unsupported(unit, site, 'external constructor');
-    final lowering = FunctionLowering(unit, bindings, ctor, site, body);
-    functions.add(
-      lowering.run(
-        ctor.isFactory
-            ? null
-            : (context) =>
-                  _initialize(context, declaration, ctor, initializers),
-      ),
+    FunctionLowering.append(
+      functions,
+      unit,
+      bindings,
+      ctor,
+      site,
+      body,
+      initializers: [
+        if (ctor.isGenerative && ctor.redirectedConstructor == null)
+          for (final member
+              in declaration.body.members.whereType<ast.FieldDeclaration>())
+            if (!member.isStatic)
+              for (final v in member.fields.variables) ?v.initializer,
+        ...initializers,
+      ],
+      initialize: ctor.isFactory
+          ? null
+          : (context) => _initialize(context, declaration, ctor, initializers),
     );
   }
 
@@ -96,8 +106,13 @@ IrClass lowerClass(
         final target = bindings.target(method, unit, member);
         if (target.kind.isVirtual) members.add(target);
         if (!target.isAbstract) {
-          functions.add(
-            FunctionLowering(unit, bindings, method, member, body).run(),
+          FunctionLowering.append(
+            functions,
+            unit,
+            bindings,
+            method,
+            member,
+            body,
           );
         }
     }
@@ -135,7 +150,7 @@ void _initialize(
         if (forwardSuper)
           for (final p
               in ctor.formalParameters.whereType<SuperFormalParameterElement>())
-            p.superConstructorParameter!: context.locals[p]!,
+            p.superConstructorParameter!: context.readLocal(p),
       },
     );
     if (args != null && !target.enclosingElement.thisType.isDartCoreObject) {
@@ -166,7 +181,7 @@ void _initialize(
   }
   for (final p
       in ctor.formalParameters.whereType<FieldFormalParameterElement>()) {
-    store(p.field!, context.locals[p]!, declaration);
+    store(p.field!, context.readLocal(p), declaration);
   }
   ast.ArgumentList? superArguments;
   for (final init in initializers) {

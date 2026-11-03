@@ -1,4 +1,4 @@
-/// A Dart type carried by an SSA value, a block parameter or a function signature.
+/// A static SSA type. Source values carry Dart types; capture cells carry a storage type.
 sealed class const ValueType() {
   /// The non-nullable `Object` type.
   static const ClassType object = ClassType._core('Object', null, false);
@@ -66,6 +66,7 @@ sealed class const ValueType() {
 
   /// Whether an operand of [type] can be passed here without a conversion.
   bool accepts(ValueType type) {
+    if (this is CellType || type is CellType) return this == type;
     if (identical(this, type) || type == never || this == voidType) return true;
     if (this case _NullableType(:final nonNullable)) {
       return type == nullType ||
@@ -88,6 +89,29 @@ sealed class const ValueType() {
         type is ClassType &&
         type._inherits(this as ClassType);
   }
+}
+
+/// An internal reference to a captured variable with invariant [content] type.
+final class CellType(
+  /// The Dart type stored in the shared variable.
+  final ValueType content,
+) extends ValueType {
+  this {
+    if (content is CellType) {
+      throw ArgumentError('A captured slot must hold a Dart value.');
+    }
+  }
+
+  @override
+  ValueType get nullable =>
+      throw UnsupportedError('Capture storage cannot be nullable.');
+  @override
+  String get dartName => 'cell<${content.dartName}>';
+  @override
+  bool operator ==(Object other) =>
+      other is CellType && other.content == content;
+  @override
+  int get hashCode => Object.hash(CellType, content);
 }
 
 /// A structural record type with positional slots followed by named slots in name order.
@@ -126,6 +150,9 @@ final class RecordType._(
       }
       slots[name] = fields.length;
       fields.add(named[name]!);
+    }
+    if (fields.any((t) => t is CellType)) {
+      throw ArgumentError('Record fields must hold Dart values.');
     }
     return ._(count, .unmodifiable(fields), .unmodifiable(slots));
   }
@@ -189,6 +216,9 @@ final class FunctionType._(
     Map<String, bool> namedParameters = const {},
   }) {
     final types = List<ValueType>.unmodifiable(parameters);
+    if (result is CellType || types.any((t) => t is CellType)) {
+      throw ArgumentError('Function signatures must contain Dart types.');
+    }
     final count = types.length - namedParameters.length;
     if (optionalPositional < 0 ||
         optionalPositional > count ||

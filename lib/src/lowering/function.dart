@@ -4,6 +4,7 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
+import 'closures.dart';
 import 'exception.dart';
 import 'expression.dart';
 import 'function_context.dart';
@@ -11,12 +12,14 @@ import 'pattern.dart';
 import 'switch_statement.dart';
 
 /// Builds the blocks and local bindings for a resolved synchronous function.
-final class FunctionLowering(
+final class FunctionLowering._(
   ResolvedUnitResult unit,
   Bindings bindings,
   final ExecutableElement element,
   final ast.AstNode site,
   final ast.FunctionBody? body,
+  final FunctionTarget _target,
+  ClosurePlan plan,
 ) {
   final FunctionContext context = .new(
     unit,
@@ -24,23 +27,71 @@ final class FunctionLowering(
     element is ConstructorElement || body == null
         ? (variable) => !variable.isFinal
         : body.isPotentiallyMutatedInScope,
+    plan,
   );
   final _breaks = <ast.AstNode, JumpTarget>{};
   final _continues = <ast.AstNode, void Function()>{};
   FinallyRegion? _finally;
-  late final _target = context.bindings.target(element, context.unit, site);
 
-  /// Lowers the body and verifies the resulting function before returning it.
-  IrFunction run([void Function(FunctionContext)? initialize]) {
+  /// Appends the outer graph and the lexical bodies it declares to [output].
+  static void append(
+    List<IrFunction> output,
+    ResolvedUnitResult unit,
+    Bindings bindings,
+    ExecutableElement element,
+    ast.AstNode site,
+    ast.FunctionBody? body, {
+    Iterable<ast.AstNode> initializers = const [],
+    void Function(FunctionContext)? initialize,
+  }) {
+    final target = bindings.target(element, unit, site);
+    final plan = ClosurePlan()
+      ..prepare(unit, bindings, target, [...initializers, ?body]);
+    output.add(
+      FunctionLowering._(
+        unit,
+        bindings,
+        element,
+        site,
+        body,
+        target,
+        plan,
+      )._run(initialize: initialize),
+    );
+    for (final fn in plan.functions.values) {
+      output.add(
+        FunctionLowering._(
+          unit,
+          bindings,
+          fn.element,
+          fn.syntax,
+          fn.syntax.body,
+          fn.target,
+          plan,
+        )._run(local: fn),
+      );
+    }
+  }
+
+  IrFunction _run({
+    LocalClosure? local,
+    void Function(FunctionContext)? initialize,
+  }) {
     final body = this.body;
     if (body != null && (body.isAsynchronous || body.isGenerator)) {
       unsupported(context.unit, site, 'async or generator bodies');
     }
     context.current = context.addBlock(_target.parameterTypes);
-    final hasReceiver = _target.kind.hasReceiver;
-    if (hasReceiver) context.receiver = context.current!.parameters.first;
+    final inputs = context.current!.parameters;
+    if (_target.kind.hasReceiver) context.receiver = inputs.first;
+    if (local != null) {
+      context.bindCapture(element, inputs.first);
+      for (final (i, capture) in local.captures.indexed) {
+        context.bindCapture(capture, inputs[i + 1]);
+      }
+    }
     for (final (i, parameter) in element.formalParameters.indexed) {
-      final input = context.current!.parameters[i + (hasReceiver ? 1 : 0)];
+      final input = inputs[i + _target.argumentOffset];
       context.declare(parameter, input.type, input);
     }
     initialize?.call(context);
@@ -179,6 +230,12 @@ final class FunctionLowering(
         );
       case ast.VariableDeclarationStatement(:final variables):
         _variables(variables);
+      case ast.FunctionDeclarationStatement(:final functionDeclaration):
+        final syntax = functionDeclaration.functionExpression;
+        context.bindCapture(
+          functionDeclaration.declaredFragment!.element,
+          context.close(syntax),
+        );
       case ast.PatternVariableDeclarationStatement(:final declaration):
         _patternDeclaration(declaration);
       case ast.ExpressionStatement(:final expression):
@@ -258,22 +315,25 @@ final class FunctionLowering(
         forLoopParts: final ast.ForParts parts,
       ):
         context.inScope(() {
-          switch (parts) {
-            case ast.ForPartsWithDeclarations(:final variables):
-              _variables(variables);
-            case ast.ForPartsWithExpression(:final initialization):
-              if (initialization != null) {
-                lowerExpression(context, initialization);
-              }
-            case ast.ForPartsWithPattern(:final variables):
-              _patternDeclaration(variables);
-          }
+          final iteration = context.forInitializer(() {
+            switch (parts) {
+              case ast.ForPartsWithDeclarations(:final variables):
+                _variables(variables);
+              case ast.ForPartsWithExpression(:final initialization):
+                if (initialization != null) {
+                  lowerExpression(context, initialization);
+                }
+              case ast.ForPartsWithPattern(:final variables):
+                _patternDeclaration(variables);
+            }
+          });
           _loop(
             statement,
             body,
             parts.condition,
             exit,
             updates: parts.updaters,
+            iteration: iteration,
           );
         });
       case ast.ForStatement():
@@ -292,12 +352,13 @@ final class FunctionLowering(
     JumpTarget exit, {
     bool testAfterBody = false,
     Iterable<ast.Expression> updates = const [],
+    List<VariableElement> iteration = const [],
   }) {
     if (context.current == null) return;
     final header = JumpTarget(context)
       ..jump()
       ..enter();
-    final next = testAfterBody || updates.isNotEmpty
+    final next = testAfterBody || updates.isNotEmpty || iteration.isNotEmpty
         ? JumpTarget(context)
         : header;
     _continues[statement] = next.jump;
@@ -308,6 +369,9 @@ final class FunctionLowering(
       _scoped(body);
       if (next != header) next.enter();
       if (context.current != null) {
+        for (final variable in iteration) {
+          context.nextIteration(variable);
+        }
         for (final update in updates) {
           if (lowerExpression(context, update) == null) break;
         }

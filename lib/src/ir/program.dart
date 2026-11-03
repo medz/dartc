@@ -131,12 +131,21 @@ final class IrProgram(
       throw ArgumentError('Repeated class.');
     }
     final names = <(Uri, ClassType?, FunctionKind, String)>{};
+    final locals = <(FunctionTarget, int)>{};
+    final bodies = {for (final f in this.functions) f.target};
     for (final f in this.functions) {
+      if (!bodies.containsAll(f.closures)) {
+        throw ArgumentError('Missing lexical function body.');
+      }
       final t = f.target, owner = t.owner;
       if (owner != null && owners[(owner.library, owner.dartName)] != owner) {
         throw ArgumentError('Body belongs to an undeclared class.');
       }
-      if (!names.add((t.library, owner, t.kind, t.name))) {
+      if (t.enclosing case final outer?) {
+        if (!bodies.contains(outer) || !locals.add((outer, t.sourceOffset!))) {
+          throw ArgumentError('Invalid lexical function declaration.');
+        }
+      } else if (!names.add((t.library, owner, t.kind, t.name))) {
         throw ArgumentError('Repeated callable body.');
       }
       if (t.kind.isVirtual && _definitions[owner]?.members[t.selector] != t) {
@@ -149,7 +158,7 @@ final class IrProgram(
         throw ArgumentError('Body does not match a declared constructor.');
       }
     }
-    final bodies = {for (final function in this.functions) function.target};
+
     for (final c in this.classes) {
       for (final ctor in c.constructors.values) {
         final destination = ctor.redirect;
