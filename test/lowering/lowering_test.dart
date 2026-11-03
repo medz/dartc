@@ -2,6 +2,7 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
+import 'fixtures/conditionals.dart' as conditionals;
 import 'fixtures/effects.dart' as effects;
 import 'fixtures/functions.dart' as dart;
 import 'fixtures/loops.dart' as loops;
@@ -22,6 +23,7 @@ void main() {
       'functions.dart',
       'updates.dart',
       'loops.dart',
+      'conditionals.dart',
     ]);
     functions = {for (final f in result) f.target.name: f};
     bodies = {for (final f in result) f.target: f};
@@ -184,6 +186,27 @@ void main() {
           n,
           stop,
         ], () => loops.nestedTransfers(n, stop));
+      }
+    }
+  });
+
+  test('conditional expressions merge only the selected values and writes', () {
+    for (final first in [true, false]) {
+      for (final n in [-1, 0, 2, 4]) {
+        for (final second in [true, false]) {
+          compare('chooseArm', [
+            first,
+            second,
+            n,
+          ], () => conditionals.chooseArm(first, second, n));
+        }
+        for (final (name, reference) in [
+          ('chooseVoid', conditionals.chooseVoid),
+          ('localVoid', conditionals.localVoid),
+        ]) {
+          final args = [first, n];
+          compare(name, args, () => Function.apply(reference, args));
+        }
       }
     }
   });

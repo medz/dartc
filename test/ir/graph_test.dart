@@ -77,4 +77,13 @@ void main() {
     expect(() => IrFunction(f, [entry, join]), returnsNormally);
     expect(() => join.emit(IntBinary(.add, one, one)), throwsStateError);
   });
+
+  test('void accepts incoming values but cannot narrow an entry signature', () {
+    final target = FunctionTarget(f.library, 'forward', .voidType, [.voidType]);
+    final entry = Block(target.parameterTypes);
+    final narrowed = Block([.integer])..finish(const Return(one));
+    expect(() => Jump(entry, [one]), returnsNormally);
+    expect(() => Jump(narrowed, entry.parameters), throwsArgumentError);
+    expect(() => IrFunction(target, [narrowed]), throwsArgumentError);
+  });
 }

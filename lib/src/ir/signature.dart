@@ -6,8 +6,11 @@ enum ValueType() {
   /// A non-nullable Dart `int`.
   integer,
 
-  /// The declared result of a `void` function, which can still return a value.
-  voidType,
+  /// A value whose use is restricted by Dart's static `void` rules.
+  voidType;
+
+  /// Whether an operand of [type] can be passed here without a conversion.
+  bool accepts(ValueType type) => this == type || this == voidType;
 }
 
 /// The identity and signature of a directly callable top-level function.
@@ -26,13 +29,4 @@ final class FunctionTarget(
 ) {
   /// The parameter types in declaration order.
   final List<ValueType> parameterTypes = .unmodifiable(parameters);
-
-  /// Creates a target with a snapshot of [parameters].
-  ///
-  /// Throws [ArgumentError] if a parameter has type [ValueType.voidType].
-  this {
-    if (parameterTypes.contains(ValueType.voidType)) {
-      throw ArgumentError('A parameter must carry a value.');
-    }
-  }
 }

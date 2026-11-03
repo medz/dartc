@@ -27,7 +27,8 @@ final class FunctionLowering(
     }
     context.current = context.addBlock(_target.parameterTypes);
     for (final (i, parameter) in element.formalParameters.indexed) {
-      _declare(parameter, context.current!.parameters[i]);
+      final input = context.current!.parameters[i];
+      _declare(parameter, input.type, input);
     }
     switch (body) {
       case ast.ExpressionFunctionBody(:final expression):
@@ -51,11 +52,11 @@ final class FunctionLowering(
     context.current = null;
   }
 
-  void _declare(VariableElement variable, Value initial) {
+  void _declare(VariableElement variable, ValueType type, Value initial) {
     context.locals[variable] = initial;
     _locals.add(variable);
     if (body.isPotentiallyMutatedInScope(variable)) {
-      context.mutableLocals.add(variable);
+      context.mutableLocals.add((variable, type));
     }
   }
 
@@ -92,10 +93,10 @@ final class FunctionLowering(
       final local = variable.declaredFragment!.element;
       final type = valueType(local.type, context.unit, variable);
       final value = lowerExpression(context, initializer);
-      if (type != value.type) {
+      if (!type.accepts(value.type)) {
         unsupported(context.unit, initializer, 'implicit conversion');
       }
-      _declare(local, value);
+      _declare(local, type, value);
     }
   }
 
@@ -114,7 +115,17 @@ final class FunctionLowering(
       case ast.ExpressionStatement(:final expression):
         lowerExpression(context, expression);
       case ast.IfStatement(caseClause: null):
-        _if(statement);
+        context.branch(
+          lowerExpression(context, statement.expression),
+          () {
+            _scoped(statement.thenStatement);
+            return null;
+          },
+          () {
+            _scoped(statement.elseStatement);
+            return null;
+          },
+        );
       case ast.LabeledStatement(:final statement):
         _breakable(statement);
       case ast.WhileStatement() || ast.DoStatement() || ast.ForStatement():
@@ -135,33 +146,6 @@ final class FunctionLowering(
           'statement starting with ${statement.beginToken.lexeme}',
         );
     }
-  }
-
-  void _if(ast.IfStatement statement) {
-    final condition = lowerExpression(context, statement.expression);
-    if (condition case Constant(value: final bool taken)) {
-      _scoped(taken ? statement.thenStatement : statement.elseStatement);
-      return;
-    }
-    final yes = context.addBlock(), no = context.addBlock();
-    context.current!.finish(Branch(condition, .new(yes), .new(no)));
-    final before = context.saveLocals();
-    context.current = yes;
-    _scoped(statement.thenStatement);
-    final yesEnd = context.current, yesValues = context.saveLocals();
-    context.current = no;
-    context.restoreLocals(before);
-    _scoped(statement.elseStatement);
-    if (yesEnd == null) return;
-    final noEnd = context.current;
-    if (noEnd == null) {
-      context.current = yesEnd;
-      context.restoreLocals(yesValues);
-      return;
-    }
-    final (fromYes, fromNo) = context.join(yesValues);
-    yesEnd.finish(fromYes);
-    noEnd.finish(fromNo);
   }
 
   void _breakable(ast.Statement statement) {

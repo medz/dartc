@@ -16,6 +16,17 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
       return Constant.integer(value);
     case ast.ParenthesizedExpression(:final expression):
       return lowerExpression(context, expression);
+    case ast.ConditionalExpression(
+      :final condition,
+      :final thenExpression,
+      :final elseExpression,
+    ):
+      return context.branch(
+        lowerExpression(context, condition),
+        () => lowerExpression(context, thenExpression),
+        () => lowerExpression(context, elseExpression),
+        valueType(expression.staticType!, unit, expression),
+      )!;
     case ast.SimpleIdentifier(element: final VariableElement variable)
         when context.locals.containsKey(variable):
       return context.locals[variable]!;
@@ -60,7 +71,7 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
         context.current = rhs;
         final right = lowerExpression(context, rightOperand);
         final rhsEnd = context.current!;
-        final (skip, evaluated) = context.join(saved, (left, right));
+        final (skip, evaluated) = context.join(saved, (.boolean, left, right));
         final enter = Jump(rhs);
         branch.finish(Branch(left, and ? enter : skip, and ? skip : enter));
         rhsEnd.finish(evaluated);
@@ -109,7 +120,7 @@ Value _updateLocal(
   final value = operator.type == .EQ
       ? lowerExpression(context, rhs!)
       : _integerOperation(context, expression, operator, old, rhs);
-  if (value.type != old.type) {
+  if (!valueType(variable.type, context.unit, expression).accepts(value.type)) {
     unsupported(context.unit, expression, 'implicit conversion');
   }
   context.locals[variable] = value;

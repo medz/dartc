@@ -25,7 +25,7 @@ final class Jump(
 
   /// Creates an edge to [target] with a snapshot of [arguments].
   ///
-  /// Throws [ArgumentError] if their count or types differ from the parameters.
+  /// Throws [ArgumentError] for a wrong argument count or an incompatible type.
   this {
     checkArguments(target.parameters.map((p) => p.type), this.arguments);
   }
@@ -54,9 +54,8 @@ final class Branch(
 
 /// A basic block with ordered instructions and a single terminator.
 ///
-/// Each parameter type creates one fresh SSA value. Construction throws
-/// [ArgumentError] for [ValueType.voidType]. Append instructions with [emit]
-/// and seal the block with [finish].
+/// Each parameter type creates one fresh SSA value. Append instructions with
+/// [emit] and seal the block with [finish].
 final class Block([Iterable<ValueType> types = const []]) {
   /// The values bound on entry, in the order given to [Block.new].
   final List<BlockParameter> parameters = blockParameters(types);

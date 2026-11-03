@@ -30,7 +30,7 @@ final class TargetBindings() {
       return .new(
         element.library.uri,
         element.name!,
-        valueType(element.returnType, unit, site, returnType: true),
+        valueType(element.returnType, unit, site),
         parameters.map((p) => valueType(p.type, unit, site)),
       );
     });
@@ -45,14 +45,9 @@ Never unsupported(ResolvedUnitResult unit, ast.AstNode node, String feature) {
   );
 }
 
-/// Maps [type] to an IR type, allowing `void` only in return position.
-ValueType valueType(
-  DartType type,
-  ResolvedUnitResult unit,
-  ast.AstNode site, {
-  bool returnType = false,
-}) {
-  if (returnType && type is VoidType) return .voidType;
+/// Maps the resolved Dart [type] to its IR type.
+ValueType valueType(DartType type, ResolvedUnitResult unit, ast.AstNode site) {
+  if (type is VoidType) return .voidType;
   if (type.nullabilitySuffix == .none) {
     if (type.isDartCoreInt) return .integer;
     if (type.isDartCoreBool) return .boolean;

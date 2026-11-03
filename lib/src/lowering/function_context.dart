@@ -18,8 +18,8 @@ final class FunctionContext(
   /// The SSA value of each in-scope variable on the current path.
   final locals = <VariableElement, Value>{};
 
-  /// In-scope locals with writes, in the order used by snapshots and loop edges.
-  final mutableLocals = <VariableElement>[];
+  /// Writable bindings and their declared types, in edge-argument order.
+  final mutableLocals = <(VariableElement, ValueType)>[];
 
   /// The block receiving instructions, or `null` after a terminating transfer.
   Block? current;
@@ -36,12 +36,12 @@ final class FunctionContext(
     final end = count ?? mutableLocals.length;
     return end == 0
         ? const []
-        : [for (var i = 0; i < end; i++) locals[mutableLocals[i]]!];
+        : [for (var i = 0; i < end; i++) locals[mutableLocals[i].$1]!];
   }
 
   /// Restores [values] at the same lexical scope in which they were captured.
   void restoreLocals(List<Value> values) {
-    for (final (i, variable) in mutableLocals.indexed) {
+    for (final (i, (variable, _)) in mutableLocals.indexed) {
       locals[variable] = values[i];
     }
   }
@@ -50,24 +50,60 @@ final class FunctionContext(
   ///
   /// If both paths produce a [result], the first block parameter carries it.
   /// The remaining parameters carry only locals that differ across the paths.
-  (Jump, Jump) join(List<Value> saved, [(Value, Value)? result]) {
-    final first = <Value>[if (result != null) result.$1];
-    final second = <Value>[if (result != null) result.$2];
+  (Jump, Jump) join(List<Value> saved, [(ValueType, Value, Value)? result]) {
+    final types = <ValueType>[if (result != null) result.$1];
+    final first = <Value>[if (result != null) result.$2];
+    final second = <Value>[if (result != null) result.$3];
     final changed = <VariableElement>[];
-    for (final (i, variable) in mutableLocals.indexed) {
+    for (final (i, (variable, type)) in mutableLocals.indexed) {
       final value = locals[variable]!;
       if (saved[i] == value) continue;
+      types.add(type);
       first.add(saved[i]);
       second.add(value);
       changed.add(variable);
     }
-    final block = addBlock(first.map((v) => v.type));
+    final block = addBlock(types);
     var slot = result == null ? 0 : 1;
     for (final variable in changed) {
       locals[variable] = block.parameters[slot++];
     }
     current = block;
     return (.new(block, first), .new(block, second));
+  }
+
+  /// Lowers alternatives from the same local state and joins paths that return normally.
+  Value? branch(
+    Value condition,
+    Value? Function() ifTrue,
+    Value? Function() ifFalse, [
+    ValueType? resultType,
+  ]) {
+    if (condition case Constant(value: final bool taken)) {
+      return taken ? ifTrue() : ifFalse();
+    }
+    final yes = addBlock(), no = addBlock();
+    current!.finish(Branch(condition, .new(yes), .new(no)));
+    final before = saveLocals();
+    current = yes;
+    final left = ifTrue(), yesEnd = current;
+    final yesValues = yesEnd == null ? null : saveLocals();
+    current = no;
+    restoreLocals(before);
+    final right = ifFalse(), noEnd = current;
+    if (yesEnd == null) return right;
+    if (noEnd == null) {
+      current = yesEnd;
+      restoreLocals(yesValues!);
+      return left;
+    }
+    final (fromYes, fromNo) = join(
+      yesValues!,
+      resultType == null ? null : (resultType, left!, right!),
+    );
+    yesEnd.finish(fromYes);
+    noEnd.finish(fromNo);
+    return resultType == null ? null : current!.parameters.first;
   }
 }
 
@@ -80,7 +116,9 @@ final class JumpTarget(final FunctionContext _context) {
   Jump edge() {
     final values = _context.saveLocals(_localCount);
     return .new(
-      _block ??= _context.addBlock(values.map((v) => v.type)),
+      _block ??= _context.addBlock(
+        _context.mutableLocals.take(_localCount).map((v) => v.$2),
+      ),
       values,
     );
   }

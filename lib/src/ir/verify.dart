@@ -6,7 +6,14 @@ import 'value.dart';
 void verifyFunction(FunctionTarget target, List<Block> blocks) {
   if (blocks.isEmpty) throw StateError('Function has no entry.');
   final entry = blocks.first;
-  checkArguments(target.parameterTypes, entry.parameters);
+  if (target.parameterTypes.length != entry.parameters.length ||
+      entry.parameters.indexed.any(
+        (p) => p.$2.type != target.parameterTypes[p.$1],
+      )) {
+    throw ArgumentError(
+      'Entry parameters do not match the function signature.',
+    );
+  }
   final predecessors = {for (final b in blocks) b: <Block>[]};
   if (predecessors.length != blocks.length) {
     throw StateError('Repeated block.');

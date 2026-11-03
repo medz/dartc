@@ -23,13 +23,7 @@ final class const Constant._(
 }
 
 /// A value supplied on entry to a block by the caller or an incoming jump.
-final class BlockParameter._(super.type) extends Value {
-  this {
-    if (type == .voidType) {
-      throw ArgumentError('A block parameter must carry a value.');
-    }
-  }
-}
+final class BlockParameter._(super.type) extends Value;
 
 /// Allocates a distinct SSA parameter for each entry in [types].
 List<BlockParameter> blockParameters(Iterable<ValueType> types) =>
@@ -97,17 +91,17 @@ final class DirectCall(
 
   /// Creates a call from the already evaluated [arguments].
   ///
-  /// Throws [ArgumentError] if their count or types differ from the signature.
+  /// Throws [ArgumentError] for a wrong argument count or an incompatible type.
   this : super(target.returnType) {
     checkArguments(target.parameterTypes, inputs);
   }
 }
 
-/// Checks that [arguments] match [types] in both arity and positional type.
+/// Checks the arity and assignability of [arguments] against [types].
 void checkArguments(Iterable<ValueType> types, List<Value> arguments) {
   var i = 0;
   for (final type in types) {
-    if (i == arguments.length || arguments[i++].type != type) {
+    if (i == arguments.length || !type.accepts(arguments[i++].type)) {
       throw ArgumentError('Argument types do not match the parameters.');
     }
   }
