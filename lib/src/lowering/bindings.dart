@@ -39,18 +39,20 @@ final class TargetBindings() {
   }
 
   /// Evaluates explicit [arguments] in source order, then fills omitted slots.
-  List<Value> arguments(
+  List<Value>? arguments(
     TopLevelFunctionElement callee,
     ast.ArgumentList arguments,
     ResolvedUnitResult unit,
-    Value Function(ast.Expression) evaluate,
+    Value? Function(ast.Expression) evaluate,
   ) {
     final parameters = callee.formalParameters;
     final values = List<Value?>.filled(parameters.length, null);
     for (final argument in arguments.arguments) {
       final binding = _parameters[argument.correspondingParameter];
       if (binding == null) unsupported(unit, argument, 'argument binding');
-      values[binding.slot] = evaluate(argument.argumentExpression);
+      final value = evaluate(argument.argumentExpression);
+      if (value == null) return null;
+      values[binding.slot] = value;
     }
     if (arguments.arguments.length < values.length) {
       for (final (i, parameter) in parameters.indexed) {
@@ -96,13 +98,17 @@ Never unsupported(ResolvedUnitResult unit, ast.AstNode node, String feature) {
 
 /// Maps the resolved Dart [type] to its IR type.
 ValueType valueType(DartType type, ResolvedUnitResult unit, ast.AstNode site) {
-  if (type is VoidType) return .voidType;
-  if (type.isDartCoreNull) return .nullType;
-  if (type.nullabilitySuffix == .none) {
-    if (type.isDartCoreInt) return .integer;
-    if (type.isDartCoreBool) return .boolean;
-    if (type.isDartCoreDouble) return .floating;
-    if (type.isDartCoreString) return .string;
-  }
-  unsupported(unit, site, type.getDisplayString());
+  final ValueType base = switch (type) {
+    VoidType() => .voidType,
+    NeverType() => .never,
+    _ when type.isDartCoreNull => .nullType,
+    _ when type.isDartCoreInt => .integer,
+    _ when type.isDartCoreBool => .boolean,
+    _ when type.isDartCoreDouble => .floating,
+    _ when type.isDartCoreString => .string,
+    _ when type.isDartCoreNum => .number,
+    _ when type.isDartCoreObject => .object,
+    _ => unsupported(unit, site, type.getDisplayString()),
+  };
+  return type.nullabilitySuffix == .question ? base.nullable : base;
 }

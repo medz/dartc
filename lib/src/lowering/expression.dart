@@ -6,8 +6,18 @@ import 'package:dartc/ir.dart';
 import 'bindings.dart';
 import 'function_context.dart';
 
-/// Emits [expression] and leaves [context] at its normal continuation block.
-Value lowerExpression(FunctionContext context, ast.Expression expression) {
+/// Returns the emitted operand, or `null` when [expression] cannot complete normally.
+Value? lowerExpression(FunctionContext context, ast.Expression expression) {
+  final value = _lower(context, expression);
+  if (value != null && value.type == .never) {
+    context.current!.finish(Unreachable(value));
+    context.current = null;
+    return null;
+  }
+  return value;
+}
+
+Value? _lower(FunctionContext context, ast.Expression expression) {
   final unit = context.unit;
   switch (expression) {
     case ast.BooleanLiteral(:final value):
@@ -32,20 +42,37 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
       return Constant.string(value);
     case ast.ParenthesizedExpression(:final expression):
       return lowerExpression(context, expression);
+    case ast.PostfixExpression(operator: Token(type: .BANG), :final operand):
+      final value = lowerExpression(context, operand);
+      return value == null ? null : context.checkNotNull(value);
+    case ast.ThrowExpression(:final expression):
+      final exception = lowerExpression(context, expression);
+      if (exception != null) {
+        context.current!.finish(Throw(exception));
+        context.current = null;
+      }
+      return null;
     case ast.ConditionalExpression(
       :final condition,
       :final thenExpression,
       :final elseExpression,
     ):
+      final test = lowerExpression(context, condition);
+      if (test == null) return null;
       return context.branch(
-        lowerExpression(context, condition),
+        test,
         () => lowerExpression(context, thenExpression),
         () => lowerExpression(context, elseExpression),
         valueType(expression.staticType!, unit, expression),
-      )!;
+      );
     case ast.SimpleIdentifier(element: final VariableElement variable)
         when context.locals.containsKey(variable):
-      return context.locals[variable]!;
+      return _readAs(
+        context,
+        expression,
+        context.locals[variable]!,
+        valueType(expression.staticType!, unit, expression),
+      );
     case ast.Identifier(
           element: GetterElement(
             variable: final TopLevelVariableElement variable,
@@ -79,28 +106,45 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
         unit,
         (e) => lowerExpression(context, e),
       );
-      return context.current!.emit(DirectCall(target, args));
+      return args == null
+          ? null
+          : context.current!.emit(DirectCall(target, args));
     case ast.BinaryExpression(
       :final leftOperand,
       :final rightOperand,
       :final operator,
     ):
       final left = lowerExpression(context, leftOperand);
+      if (left == null) return null;
+      if (operator.type == .QUESTION_QUESTION) {
+        return _coalesce(context, expression, left, rightOperand);
+      }
+      if (operator.type == .EQ_EQ || operator.type == .BANG_EQ) {
+        final right = lowerExpression(context, rightOperand);
+        if (right == null) return null;
+        final operand = left.type == .nullType
+            ? right
+            : right.type == .nullType
+            ? left
+            : null;
+        if (operand == null) unsupported(unit, expression, 'non-null equality');
+        final negated = operator.type == .BANG_EQ;
+        if (operand.type == .nullType) return Constant.boolean(!negated);
+        if (!operand.type.accepts(.nullType)) return Constant.boolean(negated);
+        return context.current!.emit(NullTest(operand, negated: negated));
+      }
       if (operator.type == .AMPERSAND_AMPERSAND || operator.type == .BAR_BAR) {
         final and = operator.type == .AMPERSAND_AMPERSAND;
         if (left case Constant(value: final bool value)) {
           return value == and ? lowerExpression(context, rightOperand) : left;
         }
-        final branch = context.current!, saved = context.saveLocals();
-        final rhs = context.addBlock();
-        context.current = rhs;
-        final right = lowerExpression(context, rightOperand);
-        final rhsEnd = context.current!;
-        final (skip, evaluated) = context.join(saved, (.boolean, left, right));
-        final enter = Jump(rhs);
-        branch.finish(Branch(left, and ? enter : skip, and ? skip : enter));
-        rhsEnd.finish(evaluated);
-        return skip.target.parameters.first;
+        return context.shortCircuit(
+          left,
+          evaluateWhen: and,
+          skipped: left,
+          resultType: .boolean,
+          right: () => lowerExpression(context, rightOperand),
+        );
       }
       return _integerOperation(
         context,
@@ -116,6 +160,37 @@ Value lowerExpression(FunctionContext context, ast.Expression expression) {
         'expression starting with ${expression.beginToken.lexeme}',
       );
   }
+}
+
+Value? _coalesce(
+  FunctionContext context,
+  ast.Expression site,
+  Value left,
+  ast.Expression rhs,
+) {
+  if (left.type == .nullType) return lowerExpression(context, rhs);
+  if (!left.type.accepts(.nullType)) return left;
+  final test = context.current!.emit(NullTest(left));
+  return context.shortCircuit(
+    test,
+    evaluateWhen: true,
+    skipped: test.nonNull,
+    resultType: valueType(site.staticType!, context.unit, site),
+    right: () => lowerExpression(context, rhs),
+  );
+}
+
+Value _readAs(
+  FunctionContext context,
+  ast.Expression site,
+  Value value,
+  ValueType type,
+) {
+  if (type.accepts(value.type)) return value;
+  final known = context.refined(value);
+  if (type.accepts(known.type)) return known;
+  if (type.accepts(known.type.nonNullable)) return context.checkNotNull(known);
+  unsupported(context.unit, site, 'promotion to ${type.dartName}');
 }
 
 Constant _integerLiteral(
@@ -134,7 +209,7 @@ Constant _integerLiteral(
   unsupported(context.unit, site, 'numeric literal');
 }
 
-Value _updateLocal(
+Value? _updateLocal(
   FunctionContext context,
   ast.CompoundAssignmentExpression expression,
 ) {
@@ -158,17 +233,28 @@ Value _updateLocal(
   }
   // The right operand can write the same local. Its previous value remains
   // the receiver of a compound operator and the result of a postfix update.
-  final value = operator.type == .EQ
-      ? lowerExpression(context, rhs!)
-      : _integerOperation(context, expression, operator, old, rhs);
+  final read = operator.type == .EQ
+      ? old
+      : _readAs(
+          context,
+          expression,
+          old,
+          valueType(expression.readType!, context.unit, expression),
+        );
+  final value = switch (operator.type) {
+    .EQ => lowerExpression(context, rhs!),
+    .QUESTION_QUESTION_EQ => _coalesce(context, expression, read, rhs!),
+    _ => _integerOperation(context, expression, operator, read, rhs),
+  };
+  if (value == null) return null;
   if (!valueType(variable.type, context.unit, expression).accepts(value.type)) {
     unsupported(context.unit, expression, 'implicit conversion');
   }
   context.locals[variable] = value;
-  return expression is ast.PostfixExpression ? old : value;
+  return expression is ast.PostfixExpression ? read : value;
 }
 
-Value _integerOperation(
+Value? _integerOperation(
   FunctionContext context,
   ast.Expression site,
   Token operator,
@@ -182,13 +268,12 @@ Value _integerOperation(
     .LT => .lessThan,
     _ => unsupported(context.unit, site, operator.lexeme),
   };
-  if (left.type != .integer ||
-      (rhs != null &&
-          valueType(rhs.staticType!, context.unit, rhs) != .integer)) {
-    unsupported(context.unit, site, 'non-integer operator');
-  }
   final right = rhs == null
       ? const Constant.integer(1)
       : lowerExpression(context, rhs);
+  if (right == null) return null;
+  if (left.type != .integer || right.type != .integer) {
+    unsupported(context.unit, site, 'non-integer operator');
+  }
   return context.current!.emit(IntBinary(op, left, right));
 }

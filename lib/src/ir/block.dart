@@ -1,6 +1,6 @@
 import 'dart:collection';
 
-import 'signature.dart';
+import 'type.dart';
 import 'value.dart';
 
 /// The control transfer executed after a block's last instruction.
@@ -13,6 +13,28 @@ final class const Return([
   /// The returned operand, or `null` for a bare return.
   final Value? value,
 ]) extends Terminator;
+
+/// The end of a path whose [cause] cannot return a value.
+final class Unreachable(
+  /// The operand of type `Never` that makes normal completion impossible.
+  final Value cause,
+) extends Terminator {
+  this {
+    if (cause.type != .never) throw ArgumentError('Expected a Never operand.');
+  }
+}
+
+/// An exceptional transfer carrying [exception] out of the function.
+final class Throw(
+  /// The exception object from the Dart `throw` expression.
+  final Value exception,
+) extends Terminator {
+  this {
+    if (!ValueType.object.accepts(exception.type)) {
+      throw ArgumentError('Expected a non-null exception object.');
+    }
+  }
+}
 
 /// A control-flow edge that binds the destination block's parameters.
 final class Jump(
@@ -74,7 +96,7 @@ final class Block([Iterable<ValueType> types = const []]) {
 
   /// The outgoing edges of [end], in true-then-false order for a [Branch].
   Iterable<Jump> get successors => switch (end) {
-    Return() => const [],
+    Return() || Unreachable() || Throw() => const [],
     final Jump jump => [jump],
     Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],
   };

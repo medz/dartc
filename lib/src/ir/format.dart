@@ -15,6 +15,7 @@ void writeFunction(
   String value(Value v) => switch (v) {
     Constant(value: final String s) => jsonEncode(s),
     Constant(:final value) => '$value',
+    NonNullValue(:final test) => 'nonNull(${value(test.operand)})',
     _ => '%${ids.putIfAbsent(v, () => ids.length)}',
   };
   String edge(Jump e) =>
@@ -28,6 +29,9 @@ void writeFunction(
     output.writeln('${labels[b]}($parameters):');
     for (final op in b.instructions) {
       final rhs = switch (op) {
+        NullTest() =>
+          '${op.negated ? 'isNotNull' : 'isNull'} ${value(op.operand)}',
+        NullCheck() => 'checkNotNull ${value(op.operand)}',
         IntBinary() =>
           '${op.operator.name} ${value(op.left)}, ${value(op.right)}',
         DirectCall() =>
@@ -38,6 +42,8 @@ void writeFunction(
     output.writeln(switch (b.end) {
       Return(value: final v?) => '  return ${value(v)}',
       Return() => '  return',
+      Throw(:final exception) => '  throw ${value(exception)}',
+      Unreachable(:final cause) => '  unreachable ${value(cause)}',
       final Jump j => '  jump ${edge(j)}',
       Branch(:final condition, :final ifTrue, :final ifFalse) =>
         '  branch ${value(condition)}, ${edge(ifTrue)}, ${edge(ifFalse)}',

@@ -9,9 +9,11 @@
 /// @docImport 'src/ir/function.dart';
 library;
 
-export 'src/ir/block.dart' show Block, Branch, Jump, Return, Terminator;
+export 'src/ir/block.dart'
+    show Block, Branch, Jump, Return, Terminator, Throw, Unreachable;
 export 'src/ir/function.dart' show IrFunction;
-export 'src/ir/signature.dart' show FunctionTarget, ValueType;
+export 'src/ir/signature.dart' show FunctionTarget;
+export 'src/ir/type.dart' show ValueType;
 export 'src/ir/value.dart'
     show
         BlockParameter,
@@ -20,4 +22,7 @@ export 'src/ir/value.dart'
         Instruction,
         IntBinary,
         IntOperator,
+        NonNullValue,
+        NullCheck,
+        NullTest,
         Value;

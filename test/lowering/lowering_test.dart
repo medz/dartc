@@ -7,6 +7,7 @@ import 'fixtures/defaults.dart' as defaults;
 import 'fixtures/effects.dart' as effects;
 import 'fixtures/functions.dart' as dart;
 import 'fixtures/loops.dart' as loops;
+import 'fixtures/nullability.dart' as nullable;
 import 'fixtures/updates.dart' as updates;
 
 const _fixtures = 'test/lowering/fixtures';
@@ -24,6 +25,7 @@ void main() {
       'functions.dart',
       'updates.dart',
       'loops.dart',
+      'nullability.dart',
       'conditionals.dart',
       'defaults.dart',
       'scalar_constants.dart',
@@ -45,7 +47,11 @@ void main() {
 
   Object? execute(IrFunction function, List<Object?> args) {
     final values = <Value, Object?>{};
-    Object? read(Value v) => v is Constant ? v.value : values[v];
+    Object? read(Value v) => switch (v) {
+      Constant(:final value) => value,
+      NonNullValue(:final test) => read(test.operand),
+      _ => values[v],
+    };
     var block = function.entry;
     for (var steps = 0; steps < 1000; steps++) {
       for (final (i, p) in block.parameters.indexed) {
@@ -53,6 +59,10 @@ void main() {
       }
       for (final op in block.instructions) {
         switch (op) {
+          case NullTest(:final operand, :final negated):
+            values[op] = (read(operand) == null) != negated;
+          case NullCheck(:final operand):
+            values[op] = read(operand)!;
           case IntBinary(:final operator, :final left, :final right):
             final a = read(left) as int, b = read(right) as int;
             values[op] = switch (operator) {
@@ -71,6 +81,8 @@ void main() {
       final end = block.end;
       if (end is Return) return end.value == null ? null : read(end.value!);
       final edge = switch (end) {
+        Throw(:final exception) => throw read(exception)!,
+        Unreachable() => throw StateError('Reached a Never continuation'),
         Jump() => end,
         Branch() => read(end.condition) as bool ? end.ifTrue : end.ifFalse,
         Return() => throw StateError('Already returned'),
@@ -84,12 +96,17 @@ void main() {
   }
 
   void compare(String name, List<Object?> args, Object? Function() sdk) {
-    (Object?, String?, List<int>) observe(Object? Function() run) {
+    (Object?, Object?, List<int>) observe(Object? Function() run) {
       effects.calls.clear();
       try {
         return (run(), null, List.of(effects.calls));
-      } on StateError catch (e) {
-        return (null, e.message, List.of(effects.calls));
+      } catch (e) {
+        final error = switch (e) {
+          StateError(:final message) => (StateError, message),
+          TypeError() => (TypeError, e.toString()),
+          _ => e,
+        };
+        return (null, error, List.of(effects.calls));
       }
     }
 
@@ -242,6 +259,39 @@ void main() {
       compare('pickNumber', [n], () => defaults.pickNumber(n));
     }
   });
+
+  test(
+    'nullable operands evaluate once and only a null value takes the fallback',
+    () {
+      for (final a in [null, 0, 3]) {
+        for (final b in [null, 4]) {
+          compare('reassigned', [a, b], () => nullable.reassigned(a, b));
+          for (final n in [-1, 2]) {
+            compare('fallback', [a, b, n], () => nullable.fallback(a, b, n));
+            compare('assign', [a, b, n], () => nullable.assign(a, b, n));
+          }
+        }
+        compare('promoted', [a], () => nullable.promoted(a));
+        compare('checked', [a], () => nullable.checked(a));
+        compare('nullableDefault', [a], () => nullable.nullableDefault(a));
+        compare('mixed', [a], () => nullable.mixed(a));
+        compare('different', [a], () => nullable.different(a));
+        for (final enabled in [false, true]) {
+          compare('sibling', [a, enabled], () => nullable.sibling(a, enabled));
+          compare('abrupt', [a, enabled], () => nullable.abrupt(a, enabled));
+          compare('abruptInLoop', [
+            a,
+            enabled,
+          ], () => nullable.abruptInLoop(a, enabled));
+        }
+      }
+      final guarded = functions['promoted']!.blocks.expand(
+        (b) => b.instructions,
+      );
+      expect(guarded.whereType<NullTest>(), hasLength(1));
+      expect(guarded.whereType<NullCheck>(), isEmpty);
+    },
+  );
 
   for (final (file, line) in [
     ('index_update.dart', 3),

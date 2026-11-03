@@ -48,7 +48,7 @@ final class FunctionLowering(
   }
 
   void _return(Value? value) {
-    context.current!.finish(Return(value));
+    context.current?.finish(Return(value));
     context.current = null;
   }
 
@@ -87,16 +87,32 @@ final class FunctionLowering(
   void _variables(ast.VariableDeclarationList declarations) {
     for (final variable in declarations.variables) {
       final initializer = variable.initializer;
-      if (variable.isLate || initializer == null) {
-        unsupported(context.unit, variable, 'late or uninitialized locals');
-      }
       final local = variable.declaredFragment!.element;
       final type = valueType(local.type, context.unit, variable);
-      final value = local.isConst
-          ? scalarConstant(local, context.unit, initializer)
-          : lowerExpression(context, initializer);
+      if (variable.isLate ||
+          (initializer == null && !type.accepts(.nullType))) {
+        unsupported(
+          context.unit,
+          variable,
+          'late or uninitialized non-nullable local',
+        );
+      }
+      final value = switch (initializer) {
+        null => const Constant.nullValue(),
+        _ when local.isConst => scalarConstant(
+          local,
+          context.unit,
+          initializer,
+        ),
+        _ => lowerExpression(context, initializer),
+      };
+      if (value == null) return;
       if (!type.accepts(value.type)) {
-        unsupported(context.unit, initializer, 'implicit conversion');
+        unsupported(
+          context.unit,
+          initializer ?? variable,
+          'implicit conversion',
+        );
       }
       _declare(local, type, value);
     }
@@ -117,8 +133,10 @@ final class FunctionLowering(
       case ast.ExpressionStatement(:final expression):
         lowerExpression(context, expression);
       case ast.IfStatement(caseClause: null):
+        final condition = lowerExpression(context, statement.expression);
+        if (condition == null) return;
         context.branch(
-          lowerExpression(context, statement.expression),
+          condition,
           () {
             _scoped(statement.thenStatement);
             return null;
@@ -197,6 +215,7 @@ final class FunctionLowering(
     bool testAfterBody = false,
     Iterable<ast.Expression> updates = const [],
   }) {
+    if (context.current == null) return;
     final header = JumpTarget(context)
       ..jump()
       ..enter();
@@ -209,7 +228,7 @@ final class FunctionLowering(
       if (next != header) next.enter();
       if (context.current != null) {
         for (final update in updates) {
-          lowerExpression(context, update);
+          if (lowerExpression(context, update) == null) break;
         }
         if (testAfterBody) _guard(condition!, exit);
         header.jump();
@@ -220,12 +239,14 @@ final class FunctionLowering(
 
   void _guard(ast.Expression expression, JumpTarget exit) {
     final condition = lowerExpression(context, expression);
+    if (condition == null) return;
     if (condition case Constant(value: final bool passes)) {
       if (!passes) exit.jump();
     } else {
-      final body = context.addBlock();
-      context.current!.finish(Branch(condition, .new(body), exit.edge()));
-      context.current = body;
+      final origin = context.current!, leave = exit.edge();
+      origin.finish(
+        Branch(condition, context.enterArm(condition, true), leave),
+      );
     }
   }
 }

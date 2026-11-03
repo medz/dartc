@@ -1,4 +1,5 @@
 import 'signature.dart';
+import 'type.dart';
 
 /// An operand in static single assignment (SSA) form.
 ///
@@ -42,6 +43,45 @@ List<BlockParameter> blockParameters(Iterable<ValueType> types) =>
 sealed class Instruction(super.type) extends Value {
   /// The SSA operands consumed by the operation.
   Iterable<Value> get inputs;
+}
+
+/// A test for the Dart null value which never invokes an equality operator.
+final class NullTest(
+  /// The already evaluated operand.
+  final Value operand, {
+
+  /// Whether the result is true when [operand] is non-null.
+  final bool negated = false,
+}) extends Instruction {
+  this : super(.boolean);
+
+  /// The same operand with its non-null type, valid only on the non-null edge.
+  late final NonNullValue nonNull = ._(this);
+
+  @override
+  Iterable<Value> get inputs => [operand];
+}
+
+/// The non-null operand passed by a branch on [test].
+///
+/// Only a jump on the non-null side of that branch may use this value as an
+/// argument. Its destination reads an ordinary block parameter.
+final class NonNullValue._(
+  /// The test that establishes this value's type.
+  final NullTest test,
+) extends Value {
+  this : super(test.operand.type.nonNullable);
+}
+
+/// A postfix null assertion that throws a Dart type error when [operand] is null.
+final class NullCheck(
+  /// The value returned unchanged on success.
+  final Value operand,
+) extends Instruction {
+  this : super(operand.type.nonNullable);
+
+  @override
+  Iterable<Value> get inputs => [operand];
 }
 
 /// A binary operation on two non-nullable Dart integers.

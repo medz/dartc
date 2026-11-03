@@ -66,26 +66,44 @@ void verifyFunction(FunctionTarget target, List<Block> blocks) {
     }
 
     final count = block.instructions.length;
+    final end = block.end;
+    void useEdge(Jump edge, [NullTest? nonNullTest]) {
+      for (final value in edge.arguments) {
+        if (value is NonNullValue && identical(value.test, nonNullTest)) {
+          use(value.test, count);
+        } else {
+          use(value, count);
+        }
+      }
+    }
+
     for (var i = 0; i < count; i++) {
-      for (final input in block.instructions[i].inputs) {
+      final op = block.instructions[i];
+      if (op.type == .never &&
+          (i + 1 != count || end is! Unreachable || end.cause != op)) {
+        throw StateError('A Never instruction must end its block.');
+      }
+      for (final input in op.inputs) {
         use(input, i);
       }
     }
-    switch (block.end) {
+    switch (end) {
       case Return(:final value):
         if (!target.returnType.accepts(value?.type ?? .nullType)) {
           throw StateError('Return type does not match the function.');
         }
         if (value != null) use(value, count);
-      case Branch(:final condition):
+      case Throw(:final exception):
+        use(exception, count);
+      case Unreachable(:final cause):
+        use(cause, count);
+      case Branch(:final condition, :final ifTrue, :final ifFalse):
         use(condition, count);
-      case Jump():
-        break;
-    }
-    for (final edge in block.successors) {
-      for (final value in edge.arguments) {
-        use(value, count);
-      }
+        final test = condition is NullTest ? condition : null;
+        useEdge(ifTrue, test != null && test.negated ? test : null);
+        useEdge(ifFalse, test != null && !test.negated ? test : null);
+      case final Jump edge:
+        useEdge(edge);
     }
   }
 }

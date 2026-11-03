@@ -23,6 +23,39 @@ final class FunctionContext(
 
   /// The block receiving instructions, or `null` after a terminating transfer.
   Block? current;
+  _Refinement? _facts;
+
+  /// The narrower operand established on the current path, if any.
+  Value refined(Value value) {
+    for (var fact = _facts; fact != null; fact = fact.previous) {
+      if (fact.operand == value) return fact.narrowed;
+    }
+    return value;
+  }
+
+  /// Checks [value] once and retains the non-null result on this path.
+  Value checkNotNull(Value value) {
+    final known = refined(value);
+    if (!known.type.accepts(.nullType)) return known;
+    final checked = current!.emit(NullCheck(known));
+    _facts = _Refinement(value, checked, _facts);
+    return checked;
+  }
+
+  /// Opens an arm of [condition] and binds the value established by a null test.
+  Jump enterArm(Value condition, bool taken) {
+    final test = condition is NullTest ? condition : null;
+    final proof = test != null && test.negated == taken ? test.nonNull : null;
+    final block = addBlock([if (proof != null) proof.type]);
+    if (test != null) {
+      final known = proof == null
+          ? const Constant.nullValue()
+          : block.parameters.single;
+      _facts = _Refinement(test.operand, known, _facts);
+    }
+    current = block;
+    return .new(block, [?proof]);
+  }
 
   /// Appends an open block with parameters of [types] and returns it.
   Block addBlock([Iterable<ValueType> types = const []]) {
@@ -82,21 +115,24 @@ final class FunctionContext(
     if (condition case Constant(value: final bool taken)) {
       return taken ? ifTrue() : ifFalse();
     }
-    final yes = addBlock(), no = addBlock();
-    current!.finish(Branch(condition, .new(yes), .new(no)));
-    final before = saveLocals();
-    current = yes;
+    final origin = current!, before = saveLocals(), facts = _facts;
+    final yes = enterArm(condition, true);
     final left = ifTrue(), yesEnd = current;
+    final yesFacts = _facts;
     final yesValues = yesEnd == null ? null : saveLocals();
-    current = no;
+    _facts = facts;
     restoreLocals(before);
+    final no = enterArm(condition, false);
     final right = ifFalse(), noEnd = current;
+    origin.finish(Branch(condition, yes, no));
     if (yesEnd == null) return right;
     if (noEnd == null) {
       current = yesEnd;
+      _facts = yesFacts;
       restoreLocals(yesValues!);
       return left;
     }
+    _facts = facts;
     final (fromYes, fromNo) = join(
       yesValues!,
       resultType == null ? null : (resultType, left!, right!),
@@ -105,11 +141,51 @@ final class FunctionContext(
     noEnd.finish(fromNo);
     return resultType == null ? null : current!.parameters.first;
   }
+
+  /// Evaluates [right] only on the selected edge and forwards [skipped] on the other.
+  Value shortCircuit(
+    Value condition, {
+    required bool evaluateWhen,
+    required Value skipped,
+    required ValueType resultType,
+    required Value? Function() right,
+  }) {
+    final entry = current!, before = saveLocals(), facts = _facts;
+    final enter = enterArm(condition, evaluateWhen);
+    final result = right();
+    _facts = facts;
+    final Jump skip;
+    if (result == null) {
+      restoreLocals(before);
+      current = addBlock([resultType]);
+      skip = Jump(current!, [skipped]);
+    } else {
+      final end = current!;
+      final edges = join(before, (resultType, skipped, result));
+      skip = edges.$1;
+      end.finish(edges.$2);
+    }
+    entry.finish(
+      Branch(
+        condition,
+        evaluateWhen ? enter : skip,
+        evaluateWhen ? skip : enter,
+      ),
+    );
+    return skip.target.parameters.first;
+  }
 }
+
+final class _Refinement(
+  final Value operand,
+  final Value narrowed,
+  final _Refinement? previous,
+);
 
 /// A jump destination carrying only the mutable locals visible at its boundary.
 final class JumpTarget(final FunctionContext _context) {
   final _localCount = _context.mutableLocals.length;
+  final _facts = _context._facts;
   Block? _block;
 
   /// Creates the destination on its first incoming edge.
@@ -135,6 +211,7 @@ final class JumpTarget(final FunctionContext _context) {
     if (block == null) return;
     _context.current?.finish(edge());
     _context.current = block;
+    _context._facts = _facts;
     _context.restoreLocals(block.parameters);
   }
 }

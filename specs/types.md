@@ -4,8 +4,8 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 
 | 特性 | 当前 IR 范围 |
 | --- | --- |
-| 类型名、前缀、嵌套实参、可空类型 | 待实现。 |
-| 核心标量、`Object`、`dynamic`、`void`、`Never` | 非空 int、bool、double、String，以及 Null 和 void。void 可传递实际运行值，静态使用限制由 analyzer 检查。 |
+| 类型名、前缀、嵌套实参、可空类型 | 支持下列核心类型的可空形式，包括参数、返回、变量和分支汇合。嵌套类型实参待实现。 |
+| 核心标量、`Object`、`dynamic`、`void`、`Never` | int、double、num、bool、String、Object、Null、void 和 Never。Never 没有正常返回值，Never? 等价于 Null。dynamic 待实现。 |
 | `List<T>` 及实际类型检查 | 待实现。 |
 | 非泛型函数签名 | 顶层函数的必需和可选参数；直接调用会补齐缺省实参。函数值待实现。 |
 | 泛型函数类型与泛型函数值签名 | 待实现。 |
@@ -13,7 +13,7 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 | 现代与旧式函数 typedef | 待实现。 |
 | 普通及 const 泛型类实例 | 待实现。 |
 | 泛型 `extends`/`implements` | 待实现。 |
-| 推断、类型提升、确定赋值 | 待实现。 |
+| 推断、类型提升、确定赋值 | 支持局部变量和参数在判空后的非空读取与更新。其他提升、非空变量的延后首次赋值待实现。 |
 | 基于界限的推断 | 待实现。 |
 | Record 类型、extension type | 待实现。 |
 | `Future`、`FutureOr` 与异步类型规则 | 待实现。 |

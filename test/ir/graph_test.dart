@@ -86,4 +86,30 @@ void main() {
     expect(() => Jump(narrowed, entry.parameters), throwsArgumentError);
     expect(() => IrFunction(target, [narrowed]), throwsArgumentError);
   });
+
+  test('a nullable value narrows only on the matching null-test edge', () {
+    final maybeInt = ValueType.integer.nullable;
+    final target = FunctionTarget(f.library, 'pick', .number, [maybeInt]);
+    final join = Block([.number])..finish(const Return(one));
+    final entry = Block(target.parameterTypes);
+    final input = entry.parameters.single;
+    expect(() => Jump(join, [input]), throwsArgumentError);
+    final test = entry.emit(NullTest(input));
+    entry.finish(Branch(test, .new(join, [one]), .new(join, [test.nonNull])));
+    expect(() => IrFunction(target, [entry, join]), returnsNormally);
+
+    final wrong = Block([maybeInt]);
+    final inverted = wrong.emit(
+      NullTest(wrong.parameters.single, negated: true),
+    );
+    final illicit = Jump(join, [inverted.nonNull]);
+    wrong.finish(Branch(inverted, illicit, illicit));
+    expect(() => IrFunction(target, [wrong, join]), throwsStateError);
+    expect(() => Unreachable(one), throwsArgumentError);
+    expect(() => Throw(input), throwsArgumentError);
+    final dead = Block(target.parameterTypes);
+    dead.emit(NullCheck(const Constant.nullValue()));
+    dead.finish(const Return(one));
+    expect(() => IrFunction(target, [dead]), throwsStateError);
+  });
 }
