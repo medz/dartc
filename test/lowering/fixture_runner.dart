@@ -67,14 +67,22 @@ final class FixtureRunner(
     };
     void execute(Instruction op) {
       switch (op) {
+        case AssertionFailure(:final message):
+          throw AssertionError(message == null ? null : read(message));
         case Construct(:final initializer, :final inputs):
           values[op] = _construct(initializer, inputs.map(read).toList());
         case MakeClosure(:final target, :final inputs):
           values[op] = _FunctionValue(target, null, inputs.map(read).toList());
         case NewCell(:final initial):
-          values[op] = _Cell(read(initial));
+          values[op] = _Cell(initial == null ? _uninitialized : read(initial));
+        case CopyCell(:final cell):
+          values[op] = _Cell((read(cell) as _Cell).value);
         case ReadCell(:final cell):
-          values[op] = (read(cell) as _Cell).value;
+          final value = (read(cell) as _Cell).value;
+          if (identical(value, _uninitialized)) {
+            fail('Read of an uninitialized definite-assignment local');
+          }
+          values[op] = value;
         case WriteCell(:final cell, :final value):
           (read(cell) as _Cell).value = read(value);
         case BindMethod(:final method, :final receiver, :final direct):
@@ -122,6 +130,30 @@ final class FixtureRunner(
           values[op] = _typeOperation(type, read(operand), cast: true);
         case NullCheck(:final operand):
           values[op] = read(operand)!;
+        case Interpolate(:final inputs):
+          final buffer = StringBuffer();
+          for (final input in inputs) {
+            buffer.write(read(input).toString());
+          }
+          values[op] = buffer.toString();
+        case StringConcat(:final left, :final right):
+          values[op] = (read(left) as String) + (read(right) as String);
+        case NumericNegate(:final operand):
+          values[op] = -(read(operand) as num);
+        case NumericBinary(:final operator, :final left, :final right):
+          final a = read(left) as num, b = read(right) as num;
+          values[op] = switch (operator) {
+            .add => a + b,
+            .subtract => a - b,
+            .multiply => a * b,
+            .divide => a / b,
+            .truncateDivide => a ~/ b,
+            .modulo => a % b,
+            .lessThan => a < b,
+            .lessOrEqual => a <= b,
+            .greaterThan => a > b,
+            .greaterOrEqual => a >= b,
+          };
         case IntBinary(:final operator, :final left, :final right):
           final a = read(left) as int, b = read(right) as int;
           values[op] = switch (operator) {
@@ -249,6 +281,7 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     ValueType.function => scalar<Function>(),
     ValueType.error => scalar<Error>(),
     ValueType.typeError => scalar<TypeError>(),
+    ValueType.assertionError => scalar<AssertionError>(),
     ValueType.stackTrace => scalar<StackTrace>(),
     ValueType.never => run<Never>(),
     ValueType.voidType => cast ? value : true,
@@ -261,6 +294,8 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     _ => throw StateError('Unexpected fixture type ${type.dartName}'),
   };
 }
+
+final _uninitialized = Object();
 
 final class _Cell(var Object? value);
 
@@ -303,6 +338,23 @@ final class _Instance(final ClassType type, final FixtureRunner runner) {
               as bool;
   }
 
+  static final _string = FunctionTarget(
+    ValueType.object.library,
+    'toString',
+    .string,
+    [],
+    owner: ValueType.object,
+    kind: .method,
+  );
+
+  @override
+  String toString() {
+    final target = runner.program.dispatch(type, _string);
+    return target == null
+        ? "Instance of '${type.dartName}'"
+        : runner._invoke(_FunctionValue(target, this), [], const {}) as String;
+  }
+
   @override
   int get hashCode => identityHashCode(this);
 }
@@ -316,4 +368,16 @@ final class _RecordValue(final RecordType type, final List<Object?> fields) {
 
   @override
   int get hashCode => Object.hashAll(fields);
+
+  @override
+  String toString() {
+    final parts = <String>[];
+    for (var i = 0; i < type.positionalCount; i++) {
+      parts.add(fields[i].toString());
+    }
+    for (final entry in type.slots.entries.skip(type.positionalCount)) {
+      parts.add('${entry.key}: ${fields[entry.value]}');
+    }
+    return '(${parts.join(', ')})';
+  }
 }

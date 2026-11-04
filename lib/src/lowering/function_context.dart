@@ -126,6 +126,15 @@ final class FunctionContext(
     }
   }
 
+  /// Reserves a local whose first write is checked by Dart definite assignment.
+  ///
+  /// Storage permits branches to perform the first write without fabricating a
+  /// Dart value of a non-nullable type on paths where it is not initialized.
+  void declareUninitialized(VariableElement variable, ValueType type) {
+    _declared.add(variable);
+    _locals[variable] = emit(NewCell(CellType(type), null));
+  }
+
   /// Binds the lexical function itself or a capture supplied by the caller.
   void bindCapture(Element? element, Value value) {
     if (element == null) {
@@ -152,6 +161,7 @@ final class FunctionContext(
     initialize();
     final variables = <VariableElement>[];
     for (final variable in _declared.skip(mark).whereType<VariableElement>()) {
+      if (!_closures.boxed.contains(variable)) continue;
       if (_locals[variable]!.type case final CellType type) {
         variables.add(variable);
         mutableLocals.add((variable, type));
@@ -163,9 +173,7 @@ final class FunctionContext(
   /// Copies a for-header binding before running the update expressions.
   void nextIteration(VariableElement variable) {
     final cell = _locals[variable]!;
-    _locals[variable] = emit(
-      NewCell(cell.type as CellType, current!.emit(ReadCell(cell))),
-    );
+    _locals[variable] = emit(CopyCell(cell));
   }
 
   /// Removes declarations introduced by [lower] when its scope ends.

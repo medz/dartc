@@ -17,6 +17,97 @@ Value? lowerExpression(FunctionContext context, ast.Expression expression) =>
 Value? _lower(FunctionContext context, ast.Expression expression) {
   final unit = context.unit;
   switch (expression) {
+    case ast.CascadeExpression():
+      final receiver = lowerExpression(context, expression.target);
+      if (receiver == null) return null;
+      Value? sections() {
+        for (final section in expression.cascadeSections) {
+          SelectorChain(
+            context,
+            section,
+            (e) => lowerExpression(context, e),
+            cascadeReceiver: context.refined(receiver),
+          ).lower();
+          if (context.current == null) return null;
+        }
+        return receiver;
+      }
+
+      return expression.isNullAware
+          ? context.branch(
+              context.testType(receiver, .nullType, negated: true),
+              sections,
+              () => const Constant.nullValue(),
+              context.typeOf(expression.staticType!, expression),
+            )
+          : sections();
+    case ast.DotShorthandConstructorInvocation():
+      if (expression.isConst) {
+        return context.bindings.constantValue(
+          expression.computeConstantValue()?.value,
+          unit,
+          expression,
+        );
+      }
+      final ctor = expression.element;
+      if (ctor is! ConstructorElement) {
+        unsupported(unit, expression, 'dot shorthand constructor');
+      }
+      final target = context.bindings
+          .target(ctor, unit, expression)
+          .implementation;
+      final args = evaluateArguments(
+        expression.argumentList,
+        (e) => lowerExpression(context, e),
+      );
+      if (args == null) return null;
+      final bound = context.bindings.bind(target, args);
+      return context.emit(
+        target.kind == .factory
+            ? DirectCall(target, bound)
+            : Construct(target, bound),
+      );
+    case ast.DotShorthandInvocation():
+      final callee = expression.memberName.element;
+      if (callee is! MethodElement ||
+          !callee.isStatic ||
+          callee.enclosingElement is! ClassElement) {
+        unsupported(unit, expression, 'dot shorthand invocation');
+      }
+      final target = context.bindings.target(callee, unit, expression);
+      final args = evaluateArguments(
+        expression.argumentList,
+        (e) => lowerExpression(context, e),
+      );
+      return args == null
+          ? null
+          : context.emit(
+              DirectCall(target, context.bindings.bind(target, args)),
+            );
+    case ast.DotShorthandPropertyAccess():
+      final member = expression.propertyName.element;
+      if (member is MethodElement &&
+              member.isStatic &&
+              member.enclosingElement is ClassElement ||
+          member is ConstructorElement) {
+        return FunctionConstant(
+          context.bindings.target(
+            member as ExecutableElement,
+            unit,
+            expression,
+          ),
+        );
+      }
+      if (member is GetterElement && member.variable.isConst) {
+        return context.bindings.constantOf(member.variable, unit, expression);
+      }
+      if (member is GetterElement &&
+          member.isStatic &&
+          member.enclosingElement is ClassElement) {
+        final target = context.bindings.target(member, unit, expression);
+        return context.emit(DirectCall(target, []));
+      }
+      unsupported(unit, expression, 'dot shorthand property');
     case ast.FunctionExpression():
       return context.close(expression);
     case ast.SimpleIdentifier(element: final LocalFunctionElement local):
@@ -153,6 +244,11 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
               : IntBinary(.subtract, const Constant.integer(0), value),
         );
       }
+      if (operator.type == .MINUS &&
+          ValueType.number.accepts(value.type) &&
+          element?.library.isDartCore == true) {
+        return context.emit(NumericNegate(value));
+      }
       return context.callPositionalMember(
         element,
         value,
@@ -176,6 +272,39 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       );
     case ast.StringLiteral(stringValue: final value?):
       return Constant.string(value);
+    case ast.StringLiteral():
+      final parts = <Value>[];
+      bool append(ast.StringLiteral literal) {
+        switch (literal) {
+          case ast.AdjacentStrings(:final strings):
+            for (final string in strings) {
+              if (!append(string)) return false;
+            }
+          case ast.StringInterpolation(:final elements):
+            for (final element in elements) {
+              switch (element) {
+                case ast.InterpolationString(:final value):
+                  parts.add(Constant.string(value));
+                case ast.InterpolationExpression(:final expression):
+                  var nested = expression;
+                  while (nested is ast.ParenthesizedExpression) {
+                    nested = nested.expression;
+                  }
+                  if (nested is ast.StringLiteral) {
+                    if (!append(nested)) return false;
+                    continue;
+                  }
+                  final value = lowerExpression(context, expression);
+                  if (value == null) return false;
+                  parts.add(value);
+              }
+            }
+          case ast.SimpleStringLiteral(:final value):
+            parts.add(Constant.string(value));
+        }
+        return true;
+      }
+      return append(expression) ? context.emit(Interpolate(parts)) : null;
     case ast.ParenthesizedExpression(:final expression):
       return lowerExpression(context, expression);
     case ast.IsExpression(:final expression, :final type, :final notOperator):
@@ -219,6 +348,10 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       final done = JumpTarget(context, [
         context.typeOf(expression.staticType!, expression),
       ]);
+      final cache = PatternCache(
+        context,
+        expression.cases.map((arm) => arm.guardedPattern.pattern),
+      );
       for (final arm in expression.cases) {
         final next = JumpTarget(context);
         context.inScope(() {
@@ -228,6 +361,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
             subject,
             next,
             (e) => lowerExpression(context, e),
+            cache,
           );
           if (context.current == null) return;
           final result = lowerExpression(context, arm.expression);
@@ -255,13 +389,11 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       return context.bindings.constantOf(variable, unit, expression);
     case ast.PrefixedIdentifier() ||
         ast.PropertyAccess() ||
-        ast.SimpleIdentifier(element: GetterElement(isStatic: false)) ||
+        ast.SimpleIdentifier(element: GetterElement()) ||
         ast.SimpleIdentifier(element: MethodElement(isStatic: false)) ||
         ast.FunctionExpressionInvocation() ||
         ast.MethodInvocation(
-          methodName: ast.SimpleIdentifier(
-            element: null || GetterElement(isStatic: false),
-          ),
+          methodName: ast.SimpleIdentifier(element: null || GetterElement()),
         ) ||
         ast.MethodInvocation(
           methodName: ast.SimpleIdentifier(

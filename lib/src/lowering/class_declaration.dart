@@ -3,6 +3,7 @@ import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
 
+import 'assertion.dart';
 import 'bindings.dart';
 import 'expression.dart';
 import 'function.dart';
@@ -100,9 +101,6 @@ IrClass lowerClass(
         break;
       case ast.MethodDeclaration(:final body):
         final method = member.declaredFragment!.element;
-        if (method.isStatic && method is PropertyAccessorElement) {
-          unsupported(unit, member, 'static accessor');
-        }
         final target = bindings.target(method, unit, member);
         if (target.kind.isVirtual) members.add(target);
         if (!target.isAbstract) {
@@ -190,6 +188,9 @@ void _initialize(
         final value = evaluate(expression);
         if (value == null) return;
         store(fieldName.element! as FieldElement, value, init);
+      case ast.AssertInitializer(:final condition, :final message):
+        lowerAssert(context, condition, message);
+        if (context.current == null) return;
       case ast.SuperConstructorInvocation(:final argumentList):
         superArguments = argumentList;
       default:

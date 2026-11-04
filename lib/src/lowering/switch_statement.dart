@@ -19,6 +19,10 @@ void lowerSwitchStatement(
 ) {
   final subject = lowerExpression(context, statement.expression);
   if (subject == null) return;
+  final cache = PatternCache(context, [
+    for (final member in statement.members)
+      if (member is ast.SwitchPatternCase) member.guardedPattern.pattern,
+  ]);
   final pending = <_CaseBody>[];
   _CaseBody? fallback;
 
@@ -100,6 +104,7 @@ void lowerSwitchStatement(
               subject,
               next,
               (e) => lowerExpression(context, e),
+              cache,
             );
             if (context.current != null) reach(body, bindings);
           });

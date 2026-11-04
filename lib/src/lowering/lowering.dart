@@ -1,5 +1,4 @@
 import 'package:analyzer/dart/ast/ast.dart' as ast;
-import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
@@ -11,11 +10,17 @@ import 'function.dart';
 abstract final class Lowering() {
   /// Returns class declarations and verified function bodies from [input].
   ///
+  /// Assertions are omitted by default. Set [enableAssertions] to evaluate
+  /// assertion conditions and raise assertion errors on failures.
+  ///
   /// Calls to the same declaration share a target throughout the batch.
   /// Constants appear as operands at their uses. Throws
   /// [UnsupportedError] at the first source construct without an IR translation.
-  static IrProgram lower(CheckedLibraries input) {
-    final bindings = Bindings();
+  static IrProgram lower(
+    CheckedLibraries input, {
+    bool enableAssertions = false,
+  }) {
+    final bindings = Bindings(enableAssertions: enableAssertions);
     final functions = <IrFunction>[];
     final classes = <IrClass>[];
     for (final unit in input.libraries.expand((library) => library.units)) {
@@ -26,14 +31,14 @@ abstract final class Lowering() {
           case ast.ClassDeclaration():
             classes.add(lowerClass(unit, bindings, node, functions));
           case ast.FunctionDeclaration(
-            declaredFragment: TopLevelFunctionFragment(:final element),
+            declaredFragment: final fragment?,
             :final functionExpression,
           ):
             FunctionLowering.append(
               functions,
               unit,
               bindings,
-              element,
+              fragment.element,
               node,
               functionExpression.body,
             );

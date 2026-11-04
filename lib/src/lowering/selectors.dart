@@ -13,8 +13,9 @@ import 'record.dart';
 final class SelectorChain(
   final FunctionContext context,
   final ast.Expression root,
-  final Value? Function(ast.Expression) evaluate,
-) {
+  final Value? Function(ast.Expression) evaluate, {
+  final Value? cascadeReceiver,
+}) {
   JumpTarget? _skipped;
 
   /// Returns the selected value, or null when evaluation cannot continue.
@@ -36,8 +37,14 @@ final class SelectorChain(
     return exit.enter()!.parameters.first;
   }
 
-  Value? _receiver(ast.Expression? expression, bool nullAware) {
-    final value = expression == null || expression is ast.SuperExpression
+  Value? _receiver(
+    ast.Expression? expression,
+    bool nullAware, {
+    bool cascaded = false,
+  }) {
+    final value = cascaded
+        ? cascadeReceiver
+        : expression == null || expression is ast.SuperExpression
         ? context.receiver
         : _visit(expression);
     if (value == null) return null;
@@ -87,17 +94,60 @@ final class SelectorChain(
       );
     }
 
+    // Static accessors have no runtime receiver. Validate their namespace without
+    // evaluating it, then retain the ordinary call/assignment evaluation order.
+    final (staticMember, staticReceiver, staticArguments) = switch (node) {
+      ast.Identifier(element: final GetterElement getter)
+          when getter.isStatic =>
+        (getter, node is ast.PrefixedIdentifier ? node.prefix : null, null),
+      ast.PropertyAccess(
+        propertyName: ast.SimpleIdentifier(element: final GetterElement getter),
+        :final target,
+      )
+          when getter.isStatic =>
+        (getter, target, null),
+      ast.MethodInvocation(
+        methodName: ast.SimpleIdentifier(element: final GetterElement getter),
+        :final target,
+        :final argumentList,
+      )
+          when getter.isStatic =>
+        (getter, target, argumentList),
+      _ => (null, null, null),
+    };
+    if (staticMember != null) {
+      _checkStaticReceiver(staticReceiver, node);
+      Value? get() {
+        if (staticMember.variable.isConst) {
+          return context.bindings.constantOf(
+            staticMember.variable,
+            context.unit,
+            node,
+          );
+        }
+        final target = context.bindings.target(
+          staticMember,
+          context.unit,
+          node,
+        );
+        return context.normal(context.emit(DirectCall(target, [])));
+      }
+
+      final invocation = getterArguments ?? staticArguments;
+      return invocation == null
+          ? get()
+          : invokeValue(get(), invocation, getterCall);
+    }
+
     if (node case ast.FunctionExpressionInvocation(
       :final function,
       :final argumentList,
       :final element,
     )) {
       if (function
-          case ast.Identifier(element: GetterElement(isStatic: false)) ||
+          case ast.Identifier(element: GetterElement()) ||
               ast.PropertyAccess(
-                propertyName: ast.SimpleIdentifier(
-                  element: GetterElement(isStatic: false),
-                ),
+                propertyName: ast.SimpleIdentifier(element: GetterElement()),
               )) {
         return _visit(
           function,
@@ -114,12 +164,17 @@ final class SelectorChain(
     if (node
         case ast.MethodInvocation(
           methodName: ast.SimpleIdentifier(name: 'call', element: null),
-          target: final target?,
+          target: final target,
           :final isNullAware,
           :final argumentList,
         )
-        when target.staticType is dart.FunctionType) {
-      return invokeValue(_receiver(target, isNullAware), argumentList);
+        when target?.staticType is dart.FunctionType ||
+            node.isCascaded &&
+                cascadeReceiver?.type.nonNullable is FunctionType) {
+      return invokeValue(
+        _receiver(target, isNullAware, cascaded: node.isCascaded),
+        argumentList,
+      );
     }
     if (node case ast.PostfixExpression(
       operator: Token(type: .BANG),
@@ -129,13 +184,16 @@ final class SelectorChain(
       return value == null ? null : context.normal(context.checkNotNull(value));
     }
     if (node case ast.IndexExpression(
-      isCascaded: false,
       :final target,
       :final index,
       :final isNullAware,
       :final element,
     )) {
-      final receiver = _receiver(target, isNullAware);
+      final receiver = _receiver(
+        target,
+        isNullAware,
+        cascaded: node.isCascaded,
+      );
       if (receiver == null) return null;
       final key = evaluate(index);
       return key == null
@@ -157,10 +215,9 @@ final class SelectorChain(
                   !(identifier.element as ExecutableElement).isStatic =>
         (prefix, identifier.name, identifier.element, null, false),
       ast.PropertyAccess(
-        target: final target?,
+        target: final target,
         :final propertyName,
         :final isNullAware,
-        isCascaded: false,
       ) =>
         (target, propertyName.name, propertyName.element, null, isNullAware),
       ast.SimpleIdentifier(element: final GetterElement getter)
@@ -174,7 +231,6 @@ final class SelectorChain(
         :final target,
         :final argumentList,
         :final isNullAware,
-        isCascaded: false,
       )
           when !getter.isStatic =>
         (target, getter.name!, getter, argumentList, isNullAware),
@@ -183,7 +239,6 @@ final class SelectorChain(
         :final target,
         :final argumentList,
         :final isNullAware,
-        isCascaded: false,
       )
           when !method.isStatic && method.enclosingElement is ClassElement =>
         (target, method.name!, method, argumentList, isNullAware),
@@ -196,14 +251,24 @@ final class SelectorChain(
       return evaluate(node);
     }
     final direct = receiver is ast.SuperExpression;
-    final known = _receiver(receiver, nullAware);
+    final known = _receiver(
+      receiver,
+      nullAware,
+      cascaded: switch (node) {
+        ast.PropertyAccess(:final isCascaded) ||
+        ast.MethodInvocation(:final isCascaded) => isCascaded,
+        _ => false,
+      },
+    );
     if (known == null) return null;
-    if (receiver?.staticType is dart.FunctionType &&
+    if (known.type.nonNullable is FunctionType &&
         member == null &&
         name == 'call') {
       return known;
     }
-    if (receiver?.staticType is dart.RecordType && member == null) {
+    if ((receiver?.staticType is dart.RecordType ||
+            known.type.nonNullable is RecordType) &&
+        member == null) {
       final owner = known.type.nonNullable is RecordType
           ? known.type.nonNullable as RecordType
           : context.typeOf(receiver!.staticType!, receiver).nonNullable
@@ -252,6 +317,20 @@ final class SelectorChain(
           ? DirectCall(target, [known, ...context.bindings.bind(target, args)])
           : InstanceCall(target, known, args.positional, args.named),
     );
+  }
+
+  void _checkStaticReceiver(ast.Expression? receiver, ast.AstNode site) {
+    if (receiver == null) return;
+    final element = receiver is ast.Identifier ? receiver.element : null;
+    final valid = switch (element) {
+      PrefixElement() => !element.imports.any(
+        (i) => i.prefix?.isDeferred == true,
+      ),
+      ClassElement() =>
+        receiver is! ast.PrefixedIdentifier || !receiver.isDeferred,
+      _ => false,
+    };
+    if (!valid) unsupported(context.unit, site, 'static accessor receiver');
   }
 
   Value? _update(ast.CompoundAssignmentExpression site) {
@@ -311,6 +390,27 @@ final class SelectorChain(
         context.writeLocal(destination, value);
       });
     }
+    if (destination is SetterElement && destination.isStatic) {
+      final receiver = switch (place) {
+        ast.SimpleIdentifier() => null,
+        ast.PrefixedIdentifier(:final prefix) => prefix,
+        ast.PropertyAccess(:final target) => target,
+        _ => unsupported(context.unit, place, 'static assignment target'),
+      };
+      _checkStaticReceiver(receiver, site);
+      final setter = context.bindings.target(destination, context.unit, site);
+      return apply(() {
+        final getter = site.readElement;
+        if (getter is! GetterElement || !getter.isStatic) {
+          unsupported(context.unit, site, 'static assignment getter');
+        }
+        return context.normal(
+          context.emit(
+            DirectCall(context.bindings.target(getter, context.unit, site), []),
+          ),
+        );
+      }, (value) => context.emit(DirectCall(setter, [value])));
+    }
     if (destination is! ExecutableElement ||
         destination.isStatic ||
         destination.enclosingElement is! ClassElement) {
@@ -319,22 +419,27 @@ final class SelectorChain(
     final (target, nullAware, index) = switch (place) {
       ast.SimpleIdentifier() => (null, false, null),
       ast.PrefixedIdentifier(:final prefix) => (prefix, false, null),
-      ast.PropertyAccess(
-        :final target,
-        :final isNullAware,
-        isCascaded: false,
-      ) =>
-        (target, isNullAware, null),
-      ast.IndexExpression(
-        :final target,
-        :final isNullAware,
-        :final index,
-        isCascaded: false,
-      ) =>
-        (target, isNullAware, index),
+      ast.PropertyAccess(:final target, :final isNullAware) => (
+        target,
+        isNullAware,
+        null,
+      ),
+      ast.IndexExpression(:final target, :final isNullAware, :final index) => (
+        target,
+        isNullAware,
+        index,
+      ),
       _ => unsupported(context.unit, place, 'assignment receiver'),
     };
-    final receiver = _receiver(target, nullAware);
+    final receiver = _receiver(
+      target,
+      nullAware,
+      cascaded: switch (place) {
+        ast.PropertyAccess(:final isCascaded) ||
+        ast.IndexExpression(:final isCascaded) => isCascaded,
+        _ => false,
+      },
+    );
     if (receiver == null) return null;
     final key = index == null ? null : evaluate(index);
     if (index != null && key == null) return null;

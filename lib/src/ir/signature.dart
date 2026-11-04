@@ -5,6 +5,12 @@ enum FunctionKind() {
   /// A top-level function or static method.
   function,
 
+  /// A top-level or static property read, without a receiver.
+  staticGetter,
+
+  /// A top-level or static property write, without a receiver.
+  staticSetter,
+
   /// A lexical function paired with its captured environment.
   closure,
 
@@ -139,7 +145,11 @@ final class FunctionTarget(
 
   this {
     if ((owner != null && owner!.library != library) ||
-        (kind != .function && kind != .closure && owner == null) ||
+        (kind != .function &&
+            kind != .closure &&
+            kind != .staticGetter &&
+            kind != .staticSetter &&
+            owner == null) ||
         (kind == .closure
             ? enclosing == null ||
                   enclosing!.library != library ||
@@ -155,8 +165,9 @@ final class FunctionTarget(
         (kind == .initializer && returnType != .voidType) ||
         (kind == .factory && returnType != owner) ||
         isAbstract && !kind.isVirtual ||
-        kind == .getter && signature.parameters.isNotEmpty ||
-        kind == .setter &&
+        (kind == .getter || kind == .staticGetter) &&
+            signature.parameters.isNotEmpty ||
+        (kind == .setter || kind == .staticSetter) &&
             (signature.positionalCount != 1 ||
                 optionalPositional != 0 ||
                 namedParameters.isNotEmpty ||

@@ -17,8 +17,8 @@ void writeFunction(
       return '${symbol(outer)}::${t.name}@${t.sourceOffset}';
     }
     final prefix = switch (t.kind) {
-      .getter => 'get ',
-      .setter => 'set ',
+      .getter || .staticGetter => 'get ',
+      .setter || .staticSetter => 'set ',
       _ => '',
     };
     return '${t.library}::${t.owner == null ? '' : '${t.owner!.dartName}.'}$prefix${t.name}';
@@ -42,10 +42,14 @@ void writeFunction(
     for (final e in named.entries) '${e.key}: ${value(e.value)}',
   ].join(', ');
   String operation(Instruction op) => switch (op) {
+    AssertionFailure() =>
+      'assertionFailure${op.message == null ? '' : ' ${value(op.message!)}'}',
     MakeClosure() =>
       'close ${symbol(op.target)}(${op.inputs.map(value).join(', ')})',
-    NewCell() => 'cell ${value(op.initial)}',
+    NewCell() =>
+      'cell ${op.initial == null ? 'uninitialized' : value(op.initial!)}',
     ReadCell() => 'readCell ${value(op.cell)}',
+    CopyCell() => 'copyCell ${value(op.cell)}',
     WriteCell() => 'writeCell ${value(op.cell)}, ${value(op.value)}',
     BindMethod() =>
       'bind ${op.direct ? 'super ' : ''}${value(op.receiver)} ${symbol(op.method)}',
@@ -68,6 +72,11 @@ void writeFunction(
       '${value(op.operand)} ${op.negated ? 'is!' : 'is'} ${op.testedType.dartName}',
     TypeCast() => '${value(op.operand)} as ${op.type.dartName}',
     NullCheck() => 'checkNotNull ${value(op.operand)}',
+    NumericBinary() =>
+      'numeric.${op.operator.name} ${value(op.left)}, ${value(op.right)}',
+    Interpolate() => 'interpolate [${op.inputs.map(value).join(', ')}]',
+    StringConcat() => 'concat ${value(op.left)}, ${value(op.right)}',
+    NumericNegate() => 'negate ${value(op.operand)}',
     IntBinary() => '${op.operator.name} ${value(op.left)}, ${value(op.right)}',
     DirectCall() =>
       'call ${symbol(op.target)}(${op.inputs.map(value).join(', ')})',

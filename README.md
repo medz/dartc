@@ -21,4 +21,6 @@ dart run tool/print_ir.dart test/lowering/fixtures/functions.dart
 
 The last command prints the basic blocks, calls and branches for each function in the file's library.
 
+Assertions are disabled by default. Pass `enableAssertions: true` to `Lowering.lower` to preserve assertion statements and constructor assertion initializers.
+
 [Release notes](https://github.com/medz/dartc/blob/main/CHANGELOG.md) · [MIT license](https://github.com/medz/dartc/blob/main/LICENSE)

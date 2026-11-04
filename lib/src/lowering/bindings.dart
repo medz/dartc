@@ -6,7 +6,7 @@ import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
 
 /// Maps analyzer declarations and formal parameters to their IR identities.
-final class Bindings() {
+final class Bindings({final bool enableAssertions = false}) {
   final _targets = <ExecutableElement, FunctionTarget>{};
   final _classes = <InterfaceElement, ClassType>{};
   final _fields = <FieldElement, InstanceField>{};
@@ -23,6 +23,11 @@ final class Bindings() {
     Iterable<ValueType> captures = const [],
   }) {
     element = element.baseElement;
+    if (element is PropertyAccessorElement &&
+        element.isStatic &&
+        element.isOriginVariable) {
+      unsupported(unit, site, 'stored static or top-level variable');
+    }
     final previous = enclosing == null ? _targets[element] : null;
     if (previous != null) return previous;
     final parameters = element.formalParameters;
@@ -35,7 +40,9 @@ final class Bindings() {
         isFactory ? FunctionKind.factory : FunctionKind.initializer,
       LocalFunctionElement() => FunctionKind.closure,
       GetterElement(isStatic: false) => FunctionKind.getter,
+      GetterElement() => FunctionKind.staticGetter,
       SetterElement(isStatic: false) => FunctionKind.setter,
+      SetterElement() => FunctionKind.staticSetter,
       MethodElement(isStatic: false) => FunctionKind.method,
       _ => FunctionKind.function,
     };
@@ -213,6 +220,7 @@ final class Bindings() {
         'Object' => ValueType.object,
         'Error' => ValueType.error,
         'TypeError' => ValueType.typeError,
+        'AssertionError' => ValueType.assertionError,
         'StackTrace' => ValueType.stackTrace,
         'num' => ValueType.number,
         'int' => ValueType.integer,

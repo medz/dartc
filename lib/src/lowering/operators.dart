@@ -80,6 +80,11 @@ Value? lowerBinary(
   if (member?.library.isDartCore != true) {
     unsupported(context.unit, site, 'operator dispatch for ${operator.lexeme}');
   }
+  if (left.type == .string &&
+      right.type == .string &&
+      (operator.type == .PLUS || operator.type == .PLUS_EQ)) {
+    return context.emit(StringConcat(left, right));
+  }
   final IntOperator op = switch (operator.type) {
     .PLUS || .PLUS_EQ || .PLUS_PLUS => .add,
     .MINUS || .MINUS_EQ || .MINUS_MINUS => .subtract,
@@ -99,8 +104,25 @@ Value? lowerBinary(
     .GT_EQ => .greaterOrEqual,
     _ => unsupported(context.unit, site, operator.lexeme),
   };
-  if (left.type != .integer || right.type != .integer) {
-    unsupported(context.unit, site, 'non-integer operator');
+  if (left.type == .integer && right.type == .integer) {
+    return context.emit(IntBinary(op, left, right));
   }
-  return context.emit(IntBinary(op, left, right));
+  if (!ValueType.number.accepts(left.type) ||
+      !ValueType.number.accepts(right.type)) {
+    unsupported(context.unit, site, 'non-numeric operator');
+  }
+  final numeric = switch (op) {
+    .add => NumericOperator.add,
+    .subtract => NumericOperator.subtract,
+    .multiply => NumericOperator.multiply,
+    .divide => NumericOperator.divide,
+    .truncateDivide => NumericOperator.truncateDivide,
+    .modulo => NumericOperator.modulo,
+    .lessThan => NumericOperator.lessThan,
+    .lessOrEqual => NumericOperator.lessOrEqual,
+    .greaterThan => NumericOperator.greaterThan,
+    .greaterOrEqual => NumericOperator.greaterOrEqual,
+    _ => unsupported(context.unit, site, 'non-integer bitwise operator'),
+  };
+  return context.emit(NumericBinary(numeric, left, right));
 }

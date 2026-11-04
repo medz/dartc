@@ -3,6 +3,7 @@ import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
 
+import 'assertion.dart';
 import 'bindings.dart';
 import 'closures.dart';
 import 'exception.dart';
@@ -181,13 +182,12 @@ final class FunctionLowering._(
       final initializer = variable.initializer;
       final local = variable.declaredFragment!.element;
       final type = context.typeOf(local.type, variable);
-      if (variable.isLate ||
-          (initializer == null && !type.accepts(.nullType))) {
-        unsupported(
-          context.unit,
-          variable,
-          'late or uninitialized non-nullable local',
-        );
+      if (variable.isLate) {
+        unsupported(context.unit, variable, 'late local');
+      }
+      if (initializer == null && (local.isFinal || !type.accepts(.nullType))) {
+        context.declareUninitialized(local, type);
+        continue;
       }
       final value = switch (initializer) {
         null => const Constant.nullValue(),
@@ -240,6 +240,8 @@ final class FunctionLowering._(
         _patternDeclaration(declaration);
       case ast.ExpressionStatement(:final expression):
         lowerExpression(context, expression);
+      case ast.AssertStatement(:final condition, :final message):
+        lowerAssert(context, condition, message);
       case ast.TryStatement():
         _try(statement);
       case ast.IfStatement(caseClause: ast.CaseClause(:final guardedPattern)):

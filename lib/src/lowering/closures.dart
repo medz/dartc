@@ -25,6 +25,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
   final boxed = <VariableElement>{};
   final _written = <VariableElement>{};
   LocalClosure? _current;
+  bool _enableAssertions = false;
 
   /// Assigns lexical targets and storage types for all nested bodies in [regions].
   void prepare(
@@ -33,6 +34,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     FunctionTarget root,
     Iterable<ast.AstNode> regions,
   ) {
+    _enableAssertions = bindings.enableAssertions;
     for (final region in regions) {
       region.accept(this);
     }
@@ -58,6 +60,16 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
         captures: fn.captures.map(slot),
       );
     }
+  }
+
+  @override
+  void visitAssertStatement(ast.AssertStatement node) {
+    if (_enableAssertions) super.visitAssertStatement(node);
+  }
+
+  @override
+  void visitAssertInitializer(ast.AssertInitializer node) {
+    if (_enableAssertions) super.visitAssertInitializer(node);
   }
 
   void _use(Element? element) {

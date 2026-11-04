@@ -1,5 +1,15 @@
 ## Unreleased
 
+Numeric expressions support `double`, `num` and mixed operands without losing integer precision or floating negative zero. Runtime string interpolation preserves expression and conversion order, including virtual `toString` calls and adjacent or nested literals.
+
+Ordinary and null-aware cascades evaluate their receiver once. Dot shorthand supports non-generic constructors, factories, static methods and explicit static getters. Explicit top-level and static getters/setters support reads, calls and updates.
+
+Non-late locals and `final` variables can be assigned after declaration. Their storage is preserved across branches, exceptions and closures, including uninitialized captured loop bindings. Wildcard declarations retain initializer effects.
+
+Object patterns read non-generic instance getters and method tear-offs. Pattern alternatives and switch cases share extracted fields and repeated comparisons without repeating user side effects.
+
+Assertion statements and constructor assertions can be enabled with `Lowering.lower(input, enableAssertions: true)`. Assertions are disabled by default, including closures inside their conditions and messages.
+
 Assignments can target local variables, parameters, instance properties and user-defined index operators. Compound assignments preserve getter and setter order, including the conditional write in `??=`. Integer expressions support division, modulo, bitwise operators and shifts.
 
 Lowering supports ordinary `for` and `do-while` loops, including `break` and `continue` across nested loops and `break` from labeled statements.

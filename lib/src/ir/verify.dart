@@ -127,6 +127,7 @@ Set<FunctionTarget> verifyFunction(FunctionTarget target, List<Block> blocks) {
       for (final input in op.inputs) {
         if (input.type is CellType &&
             op is! ReadCell &&
+            op is! CopyCell &&
             op is! WriteCell &&
             op is! MakeClosure) {
           throw StateError('Capture storage used as a Dart value.');

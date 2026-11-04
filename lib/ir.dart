@@ -28,10 +28,12 @@ export 'src/ir/type.dart'
     show CellType, ClassType, FunctionType, RecordType, ValueType;
 export 'src/ir/value.dart'
     show
+        AssertionFailure,
         BindMethod,
         BlockParameter,
         Constant,
         Construct,
+        CopyCell,
         DirectCall,
         Equals,
         Instruction,
@@ -40,6 +42,11 @@ export 'src/ir/value.dart'
         InstanceCall,
         IntBinary,
         IntOperator,
+        Interpolate,
+        StringConcat,
+        NumericBinary,
+        NumericOperator,
+        NumericNegate,
         MakeClosure,
         MakeRecord,
         NewCell,

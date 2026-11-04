@@ -89,18 +89,24 @@ sealed class Instruction(super.type) extends Value {
 
   /// Whether evaluation can transfer control to a Dart exception handler.
   bool get mayThrow => switch (this) {
+    AssertionFailure() ||
     DirectCall() ||
     InstanceCall() ||
     FunctionCall() ||
     BindMethod() ||
     MakeClosure() ||
     NewCell() ||
+    CopyCell() ||
     Construct() ||
     TypeCast() ||
     NullCheck() ||
-    MakeRecord() => true,
+    MakeRecord() ||
+    Interpolate() ||
+    StringConcat() => true,
     Equals(:final mayCallUserCode) => mayCallUserCode,
     IntBinary(:final operator) => operator.mayThrow,
+    NumericBinary(:final canThrow) => canThrow,
+    NumericNegate() => false,
     ReadCell() ||
     WriteCell() ||
     TypeTest() ||
@@ -108,6 +114,21 @@ sealed class Instruction(super.type) extends Value {
     StoreField() ||
     LoadField() => false,
   };
+}
+
+/// Raises an assertion error after the failed condition and optional message.
+final class AssertionFailure(
+  /// The lazily evaluated assertion message, absent when omitted.
+  final Value? message,
+) extends Instruction {
+  this : super(.never) {
+    if (message != null && !ValueType.object.nullable.accepts(message!.type)) {
+      throw ArgumentError('Expected a Dart assertion message value.');
+    }
+  }
+
+  @override
+  Iterable<Value> get inputs => [?message];
 }
 
 /// Creates a local function value retaining its capture slots by identity.
@@ -127,20 +148,23 @@ final class MakeClosure(
   }
 }
 
-/// Allocates shared storage for one activation of a captured variable.
+/// Allocates storage for one activation of a local variable.
+///
+/// Without [initial], a write must occur before any read. Checked Dart's
+/// definite-assignment analysis establishes this for non-late locals.
 final class NewCell(
   CellType type,
 
-  /// The starting value for this activation.
-  final Value initial,
+  /// The starting value, absent for a definitely-assigned deferred local.
+  final Value? initial,
 ) extends Instruction {
   this : super(type) {
-    if (!type.content.accepts(initial.type)) {
+    if (initial != null && !type.content.accepts(initial!.type)) {
       throw ArgumentError('Incorrect capture initializer.');
     }
   }
   @override
-  Iterable<Value> get inputs => [initial];
+  Iterable<Value> get inputs => [?initial];
 }
 
 /// Reads the current value of a captured variable.
@@ -153,6 +177,21 @@ final class ReadCell(
         CellType(:final content) => content,
         _ => throw ArgumentError('Expected capture storage.'),
       });
+  @override
+  Iterable<Value> get inputs => [cell];
+}
+
+/// Copies a captured loop binding without reading a possibly uninitialized value.
+final class CopyCell(
+  /// The previous iteration's storage.
+  final Value cell,
+) extends Instruction {
+  this : super(cell.type) {
+    if (cell.type is! CellType) {
+      throw ArgumentError('Expected capture storage.');
+    }
+  }
+
   @override
   Iterable<Value> get inputs => [cell];
 }
@@ -589,4 +628,125 @@ void checkArguments(Iterable<ValueType> types, List<Value> arguments) {
     }
   }
   if (i != arguments.length) throw ArgumentError('Unexpected arguments.');
+}
+
+/// A core arithmetic or ordered comparison operation on Dart numbers.
+enum NumericOperator() {
+  /// Addition with Dart's runtime integer or double representation.
+  add,
+
+  /// Subtraction of the right operand from the left.
+  subtract,
+
+  /// Multiplication of the operands.
+  multiply,
+
+  /// IEEE division, including infinities and NaN for zero divisors.
+  divide,
+
+  /// Division truncated toward zero, throwing for a non-finite quotient.
+  truncateDivide,
+
+  /// Euclidean modulo, preserving Dart's integer and floating semantics.
+  modulo,
+
+  /// Whether the left operand is smaller than the right.
+  lessThan,
+
+  /// Whether the left operand is smaller than or equal to the right.
+  lessOrEqual,
+
+  /// Whether the left operand is greater than the right.
+  greaterThan,
+
+  /// Whether the left operand is greater than or equal to the right.
+  greaterOrEqual;
+
+  /// The result type for operands with the given static types.
+  ValueType result(ValueType left, ValueType right) => switch (this) {
+    lessThan || lessOrEqual || greaterThan || greaterOrEqual => .boolean,
+    divide => .floating,
+    truncateDivide => .integer,
+    _ when left == .floating || right == .floating => .floating,
+    _ when left == .integer && right == .integer => .integer,
+    _ => .number,
+  };
+}
+
+/// A numeric operation without converting integer operands prematurely.
+///
+/// Runtime integer operands retain integer arithmetic and mixed comparisons
+/// retain Dart's precision. Floating operands obey IEEE semantics, including
+/// NaN and signed zero. The operation never dispatches to user code.
+final class NumericBinary(
+  /// The operation to perform.
+  final NumericOperator operator,
+
+  /// The first operand.
+  final Value left,
+
+  /// The second operand.
+  final Value right,
+) extends Instruction {
+  this : super(operator.result(left.type, right.type)) {
+    if (!ValueType.number.accepts(left.type) ||
+        !ValueType.number.accepts(right.type)) {
+      throw ArgumentError('Non-nullable numeric operands required.');
+    }
+  }
+
+  /// Whether runtime operands can cause an arithmetic error.
+  bool get canThrow =>
+      operator == .truncateDivide ||
+      operator == .modulo && left.type != .floating && right.type != .floating;
+
+  @override
+  Iterable<Value> get inputs => [left, right];
+}
+
+/// Negates a Dart number, preserving floating negative zero and NaN.
+final class NumericNegate(
+  /// The operand to negate without changing its numeric representation.
+  final Value operand,
+) extends Instruction {
+  this : super(operand.type) {
+    if (!ValueType.number.accepts(operand.type)) {
+      throw ArgumentError('A non-nullable numeric operand is required.');
+    }
+  }
+
+  @override
+  Iterable<Value> get inputs => [operand];
+}
+
+/// Converts evaluated values in order and concatenates their string forms.
+///
+/// All interpolation expressions are evaluated before this instruction. Each
+/// conversion uses Dart's `toString`, including virtual dispatch and null's
+/// string representation. Conversion may throw or execute user code.
+final class Interpolate(Iterable<Value> parts) extends Instruction {
+  @override
+  final List<Value> inputs = .unmodifiable(parts);
+  this : super(.string) {
+    if (inputs.any((value) => value.type is CellType)) {
+      throw ArgumentError('Interpolation cannot expose capture storage.');
+    }
+  }
+}
+
+/// Concatenates two already evaluated, non-nullable strings.
+final class StringConcat(
+  /// The first string.
+  final Value left,
+
+  /// The second string.
+  final Value right,
+) extends Instruction {
+  this : super(.string) {
+    if (left.type != .string || right.type != .string) {
+      throw ArgumentError('String operands required.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [left, right];
 }

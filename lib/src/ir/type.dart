@@ -37,6 +37,13 @@ sealed class const ValueType() {
   /// The error raised by failed runtime type checks.
   static const ClassType typeError = ClassType._core('TypeError', error, false);
 
+  /// The error raised by an enabled failed assertion.
+  static const ClassType assertionError = ClassType._core(
+    'AssertionError',
+    error,
+    false,
+  );
+
   /// The type whose only value is `null`.
   static const ValueType nullType = _SpecialType('Null');
 
