@@ -1,5 +1,7 @@
 ## Unreleased
 
+Constant List, Set, Map and ordinary user-class instances lower from analyzer-evaluated values. Nested constants, generic and inherited storage, defaults and constructor aliases retain canonical identity. Collection writes preserve reified type checks and immutable-operation failures; method addAll checks its source before traversal, separately from literal spreads.
+
 List and Map patterns support ordered extraction, list rest slices, missing-key checks, nested destructuring and shared lazy reads across alternatives. Irrefutable shape failures throw StateError; contextual casts and assignment writes preserve Dart's failure ordering and atomicity.
 
 IR distinguishes dynamic from Object? and preserves implicit checks for typed storage, arguments, returns, record and collection elements, and boolean contexts. Dynamic receiver/member/operator dispatch remains unsupported. Statements and collection elements now share declaration and loop lowering; ordinary and dot-shorthand calls share their evaluation paths.

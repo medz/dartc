@@ -8,12 +8,12 @@
 | 普通、raw、多行、插值与相邻字符串 | 支持普通、raw、多行、运行时插值与相邻拼接；保留插值表达式和 toString 的求值顺序、虚派发及异常。见[字符串样本](../test/lowering/fixtures/strings.dart)。 |
 | Symbol 字面量 | 待实现。 |
 | Record 字面量 | 支持空、单字段、位置与命名混合的 record，以及嵌套和 const record。字段按源码顺序求值及隐式转换，失败时跳过后续字段；支持字段读取和结构相等。见[record 样本](../test/lowering/fixtures/records.dart)。 |
-| 可变/const List | 支持保留实际元素类型的可变 List 字面量、length、索引读写、sublist、add 和 addAll。const List、集合构造器和完整 SDK API 待实现。 |
-| Set、Map 字面量 | 支持可变类型化字面量、插入顺序、重复项处理及用户相等和 hashCode。支持 Set 的 length/add/addAll、Map 的 length/索引读写/containsKey。const 集合和完整 SDK API 待实现。 |
-| List if/for/for-in、spread | 支持 List、Set、Map 的 if/else、三段式 for、同步 for-in 和 spread，按源码顺序执行。spread 使用源 Iterable 的 iterator 或 Map 的 forEach。 |
+| 可变/const List | 支持保留实际元素类型的可变 List 字面量、length、索引读写、sublist、add 和 addAll。支持 const List 的内容和规范身份；集合构造器和完整 SDK API 待实现。 |
+| Set、Map 字面量 | 支持可变类型化字面量、插入顺序、重复项处理及用户相等和 hashCode。支持 Set 的 length/add/addAll、Map 的 length/索引读写/containsKey。支持 const Set/Map；完整 SDK API 待实现。 |
+| List if/for/for-in、spread | 支持 List、Set、Map 的 if/else、三段式 for、同步 for-in 和 spread，按源码顺序执行。spread 使用源 Iterable 的 iterator 或 Map 的 forEach；addAll 调用还在遍历前检查实际接收者要求的源类型。 |
 | 空感知集合元素 | 支持空感知元素、spread 以及 Map 的空感知 key/value。空 key 跳过对应 value 的求值。 |
 | 集合 if-case、模式循环 | 支持已表示模式及 when 守卫的 if-case，以及 record、List 和 Map 模式循环头。见[集合样本](../test/lowering/fixtures/collections.dart)。 |
-| 常量运算、类型测试与转换 | 常量声明和默认值支持标量和 record 常量表达式。`is`、`is!` 和 `as` 支持[已表示的类型](types.md)及其可空形式。record 按形状和字段运行值检查，转换失败抛出 TypeError。见[类型检查样本](../test/lowering/fixtures/type_checks.dart)。 |
+| 常量运算、类型测试与转换 | 常量声明和默认值支持标量、record、List/Set/Map、普通用户对象及函数值常量。`is`、`is!` 和 `as` 支持[已表示的类型](types.md)及其可空形式。record 按形状和字段运行值检查，转换失败抛出 TypeError。见[类型检查样本](../test/lowering/fixtures/type_checks.dart)。 |
 | 算术、位运算、移位、关系与短路 | 支持 int 的算术、按位运算和移位，以及 double、num 和混合数字的算术与大小比较。保留整数精度、NaN、无穷及负零。支持 bool 的逻辑运算、标量相等及 record 字段逐项相等。见[数字样本](../test/lowering/fixtures/numeric.dart)。 |
 | 条件表达式 `c ? a : b` | 按条件只计算一个分支，保留该分支的值、写入和异常。结果可为已支持的值类型或 void。见[条件样本](../test/lowering/fixtures/conditionals.dart)。 |
 | 赋值、复合赋值、增减、索引赋值 | 局部变量、参数、实例属性和用户定义的索引支持简单赋值、复合赋值及前后缀增减。接收者与索引仅求值一次，`??=` 只在读到 null 时求值右侧并写入。见[属性与索引样本](../test/lowering/fixtures/nominal/updates.dart)。 |

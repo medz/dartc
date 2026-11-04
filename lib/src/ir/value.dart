@@ -126,6 +126,133 @@ final class RecordConstant(RecordType type, Iterable<Constant> fields)
   }
 }
 
+/// An immutable core list or set, in iteration order.
+final class SequenceConstant(ClassType type, Iterable<Constant> elements)
+    extends Constant {
+  final List<Constant> elements = .unmodifiable(elements);
+
+  this : super(type) {
+    if (type.declaration != CoreTypes.list &&
+        type.declaration != CoreTypes.set) {
+      throw ArgumentError('Expected a core List or Set constant.');
+    }
+    type.validateTypeArguments();
+    for (final element in this.elements) {
+      if (!type.typeArguments.single.accepts(element.type)) {
+        throw ArgumentError('Incompatible constant element.');
+      }
+    }
+  }
+}
+
+/// An immutable core map whose entries retain insertion order.
+final class MapConstant(ClassType type, Iterable<(Constant, Constant)> entries)
+    extends Constant {
+  final List<(Constant, Constant)> entries = .unmodifiable(entries);
+
+  this : super(type) {
+    if (type.declaration != CoreTypes.map) {
+      throw ArgumentError('Expected a core Map constant.');
+    }
+    type.validateTypeArguments();
+    for (final (key, value) in this.entries) {
+      if (!type.typeArguments[0].accepts(key.type) ||
+          !type.typeArguments[1].accepts(value.type)) {
+        throw ArgumentError('Incompatible constant map entry.');
+      }
+    }
+  }
+}
+
+/// A fully initialized immutable instance, independent of its constructor site.
+final class ObjectConstant(ClassType type, Map<InstanceField, Constant> fields)
+    extends Constant {
+  final Map<InstanceField, Constant> fields = .unmodifiable(fields);
+
+  this : super(type) {
+    type.validateTypeArguments();
+    if (type.isAbstract) {
+      throw ArgumentError('Expected a concrete constant object type.');
+    }
+    for (final MapEntry(:key, :value) in this.fields.entries) {
+      if (!key.isFinal || !key.typeFor(type).accepts(value.type)) {
+        throw ArgumentError('Invalid immutable instance field.');
+      }
+    }
+  }
+}
+
+/// A structural identity key without executing Dart user equality or hashing.
+///
+/// Scalar representation, collection order, nominal field slots and complete
+/// function instantiations are retained. Constructor sites are not identities.
+Object constantKey(Constant value) => switch (value) {
+  ScalarConstant(:final type, :final value) => (
+    type,
+    value is double ? value.toString() : value,
+  ),
+  FunctionConstant() => _functionConstantKey(value),
+  RecordConstant(:final type, :final fields) => (
+    type,
+    fields.fold<Object?>(null, (tail, field) => (tail, constantKey(field))),
+  ),
+  SequenceConstant(:final type, :final elements) => (
+    type,
+    elements.fold<Object?>(
+      null,
+      (tail, element) => (tail, constantKey(element)),
+    ),
+  ),
+  MapConstant(:final type, :final entries) => (
+    type,
+    entries.fold<Object?>(
+      null,
+      (tail, entry) => (tail, constantKey(entry.$1), constantKey(entry.$2)),
+    ),
+  ),
+  ObjectConstant(:final type, :final fields) => (
+    type,
+    _orderedFields(fields).fold<Object?>(
+      null,
+      (tail, field) => (tail, field, constantKey(fields[field]!)),
+    ),
+  ),
+};
+
+Object _functionConstantKey(FunctionConstant value) {
+  final constructor =
+      value.target.kind == .initializer || value.target.kind == .factory;
+  final signature = value.type as FunctionType;
+  // Applying a constructor's owner and instantiating its generic tear-off
+  // denote the same runtime function. Proper aliases add no nominal identity.
+  final owner = constructor && signature.typeParameters.isEmpty
+      ? signature.result
+      : value.ownerType;
+  final arguments = constructor && value.constructorAlias == null
+      ? null
+      : value.typeArguments;
+  return (
+    value.target,
+    owner,
+    value.constructorAlias,
+    arguments?.fold<Object?>(null, (tail, type) => (tail, type)),
+  );
+}
+
+List<InstanceField> _orderedFields(Map<InstanceField, Constant> fields) =>
+    fields.keys.toList()..sort((a, b) {
+      final owner = a.owner.library.toString().compareTo(
+        b.owner.library.toString(),
+      );
+      if (owner != 0) return owner;
+      final name = a.owner.name.compareTo(b.owner.name);
+      if (name != 0) return name;
+      final field = a.name.compareTo(b.name);
+      return field != 0
+          ? field
+          : identityHashCode(a).compareTo(identityHashCode(b));
+    });
+
 /// A value supplied on entry to a block by the caller or an incoming jump.
 final class BlockParameter._(super.type) extends Value;
 
@@ -968,10 +1095,15 @@ final class CollectionAdd(final Value collection, final Value value)
   Iterable<Value> get inputs => [collection, value];
 }
 
-/// Spreads in order using Dart addAll semantics, including source callbacks.
-/// Runtime writes retain covariance checks and partial progress on failure.
-final class CollectionSpread(final Value collection, final Value source)
-    extends Instruction {
+/// Appends iterable elements or map entries in iteration order.
+/// Method calls check the source type first; literal spreads check each write.
+final class CollectionSpread(
+  final Value collection,
+  final Value source, {
+
+  /// Whether this is an `addAll` invocation with a checked argument type.
+  final bool isMethodCall = false,
+}) extends Instruction {
   this : super(.voidType) {
     final map = CoreTypes.view(collection.type, CoreTypes.map);
     final target =
@@ -1166,7 +1298,7 @@ Instruction? coreCollectionOperation(
     ),
     ('addAll', [final source])
         when list != null || set != null || map != null =>
-      CollectionSpread(receiver, source),
+      CollectionSpread(receiver, source, isMethodCall: true),
     _ => null,
   };
 }

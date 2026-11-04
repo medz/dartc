@@ -5,13 +5,13 @@
 | 特性 | 当前 IR 范围 |
 | --- | --- |
 | 显式类型、`var`、多变量声明 | 支持已表示类型的局部变量。非 late 可空可变变量缺省为 null；非空变量和 final 可在声明后首次赋值，由 analyzer 检查确定赋值。 |
-| 顶层、静态、实例和局部变量 | 局部变量、参数和顶层标量或 record const，其余存储待实现。 |
+| 顶层、静态、实例和局部变量 | 支持局部变量、参数、实例字段和顶层/静态 const；顶层及静态可变存储待实现。 |
 | 局部遮蔽、捕获、声明前引用 | 按 analyzer 绑定的声明区分同名局部变量，闭包可在外层函数返回后继续读写捕获的变量。声明前引用的静态错误由 analyzer 诊断。见[遮蔽与捕获样本](../test/lowering/fixtures/closures.dart)。 |
 | 通配变量 `_` | 支持局部声明、形参及模式中的通配变量；仍按顺序执行各个初始化表达式的副作用和异常。 |
 | 确定赋值与确定未赋值 | analyzer 检查非 late 局部变量的读取及 final 首次赋值；IR 保留分支、循环、异常路径与闭包共享的延后初始化存储。见[确定赋值样本](../test/lowering/fixtures/definite_assignment.dart)。 |
 | 局部 `final` 首次赋值 | 支持立即初始化和声明后的首次赋值，包括分支合流及闭包捕获。 |
 | 库级/字段 `final` 与隐式访问器 | 待实现。 |
-| `const` 与常量对象 | 顶层和局部 const 支持 int、bool、double、String、null 和含这些值的嵌套 record。类实例和集合常量待实现。 |
+| `const` 与常量对象 | 顶层、静态和局部 const 支持标量、record、List/Set/Map、普通用户类实例和函数值的嵌套组合；保留规范身份、实际泛型和不可变操作检查。特殊 SDK 对象、Symbol/Type 常量仍待实现。 |
 | `late`、`late final` | 待实现。 |
 | 库变量和静态字段惰性初始化 | 待实现。 |
 | 模式变量声明与赋值 | 支持用 record 模式声明局部变量、交换已有变量及在三段式 for 中解构。后续字段断言抛错时，catch 仍可读到目标变量的原值。见[解构](../test/lowering/fixtures/destructure.dart)和[失败赋值样本](../test/lowering/fixtures/exceptions.dart)。 |

@@ -7,68 +7,114 @@ final class FixtureRunner(
 ) {
   final bodies = {for (final f in program.functions) f.target: f};
 
-  final _staticFunctions =
-      <
-        (FunctionTarget, ClassType?, FunctionType?, (Uri, String)?),
-        _FunctionValue
-      >{};
+  final _staticFunctions = <Object, _FunctionValue>{};
+
+  final _constants = <Object, Object>{};
+
+  // Canonical keys describe IR data, never runtime user equality or hashCode.
+  Constant _resolvedConstant(
+    Constant value,
+    Map<TypeParameterType, ValueType> environment,
+  ) {
+    if (environment.isEmpty) return value;
+    ValueType resolve(ValueType type) => substituteType(type, environment);
+    Constant child(Constant value) => _resolvedConstant(value, environment);
+    return switch (value) {
+      ScalarConstant() => value,
+      FunctionConstant() => FunctionConstant(
+        value.target,
+        ownerType: value.ownerType == null
+            ? null
+            : resolve(value.ownerType!) as ClassType,
+        typeArguments: value.typeArguments?.map(resolve),
+        constructorSignature: value.constructorSignature == null
+            ? null
+            : resolve(value.constructorSignature!) as FunctionType,
+        constructorAlias: value.constructorAlias,
+      ),
+      RecordConstant(:final type, :final fields) => RecordConstant(
+        resolve(type) as RecordType,
+        fields.map(child),
+      ),
+      SequenceConstant(:final type, :final elements) => SequenceConstant(
+        resolve(type) as ClassType,
+        elements.map(child),
+      ),
+      MapConstant(:final type, :final entries) => MapConstant(
+        resolve(type) as ClassType,
+        entries.map((e) => (child(e.$1), child(e.$2))),
+      ),
+      ObjectConstant(:final type, :final fields) => ObjectConstant(
+        resolve(type) as ClassType,
+        {for (final e in fields.entries) e.key: child(e.value)},
+      ),
+    };
+  }
 
   Object? _constant(
     Constant value, [
     Map<TypeParameterType, ValueType> environment = const {},
-  ]) => switch (value) {
-    ScalarConstant(:final value) => value,
-    FunctionConstant(
-      :final target,
-      :final ownerType,
-      :final typeArguments,
-      :final constructorSignature,
-      :final constructorAlias,
-    ) =>
-      _staticFunctions.putIfAbsent(
-        (
-          target,
-          ownerType == null
-              ? null
-              : substituteType(ownerType, environment) as ClassType,
-          typeArguments == null
-              ? null
-              : FunctionType(
-                  .voidType,
-                  typeArguments.map(
-                    (type) => substituteType(type, environment),
-                  ),
-                ),
-          constructorAlias,
+  ]) {
+    value = _resolvedConstant(value, environment);
+    return switch (value) {
+      ScalarConstant(:final value) => value,
+      FunctionConstant(
+        :final target,
+        :final ownerType,
+        :final typeArguments,
+        :final constructorSignature,
+        :final constructorAlias,
+      ) =>
+        _staticFunctions.putIfAbsent(
+          constantKey(value),
+          () => _FunctionValue(
+            target,
+            null,
+            const [],
+            ownerType?.typeEnvironment ?? const {},
+            typeArguments?.toList(),
+            null,
+            // Proper raw aliases share the target's canonical runtime callable,
+            // even when their static bounds spell dynamic instead of Object?.
+            constructorAlias == null &&
+                    constructorSignature?.typeParameters.isNotEmpty == true
+                ? null
+                : constructorSignature,
+            constructorAlias,
+          ),
         ),
-        () => _FunctionValue(
-          target,
-          null,
-          const [],
-          ownerType == null
-              ? const {}
-              : (substituteType(
-                  ownerType,
-                  environment,
-                ) as ClassType).typeEnvironment,
-          typeArguments
-              ?.map((type) => substituteType(type, environment))
-              .toList(),
-          null,
-          // Proper raw aliases share the target's canonical runtime callable,
-          // even when their static bounds spell dynamic instead of Object?.
-          constructorAlias == null &&
-                  constructorSignature?.typeParameters.isNotEmpty == true
-              ? null
-              : constructorSignature,
-          constructorAlias,
+      RecordConstant(:final type, :final fields) => _constants.putIfAbsent(
+        constantKey(value),
+        () => _RecordValue(
+          type as RecordType,
+          fields.map((field) => _constant(field)).toList(),
         ),
       ),
-    RecordConstant(:final type, :final fields) => _RecordValue(
-      type as RecordType,
-      fields.map((field) => _constant(field, environment)).toList(),
-    ),
-  };
+      SequenceConstant(:final type, :final elements) => _constants.putIfAbsent(
+        constantKey(value),
+        () => _CollectionValue(
+          type as ClassType,
+          type.declaration == CoreTypes.set
+              ? elements.map((element) => _constant(element)).toSet()
+              : elements.map((element) => _constant(element)).toList(),
+          immutable: true,
+        ),
+      ),
+      MapConstant(:final type, :final entries) => _constants.putIfAbsent(
+        constantKey(value),
+        () => _CollectionValue(type as ClassType, {
+          for (final e in entries) _constant(e.$1): _constant(e.$2),
+        }, immutable: true),
+      ),
+      ObjectConstant(:final type, :final fields) => _constants.putIfAbsent(
+        constantKey(value),
+        () => _Instance(type as ClassType, this)
+          ..fields.addAll({
+            for (final e in fields.entries) e.key: _constant(e.value),
+          }),
+      ),
+    };
+  }
 
   Object? _enter(
     FunctionTarget target,
@@ -212,6 +258,7 @@ final class FixtureRunner(
     }
     if (collection is _CollectionValue) {
       _typeOperation(collection.type.typeArguments.single, value, cast: true);
+      collection.checkMutable();
       collection = collection.storage;
     }
     if (collection is Set<Object?>) return collection.add(value);
@@ -227,15 +274,32 @@ final class FixtureRunner(
     if (map is _CollectionValue) {
       _typeOperation(map.type.typeArguments[0], key, cast: true);
       _typeOperation(map.type.typeArguments[1], value, cast: true);
+      map.checkMutable();
       map = map.storage;
     }
     (map as Map<Object?, Object?>)[key] = value;
   }
 
-  void _spread(Object? collection, Object? source, bool isMap) {
+  void _spread(
+    Object? collection,
+    Object? source,
+    bool isMap,
+    bool isMethodCall,
+  ) {
     if (collection is _Instance) {
       _member(collection, 'addAll', .method, [source]);
       return;
+    }
+    if (collection is _CollectionValue && isMethodCall) {
+      final sourceType = isMap
+          ? CoreTypes.mapOf(
+              collection.type.typeArguments[0],
+              collection.type.typeArguments[1],
+            )
+          : CoreTypes.iterableOf(collection.type.typeArguments.single);
+      _typeOperation(sourceType, source, cast: true);
+      // The SDK rejects even empty addAll before acquiring the source iterator.
+      collection.checkMutable();
     }
     if (isMap) {
       if (source is _Instance) {
@@ -286,11 +350,16 @@ final class FixtureRunner(
           );
         case CollectionAdd(:final collection, :final value):
           values[op] = _add(read(collection), read(value));
-        case CollectionSpread(:final collection, :final source):
+        case CollectionSpread(
+          :final collection,
+          :final source,
+          :final isMethodCall,
+        ):
           _spread(
             read(collection),
             read(source),
             CoreTypes.view(collection.type, CoreTypes.map) != null,
+            isMethodCall,
           );
         case MapPut(:final map, :final key, :final value):
           _put(read(map), read(key), read(value));
@@ -362,6 +431,7 @@ final class FixtureRunner(
                 read(value),
                 cast: true,
               );
+              receiver.checkMutable();
             }
             final storage = receiver is _CollectionValue
                 ? receiver.storage
@@ -627,6 +697,7 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     ValueType.typeError => scalar<TypeError>(),
     ValueType.assertionError => scalar<AssertionError>(),
     ValueType.stateError => scalar<StateError>(),
+    ValueType.unsupportedError => scalar<UnsupportedError>(),
     ValueType.stackTrace => scalar<StackTrace>(),
     ValueType.never => run<Never>(),
     ValueType.voidType => cast ? value : true,
@@ -814,7 +885,17 @@ final class _RecordValue(final RecordType type, final List<Object?> fields) {
   }
 }
 
-final class _CollectionValue(final ClassType type, final Object storage) {
+final class _CollectionValue(
+  final ClassType type,
+  final Object storage, {
+  final bool immutable = false,
+}) {
+  void checkMutable() {
+    if (immutable) {
+      throw UnsupportedError('Cannot modify a constant collection');
+    }
+  }
+
   @override
   String toString() => storage.toString();
 }

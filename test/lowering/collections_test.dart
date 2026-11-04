@@ -105,10 +105,24 @@ void main() {
       );
     }
   });
+  for (final (file, type) in [
+    ('collection_const_list.dart', CoreTypes.listOf(ValueType.integer)),
+    ('collection_const_set.dart', CoreTypes.setOf(ValueType.integer)),
+    (
+      'collection_const_map.dart',
+      CoreTypes.mapOf(ValueType.integer, ValueType.integer),
+    ),
+  ]) {
+    test('retains a typed constant in $file', () async {
+      final program = await CheckedLibraries.read([
+        'test/lowering/fixtures/$file',
+      ], Lowering.lower);
+      final result = (program.functions.single.entry.end as Return).value;
+      expect(result, anyOf(isA<SequenceConstant>(), isA<MapConstant>()));
+      expect(result!.type, type);
+    });
+  }
   for (final (file, diagnostic) in [
-    ('collection_const_list.dart', 'constant collection'),
-    ('collection_const_set.dart', 'constant collection'),
-    ('collection_const_map.dart', 'constant collection'),
     ('collection_async_element.dart', 'async or generator bodies'),
     ('collection_await_for.dart', 'async or generator bodies'),
   ]) {

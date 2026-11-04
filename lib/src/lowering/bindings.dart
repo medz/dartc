@@ -15,6 +15,7 @@ final class Bindings({final bool enableAssertions = false}) {
   final _boundParameters = <TypeParameterElement>{};
   final _fields = <FieldElement, InstanceField>{};
   final _defaults = <FunctionTarget, Map<int, Constant>>{};
+  final _constantAliases = <LibraryElement, List<TypeAliasElement>>{};
 
   /// Returns the shared signature and constructor binding for [element].
   FunctionTarget target(
@@ -176,7 +177,11 @@ final class Bindings({final bool enableAssertions = false}) {
         final functionType = value.type! as dart.FunctionType;
         final arguments = constantFunctionArguments(value);
         if (executable is ConstructorElement) {
-          final alias = _constantConstructorAlias(value, syntax);
+          final alias = _constantConstructorAlias(
+            value,
+            syntax,
+            unit.libraryElement,
+          );
           if (alias != null) {
             final signature = constructorAliasSignature(
               alias,
@@ -211,6 +216,26 @@ final class Bindings({final bool enableAssertions = false}) {
           typeArguments: arguments?.map((t) => valueType(t, unit, site)),
         );
       }
+      if (value.toListValue() ?? value.toSetValue()?.toList()
+          case final elements?) {
+        return SequenceConstant(
+          valueType(value.type!, unit, site) as ClassType,
+          elements.map(
+            (element) => _constantValue(element, syntax, unit, site),
+          ),
+        );
+      }
+      if (value.toMapValue() case final entries?) {
+        return MapConstant(
+          valueType(value.type!, unit, site) as ClassType,
+          entries.entries.map(
+            (entry) => (
+              _constantValue(entry.key, syntax, unit, site),
+              _constantValue(entry.value, syntax, unit, site),
+            ),
+          ),
+        );
+      }
       if (value.toRecordValue() case final record?) {
         final type = valueType(value.type!, unit, site);
         if (type is RecordType) {
@@ -236,6 +261,55 @@ final class Bindings({final bool enableAssertions = false}) {
               ),
           ]);
         }
+      }
+      if (value.type case final dart.InterfaceType objectType) {
+        final fields = <InstanceField, Constant>{};
+        DartObject? layer = value;
+        while (layer != null) {
+          final layerType = layer.type;
+          if (layerType is! dart.InterfaceType) {
+            unsupported(unit, site, 'constant instance storage');
+          }
+          final element = layerType.element;
+          if (element is! ClassElement ||
+              element.mixins.isNotEmpty ||
+              element.library.isInSdk && !layerType.isDartCoreObject ||
+              !layer.hasKnownValue) {
+            unsupported(unit, site, 'constant ${layer.type}');
+          }
+          for (final declaration in element.fields) {
+            if (declaration.isStatic ||
+                declaration.isAbstract ||
+                declaration.isOriginGetterSetter) {
+              continue;
+            }
+            if (!declaration.isFinal ||
+                declaration.isLate ||
+                declaration.isExternal) {
+              unsupported(
+                unit,
+                site,
+                'constant field ${declaration.displayName}',
+              );
+            }
+            fields[field(declaration, unit, site)] = _constantValue(
+              layer.getField(declaration.name!),
+              declaration.constantInitializer ?? syntax,
+              unit,
+              site,
+            );
+          }
+          if (layerType.isDartCoreObject) break;
+          final parent = constantSuperclass(layer);
+          if (parent == null && element.supertype?.isDartCoreObject != true) {
+            unsupported(unit, site, 'constant superclass storage');
+          }
+          layer = parent;
+        }
+        return ObjectConstant(
+          valueType(objectType, unit, site) as ClassType,
+          fields,
+        );
       }
     }
     unsupported(unit, site, 'constant ${value?.type}');
@@ -267,6 +341,7 @@ final class Bindings({final bool enableAssertions = false}) {
   TypeAliasElement? _constantConstructorAlias(
     DartObject value,
     ast.Expression? syntax,
+    LibraryElement library,
   ) {
     final aliases = <TypeAliasElement>{};
     final visited = <VariableElement>{};
@@ -292,6 +367,32 @@ final class Bindings({final bool enableAssertions = false}) {
     scan(value.variable?.constantInitializer);
     for (final alias in aliases) {
       if (constantFunctionUsesAlias(value, alias)) return alias;
+    }
+    // A nested value can originate in a constructor default or initializer,
+    // with no alias syntax at this use. Match the analyzer's retained identity
+    // against reachable declarations rather than guessing from the function type.
+    if (constantFunctionHasAlias(value)) {
+      final candidates = _constantAliases.putIfAbsent(library, () {
+        final libraries = <LibraryElement>{};
+        final result = <TypeAliasElement>[];
+        void collect(LibraryElement current) {
+          if (!libraries.add(current)) return;
+          result.addAll(current.typeAliases);
+          for (final dependency in [
+            ...current.exportedLibraries,
+            for (final fragment in current.fragments)
+              ...fragment.importedLibraries,
+          ]) {
+            if (!dependency.isInSdk) collect(dependency);
+          }
+        }
+
+        collect(library);
+        return result;
+      });
+      for (final alias in candidates) {
+        if (constantFunctionUsesAlias(value, alias)) return alias;
+      }
     }
     return null;
   }
@@ -417,6 +518,7 @@ final class Bindings({final bool enableAssertions = false}) {
         'Error' => ValueType.error,
         'TypeError' => ValueType.typeError,
         'StateError' => ValueType.stateError,
+        'UnsupportedError' => ValueType.unsupportedError,
         'AssertionError' => ValueType.assertionError,
         'StackTrace' => ValueType.stackTrace,
         'num' => ValueType.number,

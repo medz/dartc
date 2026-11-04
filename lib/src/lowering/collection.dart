@@ -6,14 +6,18 @@ import 'function_context.dart';
 import 'iteration.dart';
 import 'pattern.dart';
 
-/// Evaluates a collection literal in source order using mutable core storage.
+/// Converts a constant literal or evaluates mutable elements in source order.
 Value? lowerCollection(
   FunctionContext context,
   ast.TypedLiteral literal,
   Value? Function(ast.Expression) evaluate,
 ) {
   if (literal.isConst) {
-    unsupported(context.unit, literal, 'constant collection');
+    return context.bindings.constantValue(
+      literal.computeConstantValue()?.value,
+      context.unit,
+      literal,
+    );
   }
   final type = context.typeOf(literal.staticType!, literal) as ClassType;
   final result = context.emit(NewCollection(type));

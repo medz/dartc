@@ -40,6 +40,12 @@ void writeFunction(
       'tearoff ${constructorAlias == null ? symbol(target, ownerType) : "${constructorAlias.$1}::${constructorAlias.$2}.${target.name}"}${typeArgs(typeArguments ?? const [])}${constructorSignature == null ? "" : " as ${constructorSignature.dartName}"}',
     RecordConstant(:final type, :final fields) =>
       'const ${type.dartName}[${fields.map(value).join(', ')}]',
+    SequenceConstant(:final type, :final elements) =>
+      'const ${type.dartName}[${elements.map(value).join(', ')}]',
+    MapConstant(:final type, :final entries) =>
+      'const ${type.dartName}{${entries.map((e) => '${value(e.$1)}: ${value(e.$2)}').join(', ')}}',
+    ObjectConstant(:final type, :final fields) =>
+      'const ${type.dartName}{${fields.entries.map((e) => '${e.key.owner.library}::${e.key.owner.dartName}.${e.key.name}: ${value(e.value)}').join(', ')}}',
     TestedValue(:final test, :final type) =>
       '${value(test.operand)} as ${type.dartName}',
     UnwindValue() => v == UnwindValue.exception ? 'exception' : 'stackTrace',
@@ -64,7 +70,7 @@ void writeFunction(
     CollectionAdd() =>
       'collectionAdd ${value(op.collection)}, ${value(op.value)}',
     CollectionSpread() =>
-      'collectionSpread ${value(op.collection)}, ${value(op.source)}',
+      '${op.isMethodCall ? 'collectionAddAll' : 'collectionSpread'} ${value(op.collection)}, ${value(op.source)}',
     MapPut() => 'mapPut ${value(op.map)}, ${value(op.key)}, ${value(op.value)}',
     GetIterator() => 'iterator ${value(op.iterable)}',
     IteratorMoveNext() => 'moveNext ${value(op.iterator)}',

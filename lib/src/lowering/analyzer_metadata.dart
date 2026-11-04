@@ -4,7 +4,7 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 
 // The public analyzer API omits function-constant arguments/alias identity and
-// pattern context schemas. Keep these analyzer 14.7 metadata reads isolated
+// pattern context schemas and superclass storage. Keep these analyzer 14.7 reads isolated
 // instead of reconstructing inference or identity from lossy public types.
 // ignore: implementation_imports
 import 'package:analyzer/src/dart/ast/ast.dart' as internal;
@@ -35,12 +35,17 @@ bool constantFunctionUsesAlias(DartObject value, TypeAliasElement alias) {
     throw UnsupportedError('Analyzer constructor alias metadata unavailable.');
   }
   final state = value.state as internal.FunctionState;
-  return state ==
-      internal.FunctionState(
-        state.element,
-        typeArguments: state.typeArguments,
-        viaTypeAlias: alias,
-      );
+  return state
+          .isIdentical(
+            state.element.library.typeSystem,
+            internal.FunctionState(
+              state.element,
+              typeArguments: state.typeArguments,
+              viaTypeAlias: alias,
+            ),
+          )
+          .value ==
+      true;
 }
 
 /// Whether a function constant retains a distinct constructor alias identity.
@@ -50,8 +55,16 @@ bool constantFunctionHasAlias(DartObject value) {
     throw UnsupportedError('Analyzer constructor alias metadata unavailable.');
   }
   final state = value.state as internal.FunctionState;
-  return state !=
-      internal.FunctionState(state.element, typeArguments: state.typeArguments);
+  return state
+          .isIdentical(
+            state.element.library.typeSystem,
+            internal.FunctionState(
+              state.element,
+              typeArguments: state.typeArguments,
+            ),
+          )
+          .value ==
+      false;
 }
 
 /// The contextual type applied to a declaration/assignment's RHS expression.
@@ -73,3 +86,7 @@ DartType? patternContextType(ast.DartPattern pattern) {
           schema: schema,
         );
 }
+
+/// Reads the analyzer's separate storage layer for inherited instance fields.
+DartObject? constantSuperclass(DartObject value) =>
+    value.getField(internal.GenericState.SUPERCLASS_FIELD);

@@ -144,7 +144,7 @@ final class PatternCache {
         case ast.MapPattern(:final elements):
           for (final element in elements) {
             if (element is! ast.MapPatternEntry) continue;
-            final key = _constantKey(constant(element.key));
+            final key = constantKey(constant(element.key));
             final lookup = (path, '[]', key);
             final contains = (path, 'containsKey', key);
             counts.update(lookup, (count) => count + 1, ifAbsent: () => 1);
@@ -195,7 +195,7 @@ final class PatternCache {
       (
         path,
         operator == '!=' ? '==' : operator,
-        _constantKey(constant(operand)),
+        constantKey(constant(operand)),
       );
 
   Value? read(Object key, Value? Function() extract) {
@@ -217,31 +217,6 @@ final class PatternCache {
   }
 }
 
-Object _constantKey(Constant value) => switch (value) {
-  ScalarConstant(:final type, :final value) => (
-    type,
-    value is double ? value.toString() : value,
-  ),
-  FunctionConstant(
-    :final target,
-    :final ownerType,
-    :final typeArguments,
-    :final constructorSignature,
-    :final constructorAlias,
-  ) =>
-    (
-      target,
-      ownerType,
-      constructorSignature,
-      constructorAlias,
-      typeArguments?.fold<Object?>(null, (tail, type) => (tail, type)),
-    ),
-  RecordConstant(:final type, :final fields) => (
-    type,
-    fields.fold<Object?>(null, (tail, field) => (tail, _constantKey(field))),
-  ),
-};
-
 Object _fieldPath(Object parent, ast.PatternField field) {
   final member = field.element;
   final name = field.effectiveName!;
@@ -258,7 +233,7 @@ Object _listPath(Object parent, int index, int rest, int length) {
   // Tail positions are distinct from head indices, even if their runtime
   // numeric indices happen to coincide.
   if (rest >= 0 && index > rest) return (parent, 'tail[]', length - index - 1);
-  return (parent, '[]', _constantKey(Constant.integer(index)));
+  return (parent, '[]', constantKey(Constant.integer(index)));
 }
 
 bool _isDiscard(ast.DartPattern pattern) =>
@@ -579,7 +554,7 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
         unsupported(context.unit, element, 'map pattern element');
       }
       final constant = cache.constant(element.key);
-      final key = _constantKey(constant);
+      final key = constantKey(constant);
       final lookup = (path, '[]', key);
       final item = _cached(
         lookup,

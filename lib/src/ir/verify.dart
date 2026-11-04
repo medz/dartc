@@ -40,10 +40,17 @@ Set<FunctionTarget> verifyFunction(
         checkTypeScope(type);
       }
     }
-    if (value case RecordConstant(:final fields)) {
-      for (final field in fields) {
-        constant(field);
-      }
+    final children = switch (value) {
+      RecordConstant(:final fields) => fields,
+      SequenceConstant(:final elements) => elements,
+      MapConstant(:final entries) => entries.expand(
+        (entry) => [entry.$1, entry.$2],
+      ),
+      ObjectConstant(:final fields) => fields.values,
+      _ => const <Constant>[],
+    };
+    for (final child in children) {
+      constant(child);
     }
   }
 

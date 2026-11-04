@@ -47,6 +47,13 @@ sealed class const ValueType() {
     false,
   );
 
+  /// The error raised by an operation unsupported by an immutable value.
+  static const ClassType unsupportedError = ClassType._core(
+    'UnsupportedError',
+    error,
+    false,
+  );
+
   /// The error raised by an enabled failed assertion.
   static const ClassType assertionError = ClassType._core(
     'AssertionError',

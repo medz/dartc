@@ -615,7 +615,6 @@ void main() {
     ('index_update.dart', 3),
     ('lazy.dart', 2),
     ('deferred_constant.dart', 3),
-    ('object_default.dart', 1),
     ('extension_operator.dart', 1),
   ]) {
     test('reports the unsupported operation in $file at its source', () async {
@@ -631,6 +630,13 @@ void main() {
       );
     });
   }
+
+  test('void parameters retain constant collection defaults', () async {
+    final program = await _lower(['object_default.dart']);
+    final value = program.functions.single.defaults[0];
+    expect(value, isA<SequenceConstant>());
+    expect(value!.type, CoreTypes.listOf(ValueType.integer));
+  });
 
   test('an unused invalid declaration in a part prevents lowering', () async {
     await expectLater(
