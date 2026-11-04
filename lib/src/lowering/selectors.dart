@@ -285,6 +285,20 @@ final class SelectorChain(
         member.isStatic) {
       unsupported(context.unit, node, 'member $name');
     }
+    if (member.library.uri.toString() == 'dart:core' &&
+        (member is GetterElement || arguments != null)) {
+      final args = evaluateArguments(arguments, evaluate);
+      if (args == null) return null;
+      if (args.named.isEmpty) {
+        final operation = coreCollectionOperation(
+          member.name!,
+          known,
+          args.positional,
+        );
+        if (operation != null) return context.normal(context.emit(operation));
+      }
+      unsupported(context.unit, node, 'core collection member $name');
+    }
     final target = context.bindings.target(member, context.unit, node);
     if (member is MethodElement && arguments == null) {
       return context.emit(BindMethod(target, known, direct: direct));
@@ -314,7 +328,13 @@ final class SelectorChain(
     if (args == null) return null;
     return result(
       direct
-          ? DirectCall(target, [known, ...context.bindings.bind(target, args)])
+          ? DirectCall(
+              target,
+              [known, ...context.bindings.bind(target, args)],
+              ownerType: (known.type.nonNullable as ClassType).asInstanceOf(
+                target.owner!,
+              ),
+            )
           : InstanceCall(target, known, args.positional, args.named),
     );
   }

@@ -139,6 +139,16 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
   }
 
   @override
+  void visitForEachPartsWithIdentifier(ast.ForEachPartsWithIdentifier node) {
+    final element = node.identifier.element;
+    if (element is VariableElement) {
+      _written.add(element);
+      _use(element);
+    }
+    super.visitForEachPartsWithIdentifier(node);
+  }
+
+  @override
   void visitAssignedVariablePattern(ast.AssignedVariablePattern node) {
     if (node.element case final VariableElement variable) {
       _written.add(variable);

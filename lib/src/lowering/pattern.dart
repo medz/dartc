@@ -185,7 +185,9 @@ String _fieldPath(String parent, ast.PatternField field) {
 
 final class _Matcher(final FunctionContext context, final PatternCache cache) {
   Value? _require(Value value, ValueType type, JumpTarget? failure) {
-    if (type.accepts(value.type)) return context.normal(value);
+    if (type.accepts(value.type)) {
+      return context.normal(context.cast(value, type));
+    }
     if (failure != null) {
       context.guard(context.testType(value, type), failure);
       if (context.current == null) return null;
@@ -251,9 +253,18 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
           }
           final item = context.normal(readRecordField(context, record, slot));
           if (item == null) return;
+          // The shape check uses Object? slots. Restore the analyzer's static
+          // field type before lowering nested operators or binding variables.
+          final checked = context.normal(
+            context.cast(
+              item,
+              context.typeOf(field.pattern.matchedValueType!, field),
+            ),
+          );
+          if (checked == null) return;
           match(
             field.pattern,
-            item,
+            checked,
             failure,
             bindings,
             '$path/${field.name == null ? '\$${slot + 1}' : field.effectiveName}',

@@ -25,9 +25,28 @@ export 'src/ir/program.dart' show IrClass, IrProgram;
 export 'src/ir/signature.dart'
     show FunctionKind, FunctionTarget, InstanceField, MemberSelector;
 export 'src/ir/type.dart'
-    show CellType, ClassType, FunctionType, RecordType, ValueType;
+    show
+        CellType,
+        ClassType,
+        FunctionType,
+        RecordType,
+        ValueType,
+        TypeParameterType,
+        NonNullableTypeParameterType,
+        substituteType;
 export 'src/ir/value.dart'
     show
+        CollectionLength,
+        CollectionGet,
+        ListSet,
+        coreCollectionOperation,
+        NewCollection,
+        CollectionAdd,
+        CollectionSpread,
+        MapPut,
+        GetIterator,
+        IteratorMoveNext,
+        IteratorCurrent,
         AssertionFailure,
         BindMethod,
         BlockParameter,
@@ -59,7 +78,10 @@ export 'src/ir/value.dart'
         StoreField,
         TestedValue,
         TypeCast,
+        TypeView,
         TypeTest,
         UnwindValue,
         WriteCell,
         Value;
+
+export 'src/ir/core_types.dart' show CoreTypes;

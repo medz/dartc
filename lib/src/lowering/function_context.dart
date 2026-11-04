@@ -40,11 +40,20 @@ final class FunctionContext(
         member.enclosingElement is! ClassElement) {
       unsupported(unit, site, 'instance member binding');
     }
+    if (member.library.uri.toString() == 'dart:core') {
+      final operation = coreCollectionOperation(member.name!, receiver, args);
+      if (operation != null) return normal(emit(operation));
+    }
     final target = bindings.target(member, unit, site);
     return normal(
       emit(
         direct
-            ? DirectCall(target, [receiver, ...args])
+            ? DirectCall(
+                target,
+                [receiver, ...args],
+                ownerType: (receiver.type.nonNullable as ClassType)
+                    .asInstanceOf(target.owner!),
+              )
             : InstanceCall(target, receiver, args),
       ),
     );
@@ -222,7 +231,7 @@ final class FunctionContext(
   /// Checks [value] once and retains the non-null result on this path.
   Value checkNotNull(Value value) {
     final known = refined(value);
-    if (!known.type.accepts(.nullType)) return known;
+    if (!known.type.mayBeNull) return known;
     final checked = emit(NullCheck(known));
     _facts = _Refinement(value, checked, _facts);
     return checked;
@@ -230,9 +239,13 @@ final class FunctionContext(
 
   /// Checks [value] against [type] if its current binding does not establish the type.
   Value cast(Value value, ValueType type) {
-    if (type.accepts(value.type)) return value;
+    if (type.accepts(value.type)) {
+      return type == value.type ? value : current!.emit(TypeView(value, type));
+    }
     final known = refined(value);
-    if (type.accepts(known.type)) return known;
+    if (type.accepts(known.type)) {
+      return type == known.type ? known : current!.emit(TypeView(known, type));
+    }
     final cast = emit(TypeCast(known, type));
     if (known.type.accepts(type)) _facts = _Refinement(known, cast, _facts);
     return cast;
@@ -244,7 +257,7 @@ final class FunctionContext(
     if (type.accepts(known.type)) return Constant.boolean(!negated);
     if (type == .never ||
         known.type == .nullType ||
-        (type == .nullType && !known.type.accepts(.nullType))) {
+        (type == .nullType && !known.type.mayBeNull)) {
       return Constant.boolean(negated);
     }
     return current!.emit(TypeTest(known, type, negated: negated));
@@ -351,7 +364,7 @@ final class FunctionContext(
   Value? ifNull(Value left, ValueType resultType, Value? Function() fallback) {
     final known = refined(left);
     if (known.type == .nullType) return fallback();
-    if (!known.type.accepts(.nullType)) return known;
+    if (!known.type.mayBeNull) return known;
     final test = current!.emit(TypeTest(known, .nullType));
     return shortCircuit(
       test,

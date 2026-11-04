@@ -6,6 +6,24 @@ import 'value.dart';
 /// Checks control flow, argument and return types, and SSA definition dominance.
 Set<FunctionTarget> verifyFunction(FunctionTarget target, List<Block> blocks) {
   Set<FunctionTarget>? closures;
+  final scope = <TypeParameterType>{};
+  for (
+    FunctionTarget? lexical = target;
+    lexical != null;
+    lexical = lexical.enclosing
+  ) {
+    scope.addAll(lexical.owner?.typeParameters ?? const []);
+  }
+  void checkTypeScope(ValueType type) {
+    if (typeParametersIn(type).any((parameter) => !scope.contains(parameter))) {
+      throw StateError('Type parameter used outside its lexical scope.');
+    }
+  }
+
+  checkTypeScope(target.signature);
+  for (final capture in target.captures) {
+    checkTypeScope(capture);
+  }
   if (blocks.isEmpty) throw StateError('Function has no entry.');
   final entry = blocks.first;
   if (target.parameterTypes.length != entry.parameters.length ||
@@ -23,6 +41,7 @@ Set<FunctionTarget> verifyFunction(FunctionTarget target, List<Block> blocks) {
   final definitions = <Value, (Block, int)>{};
   for (final block in blocks) {
     void define(Value value, int position) {
+      checkTypeScope(value.type);
       if (definitions.containsKey(value)) {
         throw StateError('Repeated SSA definition.');
       }
@@ -97,6 +116,14 @@ Set<FunctionTarget> verifyFunction(FunctionTarget target, List<Block> blocks) {
     }
 
     void checkOperation(Instruction op, int position) {
+      checkTypeScope(op.type);
+      if (op case TypeTest(:final testedType)) checkTypeScope(testedType);
+      if (op
+          case DirectCall(:final ownerType?) ||
+              InstanceCall(:final ownerType?) ||
+              BindMethod(:final ownerType?)) {
+        checkTypeScope(ownerType);
+      }
       switch (op) {
         case MakeClosure(target: final child):
           if (child.enclosing != target) {
@@ -116,7 +143,7 @@ Set<FunctionTarget> verifyFunction(FunctionTarget target, List<Block> blocks) {
           if (target.kind != .initializer ||
               inputs.first != entry.parameters.first ||
               (callee.owner != target.owner &&
-                  callee.owner != target.owner!.superclass)) {
+                  callee.owner != target.owner!.superclass?.declaration)) {
             throw StateError(
               'An initializer can only delegate on its own receiver.',
             );
@@ -125,6 +152,7 @@ Set<FunctionTarget> verifyFunction(FunctionTarget target, List<Block> blocks) {
           break;
       }
       for (final input in op.inputs) {
+        checkTypeScope(input.type);
         if (input.type is CellType &&
             op is! ReadCell &&
             op is! CopyCell &&
@@ -147,7 +175,9 @@ Set<FunctionTarget> verifyFunction(FunctionTarget target, List<Block> blocks) {
     switch (end) {
       case Return(:final value):
         if (!target.returnType.accepts(value?.type ?? .nullType)) {
-          throw StateError('Return type does not match the function.');
+          throw StateError(
+            'Return type ${value?.type.dartName} does not match ${target.returnType.dartName} in ${target.owner?.dartName}.${target.name}.',
+          );
         }
         if (value != null) use(value, count);
       case Throw(:final exception, :final stackTrace, :final onThrow):

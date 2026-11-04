@@ -152,7 +152,16 @@ void _initialize(
       },
     );
     if (args != null && !target.enclosingElement.thisType.isDartCoreObject) {
-      context.emit(DirectCall(init, [receiver, ...bindings.bind(init, args)]));
+      context.emit(
+        DirectCall(
+          init,
+          [receiver, ...bindings.bind(init, args)],
+          ownerType: context.typeOf(
+            target.returnType,
+            arguments ?? declaration,
+          ) as ClassType,
+        ),
+      );
     }
   }
 

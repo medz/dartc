@@ -1,3 +1,4 @@
+import 'core_types.dart';
 import 'signature.dart';
 import 'type.dart';
 
@@ -31,9 +32,14 @@ sealed class const Constant(super.type) extends Value {
 /// A canonical tear-off of a top-level function, static method or constructor.
 final class FunctionConstant(
   /// The referenced declaration, including the source factory for a redirect.
-  final FunctionTarget target,
-) extends Constant {
-  this : super(target.signature) {
+  final FunctionTarget target, {
+  final ClassType? ownerType,
+}) extends Constant {
+  this
+    : super(
+        ownerType == null ? target.signature : target.signatureFor(ownerType),
+      ) {
+    ownerType?.validateTypeArguments();
     if (target.kind == .closure ||
         target.kind.isVirtual ||
         target.kind == .initializer && target.owner!.isAbstract) {
@@ -89,6 +95,16 @@ sealed class Instruction(super.type) extends Value {
 
   /// Whether evaluation can transfer control to a Dart exception handler.
   bool get mayThrow => switch (this) {
+    CollectionLength() ||
+    CollectionGet() ||
+    ListSet() ||
+    NewCollection() ||
+    CollectionAdd() ||
+    CollectionSpread() ||
+    MapPut() ||
+    GetIterator() ||
+    IteratorMoveNext() ||
+    IteratorCurrent() ||
     AssertionFailure() ||
     DirectCall() ||
     InstanceCall() ||
@@ -110,6 +126,7 @@ sealed class Instruction(super.type) extends Value {
     ReadCell() ||
     WriteCell() ||
     TypeTest() ||
+    TypeView() ||
     RecordGet() ||
     StoreField() ||
     LoadField() => false,
@@ -224,12 +241,17 @@ final class BindMethod(
 
   /// Whether `super` has already selected the implementation.
   final bool direct = false,
+  final ClassType? ownerType,
 }) extends Instruction {
-  this : super(method.signature) {
+  this
+    : super(method.signatureFor(ownerType ?? _classReceiver(receiver.type))) {
     if (method.kind != .method ||
-        !method.owner!.accepts(receiver.type) ||
+        _classReceiver(receiver.type).asInstanceOf(method.owner!) == null ||
         direct && method.isAbstract) {
       throw ArgumentError('Invalid method tear-off.');
+    }
+    if (ownerType != null && !ownerType!.accepts(receiver.type)) {
+      throw ArgumentError('Static method view cannot accept the receiver.');
     }
   }
   @override
@@ -280,8 +302,8 @@ final class LoadField(
   /// The object containing the slot.
   final Value receiver,
 ) extends Instruction {
-  this : super(field.type) {
-    if (!field.owner.accepts(receiver.type)) {
+  this : super(field.typeFor(_classReceiver(receiver.type))) {
+    if (_classReceiver(receiver.type).asInstanceOf(field.owner) == null) {
       throw ArgumentError('Incompatible field receiver.');
     }
   }
@@ -301,17 +323,29 @@ final class InstanceCall(
   final Value receiver,
   Iterable<Value> positional, [
   Map<String, Value> named = const {},
+  final ClassType? ownerType,
 ]) extends Instruction {
   /// Explicit positional arguments.
   final List<Value> positional = .unmodifiable(positional);
 
   /// Explicit named arguments, in their source order.
   final Map<String, Value> named = .unmodifiable(named);
-  this : super(member.returnType) {
-    if (!member.kind.isVirtual || !member.owner!.accepts(receiver.type)) {
+  this
+    : super(
+        member.signatureFor(ownerType ?? _classReceiver(receiver.type)).result,
+      ) {
+    if (!member.kind.isVirtual ||
+        _classReceiver(receiver.type).asInstanceOf(member.owner!) == null) {
       throw ArgumentError('Incompatible dispatch receiver.');
     }
-    _checkCall(member.signature, this.positional, this.named);
+    if (ownerType != null && !ownerType!.accepts(receiver.type)) {
+      throw ArgumentError('Static member view cannot accept the receiver.');
+    }
+    _checkCall(
+      member.signatureFor(ownerType ?? _classReceiver(receiver.type)),
+      this.positional,
+      this.named,
+    );
   }
 
   @override
@@ -328,19 +362,30 @@ final class InstanceCall(
 final class Construct(
   /// The generative constructor of the allocated class.
   final FunctionTarget initializer,
-  Iterable<Value> arguments,
-) extends Instruction {
+  Iterable<Value> arguments, {
+  ClassType? instantiatedType,
+}) extends Instruction {
+  final ClassType instantiatedType = instantiatedType ?? initializer.owner!;
   @override
   final List<Value> inputs = .unmodifiable(arguments);
 
   this
     : super(
-        initializer.owner ?? (throw ArgumentError('Expected a constructor.')),
+        instantiatedType ??
+            initializer.owner ??
+            (throw ArgumentError('Expected a constructor.')),
       ) {
     if (initializer.kind != .initializer || initializer.owner!.isAbstract) {
       throw ArgumentError('Expected a concrete generative constructor.');
     }
-    checkArguments(initializer.parameterTypes.skip(1), inputs);
+    if (this.instantiatedType.declaration != initializer.owner!.declaration) {
+      throw ArgumentError('Constructor belongs to a different class.');
+    }
+    this.instantiatedType.validateTypeArguments();
+    checkArguments(
+      initializer.signatureFor(this.instantiatedType).parameters,
+      inputs,
+    );
   }
 }
 
@@ -356,8 +401,8 @@ final class StoreField(
   final Value value,
 ) extends Instruction {
   this : super(.voidType) {
-    if (!field.owner.accepts(receiver.type) ||
-        !field.type.accepts(value.type)) {
+    if (_classReceiver(receiver.type).asInstanceOf(field.owner) == null ||
+        !field.typeFor(_classReceiver(receiver.type)).accepts(value.type)) {
       throw ArgumentError('Incompatible instance field write.');
     }
   }
@@ -423,9 +468,7 @@ final class TypeTest(
       if (testedType.accepts(source.nonNullable)) {
         narrowed = source.nonNullable;
       } else {
-        narrowed = source.accepts(.nullType)
-            ? testedType
-            : testedType.nonNullable;
+        narrowed = source.mayBeNull ? testedType : testedType.nonNullable;
       }
     } else if (testedType.accepts(.nullType)) {
       narrowed = source.nonNullable;
@@ -453,6 +496,19 @@ final class TestedValue._(
   final bool outcome,
   super.type,
 ) extends Value;
+
+/// A statically justified upcast retaining the same runtime object and type arguments.
+final class TypeView(final Value operand, super.type) extends Instruction {
+  this {
+    if (operand.type is CellType ||
+        type is CellType ||
+        !type.accepts(operand.type)) {
+      throw ArgumentError('A type view requires a valid Dart upcast.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [operand];
+}
 
 /// A Dart `as` cast that throws a type error if [operand] does not match [type].
 final class TypeCast(
@@ -596,8 +652,9 @@ final class IntBinary(
 final class DirectCall(
   /// The declaration selected during binding.
   final FunctionTarget target,
-  Iterable<Value> arguments,
-) extends Instruction {
+  Iterable<Value> arguments, {
+  final ClassType? ownerType,
+}) extends Instruction {
   /// The argument values in the target's parameter order.
   @override
   final List<Value> inputs = .unmodifiable(arguments);
@@ -605,7 +662,15 @@ final class DirectCall(
   /// Creates a call from the already evaluated [arguments].
   ///
   /// Throws [ArgumentError] for a wrong argument count or an incompatible type.
-  this : super(target.returnType) {
+  this
+    : super(
+        ownerType == null
+            ? target.returnType
+            : substituteType(
+                target.returnType,
+                target.environmentFor(ownerType),
+              ),
+      ) {
     if (target.kind == .closure) {
       throw ArgumentError('A lexical invocation requires its closure.');
     }
@@ -615,7 +680,14 @@ final class DirectCall(
     if (target.isAbstract) {
       throw ArgumentError('Cannot directly invoke an abstract member.');
     }
-    checkArguments(target.parameterTypes, inputs);
+    ownerType?.validateTypeArguments();
+    final environment = ownerType == null
+        ? const <TypeParameterType, ValueType>{}
+        : target.environmentFor(ownerType!);
+    checkArguments(
+      target.parameterTypes.map((t) => substituteType(t, environment)),
+      inputs,
+    );
   }
 }
 
@@ -749,4 +821,206 @@ final class StringConcat(
   }
   @override
   Iterable<Value> get inputs => [left, right];
+}
+
+ClassType _classReceiver(ValueType type) {
+  if (type is ClassType) return type;
+  if (type is TypeParameterType) return _classReceiver(type.bound);
+  if (type is NonNullableTypeParameterType) {
+    return _classReceiver(type.parameter.bound.nonNullable);
+  }
+  throw ArgumentError('Expected a non-nullable class receiver.');
+}
+
+/// Allocates a fresh mutable literal, retaining its reified type arguments.
+// ignore: use_super_parameters
+final class NewCollection(final ClassType collectionType) extends Instruction {
+  this : super(collectionType) {
+    if (![
+      CoreTypes.list,
+      CoreTypes.set,
+      CoreTypes.map,
+    ].contains(collectionType.declaration)) {
+      throw ArgumentError('Expected a core literal collection type.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
+/// Appends/inserts using the actual receiver's reified element type checks.
+final class CollectionAdd(final Value collection, final Value value)
+    extends Instruction {
+  this
+    : super(
+        CoreTypes.view(collection.type, CoreTypes.set) != null
+            ? .boolean
+            : .voidType,
+      ) {
+    final view =
+        CoreTypes.view(collection.type, CoreTypes.list) ??
+        CoreTypes.view(collection.type, CoreTypes.set);
+    if (view == null || value.type is CellType) {
+      throw ArgumentError('Invalid collection insertion.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [collection, value];
+}
+
+/// Spreads in order using Dart addAll semantics, including source callbacks.
+/// Runtime writes retain covariance checks and partial progress on failure.
+final class CollectionSpread(final Value collection, final Value source)
+    extends Instruction {
+  this : super(.voidType) {
+    final map = CoreTypes.view(collection.type, CoreTypes.map);
+    final target =
+        map ??
+        CoreTypes.view(collection.type, CoreTypes.list) ??
+        CoreTypes.view(collection.type, CoreTypes.set);
+    final input = CoreTypes.view(
+      source.type,
+      map == null ? CoreTypes.iterable : CoreTypes.map,
+    );
+    if (target == null || input == null) {
+      throw ArgumentError('Invalid spread operand.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [collection, source];
+}
+
+/// Assigns a map entry with runtime key/value checks and Dart key equality.
+final class MapPut(final Value map, final Value key, final Value value)
+    extends Instruction {
+  this : super(.voidType) {
+    final type = CoreTypes.view(map.type, CoreTypes.map);
+    if (type == null || key.type is CellType || value.type is CellType) {
+      throw ArgumentError('Invalid map insertion.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [map, key, value];
+}
+
+/// Reads the iterable's iterator getter exactly once through Dart dispatch.
+final class GetIterator(final Value iterable) extends Instruction {
+  this
+    : super(
+        CoreTypes.iteratorOf(_protocolElement(iterable, CoreTypes.iterable)),
+      );
+  @override
+  Iterable<Value> get inputs => [iterable];
+}
+
+/// Advances the iterator through Dart dispatch; mutation errors propagate.
+final class IteratorMoveNext(final Value iterator) extends Instruction {
+  this : super(.boolean) {
+    _protocolElement(iterator, CoreTypes.iterator);
+  }
+  @override
+  Iterable<Value> get inputs => [iterator];
+}
+
+/// Reads current only after a successful moveNext in lowered loops.
+final class IteratorCurrent(final Value iterator) extends Instruction {
+  this : super(_protocolElement(iterator, CoreTypes.iterator));
+  @override
+  Iterable<Value> get inputs => [iterator];
+}
+
+ValueType _protocolElement(Value value, ClassType protocol) {
+  final type = CoreTypes.view(value.type, protocol);
+  if (type == null) throw ArgumentError('Expected ${protocol.name} receiver.');
+  return type.typeArguments.single;
+}
+
+/// Reads length via the receiver's Dart collection getter.
+final class CollectionLength(final Value collection) extends Instruction {
+  this : super(.integer) {
+    if (CoreTypes.view(collection.type, CoreTypes.iterable) == null &&
+        CoreTypes.view(collection.type, CoreTypes.map) == null) {
+      throw ArgumentError('Expected a collection.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [collection];
+}
+
+/// Reads a list slot or map key, preserving bounds and missing-key behavior.
+final class CollectionGet(final Value collection, final Value key)
+    extends Instruction {
+  this : super(_collectionIndexType(collection, key));
+  @override
+  Iterable<Value> get inputs => [collection, key];
+}
+
+/// Writes a list slot, preserving bounds and actual runtime element checks.
+final class ListSet(final Value collection, final Value key, final Value value)
+    extends Instruction {
+  this : super(.voidType) {
+    final type = CoreTypes.view(collection.type, CoreTypes.list);
+    if (type == null ||
+        !ValueType.integer.accepts(key.type) ||
+        value.type is CellType) {
+      throw ArgumentError('Invalid list write.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [collection, key, value];
+}
+
+ValueType _collectionIndexType(Value collection, Value key) {
+  final list = CoreTypes.view(collection.type, CoreTypes.list);
+  if (list != null && ValueType.integer.accepts(key.type)) {
+    return list.typeArguments.single;
+  }
+  final map = CoreTypes.view(collection.type, CoreTypes.map);
+  if (map != null && key.type is! CellType) {
+    return map.typeArguments[1].nullable;
+  }
+  throw ArgumentError('Invalid collection index.');
+}
+
+/// Recognizes supported resolved dart:core operations without inventing targets.
+Instruction? coreCollectionOperation(
+  String name,
+  Value receiver,
+  List<Value> args,
+) {
+  final list = CoreTypes.view(receiver.type, CoreTypes.list);
+  final set = CoreTypes.view(receiver.type, CoreTypes.set);
+  final map = CoreTypes.view(receiver.type, CoreTypes.map);
+  final iterable = CoreTypes.view(receiver.type, CoreTypes.iterable);
+  final iterator = CoreTypes.view(receiver.type, CoreTypes.iterator);
+  return switch ((name, args)) {
+    ('length', []) when iterable != null || map != null => CollectionLength(
+      receiver,
+    ),
+    ('iterator', []) when iterable != null => GetIterator(receiver),
+    ('current', []) when iterator != null => IteratorCurrent(receiver),
+    ('moveNext', []) when iterator != null => IteratorMoveNext(receiver),
+    ('[]', [final key]) when list != null || map != null => CollectionGet(
+      receiver,
+      key,
+    ),
+    ('[]=', [final key, final value]) when list != null => ListSet(
+      receiver,
+      key,
+      value,
+    ),
+    ('[]=', [final key, final value]) when map != null => MapPut(
+      receiver,
+      key,
+      value,
+    ),
+    ('add', [final value]) when list != null || set != null => CollectionAdd(
+      receiver,
+      value,
+    ),
+    ('addAll', [final source])
+        when list != null || set != null || map != null =>
+      CollectionSpread(receiver, source),
+    _ => null,
+  };
 }

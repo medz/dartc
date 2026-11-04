@@ -2,6 +2,7 @@ import 'dart:convert' show jsonEncode;
 
 import 'block.dart';
 import 'signature.dart';
+import 'type.dart';
 import 'value.dart';
 
 /// Writes a graph labeled with function-local block and value numbers to [output].
@@ -12,7 +13,7 @@ void writeFunction(
 ) {
   final labels = {for (final (i, b) in blocks.indexed) b: 'b$i'};
   final ids = <Value, int>{};
-  String symbol(FunctionTarget t) {
+  String symbol(FunctionTarget t, [ClassType? ownerType]) {
     if (t.enclosing case final outer?) {
       return '${symbol(outer)}::${t.name}@${t.sourceOffset}';
     }
@@ -21,13 +22,14 @@ void writeFunction(
       .setter || .staticSetter => 'set ',
       _ => '',
     };
-    return '${t.library}::${t.owner == null ? '' : '${t.owner!.dartName}.'}$prefix${t.name}';
+    return '${t.library}::${t.owner == null ? '' : '${(ownerType ?? t.owner!).dartName}.'}$prefix${t.name}';
   }
 
   String value(Value v) => switch (v) {
     ScalarConstant(value: final String s) => jsonEncode(s),
     ScalarConstant(:final value) => '$value',
-    FunctionConstant(:final target) => 'tearoff ${symbol(target)}',
+    FunctionConstant(:final target, :final ownerType) =>
+      'tearoff ${symbol(target, ownerType)}',
     RecordConstant(:final type, :final fields) =>
       'const ${type.dartName}[${fields.map(value).join(', ')}]',
     TestedValue(:final test, :final type) =>
@@ -42,6 +44,20 @@ void writeFunction(
     for (final e in named.entries) '${e.key}: ${value(e.value)}',
   ].join(', ');
   String operation(Instruction op) => switch (op) {
+    CollectionLength() => 'length ${value(op.collection)}',
+    CollectionGet() =>
+      'collectionGet ${value(op.collection)}, ${value(op.key)}',
+    ListSet() =>
+      'listSet ${value(op.collection)}, ${value(op.key)}, ${value(op.value)}',
+    NewCollection() => 'newCollection ${op.type.dartName}',
+    CollectionAdd() =>
+      'collectionAdd ${value(op.collection)}, ${value(op.value)}',
+    CollectionSpread() =>
+      'collectionSpread ${value(op.collection)}, ${value(op.source)}',
+    MapPut() => 'mapPut ${value(op.map)}, ${value(op.key)}, ${value(op.value)}',
+    GetIterator() => 'iterator ${value(op.iterable)}',
+    IteratorMoveNext() => 'moveNext ${value(op.iterator)}',
+    IteratorCurrent() => 'current ${value(op.iterator)}',
     AssertionFailure() =>
       'assertionFailure${op.message == null ? '' : ' ${value(op.message!)}'}',
     MakeClosure() =>
@@ -60,7 +76,7 @@ void writeFunction(
     InstanceCall() =>
       'dispatch ${value(op.receiver)} ${symbol(op.member)}(${arguments(op.positional, op.named)})',
     Construct() =>
-      'new ${symbol(op.initializer)}(${op.inputs.map(value).join(', ')})',
+      'new ${symbol(op.initializer, op.instantiatedType)}(${op.inputs.map(value).join(', ')})',
     StoreField() =>
       'store ${value(op.receiver)}.${op.field.owner.dartName}::${op.field.name}, ${value(op.value)}',
     MakeRecord() =>
@@ -70,6 +86,7 @@ void writeFunction(
       '${value(op.left)} ${op.negated ? '!=' : '=='} ${value(op.right)}',
     TypeTest() =>
       '${value(op.operand)} ${op.negated ? 'is!' : 'is'} ${op.testedType.dartName}',
+    TypeView() => 'view ${value(op.operand)} as ${op.type.dartName}',
     TypeCast() => '${value(op.operand)} as ${op.type.dartName}',
     NullCheck() => 'checkNotNull ${value(op.operand)}',
     NumericBinary() =>
@@ -79,7 +96,7 @@ void writeFunction(
     NumericNegate() => 'negate ${value(op.operand)}',
     IntBinary() => '${op.operator.name} ${value(op.left)}, ${value(op.right)}',
     DirectCall() =>
-      'call ${symbol(op.target)}(${op.inputs.map(value).join(', ')})',
+      'call ${symbol(op.target, op.ownerType)}(${op.inputs.map(value).join(', ')})',
   };
   String unwind(Jump? handler) =>
       handler == null ? '' : ' unwind ${edge(handler)}';

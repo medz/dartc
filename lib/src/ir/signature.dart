@@ -80,6 +80,9 @@ final class FunctionTarget(
 
   /// The constructor named by a redirecting factory declaration.
   final FunctionTarget? redirect,
+
+  /// The destination owner expressed in this declaration's type parameters.
+  final ClassType? redirectOwnerType,
 }) {
   /// The Dart call signature, excluding the receiver and returning the instance for constructors.
   final FunctionType signature = .new(
@@ -107,7 +110,13 @@ final class FunctionTarget(
   int get argumentOffset => parameterTypes.length - signature.parameters.length;
 
   /// Explicit method parameters checked covariantly at entry.
-  final Set<int> covariantParameters = .unmodifiable(covariantParameters);
+  final Set<int> covariantParameters = .unmodifiable({
+    ...covariantParameters,
+    if (kind.isVirtual && owner != null)
+      for (final (i, type) in parameters.indexed)
+        if (containsCovariantTypeParameter(type, owner.typeParameters.toSet()))
+          i,
+  });
 
   /// The runtime type of a tear-off. Covariant parameters reify as `Object?`.
   late final FunctionType reifiedSignature = covariantParameters.isEmpty
@@ -127,6 +136,16 @@ final class FunctionTarget(
           },
         );
 
+  /// Instantiates this declaration's signature through the receiver's owner view.
+  FunctionType signatureFor(ClassType receiver) =>
+      substituteType(signature, environmentFor(receiver)) as FunctionType;
+
+  Map<TypeParameterType, ValueType> environmentFor(ClassType receiver) {
+    final view = owner == null ? null : receiver.asInstanceOf(owner!);
+    if (view == null) throw ArgumentError('Incompatible member owner.');
+    return view.typeEnvironment;
+  }
+
   /// The name used for instance lookup after the receiver has been evaluated.
   MemberSelector get selector => (
     kind: kind,
@@ -141,6 +160,29 @@ final class FunctionTarget(
       target = target.redirect!;
     }
     return target;
+  }
+
+  /// Resolves a construction while substituting each factory redirect's owner.
+  ({FunctionTarget target, ClassType ownerType}) resolveConstruction(
+    ClassType ownerType,
+  ) {
+    var target = this;
+    var applied = ownerType;
+    final visited = <FunctionTarget>{};
+    while (true) {
+      if (!visited.add(target) ||
+          applied.declaration != target.owner?.declaration) {
+        throw ArgumentError('Invalid constructor redirect chain.');
+      }
+      applied.validateTypeArguments();
+      final destination = target.redirect;
+      if (destination == null) return (target: target, ownerType: applied);
+      applied = substituteType(
+        target.redirectOwnerType ?? destination.owner!,
+        target.environmentFor(applied),
+      ) as ClassType;
+      target = destination;
+    }
   }
 
   this {
@@ -176,14 +218,21 @@ final class FunctionTarget(
         'Inconsistent callable owner or constructor signature.',
       );
     }
+    if (redirect == null && redirectOwnerType != null) {
+      throw ArgumentError('Redirect owner requires a destination.');
+    }
     if (redirect case final target?) {
       if (kind != .factory ||
           !(target.kind == .factory ||
               target.kind == .initializer && !target.owner!.isAbstract) ||
-          !returnType.accepts(target.owner!)) {
+          (redirectOwnerType ?? target.owner!).declaration !=
+              target.owner!.declaration ||
+          !returnType.accepts(redirectOwnerType ?? target.owner!)) {
         throw ArgumentError('Invalid redirecting factory target.');
       }
-      if (!signature.accepts(target.signature)) {
+      if (!signature.accepts(
+        target.signatureFor(redirectOwnerType ?? target.owner!),
+      )) {
         throw ArgumentError('Incompatible redirecting factory signature.');
       }
     }
@@ -204,6 +253,12 @@ final class InstanceField(
   /// Whether writes are restricted to initialization.
   final bool isFinal = false,
 }) {
+  ValueType typeFor(ClassType receiver) {
+    final view = receiver.asInstanceOf(owner);
+    if (view == null) throw ArgumentError('Incompatible field owner.');
+    return substituteType(type, view.typeEnvironment);
+  }
+
   this {
     if (type is CellType) {
       throw ArgumentError('An instance field must hold a Dart value.');

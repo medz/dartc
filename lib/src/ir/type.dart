@@ -56,6 +56,14 @@ sealed class const ValueType() {
   /// The spelling used in a Dart type annotation.
   String get dartName;
 
+  /// Whether a runtime inhabitant may be null, distinct from accepting a null assignment.
+  bool get mayBeNull => switch (this) {
+    TypeParameterType() => (this as TypeParameterType).bound.mayBeNull,
+    NonNullableTypeParameterType() => false,
+    _NullableType() => true,
+    _ => this == nullType || this == voidType,
+  };
+
   /// The union of this type and `Null`.
   ValueType get nullable {
     if (this == never) return nullType;
@@ -74,11 +82,28 @@ sealed class const ValueType() {
   /// Whether an operand of [type] can be passed here without a conversion.
   bool accepts(ValueType type) {
     if (this is CellType || type is CellType) return this == type;
-    if (identical(this, type) || type == never || this == voidType) return true;
+    if (this == type || type == never || this == voidType) return true;
+    if (this is TypeParameterType) {
+      if (type is NonNullableTypeParameterType) {
+        return identical(type.parameter, this) ||
+            accepts(type.parameter.bound.nonNullable);
+      }
+      return type is TypeParameterType && accepts(type.bound);
+    }
+    if (this case NonNullableTypeParameterType(:final parameter)) {
+      return !type.mayBeNull && parameter.accepts(type);
+    }
     if (this case _NullableType(:final nonNullable)) {
       return type == nullType ||
           nonNullable == object ||
           nonNullable.accepts(type.nonNullable);
+    }
+    if (type is NonNullableTypeParameterType) {
+      return this == object || accepts(type.parameter.bound.nonNullable);
+    }
+    if (type is TypeParameterType) {
+      // Only the bound is known about an arbitrary value of a type variable.
+      return accepts(type.bound);
     }
     if (type is FunctionType) {
       final target = this;
@@ -353,63 +378,342 @@ final class FunctionType._(
   }
 }
 
-/// A nominal Dart class shared by its declarations, value types and runtime tests.
+/// A nominal declaration, or an applied view of that declaration.
 final class const ClassType._(
   final Uri? _library,
-  @override final String dartName,
-
-  /// The immediate superclass, absent only for `Object`.
-  final ClassType? superclass,
-
-  /// The directly implemented interfaces, excluding [superclass].
-  final List<ClassType> interfaces,
-
-  /// Whether direct allocation of this class is forbidden.
+  final String name,
+  final ClassType? _superclass,
+  final List<ClassType> _interfaces,
   final bool isAbstract,
+  final List<TypeParameterType> typeParameters,
+  final List<ValueType> typeArguments,
+  final ClassType? _declaration,
+  final _ClassHierarchy? _hierarchy,
 ) extends ValueType {
-  /// Creates a class identity with [superclass] and directly implemented [interfaces].
   new(
     Uri library,
     String name, {
     ClassType superclass = ValueType.object,
     Iterable<ClassType> interfaces = const [],
     bool isAbstract = false,
-  }) : this._(library, name, superclass, .unmodifiable(interfaces), isAbstract);
+    Iterable<TypeParameterType> typeParameters = const [],
+  }) : this._(
+         library,
+         name,
+         superclass,
+         .unmodifiable(interfaces),
+         isAbstract,
+         .unmodifiable(typeParameters),
+         .unmodifiable(typeParameters),
+         null,
+         null,
+       );
 
   const new _core(String name, ClassType? parent, bool isAbstract)
-    : this._(null, name, parent, const [], isAbstract);
+    : this._(
+        null,
+        name,
+        parent,
+        const [],
+        isAbstract,
+        const [],
+        const [],
+        null,
+        null,
+      );
+
+  new declare(
+    Uri library,
+    String name, {
+    Iterable<TypeParameterType> typeParameters = const [],
+    bool isAbstract = false,
+  }) : this._(
+         library,
+         name,
+         null,
+         const [],
+         isAbstract,
+         .unmodifiable(typeParameters),
+         .unmodifiable(typeParameters),
+         null,
+         _ClassHierarchy(),
+       );
+
+  void initializeHierarchy({
+    ClassType superclass = ValueType.object,
+    Iterable<ClassType> interfaces = const [],
+  }) {
+    final hierarchy = declaration._hierarchy;
+    if (hierarchy == null || hierarchy.initialized) {
+      throw StateError('Class hierarchy already initialized.');
+    }
+    hierarchy.superclass = superclass;
+    hierarchy.interfaces = List.unmodifiable(interfaces);
+    hierarchy.initialized = true;
+  }
 
   static final _coreLibrary = Uri.parse('dart:core');
-
-  /// The URI of the declaring library.
   Uri get library => _library ?? _coreLibrary;
+  ClassType get declaration => _declaration ?? this;
+  Map<TypeParameterType, ValueType> get typeEnvironment => {
+    for (final (i, parameter) in typeParameters.indexed)
+      parameter: typeArguments[i],
+  };
+  ClassType? get superclass {
+    final parent =
+        declaration._hierarchy?.superclass ?? declaration._superclass;
+    return parent == null
+        ? null
+        : substituteType(parent, typeEnvironment) as ClassType;
+  }
 
-  bool _inherits(ClassType target, [Set<ClassType>? visited]) {
-    for (ClassType? type = this; type != null; type = type.superclass) {
-      if (identical(type, target)) return true;
-      if (type.interfaces.isEmpty) continue;
-      visited ??= {};
-      if (!visited.add(type)) return false;
-      for (final interface in type.interfaces) {
-        if (interface._inherits(target, visited)) return true;
+  List<ClassType> get interfaces => [
+    for (final type
+        in (declaration._hierarchy?.interfaces ?? declaration._interfaces))
+      substituteType(type, typeEnvironment) as ClassType,
+  ];
+  @override
+  String get dartName => typeArguments.isEmpty
+      ? name
+      : '$name<${typeArguments.map((t) => t.dartName).join(', ')}>';
+
+  /// Applies this declaration, retaining every type argument.
+  ClassType instantiate(Iterable<ValueType> arguments) {
+    final args = List<ValueType>.unmodifiable(arguments);
+    final owner = declaration;
+    if (args.length != owner.typeParameters.length ||
+        args.any((t) => t is CellType)) {
+      throw ArgumentError('Invalid class type arguments.');
+    }
+    if (args.indexed.every((e) => e.$2 == owner.typeParameters[e.$1])) {
+      return owner;
+    }
+    return ClassType._(
+      owner._library,
+      owner.name,
+      null,
+      const [],
+      owner.isAbstract,
+      owner.typeParameters,
+      args,
+      owner,
+      null,
+    );
+  }
+
+  /// Checks all instantiated arguments against their simultaneously substituted bounds.
+  void validateTypeArguments() {
+    for (final (i, parameter) in typeParameters.indexed) {
+      final bound = substituteType(parameter.bound, typeEnvironment);
+      if (!bound.accepts(typeArguments[i])) {
+        throw ArgumentError(
+          'Type argument does not satisfy ${parameter.name} bound.',
+        );
       }
     }
-    return false;
   }
+
+  /// Projects this view onto a superclass or implemented interface declaration.
+  ClassType? asInstanceOf(ClassType owner, [Set<ClassType>? visited]) {
+    if (identical(declaration, owner.declaration)) return this;
+    visited ??= {};
+    if (!visited.add(declaration)) return null;
+    final parent = superclass?.asInstanceOf(owner, visited);
+    if (parent != null) return parent;
+    for (final interface in interfaces) {
+      final found = interface.asInstanceOf(owner, visited);
+      if (found != null) return found;
+    }
+    return null;
+  }
+
+  bool _inherits(ClassType target) {
+    final view = asInstanceOf(target);
+    return view != null &&
+        target.typeArguments.indexed.every(
+          (e) => e.$2.accepts(view.typeArguments[e.$1]),
+        );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ClassType &&
+          identical(declaration, other.declaration) &&
+          typeArguments.length == other.typeArguments.length &&
+          typeArguments.indexed.every((e) => e.$2 == other.typeArguments[e.$1]);
+  @override
+  int get hashCode =>
+      Object.hash(identityHashCode(declaration), Object.hashAll(typeArguments));
+}
+
+final class _ClassHierarchy() {
+  bool initialized = false;
+  ClassType? superclass;
+  List<ClassType> interfaces = const [];
+}
+
+/// A lexically scoped type variable. Equal names do not imply equal identities.
+final class TypeParameterType(final String name) extends ValueType {
+  ValueType? _bound;
+  ValueType get bound =>
+      _bound ?? (throw StateError('Uninitialized type parameter bound.'));
+  void initializeBound(ValueType type) {
+    if (_bound != null || type is CellType) {
+      throw StateError('Invalid type parameter bound initialization.');
+    }
+    _bound = type;
+  }
+
+  @override
+  String get dartName => name;
+  @override
+  ValueType get nonNullable => NonNullableTypeParameterType(this);
+}
+
+/// The intersection of a type variable with non-nullable Object.
+final class NonNullableTypeParameterType(final TypeParameterType parameter)
+    extends ValueType {
+  @override
+  String get dartName => '${parameter.dartName} & Object';
+  @override
+  bool operator ==(Object other) =>
+      other is NonNullableTypeParameterType &&
+      identical(parameter, other.parameter);
+  @override
+  int get hashCode => Object.hash(NonNullableTypeParameterType, parameter);
+}
+
+/// Simultaneous, capture-free substitution of type variable identities.
+ValueType substituteType(
+  ValueType type,
+  Map<TypeParameterType, ValueType> environment,
+) {
+  if (environment.isEmpty) return type;
+  return switch (type) {
+    TypeParameterType() => environment[type] ?? type,
+    NonNullableTypeParameterType(:final parameter) =>
+      (environment[parameter] ?? parameter).nonNullable,
+    _NullableType(:final base) => substituteType(base, environment).nullable,
+    ClassType() =>
+      type.typeArguments.isEmpty
+          ? type
+          : type.declaration.instantiate(
+              type.typeArguments.map((t) => substituteType(t, environment)),
+            ),
+    CellType(:final content) => CellType(substituteType(content, environment)),
+    RecordType() => RecordType(
+      type.fields
+          .take(type.positionalCount)
+          .map((t) => substituteType(t, environment)),
+      {
+        for (final e in type.slots.entries.skip(type.positionalCount))
+          e.key: substituteType(type.fields[e.value], environment),
+      },
+    ),
+    FunctionType() => FunctionType(
+      substituteType(type.result, environment),
+      type.parameters.map((t) => substituteType(t, environment)),
+      optionalPositional: type.positionalCount - type.requiredPositional,
+      namedParameters: {
+        for (final e in type.named.entries) e.key: e.value.required,
+      },
+    ),
+    _ => type,
+  };
 }
 
 final class const _SpecialType(@override final String dartName)
     extends ValueType;
 
-final class const _NullableType(@override final ValueType nonNullable)
-    extends ValueType {
+final class const _NullableType(final ValueType base) extends ValueType {
   @override
-  String get dartName => '${nonNullable.dartName}?';
+  ValueType get nonNullable => base.nonNullable;
+  @override
+  String get dartName => '${base.dartName}?';
 
   @override
   bool operator ==(Object other) =>
-      other is _NullableType && nonNullable == other.nonNullable;
+      other is _NullableType && base == other.base;
 
   @override
-  int get hashCode => Object.hash(_NullableType, nonNullable);
+  int get hashCode => Object.hash(_NullableType, base);
+}
+
+/// Whether a type expression mentions any of the given lexical parameters.
+bool containsTypeParameter(ValueType type, Set<TypeParameterType> parameters) =>
+    switch (type) {
+      TypeParameterType() => parameters.contains(type),
+      NonNullableTypeParameterType(:final parameter) => parameters.contains(
+        parameter,
+      ),
+      _NullableType(:final base) => containsTypeParameter(base, parameters),
+      ClassType() => type.typeArguments.any(
+        (t) => containsTypeParameter(t, parameters),
+      ),
+      RecordType() => type.fields.any(
+        (t) => containsTypeParameter(t, parameters),
+      ),
+      FunctionType() =>
+        containsTypeParameter(type.result, parameters) ||
+            type.parameters.any((t) => containsTypeParameter(t, parameters)),
+      CellType(:final content) => containsTypeParameter(content, parameters),
+      _ => false,
+    };
+
+/// Whether a class variable occurs covariantly in a member parameter type.
+bool containsCovariantTypeParameter(
+  ValueType type,
+  Set<TypeParameterType> parameters, [
+  bool positive = true,
+]) => switch (type) {
+  TypeParameterType() => positive && parameters.contains(type),
+  NonNullableTypeParameterType(:final parameter) =>
+    positive && parameters.contains(parameter),
+  _NullableType(:final base) => containsCovariantTypeParameter(
+    base,
+    parameters,
+    positive,
+  ),
+  ClassType() => type.typeArguments.any(
+    (t) => containsCovariantTypeParameter(t, parameters, positive),
+  ),
+  RecordType() => type.fields.any(
+    (t) => containsCovariantTypeParameter(t, parameters, positive),
+  ),
+  FunctionType() =>
+    containsCovariantTypeParameter(type.result, parameters, positive) ||
+        type.parameters.any(
+          (t) => containsCovariantTypeParameter(t, parameters, !positive),
+        ),
+  _ => false,
+};
+
+/// Free lexical type-variable identities mentioned by a type expression.
+Iterable<TypeParameterType> typeParametersIn(ValueType type) sync* {
+  switch (type) {
+    case TypeParameterType():
+      yield type;
+    case NonNullableTypeParameterType(:final parameter):
+      yield parameter;
+    case _NullableType(:final base):
+      yield* typeParametersIn(base);
+    case ClassType():
+      for (final argument in type.typeArguments) {
+        yield* typeParametersIn(argument);
+      }
+    case RecordType():
+      for (final field in type.fields) {
+        yield* typeParametersIn(field);
+      }
+    case FunctionType():
+      yield* typeParametersIn(type.result);
+      for (final parameter in type.parameters) {
+        yield* typeParametersIn(parameter);
+      }
+    case CellType(:final content):
+      yield* typeParametersIn(content);
+    default:
+      break;
+  }
 }

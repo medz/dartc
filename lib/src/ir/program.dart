@@ -80,12 +80,13 @@ final class IrProgram(
 
   /// Resolves [member] on [receiver], returning `null` if the batch supplies no implementation.
   FunctionTarget? dispatch(ClassType receiver, FunctionTarget member) {
-    if (!member.kind.isVirtual || !member.owner!.accepts(receiver)) {
+    if (!member.kind.isVirtual ||
+        receiver.asInstanceOf(member.owner!) == null) {
       throw ArgumentError('Incompatible dispatch receiver.');
     }
     final selector = member.selector;
     for (ClassType? type = receiver; type != null; type = type.superclass) {
-      final definition = _definitions[type];
+      final definition = _definitions[type.declaration];
       if (definition == null) return null;
       final target = definition.members[selector];
       if (target != null && !target.isAbstract) return target;
@@ -113,7 +114,7 @@ final class IrProgram(
       for (final ctor in declaration.constructors.values) {
         if (ctor.redirect case final destination?) {
           output.writeln(
-            '  factory ${ctor.name} = ${label(destination.owner!)}.${destination.name}',
+            '  factory ${ctor.name} = ${label(ctor.redirectOwnerType ?? destination.owner!)}.${destination.name}',
           );
         }
       }

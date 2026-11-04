@@ -9,6 +9,7 @@ import 'package:dartc/ir.dart';
 final class Bindings({final bool enableAssertions = false}) {
   final _targets = <ExecutableElement, FunctionTarget>{};
   final _classes = <InterfaceElement, ClassType>{};
+  final _parameters = <TypeParameterElement, TypeParameterType>{};
   final _fields = <FieldElement, InstanceField>{};
   final _defaults = <FunctionTarget, Map<int, Constant>>{};
 
@@ -50,8 +51,14 @@ final class Bindings({final bool enableAssertions = false}) {
       unsupported(unit, site, 'generic functions');
     }
     FunctionTarget? destination;
+    ClassType? redirectOwnerType;
     if (element case final ConstructorElement ctor
         when ctor.isFactory && ctor.redirectedConstructor != null) {
+      redirectOwnerType = valueType(
+        ctor.redirectedConstructor!.returnType,
+        unit,
+        site,
+      ) as ClassType;
       final path = redirects ?? <ConstructorElement>{};
       if (!path.add(ctor)) unsupported(unit, site, 'cyclic factory redirect');
       destination = target(
@@ -71,6 +78,7 @@ final class Bindings({final bool enableAssertions = false}) {
       owner: owner,
       kind: kind,
       redirect: destination,
+      redirectOwnerType: redirectOwnerType,
       enclosing: enclosing,
       sourceOffset: sourceOffset,
       captures: captures,
@@ -151,7 +159,18 @@ final class Bindings({final bool enableAssertions = false}) {
       if (value.toDoubleValue() case final d?) return .floating(d);
       if (value.toStringValue() case final s?) return .string(s);
       if (value.toFunctionValue() case final executable?) {
-        return FunctionConstant(target(executable, unit, site));
+        final callable = target(executable, unit, site);
+        final ClassType? ownerType;
+        final functionType = value.type;
+        if (executable is ConstructorElement &&
+            callable.owner!.typeParameters.isNotEmpty &&
+            functionType is dart.FunctionType) {
+          ownerType =
+              valueType(functionType.returnType, unit, site) as ClassType;
+        } else {
+          ownerType = null;
+        }
+        return FunctionConstant(callable, ownerType: ownerType);
       }
       if (value.toRecordValue() case final record?) {
         final type = valueType(value.type!, unit, site);
@@ -177,6 +196,11 @@ final class Bindings({final bool enableAssertions = false}) {
     final ValueType base = switch (type) {
       dart.VoidType() => .voidType,
       dart.NeverType() => .never,
+      final dart.TypeParameterType parameter => _parameterType(
+        parameter,
+        unit,
+        site,
+      ),
       dart.FunctionType(
         :final formalParameters,
         :final returnType,
@@ -202,11 +226,39 @@ final class Bindings({final bool enableAssertions = false}) {
           },
         ),
       _ when type.isDartCoreNull => .nullType,
-      dart.InterfaceType(:final element) when type.typeArguments.isEmpty =>
-        classType(element, unit, site),
+      dart.InterfaceType(:final element, :final typeArguments) =>
+        classType(element, unit, site).instantiate(
+          typeArguments.map((argument) => valueType(argument, unit, site)),
+        ),
       _ => unsupported(unit, site, type.getDisplayString()),
     };
     return type.nullabilitySuffix == .question ? base.nullable : base;
+  }
+
+  ValueType _parameterType(
+    dart.TypeParameterType type,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    final element = type.element.baseElement;
+    final parameter = _parameters[element];
+    if (parameter == null) {
+      unsupported(unit, site, 'unbound type parameter ${element.name}');
+    }
+    final bound = element.bound;
+    final promoted = bound == null
+        ? type.bound is! dart.DynamicType
+        : type.bound != bound;
+    if (!promoted) return parameter;
+    if (type.bound.isDartCoreObject &&
+        type.bound.nullabilitySuffix != .question) {
+      return parameter.nonNullable;
+    }
+    unsupported(
+      unit,
+      site,
+      'type parameter intersection ${type.getDisplayString()}',
+    );
   }
 
   /// Resolves one nominal declaration for its type, constructors and field owners.
@@ -229,30 +281,53 @@ final class Bindings({final bool enableAssertions = false}) {
         'bool' => ValueType.boolean,
         'Record' => ValueType.record,
         'Function' => ValueType.function,
+        'Iterable' => CoreTypes.iterable,
+        'Iterator' => CoreTypes.iterator,
+        'List' => CoreTypes.list,
+        'Set' => CoreTypes.set,
+        'Map' => CoreTypes.map,
         _ => null,
       };
-      if (builtin != null) return builtin;
-    }
-    return _classes.putIfAbsent(element, () {
-      if (element is! ClassElement ||
-          element.typeParameters.isNotEmpty ||
-          element.mixins.isNotEmpty) {
-        unsupported(
-          unit,
-          site,
-          'class ${element.name} with type parameters or mixins',
-        );
+      if (builtin != null) {
+        for (final (i, parameter) in element.typeParameters.indexed) {
+          _parameters[parameter.baseElement] = builtin.typeParameters[i];
+        }
+        return builtin;
       }
-      return ClassType(
-        element.library.uri,
-        element.name!,
-        superclass: classType(element.supertype!.element, unit, site),
-        interfaces: element.interfaces.map(
-          (it) => classType(it.element, unit, site),
+    }
+    final previous = _classes[element];
+    if (previous != null) return previous;
+    if (element is! ClassElement || element.mixins.isNotEmpty) {
+      unsupported(unit, site, 'class ${element.name} with mixins');
+    }
+    final parameters = [
+      for (final parameter in element.typeParameters)
+        _parameters.putIfAbsent(
+          parameter.baseElement,
+          () => TypeParameterType(parameter.name!),
         ),
-        isAbstract: element.isAbstract || element.isSealed,
+    ];
+    final type = ClassType.declare(
+      element.library.uri,
+      element.name!,
+      typeParameters: parameters,
+      isAbstract: element.isAbstract || element.isSealed,
+    );
+    _classes[element] = type;
+    for (final (i, parameter) in element.typeParameters.indexed) {
+      parameters[i].initializeBound(
+        parameter.bound == null
+            ? ValueType.object.nullable
+            : valueType(parameter.bound!, unit, site),
       );
-    });
+    }
+    type.initializeHierarchy(
+      superclass: valueType(element.supertype!, unit, site) as ClassType,
+      interfaces: element.interfaces.map(
+        (interface) => valueType(interface, unit, site) as ClassType,
+      ),
+    );
+    return type;
   }
 }
 

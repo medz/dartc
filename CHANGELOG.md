@@ -1,12 +1,16 @@
 ## Unreleased
 
+Generic classes retain declaration type parameters and instantiated type arguments throughout IR. Constructors, factories and factory redirects substitute member signatures, superclass and interface types without copying function bodies. Runtime checks and constructor or method tear-offs preserve actual type arguments, bounds, covariance and type environments captured by closures. Generic functions and const instances remain unsupported.
+
+Mutable typed List, Set and Map literals support conditional and loop elements, patterns, spreads and null-aware elements. Synchronous `for-in` uses the iterator protocol and preserves per-iteration captures, control flow and exceptions. Collection IR includes indexing, writes, length, add and addAll; const collections and the full SDK collection API remain unsupported.
+
 Numeric expressions support `double`, `num` and mixed operands without losing integer precision or floating negative zero. Runtime string interpolation preserves expression and conversion order, including virtual `toString` calls and adjacent or nested literals.
 
-Ordinary and null-aware cascades evaluate their receiver once. Dot shorthand supports non-generic constructors, factories, static methods and explicit static getters. Explicit top-level and static getters/setters support reads, calls and updates.
+Ordinary and null-aware cascades evaluate their receiver once. Dot shorthand supports constructors, factories, static methods and explicit static getters for supported types. Explicit top-level and static getters/setters support reads, calls and updates.
 
 Non-late locals and `final` variables can be assigned after declaration. Their storage is preserved across branches, exceptions and closures, including uninitialized captured loop bindings. Wildcard declarations retain initializer effects.
 
-Object patterns read non-generic instance getters and method tear-offs. Pattern alternatives and switch cases share extracted fields and repeated comparisons without repeating user side effects.
+Object patterns read instance getters and method tear-offs. Pattern alternatives and switch cases share extracted fields and repeated comparisons without repeating user side effects.
 
 Assertion statements and constructor assertions can be enabled with `Lowering.lower(input, enableAssertions: true)`. Assertions are disabled by default, including closures inside their conditions and messages.
 
@@ -28,7 +32,7 @@ Synchronous functions can catch explicit throws, failed type checks and exceptio
 
 Use scalar and record patterns with `when` guards in `if-case`, `switch` statements and `switch` expressions. Switch statements support shared case bodies, implicit breaks and labeled `continue`.
 
-`Lowering.lower` returns an `IrProgram` with `classes` and `functions`. Non-generic classes support generative and factory constructors, including redirects to named constructors with optional arguments. Instance methods and getters dispatch on the receiver, including overrides with different defaults and covariant parameters. Runtime type tests and catch clauses follow superclass and interface declarations.
+`Lowering.lower` returns an `IrProgram` with `classes` and `functions`. Classes support generative and factory constructors, including redirects to named constructors with optional arguments. Instance methods and getters dispatch on the receiver, including overrides with different defaults and covariant parameters. Runtime type tests and catch clauses follow superclass and interface declarations.
 
 The development checkout uses the official Dart analyzer and can print compiler IR. Native executables, libraries and the `Export` API remain available in [release 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).
 

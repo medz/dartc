@@ -6,6 +6,7 @@ import 'package:dartc/ir.dart';
 import 'assertion.dart';
 import 'bindings.dart';
 import 'closures.dart';
+import 'collection.dart';
 import 'exception.dart';
 import 'expression.dart';
 import 'function_context.dart';
@@ -338,8 +339,22 @@ final class FunctionLowering._(
             iteration: iteration,
           );
         });
-      case ast.ForStatement():
-        unsupported(context.unit, statement, 'for-in');
+      case ast.ForStatement(
+        forLoopParts: final ast.ForEachParts parts,
+        :final body,
+      ):
+        if (statement.awaitKeyword != null) {
+          unsupported(context.unit, statement, 'asynchronous for-in');
+        }
+        lowerForEach(
+          context,
+          parts,
+          (e) => lowerExpression(context, e),
+          () => _scoped(body),
+          exit,
+          setContinue: (jump) => _continues[statement] = jump,
+        );
+        _continues.remove(statement);
       default:
         _statement(statement);
     }

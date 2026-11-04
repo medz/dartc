@@ -4,6 +4,7 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
+import 'collection.dart';
 import 'function_context.dart';
 import 'operators.dart';
 import 'pattern.dart';
@@ -17,6 +18,12 @@ Value? lowerExpression(FunctionContext context, ast.Expression expression) =>
 Value? _lower(FunctionContext context, ast.Expression expression) {
   final unit = context.unit;
   switch (expression) {
+    case ast.ListLiteral() || ast.SetOrMapLiteral():
+      return lowerCollection(
+        context,
+        expression as ast.TypedLiteral,
+        (e) => lowerExpression(context, e),
+      );
     case ast.CascadeExpression():
       final receiver = lowerExpression(context, expression.target);
       if (receiver == null) return null;
@@ -53,19 +60,22 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       if (ctor is! ConstructorElement) {
         unsupported(unit, expression, 'dot shorthand constructor');
       }
-      final target = context.bindings
-          .target(ctor, unit, expression)
-          .implementation;
+      final source = context.bindings.target(ctor, unit, expression);
+      final construction = source.resolveConstruction(
+        context.typeOf(expression.staticType!, expression) as ClassType,
+      );
+      final target = construction.target;
       final args = evaluateArguments(
         expression.argumentList,
         (e) => lowerExpression(context, e),
       );
       if (args == null) return null;
       final bound = context.bindings.bind(target, args);
+      final instanceType = construction.ownerType;
       return context.emit(
         target.kind == .factory
-            ? DirectCall(target, bound)
-            : Construct(target, bound),
+            ? DirectCall(target, bound, ownerType: instanceType)
+            : Construct(target, bound, instantiatedType: instanceType),
       );
     case ast.DotShorthandInvocation():
       final callee = expression.memberName.element;
@@ -153,6 +163,14 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       }
       return FunctionConstant(
         context.bindings.target(constructorName.element!, unit, expression),
+        ownerType:
+            constructorName.element!.enclosingElement.typeParameters.isEmpty
+            ? null
+            : context.typeOf(
+                constructorName.type.type ??
+                    constructorName.element!.returnType,
+                constructorName,
+              ) as ClassType,
       );
     case ast.Identifier(element: final ExecutableElement callee)
         when callee is TopLevelFunctionElement ||
@@ -192,19 +210,22 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           when prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
         unsupported(unit, expression, 'deferred constructor');
       }
-      final target = context.bindings
-          .target(ctor, unit, expression)
-          .implementation;
+      final source = context.bindings.target(ctor, unit, expression);
+      final construction = source.resolveConstruction(
+        context.typeOf(expression.staticType!, expression) as ClassType,
+      );
+      final target = construction.target;
       final args = evaluateArguments(
         argumentList,
         (e) => lowerExpression(context, e),
       );
       if (args == null) return null;
       final bound = context.bindings.bind(target, args);
+      final instanceType = construction.ownerType;
       return context.emit(
         target.kind == .factory
-            ? DirectCall(target, bound)
-            : Construct(target, bound),
+            ? DirectCall(target, bound, ownerType: instanceType)
+            : Construct(target, bound, instantiatedType: instanceType),
       );
     case ast.BooleanLiteral(:final value):
       return Constant.boolean(value);
