@@ -1,0 +1,42 @@
+import 'package:dartc/lowering.dart';
+import 'package:test/test.dart';
+
+import 'fixture_runner.dart';
+import 'fixtures/effects.dart' as effects;
+import 'fixtures/invocation_forms.dart' as sdk;
+
+void main() {
+  test(
+    'ordinary and shorthand calls retain generic checks and effect order',
+    () async {
+      const path = 'test/lowering/fixtures/invocation_forms.dart';
+      final program = await CheckedLibraries.read([path], Lowering.lower);
+      final function = program.functions.singleWhere(
+        (f) => f.target.name == 'forms',
+      );
+      final runner = FixtureRunner(program, {
+        (Uri.base.resolve('test/lowering/fixtures/effects.dart'), 'tick'):
+            effects.tick,
+      });
+      (Object?, List<int>) observe(Object? Function() run) {
+        effects.calls.clear();
+        Object? result;
+        try {
+          result = run();
+        } on TypeError {
+          result = TypeError;
+        }
+        return (result, List.of(effects.calls));
+      }
+
+      for (final value in [7, 'bad', null]) {
+        for (var form = 0; form < 6; form++) {
+          final expected = observe(() => sdk.forms(value, form));
+          final actual = observe(() => runner.run(function, [value, form]));
+          expect(actual.$1, expected.$1, reason: 'form $form, value $value');
+          expect(actual.$2, expected.$2, reason: 'form $form, value $value');
+        }
+      }
+    },
+  );
+}

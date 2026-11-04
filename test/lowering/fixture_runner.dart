@@ -55,7 +55,12 @@ final class FixtureRunner(
               ?.map((type) => substituteType(type, environment))
               .toList(),
           null,
-          constructorSignature,
+          // Proper raw aliases share the target's canonical runtime callable,
+          // even when their static bounds spell dynamic instead of Object?.
+          constructorAlias == null &&
+                  constructorSignature?.typeParameters.isNotEmpty == true
+              ? null
+              : constructorSignature,
           constructorAlias,
         ),
       ),
@@ -311,6 +316,41 @@ final class FixtureRunner(
               : storage is Map<Object?, Object?>
               ? storage[read(key)]
               : (storage as List<Object?>)[read(key) as int];
+        case ListSublist(:final list, :final start, :final end):
+          final receiver = read(list);
+          final arguments = [read(start), if (end != null) read(end)];
+          if (receiver is _Instance) {
+            values[op] = _member(receiver, 'sublist', .method, arguments);
+          } else {
+            final storage = receiver is _CollectionValue
+                ? receiver.storage
+                : receiver;
+            final source = storage as List<Object?>;
+            final result = end == null
+                ? source.sublist(arguments[0] as int)
+                : source.sublist(arguments[0] as int, arguments[1] as int?);
+            values[op] = receiver is _CollectionValue
+                ? _CollectionValue(
+                    CoreTypes.listOf(
+                      CoreTypes.view(
+                        receiver.type,
+                        CoreTypes.list,
+                      )!.typeArguments.single,
+                    ),
+                    result,
+                  )
+                : result;
+          }
+        case MapContainsKey(:final map, :final key):
+          final receiver = read(map);
+          final storage = receiver is _CollectionValue
+              ? receiver.storage
+              : receiver;
+          values[op] = receiver is _Instance
+              ? _member(receiver, 'containsKey', .method, [read(key)])
+              : (storage as Map<Object?, Object?>).containsKey(read(key));
+        case PatternMatchFailure():
+          throw StateError('Pattern matching error');
         case ListSet(:final collection, :final key, :final value):
           final receiver = read(collection);
           if (receiver is _Instance) {
@@ -533,6 +573,7 @@ final class FixtureRunner(
 }
 
 Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
+  if (type == ValueType.dynamicType) return cast ? value : true;
   Object? run<T>() => cast ? value as T : value is T;
   Object? scalar<T>() => type == type.nonNullable ? run<T>() : run<T?>();
   final actual = switch (value) {
@@ -585,6 +626,7 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     ValueType.error => scalar<Error>(),
     ValueType.typeError => scalar<TypeError>(),
     ValueType.assertionError => scalar<AssertionError>(),
+    ValueType.stateError => scalar<StateError>(),
     ValueType.stackTrace => scalar<StackTrace>(),
     ValueType.never => run<Never>(),
     ValueType.voidType => cast ? value : true,

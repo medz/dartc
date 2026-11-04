@@ -48,6 +48,9 @@ final class SelectorChain(
         ? context.receiver
         : _visit(expression);
     if (value == null) return null;
+    if (value.type is DynamicType) {
+      unsupported(context.unit, root, 'dynamic member dispatch');
+    }
     if (nullAware) {
       _skipped ??= JumpTarget(context, [
         context.typeOf(root.staticType!, root),
@@ -78,7 +81,10 @@ final class SelectorChain(
       Value? Function(Value)? getFunction,
     ]) {
       if (input == null) return null;
-      final args = evaluateArguments(arguments, evaluate);
+      if (input.type is DynamicType) {
+        unsupported(context.unit, node, 'dynamic function invocation');
+      }
+      final args = context.arguments(arguments, evaluate);
       if (args == null) return null;
       final function = getFunction == null ? input : getFunction(input);
       if (function == null) return null;
@@ -222,7 +228,8 @@ final class SelectorChain(
     }
     final (receiver, name, member, arguments, nullAware) = switch (node) {
       ast.PrefixedIdentifier(:final prefix, :final identifier)
-          when prefix.staticType is dart.RecordType ||
+          when prefix.staticType is dart.DynamicType ||
+              prefix.staticType is dart.RecordType ||
               prefix.staticType is dart.FunctionType &&
                   identifier.name == 'call' ||
               identifier.element is ExecutableElement &&
@@ -240,6 +247,14 @@ final class SelectorChain(
       ast.SimpleIdentifier(element: final MethodElement method)
           when !method.isStatic =>
         (null, node.name, method, null, false),
+      ast.MethodInvocation(
+        methodName: ast.SimpleIdentifier(element: null, :final name),
+        target: final target?,
+        :final argumentList,
+        :final isNullAware,
+      )
+          when target.staticType is dart.DynamicType =>
+        (target, name, null, argumentList, isNullAware),
       ast.MethodInvocation(
         methodName: ast.SimpleIdentifier(element: final GetterElement getter),
         :final target,
@@ -301,7 +316,7 @@ final class SelectorChain(
     }
     if (member.library.uri.toString() == 'dart:core' &&
         (member is GetterElement || arguments != null)) {
-      final args = evaluateArguments(arguments, evaluate);
+      final args = context.arguments(arguments, evaluate);
       if (args == null) return null;
       if (args.named.isEmpty) {
         final operation = coreCollectionOperation(
@@ -338,7 +353,7 @@ final class SelectorChain(
       );
     }
 
-    final args = evaluateArguments(arguments, evaluate);
+    final args = context.arguments(arguments, evaluate);
     if (args == null) return null;
     return result(
       direct
@@ -393,6 +408,10 @@ final class SelectorChain(
     Value? apply(Value? Function() read, void Function(Value) store) {
       Value? write(Value? result) {
         if (result == null) return null;
+        result = context.normal(
+          context.convert(result, context.typeOf(site.writeType!, site)),
+        );
+        if (result == null) return null;
         store(result);
         return context.current == null ? null : result;
       }
@@ -426,9 +445,6 @@ final class SelectorChain(
     final destination = site.writeElement;
     if (destination is VariableElement && context.hasLocal(destination)) {
       return apply(() => context.readLocal(destination), (value) {
-        if (!context.typeOf(destination.type, site).accepts(value.type)) {
-          unsupported(context.unit, site, 'implicit conversion');
-        }
         context.writeLocal(destination, value);
       });
     }
@@ -483,7 +499,15 @@ final class SelectorChain(
       },
     );
     if (receiver == null) return null;
-    final key = index == null ? null : evaluate(index);
+    final inputKey = index == null ? null : evaluate(index);
+    final key = inputKey == null
+        ? null
+        : context.normal(
+            context.convert(
+              inputKey,
+              context.typeOf(destination.formalParameters.first.type, site),
+            ),
+          );
     if (index != null && key == null) return null;
     final direct = target is ast.SuperExpression;
     return apply(

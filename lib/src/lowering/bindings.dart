@@ -5,7 +5,7 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
 
-import 'analyzer_constants.dart';
+import 'analyzer_metadata.dart';
 
 /// Maps analyzer declarations and formal parameters to their IR identities.
 final class Bindings({final bool enableAssertions = false}) {
@@ -303,6 +303,7 @@ final class Bindings({final bool enableAssertions = false}) {
     ast.AstNode site,
   ) {
     final ValueType base = switch (type) {
+      dart.DynamicType() => .dynamicType,
       dart.VoidType() => .voidType,
       dart.NeverType() => .never,
       final dart.TypeParameterType parameter => _parameterType(
@@ -415,6 +416,7 @@ final class Bindings({final bool enableAssertions = false}) {
         'Object' => ValueType.object,
         'Error' => ValueType.error,
         'TypeError' => ValueType.typeError,
+        'StateError' => ValueType.stateError,
         'AssertionError' => ValueType.assertionError,
         'StackTrace' => ValueType.stackTrace,
         'num' => ValueType.number,
@@ -473,6 +475,7 @@ EvaluatedArguments? evaluateArguments(
   ast.ArgumentList? arguments,
   Value? Function(ast.Expression) evaluate, {
   Map<FormalParameterElement, Value> forwarded = const {},
+  required Value? Function(Value, FormalParameterElement, ast.AstNode) convert,
 }) {
   final positional = <Value>[], named = <String, Value>{};
   for (final MapEntry(key: parameter, :value) in forwarded.entries) {
@@ -483,7 +486,12 @@ EvaluatedArguments? evaluateArguments(
     }
   }
   for (final argument in arguments?.arguments ?? const <ast.Argument>[]) {
-    final value = evaluate(argument.argumentExpression);
+    final input = evaluate(argument.argumentExpression);
+    if (input == null) return null;
+    final parameter = argument.correspondingParameter;
+    final value = parameter == null
+        ? input
+        : convert(input, parameter, argument);
     if (value == null) return null;
     if (argument is ast.NamedArgument) {
       named[argument.correspondingParameter!.name!] = value;

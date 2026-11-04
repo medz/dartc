@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/analysis/results.dart';
-import 'package:analyzer/dart/ast/ast.dart' show AstNode, FunctionExpression;
+import 'package:analyzer/dart/ast/ast.dart'
+    show AstNode, FunctionExpression, ArgumentList, Expression;
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart' show DartType;
 import 'package:dartc/ir.dart';
@@ -32,6 +33,19 @@ final class FunctionContext(
     for (final type in types ?? const <DartType>[]) typeOf(type, site),
   ];
 
+  /// Checks each argument immediately, before evaluating the following argument.
+  EvaluatedArguments? arguments(
+    ArgumentList? arguments,
+    Value? Function(Expression) evaluate, {
+    Map<FormalParameterElement, Value> forwarded = const {},
+  }) => evaluateArguments(
+    arguments,
+    evaluate,
+    forwarded: forwarded,
+    convert: (value, parameter, site) =>
+        normal(convert(value, typeOf(parameter.type, site))),
+  );
+
   /// Applies a resolved function instantiation without erasing its signature.
   Value instantiateFunction(
     Value function,
@@ -57,6 +71,15 @@ final class FunctionContext(
         member.enclosingElement is! ClassElement) {
       unsupported(unit, site, 'instance member binding');
     }
+    final converted = <Value>[];
+    for (final (i, value) in args.indexed) {
+      final argument = normal(
+        convert(value, typeOf(member.formalParameters[i].type, site)),
+      );
+      if (argument == null) return null;
+      converted.add(argument);
+    }
+    args = converted;
     if (member.library.uri.toString() == 'dart:core') {
       final operation = coreCollectionOperation(member.name!, receiver, args);
       if (operation != null) return normal(emit(operation));
@@ -134,6 +157,11 @@ final class FunctionContext(
   /// Writes the binding or its shared captured storage.
   void writeLocal(VariableElement variable, Value value) {
     final stored = _locals[variable]!;
+    final converted = normal(
+      convert(value, bindings.valueType(variable.type, unit, unit.unit)),
+    );
+    if (converted == null) return;
+    value = converted;
     if (stored.type is CellType) {
       current!.emit(WriteCell(stored, value));
     } else {
@@ -143,6 +171,9 @@ final class FunctionContext(
 
   /// Binds a declaration in the current lexical scope.
   void declare(VariableElement variable, ValueType type, Value initial) {
+    final converted = normal(convert(initial, type));
+    if (converted == null) return;
+    initial = converted;
     _declared.add(variable);
     if (_closures.boxed.contains(variable)) {
       _locals[variable] = emit(NewCell(CellType(type), initial));
@@ -229,6 +260,7 @@ final class FunctionContext(
     List<Value> onFailure = const [],
   ]) {
     if (condition == null) return;
+    condition = convert(condition, .boolean);
     if (condition case ScalarConstant(value: final bool passes)) {
       if (!passes) failure.jump(onFailure);
     } else {
@@ -253,6 +285,10 @@ final class FunctionContext(
     _facts = _Refinement(value, checked, _facts);
     return checked;
   }
+
+  /// Inserts an implicit runtime check only when assignment needs one.
+  Value convert(Value value, ValueType type) =>
+      type.accepts(value.type) ? value : cast(value, type);
 
   /// Checks [value] against [type] if its current binding does not establish the type.
   Value cast(Value value, ValueType type) {
@@ -347,6 +383,7 @@ final class FunctionContext(
     Value? Function() ifFalse, [
     ValueType? resultType,
   ]) {
+    condition = convert(condition, .boolean);
     if (condition case ScalarConstant(value: final bool taken)) {
       return taken ? ifTrue() : ifFalse();
     }
@@ -400,9 +437,13 @@ final class FunctionContext(
     required ValueType resultType,
     required Value? Function() right,
   }) {
+    final originalCondition = condition;
+    condition = convert(condition, .boolean);
+    if (identical(skipped, originalCondition)) skipped = condition;
     final entry = current!, before = saveLocals(), facts = _facts;
     final enter = enterArm(condition, evaluateWhen);
-    final result = right();
+    final input = right();
+    final result = input == null ? null : convert(input, resultType);
     _facts = facts;
     final Jump skip;
     if (result == null) {

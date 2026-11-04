@@ -7,7 +7,7 @@ environment:
   sdk: ^3.13.7
 
 dependencies:
-  # Constant function metadata uses the isolated analyzer compatibility adapter.
+  # Resolved metadata uses the isolated analyzer compatibility adapter.
   analyzer: 14.7.0
 
 dev_dependencies:

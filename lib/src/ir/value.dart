@@ -149,6 +149,9 @@ sealed class Instruction(super.type) extends Value {
 
   /// Whether evaluation can transfer control to a Dart exception handler.
   bool get mayThrow => switch (this) {
+    ListSublist() ||
+    MapContainsKey() ||
+    PatternMatchFailure() ||
     CollectionLength() ||
     CollectionGet() ||
     ListSet() ||
@@ -1052,6 +1055,39 @@ final class CollectionGet(final Value collection, final Value key)
   Iterable<Value> get inputs => [collection, key];
 }
 
+/// Copies a list range through virtual dispatch, preserving an omitted end.
+final class ListSublist(final Value list, final Value start, [final Value? end])
+    extends Instruction {
+  this : super(CoreTypes.listOf(_protocolElement(list, CoreTypes.list))) {
+    if (!ValueType.integer.accepts(start.type) ||
+        (end != null && !ValueType.integer.nullable.accepts(end!.type))) {
+      throw ArgumentError('Invalid list range.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [list, start, ?end];
+}
+
+/// Tests key presence independently from the nullable result of a map lookup.
+final class MapContainsKey(final Value map, final Value key)
+    extends Instruction {
+  this : super(.boolean) {
+    if (CoreTypes.view(map.type, CoreTypes.map) == null ||
+        key.type is CellType) {
+      throw ArgumentError('Invalid map key test.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [map, key];
+}
+
+/// Raises the Dart error for a failed irrefutable pattern match.
+final class PatternMatchFailure() extends Instruction {
+  this : super(.never);
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
 /// Writes a list slot, preserving bounds and actual runtime element checks.
 final class ListSet(final Value collection, final Value key, final Value value)
     extends Instruction {
@@ -1093,6 +1129,19 @@ Instruction? coreCollectionOperation(
   return switch ((name, args)) {
     ('length', []) when iterable != null || map != null => CollectionLength(
       receiver,
+    ),
+    ('sublist', [final start]) when list != null => ListSublist(
+      receiver,
+      start,
+    ),
+    ('sublist', [final start, final end]) when list != null => ListSublist(
+      receiver,
+      start,
+      end,
+    ),
+    ('containsKey', [final key]) when map != null => MapContainsKey(
+      receiver,
+      key,
     ),
     ('iterator', []) when iterable != null => GetIterator(receiver),
     ('current', []) when iterator != null => IteratorCurrent(receiver),

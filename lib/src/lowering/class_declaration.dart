@@ -130,8 +130,12 @@ void _initialize(
   Value? evaluate(ast.Expression expression) =>
       lowerExpression(context, expression);
   void store(FieldElement field, Value value, ast.AstNode site) {
+    final converted = context.normal(
+      context.convert(value, context.typeOf(field.type, site)),
+    );
+    if (converted == null) return;
     context.emit(
-      StoreField(bindings.field(field, unit, site), receiver, value),
+      StoreField(bindings.field(field, unit, site), receiver, converted),
     );
   }
 
@@ -141,7 +145,7 @@ void _initialize(
     bool forwardSuper = false,
   }) {
     final init = bindings.target(target, unit, arguments ?? declaration);
-    final args = evaluateArguments(
+    final args = context.arguments(
       arguments,
       evaluate,
       forwarded: {
@@ -183,12 +187,14 @@ void _initialize(
           value,
           variable,
         );
+        if (context.current == null) return;
       }
     }
   }
   for (final p
       in ctor.formalParameters.whereType<FieldFormalParameterElement>()) {
     store(p.field!, context.readLocal(p), declaration);
+    if (context.current == null) return;
   }
   ast.ArgumentList? superArguments;
   for (final init in initializers) {
@@ -197,6 +203,7 @@ void _initialize(
         final value = evaluate(expression);
         if (value == null) return;
         store(fieldName.element! as FieldElement, value, init);
+        if (context.current == null) return;
       case ast.AssertInitializer(:final condition, :final message):
         lowerAssert(context, condition, message);
         if (context.current == null) return;

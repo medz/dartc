@@ -33,7 +33,9 @@ Value? lowerRecord(
     final slot = field is ast.RecordLiteralNamedField
         ? type.slots[field.name.lexeme]!
         : positional++;
-    fields[slot] = value;
+    final converted = context.normal(context.convert(value, type.fields[slot]));
+    if (converted == null) return null;
+    fields[slot] = converted;
   }
   return context.emit(MakeRecord(type, fields.cast<Value>()));
 }

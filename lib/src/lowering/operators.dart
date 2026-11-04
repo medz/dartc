@@ -31,6 +31,9 @@ Value? lowerBinary(
   Value? right,
 ) {
   if (right == null) return null;
+  if (left.type is DynamicType) {
+    unsupported(context.unit, site, 'dynamic operator dispatch');
+  }
   final direct =
       site is ast.BinaryExpression && site.leftOperand is ast.SuperExpression;
   final member = switch (site) {
@@ -48,7 +51,7 @@ Value? lowerBinary(
           final result = context.callPositionalMember(
             member,
             left,
-            [context.refined(right)],
+            [context.refined(right!)],
             site,
             direct: true,
           );
@@ -79,6 +82,12 @@ Value? lowerBinary(
   }
   if (member?.library.isDartCore != true) {
     unsupported(context.unit, site, 'operator dispatch for ${operator.lexeme}');
+  }
+  if (member != null && member.formalParameters.isNotEmpty) {
+    right = context.convert(
+      right,
+      context.typeOf(member.formalParameters.first.type, site),
+    );
   }
   if (left.type == .string &&
       right.type == .string &&

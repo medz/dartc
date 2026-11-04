@@ -1,10 +1,18 @@
+import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 
-// The analyzer's public DartObject API does not expose instantiated function
-// arguments. A signature cannot recover unused (phantom) arguments or alias
-// identity. Keep this analyzer 14.7 compatibility boundary separate from IR.
+// The public analyzer API omits function-constant arguments/alias identity and
+// pattern context schemas. Keep these analyzer 14.7 metadata reads isolated
+// instead of reconstructing inference or identity from lossy public types.
+// ignore: implementation_imports
+import 'package:analyzer/src/dart/ast/ast.dart' as internal;
+// ignore: implementation_imports
+import 'package:analyzer/src/dart/element/type.dart' as internal;
+// ignore: implementation_imports
+import 'package:analyzer/src/dart/element/type_schema_elimination.dart'
+    as internal;
 // ignore: implementation_imports
 import 'package:analyzer/src/dart/constant/value.dart' as internal;
 // ignore: implementation_imports
@@ -44,4 +52,24 @@ bool constantFunctionHasAlias(DartObject value) {
   final state = value.state as internal.FunctionState;
   return state !=
       internal.FunctionState(state.element, typeArguments: state.typeArguments);
+}
+
+/// The contextual type applied to a declaration/assignment's RHS expression.
+/// For-in patterns do not apply a context schema to each iterated value.
+DartType? patternContextType(ast.DartPattern pattern) {
+  final schema = switch (pattern.parent) {
+    internal.PatternAssignmentImpl(:final patternTypeSchema) ||
+    internal.PatternVariableDeclarationImpl(
+      :final patternTypeSchema,
+    ) => patternTypeSchema,
+    _ => null,
+  };
+  return schema == null
+      ? null
+      : internal.TypeSchemaEliminationVisitor.run(
+          topType: internal.DynamicTypeImpl.instance,
+          bottomType: internal.NeverTypeImpl.instance,
+          isLeastClosure: false,
+          schema: schema,
+        );
 }

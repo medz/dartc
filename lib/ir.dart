@@ -27,6 +27,7 @@ export 'src/ir/signature.dart'
 export 'src/ir/type.dart'
     show
         CellType,
+        DynamicType,
         ClassType,
         FunctionType,
         RecordType,
@@ -39,6 +40,9 @@ export 'src/ir/value.dart'
         CollectionLength,
         CollectionGet,
         ListSet,
+        ListSublist,
+        MapContainsKey,
+        PatternMatchFailure,
         coreCollectionOperation,
         NewCollection,
         CollectionAdd,

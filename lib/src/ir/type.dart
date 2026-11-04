@@ -1,5 +1,8 @@
 /// A static SSA type. Source values carry Dart types; capture cells carry a storage type.
 sealed class const ValueType() {
+  /// The Dart dynamic top type, distinct from nullable Object.
+  static const DynamicType dynamicType = DynamicType();
+
   /// The non-nullable `Object` type.
   static const ClassType object = ClassType._core('Object', null, false);
 
@@ -37,6 +40,13 @@ sealed class const ValueType() {
   /// The error raised by failed runtime type checks.
   static const ClassType typeError = ClassType._core('TypeError', error, false);
 
+  /// The error raised when an operation is invalid in the current state.
+  static const ClassType stateError = ClassType._core(
+    'StateError',
+    error,
+    false,
+  );
+
   /// The error raised by an enabled failed assertion.
   static const ClassType assertionError = ClassType._core(
     'AssertionError',
@@ -60,7 +70,7 @@ sealed class const ValueType() {
   bool get mayBeNull => switch (this) {
     TypeParameterType() => (this as TypeParameterType).bound.mayBeNull,
     NonNullableTypeParameterType() => false,
-    _NullableType() => true,
+    _NullableType() || DynamicType() => true,
     _ => this == nullType || this == voidType,
   };
 
@@ -82,7 +92,12 @@ sealed class const ValueType() {
   /// Whether an operand of [type] can be passed here without a conversion.
   bool accepts(ValueType type) {
     if (this is CellType || type is CellType) return this == type;
-    if (this == type || type == never || this == voidType) return true;
+    if (this == type ||
+        type == never ||
+        this == voidType ||
+        this is DynamicType) {
+      return true;
+    }
     if (this is TypeParameterType) {
       if (type is NonNullableTypeParameterType) {
         return identical(type.parameter, this) ||
@@ -121,6 +136,20 @@ sealed class const ValueType() {
         type is ClassType &&
         type._inherits(this as ClassType);
   }
+}
+
+/// A top type whose operations require runtime dispatch or checked conversion.
+final class const DynamicType() extends ValueType {
+  @override
+  String get dartName => 'dynamic';
+  @override
+  ValueType get nullable => this;
+  @override
+  ValueType get nonNullable => this;
+  @override
+  bool operator ==(Object other) => other is DynamicType;
+  @override
+  int get hashCode => 'dynamic'.hashCode;
 }
 
 /// An internal reference to a captured variable with invariant [content] type.
@@ -307,15 +336,21 @@ final class FunctionType._(
         },
       );
 
-  Map<TypeParameterType, ValueType>? _relate(FunctionType other) {
+  Map<TypeParameterType, ValueType>? _relate(
+    FunctionType other, {
+    bool exactBounds = true,
+  }) {
     if (typeParameters.length != other.typeParameters.length) return null;
     final environment = <TypeParameterType, ValueType>{
       for (final (i, parameter) in other.typeParameters.indexed)
         parameter: typeParameters[i],
     };
     for (final (i, parameter) in typeParameters.indexed) {
-      if (parameter.bound !=
-          substituteType(other.typeParameters[i].bound, environment)) {
+      final bound = substituteType(other.typeParameters[i].bound, environment);
+      if (exactBounds
+          ? parameter.bound != bound
+          : !parameter.bound.accepts(bound) ||
+                !bound.accepts(parameter.bound)) {
         return null;
       }
     }
@@ -360,7 +395,7 @@ final class FunctionType._(
   }
 
   bool _accepts(FunctionType actual) {
-    final environment = _relate(actual);
+    final environment = _relate(actual, exactBounds: false);
     if (environment == null) return false;
     if (typeParameters.isNotEmpty) {
       return _bodyWith(const {})._accepts(actual._bodyWith(environment));

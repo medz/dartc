@@ -1,5 +1,9 @@
 ## Unreleased
 
+List and Map patterns support ordered extraction, list rest slices, missing-key checks, nested destructuring and shared lazy reads across alternatives. Irrefutable shape failures throw StateError; contextual casts and assignment writes preserve Dart's failure ordering and atomicity.
+
+IR distinguishes dynamic from Object? and preserves implicit checks for typed storage, arguments, returns, record and collection elements, and boolean contexts. Dynamic receiver/member/operator dispatch remains unsupported. Statements and collection elements now share declaration and loop lowering; ordinary and dot-shorthand calls share their evaluation paths.
+
 Generic top-level functions, static and instance methods, local functions and closures retain scoped type parameters, bounds and runtime type environments. Direct calls, function values and explicit or contextual instantiation preserve inferred type arguments, polymorphic recursion and virtual entry checks. Generic function types compare structurally up to binder renaming.
 
 Generic constructor tear-offs support aliases with reordered, fixed or repeated type arguments and preserve distinct alias identity. Constant and default function values retain type arguments even when those arguments do not appear in their signature. Constant-pattern caches distinguish function and constructor instantiations.
@@ -38,7 +42,7 @@ Use scalar and record patterns with `when` guards in `if-case`, `switch` stateme
 
 `Lowering.lower` returns an `IrProgram` with `classes` and `functions`. Classes support generative and factory constructors, including redirects to named constructors with optional arguments. Instance methods and getters dispatch on the receiver, including overrides with different defaults and covariant parameters. Runtime type tests and catch clauses follow superclass and interface declarations.
 
-The development checkout pins analyzer 14.7.0 for constant-function metadata compatibility and can print compiler IR. Native executables, libraries and the `Export` API remain available in [release 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).
+The development checkout pins analyzer 14.7.0 for resolved-metadata compatibility and can print compiler IR. Native executables, libraries and the `Export` API remain available in [release 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).
 
 ## [0.5.0](https://github.com/medz/dartc/compare/v0.4.0...v0.5.0) — 2026-10-31
 

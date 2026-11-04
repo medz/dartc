@@ -1,9 +1,9 @@
 import 'package:analyzer/dart/ast/ast.dart' as ast;
-import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
 import 'function_context.dart';
+import 'iteration.dart';
 import 'pattern.dart';
 
 /// Evaluates a collection literal in source order using mutable core storage.
@@ -28,25 +28,38 @@ Value? lowerCollection(
     if (skip.hasIncoming) skip.enter();
   }
 
+  void add(Value value) {
+    final converted = context.normal(
+      context.convert(value, type.typeArguments.single),
+    );
+    if (converted != null) context.emit(CollectionAdd(result, converted));
+  }
+
   void element(ast.CollectionElement node) {
     if (context.current == null) return;
     switch (node) {
       case ast.Expression():
         final value = evaluate(node);
-        if (value != null) context.emit(CollectionAdd(result, value));
+        if (value != null) add(value);
       case ast.NullAwareElement(:final value):
         final operand = evaluate(value);
-        if (operand != null) {
-          nonNull(operand, (v) => context.emit(CollectionAdd(result, v)));
-        }
+        if (operand != null) nonNull(operand, add);
       case ast.MapLiteralEntry():
         final key = evaluate(node.key);
         if (key == null) return;
         void entry(Value key) {
+          final convertedKey = context.normal(
+            context.convert(key, type.typeArguments[0]),
+          );
+          if (convertedKey == null) return;
+          key = convertedKey;
           final value = evaluate(node.value);
           if (value == null) return;
           void put(Value value) {
-            context.emit(MapPut(result, key, value));
+            final converted = context.normal(
+              context.convert(value, type.typeArguments[1]),
+            );
+            if (converted != null) context.emit(MapPut(result, key, converted));
           }
 
           if (node.valueQuestion != null) {
@@ -111,59 +124,14 @@ Value? lowerCollection(
           );
         } else {
           final parts = node.forLoopParts as ast.ForParts;
-          context.inScope(() {
-            final iteration = context.forInitializer(() {
-              switch (parts) {
-                case ast.ForPartsWithDeclarations(:final variables):
-                  for (final declaration in variables.variables) {
-                    if (declaration.isLate) {
-                      unsupported(
-                        context.unit,
-                        declaration,
-                        'late collection loop variable',
-                      );
-                    }
-                    final local = declaration.declaredFragment!.element;
-                    final type = context.typeOf(local.type, declaration);
-                    final initializer = declaration.initializer;
-                    if (initializer == null && !type.accepts(.nullType)) {
-                      context.declareUninitialized(local, type);
-                    } else {
-                      final value = initializer == null
-                          ? const Constant.nullValue()
-                          : evaluate(initializer);
-                      if (value == null) return;
-                      context.declare(local, type, value);
-                    }
-                  }
-                case ast.ForPartsWithExpression(:final initialization):
-                  if (initialization != null) evaluate(initialization);
-                case ast.ForPartsWithPattern(:final variables):
-                  declarePattern(
-                    context,
-                    variables.pattern,
-                    evaluate(variables.expression),
-                  );
-              }
-            });
-            if (context.current == null) return;
-            final header = JumpTarget(context)
-              ..jump()
-              ..enter();
-            if (parts.condition case final condition?) {
-              context.guard(evaluate(condition), exit);
-            }
-            element(node.body);
-            if (context.current != null) {
-              for (final local in iteration) {
-                context.nextIteration(local);
-              }
-              for (final update in parts.updaters) {
-                if (evaluate(update) == null) break;
-              }
-              header.jump();
-            }
-          });
+          lowerLoop(
+            context,
+            evaluate,
+            () => element(node.body),
+            parts.condition,
+            exit,
+            parts: parts,
+          );
         }
         exit.enter();
       default:
@@ -175,45 +143,4 @@ Value? lowerCollection(
     element(node);
   }
   return context.current == null ? null : result;
-}
-
-/// Lowers the iterator protocol with a fresh declaration scope per iteration.
-void lowerForEach(
-  FunctionContext context,
-  ast.ForEachParts parts,
-  Value? Function(ast.Expression) evaluate,
-  void Function() body,
-  JumpTarget exit, {
-  void Function(void Function())? setContinue,
-}) {
-  final iterable = evaluate(parts.iterable);
-  if (iterable == null) return;
-  final iterator = context.emit(GetIterator(iterable));
-  final header = JumpTarget(context)
-    ..jump()
-    ..enter();
-  setContinue?.call(header.jump);
-  context.guard(context.emit(IteratorMoveNext(iterator)), exit);
-  context.inScope(() {
-    final value = context.emit(IteratorCurrent(iterator));
-    switch (parts) {
-      case ast.ForEachPartsWithDeclaration(:final loopVariable):
-        final local = loopVariable.declaredFragment!.element;
-        final type = context.typeOf(local.type, loopVariable);
-        context.declare(local, type, context.cast(value, type));
-      case ast.ForEachPartsWithIdentifier(:final identifier):
-        final local = identifier.element;
-        if (local is! VariableElement || !context.hasLocal(local)) {
-          unsupported(context.unit, identifier, 'for-in assignment target');
-        }
-        context.writeLocal(
-          local,
-          context.cast(value, context.typeOf(local.type, identifier)),
-        );
-      case ast.ForEachPartsWithPattern(:final pattern):
-        declarePattern(context, pattern, value);
-    }
-    if (context.current != null) body();
-  });
-  header.jump();
 }

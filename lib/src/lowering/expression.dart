@@ -49,59 +49,6 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
               context.typeOf(expression.staticType!, expression),
             )
           : sections();
-    case ast.DotShorthandConstructorInvocation():
-      if (expression.isConst) {
-        return context.bindings.constantValue(
-          expression.computeConstantValue()?.value,
-          unit,
-          expression,
-        );
-      }
-      final ctor = expression.element;
-      if (ctor is! ConstructorElement) {
-        unsupported(unit, expression, 'dot shorthand constructor');
-      }
-      final source = context.bindings.target(ctor, unit, expression);
-      final construction = source.resolveConstruction(
-        context.typeOf(expression.staticType!, expression) as ClassType,
-      );
-      final target = construction.target;
-      final args = evaluateArguments(
-        expression.argumentList,
-        (e) => lowerExpression(context, e),
-      );
-      if (args == null) return null;
-      final bound = context.bindings.bind(target, args);
-      final instanceType = construction.ownerType;
-      return context.emit(
-        target.kind == .factory
-            ? DirectCall(target, bound, ownerType: instanceType)
-            : Construct(target, bound, instantiatedType: instanceType),
-      );
-    case ast.DotShorthandInvocation():
-      final callee = expression.memberName.element;
-      if (callee is! MethodElement ||
-          !callee.isStatic ||
-          callee.enclosingElement is! ClassElement) {
-        unsupported(unit, expression, 'dot shorthand invocation');
-      }
-      final target = context.bindings.target(callee, unit, expression);
-      final args = evaluateArguments(
-        expression.argumentList,
-        (e) => lowerExpression(context, e),
-      );
-      return args == null
-          ? null
-          : context.emit(
-              DirectCall(
-                target,
-                context.bindings.bind(target, args),
-                typeArguments: context.typeArguments(
-                  expression.typeArgumentTypes,
-                  expression,
-                ),
-              ),
-            );
     case ast.DotShorthandPropertyAccess():
       final member = expression.propertyName.element;
       if (member is MethodElement &&
@@ -143,7 +90,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       :final argumentList,
     ):
       final function = context.readLocal(local);
-      final args = evaluateArguments(
+      final args = context.arguments(
         argumentList,
         (e) => lowerExpression(context, e),
       );
@@ -194,10 +141,11 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       final signature = context.typeOf(resolved, expression) as FunctionType;
       final generic = signature.typeParameters.isNotEmpty;
       final alias = constructorName.type.element;
+      final original = target.tearOffSignature();
       final distinctAlias =
           generic &&
           alias is TypeAliasElement &&
-          signature != target.tearOffSignature();
+          !(signature.accepts(original) && original.accepts(signature));
       return FunctionConstant(
         target,
         ownerType: generic ? null : signature.result as ClassType,
@@ -227,21 +175,31 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       return FunctionConstant(
         context.bindings.target(method, unit, expression),
       );
-    case ast.InstanceCreationExpression(
-      :final constructorName,
-      :final argumentList,
-    ):
-      if (expression.isConst) {
+    case ast.DotShorthandConstructorInvocation(
+          :final isConst,
+          :final argumentList,
+          element: final ctor,
+        ) ||
+        ast.InstanceCreationExpression(
+          :final isConst,
+          :final argumentList,
+          constructorName: ast.ConstructorName(element: final ctor),
+        ):
+      if (isConst) {
         return context.bindings.constantValue(
           expression.computeConstantValue()?.value,
           unit,
           expression,
         );
       }
-      final ctor = constructorName.element!;
-      if (constructorName.type.importPrefix?.element
-          case final PrefixElement prefix
-          when prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
+      if (ctor is! ConstructorElement) {
+        unsupported(unit, expression, 'dot shorthand constructor');
+      }
+      final prefix = expression is ast.InstanceCreationExpression
+          ? expression.constructorName.type.importPrefix?.element
+          : null;
+      if (prefix is PrefixElement &&
+          prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
         unsupported(unit, expression, 'deferred constructor');
       }
       final source = context.bindings.target(ctor, unit, expression);
@@ -249,7 +207,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         context.typeOf(expression.staticType!, expression) as ClassType,
       );
       final target = construction.target;
-      final args = evaluateArguments(
+      final args = context.arguments(
         argumentList,
         (e) => lowerExpression(context, e),
       );
@@ -462,16 +420,26 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         expression,
         (e) => lowerExpression(context, e),
       ).lower();
-    case ast.MethodInvocation(
-          methodName: ast.SimpleIdentifier(
-            element: final ExecutableElement callee,
-          ),
-        )
-        when callee is TopLevelFunctionElement ||
-            callee is MethodElement &&
+    case ast.DotShorthandInvocation(
+              memberName: ast.SimpleIdentifier(
+                element: final ExecutableElement callee,
+              ),
+              :final argumentList,
+              :final typeArgumentTypes,
+            ) ||
+            ast.MethodInvocation(
+              methodName: ast.SimpleIdentifier(
+                element: final ExecutableElement callee,
+              ),
+              :final argumentList,
+              :final typeArgumentTypes,
+            )
+        when callee is MethodElement &&
                 callee.isStatic &&
-                callee.enclosingElement is ClassElement:
-      if (expression.target case final receiver?) {
+                callee.enclosingElement is ClassElement ||
+            expression is ast.MethodInvocation &&
+                callee is TopLevelFunctionElement:
+      if (expression case ast.MethodInvocation(target: final receiver?)) {
         final prefix = receiver is ast.SimpleIdentifier
             ? receiver.element
             : null;
@@ -489,8 +457,8 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         }
       }
       final target = context.bindings.target(callee, unit, expression);
-      final args = evaluateArguments(
-        expression.argumentList,
+      final args = context.arguments(
+        argumentList,
         (e) => lowerExpression(context, e),
       );
       return args == null
@@ -500,11 +468,13 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
                 target,
                 context.bindings.bind(target, args),
                 typeArguments: context.typeArguments(
-                  expression.typeArgumentTypes,
+                  typeArgumentTypes,
                   expression,
                 ),
               ),
             );
+    case ast.DotShorthandInvocation():
+      unsupported(unit, expression, 'dot shorthand invocation');
     case ast.BinaryExpression(
       :final leftOperand,
       :final rightOperand,
@@ -524,7 +494,9 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       if (operator.type == .AMPERSAND_AMPERSAND || operator.type == .BAR_BAR) {
         final and = operator.type == .AMPERSAND_AMPERSAND;
         if (left case ScalarConstant(value: final bool value)) {
-          return value == and ? lowerExpression(context, rightOperand) : left;
+          if (value != and) return left;
+          final right = lowerExpression(context, rightOperand);
+          return right == null ? null : context.convert(right, .boolean);
         }
         return context.shortCircuit(
           left,

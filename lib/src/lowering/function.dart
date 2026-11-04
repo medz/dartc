@@ -6,10 +6,11 @@ import 'package:dartc/ir.dart';
 import 'assertion.dart';
 import 'bindings.dart';
 import 'closures.dart';
-import 'collection.dart';
 import 'exception.dart';
 import 'expression.dart';
 import 'function_context.dart';
+import 'iteration.dart';
+import 'local_declaration.dart';
 import 'pattern.dart';
 import 'switch_statement.dart';
 
@@ -124,6 +125,10 @@ final class FunctionLowering._(
 
   void _return(Value? value) {
     if (context.current == null) return;
+    if (value != null) {
+      value = context.normal(context.convert(value, _target.returnType));
+      if (value == null) return;
+    }
     if (_finally case final region?) {
       region.returnValue(value);
       return;
@@ -178,39 +183,6 @@ final class FunctionLowering._(
     });
   }
 
-  void _variables(ast.VariableDeclarationList declarations) {
-    for (final variable in declarations.variables) {
-      final initializer = variable.initializer;
-      final local = variable.declaredFragment!.element;
-      final type = context.typeOf(local.type, variable);
-      if (variable.isLate) {
-        unsupported(context.unit, variable, 'late local');
-      }
-      if (initializer == null && (local.isFinal || !type.accepts(.nullType))) {
-        context.declareUninitialized(local, type);
-        continue;
-      }
-      final value = switch (initializer) {
-        null => const Constant.nullValue(),
-        _ when local.isConst => context.bindings.constantOf(
-          local,
-          context.unit,
-          initializer,
-        ),
-        _ => lowerExpression(context, initializer),
-      };
-      if (value == null) return;
-      if (!type.accepts(value.type)) {
-        unsupported(
-          context.unit,
-          initializer ?? variable,
-          'implicit conversion',
-        );
-      }
-      context.declare(local, type, value);
-    }
-  }
-
   void _patternDeclaration(ast.PatternVariableDeclaration declaration) {
     declarePattern(
       context,
@@ -230,7 +202,7 @@ final class FunctionLowering._(
           expression == null ? null : lowerExpression(context, expression),
         );
       case ast.VariableDeclarationStatement(:final variables):
-        _variables(variables);
+        lowerVariables(context, variables, (e) => lowerExpression(context, e));
       case ast.FunctionDeclarationStatement(:final functionDeclaration):
         final syntax = functionDeclaration.functionExpression;
         context.bindCapture(
@@ -306,39 +278,36 @@ final class FunctionLowering._(
 
   void _breakable(ast.Statement statement) {
     final exit = _breaks[statement] = JumpTarget(context);
+    Value? evaluate(ast.Expression expression) =>
+        lowerExpression(context, expression);
+    void setContinue(void Function() jump) => _continues[statement] = jump;
     switch (statement) {
       case ast.SwitchStatement():
         lowerSwitchStatement(context, statement, exit, _continues, _statement);
-      case ast.WhileStatement(:final body, :final condition):
-        _loop(statement, body, condition, exit);
-      case ast.DoStatement(:final body, :final condition):
-        _loop(statement, body, condition, exit, testAfterBody: true);
+      case ast.WhileStatement(:final body, :final condition) ||
+          ast.DoStatement(:final body, :final condition):
+        lowerLoop(
+          context,
+          evaluate,
+          () => _scoped(body),
+          condition,
+          exit,
+          setContinue: setContinue,
+          testAfterBody: statement is ast.DoStatement,
+        );
       case ast.ForStatement(
         :final body,
         forLoopParts: final ast.ForParts parts,
       ):
-        context.inScope(() {
-          final iteration = context.forInitializer(() {
-            switch (parts) {
-              case ast.ForPartsWithDeclarations(:final variables):
-                _variables(variables);
-              case ast.ForPartsWithExpression(:final initialization):
-                if (initialization != null) {
-                  lowerExpression(context, initialization);
-                }
-              case ast.ForPartsWithPattern(:final variables):
-                _patternDeclaration(variables);
-            }
-          });
-          _loop(
-            statement,
-            body,
-            parts.condition,
-            exit,
-            updates: parts.updaters,
-            iteration: iteration,
-          );
-        });
+        lowerLoop(
+          context,
+          evaluate,
+          () => _scoped(body),
+          parts.condition,
+          exit,
+          parts: parts,
+          setContinue: setContinue,
+        );
       case ast.ForStatement(
         forLoopParts: final ast.ForEachParts parts,
         :final body,
@@ -349,55 +318,16 @@ final class FunctionLowering._(
         lowerForEach(
           context,
           parts,
-          (e) => lowerExpression(context, e),
+          evaluate,
           () => _scoped(body),
           exit,
-          setContinue: (jump) => _continues[statement] = jump,
+          setContinue: setContinue,
         );
-        _continues.remove(statement);
       default:
         _statement(statement);
     }
+    _continues.remove(statement);
     _breaks.remove(statement);
     exit.enter();
-  }
-
-  void _loop(
-    ast.Statement statement,
-    ast.Statement body,
-    ast.Expression? condition,
-    JumpTarget exit, {
-    bool testAfterBody = false,
-    Iterable<ast.Expression> updates = const [],
-    List<VariableElement> iteration = const [],
-  }) {
-    if (context.current == null) return;
-    final header = JumpTarget(context)
-      ..jump()
-      ..enter();
-    final next = testAfterBody || updates.isNotEmpty || iteration.isNotEmpty
-        ? JumpTarget(context)
-        : header;
-    _continues[statement] = next.jump;
-    if (!testAfterBody && condition != null) {
-      context.guard(lowerExpression(context, condition), exit);
-    }
-    if (context.current != null) {
-      _scoped(body);
-      if (next != header) next.enter();
-      if (context.current != null) {
-        for (final variable in iteration) {
-          context.nextIteration(variable);
-        }
-        for (final update in updates) {
-          if (lowerExpression(context, update) == null) break;
-        }
-        if (testAfterBody) {
-          context.guard(lowerExpression(context, condition!), exit);
-        }
-        header.jump();
-      }
-    }
-    _continues.remove(statement);
   }
 }

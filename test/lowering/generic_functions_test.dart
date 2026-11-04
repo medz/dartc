@@ -1,56 +1,16 @@
-import 'package:dartc/ir.dart';
-import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
-import 'fixtures/effects.dart' as effects;
+import 'fixture_comparison.dart';
 import 'fixtures/generic_functions.dart' as sdk;
 
 void main() {
-  late FixtureRunner runner;
-  late IrProgram program;
-  late Map<String, IrFunction> functions;
+  late FixtureComparison fixture;
   setUpAll(() async {
-    program = await CheckedLibraries.read([
-      'test/lowering/fixtures/generic_functions.dart',
-    ], Lowering.lower);
-    functions = {
-      for (final function in program.functions)
-        if (function.target.owner == null) function.target.name: function,
-    };
-    final library = Uri.base.resolve('test/lowering/fixtures/effects.dart');
-    runner = FixtureRunner(program, {
-      (library, 'tick'): effects.tick,
-      (library, 'probe'): effects.probe,
-    });
+    fixture = await FixtureComparison.load('generic_functions');
   });
 
-  void compare(String name, List<Object?> args, Object? Function() expected) {
-    (Object?, Object?, List<int>) observe(Object? Function() run) {
-      effects.calls.clear();
-      Object? result;
-      Object? error;
-      try {
-        result = run();
-      } catch (e) {
-        error = switch (e) {
-          StateError(:final message) => (StateError, message),
-          TypeError() => TypeError,
-          _ => e.runtimeType,
-        };
-      }
-      return (result, error, List.of(effects.calls));
-    }
-
-    final reference = observe(expected);
-    final actual = observe(() => runner.run(functions[name]!, args));
-    expect(actual.$1, reference.$1, reason: name);
-    expect(actual.$2, reference.$2, reason: name);
-    expect(actual.$3, reference.$3, reason: name);
-  }
-
   test('generic declarations retain one body across instantiations', () {
-    final identities = program.functions.where(
+    final identities = fixture.program.functions.where(
       (f) => f.target.name == 'identity',
     );
     expect(identities, hasLength(1));
@@ -60,7 +20,7 @@ void main() {
   void compareIntegers(List<(String, Object? Function(int))> cases) {
     for (final seed in [-1, 0, 1, 7]) {
       for (final (name, function) in cases) {
-        compare(name, [seed], () => function(seed));
+        fixture.compare(name, [seed], () => function(seed));
       }
     }
   }
@@ -104,7 +64,7 @@ void main() {
   });
 
   test('nested generic bounds reify covariant callback parameters', () {
-    compare(
+    fixture.compare(
       'genericNestedBoundCovariance',
       [],
       sdk.genericNestedBoundCovariance,
@@ -116,10 +76,10 @@ void main() {
     () {
       compareIntegers([('genericAnonymous', sdk.genericAnonymous)]);
       for (final candidate in <Object>[1, 2.5, 'x', true]) {
-        compare('genericNestedAnonymous', [
+        fixture.compare('genericNestedAnonymous', [
           candidate,
         ], () => sdk.genericNestedAnonymous(candidate));
-        compare('genericReturnedAnonymous', [
+        fixture.compare('genericReturnedAnonymous', [
           candidate,
         ], () => sdk.genericReturnedAnonymous(candidate));
       }
@@ -143,19 +103,21 @@ void main() {
   test('generic recursion may change type arguments', () {
     compareIntegers([('genericLocalRecursion', sdk.genericLocalRecursion)]);
     for (final depth in [0, 1, 3]) {
-      compare('genericRecursion', [depth], () => sdk.genericRecursion(depth));
+      fixture.compare('genericRecursion', [
+        depth,
+      ], () => sdk.genericRecursion(depth));
     }
   });
 
   test('generic closures retain owner and enclosing function types', () {
     for (final candidate in <Object>[1, 2.5, 'x', true]) {
-      compare('genericCapturedBoth', [
+      fixture.compare('genericCapturedBoth', [
         candidate,
       ], () => sdk.genericCapturedBoth(candidate));
-      compare('genericCapturedOwner', [
+      fixture.compare('genericCapturedOwner', [
         candidate,
       ], () => sdk.genericCapturedOwner(candidate));
-      compare('genericCapturedFunction', [
+      fixture.compare('genericCapturedFunction', [
         candidate,
       ], () => sdk.genericCapturedFunction(candidate));
     }
@@ -173,12 +135,16 @@ void main() {
       ('genericAliasConstructorIdentity', sdk.genericAliasConstructorIdentity),
       ('genericDependentBounds', sdk.genericDependentBounds),
     ]) {
-      compare(name, [], function);
+      fixture.compare(name, [], function);
     }
   });
   test('literal null tests remain dependent on runtime type arguments', () {
-    compare('genericNullLiteralChecks', [], sdk.genericNullLiteralChecks);
-    compare(
+    fixture.compare(
+      'genericNullLiteralChecks',
+      [],
+      sdk.genericNullLiteralChecks,
+    );
+    fixture.compare(
       'genericNullLiteralCastFailure',
       [],
       sdk.genericNullLiteralCastFailure,

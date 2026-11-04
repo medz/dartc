@@ -52,6 +52,9 @@ void writeFunction(
     for (final e in named.entries) '${e.key}: ${value(e.value)}',
   ].join(', ');
   String operation(Instruction op) => switch (op) {
+    ListSublist() => 'listSublist ${op.inputs.map(value).join(', ')}',
+    MapContainsKey() => 'mapContainsKey ${value(op.map)}, ${value(op.key)}',
+    PatternMatchFailure() => 'patternMatchFailure',
     CollectionLength() => 'length ${value(op.collection)}',
     CollectionGet() =>
       'collectionGet ${value(op.collection)}, ${value(op.key)}',
