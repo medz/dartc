@@ -42,6 +42,7 @@ export 'src/ir/value.dart'
         ListSet,
         ListSublist,
         MapContainsKey,
+        MapEntries,
         PatternMatchFailure,
         coreCollectionOperation,
         NewCollection,

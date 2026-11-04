@@ -61,6 +61,7 @@ void writeFunction(
     ListSublist() => 'listSublist ${op.inputs.map(value).join(', ')}',
     MapContainsKey() => 'mapContainsKey ${value(op.map)}, ${value(op.key)}',
     PatternMatchFailure() => 'patternMatchFailure',
+    MapEntries() => 'entries ${value(op.map)}',
     CollectionLength() => 'length ${value(op.collection)}',
     CollectionGet() =>
       'collectionGet ${value(op.collection)}, ${value(op.key)}',

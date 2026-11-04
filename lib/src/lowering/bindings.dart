@@ -127,15 +127,24 @@ final class Bindings({final bool enableAssertions = false}) {
     FieldElement element,
     ResolvedUnitResult unit,
     ast.AstNode site,
-  ) => _fields.putIfAbsent(
-    element.baseElement,
-    () => InstanceField(
-      classType(element.enclosingElement as InterfaceElement, unit, site),
+  ) => _fields.putIfAbsent(element.baseElement, () {
+    final owner = classType(
+      element.enclosingElement as InterfaceElement,
+      unit,
+      site,
+    );
+    if (owner == CoreTypes.mapEntry) {
+      return element.name == 'key'
+          ? CoreTypes.mapEntryKey
+          : CoreTypes.mapEntryValue;
+    }
+    return InstanceField(
+      owner,
       element.name!,
       valueType(element.type, unit, site),
       isFinal: element.isFinal,
-    ),
-  );
+    );
+  });
 
   /// Reads a resolved constant or optional parameter's default value.
   Constant constantOf(
@@ -273,7 +282,9 @@ final class Bindings({final bool enableAssertions = false}) {
           final element = layerType.element;
           if (element is! ClassElement ||
               element.mixins.isNotEmpty ||
-              element.library.isInSdk && !layerType.isDartCoreObject ||
+              element.library.isInSdk &&
+                  !layerType.isDartCoreObject &&
+                  !(element.library.isDartCore && element.name == 'MapEntry') ||
               !layer.hasKnownValue) {
             unsupported(unit, site, 'constant ${layer.type}');
           }
@@ -533,6 +544,7 @@ final class Bindings({final bool enableAssertions = false}) {
         'List' => CoreTypes.list,
         'Set' => CoreTypes.set,
         'Map' => CoreTypes.map,
+        'MapEntry' => CoreTypes.mapEntry,
         _ => null,
       };
       if (builtin != null) {

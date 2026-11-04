@@ -75,8 +75,14 @@ void lowerForEach(
   JumpTarget exit, {
   void Function(void Function())? setContinue,
 }) {
-  final iterable = evaluate(parts.iterable);
+  var iterable = evaluate(parts.iterable);
   if (iterable == null) return;
+  if (iterable.type is DynamicType) {
+    iterable = context.normal(
+      context.cast(iterable, CoreTypes.iterableOf(.dynamicType)),
+    );
+    if (iterable == null) return;
+  }
   final iterator = context.emit(GetIterator(iterable));
   final header = JumpTarget(context)
     ..jump()

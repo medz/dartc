@@ -145,7 +145,12 @@ final class FixtureRunner(
     ClassType? instantiatedType,
   ]) {
     final instance = _Instance(instantiatedType ?? init.owner!, this);
-    if (init.owner != ValueType.object) _enter(init, [instance, ...arguments]);
+    if (init.owner == CoreTypes.mapEntry) {
+      instance.fields[CoreTypes.mapEntryKey] = arguments[0];
+      instance.fields[CoreTypes.mapEntryValue] = arguments[1];
+    } else if (init.owner != ValueType.object) {
+      _enter(init, [instance, ...arguments]);
+    }
     return instance;
   }
 
@@ -280,11 +285,37 @@ final class FixtureRunner(
     (map as Map<Object?, Object?>)[key] = value;
   }
 
+  Object? _mapEntries(Object? source) {
+    if (source is _Instance) return _member(source, 'entries', .getter, []);
+    if (source is _CollectionValue) {
+      final type = CoreTypes.mapEntryOf(
+        source.type.typeArguments[0],
+        source.type.typeArguments[1],
+      );
+      return _CollectionValue(
+        CoreTypes.iterableOf(type),
+        (source.storage as Map<Object?, Object?>).entries.map(
+          (entry) => _Instance(type, this)
+            ..fields[CoreTypes.mapEntryKey] = entry.key
+            ..fields[CoreTypes.mapEntryValue] = entry.value,
+        ),
+      );
+    }
+    return (source as Map<Object?, Object?>).entries;
+  }
+
+  Object? _entryField(Object? entry, InstanceField field) => entry is _Instance
+      ? entry.fields[field]
+      : field == CoreTypes.mapEntryKey
+      ? (entry as MapEntry<Object?, Object?>).key
+      : (entry as MapEntry<Object?, Object?>).value;
+
   void _spread(
     Object? collection,
     Object? source,
     bool isMap,
     bool isMethodCall,
+    bool checksMapEntries,
   ) {
     if (collection is _Instance) {
       _member(collection, 'addAll', .method, [source]);
@@ -302,7 +333,24 @@ final class FixtureRunner(
       collection.checkMutable();
     }
     if (isMap) {
-      if (source is _Instance) {
+      if (checksMapEntries) {
+        final type = (collection as _CollectionValue).type;
+        final iterator = _iterator(_mapEntries(source));
+        while (_moveNext(iterator)) {
+          final entry = _current(iterator);
+          final key = _typeOperation(
+            type.typeArguments[0],
+            _entryField(entry, CoreTypes.mapEntryKey),
+            cast: true,
+          );
+          final value = _typeOperation(
+            type.typeArguments[1],
+            _entryField(entry, CoreTypes.mapEntryValue),
+            cast: true,
+          );
+          _put(collection, key, value);
+        }
+      } else if (source is _Instance) {
         final type = source.type.asInstanceOf(CoreTypes.map)!;
         _member(source, 'forEach', .method, [
           _NativeFunction(FunctionType(.voidType, type.typeArguments), (args) {
@@ -354,12 +402,14 @@ final class FixtureRunner(
           :final collection,
           :final source,
           :final isMethodCall,
+          :final checksMapEntries,
         ):
           _spread(
             read(collection),
             read(source),
             CoreTypes.view(collection.type, CoreTypes.map) != null,
             isMethodCall,
+            checksMapEntries,
           );
         case MapPut(:final map, :final key, :final value):
           _put(read(map), read(key), read(value));
@@ -369,6 +419,8 @@ final class FixtureRunner(
           values[op] = _moveNext(read(iterator)!);
         case IteratorCurrent(:final iterator):
           values[op] = _current(read(iterator)!);
+        case MapEntries(:final map):
+          values[op] = _mapEntries(read(map));
         case CollectionLength(:final collection):
           final value = read(collection);
           final storage = value is _CollectionValue ? value.storage : value;
@@ -496,7 +548,9 @@ final class FixtureRunner(
             cast: true,
           );
         case LoadField(:final field, :final receiver):
-          values[op] = (read(receiver) as _Instance).fields[field];
+          values[op] = field.owner == CoreTypes.mapEntry
+              ? _entryField(read(receiver), field)
+              : (read(receiver) as _Instance).fields[field];
         case InstanceCall(
           :final typeArguments,
           :final member,

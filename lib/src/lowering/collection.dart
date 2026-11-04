@@ -81,6 +81,14 @@ Value? lowerCollection(
         final source = evaluate(node.expression);
         if (source == null) return;
         void spread(Value value) {
+          if (value.type is DynamicType) {
+            final protocol = CoreTypes.view(type, CoreTypes.map) == null
+                ? CoreTypes.iterableOf(.dynamicType)
+                : CoreTypes.mapOf(.dynamicType, .dynamicType);
+            final checked = context.normal(context.cast(value, protocol));
+            if (checked == null) return;
+            value = checked;
+          }
           context.emit(CollectionSpread(result, value));
         }
         if (node.isNullAware) {

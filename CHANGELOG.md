@@ -1,5 +1,7 @@
 ## Unreleased
 
+Dynamic for-in and collection spreads check the source protocol before traversal and cast elements in evaluation order. Map spreads requiring key/value checks use entries; compatible spreads use forEach. MapEntry values support ordinary and constant construction, generic key/value reads and lazy Map.entries views.
+
 Constant List, Set, Map and ordinary user-class instances lower from analyzer-evaluated values. Nested constants, generic and inherited storage, defaults and constructor aliases retain canonical identity. Collection writes preserve reified type checks and immutable-operation failures; method addAll checks its source before traversal, separately from literal spreads.
 
 List and Map patterns support ordered extraction, list rest slices, missing-key checks, nested destructuring and shared lazy reads across alternatives. Irrefutable shape failures throw StateError; contextual casts and assignment writes preserve Dart's failure ordering and atomicity.

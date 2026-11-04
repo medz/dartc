@@ -7,7 +7,7 @@
 | 块、空语句、表达式语句 | 同步块、空语句和已支持的表达式。 |
 | 局部变量与同步局部函数 | 支持[局部变量](variables.md)和可递归调用、捕获外部变量的[局部函数](functions.md)。 |
 | if/else、while、do、普通 for | 普通 if/else、while、do-while 和三段式 for。for 支持变量声明、表达式或空初始段，以及多个按序求值的更新表达式。每轮更新前为循环头声明的变量建立新绑定，闭包保留所捕获那一轮的绑定。见[循环闭包样本](../test/lowering/fixtures/closures.dart)。 |
-| for-in | 支持同步迭代、局部变量声明、已有局部变量赋值和 record 模式。iterator 只读取一次，每轮先 moveNext 再 current；声明变量每轮建立新绑定，已有变量保持共享。break、continue 和异常保留 finally 执行。见[集合与迭代样本](../test/lowering/fixtures/collections.dart)。 |
+| for-in | 支持同步迭代、局部变量声明、已有局部变量赋值和 record 模式。iterator 只读取一次，每轮先 moveNext 再 current；声明变量每轮建立新绑定，已有变量保持共享。break、continue 和异常保留 finally 执行。见[集合与迭代样本](../test/lowering/fixtures/collections.dart)。 dynamic 源先检查 Iterable 协议，元素按循环变量或模式的要求逐项转换。 |
 | if-case、模式声明及循环头 | if-case 支持标量与 record 模式及守卫。局部声明和三段式 for 可使用 record 解构。见[模式](patterns.md)。 |
 | switch、守卫、共享 case、隐式 break | 支持标量与 record 模式、when、default 和多个 case 共享的分支体。分支体正常结束时退出 switch。非穷尽类型未命中时继续执行 switch 后的语句。见[switch 语句样本](../test/lowering/fixtures/switch_statements.dart)。 |
 | 标签、break、continue | 支持循环和 switch 的 break，以及从带标签的语句中 break。continue 可跳到目标循环的继续点或 switch 标签对应的分支体。跳向 case 时跳过其模式与守卫。 |

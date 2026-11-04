@@ -1,8 +1,14 @@
+import 'signature.dart';
 import 'type.dart';
 
 /// Canonical identities for the core collection protocols and literal types.
 abstract final class CoreTypes() {
-  static ClassType _declare(String name, int arity, {bool sequence = false}) {
+  static ClassType _declare(
+    String name,
+    int arity, {
+    bool sequence = false,
+    bool isAbstract = true,
+  }) {
     final parameters = [
       for (var i = 0; i < arity; i++)
         TypeParameterType('T$i')..initializeBound(ValueType.object.nullable),
@@ -11,7 +17,7 @@ abstract final class CoreTypes() {
       Uri.parse('dart:core'),
       name,
       typeParameters: parameters,
-      isAbstract: true,
+      isAbstract: isAbstract,
     );
     type.initializeHierarchy(
       interfaces: sequence ? [iterableOf(parameters.single)] : [],
@@ -24,6 +30,19 @@ abstract final class CoreTypes() {
   static final ClassType list = _declare('List', 1, sequence: true);
   static final ClassType set = _declare('Set', 1, sequence: true);
   static final ClassType map = _declare('Map', 2);
+  static final ClassType mapEntry = _declare('MapEntry', 2, isAbstract: false);
+  static final InstanceField mapEntryKey = InstanceField(
+    mapEntry,
+    'key',
+    mapEntry.typeParameters[0],
+    isFinal: true,
+  );
+  static final InstanceField mapEntryValue = InstanceField(
+    mapEntry,
+    'value',
+    mapEntry.typeParameters[1],
+    isFinal: true,
+  );
 
   static ClassType iterableOf(ValueType element) =>
       iterable.instantiate([element]);
@@ -33,6 +52,9 @@ abstract final class CoreTypes() {
   static ClassType setOf(ValueType element) => set.instantiate([element]);
   static ClassType mapOf(ValueType key, ValueType value) =>
       map.instantiate([key, value]);
+
+  static ClassType mapEntryOf(ValueType key, ValueType value) =>
+      mapEntry.instantiate([key, value]);
 
   /// Resolves an inherited protocol without erasing its arguments.
   static ClassType? view(ValueType type, ClassType declaration) {

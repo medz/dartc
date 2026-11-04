@@ -278,6 +278,7 @@ sealed class Instruction(super.type) extends Value {
   bool get mayThrow => switch (this) {
     ListSublist() ||
     MapContainsKey() ||
+    MapEntries() ||
     PatternMatchFailure() ||
     CollectionLength() ||
     CollectionGet() ||
@@ -1118,6 +1119,13 @@ final class CollectionSpread(
       throw ArgumentError('Invalid spread operand.');
     }
   }
+
+  /// Whether a literal needs entry-wise key/value casts and the entries protocol.
+  bool get checksMapEntries {
+    final map = CoreTypes.view(collection.type, CoreTypes.map);
+    return !isMethodCall && map != null && !map.accepts(source.type);
+  }
+
   @override
   Iterable<Value> get inputs => [collection, source];
 }
@@ -1165,6 +1173,21 @@ ValueType _protocolElement(Value value, ClassType protocol) {
   final type = CoreTypes.view(value.type, protocol);
   if (type == null) throw ArgumentError('Expected ${protocol.name} receiver.');
   return type.typeArguments.single;
+}
+
+/// Reads the map's lazy entries iterable through its Dart getter.
+final class MapEntries(final Value map) extends Instruction {
+  this : super(_mapEntriesType(map));
+  @override
+  Iterable<Value> get inputs => [map];
+}
+
+ClassType _mapEntriesType(Value value) {
+  final map = CoreTypes.view(value.type, CoreTypes.map);
+  if (map == null) throw ArgumentError('Expected a map receiver.');
+  return CoreTypes.iterableOf(
+    CoreTypes.mapEntryOf(map.typeArguments[0], map.typeArguments[1]),
+  );
 }
 
 /// Reads length via the receiver's Dart collection getter.
@@ -1258,7 +1281,16 @@ Instruction? coreCollectionOperation(
   final map = CoreTypes.view(receiver.type, CoreTypes.map);
   final iterable = CoreTypes.view(receiver.type, CoreTypes.iterable);
   final iterator = CoreTypes.view(receiver.type, CoreTypes.iterator);
+  final entry = CoreTypes.view(receiver.type, CoreTypes.mapEntry);
   return switch ((name, args)) {
+    ('key', []) when entry != null => LoadField(
+      CoreTypes.mapEntryKey,
+      receiver,
+    ),
+    ('value', []) when entry != null => LoadField(
+      CoreTypes.mapEntryValue,
+      receiver,
+    ),
     ('length', []) when iterable != null || map != null => CollectionLength(
       receiver,
     ),
@@ -1275,6 +1307,7 @@ Instruction? coreCollectionOperation(
       receiver,
       key,
     ),
+    ('entries', []) when map != null => MapEntries(receiver),
     ('iterator', []) when iterable != null => GetIterator(receiver),
     ('current', []) when iterator != null => IteratorCurrent(receiver),
     ('moveNext', []) when iterator != null => IteratorMoveNext(receiver),
