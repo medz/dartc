@@ -4,7 +4,11 @@ import 'type.dart';
 import 'value.dart';
 
 /// Checks control flow, argument and return types, and SSA definition dominance.
-Set<FunctionTarget> verifyFunction(FunctionTarget target, List<Block> blocks) {
+Set<FunctionTarget> verifyFunction(
+  FunctionTarget target,
+  List<Block> blocks, [
+  Iterable<Constant> defaults = const [],
+]) {
   Set<FunctionTarget>? closures;
   final scope = <TypeParameterType>{};
   for (
@@ -12,7 +16,10 @@ Set<FunctionTarget> verifyFunction(FunctionTarget target, List<Block> blocks) {
     lexical != null;
     lexical = lexical.enclosing
   ) {
-    scope.addAll(lexical.owner?.typeParameters ?? const []);
+    scope.addAll(lexical.typeParameters);
+    if (lexical.kind.hasReceiver || lexical.kind == .factory) {
+      scope.addAll(lexical.owner?.typeParameters ?? const []);
+    }
   }
   void checkTypeScope(ValueType type) {
     if (typeParametersIn(type).any((parameter) => !scope.contains(parameter))) {
@@ -20,7 +27,33 @@ Set<FunctionTarget> verifyFunction(FunctionTarget target, List<Block> blocks) {
     }
   }
 
+  void constant(Constant value) {
+    checkTypeScope(value.type);
+    if (value case FunctionConstant(
+      :final ownerType,
+      :final typeArguments,
+      :final constructorSignature,
+    )) {
+      if (constructorSignature != null) checkTypeScope(constructorSignature);
+      if (ownerType != null) checkTypeScope(ownerType);
+      for (final type in typeArguments ?? const <ValueType>[]) {
+        checkTypeScope(type);
+      }
+    }
+    if (value case RecordConstant(:final fields)) {
+      for (final field in fields) {
+        constant(field);
+      }
+    }
+  }
+
+  for (final value in defaults) {
+    constant(value);
+  }
   checkTypeScope(target.signature);
+  for (final parameter in target.typeParameters) {
+    checkTypeScope(parameter.bound);
+  }
   for (final capture in target.captures) {
     checkTypeScope(capture);
   }
@@ -68,7 +101,10 @@ Set<FunctionTarget> verifyFunction(FunctionTarget target, List<Block> blocks) {
   final idom = _dominators(entry, predecessors);
   for (final block in blocks) {
     void use(Value value, int position) {
-      if (value is Constant) return;
+      if (value is Constant) {
+        constant(value);
+        return;
+      }
       final definition = definitions[value];
       if (definition == null) {
         throw StateError('Value defined outside this function.');
@@ -123,6 +159,16 @@ Set<FunctionTarget> verifyFunction(FunctionTarget target, List<Block> blocks) {
               InstanceCall(:final ownerType?) ||
               BindMethod(:final ownerType?)) {
         checkTypeScope(ownerType);
+      }
+      final typeArguments = switch (op) {
+        DirectCall(:final typeArguments) ||
+        InstanceCall(:final typeArguments) ||
+        FunctionCall(:final typeArguments) ||
+        InstantiateFunction(:final typeArguments) => typeArguments,
+        _ => const <ValueType>[],
+      };
+      for (final type in typeArguments) {
+        checkTypeScope(type);
       }
       switch (op) {
         case MakeClosure(target: final child):

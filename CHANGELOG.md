@@ -1,6 +1,10 @@
 ## Unreleased
 
-Generic classes retain declaration type parameters and instantiated type arguments throughout IR. Constructors, factories and factory redirects substitute member signatures, superclass and interface types without copying function bodies. Runtime checks and constructor or method tear-offs preserve actual type arguments, bounds, covariance and type environments captured by closures. Generic functions and const instances remain unsupported.
+Generic top-level functions, static and instance methods, local functions and closures retain scoped type parameters, bounds and runtime type environments. Direct calls, function values and explicit or contextual instantiation preserve inferred type arguments, polymorphic recursion and virtual entry checks. Generic function types compare structurally up to binder renaming.
+
+Generic constructor tear-offs support aliases with reordered, fixed or repeated type arguments and preserve distinct alias identity. Constant and default function values retain type arguments even when those arguments do not appear in their signature. Constant-pattern caches distinguish function and constructor instantiations.
+
+Generic classes retain declaration type parameters and instantiated type arguments throughout IR. Constructors, factories and factory redirects substitute member signatures, superclass and interface types without copying function bodies. Runtime checks and constructor or method tear-offs preserve actual type arguments, bounds, covariance and type environments captured by closures. Const instances remain unsupported.
 
 Mutable typed List, Set and Map literals support conditional and loop elements, patterns, spreads and null-aware elements. Synchronous `for-in` uses the iterator protocol and preserves per-iteration captures, control flow and exceptions. Collection IR includes indexing, writes, length, add and addAll; const collections and the full SDK collection API remain unsupported.
 
@@ -34,7 +38,7 @@ Use scalar and record patterns with `when` guards in `if-case`, `switch` stateme
 
 `Lowering.lower` returns an `IrProgram` with `classes` and `functions`. Classes support generative and factory constructors, including redirects to named constructors with optional arguments. Instance methods and getters dispatch on the receiver, including overrides with different defaults and covariant parameters. Runtime type tests and catch clauses follow superclass and interface declarations.
 
-The development checkout uses the official Dart analyzer and can print compiler IR. Native executables, libraries and the `Export` API remain available in [release 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).
+The development checkout pins analyzer 14.7.0 for constant-function metadata compatibility and can print compiler IR. Native executables, libraries and the `Export` API remain available in [release 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).
 
 ## [0.5.0](https://github.com/medz/dartc/compare/v0.4.0...v0.5.0) — 2026-10-31
 

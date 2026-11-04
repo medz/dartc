@@ -7,20 +7,39 @@ final class FixtureRunner(
 ) {
   final bodies = {for (final f in program.functions) f.target: f};
 
-  final _staticFunctions = <(FunctionTarget, ClassType?), _FunctionValue>{};
+  final _staticFunctions =
+      <
+        (FunctionTarget, ClassType?, FunctionType?, (Uri, String)?),
+        _FunctionValue
+      >{};
 
   Object? _constant(
     Constant value, [
     Map<TypeParameterType, ValueType> environment = const {},
   ]) => switch (value) {
     ScalarConstant(:final value) => value,
-    FunctionConstant(:final target, :final ownerType) =>
+    FunctionConstant(
+      :final target,
+      :final ownerType,
+      :final typeArguments,
+      :final constructorSignature,
+      :final constructorAlias,
+    ) =>
       _staticFunctions.putIfAbsent(
         (
           target,
           ownerType == null
               ? null
               : substituteType(ownerType, environment) as ClassType,
+          typeArguments == null
+              ? null
+              : FunctionType(
+                  .voidType,
+                  typeArguments.map(
+                    (type) => substituteType(type, environment),
+                  ),
+                ),
+          constructorAlias,
         ),
         () => _FunctionValue(
           target,
@@ -32,6 +51,12 @@ final class FixtureRunner(
                   ownerType,
                   environment,
                 ) as ClassType).typeEnvironment,
+          typeArguments
+              ?.map((type) => substituteType(type, environment))
+              .toList(),
+          null,
+          constructorSignature,
+          constructorAlias,
         ),
       ),
     RecordConstant(:final type, :final fields) => _RecordValue(
@@ -46,9 +71,12 @@ final class FixtureRunner(
     Map<TypeParameterType, ValueType> environment = const {},
   ]) {
     if (target.kind.hasReceiver) {
-      environment = (arguments.first as _Instance).type
-          .asInstanceOf(target.owner!)!
-          .typeEnvironment;
+      environment = {
+        ...environment,
+        ...(arguments.first as _Instance).type
+            .asInstanceOf(target.owner!)!
+            .typeEnvironment,
+      };
     }
     if (target.library.toString() == 'dart:core' &&
         target.name == 'identical') {
@@ -73,21 +101,40 @@ final class FixtureRunner(
   Object? _invoke(
     _FunctionValue fn,
     List<Object?> positional,
-    Map<String, Object?> named,
-  ) {
+    Map<String, Object?> named, [
+    List<ValueType> typeArguments = const [],
+  ]) {
     var target = fn.target;
-    var environment =
-        fn.receiver?.type.asInstanceOf(target.owner!)?.typeEnvironment ??
-        fn.environment;
+    var environment = {
+      ...fn.environment,
+      if (fn.receiver != null)
+        ...fn.receiver!.type.asInstanceOf(target.owner!)!.typeEnvironment,
+    };
+    final argumentsForTypes = fn.typeArguments ?? typeArguments;
+    final binders = fn.genericSignature.typeParameters;
+    final genericSignature =
+        substituteType(fn.genericSignature, environment) as FunctionType;
+    final appliedSignature = _instantiateSignature(
+      genericSignature,
+      argumentsForTypes,
+    );
+    environment = {
+      ...environment,
+      for (final (i, parameter) in binders.indexed)
+        parameter: argumentsForTypes[i],
+    };
     if (target.kind == .initializer || target.kind == .factory) {
       final resolved = target.resolveConstruction(
-        substituteType(target.owner!, environment) as ClassType,
+        appliedSignature.result as ClassType,
       );
       target = resolved.target;
-      environment = resolved.ownerType.typeEnvironment;
+      environment = {...environment, ...resolved.ownerType.typeEnvironment};
     }
-    final signature =
+    final declaredSignature =
         substituteType(target.signature, environment) as FunctionType;
+    final signature = declaredSignature.typeParameters.isEmpty
+        ? declaredSignature
+        : _instantiateSignature(declaredSignature, argumentsForTypes);
     final arguments = signature.bind<Object?>(
       positional,
       named,
@@ -103,7 +150,7 @@ final class FixtureRunner(
             substituteType(target.owner!, environment) as ClassType,
           )
         : _enter(target, [
-            if (target.kind == .closure) fn,
+            if (target.kind == .closure) fn.genericOrigin ?? fn,
             ...fn.captures,
             ?fn.receiver,
             ...arguments,
@@ -113,9 +160,10 @@ final class FixtureRunner(
   Object? _call(
     Object? function,
     List<Object?> positional,
-    Map<String, Object?> named,
-  ) => switch (function) {
-    _FunctionValue() => _invoke(function, positional, named),
+    Map<String, Object?> named, [
+    List<ValueType> typeArguments = const [],
+  ]) => switch (function) {
+    _FunctionValue() => _invoke(function, positional, named, typeArguments),
     _NativeFunction(:final callback) => callback(positional),
     _ => throw StateError('Not a fixture function: $function'),
   };
@@ -309,14 +357,23 @@ final class FixtureRunner(
           (read(cell) as _Cell).value = read(value);
         case BindMethod(:final method, :final receiver, :final direct):
           final instance = read(receiver) as _Instance;
-          values[op] = _FunctionValue(
+          final function = _FunctionValue(
             direct ? method : program.dispatch(instance.type, method)!,
             instance,
           );
-        case FunctionCall(:final function, :final positional, :final named):
+          values[op] = _typeOperation(resolve(op.type), function, cast: true);
+        case InstantiateFunction(:final function, :final typeArguments):
+          final value = read(function) as _FunctionValue;
+          values[op] = value.instantiate(typeArguments.map(resolve).toList());
+        case FunctionCall(
+          :final function,
+          :final positional,
+          :final named,
+          :final typeArguments,
+        ):
           values[op] = _call(read(function), positional.map(read).toList(), {
             for (final e in named.entries) e.key: read(e.value),
-          });
+          }, typeArguments.map(resolve).toList());
         case StoreField(:final field, :final receiver, :final value):
           final instance = read(receiver) as _Instance;
           final type = substituteType(
@@ -331,6 +388,7 @@ final class FixtureRunner(
         case LoadField(:final field, :final receiver):
           values[op] = (read(receiver) as _Instance).fields[field];
         case InstanceCall(
+          :final typeArguments,
           :final member,
           :final receiver,
           :final positional,
@@ -342,6 +400,7 @@ final class FixtureRunner(
             _FunctionValue(target, instance),
             positional.map(read).toList(),
             {for (final e in named.entries) e.key: read(e.value)},
+            typeArguments.map(resolve).toList(),
           );
         case MakeRecord(:final type, :final inputs):
           values[op] = _RecordValue(
@@ -407,15 +466,20 @@ final class FixtureRunner(
           };
         case Equals(:final left, :final right, :final negated):
           values[op] = (read(left) == read(right)) != negated;
-        case DirectCall(:final target, :final inputs, :final ownerType):
+        case DirectCall(
+          :final target,
+          :final inputs,
+          :final ownerType,
+          :final typeArguments,
+        ):
           final arguments = inputs.map(read).toList();
-          values[op] = _enter(
-            target,
-            arguments,
-            ownerType == null
-                ? environment
-                : (resolve(ownerType) as ClassType).typeEnvironment,
-          );
+          values[op] = _enter(target, arguments, {
+            ...environment,
+            if (ownerType != null)
+              ...(resolve(ownerType) as ClassType).typeEnvironment,
+            for (final (i, parameter) in target.typeParameters.indexed)
+              parameter: resolve(typeArguments[i]),
+          });
       }
     }
 
@@ -543,31 +607,86 @@ final class _FunctionValue(
   final _Instance? receiver,
   final List<Object?> captures = const [],
   final Map<TypeParameterType, ValueType> environment = const {},
+  final List<ValueType>? typeArguments,
+  final _FunctionValue? genericOrigin,
+  final FunctionType? constructorSignature,
+  final (Uri, String)? constructorAlias,
 ]) {
-  FunctionType get reifiedSignature => substituteType(
-    target.reifiedSignature,
-    receiver?.type.asInstanceOf(target.owner!)?.typeEnvironment ?? environment,
-  ) as FunctionType;
+  FunctionType get genericSignature =>
+      constructorSignature ??
+      target.tearOffSignature(
+        reified: true,
+        ownerType:
+            (target.kind == .initializer || target.kind == .factory) &&
+                target.owner!.typeParameters.every(environment.containsKey)
+            ? substituteType(target.owner!, environment) as ClassType
+            : null,
+      );
+
+  _FunctionValue instantiate(List<ValueType> arguments) {
+    _instantiateSignature(reifiedSignature, arguments);
+    return _FunctionValue(
+      target,
+      receiver,
+      captures,
+      environment,
+      arguments,
+      genericOrigin ?? this,
+      constructorSignature,
+      constructorAlias,
+    );
+  }
+
+  FunctionType get reifiedSignature {
+    final signature = substituteType(genericSignature, {
+      ...environment,
+      if (receiver != null)
+        ...receiver!.type.asInstanceOf(target.owner!)!.typeEnvironment,
+    }) as FunctionType;
+    return typeArguments == null
+        ? signature
+        : _instantiateSignature(signature, typeArguments!);
+  }
+
+  bool get isConstructor =>
+      target.kind == .initializer || target.kind == .factory;
+
+  Map<TypeParameterType, ValueType> get identityEnvironment => {
+    ...environment,
+    if (isConstructor && typeArguments != null)
+      ...(reifiedSignature.result as ClassType).typeEnvironment,
+  };
+
+  List<ValueType>? get identityTypeArguments =>
+      isConstructor && constructorAlias == null ? null : typeArguments;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      target.kind != .closure &&
-          other is _FunctionValue &&
+      other is _FunctionValue &&
+          (target.kind != .closure ||
+              genericOrigin != null &&
+                  identical(genericOrigin, other.genericOrigin)) &&
           target == other.target &&
+          constructorAlias == other.constructorAlias &&
           identical(receiver, other.receiver) &&
-          environment.length == other.environment.length &&
-          environment.entries.every(
-            (entry) => other.environment[entry.key] == entry.value,
+          _sameTypes(identityTypeArguments, other.identityTypeArguments) &&
+          identityEnvironment.length == other.identityEnvironment.length &&
+          identityEnvironment.entries.every(
+            (entry) => other.identityEnvironment[entry.key] == entry.value,
           );
   @override
-  int get hashCode => target.kind == .closure
+  int get hashCode => target.kind == .closure && genericOrigin == null
       ? identityHashCode(this)
       : Object.hash(
           target,
-          identityHashCode(receiver),
+          constructorAlias,
+          identityHashCode(target.kind == .closure ? genericOrigin : receiver),
+          identityTypeArguments == null
+              ? null
+              : Object.hashAll(identityTypeArguments!),
           Object.hashAllUnordered(
-            environment.entries.map(
+            identityEnvironment.entries.map(
               (entry) => Object.hash(entry.key, entry.value),
             ),
           ),
@@ -662,3 +781,20 @@ final class _NativeFunction(
   final FunctionType signature,
   final Object? Function(List<Object?>) callback,
 );
+
+bool _sameTypes(List<ValueType>? left, List<ValueType>? right) =>
+    left == null || right == null
+    ? left == right
+    : left.length == right.length &&
+          left.indexed.every((entry) => entry.$2 == right[entry.$1]);
+
+FunctionType _instantiateSignature(
+  FunctionType signature,
+  List<ValueType> arguments,
+) {
+  try {
+    return signature.instantiate(arguments);
+  } on ArgumentError {
+    throw TypeError();
+  }
+}

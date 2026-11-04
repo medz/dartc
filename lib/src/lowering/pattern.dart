@@ -170,7 +170,20 @@ Object _constantKey(Constant value) => switch (value) {
     type,
     value is double ? value.toString() : value,
   ),
-  FunctionConstant(:final target) => target,
+  FunctionConstant(
+    :final target,
+    :final ownerType,
+    :final typeArguments,
+    :final constructorSignature,
+    :final constructorAlias,
+  ) =>
+    (
+      target,
+      ownerType,
+      constructorSignature,
+      constructorAlias,
+      typeArguments?.fold<Object?>(null, (tail, type) => (tail, type)),
+    ),
   RecordConstant(:final type, :final fields) => (
     type,
     fields.fold<Object?>(null, (tail, field) => (tail, _constantKey(field))),
@@ -316,7 +329,7 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
         final constant = context.bindings.constantValue(
           expression.computeConstantValue()?.value,
           context.unit,
-          pattern,
+          expression,
         );
         final result = cache.read(
           cache.comparisonKey(path, 'constant==', expression),

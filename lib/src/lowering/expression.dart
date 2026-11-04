@@ -1,6 +1,7 @@
 import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/ast/token.dart' show Token;
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
@@ -92,7 +93,14 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       return args == null
           ? null
           : context.emit(
-              DirectCall(target, context.bindings.bind(target, args)),
+              DirectCall(
+                target,
+                context.bindings.bind(target, args),
+                typeArguments: context.typeArguments(
+                  expression.typeArgumentTypes,
+                  expression,
+                ),
+              ),
             );
     case ast.DotShorthandPropertyAccess():
       final member = expression.propertyName.element;
@@ -118,6 +126,11 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         return context.emit(DirectCall(target, []));
       }
       unsupported(unit, expression, 'dot shorthand property');
+    case ast.FunctionReference(:final function, :final typeArgumentTypes):
+      final value = lowerExpression(context, function);
+      return value == null
+          ? null
+          : context.instantiateFunction(value, typeArgumentTypes, expression);
     case ast.FunctionExpression():
       return context.close(expression);
     case ast.SimpleIdentifier(element: final LocalFunctionElement local):
@@ -136,24 +149,35 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       );
       return args == null
           ? null
-          : context.emit(FunctionCall(function, args.positional, args.named));
+          : context.emit(
+              FunctionCall(
+                function,
+                args.positional,
+                args.named,
+                context.typeArguments(expression.typeArgumentTypes, expression),
+              ),
+            );
     case ast.ThisExpression():
       return context.receiver!;
     case ast.ImplicitCallReference(
       :final expression,
       :final element,
-      typeArgumentTypes: [],
+      :final typeArgumentTypes,
     ):
       final receiver = lowerExpression(context, expression);
       if (receiver == null) return null;
       if (element == null || element.enclosingElement is! ClassElement) {
         unsupported(unit, expression, 'implicit call tear-off');
       }
-      return context.emit(
-        BindMethod(
-          context.bindings.target(element, unit, expression),
-          receiver,
+      return context.instantiateFunction(
+        context.emit(
+          BindMethod(
+            context.bindings.target(element, unit, expression),
+            receiver,
+          ),
         ),
+        typeArgumentTypes,
+        expression,
       );
     case ast.ConstructorReference(:final constructorName):
       if (constructorName.type.importPrefix?.element
@@ -161,16 +185,26 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           when prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
         unsupported(unit, expression, 'deferred constructor tear-off');
       }
+      final target = context.bindings.target(
+        constructorName.element!,
+        unit,
+        expression,
+      );
+      final resolved = expression.staticType! as dart.FunctionType;
+      final signature = context.typeOf(resolved, expression) as FunctionType;
+      final generic = signature.typeParameters.isNotEmpty;
+      final alias = constructorName.type.element;
+      final distinctAlias =
+          generic &&
+          alias is TypeAliasElement &&
+          signature != target.tearOffSignature();
       return FunctionConstant(
-        context.bindings.target(constructorName.element!, unit, expression),
-        ownerType:
-            constructorName.element!.enclosingElement.typeParameters.isEmpty
-            ? null
-            : context.typeOf(
-                constructorName.type.type ??
-                    constructorName.element!.returnType,
-                constructorName,
-              ) as ClassType,
+        target,
+        ownerType: generic ? null : signature.result as ClassType,
+        constructorSignature: generic ? signature : null,
+        constructorAlias: distinctAlias
+            ? (alias.library.uri, alias.name!)
+            : null,
       );
     case ast.Identifier(element: final ExecutableElement callee)
         when callee is TopLevelFunctionElement ||
@@ -462,7 +496,14 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       return args == null
           ? null
           : context.emit(
-              DirectCall(target, context.bindings.bind(target, args)),
+              DirectCall(
+                target,
+                context.bindings.bind(target, args),
+                typeArguments: context.typeArguments(
+                  expression.typeArgumentTypes,
+                  expression,
+                ),
+              ),
             );
     case ast.BinaryExpression(
       :final leftOperand,

@@ -25,11 +25,19 @@ void writeFunction(
     return '${t.library}::${t.owner == null ? '' : '${(ownerType ?? t.owner!).dartName}.'}$prefix${t.name}';
   }
 
+  String typeArgs(Iterable<ValueType> types) =>
+      types.isEmpty ? '' : '<${types.map((t) => t.dartName).join(', ')}>';
   String value(Value v) => switch (v) {
     ScalarConstant(value: final String s) => jsonEncode(s),
     ScalarConstant(:final value) => '$value',
-    FunctionConstant(:final target, :final ownerType) =>
-      'tearoff ${symbol(target, ownerType)}',
+    FunctionConstant(
+      :final target,
+      :final ownerType,
+      :final typeArguments,
+      :final constructorAlias,
+      :final constructorSignature,
+    ) =>
+      'tearoff ${constructorAlias == null ? symbol(target, ownerType) : "${constructorAlias.$1}::${constructorAlias.$2}.${target.name}"}${typeArgs(typeArguments ?? const [])}${constructorSignature == null ? "" : " as ${constructorSignature.dartName}"}',
     RecordConstant(:final type, :final fields) =>
       'const ${type.dartName}[${fields.map(value).join(', ')}]',
     TestedValue(:final test, :final type) =>
@@ -69,12 +77,14 @@ void writeFunction(
     WriteCell() => 'writeCell ${value(op.cell)}, ${value(op.value)}',
     BindMethod() =>
       'bind ${op.direct ? 'super ' : ''}${value(op.receiver)} ${symbol(op.method)}',
+    InstantiateFunction() =>
+      'instantiate ${value(op.function)}${typeArgs(op.typeArguments)}',
     FunctionCall() =>
-      'callValue ${value(op.function)}(${arguments(op.positional, op.named)})',
+      'callValue ${value(op.function)}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
     LoadField() =>
       'load ${value(op.receiver)}.${op.field.owner.dartName}::${op.field.name}',
     InstanceCall() =>
-      'dispatch ${value(op.receiver)} ${symbol(op.member)}(${arguments(op.positional, op.named)})',
+      'dispatch ${value(op.receiver)} ${symbol(op.member)}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
     Construct() =>
       'new ${symbol(op.initializer, op.instantiatedType)}(${op.inputs.map(value).join(', ')})',
     StoreField() =>
@@ -96,11 +106,14 @@ void writeFunction(
     NumericNegate() => 'negate ${value(op.operand)}',
     IntBinary() => '${op.operator.name} ${value(op.left)}, ${value(op.right)}',
     DirectCall() =>
-      'call ${symbol(op.target, op.ownerType)}(${op.inputs.map(value).join(', ')})',
+      'call ${symbol(op.target, op.ownerType)}${typeArgs(op.typeArguments)}(${op.inputs.map(value).join(', ')})',
   };
   String unwind(Jump? handler) =>
       handler == null ? '' : ' unwind ${edge(handler)}';
-  output.writeln('${symbol(target)} -> ${target.returnType.dartName}');
+  final binders = target.typeParameters.isEmpty
+      ? ''
+      : '<${target.typeParameters.map((p) => '${p.name} extends ${p.bound.dartName}').join(', ')}>';
+  output.writeln('${symbol(target)}$binders -> ${target.returnType.dartName}');
   for (final b in blocks) {
     final parameters = b.parameters
         .map((p) => '${value(p)}: ${p.type.dartName}')

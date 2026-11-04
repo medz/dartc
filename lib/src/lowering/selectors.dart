@@ -66,7 +66,11 @@ final class SelectorChain(
     ast.Expression node, {
     ast.ArgumentList? getterArguments,
     MethodElement? getterCall,
+    List<ValueType> getterTypeArguments = const [],
   }) {
+    final typeArguments = node is ast.InvocationExpression
+        ? context.typeArguments(node.typeArgumentTypes, node)
+        : getterTypeArguments;
     Value? invokeValue(
       Value? input,
       ast.ArgumentList arguments, [
@@ -82,7 +86,14 @@ final class SelectorChain(
         final method = context.bindings.target(callMethod, context.unit, node);
         return context.normal(
           context.emit(
-            InstanceCall(method, function, args.positional, args.named),
+            InstanceCall(
+              method,
+              function,
+              args.positional,
+              args.named,
+              null,
+              typeArguments,
+            ),
           ),
         );
       }
@@ -90,7 +101,9 @@ final class SelectorChain(
         unsupported(context.unit, node, 'untyped function invocation');
       }
       return context.normal(
-        context.emit(FunctionCall(function, args.positional, args.named)),
+        context.emit(
+          FunctionCall(function, args.positional, args.named, typeArguments),
+        ),
       );
     }
 
@@ -153,6 +166,7 @@ final class SelectorChain(
           function,
           getterArguments: argumentList,
           getterCall: element is MethodElement ? element : null,
+          getterTypeArguments: typeArguments,
         );
       }
       return invokeValue(
@@ -334,8 +348,16 @@ final class SelectorChain(
               ownerType: (known.type.nonNullable as ClassType).asInstanceOf(
                 target.owner!,
               ),
+              typeArguments: typeArguments,
             )
-          : InstanceCall(target, known, args.positional, args.named),
+          : InstanceCall(
+              target,
+              known,
+              args.positional,
+              args.named,
+              null,
+              typeArguments,
+            ),
     );
   }
 

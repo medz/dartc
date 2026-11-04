@@ -27,6 +27,23 @@ final class FunctionContext(
   ValueType typeOf(DartType type, AstNode site) =>
       bindings.valueType(type, unit, site);
 
+  /// Converts the analyzer's resolved explicit or inferred invocation arguments.
+  List<ValueType> typeArguments(Iterable<DartType>? types, AstNode site) => [
+    for (final type in types ?? const <DartType>[]) typeOf(type, site),
+  ];
+
+  /// Applies a resolved function instantiation without erasing its signature.
+  Value instantiateFunction(
+    Value function,
+    Iterable<DartType>? arguments,
+    AstNode site,
+  ) {
+    final types = typeArguments(arguments, site);
+    return types.isEmpty
+        ? function
+        : emit(InstantiateFunction(function, types));
+  }
+
   /// Calls a resolved getter, setter or operator with its evaluated operands.
   Value? callPositionalMember(
     ExecutableElement? member,
@@ -256,7 +273,7 @@ final class FunctionContext(
     final known = refined(value);
     if (type.accepts(known.type)) return Constant.boolean(!negated);
     if (type == .never ||
-        known.type == .nullType ||
+        (known.type == .nullType && !type.mayBeNull) ||
         (type == .nullType && !known.type.mayBeNull)) {
       return Constant.boolean(negated);
     }

@@ -44,7 +44,7 @@ final class IrFunction(
         )) {
       throw ArgumentError('Invalid body or defaults for ${target.name}.');
     }
-    closures = verifyFunction(target, this.blocks);
+    closures = verifyFunction(target, this.blocks, this.defaults.values);
   }
 
   /// Writes the typed blocks, instructions and outgoing edges to [output].

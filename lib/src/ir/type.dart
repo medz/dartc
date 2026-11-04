@@ -223,8 +223,10 @@ final class RecordType._(
   );
 }
 
-/// A non-generic Dart function type with positional and named parameter slots.
+/// A possibly generic Dart function type with positional and named parameter slots.
 final class FunctionType._(
+  final List<TypeParameterType> typeParameters,
+
   /// The result visible at a call site.
   final ValueType result,
 
@@ -246,6 +248,7 @@ final class FunctionType._(
     Iterable<ValueType> parameters, {
     int optionalPositional = 0,
     Map<String, bool> namedParameters = const {},
+    Iterable<TypeParameterType> typeParameters = const [],
   }) {
     final types = List<ValueType>.unmodifiable(parameters);
     if (result is CellType || types.any((t) => t is CellType)) {
@@ -257,7 +260,12 @@ final class FunctionType._(
         optionalPositional > 0 && namedParameters.isNotEmpty) {
       throw ArgumentError('Invalid optional and named parameter counts.');
     }
+    final binders = List<TypeParameterType>.unmodifiable(typeParameters);
+    if (binders.toSet().length != binders.length) {
+      throw ArgumentError('Repeated function type parameter.');
+    }
     return ._(
+      binders,
       result,
       types,
       count,
@@ -267,6 +275,51 @@ final class FunctionType._(
           e.key: (slot: count + i, required: e.value),
       }),
     );
+  }
+
+  /// Applies every function type argument simultaneously and checks its bound.
+  FunctionType instantiate(Iterable<ValueType> arguments) {
+    final args = List<ValueType>.unmodifiable(arguments);
+    if (args.length != typeParameters.length ||
+        args.any((t) => t is CellType)) {
+      throw ArgumentError('Invalid function type arguments.');
+    }
+    final environment = {
+      for (final (i, parameter) in typeParameters.indexed) parameter: args[i],
+    };
+    for (final (i, parameter) in typeParameters.indexed) {
+      if (!substituteType(parameter.bound, environment).accepts(args[i])) {
+        throw ArgumentError(
+          'Type argument does not satisfy ${parameter.name} bound.',
+        );
+      }
+    }
+    return _bodyWith(environment);
+  }
+
+  FunctionType _bodyWith(Map<TypeParameterType, ValueType> environment) =>
+      FunctionType(
+        substituteType(result, environment),
+        parameters.map((t) => substituteType(t, environment)),
+        optionalPositional: positionalCount - requiredPositional,
+        namedParameters: {
+          for (final e in named.entries) e.key: e.value.required,
+        },
+      );
+
+  Map<TypeParameterType, ValueType>? _relate(FunctionType other) {
+    if (typeParameters.length != other.typeParameters.length) return null;
+    final environment = <TypeParameterType, ValueType>{
+      for (final (i, parameter) in other.typeParameters.indexed)
+        parameter: typeParameters[i],
+    };
+    for (final (i, parameter) in typeParameters.indexed) {
+      if (parameter.bound !=
+          substituteType(other.typeParameters[i].bound, environment)) {
+        return null;
+      }
+    }
+    return environment;
   }
 
   /// Slots whose values can be supplied by the destination's defaults.
@@ -307,6 +360,11 @@ final class FunctionType._(
   }
 
   bool _accepts(FunctionType actual) {
+    final environment = _relate(actual);
+    if (environment == null) return false;
+    if (typeParameters.isNotEmpty) {
+      return _bodyWith(const {})._accepts(actual._bodyWith(environment));
+    }
     if (!result.accepts(actual.result) ||
         actual.requiredPositional > requiredPositional ||
         actual.positionalCount < positionalCount) {
@@ -327,35 +385,30 @@ final class FunctionType._(
   }
 
   @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is FunctionType &&
-          result == other.result &&
-          positionalCount == other.positionalCount &&
-          requiredPositional == other.requiredPositional &&
-          named.length == other.named.length &&
-          parameters
-              .take(positionalCount)
-              .indexed
-              .every((p) => p.$2 == other.parameters[p.$1]) &&
-          named.entries.every((e) {
-            final p = other.named[e.key];
-            return p != null &&
-                p.required == e.value.required &&
-                parameters[e.value.slot] == other.parameters[p.slot];
-          });
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! FunctionType) return false;
+    final environment = _relate(other);
+    if (environment == null) return false;
+    final actual = other._bodyWith(environment);
+    return result == actual.result &&
+        positionalCount == actual.positionalCount &&
+        requiredPositional == actual.requiredPositional &&
+        named.length == actual.named.length &&
+        parameters
+            .take(positionalCount)
+            .indexed
+            .every((p) => p.$2 == actual.parameters[p.$1]) &&
+        named.entries.every((e) {
+          final p = actual.named[e.key];
+          return p != null &&
+              p.required == e.value.required &&
+              parameters[e.value.slot] == actual.parameters[p.slot];
+        });
+  }
 
   @override
-  int get hashCode => Object.hash(
-    result,
-    requiredPositional,
-    Object.hashAll(parameters.take(positionalCount)),
-    Object.hashAllUnordered(
-      named.entries.map(
-        (e) => Object.hash(e.key, e.value.required, parameters[e.value.slot]),
-      ),
-    ),
-  );
+  int get hashCode => _typeHash(this, const {});
 
   @override
   String get dartName {
@@ -374,7 +427,10 @@ final class FunctionType._(
       ];
       parts.add('{${fields.join(', ')}}');
     }
-    return '${result.dartName} Function(${parts.join(', ')})';
+    final binders = typeParameters.isEmpty
+        ? ''
+        : '<${typeParameters.map((p) => '${p.name} extends ${p.bound.dartName}').join(', ')}>';
+    return '${result.dartName} Function$binders(${parts.join(', ')})';
   }
 }
 
@@ -611,14 +667,7 @@ ValueType substituteType(
           e.key: substituteType(type.fields[e.value], environment),
       },
     ),
-    FunctionType() => FunctionType(
-      substituteType(type.result, environment),
-      type.parameters.map((t) => substituteType(t, environment)),
-      optionalPositional: type.positionalCount - type.requiredPositional,
-      namedParameters: {
-        for (final e in type.named.entries) e.key: e.value.required,
-      },
-    ),
+    FunctionType() => _substituteFunction(type, environment),
     _ => type,
   };
 }
@@ -654,14 +703,15 @@ bool containsTypeParameter(ValueType type, Set<TypeParameterType> parameters) =>
       RecordType() => type.fields.any(
         (t) => containsTypeParameter(t, parameters),
       ),
-      FunctionType() =>
-        containsTypeParameter(type.result, parameters) ||
-            type.parameters.any((t) => containsTypeParameter(t, parameters)),
+      FunctionType() => typeParametersIn(type).any(parameters.contains),
       CellType(:final content) => containsTypeParameter(content, parameters),
       _ => false,
     };
 
-/// Whether a class variable occurs covariantly in a member parameter type.
+/// Whether a class variable requires a covariant check in a member parameter.
+///
+/// Occurrences in a nested generic function's bounds are invariant and require
+/// a check regardless of the surrounding function-parameter polarity.
 bool containsCovariantTypeParameter(
   ValueType type,
   Set<TypeParameterType> parameters, [
@@ -682,9 +732,23 @@ bool containsCovariantTypeParameter(
     (t) => containsCovariantTypeParameter(t, parameters, positive),
   ),
   FunctionType() =>
-    containsCovariantTypeParameter(type.result, parameters, positive) ||
+    type.typeParameters.any(
+          (p) => containsTypeParameter(
+            p.bound,
+            parameters.difference(type.typeParameters.toSet()),
+          ),
+        ) ||
+        containsCovariantTypeParameter(
+          type.result,
+          parameters.difference(type.typeParameters.toSet()),
+          positive,
+        ) ||
         type.parameters.any(
-          (t) => containsCovariantTypeParameter(t, parameters, !positive),
+          (t) => containsCovariantTypeParameter(
+            t,
+            parameters.difference(type.typeParameters.toSet()),
+            !positive,
+          ),
         ),
   _ => false,
 };
@@ -707,13 +771,105 @@ Iterable<TypeParameterType> typeParametersIn(ValueType type) sync* {
         yield* typeParametersIn(field);
       }
     case FunctionType():
-      yield* typeParametersIn(type.result);
-      for (final parameter in type.parameters) {
-        yield* typeParametersIn(parameter);
+      final bound = type.typeParameters.toSet();
+      for (final nested in [
+        type.result,
+        ...type.parameters,
+        ...type.typeParameters.map((p) => p.bound),
+      ]) {
+        yield* typeParametersIn(nested).where((p) => !bound.contains(p));
       }
     case CellType(:final content):
       yield* typeParametersIn(content);
     default:
       break;
   }
+}
+
+FunctionType _substituteFunction(
+  FunctionType type,
+  Map<TypeParameterType, ValueType> environment,
+) {
+  if (!typeParametersIn(type).any(environment.containsKey)) return type;
+  final fresh = [
+    for (final p in type.typeParameters) TypeParameterType(p.name),
+  ];
+  final scoped = <TypeParameterType, ValueType>{
+    ...environment,
+    for (final (i, p) in type.typeParameters.indexed) p: fresh[i],
+  };
+  for (final (i, p) in fresh.indexed) {
+    p.initializeBound(substituteType(type.typeParameters[i].bound, scoped));
+  }
+  final body = type._bodyWith(scoped);
+  return FunctionType(
+    body.result,
+    body.parameters,
+    typeParameters: fresh,
+    optionalPositional: body.positionalCount - body.requiredPositional,
+    namedParameters: {
+      for (final e in body.named.entries) e.key: e.value.required,
+    },
+  );
+}
+
+int _typeHash(ValueType type, Map<TypeParameterType, int> scope) {
+  return switch (type) {
+    TypeParameterType() =>
+      scope.containsKey(type)
+          ? Object.hash(TypeParameterType, scope[type])
+          : identityHashCode(type),
+    NonNullableTypeParameterType(:final parameter) => Object.hash(
+      NonNullableTypeParameterType,
+      _typeHash(parameter, scope),
+    ),
+    _NullableType(:final base) => Object.hash(
+      _NullableType,
+      _typeHash(base, scope),
+    ),
+    ClassType() => Object.hash(
+      identityHashCode(type.declaration),
+      Object.hashAll(type.typeArguments.map((t) => _typeHash(t, scope))),
+    ),
+    CellType(:final content) => Object.hash(
+      CellType,
+      _typeHash(content, scope),
+    ),
+    RecordType() => Object.hash(
+      RecordType,
+      type.positionalCount,
+      Object.hashAll(type.slots.keys),
+      Object.hashAll(type.fields.map((t) => _typeHash(t, scope))),
+    ),
+    FunctionType() => _functionHash(type, scope),
+    _ => type.hashCode,
+  };
+}
+
+int _functionHash(FunctionType type, Map<TypeParameterType, int> scope) {
+  final nested = {
+    ...scope,
+    for (final (i, p) in type.typeParameters.indexed) p: scope.length + i,
+  };
+  return Object.hash(
+    FunctionType,
+    type.typeParameters.length,
+    Object.hashAll(type.typeParameters.map((p) => _typeHash(p.bound, nested))),
+    _typeHash(type.result, nested),
+    type.requiredPositional,
+    Object.hashAll(
+      type.parameters
+          .take(type.positionalCount)
+          .map((t) => _typeHash(t, nested)),
+    ),
+    Object.hashAllUnordered(
+      type.named.entries.map(
+        (e) => Object.hash(
+          e.key,
+          e.value.required,
+          _typeHash(type.parameters[e.value.slot], nested),
+        ),
+      ),
+    ),
+  );
 }

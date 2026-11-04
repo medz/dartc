@@ -40,6 +40,9 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     }
     boxed.retainAll(_written);
     for (final fn in functions.values) {
+      bindings.registerTypeParameters(fn.element.typeParameters);
+    }
+    for (final fn in functions.values) {
       ValueType slot(Element? e) {
         if (e == null) return root.owner!;
         final declared = switch (e) {

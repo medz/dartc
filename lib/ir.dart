@@ -57,6 +57,7 @@ export 'src/ir/value.dart'
         Equals,
         Instruction,
         FunctionCall,
+        InstantiateFunction,
         FunctionConstant,
         InstanceCall,
         IntBinary,

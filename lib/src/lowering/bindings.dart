@@ -5,11 +5,14 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
 
+import 'analyzer_constants.dart';
+
 /// Maps analyzer declarations and formal parameters to their IR identities.
 final class Bindings({final bool enableAssertions = false}) {
   final _targets = <ExecutableElement, FunctionTarget>{};
   final _classes = <InterfaceElement, ClassType>{};
   final _parameters = <TypeParameterElement, TypeParameterType>{};
+  final _boundParameters = <TypeParameterElement>{};
   final _fields = <FieldElement, InstanceField>{};
   final _defaults = <FunctionTarget, Map<int, Constant>>{};
 
@@ -47,9 +50,11 @@ final class Bindings({final bool enableAssertions = false}) {
       MethodElement(isStatic: false) => FunctionKind.method,
       _ => FunctionKind.function,
     };
-    if (element.typeParameters.isNotEmpty) {
-      unsupported(unit, site, 'generic functions');
-    }
+    final typeParameters = bindTypeParameters(
+      element.typeParameters,
+      unit,
+      site,
+    );
     FunctionTarget? destination;
     ClassType? redirectOwnerType;
     if (element case final ConstructorElement ctor
@@ -76,6 +81,7 @@ final class Bindings({final bool enableAssertions = false}) {
           : valueType(element.returnType, unit, site),
       parameters.map((p) => valueType(p.type, unit, site)),
       owner: owner,
+      typeParameters: typeParameters,
       kind: kind,
       redirect: destination,
       redirectOwnerType: redirectOwnerType,
@@ -143,12 +149,19 @@ final class Bindings({final bool enableAssertions = false}) {
         !variable.hasDefaultValue) {
       return const .nullValue();
     }
-    return constantValue(value, unit, site);
+    return _constantValue(value, variable.constantInitializer, unit, site);
   }
 
   /// Converts an analyzer constant into an independent IR operand.
   Constant constantValue(
     DartObject? value,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) => _constantValue(value, site is ast.Expression ? site : null, unit, site);
+
+  Constant _constantValue(
+    DartObject? value,
+    ast.Expression? syntax,
     ResolvedUnitResult unit,
     ast.AstNode site,
   ) {
@@ -160,31 +173,127 @@ final class Bindings({final bool enableAssertions = false}) {
       if (value.toStringValue() case final s?) return .string(s);
       if (value.toFunctionValue() case final executable?) {
         final callable = target(executable, unit, site);
-        final ClassType? ownerType;
-        final functionType = value.type;
-        if (executable is ConstructorElement &&
-            callable.owner!.typeParameters.isNotEmpty &&
-            functionType is dart.FunctionType) {
-          ownerType =
-              valueType(functionType.returnType, unit, site) as ClassType;
-        } else {
-          ownerType = null;
+        final functionType = value.type! as dart.FunctionType;
+        final arguments = constantFunctionArguments(value);
+        if (executable is ConstructorElement) {
+          final alias = _constantConstructorAlias(value, syntax);
+          if (alias != null) {
+            final signature = constructorAliasSignature(
+              alias,
+              callable,
+              unit,
+              site,
+            );
+            return FunctionConstant(
+              callable,
+              constructorSignature: signature,
+              constructorAlias: (alias.library.uri, alias.name!),
+              typeArguments: functionType.typeParameters.isEmpty
+                  ? arguments!.map((t) => valueType(t, unit, site))
+                  : null,
+            );
+          }
+          if (constantFunctionHasAlias(value)) {
+            unsupported(unit, site, 'constant constructor alias provenance');
+          }
+          return FunctionConstant(
+            callable,
+            ownerType: functionType.typeParameters.isEmpty
+                ? valueType(functionType.returnType, unit, site) as ClassType
+                : null,
+            constructorSignature: functionType.typeParameters.isNotEmpty
+                ? valueType(functionType, unit, site) as FunctionType
+                : null,
+          );
         }
-        return FunctionConstant(callable, ownerType: ownerType);
+        return FunctionConstant(
+          callable,
+          typeArguments: arguments?.map((t) => valueType(t, unit, site)),
+        );
       }
       if (value.toRecordValue() case final record?) {
         final type = valueType(value.type!, unit, site);
         if (type is RecordType) {
+          final expressions = <int, ast.Expression>{};
+          if (syntax is ast.RecordLiteral) {
+            var positional = 0;
+            for (final field in syntax.fields) {
+              final slot = field is ast.RecordLiteralNamedField
+                  ? type.slots[field.name.lexeme]!
+                  : positional++;
+              expressions[slot] = field.fieldExpression;
+            }
+          }
           return RecordConstant(type, [
-            for (final field in record.positional)
-              constantValue(field, unit, site),
+            for (final (i, field) in record.positional.indexed)
+              _constantValue(field, expressions[i] ?? syntax, unit, site),
             for (final name in type.slots.keys.skip(type.positionalCount))
-              constantValue(record.named[name]!, unit, site),
+              _constantValue(
+                record.named[name]!,
+                expressions[type.slots[name]] ?? syntax,
+                unit,
+                site,
+              ),
           ]);
         }
       }
     }
     unsupported(unit, site, 'constant ${value?.type}');
+  }
+
+  /// Builds the independently bound callable view of an alias constructor.
+  FunctionType constructorAliasSignature(
+    TypeAliasElement alias,
+    FunctionTarget target,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    final parameters = bindTypeParameters(alias.typeParameters, unit, site);
+    final owner = valueType(alias.aliasedType, unit, site) as ClassType;
+    final signature = target.signatureFor(owner);
+    return FunctionType(
+      signature.result,
+      signature.parameters,
+      typeParameters: parameters,
+      optionalPositional:
+          signature.positionalCount - signature.requiredPositional,
+      namedParameters: {
+        for (final entry in signature.named.entries)
+          entry.key: entry.value.required,
+      },
+    );
+  }
+
+  TypeAliasElement? _constantConstructorAlias(
+    DartObject value,
+    ast.Expression? syntax,
+  ) {
+    final aliases = <TypeAliasElement>{};
+    final visited = <VariableElement>{};
+    void scan(ast.AstNode? node) {
+      if (node == null) return;
+      if (node is ast.NamedType && node.element is TypeAliasElement) {
+        aliases.add(node.element as TypeAliasElement);
+      }
+      final variable = switch (node) {
+        ast.Identifier(element: final VariableElement variable) => variable,
+        ast.Identifier(element: GetterElement(:final variable)) => variable,
+        _ => null,
+      };
+      if (variable != null && variable.isConst && visited.add(variable)) {
+        scan(variable.constantInitializer);
+      }
+      for (final child in node.childEntities) {
+        if (child is ast.AstNode) scan(child);
+      }
+    }
+
+    scan(syntax);
+    scan(value.variable?.constantInitializer);
+    for (final alias in aliases) {
+      if (constantFunctionUsesAlias(value, alias)) return alias;
+    }
+    return null;
   }
 
   /// Maps the resolved Dart [type] to its IR type.
@@ -201,22 +310,7 @@ final class Bindings({final bool enableAssertions = false}) {
         unit,
         site,
       ),
-      dart.FunctionType(
-        :final formalParameters,
-        :final returnType,
-        typeParameters: [],
-      ) =>
-        FunctionType(
-          valueType(returnType, unit, site),
-          formalParameters.map((p) => valueType(p.type, unit, site)),
-          optionalPositional: formalParameters
-              .where((p) => p.isOptionalPositional)
-              .length,
-          namedParameters: {
-            for (final p in formalParameters)
-              if (p.isNamed) p.name!: p.isRequiredNamed,
-          },
-        ),
+      final dart.FunctionType function => _functionType(function, unit, site),
       dart.RecordType(:final positionalFields, :final namedFields) =>
         RecordType(
           positionalFields.map((field) => valueType(field.type, unit, site)),
@@ -233,6 +327,55 @@ final class Bindings({final bool enableAssertions = false}) {
       _ => unsupported(unit, site, type.getDisplayString()),
     };
     return type.nullabilitySuffix == .question ? base.nullable : base;
+  }
+
+  /// Registers a binder group before any of its bounds are converted.
+  List<TypeParameterType> registerTypeParameters(
+    List<TypeParameterElement> elements,
+  ) => [
+    for (final element in elements)
+      _parameters.putIfAbsent(
+        element.baseElement,
+        () => TypeParameterType(element.name!),
+      ),
+  ];
+
+  /// Converts a binder group and its simultaneously scoped bounds.
+  List<TypeParameterType> bindTypeParameters(
+    List<TypeParameterElement> elements,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    final parameters = registerTypeParameters(elements);
+    for (final (i, element) in elements.indexed) {
+      if (!_boundParameters.add(element.baseElement)) continue;
+      parameters[i].initializeBound(
+        element.bound == null
+            ? ValueType.object.nullable
+            : valueType(element.bound!, unit, site),
+      );
+    }
+    return parameters;
+  }
+
+  FunctionType _functionType(
+    dart.FunctionType type,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    final parameters = bindTypeParameters(type.typeParameters, unit, site);
+    return FunctionType(
+      valueType(type.returnType, unit, site),
+      type.formalParameters.map((p) => valueType(p.type, unit, site)),
+      typeParameters: parameters,
+      optionalPositional: type.formalParameters
+          .where((p) => p.isOptionalPositional)
+          .length,
+      namedParameters: {
+        for (final p in type.formalParameters)
+          if (p.isNamed) p.name!: p.isRequiredNamed,
+      },
+    );
   }
 
   ValueType _parameterType(
@@ -300,13 +443,7 @@ final class Bindings({final bool enableAssertions = false}) {
     if (element is! ClassElement || element.mixins.isNotEmpty) {
       unsupported(unit, site, 'class ${element.name} with mixins');
     }
-    final parameters = [
-      for (final parameter in element.typeParameters)
-        _parameters.putIfAbsent(
-          parameter.baseElement,
-          () => TypeParameterType(parameter.name!),
-        ),
-    ];
+    final parameters = registerTypeParameters(element.typeParameters);
     final type = ClassType.declare(
       element.library.uri,
       element.name!,
@@ -314,13 +451,7 @@ final class Bindings({final bool enableAssertions = false}) {
       isAbstract: element.isAbstract || element.isSealed,
     );
     _classes[element] = type;
-    for (final (i, parameter) in element.typeParameters.indexed) {
-      parameters[i].initializeBound(
-        parameter.bound == null
-            ? ValueType.object.nullable
-            : valueType(parameter.bound!, unit, site),
-      );
-    }
+    bindTypeParameters(element.typeParameters, unit, site);
     type.initializeHierarchy(
       superclass: valueType(element.supertype!, unit, site) as ClassType,
       interfaces: element.interfaces.map(

@@ -34,12 +34,66 @@ final class FunctionConstant(
   /// The referenced declaration, including the source factory for a redirect.
   final FunctionTarget target, {
   final ClassType? ownerType,
+  Iterable<ValueType>? typeArguments,
+
+  /// The generic callable view of a constructor alias, including its owner template.
+  final FunctionType? constructorSignature,
+
+  /// The nominal identity retained by a non-proper generic constructor alias.
+  final (Uri, String)? constructorAlias,
 }) extends Constant {
+  final List<ValueType>? typeArguments = typeArguments == null
+      ? null
+      : .unmodifiable(typeArguments);
   this
     : super(
-        ownerType == null ? target.signature : target.signatureFor(ownerType),
+        typeArguments == null
+            ? constructorSignature ??
+                  target.tearOffSignature(ownerType: ownerType)
+            : (constructorSignature ??
+                      target.tearOffSignature(ownerType: ownerType))
+                  .instantiate(typeArguments),
       ) {
     ownerType?.validateTypeArguments();
+    if (constructorAlias != null &&
+        (constructorSignature == null ||
+            constructorSignature!.typeParameters.isEmpty)) {
+      throw ArgumentError(
+        'A constructor alias identity requires a generic callable view.',
+      );
+    }
+    if (constructorSignature case final signature?) {
+      if (ownerType != null ||
+          (target.kind != .initializer && target.kind != .factory)) {
+        throw ArgumentError(
+          'A constructor callable view requires an unapplied constructor.',
+        );
+      }
+      final owner = signature.result;
+      if (owner is! ClassType ||
+          owner.declaration != target.owner?.declaration) {
+        throw ArgumentError(
+          'Constructor callable view returns an incompatible owner.',
+        );
+      }
+      owner.validateTypeArguments();
+      final expected = target.signatureFor(owner);
+      final genericExpected = FunctionType(
+        expected.result,
+        expected.parameters,
+        typeParameters: signature.typeParameters,
+        optionalPositional:
+            expected.positionalCount - expected.requiredPositional,
+        namedParameters: {
+          for (final e in expected.named.entries) e.key: e.value.required,
+        },
+      );
+      if (signature != genericExpected) {
+        throw ArgumentError(
+          'Constructor callable view does not match its declaration.',
+        );
+      }
+    }
     if (target.kind == .closure ||
         target.kind.isVirtual ||
         target.kind == .initializer && target.owner!.isAbstract) {
@@ -109,6 +163,7 @@ sealed class Instruction(super.type) extends Value {
     DirectCall() ||
     InstanceCall() ||
     FunctionCall() ||
+    InstantiateFunction() ||
     BindMethod() ||
     MakeClosure() ||
     NewCell() ||
@@ -232,6 +287,10 @@ final class WriteCell(
 }
 
 /// Binds a method to its evaluated receiver, performing virtual selection at extraction.
+///
+/// The selected implementation's reified signature must satisfy this value's
+/// static function type. A mismatch raises `TypeError` during extraction, before
+/// any later function instantiation or invocation.
 final class BindMethod(
   /// The method selected statically at this access.
   final FunctionTarget method,
@@ -258,24 +317,47 @@ final class BindMethod(
   Iterable<Value> get inputs => [receiver];
 }
 
+/// Applies explicit or inferred type arguments to a generic function value.
+final class InstantiateFunction(
+  final Value function,
+  Iterable<ValueType> typeArguments,
+) extends Instruction {
+  final List<ValueType> typeArguments = .unmodifiable(typeArguments);
+  this : super(_functionSignature(function).instantiate(typeArguments)) {
+    if (_functionSignature(function).typeParameters.isEmpty) {
+      throw ArgumentError('Expected a generic function value.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [function];
+}
+
+FunctionType _functionSignature(Value function) => switch (function.type) {
+  FunctionType() => function.type as FunctionType,
+  _ => throw ArgumentError('Expected a non-nullable function signature.'),
+};
+
 /// Invokes a function value with the supplied arguments and the destination's defaults.
 final class FunctionCall(
   /// The evaluated function value.
   final Value function,
   Iterable<Value> positional, [
   Map<String, Value> named = const {},
+  Iterable<ValueType> typeArguments = const [],
 ]) extends Instruction {
+  final List<ValueType> typeArguments = .unmodifiable(typeArguments);
+
   /// Supplied positional arguments.
   final List<Value> positional = .unmodifiable(positional);
 
   /// Supplied named arguments.
   final Map<String, Value> named = .unmodifiable(named);
-  this
-    : super(switch (function.type) {
-        FunctionType(:final result) => result,
-        _ => throw ArgumentError('Expected a non-nullable function signature.'),
-      }) {
-    _checkCall(function.type as FunctionType, this.positional, this.named);
+  this : super(_functionSignature(function).instantiate(typeArguments).result) {
+    _checkCall(
+      _functionSignature(function).instantiate(typeArguments),
+      this.positional,
+      this.named,
+    );
   }
   @override
   Iterable<Value> get inputs => [function, ...positional, ...named.values];
@@ -324,7 +406,10 @@ final class InstanceCall(
   Iterable<Value> positional, [
   Map<String, Value> named = const {},
   final ClassType? ownerType,
+  Iterable<ValueType> typeArguments = const [],
 ]) extends Instruction {
+  final List<ValueType> typeArguments = .unmodifiable(typeArguments);
+
   /// Explicit positional arguments.
   final List<Value> positional = .unmodifiable(positional);
 
@@ -332,7 +417,10 @@ final class InstanceCall(
   final Map<String, Value> named = .unmodifiable(named);
   this
     : super(
-        member.signatureFor(ownerType ?? _classReceiver(receiver.type)).result,
+        member
+            .signatureFor(ownerType ?? _classReceiver(receiver.type))
+            .instantiate(typeArguments)
+            .result,
       ) {
     if (!member.kind.isVirtual ||
         _classReceiver(receiver.type).asInstanceOf(member.owner!) == null) {
@@ -342,7 +430,9 @@ final class InstanceCall(
       throw ArgumentError('Static member view cannot accept the receiver.');
     }
     _checkCall(
-      member.signatureFor(ownerType ?? _classReceiver(receiver.type)),
+      member
+          .signatureFor(ownerType ?? _classReceiver(receiver.type))
+          .instantiate(typeArguments),
       this.positional,
       this.named,
     );
@@ -654,23 +744,13 @@ final class DirectCall(
   final FunctionTarget target,
   Iterable<Value> arguments, {
   final ClassType? ownerType,
+  Iterable<ValueType> typeArguments = const [],
 }) extends Instruction {
-  /// The argument values in the target's parameter order.
+  final List<ValueType> typeArguments = .unmodifiable(typeArguments);
   @override
   final List<Value> inputs = .unmodifiable(arguments);
 
-  /// Creates a call from the already evaluated [arguments].
-  ///
-  /// Throws [ArgumentError] for a wrong argument count or an incompatible type.
-  this
-    : super(
-        ownerType == null
-            ? target.returnType
-            : substituteType(
-                target.returnType,
-                target.environmentFor(ownerType),
-              ),
-      ) {
+  this : super(_directResult(target, ownerType, typeArguments)) {
     if (target.kind == .closure) {
       throw ArgumentError('A lexical invocation requires its closure.');
     }
@@ -681,14 +761,31 @@ final class DirectCall(
       throw ArgumentError('Cannot directly invoke an abstract member.');
     }
     ownerType?.validateTypeArguments();
-    final environment = ownerType == null
+    final ownerEnvironment = ownerType == null
         ? const <TypeParameterType, ValueType>{}
         : target.environmentFor(ownerType!);
-    checkArguments(
-      target.parameterTypes.map((t) => substituteType(t, environment)),
-      inputs,
-    );
+    final signature = (substituteType(
+      target.signature,
+      ownerEnvironment,
+    ) as FunctionType).instantiate(typeArguments);
+    checkArguments([
+      if (target.kind.hasReceiver)
+        substituteType(target.owner!, ownerEnvironment),
+      ...signature.parameters,
+    ], inputs);
   }
+}
+
+ValueType _directResult(
+  FunctionTarget target,
+  ClassType? ownerType,
+  Iterable<ValueType> typeArguments,
+) {
+  final signature = ownerType == null
+      ? target.signature
+      : target.signatureFor(ownerType);
+  final applied = signature.instantiate(typeArguments);
+  return target.kind == .initializer ? ValueType.voidType : applied.result;
 }
 
 /// Checks the arity and assignability of [arguments] against [types].

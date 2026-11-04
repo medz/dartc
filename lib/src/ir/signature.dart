@@ -67,6 +67,7 @@ final class FunctionTarget(
   int optionalPositional = 0,
   Map<String, bool> namedParameters = const {},
   Iterable<int> covariantParameters = const [],
+  Iterable<TypeParameterType> typeParameters = const [],
 
   /// Whether the instance member is declared without an implementation.
   final bool isAbstract = false,
@@ -90,7 +91,11 @@ final class FunctionTarget(
     parameters,
     optionalPositional: optionalPositional,
     namedParameters: namedParameters,
+    typeParameters: typeParameters,
   );
+
+  /// The lexical type parameters declared by this function.
+  List<TypeParameterType> get typeParameters => signature.typeParameters;
 
   /// The capture slots, in the order supplied when the closure is created.
   final List<ValueType> captures = .unmodifiable(captures);
@@ -129,12 +134,34 @@ final class FunctionTarget(
                   ? ValueType.object.nullable
                   : type,
           ],
+          typeParameters: signature.typeParameters,
           optionalPositional:
               signature.positionalCount - signature.requiredPositional,
           namedParameters: {
             for (final e in signature.named.entries) e.key: e.value.required,
           },
         );
+
+  /// The function type exposed by extraction, before function instantiation.
+  FunctionType tearOffSignature({ClassType? ownerType, bool reified = false}) {
+    final base = reified ? reifiedSignature : signature;
+    if (ownerType != null) {
+      return substituteType(base, environmentFor(ownerType)) as FunctionType;
+    }
+    if ((kind == .initializer || kind == .factory) &&
+        owner!.typeParameters.isNotEmpty) {
+      return FunctionType(
+        base.result,
+        base.parameters,
+        typeParameters: owner!.typeParameters,
+        optionalPositional: base.positionalCount - base.requiredPositional,
+        namedParameters: {
+          for (final e in base.named.entries) e.key: e.value.required,
+        },
+      );
+    }
+    return base;
+  }
 
   /// Instantiates this declaration's signature through the receiver's owner view.
   FunctionType signatureFor(ClassType receiver) =>
@@ -186,7 +213,14 @@ final class FunctionTarget(
   }
 
   this {
-    if ((owner != null && owner!.library != library) ||
+    if ((typeParameters.isNotEmpty &&
+            (kind == .initializer ||
+                kind == .factory ||
+                kind == .getter ||
+                kind == .setter ||
+                kind == .staticGetter ||
+                kind == .staticSetter)) ||
+        (owner != null && owner!.library != library) ||
         (kind != .function &&
             kind != .closure &&
             kind != .staticGetter &&
