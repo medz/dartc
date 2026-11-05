@@ -39,6 +39,29 @@ abstract final class CoreTypes() {
     isFinal: true,
   );
 
+  static final ClassType symbol = _declare('Symbol', 0);
+
+  /// Built-in Symbol storage, distinct from user implementations of Symbol.
+  static final ClassType symbolStorage = ClassType(
+    Uri.parse('dart:_internal'),
+    'Symbol',
+    interfaces: [symbol],
+  );
+  static final InstanceField symbolName = InstanceField(
+    symbolStorage,
+    '_name',
+    ValueType.string,
+    isFinal: true,
+  );
+
+  /// A private name's declaring library URI, or null for a public constructor.
+  static final InstanceField symbolPrivateLibrary = InstanceField(
+    symbolStorage,
+    '_privateLibrary',
+    ValueType.string.nullable,
+    isFinal: true,
+  );
+
   static final ClassType iterable = _declare('Iterable', 1);
   static final ClassType iterator = _declare('Iterator', 1);
   static final ClassType list = _declare('List', 1, sequence: true);

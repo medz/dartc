@@ -356,7 +356,8 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
             if (coreEnumField(member) case final slot?) {
               return context.normal(context.emit(LoadField(slot, object)));
             }
-            if (member.library.isDartCore) {
+            if (member.library.isDartCore &&
+                !coreSymbolMember(member, object.type)) {
               final operation = member is GetterElement
                   ? coreCollectionOperation(member.name!, object, [])
                   : null;

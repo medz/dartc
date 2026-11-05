@@ -229,6 +229,12 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
             ? DirectCall(target, bound, ownerType: instanceType)
             : Construct(target, bound, instantiatedType: instanceType),
       );
+    case ast.SymbolLiteral():
+      return context.bindings.constantValue(
+        expression.computeConstantValue()?.value,
+        unit,
+        expression,
+      );
     case ast.BooleanLiteral(:final value):
       return Constant.boolean(value);
     case ast.IntegerLiteral():

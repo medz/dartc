@@ -210,6 +210,14 @@ final class FixtureRunner(
         target.name == 'identical') {
       return identical(arguments[0], arguments[1]);
     }
+    if (target == _symbolToString) return arguments.first.toString();
+    if (arguments.firstOrNull case final _Instance instance
+        when _isSymbolMember(target) &&
+            CoreTypes.symbol.accepts(instance.type)) {
+      return target.kind == .getter
+          ? instance.hashCode
+          : "Instance of '${instance.type.dartName}'";
+    }
     final body = bodies[target];
     return body != null
         ? run(body, arguments, environment)
@@ -225,6 +233,9 @@ final class FixtureRunner(
     if (init.owner == CoreTypes.mapEntry) {
       instance.fields[CoreTypes.mapEntryKey] = arguments[0];
       instance.fields[CoreTypes.mapEntryValue] = arguments[1];
+    } else if (init.owner == CoreTypes.symbolStorage) {
+      instance.fields[CoreTypes.symbolName] = arguments.single;
+      instance.fields[CoreTypes.symbolPrivateLibrary] = null;
     } else if (init.owner != ValueType.object) {
       _enter(init, [instance, ...arguments]);
     }
@@ -317,6 +328,39 @@ final class FixtureRunner(
     );
     final target = program.dispatch(instance.type, member)!;
     return _invoke(_FunctionValue(target, instance), arguments, const {});
+  }
+
+  // These SDK declarations have no bodies in the fixture program. Match their
+  // nominal owners as well as selectors, and always prefer user dispatch.
+  static final _symbolToString = FunctionTarget(
+    CoreTypes.symbolStorage.library,
+    'toString',
+    .string,
+    [],
+    owner: CoreTypes.symbolStorage,
+    kind: .method,
+  );
+
+  bool _isSymbolMember(FunctionTarget member) =>
+      member.owner == CoreTypes.symbol &&
+          member.kind == .getter &&
+          member.name == 'hashCode' ||
+      member.owner == ValueType.object &&
+          member.kind == .method &&
+          member.name == 'toString';
+
+  FunctionTarget _resolveMember(_Instance instance, FunctionTarget member) {
+    final target = program.dispatch(instance.type, member);
+    if (target != null) return target;
+    if (_isSymbolMember(member) && CoreTypes.symbol.accepts(instance.type)) {
+      // Keep the implementation identity: a direct Object.toString call must
+      // not execute the Symbol implementation or redispatch a user override.
+      return member.owner == ValueType.object &&
+              instance.type == CoreTypes.symbolStorage
+          ? _symbolToString
+          : member;
+    }
+    throw StateError('Missing fixture member: ${member.name}');
   }
 
   Object _iterator(Object? value) => switch (value) {
@@ -465,8 +509,10 @@ final class FixtureRunner(
       switch (op) {
         case ReifyType(:final template):
           values[op] = _typeValue(resolve(template));
-        case ObjectHashCode(:final operand):
-          values[op] = read(operand).hashCode;
+        case ObjectHashCode(:final operand, :final direct):
+          values[op] = direct
+              ? identityHashCode(read(operand))
+              : read(operand).hashCode;
         case NewCollection(:final collectionType):
           final type = resolve(collectionType) as ClassType;
           values[op] = _CollectionValue(
@@ -611,7 +657,7 @@ final class FixtureRunner(
         case BindMethod(:final method, :final receiver, :final direct):
           final instance = read(receiver) as _Instance;
           final function = _FunctionValue(
-            direct ? method : program.dispatch(instance.type, method)!,
+            direct ? method : _resolveMember(instance, method),
             instance,
           );
           values[op] = _typeOperation(resolve(op.type), function, cast: true);
@@ -657,7 +703,7 @@ final class FixtureRunner(
           :final named,
         ):
           final instance = read(receiver) as _Instance;
-          final target = program.dispatch(instance.type, member)!;
+          final target = _resolveMember(instance, member);
           values[op] = _invoke(
             _FunctionValue(target, instance),
             positional.map(read).toList(),
@@ -1008,6 +1054,13 @@ final class _Instance(final ClassType type, final FixtureRunner runner) {
 
   @override
   bool operator ==(Object other) {
+    if (type == CoreTypes.symbolStorage) {
+      return other is _Instance &&
+          other.type == CoreTypes.symbolStorage &&
+          fields[CoreTypes.symbolName] == other.fields[CoreTypes.symbolName] &&
+          fields[CoreTypes.symbolPrivateLibrary] ==
+              other.fields[CoreTypes.symbolPrivateLibrary];
+    }
     final target = runner.program.dispatch(type, _equality);
     return target == null
         ? identical(this, other)
@@ -1026,6 +1079,9 @@ final class _Instance(final ClassType type, final FixtureRunner runner) {
 
   @override
   String toString() {
+    if (type == CoreTypes.symbolStorage) {
+      return Symbol(fields[CoreTypes.symbolName] as String).toString();
+    }
     final target = runner.program.dispatch(type, _string);
     return target == null
         ? "Instance of '${type.dartName}'"
@@ -1043,6 +1099,13 @@ final class _Instance(final ClassType type, final FixtureRunner runner) {
 
   @override
   int get hashCode {
+    if (type == CoreTypes.symbolStorage) {
+      final name = fields[CoreTypes.symbolName] as String;
+      final library = fields[CoreTypes.symbolPrivateLibrary] as String?;
+      return library == null
+          ? Symbol(name).hashCode
+          : Object.hash(name, library);
+    }
     final target = runner.program.dispatch(type, _hash);
     return target == null
         ? identityHashCode(this)

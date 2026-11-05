@@ -7,10 +7,7 @@ void main() {
   test('unsupported special constants are not empty user instances', () async {
     final directory = Directory.systemTemp.createTempSync('dartc-constant-');
     addTearDown(() => directory.deleteSync(recursive: true));
-    for (final expression in [
-      "const Duration(seconds: 1)",
-      "const <Object>[#name]",
-    ]) {
+    for (final expression in ["const Duration(seconds: 1)"]) {
       final file = File('${directory.path}/entry.dart')
         ..writeAsStringSync('Object f() => $expression;');
       await expectLater(

@@ -323,21 +323,25 @@ final class SelectorChain(
         member.library.isDartCore &&
         member.enclosingElement?.name == 'Object' &&
         member.name == 'toString';
-    final enumToString =
+    final supportedToString =
         coreToString &&
         !direct &&
-        CoreTypes.view(known.type, CoreTypes.enumeration) != null;
-    if (coreToString && !enumToString) {
+        (CoreTypes.view(known.type, CoreTypes.enumeration) != null ||
+            coreSymbolMember(member, known.type));
+    if (coreToString && !supportedToString) {
       unsupported(context.unit, node, 'core Object.toString');
     }
     if (member.library.uri.toString() == 'dart:core' &&
-        !enumToString &&
+        !supportedToString &&
         (member is GetterElement || arguments != null)) {
       if (member is GetterElement &&
           member.name == 'hashCode' &&
           (member.enclosingElement.name == 'Object' ||
-              member.enclosingElement.name == 'Type')) {
-        return context.normal(context.emit(ObjectHashCode(known)));
+              member.enclosingElement.name == 'Type' ||
+              coreSymbolMember(member, known.type))) {
+        return context.normal(
+          context.emit(ObjectHashCode(known, direct: direct)),
+        );
       }
       final args = context.arguments(arguments, evaluate);
       if (args == null) return null;

@@ -119,7 +119,8 @@ void writeFunction(
     Equals() =>
       '${value(op.left)} ${op.negated ? '!=' : '=='} ${value(op.right)}',
     ReifyType() => 'reify ${op.template.dartName}',
-    ObjectHashCode() => 'hashCode ${value(op.operand)}',
+    ObjectHashCode() =>
+      '${op.direct ? 'direct ' : ''}hashCode ${value(op.operand)}',
     TypeTest() =>
       '${value(op.operand)} ${op.negated ? 'is!' : 'is'} ${op.testedType.dartName}',
     TypeView() => 'view ${value(op.operand)} as ${op.type.dartName}',

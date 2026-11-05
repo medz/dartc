@@ -248,6 +248,14 @@ final class Bindings({final bool enableAssertions = false}) {
       if (value.toBoolValue() case final b?) return .boolean(b);
       if (value.toDoubleValue() case final d?) return .floating(d);
       if (value.toStringValue() case final s?) return .string(s);
+      if (value.toSymbolValue() case final name?) {
+        // ConstantSafety has already rejected dependencies on private literals.
+        // Analyzer does not retain their defining library in toSymbolValue().
+        return ObjectConstant(CoreTypes.symbolStorage, {
+          CoreTypes.symbolName: .string(name),
+          CoreTypes.symbolPrivateLibrary: const .nullValue(),
+        });
+      }
       if (value.toFunctionValue() case final executable?) {
         final callable = target(executable, unit, site);
         final functionType = value.type! as dart.FunctionType;
@@ -631,6 +639,7 @@ final class Bindings({final bool enableAssertions = false}) {
         'Map' => CoreTypes.map,
         'MapEntry' => CoreTypes.mapEntry,
         'Enum' => CoreTypes.enumeration,
+        'Symbol' => CoreTypes.symbol,
         _ => null,
       };
       if (builtin != null) {
@@ -639,6 +648,10 @@ final class Bindings({final bool enableAssertions = false}) {
         }
         return builtin;
       }
+    }
+    if (element.library.uri.toString() == 'dart:_internal' &&
+        element.name == 'Symbol') {
+      return CoreTypes.symbolStorage;
     }
     final previous = _classes[element];
     if (previous != null) return previous;
@@ -732,5 +745,19 @@ InstanceField? coreEnumField(ExecutableElement? member) {
     (ClassElement(name: 'Enum'), 'index') => CoreTypes.enumIndex,
     (ExtensionElement(name: 'EnumName'), 'name') => CoreTypes.enumName,
     _ => null,
+  };
+}
+
+/// Whether this SDK member has Symbol's narrow runtime fallback.
+///
+/// Keep the public protocol virtual: user implementations of Symbol need not
+/// carry the SDK implementation's storage and may override either operation.
+bool coreSymbolMember(ExecutableElement member, ValueType receiver) {
+  if (!member.library.isDartCore || member.isStatic) return false;
+  return switch ((member, member.enclosingElement?.name, member.name)) {
+    (GetterElement(), 'Symbol', 'hashCode') => true,
+    (MethodElement(), 'Object', 'toString') =>
+      CoreTypes.view(receiver, CoreTypes.symbol) != null,
+    _ => false,
   };
 }

@@ -49,7 +49,12 @@ final class ReifyType(final ValueType template) extends Instruction {
 }
 
 /// Reads Dart Object.hashCode, retaining virtual dispatch for user objects.
-final class ObjectHashCode(final Value operand) extends Instruction {
+final class ObjectHashCode(
+  final Value operand, {
+
+  /// Whether `super` selected Object's identity hash without virtual dispatch.
+  final bool direct = false,
+}) extends Instruction {
   this : super(.integer) {
     if (operand.type is CellType) throw ArgumentError('Expected a Dart value.');
   }
