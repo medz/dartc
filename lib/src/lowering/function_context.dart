@@ -232,8 +232,7 @@ final class FunctionContext(
         extension == null && !isClassOrEnum(member.enclosingElement)) {
       unsupported(unit, site, 'instance member binding');
     }
-    if (coreRuntimeType(member)) {
-      if (direct) unsupported(unit, site, 'super.runtimeType');
+    if (coreRuntimeType(member) && !direct) {
       final value = dynamicMember(receiver, .getter, 'runtimeType', []);
       return value == null ? null : normal(cast(value, ValueType.typeType));
     }

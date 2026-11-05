@@ -1,6 +1,4 @@
-import 'dart:io';
-
-import 'package:dartc/lowering.dart';
+import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
@@ -42,22 +40,15 @@ void main() {
     });
   }
 
-  test('super.runtimeType is not lowered as virtual dispatch', () async {
-    final directory = Directory.systemTemp.createTempSync(
-      'dartc-runtime-type-',
+  test('super.runtimeType uses the selected ancestor, not an override', () {
+    fixture.compare('superRuntimeType', [], sdk.superRuntimeType);
+    final actual = fixture.program.functions.singleWhere(
+      (function) => function.target.name == 'actual',
     );
-    addTearDown(() => directory.deleteSync(recursive: true));
-    final file = File('${directory.path}/entry.dart')
-      ..writeAsStringSync('''
-class C {
-  @override
-  Type get runtimeType => int;
-  Type original() => super.runtimeType;
-}
-''');
-    await expectLater(
-      CheckedLibraries.read([file.path], Lowering.lower),
-      throwsUnsupportedError,
-    );
+    final calls = actual.blocks
+        .expand((block) => block.instructions)
+        .whereType<DirectCall>();
+    expect(calls.single.target.owner, ValueType.object);
+    expect(calls.single.target.name, 'runtimeType');
   });
 }

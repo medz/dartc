@@ -83,3 +83,35 @@ Type errorRuntimeType() {
     return error.runtimeType;
   }
 }
+
+class Base {
+  Type actual() => super.runtimeType;
+  Type Function() captured() =>
+      () => super.runtimeType;
+  @override
+  Type get runtimeType => String;
+}
+
+class Child extends Base {}
+
+class ParentOverride {
+  @override
+  Type get runtimeType {
+    tick(2);
+    return int;
+  }
+}
+
+class ChildOverride extends ParentOverride {
+  @override
+  Type get runtimeType => String;
+  Type inherited() => super.runtimeType;
+}
+
+bool superRuntimeType() {
+  final value = Child();
+  return value.actual() == Child &&
+      value.captured()() == Child &&
+      value.runtimeType == String &&
+      ChildOverride().inherited() == int;
+}
