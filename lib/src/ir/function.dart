@@ -1,15 +1,26 @@
 import 'block.dart';
+import 'core_types.dart';
 import 'format.dart';
 import 'signature.dart';
+import 'type.dart';
 import 'value.dart';
 import 'verify.dart';
 
-/// A verified SSA control-flow graph for one function.
+/// A verified SSA control-flow graph for one callable body.
+///
+/// Generator graphs explicitly represent suspension; a backend must preserve
+/// their activations or lower them to state machines before ordinary codegen.
 final class IrFunction(
   /// The declaration that callers reference.
   final FunctionTarget target,
   Iterable<Block> blocks, {
   Map<int, Constant> defaults = const {},
+
+  /// Whether this graph returns directly or suspends an iterator activation.
+  final FunctionBodyKind bodyKind = .synchronous,
+
+  /// The element type of a generator body, absent for an ordinary function.
+  final ValueType? yieldType,
 }) {
   /// The reachable blocks in the supplied order, starting with [entry].
   final List<Block> blocks = .unmodifiable(blocks);
@@ -31,8 +42,21 @@ final class IrFunction(
   /// Throws [ArgumentError] when the entry parameters differ from the signature.
   /// Throws [StateError] for an empty or malformed graph. Every block must be
   /// sealed and reachable, and each SSA definition must dominate its uses.
-  /// Each return must supply a compatible value; a bare return supplies `null`.
+  /// Ordinary returns must match the callable result. Generator returns complete
+  /// iteration and supply only `null`; yields must match [yieldType].
   this {
+    if ((bodyKind == .syncGenerator) != (yieldType != null) ||
+        yieldType is CellType ||
+        yieldType != null &&
+            (!target.returnType.accepts(CoreTypes.iterableOf(yieldType!)) ||
+                target.returnType == .voidType ||
+                target.kind == .initializer ||
+                target.kind == .factory ||
+                target.kind == .fieldInitializer ||
+                target.kind == .setter ||
+                target.kind == .staticSetter)) {
+      throw ArgumentError('Invalid generator body for ${target.name}.');
+    }
     final optional = target.signature.optionalSlots;
     final offset = target.argumentOffset;
     if (target.isAbstract ||
@@ -51,11 +75,13 @@ final class IrFunction(
       target,
       this.blocks,
       this.defaults.values,
+      yieldType: yieldType,
     );
     closures = references.closures;
     globals = references.globals;
   }
 
   /// Writes the typed blocks, instructions and outgoing edges to [output].
-  void writeTo(StringSink output) => writeFunction(output, target, blocks);
+  void writeTo(StringSink output) =>
+      writeFunction(output, target, blocks, yieldType: yieldType);
 }

@@ -19,12 +19,14 @@ export 'src/ir/block.dart'
         Return,
         Terminator,
         Throw,
+        Yield,
         Unreachable;
 export 'src/ir/function.dart' show IrFunction;
 export 'src/ir/program.dart' show IrClass, IrProgram;
 export 'src/ir/signature.dart'
     show
         FunctionKind,
+        FunctionBodyKind,
         FunctionTarget,
         GlobalVariable,
         InstanceField,

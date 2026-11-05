@@ -1,5 +1,14 @@
 import 'type.dart';
 
+/// How a body runs, independently of its callable's dispatch convention.
+enum FunctionBodyKind() {
+  /// Executes once when called and returns its result directly.
+  synchronous,
+
+  /// Returns an iterable; each iterator runs a fresh, suspendable activation.
+  syncGenerator,
+}
+
 /// How a callable is entered.
 enum FunctionKind() {
   /// A top-level function or static method.

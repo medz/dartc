@@ -14,7 +14,7 @@ import 'local_declaration.dart';
 import 'pattern.dart';
 import 'switch_statement.dart';
 
-/// Builds the blocks and local bindings for a resolved synchronous function.
+/// Builds the blocks and local bindings for a synchronous function or generator.
 final class FunctionLowering._(
   ResolvedUnitResult unit,
   Bindings bindings,
@@ -37,6 +37,15 @@ final class FunctionLowering._(
   final _breaks = <ast.AstNode, JumpTarget>{};
   final _continues = <ast.AstNode, void Function()>{};
   FinallyRegion? _finally;
+  late final ValueType? _yieldType = body?.isGenerator == true
+      ? CoreTypes.view(
+              _target.returnType.nonNullable,
+              CoreTypes.iterable,
+            )?.typeArguments.single ??
+            ValueType.dynamicType
+      : null;
+  ValueType get _bodyReturnType =>
+      _yieldType == null ? _target.returnType : ValueType.nullType;
 
   /// Appends the outer graph and the lexical bodies it declares to [output].
   static void append(
@@ -135,8 +144,13 @@ final class FunctionLowering._(
     ast.Expression? expression,
   }) {
     final body = this.body;
-    if (body != null && (body.isAsynchronous || body.isGenerator)) {
-      unsupported(context.unit, site, 'async or generator bodies');
+    if (body?.isAsynchronous == true) {
+      unsupported(context.unit, site, 'asynchronous function bodies');
+    }
+    final yieldType = _yieldType;
+    if (yieldType != null &&
+        !_target.returnType.accepts(CoreTypes.iterableOf(yieldType))) {
+      unsupported(context.unit, site, 'generator result type');
     }
     context.current = context.addBlock(_target.parameterTypes);
     final inputs = context.current!.parameters;
@@ -165,7 +179,7 @@ final class FunctionLowering._(
         case ast.BlockFunctionBody(:final block):
           _statement(block);
           if (context.current != null) {
-            if (!_target.returnType.accepts(.nullType)) {
+            if (!_bodyReturnType.accepts(.nullType)) {
               unsupported(context.unit, body, 'implicit return');
             }
             _return(null);
@@ -178,13 +192,15 @@ final class FunctionLowering._(
       _target,
       context.blocks,
       defaults: context.bindings.defaults(_target),
+      bodyKind: _yieldType == null ? .synchronous : .syncGenerator,
+      yieldType: _yieldType,
     );
   }
 
   void _return(Value? value) {
     if (context.current == null) return;
     if (value != null) {
-      value = context.normal(context.convert(value, _target.returnType));
+      value = context.normal(context.convert(value, _bodyReturnType));
       if (value == null) return;
     }
     if (_finally case final region?) {
@@ -214,7 +230,7 @@ final class FunctionLowering._(
       return;
     }
     final enclosing = _finally;
-    final region = FinallyRegion(context, statement, _target.returnType);
+    final region = FinallyRegion(context, statement, _bodyReturnType);
     region.lower(
       () {
         _finally = region;
@@ -249,6 +265,40 @@ final class FunctionLowering._(
     );
   }
 
+  void _yield(ast.YieldStatement statement) {
+    final type = _yieldType;
+    if (type == null) unsupported(context.unit, statement, 'yield body');
+    var value = lowerExpression(context, statement.expression);
+    if (value == null) return;
+    if (statement.star == null) {
+      value = context.normal(context.convert(value, type));
+      if (value != null) _suspend(value);
+      return;
+    }
+    // Unlike a for-in loop, yield* checks the complete Iterable<T> before
+    // requesting its iterator, even when the iterable is empty.
+    value = context.normal(context.convert(value, CoreTypes.iterableOf(type)));
+    if (value == null) return;
+    final iterator = context.emit(GetIterator(value));
+    final header = JumpTarget(context)
+      ..jump()
+      ..enter();
+    final done = JumpTarget(context);
+    context.guard(context.emit(IteratorMoveNext(iterator)), done);
+    final current = context.normal(context.emit(IteratorCurrent(iterator)));
+    if (current != null) {
+      _suspend(current);
+      header.jump();
+    }
+    done.enter();
+  }
+
+  void _suspend(Value value) {
+    final next = context.addBlock();
+    context.current!.finish(Yield(value, Jump(next)));
+    context.current = next;
+  }
+
   void _statement(ast.Statement statement) {
     switch (statement) {
       case ast.Block():
@@ -259,6 +309,8 @@ final class FunctionLowering._(
         _return(
           expression == null ? null : lowerExpression(context, expression),
         );
+      case ast.YieldStatement():
+        _yield(statement);
       case ast.VariableDeclarationStatement(:final variables):
         lowerVariables(context, variables, (e) => lowerExpression(context, e));
       case ast.FunctionDeclarationStatement(:final functionDeclaration):

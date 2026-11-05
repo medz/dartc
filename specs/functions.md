@@ -16,7 +16,8 @@
 | 泛型函数值、显式函数值实例化 | 支持函数、绑定方法、泛型构造器函数值，以及显式和上下文隐式实例化。运行时类型保留泛型签名与界限，实例化检查实际实现的界限。常量/default 函数值保留未出现在签名中的类型实参及身份。见[泛型函数样本](../test/lowering/fixtures/generic_functions.dart)和[常量函数样本](../test/lowering/fixtures/generic_constants.dart)。 |
 | 裸 `Function`/dynamic 函数值调用 | 支持已表示的函数、方法、构造器、闭包及 callable object，包括 Function 上界和 `.call` 提取。先验证位置/命名/类型实参个数，再应用实际声明的默认类型、界限和形参检查。保留闭包环境及构造器别名身份。原生回调只支持明确建模的签名。见[动态调用样本](../test/lowering/fixtures/dynamic_dispatch.dart)。 |
 | 可调用对象、隐式 `call` 提取 | 支持实例的普通和泛型 `call` 调用，以及在函数类型上下文中隐式提取其绑定方法。见[可调用对象样本](../test/lowering/fixtures/callables.dart)。 |
-| `async`、`sync*`、`async*` | 待实现。 |
+| `sync*` | 支持带显式 `Yield`/恢复边的生成器 IR：调用及取得 iterator 不执行函数体，每个 iterator 的局部状态独立，外层捕获绑定仍共享。支持 `yield`、`yield*`、泛型及跨暂停的 catch/finally。行为通过 SDK 对照验证；FutureOr 结果类型、生成器的具体实现 runtimeType 和同一 iterator 重入尚未建模，原生后端的帧保存/状态机转换尚未实现。见[生成器样本](../test/lowering/fixtures/generators.dart)。 |
+| `async`、`async*` | 待实现，保持显式拒绝。 |
 | `external` 函数 | 待实现。 |
 
 [IR 行为对照](../test/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/functions.md)。

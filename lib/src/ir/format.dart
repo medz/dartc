@@ -9,8 +9,9 @@ import 'value.dart';
 void writeFunction(
   StringSink output,
   FunctionTarget target,
-  List<Block> blocks,
-) {
+  List<Block> blocks, {
+  ValueType? yieldType,
+}) {
   final labels = {for (final (i, b) in blocks.indexed) b: 'b$i'};
   final ids = <Value, int>{};
   String symbol(FunctionTarget t, [ClassType? ownerType]) {
@@ -152,7 +153,10 @@ void writeFunction(
   final binders = target.typeParameters.isEmpty
       ? ''
       : '<${target.typeParameters.map((p) => '${p.name} extends ${p.bound.dartName}').join(', ')}>';
-  output.writeln('${symbol(target)}$binders -> ${target.returnType.dartName}');
+  output.writeln(
+    '${symbol(target)}$binders -> ${target.returnType.dartName}'
+    '${yieldType == null ? '' : ' sync*<${yieldType.dartName}>'}',
+  );
   for (final b in blocks) {
     final parameters = b.parameters
         .map((p) => '${value(p)}: ${p.type.dartName}')
@@ -164,6 +168,8 @@ void writeFunction(
     output.writeln(switch (b.end) {
       Return(value: final v?) => '  return ${value(v)}',
       Return() => '  return',
+      Yield(value: final element, :final onResume) =>
+        '  yield ${value(element)} resume ${edge(onResume)}',
       Throw(:final exception, stackTrace: final trace?, :final onThrow) =>
         '  rethrow ${value(exception)}, ${value(trace)}${unwind(onThrow)}',
       Throw(:final exception, :final onThrow) =>

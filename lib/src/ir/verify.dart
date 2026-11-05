@@ -6,9 +6,10 @@ import 'value.dart';
 /// Checks control flow, argument and return types, and SSA definition dominance.
 ({Set<FunctionTarget> closures, Set<GlobalVariable> globals}) verifyFunction(
   FunctionTarget target,
-  List<Block> blocks, [
-  Iterable<Constant> defaults = const [],
-]) {
+  List<Block> blocks,
+  Iterable<Constant> defaults, {
+  ValueType? yieldType,
+}) {
   Set<FunctionTarget>? closures;
   Set<GlobalVariable>? globals;
   final scope = <TypeParameterType>{};
@@ -63,6 +64,7 @@ import 'value.dart';
     constant(value);
   }
   checkTypeScope(target.signature);
+  if (yieldType != null) checkTypeScope(yieldType);
   for (final parameter in target.typeParameters) {
     checkTypeScope(parameter.bound);
     if (parameter.defaultType case final defaultType?) {
@@ -246,12 +248,23 @@ import 'value.dart';
     }
     switch (end) {
       case Return(:final value):
-        if (!target.returnType.accepts(value?.type ?? .nullType)) {
+        final resultType = yieldType == null
+            ? target.returnType
+            : ValueType.nullType;
+        if (!resultType.accepts(value?.type ?? .nullType)) {
           throw StateError(
-            'Return type ${value?.type.dartName} does not match ${target.returnType.dartName} in ${target.owner?.dartName}.${target.name}.',
+            'Return type ${value?.type.dartName} does not match ${resultType.dartName} in ${target.owner?.dartName}.${target.name}.',
           );
         }
         if (value != null) use(value, count);
+      case Yield(:final value, :final onResume):
+        if (yieldType == null ||
+            value.type is CellType ||
+            !yieldType.accepts(value.type)) {
+          throw StateError('Yield outside a compatible generator body.');
+        }
+        use(value, count);
+        useEdge(onResume);
       case Throw(:final exception, :final stackTrace, :final onThrow):
         use(exception, count);
         if (stackTrace != null) use(stackTrace, count);

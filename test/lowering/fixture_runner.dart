@@ -835,6 +835,19 @@ final class FixtureRunner(
           receiver,
         );
       }
+      if (receiver is _GeneratorIterable && name == 'iterator') {
+        return receiver.iterator;
+      }
+      if (receiver is _GeneratorIterator) {
+        if (name == 'current') return receiver.current;
+        if (name == 'moveNext') {
+          return _NativeFunction(
+            FunctionType(.boolean, const []),
+            (_) => receiver.moveNext(),
+            (receiver, _selector('moveNext')),
+          );
+        }
+      }
       if (const {'toString', '==', 'noSuchMethod'}.contains(name)) {
         final method = _selector(name);
         final signature = FunctionType(
@@ -879,6 +892,9 @@ final class FixtureRunner(
       return _noDynamicBridge;
     }
     if (selector.kind != .method) return _noDynamicBridge;
+    if (receiver is _GeneratorIterator && name == 'moveNext') {
+      return invoke(0, receiver.moveNext);
+    }
     if (name == 'toString') {
       return invoke(0, () {
         // Aggregate/function/error formatting needs its own representation
@@ -1304,8 +1320,25 @@ final class FixtureRunner(
     List<Object?> args, [
     Map<TypeParameterType, ValueType> environment = const {},
   ]) {
+    if (function.bodyKind == .syncGenerator) {
+      final saved = List<Object?>.unmodifiable(args);
+      final types = Map<TypeParameterType, ValueType>.unmodifiable(environment);
+      return _GeneratorIterable(
+        CoreTypes.iterableOf(substituteType(function.yieldType!, types)),
+        () => _GeneratorIterator(this, function, saved, types),
+      );
+    }
+    return _run(function, args, environment);
+  }
+
+  Object? _run(
+    IrFunction function,
+    List<Object?> args,
+    Map<TypeParameterType, ValueType> environment, [
+    _GeneratorIterator? generator,
+  ]) {
     ValueType resolve(ValueType type) => substituteType(type, environment);
-    final values = <Value, Object?>{};
+    final values = generator?.values ?? <Value, Object?>{};
     Object? read(Value v) => switch (v) {
       Constant() => _constant(v, environment),
       TestedValue(:final test) => read(test.operand),
@@ -1461,10 +1494,10 @@ final class FixtureRunner(
         case WriteCell(:final cell, :final value):
           _storeCell(read(cell) as _Cell, read(value));
         case BindMethod(:final method, :final receiver, :final direct):
-          final value = read(receiver);
-          if (!direct && _isObjectToString(method) && value is! _Instance) {
+          final instance = read(receiver);
+          if (!direct && _isObjectToString(method) && instance is! _Instance) {
             values[op] = _dynamicBridge(
-              value,
+              instance,
               _selector('toString', .getter),
               [],
               {},
@@ -1472,7 +1505,22 @@ final class FixtureRunner(
             );
             break;
           }
-          final instance = value as _Instance;
+          if (!direct &&
+              instance is _GeneratorIterator &&
+              method.owner?.declaration == CoreTypes.iterator &&
+              method.name == 'moveNext') {
+            values[op] = _dynamicBridge(
+              instance,
+              _selector('moveNext', .getter),
+              const [],
+              const {},
+              const [],
+            );
+            break;
+          }
+          if (instance is! _Instance) {
+            throw UnsupportedError('Unmodeled fixture method tear-off');
+          }
           final function = _FunctionValue(
             direct
                 ? (_isObjectToString(method) ? _Instance._string : method)
@@ -1637,7 +1685,8 @@ final class FixtureRunner(
       }
     }
 
-    var block = function.entry;
+    var block = generator?.block ?? function.entry;
+    args = generator?.arguments ?? args;
     for (var steps = 0; steps < 1000; steps++) {
       for (final (i, p) in block.parameters.indexed) {
         values[p] = args[i];
@@ -1649,7 +1698,15 @@ final class FixtureRunner(
       try {
         switch (end) {
           case Return(:final value):
+            if (generator != null) return generator.complete();
             return value == null ? null : read(value);
+          case Yield(:final value, :final onResume):
+            if (generator == null) fail('Yield in an ordinary activation');
+            generator
+              .._current = read(value)
+              ..arguments = onResume.arguments.map(read).toList()
+              ..block = onResume.target;
+            return true;
           case Invoke(:final operation, :final onReturn, :final onThrow):
             handler = onThrow;
             execute(operation);
@@ -1686,6 +1743,57 @@ final class FixtureRunner(
   }
 }
 
+final class _GeneratorIterable(
+  final ClassType type,
+  final Iterator<Object?> Function() _createIterator,
+) extends Iterable<Object?> {
+  @override
+  Iterator<Object?> get iterator => _createIterator();
+}
+
+final class _GeneratorIterator(
+  final FixtureRunner runner,
+  final IrFunction function,
+  var List<Object?> arguments,
+  final Map<TypeParameterType, ValueType> environment,
+) implements Iterator<Object?> {
+  final values = <Value, Object?>{};
+  final ClassType type = CoreTypes.iteratorOf(
+    substituteType(function.yieldType!, environment),
+  );
+  Block block = function.entry;
+  Object? _current;
+  bool _done = false, _running = false;
+
+  @override
+  Object? get current =>
+      _typeOperation(type.typeArguments.single, _current, cast: true);
+
+  bool complete() {
+    _done = true;
+    _current = null;
+    values.clear();
+    return false;
+  }
+
+  @override
+  bool moveNext() {
+    if (_running) {
+      throw UnsupportedError('Reentrant fixture generator activation');
+    }
+    if (_done) return false;
+    _running = true;
+    try {
+      return runner._run(function, arguments, environment, this) as bool;
+    } catch (_) {
+      complete();
+      rethrow;
+    } finally {
+      _running = false;
+    }
+  }
+}
+
 Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
   if (type == ValueType.dynamicType) return cast ? value : true;
   Object? run<T>() => cast ? value as T : value is T;
@@ -1694,6 +1802,7 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     _TypeValue() => ValueType.typeType,
     _Instance(:final type) => type,
     _CollectionValue(:final type) => type,
+    _GeneratorIterable(:final type) || _GeneratorIterator(:final type) => type,
     _NativeFunction(:final signature) => signature,
     _FunctionValue() => value.reifiedSignature,
     _ => null,
@@ -2085,6 +2194,9 @@ ValueType _runtimeValueType(Object? value) => switch (value) {
   _CollectionValue(:final type) when type.declaration == CoreTypes.list => type,
   _CollectionValue() => throw UnsupportedError(
     'Unmodeled concrete collection runtime type',
+  ),
+  _GeneratorIterable() || _GeneratorIterator() => throw UnsupportedError(
+    'Unmodeled concrete generator runtime type',
   ),
   _RecordValue(:final type) => type,
   _FunctionValue() => value.reifiedSignature,

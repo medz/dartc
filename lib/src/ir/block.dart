@@ -14,6 +14,18 @@ final class const Return([
   final Value? value,
 ]) extends Terminator;
 
+/// Publishes one generator element and suspends this activation.
+///
+/// The next `moveNext` resumes at [onResume]. Stopping iteration does not take
+/// that edge or unwind the suspended activation's finalizers.
+final class const Yield(
+  /// The already checked element, evaluated before suspension.
+  final Value value,
+
+  /// The continuation taken only when iteration is requested again.
+  final Jump onResume,
+) extends Terminator;
+
 /// The end of a path whose [cause] cannot return a value.
 final class Unreachable(
   /// The operand of type `Never` that makes normal completion impossible.
@@ -138,6 +150,7 @@ final class Block([Iterable<ValueType> types = const []]) {
     Throw(:final onThrow) ||
     ExhaustivenessFailure(:final onThrow) => [?onThrow],
     Invoke(:final onReturn, :final onThrow) => [?onReturn, onThrow],
+    Yield(:final onResume) => [onResume],
     final Jump jump => [jump],
     Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],
   };

@@ -15,7 +15,7 @@
 | try/on/catch、rethrow | on 可按[已支持的类型](types.md)筛选异常，同步函数进入首个匹配的子句。调用、运行时类型检查和显式 throw 产生的异常均可捕获。catch 可读取抛出时的局部变量、异常对象及栈轨迹。rethrow 传递原异常和轨迹。见[异常样本](../test/lowering/fixtures/exceptions.dart)。 |
 | finally | 同步 try 或 catch 正常结束、返回、抛错或跳向外部目标时，执行 finally。返回表达式先求值。finally 正常结束时继续原操作，否则由 finally 的返回、异常或跳转决定结果。见[finally 样本](../test/lowering/fixtures/finalizers.dart)。 |
 | await for | 待实现。 |
-| yield/yield* | 待实现。 |
+| yield/yield* | 支持同步生成器。`yield` 暂停直到下一次 moveNext；提前停止不触发悬挂的 finally。`yield*` 先检查完整 Iterable<T>，再按 iterator/moveNext/current 协议委托，协议异常进入现有 catch/finally。异步生成器待实现。 |
 | assert | 支持断言语句。默认关闭；`Lowering.lower(input, enableAssertions: true)` 启用后按需求值条件与失败消息，抛出 AssertionError 并正常经过 catch/finally。关闭时不求值条件或消息。见[断言样本](../test/lowering/fixtures/assertions.dart)。 |
 
 [循环样本](../test/lowering/fixtures/loops.dart)与[SDK 行为对照](../test/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/statements.md)。
