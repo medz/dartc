@@ -768,7 +768,12 @@ final class Bindings({final bool enableAssertions = false}) {
       site,
       defaultTemplates: executableTypeParameterDefaults(element),
     );
-    final source = valueType(element.type, unit, site) as FunctionType;
+    final source = _functionType(
+      element.type,
+      unit,
+      site,
+      parameters: element.formalParameters,
+    );
     final receiver = element.isStatic || constructor
         ? null
         : valueType(
@@ -1451,18 +1456,18 @@ final class Bindings({final bool enableAssertions = false}) {
   FunctionType _functionType(
     dart.FunctionType type,
     ResolvedUnitResult unit,
-    ast.AstNode site,
-  ) {
-    final parameters = bindTypeParameters(type.typeParameters, unit, site);
+    ast.AstNode site, {
+    List<FormalParameterElement>? parameters,
+  }) {
+    final formals = parameters ?? type.formalParameters;
+    final binders = bindTypeParameters(type.typeParameters, unit, site);
     return FunctionType(
       valueType(type.returnType, unit, site),
-      type.formalParameters.map((p) => valueType(p.type, unit, site)),
-      typeParameters: parameters,
-      optionalPositional: type.formalParameters
-          .where((p) => p.isOptionalPositional)
-          .length,
+      formals.map((p) => valueType(p.type, unit, site)),
+      typeParameters: binders,
+      optionalPositional: formals.where((p) => p.isOptionalPositional).length,
       namedParameters: {
-        for (final p in type.formalParameters)
+        for (final p in formals)
           if (p.isNamed) p.name!: p.isRequiredNamed,
       },
     );
