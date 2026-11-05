@@ -1392,6 +1392,8 @@ final class Bindings({final bool enableAssertions = false}) {
           },
         ),
       _ when type.isDartCoreNull => .nullType,
+      dart.InterfaceType(:final typeArguments) when type.isDartAsyncFutureOr =>
+        ValueType.futureOr(valueType(typeArguments.single, unit, site)),
       dart.InterfaceType(:final element, :final typeArguments) =>
         classType(element, unit, site).instantiate(
           typeArguments.map((argument) => valueType(argument, unit, site)),
@@ -1542,6 +1544,12 @@ final class Bindings({final bool enableAssertions = false}) {
         }
         return builtin;
       }
+    }
+    if (element.library.isDartAsync && element.name == 'Future') {
+      final parameter = element.typeParameters.single.baseElement;
+      _parameters[parameter] = CoreTypes.future.typeParameters.single;
+      _boundParameters.add(parameter);
+      return CoreTypes.future;
     }
     if (element.library.uri.toString() == 'dart:_internal' &&
         element.name == 'Symbol') {

@@ -17,9 +17,9 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 | 普通及 const 泛型类实例 | 支持普通和 const 泛型实例、成员代入、类型测试和转换；const 对象按实际类型和各声明字段的常量值保留规范身份。 |
 | 泛型 `extends`/`implements` | 保留继承路径中的实参和次序，支持继承成员、super 调用以及泛型子类型检查。 |
 | 推断、类型提升、确定赋值 | 支持局部变量和参数在核心类型测试及判空后的读取和更新，包括 `is!` 分支提前返回后的提升。支持非 late 变量的延后首次赋值，以及类类型参数判空后提升为 T & Object。更一般的类型参数交类型待实现。 |
-| 基于界限的推断 | 消费 analyzer 对已支持类构造和函数调用的推断结果；推断包含未表示类型（如 FutureOr）时仍明确拒绝。 |
+| 基于界限的推断 | 消费 analyzer 对已支持类构造和函数调用的推断结果；推断结果保留 FutureOr 联合类型；未表示的类型交集仍明确拒绝。 |
 | Record 类型、extension type | 支持 Record、具名和位置字段的结构类型、嵌套及可空 record。相同形状按字段类型协变，命名顺序不影响形状。普通/泛型 extension type 按 analyzer 表示擦除处理，保留可空表示及嵌套类型；成员仍按源声明选择。见[范围与边界](extension-types.md)。 |
-| `Future`、`FutureOr` 与异步类型规则 | 待实现。 |
+| `Future`、`FutureOr` 与异步类型规则 | `Future<T>` 使用规范名义身份；`FutureOr<T>` 单独表示联合类型，支持双臂子类型、规范化、泛型替换、函数类型 alpha 相等/hash、Type 值及同步 `is`/`as`/`!`。`FutureOr<int?>` 的 `!` 保留原静态类型和实际 null 检查；不把内部 Future<int?> 收窄。共同 Future 视图保留联合类型身份，无法求得的视图明确拒绝。原生 Future 对象的参考执行器类型桥、async/await 及异步完成/调度尚未实现。见[类型样本](../test/lowering/fixtures/future_types.dart)。 |
 | FFI 标量、指针与原生导出 | 待实现。 |
 
 [IR 行为对照](../test/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/types.md)。

@@ -497,8 +497,19 @@ final class FunctionContext(
   }
 
   /// Inserts an implicit runtime check only when assignment needs one.
-  Value convert(Value value, ValueType type) =>
-      type.accepts(value.type) ? value : cast(value, type);
+  /// A union-to-class upcast retains the selected nominal view for member
+  /// signatures even when neither union arm alone supplies that common view.
+  Value convert(Value value, ValueType type) {
+    if (!type.accepts(value.type)) return cast(value, type);
+    if (type is ClassType &&
+        (value.type is FutureOrType ||
+            value.type is TypeParameterType ||
+            value.type is NonNullableTypeParameterType) &&
+        CoreTypes.view(value.type, type.declaration) == null) {
+      return cast(value, type);
+    }
+    return value;
+  }
 
   /// Checks [value] against [type] if its current binding does not establish the type.
   Value cast(Value value, ValueType type) {

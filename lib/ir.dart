@@ -37,6 +37,7 @@ export 'src/ir/type.dart'
         DynamicType,
         ClassType,
         FunctionType,
+        FutureOrType,
         RecordType,
         ValueType,
         TypeParameterType,

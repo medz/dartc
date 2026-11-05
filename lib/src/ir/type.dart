@@ -30,6 +30,18 @@ sealed class const ValueType() {
   /// The supertype of all function values.
   static const ClassType function = ClassType._core('Function', object, true);
 
+  /// The canonical Future protocol, also used by the FutureOr type algebra.
+  static final ClassType future = ClassType(
+    Uri.parse('dart:async'),
+    'Future',
+    isAbstract: true,
+    typeParameters: [
+      TypeParameterType('T0')
+        ..initializeBound(object.nullable)
+        ..initializeDefaultType(dynamicType),
+    ],
+  );
+
   /// The Dart trace paired with a caught exception.
   static const ClassType stackTrace = ClassType._core(
     'StackTrace',
@@ -83,13 +95,42 @@ sealed class const ValueType() {
   /// The spelling used in a Dart type annotation.
   String get dartName;
 
+  /// The normalized union of [argument] and `Future<argument>`.
+  factory futureOr(ValueType argument) {
+    if (!isDartType(argument)) {
+      throw ArgumentError('FutureOr requires a Dart value type.');
+    }
+    if (argument == never) return future.instantiate([never]);
+    if (argument == nullType) return future.instantiate([nullType]).nullable;
+    if (argument is DynamicType ||
+        argument == voidType ||
+        argument == object ||
+        argument == object.nullable) {
+      return argument;
+    }
+    return FutureOrType._(argument);
+  }
+
   /// Whether a runtime inhabitant may be null, distinct from accepting a null assignment.
-  bool get mayBeNull => switch (this) {
-    TypeParameterType() => (this as TypeParameterType).bound.mayBeNull,
-    NonNullableTypeParameterType() => false,
-    _NullableType() || DynamicType() => true,
-    _ => this == nullType || this == voidType,
-  };
+  bool get mayBeNull => _mayBeNull(null);
+
+  bool _mayBeNull(Set<TypeParameterType>? active) {
+    if (this case final TypeParameterType parameter) {
+      active ??= {};
+      // A recursive bound such as X extends FutureOr<X> may admit Null.
+      if (!active.add(parameter)) return true;
+      try {
+        return parameter.bound._mayBeNull(active);
+      } finally {
+        active.remove(parameter);
+      }
+    }
+    return switch (this) {
+      FutureOrType(:final argument) => argument._mayBeNull(active),
+      _NullableType() || DynamicType() => true,
+      _ => this == nullType || this == voidType,
+    };
+  }
 
   /// The union of this type and `Null`.
   ValueType get nullable {
@@ -107,7 +148,9 @@ sealed class const ValueType() {
   }
 
   /// Whether an operand of [type] can be passed here without a conversion.
-  bool accepts(ValueType type) {
+  bool accepts(ValueType type) => _accepts(type, null);
+
+  bool _accepts(ValueType type, Set<(ValueType, ValueType)>? active) {
     if (this is CellType || type is CellType) return this == type;
     if (this == type ||
         type == never ||
@@ -115,44 +158,101 @@ sealed class const ValueType() {
         this is DynamicType) {
       return true;
     }
+    // Split source unions first: their arms may use different target arms.
+    if (type is FutureOrType) {
+      return _accepts(type.argument, active) &&
+          _accepts(type.futureType, active);
+    }
+    if (type is _NullableType) {
+      return _accepts(nullType, active) && _accepts(type.base, active);
+    }
+    if (this case FutureOrType(:final argument, :final futureType)) {
+      return argument._accepts(type, active) ||
+          futureType._accepts(type, active) ||
+          switch (type) {
+            TypeParameterType() => _acceptsBound(type, active),
+            NonNullableTypeParameterType(:final parameter) => _acceptsBound(
+              parameter,
+              active,
+              nonNullable: true,
+            ),
+            _ => false,
+          };
+    }
     if (this is TypeParameterType) {
       if (type is NonNullableTypeParameterType) {
         return identical(type.parameter, this) ||
-            accepts(type.parameter.bound.nonNullable);
+            _acceptsBound(type.parameter, active, nonNullable: true);
       }
-      return type is TypeParameterType && accepts(type.bound);
+      return type is TypeParameterType && _acceptsBound(type, active);
     }
     if (this case NonNullableTypeParameterType(:final parameter)) {
-      return !type.mayBeNull && parameter.accepts(type);
+      return !type.mayBeNull && parameter._accepts(type, active);
     }
     if (this case _NullableType(:final nonNullable)) {
       return type == nullType ||
           nonNullable == object ||
-          nonNullable.accepts(type.nonNullable);
+          nonNullable._accepts(type.nonNullable, active);
     }
     if (type is NonNullableTypeParameterType) {
-      return this == object || accepts(type.parameter.bound.nonNullable);
+      return this == object ||
+          _acceptsBound(type.parameter, active, nonNullable: true);
     }
     if (type is TypeParameterType) {
       // Only the bound is known about an arbitrary value of a type variable.
-      return accepts(type.bound);
+      return _acceptsBound(type, active);
     }
     if (type is FunctionType) {
       final target = this;
       return target is FunctionType
-          ? target._accepts(type)
+          ? target._acceptsFunction(type, active)
           : target == function || target == object;
     }
     if (type is RecordType) {
       final target = this;
       if (target is! RecordType) return target == record || target == object;
       return target.sameShape(type) &&
-          target.fields.indexed.every((p) => p.$2.accepts(type.fields[p.$1]));
+          target.fields.indexed.every(
+            (p) => p.$2._accepts(type.fields[p.$1], active),
+          );
     }
     return this is ClassType &&
         type is ClassType &&
-        type._inherits(this as ClassType);
+        type._inherits(this as ClassType, active);
   }
+
+  bool _acceptsBound(
+    TypeParameterType parameter,
+    Set<(ValueType, ValueType)>? active, {
+    bool nonNullable = false,
+  }) {
+    active ??= {};
+    final obligation = (this, nonNullable ? parameter.nonNullable : parameter);
+    if (!active.add(obligation)) return false;
+    try {
+      final bound = nonNullable ? parameter.bound.nonNullable : parameter.bound;
+      return _accepts(bound, active);
+    } finally {
+      active.remove(obligation);
+    }
+  }
+}
+
+/// The union `Future<T> | T`, kept distinct from either nominal arm.
+///
+/// Construct through [ValueType.futureOr] so special arguments normalize.
+/// Null assertion removes only an outer `?`, not nullability inside [argument].
+final class FutureOrType._(final ValueType argument) extends ValueType {
+  /// The Future arm with the same, unflattened type argument.
+  late final ClassType futureType = ValueType.future.instantiate([argument]);
+
+  @override
+  String get dartName => 'FutureOr<${argument.dartName}>';
+  @override
+  bool operator ==(Object other) =>
+      other is FutureOrType && argument == other.argument;
+  @override
+  int get hashCode => Object.hash(FutureOrType, argument);
 }
 
 /// A top type whose operations require runtime dispatch or checked conversion.
@@ -387,6 +487,7 @@ final class FunctionType._(
   Map<TypeParameterType, ValueType>? _relate(
     FunctionType other, {
     bool exactBounds = true,
+    Set<(ValueType, ValueType)>? active,
   }) {
     if (typeParameters.length != other.typeParameters.length) return null;
     final environment = <TypeParameterType, ValueType>{
@@ -397,8 +498,8 @@ final class FunctionType._(
       final bound = substituteType(other.typeParameters[i].bound, environment);
       if (exactBounds
           ? parameter.bound != bound
-          : !parameter.bound.accepts(bound) ||
-                !bound.accepts(parameter.bound)) {
+          : !parameter.bound._accepts(bound, active) ||
+                !bound._accepts(parameter.bound, active)) {
         return null;
       }
     }
@@ -442,23 +543,28 @@ final class FunctionType._(
     return values;
   }
 
-  bool _accepts(FunctionType actual) {
-    final environment = _relate(actual, exactBounds: false);
+  bool _acceptsFunction(
+    FunctionType actual,
+    Set<(ValueType, ValueType)>? active,
+  ) {
+    final environment = _relate(actual, exactBounds: false, active: active);
     if (environment == null) return false;
     if (typeParameters.isNotEmpty) {
-      return _bodyWith(const {})._accepts(actual._bodyWith(environment));
+      return _bodyWith(const {})
+          ._acceptsFunction(actual._bodyWith(environment), active);
     }
-    if (!result.accepts(actual.result) ||
+    if (!result._accepts(actual.result, active) ||
         actual.requiredPositional > requiredPositional ||
         actual.positionalCount < positionalCount) {
       return false;
     }
     for (var i = 0; i < positionalCount; i++) {
-      if (!actual.parameters[i].accepts(parameters[i])) return false;
+      if (!actual.parameters[i]._accepts(parameters[i], active)) return false;
     }
     for (final MapEntry(:key, value: p) in named.entries) {
       final q = actual.named[key];
-      if (q == null || !actual.parameters[q.slot].accepts(parameters[p.slot])) {
+      if (q == null ||
+          !actual.parameters[q.slot]._accepts(parameters[p.slot], active)) {
         return false;
       }
     }
@@ -666,11 +772,11 @@ final class const ClassType._(
     return null;
   }
 
-  bool _inherits(ClassType target) {
+  bool _inherits(ClassType target, Set<(ValueType, ValueType)>? active) {
     final view = asInstanceOf(target);
     return view != null &&
         target.typeArguments.indexed.every(
-          (e) => e.$2.accepts(view.typeArguments[e.$1]),
+          (e) => e.$2._accepts(view.typeArguments[e.$1], active),
         );
   }
 
@@ -749,6 +855,9 @@ ValueType substituteType(
     NonNullableTypeParameterType(:final parameter) =>
       (environment[parameter] ?? parameter).nonNullable,
     _NullableType(:final base) => substituteType(base, environment).nullable,
+    FutureOrType(:final argument) => ValueType.futureOr(
+      substituteType(argument, environment),
+    ),
     ClassType() =>
       type.typeArguments.isEmpty
           ? type
@@ -795,23 +904,24 @@ final class const _NullableType(final ValueType base) extends ValueType {
 }
 
 /// Whether a type expression mentions any of the given lexical parameters.
-bool containsTypeParameter(ValueType type, Set<TypeParameterType> parameters) =>
-    switch (type) {
-      TypeParameterType() => parameters.contains(type),
-      NonNullableTypeParameterType(:final parameter) => parameters.contains(
-        parameter,
-      ),
-      _NullableType(:final base) => containsTypeParameter(base, parameters),
-      ClassType() => type.typeArguments.any(
-        (t) => containsTypeParameter(t, parameters),
-      ),
-      RecordType() => type.fields.any(
-        (t) => containsTypeParameter(t, parameters),
-      ),
-      FunctionType() => typeParametersIn(type).any(parameters.contains),
-      CellType(:final content) => containsTypeParameter(content, parameters),
-      _ => false,
-    };
+bool containsTypeParameter(
+  ValueType type,
+  Set<TypeParameterType> parameters,
+) => switch (type) {
+  TypeParameterType() => parameters.contains(type),
+  NonNullableTypeParameterType(:final parameter) => parameters.contains(
+    parameter,
+  ),
+  _NullableType(:final base) => containsTypeParameter(base, parameters),
+  FutureOrType(:final argument) => containsTypeParameter(argument, parameters),
+  ClassType() => type.typeArguments.any(
+    (t) => containsTypeParameter(t, parameters),
+  ),
+  RecordType() => type.fields.any((t) => containsTypeParameter(t, parameters)),
+  FunctionType() => typeParametersIn(type).any(parameters.contains),
+  CellType(:final content) => containsTypeParameter(content, parameters),
+  _ => false,
+};
 
 /// Whether a class variable requires a covariant check in a member parameter.
 ///
@@ -827,6 +937,11 @@ bool containsCovariantTypeParameter(
     positive && parameters.contains(parameter),
   _NullableType(:final base) => containsCovariantTypeParameter(
     base,
+    parameters,
+    positive,
+  ),
+  FutureOrType(:final argument) => containsCovariantTypeParameter(
+    argument,
     parameters,
     positive,
   ),
@@ -867,6 +982,8 @@ Iterable<TypeParameterType> typeParametersIn(ValueType type) sync* {
       yield parameter;
     case _NullableType(:final base):
       yield* typeParametersIn(base);
+    case FutureOrType(:final argument):
+      yield* typeParametersIn(argument);
     case ClassType():
       for (final argument in type.typeArguments) {
         yield* typeParametersIn(argument);
@@ -946,6 +1063,10 @@ int _typeHash(ValueType type, Map<TypeParameterType, int> scope) {
       _NullableType,
       _typeHash(base, scope),
     ),
+    FutureOrType(:final argument) => Object.hash(
+      FutureOrType,
+      _typeHash(argument, scope),
+    ),
     ClassType() => Object.hash(
       identityHashCode(type.declaration),
       Object.hashAll(type.typeArguments.map((t) => _typeHash(t, scope))),
@@ -997,6 +1118,7 @@ int _functionHash(FunctionType type, Map<TypeParameterType, int> scope) {
 bool isDartType(ValueType type) => switch (type) {
   CellType() => false,
   _NullableType(:final base) => isDartType(base),
+  FutureOrType(:final argument) => isDartType(argument),
   ClassType() => type.typeArguments.every(isDartType),
   RecordType() => type.fields.every(isDartType),
   FunctionType() =>

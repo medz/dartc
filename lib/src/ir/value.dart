@@ -1233,9 +1233,15 @@ final class StringConcat(
 
 ClassType _classReceiver(ValueType type) {
   if (type is ClassType) return type;
+  if (type is FutureOrType) {
+    final future = CoreTypes.view(type, CoreTypes.future);
+    if (future != null) return future;
+    if (ValueType.object.accepts(type)) return ValueType.object;
+  }
   if (type is TypeParameterType) return _classReceiver(type.bound);
   if (type is NonNullableTypeParameterType) {
-    return _classReceiver(type.parameter.bound.nonNullable);
+    final bound = type.parameter.bound.nonNullable;
+    return bound.mayBeNull ? ValueType.object : _classReceiver(bound);
   }
   throw ArgumentError('Expected a non-nullable class receiver.');
 }

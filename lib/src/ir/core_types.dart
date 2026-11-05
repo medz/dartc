@@ -105,6 +105,10 @@ abstract final class CoreTypes() {
     isFinal: true,
   );
 
+  /// Canonical asynchronous result protocol; FutureOr is a union, not a class.
+  static final ClassType future = ValueType.future;
+  static ClassType futureOf(ValueType value) => future.instantiate([value]);
+
   static final ClassType iterable = _declare('Iterable', 1);
   static final ClassType iterator = _declare('Iterator', 1);
   static final ClassType list = _declare('List', 1, sequence: true);
@@ -137,10 +141,46 @@ abstract final class CoreTypes() {
       mapEntry.instantiate([key, value]);
 
   /// Resolves an inherited protocol without erasing its arguments.
-  static ClassType? view(ValueType type, ClassType declaration) {
-    if (type is TypeParameterType) return view(type.bound, declaration);
-    if (type is NonNullableTypeParameterType) {
-      return view(type.parameter.bound.nonNullable, declaration);
+  static ClassType? view(ValueType type, ClassType declaration) =>
+      _view(type, declaration, null);
+
+  static ClassType? _view(
+    ValueType type,
+    ClassType declaration,
+    Set<TypeParameterType>? active,
+  ) {
+    if (type is NonNullableTypeParameterType &&
+        declaration == ValueType.object) {
+      return ValueType.object;
+    }
+    final parameter = switch (type) {
+      TypeParameterType() => type,
+      NonNullableTypeParameterType(:final parameter) => parameter,
+      _ => null,
+    };
+    if (parameter != null) {
+      active ??= {};
+      if (!active.add(parameter)) return null;
+      try {
+        return _view(
+          type is NonNullableTypeParameterType
+              ? parameter.bound.nonNullable
+              : parameter.bound,
+          declaration,
+          active,
+        );
+      } finally {
+        active.remove(parameter);
+      }
+    }
+    if (type is FutureOrType) {
+      final value = _view(type.argument, declaration, active);
+      final future = _view(type.futureType, declaration, active);
+      if (value == null || future == null) return null;
+      // Retain a common existing view, without conflating the union's identity.
+      if (value.accepts(future)) return value;
+      if (future.accepts(value)) return future;
+      return null;
     }
     return type is ClassType ? type.asInstanceOf(declaration) : null;
   }

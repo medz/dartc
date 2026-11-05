@@ -1838,6 +1838,19 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     if (ok) return value;
     throw TypeError();
   }
+  if (type.nonNullable case FutureOrType(:final argument, :final futureType)) {
+    final ok = value == null
+        ? type.accepts(.nullType)
+        : (_typeOperation(argument, value, cast: false) as bool) ||
+              (_typeOperation(futureType, value, cast: false) as bool);
+    if (!cast) return ok;
+    if (ok) return value;
+    throw TypeError();
+  }
+  if (value is Future &&
+      CoreTypes.view(type.nonNullable, CoreTypes.future) != null) {
+    throw UnsupportedError('Native Future runtime type checks');
+  }
   if (type == .nullType) return run<Null>();
   return switch (type.nonNullable) {
     ValueType.integer => scalar<int>(),
