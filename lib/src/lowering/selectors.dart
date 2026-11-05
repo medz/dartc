@@ -491,6 +491,19 @@ final class SelectorChain(
         context.emit(ObjectHashCode(known, direct: direct)),
       );
     }
+    final invocation = getterArguments ?? arguments;
+    if (member is GetterElement && invocation != null) {
+      Value? get(Value receiver) => context.callPositionalMember(
+        member,
+        receiver,
+        [],
+        node,
+        direct: direct,
+      );
+      return direct
+          ? invokeValue(get(known), invocation, getterCall)
+          : invokeValue(known, invocation, getterCall, get);
+    }
     if (member.library.isDartCore &&
         (!direct || target.library.toString() == 'dart:core') &&
         !coreRuntimeMember(member) &&
@@ -509,19 +522,6 @@ final class SelectorChain(
     }
     if (member is MethodElement && arguments == null) {
       return context.emit(BindMethod(target, known, direct: direct));
-    }
-    final invocation = getterArguments ?? arguments;
-    if (member is GetterElement && invocation != null) {
-      Value? get(Value receiver) => context.callPositionalMember(
-        member,
-        receiver,
-        [],
-        node,
-        direct: direct,
-      );
-      return direct
-          ? invokeValue(get(known), invocation, getterCall)
-          : invokeValue(known, invocation, getterCall, get);
     }
     Value? result(Instruction call) {
       final value = context.normal(context.emit(call));

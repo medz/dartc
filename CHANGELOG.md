@@ -8,6 +8,8 @@ Static runtimeType reads and object-pattern fields reuse existing runtime dispat
 
 Object.toString through Object and type-parameter views reuses existing dynamic dispatch; super keeps the selected ancestor implementation. Method extraction preserves identity across static, dynamic and pattern access. The fixture interpreter explicitly rejects unmodeled formatting rather than exposing host wrapper types.
 
+Function-valued iterator getters continue into the ordinary function-call path, preserving arguments-before-getter order and avoiding a cast of the getter value in place of the call result.
+
 Indexed updates check read and write key types at their respective calls. A non-null `??=` skips the setter key check, and a failing write key no longer suppresses earlier getter or right-hand-side effects. Ordinary and extension indexes share this fix.
 
 Dynamic throw operands use the ordinary checked conversion to non-null Object before raising, preserving operand identity and evaluation order, catch/finally behavior, and rethrow stack identity. Null produces TypeError.
