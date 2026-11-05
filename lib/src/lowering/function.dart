@@ -32,6 +32,7 @@ final class FunctionLowering._(
         ? (variable) => !variable.isFinal
         : body.isPotentiallyMutatedInScope,
     plan,
+    _target,
   );
   final _breaks = <ast.AstNode, JumpTarget>{};
   final _continues = <ast.AstNode, void Function()>{};
@@ -125,6 +126,7 @@ final class FunctionLowering._(
         )._run(local: fn, expression: expression),
       );
     }
+    output.addAll(plan.syntheticFunctions);
   }
 
   IrFunction _run({

@@ -11,6 +11,7 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart' show DartType;
 import 'package:dartc/ir.dart';
 
+import 'analyzer_metadata.dart';
 import 'bindings.dart';
 import 'closures.dart';
 
@@ -23,6 +24,7 @@ final class FunctionContext(
   final Bindings bindings,
   final bool Function(VariableElement) _isWritten,
   final ClosurePlan _closures,
+  final FunctionTarget target,
 ) {
   /// The blocks created so far, with the function entry first.
   final blocks = <Block>[];
@@ -170,6 +172,27 @@ final class FunctionContext(
       ? value
       : normal(convert(value, application.receiverType));
 
+  /// Captures an already-checked extension receiver in an ordinary closure.
+  Value bindExtension(
+    ExtensionApplication application,
+    Value receiver,
+    AstNode site,
+  ) => emit(
+    MakeClosure(
+      _closures.extensionTearOff(
+        bindings,
+        target,
+        application,
+        site.offset,
+        typeArguments(
+          extensionTearOffDefaults(application.executable.declaration),
+          site,
+        ),
+      ),
+      [receiver],
+    ),
+  );
+
   /// Calls the flattened extension ABI through ordinary argument binding.
   Value? callExtension(
     ExtensionApplication application,
@@ -209,10 +232,15 @@ final class FunctionContext(
         extension == null && !isClassOrEnum(member.enclosingElement)) {
       unsupported(unit, site, 'instance member binding');
     }
+    if (coreRuntimeType(member)) {
+      if (direct) unsupported(unit, site, 'super.runtimeType');
+      final value = dynamicMember(receiver, .getter, 'runtimeType', []);
+      return value == null ? null : normal(cast(value, ValueType.typeType));
+    }
     final checked = memberReceiver(receiver, extension);
     if (checked == null) return null;
     receiver = checked;
-    final signature = extension == null
+    final signature = extension == null || args.isEmpty
         ? null
         : substituteType(extension.executable.sourceSignature, {
             for (final (i, parameter)

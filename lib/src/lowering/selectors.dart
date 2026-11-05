@@ -92,6 +92,19 @@ final class SelectorChain(
     ]) {
       if (input == null) return null;
       final resolved = arguments.parent;
+      final application = context.extensionApplication(
+        callMethod,
+        resolved ?? node,
+        receiver: resolved is ast.FunctionExpressionInvocation
+            ? resolved.function
+            : null,
+      );
+      // Virtual getter-call syntax reads the getter after the arguments. Other
+      // receivers, including explicit overrides, are checked before arguments.
+      if (getFunction == null) {
+        input = context.memberReceiver(input, application);
+        if (input == null) return null;
+      }
       final args =
           resolved is ast.InvocationExpression &&
               resolved.staticInvokeType is dart.FunctionType
@@ -100,8 +113,11 @@ final class SelectorChain(
       if (args == null) return null;
       final function = getFunction == null ? input : getFunction(input);
       if (function == null) return null;
-      if (callMethod?.enclosingElement is ExtensionElement) {
-        unsupported(context.unit, node, 'implicit extension call invocation');
+      if (application != null) {
+        final receiver = context.memberReceiver(function, application);
+        return receiver == null
+            ? null
+            : context.callExtension(application, receiver, args, typeArguments);
       }
       if (callMethod != null) {
         final method = context.bindings.target(callMethod, context.unit, node);
@@ -203,7 +219,9 @@ final class SelectorChain(
         );
       }
       return invokeValue(
-        _visit(function),
+        function is ast.ExtensionOverride
+            ? _receiver(function, false)
+            : _visit(function),
         argumentList,
         element is MethodElement ? element : null,
       );
@@ -353,8 +371,8 @@ final class SelectorChain(
       if (member.library.isDartCore) {
         unsupported(context.unit, node, 'core extension member $name');
       }
-      if (member is MethodElement && (arguments == null || member.isOperator)) {
-        unsupported(context.unit, node, 'extension method tear-off');
+      if (member is MethodElement && member.isOperator) {
+        unsupported(context.unit, node, 'extension operator tear-off');
       }
       final cascaded = switch (node) {
         ast.PropertyAccess(:final isCascaded) ||
@@ -389,6 +407,9 @@ final class SelectorChain(
             : context.normal(
                 context.cast(value, context.typeOf(node.staticType!, node)),
               );
+      }
+      if (arguments == null) {
+        return context.bindExtension(application, converted, node);
       }
       final args = context.arguments(arguments, evaluate);
       if (args == null) return null;
@@ -435,6 +456,15 @@ final class SelectorChain(
         !isClassOrEnum(member.enclosingElement) ||
         member.isStatic) {
       unsupported(context.unit, node, 'member $name');
+    }
+    if (coreRuntimeType(member)) {
+      return context.callPositionalMember(
+        member,
+        known,
+        [],
+        node,
+        direct: direct,
+      );
     }
     final target = direct
         ? context.bindings.superTarget(

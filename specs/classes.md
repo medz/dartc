@@ -19,7 +19,7 @@
 | 泛型实例、成员代入和协变检查 | 支持类类型参数、界限、嵌套实参、成员类型代入和泛型继承。实例保留实际类型实参，宽化静态引用后的字段写入、方法调用和方法提取仍执行协变检查。类体只保留一份，闭包捕获类型环境。见[泛型样本](../test/lowering/fixtures/generic_classes.dart)和[泛型工厂重定向样本](../test/lowering/fixtures/generic_redirect_factory.dart)。 |
 | 简单、增强及泛型枚举 | 复用类的常量存储和成员派发，支持 values、index、隐式 EnumName.name、默认/自定义 toString、字段、方法、运算符、工厂及模式；values 保留每项实际类型参数。具体 enum、Enum 及其类型参数界限支持显式 toString 调用与提取；通用 Object 接收者及 super.toString 仍待实现。带用户存储字段 `_name` 的 enum 因 analyzer 丢失原值而明确拒绝；同名 getter 不受此限制。混入及 Enum/EnumByName 的其他 SDK helper 待实现。见[枚举样本](../test/lowering/fixtures/enums.dart)。 |
 | 元数据注解 | 待实现。 |
-| 普通 extension | 声明与直接方法调用复用普通静态目标，接收者为显式首参数，扩展与方法类型参数按声明顺序展开。支持隐式选择、显式 override、词法调用、静态成员/变量，以及闭包捕获 this 与类型环境。非类、可空、record、函数和类型变量接收者无需伪造类。实例 getter/setter、索引、一元/二元运算符、复合赋值及增减复用同一调用适配器；对象与关系模式使用相同的已解析目标。方法提取、隐式 call 及部分 analyzer 泛型元数据边界仍明确拒绝，见[扩展访问范围与差异](extension-access.md)。见[扩展样本](../test/lowering/fixtures/extension_methods.dart)。 |
+| 普通 extension | 声明与直接方法调用复用普通静态目标，接收者为显式首参数，扩展与方法类型参数按声明顺序展开。支持隐式选择、显式 override、词法调用、静态成员/变量，以及闭包捕获 this 与类型环境。非类、可空、record、函数和类型变量接收者无需伪造类。实例 getter/setter、索引、一元/二元运算符、复合赋值及增减复用同一调用适配器；对象与关系模式使用相同的已解析目标。隐式 call 调用复用静态目标，方法提取复用捕获接收者的普通闭包；部分 analyzer 泛型元数据边界仍明确拒绝，见[扩展访问范围与差异](extension-access.md)。见[扩展样本](../test/lowering/fixtures/extension_methods.dart)。 |
 | mixin、mixin application、extension type | 待实现。 |
 | 构造器 assert initializer | 支持可配置的构造器断言，保持初始化列表顺序及抛错行为。默认关闭，使用 `enableAssertions: true` 启用。 |
 

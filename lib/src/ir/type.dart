@@ -769,7 +769,10 @@ ValueType substituteType(
           e.key: substituteType(type.fields[e.value], environment),
       },
     ),
-    FunctionType() => _substituteFunction(type, environment),
+    FunctionType() =>
+      typeParametersIn(type).any(environment.containsKey)
+          ? rebindFunctionType(type, environment)
+          : type,
     _ => type,
   };
 }
@@ -889,11 +892,18 @@ Iterable<TypeParameterType> typeParametersIn(ValueType type) sync* {
   }
 }
 
-FunctionType _substituteFunction(
+/// Copies a function signature with fresh binders and substituted free types.
+/// [defaultTemplates] optionally supplies compiler-computed runtime defaults;
+/// their free types are substituted without changing the source binders.
+FunctionType rebindFunctionType(
   FunctionType type,
-  Map<TypeParameterType, ValueType> environment,
-) {
-  if (!typeParametersIn(type).any(environment.containsKey)) return type;
+  Map<TypeParameterType, ValueType> environment, {
+  List<ValueType>? defaultTemplates,
+}) {
+  if (defaultTemplates != null &&
+      defaultTemplates.length != type.typeParameters.length) {
+    throw ArgumentError('Mismatched function type defaults.');
+  }
   final fresh = [
     for (final p in type.typeParameters) TypeParameterType(p.name),
   ];
@@ -905,7 +915,8 @@ FunctionType _substituteFunction(
     p.initializeBound(substituteType(type.typeParameters[i].bound, scoped));
   }
   for (final (i, p) in fresh.indexed) {
-    if (type.typeParameters[i].defaultType case final defaultType?) {
+    if ((defaultTemplates?[i] ?? type.typeParameters[i].defaultType)
+        case final defaultType?) {
       p.initializeDefaultType(substituteType(defaultType, scoped));
     }
   }

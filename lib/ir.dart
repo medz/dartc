@@ -41,6 +41,7 @@ export 'src/ir/type.dart'
         NonNullableTypeParameterType,
         containsCovariantTypeParameter,
         substituteType,
+        rebindFunctionType,
         typeParametersIn;
 export 'src/ir/value.dart'
     show

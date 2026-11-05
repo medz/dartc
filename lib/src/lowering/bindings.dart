@@ -1437,6 +1437,14 @@ InstanceField? coreEnumField(ExecutableElement? member) {
   };
 }
 
+/// Identifies SDK runtimeType getters without intercepting user overrides.
+bool coreRuntimeType(ExecutableElement? member) =>
+    member is GetterElement &&
+    member.library.isDartCore &&
+    (member.enclosingElement.name == 'Object' ||
+        member.enclosingElement.name == 'Record') &&
+    member.name == 'runtimeType';
+
 /// Whether this SDK member has a supported runtime-backed virtual protocol.
 ///
 /// Keep these public protocols virtual: user implementations need not carry

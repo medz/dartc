@@ -379,7 +379,7 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
               member.isStatic ||
               (!isClassOrEnum(member.enclosingElement) &&
                   coreEnumField(member) == null &&
-                  !(member is GetterElement &&
+                  !((member is GetterElement || member is MethodElement) &&
                       member.enclosingElement is ExtensionElement))) {
             unsupported(context.unit, field, 'object pattern member');
           }
@@ -390,6 +390,7 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
               return context.normal(context.emit(LoadField(slot, object)));
             }
             if (member.library.isDartCore &&
+                !coreRuntimeType(member) &&
                 !coreRuntimeMember(member, object.type)) {
               final operation = member is GetterElement
                   ? coreCollectionOperation(member.name!, object, [])
@@ -398,6 +399,17 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
                 unsupported(context.unit, field, 'core object pattern member');
               }
               return context.normal(context.emit(operation));
+            }
+            final application = context.extensionApplication(
+              member,
+              field,
+              receiverType: type.type,
+            );
+            if (member is MethodElement && application != null) {
+              final checked = context.memberReceiver(object, application);
+              return checked == null
+                  ? null
+                  : context.bindExtension(application, checked, field);
             }
             return member is MethodElement
                 ? context.normal(
@@ -413,11 +425,7 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
                     object,
                     [],
                     field,
-                    extension: context.extensionApplication(
-                      member,
-                      field,
-                      receiverType: type.type,
-                    ),
+                    extension: application,
                   );
           });
           if (item == null) return;

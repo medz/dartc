@@ -12,6 +12,8 @@ import 'package:analyzer/src/dart/ast/ast.dart' as internal;
 // ignore: implementation_imports
 import 'package:analyzer/src/dart/element/type.dart' as internal;
 // ignore: implementation_imports
+import 'package:analyzer/src/dart/element/type_algebra.dart' as internal;
+// ignore: implementation_imports
 import 'package:analyzer/src/dart/element/type_schema_elimination.dart'
     as internal;
 // ignore: implementation_imports
@@ -253,6 +255,40 @@ ClassCovariance executableClassCovariance(ExecutableElement member) {
         if (needsCheck(p.bound)) i,
     },
   );
+}
+
+/// Runtime defaults of the flattened extension/method binder group.
+/// CFE computes these together before creating the tear-off closure. Analyzer
+/// keeps separate groups, so transport its method defaults through the already
+/// computed extension defaults, using its variance-aware substitution visitor.
+List<DartType> extensionTearOffDefaults(ExecutableElement member) {
+  member = member.baseElement;
+  if (member.typeParameters.isEmpty) return const [];
+  final owner = member.enclosingElement as ExtensionElement;
+  DartType requiredDefault(TypeParameterElement parameter) =>
+      typeParameterDefault(parameter) ??
+      (throw UnsupportedError(
+        'Analyzer extension default metadata unavailable.',
+      ));
+  final substitution = _ExtensionDefaults({
+    for (final parameter in owner.typeParameters)
+      parameter: requiredDefault(parameter),
+  });
+  return [
+    for (final parameter in member.typeParameters)
+      substitution.substituteType(requiredDefault(parameter)),
+  ];
+}
+
+final class _ExtensionDefaults(final Map<TypeParameterElement, DartType> upper)
+    extends internal.Substitution {
+  @override
+  DartType? getSubstitute(TypeParameterElement parameter, bool upperBound) =>
+      !upper.containsKey(parameter)
+      ? null
+      : upperBound
+      ? upper[parameter]
+      : internal.NeverTypeImpl.instance;
 }
 
 /// Exact transported defaults for the selected executable's own binder group.

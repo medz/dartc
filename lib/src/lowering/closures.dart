@@ -22,6 +22,67 @@ final class LocalClosure(
 /// Resolves captures through intervening functions before their SSA graphs are built.
 final class ClosurePlan() extends GeneralizingAstVisitor<void> {
   final functions = <Element, LocalClosure>{};
+  final syntheticFunctions = <IrFunction>[];
+
+  /// Adapts a static extension target without inventing a virtual receiver.
+  FunctionTarget extensionTearOff(
+    Bindings bindings,
+    FunctionTarget enclosing,
+    ExtensionApplication application,
+    int offset,
+    List<ValueType> defaultTemplates,
+  ) {
+    final executable = application.executable;
+    // Extraction may occur inside this same method's body. Reuse capture-free
+    // substitution, but always freshen its method binders.
+    final signature = rebindFunctionType(executable.sourceSignature, {
+      for (final (i, parameter) in executable.extensionParameters.indexed)
+        parameter: application.typeArguments[i],
+    }, defaultTemplates: defaultTemplates);
+    final target = FunctionTarget(
+      enclosing.library,
+      '<extension-tearoff:${executable.target.name}>',
+      signature.result,
+      signature.parameters,
+      kind: .closure,
+      enclosing: enclosing,
+      sourceOffset: offset,
+      captures: [application.receiverType],
+      typeParameters: signature.typeParameters,
+      optionalPositional:
+          signature.positionalCount - signature.requiredPositional,
+      namedParameters: {
+        for (final entry in signature.named.entries)
+          entry.key: entry.value.required,
+      },
+    );
+    final entry = Block(target.parameterTypes);
+    final result = entry.emit(
+      DirectCall(
+        executable.target,
+        [entry.parameters[1], ...entry.parameters.skip(target.argumentOffset)],
+        typeArguments: [
+          ...application.typeArguments,
+          ...signature.typeParameters,
+        ],
+      ),
+    );
+    entry.finish(
+      result.type == ValueType.never ? Unreachable(result) : Return(result),
+    );
+    syntheticFunctions.add(
+      IrFunction(
+        target,
+        [entry],
+        defaults: {
+          for (final entry in bindings.defaults(executable.target).entries)
+            entry.key - executable.sourceParameterOffset: entry.value,
+        },
+      ),
+    );
+    return target;
+  }
+
   final boxed = <VariableElement>{};
   final _written = <VariableElement>{};
   // Synthetic initializers have no analyzer executable element. Track actual

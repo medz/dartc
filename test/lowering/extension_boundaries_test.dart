@@ -58,21 +58,42 @@ extension Public on int {
     },
   );
 
-  for (final (name, declaration, use) in <(String, String, String)>[
-    ('tear-off', 'int m() => this;', '1.m'),
-    ('implicit invocation', 'int call() => this;', '(1)()'),
-  ]) {
-    test('$name remains an explicit lowering boundary', () async {
-      final path = source(
-        'entry',
-        'extension E on int { $declaration } Object? run() => $use;',
-      );
+  test('extension wrappers belong to the extracting library', () async {
+    final entry = source('entry', """
+import 'other.dart' as other;
+int run() {
+  final function = other.Public(2).method;
+  return function() + other.privateExtraction();
+}
+""");
+    final other = source('other', """
+extension Public on int { int method([int value = 3]) => this + value; }
+extension Private on int { int _method() => this; }
+int privateExtraction() { final function = 7._method; return function(); }
+""");
+    final program = await CheckedLibraries.read([entry, other], Lowering.lower);
+    final run = program.functions.singleWhere((f) => f.target.name == 'run');
+    expect(FixtureRunner(program, {}).run(run, []), 12);
+    for (final function in program.functions.where(
+      (f) => f.target.name.startsWith('<extension-tearoff:'),
+    )) {
+      expect(function.target.library, function.target.enclosing!.library);
+    }
+  });
+
+  test(
+    'ordinary extension call does not implicitly convert to Function',
+    () async {
+      final path = source('entry', '''
+extension E on int { int call(int value) => this + value; }
+int run() { int Function(int) function = 1; return function(2); }
+''');
       await expectLater(
         CheckedLibraries.read([path], Lowering.lower),
-        throwsUnsupportedError,
+        throwsA(isA<FormatException>()),
       );
-    });
-  }
+    },
+  );
 
   test(
     'explicit generic binary parameter metadata remains analyzer rejected',
@@ -104,17 +125,6 @@ Object? run() => (-E<int>(Box<int>(1)), 2);
           contains('unsubstituted analyzer extension operator result'),
         ),
       ),
-    );
-  });
-
-  test('extension method object pattern remains unsupported', () async {
-    final path = source('entry', '''
-extension E on int { int method() => this; }
-Object? run() { final int(method: function) = 1; return function; }
-''');
-    await expectLater(
-      CheckedLibraries.read([path], Lowering.lower),
-      throwsUnsupportedError,
     );
   });
 
