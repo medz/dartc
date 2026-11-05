@@ -62,10 +62,16 @@ final class Bindings({final bool enableAssertions = false}) {
   }
 
   final _classes = <InterfaceElement, ClassType>{};
+  final _mixinApplications = <InterfaceElement, List<IrClass>>{};
+  final _mixinInitializers = <IrFunction>[];
+  final _applicationOwners = <ClassType, InterfaceElement>{};
+  final _superImplementations =
+      <ClassType, Map<MemberSelector, FunctionTarget>>{};
+  final _checkedMixins = <InterfaceElement>{};
   final _classElements = <ClassType, InterfaceElement>{};
   final _parameters = <TypeParameterElement, TypeParameterType>{};
   final _boundParameters = <TypeParameterElement>{};
-  final _fields = <FieldElement, InstanceField>{};
+  final _fields = <(FieldElement, ClassType), InstanceField>{};
   final _globals = <VariableElement, GlobalVariable>{};
   final _defaults = <FunctionTarget, Map<int, Constant>>{};
   final _constantAliases = <LibraryElement, List<TypeAliasElement>>{};
@@ -145,6 +151,41 @@ final class Bindings({final bool enableAssertions = false}) {
     final effective = <MemberSelector, FunctionTarget>{
       if (parent != null) ..._planImplementations(parent),
     };
+    // The final analyzer interface replaces earlier mixin contributors. Check
+    // each application before losing the entry checks of the implementation
+    // it overrides, using the same parameter-identity transport as forwarders.
+    for (final (index, application)
+        in (_mixinApplications[element] ?? <IrClass>[]).indexed) {
+      _superImplementations[application.type] = Map.of(effective);
+      final mixin = element.mixins[index].element;
+      for (final member in <ExecutableElement>[
+        ...mixin.methods,
+        ...mixin.getters,
+        ...mixin.setters,
+      ]) {
+        if (member.isStatic) continue;
+        final selected = application.members[_memberSelector(member)]!;
+        final inherited = effective[selected.selector];
+        if (inherited != null &&
+            (!selected.covariantParameters.containsAll(
+                  _transportCovariance(
+                    inherited,
+                    member,
+                    _declarationCovariance[inherited] ?? const {},
+                  ),
+                ) ||
+                (_classCovariance[inherited]?.isNotEmpty ?? false) ||
+                (_boundCovariance[inherited]?.isNotEmpty ?? false))) {
+          unsupported(
+            unit,
+            site,
+            'mixin application covariance ${member.name}',
+          );
+        }
+        effective[selected.selector] = selected;
+      }
+    }
+    _superImplementations[owner] = Map.of(effective);
     // With no own abstract declaration, interface, or mixin, this class adds
     // no new covariance provenance; its superclass has already been checked.
     var checkCovariance =
@@ -283,6 +324,10 @@ final class Bindings({final bool enableAssertions = false}) {
       _syntheticTargets.add(replacement);
       emitted.add(replacement);
       effective[selector] = replacement;
+    }
+    if (element.mixins.isNotEmpty &&
+        (emitted.isNotEmpty || unsupportedSelectors.isNotEmpty)) {
+      unsupported(unit, site, 'mixin forwarding or covariance wrappers');
     }
     _newForwarders[element] = emitted;
     _unsupportedForwarders[element] = unsupportedSelectors;
@@ -562,10 +607,13 @@ final class Bindings({final bool enableAssertions = false}) {
   ) {
     final owner = lexicalReceiver.nonNullable;
     if (owner is ClassType) {
-      final element = _classElements[owner.declaration];
-      final parent = element?.supertype?.element;
-      if (parent != null) {
-        final actual = _planImplementations(parent)[_memberSelector(member)];
+      final element =
+          _applicationOwners[owner.declaration] ??
+          _classElements[owner.declaration];
+      if (element != null) {
+        _planImplementations(element);
+        final actual =
+            _superImplementations[owner.declaration]?[_memberSelector(member)];
         if (actual != null) return actual;
       }
     }
@@ -647,7 +695,7 @@ final class Bindings({final bool enableAssertions = false}) {
         : (parameters: const <int>{}, bounds: const <int>{});
     final classFlags = classCovariance.parameters;
     final function = FunctionTarget(
-      element.library.uri,
+      enclosing?.library ?? element.library.uri,
       element.name ?? '<anonymous>',
       kind == .initializer
           ? .voidType
@@ -662,7 +710,8 @@ final class Bindings({final bool enableAssertions = false}) {
       sourceOffset: sourceOffset,
       captures: captures,
       covariantParameters: {...declarationFlags, ...classFlags},
-      isAbstract: kind.isVirtual && element.isAbstract,
+      isAbstract:
+          kind.isVirtual && (element.isAbstract || container is MixinElement),
       optionalPositional: parameters
           .where((p) => p.isOptionalPositional)
           .length,
@@ -829,6 +878,89 @@ final class Bindings({final bool enableAssertions = false}) {
   /// The stored declarations lowered from this batch's source units.
   Iterable<GlobalVariable> get globals => _globals.values;
 
+  /// Anonymous application layers with ordinary member targets.
+  Iterable<IrClass> get mixinApplications =>
+      _mixinApplications.values.expand((layers) => layers);
+
+  Iterable<IrFunction> get mixinInitializers => _mixinInitializers;
+
+  /// The same checked source is lowered against each actual application owner.
+  Iterable<(IrClass, ResolvedUnitResult, ast.AstNode)>
+  get mixinDeclarations sync* {
+    for (final entry in _mixinApplications.entries) {
+      for (final (index, application) in entry.value.indexed) {
+        final (unit, source) =
+            _modeledClasses[entry.key.mixins[index].element]!;
+        yield (application, unit, source);
+      }
+    }
+  }
+
+  void replaceMixinApplication(IrClass application) {
+    final layers = _mixinApplications[_applicationOwners[application.type]]!;
+    final index = layers.indexWhere((layer) => layer.type == application.type);
+    layers[index] = application;
+  }
+
+  /// Inserts ordinary delegating initializers for anonymous application layers.
+  /// The source constructor supplies the selected name, signature and defaults.
+  ({FunctionTarget target, ClassType ownerType}) initializerCall(
+    ConstructorElement from,
+    ConstructorElement to,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    var destination = target(to, unit, site);
+    var ownerType = valueType(to.returnType, unit, site) as ClassType;
+    final layers = from.enclosingElement == to.enclosingElement
+        ? null
+        : _mixinApplications[from.enclosingElement];
+    for (var i = 0; i < (layers?.length ?? 0); i++) {
+      final layer = layers![i];
+      var initializer = layer.constructors[destination.name];
+      if (initializer == null) {
+        final signature = destination.signatureFor(ownerType);
+        initializer = FunctionTarget(
+          layer.type.library,
+          destination.name,
+          .voidType,
+          signature.parameters,
+          owner: layer.type,
+          kind: .initializer,
+          optionalPositional:
+              signature.positionalCount - signature.requiredPositional,
+          namedParameters: {
+            for (final entry in signature.named.entries)
+              entry.key: entry.value.required,
+          },
+        );
+        _defaults[initializer] = defaults(destination);
+        final entry = Block(initializer.parameterTypes);
+        if (layer.constructors['<mixin-fields>'] case final fields?) {
+          entry.emit(DirectCall(fields, [entry.parameters.first]));
+        }
+        if (destination.owner != ValueType.object) {
+          entry.emit(
+            DirectCall(destination, entry.parameters, ownerType: ownerType),
+          );
+        }
+        entry.finish(const Return());
+        _mixinInitializers.add(
+          IrFunction(initializer, [entry], defaults: defaults(initializer)),
+        );
+        layers[i] = IrClass(
+          layer.type,
+          layer.fields,
+          members: layer.members.values,
+          constructors: [...layer.constructors.values, initializer],
+        );
+      }
+      destination = initializer;
+      ownerType = layer.type;
+    }
+    return (target: destination, ownerType: ownerType);
+  }
+
   /// Binds a top-level or static declaration using its actual source initializer.
   GlobalVariable global(
     PropertyInducingElement element,
@@ -867,15 +999,18 @@ final class Bindings({final bool enableAssertions = false}) {
   InstanceField field(
     FieldElement element,
     ResolvedUnitResult unit,
-    ast.AstNode site,
-  ) {
+    ast.AstNode site, {
+    ClassType? owner,
+  }) {
     element = element.baseElement;
-    return _fields.putIfAbsent(element, () {
-      final owner = classType(
-        element.enclosingElement as InterfaceElement,
-        unit,
-        site,
-      );
+    owner ??= classType(
+      element.enclosingElement as InterfaceElement,
+      unit,
+      site,
+    );
+    final fieldOwner = owner;
+    return _fields.putIfAbsent((element, fieldOwner), () {
+      final owner = fieldOwner;
       if (owner == CoreTypes.enumeration) {
         return switch (element.name) {
           'index' => CoreTypes.enumIndex,
@@ -897,7 +1032,7 @@ final class Bindings({final bool enableAssertions = false}) {
         isLate: element.isLate,
         initializer: element.isLate && element.hasInitializer
             ? FunctionTarget(
-                element.library.uri,
+                owner.library,
                 '<initialize:${element.name}>',
                 type,
                 const [],
@@ -1076,7 +1211,7 @@ final class Bindings({final bool enableAssertions = false}) {
             unsupported(unit, site, 'constant instance storage');
           }
           final element = layerType.element;
-          if (!isClassOrEnum(element) ||
+          if (!isClassLike(element) ||
               element.mixins.isNotEmpty ||
               element.library.isInSdk &&
                   !layerType.isDartCoreObject &&
@@ -1409,8 +1544,30 @@ final class Bindings({final bool enableAssertions = false}) {
     }
     final previous = _classes[element];
     if (previous != null) return previous;
-    if (!isClassOrEnum(element) || element.mixins.isNotEmpty) {
-      unsupported(unit, site, 'class ${element.name} with mixins');
+    if (!isClassLike(element)) {
+      unsupported(unit, site, 'class ${element.name}');
+    }
+    if (element is MixinElement) _checkMixin(element, unit, site);
+    if (element.mixins.isNotEmpty &&
+        (element is EnumElement ||
+            element.typeParameters.isNotEmpty ||
+            element.supertype!.typeArguments.isNotEmpty)) {
+      unsupported(unit, site, 'generic or enum mixin application');
+    }
+    if (element.mixins.isNotEmpty) {
+      for (
+        var parent = element.supertype;
+        parent != null && !parent.isDartCoreObject;
+        parent = parent.element.supertype
+      ) {
+        if (!_modeledClasses.containsKey(parent.element)) {
+          unsupported(
+            unit,
+            site,
+            'mixin application with unmodeled superclass',
+          );
+        }
+      }
     }
     final parameters = registerTypeParameters(element.typeParameters);
     final type = ClassType.declare(
@@ -1418,18 +1575,121 @@ final class Bindings({final bool enableAssertions = false}) {
       element.name!,
       typeParameters: parameters,
       isAbstract:
+          element is MixinElement ||
           element is ClassElement && (element.isAbstract || element.isSealed),
     );
     _classes[element] = type;
     _classElements[type] = element;
     bindTypeParameters(element.typeParameters, unit, site);
+    var parent = element.supertype == null
+        ? ValueType.object
+        : valueType(element.supertype!, unit, site) as ClassType;
+    final applications = <IrClass>[];
+    for (final (index, mixin) in element.mixins.indexed) {
+      _checkMixin(mixin.element, unit, site);
+      final view = valueType(mixin, unit, site) as ClassType;
+      final application = ClassType(
+        type.library,
+        '<${element.name}:mixin:$index>',
+        superclass: parent,
+        interfaces: [view],
+        isAbstract: true,
+      );
+      final members = <FunctionTarget>[];
+      for (final member in <ExecutableElement>[
+        ...mixin.element.methods,
+        ...mixin.element.getters,
+        ...mixin.element.setters,
+      ]) {
+        if (member.isStatic) continue;
+        final source = target(member, unit, site);
+        final signature = source.signature;
+        final bound = FunctionTarget(
+          type.library,
+          source.name,
+          source.returnType,
+          signature.parameters,
+          owner: application,
+          kind: source.kind,
+          privateSelectorLibrary: source.selector.privateLibrary,
+          optionalPositional:
+              signature.positionalCount - signature.requiredPositional,
+          namedParameters: {
+            for (final entry in signature.named.entries)
+              entry.key: entry.value.required,
+          },
+          covariantParameters: source.covariantParameters,
+        );
+        _defaults[bound] = defaults(source);
+        _declarationCovariance[bound] =
+            _declarationCovariance[source] ?? const {};
+        members.add(bound);
+      }
+      _applicationOwners[application] = element;
+      applications.add(
+        IrClass(
+          application,
+          const [],
+          members: members,
+          constructors: [
+            if (mixin.element.fields.any(
+              (field) =>
+                  !field.isStatic && !field.isLate && field.hasInitializer,
+            ))
+              FunctionTarget(
+                type.library,
+                '<mixin-fields>',
+                .voidType,
+                const [],
+                owner: application,
+                kind: .initializer,
+              ),
+          ],
+        ),
+      );
+      parent = application;
+    }
+    if (applications.isNotEmpty) _mixinApplications[element] = applications;
     type.initializeHierarchy(
-      superclass: valueType(element.supertype!, unit, site) as ClassType,
-      interfaces: element.interfaces.map(
-        (interface) => valueType(interface, unit, site) as ClassType,
-      ),
+      superclass: parent,
+      interfaces: [
+        ...element.interfaces,
+        if (element is MixinElement) ...element.superclassConstraints,
+      ].map((interface) => valueType(interface, unit, site) as ClassType),
     );
     return type;
+  }
+
+  void _checkMixin(
+    InterfaceElement element,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    if (_checkedMixins.contains(element)) return;
+    final source = _modeledClasses[element];
+    if (source == null) unsupported(unit, site, 'unmodeled mixin source');
+    (unit, site) = source;
+    if (element.typeParameters.isNotEmpty ||
+        element.interfaces.isNotEmpty ||
+        element.mixins.isNotEmpty ||
+        element is MixinElement &&
+            element.superclassConstraints.any(
+              (type) => type.typeArguments.isNotEmpty,
+            ) ||
+        <ExecutableElement>[
+          ...element.methods,
+          ...element.getters,
+          ...element.setters,
+        ].any(
+          (member) => member.typeParameters.isNotEmpty || member.isAbstract,
+        )) {
+      unsupported(
+        unit,
+        site,
+        'mixin generics, interfaces, abstract members or nested applications',
+      );
+    }
+    _checkedMixins.add(element);
   }
 }
 
@@ -1494,8 +1754,10 @@ bool isExtensionOwner(Element? element) =>
     element is ExtensionElement || element is ExtensionTypeElement;
 
 /// Whether this declaration uses the shared class member lowering.
-bool isClassOrEnum(Element? element) =>
-    element is ClassElement || element is EnumElement;
+bool isClassLike(Element? element) =>
+    element is ClassElement ||
+    element is EnumElement ||
+    element is MixinElement;
 
 /// Resolves only the public SDK enum protocols, not user members of the same name.
 InstanceField? coreEnumField(ExecutableElement? member) {

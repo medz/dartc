@@ -249,7 +249,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
             element is ExecutableElement &&
             element is! ConstructorElement &&
             !element.isStatic &&
-            (isClassOrEnum(element.enclosingElement) ||
+            (isClassLike(element.enclosingElement) ||
                 isExtensionOwner(element.enclosingElement))) {
           _useReceiver();
         }

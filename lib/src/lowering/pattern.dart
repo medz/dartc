@@ -377,7 +377,7 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
           final member = field.element;
           if (member is! ExecutableElement ||
               member.isStatic ||
-              (!isClassOrEnum(member.enclosingElement) &&
+              (!isClassLike(member.enclosingElement) &&
                   coreEnumField(member) == null &&
                   !((member is GetterElement || member is MethodElement) &&
                       isExtensionOwner(member.enclosingElement)))) {

@@ -62,8 +62,9 @@ final class FunctionLowering._(
     ast.FunctionBody? body, {
     Iterable<ast.AstNode> initializers = const [],
     void Function(FunctionContext)? initialize,
+    FunctionTarget? destination,
   }) {
-    final target = bindings.target(element, unit, site);
+    final target = destination ?? bindings.target(element, unit, site);
     final extension = bindings.extensionExecutable(element, unit, site);
     final plan = ClosurePlan()
       ..prepare(
@@ -113,6 +114,31 @@ final class FunctionLowering._(
         target,
         plan,
       )._run(expression: expression),
+    );
+    _appendClosures(output, unit, bindings, plan);
+  }
+
+  /// Appends an ordinary initializer from resolved initialization expressions.
+  static void appendInitializer(
+    List<IrFunction> output,
+    ResolvedUnitResult unit,
+    Bindings bindings,
+    FunctionTarget target,
+    ast.AstNode site,
+    Iterable<ast.AstNode> expressions,
+    void Function(FunctionContext) initialize,
+  ) {
+    final plan = ClosurePlan()..prepare(unit, bindings, target, expressions);
+    output.add(
+      FunctionLowering._(
+        unit,
+        bindings,
+        null,
+        site,
+        null,
+        target,
+        plan,
+      )._run(initialize: initialize),
     );
     _appendClosures(output, unit, bindings, plan);
   }

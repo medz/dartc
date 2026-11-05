@@ -88,7 +88,7 @@ Value? lowerBinary(
     return context.dynamicMember(left, .method, name, [right]);
   }
   if (member is MethodElement &&
-      (isClassOrEnum(member.enclosingElement) ||
+      (isClassLike(member.enclosingElement) ||
           isExtensionOwner(member.enclosingElement)) &&
       !member.library.isDartCore) {
     return context.callPositionalMember(

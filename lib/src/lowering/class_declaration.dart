@@ -11,54 +11,55 @@ import 'function.dart';
 import 'function_context.dart';
 import 'global_declaration.dart';
 
-/// Lowers a resolved class and appends its executable bodies to [functions].
+/// Lowers a nominal declaration, optionally at a concrete mixin application.
 IrClass lowerClass(
   ResolvedUnitResult unit,
   Bindings bindings,
-  ast.ClassDeclaration declaration,
-  List<IrFunction> functions,
-) {
-  return _lowerNominal(
-    unit,
-    bindings,
-    declaration,
-    declaration.declaredFragment!.element,
-    declaration.namePart,
-    declaration.body.members,
-    functions,
-  );
-}
-
-/// Lowers an enum using ordinary class storage and member bodies.
-IrClass lowerEnum(
-  ResolvedUnitResult unit,
-  Bindings bindings,
-  ast.EnumDeclaration declaration,
-  List<IrFunction> functions,
-) => _lowerNominal(
-  unit,
-  bindings,
-  declaration,
-  declaration.declaredFragment!.element,
-  declaration.namePart,
-  declaration.body.members,
-  functions,
-);
-
-IrClass _lowerNominal(
-  ResolvedUnitResult unit,
-  Bindings bindings,
   ast.AstNode declaration,
-  InterfaceElement element,
-  ast.ClassNamePart namePart,
-  List<ast.ClassMember> sourceMembers,
-  List<IrFunction> functions,
-) {
-  final forwarders = bindings.forwarders(element);
-  final type = bindings.classType(element, unit, declaration);
+  List<IrFunction> functions, {
+  IrClass? application,
+}) {
+  final (element, namePart, sourceMembers) = switch (declaration) {
+    ast.ClassDeclaration(
+      :final declaredFragment,
+      :final namePart,
+      :final body,
+    ) =>
+      (declaredFragment!.element, namePart, body.members),
+    ast.EnumDeclaration(
+      :final declaredFragment,
+      :final namePart,
+      :final body,
+    ) =>
+      (declaredFragment!.element, namePart, body.members),
+    ast.MixinDeclaration(:final declaredFragment, :final body) => (
+      declaredFragment!.element,
+      null,
+      body.members,
+    ),
+    ast.ClassTypeAlias(:final declaredFragment) => (
+      declaredFragment!.element,
+      null,
+      const <ast.ClassMember>[],
+    ),
+    _ => unsupported(unit, declaration, 'nominal declaration'),
+  };
+  final interfaceOnly = application == null && element is MixinElement;
+  final forwarders = application == null
+      ? bindings.forwarders(element)
+      : <FunctionTarget>[];
+  final type =
+      application?.type ?? bindings.classType(element, unit, declaration);
+  FunctionTarget memberTarget(ExecutableElement member, ast.AstNode site) {
+    final source = bindings.target(member, unit, site);
+    return application == null || member.isStatic
+        ? source
+        : application.members[source.selector]!;
+  }
+
   final fields = <InstanceField>[];
   final members = <FunctionTarget>[];
-  final constructors = <FunctionTarget>[];
+  final constructors = <FunctionTarget>[...?application?.constructors.values];
   for (final field in element.fields) {
     if (field.isEnumConstant || field.isOriginEnumValues) {
       bindings.constantOf(field, unit, declaration);
@@ -68,12 +69,12 @@ IrClass _lowerNominal(
     if (field.isExternal) {
       unsupported(unit, declaration, 'field ${field.displayName}');
     }
-    final slot = field.isAbstract
+    final slot = field.isAbstract || interfaceOnly
         ? null
-        : bindings.field(field, unit, declaration);
+        : bindings.field(field, unit, declaration, owner: type);
     if (slot != null) fields.add(slot);
     for (final accessor in [field.getter, field.setter].nonNulls) {
-      final target = bindings.target(accessor, unit, declaration);
+      final target = memberTarget(accessor, declaration);
       members.add(target);
       if (target.isAbstract) continue;
       final entry = Block(target.parameterTypes);
@@ -128,7 +129,28 @@ IrClass _lowerNominal(
     );
   }
 
-  if (namePart case ast.PrimaryConstructorDeclaration primary) {
+  if (application != null) {
+    if (application.constructors['<mixin-fields>'] case final initializer?) {
+      FunctionLowering.appendInitializer(
+        functions,
+        unit,
+        bindings,
+        initializer,
+        declaration,
+        [
+          for (final member in sourceMembers.whereType<ast.FieldDeclaration>())
+            if (!member.isStatic && !member.fields.isLate)
+              for (final variable in member.fields.variables)
+                ?variable.initializer,
+        ],
+        (context) => _initializeFields(context, sourceMembers),
+      );
+    }
+  } else if (element is ClassElement && element.isMixinApplication) {
+    for (final ctor in element.constructors) {
+      constructor(ctor, declaration, null, const []);
+    }
+  } else if (namePart case ast.PrimaryConstructorDeclaration primary) {
     constructor(
       primary.declaredFragment!.element,
       primary,
@@ -140,6 +162,12 @@ IrClass _lowerNominal(
     constructor(ctor, declaration, null, const []);
   }
   for (final member in sourceMembers) {
+    if (application != null &&
+        (member is ast.ConstructorDeclaration ||
+            member is ast.MethodDeclaration && member.isStatic ||
+            member is ast.FieldDeclaration && member.isStatic)) {
+      continue;
+    }
     switch (member) {
       case ast.ConstructorDeclaration(:final body, :final initializers):
         constructor(
@@ -152,7 +180,8 @@ IrClass _lowerNominal(
         for (final variable in fields.variables) {
           lowerGlobal(unit, bindings, variable, functions);
         }
-      case ast.FieldDeclaration(fields: final fields) when fields.isLate:
+      case ast.FieldDeclaration(fields: final fields)
+          when fields.isLate && !interfaceOnly:
         for (final variable in fields.variables) {
           if (variable.initializer case final expression?) {
             final field = variable.declaredFragment!.element as FieldElement;
@@ -160,7 +189,7 @@ IrClass _lowerNominal(
               functions,
               unit,
               bindings,
-              bindings.field(field, unit, variable).initializer!,
+              bindings.field(field, unit, variable, owner: type).initializer!,
               expression,
             );
           }
@@ -169,7 +198,7 @@ IrClass _lowerNominal(
         break;
       case ast.MethodDeclaration(:final body):
         final method = member.declaredFragment!.element;
-        final target = bindings.target(method, unit, member);
+        final target = memberTarget(method, member);
         if (target.kind.isVirtual) members.add(target);
         if (!target.isAbstract) {
           FunctionLowering.append(
@@ -179,6 +208,7 @@ IrClass _lowerNominal(
             method,
             member,
             body,
+            destination: target,
           );
         }
     }
@@ -229,7 +259,9 @@ IrClass _lowerNominal(
     fields,
     members: members,
     constructors: constructors,
-    unsupportedForwarders: bindings.unsupportedForwarders(element),
+    unsupportedForwarders: application == null
+        ? bindings.unsupportedForwarders(element)
+        : const {},
   );
 }
 
@@ -245,42 +277,38 @@ void _initialize(
       receiver = context.receiver!;
   Value? evaluate(ast.Expression expression) =>
       lowerExpression(context, expression);
-  void store(FieldElement field, Value value, ast.AstNode site) {
-    final converted = context.normal(
-      context.convert(value, context.typeOf(field.type, site)),
-    );
-    if (converted == null) return;
-    context.emit(
-      StoreField(bindings.field(field, unit, site), receiver, converted),
-    );
-  }
 
   void invoke(
     ConstructorElement target,
     ast.ArgumentList? arguments, {
     bool forwardSuper = false,
   }) {
-    final init = bindings.target(target, unit, arguments ?? declaration);
+    final call = bindings.initializerCall(
+      ctor,
+      target,
+      unit,
+      arguments ?? declaration,
+    );
+    final init = call.target;
     final args = context.arguments(
       arguments,
       evaluate,
       forwarded: {
+        if (ctor.isOriginMixinApplication)
+          for (final (i, p) in ctor.formalParameters.indexed)
+            target.formalParameters[i]: context.readLocal(p),
         if (forwardSuper)
           for (final p
               in ctor.formalParameters.whereType<SuperFormalParameterElement>())
             p.superConstructorParameter!: context.readLocal(p),
       },
     );
-    if (args != null && !target.enclosingElement.thisType.isDartCoreObject) {
+    if (args != null && init.owner != ValueType.object) {
       context.emit(
-        DirectCall(
-          init,
-          [receiver, ...bindings.bind(init, args)],
-          ownerType: context.typeOf(
-            target.returnType,
-            arguments ?? declaration,
-          ) as ClassType,
-        ),
+        DirectCall(init, [
+          receiver,
+          ...bindings.bind(init, args),
+        ], ownerType: call.ownerType),
       );
     }
   }
@@ -291,24 +319,16 @@ void _initialize(
     invoke(element!, argumentList);
     return;
   }
-  for (final member in sourceMembers.whereType<ast.FieldDeclaration>()) {
-    if (member.isStatic || member.fields.isLate) continue;
-    for (final variable in member.fields.variables) {
-      if (variable.initializer case final expression?) {
-        final value = evaluate(expression);
-        if (value == null) return;
-        store(
-          variable.declaredFragment!.element as FieldElement,
-          value,
-          variable,
-        );
-        if (context.current == null) return;
-      }
-    }
-  }
+  _initializeFields(context, sourceMembers);
+  if (context.current == null) return;
   for (final p
       in ctor.formalParameters.whereType<FieldFormalParameterElement>()) {
-    store(p.field!, context.readLocal(p), declaration);
+    _storeInitializedField(
+      context,
+      p.field!,
+      context.readLocal(p),
+      declaration,
+    );
     if (context.current == null) return;
   }
   ast.ArgumentList? superArguments;
@@ -317,7 +337,12 @@ void _initialize(
       case ast.ConstructorFieldInitializer(:final fieldName, :final expression):
         final value = evaluate(expression);
         if (value == null) return;
-        store(fieldName.element! as FieldElement, value, init);
+        _storeInitializedField(
+          context,
+          fieldName.element! as FieldElement,
+          value,
+          init,
+        );
         if (context.current == null) return;
       case ast.AssertInitializer(:final condition, :final message):
         lowerAssert(context, condition, message);
@@ -329,4 +354,48 @@ void _initialize(
     }
   }
   invoke(ctor.superConstructor!, superArguments, forwardSuper: true);
+}
+
+void _initializeFields(FunctionContext context, List<ast.ClassMember> members) {
+  for (final member in members.whereType<ast.FieldDeclaration>()) {
+    if (member.isStatic || member.fields.isLate) continue;
+    for (final variable in member.fields.variables) {
+      if (variable.initializer case final expression?) {
+        final value = lowerExpression(context, expression);
+        if (value == null) return;
+        _storeInitializedField(
+          context,
+          variable.declaredFragment!.element as FieldElement,
+          value,
+          variable,
+        );
+        if (context.current == null) return;
+      }
+    }
+  }
+}
+
+void _storeInitializedField(
+  FunctionContext context,
+  FieldElement field,
+  Value value,
+  ast.AstNode site,
+) {
+  final converted = context.normal(
+    context.convert(value, context.typeOf(field.type, site)),
+  );
+  if (converted == null) return;
+  final receiver = context.receiver!;
+  context.emit(
+    StoreField(
+      context.bindings.field(
+        field,
+        context.unit,
+        site,
+        owner: (receiver.type as ClassType).declaration,
+      ),
+      receiver,
+      converted,
+    ),
+  );
 }

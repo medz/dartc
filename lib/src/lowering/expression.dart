@@ -85,7 +85,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       final member = expression.propertyName.element;
       if (member is MethodElement &&
               member.isStatic &&
-              (isClassOrEnum(member.enclosingElement) ||
+              (isClassLike(member.enclosingElement) ||
                   isExtensionOwner(member.enclosingElement)) ||
           member is ConstructorElement) {
         return FunctionConstant(
@@ -101,7 +101,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       }
       if (member is GetterElement &&
           member.isStatic &&
-          (isClassOrEnum(member.enclosingElement) ||
+          (isClassLike(member.enclosingElement) ||
               isExtensionOwner(member.enclosingElement))) {
         final target = context.bindings.target(member, unit, expression);
         return context.emit(DirectCall(target, []));
@@ -162,7 +162,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
                 expression,
               );
       }
-      if (element == null || !isClassOrEnum(element.enclosingElement)) {
+      if (element == null || !isClassLike(element.enclosingElement)) {
         unsupported(unit, expression, 'implicit call tear-off');
       }
       return context.instantiateFunction(
@@ -546,7 +546,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
             )
         when callee is MethodElement &&
                 callee.isStatic &&
-                (isClassOrEnum(callee.enclosingElement) ||
+                (isClassLike(callee.enclosingElement) ||
                     isExtensionOwner(callee.enclosingElement)) ||
             expression is ast.MethodInvocation &&
                 callee is TopLevelFunctionElement:

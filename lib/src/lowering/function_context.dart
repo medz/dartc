@@ -234,7 +234,7 @@ final class FunctionContext(
     }
     if (member == null ||
         member.isStatic ||
-        extension == null && !isClassOrEnum(member.enclosingElement)) {
+        extension == null && !isClassLike(member.enclosingElement)) {
       unsupported(unit, site, 'instance member binding');
     }
     if (coreRuntimeType(member) && !direct) {

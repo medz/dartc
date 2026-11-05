@@ -338,7 +338,7 @@ final class SelectorChain(
         :final isNullAware,
       )
           when !method.isStatic &&
-              (isClassOrEnum(method.enclosingElement) ||
+              (isClassLike(method.enclosingElement) ||
                   isExtensionOwner(method.enclosingElement)) =>
         (target, method.name!, method, argumentList, isNullAware),
       _ => (null, null, null, null, false),
@@ -460,7 +460,7 @@ final class SelectorChain(
       return context.normal(context.emit(LoadField(field, known)));
     }
     if (member is! ExecutableElement ||
-        !isClassOrEnum(member.enclosingElement) ||
+        !isClassLike(member.enclosingElement) ||
         member.isStatic) {
       unsupported(context.unit, node, 'member $name');
     }
@@ -482,6 +482,7 @@ final class SelectorChain(
           )
         : context.bindings.target(member, context.unit, node);
     if (member.library.isDartCore &&
+        (!direct || target.library.toString() == 'dart:core') &&
         member is GetterElement &&
         member.name == 'hashCode' &&
         (member.enclosingElement.name == 'Object' ||
@@ -713,7 +714,7 @@ final class SelectorChain(
     }
     if (destination is! ExecutableElement ||
         destination.isStatic ||
-        !(isClassOrEnum(destination.enclosingElement) ||
+        !(isClassLike(destination.enclosingElement) ||
             isExtensionOwner(destination.enclosingElement))) {
       unsupported(context.unit, site, 'assignment target');
     }

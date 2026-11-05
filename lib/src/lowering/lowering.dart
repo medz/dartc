@@ -32,6 +32,10 @@ abstract final class Lowering() {
             bindings.registerClass(node.declaredFragment!.element, unit, node);
           case ast.EnumDeclaration():
             bindings.registerClass(node.declaredFragment!.element, unit, node);
+          case ast.MixinDeclaration():
+            bindings.registerClass(node.declaredFragment!.element, unit, node);
+          case ast.ClassTypeAlias():
+            bindings.registerClass(node.declaredFragment!.element, unit, node);
           default:
             break;
         }
@@ -42,12 +46,13 @@ abstract final class Lowering() {
     for (final unit in input.libraries.expand((library) => library.units)) {
       for (final node in unit.unit.declarations) {
         switch (node) {
+          case ast.ClassDeclaration() ||
+              ast.EnumDeclaration() ||
+              ast.MixinDeclaration() ||
+              ast.ClassTypeAlias():
+            classes.add(lowerClass(unit, bindings, node, functions));
           case ast.TypeAlias():
             break;
-          case ast.ClassDeclaration():
-            classes.add(lowerClass(unit, bindings, node, functions));
-          case ast.EnumDeclaration():
-            classes.add(lowerEnum(unit, bindings, node, functions));
           case ast.ExtensionDeclaration():
             lowerExtension(unit, bindings, node.body.members, functions);
           case ast.ExtensionTypeDeclaration():
@@ -73,6 +78,16 @@ abstract final class Lowering() {
         }
       }
     }
-    return IrProgram(classes, functions, globals: bindings.globals);
+
+    for (final (application, unit, source) in bindings.mixinDeclarations) {
+      bindings.replaceMixinApplication(
+        lowerClass(unit, bindings, source, functions, application: application),
+      );
+    }
+    return IrProgram(
+      [...classes, ...bindings.mixinApplications],
+      [...functions, ...bindings.mixinInitializers],
+      globals: bindings.globals,
+    );
   }
 }
