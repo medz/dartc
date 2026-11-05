@@ -278,11 +278,14 @@ final class Bindings({final bool enableAssertions = false}) {
     // These checks survive specialization even when the destination's own
     // parameter types no longer contain class variables. Keep their provenance
     // through further signature replacements as well as unchanged inheritance.
+    final ownerParameters = owner.typeParameters.isEmpty
+        ? const <TypeParameterType>{}
+        : owner.typeParameters.toSet();
     _forwarderClassCovariance[result] = {
       ...inheritedClassCovariance,
-      for (final (i, type) in result.signature.parameters.indexed)
-        if (containsCovariantTypeParameter(type, owner.typeParameters.toSet()))
-          i,
+      if (ownerParameters.isNotEmpty)
+        for (final (i, type) in result.signature.parameters.indexed)
+          if (containsCovariantTypeParameter(type, ownerParameters)) i,
     };
     _defaults[result] = {
       for (final (i, p) in parameters.indexed)

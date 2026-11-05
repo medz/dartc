@@ -127,14 +127,10 @@ final class FunctionTarget(
   /// The entry slot of the first explicit Dart parameter.
   int get argumentOffset => parameterTypes.length - signature.parameters.length;
 
+  late final Set<int> _covariantParameters;
+
   /// Explicit method parameters checked covariantly at entry.
-  final Set<int> covariantParameters = .unmodifiable({
-    ...covariantParameters,
-    if (kind.isVirtual && owner != null)
-      for (final (i, type) in parameters.indexed)
-        if (containsCovariantTypeParameter(type, owner.typeParameters.toSet()))
-          i,
-  });
+  Set<int> get covariantParameters => _covariantParameters;
 
   /// The runtime type of a tear-off. Covariant parameters reify as `Object?`.
   late final FunctionType reifiedSignature = covariantParameters.isEmpty
@@ -228,6 +224,18 @@ final class FunctionTarget(
   }
 
   this {
+    final ownerParameters =
+        kind.isVirtual && owner != null && owner!.typeParameters.isNotEmpty
+        ? owner!.typeParameters.toSet()
+        : const <TypeParameterType>{};
+    // The signature has already materialized the possibly lazy input once.
+    _covariantParameters = Set<int>.unmodifiable({
+      ...covariantParameters,
+      if (ownerParameters.isNotEmpty)
+        for (final (i, type) in signature.parameters.indexed)
+          if (containsCovariantTypeParameter(type, ownerParameters)) i,
+    });
+
     if ((typeParameters.isNotEmpty &&
             (kind == .initializer ||
                 kind == .fieldInitializer ||

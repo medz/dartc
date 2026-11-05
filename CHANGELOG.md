@@ -1,5 +1,7 @@
 ## Unreleased
 
+Function targets convert lazy parameter types once and avoid empty-owner covariance scans. IR verification caches successful type-scope checks by object identity and skips dominator construction for edge-free single-block graphs, retaining the same scope, SSA, operand and control-flow checks.
+
 Dynamic members, function values, operators and updates share one dispatch instruction and existing selector/lvalue lowering. Runtime shape checks precede generic defaults, bounds and parameter checks; getter-call syntax, private names, named evaluation order, assignment values and null shortening are preserved. Ordinary missing members build Invocation for user noSuchMethod or throw NoSuchMethodError. Unmodeled imported/SDK members remain explicit unsupported boundaries. Unary and binary minus have distinct dispatch identities.
 
 Typed noSuchMethod forwarders use ordinary function bodies and one Invocation builder. Entry defaults, bounds, covariance and result checks share existing call machinery; inherited bodies preserve actual defaults and lexical super calls select actual implementations. Typed mirrors retain canonical symbols, declaration-order named arguments and immutable collections. Missing merged generic defaults, covariance-only inheritance transitions and foreign-private replacements remain explicit boundaries.

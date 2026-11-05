@@ -22,10 +22,14 @@ import 'value.dart';
       scope.addAll(lexical.owner?.typeParameters ?? const []);
     }
   }
+  // Structural equality omits generic default metadata; scope checks cannot.
+  final checkedTypes = Set<ValueType>.identity();
   void checkTypeScope(ValueType type) {
+    if (checkedTypes.contains(type)) return;
     if (typeParametersIn(type).any((parameter) => !scope.contains(parameter))) {
       throw StateError('Type parameter used outside its lexical scope.');
     }
+    checkedTypes.add(type);
   }
 
   void constant(Constant value) {
@@ -78,8 +82,11 @@ import 'value.dart';
       'Entry parameters do not match the function signature.',
     );
   }
-  final predecessors = {for (final b in blocks) b: <Block>[]};
-  if (predecessors.length != blocks.length) {
+  // A one-block graph cannot have a valid edge: entry and missing targets fail.
+  final predecessors = blocks.length == 1
+      ? null
+      : {for (final b in blocks) b: <Block>[]};
+  if (predecessors != null && predecessors.length != blocks.length) {
     throw StateError('Repeated block.');
   }
   final definitions = <Value, (Block, int)>{};
@@ -102,14 +109,16 @@ import 'value.dart';
       define(operation, block.instructions.length);
     }
     for (final next in block.successors) {
-      final incoming = predecessors[next.target];
+      final incoming = predecessors?[next.target];
       if (incoming == null || next.target == entry) {
         throw StateError('Invalid control-flow edge.');
       }
       incoming.add(block);
     }
   }
-  final idom = _dominators(entry, predecessors);
+  final idom = predecessors == null
+      ? const <Block, Block>{}
+      : _dominators(entry, predecessors);
   for (final block in blocks) {
     void use(Value value, int position) {
       if (value is Constant) {
