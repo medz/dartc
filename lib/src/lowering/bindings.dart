@@ -164,31 +164,46 @@ final class Bindings({final bool enableAssertions = false}) {
     FieldElement element,
     ResolvedUnitResult unit,
     ast.AstNode site,
-  ) => _fields.putIfAbsent(element.baseElement, () {
-    final owner = classType(
-      element.enclosingElement as InterfaceElement,
-      unit,
-      site,
-    );
-    if (owner == CoreTypes.enumeration) {
-      return switch (element.name) {
-        'index' => CoreTypes.enumIndex,
-        '_name' => CoreTypes.enumName,
-        _ => unsupported(unit, site, 'Enum field ${element.name}'),
-      };
-    }
-    if (owner == CoreTypes.mapEntry) {
-      return element.name == 'key'
-          ? CoreTypes.mapEntryKey
-          : CoreTypes.mapEntryValue;
-    }
-    return InstanceField(
-      owner,
-      element.name!,
-      valueType(element.type, unit, site),
-      isFinal: element.isFinal,
-    );
-  });
+  ) {
+    element = element.baseElement;
+    return _fields.putIfAbsent(element, () {
+      final owner = classType(
+        element.enclosingElement as InterfaceElement,
+        unit,
+        site,
+      );
+      if (owner == CoreTypes.enumeration) {
+        return switch (element.name) {
+          'index' => CoreTypes.enumIndex,
+          '_name' => CoreTypes.enumName,
+          _ => unsupported(unit, site, 'Enum field ${element.name}'),
+        };
+      }
+      if (owner == CoreTypes.mapEntry) {
+        return element.name == 'key'
+            ? CoreTypes.mapEntryKey
+            : CoreTypes.mapEntryValue;
+      }
+      final type = valueType(element.type, unit, site);
+      return InstanceField(
+        owner,
+        element.name!,
+        type,
+        isFinal: element.isFinal,
+        isLate: element.isLate,
+        initializer: element.isLate && element.hasInitializer
+            ? FunctionTarget(
+                element.library.uri,
+                '<initialize:${element.name}>',
+                type,
+                const [],
+                owner: owner,
+                kind: .fieldInitializer,
+              )
+            : null,
+      );
+    });
+  }
 
   /// Reads a resolved constant or optional parameter's default value.
   Constant constantOf(

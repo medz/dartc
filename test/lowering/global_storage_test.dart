@@ -224,14 +224,6 @@ void main() {
 
     for (final (name, source) in <(String, String)>[
       (
-        'instance late field',
-        'class C { late int value; } int f() => C().value;',
-      ),
-      (
-        'initialized instance late field',
-        'class C { late int value = 1; } int f() => C().value;',
-      ),
-      (
         'local late variable',
         'int f() { late int value; value = 1; return value; }',
       ),

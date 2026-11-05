@@ -187,7 +187,8 @@ import 'value.dart';
             throw StateError('Closure created outside its lexical parent.');
           }
           (closures ??= {}).add(child);
-        case StoreField(:final field, :final receiver) when field.isFinal:
+        case StoreField(:final field, :final receiver)
+            when field.isFinal && !field.isLate:
           if (target.kind != .initializer ||
               target.owner != field.owner ||
               receiver != entry.parameters.first) {

@@ -17,6 +17,9 @@ enum FunctionKind() {
   /// A generative constructor initializing its first operand in place.
   initializer,
 
+  /// A lazy instance-field expression evaluated on its declaring storage.
+  fieldInitializer,
+
   /// A factory returning an instance without an implicit receiver.
   factory,
 
@@ -33,7 +36,8 @@ enum FunctionKind() {
   bool get isVirtual => this == method || this == getter || this == setter;
 
   /// Whether the receiver occupies the first SSA entry parameter.
-  bool get hasReceiver => isVirtual || this == initializer;
+  bool get hasReceiver =>
+      isVirtual || this == initializer || this == fieldInitializer;
 }
 
 /// A dispatch name including its operation and, for a private name, its library.
@@ -215,6 +219,7 @@ final class FunctionTarget(
   this {
     if ((typeParameters.isNotEmpty &&
             (kind == .initializer ||
+                kind == .fieldInitializer ||
                 kind == .factory ||
                 kind == .getter ||
                 kind == .setter ||
@@ -239,6 +244,7 @@ final class FunctionTarget(
           (i) => !kind.isVirtual || i < 0 || i >= signature.parameters.length,
         ) ||
         (kind == .initializer && returnType != .voidType) ||
+        (kind == .fieldInitializer && signature.parameters.isNotEmpty) ||
         (kind == .factory && returnType != owner) ||
         isAbstract && !kind.isVirtual ||
         (kind == .getter || kind == .staticGetter) &&
@@ -284,9 +290,18 @@ final class InstanceField(
   /// The Dart type accepted by the storage.
   final ValueType type, {
 
-  /// Whether writes are restricted to initialization.
+  /// Whether binding is restricted to initialization or one late assignment.
   final bool isFinal = false,
+
+  /// Whether unbound reads lazily initialize the slot or raise a late error.
+  final bool isLate = false,
+
+  /// The receiver-only body evaluated on an unbound late read.
+  final FunctionTarget? initializer,
 }) {
+  /// Whether source assignment can write the storage outside a constructor.
+  bool get isWritable => !isFinal || isLate && initializer == null;
+
   ValueType typeFor(ClassType receiver) {
     final view = receiver.asInstanceOf(owner);
     if (view == null) throw ArgumentError('Incompatible field owner.');
@@ -296,6 +311,18 @@ final class InstanceField(
   this {
     if (type is CellType) {
       throw ArgumentError('An instance field must hold a Dart value.');
+    }
+    if (initializer case final target?) {
+      if (!isLate ||
+          target.owner != owner ||
+          target.kind != .fieldInitializer ||
+          target.signature.parameters.isNotEmpty ||
+          target.typeParameters.isNotEmpty ||
+          target.returnType != type) {
+        throw ArgumentError(
+          'Invalid instance field initializer signature or owner.',
+        );
+      }
     }
   }
 }

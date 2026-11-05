@@ -123,6 +123,7 @@ final class FunctionConstant(
       }
     }
     if (target.kind == .closure ||
+        target.kind == .fieldInitializer ||
         target.kind.isVirtual ||
         target.kind == .initializer && target.owner!.isAbstract) {
       throw ArgumentError('Expected a callable without a bound receiver.');
@@ -337,6 +338,8 @@ sealed class Instruction(super.type) extends Value {
     Interpolate() ||
     StringConcat() => true,
     StoreGlobal(:final global) => global.isFinal,
+    StoreField(:final field) => field.isLate && field.isFinal,
+    LoadField(:final field) => field.isLate,
     Equals(:final mayCallUserCode) => mayCallUserCode,
     IntBinary(:final operator) => operator.mayThrow,
     NumericBinary(:final canThrow) => canThrow,
@@ -345,9 +348,7 @@ sealed class Instruction(super.type) extends Value {
     WriteCell() ||
     TypeTest() ||
     TypeView() ||
-    RecordGet() ||
-    StoreField() ||
-    LoadField() => false,
+    RecordGet() => false,
   };
 }
 
@@ -577,6 +578,9 @@ final class StoreGlobal(
 }
 
 /// Reads storage selected by its declaring class, without invoking a getter.
+///
+/// Late fields use the same unbound-read protocol as [LoadGlobal], passing the
+/// receiver and its actual owner type arguments to the initializer.
 final class LoadField(
   /// The declared slot to read.
   final InstanceField field,
@@ -679,7 +683,10 @@ final class Construct(
   }
 }
 
-/// Stores [value] directly in [field] during instance initialization.
+/// Stores [value] directly in [field]. Ordinary final fields are constructor-only.
+///
+/// A late final field without an initializer rejects a second binding, after
+/// checking the value against the actual receiver's field type.
 final class StoreField(
   /// The slot selected by its declaring class.
   final InstanceField field,
@@ -691,7 +698,8 @@ final class StoreField(
   final Value value,
 ) extends Instruction {
   this : super(.voidType) {
-    if (_classReceiver(receiver.type).asInstanceOf(field.owner) == null ||
+    if (field.isLate && !field.isWritable ||
+        _classReceiver(receiver.type).asInstanceOf(field.owner) == null ||
         !field.typeFor(_classReceiver(receiver.type)).accepts(value.type)) {
       throw ArgumentError('Incompatible instance field write.');
     }

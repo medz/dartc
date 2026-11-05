@@ -23,15 +23,37 @@ final class FixtureRunner(
       _enter(initializer, const []),
       cast: true,
     );
-    if (global.isFinal && _globals.containsKey(global)) _lateWriteError();
-    _globals[global] = value;
-    return value;
+    return _bindLazy(_globals, global, value, isFinal: global.isFinal);
   }
 
   void _storeGlobal(GlobalVariable global, Object? value) {
     value = _typeOperation(global.type, value, cast: true);
-    if (global.isFinal && _globals.containsKey(global)) _lateWriteError();
-    _globals[global] = value;
+    _bindLazy(_globals, global, value, isFinal: global.isFinal);
+  }
+
+  Object? _loadLateField(_Instance instance, InstanceField field) {
+    if (instance.fields.containsKey(field)) return instance.fields[field];
+    final initializer = field.initializer;
+    if (initializer == null) return _LateRead().value;
+    final value = _typeOperation(
+      field.typeFor(instance.type),
+      _enter(initializer, [instance]),
+      cast: true,
+    );
+    return _bindLazy(instance.fields, field, value, isFinal: field.isFinal);
+  }
+
+  // Commit only after evaluation and conversion, preserving recursive writes
+  // both on a final-binding conflict and when the initializer throws.
+  Object? _bindLazy<K>(
+    Map<K, Object?> storage,
+    K slot,
+    Object? value, {
+    required bool isFinal,
+  }) {
+    if (isFinal && storage.containsKey(slot)) _lateWriteError();
+    storage[slot] = value;
+    return value;
   }
 
   final _staticFunctions = <Object, _FunctionValue>{};
@@ -583,14 +605,17 @@ final class FixtureRunner(
             field.type,
             instance.type.asInstanceOf(field.owner)!.typeEnvironment,
           );
-          instance.fields[field] = _typeOperation(
-            type,
-            read(value),
-            cast: true,
-          );
+          final converted = _typeOperation(type, read(value), cast: true);
+          if (field.isLate && field.isFinal) {
+            _bindLazy(instance.fields, field, converted, isFinal: true);
+          } else {
+            instance.fields[field] = converted;
+          }
         case LoadField(:final field, :final receiver):
           values[op] = field.owner == CoreTypes.mapEntry
               ? _entryField(read(receiver), field)
+              : field.isLate
+              ? _loadLateField(read(receiver) as _Instance, field)
               : (read(receiver) as _Instance).fields[field];
         case InstanceCall(
           :final typeArguments,

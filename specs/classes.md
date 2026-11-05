@@ -6,7 +6,7 @@
 | --- | --- |
 | 普通、abstract 类 | 支持普通与泛型类、单继承和实现多个接口，保留继承路径中的类型实参。抽象类可参与类型判断与父类初始化。 |
 | base/interface/final/sealed 修饰符 | analyzer 检查修饰符约束。IR 可表示这些类及其类型关系，禁止直接分配抽象类和 sealed 类。 |
-| 字段、方法、getter/setter、静态成员 | 支持实例字段的构造初始化、隐式和显式 getter/setter、实例方法及静态方法。普通实例调用按运行类分派，super 调用选定的父类实现。私有成员限于声明库。支持显式静态 getter/setter。支持静态 const 及非 const 存储，包括 final、late/late final 的惰性初始化。 |
+| 字段、方法、getter/setter、静态成员 | 支持实例字段的构造初始化及 late/late final 惰性存储、隐式和显式 getter/setter、实例方法及静态方法。普通实例调用按运行类分派，super 调用选定的父类实现。私有成员限于声明库。支持显式静态 getter/setter。支持静态 const 及非 const 存储，包括 final、late/late final 的惰性初始化。 |
 | 抽象成员与 abstract 字段 | 支持通过抽象 getter 和方法调用具体类的实现。 |
 | 用户算术、关系、一元及索引运算符 | 类的运算符按解析后的成员分派，包括复合赋值和索引读写。super 直接调用选中的祖先实现。扩展运算符待实现。见[运算符与更新样本](../test/lowering/fixtures/nominal/updates.dart)。 |
 | `operator ==`、`noSuchMethod` | 支持用户相等方法，包括作为 record 字段进行比较。noSuchMethod 转发待实现。 |

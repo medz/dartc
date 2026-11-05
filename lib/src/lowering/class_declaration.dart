@@ -63,7 +63,7 @@ IrClass _lowerNominal(
       continue;
     }
     if (field.isStatic || field.isOriginGetterSetter) continue;
-    if (field.isLate || field.isExternal) {
+    if (field.isExternal) {
       unsupported(unit, declaration, 'field ${field.displayName}');
     }
     final slot = field.isAbstract
@@ -77,7 +77,8 @@ IrClass _lowerNominal(
       final entry = Block(target.parameterTypes);
       final receiver = entry.parameters.first;
       if (accessor is GetterElement) {
-        entry.finish(Return(entry.emit(LoadField(slot!, receiver))));
+        final value = entry.emit(LoadField(slot!, receiver));
+        entry.finish(value.type == .never ? Unreachable(value) : Return(value));
       } else {
         entry.emit(StoreField(slot!, receiver, entry.parameters[1]));
         entry.finish(const Return());
@@ -109,7 +110,7 @@ IrClass _lowerNominal(
       initializers: [
         if (ctor.isGenerative && ctor.redirectedConstructor == null)
           for (final member in sourceMembers.whereType<ast.FieldDeclaration>())
-            if (!member.isStatic)
+            if (!member.isStatic && !member.fields.isLate)
               for (final v in member.fields.variables) ?v.initializer,
         ...initializers,
       ],
@@ -148,6 +149,19 @@ IrClass _lowerNominal(
       case ast.FieldDeclaration(isStatic: true, :final fields):
         for (final variable in fields.variables) {
           lowerGlobal(unit, bindings, variable, functions);
+        }
+      case ast.FieldDeclaration(fields: final fields) when fields.isLate:
+        for (final variable in fields.variables) {
+          if (variable.initializer case final expression?) {
+            final field = variable.declaredFragment!.element as FieldElement;
+            FunctionLowering.appendExpression(
+              functions,
+              unit,
+              bindings,
+              bindings.field(field, unit, variable).initializer!,
+              expression,
+            );
+          }
         }
       case ast.FieldDeclaration() || ast.PrimaryConstructorBody():
         break;
@@ -251,7 +265,7 @@ void _initialize(
     return;
   }
   for (final member in sourceMembers.whereType<ast.FieldDeclaration>()) {
-    if (member.isStatic) continue;
+    if (member.isStatic || member.fields.isLate) continue;
     for (final variable in member.fields.variables) {
       if (variable.initializer case final expression?) {
         final value = evaluate(expression);

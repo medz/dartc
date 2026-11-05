@@ -113,7 +113,9 @@ final class IrProgram(
       );
       for (final field in declaration.fields) {
         output.writeln(
-          '  ${field.isFinal ? 'final ' : ''}${field.type.dartName} ${field.name}',
+          '  ${field.isLate ? 'late ' : ''}${field.isFinal ? 'final ' : ''}'
+          '${field.type.dartName} ${field.name}'
+          '${field.initializer == null ? '' : ' = ${field.initializer!.name}'}',
         );
       }
       for (final ctor in declaration.constructors.values) {
@@ -148,6 +150,17 @@ final class IrProgram(
     final names = <(Uri, ClassType?, FunctionKind, String)>{};
     final locals = <(FunctionTarget, int)>{};
     final bodies = {for (final f in this.functions) f.target};
+    final fieldInitializers = <FunctionTarget>{};
+    for (final c in this.classes) {
+      for (final field in c.fields) {
+        if (field.initializer case final initializer?) {
+          if (!fieldInitializers.add(initializer) ||
+              !bodies.contains(initializer)) {
+            throw ArgumentError('Repeated or missing field initializer body.');
+          }
+        }
+      }
+    }
     final globalNames = <(Uri, ClassType?, String)>{};
     final slots = this.globals.toSet();
     for (final global in this.globals) {
@@ -184,6 +197,11 @@ final class IrProgram(
       if (t.kind.isVirtual && _definitions[owner]?.members[t.selector] != t) {
         throw ArgumentError(
           'Instance body does not match the declared member.',
+        );
+      }
+      if (t.kind == .fieldInitializer && !fieldInitializers.contains(t)) {
+        throw ArgumentError(
+          'Body does not match a declared field initializer.',
         );
       }
       if ((t.kind == .factory || t.kind == .initializer) &&
