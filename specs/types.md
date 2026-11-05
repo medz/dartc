@@ -5,14 +5,14 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 | 特性 | 当前 IR 范围 |
 | --- | --- |
 | 类型名、前缀、嵌套实参、可空类型 | 支持已表示的核心类型、类和 record 的可空形式，以及嵌套的类类型实参。带导入前缀的类型仍指向声明库中的类。 |
-| 核心标量、`Object`、`dynamic`、`void`、`Never` | 支持这些类型及 Null；dynamic 与 Object? 保持不同类型身份和双向顶类型关系。typed 存储、参数、返回值和 bool 上下文保留逐次隐式检查。dynamic 接收者的成员、函数和运算符派发仍待实现。Never 没有正常返回值，Never? 等价于 Null。 |
-| 异常及栈轨迹 | 支持 Error、TypeError、AssertionError、StateError、UnsupportedError、StackTrace，以及按用户声明的类和接口捕获异常。 |
+| 核心标量、`Object`、`dynamic`、`void`、`Never` | 支持这些类型及 Null；dynamic 与 Object? 保持不同类型身份和双向顶类型关系。typed 存储、参数、返回值和 bool 上下文保留逐次隐式检查。dynamic 接收者的成员、函数和运算符通过统一运行时派发，未建模 SDK 成员明确拒绝。Never 没有正常返回值，Never? 等价于 Null。 |
+| 异常及栈轨迹 | 支持 Error、TypeError、NoSuchMethodError、AssertionError、StateError、UnsupportedError、StackTrace，以及按用户声明的类和接口捕获异常。 |
 | `List<T>` 及实际类型检查 | 支持 List、Set、Map、MapEntry、Iterable 和 Iterator 的参数化类型及其继承关系。字面量保留实际类型实参，宽化引用不绕过写入类型检查。 |
-| Type 值和类型参数实化 | 支持已表示类型的 Type 字面量、别名与泛型 T 值，严格保持类型相等、哈希、集合键和规范身份；闭包保留实化环境。支持 Type/Type? 测试和转换；通用 runtimeType 读取待实现。见[类型值样本](../test/lowering/fixtures/type_values.dart)。 |
+| Type 值和类型参数实化 | 支持已表示类型的 Type 字面量、别名与泛型 T 值，严格保持类型相等、哈希、集合键和规范身份；闭包保留实化环境。支持 Type/Type? 测试和转换；dynamic runtimeType 支持已表示的具体用户类、函数、record、List 及标量。Set/Map 和部分错误的 SDK 私有实现类型尚未建模，读取明确拒绝，不将公开接口伪装成实际类型。通用静态 runtimeType 读取待实现。见[类型值样本](../test/lowering/fixtures/type_values.dart)。 |
 | 函数签名 | 顶层函数、方法和构造器保留必需及可选形参。实例调用在选定实现后按其签名绑定参数。函数类型按参数逆变、返回值协变、位置参数范围及命名参数的必需性判断子类型。 |
 | 泛型函数类型与泛型函数值签名 | 支持独立绑定的函数类型参数、界限、嵌套泛型函数类型及显式实例化。类型相等、哈希和子类型比较忽略绑定参数名称；外层自由类型参数仍按声明身份区分，类型代换避免捕获。 |
 | 类型参数、上界、泛型别名 | 支持类和函数类型参数、递归上界、嵌套代入及解析为已表示类型的别名。类型参数保留声明身份和作用域，实例化同时检查全部参数的界限。 |
-| 泛型缺省类型元数据 | 保留 analyzer 预计算的默认类型，区分隐式 dynamic 与显式 Object?，支持相互依赖、逆变递归界限、别名及捕获类型代入。默认元数据不参与类型身份，仅在应用时验证界限；结构类型元数据缺失时不猜测。dynamic 调用仍待实现。见[元数据验证](../test/lowering/generic_defaults_test.dart)。 |
+| 泛型缺省类型元数据 | 保留 analyzer 预计算的默认类型，区分隐式 dynamic 与显式 Object?，支持相互依赖、逆变递归界限、别名及捕获类型代入。默认元数据不参与类型身份，仅在应用时验证界限；结构类型元数据缺失时不猜测。dynamic 调用在参数形状检查后才请求默认类型。见[元数据验证](../test/lowering/generic_defaults_test.dart)。 |
 | 现代与旧式函数 typedef | 支持别名解析为已表示的函数签名。 |
 | 普通及 const 泛型类实例 | 支持普通和 const 泛型实例、成员代入、类型测试和转换；const 对象按实际类型和各声明字段的常量值保留规范身份。 |
 | 泛型 `extends`/`implements` | 保留继承路径中的实参和次序，支持继承成员、super 调用以及泛型子类型检查。 |

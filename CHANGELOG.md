@@ -1,8 +1,10 @@
 ## Unreleased
 
-Generic binders retain analyzer-computed default type templates, including dependent and recursive bounds, aliases and captured owner types. Defaults remain separate from type identity, preserve capture-free substitution and are checked only when applied. Missing structural metadata stays explicit; this foundation does not yet enable dynamic calls.
+Dynamic members, function values, operators and updates share one dispatch instruction and existing selector/lvalue lowering. Runtime shape checks precede generic defaults, bounds and parameter checks; getter-call syntax, private names, named evaluation order, assignment values and null shortening are preserved. Ordinary missing members build Invocation for user noSuchMethod or throw NoSuchMethodError. Typed forwarders and unmodeled imported/SDK members remain explicit unsupported boundaries. Unary and binary minus have distinct dispatch identities.
 
-Invocation factories, constructor tear-offs, flags and argument getters reuse nominal storage and virtual calls. Argument collections preserve immutable shallow snapshots, copying order and the pinned SDK's typed empty identities. User implementations, inherited defaults and abstract/interface redeclarations retain ordinary dispatch; dynamic invocation and noSuchMethod forwarding remain separate work.
+Generic binders retain analyzer-computed default type templates, including dependent and recursive bounds, aliases and captured owner types. Defaults remain separate from type identity, preserve capture-free substitution and are checked only when applied. Missing structural metadata stays explicit; dynamic calls apply them only after accepting the argument shape.
+
+Invocation factories, constructor tear-offs, flags and argument getters reuse nominal storage and virtual calls. Argument collections preserve immutable shallow snapshots, copying order and the pinned SDK's typed empty identities. User implementations, inherited defaults and abstract/interface redeclarations retain ordinary dispatch; typed noSuchMethod forwarding remains separate work.
 
 Public Symbol literals and Symbol constructors reuse nominal storage and ordinary constant identity. Constant values canonicalize while runtime constructors remain fresh; equality, hashing, constructor tear-offs, object patterns and Symbol-typed toString calls preserve user implementations. Private source literals and their constant dependencies remain rejected because analyzer loses their library identity. Super hashCode reads now select Object identity hashing instead of recursively invoking an override.
 
@@ -14,7 +16,7 @@ Top-level and static mutable, final, late and late-final variables share ordinar
 
 Ordinary, enhanced and generic enums reuse class storage, constant identity and member dispatch. Values retain their index, name and actual type arguments; enum toString, factories, methods, operators and patterns share existing lowering. Class and enum static const declarations are validated without runtime storage. Enums with a user storage field named _name are rejected because pinned analyzer metadata overwrites that value.
 
-Type literals, aliases and reified type parameters retain strict structural identity, equality and hashing, including nested constants and captured generic environments. Constant dependencies containing private Symbol literals are rejected before consuming analyzer-folded values, including folded scalars; the pinned analyzer loses private-library identity. General runtimeType access remains unsupported.
+Type literals, aliases and reified type parameters retain strict structural identity, equality and hashing, including nested constants and captured generic environments. Constant dependencies containing private Symbol literals are rejected before consuming analyzer-folded values, including folded scalars; the pinned analyzer loses private-library identity. Dynamic runtimeType is available only for represented concrete types; general static access and unmodeled SDK implementation types remain unsupported.
 
 Dynamic for-in and collection spreads check the source protocol before traversal and cast elements in evaluation order. Map spreads requiring key/value checks use entries; compatible spreads use forEach. MapEntry values support ordinary and constant construction, generic key/value reads and lazy Map.entries views.
 
@@ -22,7 +24,7 @@ Constant List, Set, Map and ordinary user-class instances lower from analyzer-ev
 
 List and Map patterns support ordered extraction, list rest slices, missing-key checks, nested destructuring and shared lazy reads across alternatives. Irrefutable shape failures throw StateError; contextual casts and assignment writes preserve Dart's failure ordering and atomicity.
 
-IR distinguishes dynamic from Object? and preserves implicit checks for typed storage, arguments, returns, record and collection elements, and boolean contexts. Dynamic receiver/member/operator dispatch remains unsupported. Statements and collection elements now share declaration and loop lowering; ordinary and dot-shorthand calls share their evaluation paths.
+IR distinguishes dynamic from Object? and preserves implicit checks for typed storage, arguments, returns, record and collection elements, and boolean contexts. Dynamic receiver/member/operator dispatch uses the shared runtime lookup. Statements and collection elements now share declaration and loop lowering; ordinary and dot-shorthand calls share their evaluation paths.
 
 Generic top-level functions, static and instance methods, local functions and closures retain scoped type parameters, bounds and runtime type environments. Direct calls, function values and explicit or contextual instantiation preserve inferred type arguments, polymorphic recursion and virtual entry checks. Generic function types compare structurally up to binder renaming.
 

@@ -47,6 +47,15 @@ typedef MemberSelector = ({
   Uri? privateLibrary,
 });
 
+/// Validates the operation and library identity of an instance selector.
+void checkMemberSelector(MemberSelector selector) {
+  if (!selector.kind.isVirtual ||
+      selector.name.isEmpty ||
+      selector.name.startsWith('_') != (selector.privateLibrary != null)) {
+    throw ArgumentError('Invalid member selector.');
+  }
+}
+
 /// The identity and signature of a statically resolved Dart callable.
 ///
 /// Use the same target object for a function's definition and all its calls.
@@ -180,7 +189,9 @@ final class FunctionTarget(
   /// The name used for instance lookup after the receiver has been evaluated.
   MemberSelector get selector => (
     kind: kind,
-    name: name,
+    name: kind == .method && name == '-' && signature.parameters.isEmpty
+        ? 'unary-'
+        : name,
     privateLibrary: name.startsWith('_') ? library : null,
   );
 

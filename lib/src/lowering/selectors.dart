@@ -48,9 +48,6 @@ final class SelectorChain(
         ? context.receiver
         : _visit(expression);
     if (value == null) return null;
-    if (value.type is DynamicType) {
-      unsupported(context.unit, root, 'dynamic member dispatch');
-    }
     if (nullAware) {
       _skipped ??= JumpTarget(context, [
         context.typeOf(root.staticType!, root),
@@ -81,10 +78,12 @@ final class SelectorChain(
       Value? Function(Value)? getFunction,
     ]) {
       if (input == null) return null;
-      if (input.type is DynamicType) {
-        unsupported(context.unit, node, 'dynamic function invocation');
-      }
-      final args = context.arguments(arguments, evaluate);
+      final resolved = arguments.parent;
+      final args =
+          resolved is ast.InvocationExpression &&
+              resolved.staticInvokeType is dart.FunctionType
+          ? context.arguments(arguments, evaluate)
+          : context.dynamicArguments(arguments, evaluate);
       if (args == null) return null;
       final function = getFunction == null ? input : getFunction(input);
       if (function == null) return null;
@@ -101,6 +100,18 @@ final class SelectorChain(
               typeArguments,
             ),
           ),
+        );
+      }
+      if (function.type is DynamicType ||
+          function.type is! FunctionType &&
+              ValueType.function.accepts(function.type)) {
+        return context.dynamicMember(
+          function,
+          .method,
+          'call',
+          args.positional,
+          args.named,
+          typeArguments,
         );
       }
       if (function.type is! FunctionType) {
@@ -188,9 +199,13 @@ final class SelectorChain(
           :final isNullAware,
           :final argumentList,
         )
-        when target?.staticType is dart.FunctionType ||
+        when target != null &&
+                ValueType.function.accepts(
+                  context.typeOf(target.staticType!, target).nonNullable,
+                ) ||
             node.isCascaded &&
-                cascadeReceiver?.type.nonNullable is FunctionType) {
+                cascadeReceiver != null &&
+                ValueType.function.accepts(cascadeReceiver!.type.nonNullable)) {
       return invokeValue(
         _receiver(target, isNullAware, cascaded: node.isCascaded),
         argumentList,
@@ -216,21 +231,27 @@ final class SelectorChain(
       );
       if (receiver == null) return null;
       final key = evaluate(index);
-      return key == null
-          ? null
-          : context.callPositionalMember(
-              element,
-              receiver,
-              [key],
-              node,
-              direct: target is ast.SuperExpression,
-            );
+      if (key == null) return null;
+      if (target?.staticType is dart.DynamicType ||
+          node.isCascaded && cascadeReceiver?.type is DynamicType) {
+        return context.dynamicMember(receiver, .method, '[]', [key]);
+      }
+      return context.callPositionalMember(
+        element,
+        receiver,
+        [key],
+        node,
+        direct: target is ast.SuperExpression,
+      );
     }
     final (receiver, name, member, arguments, nullAware) = switch (node) {
       ast.PrefixedIdentifier(:final prefix, :final identifier)
           when prefix.staticType is dart.DynamicType ||
               prefix.staticType is dart.RecordType ||
-              prefix.staticType is dart.FunctionType &&
+              prefix.staticType != null &&
+                  ValueType.function.accepts(
+                    context.typeOf(prefix.staticType!, prefix).nonNullable,
+                  ) &&
                   identifier.name == 'call' ||
               identifier.element is ExecutableElement &&
                   !(identifier.element as ExecutableElement).isStatic =>
@@ -249,11 +270,12 @@ final class SelectorChain(
         (null, node.name, method, null, false),
       ast.MethodInvocation(
         methodName: ast.SimpleIdentifier(element: null, :final name),
-        target: final target?,
+        target: final target,
         :final argumentList,
         :final isNullAware,
       )
-          when target.staticType is dart.DynamicType =>
+          when target?.staticType is dart.DynamicType ||
+              node.isCascaded && cascadeReceiver?.type is DynamicType =>
         (target, name, null, argumentList, isNullAware),
       ast.MethodInvocation(
         methodName: ast.SimpleIdentifier(element: final GetterElement getter),
@@ -290,10 +312,28 @@ final class SelectorChain(
       },
     );
     if (known == null) return null;
-    if (known.type.nonNullable is FunctionType &&
-        member == null &&
-        name == 'call') {
+    if (member == null &&
+        name == 'call' &&
+        ValueType.function.accepts(known.type.nonNullable)) {
       return known;
+    }
+    if (receiver?.staticType is dart.DynamicType || known.type is DynamicType) {
+      final invocation = getterArguments ?? arguments;
+      final args = context.dynamicArguments(invocation, evaluate);
+      if (args == null) return null;
+      final value = context.dynamicMember(
+        known,
+        invocation == null ? .getter : .method,
+        name,
+        args.positional,
+        args.named,
+        typeArguments,
+      );
+      return value == null
+          ? null
+          : context.normal(
+              context.cast(value, context.typeOf(node.staticType!, node)),
+            );
     }
     if ((receiver?.staticType is dart.RecordType ||
             known.type.nonNullable is RecordType) &&
@@ -498,11 +538,6 @@ final class SelectorChain(
         );
       }, (value) => context.emit(DirectCall(setter, [value])));
     }
-    if (destination is! ExecutableElement ||
-        destination.isStatic ||
-        !isClassOrEnum(destination.enclosingElement)) {
-      unsupported(context.unit, site, 'assignment target');
-    }
     final (target, nullAware, index) = switch (place) {
       ast.SimpleIdentifier() => (null, false, null),
       ast.PrefixedIdentifier(:final prefix) => (prefix, false, null),
@@ -528,6 +563,36 @@ final class SelectorChain(
       },
     );
     if (receiver == null) return null;
+    if (target?.staticType is dart.DynamicType ||
+        receiver.type is DynamicType) {
+      final key = index == null ? null : evaluate(index);
+      if (index != null && key == null) return null;
+      final name = switch (place) {
+        ast.PrefixedIdentifier(:final identifier) => identifier.name,
+        ast.PropertyAccess(:final propertyName) => propertyName.name,
+        ast.IndexExpression() => '[]',
+        _ => unsupported(context.unit, place, 'dynamic assignment receiver'),
+      };
+      return apply(
+        () => context.dynamicMember(
+          receiver,
+          index == null ? .getter : .method,
+          name,
+          [?key],
+        ),
+        (value) => context.dynamicMember(
+          receiver,
+          index == null ? .setter : .method,
+          index == null ? name : '[]=',
+          [?key, value],
+        ),
+      );
+    }
+    if (destination is! ExecutableElement ||
+        destination.isStatic ||
+        !isClassOrEnum(destination.enclosingElement)) {
+      unsupported(context.unit, site, 'assignment target');
+    }
     final inputKey = index == null ? null : evaluate(index);
     final key = inputKey == null
         ? null

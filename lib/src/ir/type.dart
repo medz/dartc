@@ -43,6 +43,13 @@ sealed class const ValueType() {
   /// The error raised by failed runtime type checks.
   static const ClassType typeError = ClassType._core('TypeError', error, false);
 
+  /// The error raised when runtime dispatch cannot accept an invocation.
+  static const ClassType noSuchMethodError = ClassType._core(
+    'NoSuchMethodError',
+    error,
+    false,
+  );
+
   /// The error raised when an operation is invalid in the current state.
   static const ClassType stateError = ClassType._core(
     'StateError',

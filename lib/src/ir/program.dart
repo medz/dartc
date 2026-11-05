@@ -9,12 +9,21 @@ final class IrClass(
   Iterable<InstanceField> fields, {
   Iterable<FunctionTarget> members = const [],
   Iterable<FunctionTarget> constructors = const [],
+  Iterable<MemberSelector> unsupportedForwarders = const [],
 }) {
   /// Declared fields in initialization order, excluding inherited storage.
   final List<InstanceField> fields = .unmodifiable(fields);
 
   /// Instance members declared here, including implicit accessors and abstract members.
   final Map<MemberSelector, FunctionTarget> members = _members(type, members);
+
+  /// Effective typed noSuchMethod forwarders whose execution is not yet modeled.
+  ///
+  /// These are guards, not implementations. A concrete superclass member still
+  /// wins ordinary lookup even if its selector occurs in this set.
+  final Set<MemberSelector> unsupportedForwarders = .unmodifiable(
+    unsupportedForwarders,
+  );
 
   /// Declared generative and factory constructors, including redirects without a body.
   final Map<String, FunctionTarget> constructors = _constructors(
@@ -55,6 +64,9 @@ final class IrClass(
   }
 
   this {
+    for (final selector in this.unsupportedForwarders) {
+      checkMemberSelector(selector);
+    }
     final names = <String>{};
     for (final field in this.fields) {
       if (field.owner != type || !names.add(field.name)) {
@@ -97,6 +109,53 @@ final class IrProgram(
       if (target != null && !target.isAbstract) return target;
     }
     return null;
+  }
+
+  /// Looks up a selector without a statically resolved declaration.
+  ///
+  /// A null target with a null boundary proves absence after reaching Object.
+  /// Other missing definitions (or an incomplete non-Object hierarchy) report
+  /// `unmodeledBoundary` instead. Abstract declarations and interfaces do not
+  /// supply implementations; the first concrete member wins regardless of its
+  /// call shape or any accumulated unsupported-forwarder guard.
+  ({
+    FunctionTarget? target,
+    ClassType? unmodeledBoundary,
+    bool unsupportedForwarder,
+  })
+  lookupMember(ClassType receiver, MemberSelector selector) {
+    checkMemberSelector(selector);
+    var unsupportedForwarder = false;
+    var type = receiver;
+    while (true) {
+      final definition = _definitions[type.declaration];
+      unsupportedForwarder |=
+          definition?.unsupportedForwarders.contains(selector) ?? false;
+      final target = definition?.members[selector];
+      if (target != null && !target.isAbstract) {
+        return (
+          target: target,
+          unmodeledBoundary: null,
+          unsupportedForwarder: unsupportedForwarder,
+        );
+      }
+      if (type.declaration == ValueType.object) {
+        return (
+          target: null,
+          unmodeledBoundary: null,
+          unsupportedForwarder: unsupportedForwarder,
+        );
+      }
+      final parent = type.superclass;
+      if (definition == null || parent == null) {
+        return (
+          target: null,
+          unmodeledBoundary: type,
+          unsupportedForwarder: unsupportedForwarder,
+        );
+      }
+      type = parent;
+    }
   }
 
   /// Writes declared storage and the control-flow graph of each body to [output].
@@ -191,7 +250,12 @@ final class IrProgram(
         if (!bodies.contains(outer) || !locals.add((outer, t.sourceOffset!))) {
           throw ArgumentError('Invalid lexical function declaration.');
         }
-      } else if (!names.add((t.library, owner, t.kind, t.name))) {
+      } else if (!names.add((
+        t.library,
+        owner,
+        t.kind,
+        t.kind.isVirtual ? t.selector.name : t.name,
+      ))) {
         throw ArgumentError('Repeated callable body.');
       }
       if (t.kind.isVirtual && _definitions[owner]?.members[t.selector] != t) {

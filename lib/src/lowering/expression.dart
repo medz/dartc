@@ -266,6 +266,14 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
             ? null
             : context.emit(Equals(condition, const Constant.boolean(false)));
       }
+      if (operand.staticType is dart.DynamicType) {
+        return context.dynamicMember(
+          value,
+          .method,
+          operator.type == .MINUS ? 'unary-' : '~',
+          [],
+        );
+      }
       if (value.type == .integer && element?.library.isDartCore == true) {
         return context.emit(
           operator.type == .TILDE

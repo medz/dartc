@@ -261,6 +261,14 @@ final class FixtureRunner(
         target.name == 'identical') {
       return identical(arguments[0], arguments[1]);
     }
+    if (target.owner == ValueType.object &&
+        target.name == 'noSuchMethod' &&
+        target.kind == .method) {
+      throw NoSuchMethodError.withInvocation(
+        arguments[0],
+        _GuestInvocation(this, arguments[1]!),
+      );
+    }
     if (target == _symbolToString) return arguments.first.toString();
     if (arguments.firstOrNull case final _Instance instance
         when _isSymbolMember(target) &&
@@ -473,6 +481,448 @@ final class FixtureRunner(
             ?fn.receiver,
             ...arguments,
           ], environment);
+  }
+
+  bool _matchesShape(
+    FunctionType signature,
+    List<Object?> positional,
+    Map<String, Object?> named,
+    List<ValueType> types,
+  ) =>
+      positional.length >= signature.requiredPositional &&
+      positional.length <= signature.positionalCount &&
+      named.keys.every(signature.named.containsKey) &&
+      signature.named.entries.every(
+        (e) => !e.value.required || named.containsKey(e.key),
+      ) &&
+      (types.isEmpty || types.length == signature.typeParameters.length);
+
+  Object? _dynamicFunction(
+    _FunctionValue function,
+    List<Object?> positional,
+    Map<String, Object?> named,
+    List<ValueType> types,
+    Object? failureReceiver,
+    MemberSelector selector,
+  ) {
+    final signature = function.reifiedSignature;
+    if (!_matchesShape(signature, positional, named, types)) {
+      return _missingDynamic(
+        failureReceiver,
+        selector,
+        positional,
+        named,
+        types,
+      );
+    }
+    final arguments =
+        function.typeArguments ??
+        (types.isNotEmpty ? types : signature.defaultTypeArguments);
+    return _invoke(function, positional, named, arguments);
+  }
+
+  static MemberSelector _selector(String name, [FunctionKind kind = .method]) =>
+      (kind: kind, name: name, privateLibrary: null);
+
+  _Instance _invocationSymbol(String name, [Uri? library]) =>
+      _Instance(CoreTypes.symbolStorage, this)
+        ..fields[CoreTypes.symbolName] = name
+        ..fields[CoreTypes.symbolPrivateLibrary] = library?.toString();
+
+  Object? _missingDynamic(
+    Object? receiver,
+    MemberSelector selector,
+    List<Object?> positional,
+    Map<String, Object?> named,
+    List<ValueType> types,
+  ) {
+    final name = selector.kind == .setter ? '${selector.name}=' : selector.name;
+    if (receiver is _Instance) {
+      final lookup = program.lookupMember(
+        receiver.type,
+        _selector('noSuchMethod'),
+      );
+      if (lookup.target case final target?) {
+        final names = named.keys.toList()..sort();
+        final invocation = _invocation(
+          _invocationSymbol(name, selector.privateLibrary),
+          types.isEmpty ? null : types.map(_typeValue).toList(),
+          positional.isEmpty ? null : positional,
+          {for (final key in names) _invocationSymbol(key): named[key]},
+          0,
+        );
+        // Runtime mirrors share Object? empty argument constants even for
+        // accessors; public Invocation getter/setter factories use Object.
+        invocation.fields[CoreTypes.invocationKind] = selector.kind == .method
+            ? 0
+            : selector.kind == .getter
+            ? 1
+            : 2;
+        return _invoke(_FunctionValue(target, receiver), [
+          invocation,
+        ], const {});
+      }
+      if (lookup.unsupportedForwarder ||
+          lookup.unmodeledBoundary != null &&
+              receiver.type != CoreTypes.symbolStorage &&
+              receiver.type != CoreTypes.invocationStorage &&
+              receiver.type != CoreTypes.mapEntry) {
+        throw UnsupportedError('Unmodeled fixture noSuchMethod implementation');
+      }
+    }
+    // The native adapter supplies real error classification. Diagnostic text
+    // cannot encode represented generic Type values or private-symbol identity.
+    final invocation = selector.kind == .getter
+        ? Invocation.getter(Symbol(name))
+        : selector.kind == .setter
+        ? Invocation.setter(Symbol(name), positional.single)
+        : Invocation.method(Symbol(name), positional, {
+            for (final e in named.entries) Symbol(e.key): e.value,
+          });
+    throw NoSuchMethodError.withInvocation(receiver, invocation);
+  }
+
+  Object? _dynamicDispatch(
+    Object? receiver,
+    MemberSelector selector,
+    List<Object?> positional,
+    Map<String, Object?> named,
+    List<ValueType> types,
+  ) {
+    if (receiver is _FunctionValue && selector.name == 'call') {
+      if (selector.kind == .getter) return receiver;
+      if (selector.kind == .method) {
+        return _dynamicFunction(
+          receiver,
+          positional,
+          named,
+          types,
+          receiver,
+          selector,
+        );
+      }
+    }
+    if (receiver is _NativeFunction && selector == _selector('call', .getter)) {
+      return receiver;
+    }
+    if (receiver is _NativeFunction && selector == _selector('call')) {
+      if (!_matchesShape(receiver.signature, positional, named, types)) {
+        return _missingDynamic(receiver, selector, positional, named, types);
+      }
+      if (named.isNotEmpty ||
+          types.isNotEmpty ||
+          receiver.signature.typeParameters.isNotEmpty ||
+          positional.length != receiver.signature.parameters.length) {
+        throw UnsupportedError('Unmodeled native callback argument binding');
+      }
+      for (final (i, value) in positional.indexed) {
+        _typeOperation(receiver.signature.parameters[i], value, cast: true);
+      }
+      return receiver.callback(positional);
+    }
+    if (receiver is _Instance) {
+      final lookup = program.lookupMember(receiver.type, selector);
+      if (lookup.target case final target?) {
+        return _dynamicFunction(
+          _FunctionValue(target, receiver),
+          positional,
+          named,
+          types,
+          receiver,
+          selector,
+        );
+      }
+      if (lookup.unsupportedForwarder) {
+        throw UnsupportedError(
+          'Unsupported typed noSuchMethod forwarder: ${selector.name}',
+        );
+      }
+      if (selector.kind == .method || selector.kind == .getter) {
+        final alternate = (
+          kind: selector.kind == .method
+              ? FunctionKind.getter
+              : FunctionKind.method,
+          name: selector.name,
+          privateLibrary: selector.privateLibrary,
+        );
+        final other = program.lookupMember(receiver.type, alternate);
+        if (other.target case final target?) {
+          final function = _FunctionValue(target, receiver);
+          if (selector.kind == .getter) return function;
+          final value = _invoke(function, const [], const {});
+          return _dynamicDispatch(
+            value,
+            _selector('call'),
+            positional,
+            named,
+            types,
+          );
+        }
+        if (other.unsupportedForwarder) {
+          throw UnsupportedError(
+            'Unsupported typed noSuchMethod forwarder: ${selector.name}',
+          );
+        }
+      }
+      // Invocation's deliberately modeled SDK storage and default getters.
+      if ((selector.kind == .getter || selector.kind == .method) &&
+          selector.privateLibrary == null) {
+        final target = FunctionTarget(
+          CoreTypes.invocation.library,
+          selector.name,
+          .dynamicType,
+          const [],
+          owner: CoreTypes.invocation,
+          kind: .getter,
+        );
+        if (_isInvocationGetter(target) &&
+            receiver.type.asInstanceOf(CoreTypes.invocation) != null) {
+          final value = _invoke(
+            _FunctionValue(_resolveMember(receiver, target), receiver),
+            const [],
+            const {},
+          );
+          return selector.kind == .getter
+              ? value
+              : _dynamicDispatch(
+                  value,
+                  _selector('call'),
+                  positional,
+                  named,
+                  types,
+                );
+        }
+      }
+      if (lookup.unmodeledBoundary != null &&
+          receiver.type != CoreTypes.symbolStorage &&
+          receiver.type != CoreTypes.invocationStorage &&
+          receiver.type != CoreTypes.mapEntry) {
+        throw UnsupportedError(
+          'Unmodeled fixture dynamic boundary: ${lookup.unmodeledBoundary!.dartName}.${selector.name}',
+        );
+      }
+    }
+    if (selector.kind == .method &&
+        selector.privateLibrary == null &&
+        (const {'hashCode', 'runtimeType'}.contains(selector.name) ||
+            (receiver is _CollectionValue || receiver is String) &&
+                const {
+                  'length',
+                  'isEmpty',
+                  'isNotEmpty',
+                }.contains(selector.name) ||
+            receiver is _RecordValue &&
+                receiver.type.slots.containsKey(selector.name) ||
+            receiver is _Instance &&
+                receiver.type == CoreTypes.mapEntry &&
+                const {'key', 'value'}.contains(selector.name))) {
+      final value = _dynamicBridge(
+        receiver,
+        _selector(selector.name, .getter),
+        const [],
+        const {},
+        const [],
+      );
+      return _dynamicDispatch(
+        value,
+        _selector('call'),
+        positional,
+        named,
+        types,
+      );
+    }
+    final bridge = _dynamicBridge(receiver, selector, positional, named, types);
+    if (!identical(bridge, _noDynamicBridge)) return bridge;
+    if (receiver == null ||
+        receiver is _Instance ||
+        receiver is _FunctionValue ||
+        receiver is _NativeFunction ||
+        selector.name == 'call' &&
+            (receiver is num ||
+                receiver is bool ||
+                receiver is String ||
+                receiver is _TypeValue ||
+                receiver is _CollectionValue ||
+                receiver is _RecordValue)) {
+      return _missingDynamic(receiver, selector, positional, named, types);
+    }
+    throw UnsupportedError(
+      'Unmodeled fixture dynamic member: ${selector.name}',
+    );
+  }
+
+  Object? _dynamicBridge(
+    Object? receiver,
+    MemberSelector selector,
+    List<Object?> positional,
+    Map<String, Object?> named,
+    List<ValueType> types,
+  ) {
+    if (selector.privateLibrary != null) return _noDynamicBridge;
+    final name = selector.name;
+    Object? invoke(int count, Object? Function() body) {
+      if (positional.length != count || named.isNotEmpty || types.isNotEmpty) {
+        return _missingDynamic(receiver, selector, positional, named, types);
+      }
+      return body();
+    }
+
+    if (selector.kind == .getter) {
+      if (name == 'runtimeType') return _typeValue(_runtimeValueType(receiver));
+      if (name == 'hashCode') return receiver.hashCode;
+      if (const {'toString', '==', 'noSuchMethod'}.contains(name)) {
+        final method = _selector(name);
+        final signature = FunctionType(
+          name == 'toString'
+              ? .string
+              : name == '=='
+              ? .boolean
+              : .dynamicType,
+          name == 'toString'
+              ? []
+              : [
+                  name == 'noSuchMethod'
+                      ? CoreTypes.invocation
+                      : ValueType.object.nullable,
+                ],
+        );
+        return _NativeFunction(
+          signature,
+          (args) => _dynamicBridge(receiver, method, args, const {}, const []),
+          (receiver, method),
+        );
+      }
+      if (receiver is _RecordValue) {
+        final slot = receiver.type.slots[name];
+        if (slot != null) return receiver.fields[slot];
+      }
+      if (receiver is _Instance && receiver.type == CoreTypes.mapEntry) {
+        if (name == 'key') return receiver.fields[CoreTypes.mapEntryKey];
+        if (name == 'value') return receiver.fields[CoreTypes.mapEntryValue];
+      }
+      if (receiver is _CollectionValue) {
+        final dynamic storage = receiver.storage;
+        if (name == 'length') return storage.length;
+        if (name == 'isEmpty') return storage.isEmpty;
+        if (name == 'isNotEmpty') return storage.isNotEmpty;
+      }
+      if (receiver is String) {
+        if (name == 'length') return receiver.length;
+        if (name == 'isEmpty') return receiver.isEmpty;
+        if (name == 'isNotEmpty') return receiver.isNotEmpty;
+      }
+      return _noDynamicBridge;
+    }
+    if (selector.kind != .method) return _noDynamicBridge;
+    if (name == 'toString') return invoke(0, () => receiver.toString());
+    if (name == '==') return invoke(1, () => receiver == positional.single);
+    if (name == 'noSuchMethod') {
+      return invoke(1, () {
+        final invocation = positional.single;
+        _typeOperation(CoreTypes.invocation, invocation, cast: true);
+        throw NoSuchMethodError.withInvocation(
+          receiver,
+          _GuestInvocation(this, invocation!),
+        );
+      });
+    }
+    if (receiver is num) {
+      if (name == 'unary-') return invoke(0, () => -receiver);
+      if (receiver is int && name == '~') return invoke(0, () => ~receiver);
+      if (const {
+        '+',
+        '-',
+        '*',
+        '/',
+        '~/',
+        '%',
+        '<',
+        '<=',
+        '>',
+        '>=',
+      }.contains(name)) {
+        return invoke(1, () {
+          final b = positional.single as num;
+          return switch (name) {
+            '+' => receiver + b,
+            '-' => receiver - b,
+            '*' => receiver * b,
+            '/' => receiver / b,
+            '~/' => receiver ~/ b,
+            '%' => receiver % b,
+            '<' => receiver < b,
+            '<=' => receiver <= b,
+            '>' => receiver > b,
+            _ => receiver >= b,
+          };
+        });
+      }
+      if (receiver is int &&
+          const {'&', '|', '^', '<<', '>>', '>>>'}.contains(name)) {
+        return invoke(1, () {
+          final b = positional.single as int;
+          return switch (name) {
+            '&' => receiver & b,
+            '|' => receiver | b,
+            '^' => receiver ^ b,
+            '<<' => receiver << b,
+            '>>' => receiver >> b,
+            _ => receiver >>> b,
+          };
+        });
+      }
+    }
+    if (receiver is String) {
+      if (name == '+') {
+        return invoke(1, () => receiver + (positional.single as String));
+      }
+      if (name == '[]') {
+        return invoke(1, () => receiver[positional.single as int]);
+      }
+    }
+    if (receiver is _CollectionValue) {
+      final storage = receiver.storage;
+      if (name == '[]' && (storage is List || storage is Map)) {
+        return invoke(
+          1,
+          () => storage is List
+              ? storage[positional.single as int]
+              : (storage as Map)[positional.single],
+        );
+      }
+      if (name == 'containsKey' && storage is Map) {
+        return invoke(1, () => storage.containsKey(positional.single));
+      }
+      if (name == 'add' && (storage is List || storage is Set)) {
+        return invoke(1, () {
+          _typeOperation(
+            receiver.type.typeArguments.single,
+            positional.single,
+            cast: true,
+          );
+          receiver.checkMutable();
+          return _add(receiver, positional.single);
+        });
+      }
+      if (name == '[]=' && (storage is List || storage is Map)) {
+        return invoke(2, () {
+          final arguments = receiver.type.typeArguments;
+          if (storage is Map) {
+            _typeOperation(arguments[0], positional[0], cast: true);
+            _typeOperation(arguments[1], positional[1], cast: true);
+            receiver.checkMutable();
+            storage[positional[0]] = positional[1];
+          } else {
+            final index = positional[0] as int;
+            _typeOperation(arguments.single, positional[1], cast: true);
+            receiver.checkMutable();
+            (storage as List)[index] = positional[1];
+          }
+          return null;
+        });
+      }
+    }
+    return _noDynamicBridge;
   }
 
   Object? _call(
@@ -911,6 +1361,20 @@ final class FixtureRunner(
         case InstantiateFunction(:final function, :final typeArguments):
           final value = read(function) as _FunctionValue;
           values[op] = value.instantiate(typeArguments.map(resolve).toList());
+        case DynamicDispatch(
+          :final receiver,
+          :final selector,
+          :final positional,
+          :final named,
+          :final typeArguments,
+        ):
+          values[op] = _dynamicDispatch(
+            read(receiver),
+            selector,
+            positional.map(read).toList(),
+            {for (final e in named.entries) e.key: read(e.value)},
+            typeArguments.map(resolve).toList(),
+          );
         case FunctionCall(
           :final function,
           :final positional,
@@ -1141,6 +1605,7 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     ValueType.function => scalar<Function>(),
     ValueType.error => scalar<Error>(),
     ValueType.typeError => scalar<TypeError>(),
+    ValueType.noSuchMethodError => scalar<NoSuchMethodError>(),
     ValueType.assertionError => scalar<AssertionError>(),
     ValueType.stateError => scalar<StateError>(),
     ValueType.unsupportedError => scalar<UnsupportedError>(),
@@ -1400,8 +1865,63 @@ final class _CollectionValue(
 
 final class _NativeFunction(
   final FunctionType signature,
-  final Object? Function(List<Object?>) callback,
-);
+  final Object? Function(List<Object?>) callback, [
+  final (Object?, MemberSelector)? binding,
+]) {
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      binding != null &&
+          other is _NativeFunction &&
+          other.binding != null &&
+          identical(binding!.$1, other.binding!.$1) &&
+          binding!.$2 == other.binding!.$2;
+  @override
+  int get hashCode => binding == null
+      ? identityHashCode(this)
+      : Object.hash(identityHashCode(binding!.$1), binding!.$2);
+}
+
+// Native errors retain this adapter without reading user Invocation getters.
+// Only diagnostic rendering needs these conversions; represented generic types
+// cannot be expressed as host Type objects and are omitted from that rendering.
+final class _GuestInvocation(final FixtureRunner runner, final Object value)
+    implements Invocation {
+  Object? read(String name) => runner._dynamicDispatch(
+    value,
+    FixtureRunner._selector(name, .getter),
+    const [],
+    const {},
+    const [],
+  );
+  Object? storage(Object? value) =>
+      value is _CollectionValue ? value.storage : value;
+  @override
+  Symbol get memberName {
+    final symbol = read('memberName') as _Instance;
+    return Symbol(symbol.fields[CoreTypes.symbolName] as String);
+  }
+
+  @override
+  List<Type> get typeArguments => const [];
+  @override
+  List<dynamic> get positionalArguments =>
+      (storage(read('positionalArguments')) as List).toList();
+  @override
+  Map<Symbol, dynamic> get namedArguments => {
+    for (final e in (storage(read('namedArguments')) as Map).entries)
+      Symbol((e.key as _Instance).fields[CoreTypes.symbolName] as String):
+          e.value,
+  };
+  @override
+  bool get isMethod => read('isMethod') as bool;
+  @override
+  bool get isGetter => read('isGetter') as bool;
+  @override
+  bool get isSetter => read('isSetter') as bool;
+  @override
+  bool get isAccessor => read('isAccessor') as bool;
+}
 
 bool _sameTypes(List<ValueType>? left, List<ValueType>? right) =>
     left == null || right == null
@@ -1419,3 +1939,31 @@ FunctionType _instantiateSignature(
     throw TypeError();
   }
 }
+
+final _noDynamicBridge = Object();
+
+ValueType _runtimeValueType(Object? value) => switch (value) {
+  null => ValueType.nullType,
+  _Instance(:final type) => type,
+  _CollectionValue(:final type) when type.declaration == CoreTypes.list => type,
+  _CollectionValue() => throw UnsupportedError(
+    'Unmodeled concrete collection runtime type',
+  ),
+  _RecordValue(:final type) => type,
+  _FunctionValue() => value.reifiedSignature,
+  _NativeFunction(:final signature) => signature,
+  _TypeValue() => ValueType.typeType,
+  bool() => ValueType.boolean,
+  int() => ValueType.integer,
+  double() => ValueType.floating,
+  String() => ValueType.string,
+  NoSuchMethodError() => ValueType.noSuchMethodError,
+  TypeError() => throw UnsupportedError(
+    'Unmodeled concrete TypeError runtime type',
+  ),
+  StateError() => ValueType.stateError,
+  UnsupportedError() => ValueType.unsupportedError,
+  AssertionError() ||
+  Error() => throw UnsupportedError('Unmodeled concrete error runtime type'),
+  _ => throw UnsupportedError('Unmodeled fixture runtime type'),
+};

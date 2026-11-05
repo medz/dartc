@@ -31,9 +31,6 @@ Value? lowerBinary(
   Value? right,
 ) {
   if (right == null) return null;
-  if (left.type is DynamicType) {
-    unsupported(context.unit, site, 'dynamic operator dispatch');
-  }
   final direct =
       site is ast.BinaryExpression && site.leftOperand is ast.SuperExpression;
   final member = switch (site) {
@@ -68,6 +65,26 @@ Value? lowerBinary(
       right,
       negated: operator.type == .BANG_EQ,
     );
+  }
+  if (left.type is DynamicType) {
+    final name = switch (operator.type) {
+      .PLUS_PLUS => '+',
+      .MINUS_MINUS => '-',
+      .PLUS_EQ ||
+      .MINUS_EQ ||
+      .STAR_EQ ||
+      .SLASH_EQ ||
+      .TILDE_SLASH_EQ ||
+      .PERCENT_EQ ||
+      .AMPERSAND_EQ ||
+      .BAR_EQ ||
+      .CARET_EQ ||
+      .LT_LT_EQ ||
+      .GT_GT_EQ ||
+      .GT_GT_GT_EQ => operator.lexeme.substring(0, operator.lexeme.length - 1),
+      _ => operator.lexeme,
+    };
+    return context.dynamicMember(left, .method, name, [right]);
   }
   if (member is MethodElement &&
       isClassOrEnum(member.enclosingElement) &&

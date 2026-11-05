@@ -175,6 +175,7 @@ import 'value.dart';
       final typeArguments = switch (op) {
         DirectCall(:final typeArguments) ||
         InstanceCall(:final typeArguments) ||
+        DynamicDispatch(:final typeArguments) ||
         FunctionCall(:final typeArguments) ||
         InstantiateFunction(:final typeArguments) => typeArguments,
         _ => const <ValueType>[],

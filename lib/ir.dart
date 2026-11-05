@@ -68,6 +68,7 @@ export 'src/ir/value.dart'
         Construct,
         CopyCell,
         DirectCall,
+        DynamicDispatch,
         Equals,
         Instruction,
         FunctionCall,

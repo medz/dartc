@@ -19,6 +19,7 @@
 | 条件表达式 `c ? a : b` | 按条件只计算一个分支，保留该分支的值、写入和异常。结果可为已支持的值类型或 void。见[条件样本](../test/lowering/fixtures/conditionals.dart)。 |
 | 赋值、复合赋值、增减、索引赋值 | 局部变量、参数、实例属性和用户定义的索引支持简单赋值、复合赋值及前后缀增减。接收者与索引仅求值一次，`??=` 只在读到 null 时求值右侧并写入。见[属性与索引样本](../test/lowering/fixtures/nominal/updates.dart)。 |
 | 函数、构造器、成员调用与提取 | 支持普通和泛型顶层函数、实例与静态方法、实例 getter、super 成员、生成式构造器、工厂及工厂重定向。类成员和构造器保留类类型实参，可提取函数、方法及构造器，显式或按上下文实例化后进行间接调用。见[类](classes.md)。 |
+| dynamic 成员、运算符与更新 | 一条 DynamicDispatch 指令复用调用、属性与索引更新路径；支持动态级联、空感知链、赋值值、前后缀及 `??=`。所有实参先求值，再核对实际目标签名。`d.getter(arg())` 与 `(d.getter)(arg())` 保留不同的 getter/实参顺序。见[动态样本](../test/lowering/fixtures/dynamic_dispatch.dart)。 |
 | 空短路、空断言与级联 | 支持 `??`、可赋值位置的 `??=`、与 null 的比较，以及后缀 `!`。实例与 record 的空感知访问会短路同一条链上的成员、实参、索引、赋值和空断言，括号结束这条链。支持普通与空感知级联，接收者只求值一次；空接收者跳过所有级联段。见[级联样本](../test/lowering/fixtures/cascades.dart)。见[空安全样本](../test/lowering/fixtures/nullability.dart)。 |
 | 点简写 | 支持已表示类型的构造器、工厂、静态方法和显式静态 getter 的点简写。包含已表示的泛型类及枚举成员。见[点简写样本](../test/lowering/fixtures/dot_shorthand.dart)。 |
 | switch 表达式、模式赋值 | switch 表达式支持已表示模式及守卫。模式赋值可将嵌套 record、List 和 Map 解构到局部变量和参数，表达式结果为原右值。见[模式](patterns.md)。 |
@@ -32,3 +33,5 @@
 ## 规范依据
 
 [主规范 §17](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)、[空安全](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md)、[空感知元素](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.8/null-aware-elements/feature-specification.md)、[点简写](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.10/dot-shorthands/feature-specification.md)、[Records](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/records/feature-specification.md)。
+
+动态执行对照只覆盖已表示的用户成员和明确实现的核心操作。未知导入/SDK 实现及合成 typed noSuchMethod forwarder 不会被误报为缺失成员。NoSuchMethodError 的类型与传播已对照；宿主诊断文本对自定义类型实参和私有 Symbol 的呈现仍有限，不保证与 VM 文本一致。

@@ -9,7 +9,7 @@
 | 字段、方法、getter/setter、静态成员 | 支持实例字段的构造初始化及 late/late final 惰性存储、隐式和显式 getter/setter、实例方法及静态方法。普通实例调用按运行类分派，super 调用选定的父类实现。私有成员限于声明库。支持显式静态 getter/setter。支持静态 const 及非 const 存储，包括 final、late/late final 的惰性初始化。 |
 | 抽象成员与 abstract 字段 | 支持通过抽象 getter 和方法调用具体类的实现。 |
 | 用户算术、关系、一元及索引运算符 | 类的运算符按解析后的成员分派，包括复合赋值和索引读写。super 直接调用选中的祖先实现。扩展运算符待实现。见[运算符与更新样本](../test/lowering/fixtures/nominal/updates.dart)。 |
-| `operator ==`、`noSuchMethod` | 支持用户相等方法，包括作为 record 字段进行比较。Invocation 工厂与属性已支持，动态分派及 noSuchMethod 转发仍待实现。 |
+| `operator ==`、`noSuchMethod` | 支持用户相等方法及动态缺失成员回退。自定义 noSuchMethod 收到含私有库身份、调用种类和实际参数的 Invocation；Object 默认实现抛出 NoSuchMethodError。需要入口/返回类型检查的合成 forwarder 暂以成员级保护明确拒绝，不能当普通缺失成员执行。真实继承实现优先，跨库私有成员的特殊转发保持保护。 |
 | 普通、命名、生成式重定向构造 | 支持隐式和显式构造器、命名构造、this 重定向和 super 调用。子类字段先初始化，父类构造体先执行。 |
 | const 生成式构造 | 支持普通调用和普通用户类的常量实例。常量值保留实际泛型、继承及私有字段存储；相同类型和字段值按规范身份复用。 |
 | 工厂与重定向工厂 | 工厂体可以返回已有或新建的子类实例。重定向工厂可经过多级重定向到生成式构造器或工厂体，并逐级代换泛型实参。实参只求值一次，省略的参数采用最终目标的默认值。见[重定向工厂样本](../test/lowering/fixtures/nominal/factories.dart)。 |

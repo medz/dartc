@@ -109,6 +109,10 @@ void writeFunction(
       'load ${value(op.receiver)}.${op.field.owner.dartName}::${op.field.name}',
     InstanceCall() =>
       'dispatch ${value(op.receiver)} ${symbol(op.member)}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
+    DynamicDispatch() =>
+      'dynamicDispatch ${value(op.receiver)} ${op.selector.kind.name} '
+          '${op.selector.privateLibrary == null ? "" : "${op.selector.privateLibrary}::"}'
+          '${op.selector.name}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
     Construct() =>
       'new ${symbol(op.initializer, op.instantiatedType)}(${op.inputs.map(value).join(', ')})',
     StoreField() =>

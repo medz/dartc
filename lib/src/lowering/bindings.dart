@@ -624,6 +624,7 @@ final class Bindings({final bool enableAssertions = false}) {
         'Type' => ValueType.typeType,
         'Error' => ValueType.error,
         'TypeError' => ValueType.typeError,
+        'NoSuchMethodError' => ValueType.noSuchMethodError,
         'StateError' => ValueType.stateError,
         'UnsupportedError' => ValueType.unsupportedError,
         'AssertionError' => ValueType.assertionError,
@@ -714,7 +715,7 @@ EvaluatedArguments? evaluateArguments(
         : convert(input, parameter, argument);
     if (value == null) return null;
     if (argument is ast.NamedArgument) {
-      named[argument.correspondingParameter!.name!] = value;
+      named[argument.name.lexeme] = value;
     } else {
       positional.add(value);
     }

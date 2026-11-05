@@ -51,6 +51,40 @@ final class FunctionContext(
         normal(convert(value, typeOf(parameter.type, site))),
   );
 
+  /// Evaluates unresolved arguments without checking a guessed parameter type.
+  EvaluatedArguments? dynamicArguments(
+    ArgumentList? arguments,
+    Value? Function(Expression) evaluate,
+  ) => evaluateArguments(
+    arguments,
+    evaluate,
+    convert: (value, parameter, site) => value,
+  );
+
+  /// Dispatches an unresolved selector in the source library's private namespace.
+  Value? dynamicMember(
+    Value receiver,
+    FunctionKind kind,
+    String name,
+    List<Value> positional, [
+    Map<String, Value> named = const {},
+    List<ValueType> typeArguments = const [],
+  ]) => normal(
+    emit(
+      DynamicDispatch(
+        receiver,
+        (
+          kind: kind,
+          name: name,
+          privateLibrary: name.startsWith('_') ? unit.libraryElement.uri : null,
+        ),
+        positional,
+        named,
+        typeArguments,
+      ),
+    ),
+  );
+
   /// Applies a resolved function instantiation without erasing its signature.
   Value instantiateFunction(
     Value function,

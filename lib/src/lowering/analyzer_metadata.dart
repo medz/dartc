@@ -4,9 +4,9 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 
 // The public analyzer API omits function-constant arguments/alias identity and
-// pattern context schemas, generic defaults and superclass storage. Keep these
-// analyzer 14.7 reads isolated instead of reconstructing inference or identity
-// from lossy public types.
+// pattern context schemas, generic defaults, forwarding metadata and superclass
+// storage. Keep these analyzer 14.7 reads isolated instead of reconstructing
+// inference or identity from lossy public types.
 // ignore: implementation_imports
 import 'package:analyzer/src/dart/ast/ast.dart' as internal;
 // ignore: implementation_imports
@@ -18,6 +18,57 @@ import 'package:analyzer/src/dart/element/type_schema_elimination.dart'
 import 'package:analyzer/src/dart/constant/value.dart' as internal;
 // ignore: implementation_imports
 import 'package:analyzer/src/dart/element/element.dart' as internal;
+// ignore: implementation_imports
+import 'package:analyzer/src/error/correct_override.dart' as internal;
+
+/// Possible typed forwarders whose bodies are not lowered yet.
+///
+/// Analyzer's marker includes inherited forwarders and some concrete overrides.
+/// A real implementation takes precedence over these fallback guards. Private
+/// interface obligations also exist without a nontrivial noSuchMethod override.
+/// An incompatible inherited private implementation needs a replacing forwarder
+/// instead, so that rare case cannot use a fallback-only guard.
+List<({ExecutableElement member, Uri? privateLibrary, bool overridesConcrete})>
+noSuchMethodForwarderCandidates(InterfaceElement element) {
+  if (element is! internal.InterfaceElementImpl) {
+    throw UnsupportedError('Analyzer noSuchMethod metadata unavailable.');
+  }
+  if (element is internal.ClassElementImpl && element.isAbstract) {
+    return const [];
+  }
+  final interface = element.inheritanceManager.getInterface(element);
+  final inherited = element.inheritedConcreteMembers;
+  final result =
+      <
+        ({
+          ExecutableElement member,
+          Uri? privateLibrary,
+          bool overridesConcrete,
+        })
+      >[];
+  for (final entry in interface.map.entries) {
+    final name = entry.key;
+    final foreignPrivate =
+        name.libraryUri != null && name.libraryUri != element.library.uri;
+    if (!foreignPrivate && !interface.noSuchMethodForwarders.contains(name)) {
+      continue;
+    }
+    final implementation = inherited[name];
+    result.add((
+      member: entry.value,
+      privateLibrary: name.libraryUri,
+      overridesConcrete:
+          foreignPrivate &&
+          implementation != null &&
+          !implementation.isAbstract &&
+          !internal.CorrectOverrideHelper(
+            typeSystem: element.library.typeSystem,
+            thisMember: implementation,
+          ).isCorrectOverrideOf(superMember: entry.value),
+    ));
+  }
+  return result;
+}
 
 /// Reads the compiler-computed default, absent on some fresh structural binders.
 DartType? typeParameterDefault(TypeParameterElement parameter) {

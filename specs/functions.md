@@ -14,7 +14,7 @@
 | 泛型局部/匿名函数 | 支持泛型局部函数、匿名函数、递归和逃逸闭包。每次调用独立绑定自身类型实参，并保留捕获的外层类型环境。 |
 | 非泛型函数值、方法提取、`.call` | 支持提取顶层与静态函数、绑定实例或 super 方法、提取构造器，以及通过函数签名调用。协变方法提取的运行时参数类型为 Object?，调用时仍检查实现的参数类型。见[函数值样本](../test/lowering/fixtures/callables.dart)。 |
 | 泛型函数值、显式函数值实例化 | 支持函数、绑定方法、泛型构造器函数值，以及显式和上下文隐式实例化。运行时类型保留泛型签名与界限，实例化检查实际实现的界限。常量/default 函数值保留未出现在签名中的类型实参及身份。见[泛型函数样本](../test/lowering/fixtures/generic_functions.dart)和[常量函数样本](../test/lowering/fixtures/generic_constants.dart)。 |
-| 裸 `Function`/dynamic 函数值调用 | 待实现。 |
+| 裸 `Function`/dynamic 函数值调用 | 支持已表示的函数、方法、构造器、闭包及 callable object，包括 Function 上界和 `.call` 提取。先验证位置/命名/类型实参个数，再应用实际声明的默认类型、界限和形参检查。保留闭包环境及构造器别名身份。原生回调只支持明确建模的签名。见[动态调用样本](../test/lowering/fixtures/dynamic_dispatch.dart)。 |
 | 可调用对象、隐式 `call` 提取 | 支持实例的普通和泛型 `call` 调用，以及在函数类型上下文中隐式提取其绑定方法。见[可调用对象样本](../test/lowering/fixtures/callables.dart)。 |
 | `async`、`sync*`、`async*` | 待实现。 |
 | `external` 函数 | 待实现。 |
