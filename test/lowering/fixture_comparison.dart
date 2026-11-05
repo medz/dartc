@@ -45,6 +45,7 @@ final class FixtureComparison(final IrProgram program) {
     } catch (e) {
       error = switch (e) {
         StateError(:final message) => (StateError, message),
+        AssertionError(:final message) => (AssertionError, message),
         TypeError() => TypeError,
         int() || String() || bool() => e,
         _ => e.runtimeType,

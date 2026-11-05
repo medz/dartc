@@ -34,7 +34,7 @@ final class Bindings({final bool enableAssertions = false}) {
   final _extensions = <ExecutableElement, ExtensionExecutable>{};
   final _extensionTypes = <ExtensionTypeElement>{};
 
-  /// Admit only representation constructors whose complete semantics are erased.
+  /// Reject constructor forms whose erased bodies are not implemented.
   void registerExtensionType(
     ResolvedUnitResult unit,
     ast.ExtensionTypeDeclaration node,
@@ -42,9 +42,10 @@ final class Bindings({final bool enableAssertions = false}) {
     final element = node.declaredFragment!.element;
     final primary = node.namePart;
     if (primary is! ast.PrimaryConstructorDeclaration ||
-        primary.body != null ||
-        element.constructors.length != 1 ||
-        element.primaryConstructor.isExternal) {
+        element.constructors.any(
+          (c) =>
+              c.isExternal || (c.isFactory && c.redirectedConstructor != null),
+        )) {
       unsupported(unit, node, 'extension type constructor shape');
     }
     _extensionTypes.add(element);
@@ -581,21 +582,6 @@ final class Bindings({final bool enableAssertions = false}) {
     int? sourceOffset,
     Iterable<ValueType> captures = const [],
   }) {
-    if (element.enclosingElement case final ExtensionTypeElement owner
-        when element is ConstructorElement) {
-      _requireExtensionType(owner, unit, site);
-      element = element.baseElement;
-      return _targets.putIfAbsent(element, () {
-        final parameters = bindTypeParameters(owner.typeParameters, unit, site);
-        return FunctionTarget(
-          owner.library.uri,
-          _extensionName(owner, element.name!, 'constructor'),
-          valueType(owner.thisType, unit, site),
-          element.formalParameters.map((p) => valueType(p.type, unit, site)),
-          typeParameters: parameters,
-        );
-      });
-    }
     if (isExtensionOwner(element.enclosingElement)) {
       return extensionExecutable(element, unit, site)!.target;
     }
@@ -710,10 +696,11 @@ final class Bindings({final bool enableAssertions = false}) {
   ) {
     element = element.baseElement;
     final owner = element.enclosingElement;
-    if (!isExtensionOwner(owner) || element is ConstructorElement) return null;
+    if (!isExtensionOwner(owner)) return null;
+    final constructor = element is ConstructorElement;
     if (owner is ExtensionTypeElement) _requireExtensionType(owner, unit, site);
     if (_extensions[element] case final previous?) return previous;
-    final extensionElements = element.isStatic
+    final extensionElements = element.isStatic && !constructor
         ? const <TypeParameterElement>[]
         : owner is ExtensionElement
         ? owner.typeParameters
@@ -733,7 +720,7 @@ final class Bindings({final bool enableAssertions = false}) {
       defaultTemplates: executableTypeParameterDefaults(element),
     );
     final source = valueType(element.type, unit, site) as FunctionType;
-    final receiver = element.isStatic
+    final receiver = element.isStatic || constructor
         ? null
         : valueType(
             owner is ExtensionElement
@@ -745,6 +732,7 @@ final class Bindings({final bool enableAssertions = false}) {
     final function = FunctionTarget(
       element.library.uri,
       _extensionName(owner!, element.name!, switch (element) {
+        ConstructorElement() => 'constructor',
         GetterElement() => 'get',
         SetterElement() => 'set',
         MethodElement(name: '-', formalParameters: []) => 'unary',
@@ -766,14 +754,10 @@ final class Bindings({final bool enableAssertions = false}) {
           entry.key: entry.value.required,
       },
     );
-    final defaults = <int, Constant>{
-      for (final (i, parameter) in element.formalParameters.indexed)
-        if (parameter.isOptional)
-          i + (receiver == null ? 0 : 1): constantOf(parameter, unit, site),
-    };
+    // Default constants may refer to this executable (or a mutually recursive
+    // constructor), so publish its identity before evaluating defaults.
     _targets[element] = function;
-    _defaults[function] = defaults;
-    return _extensions[element] = ExtensionExecutable(
+    final executable = _extensions[element] = ExtensionExecutable(
       element,
       owner,
       function,
@@ -781,6 +765,12 @@ final class Bindings({final bool enableAssertions = false}) {
       source,
       receiver,
     );
+    _defaults[function] = {
+      for (final (i, parameter) in element.formalParameters.indexed)
+        if (parameter.isOptional)
+          i + (receiver == null ? 0 : 1): constantOf(parameter, unit, site),
+    };
+    return executable;
   }
 
   /// Resolves the selected member's extension arguments before canonicalizing it.

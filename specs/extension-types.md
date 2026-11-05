@@ -1,10 +1,11 @@
 # Extension type 表示擦除
 
-普通与泛型 extension type 的简单主构造器和 representation getter 使用普通静态 identity 函数。实例成员复用普通 extension 的显式接收者 ABI；不新增 IR 类型、分派指令、对象分配或伪造类。
+普通与泛型 extension type 的构造器返回表示值，representation getter 使用普通静态 identity 函数。实例成员复用普通 extension 的显式接收者 ABI；不新增 IR 类型、分派指令、对象分配或伪造类。
 
 ## 当前范围
 
-- 单一主构造器，没有构造体或初始化列表。类型和方法均可声明泛型参数。
+- 主构造器体与断言、次级生成式构造器、this 重定向和普通 factory body。类型和方法均可声明泛型参数。构造器复用静态 target 的参数默认值与提取规则。
+- representation 初始化完成后执行初始化断言，再执行 body；即使断言在源码中位于 representation initializer 之前也如此。这一顺序有 SDK 3.13.7 JIT/AOT 差分覆盖。正常完成或裸 return 返回表示值，finally 与闭包捕获沿用 FunctionLowering；断言启用/省略由 enableAssertions 决定。
 - 支持 implements：继承的 extension type 成员按 analyzer 选定的声明静态调用；普通接口成员在擦除后的表示对象上保留虚派发与协变检查。多层接口映射使用源类型的 asInstanceOf，不从运行时表示猜测父接口的 phantom 实参。
 - 类型实参来自 analyzer 已解析的成员代入和源接收者类型；不从表示值反推 phantom 参数。构造器展开声明 binder，成员按类型参数再方法参数的顺序传递；闭包保留运行时类型环境。
 - representation 为已支持的类型，包括可空、dynamic、record、函数、集合及嵌套 extension type。声明未写 `?` 不表示擦除后的值一定非空。
@@ -18,9 +19,9 @@
 
 ## 明确边界
 
-额外构造器、主构造器体/初始化列表在声明处拒绝；泛型构造器别名提取在使用处拒绝，非泛型别名复用原构造器身份。即使只在类型注解或函数签名中引用，extension type 的声明库也必须包含在输入 batch 中注册；不会仅凭导入自动装配或放开尚未验证的声明。其他未实现的核心库 API、async 和普通 extension 的已知边界不变。
+external 构造器及 redirecting factory 在声明处拒绝；泛型构造器别名提取在使用处拒绝，非泛型别名复用原构造器身份。即使只在类型注解或函数签名中引用，extension type 的声明库也必须包含在输入 batch 中注册；不会仅凭导入自动装配或放开尚未验证的声明。其他未实现的核心库 API、async 和普通 extension 的已知边界不变。
 
-泛型覆盖见[差分测试](../test/lowering/extension_types_generic_test.dart)及[样本](../test/lowering/fixtures/extension_types_generic.dart)。[接口差分测试](../test/lowering/extension_types_interfaces_test.dart)覆盖多个接口、同一声明的菱形继承、own 覆盖、静态父视图、泛型类型参数映射、跨库私有成员、继承提取的默认值，以及普通接口的真实覆盖与协变检查。不同声明的同名冲突、无效表示类型和禁止的接口仍由 analyzer 拒绝。额外构造器初始化仍待实现。
+泛型覆盖见[差分测试](../test/lowering/extension_types_generic_test.dart)及[样本](../test/lowering/fixtures/extension_types_generic.dart)。[接口差分测试](../test/lowering/extension_types_interfaces_test.dart)覆盖多个接口、同一声明的菱形继承、own 覆盖、静态父视图、泛型类型参数映射、跨库私有成员、继承提取的默认值，以及普通接口的真实覆盖与协变检查。不同声明的同名冲突、无效表示类型和禁止的接口仍由 analyzer 拒绝。[构造器差分测试](../test/lowering/extension_types_constructors_test.dart)覆盖初始化/断言/body/finally 顺序、异常、可空表示、泛型与 const、默认值及闭包。
 
 ### analyzer 14.7 边界
 

@@ -129,11 +129,7 @@ void main() {
           'extension type constructor alias',
         ),
         (
-          'extension type E(int value) { E.zero() : this(0); }',
-          'extension type constructor shape',
-        ),
-        (
-          'extension type E(int value) { this : assert(value >= 0); }',
+          'extension type E(int value) { factory E.zero(int value) = E; }',
           'extension type constructor shape',
         ),
       ]) {

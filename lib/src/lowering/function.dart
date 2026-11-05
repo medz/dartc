@@ -34,6 +34,11 @@ final class FunctionLowering._(
     plan,
     _target,
   );
+  bool get _representationConstructor =>
+      element is ConstructorElement &&
+      !(element as ConstructorElement).isFactory &&
+      element!.enclosingElement is ExtensionTypeElement;
+
   final _breaks = <ast.AstNode, JumpTarget>{};
   final _continues = <ast.AstNode, void Function()>{};
   FinallyRegion? _finally;
@@ -61,10 +66,19 @@ final class FunctionLowering._(
     final target = bindings.target(element, unit, site);
     final extension = bindings.extensionExecutable(element, unit, site);
     final plan = ClosurePlan()
-      ..prepare(unit, bindings, target, [
-        ...initializers,
-        ?body,
-      ], receiverType: extension?.receiverType);
+      ..prepare(
+        unit,
+        bindings,
+        target,
+        [...initializers, ?body],
+        receiverType:
+            extension?.receiverType ??
+            (element is ConstructorElement &&
+                    !element.isFactory &&
+                    element.enclosingElement is ExtensionTypeElement
+                ? target.returnType
+                : null),
+      );
     output.add(
       FunctionLowering._(
         unit,
@@ -172,14 +186,16 @@ final class FunctionLowering._(
     if (expression != null) _return(lowerExpression(context, expression));
     if (context.current != null) {
       switch (body) {
-        case null || ast.EmptyFunctionBody() when _target.kind == .initializer:
+        case null || ast.EmptyFunctionBody()
+            when _target.kind == .initializer || _representationConstructor:
           _return(null);
         case ast.ExpressionFunctionBody(:final expression):
           _return(lowerExpression(context, expression));
         case ast.BlockFunctionBody(:final block):
           _statement(block);
           if (context.current != null) {
-            if (!_bodyReturnType.accepts(.nullType)) {
+            if (!_representationConstructor &&
+                !_bodyReturnType.accepts(.nullType)) {
               unsupported(context.unit, body, 'implicit return');
             }
             _return(null);
@@ -199,6 +215,7 @@ final class FunctionLowering._(
 
   void _return(Value? value) {
     if (context.current == null) return;
+    if (_representationConstructor) value ??= context.receiver;
     if (value != null) {
       value = context.normal(context.convert(value, _bodyReturnType));
       if (value == null) return;
