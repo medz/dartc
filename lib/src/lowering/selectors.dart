@@ -316,6 +316,12 @@ final class SelectorChain(
     }
     if (member.library.uri.toString() == 'dart:core' &&
         (member is GetterElement || arguments != null)) {
+      if (member is GetterElement &&
+          member.name == 'hashCode' &&
+          (member.enclosingElement.name == 'Object' ||
+              member.enclosingElement.name == 'Type')) {
+        return context.normal(context.emit(ObjectHashCode(known)));
+      }
       final args = context.arguments(arguments, evaluate);
       if (args == null) return null;
       if (args.named.isEmpty) {

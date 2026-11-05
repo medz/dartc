@@ -1,5 +1,7 @@
 ## Unreleased
 
+Type literals, aliases and reified type parameters retain strict structural identity, equality and hashing, including nested constants and captured generic environments. Constant dependencies containing private Symbol literals are rejected before consuming analyzer-folded values, including folded scalars; the pinned analyzer loses private-library identity. Symbol values and general runtimeType access remain unsupported.
+
 Dynamic for-in and collection spreads check the source protocol before traversal and cast elements in evaluation order. Map spreads requiring key/value checks use entries; compatible spreads use forEach. MapEntry values support ordinary and constant construction, generic key/value reads and lazy Map.entries views.
 
 Constant List, Set, Map and ordinary user-class instances lower from analyzer-evaluated values. Nested constants, generic and inherited storage, defaults and constructor aliases retain canonical identity. Collection writes preserve reified type checks and immutable-operation failures; method addAll checks its source before traversal, separately from literal spreads.
@@ -12,9 +14,9 @@ Generic top-level functions, static and instance methods, local functions and cl
 
 Generic constructor tear-offs support aliases with reordered, fixed or repeated type arguments and preserve distinct alias identity. Constant and default function values retain type arguments even when those arguments do not appear in their signature. Constant-pattern caches distinguish function and constructor instantiations.
 
-Generic classes retain declaration type parameters and instantiated type arguments throughout IR. Constructors, factories and factory redirects substitute member signatures, superclass and interface types without copying function bodies. Runtime checks and constructor or method tear-offs preserve actual type arguments, bounds, covariance and type environments captured by closures. Const instances remain unsupported.
+Generic classes retain declaration type parameters and instantiated type arguments throughout IR. Constructors, factories and factory redirects substitute member signatures, superclass and interface types without copying function bodies. Runtime checks and constructor or method tear-offs preserve actual type arguments, bounds, covariance and type environments captured by closures.
 
-Mutable typed List, Set and Map literals support conditional and loop elements, patterns, spreads and null-aware elements. Synchronous `for-in` uses the iterator protocol and preserves per-iteration captures, control flow and exceptions. Collection IR includes indexing, writes, length, add and addAll; const collections and the full SDK collection API remain unsupported.
+Mutable typed List, Set and Map literals support conditional and loop elements, patterns, spreads and null-aware elements. Synchronous `for-in` uses the iterator protocol and preserves per-iteration captures, control flow and exceptions. Collection IR includes indexing, writes, length, add and addAll; the full SDK collection API remains unsupported.
 
 Numeric expressions support `double`, `num` and mixed operands without losing integer precision or floating negative zero. Runtime string interpolation preserves expression and conversion order, including virtual `toString` calls and adjacent or nested literals.
 

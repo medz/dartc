@@ -29,6 +29,34 @@ sealed class const Constant(super.type) extends Value {
   const factory nullValue() = ScalarConstant._nullValue;
 }
 
+/// A closed source-level Dart type represented as a canonical Type value.
+final class TypeConstant(final ValueType representedType) extends Constant {
+  this : super(.typeType) {
+    if (!isDartType(representedType) ||
+        typeParametersIn(representedType).isNotEmpty) {
+      throw ArgumentError('A type constant requires a closed Dart type.');
+    }
+  }
+}
+
+/// Reifies a type template using the current lexical type environment.
+final class ReifyType(final ValueType template) extends Instruction {
+  this : super(.typeType) {
+    if (!isDartType(template)) throw ArgumentError('Expected a Dart type.');
+  }
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
+/// Reads Dart Object.hashCode, retaining virtual dispatch for user objects.
+final class ObjectHashCode(final Value operand) extends Instruction {
+  this : super(.integer) {
+    if (operand.type is CellType) throw ArgumentError('Expected a Dart value.');
+  }
+  @override
+  Iterable<Value> get inputs => [operand];
+}
+
 /// A canonical tear-off of a top-level function, static method or constructor.
 final class FunctionConstant(
   /// The referenced declaration, including the source factory for a redirect.
@@ -187,6 +215,7 @@ final class ObjectConstant(ClassType type, Map<InstanceField, Constant> fields)
 /// Scalar representation, collection order, nominal field slots and complete
 /// function instantiations are retained. Constructor sites are not identities.
 Object constantKey(Constant value) => switch (value) {
+  TypeConstant(:final representedType) => (TypeConstant, representedType),
   ScalarConstant(:final type, :final value) => (
     type,
     value is double ? value.toString() : value,
@@ -276,6 +305,7 @@ sealed class Instruction(super.type) extends Value {
 
   /// Whether evaluation can transfer control to a Dart exception handler.
   bool get mayThrow => switch (this) {
+    ObjectHashCode() ||
     ListSublist() ||
     MapContainsKey() ||
     MapEntries() ||
@@ -308,7 +338,7 @@ sealed class Instruction(super.type) extends Value {
     Equals(:final mayCallUserCode) => mayCallUserCode,
     IntBinary(:final operator) => operator.mayThrow,
     NumericBinary(:final canThrow) => canThrow,
-    NumericNegate() => false,
+    NumericNegate() || ReifyType() => false,
     ReadCell() ||
     WriteCell() ||
     TypeTest() ||

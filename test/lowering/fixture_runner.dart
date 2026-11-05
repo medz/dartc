@@ -11,6 +11,11 @@ final class FixtureRunner(
 
   final _constants = <Object, Object>{};
 
+  final _types = <ValueType, _TypeValue>{};
+
+  _TypeValue _typeValue(ValueType type) =>
+      _types.putIfAbsent(type, () => _TypeValue(type));
+
   // Canonical keys describe IR data, never runtime user equality or hashCode.
   Constant _resolvedConstant(
     Constant value,
@@ -20,7 +25,7 @@ final class FixtureRunner(
     ValueType resolve(ValueType type) => substituteType(type, environment);
     Constant child(Constant value) => _resolvedConstant(value, environment);
     return switch (value) {
-      ScalarConstant() => value,
+      ScalarConstant() || TypeConstant() => value,
       FunctionConstant() => FunctionConstant(
         value.target,
         ownerType: value.ownerType == null
@@ -58,6 +63,7 @@ final class FixtureRunner(
     value = _resolvedConstant(value, environment);
     return switch (value) {
       ScalarConstant(:final value) => value,
+      TypeConstant(:final representedType) => _typeValue(representedType),
       FunctionConstant(
         :final target,
         :final ownerType,
@@ -386,6 +392,10 @@ final class FixtureRunner(
     };
     void execute(Instruction op) {
       switch (op) {
+        case ReifyType(:final template):
+          values[op] = _typeValue(resolve(template));
+        case ObjectHashCode(:final operand):
+          values[op] = read(operand).hashCode;
         case NewCollection(:final collectionType):
           final type = resolve(collectionType) as ClassType;
           values[op] = _CollectionValue(
@@ -701,6 +711,7 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
   Object? run<T>() => cast ? value as T : value is T;
   Object? scalar<T>() => type == type.nonNullable ? run<T>() : run<T?>();
   final actual = switch (value) {
+    _TypeValue() => ValueType.typeType,
     _Instance(:final type) => type,
     _CollectionValue(:final type) => type,
     _NativeFunction(:final signature) => signature,
@@ -768,6 +779,19 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
 final _uninitialized = Object();
 
 final class _Cell(var Object? value);
+
+/// Dart type identity is structural equality, not mutual assignability.
+final class _TypeValue(final ValueType representedType) {
+  @override
+  bool operator ==(Object other) =>
+      other is _TypeValue && representedType == other.representedType;
+
+  @override
+  int get hashCode => representedType.hashCode;
+
+  @override
+  String toString() => representedType.dartName;
+}
 
 final class _FunctionValue(
   final FunctionTarget target, [

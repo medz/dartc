@@ -160,6 +160,7 @@ Set<FunctionTarget> verifyFunction(
 
     void checkOperation(Instruction op, int position) {
       checkTypeScope(op.type);
+      if (op case ReifyType(:final template)) checkTypeScope(template);
       if (op case TypeTest(:final testedType)) checkTypeScope(testedType);
       if (op
           case DirectCall(:final ownerType?) ||

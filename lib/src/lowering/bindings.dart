@@ -6,9 +6,11 @@ import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
 
 import 'analyzer_metadata.dart';
+import 'constant_safety.dart';
 
 /// Maps analyzer declarations and formal parameters to their IR identities.
 final class Bindings({final bool enableAssertions = false}) {
+  final _constantSafety = ConstantSafety();
   final _targets = <ExecutableElement, FunctionTarget>{};
   final _classes = <InterfaceElement, ClassType>{};
   final _parameters = <TypeParameterElement, TypeParameterType>{};
@@ -152,6 +154,7 @@ final class Bindings({final bool enableAssertions = false}) {
     ResolvedUnitResult unit,
     ast.AstNode site,
   ) {
+    _constantSafety.check(unit, site, variable: variable);
     final value = variable.computeConstantValue();
     if (value == null &&
         variable is FormalParameterElement &&
@@ -167,7 +170,11 @@ final class Bindings({final bool enableAssertions = false}) {
     DartObject? value,
     ResolvedUnitResult unit,
     ast.AstNode site,
-  ) => _constantValue(value, site is ast.Expression ? site : null, unit, site);
+  ) {
+    final expression = site is ast.Expression ? site : null;
+    _constantSafety.check(unit, site, expression: expression);
+    return _constantValue(value, expression, unit, site);
+  }
 
   Constant _constantValue(
     DartObject? value,
@@ -176,6 +183,9 @@ final class Bindings({final bool enableAssertions = false}) {
     ast.AstNode site,
   ) {
     if (value != null) {
+      if (value.toTypeValue() case final type?) {
+        return TypeConstant(valueType(type, unit, site));
+      }
       if (value.isNull) return const .nullValue();
       if (value.toIntValue() case final i?) return .integer(i);
       if (value.toBoolValue() case final b?) return .boolean(b);
@@ -526,6 +536,7 @@ final class Bindings({final bool enableAssertions = false}) {
     if (element.library.isDartCore) {
       final builtin = switch (element.name) {
         'Object' => ValueType.object,
+        'Type' => ValueType.typeType,
         'Error' => ValueType.error,
         'TypeError' => ValueType.typeError,
         'StateError' => ValueType.stateError,

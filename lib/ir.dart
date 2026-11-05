@@ -34,9 +34,13 @@ export 'src/ir/type.dart'
         ValueType,
         TypeParameterType,
         NonNullableTypeParameterType,
-        substituteType;
+        substituteType,
+        typeParametersIn;
 export 'src/ir/value.dart'
     show
+        TypeConstant,
+        ReifyType,
+        ObjectHashCode,
         CollectionLength,
         CollectionGet,
         ListSet,

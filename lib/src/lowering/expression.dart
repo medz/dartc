@@ -19,6 +19,16 @@ Value? lowerExpression(FunctionContext context, ast.Expression expression) =>
 Value? _lower(FunctionContext context, ast.Expression expression) {
   final unit = context.unit;
   switch (expression) {
+    case ast.TypeLiteral():
+      final prefix = expression.type.importPrefix?.element;
+      if (prefix is PrefixElement &&
+          prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
+        unsupported(unit, expression, 'deferred type literal');
+      }
+      final type = context.typeOf(expression.type.type!, expression);
+      return typeParametersIn(type).isEmpty
+          ? TypeConstant(type)
+          : context.emit(ReifyType(type));
     case ast.ListLiteral() || ast.SetOrMapLiteral():
       return lowerCollection(
         context,

@@ -10,7 +10,6 @@ void main() {
     for (final expression in [
       "const Duration(seconds: 1)",
       "const <Object>[#name]",
-      "const <Object>[int]",
     ]) {
       final file = File('${directory.path}/entry.dart')
         ..writeAsStringSync('Object f() => $expression;');

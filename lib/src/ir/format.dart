@@ -28,6 +28,7 @@ void writeFunction(
   String typeArgs(Iterable<ValueType> types) =>
       types.isEmpty ? '' : '<${types.map((t) => t.dartName).join(', ')}>';
   String value(Value v) => switch (v) {
+    TypeConstant(:final representedType) => 'type ${representedType.dartName}',
     ScalarConstant(value: final String s) => jsonEncode(s),
     ScalarConstant(:final value) => '$value',
     FunctionConstant(
@@ -104,6 +105,8 @@ void writeFunction(
     RecordGet() => 'field ${value(op.record)}[${op.slot}]',
     Equals() =>
       '${value(op.left)} ${op.negated ? '!=' : '=='} ${value(op.right)}',
+    ReifyType() => 'reify ${op.template.dartName}',
+    ObjectHashCode() => 'hashCode ${value(op.operand)}',
     TypeTest() =>
       '${value(op.operand)} ${op.negated ? 'is!' : 'is'} ${op.testedType.dartName}',
     TypeView() => 'view ${value(op.operand)} as ${op.type.dartName}',

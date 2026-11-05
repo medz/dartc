@@ -90,3 +90,12 @@ DartType? patternContextType(ast.DartPattern pattern) {
 /// Reads the analyzer's separate storage layer for inherited instance fields.
 DartObject? constantSuperclass(DartObject value) =>
     value.getField(internal.GenericState.SUPERCLASS_FIELD);
+
+/// Unfolded constructor syntax, including assertions and super/redirect calls.
+/// A missing adapter result must not be treated as an empty initializer list.
+List<ast.ConstructorInitializer>? constantConstructorInitializers(
+  ConstructorElement constructor,
+) => constructor.baseElement is internal.ConstructorElementImpl
+    ? (constructor.baseElement as internal.ConstructorElementImpl)
+          .constantInitializers
+    : null;

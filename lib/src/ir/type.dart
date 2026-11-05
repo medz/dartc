@@ -21,6 +21,9 @@ sealed class const ValueType() {
   /// The non-nullable `String` type.
   static const ClassType string = ClassType._core('String', object, true);
 
+  /// The runtime value of a reified Dart type.
+  static const ClassType typeType = ClassType._core('Type', object, true);
+
   /// The common supertype of all Dart record shapes.
   static const ClassType record = ClassType._core('Record', object, true);
 
@@ -915,3 +918,16 @@ int _functionHash(FunctionType type, Map<TypeParameterType, int> scope) {
     ),
   );
 }
+
+/// Whether a type expression consists only of source-level Dart types.
+bool isDartType(ValueType type) => switch (type) {
+  CellType() => false,
+  _NullableType(:final base) => isDartType(base),
+  ClassType() => type.typeArguments.every(isDartType),
+  RecordType() => type.fields.every(isDartType),
+  FunctionType() =>
+    isDartType(type.result) &&
+        type.parameters.every(isDartType) &&
+        type.typeParameters.every((p) => isDartType(p.bound)),
+  _ => true,
+};
