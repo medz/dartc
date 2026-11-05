@@ -1494,10 +1494,9 @@ final class Bindings({final bool enableAssertions = false}) {
         type.bound.nullabilitySuffix != .question) {
       return parameter.nonNullable;
     }
-    unsupported(
-      unit,
-      site,
-      'type parameter intersection ${type.getDisplayString()}',
+    return PromotedTypeParameterType(
+      parameter,
+      valueType(type.bound, unit, site),
     );
   }
 

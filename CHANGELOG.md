@@ -1,5 +1,7 @@
 ## Unreleased
 
+Promoted type parameters retain both lexical identity and the analyzer-selected bound instead of rejecting general `T & S`. Static subtype proofs, null checks, class member views, record fields and function calls use that bound without treating it as the runtime type argument. Inference keeps the original `T`; concrete type substitution erases the promotion, while the reference executor checks both sides of an intersection before erasure. Focused SDK differential coverage includes nullable and nested promotions, generic members and calls, collections, records, functions, captures and FutureOr bounds.
+
 Mixin applications reuse ordinary class layers, field storage and resolved AST lowering. Each application owns its verified bodies and lexical super bindings, preserving repeated state, initializer order, late closures, private selectors and named application constructors without new IR or runtime body aliases. Generic applications and additional forwarding/covariance cases remain explicit boundaries; see specs/mixins.md.
 
 FutureOr has a dedicated union type rather than a nominal class. Canonical Future identities, normalization, union subtyping, nullable projections, recursive bounds, generic substitution and alpha-equivalent function hashing preserve Dart type semantics. Synchronous type tests, casts, null assertions and reified Type values are checked against the SDK. Native Future execution and async/await remain unsupported.

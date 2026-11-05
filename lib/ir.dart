@@ -42,6 +42,7 @@ export 'src/ir/type.dart'
         ValueType,
         TypeParameterType,
         NonNullableTypeParameterType,
+        PromotedTypeParameterType,
         containsCovariantTypeParameter,
         substituteType,
         rebindFunctionType,

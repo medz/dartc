@@ -72,7 +72,12 @@ final class SelectorChain(
       );
       if (context.current == null) return null;
     }
-    return context.refined(value);
+    final known = context.refined(value);
+    // A type test can add a different view without subsuming the receiver's
+    // original type (for example T extends a record, tested against U).
+    return identical(known, value) || value.type.accepts(known.type)
+        ? known
+        : value;
   }
 
   Value? _visit(
@@ -111,8 +116,14 @@ final class SelectorChain(
           ? context.arguments(arguments, evaluate)
           : context.dynamicArguments(arguments, evaluate);
       if (args == null) return null;
-      final function = getFunction == null ? input : getFunction(input);
+      var function = getFunction == null ? input : getFunction(input);
       if (function == null) return null;
+      if (function.type is! FunctionType) {
+        if (_structuralBound<FunctionType>(function.type)
+            case final FunctionType bound) {
+          function = context.cast(function, bound);
+        }
+      }
       if (application != null) {
         final receiver = context.memberReceiver(function, application);
         return receiver == null
@@ -441,13 +452,15 @@ final class SelectorChain(
               context.cast(value, context.typeOf(node.staticType!, node)),
             );
     }
-    if ((receiver?.staticType is dart.RecordType ||
-            known.type.nonNullable is RecordType) &&
+    final recordType = member == null
+        ? _structuralBound<RecordType>(known.type)
+        : null;
+    if ((receiver?.staticType is dart.RecordType || recordType != null) &&
         member == null) {
-      final owner = known.type.nonNullable is RecordType
-          ? known.type.nonNullable as RecordType
-          : context.typeOf(receiver!.staticType!, receiver).nonNullable
-                as RecordType;
+      final owner =
+          recordType ??
+          context.typeOf(receiver!.staticType!, receiver).nonNullable
+              as RecordType;
       final slot = owner.slots[name];
       if (slot == null) unsupported(context.unit, node, 'record member $name');
       final record = context.normal(context.cast(known, owner));
@@ -767,5 +780,36 @@ final class SelectorChain(
         extension: writeApplication,
       ),
     );
+  }
+}
+
+/// Finds a requested structural shape through either side of a promotion.
+T? _structuralBound<T extends ValueType>(
+  ValueType type, [
+  Set<ValueType>? active,
+]) {
+  final base = type.nonNullable;
+  if (base is T) return base;
+  if (type is! TypeParameterType &&
+      type is! PromotedTypeParameterType &&
+      type is! NonNullableTypeParameterType) {
+    return base == type ? null : _structuralBound<T>(base, active);
+  }
+  active ??= {};
+  if (!active.add(type)) return null;
+  try {
+    return switch (type) {
+      PromotedTypeParameterType(:final parameter, :final bound) =>
+        _structuralBound<T>(bound, active) ??
+            _structuralBound<T>(parameter, active),
+      TypeParameterType(:final bound) => _structuralBound<T>(bound, active),
+      NonNullableTypeParameterType(:final parameter) => _structuralBound<T>(
+        parameter.bound,
+        active,
+      ),
+      _ => null,
+    };
+  } finally {
+    active.remove(type);
   }
 }

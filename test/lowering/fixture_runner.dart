@@ -1344,6 +1344,39 @@ final class FixtureRunner(
       TestedValue(:final test) => read(test.operand),
       _ => values[v],
     };
+    Object? checkType(ValueType type, Object? value, {required bool cast}) {
+      // Reification erases promotions; a checked value must first satisfy all
+      // static conjuncts, including those under a nullable or FutureOr union.
+      final matches = switch (type) {
+        NonNullableTypeParameterType(:final parameter) =>
+          value != null && (checkType(parameter, value, cast: false) as bool),
+        PromotedTypeParameterType(
+          :final parameter,
+          :final bound,
+          :final isNonNullable,
+        ) =>
+          (!isNonNullable || value != null) &&
+              (checkType(parameter, value, cast: false) as bool) &&
+              (checkType(bound, value, cast: false) as bool),
+        FutureOrType(:final argument, :final futureType) =>
+          (checkType(argument, value, cast: false) as bool) ||
+              (checkType(futureType, value, cast: false) as bool),
+        _
+            when type != type.nonNullable &&
+                (type.nonNullable is PromotedTypeParameterType ||
+                    type.nonNullable is FutureOrType) =>
+          value == null ||
+              (checkType(type.nonNullable, value, cast: false) as bool),
+        _ => null,
+      };
+      if (matches == null) {
+        return _typeOperation(resolve(type), value, cast: cast);
+      }
+      if (!cast) return matches;
+      if (matches) return value;
+      throw TypeError();
+    }
+
     void execute(Instruction op) {
       switch (op) {
         case ReifyType(:final template):
@@ -1613,11 +1646,10 @@ final class FixtureRunner(
           values[op] = (read(record) as _RecordValue).fields[slot];
         case TypeTest(:final operand, :final testedType, :final negated):
           values[op] =
-              (_typeOperation(resolve(testedType), read(operand), cast: false)
-                  as bool) !=
+              (checkType(testedType, read(operand), cast: false) as bool) !=
               negated;
         case TypeCast(:final operand, :final type):
-          values[op] = _typeOperation(resolve(type), read(operand), cast: true);
+          values[op] = checkType(type, read(operand), cast: true);
         case TypeView(:final operand):
           values[op] = read(operand);
         case NullCheck(:final operand):

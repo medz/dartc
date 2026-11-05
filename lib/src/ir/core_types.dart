@@ -149,6 +149,18 @@ abstract final class CoreTypes() {
     ClassType declaration,
     Set<TypeParameterType>? active,
   ) {
+    if (type case PromotedTypeParameterType(:final parameter, :final bound)) {
+      final nonNullable = !type.mayBeNull;
+      if (nonNullable && declaration == ValueType.object) {
+        return ValueType.object;
+      }
+      return _view(
+            nonNullable ? bound.nonNullable : bound,
+            declaration,
+            active,
+          ) ??
+          _view(parameter, declaration, active);
+    }
     if (type is NonNullableTypeParameterType &&
         declaration == ValueType.object) {
       return ValueType.object;

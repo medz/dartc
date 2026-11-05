@@ -488,9 +488,17 @@ final class BindMethod(
   final ClassType? ownerType,
 }) extends Instruction {
   this
-    : super(method.signatureFor(ownerType ?? _classReceiver(receiver.type))) {
+    : super(
+        method.signatureFor(
+          ownerType ?? _classReceiver(receiver.type, method.owner),
+        ),
+      ) {
     if (method.kind != .method ||
-        _classReceiver(receiver.type).asInstanceOf(method.owner!) == null ||
+        _classReceiver(
+              receiver.type,
+              method.owner,
+            ).asInstanceOf(method.owner!) ==
+            null ||
         direct && method.isAbstract) {
       throw ArgumentError('Invalid method tear-off.');
     }
@@ -609,8 +617,9 @@ final class LoadField(
   /// The object containing the slot.
   final Value receiver,
 ) extends Instruction {
-  this : super(field.typeFor(_classReceiver(receiver.type))) {
-    if (_classReceiver(receiver.type).asInstanceOf(field.owner) == null) {
+  this : super(field.typeFor(_classReceiver(receiver.type, field.owner))) {
+    if (_classReceiver(receiver.type, field.owner).asInstanceOf(field.owner) ==
+        null) {
       throw ArgumentError('Incompatible field receiver.');
     }
   }
@@ -643,12 +652,18 @@ final class InstanceCall(
   this
     : super(
         member
-            .signatureFor(ownerType ?? _classReceiver(receiver.type))
+            .signatureFor(
+              ownerType ?? _classReceiver(receiver.type, member.owner),
+            )
             .instantiate(typeArguments)
             .result,
       ) {
     if (!member.kind.isVirtual ||
-        _classReceiver(receiver.type).asInstanceOf(member.owner!) == null) {
+        _classReceiver(
+              receiver.type,
+              member.owner,
+            ).asInstanceOf(member.owner!) ==
+            null) {
       throw ArgumentError('Incompatible dispatch receiver.');
     }
     if (ownerType != null && !ownerType!.accepts(receiver.type)) {
@@ -656,7 +671,9 @@ final class InstanceCall(
     }
     _checkCall(
       member
-          .signatureFor(ownerType ?? _classReceiver(receiver.type))
+          .signatureFor(
+            ownerType ?? _classReceiver(receiver.type, member.owner),
+          )
           .instantiate(typeArguments),
       this.positional,
       this.named,
@@ -802,8 +819,11 @@ final class StoreField(
 ) extends Instruction {
   this : super(.voidType) {
     if (field.isLate && !field.isWritable ||
-        _classReceiver(receiver.type).asInstanceOf(field.owner) == null ||
-        !field.typeFor(_classReceiver(receiver.type)).accepts(value.type)) {
+        _classReceiver(receiver.type, field.owner).asInstanceOf(field.owner) ==
+            null ||
+        !field
+            .typeFor(_classReceiver(receiver.type, field.owner))
+            .accepts(value.type)) {
       throw ArgumentError('Incompatible instance field write.');
     }
   }
@@ -1231,17 +1251,21 @@ final class StringConcat(
   Iterable<Value> get inputs => [left, right];
 }
 
-ClassType _classReceiver(ValueType type) {
+ClassType _classReceiver(ValueType type, [ClassType? owner]) {
+  if (type is PromotedTypeParameterType && owner != null) {
+    final view = CoreTypes.view(type, owner);
+    if (view != null) return view;
+  }
   if (type is ClassType) return type;
   if (type is FutureOrType) {
     final future = CoreTypes.view(type, CoreTypes.future);
     if (future != null) return future;
     if (ValueType.object.accepts(type)) return ValueType.object;
   }
-  if (type is TypeParameterType) return _classReceiver(type.bound);
+  if (type is TypeParameterType) return _classReceiver(type.bound, owner);
   if (type is NonNullableTypeParameterType) {
     final bound = type.parameter.bound.nonNullable;
-    return bound.mayBeNull ? ValueType.object : _classReceiver(bound);
+    return bound.mayBeNull ? ValueType.object : _classReceiver(bound, owner);
   }
   throw ArgumentError('Expected a non-nullable class receiver.');
 }

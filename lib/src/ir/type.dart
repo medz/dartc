@@ -126,6 +126,14 @@ sealed class const ValueType() {
       }
     }
     return switch (this) {
+      PromotedTypeParameterType(
+        :final parameter,
+        :final bound,
+        :final isNonNullable,
+      ) =>
+        !isNonNullable &&
+            parameter._mayBeNull(active) &&
+            bound._mayBeNull(active),
       FutureOrType(:final argument) => argument._mayBeNull(active),
       _NullableType() || DynamicType() => true,
       _ => this == nullType || this == voidType,
@@ -158,6 +166,26 @@ sealed class const ValueType() {
         this is DynamicType) {
       return true;
     }
+    // A promoted variable satisfies both its lexical type and its promoted
+    // bound. Keep the target conjunction before projecting either source side.
+    if (this case PromotedTypeParameterType(
+      :final parameter,
+      :final bound,
+      :final isNonNullable,
+    )) {
+      return (!isNonNullable || !type.mayBeNull) &&
+          parameter._accepts(type, active) &&
+          bound._accepts(type, active);
+    }
+    if (this case NonNullableTypeParameterType(:final parameter)) {
+      return !type.mayBeNull && parameter._accepts(type, active);
+    }
+    if (type case PromotedTypeParameterType(:final parameter, :final bound)) {
+      final nonNullable = !type.mayBeNull;
+      return nonNullable && this == object ||
+          _accepts(nonNullable ? parameter.nonNullable : parameter, active) ||
+          _accepts(nonNullable ? bound.nonNullable : bound, active);
+    }
     // Split source unions first: their arms may use different target arms.
     if (type is FutureOrType) {
       return _accepts(type.argument, active) &&
@@ -185,9 +213,6 @@ sealed class const ValueType() {
             _acceptsBound(type.parameter, active, nonNullable: true);
       }
       return type is TypeParameterType && _acceptsBound(type, active);
-    }
-    if (this case NonNullableTypeParameterType(:final parameter)) {
-      return !type.mayBeNull && parameter._accepts(type, active);
     }
     if (this case _NullableType(:final nonNullable)) {
       return type == nullType ||
@@ -844,6 +869,41 @@ final class NonNullableTypeParameterType(final TypeParameterType parameter)
   int get hashCode => Object.hash(NonNullableTypeParameterType, parameter);
 }
 
+/// A flow-promoted lexical variable `parameter & bound`.
+///
+/// The bound supplies additional static evidence, not a new runtime type.
+/// Inference and runtime type arguments retain the original lexical parameter.
+final class PromotedTypeParameterType(
+  final TypeParameterType parameter,
+  final ValueType bound, {
+
+  /// An additional value-level non-null fact established by a null assertion.
+  final bool isNonNullable = false,
+}) extends ValueType {
+  this {
+    if (!isDartType(bound)) {
+      throw ArgumentError('A promoted bound must be a Dart value type.');
+    }
+  }
+
+  @override
+  String get dartName =>
+      '${parameter.dartName} & ${bound.dartName}${isNonNullable ? ' & Object' : ''}';
+  @override
+  ValueType get nonNullable => !mayBeNull
+      ? this
+      : PromotedTypeParameterType(parameter, bound, isNonNullable: true);
+  @override
+  bool operator ==(Object other) =>
+      other is PromotedTypeParameterType &&
+      identical(parameter, other.parameter) &&
+      bound == other.bound &&
+      isNonNullable == other.isNonNullable;
+  @override
+  int get hashCode =>
+      Object.hash(PromotedTypeParameterType, parameter, bound, isNonNullable);
+}
+
 /// Simultaneous, capture-free substitution of type variable identities.
 ValueType substituteType(
   ValueType type,
@@ -852,6 +912,23 @@ ValueType substituteType(
   if (environment.isEmpty) return type;
   return switch (type) {
     TypeParameterType() => environment[type] ?? type,
+    // Renaming a lexical binder retains its static promotion. Instantiating
+    // that binder erases the promoted bound, just as Dart's type substitution
+    // does; runtime checks must test the promoted bound before this erasure.
+    PromotedTypeParameterType(
+      :final parameter,
+      :final bound,
+      :final isNonNullable,
+    ) =>
+      switch (environment[parameter] ?? parameter) {
+        final TypeParameterType replacement => PromotedTypeParameterType(
+          replacement,
+          substituteType(bound, environment),
+          isNonNullable: isNonNullable,
+        ),
+        final replacement =>
+          isNonNullable ? replacement.nonNullable : replacement,
+      },
     NonNullableTypeParameterType(:final parameter) =>
       (environment[parameter] ?? parameter).nonNullable,
     _NullableType(:final base) => substituteType(base, environment).nullable,
@@ -909,6 +986,8 @@ bool containsTypeParameter(
   Set<TypeParameterType> parameters,
 ) => switch (type) {
   TypeParameterType() => parameters.contains(type),
+  PromotedTypeParameterType(:final parameter, :final bound) =>
+    parameters.contains(parameter) || containsTypeParameter(bound, parameters),
   NonNullableTypeParameterType(:final parameter) => parameters.contains(
     parameter,
   ),
@@ -933,6 +1012,9 @@ bool containsCovariantTypeParameter(
   bool positive = true,
 ]) => switch (type) {
   TypeParameterType() => positive && parameters.contains(type),
+  PromotedTypeParameterType(:final parameter, :final bound) =>
+    positive && parameters.contains(parameter) ||
+        containsCovariantTypeParameter(bound, parameters, positive),
   NonNullableTypeParameterType(:final parameter) =>
     positive && parameters.contains(parameter),
   _NullableType(:final base) => containsCovariantTypeParameter(
@@ -978,6 +1060,9 @@ Iterable<TypeParameterType> typeParametersIn(ValueType type) sync* {
   switch (type) {
     case TypeParameterType():
       yield type;
+    case PromotedTypeParameterType(:final parameter, :final bound):
+      yield parameter;
+      yield* typeParametersIn(bound);
     case NonNullableTypeParameterType(:final parameter):
       yield parameter;
     case _NullableType(:final base):
@@ -1055,6 +1140,17 @@ int _typeHash(ValueType type, Map<TypeParameterType, int> scope) {
       scope.containsKey(type)
           ? Object.hash(TypeParameterType, scope[type])
           : identityHashCode(type),
+    PromotedTypeParameterType(
+      :final parameter,
+      :final bound,
+      :final isNonNullable,
+    ) =>
+      Object.hash(
+        PromotedTypeParameterType,
+        _typeHash(parameter, scope),
+        _typeHash(bound, scope),
+        isNonNullable,
+      ),
     NonNullableTypeParameterType(:final parameter) => Object.hash(
       NonNullableTypeParameterType,
       _typeHash(parameter, scope),
