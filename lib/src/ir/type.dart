@@ -165,9 +165,18 @@ final class const DynamicType() extends ValueType {
 /// An internal reference to a captured variable with invariant [content] type.
 final class CellType(
   /// The Dart type stored in the shared variable.
-  final ValueType content,
-) extends ValueType {
+  final ValueType content, {
+
+  /// Whether unbound reads initialize lazily or raise a late error.
+  final bool isLate = false,
+
+  /// Whether a late cell permits only one successful binding.
+  final bool isFinal = false,
+}) extends ValueType {
   this {
+    if (isFinal && !isLate) {
+      throw ArgumentError('Only late capture storage has runtime finality.');
+    }
     if (content is CellType) {
       throw ArgumentError('A captured slot must hold a Dart value.');
     }
@@ -177,12 +186,18 @@ final class CellType(
   ValueType get nullable =>
       throw UnsupportedError('Capture storage cannot be nullable.');
   @override
-  String get dartName => 'cell<${content.dartName}>';
+  String get dartName =>
+      '${isLate ? 'late ' : ''}${isFinal ? 'final ' : ''}cell<${content.dartName}>';
   @override
   bool operator ==(Object other) =>
-      other is CellType && other.content == content;
+      other is CellType &&
+      other.content == content &&
+      other.isLate == isLate &&
+      other.isFinal == isFinal;
   @override
-  int get hashCode => Object.hash(CellType, content);
+  int get hashCode => isLate
+      ? Object.hash(CellType, content, isLate, isFinal)
+      : Object.hash(CellType, content);
 }
 
 /// A structural record type with positional slots followed by named slots in name order.
@@ -702,7 +717,11 @@ ValueType substituteType(
           : type.declaration.instantiate(
               type.typeArguments.map((t) => substituteType(t, environment)),
             ),
-    CellType(:final content) => CellType(substituteType(content, environment)),
+    CellType(:final content, :final isLate, :final isFinal) => CellType(
+      substituteType(content, environment),
+      isLate: isLate,
+      isFinal: isFinal,
+    ),
     RecordType() => RecordType(
       type.fields
           .take(type.positionalCount)
@@ -876,10 +895,10 @@ int _typeHash(ValueType type, Map<TypeParameterType, int> scope) {
       identityHashCode(type.declaration),
       Object.hashAll(type.typeArguments.map((t) => _typeHash(t, scope))),
     ),
-    CellType(:final content) => Object.hash(
-      CellType,
-      _typeHash(content, scope),
-    ),
+    CellType(:final content, :final isLate, :final isFinal) =>
+      isLate
+          ? Object.hash(CellType, _typeHash(content, scope), isLate, isFinal)
+          : Object.hash(CellType, _typeHash(content, scope)),
     RecordType() => Object.hash(
       RecordType,
       type.positionalCount,

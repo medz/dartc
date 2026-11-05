@@ -51,8 +51,30 @@ final class FixtureRunner(
     Object? value, {
     required bool isFinal,
   }) {
-    if (isFinal && storage.containsKey(slot)) _lateWriteError();
+    _checkLazyBind(isFinal && storage.containsKey(slot));
     storage[slot] = value;
+    return value;
+  }
+
+  Object? _loadCell(_Cell cell) {
+    if (!identical(cell.value, _uninitialized)) return cell.value;
+    if (!cell.type.isLate) {
+      fail('Read of an uninitialized definite-assignment local');
+    }
+    final initializer = cell.initializer;
+    if (initializer == null) return _LateRead().value;
+    // As with fields and globals, recursive reads and writes remain observable.
+    return _storeCell(cell, _call(initializer, const [], const {}));
+  }
+
+  Object? _storeCell(_Cell cell, Object? value) {
+    if (cell.type.isLate) {
+      value = _typeOperation(cell.type.content, value, cast: true);
+      _checkLazyBind(
+        cell.type.isFinal && !identical(cell.value, _uninitialized),
+      );
+    }
+    cell.value = value;
     return value;
   }
 
@@ -564,18 +586,28 @@ final class FixtureRunner(
             inputs.map(read).toList(),
             environment,
           );
-        case NewCell(:final initial):
-          values[op] = _Cell(initial == null ? _uninitialized : read(initial));
-        case CopyCell(:final cell):
-          values[op] = _Cell((read(cell) as _Cell).value);
-        case ReadCell(:final cell):
-          final value = (read(cell) as _Cell).value;
-          if (identical(value, _uninitialized)) {
-            fail('Read of an uninitialized definite-assignment local');
+        case NewCell(:final initial, :final initializer):
+          final type = op.type as CellType;
+          final cell = _Cell(
+            type.isLate ? resolve(type) as CellType : type,
+            initial == null ? _uninitialized : read(initial),
+            initializer == null ? null : read(initializer),
+          );
+          if (type.isLate && initial != null) {
+            cell.value = _typeOperation(
+              cell.type.content,
+              cell.value,
+              cast: true,
+            );
           }
-          values[op] = value;
+          values[op] = cell;
+        case CopyCell(:final cell):
+          final source = read(cell) as _Cell;
+          values[op] = _Cell(source.type, source.value, source.initializer);
+        case ReadCell(:final cell):
+          values[op] = _loadCell(read(cell) as _Cell);
         case WriteCell(:final cell, :final value):
-          (read(cell) as _Cell).value = read(value);
+          _storeCell(read(cell) as _Cell, read(value));
         case BindMethod(:final method, :final receiver, :final direct):
           final instance = read(receiver) as _Instance;
           final function = _FunctionValue(
@@ -848,7 +880,15 @@ Object? _lateWriteError() {
 
 final _uninitialized = Object();
 
-final class _Cell(var Object? value);
+void _checkLazyBind(bool boundFinal) {
+  if (boundFinal) _lateWriteError();
+}
+
+final class _Cell(
+  final CellType type,
+  var Object? value, [
+  final Object? initializer,
+]);
 
 /// Dart type identity is structural equality, not mutual assignability.
 final class _TypeValue(final ValueType representedType) {

@@ -396,10 +396,13 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       return done.enter()?.parameters.first;
     case ast.SimpleIdentifier(element: final VariableElement variable)
         when context.hasLocal(variable):
-      return context.cast(
-        context.readLocal(variable),
-        context.typeOf(expression.staticType!, expression),
-      );
+      final value = context.normal(context.readLocal(variable));
+      return value == null
+          ? null
+          : context.cast(
+              value,
+              context.typeOf(expression.staticType!, expression),
+            );
     case ast.Identifier(
           element: GetterElement(
             variable: final TopLevelVariableElement variable,

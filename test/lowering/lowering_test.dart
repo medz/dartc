@@ -14,6 +14,7 @@ import 'fixtures/finalizers.dart' as finalizers;
 import 'fixtures/functions.dart' as dart;
 import 'fixtures/index_update.dart' as index_update;
 import 'fixtures/loops.dart' as loops;
+import 'fixtures/lazy.dart' as lazy;
 import 'fixtures/nominal/constructors.dart' as nominal;
 import 'fixtures/nominal/factories.dart' as factories;
 import 'fixtures/nominal/members.dart' as members;
@@ -626,8 +627,13 @@ void main() {
     }
   });
 
+  test('lowers the original lazy local fixture', () async {
+    final program = await _lower(['lazy.dart']);
+    final function = program.functions.singleWhere((f) => f.target.name == 'f');
+    expect(FixtureRunner(program, {}).run(function, []), lazy.f());
+  });
+
   for (final (file, line) in [
-    ('lazy.dart', 2),
     ('deferred_constant.dart', 3),
     ('extension_operator.dart', 1),
   ]) {

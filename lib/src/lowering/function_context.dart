@@ -1,6 +1,11 @@
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart'
-    show AstNode, FunctionExpression, ArgumentList, Expression;
+    show
+        AstNode,
+        FunctionExpression,
+        ArgumentList,
+        Expression,
+        VariableDeclaration;
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart' show DartType;
 import 'package:dartc/ir.dart';
@@ -154,7 +159,7 @@ final class FunctionContext(
   /// Reads a lexical value at the current program point.
   Value readLocal(Element element) {
     final stored = _locals[element]!;
-    return stored.type is CellType ? current!.emit(ReadCell(stored)) : stored;
+    return stored.type is CellType ? emit(ReadCell(stored)) : stored;
   }
 
   /// Writes the binding or its shared captured storage.
@@ -166,7 +171,7 @@ final class FunctionContext(
     if (converted == null) return;
     value = converted;
     if (stored.type is CellType) {
-      current!.emit(WriteCell(stored, value));
+      emit(WriteCell(stored, value));
     } else {
       _locals[variable] = value;
     }
@@ -195,6 +200,22 @@ final class FunctionContext(
     _locals[variable] = emit(NewCell(CellType(type), null));
   }
 
+  /// Reserves late storage without evaluating or reading its lazy captures.
+  void declareLate(VariableDeclaration declaration, ValueType type) {
+    final variable = declaration.declaredFragment!.element;
+    final initializer = declaration.initializer == null
+        ? null
+        : _close(_closures.functions[variable]!);
+    _declared.add(variable);
+    _locals[variable] = emit(
+      NewCell(
+        CellType(type, isLate: true, isFinal: variable.isFinal),
+        null,
+        initializer: initializer,
+      ),
+    );
+  }
+
   /// Binds the lexical function itself or a capture supplied by the caller.
   void bindCapture(Element? element, Value value) {
     if (element == null) {
@@ -206,14 +227,14 @@ final class FunctionContext(
   }
 
   /// Instantiates a function using this activation's values and shared cells.
-  Value close(FunctionExpression syntax) {
-    final fn = _closures.functions[syntax.declaredFragment!.element]!;
-    return emit(
-      MakeClosure(fn.target, [
-        for (final key in fn.captures) key == null ? receiver! : _locals[key]!,
-      ]),
-    );
-  }
+  Value close(FunctionExpression syntax) =>
+      _close(_closures.functions[syntax.declaredFragment!.element]!);
+
+  Value _close(LocalClosure fn) => emit(
+    MakeClosure(fn.target, [
+      for (final key in fn.captures) key == null ? receiver! : _locals[key]!,
+    ]),
+  );
 
   /// Identifies header cells that must move to a fresh binding on each for iteration.
   List<VariableElement> forInitializer(void Function() initialize) {

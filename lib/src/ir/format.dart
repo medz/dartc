@@ -60,6 +60,16 @@ void writeFunction(
     ...positional.map(value),
     for (final e in named.entries) '${e.key}: ${value(e.value)}',
   ].join(', ');
+  String cell(NewCell op) {
+    final type = op.type as CellType;
+    final state = op.initializer != null
+        ? 'lazy ${value(op.initializer!)}'
+        : op.initial == null
+        ? 'uninitialized'
+        : value(op.initial!);
+    return '${type.isLate ? 'late ' : ''}${type.isFinal ? 'final ' : ''}cell $state';
+  }
+
   String operation(Instruction op) => switch (op) {
     ListSublist() => 'listSublist ${op.inputs.map(value).join(', ')}',
     MapContainsKey() => 'mapContainsKey ${value(op.map)}, ${value(op.key)}',
@@ -83,8 +93,7 @@ void writeFunction(
       'assertionFailure${op.message == null ? '' : ' ${value(op.message!)}'}',
     MakeClosure() =>
       'close ${symbol(op.target)}(${op.inputs.map(value).join(', ')})',
-    NewCell() =>
-      'cell ${op.initial == null ? 'uninitialized' : value(op.initial!)}',
+    NewCell() => cell(op),
     ReadCell() => 'readCell ${value(op.cell)}',
     CopyCell() => 'copyCell ${value(op.cell)}',
     WriteCell() => 'writeCell ${value(op.cell)}, ${value(op.value)}',

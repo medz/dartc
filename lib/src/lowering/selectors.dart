@@ -440,7 +440,7 @@ final class SelectorChain(
       }
 
       if (operator.type == .EQ) return write(evaluate(rhs!));
-      final value = read();
+      final value = context.normal(read());
       if (value == null) return null;
       final old = context.normal(
         context.cast(value, context.typeOf(site.readType!, site)),

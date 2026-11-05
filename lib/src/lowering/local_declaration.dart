@@ -1,7 +1,6 @@
 import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:dartc/ir.dart';
 
-import 'bindings.dart';
 import 'function_context.dart';
 
 /// Declares locals with the same initialization rules in statements and loops.
@@ -15,7 +14,8 @@ void lowerVariables(
     final local = variable.declaredFragment!.element;
     final type = context.typeOf(local.type, variable);
     if (variable.isLate) {
-      unsupported(context.unit, variable, 'late local');
+      context.declareLate(variable, type);
+      continue;
     }
     if (initializer == null && (local.isFinal || !type.accepts(.nullType))) {
       context.declareUninitialized(local, type);

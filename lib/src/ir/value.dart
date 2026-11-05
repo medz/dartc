@@ -344,11 +344,10 @@ sealed class Instruction(super.type) extends Value {
     IntBinary(:final operator) => operator.mayThrow,
     NumericBinary(:final canThrow) => canThrow,
     NumericNegate() || ReifyType() => false,
-    ReadCell() ||
-    WriteCell() ||
-    TypeTest() ||
-    TypeView() ||
-    RecordGet() => false,
+    ReadCell(:final cell) => (cell.type as CellType).isLate,
+    WriteCell(:final cell) =>
+      (cell.type as CellType).isLate && (cell.type as CellType).isFinal,
+    TypeTest() || TypeView() || RecordGet() => false,
   };
 }
 
@@ -386,21 +385,36 @@ final class MakeClosure(
 
 /// Allocates storage for one activation of a local variable.
 ///
-/// Without [initial], a write must occur before any read. Checked Dart's
-/// definite-assignment analysis establishes this for non-late locals.
+/// A late cell may retain a zero-argument [initializer] function until its first
+/// read. Otherwise, without [initial], a write must occur before a successful
+/// read. Definite-assignment analysis establishes this for non-late locals.
 final class NewCell(
   CellType type,
 
   /// The starting value, absent for a definitely-assigned deferred local.
-  final Value? initial,
-) extends Instruction {
+  final Value? initial, {
+
+  /// The lazy zero-argument function value, separate from a bound [initial].
+  final Value? initializer,
+}) extends Instruction {
   this : super(type) {
     if (initial != null && !type.content.accepts(initial!.type)) {
       throw ArgumentError('Incorrect capture initializer.');
     }
+    if (initializer != null) {
+      final signature = initializer!.type;
+      if (!type.isLate ||
+          initial != null ||
+          signature is! FunctionType ||
+          signature.typeParameters.isNotEmpty ||
+          signature.parameters.isNotEmpty ||
+          !type.content.accepts(signature.result)) {
+        throw ArgumentError('Invalid lazy capture initializer.');
+      }
+    }
   }
   @override
-  Iterable<Value> get inputs => [?initial];
+  Iterable<Value> get inputs => [?initial, ?initializer];
 }
 
 /// Reads the current value of a captured variable.

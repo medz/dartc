@@ -94,16 +94,29 @@ final class FunctionLowering._(
     ClosurePlan plan,
   ) {
     for (final fn in plan.functions.values) {
+      final (element, body, expression) = switch (fn.syntax) {
+        ast.FunctionExpression(:final body) => (
+          fn.element as LocalFunctionElement,
+          body,
+          null,
+        ),
+        ast.VariableDeclaration(:final initializer) => (
+          null,
+          null,
+          initializer,
+        ),
+        _ => throw StateError('Unexpected lexical body.'),
+      };
       output.add(
         FunctionLowering._(
           unit,
           bindings,
-          fn.element,
+          element,
           fn.syntax,
-          fn.syntax.body,
+          body,
           fn.target,
           plan,
-        )._run(local: fn),
+        )._run(local: fn, expression: expression),
       );
     }
   }
@@ -121,7 +134,7 @@ final class FunctionLowering._(
     final inputs = context.current!.parameters;
     if (_target.kind.hasReceiver) context.receiver = inputs.first;
     if (local != null) {
-      context.bindCapture(element!, inputs.first);
+      if (element != null) context.bindCapture(element!, inputs.first);
       for (final (i, capture) in local.captures.indexed) {
         context.bindCapture(capture, inputs[i + 1]);
       }

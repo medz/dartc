@@ -1,8 +1,10 @@
 ## Unreleased
 
+Local late and late-final variables reuse captured cells and lexical initializer closures. Lazy reads, retries, single binding and exception paths preserve current captured values, generic environments and loop iteration identity. Nested named local functions use the closure plan for capture ownership when analyzer metadata omits their parent.
+
 Instance late and late-final fields use receiver-bound lazy initializer bodies, preserving actual generic arguments, private/inherited storage, reentrant binding and exception identity. Constructors skip lazy initializers; explicit constructor writes still bind storage. Generic late-final setters retain covariant safety checks, with a documented difference from SDK 3.13.7.
 
-Top-level and static mutable, final, late and late-final variables share ordinary accessor calls and lazy global storage. Initializers preserve first-read order, reentrant binding, retries after failures, writes made before or during initialization, and captured closure identity. Final commit checks retain RHS/type-check ordering and original exceptions. Local late variables remain unsupported.
+Top-level and static mutable, final, late and late-final variables share ordinary accessor calls and lazy global storage. Initializers preserve first-read order, reentrant binding, retries after failures, writes made before or during initialization, and captured closure identity. Final commit checks retain RHS/type-check ordering and original exceptions.
 
 Ordinary, enhanced and generic enums reuse class storage, constant identity and member dispatch. Values retain their index, name and actual type arguments; enum toString, factories, methods, operators and patterns share existing lowering. Class and enum static const declarations are validated without runtime storage. Enums with a user storage field named _name are rejected because pinned analyzer metadata overwrites that value.
 

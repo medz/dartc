@@ -6,10 +6,10 @@ import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
 
-/// The free declarations of a function literal or named local function.
+/// The free declarations of a lexical function or lazy local initializer.
 final class LocalClosure(
-  final LocalFunctionElement element,
-  final ast.FunctionExpression syntax,
+  final Element element,
+  final ast.AstNode syntax,
   final LocalClosure? parent,
 ) {
   /// A null slot denotes the enclosing instance receiver.
@@ -21,9 +21,12 @@ final class LocalClosure(
 
 /// Resolves captures through intervening functions before their SSA graphs are built.
 final class ClosurePlan() extends GeneralizingAstVisitor<void> {
-  final functions = <LocalFunctionElement, LocalClosure>{};
+  final functions = <Element, LocalClosure>{};
   final boxed = <VariableElement>{};
   final _written = <VariableElement>{};
+  // Synthetic initializers have no analyzer executable element. Track actual
+  // lexical ownership so their expression-local declarations are not captures.
+  final _owners = <Element, LocalClosure>{};
   LocalClosure? _current;
   bool _enableAssertions = false;
 
@@ -38,9 +41,13 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     for (final region in regions) {
       region.accept(this);
     }
-    boxed.retainAll(_written);
+    boxed.removeWhere(
+      (variable) => !variable.isLate && !_written.contains(variable),
+    );
     for (final fn in functions.values) {
-      bindings.registerTypeParameters(fn.element.typeParameters);
+      if (fn.element case final LocalFunctionElement element) {
+        bindings.registerTypeParameters(element.typeParameters);
+      }
     }
     for (final fn in functions.values) {
       ValueType slot(Element? e) {
@@ -51,17 +58,37 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
           _ => throw StateError('Unexpected lexical capture.'),
         };
         final type = bindings.valueType(declared, unit, fn.syntax);
-        return boxed.contains(e) ? CellType(type) : type;
+        return boxed.contains(e)
+            ? CellType(
+                type,
+                isLate: (e as VariableElement).isLate,
+                isFinal: e.isLate && e.isFinal,
+              )
+            : type;
       }
 
-      fn.target = bindings.target(
-        fn.element,
-        unit,
-        fn.syntax,
-        enclosing: fn.parent?.target ?? root,
-        sourceOffset: fn.syntax.offset,
-        captures: fn.captures.map(slot),
-      );
+      final enclosing = fn.parent?.target ?? root;
+      fn.target = switch (fn.element) {
+        final LocalFunctionElement element => bindings.target(
+          element,
+          unit,
+          fn.syntax,
+          enclosing: enclosing,
+          sourceOffset: fn.syntax.offset,
+          captures: fn.captures.map(slot),
+        ),
+        final LocalVariableElement element => FunctionTarget(
+          root.library,
+          '<initialize:${element.name}>',
+          bindings.valueType(element.type, unit, fn.syntax),
+          const [],
+          kind: .closure,
+          enclosing: enclosing,
+          sourceOffset: fn.syntax.offset,
+          captures: fn.captures.map(slot),
+        ),
+        _ => throw StateError('Unexpected lexical body.'),
+      };
     }
   }
 
@@ -81,11 +108,14 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
         element is! LocalFunctionElement) {
       return;
     }
+    // The analyzer leaves a local function's enclosing element null, so its
+    // lexical owner comes from the same plan that supplies its target.
+    final owner = element is LocalFunctionElement
+        ? functions[element]?.parent?.element
+        : _owners[element]?.element ?? element!.enclosingElement;
     for (
       var fn = _current;
-      fn != null &&
-          element != fn.element &&
-          element!.enclosingElement != fn.element;
+      fn != null && element != fn.element && owner != fn.element;
       fn = fn.parent
     ) {
       fn.captures.add(element);
@@ -106,6 +136,44 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     _current = functions[element] = LocalClosure(element, node, enclosing);
     node.body.accept(this);
     _current = enclosing;
+  }
+
+  @override
+  void visitVariableDeclaration(ast.VariableDeclaration node) {
+    final element = node.declaredFragment!.element;
+    _declare(element);
+    if (node.isLate && node.initializer != null) {
+      final enclosing = _current;
+      _current = functions[element] = LocalClosure(element, node, enclosing);
+      node.initializer!.accept(this);
+      _current = enclosing;
+    } else {
+      super.visitVariableDeclaration(node);
+    }
+  }
+
+  void _declare(Element element) {
+    if (_current?.element is LocalVariableElement) {
+      _owners[element] = _current!;
+    }
+  }
+
+  @override
+  void visitDeclaredIdentifier(ast.DeclaredIdentifier node) {
+    _declare(node.declaredFragment!.element);
+    super.visitDeclaredIdentifier(node);
+  }
+
+  @override
+  void visitDeclaredVariablePattern(ast.DeclaredVariablePattern node) {
+    for (
+      PatternVariableElement? variable = node.declaredFragment!.element;
+      variable != null;
+      variable = variable.join
+    ) {
+      _declare(variable);
+    }
+    super.visitDeclaredVariablePattern(node);
   }
 
   @override

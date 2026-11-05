@@ -221,35 +221,5 @@ void main() {
         expect(lowered, isFalse);
       });
     }
-
-    for (final (name, source) in <(String, String)>[
-      (
-        'local late variable',
-        'int f() { late int value; value = 1; return value; }',
-      ),
-      (
-        'initialized local late final',
-        'int f() { late final int value = 1; return value; }',
-      ),
-    ]) {
-      test('$name remains explicitly unsupported', () async {
-        final directory = Directory.systemTemp.createTempSync(
-          'dartc-local-late-',
-        );
-        addTearDown(() => directory.deleteSync(recursive: true));
-        final file = File('${directory.path}/entry.dart')
-          ..writeAsStringSync(source);
-        await expectLater(
-          CheckedLibraries.read([file.path], Lowering.lower),
-          throwsA(
-            isA<UnsupportedError>().having(
-              (error) => error.message,
-              'source',
-              contains('entry.dart:'),
-            ),
-          ),
-        );
-      });
-    }
   });
 }
