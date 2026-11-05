@@ -120,7 +120,6 @@ void main() {
     );
     try {
       for (final (source, reason) in [
-        ('extension type E<T>(T value) {}', 'generic extension type'),
         (
           'extension type E(int value) {} typedef Alias<T> = E; Object f() => Alias.new;',
           'extension type constructor alias',

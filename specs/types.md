@@ -18,7 +18,7 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 | 泛型 `extends`/`implements` | 保留继承路径中的实参和次序，支持继承成员、super 调用以及泛型子类型检查。 |
 | 推断、类型提升、确定赋值 | 支持局部变量和参数在核心类型测试及判空后的读取和更新，包括 `is!` 分支提前返回后的提升。支持非 late 变量的延后首次赋值，以及类类型参数判空后提升为 T & Object。更一般的类型参数交类型待实现。 |
 | 基于界限的推断 | 消费 analyzer 对已支持类构造和函数调用的推断结果；推断包含未表示类型（如 FutureOr）时仍明确拒绝。 |
-| Record 类型、extension type | 支持 Record、具名和位置字段的结构类型、嵌套及可空 record。相同形状按字段类型协变，命名顺序不影响形状。非泛型 extension type 按 analyzer 表示擦除处理，保留可空表示及嵌套类型；成员仍按源声明选择。见[范围与边界](extension-types.md)。 |
+| Record 类型、extension type | 支持 Record、具名和位置字段的结构类型、嵌套及可空 record。相同形状按字段类型协变，命名顺序不影响形状。普通/泛型 extension type 按 analyzer 表示擦除处理，保留可空表示及嵌套类型；成员仍按源声明选择。见[范围与边界](extension-types.md)。 |
 | `Future`、`FutureOr` 与异步类型规则 | 待实现。 |
 | FFI 标量、指针与原生导出 | 待实现。 |
 

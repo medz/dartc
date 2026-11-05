@@ -40,9 +40,6 @@ final class Bindings({final bool enableAssertions = false}) {
     ast.ExtensionTypeDeclaration node,
   ) {
     final element = node.declaredFragment!.element;
-    if (element.typeParameters.isNotEmpty) {
-      unsupported(unit, node, 'generic extension type');
-    }
     if (node.implementsClause != null) {
       unsupported(unit, node, 'extension type implements');
     }
@@ -591,15 +588,16 @@ final class Bindings({final bool enableAssertions = false}) {
         when element is ConstructorElement) {
       _requireExtensionType(owner, unit, site);
       element = element.baseElement;
-      return _targets.putIfAbsent(
-        element,
-        () => FunctionTarget(
+      return _targets.putIfAbsent(element, () {
+        final parameters = bindTypeParameters(owner.typeParameters, unit, site);
+        return FunctionTarget(
           owner.library.uri,
           _extensionName(owner, element.name!, 'constructor'),
           valueType(owner.thisType, unit, site),
           element.formalParameters.map((p) => valueType(p.type, unit, site)),
-        ),
-      );
+          typeParameters: parameters,
+        );
+      });
     }
     if (isExtensionOwner(element.enclosingElement)) {
       return extensionExecutable(element, unit, site)!.target;
@@ -806,13 +804,6 @@ final class Bindings({final bool enableAssertions = false}) {
         'instance application of static extension member',
       );
     }
-    if (selected.enclosingElement is ExtensionTypeElement) {
-      return ExtensionApplication(
-        executable,
-        const [],
-        executable.receiverType!,
-      );
-    }
     final arguments = extensionTypeArguments(
       selected,
       unit.libraryElement,
@@ -991,7 +982,17 @@ final class Bindings({final bool enableAssertions = false}) {
           if (constantFunctionHasAlias(value)) {
             unsupported(unit, site, 'extension type constructor alias');
           }
-          return FunctionConstant(callable);
+          if (functionType.typeParameters.isEmpty &&
+              arguments == null &&
+              callable.typeParameters.isNotEmpty) {
+            unsupported(unit, site, 'extension type constructor arguments');
+          }
+          return FunctionConstant(
+            callable,
+            typeArguments: functionType.typeParameters.isEmpty
+                ? arguments?.map((type) => valueType(type, unit, site))
+                : null,
+          );
         }
         if (executable is ConstructorElement) {
           final alias = _constantConstructorAlias(
@@ -1501,10 +1502,11 @@ bool requiresExhaustiveSwitch(dart.DartType type) => switch (type) {
   _ => type.isDartCoreBool || type.isDartCoreNull,
 };
 
-/// Whether this declaration uses the shared class member lowering.
+/// Whether source members use the explicit-receiver static ABI.
 bool isExtensionOwner(Element? element) =>
     element is ExtensionElement || element is ExtensionTypeElement;
 
+/// Whether this declaration uses the shared class member lowering.
 bool isClassOrEnum(Element? element) =>
     element is ClassElement || element is EnumElement;
 

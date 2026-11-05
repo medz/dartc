@@ -33,7 +33,7 @@ import 'package:analyzer/src/dart/element/non_covariant_type_parameter_position.
 import 'package:analyzer/src/dart/resolver/applicable_extensions.dart'
     as internal;
 
-/// Recovers only the already-selected extension's instance type arguments.
+/// Recovers source arguments of an already-selected extension or extension type.
 /// Applicability inference is not generic-function default generation.
 List<DartType> extensionTypeArguments(
   ExecutableElement selected,
@@ -43,7 +43,8 @@ List<DartType> extensionTypeArguments(
   ExtensionElement? lexicalExtension,
   bool nullAware = false,
 }) {
-  final owner = selected.baseElement.enclosingElement as ExtensionElement;
+  final owner =
+      selected.baseElement.enclosingElement as TypeParameterizedElement;
   final parameters = owner.typeParameters;
   if (override != null) {
     if (override.element != owner ||
@@ -68,12 +69,25 @@ List<DartType> extensionTypeArguments(
   if (receiverType == null) {
     throw UnsupportedError('Analyzer extension receiver metadata unavailable.');
   }
-  final candidates = internal.ExtensionsExtensions([owner]).applicableTo(
-    targetLibrary: library,
-    targetType: nullAware
-        ? library.typeSystem.promoteToNonNull(receiverType)
-        : receiverType,
-  );
+  if (owner is ExtensionTypeElement) {
+    final seen = <DartType>{};
+    while (receiverType is TypeParameterType && seen.add(receiverType)) {
+      receiverType = receiverType.bound;
+    }
+    if (receiverType is InterfaceType && receiverType.element == owner) {
+      return receiverType.typeArguments;
+    }
+    throw UnsupportedError(
+      'Analyzer extension type receiver metadata unavailable.',
+    );
+  }
+  final candidates = internal.ExtensionsExtensions([owner as ExtensionElement])
+      .applicableTo(
+        targetLibrary: library,
+        targetType: nullAware
+            ? library.typeSystem.promoteToNonNull(receiverType)
+            : receiverType,
+      );
   if (candidates.length != 1) {
     throw UnsupportedError('Analyzer selected extension is not applicable.');
   }

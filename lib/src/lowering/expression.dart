@@ -192,7 +192,16 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
             when typeParameters.isNotEmpty) {
           unsupported(unit, expression, 'extension type constructor alias');
         }
-        return FunctionConstant(target);
+        final resolved = expression.staticType! as dart.FunctionType;
+        return FunctionConstant(
+          target,
+          typeArguments: resolved.typeParameters.isNotEmpty
+              ? null
+              : context.typeArguments(
+                  (resolved.returnType as dart.InterfaceType).typeArguments,
+                  expression,
+                ),
+        );
       }
       final resolved = expression.staticType! as dart.FunctionType;
       final signature = context.typeOf(resolved, expression) as FunctionType;
@@ -268,7 +277,15 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         return args == null
             ? null
             : context.emit(
-                DirectCall(source, context.bindings.bind(source, args)),
+                DirectCall(
+                  source,
+                  context.bindings.bind(source, args),
+                  typeArguments: context.typeArguments(
+                    (expression.staticType! as dart.InterfaceType)
+                        .typeArguments,
+                    expression,
+                  ),
+                ),
               );
       }
       final construction = source.resolveConstruction(

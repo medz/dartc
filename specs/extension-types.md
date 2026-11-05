@@ -1,20 +1,30 @@
 # Extension type 表示擦除
 
-非泛型 extension type 的简单主构造器和 representation getter 使用普通静态 identity 函数。实例成员复用普通 extension 的显式接收者 ABI；不新增 IR 类型、分派指令、对象分配或伪造类。
+普通与泛型 extension type 的简单主构造器和 representation getter 使用普通静态 identity 函数。实例成员复用普通 extension 的显式接收者 ABI；不新增 IR 类型、分派指令、对象分配或伪造类。
 
 ## 当前范围
 
-- 单一主构造器，没有构造体、初始化列表或 implements。非泛型类型可以声明泛型方法。
+- 单一主构造器，没有构造体、初始化列表或 implements。类型和方法均可声明泛型参数。
+- 类型实参来自 analyzer 已解析的成员代入和源接收者类型；不从表示值反推 phantom 参数。构造器展开声明 binder，成员按类型参数再方法参数的顺序传递；闭包保留运行时类型环境。
 - representation 为已支持的类型，包括可空、dynamic、record、函数、集合及嵌套 extension type。声明未写 `?` 不表示擦除后的值一定非空。
 - 自身方法、getter/setter、索引与一元/二元运算符、call、静态成员及变量；保留实参、索引更新和级联的求值顺序。
 - 词法 this 和成员访问、捕获接收者的闭包、普通/泛型方法提取、隐式 call 提取及主构造器提取。
 - 普通与 const 构造、类型值、is/as、对象模式、集合中的类型参数及函数类型。运行时类型使用 analyzer 的 extensionTypeErasure；成员选择仍使用源声明，不能从擦除后的类型重新推断。
+- 方法提取复用普通 extension 的联合默认值规则，不能把声明默认值简单替换为实际接收者类型参数。支持泛型构造器提取、显式/上下文实例化及 const 构造器函数值。
 - 主构造器返回表示值本身；提取构造器仍保留声明身份。运行时不保存 extension type 的名义身份。
 
 [SDK 差分及边界测试](../test/lowering/extension_types_test.dart)与[样本](../test/lowering/fixtures/extension_types.dart)覆盖结果、异常种类、效果顺序，并检查没有 extension type 的类、Construct 或 representation LoadField。
 
 ## 明确边界
 
-泛型 extension type、implements、额外构造器、主构造器体/初始化列表在声明处拒绝；泛型构造器别名提取在使用处拒绝，非泛型别名复用原构造器身份。即使只在类型注解或函数签名中引用，extension type 的声明库也必须包含在输入 batch 中注册；不会仅凭导入自动装配或放开尚未验证的声明。其他未实现的核心库 API、async 和普通 extension 的已知边界不变。
+implements、额外构造器、主构造器体/初始化列表在声明处拒绝；泛型构造器别名提取在使用处拒绝，非泛型别名复用原构造器身份。即使只在类型注解或函数签名中引用，extension type 的声明库也必须包含在输入 batch 中注册；不会仅凭导入自动装配或放开尚未验证的声明。其他未实现的核心库 API、async 和普通 extension 的已知边界不变。
 
-下一阶段保留源类型实参并展开泛型 extension type 的声明 binder，尤其不能从表示值恢复 phantom 类型参数；随后分别处理接口成员选择和额外构造器初始化。
+泛型覆盖见[差分测试](../test/lowering/extension_types_generic_test.dart)及[样本](../test/lowering/fixtures/extension_types_generic.dart)。接口成员选择和额外构造器初始化仍分别待实现。
+
+### analyzer 14.7 边界
+
+对于 `extension type E<T>(T value) { T get() => value; }`，`int read<B extends E<int>>(B value) => value.get();` 被 analyzer 14.7 诊断为接收者可空，连 `!` 与 `?.` 形式也不能消除该诊断。同一最小程序在 SDK 3.13.7 的 JIT 与 AOT 均输出 `3`，这是 analyzer 与 kernel 的差异。已检查库入口保留此错误，不绕过分析；显式转换为 `E<int>` 后访问可工作。边界测试保留最小源程序。
+
+## 规范依据
+
+[官方 extension types 规范](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.3/extension-types/feature-specification.md)：[成员静态绑定、实际类型参数和提取](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.3/extension-types/feature-specification.md#L697-L727)、[表示擦除与泛型界限](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.3/extension-types/feature-specification.md#L1112-L1133)、[构造和运行时类型语义](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.3/extension-types/feature-specification.md#L1406-L1459)。
