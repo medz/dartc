@@ -8,19 +8,22 @@ import 'verify.dart';
 
 /// A verified SSA control-flow graph for one callable body.
 ///
-/// Generator graphs explicitly represent suspension; a backend must preserve
-/// their activations or lower them to state machines before ordinary codegen.
+/// Suspendable graphs explicitly represent their continuations; a backend must
+/// preserve activations or lower them to state machines before ordinary codegen.
 final class IrFunction(
   /// The declaration that callers reference.
   final FunctionTarget target,
   Iterable<Block> blocks, {
   Map<int, Constant> defaults = const {},
 
-  /// Whether this graph returns directly or suspends an iterator activation.
+  /// Whether this graph returns directly or uses an async/generator activation.
   final FunctionBodyKind bodyKind = .synchronous,
 
   /// The element type of a generator body, absent for an ordinary function.
   final ValueType? yieldType,
+
+  /// The reified value type of an async body's Future, not its public result.
+  final ValueType? completionType,
 }) {
   /// The reachable blocks in the supplied order, starting with [entry].
   final List<Block> blocks = .unmodifiable(blocks);
@@ -57,6 +60,17 @@ final class IrFunction(
                 target.kind == .staticSetter)) {
       throw ArgumentError('Invalid generator body for ${target.name}.');
     }
+    if ((bodyKind == .asynchronous) != (completionType != null) ||
+        completionType is CellType ||
+        completionType != null &&
+            (!target.returnType.accepts(CoreTypes.futureOf(completionType!)) ||
+                target.kind == .initializer ||
+                target.kind == .factory ||
+                target.kind == .fieldInitializer ||
+                target.kind == .setter ||
+                target.kind == .staticSetter)) {
+      throw ArgumentError('Invalid async body for ${target.name}.');
+    }
     final optional = target.signature.optionalSlots;
     final offset = target.argumentOffset;
     if (target.isAbstract ||
@@ -76,12 +90,18 @@ final class IrFunction(
       this.blocks,
       this.defaults.values,
       yieldType: yieldType,
+      completionType: completionType,
     );
     closures = references.closures;
     globals = references.globals;
   }
 
   /// Writes the typed blocks, instructions and outgoing edges to [output].
-  void writeTo(StringSink output) =>
-      writeFunction(output, target, blocks, yieldType: yieldType);
+  void writeTo(StringSink output) => writeFunction(
+    output,
+    target,
+    blocks,
+    yieldType: yieldType,
+    completionType: completionType,
+  );
 }

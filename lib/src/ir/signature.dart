@@ -7,6 +7,9 @@ enum FunctionBodyKind() {
 
   /// Returns an iterable; each iterator runs a fresh, suspendable activation.
   syncGenerator,
+
+  /// Starts immediately and completes a Future, suspending at explicit awaits.
+  asynchronous,
 }
 
 /// How a callable is entered.

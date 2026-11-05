@@ -14,7 +14,7 @@ import 'local_declaration.dart';
 import 'pattern.dart';
 import 'switch_statement.dart';
 
-/// Builds the blocks and local bindings for a synchronous function or generator.
+/// Builds blocks and local bindings for ordinary and suspendable function bodies.
 final class FunctionLowering._(
   ResolvedUnitResult unit,
   Bindings bindings,
@@ -33,6 +33,7 @@ final class FunctionLowering._(
         : body.isPotentiallyMutatedInScope,
     plan,
     _target,
+    isAsynchronous: body?.isAsynchronous == true && body?.isGenerator == false,
   );
   bool get _representationConstructor =>
       element is ConstructorElement &&
@@ -49,8 +50,17 @@ final class FunctionLowering._(
             )?.typeArguments.single ??
             ValueType.dynamicType
       : null;
-  ValueType get _bodyReturnType =>
-      _yieldType == null ? _target.returnType : ValueType.nullType;
+  late final ValueType? _completionType = context.isAsynchronous
+      ? context.typeOf(
+          context.unit.typeSystem.futureValueType(element!.returnType),
+          site,
+        )
+      : null;
+  ValueType get _bodyReturnType => _completionType != null
+      ? ValueType.futureOr(_completionType)
+      : _yieldType == null
+      ? _target.returnType
+      : ValueType.nullType;
 
   /// Appends the outer graph and the lexical bodies it declares to [output].
   static void append(
@@ -184,8 +194,8 @@ final class FunctionLowering._(
     ast.Expression? expression,
   }) {
     final body = this.body;
-    if (body?.isAsynchronous == true) {
-      unsupported(context.unit, site, 'asynchronous function bodies');
+    if (body?.isAsynchronous == true && body?.isGenerator == true) {
+      unsupported(context.unit, site, 'asynchronous generator bodies');
     }
     final yieldType = _yieldType;
     if (yieldType != null &&
@@ -234,8 +244,13 @@ final class FunctionLowering._(
       _target,
       context.blocks,
       defaults: context.bindings.defaults(_target),
-      bodyKind: _yieldType == null ? .synchronous : .syncGenerator,
+      bodyKind: _completionType != null
+          ? .asynchronous
+          : _yieldType == null
+          ? .synchronous
+          : .syncGenerator,
       yieldType: _yieldType,
+      completionType: _completionType,
     );
   }
 

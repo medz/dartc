@@ -11,6 +11,18 @@ sealed class const Value(
   final ValueType type,
 );
 
+/// An edge-only result supplied by one Await's successful resumption.
+///
+/// Its type also selects the `Future<T>` arm of the await protocol. It is not
+/// a normal instruction and may only be passed on its owning resume edge.
+final class AwaitResult(ValueType type) extends Value {
+  this : super(type) {
+    if (!isDartType(type)) {
+      throw ArgumentError('Await requires a Dart result type.');
+    }
+  }
+}
+
 /// A compile-time value that can be used in any block.
 sealed class const Constant(super.type) extends Value {
   /// Creates an integer literal with the value [value].

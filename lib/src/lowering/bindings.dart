@@ -1513,6 +1513,7 @@ final class Bindings({final bool enableAssertions = false}) {
         'Error' => ValueType.error,
         'TypeError' => ValueType.typeError,
         'NoSuchMethodError' => ValueType.noSuchMethodError,
+        'ArgumentError' => ValueType.argumentError,
         'StateError' => ValueType.stateError,
         'UnsupportedError' => ValueType.unsupportedError,
         'AssertionError' => ValueType.assertionError,

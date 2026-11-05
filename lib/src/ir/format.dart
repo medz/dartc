@@ -11,6 +11,7 @@ void writeFunction(
   FunctionTarget target,
   List<Block> blocks, {
   ValueType? yieldType,
+  ValueType? completionType,
 }) {
   final labels = {for (final (i, b) in blocks.indexed) b: 'b$i'};
   final ids = <Value, int>{};
@@ -155,7 +156,8 @@ void writeFunction(
       : '<${target.typeParameters.map((p) => '${p.name} extends ${p.bound.dartName}').join(', ')}>';
   output.writeln(
     '${symbol(target)}$binders -> ${target.returnType.dartName}'
-    '${yieldType == null ? '' : ' sync*<${yieldType.dartName}>'}',
+    '${yieldType == null ? '' : ' sync*<${yieldType.dartName}>'}'
+    '${completionType == null ? '' : ' async<${completionType.dartName}>'}',
   );
   for (final b in blocks) {
     final parameters = b.parameters
@@ -168,6 +170,9 @@ void writeFunction(
     output.writeln(switch (b.end) {
       Return(value: final v?) => '  return ${value(v)}',
       Return() => '  return',
+      Await(:final operand, :final result, :final onResume, :final onThrow) =>
+        '  ${value(result)}: ${result.type.dartName} = await ${value(operand)}'
+            '${onResume == null ? '' : ' resume ${edge(onResume)}'}${unwind(onThrow)}',
       Yield(value: final element, :final onResume) =>
         '  yield ${value(element)} resume ${edge(onResume)}',
       Throw(:final exception, stackTrace: final trace?, :final onThrow) =>

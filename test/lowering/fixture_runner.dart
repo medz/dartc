@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
@@ -206,6 +208,61 @@ final class FixtureRunner(
             .typeEnvironment,
       };
     }
+    if (target.library.toString() == 'dart:async' && !target.kind.hasReceiver) {
+      if (target.name == 'scheduleMicrotask' && target.owner == null) {
+        scheduleMicrotask(() => _call(arguments.single, const [], const {}));
+        return null;
+      }
+      final owner = target.owner;
+      if (owner != null &&
+          (owner == CoreTypes.future || owner.name == 'Completer')) {
+        final type = substituteType(owner, environment) as ClassType;
+        final element = type.typeArguments.single;
+        if (owner.name == 'Completer' &&
+            (target.name == 'new' || target.name == 'sync')) {
+          return _GuestCompleter(type, target.name == 'sync');
+        }
+        if (target.name == 'sync') {
+          try {
+            final value = _call(arguments.single, const [], const {});
+            _typeOperation(ValueType.futureOr(element), value, cast: true);
+            final actual = _futureType(value);
+            if (actual != null && CoreTypes.futureOf(element).accepts(actual)) {
+              return value;
+            }
+            return _GuestFuture(
+              CoreTypes.futureOf(element),
+              Future<_FutureBox>.sync(() => _FutureBox(value)),
+            );
+          } catch (error, trace) {
+            if (error is _AsyncUnsupported) rethrow;
+            return _GuestFuture(
+              CoreTypes.futureOf(element),
+              Future<_FutureBox>.error(error, trace),
+            );
+          }
+        }
+        final Future<_FutureBox> carrier = switch (target.name) {
+          'value' => Future<_FutureBox>.value(
+            _boxOrAdopt(arguments.firstOrNull, element),
+          ),
+          'error' => Future<_FutureBox>.error(
+            arguments.first!,
+            _asyncTrace(arguments.elementAtOrNull(1)),
+          ),
+          'microtask' => Future<_FutureBox>.microtask(
+            () => _boxOrAdopt(
+              _call(arguments.single, const [], const {}),
+              element,
+            ),
+          ),
+          _ => throw _AsyncUnsupported(
+            'Unmodeled async factory ${target.name}',
+          ),
+        };
+        return _GuestFuture(CoreTypes.futureOf(element), carrier);
+      }
+    }
     final body = bodies[target];
     if (body != null) return run(body, arguments, environment);
     if (target.owner == ValueType.object &&
@@ -285,6 +342,9 @@ final class FixtureRunner(
       return target.kind == .getter
           ? instance.hashCode
           : "Instance of '${instance.type.dartName}'";
+    }
+    if (target.library.toString() == 'dart:async') {
+      throw _AsyncUnsupported('Unmodeled async entry ${target.name}');
     }
     return imports[(target.library, target.name)]!(arguments.single as int);
   }
@@ -811,6 +871,13 @@ final class FixtureRunner(
     Map<String, Object?> named,
     List<ValueType> types,
   ) {
+    if (receiver is _GuestFuture || receiver is _GuestCompleter) {
+      if (selector.name == 'runtimeType' && selector.kind == .getter) {
+        return _typeValue(_runtimeValueType(receiver));
+      }
+      return _asyncMember(receiver!, selector, positional, named, types);
+    }
+
     if (selector.privateLibrary != null) return _noDynamicBridge;
     final name = selector.name;
     Object? invoke(int count, Object? Function() body) {
@@ -1015,6 +1082,170 @@ final class FixtureRunner(
       }
     }
     return _noDynamicBridge;
+  }
+
+  StackTrace? _asyncTrace(Object? value) {
+    _typeOperation(ValueType.stackTrace.nullable, value, cast: true);
+    if (value == null || value is StackTrace) return value as StackTrace?;
+    throw _AsyncUnsupported('Guest StackTrace async adapter');
+  }
+
+  int? _asyncErrorArity(Object? callback) {
+    _typeOperation(.function, callback, cast: true);
+    final signature = switch (callback) {
+      _FunctionValue() => callback.reifiedSignature,
+      _NativeFunction(:final signature) => signature,
+      _ => throw _AsyncUnsupported('Async error callback shape'),
+    };
+    for (final parameters in <List<ValueType>>[
+      [.object, .stackTrace],
+      [.object],
+    ]) {
+      if (FunctionType(.dynamicType, parameters).accepts(signature)) {
+        return parameters.length;
+      }
+    }
+    return null;
+  }
+
+  FutureOr<_FutureBox> _asyncErrorCallback(
+    Object? callback,
+    Object error,
+    StackTrace trace,
+    ValueType result,
+  ) {
+    if (error is _AsyncUnsupported) Error.throwWithStackTrace(error, trace);
+    final arity = _asyncErrorArity(callback);
+    if (arity == null) throw TypeError();
+    final value = _call(
+      callback,
+      arity == 2 ? [error, trace] : [error],
+      const {},
+    );
+    try {
+      return _boxOrAdopt(value, result);
+    } on TypeError {
+      throw ArgumentError('Error handler must return the future value type');
+    }
+  }
+
+  Object? _asyncMember(
+    Object receiver,
+    MemberSelector selector,
+    List<Object?> positional,
+    Map<String, Object?> named,
+    List<ValueType> types,
+  ) {
+    if (selector.privateLibrary != null) {
+      throw _AsyncUnsupported('Private async member');
+    }
+    if (receiver is _GuestCompleter) {
+      if (selector.kind == .getter) {
+        return switch (selector.name) {
+          'future' => receiver.future,
+          'isCompleted' => receiver.completer.isCompleted,
+          _ => throw _AsyncUnsupported(
+            'Completer member extraction ${selector.name}',
+          ),
+        };
+      }
+      if (selector.kind != .method || named.isNotEmpty || types.isNotEmpty) {
+        throw _AsyncUnsupported('Completer invocation shape');
+      }
+      switch (selector.name) {
+        case 'complete' when positional.length <= 1:
+          _typeOperation(
+            ValueType.futureOr(receiver.type.typeArguments.single).nullable,
+            positional.firstOrNull,
+            cast: true,
+          );
+          if (receiver.completer.isCompleted) {
+            throw StateError('Future already completed');
+          }
+          receiver.completer.complete(
+            _boxOrAdopt(
+              positional.firstOrNull,
+              receiver.type.typeArguments.single,
+            ),
+          );
+          return null;
+        case 'completeError'
+            when positional.length == 1 || positional.length == 2:
+          _typeOperation(.object, positional.first, cast: true);
+          receiver.completer.completeError(
+            positional.first!,
+            _asyncTrace(positional.elementAtOrNull(1)),
+          );
+          return null;
+        default:
+          throw _AsyncUnsupported(
+            'Unmodeled Completer member ${selector.name}',
+          );
+      }
+    }
+    final future = receiver as _GuestFuture;
+    if (selector.kind != .method) {
+      throw _AsyncUnsupported('Future member extraction ${selector.name}');
+    }
+    final element = future.type.typeArguments.single;
+    if (selector.name == 'then' &&
+        positional.length == 1 &&
+        named.keys.every((name) => name == 'onError') &&
+        types.length <= 1) {
+      final result = types.firstOrNull ?? ValueType.dynamicType;
+      final onError = named['onError'];
+      _typeOperation(
+        FunctionType(ValueType.futureOr(result), [element]),
+        positional.single,
+        cast: true,
+      );
+      if (onError != null && _asyncErrorArity(onError) == null) {
+        throw ArgumentError('Invalid async error handler');
+      }
+      return _GuestFuture(
+        CoreTypes.futureOf(result),
+        future.carrier.then<_FutureBox>(
+          (box) => _boxOrAdopt(
+            _call(positional.single, [box.value], const {}),
+            result,
+          ),
+          onError: onError == null
+              ? null
+              : (Object error, StackTrace trace) =>
+                    _asyncErrorCallback(onError, error, trace, result),
+        ),
+      );
+    }
+    if (selector.name == 'catchError' &&
+        positional.length == 1 &&
+        named.keys.every((name) => name == 'test') &&
+        types.isEmpty) {
+      final predicate = named['test'];
+      if (Zone.current != Zone.root &&
+          _asyncErrorArity(positional.single) == null) {
+        throw ArgumentError('Invalid async error handler');
+      }
+      if (predicate != null) {
+        _typeOperation(
+          FunctionType(.boolean, [.object]),
+          predicate,
+          cast: true,
+        );
+      }
+      return _GuestFuture(
+        future.type,
+        future.carrier.catchError(
+          (Object error, StackTrace trace) =>
+              _asyncErrorCallback(positional.single, error, trace, element),
+          test: predicate == null
+              ? null
+              : (Object error) =>
+                    error is! _AsyncUnsupported &&
+                    _call(predicate, [error], const {}) as bool,
+        ),
+      );
+    }
+    throw _AsyncUnsupported('Unmodeled Future member ${selector.name}');
   }
 
   Object? _call(
@@ -1320,6 +1551,17 @@ final class FixtureRunner(
     List<Object?> args, [
     Map<TypeParameterType, ValueType> environment = const {},
   ]) {
+    if (function.bodyKind == .asynchronous) {
+      final frame = _AsyncActivation(
+        function,
+        List.of(args),
+        Map.of(environment),
+      );
+      return _GuestFuture(
+        CoreTypes.futureOf(frame.completionType),
+        _driveAsync(frame),
+      );
+    }
     if (function.bodyKind == .syncGenerator) {
       final saved = List<Object?>.unmodifiable(args);
       final types = Map<TypeParameterType, ValueType>.unmodifiable(environment);
@@ -1331,14 +1573,69 @@ final class FixtureRunner(
     return _run(function, args, environment);
   }
 
+  /// Observes a root guest Future without flattening a future-valued payload.
+  Future<Object?> resolveAsync(Object? value) async {
+    if (value is! _GuestFuture) throw StateError('Expected a guest Future.');
+    return (await value.carrier).value;
+  }
+
+  Future<_FutureBox> _driveAsync(_AsyncActivation frame) async {
+    while (true) {
+      final step = _run(
+        frame.function,
+        frame.arguments,
+        frame.environment,
+        frame,
+      );
+      if (step is _Returned) {
+        final source = _futureType(step.value);
+        final awaited = _boxOrAdopt(
+          step.value,
+          frame.completionType,
+          check: false,
+        );
+        if (awaited is Future<_FutureBox>) return awaited;
+        // A Future in the value arm still takes the SDK's async completion path.
+        return source == null ? awaited : Future<_FutureBox>.value(awaited);
+      }
+      final suspended = step as _Suspended;
+      final operation = suspended.operation;
+      final type = substituteType(operation.result.type, frame.environment);
+      final awaited = _boxOrAdopt(suspended.operand, type, check: false);
+      Jump? edge;
+      try {
+        final box = await awaited;
+        frame.values[operation.result] = _typeOperation(
+          type,
+          box.value,
+          cast: true,
+        );
+        edge = operation.onResume;
+      } catch (error, trace) {
+        if (error is _AsyncUnsupported || operation.onThrow == null) rethrow;
+        frame.values[UnwindValue.exception] = error;
+        frame.values[UnwindValue.stackTrace] = trace;
+        edge = operation.onThrow;
+      }
+      if (edge == null) fail('A Never await returned');
+      Object? read(Value value) => switch (value) {
+        Constant() => _constant(value, frame.environment),
+        TestedValue(:final test) => read(test.operand),
+        _ => frame.values[value],
+      };
+      frame.arguments = edge.arguments.map(read).toList();
+      frame.block = edge.target;
+    }
+  }
+
   Object? _run(
     IrFunction function,
     List<Object?> args,
     Map<TypeParameterType, ValueType> environment, [
-    _GeneratorIterator? generator,
+    _ExecutionFrame? frame,
   ]) {
     ValueType resolve(ValueType type) => substituteType(type, environment);
-    final values = generator?.values ?? <Value, Object?>{};
+    final values = frame?.values ?? <Value, Object?>{};
     Object? read(Value v) => switch (v) {
       Constant() => _constant(v, environment),
       TestedValue(:final test) => read(test.operand),
@@ -1551,6 +1848,9 @@ final class FixtureRunner(
             );
             break;
           }
+          if (instance is _GuestFuture || instance is _GuestCompleter) {
+            throw _AsyncUnsupported('Async method tear-off');
+          }
           if (instance is! _Instance) {
             throw UnsupportedError('Unmodeled fixture method tear-off');
           }
@@ -1629,7 +1929,34 @@ final class FixtureRunner(
           :final positional,
           :final named,
         ):
-          final instance = read(receiver) as _Instance;
+          final value = read(receiver);
+          if (value is _GuestFuture || value is _GuestCompleter) {
+            final actual = value is _GuestFuture
+                ? value.type
+                : (value as _GuestCompleter).type;
+            final types = typeArguments.map(resolve).toList();
+            final signature = _instantiateSignature(
+              member.signatureFor(actual),
+              types,
+            );
+            final args = signature.bind<Object?>(
+              positional.map(read).toList(),
+              {for (final e in named.entries) e.key: read(e.value)},
+              (_) => null,
+            );
+            for (final (i, arg) in args.indexed) {
+              _typeOperation(signature.parameters[i], arg, cast: true);
+            }
+            values[op] = _asyncMember(
+              value!,
+              member.selector,
+              positional.map(read).toList(),
+              {for (final e in named.entries) e.key: read(e.value)},
+              types,
+            );
+            break;
+          }
+          final instance = value as _Instance;
           final target = _resolveMember(instance, member);
           values[op] = _invoke(
             _FunctionValue(target, instance),
@@ -1717,8 +2044,8 @@ final class FixtureRunner(
       }
     }
 
-    var block = generator?.block ?? function.entry;
-    args = generator?.arguments ?? args;
+    var block = frame?.block ?? function.entry;
+    args = frame?.arguments ?? args;
     for (var steps = 0; steps < 1000; steps++) {
       for (final (i, p) in block.parameters.indexed) {
         values[p] = args[i];
@@ -1730,11 +2057,19 @@ final class FixtureRunner(
       try {
         switch (end) {
           case Return(:final value):
-            if (generator != null) return generator.complete();
-            return value == null ? null : read(value);
+            if (frame is _GeneratorIterator) return frame.complete();
+            final result = value == null ? null : read(value);
+            return frame is _AsyncActivation ? _Returned(result) : result;
+          case Await():
+            if (frame is! _AsyncActivation) {
+              fail('Await in an ordinary activation');
+            }
+            return _Suspended(end, read(end.operand));
           case Yield(:final value, :final onResume):
-            if (generator == null) fail('Yield in an ordinary activation');
-            generator
+            if (frame is! _GeneratorIterator) {
+              fail('Yield in an ordinary activation');
+            }
+            frame
               .._current = read(value)
               ..arguments = onResume.arguments.map(read).toList()
               ..block = onResume.target;
@@ -1760,7 +2095,7 @@ final class FixtureRunner(
             edge = read(end.condition) as bool ? end.ifTrue : end.ifFalse;
         }
       } catch (exception, trace) {
-        if (handler == null) rethrow;
+        if (exception is _AsyncUnsupported || handler == null) rethrow;
         values[UnwindValue.exception] = exception;
         values[UnwindValue.stackTrace] = trace;
         edge = handler;
@@ -1783,17 +2118,84 @@ final class _GeneratorIterable(
   Iterator<Object?> get iterator => _createIterator();
 }
 
-final class _GeneratorIterator(
-  final FixtureRunner runner,
+base class _ExecutionFrame(
   final IrFunction function,
   var List<Object?> arguments,
   final Map<TypeParameterType, ValueType> environment,
-) implements Iterator<Object?> {
+) {
   final values = <Value, Object?>{};
-  final ClassType type = CoreTypes.iteratorOf(
+  Block block = function.entry;
+}
+
+final class _AsyncActivation(super.function, super.arguments, super.environment)
+    extends _ExecutionFrame {
+  late final ValueType completionType = substituteType(
+    function.completionType!,
+    environment,
+  );
+}
+
+final class _Returned(final Object? value);
+final class _Suspended(final Await operation, final Object? operand);
+final class _FutureBox(final Object? value);
+
+final class _GuestFuture(
+  final ClassType type,
+  final Future<_FutureBox> carrier,
+) {
+  @override
+  String toString() =>
+      throw _AsyncUnsupported('Concrete Future string representation');
+}
+
+final class _GuestCompleter(final ClassType type, bool synchronous) {
+  final Completer<_FutureBox> completer = synchronous
+      ? Completer<_FutureBox>.sync()
+      : Completer<_FutureBox>();
+  late final _GuestFuture future = _GuestFuture(
+    CoreTypes.futureOf(type.typeArguments.single),
+    completer.future,
+  );
+  @override
+  String toString() =>
+      throw _AsyncUnsupported('Concrete Completer string representation');
+}
+
+// Capability failures must not be mistaken for catchable Dart program errors.
+final class _AsyncUnsupported(super.message) extends UnsupportedError;
+
+ClassType? _futureType(Object? value) => switch (value) {
+  _GuestFuture(:final type) => type,
+  _Instance(:final type) => CoreTypes.view(type, CoreTypes.future),
+  Future() => throw _AsyncUnsupported('Native Future runtime bridge'),
+  _ => null,
+};
+
+FutureOr<_FutureBox> _boxOrAdopt(
+  Object? value,
+  ValueType type, {
+  bool check = true,
+}) {
+  if (check) _typeOperation(ValueType.futureOr(type), value, cast: true);
+  final actual = _futureType(value);
+  if (actual != null && CoreTypes.futureOf(type).accepts(actual)) {
+    if (value is! _GuestFuture) {
+      throw _AsyncUnsupported('User-defined Future await/adoption');
+    }
+    return value.carrier;
+  }
+  return _FutureBox(value);
+}
+
+final class _GeneratorIterator(
+  final FixtureRunner runner,
+  super.function,
+  super.arguments,
+  super.environment,
+) extends _ExecutionFrame implements Iterator<Object?> {
+  late final ClassType type = CoreTypes.iteratorOf(
     substituteType(function.yieldType!, environment),
   );
-  Block block = function.entry;
   Object? _current;
   bool _done = false, _running = false;
 
@@ -1834,7 +2236,10 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     _TypeValue() => ValueType.typeType,
     _Instance(:final type) => type,
     _CollectionValue(:final type) => type,
-    _GeneratorIterable(:final type) || _GeneratorIterator(:final type) => type,
+    _GeneratorIterable(:final type) ||
+    _GeneratorIterator(:final type) ||
+    _GuestFuture(:final type) ||
+    _GuestCompleter(:final type) => type,
     _NativeFunction(:final signature) => signature,
     _FunctionValue() => value.reifiedSignature,
     _ => null,
@@ -1881,7 +2286,7 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
   }
   if (value is Future &&
       CoreTypes.view(type.nonNullable, CoreTypes.future) != null) {
-    throw UnsupportedError('Native Future runtime type checks');
+    throw _AsyncUnsupported('Native Future runtime type checks');
   }
   if (type == .nullType) return run<Null>();
   return switch (type.nonNullable) {
@@ -1896,6 +2301,7 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     ValueType.typeError => scalar<TypeError>(),
     ValueType.noSuchMethodError => scalar<NoSuchMethodError>(),
     ValueType.assertionError => scalar<AssertionError>(),
+    ValueType.argumentError => scalar<ArgumentError>(),
     ValueType.stateError => scalar<StateError>(),
     ValueType.unsupportedError => scalar<UnsupportedError>(),
     ValueType.stackTrace => scalar<StackTrace>(),
@@ -2239,6 +2645,9 @@ ValueType _runtimeValueType(Object? value) => switch (value) {
   _CollectionValue(:final type) when type.declaration == CoreTypes.list => type,
   _CollectionValue() => throw UnsupportedError(
     'Unmodeled concrete collection runtime type',
+  ),
+  _GuestFuture() || _GuestCompleter() => throw _AsyncUnsupported(
+    'Unmodeled concrete async runtime type',
   ),
   _GeneratorIterable() || _GeneratorIterator() => throw UnsupportedError(
     'Unmodeled concrete generator runtime type',

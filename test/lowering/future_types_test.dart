@@ -135,27 +135,24 @@ void main() {
     );
   });
 
-  test(
-    'FutureOr types do not prematurely permit asynchronous bodies',
-    () async {
-      final directory = Directory.systemTemp.createTempSync(
-        'dartc-future-types-',
+  test('FutureOr types do not permit asynchronous generator bodies', () async {
+    final directory = Directory.systemTemp.createTempSync(
+      'dartc-future-types-',
+    );
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final file = File('${directory.path}/entry.dart')
+      ..writeAsStringSync(
+        "import 'dart:async'; Stream<int> f() async* { yield 1; }",
       );
-      addTearDown(() => directory.deleteSync(recursive: true));
-      final file = File('${directory.path}/entry.dart')
-        ..writeAsStringSync(
-          "import 'dart:async'; FutureOr<int> f() async => 1;",
-        );
-      await expectLater(
-        CheckedLibraries.read([file.path], Lowering.lower),
-        throwsA(
-          isA<UnsupportedError>().having(
-            (e) => e.message,
-            'feature',
-            contains('asynchronous function bodies'),
-          ),
+    await expectLater(
+      CheckedLibraries.read([file.path], Lowering.lower),
+      throwsA(
+        isA<UnsupportedError>().having(
+          (e) => e.message,
+          'feature',
+          contains('asynchronous generator bodies'),
         ),
-      );
-    },
-  );
+      ),
+    );
+  });
 }

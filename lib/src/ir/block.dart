@@ -6,9 +6,13 @@ import 'value.dart';
 /// The control transfer executed after a block's last instruction.
 sealed class const Terminator();
 
-/// A transfer back to the caller with an optional result.
+/// Ends this activation with an optional result.
 ///
 /// A function declared `void` can still forward a value to its caller.
+/// An async body supplies an already checked `FutureOr<T>` only after its
+/// finalizers finish. At the activation boundary the runtime adopts a matching
+/// `Future<T>`; adoption errors do not re-enter the body's earlier catch regions.
+/// This completion protocol is distinct from Await's local exception edge.
 final class const Return([
   /// The returned operand, or `null` for a bare return.
   final Value? value,
@@ -25,6 +29,26 @@ final class const Yield(
   /// The continuation taken only when iteration is requested again.
   final Jump onResume,
 ) extends Terminator;
+
+/// Suspends an async activation until [operand] supplies [result].
+///
+/// The runtime awaits only the `Future<T>` arm, where T is [result]'s type;
+/// a future belonging to the value arm remains a value. Scalar and completed
+/// future operands still use Dart's asynchronous resumption protocol.
+final class Await(
+  final Value operand,
+  final AwaitResult result, {
+  required final Jump? onResume,
+  final Jump? onThrow,
+}) extends Terminator {
+  this {
+    if (operand.type is CellType ||
+        !ValueType.futureOr(result.type).accepts(operand.type) ||
+        (result.type == .never) != (onResume == null)) {
+      throw ArgumentError('Invalid await operand or continuations.');
+    }
+  }
+}
 
 /// The end of a path whose [cause] cannot return a value.
 final class Unreachable(
@@ -151,6 +175,7 @@ final class Block([Iterable<ValueType> types = const []]) {
     ExhaustivenessFailure(:final onThrow) => [?onThrow],
     Invoke(:final onReturn, :final onThrow) => [?onReturn, onThrow],
     Yield(:final onResume) => [onResume],
+    Await(:final onResume, :final onThrow) => [?onResume, ?onThrow],
     final Jump jump => [jump],
     Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],
   };

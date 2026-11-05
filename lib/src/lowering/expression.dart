@@ -39,6 +39,14 @@ Value? _operatorReceiver(FunctionContext context, ast.Expression expression) {
 Value? _lower(FunctionContext context, ast.Expression expression) {
   final unit = context.unit;
   switch (expression) {
+    case ast.AwaitExpression(expression: final operand):
+      final value = lowerExpression(context, operand);
+      return value == null
+          ? null
+          : context.awaitValue(
+              value,
+              context.typeOf(expression.staticType!, expression),
+            );
     case ast.TypeLiteral():
       final prefix = expression.type.importPrefix?.element;
       if (prefix is PrefixElement &&

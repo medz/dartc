@@ -62,6 +62,13 @@ sealed class const ValueType() {
     false,
   );
 
+  /// The error raised when a core protocol rejects an argument.
+  static const ClassType argumentError = ClassType._core(
+    'ArgumentError',
+    error,
+    false,
+  );
+
   /// The error raised when an operation is invalid in the current state.
   static const ClassType stateError = ClassType._core(
     'StateError',

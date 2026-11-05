@@ -11,6 +11,7 @@ library;
 
 export 'src/ir/block.dart'
     show
+        Await,
         Block,
         Branch,
         ExhaustivenessFailure,
@@ -49,6 +50,7 @@ export 'src/ir/type.dart'
         typeParametersIn;
 export 'src/ir/value.dart'
     show
+        AwaitResult,
         TypeConstant,
         ReifyType,
         ObjectHashCode,

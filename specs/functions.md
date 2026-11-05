@@ -17,10 +17,17 @@
 | 裸 `Function`/dynamic 函数值调用 | 支持已表示的函数、方法、构造器、闭包及 callable object，包括 Function 上界和 `.call` 提取。先验证位置/命名/类型实参个数，再应用实际声明的默认类型、界限和形参检查。保留闭包环境及构造器别名身份。原生回调只支持明确建模的签名。见[动态调用样本](../test/lowering/fixtures/dynamic_dispatch.dart)。 |
 | 可调用对象、隐式 `call` 提取 | 支持实例的普通和泛型 `call` 调用，以及在函数类型上下文中隐式提取其绑定方法。见[可调用对象样本](../test/lowering/fixtures/callables.dart)。 |
 | `sync*` | 支持带显式 `Yield`/恢复边的生成器 IR：调用及取得 iterator 不执行函数体，每个 iterator 的局部状态独立，外层捕获绑定仍共享。支持 `yield`、`yield*`、泛型及跨暂停的 catch/finally。行为通过 SDK 对照验证；FutureOr 结果类型、生成器的具体实现 runtimeType 和同一 iterator 重入尚未建模，原生后端的帧保存/状态机转换尚未实现。见[生成器样本](../test/lowering/fixtures/generators.dart)。 |
-| `async`、`async*` | 待实现，保持显式拒绝。 |
+| `async`、`await` | IR 区分公开返回签名与 `completionType`，用显式 `Await` 终结符和正常/异常恢复边保存暂停点。支持立即执行、类型化 Future/value 双臂、跨暂停的捕获/异常/控制流，以及 finally 完成后才接续返回的 Future；返回表达式的类型检查仍在 finally 之前。参考执行器使用 SDK Future 微任务，已作顺序/错误/身份对照；原生后端的异步帧与运行时转换尚未实现。见[异步样本](../test/lowering/fixtures/async_functions.dart)。 |
+| `async*`、`await for` | 待实现，保持显式拒绝；Stream 的订阅、暂停/取消和异步清理另行建模。 |
 | `external` 函数 | 待实现。 |
 
 [IR 行为对照](../test/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/functions.md)。
+
+## 异步参考执行器范围
+
+测试执行器将 guest Future 的类型与载荷分开保存，使用真实 SDK Future 调度，而非把暂停伪装成普通调用或同步循环。支持 `Future.value/error/sync/microtask`、`Completer`/`Completer.sync`、`then`、`catchError` 和 `scheduleMicrotask` 的已建模协议；`Future.sync` 保留可直接返回的 Future 身份与实际类型。普通同步函数不创建异步帧。
+
+参考执行器显式拒绝原生 Future 输入的类型桥、自定义 Future 的 await/接续协议、`whenComplete` 及其他未建模 Future API、Future/Completer 的方法提取和具体实现 runtimeType/toString。能力缺口不会交给源码 catch/error handler 伪装成程序行为。Zone 的用户 API、完整异步堆栈文本、Stream 和取消不在本片范围。这些执行器边界不等于生产 IR 的语法拒绝，IR 仍保留正常外部调用。
 
 ## 规范依据
 

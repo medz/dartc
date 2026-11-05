@@ -24,8 +24,9 @@ final class FunctionContext(
   final Bindings bindings,
   final bool Function(VariableElement) _isWritten,
   final ClosurePlan _closures,
-  final FunctionTarget target,
-) {
+  final FunctionTarget target, {
+  final bool isAsynchronous = false,
+}) {
   /// The blocks created so far, with the function entry first.
   final blocks = <Block>[];
 
@@ -326,6 +327,23 @@ final class FunctionContext(
     );
     current = next;
     return next?.parameters.single ?? operation;
+  }
+
+  /// Suspends after evaluating an operand, preserving this site's error edge.
+  Value? awaitValue(Value operand, ValueType type) {
+    if (!isAsynchronous) throw StateError('Await outside an async body.');
+    final result = AwaitResult(type);
+    final next = type == .never ? null : addBlock([type]);
+    current!.finish(
+      Await(
+        operand,
+        result,
+        onResume: next == null ? null : Jump(next, [result]),
+        onThrow: _unwind,
+      ),
+    );
+    current = next;
+    return next?.parameters.single;
   }
 
   /// Throws to the active handler or caller, preserving [stackTrace] for a rethrow.

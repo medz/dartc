@@ -9,6 +9,7 @@ import 'value.dart';
   List<Block> blocks,
   Iterable<Constant> defaults, {
   ValueType? yieldType,
+  ValueType? completionType,
 }) {
   Set<FunctionTarget>? closures;
   Set<GlobalVariable>? globals;
@@ -65,6 +66,7 @@ import 'value.dart';
   }
   checkTypeScope(target.signature);
   if (yieldType != null) checkTypeScope(yieldType);
+  if (completionType != null) checkTypeScope(completionType);
   for (final parameter in target.typeParameters) {
     checkTypeScope(parameter.bound);
     if (parameter.defaultType case final defaultType?) {
@@ -107,8 +109,13 @@ import 'value.dart';
     for (var i = 0; i < block.instructions.length; i++) {
       define(block.instructions[i], i);
     }
-    if (block.end case Invoke(:final operation)) {
-      define(operation, block.instructions.length);
+    switch (block.end) {
+      case Invoke(:final operation):
+        define(operation, block.instructions.length);
+      case Await(:final result):
+        define(result, block.instructions.length);
+      default:
+        break;
     }
     for (final next in block.successors) {
       final incoming = predecessors?[next.target];
@@ -133,7 +140,7 @@ import 'value.dart';
       }
       final (owner, index) = definition;
       if (index == owner.instructions.length) {
-        throw StateError('Invoke result used outside its normal edge.');
+        throw StateError('Control-flow result used outside its normal edge.');
       }
       if (owner == block) {
         if (index >= position) {
@@ -156,7 +163,7 @@ import 'value.dart';
       Jump edge, {
       TypeTest? test,
       bool? outcome,
-      Instruction? result,
+      Value? result,
       bool unwinding = false,
     }) {
       for (final value in edge.arguments) {
@@ -248,7 +255,9 @@ import 'value.dart';
     }
     switch (end) {
       case Return(:final value):
-        final resultType = yieldType == null
+        final resultType = completionType != null
+            ? ValueType.futureOr(completionType)
+            : yieldType == null
             ? target.returnType
             : ValueType.nullType;
         if (!resultType.accepts(value?.type ?? .nullType)) {
@@ -257,6 +266,18 @@ import 'value.dart';
           );
         }
         if (value != null) use(value, count);
+      case Await(
+        :final operand,
+        :final result,
+        :final onResume,
+        :final onThrow,
+      ):
+        if (completionType == null) {
+          throw StateError('Await outside an async body.');
+        }
+        use(operand, count);
+        if (onResume != null) useEdge(onResume, result: result);
+        if (onThrow != null) useEdge(onThrow, unwinding: true);
       case Yield(:final value, :final onResume):
         if (yieldType == null ||
             value.type is CellType ||
