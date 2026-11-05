@@ -62,6 +62,47 @@ abstract final class CoreTypes() {
     isFinal: true,
   );
 
+  static final ClassType invocation = _declare('Invocation', 0);
+
+  /// Factory-created Invocation storage, separate from user implementations.
+  static final ClassType invocationStorage = ClassType(
+    Uri.parse('dart:core'),
+    '_Invocation',
+    interfaces: [invocation],
+  );
+  static final InstanceField invocationMemberName = InstanceField(
+    invocationStorage,
+    'memberName',
+    symbol,
+    isFinal: true,
+  );
+  static final InstanceField invocationTypeArguments = InstanceField(
+    invocationStorage,
+    'typeArguments',
+    listOf(ValueType.typeType),
+    isFinal: true,
+  );
+  static final InstanceField invocationPositionalArguments = InstanceField(
+    invocationStorage,
+    'positionalArguments',
+    listOf(ValueType.dynamicType),
+    isFinal: true,
+  );
+  static final InstanceField invocationNamedArguments = InstanceField(
+    invocationStorage,
+    'namedArguments',
+    mapOf(symbol, ValueType.dynamicType),
+    isFinal: true,
+  );
+
+  /// Method (0), getter (1), or setter (2); the public flags are derived.
+  static final InstanceField invocationKind = InstanceField(
+    invocationStorage,
+    '_kind',
+    ValueType.integer,
+    isFinal: true,
+  );
+
   static final ClassType iterable = _declare('Iterable', 1);
   static final ClassType iterator = _declare('Iterator', 1);
   static final ClassType list = _declare('List', 1, sequence: true);

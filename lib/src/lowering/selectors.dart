@@ -327,22 +327,24 @@ final class SelectorChain(
         coreToString &&
         !direct &&
         (CoreTypes.view(known.type, CoreTypes.enumeration) != null ||
-            coreSymbolMember(member, known.type));
+            coreRuntimeMember(member, known.type));
     if (coreToString && !supportedToString) {
       unsupported(context.unit, node, 'core Object.toString');
     }
-    if (member.library.uri.toString() == 'dart:core' &&
+    if (member.library.isDartCore &&
+        member is GetterElement &&
+        member.name == 'hashCode' &&
+        (member.enclosingElement.name == 'Object' ||
+            member.enclosingElement.name == 'Type' ||
+            coreRuntimeMember(member, known.type))) {
+      return context.normal(
+        context.emit(ObjectHashCode(known, direct: direct)),
+      );
+    }
+    if (member.library.isDartCore &&
         !supportedToString &&
+        !coreRuntimeMember(member, known.type) &&
         (member is GetterElement || arguments != null)) {
-      if (member is GetterElement &&
-          member.name == 'hashCode' &&
-          (member.enclosingElement.name == 'Object' ||
-              member.enclosingElement.name == 'Type' ||
-              coreSymbolMember(member, known.type))) {
-        return context.normal(
-          context.emit(ObjectHashCode(known, direct: direct)),
-        );
-      }
       final args = context.arguments(arguments, evaluate);
       if (args == null) return null;
       if (args.named.isEmpty) {

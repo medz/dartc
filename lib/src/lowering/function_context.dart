@@ -88,7 +88,8 @@ final class FunctionContext(
       converted.add(argument);
     }
     args = converted;
-    if (member.library.uri.toString() == 'dart:core') {
+    if (member.library.isDartCore &&
+        !coreRuntimeMember(member, receiver.type)) {
       final operation = coreCollectionOperation(member.name!, receiver, args);
       if (operation != null) return normal(emit(operation));
     }

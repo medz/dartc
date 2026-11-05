@@ -206,6 +206,57 @@ final class FixtureRunner(
             .typeEnvironment,
       };
     }
+    final body = bodies[target];
+    if (body != null) return run(body, arguments, environment);
+    if (_isInvocationFactory(target)) {
+      return target.name == 'method'
+          ? _invocation(arguments[0], null, arguments[1], arguments[2], 0)
+          : _invocation(
+              arguments[0],
+              arguments[1],
+              arguments[2],
+              arguments[3],
+              0,
+            );
+    }
+    if (target.owner == CoreTypes.invocation &&
+        target.kind == .initializer &&
+        target.name == 'new') {
+      return null;
+    }
+    if (_isInvocationGetter(target)) {
+      final instance = arguments.single as _Instance;
+      if (target.owner == CoreTypes.invocationStorage &&
+          instance.type == CoreTypes.invocationStorage) {
+        return switch (target.name) {
+          'memberName' => instance.fields[CoreTypes.invocationMemberName],
+          'typeArguments' => instance.fields[CoreTypes.invocationTypeArguments],
+          'positionalArguments' =>
+            instance.fields[CoreTypes.invocationPositionalArguments],
+          'namedArguments' =>
+            instance.fields[CoreTypes.invocationNamedArguments],
+          'isMethod' => instance.fields[CoreTypes.invocationKind] == 0,
+          'isGetter' => instance.fields[CoreTypes.invocationKind] == 1,
+          'isSetter' => instance.fields[CoreTypes.invocationKind] == 2,
+          'isAccessor' => instance.fields[CoreTypes.invocationKind] != 0,
+          _ => throw StateError('Invalid Invocation getter'),
+        };
+      }
+      if (target.owner == CoreTypes.invocation) {
+        if (target.name == 'typeArguments') return _emptyList(.typeType);
+        if (target.name == 'isAccessor') {
+          bool flag(String name) => _invoke(
+            _FunctionValue(
+              _resolveMember(instance, _invocationFlags[name]!),
+              instance,
+            ),
+            const [],
+            const {},
+          ) as bool;
+          return flag('isGetter') || flag('isSetter');
+        }
+      }
+    }
     if (target.library.toString() == 'dart:core' &&
         target.name == 'identical') {
       return identical(arguments[0], arguments[1]);
@@ -218,10 +269,7 @@ final class FixtureRunner(
           ? instance.hashCode
           : "Instance of '${instance.type.dartName}'";
     }
-    final body = bodies[target];
-    return body != null
-        ? run(body, arguments, environment)
-        : imports[(target.library, target.name)]!(arguments.single as int);
+    return imports[(target.library, target.name)]!(arguments.single as int);
   }
 
   _Instance _construct(
@@ -229,6 +277,17 @@ final class FixtureRunner(
     List<Object?> arguments, [
     ClassType? instantiatedType,
   ]) {
+    if (init.owner == CoreTypes.invocationStorage &&
+        init.kind == .initializer &&
+        (init.name == 'getter' || init.name == 'setter')) {
+      return _invocation(
+        arguments[0],
+        null,
+        init.name == 'setter' ? arguments[1] : null,
+        null,
+        init.name == 'getter' ? 1 : 2,
+      );
+    }
     final instance = _Instance(instantiatedType ?? init.owner!, this);
     if (init.owner == CoreTypes.mapEntry) {
       instance.fields[CoreTypes.mapEntryKey] = arguments[0];
@@ -240,6 +299,121 @@ final class FixtureRunner(
       _enter(init, [instance, ...arguments]);
     }
     return instance;
+  }
+
+  Object? _emptyList(ValueType element) =>
+      _constant(SequenceConstant(CoreTypes.listOf(element), const []));
+
+  Object? _emptyNamed(ValueType value) => _constant(
+    MapConstant(CoreTypes.mapOf(CoreTypes.symbol, value), const []),
+  );
+
+  _CollectionValue _invocationList(Object source, ValueType element) {
+    if (source is _Instance &&
+        (source.type.asInstanceOf(CoreTypes.list) != null ||
+            source.type.asInstanceOf(CoreTypes.set) != null)) {
+      // The SDK's List/Set protocols have efficient length. A zero length
+      // skips iterator acquisition; mismatched lengths fail during/after copy.
+      final length = _member(source, 'length', .getter, []) as int;
+      final storage = List<Object?>.filled(length, null);
+      if (length > 0) {
+        var index = 0;
+        final iterator = _iterator(source);
+        while (_moveNext(iterator)) {
+          final value = _typeOperation(element, _current(iterator), cast: true);
+          storage[index++] = value;
+        }
+        if (index != length) throw ConcurrentModificationError(source);
+      }
+      return _CollectionValue(
+        CoreTypes.listOf(element),
+        storage,
+        immutable: true,
+      );
+    }
+    final list = _CollectionValue(CoreTypes.listOf(element), <Object?>[]);
+    _spread(list, source, false, false, false);
+    return _CollectionValue(list.type, list.storage, immutable: true);
+  }
+
+  _Instance _invocation(
+    Object? memberName,
+    Object? types,
+    Object? positional,
+    Object? named,
+    int kind,
+  ) {
+    // Evaluate and copy in SDK order; later protocols are never entered after
+    // an earlier traversal or element conversion fails.
+    final typeArguments = types == null
+        ? _emptyList(.typeType)
+        : _invocationList(types, .typeType);
+    final positionalArguments = kind == 1
+        ? _emptyList(.object)
+        : kind == 2
+        ? _CollectionValue(
+            CoreTypes.listOf(ValueType.object.nullable),
+            <Object?>[positional],
+            immutable: true,
+          )
+        : positional == null
+        ? _emptyList(ValueType.object.nullable)
+        : _invocationList(positional, ValueType.object.nullable);
+    Object? namedArguments;
+    if (kind != 0) {
+      namedArguments = _emptyNamed(.object);
+    } else {
+      final empty =
+          named == null ||
+          (named is _Instance
+              ? _member(named, 'isEmpty', .getter, []) as bool
+              : ((named is _CollectionValue ? named.storage : named)
+                        as Map<Object?, Object?>)
+                    .isEmpty);
+      if (empty) {
+        namedArguments = _emptyNamed(ValueType.object.nullable);
+      } else {
+        final map = _CollectionValue(
+          CoreTypes.mapOf(CoreTypes.symbol, ValueType.object.nullable),
+          <Object?, Object?>{},
+        );
+        _spread(map, named, true, false, false);
+        namedArguments = _CollectionValue(
+          map.type,
+          map.storage,
+          immutable: true,
+        );
+      }
+    }
+    return _Instance(CoreTypes.invocationStorage, this)
+      ..fields.addAll({
+        CoreTypes.invocationMemberName: memberName,
+        CoreTypes.invocationTypeArguments: typeArguments,
+        CoreTypes.invocationPositionalArguments: positionalArguments,
+        CoreTypes.invocationNamedArguments: namedArguments,
+        CoreTypes.invocationKind: kind,
+      });
+  }
+
+  bool _isInvocationFactory(FunctionTarget target) =>
+      target.owner == CoreTypes.invocation &&
+      target.kind == .factory &&
+      (target.name == 'method' || target.name == 'genericMethod');
+
+  Object? _defaultArgument(
+    FunctionTarget target,
+    int index,
+    Map<TypeParameterType, ValueType> environment,
+  ) {
+    final defaults = bodies[target]?.defaults;
+    if (defaults != null && defaults.containsKey(index)) {
+      return _constant(defaults[index]!, environment);
+    }
+    if (_isInvocationFactory(target) &&
+        index == (target.name == 'method' ? 2 : 3)) {
+      return null;
+    }
+    throw StateError('Missing fixture default: ${target.name}[$index]');
   }
 
   Object? _invoke(
@@ -282,7 +456,7 @@ final class FixtureRunner(
     final arguments = signature.bind<Object?>(
       positional,
       named,
-      (i) => _constant(bodies[target]!.defaults[i]!, environment),
+      (i) => _defaultArgument(target, i, environment),
     );
     for (final (i, arg) in arguments.indexed) {
       _typeOperation(signature.parameters[i], arg, cast: true);
@@ -349,9 +523,82 @@ final class FixtureRunner(
           member.kind == .method &&
           member.name == 'toString';
 
+  bool _isInvocationGetter(FunctionTarget member) =>
+      (member.owner == CoreTypes.invocation ||
+          member.owner == CoreTypes.invocationStorage) &&
+      member.kind == .getter &&
+      const {
+        'memberName',
+        'typeArguments',
+        'positionalArguments',
+        'namedArguments',
+        'isMethod',
+        'isGetter',
+        'isSetter',
+        'isAccessor',
+      }.contains(member.name);
+
+  static final _invocationFlags = {
+    for (final name in ['isGetter', 'isSetter'])
+      name: FunctionTarget(
+        CoreTypes.invocation.library,
+        name,
+        .boolean,
+        const [],
+        owner: CoreTypes.invocation,
+        kind: .getter,
+        isAbstract: true,
+      ),
+  };
+
+  static final _invocationDefaults = {
+    for (final entry in {
+      'typeArguments': CoreTypes.listOf(ValueType.typeType),
+      'isAccessor': ValueType.boolean,
+    }.entries)
+      entry.key: FunctionTarget(
+        CoreTypes.invocation.library,
+        entry.key,
+        entry.value,
+        const [],
+        owner: CoreTypes.invocation,
+        kind: .getter,
+      ),
+  };
+
+  final _invocationStorageGetters = <String, FunctionTarget>{};
+
   FunctionTarget _resolveMember(_Instance instance, FunctionTarget member) {
     final target = program.dispatch(instance.type, member);
     if (target != null) return target;
+    if (_isInvocationGetter(member) &&
+        instance.type == CoreTypes.invocationStorage) {
+      return _invocationStorageGetters.putIfAbsent(
+        member.name,
+        () => FunctionTarget(
+          CoreTypes.invocationStorage.library,
+          member.name,
+          member.returnType,
+          const [],
+          owner: CoreTypes.invocationStorage,
+          kind: .getter,
+        ),
+      );
+    }
+    if (member.kind == .getter) {
+      // An abstract redeclaration or unrelated interface can supply the static
+      // selector while the receiver still inherits Invocation's concrete body.
+      final inherited = _invocationDefaults[member.name];
+      if (inherited != null) {
+        for (
+          ClassType? type = instance.type;
+          type != null;
+          type = type.superclass
+        ) {
+          if (type == CoreTypes.invocation) return inherited;
+        }
+      }
+    }
     if (_isSymbolMember(member) && CoreTypes.symbol.accepts(instance.type)) {
       // Keep the implementation identity: a direct Object.toString call must
       // not execute the Symbol implementation or redispatch a user override.

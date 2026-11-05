@@ -640,6 +640,8 @@ final class Bindings({final bool enableAssertions = false}) {
         'MapEntry' => CoreTypes.mapEntry,
         'Enum' => CoreTypes.enumeration,
         'Symbol' => CoreTypes.symbol,
+        'Invocation' => CoreTypes.invocation,
+        '_Invocation' => CoreTypes.invocationStorage,
         _ => null,
       };
       if (builtin != null) {
@@ -748,14 +750,28 @@ InstanceField? coreEnumField(ExecutableElement? member) {
   };
 }
 
-/// Whether this SDK member has Symbol's narrow runtime fallback.
+/// Whether this SDK member has a supported runtime-backed virtual protocol.
 ///
-/// Keep the public protocol virtual: user implementations of Symbol need not
-/// carry the SDK implementation's storage and may override either operation.
-bool coreSymbolMember(ExecutableElement member, ValueType receiver) {
+/// Keep these public protocols virtual: user implementations need not carry
+/// the SDK implementation's storage, and subclasses may inherit or override
+/// their concrete getters.
+bool coreRuntimeMember(ExecutableElement member, ValueType receiver) {
   if (!member.library.isDartCore || member.isStatic) return false;
   return switch ((member, member.enclosingElement?.name, member.name)) {
     (GetterElement(), 'Symbol', 'hashCode') => true,
+    (
+      GetterElement(),
+      'Invocation',
+      'memberName' ||
+          'typeArguments' ||
+          'positionalArguments' ||
+          'namedArguments' ||
+          'isMethod' ||
+          'isGetter' ||
+          'isSetter' ||
+          'isAccessor',
+    ) =>
+      true,
     (MethodElement(), 'Object', 'toString') =>
       CoreTypes.view(receiver, CoreTypes.symbol) != null,
     _ => false,

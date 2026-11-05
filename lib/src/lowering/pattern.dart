@@ -357,7 +357,7 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
               return context.normal(context.emit(LoadField(slot, object)));
             }
             if (member.library.isDartCore &&
-                !coreSymbolMember(member, object.type)) {
+                !coreRuntimeMember(member, object.type)) {
               final operation = member is GetterElement
                   ? coreCollectionOperation(member.name!, object, [])
                   : null;
