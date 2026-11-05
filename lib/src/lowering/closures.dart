@@ -119,7 +119,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
             element is ExecutableElement &&
             element is! ConstructorElement &&
             !element.isStatic &&
-            element.enclosingElement is ClassElement) {
+            isClassOrEnum(element.enclosingElement)) {
           _useReceiver();
         }
       case ast.ThisExpression() || ast.SuperExpression():

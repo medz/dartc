@@ -39,6 +39,12 @@ final class Bindings({final bool enableAssertions = false}) {
     if (previous != null) return previous;
     final parameters = element.formalParameters;
     final container = element.enclosingElement;
+    if (element.isStatic &&
+        element.library.isDartCore &&
+        container is ClassElement &&
+        container.name == 'Enum') {
+      unsupported(unit, site, 'core Enum member ${element.name}');
+    }
     final owner = container is InterfaceElement
         ? classType(container, unit, site)
         : null;
@@ -135,6 +141,13 @@ final class Bindings({final bool enableAssertions = false}) {
       unit,
       site,
     );
+    if (owner == CoreTypes.enumeration) {
+      return switch (element.name) {
+        'index' => CoreTypes.enumIndex,
+        '_name' => CoreTypes.enumName,
+        _ => unsupported(unit, site, 'Enum field ${element.name}'),
+      };
+    }
     if (owner == CoreTypes.mapEntry) {
       return element.name == 'key'
           ? CoreTypes.mapEntryKey
@@ -290,7 +303,7 @@ final class Bindings({final bool enableAssertions = false}) {
             unsupported(unit, site, 'constant instance storage');
           }
           final element = layerType.element;
-          if (element is! ClassElement ||
+          if (!isClassOrEnum(element) ||
               element.mixins.isNotEmpty ||
               element.library.isInSdk &&
                   !layerType.isDartCoreObject &&
@@ -319,6 +332,23 @@ final class Bindings({final bool enableAssertions = false}) {
               unit,
               site,
             );
+          }
+          if (element is EnumElement) {
+            // Analyzer stores Enum's inherited slots directly in the enum value,
+            // unlike the separate superclass layer used by ordinary instances.
+            fields[CoreTypes.enumIndex] = _constantValue(
+              layer.getField('index'),
+              syntax,
+              unit,
+              site,
+            );
+            fields[CoreTypes.enumName] = _constantValue(
+              layer.getField('_name'),
+              syntax,
+              unit,
+              site,
+            );
+            break;
           }
           if (layerType.isDartCoreObject) break;
           final parent = constantSuperclass(layer);
@@ -556,6 +586,7 @@ final class Bindings({final bool enableAssertions = false}) {
         'Set' => CoreTypes.set,
         'Map' => CoreTypes.map,
         'MapEntry' => CoreTypes.mapEntry,
+        'Enum' => CoreTypes.enumeration,
         _ => null,
       };
       if (builtin != null) {
@@ -567,7 +598,7 @@ final class Bindings({final bool enableAssertions = false}) {
     }
     final previous = _classes[element];
     if (previous != null) return previous;
-    if (element is! ClassElement || element.mixins.isNotEmpty) {
+    if (!isClassOrEnum(element) || element.mixins.isNotEmpty) {
       unsupported(unit, site, 'class ${element.name} with mixins');
     }
     final parameters = registerTypeParameters(element.typeParameters);
@@ -575,7 +606,8 @@ final class Bindings({final bool enableAssertions = false}) {
       element.library.uri,
       element.name!,
       typeParameters: parameters,
-      isAbstract: element.isAbstract || element.isSealed,
+      isAbstract:
+          element is ClassElement && (element.isAbstract || element.isSealed),
     );
     _classes[element] = type;
     bindTypeParameters(element.typeParameters, unit, site);
@@ -644,3 +676,17 @@ bool requiresExhaustiveSwitch(dart.DartType type) => switch (type) {
     true,
   _ => type.isDartCoreBool || type.isDartCoreNull,
 };
+
+/// Whether this declaration uses the shared class member lowering.
+bool isClassOrEnum(Element? element) =>
+    element is ClassElement || element is EnumElement;
+
+/// Resolves only the public SDK enum protocols, not user members of the same name.
+InstanceField? coreEnumField(ExecutableElement? member) {
+  if (member is! GetterElement || !member.library.isDartCore) return null;
+  return switch ((member.enclosingElement, member.name)) {
+    (ClassElement(name: 'Enum'), 'index') => CoreTypes.enumIndex,
+    (ExtensionElement(name: 'EnumName'), 'name') => CoreTypes.enumName,
+    _ => null,
+  };
+}

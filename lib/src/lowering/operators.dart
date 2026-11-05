@@ -70,7 +70,7 @@ Value? lowerBinary(
     );
   }
   if (member is MethodElement &&
-      member.enclosingElement is ClassElement &&
+      isClassOrEnum(member.enclosingElement) &&
       !member.library.isDartCore) {
     return context.callPositionalMember(
       member,

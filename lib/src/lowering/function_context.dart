@@ -66,9 +66,12 @@ final class FunctionContext(
     AstNode site, {
     bool direct = false,
   }) {
+    if (coreEnumField(member) case final field? when args.isEmpty) {
+      return normal(emit(LoadField(field, receiver)));
+    }
     if (member == null ||
         member.isStatic ||
-        member.enclosingElement is! ClassElement) {
+        !isClassOrEnum(member.enclosingElement)) {
       unsupported(unit, site, 'instance member binding');
     }
     final converted = <Value>[];

@@ -16,12 +16,51 @@ IrClass lowerClass(
   ast.ClassDeclaration declaration,
   List<IrFunction> functions,
 ) {
-  final element = declaration.declaredFragment!.element;
+  return _lowerNominal(
+    unit,
+    bindings,
+    declaration,
+    declaration.declaredFragment!.element,
+    declaration.namePart,
+    declaration.body.members,
+    functions,
+  );
+}
+
+/// Lowers an enum using ordinary class storage and member bodies.
+IrClass lowerEnum(
+  ResolvedUnitResult unit,
+  Bindings bindings,
+  ast.EnumDeclaration declaration,
+  List<IrFunction> functions,
+) => _lowerNominal(
+  unit,
+  bindings,
+  declaration,
+  declaration.declaredFragment!.element,
+  declaration.namePart,
+  declaration.body.members,
+  functions,
+);
+
+IrClass _lowerNominal(
+  ResolvedUnitResult unit,
+  Bindings bindings,
+  ast.AstNode declaration,
+  InterfaceElement element,
+  ast.ClassNamePart namePart,
+  List<ast.ClassMember> sourceMembers,
+  List<IrFunction> functions,
+) {
   final type = bindings.classType(element, unit, declaration);
   final fields = <InstanceField>[];
   final members = <FunctionTarget>[];
   final constructors = <FunctionTarget>[];
   for (final field in element.fields) {
+    if (field.isStatic && field.isConst) {
+      bindings.constantOf(field, unit, declaration);
+      continue;
+    }
     if (field.isOriginGetterSetter) continue;
     if (field.isStatic || field.isLate || field.isExternal) {
       unsupported(unit, declaration, 'field ${field.displayName}');
@@ -52,6 +91,9 @@ IrClass lowerClass(
     ast.FunctionBody? body,
     List<ast.ConstructorInitializer> initializers,
   ) {
+    // Enum instances exist only as constants. Their generative constructors
+    // are checked by constant lowering and never have an executable entry.
+    if (element is EnumElement && ctor.isGenerative) return;
     final target = bindings.target(ctor, unit, site);
     constructors.add(target);
     if (target.redirect != null) return;
@@ -65,19 +107,24 @@ IrClass lowerClass(
       body,
       initializers: [
         if (ctor.isGenerative && ctor.redirectedConstructor == null)
-          for (final member
-              in declaration.body.members.whereType<ast.FieldDeclaration>())
+          for (final member in sourceMembers.whereType<ast.FieldDeclaration>())
             if (!member.isStatic)
               for (final v in member.fields.variables) ?v.initializer,
         ...initializers,
       ],
       initialize: ctor.isFactory
           ? null
-          : (context) => _initialize(context, declaration, ctor, initializers),
+          : (context) => _initialize(
+              context,
+              declaration,
+              sourceMembers,
+              ctor,
+              initializers,
+            ),
     );
   }
 
-  if (declaration.namePart case ast.PrimaryConstructorDeclaration primary) {
+  if (namePart case ast.PrimaryConstructorDeclaration primary) {
     constructor(
       primary.declaredFragment!.element,
       primary,
@@ -88,7 +135,7 @@ IrClass lowerClass(
       when ctor.isOriginImplicitDefault) {
     constructor(ctor, declaration, null, const []);
   }
-  for (final member in declaration.body.members) {
+  for (final member in sourceMembers) {
     switch (member) {
       case ast.ConstructorDeclaration(:final body, :final initializers):
         constructor(
@@ -115,12 +162,35 @@ IrClass lowerClass(
         }
     }
   }
+  if (element is EnumElement &&
+      !members.any(
+        (member) => member.kind == .method && member.name == 'toString',
+      )) {
+    final target = FunctionTarget(
+      type.library,
+      'toString',
+      ValueType.string,
+      const [],
+      owner: type,
+      kind: .method,
+    );
+    final entry = Block(target.parameterTypes);
+    final name = entry.emit(
+      LoadField(CoreTypes.enumName, entry.parameters.first),
+    );
+    entry.finish(
+      Return(entry.emit(StringConcat(Constant.string('${type.name}.'), name))),
+    );
+    members.add(target);
+    functions.add(IrFunction(target, [entry]));
+  }
   return IrClass(type, fields, members: members, constructors: constructors);
 }
 
 void _initialize(
   FunctionContext context,
-  ast.ClassDeclaration declaration,
+  ast.AstNode declaration,
+  List<ast.ClassMember> sourceMembers,
   ConstructorElement ctor,
   List<ast.ConstructorInitializer> initializers,
 ) {
@@ -175,8 +245,7 @@ void _initialize(
     invoke(element!, argumentList);
     return;
   }
-  for (final member
-      in declaration.body.members.whereType<ast.FieldDeclaration>()) {
+  for (final member in sourceMembers.whereType<ast.FieldDeclaration>()) {
     if (member.isStatic) continue;
     for (final variable in member.fields.variables) {
       if (variable.initializer case final expression?) {

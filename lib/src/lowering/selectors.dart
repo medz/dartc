@@ -269,7 +269,7 @@ final class SelectorChain(
         :final argumentList,
         :final isNullAware,
       )
-          when !method.isStatic && method.enclosingElement is ClassElement =>
+          when !method.isStatic && isClassOrEnum(method.enclosingElement) =>
         (target, method.name!, method, argumentList, isNullAware),
       _ => (null, null, null, null, false),
     };
@@ -309,12 +309,29 @@ final class SelectorChain(
           ? null
           : context.normal(readRecordField(context, record, slot));
     }
+    if (coreEnumField(member is ExecutableElement ? member : null)
+        case final field?) {
+      return context.normal(context.emit(LoadField(field, known)));
+    }
     if (member is! ExecutableElement ||
-        member.enclosingElement is! ClassElement ||
+        !isClassOrEnum(member.enclosingElement) ||
         member.isStatic) {
       unsupported(context.unit, node, 'member $name');
     }
+    final coreToString =
+        member is MethodElement &&
+        member.library.isDartCore &&
+        member.enclosingElement?.name == 'Object' &&
+        member.name == 'toString';
+    final enumToString =
+        coreToString &&
+        !direct &&
+        CoreTypes.view(known.type, CoreTypes.enumeration) != null;
+    if (coreToString && !enumToString) {
+      unsupported(context.unit, node, 'core Object.toString');
+    }
     if (member.library.uri.toString() == 'dart:core' &&
+        !enumToString &&
         (member is GetterElement || arguments != null)) {
       if (member is GetterElement &&
           member.name == 'hashCode' &&
@@ -389,7 +406,7 @@ final class SelectorChain(
       PrefixElement() => !element.imports.any(
         (i) => i.prefix?.isDeferred == true,
       ),
-      ClassElement() =>
+      ClassElement() || EnumElement() =>
         receiver is! ast.PrefixedIdentifier || !receiver.isDeferred,
       _ => false,
     };
@@ -477,7 +494,7 @@ final class SelectorChain(
     }
     if (destination is! ExecutableElement ||
         destination.isStatic ||
-        destination.enclosingElement is! ClassElement) {
+        !isClassOrEnum(destination.enclosingElement)) {
       unsupported(context.unit, site, 'assignment target');
     }
     final (target, nullAware, index) = switch (place) {

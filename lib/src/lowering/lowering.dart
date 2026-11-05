@@ -30,6 +30,8 @@ abstract final class Lowering() {
             break;
           case ast.ClassDeclaration():
             classes.add(lowerClass(unit, bindings, node, functions));
+          case ast.EnumDeclaration():
+            classes.add(lowerEnum(unit, bindings, node, functions));
           case ast.FunctionDeclaration(
             declaredFragment: final fragment?,
             :final functionExpression,

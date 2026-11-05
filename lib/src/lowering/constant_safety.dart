@@ -5,7 +5,7 @@ import 'package:analyzer/dart/element/element.dart';
 
 import 'analyzer_metadata.dart';
 
-/// Rejects constant dependencies whose private-symbol identity analyzer loses.
+/// Rejects constant dependencies whose identity or storage analyzer loses.
 ///
 /// Inspect syntax before consuming even a scalar result: a private-symbol
 /// comparison may already have folded to the wrong boolean or selected branch.
@@ -82,6 +82,17 @@ final class _Scan(final Set<Element> safe) extends RecursiveAstVisitor<void> {
       throw _UnsafeConstant(
         'unavailable const constructor metadata for '
         '${element.library.uri}::${element.displayName}',
+      );
+    }
+    if (element.enclosingElement is EnumElement &&
+        element.enclosingElement.fields.any(
+          (field) =>
+              !field.isStatic &&
+              !field.isOriginGetterSetter &&
+              field.name == '_name',
+        )) {
+      throw _UnsafeConstant(
+        'enum instance field _name loses its value in analyzer constants',
       );
     }
     for (final parameter in element.formalParameters) {

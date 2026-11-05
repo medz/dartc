@@ -63,7 +63,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       final member = expression.propertyName.element;
       if (member is MethodElement &&
               member.isStatic &&
-              member.enclosingElement is ClassElement ||
+              isClassOrEnum(member.enclosingElement) ||
           member is ConstructorElement) {
         return FunctionConstant(
           context.bindings.target(
@@ -78,7 +78,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       }
       if (member is GetterElement &&
           member.isStatic &&
-          member.enclosingElement is ClassElement) {
+          isClassOrEnum(member.enclosingElement)) {
         final target = context.bindings.target(member, unit, expression);
         return context.emit(DirectCall(target, []));
       }
@@ -123,7 +123,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
     ):
       final receiver = lowerExpression(context, expression);
       if (receiver == null) return null;
-      if (element == null || element.enclosingElement is! ClassElement) {
+      if (element == null || !isClassOrEnum(element.enclosingElement)) {
         unsupported(unit, expression, 'implicit call tear-off');
       }
       return context.instantiateFunction(
@@ -446,7 +446,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
             )
         when callee is MethodElement &&
                 callee.isStatic &&
-                callee.enclosingElement is ClassElement ||
+                isClassOrEnum(callee.enclosingElement) ||
             expression is ast.MethodInvocation &&
                 callee is TopLevelFunctionElement:
       if (expression case ast.MethodInvocation(target: final receiver?)) {
@@ -457,7 +457,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           _ when prefix is PrefixElement => !prefix.imports.any(
             (i) => i.prefix?.isDeferred == true,
           ),
-          ast.Identifier(element: ClassElement())
+          ast.Identifier(element: ClassElement() || EnumElement())
               when callee is MethodElement =>
             receiver is! ast.PrefixedIdentifier || !receiver.isDeferred,
           _ => false,

@@ -1,7 +1,7 @@
 import 'signature.dart';
 import 'type.dart';
 
-/// Canonical identities for the core collection protocols and literal types.
+/// Canonical identities and storage for supported core nominal types.
 abstract final class CoreTypes() {
   static ClassType _declare(
     String name,
@@ -24,6 +24,20 @@ abstract final class CoreTypes() {
     );
     return type;
   }
+
+  static final ClassType enumeration = _declare('Enum', 0);
+  static final InstanceField enumIndex = InstanceField(
+    enumeration,
+    'index',
+    ValueType.integer,
+    isFinal: true,
+  );
+  static final InstanceField enumName = InstanceField(
+    enumeration,
+    '_name',
+    ValueType.string,
+    isFinal: true,
+  );
 
   static final ClassType iterable = _declare('Iterable', 1);
   static final ClassType iterator = _declare('Iterator', 1);

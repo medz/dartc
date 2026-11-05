@@ -346,12 +346,16 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
           final member = field.element;
           if (member is! ExecutableElement ||
               member.isStatic ||
-              member.enclosingElement is! ClassElement) {
+              (!isClassOrEnum(member.enclosingElement) &&
+                  coreEnumField(member) == null)) {
             unsupported(context.unit, field, 'object pattern member');
           }
           // Unlike record slots, even wildcard fields must evaluate their getter.
           final key = _fieldPath(path, field);
           final item = cache.read(key, () {
+            if (coreEnumField(member) case final slot?) {
+              return context.normal(context.emit(LoadField(slot, object)));
+            }
             if (member.library.isDartCore) {
               final operation = member is GetterElement
                   ? coreCollectionOperation(member.name!, object, [])

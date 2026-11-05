@@ -1,5 +1,7 @@
 ## Unreleased
 
+Ordinary, enhanced and generic enums reuse class storage, constant identity and member dispatch. Values retain their index, name and actual type arguments; enum toString, factories, methods, operators and patterns share existing lowering. Class and enum static const declarations are validated without runtime storage. Enums with a user storage field named _name are rejected because pinned analyzer metadata overwrites that value.
+
 Type literals, aliases and reified type parameters retain strict structural identity, equality and hashing, including nested constants and captured generic environments. Constant dependencies containing private Symbol literals are rejected before consuming analyzer-folded values, including folded scalars; the pinned analyzer loses private-library identity. Symbol values and general runtimeType access remain unsupported.
 
 Dynamic for-in and collection spreads check the source protocol before traversal and cast elements in evaluation order. Map spreads requiring key/value checks use entries; compatible spreads use forEach. MapEntry values support ordinary and constant construction, generic key/value reads and lazy Map.entries views.
