@@ -20,14 +20,16 @@ import 'package:analyzer/src/dart/constant/value.dart' as internal;
 import 'package:analyzer/src/dart/element/element.dart' as internal;
 // ignore: implementation_imports
 import 'package:analyzer/src/error/correct_override.dart' as internal;
+// ignore: implementation_imports
+import 'package:analyzer/src/dart/element/member.dart' as internal;
 
-/// Possible typed forwarders whose bodies are not lowered yet.
+/// Selected effective signatures that may require typed forwarding bodies.
 ///
-/// Analyzer's marker includes inherited forwarders and some concrete overrides.
-/// A real implementation takes precedence over these fallback guards. Private
-/// interface obligations also exist without a nontrivial noSuchMethod override.
-/// An incompatible inherited private implementation needs a replacing forwarder
-/// instead, so that rare case cannot use a fallback-only guard.
+/// Analyzer's marker includes inherited forwarders and some concrete overrides;
+/// actual implementation planning must distinguish these from new bodies.
+/// Private obligations also exist without a nontrivial noSuchMethod override.
+/// An incompatible inherited private implementation needs a replacing body,
+/// not a fallback-only guard.
 List<({ExecutableElement member, Uri? privateLibrary, bool overridesConcrete})>
 noSuchMethodForwarderCandidates(InterfaceElement element) {
   if (element is! internal.InterfaceElementImpl) {
@@ -55,7 +57,7 @@ noSuchMethodForwarderCandidates(InterfaceElement element) {
     }
     final implementation = inherited[name];
     result.add((
-      member: entry.value,
+      member: interface.implemented[name] ?? entry.value,
       privateLibrary: name.libraryUri,
       overridesConcrete:
           foreignPrivate &&
@@ -69,6 +71,23 @@ noSuchMethodForwarderCandidates(InterfaceElement element) {
   }
   return result;
 }
+
+/// Exact transported defaults for the selected executable's own binder group.
+List<DartType?> executableTypeParameterDefaults(
+  ExecutableElement executable,
+) => [
+  for (final (i, parameter) in executable.typeParameters.indexed)
+    typeParameterDefault(parameter) ??
+        (executable is internal.SubstitutedExecutableElementImpl &&
+                typeParameterDefault(
+                      executable.baseElement.typeParameters[i],
+                    ) !=
+                    null
+            ? executable.substitution.substituteType(
+                typeParameterDefault(executable.baseElement.typeParameters[i])!,
+              )
+            : null),
+];
 
 /// Reads the compiler-computed default, absent on some fresh structural binders.
 DartType? typeParameterDefault(TypeParameterElement parameter) {

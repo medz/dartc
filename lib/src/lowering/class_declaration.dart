@@ -3,7 +3,7 @@ import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
 
-import 'analyzer_metadata.dart';
+import 'no_such_method.dart';
 import 'assertion.dart';
 import 'bindings.dart';
 import 'expression.dart';
@@ -54,16 +54,7 @@ IrClass _lowerNominal(
   List<ast.ClassMember> sourceMembers,
   List<IrFunction> functions,
 ) {
-  final forwarders = noSuchMethodForwarderCandidates(element);
-  for (final forwarder in forwarders) {
-    if (forwarder.overridesConcrete) {
-      unsupported(
-        unit,
-        declaration,
-        'inherited private noSuchMethod forwarder ${forwarder.member.name}',
-      );
-    }
-  }
+  final forwarders = bindings.forwarders(element);
   final type = bindings.classType(element, unit, declaration);
   final fields = <InstanceField>[];
   final members = <FunctionTarget>[];
@@ -214,23 +205,17 @@ IrClass _lowerNominal(
     members.add(target);
     functions.add(IrFunction(target, [entry]));
   }
+  for (final forwarder in forwarders) {
+    members.removeWhere((member) => member.selector == forwarder.selector);
+    members.add(forwarder);
+    functions.add(lowerNoSuchMethodForwarder(bindings, forwarder));
+  }
   return IrClass(
     type,
     fields,
     members: members,
     constructors: constructors,
-    unsupportedForwarders: [
-      for (final forwarder in forwarders)
-        (
-          kind: switch (forwarder.member) {
-            GetterElement() => FunctionKind.getter,
-            SetterElement() => FunctionKind.setter,
-            _ => FunctionKind.method,
-          },
-          name: forwarder.member.name!,
-          privateLibrary: forwarder.privateLibrary,
-        ),
-    ],
+    unsupportedForwarders: bindings.unsupportedForwarders(element),
   );
 }
 

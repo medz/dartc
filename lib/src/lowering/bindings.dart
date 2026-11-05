@@ -13,12 +13,303 @@ final class Bindings({final bool enableAssertions = false}) {
   final _constantSafety = ConstantSafety();
   final _targets = <ExecutableElement, FunctionTarget>{};
   final _classes = <InterfaceElement, ClassType>{};
+  final _classElements = <ClassType, InterfaceElement>{};
   final _parameters = <TypeParameterElement, TypeParameterType>{};
   final _boundParameters = <TypeParameterElement>{};
   final _fields = <FieldElement, InstanceField>{};
   final _globals = <VariableElement, GlobalVariable>{};
   final _defaults = <FunctionTarget, Map<int, Constant>>{};
   final _constantAliases = <LibraryElement, List<TypeAliasElement>>{};
+
+  final _modeledClasses =
+      <InterfaceElement, (ResolvedUnitResult, ast.AstNode)>{};
+  final _implementationPlans =
+      <InterfaceElement, Map<MemberSelector, FunctionTarget>>{};
+  final _syntheticTargets = <FunctionTarget>{};
+  final _forwarderClassCovariance = <FunctionTarget, Set<int>>{};
+  final _newForwarders = <InterfaceElement, List<FunctionTarget>>{};
+  final _unsupportedForwarders = <InterfaceElement, Set<MemberSelector>>{};
+  final _planningClasses = <InterfaceElement>{};
+
+  /// Records source ownership before any body (including super calls) is lowered.
+  void registerClass(
+    InterfaceElement element,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    _modeledClasses[element] = (unit, site);
+  }
+
+  MemberSelector _memberSelector(
+    ExecutableElement member, [
+    Uri? privateLibrary,
+  ]) => (
+    kind: switch (member) {
+      GetterElement() => FunctionKind.getter,
+      SetterElement() => FunctionKind.setter,
+      _ => FunctionKind.method,
+    },
+    name:
+        member is MethodElement &&
+            member.name == '-' &&
+            member.formalParameters.isEmpty
+        ? 'unary-'
+        : member.name!,
+    privateLibrary: member.name!.startsWith('_')
+        ? privateLibrary ?? member.library.uri
+        : null,
+  );
+
+  /// Stable targets emitted only by the destination class's lowering pass.
+  List<FunctionTarget> forwarders(InterfaceElement element) {
+    _planImplementations(element);
+    return _newForwarders[element] ?? const [];
+  }
+
+  Set<MemberSelector> unsupportedForwarders(InterfaceElement element) {
+    _planImplementations(element);
+    return _unsupportedForwarders[element] ?? const {};
+  }
+
+  Map<MemberSelector, FunctionTarget> _planImplementations(
+    InterfaceElement element,
+  ) {
+    if (_implementationPlans[element] case final previous?) return previous;
+    final source = _modeledClasses[element];
+    if (source == null) return const {};
+    final (unit, site) = source;
+    if (!_planningClasses.add(element)) {
+      unsupported(unit, site, 'cyclic forwarder implementation plan');
+    }
+    final owner = classType(element, unit, site);
+    final parent = element.supertype?.element;
+    final effective = <MemberSelector, FunctionTarget>{
+      if (parent != null) ..._planImplementations(parent),
+    };
+    for (final member in <ExecutableElement>[
+      ...element.methods,
+      ...element.getters,
+      ...element.setters,
+    ]) {
+      if (!member.isStatic && !member.isAbstract) {
+        final implementation = target(member, unit, site);
+        effective[implementation.selector] = implementation;
+      }
+    }
+    final emitted = <FunctionTarget>[];
+    final unsupportedSelectors = <MemberSelector>{};
+    for (final candidate in noSuchMethodForwarderCandidates(element)) {
+      final member = candidate.member;
+      final selector = _memberSelector(member, candidate.privateLibrary);
+      final inherited = effective[selector];
+      // Analyzer propagates forwarder markers across real concrete overrides.
+      if (inherited != null && !_syntheticTargets.contains(inherited)) {
+        if (candidate.overridesConcrete) {
+          unsupported(
+            unit,
+            site,
+            'inherited private noSuchMethod forwarder ${member.name}',
+          );
+        }
+        continue;
+      }
+      final foreignPrivate =
+          candidate.privateLibrary != null &&
+          candidate.privateLibrary != element.library.uri;
+      final unmodeledParent =
+          parent != null &&
+          !_modeledClasses.containsKey(parent) &&
+          !element.supertype!.isDartCoreObject;
+      if (inherited == null) {
+        if (candidate.overridesConcrete) {
+          unsupported(
+            unit,
+            site,
+            'inherited private noSuchMethod forwarder ${member.name}',
+          );
+        }
+        // A guard does not consume the unsupported signature or its constants.
+        // Only an actual inherited synthetic target requires comparison first.
+        if (foreignPrivate || unmodeledParent) {
+          unsupportedSelectors.add(selector);
+          continue;
+        }
+      }
+      final templates = executableTypeParameterDefaults(member);
+      if (templates.any((type) => type == null)) {
+        if (inherited != null) {
+          unsupported(
+            unit,
+            site,
+            'inherited synthetic generic-default metadata ${member.name}',
+          );
+        }
+        unsupportedSelectors.add(selector);
+        continue;
+      }
+      final replacement = _forwarderTarget(
+        element,
+        member,
+        templates,
+        unit,
+        site,
+        inheritedClassCovariance: inherited == null
+            ? const {}
+            : _transportCovariance(
+                inherited,
+                member,
+                _forwarderClassCovariance[inherited] ?? const {},
+              ),
+      );
+      if (inherited != null) {
+        if (inherited.signatureFor(owner) == replacement.signature) {
+          final inheritedCovariance = _transportCovariance(
+            inherited,
+            member,
+            inherited.covariantParameters,
+          );
+          if (inheritedCovariance.length !=
+                  replacement.covariantParameters.length ||
+              !inheritedCovariance.containsAll(
+                replacement.covariantParameters,
+              )) {
+            unsupported(
+              unit,
+              site,
+              'inherited noSuchMethod covariance transition ${member.name}',
+            );
+          }
+          continue;
+        }
+      }
+      if (foreignPrivate) {
+        if (inherited != null || candidate.overridesConcrete) {
+          unsupported(
+            unit,
+            site,
+            'inherited private noSuchMethod forwarder ${member.name}',
+          );
+        }
+        unsupportedSelectors.add(selector);
+        continue;
+      }
+      if (unmodeledParent) {
+        unsupportedSelectors.add(selector);
+        continue;
+      }
+      _syntheticTargets.add(replacement);
+      emitted.add(replacement);
+      effective[selector] = replacement;
+    }
+    _newForwarders[element] = emitted;
+    _unsupportedForwarders[element] = unsupportedSelectors;
+    _planningClasses.remove(element);
+    return _implementationPlans[element] = effective;
+  }
+
+  // FunctionType equality ignores named declaration order, unlike entry slots.
+  // Transfer inherited checks by named identity and only positional index.
+  Set<int> _transportCovariance(
+    FunctionTarget inherited,
+    ExecutableElement selected,
+    Set<int> slots,
+  ) {
+    final oldNames = {
+      for (final entry in inherited.signature.named.entries)
+        entry.value.slot: entry.key,
+    };
+    final newNames = {
+      for (final (i, parameter) in selected.formalParameters.indexed)
+        if (parameter.isNamed) parameter.name!: i,
+    };
+    final positionalCount = selected.formalParameters
+        .where((p) => p.isPositional)
+        .length;
+    final result = <int>{};
+    for (final slot in slots) {
+      final name = oldNames[slot];
+      if (name != null) {
+        final destination = newNames[name];
+        if (destination != null) result.add(destination);
+      } else if (slot < positionalCount) {
+        result.add(slot);
+      }
+    }
+    return result;
+  }
+
+  FunctionTarget _forwarderTarget(
+    InterfaceElement destination,
+    ExecutableElement selected,
+    List<dart.DartType?> templates,
+    ResolvedUnitResult unit,
+    ast.AstNode site, {
+    Set<int> inheritedClassCovariance = const {},
+  }) {
+    final owner = classType(destination, unit, site);
+    final parameters = selected.formalParameters;
+    final binders = bindTypeParameters(
+      selected.typeParameters,
+      unit,
+      site,
+      defaultTemplates: templates,
+    );
+    final result = FunctionTarget(
+      destination.library.uri,
+      selected.name!,
+      valueType(selected.returnType, unit, site),
+      parameters.map((p) => valueType(p.type, unit, site)),
+      owner: owner,
+      kind: _memberSelector(selected).kind,
+      typeParameters: binders,
+      optionalPositional: parameters
+          .where((p) => p.isOptionalPositional)
+          .length,
+      namedParameters: {
+        for (final p in parameters)
+          if (p.isNamed) p.name!: p.isRequiredNamed,
+      },
+      covariantParameters: [
+        ...inheritedClassCovariance,
+        for (final (i, p) in parameters.indexed)
+          if (p.isCovariant) i,
+      ],
+    );
+    // These checks survive specialization even when the destination's own
+    // parameter types no longer contain class variables. Keep their provenance
+    // through further signature replacements as well as unchanged inheritance.
+    _forwarderClassCovariance[result] = {
+      ...inheritedClassCovariance,
+      for (final (i, type) in result.signature.parameters.indexed)
+        if (containsCovariantTypeParameter(type, owner.typeParameters.toSet()))
+          i,
+    };
+    _defaults[result] = {
+      for (final (i, p) in parameters.indexed)
+        if (p.isOptional) i: constantOf(p.baseElement, unit, site),
+    };
+    return result;
+  }
+
+  /// Resolves super against the lexical superclass, not an abstract interface
+  /// declaration returned by analyzer or the runtime receiver's class.
+  FunctionTarget superTarget(
+    ValueType lexicalReceiver,
+    ExecutableElement member,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    final owner = lexicalReceiver.nonNullable;
+    if (owner is ClassType) {
+      final element = _classElements[owner.declaration];
+      final parent = element?.supertype?.element;
+      if (parent != null) {
+        final actual = _planImplementations(parent)[_memberSelector(member)];
+        if (actual != null) return actual;
+      }
+    }
+    return target(member, unit, site);
+  }
 
   /// Returns the shared signature and constructor binding for [element].
   FunctionTarget target(
@@ -549,18 +840,38 @@ final class Bindings({final bool enableAssertions = false}) {
   List<TypeParameterType> bindTypeParameters(
     List<TypeParameterElement> elements,
     ResolvedUnitResult unit,
-    ast.AstNode site,
-  ) {
+    ast.AstNode site, {
+    List<dart.DartType?>? defaultTemplates,
+  }) {
+    if (defaultTemplates != null &&
+        defaultTemplates.length != elements.length) {
+      throw ArgumentError('Mismatched type parameter defaults.');
+    }
     final parameters = registerTypeParameters(elements);
     for (final (i, element) in elements.indexed) {
-      if (!_boundParameters.add(element.baseElement)) continue;
-      parameters[i].initializeBound(
-        element.bound == null
-            ? ValueType.object.nullable
-            : valueType(element.bound!, unit, site),
-      );
-      if (typeParameterDefault(element) case final type?) {
-        parameters[i].initializeDefaultType(valueType(type, unit, site));
+      final initialize = _boundParameters.add(element.baseElement);
+      // Ordinary metadata is immutable. Only exact recovered templates can
+      // augment a binder that has already been initialized.
+      if (!initialize && defaultTemplates == null) continue;
+      if (initialize) {
+        parameters[i].initializeBound(
+          element.bound == null
+              ? ValueType.object.nullable
+              : valueType(element.bound!, unit, site),
+        );
+      }
+      final template = defaultTemplates?[i] ?? typeParameterDefault(element);
+      if (template != null) {
+        final converted = valueType(template, unit, site);
+        if (parameters[i].defaultType == null) {
+          parameters[i].initializeDefaultType(converted);
+        } else if (parameters[i].defaultType != converted) {
+          unsupported(
+            unit,
+            site,
+            'inconsistent type parameter default metadata',
+          );
+        }
       }
     }
     return parameters;
@@ -674,6 +985,7 @@ final class Bindings({final bool enableAssertions = false}) {
           element is ClassElement && (element.isAbstract || element.isSealed),
     );
     _classes[element] = type;
+    _classElements[type] = element;
     bindTypeParameters(element.typeParameters, unit, site);
     type.initializeHierarchy(
       superclass: valueType(element.supertype!, unit, site) as ClassType,

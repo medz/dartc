@@ -113,6 +113,10 @@ void writeFunction(
       'dynamicDispatch ${value(op.receiver)} ${op.selector.kind.name} '
           '${op.selector.privateLibrary == null ? "" : "${op.selector.privateLibrary}::"}'
           '${op.selector.name}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
+    MakeInvocation() =>
+      'makeInvocation ${op.selector.kind.name} '
+          '${op.selector.privateLibrary == null ? "" : "${op.selector.privateLibrary}::"}'
+          '${op.selector.name}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
     Construct() =>
       'new ${symbol(op.initializer, op.instantiatedType)}(${op.inputs.map(value).join(', ')})',
     StoreField() =>

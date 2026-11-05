@@ -4,6 +4,7 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
+import 'fixture_runner.dart';
 import 'fixtures/nosuchmethod_unsupported.dart' as sdk;
 import 'fixtures/nosuchmethod_unsupported_private.dart' as private_sdk;
 
@@ -25,35 +26,42 @@ void main() {
   MemberSelector method(String name, [Uri? library]) =>
       (kind: .method, name: name, privateLibrary: library);
 
-  test('records typed method, accessor, callable and private obligations', () {
-    final forwarded = declaration('Forwarded');
-    expect(forwarded.unsupportedForwarders, {
-      method('method'),
-      (kind: FunctionKind.getter, name: 'property', privateLibrary: null),
-      (kind: FunctionKind.setter, name: 'property', privateLibrary: null),
-      method('call'),
-      method('_private', forwarded.type.library),
-    });
-    final lookup = program.lookupMember(
-      forwarded.type.instantiate([ValueType.integer]),
-      method('method'),
-    );
-    expect(lookup.target, isNull);
-    expect(lookup.unmodeledBoundary, isNull);
-    expect(lookup.unsupportedForwarder, isTrue);
-    final child = declaration('ForwardedChild');
-    expect(child.unsupportedForwarders, forwarded.unsupportedForwarders);
-    expect(
-      program.lookupMember(child.type, method('method')).unsupportedForwarder,
-      isTrue,
-    );
-    expect(
-      program
-          .lookupMember(forwarded.type, method('notDeclared'))
-          .unsupportedForwarder,
-      isFalse,
-    );
-  });
+  test(
+    'emits ordinary typed method, accessor, callable and private bodies',
+    () {
+      final forwarded = declaration('Forwarded');
+      expect(forwarded.unsupportedForwarders, isEmpty);
+      expect(
+        forwarded.members.keys.toSet(),
+        containsAll({
+          method('method'),
+          (kind: FunctionKind.getter, name: 'property', privateLibrary: null),
+          (kind: FunctionKind.setter, name: 'property', privateLibrary: null),
+          method('call'),
+          method('_private', forwarded.type.library),
+        }),
+      );
+      final lookup = program.lookupMember(
+        forwarded.type.instantiate([ValueType.integer]),
+        method('method'),
+      );
+      expect(lookup.target, same(forwarded.members[method('method')]));
+      expect(lookup.unmodeledBoundary, isNull);
+      expect(lookup.unsupportedForwarder, isFalse);
+      final child = declaration('ForwardedChild');
+      expect(child.unsupportedForwarders, forwarded.unsupportedForwarders);
+      expect(
+        program.lookupMember(child.type, method('method')).target,
+        same(lookup.target),
+      );
+      expect(
+        program
+            .lookupMember(forwarded.type, method('notDeclared'))
+            .unsupportedForwarder,
+        isFalse,
+      );
+    },
+  );
 
   test(
     'abstract and sealed declarations defer obligations to concrete child',
@@ -71,8 +79,8 @@ void main() {
         'RedeclarationChild',
       ]) {
         expect(
-          declaration(name).unsupportedForwarders,
-          contains(method('method')),
+          program.lookupMember(declaration(name).type, method('method')).target,
+          isNotNull,
           reason: name,
         );
       }
@@ -87,7 +95,7 @@ void main() {
         final cls = declaration(name);
         expect(
           cls.unsupportedForwarders,
-          contains(method('method')),
+          isNot(contains(method('method'))),
           reason: name,
         );
         expect(
@@ -154,7 +162,7 @@ void main() {
 
   test('partial core implementations are not rejected at class lowering', () {
     final cls = declaration('PartialIterable');
-    expect(cls.unsupportedForwarders, isNotEmpty);
+
     expect(
       program.lookupMember(cls.type, (
         kind: FunctionKind.getter,
@@ -168,8 +176,8 @@ void main() {
         kind: FunctionKind.getter,
         name: 'length',
         privateLibrary: null,
-      )).unsupportedForwarder,
-      isTrue,
+      )).target,
+      isNotNull,
     );
   });
 
@@ -200,4 +208,86 @@ int invoke(Incompatible receiver) => invokeChangedPrivate(receiver);
       );
     },
   );
+  test(
+    'missing merged generic defaults remain an explicit selector boundary',
+    () async {
+      final directory = Directory.systemTemp.createTempSync(
+        'dartc-merged-defaults-',
+      );
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final file = File('${directory.path}/entry.dart')
+        ..writeAsStringSync('''
+abstract class A { dynamic g<T extends Object?>({Object? p = 10}); }
+abstract class B { Object? g<U extends dynamic>({dynamic p = 20}); }
+class C implements A, B { dynamic noSuchMethod(Invocation i) => null; }
+Object? invoke() { dynamic c = C(); return c.g(); }
+''');
+      final lowered = await CheckedLibraries.read([file.path], Lowering.lower);
+      final cls = lowered.classes.singleWhere((c) => c.type.name == 'C');
+      expect(
+        lowered.lookupMember(cls.type, method('g')).unsupportedForwarder,
+        isTrue,
+      );
+      final entry = lowered.functions.singleWhere(
+        (f) => f.target.name == 'invoke',
+      );
+      expect(
+        () => FixtureRunner(lowered, {}).run(entry, []),
+        throwsUnsupportedError,
+      );
+    },
+  );
+
+  test(
+    'covariance-only inherited changes remain explicit rather than guessed',
+    () async {
+      final directory = Directory.systemTemp.createTempSync(
+        'dartc-forwarder-covariance-',
+      );
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final file = File('${directory.path}/entry.dart')
+        ..writeAsStringSync('''
+abstract class I { Object? f([num x = 10]); }
+class A implements I { dynamic noSuchMethod(Invocation i) => 7; }
+abstract class B extends A { Object? f([covariant num x = 20]); }
+class C extends B {}
+''');
+      await expectLater(
+        CheckedLibraries.read([file.path], Lowering.lower),
+        throwsA(
+          isA<UnsupportedError>().having(
+            (e) => e.message,
+            'feature',
+            contains('inherited noSuchMethod covariance transition f'),
+          ),
+        ),
+      );
+    },
+  );
+  test('foreign private replacement cannot reuse an incompatible synthetic ancestor', () async {
+    final directory = Directory.systemTemp.createTempSync(
+      'dartc-private-replacement-',
+    );
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final parent = File('${directory.path}/parent.dart')
+      ..writeAsStringSync('''
+abstract class Contract { num _value([int x = 40]); }
+class Parent implements Contract { dynamic noSuchMethod(Invocation i) => 1; }
+abstract class Changed extends Parent { int _value([int x = 50]); }
+''');
+    final child = File('${directory.path}/child.dart')
+      ..writeAsStringSync(
+        "import 'parent.dart'; class Child extends Changed {}",
+      );
+    await expectLater(
+      CheckedLibraries.read([child.path, parent.path], Lowering.lower),
+      throwsA(
+        isA<UnsupportedError>().having(
+          (e) => e.message,
+          'feature',
+          contains('inherited private noSuchMethod forwarder _value'),
+        ),
+      ),
+    );
+  });
 }

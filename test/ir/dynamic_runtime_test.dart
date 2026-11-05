@@ -30,6 +30,42 @@ void main() {
   const wrong = Constant.string('wrong');
   const nil = Constant.nullValue();
 
+  test(
+    'static calls and tear-offs reject surviving typed-forwarder guards',
+    () {
+      final owner = ClassType(_library, 'Guarded');
+      final member = FunctionTarget(
+        _library,
+        'missing',
+        .integer,
+        [],
+        owner: owner,
+        kind: .method,
+        isAbstract: true,
+      );
+      final receiver = ObjectConstant(owner, {});
+      final definition = IrClass(
+        owner,
+        [],
+        members: [member],
+        unsupportedForwarders: {member.selector},
+      );
+      for (final bind in [false, true]) {
+        expect(
+          () => _run(
+            (b) => b.emit(
+              bind
+                  ? BindMethod(member, receiver)
+                  : InstanceCall(member, receiver, []),
+            ),
+            classes: [definition],
+          ),
+          throwsUnsupportedError,
+        );
+      }
+    },
+  );
+
   test('null Object bridges and real NoSuchMethodError', () {
     expect(
       _run((b) => b.emit(DynamicDispatch(nil, _selector('toString'), []))),

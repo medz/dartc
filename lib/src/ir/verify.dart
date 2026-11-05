@@ -176,6 +176,7 @@ import 'value.dart';
         DirectCall(:final typeArguments) ||
         InstanceCall(:final typeArguments) ||
         DynamicDispatch(:final typeArguments) ||
+        MakeInvocation(:final typeArguments) ||
         FunctionCall(:final typeArguments) ||
         InstantiateFunction(:final typeArguments) => typeArguments,
         _ => const <ValueType>[],

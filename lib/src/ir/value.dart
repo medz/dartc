@@ -330,6 +330,7 @@ sealed class Instruction(super.type) extends Value {
     DirectCall() ||
     InstanceCall() ||
     DynamicDispatch() ||
+    MakeInvocation() ||
     FunctionCall() ||
     InstantiateFunction() ||
     BindMethod() ||
@@ -687,24 +688,69 @@ final class DynamicDispatch(
   final List<ValueType> typeArguments = .unmodifiable(typeArguments);
 
   this : super(.dynamicType) {
-    checkMemberSelector(selector);
-    if (this.named.keys.any((name) => name.isEmpty) ||
-        inputs.any((value) => !isDartType(value.type)) ||
-        this.typeArguments.any((type) => !isDartType(type))) {
-      throw ArgumentError(
-        'Dynamic dispatch requires named Dart values and types.',
-      );
-    }
-    if (selector.kind != .method &&
-        (this.named.isNotEmpty ||
-            this.typeArguments.isNotEmpty ||
-            this.positional.length != (selector.kind == .setter ? 1 : 0))) {
-      throw ArgumentError('Invalid dynamic accessor arguments.');
+    _checkInvocationArguments(
+      selector,
+      this.positional,
+      this.named,
+      this.typeArguments,
+    );
+    if (!isDartType(receiver.type)) {
+      throw ArgumentError('Dynamic dispatch requires a Dart receiver.');
     }
   }
 
   @override
   Iterable<Value> get inputs => [receiver, ...positional, ...named.values];
+}
+
+/// Builds the runtime invocation mirror used by noSuchMethod forwarders.
+///
+/// Canonical symbols retain private-library identity. Named arguments are exposed in
+/// their supplied order; argument collections are immutable runtime snapshots.
+final class MakeInvocation(
+  final MemberSelector selector,
+  Iterable<Value> positional, [
+  Map<String, Value> named = const {},
+  Iterable<ValueType> typeArguments = const [],
+]) extends Instruction {
+  final List<Value> positional = .unmodifiable(positional);
+  final Map<String, Value> named = .unmodifiable(named);
+  final List<ValueType> typeArguments = .unmodifiable(typeArguments);
+
+  this : super(CoreTypes.invocation) {
+    _checkInvocationArguments(
+      selector,
+      this.positional,
+      this.named,
+      this.typeArguments,
+    );
+  }
+
+  @override
+  Iterable<Value> get inputs => [...positional, ...named.values];
+}
+
+void _checkInvocationArguments(
+  MemberSelector selector,
+  List<Value> positional,
+  Map<String, Value> named,
+  List<ValueType> typeArguments,
+) {
+  checkMemberSelector(selector);
+  if (named.keys.any((name) => name.isEmpty) ||
+      [
+        ...positional,
+        ...named.values,
+      ].any((value) => !isDartType(value.type)) ||
+      typeArguments.any((type) => !isDartType(type))) {
+    throw ArgumentError('Invocation requires named Dart values and types.');
+  }
+  if (selector.kind != .method &&
+      (named.isNotEmpty ||
+          typeArguments.isNotEmpty ||
+          positional.length != (selector.kind == .setter ? 1 : 0))) {
+    throw ArgumentError('Invalid invocation accessor arguments.');
+  }
 }
 
 /// Allocates a fresh object, runs [initializer] on it and returns it on success.

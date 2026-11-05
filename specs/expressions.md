@@ -34,4 +34,4 @@
 
 [主规范 §17](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)、[空安全](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md)、[空感知元素](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.8/null-aware-elements/feature-specification.md)、[点简写](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.10/dot-shorthands/feature-specification.md)、[Records](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/records/feature-specification.md)。
 
-动态执行对照只覆盖已表示的用户成员和明确实现的核心操作。未知导入/SDK 实现及合成 typed noSuchMethod forwarder 不会被误报为缺失成员。NoSuchMethodError 的类型与传播已对照；宿主诊断文本对自定义类型实参和私有 Symbol 的呈现仍有限，不保证与 VM 文本一致。
+动态执行对照只覆盖已表示的用户成员和明确实现的核心操作。未知导入/SDK 实现及尚未表示的 typed noSuchMethod forwarder 不会被误报为缺失成员；已表示转发使用普通函数体执行入口及返回检查。NoSuchMethodError 的类型与传播已对照；宿主诊断文本对自定义类型实参和私有 Symbol 的呈现仍有限，不保证与 VM 文本一致。

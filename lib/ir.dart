@@ -39,6 +39,7 @@ export 'src/ir/type.dart'
         ValueType,
         TypeParameterType,
         NonNullableTypeParameterType,
+        containsCovariantTypeParameter,
         substituteType,
         typeParametersIn;
 export 'src/ir/value.dart'
@@ -69,6 +70,7 @@ export 'src/ir/value.dart'
         CopyCell,
         DirectCall,
         DynamicDispatch,
+        MakeInvocation,
         Equals,
         Instruction,
         FunctionCall,

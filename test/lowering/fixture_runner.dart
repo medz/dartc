@@ -529,6 +529,61 @@ final class FixtureRunner(
         ..fields[CoreTypes.symbolName] = name
         ..fields[CoreTypes.symbolPrivateLibrary] = library?.toString();
 
+  _Instance _runtimeInvocation(
+    MemberSelector selector,
+    List<Object?> positional,
+    Map<String, Object?> named,
+    List<ValueType> types, {
+    bool typedForwarder = false,
+  }) {
+    Object? symbol(String name, [Uri? library]) => typedForwarder
+        ? _constant(
+            ObjectConstant(CoreTypes.symbolStorage, {
+              CoreTypes.symbolName: Constant.string(name),
+              CoreTypes.symbolPrivateLibrary: library == null
+                  ? const Constant.nullValue()
+                  : Constant.string(library.toString()),
+            }),
+          )
+        : _invocationSymbol(name, library);
+    final name = selector.kind == .setter ? '${selector.name}=' : selector.name;
+    final elementType = typedForwarder
+        ? ValueType.dynamicType
+        : ValueType.object.nullable;
+    // Generated forwarders canonicalize symbols and empty dynamic lists, but
+    // always allocate their named-argument view. Raw missing dispatch instead
+    // shares Object? empty constants; public accessor factories use Object.
+    return _Instance(CoreTypes.invocationStorage, this)
+      ..fields.addAll({
+        CoreTypes.invocationMemberName: symbol(name, selector.privateLibrary),
+        CoreTypes.invocationTypeArguments: types.isEmpty
+            ? _emptyList(.typeType)
+            : _CollectionValue(
+                CoreTypes.listOf(ValueType.typeType),
+                types.map(_typeValue).toList(),
+                immutable: true,
+              ),
+        CoreTypes.invocationPositionalArguments: positional.isEmpty
+            ? _emptyList(elementType)
+            : _CollectionValue(
+                CoreTypes.listOf(elementType),
+                positional.toList(),
+                immutable: true,
+              ),
+        CoreTypes.invocationNamedArguments: named.isEmpty && !typedForwarder
+            ? _emptyNamed(elementType)
+            : _CollectionValue(CoreTypes.mapOf(CoreTypes.symbol, elementType), {
+                for (final entry in named.entries)
+                  symbol(entry.key): entry.value,
+              }, immutable: true),
+        CoreTypes.invocationKind: selector.kind == .method
+            ? 0
+            : selector.kind == .getter
+            ? 1
+            : 2,
+      });
+  }
+
   Object? _missingDynamic(
     Object? receiver,
     MemberSelector selector,
@@ -544,20 +599,9 @@ final class FixtureRunner(
       );
       if (lookup.target case final target?) {
         final names = named.keys.toList()..sort();
-        final invocation = _invocation(
-          _invocationSymbol(name, selector.privateLibrary),
-          types.isEmpty ? null : types.map(_typeValue).toList(),
-          positional.isEmpty ? null : positional,
-          {for (final key in names) _invocationSymbol(key): named[key]},
-          0,
-        );
-        // Runtime mirrors share Object? empty argument constants even for
-        // accessors; public Invocation getter/setter factories use Object.
-        invocation.fields[CoreTypes.invocationKind] = selector.kind == .method
-            ? 0
-            : selector.kind == .getter
-            ? 1
-            : 2;
+        final invocation = _runtimeInvocation(selector, positional, {
+          for (final name in names) name: named[name],
+        }, types);
         return _invoke(_FunctionValue(target, receiver), [
           invocation,
         ], const {});
@@ -1057,6 +1101,11 @@ final class FixtureRunner(
           ? _symbolToString
           : member;
     }
+    if (program
+        .lookupMember(instance.type, member.selector)
+        .unsupportedForwarder) {
+      throw UnsupportedError('Unmodeled fixture noSuchMethod forwarder');
+    }
     throw StateError('Missing fixture member: ${member.name}');
   }
 
@@ -1361,6 +1410,19 @@ final class FixtureRunner(
         case InstantiateFunction(:final function, :final typeArguments):
           final value = read(function) as _FunctionValue;
           values[op] = value.instantiate(typeArguments.map(resolve).toList());
+        case MakeInvocation(
+          :final selector,
+          :final positional,
+          :final named,
+          :final typeArguments,
+        ):
+          values[op] = _runtimeInvocation(
+            selector,
+            positional.map(read).toList(),
+            {for (final e in named.entries) e.key: read(e.value)},
+            typeArguments.map(resolve).toList(),
+            typedForwarder: true,
+          );
         case DynamicDispatch(
           :final receiver,
           :final selector,

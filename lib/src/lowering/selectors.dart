@@ -358,6 +358,14 @@ final class SelectorChain(
         member.isStatic) {
       unsupported(context.unit, node, 'member $name');
     }
+    final target = direct
+        ? context.bindings.superTarget(
+            context.receiver!.type,
+            member,
+            context.unit,
+            node,
+          )
+        : context.bindings.target(member, context.unit, node);
     final coreToString =
         member is MethodElement &&
         member.library.isDartCore &&
@@ -382,6 +390,7 @@ final class SelectorChain(
       );
     }
     if (member.library.isDartCore &&
+        (!direct || target.library.toString() == 'dart:core') &&
         !supportedToString &&
         !coreRuntimeMember(member, known.type) &&
         (member is GetterElement || arguments != null)) {
@@ -397,7 +406,6 @@ final class SelectorChain(
       }
       unsupported(context.unit, node, 'core collection member $name');
     }
-    final target = context.bindings.target(member, context.unit, node);
     if (member is MethodElement && arguments == null) {
       return context.emit(BindMethod(target, known, direct: direct));
     }

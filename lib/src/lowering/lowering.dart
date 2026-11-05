@@ -22,6 +22,18 @@ abstract final class Lowering() {
     bool enableAssertions = false,
   }) {
     final bindings = Bindings(enableAssertions: enableAssertions);
+    for (final unit in input.libraries.expand((library) => library.units)) {
+      for (final node in unit.unit.declarations) {
+        switch (node) {
+          case ast.ClassDeclaration():
+            bindings.registerClass(node.declaredFragment!.element, unit, node);
+          case ast.EnumDeclaration():
+            bindings.registerClass(node.declaredFragment!.element, unit, node);
+          default:
+            break;
+        }
+      }
+    }
     final functions = <IrFunction>[];
     final classes = <IrClass>[];
     for (final unit in input.libraries.expand((library) => library.units)) {

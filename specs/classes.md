@@ -9,7 +9,7 @@
 | 字段、方法、getter/setter、静态成员 | 支持实例字段的构造初始化及 late/late final 惰性存储、隐式和显式 getter/setter、实例方法及静态方法。普通实例调用按运行类分派，super 调用选定的父类实现。私有成员限于声明库。支持显式静态 getter/setter。支持静态 const 及非 const 存储，包括 final、late/late final 的惰性初始化。 |
 | 抽象成员与 abstract 字段 | 支持通过抽象 getter 和方法调用具体类的实现。 |
 | 用户算术、关系、一元及索引运算符 | 类的运算符按解析后的成员分派，包括复合赋值和索引读写。super 直接调用选中的祖先实现。扩展运算符待实现。见[运算符与更新样本](../test/lowering/fixtures/nominal/updates.dart)。 |
-| `operator ==`、`noSuchMethod` | 支持用户相等方法及动态缺失成员回退。自定义 noSuchMethod 收到含私有库身份、调用种类和实际参数的 Invocation；Object 默认实现抛出 NoSuchMethodError。需要入口/返回类型检查的合成 forwarder 暂以成员级保护明确拒绝，不能当普通缺失成员执行。真实继承实现优先，跨库私有成员的特殊转发保持保护。 |
+| `operator ==`、`noSuchMethod` | 支持用户相等方法及动态缺失成员回退。自定义 noSuchMethod 收到含私有库身份、调用种类和实际参数的 Invocation；Object 默认实现抛出 NoSuchMethodError。合成 typed forwarder 使用普通函数体，复用入口默认值、泛型边界、协变参数及返回检查；void 返回保留实际结果，Never 返回执行检查。真实继承实现优先，同签名转发继承保留原默认值；super 解析实际实现，支持声明顺序、闭包和提取。缺失合并泛型默认元数据、仅协变标记变化的继承，以及新建或替换跨库私有转发仍明确拒绝。 |
 | 普通、命名、生成式重定向构造 | 支持隐式和显式构造器、命名构造、this 重定向和 super 调用。子类字段先初始化，父类构造体先执行。 |
 | const 生成式构造 | 支持普通调用和普通用户类的常量实例。常量值保留实际泛型、继承及私有字段存储；相同类型和字段值按规范身份复用。 |
 | 工厂与重定向工厂 | 工厂体可以返回已有或新建的子类实例。重定向工厂可经过多级重定向到生成式构造器或工厂体，并逐级代换泛型实参。实参只求值一次，省略的参数采用最终目标的默认值。见[重定向工厂样本](../test/lowering/fixtures/nominal/factories.dart)。 |
@@ -27,3 +27,5 @@
 ## 规范依据
 
 [主规范 §10–§16](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)、[类修饰符](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/class-modifiers/feature-specification.md)、[主构造器](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.13/primary-constructors/feature-specification.md)、[构造器提取](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.15/constructor-tearoffs/feature-specification.md)、[增强枚举](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.17/enhanced-enums/feature-specification.md)。
+
+Typed forwarder 的 Invocation 与动态缺失回退及公开工厂分开建模：成员/命名键使用规范化 Symbol，命名实参按声明顺序排列；空位置列表为 const<dynamic>[]，命名 Map 每次创建，集合不可修改。沿用 SDK 3.13.7 的可观察身份，不将其声明为跨 SDK 保证。见[转发样本](../test/lowering/fixtures/typed_forwarders.dart)。

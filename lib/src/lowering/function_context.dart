@@ -122,12 +122,15 @@ final class FunctionContext(
       converted.add(argument);
     }
     args = converted;
+    final target = direct
+        ? bindings.superTarget(this.receiver!.type, member, unit, site)
+        : bindings.target(member, unit, site);
     if (member.library.isDartCore &&
+        (!direct || target.library.toString() == 'dart:core') &&
         !coreRuntimeMember(member, receiver.type)) {
       final operation = coreCollectionOperation(member.name!, receiver, args);
       if (operation != null) return normal(emit(operation));
     }
-    final target = bindings.target(member, unit, site);
     return normal(
       emit(
         direct
