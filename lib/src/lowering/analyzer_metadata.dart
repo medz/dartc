@@ -74,8 +74,9 @@ List<DartType> extensionTypeArguments(
     while (receiverType is TypeParameterType && seen.add(receiverType)) {
       receiverType = receiverType.bound;
     }
-    if (receiverType is InterfaceType && receiverType.element == owner) {
-      return receiverType.typeArguments;
+    if (receiverType is InterfaceType) {
+      final view = receiverType.asInstanceOf(owner);
+      if (view != null) return view.typeArguments;
     }
     throw UnsupportedError(
       'Analyzer extension type receiver metadata unavailable.',

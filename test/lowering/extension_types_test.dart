@@ -129,10 +129,6 @@ void main() {
           'extension type constructor alias',
         ),
         (
-          'extension type E(int value) implements int {}',
-          'extension type implements',
-        ),
-        (
           'extension type E(int value) { E.zero() : this(0); }',
           'extension type constructor shape',
         ),

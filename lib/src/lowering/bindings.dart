@@ -40,9 +40,6 @@ final class Bindings({final bool enableAssertions = false}) {
     ast.ExtensionTypeDeclaration node,
   ) {
     final element = node.declaredFragment!.element;
-    if (node.implementsClause != null) {
-      unsupported(unit, node, 'extension type implements');
-    }
     final primary = node.namePart;
     if (primary is! ast.PrimaryConstructorDeclaration ||
         primary.body != null ||

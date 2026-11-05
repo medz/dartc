@@ -21,7 +21,7 @@
 | Object.toString | Object?/类型参数视图支持虚调用及提取，super 保留选定祖先语义，用户重写优先。静态、dynamic、对象模式及 super 默认方法的绑定身份一致。fixture 当前覆盖用户实例、null/标量、Type 与 Symbol；聚合值、函数、错误及未建模 SDK 存储明确拒绝。见[字符串样本](../test/lowering/fixtures/object_to_string.dart)。 |
 | 元数据注解 | 待实现。 |
 | 普通 extension | 声明与直接方法调用复用普通静态目标，接收者为显式首参数，扩展与方法类型参数按声明顺序展开。支持隐式选择、显式 override、词法调用、静态成员/变量，以及闭包捕获 this 与类型环境。非类、可空、record、函数和类型变量接收者无需伪造类。实例 getter/setter、索引、一元/二元运算符、复合赋值及增减复用同一调用适配器；对象与关系模式使用相同的已解析目标。隐式 call 调用复用静态目标，方法提取复用捕获接收者的普通闭包；部分 analyzer 泛型元数据边界仍明确拒绝，见[扩展访问范围与差异](extension-access.md)。见[扩展样本](../test/lowering/fixtures/extension_methods.dart)。 |
-| extension type | 支持普通/泛型、无 implements 的简单主构造器，representation 擦除及自身成员复用静态函数，无名义分配。支持可空/record/函数表示、const、构造器与方法提取，具体范围与拒绝边界见[extension type](extension-types.md)。 |
+| extension type | 支持普通/泛型的简单主构造器、implements 和表示擦除。自身及继承的 extension type 成员复用静态函数，普通接口在表示对象上虚派发，无名义分配。支持可空/record/函数表示、const、构造器与方法提取，具体范围与拒绝边界见[extension type](extension-types.md)。 |
 | mixin、mixin application | 待实现。 |
 | 构造器 assert initializer | 支持可配置的构造器断言，保持初始化列表顺序及抛错行为。默认关闭，使用 `enableAssertions: true` 启用。 |
 
