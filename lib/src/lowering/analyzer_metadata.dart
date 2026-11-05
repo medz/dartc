@@ -264,7 +264,7 @@ ClassCovariance executableClassCovariance(ExecutableElement member) {
 List<DartType> extensionTearOffDefaults(ExecutableElement member) {
   member = member.baseElement;
   if (member.typeParameters.isEmpty) return const [];
-  final owner = member.enclosingElement as ExtensionElement;
+  final owner = member.enclosingElement as TypeParameterizedElement;
   DartType requiredDefault(TypeParameterElement parameter) =>
       typeParameterDefault(parameter) ??
       (throw UnsupportedError(

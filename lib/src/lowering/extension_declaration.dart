@@ -10,10 +10,10 @@ import 'global_declaration.dart';
 void lowerExtension(
   ResolvedUnitResult unit,
   Bindings bindings,
-  ast.ExtensionDeclaration declaration,
+  List<ast.ClassMember> members,
   List<IrFunction> functions,
 ) {
-  for (final member in declaration.body.members) {
+  for (final member in members) {
     switch (member) {
       case ast.MethodDeclaration(:final body):
         FunctionLowering.append(
@@ -32,4 +32,25 @@ void lowerExtension(
         unsupported(unit, member, 'extension member declaration');
     }
   }
+}
+
+/// Erased representation construction and access are ordinary identity bodies.
+void lowerExtensionType(
+  ResolvedUnitResult unit,
+  Bindings bindings,
+  ast.ExtensionTypeDeclaration declaration,
+  List<IrFunction> functions,
+) {
+  final element = declaration.declaredFragment!.element;
+  for (final executable in [
+    element.primaryConstructor,
+    element.representation.getter!,
+  ]) {
+    final target = bindings.target(executable, unit, declaration);
+    final entry = Block(target.parameterTypes);
+    final value = entry.parameters.single;
+    entry.finish(value.type == .never ? Unreachable(value) : Return(value));
+    functions.add(IrFunction(target, [entry]));
+  }
+  lowerExtension(unit, bindings, declaration.body.members, functions);
 }

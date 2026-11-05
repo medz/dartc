@@ -67,8 +67,7 @@ Value? lowerBinary(
       negated: operator.type == .BANG_EQ,
     );
   }
-  if (left.type is DynamicType &&
-      member?.enclosingElement is! ExtensionElement) {
+  if (left.type is DynamicType && !isExtensionOwner(member?.enclosingElement)) {
     final name = switch (operator.type) {
       .PLUS_PLUS => '+',
       .MINUS_MINUS => '-',
@@ -90,7 +89,7 @@ Value? lowerBinary(
   }
   if (member is MethodElement &&
       (isClassOrEnum(member.enclosingElement) ||
-          member.enclosingElement is ExtensionElement) &&
+          isExtensionOwner(member.enclosingElement)) &&
       !member.library.isDartCore) {
     return context.callPositionalMember(
       member,

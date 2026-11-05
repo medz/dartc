@@ -85,7 +85,8 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       final member = expression.propertyName.element;
       if (member is MethodElement &&
               member.isStatic &&
-              isClassOrEnum(member.enclosingElement) ||
+              (isClassOrEnum(member.enclosingElement) ||
+                  isExtensionOwner(member.enclosingElement)) ||
           member is ConstructorElement) {
         return FunctionConstant(
           context.bindings.target(
@@ -100,7 +101,8 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       }
       if (member is GetterElement &&
           member.isStatic &&
-          isClassOrEnum(member.enclosingElement)) {
+          (isClassOrEnum(member.enclosingElement) ||
+              isExtensionOwner(member.enclosingElement))) {
         final target = context.bindings.target(member, unit, expression);
         return context.emit(DirectCall(target, []));
       }
@@ -145,6 +147,21 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
     ):
       final receiver = lowerExpression(context, expression);
       if (receiver == null) return null;
+      final application = context.extensionApplication(
+        element,
+        expression,
+        receiver: expression,
+      );
+      if (application != null) {
+        final checked = context.memberReceiver(receiver, application);
+        return checked == null
+            ? null
+            : context.instantiateFunction(
+                context.bindExtension(application, checked, expression),
+                typeArgumentTypes,
+                expression,
+              );
+      }
       if (element == null || !isClassOrEnum(element.enclosingElement)) {
         unsupported(unit, expression, 'implicit call tear-off');
       }
@@ -169,6 +186,14 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         unit,
         expression,
       );
+      if (constructorName.element!.enclosingElement is ExtensionTypeElement) {
+        if (constructorName.type.element
+            case TypeAliasElement(:final typeParameters)
+            when typeParameters.isNotEmpty) {
+          unsupported(unit, expression, 'extension type constructor alias');
+        }
+        return FunctionConstant(target);
+      }
       final resolved = expression.staticType! as dart.FunctionType;
       final signature = context.typeOf(resolved, expression) as FunctionType;
       final generic = signature.typeParameters.isNotEmpty;
@@ -235,6 +260,17 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         unsupported(unit, expression, 'deferred constructor');
       }
       final source = context.bindings.target(ctor, unit, expression);
+      if (ctor.enclosingElement is ExtensionTypeElement) {
+        final args = context.arguments(
+          argumentList,
+          (e) => lowerExpression(context, e),
+        );
+        return args == null
+            ? null
+            : context.emit(
+                DirectCall(source, context.bindings.bind(source, args)),
+              );
+      }
       final construction = source.resolveConstruction(
         context.typeOf(expression.staticType!, expression) as ClassType,
       );
@@ -494,7 +530,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         when callee is MethodElement &&
                 callee.isStatic &&
                 (isClassOrEnum(callee.enclosingElement) ||
-                    callee.enclosingElement is ExtensionElement) ||
+                    isExtensionOwner(callee.enclosingElement)) ||
             expression is ast.MethodInvocation &&
                 callee is TopLevelFunctionElement:
       if (expression case ast.MethodInvocation(target: final receiver?)) {
@@ -506,7 +542,10 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
             (i) => i.prefix?.isDeferred == true,
           ),
           ast.Identifier(
-            element: ClassElement() || EnumElement() || ExtensionElement(),
+            element: ClassElement() ||
+                EnumElement() ||
+                ExtensionElement() ||
+                ExtensionTypeElement(),
           )
               when callee is MethodElement =>
             receiver is! ast.PrefixedIdentifier || !receiver.isDeferred,

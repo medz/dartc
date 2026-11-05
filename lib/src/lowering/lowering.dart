@@ -26,6 +26,8 @@ abstract final class Lowering() {
     for (final unit in input.libraries.expand((library) => library.units)) {
       for (final node in unit.unit.declarations) {
         switch (node) {
+          case ast.ExtensionTypeDeclaration():
+            bindings.registerExtensionType(unit, node);
           case ast.ClassDeclaration():
             bindings.registerClass(node.declaredFragment!.element, unit, node);
           case ast.EnumDeclaration():
@@ -47,7 +49,9 @@ abstract final class Lowering() {
           case ast.EnumDeclaration():
             classes.add(lowerEnum(unit, bindings, node, functions));
           case ast.ExtensionDeclaration():
-            lowerExtension(unit, bindings, node, functions);
+            lowerExtension(unit, bindings, node.body.members, functions);
+          case ast.ExtensionTypeDeclaration():
+            lowerExtensionType(unit, bindings, node, functions);
           case ast.FunctionDeclaration(
             declaredFragment: final fragment?,
             :final functionExpression,

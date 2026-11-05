@@ -241,7 +241,7 @@ Object _fieldPath(
   final member = field.element;
   final name = field.effectiveName!;
   if (member is ExecutableElement &&
-      member.enclosingElement is ExtensionElement &&
+      isExtensionOwner(member.enclosingElement) &&
       coreEnumField(member) == null) {
     final owner = field.parent as ast.ObjectPattern;
     final application = context.extensionApplication(
@@ -380,7 +380,7 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
               (!isClassOrEnum(member.enclosingElement) &&
                   coreEnumField(member) == null &&
                   !((member is GetterElement || member is MethodElement) &&
-                      member.enclosingElement is ExtensionElement))) {
+                      isExtensionOwner(member.enclosingElement)))) {
             unsupported(context.unit, field, 'object pattern member');
           }
           // Unlike record slots, even wildcard fields must evaluate their getter.

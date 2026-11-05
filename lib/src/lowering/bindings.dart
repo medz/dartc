@@ -11,7 +11,7 @@ import 'constant_safety.dart';
 /// Declaration-time static ABI, separate from the source callable signature.
 final class ExtensionExecutable(
   final ExecutableElement declaration,
-  final ExtensionElement extension,
+  final Element extension,
   final FunctionTarget target,
   final List<TypeParameterType> extensionParameters,
   final FunctionType sourceSignature,
@@ -32,6 +32,40 @@ final class Bindings({final bool enableAssertions = false}) {
   final _constantSafety = ConstantSafety();
   final _targets = <ExecutableElement, FunctionTarget>{};
   final _extensions = <ExecutableElement, ExtensionExecutable>{};
+  final _extensionTypes = <ExtensionTypeElement>{};
+
+  /// Admit only representation constructors whose complete semantics are erased.
+  void registerExtensionType(
+    ResolvedUnitResult unit,
+    ast.ExtensionTypeDeclaration node,
+  ) {
+    final element = node.declaredFragment!.element;
+    if (element.typeParameters.isNotEmpty) {
+      unsupported(unit, node, 'generic extension type');
+    }
+    if (node.implementsClause != null) {
+      unsupported(unit, node, 'extension type implements');
+    }
+    final primary = node.namePart;
+    if (primary is! ast.PrimaryConstructorDeclaration ||
+        primary.body != null ||
+        element.constructors.length != 1 ||
+        element.primaryConstructor.isExternal) {
+      unsupported(unit, node, 'extension type constructor shape');
+    }
+    _extensionTypes.add(element);
+  }
+
+  void _requireExtensionType(
+    ExtensionTypeElement element,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    if (!_extensionTypes.contains(element)) {
+      unsupported(unit, site, 'unregistered extension type ${element.name}');
+    }
+  }
+
   final _classes = <InterfaceElement, ClassType>{};
   final _classElements = <ClassType, InterfaceElement>{};
   final _parameters = <TypeParameterElement, TypeParameterType>{};
@@ -553,7 +587,21 @@ final class Bindings({final bool enableAssertions = false}) {
     int? sourceOffset,
     Iterable<ValueType> captures = const [],
   }) {
-    if (element.enclosingElement is ExtensionElement) {
+    if (element.enclosingElement case final ExtensionTypeElement owner
+        when element is ConstructorElement) {
+      _requireExtensionType(owner, unit, site);
+      element = element.baseElement;
+      return _targets.putIfAbsent(
+        element,
+        () => FunctionTarget(
+          owner.library.uri,
+          _extensionName(owner, element.name!, 'constructor'),
+          valueType(owner.thisType, unit, site),
+          element.formalParameters.map((p) => valueType(p.type, unit, site)),
+        ),
+      );
+    }
+    if (isExtensionOwner(element.enclosingElement)) {
       return extensionExecutable(element, unit, site)!.target;
     }
     element = element.baseElement;
@@ -667,11 +715,14 @@ final class Bindings({final bool enableAssertions = false}) {
   ) {
     element = element.baseElement;
     final owner = element.enclosingElement;
-    if (owner is! ExtensionElement) return null;
+    if (!isExtensionOwner(owner) || element is ConstructorElement) return null;
+    if (owner is ExtensionTypeElement) _requireExtensionType(owner, unit, site);
     if (_extensions[element] case final previous?) return previous;
     final extensionElements = element.isStatic
         ? const <TypeParameterElement>[]
-        : owner.typeParameters;
+        : owner is ExtensionElement
+        ? owner.typeParameters
+        : (owner as ExtensionTypeElement).typeParameters;
     // Both groups must exist before converting dependent bounds/defaults.
     registerTypeParameters(extensionElements);
     registerTypeParameters(element.typeParameters);
@@ -689,10 +740,16 @@ final class Bindings({final bool enableAssertions = false}) {
     final source = valueType(element.type, unit, site) as FunctionType;
     final receiver = element.isStatic
         ? null
-        : valueType(owner.extendedType, unit, site);
+        : valueType(
+            owner is ExtensionElement
+                ? owner.extendedType
+                : (owner as ExtensionTypeElement).thisType,
+            unit,
+            site,
+          );
     final function = FunctionTarget(
       element.library.uri,
-      _extensionName(owner, element.name!, switch (element) {
+      _extensionName(owner!, element.name!, switch (element) {
         GetterElement() => 'get',
         SetterElement() => 'set',
         MethodElement(name: '-', formalParameters: []) => 'unary',
@@ -749,6 +806,13 @@ final class Bindings({final bool enableAssertions = false}) {
         'instance application of static extension member',
       );
     }
+    if (selected.enclosingElement is ExtensionTypeElement) {
+      return ExtensionApplication(
+        executable,
+        const [],
+        executable.receiverType!,
+      );
+    }
     final arguments = extensionTypeArguments(
       selected,
       unit.libraryElement,
@@ -767,12 +831,12 @@ final class Bindings({final bool enableAssertions = false}) {
     );
   }
 
-  String _extensionName(ExtensionElement owner, String name, String operation) {
-    final fragment = owner.firstFragment;
+  String _extensionName(Element owner, String name, String operation) {
     final identity =
         owner.name ??
-        '${fragment.libraryFragment.source.uri}@${fragment.offset}';
-    return '<extension:$identity:$operation:$name>';
+        '${(owner as ExtensionElement).firstFragment.libraryFragment.source.uri}@${owner.firstFragment.offset}';
+    final kind = owner is ExtensionTypeElement ? 'extension-type' : 'extension';
+    return '<$kind:$identity:$operation:$name>';
   }
 
   /// Defaults supplied by an executable declaration.
@@ -794,12 +858,13 @@ final class Bindings({final bool enableAssertions = false}) {
     ast.VariableDeclaration declaration,
   ) => _globals.putIfAbsent(element.baseElement as VariableElement, () {
     final container = element.enclosingElement;
-    final owner = container is InterfaceElement
+    final owner =
+        container is InterfaceElement && container is! ExtensionTypeElement
         ? classType(container, unit, declaration)
         : null;
     final type = valueType(element.type, unit, declaration);
-    final name = container is ExtensionElement
-        ? _extensionName(container, element.name!, 'field')
+    final name = isExtensionOwner(container)
+        ? _extensionName(container!, element.name!, 'field')
         : element.name!;
     return GlobalVariable(
       element.library.uri,
@@ -921,6 +986,13 @@ final class Bindings({final bool enableAssertions = false}) {
         final callable = target(executable, unit, site);
         final functionType = value.type! as dart.FunctionType;
         final arguments = constantFunctionArguments(value);
+        if (executable is ConstructorElement &&
+            executable.enclosingElement is ExtensionTypeElement) {
+          if (constantFunctionHasAlias(value)) {
+            unsupported(unit, site, 'extension type constructor alias');
+          }
+          return FunctionConstant(callable);
+        }
         if (executable is ConstructorElement) {
           final alias = _constantConstructorAlias(
             value,
@@ -1167,6 +1239,12 @@ final class Bindings({final bool enableAssertions = false}) {
     ResolvedUnitResult unit,
     ast.AstNode site,
   ) {
+    if (type case dart.InterfaceType(
+      element: final ExtensionTypeElement element,
+    )) {
+      _requireExtensionType(element, unit, site);
+      return valueType(type.extensionTypeErasure, unit, site);
+    }
     final ValueType base = switch (type) {
       dart.DynamicType() => .dynamicType,
       dart.VoidType() => .voidType,
@@ -1424,6 +1502,9 @@ bool requiresExhaustiveSwitch(dart.DartType type) => switch (type) {
 };
 
 /// Whether this declaration uses the shared class member lowering.
+bool isExtensionOwner(Element? element) =>
+    element is ExtensionElement || element is ExtensionTypeElement;
+
 bool isClassOrEnum(Element? element) =>
     element is ClassElement || element is EnumElement;
 

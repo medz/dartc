@@ -276,8 +276,9 @@ final class SelectorChain(
       if (converted == null) return null;
       final key = evaluate(index);
       if (key == null) return null;
-      if (target?.staticType is dart.DynamicType ||
-          node.isCascaded && cascadeReceiver?.type is DynamicType) {
+      if (application == null &&
+          (target?.staticType is dart.DynamicType ||
+              node.isCascaded && cascadeReceiver?.type is DynamicType)) {
         return context.dynamicMember(receiver, .method, '[]', [key]);
       }
       return context.callPositionalMember(
@@ -338,7 +339,7 @@ final class SelectorChain(
       )
           when !method.isStatic &&
               (isClassOrEnum(method.enclosingElement) ||
-                  method.enclosingElement is ExtensionElement) =>
+                  isExtensionOwner(method.enclosingElement)) =>
         (target, method.name!, method, argumentList, isNullAware),
       _ => (null, null, null, null, false),
     };
@@ -366,7 +367,7 @@ final class SelectorChain(
     }
     if (member is ExecutableElement &&
         !member.isStatic &&
-        member.enclosingElement is ExtensionElement &&
+        isExtensionOwner(member.enclosingElement) &&
         coreEnumField(member) == null) {
       if (member.library.isDartCore) {
         unsupported(context.unit, node, 'core extension member $name');
@@ -568,7 +569,10 @@ final class SelectorChain(
       PrefixElement() => !element.imports.any(
         (i) => i.prefix?.isDeferred == true,
       ),
-      ClassElement() || EnumElement() || ExtensionElement() =>
+      ClassElement() ||
+      EnumElement() ||
+      ExtensionElement() ||
+      ExtensionTypeElement() =>
         receiver is! ast.PrefixedIdentifier || !receiver.isDeferred,
       _ => false,
     };
@@ -691,7 +695,7 @@ final class SelectorChain(
     if ((target?.staticType is dart.DynamicType ||
             receiver.type is DynamicType) &&
         !(destination is ExecutableElement &&
-            destination.enclosingElement is ExtensionElement)) {
+            isExtensionOwner(destination.enclosingElement))) {
       final key = index == null ? null : evaluate(index);
       if (index != null && key == null) return null;
       final name = switch (place) {
@@ -718,7 +722,7 @@ final class SelectorChain(
     if (destination is! ExecutableElement ||
         destination.isStatic ||
         !(isClassOrEnum(destination.enclosingElement) ||
-            destination.enclosingElement is ExtensionElement)) {
+            isExtensionOwner(destination.enclosingElement))) {
       unsupported(context.unit, site, 'assignment target');
     }
     ExtensionApplication? application(ExecutableElement? member) =>

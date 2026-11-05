@@ -110,7 +110,7 @@ final class FunctionContext(
     bool nullAware = false,
   }) {
     if (member == null ||
-        member.enclosingElement is! ExtensionElement ||
+        !isExtensionOwner(member.enclosingElement) ||
         coreEnumField(member) != null) {
       return null;
     }
@@ -125,11 +125,16 @@ final class FunctionContext(
         : null;
     final lexicalReceiver = unqualified
         ? switch (site.thisOrAncestorMatching(
-            (n) => n is ast.ClassDeclaration || n is ast.EnumDeclaration,
+            (n) =>
+                n is ast.ClassDeclaration ||
+                n is ast.EnumDeclaration ||
+                n is ast.ExtensionTypeDeclaration,
           )) {
             ast.ClassDeclaration(:final declaredFragment) =>
               declaredFragment!.element.thisType,
             ast.EnumDeclaration(:final declaredFragment) =>
+              declaredFragment!.element.thisType,
+            ast.ExtensionTypeDeclaration(:final declaredFragment) =>
               declaredFragment!.element.thisType,
             _ => null,
           }
