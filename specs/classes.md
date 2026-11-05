@@ -17,7 +17,8 @@
 | 主构造器及 new/factory 简写 | 支持主构造器、声明字段的形参、类体中的 this 初始化列表和构造体，以及简写的次级构造器。 |
 | 构造器函数值 | 支持生成式和工厂构造器提取，包括泛型构造器函数值、显式或上下文实例化、重定向工厂、默认参数和函数值身份。泛型类型别名的参数重排、固定/重复参数和不同界限保留其独立身份。 |
 | 泛型实例、成员代入和协变检查 | 支持类类型参数、界限、嵌套实参、成员类型代入和泛型继承。实例保留实际类型实参，宽化静态引用后的字段写入、方法调用和方法提取仍执行协变检查。类体只保留一份，闭包捕获类型环境。见[泛型样本](../test/lowering/fixtures/generic_classes.dart)和[泛型工厂重定向样本](../test/lowering/fixtures/generic_redirect_factory.dart)。 |
-| 简单、增强及泛型枚举 | 复用类的常量存储和成员派发，支持 values、index、隐式 EnumName.name、默认/自定义 toString、字段、方法、运算符、工厂及模式；values 保留每项实际类型参数。具体 enum、Enum 及其类型参数界限支持显式 toString 调用与提取；通用 Object 接收者及 super.toString 仍待实现。带用户存储字段 `_name` 的 enum 因 analyzer 丢失原值而明确拒绝；同名 getter 不受此限制。混入及 Enum/EnumByName 的其他 SDK helper 待实现。见[枚举样本](../test/lowering/fixtures/enums.dart)。 |
+| 简单、增强及泛型枚举 | 复用类的常量存储和成员派发，支持 values、index、隐式 EnumName.name、默认/自定义 toString、字段、方法、运算符、工厂及模式；values 保留每项实际类型参数。具体 enum、Enum 及其类型参数界限支持显式 toString 调用与提取；通用 Object 接收者也支持 toString 调用与提取。带用户存储字段 `_name` 的 enum 因 analyzer 丢失原值而明确拒绝；同名 getter 不受此限制。混入及 Enum/EnumByName 的其他 SDK helper 待实现。见[枚举样本](../test/lowering/fixtures/enums.dart)。 |
+| Object.toString | Object?/类型参数视图支持虚调用及提取，super 保留选定祖先语义，用户重写优先。静态、dynamic、对象模式及 super 默认方法的绑定身份一致。fixture 当前覆盖用户实例、null/标量、Type 与 Symbol；聚合值、函数、错误及未建模 SDK 存储明确拒绝。见[字符串样本](../test/lowering/fixtures/object_to_string.dart)。 |
 | 元数据注解 | 待实现。 |
 | 普通 extension | 声明与直接方法调用复用普通静态目标，接收者为显式首参数，扩展与方法类型参数按声明顺序展开。支持隐式选择、显式 override、词法调用、静态成员/变量，以及闭包捕获 this 与类型环境。非类、可空、record、函数和类型变量接收者无需伪造类。实例 getter/setter、索引、一元/二元运算符、复合赋值及增减复用同一调用适配器；对象与关系模式使用相同的已解析目标。隐式 call 调用复用静态目标，方法提取复用捕获接收者的普通闭包；部分 analyzer 泛型元数据边界仍明确拒绝，见[扩展访问范围与差异](extension-access.md)。见[扩展样本](../test/lowering/fixtures/extension_methods.dart)。 |
 | extension type | 支持非泛型、无 implements 的简单主构造器，representation 擦除及自身成员复用静态函数，无名义分配。支持可空/record/函数表示、const、构造器与方法提取，具体范围与拒绝边界见[extension type](extension-types.md)。 |

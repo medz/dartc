@@ -1531,7 +1531,7 @@ bool coreRuntimeType(ExecutableElement? member) =>
 /// Keep these public protocols virtual: user implementations need not carry
 /// the SDK implementation's storage, and subclasses may inherit or override
 /// their concrete getters.
-bool coreRuntimeMember(ExecutableElement member, ValueType receiver) {
+bool coreRuntimeMember(ExecutableElement member) {
   if (!member.library.isDartCore || member.isStatic) return false;
   return switch ((member, member.enclosingElement?.name, member.name)) {
     (GetterElement(), 'Symbol', 'hashCode') => true,
@@ -1548,8 +1548,7 @@ bool coreRuntimeMember(ExecutableElement member, ValueType receiver) {
           'isAccessor',
     ) =>
       true,
-    (MethodElement(), 'Object', 'toString') =>
-      CoreTypes.view(receiver, CoreTypes.symbol) != null,
+    (MethodElement(), 'Object', 'toString') => true,
     _ => false,
   };
 }

@@ -275,7 +275,7 @@ final class FunctionContext(
         : bindings.target(member, unit, site);
     if (member.library.isDartCore &&
         (!direct || target.library.toString() == 'dart:core') &&
-        !coreRuntimeMember(member, receiver.type)) {
+        !coreRuntimeMember(member)) {
       final operation = coreCollectionOperation(member.name!, receiver, args);
       if (operation != null) return normal(emit(operation));
     }

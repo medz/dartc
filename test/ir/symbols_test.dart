@@ -562,7 +562,7 @@ void main() {
   );
 
   test(
-    'Symbol fallback requires exact owners and does not cover other objects',
+    'Symbol fallback requires exact owners and rejects unmodeled objects',
     () {
       final lookalike = ClassType(
         CoreTypes.symbol.library,
@@ -593,13 +593,13 @@ void main() {
         () => _execute(
           (b) => b.emit(InstanceCall(_toString, ObjectConstant(plain, {}), [])),
         ),
-        throwsStateError,
+        throwsUnsupportedError,
       );
       expect(
         () => _execute(
           (b) => b.emit(BindMethod(_toString, ObjectConstant(plain, {}))),
         ),
-        throwsStateError,
+        throwsUnsupportedError,
       );
     },
   );

@@ -115,17 +115,6 @@ void main() {
             'Map<String, E> f() => E.values.asNameMap();',
       ),
       (
-        'Object-typed toString call',
-        'enum E { a }\n'
-            'String f() { Object value = E.a; return value.toString(); }',
-      ),
-      (
-        'Object-typed toString tearoff',
-        'enum E { a }\n'
-            'String f() { Object value = E.a; final describe = value.toString; '
-            'return describe(); }',
-      ),
-      (
         'Enum.compareByName',
         'enum E { a, b }\n'
             'int f() => Enum.compareByName(E.a, E.b);',

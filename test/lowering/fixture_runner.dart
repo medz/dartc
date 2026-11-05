@@ -275,6 +275,9 @@ final class FixtureRunner(
     if (_isObjectNoSuchMethod(target)) {
       throw _noSuchMethodError(arguments[0], arguments[1]!);
     }
+    if (_isObjectToString(target)) {
+      return (arguments.single as _Instance).defaultString;
+    }
     if (target == _symbolToString) return arguments.first.toString();
     if (arguments.firstOrNull case final _Instance instance
         when _isSymbolMember(target) &&
@@ -817,9 +820,21 @@ final class FixtureRunner(
       return body();
     }
 
+    if (name == 'toString' &&
+        receiver is _Instance &&
+        receiver.type.library.scheme == 'dart' &&
+        receiver.type != CoreTypes.symbolStorage) {
+      throw UnsupportedError('Unmodeled SDK toString receiver');
+    }
     if (selector.kind == .getter) {
       if (name == 'runtimeType') return _typeValue(_runtimeValueType(receiver));
       if (name == 'hashCode') return receiver.hashCode;
+      if (name == 'toString' && receiver is _Instance) {
+        return _FunctionValue(
+          _resolveMember(receiver, _Instance._string),
+          receiver,
+        );
+      }
       if (const {'toString', '==', 'noSuchMethod'}.contains(name)) {
         final method = _selector(name);
         final signature = FunctionType(
@@ -864,7 +879,21 @@ final class FixtureRunner(
       return _noDynamicBridge;
     }
     if (selector.kind != .method) return _noDynamicBridge;
-    if (name == 'toString') return invoke(0, () => receiver.toString());
+    if (name == 'toString') {
+      return invoke(0, () {
+        // Aggregate/function/error formatting needs its own representation
+        // model; never leak host wrapper names through an Object-typed call.
+        if (receiver != null &&
+            receiver is! _Instance &&
+            receiver is! _TypeValue &&
+            receiver is! num &&
+            receiver is! bool &&
+            receiver is! String) {
+          throw UnsupportedError('Unmodeled fixture toString receiver');
+        }
+        return receiver.toString();
+      });
+    }
     if (name == '==') return invoke(1, () => receiver == positional.single);
     if (name == 'noSuchMethod') {
       return invoke(1, () {
@@ -1071,6 +1100,11 @@ final class FixtureRunner(
         _GuestInvocation(this, invocation),
       );
 
+  static bool _isObjectToString(FunctionTarget target) =>
+      target.owner == ValueType.object &&
+      target.kind == .method &&
+      target.name == 'toString';
+
   static bool _isObjectNoSuchMethod(FunctionTarget target) =>
       target.library == ValueType.object.library &&
       target.owner == ValueType.object &&
@@ -1114,6 +1148,8 @@ final class FixtureRunner(
       return member.owner == ValueType.object &&
               instance.type == CoreTypes.symbolStorage
           ? _symbolToString
+          : _isObjectToString(member)
+          ? _Instance._string
           : member;
     }
     final lookup = program.lookupMember(instance.type, member.selector);
@@ -1121,11 +1157,14 @@ final class FixtureRunner(
       throw UnsupportedError('Unmodeled fixture noSuchMethod forwarder');
     }
     // Only proven absence through Object permits the SDK implementation. An
-    // unknown imported superclass may supply its own noSuchMethod override.
-    if (_isObjectNoSuchMethod(member) &&
+    // unknown imported superclass may supply its own implementation.
+    if ((_isObjectNoSuchMethod(member) || _isObjectToString(member)) &&
         lookup.target == null &&
         lookup.unmodeledBoundary == null) {
-      return member;
+      return _isObjectToString(member) ? _Instance._string : member;
+    }
+    if (_isObjectToString(member) && lookup.unmodeledBoundary != null) {
+      throw UnsupportedError('Unmodeled SDK toString implementation');
     }
     throw StateError('Missing fixture member: ${member.name}');
   }
@@ -1422,9 +1461,22 @@ final class FixtureRunner(
         case WriteCell(:final cell, :final value):
           _storeCell(read(cell) as _Cell, read(value));
         case BindMethod(:final method, :final receiver, :final direct):
-          final instance = read(receiver) as _Instance;
+          final value = read(receiver);
+          if (!direct && _isObjectToString(method) && value is! _Instance) {
+            values[op] = _dynamicBridge(
+              value,
+              _selector('toString', .getter),
+              [],
+              {},
+              [],
+            );
+            break;
+          }
+          final instance = value as _Instance;
           final function = _FunctionValue(
-            direct ? method : _resolveMember(instance, method),
+            direct
+                ? (_isObjectToString(method) ? _Instance._string : method)
+                : _resolveMember(instance, method),
             instance,
           );
           values[op] = _typeOperation(resolve(op.type), function, cast: true);
@@ -1872,6 +1924,8 @@ final class _Instance(final ClassType type, final FixtureRunner runner) {
     kind: .method,
   );
 
+  String get defaultString => "Instance of '${type.dartName}'";
+
   @override
   String toString() {
     if (type == CoreTypes.symbolStorage) {
@@ -1879,7 +1933,7 @@ final class _Instance(final ClassType type, final FixtureRunner runner) {
     }
     final target = runner.program.dispatch(type, _string);
     return target == null
-        ? "Instance of '${type.dartName}'"
+        ? defaultString
         : runner._invoke(_FunctionValue(target, this), [], const {}) as String;
   }
 

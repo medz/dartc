@@ -391,7 +391,7 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
             }
             if (member.library.isDartCore &&
                 !coreRuntimeType(member) &&
-                !coreRuntimeMember(member, object.type)) {
+                !coreRuntimeMember(member)) {
               final operation = member is GetterElement
                   ? coreCollectionOperation(member.name!, object, [])
                   : null;

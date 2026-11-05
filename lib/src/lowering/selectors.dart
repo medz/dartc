@@ -417,7 +417,13 @@ final class SelectorChain(
       return context.callExtension(application, converted, args, typeArguments);
     }
 
-    if (receiver?.staticType is dart.DynamicType || known.type is DynamicType) {
+    if (receiver?.staticType is dart.DynamicType ||
+        known.type is DynamicType ||
+        !direct &&
+            member is MethodElement &&
+            member.library.isDartCore &&
+            member.enclosingElement?.name == 'Object' &&
+            name == 'toString') {
       final invocation = getterArguments ?? arguments;
       final args = context.dynamicArguments(invocation, evaluate);
       if (args == null) return null;
@@ -475,33 +481,19 @@ final class SelectorChain(
             node,
           )
         : context.bindings.target(member, context.unit, node);
-    final coreToString =
-        member is MethodElement &&
-        member.library.isDartCore &&
-        member.enclosingElement?.name == 'Object' &&
-        member.name == 'toString';
-    final supportedToString =
-        coreToString &&
-        !direct &&
-        (CoreTypes.view(known.type, CoreTypes.enumeration) != null ||
-            coreRuntimeMember(member, known.type));
-    if (coreToString && !supportedToString) {
-      unsupported(context.unit, node, 'core Object.toString');
-    }
     if (member.library.isDartCore &&
         member is GetterElement &&
         member.name == 'hashCode' &&
         (member.enclosingElement.name == 'Object' ||
             member.enclosingElement.name == 'Type' ||
-            coreRuntimeMember(member, known.type))) {
+            coreRuntimeMember(member))) {
       return context.normal(
         context.emit(ObjectHashCode(known, direct: direct)),
       );
     }
     if (member.library.isDartCore &&
         (!direct || target.library.toString() == 'dart:core') &&
-        !supportedToString &&
-        !coreRuntimeMember(member, known.type) &&
+        !coreRuntimeMember(member) &&
         (member is GetterElement || arguments != null)) {
       final args = context.arguments(arguments, evaluate);
       if (args == null) return null;
