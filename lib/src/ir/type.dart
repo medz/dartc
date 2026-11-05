@@ -331,6 +331,21 @@ final class FunctionType._(
     );
   }
 
+  /// Recorded default arguments in binder order, without inferring missing data.
+  ///
+  /// Defaults are execution metadata, not part of this function's type identity.
+  /// A generic signature may omit them until default instantiation is requested.
+  List<ValueType> get defaultTypeArguments => List.unmodifiable([
+    for (final parameter in typeParameters)
+      parameter.defaultType ??
+          (throw StateError(
+            'Missing default type metadata for ${parameter.name}.',
+          )),
+  ]);
+
+  /// Applies the recorded defaults using the ordinary bound checks.
+  FunctionType instantiateToBounds() => instantiate(defaultTypeArguments);
+
   /// Applies every function type argument simultaneously and checks its bound.
   FunctionType instantiate(Iterable<ValueType> arguments) {
     final args = List<ValueType>.unmodifiable(arguments);
@@ -681,6 +696,21 @@ final class TypeParameterType(final String name) extends ValueType {
     _bound = type;
   }
 
+  ValueType? _defaultType;
+
+  /// The compiler-computed default template, when metadata is available.
+  ValueType? get defaultType => _defaultType;
+
+  /// Records a default once, without checking it against the parameter's bound.
+  ///
+  /// Recursive bounds may have defaults that are invalid only when applied.
+  void initializeDefaultType(ValueType type) {
+    if (_defaultType != null || type is CellType) {
+      throw StateError('Invalid type parameter default initialization.');
+    }
+    _defaultType = type;
+  }
+
   @override
   String get dartName => name;
   @override
@@ -840,6 +870,7 @@ Iterable<TypeParameterType> typeParametersIn(ValueType type) sync* {
         type.result,
         ...type.parameters,
         ...type.typeParameters.map((p) => p.bound),
+        for (final parameter in type.typeParameters) ?parameter.defaultType,
       ]) {
         yield* typeParametersIn(nested).where((p) => !bound.contains(p));
       }
@@ -864,6 +895,11 @@ FunctionType _substituteFunction(
   };
   for (final (i, p) in fresh.indexed) {
     p.initializeBound(substituteType(type.typeParameters[i].bound, scoped));
+  }
+  for (final (i, p) in fresh.indexed) {
+    if (type.typeParameters[i].defaultType case final defaultType?) {
+      p.initializeDefaultType(substituteType(defaultType, scoped));
+    }
   }
   final body = type._bodyWith(scoped);
   return FunctionType(

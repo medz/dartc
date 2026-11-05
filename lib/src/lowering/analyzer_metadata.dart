@@ -4,8 +4,9 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 
 // The public analyzer API omits function-constant arguments/alias identity and
-// pattern context schemas and superclass storage. Keep these analyzer 14.7 reads isolated
-// instead of reconstructing inference or identity from lossy public types.
+// pattern context schemas, generic defaults and superclass storage. Keep these
+// analyzer 14.7 reads isolated instead of reconstructing inference or identity
+// from lossy public types.
 // ignore: implementation_imports
 import 'package:analyzer/src/dart/ast/ast.dart' as internal;
 // ignore: implementation_imports
@@ -17,6 +18,16 @@ import 'package:analyzer/src/dart/element/type_schema_elimination.dart'
 import 'package:analyzer/src/dart/constant/value.dart' as internal;
 // ignore: implementation_imports
 import 'package:analyzer/src/dart/element/element.dart' as internal;
+
+/// Reads the compiler-computed default, absent on some fresh structural binders.
+DartType? typeParameterDefault(TypeParameterElement parameter) {
+  if (parameter is! internal.TypeParameterElementImpl) {
+    throw UnsupportedError(
+      'Analyzer type parameter default metadata unavailable.',
+    );
+  }
+  return parameter.defaultType;
+}
 
 /// Reads the exact arguments retained by constant function instantiation.
 List<DartType>? constantFunctionArguments(DartObject value) {

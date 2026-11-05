@@ -534,7 +534,7 @@ final class Bindings({final bool enableAssertions = false}) {
     return type.nullabilitySuffix == .question ? base.nullable : base;
   }
 
-  /// Registers a binder group before any of its bounds are converted.
+  /// Registers a binder group before its bounds or defaults are converted.
   List<TypeParameterType> registerTypeParameters(
     List<TypeParameterElement> elements,
   ) => [
@@ -545,7 +545,7 @@ final class Bindings({final bool enableAssertions = false}) {
       ),
   ];
 
-  /// Converts a binder group and its simultaneously scoped bounds.
+  /// Converts a binder group and its simultaneously scoped bounds and defaults.
   List<TypeParameterType> bindTypeParameters(
     List<TypeParameterElement> elements,
     ResolvedUnitResult unit,
@@ -559,6 +559,9 @@ final class Bindings({final bool enableAssertions = false}) {
             ? ValueType.object.nullable
             : valueType(element.bound!, unit, site),
       );
+      if (typeParameterDefault(element) case final type?) {
+        parameters[i].initializeDefaultType(valueType(type, unit, site));
+      }
     }
     return parameters;
   }
@@ -647,6 +650,7 @@ final class Bindings({final bool enableAssertions = false}) {
       if (builtin != null) {
         for (final (i, parameter) in element.typeParameters.indexed) {
           _parameters[parameter.baseElement] = builtin.typeParameters[i];
+          _boundParameters.add(parameter.baseElement);
         }
         return builtin;
       }

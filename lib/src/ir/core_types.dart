@@ -11,7 +11,9 @@ abstract final class CoreTypes() {
   }) {
     final parameters = [
       for (var i = 0; i < arity; i++)
-        TypeParameterType('T$i')..initializeBound(ValueType.object.nullable),
+        TypeParameterType('T$i')
+          ..initializeBound(ValueType.object.nullable)
+          ..initializeDefaultType(ValueType.dynamicType),
     ];
     final type = ClassType.declare(
       Uri.parse('dart:core'),

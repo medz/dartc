@@ -61,6 +61,9 @@ import 'value.dart';
   checkTypeScope(target.signature);
   for (final parameter in target.typeParameters) {
     checkTypeScope(parameter.bound);
+    if (parameter.defaultType case final defaultType?) {
+      checkTypeScope(defaultType);
+    }
   }
   for (final capture in target.captures) {
     checkTypeScope(capture);

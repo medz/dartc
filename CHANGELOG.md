@@ -1,5 +1,7 @@
 ## Unreleased
 
+Generic binders retain analyzer-computed default type templates, including dependent and recursive bounds, aliases and captured owner types. Defaults remain separate from type identity, preserve capture-free substitution and are checked only when applied. Missing structural metadata stays explicit; this foundation does not yet enable dynamic calls.
+
 Invocation factories, constructor tear-offs, flags and argument getters reuse nominal storage and virtual calls. Argument collections preserve immutable shallow snapshots, copying order and the pinned SDK's typed empty identities. User implementations, inherited defaults and abstract/interface redeclarations retain ordinary dispatch; dynamic invocation and noSuchMethod forwarding remain separate work.
 
 Public Symbol literals and Symbol constructors reuse nominal storage and ordinary constant identity. Constant values canonicalize while runtime constructors remain fresh; equality, hashing, constructor tear-offs, object patterns and Symbol-typed toString calls preserve user implementations. Private source literals and their constant dependencies remain rejected because analyzer loses their library identity. Super hashCode reads now select Object identity hashing instead of recursively invoking an override.
