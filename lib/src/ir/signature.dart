@@ -299,3 +299,59 @@ final class InstanceField(
     }
   }
 }
+
+/// A top-level or static non-constant variable, identified by its declaration.
+///
+/// Initializers run lazily on a read of unbound storage. A write before the first
+/// read binds the slot without running its initializer. Static storage belongs
+/// to the class declaration and is never specialized by class type arguments.
+final class GlobalVariable(
+  /// The library containing the source declaration.
+  final Uri library,
+
+  /// The source variable name within its declaring library or class.
+  final String name,
+
+  /// The closed Dart type accepted by the storage.
+  final ValueType type, {
+
+  /// The declaring class for static storage, absent for a top-level variable.
+  final ClassType? owner,
+
+  /// Whether binding is restricted to one successful initialization.
+  final bool isFinal = false,
+
+  /// Whether an absent initializer leaves the slot unbound instead of null.
+  final bool isLate = false,
+
+  /// The zero-argument body evaluated on a read of an unbound slot.
+  final FunctionTarget? initializer,
+}) {
+  /// Whether source assignment can write the storage.
+  bool get isWritable => !isFinal || isLate && initializer == null;
+
+  this {
+    if (!isDartType(type) || typeParametersIn(type).isNotEmpty) {
+      throw ArgumentError('Global storage requires a closed Dart value type.');
+    }
+    if (owner != null &&
+        (owner!.library != library || !identical(owner, owner!.declaration))) {
+      throw ArgumentError('Global storage requires its declaring class.');
+    }
+    if (!isLate && initializer == null && (isFinal || !type.mayBeNull)) {
+      throw ArgumentError(
+        'Uninitialized non-late storage must be nullable and mutable.',
+      );
+    }
+    if (initializer case final target?) {
+      if (target.library != library ||
+          target.owner != owner ||
+          target.kind != .function ||
+          target.parameterTypes.isNotEmpty ||
+          target.typeParameters.isNotEmpty ||
+          target.returnType != type) {
+        throw ArgumentError('Invalid global initializer signature or owner.');
+      }
+    }
+  }
+}

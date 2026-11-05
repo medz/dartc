@@ -18,7 +18,7 @@ import 'switch_statement.dart';
 final class FunctionLowering._(
   ResolvedUnitResult unit,
   Bindings bindings,
-  final ExecutableElement element,
+  final ExecutableElement? element,
   final ast.AstNode site,
   final ast.FunctionBody? body,
   final FunctionTarget _target,
@@ -61,6 +61,38 @@ final class FunctionLowering._(
         plan,
       )._run(initialize: initialize),
     );
+    _appendClosures(output, unit, bindings, plan);
+  }
+
+  /// Appends a parameterless initializer and its ordinary lexical closures.
+  static void appendExpression(
+    List<IrFunction> output,
+    ResolvedUnitResult unit,
+    Bindings bindings,
+    FunctionTarget target,
+    ast.Expression expression,
+  ) {
+    final plan = ClosurePlan()..prepare(unit, bindings, target, [expression]);
+    output.add(
+      FunctionLowering._(
+        unit,
+        bindings,
+        null,
+        expression,
+        null,
+        target,
+        plan,
+      )._run(expression: expression),
+    );
+    _appendClosures(output, unit, bindings, plan);
+  }
+
+  static void _appendClosures(
+    List<IrFunction> output,
+    ResolvedUnitResult unit,
+    Bindings bindings,
+    ClosurePlan plan,
+  ) {
     for (final fn in plan.functions.values) {
       output.add(
         FunctionLowering._(
@@ -79,6 +111,7 @@ final class FunctionLowering._(
   IrFunction _run({
     LocalClosure? local,
     void Function(FunctionContext)? initialize,
+    ast.Expression? expression,
   }) {
     final body = this.body;
     if (body != null && (body.isAsynchronous || body.isGenerator)) {
@@ -88,16 +121,18 @@ final class FunctionLowering._(
     final inputs = context.current!.parameters;
     if (_target.kind.hasReceiver) context.receiver = inputs.first;
     if (local != null) {
-      context.bindCapture(element, inputs.first);
+      context.bindCapture(element!, inputs.first);
       for (final (i, capture) in local.captures.indexed) {
         context.bindCapture(capture, inputs[i + 1]);
       }
     }
-    for (final (i, parameter) in element.formalParameters.indexed) {
+    final parameters = element?.formalParameters ?? const [];
+    for (final (i, parameter) in parameters.indexed) {
       final input = inputs[i + _target.argumentOffset];
       context.declare(parameter, input.type, input);
     }
     initialize?.call(context);
+    if (expression != null) _return(lowerExpression(context, expression));
     if (context.current != null) {
       switch (body) {
         case null || ast.EmptyFunctionBody() when _target.kind == .initializer:

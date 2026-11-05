@@ -12,6 +12,7 @@ import 'fixtures/effects.dart' as effects;
 import 'fixtures/exceptions.dart' as exceptions;
 import 'fixtures/finalizers.dart' as finalizers;
 import 'fixtures/functions.dart' as dart;
+import 'fixtures/index_update.dart' as index_update;
 import 'fixtures/loops.dart' as loops;
 import 'fixtures/nominal/constructors.dart' as nominal;
 import 'fixtures/nominal/factories.dart' as factories;
@@ -611,8 +612,21 @@ void main() {
     }
   });
 
+  test('updates imported global storage through its linked accessor', () async {
+    final program = await _lower(['index_update.dart', 'effects.dart']);
+    final linked = FixtureRunner(program, {});
+    final tick = program.functions.singleWhere((f) => f.target.name == 'tick');
+    final update = program.functions.singleWhere(
+      (f) => f.target.name == 'updateFirst',
+    );
+    effects.calls.clear();
+    expect(linked.run(tick, [7]), effects.tick(7));
+    for (var i = 0; i < 3; i++) {
+      expect(linked.run(update, []), index_update.updateFirst());
+    }
+  });
+
   for (final (file, line) in [
-    ('index_update.dart', 3),
     ('lazy.dart', 2),
     ('deferred_constant.dart', 3),
     ('extension_operator.dart', 1),

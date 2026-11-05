@@ -69,13 +69,18 @@ final class IrClass(
 /// A reference to a declaration outside this batch is an import.
 final class IrProgram(
   Iterable<IrClass> classes,
-  Iterable<IrFunction> functions,
-) {
+  Iterable<IrFunction> functions, {
+  Iterable<GlobalVariable> globals = const [],
+}) {
   /// The class definitions supplied by the input libraries.
   final List<IrClass> classes = .unmodifiable(classes);
 
   /// The verified bodies supplied by the input libraries.
   final List<IrFunction> functions = .unmodifiable(functions);
+
+  /// Top-level and static storage, excluding compile-time constants.
+  final List<GlobalVariable> globals = .unmodifiable(globals);
+
   late final _definitions = {for (final c in classes) c.type: c};
 
   /// Resolves [member] on [receiver], returning `null` if the batch supplies no implementation.
@@ -119,6 +124,15 @@ final class IrProgram(
         }
       }
     }
+    for (final global in globals) {
+      final owner = global.owner;
+      output.writeln(
+        'global ${global.isLate ? 'late ' : ''}${global.isFinal ? 'final ' : ''}'
+        '${global.type.dartName} ${global.library}::'
+        '${owner == null ? '' : '${owner.dartName}.'}${global.name}'
+        '${global.initializer == null ? '' : ' = ${global.initializer!.name}'}',
+      );
+    }
     for (final function in functions) {
       function.writeTo(output);
     }
@@ -134,9 +148,27 @@ final class IrProgram(
     final names = <(Uri, ClassType?, FunctionKind, String)>{};
     final locals = <(FunctionTarget, int)>{};
     final bodies = {for (final f in this.functions) f.target};
+    final globalNames = <(Uri, ClassType?, String)>{};
+    final slots = this.globals.toSet();
+    for (final global in this.globals) {
+      if (!globalNames.add((global.library, global.owner, global.name))) {
+        throw ArgumentError('Repeated global declaration.');
+      }
+      final owner = global.owner;
+      if (owner != null && owners[(owner.library, owner.dartName)] != owner) {
+        throw ArgumentError('Global belongs to an undeclared class.');
+      }
+      if (global.initializer case final initializer?
+          when !bodies.contains(initializer)) {
+        throw ArgumentError('Missing global initializer body.');
+      }
+    }
     for (final f in this.functions) {
       if (!bodies.containsAll(f.closures)) {
         throw ArgumentError('Missing lexical function body.');
+      }
+      if (!slots.containsAll(f.globals)) {
+        throw ArgumentError('Global operation references undeclared storage.');
       }
       final t = f.target, owner = t.owner;
       if (owner != null && owners[(owner.library, owner.dartName)] != owner) {

@@ -20,6 +20,9 @@ final class IrFunction(
   /// The local bodies that this graph can instantiate.
   late final Set<FunctionTarget> closures;
 
+  /// The global declarations directly read or written by this graph.
+  late final Set<GlobalVariable> globals;
+
   /// The block whose parameters receive the function arguments.
   Block get entry => blocks.first;
 
@@ -44,7 +47,13 @@ final class IrFunction(
         )) {
       throw ArgumentError('Invalid body or defaults for ${target.name}.');
     }
-    closures = verifyFunction(target, this.blocks, this.defaults.values);
+    final references = verifyFunction(
+      target,
+      this.blocks,
+      this.defaults.values,
+    );
+    closures = references.closures;
+    globals = references.globals;
   }
 
   /// Writes the typed blocks, instructions and outgoing edges to [output].

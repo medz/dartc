@@ -105,11 +105,6 @@ void main() {
             'int f() => E.a.score;',
       ),
       (
-        'mutable static storage',
-        'enum E { a; static int count = 0; }\n'
-            'int f() => E.count;',
-      ),
-      (
         'EnumByName.byName',
         'enum E { a, b }\n'
             "E f() => E.values.byName('a');",

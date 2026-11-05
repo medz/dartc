@@ -5,6 +5,7 @@ import 'bindings.dart';
 import 'checked_libraries.dart';
 import 'class_declaration.dart';
 import 'function.dart';
+import 'global_declaration.dart';
 
 /// The translation from resolved Dart declarations to executable IR operations.
 abstract final class Lowering() {
@@ -44,20 +45,15 @@ abstract final class Lowering() {
               node,
               functionExpression.body,
             );
-          case ast.TopLevelVariableDeclaration(variables: final declarations)
-              when declarations.isConst:
+          case ast.TopLevelVariableDeclaration(variables: final declarations):
             for (final variable in declarations.variables) {
-              bindings.constantOf(
-                variable.declaredFragment!.element,
-                unit,
-                variable,
-              );
+              lowerGlobal(unit, bindings, variable, functions);
             }
           default:
             unsupported(unit, node, 'declaration');
         }
       }
     }
-    return IrProgram(classes, functions);
+    return IrProgram(classes, functions, globals: bindings.globals);
   }
 }

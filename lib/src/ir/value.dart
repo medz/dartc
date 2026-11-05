@@ -326,6 +326,7 @@ sealed class Instruction(super.type) extends Value {
     FunctionCall() ||
     InstantiateFunction() ||
     BindMethod() ||
+    LoadGlobal() ||
     MakeClosure() ||
     NewCell() ||
     CopyCell() ||
@@ -335,6 +336,7 @@ sealed class Instruction(super.type) extends Value {
     MakeRecord() ||
     Interpolate() ||
     StringConcat() => true,
+    StoreGlobal(:final global) => global.isFinal,
     Equals(:final mayCallUserCode) => mayCallUserCode,
     IntBinary(:final operator) => operator.mayThrow,
     NumericBinary(:final canThrow) => canThrow,
@@ -535,6 +537,43 @@ void _checkCall(
       throw ArgumentError('Incompatible argument for ${signature.dartName}.');
     }
   }
+}
+
+/// Reads a declared global slot, lazily running its initializer when unbound.
+///
+/// An unbound read without an initializer raises a late initialization error.
+/// Recursive reads run the initializer again without a separate busy state.
+/// A successful result replaces mutable storage, but cannot replace a final
+/// binding created recursively. A thrown exception preserves writes already
+/// made; an unbound slot retries its initializer on the next read.
+final class LoadGlobal(
+  /// The source declaration whose storage is read.
+  final GlobalVariable global,
+) extends Instruction {
+  this : super(global.type);
+
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
+/// Binds a writable global slot after evaluating and converting [value].
+///
+/// A late final variable without an initializer rejects a second binding.
+final class StoreGlobal(
+  /// The source declaration whose storage is written.
+  final GlobalVariable global,
+
+  /// The already evaluated, statically compatible value.
+  final Value value,
+) extends Instruction {
+  this : super(.voidType) {
+    if (!global.isWritable || !global.type.accepts(value.type)) {
+      throw ArgumentError('Incompatible or read-only global write.');
+    }
+  }
+
+  @override
+  Iterable<Value> get inputs => [value];
 }
 
 /// Reads storage selected by its declaring class, without invoking a getter.

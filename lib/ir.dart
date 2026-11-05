@@ -23,7 +23,12 @@ export 'src/ir/block.dart'
 export 'src/ir/function.dart' show IrFunction;
 export 'src/ir/program.dart' show IrClass, IrProgram;
 export 'src/ir/signature.dart'
-    show FunctionKind, FunctionTarget, InstanceField, MemberSelector;
+    show
+        FunctionKind,
+        FunctionTarget,
+        GlobalVariable,
+        InstanceField,
+        MemberSelector;
 export 'src/ir/type.dart'
     show
         CellType,
@@ -81,6 +86,7 @@ export 'src/ir/value.dart'
         NewCell,
         ReadCell,
         LoadField,
+        LoadGlobal,
         NullCheck,
         RecordConstant,
         SequenceConstant,
@@ -90,6 +96,7 @@ export 'src/ir/value.dart'
         RecordGet,
         ScalarConstant,
         StoreField,
+        StoreGlobal,
         TestedValue,
         TypeCast,
         TypeView,

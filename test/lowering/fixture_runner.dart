@@ -7,6 +7,33 @@ final class FixtureRunner(
 ) {
   final bodies = {for (final f in program.functions) f.target: f};
 
+  final _globals = <GlobalVariable, Object?>{
+    for (final global in program.globals)
+      if (!global.isLate && global.initializer == null) global: null,
+  };
+
+  Object? _loadGlobal(GlobalVariable global) {
+    if (_globals.containsKey(global)) return _globals[global];
+    final initializer = global.initializer;
+    if (initializer == null) return _LateRead().value;
+    // No busy state: recursive reads may initialize the slot, and exceptions
+    // preserve any writes made by the initializer instead of rolling them back.
+    final value = _typeOperation(
+      global.type,
+      _enter(initializer, const []),
+      cast: true,
+    );
+    if (global.isFinal && _globals.containsKey(global)) _lateWriteError();
+    _globals[global] = value;
+    return value;
+  }
+
+  void _storeGlobal(GlobalVariable global, Object? value) {
+    value = _typeOperation(global.type, value, cast: true);
+    if (global.isFinal && _globals.containsKey(global)) _lateWriteError();
+    _globals[global] = value;
+  }
+
   final _staticFunctions = <Object, _FunctionValue>{};
 
   final _constants = <Object, Object>{};
@@ -546,6 +573,10 @@ final class FixtureRunner(
           values[op] = _call(read(function), positional.map(read).toList(), {
             for (final e in named.entries) e.key: read(e.value),
           }, typeArguments.map(resolve).toList());
+        case LoadGlobal(:final global):
+          values[op] = _loadGlobal(global);
+        case StoreGlobal(:final global, :final value):
+          _storeGlobal(global, read(value));
         case StoreField(:final field, :final receiver, :final value):
           final instance = read(receiver) as _Instance;
           final type = substituteType(
@@ -774,6 +805,20 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
           : value == null && type.accepts(.nullType),
     _ => throw StateError('Unexpected fixture type ${type.dartName}'),
   };
+}
+
+// Trigger the host runtime's private LateError rather than inventing a public
+// error type or replacing it with StateError. These helpers always throw.
+final class _LateRead() {
+  late Object? value;
+}
+
+Object? _lateWriteError() {
+  late final Object? value;
+  void bind() => value = null;
+  bind();
+  bind();
+  return value;
 }
 
 final _uninitialized = Object();

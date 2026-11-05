@@ -1,5 +1,7 @@
 ## Unreleased
 
+Top-level and static mutable, final, late and late-final variables share ordinary accessor calls and lazy global storage. Initializers preserve first-read order, reentrant binding, retries after failures, writes made before or during initialization, and captured closure identity. Final commit checks retain RHS/type-check ordering and original exceptions. Instance and local late variables remain unsupported.
+
 Ordinary, enhanced and generic enums reuse class storage, constant identity and member dispatch. Values retain their index, name and actual type arguments; enum toString, factories, methods, operators and patterns share existing lowering. Class and enum static const declarations are validated without runtime storage. Enums with a user storage field named _name are rejected because pinned analyzer metadata overwrites that value.
 
 Type literals, aliases and reified type parameters retain strict structural identity, equality and hashing, including nested constants and captured generic environments. Constant dependencies containing private Symbol literals are rejected before consuming analyzer-folded values, including folded scalars; the pinned analyzer loses private-library identity. Symbol values and general runtimeType access remain unsupported.

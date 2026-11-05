@@ -4,12 +4,13 @@ import 'type.dart';
 import 'value.dart';
 
 /// Checks control flow, argument and return types, and SSA definition dominance.
-Set<FunctionTarget> verifyFunction(
+({Set<FunctionTarget> closures, Set<GlobalVariable> globals}) verifyFunction(
   FunctionTarget target,
   List<Block> blocks, [
   Iterable<Constant> defaults = const [],
 ]) {
   Set<FunctionTarget>? closures;
+  Set<GlobalVariable>? globals;
   final scope = <TypeParameterType>{};
   for (
     FunctionTarget? lexical = target;
@@ -179,6 +180,8 @@ Set<FunctionTarget> verifyFunction(
         checkTypeScope(type);
       }
       switch (op) {
+        case LoadGlobal(:final global) || StoreGlobal(:final global):
+          (globals ??= {}).add(global);
         case MakeClosure(target: final child):
           if (child.enclosing != target) {
             throw StateError('Closure created outside its lexical parent.');
@@ -255,7 +258,10 @@ Set<FunctionTarget> verifyFunction(
         useEdge(edge);
     }
   }
-  return closures == null ? const {} : Set.unmodifiable(closures!);
+  return (
+    closures: closures == null ? const {} : Set.unmodifiable(closures!),
+    globals: globals == null ? const {} : Set.unmodifiable(globals!),
+  );
 }
 
 Map<Block, Block> _dominators(

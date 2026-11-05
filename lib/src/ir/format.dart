@@ -25,6 +25,8 @@ void writeFunction(
     return '${t.library}::${t.owner == null ? '' : '${(ownerType ?? t.owner!).dartName}.'}$prefix${t.name}';
   }
 
+  String global(GlobalVariable slot) =>
+      '${slot.library}::${slot.owner == null ? '' : '${slot.owner!.dartName}.'}${slot.name}';
   String typeArgs(Iterable<ValueType> types) =>
       types.isEmpty ? '' : '<${types.map((t) => t.dartName).join(', ')}>';
   String value(Value v) => switch (v) {
@@ -92,6 +94,8 @@ void writeFunction(
       'instantiate ${value(op.function)}${typeArgs(op.typeArguments)}',
     FunctionCall() =>
       'callValue ${value(op.function)}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
+    LoadGlobal() => 'loadGlobal ${global(op.global)}',
+    StoreGlobal() => 'storeGlobal ${global(op.global)}, ${value(op.value)}',
     LoadField() =>
       'load ${value(op.receiver)}.${op.field.owner.dartName}::${op.field.name}',
     InstanceCall() =>

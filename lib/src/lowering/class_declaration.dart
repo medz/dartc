@@ -8,6 +8,7 @@ import 'bindings.dart';
 import 'expression.dart';
 import 'function.dart';
 import 'function_context.dart';
+import 'global_declaration.dart';
 
 /// Lowers a resolved class and appends its executable bodies to [functions].
 IrClass lowerClass(
@@ -57,12 +58,12 @@ IrClass _lowerNominal(
   final members = <FunctionTarget>[];
   final constructors = <FunctionTarget>[];
   for (final field in element.fields) {
-    if (field.isStatic && field.isConst) {
+    if (field.isEnumConstant || field.isOriginEnumValues) {
       bindings.constantOf(field, unit, declaration);
       continue;
     }
-    if (field.isOriginGetterSetter) continue;
-    if (field.isStatic || field.isLate || field.isExternal) {
+    if (field.isStatic || field.isOriginGetterSetter) continue;
+    if (field.isLate || field.isExternal) {
       unsupported(unit, declaration, 'field ${field.displayName}');
     }
     final slot = field.isAbstract
@@ -144,6 +145,10 @@ IrClass _lowerNominal(
           body,
           initializers,
         );
+      case ast.FieldDeclaration(isStatic: true, :final fields):
+        for (final variable in fields.variables) {
+          lowerGlobal(unit, bindings, variable, functions);
+        }
       case ast.FieldDeclaration() || ast.PrimaryConstructorBody():
         break;
       case ast.MethodDeclaration(:final body):

@@ -16,6 +16,7 @@ final class Bindings({final bool enableAssertions = false}) {
   final _parameters = <TypeParameterElement, TypeParameterType>{};
   final _boundParameters = <TypeParameterElement>{};
   final _fields = <FieldElement, InstanceField>{};
+  final _globals = <VariableElement, GlobalVariable>{};
   final _defaults = <FunctionTarget, Map<int, Constant>>{};
   final _constantAliases = <LibraryElement, List<TypeAliasElement>>{};
 
@@ -30,11 +31,6 @@ final class Bindings({final bool enableAssertions = false}) {
     Iterable<ValueType> captures = const [],
   }) {
     element = element.baseElement;
-    if (element is PropertyAccessorElement &&
-        element.isStatic &&
-        element.isOriginVariable) {
-      unsupported(unit, site, 'stored static or top-level variable');
-    }
     final previous = enclosing == null ? _targets[element] : null;
     if (previous != null) return previous;
     final parameters = element.formalParameters;
@@ -129,6 +125,39 @@ final class Bindings({final bool enableAssertions = false}) {
   List<Value> bind(FunctionTarget target, EvaluatedArguments args) => target
       .signature
       .bind(args.positional, args.named, (i) => _defaults[target]![i]!);
+
+  /// The stored declarations lowered from this batch's source units.
+  Iterable<GlobalVariable> get globals => _globals.values;
+
+  /// Binds a top-level or static declaration using its actual source initializer.
+  GlobalVariable global(
+    PropertyInducingElement element,
+    ResolvedUnitResult unit,
+    ast.VariableDeclaration declaration,
+  ) => _globals.putIfAbsent(element.baseElement as VariableElement, () {
+    final container = element.enclosingElement;
+    final owner = container is InterfaceElement
+        ? classType(container, unit, declaration)
+        : null;
+    final type = valueType(element.type, unit, declaration);
+    return GlobalVariable(
+      element.library.uri,
+      element.name!,
+      type,
+      owner: owner,
+      isFinal: element.isFinal,
+      isLate: element.isLate,
+      initializer: declaration.initializer == null
+          ? null
+          : FunctionTarget(
+              element.library.uri,
+              '<initialize:${element.name}>',
+              type,
+              const [],
+              owner: owner,
+            ),
+    );
+  });
 
   /// Returns the same slot for every use of this field declaration.
   InstanceField field(
