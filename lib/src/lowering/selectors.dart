@@ -246,6 +246,16 @@ final class SelectorChain(
         cascaded: node.isCascaded,
       );
       if (receiver == null) return null;
+      final application = context.extensionApplication(
+        element,
+        node,
+        receiver: target,
+        receiverType: cascadeReceiverType,
+        unqualified: target == null && !node.isCascaded,
+        nullAware: isNullAware || cascadeNullAware && node.isCascaded,
+      );
+      final converted = context.memberReceiver(receiver, application);
+      if (converted == null) return null;
       final key = evaluate(index);
       if (key == null) return null;
       if (target?.staticType is dart.DynamicType ||
@@ -254,10 +264,11 @@ final class SelectorChain(
       }
       return context.callPositionalMember(
         element,
-        receiver,
+        converted,
         [key],
         node,
         direct: target is ast.SuperExpression,
+        extension: application,
       );
     }
     final (receiver, name, member, arguments, nullAware) = switch (node) {
@@ -342,54 +353,48 @@ final class SelectorChain(
       if (member.library.isDartCore) {
         unsupported(context.unit, node, 'core extension member $name');
       }
-      if (member is! MethodElement || arguments == null || member.isOperator) {
-        unsupported(
-          context.unit,
-          node,
-          'extension accessor, operator or tear-off',
-        );
+      if (member is MethodElement && (arguments == null || member.isOperator)) {
+        unsupported(context.unit, node, 'extension method tear-off');
       }
-      final override = receiver is ast.ExtensionOverride ? receiver : null;
-      final unqualified =
-          receiver == null &&
-          !(node is ast.MethodInvocation && node.isCascaded);
-      final lexical = unqualified
-          ? node
-                .thisOrAncestorOfType<ast.ExtensionDeclaration>()
-                ?.declaredFragment
-                ?.element
-          : null;
-      final lexicalReceiver = unqualified
-          ? switch (node.thisOrAncestorMatching(
-              (n) => n is ast.ClassDeclaration || n is ast.EnumDeclaration,
-            )) {
-              ast.ClassDeclaration(:final declaredFragment) =>
-                declaredFragment!.element.thisType,
-              ast.EnumDeclaration(:final declaredFragment) =>
-                declaredFragment!.element.thisType,
-              _ => null,
-            }
-          : null;
-      final application = context.bindings.extensionApplication(
+      final cascaded = switch (node) {
+        ast.PropertyAccess(:final isCascaded) ||
+        ast.MethodInvocation(:final isCascaded) => isCascaded,
+        _ => false,
+      };
+      final application = context.extensionApplication(
         member,
-        context.unit,
         node,
-        receiverType:
-            receiver?.staticType ?? lexicalReceiver ?? cascadeReceiverType,
-        override: override,
-        lexicalExtension: lexical,
-        nullAware:
-            nullAware ||
-            cascadeNullAware && node is ast.MethodInvocation && node.isCascaded,
-      );
-      final converted = context.normal(
-        context.convert(known, application.receiverType),
-      );
+        receiver: receiver,
+        receiverType: cascadeReceiverType,
+        unqualified: receiver == null && !cascaded,
+        nullAware: nullAware || cascadeNullAware && cascaded,
+      )!;
+      final converted = context.memberReceiver(known, application);
       if (converted == null) return null;
+      if (member is GetterElement) {
+        Value? get(Value value) => context.callPositionalMember(
+          member,
+          value,
+          [],
+          node,
+          extension: application,
+        );
+        final invocation = getterArguments ?? arguments;
+        if (invocation != null) {
+          return invokeValue(get(converted), invocation, getterCall);
+        }
+        final value = get(converted);
+        return value == null
+            ? null
+            : context.normal(
+                context.cast(value, context.typeOf(node.staticType!, node)),
+              );
+      }
       final args = context.arguments(arguments, evaluate);
       if (args == null) return null;
       return context.callExtension(application, converted, args, typeArguments);
     }
+
     if (receiver?.staticType is dart.DynamicType || known.type is DynamicType) {
       final invocation = getterArguments ?? arguments;
       final args = context.dynamicArguments(invocation, evaluate);
@@ -580,13 +585,25 @@ final class SelectorChain(
           () => write(evaluate(rhs!)),
         );
       }
+      final operatorMember = switch (site) {
+        ast.MethodReferenceExpression(:final element) => element,
+        _ => null,
+      };
+      final operation = context.extensionApplication(
+        operatorMember,
+        site,
+        receiverType: site.readType,
+      );
+      final operand = context.memberReceiver(old, operation);
+      if (operand == null) return null;
       final result = write(
         lowerBinary(
           context,
           site,
           operator,
-          old,
+          operand,
           rhs == null ? const Constant.integer(1) : evaluate(rhs),
+          extension: operation,
         ),
       );
       return result != null && site is ast.PostfixExpression ? old : result;
@@ -634,18 +651,17 @@ final class SelectorChain(
       ),
       _ => unsupported(context.unit, place, 'assignment receiver'),
     };
-    final receiver = _receiver(
-      target,
-      nullAware,
-      cascaded: switch (place) {
-        ast.PropertyAccess(:final isCascaded) ||
-        ast.IndexExpression(:final isCascaded) => isCascaded,
-        _ => false,
-      },
-    );
+    final cascaded = switch (place) {
+      ast.PropertyAccess(:final isCascaded) ||
+      ast.IndexExpression(:final isCascaded) => isCascaded,
+      _ => false,
+    };
+    final receiver = _receiver(target, nullAware, cascaded: cascaded);
     if (receiver == null) return null;
-    if (target?.staticType is dart.DynamicType ||
-        receiver.type is DynamicType) {
+    if ((target?.staticType is dart.DynamicType ||
+            receiver.type is DynamicType) &&
+        !(destination is ExecutableElement &&
+            destination.enclosingElement is ExtensionElement)) {
       final key = index == null ? null : evaluate(index);
       if (index != null && key == null) return null;
       final name = switch (place) {
@@ -671,12 +687,33 @@ final class SelectorChain(
     }
     if (destination is! ExecutableElement ||
         destination.isStatic ||
-        !isClassOrEnum(destination.enclosingElement)) {
+        !(isClassOrEnum(destination.enclosingElement) ||
+            destination.enclosingElement is ExtensionElement)) {
       unsupported(context.unit, site, 'assignment target');
     }
+    ExtensionApplication? application(ExecutableElement? member) =>
+        context.extensionApplication(
+          member,
+          site,
+          receiver: target,
+          receiverType: cascadeReceiverType,
+          unqualified: target == null && !cascaded,
+          nullAware: nullAware || cascadeNullAware && cascaded,
+        );
+    final writeApplication = application(destination);
+    final readMember = site.readElement;
+    final readApplication = application(
+      readMember is ExecutableElement ? readMember : null,
+    );
+    final writeReceiver = context.memberReceiver(receiver, writeApplication);
+    if (writeReceiver == null) return null;
+    final readReceiver = context.memberReceiver(receiver, readApplication);
+    if (readReceiver == null) return null;
     final inputKey = index == null ? null : evaluate(index);
-    final key = inputKey == null
-        ? null
+    // Compound updates check the read key first. The write-key conversion
+    // belongs to the setter call and is skipped entirely on a non-null ??=.
+    final key = inputKey == null || operator.type != .EQ
+        ? inputKey
         : context.normal(
             context.convert(
               inputKey,
@@ -688,17 +725,19 @@ final class SelectorChain(
     return apply(
       () => context.callPositionalMember(
         site.readElement as ExecutableElement?,
-        receiver,
+        readReceiver,
         [?key],
         site,
         direct: direct,
+        extension: readApplication,
       ),
       (value) => context.callPositionalMember(
         destination,
-        receiver,
+        writeReceiver,
         [?key, value],
         site,
         direct: direct,
+        extension: writeApplication,
       ),
     );
   }

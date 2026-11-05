@@ -59,9 +59,6 @@ extension Public on int {
   );
 
   for (final (name, declaration, use) in <(String, String, String)>[
-    ('getter', 'int get x => this;', '1.x'),
-    ('setter', 'set x(int value) {}', '(1.x = 2)'),
-    ('operator', 'int operator +(int value) => value;', 'E(1) + 2'),
     ('tear-off', 'int m() => this;', '1.m'),
     ('implicit invocation', 'int call() => this;', '(1)()'),
   ]) {
@@ -76,6 +73,50 @@ extension Public on int {
       );
     });
   }
+
+  test(
+    'explicit generic binary parameter metadata remains analyzer rejected',
+    () async {
+      final path = source('entry', '''
+class Box<T> { Box(this.value); final T value; }
+extension E<T> on Box<T> { T operator +(T other) => other; }
+Object? run() => E<int>(Box<int>(1)) + 7;
+''');
+      await expectLater(
+        CheckedLibraries.read([path], Lowering.lower),
+        throwsA(isA<FormatException>()),
+      );
+    },
+  );
+
+  test('explicit generic unary result metadata fails closed', () async {
+    final path = source('entry', '''
+class Box<T> { Box(this.value); final T value; }
+extension E<T> on Box<T> { T operator -() => value; }
+Object? run() => (-E<int>(Box<int>(1)), 2);
+''');
+    await expectLater(
+      CheckedLibraries.read([path], Lowering.lower),
+      throwsA(
+        isA<UnsupportedError>().having(
+          (e) => e.message,
+          'message',
+          contains('unsubstituted analyzer extension operator result'),
+        ),
+      ),
+    );
+  });
+
+  test('extension method object pattern remains unsupported', () async {
+    final path = source('entry', '''
+extension E on int { int method() => this; }
+Object? run() { final int(method: function) = 1; return function; }
+''');
+    await expectLater(
+      CheckedLibraries.read([path], Lowering.lower),
+      throwsUnsupportedError,
+    );
+  });
 
   test(
     'declaration-only accessors and operators have no virtual targets',

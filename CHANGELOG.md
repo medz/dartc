@@ -1,6 +1,8 @@
 ## Unreleased
 
-Ordinary extension declarations and direct method calls lower to existing static function targets with an explicit receiver and flattened extension/member type arguments. Implicit, explicit-override and lexical calls preserve analyzer selection, static receiver types, named/default arguments, null shortening and captured receiver/type environments. True static members and globals have qualified identities. Instance accessors, operators, updates, method tear-offs and implicit extension-call invocation remain explicit boundaries; extension types remain unsupported.
+Ordinary extension declarations and direct method calls lower to existing static function targets with an explicit receiver and flattened extension/member type arguments. Implicit, explicit-override and lexical calls preserve analyzer selection, static receiver types, named/default arguments, null shortening and captured receiver/type environments. True static members and globals have qualified identities. Instance accessors, index and unary/binary operators, updates and object/relational patterns reuse the same call adapter. Method tear-offs and implicit extension-call invocation remain explicit boundaries; extension types remain unsupported. Two assignment-value evaluation-order differences from SDK 3.13.7 have separate source-order tests and are documented in specs/extension-access.md.
+
+Indexed updates check read and write key types at their respective calls. A non-null `??=` skips the setter key check, and a failing write key no longer suppresses earlier getter or right-hand-side effects. Ordinary and extension indexes share this fix.
 
 Dynamic throw operands use the ordinary checked conversion to non-null Object before raising, preserving operand identity and evaluation order, catch/finally behavior, and rethrow stack identity. Null produces TypeError.
 

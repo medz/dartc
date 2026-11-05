@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/analysis/results.dart';
+import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/ast/ast.dart'
     show
         AstNode,
@@ -97,6 +98,78 @@ final class FunctionContext(
         : emit(InstantiateFunction(function, types));
   }
 
+  /// Resolves a selected extension using its source receiver, not an IR type.
+  ExtensionApplication? extensionApplication(
+    ExecutableElement? member,
+    AstNode site, {
+    ast.Expression? receiver,
+    DartType? receiverType,
+    bool unqualified = false,
+    bool nullAware = false,
+  }) {
+    if (member == null ||
+        member.enclosingElement is! ExtensionElement ||
+        coreEnumField(member) != null) {
+      return null;
+    }
+    if (member.isStatic || member.library.isDartCore) {
+      unsupported(unit, site, 'extension instance member');
+    }
+    final lexical = unqualified
+        ? site
+              .thisOrAncestorOfType<ast.ExtensionDeclaration>()
+              ?.declaredFragment
+              ?.element
+        : null;
+    final lexicalReceiver = unqualified
+        ? switch (site.thisOrAncestorMatching(
+            (n) => n is ast.ClassDeclaration || n is ast.EnumDeclaration,
+          )) {
+            ast.ClassDeclaration(:final declaredFragment) =>
+              declaredFragment!.element.thisType,
+            ast.EnumDeclaration(:final declaredFragment) =>
+              declaredFragment!.element.thisType,
+            _ => null,
+          }
+        : null;
+    final application = bindings.extensionApplication(
+      member,
+      unit,
+      site,
+      receiverType: receiver?.staticType ?? receiverType ?? lexicalReceiver,
+      override: receiver is ast.ExtensionOverride ? receiver : null,
+      lexicalExtension: lexical,
+      nullAware: nullAware,
+    );
+    // Analyzer 14.7 leaves raw extension parameters in some explicit operator
+    // result types, including enclosing record/context metadata. Do not emit
+    // types whose declaration parameters escape into the caller.
+    if (receiver is ast.ExtensionOverride &&
+        (site is ast.BinaryExpression || site is ast.PrefixExpression) &&
+        site is ast.Expression &&
+        site.staticType != null) {
+      final used = typeParametersIn(typeOf(site.staticType!, site));
+      for (final (i, parameter)
+          in application.executable.extensionParameters.indexed) {
+        if (used.contains(parameter) &&
+            application.typeArguments[i] != parameter) {
+          unsupported(
+            unit,
+            site,
+            'unsubstituted analyzer extension operator result',
+          );
+        }
+      }
+    }
+    return application;
+  }
+
+  /// Checks an extension receiver before evaluating subsequent operands.
+  Value? memberReceiver(Value value, ExtensionApplication? application) =>
+      application == null
+      ? value
+      : normal(convert(value, application.receiverType));
+
   /// Calls the flattened extension ABI through ordinary argument binding.
   Value? callExtension(
     ExtensionApplication application,
@@ -126,24 +199,45 @@ final class FunctionContext(
     List<Value> args,
     AstNode site, {
     bool direct = false,
+    ExtensionApplication? extension,
   }) {
     if (coreEnumField(member) case final field? when args.isEmpty) {
       return normal(emit(LoadField(field, receiver)));
     }
     if (member == null ||
         member.isStatic ||
-        !isClassOrEnum(member.enclosingElement)) {
+        extension == null && !isClassOrEnum(member.enclosingElement)) {
       unsupported(unit, site, 'instance member binding');
     }
+    final checked = memberReceiver(receiver, extension);
+    if (checked == null) return null;
+    receiver = checked;
+    final signature = extension == null
+        ? null
+        : substituteType(extension.executable.sourceSignature, {
+            for (final (i, parameter)
+                in extension.executable.extensionParameters.indexed)
+              parameter: extension.typeArguments[i],
+          }) as FunctionType;
     final converted = <Value>[];
     for (final (i, value) in args.indexed) {
       final argument = normal(
-        convert(value, typeOf(member.formalParameters[i].type, site)),
+        convert(
+          value,
+          signature?.parameters[i] ??
+              typeOf(member.formalParameters[i].type, site),
+        ),
       );
       if (argument == null) return null;
       converted.add(argument);
     }
     args = converted;
+    if (extension != null) {
+      return callExtension(extension, receiver, (
+        positional: args,
+        named: {},
+      ), []);
+    }
     final target = direct
         ? bindings.superTarget(this.receiver!.type, member, unit, site)
         : bindings.target(member, unit, site);

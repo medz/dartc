@@ -28,8 +28,9 @@ Value? lowerBinary(
   ast.AstNode site,
   Token operator,
   Value left,
-  Value? right,
-) {
+  Value? right, {
+  ExtensionApplication? extension,
+}) {
   if (right == null) return null;
   final direct =
       site is ast.BinaryExpression && site.leftOperand is ast.SuperExpression;
@@ -66,7 +67,8 @@ Value? lowerBinary(
       negated: operator.type == .BANG_EQ,
     );
   }
-  if (left.type is DynamicType) {
+  if (left.type is DynamicType &&
+      member?.enclosingElement is! ExtensionElement) {
     final name = switch (operator.type) {
       .PLUS_PLUS => '+',
       .MINUS_MINUS => '-',
@@ -87,7 +89,8 @@ Value? lowerBinary(
     return context.dynamicMember(left, .method, name, [right]);
   }
   if (member is MethodElement &&
-      isClassOrEnum(member.enclosingElement) &&
+      (isClassOrEnum(member.enclosingElement) ||
+          member.enclosingElement is ExtensionElement) &&
       !member.library.isDartCore) {
     return context.callPositionalMember(
       member,
@@ -95,6 +98,15 @@ Value? lowerBinary(
       [right],
       site,
       direct: direct,
+      extension:
+          extension ??
+          context.extensionApplication(
+            member,
+            site,
+            receiverType: site is ast.RelationalPattern
+                ? site.matchedValueType
+                : null,
+          ),
     );
   }
   if (member?.library.isDartCore != true) {

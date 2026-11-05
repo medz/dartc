@@ -16,6 +16,26 @@ import 'selectors.dart';
 Value? lowerExpression(FunctionContext context, ast.Expression expression) =>
     context.normal(_lower(context, expression));
 
+/// Operator overrides are receiver syntax, not first-class expression values.
+Value? _operatorReceiver(FunctionContext context, ast.Expression expression) {
+  if (expression is ast.ExtensionOverride) {
+    final prefix = expression.importPrefix?.element;
+    if (expression.isNullAware ||
+        prefix is PrefixElement &&
+            prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
+      unsupported(
+        context.unit,
+        expression,
+        'null-aware or deferred operator override',
+      );
+    }
+    expression = expression.argumentList.arguments.single.argumentExpression;
+  }
+  return expression is ast.SuperExpression
+      ? context.receiver
+      : lowerExpression(context, expression);
+}
+
 Value? _lower(FunctionContext context, ast.Expression expression) {
   final unit = context.unit;
   switch (expression) {
@@ -258,9 +278,14 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
             operator.type == .TILDE ||
             operator.type == .BANG:
       final direct = operand is ast.SuperExpression;
-      final value = direct
-          ? context.receiver
-          : lowerExpression(context, operand);
+      final input = _operatorReceiver(context, operand);
+      if (input == null) return null;
+      final application = context.extensionApplication(
+        element,
+        expression,
+        receiver: operand,
+      );
+      final value = context.memberReceiver(input, application);
       if (value == null) return null;
       if (operator.type == .BANG) {
         final condition = context.normal(context.cast(value, .boolean));
@@ -268,7 +293,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
             ? null
             : context.emit(Equals(condition, const Constant.boolean(false)));
       }
-      if (operand.staticType is dart.DynamicType) {
+      if (application == null && operand.staticType is dart.DynamicType) {
         return context.dynamicMember(
           value,
           .method,
@@ -294,6 +319,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         [],
         expression,
         direct: direct,
+        extension: application,
       );
     case ast.NullLiteral():
       return const Constant.nullValue();
@@ -514,9 +540,14 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       :final rightOperand,
       :final operator,
     ):
-      final left = leftOperand is ast.SuperExpression
-          ? context.receiver
-          : lowerExpression(context, leftOperand);
+      final input = _operatorReceiver(context, leftOperand);
+      if (input == null) return null;
+      final application = context.extensionApplication(
+        expression.element,
+        expression,
+        receiver: leftOperand,
+      );
+      final left = context.memberReceiver(input, application);
       if (left == null) return null;
       if (operator.type == .QUESTION_QUESTION) {
         return context.ifNull(
@@ -546,6 +577,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         operator,
         left,
         lowerExpression(context, rightOperand),
+        extension: application,
       );
     default:
       unsupported(

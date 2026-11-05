@@ -10,6 +10,7 @@ import 'fixtures/defaults.dart' as defaults;
 import 'fixtures/destructure.dart' as destructure;
 import 'fixtures/effects.dart' as effects;
 import 'fixtures/exceptions.dart' as exceptions;
+import 'fixtures/extension_operator.dart' as extension_operator;
 import 'fixtures/finalizers.dart' as finalizers;
 import 'fixtures/functions.dart' as dart;
 import 'fixtures/index_update.dart' as index_update;
@@ -633,10 +634,32 @@ void main() {
     expect(FixtureRunner(program, {}).run(function, []), lazy.f());
   });
 
-  for (final (file, line) in [
-    ('deferred_constant.dart', 3),
-    ('extension_operator.dart', 1),
-  ]) {
+  test(
+    'extension operator uses the receiver static view and direct ABI',
+    () async {
+      final program = await _lower(['extension_operator.dart']);
+      final function = program.functions.singleWhere(
+        (f) => f.target.name == 'compareAsObject',
+      );
+      final runner = FixtureRunner(program, {});
+      for (final seed in [-1, 0, 7]) {
+        expect(
+          runner.run(function, [seed]),
+          extension_operator.compareAsObject(seed),
+        );
+      }
+      final instructions = function.blocks
+          .expand((b) => b.instructions)
+          .toList();
+      expect(instructions.whereType<InstanceCall>(), isEmpty);
+      final call = instructions.whereType<DirectCall>().single;
+      expect(call.target.owner, isNull);
+      expect(call.target.name, startsWith('<extension:'));
+      expect(call.inputs, hasLength(2));
+    },
+  );
+
+  for (final (file, line) in [('deferred_constant.dart', 3)]) {
     test('reports the unsupported operation in $file at its source', () async {
       await expectLater(
         _lower([file]),

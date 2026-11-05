@@ -111,7 +111,7 @@ final class PatternCache {
           counts.update(key, (count) => count + 1, ifAbsent: () => 1);
         case ast.ObjectPattern(:final fields):
           for (final field in fields) {
-            final key = _fieldPath(path, field);
+            final key = _fieldPath(context, path, field);
             counts.update(key, (count) => count + 1, ifAbsent: () => 1);
             collect(field.pattern, key);
           }
@@ -191,12 +191,22 @@ final class PatternCache {
         expression,
       );
 
-  Object comparisonKey(Object path, String operator, ast.Expression operand) =>
-      (
-        path,
-        operator == '!=' ? '==' : operator,
-        constantKey(constant(operand)),
-      );
+  Object comparisonKey(Object path, String operator, ast.Expression operand) {
+    final key = (
+      path,
+      operator == '!=' ? '==' : operator,
+      constantKey(constant(operand)),
+    );
+    final pattern = operand.parent;
+    final application = pattern is ast.RelationalPattern
+        ? context.extensionApplication(
+            pattern.element,
+            pattern,
+            receiverType: pattern.matchedValueType,
+          )
+        : null;
+    return application == null ? key : (key, _extensionKey(application));
+  }
 
   Value? read(Object key, Value? Function() extract) {
     final cells = _cells[key];
@@ -217,9 +227,30 @@ final class PatternCache {
   }
 }
 
-Object _fieldPath(Object parent, ast.PatternField field) {
+Object _extensionKey(ExtensionApplication application) =>
+    application.typeArguments.fold<Object>(
+      application.executable.declaration,
+      (key, type) => (key, type),
+    );
+
+Object _fieldPath(
+  FunctionContext context,
+  Object parent,
+  ast.PatternField field,
+) {
   final member = field.element;
   final name = field.effectiveName!;
+  if (member is ExecutableElement &&
+      member.enclosingElement is ExtensionElement &&
+      coreEnumField(member) == null) {
+    final owner = field.parent as ast.ObjectPattern;
+    final application = context.extensionApplication(
+      member,
+      field,
+      receiverType: owner.type.type,
+    )!;
+    return (parent, name, _extensionKey(application));
+  }
   return _getterPath(
     parent,
     name.startsWith('_') ? (member!.library!.uri, name) : name,
@@ -347,11 +378,13 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
           if (member is! ExecutableElement ||
               member.isStatic ||
               (!isClassOrEnum(member.enclosingElement) &&
-                  coreEnumField(member) == null)) {
+                  coreEnumField(member) == null &&
+                  !(member is GetterElement &&
+                      member.enclosingElement is ExtensionElement))) {
             unsupported(context.unit, field, 'object pattern member');
           }
           // Unlike record slots, even wildcard fields must evaluate their getter.
-          final key = _fieldPath(path, field);
+          final key = _fieldPath(context, path, field);
           final item = cache.read(key, () {
             if (coreEnumField(member) case final slot?) {
               return context.normal(context.emit(LoadField(slot, object)));
@@ -375,7 +408,17 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
                       ),
                     ),
                   )
-                : context.callPositionalMember(member, object, [], field);
+                : context.callPositionalMember(
+                    member,
+                    object,
+                    [],
+                    field,
+                    extension: context.extensionApplication(
+                      member,
+                      field,
+                      receiverType: type.type,
+                    ),
+                  );
           });
           if (item == null) return;
           final checked = context.normal(
