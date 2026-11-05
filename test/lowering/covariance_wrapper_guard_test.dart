@@ -1,0 +1,362 @@
+import 'dart:io';
+
+import 'package:dartc/ir.dart';
+import 'package:dartc/lowering.dart';
+import 'package:test/test.dart';
+
+import 'fixture_runner.dart';
+import 'fixture_comparison.dart';
+import 'fixtures/covariant_forwarder_sources.dart' as sdk;
+
+void main() {
+  Future<IrProgram> lower(String source) async {
+    final directory = Directory.systemTemp.createTempSync(
+      'dartc-wrapper-guard-',
+    );
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final file = File('${directory.path}/entry.dart')
+      ..writeAsStringSync(source);
+    return CheckedLibraries.read([file.path], Lowering.lower);
+  }
+
+  final unsupportedCases = <String, (String, String)>{
+    'abstract interface-only covariance is caught before a descendant loses it':
+        (
+          '''
+abstract class I { Object? f([num x = 10]); }
+class A implements I {
+  dynamic noSuchMethod(Invocation i) => i.positionalArguments[0];
+}
+abstract class J { Object? f([covariant num x = 40]); }
+abstract class B extends A implements J {}
+class C extends B {}
+''',
+          'inherited noSuchMethod covariance transition f',
+        ),
+    'abstract interface-only boundary is checked without any concrete child': (
+      '''
+abstract class I { Object? f([num x = 10]); }
+class A implements I { dynamic noSuchMethod(Invocation i) => 1; }
+abstract class J { Object? f([covariant num x = 40]); }
+abstract class B extends A implements J {}
+''',
+      'inherited noSuchMethod covariance transition f',
+    ),
+    'own abstract redeclaration over real body needs an abstract wrapper': (
+      '''
+class R { Object? f([num x = 10]) => x; }
+abstract class RB extends R { Object? f([covariant num x = 20]); }
+class RC extends RB {}
+''',
+      'inherited concrete covariance transition f',
+    ),
+    'own abstract redeclaration in concrete class over real body needs wrapper':
+        (
+          '''
+class R { Object? f([num x = 10]) => x; }
+class RD extends R { Object? f([covariant num x = 30]); }
+''',
+          'inherited concrete covariance transition f',
+        ),
+    'named covariance is aligned by name rather than declaration order': (
+      '''
+class R { Object? f({num x = 10, num y = 11}) => x; }
+abstract class B extends R {
+  Object? f({num y = 21, covariant num x = 20});
+}
+class C extends B {}
+''',
+      'inherited concrete covariance transition f',
+    ),
+    'new class covariance is distinct from inherited explicit covariance': (
+      '''
+class R { Object? f([covariant num? x = 10]) => x; }
+abstract class B<T extends num> extends R { Object? f([T? x]); }
+class C extends B<int> {}
+''',
+      'inherited concrete covariance transition f',
+    ),
+    'specialized interface retains original class-covariance provenance': (
+      '''
+class R { Object? f([covariant int? x = 10]) => x; }
+abstract class J<T> { Object? f([T? x]); }
+abstract class B extends R implements J<int> { Object? f([int? x = 20]); }
+class C extends B {}
+''',
+      'inherited concrete covariance transition f',
+    ),
+    'specialized method bounds retain original class-covariance flags': (
+      '''
+class R { Object? f<U extends Object?>([num x = 10]) => x; }
+abstract class J<T> { Object? f<U extends T>([num x = 40]); }
+abstract class B extends R implements J<Object?> {
+  Object? f<U extends Object?>([num x = 20]);
+}
+class C extends B {}
+''',
+      'inherited concrete covariance transition f',
+    ),
+    'abstract nSM boundary adds specialized method-bound covariance': (
+      '''
+abstract class I { Object? f<U extends Object?>([num x = 10]); }
+class A implements I { dynamic noSuchMethod(Invocation i) => 1; }
+abstract class J<T> { Object? f<U extends T>([num x = 40]); }
+abstract class B extends A implements J<Object?> {}
+class C extends B {}
+''',
+      'inherited noSuchMethod covariance transition f',
+    ),
+    'inherited real body requires a wrapper for specialized interface covariance':
+        (
+          '''
+class R { Object? f(int value) => value; }
+abstract class J<T> { Object? f(T value); }
+class A extends R implements J<int> {}
+''',
+          'inherited concrete covariance transition f',
+        ),
+    'different function types do not bypass the covariance-wrapper guard': (
+      '''
+class R { Object? f([num x = 10]) => x; }
+abstract class B extends R { Object? f([covariant int x = 20]); }
+class C extends B {}
+''',
+      'inherited concrete covariance transition f',
+    ),
+  };
+  for (final entry in unsupportedCases.entries) {
+    test(entry.key, () async {
+      await expectLater(
+        lower(entry.value.$1),
+        throwsA(
+          isA<UnsupportedError>().having(
+            (e) => e.message,
+            'feature',
+            contains(entry.value.$2),
+          ),
+        ),
+      );
+    });
+  }
+
+  test('own real covariant override wins over inherited body', () async {
+    final program = await lower('''
+class R { Object? f([num x = 10]) => x; }
+class D extends R { Object? f([covariant int x = 30]) => x + 1; }
+Object? run() => D().f();
+''');
+    final entry = program.functions.singleWhere((f) => f.target.name == 'run');
+    expect(FixtureRunner(program, {}).run(entry, []), 31);
+  });
+
+  test(
+    'unchanged inherited covariance keeps the actual implementation',
+    () async {
+      final program = await lower('''
+class R { Object? f({covariant num x = 10, num y = 11}) => x; }
+abstract class B extends R {
+  Object? f({num y = 21, covariant num x = 20});
+}
+class C extends B {}
+Object? run() => C().f();
+''');
+      final entry = program.functions.singleWhere(
+        (f) => f.target.name == 'run',
+      );
+      expect(FixtureRunner(program, {}).run(entry, []), 10);
+    },
+  );
+
+  test(
+    'generic inherited class checks alone do not become a wrapper guard',
+    () async {
+      final program = await lower('''
+class R<T> { Object? f(T x) => x; }
+abstract class B extends R<int> { Object? f(int x); }
+class C extends B {}
+Object? run() => C().f(10);
+''');
+      final entry = program.functions.singleWhere(
+        (f) => f.target.name == 'run',
+      );
+      expect(FixtureRunner(program, {}).run(entry, []), 10);
+    },
+  );
+
+  test('own real covariant override wins over an inherited nSM body', () async {
+    final program = await lower('''
+abstract class I { Object? f([num x = 10]); }
+class A implements I { dynamic noSuchMethod(Invocation i) => 1; }
+class D extends A { Object? f([covariant int x = 30]) => x + 1; }
+Object? run() => D().f();
+''');
+    final entry = program.functions.singleWhere((f) => f.target.name == 'run');
+    expect(FixtureRunner(program, {}).run(entry, []), 31);
+  });
+
+  test('unchanged deep inheritance reuses a covariant nSM body', () async {
+    final program = await lower('''
+abstract class I { Object? f([covariant num x = 10]); }
+class A implements I {
+  dynamic noSuchMethod(Invocation i) => i.positionalArguments[0];
+}
+abstract class B extends A {}
+class C extends B {}
+abstract class D extends C {}
+class E extends D {}
+class F extends E {}
+Object? run() => F().f();
+''');
+    final entry = program.functions.singleWhere((f) => f.target.name == 'run');
+    expect(FixtureRunner(program, {}).run(entry, []), 10);
+  });
+
+  test(
+    'foreign-private real covariance wraps only at an abstract boundary',
+    () async {
+      final directory = Directory.systemTemp.createTempSync(
+        'dartc-private-wrapper-',
+      );
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final parent = File('${directory.path}/parent.dart')
+        ..writeAsStringSync('''
+class R { Object? _f([num x = 10]) => x; }
+abstract class J { Object? _f([covariant num x = 20]); }
+String inspect(R value) {
+  dynamic f = value._f;
+  return '\${f()}:\${f is Object? Function([Object?])}';
+}
+''');
+      final child = File('${directory.path}/child.dart')
+        ..writeAsStringSync('''
+import 'parent.dart';
+class B extends R implements J {}
+String run() => inspect(B());
+''');
+      final program = await CheckedLibraries.read([
+        parent.path,
+        child.path,
+      ], Lowering.lower);
+      final entry = program.functions.singleWhere(
+        (f) => f.target.name == 'run',
+      );
+      expect(FixtureRunner(program, {}).run(entry, []), '10:false');
+      child.writeAsStringSync('''
+import 'parent.dart';
+abstract class B extends R implements J {}
+class C extends B {}
+String run() => inspect(C());
+''');
+      await expectLater(
+        CheckedLibraries.read([parent.path, child.path], Lowering.lower),
+        throwsA(
+          isA<UnsupportedError>().having(
+            (e) => e.message,
+            'feature',
+            contains('inherited concrete covariance transition _f'),
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'specialized source covariance matches SDK in first-generation bodies',
+    () async {
+      final fixture = await FixtureComparison.load(
+        'covariant_forwarder_sources',
+      );
+      for (var form = 0; form < 11; form++) {
+        for (final value in [7, 1.5, 'bad', null]) {
+          fixture.compare('sourceCovariance', [
+            form,
+            value,
+          ], () => sdk.sourceCovariance(form, value));
+        }
+      }
+    },
+  );
+
+  test(
+    'inherited method-bound class covariance survives specialization',
+    () async {
+      final program = await lower('''
+class R<T> { Object? f<U extends T>([num x = 10]) => x; }
+abstract class B extends R<Object?> { Object? f<U extends Object?>([num x = 20]); }
+class C extends B {}
+Object? run() => C().f();
+''');
+      final entry = program.functions.singleWhere(
+        (f) => f.target.name == 'run',
+      );
+      expect(FixtureRunner(program, {}).run(entry, []), 10);
+    },
+  );
+
+  test(
+    'contravariant-only method bounds do not introduce class covariance',
+    () async {
+      final program = await lower('''
+class R { Object? f<U extends void Function(num)>([num x = 10]) => x; }
+abstract class J<T> { Object? f<U extends void Function(T)>([num x = 40]); }
+abstract class B extends R implements J<num> {
+  Object? f<U extends void Function(num)>([num x = 20]);
+}
+class C extends B {}
+Object? run() => C().f();
+''');
+      final entry = program.functions.singleWhere(
+        (f) => f.target.name == 'run',
+      );
+      expect(FixtureRunner(program, {}).run(entry, []), 10);
+    },
+  );
+
+  test(
+    'synthesized method-bound class covariance survives abstract redeclaration',
+    () async {
+      final program = await lower('''
+abstract class I<T> { Object? f<U extends T>([num x = 10]); }
+class A implements I<Object?> {
+  dynamic noSuchMethod(Invocation i) => i.positionalArguments[0];
+}
+abstract class B extends A { Object? f<U extends Object?>([num x = 20]); }
+class C extends B {}
+Object? run() => C().f();
+''');
+      final entry = program.functions.singleWhere(
+        (f) => f.target.name == 'run',
+      );
+      expect(FixtureRunner(program, {}).run(entry, []), 10);
+    },
+  );
+
+  test('own source covariance is cache-safe and leaves unrelated ancestors unchanged', () async {
+    final fixture = await FixtureComparison.load('covariant_forwarder_sources');
+    for (var form = 0; form < 11; form++) {
+      for (final value in [7, 1.5, 'bad', null]) {
+        fixture.compare('ownSourceCovariance', [
+          form,
+          value,
+        ], () => sdk.ownSourceCovariance(form, value));
+      }
+    }
+  });
+
+  test(
+    'source class covariance propagates transitively through real overrides',
+    () async {
+      final fixture = await FixtureComparison.load(
+        'covariant_forwarder_sources',
+      );
+      for (var form = 0; form < 5; form++) {
+        for (final value in [7, 1.5, 'bad', null]) {
+          fixture.compare('transitiveSourceCovariance', [
+            form,
+            value,
+          ], () => sdk.transitiveSourceCovariance(form, value));
+        }
+      }
+    },
+  );
+}

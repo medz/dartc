@@ -206,7 +206,7 @@ final class IrProgram(
     if (owners.length != this.classes.length) {
       throw ArgumentError('Repeated class.');
     }
-    final names = <(Uri, ClassType?, FunctionKind, String)>{};
+    final names = <(Uri, ClassType?, FunctionKind, String, Uri?)>{};
     final locals = <(FunctionTarget, int)>{};
     final bodies = {for (final f in this.functions) f.target};
     final fieldInitializers = <FunctionTarget>{};
@@ -255,6 +255,7 @@ final class IrProgram(
         owner,
         t.kind,
         t.kind.isVirtual ? t.selector.name : t.name,
+        t.kind.isVirtual ? t.selector.privateLibrary : null,
       ))) {
         throw ArgumentError('Repeated callable body.');
       }

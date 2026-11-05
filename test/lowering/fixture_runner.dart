@@ -261,13 +261,14 @@ final class FixtureRunner(
         target.name == 'identical') {
       return identical(arguments[0], arguments[1]);
     }
-    if (target.owner == ValueType.object &&
-        target.name == 'noSuchMethod' &&
-        target.kind == .method) {
-      throw NoSuchMethodError.withInvocation(
-        arguments[0],
-        _GuestInvocation(this, arguments[1]!),
-      );
+    if (target.library == ValueType.noSuchMethodError.library &&
+        target.owner == ValueType.noSuchMethodError &&
+        target.kind == .factory &&
+        target.name == 'withInvocation') {
+      return _noSuchMethodError(arguments[0], arguments[1]!);
+    }
+    if (_isObjectNoSuchMethod(target)) {
+      throw _noSuchMethodError(arguments[0], arguments[1]!);
     }
     if (target == _symbolToString) return arguments.first.toString();
     if (arguments.firstOrNull case final _Instance instance
@@ -864,10 +865,7 @@ final class FixtureRunner(
       return invoke(1, () {
         final invocation = positional.single;
         _typeOperation(CoreTypes.invocation, invocation, cast: true);
-        throw NoSuchMethodError.withInvocation(
-          receiver,
-          _GuestInvocation(this, invocation!),
-        );
+        throw _noSuchMethodError(receiver, invocation!);
       });
     }
     if (receiver is num) {
@@ -1062,6 +1060,18 @@ final class FixtureRunner(
 
   final _invocationStorageGetters = <String, FunctionTarget>{};
 
+  NoSuchMethodError _noSuchMethodError(Object? receiver, Object invocation) =>
+      NoSuchMethodError.withInvocation(
+        receiver,
+        _GuestInvocation(this, invocation),
+      );
+
+  static bool _isObjectNoSuchMethod(FunctionTarget target) =>
+      target.library == ValueType.object.library &&
+      target.owner == ValueType.object &&
+      target.kind == .method &&
+      target.name == 'noSuchMethod';
+
   FunctionTarget _resolveMember(_Instance instance, FunctionTarget member) {
     final target = program.dispatch(instance.type, member);
     if (target != null) return target;
@@ -1101,10 +1111,16 @@ final class FixtureRunner(
           ? _symbolToString
           : member;
     }
-    if (program
-        .lookupMember(instance.type, member.selector)
-        .unsupportedForwarder) {
+    final lookup = program.lookupMember(instance.type, member.selector);
+    if (lookup.unsupportedForwarder) {
       throw UnsupportedError('Unmodeled fixture noSuchMethod forwarder');
+    }
+    // Only proven absence through Object permits the SDK implementation. An
+    // unknown imported superclass may supply its own noSuchMethod override.
+    if (_isObjectNoSuchMethod(member) &&
+        lookup.target == null &&
+        lookup.unmodeledBoundary == null) {
+      return member;
     }
     throw StateError('Missing fixture member: ${member.name}');
   }

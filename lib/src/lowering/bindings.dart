@@ -26,7 +26,12 @@ final class Bindings({final bool enableAssertions = false}) {
   final _implementationPlans =
       <InterfaceElement, Map<MemberSelector, FunctionTarget>>{};
   final _syntheticTargets = <FunctionTarget>{};
-  final _forwarderClassCovariance = <FunctionTarget, Set<int>>{};
+  // Keep declaration covariance separate from implicit class-variable checks.
+  // CFE compares these independently when deciding to emit a super wrapper.
+  final _declarationCovariance = <FunctionTarget, Set<int>>{};
+  final _classCovariance = <FunctionTarget, Set<int>>{};
+  final _boundCovariance = <FunctionTarget, Set<int>>{};
+  final _memberClassCovariance = <ExecutableElement, ClassCovariance>{};
   final _newForwarders = <InterfaceElement, List<FunctionTarget>>{};
   final _unsupportedForwarders = <InterfaceElement, Set<MemberSelector>>{};
   final _planningClasses = <InterfaceElement>{};
@@ -86,11 +91,16 @@ final class Bindings({final bool enableAssertions = false}) {
     final effective = <MemberSelector, FunctionTarget>{
       if (parent != null) ..._planImplementations(parent),
     };
+    // With no own abstract declaration, interface, or mixin, this class adds
+    // no new covariance provenance; its superclass has already been checked.
+    var checkCovariance =
+        element.interfaces.isNotEmpty || element.mixins.isNotEmpty;
     for (final member in <ExecutableElement>[
       ...element.methods,
       ...element.getters,
       ...element.setters,
     ]) {
+      if (!member.isStatic && member.isAbstract) checkCovariance = true;
       if (!member.isStatic && !member.isAbstract) {
         final implementation = target(member, unit, site);
         effective[implementation.selector] = implementation;
@@ -98,24 +108,32 @@ final class Bindings({final bool enableAssertions = false}) {
     }
     final emitted = <FunctionTarget>[];
     final unsupportedSelectors = <MemberSelector>{};
-    for (final candidate in noSuchMethodForwarderCandidates(element)) {
+    final candidates = noSuchMethodForwarderCandidates(
+      element,
+      checkCovariance: !checkCovariance
+          ? null
+          : (member, library, contributors) {
+              _guardCovarianceWrapper(
+                element,
+                member,
+                library,
+                contributors,
+                effective,
+                unit,
+                site,
+              );
+            },
+    );
+    for (final candidate in candidates) {
       final member = candidate.member;
       final selector = _memberSelector(member, candidate.privateLibrary);
       final inherited = effective[selector];
       // Analyzer propagates forwarder markers across real concrete overrides.
-      if (inherited != null && !_syntheticTargets.contains(inherited)) {
-        if (candidate.overridesConcrete) {
-          unsupported(
-            unit,
-            site,
-            'inherited private noSuchMethod forwarder ${member.name}',
-          );
-        }
+      if (inherited != null &&
+          !_syntheticTargets.contains(inherited) &&
+          !candidate.overridesConcrete) {
         continue;
       }
-      final foreignPrivate =
-          candidate.privateLibrary != null &&
-          candidate.privateLibrary != element.library.uri;
       final unmodeledParent =
           parent != null &&
           !_modeledClasses.containsKey(parent) &&
@@ -129,8 +147,8 @@ final class Bindings({final bool enableAssertions = false}) {
           );
         }
         // A guard does not consume the unsupported signature or its constants.
-        // Only an actual inherited synthetic target requires comparison first.
-        if (foreignPrivate || unmodeledParent) {
+        // A known inherited target requires replacement comparison first.
+        if (unmodeledParent) {
           unsupportedSelectors.add(selector);
           continue;
         }
@@ -147,20 +165,57 @@ final class Bindings({final bool enableAssertions = false}) {
         unsupportedSelectors.add(selector);
         continue;
       }
+      final sourceClassFlags = combinedCovariance(
+        member,
+        candidate.covarianceContributors,
+        flags: (contributor) => _classCovarianceFor(contributor).parameters,
+      );
       final replacement = _forwarderTarget(
         element,
         member,
         templates,
         unit,
         site,
-        inheritedClassCovariance: inherited == null
-            ? const {}
-            : _transportCovariance(
-                inherited,
-                member,
-                _forwarderClassCovariance[inherited] ?? const {},
-              ),
+        privateLibrary: candidate.privateLibrary,
+        effectiveCovariance: {
+          ...candidate.additionalCovariance,
+          if (candidate.overridesConcrete && inherited != null)
+            ..._transportCovariance(
+              inherited,
+              member,
+              inherited.covariantParameters,
+            ),
+        },
+        inheritedClassCovariance: {
+          ...sourceClassFlags,
+          if (inherited != null)
+            ..._transportCovariance(
+              inherited,
+              member,
+              _classCovariance[inherited] ?? const {},
+            ),
+        },
       );
+      final declarationFlags = {
+        ...candidate.additionalCovariance,
+        for (final (i, p) in member.formalParameters.indexed)
+          if (p.isCovariant) i,
+        if (candidate.overridesConcrete && inherited != null)
+          ..._transportCovariance(
+            inherited,
+            member,
+            _declarationCovariance[inherited] ?? const {},
+          ),
+      };
+      if (declarationFlags.isNotEmpty) {
+        _declarationCovariance[replacement] = declarationFlags;
+      }
+      final boundFlags = {
+        ...?_boundCovariance[inherited],
+        for (final contributor in candidate.covarianceContributors)
+          ..._classCovarianceFor(contributor).bounds,
+      };
+      if (boundFlags.isNotEmpty) _boundCovariance[replacement] = boundFlags;
       if (inherited != null) {
         if (inherited.signatureFor(owner) == replacement.signature) {
           final inheritedCovariance = _transportCovariance(
@@ -182,17 +237,6 @@ final class Bindings({final bool enableAssertions = false}) {
           continue;
         }
       }
-      if (foreignPrivate) {
-        if (inherited != null || candidate.overridesConcrete) {
-          unsupported(
-            unit,
-            site,
-            'inherited private noSuchMethod forwarder ${member.name}',
-          );
-        }
-        unsupportedSelectors.add(selector);
-        continue;
-      }
       if (unmodeledParent) {
         unsupportedSelectors.add(selector);
         continue;
@@ -207,6 +251,114 @@ final class Bindings({final bool enableAssertions = false}) {
     return _implementationPlans[element] = effective;
   }
 
+  void _guardCovarianceWrapper(
+    InterfaceElement element,
+    ExecutableElement member,
+    Uri? privateLibrary,
+    Iterable<ExecutableElement> contributors,
+    Map<MemberSelector, FunctionTarget> effective,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    if (member.formalParameters.isEmpty && member.typeParameters.isEmpty) {
+      return;
+    }
+    final inherited = effective[_memberSelector(member, privateLibrary)];
+    if (inherited == null) return;
+    final isAbstract = element is ClassElement && element.isAbstract;
+    // Concrete nSM/private candidates use the existing replacement branch.
+    // Even a real foreign-private body uses CFE's nSM-target equality branch:
+    // a compatible body is reused despite additional interface covariance.
+    if (!isAbstract &&
+        (_syntheticTargets.contains(inherited) ||
+            privateLibrary != null && privateLibrary != element.library.uri)) {
+      return;
+    }
+    // An insufficient super parameter count cannot support a concrete wrapper.
+    final parameters = member.formalParameters;
+    if (inherited.signature.positionalCount <
+            parameters.where((p) => p.isPositional).length ||
+        inherited.signature.named.length <
+            parameters.where((p) => p.isNamed).length) {
+      return;
+    }
+    final inheritedCovariance = _transportCovariance(
+      inherited,
+      member,
+      _declarationCovariance[inherited] ?? const {},
+    );
+    final inheritedClassCovariance = _transportCovariance(
+      inherited,
+      member,
+      _classCovariance[inherited] ?? const {},
+    );
+    final combinedClassCovariance = combinedCovariance(
+      member,
+      contributors,
+      flags: (contributor) => _classCovarianceFor(contributor).parameters,
+    );
+    final combinedBounds = {
+      for (final contributor in contributors)
+        ..._classCovarianceFor(contributor).bounds,
+    };
+    if (!inheritedCovariance.containsAll(
+          combinedCovariance(member, contributors),
+        ) ||
+        !inheritedClassCovariance.containsAll(combinedClassCovariance) ||
+        !(_boundCovariance[inherited] ?? const <int>{}).containsAll(
+          combinedBounds,
+        )) {
+      unsupported(
+        unit,
+        site,
+        _syntheticTargets.contains(inherited)
+            ? 'inherited noSuchMethod covariance transition ${member.name}'
+            : 'inherited concrete covariance transition ${member.name}',
+      );
+    }
+  }
+
+  ClassCovariance _classCovarianceFor(ExecutableElement member) {
+    member = member.baseElement;
+    if (_memberClassCovariance[member] case final previous?) return previous;
+    final owner = member.enclosingElement;
+    if (owner is! InterfaceElement) {
+      return (parameters: const {}, bounds: const {});
+    }
+    final hasInherited =
+        owner.interfaces.isNotEmpty ||
+        owner.mixins.isNotEmpty ||
+        (owner.supertype != null && !owner.supertype!.isDartCoreObject);
+    if (owner.typeParameters.isEmpty && !hasInherited) {
+      return (parameters: const {}, bounds: const {});
+    }
+    return _memberClassCovariance.putIfAbsent(member, () {
+      final own = executableClassCovariance(member);
+      if (!hasInherited) return own;
+      // A checked inheritance graph is acyclic. Do not recurse into the own
+      // declaration included by the adapter; effective flags survive real
+      // overrides whose syntactic types no longer contain owner variables.
+      final overridden = executableCovarianceContributors(member)
+          .where((e) => e.baseElement != member)
+          .toList();
+      if (overridden.isEmpty) return own;
+      return (
+        parameters: {
+          ...own.parameters,
+          ...combinedCovariance(
+            member,
+            overridden,
+            flags: (e) => _classCovarianceFor(e).parameters,
+          ),
+        },
+        bounds: {
+          ...own.bounds,
+          for (final e in overridden) ..._classCovarianceFor(e).bounds,
+        },
+      );
+    });
+  }
+
   // FunctionType equality ignores named declaration order, unlike entry slots.
   // Transfer inherited checks by named identity and only positional index.
   Set<int> _transportCovariance(
@@ -214,6 +366,7 @@ final class Bindings({final bool enableAssertions = false}) {
     ExecutableElement selected,
     Set<int> slots,
   ) {
+    if (slots.isEmpty) return const {};
     final oldNames = {
       for (final entry in inherited.signature.named.entries)
         entry.value.slot: entry.key,
@@ -244,6 +397,8 @@ final class Bindings({final bool enableAssertions = false}) {
     List<dart.DartType?> templates,
     ResolvedUnitResult unit,
     ast.AstNode site, {
+    Uri? privateLibrary,
+    Set<int> effectiveCovariance = const {},
     Set<int> inheritedClassCovariance = const {},
   }) {
     final owner = classType(destination, unit, site);
@@ -261,6 +416,7 @@ final class Bindings({final bool enableAssertions = false}) {
       parameters.map((p) => valueType(p.type, unit, site)),
       owner: owner,
       kind: _memberSelector(selected).kind,
+      privateSelectorLibrary: privateLibrary,
       typeParameters: binders,
       optionalPositional: parameters
           .where((p) => p.isOptionalPositional)
@@ -271,6 +427,7 @@ final class Bindings({final bool enableAssertions = false}) {
       },
       covariantParameters: [
         ...inheritedClassCovariance,
+        ...effectiveCovariance,
         for (final (i, p) in parameters.indexed)
           if (p.isCovariant) i,
       ],
@@ -281,7 +438,7 @@ final class Bindings({final bool enableAssertions = false}) {
     final ownerParameters = owner.typeParameters.isEmpty
         ? const <TypeParameterType>{}
         : owner.typeParameters.toSet();
-    _forwarderClassCovariance[result] = {
+    _classCovariance[result] = {
       ...inheritedClassCovariance,
       if (ownerParameters.isNotEmpty)
         for (final (i, type) in result.signature.parameters.indexed)
@@ -292,6 +449,28 @@ final class Bindings({final bool enableAssertions = false}) {
         if (p.isOptional) i: constantOf(p.baseElement, unit, site),
     };
     return result;
+  }
+
+  /// Binds the genuine SDK operation used by an ordinary forwarding body.
+  FunctionTarget noSuchMethodBodyTarget(
+    InterfaceElement destination,
+    FunctionTarget forwarder,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    final object = destination.library.typeProvider.objectElement;
+    final foreignPrivate =
+        forwarder.selector.privateLibrary != null &&
+        forwarder.selector.privateLibrary != forwarder.library;
+    return target(
+      foreignPrivate
+          ? object.library
+                .getClass('NoSuchMethodError')!
+                .getNamedConstructor('withInvocation')!
+          : object.getMethod('noSuchMethod')!,
+      unit,
+      site,
+    );
   }
 
   /// Resolves super against the lexical superclass, not an abstract interface
@@ -372,6 +551,19 @@ final class Bindings({final bool enableAssertions = false}) {
         redirects: path,
       );
     }
+    final needsCovariance =
+        kind.isVirtual &&
+        (parameters.isNotEmpty || element.typeParameters.isNotEmpty);
+    final contributors = needsCovariance
+        ? executableCovarianceContributors(element)
+        : const <ExecutableElement>[];
+    final declarationFlags = needsCovariance
+        ? combinedCovariance(element, contributors)
+        : const <int>{};
+    final classCovariance = needsCovariance
+        ? _classCovarianceFor(element)
+        : (parameters: const <int>{}, bounds: const <int>{});
+    final classFlags = classCovariance.parameters;
     final function = FunctionTarget(
       element.library.uri,
       element.name ?? '<anonymous>',
@@ -387,11 +579,7 @@ final class Bindings({final bool enableAssertions = false}) {
       enclosing: enclosing,
       sourceOffset: sourceOffset,
       captures: captures,
-      covariantParameters: [
-        if (kind.isVirtual)
-          for (final (i, p) in parameters.indexed)
-            if (p.isCovariant) i,
-      ],
+      covariantParameters: {...declarationFlags, ...classFlags},
       isAbstract: kind.isVirtual && element.isAbstract,
       optionalPositional: parameters
           .where((p) => p.isOptionalPositional)
@@ -401,6 +589,13 @@ final class Bindings({final bool enableAssertions = false}) {
           if (p.isNamed) p.name!: p.isRequiredNamed,
       },
     );
+    if (declarationFlags.isNotEmpty) {
+      _declarationCovariance[function] = declarationFlags;
+    }
+    if (classFlags.isNotEmpty) _classCovariance[function] = classFlags;
+    if (classCovariance.bounds.isNotEmpty) {
+      _boundCovariance[function] = classCovariance.bounds;
+    }
     if (enclosing == null) _targets[element] = function;
     if (destination == null && parameters.any((p) => p.isOptional)) {
       _defaults[function] = {

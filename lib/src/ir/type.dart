@@ -360,6 +360,7 @@ final class FunctionType._(
         args.any((t) => t is CellType)) {
       throw ArgumentError('Invalid function type arguments.');
     }
+    if (typeParameters.isEmpty) return this;
     final environment = {
       for (final (i, parameter) in typeParameters.indexed) parameter: args[i],
     };

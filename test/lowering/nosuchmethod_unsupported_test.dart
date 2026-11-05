@@ -119,37 +119,39 @@ void main() {
     expect(sdk.OrdinaryChild().method(7), 7);
   });
 
-  test(
-    'foreign private obligations are guarded even with Object.noSuchMethod',
-    () {
-      final uri = declaration('PrivateContract').type.library;
-      for (final name in ['DefaultPrivate', 'CustomPrivate']) {
-        final cls = declaration(name);
-        expect(cls.unsupportedForwarders, {
+  test('foreign private obligations emit throwing bodies even with Object.noSuchMethod', () {
+    final uri = declaration('PrivateContract').type.library;
+    for (final name in ['DefaultPrivate', 'CustomPrivate']) {
+      final cls = declaration(name);
+      expect(cls.unsupportedForwarders, isEmpty);
+      expect(
+        cls.members.keys,
+        containsAll({
           method('_method', uri),
           (kind: FunctionKind.getter, name: '_property', privateLibrary: uri),
           (kind: FunctionKind.setter, name: '_property', privateLibrary: uri),
-        });
-        final lookup = program.lookupMember(cls.type, method('_method', uri));
-        expect(lookup.target, isNull);
-        expect(lookup.unsupportedForwarder, isTrue);
-        expect(
-          program
-              .lookupMember(cls.type, method('_method', cls.type.library))
-              .unsupportedForwarder,
-          isFalse,
-        );
-      }
-      expect(
-        () => private_sdk.invokePrivate(sdk.DefaultPrivate()),
-        throwsNoSuchMethodError,
+        }),
       );
+      final lookup = program.lookupMember(cls.type, method('_method', uri));
+      expect(lookup.target, same(cls.members[method('_method', uri)]));
+      expect(lookup.target!.privateSelectorLibrary, uri);
+      expect(lookup.unsupportedForwarder, isFalse);
       expect(
-        () => private_sdk.invokePrivate(sdk.CustomPrivate()),
-        throwsNoSuchMethodError,
+        program
+            .lookupMember(cls.type, method('_method', cls.type.library))
+            .unsupportedForwarder,
+        isFalse,
       );
-    },
-  );
+    }
+    expect(
+      () => private_sdk.invokePrivate(sdk.DefaultPrivate()),
+      throwsNoSuchMethodError,
+    );
+    expect(
+      () => private_sdk.invokePrivate(sdk.CustomPrivate()),
+      throwsNoSuchMethodError,
+    );
+  });
 
   test('a compatible foreign private concrete implementation still wins', () {
     final owner = declaration('PrivateImplementation');
@@ -182,7 +184,7 @@ void main() {
   });
 
   test(
-    'rejects foreign private forwarder replacing incompatible real body',
+    'foreign private forwarder replaces an incompatible real body',
     () async {
       final directory = Directory.systemTemp.createTempSync('dartc-forwarder-');
       addTearDown(() => directory.deleteSync(recursive: true));
@@ -190,21 +192,28 @@ void main() {
         ..writeAsStringSync('''
 import '${File(privateFixture).absolute.uri}';
 class Incompatible extends ChangedPrivateImplementation {}
-int invoke(Incompatible receiver) => invokeChangedPrivate(receiver);
+int invoke() => invokeChangedPrivate(Incompatible());
 ''');
-      await expectLater(
-        CheckedLibraries.read([file.path, privateFixture], Lowering.lower),
-        throwsA(
-          isA<UnsupportedError>()
-              .having(
-                (e) => e.message,
-                'feature',
-                contains(
-                  'inherited private noSuchMethod forwarder _implemented',
-                ),
-              )
-              .having((e) => e.message, 'source', contains('entry.dart:2:')),
-        ),
+      final lowered = await CheckedLibraries.read([
+        file.path,
+        privateFixture,
+      ], Lowering.lower);
+      final cls = lowered.classes.singleWhere(
+        (c) => c.type.name == 'Incompatible',
+      );
+      final selector = method(
+        '_implemented',
+        File(privateFixture).absolute.uri,
+      );
+      final replacement = lowered.lookupMember(cls.type, selector).target!;
+      expect(replacement.owner, cls.type);
+      expect(replacement.signature.parameters.single, ValueType.number);
+      final entry = lowered.functions.singleWhere(
+        (f) => f.target.name == 'invoke',
+      );
+      expect(
+        () => FixtureRunner(lowered, {}).run(entry, []),
+        throwsNoSuchMethodError,
       );
     },
   );
@@ -264,7 +273,7 @@ class C extends B {}
       );
     },
   );
-  test('foreign private replacement cannot reuse an incompatible synthetic ancestor', () async {
+  test('foreign private replacement does not reuse an incompatible synthetic ancestor', () async {
     final directory = Directory.systemTemp.createTempSync(
       'dartc-private-replacement-',
     );
@@ -274,20 +283,28 @@ class C extends B {}
 abstract class Contract { num _value([int x = 40]); }
 class Parent implements Contract { dynamic noSuchMethod(Invocation i) => 1; }
 abstract class Changed extends Parent { int _value([int x = 50]); }
+int call(Changed receiver) => receiver._value();
 ''');
     final child = File('${directory.path}/child.dart')
       ..writeAsStringSync(
-        "import 'parent.dart'; class Child extends Changed {}",
+        "import 'parent.dart'; class Child extends Changed {} int invoke() => call(Child());",
       );
-    await expectLater(
-      CheckedLibraries.read([child.path, parent.path], Lowering.lower),
-      throwsA(
-        isA<UnsupportedError>().having(
-          (e) => e.message,
-          'feature',
-          contains('inherited private noSuchMethod forwarder _value'),
-        ),
-      ),
+    final lowered = await CheckedLibraries.read([
+      child.path,
+      parent.path,
+    ], Lowering.lower);
+    final cls = lowered.classes.singleWhere((c) => c.type.name == 'Child');
+    final replacement = lowered
+        .lookupMember(cls.type, method('_value', parent.uri))
+        .target!;
+    expect(replacement.owner, cls.type);
+    expect(replacement.returnType, ValueType.integer);
+    final entry = lowered.functions.singleWhere(
+      (f) => f.target.name == 'invoke',
+    );
+    expect(
+      () => FixtureRunner(lowered, {}).run(entry, []),
+      throwsNoSuchMethodError,
     );
   });
 }

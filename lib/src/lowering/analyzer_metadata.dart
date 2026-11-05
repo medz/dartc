@@ -19,9 +19,13 @@ import 'package:analyzer/src/dart/constant/value.dart' as internal;
 // ignore: implementation_imports
 import 'package:analyzer/src/dart/element/element.dart' as internal;
 // ignore: implementation_imports
-import 'package:analyzer/src/error/correct_override.dart' as internal;
-// ignore: implementation_imports
 import 'package:analyzer/src/dart/element/member.dart' as internal;
+// ignore: implementation_imports
+import 'package:analyzer/src/dart/element/inheritance_manager3.dart'
+    as internal;
+// ignore: implementation_imports
+import 'package:analyzer/src/dart/element/non_covariant_type_parameter_position.dart'
+    as internal;
 
 /// Selected effective signatures that may require typed forwarding bodies.
 ///
@@ -30,46 +34,173 @@ import 'package:analyzer/src/dart/element/member.dart' as internal;
 /// Private obligations also exist without a nontrivial noSuchMethod override.
 /// An incompatible inherited private implementation needs a replacing body,
 /// not a fallback-only guard.
-List<({ExecutableElement member, Uri? privateLibrary, bool overridesConcrete})>
-noSuchMethodForwarderCandidates(InterfaceElement element) {
+List<
+  ({
+    ExecutableElement member,
+    Uri? privateLibrary,
+    bool overridesConcrete,
+    Set<int> additionalCovariance,
+    Iterable<ExecutableElement> covarianceContributors,
+  })
+>
+noSuchMethodForwarderCandidates(
+  InterfaceElement element, {
+  void Function(ExecutableElement, Uri?, Iterable<ExecutableElement>)?
+  checkCovariance,
+}) {
   if (element is! internal.InterfaceElementImpl) {
     throw UnsupportedError('Analyzer noSuchMethod metadata unavailable.');
   }
-  if (element is internal.ClassElementImpl && element.isAbstract) {
-    return const [];
-  }
+  final isAbstract = element is internal.ClassElementImpl && element.isAbstract;
+  if (isAbstract && checkCovariance == null) return const [];
   final interface = element.inheritanceManager.getInterface(element);
-  final inherited = element.inheritedConcreteMembers;
+  late final inherited = element.inheritedConcreteMembers;
   final result =
       <
         ({
           ExecutableElement member,
           Uri? privateLibrary,
           bool overridesConcrete,
+          Set<int> additionalCovariance,
+          Iterable<ExecutableElement> covarianceContributors,
         })
       >[];
   for (final entry in interface.map.entries) {
     final name = entry.key;
+    final declared = interface.declared[name];
+    late final contributors = <ExecutableElement>[
+      declared ?? entry.value,
+      ?interface.implemented[name],
+      ...?interface.overridden[name],
+    ];
+    if (checkCovariance != null && (declared == null || declared.isAbstract)) {
+      checkCovariance(declared ?? entry.value, name.libraryUri, contributors);
+    }
+    if (isAbstract) continue;
     final foreignPrivate =
         name.libraryUri != null && name.libraryUri != element.library.uri;
     if (!foreignPrivate && !interface.noSuchMethodForwarders.contains(name)) {
       continue;
     }
     final implementation = inherited[name];
+    // A legal covariant override can still have a narrower entry signature.
+    // Replacement needs function subtyping, not override legality (which erases
+    // covariant parameter types to Object?).
+    final overridesConcrete =
+        foreignPrivate &&
+        implementation != null &&
+        !implementation.isAbstract &&
+        !element.library.typeSystem.isSubtypeOf(
+          implementation.type,
+          entry.value.type,
+        );
+    // An incompatible real implementation still carries its old types/defaults.
+    // The combined interface is the exact replacement signature instead.
+    final selected = overridesConcrete
+        ? entry.value
+        : interface.implemented[name] ?? entry.value;
+    // Selected declaration covariance is read by target construction. Only a
+    // real replacement needs additional flags from the old implementation.
+    var additionalCovariance = const <int>{};
+    if (overridesConcrete) {
+      if (interface.implemented[name] case final implemented?) {
+        additionalCovariance = combinedCovariance(selected, [implemented])
+          ..removeAll({
+            for (final (i, p) in selected.formalParameters.indexed)
+              if (p.isCovariant) i,
+          });
+      }
+    }
     result.add((
-      member: interface.implemented[name] ?? entry.value,
+      member: selected,
       privateLibrary: name.libraryUri,
-      overridesConcrete:
-          foreignPrivate &&
-          implementation != null &&
-          !implementation.isAbstract &&
-          !internal.CorrectOverrideHelper(
-            typeSystem: element.library.typeSystem,
-            thisMember: implementation,
-          ).isCorrectOverrideOf(superMember: entry.value),
+      overridesConcrete: overridesConcrete,
+      additionalCovariance: additionalCovariance,
+      covarianceContributors: contributors,
     ));
   }
   return result;
+}
+
+/// Exact own/overridden contributors for a declared virtual implementation.
+/// Read at target construction so an early cached target already has its checks.
+Iterable<ExecutableElement> executableCovarianceContributors(
+  ExecutableElement member,
+) {
+  member = member.baseElement;
+  final owner = member.enclosingElement;
+  if (member is! internal.ElementImpl ||
+      owner is! internal.InterfaceElementImpl) {
+    throw UnsupportedError('Analyzer covariance contributors unavailable.');
+  }
+  return [
+    member,
+    ...?owner.inheritanceManager.getOverridden(
+      owner,
+      internal.Name(member.library.uri, member.lookupName!),
+    ),
+  ];
+}
+
+/// Combines parameter flags by positional index or named identity.
+/// The default flags are declaration covariance; callers may supply class flags.
+/// The result is mutable, including when the selected member has no parameters.
+Set<int> combinedCovariance(
+  ExecutableElement selected,
+  Iterable<ExecutableElement> contributors, {
+  Set<int> Function(ExecutableElement)? flags,
+}) {
+  final parameters = selected.formalParameters;
+  if (parameters.isEmpty) return <int>{};
+  final positionalCount = parameters.where((p) => p.isPositional).length;
+  final namedSlots = {
+    for (final (i, p) in parameters.indexed)
+      if (p.isNamed) p.name!: i,
+  };
+  final result = <int>{};
+  for (final member in contributors) {
+    final slots = flags?.call(member);
+    if (slots != null && slots.isEmpty) continue;
+    for (final (i, p) in member.formalParameters.indexed) {
+      if (!(slots?.contains(i) ?? p.isCovariant)) continue;
+      final slot = p.isNamed
+          ? namedSlots[p.name]
+          : (i < positionalCount ? i : null);
+      if (slot != null) result.add(slot);
+    }
+  }
+  return result;
+}
+
+typedef ClassCovariance = ({Set<int> parameters, Set<int> bounds});
+
+/// Compiler polarity checks in the original owner view, before specialization.
+/// A fresh visitor is required for every query: early success can leave its
+/// internal variance changed. No IR types, binders, or defaults are constructed.
+ClassCovariance executableClassCovariance(ExecutableElement member) {
+  member = member.baseElement;
+  final owner = member.enclosingElement;
+  if (owner is! InterfaceElement || owner.typeParameters.isEmpty) {
+    return (parameters: const {}, bounds: const {});
+  }
+  bool needsCheck(DartType? type) =>
+      type?.accept(
+        internal.NonCovariantTypeParameterPositionVisitor(
+          owner.typeParameters,
+          initialVariance: .contravariant,
+        ),
+      ) ??
+      false;
+  return (
+    parameters: {
+      for (final (i, p) in member.formalParameters.indexed)
+        if (needsCheck(p.type)) i,
+    },
+    bounds: {
+      for (final (i, p) in member.typeParameters.indexed)
+        if (needsCheck(p.bound)) i,
+    },
+  );
 }
 
 /// Exact transported defaults for the selected executable's own binder group.

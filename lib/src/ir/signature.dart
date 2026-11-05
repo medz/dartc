@@ -76,6 +76,9 @@ final class FunctionTarget(
   /// The entry and return protocol of the body.
   final FunctionKind kind = .function,
 
+  /// The originating library of a private virtual selector, if different from ownership.
+  final Uri? privateSelectorLibrary,
+
   /// The number of trailing positional parameters that may be omitted.
   int optionalPositional = 0,
   Map<String, bool> namedParameters = const {},
@@ -188,7 +191,9 @@ final class FunctionTarget(
     name: kind == .method && name == '-' && signature.parameters.isEmpty
         ? 'unary-'
         : name,
-    privateLibrary: name.startsWith('_') ? library : null,
+    privateLibrary: name.startsWith('_')
+        ? privateSelectorLibrary ?? library
+        : null,
   );
 
   /// The constructor whose body or initializer runs after factory redirection.
@@ -236,6 +241,12 @@ final class FunctionTarget(
           if (containsCovariantTypeParameter(type, ownerParameters)) i,
     });
 
+    if (privateSelectorLibrary != null &&
+        (!kind.isVirtual || !name.startsWith('_'))) {
+      throw ArgumentError(
+        'Private selector provenance requires a private virtual member.',
+      );
+    }
     if ((typeParameters.isNotEmpty &&
             (kind == .initializer ||
                 kind == .fieldInitializer ||

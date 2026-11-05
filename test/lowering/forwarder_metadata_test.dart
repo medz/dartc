@@ -99,14 +99,14 @@ void main() {
     },
   );
   test(
-    'foreign private and unmodeled-parent guards do not consume defaults',
+    'foreign private defaults lower while unmodeled-parent guards stay lazy',
     () async {
       final directory = Directory.systemTemp.createTempSync(
         'dartc-forwarder-lazy-',
       );
       addTearDown(() => directory.deleteSync(recursive: true));
       File('${directory.path}/imported.dart').writeAsStringSync('''
-abstract class PrivateContract { int _f([Symbol value = #_secret]); }
+abstract class PrivateContract { int _f([Symbol value = #public]); }
 abstract class PublicContract { int f([Symbol value = #_secret]); }
 class ImportedParent implements PublicContract {
   dynamic noSuchMethod(Invocation invocation) => 1;
@@ -124,8 +124,9 @@ class UnknownParent extends ImportedParent {}
       final foreign = program.classes.singleWhere(
         (c) => c.type.name == 'ForeignPrivate',
       );
+      expect(foreign.unsupportedForwarders, isEmpty);
       expect(
-        foreign.unsupportedForwarders,
+        foreign.members.keys,
         contains((
           kind: FunctionKind.method,
           name: '_f',

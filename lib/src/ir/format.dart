@@ -22,7 +22,11 @@ void writeFunction(
       .setter || .staticSetter => 'set ',
       _ => '',
     };
-    return '${t.library}::${t.owner == null ? '' : '${(ownerType ?? t.owner!).dartName}.'}$prefix${t.name}';
+    final provenance = t.privateSelectorLibrary;
+    final suffix = provenance != null && provenance != t.library
+        ? ' [private $provenance]'
+        : '';
+    return '${t.library}::${t.owner == null ? '' : '${(ownerType ?? t.owner!).dartName}.'}$prefix${t.name}$suffix';
   }
 
   String global(GlobalVariable slot) =>
