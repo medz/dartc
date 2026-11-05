@@ -4,6 +4,7 @@ import 'package:dartc/ir.dart';
 import 'bindings.dart';
 import 'checked_libraries.dart';
 import 'class_declaration.dart';
+import 'extension_declaration.dart';
 import 'function.dart';
 import 'global_declaration.dart';
 
@@ -45,6 +46,8 @@ abstract final class Lowering() {
             classes.add(lowerClass(unit, bindings, node, functions));
           case ast.EnumDeclaration():
             classes.add(lowerEnum(unit, bindings, node, functions));
+          case ast.ExtensionDeclaration():
+            lowerExtension(unit, bindings, node, functions);
           case ast.FunctionDeclaration(
             declaredFragment: final fragment?,
             :final functionExpression,

@@ -1,5 +1,7 @@
 ## Unreleased
 
+Ordinary extension declarations and direct method calls lower to existing static function targets with an explicit receiver and flattened extension/member type arguments. Implicit, explicit-override and lexical calls preserve analyzer selection, static receiver types, named/default arguments, null shortening and captured receiver/type environments. True static members and globals have qualified identities. Instance accessors, operators, updates, method tear-offs and implicit extension-call invocation remain explicit boundaries; extension types remain unsupported.
+
 Dynamic throw operands use the ordinary checked conversion to non-null Object before raising, preserving operand identity and evaluation order, catch/finally behavior, and rethrow stack identity. Null produces TypeError.
 
 Own abstract ordinary methods can now emit direct-super covariance wrappers when their complete instantiated signature equals the inherited implementation. Wrappers preserve their own defaults, named argument identity, owner/method generics, lexical super behavior and nSM replacement eligibility, while flattening direct wrapper chains. Interface-only covariance changes and unequal-signature semi-stubs remain guarded.

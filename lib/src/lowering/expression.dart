@@ -45,6 +45,8 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
             section,
             (e) => lowerExpression(context, e),
             cascadeReceiver: context.refined(receiver),
+            cascadeReceiverType: expression.target.staticType,
+            cascadeNullAware: expression.isNullAware,
           ).lower();
           if (context.current == null) return null;
         }
@@ -465,7 +467,8 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
             )
         when callee is MethodElement &&
                 callee.isStatic &&
-                isClassOrEnum(callee.enclosingElement) ||
+                (isClassOrEnum(callee.enclosingElement) ||
+                    callee.enclosingElement is ExtensionElement) ||
             expression is ast.MethodInvocation &&
                 callee is TopLevelFunctionElement:
       if (expression case ast.MethodInvocation(target: final receiver?)) {
@@ -476,7 +479,9 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           _ when prefix is PrefixElement => !prefix.imports.any(
             (i) => i.prefix?.isDeferred == true,
           ),
-          ast.Identifier(element: ClassElement() || EnumElement())
+          ast.Identifier(
+            element: ClassElement() || EnumElement() || ExtensionElement(),
+          )
               when callee is MethodElement =>
             receiver is! ast.PrefixedIdentifier || !receiver.isDeferred,
           _ => false,

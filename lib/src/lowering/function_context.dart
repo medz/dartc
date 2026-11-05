@@ -97,6 +97,28 @@ final class FunctionContext(
         : emit(InstantiateFunction(function, types));
   }
 
+  /// Calls the flattened extension ABI through ordinary argument binding.
+  Value? callExtension(
+    ExtensionApplication application,
+    Value receiver,
+    EvaluatedArguments args,
+    List<ValueType> memberTypes,
+  ) {
+    final target = application.executable.target;
+    return normal(
+      emit(
+        DirectCall(
+          target,
+          bindings.bind(target, (
+            positional: [receiver, ...args.positional],
+            named: args.named,
+          )),
+          typeArguments: [...application.typeArguments, ...memberTypes],
+        ),
+      ),
+    );
+  }
+
   /// Calls a resolved getter, setter or operator with its evaluated operands.
   Value? callPositionalMember(
     ExecutableElement? member,

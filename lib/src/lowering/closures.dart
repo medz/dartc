@@ -35,8 +35,9 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     ResolvedUnitResult unit,
     Bindings bindings,
     FunctionTarget root,
-    Iterable<ast.AstNode> regions,
-  ) {
+    Iterable<ast.AstNode> regions, {
+    ValueType? receiverType,
+  }) {
     _enableAssertions = bindings.enableAssertions;
     for (final region in regions) {
       region.accept(this);
@@ -51,7 +52,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     }
     for (final fn in functions.values) {
       ValueType slot(Element? e) {
-        if (e == null) return root.owner!;
+        if (e == null) return receiverType ?? root.owner!;
         final declared = switch (e) {
           VariableElement(:final type) => type,
           LocalFunctionElement(:final type) => type,
@@ -187,7 +188,8 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
             element is ExecutableElement &&
             element is! ConstructorElement &&
             !element.isStatic &&
-            isClassOrEnum(element.enclosingElement)) {
+            (isClassOrEnum(element.enclosingElement) ||
+                element.enclosingElement is ExtensionElement)) {
           _useReceiver();
         }
       case ast.ThisExpression() || ast.SuperExpression():

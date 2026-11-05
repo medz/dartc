@@ -19,7 +19,8 @@
 | 泛型实例、成员代入和协变检查 | 支持类类型参数、界限、嵌套实参、成员类型代入和泛型继承。实例保留实际类型实参，宽化静态引用后的字段写入、方法调用和方法提取仍执行协变检查。类体只保留一份，闭包捕获类型环境。见[泛型样本](../test/lowering/fixtures/generic_classes.dart)和[泛型工厂重定向样本](../test/lowering/fixtures/generic_redirect_factory.dart)。 |
 | 简单、增强及泛型枚举 | 复用类的常量存储和成员派发，支持 values、index、隐式 EnumName.name、默认/自定义 toString、字段、方法、运算符、工厂及模式；values 保留每项实际类型参数。具体 enum、Enum 及其类型参数界限支持显式 toString 调用与提取；通用 Object 接收者及 super.toString 仍待实现。带用户存储字段 `_name` 的 enum 因 analyzer 丢失原值而明确拒绝；同名 getter 不受此限制。混入及 Enum/EnumByName 的其他 SDK helper 待实现。见[枚举样本](../test/lowering/fixtures/enums.dart)。 |
 | 元数据注解 | 待实现。 |
-| mixin、mixin application、extension、extension type | 待实现。 |
+| 普通 extension | 声明与直接方法调用复用普通静态目标，接收者为显式首参数，扩展与方法类型参数按声明顺序展开。支持隐式选择、显式 override、词法调用、静态成员/变量，以及闭包捕获 this 与类型环境。非类、可空、record、函数和类型变量接收者无需伪造类。实例 accessor、运算符、更新、方法提取及隐式 call 调用仍明确拒绝；声明体可先按正确 ABI 发出。见[扩展样本](../test/lowering/fixtures/extension_methods.dart)。 |
+| mixin、mixin application、extension type | 待实现。 |
 | 构造器 assert initializer | 支持可配置的构造器断言，保持初始化列表顺序及抛错行为。默认关闭，使用 `enableAssertions: true` 启用。 |
 
 [构造样本](../test/lowering/fixtures/nominal/constructors.dart)和[分派、默认参数与私有成员样本](../test/lowering/fixtures/nominal/members.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/classes.md)。

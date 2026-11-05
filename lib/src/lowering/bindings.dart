@@ -8,10 +8,30 @@ import 'package:dartc/ir.dart';
 import 'analyzer_metadata.dart';
 import 'constant_safety.dart';
 
+/// Declaration-time static ABI, separate from the source callable signature.
+final class ExtensionExecutable(
+  final ExecutableElement declaration,
+  final ExtensionElement extension,
+  final FunctionTarget target,
+  final List<TypeParameterType> extensionParameters,
+  final FunctionType sourceSignature,
+  final ValueType? receiverType,
+) {
+  int get sourceParameterOffset => receiverType == null ? 0 : 1;
+}
+
+/// Call-site instantiation, never cached by declaration alone.
+final class ExtensionApplication(
+  final ExtensionExecutable executable,
+  final List<ValueType> typeArguments,
+  final ValueType receiverType,
+);
+
 /// Maps analyzer declarations and formal parameters to their IR identities.
 final class Bindings({final bool enableAssertions = false}) {
   final _constantSafety = ConstantSafety();
   final _targets = <ExecutableElement, FunctionTarget>{};
+  final _extensions = <ExecutableElement, ExtensionExecutable>{};
   final _classes = <InterfaceElement, ClassType>{};
   final _classElements = <ClassType, InterfaceElement>{};
   final _parameters = <TypeParameterElement, TypeParameterType>{};
@@ -533,6 +553,9 @@ final class Bindings({final bool enableAssertions = false}) {
     int? sourceOffset,
     Iterable<ValueType> captures = const [],
   }) {
+    if (element.enclosingElement is ExtensionElement) {
+      return extensionExecutable(element, unit, site)!.target;
+    }
     element = element.baseElement;
     final previous = enclosing == null ? _targets[element] : null;
     if (previous != null) return previous;
@@ -636,6 +659,122 @@ final class Bindings({final bool enableAssertions = false}) {
     return function;
   }
 
+  /// Returns an extension member's declaration ABI, or null for other owners.
+  ExtensionExecutable? extensionExecutable(
+    ExecutableElement element,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    element = element.baseElement;
+    final owner = element.enclosingElement;
+    if (owner is! ExtensionElement) return null;
+    if (_extensions[element] case final previous?) return previous;
+    final extensionElements = element.isStatic
+        ? const <TypeParameterElement>[]
+        : owner.typeParameters;
+    // Both groups must exist before converting dependent bounds/defaults.
+    registerTypeParameters(extensionElements);
+    registerTypeParameters(element.typeParameters);
+    final extensionParameters = bindTypeParameters(
+      extensionElements,
+      unit,
+      site,
+    );
+    bindTypeParameters(
+      element.typeParameters,
+      unit,
+      site,
+      defaultTemplates: executableTypeParameterDefaults(element),
+    );
+    final source = valueType(element.type, unit, site) as FunctionType;
+    final receiver = element.isStatic
+        ? null
+        : valueType(owner.extendedType, unit, site);
+    final function = FunctionTarget(
+      element.library.uri,
+      _extensionName(owner, element.name!, switch (element) {
+        GetterElement() => 'get',
+        SetterElement() => 'set',
+        MethodElement(name: '-', formalParameters: []) => 'unary',
+        _ => 'method',
+      }),
+      source.result,
+      [?receiver, ...source.parameters],
+      kind: !element.isStatic
+          ? .function
+          : switch (element) {
+              GetterElement() => .staticGetter,
+              SetterElement() => .staticSetter,
+              _ => .function,
+            },
+      typeParameters: [...extensionParameters, ...source.typeParameters],
+      optionalPositional: source.positionalCount - source.requiredPositional,
+      namedParameters: {
+        for (final entry in source.named.entries)
+          entry.key: entry.value.required,
+      },
+    );
+    final defaults = <int, Constant>{
+      for (final (i, parameter) in element.formalParameters.indexed)
+        if (parameter.isOptional)
+          i + (receiver == null ? 0 : 1): constantOf(parameter, unit, site),
+    };
+    _targets[element] = function;
+    _defaults[function] = defaults;
+    return _extensions[element] = ExtensionExecutable(
+      element,
+      owner,
+      function,
+      extensionParameters,
+      source,
+      receiver,
+    );
+  }
+
+  /// Resolves the selected member's extension arguments before canonicalizing it.
+  ExtensionApplication extensionApplication(
+    ExecutableElement selected,
+    ResolvedUnitResult unit,
+    ast.AstNode site, {
+    dart.DartType? receiverType,
+    ast.ExtensionOverride? override,
+    ExtensionElement? lexicalExtension,
+    bool nullAware = false,
+  }) {
+    final executable = extensionExecutable(selected, unit, site)!;
+    if (executable.receiverType == null) {
+      unsupported(
+        unit,
+        site,
+        'instance application of static extension member',
+      );
+    }
+    final arguments = extensionTypeArguments(
+      selected,
+      unit.libraryElement,
+      receiverType: receiverType,
+      override: override,
+      lexicalExtension: lexicalExtension,
+      nullAware: nullAware,
+    ).map((type) => valueType(type, unit, site)).toList();
+    return ExtensionApplication(
+      executable,
+      arguments,
+      substituteType(executable.receiverType!, {
+        for (final (i, parameter) in executable.extensionParameters.indexed)
+          parameter: arguments[i],
+      }),
+    );
+  }
+
+  String _extensionName(ExtensionElement owner, String name, String operation) {
+    final fragment = owner.firstFragment;
+    final identity =
+        owner.name ??
+        '${fragment.libraryFragment.source.uri}@${fragment.offset}';
+    return '<extension:$identity:$operation:$name>';
+  }
+
   /// Defaults supplied by an executable declaration.
   Map<int, Constant> defaults(FunctionTarget target) =>
       _defaults[target] ?? const {};
@@ -659,9 +798,12 @@ final class Bindings({final bool enableAssertions = false}) {
         ? classType(container, unit, declaration)
         : null;
     final type = valueType(element.type, unit, declaration);
+    final name = container is ExtensionElement
+        ? _extensionName(container, element.name!, 'field')
+        : element.name!;
     return GlobalVariable(
       element.library.uri,
-      element.name!,
+      name,
       type,
       owner: owner,
       isFinal: element.isFinal,
@@ -670,7 +812,7 @@ final class Bindings({final bool enableAssertions = false}) {
           ? null
           : FunctionTarget(
               element.library.uri,
-              '<initialize:${element.name}>',
+              '<initialize:$name>',
               type,
               const [],
               owner: owner,

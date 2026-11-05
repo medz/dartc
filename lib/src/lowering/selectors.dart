@@ -15,6 +15,8 @@ final class SelectorChain(
   final ast.Expression root,
   final Value? Function(ast.Expression) evaluate, {
   final Value? cascadeReceiver,
+  final dart.DartType? cascadeReceiverType,
+  final bool cascadeNullAware = false,
 }) {
   JumpTarget? _skipped;
 
@@ -42,10 +44,21 @@ final class SelectorChain(
     bool nullAware, {
     bool cascaded = false,
   }) {
+    final explicitOverride = expression is ast.ExtensionOverride;
+    if (expression is ast.ExtensionOverride) {
+      if (expression.importPrefix?.element case final PrefixElement prefix
+          when prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
+        unsupported(context.unit, expression, 'deferred extension override');
+      }
+      nullAware = nullAware || expression.isNullAware;
+      expression = expression.argumentList.arguments.single.argumentExpression;
+    }
     final value = cascaded
         ? cascadeReceiver
         : expression == null || expression is ast.SuperExpression
         ? context.receiver
+        : explicitOverride
+        ? evaluate(expression)
         : _visit(expression);
     if (value == null) return null;
     if (nullAware) {
@@ -87,6 +100,9 @@ final class SelectorChain(
       if (args == null) return null;
       final function = getFunction == null ? input : getFunction(input);
       if (function == null) return null;
+      if (callMethod?.enclosingElement is ExtensionElement) {
+        unsupported(context.unit, node, 'implicit extension call invocation');
+      }
       if (callMethod != null) {
         final method = context.bindings.target(callMethod, context.unit, node);
         return context.normal(
@@ -291,7 +307,9 @@ final class SelectorChain(
         :final argumentList,
         :final isNullAware,
       )
-          when !method.isStatic && isClassOrEnum(method.enclosingElement) =>
+          when !method.isStatic &&
+              (isClassOrEnum(method.enclosingElement) ||
+                  method.enclosingElement is ExtensionElement) =>
         (target, method.name!, method, argumentList, isNullAware),
       _ => (null, null, null, null, false),
     };
@@ -316,6 +334,61 @@ final class SelectorChain(
         name == 'call' &&
         ValueType.function.accepts(known.type.nonNullable)) {
       return known;
+    }
+    if (member is ExecutableElement &&
+        !member.isStatic &&
+        member.enclosingElement is ExtensionElement &&
+        coreEnumField(member) == null) {
+      if (member.library.isDartCore) {
+        unsupported(context.unit, node, 'core extension member $name');
+      }
+      if (member is! MethodElement || arguments == null || member.isOperator) {
+        unsupported(
+          context.unit,
+          node,
+          'extension accessor, operator or tear-off',
+        );
+      }
+      final override = receiver is ast.ExtensionOverride ? receiver : null;
+      final unqualified =
+          receiver == null &&
+          !(node is ast.MethodInvocation && node.isCascaded);
+      final lexical = unqualified
+          ? node
+                .thisOrAncestorOfType<ast.ExtensionDeclaration>()
+                ?.declaredFragment
+                ?.element
+          : null;
+      final lexicalReceiver = unqualified
+          ? switch (node.thisOrAncestorMatching(
+              (n) => n is ast.ClassDeclaration || n is ast.EnumDeclaration,
+            )) {
+              ast.ClassDeclaration(:final declaredFragment) =>
+                declaredFragment!.element.thisType,
+              ast.EnumDeclaration(:final declaredFragment) =>
+                declaredFragment!.element.thisType,
+              _ => null,
+            }
+          : null;
+      final application = context.bindings.extensionApplication(
+        member,
+        context.unit,
+        node,
+        receiverType:
+            receiver?.staticType ?? lexicalReceiver ?? cascadeReceiverType,
+        override: override,
+        lexicalExtension: lexical,
+        nullAware:
+            nullAware ||
+            cascadeNullAware && node is ast.MethodInvocation && node.isCascaded,
+      );
+      final converted = context.normal(
+        context.convert(known, application.receiverType),
+      );
+      if (converted == null) return null;
+      final args = context.arguments(arguments, evaluate);
+      if (args == null) return null;
+      return context.callExtension(application, converted, args, typeArguments);
     }
     if (receiver?.staticType is dart.DynamicType || known.type is DynamicType) {
       final invocation = getterArguments ?? arguments;
@@ -460,7 +533,7 @@ final class SelectorChain(
       PrefixElement() => !element.imports.any(
         (i) => i.prefix?.isDeferred == true,
       ),
-      ClassElement() || EnumElement() =>
+      ClassElement() || EnumElement() || ExtensionElement() =>
         receiver is! ast.PrefixedIdentifier || !receiver.isDeferred,
       _ => false,
     };

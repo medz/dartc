@@ -27,6 +27,58 @@ import 'package:analyzer/src/dart/element/inheritance_manager3.dart'
 import 'package:analyzer/src/dart/element/non_covariant_type_parameter_position.dart'
     as internal;
 
+// ignore: implementation_imports
+import 'package:analyzer/src/dart/resolver/applicable_extensions.dart'
+    as internal;
+
+/// Recovers only the already-selected extension's instance type arguments.
+/// Applicability inference is not generic-function default generation.
+List<DartType> extensionTypeArguments(
+  ExecutableElement selected,
+  LibraryElement library, {
+  DartType? receiverType,
+  ast.ExtensionOverride? override,
+  ExtensionElement? lexicalExtension,
+  bool nullAware = false,
+}) {
+  final owner = selected.baseElement.enclosingElement as ExtensionElement;
+  final parameters = owner.typeParameters;
+  if (override != null) {
+    if (override.element != owner ||
+        override.typeArgumentTypes?.length != parameters.length) {
+      throw UnsupportedError(
+        'Analyzer extension override metadata unavailable.',
+      );
+    }
+    return override.typeArgumentTypes!;
+  }
+  if (parameters.isEmpty) return const [];
+  if (lexicalExtension == owner) {
+    return [
+      for (final p in parameters) p.instantiate(nullabilitySuffix: .none),
+    ];
+  }
+  if (selected is internal.SubstitutedExecutableElementImpl &&
+      parameters.every(selected.substitution.map.containsKey)) {
+    return [for (final p in parameters) selected.substitution.map[p]!];
+  }
+  receiverType ??= lexicalExtension?.extendedType;
+  if (receiverType == null) {
+    throw UnsupportedError('Analyzer extension receiver metadata unavailable.');
+  }
+  final candidates = internal.ExtensionsExtensions([owner]).applicableTo(
+    targetLibrary: library,
+    targetType: nullAware
+        ? library.typeSystem.promoteToNonNull(receiverType)
+        : receiverType,
+  );
+  if (candidates.length != 1) {
+    throw UnsupportedError('Analyzer selected extension is not applicable.');
+  }
+  final substitution = candidates.single.substitution;
+  return [for (final p in parameters) substitution.map[p]!];
+}
+
 /// Selected effective signatures that may require typed forwarding bodies.
 ///
 /// Analyzer's marker includes inherited forwarders and some concrete overrides;

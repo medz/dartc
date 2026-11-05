@@ -22,8 +22,9 @@ final class FunctionLowering._(
   final ast.AstNode site,
   final ast.FunctionBody? body,
   final FunctionTarget _target,
-  ClosurePlan plan,
-) {
+  ClosurePlan plan, {
+  final int sourceParameterOffset = 0,
+}) {
   final FunctionContext context = .new(
     unit,
     bindings,
@@ -48,8 +49,12 @@ final class FunctionLowering._(
     void Function(FunctionContext)? initialize,
   }) {
     final target = bindings.target(element, unit, site);
+    final extension = bindings.extensionExecutable(element, unit, site);
     final plan = ClosurePlan()
-      ..prepare(unit, bindings, target, [...initializers, ?body]);
+      ..prepare(unit, bindings, target, [
+        ...initializers,
+        ?body,
+      ], receiverType: extension?.receiverType);
     output.add(
       FunctionLowering._(
         unit,
@@ -59,6 +64,7 @@ final class FunctionLowering._(
         body,
         target,
         plan,
+        sourceParameterOffset: extension?.sourceParameterOffset ?? 0,
       )._run(initialize: initialize),
     );
     _appendClosures(output, unit, bindings, plan);
@@ -132,7 +138,9 @@ final class FunctionLowering._(
     }
     context.current = context.addBlock(_target.parameterTypes);
     final inputs = context.current!.parameters;
-    if (_target.kind.hasReceiver) context.receiver = inputs.first;
+    if (_target.kind.hasReceiver || sourceParameterOffset != 0) {
+      context.receiver = inputs.first;
+    }
     if (local != null) {
       if (element != null) context.bindCapture(element!, inputs.first);
       for (final (i, capture) in local.captures.indexed) {
@@ -141,7 +149,7 @@ final class FunctionLowering._(
     }
     final parameters = element?.formalParameters ?? const [];
     for (final (i, parameter) in parameters.indexed) {
-      final input = inputs[i + _target.argumentOffset];
+      final input = inputs[i + _target.argumentOffset + sourceParameterOffset];
       context.declare(parameter, input.type, input);
     }
     initialize?.call(context);
