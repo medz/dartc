@@ -360,7 +360,9 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           : context.cast(input, context.typeOf(type.type!, type));
     case ast.ThrowExpression(:final expression):
       final exception = lowerExpression(context, expression);
-      if (exception != null) context.raise(exception);
+      if (exception != null) {
+        context.raise(context.convert(exception, .object));
+      }
       return null;
     case ast.RethrowExpression():
       final (exception, trace) = context.caught!;

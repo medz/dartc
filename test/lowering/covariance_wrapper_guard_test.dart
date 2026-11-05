@@ -42,57 +42,11 @@ abstract class B extends A implements J {}
 ''',
       'inherited noSuchMethod covariance transition f',
     ),
-    'own abstract redeclaration over real body needs an abstract wrapper': (
-      '''
-class R { Object? f([num x = 10]) => x; }
-abstract class RB extends R { Object? f([covariant num x = 20]); }
-class RC extends RB {}
-''',
-      'inherited concrete covariance transition f',
-    ),
-    'own abstract redeclaration in concrete class over real body needs wrapper':
-        (
-          '''
-class R { Object? f([num x = 10]) => x; }
-class RD extends R { Object? f([covariant num x = 30]); }
-''',
-          'inherited concrete covariance transition f',
-        ),
-    'named covariance is aligned by name rather than declaration order': (
-      '''
-class R { Object? f({num x = 10, num y = 11}) => x; }
-abstract class B extends R {
-  Object? f({num y = 21, covariant num x = 20});
-}
-class C extends B {}
-''',
-      'inherited concrete covariance transition f',
-    ),
     'new class covariance is distinct from inherited explicit covariance': (
       '''
 class R { Object? f([covariant num? x = 10]) => x; }
 abstract class B<T extends num> extends R { Object? f([T? x]); }
 class C extends B<int> {}
-''',
-      'inherited concrete covariance transition f',
-    ),
-    'specialized interface retains original class-covariance provenance': (
-      '''
-class R { Object? f([covariant int? x = 10]) => x; }
-abstract class J<T> { Object? f([T? x]); }
-abstract class B extends R implements J<int> { Object? f([int? x = 20]); }
-class C extends B {}
-''',
-      'inherited concrete covariance transition f',
-    ),
-    'specialized method bounds retain original class-covariance flags': (
-      '''
-class R { Object? f<U extends Object?>([num x = 10]) => x; }
-abstract class J<T> { Object? f<U extends T>([num x = 40]); }
-abstract class B extends R implements J<Object?> {
-  Object? f<U extends Object?>([num x = 20]);
-}
-class C extends B {}
 ''',
       'inherited concrete covariance transition f',
     ),
@@ -115,6 +69,14 @@ class A extends R implements J<int> {}
 ''',
           'inherited concrete covariance transition f',
         ),
+    'unequal covariance guard precedes private Symbol default lowering': (
+      """
+class R { Object? f([Object x = 0]) => x; }
+abstract class B extends R { Object? f([covariant Symbol x = #_selected]); }
+class C extends B {}
+""",
+      'inherited concrete covariance transition f',
+    ),
     'different function types do not bypass the covariance-wrapper guard': (
       '''
 class R { Object? f([num x = 10]) => x; }

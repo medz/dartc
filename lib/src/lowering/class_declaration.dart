@@ -206,14 +206,22 @@ IrClass _lowerNominal(
     functions.add(IrFunction(target, [entry]));
   }
   for (final forwarder in forwarders) {
+    final bodyTarget = bindings.superWrapperTarget(forwarder);
     members.removeWhere((member) => member.selector == forwarder.selector);
     members.add(forwarder);
     functions.add(
-      lowerNoSuchMethodForwarder(
-        bindings,
-        forwarder,
-        bindings.noSuchMethodBodyTarget(element, forwarder, unit, declaration),
-      ),
+      bodyTarget != null
+          ? lowerSuperForwarder(bindings, forwarder, bodyTarget)
+          : lowerNoSuchMethodForwarder(
+              bindings,
+              forwarder,
+              bindings.noSuchMethodBodyTarget(
+                element,
+                forwarder,
+                unit,
+                declaration,
+              ),
+            ),
     );
   }
   return IrClass(

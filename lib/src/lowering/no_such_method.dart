@@ -52,3 +52,30 @@ IrFunction lowerNoSuchMethodForwarder(
   }
   return IrFunction(target, [entry], defaults: bindings.defaults(target));
 }
+
+/// A covariance wrapper binds its own defaults, then forwards every argument.
+IrFunction lowerSuperForwarder(
+  Bindings bindings,
+  FunctionTarget target,
+  FunctionTarget bodyTarget,
+) {
+  final entry = Block(target.parameterTypes);
+  final arguments = entry.parameters.skip(target.argumentOffset).toList();
+  final ordered = List<Value>.of(arguments);
+  for (final parameter in bodyTarget.signature.named.entries) {
+    ordered[parameter.value.slot] =
+        arguments[target.signature.named[parameter.key]!.slot];
+  }
+  final result = entry.emit(
+    DirectCall(
+      bodyTarget,
+      [entry.parameters.first, ...ordered],
+      ownerType: target.owner!.asInstanceOf(bodyTarget.owner!),
+      typeArguments: target.typeParameters,
+    ),
+  );
+  entry.finish(
+    target.returnType == ValueType.never ? Unreachable(result) : Return(result),
+  );
+  return IrFunction(target, [entry], defaults: bindings.defaults(target));
+}

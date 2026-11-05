@@ -23,7 +23,7 @@
 | 空短路、空断言与级联 | 支持 `??`、可赋值位置的 `??=`、与 null 的比较，以及后缀 `!`。实例与 record 的空感知访问会短路同一条链上的成员、实参、索引、赋值和空断言，括号结束这条链。支持普通与空感知级联，接收者只求值一次；空接收者跳过所有级联段。见[级联样本](../test/lowering/fixtures/cascades.dart)。见[空安全样本](../test/lowering/fixtures/nullability.dart)。 |
 | 点简写 | 支持已表示类型的构造器、工厂、静态方法和显式静态 getter 的点简写。包含已表示的泛型类及枚举成员。见[点简写样本](../test/lowering/fixtures/dot_shorthand.dart)。 |
 | switch 表达式、模式赋值 | switch 表达式支持已表示模式及守卫。模式赋值可将嵌套 record、List 和 Map 解构到局部变量和参数，表达式结果为原右值。见[模式](patterns.md)。 |
-| throw、rethrow | 同步函数可抛出非空值，后续实参和更新表达式不再执行。catch 中的 rethrow 保留原异常对象和栈轨迹。 |
+| throw、rethrow | 同步函数可抛出非空值，后续实参和更新表达式不再执行。dynamic 操作数先按普通检查转换为非空 Object，非空值保持原身份，null 产生 TypeError；转换失败遵循当前 catch/finally。catch 中的 rethrow 保留原异常对象和栈轨迹。 |
 | await、泛型函数值实例化 | 支持泛型函数值的显式和上下文隐式实例化，保留类型实参及函数身份。await 待实现。 |
 
 复合赋值先读取左侧旧值，再计算右侧。例如 `x += (x = 3)` 把旧值加上 3。简单赋值、复合赋值和前缀增减的结果都是写入值，后缀增减的结果是旧值。短路跳过的操作数不会写入变量。见[赋值样本](../test/lowering/fixtures/updates.dart)和[SDK 行为对照](../test/lowering/lowering_test.dart)。
