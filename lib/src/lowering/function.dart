@@ -112,21 +112,9 @@ final class FunctionLowering._(
     Bindings bindings,
     FunctionTarget target,
     ast.Expression expression,
-  ) {
-    final plan = ClosurePlan()..prepare(unit, bindings, target, [expression]);
-    output.add(
-      FunctionLowering._(
-        unit,
-        bindings,
-        null,
-        expression,
-        null,
-        target,
-        plan,
-      )._run(expression: expression),
-    );
-    _appendClosures(output, unit, bindings, plan);
-  }
+  ) => appendInitializer(output, unit, bindings, target, expression, [
+    expression,
+  ], (context) => lowerExpression(context, expression));
 
   /// Appends an ordinary initializer from resolved initialization expressions.
   static void appendInitializer(
@@ -136,19 +124,22 @@ final class FunctionLowering._(
     FunctionTarget target,
     ast.AstNode site,
     Iterable<ast.AstNode> expressions,
-    void Function(FunctionContext) initialize,
+    Value? Function(FunctionContext) evaluate,
   ) {
     final plan = ClosurePlan()..prepare(unit, bindings, target, expressions);
+    final function = FunctionLowering._(
+      unit,
+      bindings,
+      null,
+      site,
+      null,
+      target,
+      plan,
+    );
     output.add(
-      FunctionLowering._(
-        unit,
-        bindings,
-        null,
-        site,
-        null,
-        target,
-        plan,
-      )._run(initialize: initialize),
+      function._run(
+        initialize: (context) => function._return(evaluate(context)),
+      ),
     );
     _appendClosures(output, unit, bindings, plan);
   }
@@ -185,7 +176,7 @@ final class FunctionLowering._(
         )._run(local: fn, expression: expression),
       );
     }
-    output.addAll(plan.syntheticFunctions);
+    output.addAll(plan.extensionTearOffs.values);
   }
 
   IrFunction _run({

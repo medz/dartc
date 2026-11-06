@@ -3,13 +3,13 @@ import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
 
-import 'no_such_method.dart';
 import 'assertion.dart';
 import 'bindings.dart';
 import 'expression.dart';
 import 'function.dart';
 import 'function_context.dart';
 import 'global_declaration.dart';
+import 'no_such_method.dart';
 
 /// Lowers a nominal declaration, optionally at a concrete mixin application.
 IrClass lowerClass(
@@ -50,6 +50,14 @@ IrClass lowerClass(
       : <FunctionTarget>[];
   final type =
       application?.type ?? bindings.classType(element, unit, declaration);
+  final fieldInitializers = [
+    for (final field in sourceMembers.whereType<ast.FieldDeclaration>())
+      if (!field.isStatic && !field.fields.isLate)
+        for (final variable in field.fields.variables)
+          if (variable.initializer case final expression?)
+            (variable, expression),
+  ];
+  final expressions = fieldInitializers.map((field) => field.$2);
   FunctionTarget memberTarget(ExecutableElement member, ast.AstNode site) {
     final source = bindings.target(member, unit, site);
     return application == null || member.isStatic
@@ -112,9 +120,7 @@ IrClass lowerClass(
       body,
       initializers: [
         if (ctor.isGenerative && ctor.redirectedConstructor == null)
-          for (final member in sourceMembers.whereType<ast.FieldDeclaration>())
-            if (!member.isStatic && !member.fields.isLate)
-              for (final v in member.fields.variables) ?v.initializer,
+          ...expressions,
         ...initializers,
       ],
       initialize: ctor.isFactory
@@ -122,7 +128,7 @@ IrClass lowerClass(
           : (context) => _initialize(
               context,
               declaration,
-              sourceMembers,
+              fieldInitializers,
               ctor,
               initializers,
             ),
@@ -137,13 +143,11 @@ IrClass lowerClass(
         bindings,
         initializer,
         declaration,
-        [
-          for (final member in sourceMembers.whereType<ast.FieldDeclaration>())
-            if (!member.isStatic && !member.fields.isLate)
-              for (final variable in member.fields.variables)
-                ?variable.initializer,
-        ],
-        (context) => _initializeFields(context, sourceMembers),
+        expressions,
+        (context) {
+          _initializeFields(context, fieldInitializers);
+          return null;
+        },
       );
     }
   } else if (element is ClassElement && element.isMixinApplication) {
@@ -268,7 +272,7 @@ IrClass lowerClass(
 void _initialize(
   FunctionContext context,
   ast.AstNode declaration,
-  List<ast.ClassMember> sourceMembers,
+  List<(ast.VariableDeclaration, ast.Expression)> fieldInitializers,
   ConstructorElement ctor,
   List<ast.ConstructorInitializer> initializers,
 ) {
@@ -319,7 +323,7 @@ void _initialize(
     invoke(element!, argumentList);
     return;
   }
-  _initializeFields(context, sourceMembers);
+  _initializeFields(context, fieldInitializers);
   if (context.current == null) return;
   for (final p
       in ctor.formalParameters.whereType<FieldFormalParameterElement>()) {
@@ -356,22 +360,20 @@ void _initialize(
   invoke(ctor.superConstructor!, superArguments, forwardSuper: true);
 }
 
-void _initializeFields(FunctionContext context, List<ast.ClassMember> members) {
-  for (final member in members.whereType<ast.FieldDeclaration>()) {
-    if (member.isStatic || member.fields.isLate) continue;
-    for (final variable in member.fields.variables) {
-      if (variable.initializer case final expression?) {
-        final value = lowerExpression(context, expression);
-        if (value == null) return;
-        _storeInitializedField(
-          context,
-          variable.declaredFragment!.element as FieldElement,
-          value,
-          variable,
-        );
-        if (context.current == null) return;
-      }
-    }
+void _initializeFields(
+  FunctionContext context,
+  List<(ast.VariableDeclaration, ast.Expression)> fields,
+) {
+  for (final (variable, expression) in fields) {
+    final value = lowerExpression(context, expression);
+    if (value == null) return;
+    _storeInitializedField(
+      context,
+      variable.declaredFragment!.element as FieldElement,
+      value,
+      variable,
+    );
+    if (context.current == null) return;
   }
 }
 

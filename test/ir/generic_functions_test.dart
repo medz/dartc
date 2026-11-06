@@ -7,6 +7,64 @@ TypeParameterType parameter(String name, [ValueType? bound]) =>
 
 void main() {
   final library = Uri.parse('memory:generic-functions');
+  test('call sites use the same type arguments they retain', () {
+    final t = parameter('T');
+    final function = FunctionTarget(library, 'f', t, [], typeParameters: [t]);
+    final value = FunctionConstant(function);
+    final owner = ClassType(library, 'C');
+    final receiver = Block([owner]).parameters.single;
+    final method = FunctionTarget(
+      library,
+      'm',
+      t,
+      [],
+      kind: .method,
+      owner: owner,
+      typeParameters: [t],
+    );
+    for (final build in <Value Function(Iterable<ValueType>)>[
+      (a) => FunctionCall(value, [], {}, a),
+      (a) => DirectCall(function, [], typeArguments: a),
+      (a) => InstanceCall(method, receiver, [], {}, null, a),
+      (a) => InstantiateFunction(value, a),
+      (a) => FunctionConstant(function, typeArguments: a),
+    ]) {
+      var reads = 0;
+      Iterable<ValueType> arguments() sync* {
+        yield ++reads == 1 ? ValueType.integer : ValueType.string;
+      }
+
+      final call = build(arguments());
+      final result = call.type;
+      expect(
+        result is FunctionType ? result.result : result,
+        ValueType.integer,
+      );
+      expect(reads, 1);
+    }
+  });
+
+  test('callable kinds validate the binders retained by their signature', () {
+    final t = parameter('T');
+    var reads = 0;
+    Iterable<TypeParameterType> binders() sync* {
+      if (++reads == 1) yield t;
+    }
+
+    expect(
+      () => FunctionTarget(
+        library,
+        'getValue',
+        t,
+        [],
+        kind: .staticGetter,
+        typeParameters: binders(),
+      ),
+      throwsArgumentError,
+    );
+    expect(reads, 1);
+  });
+
   test('generic equality and hashing are alpha equivalent', () {
     final t = parameter('T');
     final u = parameter('U');

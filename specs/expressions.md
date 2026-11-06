@@ -38,3 +38,5 @@
 动态执行对照只覆盖已表示的用户成员和明确实现的核心操作。未知导入/SDK 实现及尚未表示的 typed noSuchMethod forwarder 不会被误报为缺失成员；已表示转发使用普通函数体执行入口及返回检查。NoSuchMethodError 的类型与传播已对照；宿主诊断文本对自定义类型实参和私有 Symbol 的呈现仍有限，不保证与 VM 文本一致。
 
 NoSuchMethodError.withInvocation 的普通工厂调用与提取复用既有调用路径：构造返回新的错误对象，不触发接收者 noSuchMethod，也不提前读取用户 Invocation getter。支持类型判断、抛出、捕获和重新抛出的身份保持；该工厂支持不代表完整原生 Error 实例 API 或诊断文本与 VM 完全一致。
+
+动态调用 `g<String>('bad')` 遗漏必需命名实参时，传给 `noSuchMethod` 的 Invocation 应保留显式类型实参 `String`。在同一份 `shapeBeforeBounds` 样本上，macOS ARM64 的 Dart SDK 3.13.7 JIT 返回 111，SDK AOT 返回 101。IR 保留显式类型实参，结果为 111。对照使用 SDK 显式构造的 Invocation 和同一接收者的 `noSuchMethod`。[样本](../test/lowering/fixtures/dynamic_dispatch.dart)、[Invocation.typeArguments](https://api.dart.dev/dart-core/Invocation/typeArguments.html)。

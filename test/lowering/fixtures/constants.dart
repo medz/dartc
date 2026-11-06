@@ -64,6 +64,10 @@ const listConstant = <int>[3, 1, 2];
 const setConstant = <int>{3, 1, 2};
 const mapConstant = <int, int>{3: 30, 1: 10, 2: 20};
 
+bool importedConstructorAlias() =>
+    identical(privateIntMaker, privateMaker<int, String>) &&
+    !identical(privateIntMaker, privateMaker<int, bool>);
+
 int collectionTypes() {
   final Object list = listConstant;
   final Object set = setConstant;

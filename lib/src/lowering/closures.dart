@@ -22,16 +22,18 @@ final class LocalClosure(
 /// Resolves captures through intervening functions before their SSA graphs are built.
 final class ClosurePlan() extends GeneralizingAstVisitor<void> {
   final functions = <Element, LocalClosure>{};
-  final syntheticFunctions = <IrFunction>[];
+  final extensionTearOffs = <(FunctionTarget, ast.AstNode), IrFunction>{};
 
   /// Adapts a static extension target without inventing a virtual receiver.
   FunctionTarget extensionTearOff(
     Bindings bindings,
     FunctionTarget enclosing,
     ExtensionApplication application,
-    int offset,
+    ast.AstNode site,
     List<ValueType> defaultTemplates,
   ) {
+    final declaration = (enclosing, site);
+    if (extensionTearOffs[declaration] case final body?) return body.target;
     final executable = application.executable;
     // Extraction may occur inside this same method's body. Reuse capture-free
     // substitution, but always freshen its method binders.
@@ -46,15 +48,11 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
       signature.parameters,
       kind: .closure,
       enclosing: enclosing,
-      sourceOffset: offset,
+      sourceOffset: site.offset,
       captures: [application.receiverType],
       typeParameters: signature.typeParameters,
-      optionalPositional:
-          signature.positionalCount - signature.requiredPositional,
-      namedParameters: {
-        for (final entry in signature.named.entries)
-          entry.key: entry.value.required,
-      },
+      optionalPositional: signature.optionalPositional,
+      namedParameters: signature.namedParameters,
     );
     final entry = Block(target.parameterTypes);
     final result = entry.emit(
@@ -70,15 +68,13 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     entry.finish(
       result.type == ValueType.never ? Unreachable(result) : Return(result),
     );
-    syntheticFunctions.add(
-      IrFunction(
-        target,
-        [entry],
-        defaults: {
-          for (final entry in bindings.defaults(executable.target).entries)
-            entry.key - executable.sourceParameterOffset: entry.value,
-        },
-      ),
+    extensionTearOffs[declaration] = IrFunction(
+      target,
+      [entry],
+      defaults: {
+        for (final entry in bindings.defaults(executable.target).entries)
+          entry.key - executable.sourceParameterOffset: entry.value,
+      },
     );
     return target;
   }

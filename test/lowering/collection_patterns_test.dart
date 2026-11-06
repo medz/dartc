@@ -1,3 +1,4 @@
+import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
@@ -7,6 +8,17 @@ void main() {
   late FixtureComparison fixture;
   setUpAll(() async {
     fixture = await FixtureComparison.load('collection_patterns');
+  });
+
+  test('sublist preserves an omitted end and an explicitly passed null', () {
+    fixture.compare('sublistArguments', [], sdk.sublistArguments);
+    final function = fixture.program.functions.singleWhere(
+      (f) => f.target.name == 'sublistArguments',
+    );
+    final calls = function.blocks
+        .expand((b) => b.instructions)
+        .whereType<ListSublist>();
+    expect(calls.map((call) => call.inputs.length), [2, 3, 3]);
   });
 
   for (final (name, function, inputs)

@@ -109,8 +109,7 @@ void lowerSwitchStatement(
             if (context.current != null) reach(body, bindings);
           });
         case ast.SwitchCase(:final expression):
-          final constant = context.bindings.constantValue(
-            expression.computeConstantValue()?.value,
+          final constant = context.bindings.constantExpression(
             context.unit,
             expression,
           );

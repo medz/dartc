@@ -7,6 +7,20 @@ void main() {
       TypeParameterType(name)
         ..initializeBound(bound ?? ValueType.object.nullable);
 
+  test('a declaration uses its own type parameters as its open arguments', () {
+    final t = parameter('T');
+    for (final declare in [ClassType.new, ClassType.declare]) {
+      var reads = 0;
+      Iterable<TypeParameterType> parameters() sync* {
+        if (++reads != 1) throw StateError('Type parameters read twice');
+        yield t;
+      }
+
+      final type = declare(library, 'C', typeParameters: parameters());
+      expect(type.typeParameters.single, same(t));
+      expect(type.typeArguments.single, same(t));
+    }
+  });
   test(
     'type variables preserve identity and do not accept bound inhabitants',
     () {

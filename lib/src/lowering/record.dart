@@ -18,11 +18,7 @@ Value? lowerRecord(
   Value? Function(ast.Expression) evaluate,
 ) {
   if (literal.isConst) {
-    return context.bindings.constantValue(
-      literal.computeConstantValue()?.value,
-      context.unit,
-      literal,
-    );
+    return context.bindings.constantExpression(context.unit, literal);
   }
   final type = context.typeOf(literal.staticType!, literal) as RecordType;
   final fields = List<Value?>.filled(type.fields.length, null);

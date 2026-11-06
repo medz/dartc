@@ -117,9 +117,9 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       unsupported(unit, expression, 'dot shorthand property');
     case ast.FunctionReference(:final function, :final typeArgumentTypes):
       final value = lowerExpression(context, function);
-      return value == null
-          ? null
-          : context.instantiateFunction(value, typeArgumentTypes, expression);
+      if (value == null) return null;
+      return context.bindings.tryConstantExpression(unit, expression) ??
+          context.instantiateFunction(value, typeArgumentTypes, expression);
     case ast.FunctionExpression():
       return context.close(expression);
     case ast.SimpleIdentifier(element: final LocalFunctionElement local):
@@ -149,16 +149,16 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
     case ast.ThisExpression():
       return context.receiver!;
     case ast.ImplicitCallReference(
-      :final expression,
+      expression: final operand,
       :final element,
       :final typeArgumentTypes,
     ):
-      final receiver = lowerExpression(context, expression);
+      final receiver = lowerExpression(context, operand);
       if (receiver == null) return null;
       final application = context.extensionApplication(
         element,
         expression,
-        receiver: expression,
+        receiver: operand,
       );
       if (application != null) {
         final checked = context.memberReceiver(receiver, application);
@@ -260,11 +260,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           constructorName: ast.ConstructorName(element: final ctor),
         ):
       if (isConst) {
-        return context.bindings.constantValue(
-          expression.computeConstantValue()?.value,
-          unit,
-          expression,
-        );
+        return context.bindings.constantExpression(unit, expression);
       }
       if (ctor is! ConstructorElement) {
         unsupported(unit, expression, 'dot shorthand constructor');
@@ -313,11 +309,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
             : Construct(target, bound, instantiatedType: instanceType),
       );
     case ast.SymbolLiteral():
-      return context.bindings.constantValue(
-        expression.computeConstantValue()?.value,
-        unit,
-        expression,
-      );
+      return context.bindings.constantExpression(unit, expression);
     case ast.BooleanLiteral(:final value):
       return Constant.boolean(value);
     case ast.IntegerLiteral():

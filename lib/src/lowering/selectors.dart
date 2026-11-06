@@ -5,6 +5,7 @@ import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
+import 'core_member.dart';
 import 'function_context.dart';
 import 'operators.dart';
 import 'record.dart';
@@ -525,8 +526,8 @@ final class SelectorChain(
       final args = context.arguments(arguments, evaluate);
       if (args == null) return null;
       if (args.named.isEmpty) {
-        final operation = coreCollectionOperation(
-          member.name!,
+        final operation = lowerCoreCollectionMember(
+          member,
           known,
           args.positional,
         );

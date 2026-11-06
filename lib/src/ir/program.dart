@@ -101,14 +101,7 @@ final class IrProgram(
         receiver.asInstanceOf(member.owner!) == null) {
       throw ArgumentError('Incompatible dispatch receiver.');
     }
-    final selector = member.selector;
-    for (ClassType? type = receiver; type != null; type = type.superclass) {
-      final definition = _definitions[type.declaration];
-      if (definition == null) return null;
-      final target = definition.members[selector];
-      if (target != null && !target.isAbstract) return target;
-    }
-    return null;
+    return lookupMember(receiver, member.selector).target;
   }
 
   /// Looks up a selector without a statically resolved declaration.
@@ -207,8 +200,10 @@ final class IrProgram(
       throw ArgumentError('Repeated class.');
     }
     final names = <(Uri, ClassType?, FunctionKind, String, Uri?)>{};
-    final locals = <(FunctionTarget, int)>{};
     final bodies = {for (final f in this.functions) f.target};
+    if (bodies.length != this.functions.length) {
+      throw ArgumentError('Repeated callable body.');
+    }
     final fieldInitializers = <FunctionTarget>{};
     for (final c in this.classes) {
       for (final field in c.fields) {
@@ -247,8 +242,8 @@ final class IrProgram(
         throw ArgumentError('Body belongs to an undeclared class.');
       }
       if (t.enclosing case final outer?) {
-        if (!bodies.contains(outer) || !locals.add((outer, t.sourceOffset!))) {
-          throw ArgumentError('Invalid lexical function declaration.');
+        if (!bodies.contains(outer)) {
+          throw ArgumentError('Missing enclosing function body.');
         }
       } else if (!names.add((
         t.library,

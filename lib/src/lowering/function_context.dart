@@ -1,18 +1,12 @@
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart' as ast;
-import 'package:analyzer/dart/ast/ast.dart'
-    show
-        AstNode,
-        FunctionExpression,
-        ArgumentList,
-        Expression,
-        VariableDeclaration;
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart' show DartType;
 import 'package:dartc/ir.dart';
 
 import 'analyzer_metadata.dart';
 import 'bindings.dart';
+import 'core_member.dart';
 import 'closures.dart';
 
 /// The open control-flow graph and local bindings for one function.
@@ -34,18 +28,17 @@ final class FunctionContext(
   Value? receiver;
 
   /// Resolves [type] in the same declaration table as the rest of the program.
-  ValueType typeOf(DartType type, AstNode site) =>
+  ValueType typeOf(DartType type, ast.AstNode site) =>
       bindings.valueType(type, unit, site);
 
   /// Converts the analyzer's resolved explicit or inferred invocation arguments.
-  List<ValueType> typeArguments(Iterable<DartType>? types, AstNode site) => [
-    for (final type in types ?? const <DartType>[]) typeOf(type, site),
-  ];
+  List<ValueType> typeArguments(Iterable<DartType>? types, ast.AstNode site) =>
+      [for (final type in types ?? const <DartType>[]) typeOf(type, site)];
 
   /// Checks each argument immediately, before evaluating the following argument.
   EvaluatedArguments? arguments(
-    ArgumentList? arguments,
-    Value? Function(Expression) evaluate, {
+    ast.ArgumentList? arguments,
+    Value? Function(ast.Expression) evaluate, {
     Map<FormalParameterElement, Value> forwarded = const {},
   }) => evaluateArguments(
     arguments,
@@ -57,8 +50,8 @@ final class FunctionContext(
 
   /// Evaluates unresolved arguments without checking a guessed parameter type.
   EvaluatedArguments? dynamicArguments(
-    ArgumentList? arguments,
-    Value? Function(Expression) evaluate,
+    ast.ArgumentList? arguments,
+    Value? Function(ast.Expression) evaluate,
   ) => evaluateArguments(
     arguments,
     evaluate,
@@ -93,7 +86,7 @@ final class FunctionContext(
   Value instantiateFunction(
     Value function,
     Iterable<DartType>? arguments,
-    AstNode site,
+    ast.AstNode site,
   ) {
     final types = typeArguments(arguments, site);
     return types.isEmpty
@@ -104,7 +97,7 @@ final class FunctionContext(
   /// Resolves a selected extension using its source receiver, not an IR type.
   ExtensionApplication? extensionApplication(
     ExecutableElement? member,
-    AstNode site, {
+    ast.AstNode site, {
     ast.Expression? receiver,
     DartType? receiverType,
     bool unqualified = false,
@@ -182,14 +175,14 @@ final class FunctionContext(
   Value bindExtension(
     ExtensionApplication application,
     Value receiver,
-    AstNode site,
+    ast.AstNode site,
   ) => emit(
     MakeClosure(
       _closures.extensionTearOff(
         bindings,
         target,
         application,
-        site.offset,
+        site,
         typeArguments(
           extensionTearOffDefaults(application.executable.declaration),
           site,
@@ -226,7 +219,7 @@ final class FunctionContext(
     ExecutableElement? member,
     Value receiver,
     List<Value> args,
-    AstNode site, {
+    ast.AstNode site, {
     bool direct = false,
     ExtensionApplication? extension,
   }) {
@@ -277,7 +270,7 @@ final class FunctionContext(
     if (member.library.isDartCore &&
         (!direct || target.library.toString() == 'dart:core') &&
         !coreRuntimeMember(member)) {
-      final operation = coreCollectionOperation(member.name!, receiver, args);
+      final operation = lowerCoreCollectionMember(member, receiver, args);
       if (operation != null) return normal(emit(operation));
     }
     return normal(
@@ -405,7 +398,7 @@ final class FunctionContext(
   }
 
   /// Reserves late storage without evaluating or reading its lazy captures.
-  void declareLate(VariableDeclaration declaration, ValueType type) {
+  void declareLate(ast.VariableDeclaration declaration, ValueType type) {
     final variable = declaration.declaredFragment!.element;
     final initializer = declaration.initializer == null
         ? null
@@ -431,7 +424,7 @@ final class FunctionContext(
   }
 
   /// Instantiates a function using this activation's values and shared cells.
-  Value close(FunctionExpression syntax) =>
+  Value close(ast.FunctionExpression syntax) =>
       _close(_closures.functions[syntax.declaredFragment!.element]!);
 
   Value _close(LocalClosure fn) => emit(

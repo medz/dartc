@@ -64,31 +64,6 @@ void main() {
   });
 
   test(
-    'resolved core operation recognition preserves optional argument count',
-    () {
-      final list = NewCollection(CoreTypes.listOf(ValueType.integer));
-      final map = NewCollection(
-        CoreTypes.mapOf(ValueType.string, ValueType.integer),
-      );
-      expect(
-        coreCollectionOperation('sublist', list, [zero])!.inputs.length,
-        2,
-      );
-      expect(
-        coreCollectionOperation('sublist', list, [zero, one])!.inputs.length,
-        3,
-      );
-      expect(
-        coreCollectionOperation('containsKey', map, [zero]),
-        isA<MapContainsKey>(),
-      );
-      expect(coreCollectionOperation('sublist', map, [zero]), isNull);
-      expect(coreCollectionOperation('sublist', list, []), isNull);
-      expect(coreCollectionOperation('containsKey', list, [zero]), isNull);
-    },
-  );
-
-  test(
     'sublist returns a fresh growable list and does not mutate its source',
     () {
       expect(

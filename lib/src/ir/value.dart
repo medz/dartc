@@ -75,21 +75,31 @@ final class ObjectHashCode(
 }
 
 /// A canonical tear-off of a top-level function, static method or constructor.
-final class FunctionConstant(
+final class FunctionConstant._(
   /// The referenced declaration, including the source factory for a redirect.
-  final FunctionTarget target, {
+  final FunctionTarget target,
   final ClassType? ownerType,
-  Iterable<ValueType>? typeArguments,
+  final List<ValueType>? typeArguments,
 
   /// The generic callable view of a constructor alias, including its owner template.
   final FunctionType? constructorSignature,
 
   /// The nominal identity retained by a non-proper generic constructor alias.
   final (Uri, String)? constructorAlias,
-}) extends Constant {
-  final List<ValueType>? typeArguments = typeArguments == null
-      ? null
-      : .unmodifiable(typeArguments);
+) extends Constant {
+  new(
+    FunctionTarget target, {
+    ClassType? ownerType,
+    Iterable<ValueType>? typeArguments,
+    FunctionType? constructorSignature,
+    (Uri, String)? constructorAlias,
+  }) : this._(
+         target,
+         ownerType,
+         typeArguments == null ? null : .unmodifiable(typeArguments),
+         constructorSignature,
+         constructorAlias,
+       );
   this
     : super(
         typeArguments == null
@@ -127,11 +137,8 @@ final class FunctionConstant(
         expected.result,
         expected.parameters,
         typeParameters: signature.typeParameters,
-        optionalPositional:
-            expected.positionalCount - expected.requiredPositional,
-        namedParameters: {
-          for (final e in expected.named.entries) e.key: e.value.required,
-        },
+        optionalPositional: expected.optionalPositional,
+        namedParameters: expected.namedParameters,
       );
       if (signature != genericExpected) {
         throw ArgumentError(
@@ -499,23 +506,9 @@ final class BindMethod(
   final bool direct = false,
   final ClassType? ownerType,
 }) extends Instruction {
-  this
-    : super(
-        method.signatureFor(
-          ownerType ?? _classReceiver(receiver.type, method.owner),
-        ),
-      ) {
-    if (method.kind != .method ||
-        _classReceiver(
-              receiver.type,
-              method.owner,
-            ).asInstanceOf(method.owner!) ==
-            null ||
-        direct && method.isAbstract) {
+  this : super(_memberSignature(method, receiver, ownerType)) {
+    if (method.kind != .method || direct && method.isAbstract) {
       throw ArgumentError('Invalid method tear-off.');
-    }
-    if (ownerType != null && !ownerType!.accepts(receiver.type)) {
-      throw ArgumentError('Static method view cannot accept the receiver.');
     }
   }
   @override
@@ -523,13 +516,14 @@ final class BindMethod(
 }
 
 /// Applies explicit or inferred type arguments to a generic function value.
-final class InstantiateFunction(
+final class InstantiateFunction._(
   final Value function,
-  Iterable<ValueType> typeArguments,
+  final List<ValueType> typeArguments,
 ) extends Instruction {
-  final List<ValueType> typeArguments = .unmodifiable(typeArguments);
+  new(Value function, Iterable<ValueType> typeArguments)
+    : this._(function, .unmodifiable(typeArguments));
   this : super(_functionSignature(function).instantiate(typeArguments)) {
-    if (_functionSignature(function).typeParameters.isEmpty) {
+    if (typeArguments.isEmpty) {
       throw ArgumentError('Expected a generic function value.');
     }
   }
@@ -538,37 +532,46 @@ final class InstantiateFunction(
 }
 
 FunctionType _functionSignature(Value function) => switch (function.type) {
-  FunctionType() => function.type as FunctionType,
+  final FunctionType type => type,
   _ => throw ArgumentError('Expected a non-nullable function signature.'),
 };
 
 /// Invokes a function value with the supplied arguments and the destination's defaults.
-final class FunctionCall(
+final class FunctionCall._(
   /// The evaluated function value.
   final Value function,
-  Iterable<Value> positional, [
-  Map<String, Value> named = const {},
-  Iterable<ValueType> typeArguments = const [],
-]) extends Instruction {
-  final List<ValueType> typeArguments = .unmodifiable(typeArguments);
 
   /// Supplied positional arguments.
-  final List<Value> positional = .unmodifiable(positional);
+  final List<Value> positional,
 
   /// Supplied named arguments.
-  final Map<String, Value> named = .unmodifiable(named);
-  this : super(_functionSignature(function).instantiate(typeArguments).result) {
-    _checkCall(
-      _functionSignature(function).instantiate(typeArguments),
-      this.positional,
-      this.named,
-    );
-  }
+  final Map<String, Value> named,
+  final List<ValueType> typeArguments,
+) extends Instruction {
+  new(
+    Value function,
+    Iterable<Value> positional, [
+    Map<String, Value> named = const {},
+    Iterable<ValueType> typeArguments = const [],
+  ]) : this._(
+         function,
+         .unmodifiable(positional),
+         .unmodifiable(named),
+         .unmodifiable(typeArguments),
+       );
+  this
+    : super(
+        _callResult(
+          _functionSignature(function).instantiate(typeArguments),
+          positional,
+          named,
+        ),
+      );
   @override
   Iterable<Value> get inputs => [function, ...positional, ...named.values];
 }
 
-void _checkCall(
+ValueType _callResult(
   FunctionType signature,
   List<Value> positional,
   Map<String, Value> named,
@@ -579,6 +582,7 @@ void _checkCall(
       throw ArgumentError('Incompatible argument for ${signature.dartName}.');
     }
   }
+  return signature.result;
 }
 
 /// Reads a declared global slot, lazily running its initializer when unbound.
@@ -629,12 +633,7 @@ final class LoadField(
   /// The object containing the slot.
   final Value receiver,
 ) extends Instruction {
-  this : super(field.typeFor(_classReceiver(receiver.type, field.owner))) {
-    if (_classReceiver(receiver.type, field.owner).asInstanceOf(field.owner) ==
-        null) {
-      throw ArgumentError('Incompatible field receiver.');
-    }
-  }
+  this : super(field.typeFor(_classReceiver(receiver.type, field.owner)));
   @override
   Iterable<Value> get inputs => [receiver];
 }
@@ -643,54 +642,48 @@ final class LoadField(
 ///
 /// The implementation supplies its own optional defaults and performs its
 /// parameter type checks before entering the body.
-final class InstanceCall(
+final class InstanceCall._(
   /// The statically resolved member and signature.
   final FunctionTarget member,
 
   /// The evaluated dispatch receiver.
   final Value receiver,
-  Iterable<Value> positional, [
-  Map<String, Value> named = const {},
-  final ClassType? ownerType,
-  Iterable<ValueType> typeArguments = const [],
-]) extends Instruction {
-  final List<ValueType> typeArguments = .unmodifiable(typeArguments);
 
   /// Explicit positional arguments.
-  final List<Value> positional = .unmodifiable(positional);
+  final List<Value> positional,
 
   /// Explicit named arguments, in their source order.
-  final Map<String, Value> named = .unmodifiable(named);
+  final Map<String, Value> named,
+  final ClassType? ownerType,
+  final List<ValueType> typeArguments,
+) extends Instruction {
+  new(
+    FunctionTarget member,
+    Value receiver,
+    Iterable<Value> positional, [
+    Map<String, Value> named = const {},
+    ClassType? ownerType,
+    Iterable<ValueType> typeArguments = const [],
+  ]) : this._(
+         member,
+         receiver,
+         .unmodifiable(positional),
+         .unmodifiable(named),
+         ownerType,
+         .unmodifiable(typeArguments),
+       );
   this
     : super(
-        member
-            .signatureFor(
-              ownerType ?? _classReceiver(receiver.type, member.owner),
-            )
-            .instantiate(typeArguments)
-            .result,
-      ) {
-    if (!member.kind.isVirtual ||
-        _classReceiver(
-              receiver.type,
-              member.owner,
-            ).asInstanceOf(member.owner!) ==
-            null) {
-      throw ArgumentError('Incompatible dispatch receiver.');
-    }
-    if (ownerType != null && !ownerType!.accepts(receiver.type)) {
-      throw ArgumentError('Static member view cannot accept the receiver.');
-    }
-    _checkCall(
-      member
-          .signatureFor(
-            ownerType ?? _classReceiver(receiver.type, member.owner),
-          )
-          .instantiate(typeArguments),
-      this.positional,
-      this.named,
-    );
-  }
+        _callResult(
+          _memberSignature(
+            member,
+            receiver,
+            ownerType,
+          ).instantiate(typeArguments),
+          positional,
+          named,
+        ),
+      );
 
   @override
   Iterable<Value> get inputs sync* {
@@ -698,6 +691,23 @@ final class InstanceCall(
     yield* positional;
     yield* named.values;
   }
+}
+
+FunctionType _memberSignature(
+  FunctionTarget member,
+  Value receiver,
+  ClassType? ownerType,
+) {
+  if (!member.kind.isVirtual) {
+    throw ArgumentError('Expected an instance member.');
+  }
+  final actual = _classReceiver(receiver.type, member.owner);
+  if (ownerType == null) return member.signatureFor(actual);
+  if (!ownerType.accepts(receiver.type) ||
+      actual.asInstanceOf(member.owner!) == null) {
+    throw ArgumentError('Incompatible dispatch receiver.');
+  }
+  return member.signatureFor(ownerType);
 }
 
 /// Dispatches an unresolved selector on a runtime value.
@@ -791,7 +801,8 @@ final class Construct(
   Iterable<Value> arguments, {
   ClassType? instantiatedType,
 }) extends Instruction {
-  final ClassType instantiatedType = instantiatedType ?? initializer.owner!;
+  /// The instance type produced by this constructor invocation.
+  ClassType get instantiatedType => type as ClassType;
   @override
   final List<Value> inputs = .unmodifiable(arguments);
 
@@ -831,8 +842,6 @@ final class StoreField(
 ) extends Instruction {
   this : super(.voidType) {
     if (field.isLate && !field.isWritable ||
-        _classReceiver(receiver.type, field.owner).asInstanceOf(field.owner) ==
-            null ||
         !field
             .typeFor(_classReceiver(receiver.type, field.owner))
             .accepts(value.type)) {
@@ -1082,18 +1091,20 @@ final class IntBinary(
 /// A call to a statically bound function.
 ///
 /// The call may change state or throw even when its result is unused.
-final class DirectCall(
+final class DirectCall._(
   /// The declaration selected during binding.
   final FunctionTarget target,
-  Iterable<Value> arguments, {
+  @override final List<Value> inputs,
   final ClassType? ownerType,
-  Iterable<ValueType> typeArguments = const [],
-}) extends Instruction {
-  final List<ValueType> typeArguments = .unmodifiable(typeArguments);
-  @override
-  final List<Value> inputs = .unmodifiable(arguments);
-
-  this : super(_directResult(target, ownerType, typeArguments)) {
+  final List<ValueType> typeArguments,
+  super.type,
+) extends Instruction {
+  factory(
+    FunctionTarget target,
+    Iterable<Value> arguments, {
+    ClassType? ownerType,
+    Iterable<ValueType> typeArguments = const [],
+  }) {
     if (target.kind == .closure) {
       throw ArgumentError('A lexical invocation requires its closure.');
     }
@@ -1106,29 +1117,26 @@ final class DirectCall(
     ownerType?.validateTypeArguments();
     final ownerEnvironment = ownerType == null
         ? const <TypeParameterType, ValueType>{}
-        : target.environmentFor(ownerType!);
+        : target.environmentFor(ownerType);
+    final types = List<ValueType>.unmodifiable(typeArguments);
+    final inputs = List<Value>.unmodifiable(arguments);
     final signature = (substituteType(
       target.signature,
       ownerEnvironment,
-    ) as FunctionType).instantiate(typeArguments);
+    ) as FunctionType).instantiate(types);
     checkArguments([
       if (target.kind.hasReceiver)
         substituteType(target.owner!, ownerEnvironment),
       ...signature.parameters,
     ], inputs);
+    return ._(
+      target,
+      inputs,
+      ownerType,
+      types,
+      target.kind == .initializer ? .voidType : signature.result,
+    );
   }
-}
-
-ValueType _directResult(
-  FunctionTarget target,
-  ClassType? ownerType,
-  Iterable<ValueType> typeArguments,
-) {
-  final signature = ownerType == null
-      ? target.signature
-      : target.signatureFor(ownerType);
-  final applied = signature.instantiate(typeArguments);
-  return target.kind == .initializer ? ValueType.voidType : applied.result;
 }
 
 /// Checks the arity and assignability of [arguments] against [types].
@@ -1283,9 +1291,10 @@ ClassType _classReceiver(ValueType type, [ClassType? owner]) {
 }
 
 /// Allocates a fresh mutable literal, retaining its reified type arguments.
-// ignore: use_super_parameters
-final class NewCollection(final ClassType collectionType) extends Instruction {
-  this : super(collectionType) {
+final class NewCollection(ClassType super.type) extends Instruction {
+  /// The collection type, including its reified element or key and value types.
+  ClassType get collectionType => type as ClassType;
+  this {
     if (![
       CoreTypes.list,
       CoreTypes.set,
@@ -1490,70 +1499,4 @@ ValueType _collectionIndexType(Value collection, Value key) {
     return map.typeArguments[1].nullable;
   }
   throw ArgumentError('Invalid collection index.');
-}
-
-/// Recognizes supported resolved dart:core operations without inventing targets.
-Instruction? coreCollectionOperation(
-  String name,
-  Value receiver,
-  List<Value> args,
-) {
-  final list = CoreTypes.view(receiver.type, CoreTypes.list);
-  final set = CoreTypes.view(receiver.type, CoreTypes.set);
-  final map = CoreTypes.view(receiver.type, CoreTypes.map);
-  final iterable = CoreTypes.view(receiver.type, CoreTypes.iterable);
-  final iterator = CoreTypes.view(receiver.type, CoreTypes.iterator);
-  final entry = CoreTypes.view(receiver.type, CoreTypes.mapEntry);
-  return switch ((name, args)) {
-    ('key', []) when entry != null => LoadField(
-      CoreTypes.mapEntryKey,
-      receiver,
-    ),
-    ('value', []) when entry != null => LoadField(
-      CoreTypes.mapEntryValue,
-      receiver,
-    ),
-    ('length', []) when iterable != null || map != null => CollectionLength(
-      receiver,
-    ),
-    ('sublist', [final start]) when list != null => ListSublist(
-      receiver,
-      start,
-    ),
-    ('sublist', [final start, final end]) when list != null => ListSublist(
-      receiver,
-      start,
-      end,
-    ),
-    ('containsKey', [final key]) when map != null => MapContainsKey(
-      receiver,
-      key,
-    ),
-    ('entries', []) when map != null => MapEntries(receiver),
-    ('iterator', []) when iterable != null => GetIterator(receiver),
-    ('current', []) when iterator != null => IteratorCurrent(receiver),
-    ('moveNext', []) when iterator != null => IteratorMoveNext(receiver),
-    ('[]', [final key]) when list != null || map != null => CollectionGet(
-      receiver,
-      key,
-    ),
-    ('[]=', [final key, final value]) when list != null => ListSet(
-      receiver,
-      key,
-      value,
-    ),
-    ('[]=', [final key, final value]) when map != null => MapPut(
-      receiver,
-      key,
-      value,
-    ),
-    ('add', [final value]) when list != null || set != null => CollectionAdd(
-      receiver,
-      value,
-    ),
-    ('addAll', [final source])
-        when list != null || set != null || map != null =>
-      CollectionSpread(receiver, source, isMethodCall: true),
-    _ => null,
-  };
 }

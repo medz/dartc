@@ -15,6 +15,14 @@ void main() {
       (function) => function.target.name.startsWith('<extension-tearoff:'),
     );
     expect(wrappers, isNotEmpty);
+    expect(
+      wrappers.where((f) => f.target.enclosing?.name == 'cleanupTearOff'),
+      hasLength(1),
+    );
+    expect(
+      wrappers.where((f) => f.target.enclosing?.name == 'chainedTearOffs'),
+      hasLength(2),
+    );
     for (final wrapper in wrappers) {
       expect(wrapper.target.kind, FunctionKind.closure);
       expect(wrapper.target.owner, isNull);
@@ -37,6 +45,8 @@ void main() {
     for (final (name, function) in <(String, Object? Function(int))>[
       ('extractedDefaults', sdk.extractedDefaults),
       ('capturedReceiver', sdk.capturedReceiver),
+      ('cleanupTearOff', sdk.cleanupTearOff),
+      ('chainedTearOffs', sdk.chainedTearOffs),
       ('nonClassReceivers', sdk.nonClassReceivers),
       ('extractedLexical', sdk.extractedLexical),
       ('extractedCallMethod', sdk.extractedCallMethod),

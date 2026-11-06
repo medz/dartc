@@ -435,6 +435,14 @@ final class FunctionType._(
   /// Named parameter slots and requiredness.
   final Map<String, ({int slot, bool required})> named,
 ) extends ValueType {
+  /// The number of trailing positional parameters with defaults.
+  int get optionalPositional => positionalCount - requiredPositional;
+
+  /// Each named parameter in declaration order and whether it is required.
+  Map<String, bool> get namedParameters => Map.unmodifiable(
+    named.map((name, parameter) => MapEntry(name, parameter.required)),
+  );
+
   /// Builds a signature. Named parameters occupy the last slots in map order.
   factory(
     ValueType result,
@@ -510,10 +518,8 @@ final class FunctionType._(
       FunctionType(
         substituteType(result, environment),
         parameters.map((t) => substituteType(t, environment)),
-        optionalPositional: positionalCount - requiredPositional,
-        namedParameters: {
-          for (final e in named.entries) e.key: e.value.required,
-        },
+        optionalPositional: optionalPositional,
+        namedParameters: namedParameters,
       );
 
   Map<TypeParameterType, ValueType>? _relate(
@@ -663,7 +669,7 @@ final class const ClassType._(
   final List<ClassType> _interfaces,
   final bool isAbstract,
   final List<TypeParameterType> typeParameters,
-  final List<ValueType> typeArguments,
+  final List<ValueType>? _arguments,
   final ClassType? _declaration,
   final _ClassHierarchy? _hierarchy,
 ) extends ValueType {
@@ -681,7 +687,7 @@ final class const ClassType._(
          .unmodifiable(interfaces),
          isAbstract,
          .unmodifiable(typeParameters),
-         .unmodifiable(typeParameters),
+         null,
          null,
          null,
        );
@@ -694,7 +700,7 @@ final class const ClassType._(
         const [],
         isAbstract,
         const [],
-        const [],
+        null,
         null,
         null,
       );
@@ -711,7 +717,7 @@ final class const ClassType._(
          const [],
          isAbstract,
          .unmodifiable(typeParameters),
-         .unmodifiable(typeParameters),
+         null,
          null,
          _ClassHierarchy(),
        );
@@ -724,12 +730,15 @@ final class const ClassType._(
     if (hierarchy == null || hierarchy.initialized) {
       throw StateError('Class hierarchy already initialized.');
     }
-    hierarchy.superclass = superclass;
     hierarchy.interfaces = List.unmodifiable(interfaces);
+    hierarchy.superclass = superclass;
     hierarchy.initialized = true;
   }
 
   static final _coreLibrary = Uri.parse('dart:core');
+
+  /// The applied arguments, or the declaration's own type parameters.
+  List<ValueType> get typeArguments => _arguments ?? typeParameters;
   Uri get library => _library ?? _coreLibrary;
   ClassType get declaration => _declaration ?? this;
   Map<TypeParameterType, ValueType> get typeEnvironment => {
@@ -1134,10 +1143,8 @@ FunctionType rebindFunctionType(
     body.result,
     body.parameters,
     typeParameters: fresh,
-    optionalPositional: body.positionalCount - body.requiredPositional,
-    namedParameters: {
-      for (final e in body.named.entries) e.key: e.value.required,
-    },
+    optionalPositional: body.optionalPositional,
+    namedParameters: body.namedParameters,
   );
 }
 

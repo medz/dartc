@@ -31,10 +31,11 @@ void main() {
       expect(CoreTypes.mapEntryValue.typeFor(entryType), ValueType.string);
       expect(CoreTypes.mapEntryKey.isFinal, isTrue);
       expect(CoreTypes.mapEntryValue.isFinal, isTrue);
-      for (final (name, expected) in [('key', 1), ('value', 'value')]) {
-        final operation = coreCollectionOperation(name, constant, []);
-        expect(operation, isA<LoadField>());
-        expect(_execute((b) => b.emit(operation!)), expected);
+      for (final (field, expected) in [
+        (CoreTypes.mapEntryKey, 1),
+        (CoreTypes.mapEntryValue, 'value'),
+      ]) {
+        expect(_execute((b) => b.emit(LoadField(field, constant))), expected);
       }
     },
   );

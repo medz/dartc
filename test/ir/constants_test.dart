@@ -11,12 +11,7 @@ void main() {
     final list = NewCollection(CoreTypes.listOf(ValueType.integer));
     final source = SequenceConstant(CoreTypes.listOf(ValueType.integer), []);
     expect(CollectionSpread(list, source).isMethodCall, isFalse);
-    expect(
-      CollectionSpread(list, source, isMethodCall: true).isMethodCall,
-      isTrue,
-    );
-    final call =
-        coreCollectionOperation('addAll', list, [source]) as CollectionSpread;
+    final call = CollectionSpread(list, source, isMethodCall: true);
     expect(call.isMethodCall, isTrue);
     expect(call.inputs, [list, source]);
     final map = NewCollection(
@@ -27,9 +22,7 @@ void main() {
       [],
     );
     expect(
-      (coreCollectionOperation('addAll', map, [
-        mapSource,
-      ]) as CollectionSpread).isMethodCall,
+      CollectionSpread(map, mapSource, isMethodCall: true).isMethodCall,
       isTrue,
     );
   });

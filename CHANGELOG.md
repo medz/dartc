@@ -1,5 +1,9 @@
 ## Unreleased
 
+Extension method tear-offs work in `finally` blocks and in chains such as `value.first.second`. Generic IR calls retain the same type arguments they use to check parameters and determine their result type.
+
+SDK collection member selection now belongs to lowering. Callers of the development-only `coreCollectionOperation` helper should construct typed IR operations such as `ListSublist` and `MapContainsKey` directly.
+
 Async functions and await now use explicit suspension, normal/error continuations and completion types. Future adoption happens after finalizers; reference execution preserves microtask ordering, typed Future arms and return-versus-await behavior. Async generators and await-for remain separate work.
 
 Promoted type parameters retain both lexical identity and the analyzer-selected bound instead of rejecting general `T & S`. Static subtype proofs, null checks, class member views, record fields and function calls use that bound without treating it as the runtime type argument. Inference keeps the original `T`; concrete type substitution erases the promotion, while the reference executor checks both sides of an intersection before erasure. Focused SDK differential coverage includes nullable and nested promotions, generic members and calls, collections, records, functions, captures and FutureOr bounds.

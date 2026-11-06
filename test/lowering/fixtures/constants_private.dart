@@ -5,3 +5,7 @@ class PrivateBase<T> {
   const PrivateBase(this._value);
   T get baseValue => _value;
 }
+
+typedef _PrivateAlias<A, B> = PrivateBase<A>;
+const privateMaker = _PrivateAlias.new;
+const privateIntMaker = privateMaker<int, String>;

@@ -61,6 +61,13 @@ int listShapes(int n) {
   };
 }
 
+int sublistArguments() {
+  final items = [1, 2, 3];
+  return items.sublist(1).length * 100 +
+      items.sublist(1, null).length * 10 +
+      items.sublist(1, 2).length;
+}
+
 int listWildcards(int n) {
   final value = TraceList(<int>[for (var i = 0; i < n; i++) i], 0);
   var result = 0;

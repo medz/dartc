@@ -61,7 +61,6 @@ export 'src/ir/value.dart'
         MapContainsKey,
         MapEntries,
         PatternMatchFailure,
-        coreCollectionOperation,
         NewCollection,
         CollectionAdd,
         CollectionSpread,

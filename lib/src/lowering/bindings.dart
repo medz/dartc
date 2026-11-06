@@ -74,7 +74,7 @@ final class Bindings({final bool enableAssertions = false}) {
   final _fields = <(FieldElement, ClassType), InstanceField>{};
   final _globals = <VariableElement, GlobalVariable>{};
   final _defaults = <FunctionTarget, Map<int, Constant>>{};
-  final _constantAliases = <LibraryElement, List<TypeAliasElement>>{};
+  final _constants = <VariableElement, Constant>{};
 
   final _modeledClasses =
       <InterfaceElement, (ResolvedUnitResult, ast.AstNode)>{};
@@ -802,11 +802,8 @@ final class Bindings({final bool enableAssertions = false}) {
               _ => .function,
             },
       typeParameters: [...extensionParameters, ...source.typeParameters],
-      optionalPositional: source.positionalCount - source.requiredPositional,
-      namedParameters: {
-        for (final entry in source.named.entries)
-          entry.key: entry.value.required,
-      },
+      optionalPositional: source.optionalPositional,
+      namedParameters: source.namedParameters,
     );
     // Default constants may refer to this executable (or a mutually recursive
     // constructor), so publish its identity before evaluating defaults.
@@ -932,12 +929,8 @@ final class Bindings({final bool enableAssertions = false}) {
           signature.parameters,
           owner: layer.type,
           kind: .initializer,
-          optionalPositional:
-              signature.positionalCount - signature.requiredPositional,
-          namedParameters: {
-            for (final entry in signature.named.entries)
-              entry.key: entry.value.required,
-          },
+          optionalPositional: signature.optionalPositional,
+          namedParameters: signature.namedParameters,
         );
         _defaults[initializer] = defaults(destination);
         final entry = Block(initializer.parameterTypes);
@@ -1054,7 +1047,7 @@ final class Bindings({final bool enableAssertions = false}) {
     VariableElement variable,
     ResolvedUnitResult unit,
     ast.AstNode site,
-  ) {
+  ) => _constants.putIfAbsent(variable, () {
     _constantSafety.check(unit, site, variable: variable);
     final value = variable.computeConstantValue();
     if (value == null &&
@@ -1063,26 +1056,41 @@ final class Bindings({final bool enableAssertions = false}) {
         !variable.hasDefaultValue) {
       return const .nullValue();
     }
-    return _constantValue(value, variable.constantInitializer, unit, site);
-  }
+    return _constantValue(
+      value,
+      variable.library ?? unit.libraryElement,
+      unit,
+      site,
+    );
+  });
 
-  /// Converts an analyzer constant into an independent IR operand.
-  Constant constantValue(
-    DartObject? value,
+  /// Returns the IR operand required by a constant expression.
+  Constant constantExpression(
     ResolvedUnitResult unit,
-    ast.AstNode site,
+    ast.Expression expression,
+  ) =>
+      tryConstantExpression(unit, expression) ??
+      unsupported(unit, expression, 'constant expression');
+
+  /// Returns a checked constant when the analyzer can evaluate [expression].
+  Constant? tryConstantExpression(
+    ResolvedUnitResult unit,
+    ast.Expression expression,
   ) {
-    final expression = site is ast.Expression ? site : null;
-    _constantSafety.check(unit, site, expression: expression);
-    return _constantValue(value, expression, unit, site);
+    final value = expression.computeConstantValue()?.value;
+    if (value == null) return null;
+    _constantSafety.check(unit, expression, expression: expression);
+    return _constantValue(value, unit.libraryElement, unit, expression);
   }
 
   Constant _constantValue(
     DartObject? value,
-    ast.Expression? syntax,
+    LibraryElement origin,
     ResolvedUnitResult unit,
     ast.AstNode site,
   ) {
+    Constant convert(DartObject? child) =>
+        _constantValue(child, origin, unit, site);
     if (value != null) {
       if (value.toTypeValue() case final type?) {
         return TypeConstant(valueType(type, unit, site));
@@ -1106,7 +1114,7 @@ final class Bindings({final bool enableAssertions = false}) {
         final arguments = constantFunctionArguments(value);
         if (executable is ConstructorElement &&
             executable.enclosingElement is ExtensionTypeElement) {
-          if (constantFunctionHasAlias(value)) {
+          if (!constantFunctionUsesAlias(value, null)) {
             unsupported(unit, site, 'extension type constructor alias');
           }
           if (functionType.typeParameters.isEmpty &&
@@ -1122,11 +1130,7 @@ final class Bindings({final bool enableAssertions = false}) {
           );
         }
         if (executable is ConstructorElement) {
-          final alias = _constantConstructorAlias(
-            value,
-            syntax,
-            unit.libraryElement,
-          );
+          final alias = _constantConstructorAlias(value, origin, unit, site);
           if (alias != null) {
             final signature = constructorAliasSignature(
               alias,
@@ -1142,9 +1146,6 @@ final class Bindings({final bool enableAssertions = false}) {
                   ? arguments!.map((t) => valueType(t, unit, site))
                   : null,
             );
-          }
-          if (constantFunctionHasAlias(value)) {
-            unsupported(unit, site, 'constant constructor alias provenance');
           }
           return FunctionConstant(
             callable,
@@ -1165,45 +1166,24 @@ final class Bindings({final bool enableAssertions = false}) {
           case final elements?) {
         return SequenceConstant(
           valueType(value.type!, unit, site) as ClassType,
-          elements.map(
-            (element) => _constantValue(element, syntax, unit, site),
-          ),
+          elements.map(convert),
         );
       }
       if (value.toMapValue() case final entries?) {
         return MapConstant(
           valueType(value.type!, unit, site) as ClassType,
           entries.entries.map(
-            (entry) => (
-              _constantValue(entry.key, syntax, unit, site),
-              _constantValue(entry.value, syntax, unit, site),
-            ),
+            (entry) => (convert(entry.key), convert(entry.value)),
           ),
         );
       }
       if (value.toRecordValue() case final record?) {
         final type = valueType(value.type!, unit, site);
         if (type is RecordType) {
-          final expressions = <int, ast.Expression>{};
-          if (syntax is ast.RecordLiteral) {
-            var positional = 0;
-            for (final field in syntax.fields) {
-              final slot = field is ast.RecordLiteralNamedField
-                  ? type.slots[field.name.lexeme]!
-                  : positional++;
-              expressions[slot] = field.fieldExpression;
-            }
-          }
           return RecordConstant(type, [
-            for (final (i, field) in record.positional.indexed)
-              _constantValue(field, expressions[i] ?? syntax, unit, site),
+            ...record.positional.map(convert),
             for (final name in type.slots.keys.skip(type.positionalCount))
-              _constantValue(
-                record.named[name]!,
-                expressions[type.slots[name]] ?? syntax,
-                unit,
-                site,
-              ),
+              convert(record.named[name]),
           ]);
         }
       }
@@ -1239,28 +1219,15 @@ final class Bindings({final bool enableAssertions = false}) {
                 'constant field ${declaration.displayName}',
               );
             }
-            fields[field(declaration, unit, site)] = _constantValue(
+            fields[field(declaration, unit, site)] = convert(
               layer.getField(declaration.name!),
-              declaration.constantInitializer ?? syntax,
-              unit,
-              site,
             );
           }
           if (element is EnumElement) {
             // Analyzer stores Enum's inherited slots directly in the enum value,
             // unlike the separate superclass layer used by ordinary instances.
-            fields[CoreTypes.enumIndex] = _constantValue(
-              layer.getField('index'),
-              syntax,
-              unit,
-              site,
-            );
-            fields[CoreTypes.enumName] = _constantValue(
-              layer.getField('_name'),
-              syntax,
-              unit,
-              site,
-            );
+            fields[CoreTypes.enumIndex] = convert(layer.getField('index'));
+            fields[CoreTypes.enumName] = convert(layer.getField('_name'));
             break;
           }
           if (layerType.isDartCoreObject) break;
@@ -1293,72 +1260,31 @@ final class Bindings({final bool enableAssertions = false}) {
       signature.result,
       signature.parameters,
       typeParameters: parameters,
-      optionalPositional:
-          signature.positionalCount - signature.requiredPositional,
-      namedParameters: {
-        for (final entry in signature.named.entries)
-          entry.key: entry.value.required,
-      },
+      optionalPositional: signature.optionalPositional,
+      namedParameters: signature.namedParameters,
     );
   }
 
   TypeAliasElement? _constantConstructorAlias(
     DartObject value,
-    ast.Expression? syntax,
     LibraryElement library,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
   ) {
-    final aliases = <TypeAliasElement>{};
-    final visited = <VariableElement>{};
-    void scan(ast.AstNode? node) {
-      if (node == null) return;
-      if (node is ast.NamedType && node.element is TypeAliasElement) {
-        aliases.add(node.element as TypeAliasElement);
-      }
-      final variable = switch (node) {
-        ast.Identifier(element: final VariableElement variable) => variable,
-        ast.Identifier(element: GetterElement(:final variable)) => variable,
-        _ => null,
-      };
-      if (variable != null && variable.isConst && visited.add(variable)) {
-        scan(variable.constantInitializer);
-      }
-      for (final child in node.childEntities) {
-        if (child is ast.AstNode) scan(child);
-      }
-    }
-
-    scan(syntax);
-    scan(value.variable?.constantInitializer);
-    for (final alias in aliases) {
-      if (constantFunctionUsesAlias(value, alias)) return alias;
-    }
-    // A nested value can originate in a constructor default or initializer,
-    // with no alias syntax at this use. Match the analyzer's retained identity
-    // against reachable declarations rather than guessing from the function type.
-    if (constantFunctionHasAlias(value)) {
-      final candidates = _constantAliases.putIfAbsent(library, () {
-        final libraries = <LibraryElement>{};
-        final result = <TypeAliasElement>[];
-        void collect(LibraryElement current) {
-          if (!libraries.add(current)) return;
-          result.addAll(current.typeAliases);
-          for (final dependency in [
-            ...current.exportedLibraries,
-            for (final fragment in current.fragments)
-              ...fragment.importedLibraries,
-          ]) {
-            if (!dependency.isInSdk) collect(dependency);
-          }
-        }
-
-        collect(library);
-        return result;
-      });
-      for (final alias in candidates) {
+    if (constantFunctionUsesAlias(value, null)) return null;
+    final pending = [library], visited = <LibraryElement>{};
+    while (pending.isNotEmpty) {
+      final current = pending.removeLast();
+      if (!visited.add(current)) continue;
+      for (final alias in current.typeAliases) {
         if (constantFunctionUsesAlias(value, alias)) return alias;
       }
+      pending.addAll(current.exportedLibraries);
+      for (final fragment in current.fragments) {
+        pending.addAll(fragment.importedLibraries);
+      }
     }
-    return null;
+    unsupported(unit, site, 'constant constructor alias provenance');
   }
 
   /// Maps the resolved Dart [type] to its IR type.
@@ -1625,12 +1551,8 @@ final class Bindings({final bool enableAssertions = false}) {
           owner: application,
           kind: source.kind,
           privateSelectorLibrary: source.selector.privateLibrary,
-          optionalPositional:
-              signature.positionalCount - signature.requiredPositional,
-          namedParameters: {
-            for (final entry in signature.named.entries)
-              entry.key: entry.value.required,
-          },
+          optionalPositional: signature.optionalPositional,
+          namedParameters: signature.namedParameters,
           covariantParameters: source.covariantParameters,
         );
         _defaults[bound] = defaults(source);
@@ -1771,48 +1693,3 @@ bool isClassLike(Element? element) =>
     element is ClassElement ||
     element is EnumElement ||
     element is MixinElement;
-
-/// Resolves only the public SDK enum protocols, not user members of the same name.
-InstanceField? coreEnumField(ExecutableElement? member) {
-  if (member is! GetterElement || !member.library.isDartCore) return null;
-  return switch ((member.enclosingElement, member.name)) {
-    (ClassElement(name: 'Enum'), 'index') => CoreTypes.enumIndex,
-    (ExtensionElement(name: 'EnumName'), 'name') => CoreTypes.enumName,
-    _ => null,
-  };
-}
-
-/// Identifies SDK runtimeType getters without intercepting user overrides.
-bool coreRuntimeType(ExecutableElement? member) =>
-    member is GetterElement &&
-    member.library.isDartCore &&
-    (member.enclosingElement.name == 'Object' ||
-        member.enclosingElement.name == 'Record') &&
-    member.name == 'runtimeType';
-
-/// Whether this SDK member has a supported runtime-backed virtual protocol.
-///
-/// Keep these public protocols virtual: user implementations need not carry
-/// the SDK implementation's storage, and subclasses may inherit or override
-/// their concrete getters.
-bool coreRuntimeMember(ExecutableElement member) {
-  if (!member.library.isDartCore || member.isStatic) return false;
-  return switch ((member, member.enclosingElement?.name, member.name)) {
-    (GetterElement(), 'Symbol', 'hashCode') => true,
-    (
-      GetterElement(),
-      'Invocation',
-      'memberName' ||
-          'typeArguments' ||
-          'positionalArguments' ||
-          'namedArguments' ||
-          'isMethod' ||
-          'isGetter' ||
-          'isSetter' ||
-          'isAccessor',
-    ) =>
-      true,
-    (MethodElement(), 'Object', 'toString') => true,
-    _ => false,
-  };
-}

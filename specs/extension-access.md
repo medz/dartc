@@ -21,7 +21,7 @@
 
 普通 extension 方法提取、显式 `call` 提取与对象模式的方法字段复用 `MakeClosure`，捕获提取时已检查的接收者，再由普通 wrapper 调用 receiver-first 静态目标。保留方法泛型界限、默认类型、可选参数默认值及词法类型环境；每次提取产生独立闭包，同一个泛型闭包的相同实例化保留既有身份规则。不增加 extension 专用 IR。
 
-[方法提取样本](../test/lowering/fixtures/extension_tearoffs.dart)覆盖静态与动态调用、空感知、提取检查时机、类型环境和身份。
+在 `finally` 内提取方法时，正常离开、返回和抛错均在清理路径上绑定当次接收者。连续提取两个扩展方法也保留各自的目标。见[方法提取样本](../test/lowering/fixtures/extension_tearoffs.dart)。
 
 ## 赋值表达式值的已知差异
 

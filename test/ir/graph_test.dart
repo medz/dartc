@@ -310,13 +310,9 @@ void main() {
     expect(() => IrProgram([], [body]), throwsArgumentError);
     final closure = Block(local.parameterTypes);
     closure.finish(Return(closure.emit(ReadCell(closure.parameters[1]))));
-    expect(
-      () => IrProgram([], [
-        body,
-        IrFunction(local, [closure]),
-      ]),
-      returnsNormally,
-    );
+    final nested = IrFunction(local, [closure]);
+    expect(() => IrProgram([], [body, nested]), returnsNormally);
+    expect(() => IrProgram([], [body, nested, nested]), throwsArgumentError);
     expect(ValueType.object.nullable.accepts(cell), isFalse);
     expect(cell.accepts(CellType(.number)), isFalse);
   });

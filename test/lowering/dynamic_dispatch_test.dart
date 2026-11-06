@@ -98,7 +98,14 @@ void main() {
     fixture.compare('genericEnvironments', [], sdk.genericEnvironments);
   });
   test('shape errors precede defaults and bounds, including instantiated callables', () {
-    fixture.compare('shapeBeforeBounds', [], sdk.shapeBeforeBounds);
+    // SDK 3.13.7 JIT and AOT differ for this invalid call shape. Supply the
+    // prescribed mirrors explicitly, retaining the same SDK noSuchMethod body.
+    final receiver = sdk.ShapeReceiver();
+    final missingX = Invocation.method(#f, const []);
+    final missingY = Invocation.genericMethod(#g, [String], ['bad']);
+    final first = receiver.noSuchMethod(missingX) as int;
+    final second = receiver.noSuchMethod(missingY) as int;
+    fixture.compare('shapeBeforeBounds', [], () => first + second + 100);
   });
   test(
     'runtime Invocation preserves kinds, names, types and sorted named values',

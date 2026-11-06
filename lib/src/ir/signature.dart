@@ -103,7 +103,7 @@ final class FunctionTarget(
   /// The immediately enclosing function of a local declaration or literal.
   final FunctionTarget? enclosing,
 
-  /// The lexical source offset of that local function.
+  /// The source offset of a local function. Synthesized functions can share an offset.
   final int? sourceOffset,
   Iterable<ValueType> captures = const [],
 
@@ -159,11 +159,8 @@ final class FunctionTarget(
                   : type,
           ],
           typeParameters: signature.typeParameters,
-          optionalPositional:
-              signature.positionalCount - signature.requiredPositional,
-          namedParameters: {
-            for (final e in signature.named.entries) e.key: e.value.required,
-          },
+          optionalPositional: signature.optionalPositional,
+          namedParameters: signature.namedParameters,
         );
 
   /// The function type exposed by extraction, before function instantiation.
@@ -178,10 +175,8 @@ final class FunctionTarget(
         base.result,
         base.parameters,
         typeParameters: owner!.typeParameters,
-        optionalPositional: base.positionalCount - base.requiredPositional,
-        namedParameters: {
-          for (final e in base.named.entries) e.key: e.value.required,
-        },
+        optionalPositional: base.optionalPositional,
+        namedParameters: base.namedParameters,
       );
     }
     return base;
@@ -259,46 +254,46 @@ final class FunctionTarget(
         'Private selector provenance requires a private virtual member.',
       );
     }
-    if ((typeParameters.isNotEmpty &&
-            (kind == .initializer ||
-                kind == .fieldInitializer ||
-                kind == .factory ||
-                kind == .getter ||
-                kind == .setter ||
-                kind == .staticGetter ||
-                kind == .staticSetter)) ||
-        (owner != null && owner!.library != library) ||
-        (kind != .function &&
-            kind != .closure &&
-            kind != .staticGetter &&
-            kind != .staticSetter &&
-            owner == null) ||
-        (kind == .closure
-            ? enclosing == null ||
-                  enclosing!.library != library ||
-                  owner != null ||
-                  sourceOffset == null ||
-                  sourceOffset! < 0
-            : enclosing != null ||
-                  sourceOffset != null ||
-                  this.captures.isNotEmpty) ||
-        this.covariantParameters.any(
-          (i) => !kind.isVirtual || i < 0 || i >= signature.parameters.length,
-        ) ||
-        (kind == .initializer && returnType != .voidType) ||
-        (kind == .fieldInitializer && signature.parameters.isNotEmpty) ||
-        (kind == .factory && returnType != owner) ||
-        isAbstract && !kind.isVirtual ||
-        (kind == .getter || kind == .staticGetter) &&
-            signature.parameters.isNotEmpty ||
-        (kind == .setter || kind == .staticSetter) &&
-            (signature.positionalCount != 1 ||
-                optionalPositional != 0 ||
-                namedParameters.isNotEmpty ||
-                returnType != .voidType)) {
+    if (owner != null && owner!.library != library ||
+        owner == null && (kind.hasReceiver || kind == .factory) ||
+        isAbstract && !kind.isVirtual) {
+      throw ArgumentError('Invalid callable owner.');
+    }
+    if (kind == .closure) {
+      if (enclosing?.library != library ||
+          owner != null ||
+          sourceOffset == null ||
+          sourceOffset! < 0) {
+        throw ArgumentError('Invalid lexical function.');
+      }
+    } else if (enclosing != null ||
+        sourceOffset != null ||
+        this.captures.isNotEmpty) {
       throw ArgumentError(
-        'Inconsistent callable owner or constructor signature.',
+        'Only lexical functions have an enclosing function and captures.',
       );
+    }
+    if (this.covariantParameters.any(
+      (slot) =>
+          !kind.isVirtual || slot < 0 || slot >= signature.parameters.length,
+    )) {
+      throw ArgumentError('Invalid covariant parameter slot.');
+    }
+    final validSignature = switch (kind) {
+      .function || .closure || .method => true,
+      _ when signature.typeParameters.isNotEmpty => false,
+      .initializer => returnType == .voidType,
+      .fieldInitializer ||
+      .getter ||
+      .staticGetter => signature.parameters.isEmpty,
+      .factory => returnType == owner,
+      .setter || .staticSetter =>
+        signature.requiredPositional == 1 &&
+            signature.parameters.length == 1 &&
+            returnType == .voidType,
+    };
+    if (!validSignature) {
+      throw ArgumentError('Invalid signature for ${kind.name} $name.');
     }
     if (redirect == null && redirectOwnerType != null) {
       throw ArgumentError('Redirect owner requires a destination.');

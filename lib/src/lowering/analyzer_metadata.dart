@@ -342,11 +342,11 @@ List<DartType>? constantFunctionArguments(DartObject value) {
   return (value.state as internal.FunctionState).typeArguments;
 }
 
-/// Tests the alias identity without inspecting or reconstructing private state.
-bool constantFunctionUsesAlias(DartObject value, TypeAliasElement alias) {
+/// Matches the retained constructor alias, or the unaliased constructor for `null`.
+bool constantFunctionUsesAlias(DartObject value, TypeAliasElement? alias) {
   if (value is! internal.DartObjectImpl ||
       value.state is! internal.FunctionState ||
-      alias is! internal.TypeAliasElementImpl) {
+      (alias != null && alias is! internal.TypeAliasElementImpl)) {
     throw UnsupportedError('Analyzer constructor alias metadata unavailable.');
   }
   final state = value.state as internal.FunctionState;
@@ -356,30 +356,11 @@ bool constantFunctionUsesAlias(DartObject value, TypeAliasElement alias) {
             internal.FunctionState(
               state.element,
               typeArguments: state.typeArguments,
-              viaTypeAlias: alias,
+              viaTypeAlias: alias as internal.TypeAliasElementImpl?,
             ),
           )
           .value ==
       true;
-}
-
-/// Whether a function constant retains a distinct constructor alias identity.
-bool constantFunctionHasAlias(DartObject value) {
-  if (value is! internal.DartObjectImpl ||
-      value.state is! internal.FunctionState) {
-    throw UnsupportedError('Analyzer constructor alias metadata unavailable.');
-  }
-  final state = value.state as internal.FunctionState;
-  return state
-          .isIdentical(
-            state.element.library.typeSystem,
-            internal.FunctionState(
-              state.element,
-              typeArguments: state.typeArguments,
-            ),
-          )
-          .value ==
-      false;
 }
 
 /// The contextual type applied to a declaration/assignment's RHS expression.

@@ -4,6 +4,7 @@ import 'package:dartc/ir.dart';
 
 import 'analyzer_metadata.dart';
 import 'bindings.dart';
+import 'core_member.dart';
 import 'function_context.dart';
 import 'operators.dart';
 import 'record.dart';
@@ -93,26 +94,52 @@ Value? _contextualCast(
 }
 
 /// Shares field extractions and comparison results across one pattern match.
-final class PatternCache {
-  final FunctionContext context;
+final class PatternCache(
+  final FunctionContext context,
+  Iterable<ast.DartPattern> patterns,
+) {
   final _cells = <Object, (Value, Value)>{};
+  final _operands = <ast.Expression, (Constant, Object)>{};
 
-  // Collect all alternatives before emitting their lazy cache storage.
-  // ignore: use_primary_constructors
-  new(this.context, Iterable<ast.DartPattern> patterns) {
+  this {
     final counts = <Object, int>{};
+    void count(Object key) =>
+        counts.update(key, (n) => n + 1, ifAbsent: () => 1);
+    void comparison(Object path, String operator, ast.Expression operand) {
+      final constant = context.bindings.constantExpression(
+        context.unit,
+        operand,
+      );
+      final key = (
+        path,
+        operator == '!=' ? '==' : operator,
+        constantKey(constant),
+      );
+      final pattern = operand.parent;
+      final application = pattern is ast.RelationalPattern
+          ? context.extensionApplication(
+              pattern.element,
+              pattern,
+              receiverType: pattern.matchedValueType,
+            )
+          : null;
+      final comparisonKey = application == null
+          ? key
+          : (key, _extensionKey(application));
+      _operands[operand] = (constant, comparisonKey);
+      count(comparisonKey);
+    }
+
     void collect(ast.DartPattern pattern, Object path) {
       switch (pattern) {
         case ast.RelationalPattern(:final operand, :final operator):
-          final key = comparisonKey(path, operator.lexeme, operand);
-          counts.update(key, (count) => count + 1, ifAbsent: () => 1);
+          comparison(path, operator.lexeme, operand);
         case ast.ConstantPattern(:final expression):
-          final key = comparisonKey(path, 'constant==', expression);
-          counts.update(key, (count) => count + 1, ifAbsent: () => 1);
+          comparison(path, 'constant==', expression);
         case ast.ObjectPattern(:final fields):
           for (final field in fields) {
             final key = _fieldPath(context, path, field);
-            counts.update(key, (count) => count + 1, ifAbsent: () => 1);
+            count(key);
             collect(field.pattern, key);
           }
         case ast.RecordPattern(:final fields):
@@ -128,7 +155,7 @@ final class PatternCache {
           final rest = elements.indexWhere((e) => e is ast.RestPatternElement);
           if (elements.length != 1 || rest < 0) {
             final key = _getterPath(path, 'length');
-            counts.update(key, (count) => count + 1, ifAbsent: () => 1);
+            count(key);
           }
           for (final (index, element) in elements.indexed) {
             final child = switch (element) {
@@ -138,17 +165,22 @@ final class PatternCache {
             };
             if (child == null || _isDiscard(child)) continue;
             final key = _listPath(path, index, rest, elements.length);
-            counts.update(key, (count) => count + 1, ifAbsent: () => 1);
+            count(key);
             collect(child, key);
           }
         case ast.MapPattern(:final elements):
           for (final element in elements) {
             if (element is! ast.MapPatternEntry) continue;
-            final key = constantKey(constant(element.key));
+            final constant = context.bindings.constantExpression(
+              context.unit,
+              element.key,
+            );
+            final key = constantKey(constant);
+            _operands[element.key] = (constant, key);
             final lookup = (path, '[]', key);
             final contains = (path, 'containsKey', key);
-            counts.update(lookup, (count) => count + 1, ifAbsent: () => 1);
-            counts.update(contains, (count) => count + 1, ifAbsent: () => 1);
+            count(lookup);
+            count(contains);
             collect(element.value, lookup);
           }
         case ast.LogicalAndPattern(:final leftOperand, :final rightOperand) ||
@@ -182,30 +214,6 @@ final class PatternCache {
         ),
       );
     }
-  }
-
-  Constant constant(ast.Expression expression) =>
-      context.bindings.constantValue(
-        expression.computeConstantValue()?.value,
-        context.unit,
-        expression,
-      );
-
-  Object comparisonKey(Object path, String operator, ast.Expression operand) {
-    final key = (
-      path,
-      operator == '!=' ? '==' : operator,
-      constantKey(constant(operand)),
-    );
-    final pattern = operand.parent;
-    final application = pattern is ast.RelationalPattern
-        ? context.extensionApplication(
-            pattern.element,
-            pattern,
-            receiverType: pattern.matchedValueType,
-          )
-        : null;
-    return application == null ? key : (key, _extensionKey(application));
   }
 
   Value? read(Object key, Value? Function() extract) {
@@ -393,7 +401,7 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
                 !coreRuntimeType(member) &&
                 !coreRuntimeMember(member)) {
               final operation = member is GetterElement
-                  ? coreCollectionOperation(member.name!, object, [])
+                  ? lowerCoreCollectionMember(member, object, [])
                   : null;
               if (operation == null) {
                 unsupported(context.unit, field, 'core object pattern member');
@@ -440,25 +448,17 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
           if (context.current == null) return;
         }
       case ast.ConstantPattern(:final expression):
-        final constant = context.bindings.constantValue(
-          expression.computeConstantValue()?.value,
-          context.unit,
-          expression,
-        );
+        final (constant, key) = cache._operands[expression]!;
         final result = cache.read(
-          cache.comparisonKey(path, 'constant==', expression),
+          key,
           () => lowerEquality(context, constant, value),
         );
         if (result == null) return;
         context.guard(context.normal(context.cast(result, .boolean)), failure!);
       case ast.RelationalPattern(:final operand, :final operator):
-        final constant = context.bindings.constantValue(
-          operand.computeConstantValue()?.value,
-          context.unit,
-          operand,
-        );
+        final (constant, key) = cache._operands[operand]!;
         final result = cache.read(
-          cache.comparisonKey(path, operator.lexeme, operand),
+          key,
           () => operator.lexeme == '==' || operator.lexeme == '!='
               ? lowerEquality(context, value, constant)
               : lowerBinary(context, pattern, operator, value, constant),
@@ -609,8 +609,7 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
       if (element is! ast.MapPatternEntry) {
         unsupported(context.unit, element, 'map pattern element');
       }
-      final constant = cache.constant(element.key);
-      final key = constantKey(constant);
+      final (constant, key) = cache._operands[element.key]!;
       final lookup = (path, '[]', key);
       final item = _cached(
         lookup,

@@ -21,6 +21,26 @@ extension NullableMethods on int? {
   int orDefault() => this ?? 42;
 }
 
+extension Twice on int Function([int]) {
+  int twice() => this(2) + this(3);
+}
+
+int chainedTearOffs(int seed) {
+  final twice = seed.add.twice;
+  return twice();
+}
+
+int cleanupTearOff(int seed) {
+  try {
+    if (seed < 0) throw seed;
+    if (seed > 0) return seed;
+  } finally {
+    final add = seed.add;
+    tick(add(10));
+  }
+  return seed;
+}
+
 extension GenericMethods<T> on List<T> {
   T firstValue() => this[0];
   U choose<U extends T>(U value, {bool first = false}) =>

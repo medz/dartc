@@ -1,3 +1,4 @@
+import 'package:dartc/ir.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
@@ -15,8 +16,22 @@ void main() {
     ),
   );
 
+  test('reads of a named constant share its IR operand', () {
+    final function = fixture.program.functions.singleWhere(
+      (f) => f.target.name == 'collectionOrder',
+    );
+    final maps = function.blocks
+        .expand((block) => block.instructions)
+        .expand((instruction) => instruction.inputs)
+        .whereType<MapConstant>()
+        .toList();
+    expect(maps.length, greaterThan(1));
+    expect(maps.skip(1), everyElement(same(maps.first)));
+  });
+
   for (final (name, reference) in <(String, Object? Function())>[
     ('rootObjectIdentity', sdk.rootObjectIdentity),
+    ('importedConstructorAlias', sdk.importedConstructorAlias),
     ('collectionTypes', sdk.collectionTypes),
     ('collectionOrder', sdk.collectionOrder),
     ('collectionEmptyNested', sdk.collectionEmptyNested),
