@@ -20,15 +20,37 @@ final class const Return([
 
 /// Publishes one generator element and suspends this activation.
 ///
-/// The next `moveNext` resumes at [onResume]. Stopping iteration does not take
-/// that edge or unwind the suspended activation's finalizers.
+/// A synchronous iterator resumes at [onResume] on its next `moveNext`.
+/// A stream waits out a pause and takes [onCancel] to run pending finalizers
+/// when its subscription has been canceled.
 final class const Yield(
   /// The already checked element, evaluated before suspension.
   final Value value,
 
-  /// The continuation taken only when iteration is requested again.
-  final Jump onResume,
-) extends Terminator;
+  /// The continuation after publishing the element.
+  final Jump onResume, {
+
+  /// The normal return path on cancellation, required only for a stream.
+  final Jump? onCancel,
+}) extends Terminator;
+
+/// Forwards a stream's data and error events to an async generator's listener.
+///
+/// Pausing or canceling the outer subscription propagates to the delegate.
+/// Forwarded error events do not enter [onThrow].
+final class const YieldStream(
+  /// The evaluated stream whose events are forwarded.
+  final Value stream,
+
+  /// Continues after the delegated stream closes.
+  final Jump onResume, {
+
+  /// Runs pending finalizers after cancellation.
+  required final Jump onCancel,
+
+  /// Handles an exception raised by delegation itself, such as a failed listen.
+  final Jump? onThrow,
+}) extends Terminator;
 
 /// Suspends an async activation until [operand] supplies [result].
 ///
@@ -174,7 +196,12 @@ final class Block([Iterable<ValueType> types = const []]) {
     Throw(:final onThrow) ||
     ExhaustivenessFailure(:final onThrow) => [?onThrow],
     Invoke(:final onReturn, :final onThrow) => [?onReturn, onThrow],
-    Yield(:final onResume) => [onResume],
+    Yield(:final onResume, :final onCancel) => [onResume, ?onCancel],
+    YieldStream(:final onResume, :final onCancel, :final onThrow) => [
+      onResume,
+      onCancel,
+      ?onThrow,
+    ],
     Await(:final onResume, :final onThrow) => [?onResume, ?onThrow],
     final Jump jump => [jump],
     Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],

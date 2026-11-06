@@ -1,18 +1,41 @@
 import 'block.dart';
+import 'core_types.dart';
 import 'signature.dart';
 import 'type.dart';
 import 'value.dart';
 
-/// Checks control flow, argument and return types, and SSA definition dominance.
-({Set<FunctionTarget> closures, Set<GlobalVariable> globals}) verifyFunction(
+typedef FunctionReferences = ({
+  Set<FunctionTarget> closures,
+  Set<FunctionTarget> callees,
+  Set<GlobalVariable> globals,
+  Set<InstanceField> fields,
+  Set<ObjectConstant> objects,
+  Set<ClassType> classes,
+});
+
+/// Checks declaration scope and defaults, then verifies a supplied SSA graph.
+FunctionReferences verifyCallable(
   FunctionTarget target,
-  List<Block> blocks,
   Iterable<Constant> defaults, {
+  List<Block>? blocks,
+  FunctionBodyKind bodyKind = .synchronous,
   ValueType? yieldType,
   ValueType? completionType,
 }) {
   Set<FunctionTarget>? closures;
+  Set<FunctionTarget>? callees;
   Set<GlobalVariable>? globals;
+  Set<InstanceField>? fields;
+  Set<ObjectConstant>? objects;
+  Set<ClassType>? classes;
+  FunctionReferences references() => (
+    closures: _snapshot(closures),
+    callees: _snapshot(callees),
+    globals: _snapshot(globals),
+    fields: _snapshot(fields),
+    objects: _snapshot(objects),
+    classes: _snapshot(classes),
+  );
   final scope = <TypeParameterType>{};
   for (
     FunctionTarget? lexical = target;
@@ -28,24 +51,35 @@ import 'value.dart';
   final checkedTypes = Set<ValueType>.identity();
   void checkTypeScope(ValueType type) {
     if (checkedTypes.contains(type)) return;
-    if (typeParametersIn(type).any((parameter) => !scope.contains(parameter))) {
-      throw StateError('Type parameter used outside its lexical scope.');
+    for (final declaration in typeDeclarationsIn(type)) {
+      if (declaration is ClassType) {
+        (classes ??= {}).add(declaration);
+      } else if (!scope.contains(declaration)) {
+        throw StateError('Type parameter used outside its lexical scope.');
+      }
     }
     checkedTypes.add(type);
   }
 
   void constant(Constant value) {
     checkTypeScope(value.type);
+    if (value is TypeConstant) checkTypeScope(value.representedType);
     if (value case FunctionConstant(
+      target: final callee,
       :final ownerType,
       :final typeArguments,
       :final constructorSignature,
     )) {
+      (callees ??= {}).add(callee);
       if (constructorSignature != null) checkTypeScope(constructorSignature);
       if (ownerType != null) checkTypeScope(ownerType);
       for (final type in typeArguments ?? const <ValueType>[]) {
         checkTypeScope(type);
       }
+    }
+    if (value is ObjectConstant) {
+      (objects ??= {}).add(value);
+      (fields ??= {}).addAll(value.fields.keys);
     }
     final children = switch (value) {
       RecordConstant(:final fields) => fields,
@@ -76,6 +110,7 @@ import 'value.dart';
   for (final capture in target.captures) {
     checkTypeScope(capture);
   }
+  if (blocks == null) return references();
   if (blocks.isEmpty) throw StateError('Function has no entry.');
   final entry = blocks.first;
   if (target.parameterTypes.length != entry.parameters.length ||
@@ -203,6 +238,17 @@ import 'value.dart';
         checkTypeScope(type);
       }
       switch (op) {
+        case DirectCall(target: final callee) ||
+            InstanceCall(member: final callee) ||
+            BindMethod(method: final callee) ||
+            Construct(initializer: final callee):
+          (callees ??= {}).add(callee);
+        case LoadField(:final field) || StoreField(:final field):
+          (fields ??= {}).add(field);
+        default:
+          break;
+      }
+      switch (op) {
         case LoadGlobal(:final global) || StoreGlobal(:final global):
           (globals ??= {}).add(global);
         case MakeClosure(target: final child):
@@ -272,20 +318,38 @@ import 'value.dart';
         :final onResume,
         :final onThrow,
       ):
-        if (completionType == null) {
+        if (bodyKind != .asynchronous && bodyKind != .asyncGenerator) {
           throw StateError('Await outside an async body.');
         }
         use(operand, count);
         if (onResume != null) useEdge(onResume, result: result);
         if (onThrow != null) useEdge(onThrow, unwinding: true);
-      case Yield(:final value, :final onResume):
+      case Yield(:final value, :final onResume, :final onCancel):
         if (yieldType == null ||
-            value.type is CellType ||
+            (bodyKind == .asyncGenerator) != (onCancel != null) ||
+            !isDartType(value.type) ||
             !yieldType.accepts(value.type)) {
           throw StateError('Yield outside a compatible generator body.');
         }
         use(value, count);
         useEdge(onResume);
+        if (onCancel != null) useEdge(onCancel);
+      case YieldStream(
+        :final stream,
+        :final onResume,
+        :final onCancel,
+        :final onThrow,
+      ):
+        if (bodyKind != .asyncGenerator ||
+            !CoreTypes.streamOf(yieldType!).accepts(stream.type)) {
+          throw StateError(
+            'Stream delegation requires a compatible async generator.',
+          );
+        }
+        use(stream, count);
+        useEdge(onResume);
+        useEdge(onCancel);
+        if (onThrow != null) useEdge(onThrow, unwinding: true);
       case Throw(:final exception, :final stackTrace, :final onThrow):
         use(exception, count);
         if (stackTrace != null) use(stackTrace, count);
@@ -307,11 +371,10 @@ import 'value.dart';
         useEdge(edge);
     }
   }
-  return (
-    closures: closures == null ? const {} : Set.unmodifiable(closures!),
-    globals: globals == null ? const {} : Set.unmodifiable(globals!),
-  );
+  return references();
 }
+
+Set<T> _snapshot<T>(Set<T>? values) => Set<T>.unmodifiable(values ?? const []);
 
 Map<Block, Block> _dominators(
   Block entry,

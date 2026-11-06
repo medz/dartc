@@ -8,6 +8,7 @@ abstract final class CoreTypes() {
     int arity, {
     bool sequence = false,
     bool isAbstract = true,
+    String library = 'dart:core',
   }) {
     final parameters = [
       for (var i = 0; i < arity; i++)
@@ -16,7 +17,7 @@ abstract final class CoreTypes() {
           ..initializeDefaultType(ValueType.dynamicType),
     ];
     final type = ClassType.declare(
-      Uri.parse('dart:core'),
+      Uri.parse(library),
       name,
       typeParameters: parameters,
       isAbstract: isAbstract,
@@ -108,6 +109,10 @@ abstract final class CoreTypes() {
   /// Canonical asynchronous result protocol; FutureOr is a union, not a class.
   static final ClassType future = ValueType.future;
   static ClassType futureOf(ValueType value) => future.instantiate([value]);
+
+  /// The stream returned by an asynchronous generator.
+  static final ClassType stream = _declare('Stream', 1, library: 'dart:async');
+  static ClassType streamOf(ValueType element) => stream.instantiate([element]);
 
   static final ClassType iterable = _declare('Iterable', 1);
   static final ClassType iterator = _declare('Iterator', 1);

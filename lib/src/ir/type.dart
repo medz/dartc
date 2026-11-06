@@ -727,10 +727,17 @@ final class const ClassType._(
     Iterable<ClassType> interfaces = const [],
   }) {
     final hierarchy = declaration._hierarchy;
-    if (hierarchy == null || hierarchy.initialized) {
+    if (!identical(this, declaration) ||
+        hierarchy == null ||
+        hierarchy.initialized) {
       throw StateError('Class hierarchy already initialized.');
     }
-    hierarchy.interfaces = List.unmodifiable(interfaces);
+    final implemented = List<ClassType>.unmodifiable(interfaces);
+    if (superclass.asInstanceOf(this) != null ||
+        implemented.any((parent) => parent.asInstanceOf(this) != null)) {
+      throw ArgumentError('Cyclic class hierarchy for $name.');
+    }
+    hierarchy.interfaces = implemented;
     hierarchy.superclass = superclass;
     hierarchy.initialized = true;
   }
@@ -1072,26 +1079,32 @@ bool containsCovariantTypeParameter(
 };
 
 /// Free lexical type-variable identities mentioned by a type expression.
-Iterable<TypeParameterType> typeParametersIn(ValueType type) sync* {
+Iterable<TypeParameterType> typeParametersIn(ValueType type) =>
+    typeDeclarationsIn(type).whereType<TypeParameterType>();
+
+/// Nominal declarations and free type variables referenced by a type expression.
+Iterable<ValueType> typeDeclarationsIn(ValueType type) sync* {
   switch (type) {
     case TypeParameterType():
       yield type;
     case PromotedTypeParameterType(:final parameter, :final bound):
       yield parameter;
-      yield* typeParametersIn(bound);
+      yield* typeDeclarationsIn(bound);
     case NonNullableTypeParameterType(:final parameter):
       yield parameter;
     case _NullableType(:final base):
-      yield* typeParametersIn(base);
+      yield* typeDeclarationsIn(base);
     case FutureOrType(:final argument):
-      yield* typeParametersIn(argument);
+      yield ValueType.future;
+      yield* typeDeclarationsIn(argument);
     case ClassType():
+      yield type.declaration;
       for (final argument in type.typeArguments) {
-        yield* typeParametersIn(argument);
+        yield* typeDeclarationsIn(argument);
       }
     case RecordType():
       for (final field in type.fields) {
-        yield* typeParametersIn(field);
+        yield* typeDeclarationsIn(field);
       }
     case FunctionType():
       final bound = type.typeParameters.toSet();
@@ -1101,10 +1114,10 @@ Iterable<TypeParameterType> typeParametersIn(ValueType type) sync* {
         ...type.typeParameters.map((p) => p.bound),
         for (final parameter in type.typeParameters) ?parameter.defaultType,
       ]) {
-        yield* typeParametersIn(nested).where((p) => !bound.contains(p));
+        yield* typeDeclarationsIn(nested).where((t) => !bound.contains(t));
       }
     case CellType(:final content):
-      yield* typeParametersIn(content);
+      yield* typeDeclarationsIn(content);
     default:
       break;
   }

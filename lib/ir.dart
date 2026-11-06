@@ -5,8 +5,15 @@
 ///
 /// {@example /test/ir/graph_test.dart#block_arguments}
 ///
+/// [IrProgram] checks references against the supplied class and callable
+/// declarations. [IrExternal] describes a callable implemented outside the
+/// graph using its Dart signature and defaults. Inspect [Instruction.effects]
+/// for possible storage access, allocation, calls and exceptions.
+///
 /// @docImport 'src/ir/block.dart';
 /// @docImport 'src/ir/function.dart';
+/// @docImport 'src/ir/program.dart';
+/// @docImport 'src/ir/value.dart';
 library;
 
 export 'src/ir/block.dart'
@@ -21,8 +28,9 @@ export 'src/ir/block.dart'
         Terminator,
         Throw,
         Yield,
+        YieldStream,
         Unreachable;
-export 'src/ir/function.dart' show IrFunction;
+export 'src/ir/function.dart' show IrCallable, IrExternal, IrFunction;
 export 'src/ir/program.dart' show IrClass, IrProgram;
 export 'src/ir/signature.dart'
     show
@@ -78,6 +86,7 @@ export 'src/ir/value.dart'
         DynamicDispatch,
         MakeInvocation,
         Equals,
+        Effect,
         Instruction,
         FunctionCall,
         InstantiateFunction,

@@ -323,58 +323,110 @@ final class const UnwindValue._(super.type) extends Value {
 List<BlockParameter> blockParameters(Iterable<ValueType> types) =>
     .unmodifiable(types.map(BlockParameter._));
 
+/// Possible effects of evaluating an instruction with its operands already available.
+enum Effect() {
+  /// Observes mutable state outside the SSA operands.
+  readsStorage,
+
+  /// Changes observable storage, including lazy initialization.
+  writesStorage,
+
+  /// Creates a value or storage, independently of its machine representation.
+  allocates,
+
+  /// May invoke Dart code with arbitrary effects.
+  callsUserCode,
+
+  /// May transfer control to a Dart exception handler.
+  mayThrow,
+}
+
 /// An operation executed at its position in a block's instruction list.
 sealed class Instruction(super.type) extends Value {
   /// The SSA operands consumed by the operation.
   Iterable<Value> get inputs;
 
-  /// Whether evaluation can transfer control to a Dart exception handler.
-  bool get mayThrow => switch (this) {
+  static const _call = <Effect>{
+    .readsStorage,
+    .writesStorage,
+    .allocates,
+    .callsUserCode,
+    .mayThrow,
+  };
+  static const _allocate = <Effect>{.allocates, .mayThrow};
+  static const _checkedWrite = <Effect>{.writesStorage, .mayThrow};
+  static const _bindOnce = <Effect>{.readsStorage, .writesStorage, .mayThrow};
+
+  /// A conservative bound on this operation's effects on every path.
+  ///
+  /// Calls include all effects their callees could have. Allocation describes
+  /// the operation itself; temporary boxes and GC safepoints depend on the backend.
+  Set<Effect> get effects => switch (this) {
+    ObjectHashCode(direct: true) => _bindOnce,
     ObjectHashCode() ||
     ListSublist() ||
     MapContainsKey() ||
     MapEntries() ||
-    PatternMatchFailure() ||
     CollectionLength() ||
     CollectionGet() ||
     ListSet() ||
-    NewCollection() ||
     CollectionAdd() ||
     CollectionSpread() ||
     MapPut() ||
     GetIterator() ||
     IteratorMoveNext() ||
     IteratorCurrent() ||
-    AssertionFailure() ||
     DirectCall() ||
     InstanceCall() ||
     DynamicDispatch() ||
-    MakeInvocation() ||
     FunctionCall() ||
+    Construct() ||
+    BindMethod(direct: false) ||
+    Interpolate() ||
+    Equals(mayCallUserCode: true) => _call,
+    NewCollection() ||
+    MakeInvocation() ||
+    BindMethod(direct: true) ||
     InstantiateFunction() ||
-    BindMethod() ||
-    LoadGlobal() ||
     MakeClosure() ||
     NewCell() ||
-    CopyCell() ||
-    Construct() ||
+    MakeRecord() ||
+    StringConcat() ||
+    AssertionFailure() ||
+    PatternMatchFailure() => _allocate,
+    CopyCell() => const {.readsStorage, .allocates, .mayThrow},
+    LoadGlobal(global: GlobalVariable(initializer: != null)) ||
+    LoadField(field: InstanceField(initializer: != null)) ||
+    ReadCell(cell: Value(type: CellType(isLate: true))) => _call,
+    LoadGlobal(global: GlobalVariable(isLate: true)) ||
+    LoadField(
+      field: InstanceField(isLate: true),
+    ) => const {.readsStorage, .mayThrow},
+    LoadGlobal() || LoadField() || ReadCell() => const {.readsStorage},
+    StoreGlobal(global: GlobalVariable(isFinal: true)) ||
+    StoreField(field: InstanceField(isLate: true, isFinal: true)) ||
+    WriteCell(
+      cell: Value(type: CellType(isLate: true, isFinal: true)),
+    ) => _bindOnce,
+    StoreField(:final field) when typeParametersIn(field.type).isNotEmpty =>
+      _checkedWrite,
+    StoreGlobal() || StoreField() || WriteCell() => const {.writesStorage},
     TypeCast() ||
     NullCheck() ||
-    MakeRecord() ||
-    Interpolate() ||
-    StringConcat() => true,
-    StoreGlobal(:final global) => global.isFinal,
-    StoreField(:final field) => field.isLate && field.isFinal,
-    LoadField(:final field) => field.isLate,
-    Equals(:final mayCallUserCode) => mayCallUserCode,
-    IntBinary(:final operator) => operator.mayThrow,
-    NumericBinary(:final canThrow) => canThrow,
-    NumericNegate() || ReifyType() => false,
-    ReadCell(:final cell) => (cell.type as CellType).isLate,
-    WriteCell(:final cell) =>
-      (cell.type as CellType).isLate && (cell.type as CellType).isFinal,
-    TypeTest() || TypeView() || RecordGet() => false,
+    IntBinary(operator: IntOperator(mayThrow: true)) ||
+    NumericBinary(canThrow: true) => const {.mayThrow},
+    ReifyType() => const {.allocates},
+    Equals() ||
+    IntBinary() ||
+    NumericBinary() ||
+    NumericNegate() ||
+    TypeTest() ||
+    TypeView() ||
+    RecordGet() => const {},
   };
+
+  /// Whether evaluation can transfer control to a Dart exception handler.
+  bool get mayThrow => effects.contains(Effect.mayThrow);
 }
 
 /// Raises an assertion error after the failed condition and optional message.

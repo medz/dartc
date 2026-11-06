@@ -1,6 +1,7 @@
 import 'function.dart';
 import 'signature.dart';
 import 'type.dart';
+import 'verify.dart';
 
 /// A class definition and the instance storage introduced by that class.
 final class IrClass(
@@ -64,6 +65,9 @@ final class IrClass(
   }
 
   this {
+    if (!identical(type, type.declaration)) {
+      throw ArgumentError('A class definition requires its declaration.');
+    }
     for (final selector in this.unsupportedForwarders) {
       checkMemberSelector(selector);
     }
@@ -83,6 +87,7 @@ final class IrProgram(
   Iterable<IrClass> classes,
   Iterable<IrFunction> functions, {
   Iterable<GlobalVariable> globals = const [],
+  Iterable<IrExternal> externals = const [],
 }) {
   /// The class definitions supplied by the input libraries.
   final List<IrClass> classes = .unmodifiable(classes);
@@ -90,10 +95,23 @@ final class IrProgram(
   /// The verified bodies supplied by the input libraries.
   final List<IrFunction> functions = .unmodifiable(functions);
 
+  /// External implementations declared in these libraries, with their Dart defaults.
+  final List<IrExternal> externals = .unmodifiable(externals);
+
   /// Top-level and static storage, excluding compile-time constants.
   final List<GlobalVariable> globals = .unmodifiable(globals);
 
   late final _definitions = {for (final c in classes) c.type: c};
+  late final _implementations = <FunctionTarget, IrCallable>{
+    for (final f in functions) f.target: f,
+    for (final f in externals) f.target: f,
+  };
+
+  /// The supplied body or external declaration for [target].
+  ///
+  /// Returns null for imports, abstract members and redirecting declarations.
+  IrCallable? implementationOf(FunctionTarget target) =>
+      _implementations[target];
 
   /// Resolves [member] on [receiver], returning `null` if the batch supplies no implementation.
   FunctionTarget? dispatch(ClassType receiver, FunctionTarget member) {
@@ -187,6 +205,13 @@ final class IrProgram(
         '${global.initializer == null ? '' : ' = ${global.initializer!.name}'}',
       );
     }
+    for (final external in externals) {
+      final t = external.target;
+      output.writeln(
+        'external ${t.kind.name} ${t.library}::'
+        '${t.owner == null ? '' : '${t.owner!.name}.'}${t.name}: ${t.signature.dartName}',
+      );
+    }
     for (final function in functions) {
       function.writeTo(output);
     }
@@ -194,22 +219,30 @@ final class IrProgram(
 
   this {
     final owners = {
-      for (final c in this.classes) (c.type.library, c.type.dartName): c.type,
+      for (final c in this.classes) (c.type.library, c.type.name): c.type,
     };
     if (owners.length != this.classes.length) {
       throw ArgumentError('Repeated class.');
     }
-    final names = <(Uri, ClassType?, FunctionKind, String, Uri?)>{};
-    final bodies = {for (final f in this.functions) f.target};
-    if (bodies.length != this.functions.length) {
-      throw ArgumentError('Repeated callable body.');
+    (Uri, ClassType?, FunctionKind, String, Uri?) nameOf(FunctionTarget t) => (
+      t.library,
+      t.owner,
+      t.kind,
+      t.kind.isVirtual ? t.selector.name : t.name,
+      t.kind.isVirtual ? t.selector.privateLibrary : null,
+    );
+    final names =
+        <(Uri, ClassType?, FunctionKind, String, Uri?), FunctionTarget>{};
+    if (_implementations.length !=
+        this.functions.length + this.externals.length) {
+      throw ArgumentError('Repeated callable implementation.');
     }
     final fieldInitializers = <FunctionTarget>{};
     for (final c in this.classes) {
       for (final field in c.fields) {
         if (field.initializer case final initializer?) {
           if (!fieldInitializers.add(initializer) ||
-              !bodies.contains(initializer)) {
+              implementationOf(initializer) == null) {
             throw ArgumentError('Repeated or missing field initializer body.');
           }
         }
@@ -222,37 +255,37 @@ final class IrProgram(
         throw ArgumentError('Repeated global declaration.');
       }
       final owner = global.owner;
-      if (owner != null && owners[(owner.library, owner.dartName)] != owner) {
+      if (owner != null && owners[(owner.library, owner.name)] != owner) {
         throw ArgumentError('Global belongs to an undeclared class.');
       }
       if (global.initializer case final initializer?
-          when !bodies.contains(initializer)) {
+          when implementationOf(initializer) == null) {
         throw ArgumentError('Missing global initializer body.');
       }
     }
-    for (final f in this.functions) {
-      if (!bodies.containsAll(f.closures)) {
-        throw ArgumentError('Missing lexical function body.');
-      }
-      if (!slots.containsAll(f.globals)) {
-        throw ArgumentError('Global operation references undeclared storage.');
+    for (final f in _implementations.values) {
+      if (f is IrFunction) {
+        if (f.closures.any((t) => implementationOf(t) is! IrFunction)) {
+          throw ArgumentError('Missing lexical function body.');
+        }
+        if (!slots.containsAll(f.globals)) {
+          throw ArgumentError(
+            'Global operation references undeclared storage.',
+          );
+        }
       }
       final t = f.target, owner = t.owner;
-      if (owner != null && owners[(owner.library, owner.dartName)] != owner) {
+      if (owner != null && owners[(owner.library, owner.name)] != owner) {
         throw ArgumentError('Body belongs to an undeclared class.');
       }
       if (t.enclosing case final outer?) {
-        if (!bodies.contains(outer)) {
+        if (implementationOf(outer) is! IrFunction) {
           throw ArgumentError('Missing enclosing function body.');
         }
-      } else if (!names.add((
-        t.library,
-        owner,
-        t.kind,
-        t.kind.isVirtual ? t.selector.name : t.name,
-        t.kind.isVirtual ? t.selector.privateLibrary : null,
-      ))) {
+      } else if (names.containsKey(nameOf(t))) {
         throw ArgumentError('Repeated callable body.');
+      } else {
+        names[nameOf(t)] = t;
       }
       if (t.kind.isVirtual && _definitions[owner]?.members[t.selector] != t) {
         throw ArgumentError(
@@ -270,24 +303,128 @@ final class IrProgram(
       }
     }
 
-    for (final c in this.classes) {
-      for (final ctor in c.constructors.values) {
-        final destination = ctor.redirect;
-        final definition = _definitions[destination?.owner];
-        if (destination != null &&
-            definition != null &&
-            definition.constructors[destination.name] != destination) {
+    IrClass? definitionOf(ClassType type) {
+      final identity = owners.putIfAbsent((
+        type.library,
+        type.name,
+      ), () => type.declaration);
+      if (!identical(identity, type.declaration)) {
+        throw ArgumentError('Conflicting class identity for ${type.name}.');
+      }
+      return _definitions[identity];
+    }
+
+    void checkType(ValueType type, Set<TypeParameterType> scope) {
+      for (final declaration in typeDeclarationsIn(type)) {
+        if (declaration is ClassType) {
+          definitionOf(declaration);
+        } else if (!scope.contains(declaration)) {
+          throw ArgumentError('Type parameter outside its declaration.');
+        }
+      }
+    }
+
+    final checkedSignatures = _implementations.keys.toSet();
+    void checkSignature(FunctionTarget t) {
+      if (checkedSignatures.add(t)) {
+        verifyCallable(t, const []).classes.forEach(definitionOf);
+      }
+    }
+
+    void checkTarget(FunctionTarget target) {
+      checkSignature(target);
+      final owner = target.owner;
+      final c = owner == null ? null : definitionOf(owner);
+      final known = switch (target.kind) {
+        .getter ||
+        .setter ||
+        .method when c != null => c.members[target.selector],
+        .initializer || .factory when c != null => c.constructors[target.name],
+        .fieldInitializer when c != null => fieldInitializers.lookup(target),
+        _ => names[nameOf(target)] ?? target,
+      };
+      // A synthesized concrete forwarder can implement this abstract selector.
+      if (!identical(known, target) &&
+          !(target.isAbstract &&
+              known != null &&
+              !known.isAbstract &&
+              target.signature == known.signature)) {
+        throw ArgumentError(
+          'Unbound callable reference to ${target.library}::${owner?.name ?? ''}.${target.name}.',
+        );
+      }
+    }
+
+    for (final f in _implementations.values) {
+      f.referencedClasses.forEach(definitionOf);
+      f.callees.forEach(checkTarget);
+      for (final field in f.fields) {
+        final c = definitionOf(field.owner);
+        if (c != null && !c.fields.contains(field)) {
           throw ArgumentError(
-            'Factory redirects to an undeclared constructor.',
+            'Undeclared field ${field.owner.name}.${field.name}.',
           );
         }
-        if (ctor.redirect == null && !bodies.contains(ctor)) {
-          throw ArgumentError('Missing constructor body.');
+      }
+      for (final object in f.objects) {
+        for (
+          ClassType? t = object.type as ClassType;
+          t != null;
+          t = t.superclass
+        ) {
+          final c = definitionOf(t);
+          if (c != null && !c.fields.every(object.fields.containsKey)) {
+            throw ArgumentError('Incomplete constant storage for ${t.name}.');
+          }
+        }
+      }
+    }
+    for (final global in this.globals) {
+      checkType(global.type, const {});
+    }
+    for (final c in this.classes) {
+      final parameters = c.type.typeParameters.toSet();
+      if (parameters.length != c.type.typeParameters.length) {
+        throw ArgumentError('Repeated class type parameter in ${c.type.name}.');
+      }
+      for (final parameter in parameters) {
+        checkType(parameter.bound, parameters);
+        if (parameter.defaultType case final t?) checkType(t, parameters);
+      }
+      final views = <ClassType, ClassType>{};
+      void visit(ClassType t) {
+        final previous = views[t.declaration];
+        if (previous != null) {
+          if (previous != t) {
+            throw ArgumentError(
+              'Inconsistent inherited arguments for ${t.name}.',
+            );
+          }
+          return;
+        }
+        views[t.declaration] = t;
+        checkType(t, parameters);
+        if (t.superclass case final parent?) visit(parent);
+        t.interfaces.forEach(visit);
+      }
+
+      visit(c.type);
+      for (final field in c.fields) {
+        checkType(field.type, parameters);
+      }
+      for (final ctor in c.constructors.values) {
+        checkSignature(ctor);
+        if (ctor.redirectOwnerType case final t?) checkType(t, parameters);
+        final destination = ctor.redirect;
+        if (destination != null) checkTarget(destination);
+        if (ctor.redirect == null && implementationOf(ctor) == null) {
+          throw ArgumentError('Missing constructor implementation.');
         }
       }
       for (final member in c.members.values) {
-        if (!member.isAbstract && !bodies.contains(member)) {
-          throw ArgumentError('Missing member body.');
+        checkSignature(member);
+        if (!member.isAbstract && implementationOf(member) == null) {
+          throw ArgumentError('Missing member implementation.');
         }
       }
     }

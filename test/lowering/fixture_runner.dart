@@ -7,8 +7,6 @@ final class FixtureRunner(
   final IrProgram program,
   final Map<(Uri, String), Object? Function(int)> imports,
 ) {
-  final bodies = {for (final f in program.functions) f.target: f};
-
   final _globals = <GlobalVariable, Object?>{
     for (final global in program.globals)
       if (!global.isLate && global.initializer == null) global: null,
@@ -263,8 +261,9 @@ final class FixtureRunner(
         return _GuestFuture(CoreTypes.futureOf(element), carrier);
       }
     }
-    final body = bodies[target];
-    if (body != null) return run(body, arguments, environment);
+    if (program.implementationOf(target) case final IrFunction body) {
+      return run(body, arguments, environment);
+    }
     if (target.owner == ValueType.object &&
         target.kind == .getter &&
         target.name == 'runtimeType') {
@@ -482,7 +481,7 @@ final class FixtureRunner(
     int index,
     Map<TypeParameterType, ValueType> environment,
   ) {
-    final defaults = bodies[target]?.defaults;
+    final defaults = program.implementationOf(target)?.defaults;
     if (defaults != null && defaults.containsKey(index)) {
       return _constant(defaults[index]!, environment);
     }
@@ -1265,15 +1264,9 @@ final class FixtureRunner(
     FunctionKind kind,
     List<Object?> arguments,
   ) {
-    final member = FunctionTarget(
-      instance.type.library,
-      name,
-      .voidType,
-      [for (final _ in arguments) ValueType.object.nullable],
-      owner: instance.type,
-      kind: kind,
-    );
-    final target = program.dispatch(instance.type, member)!;
+    final target = program
+        .lookupMember(instance.type, _selector(name, kind))
+        .target!;
     return _invoke(_FunctionValue(target, instance), arguments, const {});
   }
 
@@ -1552,15 +1545,13 @@ final class FixtureRunner(
     Map<TypeParameterType, ValueType> environment = const {},
   ]) {
     if (function.bodyKind == .asynchronous) {
-      final frame = _AsyncActivation(
+      final frame = _ExecutionFrame(
         function,
         List.of(args),
         Map.of(environment),
       );
-      return _GuestFuture(
-        CoreTypes.futureOf(frame.completionType),
-        _driveAsync(frame),
-      );
+      final type = substituteType(function.completionType!, environment);
+      return _GuestFuture(CoreTypes.futureOf(type), _driveAsync(frame, type));
     }
     if (function.bodyKind == .syncGenerator) {
       final saved = List<Object?>.unmodifiable(args);
@@ -1569,6 +1560,13 @@ final class FixtureRunner(
         CoreTypes.iterableOf(substituteType(function.yieldType!, types)),
         () => _GeneratorIterator(this, function, saved, types),
       );
+    }
+    if (function.bodyKind == .asyncGenerator) {
+      return _StreamActivation(
+        function,
+        List.of(args),
+        Map.of(environment),
+      ).stream(this);
     }
     return _run(function, args, environment);
   }
@@ -1579,7 +1577,10 @@ final class FixtureRunner(
     return (await value.carrier).value;
   }
 
-  Future<_FutureBox> _driveAsync(_AsyncActivation frame) async {
+  Future<_FutureBox> _driveAsync(
+    _ExecutionFrame frame, [
+    ValueType? completion,
+  ]) async {
     while (true) {
       final step = _run(
         frame.function,
@@ -1588,34 +1589,66 @@ final class FixtureRunner(
         frame,
       );
       if (step is _Returned) {
+        if (completion == null) return _FutureBox(null);
         final source = _futureType(step.value);
-        final awaited = _boxOrAdopt(
-          step.value,
-          frame.completionType,
-          check: false,
-        );
+        final awaited = _boxOrAdopt(step.value, completion, check: false);
         if (awaited is Future<_FutureBox>) return awaited;
         // A Future in the value arm still takes the SDK's async completion path.
         return source == null ? awaited : Future<_FutureBox>.value(awaited);
       }
-      final suspended = step as _Suspended;
-      final operation = suspended.operation;
-      final type = substituteType(operation.result.type, frame.environment);
-      final awaited = _boxOrAdopt(suspended.operand, type, check: false);
       Jump? edge;
-      try {
-        final box = await awaited;
-        frame.values[operation.result] = _typeOperation(
-          type,
-          box.value,
-          cast: true,
-        );
-        edge = operation.onResume;
-      } catch (error, trace) {
-        if (error is _AsyncUnsupported || operation.onThrow == null) rethrow;
-        frame.values[UnwindValue.exception] = error;
-        frame.values[UnwindValue.stackTrace] = trace;
-        edge = operation.onThrow;
+      if (step is _Suspended) {
+        final operation = step.operation;
+        final type = substituteType(operation.result.type, frame.environment);
+        final awaited = _boxOrAdopt(step.operand, type, check: false);
+        try {
+          final box = await awaited;
+          frame.values[operation.result] = _typeOperation(
+            type,
+            box.value,
+            cast: true,
+          );
+          edge = operation.onResume;
+        } catch (error, trace) {
+          if (error is _AsyncUnsupported || operation.onThrow == null) rethrow;
+          frame.values[UnwindValue.exception] = error;
+          frame.values[UnwindValue.stackTrace] = trace;
+          edge = operation.onThrow;
+        }
+      } else {
+        final stream = frame as _StreamActivation;
+        final (end, value) = step as (Terminator, Object?);
+        final (resume, cancel) = switch (end) {
+          Yield(:final onResume, :final onCancel) => (onResume, onCancel!),
+          YieldStream(:final onResume, :final onCancel) => (onResume, onCancel),
+          _ => throw StateError('Expected a stream yield.'),
+        };
+        if (stream.controller.hasListener) {
+          if (end is YieldStream) {
+            try {
+              await stream.controller.addStream(
+                value as Stream<Object?>,
+                cancelOnError: false,
+              );
+            } catch (error, trace) {
+              if (end.onThrow == null) rethrow;
+              frame.values[UnwindValue.exception] = error;
+              frame.values[UnwindValue.stackTrace] = trace;
+              edge = end.onThrow;
+            }
+          } else {
+            stream.controller.add(value);
+          }
+          if (edge == null && stream.controller.hasListener) {
+            await null;
+            while (stream.controller.hasListener &&
+                stream.controller.isPaused) {
+              final wake = stream.wake = Completer<void>();
+              await wake.future;
+            }
+          }
+        }
+        edge ??= stream.controller.hasListener ? resume : cancel;
       }
       if (edge == null) fail('A Never await returned');
       Object? read(Value value) => switch (value) {
@@ -2059,13 +2092,14 @@ final class FixtureRunner(
           case Return(:final value):
             if (frame is _GeneratorIterator) return frame.complete();
             final result = value == null ? null : read(value);
-            return frame is _AsyncActivation ? _Returned(result) : result;
+            return frame == null ? result : _Returned(result);
           case Await():
-            if (frame is! _AsyncActivation) {
+            if (frame == null || frame is _GeneratorIterator) {
               fail('Await in an ordinary activation');
             }
             return _Suspended(end, read(end.operand));
           case Yield(:final value, :final onResume):
+            if (frame is _StreamActivation) return (end, read(value));
             if (frame is! _GeneratorIterator) {
               fail('Yield in an ordinary activation');
             }
@@ -2074,6 +2108,8 @@ final class FixtureRunner(
               ..arguments = onResume.arguments.map(read).toList()
               ..block = onResume.target;
             return true;
+          case YieldStream(:final stream):
+            return (end, read(stream));
           case Invoke(:final operation, :final onReturn, :final onThrow):
             handler = onThrow;
             execute(operation);
@@ -2127,12 +2163,42 @@ base class _ExecutionFrame(
   Block block = function.entry;
 }
 
-final class _AsyncActivation(super.function, super.arguments, super.environment)
-    extends _ExecutionFrame {
-  late final ValueType completionType = substituteType(
-    function.completionType!,
-    environment,
-  );
+final class _StreamActivation(
+  super.function,
+  super.arguments,
+  super.environment,
+) extends _ExecutionFrame {
+  final controller = StreamController<Object?>(sync: true);
+  Completer<void>? wake;
+
+  Stream<Object?> stream(FixtureRunner runner) {
+    final done = Completer<void>();
+    void resume() {
+      wake?.complete();
+      wake = null;
+    }
+
+    controller.onListen = () => scheduleMicrotask(() async {
+      try {
+        await runner._driveAsync(this);
+      } catch (error, trace) {
+        if (controller.hasListener) {
+          controller.addError(error, trace);
+        } else {
+          done.completeError(error, trace);
+        }
+      } finally {
+        if (!done.isCompleted) done.complete();
+        unawaited(controller.close());
+      }
+    });
+    controller.onResume = resume;
+    controller.onCancel = () {
+      resume();
+      return controller.isClosed ? null : done.future;
+    };
+    return controller.stream;
+  }
 }
 
 final class _Returned(final Object? value);

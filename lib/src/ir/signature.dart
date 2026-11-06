@@ -10,6 +10,9 @@ enum FunctionBodyKind() {
 
   /// Starts immediately and completes a Future, suspending at explicit awaits.
   asynchronous,
+
+  /// Returns a single-subscription stream whose body starts on listen.
+  asyncGenerator,
 }
 
 /// How a callable is entered.
@@ -254,7 +257,9 @@ final class FunctionTarget(
         'Private selector provenance requires a private virtual member.',
       );
     }
-    if (owner != null && owner!.library != library ||
+    if (owner != null &&
+            (owner!.library != library ||
+                !identical(owner, owner!.declaration)) ||
         owner == null && (kind.hasReceiver || kind == .factory) ||
         isAbstract && !kind.isVirtual) {
       throw ArgumentError('Invalid callable owner.');
@@ -339,15 +344,21 @@ final class InstanceField(
   /// Whether source assignment can write the storage outside a constructor.
   bool get isWritable => !isFinal || isLate && initializer == null;
 
+  /// Substitutes type arguments along the superclass chain that supplies this slot.
   ValueType typeFor(ClassType receiver) {
-    final view = receiver.asInstanceOf(owner);
-    if (view == null) throw ArgumentError('Incompatible field owner.');
-    return substituteType(type, view.typeEnvironment);
+    for (ClassType? view = receiver; view != null; view = view.superclass) {
+      if (identical(view.declaration, owner)) {
+        return substituteType(type, view.typeEnvironment);
+      }
+    }
+    throw ArgumentError('Receiver does not inherit this field.');
   }
 
   this {
-    if (type is CellType) {
-      throw ArgumentError('An instance field must hold a Dart value.');
+    if (!identical(owner, owner.declaration) ||
+        !isDartType(type) ||
+        typeParametersIn(type).any((p) => !owner.typeParameters.contains(p))) {
+      throw ArgumentError('Invalid instance field type or declaring class.');
     }
     if (initializer case final target?) {
       if (!isLate ||

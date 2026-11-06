@@ -10,6 +10,7 @@ void writeFunction(
   StringSink output,
   FunctionTarget target,
   List<Block> blocks, {
+  required FunctionBodyKind bodyKind,
   ValueType? yieldType,
   ValueType? completionType,
 }) {
@@ -156,7 +157,7 @@ void writeFunction(
       : '<${target.typeParameters.map((p) => '${p.name} extends ${p.bound.dartName}').join(', ')}>';
   output.writeln(
     '${symbol(target)}$binders -> ${target.returnType.dartName}'
-    '${yieldType == null ? '' : ' sync*<${yieldType.dartName}>'}'
+    '${yieldType == null ? '' : ' ${bodyKind == .asyncGenerator ? 'async' : 'sync'}*<${yieldType.dartName}>'}'
     '${completionType == null ? '' : ' async<${completionType.dartName}>'}',
   );
   for (final b in blocks) {
@@ -173,8 +174,15 @@ void writeFunction(
       Await(:final operand, :final result, :final onResume, :final onThrow) =>
         '  ${value(result)}: ${result.type.dartName} = await ${value(operand)}'
             '${onResume == null ? '' : ' resume ${edge(onResume)}'}${unwind(onThrow)}',
-      Yield(value: final element, :final onResume) =>
-        '  yield ${value(element)} resume ${edge(onResume)}',
+      Yield(value: final element, :final onResume, :final onCancel) =>
+        '  yield ${value(element)} resume ${edge(onResume)}${onCancel == null ? '' : ' cancel ${edge(onCancel)}'}',
+      YieldStream(
+        :final stream,
+        :final onResume,
+        :final onCancel,
+        :final onThrow,
+      ) =>
+        '  yield* ${value(stream)} resume ${edge(onResume)} cancel ${edge(onCancel)}${unwind(onThrow)}',
       Throw(:final exception, stackTrace: final trace?, :final onThrow) =>
         '  rethrow ${value(exception)}, ${value(trace)}${unwind(onThrow)}',
       Throw(:final exception, :final onThrow) =>

@@ -239,6 +239,15 @@ void main() {
         [(_symbol('default'), _one)],
       );
       final body = Block(_method.parameterTypes);
+      final positional = FunctionTarget(
+        CoreTypes.invocation.library,
+        'positionalArguments',
+        _positionals,
+        [],
+        owner: CoreTypes.invocation,
+        kind: .getter,
+        isAbstract: true,
+      );
       final value = body.emit(
         Construct(_setter, [body.parameters[0], body.parameters[2]]),
       );
@@ -248,12 +257,17 @@ void main() {
           (b) {
             final value = _create(b, 'method', tearoff: true, omitNamed: true);
             final supplied = b.emit(
-              CollectionGet(_get(b, value, 'positionalArguments'), _zero),
+              CollectionGet(b.emit(InstanceCall(positional, value, [])), _zero),
             );
             return _same(b, supplied, fallback);
           },
           classes: [
-            IrClass(CoreTypes.invocation, [], constructors: [_method]),
+            IrClass(
+              CoreTypes.invocation,
+              [],
+              members: [positional],
+              constructors: [_method],
+            ),
           ],
           functions: [
             IrFunction(_method, [body], defaults: {2: fallback}),

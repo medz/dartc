@@ -6,15 +6,68 @@ import 'type.dart';
 import 'value.dart';
 import 'verify.dart';
 
+/// A callable supplied by the program, with a Dart signature and checked defaults.
+sealed class IrCallable(
+  /// The declaration used by calls and tear-offs.
+  final FunctionTarget target, {
+  Map<int, Constant> defaults = const {},
+}) {
+  /// Constant defaults keyed by explicit parameter slot, excluding the receiver.
+  final Map<int, Constant> defaults = .unmodifiable(defaults);
+  late final FunctionReferences _references;
+
+  /// Statically identified call and tear-off targets, including those in defaults.
+  Set<FunctionTarget> get callees => _references.callees;
+
+  /// Instance slots referenced by instructions or embedded constants.
+  Set<InstanceField> get fields => _references.fields;
+
+  /// Constant instances whose complete storage is checked against supplied classes.
+  Set<ObjectConstant> get objects => _references.objects;
+
+  /// Nominal identities used by the signature, constants and graph.
+  Set<ClassType> get referencedClasses => _references.classes;
+
+  this {
+    final optional = target.signature.optionalSlots;
+    if (target.isAbstract ||
+        target.redirect != null ||
+        optional.length != this.defaults.length ||
+        optional.any(
+          (slot) =>
+              !this.defaults.containsKey(slot) ||
+              !target.signature.parameters[slot].accepts(
+                this.defaults[slot]!.type,
+              ),
+        )) {
+      throw ArgumentError(
+        'Invalid implementation or defaults for ${target.name}.',
+      );
+    }
+  }
+}
+
+/// A Dart callable whose implementation is supplied outside the IR graph.
+///
+/// Calls retain normal Dart argument and return types. A native binding must
+/// separately specify the platform ABI and any necessary conversions.
+final class IrExternal(super.target, {super.defaults}) extends IrCallable {
+  this {
+    if (target.kind == .closure || target.kind == .fieldInitializer) {
+      throw ArgumentError('Invalid external declaration ${target.name}.');
+    }
+    _references = verifyCallable(target, defaults.values);
+  }
+}
+
 /// A verified SSA control-flow graph for one callable body.
 ///
 /// Suspendable graphs explicitly represent their continuations; a backend must
 /// preserve activations or lower them to state machines before ordinary codegen.
 final class IrFunction(
-  /// The declaration that callers reference.
-  final FunctionTarget target,
+  super.target,
   Iterable<Block> blocks, {
-  Map<int, Constant> defaults = const {},
+  super.defaults,
 
   /// Whether this graph returns directly or uses an async/generator activation.
   final FunctionBodyKind bodyKind = .synchronous,
@@ -24,18 +77,15 @@ final class IrFunction(
 
   /// The reified value type of an async body's Future, not its public result.
   final ValueType? completionType,
-}) {
+}) extends IrCallable {
   /// The reachable blocks in the supplied order, starting with [entry].
   final List<Block> blocks = .unmodifiable(blocks);
 
-  /// Default values indexed by explicit parameter slot, excluding the receiver.
-  final Map<int, Constant> defaults = .unmodifiable(defaults);
-
   /// The local bodies that this graph can instantiate.
-  late final Set<FunctionTarget> closures;
+  Set<FunctionTarget> get closures => _references.closures;
 
   /// The global declarations directly read or written by this graph.
-  late final Set<GlobalVariable> globals;
+  Set<GlobalVariable> get globals => _references.globals;
 
   /// The block whose parameters receive the function arguments.
   Block get entry => blocks.first;
@@ -48,52 +98,38 @@ final class IrFunction(
   /// Ordinary returns must match the callable result. Generator returns complete
   /// iteration and supply only `null`; yields must match [yieldType].
   this {
-    if ((bodyKind == .syncGenerator) != (yieldType != null) ||
-        yieldType is CellType ||
-        yieldType != null &&
-            (!target.returnType.accepts(CoreTypes.iterableOf(yieldType!)) ||
-                target.returnType == .voidType ||
-                target.kind == .initializer ||
-                target.kind == .factory ||
-                target.kind == .fieldInitializer ||
-                target.kind == .setter ||
-                target.kind == .staticSetter)) {
-      throw ArgumentError('Invalid generator body for ${target.name}.');
+    final result = switch ((bodyKind, yieldType, completionType)) {
+      (.synchronous, null, null) => null,
+      (.asynchronous, null, final t?) when isDartType(t) => CoreTypes.futureOf(
+        t,
+      ),
+      (.syncGenerator, final t?, null) when isDartType(t) =>
+        CoreTypes.iterableOf(t),
+      (.asyncGenerator, final t?, null) when isDartType(t) =>
+        CoreTypes.streamOf(t),
+      _ => throw ArgumentError('Invalid body types for ${target.name}.'),
+    };
+    if (result != null &&
+        (!target.returnType.accepts(result) ||
+            yieldType != null && target.returnType == .voidType ||
+            switch (target.kind) {
+              .initializer ||
+              .factory ||
+              .fieldInitializer ||
+              .setter ||
+              .staticSetter => true,
+              _ => false,
+            })) {
+      throw ArgumentError('Invalid suspendable body for ${target.name}.');
     }
-    if ((bodyKind == .asynchronous) != (completionType != null) ||
-        completionType is CellType ||
-        completionType != null &&
-            (!target.returnType.accepts(CoreTypes.futureOf(completionType!)) ||
-                target.kind == .initializer ||
-                target.kind == .factory ||
-                target.kind == .fieldInitializer ||
-                target.kind == .setter ||
-                target.kind == .staticSetter)) {
-      throw ArgumentError('Invalid async body for ${target.name}.');
-    }
-    final optional = target.signature.optionalSlots;
-    final offset = target.argumentOffset;
-    if (target.isAbstract ||
-        target.redirect != null ||
-        optional.length != this.defaults.length ||
-        optional.any(
-          (slot) =>
-              !this.defaults.containsKey(slot) ||
-              !target.parameterTypes[slot + offset].accepts(
-                this.defaults[slot]!.type,
-              ),
-        )) {
-      throw ArgumentError('Invalid body or defaults for ${target.name}.');
-    }
-    final references = verifyFunction(
+    _references = verifyCallable(
       target,
-      this.blocks,
-      this.defaults.values,
+      defaults.values,
+      blocks: this.blocks,
+      bodyKind: bodyKind,
       yieldType: yieldType,
       completionType: completionType,
     );
-    closures = references.closures;
-    globals = references.globals;
   }
 
   /// Writes the typed blocks, instructions and outgoing edges to [output].
@@ -101,6 +137,7 @@ final class IrFunction(
     output,
     target,
     blocks,
+    bodyKind: bodyKind,
     yieldType: yieldType,
     completionType: completionType,
   );
