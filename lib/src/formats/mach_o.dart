@@ -3,8 +3,14 @@ import 'dart:typed_data';
 
 import 'package:dartc/artifact.dart';
 
-/// Writes Mach-O relocatable objects for macOS ARM64 and x86-64.
+import 'mach_o_dylib.dart';
+
+/// Writes Mach-O objects and dynamic libraries for macOS ARM64 and x86-64.
 abstract final class MachO() {
+  /// Encodes a dynamic library with [installName] and an ad-hoc code signature.
+  static Uint8List shared(ObjectFile object, String installName) =>
+      MachODylib.encode(object, installName);
+
   /// Encodes a text section and its externally visible function symbols.
   ///
   /// Symbol names are already linker names; this does not add a C prefix.

@@ -1,4 +1,4 @@
-/// Native library linking through the host platform's toolchain.
+/// Links native code artifacts without an external toolchain.
 library;
 
 export 'src/linker/linker.dart' show Linker;

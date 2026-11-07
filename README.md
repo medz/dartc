@@ -26,7 +26,7 @@ Save it as `math.dart` in a package that depends on this checkout, then build an
 dart run dartc math.dart -o build/math.o --header build/math.h
 ```
 
-Use `--kind static` or `--kind shared` for a library. Linking uses the host's `ar` or `cc`; object encoding is implemented in Dart. `--target` selects `macos-arm64`, `macos-x64`, `linux-arm64` or `linux-x64` for object output. Library linking currently requires a matching host. `--sdk <root>` selects an installed SDK explicitly.
+Use `--kind static` or `--kind shared` for a library. Code generation, linking, static archives and Mach-O ad-hoc signing are implemented in Dart. Building libraries requires no external native toolchain. `--target` selects `macos-arm64`, `macos-x64`, `linux-arm64` or `linux-x64` independently of the host. `--sdk <root>` selects an installed SDK explicitly.
 
 Native bodies currently support integer constants, addition, subtraction and returns, with register-passed `Int64` arguments and results. Unsupported operations and register pressure are reported as errors. General Dart executables, managed objects, exceptions and a target runtime remain unimplemented in this checkout.
 
@@ -45,6 +45,6 @@ The last command prints the basic blocks, calls and branches for each function i
 
 Assertions are disabled by default. Pass `enableAssertions: true` to `Lowering.lower` to preserve assertion statements and constructor assertion initializers.
 
-The native integration tests use the platform C/C++ compiler and archiver. Test inputs live in `test/compiler/fixtures/`; generated files are confined to `build/`.
+The native integration tests use the platform C/C++ compiler to build calling programs and check interoperability. macOS tests also verify generated signatures with the system verifier. Fixtures live alongside their tests; generated files are confined to `build/`.
 
 [Release notes](https://github.com/medz/dartc/blob/main/CHANGELOG.md) · [MIT license](https://github.com/medz/dartc/blob/main/LICENSE)

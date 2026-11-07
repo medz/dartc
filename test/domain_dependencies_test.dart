@@ -70,9 +70,11 @@ void main() {
           final uri = Uri.parse(literal.stringValue!);
           if (uri.scheme == 'dart') continue;
           if (uri.scheme == 'package' && uri.pathSegments.first != 'dartc') {
-            expect(uri.pathSegments.first, 'analyzer', reason: file.path);
             expect(
-              {'analyzer', 'lowering', 'interop'},
+              const {
+                'analyzer': {'analyzer', 'lowering', 'interop'},
+                'crypto': {'formats'},
+              }[uri.pathSegments.first],
               contains(owner),
               reason: file.path,
             );

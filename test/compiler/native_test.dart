@@ -91,7 +91,7 @@ void main() {
     await expectLater(
       Linker(target)
           .link([library.object, library.object], output, .sharedLibrary),
-      throwsA(isA<ProcessException>()),
+      throwsArgumentError,
     );
     expect(output.readAsStringSync(), 'previous');
   });

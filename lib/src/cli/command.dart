@@ -70,9 +70,6 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
     } on FileSystemException catch (error) {
       errors.writeln(error);
       return 1;
-    } on ProcessException catch (error) {
-      errors.writeln(error);
-      return 1;
     }
   }
 }

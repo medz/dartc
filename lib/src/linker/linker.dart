@@ -1,13 +1,14 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dartc/artifact.dart';
 import 'package:dartc/formats.dart';
 import 'package:dartc/target.dart';
 
-/// Links object artifacts with the host's `cc` or `ar` program.
+/// Links position-independent code artifacts for an explicit target.
 ///
-/// This initial implementation requires the host and output target to match.
-/// Object encoding remains in Dart; no assembly source or Dart SDK is invoked.
+/// Inputs contain defined functions without data sections or unresolved
+/// references, as required by [ObjectFile]. Linking is independent of the host.
 final class Linker(final Target target) {
   /// Builds a native library, preserving an existing output if linking fails.
   Future<void> link(
@@ -23,51 +24,35 @@ final class Linker(final Target target) {
         'Expected matching objects and a library output kind.',
       );
     }
-    if (target != Target.host()) {
-      throw UnsupportedError('Native linking requires a $target host.');
+    final Uint8List bytes;
+    if (kind == .staticLibrary) {
+      bytes = Archive.encode(objects);
+    } else {
+      final code = BytesBuilder(copy: false), symbols = <Symbol>[];
+      final names = <String>{};
+      for (final object in objects) {
+        code.add(Uint8List((-code.length) & 15));
+        final base = code.length;
+        for (final symbol in object.symbols) {
+          if (!names.add(symbol.name)) {
+            throw ArgumentError('Duplicate symbol: ${symbol.name}');
+          }
+          symbols.add(.new(symbol.name, base + symbol.offset, symbol.size));
+        }
+        code.add(object.code);
+      }
+      final image = ObjectFile(target, code.takeBytes(), symbols);
+      final name = output.uri.pathSegments.last;
+      bytes = switch (target.operatingSystem) {
+        .macos => MachO.shared(image, '@rpath/$name'),
+        .linux => Elf.shared(image, name),
+      };
     }
     await output.absolute.parent.create(recursive: true);
     final work = await output.absolute.parent.createTemp('.dartc-link-');
     try {
-      final paths = <String>[];
-      for (final (i, object) in objects.indexed) {
-        final file = File.fromUri(work.uri.resolve('$i.o'));
-        await file.writeAsBytes(switch (target.operatingSystem) {
-          .macos => MachO.encode(object),
-          .linux => Elf.encode(object),
-        });
-        paths.add(file.path);
-      }
       final linked = File.fromUri(work.uri.resolve('output'));
-      final program = kind == .staticLibrary ? 'ar' : 'cc';
-      final args = kind == .staticLibrary
-          ? ['rcs', linked.path, ...paths]
-          : [
-              if (target.operatingSystem == .macos) ...[
-                '-arch',
-                target.architecture == .arm64 ? 'arm64' : 'x86_64',
-                '-dynamiclib',
-                '-Xlinker',
-                '-install_name',
-                '-Xlinker',
-                '@rpath/${output.uri.pathSegments.last}',
-              ] else ...[
-                '-shared',
-                '-Wl,--no-undefined',
-              ],
-              ...paths,
-              '-o',
-              linked.path,
-            ];
-      final result = await Process.run(program, args);
-      if (result.exitCode != 0) {
-        throw ProcessException(
-          program,
-          args,
-          '${result.stdout}${result.stderr}',
-          result.exitCode,
-        );
-      }
+      await linked.writeAsBytes(bytes);
       await linked.rename(output.absolute.path);
     } finally {
       await work.delete(recursive: true);
