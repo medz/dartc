@@ -128,10 +128,6 @@ void main() {
           'extension type E(int value) {} typedef Alias<T> = E; const f = Alias.new;',
           'extension type constructor alias',
         ),
-        (
-          'extension type E(int value) { factory E.zero(int value) = E; }',
-          'extension type constructor shape',
-        ),
       ]) {
         final file = File('${directory.path}/entry.dart')
           ..writeAsStringSync(source);

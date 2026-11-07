@@ -61,6 +61,37 @@ void lowerExtensionType(
     ast.FunctionBody? body,
     List<ast.ConstructorInitializer> initializers,
   ) {
+    if (ctor case ConstructorElement(
+      isFactory: true,
+      redirectedConstructor: final redirect?,
+    )) {
+      final target = bindings.target(ctor, unit, site);
+      final destination = bindings.target(redirect, unit, site);
+      final entry = Block(target.parameterTypes);
+      final arguments = (
+        positional: entry.parameters
+            .take(target.signature.positionalCount)
+            .toList(),
+        named: {
+          for (final parameter in target.signature.named.entries)
+            parameter.key: entry.parameters[parameter.value.slot],
+        },
+      );
+      final result = entry.emit(
+        DirectCall(
+          destination,
+          bindings.bind(destination, arguments),
+          typeArguments: redirect.returnType.typeArguments.map(
+            (type) => bindings.valueType(type, unit, site),
+          ),
+        ),
+      );
+      entry.finish(Return(result));
+      functions.add(
+        IrFunction(target, [entry], defaults: bindings.defaults(target)),
+      );
+      return;
+    }
     FunctionLowering.append(
       functions,
       unit,

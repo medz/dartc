@@ -1,25 +1,19 @@
-# Mixin application lowering
+# Mixins
 
-The lowerer processes each mixin application with the existing resolved AST lowerer. It changes no IR instruction, verifier contract, or fixture runtime behavior.
+## 当前 IR 范围
 
-`C extends B with M, N` has the ordinary class chain `C -> application(N) -> application(M) -> B`. Each application implements its source mixin interface and owns concrete function targets and fields. A pure mixin declaration contains its nominal interface and static members; a mixin class also retains its ordinary class bodies.
+| 语言行为 | 支持情况 |
+| --- | --- |
+| mixin 声明与应用 | 支持普通与泛型 mixin、泛型应用类和父类、多个及重复应用。每次应用拥有独立的实例字段，保留声明的名义接口。 |
+| 成员 | 支持方法、泛型方法、属性、运算符、默认参数、方法提取、闭包和跨库私有成员。抽象成员不遮盖继承的具体实现。 |
+| 字段 | 支持可变、final、late 和 late final；保留每个应用的实际类型参数、初始化顺序和协变写入检查。 |
+| `on` 与 `super` | 支持泛型约束和词法 super，包括逃逸闭包中的 super。调用选择该应用之前的实现。 |
+| 命名应用与 mixin class | 支持分析器生成的构造器、命名参数、默认值和嵌套 mixin class 应用。 |
+| 接口与缺失成员 | 支持 implements、抽象成员及普通 typed noSuchMethod 转发；替换成员时保留显式及类类型参数带来的协变检查。 |
+| 常量 | 支持合法的 const 应用及其泛型父类存储、成员派发和规范身份。 |
 
-## Supported scope
+## 当前边界
 
-- Non-generic mixin declarations and applications, including multiple and repeated applications, overrides, nominal interfaces, defaults, tearoffs, closures, and cross-library private selectors.
-- Independent mutable, final and late field slots per application. Existing getter/setter and late-initializer lowering is reused. An ordinary initializer initializes eager fields before delegating to the preceding application, preserving derived-first initialization order.
-- Non-generic `on` constraints and lexical `super` member references. Each application stores the existing implementation plan's prefix during compilation. Bodies and escaping closures bind super to that prefix, not to the most-derived receiver.
-- Analyzer-generated named mixin application constructors, including named parameters and defaults. Each application forwards through ordinary initializers to its immediate superclass.
-- Mixin classes without their own mixin applications, including application-specific Object member bindings.
+支持枚举混入及其泛型实参和成员重写，见[枚举混入验证](../test/lowering/enum_mixins_test.dart)。新增协变转发体仍受[类成员转发](classes.md)的签名限制。所有源 mixin 和非 Object 父类声明须包含在输入库批次中；未提供的源码不会自动装配。
 
-## Explicit restrictions
-
-Generic mixin declarations, generic own methods, generic application classes, generic on constraints and direct generic bases remain unsupported. So do source abstract members, source implemented interfaces, nested mixin class applications, application constants, and applications requiring new typed noSuchMethod forwarders or additional covariance checks. All source mixins and non-Object superclass declarations must be in the input batch.
-
-A mixin `on B` includes B in its nominal interface hierarchy, as confirmed by an SDK test with an unrelated class implementing the mixin interface. Its application body receives the concrete application type, whose existing superclass hierarchy also supplies the lexical super implementation. General generic receiver environments and additional covariance provenance still require separate work.
-
-## Cost and contracts
-
-The same AST is lowered once per application. Generated IR bodies and lexical closures therefore grow with application count, but compiler implementation and runtime state do not need shared-body aliases, field-slot mappings, or captured dynamic application origins. Each generated body is checked by the existing IR verifier against its actual owner.
-
-Tests: [basic applications](../test/lowering/mixins_test.dart), [fields and lexical super](../test/lowering/mixin_application_state_test.dart), [unsupported boundaries](../test/lowering/mixins_unsupported_test.dart).
+行为验证：[基本应用](../test/lowering/mixins_test.dart)、[字段与词法 super](../test/lowering/mixin_application_state_test.dart)、[泛型、接口、常量及嵌套应用](../test/lowering/mixin_type_environments_test.dart)、[输入库边界](../test/lowering/mixins_unsupported_test.dart)。

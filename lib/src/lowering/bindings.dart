@@ -31,7 +31,22 @@ final class ExtensionApplication(
 final class Bindings({final bool enableAssertions = false}) {
   final _constantSafety = ConstantSafety();
   final _targets = <ExecutableElement, FunctionTarget>{};
+  final _typeEnvironments =
+      <FunctionTarget, Map<TypeParameterType, ValueType>>{};
   final _extensions = <ExecutableElement, ExtensionExecutable>{};
+
+  /// Substitutions from source binders into this instantiated lexical body.
+  Map<TypeParameterType, ValueType> typeEnvironment(FunctionTarget target) {
+    if (_typeEnvironments[target] case final environment?) return environment;
+    if (target.enclosing case final enclosing?) {
+      return typeEnvironment(enclosing);
+    }
+    final owner = target.owner;
+    return _applicationOwners.containsKey(owner)
+        ? owner!.interfaces.single.typeEnvironment
+        : const {};
+  }
+
   final _extensionTypes = <ExtensionTypeElement>{};
 
   /// Reject constructor forms whose erased bodies are not implemented.
@@ -41,10 +56,7 @@ final class Bindings({final bool enableAssertions = false}) {
   ) {
     final element = node.declaredFragment!.element;
     final primary = node.namePart;
-    if (primary is! ast.PrimaryConstructorDeclaration ||
-        element.constructors.any(
-          (c) => c.isFactory && c.redirectedConstructor != null,
-        )) {
+    if (primary is! ast.PrimaryConstructorDeclaration) {
       unsupported(unit, node, 'extension type constructor shape');
     }
     _extensionTypes.add(element);
@@ -63,10 +75,10 @@ final class Bindings({final bool enableAssertions = false}) {
   final _classes = <InterfaceElement, ClassType>{};
   final _mixinApplications = <InterfaceElement, List<IrClass>>{};
   final _mixinInitializers = <IrFunction>[];
-  final _applicationOwners = <ClassType, InterfaceElement>{};
+  final _applicationOwners =
+      <ClassType, ({InterfaceElement owner, InterfaceElement source})>{};
   final _superImplementations =
       <ClassType, Map<MemberSelector, FunctionTarget>>{};
-  final _checkedMixins = <InterfaceElement>{};
   final _classElements = <ClassType, InterfaceElement>{};
   final _parameters = <TypeParameterElement, TypeParameterType>{};
   final _boundParameters = <TypeParameterElement>{};
@@ -150,37 +162,16 @@ final class Bindings({final bool enableAssertions = false}) {
     final effective = <MemberSelector, FunctionTarget>{
       if (parent != null) ..._planImplementations(parent),
     };
-    // The final analyzer interface replaces earlier mixin contributors. Check
-    // each application before losing the entry checks of the implementation
-    // it overrides, using the same parameter-identity transport as forwarders.
-    for (final (index, application)
-        in (_mixinApplications[element] ?? <IrClass>[]).indexed) {
+    for (final application in _mixinApplications[element] ?? <IrClass>[]) {
       _superImplementations[application.type] = Map.of(effective);
-      final mixin = element.mixins[index].element;
+      final mixin = _applicationOwners[application.type]!.source;
       for (final member in <ExecutableElement>[
         ...mixin.methods,
         ...mixin.getters,
         ...mixin.setters,
       ]) {
-        if (member.isStatic) continue;
+        if (member.isStatic || member.isAbstract) continue;
         final selected = application.members[_memberSelector(member)]!;
-        final inherited = effective[selected.selector];
-        if (inherited != null &&
-            (!selected.covariantParameters.containsAll(
-                  _transportCovariance(
-                    inherited,
-                    member,
-                    _declarationCovariance[inherited] ?? const {},
-                  ),
-                ) ||
-                (_classCovariance[inherited]?.isNotEmpty ?? false) ||
-                (_boundCovariance[inherited]?.isNotEmpty ?? false))) {
-          unsupported(
-            unit,
-            site,
-            'mixin application covariance ${member.name}',
-          );
-        }
         effective[selected.selector] = selected;
       }
     }
@@ -323,10 +314,6 @@ final class Bindings({final bool enableAssertions = false}) {
       _syntheticTargets.add(replacement);
       emitted.add(replacement);
       effective[selector] = replacement;
-    }
-    if (element.mixins.isNotEmpty &&
-        (emitted.isNotEmpty || unsupportedSelectors.isNotEmpty)) {
-      unsupported(unit, site, 'mixin forwarding or covariance wrappers');
     }
     _newForwarders[element] = emitted;
     _unsupportedForwarders[element] = unsupportedSelectors;
@@ -607,7 +594,7 @@ final class Bindings({final bool enableAssertions = false}) {
     final owner = lexicalReceiver.nonNullable;
     if (owner is ClassType) {
       final element =
-          _applicationOwners[owner.declaration] ??
+          _applicationOwners[owner.declaration]?.owner ??
           _classElements[owner.declaration];
       if (element != null) {
         _planImplementations(element);
@@ -662,6 +649,14 @@ final class Bindings({final bool enableAssertions = false}) {
       unit,
       site,
     );
+    final environment = enclosing == null
+        ? const <TypeParameterType, ValueType>{}
+        : typeEnvironment(enclosing);
+    final rebound = environment.isEmpty
+        ? null
+        : (valueType(element.type, unit, site) as FunctionType).rebind(
+            environment,
+          );
     FunctionTarget? destination;
     ClassType? redirectOwnerType;
     if (element case final ConstructorElement ctor
@@ -698,10 +693,11 @@ final class Bindings({final bool enableAssertions = false}) {
       element.name ?? '<anonymous>',
       kind == .initializer
           ? .voidType
-          : valueType(element.returnType, unit, site),
-      parameters.map((p) => valueType(p.type, unit, site)),
+          : rebound?.result ?? valueType(element.returnType, unit, site),
+      rebound?.parameters ??
+          parameters.map((p) => valueType(p.type, unit, site)),
       owner: owner,
-      typeParameters: typeParameters,
+      typeParameters: rebound?.typeParameters ?? typeParameters,
       kind: kind,
       redirect: destination,
       redirectOwnerType: redirectOwnerType,
@@ -719,6 +715,13 @@ final class Bindings({final bool enableAssertions = false}) {
           if (p.isNamed) p.name!: p.isRequiredNamed,
       },
     );
+    if (rebound != null) {
+      _typeEnvironments[function] = {
+        ...environment,
+        for (final (i, parameter) in typeParameters.indexed)
+          parameter: rebound.typeParameters[i],
+      };
+    }
     if (declarationFlags.isNotEmpty) {
       _declarationCovariance[function] = declarationFlags;
     }
@@ -815,48 +818,25 @@ final class Bindings({final bool enableAssertions = false}) {
       source,
       receiver,
     );
-    _defaults[function] = {
-      for (final (i, parameter) in element.formalParameters.indexed)
-        if (parameter.isOptional)
-          i + (receiver == null ? 0 : 1): constantOf(parameter, unit, site),
-    };
-    return executable;
-  }
-
-  /// Resolves the selected member's extension arguments before canonicalizing it.
-  ExtensionApplication extensionApplication(
-    ExecutableElement selected,
-    ResolvedUnitResult unit,
-    ast.AstNode site, {
-    dart.DartType? receiverType,
-    ast.ExtensionOverride? override,
-    ExtensionElement? lexicalExtension,
-    bool nullAware = false,
-  }) {
-    final executable = extensionExecutable(selected, unit, site)!;
-    if (executable.receiverType == null) {
-      unsupported(
-        unit,
-        site,
-        'instance application of static extension member',
-      );
+    if (element case ConstructorElement(redirectedConstructor: final redirect?)
+        when element.isFactory) {
+      final destination = target(redirect, unit, site);
+      _defaults[function] = {
+        for (final (i, parameter) in element.formalParameters.indexed)
+          if (parameter.isOptional)
+            i:
+                defaults(destination)[parameter.isNamed
+                    ? destination.signature.named[parameter.name]!.slot
+                    : i]!,
+      };
+    } else {
+      _defaults[function] = {
+        for (final (i, parameter) in element.formalParameters.indexed)
+          if (parameter.isOptional)
+            i + (receiver == null ? 0 : 1): constantOf(parameter, unit, site),
+      };
     }
-    final arguments = extensionTypeArguments(
-      selected,
-      unit.libraryElement,
-      receiverType: receiverType,
-      override: override,
-      lexicalExtension: lexicalExtension,
-      nullAware: nullAware,
-    ).map((type) => valueType(type, unit, site)).toList();
-    return ExtensionApplication(
-      executable,
-      arguments,
-      (executable.receiverType!).substitute({
-        for (final (i, parameter) in executable.extensionParameters.indexed)
-          parameter: arguments[i],
-      }),
-    );
+    return executable;
   }
 
   String _extensionName(Element owner, String name, String operation) {
@@ -888,17 +868,16 @@ final class Bindings({final bool enableAssertions = false}) {
   /// The same checked source is lowered against each actual application owner.
   Iterable<(IrClass, ResolvedUnitResult, ast.AstNode)>
   get mixinDeclarations sync* {
-    for (final entry in _mixinApplications.entries) {
-      for (final (index, application) in entry.value.indexed) {
-        final (unit, source) =
-            _modeledClasses[entry.key.mixins[index].element]!;
-        yield (application, unit, source);
-      }
+    for (final application in mixinApplications) {
+      final (unit, source) =
+          _modeledClasses[_applicationOwners[application.type]!.source]!;
+      yield (application, unit, source);
     }
   }
 
   void replaceMixinApplication(IrClass application) {
-    final layers = _mixinApplications[_applicationOwners[application.type]]!;
+    final layers =
+        _mixinApplications[_applicationOwners[application.type]!.owner]!;
     final index = layers.indexWhere((layer) => layer.type == application.type);
     layers[index] = application;
   }
@@ -1020,7 +999,11 @@ final class Bindings({final bool enableAssertions = false}) {
             ? CoreTypes.mapEntryKey
             : CoreTypes.mapEntryValue;
       }
-      final type = valueType(element.type, unit, site);
+      final type = valueType(element.type, unit, site).substitute(
+        _applicationOwners.containsKey(owner)
+            ? owner.interfaces.single.typeEnvironment
+            : const {},
+      );
       return InstanceField(
         owner,
         element.name!,
@@ -1196,7 +1179,6 @@ final class Bindings({final bool enableAssertions = false}) {
           }
           final element = layerType.element;
           if (!isClassLike(element) ||
-              element.mixins.isNotEmpty ||
               element.library.isInSdk &&
                   !layerType.isDartCoreObject &&
                   !(element.library.isDartCore && element.name == 'MapEntry') ||
@@ -1490,19 +1472,15 @@ final class Bindings({final bool enableAssertions = false}) {
       unsupported(unit, site, 'class ${element.name}');
     }
     if (element is MixinElement) _checkMixin(element, unit, site);
-    if (element.mixins.isNotEmpty &&
-        (element is EnumElement ||
-            element.typeParameters.isNotEmpty ||
-            element.supertype!.typeArguments.isNotEmpty)) {
-      unsupported(unit, site, 'generic or enum mixin application');
-    }
     if (element.mixins.isNotEmpty) {
       for (
         var parent = element.supertype;
         parent != null && !parent.isDartCoreObject;
         parent = parent.element.supertype
       ) {
-        if (!_modeledClasses.containsKey(parent.element)) {
+        if (!_modeledClasses.containsKey(parent.element) &&
+            !(parent.element.library.isDartCore &&
+                parent.element.name == 'Enum')) {
           unsupported(
             unit,
             site,
@@ -1527,14 +1505,26 @@ final class Bindings({final bool enableAssertions = false}) {
         ? ValueType.object
         : valueType(element.supertype!, unit, site) as ClassType;
     final applications = <IrClass>[];
-    for (final (index, mixin) in element.mixins.indexed) {
+    final effective = <MemberSelector, FunctionTarget>{
+      if (element.mixins.isNotEmpty && element.supertype != null)
+        ..._planImplementations(element.supertype!.element),
+    };
+    Iterable<dart.InterfaceType> expand(dart.InterfaceType mixin) sync* {
+      for (final nested in mixin.mixins) {
+        yield* expand(nested);
+      }
+      yield mixin;
+    }
+
+    for (final mixin in element.mixins.expand(expand)) {
       _checkMixin(mixin.element, unit, site);
       final view = valueType(mixin, unit, site) as ClassType;
       final application = ClassType(
         type.library,
-        '<${element.name}:mixin:$index>',
+        '<${element.name}:mixin:${applications.length}>',
         superclass: parent,
         interfaces: [view],
+        typeParameters: parameters,
         isAbstract: true,
       );
       final members = <FunctionTarget>[];
@@ -1545,25 +1535,45 @@ final class Bindings({final bool enableAssertions = false}) {
       ]) {
         if (member.isStatic) continue;
         final source = target(member, unit, site);
-        final signature = source.signature;
+        final signature = source.signature.rebind(view.typeEnvironment);
+        final inherited = effective[source.selector];
+        Set<int> covariance(Map<FunctionTarget, Set<int>> flags) => {
+          ...?flags[source],
+          if (inherited != null)
+            ..._transportCovariance(inherited, member, flags[inherited] ?? {}),
+        };
+        final declarationFlags = covariance(_declarationCovariance);
+        final classFlags = covariance(_classCovariance);
         final bound = FunctionTarget(
           type.library,
           source.name,
-          source.returnType,
+          signature.result,
           signature.parameters,
           owner: application,
           kind: source.kind,
+          typeParameters: signature.typeParameters,
           privateSelectorLibrary: source.selector.privateLibrary,
           optionalPositional: signature.optionalPositional,
           namedParameters: signature.namedParameters,
-          covariantParameters: source.covariantParameters,
+          covariantParameters: {...declarationFlags, ...classFlags},
+          isAbstract: member.isAbstract,
         );
+        _typeEnvironments[bound] = {
+          ...view.typeEnvironment,
+          for (final (i, parameter) in source.typeParameters.indexed)
+            parameter: signature.typeParameters[i],
+        };
         _defaults[bound] = defaults(source);
-        _declarationCovariance[bound] =
-            _declarationCovariance[source] ?? const {};
+        _declarationCovariance[bound] = declarationFlags;
+        _classCovariance[bound] = classFlags;
+        _boundCovariance[bound] = {
+          ...?_boundCovariance[source],
+          ...?_boundCovariance[inherited],
+        };
+        if (!bound.isAbstract) effective[bound.selector] = bound;
         members.add(bound);
       }
-      _applicationOwners[application] = element;
+      _applicationOwners[application] = (owner: element, source: mixin.element);
       applications.add(
         IrClass(
           application,
@@ -1603,31 +1613,9 @@ final class Bindings({final bool enableAssertions = false}) {
     ResolvedUnitResult unit,
     ast.AstNode site,
   ) {
-    if (_checkedMixins.contains(element)) return;
-    final source = _modeledClasses[element];
-    if (source == null) unsupported(unit, site, 'unmodeled mixin source');
-    (unit, site) = source;
-    if (element.typeParameters.isNotEmpty ||
-        element.interfaces.isNotEmpty ||
-        element.mixins.isNotEmpty ||
-        element is MixinElement &&
-            element.superclassConstraints.any(
-              (type) => type.typeArguments.isNotEmpty,
-            ) ||
-        <ExecutableElement>[
-          ...element.methods,
-          ...element.getters,
-          ...element.setters,
-        ].any(
-          (member) => member.typeParameters.isNotEmpty || member.isAbstract,
-        )) {
-      unsupported(
-        unit,
-        site,
-        'mixin generics, interfaces, abstract members or nested applications',
-      );
+    if (!_modeledClasses.containsKey(element)) {
+      unsupported(unit, site, 'unmodeled mixin source');
     }
-    _checkedMixins.add(element);
   }
 }
 

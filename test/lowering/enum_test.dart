@@ -99,12 +99,6 @@ void main() {
   group('unsupported enum constructs', () {
     for (final (name, source) in <(String, String)>[
       (
-        'mixins',
-        'mixin Extra { int get score => 1; }\n'
-            'enum E with Extra { a }\n'
-            'int f() => E.a.score;',
-      ),
-      (
         'EnumByName.byName',
         'enum E { a, b }\n'
             "E f() => E.values.byName('a');",

@@ -220,7 +220,18 @@ IrClass lowerClass(
   if (element is EnumElement &&
       !members.any(
         (member) => member.kind == .method && member.name == 'toString',
-      )) {
+      ) &&
+      bindings
+              .superTarget(
+                type,
+                element.library.typeProvider.objectElement.getMethod(
+                  'toString',
+                )!,
+                unit,
+                declaration,
+              )
+              .owner ==
+          ValueType.object) {
     final target = FunctionTarget(
       type.library,
       'toString',

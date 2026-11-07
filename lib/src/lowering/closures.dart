@@ -108,6 +108,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
       }
     }
     for (final fn in functions.values) {
+      final enclosing = fn.parent?.target ?? root;
       ValueType slot(Element? e) {
         if (e == null) return receiverType ?? root.owner!;
         final declared = switch (e) {
@@ -115,7 +116,9 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
           LocalFunctionElement(:final type) => type,
           _ => throw StateError('Unexpected lexical capture.'),
         };
-        final type = bindings.valueType(declared, unit, fn.syntax);
+        final type = bindings
+            .valueType(declared, unit, fn.syntax)
+            .substitute(bindings.typeEnvironment(enclosing));
         return boxed.contains(e)
             ? CellType(
                 type,
@@ -125,7 +128,6 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
             : type;
       }
 
-      final enclosing = fn.parent?.target ?? root;
       fn.target = switch (fn.element) {
         final LocalFunctionElement element => bindings.target(
           element,
@@ -138,7 +140,9 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
         final LocalVariableElement element => FunctionTarget(
           root.library,
           '<initialize:${element.name}>',
-          bindings.valueType(element.type, unit, fn.syntax),
+          bindings
+              .valueType(element.type, unit, fn.syntax)
+              .substitute(bindings.typeEnvironment(enclosing)),
           const [],
           kind: .closure,
           enclosing: enclosing,

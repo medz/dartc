@@ -30,8 +30,9 @@ final class FunctionContext(
   Value? receiver;
 
   /// Resolves [type] in the same declaration table as the rest of the program.
-  ValueType typeOf(DartType type, ast.AstNode site) =>
-      bindings.valueType(type, unit, site);
+  ValueType typeOf(DartType type, ast.AstNode site) => bindings
+      .valueType(type, unit, site)
+      .substitute(bindings.typeEnvironment(target));
 
   /// Converts the analyzer's resolved explicit or inferred invocation arguments.
   List<ValueType> typeArguments(Iterable<DartType>? types, ast.AstNode site) =>
@@ -135,14 +136,25 @@ final class FunctionContext(
             _ => null,
           }
         : null;
-    final application = bindings.extensionApplication(
-      member,
-      unit,
+    final executable = bindings.extensionExecutable(member, unit, site)!;
+    final arguments = typeArguments(
+      extensionTypeArguments(
+        member,
+        unit.libraryElement,
+        receiverType: receiver?.staticType ?? receiverType ?? lexicalReceiver,
+        override: receiver is ast.ExtensionOverride ? receiver : null,
+        lexicalExtension: lexical,
+        nullAware: nullAware,
+      ),
       site,
-      receiverType: receiver?.staticType ?? receiverType ?? lexicalReceiver,
-      override: receiver is ast.ExtensionOverride ? receiver : null,
-      lexicalExtension: lexical,
-      nullAware: nullAware,
+    );
+    final application = ExtensionApplication(
+      executable,
+      arguments,
+      executable.receiverType!.substitute({
+        for (final (i, parameter) in executable.extensionParameters.indexed)
+          parameter: arguments[i],
+      }),
     );
     // Analyzer 14.7 leaves raw extension parameters in some explicit operator
     // result types, including enclosing record/context metadata. Do not emit
@@ -364,9 +376,7 @@ final class FunctionContext(
   /// Writes the binding or its shared captured storage.
   void writeLocal(VariableElement variable, Value value) {
     final stored = _locals[variable]!;
-    final converted = normal(
-      convert(value, bindings.valueType(variable.type, unit, unit.unit)),
-    );
+    final converted = normal(convert(value, typeOf(variable.type, unit.unit)));
     if (converted == null) return;
     value = converted;
     if (stored.type is CellType) {
