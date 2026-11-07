@@ -9,6 +9,7 @@ final class IrClass(
   final ClassType type,
   Iterable<InstanceField> fields, {
   Iterable<FunctionTarget> members = const [],
+  Iterable<FunctionTarget> implementations = const [],
   Iterable<FunctionTarget> constructors = const [],
   Iterable<MemberSelector> unsupportedForwarders = const [],
 }) {
@@ -17,6 +18,12 @@ final class IrClass(
 
   /// Instance members declared here, including implicit accessors and abstract members.
   final Map<MemberSelector, FunctionTarget> members = _members(type, members);
+
+  /// Concrete entries for abstract declarations whose inherited entry differs.
+  final Map<MemberSelector, FunctionTarget> implementations = _members(
+    type,
+    implementations,
+  );
 
   /// Effective typed noSuchMethod forwarders whose execution is not yet modeled.
   ///
@@ -67,6 +74,19 @@ final class IrClass(
   this {
     if (!identical(type, type.declaration)) {
       throw ArgumentError('A class definition requires its declaration.');
+    }
+    for (final entry in this.implementations.entries) {
+      final declaration = this.members[entry.key], body = entry.value;
+      if (declaration == null ||
+          !declaration.isAbstract ||
+          body.isAbstract ||
+          !declaration.signature
+              .instantiate(declaration.typeParameters)
+              .accepts(
+                body.reifiedSignature.instantiate(declaration.typeParameters),
+              )) {
+        throw ArgumentError('Incompatible abstract member implementation.');
+      }
     }
     for (final selector in this.unsupportedForwarders) {
       checkMemberSelector(selector);
@@ -142,7 +162,9 @@ final class IrProgram(
       final definition = _definitions[type.declaration];
       unsupportedForwarder |=
           definition?.unsupportedForwarders.contains(selector) ?? false;
-      final target = definition?.members[selector];
+      final target =
+          definition?.implementations[selector] ??
+          definition?.members[selector];
       if (target != null && !target.isAbstract) {
         return (
           target: target,
@@ -194,6 +216,12 @@ final class IrProgram(
             '  factory ${ctor.name} = ${label(ctor.redirectOwnerType ?? destination.owner!)}.${destination.name}',
           );
         }
+      }
+      for (final entry in declaration.implementations.entries) {
+        output.writeln(
+          '  ${entry.key.name}: ${declaration.members[entry.key]!.signature.dartName}'
+          ' -> entry ${entry.value.signature.dartName}',
+        );
       }
     }
     for (final global in globals) {
@@ -287,7 +315,10 @@ final class IrProgram(
       } else {
         names[nameOf(t)] = t;
       }
-      if (t.kind.isVirtual && _definitions[owner]?.members[t.selector] != t) {
+      if (t.kind.isVirtual &&
+          (_definitions[owner]?.implementations[t.selector] ??
+                  _definitions[owner]?.members[t.selector]) !=
+              t) {
         throw ArgumentError(
           'Instance body does not match the declared member.',
         );
@@ -336,9 +367,11 @@ final class IrProgram(
       final owner = target.owner;
       final c = owner == null ? null : definitionOf(owner);
       final known = switch (target.kind) {
-        .getter ||
-        .setter ||
-        .method when c != null => c.members[target.selector],
+        .getter || .setter || .method when c != null =>
+          target.isAbstract
+              ? c.members[target.selector]
+              : c.implementations[target.selector] ??
+                    c.members[target.selector],
         .initializer || .factory when c != null => c.constructors[target.name],
         .fieldInitializer when c != null => fieldInitializers.lookup(target),
         _ => names.putIfAbsent(nameOf(target), () => target),
@@ -421,7 +454,7 @@ final class IrProgram(
           throw ArgumentError('Missing constructor implementation.');
         }
       }
-      for (final member in c.members.values) {
+      for (final member in [...c.members.values, ...c.implementations.values]) {
         checkSignature(member);
         if (!member.isAbstract && implementationOf(member) == null) {
           throw ArgumentError('Missing member implementation.');

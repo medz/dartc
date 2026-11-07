@@ -61,12 +61,22 @@ IrFunction lowerSuperForwarder(
 ) {
   final entry = Block(target.parameterTypes);
   final arguments = entry.parameters.skip(target.argumentOffset).toList();
-  final ordered = List<Value>.of(arguments);
-  for (final parameter in bodyTarget.signature.named.entries) {
-    ordered[parameter.value.slot] =
-        arguments[target.signature.named[parameter.key]!.slot];
+  final ordered = bindings.bind(bodyTarget, (
+    positional: arguments.take(target.signature.positionalCount).toList(),
+    named: {
+      for (final parameter in target.signature.named.entries)
+        parameter.key: arguments[parameter.value.slot],
+    },
+  ));
+  final signature = bodyTarget
+      .signatureFor(target.owner!)
+      .instantiate(target.typeParameters);
+  for (final (i, expected) in signature.parameters.indexed) {
+    if (!expected.accepts(ordered[i].type)) {
+      ordered[i] = entry.emit(TypeCast(ordered[i], expected));
+    }
   }
-  final result = entry.emit(
+  Value result = entry.emit(
     DirectCall(
       bodyTarget,
       [entry.parameters.first, ...ordered],
@@ -74,6 +84,9 @@ IrFunction lowerSuperForwarder(
       typeArguments: target.typeParameters,
     ),
   );
+  if (!target.returnType.accepts(result.type)) {
+    result = entry.emit(TypeCast(result, target.returnType));
+  }
   entry.finish(
     target.returnType == ValueType.never ? Unreachable(result) : Return(result),
   );

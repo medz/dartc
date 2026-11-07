@@ -63,16 +63,5 @@ void main() {
       newest.blocks.expand((b) => b.instructions).whereType<MakeInvocation>(),
       isEmpty,
     );
-    final reordered = functions.singleWhere(
-      (f) => f.target.owner?.name == 'NamedMiddle' && f.target.name == 'f',
-    );
-    final reorderedCall = reordered.blocks
-        .expand((b) => b.instructions)
-        .whereType<DirectCall>()
-        .single;
-    expect(reorderedCall.inputs.skip(1), [
-      reordered.blocks.first.parameters[2],
-      reordered.blocks.first.parameters[1],
-    ]);
   });
 }

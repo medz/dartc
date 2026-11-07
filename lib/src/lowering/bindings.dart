@@ -93,7 +93,8 @@ final class Bindings({final bool enableAssertions = false}) {
       <InterfaceElement, Map<MemberSelector, FunctionTarget>>{};
   // Eligibility for later nSM replacement, including direct wrappers over nSM.
   final _syntheticTargets = <FunctionTarget>{};
-  final _superWrappers = <FunctionTarget, FunctionTarget>{};
+  final _superWrappers =
+      <FunctionTarget, ({FunctionTarget target, FunctionType declaration})>{};
   // Keep declaration covariance separate from implicit class-variable checks.
   // CFE compares these independently when deciding to emit a super wrapper.
   final _declarationCovariance = <FunctionTarget, Set<int>>{};
@@ -134,7 +135,7 @@ final class Bindings({final bool enableAssertions = false}) {
   );
 
   FunctionTarget? superWrapperTarget(FunctionTarget target) =>
-      _superWrappers[target];
+      _superWrappers[target]?.target;
 
   /// Stable targets emitted only by the destination class's lowering pass.
   List<FunctionTarget> forwarders(InterfaceElement element) {
@@ -303,7 +304,12 @@ final class Bindings({final bool enableAssertions = false}) {
       };
       if (boundFlags.isNotEmpty) _boundCovariance[replacement] = boundFlags;
       if (inherited != null) {
-        if (inherited.signatureFor(owner) == replacement.signature) {
+        final inheritedSignature =
+            _superWrappers[inherited]?.declaration.substitute(
+              inherited.environmentFor(owner),
+            ) ??
+            inherited.signatureFor(owner);
+        if (inheritedSignature == replacement.signature) {
           continue;
         }
       }
@@ -378,45 +384,39 @@ final class Bindings({final bool enableAssertions = false}) {
         !(_boundCovariance[inherited] ?? const <int>{}).containsAll(
           combinedBounds,
         )) {
-      // Only an own declaration supplies unambiguous canonical defaults.
-      // Unequal signatures require CFE semi-stub rewriting, not this body.
       final owner = classType(element, unit, site);
-      if (member is MethodElement &&
-          !member.isOperator &&
-          member.isAbstract &&
-          member.baseElement.enclosingElement == element &&
-          privateLibrary == null &&
-          inherited.signatureFor(owner) == valueType(member.type, unit, site)) {
-        final templates = executableTypeParameterDefaults(member);
-        if (templates.every((type) => type != null)) {
-          final wrapper = _forwarderTarget(
-            element,
-            member,
-            templates,
-            unit,
-            site,
-            effectiveCovariance: {...inheritedCovariance, ...declarationFlags},
-            inheritedClassCovariance: {
-              ...inheritedClassCovariance,
-              ...combinedClassCovariance,
-            },
-          );
-          _declarationCovariance[wrapper] = {
-            ...inheritedCovariance,
-            ...declarationFlags,
-          };
-          _boundCovariance[wrapper] = {
-            ...?_boundCovariance[inherited],
-            ...combinedBounds,
-          };
-          _superWrappers[wrapper] = _superWrappers[inherited] ?? inherited;
-          if (_syntheticTargets.contains(inherited)) {
-            _syntheticTargets.add(wrapper);
-          }
-          effective[wrapper.selector] = wrapper;
-          emitted.add(wrapper);
-          return;
+      final templates = executableTypeParameterDefaults(member);
+      if (templates.every((type) => type != null)) {
+        final wrapper = _forwarderTarget(
+          element,
+          member,
+          templates,
+          unit,
+          site,
+          privateLibrary: privateLibrary,
+          inheritedEntry: inherited,
+          effectiveCovariance: {...inheritedCovariance, ...declarationFlags},
+          inheritedClassCovariance: {
+            ...inheritedClassCovariance,
+            ...combinedClassCovariance,
+          },
+        );
+        _boundCovariance[wrapper] = {
+          ...?_boundCovariance[inherited],
+          ...combinedBounds,
+        };
+        _superWrappers[wrapper] = (
+          target: inherited.signatureFor(owner) == wrapper.signature
+              ? _superWrappers[inherited]?.target ?? inherited
+              : inherited,
+          declaration: valueType(member.type, unit, site) as FunctionType,
+        );
+        if (_syntheticTargets.contains(inherited)) {
+          _syntheticTargets.add(wrapper);
         }
+        effective[wrapper.selector] = wrapper;
+        emitted.add(wrapper);
+        return;
       }
       unsupported(
         unit,
@@ -508,6 +508,7 @@ final class Bindings({final bool enableAssertions = false}) {
     ResolvedUnitResult unit,
     ast.AstNode site, {
     Uri? privateLibrary,
+    FunctionTarget? inheritedEntry,
     Set<int> effectiveCovariance = const {},
     Set<int> inheritedClassCovariance = const {},
   }) {
@@ -519,28 +520,40 @@ final class Bindings({final bool enableAssertions = false}) {
       site,
       defaultTemplates: templates,
     );
+    final signature =
+        inheritedEntry?.signatureFor(owner).rebind({}) ??
+        FunctionType(
+          valueType(selected.returnType, unit, site),
+          parameters.map((p) => valueType(p.type, unit, site)),
+          typeParameters: binders,
+          optionalPositional: parameters
+              .where((p) => p.isOptionalPositional)
+              .length,
+          namedParameters: {
+            for (final p in parameters)
+              if (p.isNamed) p.name!: p.isRequiredNamed,
+          },
+        );
+    int slot(int i) =>
+        parameters[i].isNamed ? signature.named[parameters[i].name]!.slot : i;
+    final declarationFlags = {
+      ...effectiveCovariance.map(slot),
+      for (final (i, p) in parameters.indexed)
+        if (p.isCovariant) slot(i),
+    };
+    final classFlags = inheritedClassCovariance.map(slot).toSet();
     final result = FunctionTarget(
       destination.library.uri,
       selected.name!,
-      valueType(selected.returnType, unit, site),
-      parameters.map((p) => valueType(p.type, unit, site)),
+      signature.result,
+      signature.parameters,
       owner: owner,
       kind: _memberSelector(selected).kind,
       privateSelectorLibrary: privateLibrary,
-      typeParameters: binders,
-      optionalPositional: parameters
-          .where((p) => p.isOptionalPositional)
-          .length,
-      namedParameters: {
-        for (final p in parameters)
-          if (p.isNamed) p.name!: p.isRequiredNamed,
-      },
-      covariantParameters: [
-        ...inheritedClassCovariance,
-        ...effectiveCovariance,
-        for (final (i, p) in parameters.indexed)
-          if (p.isCovariant) i,
-      ],
+      typeParameters: signature.typeParameters,
+      optionalPositional: signature.optionalPositional,
+      namedParameters: signature.namedParameters,
+      covariantParameters: {...classFlags, ...declarationFlags},
     );
     // These checks survive specialization even when the destination's own
     // parameter types no longer contain class variables. Keep their provenance
@@ -549,14 +562,16 @@ final class Bindings({final bool enableAssertions = false}) {
         ? const <TypeParameterType>{}
         : owner.typeParameters.toSet();
     _classCovariance[result] = {
-      ...inheritedClassCovariance,
+      ...classFlags,
       if (ownerParameters.isNotEmpty)
         for (final (i, type) in result.signature.parameters.indexed)
           if (type.requiresCovariantCheck(ownerParameters)) i,
     };
+    _declarationCovariance[result] = declarationFlags;
     _defaults[result] = {
+      if (inheritedEntry != null) ...defaults(inheritedEntry),
       for (final (i, p) in parameters.indexed)
-        if (p.isOptional) i: constantOf(p.baseElement, unit, site),
+        if (p.isOptional) slot(i): constantOf(p.baseElement, unit, site),
     };
     return result;
   }

@@ -247,29 +247,6 @@ Object? invoke() { dynamic c = C(); return c.g(); }
     },
   );
 
-  test('unequal inherited signatures still require unsupported semi-stub rewriting', () async {
-    final directory = Directory.systemTemp.createTempSync(
-      'dartc-forwarder-covariance-',
-    );
-    addTearDown(() => directory.deleteSync(recursive: true));
-    final file = File('${directory.path}/entry.dart')
-      ..writeAsStringSync('''
-abstract class I { Object? f([num x = 10]); }
-class A implements I { dynamic noSuchMethod(Invocation i) => 7; }
-abstract class B extends A { Object? f([covariant int x = 20]); }
-class C extends B {}
-''');
-    await expectLater(
-      CheckedLibraries.read([file.path], Lowering.lower),
-      throwsA(
-        isA<UnsupportedError>().having(
-          (e) => e.message,
-          'feature',
-          contains('inherited noSuchMethod covariance transition f'),
-        ),
-      ),
-    );
-  });
   test('foreign private replacement does not reuse an incompatible synthetic ancestor', () async {
     final directory = Directory.systemTemp.createTempSync(
       'dartc-private-replacement-',

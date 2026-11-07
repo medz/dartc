@@ -67,6 +67,7 @@ IrClass lowerClass(
 
   final fields = <InstanceField>[];
   final members = <FunctionTarget>[];
+  final implementations = <FunctionTarget>[];
   final constructors = <FunctionTarget>[...?application?.constructors.values];
   for (final field in element.fields) {
     if (field.isEnumConstant || field.isOriginEnumValues) {
@@ -252,8 +253,16 @@ IrClass lowerClass(
   }
   for (final forwarder in forwarders) {
     final bodyTarget = bindings.superWrapperTarget(forwarder);
-    members.removeWhere((member) => member.selector == forwarder.selector);
-    members.add(forwarder);
+    final declaredMember = members
+        .where((m) => m.selector == forwarder.selector)
+        .firstOrNull;
+    if (declaredMember != null &&
+        declaredMember.signature != forwarder.signature) {
+      implementations.add(forwarder);
+    } else {
+      members.removeWhere((member) => member.selector == forwarder.selector);
+      members.add(forwarder);
+    }
     functions.add(
       bodyTarget != null
           ? lowerSuperForwarder(bindings, forwarder, bodyTarget)
@@ -273,6 +282,7 @@ IrClass lowerClass(
     type,
     fields,
     members: members,
+    implementations: implementations,
     constructors: constructors,
     unsupportedForwarders: application == null
         ? bindings.unsupportedForwarders(element)
