@@ -93,7 +93,7 @@ final class FixtureRunner(
     Map<TypeParameterType, ValueType> environment,
   ) {
     if (environment.isEmpty) return value;
-    ValueType resolve(ValueType type) => substituteType(type, environment);
+    ValueType resolve(ValueType type) => type.substitute(environment);
     Constant child(Constant value) => _resolvedConstant(value, environment);
     return switch (value) {
       ScalarConstant() || TypeConstant() => value,
@@ -143,7 +143,7 @@ final class FixtureRunner(
         :final constructorAlias,
       ) =>
         _staticFunctions.putIfAbsent(
-          constantKey(value),
+          value.structuralKey,
           () => _FunctionValue(
             target,
             null,
@@ -161,14 +161,14 @@ final class FixtureRunner(
           ),
         ),
       RecordConstant(:final type, :final fields) => _constants.putIfAbsent(
-        constantKey(value),
+        value.structuralKey,
         () => _RecordValue(
           type as RecordType,
           fields.map((field) => _constant(field)).toList(),
         ),
       ),
       SequenceConstant(:final type, :final elements) => _constants.putIfAbsent(
-        constantKey(value),
+        value.structuralKey,
         () => _CollectionValue(
           type as ClassType,
           type.declaration == CoreTypes.set
@@ -178,13 +178,13 @@ final class FixtureRunner(
         ),
       ),
       MapConstant(:final type, :final entries) => _constants.putIfAbsent(
-        constantKey(value),
+        value.structuralKey,
         () => _CollectionValue(type as ClassType, {
           for (final e in entries) _constant(e.$1): _constant(e.$2),
         }, immutable: true),
       ),
       ObjectConstant(:final type, :final fields) => _constants.putIfAbsent(
-        constantKey(value),
+        value.structuralKey,
         () => _Instance(type as ClassType, this)
           ..fields.addAll({
             for (final e in fields.entries) e.key: _constant(e.value),
@@ -214,7 +214,7 @@ final class FixtureRunner(
       final owner = target.owner;
       if (owner != null &&
           (owner == CoreTypes.future || owner.name == 'Completer')) {
-        final type = substituteType(owner, environment) as ClassType;
+        final type = owner.substitute(environment) as ClassType;
         final element = type.typeArguments.single;
         if (owner.name == 'Completer' &&
             (target.name == 'new' || target.name == 'sync')) {
@@ -507,7 +507,7 @@ final class FixtureRunner(
     final argumentsForTypes = fn.typeArguments ?? typeArguments;
     final binders = fn.genericSignature.typeParameters;
     final genericSignature =
-        substituteType(fn.genericSignature, environment) as FunctionType;
+        fn.genericSignature.substitute(environment) as FunctionType;
     final appliedSignature = _instantiateSignature(
       genericSignature,
       argumentsForTypes,
@@ -525,7 +525,7 @@ final class FixtureRunner(
       environment = {...environment, ...resolved.ownerType.typeEnvironment};
     }
     final declaredSignature =
-        substituteType(target.signature, environment) as FunctionType;
+        target.signature.substitute(environment) as FunctionType;
     final signature = declaredSignature.typeParameters.isEmpty
         ? declaredSignature
         : _instantiateSignature(declaredSignature, argumentsForTypes);
@@ -541,7 +541,7 @@ final class FixtureRunner(
         ? _construct(
             target,
             arguments,
-            substituteType(target.owner!, environment) as ClassType,
+            (target.owner!).substitute(environment) as ClassType,
           )
         : _enter(target, [
             if (target.kind == .closure) fn.genericOrigin ?? fn,
@@ -1550,14 +1550,14 @@ final class FixtureRunner(
         List.of(args),
         Map.of(environment),
       );
-      final type = substituteType(function.completionType!, environment);
+      final type = (function.completionType!).substitute(environment);
       return _GuestFuture(CoreTypes.futureOf(type), _driveAsync(frame, type));
     }
     if (function.bodyKind == .syncGenerator) {
       final saved = List<Object?>.unmodifiable(args);
       final types = Map<TypeParameterType, ValueType>.unmodifiable(environment);
       return _GeneratorIterable(
-        CoreTypes.iterableOf(substituteType(function.yieldType!, types)),
+        CoreTypes.iterableOf((function.yieldType!).substitute(types)),
         () => _GeneratorIterator(this, function, saved, types),
       );
     }
@@ -1599,7 +1599,7 @@ final class FixtureRunner(
       Jump? edge;
       if (step is _Suspended) {
         final operation = step.operation;
-        final type = substituteType(operation.result.type, frame.environment);
+        final type = operation.result.type.substitute(frame.environment);
         final awaited = _boxOrAdopt(step.operand, type, check: false);
         try {
           final box = await awaited;
@@ -1667,7 +1667,7 @@ final class FixtureRunner(
     Map<TypeParameterType, ValueType> environment, [
     _ExecutionFrame? frame,
   ]) {
-    ValueType resolve(ValueType type) => substituteType(type, environment);
+    ValueType resolve(ValueType type) => type.substitute(environment);
     final values = frame?.values ?? <Value, Object?>{};
     Object? read(Value v) => switch (v) {
       Constant() => _constant(v, environment),
@@ -1939,8 +1939,7 @@ final class FixtureRunner(
           _storeGlobal(global, read(value));
         case StoreField(:final field, :final receiver, :final value):
           final instance = read(receiver) as _Instance;
-          final type = substituteType(
-            field.type,
+          final type = field.type.substitute(
             instance.type.asInstanceOf(field.owner)!.typeEnvironment,
           );
           final converted = _typeOperation(type, read(value), cast: true);
@@ -2260,7 +2259,7 @@ final class _GeneratorIterator(
   super.environment,
 ) extends _ExecutionFrame implements Iterator<Object?> {
   late final ClassType type = CoreTypes.iteratorOf(
-    substituteType(function.yieldType!, environment),
+    (function.yieldType!).substitute(environment),
   );
   Object? _current;
   bool _done = false, _running = false;
@@ -2439,7 +2438,7 @@ final class _FunctionValue(
         ownerType:
             (target.kind == .initializer || target.kind == .factory) &&
                 target.owner!.typeParameters.every(environment.containsKey)
-            ? substituteType(target.owner!, environment) as ClassType
+            ? (target.owner!).substitute(environment) as ClassType
             : null,
       );
 
@@ -2458,7 +2457,7 @@ final class _FunctionValue(
   }
 
   FunctionType get reifiedSignature {
-    final signature = substituteType(genericSignature, {
+    final signature = genericSignature.substitute({
       ...environment,
       if (receiver != null)
         ...receiver!.type.asInstanceOf(target.owner!)!.typeEnvironment,

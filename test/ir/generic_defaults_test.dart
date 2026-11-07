@@ -203,17 +203,17 @@ void main() {
     final t = _parameter('T', defaultType: outer);
     final absent = _parameter('Missing');
     final source = FunctionType(.voidType, [], typeParameters: [t, absent]);
-    expect(typeParametersIn(source), [outer]);
+    expect(source.freeTypeParameters, [outer]);
     final changed =
-        substituteType(source, {outer: ValueType.integer}) as FunctionType;
+        source.substitute({outer: ValueType.integer}) as FunctionType;
     expect(changed, source);
     expect(changed.typeParameters[0], isNot(same(t)));
     expect(changed.typeParameters[0].defaultType, ValueType.integer);
     expect(changed.typeParameters[1], isNot(same(absent)));
     expect(changed.typeParameters[1].defaultType, isNull);
-    expect(typeParametersIn(changed), isEmpty);
+    expect(changed.freeTypeParameters, isEmpty);
     expect(t.defaultType, same(outer));
-    expect(substituteType(source, {t: ValueType.string}), same(source));
+    expect(source.substitute({t: ValueType.string}), same(source));
   });
 
   test('fresh defaults use the same scoped binder map as bounds', () {
@@ -222,7 +222,7 @@ void main() {
     final u = _parameter('U', bound: t, defaultType: t);
     final source = FunctionType(u, [t], typeParameters: [t, u]);
     final changed =
-        substituteType(source, {outer: ValueType.number}) as FunctionType;
+        source.substitute({outer: ValueType.number}) as FunctionType;
     final freshT = changed.typeParameters[0];
     final freshU = changed.typeParameters[1];
     expect(freshT.bound, ValueType.number);
@@ -240,12 +240,12 @@ void main() {
     final inner = _parameter('T');
     inner.initializeDefaultType(RecordType([outer, inner]));
     final source = FunctionType(.voidType, [], typeParameters: [inner]);
-    final changed = substituteType(source, {outer: inner}) as FunctionType;
+    final changed = source.substitute({outer: inner}) as FunctionType;
     final fresh = changed.typeParameters.single;
     final defaultType = fresh.defaultType as RecordType;
     expect(fresh, isNot(same(inner)));
     expect(defaultType.fields, [inner, fresh]);
-    expect(typeParametersIn(changed), [inner]);
+    expect(changed.freeTypeParameters, [inner]);
     expect((inner.defaultType as RecordType).fields, [outer, inner]);
   });
 
@@ -270,7 +270,7 @@ void main() {
       [],
       typeParameters: [t, u],
     );
-    expect(typeParametersIn(own.signature), isEmpty);
+    expect(own.signature.freeTypeParameters, isEmpty);
     expect(() => _emptyFunction(own), returnsNormally);
   });
 
@@ -323,9 +323,8 @@ void main() {
         typeParameters: [v],
       );
       expect(() => _emptyFunction(local), returnsNormally);
-      final captured = substituteType(local.signature, {
-        u: ValueType.integer,
-      }) as FunctionType;
+      final captured =
+          local.signature.substitute({u: ValueType.integer}) as FunctionType;
       expect(captured.defaultTypeArguments, [ValueType.integer]);
       expect(v.defaultType, same(u));
     },

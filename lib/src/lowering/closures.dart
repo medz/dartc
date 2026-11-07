@@ -37,7 +37,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     final executable = application.executable;
     // Extraction may occur inside this same method's body. Reuse capture-free
     // substitution, but always freshen its method binders.
-    final signature = rebindFunctionType(executable.sourceSignature, {
+    final signature = executable.sourceSignature.rebind({
       for (final (i, parameter) in executable.extensionParameters.indexed)
         parameter: application.typeArguments[i],
     }, defaultTemplates: defaultTemplates);

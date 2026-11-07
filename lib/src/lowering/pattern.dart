@@ -113,7 +113,7 @@ final class PatternCache(
       final key = (
         path,
         operator == '!=' ? '==' : operator,
-        constantKey(constant),
+        constant.structuralKey,
       );
       final pattern = operand.parent;
       final application = pattern is ast.RelationalPattern
@@ -175,7 +175,7 @@ final class PatternCache(
               context.unit,
               element.key,
             );
-            final key = constantKey(constant);
+            final key = constant.structuralKey;
             _operands[element.key] = (constant, key);
             final lookup = (path, '[]', key);
             final contains = (path, 'containsKey', key);
@@ -272,7 +272,7 @@ Object _listPath(Object parent, int index, int rest, int length) {
   // Tail positions are distinct from head indices, even if their runtime
   // numeric indices happen to coincide.
   if (rest >= 0 && index > rest) return (parent, 'tail[]', length - index - 1);
-  return (parent, '[]', constantKey(Constant.integer(index)));
+  return (parent, '[]', Constant.integer(index).structuralKey);
 }
 
 bool _isDiscard(ast.DartPattern pattern) =>

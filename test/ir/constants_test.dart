@@ -34,25 +34,28 @@ void main() {
     expect(list.elements, [one, two]);
     expect(() => list.elements.add(one), throwsUnsupportedError);
     expect(
-      constantKey(list),
-      constantKey(
-        SequenceConstant(CoreTypes.listOf(ValueType.integer), [one, two]),
+      list.structuralKey,
+      SequenceConstant(CoreTypes.listOf(ValueType.integer), [
+        one,
+        two,
+      ]).structuralKey,
+    );
+    expect(
+      list.structuralKey,
+      isNot(
+        SequenceConstant(CoreTypes.listOf(ValueType.integer), [
+          two,
+          one,
+        ]).structuralKey,
       ),
     );
     expect(
-      constantKey(list),
+      list.structuralKey,
       isNot(
-        constantKey(
-          SequenceConstant(CoreTypes.listOf(ValueType.integer), [two, one]),
-        ),
-      ),
-    );
-    expect(
-      constantKey(list),
-      isNot(
-        constantKey(
-          SequenceConstant(CoreTypes.setOf(ValueType.integer), [one, two]),
-        ),
+        SequenceConstant(CoreTypes.setOf(ValueType.integer), [
+          one,
+          two,
+        ]).structuralKey,
       ),
     );
     expect(() => SequenceConstant(ValueType.object, []), throwsArgumentError);
@@ -71,10 +74,10 @@ void main() {
       input.clear();
       expect(map.entries, [(one, text), (two, text)]);
       expect(() => map.entries.clear(), throwsUnsupportedError);
-      expect(constantKey(map), constantKey(MapConstant(type, map.entries)));
+      expect(map.structuralKey, MapConstant(type, map.entries).structuralKey);
       expect(
-        constantKey(map),
-        isNot(constantKey(MapConstant(type, map.entries.reversed))),
+        map.structuralKey,
+        isNot(MapConstant(type, map.entries.reversed).structuralKey),
       );
       expect(() => MapConstant(type, [(text, text)]), throwsArgumentError);
       expect(() => MapConstant(type, [(one, two)]), throwsArgumentError);
@@ -105,16 +108,16 @@ void main() {
       expect(object.fields.length, 2);
       expect(() => object.fields.clear(), throwsUnsupportedError);
       expect(
-        constantKey(object),
-        constantKey(ObjectConstant(child, {own: two, inherited: one})),
+        object.structuralKey,
+        ObjectConstant(child, {own: two, inherited: one}).structuralKey,
       );
       expect(
-        constantKey(object),
-        isNot(constantKey(ObjectConstant(child, {inherited: two, own: one}))),
+        object.structuralKey,
+        isNot(ObjectConstant(child, {inherited: two, own: one}).structuralKey),
       );
       expect(
-        constantKey(ObjectConstant(parent, {inherited: one})),
-        isNot(constantKey(ObjectConstant(child, {inherited: one}))),
+        ObjectConstant(parent, {inherited: one}).structuralKey,
+        isNot(ObjectConstant(child, {inherited: one}).structuralKey),
       );
       final other = ClassType(Uri.parse('memory:other'), 'Parent');
       final foreign = InstanceField(
@@ -159,14 +162,17 @@ void main() {
   });
 
   test('scalar keys preserve numeric representation and signed zero', () {
-    expect(constantKey(one), isNot(constantKey(const Constant.floating(1.0))));
     expect(
-      constantKey(const Constant.floating(-0.0)),
-      isNot(constantKey(const Constant.floating(0.0))),
+      one.structuralKey,
+      isNot(const Constant.floating(1.0).structuralKey),
     );
     expect(
-      constantKey(const Constant.floating(double.nan)),
-      constantKey(const Constant.floating(double.nan)),
+      const Constant.floating(-0.0).structuralKey,
+      isNot(const Constant.floating(0.0).structuralKey),
+    );
+    expect(
+      const Constant.floating(double.nan).structuralKey,
+      const Constant.floating(double.nan).structuralKey,
     );
   });
 
@@ -184,8 +190,8 @@ void main() {
     );
     final ints = box.instantiate([ValueType.integer]);
     expect(
-      constantKey(FunctionConstant(ctor, ownerType: ints)),
-      constantKey(FunctionConstant(ctor, typeArguments: [ValueType.integer])),
+      FunctionConstant(ctor, ownerType: ints).structuralKey,
+      FunctionConstant(ctor, typeArguments: [ValueType.integer]).structuralKey,
     );
     final aliasT = TypeParameterType('T')
       ..initializeBound(ValueType.dynamicType);
@@ -195,18 +201,16 @@ void main() {
       typeParameters: [aliasT],
     );
     expect(
-      constantKey(FunctionConstant(ctor)),
-      constantKey(FunctionConstant(ctor, constructorSignature: view)),
+      FunctionConstant(ctor).structuralKey,
+      FunctionConstant(ctor, constructorSignature: view).structuralKey,
     );
     expect(
-      constantKey(FunctionConstant(ctor, ownerType: ints)),
-      constantKey(
-        FunctionConstant(
-          ctor,
-          constructorSignature: view,
-          typeArguments: [ValueType.integer],
-        ),
-      ),
+      FunctionConstant(ctor, ownerType: ints).structuralKey,
+      FunctionConstant(
+        ctor,
+        constructorSignature: view,
+        typeArguments: [ValueType.integer],
+      ).structuralKey,
     );
     final plain = ClassType(library, 'Plain');
     final plainCtor = FunctionTarget(
@@ -218,8 +222,8 @@ void main() {
       kind: .initializer,
     );
     expect(
-      constantKey(FunctionConstant(plainCtor)),
-      constantKey(FunctionConstant(plainCtor, ownerType: plain)),
+      FunctionConstant(plainCtor).structuralKey,
+      FunctionConstant(plainCtor, ownerType: plain).structuralKey,
     );
   });
 
@@ -234,9 +238,9 @@ void main() {
       typeParameters: [t],
     );
     expect(
-      constantKey(FunctionConstant(fn, typeArguments: [ValueType.integer])),
+      FunctionConstant(fn, typeArguments: [ValueType.integer]).structuralKey,
       isNot(
-        constantKey(FunctionConstant(fn, typeArguments: [ValueType.string])),
+        FunctionConstant(fn, typeArguments: [ValueType.string]).structuralKey,
       ),
     );
     final box = ClassType(library, 'Box');
@@ -256,12 +260,12 @@ void main() {
       typeArguments: [argument],
     );
     expect(
-      constantKey(alias('Alias', ValueType.integer)),
-      isNot(constantKey(alias('Alias', ValueType.string))),
+      alias('Alias', ValueType.integer).structuralKey,
+      isNot(alias('Alias', ValueType.string).structuralKey),
     );
     expect(
-      constantKey(alias('Alias', ValueType.integer)),
-      isNot(constantKey(alias('Other', ValueType.integer))),
+      alias('Alias', ValueType.integer).structuralKey,
+      isNot(alias('Other', ValueType.integer).structuralKey),
     );
   });
 

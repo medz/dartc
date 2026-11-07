@@ -37,13 +37,13 @@ void main() {
       expect(t.nonNullable.mayBeNull, isFalse);
       expect(t.nullable.nonNullable.mayBeNull, isFalse);
       expect(
-        substituteType(t.nullable, {t: ValueType.integer}),
+        t.nullable.substitute({t: ValueType.integer}),
         ValueType.integer.nullable,
       );
       expect(ValueType.object.nullable.accepts(t), isTrue);
       expect(t.accepts(t.nonNullable), isTrue);
       expect(
-        substituteType(t.nonNullable, {t: ValueType.integer.nullable}),
+        t.nonNullable.substitute({t: ValueType.integer.nullable}),
         ValueType.integer,
       );
       expect(() => t.initializeBound(ValueType.object), throwsStateError);

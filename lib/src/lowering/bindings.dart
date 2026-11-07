@@ -566,7 +566,7 @@ final class Bindings({final bool enableAssertions = false}) {
       ...inheritedClassCovariance,
       if (ownerParameters.isNotEmpty)
         for (final (i, type) in result.signature.parameters.indexed)
-          if (containsCovariantTypeParameter(type, ownerParameters)) i,
+          if (type.requiresCovariantCheck(ownerParameters)) i,
     };
     _defaults[result] = {
       for (final (i, p) in parameters.indexed)
@@ -853,7 +853,7 @@ final class Bindings({final bool enableAssertions = false}) {
     return ExtensionApplication(
       executable,
       arguments,
-      substituteType(executable.receiverType!, {
+      (executable.receiverType!).substitute({
         for (final (i, parameter) in executable.extensionParameters.indexed)
           parameter: arguments[i],
       }),

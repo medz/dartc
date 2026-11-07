@@ -83,7 +83,10 @@ void main() {
         final type = signature(name);
         expect(defaultNames(type), function(), reason: name);
         expect(type.instantiateToBounds().typeParameters, isEmpty);
-        expect(type.defaultTypeArguments.expand(typeParametersIn), isEmpty);
+        expect(
+          type.defaultTypeArguments.expand((t) => t.freeTypeParameters),
+          isEmpty,
+        );
       }
       final dependent = signature('dependentBounds').typeParameters;
       expect(
@@ -147,7 +150,7 @@ void main() {
         type.typeParameters.single.defaultType,
         same(owner.typeParameters.single),
       );
-      final applied = substituteType(type, {
+      final applied = type.substitute({
         owner.typeParameters.single: ValueType.integer,
       }) as FunctionType;
       expect(applied.defaultTypeArguments, [ValueType.integer]);
@@ -162,7 +165,7 @@ void main() {
     final enclosingParameter = nested.typeParameters.single;
     expect(enclosingParameter.defaultType, same(ownerParameter));
     expect(local.typeParameters.single.defaultType, same(enclosingParameter));
-    final applied = substituteType(local.signature, {
+    final applied = local.signature.substitute({
       ownerParameter: ValueType.integer,
       enclosingParameter: ValueType.integer,
     }) as FunctionType;

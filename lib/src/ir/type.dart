@@ -1,5 +1,96 @@
 /// A static SSA type. Source values carry Dart types; capture cells carry a storage type.
 sealed class const ValueType() {
+  /// Substitutes free type variables simultaneously without capturing binders.
+  ValueType substitute(Map<TypeParameterType, ValueType> environment) {
+    if (environment.isEmpty) return this;
+    return switch (this) {
+      final TypeParameterType type => environment[type] ?? type,
+      // Renaming a lexical binder retains its static promotion. Instantiating
+      // that binder erases the promoted bound, just as Dart's type substitution
+      // does; runtime checks must test the promoted bound before this erasure.
+      PromotedTypeParameterType(
+        :final parameter,
+        :final bound,
+        :final isNonNullable,
+      ) =>
+        switch (environment[parameter] ?? parameter) {
+          final TypeParameterType replacement => PromotedTypeParameterType(
+            replacement,
+            bound.substitute(environment),
+            isNonNullable: isNonNullable,
+          ),
+          final replacement =>
+            isNonNullable ? replacement.nonNullable : replacement,
+        },
+      NonNullableTypeParameterType(:final parameter) =>
+        (environment[parameter] ?? parameter).nonNullable,
+      _NullableType(:final base) => base.substitute(environment).nullable,
+      FutureOrType(:final argument) => ValueType.futureOr(
+        argument.substitute(environment),
+      ),
+      final ClassType type =>
+        type.typeArguments.isEmpty
+            ? type
+            : type.declaration.instantiate(
+                type.typeArguments.map((t) => t.substitute(environment)),
+              ),
+      CellType(:final content, :final isLate, :final isFinal) => CellType(
+        content.substitute(environment),
+        isLate: isLate,
+        isFinal: isFinal,
+      ),
+      final RecordType type => RecordType(
+        type.fields
+            .take(type.positionalCount)
+            .map((t) => t.substitute(environment)),
+        {
+          for (final e in type.slots.entries.skip(type.positionalCount))
+            e.key: type.fields[e.value].substitute(environment),
+        },
+      ),
+      final FunctionType type =>
+        type.freeTypeParameters.any(environment.containsKey)
+            ? type.rebind(environment)
+            : type,
+      _ => this,
+    };
+  }
+
+  /// Checks whether these class variables require a covariant parameter check.
+  ///
+  /// Variables in nested function bounds require a check in either variance.
+  bool requiresCovariantCheck(Set<TypeParameterType> parameters) {
+    bool visit(ValueType type, Set<TypeParameterType> scope, bool positive) {
+      if (type is FunctionType) {
+        final free = scope.difference(type.typeParameters.toSet());
+        return type.typeParameters.any(
+              (p) => p.bound.freeTypeParameters.any(free.contains),
+            ) ||
+            visit(type.result, free, positive) ||
+            type.parameters.any((t) => visit(t, free, !positive));
+      }
+      return switch (type) {
+        TypeParameterType() => positive && scope.contains(type),
+        PromotedTypeParameterType(:final parameter, :final bound) =>
+          positive && scope.contains(parameter) ||
+              visit(bound, scope, positive),
+        NonNullableTypeParameterType(:final parameter) =>
+          positive && scope.contains(parameter),
+        _NullableType(:final base) => visit(base, scope, positive),
+        FutureOrType(:final argument) => visit(argument, scope, positive),
+        ClassType() => type.typeArguments.any((t) => visit(t, scope, positive)),
+        RecordType() => type.fields.any((t) => visit(t, scope, positive)),
+        _ => false,
+      };
+    }
+
+    return visit(this, parameters, true);
+  }
+
+  /// Free lexical type-variable identities mentioned by this type expression.
+  Iterable<TypeParameterType> get freeTypeParameters =>
+      typeDeclarationsIn(this).whereType<TypeParameterType>();
+
   /// The Dart dynamic top type, distinct from nullable Object.
   static const DynamicType dynamicType = DynamicType();
 
@@ -435,6 +526,42 @@ final class FunctionType._(
   /// Named parameter slots and requiredness.
   final Map<String, ({int slot, bool required})> named,
 ) extends ValueType {
+  /// Copies a function signature with fresh binders and substituted free types.
+  ///
+  /// [defaultTemplates] optionally supplies compiler-computed runtime defaults;
+  /// their free types are substituted without changing the source binders.
+  FunctionType rebind(
+    Map<TypeParameterType, ValueType> environment, {
+    List<ValueType>? defaultTemplates,
+  }) {
+    if (defaultTemplates != null &&
+        defaultTemplates.length != typeParameters.length) {
+      throw ArgumentError('Mismatched function type defaults.');
+    }
+    final fresh = [for (final p in typeParameters) TypeParameterType(p.name)];
+    final scoped = <TypeParameterType, ValueType>{
+      ...environment,
+      for (final (i, p) in typeParameters.indexed) p: fresh[i],
+    };
+    for (final (i, p) in fresh.indexed) {
+      p.initializeBound(typeParameters[i].bound.substitute(scoped));
+    }
+    for (final (i, p) in fresh.indexed) {
+      if ((defaultTemplates?[i] ?? typeParameters[i].defaultType)
+          case final defaultType?) {
+        p.initializeDefaultType(defaultType.substitute(scoped));
+      }
+    }
+    final body = _bodyWith(scoped);
+    return FunctionType(
+      body.result,
+      body.parameters,
+      typeParameters: fresh,
+      optionalPositional: body.optionalPositional,
+      namedParameters: body.namedParameters,
+    );
+  }
+
   /// The number of trailing positional parameters with defaults.
   int get optionalPositional => positionalCount - requiredPositional;
 
@@ -505,7 +632,7 @@ final class FunctionType._(
       for (final (i, parameter) in typeParameters.indexed) parameter: args[i],
     };
     for (final (i, parameter) in typeParameters.indexed) {
-      if (!substituteType(parameter.bound, environment).accepts(args[i])) {
+      if (!parameter.bound.substitute(environment).accepts(args[i])) {
         throw ArgumentError(
           'Type argument does not satisfy ${parameter.name} bound.',
         );
@@ -516,8 +643,8 @@ final class FunctionType._(
 
   FunctionType _bodyWith(Map<TypeParameterType, ValueType> environment) =>
       FunctionType(
-        substituteType(result, environment),
-        parameters.map((t) => substituteType(t, environment)),
+        result.substitute(environment),
+        parameters.map((t) => t.substitute(environment)),
         optionalPositional: optionalPositional,
         namedParameters: namedParameters,
       );
@@ -533,7 +660,7 @@ final class FunctionType._(
         parameter: typeParameters[i],
     };
     for (final (i, parameter) in typeParameters.indexed) {
-      final bound = substituteType(other.typeParameters[i].bound, environment);
+      final bound = other.typeParameters[i].bound.substitute(environment);
       if (exactBounds
           ? parameter.bound != bound
           : !parameter.bound._accepts(bound, active) ||
@@ -705,6 +832,7 @@ final class const ClassType._(
         null,
       );
 
+  /// Creates a declaration whose hierarchy can be initialized before verification.
   new declare(
     Uri library,
     String name, {
@@ -722,6 +850,7 @@ final class const ClassType._(
          _ClassHierarchy(),
        );
 
+  /// Sets the hierarchy once, before a verified graph or program uses this type.
   void initializeHierarchy({
     ClassType superclass = ValueType.object,
     Iterable<ClassType> interfaces = const [],
@@ -729,8 +858,9 @@ final class const ClassType._(
     final hierarchy = declaration._hierarchy;
     if (!identical(this, declaration) ||
         hierarchy == null ||
-        hierarchy.initialized) {
-      throw StateError('Class hierarchy already initialized.');
+        hierarchy.initialized ||
+        hierarchy.sealed) {
+      throw StateError('Class hierarchy already initialized or sealed.');
     }
     final implemented = List<ClassType>.unmodifiable(interfaces);
     if (superclass.asInstanceOf(this) != null ||
@@ -757,13 +887,13 @@ final class const ClassType._(
         declaration._hierarchy?.superclass ?? declaration._superclass;
     return parent == null
         ? null
-        : substituteType(parent, typeEnvironment) as ClassType;
+        : parent.substitute(typeEnvironment) as ClassType;
   }
 
   List<ClassType> get interfaces => [
     for (final type
         in (declaration._hierarchy?.interfaces ?? declaration._interfaces))
-      substituteType(type, typeEnvironment) as ClassType,
+      type.substitute(typeEnvironment) as ClassType,
   ];
   @override
   String get dartName => typeArguments.isEmpty
@@ -797,7 +927,7 @@ final class const ClassType._(
   /// Checks all instantiated arguments against their simultaneously substituted bounds.
   void validateTypeArguments() {
     for (final (i, parameter) in typeParameters.indexed) {
-      final bound = substituteType(parameter.bound, typeEnvironment);
+      final bound = parameter.bound.substitute(typeEnvironment);
       if (!bound.accepts(typeArguments[i])) {
         throw ArgumentError(
           'Type argument does not satisfy ${parameter.name} bound.',
@@ -842,17 +972,19 @@ final class const ClassType._(
 
 final class _ClassHierarchy() {
   bool initialized = false;
+  bool sealed = false;
   ClassType? superclass;
   List<ClassType> interfaces = const [];
 }
 
 /// A lexically scoped type variable. Equal names do not imply equal identities.
 final class TypeParameterType(final String name) extends ValueType {
+  bool _sealed = false;
   ValueType? _bound;
   ValueType get bound =>
       _bound ?? (throw StateError('Uninitialized type parameter bound.'));
   void initializeBound(ValueType type) {
-    if (_bound != null || type is CellType) {
+    if (_sealed || _bound != null || type is CellType) {
       throw StateError('Invalid type parameter bound initialization.');
     }
     _bound = type;
@@ -863,11 +995,11 @@ final class TypeParameterType(final String name) extends ValueType {
   /// The compiler-computed default template, when metadata is available.
   ValueType? get defaultType => _defaultType;
 
-  /// Records a default once, without checking it against the parameter's bound.
+  /// Records a default once, before a verified graph or program uses this binder.
   ///
   /// Recursive bounds may have defaults that are invalid only when applied.
   void initializeDefaultType(ValueType type) {
-    if (_defaultType != null || type is CellType) {
+    if (_sealed || _defaultType != null || type is CellType) {
       throw StateError('Invalid type parameter default initialization.');
     }
     _defaultType = type;
@@ -877,6 +1009,55 @@ final class TypeParameterType(final String name) extends ValueType {
   String get dartName => name;
   @override
   ValueType get nonNullable => NonNullableTypeParameterType(this);
+}
+
+// Finish recursive declarations before publishing checked graphs or programs.
+void sealTypes(Iterable<ValueType> roots) {
+  final types = Set<ValueType>.identity();
+  void visit(ValueType type) {
+    if (!types.add(type)) return;
+    switch (type) {
+      case TypeParameterType():
+        visit(type.bound);
+        if (type.defaultType case final value?) visit(value);
+      case ClassType():
+        final declaration = type.declaration;
+        if (!identical(type, declaration)) visit(declaration);
+        type.typeArguments.forEach(visit);
+        final parent =
+            declaration._hierarchy?.superclass ?? declaration._superclass;
+        if (parent != null) visit(parent);
+        (declaration._hierarchy?.interfaces ?? declaration._interfaces).forEach(
+          visit,
+        );
+      case FunctionType():
+        type.typeParameters.forEach(visit);
+        visit(type.result);
+        type.parameters.forEach(visit);
+      case RecordType():
+        type.fields.forEach(visit);
+      case PromotedTypeParameterType(:final parameter, :final bound):
+        visit(parameter);
+        visit(bound);
+      case NonNullableTypeParameterType(:final parameter):
+        visit(parameter);
+      case _NullableType(:final base):
+        visit(base);
+      case FutureOrType(:final argument):
+        visit(ValueType.future);
+        visit(argument);
+      case CellType(:final content):
+        visit(content);
+      default:
+        break;
+    }
+  }
+
+  roots.forEach(visit);
+  for (final type in types) {
+    if (type is TypeParameterType) type._sealed = true;
+    if (type is ClassType) type._hierarchy?.sealed = true;
+  }
 }
 
 /// The intersection of a type variable with non-nullable Object.
@@ -927,65 +1108,6 @@ final class PromotedTypeParameterType(
       Object.hash(PromotedTypeParameterType, parameter, bound, isNonNullable);
 }
 
-/// Simultaneous, capture-free substitution of type variable identities.
-ValueType substituteType(
-  ValueType type,
-  Map<TypeParameterType, ValueType> environment,
-) {
-  if (environment.isEmpty) return type;
-  return switch (type) {
-    TypeParameterType() => environment[type] ?? type,
-    // Renaming a lexical binder retains its static promotion. Instantiating
-    // that binder erases the promoted bound, just as Dart's type substitution
-    // does; runtime checks must test the promoted bound before this erasure.
-    PromotedTypeParameterType(
-      :final parameter,
-      :final bound,
-      :final isNonNullable,
-    ) =>
-      switch (environment[parameter] ?? parameter) {
-        final TypeParameterType replacement => PromotedTypeParameterType(
-          replacement,
-          substituteType(bound, environment),
-          isNonNullable: isNonNullable,
-        ),
-        final replacement =>
-          isNonNullable ? replacement.nonNullable : replacement,
-      },
-    NonNullableTypeParameterType(:final parameter) =>
-      (environment[parameter] ?? parameter).nonNullable,
-    _NullableType(:final base) => substituteType(base, environment).nullable,
-    FutureOrType(:final argument) => ValueType.futureOr(
-      substituteType(argument, environment),
-    ),
-    ClassType() =>
-      type.typeArguments.isEmpty
-          ? type
-          : type.declaration.instantiate(
-              type.typeArguments.map((t) => substituteType(t, environment)),
-            ),
-    CellType(:final content, :final isLate, :final isFinal) => CellType(
-      substituteType(content, environment),
-      isLate: isLate,
-      isFinal: isFinal,
-    ),
-    RecordType() => RecordType(
-      type.fields
-          .take(type.positionalCount)
-          .map((t) => substituteType(t, environment)),
-      {
-        for (final e in type.slots.entries.skip(type.positionalCount))
-          e.key: substituteType(type.fields[e.value], environment),
-      },
-    ),
-    FunctionType() =>
-      typeParametersIn(type).any(environment.containsKey)
-          ? rebindFunctionType(type, environment)
-          : type,
-    _ => type,
-  };
-}
-
 final class const _SpecialType(@override final String dartName)
     extends ValueType;
 
@@ -1002,85 +1124,6 @@ final class const _NullableType(final ValueType base) extends ValueType {
   @override
   int get hashCode => Object.hash(_NullableType, base);
 }
-
-/// Whether a type expression mentions any of the given lexical parameters.
-bool containsTypeParameter(
-  ValueType type,
-  Set<TypeParameterType> parameters,
-) => switch (type) {
-  TypeParameterType() => parameters.contains(type),
-  PromotedTypeParameterType(:final parameter, :final bound) =>
-    parameters.contains(parameter) || containsTypeParameter(bound, parameters),
-  NonNullableTypeParameterType(:final parameter) => parameters.contains(
-    parameter,
-  ),
-  _NullableType(:final base) => containsTypeParameter(base, parameters),
-  FutureOrType(:final argument) => containsTypeParameter(argument, parameters),
-  ClassType() => type.typeArguments.any(
-    (t) => containsTypeParameter(t, parameters),
-  ),
-  RecordType() => type.fields.any((t) => containsTypeParameter(t, parameters)),
-  FunctionType() => typeParametersIn(type).any(parameters.contains),
-  CellType(:final content) => containsTypeParameter(content, parameters),
-  _ => false,
-};
-
-/// Whether a class variable requires a covariant check in a member parameter.
-///
-/// Occurrences in a nested generic function's bounds are invariant and require
-/// a check regardless of the surrounding function-parameter polarity.
-bool containsCovariantTypeParameter(
-  ValueType type,
-  Set<TypeParameterType> parameters, [
-  bool positive = true,
-]) => switch (type) {
-  TypeParameterType() => positive && parameters.contains(type),
-  PromotedTypeParameterType(:final parameter, :final bound) =>
-    positive && parameters.contains(parameter) ||
-        containsCovariantTypeParameter(bound, parameters, positive),
-  NonNullableTypeParameterType(:final parameter) =>
-    positive && parameters.contains(parameter),
-  _NullableType(:final base) => containsCovariantTypeParameter(
-    base,
-    parameters,
-    positive,
-  ),
-  FutureOrType(:final argument) => containsCovariantTypeParameter(
-    argument,
-    parameters,
-    positive,
-  ),
-  ClassType() => type.typeArguments.any(
-    (t) => containsCovariantTypeParameter(t, parameters, positive),
-  ),
-  RecordType() => type.fields.any(
-    (t) => containsCovariantTypeParameter(t, parameters, positive),
-  ),
-  FunctionType() =>
-    type.typeParameters.any(
-          (p) => containsTypeParameter(
-            p.bound,
-            parameters.difference(type.typeParameters.toSet()),
-          ),
-        ) ||
-        containsCovariantTypeParameter(
-          type.result,
-          parameters.difference(type.typeParameters.toSet()),
-          positive,
-        ) ||
-        type.parameters.any(
-          (t) => containsCovariantTypeParameter(
-            t,
-            parameters.difference(type.typeParameters.toSet()),
-            !positive,
-          ),
-        ),
-  _ => false,
-};
-
-/// Free lexical type-variable identities mentioned by a type expression.
-Iterable<TypeParameterType> typeParametersIn(ValueType type) =>
-    typeDeclarationsIn(type).whereType<TypeParameterType>();
 
 /// Nominal declarations and free type variables referenced by a type expression.
 Iterable<ValueType> typeDeclarationsIn(ValueType type) sync* {
@@ -1121,44 +1164,6 @@ Iterable<ValueType> typeDeclarationsIn(ValueType type) sync* {
     default:
       break;
   }
-}
-
-/// Copies a function signature with fresh binders and substituted free types.
-/// [defaultTemplates] optionally supplies compiler-computed runtime defaults;
-/// their free types are substituted without changing the source binders.
-FunctionType rebindFunctionType(
-  FunctionType type,
-  Map<TypeParameterType, ValueType> environment, {
-  List<ValueType>? defaultTemplates,
-}) {
-  if (defaultTemplates != null &&
-      defaultTemplates.length != type.typeParameters.length) {
-    throw ArgumentError('Mismatched function type defaults.');
-  }
-  final fresh = [
-    for (final p in type.typeParameters) TypeParameterType(p.name),
-  ];
-  final scoped = <TypeParameterType, ValueType>{
-    ...environment,
-    for (final (i, p) in type.typeParameters.indexed) p: fresh[i],
-  };
-  for (final (i, p) in fresh.indexed) {
-    p.initializeBound(substituteType(type.typeParameters[i].bound, scoped));
-  }
-  for (final (i, p) in fresh.indexed) {
-    if ((defaultTemplates?[i] ?? type.typeParameters[i].defaultType)
-        case final defaultType?) {
-      p.initializeDefaultType(substituteType(defaultType, scoped));
-    }
-  }
-  final body = type._bodyWith(scoped);
-  return FunctionType(
-    body.result,
-    body.parameters,
-    typeParameters: fresh,
-    optionalPositional: body.optionalPositional,
-    namedParameters: body.namedParameters,
-  );
 }
 
 int _typeHash(ValueType type, Map<TypeParameterType, int> scope) {

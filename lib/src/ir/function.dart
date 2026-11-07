@@ -7,6 +7,8 @@ import 'value.dart';
 import 'verify.dart';
 
 /// A callable supplied by the program, with a Dart signature and checked defaults.
+///
+/// Verification seals all referenced type metadata against later initialization.
 sealed class IrCallable(
   /// The declaration used by calls and tear-offs.
   final FunctionTarget target, {

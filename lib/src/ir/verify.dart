@@ -28,15 +28,29 @@ FunctionReferences verifyCallable(
   Set<InstanceField>? fields;
   Set<ObjectConstant>? objects;
   Set<ClassType>? classes;
-  FunctionReferences references() => (
-    closures: _snapshot(closures),
-    callees: _snapshot(callees),
-    globals: _snapshot(globals),
-    fields: _snapshot(fields),
-    objects: _snapshot(objects),
-    classes: _snapshot(classes),
-  );
   final scope = <TypeParameterType>{};
+  // Structural equality omits generic default metadata; scope checks cannot.
+  final checkedTypes = Set<ValueType>.identity();
+  FunctionReferences references() {
+    sealTypes([
+      ...checkedTypes,
+      ...scope,
+      ?target.owner,
+      for (final callee in callees ?? const <FunctionTarget>{}) ...[
+        callee.signature,
+        ?callee.owner,
+      ],
+    ]);
+    return (
+      closures: _snapshot(closures),
+      callees: _snapshot(callees),
+      globals: _snapshot(globals),
+      fields: _snapshot(fields),
+      objects: _snapshot(objects),
+      classes: _snapshot(classes),
+    );
+  }
+
   for (
     FunctionTarget? lexical = target;
     lexical != null;
@@ -47,8 +61,6 @@ FunctionReferences verifyCallable(
       scope.addAll(lexical.owner?.typeParameters ?? const []);
     }
   }
-  // Structural equality omits generic default metadata; scope checks cannot.
-  final checkedTypes = Set<ValueType>.identity();
   void checkTypeScope(ValueType type) {
     if (checkedTypes.contains(type)) return;
     for (final declaration in typeDeclarationsIn(type)) {

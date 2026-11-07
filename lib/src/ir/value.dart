@@ -25,6 +25,44 @@ final class AwaitResult(ValueType type) extends Value {
 
 /// A compile-time value that can be used in any block.
 sealed class const Constant(super.type) extends Value {
+  /// A structural identity key without executing Dart user equality or hashing.
+  ///
+  /// Scalar representation, collection order, nominal field slots and complete
+  /// function instantiations are retained. Constructor sites are not identities.
+  Object get structuralKey => switch (this) {
+    TypeConstant(:final representedType) => (TypeConstant, representedType),
+    ScalarConstant(:final type, :final value) => (
+      type,
+      value is double ? value.toString() : value,
+    ),
+    final FunctionConstant value => _functionConstantKey(value),
+    RecordConstant(:final type, :final fields) => (
+      type,
+      fields.fold<Object?>(null, (tail, field) => (tail, field.structuralKey)),
+    ),
+    SequenceConstant(:final type, :final elements) => (
+      type,
+      elements.fold<Object?>(
+        null,
+        (tail, element) => (tail, element.structuralKey),
+      ),
+    ),
+    MapConstant(:final type, :final entries) => (
+      type,
+      entries.fold<Object?>(
+        null,
+        (tail, entry) => (tail, entry.$1.structuralKey, entry.$2.structuralKey),
+      ),
+    ),
+    ObjectConstant(:final type, :final fields) => (
+      type,
+      _orderedFields(fields).fold<Object?>(
+        null,
+        (tail, field) => (tail, field, (fields[field]!).structuralKey),
+      ),
+    ),
+  };
+
   /// Creates an integer literal with the value [value].
   const factory integer(int value) = ScalarConstant._integer;
 
@@ -45,7 +83,7 @@ sealed class const Constant(super.type) extends Value {
 final class TypeConstant(final ValueType representedType) extends Constant {
   this : super(.typeType) {
     if (!isDartType(representedType) ||
-        typeParametersIn(representedType).isNotEmpty) {
+        representedType.freeTypeParameters.isNotEmpty) {
       throw ArgumentError('A type constant requires a closed Dart type.');
     }
   }
@@ -235,44 +273,6 @@ final class ObjectConstant(ClassType type, Map<InstanceField, Constant> fields)
   }
 }
 
-/// A structural identity key without executing Dart user equality or hashing.
-///
-/// Scalar representation, collection order, nominal field slots and complete
-/// function instantiations are retained. Constructor sites are not identities.
-Object constantKey(Constant value) => switch (value) {
-  TypeConstant(:final representedType) => (TypeConstant, representedType),
-  ScalarConstant(:final type, :final value) => (
-    type,
-    value is double ? value.toString() : value,
-  ),
-  FunctionConstant() => _functionConstantKey(value),
-  RecordConstant(:final type, :final fields) => (
-    type,
-    fields.fold<Object?>(null, (tail, field) => (tail, constantKey(field))),
-  ),
-  SequenceConstant(:final type, :final elements) => (
-    type,
-    elements.fold<Object?>(
-      null,
-      (tail, element) => (tail, constantKey(element)),
-    ),
-  ),
-  MapConstant(:final type, :final entries) => (
-    type,
-    entries.fold<Object?>(
-      null,
-      (tail, entry) => (tail, constantKey(entry.$1), constantKey(entry.$2)),
-    ),
-  ),
-  ObjectConstant(:final type, :final fields) => (
-    type,
-    _orderedFields(fields).fold<Object?>(
-      null,
-      (tail, field) => (tail, field, constantKey(fields[field]!)),
-    ),
-  ),
-};
-
 Object _functionConstantKey(FunctionConstant value) {
   final constructor =
       value.target.kind == .initializer || value.target.kind == .factory;
@@ -408,7 +408,7 @@ sealed class Instruction(super.type) extends Value {
     WriteCell(
       cell: Value(type: CellType(isLate: true, isFinal: true)),
     ) => _bindOnce,
-    StoreField(:final field) when typeParametersIn(field.type).isNotEmpty =>
+    StoreField(:final field) when field.type.freeTypeParameters.isNotEmpty =>
       _checkedWrite,
     StoreGlobal() || StoreField() || WriteCell() => const {.writesStorage},
     TypeCast() ||
@@ -1172,13 +1172,11 @@ final class DirectCall._(
         : target.environmentFor(ownerType);
     final types = List<ValueType>.unmodifiable(typeArguments);
     final inputs = List<Value>.unmodifiable(arguments);
-    final signature = (substituteType(
-      target.signature,
+    final signature = (target.signature.substitute(
       ownerEnvironment,
     ) as FunctionType).instantiate(types);
     checkArguments([
-      if (target.kind.hasReceiver)
-        substituteType(target.owner!, ownerEnvironment),
+      if (target.kind.hasReceiver) (target.owner!).substitute(ownerEnvironment),
       ...signature.parameters,
     ], inputs);
     return ._(

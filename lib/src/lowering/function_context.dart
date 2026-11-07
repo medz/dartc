@@ -149,7 +149,7 @@ final class FunctionContext(
         (site is ast.BinaryExpression || site is ast.PrefixExpression) &&
         site is ast.Expression &&
         site.staticType != null) {
-      final used = typeParametersIn(typeOf(site.staticType!, site));
+      final used = typeOf(site.staticType!, site).freeTypeParameters;
       for (final (i, parameter)
           in application.executable.extensionParameters.indexed) {
         if (used.contains(parameter) &&
@@ -240,7 +240,7 @@ final class FunctionContext(
     receiver = checked;
     final signature = extension == null || args.isEmpty
         ? null
-        : substituteType(extension.executable.sourceSignature, {
+        : extension.executable.sourceSignature.substitute({
             for (final (i, parameter)
                 in extension.executable.extensionParameters.indexed)
               parameter: extension.typeArguments[i],

@@ -20,12 +20,12 @@ void main() {
       ValueType.voidType,
     );
     expect(
-      constantKey(TypeConstant(ValueType.integer)),
-      constantKey(TypeConstant(ValueType.integer)),
+      TypeConstant(ValueType.integer).structuralKey,
+      TypeConstant(ValueType.integer).structuralKey,
     );
     expect(
-      constantKey(TypeConstant(ValueType.dynamicType)),
-      isNot(constantKey(TypeConstant(ValueType.object.nullable))),
+      TypeConstant(ValueType.dynamicType).structuralKey,
+      isNot(TypeConstant(ValueType.object.nullable).structuralKey),
     );
   });
   test('reification is pure and verifier checks lexical template scope', () {

@@ -117,7 +117,7 @@ void main() {
         typeParameters: [inner],
       );
       final changed =
-          substituteType(source, {outer: ValueType.number}) as FunctionType;
+          source.substitute({outer: ValueType.number}) as FunctionType;
       expect(inner.bound, same(outer));
       expect(changed.typeParameters.single.bound, ValueType.number);
       expect(changed.parameters.first, ValueType.number);
@@ -130,7 +130,7 @@ void main() {
         () => changed.instantiate([ValueType.string]),
         throwsArgumentError,
       );
-      expect(substituteType(source, {inner: ValueType.integer}), same(source));
+      expect(source.substitute({inner: ValueType.integer}), same(source));
     },
   );
 
@@ -138,7 +138,7 @@ void main() {
     final outer = parameter('T');
     final inner = parameter('T');
     final source = FunctionType(outer, [inner], typeParameters: [inner]);
-    final changed = substituteType(source, {outer: inner}) as FunctionType;
+    final changed = source.substitute({outer: inner}) as FunctionType;
     expect(changed.result, same(inner));
     expect(changed.typeParameters.single, isNot(same(inner)));
     expect(changed.parameters.single, same(changed.typeParameters.single));

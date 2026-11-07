@@ -57,8 +57,8 @@ void main() {
       ..initializeBound(ValueType.number)
       ..initializeDefaultType(ValueType.integer);
     final source = FunctionType(t, [t], typeParameters: [t]);
-    expect(substituteType(source, const {}), same(source));
-    final rebound = rebindFunctionType(source, const {});
+    expect(source.substitute(const {}), same(source));
+    final rebound = source.rebind(const {});
     final fresh = rebound.typeParameters.single;
     expect(fresh, isNot(same(t)));
     expect(fresh.bound, ValueType.number);
@@ -73,8 +73,7 @@ void main() {
       ..initializeBound(outer)
       ..initializeDefaultType(outer);
     final source = FunctionType(method, [method], typeParameters: [method]);
-    final rebound = rebindFunctionType(
-      source,
+    final rebound = source.rebind(
       {outer: ValueType.integer},
       defaultTemplates: [ValueType.number],
     );
@@ -86,7 +85,7 @@ void main() {
     expect(rebound.instantiate([ValueType.integer]).result, ValueType.integer);
     expect(() => rebound.instantiateToBounds(), throwsArgumentError);
     expect(
-      () => rebindFunctionType(source, const {}, defaultTemplates: []),
+      () => source.rebind(const {}, defaultTemplates: []),
       throwsArgumentError,
     );
   });

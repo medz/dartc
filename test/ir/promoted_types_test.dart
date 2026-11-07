@@ -1,5 +1,4 @@
 import 'package:dartc/ir.dart';
-import 'package:dartc/src/ir/type.dart' show containsTypeParameter;
 import 'package:test/test.dart';
 
 import '../lowering/fixture_runner.dart';
@@ -29,16 +28,16 @@ void main() {
     final p = PromotedTypeParameterType(t, CoreTypes.listOf(u));
     final fresh = parameter('Fresh');
     expect(
-      substituteType(p, {t: fresh, u: ValueType.integer}),
+      p.substitute({t: fresh, u: ValueType.integer}),
       PromotedTypeParameterType(fresh, CoreTypes.listOf(ValueType.integer)),
     );
     expect(
-      substituteType(p, {t: ValueType.object, u: ValueType.integer}),
+      p.substitute({t: ValueType.object, u: ValueType.integer}),
       ValueType.object,
     );
-    expect(typeParametersIn(p), [t, u]);
-    expect(containsTypeParameter(p, {u}), isTrue);
-    expect(containsCovariantTypeParameter(p, {u}), isTrue);
+    expect(p.freeTypeParameters, [t, u]);
+    expect(p.freeTypeParameters, contains(u));
+    expect(p.requiresCovariantCheck({u}), isTrue);
   });
   test('null assertion retains the promotion and an extra non-null fact', () {
     final t = parameter('T');

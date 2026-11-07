@@ -7,6 +7,75 @@ final _uri = Uri.parse('memory:references');
 const _one = Constant.integer(1);
 
 void main() {
+  test('verified graphs seal reachable binders and nominal metadata', () {
+    final t = TypeParameterType('T')..initializeBound(.object.nullable);
+    final owner = ClassType.declare(_uri, 'Pending', typeParameters: [t]);
+    final nested = TypeParameterType('U')..initializeBound(owner);
+    final signature = FunctionType(.voidType, [], typeParameters: [nested]);
+    final target = FunctionTarget(
+      _uri,
+      'sealed',
+      .voidType,
+      [signature],
+      typeParameters: [t],
+    );
+    final block = Block(target.parameterTypes)..finish(const Return());
+    IrFunction(target, [block]);
+    expect(() => t.initializeDefaultType(.integer), throwsStateError);
+    expect(() => nested.initializeDefaultType(.string), throwsStateError);
+    expect(owner.initializeHierarchy, throwsStateError);
+    expect(() => IrFunction(target, [block]), returnsNormally);
+    expect(t.defaultType, isNull);
+  });
+
+  test(
+    'programs seal unused class declarations and imported parent metadata',
+    () {
+      final t = TypeParameterType('T')..initializeBound(.object.nullable);
+      final parent = ClassType.declare(_uri, 'Parent', typeParameters: [t]);
+      final child = ClassType(
+        _uri,
+        'Child',
+        superclass: parent.instantiate([.integer]),
+      );
+      final program = IrProgram([IrClass(child, [])], []);
+      expect(() => t.initializeDefaultType(.string), throwsStateError);
+      expect(parent.initializeHierarchy, throwsStateError);
+      expect(
+        program.classes.single.type.superclass,
+        parent.instantiate([.integer]),
+      );
+    },
+  );
+
+  test('imported callable references share one declaration identity', () {
+    final imported = Uri.parse('memory:imported');
+    final read = FunctionTarget(imported, 'read', .integer, []);
+    IrProgram program(FunctionTarget second) {
+      final block = Block();
+      block.emit(DirectCall(read, []));
+      block.emit(DirectCall(second, []));
+      block.finish(const Return());
+      return IrProgram([], [
+        IrFunction(FunctionTarget(_uri, 'caller', .voidType, []), [block]),
+      ]);
+    }
+
+    expect(() => program(read), returnsNormally);
+    expect(
+      () => program(FunctionTarget(imported, 'read', .string, [])),
+      throwsArgumentError,
+    );
+    expect(
+      () => program(FunctionTarget(imported, 'read', .integer, [])),
+      throwsArgumentError,
+    );
+    expect(
+      () => program(FunctionTarget(_uri, 'read', .string, [])),
+      returnsNormally,
+    );
+  });
+
   test('external Dart implementations keep their declaration, defaults and dispatch', () {
     final owner = ClassType(_uri, 'Api');
     final method = FunctionTarget(
@@ -222,10 +291,10 @@ void main() {
     () {
       final a = ClassType.declare(_uri, 'A'), b = ClassType.declare(_uri, 'B');
       a.initializeHierarchy(superclass: b);
-      final program = IrProgram([IrClass(a, []), IrClass(b, [])], []);
       expect(() => b.initializeHierarchy(interfaces: [a]), throwsArgumentError);
       expect(() => b.initializeHierarchy(superclass: b), throwsArgumentError);
       b.initializeHierarchy();
+      final program = IrProgram([IrClass(a, []), IrClass(b, [])], []);
       expect(
         program.lookupMember(a, (
           kind: .method,

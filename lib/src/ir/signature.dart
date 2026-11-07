@@ -170,7 +170,7 @@ final class FunctionTarget(
   FunctionType tearOffSignature({ClassType? ownerType, bool reified = false}) {
     final base = reified ? reifiedSignature : signature;
     if (ownerType != null) {
-      return substituteType(base, environmentFor(ownerType)) as FunctionType;
+      return base.substitute(environmentFor(ownerType)) as FunctionType;
     }
     if ((kind == .initializer || kind == .factory) &&
         owner!.typeParameters.isNotEmpty) {
@@ -187,7 +187,7 @@ final class FunctionTarget(
 
   /// Instantiates this declaration's signature through the receiver's owner view.
   FunctionType signatureFor(ClassType receiver) =>
-      substituteType(signature, environmentFor(receiver)) as FunctionType;
+      signature.substitute(environmentFor(receiver)) as FunctionType;
 
   Map<TypeParameterType, ValueType> environmentFor(ClassType receiver) {
     final view = owner == null ? null : receiver.asInstanceOf(owner!);
@@ -230,8 +230,7 @@ final class FunctionTarget(
       applied.validateTypeArguments();
       final destination = target.redirect;
       if (destination == null) return (target: target, ownerType: applied);
-      applied = substituteType(
-        target.redirectOwnerType ?? destination.owner!,
+      applied = (target.redirectOwnerType ?? destination.owner!).substitute(
         target.environmentFor(applied),
       ) as ClassType;
       target = destination;
@@ -248,7 +247,7 @@ final class FunctionTarget(
       ...covariantParameters,
       if (ownerParameters.isNotEmpty)
         for (final (i, type) in signature.parameters.indexed)
-          if (containsCovariantTypeParameter(type, ownerParameters)) i,
+          if (type.requiresCovariantCheck(ownerParameters)) i,
     });
 
     if (privateSelectorLibrary != null &&
@@ -348,7 +347,7 @@ final class InstanceField(
   ValueType typeFor(ClassType receiver) {
     for (ClassType? view = receiver; view != null; view = view.superclass) {
       if (identical(view.declaration, owner)) {
-        return substituteType(type, view.typeEnvironment);
+        return type.substitute(view.typeEnvironment);
       }
     }
     throw ArgumentError('Receiver does not inherit this field.');
@@ -357,7 +356,7 @@ final class InstanceField(
   this {
     if (!identical(owner, owner.declaration) ||
         !isDartType(type) ||
-        typeParametersIn(type).any((p) => !owner.typeParameters.contains(p))) {
+        type.freeTypeParameters.any((p) => !owner.typeParameters.contains(p))) {
       throw ArgumentError('Invalid instance field type or declaring class.');
     }
     if (initializer case final target?) {
@@ -406,7 +405,7 @@ final class GlobalVariable(
   bool get isWritable => !isFinal || isLate && initializer == null;
 
   this {
-    if (!isDartType(type) || typeParametersIn(type).isNotEmpty) {
+    if (!isDartType(type) || type.freeTypeParameters.isNotEmpty) {
       throw ArgumentError('Global storage requires a closed Dart value type.');
     }
     if (owner != null &&

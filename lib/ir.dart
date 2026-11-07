@@ -51,11 +51,7 @@ export 'src/ir/type.dart'
         ValueType,
         TypeParameterType,
         NonNullableTypeParameterType,
-        PromotedTypeParameterType,
-        containsCovariantTypeParameter,
-        substituteType,
-        rebindFunctionType,
-        typeParametersIn;
+        PromotedTypeParameterType;
 export 'src/ir/value.dart'
     show
         AwaitResult,
@@ -110,7 +106,6 @@ export 'src/ir/value.dart'
         SequenceConstant,
         MapConstant,
         ObjectConstant,
-        constantKey,
         RecordGet,
         ScalarConstant,
         StoreField,

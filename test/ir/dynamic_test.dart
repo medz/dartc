@@ -42,7 +42,7 @@ void main() {
     expect(dynamicList.validateTypeArguments, returnsNormally);
     final t = TypeParameterType('T')
       ..initializeBound(ValueType.object.nullable);
-    expect(substituteType(t, {t: dynamicType}), dynamicType);
+    expect(t.substitute({t: dynamicType}), dynamicType);
     expect(
       FunctionType(
         t,

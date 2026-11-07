@@ -79,14 +79,11 @@ void main() {
         ValueType.integer.nullable,
         future(.integer),
       ]) {
-        expect(substituteType(either(t), {t: type}), either(type));
-        expect(
-          substituteType(either(t).nullable, {t: type}),
-          either(type).nullable,
-        );
+        expect(either(t).substitute({t: type}), either(type));
+        expect(either(t).nullable.substitute({t: type}), either(type).nullable);
       }
       expect(
-        substituteType(either(t).nonNullable, {t: ValueType.integer.nullable}),
+        either(t).nonNullable.substitute({t: ValueType.integer.nullable}),
         either(ValueType.integer.nullable),
       );
       expect(either(.number).accepts(either(.integer)), isTrue);
@@ -114,13 +111,11 @@ void main() {
         left.instantiate([ValueType.nullType]).result,
         future(.nullType).nullable,
       );
-      expect(typeParametersIn(either(a)), [a]);
-      expect(typeParametersIn(left), isEmpty);
-      expect(containsCovariantTypeParameter(either(a), {a}), isTrue);
+      expect(either(a).freeTypeParameters, [a]);
+      expect(left.freeTypeParameters, isEmpty);
+      expect(either(a).requiresCovariantCheck({a}), isTrue);
       expect(
-        containsCovariantTypeParameter(FunctionType(.voidType, [either(a)]), {
-          a,
-        }),
+        FunctionType(.voidType, [either(a)]).requiresCovariantCheck({a}),
         isFalse,
       );
       expect(() => TypeConstant(either(a)), throwsArgumentError);
@@ -147,13 +142,13 @@ void main() {
         typeParameters: [inner],
       );
       final rebound =
-          substituteType(nested, {outer: ValueType.nullType}) as FunctionType;
+          nested.substitute({outer: ValueType.nullType}) as FunctionType;
       expect(rebound.typeParameters.single, isNot(same(inner)));
       expect(rebound.typeParameters.single.bound, future(.nullType).nullable);
       expect(rebound.result, either(rebound.typeParameters.single));
       expect(rebound.parameters, [future(.nullType)]);
-      expect(typeParametersIn(rebound), isEmpty);
-      expect(containsCovariantTypeParameter(nested, {outer}), isTrue);
+      expect(rebound.freeTypeParameters, isEmpty);
+      expect(nested.requiresCovariantCheck({outer}), isTrue);
     },
   );
 

@@ -101,7 +101,7 @@ void main() {
   test('Symbol constants use ordinary canonical object storage', () {
     final first = _symbol('value');
     final second = _symbol('value');
-    expect(constantKey(first), constantKey(second));
+    expect(first.structuralKey, second.structuralKey);
     expect(
       _execute((b) => b.emit(DirectCall(_identical, [first, second]))),
       isTrue,
@@ -174,9 +174,9 @@ void main() {
     final first = _symbol('_name', 'package:a/a.dart');
     final same = _symbol('_name', 'package:a/a.dart');
     final other = _symbol('_name', 'package:b/b.dart');
-    expect(constantKey(first), constantKey(same));
-    expect(constantKey(first), isNot(constantKey(other)));
-    expect(constantKey(first), isNot(constantKey(public)));
+    expect(first.structuralKey, same.structuralKey);
+    expect(first.structuralKey, isNot(other.structuralKey));
+    expect(first.structuralKey, isNot(public.structuralKey));
     expect(
       _execute((b) => b.emit(DirectCall(_identical, [first, same]))),
       isTrue,

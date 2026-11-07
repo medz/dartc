@@ -66,20 +66,51 @@ ObjectConstant _symbol(String name) => ObjectConstant(CoreTypes.symbolStorage, {
   CoreTypes.symbolPrivateLibrary: _null,
 });
 
-FunctionTarget _property(String name, [ClassType? owner]) => FunctionTarget(
-  (owner ?? CoreTypes.invocation).library,
-  name,
-  switch (name) {
-    'memberName' => CoreTypes.symbol,
-    'typeArguments' => _types,
-    'positionalArguments' => _positionals,
-    'namedArguments' => _named,
-    _ => ValueType.boolean,
-  },
-  [],
-  owner: owner ?? CoreTypes.invocation,
-  kind: .getter,
-);
+final _properties = {
+  for (final name in [
+    'memberName',
+    'typeArguments',
+    'positionalArguments',
+    'namedArguments',
+    'isMethod',
+    'isGetter',
+    'isSetter',
+    'isAccessor',
+  ])
+    name: _property(name, CoreTypes.invocation),
+};
+
+FunctionTarget _property(String name, [ClassType? owner]) => owner == null
+    ? _properties[name]!
+    : FunctionTarget(
+        owner.library,
+        name,
+        switch (name) {
+          'memberName' => CoreTypes.symbol,
+          'typeArguments' => _types,
+          'positionalArguments' => _positionals,
+          'namedArguments' => _named,
+          _ => ValueType.boolean,
+        },
+        [],
+        owner: owner,
+        kind: .getter,
+      );
+
+final _factories = {
+  'method': _method,
+  'genericMethod': _genericMethod,
+  for (final kind in ['getter', 'setter'])
+    kind: FunctionTarget(
+      CoreTypes.invocation.library,
+      kind,
+      CoreTypes.invocation,
+      [CoreTypes.symbol, if (kind == 'setter') _nullableObject],
+      owner: CoreTypes.invocation,
+      kind: .factory,
+      redirect: kind == 'getter' ? _getter : _setter,
+    ),
+};
 
 Value _get(Block block, Value receiver, String name) =>
     block.emit(InstanceCall(_property(name), receiver, []));
@@ -98,20 +129,7 @@ Value _create(
   bool omitNamed = false,
 }) {
   final symbol = memberName ?? _symbol('name');
-  final target = switch (kind) {
-    'method' => _method,
-    'genericMethod' => _genericMethod,
-    'getter' || 'setter' => FunctionTarget(
-      CoreTypes.invocation.library,
-      kind,
-      CoreTypes.invocation,
-      [CoreTypes.symbol, if (kind == 'setter') _nullableObject],
-      owner: CoreTypes.invocation,
-      kind: .factory,
-      redirect: kind == 'getter' ? _getter : _setter,
-    ),
-    _ => throw ArgumentError(kind),
-  };
+  final target = _factories[kind] ?? (throw ArgumentError(kind));
   final args = [
     symbol,
     if (kind == 'genericMethod') types ?? _null,

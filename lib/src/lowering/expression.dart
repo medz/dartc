@@ -54,7 +54,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         unsupported(unit, expression, 'deferred type literal');
       }
       final type = context.typeOf(expression.type.type!, expression);
-      return typeParametersIn(type).isEmpty
+      return type.freeTypeParameters.isEmpty
           ? TypeConstant(type)
           : context.emit(ReifyType(type));
     case ast.ListLiteral() || ast.SetOrMapLiteral():

@@ -163,15 +163,15 @@ void main() {
       final t = TypeParameterType('T')
         ..initializeBound(ValueType.object.nullable);
       final original = CellType(t, isLate: true, isFinal: true);
-      final changed = substituteType(original, {t: ValueType.integer});
+      final changed = original.substitute({t: ValueType.integer});
       expect(changed, CellType(.integer, isLate: true, isFinal: true));
       expect(
         changed.hashCode,
         CellType(.integer, isLate: true, isFinal: true).hashCode,
       );
-      expect(typeParametersIn(original), [t]);
-      expect(typeParametersIn(changed), isEmpty);
-      expect(substituteType(original, const {}), same(original));
+      expect(original.freeTypeParameters, [t]);
+      expect(changed.freeTypeParameters, isEmpty);
+      expect(original.substitute(const {}), same(original));
       final target = _target('foreign', .voidType);
       expect(
         () => _body(target, (block) {

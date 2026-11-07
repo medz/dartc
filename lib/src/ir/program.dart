@@ -341,7 +341,7 @@ final class IrProgram(
         .method when c != null => c.members[target.selector],
         .initializer || .factory when c != null => c.constructors[target.name],
         .fieldInitializer when c != null => fieldInitializers.lookup(target),
-        _ => names[nameOf(target)] ?? target,
+        _ => names.putIfAbsent(nameOf(target), () => target),
       };
       // A synthesized concrete forwarder can implement this abstract selector.
       if (!identical(known, target) &&
@@ -428,5 +428,9 @@ final class IrProgram(
         }
       }
     }
+    sealTypes([
+      ...owners.values,
+      for (final global in this.globals) global.type,
+    ]);
   }
 }
