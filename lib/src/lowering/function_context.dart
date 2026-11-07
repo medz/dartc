@@ -111,7 +111,7 @@ final class FunctionContext(
         coreEnumField(member) != null) {
       return null;
     }
-    if (member.isStatic || member.library.isDartCore) {
+    if (member.isStatic) {
       unsupported(unit, site, 'extension instance member');
     }
     final lexical = unqualified

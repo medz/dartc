@@ -381,9 +381,6 @@ final class SelectorChain(
         !member.isStatic &&
         isExtensionOwner(member.enclosingElement) &&
         coreEnumField(member) == null) {
-      if (member.library.isDartCore) {
-        unsupported(context.unit, node, 'core extension member $name');
-      }
       if (member is MethodElement && member.isOperator) {
         unsupported(context.unit, node, 'extension operator tear-off');
       }
@@ -519,12 +516,15 @@ final class SelectorChain(
           ? invokeValue(get(known), invocation, getterCall)
           : invokeValue(known, invocation, getterCall, get);
     }
+    if (member is MethodElement && arguments == null) {
+      return context.emit(BindMethod(target, known, direct: direct));
+    }
+    final args = context.arguments(arguments, evaluate);
+    if (args == null) return null;
     if (member.library.isDartCore &&
         (!direct || target.library.toString() == 'dart:core') &&
         !coreRuntimeMember(member) &&
         (member is GetterElement || arguments != null)) {
-      final args = context.arguments(arguments, evaluate);
-      if (args == null) return null;
       if (args.named.isEmpty) {
         final operation = lowerCoreCollectionMember(
           member,
@@ -533,10 +533,6 @@ final class SelectorChain(
         );
         if (operation != null) return context.normal(context.emit(operation));
       }
-      unsupported(context.unit, node, 'core collection member $name');
-    }
-    if (member is MethodElement && arguments == null) {
-      return context.emit(BindMethod(target, known, direct: direct));
     }
     Value? result(Instruction call) {
       final value = context.normal(context.emit(call));
@@ -546,8 +542,6 @@ final class SelectorChain(
       );
     }
 
-    final args = context.arguments(arguments, evaluate);
-    if (args == null) return null;
     return result(
       direct
           ? DirectCall(

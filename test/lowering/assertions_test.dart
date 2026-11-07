@@ -70,7 +70,7 @@ void main() {
     );
   }
 
-  test('disabled assertions omit unsupported nested closure bodies', () async {
+  test('disabled assertions omit nested closure bodies', () async {
     final program = await CheckedLibraries.read([
       'test/lowering/fixtures/disabled_assertion_closure.dart',
     ], Lowering.lower);
@@ -82,16 +82,15 @@ void main() {
     for (final (name, expected) in [
       ('skippedClosure', 5),
       ('skippedConstructor', 6),
+      ('skippedExtension', 3),
     ]) {
       final fn = program.functions.singleWhere((fn) => fn.target.name == name);
       expect(runner.run(fn, []), expected);
     }
-    await expectLater(
-      CheckedLibraries.read([
-        'test/lowering/fixtures/disabled_assertion_closure.dart',
-      ], (input) => Lowering.lower(input, enableAssertions: true)),
-      throwsUnsupportedError,
-    );
+    final checked = await CheckedLibraries.read([
+      'test/lowering/fixtures/disabled_assertion_closure.dart',
+    ], (input) => Lowering.lower(input, enableAssertions: true));
+    expect(checked.functions.any((fn) => fn.target.enclosing != null), isTrue);
   });
 
   test('enabled assertions match condition and lazy message evaluation', () {

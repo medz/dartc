@@ -639,12 +639,6 @@ final class Bindings({final bool enableAssertions = false}) {
     if (previous != null) return previous;
     final parameters = element.formalParameters;
     final container = element.enclosingElement;
-    if (element.isStatic &&
-        element.library.isDartCore &&
-        container is ClassElement &&
-        container.name == 'Enum') {
-      unsupported(unit, site, 'core Enum member ${element.name}');
-    }
     final owner = container is InterfaceElement
         ? classType(container, unit, site)
         : null;
@@ -1193,11 +1187,7 @@ final class Bindings({final bool enableAssertions = false}) {
             unsupported(unit, site, 'constant instance storage');
           }
           final element = layerType.element;
-          if (!isClassLike(element) ||
-              element.library.isInSdk &&
-                  !layerType.isDartCoreObject &&
-                  !(element.library.isDartCore && element.name == 'MapEntry') ||
-              !layer.hasKnownValue) {
+          if (!isClassLike(element) || !layer.hasKnownValue) {
             unsupported(unit, site, 'constant ${layer.type}');
           }
           for (final declaration in element.fields) {

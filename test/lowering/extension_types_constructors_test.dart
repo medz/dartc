@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:dartc/ir.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
@@ -66,35 +64,6 @@ void main() {
         2,
       );
       expect(effects.calls, [2, 4, 5]);
-      final dir = Directory.systemTemp.createTempSync('dartc-erased-assert-');
-      try {
-        final file = File('${dir.path}/entry.dart')
-          ..writeAsStringSync(
-            'extension type E(int x) { this : assert((() => <int>[1].isNotEmpty)()); } int run() => E(3).x;',
-          );
-        final program = await CheckedLibraries.read([
-          file.path,
-        ], Lowering.lower);
-        expect(
-          program.functions.every((f) => f.target.enclosing == null),
-          isTrue,
-        );
-        expect(
-          FixtureRunner(program, {}).run(
-            program.functions.singleWhere((f) => f.target.name == 'run'),
-            [],
-          ),
-          3,
-        );
-        await expectLater(
-          CheckedLibraries.read([
-            file.path,
-          ], (i) => Lowering.lower(i, enableAssertions: true)),
-          throwsUnsupportedError,
-        );
-      } finally {
-        dir.deleteSync(recursive: true);
-      }
     },
   );
   test('erased constructors use ordinary static functions and no storage', () {

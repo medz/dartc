@@ -97,46 +97,6 @@ void main() {
   });
 
   group('unsupported enum constructs', () {
-    for (final (name, source) in <(String, String)>[
-      (
-        'EnumByName.byName',
-        'enum E { a, b }\n'
-            "E f() => E.values.byName('a');",
-      ),
-      (
-        'EnumByName.asNameMap',
-        'enum E { a, b }\n'
-            'Map<String, E> f() => E.values.asNameMap();',
-      ),
-      (
-        'Enum.compareByName',
-        'enum E { a, b }\n'
-            'int f() => Enum.compareByName(E.a, E.b);',
-      ),
-      (
-        'Enum.compareByIndex',
-        'enum E { a, b }\n'
-            'int f() => Enum.compareByIndex(E.b, E.a);',
-      ),
-    ]) {
-      test('$name fails explicitly at its source', () async {
-        final directory = Directory.systemTemp.createTempSync('dartc-enum-');
-        addTearDown(() => directory.deleteSync(recursive: true));
-        final file = File('${directory.path}/entry.dart')
-          ..writeAsStringSync(source);
-        await expectLater(
-          CheckedLibraries.read([file.path], Lowering.lower),
-          throwsA(
-            isA<UnsupportedError>().having(
-              (error) => error.message,
-              'source',
-              contains('entry.dart:'),
-            ),
-          ),
-        );
-      });
-    }
-
     for (final (name, declaration) in <(String, String)>[
       ('field formal', 'a(7); final int _name; const Broken(this._name);'),
       ('field initializer', 'a; final int _name = 7; const Broken();'),

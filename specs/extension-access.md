@@ -39,7 +39,7 @@
 
 - analyzer 14.7 拒绝部分 SDK 有效的显式泛型二元运算符：`E<int>(box) + 7` 中若形式参数为 extension 的 `T`，它仍可能按未替换的 `T` 报类型错误。
 - analyzer 14.7 接受部分显式泛型一元表达式，却把声明的 `T` 留在结果及外围 record 的静态类型中。lowering 对可能逃出词法作用域的结果明确拒绝，而不猜测修复整棵 AST 的类型。
-- 核心库 extension 边界不变；extension type 的独立范围见[表示擦除](extension-types.md)。
+- 核心库 extension 复用普通静态调用，未提供的函数体保留为导入；extension type 的独立范围见[表示擦除](extension-types.md)。
 
 这些不是完整运算符支持；[边界测试](../test/lowering/extension_boundaries_test.dart)保留相应最小用例。
 

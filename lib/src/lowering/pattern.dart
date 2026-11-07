@@ -397,17 +397,6 @@ final class _Matcher(final FunctionContext context, final PatternCache cache) {
             if (coreEnumField(member) case final slot?) {
               return context.normal(context.emit(LoadField(slot, object)));
             }
-            if (member.library.isDartCore &&
-                !coreRuntimeType(member) &&
-                !coreRuntimeMember(member)) {
-              final operation = member is GetterElement
-                  ? lowerCoreCollectionMember(member, object, [])
-                  : null;
-              if (operation == null) {
-                unsupported(context.unit, field, 'core object pattern member');
-              }
-              return context.normal(context.emit(operation));
-            }
             final application = context.extensionApplication(
               member,
               field,
