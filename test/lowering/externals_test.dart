@@ -1,4 +1,5 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 

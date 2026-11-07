@@ -1,8 +1,8 @@
 import 'package:analyzer/dart/ast/ast.dart' as ast;
+import 'package:dartc/analyzer.dart';
 import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
-import 'checked_libraries.dart';
 import 'class_declaration.dart';
 import 'extension_declaration.dart';
 import 'function.dart';

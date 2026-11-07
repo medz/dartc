@@ -1,5 +1,6 @@
 import 'package:test/test.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 
 import 'fixtures/typed_forwarders_private_use.dart' as private_sdk;

@@ -3,6 +3,9 @@ description: A native Dart compiler written in Dart, producing standalone execut
 version: 0.5.0
 repository: https://github.com/medz/dartc
 
+executables:
+  dartc:
+
 environment:
   sdk: ^3.13.7
 

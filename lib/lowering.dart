@@ -6,9 +6,8 @@
 ///
 /// {@example /tool/print_ir.dart#lower_libraries}
 ///
-/// @docImport 'src/lowering/checked_libraries.dart';
+/// @docImport 'analyzer.dart';
 /// @docImport 'src/lowering/lowering.dart';
 library;
 
-export 'src/lowering/checked_libraries.dart' show CheckedLibraries;
 export 'src/lowering/lowering.dart' show Lowering;

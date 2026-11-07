@@ -5,72 +5,125 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('libraries have acyclic imports and the IR owns its model', () {
+  test('domains use public entries and have acyclic dependencies', () {
+    const dependencies = <String, Set<String>>{
+      'ir': {},
+      'target': {},
+      'sdk': {},
+      'export': {},
+      'arm64': {},
+      'x64': {},
+      'analyzer': {'sdk'},
+      'lowering': {'analyzer', 'ir'},
+      'abi': {'arm64', 'x64'},
+      'artifact': {'target'},
+      'formats': {'artifact'},
+      'interop': {'analyzer', 'ir', 'target'},
+      'codegen': {'abi', 'arm64', 'x64', 'artifact', 'ir', 'target'},
+      'linker': {'artifact', 'formats', 'target'},
+      'compiler': {
+        'analyzer',
+        'codegen',
+        'interop',
+        'lowering',
+        'sdk',
+        'target',
+        'artifact',
+        'formats',
+        'linker',
+      },
+      'cli': {'artifact', 'compiler', 'sdk', 'target'},
+    };
     final lib = Directory('lib').absolute.uri;
-    final ir = lib.resolve('ir.dart');
-    final lowering = lib.resolve('lowering.dart');
-    final irSources = lib.resolve('src/ir/').toString();
-    final loweringSources = lib.resolve('src/lowering/').toString();
-    bool ownsIr(Uri file) =>
-        file == ir || file.toString().startsWith(irSources);
-    bool ownsLowering(Uri file) =>
-        file == lowering || file.toString().startsWith(loweringSources);
+    String domain(Uri uri) {
+      final segments = uri.pathSegments
+          .skip(lib.pathSegments.length - 1)
+          .toList();
+      return segments.first == 'src'
+          ? segments[1]
+          : segments.single.split('.').first;
+    }
+
     final edges = <Uri, Set<Uri>>{};
     for (final file in Directory.fromUri(
       lib,
     ).listSync(recursive: true).whereType<File>()) {
       if (!file.path.endsWith('.dart')) continue;
-      final source = file.uri;
+      final source = file.uri, owner = domain(file.uri);
+      expect(dependencies, contains(owner));
       final unit = parseString(
         content: file.readAsStringSync(),
         path: file.path,
       ).unit;
       final links = edges[source] = {};
-      for (final d in unit.directives) {
+      for (final directive in unit.directives) {
         expect(
-          d is PartDirective || d is PartOfDirective,
+          directive is PartDirective || directive is PartOfDirective,
           isFalse,
           reason: file.path,
         );
-        if (d is! NamespaceDirective) continue;
+        if (directive is! NamespaceDirective) continue;
         for (final literal in [
-          d.uri,
-          for (final c in d.configurations) c.uri,
+          directive.uri,
+          for (final c in directive.configurations) c.uri,
         ]) {
           final uri = Uri.parse(literal.stringValue!);
           if (uri.scheme == 'dart') continue;
-          final target =
-              uri.scheme == 'package' && uri.pathSegments.first == 'dartc'
+          if (uri.scheme == 'package' && uri.pathSegments.first != 'dartc') {
+            expect(uri.pathSegments.first, 'analyzer', reason: file.path);
+            expect(
+              {'analyzer', 'lowering', 'interop'},
+              contains(owner),
+              reason: file.path,
+            );
+            continue;
+          }
+          final target = uri.scheme == 'package'
               ? lib.resolve(uri.pathSegments.skip(1).join('/'))
               : source.resolveUri(uri);
-          if (ownsIr(source)) {
-            expect(ownsIr(target), isTrue, reason: '$source -> $target');
-          } else if (source == lowering && d is ExportDirective) {
-            expect(ownsLowering(target), isTrue, reason: '$source -> $target');
-          } else if (ownsLowering(source) && ownsIr(target)) {
-            expect(d, isA<ImportDirective>(), reason: file.path);
-            expect(uri.toString(), 'package:dartc/ir.dart', reason: file.path);
+          expect(
+            target.toString().startsWith(lib.toString()),
+            isTrue,
+            reason: file.path,
+          );
+          links.add(target);
+          final dependency = domain(target);
+          if (dependency != owner) {
+            expect(directive, isA<ImportDirective>(), reason: file.path);
+            expect(
+              dependencies[owner],
+              contains(dependency),
+              reason: '$owner -> $dependency',
+            );
+            expect(
+              uri.toString(),
+              'package:dartc/$dependency.dart',
+              reason: file.path,
+            );
           }
-          if (target.toString().startsWith(lib.toString())) links.add(target);
         }
       }
     }
-    expect(edges.keys, containsAll([ir, lowering]));
-    final done = <Uri>{}, visiting = <Uri>{};
-    void visit(Uri source) {
-      if (done.contains(source)) return;
-      expect(
-        visiting.add(source),
-        isTrue,
-        reason: [...visiting, source].join(' -> '),
-      );
-      for (final target in edges[source]!) {
-        visit(target);
+    void checkCycles<T>(Map<T, Set<T>> graph) {
+      final done = <T>{}, visiting = <T>{};
+      void visit(T source) {
+        if (done.contains(source)) return;
+        expect(
+          visiting.add(source),
+          isTrue,
+          reason: [...visiting, source].join(' -> '),
+        );
+        for (final target in graph[source]!) {
+          visit(target);
+        }
+        visiting.remove(source);
+        done.add(source);
       }
-      visiting.remove(source);
-      done.add(source);
+
+      graph.keys.forEach(visit);
     }
 
-    edges.keys.forEach(visit);
+    checkCycles(edges);
+    checkCycles(dependencies);
   });
 }

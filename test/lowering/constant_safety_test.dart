@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:dartc/src/lowering/constant_safety.dart';
 import 'package:test/test.dart';

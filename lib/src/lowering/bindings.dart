@@ -8,7 +8,7 @@ import 'package:dartc/ir.dart';
 import 'analyzer_metadata.dart';
 import 'constant_safety.dart';
 
-/// Declaration-time static ABI, separate from the source callable signature.
+/// An extension's static IR entry, distinct from its source callable signature.
 final class ExtensionExecutable(
   final ExecutableElement declaration,
   final Element extension,

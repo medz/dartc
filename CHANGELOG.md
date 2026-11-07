@@ -1,11 +1,14 @@
 ## Unreleased
 
-The development checkout provides `package:dartc/ir.dart` and `package:dartc/lowering.dart`, using analyzer 14.7.0 to resolve Dart source. It produces verified IR; native code generation, runtime implementation and linking are not yet available in this checkout. Existing native compiler downloads remain available in [0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).
+The development checkout uses analyzer 14.7.0 to resolve Dart source, produces verified IR and builds native integer library exports. General Dart executable generation and the target runtime remain unimplemented. Existing native compiler downloads remain available in [0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).
 
 - Build and inspect typed SSA graphs with explicit calls, storage, effects, exception edges and asynchronous suspension. Verification seals referenced type metadata and rejects conflicting declaration identities, invalid field references and incomplete constant storage.
 - Lower Dart control flow, patterns, collections, closures, generics, classes, enums, mixins and extension types. Async functions, synchronous and asynchronous generators, and `await for` preserve cleanup and cancellation paths. Assertions can be enabled with `Lowering.lower(input, enableAssertions: true)`.
 - Preserve constructor-alias type mappings and function identity, including erased extension-type constructors. Inherited method entries remain distinct from abstract interface signatures, preserving covariant checks and defaults.
 - Lower deferred imports with independent prefix identities, asynchronous loading and checks before argument evaluation. Ordinary SDK calls and imported extension types retain external targets when their implementations are outside the supplied library batch.
+- Build `@Export<Int64 Function(...)>` functions as Mach-O or ELF objects, static libraries and shared libraries, with matching C/C++ headers. Native bodies currently support constants, addition, subtraction and returns; library linking uses the host C toolchain.
+- Use architecture encoders, ABI emission methods, code generation, object writers and linking independently through their package APIs. Select an explicit target and installed SDK.
+- Import `CheckedLibraries` from `package:dartc/analyzer.dart`. Analysis can include the non-SDK dependency closure, checking unused declarations and preventing source suppressions or editor settings from hiding language errors.
 
 Language support and known analyzer differences are tracked in [specs](specs/README.md). IR behavior checks do not establish native execution support or full Dart compatibility.
 

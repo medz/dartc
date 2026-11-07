@@ -2,6 +2,7 @@ import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
+import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:dartc/src/lowering/analyzer_metadata.dart';
 import 'package:dartc/src/lowering/bindings.dart';
