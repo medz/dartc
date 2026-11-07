@@ -195,12 +195,16 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         expression,
       );
       if (constructorName.element!.enclosingElement is ExtensionTypeElement) {
-        if (constructorName.type.element
-            case TypeAliasElement(:final typeParameters)
-            when typeParameters.isNotEmpty) {
-          unsupported(unit, expression, 'extension type constructor alias');
-        }
         final resolved = expression.staticType! as dart.FunctionType;
+        if (constructorName.type.element case final TypeAliasElement alias
+            when resolved.typeParameters.isNotEmpty) {
+          return context.bindings.constructorAliasConstant(
+            alias,
+            target,
+            unit,
+            expression,
+          );
+        }
         return FunctionConstant(
           target,
           typeArguments: resolved.typeParameters.isNotEmpty

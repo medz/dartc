@@ -119,11 +119,14 @@ final class FunctionConstant._(
   final ClassType? ownerType,
   final List<ValueType>? typeArguments,
 
-  /// The generic callable view of a constructor alias, including its owner template.
+  /// The generic callable view of a constructor alias.
   final FunctionType? constructorSignature,
 
   /// The nominal identity retained by a non-proper generic constructor alias.
   final (Uri, String)? constructorAlias,
+
+  /// The target type arguments in an erased constructor alias's binder scope.
+  final List<ValueType>? constructorTypeArguments,
 ) extends Constant {
   new(
     FunctionTarget target, {
@@ -131,12 +134,16 @@ final class FunctionConstant._(
     Iterable<ValueType>? typeArguments,
     FunctionType? constructorSignature,
     (Uri, String)? constructorAlias,
+    Iterable<ValueType>? constructorTypeArguments,
   }) : this._(
          target,
          ownerType,
          typeArguments == null ? null : .unmodifiable(typeArguments),
          constructorSignature,
          constructorAlias,
+         constructorTypeArguments == null
+             ? null
+             : .unmodifiable(constructorTypeArguments),
        );
   this
     : super(
@@ -155,22 +162,35 @@ final class FunctionConstant._(
         'A constructor alias identity requires a generic callable view.',
       );
     }
+    if (constructorTypeArguments != null &&
+        (constructorAlias == null || target.kind != .function)) {
+      throw ArgumentError(
+        'Erased constructor arguments require a static alias callable.',
+      );
+    }
     if (constructorSignature case final signature?) {
       if (ownerType != null ||
-          (target.kind != .initializer && target.kind != .factory)) {
+          (constructorTypeArguments == null &&
+              target.kind != .initializer &&
+              target.kind != .factory)) {
         throw ArgumentError(
           'A constructor callable view requires an unapplied constructor.',
         );
       }
-      final owner = signature.result;
-      if (owner is! ClassType ||
-          owner.declaration != target.owner?.declaration) {
-        throw ArgumentError(
-          'Constructor callable view returns an incompatible owner.',
-        );
+      final FunctionType expected;
+      if (constructorTypeArguments case final arguments?) {
+        expected = target.signature.instantiate(arguments);
+      } else {
+        final owner = signature.result;
+        if (owner is! ClassType ||
+            owner.declaration != target.owner?.declaration) {
+          throw ArgumentError(
+            'Constructor callable view returns an incompatible owner.',
+          );
+        }
+        owner.validateTypeArguments();
+        expected = target.signatureFor(owner);
       }
-      owner.validateTypeArguments();
-      final expected = target.signatureFor(owner);
       final genericExpected = FunctionType(
         expected.result,
         expected.parameters,

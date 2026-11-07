@@ -4,14 +4,19 @@ mixin Label on Enum {
   String toString() => 'mixed:$index';
 }
 
-enum const Labeled() with Label { a, b }
+enum const Labeled() with Label {
+  a,
+  b,
+}
 
 mixin Generic<T> {
   T echo(T value) => value;
   T Function(T) get identity => echo;
 }
 
-enum const Numbered() with Generic<int> { a }
+enum const Numbered() with Generic<int> {
+  a,
+}
 
 enum const Parameterized<T>(final T value) with Generic<T> {
   number<int>(3),

@@ -114,36 +114,4 @@ void main() {
       }
     },
   );
-  test('unsupported declarations fail before representation erasure', () async {
-    final directory = Directory.systemTemp.createTempSync(
-      'dartc-extension-types-',
-    );
-    try {
-      for (final (source, reason) in [
-        (
-          'extension type E(int value) {} typedef Alias<T> = E; Object f() => Alias.new;',
-          'extension type constructor alias',
-        ),
-        (
-          'extension type E(int value) {} typedef Alias<T> = E; const f = Alias.new;',
-          'extension type constructor alias',
-        ),
-      ]) {
-        final file = File('${directory.path}/entry.dart')
-          ..writeAsStringSync(source);
-        await expectLater(
-          CheckedLibraries.read([file.path], Lowering.lower),
-          throwsA(
-            isA<UnsupportedError>().having(
-              (e) => e.toString(),
-              'reason',
-              contains(reason),
-            ),
-          ),
-        );
-      }
-    } finally {
-      directory.deleteSync(recursive: true);
-    }
-  });
 }

@@ -95,19 +95,32 @@ final class FixtureRunner(
     if (environment.isEmpty) return value;
     ValueType resolve(ValueType type) => type.substitute(environment);
     Constant child(Constant value) => _resolvedConstant(value, environment);
-    return switch (value) {
-      ScalarConstant() || TypeConstant() => value,
-      FunctionConstant() => FunctionConstant(
+    if (value is FunctionConstant) {
+      final original = value.constructorSignature;
+      final signature = original == null
+          ? null
+          : resolve(original) as FunctionType;
+      final scoped = {
+        ...environment,
+        if (original != null)
+          for (final (i, p) in original.typeParameters.indexed)
+            p: signature!.typeParameters[i],
+      };
+      return FunctionConstant(
         value.target,
         ownerType: value.ownerType == null
             ? null
             : resolve(value.ownerType!) as ClassType,
         typeArguments: value.typeArguments?.map(resolve),
-        constructorSignature: value.constructorSignature == null
-            ? null
-            : resolve(value.constructorSignature!) as FunctionType,
+        constructorSignature: signature,
         constructorAlias: value.constructorAlias,
-      ),
+        constructorTypeArguments: value.constructorTypeArguments?.map(
+          (t) => t.substitute(scoped),
+        ),
+      );
+    }
+    return switch (value) {
+      ScalarConstant() || TypeConstant() || FunctionConstant() => value,
       RecordConstant(:final type, :final fields) => RecordConstant(
         resolve(type) as RecordType,
         fields.map(child),
@@ -141,6 +154,7 @@ final class FixtureRunner(
         :final typeArguments,
         :final constructorSignature,
         :final constructorAlias,
+        :final constructorTypeArguments,
       ) =>
         _staticFunctions.putIfAbsent(
           value.structuralKey,
@@ -158,6 +172,7 @@ final class FixtureRunner(
                 ? null
                 : constructorSignature,
             constructorAlias,
+            constructorTypeArguments,
           ),
         ),
       RecordConstant(:final type, :final fields) => _constants.putIfAbsent(
@@ -523,6 +538,17 @@ final class FixtureRunner(
       for (final (i, parameter) in binders.indexed)
         parameter: argumentsForTypes[i],
     };
+    final targetArguments =
+        fn.constructorTypeArguments
+            ?.map((t) => t.substitute(environment))
+            .toList() ??
+        argumentsForTypes;
+    if (fn.constructorTypeArguments != null) {
+      environment.addAll({
+        for (final (i, p) in target.typeParameters.indexed)
+          p: targetArguments[i],
+      });
+    }
     if (target.kind == .initializer || target.kind == .factory) {
       final resolved = target.resolveConstruction(
         appliedSignature.result as ClassType,
@@ -534,7 +560,7 @@ final class FixtureRunner(
         target.signature.substitute(environment) as FunctionType;
     final signature = declaredSignature.typeParameters.isEmpty
         ? declaredSignature
-        : _instantiateSignature(declaredSignature, argumentsForTypes);
+        : _instantiateSignature(declaredSignature, targetArguments);
     final arguments = signature.bind<Object?>(
       positional,
       named,
@@ -2468,6 +2494,7 @@ final class _FunctionValue(
   final _FunctionValue? genericOrigin,
   final FunctionType? constructorSignature,
   final (Uri, String)? constructorAlias,
+  final List<ValueType>? constructorTypeArguments,
 ]) {
   FunctionType get genericSignature =>
       constructorSignature ??
@@ -2491,6 +2518,7 @@ final class _FunctionValue(
       genericOrigin ?? this,
       constructorSignature,
       constructorAlias,
+      constructorTypeArguments,
     );
   }
 

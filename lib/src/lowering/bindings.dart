@@ -1103,11 +1103,22 @@ final class Bindings({final bool enableAssertions = false}) {
         final callable = target(executable, unit, site);
         final functionType = value.type! as dart.FunctionType;
         final arguments = constantFunctionArguments(value);
+        if (executable is ConstructorElement) {
+          final alias = _constantConstructorAlias(value, origin, unit, site);
+          if (alias != null) {
+            return constructorAliasConstant(
+              alias,
+              callable,
+              unit,
+              site,
+              typeArguments: functionType.typeParameters.isEmpty
+                  ? arguments!.map((t) => valueType(t, unit, site))
+                  : null,
+            );
+          }
+        }
         if (executable is ConstructorElement &&
             executable.enclosingElement is ExtensionTypeElement) {
-          if (!constantFunctionUsesAlias(value, null)) {
-            unsupported(unit, site, 'extension type constructor alias');
-          }
           if (functionType.typeParameters.isEmpty &&
               arguments == null &&
               callable.typeParameters.isNotEmpty) {
@@ -1121,23 +1132,6 @@ final class Bindings({final bool enableAssertions = false}) {
           );
         }
         if (executable is ConstructorElement) {
-          final alias = _constantConstructorAlias(value, origin, unit, site);
-          if (alias != null) {
-            final signature = constructorAliasSignature(
-              alias,
-              callable,
-              unit,
-              site,
-            );
-            return FunctionConstant(
-              callable,
-              constructorSignature: signature,
-              constructorAlias: (alias.library.uri, alias.name!),
-              typeArguments: functionType.typeParameters.isEmpty
-                  ? arguments!.map((t) => valueType(t, unit, site))
-                  : null,
-            );
-          }
           return FunctionConstant(
             callable,
             ownerType: functionType.typeParameters.isEmpty
@@ -1232,22 +1226,42 @@ final class Bindings({final bool enableAssertions = false}) {
     unsupported(unit, site, 'constant ${value?.type}');
   }
 
-  /// Builds the independently bound callable view of an alias constructor.
-  FunctionType constructorAliasSignature(
+  /// Builds a constructor alias with its declared binders and target mapping.
+  FunctionConstant constructorAliasConstant(
     TypeAliasElement alias,
     FunctionTarget target,
     ResolvedUnitResult unit,
-    ast.AstNode site,
-  ) {
+    ast.AstNode site, {
+    Iterable<ValueType>? typeArguments,
+  }) {
     final parameters = bindTypeParameters(alias.typeParameters, unit, site);
-    final owner = valueType(alias.aliasedType, unit, site) as ClassType;
-    final signature = target.signatureFor(owner);
-    return FunctionType(
+    final aliasedType = alias.aliasedType as dart.InterfaceType;
+    final arguments = aliasedType.element is ExtensionTypeElement
+        ? [for (final t in aliasedType.typeArguments) valueType(t, unit, site)]
+        : null;
+    final signature = arguments == null
+        ? target.signatureFor(valueType(aliasedType, unit, site) as ClassType)
+        : target.signature.instantiate(arguments);
+    final view = FunctionType(
       signature.result,
       signature.parameters,
       typeParameters: parameters,
       optionalPositional: signature.optionalPositional,
       namedParameters: signature.namedParameters,
+    );
+    if (arguments != null &&
+        arguments.length == parameters.length &&
+        arguments.indexed.every((e) => e.$2 == parameters[e.$1]) &&
+        view.accepts(target.signature) &&
+        target.signature.accepts(view)) {
+      return FunctionConstant(target, typeArguments: typeArguments);
+    }
+    return FunctionConstant(
+      target,
+      constructorSignature: view,
+      constructorAlias: (alias.library.uri, alias.name!),
+      constructorTypeArguments: arguments,
+      typeArguments: typeArguments,
     );
   }
 

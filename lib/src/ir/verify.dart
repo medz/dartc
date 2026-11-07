@@ -81,9 +81,19 @@ FunctionReferences verifyCallable(
       :final ownerType,
       :final typeArguments,
       :final constructorSignature,
+      :final constructorTypeArguments,
     )) {
       (callees ??= {}).add(callee);
       if (constructorSignature != null) checkTypeScope(constructorSignature);
+      if (constructorTypeArguments != null) {
+        checkTypeScope(
+          FunctionType(
+            ValueType.voidType,
+            constructorTypeArguments,
+            typeParameters: constructorSignature!.typeParameters,
+          ),
+        );
+      }
       if (ownerType != null) checkTypeScope(ownerType);
       for (final type in typeArguments ?? const <ValueType>[]) {
         checkTypeScope(type);

@@ -46,8 +46,9 @@ void writeFunction(
       :final typeArguments,
       :final constructorAlias,
       :final constructorSignature,
+      :final constructorTypeArguments,
     ) =>
-      'tearoff ${constructorAlias == null ? symbol(target, ownerType) : "${constructorAlias.$1}::${constructorAlias.$2}.${target.name}"}${typeArgs(typeArguments ?? const [])}${constructorSignature == null ? "" : " as ${constructorSignature.dartName}"}',
+      'tearoff ${constructorAlias == null ? symbol(target, ownerType) : "${constructorAlias.$1}::${constructorAlias.$2}.${target.name}"}${typeArgs(typeArguments ?? const [])}${constructorSignature == null ? "" : " as ${constructorSignature.dartName}"}${constructorTypeArguments == null ? "" : " => ${symbol(target)}${typeArgs(constructorTypeArguments)}"}',
     RecordConstant(:final type, :final fields) =>
       'const ${type.dartName}[${fields.map(value).join(', ')}]',
     SequenceConstant(:final type, :final elements) =>
