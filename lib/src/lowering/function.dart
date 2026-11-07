@@ -25,16 +25,21 @@ final class FunctionLowering._(
   ClosurePlan plan, {
   final int sourceParameterOffset = 0,
 }) {
-  final FunctionContext context = .new(
-    unit,
-    bindings,
-    element is ConstructorElement || body == null
-        ? (variable) => !variable.isFinal
-        : body.isPotentiallyMutatedInScope,
-    plan,
-    _target,
-    isAsynchronous: body?.isAsynchronous == true && body?.isGenerator == false,
-  );
+  late final FunctionContext context;
+
+  this {
+    context = .new(
+      unit,
+      bindings,
+      element is ConstructorElement || body == null
+          ? (variable) => !variable.isFinal
+          : body!.isPotentiallyMutatedInScope,
+      plan,
+      _target,
+      isAsynchronous: body?.isAsynchronous == true,
+      withFinally: _protect,
+    );
+  }
   bool get _representationConstructor =>
       element is ConstructorElement &&
       !(element as ConstructorElement).isFactory &&
@@ -43,14 +48,21 @@ final class FunctionLowering._(
   final _breaks = <ast.AstNode, JumpTarget>{};
   final _continues = <ast.AstNode, void Function()>{};
   FinallyRegion? _finally;
-  late final ValueType? _yieldType = body?.isGenerator == true
-      ? CoreTypes.view(
-              _target.returnType.nonNullable,
-              CoreTypes.iterable,
-            )?.typeArguments.single ??
-            ValueType.dynamicType
-      : null;
-  late final ValueType? _completionType = context.isAsynchronous
+  ValueType? get _yieldType {
+    if (body?.isGenerator != true) return null;
+    var type = _target.returnType.nonNullable;
+    while (type is FutureOrType) {
+      type = type.argument;
+    }
+    return CoreTypes.view(
+          type,
+          context.isAsynchronous ? CoreTypes.stream : CoreTypes.iterable,
+        )?.typeArguments.single ??
+        ValueType.dynamicType;
+  }
+
+  late final ValueType? _completionType =
+      context.isAsynchronous && _yieldType == null
       ? context.typeOf(
           context.unit.typeSystem.futureValueType(element!.returnType),
           site,
@@ -64,7 +76,7 @@ final class FunctionLowering._(
 
   /// Appends the outer graph and the lexical bodies it declares to [output].
   static void append(
-    List<IrFunction> output,
+    List<IrCallable> output,
     ResolvedUnitResult unit,
     Bindings bindings,
     ExecutableElement element,
@@ -75,6 +87,10 @@ final class FunctionLowering._(
     FunctionTarget? destination,
   }) {
     final target = destination ?? bindings.target(element, unit, site);
+    if (element.isExternal) {
+      output.add(IrExternal(target, defaults: bindings.defaults(target)));
+      return;
+    }
     final extension = bindings.extensionExecutable(element, unit, site);
     final plan = ClosurePlan()
       ..prepare(
@@ -107,7 +123,7 @@ final class FunctionLowering._(
 
   /// Appends a parameterless initializer and its ordinary lexical closures.
   static void appendExpression(
-    List<IrFunction> output,
+    List<IrCallable> output,
     ResolvedUnitResult unit,
     Bindings bindings,
     FunctionTarget target,
@@ -118,7 +134,7 @@ final class FunctionLowering._(
 
   /// Appends an ordinary initializer from resolved initialization expressions.
   static void appendInitializer(
-    List<IrFunction> output,
+    List<IrCallable> output,
     ResolvedUnitResult unit,
     Bindings bindings,
     FunctionTarget target,
@@ -145,7 +161,7 @@ final class FunctionLowering._(
   }
 
   static void _appendClosures(
-    List<IrFunction> output,
+    List<IrCallable> output,
     ResolvedUnitResult unit,
     Bindings bindings,
     ClosurePlan plan,
@@ -185,12 +201,13 @@ final class FunctionLowering._(
     ast.Expression? expression,
   }) {
     final body = this.body;
-    if (body?.isAsynchronous == true && body?.isGenerator == true) {
-      unsupported(context.unit, site, 'asynchronous generator bodies');
-    }
     final yieldType = _yieldType;
     if (yieldType != null &&
-        !_target.returnType.accepts(CoreTypes.iterableOf(yieldType))) {
+        !_target.returnType.accepts(
+          context.isAsynchronous
+              ? CoreTypes.streamOf(yieldType)
+              : CoreTypes.iterableOf(yieldType),
+        )) {
       unsupported(context.unit, site, 'generator result type');
     }
     context.current = context.addBlock(_target.parameterTypes);
@@ -235,11 +252,12 @@ final class FunctionLowering._(
       _target,
       context.blocks,
       defaults: context.bindings.defaults(_target),
-      bodyKind: _completionType != null
-          ? .asynchronous
-          : _yieldType == null
-          ? .synchronous
-          : .syncGenerator,
+      bodyKind: switch ((context.isAsynchronous, _yieldType)) {
+        (true, null) => .asynchronous,
+        (true, _) => .asyncGenerator,
+        (false, null) => .synchronous,
+        (false, _) => .syncGenerator,
+      },
       yieldType: _yieldType,
       completionType: _completionType,
     );
@@ -278,15 +296,23 @@ final class FunctionLowering._(
       body();
       return;
     }
+    _protect(statement, body, () => _scoped(finalizer));
+  }
+
+  void _protect(
+    ast.AstNode scope,
+    void Function() body,
+    void Function() cleanup,
+  ) {
     final enclosing = _finally;
-    final region = FinallyRegion(context, statement, _bodyReturnType);
+    final region = FinallyRegion(context, scope, _bodyReturnType);
     region.lower(
       () {
         _finally = region;
         body();
         _finally = enclosing;
       },
-      () => _scoped(finalizer),
+      cleanup,
       _return,
       _jump,
     );
@@ -324,6 +350,11 @@ final class FunctionLowering._(
       if (value != null) _suspend(value);
       return;
     }
+    if (context.isAsynchronous) {
+      value = context.normal(context.convert(value, CoreTypes.streamOf(type)));
+      if (value != null) _suspend(value, delegate: true);
+      return;
+    }
     // Unlike a for-in loop, yield* checks the complete Iterable<T> before
     // requesting its iterator, even when the iterable is empty.
     value = context.normal(context.convert(value, CoreTypes.iterableOf(type)));
@@ -342,10 +373,25 @@ final class FunctionLowering._(
     done.enter();
   }
 
-  void _suspend(Value value) {
-    final next = context.addBlock();
-    context.current!.finish(Yield(value, Jump(next)));
-    context.current = next;
+  void _suspend(Value value, {bool delegate = false}) {
+    final next = JumpTarget(context);
+    final cancel = context.isAsynchronous ? JumpTarget(context) : null;
+    context.current!.finish(
+      delegate
+          ? YieldStream(
+              value,
+              next.edge(),
+              onCancel: cancel!.edge(),
+              onThrow: context.handler?.edge([
+                UnwindValue.exception,
+                UnwindValue.stackTrace,
+              ]),
+            )
+          : Yield(value, next.edge(), onCancel: cancel?.edge()),
+    );
+    context.current = null;
+    if (cancel?.enter() != null) _return(null);
+    next.enter();
   }
 
   void _statement(ast.Statement statement) {
@@ -425,7 +471,12 @@ final class FunctionLowering._(
         if (jump == null) {
           unsupported(context.unit, statement, 'jump target');
         }
-        _jump(target!, jump);
+        _jump(
+          statement is ast.ContinueStatement && target is ast.ForStatement
+              ? target.body
+              : target!,
+          jump,
+        );
       default:
         unsupported(
           context.unit,
@@ -471,9 +522,6 @@ final class FunctionLowering._(
         forLoopParts: final ast.ForEachParts parts,
         :final body,
       ):
-        if (statement.awaitKeyword != null) {
-          unsupported(context.unit, statement, 'asynchronous for-in');
-        }
         lowerForEach(
           context,
           parts,

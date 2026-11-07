@@ -151,7 +151,7 @@ void main() {
       }
     },
   );
-  test('async* and await-for remain explicit unsupported boundaries', () async {
+  test('invalid generator return types fail before lowering', () async {
     final directory = Directory.systemTemp.createTempSync('dartc-generators-');
     addTearDown(() => directory.deleteSync(recursive: true));
     final invalid = File('${directory.path}/invalid.dart')
@@ -160,25 +160,5 @@ void main() {
       CheckedLibraries.read([invalid.path], Lowering.lower),
       throwsFormatException,
     );
-    for (final (source, reason) in [
-      ('Stream<int> f() async* { yield 1; }', 'asynchronous generator bodies'),
-      (
-        'Future<void> f() async { await for (final x in const Stream<int>.empty()) {} }',
-        'asynchronous for-in',
-      ),
-    ]) {
-      final file = File('${directory.path}/entry.dart')
-        ..writeAsStringSync(source);
-      await expectLater(
-        CheckedLibraries.read([file.path], Lowering.lower),
-        throwsA(
-          isA<UnsupportedError>().having(
-            (e) => e.message,
-            'reason',
-            contains(reason),
-          ),
-        ),
-      );
-    }
   });
 }

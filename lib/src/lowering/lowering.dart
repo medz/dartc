@@ -41,7 +41,7 @@ abstract final class Lowering() {
         }
       }
     }
-    final functions = <IrFunction>[];
+    final functions = <IrCallable>[];
     final classes = <IrClass>[];
     for (final unit in input.libraries.expand((library) => library.units)) {
       for (final node in unit.unit.declarations) {
@@ -86,7 +86,8 @@ abstract final class Lowering() {
     }
     return IrProgram(
       [...classes, ...bindings.mixinApplications],
-      [...functions, ...bindings.mixinInitializers],
+      [...functions.whereType<IrFunction>(), ...bindings.mixinInitializers],
+      externals: functions.whereType<IrExternal>(),
       globals: bindings.globals,
     );
   }

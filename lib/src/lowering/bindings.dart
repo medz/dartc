@@ -43,8 +43,7 @@ final class Bindings({final bool enableAssertions = false}) {
     final primary = node.namePart;
     if (primary is! ast.PrimaryConstructorDeclaration ||
         element.constructors.any(
-          (c) =>
-              c.isExternal || (c.isFactory && c.redirectedConstructor != null),
+          (c) => c.isFactory && c.redirectedConstructor != null,
         )) {
       unsupported(unit, node, 'extension type constructor shape');
     }
@@ -1471,11 +1470,15 @@ final class Bindings({final bool enableAssertions = false}) {
         return builtin;
       }
     }
-    if (element.library.isDartAsync && element.name == 'Future') {
+    if (element.library.isDartAsync &&
+        (element.name == 'Future' || element.name == 'Stream')) {
+      final type = element.name == 'Future'
+          ? CoreTypes.future
+          : CoreTypes.stream;
       final parameter = element.typeParameters.single.baseElement;
-      _parameters[parameter] = CoreTypes.future.typeParameters.single;
+      _parameters[parameter] = type.typeParameters.single;
       _boundParameters.add(parameter);
-      return CoreTypes.future;
+      return type;
     }
     if (element.library.uri.toString() == 'dart:_internal' &&
         element.name == 'Symbol') {

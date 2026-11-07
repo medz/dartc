@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:dartc/ir.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
@@ -130,27 +128,6 @@ void main() {
           (e) => e.message,
           'feature',
           contains('Native Future runtime type checks'),
-        ),
-      ),
-    );
-  });
-
-  test('FutureOr types do not permit asynchronous generator bodies', () async {
-    final directory = Directory.systemTemp.createTempSync(
-      'dartc-future-types-',
-    );
-    addTearDown(() => directory.deleteSync(recursive: true));
-    final file = File('${directory.path}/entry.dart')
-      ..writeAsStringSync(
-        "import 'dart:async'; Stream<int> f() async* { yield 1; }",
-      );
-    await expectLater(
-      CheckedLibraries.read([file.path], Lowering.lower),
-      throwsA(
-        isA<UnsupportedError>().having(
-          (e) => e.message,
-          'feature',
-          contains('asynchronous generator bodies'),
         ),
       ),
     );

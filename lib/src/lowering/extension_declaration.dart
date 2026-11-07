@@ -14,7 +14,7 @@ void lowerExtension(
   ResolvedUnitResult unit,
   Bindings bindings,
   Iterable<ast.ClassMember> members,
-  List<IrFunction> functions,
+  List<IrCallable> functions,
 ) {
   for (final member in members) {
     switch (member) {
@@ -42,7 +42,7 @@ void lowerExtensionType(
   ResolvedUnitResult unit,
   Bindings bindings,
   ast.ExtensionTypeDeclaration declaration,
-  List<IrFunction> functions,
+  List<IrCallable> functions,
 ) {
   final element = declaration.declaredFragment!.element;
   final getter = bindings.target(

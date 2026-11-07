@@ -19,7 +19,7 @@
 
 ## 明确边界
 
-external 构造器及 redirecting factory 在声明处拒绝；泛型构造器别名提取在使用处拒绝，非泛型别名复用原构造器身份。即使只在类型注解或函数签名中引用，extension type 的声明库也必须包含在输入 batch 中注册；不会仅凭导入自动装配或放开尚未验证的声明。其他未实现的核心库 API、async 和普通 extension 的已知边界不变。
+external 构造器保留擦除后的外部调用签名，具体实现由链接方提供。redirecting factory 在声明处拒绝；泛型构造器别名提取在使用处拒绝，非泛型别名复用原构造器身份。即使只在类型注解或函数签名中引用，extension type 的声明库也必须包含在输入 batch 中注册；不会仅凭导入自动装配。其他未实现的核心库 API 和普通 extension 的已知边界不变。
 
 泛型覆盖见[差分测试](../test/lowering/extension_types_generic_test.dart)及[样本](../test/lowering/fixtures/extension_types_generic.dart)。[接口差分测试](../test/lowering/extension_types_interfaces_test.dart)覆盖多个接口、同一声明的菱形继承、own 覆盖、静态父视图、泛型类型参数映射、跨库私有成员、继承提取的默认值，以及普通接口的真实覆盖与协变检查。不同声明的同名冲突、无效表示类型和禁止的接口仍由 analyzer 拒绝。[构造器差分测试](../test/lowering/extension_types_constructors_test.dart)覆盖初始化/断言/body/finally 顺序、异常、可空表示、泛型与 const、默认值及闭包。
 

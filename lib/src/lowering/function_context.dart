@@ -20,6 +20,8 @@ final class FunctionContext(
   final ClosurePlan _closures,
   final FunctionTarget target, {
   final bool isAsynchronous = false,
+  required final void Function(ast.AstNode, void Function(), void Function())
+  withFinally,
 }) {
   /// The blocks created so far, with the function entry first.
   final blocks = <Block>[];

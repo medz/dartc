@@ -77,38 +77,96 @@ void lowerForEach(
 }) {
   var iterable = evaluate(parts.iterable);
   if (iterable == null) return;
+  final asynchronous = switch (parts.parent) {
+    ast.ForStatement(:final awaitKeyword) ||
+    ast.ForElement(:final awaitKeyword) => awaitKeyword != null,
+  };
   if (iterable.type is DynamicType) {
     iterable = context.normal(
-      context.cast(iterable, CoreTypes.iterableOf(.dynamicType)),
+      context.cast(
+        iterable,
+        asynchronous
+            ? CoreTypes.streamOf(.dynamicType)
+            : CoreTypes.iterableOf(.dynamicType),
+      ),
     );
     if (iterable == null) return;
   }
-  final iterator = context.emit(GetIterator(iterable));
-  final header = JumpTarget(context)
-    ..jump()
-    ..enter();
-  setContinue?.call(header.jump);
-  context.guard(context.emit(IteratorMoveNext(iterator)), exit);
-  context.inScope(() {
-    final value = context.emit(IteratorCurrent(iterator));
-    switch (parts) {
-      case ast.ForEachPartsWithDeclaration(:final loopVariable):
-        final local = loopVariable.declaredFragment!.element;
-        final type = context.typeOf(local.type, loopVariable);
-        context.declare(local, type, context.cast(value, type));
-      case ast.ForEachPartsWithIdentifier(:final identifier):
-        final local = identifier.element;
-        if (local is! VariableElement || !context.hasLocal(local)) {
-          unsupported(context.unit, identifier, 'for-in assignment target');
-        }
-        context.writeLocal(
-          local,
-          context.cast(value, context.typeOf(local.type, identifier)),
-        );
-      case ast.ForEachPartsWithPattern(:final pattern):
-        declarePattern(context, pattern, value);
-    }
-    if (context.current != null) body();
-  });
-  header.jump();
+  FunctionTarget? moveNext, current, cancel;
+  late final Value iterator;
+  if (asynchronous) {
+    final element = context
+        .unit
+        .libraryElement
+        .typeProvider
+        .streamElement
+        .library
+        .getClass('StreamIterator')!;
+    final bindings = context.bindings, unit = context.unit;
+    final type = bindings.classType(element, unit, parts).instantiate([
+      CoreTypes.view(iterable.type, CoreTypes.stream)!.typeArguments.single,
+    ]);
+    iterator = context.emit(
+      DirectCall(bindings.target(element.unnamedConstructor!, unit, parts), [
+        iterable,
+      ], ownerType: type),
+    );
+    moveNext = bindings.target(element.getMethod('moveNext')!, unit, parts);
+    current = bindings.target(element.getGetter('current')!, unit, parts);
+    cancel = bindings.target(element.getMethod('cancel')!, unit, parts);
+  } else {
+    iterator = context.emit(GetIterator(iterable));
+  }
+  void loop() {
+    final header = JumpTarget(context)
+      ..jump()
+      ..enter();
+    final done = asynchronous ? JumpTarget(context) : exit;
+    setContinue?.call(header.jump);
+    final next = moveNext == null
+        ? context.emit(IteratorMoveNext(iterator))
+        : context.awaitValue(
+            context.emit(InstanceCall(moveNext, iterator, [])),
+            .boolean,
+          );
+    context.guard(next, done);
+    context.inScope(() {
+      final value = context.emit(
+        current == null
+            ? IteratorCurrent(iterator)
+            : InstanceCall(current, iterator, []),
+      );
+      switch (parts) {
+        case ast.ForEachPartsWithDeclaration(:final loopVariable):
+          final local = loopVariable.declaredFragment!.element;
+          final type = context.typeOf(local.type, loopVariable);
+          context.declare(local, type, context.cast(value, type));
+        case ast.ForEachPartsWithIdentifier(:final identifier):
+          final local = identifier.element;
+          if (local is! VariableElement || !context.hasLocal(local)) {
+            unsupported(context.unit, identifier, 'for-in assignment target');
+          }
+          context.writeLocal(
+            local,
+            context.cast(value, context.typeOf(local.type, identifier)),
+          );
+        case ast.ForEachPartsWithPattern(:final pattern):
+          declarePattern(context, pattern, value);
+      }
+      if (context.current != null) body();
+    });
+    header.jump();
+    if (asynchronous) done.enter();
+  }
+
+  if (cancel != null) {
+    context.withFinally(parts.parent, loop, () {
+      context.awaitValue(
+        context.emit(InstanceCall(cancel!, iterator, [])),
+        .dynamicType,
+      );
+    });
+  } else {
+    loop();
+  }
 }

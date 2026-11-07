@@ -16,7 +16,7 @@ IrClass lowerClass(
   ResolvedUnitResult unit,
   Bindings bindings,
   ast.AstNode declaration,
-  List<IrFunction> functions, {
+  List<IrCallable> functions, {
   IrClass? application,
 }) {
   final (element, namePart, sourceMembers) = switch (declaration) {
@@ -74,10 +74,7 @@ IrClass lowerClass(
       continue;
     }
     if (field.isStatic || field.isOriginGetterSetter) continue;
-    if (field.isExternal) {
-      unsupported(unit, declaration, 'field ${field.displayName}');
-    }
-    final slot = field.isAbstract || interfaceOnly
+    final slot = field.isAbstract || field.isExternal || interfaceOnly
         ? null
         : bindings.field(field, unit, declaration, owner: type);
     if (slot != null) fields.add(slot);
@@ -85,6 +82,10 @@ IrClass lowerClass(
       final target = memberTarget(accessor, declaration);
       members.add(target);
       if (target.isAbstract) continue;
+      if (field.isExternal) {
+        functions.add(IrExternal(target));
+        continue;
+      }
       final entry = Block(target.parameterTypes);
       final receiver = entry.parameters.first;
       if (accessor is GetterElement) {
@@ -110,7 +111,6 @@ IrClass lowerClass(
     final target = bindings.target(ctor, unit, site);
     constructors.add(target);
     if (target.redirect != null) return;
-    if (ctor.isExternal) unsupported(unit, site, 'external constructor');
     FunctionLowering.append(
       functions,
       unit,

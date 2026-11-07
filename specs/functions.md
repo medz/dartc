@@ -16,10 +16,10 @@
 | 泛型函数值、显式函数值实例化 | 支持函数、绑定方法、泛型构造器函数值，以及显式和上下文隐式实例化。运行时类型保留泛型签名与界限，实例化检查实际实现的界限。常量实例化保留规范身份，包括通过其他库的私有别名取得的构造器和未出现在签名中的类型实参。见[泛型函数样本](../test/lowering/fixtures/generic_functions.dart)和[常量函数样本](../test/lowering/fixtures/generic_constants.dart)。 |
 | 裸 `Function`/dynamic 函数值调用 | 支持已表示的函数、方法、构造器、闭包及 callable object，包括 Function 上界和 `.call` 提取。先验证位置/命名/类型实参个数，再应用实际声明的默认类型、界限和形参检查。保留闭包环境及构造器别名身份。原生回调只支持明确建模的签名。见[动态调用样本](../test/lowering/fixtures/dynamic_dispatch.dart)。 |
 | 可调用对象、隐式 `call` 提取 | 支持实例的普通和泛型 `call` 调用，以及在函数类型上下文中隐式提取其绑定方法。见[可调用对象样本](../test/lowering/fixtures/callables.dart)。 |
-| `sync*` | 支持带显式 `Yield`/恢复边的生成器 IR：调用及取得 iterator 不执行函数体，每个 iterator 的局部状态独立，外层捕获绑定仍共享。支持 `yield`、`yield*`、泛型及跨暂停的 catch/finally。行为通过 SDK 对照验证；FutureOr 结果类型、生成器的具体实现 runtimeType 和同一 iterator 重入尚未建模，原生后端的帧保存/状态机转换尚未实现。见[生成器样本](../test/lowering/fixtures/generators.dart)。 |
+| `sync*` | 支持带显式 `Yield`/恢复边的生成器 IR：调用及取得 iterator 不执行函数体，每个 iterator 的局部状态独立，外层捕获绑定仍共享。支持 `yield`、`yield*`、泛型及跨暂停的 catch/finally。行为通过 SDK 对照验证；支持 FutureOr<Iterable<T>> 返回声明；生成器的具体实现 runtimeType 和同一 iterator 重入尚未建模，原生后端的帧保存/状态机转换尚未实现。见[生成器样本](../test/lowering/fixtures/generators.dart)。 |
 | `async`、`await` | IR 区分公开返回签名与 `completionType`，用显式 `Await` 终结符和正常/异常恢复边保存暂停点。支持立即执行、类型化 Future/value 双臂、跨暂停的捕获/异常/控制流，以及 finally 完成后才接续返回的 Future；返回表达式的类型检查仍在 finally 之前。参考执行器使用 SDK Future 微任务，已作顺序/错误/身份对照；原生后端的异步帧与运行时转换尚未实现。见[异步样本](../test/lowering/fixtures/async_functions.dart)。 |
-| `async*` | 可以手工构造返回 `Stream<T>` 的生成器 IR。`Yield` 区分继续和取消，`YieldStream` 委托数据与错误事件，订阅操作本身的异常可进入局部处理器。开始监听、暂停、取消、异步 finally 和清理失败已有 [SDK 行为对照](../test/ir/async_generators_test.dart)。源码 lowering 待实现。 |
-| `external` 函数 | `IrExternal` 保存外部实现的 Dart 签名、默认值和声明身份，适用于顶层函数、类成员和构造器。[IR 校验](../test/ir/program_references_test.dart)覆盖重复实现、缺失实现和默认值类型。源码 lowering、外部符号绑定及原生调用待实现。 |
+| `async*` | 支持普通、泛型和局部 `async*` 函数，返回 `Stream<T>`。`Yield` 区分继续和取消，`YieldStream` 委托数据与错误事件，订阅操作本身的异常可进入局部处理器。开始监听、暂停、取消、异步 finally 和清理失败已有 [SDK 行为对照](../test/ir/async_generators_test.dart)。源码转换也通过[暂停与取消对照](../test/lowering/async_generators_test.dart)验证。 |
+| `external` 函数 | `IrExternal` 保存外部实现的 Dart 签名、默认值和声明身份，源码支持顶层函数、类成员、构造器和 extension 成员；external 变量生成访问器声明，不分配普通字段或全局存储。[IR 校验](../test/ir/program_references_test.dart)覆盖重复实现、缺失实现和默认值类型。见[源码声明验证](../test/lowering/externals_test.dart)。外部符号绑定及原生调用仍由后续领域实现。 |
 
 [IR 行为对照](../test/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/functions.md)。
 

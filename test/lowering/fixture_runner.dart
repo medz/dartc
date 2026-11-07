@@ -212,6 +212,12 @@ final class FixtureRunner(
         return null;
       }
       final owner = target.owner;
+      if (owner?.name == 'StreamIterator' && target.name == 'new') {
+        return _GuestStreamIterator(
+          owner!.substitute(environment) as ClassType,
+          StreamIterator(arguments.single as Stream<Object?>),
+        );
+      }
       if (owner != null &&
           (owner == CoreTypes.future || owner.name == 'Completer')) {
         final type = owner.substitute(environment) as ClassType;
@@ -870,7 +876,9 @@ final class FixtureRunner(
     Map<String, Object?> named,
     List<ValueType> types,
   ) {
-    if (receiver is _GuestFuture || receiver is _GuestCompleter) {
+    if (receiver is _GuestFuture ||
+        receiver is _GuestCompleter ||
+        receiver is _GuestStreamIterator) {
       if (selector.name == 'runtimeType' && selector.kind == .getter) {
         return _typeValue(_runtimeValueType(receiver));
       }
@@ -1137,6 +1145,25 @@ final class FixtureRunner(
   ) {
     if (selector.privateLibrary != null) {
       throw _AsyncUnsupported('Private async member');
+    }
+    if (receiver is _GuestStreamIterator) {
+      if (positional.isNotEmpty || named.isNotEmpty || types.isNotEmpty) {
+        throw _AsyncUnsupported('StreamIterator invocation shape');
+      }
+      return switch ((selector.kind, selector.name)) {
+        (.getter, 'current') => receiver.iterator.current,
+        (.method, 'moveNext') => _GuestFuture(
+          CoreTypes.futureOf(.boolean),
+          receiver.iterator.moveNext().then(_FutureBox.new),
+        ),
+        (.method, 'cancel') => _GuestFuture(
+          CoreTypes.futureOf(.dynamicType),
+          receiver.iterator.cancel().then(_FutureBox.new),
+        ),
+        _ => throw _AsyncUnsupported(
+          'Unmodeled StreamIterator member ${selector.name}',
+        ),
+      };
     }
     if (receiver is _GuestCompleter) {
       if (selector.kind == .getter) {
@@ -1962,10 +1989,15 @@ final class FixtureRunner(
           :final named,
         ):
           final value = read(receiver);
-          if (value is _GuestFuture || value is _GuestCompleter) {
-            final actual = value is _GuestFuture
-                ? value.type
-                : (value as _GuestCompleter).type;
+          if (value is _GuestFuture ||
+              value is _GuestCompleter ||
+              value is _GuestStreamIterator) {
+            final actual = switch (value) {
+              _GuestFuture(:final type) ||
+              _GuestCompleter(:final type) ||
+              _GuestStreamIterator(:final type) => type,
+              _ => throw StateError('Expected an async protocol value.'),
+            };
             final types = typeArguments.map(resolve).toList();
             final signature = _instantiateSignature(
               member.signatureFor(actual),
@@ -2204,6 +2236,11 @@ final class _Returned(final Object? value);
 final class _Suspended(final Await operation, final Object? operand);
 final class _FutureBox(final Object? value);
 
+final class _GuestStreamIterator(
+  final ClassType type,
+  final StreamIterator<Object?> iterator,
+);
+
 final class _GuestFuture(
   final ClassType type,
   final Future<_FutureBox> carrier,
@@ -2304,6 +2341,7 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     _GeneratorIterable(:final type) ||
     _GeneratorIterator(:final type) ||
     _GuestFuture(:final type) ||
+    _GuestStreamIterator(:final type) ||
     _GuestCompleter(:final type) => type,
     _NativeFunction(:final signature) => signature,
     _FunctionValue() => value.reifiedSignature,

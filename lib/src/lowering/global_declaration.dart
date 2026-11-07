@@ -11,7 +11,7 @@ void lowerGlobal(
   ResolvedUnitResult unit,
   Bindings bindings,
   ast.VariableDeclaration declaration,
-  List<IrFunction> functions,
+  List<IrCallable> functions,
 ) {
   final element =
       declaration.declaredFragment!.element as PropertyInducingElement;
@@ -22,7 +22,10 @@ void lowerGlobal(
   if (element
       case FieldElement(isExternal: true) ||
           TopLevelVariableElement(isExternal: true)) {
-    unsupported(unit, declaration, 'external stored variable');
+    for (final accessor in [element.getter, element.setter].nonNulls) {
+      functions.add(IrExternal(bindings.target(accessor, unit, declaration)));
+    }
+    return;
   }
   final slot = bindings.global(element, unit, declaration);
   if (declaration.initializer case final expression?) {

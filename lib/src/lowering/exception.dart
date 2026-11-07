@@ -53,7 +53,7 @@ void lowerTryCatch(
 /// Routes transfers that leave a try statement through its `finally` block.
 final class FinallyRegion(
   final FunctionContext _context,
-  final ast.TryStatement _statement,
+  final ast.AstNode _statement,
   ValueType resultType,
 ) {
   final JumpTarget _normal = .new(_context);

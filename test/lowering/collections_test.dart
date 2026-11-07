@@ -122,19 +122,4 @@ void main() {
       expect(result!.type, type);
     });
   }
-  for (final (file, diagnostic) in [
-    ('collection_async_element.dart', 'asynchronous collection for'),
-    ('collection_await_for.dart', 'asynchronous for-in'),
-  ]) {
-    test('explicitly rejects unsupported $file', () async {
-      await expectLater(
-        CheckedLibraries.read(['test/lowering/fixtures/$file'], Lowering.lower),
-        throwsA(
-          isA<UnsupportedError>()
-              .having((error) => error.message, 'feature', contains(diagnostic))
-              .having((error) => error.message, 'source', contains('$file:')),
-        ),
-      );
-    });
-  }
 }

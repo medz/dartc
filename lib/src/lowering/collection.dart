@@ -118,9 +118,6 @@ Value? lowerCollection(
           done.enter();
         }
       case ast.ForElement():
-        if (node.awaitKeyword != null) {
-          unsupported(context.unit, node, 'asynchronous collection for');
-        }
         final exit = JumpTarget(context);
         if (node.forLoopParts case final ast.ForEachParts parts) {
           lowerForEach(
