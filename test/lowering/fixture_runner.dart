@@ -7,6 +7,7 @@ final class FixtureRunner(
   final IrProgram program,
   final Map<(Uri, String), Object? Function(int)> imports,
 ) {
+  final _loadedLibraries = <DeferredImport>{};
   final _globals = <GlobalVariable, Object?>{
     for (final global in program.globals)
       if (!global.isLate && global.initializer == null) global: null,
@@ -1986,6 +1987,16 @@ final class FixtureRunner(
           values[op] = _call(read(function), positional.map(read).toList(), {
             for (final e in named.entries) e.key: read(e.value),
           }, typeArguments.map(resolve).toList());
+        case LoadLibrary(:final reference):
+          values[op] = _GuestFuture(
+            CoreTypes.futureOf(.dynamicType),
+            Future<_FutureBox>.microtask(() {
+              _loadedLibraries.add(reference);
+              return _FutureBox(null);
+            }),
+          );
+        case CheckLibraryLoaded(:final reference):
+          if (!_loadedLibraries.contains(reference)) throw _DeferredNotLoaded();
         case LoadGlobal(:final global):
           values[op] = _loadGlobal(global);
         case StoreGlobal(:final global, :final value):
@@ -2291,6 +2302,8 @@ final class _GuestCompleter(final ClassType type, bool synchronous) {
 
 // Capability failures must not be mistaken for catchable Dart program errors.
 final class _AsyncUnsupported(super.message) extends UnsupportedError;
+
+final class _DeferredNotLoaded() extends Error;
 
 ClassType? _futureType(Object? value) => switch (value) {
   _GuestFuture(:final type) => type,

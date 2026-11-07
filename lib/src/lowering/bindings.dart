@@ -34,6 +34,45 @@ final class Bindings({final bool enableAssertions = false}) {
   final _typeEnvironments =
       <FunctionTarget, Map<TypeParameterType, ValueType>>{};
   final _extensions = <ExecutableElement, ExtensionExecutable>{};
+  final _deferredImports =
+      <PrefixElement, ({DeferredImport reference, IrFunction loader})>{};
+
+  /// The implicit `loadLibrary` functions referenced by this batch.
+  Iterable<IrFunction> get libraryLoaders =>
+      _deferredImports.values.map((entry) => entry.loader);
+
+  /// Resolves a deferred namespace from a static receiver or named type.
+  ({DeferredImport reference, IrFunction loader})? deferredImport(
+    ast.AstNode? source,
+  ) {
+    final prefix = switch (source) {
+      ast.SimpleIdentifier(:final element) => element,
+      ast.PrefixedIdentifier(prefix: ast.SimpleIdentifier(:final element)) =>
+        element,
+      ast.NamedType(:final importPrefix) => importPrefix?.element,
+      _ => null,
+    };
+    if (prefix is! PrefixElement || !prefix.firstFragment.isDeferred) {
+      return null;
+    }
+    return _deferredImports.putIfAbsent(prefix, () {
+      final reference = DeferredImport(
+        prefix.firstFragment.enclosingFragment!.source.uri,
+        prefix.name!,
+        prefix.imports.single.importedLibrary!.uri,
+      );
+      final operation = LoadLibrary(reference);
+      final target = FunctionTarget(
+        prefix.library.uri,
+        '${reference.unit}:loadLibrary:${reference.prefix}',
+        operation.type,
+        [],
+      );
+      final entry = Block([]);
+      entry.finish(Return(entry.emit(operation)));
+      return (reference: reference, loader: IrFunction(target, [entry]));
+    });
+  }
 
   /// Substitutions from source binders into this instantiated lexical body.
   Map<TypeParameterType, ValueType> typeEnvironment(FunctionTarget target) {
@@ -45,31 +84,6 @@ final class Bindings({final bool enableAssertions = false}) {
     return _applicationOwners.containsKey(owner)
         ? owner!.interfaces.single.typeEnvironment
         : const {};
-  }
-
-  final _extensionTypes = <ExtensionTypeElement>{};
-
-  /// Reject constructor forms whose erased bodies are not implemented.
-  void registerExtensionType(
-    ResolvedUnitResult unit,
-    ast.ExtensionTypeDeclaration node,
-  ) {
-    final element = node.declaredFragment!.element;
-    final primary = node.namePart;
-    if (primary is! ast.PrimaryConstructorDeclaration) {
-      unsupported(unit, node, 'extension type constructor shape');
-    }
-    _extensionTypes.add(element);
-  }
-
-  void _requireExtensionType(
-    ExtensionTypeElement element,
-    ResolvedUnitResult unit,
-    ast.AstNode site,
-  ) {
-    if (!_extensionTypes.contains(element)) {
-      unsupported(unit, site, 'unregistered extension type ${element.name}');
-    }
   }
 
   final _classes = <InterfaceElement, ClassType>{};
@@ -758,7 +772,6 @@ final class Bindings({final bool enableAssertions = false}) {
     final owner = element.enclosingElement;
     if (!isExtensionOwner(owner)) return null;
     final constructor = element is ConstructorElement;
-    if (owner is ExtensionTypeElement) _requireExtensionType(owner, unit, site);
     if (_extensions[element] case final previous?) return previous;
     final extensionElements = element.isStatic && !constructor
         ? const <TypeParameterElement>[]
@@ -1293,10 +1306,7 @@ final class Bindings({final bool enableAssertions = false}) {
     ResolvedUnitResult unit,
     ast.AstNode site,
   ) {
-    if (type case dart.InterfaceType(
-      element: final ExtensionTypeElement element,
-    )) {
-      _requireExtensionType(element, unit, site);
+    if (type case dart.InterfaceType(element: ExtensionTypeElement())) {
       return valueType(type.extensionTypeErasure, unit, site);
     }
     final ValueType base = switch (type) {

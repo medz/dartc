@@ -30,6 +30,9 @@ sealed class IrCallable(
   /// Nominal identities used by the signature, constants and graph.
   Set<ClassType> get referencedClasses => _references.classes;
 
+  /// Deferred prefixes loaded or checked by this body.
+  Set<DeferredImport> get deferredImports => _references.deferredImports;
+
   this {
     final optional = target.signature.optionalSlots;
     if (target.isAbstract ||

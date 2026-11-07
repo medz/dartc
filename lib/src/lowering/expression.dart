@@ -19,15 +19,8 @@ Value? lowerExpression(FunctionContext context, ast.Expression expression) =>
 /// Operator overrides are receiver syntax, not first-class expression values.
 Value? _operatorReceiver(FunctionContext context, ast.Expression expression) {
   if (expression is ast.ExtensionOverride) {
-    final prefix = expression.importPrefix?.element;
-    if (expression.isNullAware ||
-        prefix is PrefixElement &&
-            prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
-      unsupported(
-        context.unit,
-        expression,
-        'null-aware or deferred operator override',
-      );
+    if (expression.isNullAware) {
+      unsupported(context.unit, expression, 'null-aware operator override');
     }
     expression = expression.argumentList.arguments.single.argumentExpression;
   }
@@ -48,11 +41,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
               context.typeOf(expression.staticType!, expression),
             );
     case ast.TypeLiteral():
-      final prefix = expression.type.importPrefix?.element;
-      if (prefix is PrefixElement &&
-          prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
-        unsupported(unit, expression, 'deferred type literal');
-      }
+      context.checkDeferred(expression.type);
       final type = context.typeOf(expression.type.type!, expression);
       return type.freeTypeParameters.isEmpty
           ? TypeConstant(type)
@@ -184,11 +173,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         expression,
       );
     case ast.ConstructorReference(:final constructorName):
-      if (constructorName.type.importPrefix?.element
-          case final PrefixElement prefix
-          when prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
-        unsupported(unit, expression, 'deferred constructor tear-off');
-      }
+      context.checkDeferred(constructorName.type);
       final target = context.bindings.target(
         constructorName.element!,
         unit,
@@ -235,9 +220,12 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
     case ast.Identifier(element: final ExecutableElement callee)
         when callee is TopLevelFunctionElement ||
             callee is MethodElement && callee.isStatic:
-      if (expression is ast.PrefixedIdentifier && expression.isDeferred) {
-        unsupported(unit, expression, 'deferred function tear-off');
+      if (callee is TopLevelFunctionElement && callee.isOriginLoadLibrary) {
+        return FunctionConstant(
+          context.bindings.deferredImport(expression)!.loader.target,
+        );
       }
+      context.checkDeferred(expression);
       return FunctionConstant(
         context.bindings.target(callee, unit, expression),
       );
@@ -247,9 +235,8 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           ),
           target: final target?,
         )
-        when method.isStatic &&
-            target is ast.PrefixedIdentifier &&
-            !target.isDeferred:
+        when method.isStatic && target is ast.PrefixedIdentifier:
+      context.checkDeferred(target);
       return FunctionConstant(
         context.bindings.target(method, unit, expression),
       );
@@ -269,12 +256,8 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       if (ctor is! ConstructorElement) {
         unsupported(unit, expression, 'dot shorthand constructor');
       }
-      final prefix = expression is ast.InstanceCreationExpression
-          ? expression.constructorName.type.importPrefix?.element
-          : null;
-      if (prefix is PrefixElement &&
-          prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
-        unsupported(unit, expression, 'deferred constructor');
+      if (expression is ast.InstanceCreationExpression) {
+        context.checkDeferred(expression.constructorName.type);
       }
       final source = context.bindings.target(ctor, unit, expression);
       if (ctor.enclosingElement is ExtensionTypeElement) {
@@ -510,9 +493,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           ),
         )
         when variable.isConst:
-      if (expression is ast.PrefixedIdentifier && expression.isDeferred) {
-        unsupported(unit, expression, 'deferred constant');
-      }
+      context.checkDeferred(expression);
       return context.bindings.constantOf(variable, unit, expression);
     case ast.PrefixedIdentifier() ||
         ast.PropertyAccess() ||
@@ -554,14 +535,13 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
                     isExtensionOwner(callee.enclosingElement)) ||
             expression is ast.MethodInvocation &&
                 callee is TopLevelFunctionElement:
+      FunctionTarget? loadLibrary;
       if (expression case ast.MethodInvocation(target: final receiver?)) {
         final prefix = receiver is ast.SimpleIdentifier
             ? receiver.element
             : null;
         final valid = switch (receiver) {
-          _ when prefix is PrefixElement => !prefix.imports.any(
-            (i) => i.prefix?.isDeferred == true,
-          ),
+          _ when prefix is PrefixElement => true,
           ast.Identifier(
             element: ClassElement() ||
                 EnumElement() ||
@@ -569,14 +549,23 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
                 ExtensionTypeElement(),
           )
               when callee is MethodElement =>
-            receiver is! ast.PrefixedIdentifier || !receiver.isDeferred,
+            true,
           _ => false,
         };
         if (!valid) {
           unsupported(unit, expression, 'call receiver');
         }
+        if (callee is TopLevelFunctionElement && callee.isOriginLoadLibrary) {
+          loadLibrary = context.bindings
+              .deferredImport(receiver)!
+              .loader
+              .target;
+        } else {
+          context.checkDeferred(receiver);
+        }
       }
-      final target = context.bindings.target(callee, unit, expression);
+      final target =
+          loadLibrary ?? context.bindings.target(callee, unit, expression);
       final args = context.arguments(
         argumentList,
         (e) => lowerExpression(context, e),

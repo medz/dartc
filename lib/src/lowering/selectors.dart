@@ -47,10 +47,6 @@ final class SelectorChain(
   }) {
     final explicitOverride = expression is ast.ExtensionOverride;
     if (expression is ast.ExtensionOverride) {
-      if (expression.importPrefix?.element case final PrefixElement prefix
-          when prefix.imports.any((i) => i.prefix?.isDeferred == true)) {
-        unsupported(context.unit, expression, 'deferred extension override');
-      }
       nullAware = nullAware || expression.isNullAware;
       expression = expression.argumentList.arguments.single.argumentExpression;
     }
@@ -567,17 +563,15 @@ final class SelectorChain(
     if (receiver == null) return;
     final element = receiver is ast.Identifier ? receiver.element : null;
     final valid = switch (element) {
-      PrefixElement() => !element.imports.any(
-        (i) => i.prefix?.isDeferred == true,
-      ),
+      PrefixElement() => true,
       ClassElement() ||
       EnumElement() ||
       ExtensionElement() ||
-      ExtensionTypeElement() =>
-        receiver is! ast.PrefixedIdentifier || !receiver.isDeferred,
+      ExtensionTypeElement() => true,
       _ => false,
     };
     if (!valid) unsupported(context.unit, site, 'static accessor receiver');
+    context.checkDeferred(receiver);
   }
 
   Value? _update(ast.CompoundAssignmentExpression site) {

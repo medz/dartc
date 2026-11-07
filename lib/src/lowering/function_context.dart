@@ -38,6 +38,13 @@ final class FunctionContext(
   List<ValueType> typeArguments(Iterable<DartType>? types, ast.AstNode site) =>
       [for (final type in types ?? const <DartType>[]) typeOf(type, site)];
 
+  /// Checks a deferred namespace before evaluating a member's arguments.
+  void checkDeferred(ast.AstNode? source) {
+    if (bindings.deferredImport(source) case final deferred?) {
+      emit(CheckLibraryLoaded(deferred.reference));
+    }
+  }
+
   /// Checks each argument immediately, before evaluating the following argument.
   EvaluatedArguments? arguments(
     ast.ArgumentList? arguments,

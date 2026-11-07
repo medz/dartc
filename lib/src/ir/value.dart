@@ -397,6 +397,7 @@ sealed class Instruction(super.type) extends Value {
     IteratorMoveNext() ||
     IteratorCurrent() ||
     DirectCall() ||
+    LoadLibrary() ||
     InstanceCall() ||
     DynamicDispatch() ||
     FunctionCall() ||
@@ -418,6 +419,7 @@ sealed class Instruction(super.type) extends Value {
     LoadGlobal(global: GlobalVariable(initializer: != null)) ||
     LoadField(field: InstanceField(initializer: != null)) ||
     ReadCell(cell: Value(type: CellType(isLate: true))) => _call,
+    CheckLibraryLoaded() ||
     LoadGlobal(global: GlobalVariable(isLate: true)) ||
     LoadField(
       field: InstanceField(isLate: true),
@@ -447,6 +449,29 @@ sealed class Instruction(super.type) extends Value {
 
   /// Whether evaluation can transfer control to a Dart exception handler.
   bool get mayThrow => effects.contains(Effect.mayThrow);
+}
+
+/// Starts loading a deferred import and returns its completion Future.
+///
+/// Successful completion enables this prefix. Repeated loads after success
+/// succeed. Compilation failures persist; other failures permit another attempt.
+/// Failures complete the Future with an error and leave the prefix unloaded.
+final class LoadLibrary(final DeferredImport reference) extends Instruction {
+  this : super(CoreTypes.futureOf(.dynamicType));
+
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
+/// Raises a dynamic error unless this deferred prefix has finished loading.
+///
+/// The check precedes argument evaluation and must retain exception edges.
+final class CheckLibraryLoaded(final DeferredImport reference)
+    extends Instruction {
+  this : super(.voidType);
+
+  @override
+  Iterable<Value> get inputs => const [];
 }
 
 /// Raises an assertion error after the failed condition and optional message.

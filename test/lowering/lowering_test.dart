@@ -495,12 +495,14 @@ void main() {
       compare('construct', [n], () => nominal.construct(n));
       compare('primary', [n], () => nominal.primary(n));
       compare('inheritedDefault', [n], () => nominal.inheritedDefault(n));
+      compare('exhaustiveGeneric', [n], () => nominal.exhaustiveGeneric(n));
     }
     for (final flag in [false, true]) {
       compare('separateLibraries', [
         flag,
       ], () => nominal.separateLibraries(flag));
       compare('typedException', [flag], () => nominal.typedException(flag));
+      compare('exhaustiveChoice', [flag], () => nominal.exhaustiveChoice(flag));
     }
   });
 
@@ -658,21 +660,6 @@ void main() {
       expect(call.inputs, hasLength(2));
     },
   );
-
-  for (final (file, line) in [('deferred_constant.dart', 3)]) {
-    test('reports the unsupported operation in $file at its source', () async {
-      await expectLater(
-        _lower([file]),
-        throwsA(
-          isA<UnsupportedError>().having(
-            (e) => e.message,
-            'location',
-            contains('$file:$line:'),
-          ),
-        ),
-      );
-    });
-  }
 
   test('void parameters retain constant collection defaults', () async {
     final program = await _lower(['object_default.dart']);

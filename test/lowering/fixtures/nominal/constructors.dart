@@ -43,6 +43,26 @@ class First() extends Choice;
 
 class Second() extends Choice;
 
+int exhaustiveChoice(bool first) {
+  final Choice choice = first ? First() : Second();
+  return switch (choice) {
+    First() => 1,
+    Second() => 2,
+  };
+}
+
+sealed class Outcome<T>();
+class Present<T>(final T value) extends Outcome<T>;
+class Missing<T>() extends Outcome<T>;
+
+int exhaustiveGeneric(int value) {
+  final Outcome<int> outcome = value > 0 ? Present(value) : Missing();
+  return switch (outcome) {
+    Present<int>(:final value) => value,
+    Missing<int>() => 0,
+  };
+}
+
 int construct(int n) {
   try {
     final Base item = Base.pick(Base.positive(n));

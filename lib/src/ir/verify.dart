@@ -11,6 +11,7 @@ typedef FunctionReferences = ({
   Set<InstanceField> fields,
   Set<ObjectConstant> objects,
   Set<ClassType> classes,
+  Set<DeferredImport> deferredImports,
 });
 
 /// Checks declaration scope and defaults, then verifies a supplied SSA graph.
@@ -28,6 +29,7 @@ FunctionReferences verifyCallable(
   Set<InstanceField>? fields;
   Set<ObjectConstant>? objects;
   Set<ClassType>? classes;
+  Set<DeferredImport>? deferredImports;
   final scope = <TypeParameterType>{};
   // Structural equality omits generic default metadata; scope checks cannot.
   final checkedTypes = Set<ValueType>.identity();
@@ -48,6 +50,7 @@ FunctionReferences verifyCallable(
       fields: _snapshot(fields),
       objects: _snapshot(objects),
       classes: _snapshot(classes),
+      deferredImports: _snapshot(deferredImports),
     );
   }
 
@@ -260,6 +263,9 @@ FunctionReferences verifyCallable(
         checkTypeScope(type);
       }
       switch (op) {
+        case LoadLibrary(:final reference) ||
+            CheckLibraryLoaded(:final reference):
+          (deferredImports ??= {}).add(reference);
         case DirectCall(target: final callee) ||
             InstanceCall(member: final callee) ||
             BindMethod(method: final callee) ||

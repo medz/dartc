@@ -1,108 +1,25 @@
 ## Unreleased
 
-The IR supports hand-built async generators with explicit resume and cancellation paths, stream delegation, and external Dart declarations with checked defaults. Instructions expose their possible effects. Program validation catches conflicting class identities, undeclared field slots and incomplete constant instances.
+The development checkout provides `package:dartc/ir.dart` and `package:dartc/lowering.dart`, using analyzer 14.7.0 to resolve Dart source. It produces verified IR; native code generation, runtime implementation and linking are not yet available in this checkout. Existing native compiler downloads remain available in [0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).
 
-Extension method tear-offs work in `finally` blocks and in chains such as `value.first.second`. Generic IR calls retain the same type arguments they use to check parameters and determine their result type.
+- Build and inspect typed SSA graphs with explicit calls, storage, effects, exception edges and asynchronous suspension. Verification seals referenced type metadata and rejects conflicting declaration identities, invalid field references and incomplete constant storage.
+- Lower Dart control flow, patterns, collections, closures, generics, classes, enums, mixins and extension types. Async functions, synchronous and asynchronous generators, and `await for` preserve cleanup and cancellation paths. Assertions can be enabled with `Lowering.lower(input, enableAssertions: true)`.
+- Preserve constructor-alias type mappings and function identity, including erased extension-type constructors. Inherited method entries remain distinct from abstract interface signatures, preserving covariant checks and defaults.
+- Lower deferred imports with independent prefix identities, asynchronous loading and checks before argument evaluation. Ordinary SDK calls and imported extension types retain external targets when their implementations are outside the supplied library batch.
 
-SDK collection member selection now belongs to lowering. Callers of the development-only `coreCollectionOperation` helper should construct typed IR operations such as `ListSublist` and `MapContainsKey` directly.
+Language support and known analyzer differences are tracked in [specs](specs/README.md). IR behavior checks do not establish native execution support or full Dart compatibility.
 
-Async functions and await now use explicit suspension, normal/error continuations and completion types. Future adoption happens after finalizers. Source lowering for async generators and await-for is pending.
+Development-only type and constant helpers have moved to their owning values:
 
-Promoted type parameters retain both lexical identity and the analyzer-selected bound instead of rejecting general `T & S`. Static subtype proofs, null checks, class member views, record fields and function calls use that bound without treating it as the runtime type argument. Inference keeps the original `T`; concrete type substitution erases the promotion, while the reference executor checks both sides of an intersection before erasure. Focused SDK differential coverage includes nullable and nested promotions, generic members and calls, collections, records, functions, captures and FutureOr bounds.
+| Previous helper | Replacement |
+| --- | --- |
+| `substituteType(type, environment)` | `type.substitute(environment)` |
+| `typeParametersIn(type)` | `type.freeTypeParameters` |
+| `rebindFunctionType(signature, environment)` | `signature.rebind(environment)` |
+| `containsCovariantTypeParameter(type, parameters)` | `type.requiresCovariantCheck(parameters)` |
+| `constantKey(value)` | `value.structuralKey` |
 
-Mixin applications reuse ordinary class layers, field storage and resolved AST lowering. Each application owns its verified bodies and lexical super bindings, preserving repeated state, initializer order, late closures, private selectors and named application constructors without new IR or runtime body aliases. Generic applications and additional forwarding/covariance cases remain explicit boundaries; see specs/mixins.md.
-
-FutureOr has a dedicated union type rather than a nominal class. Canonical Future identities, normalization, union subtyping, nullable projections, recursive bounds, generic substitution and alpha-equivalent function hashing preserve Dart type semantics. Synchronous type tests, casts, null assertions and reified Type values are checked against the SDK. Native Future execution and async/await remain unsupported.
-
-Synchronous generators lower to explicitly resumable SSA graphs. Each `Yield` publishes a checked element and retains a normal resume edge; a generator `Return` completes iteration rather than returning its public Iterable result. The reference executor gives each iterator a lazy, independent activation while sharing outer capture cells. Synchronous `yield*` checks the entire Iterable<T> and preserves delegated iterator errors, catches and finalizers. SDK differential tests cover laziness, repeated/interleaved iteration, closures, generic methods, cleanup and delegation; same-activation iterator reentry remains an explicit reference-executor boundary. Native coroutine frame/state-machine code generation and asynchronous bodies remain unimplemented.
-
-Ordinary and generic extension types erase through analyzer metadata and ordinary static functions. Primary and secondary generative constructors, this redirects and factory bodies preserve initializer/assertion order, defaults and receiver captures. Representation access, own members/operators, static storage, closures, method and constructor tear-offs, const values and runtime type checks reuse existing IR without nominal allocation. Nullable, dynamic, record, function and collection representations retain their values and evaluation order. Source type arguments retain phantom binders and captured type environments; generic constructors and joint method tear-off defaults reuse ordinary callable machinery. Extension-type interfaces retain source owner substitutions and static bodies, while ordinary interfaces dispatch on the representation with existing covariance checks. Redirecting factories, external constructors and generic constructor-alias extraction remain explicit boundaries; see specs/extension-types.md.
-
-Ordinary extension declarations and direct method calls lower to existing static function targets with an explicit receiver and flattened extension/member type arguments. Implicit, explicit-override and lexical calls preserve analyzer selection, static receiver types, named/default arguments, null shortening and captured receiver/type environments. True static members and globals have qualified identities. Instance accessors, index and unary/binary operators, updates and object/relational patterns reuse the same call adapter. Implicit extension-call invocation reuses the same static targets. Method tear-offs, explicit call extraction and object-pattern method fields use ordinary receiver-capturing closures, preserving generic defaults, fresh binders and per-extraction identity. Two assignment-value evaluation-order differences from SDK 3.13.7 have separate source-order tests and are documented in specs/extension-access.md.
-
-Static runtimeType reads and object-pattern fields reuse existing runtime dispatch, preserving user overrides, actual generic types and getter caching. Direct super.runtimeType uses the selected ancestor implementation. Unmodeled SDK concrete types remain explicit boundaries.
-
-Object.toString through Object and type-parameter views reuses existing dynamic dispatch; super keeps the selected ancestor implementation. Method extraction preserves identity across static, dynamic and pattern access. The fixture interpreter explicitly rejects unmodeled formatting rather than exposing host wrapper types.
-
-Function-valued iterator getters continue into the ordinary function-call path, preserving arguments-before-getter order and avoiding a cast of the getter value in place of the call result.
-
-Indexed updates check read and write key types at their respective calls. A non-null `??=` skips the setter key check, and a failing write key no longer suppresses earlier getter or right-hand-side effects. Ordinary and extension indexes share this fix.
-
-Dynamic throw operands use the ordinary checked conversion to non-null Object before raising, preserving operand identity and evaluation order, catch/finally behavior, and rethrow stack identity. Null produces TypeError.
-
-Own abstract ordinary methods can now emit direct-super covariance wrappers when their complete instantiated signature equals the inherited implementation. Wrappers preserve their own defaults, named argument identity, owner/method generics, lexical super behavior and nSM replacement eligibility, while flattening direct wrapper chains. Interface-only covariance changes and unequal-signature semi-stubs remain guarded.
-
-Foreign-private noSuchMethod obligations retain separate selector and body ownership. Required replacements use the combined interface signature and defaults, including covariant inputs; compatible real and synthetic ancestors remain shared. Bodies construct genuine NoSuchMethodError.withInvocation values and throw through ordinary IR. Public forwarders use statically resolved virtual calls. Error construction is fresh and defers user Invocation getter reads. Nongeneric function instantiation reuses its immutable signature after validating type arguments. Original generic-interface covariance survives specialization and transitive real overrides, including method-bound provenance. Still-unsupported inherited covariance wrappers are rejected before silently selecting wrong defaults or tear-off types.
-
-Function targets convert lazy parameter types once and avoid empty-owner covariance scans. IR verification caches successful type-scope checks by object identity and skips dominator construction for edge-free single-block graphs, retaining the same scope, SSA, operand and control-flow checks.
-
-Dynamic members, function values, operators and updates share one dispatch instruction and existing selector/lvalue lowering. Runtime shape checks precede generic defaults, bounds and parameter checks; getter-call syntax, private names, named evaluation order, assignment values and null shortening are preserved. Ordinary missing members build Invocation for user noSuchMethod or throw NoSuchMethodError. Unmodeled imported/SDK members remain explicit unsupported boundaries. Unary and binary minus have distinct dispatch identities.
-
-Typed noSuchMethod forwarders use ordinary function bodies and one Invocation builder. Entry defaults, bounds, covariance and result checks share existing call machinery; inherited bodies preserve actual defaults and lexical super calls select actual implementations. Typed mirrors retain canonical symbols, declaration-order named arguments and immutable collections. Missing merged generic defaults, interface-only covariance transitions and unequal-signature semi-stubs remain explicit boundaries.
-
-Generic binders retain analyzer-computed default type templates, including dependent and recursive bounds, aliases and captured owner types. Defaults remain separate from type identity, preserve capture-free substitution and are checked only when applied. Missing structural metadata stays explicit; dynamic calls apply them only after accepting the argument shape.
-
-Invocation factories, constructor tear-offs, flags and argument getters reuse nominal storage and virtual calls. Argument collections preserve immutable shallow snapshots, copying order and the pinned SDK's typed empty identities. User implementations, inherited defaults and abstract/interface redeclarations retain ordinary dispatch; typed noSuchMethod forwarding uses a separate Invocation profile matching compiler-generated bodies.
-
-Public Symbol literals and Symbol constructors reuse nominal storage and ordinary constant identity. Constant values canonicalize while runtime constructors remain fresh; equality, hashing, constructor tear-offs, object patterns and Symbol-typed toString calls preserve user implementations. Private source literals and their constant dependencies remain rejected because analyzer loses their library identity. Super hashCode reads now select Object identity hashing instead of recursively invoking an override.
-
-Local late and late-final variables reuse captured cells and lexical initializer closures. Lazy reads, retries, single binding and exception paths preserve current captured values, generic environments and loop iteration identity. Nested named local functions use the closure plan for capture ownership when analyzer metadata omits their parent.
-
-Instance late and late-final fields use receiver-bound lazy initializer bodies, preserving actual generic arguments, private/inherited storage, reentrant binding and exception identity. Constructors skip lazy initializers; explicit constructor writes still bind storage. Generic late-final setters retain covariant safety checks, with a documented difference from SDK 3.13.7.
-
-Top-level and static mutable, final, late and late-final variables share ordinary accessor calls and lazy global storage. Initializers preserve first-read order, reentrant binding, retries after failures, writes made before or during initialization, and captured closure identity. Final commit checks retain RHS/type-check ordering and original exceptions.
-
-Ordinary, enhanced and generic enums reuse class storage, constant identity and member dispatch. Values retain their index, name and actual type arguments; enum toString, factories, methods, operators and patterns share existing lowering. Class and enum static const declarations are validated without runtime storage. Enums with a user storage field named _name are rejected because pinned analyzer metadata overwrites that value.
-
-Type literals, aliases and reified type parameters retain strict structural identity, equality and hashing, including nested constants and captured generic environments. Constant dependencies containing private Symbol literals are rejected before consuming analyzer-folded values, including folded scalars; the pinned analyzer loses private-library identity. Dynamic runtimeType is available only for represented concrete types; general static access and unmodeled SDK implementation types remain unsupported.
-
-Dynamic for-in and collection spreads check the source protocol before traversal and cast elements in evaluation order. Map spreads requiring key/value checks use entries; compatible spreads use forEach. MapEntry values support ordinary and constant construction, generic key/value reads and lazy Map.entries views.
-
-Constant List, Set, Map and ordinary user-class instances lower from analyzer-evaluated values. Nested constants, generic and inherited storage, defaults and constructor aliases retain canonical identity. Collection writes preserve reified type checks and immutable-operation failures; method addAll checks its source before traversal, separately from literal spreads.
-
-List and Map patterns support ordered extraction, list rest slices, missing-key checks, nested destructuring and shared lazy reads across alternatives. Irrefutable shape failures throw StateError; contextual casts and assignment writes preserve Dart's failure ordering and atomicity.
-
-IR distinguishes dynamic from Object? and preserves implicit checks for typed storage, arguments, returns, record and collection elements, and boolean contexts. Dynamic receiver/member/operator dispatch uses the shared runtime lookup. Statements and collection elements now share declaration and loop lowering; ordinary and dot-shorthand calls share their evaluation paths.
-
-Generic top-level functions, static and instance methods, local functions and closures retain scoped type parameters, bounds and runtime type environments. Direct calls, function values and explicit or contextual instantiation preserve inferred type arguments, polymorphic recursion and virtual entry checks. Generic function types compare structurally up to binder renaming.
-
-Generic constructor tear-offs support aliases with reordered, fixed or repeated type arguments and preserve distinct alias identity. Constant and default function values retain type arguments even when those arguments do not appear in their signature. Constant-pattern caches distinguish function and constructor instantiations.
-
-Generic classes retain declaration type parameters and instantiated type arguments throughout IR. Constructors, factories and factory redirects substitute member signatures, superclass and interface types without copying function bodies. Runtime checks and constructor or method tear-offs preserve actual type arguments, bounds, covariance and type environments captured by closures.
-
-Mutable typed List, Set and Map literals support conditional and loop elements, patterns, spreads and null-aware elements. Synchronous `for-in` uses the iterator protocol and preserves per-iteration captures, control flow and exceptions. Collection IR includes indexing, writes, length, add and addAll; the full SDK collection API remains unsupported.
-
-Numeric expressions support `double`, `num` and mixed operands without losing integer precision or floating negative zero. Runtime string interpolation preserves expression and conversion order, including virtual `toString` calls and adjacent or nested literals.
-
-Ordinary and null-aware cascades evaluate their receiver once. Dot shorthand supports constructors, factories, static methods and explicit static getters for supported types. Explicit top-level and static getters/setters support reads, calls and updates.
-
-Non-late locals and `final` variables can be assigned after declaration. Their storage is preserved across branches, exceptions and closures, including uninitialized captured loop bindings. Wildcard declarations retain initializer effects.
-
-Object patterns read instance getters and method tear-offs. Pattern alternatives and switch cases share extracted fields and repeated comparisons without repeating user side effects.
-
-Assertion statements and constructor assertions can be enabled with `Lowering.lower(input, enableAssertions: true)`. Assertions are disabled by default, including closures inside their conditions and messages.
-
-Assignments can target local variables, parameters, instance properties and user-defined index operators. Compound assignments preserve getter and setter order, including the conditional write in `??=`. Integer expressions support division, modulo, bitwise operators and shifts.
-
-Lowering supports ordinary `for` and `do-while` loops, including `break` and `continue` across nested loops and `break` from labeled statements.
-
-Conditional expressions now select one branch and preserve its result, including values passed through `void` parameters and locals.
-
-Direct calls accept optional positional and named parameters with scalar defaults. Lowering also supports string, double and null literals and scalar constants declared locally or at library scope.
-
-Pass top-level functions, bound methods and constructors as values. Indirect calls preserve optional defaults and covariant entry checks. Local functions and anonymous closures can retain and update captured variables after the enclosing call returns. Closures created in a `for` loop retain their iteration's bindings.
-
-Records can be constructed, returned, compared and used as constants or parameter defaults. Named and positional fields support ordinary and null-aware reads. Nested record patterns can declare locals, swap existing variables and initialize `for` loops.
-
-Nullable core types can pass through calls and branches. Lowering supports `??`, local `??=`, postfix `!`, and type tests and casts on core types. Synchronous `throw` and calls returning `Never` end evaluation of the current path.
-
-Synchronous functions can catch explicit throws, failed type checks and exceptions from calls. Typed catch clauses can bind the exception and stack trace, and `rethrow` preserves both. A `finally` block runs on normal completion, return, unwinding and jumps out of the protected code.
-
-Use scalar and record patterns with `when` guards in `if-case`, `switch` statements and `switch` expressions. Switch statements support shared case bodies, implicit breaks and labeled `continue`.
-
-`Lowering.lower` returns an `IrProgram` with `classes` and `functions`. Classes support generative and factory constructors, including redirects to named constructors with optional arguments. Instance methods and getters dispatch on the receiver, including overrides with different defaults and covariant parameters. Runtime type tests and catch clauses follow superclass and interface declarations.
-
-The development checkout pins analyzer 14.7.0 for resolved-metadata compatibility and can print compiler IR. Native executables, libraries and the `Export` API remain available in [release 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).
+SDK member selection belongs to lowering. Callers of the removed `coreCollectionOperation` helper should construct typed IR operations such as `ListSublist` and `MapContainsKey` directly.
 
 ## [0.5.0](https://github.com/medz/dartc/compare/v0.4.0...v0.5.0) — 2026-10-31
 

@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:dartc/ir.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
@@ -77,41 +75,31 @@ void main() {
     },
   );
   test(
-    'cross-library extension types require registered declarations',
+    'imported extension types erase without requiring their bodies',
     () async {
-      final directory = Directory.systemTemp.createTempSync(
-        'dartc-extension-type-imports-',
+      const entry = 'test/lowering/fixtures/extension_type_import.dart';
+      final imported = await CheckedLibraries.read([entry], Lowering.lower);
+      expect(imported.classes, isEmpty);
+      final keep = imported.functions.singleWhere(
+        (f) => f.target.name == 'keep',
       );
-      try {
-        final other = File('${directory.path}/other.dart')
-          ..writeAsStringSync(
-            'extension type E(int value) { int twice() => value * 2; }',
-          );
-        final entry = File('${directory.path}/entry.dart')
-          ..writeAsStringSync(
-            "import 'other.dart' as other; other.E keep(other.E value) => value; int run() => keep(other.E(3)).twice();",
-          );
-        await expectLater(
-          CheckedLibraries.read([entry.path], Lowering.lower),
-          throwsA(
-            isA<UnsupportedError>().having(
-              (e) => e.toString(),
-              'reason',
-              contains('unregistered extension type'),
-            ),
-          ),
-        );
-        final program = await CheckedLibraries.read([
-          entry.path,
-          other.path,
-        ], Lowering.lower);
-        final run = program.functions.singleWhere(
-          (f) => f.target.name == 'run',
-        );
-        expect(FixtureRunner(program, {}).run(run, []), 6);
-      } finally {
-        directory.deleteSync(recursive: true);
-      }
+      expect(keep.target.returnType, ValueType.integer);
+      final run = imported.functions.singleWhere((f) => f.target.name == 'run');
+      expect(
+        run.callees.where((t) => imported.implementationOf(t) == null),
+        hasLength(2),
+      );
+      final linked = await CheckedLibraries.read([
+        entry,
+        'test/lowering/fixtures/deferred_library.dart',
+      ], Lowering.lower);
+      expect(
+        FixtureRunner(
+          linked,
+          {},
+        ).run(linked.functions.singleWhere((f) => f.target.name == 'run'), []),
+        3,
+      );
     },
   );
 }

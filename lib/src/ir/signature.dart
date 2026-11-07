@@ -1,5 +1,37 @@
 import 'type.dart';
 
+/// A deferred import's source prefix and the library it loads.
+///
+/// Loading one prefix does not load another prefix for the same library.
+final class DeferredImport(
+  /// The source unit declaring the import, including imports inside parts.
+  final Uri unit,
+
+  /// The prefix whose loading state is checked.
+  final String prefix,
+
+  /// The resolved library URI, after conditional import selection.
+  final Uri library,
+) {
+  this {
+    if (!unit.isAbsolute || !library.isAbsolute || prefix.isEmpty) {
+      throw ArgumentError(
+        'Expected resolved library URIs and an import prefix.',
+      );
+    }
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is DeferredImport &&
+      unit == other.unit &&
+      prefix == other.prefix &&
+      library == other.library;
+
+  @override
+  int get hashCode => Object.hash(unit, prefix, library);
+}
+
 /// How a body runs, independently of its callable's dispatch convention.
 enum FunctionBodyKind() {
   /// Executes once when called and returns its result directly.

@@ -25,6 +25,12 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 
 [IR 行为对照](../test/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/types.md)。
 
+## analyzer 元数据边界
+
+analyzer 14.7 对部分合并接口缺少泛型默认类型，或保留显式 extension 运算符的未代入类型参数；lowering 不把这些值当作已检查的类型。枚举 `_name` 存储以及私有 Symbol 常量也有信息丢失，分别见[类](classes.md)和[变量及常量](variables.md)。这些是兼容缺口。
+
+将继承方法 `f<T>()` 与接口 `f<U extends T>()` 在 `T=Object?` 时合并，analyzer 14.7 还可能抛出 `_TopMergeStateError`，而 SDK 3.13.7 可编译执行。这发生在取得已解析库之前；显式为原方法写出 `T extends Object?` 可绕过该上游差异，不改变 dartc 的语言目标。
+
 ## 规范依据
 
 [主规范 §15、§20](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)、[空安全](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md)、[类型推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/inference.md)、[流分析](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/flow-analysis.md)、[类型别名](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.13/nonfunction-type-aliases/feature-specification.md)、[`dart:ffi`](https://api.dart.dev/stable/3.13.7/dart-ffi/NativeType-class.html)。

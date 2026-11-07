@@ -388,7 +388,17 @@ final class IrProgram(
       }
     }
 
+    final deferred = <(Uri, String), Uri>{};
     for (final f in _implementations.values) {
+      for (final reference in f.deferredImports) {
+        if (deferred.putIfAbsent((
+              reference.unit,
+              reference.prefix,
+            ), () => reference.library) !=
+            reference.library) {
+          throw ArgumentError('Conflicting deferred import prefix.');
+        }
+      }
       f.referencedClasses.forEach(definitionOf);
       f.callees.forEach(checkTarget);
       for (final field in f.fields) {

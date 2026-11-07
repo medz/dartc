@@ -17,9 +17,9 @@
 | for/for-in 模式循环头 | 三段式 for 支持模式变量声明和解构更新。同步 for-in 支持 record、List 和 Map 解构声明，并为每次迭代建立独立绑定。 |
 | switch 语句、guard、共享 case | 支持上述模式与 when。多个 case 共享分支体时，传递相应 case 中一致绑定的变量值。带标签的 continue 直接进入分支体。 |
 | bool/Null/Never/record/枚举穷尽性 | analyzer 检查输入的穷尽性。IR 行为对照涵盖 bool? 的 true、false、null，num 的 int、double，以及 (bool, bool?) 的全部组合。支持枚举声明及其常量模式，见[枚举样本](../test/lowering/fixtures/enums.dart)。 |
-| 非泛型 sealed 层次穷尽性 | 待实现。 |
+| sealed 层次穷尽性 | analyzer 检查普通及泛型 sealed 层次的静态穷尽性；lowering 保留子类类型检查及分支。见[sealed 层次样本](../test/lowering/fixtures/nominal/constructors.dart)。 |
 | List 长度与对象属性空间覆盖 | analyzer 检查静态覆盖；SDK 差分验证长度/属性读取及守卫失败后的缓存行为。 |
-| 完整不可达 case 诊断 | 待实现。 |
+| 不可达 case 诊断 | analyzer 提供诊断，调用方可在 CheckedLibraries 的回调中读取；lowering 不重复诊断。warning 不阻止转换，error 阻止整批转换。 |
 
 [集合模式样本](../test/lowering/fixtures/collection_patterns.dart)、[匹配与守卫样本](../test/lowering/fixtures/patterns.dart)、[record 解构样本](../test/lowering/fixtures/destructure.dart)和[SDK 行为对照](../test/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/patterns.md)。
 

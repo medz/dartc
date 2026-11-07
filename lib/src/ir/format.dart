@@ -79,6 +79,10 @@ void writeFunction(
   }
 
   String operation(Instruction op) => switch (op) {
+    LoadLibrary(:final reference) =>
+      'loadLibrary ${reference.unit}::${reference.prefix} -> ${reference.library}',
+    CheckLibraryLoaded(:final reference) =>
+      'checkLibraryLoaded ${reference.unit}::${reference.prefix} -> ${reference.library}',
     ListSublist() => 'listSublist ${op.inputs.map(value).join(', ')}',
     MapContainsKey() => 'mapContainsKey ${value(op.map)}, ${value(op.key)}',
     PatternMatchFailure() => 'patternMatchFailure',

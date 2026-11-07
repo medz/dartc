@@ -37,6 +37,7 @@ export 'src/ir/signature.dart'
         FunctionKind,
         FunctionBodyKind,
         FunctionTarget,
+        DeferredImport,
         GlobalVariable,
         InstanceField,
         MemberSelector;
@@ -55,6 +56,8 @@ export 'src/ir/type.dart'
 export 'src/ir/value.dart'
     show
         AwaitResult,
+        LoadLibrary,
+        CheckLibraryLoaded,
         TypeConstant,
         ReifyType,
         ObjectHashCode,

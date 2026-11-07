@@ -23,7 +23,7 @@
 
 external 构造器保留擦除后的外部调用签名，具体实现由链接方提供。泛型构造器别名支持类型参数重排、固定、重复和未使用参数，以及不同界限；非平凡的泛型别名保留自己的函数值身份。显式应用类型参数的构造器提取复用目标声明；先提取泛型别名再实例化则保留别名身份。见[构造器别名对照](../test/lowering/extension_type_aliases_test.dart)。
 
-即使只在类型注解或函数签名中引用，extension type 的声明库也必须包含在输入 batch 中注册；不会仅凭导入自动装配。普通 SDK 调用保留为导入，函数体不由 lowering 补造。普通 extension 的已知边界不变。
+导入的 extension type 可以直接擦除类型并引用其构造器及成员；未提供声明库时保留外部目标，提供该库时生成对应函数体，不要求调用方为类型引用装配无关函数体。见[导入测试](../test/lowering/extension_types_test.dart)。普通 SDK 调用同样保留为导入。普通 extension 的已知边界不变。
 
 泛型覆盖见[差分测试](../test/lowering/extension_types_generic_test.dart)及[样本](../test/lowering/fixtures/extension_types_generic.dart)。[接口差分测试](../test/lowering/extension_types_interfaces_test.dart)覆盖多个接口、同一声明的菱形继承、own 覆盖、静态父视图、泛型类型参数映射、跨库私有成员、继承提取的默认值，以及普通接口的真实覆盖与协变检查。不同声明的同名冲突、无效表示类型和禁止的接口仍由 analyzer 拒绝。[构造器差分测试](../test/lowering/extension_types_constructors_test.dart)覆盖初始化/断言/body/finally 顺序、异常、可空表示、泛型与 const、默认值及闭包。
 

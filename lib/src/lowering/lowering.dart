@@ -26,8 +26,6 @@ abstract final class Lowering() {
     for (final unit in input.libraries.expand((library) => library.units)) {
       for (final node in unit.unit.declarations) {
         switch (node) {
-          case ast.ExtensionTypeDeclaration():
-            bindings.registerExtensionType(unit, node);
           case ast.ClassDeclaration():
             bindings.registerClass(node.declaredFragment!.element, unit, node);
           case ast.EnumDeclaration():
@@ -86,7 +84,11 @@ abstract final class Lowering() {
     }
     return IrProgram(
       [...classes, ...bindings.mixinApplications],
-      [...functions.whereType<IrFunction>(), ...bindings.mixinInitializers],
+      [
+        ...functions.whereType<IrFunction>(),
+        ...bindings.mixinInitializers,
+        ...bindings.libraryLoaders,
+      ],
       externals: functions.whereType<IrExternal>(),
       globals: bindings.globals,
     );
