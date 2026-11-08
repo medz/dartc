@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:dartc/artifact.dart';
+import 'package:dartc/abi.dart';
+import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
 
@@ -16,17 +18,40 @@ base class IntegerCodeGenerator<R extends Object>(
   final FunctionEmitter<R> Function() _createFunction = createFunction;
 
   @override
-  ObjectFile generate(IrProgram program, Map<FunctionTarget, String> exports) {
-    if (exports.isEmpty) throw ArgumentError('No native exports.');
+  ObjectModule generate(
+    IrProgram program, {
+    required Iterable<FunctionTarget> definitions,
+    Map<FunctionTarget, NativeExport> exports = const {},
+  }) {
+    final selected = definitions.toSet();
+    if (selected.isEmpty || !selected.containsAll(exports.keys)) {
+      throw ArgumentError('Expected definitions containing every export.');
+    }
     final code = BytesBuilder(copy: false), symbols = <Symbol>[];
-    for (final MapEntry(key: declaration, value: name) in exports.entries) {
+    for (final declaration in selected) {
       final function = program.implementationOf(declaration);
       if (function is! IrFunction) {
-        throw ArgumentError('Export has no body: $name');
+        throw ArgumentError('Definition has no body: ${declaration.name}');
+      }
+      final export = exports[declaration];
+      if (export != null &&
+          export.signature.parameterCount !=
+              declaration.parameterTypes.length) {
+        throw ArgumentError('Native signature mismatch: ${declaration.name}');
       }
       final bytes = IntegerFunction(_createFunction()).generate(function);
       code.add(Uint8List((-code.length) & 15));
-      symbols.add(.new(name, code.length, bytes.length));
+      symbols.add(
+        .new(
+          export == null
+              ? declaration.name
+              : target.nativeSymbol(export.symbol),
+          code.length,
+          bytes.length,
+          binding: export == null ? .local : .global,
+          exported: export != null,
+        ),
+      );
       code.add(bytes);
     }
     return .new(target, code.takeBytes(), symbols);

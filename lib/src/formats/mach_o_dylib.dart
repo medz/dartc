@@ -8,32 +8,45 @@ import 'code_signature.dart';
 import 'export_trie.dart';
 
 /// Encodes a Mach-O dynamic library without undefined references or fixups.
-abstract final class MachODylib() {
-  static Uint8List encode(ObjectFile object, String installName) {
-    if (object.target.operatingSystem != .macos) {
-      throw ArgumentError('Mach-O output requires a macOS target.');
+final class MachODylibLayout(
+  @override final ObjectModule module,
+  final String installName,
+) implements ImageLayout {
+  late final List<int> _name;
+  late final int _idSize;
+  late final int _commandsSize;
+  @override
+  late final int codeOffset;
+
+  @override
+  int get codeAddress => codeOffset;
+
+  this {
+    if (module.target.operatingSystem != .macos ||
+        installName.isEmpty ||
+        installName.contains('\u0000')) {
+      throw ArgumentError('Invalid Mach-O image configuration.');
     }
-    if (installName.isEmpty || installName.contains('\u0000')) {
-      throw ArgumentError.value(
-        installName,
-        'installName',
-        'Expected a non-empty name.',
-      );
-    }
-    final name = utf8.encode(installName);
-    final idSize = (24 + name.length + 1 + 7) & ~7;
-    final commandsSize = 152 + 72 + idSize + 56 + 24 + 24 + 24 + 80 + 16 + 16;
-    final textOffset = (32 + commandsSize + 15) & ~15;
+    _name = utf8.encode(installName);
+    _idSize = (24 + _name.length + 1 + 7) & ~7;
+    _commandsSize = 152 + 72 + _idSize + 56 + 24 + 24 + 24 + 80 + 16 + 16;
+    codeOffset = (32 + _commandsSize + 15) & ~15;
+  }
+
+  /// Encodes code using the section placement established by this layout.
+  Uint8List encode(Uint8List code) {
+    final object = module, textOffset = codeOffset;
+    final symbols = object.symbols.where((s) => s.exported).toList();
     final page = object.target.architecture == .arm64 ? 16384 : 4096;
     final textSize = (textOffset + object.code.length + page - 1) & -page;
     final strings = <int>[0], names = <int>[];
-    for (final symbol in object.symbols) {
+    for (final symbol in symbols) {
       names.add(strings.length);
       strings.addAll([...utf8.encode(symbol.name), 0]);
     }
-    final stringOffset = textSize + object.symbols.length * 16;
+    final stringOffset = textSize + symbols.length * 16;
     final trieOffset = (stringOffset + strings.length + 7) & ~7;
-    final trie = ExportTrie.encode(object.symbols, textOffset);
+    final trie = ExportTrie(symbols, textOffset).encode();
     final signatureOffset = (trieOffset + trie.length + 15) & ~15;
     final signature = CodeSignature(installName, signatureOffset, textSize);
     final data = ByteData(signatureOffset + signature.size);
@@ -47,7 +60,7 @@ abstract final class MachODylib() {
     data.setUint32(8, object.target.architecture == .arm64 ? 0 : 3, .little);
     data.setUint32(12, 6, .little);
     data.setUint32(16, 10, .little);
-    data.setUint32(20, commandsSize, .little);
+    data.setUint32(20, _commandsSize, .little);
     data.setUint32(
       24,
       0x85,
@@ -90,11 +103,11 @@ abstract final class MachODylib() {
     data.setUint32(section + 52, 4, .little);
     data.setUint32(section + 64, 0x80000400, .little);
     segment('__LINKEDIT', textSize, bytes.length - textSize, 1, 0);
-    final id = command(0xd, idSize);
+    final id = command(0xd, _idSize);
     data.setUint32(id + 8, 24, .little);
     data.setUint32(id + 16, 0x10000, .little);
     data.setUint32(id + 20, 0x10000, .little);
-    bytes.setAll(id + 24, name);
+    bytes.setAll(id + 24, _name);
     // dyld requires a libSystem dependency even when the library imports no symbols.
     final system = command(0xc, 56);
     data.setUint32(system + 8, 24, .little);
@@ -107,20 +120,20 @@ abstract final class MachODylib() {
     final uuid = command(0x1b, 24);
     final symtab = command(2, 24);
     data.setUint32(symtab + 8, textSize, .little);
-    data.setUint32(symtab + 12, object.symbols.length, .little);
+    data.setUint32(symtab + 12, symbols.length, .little);
     data.setUint32(symtab + 16, stringOffset, .little);
     data.setUint32(symtab + 20, strings.length, .little);
     final dysymtab = command(0xb, 80);
-    data.setUint32(dysymtab + 20, object.symbols.length, .little);
-    data.setUint32(dysymtab + 24, object.symbols.length, .little);
+    data.setUint32(dysymtab + 20, symbols.length, .little);
+    data.setUint32(dysymtab + 24, symbols.length, .little);
     final exports = command(0x80000033, 16);
     data.setUint32(exports + 8, trieOffset, .little);
     data.setUint32(exports + 12, trie.length, .little);
     final signing = command(0x1d, 16);
     data.setUint32(signing + 8, signatureOffset, .little);
     data.setUint32(signing + 12, signature.size, .little);
-    bytes.setAll(textOffset, object.code);
-    for (final (i, symbol) in object.symbols.indexed) {
+    bytes.setAll(textOffset, code);
+    for (final (i, symbol) in symbols.indexed) {
       final offset = textSize + i * 16;
       data.setUint32(offset, names[i], .little);
       data.setUint8(offset + 4, 0xf);

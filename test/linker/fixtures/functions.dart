@@ -3,7 +3,7 @@ import 'package:dartc/artifact.dart';
 import 'package:dartc/target.dart';
 import 'package:dartc/x64.dart' as x64;
 
-ObjectFile functions(Target target, Map<String, int> values) {
+ObjectModule functions(Target target, Map<String, int> values) {
   final code = <int>[], symbols = <Symbol>[];
   for (final MapEntry(:key, :value) in values.entries) {
     final List<int> body;
@@ -23,6 +23,7 @@ ObjectFile functions(Target target, Map<String, int> values) {
         target.operatingSystem == .macos ? '_$key' : key,
         code.length,
         body.length,
+        exported: true,
       ),
     );
     code.addAll(body);

@@ -7,7 +7,7 @@ void main() {
   test('owns bytes and symbols and rejects invalid ranges', () {
     final bytes = [0xc0, 0x03, 0x5f, 0xd6];
     final symbols = [const artifact.Symbol('return', 0, 4)];
-    final object = artifact.ObjectFile(target, bytes, symbols);
+    final object = artifact.ObjectModule(target, bytes, symbols);
     bytes.clear();
     symbols.clear();
     expect(object.code, [0xc0, 0x03, 0x5f, 0xd6]);
@@ -21,14 +21,14 @@ void main() {
       [const artifact.Symbol('a\u0000b', 0, 4)],
     ]) {
       expect(
-        () => artifact.ObjectFile(target, object.code, invalid),
+        () => artifact.ObjectModule(target, object.code, invalid),
         throwsArgumentError,
       );
     }
     expect(
-      () => artifact.ObjectFile(target, [256, 0, 0, 0], []),
+      () => artifact.ObjectModule(target, [256, 0, 0, 0], []),
       throwsArgumentError,
     );
-    expect(() => artifact.ObjectFile(target, [0], []), throwsArgumentError);
+    expect(() => artifact.ObjectModule(target, [0], []), throwsArgumentError);
   });
 }

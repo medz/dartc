@@ -4,8 +4,9 @@ import 'dart:typed_data';
 import 'package:dartc/artifact.dart';
 
 /// Encodes dyld's compressed symbol trie with image-relative function addresses.
-abstract final class ExportTrie() {
-  static Uint8List encode(List<Symbol> symbols, int codeOffset) {
+final class ExportTrie(final List<Symbol> symbols, final int codeOffset) {
+  /// Encodes the declared exports into one compressed trie.
+  Uint8List encode() {
     final entries =
         [
           for (final symbol in symbols)

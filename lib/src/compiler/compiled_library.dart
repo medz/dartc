@@ -8,7 +8,7 @@ import 'package:dartc/linker.dart';
 
 /// Native code and declarations ready to write without retaining analyzer state.
 final class CompiledLibrary(
-  final ObjectFile object,
+  final ObjectModule object,
   final NativeExports exports,
   Iterable<Uri> sources,
 ) {
@@ -19,8 +19,10 @@ final class CompiledLibrary(
       for (final export in exports.functions)
         object.target.nativeSymbol(export.symbol),
     };
-    if (names.length != object.symbols.length ||
-        object.symbols.any((symbol) => !names.contains(symbol.name))) {
+    if (names.length != object.symbols.where((s) => s.exported).length ||
+        object.symbols.any(
+          (symbol) => symbol.exported && !names.contains(symbol.name),
+        )) {
       throw ArgumentError('Object symbols do not match the native exports.');
     }
   }
@@ -55,14 +57,19 @@ final class CompiledLibrary(
         );
       }
     }
-    if (kind == .object) {
-      await _write(output, switch (object.target.operatingSystem) {
-        .macos => MachO.encode(object),
-        .linux => Elf.encode(object),
-      });
-    } else {
-      await Linker(object.target).link([object], output, kind);
-    }
+    final ImageFormat format = switch (object.target.operatingSystem) {
+      .macos => MachO(object.target),
+      .linux => Elf(object.target),
+    };
+    final bytes = switch (kind) {
+      .object => format.encodeObject(object),
+      .staticLibrary => ArchiveWriter(format).encode([object]),
+      .sharedLibrary => format.encodeImage(
+        Linker(format)
+            .link([object], libraryName: output.uri.pathSegments.last),
+      ),
+    };
+    await _write(output, bytes);
     if (header != null) {
       final text = StringBuffer();
       exports.writeHeader(text);
@@ -70,7 +77,7 @@ final class CompiledLibrary(
     }
   }
 
-  static String _identity(File file) {
+  String _identity(File file) {
     if (file.existsSync()) return file.resolveSymbolicLinksSync();
     final uri = file.absolute.uri.normalizePath();
     var parent = File.fromUri(uri).parent;
@@ -84,7 +91,7 @@ final class CompiledLibrary(
         .toFilePath();
   }
 
-  static Future<void> _write(File file, List<int> bytes) async {
+  Future<void> _write(File file, List<int> bytes) async {
     await file.absolute.parent.create(recursive: true);
     final work = await file.absolute.parent.createTemp('.dartc-write-');
     try {

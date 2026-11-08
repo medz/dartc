@@ -1,4 +1,8 @@
 import 'package:dartc/compiler.dart';
+import 'package:dartc/artifact.dart';
+
+import 'dart:io';
+
 import 'package:dartc/formats.dart';
 import 'package:dartc/linker.dart';
 import 'package:dartc/target.dart';
@@ -29,33 +33,34 @@ Future<void> main() async {
         kind: .sharedLibrary,
       );
 
-      final linker = Linker(target);
-      await linker.link(
-        [aliases(target)],
-        assets.library('codegen/aliases'),
-        .sharedLibrary,
-      );
+      final ImageFormat format = switch (os) {
+        .macos => MachO(target),
+        .linux => Elf(target),
+      };
+      final linker = Linker(format);
+      Future<void> shared(List<ObjectModule> modules, File output) =>
+          output.writeAsBytes(
+            format.encodeImage(
+              linker.link(modules, libraryName: output.uri.pathSegments.last),
+            ),
+          );
+      await shared([aliases(target)], assets.library('codegen/aliases'));
       final inputs = [
         functions(target, {'first': 40}),
         functions(target, {'second': 2}),
       ];
-      await linker.link(inputs, assets.file('linker/values.a'), .staticLibrary);
-      await linker.link(
-        inputs,
-        assets.library('linker/values'),
-        .sharedLibrary,
-      );
+      await assets
+          .file('linker/values.a')
+          .writeAsBytes(ArchiveWriter(format).encode(inputs));
+      await shared(inputs, assets.library('linker/values'));
       for (final (i, object) in inputs.indexed) {
-        await assets.file('linker/$i.o').writeAsBytes(switch (os) {
-          .macos => MachO.encode(object),
-          .linux => Elf.encode(object),
-        });
+        await assets
+            .file('linker/$i.o')
+            .writeAsBytes(format.encodeObject(object));
       }
-      await linker.link(
-        [functions(target, symbolValues)],
-        assets.library('linker/symbols'),
-        .sharedLibrary,
-      );
+      await shared([
+        functions(target, symbolValues),
+      ], assets.library('linker/symbols'));
       print('Built test assets for $target.');
     }
   }

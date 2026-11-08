@@ -3,25 +3,24 @@ import 'dart:typed_data';
 
 import 'package:dartc/artifact.dart';
 
-import 'elf.dart';
-import 'mach_o.dart';
+import 'format.dart';
 
 /// Writes indexed static archives for macOS and Linux.
-abstract final class Archive() {
+final class ArchiveWriter(final ObjectFormat format) {
   /// Encodes matching [objects] as separate members with deterministic headers.
   ///
   /// Member names are their input indices followed by `.o`. Duplicate symbols
   /// remain in the index; an archive consumer selects the members it needs.
-  static Uint8List encode(Iterable<ObjectFile> objects) {
+  Uint8List encode(Iterable<ObjectModule> objects) {
     final members = objects.toList();
-    if (members.isEmpty ||
-        members.any((o) => o.target != members.first.target)) {
+    if (members.isEmpty || members.any((o) => o.target != format.target)) {
       throw ArgumentError('Expected non-empty objects for one target.');
     }
     final darwin = members.first.target.operatingSystem == .macos;
     final symbols = [
       for (final (i, object) in members.indexed)
-        for (final symbol in object.symbols) (i, utf8.encode(symbol.name)),
+        for (final symbol in object.symbols)
+          if (symbol.binding == .global) (i, utf8.encode(symbol.name)),
     ];
     final namesSize = symbols.fold(0, (n, s) => n + s.$2.length + 1);
     final table = ByteData(
@@ -68,7 +67,7 @@ abstract final class Archive() {
         throw UnsupportedError('Archive requires 64-bit symbol offsets.');
       }
       offsets.add(output.length);
-      member('$i.o', darwin ? MachO.encode(object) : Elf.encode(object));
+      member('$i.o', format.encodeObject(object));
     }
     table.setUint32(
       0,

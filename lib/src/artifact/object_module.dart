@@ -4,11 +4,11 @@ import 'package:dartc/target.dart';
 
 import 'symbol.dart';
 
-/// A relocatable code section with defined global function symbols.
+/// An immutable relocatable code section with scoped function definitions.
 ///
 /// Code must be position independent and contain no unresolved references.
 /// Data sections and relocations are not represented yet.
-final class ObjectFile(
+final class ObjectModule(
   final Target target,
   List<int> code,
   Iterable<Symbol> symbols,
@@ -31,7 +31,8 @@ final class ObjectFile(
     for (final symbol in this.symbols) {
       if (symbol.name.isEmpty ||
           symbol.name.contains('\u0000') ||
-          !names.add(symbol.name) ||
+          symbol.binding == .global && !names.add(symbol.name) ||
+          symbol.exported && symbol.binding != .global ||
           symbol.offset < end ||
           symbol.size <= 0 ||
           symbol.offset > code.length - symbol.size ||

@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:dartc/artifact.dart';
 import 'package:dartc/formats.dart';
 import 'package:dartc/linker.dart';
@@ -7,81 +5,70 @@ import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
 void main() {
-  final target = Target.host();
-  final object = _object(target);
-  late Directory directory;
-  setUp(() {
-    directory = (Directory(
-      'build/test',
-    )..createSync(recursive: true)).createTempSync('linker-');
-  });
-  tearDown(() => directory.deleteSync(recursive: true));
+  for (final os in OperatingSystem.values) {
+    for (final arch in Architecture.values) {
+      final target = Target(os, arch);
+      final ImageFormat format = os == .macos ? MachO(target) : Elf(target);
+      final linker = Linker(format);
+      final code = arch == .arm64 ? [0xc0, 0x03, 0x5f, 0xd6] : [0xc3];
+      final module = ObjectModule(target, code, [
+        Symbol('entry', 0, code.length, exported: true),
+      ]);
 
-  test('all targets link deterministically', () async {
-    for (final os in OperatingSystem.values) {
-      for (final arch in Architecture.values) {
-        final target = Target(os, arch);
-        final object = _object(target);
-        for (final kind in [
-          OutputKind.staticLibrary,
-          OutputKind.sharedLibrary,
-        ]) {
-          final file = File.fromUri(
-            directory.uri.resolve('$target-${kind.name}'),
+      test('$target links and encodes deterministically without file IO', () {
+        final first = linker.link([module], libraryName: 'values');
+        final second = linker.link([module], libraryName: 'values');
+        expect(first.code, module.code);
+        expect(format.encodeImage(second), format.encodeImage(first));
+        final archive = ArchiveWriter(format);
+        expect(archive.encode([module]), archive.encode([module]));
+      });
+
+      test(
+        '$target validates inputs and distinguishes locals from exports',
+        () {
+          final other = ObjectModule(
+            Target(os == .macos ? .linux : .macos, arch),
+            code,
+            [],
           );
-          await Linker(target).link([object], file, kind);
-          final first = file.readAsBytesSync();
-          await Linker(target).link([object], file, kind);
-          expect(file.readAsBytesSync(), first);
-        }
-      }
+          for (final inputs in [
+            <ObjectModule>[],
+            [module, other],
+            [module, module],
+          ]) {
+            expect(
+              () => linker.link(inputs, libraryName: 'values'),
+              throwsArgumentError,
+            );
+          }
+          for (final name in ['', 'bad\u0000name']) {
+            expect(
+              () => linker.link([module], libraryName: name),
+              throwsArgumentError,
+            );
+          }
+          expect(() => ArchiveWriter(format).encode([]), throwsArgumentError);
+          expect(
+            () => ArchiveWriter(format).encode([module, other]),
+            throwsArgumentError,
+          );
+          final local = ObjectModule(target, code, [
+            Symbol('entry', 0, code.length, binding: .local),
+          ]);
+          final linked = linker.link([
+            local,
+            local,
+            module,
+          ], libraryName: 'values');
+          expect(linked.layout.module.symbols.length, 3);
+          expect(
+            linked.layout.module.symbols.where((s) => s.exported).length,
+            1,
+          );
+          expect(() => format.encodeObject(other), throwsArgumentError);
+        },
+      );
     }
-  });
-
-  test(
-    'invalid inputs preserve outputs and reject malformed library names',
-    () async {
-      final output = File.fromUri(directory.uri.resolve('preserved'))
-        ..writeAsStringSync('previous');
-      final other = _object(
-        Target(
-          target.operatingSystem == .macos ? .linux : .macos,
-          target.architecture,
-        ),
-      );
-      for (final input in [
-        <ObjectFile>[],
-        [object, other],
-        [object, object],
-      ]) {
-        await expectLater(
-          Linker(target).link(input, output, .sharedLibrary),
-          throwsArgumentError,
-        );
-        expect(output.readAsStringSync(), 'previous');
-      }
-      await expectLater(
-        Linker(target).link([object], output, .object),
-        throwsArgumentError,
-      );
-      expect(() => Archive.encode([]), throwsArgumentError);
-      expect(() => Archive.encode([object, other]), throwsArgumentError);
-      for (final name in ['', 'bad\u0000name']) {
-        expect(
-          () => target.operatingSystem == .macos
-              ? MachO.shared(object, name)
-              : Elf.shared(object, name),
-          throwsArgumentError,
-        );
-      }
-      expect(directory.listSync().length, 1);
-    },
-  );
-}
-
-ObjectFile _object(Target target) {
-  final bytes = target.architecture == .arm64
-      ? [0xc0, 0x03, 0x5f, 0xd6]
-      : [0xc3];
-  return .new(target, bytes, [Symbol('entry', 0, bytes.length)]);
+  }
 }

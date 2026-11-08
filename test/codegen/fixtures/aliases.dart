@@ -1,6 +1,7 @@
 import 'package:dartc/artifact.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
 import 'package:dartc/target.dart';
 
 IrProgram arithmetic() {
@@ -22,15 +23,21 @@ IrProgram arithmetic() {
   return .new([], functions);
 }
 
-ObjectFile aliases(Target target) {
+ObjectModule aliases(Target target) {
   final CodeGenerator generator = switch (target.architecture) {
     .arm64 => Arm64CodeGenerator(target),
     .x64 => X64CodeGenerator(target),
   };
   final program = arithmetic();
-  return generator.generate(program, {
-    for (final function in program.functions)
-      function.target:
-          '${target.operatingSystem == .macos ? '_' : ''}${function.target.name}',
-  });
+  return generator.generate(
+    program,
+    definitions: program.functions.map((f) => f.target),
+    exports: {
+      for (final f in program.functions)
+        f.target: NativeExport(
+          f.target.name,
+          NativeSignature.int64(f.target.parameterTypes.length),
+        ),
+    },
+  );
 }

@@ -32,9 +32,11 @@ void main() {
             expect(data.getUint16(16, .little), 1);
             expect(data.getUint16(18, .little), arch == .arm64 ? 183 : 62);
           }
-          final object = ObjectFile(target, [], []);
+          final object = ObjectModule(target, [], []);
           expect(
-            () => darwin ? Elf.encode(object) : MachO.encode(object),
+            () => darwin
+                ? Elf(target).encodeObject(object)
+                : MachO(target).encodeObject(object),
             throwsArgumentError,
           );
         },

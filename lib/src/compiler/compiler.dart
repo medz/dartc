@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:dartc/analyzer.dart';
-import 'package:dartc/abi.dart';
+import 'package:dartc/ir.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/lowering.dart';
@@ -22,10 +22,22 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
           .arm64 => Arm64CodeGenerator(target),
           .x64 => X64CodeGenerator(target),
         };
-        final object = generator.generate(program, {
-          for (final MapEntry(key: function, value: export) in exports.entries)
-            function: target.nativeSymbol(export.symbol),
-        });
+        final definitions = <FunctionTarget>{};
+        void include(FunctionTarget target) {
+          if (!definitions.add(target)) return;
+          final function = program.implementationOf(target);
+          if (function is! IrFunction) {
+            throw UnsupportedError('Native body unavailable: ${target.name}');
+          }
+          function.callees.forEach(include);
+        }
+
+        exports.keys.forEach(include);
+        final object = generator.generate(
+          program,
+          definitions: definitions,
+          exports: exports,
+        );
         return CompiledLibrary(object, NativeExports(exports.values), [
           for (final library in input.libraries)
             for (final unit in library.units) File(unit.path).absolute.uri,

@@ -2,26 +2,57 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dartc/artifact.dart';
+import 'package:dartc/target.dart';
+
+import 'format.dart';
 
 /// Writes ELF64 objects and shared libraries for Linux ARM64 and x86-64.
-abstract final class Elf() {
-  /// Encodes the code section, symbol tables and a non-executable stack note.
-  static Uint8List encode(ObjectFile object) => _encode(object, null);
-
-  /// Encodes a position-independent shared library identified by [soname].
-  static Uint8List shared(ObjectFile object, String soname) {
-    if (soname.isEmpty || soname.contains('\u0000')) {
-      throw ArgumentError.value(soname, 'soname', 'Expected a non-empty name.');
+final class Elf(@override final Target target) implements ImageFormat {
+  this {
+    if (target.operatingSystem != .linux) {
+      throw ArgumentError('ELF requires a Linux target.');
     }
-    return _encode(object, soname);
   }
 
-  static Uint8List _encode(ObjectFile object, String? soname) {
-    if (object.target.operatingSystem != .linux) {
-      throw ArgumentError('ELF output requires a Linux target.');
+  @override
+  Uint8List encodeObject(ObjectModule module) {
+    _checkTarget(module);
+    return _encode(module, module.code, null, 64);
+  }
+
+  @override
+  ImageLayout layoutImage(ObjectModule module, {required String libraryName}) {
+    _checkTarget(module);
+    if (libraryName.isEmpty || libraryName.contains('\u0000')) {
+      throw ArgumentError.value(libraryName, 'libraryName');
     }
+    return _ElfLayout(module, libraryName);
+  }
+
+  @override
+  Uint8List encodeImage(LinkedImage image) {
+    final layout = image.layout;
+    if (layout is! _ElfLayout) throw ArgumentError('Expected an ELF layout.');
+    _checkTarget(layout.module);
+    return _encode(layout.module, image.code, layout.soname, layout.codeOffset);
+  }
+
+  void _checkTarget(ObjectModule module) {
+    if (module.target != target) throw ArgumentError('ELF target mismatch.');
+  }
+
+  Uint8List _encode(
+    ObjectModule object,
+    Uint8List code,
+    String? soname,
+    int textOffset,
+  ) {
+    final symbols = soname == null
+        ? ([...object.symbols]
+            ..sort((a, b) => a.binding.index.compareTo(b.binding.index)))
+        : object.symbols.where((s) => s.exported).toList();
     final strings = <int>[0], names = <int>[];
-    for (final symbol in object.symbols) {
+    for (final symbol in symbols) {
       names.add(strings.length);
       strings.addAll([...utf8.encode(symbol.name), 0]);
     }
@@ -31,13 +62,12 @@ abstract final class Elf() {
     final sectionNames = shared
         ? '\u0000.text\u0000.dynsym\u0000.dynstr\u0000.shstrtab\u0000.hash\u0000.dynamic\u0000'
         : '\u0000.text\u0000.symtab\u0000.strtab\u0000.shstrtab\u0000.note.GNU-stack\u0000';
-    final textOffset = shared ? 240 : 64;
     final symbolOffset = (textOffset + object.code.length + 7) & ~7;
-    final symbolSize = (object.symbols.length + 1) * 24;
+    final symbolSize = (symbols.length + 1) * 24;
     final stringOffset = symbolOffset + symbolSize;
     final hashOffset = (stringOffset + strings.length + 7) & ~7;
-    final bucketCount = object.symbols.length | 1;
-    final hashSize = (2 + bucketCount + object.symbols.length + 1) * 4;
+    final bucketCount = symbols.length | 1;
+    final hashSize = (2 + bucketCount + symbols.length + 1) * 4;
     final dynamicOffset = (hashOffset + hashSize + 7) & ~7;
     const dynamicSize = 7 * 16;
     final nameOffset = shared
@@ -63,13 +93,13 @@ abstract final class Elf() {
     data.setUint16(58, 64, .little);
     data.setUint16(60, sectionCount, .little);
     data.setUint16(62, 4, .little);
-    bytes.setAll(textOffset, object.code);
+    bytes.setAll(textOffset, code);
     bytes.setAll(stringOffset, strings);
     bytes.setAll(nameOffset, ascii.encode(sectionNames));
-    for (final (i, symbol) in object.symbols.indexed) {
+    for (final (i, symbol) in symbols.indexed) {
       final offset = symbolOffset + (i + 1) * 24;
       data.setUint32(offset, names[i], .little);
-      data.setUint8(offset + 4, 0x12);
+      data.setUint8(offset + 4, symbol.binding == .local ? 0x02 : 0x12);
       data.setUint16(offset + 6, 1, .little);
       data.setUint64(
         offset + 8,
@@ -112,7 +142,7 @@ abstract final class Elf() {
       symbolOffset,
       symbolSize,
       link: 3,
-      info: 1,
+      info: 1 + symbols.where((s) => s.binding == .local).length,
       alignment: 8,
       entrySize: 24,
     );
@@ -185,7 +215,7 @@ abstract final class Elf() {
         16,
       ); // PT_GNU_STACK: read/write, never execute.
       data.setUint32(hashOffset, bucketCount, .little);
-      data.setUint32(hashOffset + 4, object.symbols.length + 1, .little);
+      data.setUint32(hashOffset + 4, symbols.length + 1, .little);
       for (final (i, name) in names.indexed) {
         var hash = 0;
         for (var cursor = name; strings[cursor] != 0; cursor++) {
@@ -216,4 +246,13 @@ abstract final class Elf() {
     }
     return bytes;
   }
+}
+
+final class _ElfLayout(@override final ObjectModule module, final String soname)
+    implements ImageLayout {
+  @override
+  int get codeOffset => 240;
+
+  @override
+  int get codeAddress => codeOffset;
 }
