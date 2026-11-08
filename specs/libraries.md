@@ -38,9 +38,9 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 | 平台验证 | macOS ARM64、Linux ARM64/x86-64 已验证原生调用；macOS x86-64 已检查文件生成、签名与系统链接，尚无运行验证。 |
 | 标准库与执行支持 | 导出函数尚不能依赖托管分配、GC、调度及一般标准库执行能力。缓存或找到 SDK 源码不等于目标侧实现已经存在。 |
 
-[原生函数与 C/C++ 宿主验证](../test/compiler/native_test.dart)包含对象、静态库、动态库调用和 SDK 整数边界差分。[ABI 验证](../test/abi/native_test.dart)覆盖目标寄存器重叠时的实际结果。上述范围是当前后端实现进度，不改变完整语言目标。
+[原生函数验证](../test/compiler/native_test.dart)通过固定 Dart FFI 调用代码执行预编译资产，并与 SDK 对照整数边界行为。[ABI 验证](../test/abi/native_test.dart)覆盖目标寄存器重叠时的实际结果。[格式验证](../test/formats/formats_test.dart)检查目标标识、静态归档成员与符号索引，以及 Mach-O 签名对全部映像页的覆盖；[头文件验证](../test/compiler/artifacts_test.dart)检查导出原型。上述范围是当前后端实现进度，不改变完整语言目标。
 
-[独立链接验证](../test/linker/linker_test.dart)直接使用机器码产物，覆盖多目标文件、跨目标编码、静态库索引、动态符号查找、签名、重复定义及失败时的输出保护。
+[独立链接验证](../test/linker/native_test.dart)调用预先链接的多目标文件与大符号表资产。[链接契约验证](../test/linker/linker_test.dart)覆盖确定性、重复定义及失败时的输出保护。
 
 ## 规范依据
 

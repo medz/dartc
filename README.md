@@ -37,7 +37,7 @@ Use Dart SDK `^3.13.7` and run:
 ```sh
 dart pub get
 dart analyze --fatal-infos
-dart test
+dart run tool/build_test_assets.dart && dart test
 dart run tool/print_ir.dart test/lowering/fixtures/functions.dart
 ```
 
@@ -45,6 +45,6 @@ The last command prints the basic blocks, calls and branches for each function i
 
 Assertions are disabled by default. Pass `enableAssertions: true` to `Lowering.lower` to preserve assertion statements and constructor assertion initializers.
 
-The native integration tests use the platform C/C++ compiler to build calling programs and check interoperability. macOS tests also verify generated signatures with the system verifier. Fixtures live alongside their tests; generated files are confined to `build/`.
+Before running tests, build the fixed native assets with `dart run tool/build_test_assets.dart`. Sources and Dart FFI bindings live in each domain's `test/<domain>/fixtures/` directory; generated files go to `build/test/<target>/`. Native execution tests call these bindings directly. Rebuild the assets after changing the compiler or fixtures. Tests require no external native toolchain.
 
 [Release notes](https://github.com/medz/dartc/blob/main/CHANGELOG.md) · [MIT license](https://github.com/medz/dartc/blob/main/LICENSE)
