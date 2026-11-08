@@ -19,7 +19,11 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
     (input) async {
       final program = Lowering.lower(input);
       final exports = await NativeExports.read(input, program);
-      final object = CodeGenerator(target).generate(program, {
+      final CodeGenerator generator = switch (target.architecture) {
+        .arm64 => Arm64CodeGenerator(target),
+        .x64 => X64CodeGenerator(target),
+      };
+      final object = generator.generate(program, {
         for (final export in exports.functions)
           export.function: export.linkerName(target),
       });

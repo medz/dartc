@@ -1,12 +1,10 @@
-import 'dart:typed_data';
-
 import 'package:dartc/arm64.dart';
 
-import 'integer_abi.dart';
+import 'calling_convention.dart';
 
 /// Emits integer leaf entry points shared by macOS and Linux AArch64.
 final class Arm64Abi(final Assembler assembler)
-    implements IntegerAbi<Register> {
+    implements CallingConvention<Register> {
   @override
   List<Register> get parameters => const [
     .x0,
@@ -20,7 +18,7 @@ final class Arm64Abi(final Assembler assembler)
   ];
 
   @override
-  List<Register> get temporaries => const [
+  List<Register> get callerSaved => const [
     .x0,
     .x1,
     .x2,
@@ -39,23 +37,8 @@ final class Arm64Abi(final Assembler assembler)
   ];
 
   @override
-  void loadImmediate(Register destination, int value) =>
-      assembler.loadImmediate(destination, value);
-
-  @override
-  void add(Register destination, Register left, Register right) =>
-      assembler.add(destination, left, right);
-
-  @override
-  void subtract(Register destination, Register left, Register right) =>
-      assembler.subtract(destination, left, right);
-
-  @override
   void returnValue(Register value) {
     assembler.move(.x0, value);
     assembler.ret();
   }
-
-  @override
-  Uint8List takeBytes() => assembler.takeBytes();
 }

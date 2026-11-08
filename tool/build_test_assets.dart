@@ -3,7 +3,7 @@ import 'package:dartc/formats.dart';
 import 'package:dartc/linker.dart';
 import 'package:dartc/target.dart';
 
-import '../test/abi/fixtures/aliases.dart';
+import '../test/codegen/fixtures/aliases.dart';
 import '../test/linker/fixtures/functions.dart';
 import '../test/linker/fixtures/symbols.dart';
 import '../test/native_assets.dart';
@@ -32,7 +32,7 @@ Future<void> main() async {
       final linker = Linker(target);
       await linker.link(
         [aliases(target)],
-        assets.library('abi/aliases'),
+        assets.library('codegen/aliases'),
         .sharedLibrary,
       );
       final inputs = [
