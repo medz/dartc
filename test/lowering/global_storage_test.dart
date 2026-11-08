@@ -119,12 +119,12 @@ void main() {
       'parts, prefixes, exports and private names resolve declaration slots',
       () async {
         const root = 'test/lowering/fixtures/global_storage';
-        final program = await CheckedLibraries.read([
+        final program = await AnalysisSession([
           '$root/entry.dart',
           '$root/first.dart',
           '$root/second.dart',
           '$root/barrel.dart',
-        ], Lowering.lower);
+        ]).use((input) => Lowering().lower(input).program);
         FixtureComparison(program)
             .compare('libraryIdentity', [], libraries.libraryIdentity);
         final firstUri = Uri.base.resolve('$root/first.dart');
@@ -159,7 +159,8 @@ void main() {
         ..writeAsStringSync(
           "import 'dependency.dart' as dep; int f() => dep.value;",
         );
-      final program = await CheckedLibraries.read([entry.path], Lowering.lower);
+      final program = await AnalysisSession([entry.path])
+          .use((input) => Lowering().lower(input).program);
       expect(program.globals, isEmpty);
       final calls = program.functions.single.blocks
           .expand((block) => block.instructions)
@@ -213,9 +214,9 @@ void main() {
           ..writeAsStringSync(source);
         var lowered = false;
         await expectLater(
-          CheckedLibraries.read([file.path], (input) {
+          AnalysisSession([file.path]).use((input) {
             lowered = true;
-            return Lowering.lower(input);
+            return Lowering().lower(input).program;
           }),
           throwsFormatException,
         );

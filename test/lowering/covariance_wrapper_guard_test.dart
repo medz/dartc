@@ -17,7 +17,8 @@ void main() {
     addTearDown(() => directory.deleteSync(recursive: true));
     final file = File('${directory.path}/entry.dart')
       ..writeAsStringSync(source);
-    return CheckedLibraries.read([file.path], Lowering.lower);
+    return AnalysisSession([file.path])
+        .use((input) => Lowering().lower(input).program);
   }
 
   final sources = <String, String>{

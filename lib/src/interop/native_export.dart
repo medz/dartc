@@ -1,36 +1,17 @@
-import 'package:dartc/ir.dart';
-import 'package:dartc/target.dart';
+import 'native_signature.dart';
 
-/// An explicitly requested signed 64-bit C function signature.
-final class NativeExport.int64(
-  final FunctionTarget function,
-  final String symbol,
-) {
+/// An explicitly named native function, independent of its Dart declaration.
+final class NativeExport(final String symbol, final NativeSignature signature) {
   this {
     if (!RegExp(r'^[A-Za-z][A-Za-z0-9_]*$').hasMatch(symbol) ||
         _keywords.contains(symbol)) {
       throw ArgumentError('Expected a non-reserved C identifier: $symbol');
     }
-    if (function.kind != .function ||
-        function.owner != null ||
-        function.typeParameters.isNotEmpty ||
-        function.signature.optionalSlots.isNotEmpty ||
-        function.signature.namedParameters.isNotEmpty ||
-        function.returnType != .integer ||
-        function.parameterTypes.any((type) => type != .integer)) {
-      throw ArgumentError(
-        'An Int64 export requires a positional int function.',
-      );
-    }
   }
-
-  /// The symbol spelling used by the target linker.
-  String linkerName(Target target) =>
-      target.operatingSystem == .macos ? '_$symbol' : symbol;
 
   /// Writes a C prototype using exact-width integer types.
   void writeDeclaration(StringSink output) {
-    final parameters = List.filled(function.parameterTypes.length, 'int64_t');
+    final parameters = List.filled(signature.parameterCount, 'int64_t');
     output.writeln(
       'int64_t $symbol(${parameters.isEmpty ? 'void' : parameters.join(', ')});',
     );

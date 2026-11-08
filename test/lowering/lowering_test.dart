@@ -30,9 +30,9 @@ import 'fixtures/updates.dart' as updates;
 
 const _fixtures = 'test/lowering/fixtures';
 
-Future<IrProgram> _lower(List<String> names) => CheckedLibraries.read([
-  for (final name in names) '$_fixtures/$name',
-], Lowering.lower);
+Future<IrProgram> _lower(List<String> names) =>
+    AnalysisSession([for (final name in names) '$_fixtures/$name'])
+        .use((input) => Lowering().lower(input).program);
 
 void main() {
   late Map<String, IrFunction> functions;

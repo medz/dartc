@@ -13,13 +13,13 @@ void main() {
   late FixtureRunner enabledRunner;
   late FixtureRunner disabledRunner;
   setUpAll(() async {
-    final programs = await CheckedLibraries.read(
-      ['test/lowering/fixtures/assertions.dart'],
-      (input) => (
-        Lowering.lower(input, enableAssertions: true),
-        Lowering.lower(input),
-      ),
-    );
+    final programs =
+        await AnalysisSession(['test/lowering/fixtures/assertions.dart']).use(
+          (input) => (
+            Lowering(enableAssertions: true).lower(input).program,
+            Lowering().lower(input).program,
+          ),
+        );
     Map<String, IrFunction> functions(IrProgram program) => {
       for (final fn in program.functions)
         if (fn.target.owner == null && fn.target.enclosing == null)
@@ -72,9 +72,9 @@ void main() {
   }
 
   test('disabled assertions omit nested closure bodies', () async {
-    final program = await CheckedLibraries.read([
+    final program = await AnalysisSession([
       'test/lowering/fixtures/disabled_assertion_closure.dart',
-    ], Lowering.lower);
+    ]).use((input) => Lowering().lower(input).program);
     expect(
       program.functions.every((fn) => fn.target.enclosing == null),
       isTrue,
@@ -88,9 +88,9 @@ void main() {
       final fn = program.functions.singleWhere((fn) => fn.target.name == name);
       expect(runner.run(fn, []), expected);
     }
-    final checked = await CheckedLibraries.read([
+    final checked = await AnalysisSession([
       'test/lowering/fixtures/disabled_assertion_closure.dart',
-    ], (input) => Lowering.lower(input, enableAssertions: true));
+    ]).use((input) => Lowering(enableAssertions: true).lower(input).program);
     expect(checked.functions.any((fn) => fn.target.enclosing != null), isTrue);
   });
 

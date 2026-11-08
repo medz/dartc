@@ -11,12 +11,12 @@ void main() {
   late FixtureComparison fixture;
   setUpAll(() async {
     fixture = FixtureComparison(
-      await CheckedLibraries.read([
+      await AnalysisSession([
         'test/lowering/fixtures/private_forwarders.dart',
         'test/lowering/fixtures/private_forwarders_a.dart',
         'test/lowering/fixtures/private_forwarders_b.dart',
         'test/lowering/fixtures/private_forwarders_child.dart',
-      ], Lowering.lower),
+      ]).use((input) => Lowering().lower(input).program),
     );
   });
 

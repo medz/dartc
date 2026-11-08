@@ -11,10 +11,10 @@ void main() {
   test(
     'analyzer-resolved unnamed tear-offs retain their deferred check',
     () async {
-      final program = await CheckedLibraries.read([
+      final program = await AnalysisSession([
         'test/lowering/fixtures/deferred_unnamed_tearoff.dart',
         'test/lowering/fixtures/deferred_library.dart',
-      ], Lowering.lower);
+      ]).use((input) => Lowering().lower(input).program);
       final runner = FixtureRunner(program, {});
       final create = program.functions.singleWhere(
         (f) => f.target.name == 'create',
@@ -25,10 +25,10 @@ void main() {
   test(
     'deferred prefixes check before effects and load independently',
     () async {
-      final program = await CheckedLibraries.read([
+      final program = await AnalysisSession([
         'test/lowering/fixtures/deferred_imports.dart',
         'test/lowering/fixtures/deferred_library.dart',
-      ], Lowering.lower);
+      ]).use((input) => Lowering().lower(input).program);
       final runner = FixtureRunner(program, {
         (Uri.base.resolve('test/lowering/fixtures/effects.dart'), 'tick'):
             effects.tick,

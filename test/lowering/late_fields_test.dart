@@ -168,10 +168,10 @@ void main() {
       'same-name private fields retain distinct declaring-library slots',
       () async {
         const root = 'test/lowering/fixtures/late_fields';
-        final program = await CheckedLibraries.read([
+        final program = await AnalysisSession([
           '$root/first.dart',
           '$root/second.dart',
-        ], Lowering.lower);
+        ]).use((input) => Lowering().lower(input).program);
         FixtureComparison(
           program,
         ).compare('privateFieldIdentity', [], libraries.privateFieldIdentity);
@@ -224,9 +224,9 @@ void main() {
           ..writeAsStringSync(source);
         var lowered = false;
         await expectLater(
-          CheckedLibraries.read([file.path], (input) {
+          AnalysisSession([file.path]).use((input) {
             lowered = true;
-            return Lowering.lower(input);
+            return Lowering().lower(input).program;
           }),
           throwsFormatException,
         );

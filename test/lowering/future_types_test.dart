@@ -94,7 +94,7 @@ void main() {
     final target = comparison.program.functions
         .singleWhere((f) => f.target.name == 'subtypeMatrix')
         .target;
-    await CheckedLibraries.read(['test/lowering/fixtures/future_types.dart'], (
+    await AnalysisSession(['test/lowering/fixtures/future_types.dart']).use((
       checked,
     ) {
       final unit = checked.libraries.single.units.single;

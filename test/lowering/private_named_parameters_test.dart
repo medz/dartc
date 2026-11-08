@@ -12,10 +12,10 @@ void main() {
   late FixtureComparison comparison;
   setUpAll(() async {
     comparison = FixtureComparison(
-      await CheckedLibraries.read([
+      await AnalysisSession([
         'test/lowering/fixtures/private_named/entry.dart',
         'test/lowering/fixtures/private_named/declarations.dart',
-      ], Lowering.lower),
+      ]).use((input) => Lowering().lower(input).program),
     );
   });
 
@@ -51,7 +51,8 @@ void main() {
         final file = File('${directory.path}/entry.dart')
           ..writeAsStringSync(source);
         await expectLater(
-          CheckedLibraries.read([file.path], Lowering.lower),
+          AnalysisSession([file.path])
+              .use((input) => Lowering().lower(input).program),
           throwsA(isA<FormatException>()),
         );
       },

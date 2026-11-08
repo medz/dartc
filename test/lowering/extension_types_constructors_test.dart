@@ -12,13 +12,15 @@ void main() {
   late FixtureComparison fixture;
   late IrProgram disabled;
   setUpAll(() async {
-    final programs = await CheckedLibraries.read(
-      ['test/lowering/fixtures/extension_types_constructors.dart'],
-      (input) => (
-        Lowering.lower(input, enableAssertions: true),
-        Lowering.lower(input),
-      ),
-    );
+    final programs =
+        await AnalysisSession([
+          'test/lowering/fixtures/extension_types_constructors.dart',
+        ]).use(
+          (input) => (
+            Lowering(enableAssertions: true).lower(input).program,
+            Lowering().lower(input).program,
+          ),
+        );
     fixture = FixtureComparison(programs.$1);
     disabled = programs.$2;
   });

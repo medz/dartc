@@ -79,7 +79,8 @@ void main() {
     'imported extension types erase without requiring their bodies',
     () async {
       const entry = 'test/lowering/fixtures/extension_type_import.dart';
-      final imported = await CheckedLibraries.read([entry], Lowering.lower);
+      final imported = await AnalysisSession([entry])
+          .use((input) => Lowering().lower(input).program);
       expect(imported.classes, isEmpty);
       final keep = imported.functions.singleWhere(
         (f) => f.target.name == 'keep',
@@ -90,10 +91,10 @@ void main() {
         run.callees.where((t) => imported.implementationOf(t) == null),
         hasLength(2),
       );
-      final linked = await CheckedLibraries.read([
+      final linked = await AnalysisSession([
         entry,
         'test/lowering/fixtures/deferred_library.dart',
-      ], Lowering.lower);
+      ]).use((input) => Lowering().lower(input).program);
       expect(
         FixtureRunner(
           linked,

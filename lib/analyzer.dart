@@ -3,4 +3,4 @@
 /// Analysis session ownership stays here; lowering consumes the checked result.
 library;
 
-export 'src/analyzer/checked_libraries.dart' show CheckedLibraries;
+export 'src/analyzer/session.dart' show AnalysisSession, CheckedLibraries;

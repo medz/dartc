@@ -112,7 +112,8 @@ int read<B extends E<int>>(B value) => value.get();
 void main() { print(read(E<int>(3))); }
 """);
         await expectLater(
-          CheckedLibraries.read([file.path], Lowering.lower),
+          AnalysisSession([file.path])
+              .use((input) => Lowering().lower(input).program),
           throwsA(
             isA<FormatException>().having(
               (e) => e.message,

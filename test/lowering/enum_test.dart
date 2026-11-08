@@ -114,7 +114,8 @@ void main() {
             'enum Broken { $declaration }\nObject f() => Broken.a._name;',
           );
         await expectLater(
-          CheckedLibraries.read([file.path], Lowering.lower),
+          AnalysisSession([file.path])
+              .use((input) => Lowering().lower(input).program),
           throwsA(
             isA<UnsupportedError>()
                 .having(
@@ -151,7 +152,8 @@ void main() {
             "import 'dependency.dart' as d; Object f() => $expression;",
           );
           await expectLater(
-            CheckedLibraries.read([entry.path], Lowering.lower),
+            AnalysisSession([entry.path])
+                .use((input) => Lowering().lower(input).program),
             throwsA(
               isA<UnsupportedError>()
                   .having(
@@ -171,7 +173,8 @@ void main() {
         entry.writeAsStringSync(
           "import 'dependency.dart' as d; int f() => 42;",
         );
-        await CheckedLibraries.read([entry.path], Lowering.lower);
+        await AnalysisSession([entry.path])
+            .use((input) => Lowering().lower(input).program);
       },
     );
   });

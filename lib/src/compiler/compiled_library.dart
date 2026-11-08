@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:dartc/artifact.dart';
+import 'package:dartc/abi.dart';
 import 'package:dartc/formats.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/linker.dart';
@@ -15,7 +16,8 @@ final class CompiledLibrary(
 
   this {
     final names = {
-      for (final export in exports.functions) export.linkerName(object.target),
+      for (final export in exports.functions)
+        object.target.nativeSymbol(export.symbol),
     };
     if (names.length != object.symbols.length ||
         object.symbols.any((symbol) => !names.contains(symbol.name))) {

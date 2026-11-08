@@ -12,10 +12,10 @@ void main() {
   late FixtureComparison fixture;
   setUpAll(() async {
     fixture = FixtureComparison(
-      await CheckedLibraries.read([
+      await AnalysisSession([
         'test/lowering/fixtures/extension_types_interfaces.dart',
         'test/lowering/fixtures/extension_types_interfaces_other.dart',
-      ], Lowering.lower),
+      ]).use((input) => Lowering().lower(input).program),
     );
   });
   test('inherited extension members retain source owner type arguments', () {
@@ -82,7 +82,8 @@ void main() {
           final file = File('${directory.path}/entry.dart')
             ..writeAsStringSync(source);
           await expectLater(
-            CheckedLibraries.read([file.path], Lowering.lower),
+            AnalysisSession([file.path])
+                .use((input) => Lowering().lower(input).program),
             throwsA(isA<FormatException>()),
           );
         }

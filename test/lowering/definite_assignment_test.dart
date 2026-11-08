@@ -10,9 +10,9 @@ void main() {
   late Map<String, IrFunction> functions;
   late FixtureRunner runner;
   setUpAll(() async {
-    final program = await CheckedLibraries.read([
+    final program = await AnalysisSession([
       'test/lowering/fixtures/definite_assignment.dart',
-    ], Lowering.lower);
+    ]).use((input) => Lowering().lower(input).program);
     functions = {
       for (final fn in program.functions)
         if (fn.target.enclosing == null) fn.target.name: fn,

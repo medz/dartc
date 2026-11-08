@@ -7,9 +7,9 @@ import 'fixture_runner.dart';
 
 void main() {
   test('external declarations retain Dart defaults and identities without invented bodies or storage', () async {
-    final program = await CheckedLibraries.read([
+    final program = await AnalysisSession([
       'test/lowering/fixtures/externals.dart',
-    ], Lowering.lower);
+    ]).use((input) => Lowering().lower(input).program);
     expect(program.externals, hasLength(11));
     expect(program.functions.map((f) => f.target.name), ['use']);
     expect(program.globals, isEmpty);

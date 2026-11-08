@@ -4,3 +4,4 @@ library;
 export 'src/abi/calling_convention.dart' show CallingConvention;
 export 'src/abi/arm64.dart' show Arm64Abi;
 export 'src/abi/x64.dart' show X64Abi;
+export 'src/abi/native_symbols.dart' show NativeSymbols;

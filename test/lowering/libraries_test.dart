@@ -40,7 +40,10 @@ import 'original.dart' as original hide hidden;
 int run() { exposed.value += 3; return original.value; }
 ''');
       expect(
-        run(await CheckedLibraries.read([entry, original], Lowering.lower)),
+        run(
+          await AnalysisSession([entry, original])
+              .use((input) => Lowering().lower(input).program),
+        ),
         5,
       );
     },
@@ -56,7 +59,7 @@ int run() => value();
 ''');
     var consumed = false;
     await expectLater(
-      CheckedLibraries.read([entry], (input) {
+      AnalysisSession([entry]).use((input) {
         consumed = true;
       }),
       throwsA(isA<FormatException>()),
@@ -74,7 +77,8 @@ import 'other.dart' as other hide visible;
 int run() => other.$name();
 ''');
         await expectLater(
-          CheckedLibraries.read([entry], Lowering.lower),
+          AnalysisSession([entry])
+              .use((input) => Lowering().lower(input).program),
           throwsA(isA<FormatException>()),
         );
       }
@@ -95,10 +99,8 @@ import 'original.dart' if (dartc.test) 'alternate.dart' as direct;
 import 'barrel.dart' as exposed;
 int run() => direct.value() + exposed.value();
 ''');
-      final program = await CheckedLibraries.read([
-        entry,
-        original,
-      ], Lowering.lower);
+      final program = await AnalysisSession([entry, original])
+          .use((input) => Lowering().lower(input).program);
       expect(run(program), 14);
       final calls = program.functions.first.entry.instructions
           .whereType<DirectCall>();
@@ -113,7 +115,8 @@ import '${File(other).uri}' as absolute;
 import 'other.dart' as relative;
 int run() => absolute.value() + relative.value();
 ''');
-    final program = await CheckedLibraries.read([entry, other], Lowering.lower);
+    final program = await AnalysisSession([entry, other])
+        .use((input) => Lowering().lower(input).program);
     expect(run(program), 12);
     final calls = program.functions.first.entry.instructions
         .whereType<DirectCall>();
@@ -135,16 +138,16 @@ import 'dart:core';
 part 'piece.dart';
 int run() => _value();
 ''');
-        final program = await CheckedLibraries.read([entry], Lowering.lower);
+        final program = await AnalysisSession([entry])
+            .use((input) => Lowering().lower(input).program);
         expect(run(program), 11);
         expect(
           program.functions.map((f) => f.target.library).toSet(),
           hasLength(1),
         );
         await expectLater(
-          CheckedLibraries.read([
-            '${directory.path}/piece.dart',
-          ], Lowering.lower),
+          AnalysisSession(['${directory.path}/piece.dart'])
+              .use((input) => Lowering().lower(input).program),
           throwsA(isA<FormatException>()),
         );
       },
@@ -157,7 +160,8 @@ int run() => _value();
       'entry',
       "import 'other.dart'; void main() { value(); }",
     );
-    final program = await CheckedLibraries.read([entry], Lowering.lower);
+    final program = await AnalysisSession([entry])
+        .use((input) => Lowering().lower(input).program);
     expect(program.functions.single.target.name, 'main');
     final call = program.functions.single.entry.instructions
         .whereType<DirectCall>()
@@ -167,7 +171,8 @@ int run() => _value();
       program.functions.any((f) => identical(f.target, call.target)),
       isFalse,
     );
-    final linked = await CheckedLibraries.read([entry, other], Lowering.lower);
+    final linked = await AnalysisSession([entry, other])
+        .use((input) => Lowering().lower(input).program);
     expect(FixtureRunner(linked, {}).run(linked.functions.first, []), isNull);
     expect(linked.functions.map((f) => f.target.name), ['main', 'value']);
   });

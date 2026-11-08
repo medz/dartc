@@ -1,8 +1,7 @@
 /// Translation from checked Dart libraries to the compiler's typed IR.
 ///
-/// [CheckedLibraries.read] runs [Lowering.lower] while the analysis session is
-/// open. The resulting class declarations and function bodies are independent
-/// of the analyzer session.
+/// [AnalysisSession.use] keeps checked input available to a [Lowering] instance.
+/// The resulting IR and native bindings are independent of the session.
 ///
 /// {@example /tool/print_ir.dart#lower_libraries}
 ///
@@ -10,4 +9,4 @@
 /// @docImport 'src/lowering/lowering.dart';
 library;
 
-export 'src/lowering/lowering.dart' show Lowering;
+export 'src/lowering/lowering.dart' show Lowering, LoweringResult;

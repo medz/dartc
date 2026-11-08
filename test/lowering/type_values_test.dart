@@ -14,7 +14,8 @@ void main() {
     final file = File('${directory.path}/entry.dart')
       ..writeAsStringSync('Object f<T>() { const value = T; return value; }');
     await expectLater(
-      CheckedLibraries.read([file.path], Lowering.lower),
+      AnalysisSession([file.path])
+          .use((input) => Lowering().lower(input).program),
       throwsFormatException,
     );
   });

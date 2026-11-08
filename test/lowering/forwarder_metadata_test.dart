@@ -12,91 +12,84 @@ void main() {
   test(
     'selected forwarder binders retain exact identity and transported defaults',
     () async {
-      await CheckedLibraries.read(
-        [
-          'test/lowering/fixtures/nosuchmethod_unsupported.dart',
-          'test/lowering/fixtures/nosuchmethod_unsupported_private.dart',
-        ],
-        (input) {
-          final unit = input.libraries
-              .expand((library) => library.units)
-              .firstWhere(
-                (unit) => unit.unit.declarations
-                    .whereType<ast.ClassDeclaration>()
-                    .any(
-                      (declaration) =>
-                          declaration.declaredFragment!.element.name ==
-                          'Forwarded',
-                    ),
-              );
-          final declaration = unit.unit.declarations
-              .whereType<ast.ClassDeclaration>()
-              .singleWhere(
-                (declaration) =>
-                    declaration.declaredFragment!.element.name == 'Forwarded',
-              );
-          final element = declaration.declaredFragment!.element;
-          final selected = noSuchMethodForwarderCandidates(element)
-              .singleWhere((candidate) => candidate.member.name == 'method')
-              .member;
-          final binder = selected.typeParameters.single;
-          expect(identical(binder.baseElement, binder), isTrue);
-          expect(
-            identical(binder, selected.type.typeParameters.single),
-            isFalse,
-          );
-          expect(typeParameterDefault(binder), isNull);
-          final templates = executableTypeParameterDefaults(selected);
-          expect(templates.single!.getDisplayString(), 'num');
+      await AnalysisSession([
+        'test/lowering/fixtures/nosuchmethod_unsupported.dart',
+        'test/lowering/fixtures/nosuchmethod_unsupported_private.dart',
+      ]).use((input) {
+        final unit = input.libraries
+            .expand((library) => library.units)
+            .firstWhere(
+              (unit) =>
+                  unit.unit.declarations.whereType<ast.ClassDeclaration>().any(
+                    (declaration) =>
+                        declaration.declaredFragment!.element.name ==
+                        'Forwarded',
+                  ),
+            );
+        final declaration = unit.unit.declarations
+            .whereType<ast.ClassDeclaration>()
+            .singleWhere(
+              (declaration) =>
+                  declaration.declaredFragment!.element.name == 'Forwarded',
+            );
+        final element = declaration.declaredFragment!.element;
+        final selected = noSuchMethodForwarderCandidates(element)
+            .singleWhere((candidate) => candidate.member.name == 'method')
+            .member;
+        final binder = selected.typeParameters.single;
+        expect(identical(binder.baseElement, binder), isTrue);
+        expect(identical(binder, selected.type.typeParameters.single), isFalse);
+        expect(typeParameterDefault(binder), isNull);
+        final templates = executableTypeParameterDefaults(selected);
+        expect(templates.single!.getDisplayString(), 'num');
 
-          final bindings = Bindings();
-          bindings.classType(element, unit, declaration);
-          final first = bindings.bindTypeParameters(
+        final bindings = Bindings();
+        bindings.classType(element, unit, declaration);
+        final first = bindings.bindTypeParameters(
+          selected.typeParameters,
+          unit,
+          declaration,
+        );
+        expect(first.single.defaultType, isNull);
+        final augmented = bindings.bindTypeParameters(
+          selected.typeParameters,
+          unit,
+          declaration,
+          defaultTemplates: templates,
+        );
+        expect(identical(augmented.single, first.single), isTrue);
+        expect(augmented.single.bound, ValueType.number);
+        expect(augmented.single.defaultType, ValueType.number);
+        expect(
+          bindings
+              .bindTypeParameters(
+                selected.typeParameters,
+                unit,
+                declaration,
+                defaultTemplates: templates,
+              )
+              .single,
+          same(first.single),
+        );
+        expect(
+          () => bindings.bindTypeParameters(
             selected.typeParameters,
             unit,
             declaration,
-          );
-          expect(first.single.defaultType, isNull);
-          final augmented = bindings.bindTypeParameters(
+            defaultTemplates: const [],
+          ),
+          throwsArgumentError,
+        );
+        expect(
+          () => bindings.bindTypeParameters(
             selected.typeParameters,
             unit,
             declaration,
-            defaultTemplates: templates,
-          );
-          expect(identical(augmented.single, first.single), isTrue);
-          expect(augmented.single.bound, ValueType.number);
-          expect(augmented.single.defaultType, ValueType.number);
-          expect(
-            bindings
-                .bindTypeParameters(
-                  selected.typeParameters,
-                  unit,
-                  declaration,
-                  defaultTemplates: templates,
-                )
-                .single,
-            same(first.single),
-          );
-          expect(
-            () => bindings.bindTypeParameters(
-              selected.typeParameters,
-              unit,
-              declaration,
-              defaultTemplates: const [],
-            ),
-            throwsArgumentError,
-          );
-          expect(
-            () => bindings.bindTypeParameters(
-              selected.typeParameters,
-              unit,
-              declaration,
-              defaultTemplates: [unit.libraryElement.typeProvider.stringType],
-            ),
-            throwsUnsupportedError,
-          );
-        },
-      );
+            defaultTemplates: [unit.libraryElement.typeProvider.stringType],
+          ),
+          throwsUnsupportedError,
+        );
+      });
     },
   );
   test(
@@ -121,7 +114,8 @@ class ForeignPrivate implements PrivateContract {
 }
 class UnknownParent extends ImportedParent {}
 ''');
-      final program = await CheckedLibraries.read([entry.path], Lowering.lower);
+      final program = await AnalysisSession([entry.path])
+          .use((input) => Lowering().lower(input).program);
       final foreign = program.classes.singleWhere(
         (c) => c.type.name == 'ForeignPrivate',
       );

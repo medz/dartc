@@ -10,10 +10,10 @@ void main() {
   late FixtureComparison fixture;
   setUpAll(
     () async => fixture = FixtureComparison(
-      await CheckedLibraries.read([
+      await AnalysisSession([
         'test/lowering/fixtures/constants.dart',
         'test/lowering/fixtures/constants_private.dart',
-      ], Lowering.lower),
+      ]).use((input) => Lowering().lower(input).program),
     ),
   );
 

@@ -43,7 +43,7 @@ dart run tool/print_ir.dart test/lowering/fixtures/functions.dart
 
 The last command prints the basic blocks, calls and branches for each function in the file's library.
 
-Assertions are disabled by default. Pass `enableAssertions: true` to `Lowering.lower` to preserve assertion statements and constructor assertion initializers.
+Assertions are disabled by default. Pass `enableAssertions: true` to the `Lowering` constructor to preserve assertion statements and constructor assertion initializers.
 
 Before running tests, build the fixed native assets with `dart run tool/build_test_assets.dart`. Sources and Dart FFI bindings live in each domain's `test/<domain>/fixtures/` directory; generated files go to `build/test/<target>/`. Native execution tests call these bindings directly. Rebuild the assets after changing the compiler or fixtures. Tests require no external native toolchain.
 

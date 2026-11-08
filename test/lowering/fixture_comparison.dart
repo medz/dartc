@@ -9,9 +9,8 @@ import 'fixtures/effects.dart' as effects;
 /// Compares a lowered fixture with the SDK, including failures and effect order.
 final class FixtureComparison(final IrProgram program) {
   static Future<FixtureComparison> load(String fixture) async => .new(
-    await CheckedLibraries.read([
-      'test/lowering/fixtures/$fixture.dart',
-    ], Lowering.lower),
+    await AnalysisSession(['test/lowering/fixtures/$fixture.dart'])
+        .use((input) => Lowering().lower(input).program),
   );
 
   static final _effects = Uri.base.resolve(

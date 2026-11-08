@@ -5,9 +5,9 @@ import 'package:test/test.dart';
 void main() {
   test('unmodeled superclass cannot lose application covariance', () async {
     await expectLater(
-      CheckedLibraries.read([
+      AnalysisSession([
         'test/lowering/fixtures/mixin_imported_application.dart',
-      ], Lowering.lower),
+      ]).use((input) => Lowering().lower(input).program),
       throwsA(
         isA<UnsupportedError>().having(
           (error) => error.message,

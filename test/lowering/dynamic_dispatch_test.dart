@@ -72,10 +72,10 @@ void main() {
   test(
     'private dynamic selectors retain each calling library identity',
     () async {
-      final program = await CheckedLibraries.read([
+      final program = await AnalysisSession([
         'test/lowering/fixtures/dynamic_dispatch_private.dart',
         'test/lowering/fixtures/dynamic_dispatch_private_use.dart',
-      ], Lowering.lower);
+      ]).use((input) => Lowering().lower(input).program);
       FixtureComparison(program)
           .compare('privateLibraries', [], private_sdk.privateLibraries);
     },

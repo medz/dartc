@@ -14,14 +14,15 @@ void main() {
       'arm64': {},
       'x64': {},
       'analyzer': {'sdk'},
-      'lowering': {'analyzer', 'ir'},
-      'abi': {'arm64', 'x64'},
+      'lowering': {'analyzer', 'ir', 'interop'},
+      'abi': {'arm64', 'x64', 'target'},
       'artifact': {'target'},
       'formats': {'artifact'},
-      'interop': {'analyzer', 'ir', 'target'},
+      'interop': {},
       'codegen': {'abi', 'arm64', 'x64', 'artifact', 'ir', 'target'},
       'linker': {'artifact', 'formats', 'target'},
       'compiler': {
+        'abi',
         'analyzer',
         'codegen',
         'interop',
@@ -72,7 +73,7 @@ void main() {
           if (uri.scheme == 'package' && uri.pathSegments.first != 'dartc') {
             expect(
               const {
-                'analyzer': {'analyzer', 'lowering', 'interop'},
+                'analyzer': {'analyzer', 'lowering'},
                 'crypto': {'formats'},
               }[uri.pathSegments.first],
               contains(owner),

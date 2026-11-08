@@ -14,11 +14,11 @@ void main() {
   late Map<String, IrFunction> functions;
   setUpAll(() async {
     const dir = 'test/lowering/fixtures';
-    final program = await CheckedLibraries.read([
+    final program = await AnalysisSession([
       '$dir/cascades.dart',
       '$dir/dot_shorthand.dart',
       '$dir/static_accessors.dart',
-    ], Lowering.lower);
+    ]).use((input) => Lowering().lower(input).program);
     functions = {
       for (final f in program.functions)
         if (f.target.owner == null && f.target.enclosing == null)

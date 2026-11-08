@@ -15,10 +15,8 @@ void main() {
       'test/lowering/fixtures/nosuchmethod_unsupported_private.dart';
   late IrProgram program;
   setUpAll(() async {
-    program = await CheckedLibraries.read([
-      fixture,
-      privateFixture,
-    ], Lowering.lower);
+    program = await AnalysisSession([fixture, privateFixture])
+        .use((input) => Lowering().lower(input).program);
   });
 
   IrClass declaration(String name) =>
@@ -195,10 +193,8 @@ import '${File(privateFixture).absolute.uri}';
 class Incompatible extends ChangedPrivateImplementation {}
 int invoke() => invokeChangedPrivate(Incompatible());
 ''');
-      final lowered = await CheckedLibraries.read([
-        file.path,
-        privateFixture,
-      ], Lowering.lower);
+      final lowered = await AnalysisSession([file.path, privateFixture])
+          .use((input) => Lowering().lower(input).program);
       final cls = lowered.classes.singleWhere(
         (c) => c.type.name == 'Incompatible',
       );
@@ -232,7 +228,8 @@ abstract class B { Object? g<U extends dynamic>({dynamic p = 20}); }
 class C implements A, B { dynamic noSuchMethod(Invocation i) => null; }
 Object? invoke() { dynamic c = C(); return c.g(); }
 ''');
-      final lowered = await CheckedLibraries.read([file.path], Lowering.lower);
+      final lowered = await AnalysisSession([file.path])
+          .use((input) => Lowering().lower(input).program);
       final cls = lowered.classes.singleWhere((c) => c.type.name == 'C');
       expect(
         lowered.lookupMember(cls.type, method('g')).unsupportedForwarder,
@@ -264,10 +261,8 @@ int call(Changed receiver) => receiver._value();
       ..writeAsStringSync(
         "import 'parent.dart'; class Child extends Changed {} int invoke() => call(Child());",
       );
-    final lowered = await CheckedLibraries.read([
-      child.path,
-      parent.path,
-    ], Lowering.lower);
+    final lowered = await AnalysisSession([child.path, parent.path])
+        .use((input) => Lowering().lower(input).program);
     final cls = lowered.classes.singleWhere((c) => c.type.name == 'Child');
     final replacement = lowered
         .lookupMember(cls.type, method('_value', parent.uri))

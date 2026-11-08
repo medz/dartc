@@ -11,7 +11,8 @@ void main() {
     'ordinary and shorthand calls retain generic checks and effect order',
     () async {
       const path = 'test/lowering/fixtures/invocation_forms.dart';
-      final program = await CheckedLibraries.read([path], Lowering.lower);
+      final program = await AnalysisSession([path])
+          .use((input) => Lowering().lower(input).program);
       final function = program.functions.singleWhere(
         (f) => f.target.name == 'forms',
       );

@@ -219,9 +219,9 @@ void main() {
           ..writeAsStringSync(source);
         var lowered = false;
         await expectLater(
-          CheckedLibraries.read([file.path], (input) {
+          AnalysisSession([file.path]).use((input) {
             lowered = true;
-            return Lowering.lower(input);
+            return Lowering().lower(input).program;
           }),
           throwsFormatException,
         );

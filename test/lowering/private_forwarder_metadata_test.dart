@@ -31,7 +31,7 @@ abstract class Other { num _f({num z = 30, num a = 20}); }
 import 'imported.dart';
 class Replacement extends Base implements Contract, Other {}
 ''');
-      await CheckedLibraries.read([entry.path, imported.path], (input) {
+      await AnalysisSession([entry.path, imported.path]).use((input) {
         final unit = input.libraries
             .expand((l) => l.units)
             .firstWhere(
@@ -146,25 +146,24 @@ import 'imported.dart';
 class B extends R implements I {}
 int invoke() => read(B());
 ''');
-      final program = await CheckedLibraries.read([entry.path, imported.path], (
-        input,
-      ) {
-        final element = input.libraries
-            .expand((l) => l.units)
-            .expand(
-              (u) => u.unit.declarations.whereType<ast.ClassDeclaration>(),
-            )
-            .singleWhere((d) => d.declaredFragment!.element.name == 'B')
-            .declaredFragment!
-            .element;
-        final candidate = noSuchMethodForwarderCandidates(element)
-            .singleWhere((c) => c.member.name == '_g');
-        expect(candidate.overridesConcrete, isTrue);
-        expect(candidate.member.formalParameters, isEmpty);
-        expect(candidate.member.returnType.getDisplayString(), 'int');
-        expect(candidate.additionalCovariance, isEmpty);
-        return Lowering.lower(input);
-      });
+      final program = await AnalysisSession([entry.path, imported.path])
+          .use((input) {
+            final element = input.libraries
+                .expand((l) => l.units)
+                .expand(
+                  (u) => u.unit.declarations.whereType<ast.ClassDeclaration>(),
+                )
+                .singleWhere((d) => d.declaredFragment!.element.name == 'B')
+                .declaredFragment!
+                .element;
+            final candidate = noSuchMethodForwarderCandidates(element)
+                .singleWhere((c) => c.member.name == '_g');
+            expect(candidate.overridesConcrete, isTrue);
+            expect(candidate.member.formalParameters, isEmpty);
+            expect(candidate.member.returnType.getDisplayString(), 'int');
+            expect(candidate.additionalCovariance, isEmpty);
+            return Lowering().lower(input).program;
+          });
       final invoke = program.functions.singleWhere(
         (f) => f.target.name == 'invoke',
       );

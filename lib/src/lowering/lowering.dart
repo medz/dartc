@@ -1,15 +1,17 @@
 import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:dartc/analyzer.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
 
 import 'bindings.dart';
 import 'class_declaration.dart';
 import 'extension_declaration.dart';
 import 'function.dart';
 import 'global_declaration.dart';
+import 'native_exports.dart';
 
 /// The translation from resolved Dart declarations to executable IR operations.
-abstract final class Lowering() {
+final class Lowering({final bool enableAssertions = false}) {
   /// Returns class declarations and verified function bodies from [input].
   ///
   /// Assertions are omitted by default. Set [enableAssertions] to evaluate
@@ -18,10 +20,7 @@ abstract final class Lowering() {
   /// Calls to the same declaration share a target throughout the batch.
   /// Constants appear as operands at their uses. Throws
   /// [UnsupportedError] at the first source construct without an IR translation.
-  static IrProgram lower(
-    CheckedLibraries input, {
-    bool enableAssertions = false,
-  }) {
+  LoweringResult lower(CheckedLibraries input) {
     final bindings = Bindings(enableAssertions: enableAssertions);
     for (final unit in input.libraries.expand((library) => library.units)) {
       for (final node in unit.unit.declarations) {
@@ -37,6 +36,13 @@ abstract final class Lowering() {
           default:
             break;
         }
+      }
+    }
+    final exports = ExportBindings(bindings);
+    for (final library in input.libraries) {
+      for (final unit in library.units) {
+        exports.unit = unit;
+        unit.unit.accept(exports);
       }
     }
     final functions = <IrCallable>[];
@@ -82,7 +88,7 @@ abstract final class Lowering() {
         lowerClass(unit, bindings, source, functions, application: application),
       );
     }
-    return IrProgram(
+    final program = IrProgram(
       [...classes, ...bindings.mixinApplications],
       [
         ...functions.whereType<IrFunction>(),
@@ -92,5 +98,12 @@ abstract final class Lowering() {
       externals: functions.whereType<IrExternal>(),
       globals: bindings.globals,
     );
+    return (program: program, exports: Map.unmodifiable(exports.functions));
   }
 }
+
+/// Verified Dart IR and native exports bound to its declaration identities.
+typedef LoweringResult = ({
+  IrProgram program,
+  Map<FunctionTarget, NativeExport> exports,
+});

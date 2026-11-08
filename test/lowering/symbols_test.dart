@@ -148,7 +148,8 @@ void main() {
       ]) {
         file.writeAsStringSync(source);
         await expectLater(
-          CheckedLibraries.read([file.path], Lowering.lower),
+          AnalysisSession([file.path])
+              .use((input) => Lowering().lower(input).program),
           throwsA(
             isA<UnsupportedError>()
                 .having((e) => e.message, 'source', contains('entry.dart:'))

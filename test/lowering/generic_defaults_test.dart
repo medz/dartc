@@ -16,23 +16,21 @@ void main() {
   late FunctionType structuralMethod;
   late bool structuralDefaultAbsent;
   setUpAll(() async {
-    await CheckedLibraries.read(
-      ['test/lowering/fixtures/generic_defaults.dart'],
-      (input) {
-        final unit = input.libraries.single.units.single;
-        final declaration = unit.unit.declarations
-            .whereType<ast.FunctionDeclaration>()
-            .singleWhere((node) => node.name.lexeme == 'methodTearoff');
-        final body =
-            declaration.functionExpression.body as ast.ExpressionFunctionBody;
-        final type = body.expression.staticType! as dart.FunctionType;
-        structuralDefaultAbsent =
-            typeParameterDefault(type.typeParameters.single) == null;
-        structuralMethod =
-            Bindings().valueType(type, unit, body) as FunctionType;
-        program = Lowering.lower(input);
-      },
-    );
+    await AnalysisSession([
+      'test/lowering/fixtures/generic_defaults.dart',
+    ]).use((input) {
+      final unit = input.libraries.single.units.single;
+      final declaration = unit.unit.declarations
+          .whereType<ast.FunctionDeclaration>()
+          .singleWhere((node) => node.name.lexeme == 'methodTearoff');
+      final body =
+          declaration.functionExpression.body as ast.ExpressionFunctionBody;
+      final type = body.expression.staticType! as dart.FunctionType;
+      structuralDefaultAbsent =
+          typeParameterDefault(type.typeParameters.single) == null;
+      structuralMethod = Bindings().valueType(type, unit, body) as FunctionType;
+      program = Lowering().lower(input).program;
+    });
   });
 
   FunctionTarget target(String name) => program.functions

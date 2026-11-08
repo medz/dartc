@@ -10,10 +10,10 @@ void main() {
     'inherited covariance retains defaults, checks and tearoff types',
     () async {
       final fixture = FixtureComparison(
-        await CheckedLibraries.read([
+        await AnalysisSession([
           'test/lowering/fixtures/covariance_transitions.dart',
           'test/lowering/fixtures/covariance_transitions_private.dart',
-        ], Lowering.lower),
+        ]).use((input) => Lowering().lower(input).program),
       );
       fixture.compare('defaults', [], sdk.defaults);
       fixture.compare('tearoffs', [], sdk.tearoffs);

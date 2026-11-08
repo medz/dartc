@@ -158,7 +158,8 @@ void main() {
     final invalid = File('${directory.path}/invalid.dart')
       ..writeAsStringSync('void f() sync* { yield 1; }');
     await expectLater(
-      CheckedLibraries.read([invalid.path], Lowering.lower),
+      AnalysisSession([invalid.path])
+          .use((input) => Lowering().lower(input).program),
       throwsFormatException,
     );
   });

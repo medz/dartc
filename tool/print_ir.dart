@@ -11,7 +11,8 @@ Future<void> main(List<String> args) async {
   }
   try {
     // #region lower_libraries
-    final program = await CheckedLibraries.read(args, Lowering.lower);
+    final program = await AnalysisSession(args)
+        .use((input) => Lowering().lower(input).program);
     program.writeTo(stdout);
     // #endregion lower_libraries
   } on FormatException catch (error) {

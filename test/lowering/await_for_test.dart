@@ -13,9 +13,9 @@ void main() {
   late FixtureRunner runner;
   late Map<String, IrFunction> functions;
   setUpAll(() async {
-    final program = await CheckedLibraries.read([
+    final program = await AnalysisSession([
       'test/lowering/fixtures/await_for.dart',
-    ], Lowering.lower);
+    ]).use((input) => Lowering().lower(input).program);
     runner = FixtureRunner(program, {
       (Uri.base.resolve('test/lowering/fixtures/effects.dart'), 'tick'):
           effects.tick,

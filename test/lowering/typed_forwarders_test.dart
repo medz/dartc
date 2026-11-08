@@ -63,10 +63,10 @@ void main() {
     'unchanged foreign children reuse the actual private forwarder',
     () async {
       final privateFixture = FixtureComparison(
-        await CheckedLibraries.read([
+        await AnalysisSession([
           'test/lowering/fixtures/typed_forwarders_private.dart',
           'test/lowering/fixtures/typed_forwarders_private_use.dart',
-        ], Lowering.lower),
+        ]).use((input) => Lowering().lower(input).program),
       );
       for (var form = 0; form < 3; form++) {
         for (final tearoff in [false, true]) {

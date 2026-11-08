@@ -11,9 +11,8 @@ void main() {
   late FixtureRunner runner;
   late Map<String, IrFunction> functions;
   setUpAll(() async {
-    program = await CheckedLibraries.read([
-      'test/lowering/fixtures/collections.dart',
-    ], Lowering.lower);
+    program = await AnalysisSession(['test/lowering/fixtures/collections.dart'])
+        .use((input) => Lowering().lower(input).program);
     runner = FixtureRunner(program, {});
     functions = {
       for (final f in program.functions)
@@ -115,9 +114,8 @@ void main() {
     ),
   ]) {
     test('retains a typed constant in $file', () async {
-      final program = await CheckedLibraries.read([
-        'test/lowering/fixtures/$file',
-      ], Lowering.lower);
+      final program = await AnalysisSession(['test/lowering/fixtures/$file'])
+          .use((input) => Lowering().lower(input).program);
       final result = (program.functions.single.entry.end as Return).value;
       expect(result, anyOf(isA<SequenceConstant>(), isA<MapConstant>()));
       expect(result!.type, type);

@@ -14,7 +14,8 @@ void main() {
       ..writeAsStringSync(
         "Object? f() { dynamic value = <int>[1, 2]; return value.join(','); }",
       );
-    final program = await CheckedLibraries.read([file.path], Lowering.lower);
+    final program = await AnalysisSession([file.path])
+        .use((input) => Lowering().lower(input).program);
     final entry = program.functions.singleWhere((f) => f.target.name == 'f');
     expect(
       () => FixtureRunner(program, {}).run(entry, []),
