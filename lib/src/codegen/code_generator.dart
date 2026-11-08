@@ -10,6 +10,8 @@ abstract interface class CodeGenerator() {
 
   /// Generates the selected definitions and exposes the declared native exports.
   ///
+  /// Definitions must belong to [program] and include every directly called
+  /// body. [exports] marks a subset; it does not select or discover functions.
   /// Unsupported operations fail before an artifact is returned.
   ObjectModule generate(
     IrProgram program, {

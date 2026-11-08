@@ -24,6 +24,9 @@ enum Register() {
 final class Assembler() {
   final _bytes = BytesBuilder(copy: false);
 
+  /// The number of encoded bytes.
+  int get length => _bytes.length;
+
   /// Copies all 64 bits of [source].
   void move(Register destination, Register source) {
     if (destination != source) _binary(0x89, destination, source);
@@ -50,6 +53,56 @@ final class Assembler() {
   void negate(Register value) =>
       _bytes.add([0x48 | value.index >> 3, 0xf7, 0xd8 | value.index & 7]);
 
+  /// Adds a signed 32-bit immediate to a register, updating flags.
+  void addImmediate(Register destination, int value) {
+    RangeError.checkValueInInterval(value, -0x80000000, 0x7fffffff, 'value');
+    final bytes = ByteData(7)
+      ..setUint8(0, 0x48 | destination.index >> 3)
+      ..setUint8(1, 0x81)
+      ..setUint8(2, 0xc0 | destination.index & 7)
+      ..setInt32(3, value, .little);
+    _bytes.add(bytes.buffer.asUint8List());
+  }
+
+  /// Pushes a 64-bit register onto the stack.
+  void push(Register value) {
+    if (value.index >= 8) _bytes.addByte(0x41);
+    _bytes.addByte(0x50 | value.index & 7);
+  }
+
+  /// Pops a 64-bit register from the stack.
+  void pop(Register destination) {
+    if (destination.index >= 8) _bytes.addByte(0x41);
+    _bytes.addByte(0x58 | destination.index & 7);
+  }
+
+  /// Loads a word from RSP plus a signed 32-bit displacement.
+  void loadStack(Register destination, int offset) =>
+      _stack(0x8b, destination, offset);
+
+  /// Stores a word at RSP plus a signed 32-bit displacement.
+  void storeStack(Register source, int offset) => _stack(0x89, source, offset);
+
+  /// Calls a target relative to the end of this instruction.
+  void call(int displacement) {
+    _checkCall(displacement);
+    final bytes = ByteData(5)
+      ..setUint8(0, 0xe8)
+      ..setInt32(1, displacement, .little);
+    _bytes.add(bytes.buffer.asUint8List());
+  }
+
+  void _stack(int opcode, Register value, int offset) {
+    RangeError.checkValueInInterval(offset, -0x80000000, 0x7fffffff, 'offset');
+    final bytes = ByteData(8)
+      ..setUint8(0, 0x48 | (value.index >> 3) << 2)
+      ..setUint8(1, opcode)
+      ..setUint8(2, 0x84 | (value.index & 7) << 3)
+      ..setUint8(3, 0x24)
+      ..setInt32(4, offset, .little);
+    _bytes.add(bytes.buffer.asUint8List());
+  }
+
   /// Returns through the address at the top of the stack.
   void ret() => _bytes.addByte(0xc3);
 
@@ -63,3 +116,22 @@ final class Assembler() {
         0xc0 | (source.index & 7) << 3 | destination.index & 7,
       ]);
 }
+
+/// Patches x86-64 direct calls in a writable code buffer.
+extension X64CallPatch on ByteData {
+  /// Replaces a displacement measured from the end of the four-byte field.
+  void patchX64Call(int offset, int displacement) {
+    if (offset <= 0 || getUint8(offset - 1) != 0xe8) {
+      throw ArgumentError('Expected a CALL displacement field.');
+    }
+    _checkCall(displacement);
+    setInt32(offset, displacement, .little);
+  }
+}
+
+void _checkCall(int displacement) => RangeError.checkValueInInterval(
+  displacement,
+  -0x80000000,
+  0x7fffffff,
+  'displacement',
+);

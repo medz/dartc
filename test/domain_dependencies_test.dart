@@ -20,7 +20,7 @@ void main() {
       'formats': {'artifact', 'target'},
       'interop': {},
       'codegen': {'abi', 'arm64', 'x64', 'artifact', 'ir', 'interop', 'target'},
-      'linker': {'artifact', 'formats', 'target'},
+      'linker': {'artifact', 'formats', 'arm64', 'x64'},
       'compiler': {
         'abi',
         'ir',

@@ -23,6 +23,9 @@ final class Elf(@override final Target target) implements ImageFormat {
   @override
   ImageLayout layoutImage(ObjectModule module, {required String libraryName}) {
     _checkTarget(module);
+    if (module.imports.isNotEmpty || module.relocations.isNotEmpty) {
+      throw ArgumentError('Image layout requires resolved module references.');
+    }
     if (libraryName.isEmpty || libraryName.contains('\u0000')) {
       throw ArgumentError.value(libraryName, 'libraryName');
     }
@@ -47,23 +50,36 @@ final class Elf(@override final Target target) implements ImageFormat {
     String? soname,
     int textOffset,
   ) {
-    final symbols = soname == null
-        ? ([...object.symbols]
-            ..sort((a, b) => a.binding.index.compareTo(b.binding.index)))
-        : object.symbols.where((s) => s.exported).toList();
-    final strings = <int>[0], names = <int>[];
-    for (final symbol in symbols) {
-      names.add(strings.length);
-      strings.addAll([...utf8.encode(symbol.name), 0]);
-    }
     final shared = soname != null;
+    final order =
+        [
+          for (var i = 0; i < object.symbols.length; i++)
+            if (!shared || object.symbols[i].exported) i,
+        ]..sort(
+          (a, b) => object.symbols[a].binding.index.compareTo(
+            object.symbols[b].binding.index,
+          ),
+        );
+    final symbols = [for (final i in order) object.symbols[i]];
+    final indices = {
+      for (final (i, original) in order.indexed) original: i + 1,
+    };
+    final imports = shared ? const <String>[] : object.imports;
+    final count = symbols.length + imports.length;
+    final strings = <int>[0], names = <int>[];
+    for (final name in [...symbols.map((s) => s.name), ...imports]) {
+      names.add(strings.length);
+      strings.addAll([...utf8.encode(name), 0]);
+    }
     final sonameOffset = strings.length;
     if (soname != null) strings.addAll([...utf8.encode(soname), 0]);
     final sectionNames = shared
         ? '\u0000.text\u0000.dynsym\u0000.dynstr\u0000.shstrtab\u0000.hash\u0000.dynamic\u0000'
-        : '\u0000.text\u0000.symtab\u0000.strtab\u0000.shstrtab\u0000.note.GNU-stack\u0000';
-    final symbolOffset = (textOffset + object.code.length + 7) & ~7;
-    final symbolSize = (symbols.length + 1) * 24;
+        : '\u0000.text\u0000.symtab\u0000.strtab\u0000.shstrtab\u0000.note.GNU-stack\u0000.rela.text\u0000';
+    final relocations = shared ? const <Relocation>[] : object.relocations;
+    final relocationOffset = (textOffset + code.length + 7) & ~7;
+    final symbolOffset = relocationOffset + relocations.length * 24;
+    final symbolSize = (count + 1) * 24;
     final stringOffset = symbolOffset + symbolSize;
     final hashOffset = (stringOffset + strings.length + 7) & ~7;
     final bucketCount = symbols.length | 1;
@@ -74,7 +90,7 @@ final class Elf(@override final Target target) implements ImageFormat {
         ? dynamicOffset + dynamicSize
         : stringOffset + strings.length;
     final sectionOffset = (nameOffset + sectionNames.length + 7) & ~7;
-    final sectionCount = shared ? 7 : 6;
+    final sectionCount = shared || relocations.isNotEmpty ? 7 : 6;
     final data = ByteData(sectionOffset + sectionCount * 64);
     final bytes = data.buffer.asUint8List();
     bytes.setAll(0, [0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]);
@@ -100,6 +116,10 @@ final class Elf(@override final Target target) implements ImageFormat {
       final offset = symbolOffset + (i + 1) * 24;
       data.setUint32(offset, names[i], .little);
       data.setUint8(offset + 4, symbol.binding == .local ? 0x02 : 0x12);
+      data.setUint8(
+        offset + 5,
+        symbol.binding == .global && !symbol.exported ? 2 : 0,
+      );
       data.setUint16(offset + 6, 1, .little);
       data.setUint64(
         offset + 8,
@@ -107,6 +127,31 @@ final class Elf(@override final Target target) implements ImageFormat {
         .little,
       );
       data.setUint64(offset + 16, symbol.size, .little);
+    }
+    for (final (i, _) in imports.indexed) {
+      final offset = symbolOffset + (symbols.length + i + 1) * 24;
+      data.setUint32(offset, names[symbols.length + i], .little);
+      data.setUint8(offset + 4, 0x12);
+    }
+    for (final (i, relocation) in relocations.indexed) {
+      final index = relocation.symbol < object.symbols.length
+          ? indices[relocation.symbol]!
+          : symbols.length + 1 + relocation.symbol - object.symbols.length;
+      final offset = relocationOffset + i * 24;
+      final arm = relocation.kind == .arm64Call26;
+      data.setUint64(offset, relocation.offset, .little);
+      data.setUint64(
+        offset + 8,
+        index << 32 |
+            (arm
+                ? 283
+                : relocation.symbol < object.symbols.length &&
+                      object.symbols[relocation.symbol].binding == .local
+                ? 2
+                : 4),
+        .little,
+      );
+      data.setInt64(offset + 16, arm ? 0 : -4, .little);
     }
     void section(
       int index,
@@ -155,6 +200,20 @@ final class Elf(@override final Target target) implements ImageFormat {
       strings.length,
     );
     section(4, '.shstrtab', 3, 0, nameOffset, sectionNames.length);
+    if (relocations.isNotEmpty) {
+      section(
+        6,
+        '.rela.text',
+        4,
+        0,
+        relocationOffset,
+        relocations.length * 24,
+        link: 2,
+        info: 1,
+        alignment: 8,
+        entrySize: 24,
+      );
+    }
     if (shared) {
       section(
         5,

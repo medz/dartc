@@ -48,5 +48,20 @@ final class _X64Emitter(final Assembler assembler)
   }
 
   @override
+  void loadStack(Register destination, int offset) =>
+      assembler.loadStack(destination, offset);
+
+  @override
+  void storeStack(Register source, int offset) =>
+      assembler.storeStack(source, offset);
+
+  @override
+  int call() {
+    final offset = assembler.length + 1;
+    assembler.call(0);
+    return offset;
+  }
+
+  @override
   Uint8List takeBytes() => assembler.takeBytes();
 }

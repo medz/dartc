@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dartc/x64.dart';
 import 'package:test/test.dart';
 
@@ -37,4 +39,45 @@ void main() {
     ]);
     expect(assembler.takeBytes(), isEmpty);
   });
+  test(
+    'calls preserve signed displacement limits and stack register fields',
+    () {
+      final assembler = Assembler()
+        ..call(0)
+        ..call(0);
+      final data = ByteData.sublistView(assembler.takeBytes());
+      data.patchX64Call(1, -0x80000000);
+      data.patchX64Call(6, 0x7fffffff);
+      expect(data.getInt32(1, .little), -0x80000000);
+      expect(data.getInt32(6, .little), 0x7fffffff);
+      expect(() => data.patchX64Call(1, 0x80000000), throwsRangeError);
+      expect(() => data.patchX64Call(0, 0), throwsArgumentError);
+      expect(() => assembler.loadStack(.rax, 0x80000000), throwsRangeError);
+      assembler
+        ..push(.rbp)
+        ..loadStack(.r9, 8)
+        ..storeStack(.r10, 16)
+        ..pop(.rbp);
+      expect(assembler.takeBytes(), [
+        0x55,
+        0x4c,
+        0x8b,
+        0x8c,
+        0x24,
+        8,
+        0,
+        0,
+        0,
+        0x4c,
+        0x89,
+        0x94,
+        0x24,
+        16,
+        0,
+        0,
+        0,
+        0x5d,
+      ]);
+    },
+  );
 }

@@ -31,4 +31,56 @@ void main() {
     );
     expect(() => artifact.ObjectModule(target, [0], []), throwsArgumentError);
   });
+  test(
+    'validates symbol scope and relocation fields without losing imports',
+    () {
+      final code = [0, 0, 0, 0x94];
+      const symbol = artifact.Symbol('entry', 0, 4);
+      final imports = ['callee'];
+      final refs = [const artifact.Relocation(0, .arm64Call26, 1)];
+      final module = artifact.ObjectModule(
+        target,
+        code,
+        [symbol],
+        imports: imports,
+        relocations: refs,
+      );
+      imports.clear();
+      refs.clear();
+      expect(module.imports, ['callee']);
+      expect(module.relocations.single.symbol, 1);
+      for (final ref in [
+        const artifact.Relocation(-1, .arm64Call26, 0),
+        const artifact.Relocation(1, .arm64Call26, 0),
+        const artifact.Relocation(0, .x64Call32, 0),
+        const artifact.Relocation(0, .arm64Call26, -1),
+        const artifact.Relocation(0, .arm64Call26, 1),
+      ]) {
+        expect(
+          () =>
+              artifact.ObjectModule(target, code, [symbol], relocations: [ref]),
+          throwsArgumentError,
+        );
+      }
+      expect(
+        () => artifact.ObjectModule(target, code, [symbol], imports: ['entry']),
+        throwsArgumentError,
+      );
+      expect(
+        () => artifact.ObjectModule(target, code, [
+          const artifact.Symbol('local', 0, 4, binding: .local, exported: true),
+        ]),
+        throwsArgumentError,
+      );
+      expect(
+        () => artifact.ObjectModule(
+          target,
+          [0xc0, 3, 0x5f, 0xd6],
+          [symbol],
+          relocations: [const artifact.Relocation(0, .arm64Call26, 0)],
+        ),
+        throwsArgumentError,
+      );
+    },
+  );
 }

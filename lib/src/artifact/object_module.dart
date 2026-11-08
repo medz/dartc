@@ -3,21 +3,30 @@ import 'dart:typed_data';
 import 'package:dartc/target.dart';
 
 import 'symbol.dart';
+import 'relocation.dart';
 
 /// An immutable relocatable code section with scoped function definitions.
 ///
-/// Code must be position independent and contain no unresolved references.
-/// Data sections and relocations are not represented yet.
+/// Direct calls may refer to defined symbols or named imports. Data sections
+/// and references other than direct calls are not represented yet.
 final class ObjectModule(
   final Target target,
   List<int> code,
-  Iterable<Symbol> symbols,
-) {
+  Iterable<Symbol> symbols, {
+  Iterable<String> imports = const [],
+  Iterable<Relocation> relocations = const [],
+}) {
   /// An immutable copy of the machine code.
   final Uint8List code = Uint8List.fromList(code).asUnmodifiableView();
 
   /// Function ranges sorted by code offset.
   final List<Symbol> symbols = .unmodifiable(symbols);
+
+  /// Undefined global symbols, indexed after [symbols].
+  final List<String> imports = .unmodifiable(imports);
+
+  /// Instruction references that a linker must resolve.
+  final List<Relocation> relocations = .unmodifiable(relocations);
 
   this {
     if (code.any((byte) => byte < 0 || byte > 255)) {
@@ -41,6 +50,32 @@ final class ObjectModule(
         throw ArgumentError('Invalid function symbol: ${symbol.name}');
       }
       end = symbol.offset + symbol.size;
+    }
+    for (final name in this.imports) {
+      if (name.isEmpty || name.contains('\u0000') || !names.add(name)) {
+        throw ArgumentError('Invalid or duplicate import: $name');
+      }
+    }
+    final sites = this.relocations.toList()
+      ..sort((a, b) => a.offset.compareTo(b.offset));
+    var previousEnd = 0;
+    final data = ByteData.sublistView(this.code);
+    for (final reference in sites) {
+      final offset = reference.offset;
+      final arm = reference.kind == .arm64Call26;
+      if (arm != (target.architecture == .arm64) ||
+          offset < previousEnd ||
+          offset > code.length - 4 ||
+          reference.symbol < 0 ||
+          reference.symbol >= this.symbols.length + this.imports.length ||
+          (arm
+              ? offset % 4 != 0 || data.getUint32(offset, .little) != 0x94000000
+              : offset == 0 ||
+                    code[offset - 1] != 0xe8 ||
+                    data.getInt32(offset, .little) != 0)) {
+        throw ArgumentError('Invalid call relocation at $offset.');
+      }
+      previousEnd = offset + 4;
     }
   }
 }

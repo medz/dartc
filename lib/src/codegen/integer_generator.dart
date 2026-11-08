@@ -10,7 +10,7 @@ import 'code_generator.dart';
 import 'function_emitter.dart';
 import 'integer_function.dart';
 
-/// Generates independent integer functions with target-specific emitters.
+/// Generates integer modules with target-specific function emitters.
 base class IntegerCodeGenerator<R extends Object>(
   @override final Target target,
   FunctionEmitter<R> Function() createFunction,
@@ -27,6 +27,10 @@ base class IntegerCodeGenerator<R extends Object>(
     if (selected.isEmpty || !selected.containsAll(exports.keys)) {
       throw ArgumentError('Expected definitions containing every export.');
     }
+    final indices = {
+      for (final (i, declaration) in selected.indexed) declaration: i,
+    };
+    final relocations = <Relocation>[];
     final code = BytesBuilder(copy: false), symbols = <Symbol>[];
     for (final declaration in selected) {
       final function = program.implementationOf(declaration);
@@ -39,8 +43,21 @@ base class IntegerCodeGenerator<R extends Object>(
               declaration.parameterTypes.length) {
         throw ArgumentError('Native signature mismatch: ${declaration.name}');
       }
-      final bytes = IntegerFunction(_createFunction()).generate(function);
       code.add(Uint8List((-code.length) & 15));
+      final bytes = IntegerFunction(_createFunction())
+          .generate(function, (offset, callee) {
+            final index = indices[callee];
+            if (index == null) {
+              throw ArgumentError('Missing call definition: ${callee.name}');
+            }
+            relocations.add(
+              .new(
+                code.length + offset,
+                target.architecture == .arm64 ? .arm64Call26 : .x64Call32,
+                index,
+              ),
+            );
+          });
       symbols.add(
         .new(
           export == null
@@ -54,6 +71,6 @@ base class IntegerCodeGenerator<R extends Object>(
       );
       code.add(bytes);
     }
-    return .new(target, code.takeBytes(), symbols);
+    return .new(target, code.takeBytes(), symbols, relocations: relocations);
   }
 }

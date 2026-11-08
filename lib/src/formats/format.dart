@@ -15,6 +15,8 @@ abstract interface class ObjectFormat() {
 /// Encodes native objects and lays out their shared-library images.
 abstract interface class ImageFormat() implements ObjectFormat {
   /// Determines code placement for a shared library before address fixups.
+  ///
+  /// The returned layout retains [module] without replacing its contents.
   ImageLayout layoutImage(ObjectModule module, {required String libraryName});
 
   /// Encodes the patched code using the layout that produced its addresses.

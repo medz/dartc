@@ -4,6 +4,8 @@ import 'package:dartc/linker.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
+import 'fixtures/calls.dart';
+
 void main() {
   for (final os in OperatingSystem.values) {
     for (final arch in Architecture.values) {
@@ -23,6 +25,32 @@ void main() {
         final archive = ArchiveWriter(format);
         expect(archive.encode([module]), archive.encode([module]));
       });
+
+      test(
+        '$target rejects unresolved calls and consumes one format layout',
+        () {
+          final modules = callModules(target);
+          expect(
+            () => linker.link([modules.first], libraryName: 'missing'),
+            throwsArgumentError,
+          );
+          expect(
+            () => format.layoutImage(modules.first, libraryName: 'unlinked'),
+            throwsArgumentError,
+          );
+          final image = linker.link(modules, libraryName: 'calls');
+          expect(image.layout.module.imports, isEmpty);
+          expect(image.layout.module.relocations, isEmpty);
+          expect(image.code, isNot(image.layout.module.code));
+          final offset = image.layout.codeOffset;
+          expect(
+            format
+                .encodeImage(image)
+                .sublist(offset, offset + image.code.length),
+            image.code,
+          );
+        },
+      );
 
       test(
         '$target validates inputs and distinguishes locals from exports',

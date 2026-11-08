@@ -35,5 +35,20 @@ final class _Arm64Emitter(final Assembler assembler)
       assembler.subtract(destination, left, right);
 
   @override
+  void loadStack(Register destination, int offset) =>
+      assembler.load(destination, .sp, offset);
+
+  @override
+  void storeStack(Register source, int offset) =>
+      assembler.store(source, .sp, offset);
+
+  @override
+  int call() {
+    final offset = assembler.length;
+    assembler.call(0);
+    return offset;
+  }
+
+  @override
   Uint8List takeBytes() => assembler.takeBytes();
 }

@@ -16,7 +16,7 @@
 | finally | 同步 try 或 catch 正常结束、返回、抛错或跳向外部目标时，执行 finally。返回表达式先求值。finally 正常结束时继续原操作，否则由 finally 的返回、异常或跳转决定结果。见[finally 样本](../test/lowering/fixtures/finalizers.dart)。 |
 | await for | 支持语句和集合元素中的流迭代，复用 StreamIterator 调用及 Await。continue 保留当前订阅；break、return、异常和外层生成器取消经过异步清理。见[流循环对照](../test/lowering/await_for_test.dart)。 |
 | yield/yield* | 同步生成器的 `yield` 暂停直到下一次 moveNext，提前停止保留悬挂的 finally。`yield*` 检查 Iterable<T> 后按 iterator/moveNext/current 协议委托。异步生成器 IR 将订阅取消接到清理路径，委托流的错误事件转发给监听者。支持异步生成器源码转换、泛型及局部生成器。见[生成器行为](functions.md)。 |
-| assert | 支持断言语句。默认关闭；`Lowering.lower(input, enableAssertions: true)` 启用后按需求值条件与失败消息，抛出 AssertionError 并正常经过 catch/finally。关闭时不求值条件或消息。见[断言样本](../test/lowering/fixtures/assertions.dart)。 |
+| assert | 支持断言语句。默认关闭；`Lowering(enableAssertions: true).lower(input)` 启用后按需求值条件与失败消息，抛出 AssertionError 并正常经过 catch/finally。关闭时不求值条件或消息。见[断言样本](../test/lowering/fixtures/assertions.dart)。 |
 
 [循环样本](../test/lowering/fixtures/loops.dart)与[SDK 行为对照](../test/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/statements.md)。
 

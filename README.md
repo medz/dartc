@@ -28,7 +28,7 @@ dart run dartc math.dart -o build/math.o --header build/math.h
 
 Use `--kind static` or `--kind shared` for a library. Code generation, linking, static archives and Mach-O ad-hoc signing are implemented in Dart. Building libraries requires no external native toolchain. `--target` selects `macos-arm64`, `macos-x64`, `linux-arm64` or `linux-x64` independently of the host. `--sdk <root>` selects an installed SDK explicitly.
 
-Native bodies currently support integer constants, addition, subtraction and returns, with register-passed `Int64` arguments and results. Unsupported operations and register pressure are reported as errors. General Dart executables, managed objects, exceptions and a target runtime remain unimplemented in this checkout.
+Native bodies currently support integer constants, addition, subtraction, direct calls and returns, with register-passed `Int64` arguments and results. Functions can call helpers in other Dart libraries; live values are saved across calls and spilled to stack slots when needed. Unsupported operations and signatures are reported as errors. General Dart executables, managed objects, exceptions and a target runtime remain unimplemented in this checkout.
 
 ## Development
 

@@ -1,6 +1,7 @@
 import 'package:test/test.dart';
 
 import 'fixtures/symbols.dart';
+import 'fixtures/calls_ffi.dart';
 import 'fixtures/values_ffi.dart';
 
 void main() {
@@ -8,6 +9,17 @@ void main() {
   tearDownAll(values.close);
   final symbols = Symbols();
   tearDownAll(symbols.close);
+
+  final calls = LinkedCalls();
+  tearDownAll(calls.close);
+  test(
+    'resolves imports and module-local references without exporting helpers',
+    () {
+      expect(calls.forward(), 42);
+      expect(calls.hasSymbol('helper'), isFalse);
+      expect(calls.hasSymbol('local'), isFalse);
+    },
+  );
 
   test('functions from separate objects are callable', () {
     expect(values.first(), 40);

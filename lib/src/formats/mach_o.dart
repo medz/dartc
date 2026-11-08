@@ -19,6 +19,9 @@ final class MachO(@override final Target target) implements ImageFormat {
   @override
   ImageLayout layoutImage(ObjectModule module, {required String libraryName}) {
     _checkTarget(module);
+    if (module.imports.isNotEmpty || module.relocations.isNotEmpty) {
+      throw ArgumentError('Image layout requires resolved module references.');
+    }
     if (libraryName.isEmpty || libraryName.contains('\u0000')) {
       throw ArgumentError.value(libraryName, 'libraryName');
     }
@@ -42,17 +45,28 @@ final class MachO(@override final Target target) implements ImageFormat {
   @override
   Uint8List encodeObject(ObjectModule object) {
     _checkTarget(object);
-    final symbols = [...object.symbols]
-      ..sort((a, b) => a.binding.index.compareTo(b.binding.index));
+    final order = List.generate(object.symbols.length, (i) => i)
+      ..sort(
+        (a, b) => object.symbols[a].binding.index.compareTo(
+          object.symbols[b].binding.index,
+        ),
+      );
+    final symbols = [for (final i in order) object.symbols[i]];
+    final indices = {for (final (i, original) in order.indexed) original: i};
     final localCount = symbols.where((s) => s.binding == .local).length;
+    final count = symbols.length + object.imports.length;
+    if (count > 0x1000000) {
+      throw UnsupportedError('Mach-O relocation symbol index exceeds 24 bits.');
+    }
     final strings = <int>[0], names = <int>[];
-    for (final symbol in symbols) {
+    for (final name in [...symbols.map((s) => s.name), ...object.imports]) {
       names.add(strings.length);
-      strings.addAll([...utf8.encode(symbol.name), 0]);
+      strings.addAll([...utf8.encode(name), 0]);
     }
     const commandSize = 152 + 24 + 24 + 80, textOffset = 320;
-    final symbolOffset = (textOffset + object.code.length + 7) & ~7;
-    final stringOffset = symbolOffset + symbols.length * 16;
+    final relocationOffset = (textOffset + object.code.length + 7) & ~7;
+    final symbolOffset = relocationOffset + object.relocations.length * 8;
+    final stringOffset = symbolOffset + count * 16;
     final data = ByteData(stringOffset + strings.length);
     final bytes = data.buffer.asUint8List();
     data.setUint32(0, 0xfeedfacf, .little);
@@ -80,6 +94,12 @@ final class MachO(@override final Target target) implements ImageFormat {
     data.setUint64(144, object.code.length, .little);
     data.setUint32(152, textOffset, .little);
     data.setUint32(156, 4, .little);
+    data.setUint32(
+      160,
+      object.relocations.isEmpty ? 0 : relocationOffset,
+      .little,
+    );
+    data.setUint32(164, object.relocations.length, .little);
     data.setUint32(168, 0x80000400, .little);
     // LC_BUILD_VERSION identifies macOS 11 as the deployment floor.
     data.setUint32(184, 0x32, .little);
@@ -89,7 +109,7 @@ final class MachO(@override final Target target) implements ImageFormat {
     data.setUint32(208, 2, .little);
     data.setUint32(212, 24, .little);
     data.setUint32(216, symbolOffset, .little);
-    data.setUint32(220, symbols.length, .little);
+    data.setUint32(220, count, .little);
     data.setUint32(224, stringOffset, .little);
     data.setUint32(228, strings.length, .little);
     data.setUint32(232, 0xb, .little);
@@ -98,14 +118,32 @@ final class MachO(@override final Target target) implements ImageFormat {
     data.setUint32(248, localCount, .little);
     data.setUint32(252, symbols.length - localCount, .little);
     data.setUint32(256, symbols.length, .little);
+    data.setUint32(260, object.imports.length, .little);
     bytes.setAll(textOffset, object.code);
     bytes.setAll(stringOffset, strings);
     for (final (i, symbol) in symbols.indexed) {
       final offset = symbolOffset + i * 16;
       data.setUint32(offset, names[i], .little);
-      data.setUint8(offset + 4, symbol.binding == .local ? 0xe : 0xf);
+      data.setUint8(
+        offset + 4,
+        symbol.binding == .local ? 0xe : (symbol.exported ? 0xf : 0x1f),
+      );
       data.setUint8(offset + 5, 1);
       data.setUint64(offset + 8, symbol.offset, .little);
+    }
+    for (final (i, _) in object.imports.indexed) {
+      final offset = symbolOffset + (symbols.length + i) * 16;
+      data.setUint32(offset, names[symbols.length + i], .little);
+      data.setUint8(offset + 4, 1);
+    }
+    final relocations = object.relocations.toList()
+      ..sort((a, b) => b.offset.compareTo(a.offset));
+    for (final (i, relocation) in relocations.indexed) {
+      final index = relocation.symbol < object.symbols.length
+          ? indices[relocation.symbol]!
+          : symbols.length + relocation.symbol - object.symbols.length;
+      data.setUint32(relocationOffset + i * 8, relocation.offset, .little);
+      data.setUint32(relocationOffset + i * 8 + 4, index | 0x2d000000, .little);
     }
     return bytes;
   }
