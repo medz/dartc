@@ -5,11 +5,11 @@ import 'dart:ffi';
 
 import 'package:test/test.dart';
 
-import 'fixtures/io_ffi.dart';
+import 'fixtures/descriptor_write_ffi.dart';
 
 void main() {
   test('writes actual bytes and reports descriptor errors', () {
-    final io = IoLibrary('io');
+    final io = IoLibrary('descriptor_write');
     addTearDown(io.close);
     final descriptors = io.state.cast<Int32>();
     expect(io.pipe(descriptors), 0);
@@ -31,7 +31,7 @@ void main() {
   });
 
   test('retries EINTR without repeating partial or failed writes', () {
-    final io = IoLibrary('io_scripted');
+    final io = IoLibrary('descriptor_write_scripted');
     addTearDown(io.close);
     for (final (result, error, interruptions, expected) in [
       (8, 0, 0, 8),

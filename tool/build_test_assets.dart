@@ -24,7 +24,7 @@ import '../test/linker/fixtures/data.dart';
 import '../test/linker/fixtures/archive.dart';
 import '../test/linker/fixtures/shared_libraries.dart';
 import '../test/linker/fixtures/addresses.dart';
-import '../test/runtime/fixtures/assets.dart';
+import '../test/compiler/fixtures/descriptor_write_assets.dart';
 import '../test/support/native_assets.dart';
 import 'build_compiler_test_assets.dart' as compiler_assets;
 
@@ -46,7 +46,7 @@ Future<void> main(List<String> args) async {
       .linux => ElfLinker(target),
     };
     final assets = NativeAssets(target);
-    for (final domain in ['abi', 'compiler', 'codegen', 'linker', 'runtime']) {
+    for (final domain in ['abi', 'compiler', 'codegen', 'linker']) {
       await Directory.fromUri(assets.directory.uri.resolve('$domain/'))
           .create(recursive: true);
     }
@@ -69,15 +69,16 @@ Future<void> main(List<String> args) async {
       await result.write(assets.file('compiler/entry_$fixture'));
     }
 
-    final io = await Compiler(target)
-        .compile(['test/runtime/fixtures/io.dart'], nativeSymbols: ioSymbols);
-    final scriptedIo = await Compiler(target).compile([
-      'test/runtime/fixtures/scripted_io.dart',
+    final io = await Compiler(target).compile([
+      'test/compiler/fixtures/descriptor_write.dart',
     ], nativeSymbols: ioSymbols);
-    await io.write(assets.file('runtime/io.o'));
-    await scriptedIo.write(assets.file('runtime/scripted_io.o'));
+    final scriptedIo = await Compiler(target).compile([
+      'test/compiler/fixtures/scripted_write.dart',
+    ], nativeSymbols: ioSymbols);
+    await io.write(assets.file('compiler/descriptor_write.o'));
+    await scriptedIo.write(assets.file('compiler/scripted_write.o'));
     final ioModule = format.decodeObject(io.bytes), storage = ioStorage(target);
-    final ioLibrary = assets.library('runtime/io');
+    final ioLibrary = assets.library('compiler/descriptor_write');
     await ioLibrary.writeAsBytes(
       linker.linkSharedLibrary([
         .object(ioModule),
@@ -87,10 +88,8 @@ Future<void> main(List<String> args) async {
               ? '/usr/lib/libSystem.B.dylib'
               : 'libc.so.6',
           symbols: {
-            target.nativeSymbol('dartc_posix_write'): target.nativeSymbol(
-              'write',
-            ),
-            target.nativeSymbol('dartc_posix_errno'): target.nativeSymbol(
+            target.nativeSymbol('test_write'): target.nativeSymbol('write'),
+            target.nativeSymbol('test_errno'): target.nativeSymbol(
               target.operatingSystem == .macos ? '__error' : '__errno_location',
             ),
           },
@@ -101,7 +100,7 @@ Future<void> main(List<String> args) async {
       ioModule,
       format.decodeObject(scriptedIo.bytes),
       storage,
-    ], assets.library('runtime/io_scripted'));
+    ], assets.library('compiler/descriptor_write_scripted'));
 
     for (final fixture in [
       'arithmetic',

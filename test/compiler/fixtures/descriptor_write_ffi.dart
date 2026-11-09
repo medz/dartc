@@ -5,7 +5,7 @@ import 'package:dartc/target.dart';
 import '../../support/native_assets.dart';
 
 final class IoLibrary(String name) {
-  final _library = NativeAssets(Target.host()).open('runtime/$name');
+  final _library = NativeAssets(Target.host()).open('compiler/$name');
   final _system = DynamicLibrary.process();
 
   late final bytes = _library.lookup<Uint8>('io_bytes');

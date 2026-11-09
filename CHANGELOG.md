@@ -23,7 +23,7 @@ The development checkout uses analyzer 14.7.0 to resolve Dart source, produces v
 - Manage checked input with `AnalysisSession` from `package:dartc/frontend.dart`. `Lowering().lower(input)` returns `program`, `entryPoint`, `exports` and `imports`; the entry and binding maps use the program's declaration identities, and `imports` retains unresolved `NativeReference` values. Analysis can include the non-SDK dependency closure, checking unused declarations and preventing source suppressions or editor settings from hiding language errors.
 - Bundle the original Dart SDK 3.13.7 standard library sources and license at a fixed official commit. The standalone compiler works without an installed SDK, source cache or network access; declared project dependencies remain separate. `const DartSdk().files` exposes the verified source text. The development-only `SdkResolver`, `DartSdk.at/current`, `--sdk` and SDK selection parameters have been removed.
 - Compile non-captured scalar locals initialized after declaration, preserving integer, boolean, double and pointer values across branches, loops and calls. Native generation rejects uninitialized reads, escaping or aliased cells, and unsupported late storage.
-- Add ordinary Dart target support for descriptor writes on macOS and Linux glibc. `runtime/platform/io.dart` uses explicitly bound FFI calls, retries `EINTR`, preserves short-write counts and returns negative native errors. The complete Dart I/O runtime remains unimplemented.
+- Remove the development-only `runtime/platform/io.dart` source API.
 
 Language support and known analyzer differences are tracked in [specs](specs/README.md). IR behavior checks do not establish native execution support or full Dart compatibility.
 

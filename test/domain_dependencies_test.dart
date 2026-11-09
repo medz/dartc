@@ -5,44 +5,6 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('target support sources do not import host toolchain libraries', () {
-    final root = Directory('runtime').absolute.uri;
-    final edges = <Uri, Set<Uri>>{};
-    for (final file in Directory.fromUri(
-      root,
-    ).listSync(recursive: true).whereType<File>()) {
-      if (!file.path.endsWith('.dart')) continue;
-      final links = edges[file.uri] = {};
-      final unit = parseString(
-        content: file.readAsStringSync(),
-        path: file.path,
-      ).unit;
-      for (final directive in unit.directives) {
-        expect(
-          directive is PartDirective || directive is PartOfDirective,
-          isFalse,
-        );
-        if (directive is NamespaceDirective) {
-          for (final literal in [
-            directive.uri,
-            for (final c in directive.configurations) c.uri,
-          ]) {
-            final uri = Uri.parse(literal.stringValue!);
-            if (uri.scheme == 'dart') continue;
-            final target = file.uri.resolveUri(uri);
-            expect(
-              target.toString().startsWith(root.toString()),
-              isTrue,
-              reason: file.path,
-            );
-            links.add(target);
-          }
-        }
-      }
-    }
-    _checkCycles(edges);
-  });
-
   test('domains use public entries and have acyclic dependencies', () {
     const dependencies = <String, Set<String>>{
       'ir': {'interop'},

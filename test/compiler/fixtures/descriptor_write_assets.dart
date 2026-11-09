@@ -6,11 +6,11 @@ import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 
 const ioSymbols = {
-  'dartc:posix': {
-    'dartc_posix_write': 'dartc_posix_write',
-    'dartc_posix_errno': 'dartc_posix_errno',
+  'test:io': {
+    'write': 'test_write',
+    'errno': 'test_errno',
+    'state': 'io_state_address',
   },
-  'io:test': {'state': 'io_state_address'},
 };
 
 ObjectModule ioStorage(Target target) {

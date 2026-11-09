@@ -1,7 +1,9 @@
-@DefaultAsset('dartc:posix')
+@DefaultAsset('test:io')
 library;
 
 import 'dart:ffi';
+
+import 'package:dartc/interop.dart';
 
 /// Writes up to [count] bytes, returning the byte count or a negative errno.
 ///
@@ -10,6 +12,7 @@ import 'dart:ffi';
 /// readable for [count] bytes until the operation returns and owns [descriptor].
 /// Blocking and signal behavior, including SIGPIPE, follow the descriptor's
 /// operating-system contract. This operation does not flush durable storage.
+@Export<Int64 Function(Int64, Pointer<Uint8>, Int64)>()
 int writeDescriptor(int descriptor, Pointer<Uint8> bytes, int count) {
   if (descriptor < 0 || descriptor > 0x7fffffff) return -_badDescriptor;
   if (count < 0) return -_invalidArgument;
@@ -24,10 +27,8 @@ int writeDescriptor(int descriptor, Pointer<Uint8> bytes, int count) {
 const _interrupted = 4, _badDescriptor = 9, _invalidArgument = 22;
 
 // macOS and Linux LP64 use 64-bit ssize_t/size_t and a 32-bit descriptor.
-@Native<Int64 Function(Int32, Pointer<Uint8>, Uint64)>(
-  symbol: 'dartc_posix_write',
-)
+@Native<Int64 Function(Int32, Pointer<Uint8>, Uint64)>(symbol: 'write')
 external int _write(int descriptor, Pointer<Uint8> bytes, int count);
 
-@Native<Pointer<Int32> Function()>(symbol: 'dartc_posix_errno', isLeaf: true)
+@Native<Pointer<Int32> Function()>(symbol: 'errno', isLeaf: true)
 external Pointer<Int32> _errno();
