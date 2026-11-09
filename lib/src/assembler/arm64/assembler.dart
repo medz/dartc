@@ -297,6 +297,16 @@ final class Assembler() {
     return fixup;
   }
 
+  /// Loads eight bytes at [base] plus an unresolved address's low 12 bits.
+  ///
+  /// The resolved address must be eight-byte aligned.
+  Fixup loadPageOffset(Register destination, Register base) {
+    _general(destination);
+    final fixup = Fixup(length, .arm64LoadPageOffset12);
+    _word(0xf9400000 | base.index << 5 | destination.index);
+    return fixup;
+  }
+
   int _size(int bytes) => switch (bytes) {
     1 => 0,
     2 => 1,

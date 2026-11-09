@@ -21,10 +21,12 @@ enum FixupEncoding(
   arm64Zero19(.arm64, 0xb4000000, 0xff000000, 19, 5),
   arm64Page21(.arm64, 0x90000000, 0x9f000000, 21, 0),
   arm64PageOffset12(.arm64, 0x91000000, 0xffc00000, 12, 10),
+  arm64LoadPageOffset12(.arm64, 0xf9400000, 0xffc00000, 12, 10),
   x64Call32(.x64, 0xe8, 0xff, 32, 0),
   x64Jump32(.x64, 0xe9, 0xff, 32, 0),
   x64Conditional32(.x64, 0x800f, 0xf0ff, 32, 0),
-  x64Address32(.x64, 0x058d48, 0xc7fffb, 32, 0);
+  x64Address32(.x64, 0x058d48, 0xc7fffb, 32, 0),
+  x64LoadAddress32(.x64, 0x058b48, 0xc7fffb, 32, 0);
 
   int get _fieldMask =>
       this == .arm64Page21 ? 0x60ffffe0 : ((1 << _bits) - 1) << _shift;
@@ -46,7 +48,7 @@ enum FixupEncoding(
       }
       opcode = code.getUint32(offset, .little);
     } else {
-      final prefix = this == .x64Address32
+      final prefix = this == .x64Address32 || this == .x64LoadAddress32
           ? 3
           : this == .x64Conditional32
           ? 2
@@ -86,6 +88,11 @@ enum FixupEncoding(
     final int field;
     if (this == .arm64PageOffset12) {
       field = (destination & 0xfff) << 10;
+    } else if (this == .arm64LoadPageOffset12) {
+      if (destination % 8 != 0) {
+        throw ArgumentError('Expected an eight-byte aligned load address.');
+      }
+      field = ((destination & 0xfff) >> 3) << 10;
     } else if (this == .arm64Page21) {
       final pages = (destination >> 12) - (placeAddress >> 12);
       RangeError.checkValueInInterval(pages, -0x100000, 0xfffff, 'pages');

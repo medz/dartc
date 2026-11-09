@@ -8,5 +8,11 @@ final class const Relocation(
   final int section,
   final int offset,
   final FixupEncoding encoding,
-  final int symbol,
-);
+  final int symbol, {
+
+  /// Whether the instruction addresses a pointer slot for [symbol].
+  ///
+  /// The slot holds the symbol's address after loading. Supported instructions
+  /// are AArch64 ADRP/LDR and x86-64 RIP-relative MOV, with no symbol addend.
+  final bool indirect = false,
+});

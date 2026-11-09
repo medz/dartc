@@ -76,7 +76,13 @@ final class ObjectModule(
           (!call &&
               encoding != .arm64Page21 &&
               encoding != .arm64PageOffset12 &&
-              encoding != .x64Address32) ||
+              encoding != .arm64LoadPageOffset12 &&
+              encoding != .x64Address32 &&
+              encoding != .x64LoadAddress32) ||
+          reference.indirect &&
+              encoding != .arm64Page21 &&
+              encoding != .arm64LoadPageOffset12 &&
+              encoding != .x64LoadAddress32 ||
           section.kind != .code ||
           offset < ends[reference.section] ||
           offset > section.size - 4 ||

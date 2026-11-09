@@ -137,6 +137,7 @@ void main() {
         const native.Relocation(0, 0, .arm64Call26, -1),
         const native.Relocation(0, 0, .arm64Call26, 1),
         const native.Relocation(0, 0, .arm64Branch26, 0),
+        const native.Relocation(0, 0, .arm64Call26, 0, indirect: true),
       ]) {
         expect(
           () => native.ObjectModule(

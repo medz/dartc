@@ -47,10 +47,10 @@ Map<String, List<LinkInput>> sharedLibraries(Target target) {
 SharedLibraryInput dependency(
   Target target,
   String name,
-  Map<String, String> functions,
+  Map<String, String> symbols,
 ) => SharedLibraryInput(
   target.operatingSystem == .macos
       ? '@loader_path/$name.dylib'
       : '\$ORIGIN/$name.so',
-  functions: functions,
+  symbols: symbols,
 );

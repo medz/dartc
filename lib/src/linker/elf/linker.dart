@@ -24,6 +24,7 @@ final class ElfLinker(@override final Target target) implements Linker {
     required String name,
   }) {
     final unit = LinkUnit(Elf(target), inputs, name), sections = unit.sections;
+    final relocationCount = unit.bindings.length + unit.rebases.length;
     final symbols = unit.symbols.where((symbol) => symbol.exported).toList();
     final hasConstants = sections.any((s) => s.kind == .readOnlyData);
     final writable = sections.any(
@@ -75,10 +76,10 @@ final class ElfLinker(@override final Target target) implements Linker {
     final bucketCount = names.length | 1;
     final hashSize = (2 + bucketCount + names.length + 1) * 4;
     final relocationOffset = (hashOffset + hashSize + 7) & ~7;
-    final relocationSize = unit.bindings.length * 24;
+    final relocationSize = relocationCount * 24;
     final dynamicOffset = relocationOffset + relocationSize;
     final dynamicSize =
-        (7 + dependencies.length + (unit.bindings.isEmpty ? 0 : 3)) * 16;
+        (7 + dependencies.length + (relocationCount == 0 ? 0 : 3)) * 16;
     final readOnlyEnd = dynamicOffset + dynamicSize;
     final dataStart = (readOnlyEnd + page - 1) & -page;
     cursor = dataStart;
@@ -94,7 +95,7 @@ final class ElfLinker(@override final Target target) implements Linker {
       '.shstrtab',
       '.hash',
       '.dynamic',
-      if (unit.bindings.isNotEmpty) '.rela.dyn',
+      if (relocationCount != 0) '.rela.dyn',
     ];
     final nameBytes = <int>[], nameOffsets = <int>[];
     for (final name in sectionNames) {
@@ -135,7 +136,7 @@ final class ElfLinker(@override final Target target) implements Linker {
     for (final (i, binding) in unit.bindings.indexed) {
       final index = symbols.length + i + 1;
       data.setUint32(symbolOffset + index * 24, names[index - 1], .little);
-      data.setUint8(symbolOffset + index * 24 + 4, 0x12);
+      data.setUint8(symbolOffset + index * 24 + 4, 0x10 | binding.kind.elfType);
       final slot = unit.symbols[binding.slot];
       data.setUint64(
         relocationOffset + i * 24,
@@ -145,6 +146,18 @@ final class ElfLinker(@override final Target target) implements Linker {
       data.setUint64(
         relocationOffset + i * 24 + 8,
         (index << 32) | (target.architecture == .arm64 ? 1025 : 6),
+        .little,
+      );
+    }
+    for (final (i, rebase) in unit.rebases.indexed) {
+      final at = relocationOffset + (unit.bindings.length + i) * 24;
+      final slot = unit.symbols[rebase.slot],
+          symbol = unit.symbols[rebase.target];
+      data.setUint64(at, addresses[slot.section] + slot.offset, .little);
+      data.setUint64(at + 8, target.architecture == .arm64 ? 1027 : 8, .little);
+      data.setInt64(
+        at + 16,
+        addresses[symbol.section] + symbol.offset,
         .little,
       );
     }
@@ -219,7 +232,7 @@ final class ElfLinker(@override final Target target) implements Linker {
       alignment: 8,
       entrySize: 16,
     );
-    if (unit.bindings.isNotEmpty) {
+    if (relocationCount != 0) {
       section(
         dynamicIndex + 1,
         4,
@@ -300,7 +313,7 @@ final class ElfLinker(@override final Target target) implements Linker {
       (11, 24),
       (14, sonameOffset),
       for (final dependency in dependencies) (1, dependency),
-      if (unit.bindings.isNotEmpty) ...[
+      if (relocationCount != 0) ...[
         (7, relocationOffset),
         (8, relocationSize),
         (9, 24),

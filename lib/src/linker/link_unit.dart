@@ -4,7 +4,7 @@ import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 
 import 'input.dart';
-import 'call_stubs.dart';
+import 'linkage_table.dart';
 
 /// Coalesced storage with source bytes copied only into the final image.
 final class SectionGroup(
@@ -24,7 +24,8 @@ final class LinkUnit(
   final sections = <SectionGroup>[];
   final symbols = <Symbol>[];
   final libraries = <String>[];
-  final bindings = <({int library, String name, int slot})>[];
+  final bindings = <({int library, String name, int slot, SymbolKind kind})>[];
+  final rebases = <({int slot, int target})>[];
   final _references = <Relocation>[];
 
   this {
@@ -100,13 +101,13 @@ final class LinkUnit(
           } else {
             archives.add(archive);
           }
-        case SharedLibraryInput(:final name, :final functions):
+        case SharedLibraryInput(:final name, :final symbols):
           var library = libraries.indexOf(name);
           if (library < 0) {
             library = libraries.length;
             libraries.add(name);
           }
-          for (final entry in functions.entries) {
+          for (final entry in symbols.entries) {
             final binding = (library, entry.value);
             if (imports[entry.key] case final previous?
                 when previous != binding) {
@@ -117,29 +118,56 @@ final class LinkUnit(
       }
     }
     if (target.operatingSystem == .macos) search(archives);
-    final dynamicNames = missing.where(imports.containsKey).toList();
-    if (dynamicNames.isNotEmpty) {
-      for (final object in objects) {
-        for (final reference in object.relocations) {
-          if (reference.symbol < object.symbols.length) continue;
-          final name = object.imports[reference.symbol - object.symbols.length];
-          if (missing.contains(name) &&
-              imports.containsKey(name) &&
-              reference.encoding != .arm64Call26 &&
-              reference.encoding != .x64Call32) {
-            throw UnsupportedError(
-              'Shared-library imports require direct calls: $name',
-            );
-          }
-        }
-      }
-      include(callStubs(target, dynamicNames));
+    final dynamicSlots = <String, int>{};
+    for (final name in missing) {
+      if (imports.containsKey(name)) dynamicSlots[name] = dynamicSlots.length;
     }
+    missing.removeAll(dynamicSlots.keys);
     if (missing.isNotEmpty) {
       throw ArgumentError('Undefined symbol: ${missing.first}');
     }
     if (objects.isEmpty) {
       throw ArgumentError('Expected at least one included object.');
+    }
+    (int, int)? resolve(int owner, int index) {
+      final object = objects[owner];
+      return index < object.symbols.length
+          ? (owner, index)
+          : globals[object.imports[index - object.symbols.length]];
+    }
+
+    final staticSlots = <(int, int), int>{}, calls = <String>{};
+    for (final (i, object) in objects.indexed) {
+      for (final reference in object.relocations) {
+        final resolved = resolve(i, reference.symbol);
+        if (reference.indirect) {
+          if (resolved != null) {
+            staticSlots.putIfAbsent(
+              resolved,
+              () => dynamicSlots.length + staticSlots.length,
+            );
+          }
+        } else if (resolved == null) {
+          final name = object.imports[reference.symbol - object.symbols.length];
+          if (reference.encoding != .arm64Call26 &&
+              reference.encoding != .x64Call32) {
+            throw UnsupportedError(
+              'Shared-library addresses require indirect references: $name',
+            );
+          }
+          calls.add(name);
+        }
+      }
+    }
+    final table = objects.length,
+        slotCount = dynamicSlots.length + staticSlots.length;
+    if (slotCount != 0) {
+      include(
+        linkageTable(target, slotCount, {
+          for (final entry in dynamicSlots.entries)
+            if (calls.contains(entry.key)) entry.key: entry.value,
+        }),
+      );
     }
     final bases = [
       for (final object in objects)
@@ -182,20 +210,32 @@ final class LinkUnit(
         );
       }
     }
-    for (final (i, name) in dynamicNames.indexed) {
+    for (final MapEntry(key: name, value: slot) in dynamicSlots.entries) {
       final (library, symbol) = imports[name]!;
       bindings.add((
         library: library,
         name: symbol,
-        slot: symbolBases.last + i * 2 + 1,
+        slot: symbolBases[table] + slot,
+        kind: calls.contains(name) ? .function : .unknown,
+      ));
+    }
+    for (final MapEntry(key: (owner, index), value: slot)
+        in staticSlots.entries) {
+      rebases.add((
+        slot: symbolBases[table] + slot,
+        target: symbolBases[owner] + index,
       ));
     }
     for (final (i, object) in objects.indexed) {
       for (final reference in object.relocations) {
-        final (owner, index) = reference.symbol < object.symbols.length
-            ? (i, reference.symbol)
-            : globals[object.imports[reference.symbol -
-                  object.symbols.length]]!;
+        final resolved = resolve(i, reference.symbol);
+        final dynamicSlot = reference.symbol < object.symbols.length
+            ? null
+            : dynamicSlots[object.imports[reference.symbol -
+                  object.symbols.length]];
+        final (owner, index) = reference.indirect
+            ? (table, dynamicSlot ?? staticSlots[resolved]!)
+            : resolved!;
         final definition = objects[owner].symbols[index];
         final storage = objects[owner].sections[definition.section];
         if ((reference.encoding == .arm64Call26 ||
@@ -258,6 +298,14 @@ final class LinkUnit(
         fileOffsets[reference.section] + reference.offset,
         placeAddress: addresses[reference.section] + reference.offset,
         targetAddress: addresses[symbol.section] + symbol.offset,
+      );
+    }
+    for (final rebase in rebases) {
+      final slot = symbols[rebase.slot], target = symbols[rebase.target];
+      image.setUint64(
+        fileOffsets[slot.section] + slot.offset,
+        addresses[target.section] + target.offset,
+        .little,
       );
     }
   }

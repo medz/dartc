@@ -12,18 +12,18 @@ import 'fixtures/data.dart';
 void main() {
   test('shared dependencies own their bindings and reject invalid names', () {
     final names = {'local': 'native'};
-    final input = SharedLibraryInput('provider', functions: names);
+    final input = SharedLibraryInput('provider', symbols: names);
     names.clear();
-    expect(input.functions, {'local': 'native'});
-    expect(() => input.functions.clear(), throwsUnsupportedError);
+    expect(input.symbols, {'local': 'native'});
+    expect(() => input.symbols.clear(), throwsUnsupportedError);
     for (final invalid in ['', 'nul\u0000suffix']) {
       expect(() => LinkInput.sharedLibrary(invalid), throwsArgumentError);
       expect(
-        () => LinkInput.sharedLibrary('valid', functions: {invalid: 'valid'}),
+        () => LinkInput.sharedLibrary('valid', symbols: {invalid: 'valid'}),
         throwsArgumentError,
       );
       expect(
-        () => LinkInput.sharedLibrary('valid', functions: {'valid': invalid}),
+        () => LinkInput.sharedLibrary('valid', symbols: {'valid': invalid}),
         throwsArgumentError,
       );
     }
@@ -50,13 +50,13 @@ void main() {
       }
 
       test(
-        '$target rejects conflicting bindings and dynamic address references',
+        '$target rejects conflicting bindings and direct dynamic address references',
         () {
           expect(
             () => linker.linkSharedLibrary([
               .object(modules.first),
-              .sharedLibrary('first', functions: {name: 'native'}),
-              .sharedLibrary('second', functions: {name: 'native'}),
+              .sharedLibrary('first', symbols: {name: 'native'}),
+              .sharedLibrary('second', symbols: {name: 'native'}),
             ], name: 'consumer'),
             throwsArgumentError,
           );
@@ -66,7 +66,7 @@ void main() {
               .object(data),
               .sharedLibrary(
                 'provider',
-                functions: {for (final name in data.imports) name: name},
+                symbols: {for (final name in data.imports) name: name},
               ),
             ], name: 'consumer'),
             throwsUnsupportedError,
@@ -74,7 +74,7 @@ void main() {
           expect(
             () => linker.linkSharedLibrary([
               .object(modules.first),
-              .sharedLibrary('provider', functions: {'other': 'native'}),
+              .sharedLibrary('provider', symbols: {'other': 'native'}),
             ], name: 'consumer'),
             throwsArgumentError,
           );
@@ -92,8 +92,8 @@ void main() {
           expect(
             linker.linkSharedLibrary([
               ...inputs,
-              .sharedLibrary('provider', functions: {name: 'not_used'}),
-              .sharedLibrary('provider', functions: {name: 'not_used'}),
+              .sharedLibrary('provider', symbols: {name: 'not_used'}),
+              .sharedLibrary('provider', symbols: {name: 'not_used'}),
             ], name: 'consumer'),
             first,
           );
@@ -115,7 +115,7 @@ void main() {
             for (var i = 1; i <= 16; i++)
               .sharedLibrary(
                 'provider$i',
-                functions: {if (i == 16) name: 'actual'},
+                symbols: {if (i == 16) name: 'actual'},
               ),
           ];
           final bytes = linker.linkSharedLibrary(inputs, name: 'consumer');

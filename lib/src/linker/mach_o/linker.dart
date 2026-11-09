@@ -44,7 +44,7 @@ final class MachOLinker(@override final Target target) implements Linker {
     final ordinals = [
       for (final library in unit.libraries) libraries.indexOf(library) + 1,
     ];
-    final hasBindings = unit.bindings.isNotEmpty;
+    final hasFixups = unit.bindings.isNotEmpty || unit.rebases.isNotEmpty;
     final hasConstants = sections.any((s) => s.kind == .readOnlyData);
     final writable = sections.any(
       (s) => s.kind == .data || s.kind == .zeroFill,
@@ -59,7 +59,7 @@ final class MachOLinker(@override final Target target) implements Linker {
         24 +
         24 +
         80 +
-        (hasBindings ? 48 : 16) +
+        (hasFixups ? 48 : 16) +
         16;
     var page = target.architecture == .arm64 ? 16384 : 4096;
     for (final section in sections) {
@@ -108,33 +108,43 @@ final class MachOLinker(@override final Target target) implements Linker {
       for (final symbol in symbols)
         (symbol.name, addresses[symbol.section] + symbol.offset),
     ]).encode();
-    final bindOffset = (trieOffset + trie.length + 7) & ~7,
-        binds = BytesBuilder();
-    void uleb(int value) {
+    final rebaseOffset = (trieOffset + trie.length + 7) & ~7;
+    void uleb(BytesBuilder bytes, int value) {
       do {
         final byte = value & 127;
         value >>= 7;
-        binds.addByte(byte | (value == 0 ? 0 : 128));
+        bytes.addByte(byte | (value == 0 ? 0 : 128));
       } while (value != 0);
     }
 
+    final rebases = BytesBuilder();
+    for (final rebase in unit.rebases) {
+      rebases.add([0x11, 0x20 | (hasConstants ? 2 : 1)]);
+      final slot = unit.symbols[rebase.slot];
+      uleb(rebases, addresses[slot.section] + slot.offset - dataStart);
+      rebases.addByte(0x51);
+    }
+    if (unit.rebases.isNotEmpty) rebases.addByte(0);
+    final rebaseBytes = rebases.takeBytes();
+    final bindOffset = (rebaseOffset + rebaseBytes.length + 7) & ~7;
+    final binds = BytesBuilder();
     for (final binding in unit.bindings) {
       final ordinal = ordinals[binding.library];
       if (ordinal <= 15) {
         binds.addByte(0x10 | ordinal);
       } else {
         binds.addByte(0x20);
-        uleb(ordinal);
+        uleb(binds, ordinal);
       }
       binds
         ..addByte(0x40)
         ..add(utf8.encode(binding.name))
         ..add([0, 0x51, 0x70 | (hasConstants ? 2 : 1)]);
       final slot = unit.symbols[binding.slot];
-      uleb(addresses[slot.section] + slot.offset - dataStart);
+      uleb(binds, addresses[slot.section] + slot.offset - dataStart);
       binds.addByte(0x90);
     }
-    if (hasBindings) binds.addByte(0);
+    if (unit.bindings.isNotEmpty) binds.addByte(0);
     final bindBytes = binds.takeBytes();
     final signatureOffset = (bindOffset + bindBytes.length + 15) & ~15;
     final signature = CodeSignature(installName, signatureOffset, textSize);
@@ -251,10 +261,16 @@ final class MachOLinker(@override final Target target) implements Linker {
     data.setUint32(dysymtab + 20, symbols.length, .little);
     data.setUint32(dysymtab + 24, symbols.length, .little);
     data.setUint32(dysymtab + 28, unit.bindings.length, .little);
-    if (hasBindings) {
+    if (hasFixups) {
       final info = command(0x80000022, 48);
-      data.setUint32(info + 16, bindOffset, .little);
-      data.setUint32(info + 20, bindBytes.length, .little);
+      if (unit.rebases.isNotEmpty) {
+        data.setUint32(info + 8, rebaseOffset, .little);
+        data.setUint32(info + 12, rebaseBytes.length, .little);
+      }
+      if (unit.bindings.isNotEmpty) {
+        data.setUint32(info + 16, bindOffset, .little);
+        data.setUint32(info + 20, bindBytes.length, .little);
+      }
       data.setUint32(info + 40, trieOffset, .little);
       data.setUint32(info + 44, trie.length, .little);
     } else {
@@ -285,6 +301,7 @@ final class MachOLinker(@override final Target target) implements Linker {
     }
     bytes.setAll(stringOffset, strings);
     bytes.setAll(trieOffset, trie);
+    bytes.setAll(rebaseOffset, rebaseBytes);
     bytes.setAll(bindOffset, bindBytes);
     final identifier = sha256
         .convert(Uint8List.sublistView(bytes, 0, signatureOffset))

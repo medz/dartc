@@ -5,43 +5,40 @@ import 'package:dartc/assembler/x64.dart' as x64;
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 
-/// Builds tail-call entries paired with loader-initialized pointer slots.
-ObjectModule callStubs(Target target, List<String> names) {
-  final code = BytesBuilder(copy: false), symbols = <Symbol>[];
+/// Builds pointer-slot definitions followed by tail-call entries using them.
+ObjectModule linkageTable(Target target, int slots, Map<String, int> calls) {
+  final code = BytesBuilder(copy: false);
+  final symbols = [
+    for (var i = 0; i < slots; i++)
+      Symbol('slot$i', 1, i * 8, 8, kind: .data, binding: .local),
+  ];
   final relocations = <Relocation>[];
-  for (final (i, name) in names.indexed) {
-    final start = code.length, slot = symbols.length + 1;
+  for (final MapEntry(key: name, value: slot) in calls.entries) {
+    final start = code.length;
     if (target.architecture == .arm64) {
       final assembler = arm.Assembler();
       for (final fixup in [
         assembler.pageAddress(.x16),
-        assembler.addPageOffset(.x16, .x16),
+        assembler.loadPageOffset(.x16, .x16),
       ]) {
         relocations.add(.new(0, start + fixup.offset, fixup.encoding, slot));
       }
-      assembler
-        ..load(.x16, .x16, 0)
-        ..branchRegister(.x16);
+      assembler.branchRegister(.x16);
       code.add(assembler.finish());
     } else {
       final assembler = x64.Assembler();
-      final fixup = assembler.address(.r11);
+      final fixup = assembler.loadAddress(.r11);
       relocations.add(.new(0, start + fixup.offset, fixup.encoding, slot));
-      assembler
-        ..load(.r11, .r11, 0)
-        ..jumpRegister(.r11);
+      assembler.jumpRegister(.r11);
       code.add(assembler.finish());
     }
-    symbols.addAll([
-      Symbol(name, 0, start, code.length - start),
-      Symbol(name, 1, i * 8, 8, kind: .data, binding: .local),
-    ]);
+    symbols.add(Symbol(name, 0, start, code.length - start));
   }
   return ObjectModule(
     target,
     [
       Section.code(code.takeBytes()),
-      Section.data(Uint8List(names.length * 8), alignment: 8),
+      Section.data(Uint8List(slots * 8), alignment: 8),
     ],
     symbols,
     relocations: relocations,

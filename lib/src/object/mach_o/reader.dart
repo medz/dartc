@@ -266,12 +266,27 @@ final class MachOReader(final Target target, Uint8List bytes) {
           throw UnsupportedError('Mach-O scattered relocation.');
         }
         input.check(symbol < count, 'Invalid Mach-O relocation symbol.');
+        final code = sections[section].bytes;
+        input.check(
+          offset <= code.length - 4,
+          'Invalid Mach-O relocation offset.',
+        );
         final encoding = switch ((target.architecture, info >> 24)) {
           (.arm64, 0x2d) => FixupEncoding.arm64Call26,
-          (.arm64, 0x3d) => FixupEncoding.arm64Page21,
-          (.arm64, 0x4c) => FixupEncoding.arm64PageOffset12,
+          (.arm64, 0x3d || 0x5d) => FixupEncoding.arm64Page21,
+          (.arm64, 0x4c) =>
+            ByteData.sublistView(code).getUint32(offset, .little) &
+                        0xffc00000 ==
+                    0xf9400000
+                ? FixupEncoding.arm64LoadPageOffset12
+                : FixupEncoding.arm64PageOffset12,
+          (.arm64, 0x6c) => FixupEncoding.arm64LoadPageOffset12,
           (.x64, 0x2d) => FixupEncoding.x64Call32,
-          (.x64, 0x1d) => FixupEncoding.x64Address32,
+          (.x64, 0x1d) =>
+            offset >= 3 && code[offset - 2] == 0x8b
+                ? FixupEncoding.x64LoadAddress32
+                : FixupEncoding.x64Address32,
+          (.x64, 0x3d) => FixupEncoding.x64LoadAddress32,
           _ => throw UnsupportedError('Mach-O relocation flags ${info >> 24}.'),
         };
         final index = indices[symbol];
@@ -281,6 +296,9 @@ final class MachOReader(final Target target, Uint8List bytes) {
             offset,
             encoding,
             index < 0 ? symbols.length - index - 1 : index,
+            indirect: target.architecture == .arm64
+                ? info >> 24 == 0x5d || info >> 24 == 0x6c
+                : info >> 24 == 0x3d,
           ),
         );
       }

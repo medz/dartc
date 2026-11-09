@@ -248,10 +248,13 @@ final class ElfReader(final Target target, Uint8List bytes) {
         if (target.architecture == .arm64) {
           encoding = switch (type) {
             283 => .arm64Call26,
-            275 => .arm64Page21,
+            275 || 311 => .arm64Page21,
             277 => .arm64PageOffset12,
+            286 || 312 => .arm64LoadPageOffset12,
             _ => throw UnsupportedError('AArch64 ELF relocation $type.'),
           };
+        } else if (type == 9) {
+          encoding = .x64LoadAddress32;
         } else if (type == 4) {
           encoding = .x64Call32;
         } else if (type == 2) {
@@ -260,7 +263,11 @@ final class ElfReader(final Target target, Uint8List bytes) {
             offset > 0 && offset <= bytes.length - 4,
             'Invalid ELF relocation offset.',
           );
-          encoding = bytes[offset - 1] == 0xe8 ? .x64Call32 : .x64Address32;
+          encoding = bytes[offset - 1] == 0xe8
+              ? .x64Call32
+              : offset >= 3 && bytes[offset - 2] == 0x8b
+              ? .x64LoadAddress32
+              : .x64Address32;
         } else {
           throw UnsupportedError('x86-64 ELF relocation $type.');
         }
@@ -275,6 +282,9 @@ final class ElfReader(final Target target, Uint8List bytes) {
             offset,
             encoding,
             index < 0 ? symbols.length - index - 1 : index,
+            indirect: target.architecture == .arm64
+                ? type == 311 || type == 312
+                : type == 9,
           ),
         );
       }

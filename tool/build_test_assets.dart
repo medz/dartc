@@ -21,6 +21,7 @@ import '../test/linker/fixtures/symbols.dart';
 import '../test/linker/fixtures/data.dart';
 import '../test/linker/fixtures/archive.dart';
 import '../test/linker/fixtures/shared_libraries.dart';
+import '../test/linker/fixtures/addresses.dart';
 import '../test/support/native_assets.dart';
 
 Future<void> main(List<String> args) async {
@@ -164,6 +165,35 @@ Future<void> main(List<String> args) async {
     final decodedData = await objects('data_', data);
     await shared(decodedData, assets.library('linker/data'));
     await shared([decodedData.first], assets.library('linker/storage'));
+    final addresses = await objects('addresses_', addressModules(target));
+    await shared([
+      addresses.first,
+    ], assets.library('linker/addresses_provider'));
+    await shared(addresses, assets.library('linker/addresses_static'));
+    final addressArchive = assets.file('linker/addresses.a');
+    await addressArchive.writeAsBytes(
+      ArchiveWriter(format).encode([addresses.first]),
+    );
+    for (final (name, provider) in <(String, LinkInput)>[
+      (
+        'addresses_archive',
+        .archive(Archive.decode(await addressArchive.readAsBytes())),
+      ),
+      (
+        'addresses_shared',
+        dependency(target, 'addresses_provider', {
+          for (final name in addresses[1].imports) name: name,
+        }),
+      ),
+    ]) {
+      final library = assets.library('linker/$name');
+      await library.writeAsBytes(
+        linker.linkSharedLibrary([
+          for (final consumer in addresses.skip(1)) .object(consumer),
+          provider,
+        ], name: library.uri.pathSegments.last),
+      );
+    }
     for (final name in [
       'double',
       'numeric',

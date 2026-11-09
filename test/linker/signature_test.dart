@@ -12,7 +12,13 @@ import '../support/native_assets.dart';
 void main() {
   for (final (arch, name) in [
     for (final arch in Architecture.values)
-      for (final name in ['symbols', 'shared_calls']) (arch, name),
+      for (final name in [
+        'symbols',
+        'shared_calls',
+        'addresses_shared',
+        'addresses_static',
+      ])
+        (arch, name),
   ]) {
     final target = Target(.macos, arch),
         assets = NativeAssets(Target(.macos, arch));

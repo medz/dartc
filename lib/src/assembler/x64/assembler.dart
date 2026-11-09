@@ -314,6 +314,21 @@ final class Assembler() {
     return fixup;
   }
 
+  /// Loads eight bytes from an unresolved RIP-relative address.
+  Fixup loadAddress(Register destination) {
+    final fixup = Fixup(length + 3, .x64LoadAddress32);
+    _bytes.add([
+      0x48 | (destination.index >> 3) << 2,
+      0x8b,
+      0x05 | (destination.index & 7) << 3,
+      0,
+      0,
+      0,
+      0,
+    ]);
+    return fixup;
+  }
+
   void _checkSize(int bytes) {
     if (![1, 2, 4, 8].contains(bytes)) {
       throw ArgumentError.value(bytes, 'bytes', 'Expected 1, 2, 4 or 8.');

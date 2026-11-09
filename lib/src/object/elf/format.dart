@@ -163,12 +163,16 @@ final class Elf(@override final Target target) implements ObjectFormat {
         final index = relocation.symbol < object.symbols.length
             ? indices[relocation.symbol]!
             : symbols.length + 1 + relocation.symbol - object.symbols.length;
-        final type = switch (relocation.encoding) {
-          .arm64Call26 => 283,
-          .arm64Page21 => 275,
-          .arm64PageOffset12 => 277,
-          .x64Address32 => 2,
-          .x64Call32 =>
+        final type = switch ((relocation.encoding, relocation.indirect)) {
+          (.arm64Call26, false) => 283,
+          (.arm64Page21, false) => 275,
+          (.arm64Page21, true) => 311,
+          (.arm64PageOffset12, false) => 277,
+          (.arm64LoadPageOffset12, false) => 286,
+          (.arm64LoadPageOffset12, true) => 312,
+          (.x64Address32 || .x64LoadAddress32, false) => 2,
+          (.x64LoadAddress32, true) => 9,
+          (.x64Call32, false) =>
             relocation.symbol < object.symbols.length &&
                     object.symbols[relocation.symbol].binding == .local
                 ? 2

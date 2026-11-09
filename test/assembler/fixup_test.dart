@@ -71,6 +71,15 @@ void main() {
           0x80000000,
           0x7fffffff,
         ),
+        (
+          .x64LoadAddress32,
+          [0x4c, 0x8b, 0x15, 0, 0, 0, 0],
+          3,
+          -0x80000000,
+          0x7fffffff,
+          0x80000000,
+          0x7fffffff,
+        ),
       ]) {
     test('${encoding.name} validates and patches signed bounds atomically', () {
       final code = Uint8List.fromList(bytes), data = ByteData.sublistView(code);
@@ -200,5 +209,42 @@ void main() {
       );
       expect(data.getUint32(fixup.offset, .little), expected);
     }
+  });
+
+  test('address loads preserve registers and reject unaligned ARM64 slots', () {
+    final armAssembler = arm.Assembler();
+    final load = armAssembler.loadPageOffset(.x10, .x9);
+    final bytes = Uint8List.fromList(armAssembler.finish());
+    final data = ByteData.sublistView(bytes);
+    expect(data.getUint32(0, .little), 0xf940012a);
+    for (final target in [0, 8, 4088, 4096]) {
+      load.encoding.apply(
+        data,
+        load.offset,
+        placeAddress: 4,
+        targetAddress: target,
+      );
+      expect(
+        data.getUint32(0, .little),
+        0xf940012a | ((target & 0xfff) ~/ 8) << 10,
+      );
+    }
+    final before = bytes.toList();
+    for (final target in [1, 4, 4095]) {
+      expect(
+        () => load.encoding.apply(
+          data,
+          0,
+          placeAddress: 0,
+          targetAddress: target,
+        ),
+        throwsArgumentError,
+      );
+      expect(bytes, before);
+    }
+    expect(() => arm.Assembler().loadPageOffset(.sp, .x0), throwsArgumentError);
+    final x64Assembler = x64.Assembler();
+    expect(x64Assembler.loadAddress(.r10).offset, 3);
+    expect(x64Assembler.finish(), [0x4c, 0x8b, 0x15, 0, 0, 0, 0]);
   });
 }
