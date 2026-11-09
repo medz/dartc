@@ -53,6 +53,8 @@ analyzer 14.7 的常量求值也存在相同的精度问题，还会将 `0.0 == 
 
 分析阶段检查常量声明、默认值、注解、const 对象与集合表达式及模式中的常量表达式，包括未使用声明、不可达代码和已纳入分析的依赖库。常量求值错误在进入 lowering 前报告；重新求值成功的表达式可以通过上游因精度丢失而误报的断言或赋值检查，其余诊断继续保留。[静态检查样本](../test/frontend/analysis/checked_libraries_test.dart)覆盖误报、漏报及同一文件中的真实错误。
 
-受错误常量折叠影响的派生静态诊断仍未完整校正，包括通过常量别名覆盖 true/false 的 switch 穷尽性，以及集合元素类型和重复键检查。求值使用精确值不代表这些诊断也已使用同一结果，此项仍是实现缺口。
+常量集合按实际求值结果检查元素类型、primitive equality、重复 Set 元素和 Map 键。未选中的分支仍须满足静态类型及潜在常量要求；空 spread 和被 null-aware 项跳过的表达式也不能隐藏静态类型错误。null-aware Map 键为 null 时不求值对应值，非 null 的 null-aware 元素不跳过后续元素。[集合常量验证](../test/frontend/analysis/collection_constants_test.dart)覆盖合法结果和静态错误。
+
+模式常量、Map 模式重复键与 switch 穷尽性使用同一求值结果，覆盖常量别名、record、枚举及 sealed 层次；带守卫的 case 不保证覆盖。见[模式常量验证](../test/frontend/analysis/pattern_constants_test.dart)。原始 analyzer 对象仍保留上游诊断，包含可能受错误常量折叠影响的不可达警告；会话验收与 IR 转换使用重新检查的结果。
 
 跨 int/double 的 `identical` 常量结果仍未接通；analyzer 为这类依赖目标表示的判断保留未知值，当前转换会明确拒绝，不能把未知值当作 false。

@@ -74,6 +74,7 @@ void main() {
           if (uri.scheme == 'package' && uri.pathSegments.first != 'dartc') {
             expect(
               const {
+                '_fe_analyzer_shared': {'frontend'},
                 'analyzer': {'frontend'},
                 'crypto': {'linker'},
               }[uri.pathSegments.first],

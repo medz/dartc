@@ -30,6 +30,8 @@ import 'package:analyzer/src/dart/element/type_algebra.dart' as internal;
 // ignore: implementation_imports
 import 'package:analyzer/src/diagnostic/diagnostic.dart' as diagnostics;
 
+import 'constant_collection.dart';
+import 'constant_patterns.dart';
 import 'constant_safety.dart';
 
 /// Checks and evaluates constants with exact mixed numeric comparisons.
@@ -42,7 +44,8 @@ final class ConstantEvaluation() {
   void check(ResolvedUnitResult unit) {
     final errors = unit.diagnostics.where((d) => d.severity == .error).toList();
     for (final error in errors) {
-      if (!_evaluationErrors.contains(error.diagnosticCode)) {
+      if (!_evaluationErrors.contains(error.diagnosticCode) &&
+          !ConstantPatterns.errors.contains(error.diagnosticCode)) {
         _fail(unit, error);
       }
     }
@@ -59,6 +62,20 @@ final class ConstantEvaluation() {
     diagnostics.constConstructorParamTypeMismatch,
     diagnostics.constConstructorFieldTypeMismatch,
     diagnostics.variableTypeMismatch,
+    diagnostics.listElementTypeNotAssignable,
+    diagnostics.listElementTypeNotAssignableNullability,
+    diagnostics.setElementTypeNotAssignable,
+    diagnostics.setElementTypeNotAssignableNullability,
+    diagnostics.mapKeyTypeNotAssignable,
+    diagnostics.mapKeyTypeNotAssignableNullability,
+    diagnostics.mapValueTypeNotAssignable,
+    diagnostics.mapValueTypeNotAssignableNullability,
+    diagnostics.equalElementsInConstSet,
+    diagnostics.equalKeysInConstMap,
+    diagnostics.constSetElementNotPrimitiveEquality,
+    diagnostics.constMapKeyNotPrimitiveEquality,
+    diagnostics.constSpreadExpectedListOrSet,
+    diagnostics.constSpreadExpectedMap,
   };
 
   static Never _fail(ResolvedUnitResult unit, Diagnostic error) =>
@@ -184,6 +201,12 @@ final class _CheckConstants(
   final ResolvedUnitResult unit,
   final List<Diagnostic> errors,
 ) extends UnifyingAstVisitor2<void> {
+  late final _patterns = ConstantPatterns(
+    unit,
+    (field) =>
+        constants._value(constants._variable(field), unit, unit.unit)
+            as internal.DartObjectImpl,
+  );
   late final _visitor = _Visitor(
     constants,
     unit.libraryElement as internal.LibraryElementImpl,
@@ -194,14 +217,20 @@ final class _CheckConstants(
     if (value case internal.DartObjectImpl(isUnknown: false)) {
       errors.removeWhere(
         (error) =>
+            ConstantEvaluation._evaluationErrors.contains(
+              error.diagnosticCode,
+            ) &&
             error.offset >= site.offset &&
             error.offset + error.length <= site.end,
       );
     }
   }
 
-  void _expression(Expression expression) =>
-      _check(_visitor.evaluateConstant(expression), expression);
+  internal.DartObjectImpl _expression(Expression expression) {
+    final value = _visitor.evaluateConstant(expression);
+    _check(value, expression);
+    return value as internal.DartObjectImpl;
+  }
 
   @override
   void visitNode(AstNode node) {
@@ -229,13 +258,32 @@ final class _CheckConstants(
           RecordLiteral(isConst: true):
         _expression(node as Expression);
       case ConstantPattern(:final expression2):
-        _expression(expression2);
+        _patterns.constant(node, _expression(expression2));
       case RelationalPattern(:final operand2):
         _expression(operand2);
       case MapPatternEntry(:final key2):
-        _expression(key2);
+        _patterns.keys[key2] = _expression(key2);
     }
     super.visitNode(node);
+    switch (node) {
+      case MapPattern():
+        _patterns.checkMap(node);
+        errors.removeWhere(
+          (error) =>
+              error.diagnosticCode == diagnostics.equalKeysInMapPattern &&
+              error.offset >= node.offset &&
+              error.offset + error.length <= node.end,
+        );
+      case SwitchExpression(:final switchKeyword) ||
+          SwitchStatement(:final switchKeyword):
+        if (_patterns.checkSwitch(node)) {
+          errors.removeWhere(
+            (error) =>
+                ConstantPatterns.errors.contains(error.diagnosticCode) &&
+                error.offset == switchKeyword.offset,
+          );
+        }
+    }
   }
 }
 
@@ -271,6 +319,14 @@ final class _Visitor(
     return constants._variable(element) ??
         (throw UnsupportedError('Missing constant value: ${element.name}'));
   }
+
+  @override
+  internal.Constant visitListLiteral(ListLiteral node) =>
+      ConstantCollection(node, this, library).evaluate();
+
+  @override
+  internal.Constant visitSetOrMapLiteral(SetOrMapLiteral node) =>
+      ConstantCollection(node, this, library).evaluate();
 
   @override
   internal.Constant visitUnqualifiedNameExpression(
