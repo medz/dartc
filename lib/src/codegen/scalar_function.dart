@@ -36,23 +36,29 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
           allocation.flush(clobbered: layout.clobberedRegisters);
           // Stage stack words before populating registers that the scratch may alias.
           if (layout.stackBytes != 0) {
-            final scratch = emitter.allocatableRegisters.firstWhere(
-              layout.clobberedRegisters.contains,
-            );
             for (final (i, location) in layout.parameters.indexed) {
               if (location case StackArgument(:final offset)) {
                 final value = instruction.inputs[i];
+                final scratch = emitter.allocatableRegisters.firstWhere(
+                  (r) =>
+                      emitter.bank(r) == selection.bank(value.type) &&
+                      layout.clobberedRegisters.contains(r),
+                );
                 allocation.load(value, scratch);
                 emitter.storeStack(scratch, offset);
                 allocation.release(value);
               }
             }
           }
-          for (final (i, location) in layout.parameters.indexed) {
-            if (location case RegisterArgument(:final register)) {
-              final value = instruction.inputs[i];
-              allocation.load(value, register);
-              allocation.release(value);
+          // Double constants may need a general temporary before fixed general arguments.
+          for (final bank in [RegisterBank.floating, RegisterBank.general]) {
+            for (final (i, location) in layout.parameters.indexed) {
+              if (location case RegisterArgument(:final register)
+                  when emitter.bank(register) == bank) {
+                final value = instruction.inputs[i];
+                allocation.load(value, register);
+                allocation.release(value);
+              }
             }
           }
           call(emitter.call(), callInstruction.target);
@@ -74,12 +80,22 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
                 LoadNativeInt64(pointer: final operand)) {
           final source = allocation.read(operand);
           allocation.release(operand);
-          final destination = allocation.allocate(preferred: source);
+          final destination = allocation.allocate(.general, preferred: source);
           if (instruction is LoadNativeInt64) {
             emitter.loadMemory(destination, source);
           } else {
             emitter.move(destination, source);
           }
+          allocation.define(instruction, destination);
+        } else if (instruction case NumericNegate(:final operand)) {
+          final source = allocation.read(operand);
+          allocation.release(operand);
+          final destination = allocation.allocate(.floating, preferred: source);
+          final temporary = emitter.negationNeedsTemporary
+              ? allocation.allocate(.general)
+              : null;
+          emitter.negateDouble(destination, source, temporary);
+          if (temporary != null) allocation.releaseTemporary(temporary);
           allocation.define(instruction, destination);
         } else {
           final (:encoding, :left, :right) = selection.binaries[instruction]!;
@@ -88,8 +104,12 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
           allocation.release(left);
           allocation.release(right);
           final destination = encoding.reuseLeft
-              ? allocation.allocate(preferred: a, except: a == b ? null : b)
-              : allocation.allocate();
+              ? allocation.allocate(
+                  selection.bank(instruction.type),
+                  preferred: a,
+                  except: a == b ? null : b,
+                )
+              : allocation.allocate(selection.bank(instruction.type));
           if (encoding.reuseLeft) emitter.move(destination, a);
           encoding.emit(destination, encoding.reuseLeft ? destination : a, b);
           allocation.define(instruction, destination);

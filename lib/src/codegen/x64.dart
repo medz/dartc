@@ -11,7 +11,7 @@ import 'scalar_generator.dart';
 
 /// Generates x86-64 scalar functions for the selected operating system.
 final class X64CodeGenerator(Target target)
-    extends ScalarCodeGenerator<Register> {
+    extends ScalarCodeGenerator<CpuRegister> {
   this : super(target, () => _X64Emitter(Assembler(), X64Abi(target))) {
     if (target.architecture != .x64) {
       throw ArgumentError('Expected an x64 target.');
@@ -22,30 +22,37 @@ final class X64CodeGenerator(Target target)
 final class _X64Emitter(
   final Assembler assembler,
   @override final X64Abi convention,
-) implements FunctionEmitter<Register> {
+) implements FunctionEmitter<CpuRegister> {
   @override
-  List<Register> get allocatableRegisters => const [
-    .rax,
-    .rcx,
-    .rdx,
-    .rsi,
-    .rdi,
-    .r8,
-    .r9,
-    .r10,
-    .r11,
+  List<CpuRegister> get allocatableRegisters => [
+    ...const <Register>[.rax, .rcx, .rdx, .rsi, .rdi, .r8, .r9, .r10, .r11],
+    ...FloatRegister.values,
   ];
 
   @override
-  void move(Register destination, Register source) =>
-      assembler.move(destination, source);
+  RegisterBank bank(CpuRegister register) =>
+      register is FloatRegister ? .floating : .general;
 
   @override
-  void prologue(FrameLayout<Register> frame) =>
+  void move(CpuRegister destination, CpuRegister source) {
+    switch ((destination, source)) {
+      case (final Register d, final Register s):
+        assembler.move(d, s);
+      case (final FloatRegister d, final FloatRegister s):
+        assembler.moveDouble(d, s);
+      case (final Register d, final FloatRegister s):
+        assembler.moveBitsToGeneral(d, s);
+      case (final FloatRegister d, final Register s):
+        assembler.moveBitsToDouble(d, s);
+    }
+  }
+
+  @override
+  void prologue(FrameLayout<CpuRegister> frame) =>
       convention.emitPrologue(assembler, frame);
 
   @override
-  void epilogue(FrameLayout<Register> frame) =>
+  void epilogue(FrameLayout<CpuRegister> frame) =>
       convention.emitEpilogue(assembler, frame);
 
   @override
@@ -58,35 +65,55 @@ final class _X64Emitter(
   void bind(Label label) => assembler.bind(label);
 
   @override
-  void loadImmediate(Register destination, int value) =>
-      assembler.loadImmediate(destination, value);
+  void loadImmediate(CpuRegister destination, int value) =>
+      assembler.loadImmediate(destination as Register, value);
 
   @override
-  BinaryEncoding<Register> get add => _binary(assembler.add);
+  BinaryEncoding<CpuRegister> get add => _binary(assembler.add);
 
   @override
-  BinaryEncoding<Register> get subtract => _binary(assembler.subtract);
+  BinaryEncoding<CpuRegister> get subtract => _binary(assembler.subtract);
 
   @override
-  BinaryEncoding<Register> get multiply => _binary(assembler.multiply);
+  BinaryEncoding<CpuRegister> get multiply => _binary(assembler.multiply);
 
   @override
-  BinaryEncoding<Register> get bitAnd => _binary(assembler.bitAnd);
+  BinaryEncoding<CpuRegister> get bitAnd => _binary(assembler.bitAnd);
 
   @override
-  BinaryEncoding<Register> get bitOr => _binary(assembler.bitOr);
+  BinaryEncoding<CpuRegister> get bitOr => _binary(assembler.bitOr);
 
   @override
-  BinaryEncoding<Register> get bitXor => _binary(assembler.bitXor);
+  BinaryEncoding<CpuRegister> get bitXor => _binary(assembler.bitXor);
 
-  BinaryEncoding<Register> _binary(void Function(Register, Register) emit) =>
-      .new(
-        (destination, _, right) => emit(destination, right),
-        reuseLeft: true,
-      );
+  BinaryEncoding<CpuRegister> _binary<T extends CpuRegister>(
+    void Function(T, T) emit,
+  ) => .new(
+    (destination, _, right) => emit(destination as T, right as T),
+    reuseLeft: true,
+  );
 
   @override
-  BinaryEncoding<Register> comparison(Comparison comparison) {
+  BinaryEncoding<CpuRegister> get addDouble => _binary(assembler.addDouble);
+
+  @override
+  BinaryEncoding<CpuRegister> get subtractDouble =>
+      _binary(assembler.subtractDouble);
+
+  @override
+  BinaryEncoding<CpuRegister> get multiplyDouble =>
+      _binary(assembler.multiplyDouble);
+
+  @override
+  BinaryEncoding<CpuRegister> get divideDouble =>
+      _binary(assembler.divideDouble);
+
+  @override
+  BinaryEncoding<CpuRegister> comparison(
+    Comparison comparison, {
+    bool floating = false,
+  }) {
+    if (floating) return _floatingComparison(comparison);
     final Condition condition = switch (comparison) {
       .equal => .equal,
       .notEqual => .notEqual,
@@ -96,38 +123,89 @@ final class _X64Emitter(
       .greaterOrEqual => .greaterOrEqual,
     };
     return .new((destination, left, right) {
-      assembler.compare(left, right);
-      assembler.setCondition(destination, condition);
+      assembler.compare(left as Register, right as Register);
+      assembler.setCondition(destination as Register, condition);
     });
   }
+
+  @override
+  bool get negationNeedsTemporary => true;
+
+  @override
+  void negateDouble(
+    CpuRegister destination,
+    CpuRegister source,
+    CpuRegister? temporary,
+  ) {
+    final scratch = temporary as Register;
+    assembler
+      ..moveBitsToGeneral(scratch, source as FloatRegister)
+      ..complementBit(scratch, 63)
+      ..moveBitsToDouble(destination as FloatRegister, scratch);
+  }
+
+  BinaryEncoding<CpuRegister> _floatingComparison(Comparison comparison) =>
+      .new((d, l, r) {
+        final destination = d as Register,
+            left = l as FloatRegister,
+            right = r as FloatRegister;
+        final reversed = comparison == .lessThan || comparison == .lessOrEqual;
+        assembler.compareDouble(
+          reversed ? right : left,
+          reversed ? left : right,
+        );
+        if (comparison == .equal || comparison == .notEqual) {
+          final unordered = assembler.label(), done = assembler.label();
+          assembler.jumpCondition(.parity, unordered);
+          assembler.setCondition(
+            destination,
+            comparison == .equal ? .equal : .notEqual,
+          );
+          assembler.jump(done);
+          assembler.bind(unordered);
+          assembler.loadImmediate(destination, comparison == .notEqual ? 1 : 0);
+          assembler.bind(done);
+        } else {
+          assembler.setCondition(
+            destination,
+            comparison == .lessOrEqual || comparison == .greaterOrEqual
+                ? .aboveOrEqual
+                : .above,
+          );
+        }
+      });
 
   @override
   void jump(Label target) => assembler.jump(target);
 
   @override
-  void jumpIfZero(Register value, Label target) {
-    assembler.test(value);
+  void jumpIfZero(CpuRegister value, Label target) {
+    assembler.test(value as Register);
     assembler.jumpCondition(.equal, target);
   }
 
   @override
-  void loadStack(Register destination, int offset) =>
-      assembler.load(destination, .rsp, offset);
+  void loadStack(CpuRegister destination, int offset) => switch (destination) {
+    Register() => assembler.load(destination, .rsp, offset),
+    FloatRegister() => assembler.loadDouble(destination, .rsp, offset),
+  };
 
   @override
-  void storeStack(Register source, int offset) =>
-      assembler.store(source, .rsp, offset);
+  void storeStack(CpuRegister source, int offset) => switch (source) {
+    Register() => assembler.store(source, .rsp, offset),
+    FloatRegister() => assembler.storeDouble(source, .rsp, offset),
+  };
 
   @override
   Fixup call() => assembler.call();
 
   @override
-  void loadMemory(Register destination, Register base) =>
-      assembler.load(destination, base, 0);
+  void loadMemory(CpuRegister destination, CpuRegister base) =>
+      assembler.load(destination as Register, base as Register, 0);
 
   @override
-  void storeMemory(Register source, Register base) =>
-      assembler.store(source, base, 0);
+  void storeMemory(CpuRegister source, CpuRegister base) =>
+      assembler.store(source as Register, base as Register, 0);
 
   @override
   Uint8List finish() => assembler.finish();

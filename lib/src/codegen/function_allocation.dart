@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dartc/abi.dart';
 import 'package:dartc/ir.dart';
 
@@ -73,7 +75,13 @@ final class FunctionAllocation<R extends Object>(
         selection.calls.isNotEmpty ||
         _shared.isNotEmpty ||
         _blockUses.values.any(
-          (uses) => uses.length >= emitter.allocatableRegisters.length,
+          (uses) => RegisterBank.values.any(
+            (bank) =>
+                uses.keys.where((v) => selection.bank(v.type) == bank).length >=
+                emitter.allocatableRegisters
+                    .where((r) => emitter.bank(r) == bank)
+                    .length,
+          ),
         );
     if (framed) {
       for (final value in _owners.keys) {
@@ -151,7 +159,7 @@ final class FunctionAllocation<R extends Object>(
   /// Reads an operand without evicting the other operand's [except] register.
   R read(Value value, {R? except}) {
     if (_registers[value] case final register?) return register;
-    final register = allocate(except: except);
+    final register = allocate(selection.bank(value.type), except: except);
     load(value, register);
     return _registers[value] = register;
   }
@@ -162,6 +170,12 @@ final class FunctionAllocation<R extends Object>(
       emitter.loadImmediate(destination, number);
     } else if (value case ScalarConstant(value: final bool flag)) {
       emitter.loadImmediate(destination, flag ? 1 : 0);
+    } else if (value case ScalarConstant(value: final double number)) {
+      final bits = ByteData(8)..setFloat64(0, number, .little);
+      final temporary = allocate(.general);
+      emitter.loadImmediate(temporary, bits.getInt64(0, .little));
+      emitter.move(destination, temporary);
+      releaseTemporary(temporary);
     } else if (_spilled.contains(value)) {
       emitter.loadStack(destination, _slot(value));
     } else {
@@ -170,15 +184,27 @@ final class FunctionAllocation<R extends Object>(
   }
 
   /// Allocates one register, spilling a different resident value if necessary.
-  R allocate({R? except, R? preferred}) {
-    if (preferred != except && _free.remove(preferred)) return preferred!;
-    final index = _free.lastIndexWhere((r) => r != except);
+  R allocate(RegisterBank bank, {R? except, R? preferred}) {
+    if (preferred != null &&
+        preferred != except &&
+        emitter.bank(preferred) == bank &&
+        _free.remove(preferred)) {
+      return preferred;
+    }
+    final index = _free.lastIndexWhere(
+      (r) => r != except && emitter.bank(r) == bank,
+    );
     if (index >= 0) return _free.removeAt(index);
-    final entry = _registers.entries.firstWhere((e) => e.value != except);
+    final entry = _registers.entries.firstWhere(
+      (e) => e.value != except && emitter.bank(e.value) == bank,
+    );
     _spill(entry.key, entry.value);
     _registers.remove(entry.key);
     return entry.value;
   }
+
+  /// Releases a temporary that has not been associated with an SSA value.
+  void releaseTemporary(R register) => _free.add(register);
 
   /// Publishes a result and stores its home if other blocks can read it.
   void define(Value value, R register) {
@@ -217,12 +243,17 @@ final class FunctionAllocation<R extends Object>(
 
   /// Assigns block parameters simultaneously after [flush], using one register.
   void copyArguments(Jump edge) {
-    final scratch = emitter.allocatableRegisters.last;
     for (final (i, argument) in edge.arguments.indexed) {
+      final scratch = emitter.allocatableRegisters.lastWhere(
+        (r) => emitter.bank(r) == selection.bank(argument.type),
+      );
       load(argument, scratch);
       emitter.storeStack(scratch, _stagingOffset + i * 8);
     }
     for (final (i, parameter) in edge.target.parameters.indexed) {
+      final scratch = emitter.allocatableRegisters.lastWhere(
+        (r) => emitter.bank(r) == selection.bank(parameter.type),
+      );
       emitter.loadStack(scratch, _stagingOffset + i * 8);
       emitter.storeStack(scratch, _slot(parameter));
     }

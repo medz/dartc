@@ -23,6 +23,7 @@ Type nativeType(dart.DartType type) {
     final library = type.element.library;
     if (library.uri == _library) {
       if (type.element == library.getClass('Int64')) return ffi.Int64;
+      if (type.element == library.getClass('Double')) return ffi.Double;
       if (type.element == library.getClass('Void')) return ffi.Void;
       if (type.element == library.getClass('Pointer') &&
           nativeType(type.typeArguments.single) == ffi.Int64) {

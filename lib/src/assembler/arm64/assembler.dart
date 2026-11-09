@@ -2,54 +2,9 @@ import 'dart:typed_data';
 
 import '../code_buffer.dart';
 import '../fixup.dart';
+import 'registers.dart';
 
-/// A 64-bit general-purpose register or the stack pointer.
-enum Register() {
-  x0,
-  x1,
-  x2,
-  x3,
-  x4,
-  x5,
-  x6,
-  x7,
-  x8,
-  x9,
-  x10,
-  x11,
-  x12,
-  x13,
-  x14,
-  x15,
-  x16,
-  x17,
-  x18,
-  x19,
-  x20,
-  x21,
-  x22,
-  x23,
-  x24,
-  x25,
-  x26,
-  x27,
-  x28,
-  x29,
-  x30,
-  sp,
-}
-
-/// A condition on the flags produced by a signed integer comparison.
-enum Condition(final int encoding) {
-  equal(0),
-  notEqual(1),
-  lessThan(11),
-  lessOrEqual(13),
-  greaterThan(12),
-  greaterOrEqual(10),
-}
-
-/// Encodes AArch64 integer instructions in little-endian order.
+/// Encodes AArch64 scalar instructions in little-endian order.
 final class Assembler() {
   final _bytes = CodeBuffer();
 
@@ -137,6 +92,77 @@ final class Assembler() {
     _word(0xeb00001f | right.index << 16 | left.index << 5);
   }
 
+  /// Copies a double's bits without changing flags.
+  void moveDouble(FloatRegister destination, FloatRegister source) {
+    _bytes.checkOpen();
+    if (destination != source) _float(0x1e604000, destination, source);
+  }
+
+  /// Copies raw bits from a general register into a double register.
+  void moveBitsToDouble(FloatRegister destination, Register source) {
+    _general(source);
+    _word(0x9e670000 | source.index << 5 | destination.index);
+  }
+
+  /// Copies raw bits from a double register into a general register.
+  void moveBitsToGeneral(Register destination, FloatRegister source) {
+    _general(destination);
+    _word(0x9e660000 | source.index << 5 | destination.index);
+  }
+
+  /// Adds two IEEE 754 doubles.
+  void addDouble(
+    FloatRegister destination,
+    FloatRegister left,
+    FloatRegister right,
+  ) => _float(0x1e602800, destination, left, right);
+
+  /// Subtracts two IEEE 754 doubles.
+  void subtractDouble(
+    FloatRegister destination,
+    FloatRegister left,
+    FloatRegister right,
+  ) => _float(0x1e603800, destination, left, right);
+
+  /// Multiplies two IEEE 754 doubles without fusion with another operation.
+  void multiplyDouble(
+    FloatRegister destination,
+    FloatRegister left,
+    FloatRegister right,
+  ) => _float(0x1e600800, destination, left, right);
+
+  /// Divides two IEEE 754 doubles.
+  void divideDouble(
+    FloatRegister destination,
+    FloatRegister left,
+    FloatRegister right,
+  ) => _float(0x1e601800, destination, left, right);
+
+  /// Flips the sign bit without changing NaN payloads or flags.
+  void negateDouble(FloatRegister destination, FloatRegister source) =>
+      _float(0x1e614000, destination, source);
+
+  /// Sets NZCV for FCMP, including unordered comparisons when an operand is NaN.
+  void compareDouble(FloatRegister left, FloatRegister right) =>
+      _word(0x1e602000 | right.index << 16 | left.index << 5);
+
+  /// Loads a double with the address constraints of [load].
+  void loadDouble(FloatRegister destination, Register base, int offset) =>
+      _memory(0xfd400000, destination, base, offset);
+
+  /// Stores a double with the address constraints of [store].
+  void storeDouble(FloatRegister source, Register base, int offset) =>
+      _memory(0xfd000000, source, base, offset);
+
+  void _float(
+    int opcode,
+    FloatRegister destination,
+    FloatRegister left, [
+    FloatRegister? right,
+  ]) => _word(
+    opcode | (right?.index ?? 0) << 16 | left.index << 5 | destination.index,
+  );
+
   /// Writes 0 or 1 for [condition], preserving NZCV and other registers.
   void setCondition(Register destination, Condition condition) {
     _general(destination);
@@ -184,8 +210,8 @@ final class Assembler() {
     return fixup;
   }
 
-  void _memory(int opcode, Register value, Register base, int offset) {
-    _general(value);
+  void _memory(int opcode, CpuRegister value, Register base, int offset) {
+    if (value is Register) _general(value);
     RangeError.checkValueInInterval(offset, 0, 32760, 'offset');
     if (offset % 8 != 0) throw ArgumentError('Expected an eight-byte offset.');
     _word(opcode | (offset ~/ 8) << 10 | base.index << 5 | value.index);

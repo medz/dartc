@@ -43,6 +43,7 @@ abstract final class FfiTypes() {
   static ValueType valueType(Type native) {
     if (native == ffi.Void) return .voidType;
     if (native == ffi.Int64) return .integer;
+    if (native == ffi.Double) return .floating;
     if (native == ffi.Pointer<ffi.Int64>) return int64Pointer;
     throw UnsupportedError('Native value type: $native');
   }

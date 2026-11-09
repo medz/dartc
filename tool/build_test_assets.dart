@@ -10,6 +10,7 @@ import 'package:dartc/target.dart';
 
 import '../test/codegen/fixtures/aliases.dart';
 import '../test/abi/fixtures/frames.dart';
+import '../test/abi/fixtures/floating_frames.dart';
 import '../test/abi/fixtures/stack_calls.dart';
 import '../test/codegen/fixtures/control_flow.dart';
 import '../test/linker/fixtures/functions.dart';
@@ -35,6 +36,7 @@ Future<void> main() async {
         'stack_calls',
         'integer_operations',
         'pointers',
+        'doubles',
       ]) {
         final library = assets.library('compiler/$fixture');
         for (final (file, output) in <(File, Output)>[
@@ -48,7 +50,9 @@ Future<void> main() async {
           await result.write(
             file,
             header:
-                (fixture == 'arithmetic' || fixture == 'pointers') &&
+                (fixture == 'arithmetic' ||
+                        fixture == 'pointers' ||
+                        fixture == 'doubles') &&
                     output is ObjectOutput
                 ? assets.file('compiler/$fixture.h')
                 : null,
@@ -71,6 +75,9 @@ Future<void> main() async {
               name: output.uri.pathSegments.last,
             ),
           );
+      await shared([
+        floatingFrames(target),
+      ], assets.library('abi/floating_frames'));
       Future<List<ObjectModule>> objects(
         String name,
         List<ObjectModule> modules,
@@ -104,6 +111,9 @@ Future<void> main() async {
       final data = dataModules(target);
       final decodedData = await objects('data_', data);
       await shared(decodedData, assets.library('linker/data'));
+      await shared([
+        decodedData.first,
+      ], assets.library('compiler/double_storage'));
       await shared([decodedData.first], assets.library('linker/storage'));
       await shared([
         decodedData.first,

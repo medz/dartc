@@ -13,3 +13,13 @@ final class Frames() {
 
   void close() => _library.close();
 }
+
+final class FloatingFrames() {
+  final _library = NativeAssets(Target.host()).open('abi/floating_frames');
+  late final roundTrip = _library
+      .lookupFunction<Double Function(Double), double Function(double)>(
+        'floating_frame',
+      );
+
+  void close() => _library.close();
+}

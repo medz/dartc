@@ -25,8 +25,8 @@ final class FunctionSelection<R>(
         function.target.signature.optionalSlots.isNotEmpty ||
         function.target.signature.namedParameters.isNotEmpty ||
         !(function.target.returnType == .voidType ||
-            _word(function.target.returnType)) ||
-        function.target.parameterTypes.any((type) => !_word(type))) {
+            _scalar(function.target.returnType)) ||
+        function.target.parameterTypes.any((type) => !_scalar(type))) {
       throw UnsupportedError(
         'Native scalar signature: ${function.target.name}',
       );
@@ -42,9 +42,9 @@ final class FunctionSelection<R>(
       for (final instruction in block.instructions) {
         switch (instruction) {
           case DirectCall(:final inputs, :final type, :final typeArguments):
-            if (!(type == .voidType || _word(type)) ||
+            if (!(type == .voidType || _scalar(type)) ||
                 typeArguments.isNotEmpty ||
-                inputs.any((v) => !_word(v.type))) {
+                inputs.any((v) => !_scalar(v.type))) {
               throw UnsupportedError(
                 'Native call requires supported scalar arguments.',
               );
@@ -60,6 +60,35 @@ final class FunctionSelection<R>(
               LoadNativeInt64() ||
               StoreNativeInt64():
             break;
+          case NumericNegate(:final type):
+            if (type != .floating) {
+              throw UnsupportedError('Native numeric negation: $type');
+            }
+          case NumericBinary(:final operator, :final left, :final right):
+            if (left.type != .floating || right.type != .floating) {
+              throw UnsupportedError(
+                'Native arithmetic requires known double operands.',
+              );
+            }
+            final encoding = switch (operator) {
+              .add => emitter.addDouble,
+              .subtract => emitter.subtractDouble,
+              .multiply => emitter.multiplyDouble,
+              .divide => emitter.divideDouble,
+              .lessThan => emitter.comparison(.lessThan, floating: true),
+              .lessOrEqual => emitter.comparison(.lessOrEqual, floating: true),
+              .greaterThan => emitter.comparison(.greaterThan, floating: true),
+              .greaterOrEqual => emitter.comparison(
+                .greaterOrEqual,
+                floating: true,
+              ),
+              _ => throw UnsupportedError('Native double operation: $operator'),
+            };
+            binaries[instruction] = (
+              encoding: encoding,
+              left: left,
+              right: right,
+            );
           case IntBinary(:final operator, :final left, :final right):
             final encoding = switch (operator) {
               .add => emitter.add,
@@ -82,13 +111,19 @@ final class FunctionSelection<R>(
               right: right,
             );
           case Equals(:final left, :final right, :final negated):
-            if (!_word(left.type) || !_word(right.type)) {
+            if (!_scalar(left.type) ||
+                !_scalar(right.type) ||
+                (left.type == .integer && right.type == .floating) ||
+                (left.type == .floating && right.type == .integer)) {
               throw UnsupportedError(
                 'Native equality requires supported scalar operands.',
               );
             }
             final BinaryEncoding<R> encoding = left.type == right.type
-                ? emitter.comparison(negated ? .notEqual : .equal)
+                ? emitter.comparison(
+                    negated ? .notEqual : .equal,
+                    floating: left.type == .floating,
+                  )
                 : BinaryEncoding(
                     (destination, _, _) =>
                         emitter.loadImmediate(destination, negated ? 1 : 0),
@@ -107,11 +142,19 @@ final class FunctionSelection<R>(
     }
   }
 
-  bool _word(ValueType type) =>
-      type == .integer || type == .boolean || type == FfiTypes.int64Pointer;
+  /// Selects the physical bank for an already supported value representation.
+  RegisterBank bank(ValueType type) => type == .floating ? .floating : .general;
+
+  bool _scalar(ValueType type) =>
+      type == .integer ||
+      type == .boolean ||
+      type == .floating ||
+      type == FfiTypes.int64Pointer;
 
   Type _nativeType(ValueType type) => type == .voidType
       ? Void
+      : type == .floating
+      ? Double
       : type == FfiTypes.int64Pointer
       ? Pointer<Int64>
       : Int64;

@@ -1,5 +1,6 @@
-/// x86-64 instruction encoding with explicit 64-bit registers.
+/// x86-64 instruction encoding with explicit scalar registers.
 library;
 
-export '../src/assembler/x64/assembler.dart'
-    show Assembler, Register, Condition;
+export '../src/assembler/x64/assembler.dart' show Assembler;
+export '../src/assembler/x64/registers.dart'
+    show CpuRegister, Register, FloatRegister, Condition;

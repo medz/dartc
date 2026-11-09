@@ -13,7 +13,7 @@ ObjectModule frames(Target target) {
     final frame = abi.frameLayout(
       localBytes: 8,
       localAlignment: 16,
-      savedRegisters: [.x19, .x20],
+      savedRegisters: <arm.Register>[.x19, .x20],
       outgoingStackBytes: 24,
     );
     abi.emitPrologue(code, frame);
@@ -42,7 +42,7 @@ ObjectModule frames(Target target) {
     final frame = abi.frameLayout(
       localBytes: 8,
       localAlignment: 16,
-      savedRegisters: [.rbx, .r12],
+      savedRegisters: <x64.Register>[.rbx, .r12],
       outgoingStackBytes: 24,
     );
     abi.emitPrologue(code, frame);

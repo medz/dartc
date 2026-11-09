@@ -33,5 +33,11 @@ void main() {
         'void write(int64_t*, int64_t);',
       ]),
     );
+    final doubles = NativeAssets(Target.host())
+        .file('compiler/doubles.h')
+        .readAsStringSync();
+    expect(doubles, contains('double add(double, double);'));
+    expect(doubles, contains('int64_t comparisons(double, double);'));
+    expect(doubles, contains('double rotate(double, double, int64_t);'));
   });
 }

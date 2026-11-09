@@ -2,38 +2,9 @@ import 'dart:typed_data';
 
 import '../code_buffer.dart';
 import '../fixup.dart';
+import 'registers.dart';
 
-/// A general-purpose register in instruction encoding order.
-enum Register() {
-  rax,
-  rcx,
-  rdx,
-  rbx,
-  rsp,
-  rbp,
-  rsi,
-  rdi,
-  r8,
-  r9,
-  r10,
-  r11,
-  r12,
-  r13,
-  r14,
-  r15,
-}
-
-/// A condition on the flags produced by a signed integer comparison.
-enum Condition(final int encoding) {
-  equal(4),
-  notEqual(5),
-  lessThan(12),
-  lessOrEqual(14),
-  greaterThan(15),
-  greaterOrEqual(13),
-}
-
-/// Encodes x86-64 integer instructions.
+/// Encodes x86-64 scalar instructions.
 final class Assembler() {
   final _bytes = CodeBuffer();
 
@@ -121,6 +92,77 @@ final class Assembler() {
   /// Updates flags as if subtracting [right] from [left], preserving registers.
   void compare(Register left, Register right) => _binary(0x39, left, right);
 
+  /// Copies the low 64 bits between SSE registers, preserving flags.
+  void moveDouble(FloatRegister destination, FloatRegister source) {
+    _bytes.checkOpen();
+    if (destination != source) _sse(0xf2, 0x10, destination, source);
+  }
+
+  /// Copies raw bits from a general register into a double register.
+  void moveBitsToDouble(FloatRegister destination, Register source) =>
+      _sse(0x66, 0x6e, destination, source, wide: true);
+
+  /// Copies raw bits from a double register into a general register.
+  void moveBitsToGeneral(Register destination, FloatRegister source) =>
+      _sse(0x66, 0x7e, source, destination, wide: true);
+
+  /// Adds two IEEE 754 doubles in [destination].
+  void addDouble(FloatRegister destination, FloatRegister source) =>
+      _sse(0xf2, 0x58, destination, source);
+
+  /// Subtracts [source] from the double in [destination].
+  void subtractDouble(FloatRegister destination, FloatRegister source) =>
+      _sse(0xf2, 0x5c, destination, source);
+
+  /// Multiplies doubles in [destination], without fusion with another operation.
+  void multiplyDouble(FloatRegister destination, FloatRegister source) =>
+      _sse(0xf2, 0x59, destination, source);
+
+  /// Divides the double in [destination] by [source].
+  void divideDouble(FloatRegister destination, FloatRegister source) =>
+      _sse(0xf2, 0x5e, destination, source);
+
+  /// Sets ZF/PF/CF using UCOMISD; unordered comparisons set all three.
+  void compareDouble(FloatRegister left, FloatRegister right) =>
+      _sse(0x66, 0x2e, left, right);
+
+  /// Flips one bit, storing its previous value in CF.
+  void complementBit(Register register, int bit) {
+    RangeError.checkValueInInterval(bit, 0, 63, 'bit');
+    _bytes.add([
+      0x48 | register.index >> 3,
+      0x0f,
+      0xba,
+      0xf8 | register.index & 7,
+      bit,
+    ]);
+  }
+
+  /// Loads a double with the address constraints of [load].
+  void loadDouble(FloatRegister destination, Register base, int offset) =>
+      _memory(0x10, destination, base, offset);
+
+  /// Stores a double with the address constraints of [store].
+  void storeDouble(FloatRegister source, Register base, int offset) =>
+      _memory(0x11, source, base, offset);
+
+  void _sse(
+    int prefix,
+    int opcode,
+    CpuRegister reg,
+    CpuRegister rm, {
+    bool wide = false,
+  }) {
+    final rex = 0x40 | (wide ? 8 : 0) | (reg.index >> 3) << 2 | rm.index >> 3;
+    _bytes.add([
+      prefix,
+      if (rex != 0x40) rex,
+      0x0f,
+      opcode,
+      0xc0 | (reg.index & 7) << 3 | rm.index & 7,
+    ]);
+  }
+
   /// Writes 0 or 1 for [condition], preserving flags and other registers.
   void setCondition(Register destination, Condition condition) {
     final low = destination.index & 7, high = destination.index >> 3;
@@ -179,16 +221,22 @@ final class Assembler() {
     return fixup;
   }
 
-  void _memory(int opcode, Register value, Register base, int offset) {
+  void _memory(int opcode, CpuRegister value, Register base, int offset) {
     RangeError.checkValueInInterval(offset, -0x80000000, 0x7fffffff, 'offset');
     final sib = base.index & 7 == 4;
-    final bytes = ByteData(sib ? 8 : 7)
-      ..setUint8(0, 0x48 | (value.index >> 3) << 2 | base.index >> 3)
-      ..setUint8(1, opcode)
-      ..setUint8(2, 0x80 | (value.index & 7) << 3 | base.index & 7)
-      ..setInt32(sib ? 4 : 3, offset, .little);
-    if (sib) bytes.setUint8(3, 0x24);
-    _bytes.add(bytes.buffer.asUint8List());
+    final floating = value is FloatRegister;
+    final rex =
+        0x40 | (floating ? 0 : 8) | (value.index >> 3) << 2 | base.index >> 3;
+    final displacement = ByteData(4)..setInt32(0, offset, .little);
+    _bytes.add([
+      if (floating) 0xf2,
+      if (rex != 0x40) rex,
+      if (floating) 0x0f,
+      opcode,
+      0x80 | (value.index & 7) << 3 | base.index & 7,
+      if (sib) 0x24,
+      ...displacement.buffer.asUint8List(),
+    ]);
   }
 
   /// Returns through the address at the top of the stack.

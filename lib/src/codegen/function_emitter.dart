@@ -15,6 +15,12 @@ enum Comparison() {
   greaterOrEqual,
 }
 
+/// The disjoint physical resources used by current scalar representations.
+enum RegisterBank() {
+  general,
+  floating,
+}
+
 /// Emits one function with explicit operand registers.
 abstract interface class FunctionEmitter<R>() {
   /// The calling rules for the explicit output platform.
@@ -23,7 +29,10 @@ abstract interface class FunctionEmitter<R>() {
   /// The registers this generator makes available to its allocator.
   List<R> get allocatableRegisters;
 
-  /// Copies a value between registers without changing flags.
+  /// The physical bank containing [register].
+  RegisterBank bank(R register);
+
+  /// Copies 64 bits within or between register banks without changing flags.
   void move(R destination, R source);
 
   /// Establishes the queried frame before the body.
@@ -41,7 +50,7 @@ abstract interface class FunctionEmitter<R>() {
   /// Binds a local destination at the next instruction.
   void bind(Label label);
 
-  /// Loads all 64 bits of [value] into [destination].
+  /// Loads all 64 bits of [value] into a general [destination] register.
   void loadImmediate(R destination, int value);
 
   /// The selected 64-bit wrapping addition and its operand constraint.
@@ -62,8 +71,26 @@ abstract interface class FunctionEmitter<R>() {
   /// The selected 64-bit bitwise exclusive or and its operand constraint.
   BinaryEncoding<R> get bitXor;
 
+  /// The selected IEEE double addition.
+  BinaryEncoding<R> get addDouble;
+
+  /// The selected IEEE double subtraction.
+  BinaryEncoding<R> get subtractDouble;
+
+  /// The selected IEEE double multiplication, without contraction.
+  BinaryEncoding<R> get multiplyDouble;
+
+  /// The selected IEEE double division.
+  BinaryEncoding<R> get divideDouble;
+
+  /// Whether double negation needs a distinct general temporary register.
+  bool get negationNeedsTemporary;
+
+  /// Flips a double's sign, changing only [destination], [temporary] and flags.
+  void negateDouble(R destination, R source, R? temporary);
+
   /// Selects a materialized 0/1 comparison, with no live flags after emission.
-  BinaryEncoding<R> comparison(Comparison comparison);
+  BinaryEncoding<R> comparison(Comparison comparison, {bool floating = false});
 
   /// Emits a jump to a local destination.
   void jump(Label target);

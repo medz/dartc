@@ -53,8 +53,81 @@ void main() {
   for (final os in OperatingSystem.values) {
     final armAbi = Arm64Abi(Target(os, .arm64)),
         x64Abi = X64Abi(Target(os, .x64));
-    layouts<arm.Register>(armAbi, <arm.Register>[.x19, .x20], .x0);
-    layouts<x64.Register>(x64Abi, <x64.Register>[.rbx, .r12], .rax);
+    test('$os exhausts integer and double argument banks independently', () {
+      final signature = NativeSignature(Double, [
+        Pointer<Int64>,
+        for (var i = 0; i < 9; i++) ...[Double, Int64],
+      ]);
+      final armCall = armAbi.classify(signature),
+          x64Call = x64Abi.classify(signature);
+      expect(armCall.result, arm.FloatRegister.d0);
+      expect(x64Call.result, x64.FloatRegister.xmm0);
+      expect(
+        armCall.parameters.whereType<RegisterArgument<arm.CpuRegister>>().map(
+          (v) => v.register,
+        ),
+        [
+          arm.Register.x0,
+          for (var i = 0; i < 8; i++) ...[
+            arm.FloatRegister.values[i],
+            if (i < 7) arm.Register.values[i + 1],
+          ],
+        ],
+      );
+      expect(
+        x64Call.parameters.whereType<RegisterArgument<x64.CpuRegister>>().map(
+          (v) => v.register,
+        ),
+        [
+          x64.Register.rdi,
+          for (var i = 0; i < 8; i++) ...[
+            x64.FloatRegister.values[i],
+            if (i < 5) <x64.Register>[.rsi, .rdx, .rcx, .r8, .r9][i],
+          ],
+        ],
+      );
+      expect(
+        armCall.parameters.whereType<StackArgument>().map((v) => v.offset),
+        [0, 8, 16],
+      );
+      expect(
+        x64Call.parameters.whereType<StackArgument>().map((v) => v.offset),
+        [0, 8, 16, 24, 32],
+      );
+      expect(armCall.stackBytes, 32);
+      expect(x64Call.stackBytes, 48);
+      expect(
+        armCall.clobberedRegisters,
+        containsAll([arm.FloatRegister.d0, arm.FloatRegister.d31]),
+      );
+      expect(armCall.clobberedRegisters, isNot(contains(arm.FloatRegister.d8)));
+      expect(x64Call.clobberedRegisters, containsAll(x64.FloatRegister.values));
+      final frame = armAbi.frameLayout(
+        localBytes: 0,
+        localAlignment: 8,
+        savedRegisters: <arm.FloatRegister>[.d8, .d15],
+        outgoingStackBytes: 0,
+      );
+      expect(frame.savedRegisters[arm.FloatRegister.d8], 0);
+      expect(frame.savedRegisters[arm.FloatRegister.d15], 8);
+      expect(
+        () => x64Abi.frameLayout(
+          localBytes: 0,
+          localAlignment: 8,
+          savedRegisters: <x64.FloatRegister>[.xmm8],
+          outgoingStackBytes: 0,
+        ),
+        throwsArgumentError,
+      );
+    });
+    layouts<arm.CpuRegister>(armAbi, <arm.Register>[
+      .x19,
+      .x20,
+    ], arm.Register.x0);
+    layouts<x64.CpuRegister>(x64Abi, <x64.Register>[
+      .rbx,
+      .r12,
+    ], x64.Register.rax);
     test(
       '$os shares word locations for pointers and integers with void results',
       () {
@@ -97,13 +170,13 @@ void main() {
         NativeSignature(Int64, List.filled(6, Int64)),
       );
       expect(
-        armCall.parameters.whereType<RegisterArgument<arm.Register>>().map(
+        armCall.parameters.whereType<RegisterArgument<arm.CpuRegister>>().map(
           (location) => location.register,
         ),
         <arm.Register>[.x0, .x1, .x2, .x3, .x4, .x5, .x6, .x7],
       );
       expect(
-        x64Call.parameters.whereType<RegisterArgument<x64.Register>>().map(
+        x64Call.parameters.whereType<RegisterArgument<x64.CpuRegister>>().map(
           (location) => location.register,
         ),
         <x64.Register>[.rdi, .rsi, .rdx, .rcx, .r8, .r9],

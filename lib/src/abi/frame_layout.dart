@@ -28,7 +28,7 @@ final class FrameLayout<R>._(
   final Map<R, int> savedRegisters = Map.unmodifiable(savedRegisters);
 }
 
-FrameLayout<R> integerFrame<R>(
+FrameLayout<R> scalarFrame<R>(
   Target target, {
   required int localBytes,
   required int localAlignment,

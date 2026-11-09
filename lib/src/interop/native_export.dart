@@ -11,12 +11,14 @@ final class NativeExport(final String symbol, final NativeSignature signature) {
     }
   }
 
-  /// Writes a C prototype with explicit integer, pointer and void types.
+  /// Writes a C prototype with explicit scalar, pointer and void types.
   void writeDeclaration(StringSink output) {
     String name(Type type) => type == Void
         ? 'void'
         : type == Int64
         ? 'int64_t'
+        : type == Double
+        ? 'double'
         : 'int64_t*';
     final parameters = signature.parameters.map(name).toList();
     output.writeln(
