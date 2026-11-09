@@ -1,3 +1,6 @@
+@Tags(['assets', 'native'])
+library;
+
 import 'dart:ffi';
 import 'dart:math';
 import 'dart:typed_data';
@@ -27,8 +30,11 @@ int mask(int? order) => switch (order) {
 };
 
 void main() {
-  final library = NumericLibrary();
-  tearDownAll(library.close);
+  late NumericLibrary library;
+  setUpAll(() {
+    library = NumericLibrary();
+    addTearDown(library.close);
+  });
   const integers = [
     -0x8000000000000000,
     -0x7fffffffffffffff,

@@ -1,11 +1,17 @@
+@Tags(['assets', 'native'])
+library;
+
 import 'package:test/test.dart';
 
 import 'fixtures/control_flow.dart' as sdk;
 import 'fixtures/control_flow_ffi.dart';
 
 void main() {
-  final native = ControlFlow();
-  tearDownAll(native.close);
+  late ControlFlow native;
+  setUpAll(() {
+    native = ControlFlow();
+    addTearDown(native.close);
+  });
 
   test(
     'signed comparisons, boolean results and multiple returns match the SDK',

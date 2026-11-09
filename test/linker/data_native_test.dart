@@ -1,3 +1,6 @@
+@Tags(['assets', 'native'])
+library;
+
 import 'dart:ffi';
 
 import 'package:test/test.dart';

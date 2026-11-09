@@ -1,3 +1,6 @@
+@Tags(['assets', 'native'])
+library;
+
 import 'package:test/test.dart';
 
 import 'fixtures/symbols.dart';
@@ -18,16 +21,11 @@ void main() {
       }
     },
   );
-  final values = Values();
-  tearDownAll(values.close);
-  final symbols = Symbols();
-  tearDownAll(symbols.close);
-
-  final calls = LinkedCalls();
-  tearDownAll(calls.close);
   test(
     'resolves imports and module-local references without exporting helpers',
     () {
+      final calls = LinkedCalls();
+      addTearDown(calls.close);
       expect(calls.forward(), 42);
       expect(calls.hasSymbol('helper'), isFalse);
       expect(calls.hasSymbol('local'), isFalse);
@@ -35,11 +33,15 @@ void main() {
   );
 
   test('functions from separate objects are callable', () {
+    final values = Values();
+    addTearDown(values.close);
     expect(values.first(), 40);
     expect(values.second(), 2);
   });
 
   test('large symbol tables resolve prefixes and Unicode names', () {
+    final symbols = Symbols();
+    addTearDown(symbols.close);
     for (final MapEntry(:key, :value) in symbolValues.entries) {
       expect(symbols(key), value, reason: key);
     }

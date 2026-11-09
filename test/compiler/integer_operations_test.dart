@@ -1,11 +1,17 @@
+@Tags(['assets', 'native'])
+library;
+
 import 'package:test/test.dart';
 
 import 'fixtures/integer_operations.dart' as sdk;
 import 'fixtures/integer_operations_ffi.dart';
 
 void main() {
-  final native = IntegerOperations();
-  tearDownAll(native.close);
+  late IntegerOperations native;
+  setUpAll(() {
+    native = IntegerOperations();
+    addTearDown(native.close);
+  });
 
   const values = [
     -0x8000000000000000,

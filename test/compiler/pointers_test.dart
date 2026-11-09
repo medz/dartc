@@ -1,3 +1,6 @@
+@Tags(['assets', 'native'])
+library;
+
 import 'dart:ffi';
 
 import 'package:test/test.dart';
@@ -6,8 +9,13 @@ import 'fixtures/pointers.dart' as sdk;
 import 'fixtures/pointers_ffi.dart';
 
 void main() {
-  final library = PointerLibrary(), memory = library.memory;
-  tearDownAll(library.close);
+  late PointerLibrary library;
+  late Pointer<Int64> memory;
+  setUpAll(() {
+    library = PointerLibrary();
+    addTearDown(library.close);
+    memory = library.memory;
+  });
 
   test('pointer bits round-trip independently of integer values', () {
     for (final bits in [

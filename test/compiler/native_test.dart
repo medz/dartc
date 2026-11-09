@@ -1,11 +1,17 @@
+@Tags(['assets', 'native'])
+library;
+
 import 'package:test/test.dart';
 
 import 'fixtures/arithmetic.dart' as sdk;
 import 'fixtures/arithmetic_ffi.dart';
 
 void main() {
-  final native = Arithmetic();
-  tearDownAll(native.close);
+  late Arithmetic native;
+  setUpAll(() {
+    native = Arithmetic();
+    addTearDown(native.close);
+  });
 
   test(
     'native functions accept arguments and return values through Dart FFI',

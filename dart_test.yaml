@@ -1,0 +1,15 @@
+tags:
+  assets:
+  native:
+
+presets:
+  unit:
+    exclude_tags: assets
+  native:
+    paths:
+      - test/abi
+      - test/codegen
+      - test/compiler
+      - test/linker
+    include_tags: native
+    exclude_tags: assets && !native

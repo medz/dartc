@@ -1,3 +1,6 @@
+@Tags(['assets', 'native'])
+library;
+
 import 'package:test/test.dart';
 
 import 'fixtures/stack_calls.dart' as sdk;
@@ -5,9 +8,6 @@ import 'fixtures/stack_helpers.dart' as helper;
 import 'fixtures/stack_calls_ffi.dart';
 
 void main() {
-  final native = StackCalls();
-  tearDownAll(native.close);
-
   int invoke(TenDart function, List<int> values) => function(
     values[0],
     values[1],
@@ -24,6 +24,8 @@ void main() {
   test(
     'register and stack arguments retain order, lifetime and all 64 bits',
     () {
+      final native = StackCalls();
+      addTearDown(native.close);
       final values = List.generate(10, (i) => i + 1);
       for (final boundary in [
         -0x8000000000000000,

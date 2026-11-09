@@ -1,3 +1,6 @@
+@Tags(['assets', 'native'])
+library;
+
 import 'dart:io';
 
 import 'package:dartc/src/compiler/cli/command.dart';

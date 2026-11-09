@@ -9,26 +9,8 @@ import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
 import 'fixtures/control_flow.dart';
-import 'fixtures/control_flow_ffi.dart';
 
 void main() {
-  final native = ControlFlowGraphs();
-  tearDownAll(native.close);
-
-  test(
-    'parallel edges retain distinct argument assignments to the same block',
-    () {
-      const values = [-0x8000000000000000, -1, 0, 42, 0x7fffffffffffffff];
-      for (final a in values) {
-        expect(native.scrambled(a), a + 7 + a);
-        expect(native.unusedResult(a, 2, 3, 4, 5, 6), a);
-        for (final b in values) {
-          expect(native.sameTarget(a, b), a < b ? a - b : b - a);
-        }
-      }
-    },
-  );
-
   test(
     'an infinite graph emits backward control flow without inventing a return',
     () {

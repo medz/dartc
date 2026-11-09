@@ -1,3 +1,6 @@
+@Tags(['assets'])
+library;
+
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 

@@ -1,3 +1,6 @@
+@Tags(['assets', 'native'])
+library;
+
 import 'package:test/test.dart';
 
 import 'fixtures/frames_ffi.dart';

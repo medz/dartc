@@ -1,11 +1,17 @@
+@Tags(['assets', 'native'])
+library;
+
 import 'package:test/test.dart';
 
 import 'fixtures/calls.dart' as sdk;
 import 'fixtures/calls_ffi.dart';
 
 void main() {
-  final native = Calls();
-  tearDownAll(native.close);
+  late Calls native;
+  setUpAll(() {
+    native = Calls();
+    addTearDown(native.close);
+  });
 
   test(
     'cross-file calls preserve arguments, live values and frame records',

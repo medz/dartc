@@ -1,3 +1,6 @@
+@Tags(['assets'])
+library;
+
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -11,113 +14,104 @@ import '../support/native_assets.dart';
 import 'fixtures/archives.dart';
 
 void main() {
+  // Archive records depend on the file format, not the member's CPU.
   for (final os in OperatingSystem.values) {
-    for (final arch in Architecture.values) {
-      final target = Target(os, arch), assets = NativeAssets(target);
-      final ObjectFormat format = os == .macos ? MachO(target) : Elf(target);
-      final original = assets.file('linker/values.a').readAsBytesSync();
+    final target = Target(os, .arm64), assets = NativeAssets(target);
+    final ObjectFormat format = os == .macos ? MachO(target) : Elf(target);
+    late final original = assets.file('linker/values.a').readAsBytesSync();
 
-      test('$target reads members, index order and duplicate names', () {
-        for (final fixture in ['values', 'calls', 'data']) {
-          final archive = Archive.decode(
-            assets.file('linker/$fixture.a').readAsBytesSync(),
-          );
-          final members = archive.members
-              .map((m) => format.decodeObject(m.bytes))
-              .toList();
-          expect(archive.members.map((m) => m.name), ['0.o', '1.o']);
-          expect(archive.index, [
-            for (final (i, module) in members.indexed)
-              for (final symbol in module.symbols)
-                if (symbol.binding == .global) (name: symbol.name, member: i),
-          ]);
-        }
-        final module = format.decodeObject(
-          assets.file('linker/0.o').readAsBytesSync(),
-        );
-        final duplicate = Archive.decode(
-          ArchiveWriter(format).encode([module, module]),
-        );
-        expect(duplicate.index, [
-          (name: module.symbols.single.name, member: 0),
-          (name: module.symbols.single.name, member: 1),
-        ]);
-      });
-
-      test('$target owns archive bytes and exposes only immutable views', () {
-        final buffer = Uint8List(original.length + 16)..setAll(8, original);
+    test('$target reads members, index order and duplicate names', () {
+      for (final fixture in ['values', 'calls', 'data']) {
         final archive = Archive.decode(
-          Uint8List.sublistView(buffer, 8, buffer.length - 8),
+          assets.file('linker/$fixture.a').readAsBytesSync(),
         );
-        buffer.fillRange(0, buffer.length, 0xff);
-        final module = format.decodeObject(archive.members.first.bytes);
-        expect(
-          format.encodeObject(module),
-          assets.file('linker/0.o').readAsBytesSync(),
-        );
-        expect(() => archive.members.clear(), throwsUnsupportedError);
-        expect(() => archive.index.clear(), throwsUnsupportedError);
-        expect(
-          () => archive.members.first.bytes[0] = 0,
-          throwsUnsupportedError,
-        );
-        expect(
-          () => archive.members.first.bytes.buffer.asUint8List()[0] = 0,
-          throwsUnsupportedError,
-        );
-      });
+        final members = archive.members
+            .map((m) => format.decodeObject(m.bytes))
+            .toList();
+        expect(archive.members.map((m) => m.name), ['0.o', '1.o']);
+        expect(archive.index, [
+          for (final (i, module) in members.indexed)
+            for (final symbol in module.symbols)
+              if (symbol.binding == .global) (name: symbol.name, member: i),
+        ]);
+      }
+      final module = format.decodeObject(
+        assets.file('linker/0.o').readAsBytesSync(),
+      );
+      final duplicate = Archive.decode(
+        ArchiveWriter(format).encode([module, module]),
+      );
+      expect(duplicate.index, [
+        (name: module.symbols.single.name, member: 0),
+        (name: module.symbols.single.name, member: 1),
+      ]);
+    });
 
-      test('$target rejects corrupt member and symbol records', () {
-        final darwin = os == .macos,
-            endian = darwin ? Endian.little : Endian.big;
-        final table =
-            68 +
-            (darwin
-                ? int.parse(ascii.decode(original.sublist(11, 24)).trim())
-                : 0);
-        final data = ByteData.sublistView(original);
-        final firstOffset = data.getUint32(table + (darwin ? 8 : 4), endian);
-        final strings = table + (darwin ? 24 : 12);
-        final corruptions = <String, void Function(ByteData)>{
-          'magic': (d) => d.setUint8(0, 0),
-          'header trailer': (d) => d.setUint8(66, 0),
-          'member size': (d) => d.setUint8(56, 57),
-          'numeric field': (d) => d.setUint8(24, 120),
-          'octal mode': (d) => d.setUint8(48, 56),
-          'index count': (d) => d.setUint32(table, 0xffffffff, endian),
-          'index points to metadata': (d) =>
-              d.setUint32(table + (darwin ? 8 : 4), 8, endian),
-          'index points to payload': (d) =>
-              d.setUint32(table + (darwin ? 8 : 4), firstOffset + 60, endian),
-          'empty symbol': (d) => d.setUint8(strings, 0),
-          'invalid UTF-8': (d) => d.setUint8(strings, 0xff),
-          'unterminated last symbol': (d) =>
-              d.setUint8(strings + (darwin ? 14 : 12), 1),
-          if (darwin) ...{
-            'name exceeds member': (d) => d.setUint8(11, 57),
-            'symbol string offset': (d) =>
-                d.setUint32(table + 4, 0xffffffff, .little),
-            'string size': (d) => d.setUint32(table + 20, 0xffffffff, .little),
-            'nonzero index padding': (d) => d.setUint8(strings + 15, 1),
-          },
-        };
-        for (final MapEntry(:key, :value) in corruptions.entries) {
-          final bytes = Uint8List.fromList(original);
-          value(ByteData.sublistView(bytes));
-          expect(
-            () => Archive.decode(bytes),
-            throwsFormatException,
-            reason: key,
-          );
-        }
-        for (final length in [0, 7, 67, original.length - 1]) {
-          expect(
-            () => Archive.decode(Uint8List.sublistView(original, 0, length)),
-            throwsFormatException,
-          );
-        }
-      });
-    }
+    test('$target owns archive bytes and exposes only immutable views', () {
+      final buffer = Uint8List(original.length + 16)..setAll(8, original);
+      final archive = Archive.decode(
+        Uint8List.sublistView(buffer, 8, buffer.length - 8),
+      );
+      buffer.fillRange(0, buffer.length, 0xff);
+      final module = format.decodeObject(archive.members.first.bytes);
+      expect(
+        format.encodeObject(module),
+        assets.file('linker/0.o').readAsBytesSync(),
+      );
+      expect(() => archive.members.clear(), throwsUnsupportedError);
+      expect(() => archive.index.clear(), throwsUnsupportedError);
+      expect(() => archive.members.first.bytes[0] = 0, throwsUnsupportedError);
+      expect(
+        () => archive.members.first.bytes.buffer.asUint8List()[0] = 0,
+        throwsUnsupportedError,
+      );
+    });
+
+    test('$target rejects corrupt member and symbol records', () {
+      final darwin = os == .macos, endian = darwin ? Endian.little : Endian.big;
+      final table =
+          68 +
+          (darwin
+              ? int.parse(ascii.decode(original.sublist(11, 24)).trim())
+              : 0);
+      final data = ByteData.sublistView(original);
+      final firstOffset = data.getUint32(table + (darwin ? 8 : 4), endian);
+      final strings = table + (darwin ? 24 : 12);
+      final corruptions = <String, void Function(ByteData)>{
+        'magic': (d) => d.setUint8(0, 0),
+        'header trailer': (d) => d.setUint8(66, 0),
+        'member size': (d) => d.setUint8(56, 57),
+        'numeric field': (d) => d.setUint8(24, 120),
+        'octal mode': (d) => d.setUint8(48, 56),
+        'index count': (d) => d.setUint32(table, 0xffffffff, endian),
+        'index points to metadata': (d) =>
+            d.setUint32(table + (darwin ? 8 : 4), 8, endian),
+        'index points to payload': (d) =>
+            d.setUint32(table + (darwin ? 8 : 4), firstOffset + 60, endian),
+        'empty symbol': (d) => d.setUint8(strings, 0),
+        'invalid UTF-8': (d) => d.setUint8(strings, 0xff),
+        'unterminated last symbol': (d) =>
+            d.setUint8(strings + (darwin ? 14 : 12), 1),
+        if (darwin) ...{
+          'name exceeds member': (d) => d.setUint8(11, 57),
+          'symbol string offset': (d) =>
+              d.setUint32(table + 4, 0xffffffff, .little),
+          'string size': (d) => d.setUint32(table + 20, 0xffffffff, .little),
+          'nonzero index padding': (d) => d.setUint8(strings + 15, 1),
+        },
+      };
+      for (final MapEntry(:key, :value) in corruptions.entries) {
+        final bytes = Uint8List.fromList(original);
+        value(ByteData.sublistView(bytes));
+        expect(() => Archive.decode(bytes), throwsFormatException, reason: key);
+      }
+      for (final length in [0, 7, 67, original.length - 1]) {
+        expect(
+          () => Archive.decode(Uint8List.sublistView(original, 0, length)),
+          throwsFormatException,
+        );
+      }
+    });
   }
 
   test('reads GNU long names and BSD UTF-8 names without decoding members', () {

@@ -65,7 +65,7 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 
 [栈参数验证](../test/compiler/stack_calls_test.dart)对照 SDK 检查十参数入口、十及十一参数调用、嵌套调用、参数轮换与整数边界；[独立 ABI 调用](../test/abi/native_test.dart)通过另一个目标模块传递栈参数。[位置契约](../test/abi/layout_test.dart)检查参数位置、栈区大小和非法输入；[栈访问边界](../test/codegen/arguments_test.dart)检查机器位移上限。
 
-[原生控制流对照](../test/compiler/control_flow_test.dart)覆盖整数边界比较、布尔辅助函数、短路副作用、循环的零次/一次/多次执行、嵌套循环及标签转移、循环变量轮换和递归返回。[图交接验证](../test/codegen/control_flow_test.dart)覆盖同目标的不同边参数、乱序块布局、空块及不返回的循环；[不支持的异常路径](../test/compiler/fixtures/unsupported_control_flow.dart)仍明确拒绝生成，不因分支或未使用结果而丢弃。
+[原生控制流对照](../test/compiler/control_flow_test.dart)覆盖整数边界比较、布尔辅助函数、短路副作用、循环的零次/一次/多次执行、嵌套循环及标签转移、循环变量轮换和递归返回。[图交接验证](../test/codegen/native_test.dart)覆盖同目标的不同边参数、乱序块布局和空块；[控制流编码验证](../test/codegen/control_flow_test.dart)检查不返回的循环。[不支持的异常路径](../test/compiler/fixtures/unsupported_control_flow.dart)仍明确拒绝生成，不因分支或未使用结果而丢弃。
 
 ## 规范依据
 

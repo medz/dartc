@@ -1,3 +1,6 @@
+@Tags(['assets', 'native'])
+library;
+
 import 'dart:ffi';
 import 'dart:typed_data';
 
@@ -17,8 +20,11 @@ void sameDouble(double actual, double expected) {
 }
 
 void main() {
-  final library = DoubleLibrary();
-  tearDownAll(library.close);
+  late DoubleLibrary library;
+  setUpAll(() {
+    library = DoubleLibrary();
+    addTearDown(library.close);
+  });
   final values = [
     0.0,
     -0.0,

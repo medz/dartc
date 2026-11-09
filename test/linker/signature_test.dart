@@ -1,3 +1,6 @@
+@Tags(['assets'])
+library;
+
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';

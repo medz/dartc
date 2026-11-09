@@ -45,7 +45,7 @@ Use Dart SDK `^3.13.7` and run:
 ```sh
 dart pub get
 dart analyze --fatal-infos
-dart run tool/build_test_assets.dart && dart test
+dart test -P unit
 dart run tool/print_ir.dart test/frontend/lowering/fixtures/functions.dart
 ```
 
@@ -53,6 +53,6 @@ The last command prints the basic blocks, calls and branches for each function i
 
 Assertions are disabled by default. Pass `enableAssertions: true` to the `Lowering` constructor to preserve assertion statements and constructor assertion initializers.
 
-Before running tests, build the fixed native assets with `dart run tool/build_test_assets.dart`. Sources and Dart FFI bindings live in each domain's `test/<domain>/fixtures/` directory; generated files go to `build/test/<target>/`. Native execution tests call these bindings directly. Rebuild the assets after changing the compiler or fixtures. Tests require no external native toolchain.
+Run changed-domain tests during development. For native execution, build the host's assets (for example, `dart run tool/build_test_assets.dart macos-arm64`) and run `dart test -P native`. The unfiltered `dart test` runs all suites and requires assets for every target, built by omitting the target argument. See the [testing guide](test/README.md) for validation scope and cross-platform execution. Tests require no external native toolchain.
 
 [Release notes](https://github.com/medz/dartc/blob/main/CHANGELOG.md) · [MIT license](https://github.com/medz/dartc/blob/main/LICENSE)
