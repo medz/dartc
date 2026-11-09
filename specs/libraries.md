@@ -32,6 +32,7 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 | 项目 | 当前原生范围与缺口 |
 | --- | --- |
 | 导出签名 | 同步、非泛型的顶层函数；参数和结果支持 `Int8/16/32/64`、`Uint8/16/32/64`、`Float`、`Double` 和这些标量类型的 `Pointer<T>`，分别对应非可空 Dart `int`、`double` 和同元素类型的指针；结果另支持 `Void`，对应 Dart `void`。原生整数边界按签名扩展或截断，Float 边界转换单精度与 double；普通 Dart 调用注解函数保留完整 int/double，不受原生签名截断。只接受必需位置参数。其他标量、指针元素类型、结构体、可变参数和数据导出尚未实现。 |
+| 已绑定原生调用 | 独立 `CodeGenerator.generate` API 接受以 `IrExternal.target` 为键的 `imports`，由 `NativeImport` 明确原生符号及上述标量签名。Dart 参数在出站边界转换，原生结果按宽度/精度转换回 Dart 值；调用者存活值及写入副作用保留，参数遵循目标平台寄存器和栈布局。绑定必须匹配外部声明，缺失或不匹配均报错；原生实现由链接输入提供。`Compiler.compile` 尚未自动绑定 `@Native`，资产解析、函数指针与 `asFunction` 调用、回调及托管调用协议仍未接通，不能据此声称完整 dart:ffi 支持。 |
 | 函数体 | 整数常量、加法、减法、乘法、按位与/或/异或/取反及相应复合赋值、有符号比较，整数与布尔值的相等/不等比较；整数运算保留 64 位环绕结果，`int / int` 产生 double。支持条件表达式、逻辑短路、if/else、while/do/for、含标签的 break/continue、多返回，以及批次内跨库调用和递归。Dart 函数间的直接调用支持可选位置参数、命名参数及常量默认值；原生导出仍只接受必需位置参数。整数截断除法、余数、移位、对象存储、异常及异步尚未接入原生后端。 |
 | 浮点 | 支持静态 int/double 操作数的混合加、减、乘、IEEE 除法、全部数值比较及 `toDouble`，另支持 double 常量和取负；比较保持整数的原始数值，不因算术转换而丢失精度。保留 NaN、无穷、次正规数和正负零行为，不做融合乘加或 fast-math 改写。参数、结果、分支汇合和调用保持 double 表示。部分混合数值常量表达式尚未实现，见[数值比较](expressions.md#数值比较与-sdk-差异)。其他数值转换、浮点取模/截断除法、compareTo 及完整数学库尚未接入。当前执行验证使用 SDK 宿主的默认浮点控制环境，非默认控制状态尚未验证。 |
 | 参数与存储 | ARM64 的前八个、x86-64 的前六个原生整数或指针参数使用通用寄存器；两者另有八个由 `Float` 和 `Double` 共用的浮点参数寄存器，与通用寄存器独立分配。各类超出的参数按源顺序使用栈：macOS ARM64 按实际大小自然对齐，Linux ARM64 与 x86-64 使用八字节槽。Dart 函数间另支持布尔参数及结果，不隐式扩展原生导出签名。分支、循环和调用之间保留活跃值，块参数遵循同时赋值语义；栈帧保持 16 字节对齐及帧指针链，出参区与局部存储分开。ARM64 帧支持保存 D8–D15 的低 64 位，x86-64 的标量浮点寄存器均按调用可破坏处理。超出当前栈访问、栈帧或分支/调用位移编码范围时明确报错。 |
@@ -52,6 +53,8 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 [原生整数验证](../test/compiler/native_integers_test.dart)检查各宽度的正负边界、截断与扩展、邻接字节保护、IR 与原生访问、注解函数的普通 Dart 调用，以及窄整数与浮点混合栈参数。整数读写预期由元素位宽独立计算；SDK 对照不替代该预期。规范依据包括 [Int8Pointer.value](https://api.dart.dev/stable/3.13.7/dart-ffi/Int8Pointer/value.html)、[Uint8Pointer.value](https://api.dart.dev/stable/3.13.7/dart-ffi/Uint8Pointer/value.html)及对应宽度的标准库契约。
 
 [原生浮点存储验证](../test/compiler/native_floats_test.dart)检查 Float 参数与结果、普通调用保持 double 精度、Float/Double 指针读写、复合赋值及混合栈参数。默认浮点环境下的舍入预期使用明确的 binary32 位模式，覆盖中点、次正规数、溢出、正负零与 NaN；另与 SDK 对照。规范依据为 [FloatPointer.value](https://api.dart.dev/stable/3.13.7/dart-ffi/FloatPointer/value.html) 和 [DoublePointer.value](https://api.dart.dev/stable/3.13.7/dart-ffi/DoublePointer/value.html)。
+
+[出站调用验证](../test/codegen/native_calls_test.dart)执行独立原生被调函数，检查整数截断/扩展、Float 参数和结果、调用者原值存活、指针与 void 副作用、21 个混合参数及原生栈布局；混合调用同时经 SDK FFI 验证。[绑定契约](../test/codegen/native_imports_test.dart)检查声明身份、签名拒绝、符号别名与未决引用。源码 `@Native` 的资产身份、查找顺序及调用属性仍须按 [Native 库契约](https://api.dart.dev/stable/3.13.7/dart-ffi/Native-class.html)接通。
 
 [浮点对照](../test/compiler/doubles_test.dart)检查 double 运算与全部比较、NaN、无穷、次正规数、负零和取负后的 NaN 载荷；覆盖两类寄存器耗尽、十九个混合参数及栈溢出、常量参数、调用保存和循环交换。[ABI 执行验证](../test/abi/native_test.dart)检查浮点局部存储及 ARM64 的被调用者保存标量寄存器；[布局检查](../test/abi/layout_test.dart)区分通用/浮点位置、破坏集合和栈偏移。
 

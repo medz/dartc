@@ -8,6 +8,7 @@ import 'package:dartc/object/mach_o.dart';
 import 'package:dartc/target.dart';
 
 import '../test/codegen/fixtures/aliases.dart';
+import '../test/codegen/fixtures/native_calls.dart';
 import '../test/abi/fixtures/frames.dart';
 import '../test/abi/fixtures/floating_frames.dart';
 import '../test/abi/fixtures/stack_calls.dart';
@@ -99,6 +100,10 @@ Future<void> main(List<String> args) async {
     }
 
     await shared([aliases(target)], assets.library('codegen/aliases'));
+    await shared(
+      await objects('native_calls_', nativeCalls(target)),
+      assets.library('codegen/native_calls'),
+    );
     await shared([frames(target)], assets.library('abi/frames'));
     await shared(stackCalls(target), assets.library('abi/stack_calls'));
     await shared([controlFlow(target)], assets.library('codegen/control_flow'));

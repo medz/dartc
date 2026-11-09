@@ -258,10 +258,14 @@ final class _X64Emitter(
   };
 
   @override
-  void storeStack(CpuRegister source, int offset) => switch (source) {
-    Register() => assembler.store(source, .rsp, offset),
-    FloatRegister() => assembler.storeDouble(source, .rsp, offset),
-  };
+  void storeStack(CpuRegister source, int offset, {int bytes = 8}) =>
+      switch (source) {
+        Register() => assembler.store(source, .rsp, offset, bytes: bytes),
+        FloatRegister() =>
+          bytes == 4
+              ? assembler.storeFloat(source, .rsp, offset)
+              : assembler.storeDouble(source, .rsp, offset),
+      };
 
   @override
   Fixup call() => assembler.call();

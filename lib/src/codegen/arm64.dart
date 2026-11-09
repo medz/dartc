@@ -244,10 +244,14 @@ final class _Arm64Emitter(
   };
 
   @override
-  void storeStack(CpuRegister source, int offset) => switch (source) {
-    Register() => assembler.store(source, .sp, offset),
-    FloatRegister() => assembler.storeDouble(source, .sp, offset),
-  };
+  void storeStack(CpuRegister source, int offset, {int bytes = 8}) =>
+      switch (source) {
+        Register() => assembler.store(source, .sp, offset, bytes: bytes),
+        FloatRegister() =>
+          bytes == 4
+              ? assembler.storeFloat(source, .sp, offset)
+              : assembler.storeDouble(source, .sp, offset),
+      };
 
   @override
   Fixup call() => assembler.call();

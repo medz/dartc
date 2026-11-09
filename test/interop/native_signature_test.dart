@@ -4,6 +4,19 @@ import 'package:dartc/interop.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'native imports retain signatures and reject invalid symbol strings',
+    () {
+      final signature = NativeSignature(Int8, [Float]);
+      final binding = NativeImport('_foreign_symbol', signature);
+      expect(binding.symbol, '_foreign_symbol');
+      expect(binding.signature, same(signature));
+      for (final symbol in ['', 'bad\u0000symbol']) {
+        expect(() => NativeImport(symbol, signature), throwsArgumentError);
+      }
+    },
+  );
+
   test('floating signatures preserve storage widths and C declarations', () {
     for (final (type, pointer, bytes, name) in [
       (Float, Pointer<Float>, 4, 'float'),

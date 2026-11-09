@@ -11,11 +11,14 @@ abstract interface class CodeGenerator() {
   /// Generates the selected definitions and exposes the declared native exports.
   ///
   /// Definitions must belong to [program] and include every directly called
-  /// body. [exports] marks a subset; it does not select or discover functions.
-  /// Unsupported operations fail before an artifact is returned.
+  /// body or external declaration. [imports] binds external declarations to
+  /// native signatures; [exports] exposes a subset of the supplied Dart bodies.
+  /// The caller resolves native symbols and supplies their implementations when
+  /// linking. Unsupported operations fail before an artifact is returned.
   ObjectModule generate(
     IrProgram program, {
     required Iterable<FunctionTarget> definitions,
     Map<FunctionTarget, NativeExport> exports = const {},
+    Map<FunctionTarget, NativeImport> imports = const {},
   });
 }

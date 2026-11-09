@@ -126,8 +126,8 @@ abstract interface class FunctionEmitter<R>() {
     bool signed = false,
   });
 
-  /// Saves a word to a slot in the current frame.
-  void storeStack(R source, int offset);
+  /// Writes the low [bytes] to a slot in the current frame without changing inputs.
+  void storeStack(R source, int offset, {int bytes = 8});
 
   /// Loads scalar bits, extending integers; [destination] may alias [base].
   void loadMemory(

@@ -6,6 +6,8 @@ The development version uses the official Dart analyzer and provides reusable an
 
 Use `package:dartc/frontend.dart` to check libraries and translate them to IR, and `package:dartc/ir.dart` to inspect or construct verified SSA functions. Backend APIs are available separately through `target.dart`, `assembler.dart`, `assembler/arm64.dart`, `assembler/x64.dart`, `abi.dart`, `codegen.dart`, `object.dart`, `object/elf.dart`, `object/mach_o.dart` and `linker.dart`.
 
+The standalone `CodeGenerator.generate` API accepts an `imports` map from external IR declaration identities to `NativeImport` values from `interop.dart`. Each binding specifies a native symbol and FFI signature; generated calls convert scalar arguments and results at that boundary. Supply the native implementations when linking. Automatic `@Native` asset resolution and function-pointer calls are not yet available.
+
 Object and linker APIs support code, read-only data, writable data and zero-initialized storage, with cross-module calls and address references. `ObjectFormat.decodeObject(bytes)` reads supported Mach-O/ELF objects; `Archive.decode(bytes)` reads indexed static archives. Pass ordered `LinkInput.object(module)` and `LinkInput.archive(archive)` values to `Linker.linkSharedLibrary` to include objects and select the archive members needed by unresolved references. Dart global variables are not yet compiled to this storage.
 
 `package:dartc/compiler.dart` combines these APIs. `Compiler.compile` accepts an `Output.object()`, `Output.staticLibrary()` or `Output.sharedLibrary(name)` request and returns a `Compilation` with final bytes and C declarations. `Compilation.write` saves them; it does not change the compiled library name.
