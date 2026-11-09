@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/assembler/arm64.dart' as arm;
@@ -32,14 +34,19 @@ List<ObjectModule> stackCalls(Target target) {
   final callee = generator.generate(
     program,
     definitions: [declaration],
-    exports: {declaration: NativeExport('stack_value', .int64(10))},
+    exports: {
+      declaration: NativeExport(
+        'stack_value',
+        .new(Int64, List.filled(10, Int64)),
+      ),
+    },
   );
 
   final List<int> code;
   final Fixup call;
   if (target.architecture == .arm64) {
     final abi = Arm64Abi(target), assembler = arm.Assembler();
-    final layout = abi.classify(.int64(10));
+    final layout = abi.classify(.new(Int64, List.filled(10, Int64)));
     final frame = abi.frameLayout(
       localBytes: 0,
       localAlignment: 8,
@@ -57,7 +64,7 @@ List<ObjectModule> stackCalls(Target target) {
     code = assembler.finish();
   } else {
     final abi = X64Abi(target), assembler = x64.Assembler();
-    final layout = abi.classify(.int64(10));
+    final layout = abi.classify(.new(Int64, List.filled(10, Int64)));
     final frame = abi.frameLayout(
       localBytes: 0,
       localAlignment: 8,

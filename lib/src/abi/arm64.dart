@@ -6,7 +6,7 @@ import 'calling_convention.dart';
 import 'call_layout.dart';
 import 'frame_layout.dart';
 
-/// Classifies integer calls and emits frames for macOS and Linux AArch64.
+/// Classifies integer and pointer calls for macOS and Linux AArch64.
 final class Arm64Abi(@override final Target target)
     implements CallingConvention<Register> {
   this {
@@ -18,7 +18,7 @@ final class Arm64Abi(@override final Target target)
   @override
   CallLayout<Register> classify(NativeSignature signature) {
     const parameters = <Register>[.x0, .x1, .x2, .x3, .x4, .x5, .x6, .x7];
-    return .int64(signature, parameters, .x0, [
+    return .words(signature, parameters, .x0, [
       for (var i = 0; i <= 17; i++) Register.values[i],
       if (target.operatingSystem == .linux) .x18,
       .x30,

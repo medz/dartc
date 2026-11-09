@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import 'dart:typed_data';
 
 import 'package:dartc/codegen.dart';
@@ -72,7 +74,10 @@ void main() {
             program,
             definitions: [target],
             exports: {
-              target: NativeExport('predicate', NativeSignature.int64(0)),
+              target: NativeExport(
+                'predicate',
+                NativeSignature(Int64, List.filled(0, Int64)),
+              ),
             },
           ),
           throwsArgumentError,

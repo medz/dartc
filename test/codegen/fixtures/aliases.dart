@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import 'package:dartc/object.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
@@ -36,7 +38,10 @@ ObjectModule aliases(Target target) {
       for (final f in program.functions)
         f.target: NativeExport(
           f.target.name,
-          NativeSignature.int64(f.target.parameterTypes.length),
+          NativeSignature(
+            Int64,
+            List.filled(f.target.parameterTypes.length, Int64),
+          ),
         ),
     },
   );

@@ -5,6 +5,7 @@ import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
+import 'ffi.dart';
 import 'collection.dart';
 import 'function_context.dart';
 import 'operators.dart';
@@ -258,6 +259,22 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       }
       if (expression is ast.InstanceCreationExpression) {
         context.checkDeferred(expression.constructorName.type);
+      }
+      if (ffiClass(ctor.enclosingElement) == FfiTypes.pointer &&
+          context.typeOf(expression.staticType!, expression) ==
+              FfiTypes.int64Pointer) {
+        final args = context.arguments(
+          argumentList,
+          (e) => lowerExpression(context, e),
+        );
+        if (args == null) return null;
+        final operation = ffiOperation(
+          ctor,
+          args.positional,
+          result: FfiTypes.int64Pointer,
+        );
+        if (operation != null) return context.emit(operation);
+        unsupported(unit, expression, 'native pointer construction');
       }
       final source = context.bindings.target(ctor, unit, expression);
       if (ctor.enclosingElement is ExtensionTypeElement) {

@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler/arm64.dart' as arm;
 import 'package:dartc/assembler/x64.dart' as x64;
@@ -53,9 +55,47 @@ void main() {
         x64Abi = X64Abi(Target(os, .x64));
     layouts<arm.Register>(armAbi, <arm.Register>[.x19, .x20], .x0);
     layouts<x64.Register>(x64Abi, <x64.Register>[.rbx, .r12], .rax);
+    test(
+      '$os shares word locations for pointers and integers with void results',
+      () {
+        final signature = NativeSignature(Void, [
+          for (var i = 0; i < 5; i++) ...[Pointer<Int64>, Int64],
+        ]);
+        for (final (call, registers) in [
+          (armAbi.classify(signature), 8),
+          (x64Abi.classify(signature), 6),
+        ]) {
+          expect(call.result, isNull);
+          expect(
+            call.parameters.take(registers).every((p) => p is RegisterArgument),
+            isTrue,
+          );
+          expect(
+            call.parameters
+                .skip(registers)
+                .cast<StackArgument>()
+                .map((p) => p.offset),
+            [for (var i = 0; i < 10 - registers; i++) i * 8],
+          );
+          expect(call.stackBytes, (10 - registers) * 8);
+        }
+        expect(
+          armAbi.classify(NativeSignature(Pointer<Int64>, [])).result,
+          arm.Register.x0,
+        );
+        expect(
+          x64Abi.classify(NativeSignature(Pointer<Int64>, [])).result,
+          x64.Register.rax,
+        );
+      },
+    );
     test('$os classifies Int64 locations and actual call clobbers', () {
-      final armCall = armAbi.classify(NativeSignature.int64(8));
-      final x64Call = x64Abi.classify(NativeSignature.int64(6));
+      final armCall = armAbi.classify(
+        NativeSignature(Int64, List.filled(8, Int64)),
+      );
+      final x64Call = x64Abi.classify(
+        NativeSignature(Int64, List.filled(6, Int64)),
+      );
       expect(
         armCall.parameters.whereType<RegisterArgument<arm.Register>>().map(
           (location) => location.register,
@@ -88,11 +128,21 @@ void main() {
       expect(armCall.stackBytes + x64Call.stackBytes, 0);
       expect(() => armCall.parameters.clear(), throwsUnsupportedError);
       expect(() => x64Call.clobberedRegisters.clear(), throwsUnsupportedError);
-      expect(armAbi.classify(NativeSignature.int64(0)).parameters, isEmpty);
-      expect(x64Abi.classify(NativeSignature.int64(0)).parameters, isEmpty);
+      expect(
+        armAbi
+            .classify(NativeSignature(Int64, List.filled(0, Int64)))
+            .parameters,
+        isEmpty,
+      );
+      expect(
+        x64Abi
+            .classify(NativeSignature(Int64, List.filled(0, Int64)))
+            .parameters,
+        isEmpty,
+      );
       for (final call in [
-        armAbi.classify(NativeSignature.int64(9)),
-        x64Abi.classify(NativeSignature.int64(7)),
+        armAbi.classify(NativeSignature(Int64, List.filled(9, Int64))),
+        x64Abi.classify(NativeSignature(Int64, List.filled(7, Int64))),
       ]) {
         expect(
           call.parameters.last,
@@ -105,8 +155,8 @@ void main() {
         expect(call.stackBytes, 16);
       }
       for (final (call, registerCount) in [
-        (armAbi.classify(NativeSignature.int64(11)), 8),
-        (x64Abi.classify(NativeSignature.int64(9)), 6),
+        (armAbi.classify(NativeSignature(Int64, List.filled(11, Int64))), 8),
+        (x64Abi.classify(NativeSignature(Int64, List.filled(9, Int64))), 6),
       ]) {
         expect(call.parameters, hasLength(registerCount + 3));
         expect(
@@ -169,6 +219,6 @@ void main() {
         throwsArgumentError,
       );
     }
-    expect(() => NativeSignature.int64(-1), throwsArgumentError);
+    expect(() => NativeSignature(Int64, [Void]), throwsUnsupportedError);
   });
 }

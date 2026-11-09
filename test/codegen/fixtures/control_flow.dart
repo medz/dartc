@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import 'package:dartc/object.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
@@ -86,7 +88,10 @@ ObjectModule controlFlow(Target target) {
         if (function.target.name != 'forever')
           function.target: NativeExport(
             function.target.name,
-            NativeSignature.int64(function.target.parameterTypes.length),
+            NativeSignature(
+              Int64,
+              List.filled(function.target.parameterTypes.length, Int64),
+            ),
           ),
     },
   );

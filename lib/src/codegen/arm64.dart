@@ -7,11 +7,11 @@ import 'package:dartc/target.dart';
 
 import 'function_emitter.dart';
 import 'binary_encoding.dart';
-import 'integer_generator.dart';
+import 'scalar_generator.dart';
 
-/// Generates AArch64 integer functions for the selected operating system.
+/// Generates AArch64 scalar functions for the selected operating system.
 final class Arm64CodeGenerator(Target target)
-    extends IntegerCodeGenerator<Register> {
+    extends ScalarCodeGenerator<Register> {
   this : super(target, () => _Arm64Emitter(Assembler(), Arm64Abi(target))) {
     if (target.architecture != .arm64) {
       throw ArgumentError('Expected an ARM64 target.');
@@ -118,6 +118,14 @@ final class _Arm64Emitter(
 
   @override
   Fixup call() => assembler.call();
+
+  @override
+  void loadMemory(Register destination, Register base) =>
+      assembler.load(destination, base, 0);
+
+  @override
+  void storeMemory(Register source, Register base) =>
+      assembler.store(source, base, 0);
 
   @override
   Uint8List finish() => assembler.finish();

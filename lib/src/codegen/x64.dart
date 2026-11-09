@@ -7,11 +7,11 @@ import 'package:dartc/assembler/x64.dart';
 
 import 'function_emitter.dart';
 import 'binary_encoding.dart';
-import 'integer_generator.dart';
+import 'scalar_generator.dart';
 
-/// Generates x86-64 integer functions for the selected operating system.
+/// Generates x86-64 scalar functions for the selected operating system.
 final class X64CodeGenerator(Target target)
-    extends IntegerCodeGenerator<Register> {
+    extends ScalarCodeGenerator<Register> {
   this : super(target, () => _X64Emitter(Assembler(), X64Abi(target))) {
     if (target.architecture != .x64) {
       throw ArgumentError('Expected an x64 target.');
@@ -120,6 +120,14 @@ final class _X64Emitter(
 
   @override
   Fixup call() => assembler.call();
+
+  @override
+  void loadMemory(Register destination, Register base) =>
+      assembler.load(destination, base, 0);
+
+  @override
+  void storeMemory(Register source, Register base) =>
+      assembler.store(source, base, 0);
 
   @override
   Uint8List finish() => assembler.finish();

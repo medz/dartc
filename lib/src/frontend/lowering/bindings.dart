@@ -7,6 +7,7 @@ import 'package:dartc/ir.dart';
 
 import 'analyzer_metadata.dart';
 import 'constant_safety.dart';
+import 'ffi.dart';
 
 /// An extension's static IR entry, distinct from its source callable signature.
 final class ExtensionExecutable(
@@ -1442,37 +1443,40 @@ final class Bindings({final bool enableAssertions = false}) {
     ResolvedUnitResult unit,
     ast.AstNode site,
   ) {
-    if (element.library.isDartCore) {
-      final builtin = switch (element.name) {
-        'Object' => ValueType.object,
-        'Type' => ValueType.typeType,
-        'Error' => ValueType.error,
-        'TypeError' => ValueType.typeError,
-        'NoSuchMethodError' => ValueType.noSuchMethodError,
-        'ArgumentError' => ValueType.argumentError,
-        'StateError' => ValueType.stateError,
-        'UnsupportedError' => ValueType.unsupportedError,
-        'AssertionError' => ValueType.assertionError,
-        'StackTrace' => ValueType.stackTrace,
-        'num' => ValueType.number,
-        'int' => ValueType.integer,
-        'double' => ValueType.floating,
-        'String' => ValueType.string,
-        'bool' => ValueType.boolean,
-        'Record' => ValueType.record,
-        'Function' => ValueType.function,
-        'Iterable' => CoreTypes.iterable,
-        'Iterator' => CoreTypes.iterator,
-        'List' => CoreTypes.list,
-        'Set' => CoreTypes.set,
-        'Map' => CoreTypes.map,
-        'MapEntry' => CoreTypes.mapEntry,
-        'Enum' => CoreTypes.enumeration,
-        'Symbol' => CoreTypes.symbol,
-        'Invocation' => CoreTypes.invocation,
-        '_Invocation' => CoreTypes.invocationStorage,
-        _ => null,
-      };
+    final ffi = ffiClass(element);
+    if (element.library.isDartCore || ffi != null) {
+      final builtin =
+          ffi ??
+          switch (element.name) {
+            'Object' => ValueType.object,
+            'Type' => ValueType.typeType,
+            'Error' => ValueType.error,
+            'TypeError' => ValueType.typeError,
+            'NoSuchMethodError' => ValueType.noSuchMethodError,
+            'ArgumentError' => ValueType.argumentError,
+            'StateError' => ValueType.stateError,
+            'UnsupportedError' => ValueType.unsupportedError,
+            'AssertionError' => ValueType.assertionError,
+            'StackTrace' => ValueType.stackTrace,
+            'num' => ValueType.number,
+            'int' => ValueType.integer,
+            'double' => ValueType.floating,
+            'String' => ValueType.string,
+            'bool' => ValueType.boolean,
+            'Record' => ValueType.record,
+            'Function' => ValueType.function,
+            'Iterable' => CoreTypes.iterable,
+            'Iterator' => CoreTypes.iterator,
+            'List' => CoreTypes.list,
+            'Set' => CoreTypes.set,
+            'Map' => CoreTypes.map,
+            'MapEntry' => CoreTypes.mapEntry,
+            'Enum' => CoreTypes.enumeration,
+            'Symbol' => CoreTypes.symbol,
+            'Invocation' => CoreTypes.invocation,
+            '_Invocation' => CoreTypes.invocationStorage,
+            _ => null,
+          };
       if (builtin != null) {
         for (final (i, parameter) in element.typeParameters.indexed) {
           _parameters[parameter.baseElement] = builtin.typeParameters[i];

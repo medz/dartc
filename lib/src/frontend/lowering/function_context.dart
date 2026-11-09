@@ -6,6 +6,7 @@ import 'package:dartc/ir.dart';
 
 import 'analyzer_metadata.dart';
 import 'bindings.dart';
+import 'ffi.dart';
 import 'core_member.dart';
 import 'closures.dart';
 
@@ -220,6 +221,13 @@ final class FunctionContext(
     EvaluatedArguments args,
     List<ValueType> memberTypes,
   ) {
+    if (args.named.isEmpty && memberTypes.isEmpty) {
+      final operation = ffiOperation(application.executable.declaration, [
+        receiver,
+        ...args.positional,
+      ]);
+      if (operation != null) return normal(emit(operation));
+    }
     final target = application.executable.target;
     return normal(
       emit(
@@ -284,6 +292,9 @@ final class FunctionContext(
         positional: args,
         named: {},
       ), []);
+    }
+    if (ffiOperation(member, [receiver, ...args]) case final operation?) {
+      return normal(emit(operation));
     }
     final target = direct
         ? bindings.superTarget(this.receiver!.type, member, unit, site)

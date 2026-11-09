@@ -8,10 +8,8 @@ import 'function_allocation.dart';
 import 'function_emitter.dart';
 import 'function_selection.dart';
 
-/// Generates an integer/boolean control-flow graph with explicit edge transfers.
-final class IntegerFunction<R extends Object>(
-  final FunctionEmitter<R> emitter,
-) {
+/// Generates a scalar control-flow graph with explicit edge transfers.
+final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
   /// Emits the body and reports direct call sites to the module generator.
   Uint8List generate(
     IrFunction function,
@@ -58,7 +56,31 @@ final class IntegerFunction<R extends Object>(
             }
           }
           call(emitter.call(), callInstruction.target);
-          allocation.define(instruction, layout.result);
+          if (layout.result case final result?) {
+            allocation.define(instruction, result);
+          }
+        } else if (instruction case StoreNativeInt64(
+          :final pointer,
+          :final value,
+        )) {
+          final base = allocation.read(pointer),
+              source = allocation.read(value, except: base);
+          emitter.storeMemory(source, base);
+          allocation.release(pointer);
+          allocation.release(value);
+        } else if (instruction
+            case PointerFromAddress(address: final operand) ||
+                PointerAddress(pointer: final operand) ||
+                LoadNativeInt64(pointer: final operand)) {
+          final source = allocation.read(operand);
+          allocation.release(operand);
+          final destination = allocation.allocate(preferred: source);
+          if (instruction is LoadNativeInt64) {
+            emitter.loadMemory(destination, source);
+          } else {
+            emitter.move(destination, source);
+          }
+          allocation.define(instruction, destination);
         } else {
           final (:encoding, :left, :right) = selection.binaries[instruction]!;
           final a = allocation.read(left),
@@ -74,9 +96,10 @@ final class IntegerFunction<R extends Object>(
         }
       }
       switch (block.end) {
-        case Return(value: final result?):
-          final value = allocation.read(result);
-          emitter.move(selection.entry.result, value);
+        case Return(:final value):
+          if (selection.entry.result case final result?) {
+            emitter.move(result, allocation.read(value!));
+          }
           if (allocation.frame case final frame?) {
             emitter.epilogue(frame);
           } else {

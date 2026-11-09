@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ffi' as ffi;
 
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
@@ -1763,6 +1764,16 @@ final class IrInterpreter(
 
     void execute(Instruction op) {
       switch (op) {
+        case PointerFromAddress(:final address):
+          values[op] = ffi.Pointer<ffi.Int64>.fromAddress(read(address) as int);
+        case PointerAddress(:final pointer):
+          values[op] = (read(pointer) as ffi.Pointer<ffi.Int64>).address;
+        case LoadNativeInt64(:final pointer):
+          values[op] = ffi.Int64Pointer(read(pointer) as ffi.Pointer<ffi.Int64>)
+              .value;
+        case StoreNativeInt64(:final pointer, :final value):
+          ffi.Int64Pointer(read(pointer) as ffi.Pointer<ffi.Int64>).value =
+              read(value) as int;
         case ReifyType(:final template):
           values[op] = _typeValue(resolve(template));
         case ObjectHashCode(:final operand, :final direct):
@@ -2374,6 +2385,7 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
   Object? run<T>() => cast ? value as T : value is T;
   Object? scalar<T>() => type == type.nonNullable ? run<T>() : run<T?>();
   final actual = switch (value) {
+    ffi.Pointer<ffi.Int64>() => FfiTypes.int64Pointer,
     _TypeValue() => ValueType.typeType,
     _Instance(:final type) => type,
     _CollectionValue(:final type) => type,
@@ -2784,6 +2796,7 @@ FunctionType _instantiateSignature(
 final _noDynamicBridge = Object();
 
 ValueType _runtimeValueType(Object? value) => switch (value) {
+  ffi.Pointer<ffi.Int64>() => FfiTypes.int64Pointer,
   null => ValueType.nullType,
   _Instance(:final type) => type,
   _CollectionValue(:final type) when type.declaration == CoreTypes.list => type,

@@ -21,5 +21,17 @@ void main() {
         'int64_t mixed(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);',
       ]),
     );
+    final pointers = NativeAssets(Target.host())
+        .file('compiler/pointers.h')
+        .readAsStringSync();
+    expect(
+      pointers,
+      stringContainsInOrder([
+        'int64_t* fromAddress(int64_t);',
+        'int64_t address(int64_t*);',
+        'int64_t read(int64_t*);',
+        'void write(int64_t*, int64_t);',
+      ]),
+    );
   });
 }

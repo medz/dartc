@@ -5,6 +5,7 @@ import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
+import 'ffi.dart';
 import 'core_member.dart';
 import 'function_context.dart';
 import 'operators.dart';
@@ -479,6 +480,11 @@ final class SelectorChain(
         node,
         direct: direct,
       );
+    }
+    if (member is GetterElement && arguments == null) {
+      if (ffiOperation(member, [known]) case final operation?) {
+        return context.normal(context.emit(operation));
+      }
     }
     final target = direct
         ? context.bindings.superTarget(

@@ -30,6 +30,16 @@ void main() {
         compiler.compile(['test/compiler/fixtures/nullable_signature.dart']),
         throwsUnsupportedError,
       );
+      for (final (fixture, error) in [
+        ('wrong_pointer_signature', throwsArgumentError),
+        ('nullable_pointer', throwsArgumentError),
+        ('unsupported_pointer', throwsUnsupportedError),
+      ]) {
+        await expectLater(
+          compiler.compile(['test/compiler/fixtures/$fixture.dart']),
+          error,
+        );
+      }
       await expectLater(
         compiler.compile(['test/compiler/fixtures/invalid_dependency.dart']),
         throwsFormatException,

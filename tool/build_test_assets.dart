@@ -34,6 +34,7 @@ Future<void> main() async {
         'control_flow',
         'stack_calls',
         'integer_operations',
+        'pointers',
       ]) {
         final library = assets.library('compiler/$fixture');
         for (final (file, output) in <(File, Output)>[
@@ -46,8 +47,10 @@ Future<void> main() async {
           ).compile(['test/compiler/fixtures/$fixture.dart'], output: output);
           await result.write(
             file,
-            header: fixture == 'arithmetic' && output is ObjectOutput
-                ? assets.file('compiler/arithmetic.h')
+            header:
+                (fixture == 'arithmetic' || fixture == 'pointers') &&
+                    output is ObjectOutput
+                ? assets.file('compiler/$fixture.h')
                 : null,
           );
         }
@@ -102,6 +105,9 @@ Future<void> main() async {
       final decodedData = await objects('data_', data);
       await shared(decodedData, assets.library('linker/data'));
       await shared([decodedData.first], assets.library('linker/storage'));
+      await shared([
+        decodedData.first,
+      ], assets.library('compiler/pointer_storage'));
       await assets
           .file('linker/data.a')
           .writeAsBytes(ArchiveWriter(format).encode(data));

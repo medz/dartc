@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import 'package:dartc/abi.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -22,30 +24,42 @@ final class FunctionSelection<R>(
         function.target.typeParameters.isNotEmpty ||
         function.target.signature.optionalSlots.isNotEmpty ||
         function.target.signature.namedParameters.isNotEmpty ||
-        !_word(function.target.returnType) ||
+        !(function.target.returnType == .voidType ||
+            _word(function.target.returnType)) ||
         function.target.parameterTypes.any((type) => !_word(type))) {
       throw UnsupportedError(
         'Native scalar signature: ${function.target.name}',
       );
     }
-    // Internal int/bool values use word locations; exports still require Int64.
+    // Internal booleans use integer locations; exported booleans remain rejected.
     entry = emitter.convention.classify(
-      NativeSignature.int64(function.entry.parameters.length),
+      NativeSignature(
+        _nativeType(function.target.returnType),
+        function.target.parameterTypes.map(_nativeType),
+      ),
     );
     for (final block in function.blocks) {
       for (final instruction in block.instructions) {
         switch (instruction) {
           case DirectCall(:final inputs, :final type, :final typeArguments):
-            if (!_word(type) ||
+            if (!(type == .voidType || _word(type)) ||
                 typeArguments.isNotEmpty ||
                 inputs.any((v) => !_word(v.type))) {
               throw UnsupportedError(
-                'Native call requires integer or boolean arguments.',
+                'Native call requires supported scalar arguments.',
               );
             }
             calls[instruction] = emitter.convention.classify(
-              NativeSignature.int64(inputs.length),
+              NativeSignature(
+                _nativeType(type),
+                inputs.map((v) => _nativeType(v.type)),
+              ),
             );
+          case PointerFromAddress() ||
+              PointerAddress() ||
+              LoadNativeInt64() ||
+              StoreNativeInt64():
+            break;
           case IntBinary(:final operator, :final left, :final right):
             final encoding = switch (operator) {
               .add => emitter.add,
@@ -70,7 +84,7 @@ final class FunctionSelection<R>(
           case Equals(:final left, :final right, :final negated):
             if (!_word(left.type) || !_word(right.type)) {
               throw UnsupportedError(
-                'Native equality requires integer or boolean operands.',
+                'Native equality requires supported scalar operands.',
               );
             }
             final BinaryEncoding<R> encoding = left.type == right.type
@@ -93,5 +107,12 @@ final class FunctionSelection<R>(
     }
   }
 
-  bool _word(ValueType type) => type == .integer || type == .boolean;
+  bool _word(ValueType type) =>
+      type == .integer || type == .boolean || type == FfiTypes.int64Pointer;
+
+  Type _nativeType(ValueType type) => type == .voidType
+      ? Void
+      : type == FfiTypes.int64Pointer
+      ? Pointer<Int64>
+      : Int64;
 }

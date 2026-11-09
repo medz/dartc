@@ -6,6 +6,7 @@ import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
+import 'ffi.dart';
 
 /// Binds explicit native annotations through the lowering declaration table.
 final class ExportBindings(final Bindings bindings)
@@ -33,14 +34,15 @@ final class ExportBindings(final Bindings bindings)
     if (native is! dart.FunctionType ||
         native.nullabilitySuffix != .none ||
         native.typeParameters.isNotEmpty ||
-        !_isInt64(native.returnType) ||
-        native.formalParameters.any(
-          (p) => !p.isRequiredPositional || !_isInt64(p.type),
-        )) {
+        native.formalParameters.any((p) => !p.isRequiredPositional)) {
       throw UnsupportedError(
-        'Native exports currently require an Int64 Function(Int64, ...) signature.',
+        'Native exports require a non-generic positional FFI function signature.',
       );
     }
+    final signature = NativeSignature(
+      nativeType(native.returnType),
+      native.formalParameters.map((p) => nativeType(p.type)),
+    );
     final target = bindings.target(
       declaration.declaredFragment!.element,
       unit,
@@ -55,29 +57,24 @@ final class ExportBindings(final Bindings bindings)
         target.typeParameters.isNotEmpty ||
         target.signature.optionalSlots.isNotEmpty ||
         target.signature.namedParameters.isNotEmpty ||
-        target.returnType != .integer ||
-        target.parameterTypes.any((type) => type != .integer) ||
-        target.parameterTypes.length != native.formalParameters.length) {
+        target.returnType != FfiTypes.valueType(signature.result) ||
+        target.parameterTypes.length != signature.parameters.length ||
+        target.parameterTypes.indexed.any(
+          (p) => p.$2 != FfiTypes.valueType(signature.parameters[p.$1]),
+        )) {
       throw ArgumentError(
-        'An Int64 export requires a synchronous positional int function.',
+        'Native exports require matching synchronous Dart parameter and result types.',
       );
     }
     final export = NativeExport(
       value!.getField('symbol')!.toStringValue() ?? target.name,
-      .int64(native.formalParameters.length),
+      signature,
     );
     if (functions.containsKey(target) || !_names.add(export.symbol)) {
       throw ArgumentError('Repeated native export: ${export.symbol}');
     }
     functions[target] = export;
   }
-
-  bool _isInt64(dart.DartType type) =>
-      type is dart.InterfaceType &&
-      type.nullabilitySuffix == .none &&
-      type.element.library.uri == _ffiLibrary &&
-      type.element == type.element.library.getClass('Int64');
 }
 
 final _exportLibrary = Uri.parse('package:dartc/src/interop/annotation.dart');
-final _ffiLibrary = Uri.parse('dart:ffi');

@@ -32,6 +32,7 @@ export 'src/ir/block.dart'
         Unreachable;
 export 'src/ir/function.dart' show IrCallable, IrExternal, IrFunction;
 export 'src/ir/program.dart' show IrClass, IrProgram;
+export 'src/ir/ffi_types.dart' show FfiTypes;
 export 'src/ir/signature.dart'
     show
         FunctionKind,
@@ -87,6 +88,10 @@ export 'src/ir/value.dart'
         Equals,
         Effect,
         Instruction,
+        PointerFromAddress,
+        PointerAddress,
+        LoadNativeInt64,
+        StoreNativeInt64,
         FunctionCall,
         InstantiateFunction,
         FunctionConstant,

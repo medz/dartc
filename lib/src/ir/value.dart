@@ -1,4 +1,5 @@
 import 'core_types.dart';
+import 'ffi_types.dart';
 import 'signature.dart';
 import 'type.dart';
 
@@ -424,7 +425,10 @@ sealed class Instruction(super.type) extends Value {
     LoadField(
       field: InstanceField(isLate: true),
     ) => const {.readsStorage, .mayThrow},
-    LoadGlobal() || LoadField() || ReadCell() => const {.readsStorage},
+    LoadGlobal() ||
+    LoadField() ||
+    ReadCell() ||
+    LoadNativeInt64() => const {.readsStorage},
     StoreGlobal(global: GlobalVariable(isFinal: true)) ||
     StoreField(field: InstanceField(isLate: true, isFinal: true)) ||
     WriteCell(
@@ -432,23 +436,78 @@ sealed class Instruction(super.type) extends Value {
     ) => _bindOnce,
     StoreField(:final field) when field.type.freeTypeParameters.isNotEmpty =>
       _checkedWrite,
-    StoreGlobal() || StoreField() || WriteCell() => const {.writesStorage},
+    StoreGlobal() ||
+    StoreField() ||
+    WriteCell() ||
+    StoreNativeInt64() => const {.writesStorage},
     TypeCast() ||
     NullCheck() ||
     IntBinary(operator: IntOperator(mayThrow: true)) ||
     NumericBinary(canThrow: true) => const {.mayThrow},
-    ReifyType() => const {.allocates},
+    ReifyType() || PointerFromAddress() => const {.allocates},
     Equals() ||
     IntBinary() ||
     NumericBinary() ||
     NumericNegate() ||
     TypeTest() ||
     TypeView() ||
-    RecordGet() => const {},
+    RecordGet() ||
+    PointerAddress() => const {},
   };
 
   /// Whether evaluation can transfer control to a Dart exception handler.
   bool get mayThrow => effects.contains(Effect.mayThrow);
+}
+
+/// Creates a `Pointer<Int64>` value without accessing or owning its storage.
+final class PointerFromAddress(final Value address) extends Instruction {
+  this : super(FfiTypes.int64Pointer) {
+    if (address.type != .integer) {
+      throw ArgumentError('Expected an integer address.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [address];
+}
+
+/// Extracts the address bits of a `Pointer<Int64>` without dereferencing it.
+final class PointerAddress(final Value pointer) extends Instruction {
+  this : super(.integer) {
+    if (pointer.type != FfiTypes.int64Pointer) {
+      throw ArgumentError('Expected Pointer<Int64>.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [pointer];
+}
+
+/// Reads signed 64-bit native storage at an eight-byte-aligned pointer.
+///
+/// The caller must keep the storage alive and readable. Invalid native memory
+/// access is not a Dart exception and is not checked by this operation.
+final class LoadNativeInt64(final Value pointer) extends Instruction {
+  this : super(.integer) {
+    if (pointer.type != FfiTypes.int64Pointer) {
+      throw ArgumentError('Expected Pointer<Int64>.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [pointer];
+}
+
+/// Writes signed 64-bit native storage at an eight-byte-aligned pointer.
+///
+/// The caller must keep the storage alive and writable. The write is observable
+/// through every alias, even when its result is unused.
+final class StoreNativeInt64(final Value pointer, final Value value)
+    extends Instruction {
+  this : super(.voidType) {
+    if (pointer.type != FfiTypes.int64Pointer || value.type != .integer) {
+      throw ArgumentError('Expected Pointer<Int64> and int.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [pointer, value];
 }
 
 /// Starts loading a deferred import and returns its completion Future.

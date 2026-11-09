@@ -8,10 +8,10 @@ import 'package:dartc/target.dart';
 
 import 'code_generator.dart';
 import 'function_emitter.dart';
-import 'integer_function.dart';
+import 'scalar_function.dart';
 
-/// Generates integer modules with target-specific function emitters.
-base class IntegerCodeGenerator<R extends Object>(
+/// Generates scalar modules with target-specific function emitters.
+base class ScalarCodeGenerator<R extends Object>(
   @override final Target target,
   FunctionEmitter<R> Function() createFunction,
 ) implements CodeGenerator {
@@ -39,14 +39,19 @@ base class IntegerCodeGenerator<R extends Object>(
       }
       final export = exports[declaration];
       if (export != null &&
-          (export.signature.parameterCount !=
+          (export.signature.parameters.length !=
                   declaration.parameterTypes.length ||
-              declaration.returnType != .integer ||
-              declaration.parameterTypes.any((type) => type != .integer))) {
+              declaration.returnType !=
+                  FfiTypes.valueType(export.signature.result) ||
+              declaration.parameterTypes.indexed.any(
+                (p) =>
+                    p.$2 !=
+                    FfiTypes.valueType(export.signature.parameters[p.$1]),
+              ))) {
         throw ArgumentError('Native signature mismatch: ${declaration.name}');
       }
       code.add(Uint8List((-code.length) & 15));
-      final bytes = IntegerFunction(_createFunction())
+      final bytes = ScalarFunction(_createFunction())
           .generate(function, (fixup, callee) {
             final index = indices[callee];
             if (index == null) {

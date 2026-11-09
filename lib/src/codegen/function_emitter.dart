@@ -77,6 +77,12 @@ abstract interface class FunctionEmitter<R>() {
   /// Saves a word to a slot in the current frame.
   void storeStack(R source, int offset);
 
+  /// Reads a native 64-bit word; [destination] may alias [base].
+  void loadMemory(R destination, R base);
+
+  /// Writes a native 64-bit word without changing either input register.
+  void storeMemory(R source, R base);
+
   /// Emits an unresolved direct call and returns its instruction field.
   Fixup call();
 

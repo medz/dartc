@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -42,7 +44,12 @@ void main() {
           () => generator.generate(
             program,
             definitions: [callee],
-            exports: {entry: NativeExport('caller', NativeSignature.int64(0))},
+            exports: {
+              entry: NativeExport(
+                'caller',
+                NativeSignature(Int64, List.filled(0, Int64)),
+              ),
+            },
           ),
           throwsArgumentError,
         );
@@ -50,7 +57,12 @@ void main() {
           () => generator.generate(
             program,
             definitions: [callee],
-            exports: {callee: NativeExport('add', NativeSignature.int64(0))},
+            exports: {
+              callee: NativeExport(
+                'add',
+                NativeSignature(Int64, List.filled(0, Int64)),
+              ),
+            },
           ),
           throwsArgumentError,
         );
@@ -84,7 +96,10 @@ void main() {
     final program = arithmetic();
     final exports = {
       for (final f in program.functions)
-        f.target: NativeExport(f.target.name, NativeSignature.int64(2)),
+        f.target: NativeExport(
+          f.target.name,
+          NativeSignature(Int64, List.filled(2, Int64)),
+        ),
     };
     for (final CodeGenerator generator in [
       Arm64CodeGenerator(const Target(.linux, .arm64)),

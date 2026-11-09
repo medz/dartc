@@ -2,7 +2,7 @@
 
 A native Dart compiler written in Dart.
 
-The development version uses the official Dart analyzer and provides reusable analysis, IR and native code generation APIs. Its native backend builds integer functions as object files, static libraries and shared libraries. See the [language support tracker](https://github.com/medz/dartc/blob/main/specs/README.md) for supported behavior and remaining gaps.
+The development version uses the official Dart analyzer and provides reusable analysis, IR and native code generation APIs. Its native backend builds integer and pointer functions as object files, static libraries and shared libraries. See the [language support tracker](https://github.com/medz/dartc/blob/main/specs/README.md) for supported behavior and remaining gaps.
 
 Use `package:dartc/frontend.dart` to check libraries and translate them to IR, and `package:dartc/ir.dart` to inspect or construct verified SSA functions. Backend APIs are available separately through `target.dart`, `assembler.dart`, `assembler/arm64.dart`, `assembler/x64.dart`, `abi.dart`, `codegen.dart`, `object.dart`, `object/elf.dart`, `object/mach_o.dart` and `linker.dart`.
 
@@ -32,7 +32,9 @@ dart run dartc math.dart -o build/math.o --header build/math.h
 
 Use `--kind static` or `--kind shared` for a library. Code generation, linking, static archives and Mach-O ad-hoc signing are implemented in Dart. Building libraries requires no external native toolchain. `--target` selects `macos-arm64`, `macos-x64`, `linux-arm64` or `linux-x64` independently of the host. `--sdk <root>` selects an installed SDK explicitly.
 
-Native bodies support integer constants, addition, subtraction, multiplication, bitwise operations, comparisons, boolean expressions, branches, loops and direct calls, with `Int64` arguments passed in registers and on the stack and an `Int64` result. Functions can call helpers in other Dart libraries and recurse; values survive branches, loop iterations and calls. Boolean parameters and results are supported between Dart functions, while exported signatures remain `Int64`. Division, remainder, shifts and other unsupported operations and signatures are reported as errors. General Dart executables, managed objects, exceptions and a target runtime remain unimplemented in this checkout.
+Native bodies support integer constants, addition, subtraction, multiplication, bitwise operations, comparisons, boolean expressions, branches, loops and direct calls. Exported signatures accept `Int64` and `Pointer<Int64>` parameters and results, plus `Void` results. Functions can call helpers in other Dart libraries and recurse; values survive branches, loop iterations and calls. Boolean parameters and results are also supported between Dart functions. Division, remainder, shifts and other unsupported operations and signatures are reported as errors.
+
+Pointer functions can use `Pointer<Int64>.fromAddress`, `.address`, equality and `.value` reads and writes, including compound assignments. Callers own the native storage and must keep it alive and eight-byte aligned for access. Pointer arithmetic, other native element types, structs and callbacks remain unimplemented. General Dart executables, managed objects, exceptions and a target runtime also remain unimplemented in this checkout.
 
 ## Development
 

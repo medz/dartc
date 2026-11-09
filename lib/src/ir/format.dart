@@ -116,6 +116,11 @@ void writeFunction(
     FunctionCall() =>
       'callValue ${value(op.function)}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
     LoadGlobal() => 'loadGlobal ${global(op.global)}',
+    PointerFromAddress() => 'pointerFromAddress ${value(op.address)}',
+    PointerAddress() => 'pointerAddress ${value(op.pointer)}',
+    LoadNativeInt64() => 'loadNativeInt64 ${value(op.pointer)}',
+    StoreNativeInt64() =>
+      'storeNativeInt64 ${value(op.pointer)}, ${value(op.value)}',
     StoreGlobal() => 'storeGlobal ${global(op.global)}, ${value(op.value)}',
     LoadField() =>
       'load ${value(op.receiver)}.${op.field.owner.dartName}::${op.field.name}',

@@ -1,15 +1,18 @@
+import 'dart:ffi';
+
 import 'package:dartc/interop.dart';
 
 import 'argument_location.dart';
 
-/// Argument locations and call effects for an Int64 native signature.
+/// Argument locations and call effects for a native word signature.
 ///
 /// Stack words are consecutive in parameter order. The clobber set covers the
 /// represented general-purpose registers, not allocation policy or
 /// unrepresented floating-point and vector registers.
+/// [result] is absent for a `Void` result.
 final class CallLayout<R>(
   Iterable<ArgumentLocation<R>> parameters,
-  final R result,
+  final R? result,
   Iterable<R> clobberedRegisters,
 ) {
   /// Parameter locations in source order.
@@ -24,20 +27,20 @@ final class CallLayout<R>(
   /// Argument storage at the caller's stack pointer, padded to 16 bytes.
   late final int stackBytes;
 
-  /// Assigns a register prefix followed by consecutive Int64 stack words.
-  factory int64(
+  /// Assigns integer and pointer words to registers followed by stack slots.
+  factory words(
     NativeSignature signature,
     List<R> registers,
     R result,
     Iterable<R> clobberedRegisters,
   ) => .new(
     [
-      for (var i = 0; i < signature.parameterCount; i++)
+      for (var i = 0; i < signature.parameters.length; i++)
         i < registers.length
             ? RegisterArgument(registers[i])
             : StackArgument((i - registers.length) * 8),
     ],
-    result,
+    signature.result == Void ? null : result,
     clobberedRegisters,
   );
 
@@ -57,7 +60,7 @@ final class CallLayout<R>(
           bytes += 8;
       }
     }
-    if (!this.clobberedRegisters.containsAll([...registers, result])) {
+    if (!this.clobberedRegisters.containsAll([...registers, ?result])) {
       throw ArgumentError('Parameter and result registers must be clobbered.');
     }
     stackBytes = (bytes + 15) & ~15;

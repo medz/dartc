@@ -6,7 +6,7 @@ import 'calling_convention.dart';
 import 'call_layout.dart';
 import 'frame_layout.dart';
 
-/// Classifies System V integer calls for macOS and Linux x86-64.
+/// Classifies System V integer and pointer calls for macOS and Linux x86-64.
 final class X64Abi(@override final Target target)
     implements CallingConvention<Register> {
   this {
@@ -18,7 +18,7 @@ final class X64Abi(@override final Target target)
   @override
   CallLayout<Register> classify(NativeSignature signature) {
     const parameters = <Register>[.rdi, .rsi, .rdx, .rcx, .r8, .r9];
-    return .int64(signature, parameters, .rax, const [
+    return .words(signature, parameters, .rax, const [
       .rax,
       .rcx,
       .rdx,

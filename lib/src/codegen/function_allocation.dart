@@ -47,10 +47,10 @@ final class FunctionAllocation<R extends Object>(
       }
       switch (block.end) {
         case Return(value: final value?):
-          use(value);
+          if (value.type != .voidType) use(value);
         case Branch(:final condition):
           use(condition);
-        case Jump():
+        case Jump() || Return():
           break;
         default:
           throw UnsupportedError('Native terminator: ${block.end.runtimeType}');
