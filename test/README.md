@@ -18,7 +18,7 @@ Use the standard runner's concurrency. Override `--concurrency` only when measur
 | `dart test -P native` | Host Compiler/CLI integration and native execution | Current target only |
 | `dart test` | All suites on the current host, including all-target file-format checks | All targets |
 
-The `assets` tag marks suites that consume prebuilt files. The `native` tag selects host compilation, output handling and actual FFI calls; the preset searches `abi`, `codegen`, `compiler` and `linker`. Add a new native domain to that preset when introducing its tests. Keep target-independent assertions outside native suites so they can run without loading a library.
+The `assets` tag marks suites that consume prebuilt files. The `native` tag selects host compilation, output handling and actual FFI calls; the preset lists the participating files and domains. Add new native suites to that preset without including unrelated test files. Keep target-independent assertions outside native suites so they can run without loading a library.
 
 For host execution, build only its assets:
 

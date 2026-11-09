@@ -7,6 +7,13 @@ import 'package:dartc/interop.dart';
 
 final _library = Uri.parse('dart:ffi');
 
+bool isAsFunction(ExecutableElement member) =>
+    member.library.uri == _library &&
+    member.baseElement ==
+        member.library
+            .getExtension('NativeFunctionPointer')
+            ?.getMethod('asFunction');
+
 ClassType? ffiClass(InterfaceElement element) {
   final library = element.library;
   if (library.uri != _library) return null;

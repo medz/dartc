@@ -3,6 +3,7 @@ import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
 
 import 'bindings.dart';
 
@@ -22,7 +23,62 @@ final class LocalClosure(
 /// Resolves captures through intervening functions before their SSA graphs are built.
 final class ClosurePlan() extends GeneralizingAstVisitor<void> {
   final functions = <Element, LocalClosure>{};
-  final extensionTearOffs = <(FunctionTarget, ast.AstNode), IrFunction>{};
+  final adapters = <(FunctionTarget, ast.AstNode), IrFunction>{};
+
+  /// Captures a native address in an ordinary Dart function with a fixed signature.
+  FunctionTarget nativeFunction(
+    FunctionTarget enclosing,
+    ast.AstNode site,
+    ValueType pointerType,
+    FunctionType signature, {
+    required bool isLeaf,
+  }) {
+    final declaration = (enclosing, site);
+    if (adapters[declaration] case final body?) return body.target;
+    if (signature.freeTypeParameters.isNotEmpty ||
+        signature.typeParameters.isNotEmpty ||
+        signature.optionalPositional != 0 ||
+        signature.named.isNotEmpty) {
+      throw UnsupportedError(
+        'asFunction requires a static positional function type.',
+      );
+    }
+    final target = FunctionTarget(
+      enclosing.library,
+      '<native-function>',
+      signature.result,
+      signature.parameters,
+      kind: .closure,
+      enclosing: enclosing,
+      sourceOffset: site.offset,
+      captures: [pointerType],
+    );
+    final entry = Block(target.parameterTypes);
+    final call = entry.emit(
+      NativeCall(
+        entry.parameters[1],
+        entry.parameters.skip(target.argumentOffset),
+        isLeaf: isLeaf,
+      ),
+    );
+    bool matches(NativeTypeRef native, ValueType dart, {bool result = false}) {
+      final value = FfiTypes.valueType(native);
+      return native is NativePointerType
+          ? FfiTypes.isPointer(dart) &&
+                (result ? dart.accepts(value) : value.accepts(dart))
+          : value == dart;
+    }
+
+    if (!matches(call.signature.result, signature.result, result: true) ||
+        call.signature.parameters.indexed.any(
+          (p) => !matches(p.$2, signature.parameters[p.$1]),
+        )) {
+      throw ArgumentError('Incompatible Dart representation for asFunction.');
+    }
+    entry.finish(Return(call));
+    adapters[declaration] = IrFunction(target, [entry]);
+    return target;
+  }
 
   /// Adapts a static extension target without inventing a virtual receiver.
   FunctionTarget extensionTearOff(
@@ -33,7 +89,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     List<ValueType> defaultTemplates,
   ) {
     final declaration = (enclosing, site);
-    if (extensionTearOffs[declaration] case final body?) return body.target;
+    if (adapters[declaration] case final body?) return body.target;
     final executable = application.executable;
     // Extraction may occur inside this same method's body. Reuse capture-free
     // substitution, but always freshen its method binders.
@@ -68,7 +124,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     entry.finish(
       result.type == ValueType.never ? Unreachable(result) : Return(result),
     );
-    extensionTearOffs[declaration] = IrFunction(
+    adapters[declaration] = IrFunction(
       target,
       [entry],
       defaults: {

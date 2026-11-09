@@ -1662,7 +1662,7 @@ typedef EvaluatedArguments = ({
 /// Evaluates each argument once, retaining omissions and names for the dispatch target.
 EvaluatedArguments? evaluateArguments(
   ast.ArgumentList? arguments,
-  Value? Function(ast.Expression) evaluate, {
+  Value? Function(ast.Expression, FormalParameterElement?) evaluate, {
   Map<FormalParameterElement, Value> forwarded = const {},
   required Value? Function(Value, FormalParameterElement, ast.AstNode) convert,
 }) {
@@ -1675,9 +1675,9 @@ EvaluatedArguments? evaluateArguments(
     }
   }
   for (final argument in arguments?.arguments ?? const <ast.Argument>[]) {
-    final input = evaluate(argument.argumentExpression);
-    if (input == null) return null;
     final parameter = argument.correspondingParameter;
+    final input = evaluate(argument.argumentExpression, parameter);
+    if (input == null) return null;
     final value = parameter == null
         ? input
         : convert(input, parameter, argument);

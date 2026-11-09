@@ -41,8 +41,9 @@ ByteData _nativeData(ffi.Pointer<ffi.NativeType> pointer, int bytes) =>
 
 final class IrInterpreter(
   final IrProgram program,
-  final Map<(Uri, String), Object? Function(int)> imports,
-) {
+  final Map<(Uri, String), Object? Function(int)> imports, {
+  final Object? Function(NativeCall, int, List<Object?>)? callNative,
+}) {
   final _loadedLibraries = <DeferredImport>{};
   final _globals = <GlobalVariable, Object?>{
     for (final global in program.globals)
@@ -1817,10 +1818,19 @@ final class IrInterpreter(
             (read(pointer) as ffi.Pointer).address +
                 (read(index) as int) * element.nativeSize,
           );
-        case NativeCall():
-          throw UnsupportedError(
-            'Native function calls require native execution.',
-          );
+        case NativeCall(:final pointer, :final arguments):
+          final invoke = callNative;
+          if (invoke == null) {
+            throw UnsupportedError(
+              'Native function calls require native execution.',
+            );
+          }
+          final address = switch (read(pointer)) {
+            _TypedPointer(:final address) ||
+            ffi.Pointer(:final address) => address,
+            _ => throw StateError('Expected a pointer value.'),
+          };
+          values[op] = invoke(op, address, arguments.map(read).toList());
         case LoadNative(:final pointer):
           final native = FfiTypes.pointerElement(pointer.type)!;
           final data = _nativeData(

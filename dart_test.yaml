@@ -10,6 +10,7 @@ presets:
       - test/abi
       - test/codegen
       - test/compiler
+      - test/frontend/lowering/ffi_functions_test.dart
       - test/linker
     include_tags: native
     exclude_tags: assets && !native

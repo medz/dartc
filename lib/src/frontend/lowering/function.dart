@@ -192,7 +192,7 @@ final class FunctionLowering._(
         )._run(local: fn, expression: expression),
       );
     }
-    output.addAll(plan.extensionTearOffs.values);
+    output.addAll(plan.adapters.values);
   }
 
   IrFunction _run({

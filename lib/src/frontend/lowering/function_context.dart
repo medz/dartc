@@ -53,7 +53,11 @@ final class FunctionContext(
     Map<FormalParameterElement, Value> forwarded = const {},
   }) => evaluateArguments(
     arguments,
-    evaluate,
+    (expression, parameter) => switch (parameter?.enclosingElement) {
+      final ExecutableElement member when isAsFunction(member) =>
+        bindings.constantExpression(unit, expression),
+      _ => evaluate(expression),
+    },
     forwarded: forwarded,
     convert: (value, parameter, site) =>
         normal(convert(value, typeOf(parameter.type, site))),
@@ -65,7 +69,7 @@ final class FunctionContext(
     Value? Function(ast.Expression) evaluate,
   ) => evaluateArguments(
     arguments,
-    evaluate,
+    (expression, _) => evaluate(expression),
     convert: (value, parameter, site) => value,
   );
 
@@ -214,13 +218,34 @@ final class FunctionContext(
     ),
   );
 
-  /// Calls the flattened extension ABI through ordinary argument binding.
+  /// Lowers a resolved extension call after checking its receiver and arguments.
   Value? callExtension(
     ExtensionApplication application,
     Value receiver,
     EvaluatedArguments args,
     List<ValueType> memberTypes,
+    ast.AstNode site,
   ) {
+    if (isAsFunction(application.executable.declaration)) {
+      if (memberTypes case [final FunctionType signature]) {
+        final isLeaf = args.named['isLeaf'];
+        return emit(
+          MakeClosure(
+            _closures.nativeFunction(
+              target,
+              site,
+              receiver.type,
+              signature,
+              isLeaf: isLeaf == null
+                  ? false
+                  : (isLeaf as ScalarConstant).value as bool,
+            ),
+            [receiver],
+          ),
+        );
+      }
+      unsupported(unit, site, 'asFunction Dart function type');
+    }
     if (args.named.isEmpty && memberTypes.isEmpty) {
       final value = lowerFfi(application.executable.declaration, [
         receiver,
@@ -228,12 +253,12 @@ final class FunctionContext(
       ], emit);
       if (value != null) return normal(value);
     }
-    final target = application.executable.target;
+    final callee = application.executable.target;
     return normal(
       emit(
         DirectCall(
-          target,
-          bindings.bind(target, (
+          callee,
+          bindings.bind(callee, (
             positional: [receiver, ...args.positional],
             named: args.named,
           )),
@@ -288,10 +313,13 @@ final class FunctionContext(
     }
     args = converted;
     if (extension != null) {
-      return callExtension(extension, receiver, (
-        positional: args,
-        named: {},
-      ), []);
+      return callExtension(
+        extension,
+        receiver,
+        (positional: args, named: {}),
+        [],
+        site,
+      );
     }
     if (lowerFfi(member, [receiver, ...args], emit) case final value?) {
       return normal(value);

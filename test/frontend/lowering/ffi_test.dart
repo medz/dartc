@@ -9,6 +9,72 @@ import '../../support/ir_interpreter.dart';
 
 void main() {
   test(
+    'asFunction creates typed lexical bodies with native call contracts',
+    () async {
+      final result = await AnalysisSession([
+        'test/frontend/lowering/fixtures/ffi_functions.dart',
+        'test/frontend/lowering/fixtures/ffi_constant_leaf.dart',
+      ]).use(Lowering().lower);
+      final adapters = result.program.functions.where(
+        (f) => f.target.name == '<native-function>',
+      );
+      expect(adapters, isNotEmpty);
+      expect(
+        adapters.where((f) => f.target.enclosing?.name == 'cleanup'),
+        hasLength(1),
+      );
+      for (final adapter in adapters) {
+        expect(adapter.target.kind, FunctionKind.closure);
+        expect(adapter.target.captures, hasLength(1));
+        final name = adapter.target.enclosing?.name;
+        expect(adapter.target.signature, switch (name) {
+          'floating' => FunctionType(.floating, [.floating]),
+          'empty' => FunctionType(.voidType, []),
+          'widenedPointer' => FunctionType(
+            FfiTypes.pointer.instantiate([FfiTypes.nativeType]),
+            [FfiTypes.int64Pointer],
+          ),
+          _ => FunctionType(.integer, [.integer]),
+        });
+        final call = adapter.entry.instructions.whereType<NativeCall>().single;
+        expect(call.signature, switch (name) {
+          'floating' => NativeSignature(Float, [Double]),
+          'empty' => NativeSignature(Void, []),
+          'widenedPointer' => NativeSignature(Pointer<Int64>, [Pointer<Int64>]),
+          _ => NativeSignature(Int64, [Int8]),
+        });
+        expect(call.pointer, same(adapter.entry.parameters[1]));
+        expect(
+          call.isLeaf,
+          ['leaf', 'constantLeaf'].contains(adapter.target.enclosing?.name),
+        );
+      }
+      expect(
+        result.program.externals.any(
+          (f) =>
+              f.target.library.toString() == 'dart:ffi' &&
+              f.target.name.endsWith('asFunction'),
+        ),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'unused asFunction declarations retain signature and constant obligations',
+    () async {
+      var consumed = false;
+      await expectLater(
+        AnalysisSession([
+          'test/frontend/lowering/fixtures/invalid_ffi_functions.dart',
+        ]).use((_) => consumed = true),
+        throwsFormatException,
+      );
+      expect(consumed, isFalse);
+    },
+  );
+
+  test(
     'function pointer exports retain nested FFI identities through lowering',
     () async {
       final result = await AnalysisSession([

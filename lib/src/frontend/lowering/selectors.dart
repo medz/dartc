@@ -126,7 +126,13 @@ final class SelectorChain(
         final receiver = context.memberReceiver(function, application);
         return receiver == null
             ? null
-            : context.callExtension(application, receiver, args, typeArguments);
+            : context.callExtension(
+                application,
+                receiver,
+                args,
+                typeArguments,
+                node,
+              );
       }
       if (callMethod != null) {
         final method = context.bindings.target(callMethod, context.unit, node);
@@ -420,7 +426,13 @@ final class SelectorChain(
       }
       final args = context.arguments(arguments, evaluate);
       if (args == null) return null;
-      return context.callExtension(application, converted, args, typeArguments);
+      return context.callExtension(
+        application,
+        converted,
+        args,
+        typeArguments,
+        node,
+      );
     }
 
     if (receiver?.staticType is dart.DynamicType ||
