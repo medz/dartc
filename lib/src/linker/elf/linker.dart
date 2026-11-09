@@ -54,20 +54,31 @@ final class ElfLinker(@override final Target target) implements Linker {
     cursor = readOnlyStart;
     place(.readOnlyData);
     final strings = <int>[0], names = <int>[];
-    for (final symbol in symbols) {
+    for (final name in [
+      for (final symbol in symbols) symbol.name,
+      for (final binding in unit.bindings) binding.name,
+    ]) {
       names.add(strings.length);
-      strings.addAll([...utf8.encode(symbol.name), 0]);
+      strings.addAll([...utf8.encode(name), 0]);
     }
     final sonameOffset = strings.length;
     strings.addAll([...utf8.encode(name), 0]);
+    final dependencies = <int>[];
+    for (final library in unit.libraries) {
+      dependencies.add(strings.length);
+      strings.addAll([...utf8.encode(library), 0]);
+    }
     final symbolOffset = (cursor + 7) & ~7,
-        symbolSize = (symbols.length + 1) * 24;
+        symbolSize = (names.length + 1) * 24;
     final stringOffset = symbolOffset + symbolSize;
     final hashOffset = (stringOffset + strings.length + 7) & ~7;
-    final bucketCount = symbols.length | 1;
-    final hashSize = (2 + bucketCount + symbols.length + 1) * 4;
-    final dynamicOffset = (hashOffset + hashSize + 7) & ~7;
-    const dynamicSize = 7 * 16;
+    final bucketCount = names.length | 1;
+    final hashSize = (2 + bucketCount + names.length + 1) * 4;
+    final relocationOffset = (hashOffset + hashSize + 7) & ~7;
+    final relocationSize = unit.bindings.length * 24;
+    final dynamicOffset = relocationOffset + relocationSize;
+    final dynamicSize =
+        (7 + dependencies.length + (unit.bindings.isEmpty ? 0 : 3)) * 16;
     final readOnlyEnd = dynamicOffset + dynamicSize;
     final dataStart = (readOnlyEnd + page - 1) & -page;
     cursor = dataStart;
@@ -83,6 +94,7 @@ final class ElfLinker(@override final Target target) implements Linker {
       '.shstrtab',
       '.hash',
       '.dynamic',
+      if (unit.bindings.isNotEmpty) '.rela.dyn',
     ];
     final nameBytes = <int>[], nameOffsets = <int>[];
     for (final name in sectionNames) {
@@ -119,6 +131,22 @@ final class ElfLinker(@override final Target target) implements Linker {
         .little,
       );
       data.setUint64(offset + 16, symbol.size ?? 0, .little);
+    }
+    for (final (i, binding) in unit.bindings.indexed) {
+      final index = symbols.length + i + 1;
+      data.setUint32(symbolOffset + index * 24, names[index - 1], .little);
+      data.setUint8(symbolOffset + index * 24 + 4, 0x12);
+      final slot = unit.symbols[binding.slot];
+      data.setUint64(
+        relocationOffset + i * 24,
+        addresses[slot.section] + slot.offset,
+        .little,
+      );
+      data.setUint64(
+        relocationOffset + i * 24 + 8,
+        (index << 32) | (target.architecture == .arm64 ? 1025 : 6),
+        .little,
+      );
     }
     void section(
       int index,
@@ -191,6 +219,18 @@ final class ElfLinker(@override final Target target) implements Linker {
       alignment: 8,
       entrySize: 16,
     );
+    if (unit.bindings.isNotEmpty) {
+      section(
+        dynamicIndex + 1,
+        4,
+        2,
+        relocationOffset,
+        relocationSize,
+        link: symbolIndex,
+        alignment: 8,
+        entrySize: 24,
+      );
+    }
     void segment(
       int index,
       int type,
@@ -239,7 +279,7 @@ final class ElfLinker(@override final Target target) implements Linker {
     segment(next++, 2, 4, dynamicOffset, dynamicSize, dynamicSize, 8);
     segment(next, 0x6474e551, 6, 0, 0, 0, 16);
     data.setUint32(hashOffset, bucketCount, .little);
-    data.setUint32(hashOffset + 4, symbols.length + 1, .little);
+    data.setUint32(hashOffset + 4, names.length + 1, .little);
     for (final (i, name) in names.indexed) {
       var hash = 0;
       for (var cursor = name; strings[cursor] != 0; cursor++) {
@@ -259,6 +299,12 @@ final class ElfLinker(@override final Target target) implements Linker {
       (10, strings.length),
       (11, 24),
       (14, sonameOffset),
+      for (final dependency in dependencies) (1, dependency),
+      if (unit.bindings.isNotEmpty) ...[
+        (7, relocationOffset),
+        (8, relocationSize),
+        (9, 24),
+      ],
       (0, 0),
     ];
     for (final (i, (tag, value)) in dynamicEntries.indexed) {

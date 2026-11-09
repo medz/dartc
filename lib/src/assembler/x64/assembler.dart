@@ -294,6 +294,11 @@ final class Assembler() {
     _bytes.add([if (target.index >= 8) 0x41, 0xff, 0xd0 | (target.index & 7)]);
   }
 
+  /// Jumps to the address in [target] without changing the stack or flags.
+  void jumpRegister(Register target) {
+    _bytes.add([if (target.index >= 8) 0x41, 0xff, 0xe0 | (target.index & 7)]);
+  }
+
   /// Loads an unresolved RIP-relative address without changing flags.
   Fixup address(Register destination) {
     final fixup = Fixup(length + 3, .x64Address32);

@@ -29,6 +29,22 @@ final class MachOLinker(@override final Target target) implements Linker {
         sections = unit.sections;
     final installName = '@rpath/$name', nameBytes = utf8.encode(installName);
     final idSize = (24 + nameBytes.length + 1 + 7) & ~7;
+    const systemLibrary = '/usr/lib/libSystem.B.dylib';
+    final libraries = [
+      systemLibrary,
+      ...unit.libraries.where((name) => name != systemLibrary),
+    ];
+    if (libraries.length > 253) {
+      throw UnsupportedError('Mach-O supports at most 253 library ordinals.');
+    }
+    final libraryNames = libraries.map(utf8.encode).toList();
+    final librarySizes = [
+      for (final bytes in libraryNames) (24 + bytes.length + 1 + 7) & ~7,
+    ];
+    final ordinals = [
+      for (final library in unit.libraries) libraries.indexOf(library) + 1,
+    ];
+    final hasBindings = unit.bindings.isNotEmpty;
     final hasConstants = sections.any((s) => s.kind == .readOnlyData);
     final writable = sections.any(
       (s) => s.kind == .data || s.kind == .zeroFill,
@@ -38,12 +54,12 @@ final class MachOLinker(@override final Target target) implements Linker {
         segmentCount * 72 +
         sections.length * 80 +
         idSize +
-        56 +
+        librarySizes.fold<int>(0, (sum, size) => sum + size) +
         24 +
         24 +
         24 +
         80 +
-        16 +
+        (hasBindings ? 48 : 16) +
         16;
     var page = target.architecture == .arm64 ? 16384 : 4096;
     for (final section in sections) {
@@ -79,17 +95,48 @@ final class MachOLinker(@override final Target target) implements Linker {
     final linkOffset = dataFileEnd;
     final symbols = unit.symbols.where((s) => s.exported).toList();
     final strings = <int>[0], names = <int>[];
-    for (final symbol in symbols) {
+    for (final name in [
+      for (final symbol in symbols) symbol.name,
+      for (final binding in unit.bindings) binding.name,
+    ]) {
       names.add(strings.length);
-      strings.addAll([...utf8.encode(symbol.name), 0]);
+      strings.addAll([...utf8.encode(name), 0]);
     }
-    final stringOffset = linkOffset + symbols.length * 16;
+    final stringOffset = linkOffset + names.length * 16;
     final trieOffset = (stringOffset + strings.length + 7) & ~7;
     final trie = ExportTrie([
       for (final symbol in symbols)
         (symbol.name, addresses[symbol.section] + symbol.offset),
     ]).encode();
-    final signatureOffset = (trieOffset + trie.length + 15) & ~15;
+    final bindOffset = (trieOffset + trie.length + 7) & ~7,
+        binds = BytesBuilder();
+    void uleb(int value) {
+      do {
+        final byte = value & 127;
+        value >>= 7;
+        binds.addByte(byte | (value == 0 ? 0 : 128));
+      } while (value != 0);
+    }
+
+    for (final binding in unit.bindings) {
+      final ordinal = ordinals[binding.library];
+      if (ordinal <= 15) {
+        binds.addByte(0x10 | ordinal);
+      } else {
+        binds.addByte(0x20);
+        uleb(ordinal);
+      }
+      binds
+        ..addByte(0x40)
+        ..add(utf8.encode(binding.name))
+        ..add([0, 0x51, 0x70 | (hasConstants ? 2 : 1)]);
+      final slot = unit.symbols[binding.slot];
+      uleb(addresses[slot.section] + slot.offset - dataStart);
+      binds.addByte(0x90);
+    }
+    if (hasBindings) binds.addByte(0);
+    final bindBytes = binds.takeBytes();
+    final signatureOffset = (bindOffset + bindBytes.length + 15) & ~15;
     final signature = CodeSignature(installName, signatureOffset, textSize);
     final data = ByteData(signatureOffset + signature.size),
         bytes = data.buffer.asUint8List();
@@ -101,7 +148,7 @@ final class MachOLinker(@override final Target target) implements Linker {
     );
     data.setUint32(8, target.architecture == .arm64 ? 0 : 3, .little);
     data.setUint32(12, 6, .little);
-    data.setUint32(16, segmentCount + 8, .little);
+    data.setUint32(16, segmentCount + 7 + libraries.length, .little);
     data.setUint32(20, commandsSize, .little);
     data.setUint32(24, 0x85, .little);
     var cursor = 32;
@@ -185,25 +232,36 @@ final class MachOLinker(@override final Target target) implements Linker {
     data.setUint32(id + 20, 0x10000, .little);
     bytes.setAll(id + 24, nameBytes);
     // dyld requires libSystem even when the library imports no symbols.
-    final system = command(0xc, 56);
-    data.setUint32(system + 8, 24, .little);
-    data.setUint32(system + 16, 0x10000, .little);
-    data.setUint32(system + 20, 0x10000, .little);
-    bytes.setAll(system + 24, ascii.encode('/usr/lib/libSystem.B.dylib'));
+    for (final (i, library) in libraryNames.indexed) {
+      final dependency = command(0xc, librarySizes[i]);
+      data.setUint32(dependency + 8, 24, .little);
+      data.setUint32(dependency + 16, i == 0 ? 0x10000 : 0, .little);
+      data.setUint32(dependency + 20, i == 0 ? 0x10000 : 0, .little);
+      bytes.setAll(dependency + 24, library);
+    }
     final build = command(0x32, 24);
     data.setUint32(build + 8, 1, .little);
     data.setUint32(build + 12, 0xb0000, .little);
     final uuid = command(0x1b, 24), symtab = command(2, 24);
     data.setUint32(symtab + 8, linkOffset, .little);
-    data.setUint32(symtab + 12, symbols.length, .little);
+    data.setUint32(symtab + 12, names.length, .little);
     data.setUint32(symtab + 16, stringOffset, .little);
     data.setUint32(symtab + 20, strings.length, .little);
     final dysymtab = command(0xb, 80);
     data.setUint32(dysymtab + 20, symbols.length, .little);
     data.setUint32(dysymtab + 24, symbols.length, .little);
-    final exports = command(0x80000033, 16);
-    data.setUint32(exports + 8, trieOffset, .little);
-    data.setUint32(exports + 12, trie.length, .little);
+    data.setUint32(dysymtab + 28, unit.bindings.length, .little);
+    if (hasBindings) {
+      final info = command(0x80000022, 48);
+      data.setUint32(info + 16, bindOffset, .little);
+      data.setUint32(info + 20, bindBytes.length, .little);
+      data.setUint32(info + 40, trieOffset, .little);
+      data.setUint32(info + 44, trie.length, .little);
+    } else {
+      final exports = command(0x80000033, 16);
+      data.setUint32(exports + 8, trieOffset, .little);
+      data.setUint32(exports + 12, trie.length, .little);
+    }
     final signing = command(0x1d, 16);
     data.setUint32(signing + 8, signatureOffset, .little);
     data.setUint32(signing + 12, signature.size, .little);
@@ -219,8 +277,15 @@ final class MachOLinker(@override final Target target) implements Linker {
         .little,
       );
     }
+    for (final (i, binding) in unit.bindings.indexed) {
+      final index = symbols.length + i, offset = linkOffset + index * 16;
+      data.setUint32(offset, names[index], .little);
+      data.setUint8(offset + 4, 1);
+      data.setUint16(offset + 6, ordinals[binding.library] << 8, .little);
+    }
     bytes.setAll(stringOffset, strings);
     bytes.setAll(trieOffset, trie);
+    bytes.setAll(bindOffset, bindBytes);
     final identifier = sha256
         .convert(Uint8List.sublistView(bytes, 0, signatureOffset))
         .bytes

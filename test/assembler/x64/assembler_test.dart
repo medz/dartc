@@ -4,6 +4,27 @@ import 'package:dartc/assembler/x64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('register jumps encode low, extended and stack registers', () {
+    final assembler = Assembler()
+      ..jumpRegister(.rax)
+      ..jumpRegister(.rsp)
+      ..jumpRegister(.r11)
+      ..jumpRegister(.r15);
+    expect(assembler.finish(), [
+      0xff,
+      0xe0,
+      0xff,
+      0xe4,
+      0x41,
+      0xff,
+      0xe3,
+      0x41,
+      0xff,
+      0xe7,
+    ]);
+    expect(() => assembler.jumpRegister(.rcx), throwsStateError);
+  });
+
   test('indirect calls encode low, extended and stack registers', () {
     final assembler = Assembler()
       ..callRegister(.rax)

@@ -2,13 +2,45 @@
 library;
 
 import 'package:test/test.dart';
+import 'package:dartc/target.dart';
 
 import 'fixtures/symbols.dart';
 import 'fixtures/calls_ffi.dart';
 import 'fixtures/values_ffi.dart';
 import 'fixtures/archive_ffi.dart';
+import '../support/native_assets.dart';
 
 void main() {
+  test('shared-library names follow the target loader symbol scope', () {
+    final calls = LinkedCalls('linker/shared_calls');
+    addTearDown(calls.close);
+    expect(calls.forward(), Target.host().operatingSystem == .macos ? 42 : 11);
+    expect(calls.hasSymbol('helper'), isFalse);
+  });
+
+  test(
+    'missing dependencies and missing required symbols fail at load time',
+    () {
+      final assets = NativeAssets(Target.host());
+      for (final (name, missing) in [
+        ('missing_dependency', 'absent_library'),
+        ('missing_symbol', 'dartc_absent_symbol'),
+      ]) {
+        expect(
+          () => assets.open('linker/$name'),
+          throwsA(
+            isA<ArgumentError>().having(
+              (error) => error.message,
+              'loader error',
+              contains(missing),
+            ),
+          ),
+          reason: name,
+        );
+      }
+    },
+  );
+
   test(
     'loads only archive members needed by direct and transitive references',
     () {

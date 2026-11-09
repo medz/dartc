@@ -4,6 +4,21 @@ import 'package:dartc/assembler/arm64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('register branches preserve the return address and reject SP', () {
+    final assembler = Assembler()
+      ..branchRegister(.x0)
+      ..branchRegister(.x16)
+      ..branchRegister(.x30);
+    final bytes = ByteData.sublistView(assembler.finish());
+    expect(bytes.getUint32(0, .little), 0xd61f0000);
+    expect(bytes.getUint32(4, .little), 0xd61f0200);
+    expect(bytes.getUint32(8, .little), 0xd61f03c0);
+    final invalid = Assembler();
+    expect(() => invalid.branchRegister(.sp), throwsArgumentError);
+    expect(invalid.finish(), isEmpty);
+    expect(() => assembler.branchRegister(.x1), throwsStateError);
+  });
+
   test(
     'indirect calls encode register targets and reject SP before writing',
     () {

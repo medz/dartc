@@ -9,11 +9,15 @@ import 'package:test/test.dart';
 import 'fixtures/native_calls_ffi.dart';
 
 void main() {
-  for (final indirect in [false, true]) {
-    group(indirect ? 'indirect' : 'bound', () {
+  for (final (asset, indirect) in [
+    ('codegen/native_calls', false),
+    ('codegen/native_calls', true),
+    ('linker/native_calls', false),
+  ]) {
+    group('$asset ${indirect ? 'indirect' : 'bound'}', () {
       late NativeCalls library;
       setUpAll(() {
-        library = NativeCalls(indirect: indirect);
+        library = NativeCalls(asset: asset, indirect: indirect);
         addTearDown(library.close);
       });
       double float32(double value) =>

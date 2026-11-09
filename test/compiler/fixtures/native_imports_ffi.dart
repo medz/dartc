@@ -9,8 +9,8 @@ const nativeImportSymbols = {
   'math:second': {'step': 'decrement'},
 };
 
-final class NativeImports() {
-  final _library = NativeAssets(Target.host()).open('compiler/native_imports');
+final class NativeImports([String asset = 'compiler/native_imports']) {
+  final _library = NativeAssets(Target.host()).open(asset);
 
   late final run = _library
       .lookupFunction<Int64 Function(Int64), int Function(int)>('runImports');

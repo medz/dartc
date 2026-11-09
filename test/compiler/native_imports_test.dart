@@ -13,6 +13,7 @@ import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
 import '../support/native_assets.dart';
+import '../linker/fixtures/shared_libraries.dart';
 import 'fixtures/native_imports_ffi.dart';
 
 void main() {
@@ -64,11 +65,28 @@ void main() {
     },
   );
 
-  for (final kind in ['object', 'static', 'shared']) {
+  test('source native calls load a separate shared provider', () {
+    final library = NativeImports('compiler/native_imports_dynamic');
+    addTearDown(library.close);
+    for (final value in [-129, -1, 0, 127, 128, 255, 256]) {
+      final narrowed = value.toSigned(8);
+      expect(library.run(value), (narrowed + 7) * 1000 + narrowed - 11);
+    }
+    expect(
+      library.pointer(Pointer<Void>.fromAddress(0x123456789)),
+      0x123456789,
+    );
+  });
+
+  for (final kind in ['object', 'static', 'shared', 'dynamic']) {
     test(
       'native imports compile to $kind output with explicit link inputs',
       () async {
-        final library = assets.library('compiler/native_imports');
+        final library = assets.library(
+          kind == 'dynamic'
+              ? 'compiler/native_imports_dynamic'
+              : 'compiler/native_imports',
+        );
         final provider = format.decodeObject(
           assets.file('compiler/native_function_pointers.o').readAsBytesSync(),
         );
@@ -80,7 +98,14 @@ void main() {
             _ => .sharedLibrary(library.uri.pathSegments.last),
           },
           nativeSymbols: nativeImportSymbols,
-          linkInputs: [if (kind == 'shared') .object(provider)],
+          linkInputs: [
+            if (kind == 'shared') .object(provider),
+            if (kind == 'dynamic')
+              dependency(target, 'native_function_pointers', {
+                for (final name in ['increment', 'decrement', 'opaque'])
+                  target.nativeSymbol(name): target.nativeSymbol(name),
+              }),
+          ],
         );
         final expected = switch (kind) {
           'object' => assets.file('compiler/native_imports.o'),

@@ -25,8 +25,9 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
   ///
   /// [nativeSymbols] maps exact asset IDs and requested symbols to native names
   /// before platform symbol decoration.
-  /// Missing bindings fail when referenced; no process-wide lookup is implied.
+  /// Missing bindings fail when referenced; no asset resolver fallback occurs.
   /// [linkInputs] supplies implementations when producing a shared library.
+  /// Shared-library inputs follow the target loader's symbol lookup rules.
   /// Object and archive outputs retain unresolved imports for a later link.
   Future<Compilation> compile(
     List<String> paths, {

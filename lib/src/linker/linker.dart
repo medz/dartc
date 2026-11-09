@@ -17,6 +17,9 @@ abstract interface class Linker() {
   /// further passes for new imports. macOS includes explicit objects first, then
   /// finds each missing symbol in the first archive that defines it, repeating
   /// for new imports. Unselected members are not decoded or included.
+  /// Shared-library bindings satisfy remaining direct function calls; every
+  /// declared dependency is retained. Conflicting bindings are rejected.
+  /// Library availability and symbol lookup are checked by the target loader.
   Uint8List linkSharedLibrary(
     Iterable<LinkInput> inputs, {
     required String name,

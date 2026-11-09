@@ -10,11 +10,14 @@ import 'package:test/test.dart';
 import '../support/native_assets.dart';
 
 void main() {
-  for (final arch in Architecture.values) {
+  for (final (arch, name) in [
+    for (final arch in Architecture.values)
+      for (final name in ['symbols', 'shared_calls']) (arch, name),
+  ]) {
     final target = Target(.macos, arch),
         assets = NativeAssets(Target(.macos, arch));
-    test('$target code signature covers every image page', () {
-      final bytes = assets.library('linker/symbols').readAsBytesSync();
+    test('$target $name signature covers every image page', () {
+      final bytes = assets.library('linker/$name').readAsBytesSync();
       final data = ByteData.sublistView(bytes);
       var command = 32, signature = -1;
       for (var i = 0; i < data.getUint32(16, .little); i++) {

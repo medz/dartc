@@ -20,6 +20,7 @@ import '../test/linker/fixtures/calls.dart';
 import '../test/linker/fixtures/symbols.dart';
 import '../test/linker/fixtures/data.dart';
 import '../test/linker/fixtures/archive.dart';
+import '../test/linker/fixtures/shared_libraries.dart';
 import '../test/support/native_assets.dart';
 
 Future<void> main(List<String> args) async {
@@ -100,6 +101,19 @@ Future<void> main(List<String> args) async {
                 .readAsBytes(),
           ),
       ], library);
+      if (fixture == 'native_imports') {
+        final dynamicLibrary = assets.library(
+          'compiler/native_imports_dynamic',
+        );
+        await dynamicLibrary.writeAsBytes(
+          linker.linkSharedLibrary([
+            .object(module),
+            dependency(target, 'native_function_pointers', {
+              for (final name in module.imports) name: name,
+            }),
+          ], name: dynamicLibrary.uri.pathSegments.last),
+        );
+      }
     }
     await shared([
       floatingFrames(target),
@@ -118,9 +132,19 @@ Future<void> main(List<String> args) async {
     }
 
     await shared([aliases(target)], assets.library('codegen/aliases'));
-    await shared(
-      await objects('native_calls_', nativeCalls(target)),
-      assets.library('codegen/native_calls'),
+    final nativeModules = await objects('native_calls_', nativeCalls(target));
+    await shared(nativeModules, assets.library('codegen/native_calls'));
+    await shared([
+      nativeModules.last,
+    ], assets.library('linker/native_provider'));
+    final nativeLibrary = assets.library('linker/native_calls');
+    await nativeLibrary.writeAsBytes(
+      linker.linkSharedLibrary([
+        .object(nativeModules.first),
+        dependency(target, 'native_provider', {
+          for (final name in nativeModules.first.imports) name: name,
+        }),
+      ], name: nativeLibrary.uri.pathSegments.last),
     );
     await shared([frames(target)], assets.library('abi/frames'));
     await shared(stackCalls(target), assets.library('abi/stack_calls'));
@@ -156,6 +180,16 @@ Future<void> main(List<String> args) async {
         .file('linker/data.a')
         .writeAsBytes(ArchiveWriter(format).encode(data));
     final modules = callModules(target);
+    for (final entry in sharedLibraries(target).entries) {
+      final name = entry.key;
+      final library = assets.library('linker/$name');
+      await library.writeAsBytes(
+        linker.linkSharedLibrary(
+          entry.value,
+          name: library.uri.pathSegments.last,
+        ),
+      );
+    }
     await shared(
       await objects('call_', modules),
       assets.library('linker/calls'),

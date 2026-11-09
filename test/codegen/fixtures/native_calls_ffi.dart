@@ -8,8 +8,11 @@ import '../../support/native_assets.dart';
 typedef _Unary = Int64 Function(Int64);
 typedef _Callback = Pointer<NativeFunction<_Unary>>;
 
-final class NativeCalls({final bool indirect = false}) {
-  final _library = NativeAssets(Target.host()).open('codegen/native_calls');
+final class NativeCalls({
+  final bool indirect = false,
+  String asset = 'codegen/native_calls',
+}) {
+  final _library = NativeAssets(Target.host()).open(asset);
   late final memory = _library.lookup<Int64>('memory');
   int _address(String name) => _library.lookup<Void>('provided_$name').address;
 

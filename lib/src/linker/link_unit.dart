@@ -4,6 +4,7 @@ import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 
 import 'input.dart';
+import 'call_stubs.dart';
 
 /// Coalesced storage with source bytes copied only into the final image.
 final class SectionGroup(
@@ -22,6 +23,8 @@ final class LinkUnit(
   final Target target = format.target;
   final sections = <SectionGroup>[];
   final symbols = <Symbol>[];
+  final libraries = <String>[];
+  final bindings = <({int library, String name, int slot})>[];
   final _references = <Relocation>[];
 
   this {
@@ -86,6 +89,7 @@ final class LinkUnit(
     }
 
     final archives = <Archive>[];
+    final imports = <String, (int, String)>{};
     for (final entry in input) {
       switch (entry) {
         case ObjectInput(:final module):
@@ -96,9 +100,41 @@ final class LinkUnit(
           } else {
             archives.add(archive);
           }
+        case SharedLibraryInput(:final name, :final functions):
+          var library = libraries.indexOf(name);
+          if (library < 0) {
+            library = libraries.length;
+            libraries.add(name);
+          }
+          for (final entry in functions.entries) {
+            final binding = (library, entry.value);
+            if (imports[entry.key] case final previous?
+                when previous != binding) {
+              throw ArgumentError('Conflicting library binding: ${entry.key}');
+            }
+            imports[entry.key] = binding;
+          }
       }
     }
     if (target.operatingSystem == .macos) search(archives);
+    final dynamicNames = missing.where(imports.containsKey).toList();
+    if (dynamicNames.isNotEmpty) {
+      for (final object in objects) {
+        for (final reference in object.relocations) {
+          if (reference.symbol < object.symbols.length) continue;
+          final name = object.imports[reference.symbol - object.symbols.length];
+          if (missing.contains(name) &&
+              imports.containsKey(name) &&
+              reference.encoding != .arm64Call26 &&
+              reference.encoding != .x64Call32) {
+            throw UnsupportedError(
+              'Shared-library imports require direct calls: $name',
+            );
+          }
+        }
+      }
+      include(callStubs(target, dynamicNames));
+    }
     if (missing.isNotEmpty) {
       throw ArgumentError('Undefined symbol: ${missing.first}');
     }
@@ -145,6 +181,14 @@ final class LinkUnit(
           ),
         );
       }
+    }
+    for (final (i, name) in dynamicNames.indexed) {
+      final (library, symbol) = imports[name]!;
+      bindings.add((
+        library: library,
+        name: symbol,
+        slot: symbolBases.last + i * 2 + 1,
+      ));
     }
     for (final (i, object) in objects.indexed) {
       for (final reference in object.relocations) {
