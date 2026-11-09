@@ -156,6 +156,7 @@ void writeFunction(
     Interpolate() => 'interpolate [${op.inputs.map(value).join(', ')}]',
     StringConcat() => 'concat ${value(op.left)}, ${value(op.right)}',
     NumericNegate() => 'negate ${value(op.operand)}',
+    NumericToDouble() => 'toDouble ${value(op.operand)}',
     IntBinary() => '${op.operator.name} ${value(op.left)}, ${value(op.right)}',
     DirectCall() =>
       'call ${symbol(op.target, op.ownerType)}${typeArgs(op.typeArguments)}(${op.inputs.map(value).join(', ')})',

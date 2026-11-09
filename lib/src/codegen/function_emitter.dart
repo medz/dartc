@@ -53,6 +53,12 @@ abstract interface class FunctionEmitter<R>() {
   /// Loads all 64 bits of [value] into a general [destination] register.
   void loadImmediate(R destination, int value);
 
+  /// Converts a signed integer into a floating register without changing inputs.
+  void convertIntToDouble(R destination, R source);
+
+  /// Truncates a finite double in the range [-2^63, 2^63) into a general register.
+  void truncateDoubleToInt(R destination, R source);
+
   /// The selected 64-bit wrapping addition and its operand constraint.
   BinaryEncoding<R> get add;
 

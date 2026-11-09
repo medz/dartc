@@ -106,6 +106,14 @@ final class Assembler() {
   void moveBitsToGeneral(Register destination, FloatRegister source) =>
       _sse(0x66, 0x7e, source, destination, wide: true);
 
+  /// Converts a signed 64-bit integer using the current MXCSR rounding mode.
+  void convertIntToDouble(FloatRegister destination, Register source) =>
+      _sse(0xf2, 0x2a, destination, source, wide: true);
+
+  /// Truncates toward zero; masked invalid conversions produce the minimum int64.
+  void truncateDoubleToInt(Register destination, FloatRegister source) =>
+      _sse(0xf2, 0x2c, destination, source, wide: true);
+
   /// Adds two IEEE 754 doubles in [destination].
   void addDouble(FloatRegister destination, FloatRegister source) =>
       _sse(0xf2, 0x58, destination, source);

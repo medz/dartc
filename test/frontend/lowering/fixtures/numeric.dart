@@ -11,6 +11,18 @@ bool greaterEqual(num a, num b) => a >= b;
 num negate(num a) => -a;
 double negateDouble(double a) => -a;
 double mixedAdd(int a, double b) => a + b;
+double convertNumber(num value) => value.toDouble();
+double userConversion() => const UserNumber().toDouble();
+double extensionConversion() => UserConversion(3).toDouble();
+
+class const UserNumber() {
+  double toDouble() => 7.5;
+}
+
+extension UserConversion on int {
+  double toDouble() => 8.5;
+}
+
 double doubleModulo(double a, num b) => a % b;
 num compound(num a, num b) {
   a += b;

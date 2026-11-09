@@ -110,6 +110,18 @@ final class Assembler() {
     _word(0x9e660000 | source.index << 5 | destination.index);
   }
 
+  /// Converts a signed 64-bit integer using the current FPCR rounding mode.
+  void convertIntToDouble(FloatRegister destination, Register source) {
+    _general(source);
+    _word(0x9e620000 | source.index << 5 | destination.index);
+  }
+
+  /// Truncates toward zero; out-of-range values saturate and NaN becomes zero.
+  void truncateDoubleToInt(Register destination, FloatRegister source) {
+    _general(destination);
+    _word(0x9e780000 | source.index << 5 | destination.index);
+  }
+
   /// Adds two IEEE 754 doubles.
   void addDouble(
     FloatRegister destination,

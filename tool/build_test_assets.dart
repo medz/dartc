@@ -37,6 +37,7 @@ Future<void> main() async {
         'integer_operations',
         'pointers',
         'doubles',
+        'mixed_numeric',
       ]) {
         final library = assets.library('compiler/$fixture');
         for (final (file, output) in <(File, Output)>[
@@ -52,7 +53,8 @@ Future<void> main() async {
             header:
                 (fixture == 'arithmetic' ||
                         fixture == 'pointers' ||
-                        fixture == 'doubles') &&
+                        fixture == 'doubles' ||
+                        fixture == 'mixed_numeric') &&
                     output is ObjectOutput
                 ? assets.file('compiler/$fixture.h')
                 : null,
@@ -114,6 +116,9 @@ Future<void> main() async {
       await shared([
         decodedData.first,
       ], assets.library('compiler/double_storage'));
+      await shared([
+        decodedData.first,
+      ], assets.library('compiler/numeric_storage'));
       await shared([decodedData.first], assets.library('linker/storage'));
       await shared([
         decodedData.first,

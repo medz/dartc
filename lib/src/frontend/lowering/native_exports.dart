@@ -1,6 +1,7 @@
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -17,6 +18,15 @@ final class ExportBindings(final Bindings bindings)
 
   @override
   void visitAnnotation(ast.Annotation node) {
+    if (node.element case ConstructorElement(:final enclosingElement)) {
+      final library = enclosingElement.library;
+      if (library.uri != _exportLibrary ||
+          enclosingElement != library.getClass('Export')) {
+        return;
+      }
+    }
+    // Constant aliases can select the annotation's type as well as its fields.
+    bindings.constantSafety.check(unit, node, syntax: node);
     final value = node.elementAnnotation?.computeConstantValue();
     final type = value?.type;
     if (type is! dart.InterfaceType) return;

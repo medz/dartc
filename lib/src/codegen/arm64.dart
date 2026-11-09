@@ -86,6 +86,20 @@ final class _Arm64Emitter(
       assembler.loadImmediate(destination as Register, value);
 
   @override
+  void convertIntToDouble(CpuRegister destination, CpuRegister source) =>
+      assembler.convertIntToDouble(
+        destination as FloatRegister,
+        source as Register,
+      );
+
+  @override
+  void truncateDoubleToInt(CpuRegister destination, CpuRegister source) =>
+      assembler.truncateDoubleToInt(
+        destination as Register,
+        source as FloatRegister,
+      );
+
+  @override
   BinaryEncoding<CpuRegister> get add => _binary(assembler.add);
 
   @override

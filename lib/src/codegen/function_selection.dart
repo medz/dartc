@@ -13,9 +13,24 @@ final class FunctionSelection<R>(
   FunctionEmitter<R> emitter,
 ) {
   final binaries =
-      <Instruction, ({BinaryEncoding<R> encoding, Value left, Value right})>{};
+      <
+        Instruction,
+        ({
+          BinaryEncoding<R> encoding,
+          Value left,
+          Value right,
+          bool floatingInputs,
+        })
+      >{};
+  final mixedComparisons =
+      <Instruction, ({Comparison comparison, Value integer, Value floating})>{};
   final calls = <DirectCall, CallLayout<R>>{};
   late final CallLayout<R> entry;
+  int _generalTemporaries = 0, _floatingTemporaries = 0;
+
+  /// The maximum additional scratch demand of a selected operation.
+  int temporaries(RegisterBank bank) =>
+      bank == .general ? _generalTemporaries : _floatingTemporaries;
 
   this {
     if (function.bodyKind != .synchronous ||
@@ -64,36 +79,57 @@ final class FunctionSelection<R>(
             if (type != .floating) {
               throw UnsupportedError('Native numeric negation: $type');
             }
-          case NumericBinary(:final operator, :final left, :final right):
-            if (left.type != .floating || right.type != .floating) {
+          case NumericToDouble(:final operand):
+            if (!_number(operand.type)) {
               throw UnsupportedError(
-                'Native arithmetic requires known double operands.',
+                'Native conversion requires a known numeric representation.',
               );
             }
-            final encoding = switch (operator) {
-              .add => emitter.addDouble,
-              .subtract => emitter.subtractDouble,
-              .multiply => emitter.multiplyDouble,
-              .divide => emitter.divideDouble,
-              .lessThan => emitter.comparison(.lessThan, floating: true),
-              .lessOrEqual => emitter.comparison(.lessOrEqual, floating: true),
-              .greaterThan => emitter.comparison(.greaterThan, floating: true),
-              .greaterOrEqual => emitter.comparison(
-                .greaterOrEqual,
-                floating: true,
-              ),
-              _ => throw UnsupportedError('Native double operation: $operator'),
+          case NumericBinary(:final operator, :final left, :final right):
+            if (!_number(left.type) || !_number(right.type)) {
+              throw UnsupportedError(
+                'Native arithmetic requires known numeric representations.',
+              );
+            }
+            final Comparison? comparison = switch (operator) {
+              .lessThan => .lessThan,
+              .lessOrEqual => .lessOrEqual,
+              .greaterThan => .greaterThan,
+              .greaterOrEqual => .greaterOrEqual,
+              _ => null,
             };
-            binaries[instruction] = (
-              encoding: encoding,
-              left: left,
-              right: right,
+            if (comparison != null && left.type != right.type) {
+              _mixed(instruction, comparison, left, right);
+              break;
+            }
+            final floating =
+                instruction.type == .floating || left.type == .floating;
+            final encoding = switch (operator) {
+              .add => floating ? emitter.addDouble : emitter.add,
+              .subtract => floating ? emitter.subtractDouble : emitter.subtract,
+              .multiply => floating ? emitter.multiplyDouble : emitter.multiply,
+              .divide => emitter.divideDouble,
+              _ when comparison != null => emitter.comparison(
+                comparison,
+                floating: floating,
+              ),
+              _ => throw UnsupportedError(
+                'Native numeric operation: $operator',
+              ),
+            };
+            _binary(
+              instruction,
+              encoding,
+              left,
+              right,
+              floatingInputs: floating,
             );
           case IntBinary(:final operator, :final left, :final right):
             final encoding = switch (operator) {
               .add => emitter.add,
               .subtract => emitter.subtract,
               .multiply => emitter.multiply,
+              .divide => emitter.divideDouble,
               .bitAnd => emitter.bitAnd,
               .bitOr => emitter.bitOr,
               .bitXor => emitter.bitXor,
@@ -105,19 +141,24 @@ final class FunctionSelection<R>(
                 'Native integer operation: $operator',
               ),
             };
-            binaries[instruction] = (
-              encoding: encoding,
-              left: left,
-              right: right,
+            _binary(
+              instruction,
+              encoding,
+              left,
+              right,
+              floatingInputs: operator == .divide,
             );
           case Equals(:final left, :final right, :final negated):
-            if (!_scalar(left.type) ||
-                !_scalar(right.type) ||
-                (left.type == .integer && right.type == .floating) ||
-                (left.type == .floating && right.type == .integer)) {
+            if (!_scalar(left.type) || !_scalar(right.type)) {
               throw UnsupportedError(
                 'Native equality requires supported scalar operands.',
               );
+            }
+            if (_number(left.type) &&
+                _number(right.type) &&
+                left.type != right.type) {
+              _mixed(instruction, negated ? .notEqual : .equal, left, right);
+              break;
             }
             final BinaryEncoding<R> encoding = left.type == right.type
                 ? emitter.comparison(
@@ -128,11 +169,7 @@ final class FunctionSelection<R>(
                     (destination, _, _) =>
                         emitter.loadImmediate(destination, negated ? 1 : 0),
                   );
-            binaries[instruction] = (
-              encoding: encoding,
-              left: left,
-              right: right,
-            );
+            _binary(instruction, encoding, left, right);
           default:
             throw UnsupportedError(
               'Native operation: ${instruction.runtimeType}',
@@ -141,6 +178,52 @@ final class FunctionSelection<R>(
       }
     }
   }
+
+  void _binary(
+    Instruction instruction,
+    BinaryEncoding<R> encoding,
+    Value left,
+    Value right, {
+    bool floatingInputs = false,
+  }) {
+    final count = floatingInputs
+        ? [left, right].where((v) => v.type == .integer).length
+        : 0;
+    if (count > _floatingTemporaries) _floatingTemporaries = count;
+    binaries[instruction] = (
+      encoding: encoding,
+      left: left,
+      right: right,
+      floatingInputs: floatingInputs,
+    );
+  }
+
+  void _mixed(
+    Instruction instruction,
+    Comparison comparison,
+    Value left,
+    Value right,
+  ) {
+    if (left.type == .floating) {
+      (left, right) = (right, left);
+      comparison = switch (comparison) {
+        .lessThan => .greaterThan,
+        .lessOrEqual => .greaterOrEqual,
+        .greaterThan => .lessThan,
+        .greaterOrEqual => .lessOrEqual,
+        _ => comparison,
+      };
+    }
+    mixedComparisons[instruction] = (
+      comparison: comparison,
+      integer: left,
+      floating: right,
+    );
+    _generalTemporaries = 1;
+    if (_floatingTemporaries == 0) _floatingTemporaries = 1;
+  }
+
+  bool _number(ValueType type) => type == .integer || type == .floating;
 
   /// Selects the physical bank for an already supported value representation.
   RegisterBank bank(ValueType type) => type == .floating ? .floating : .general;

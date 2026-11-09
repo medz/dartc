@@ -51,6 +51,13 @@ void main() {
     expect(NumericBinary(.modulo, number, i).mayThrow, isTrue);
     expect(NumericBinary(.modulo, d, i).mayThrow, isFalse);
     expect(NumericNegate(number).type, ValueType.number);
+    expect(NumericToDouble(number).type, ValueType.floating);
+    expect(NumericToDouble(i).effects, isEmpty);
+    expect(NumericToDouble(d).inputs, [d]);
+    expect(
+      () => NumericToDouble(const Constant.boolean(false)),
+      throwsArgumentError,
+    );
     expect(
       () => NumericBinary(.add, i, const Constant.nullValue()),
       throwsArgumentError,

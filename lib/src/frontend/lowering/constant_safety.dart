@@ -2,32 +2,33 @@ import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
 
 import 'analyzer_metadata.dart';
 
-/// Rejects constant dependencies whose identity or storage analyzer loses.
+/// Rejects constant dependencies whose identity, storage or value analyzer loses.
 ///
 /// Inspect syntax before consuming even a scalar result: a private-symbol
 /// comparison may already have folded to the wrong boolean or selected branch.
 /// This deliberately visits both branches, without evaluating Dart expressions.
 final class ConstantSafety() {
   final _safe = <Element>{};
-  final _safeExpressions = <Expression>{};
+  final _safeSyntax = <AstNode>{};
 
   void check(
     ResolvedUnitResult unit,
     AstNode site, {
-    Expression? expression,
+    AstNode? syntax,
     VariableElement? variable,
   }) {
     if ((variable == null || _safe.contains(variable.baseElement)) &&
-        (expression == null || _safeExpressions.contains(expression))) {
+        (syntax == null || _safeSyntax.contains(syntax))) {
       return;
     }
     final scan = _Scan(_safe);
     try {
       if (variable != null) scan.variable(variable);
-      expression?.accept(scan);
+      syntax?.accept(scan);
     } on _UnsafeConstant catch (error) {
       final location = unit.lineInfo.getLocation(site.offset);
       throw UnsupportedError(
@@ -38,7 +39,7 @@ final class ConstantSafety() {
     // Commit only after the entire reachable graph succeeds. A back edge must
     // never make a node safe while an ancestor is still being inspected.
     _safe.addAll(scan.visited);
-    if (expression != null) _safeExpressions.add(expression);
+    if (syntax != null) _safeSyntax.add(syntax);
   }
 }
 
@@ -125,6 +126,125 @@ final class _Scan(final Set<Element> safe) extends RecursiveAstVisitor<void> {
     } else if (element is VariableElement && element.isConst) {
       variable(element);
     }
+  }
+
+  @override
+  void visitAnnotation(Annotation node) {
+    if (node.element case final ConstructorElement element) {
+      constructor(element);
+    }
+    super.visitAnnotation(node);
+  }
+
+  ({num? value, bool integer, bool floating}) numericOperand(
+    Expression expression,
+  ) {
+    if (expression case ParenthesizedExpression(:final expression)) {
+      return numericOperand(expression);
+    }
+    if (expression case IntegerLiteral(:final value)) {
+      return (value: value, integer: true, floating: false);
+    }
+    if (expression case DoubleLiteral(:final value)) {
+      return (value: value, integer: false, floating: true);
+    }
+    if (expression case PrefixExpression(:final operator, :final operand)
+        when operator.lexeme == '-') {
+      final input = numericOperand(operand);
+      return (
+        value: input.value == null ? null : -input.value!,
+        integer: input.integer,
+        floating: input.floating,
+      );
+    }
+    final element = switch (expression) {
+      SimpleIdentifier(:final element) => element,
+      PrefixedIdentifier(:final identifier) => identifier.element,
+      PropertyAccess(:final propertyName) => propertyName.element,
+      _ => null,
+    };
+    final variable = element is PropertyAccessorElement
+        ? element.variable
+        : element;
+    var type = expression.staticType;
+    if (variable is VariableElement) {
+      type ??= variable.type;
+      if (variable.isConst) {
+        final value = variable.computeConstantValue();
+        if (value?.hasKnownValue == true) {
+          final number = value!.toIntValue() ?? value.toDoubleValue();
+          return (
+            value: number,
+            integer: number is int,
+            floating: number is double,
+          );
+        }
+      }
+    }
+    if (expression case InstanceCreationExpression(:final constructorName)) {
+      type ??= constructorName.element?.enclosingElement.thisType;
+    }
+    if (expression is BooleanLiteral ||
+        expression is NullLiteral ||
+        expression is StringLiteral ||
+        expression is SymbolLiteral ||
+        expression is ListLiteral ||
+        expression is SetOrMapLiteral ||
+        expression is RecordLiteral) {
+      return (value: null, integer: false, floating: false);
+    }
+    return (
+      value: null,
+      integer:
+          type is! InterfaceType ||
+          type.isDartCoreInt ||
+          type.isDartCoreNum ||
+          type.isDartCoreObject,
+      floating:
+          type is! InterfaceType ||
+          type.isDartCoreDouble ||
+          type.isDartCoreNum ||
+          type.isDartCoreObject,
+    );
+  }
+
+  @override
+  void visitBinaryExpression(BinaryExpression node) {
+    super.visitBinaryExpression(node);
+    if (!const {
+      '==',
+      '!=',
+      '<',
+      '<=',
+      '>',
+      '>=',
+    }.contains(node.operator.lexeme)) {
+      return;
+    }
+    final left = numericOperand(node.leftOperand),
+        right = numericOperand(node.rightOperand);
+    if (!(left.integer && right.floating || left.floating && right.integer)) {
+      return;
+    }
+    final a = left.value, b = right.value;
+    if (a != null && b != null) {
+      if (a.isNaN || b.isNaN) return;
+      final order = a == 0 && b == 0 ? 0 : a.compareTo(b);
+      final roundedLeft = a.toDouble(), roundedRight = b.toDouble();
+      final (expected, observed) = switch (node.operator.lexeme) {
+        '==' => (order == 0, roundedLeft == roundedRight),
+        '!=' => (order != 0, roundedLeft != roundedRight),
+        '<' => (order < 0, roundedLeft < roundedRight),
+        '<=' => (order <= 0, roundedLeft <= roundedRight),
+        '>' => (order > 0, roundedLeft > roundedRight),
+        _ => (order >= 0, roundedLeft >= roundedRight),
+      };
+      if (observed == expected) return;
+    }
+    // shortcut: reject unsafe analyzer folds until exact constant evaluation is available.
+    throw _UnsafeConstant(
+      'exact mixed numeric constant evaluation is not implemented',
+    );
   }
 
   @override

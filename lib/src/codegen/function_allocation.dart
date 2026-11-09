@@ -77,7 +77,8 @@ final class FunctionAllocation<R extends Object>(
         _blockUses.values.any(
           (uses) => RegisterBank.values.any(
             (bank) =>
-                uses.keys.where((v) => selection.bank(v.type) == bank).length >=
+                uses.keys.where((v) => selection.bank(v.type) == bank).length +
+                    selection.temporaries(bank) >=
                 emitter.allocatableRegisters
                     .where((r) => emitter.bank(r) == bank)
                     .length,
@@ -156,23 +157,23 @@ final class FunctionAllocation<R extends Object>(
     }
   }
 
-  /// Reads an operand without evicting the other operand's [except] register.
-  R read(Value value, {R? except}) {
+  /// Reads an operand without evicting registers in [except].
+  R read(Value value, {Iterable<R> except = const []}) {
     if (_registers[value] case final register?) return register;
     final register = allocate(selection.bank(value.type), except: except);
-    load(value, register);
+    load(value, register, except: except);
     return _registers[value] = register;
   }
 
   /// Loads a constant or a saved value into an explicitly chosen register.
-  void load(Value value, R destination) {
+  void load(Value value, R destination, {Iterable<R> except = const []}) {
     if (value case ScalarConstant(value: final int number)) {
       emitter.loadImmediate(destination, number);
     } else if (value case ScalarConstant(value: final bool flag)) {
       emitter.loadImmediate(destination, flag ? 1 : 0);
     } else if (value case ScalarConstant(value: final double number)) {
       final bits = ByteData(8)..setFloat64(0, number, .little);
-      final temporary = allocate(.general);
+      final temporary = allocate(.general, except: except);
       emitter.loadImmediate(temporary, bits.getInt64(0, .little));
       emitter.move(destination, temporary);
       releaseTemporary(temporary);
@@ -184,19 +185,19 @@ final class FunctionAllocation<R extends Object>(
   }
 
   /// Allocates one register, spilling a different resident value if necessary.
-  R allocate(RegisterBank bank, {R? except, R? preferred}) {
+  R allocate(RegisterBank bank, {Iterable<R> except = const [], R? preferred}) {
     if (preferred != null &&
-        preferred != except &&
+        !except.contains(preferred) &&
         emitter.bank(preferred) == bank &&
         _free.remove(preferred)) {
       return preferred;
     }
     final index = _free.lastIndexWhere(
-      (r) => r != except && emitter.bank(r) == bank,
+      (r) => !except.contains(r) && emitter.bank(r) == bank,
     );
     if (index >= 0) return _free.removeAt(index);
     final entry = _registers.entries.firstWhere(
-      (e) => e.value != except && emitter.bank(e.value) == bank,
+      (e) => !except.contains(e.value) && emitter.bank(e.value) == bank,
     );
     _spill(entry.key, entry.value);
     _registers.remove(entry.key);

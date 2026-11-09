@@ -1,13 +1,18 @@
 import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
 
-/// Selects the IR operation for a resolved SDK collection member.
-Instruction? lowerCoreCollectionMember(
+/// Selects the IR operation for a resolved SDK core member.
+Instruction? lowerCoreMember(
   ExecutableElement member,
   Value receiver,
   List<Value> arguments,
 ) {
   if (!member.library.isDartCore || member.isStatic) return null;
+  if (member.baseElement ==
+          member.library.getClass('num')?.getMethod('toDouble') &&
+      arguments.isEmpty) {
+    return NumericToDouble(receiver);
+  }
   return switch ((member.enclosingElement?.name, member.name, arguments)) {
     ('MapEntry', 'key', []) => LoadField(CoreTypes.mapEntryKey, receiver),
     ('MapEntry', 'value', []) => LoadField(CoreTypes.mapEntryValue, receiver),

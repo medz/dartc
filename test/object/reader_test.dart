@@ -27,6 +27,7 @@ void main() {
             'integer_operations',
             'pointers',
             'doubles',
+            'mixed_numeric',
           ]) {
             final bytes = assets.file('compiler/$fixture.o').readAsBytesSync();
             final module = format.decodeObject(bytes);

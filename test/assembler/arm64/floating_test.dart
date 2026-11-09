@@ -11,6 +11,8 @@ void main() {
         ..moveDouble(.d31, .d17)
         ..moveBitsToDouble(.d9, .x10)
         ..moveBitsToGeneral(.x11, .d12)
+        ..convertIntToDouble(.d17, .x18)
+        ..truncateDoubleToInt(.x19, .d20)
         ..addDouble(.d0, .d1, .d2)
         ..subtractDouble(.d30, .d29, .d28)
         ..multiplyDouble(.d8, .d9, .d10)
@@ -29,6 +31,8 @@ void main() {
           0x1e60423f,
           0x9e670149,
           0x9e66018b,
+          0x9e620251,
+          0x9e780293,
           0x1e622820,
           0x1e7c3bbe,
           0x1e6a0928,
@@ -51,6 +55,8 @@ void main() {
       expect(() => code.storeDouble(.d31, .x0, 1), throwsArgumentError);
       expect(() => code.moveBitsToDouble(.d0, .sp), throwsArgumentError);
       expect(() => code.moveBitsToGeneral(.sp, .d0), throwsArgumentError);
+      expect(() => code.convertIntToDouble(.d0, .sp), throwsArgumentError);
+      expect(() => code.truncateDoubleToInt(.sp, .d0), throwsArgumentError);
       expect(code.finish(), isEmpty);
     },
   );

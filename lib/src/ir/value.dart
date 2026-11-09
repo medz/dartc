@@ -449,6 +449,7 @@ sealed class Instruction(super.type) extends Value {
     IntBinary() ||
     NumericBinary() ||
     NumericNegate() ||
+    NumericToDouble() ||
     TypeTest() ||
     TypeView() ||
     RecordGet() ||
@@ -1384,6 +1385,18 @@ final class NumericNegate(
   final Value operand,
 ) extends Instruction {
   this : super(operand.type) {
+    if (!ValueType.number.accepts(operand.type)) {
+      throw ArgumentError('A non-nullable numeric operand is required.');
+    }
+  }
+
+  @override
+  Iterable<Value> get inputs => [operand];
+}
+
+/// Converts a number to double, rounding integers to the nearest IEEE value.
+final class NumericToDouble(final Value operand) extends Instruction {
+  this : super(.floating) {
     if (!ValueType.number.accepts(operand.type)) {
       throw ArgumentError('A non-nullable numeric operand is required.');
     }

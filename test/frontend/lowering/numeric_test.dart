@@ -3,6 +3,7 @@ import 'package:dartc/frontend.dart';
 import 'package:test/test.dart';
 
 import '../../support/ir_interpreter.dart';
+import '../../support/numeric_order.dart';
 import 'fixtures/numeric.dart' as sdk;
 
 void main() {
@@ -19,7 +20,13 @@ void main() {
   void compare(String name, List<num> args, Function reference) {
     Object? expected;
     try {
-      expected = Function.apply(reference, args);
+      expected = switch (name) {
+        'less' => (numericOrder(args[0], args[1]) ?? 1) < 0,
+        'lessEqual' => (numericOrder(args[0], args[1]) ?? 1) <= 0,
+        'greater' => (numericOrder(args[0], args[1]) ?? -1) > 0,
+        'greaterEqual' => (numericOrder(args[0], args[1]) ?? -1) >= 0,
+        _ => Function.apply(reference, args),
+      };
     } catch (e) {
       expect(
         () => runner.run(functions[name]!, args),
@@ -42,61 +49,70 @@ void main() {
     }
   }
 
-  test(
-    'numeric operations match SDK values, representations and exceptions',
-    () {
-      const values = <num>[
-        -0x8000000000000000,
-        -9007199254740993,
-        -7,
-        -1,
-        0,
-        1,
-        7,
-        9007199254740993,
-        0x7fffffffffffffff,
-        -double.infinity,
-        -7.5,
-        -1.0,
-        -0.0,
-        0.0,
-        1.0,
-        2.5,
-        9007199254740992.0,
-        double.infinity,
-        double.nan,
-      ];
-      final binary = <String, Function>{
-        'add': sdk.add,
-        'subtract': sdk.subtract,
-        'multiply': sdk.multiply,
-        'divide': sdk.divide,
-        'truncate': sdk.truncate,
-        'modulo': sdk.modulo,
-        'less': sdk.less,
-        'lessEqual': sdk.lessEqual,
-        'greater': sdk.greater,
-        'greaterEqual': sdk.greaterEqual,
-        'compound': sdk.compound,
-        'caughtTruncate': sdk.caughtTruncate,
-        'caughtModulo': sdk.caughtModulo,
-      };
-      for (final a in values) {
-        compare('negate', [a], sdk.negate);
-        compare('increment', [a], sdk.increment);
-        if (a is double) compare('negateDouble', [a], sdk.negateDouble);
-        for (final b in values) {
-          for (final entry in binary.entries) {
-            compare(entry.key, [a, b], entry.value);
-          }
-          if (a is int && b is double) {
-            compare('mixedAdd', [a, b], sdk.mixedAdd);
-          }
-          if (a is double) compare('doubleModulo', [a, b], sdk.doubleModulo);
+  test('numeric operations preserve specified values, representations and exceptions', () {
+    const values = <num>[
+      -0x8000000000000000,
+      -9007199254740993,
+      -7,
+      -1,
+      0,
+      1,
+      7,
+      9007199254740993,
+      0x7fffffffffffffff,
+      -double.infinity,
+      -7.5,
+      -1.0,
+      -0.0,
+      0.0,
+      1.0,
+      2.5,
+      9007199254740992.0,
+      double.infinity,
+      double.nan,
+    ];
+    final binary = <String, Function>{
+      'add': sdk.add,
+      'subtract': sdk.subtract,
+      'multiply': sdk.multiply,
+      'divide': sdk.divide,
+      'truncate': sdk.truncate,
+      'modulo': sdk.modulo,
+      'less': sdk.less,
+      'lessEqual': sdk.lessEqual,
+      'greater': sdk.greater,
+      'greaterEqual': sdk.greaterEqual,
+      'compound': sdk.compound,
+      'caughtTruncate': sdk.caughtTruncate,
+      'caughtModulo': sdk.caughtModulo,
+    };
+    for (final a in values) {
+      compare('negate', [a], sdk.negate);
+      compare('increment', [a], sdk.increment);
+      compare('convertNumber', [a], sdk.convertNumber);
+      if (a is double) compare('negateDouble', [a], sdk.negateDouble);
+      for (final b in values) {
+        for (final entry in binary.entries) {
+          compare(entry.key, [a, b], entry.value);
         }
+        if (a is int && b is double) {
+          compare('mixedAdd', [a, b], sdk.mixedAdd);
+        }
+        if (a is double) compare('doubleModulo', [a, b], sdk.doubleModulo);
       }
-    },
-  );
+    }
+  });
+
+  test('numeric conversion only binds the resolved SDK declaration', () {
+    expect(runner.run(functions['userConversion']!, []), 7.5);
+    expect(runner.run(functions['extensionConversion']!, []), 8.5);
+    expect(
+      functions['convertNumber']!.blocks
+          .expand((b) => b.instructions)
+          .whereType<NumericToDouble>(),
+      hasLength(1),
+    );
+  });
 
   test('numeric IR validates operands, types and exceptional behavior', () {
     const integer = Constant.integer(1);

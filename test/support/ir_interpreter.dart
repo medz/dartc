@@ -4,6 +4,8 @@ import 'dart:ffi' as ffi;
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
+import 'numeric_order.dart';
+
 final class IrInterpreter(
   final IrProgram program,
   final Map<(Uri, String), Object? Function(int)> imports,
@@ -2103,6 +2105,8 @@ final class IrInterpreter(
           values[op] = (read(left) as String) + (read(right) as String);
         case NumericNegate(:final operand):
           values[op] = -(read(operand) as num);
+        case NumericToDouble(:final operand):
+          values[op] = (read(operand) as num).toDouble();
         case NumericBinary(:final operator, :final left, :final right):
           final a = read(left) as num, b = read(right) as num;
           values[op] = switch (operator) {
@@ -2112,10 +2116,10 @@ final class IrInterpreter(
             .divide => a / b,
             .truncateDivide => a ~/ b,
             .modulo => a % b,
-            .lessThan => a < b,
-            .lessOrEqual => a <= b,
-            .greaterThan => a > b,
-            .greaterOrEqual => a >= b,
+            .lessThan => (numericOrder(a, b) ?? 1) < 0,
+            .lessOrEqual => (numericOrder(a, b) ?? 1) <= 0,
+            .greaterThan => (numericOrder(a, b) ?? -1) > 0,
+            .greaterOrEqual => (numericOrder(a, b) ?? -1) >= 0,
           };
         case IntBinary(:final operator, :final left, :final right):
           final a = read(left) as int, b = read(right) as int;
@@ -2138,7 +2142,10 @@ final class IrInterpreter(
             .greaterOrEqual => a >= b,
           };
         case Equals(:final left, :final right, :final negated):
-          values[op] = (read(left) == read(right)) != negated;
+          final a = read(left), b = read(right);
+          values[op] =
+              (a is num && b is num ? numericOrder(a, b) == 0 : a == b) !=
+              negated;
         case DirectCall(
           :final target,
           :final inputs,

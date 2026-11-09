@@ -302,7 +302,7 @@ final class FunctionContext(
     if (member.library.isDartCore &&
         (!direct || target.library.toString() == 'dart:core') &&
         !coreRuntimeMember(member)) {
-      final operation = lowerCoreCollectionMember(member, receiver, args);
+      final operation = lowerCoreMember(member, receiver, args);
       if (operation != null) return normal(emit(operation));
     }
     return normal(

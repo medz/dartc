@@ -34,8 +34,8 @@ void main() {
         ('wrong_pointer_signature', throwsArgumentError),
         ('nullable_pointer', throwsArgumentError),
         ('unsupported_pointer', throwsUnsupportedError),
-        ('mixed_numeric', throwsUnsupportedError),
         ('floating_modulo', throwsUnsupportedError),
+        ('unsafe_numeric_constant', throwsUnsupportedError),
       ]) {
         await expectLater(
           compiler.compile(['test/compiler/fixtures/$fixture.dart']),

@@ -39,5 +39,10 @@ void main() {
     expect(doubles, contains('double add(double, double);'));
     expect(doubles, contains('int64_t comparisons(double, double);'));
     expect(doubles, contains('double rotate(double, double, int64_t);'));
+    final numeric = NativeAssets(Target.host())
+        .file('compiler/mixed_numeric.h')
+        .readAsStringSync();
+    expect(numeric, contains('double converted(int64_t);'));
+    expect(numeric, contains('int64_t comparisons(int64_t, double);'));
   });
 }

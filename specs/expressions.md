@@ -40,3 +40,11 @@
 NoSuchMethodError.withInvocation 的普通工厂调用与提取复用既有调用路径：构造返回新的错误对象，不触发接收者 noSuchMethod，也不提前读取用户 Invocation getter。支持类型判断、抛出、捕获和重新抛出的身份保持；该工厂支持不代表完整原生 Error 实例 API 或诊断文本与 VM 完全一致。
 
 动态调用 `g<String>('bad')` 遗漏必需命名实参时，传给 `noSuchMethod` 的 Invocation 应保留显式类型实参 `String`。在同一份 `shapeBeforeBounds` 样本上，macOS ARM64 的 Dart SDK 3.13.7 JIT 返回 111，SDK AOT 返回 101。IR 保留显式类型实参，结果为 111。对照使用 SDK 显式构造的 Invocation 和同一接收者的 `noSuchMethod`。[样本](../test/frontend/lowering/fixtures/dynamic_dispatch.dart)、[Invocation.typeArguments](https://api.dart.dev/dart-core/Invocation/typeArguments.html)。
+
+## 数值比较与 SDK 差异
+
+[`num.==`](https://api.dart.dev/stable/3.13.7/dart-core/num/operator_equals.html) 要求 int 与 double 具有相同数值；[`num.<`](https://api.dart.dev/stable/3.13.7/dart-core/num/operator_less.html) 按数值大小比较。正负零在这些运算符下相等；NaN 与任何值不等，四种大小关系均为假。整数先舍入成 double 再比较不满足这一契约。例如 `9007199254740993 > 9007199254740992.0` 应为真，两者相等应为假；最大 int 小于 `9223372036854775808.0`。
+
+SDK 3.13.7 的 VM JIT/AOT 在这些边界丢失整数精度。官方 [SDK #64728](https://github.com/dart-lang/sdk/issues/64728) 确认把最大整数与其舍入 double 判为相等属于实现错误。IR 数值操作及已接通的原生比较按原始数值执行；[独立数值预期](../test/support/numeric_order.dart)将有限 double 展开为精确整数比例，[原生验证](../test/compiler/mixed_numeric_test.dart)覆盖边界、相邻浮点值、随机位模式、两种操作数顺序和副作用。
+
+analyzer 14.7 的常量求值也存在相同的精度问题。常量依赖包含会改变比较结果的混合数值折叠，或其操作数不能证明安全时，当前明确拒绝，避免消费错误布尔值、分支或嵌套常量；这些合法常量表达式的正确重算仍是实现缺口。[常量依赖验证](../test/frontend/lowering/constant_safety_test.dart)检查六种比较、传递依赖、条件选择、嵌套构造和安全常量；[导出验证](../test/frontend/lowering/native_exports_test.dart)检查注解名称及常量别名的类型选择，避免生成错误的导出名称或遗漏导出。

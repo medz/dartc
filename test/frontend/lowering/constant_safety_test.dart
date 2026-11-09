@@ -9,6 +9,42 @@ import 'fixtures/constant_safety/dependency.dart' as sdk;
 
 void main() {
   test(
+    'numeric constant dependencies cannot import analyzer rounding errors',
+    () async {
+      await AnalysisSession([
+        'test/frontend/lowering/fixtures/constant_safety/numeric.dart',
+      ]).use((checked) {
+        final unit = checked.libraries.single.units.single;
+        final safety = ConstantSafety();
+        for (final declaration
+            in unit.unit.declarations
+                .whereType<TopLevelVariableDeclaration>()) {
+          for (final variable in declaration.variables.variables) {
+            void check() => safety.check(
+              unit,
+              variable,
+              variable: variable.declaredFragment!.element,
+            );
+            expect(
+              check,
+              variable.name.lexeme.startsWith('unsafe')
+                  ? throwsA(
+                      isA<UnsupportedError>().having(
+                        (e) => e.message,
+                        'reason',
+                        contains('exact mixed numeric constant evaluation'),
+                      ),
+                    )
+                  : returnsNormally,
+              reason: variable.name.lexeme,
+            );
+          }
+        }
+      });
+    },
+  );
+
+  test(
     'private symbol comparisons lose identity in analyzer, not the VM',
     () async {
       expect(sdk.b, isFalse);
@@ -54,7 +90,7 @@ void main() {
               void checkVariable() =>
                   safety.check(unit, node, variable: variable);
               void checkExpression() =>
-                  safety.check(unit, node, expression: node.initializer);
+                  safety.check(unit, node, syntax: node.initializer);
               for (final check in [checkVariable, checkExpression]) {
                 if (node.name.lexeme.startsWith('unsafe')) {
                   expect(
@@ -105,7 +141,7 @@ void main() {
         unit,
         safe,
         variable: safe.declaredFragment!.element,
-        expression: safe.initializer,
+        syntax: safe.initializer,
       );
       for (final site in [safe, unsafe, safe]) {
         final location = unit.lineInfo.getLocation(site.offset);
@@ -118,7 +154,7 @@ void main() {
               unit,
               site,
               variable: variable,
-              expression: expression,
+              syntax: expression,
             ),
             throwsA(
               isA<UnsupportedError>()

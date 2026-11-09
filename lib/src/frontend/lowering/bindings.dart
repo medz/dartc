@@ -30,7 +30,7 @@ final class ExtensionApplication(
 
 /// Maps analyzer declarations and formal parameters to their IR identities.
 final class Bindings({final bool enableAssertions = false}) {
-  final _constantSafety = ConstantSafety();
+  final constantSafety = ConstantSafety();
   final _targets = <ExecutableElement, FunctionTarget>{};
   final _typeEnvironments =
       <FunctionTarget, Map<TypeParameterType, ValueType>>{};
@@ -1053,7 +1053,7 @@ final class Bindings({final bool enableAssertions = false}) {
     ResolvedUnitResult unit,
     ast.AstNode site,
   ) => _constants.putIfAbsent(variable, () {
-    _constantSafety.check(unit, site, variable: variable);
+    constantSafety.check(unit, site, variable: variable);
     final value = variable.computeConstantValue();
     if (value == null &&
         variable is FormalParameterElement &&
@@ -1084,7 +1084,7 @@ final class Bindings({final bool enableAssertions = false}) {
   ) {
     final value = expression.computeConstantValue()?.value;
     if (value == null) return null;
-    _constantSafety.check(unit, expression, expression: expression);
+    constantSafety.check(unit, expression, syntax: expression);
     return _constantValue(value, unit.libraryElement, unit, expression);
   }
 
