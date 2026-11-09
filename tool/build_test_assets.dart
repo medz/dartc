@@ -25,38 +25,24 @@ Future<void> main() async {
         await Directory.fromUri(assets.directory.uri.resolve('$domain/'))
             .create(recursive: true);
       }
-      final arithmetic = await Compiler(target)
-          .compile(['test/compiler/fixtures/arithmetic.dart']);
-      await arithmetic.write(
-        assets.file('compiler/arithmetic.o'),
-        header: assets.file('compiler/arithmetic.h'),
-      );
-      await arithmetic.write(
-        assets.file('compiler/arithmetic.a'),
-        kind: .staticLibrary,
-      );
-      await arithmetic.write(
-        assets.library('compiler/arithmetic'),
-        kind: .sharedLibrary,
-      );
-
-      final calls = await Compiler(target)
-          .compile(['test/compiler/fixtures/calls.dart']);
-      await calls.write(assets.library('compiler/calls'), kind: .sharedLibrary);
-      await calls.write(assets.file('compiler/calls.o'));
-      await calls.write(assets.file('compiler/calls.a'), kind: .staticLibrary);
-
-      final flowLibrary = await Compiler(target)
-          .compile(['test/compiler/fixtures/control_flow.dart']);
-      await flowLibrary.write(
-        assets.library('compiler/control_flow'),
-        kind: .sharedLibrary,
-      );
-      await flowLibrary.write(assets.file('compiler/control_flow.o'));
-      await flowLibrary.write(
-        assets.file('compiler/control_flow.a'),
-        kind: .staticLibrary,
-      );
+      for (final fixture in ['arithmetic', 'calls', 'control_flow']) {
+        final library = assets.library('compiler/$fixture');
+        for (final (file, output) in <(File, Output)>[
+          (assets.file('compiler/$fixture.o'), const .object()),
+          (assets.file('compiler/$fixture.a'), const .staticLibrary()),
+          (library, .sharedLibrary(library.uri.pathSegments.last)),
+        ]) {
+          final result = await Compiler(
+            target,
+          ).compile(['test/compiler/fixtures/$fixture.dart'], output: output);
+          await result.write(
+            file,
+            header: fixture == 'arithmetic' && output is ObjectOutput
+                ? assets.file('compiler/arithmetic.h')
+                : null,
+          );
+        }
+      }
 
       final ObjectFormat format = switch (os) {
         .macos => MachO(target),

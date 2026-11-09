@@ -18,7 +18,6 @@ void main() {
       'codegen': {'abi', 'assembler', 'object', 'ir', 'interop', 'target'},
       'linker': {'object', 'assembler', 'target'},
       'compiler': {
-        'abi',
         'ir',
         'frontend',
         'codegen',
@@ -28,7 +27,6 @@ void main() {
         'object',
         'linker',
       },
-      'cli': {'compiler', 'sdk', 'target'},
     };
     final entries = {
       for (final domain in dependencies.keys) '$domain.dart': domain,

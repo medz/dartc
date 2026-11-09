@@ -1,8 +1,9 @@
 import 'dart:io';
 
-import 'package:dartc/compiler.dart';
 import 'package:dartc/sdk.dart';
 import 'package:dartc/target.dart';
+
+import '../compiler.dart';
 
 /// Runs compiler commands with caller-owned output streams.
 final class CompilerCommand(final StringSink output, final StringSink errors) {
@@ -17,7 +18,7 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
       final source = arguments.first;
       String? destination, header, sdkPath;
       var target = Target.host();
-      var kind = OutputKind.object;
+      var kind = _OutputKind.object;
       for (var i = 1; i < arguments.length; i += 2) {
         if (i + 1 == arguments.length) {
           throw FormatException('Missing value for ${arguments[i]}');
@@ -50,12 +51,16 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
         target,
         sdk: sdkPath == null ? null : DartSdk.at(sdkPath),
       );
-      final library = await compiler.compile([source]);
-      await library.write(
-        File(destination),
-        kind: kind,
-        header: header == null ? null : File(header),
+      final file = File(destination);
+      final library = await compiler.compile(
+        [source],
+        output: switch (kind) {
+          .object => const .object(),
+          .staticLibrary => const .staticLibrary(),
+          .sharedLibrary => .sharedLibrary(file.uri.pathSegments.last),
+        },
       );
+      await library.write(file, header: header == null ? null : File(header));
       return 0;
     } on FormatException catch (error) {
       errors.writeln(error.message);
@@ -77,3 +82,9 @@ const _usage =
     'Usage: dartc <source.dart> -o <output> '
     '[--kind object|static|shared] [--header <file.h>] '
     '[--target macos-arm64|macos-x64|linux-arm64|linux-x64] [--sdk <root>]';
+
+enum _OutputKind() {
+  object,
+  staticLibrary,
+  sharedLibrary,
+}

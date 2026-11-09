@@ -1,45 +1,150 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
-import 'package:dartc/frontend.dart';
-import 'package:dartc/ir.dart';
 import 'package:dartc/codegen.dart';
+import 'package:dartc/frontend.dart';
 import 'package:dartc/interop.dart';
+import 'package:dartc/ir.dart';
+import 'package:dartc/linker.dart';
+import 'package:dartc/object.dart';
+import 'package:dartc/object/elf.dart';
+import 'package:dartc/object/mach_o.dart';
 import 'package:dartc/sdk.dart';
 import 'package:dartc/target.dart';
 
-import 'compiled_library.dart';
+import 'output.dart';
 
 /// Compiles annotated native exports for an explicit output target.
 final class Compiler(final Target target, {final DartSdk? sdk}) {
-  /// Checks the non-SDK dependency closure and builds all annotated exports.
+  /// Checks dependencies and returns the final bytes and C declarations.
   ///
-  /// No output files are changed until the returned library is written.
-  Future<CompiledLibrary> compile(List<String> paths) =>
-      AnalysisSession(paths, sdk: sdk, includeDependencies: true).use((input) {
-        final (:program, :exports) = Lowering().lower(input);
-        final CodeGenerator generator = switch (target.architecture) {
-          .arm64 => Arm64CodeGenerator(target),
-          .x64 => X64CodeGenerator(target),
-        };
-        final definitions = <FunctionTarget>{};
-        void include(FunctionTarget target) {
-          if (!definitions.add(target)) return;
-          final function = program.implementationOf(target);
-          if (function is! IrFunction) {
-            throw UnsupportedError('Native body unavailable: ${target.name}');
-          }
-          function.callees.forEach(include);
-        }
-
-        exports.keys.forEach(include);
-        final object = generator.generate(
-          program,
-          definitions: definitions,
-          exports: exports,
-        );
-        return CompiledLibrary(object, NativeExports(exports.values), [
+  /// All non-SDK dependencies are checked before selecting native definitions.
+  /// Analysis resources are closed before code generation. [output] selects
+  /// the file kind and, for a shared library, its name. No output files change.
+  Future<Compilation> compile(
+    List<String> paths, {
+    Output output = const .object(),
+  }) async {
+    final (
+      lowered,
+      sources,
+    ) = await AnalysisSession(paths, sdk: sdk, includeDependencies: true).use(
+      (input) => (
+        Lowering().lower(input),
+        [
           for (final library in input.libraries)
             for (final unit in library.units) File(unit.path).absolute.uri,
-        ]);
-      });
+        ],
+      ),
+    );
+    final (:program, :exports) = lowered;
+    final CodeGenerator generator = switch (target.architecture) {
+      .arm64 => Arm64CodeGenerator(target),
+      .x64 => X64CodeGenerator(target),
+    };
+    final definitions = <FunctionTarget>{};
+    void include(FunctionTarget target) {
+      if (!definitions.add(target)) return;
+      final function = program.implementationOf(target);
+      if (function is! IrFunction) {
+        throw UnsupportedError('Native body unavailable: ${target.name}');
+      }
+      function.callees.forEach(include);
+    }
+
+    exports.keys.forEach(include);
+    final object = generator.generate(
+      program,
+      definitions: definitions,
+      exports: exports,
+    );
+    final ObjectFormat format = switch (target.operatingSystem) {
+      .macos => MachO(target),
+      .linux => Elf(target),
+    };
+    final bytes = switch (output) {
+      ObjectOutput() => format.encodeObject(object),
+      StaticLibraryOutput() => ArchiveWriter(format).encode([object]),
+      SharedLibraryOutput(:final name) => switch (target.operatingSystem) {
+        .macos => MachOLinker(target),
+        .linux => ElfLinker(target),
+      }.linkSharedLibrary([object], name: name),
+    };
+    final header = StringBuffer();
+    NativeExports(exports.values).writeHeader(header);
+    return Compilation._(bytes, header.toString(), sources);
+  }
+}
+
+/// A completed native file and C header, independent of analysis resources.
+final class Compilation._(
+  Uint8List bytes,
+
+  /// C and C++ declarations for the native exports.
+  final String header,
+  Iterable<Uri> sources,
+) {
+  /// Immutable final bytes, including any required linking and signing.
+  final Uint8List bytes = bytes.asUnmodifiableView();
+
+  final List<Uri> _sources = .unmodifiable(sources);
+
+  /// Writes the completed file and, optionally, its C header.
+  ///
+  /// Writing to a new path does not change a shared library's compiled name.
+  /// Input files and colliding destinations are protected. Each file is replaced
+  /// after staging; the two-file update is not transactional if a filesystem
+  /// error occurs between renames.
+  Future<void> write(File output, {File? header}) async {
+    final destinations = [output, ?header];
+    final protected = {
+      for (final source in _sources)
+        if (source.scheme == 'file') _identity(File.fromUri(source)),
+    };
+    final names = <String>{};
+    for (final file in destinations) {
+      final name = _identity(file);
+      final aliasesSource =
+          file.existsSync() &&
+          _sources.any(
+            (source) =>
+                source.scheme == 'file' &&
+                FileSystemEntity.identicalSync(file.path, source.toFilePath()),
+          );
+      if (protected.contains(name) || aliasesSource || !names.add(name)) {
+        throw ArgumentError(
+          'Output would overwrite an input or another output: ${file.path}',
+        );
+      }
+    }
+    await _write(output, bytes);
+    if (header != null) await _write(header, utf8.encode(this.header));
+  }
+
+  String _identity(File file) {
+    if (file.existsSync()) return file.resolveSymbolicLinksSync();
+    final uri = file.absolute.uri.normalizePath();
+    var parent = File.fromUri(uri).parent;
+    final parts = [uri.pathSegments.last];
+    while (!parent.existsSync()) {
+      parts.insert(0, parent.uri.pathSegments.where((s) => s.isNotEmpty).last);
+      parent = parent.parent;
+    }
+    return Directory(parent.resolveSymbolicLinksSync()).uri
+        .resolveUri(Uri(pathSegments: parts))
+        .toFilePath();
+  }
+
+  Future<void> _write(File file, List<int> bytes) async {
+    await file.absolute.parent.create(recursive: true);
+    final work = await file.absolute.parent.createTemp('.dartc-write-');
+    try {
+      final staged = File.fromUri(work.uri.resolve('output'));
+      await staged.writeAsBytes(bytes);
+      await staged.rename(file.absolute.path);
+    } finally {
+      await work.delete(recursive: true);
+    }
+  }
 }

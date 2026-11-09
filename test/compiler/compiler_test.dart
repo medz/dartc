@@ -4,6 +4,8 @@ import 'package:dartc/compiler.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
+import '../support/native_assets.dart';
+
 void main() {
   final compiler = Compiler(Target.host());
 
@@ -34,6 +36,45 @@ void main() {
       );
     },
   );
+
+  test(
+    'compilation owns final bytes and keeps the library name across writes',
+    () async {
+      final assets = NativeAssets(Target.host());
+      final expected = assets.library('compiler/arithmetic');
+      final result = await compiler.compile([
+        'test/compiler/fixtures/arithmetic.dart',
+      ], output: .sharedLibrary(expected.uri.pathSegments.last));
+      expect(result.bytes, expected.readAsBytesSync());
+      expect(() => result.bytes[0] = 0, throwsUnsupportedError);
+      expect(
+        result.header,
+        assets.file('compiler/arithmetic.h').readAsStringSync(),
+      );
+      final directory = (Directory(
+        'build/test',
+      )..createSync(recursive: true)).createTempSync('compilation-');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final header = File.fromUri(directory.uri.resolve('api.h'));
+      for (final name in ['first-name', 'second-name']) {
+        final output = File.fromUri(directory.uri.resolve(name));
+        await result.write(output, header: header);
+        expect(output.readAsBytesSync(), result.bytes);
+        expect(header.readAsStringSync(), result.header);
+      }
+    },
+  );
+
+  test('invalid shared library identities fail during compilation', () async {
+    for (final name in ['', 'bad\u0000name']) {
+      await expectLater(
+        compiler.compile([
+          'test/compiler/fixtures/arithmetic.dart',
+        ], output: .sharedLibrary(name)),
+        throwsArgumentError,
+      );
+    }
+  });
 
   test(
     'source files and colliding output paths cannot be overwritten',
