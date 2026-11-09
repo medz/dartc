@@ -22,10 +22,22 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
   /// All non-SDK dependencies are checked before selecting native definitions.
   /// Analysis resources are closed before code generation. [output] selects
   /// the file kind and, for a shared library, its name. No output files change.
+  ///
+  /// [nativeSymbols] maps exact asset IDs and requested symbols to native names
+  /// before platform symbol decoration.
+  /// Missing bindings fail when referenced; no process-wide lookup is implied.
+  /// [linkInputs] supplies implementations when producing a shared library.
+  /// Object and archive outputs retain unresolved imports for a later link.
   Future<Compilation> compile(
     List<String> paths, {
     Output output = const .object(),
+    Map<String, Map<String, String>> nativeSymbols = const {},
+    Iterable<LinkInput> linkInputs = const [],
   }) async {
+    final inputs = linkInputs.toList();
+    if (inputs.isNotEmpty && output is! SharedLibraryOutput) {
+      throw ArgumentError('Link inputs require shared library output.');
+    }
     final (
       lowered,
       sources,
@@ -38,15 +50,31 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
         ],
       ),
     );
-    final (:program, :exports) = lowered;
+    final (:program, :exports, :imports) = lowered;
     final CodeGenerator generator = switch (target.architecture) {
       .arm64 => Arm64CodeGenerator(target),
       .x64 => X64CodeGenerator(target),
     };
     final definitions = <FunctionTarget>{};
+    final nativeImports = <FunctionTarget, NativeImport>{};
     void include(FunctionTarget target) {
       if (!definitions.add(target)) return;
       final function = program.implementationOf(target);
+      final reference = imports[target];
+      if (function is IrExternal && reference != null) {
+        final symbol = nativeSymbols[reference.assetId]?[reference.symbol];
+        if (symbol == null) {
+          throw ArgumentError(
+            'Unbound native symbol ${reference.symbol} in asset ${reference.assetId}',
+          );
+        }
+        nativeImports[target] = NativeImport(
+          symbol,
+          reference.signature,
+          isLeaf: reference.isLeaf,
+        );
+        return;
+      }
       if (function is! IrFunction) {
         throw UnsupportedError('Native body unavailable: ${target.name}');
       }
@@ -58,6 +86,7 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
       program,
       definitions: definitions,
       exports: exports,
+      imports: nativeImports,
     );
     final ObjectFormat format = switch (target.operatingSystem) {
       .macos => MachO(target),
@@ -69,7 +98,7 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
       SharedLibraryOutput(:final name) => switch (target.operatingSystem) {
         .macos => MachOLinker(target),
         .linux => ElfLinker(target),
-      }.linkSharedLibrary([.object(object)], name: name),
+      }.linkSharedLibrary([.object(object), ...inputs], name: name),
     };
     final header = StringBuffer();
     NativeExports(exports.values).writeHeader(header);

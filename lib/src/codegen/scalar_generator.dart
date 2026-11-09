@@ -48,7 +48,7 @@ base class ScalarCodeGenerator<R extends Object>(
         if (function is! IrExternal ||
             declaration.kind.hasReceiver ||
             declaration.typeParameters.isNotEmpty ||
-            !_matches(declaration, binding.signature)) {
+            !FfiTypes.canCall(binding.signature, declaration.signature)) {
           throw ArgumentError(
             'Native import requires a matching external declaration: ${declaration.name}',
           );

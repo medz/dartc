@@ -63,9 +63,10 @@ void main() {
     'native imports retain signatures and reject invalid symbol strings',
     () {
       final signature = NativeSignature(Int8, [Float]);
-      final binding = NativeImport('_foreign_symbol', signature);
+      final binding = NativeImport('_foreign_symbol', signature, isLeaf: true);
       expect(binding.symbol, '_foreign_symbol');
       expect(binding.signature, same(signature));
+      expect(binding.isLeaf, isTrue);
       for (final symbol in ['', 'bad\u0000symbol']) {
         expect(() => NativeImport(symbol, signature), throwsArgumentError);
       }

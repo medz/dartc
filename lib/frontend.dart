@@ -2,7 +2,7 @@
 ///
 /// Use [AnalysisSession] for scoped analysis and [Lowering] to translate its
 /// checked libraries. Resolved analyzer objects belong to the open session;
-/// the resulting IR and native export bindings remain usable after it closes.
+/// the resulting IR and native bindings remain usable after it closes.
 ///
 /// {@example /tool/print_ir.dart#lower_libraries}
 ///

@@ -3,7 +3,6 @@ import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
-import 'package:dartc/interop.dart';
 
 import 'bindings.dart';
 
@@ -61,18 +60,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
         isLeaf: isLeaf,
       ),
     );
-    bool matches(NativeTypeRef native, ValueType dart, {bool result = false}) {
-      final value = FfiTypes.valueType(native);
-      return native is NativePointerType
-          ? FfiTypes.isPointer(dart) &&
-                (result ? dart.accepts(value) : value.accepts(dart))
-          : value == dart;
-    }
-
-    if (!matches(call.signature.result, signature.result, result: true) ||
-        call.signature.parameters.indexed.any(
-          (p) => !matches(p.$2, signature.parameters[p.$1]),
-        )) {
+    if (!FfiTypes.canCall(call.signature, signature)) {
       throw ArgumentError('Incompatible Dart representation for asFunction.');
     }
     entry.finish(Return(call));

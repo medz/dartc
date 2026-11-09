@@ -138,6 +138,29 @@ abstract final class FfiTypes() {
       'A native function requires a pointer.',
     ),
   };
+
+  /// Whether a Dart function can call [native], including pointer variance.
+  static bool canCall(NativeSignature native, FunctionType dart) {
+    if (dart.typeParameters.isNotEmpty ||
+        dart.freeTypeParameters.isNotEmpty ||
+        dart.optionalPositional != 0 ||
+        dart.named.isNotEmpty ||
+        dart.parameters.length != native.parameters.length) {
+      return false;
+    }
+    bool matches(NativeTypeRef type, ValueType value, {bool result = false}) {
+      final expected = valueType(type);
+      return type is NativePointerType
+          ? isPointer(value) &&
+                (result ? value.accepts(expected) : expected.accepts(value))
+          : value == expected;
+    }
+
+    return matches(native.result, dart.result, result: true) &&
+        native.parameters.indexed.every(
+          (p) => matches(p.$2, dart.parameters[p.$1]),
+        );
+  }
 }
 
 const _scalars = {

@@ -9,7 +9,7 @@ import 'class_declaration.dart';
 import 'extension_declaration.dart';
 import 'function.dart';
 import 'global_declaration.dart';
-import 'native_exports.dart';
+import 'native_bindings.dart';
 
 /// The translation from resolved Dart declarations to executable IR operations.
 final class Lowering({final bool enableAssertions = false}) {
@@ -42,13 +42,8 @@ final class Lowering({final bool enableAssertions = false}) {
         }
       }
     }
-    final exports = ExportBindings(bindings);
-    for (final library in input.libraries) {
-      for (final unit in library.units) {
-        exports.unit = unit;
-        unit.unit.accept(exports);
-      }
-    }
+    final native = NativeBindings(bindings);
+    input.libraries.forEach(native.bind);
     final functions = <IrCallable>[];
     final classes = <IrClass>[];
     for (final unit in input.libraries.expand((library) => library.units)) {
@@ -102,12 +97,17 @@ final class Lowering({final bool enableAssertions = false}) {
       externals: functions.whereType<IrExternal>(),
       globals: bindings.globals,
     );
-    return (program: program, exports: Map.unmodifiable(exports.functions));
+    return (
+      program: program,
+      exports: Map.unmodifiable(native.exports),
+      imports: Map.unmodifiable(native.imports),
+    );
   }
 }
 
-/// Verified Dart IR and native exports bound to its declaration identities.
+/// Verified Dart IR and native declarations bound to its function identities.
 typedef LoweringResult = ({
   IrProgram program,
   Map<FunctionTarget, NativeExport> exports,
+  Map<FunctionTarget, NativeReference> imports,
 });

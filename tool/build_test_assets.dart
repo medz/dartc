@@ -9,6 +9,8 @@ import 'package:dartc/target.dart';
 
 import '../test/codegen/fixtures/aliases.dart';
 import '../test/codegen/fixtures/native_calls.dart';
+import '../test/compiler/fixtures/native_imports_ffi.dart'
+    show nativeImportSymbols;
 import '../test/abi/fixtures/frames.dart';
 import '../test/abi/fixtures/floating_frames.dart';
 import '../test/abi/fixtures/stack_calls.dart';
@@ -62,10 +64,15 @@ Future<void> main(List<String> args) async {
       'native_integers',
       'native_floats',
       'native_function_pointers',
+      'native_imports',
     ]) {
       final library = assets.library('compiler/$fixture');
-      final result = await Compiler(target)
-          .compile(['test/compiler/fixtures/$fixture.dart']);
+      final result = await Compiler(target).compile(
+        ['test/compiler/fixtures/$fixture.dart'],
+        nativeSymbols: fixture == 'native_imports'
+            ? nativeImportSymbols
+            : const {},
+      );
       await result.write(
         assets.file('compiler/$fixture.o'),
         header: switch (fixture) {
@@ -75,7 +82,8 @@ Future<void> main(List<String> args) async {
           'mixed_numeric' ||
           'native_integers' ||
           'native_floats' ||
-          'native_function_pointers' => assets.file('compiler/$fixture.h'),
+          'native_function_pointers' ||
+          'native_imports' => assets.file('compiler/$fixture.h'),
           _ => null,
         },
       );
@@ -83,7 +91,15 @@ Future<void> main(List<String> args) async {
       await assets
           .file('compiler/$fixture.a')
           .writeAsBytes(ArchiveWriter(format).encode([module]));
-      await shared([module], library);
+      await shared([
+        module,
+        if (fixture == 'native_imports')
+          format.decodeObject(
+            await assets
+                .file('compiler/native_function_pointers.o')
+                .readAsBytes(),
+          ),
+      ], library);
     }
     await shared([
       floatingFrames(target),

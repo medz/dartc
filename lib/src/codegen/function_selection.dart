@@ -47,8 +47,8 @@ final class FunctionSelection<R>(
     // Internal booleans use integer locations; exported booleans remain rejected.
     entry = emitter.convention.classify(
       NativeSignature.types(
-        _nativeType(function.target.returnType),
-        function.target.parameterTypes.map(_nativeType),
+        _callType(function.target.returnType),
+        function.target.parameterTypes.map(_callType),
       ),
     );
     for (final block in function.blocks) {
@@ -66,8 +66,8 @@ final class FunctionSelection<R>(
             }
             calls[instruction] = emitter.convention.classify(
               NativeSignature.types(
-                _nativeType(type),
-                inputs.map((v) => _nativeType(v.type)),
+                _callType(type),
+                inputs.map((v) => _callType(v.type)),
               ),
             );
           case PointerFromAddress() ||
@@ -242,11 +242,14 @@ final class FunctionSelection<R>(
       type == .floating ||
       FfiTypes.isPointer(type);
 
-  NativeTypeRef _nativeType(ValueType type) {
+  NativeTypeRef _callType(ValueType type) {
     if (type == .voidType) return NativeScalarType(Void);
     if (type == .floating) return NativeScalarType(Double);
     if (type == .integer || type == .boolean) return NativeScalarType(Int64);
-    if (FfiTypes.isPointer(type)) return FfiTypes.describe(type);
+    // Dart calls classify addresses without requiring a concrete pointee type.
+    if (FfiTypes.isPointer(type)) {
+      return NativePointerType(NativeScalarType(Void));
+    }
     throw UnsupportedError('Native representation: $type');
   }
 }

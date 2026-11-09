@@ -12,6 +12,31 @@ void main() {
   final pointer = Block([type]).parameters.single;
   const integer = Constant.integer(129), floating = Constant.floating(1.25);
 
+  test('native Dart signatures retain scalar types and pointer variance', () {
+    final pointer = FfiTypes.int64Pointer;
+    final wider = FfiTypes.pointer.instantiate([FfiTypes.nativeType]);
+    final native = NativeSignature(ffi.Pointer<ffi.Int64>, [
+      ffi.Pointer<ffi.Int64>,
+    ]);
+    expect(FfiTypes.canCall(native, FunctionType(wider, [pointer])), isTrue);
+    for (final type in [
+      FunctionType(pointer, [wider]),
+      FunctionType(pointer.nullable, [pointer]),
+      FunctionType(pointer, [pointer], optionalPositional: 1),
+      FunctionType(pointer, [pointer], namedParameters: {'value': true}),
+      FunctionType(pointer, []),
+    ]) {
+      expect(FfiTypes.canCall(native, type), isFalse);
+    }
+    expect(
+      FfiTypes.canCall(
+        NativeSignature(ffi.Int64, [ffi.Int64]),
+        FunctionType(.object, [.integer]),
+      ),
+      isFalse,
+    );
+  });
+
   test(
     'native calls derive signatures and retain evaluated operands and effects',
     () {

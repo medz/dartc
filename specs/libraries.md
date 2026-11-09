@@ -33,7 +33,8 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 | --- | --- |
 | 导出签名 | 同步、非泛型的顶层函数；参数和结果支持 `Int8/16/32/64`、`Uint8/16/32/64`、`Float`、`Double` 和指向所支持原生类型的 `Pointer<T>`，分别对应非可空 Dart `int`、`double` 和同元素类型的指针。指针类型可递归嵌套，元素另支持 `Void` 和保留完整原生签名的 `NativeFunction<T>`；后两者不能按值传参，结果另支持 `Void`，对应 Dart `void`。原生整数边界按签名扩展或截断，Float 边界转换单精度与 double；普通 Dart 调用注解函数保留完整 int/double，不受原生签名截断。只接受必需位置参数。其他标量、结构体、可变参数和数据导出尚未实现。 |
 | 函数与不透明指针 | `Pointer<NativeFunction<T>>`、`Pointer<Void>` 及所支持类型的多级指针可作为参数和结果、从地址构造、读取地址及比较；普通 Dart 调用、分支和循环保留地址及语义类型，头文件保留嵌套函数指针声明。相等只取决于地址，不同元素类型不影响指针相等。Void 和 NativeFunction 不具有元素存储大小；指针容器读写和回调尚未接通。 |
-| 已绑定原生调用 | 独立 `CodeGenerator.generate` API 接受以 `IrExternal.target` 为键的 `imports`，由 `NativeImport` 明确原生符号及上述标量签名。Dart 参数在出站边界转换，原生结果按宽度/精度转换回 Dart 值；调用者存活值及写入副作用保留，参数遵循目标平台寄存器和栈布局。绑定必须匹配外部声明，缺失或不匹配均报错；原生实现由链接输入提供。`Compiler.compile` 尚未自动绑定 `@Native`，资产解析、回调及托管调用协议仍未接通。 |
+| 已绑定原生调用 | 独立 `CodeGenerator.generate` API 接受以 `IrExternal.target` 为键的 `imports`，由 `NativeImport` 明确原生符号、上述标量签名及 `isLeaf`。Dart 参数在出站边界转换，原生结果按宽度/精度转换回 Dart 值；指针类型允许兼容的参数收窄和结果扩大。调用者存活值及写入副作用保留，参数遵循目标平台寄存器和栈布局。绑定必须匹配外部声明，缺失或不匹配均报错；原生实现由链接输入提供。回调及托管调用协议仍未接通。 |
+| `@Native` | 支持顶层和静态 external 函数。前端按 SDK 声明身份保留资产 ID、符号、原生签名及 `isLeaf`，支持常量别名；缺省资产依次取 `DefaultAsset` 和所属库 URI，part 使用所属库默认值，缺省符号采用声明名。省略类型实参时支持从指针和 void 签名推断。`LoweringResult.imports` 交付按声明身份绑定的 `NativeReference`；`Compiler.compile(nativeSymbols: ...)` 按资产 ID 与请求符号查找显式链接符号，shared 输出由 `linkInputs` 提供实现，object/archive 输出保留未决引用。未使用声明仍检查静态义务，未引用的合法导入不要求绑定。自动资产发现、运行时 resolver/进程回退查找、数据字段、实例接收者及完整 FFI 类型仍未接通。当前标量后端不含托管运行时，`isLeaf` 保留声明承诺，不代表已实现托管调用转换。 |
 | 间接原生调用 | 独立 IR/CodeGenerator API 支持 `NativeCall`，从 `Pointer<NativeFunction<T>>` 的完整类型推导签名并检查 Dart 实参；参数和结果执行上述原生边界转换，函数地址通过寄存器调用，无须符号绑定。地址和其他活跃值经过寄存器覆盖、栈传参、分支及循环保持有效。IR 保留 `isLeaf` 承诺，当前后端只提供不含托管运行时的标量调用；闭包原生执行及托管调用协议尚未接通。 |
 | `asFunction` | 前端按 `dart:ffi` 声明身份将调用转换成捕获当时指针值的普通闭包 IR，其函数体执行 `NativeCall`。支持显式/推断 Dart 函数类型、显式 extension override、空参数/void 结果、上述标量和指针签名及兼容的指针返回类型扩大；`isLeaf` 按常量参数求值，默认 false。返回的函数可经普通 IR 的返回、局部变量、集合、分支、循环、动态调用及嵌套闭包使用。同名用户方法仍是普通调用。闭包的目标存储与生命周期、原生函数值调用、托管转换尚未实现，源码尚不能由原生后端执行；`asFunction` 方法本身的提取与间接调用也仍待接通。 |
 | 函数体 | 整数常量、加法、减法、乘法、按位与/或/异或/取反及相应复合赋值、有符号比较，整数与布尔值的相等/不等比较；整数运算保留 64 位环绕结果，`int / int` 产生 double。支持条件表达式、逻辑短路、if/else、while/do/for、含标签的 break/continue、多返回，以及批次内跨库调用和递归。Dart 函数间的直接调用支持可选位置参数、命名参数及常量默认值；原生导出仍只接受必需位置参数。整数截断除法、余数、移位、对象存储、异常及异步尚未接入原生后端。 |
@@ -65,7 +66,9 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 
 [原生浮点存储验证](../test/compiler/native_floats_test.dart)检查 Float 参数与结果、普通调用保持 double 精度、Float/Double 指针读写、复合赋值及混合栈参数。默认浮点环境下的舍入预期使用明确的 binary32 位模式，覆盖中点、次正规数、溢出、正负零与 NaN；另与 SDK 对照。规范依据为 [FloatPointer.value](https://api.dart.dev/stable/3.13.7/dart-ffi/FloatPointer/value.html) 和 [DoublePointer.value](https://api.dart.dev/stable/3.13.7/dart-ffi/DoublePointer/value.html)。
 
-[出站调用验证](../test/codegen/native_calls_test.dart)执行独立原生被调函数，检查整数截断/扩展、Float 参数和结果、调用者原值存活、指针与 void 副作用、21 个混合参数及原生栈布局；混合调用同时经 SDK FFI 验证。[绑定契约](../test/codegen/native_imports_test.dart)检查声明身份、签名拒绝、符号别名与未决引用。源码 `@Native` 的资产身份、查找顺序及调用属性仍须按 [Native 库契约](https://api.dart.dev/stable/3.13.7/dart-ffi/Native-class.html)接通。
+[出站调用验证](../test/codegen/native_calls_test.dart)执行独立原生被调函数，检查整数截断/扩展、Float 参数和结果、调用者原值存活、指针与 void 副作用、21 个混合参数及原生栈布局；混合调用同时经 SDK FFI 验证。[绑定契约](../test/codegen/native_imports_test.dart)检查声明身份、签名拒绝、符号别名与未决引用。
+
+[`@Native` 声明验证](../test/frontend/lowering/native_imports_test.dart)检查默认资产、part、别名、静态方法、类型推断与未使用声明；[编译和执行验证](../test/compiler/native_imports_test.dart)覆盖不同资产中的同名符号、缺失绑定、窄整数转换、指针返回类型扩大及三种输出。声明规则依据 [Native](https://api.dart.dev/stable/3.13.7/dart-ffi/Native-class.html) 和 [DefaultAsset](https://api.dart.dev/stable/3.13.7/dart-ffi/DefaultAsset-class.html)；运行时查找顺序仍是实现缺口。
 
 [浮点对照](../test/compiler/doubles_test.dart)检查 double 运算与全部比较、NaN、无穷、次正规数、负零和取负后的 NaN 载荷；覆盖两类寄存器耗尽、十九个混合参数及栈溢出、常量参数、调用保存和循环交换。[ABI 执行验证](../test/abi/native_test.dart)检查浮点局部存储及 ARM64 的被调用者保存标量寄存器；[布局检查](../test/abi/layout_test.dart)区分通用/浮点位置、破坏集合和栈偏移。
 
