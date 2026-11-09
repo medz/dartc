@@ -90,6 +90,7 @@ export 'src/ir/value.dart'
         Instruction,
         PointerFromAddress,
         PointerAddress,
+        PointerOffset,
         LoadNative,
         StoreNative,
         FunctionCall,

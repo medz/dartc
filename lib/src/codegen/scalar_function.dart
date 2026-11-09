@@ -67,6 +67,22 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
           if (layout.result case final result?) {
             allocation.define(instruction, result);
           }
+        } else if (instruction case PointerOffset(
+          :final pointer,
+          :final index,
+        )) {
+          final base = allocation.read(pointer),
+              offset = allocation.read(index, except: [base]);
+          allocation.release(pointer);
+          allocation.release(index);
+          final destination = allocation.allocate(.general, preferred: base);
+          emitter.addScaled(
+            destination,
+            base,
+            offset,
+            scale: FfiTypes.pointerElement(pointer.type)!.nativeSize,
+          );
+          allocation.define(instruction, destination);
         } else if (instruction case StoreNative(:final pointer, :final value)) {
           final base = allocation.read(pointer),
               source = allocation.read(value, except: [base]);

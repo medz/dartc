@@ -4,6 +4,46 @@ import 'package:dartc/assembler/x64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'LEA encodes scaled indices, extended registers and base exceptions',
+    () {
+      final assembler = Assembler()
+        ..lea(.rax, .rbx, .rcx)
+        ..lea(.rax, .rbp, .rdx, scale: 2)
+        ..lea(.r10, .r13, .r12, scale: 4)
+        ..lea(.r9, .rsp, .r10, scale: 8);
+      expect(assembler.finish(), [
+        0x48,
+        0x8d,
+        0x04,
+        0x0b,
+        0x48,
+        0x8d,
+        0x44,
+        0x55,
+        0,
+        0x4f,
+        0x8d,
+        0x54,
+        0xa5,
+        0,
+        0x4e,
+        0x8d,
+        0x0c,
+        0xd4,
+      ]);
+      final invalid = Assembler();
+      for (final scale in [-1, 0, 3, 16]) {
+        expect(
+          () => invalid.lea(.rax, .rcx, .rdx, scale: scale),
+          throwsArgumentError,
+        );
+      }
+      expect(() => invalid.lea(.rax, .rcx, .rsp), throwsArgumentError);
+      expect(invalid.finish(), isEmpty);
+    },
+  );
+
   test('narrow operations preserve REX byte registers and memory widths', () {
     final a = Assembler()
       ..load(.r9, .r12, 1, bytes: 1, signed: true)

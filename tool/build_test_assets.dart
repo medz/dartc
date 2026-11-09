@@ -55,6 +55,7 @@ Future<void> main(List<String> args) async {
       'stack_calls',
       'integer_operations',
       'pointers',
+      'pointer_arithmetic',
       'doubles',
       'mixed_numeric',
       'native_integers',
@@ -116,7 +117,14 @@ Future<void> main(List<String> args) async {
     final decodedData = await objects('data_', data);
     await shared(decodedData, assets.library('linker/data'));
     await shared([decodedData.first], assets.library('linker/storage'));
-    for (final name in ['double', 'numeric', 'pointer', 'integer', 'float']) {
+    for (final name in [
+      'double',
+      'numeric',
+      'pointer',
+      'integer',
+      'float',
+      'index',
+    ]) {
       await shared([
         decodedData.first,
       ], assets.library('compiler/${name}_storage'));

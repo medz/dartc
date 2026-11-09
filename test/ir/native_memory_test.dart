@@ -29,6 +29,8 @@ void main() {
     expect(pointer.type, isNot(ValueType.integer));
     expect(pointer.effects, {Effect.allocates});
     expect(PointerAddress(pointer).effects, isEmpty);
+    expect(PointerOffset(pointer, address).effects, {Effect.allocates});
+    expect(PointerOffset(pointer, address).type, pointer.type);
     expect(LoadNative(pointer).effects, {Effect.readsStorage});
     expect(StoreNative(pointer, address).effects, {Effect.writesStorage});
     expect(StoreNative(pointer, address).type, ValueType.voidType);
@@ -37,6 +39,7 @@ void main() {
         .single;
     for (final value in [address, impostor, const Constant.nullValue()]) {
       expect(() => PointerAddress(value), throwsArgumentError);
+      expect(() => PointerOffset(value, address), throwsArgumentError);
       expect(() => LoadNative(value), throwsArgumentError);
       expect(() => StoreNative(value, address), throwsArgumentError);
     }
@@ -45,12 +48,53 @@ void main() {
       throwsArgumentError,
     );
     expect(() => StoreNative(pointer, pointer), throwsArgumentError);
+    expect(() => PointerOffset(pointer, pointer), throwsArgumentError);
     expect(FfiTypes.valueType(ffi.Pointer<ffi.Int64>), pointer.type);
     expect(
       () => FfiTypes.valueType(ffi.Pointer<ffi.Void>),
       throwsUnsupportedError,
     );
   });
+
+  test(
+    'offsets retain scalar element types and wrap without reading storage',
+    () {
+      final library = Uri.parse('memory:pointer');
+      for (final (native, size) in [
+        (ffi.Pointer<ffi.Int8>, 1),
+        (ffi.Pointer<ffi.Uint8>, 1),
+        (ffi.Pointer<ffi.Int16>, 2),
+        (ffi.Pointer<ffi.Uint16>, 2),
+        (ffi.Pointer<ffi.Int32>, 4),
+        (ffi.Pointer<ffi.Uint32>, 4),
+        (ffi.Pointer<ffi.Int64>, 8),
+        (ffi.Pointer<ffi.Uint64>, 8),
+        (ffi.Pointer<ffi.Float>, 4),
+        (ffi.Pointer<ffi.Double>, 8),
+      ]) {
+        final type = FfiTypes.pointerTypes[native]!;
+        final block = Block([.integer, .integer]);
+        final pointer = block.emit(
+          PointerFromAddress(block.parameters[0], type),
+        );
+        final offset = block.emit(PointerOffset(pointer, block.parameters[1]));
+        block.finish(Return(block.emit(PointerAddress(offset))));
+        final function = IrFunction(
+          FunctionTarget(library, 'offset', .integer, [.integer, .integer]),
+          [block],
+        );
+        final interpreter = IrInterpreter(IrProgram([], [function]), {});
+        for (final address in [0, -1, 0x7fffffffffffffff]) {
+          for (final index in [0, -1, 3, -0x8000000000000000]) {
+            expect(
+              interpreter.run(function, [address, index]),
+              address + index * size,
+            );
+          }
+        }
+      }
+    },
+  );
 
   test(
     'pointer construction preserves address bits without accessing memory',

@@ -36,6 +36,10 @@ void main() {
         hasLength(1),
       );
       expect(instructions('customMember').whereType<LoadNative>(), isEmpty);
+      for (final name in ['customOffset', 'customIndex']) {
+        expect(instructions(name).whereType<PointerOffset>(), isEmpty);
+        expect(instructions(name).whereType<DirectCall>(), hasLength(1));
+      }
       final runner = IrInterpreter(result.program, {});
       for (final address in [
         0,
@@ -49,6 +53,8 @@ void main() {
         expect(runner.run(functions['address']!, [pointer]), address);
         expect(runner.run(functions['declaredMember']!, [pointer]), 73);
         expect(runner.run(functions['ordinaryPointer']!, [address]), address);
+        expect(runner.run(functions['customOffset']!, [pointer]), address);
+        expect(runner.run(functions['customIndex']!, [pointer]), 77);
       }
     },
   );

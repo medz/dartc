@@ -482,8 +482,8 @@ final class SelectorChain(
       );
     }
     if (member is GetterElement && arguments == null) {
-      if (ffiOperation(member, [known]) case final operation?) {
-        return context.normal(context.emit(operation));
+      if (lowerFfi(member, [known], context.emit) case final value?) {
+        return context.normal(value);
       }
     }
     final target = direct

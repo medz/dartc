@@ -53,6 +53,11 @@ abstract interface class FunctionEmitter<R>() {
   /// Loads all 64 bits of [value] into a general [destination] register.
   void loadImmediate(R destination, int value);
 
+  /// Adds [base] and [index] times 1, 2, 4 or 8, wrapping at 64 bits.
+  ///
+  /// The destination may alias either input; flags and other registers survive.
+  void addScaled(R destination, R base, R index, {required int scale});
+
   /// Extends the low [bytes] in a general register to the Dart integer width.
   void extendInteger(R register, {required int bytes, required bool signed});
 

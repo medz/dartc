@@ -1792,6 +1792,12 @@ final class IrInterpreter(
           );
         case PointerAddress(:final pointer):
           values[op] = (read(pointer) as ffi.Pointer).address;
+        case PointerOffset(:final pointer, :final index):
+          final element = FfiTypes.pointerElement(op.type)!;
+          values[op] = _nativePointers[element]!(
+            (read(pointer) as ffi.Pointer).address +
+                (read(index) as int) * element.nativeSize,
+          );
         case LoadNative(:final pointer):
           final native = FfiTypes.pointerElement(pointer.type)!;
           final data = _nativeData(

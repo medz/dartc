@@ -30,6 +30,35 @@ final class Assembler() {
   void add(Register destination, Register source) =>
       _binary(0x01, destination, source);
 
+  /// Computes [base] plus [index] times [scale], preserving memory and flags.
+  ///
+  /// The result wraps at 64 bits. [scale] must be 1, 2, 4 or 8; [index] cannot
+  /// be RSP. The destination may alias either input.
+  void lea(
+    Register destination,
+    Register base,
+    Register index, {
+    int scale = 1,
+  }) {
+    if (scale != 1 && scale != 2 && scale != 4 && scale != 8) {
+      throw ArgumentError.value(scale, 'scale', 'Expected 1, 2, 4 or 8.');
+    }
+    if (index == .rsp) {
+      throw ArgumentError.value(index, 'index', 'RSP cannot index an address.');
+    }
+    final displacement = base.index & 7 == 5;
+    _bytes.add([
+      0x48 |
+          (destination.index >> 3) << 2 |
+          (index.index >> 3) << 1 |
+          base.index >> 3,
+      0x8d,
+      (displacement ? 0x40 : 0) | (destination.index & 7) << 3 | 4,
+      (scale.bitLength - 1) << 6 | (index.index & 7) << 3 | base.index & 7,
+      if (displacement) 0,
+    ]);
+  }
+
   /// Subtracts [source] from [destination], wrapping at 64 bits and updating flags.
   void subtract(Register destination, Register source) =>
       _binary(0x29, destination, source);

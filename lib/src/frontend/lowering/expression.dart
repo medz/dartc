@@ -266,12 +266,13 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           (e) => lowerExpression(context, e),
         );
         if (args == null) return null;
-        final operation = ffiOperation(
+        final value = lowerFfi(
           ctor,
           args.positional,
+          context.emit,
           result: context.typeOf(expression.staticType!, expression),
         );
-        if (operation != null) return context.emit(operation);
+        if (value != null) return value;
         unsupported(unit, expression, 'native pointer construction');
       }
       final source = context.bindings.target(ctor, unit, expression);

@@ -69,6 +69,19 @@ final class _X64Emitter(
       assembler.loadImmediate(destination as Register, value);
 
   @override
+  void addScaled(
+    CpuRegister destination,
+    CpuRegister base,
+    CpuRegister index, {
+    required int scale,
+  }) => assembler.lea(
+    destination as Register,
+    base as Register,
+    index as Register,
+    scale: scale,
+  );
+
+  @override
   void extendInteger(
     CpuRegister register, {
     required int bytes,

@@ -33,9 +33,18 @@ final class Assembler() {
     }
   }
 
-  /// Adds two registers, wrapping at 64 bits without changing condition flags.
-  void add(Register destination, Register left, Register right) =>
-      _binary(0x8b000000, destination, left, right);
+  /// Adds [left] to [right] shifted left by [shift], without changing flags.
+  ///
+  /// [shift] must be 0–63. The result wraps at 64 bits.
+  void add(
+    Register destination,
+    Register left,
+    Register right, {
+    int shift = 0,
+  }) {
+    RangeError.checkValueInInterval(shift, 0, 63, 'shift');
+    _binary(0x8b000000 | shift << 10, destination, left, right);
+  }
 
   /// Subtracts [right] from [left], wrapping at 64 bits.
   void subtract(Register destination, Register left, Register right) =>

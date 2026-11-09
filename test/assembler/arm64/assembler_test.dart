@@ -4,6 +4,27 @@ import 'package:dartc/assembler/arm64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'shifted addition encodes scale and rejects invalid operands atomically',
+    () {
+      final assembler = Assembler()
+        ..add(.x0, .x1, .x2, shift: 3)
+        ..add(.x30, .x29, .x28, shift: 63);
+      final bytes = ByteData.sublistView(assembler.finish());
+      expect(bytes.getUint32(0, .little), 0x8b020c20);
+      expect(bytes.getUint32(4, .little), 0x8b1cffbe);
+      final invalid = Assembler();
+      for (final shift in [-1, 64]) {
+        expect(
+          () => invalid.add(.x0, .x1, .x2, shift: shift),
+          throwsRangeError,
+        );
+      }
+      expect(() => invalid.add(.x0, .sp, .x1, shift: 3), throwsArgumentError);
+      expect(invalid.finish(), isEmpty);
+    },
+  );
+
   test('narrow memory and register operations encode their actual widths', () {
     final a = Assembler()
       ..load(.x0, .x1, 1, bytes: 1, signed: true)

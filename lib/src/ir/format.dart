@@ -118,6 +118,7 @@ void writeFunction(
     LoadGlobal() => 'loadGlobal ${global(op.global)}',
     PointerFromAddress() => 'pointerFromAddress ${value(op.address)}',
     PointerAddress() => 'pointerAddress ${value(op.pointer)}',
+    PointerOffset() => 'pointerOffset ${value(op.pointer)}, ${value(op.index)}',
     LoadNative() => 'loadNative ${value(op.pointer)}',
     StoreNative() => 'storeNative ${value(op.pointer)}, ${value(op.value)}',
     StoreGlobal() => 'storeGlobal ${global(op.global)}, ${value(op.value)}',

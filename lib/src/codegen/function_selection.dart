@@ -68,7 +68,10 @@ final class FunctionSelection<R>(
                 inputs.map((v) => _nativeType(v.type)),
               ),
             );
-          case PointerFromAddress() || PointerAddress() || LoadNative():
+          case PointerFromAddress() ||
+              PointerAddress() ||
+              PointerOffset() ||
+              LoadNative():
             break;
           case StoreNative(:final pointer):
             if (FfiTypes.pointerElement(pointer.type) == Float &&

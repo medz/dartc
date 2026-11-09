@@ -86,6 +86,24 @@ final class _Arm64Emitter(
       assembler.loadImmediate(destination as Register, value);
 
   @override
+  void addScaled(
+    CpuRegister destination,
+    CpuRegister base,
+    CpuRegister index, {
+    required int scale,
+  }) {
+    if (scale != 1 && scale != 2 && scale != 4 && scale != 8) {
+      throw ArgumentError.value(scale, 'scale', 'Expected 1, 2, 4 or 8.');
+    }
+    assembler.add(
+      destination as Register,
+      base as Register,
+      index as Register,
+      shift: scale.bitLength - 1,
+    );
+  }
+
+  @override
   void extendInteger(
     CpuRegister register, {
     required int bytes,

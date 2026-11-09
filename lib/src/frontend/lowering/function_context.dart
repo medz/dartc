@@ -222,11 +222,11 @@ final class FunctionContext(
     List<ValueType> memberTypes,
   ) {
     if (args.named.isEmpty && memberTypes.isEmpty) {
-      final operation = ffiOperation(application.executable.declaration, [
+      final value = lowerFfi(application.executable.declaration, [
         receiver,
         ...args.positional,
-      ]);
-      if (operation != null) return normal(emit(operation));
+      ], emit);
+      if (value != null) return normal(value);
     }
     final target = application.executable.target;
     return normal(
@@ -293,8 +293,8 @@ final class FunctionContext(
         named: {},
       ), []);
     }
-    if (ffiOperation(member, [receiver, ...args]) case final operation?) {
-      return normal(emit(operation));
+    if (lowerFfi(member, [receiver, ...args], emit) case final value?) {
+      return normal(value);
     }
     final target = direct
         ? bindings.superTarget(this.receiver!.type, member, unit, site)

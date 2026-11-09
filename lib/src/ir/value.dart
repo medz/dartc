@@ -444,7 +444,9 @@ sealed class Instruction(super.type) extends Value {
     NullCheck() ||
     IntBinary(operator: IntOperator(mayThrow: true)) ||
     NumericBinary(canThrow: true) => const {.mayThrow},
-    ReifyType() || PointerFromAddress() => const {.allocates},
+    ReifyType() ||
+    PointerFromAddress() ||
+    PointerOffset() => const {.allocates},
     Equals() ||
     IntBinary() ||
     NumericBinary() ||
@@ -483,6 +485,24 @@ final class PointerAddress(final Value pointer) extends Instruction {
   }
   @override
   Iterable<Value> get inputs => [pointer];
+}
+
+/// Offsets a native pointer by a signed number of elements, without accessing it.
+///
+/// The result retains the element type. Address arithmetic wraps at the target
+/// pointer width; this operation neither owns storage nor checks its bounds.
+final class PointerOffset(final Value pointer, final Value index)
+    extends Instruction {
+  this : super(pointer.type) {
+    if (FfiTypes.pointerElement(pointer.type) == null ||
+        index.type != .integer) {
+      throw ArgumentError(
+        'Expected a native scalar pointer and integer index.',
+      );
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [pointer, index];
 }
 
 /// Reads native storage as the Dart value of the pointer's element type.
