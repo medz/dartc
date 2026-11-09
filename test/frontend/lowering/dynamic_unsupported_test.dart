@@ -14,7 +14,7 @@ void main() {
         "Object? f() { dynamic value = <int>[1, 2]; return value.join(','); }",
       );
     final program = await AnalysisSession([file.path])
-        .use((input) => Lowering().lower(input).program);
+        .use((input) async => (await Lowering().lower(input)).program);
     final entry = program.functions.singleWhere((f) => f.target.name == 'f');
     expect(
       () => IrInterpreter(program, {}).run(entry, []),

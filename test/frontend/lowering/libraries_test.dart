@@ -41,7 +41,7 @@ int run() { exposed.value += 3; return original.value; }
       expect(
         run(
           await AnalysisSession([entry, original])
-              .use((input) => Lowering().lower(input).program),
+              .use((input) async => (await Lowering().lower(input)).program),
         ),
         5,
       );
@@ -77,7 +77,7 @@ int run() => other.$name();
 ''');
         await expectLater(
           AnalysisSession([entry])
-              .use((input) => Lowering().lower(input).program),
+              .use((input) async => (await Lowering().lower(input)).program),
           throwsA(isA<FormatException>()),
         );
       }
@@ -99,7 +99,7 @@ import 'barrel.dart' as exposed;
 int run() => direct.value() + exposed.value();
 ''');
       final program = await AnalysisSession([entry, original])
-          .use((input) => Lowering().lower(input).program);
+          .use((input) async => (await Lowering().lower(input)).program);
       expect(run(program), 14);
       final calls = program.functions.first.entry.instructions
           .whereType<DirectCall>();
@@ -115,7 +115,7 @@ import 'other.dart' as relative;
 int run() => absolute.value() + relative.value();
 ''');
     final program = await AnalysisSession([entry, other])
-        .use((input) => Lowering().lower(input).program);
+        .use((input) async => (await Lowering().lower(input)).program);
     expect(run(program), 12);
     final calls = program.functions.first.entry.instructions
         .whereType<DirectCall>();
@@ -138,7 +138,7 @@ part 'piece.dart';
 int run() => _value();
 ''');
         final program = await AnalysisSession([entry])
-            .use((input) => Lowering().lower(input).program);
+            .use((input) async => (await Lowering().lower(input)).program);
         expect(run(program), 11);
         expect(
           program.functions.map((f) => f.target.library).toSet(),
@@ -146,7 +146,7 @@ int run() => _value();
         );
         await expectLater(
           AnalysisSession(['${directory.path}/piece.dart'])
-              .use((input) => Lowering().lower(input).program),
+              .use((input) async => (await Lowering().lower(input)).program),
           throwsA(isA<FormatException>()),
         );
       },
@@ -160,7 +160,7 @@ int run() => _value();
       "import 'other.dart'; void main() { value(); }",
     );
     final program = await AnalysisSession([entry])
-        .use((input) => Lowering().lower(input).program);
+        .use((input) async => (await Lowering().lower(input)).program);
     expect(program.functions.single.target.name, 'main');
     final call = program.functions.single.entry.instructions
         .whereType<DirectCall>()
@@ -171,7 +171,7 @@ int run() => _value();
       isFalse,
     );
     final linked = await AnalysisSession([entry, other])
-        .use((input) => Lowering().lower(input).program);
+        .use((input) async => (await Lowering().lower(input)).program);
     expect(IrInterpreter(linked, {}).run(linked.functions.first, []), isNull);
     expect(linked.functions.map((f) => f.target.name), ['main', 'value']);
   });

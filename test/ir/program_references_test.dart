@@ -76,6 +76,32 @@ void main() {
     );
   });
 
+  test('static bodies need class identity without an instance layout', () {
+    final owner = ClassType(_uri, 'Helpers');
+    final target = FunctionTarget(_uri, 'read', .integer, [], owner: owner);
+    final body = IrFunction(target, [Block()..finish(const Return(_one))]);
+    final program = IrProgram([], [body]);
+    expect(program.implementationOf(target), same(body));
+    expect(
+      () => IrProgram([IrClass(ClassType(_uri, 'Helpers'), [])], [body]),
+      throwsArgumentError,
+    );
+    for (final kind in <FunctionKind>[.method, .initializer, .factory]) {
+      final member = FunctionTarget(
+        _uri,
+        'entry',
+        kind == .factory ? owner : .voidType,
+        [],
+        owner: owner,
+        kind: kind,
+      );
+      expect(
+        () => IrProgram([], [], externals: [IrExternal(member)]),
+        throwsArgumentError,
+      );
+    }
+  });
+
   test('external Dart implementations keep their declaration, defaults and dispatch', () {
     final owner = ClassType(_uri, 'Api');
     final method = FunctionTarget(

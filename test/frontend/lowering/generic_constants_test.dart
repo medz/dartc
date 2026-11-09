@@ -11,7 +11,7 @@ void main() {
   setUpAll(() async {
     final program = await AnalysisSession([
       'test/frontend/lowering/fixtures/generic_constants.dart',
-    ]).use((input) => Lowering().lower(input).program);
+    ]).use((input) async => (await Lowering().lower(input)).program);
     runner = IrInterpreter(program, {});
     functions = {for (final fn in program.functions) fn.target.name: fn};
   });

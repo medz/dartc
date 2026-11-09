@@ -17,7 +17,7 @@ void main() {
       '$dir/cascades.dart',
       '$dir/dot_shorthand.dart',
       '$dir/static_accessors.dart',
-    ]).use((input) => Lowering().lower(input).program);
+    ]).use((input) async => (await Lowering().lower(input)).program);
     functions = {
       for (final f in program.functions)
         if (f.target.owner == null && f.target.enclosing == null)

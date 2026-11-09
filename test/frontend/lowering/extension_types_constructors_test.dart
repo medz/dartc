@@ -15,9 +15,9 @@ void main() {
         await AnalysisSession([
           'test/frontend/lowering/fixtures/extension_types_constructors.dart',
         ]).use(
-          (input) => (
-            Lowering(enableAssertions: true).lower(input).program,
-            Lowering().lower(input).program,
+          (input) async => (
+            (await Lowering(enableAssertions: true).lower(input)).program,
+            (await Lowering().lower(input)).program,
           ),
         );
     fixture = FixtureComparison(programs.$1);

@@ -19,9 +19,12 @@ final class Lowering({final bool enableAssertions = false}) {
   /// assertion conditions and raise assertion errors on failures.
   ///
   /// Calls to the same declaration share a target throughout the batch.
-  /// Constants appear as operands at their uses. Throws
-  /// [UnsupportedError] at the first source construct without an IR translation.
-  LoweringResult lower(CheckedLibraries input) {
+  /// Referenced SDK top-level functions and class static methods with Dart bodies
+  /// are resolved and checked in the same session, then lowered normally.
+  /// Keep the owning analysis session open until the returned future completes.
+  /// Constants appear as operands at their uses. Throws [FormatException] for
+  /// dependency static errors and [UnsupportedError] for missing translations.
+  Future<LoweringResult> lower(CheckedLibraries input) async {
     final bindings = Bindings(
       enableAssertions: enableAssertions,
       constants: input.constants,
@@ -87,6 +90,31 @@ final class Lowering({final bool enableAssertions = false}) {
         lowerClass(unit, bindings, source, functions, application: application),
       );
     }
+    for (var i = 0; i < bindings.sdkFunctions.length; i++) {
+      final element = bindings.sdkFunctions[i];
+      final library = await input.resolveLibrary(element.library);
+      final declaration = library.getFragmentDeclaration(element.firstFragment);
+      if (declaration == null) {
+        throw UnsupportedError('SDK declaration unavailable: ${element.name}');
+      }
+      final body = switch (declaration.node) {
+        ast.FunctionDeclaration(:final functionExpression) =>
+          functionExpression.body,
+        ast.MethodDeclaration(:final body) => body,
+        _ => throw UnsupportedError(
+          'SDK function unavailable: ${element.name}',
+        ),
+      };
+      FunctionLowering.append(
+        functions,
+        declaration.resolvedUnit!,
+        bindings,
+        element,
+        declaration.node,
+        body,
+      );
+    }
+
     final program = IrProgram(
       [...classes, ...bindings.mixinApplications],
       [
@@ -108,8 +136,10 @@ final class Lowering({final bool enableAssertions = false}) {
         ),
         null => null,
       },
-      exports: Map.unmodifiable(native.exports),
-      imports: Map.unmodifiable(native.imports),
+      exports: Map<FunctionTarget, NativeExport>.unmodifiable(native.exports),
+      imports: Map<FunctionTarget, NativeReference>.unmodifiable(
+        native.imports,
+      ),
     );
   }
 }

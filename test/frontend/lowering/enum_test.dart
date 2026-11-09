@@ -114,7 +114,7 @@ void main() {
           );
         await expectLater(
           AnalysisSession([file.path])
-              .use((input) => Lowering().lower(input).program),
+              .use((input) async => (await Lowering().lower(input)).program),
           throwsA(
             isA<UnsupportedError>()
                 .having(
@@ -152,7 +152,7 @@ void main() {
           );
           await expectLater(
             AnalysisSession([entry.path])
-                .use((input) => Lowering().lower(input).program),
+                .use((input) async => (await Lowering().lower(input)).program),
             throwsA(
               isA<UnsupportedError>()
                   .having(
@@ -173,7 +173,7 @@ void main() {
           "import 'dependency.dart' as d; int f() => 42;",
         );
         await AnalysisSession([entry.path])
-            .use((input) => Lowering().lower(input).program);
+            .use((input) async => (await Lowering().lower(input)).program);
       },
     );
   });

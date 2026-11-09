@@ -49,8 +49,8 @@ final class Compiler(final Target target) {
       lowered,
       sources,
     ) = await AnalysisSession(paths, includeDependencies: true).use(
-      (input) => (
-        Lowering().lower(input),
+      (input) async => (
+        await Lowering().lower(input),
         [
           for (final library in input.libraries)
             for (final unit in library.units) File(unit.path).absolute.uri,

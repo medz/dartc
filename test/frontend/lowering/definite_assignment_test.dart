@@ -11,7 +11,7 @@ void main() {
   setUpAll(() async {
     final program = await AnalysisSession([
       'test/frontend/lowering/fixtures/definite_assignment.dart',
-    ]).use((input) => Lowering().lower(input).program);
+    ]).use((input) async => (await Lowering().lower(input)).program);
     functions = {
       for (final fn in program.functions)
         if (fn.target.enclosing == null) fn.target.name: fn,

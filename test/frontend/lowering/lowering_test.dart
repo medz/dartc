@@ -31,7 +31,7 @@ const _fixtures = 'test/frontend/lowering/fixtures';
 
 Future<IrProgram> _lower(List<String> names) =>
     AnalysisSession([for (final name in names) '$_fixtures/$name'])
-        .use((input) => Lowering().lower(input).program);
+        .use((input) async => (await Lowering().lower(input)).program);
 
 void main() {
   late Map<String, IrFunction> functions;

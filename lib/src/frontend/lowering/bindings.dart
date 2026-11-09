@@ -35,6 +35,9 @@ final class Bindings({
 }) {
   final ConstantEvaluation constants = constants ?? ConstantEvaluation();
   final _targets = <ExecutableElement, FunctionTarget>{};
+
+  /// SDK functions with Dart bodies, discovered while binding direct references.
+  final sdkFunctions = <ExecutableElement>[];
   final _typeEnvironments =
       <FunctionTarget, Map<TypeParameterType, ValueType>>{};
   final _extensions = <ExecutableElement, ExtensionExecutable>{};
@@ -756,7 +759,16 @@ final class Bindings({
     if (classCovariance.bounds.isNotEmpty) {
       _boundCovariance[function] = classCovariance.bounds;
     }
-    if (enclosing == null) _targets[element] = function;
+    if (enclosing == null) {
+      _targets[element] = function;
+      if (element.library.isInSdk &&
+          element.isStatic &&
+          !element.isExternal &&
+          !element.isAbstract &&
+          (element is TopLevelFunctionElement || element is MethodElement)) {
+        sdkFunctions.add(element);
+      }
+    }
     if (destination == null && parameters.any((p) => p.isOptional)) {
       _defaults[function] = {
         for (final (i, p) in parameters.indexed)

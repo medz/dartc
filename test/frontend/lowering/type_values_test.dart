@@ -14,7 +14,7 @@ void main() {
       ..writeAsStringSync('Object f<T>() { const value = T; return value; }');
     await expectLater(
       AnalysisSession([file.path])
-          .use((input) => Lowering().lower(input).program),
+          .use((input) async => (await Lowering().lower(input)).program),
       throwsFormatException,
     );
   });

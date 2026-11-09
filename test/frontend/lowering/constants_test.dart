@@ -12,7 +12,7 @@ void main() {
       await AnalysisSession([
         'test/frontend/lowering/fixtures/constants.dart',
         'test/frontend/lowering/fixtures/constants_private.dart',
-      ]).use((input) => Lowering().lower(input).program),
+      ]).use((input) async => (await Lowering().lower(input)).program),
     ),
   );
 

@@ -11,7 +11,7 @@ void main() {
     () async {
       const path = 'test/frontend/lowering/fixtures/invocation_forms.dart';
       final program = await AnalysisSession([path])
-          .use((input) => Lowering().lower(input).program);
+          .use((input) async => (await Lowering().lower(input)).program);
       final function = program.functions.singleWhere(
         (f) => f.target.name == 'forms',
       );

@@ -14,7 +14,7 @@ void main() {
   setUpAll(() async {
     final program = await AnalysisSession([
       'test/frontend/lowering/fixtures/await_for.dart',
-    ]).use((input) => Lowering().lower(input).program);
+    ]).use((input) async => (await Lowering().lower(input)).program);
     runner = IrInterpreter(program, {
       (
         Uri.base.resolve('test/frontend/lowering/fixtures/effects.dart'),

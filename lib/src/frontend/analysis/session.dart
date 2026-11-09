@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:analyzer/dart/analysis/results.dart';
+import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/file_system/overlay_file_system.dart';
 import 'package:analyzer/file_system/physical_file_system.dart';
 // A single options override also protects transitive dependency diagnostics.
@@ -8,6 +9,7 @@ import 'package:analyzer/file_system/physical_file_system.dart';
 import 'package:analyzer/src/dart/analysis/analysis_context_collection.dart';
 import 'package:dartc/sdk.dart';
 
+import '../analyzer_metadata.dart';
 import '../constant_evaluation.dart';
 
 /// Owns the analysis resources and resolved snapshot of one library batch.
@@ -58,7 +60,8 @@ final class AnalysisSession(
 
   Future<void> _close() async {
     try {
-      await _resolution;
+      final input = await _resolution;
+      if (input != null) await Future.wait(input._dependencies.values);
     } catch (_) {
       // Resolution reports its error; disposal must still finish.
     }
@@ -134,8 +137,9 @@ final class CheckedLibraries._(
   final List<ResolvedLibraryResult> _libraries = .unmodifiable(input);
   final void Function() _checkOpen = checkOpen;
   final _constants = ConstantEvaluation();
+  final _dependencies = <LibraryElement, Future<ResolvedLibraryResult>>{};
 
-  /// The resolved libraries, accessible until their session is closed.
+  /// The input batch's resolved libraries, accessible until the session closes.
   ///
   /// Analyzer objects retain their original diagnostics and constant values.
   /// The session's constant checks and IR translation use corrected values.
@@ -163,9 +167,30 @@ final class CheckedLibraries._(
 }
 
 // Internal handoff; this extension is not exported by frontend.dart.
-extension CheckedConstants on CheckedLibraries {
+extension CheckedSources on CheckedLibraries {
   ConstantEvaluation get constants {
     _checkOpen();
     return _constants;
+  }
+
+  /// Resolves a referenced library and checks every unit before lowering it.
+  Future<ResolvedLibraryResult> resolveLibrary(LibraryElement element) {
+    _checkOpen();
+    for (final library in _libraries) {
+      if (identical(library.element, element)) return Future.value(library);
+    }
+    return _dependencies.putIfAbsent(element, () async {
+      prepareSdkLibrary(element);
+      final result = await _libraries.first.session.getResolvedLibraryByElement(
+        element,
+      );
+      if (result is! ResolvedLibraryResult) {
+        throw FormatException('Expected a Dart library: ${element.uri}');
+      }
+      for (final unit in result.units) {
+        _constants.check(unit);
+      }
+      return result;
+    });
   }
 }

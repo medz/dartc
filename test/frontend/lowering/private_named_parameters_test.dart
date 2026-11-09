@@ -14,7 +14,7 @@ void main() {
       await AnalysisSession([
         'test/frontend/lowering/fixtures/private_named/entry.dart',
         'test/frontend/lowering/fixtures/private_named/declarations.dart',
-      ]).use((input) => Lowering().lower(input).program),
+      ]).use((input) async => (await Lowering().lower(input)).program),
     );
   });
 
@@ -51,7 +51,7 @@ void main() {
           ..writeAsStringSync(source);
         await expectLater(
           AnalysisSession([file.path])
-              .use((input) => Lowering().lower(input).program),
+              .use((input) async => (await Lowering().lower(input)).program),
           throwsA(isA<FormatException>()),
         );
       },

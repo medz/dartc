@@ -52,6 +52,22 @@ void main() {
   );
 
   test(
+    'SDK error branches still require their native implementations',
+    () async {
+      await expectLater(
+        compiler.compile(['test/compiler/fixtures/sdk_functions.dart']),
+        throwsA(
+          isA<UnsupportedError>().having(
+            (error) => error.message,
+            'missing error constructor',
+            'Native body unavailable: range',
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
     'compilation owns final bytes and keeps the library name across writes',
     () async {
       final assets = NativeAssets(Target.host());

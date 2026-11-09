@@ -5,7 +5,7 @@ import 'package:analyzer/dart/element/type.dart';
 
 // The public analyzer API omits function-constant arguments/alias identity and
 // pattern context schemas, generic defaults, forwarding metadata and superclass
-// storage. Keep these analyzer 14.7 reads isolated instead of reconstructing
+// storage. Keep these analyzer 14.7 accesses isolated instead of reconstructing
 // inference or identity from lossy public types.
 // ignore: implementation_imports
 import 'package:analyzer/src/dart/ast/ast.dart' as internal;
@@ -32,6 +32,17 @@ import 'package:analyzer/src/dart/element/non_covariant_type_parameter_position.
 // ignore: implementation_imports
 import 'package:analyzer/src/dart/resolver/applicable_extensions.dart'
     as internal;
+
+/// Completes the analyzer model of compiler-provided enum storage.
+void prepareSdkLibrary(LibraryElement library) {
+  if (!library.isDartCore) return;
+  final enumeration = library.getClass('Enum')! as internal.ClassElementImpl;
+  final name = enumeration.getGetter('_name')!;
+  if (!name.isAbstract) return;
+  // Analyzer 14.7 models Enum.index as concrete, but omits the implicit name.
+  name.firstFragment.isAbstract = false;
+  enumeration.inheritanceManager.removeOfLibraries({library.uri});
+}
 
 /// Recovers source arguments of an already-selected extension or extension type.
 /// Applicability inference is not generic-function default generation.

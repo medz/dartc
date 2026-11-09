@@ -324,7 +324,7 @@ void main() {
       );
       await expectLater(
         AnalysisSession([entry.path])
-            .use((input) => Lowering().lower(input).program),
+            .use((input) async => (await Lowering().lower(input)).program),
         throwsA(
           isA<UnsupportedError>()
               .having((e) => e.message, 'use site', contains('entry.dart:1:'))
@@ -338,7 +338,7 @@ void main() {
     }
     entry.writeAsStringSync("import 'dependency.dart' as d; int f() => 42;");
     await AnalysisSession([entry.path])
-        .use((input) => Lowering().lower(input).program);
+        .use((input) async => (await Lowering().lower(input)).program);
   });
   test(
     'super formal defaults follow inherited constant dependencies',

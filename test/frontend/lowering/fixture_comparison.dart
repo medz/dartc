@@ -9,7 +9,7 @@ import 'fixtures/effects.dart' as effects;
 final class FixtureComparison(final IrProgram program) {
   static Future<FixtureComparison> load(String fixture) async => .new(
     await AnalysisSession(['test/frontend/lowering/fixtures/$fixture.dart'])
-        .use((input) => Lowering().lower(input).program),
+        .use((input) async => (await Lowering().lower(input)).program),
   );
 
   static final _effects = Uri.base.resolve(

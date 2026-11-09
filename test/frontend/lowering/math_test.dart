@@ -9,7 +9,7 @@ void main() {
   late Map<String, IrFunction> functions;
   setUpAll(() async {
     final program = await AnalysisSession(['test/compiler/fixtures/math.dart'])
-        .use((input) => Lowering().lower(input).program);
+        .use((input) async => (await Lowering().lower(input)).program);
     runner = IrInterpreter(program, {});
     functions = {
       for (final function in program.functions)

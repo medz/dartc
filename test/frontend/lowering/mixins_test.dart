@@ -12,7 +12,7 @@ void main() {
         await AnalysisSession([
           'test/frontend/lowering/fixtures/mixins.dart',
           'test/frontend/lowering/fixtures/mixins_private.dart',
-        ]).use((input) => Lowering().lower(input).program),
+        ]).use((input) async => (await Lowering().lower(input)).program),
       );
     });
 

@@ -146,7 +146,7 @@ class B extends R implements I {}
 int invoke() => read(B());
 ''');
       final program = await AnalysisSession([entry.path, imported.path])
-          .use((input) {
+          .use((input) async {
             final element = input.libraries
                 .expand((l) => l.units)
                 .expand(
@@ -161,7 +161,7 @@ int invoke() => read(B());
             expect(candidate.member.formalParameters, isEmpty);
             expect(candidate.member.returnType.getDisplayString(), 'int');
             expect(candidate.additionalCovariance, isEmpty);
-            return Lowering().lower(input).program;
+            return (await Lowering().lower(input)).program;
           });
       final invoke = program.functions.singleWhere(
         (f) => f.target.name == 'invoke',

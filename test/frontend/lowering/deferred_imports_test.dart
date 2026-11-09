@@ -13,7 +13,7 @@ void main() {
       final program = await AnalysisSession([
         'test/frontend/lowering/fixtures/deferred_unnamed_tearoff.dart',
         'test/frontend/lowering/fixtures/deferred_library.dart',
-      ]).use((input) => Lowering().lower(input).program);
+      ]).use((input) async => (await Lowering().lower(input)).program);
       final runner = IrInterpreter(program, {});
       final create = program.functions.singleWhere(
         (f) => f.target.name == 'create',
@@ -27,7 +27,7 @@ void main() {
       final program = await AnalysisSession([
         'test/frontend/lowering/fixtures/deferred_imports.dart',
         'test/frontend/lowering/fixtures/deferred_library.dart',
-      ]).use((input) => Lowering().lower(input).program);
+      ]).use((input) async => (await Lowering().lower(input)).program);
       final runner = IrInterpreter(program, {
         (
           Uri.base.resolve('test/frontend/lowering/fixtures/effects.dart'),

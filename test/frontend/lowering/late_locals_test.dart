@@ -218,9 +218,9 @@ void main() {
           ..writeAsStringSync(source);
         var lowered = false;
         await expectLater(
-          AnalysisSession([file.path]).use((input) {
+          AnalysisSession([file.path]).use((input) async {
             lowered = true;
-            return Lowering().lower(input).program;
+            return (await Lowering().lower(input)).program;
           }),
           throwsFormatException,
         );

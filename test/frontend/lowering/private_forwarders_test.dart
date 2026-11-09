@@ -15,7 +15,7 @@ void main() {
         'test/frontend/lowering/fixtures/private_forwarders_a.dart',
         'test/frontend/lowering/fixtures/private_forwarders_b.dart',
         'test/frontend/lowering/fixtures/private_forwarders_child.dart',
-      ]).use((input) => Lowering().lower(input).program),
+      ]).use((input) async => (await Lowering().lower(input)).program),
     );
   });
 

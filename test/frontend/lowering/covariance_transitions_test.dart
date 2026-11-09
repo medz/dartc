@@ -12,7 +12,7 @@ void main() {
         await AnalysisSession([
           'test/frontend/lowering/fixtures/covariance_transitions.dart',
           'test/frontend/lowering/fixtures/covariance_transitions_private.dart',
-        ]).use((input) => Lowering().lower(input).program),
+        ]).use((input) async => (await Lowering().lower(input)).program),
       );
       fixture.compare('defaults', [], sdk.defaults);
       fixture.compare('tearoffs', [], sdk.tearoffs);

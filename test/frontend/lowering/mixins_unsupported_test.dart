@@ -6,7 +6,7 @@ void main() {
     await expectLater(
       AnalysisSession([
         'test/frontend/lowering/fixtures/mixin_imported_application.dart',
-      ]).use((input) => Lowering().lower(input).program),
+      ]).use((input) async => (await Lowering().lower(input)).program),
       throwsA(
         isA<UnsupportedError>().having(
           (error) => error.message,

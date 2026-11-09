@@ -16,7 +16,7 @@ void main() {
   late IrProgram program;
   setUpAll(() async {
     program = await AnalysisSession([fixture, privateFixture])
-        .use((input) => Lowering().lower(input).program);
+        .use((input) async => (await Lowering().lower(input)).program);
   });
 
   IrClass declaration(String name) =>
@@ -194,7 +194,7 @@ class Incompatible extends ChangedPrivateImplementation {}
 int invoke() => invokeChangedPrivate(Incompatible());
 ''');
       final lowered = await AnalysisSession([file.path, privateFixture])
-          .use((input) => Lowering().lower(input).program);
+          .use((input) async => (await Lowering().lower(input)).program);
       final cls = lowered.classes.singleWhere(
         (c) => c.type.name == 'Incompatible',
       );
@@ -229,7 +229,7 @@ class C implements A, B { dynamic noSuchMethod(Invocation i) => null; }
 Object? invoke() { dynamic c = C(); return c.g(); }
 ''');
       final lowered = await AnalysisSession([file.path])
-          .use((input) => Lowering().lower(input).program);
+          .use((input) async => (await Lowering().lower(input)).program);
       final cls = lowered.classes.singleWhere((c) => c.type.name == 'C');
       expect(
         lowered.lookupMember(cls.type, method('g')).unsupportedForwarder,
@@ -262,7 +262,7 @@ int call(Changed receiver) => receiver._value();
         "import 'parent.dart'; class Child extends Changed {} int invoke() => call(Child());",
       );
     final lowered = await AnalysisSession([child.path, parent.path])
-        .use((input) => Lowering().lower(input).program);
+        .use((input) async => (await Lowering().lower(input)).program);
     final cls = lowered.classes.singleWhere((c) => c.type.name == 'Child');
     final replacement = lowered
         .lookupMember(cls.type, method('_value', parent.uri))

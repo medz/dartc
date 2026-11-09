@@ -74,7 +74,7 @@ void main() {
       final program = await AnalysisSession([
         'test/frontend/lowering/fixtures/dynamic_dispatch_private.dart',
         'test/frontend/lowering/fixtures/dynamic_dispatch_private_use.dart',
-      ]).use((input) => Lowering().lower(input).program);
+      ]).use((input) async => (await Lowering().lower(input)).program);
       FixtureComparison(program)
           .compare('privateLibraries', [], private_sdk.privateLibraries);
     },

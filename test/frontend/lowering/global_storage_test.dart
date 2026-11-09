@@ -125,7 +125,7 @@ void main() {
           '$root/first.dart',
           '$root/second.dart',
           '$root/barrel.dart',
-        ]).use((input) => Lowering().lower(input).program);
+        ]).use((input) async => (await Lowering().lower(input)).program);
         FixtureComparison(program)
             .compare('libraryIdentity', [], libraries.libraryIdentity);
         final firstUri = Uri.base.resolve('$root/first.dart');
@@ -161,7 +161,7 @@ void main() {
           "import 'dependency.dart' as dep; int f() => dep.value;",
         );
       final program = await AnalysisSession([entry.path])
-          .use((input) => Lowering().lower(input).program);
+          .use((input) async => (await Lowering().lower(input)).program);
       expect(program.globals, isEmpty);
       final calls = program.functions.single.blocks
           .expand((block) => block.instructions)
@@ -215,9 +215,9 @@ void main() {
           ..writeAsStringSync(source);
         var lowered = false;
         await expectLater(
-          AnalysisSession([file.path]).use((input) {
+          AnalysisSession([file.path]).use((input) async {
             lowered = true;
-            return Lowering().lower(input).program;
+            return (await Lowering().lower(input)).program;
           }),
           throwsFormatException,
         );

@@ -45,7 +45,7 @@ extension Public on int {
         "part of 'entry.dart'; extension on String { int mark() => 2; }",
       );
       final program = await AnalysisSession([entry, other])
-          .use((input) => Lowering().lower(input).program);
+          .use((input) async => (await Lowering().lower(input)).program);
       final run = program.functions.singleWhere((f) => f.target.name == 'run');
       expect(IrInterpreter(program, {}).run(run, []), 109);
       final markTargets = program.functions.where(
@@ -70,7 +70,7 @@ extension Private on int { int _method() => this; }
 int privateExtraction() { final function = 7._method; return function(); }
 """);
     final program = await AnalysisSession([entry, other])
-        .use((input) => Lowering().lower(input).program);
+        .use((input) async => (await Lowering().lower(input)).program);
     final run = program.functions.singleWhere((f) => f.target.name == 'run');
     expect(IrInterpreter(program, {}).run(run, []), 12);
     for (final function in program.functions.where(
@@ -88,7 +88,8 @@ extension E on int { int call(int value) => this + value; }
 int run() { int Function(int) function = 1; return function(2); }
 ''');
       await expectLater(
-        AnalysisSession([path]).use((input) => Lowering().lower(input).program),
+        AnalysisSession([path])
+            .use((input) async => (await Lowering().lower(input)).program),
         throwsA(isA<FormatException>()),
       );
     },
@@ -103,7 +104,8 @@ extension E<T> on Box<T> { T operator +(T other) => other; }
 Object? run() => E<int>(Box<int>(1)) + 7;
 ''');
       await expectLater(
-        AnalysisSession([path]).use((input) => Lowering().lower(input).program),
+        AnalysisSession([path])
+            .use((input) async => (await Lowering().lower(input)).program),
         throwsA(isA<FormatException>()),
       );
     },
@@ -116,7 +118,8 @@ extension E<T> on Box<T> { T operator -() => value; }
 Object? run() => (-E<int>(Box<int>(1)), 2);
 ''');
     await expectLater(
-      AnalysisSession([path]).use((input) => Lowering().lower(input).program),
+      AnalysisSession([path])
+          .use((input) async => (await Lowering().lower(input)).program),
       throwsA(
         isA<UnsupportedError>().having(
           (e) => e.message,
@@ -139,7 +142,7 @@ extension E<T> on List<T> {
 }
 ''');
       final program = await AnalysisSession([path])
-          .use((input) => Lowering().lower(input).program);
+          .use((input) async => (await Lowering().lower(input)).program);
       expect(program.classes, isEmpty);
       expect(program.functions.length, 4);
       for (final function in program.functions) {
@@ -157,7 +160,7 @@ extension E on int { int m() => this; }
 Object? run() { dynamic value = 1; return value.m(); }
 ''');
     final program = await AnalysisSession([path])
-        .use((input) => Lowering().lower(input).program);
+        .use((input) async => (await Lowering().lower(input)).program);
     final run = program.functions.singleWhere((f) => f.target.name == 'run');
     expect(
       run.blocks.expand((b) => b.instructions).whereType<DynamicDispatch>(),

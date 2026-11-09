@@ -114,7 +114,7 @@ class ForeignPrivate implements PrivateContract {
 class UnknownParent extends ImportedParent {}
 ''');
       final program = await AnalysisSession([entry.path])
-          .use((input) => Lowering().lower(input).program);
+          .use((input) async => (await Lowering().lower(input)).program);
       final foreign = program.classes.singleWhere(
         (c) => c.type.name == 'ForeignPrivate',
       );

@@ -1,6 +1,6 @@
 # 库、脚本与并发边界
 
-转换以调用方明确提供的库批次为单位，包含每个库的所有 part。`package:dartc/frontend.dart` 的 `AnalysisSession` 复用官方 analyzer 的解析结果；名称与指令解析不由 lowering 重复实现。`includeDependencies: true` 纳入非 SDK 导入和导出库，整个批次完成静态检查后才开始转换。导入库的函数调用保留声明身份，但只有批次内的库会生成函数体。无参数的同步 main 可作为独立进程入口，其他启动能力见下文。
+转换以调用方明确提供的库批次为单位，包含每个库的所有 part。`package:dartc/frontend.dart` 的 `AnalysisSession` 复用官方 analyzer 的解析结果；名称与指令解析不由 lowering 重复实现。`includeDependencies: true` 纳入非 SDK 导入和导出库，整个批次完成静态检查后才开始转换。用户库的函数体由输入批次提供；引用的 SDK 普通顶层函数和静态方法按声明身份读取函数体，并在转换前检查所在库的全部单元。`Lowering.lower` 返回 `Future<LoweringResult>`，须在分析会话关闭前等待完成。无参数的同步 main 可作为独立进程入口，其他启动能力见下文。
 
 | 特性 | 当前 IR 范围 |
 | --- | --- |
@@ -19,7 +19,7 @@
 
 [库与命名空间行为对照](../test/frontend/lowering/libraries_test.dart)、[包上下文与诊断对照](../test/frontend/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/libraries.md)。
 
-SDK 成员按已解析的声明生成普通调用、方法提取或扩展调用；未提供函数体时保留导入身份。已有语义 IR 操作只替换它们明确表示的操作，其他方法不会因参考执行器缺少实现而在 lowering 阶段拒绝。SDK 实现的装配、链接及执行属于后续交付范围。见[SDK 调用与用户重写测试](../test/frontend/lowering/sdk_calls_test.dart)。
+SDK 成员按已解析的声明生成普通调用、方法提取或扩展调用；未提供函数体时保留导入身份。普通顶层函数和类静态方法的 Dart 函数体支持别名、再导出、函数提取、默认参数及继续引用其他函数；静态方法不要求先提供类的实例布局。范围检查的成功分支与 SDK 对照，失败分支保留构造和抛错操作。SDK 构造器、实例及 extension 成员、访问器和全局存储的实现装配仍未接通，外部声明所需原语和托管对象执行也未完整实现。缺少原生依赖时拒绝生成产物。见[SDK 函数体对照](../test/frontend/lowering/sdk_functions_test.dart)、[原生依赖拒绝](../test/compiler/compiler_test.dart)及[SDK 调用与用户重写测试](../test/frontend/lowering/sdk_calls_test.dart)。
 
 [延迟导入对照](../test/frontend/lowering/deferred_imports_test.dart)覆盖未加载、请求已发出但尚未完成、加载完成和重复加载；两个前缀指向同一库时仍各自检查。`LoadLibrary` 返回代表加载完成的 Future，`CheckLibraryLoaded` 保留可抛错的读取效果。`loadLibrary` 的隐式函数保留普通调用和函数值身份。普通 extension 声明不能通过 deferred 导入，由 analyzer 检查。
 

@@ -103,6 +103,8 @@ final class IrClass(
 /// The class definitions and callable bodies in a batch of checked libraries.
 ///
 /// A reference to a declaration outside this batch is an import.
+/// Static bodies can belong to imported classes; instance bodies and
+/// constructors require their declaring class definition.
 final class IrProgram(
   Iterable<IrClass> classes,
   Iterable<IrFunction> functions, {
@@ -303,7 +305,9 @@ final class IrProgram(
         }
       }
       final t = f.target, owner = t.owner;
-      if (owner != null && owners[(owner.library, owner.name)] != owner) {
+      if (owner != null &&
+          (t.kind.hasReceiver || t.kind == .factory) &&
+          owners[(owner.library, owner.name)] != owner) {
         throw ArgumentError('Body belongs to an undeclared class.');
       }
       if (t.enclosing case final outer?) {
@@ -399,6 +403,7 @@ final class IrProgram(
           throw ArgumentError('Conflicting deferred import prefix.');
         }
       }
+      if (f.target.owner case final owner?) definitionOf(owner);
       f.referencedClasses.forEach(definitionOf);
       f.callees.forEach(checkTarget);
       for (final field in f.fields) {

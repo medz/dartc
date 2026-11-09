@@ -14,7 +14,7 @@ void main() {
       await AnalysisSession([
         'test/frontend/lowering/fixtures/extension_types_interfaces.dart',
         'test/frontend/lowering/fixtures/extension_types_interfaces_other.dart',
-      ]).use((input) => Lowering().lower(input).program),
+      ]).use((input) async => (await Lowering().lower(input)).program),
     );
   });
   test('inherited extension members retain source owner type arguments', () {
@@ -82,7 +82,7 @@ void main() {
             ..writeAsStringSync(source);
           await expectLater(
             AnalysisSession([file.path])
-                .use((input) => Lowering().lower(input).program),
+                .use((input) async => (await Lowering().lower(input)).program),
             throwsA(isA<FormatException>()),
           );
         }

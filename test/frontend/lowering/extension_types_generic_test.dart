@@ -112,7 +112,7 @@ void main() { print(read(E<int>(3))); }
 """);
         await expectLater(
           AnalysisSession([file.path])
-              .use((input) => Lowering().lower(input).program),
+              .use((input) async => (await Lowering().lower(input)).program),
           throwsA(
             isA<FormatException>().having(
               (e) => e.message,

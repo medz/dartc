@@ -12,7 +12,7 @@ void main() {
   setUpAll(() async {
     program = await AnalysisSession([
       'test/frontend/lowering/fixtures/collections.dart',
-    ]).use((input) => Lowering().lower(input).program);
+    ]).use((input) async => (await Lowering().lower(input)).program);
     runner = IrInterpreter(program, {});
     functions = {
       for (final f in program.functions)
@@ -116,7 +116,7 @@ void main() {
     test('retains a typed constant in $file', () async {
       final program = await AnalysisSession([
         'test/frontend/lowering/fixtures/$file',
-      ]).use((input) => Lowering().lower(input).program);
+      ]).use((input) async => (await Lowering().lower(input)).program);
       final result = (program.functions.single.entry.end as Return).value;
       expect(result, anyOf(isA<SequenceConstant>(), isA<MapConstant>()));
       expect(result!.type, type);

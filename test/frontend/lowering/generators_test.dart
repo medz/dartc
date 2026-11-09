@@ -158,7 +158,7 @@ void main() {
       ..writeAsStringSync('void f() sync* { yield 1; }');
     await expectLater(
       AnalysisSession([invalid.path])
-          .use((input) => Lowering().lower(input).program),
+          .use((input) async => (await Lowering().lower(input)).program),
       throwsFormatException,
     );
   });

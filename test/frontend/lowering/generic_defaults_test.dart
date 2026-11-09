@@ -17,7 +17,7 @@ void main() {
   setUpAll(() async {
     await AnalysisSession([
       'test/frontend/lowering/fixtures/generic_defaults.dart',
-    ]).use((input) {
+    ]).use((input) async {
       final unit = input.libraries.single.units.single;
       final declaration = unit.unit.declarations
           .whereType<ast.FunctionDeclaration>()
@@ -28,7 +28,7 @@ void main() {
       structuralDefaultAbsent =
           typeParameterDefault(type.typeParameters.single) == null;
       structuralMethod = Bindings().valueType(type, unit, body) as FunctionType;
-      program = Lowering().lower(input).program;
+      program = (await Lowering().lower(input)).program;
     });
   });
 

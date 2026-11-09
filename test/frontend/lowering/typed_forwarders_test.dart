@@ -65,7 +65,7 @@ void main() {
         await AnalysisSession([
           'test/frontend/lowering/fixtures/typed_forwarders_private.dart',
           'test/frontend/lowering/fixtures/typed_forwarders_private_use.dart',
-        ]).use((input) => Lowering().lower(input).program),
+        ]).use((input) async => (await Lowering().lower(input)).program),
       );
       for (var form = 0; form < 3; form++) {
         for (final tearoff in [false, true]) {

@@ -17,7 +17,7 @@ void main() {
     final file = File('${directory.path}/entry.dart')
       ..writeAsStringSync(source);
     return AnalysisSession([file.path])
-        .use((input) => Lowering().lower(input).program);
+        .use((input) async => (await Lowering().lower(input)).program);
   }
 
   final sources = <String, String>{

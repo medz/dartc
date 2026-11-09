@@ -8,7 +8,7 @@ void main() {
   test('external declarations retain Dart defaults and identities without invented bodies or storage', () async {
     final program = await AnalysisSession([
       'test/frontend/lowering/fixtures/externals.dart',
-    ]).use((input) => Lowering().lower(input).program);
+    ]).use((input) async => (await Lowering().lower(input)).program);
     expect(program.externals, hasLength(11));
     expect(program.functions.map((f) => f.target.name), ['use']);
     expect(program.globals, isEmpty);

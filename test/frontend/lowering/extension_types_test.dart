@@ -80,7 +80,7 @@ void main() {
       const entry =
           'test/frontend/lowering/fixtures/extension_type_import.dart';
       final imported = await AnalysisSession([entry])
-          .use((input) => Lowering().lower(input).program);
+          .use((input) async => (await Lowering().lower(input)).program);
       expect(imported.classes, isEmpty);
       final keep = imported.functions.singleWhere(
         (f) => f.target.name == 'keep',
@@ -94,7 +94,7 @@ void main() {
       final linked = await AnalysisSession([
         entry,
         'test/frontend/lowering/fixtures/deferred_library.dart',
-      ]).use((input) => Lowering().lower(input).program);
+      ]).use((input) async => (await Lowering().lower(input)).program);
       expect(
         IrInterpreter(
           linked,

@@ -30,11 +30,13 @@ void main() {
   test(
     'checks and lowers a batch without recreating its analysis session',
     () async {
-      await AnalysisSession([path]).use((input) {
+      await AnalysisSession([path]).use((input) async {
         expect(input.libraries, hasLength(1));
-        expect(Lowering().lower(input).program.functions, isNotEmpty);
+        expect((await Lowering().lower(input)).program.functions, isNotEmpty);
         expect(
-          Lowering(enableAssertions: true).lower(input).program.functions,
+          (await Lowering(enableAssertions: true).lower(input))
+              .program
+              .functions,
           isNotEmpty,
         );
       });
@@ -56,9 +58,9 @@ void main() {
   test('constant checks use exact comparisons before rejecting SDK errors', () {
     return AnalysisSession([
       'test/frontend/analysis/fixtures/valid_constants.dart',
-    ]).use((checked) {
+    ]).use((checked) async {
       expect(checked.libraries, hasLength(1));
-      expect(Lowering().lower(checked).program.functions, isNotEmpty);
+      expect((await Lowering().lower(checked)).program.functions, isNotEmpty);
     });
   });
 
