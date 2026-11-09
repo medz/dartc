@@ -15,7 +15,6 @@ import '../constant_evaluation.dart';
 /// Call [close] after consuming [resolve], or use [use] for scoped access.
 final class AnalysisSession(
   Iterable<String> paths, {
-  final DartSdk? sdk,
   final bool includeDependencies = false,
 }) {
   final List<String> _paths = .unmodifiable(paths);
@@ -78,6 +77,14 @@ final class AnalysisSession(
     if (inputs.length != _paths.length) {
       throw ArgumentError('Duplicate input library.');
     }
+    final sdk = path.join(path.rootPrefix(inputs.first), '__dartc__', 'sdk');
+    for (final entry in const DartSdk().files.entries) {
+      files.setOverlay(
+        path.joinAll([sdk, ...entry.key.split('/')]),
+        content: entry.value,
+        modificationStamp: 0,
+      );
+    }
     final options = path.join(
       path.dirname(inputs.first),
       '.dartc-analysis.yaml',
@@ -87,11 +94,10 @@ final class AnalysisSession(
       content: 'analyzer:\n  cannot-ignore: [error]\n',
       modificationStamp: 0,
     );
-    final selectedSdk = sdk ?? await SdkResolver().resolve();
     final contexts = _contexts = AnalysisContextCollectionImpl(
       includedPaths: inputs.toList(),
       resourceProvider: files,
-      sdkPath: selectedSdk.directory.path,
+      sdkPath: sdk,
       optionsFile: options,
     );
     final session = contexts.contextFor(inputs.first).currentSession;

@@ -48,11 +48,9 @@ Pointers to supported scalar types can use `Pointer<T>.fromAddress`, `.address`,
 
 ## SDK sources
 
-Standard library sources must currently report version `3.13.7`. `--sdk` accepts an SDK directory, a Dart executable path or a command on `PATH`, such as `--sdk dart`. Dart command wrappers are queried for the SDK they actually launch. An invalid explicit source fails without falling back.
+dartc carries the original standard library sources and license from [Dart SDK 3.13.7 at commit `416e33b`](https://github.com/dart-lang/sdk/tree/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib). The standalone compiler can analyze and compile supported code without an installed SDK, a source cache or network access. Project package dependencies must still be available.
 
-Without `--sdk`, dartc checks the SDK running the process, then Dart commands on `PATH`. If neither provides compatible sources, it downloads the [pinned official source revision](https://github.com/dart-lang/sdk/tree/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib) and caches its standard libraries and license. It downloads no SDK executable. Cache contents are verified before use; an interrupted download never becomes a usable cache. A damaged cache fails and must be removed explicitly before downloading again. User-code errors never trigger SDK reselection.
-
-The default cache is `~/Library/Caches/dartc/sdk` on macOS and `~/.cache/dartc/sdk` on Linux; an absolute `XDG_CACHE_HOME` overrides the base directory. A complete cache works offline. Through `package:dartc/sdk.dart`, use `SdkResolver().resolve()` to select sources, or `SdkResolver().resolveCached()` to prepare the pinned sources before going offline. Both return a `DartSdk` accepted by `AnalysisSession` and `Compiler`. `SdkResolver(cacheDirectory: Directory(path))` selects a cache location. Caller-supplied SDK directories are checked for required files and version; their contents are not authenticated against the pinned source tree.
+`AnalysisSession` and `Compiler` use these fixed sources. `const DartSdk().files`, from `package:dartc/sdk.dart`, exposes their immutable text and metadata; `DartSdk.version` and `DartSdk.sourceRevision` identify them. Bundled contents are checked before use; damaged data fails instead of selecting another SDK. Source availability does not imply complete native standard library support.
 
 ## Development
 
@@ -66,6 +64,8 @@ dart run tool/print_ir.dart test/frontend/lowering/fixtures/functions.dart
 ```
 
 The last command prints the basic blocks, calls and branches for each function in the file's library.
+
+To regenerate the bundled SDK data, run `dart run tool/embed_sdk.dart`. This build tool fetches and verifies the pinned official sources when they are absent from `build/sources/sdk/`; compilation of user programs never downloads them. Rebuild the dartc executable after regenerating the data.
 
 Assertions are disabled by default. Pass `enableAssertions: true` to the `Lowering` constructor to preserve assertion statements and constructor assertion initializers.
 

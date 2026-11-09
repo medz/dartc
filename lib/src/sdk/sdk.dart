@@ -1,51 +1,59 @@
-import 'dart:io';
+import 'dart:convert';
+import 'dart:io' show gzip;
 
-/// Standard library sources for the supported Dart SDK version.
-final class DartSdk._(final Directory directory, final String version) {
-  /// The standard library version currently checked by dartc.
-  static const supportedVersion = '3.13.7';
+import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart';
 
-  /// The official source revision used when no compatible SDK is installed.
+import 'sources.g.dart';
+
+/// The immutable official standard library sources bundled with this compiler.
+final class const DartSdk() {
+  /// The fixed standard library version.
+  static const version = '3.13.7';
+
+  /// The official commit containing the bundled source files.
   static const sourceRevision = '416e33b0ffaef062a60ec966bb8c82ed2b83f128';
 
-  /// Checks required source files and the version without modifying the SDK.
+  /// The SHA-256 of sorted file names and their original content digests.
+  static const sourceFingerprint =
+      'a054ede359302c352757ea57878e5e4033c6c955a9d4e2da3ec02c4087dc8b8e';
+
+  /// Source text and metadata keyed by paths relative to the SDK root.
   ///
-  /// [path] can name an installed SDK or a prepared source-only SDK.
-  /// Other versions throw [UnsupportedError]; this does not attest that a
-  /// caller-supplied SDK's contents are identical to the official release.
-  factory at(String path) {
-    final root = Directory(Directory(path).absolute.resolveSymbolicLinksSync());
-    for (final file in [
-      'version',
-      'lib/libraries.json',
-      'lib/core/core.dart',
-      'lib/_internal/allowed_experiments.json',
-      'lib/_internal/sdk_library_metadata/lib/libraries.dart',
-    ]) {
-      if (!File.fromUri(root.uri.resolve(file)).existsSync()) {
-        throw ArgumentError('Missing SDK file: ${root.path}/$file');
+  /// Includes the original license, version and revision. Damaged or incomplete
+  /// bundled contents throw [FormatException]; no external source is consulted.
+  Map<String, String> get files => _files;
+
+  static final _files = _read();
+
+  static Map<String, String> _read() {
+    final files = <String, String>{}, records = <String>[];
+    try {
+      final archive = TarDecoder().decodeBytes(
+        gzip.decode(base64.decode(sdkArchive)),
+        verify: true,
+      );
+      for (final file in archive) {
+        if (!file.isFile ||
+            file.isSymbolicLink ||
+            file.isHardLink ||
+            files.containsKey(file.name)) {
+          throw const FormatException('Invalid bundled SDK entry.');
+        }
+        final bytes = file.content;
+        records.add('${file.name}\u0000${sha256.convert(bytes)}\n');
+        files[file.name] = utf8.decode(bytes);
       }
+    } on ArchiveException catch (error) {
+      throw FormatException('Invalid bundled SDK: $error');
     }
-    final version = File.fromUri(root.uri.resolve('version'))
-        .readAsStringSync()
-        .trim();
-    if (version.isEmpty) {
-      throw FormatException('Empty SDK version: ${root.path}');
-    }
-    if (version != supportedVersion) {
-      throw UnsupportedError(
-        'SDK $version is not supported; expected $supportedVersion: ${root.path}',
+    records.sort();
+    if (sha256.convert(utf8.encode(records.join())).toString() !=
+        sourceFingerprint) {
+      throw const FormatException(
+        'Bundled SDK contents do not match the fixed source revision.',
       );
     }
-    return ._(root, version);
+    return Map.unmodifiable(files);
   }
-
-  /// Locates the SDK containing the executable running this process.
-  ///
-  /// Throws when running as a standalone executable outside an SDK.
-  factory current() =>
-      .at(File(Platform.resolvedExecutable).parent.parent.path);
-
-  /// The directory containing `dart:` library sources.
-  Directory get libraries => Directory.fromUri(directory.uri.resolve('lib/'));
 }

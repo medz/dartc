@@ -1,5 +1,4 @@
 import 'package:dartc/frontend.dart';
-import 'package:dartc/sdk.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -41,22 +40,18 @@ void main() {
       });
     },
   );
-  test(
-    'explicit SDK validation and transitive errors precede consumption',
-    () async {
-      expect(() => DartSdk.at('test/compiler/fixtures'), throwsArgumentError);
-      var consumed = false;
-      await expectLater(
-        AnalysisSession([
-          'test/compiler/fixtures/invalid_dependency.dart',
-        ], includeDependencies: true).use((_) {
-          consumed = true;
-        }),
-        throwsFormatException,
-      );
-      expect(consumed, isFalse);
-    },
-  );
+  test('transitive errors precede consumption', () async {
+    var consumed = false;
+    await expectLater(
+      AnalysisSession([
+        'test/compiler/fixtures/invalid_dependency.dart',
+      ], includeDependencies: true).use((_) {
+        consumed = true;
+      }),
+      throwsFormatException,
+    );
+    expect(consumed, isFalse);
+  });
 
   test('constant checks use exact comparisons before rejecting SDK errors', () {
     return AnalysisSession([

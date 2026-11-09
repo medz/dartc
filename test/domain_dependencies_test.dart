@@ -60,7 +60,6 @@ void main() {
         'frontend',
         'codegen',
         'interop',
-        'sdk',
         'target',
         'object',
         'linker',

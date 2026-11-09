@@ -10,13 +10,12 @@ import 'package:dartc/linker.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/object/elf.dart';
 import 'package:dartc/object/mach_o.dart';
-import 'package:dartc/sdk.dart';
 import 'package:dartc/target.dart';
 
 import 'output.dart';
 
 /// Compiles annotated native exports for an explicit output target.
-final class Compiler(final Target target, {final DartSdk? sdk}) {
+final class Compiler(final Target target) {
   /// Checks dependencies and returns the final bytes and C declarations.
   ///
   /// All non-SDK dependencies are checked before selecting native definitions.
@@ -42,7 +41,7 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
     final (
       lowered,
       sources,
-    ) = await AnalysisSession(paths, sdk: sdk, includeDependencies: true).use(
+    ) = await AnalysisSession(paths, includeDependencies: true).use(
       (input) => (
         Lowering().lower(input),
         [

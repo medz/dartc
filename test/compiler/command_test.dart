@@ -3,7 +3,6 @@ library;
 
 import 'dart:io';
 
-import 'package:dartc/sdk.dart';
 import 'package:dartc/src/compiler/cli/command.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
@@ -35,22 +34,14 @@ void main() {
         '--sdk',
         'test/compiler/fixtures',
       ]),
-      1,
+      64,
     );
     expect(existing.readAsStringSync(), 'existing output');
-    expect(errors.toString(), contains('Missing SDK file:'));
-    for (final (kind, expected, sdk) in [
-      (
-        'object',
-        assets.file('compiler/arithmetic.o'),
-        DartSdk.current().directory.path,
-      ),
-      (
-        'static',
-        assets.file('compiler/arithmetic.a'),
-        Platform.resolvedExecutable,
-      ),
-      ('shared', assets.library('compiler/arithmetic'), null),
+    expect(errors.toString(), contains('Unknown option: --sdk'));
+    for (final (kind, expected) in [
+      ('object', assets.file('compiler/arithmetic.o')),
+      ('static', assets.file('compiler/arithmetic.a')),
+      ('shared', assets.library('compiler/arithmetic')),
     ]) {
       final file = File.fromUri(
         directory.uri.resolve(expected.uri.pathSegments.last),
@@ -61,7 +52,6 @@ void main() {
           '-o',
           file.path,
           if (kind != 'object') ...['--kind', kind],
-          if (sdk != null) ...['--sdk', sdk],
           '--header',
           header.path,
         ]),

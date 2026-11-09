@@ -15,7 +15,7 @@ Use the standard runner's concurrency. Override `--concurrency` only when measur
 | --- | --- | --- |
 | `dart test <paths>` | The changed contract and affected callers | Only if the selected suites have the `assets` tag |
 | `dart test -P unit` | All suites that need no prebuilt assets | None |
-| `dart test -P native` | Host Compiler/CLI integration, SDK selection and native execution | Current target and SDK assets |
+| `dart test -P native` | Host Compiler/CLI integration, standalone compilation and native execution | Current target and host compiler assets |
 | `dart test` | All suites on the current host, including all-target file-format checks | All targets |
 
 The `assets` tag marks suites that consume prebuilt files. The `native` tag selects host compilation, output handling and actual FFI calls; the preset lists the participating files and domains. Add new native suites to that preset without including unrelated test files. Keep target-independent assertions outside native suites so they can run without loading a library.
@@ -27,9 +27,11 @@ dart run tool/build_test_assets.dart macos-arm64
 dart test -P native
 ```
 
-The builder also accepts `macos-x64`, `linux-arm64` and `linux-x64`, with multiple targets separated by spaces. With no arguments it builds all supported targets. Sources and FFI clients live in each domain's `fixtures/`; outputs go to `build/test/<target>/`. Each compiler fixture is compiled to an object once per target, then archived and linked through the public object/linker APIs. Compiler and CLI tests separately exercise all three output requests.
+The builder also accepts `macos-x64`, `linux-arm64` and `linux-x64`, with multiple targets separated by spaces. With no arguments it builds all supported targets. Sources and FFI clients live in each domain's `fixtures/`; outputs go to `build/test/<target>/`. Each compiler fixture is compiled to an object once per target and binding configuration, then archived and linked through the public object/linker APIs. Compiler and CLI tests separately exercise all three output requests.
 
-The builder also prepares SDK assets: verified official sources and a source archive under `build/test/sdk/`, plus a host executable for the fixed SDK-discovery probe. The current Dart SDK builds this probe before tests. The first preparation needs network access to fetch the pinned sources; later runs reuse the verified cache. To prepare only these assets, run `dart run tool/build_sdk_test_assets.dart`. SDK cache tests serve the prepared archive over loopback and require no internet access.
+The builder also compiles the real `bin/dartc.dart` executable and a fixed Dart FFI client with the development SDK. It prepares a standalone input with explicit package dependencies and an archive for the SDK build-input tests. To prepare only these assets, run `dart run tool/build_compiler_test_assets.dart`. The builder reads the bundled SDK data and needs no source download. Acquisition tests serve their prepared archive over loopback, checking content integrity, invalid archives and interrupted preparation.
+
+The standalone test invokes the prepared dartc executable with an empty `PATH` and no inherited environment, then uses the prepared FFI client to execute its output. This compilation is the behavior under test. For full environment isolation, copy only those executables and the prepared input to a container without an SDK, checkout or source caches and run with `--network none`.
 
 Build assets before tests. A missing asset is an error, never a request to compile from a test setup. Rebuild when its source, compiler, dependency or target configuration changes. The same batch of target assets can be copied into matching execution environments; do not rebuild all targets in every container. Host compiler checks still compile source in that host.
 
@@ -41,12 +43,11 @@ docker run --rm --platform linux/arm64 \
   -e TEST_TARGET=linux-arm64 -v "$PWD:/src:ro" \
   --tmpfs /work:exec -w /work dart:3.13.7-sdk sh -eu -c '
     cp -R /src/lib /src/bin /src/runtime /src/test /src/tool /work/
-    cp /src/pubspec.yaml /src/pubspec.lock /src/analysis_options.yaml /src/dart_test.yaml /work/
+    cp /src/pubspec.yaml /src/pubspec.lock /src/analysis_options.yaml /src/dart_test.yaml /src/LICENSE /work/
     mkdir -p build/test
     cp -R /src/build/test/$TEST_TARGET build/test/
-    cp -R /src/build/test/sdk build/test/
     dart pub get
-    dart run tool/build_sdk_test_assets.dart
+    dart run tool/build_compiler_test_assets.dart
     dart test -P native
   '
 ```
@@ -61,7 +62,7 @@ For Linux x64, use `linux-x64` for the builder and `TEST_TARGET`, and `linux/amd
 | Instruction encoding, object records, relocations | All affected target variants on one host; cross-generation is not execution |
 | Calling conventions, register allocation, memory operations, linking/loading | Relevant native tests on every affected OS/CPU; shared rules can affect all targets |
 | Target support sources | Native execution with real platform services and focused error cases; source imports must not depend on the host toolchain |
-| SDK discovery, CLI, filesystem handling | Relevant host integration tests on the affected operating systems |
+| Bundled SDK, CLI, filesystem handling | Relevant host integration tests on the affected operating systems |
 | Dependency upgrades, broad integration, release candidates | Full host regression and the platform execution required by the changed dependencies and supported release targets |
 
 Do not repeat a passed check unless its inputs changed or a new failure calls its result into question. A commit or push alone is not a reason to rerun it. CI covers required environments that local machines and Docker cannot establish; it is not a per-edit requirement. Record emulated execution separately from real hardware and do not use it for native performance claims.

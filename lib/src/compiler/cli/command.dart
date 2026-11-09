@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:dartc/sdk.dart';
 import 'package:dartc/target.dart';
 
 import '../compiler.dart';
@@ -16,7 +15,7 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
     try {
       if (arguments.isEmpty) throw FormatException(_usage);
       final source = arguments.first;
-      String? destination, header, sdkPath;
+      String? destination, header;
       var target = Target.host();
       var kind = _OutputKind.object;
       for (var i = 1; i < arguments.length; i += 2) {
@@ -29,8 +28,6 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
             destination = value;
           case '--header':
             header = value;
-          case '--sdk':
-            sdkPath = value;
           case '--target':
             target = Target.parse(value);
           case '--kind':
@@ -47,12 +44,7 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
       if (destination == null) {
         throw FormatException('Missing -o output path.\n$_usage');
       }
-      final compiler = Compiler(
-        target,
-        sdk: sdkPath == null
-            ? null
-            : await SdkResolver().resolve(source: sdkPath),
-      );
+      final compiler = Compiler(target);
       final file = File(destination);
       final library = await compiler.compile(
         [source],
@@ -83,7 +75,7 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
 const _usage =
     'Usage: dartc <source.dart> -o <output> '
     '[--kind object|static|shared] [--header <file.h>] '
-    '[--target macos-arm64|macos-x64|linux-arm64|linux-x64] [--sdk <root|dart-command>]';
+    '[--target macos-arm64|macos-x64|linux-arm64|linux-x64]';
 
 enum _OutputKind() {
   object,

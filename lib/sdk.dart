@@ -1,5 +1,4 @@
-/// Selects and prepares compatible official Dart standard library sources.
+/// Provides the fixed official standard library sources bundled with dartc.
 library;
 
 export 'src/sdk/sdk.dart' show DartSdk;
-export 'src/sdk/resolver.dart' show SdkResolver;

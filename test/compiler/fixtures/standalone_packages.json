@@ -1,0 +1,11 @@
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "dartc",
+      "rootUri": "../dependency",
+      "packageUri": "lib/",
+      "languageVersion": "3.13"
+    }
+  ]
+}

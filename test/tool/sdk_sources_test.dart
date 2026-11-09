@@ -7,6 +7,8 @@ import 'package:archive/archive.dart';
 import 'package:dartc/sdk.dart';
 import 'package:test/test.dart';
 
+import '../../tool/src/sdk_sources.dart';
+
 void main() {
   late Directory work;
   late HttpServer server;
@@ -16,7 +18,7 @@ void main() {
   setUp(() async {
     work = (Directory(
       'build/test/sdk',
-    )..createSync(recursive: true)).createTempSync('cache-');
+    )..createSync(recursive: true)).createTempSync('inputs-');
     addTearDown(() => work.delete(recursive: true));
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() => server.close(force: true));
@@ -51,31 +53,22 @@ void main() {
 
   test('publishes verified sources and reuses them without network access', () async {
     serveSource();
-    final resolver = SdkResolver(cacheDirectory: work);
+    final resolver = SdkSources(work);
     await redirected(() async {
-      final sdk = await resolver.resolveCached();
-      expect(sdk.version, '3.13.7');
+      final sdk = await resolver.prepare();
       expect(
-        File.fromUri(sdk.directory.uri.resolve('revision'))
-            .readAsStringSync()
-            .trim(),
+        File.fromUri(sdk.uri.resolve('revision')).readAsStringSync().trim(),
         DartSdk.sourceRevision,
       );
-      expect(
-        Directory.fromUri(sdk.directory.uri.resolve('bin/')).existsSync(),
-        isFalse,
-      );
-      expect(
-        (await resolver.resolveCached()).directory.path,
-        sdk.directory.path,
-      );
+      expect(Directory.fromUri(sdk.uri.resolve('bin/')).existsSync(), isFalse);
+      expect((await resolver.prepare()).path, sdk.path);
       expect(
         requests.single.toString(),
         'https://codeload.github.com/dart-lang/sdk/tar.gz/${DartSdk.sourceRevision}',
       );
-      File.fromUri(sdk.directory.uri.resolve('lib/core/core.dart'))
+      File.fromUri(sdk.uri.resolve('lib/core/core.dart'))
           .writeAsStringSync('corrupt');
-      await expectLater(resolver.resolveCached(), throwsFormatException);
+      await expectLater(resolver.prepare(), throwsFormatException);
       expect(requests, hasLength(1));
     });
     expect(work.listSync(), hasLength(1));
@@ -83,24 +76,24 @@ void main() {
 
   test('concurrent preparation publishes one complete source tree', () async {
     serveSource();
-    final resolver = SdkResolver(cacheDirectory: work);
+    final resolver = SdkSources(work);
     final results = await redirected(
-      () => Future.wait([resolver.resolveCached(), resolver.resolveCached()]),
+      () => Future.wait([resolver.prepare(), resolver.prepare()]),
       count: 2,
     );
-    expect(results[0].directory.path, results[1].directory.path);
+    expect(results[0].path, results[1].path);
     expect(work.listSync(), hasLength(1));
   });
 
-  test('a source cache cannot be replaced by a directory link', () async {
+  test('a build input tree cannot be replaced by a directory link', () async {
     serveSource();
-    final resolver = SdkResolver(cacheDirectory: work);
+    final resolver = SdkSources(work);
     await redirected(() async {
-      final sdk = await resolver.resolveCached();
-      final original = await sdk.directory.rename('${work.path}/original');
+      final sdk = await resolver.prepare();
+      final original = await sdk.rename('${work.path}/original');
       await Link('${work.path}/${DartSdk.sourceRevision}')
           .create(original.absolute.path);
-      await expectLater(resolver.resolveCached(), throwsFormatException);
+      await expectLater(resolver.prepare(), throwsFormatException);
       expect(requests, hasLength(1));
     });
   });
@@ -112,7 +105,7 @@ void main() {
     'contents',
     'link',
   ]) {
-    test('$failure leaves no published or partial cache', () async {
+    test('$failure leaves no published or partial build inputs', () async {
       final archive = Archive();
       const prefix = 'sdk-${DartSdk.sourceRevision}/sdk/lib/';
       archive.add(
@@ -137,7 +130,7 @@ void main() {
         await request.response.close();
       });
       await expectLater(
-        redirected(() => SdkResolver(cacheDirectory: work).resolveCached()),
+        redirected(() => SdkSources(work).prepare()),
         failure == 'http'
             ? throwsA(isA<HttpException>())
             : throwsFormatException,

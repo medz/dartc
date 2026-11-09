@@ -5,18 +5,16 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 
-import 'sdk.dart';
+import 'package:dartc/sdk.dart';
 
-/// Acquires and verifies one pinned standard library source tree.
-final class SourceCache(final Directory directory) {
-  static const _digest =
-      'a054ede359302c352757ea57878e5e4033c6c955a9d4e2da3ec02c4087dc8b8e';
+/// Prepares the pinned official inputs when building dartc.
+final class SdkSources(final Directory directory) {
   static final _uri = Uri.https(
     'codeload.github.com',
     '/dart-lang/sdk/tar.gz/${DartSdk.sourceRevision}',
   );
 
-  Future<DartSdk> resolve() async {
+  Future<Directory> prepare() async {
     final destination = Directory.fromUri(
       directory.absolute.uri.resolve(DartSdk.sourceRevision),
     );
@@ -61,7 +59,7 @@ final class SourceCache(final Directory directory) {
       await sdk.create();
       _extract(tar, sdk);
       await File.fromUri(sdk.uri.resolve('version'))
-          .writeAsString('${DartSdk.supportedVersion}\n');
+          .writeAsString('${DartSdk.version}\n');
       await File.fromUri(sdk.uri.resolve('revision'))
           .writeAsString('${DartSdk.sourceRevision}\n');
       _verified(sdk);
@@ -71,7 +69,7 @@ final class SourceCache(final Directory directory) {
         if (!await destination.exists()) rethrow;
         return _verified(destination);
       }
-      return DartSdk.at(destination.path);
+      return destination;
     } finally {
       await work.delete(recursive: true);
     }
@@ -141,7 +139,7 @@ final class SourceCache(final Directory directory) {
     }
   }
 
-  DartSdk _verified(Directory directory) {
+  Directory _verified(Directory directory) {
     if (FileSystemEntity.typeSync(directory.path, followLinks: false) !=
         .directory) {
       throw FormatException('Invalid SDK cache directory: ${directory.path}');
@@ -161,11 +159,12 @@ final class SourceCache(final Directory directory) {
       records.add('$name\u0000${sha256.convert(entry.readAsBytesSync())}\n');
     }
     records.sort();
-    if (sha256.convert(utf8.encode(records.join())).toString() != _digest) {
+    if (sha256.convert(utf8.encode(records.join())).toString() !=
+        DartSdk.sourceFingerprint) {
       throw FormatException(
         'SDK cache contents do not match ${DartSdk.sourceRevision}: ${directory.path}',
       );
     }
-    return DartSdk.at(directory.path);
+    return directory;
   }
 }
