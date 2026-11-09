@@ -67,6 +67,19 @@ Future<void> main() async {
               name: output.uri.pathSegments.last,
             ),
           );
+      Future<List<ObjectModule>> objects(
+        String name,
+        List<ObjectModule> modules,
+      ) async {
+        final decoded = <ObjectModule>[];
+        for (final (i, module) in modules.indexed) {
+          final file = assets.file('linker/$name$i.o');
+          await file.writeAsBytes(format.encodeObject(module));
+          decoded.add(format.decodeObject(await file.readAsBytes()));
+        }
+        return decoded;
+      }
+
       await shared([aliases(target)], assets.library('codegen/aliases'));
       await shared([frames(target)], assets.library('abi/frames'));
       await shared(stackCalls(target), assets.library('abi/stack_calls'));
@@ -80,36 +93,25 @@ Future<void> main() async {
       await assets
           .file('linker/values.a')
           .writeAsBytes(ArchiveWriter(format).encode(inputs));
-      await shared(inputs, assets.library('linker/values'));
-      for (final (i, object) in inputs.indexed) {
-        await assets
-            .file('linker/$i.o')
-            .writeAsBytes(format.encodeObject(object));
-      }
+      await shared(await objects('', inputs), assets.library('linker/values'));
       await shared([
         functions(target, symbolValues),
       ], assets.library('linker/symbols'));
       final data = dataModules(target);
-      await shared(data, assets.library('linker/data'));
-      await shared([data.first], assets.library('linker/storage'));
+      final decodedData = await objects('data_', data);
+      await shared(decodedData, assets.library('linker/data'));
+      await shared([decodedData.first], assets.library('linker/storage'));
       await assets
           .file('linker/data.a')
           .writeAsBytes(ArchiveWriter(format).encode(data));
-      for (final (i, module) in data.indexed) {
-        await assets
-            .file('linker/data_$i.o')
-            .writeAsBytes(format.encodeObject(module));
-      }
       final modules = callModules(target);
-      await shared(modules, assets.library('linker/calls'));
+      await shared(
+        await objects('call_', modules),
+        assets.library('linker/calls'),
+      );
       await assets
           .file('linker/calls.a')
           .writeAsBytes(ArchiveWriter(format).encode(modules));
-      for (final (i, module) in modules.indexed) {
-        await assets
-            .file('linker/call_$i.o')
-            .writeAsBytes(format.encodeObject(module));
-      }
       print('Built test assets for $target.');
     }
   }

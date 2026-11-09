@@ -4,6 +4,20 @@ import 'package:test/test.dart';
 
 void main() {
   const target = Target(.linux, .arm64);
+  test('symbols preserve identity, aliases and missing extent', () {
+    final symbols = [
+      const native.Symbol('second', 0, 4, 4),
+      const native.Symbol('label', 0, 4, null, kind: .unknown),
+      const native.Symbol('first', 0, 0, 4),
+      const native.Symbol('alias', 0, 0, 4),
+    ];
+    final module = native.ObjectModule(target, [
+      native.Section.code(List.filled(8, 0)),
+    ], symbols);
+    expect(module.symbols, symbols);
+    expect(module.symbols[1].size, isNull);
+    expect(module.symbols[1].kind, native.SymbolKind.unknown);
+  });
   test(
     'section identities validate storage and symbol/reference ownership',
     () {
@@ -77,7 +91,7 @@ void main() {
       [const native.Symbol('a', 0, -1, 4)],
       [const native.Symbol('a', 0, 0, 5)],
       [const native.Symbol('a', 0, 0, 0)],
-      [const native.Symbol('a', 0, 0, 4), const native.Symbol('b', 0, 0, 4)],
+      [const native.Symbol('a', 0, 0, 4), const native.Symbol('a', 0, 0, 4)],
       [const native.Symbol('a\u0000b', 0, 0, 4)],
     ]) {
       expect(

@@ -95,6 +95,27 @@ void main() {
             ], name: 'bad_call'),
             throwsArgumentError,
           );
+          final endMarker = ObjectModule(
+            target,
+            [Section.code(code)],
+            [
+              Symbol(
+                caller.imports.single,
+                0,
+                code.length,
+                null,
+                kind: .unknown,
+              ),
+            ],
+          );
+          expect(
+            () => linker.linkSharedLibrary([
+              caller,
+              endMarker,
+              module,
+            ], name: 'end'),
+            throwsArgumentError,
+          );
           final distant = ObjectModule(
             target,
             [

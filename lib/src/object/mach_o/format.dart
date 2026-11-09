@@ -6,14 +6,19 @@ import 'package:dartc/target.dart';
 import '../object_module.dart';
 import '../object_format.dart';
 import 'sections.dart';
+import 'reader.dart';
 
-/// Writes Mach-O relocatable objects for macOS ARM64 and x86-64.
+/// Reads and writes Mach-O relocatable objects for macOS ARM64 and x86-64.
 final class MachO(@override final Target target) implements ObjectFormat {
   this {
     if (target.operatingSystem != .macos) {
       throw ArgumentError('Mach-O requires a macOS target.');
     }
   }
+
+  @override
+  ObjectModule decodeObject(Uint8List bytes) =>
+      MachOReader(target, bytes).read();
 
   @override
   Uint8List encodeObject(ObjectModule object) {

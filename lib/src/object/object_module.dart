@@ -17,7 +17,7 @@ final class ObjectModule(
   /// The sections addressed by symbols and relocation sites.
   final List<Section> sections = .unmodifiable(sections);
 
-  /// Definitions in increasing offset order within each section.
+  /// Definitions indexed by their module-local identity.
   final List<Symbol> symbols = .unmodifiable(symbols);
 
   /// Undefined global symbols, indexed after [symbols].
@@ -37,7 +37,6 @@ final class ObjectModule(
       }
     }
     final names = <String>{};
-    final ends = List.filled(this.sections.length, 0);
     for (final symbol in this.symbols) {
       RangeError.checkValidIndex(symbol.section, this.sections, 'section');
       final section = this.sections[symbol.section];
@@ -45,16 +44,15 @@ final class ObjectModule(
           symbol.name.contains('\u0000') ||
           symbol.binding == .global && !names.add(symbol.name) ||
           symbol.exported && symbol.binding != .global ||
-          symbol.offset < ends[symbol.section] ||
-          symbol.size <= 0 ||
-          symbol.offset > section.size - symbol.size ||
+          symbol.offset < 0 ||
+          symbol.size != null && symbol.size! <= 0 ||
+          symbol.offset > section.size - (symbol.size ?? 0) ||
           symbol.kind == .function && section.kind != .code ||
           symbol.kind == .function &&
               target.architecture == .arm64 &&
-              (symbol.offset % 4 != 0 || symbol.size % 4 != 0)) {
+              (symbol.offset % 4 != 0 || (symbol.size ?? 0) % 4 != 0)) {
         throw ArgumentError('Invalid symbol: ${symbol.name}');
       }
-      ends[symbol.section] = symbol.offset + symbol.size;
     }
     for (final name in this.imports) {
       if (name.isEmpty || name.contains('\u0000') || !names.add(name)) {
@@ -67,7 +65,7 @@ final class ObjectModule(
             ? a.offset.compareTo(b.offset)
             : a.section.compareTo(b.section),
       );
-    ends.fillRange(0, ends.length, 0);
+    final ends = List.filled(this.sections.length, 0);
     for (final reference in sites) {
       RangeError.checkValidIndex(reference.section, this.sections, 'section');
       final section = this.sections[reference.section];
@@ -83,11 +81,19 @@ final class ObjectModule(
           offset < ends[reference.section] ||
           offset > section.size - 4 ||
           reference.symbol < 0 ||
-          reference.symbol >= this.symbols.length + this.imports.length ||
-          call &&
-              reference.symbol < this.symbols.length &&
-              this.symbols[reference.symbol].kind != .function) {
+          reference.symbol >= this.symbols.length + this.imports.length) {
         throw ArgumentError('Invalid relocation at $offset.');
+      }
+      if (call && reference.symbol < this.symbols.length) {
+        final definition = this.symbols[reference.symbol];
+        final storage = this.sections[definition.section];
+        if (definition.kind == .data ||
+            storage.kind != .code ||
+            definition.offset == storage.size) {
+          throw ArgumentError(
+            'Call target is outside code: ${definition.name}',
+          );
+        }
       }
       encoding.validate(
         ByteData.sublistView(section.bytes),

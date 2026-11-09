@@ -52,15 +52,15 @@ final class LinkUnit(
         sections.add(SectionGroup(kind, size, alignment, parts));
       }
     }
-    final globals = <String, int>{}, symbolBases = <int>[];
+    final globals = <String, (int, int)>{}, symbolBases = <int>[];
     for (final (i, object) in objects.indexed) {
       symbolBases.add(symbols.length);
-      for (final symbol in object.symbols) {
+      for (final (j, symbol) in object.symbols.indexed) {
         if (symbol.binding == .global) {
           if (globals.containsKey(symbol.name)) {
             throw ArgumentError('Duplicate global: ${symbol.name}');
           }
-          globals[symbol.name] = symbols.length;
+          globals[symbol.name] = (i, j);
         }
         final (section, offset) = bases[i][symbol.section]!;
         symbols.add(
@@ -83,15 +83,19 @@ final class LinkUnit(
         }
       }
       for (final reference in object.relocations) {
-        final destination = reference.symbol < object.symbols.length
-            ? symbolBases[i] + reference.symbol
+        final (owner, index) = reference.symbol < object.symbols.length
+            ? (i, reference.symbol)
             : globals[object.imports[reference.symbol -
                   object.symbols.length]]!;
+        final definition = objects[owner].symbols[index];
+        final storage = objects[owner].sections[definition.section];
         if ((reference.encoding == .arm64Call26 ||
                 reference.encoding == .x64Call32) &&
-            symbols[destination].kind != .function) {
+            (definition.kind == .data ||
+                storage.kind != .code ||
+                definition.offset == storage.size)) {
           throw ArgumentError(
-            'Call targets data: ${symbols[destination].name}',
+            'Call target is outside code: ${definition.name}',
           );
         }
         final (section, offset) = bases[i][reference.section]!;
@@ -100,7 +104,7 @@ final class LinkUnit(
             section,
             offset + reference.offset,
             reference.encoding,
-            destination,
+            symbolBases[owner] + index,
           ),
         );
       }

@@ -6,14 +6,18 @@ import 'package:dartc/target.dart';
 import '../object_module.dart';
 import '../object_format.dart';
 import 'records.dart';
+import 'reader.dart';
 
-/// Writes ELF64 relocatable objects for Linux ARM64 and x86-64.
+/// Reads and writes ELF64 relocatable objects for Linux ARM64 and x86-64.
 final class Elf(@override final Target target) implements ObjectFormat {
   this {
     if (target.operatingSystem != .linux) {
       throw ArgumentError('ELF requires a Linux target.');
     }
   }
+
+  @override
+  ObjectModule decodeObject(Uint8List bytes) => ElfReader(target, bytes).read();
 
   @override
   Uint8List encodeObject(ObjectModule object) {
@@ -91,8 +95,7 @@ final class Elf(@override final Target target) implements ObjectFormat {
       data.setUint32(offset, names[i], .little);
       data.setUint8(
         offset + 4,
-        (symbol.binding == .local ? 0 : 0x10) |
-            (symbol.kind == .function ? 2 : 1),
+        (symbol.binding == .local ? 0 : 0x10) | symbol.kind.elfType,
       );
       data.setUint8(
         offset + 5,
@@ -100,7 +103,7 @@ final class Elf(@override final Target target) implements ObjectFormat {
       );
       data.setUint16(offset + 6, symbol.section + 1, .little);
       data.setUint64(offset + 8, symbol.offset, .little);
-      data.setUint64(offset + 16, symbol.size, .little);
+      data.setUint64(offset + 16, symbol.size ?? 0, .little);
     }
     for (final (i, _) in object.imports.indexed) {
       final offset = symbolOffset + (symbols.length + i + 1) * 24;

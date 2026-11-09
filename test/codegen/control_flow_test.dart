@@ -36,7 +36,7 @@ void main() {
         final bytes = Uint8List.sublistView(
           module.sections.single.bytes,
           symbol.offset,
-          symbol.offset + symbol.size,
+          symbol.offset + symbol.size!,
         );
         final data = ByteData.sublistView(bytes);
         if (arch == .arm64) {

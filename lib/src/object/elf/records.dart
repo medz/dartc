@@ -3,6 +3,17 @@ import 'dart:typed_data';
 import 'package:dartc/target.dart';
 
 import '../section.dart';
+import '../symbol.dart';
+
+/// The ELF symbol type associated with a known or unspecified definition.
+extension ElfSymbolKind on SymbolKind {
+  /// The STT_NOTYPE, STT_FUNC or STT_OBJECT value.
+  int get elfType => switch (this) {
+    .unknown => 0,
+    .function => 2,
+    .data => 1,
+  };
+}
 
 /// ELF names, storage types and allocation permissions for supported sections.
 extension ElfSectionKind on SectionKind {

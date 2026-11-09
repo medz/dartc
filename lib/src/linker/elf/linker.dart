@@ -2,7 +2,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dartc/object.dart';
-import 'package:dartc/object/elf.dart' show ElfRecords, ElfSectionKind;
+import 'package:dartc/object/elf.dart'
+    show ElfRecords, ElfSectionKind, ElfSymbolKind;
 import 'package:dartc/target.dart';
 
 import '../linker.dart';
@@ -109,14 +110,14 @@ final class ElfLinker(@override final Target target) implements Linker {
     for (final (i, symbol) in symbols.indexed) {
       final offset = symbolOffset + (i + 1) * 24;
       data.setUint32(offset, names[i], .little);
-      data.setUint8(offset + 4, symbol.kind == .function ? 0x12 : 0x11);
+      data.setUint8(offset + 4, 0x10 | symbol.kind.elfType);
       data.setUint16(offset + 6, symbol.section + 1, .little);
       data.setUint64(
         offset + 8,
         addresses[symbol.section] + symbol.offset,
         .little,
       );
-      data.setUint64(offset + 16, symbol.size, .little);
+      data.setUint64(offset + 16, symbol.size ?? 0, .little);
     }
     void section(
       int index,
