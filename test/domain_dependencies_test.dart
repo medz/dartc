@@ -15,11 +15,10 @@ void main() {
       'analyzer': {'sdk'},
       'lowering': {'analyzer', 'ir', 'interop'},
       'abi': {'assembler', 'target', 'interop'},
-      'artifact': {'target', 'assembler'},
-      'formats': {'artifact', 'target'},
+      'object': {'target', 'assembler'},
       'interop': {},
-      'codegen': {'abi', 'assembler', 'artifact', 'ir', 'interop', 'target'},
-      'linker': {'artifact', 'formats'},
+      'codegen': {'abi', 'assembler', 'object', 'ir', 'interop', 'target'},
+      'linker': {'object', 'assembler', 'target'},
       'compiler': {
         'abi',
         'ir',
@@ -29,16 +28,17 @@ void main() {
         'lowering',
         'sdk',
         'target',
-        'artifact',
-        'formats',
+        'object',
         'linker',
       },
-      'cli': {'artifact', 'compiler', 'sdk', 'target'},
+      'cli': {'compiler', 'sdk', 'target'},
     };
     final entries = {
       for (final domain in dependencies.keys) '$domain.dart': domain,
       'assembler/arm64.dart': 'assembler',
       'assembler/x64.dart': 'assembler',
+      'object/elf.dart': 'object',
+      'object/mach_o.dart': 'object',
     };
     final lib = Directory('lib').absolute.uri;
     String domain(Uri uri) {
@@ -79,7 +79,7 @@ void main() {
             expect(
               const {
                 'analyzer': {'analyzer', 'lowering'},
-                'crypto': {'formats'},
+                'crypto': {'linker'},
               }[uri.pathSegments.first],
               contains(owner),
               reason: file.path,

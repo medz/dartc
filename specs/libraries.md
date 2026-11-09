@@ -38,11 +38,11 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 | 平台验证 | macOS ARM64、Linux ARM64/x86-64 已验证原生调用；macOS x86-64 当前检查文件生成、重定位表与签名，尚无运行验证。 |
 | 标准库与执行支持 | 导出函数尚不能依赖托管分配、GC、调度及一般标准库执行能力。缓存或找到 SDK 源码不等于目标侧实现已经存在。 |
 
-[原生函数验证](../test/compiler/native_test.dart)通过固定 Dart FFI 调用代码执行预编译资产，并与 SDK 对照整数边界行为。[寄存器别名验证](../test/codegen/native_test.dart)覆盖目标寄存器重叠时的实际结果。[格式验证](../test/formats/formats_test.dart)检查目标标识、静态归档成员与符号索引，以及 Mach-O 签名对全部映像页的覆盖；[头文件验证](../test/compiler/artifacts_test.dart)检查导出原型。上述范围是当前后端实现进度，不改变完整语言目标。
+[原生函数验证](../test/compiler/native_test.dart)通过固定 Dart FFI 调用代码执行预编译资产，并与 SDK 对照整数边界行为。[寄存器别名验证](../test/codegen/native_test.dart)覆盖目标寄存器重叠时的实际结果。[格式验证](../test/object/formats_test.dart)检查目标标识、静态归档成员与符号索引；[签名验证](../test/linker/signature_test.dart)检查 Mach-O 签名对全部映像页的覆盖；[头文件验证](../test/compiler/artifacts_test.dart)检查导出原型。上述范围是当前后端实现进度，不改变完整语言目标。
 
 [独立链接验证](../test/linker/native_test.dart)调用预先链接的多目标文件与大符号表资产。[链接契约验证](../test/linker/linker_test.dart)覆盖确定性、局部符号隔离、重复全局定义和未解析引用；[输出保护验证](../test/compiler/compiler_test.dart)覆盖源文件和输出路径冲突。
 
-[跨文件调用验证](../test/compiler/calls_test.dart)覆盖参数换位、重复参数、常量参数、跨调用活跃值、寄存器溢出和导出可见性。[重定位格式验证](../test/formats/relocations_test.dart)检查对象文件的引用索引、局部/全局/未定义符号及位移规则。
+[跨文件调用验证](../test/compiler/calls_test.dart)覆盖参数换位、重复参数、常量参数、跨调用活跃值、寄存器溢出和导出可见性。[重定位格式验证](../test/object/relocations_test.dart)检查对象文件的引用索引、局部/全局/未定义符号及位移规则。
 
 [原生控制流对照](../test/compiler/control_flow_test.dart)覆盖整数边界比较、布尔辅助函数、短路副作用、循环的零次/一次/多次执行、嵌套循环及标签转移、循环变量轮换和递归返回。[图交接验证](../test/codegen/control_flow_test.dart)覆盖同目标的不同边参数、乱序块布局、空块及不返回的循环；[不支持的异常路径](../test/compiler/fixtures/unsupported_control_flow.dart)仍明确拒绝生成，不因分支或未使用结果而丢弃。
 

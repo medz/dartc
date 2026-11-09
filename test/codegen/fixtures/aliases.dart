@@ -1,4 +1,4 @@
-import 'package:dartc/artifact.dart';
+import 'package:dartc/object.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';

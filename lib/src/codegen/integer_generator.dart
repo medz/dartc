@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:dartc/artifact.dart';
+import 'package:dartc/object.dart';
 import 'package:dartc/abi.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';

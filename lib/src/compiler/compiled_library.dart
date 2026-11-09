@@ -1,10 +1,13 @@
 import 'dart:io';
 
-import 'package:dartc/artifact.dart';
+import 'package:dartc/object.dart';
 import 'package:dartc/abi.dart';
-import 'package:dartc/formats.dart';
+import 'package:dartc/object/elf.dart';
+import 'package:dartc/object/mach_o.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/linker.dart';
+
+import 'output_kind.dart';
 
 /// Native code and declarations ready to write without retaining analyzer state.
 final class CompiledLibrary(
@@ -57,17 +60,17 @@ final class CompiledLibrary(
         );
       }
     }
-    final ImageFormat format = switch (object.target.operatingSystem) {
+    final ObjectFormat format = switch (object.target.operatingSystem) {
       .macos => MachO(object.target),
       .linux => Elf(object.target),
     };
     final bytes = switch (kind) {
       .object => format.encodeObject(object),
       .staticLibrary => ArchiveWriter(format).encode([object]),
-      .sharedLibrary => format.encodeImage(
-        Linker(format)
-            .link([object], libraryName: output.uri.pathSegments.last),
-      ),
+      .sharedLibrary => switch (object.target.operatingSystem) {
+        .macos => MachOLinker(object.target),
+        .linux => ElfLinker(object.target),
+      }.linkSharedLibrary([object], name: output.uri.pathSegments.last),
     };
     await _write(output, bytes);
     if (header != null) {

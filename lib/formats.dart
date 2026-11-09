@@ -1,7 +1,0 @@
-/// Encodes native objects, static archives and shared libraries.
-library;
-
-export 'src/formats/archive.dart' show ArchiveWriter;
-export 'src/formats/elf.dart' show Elf;
-export 'src/formats/mach_o.dart' show MachO;
-export 'src/formats/format.dart' show ObjectFormat, ImageFormat;

@@ -1,9 +1,10 @@
 import 'package:dartc/compiler.dart';
-import 'package:dartc/artifact.dart';
+import 'package:dartc/object.dart';
 
 import 'dart:io';
 
-import 'package:dartc/formats.dart';
+import 'package:dartc/object/elf.dart';
+import 'package:dartc/object/mach_o.dart';
 import 'package:dartc/linker.dart';
 import 'package:dartc/target.dart';
 
@@ -57,15 +58,19 @@ Future<void> main() async {
         kind: .staticLibrary,
       );
 
-      final ImageFormat format = switch (os) {
+      final ObjectFormat format = switch (os) {
         .macos => MachO(target),
         .linux => Elf(target),
       };
-      final linker = Linker(format);
+      final Linker linker = switch (os) {
+        .macos => MachOLinker(target),
+        .linux => ElfLinker(target),
+      };
       Future<void> shared(List<ObjectModule> modules, File output) =>
           output.writeAsBytes(
-            format.encodeImage(
-              linker.link(modules, libraryName: output.uri.pathSegments.last),
+            linker.linkSharedLibrary(
+              modules,
+              name: output.uri.pathSegments.last,
             ),
           );
       await shared([aliases(target)], assets.library('codegen/aliases'));

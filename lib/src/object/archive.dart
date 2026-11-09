@@ -1,9 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:dartc/artifact.dart';
-
-import 'format.dart';
+import 'object_module.dart';
+import 'object_format.dart';
 
 /// Writes indexed static archives for macOS and Linux.
 final class ArchiveWriter(final ObjectFormat format) {

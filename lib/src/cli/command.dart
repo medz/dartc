@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:dartc/artifact.dart';
 import 'package:dartc/compiler.dart';
 import 'package:dartc/sdk.dart';
 import 'package:dartc/target.dart';

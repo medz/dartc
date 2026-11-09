@@ -1,5 +1,5 @@
 import 'package:dartc/assembler/arm64.dart' as arm64;
-import 'package:dartc/artifact.dart';
+import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 import 'package:dartc/assembler/x64.dart' as x64;
 

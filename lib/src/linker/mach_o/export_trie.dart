@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:dartc/artifact.dart';
+import 'package:dartc/object.dart';
 
 /// Encodes dyld's compressed symbol trie with image-relative function addresses.
 final class ExportTrie(final List<Symbol> symbols, final int codeOffset) {

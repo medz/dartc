@@ -2,31 +2,38 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
-import 'package:dartc/artifact.dart';
+import 'package:dartc/object.dart';
+import 'package:dartc/target.dart';
+
+import '../linker.dart';
+import '../link_unit.dart';
 
 import 'code_signature.dart';
 import 'export_trie.dart';
 
-/// Encodes a Mach-O dynamic library without undefined references or fixups.
-final class MachODylibLayout(
-  @override final ObjectModule module,
-  final String installName,
-) implements ImageLayout {
+/// Links macOS shared libraries, including export metadata and an ad-hoc signature.
+final class MachOLinker(@override final Target target) implements Linker {
+  this {
+    if (target.operatingSystem != .macos) {
+      throw ArgumentError('Mach-O requires a macOS target.');
+    }
+  }
+
+  @override
+  Uint8List linkSharedLibrary(
+    Iterable<ObjectModule> objects, {
+    required String name,
+  }) => _MachODylib(LinkUnit(target, objects, name)).encode();
+}
+
+final class _MachODylib(final LinkUnit unit) {
+  final String installName = '@rpath/${unit.name}';
   late final List<int> _name;
   late final int _idSize;
   late final int _commandsSize;
-  @override
   late final int codeOffset;
 
-  @override
-  int get codeAddress => codeOffset;
-
   this {
-    if (module.target.operatingSystem != .macos ||
-        installName.isEmpty ||
-        installName.contains('\u0000')) {
-      throw ArgumentError('Invalid Mach-O image configuration.');
-    }
     _name = utf8.encode(installName);
     _idSize = (24 + _name.length + 1 + 7) & ~7;
     _commandsSize = 152 + 72 + _idSize + 56 + 24 + 24 + 24 + 80 + 16 + 16;
@@ -34,8 +41,8 @@ final class MachODylibLayout(
   }
 
   /// Encodes code using the section placement established by this layout.
-  Uint8List encode(Uint8List code) {
-    final object = module, textOffset = codeOffset;
+  Uint8List encode() {
+    final object = unit, textOffset = codeOffset;
     final symbols = object.symbols.where((s) => s.exported).toList();
     final page = object.target.architecture == .arm64 ? 16384 : 4096;
     final textSize = (textOffset + object.code.length + page - 1) & -page;
@@ -132,7 +139,7 @@ final class MachODylibLayout(
     final signing = command(0x1d, 16);
     data.setUint32(signing + 8, signatureOffset, .little);
     data.setUint32(signing + 12, signature.size, .little);
-    bytes.setAll(textOffset, code);
+    unit.writeCode(data, textOffset, address: textOffset);
     for (final (i, symbol) in symbols.indexed) {
       final offset = textSize + i * 16;
       data.setUint32(offset, names[i], .little);
@@ -150,6 +157,6 @@ final class MachODylibLayout(
     identifier[8] = (identifier[8] & 63) | 0x80;
     bytes.setAll(uuid + 8, identifier);
     signature.write(bytes);
-    return bytes;
+    return bytes.asUnmodifiableView();
   }
 }

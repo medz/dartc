@@ -1,41 +1,18 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:dartc/artifact.dart';
+import '../object_module.dart';
+
 import 'package:dartc/target.dart';
 
-import 'format.dart';
+import '../object_format.dart';
 
-import 'mach_o_dylib.dart';
-
-/// Writes Mach-O objects and dynamic libraries for macOS ARM64 and x86-64.
-final class MachO(@override final Target target) implements ImageFormat {
+/// Writes Mach-O relocatable objects for macOS ARM64 and x86-64.
+final class MachO(@override final Target target) implements ObjectFormat {
   this {
     if (target.operatingSystem != .macos) {
       throw ArgumentError('Mach-O requires a macOS target.');
     }
-  }
-
-  @override
-  ImageLayout layoutImage(ObjectModule module, {required String libraryName}) {
-    _checkTarget(module);
-    if (module.imports.isNotEmpty || module.relocations.isNotEmpty) {
-      throw ArgumentError('Image layout requires resolved module references.');
-    }
-    if (libraryName.isEmpty || libraryName.contains('\u0000')) {
-      throw ArgumentError.value(libraryName, 'libraryName');
-    }
-    return MachODylibLayout(module, '@rpath/$libraryName');
-  }
-
-  @override
-  Uint8List encodeImage(LinkedImage image) {
-    final layout = image.layout;
-    if (layout is! MachODylibLayout) {
-      throw ArgumentError('Expected a Mach-O layout.');
-    }
-    _checkTarget(layout.module);
-    return layout.encode(image.code);
   }
 
   void _checkTarget(ObjectModule module) {
@@ -145,6 +122,6 @@ final class MachO(@override final Target target) implements ImageFormat {
       data.setUint32(relocationOffset + i * 8, relocation.offset, .little);
       data.setUint32(relocationOffset + i * 8 + 4, index | 0x2d000000, .little);
     }
-    return bytes;
+    return bytes.asUnmodifiableView();
   }
 }
