@@ -6,7 +6,7 @@ import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/generators.dart' as sdk;
 
 void main() {
@@ -28,7 +28,7 @@ void main() {
       (f) => f.target.name == 'interleavedCaptures',
     );
     expect(
-      FixtureRunner(comparison.program, {}).run(function, []),
+      IrInterpreter(comparison.program, {}).run(function, []),
       sdk.interleavedCaptures(),
     );
     comparison.compare('retainedLoopClosures', [], sdk.retainedLoopClosures);
@@ -106,7 +106,7 @@ void main() {
       (f) => f.target.name == 'reentrantIterator',
     );
     expect(
-      () => FixtureRunner(comparison.program, {}).run(function, []),
+      () => IrInterpreter(comparison.program, {}).run(function, []),
       throwsUnsupportedError,
     );
   });
@@ -114,7 +114,7 @@ void main() {
     final function = comparison.program.functions.singleWhere(
       (f) => f.target.name == 'manyValues',
     );
-    final runner = FixtureRunner(comparison.program, {});
+    final runner = IrInterpreter(comparison.program, {});
     final arguments = <Object?>[1500];
     final values = runner.run(function, arguments) as Iterable<Object?>;
     arguments[0] = 1;
@@ -146,7 +146,7 @@ void main() {
           (f) => f.target.name == name,
         );
         expect(
-          () => FixtureRunner(comparison.program, {}).run(function, []),
+          () => IrInterpreter(comparison.program, {}).run(function, []),
           throwsUnsupportedError,
         );
       }

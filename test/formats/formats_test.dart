@@ -7,7 +7,7 @@ import 'package:dartc/formats.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
-import '../native_assets.dart';
+import '../support/native_assets.dart';
 
 void main() {
   for (final os in OperatingSystem.values) {

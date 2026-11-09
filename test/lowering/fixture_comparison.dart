@@ -3,7 +3,7 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/effects.dart' as effects;
 
 /// Compares a lowered fixture with the SDK, including failures and effect order.
@@ -16,7 +16,7 @@ final class FixtureComparison(final IrProgram program) {
   static final _effects = Uri.base.resolve(
     'test/lowering/fixtures/effects.dart',
   );
-  late final _runner = FixtureRunner(program, {
+  late final _runner = IrInterpreter(program, {
     (_effects, 'tick'): effects.tick,
     (_effects, 'probe'): effects.probe,
   });

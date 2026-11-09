@@ -1,7 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-import '../lowering/fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 final _uri = Uri.parse('memory:references');
 const _one = Constant.integer(1);
@@ -246,7 +246,7 @@ void main() {
       final b = Block();
       b.finish(Return(b.emit(FunctionCall(FunctionConstant(f), []))));
       final caller = IrFunction(FunctionTarget(_uri, 'use', .integer, []), [b]);
-      final runner = FixtureRunner(
+      final runner = IrInterpreter(
         IrProgram([], [caller], externals: [external]),
         {(_uri, 'twice'): (x) => x * 2},
       );

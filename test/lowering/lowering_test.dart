@@ -3,7 +3,7 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/callables.dart' as callables;
 import 'fixtures/closures.dart' as closures;
 import 'fixtures/conditionals.dart' as conditionals;
@@ -36,7 +36,7 @@ Future<IrProgram> _lower(List<String> names) =>
 
 void main() {
   late Map<String, IrFunction> functions;
-  late FixtureRunner runner;
+  late IrInterpreter runner;
   setUpAll(() async {
     final result = await _lower([
       'functions.dart',
@@ -67,7 +67,7 @@ void main() {
           f.target.name: f,
     };
     final library = Uri.base.resolve('$_fixtures/effects.dart');
-    runner = FixtureRunner(result, {
+    runner = IrInterpreter(result, {
       (library, 'tick'): effects.tick,
       (library, 'probe'): effects.probe,
     });
@@ -619,7 +619,7 @@ void main() {
 
   test('updates imported global storage through its linked accessor', () async {
     final program = await _lower(['index_update.dart', 'effects.dart']);
-    final linked = FixtureRunner(program, {});
+    final linked = IrInterpreter(program, {});
     final tick = program.functions.singleWhere((f) => f.target.name == 'tick');
     final update = program.functions.singleWhere(
       (f) => f.target.name == 'updateFirst',
@@ -634,7 +634,7 @@ void main() {
   test('lowers the original lazy local fixture', () async {
     final program = await _lower(['lazy.dart']);
     final function = program.functions.singleWhere((f) => f.target.name == 'f');
-    expect(FixtureRunner(program, {}).run(function, []), lazy.f());
+    expect(IrInterpreter(program, {}).run(function, []), lazy.f());
   });
 
   test(
@@ -644,7 +644,7 @@ void main() {
       final function = program.functions.singleWhere(
         (f) => f.target.name == 'compareAsObject',
       );
-      final runner = FixtureRunner(program, {});
+      final runner = IrInterpreter(program, {});
       for (final seed in [-1, 0, 7]) {
         expect(
           runner.run(function, [seed]),

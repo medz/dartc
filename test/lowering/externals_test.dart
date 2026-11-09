@@ -3,7 +3,7 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 void main() {
   test('external declarations retain Dart defaults and identities without invented bodies or storage', () async {
@@ -30,7 +30,7 @@ void main() {
       const Constant.integer(2).structuralKey,
     );
     final library = sum.target.library;
-    final runner = FixtureRunner(program, {
+    final runner = IrInterpreter(program, {
       (library, 'identity'): (int value) => value,
     });
     expect(runner.run(program.functions.single, []), 4);

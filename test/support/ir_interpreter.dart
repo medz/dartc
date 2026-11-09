@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-final class FixtureRunner(
+final class IrInterpreter(
   final IrProgram program,
   final Map<(Uri, String), Object? Function(int)> imports,
 ) {
@@ -2239,7 +2239,7 @@ final class _StreamActivation(
   final controller = StreamController<Object?>(sync: true);
   Completer<void>? wake;
 
-  Stream<Object?> stream(FixtureRunner runner) {
+  Stream<Object?> stream(IrInterpreter runner) {
     final done = Completer<void>();
     void resume() {
       wake?.complete();
@@ -2329,7 +2329,7 @@ FutureOr<_FutureBox> _boxOrAdopt(
 }
 
 final class _GeneratorIterator(
-  final FixtureRunner runner,
+  final IrInterpreter runner,
   super.function,
   super.arguments,
   super.environment,
@@ -2591,7 +2591,7 @@ final class _FunctionValue(
         );
 }
 
-final class _Instance(final ClassType type, final FixtureRunner runner) {
+final class _Instance(final ClassType type, final IrInterpreter runner) {
   final fields = <InstanceField, Object?>{};
 
   static final _equality = FunctionTarget(
@@ -2726,11 +2726,11 @@ final class _NativeFunction(
 // Native errors retain this adapter without reading user Invocation getters.
 // Only diagnostic rendering needs these conversions; represented generic types
 // cannot be expressed as host Type objects and are omitted from that rendering.
-final class _GuestInvocation(final FixtureRunner runner, final Object value)
+final class _GuestInvocation(final IrInterpreter runner, final Object value)
     implements Invocation {
   Object? read(String name) => runner._dynamicDispatch(
     value,
-    FixtureRunner._selector(name, .getter),
+    IrInterpreter._selector(name, .getter),
     const [],
     const {},
     const [],

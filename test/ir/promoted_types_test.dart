@@ -1,7 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-import '../lowering/fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 void main() {
   TypeParameterType parameter(String name, [ValueType? bound]) =>
@@ -95,7 +95,7 @@ void main() {
           );
           block.finish(Return(result));
           final function = IrFunction(target, [block]);
-          final runner = FixtureRunner(IrProgram([], [function]), {});
+          final runner = IrInterpreter(IrProgram([], [function]), {});
           expect(
             runner.run(function, [3], {t: ValueType.object}),
             cast ? 3 : true,
@@ -136,7 +136,7 @@ void main() {
         Return(block.emit(TypeTest(block.parameters.single, t.nonNullable))),
       );
       final function = IrFunction(target, [block]);
-      final runner = FixtureRunner(IrProgram([], [function]), {});
+      final runner = IrInterpreter(IrProgram([], [function]), {});
       for (final actual in [
         ValueType.dynamicType,
         ValueType.futureOr(ValueType.integer.nullable),

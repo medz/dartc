@@ -1,7 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-import '../lowering/fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 final _library = Uri.parse('memory:make-invocation');
 const _one = Constant.integer(1);
@@ -31,7 +31,7 @@ Object? _run(Value Function(Block) build) {
   final value = build(b);
   b.finish(Return(value));
   final f = IrFunction(FunctionTarget(_library, 'main', value.type, []), [b]);
-  return FixtureRunner(IrProgram([], [f]), {}).run(f, []);
+  return IrInterpreter(IrProgram([], [f]), {}).run(f, []);
 }
 
 Value _make(Block b, [FunctionKind kind = .method]) => b.emit(
@@ -411,7 +411,7 @@ void main() {
       b,
     ]);
     expect(
-      FixtureRunner(IrProgram([], [generic, main]), {}).run(main, []),
+      IrInterpreter(IrProgram([], [generic, main]), {}).run(main, []),
       isTrue,
     );
   });

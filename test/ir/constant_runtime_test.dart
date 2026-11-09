@@ -1,7 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-import '../lowering/fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 Object? _execute(
   Value Function(Block) build, [
@@ -19,7 +19,7 @@ Object? _execute(
     ),
     [block],
   );
-  return FixtureRunner(IrProgram(classes, [function]), {}).run(function, []);
+  return IrInterpreter(IrProgram(classes, [function]), {}).run(function, []);
 }
 
 final _identical = FunctionTarget(

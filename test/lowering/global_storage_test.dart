@@ -6,7 +6,7 @@ import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/effects.dart' as effects;
 import 'fixtures/global_storage.dart' as sdk;
 import 'fixtures/global_storage/entry.dart' as libraries;
@@ -102,8 +102,8 @@ void main() {
         (Uri.base.resolve('test/lowering/fixtures/effects.dart'), 'tick'):
             effects.tick,
       };
-      final first = FixtureRunner(fixture.program, importedEffects);
-      final second = FixtureRunner(fixture.program, importedEffects);
+      final first = IrInterpreter(fixture.program, importedEffects);
+      final second = IrInterpreter(fixture.program, importedEffects);
       effects.calls.clear();
       expect(first.run(function, []), 131);
       expect(first.run(function, []), 132);

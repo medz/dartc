@@ -4,7 +4,7 @@ import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/effects.dart' as effects;
 import 'fixtures/extension_types_constructors.dart' as sdk;
 
@@ -54,7 +54,7 @@ void main() {
     'disabled constructor assertions omit effects and closure bodies',
     () async {
       final uri = Uri.base.resolve('test/lowering/fixtures/effects.dart');
-      final runner = FixtureRunner(disabled, {
+      final runner = IrInterpreter(disabled, {
         (uri, 'tick'): effects.tick,
         (uri, 'probe'): effects.probe,
       });

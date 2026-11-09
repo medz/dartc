@@ -1,7 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-import '../lowering/fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 Object? execute(Value Function(Block) build) {
   final block = Block();
@@ -13,7 +13,7 @@ Object? execute(Value Function(Block) build) {
     FunctionTarget(Uri.parse('memory:patterns'), 'test', result.type, []),
     [block],
   );
-  return FixtureRunner(IrProgram([], [function]), {}).run(function, []);
+  return IrInterpreter(IrProgram([], [function]), {}).run(function, []);
 }
 
 void main() {
@@ -214,7 +214,7 @@ void main() {
         [entry, handler],
       );
       expect(
-        FixtureRunner(IrProgram([], [function]), {}).run(function, []),
+        IrInterpreter(IrProgram([], [function]), {}).run(function, []),
         isTrue,
       );
     },

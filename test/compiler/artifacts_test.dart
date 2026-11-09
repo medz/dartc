@@ -1,7 +1,7 @@
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
-import '../native_assets.dart';
+import '../support/native_assets.dart';
 
 void main() {
   test('compiled exports preserve FFI argument and result types in headers', () {

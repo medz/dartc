@@ -1,7 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-import '../lowering/fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 Object? _execute(Value Function(Block) build) {
   final block = Block();
@@ -11,7 +11,7 @@ Object? _execute(Value Function(Block) build) {
     FunctionTarget(Uri.parse('memory:map-entry'), 'test', result.type, []),
     [block],
   );
-  return FixtureRunner(IrProgram([], [function]), {}).run(function, []);
+  return IrInterpreter(IrProgram([], [function]), {}).run(function, []);
 }
 
 void main() {
@@ -154,7 +154,7 @@ void main() {
         ),
         [block],
       );
-      final runner = FixtureRunner(IrProgram([], [function]), {});
+      final runner = IrInterpreter(IrProgram([], [function]), {});
       expect(
         runner.run(function, [
           <dynamic, dynamic>{1: 'value'},

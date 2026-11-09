@@ -3,12 +3,12 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/definite_assignment.dart' as sdk;
 
 void main() {
   late Map<String, IrFunction> functions;
-  late FixtureRunner runner;
+  late IrInterpreter runner;
   setUpAll(() async {
     final program = await AnalysisSession([
       'test/lowering/fixtures/definite_assignment.dart',
@@ -17,7 +17,7 @@ void main() {
       for (final fn in program.functions)
         if (fn.target.enclosing == null) fn.target.name: fn,
     };
-    runner = FixtureRunner(program, {});
+    runner = IrInterpreter(program, {});
   });
 
   void compare(String name, List<Object?> arguments, Object? expected) {

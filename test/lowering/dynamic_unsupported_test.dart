@@ -4,7 +4,7 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 void main() {
   test('unmodeled existing SDK members are not reported as missing', () async {
@@ -18,7 +18,7 @@ void main() {
         .use((input) => Lowering().lower(input).program);
     final entry = program.functions.singleWhere((f) => f.target.name == 'f');
     expect(
-      () => FixtureRunner(program, {}).run(entry, []),
+      () => IrInterpreter(program, {}).run(entry, []),
       throwsUnsupportedError,
     );
   });

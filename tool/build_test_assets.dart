@@ -12,7 +12,7 @@ import '../test/codegen/fixtures/control_flow.dart';
 import '../test/linker/fixtures/functions.dart';
 import '../test/linker/fixtures/calls.dart';
 import '../test/linker/fixtures/symbols.dart';
-import '../test/native_assets.dart';
+import '../test/support/native_assets.dart';
 
 Future<void> main() async {
   for (final os in OperatingSystem.values) {

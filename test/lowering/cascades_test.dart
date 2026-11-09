@@ -3,14 +3,14 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/cascades.dart' as cascades;
 import 'fixtures/dot_shorthand.dart' as shorthand;
 import 'fixtures/effects.dart' as effects;
 import 'fixtures/static_accessors.dart' as accessors;
 
 void main() {
-  late FixtureRunner runner;
+  late IrInterpreter runner;
   late Map<String, IrFunction> functions;
   setUpAll(() async {
     const dir = 'test/lowering/fixtures';
@@ -24,7 +24,7 @@ void main() {
         if (f.target.owner == null && f.target.enclosing == null)
           f.target.name: f,
     };
-    runner = FixtureRunner(program, {
+    runner = IrInterpreter(program, {
       (Uri.base.resolve('$dir/effects.dart'), 'tick'): effects.tick,
       (Uri.base.resolve('$dir/effects.dart'), 'probe'): effects.probe,
     });

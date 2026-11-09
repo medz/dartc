@@ -5,7 +5,7 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 void main() {
   late Directory directory;
@@ -18,7 +18,7 @@ void main() {
     return file.path;
   }
 
-  Object? run(IrProgram program) => FixtureRunner(
+  Object? run(IrProgram program) => IrInterpreter(
     program,
     {},
   ).run(program.functions.singleWhere((f) => f.target.name == 'run'), []);
@@ -173,7 +173,7 @@ int run() => _value();
     );
     final linked = await AnalysisSession([entry, other])
         .use((input) => Lowering().lower(input).program);
-    expect(FixtureRunner(linked, {}).run(linked.functions.first, []), isNull);
+    expect(IrInterpreter(linked, {}).run(linked.functions.first, []), isNull);
     expect(linked.functions.map((f) => f.target.name), ['main', 'value']);
   });
 }

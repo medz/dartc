@@ -3,17 +3,17 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/generic_constants.dart' as sdk;
 
 void main() {
-  late FixtureRunner runner;
+  late IrInterpreter runner;
   late Map<String, IrFunction> functions;
   setUpAll(() async {
     final program = await AnalysisSession([
       'test/lowering/fixtures/generic_constants.dart',
     ]).use((input) => Lowering().lower(input).program);
-    runner = FixtureRunner(program, {});
+    runner = IrInterpreter(program, {});
     functions = {for (final fn in program.functions) fn.target.name: fn};
   });
   Object? run(String name, [List<Object?> arguments = const []]) =>

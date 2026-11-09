@@ -2,7 +2,7 @@ import 'dart:ffi';
 
 import 'package:dartc/target.dart';
 
-import '../../native_assets.dart';
+import '../../support/native_assets.dart';
 
 final class LinkedCalls() {
   final _library = NativeAssets(Target.host()).open('linker/calls');

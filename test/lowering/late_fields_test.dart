@@ -6,7 +6,7 @@ import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/late_fields.dart' as sdk;
 import 'fixtures/late_fields/second.dart' as libraries;
 
@@ -141,7 +141,7 @@ void main() {
             body.target.name == 'implicitCovariantFinalKnownSdkDifference',
       );
       expect(
-        () => FixtureRunner(fixture.program, {}).run(function, []),
+        () => IrInterpreter(fixture.program, {}).run(function, []),
         throwsA(isA<TypeError>()),
       );
       Object? sdkOutcome;
@@ -159,7 +159,7 @@ void main() {
             body.target.name ==
             'implicitCovariantFinalFailedWriteLeavesUnbound',
       );
-      expect(FixtureRunner(fixture.program, {}).run(function, []), 125);
+      expect(IrInterpreter(fixture.program, {}).run(function, []), 125);
     });
   });
 

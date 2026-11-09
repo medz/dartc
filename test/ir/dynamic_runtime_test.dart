@@ -1,7 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-import '../lowering/fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 final _library = Uri.parse('memory:dynamic-runtime');
 MemberSelector _selector(String name, [FunctionKind kind = .method]) =>
@@ -19,7 +19,7 @@ Object? _run(
     FunctionTarget(_library, 'main', result.type, []),
     [block],
   );
-  return FixtureRunner(
+  return IrInterpreter(
     IrProgram(classes, [function, ...bodies]),
     {},
   ).run(function, []);
@@ -454,7 +454,7 @@ void main() {
       .dynamicType,
     ]);
     final function = IrFunction(target, [block]);
-    final runner = FixtureRunner(IrProgram([], [function]), {});
+    final runner = IrInterpreter(IrProgram([], [function]), {});
     expect(() => runner.run(function, [() => 1]), throwsUnsupportedError);
   });
 

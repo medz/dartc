@@ -5,7 +5,7 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/nosuchmethod_unsupported.dart' as sdk;
 import 'fixtures/nosuchmethod_unsupported_private.dart' as private_sdk;
 
@@ -209,7 +209,7 @@ int invoke() => invokeChangedPrivate(Incompatible());
         (f) => f.target.name == 'invoke',
       );
       expect(
-        () => FixtureRunner(lowered, {}).run(entry, []),
+        () => IrInterpreter(lowered, {}).run(entry, []),
         throwsNoSuchMethodError,
       );
     },
@@ -239,7 +239,7 @@ Object? invoke() { dynamic c = C(); return c.g(); }
         (f) => f.target.name == 'invoke',
       );
       expect(
-        () => FixtureRunner(lowered, {}).run(entry, []),
+        () => IrInterpreter(lowered, {}).run(entry, []),
         throwsUnsupportedError,
       );
     },
@@ -273,7 +273,7 @@ int call(Changed receiver) => receiver._value();
       (f) => f.target.name == 'invoke',
     );
     expect(
-      () => FixtureRunner(lowered, {}).run(entry, []),
+      () => IrInterpreter(lowered, {}).run(entry, []),
       throwsNoSuchMethodError,
     );
   });

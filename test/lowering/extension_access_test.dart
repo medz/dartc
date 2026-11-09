@@ -2,7 +2,7 @@ import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/effects.dart' as effects;
 import 'fixtures/extension_access.dart' as sdk;
 
@@ -76,7 +76,7 @@ void main() {
     () {
       effects.calls.clear();
       final uri = Uri.base.resolve('test/lowering/fixtures/effects.dart');
-      final runner = FixtureRunner(fixture.program, {
+      final runner = IrInterpreter(fixture.program, {
         (uri, 'tick'): effects.tick,
       });
       for (final (name, order) in [
@@ -97,7 +97,7 @@ void main() {
     'assignment source-order failures retain finally and skipped effects',
     () {
       final uri = Uri.base.resolve('test/lowering/fixtures/effects.dart');
-      final runner = FixtureRunner(fixture.program, {
+      final runner = IrInterpreter(fixture.program, {
         (uri, 'tick'): effects.tick,
       });
       for (final (name, stage, order) in [

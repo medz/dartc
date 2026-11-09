@@ -1,7 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-import '../lowering/fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 final _library = Uri.parse('memory:late_fields');
 
@@ -26,7 +26,7 @@ IrFunction _body(FunctionTarget target, void Function(Block) build) {
   return IrFunction(target, [block]);
 }
 
-({FixtureRunner runner, IrFunction create, IrFunction read, IrFunction? write})
+({IrInterpreter runner, IrFunction create, IrFunction read, IrFunction? write})
 _fixture(
   InstanceField field, {
   IrFunction? initializer,
@@ -79,7 +79,7 @@ _fixture(
     ],
   );
   return (
-    runner: FixtureRunner(program, imports),
+    runner: IrInterpreter(program, imports),
     create: create,
     read: read,
     write: write,

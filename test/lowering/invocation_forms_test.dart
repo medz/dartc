@@ -2,7 +2,7 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/effects.dart' as effects;
 import 'fixtures/invocation_forms.dart' as sdk;
 
@@ -16,7 +16,7 @@ void main() {
       final function = program.functions.singleWhere(
         (f) => f.target.name == 'forms',
       );
-      final runner = FixtureRunner(program, {
+      final runner = IrInterpreter(program, {
         (Uri.base.resolve('test/lowering/fixtures/effects.dart'), 'tick'):
             effects.tick,
       });

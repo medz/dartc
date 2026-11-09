@@ -1,7 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-import '../lowering/fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 final _library = Uri.parse('memory:symbols');
 final _constructor = FunctionTarget(
@@ -65,7 +65,7 @@ Object? _execute(
     FunctionTarget(_library, 'test', result.type, []),
     [block],
   );
-  return FixtureRunner(
+  return IrInterpreter(
     IrProgram(classes, [...functions, function]),
     {},
   ).run(function, []);
@@ -460,7 +460,7 @@ void main() {
       [block],
     );
     expect(
-      FixtureRunner(IrProgram(classes, [function]), {}).run(function, []),
+      IrInterpreter(IrProgram(classes, [function]), {}).run(function, []),
       isTrue,
     );
     expect(

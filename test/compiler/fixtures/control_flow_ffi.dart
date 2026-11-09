@@ -2,7 +2,7 @@ import 'dart:ffi';
 
 import 'package:dartc/target.dart';
 
-import '../../native_assets.dart';
+import '../../support/native_assets.dart';
 
 final class ControlFlow() {
   final _library = NativeAssets(Target.host()).open('compiler/control_flow');

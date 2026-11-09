@@ -8,7 +8,7 @@ import 'package:dartc/src/lowering/analyzer_metadata.dart';
 import 'package:dartc/src/lowering/bindings.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/generic_defaults.dart' as sdk;
 
 void main() {
@@ -275,7 +275,7 @@ void main() {
       (function) => function.target.name == 'explicitApplications',
     );
     expect(
-      FixtureRunner(program, {}).run(function, []),
+      IrInterpreter(program, {}).run(function, []),
       sdk.explicitApplications(),
     );
     expect(

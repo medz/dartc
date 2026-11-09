@@ -4,7 +4,7 @@ import 'package:dartc/cli.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
-import '../native_assets.dart';
+import '../support/native_assets.dart';
 
 void main() {
   test('CLI reports usage errors and writes a native object', () async {

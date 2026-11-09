@@ -5,7 +5,7 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 void main() {
   late Directory directory;
@@ -48,7 +48,7 @@ extension Public on int {
       final program = await AnalysisSession([entry, other])
           .use((input) => Lowering().lower(input).program);
       final run = program.functions.singleWhere((f) => f.target.name == 'run');
-      expect(FixtureRunner(program, {}).run(run, []), 109);
+      expect(IrInterpreter(program, {}).run(run, []), 109);
       final markTargets = program.functions.where(
         (f) => f.target.name.endsWith(':method:mark>'),
       );
@@ -73,7 +73,7 @@ int privateExtraction() { final function = 7._method; return function(); }
     final program = await AnalysisSession([entry, other])
         .use((input) => Lowering().lower(input).program);
     final run = program.functions.singleWhere((f) => f.target.name == 'run');
-    expect(FixtureRunner(program, {}).run(run, []), 12);
+    expect(IrInterpreter(program, {}).run(run, []), 12);
     for (final function in program.functions.where(
       (f) => f.target.name.startsWith('<extension-tearoff:'),
     )) {

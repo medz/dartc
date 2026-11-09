@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-import '../lowering/fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 final _stream = CoreTypes.streamOf(.integer);
 final _library = Uri.parse('memory:async_generator');
@@ -72,7 +72,7 @@ IrFunction _graph() {
 }
 
 Stream<Object?> _ir(Stream<int> source, int Function(int) mark) =>
-    FixtureRunner(IrProgram([], [_function]), {
+    IrInterpreter(IrProgram([], [_function]), {
       (_library, 'mark'): mark,
     }).run(_function, [source]) as Stream<Object?>;
 

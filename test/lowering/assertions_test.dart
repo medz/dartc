@@ -3,15 +3,15 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/assertions.dart' as sdk;
 import 'fixtures/effects.dart' as effects;
 
 void main() {
   late Map<String, IrFunction> enabled;
   late Map<String, IrFunction> disabled;
-  late FixtureRunner enabledRunner;
-  late FixtureRunner disabledRunner;
+  late IrInterpreter enabledRunner;
+  late IrInterpreter disabledRunner;
   setUpAll(() async {
     final programs =
         await AnalysisSession(['test/lowering/fixtures/assertions.dart']).use(
@@ -32,8 +32,8 @@ void main() {
       (uri, 'tick'): effects.tick,
       (uri, 'probe'): effects.probe,
     };
-    enabledRunner = FixtureRunner(programs.$1, imports);
-    disabledRunner = FixtureRunner(programs.$2, imports);
+    enabledRunner = IrInterpreter(programs.$1, imports);
+    disabledRunner = IrInterpreter(programs.$2, imports);
   });
 
   (Object?, Object?, List<int>) observe(Object? Function() run) {
@@ -79,7 +79,7 @@ void main() {
       program.functions.every((fn) => fn.target.enclosing == null),
       isTrue,
     );
-    final runner = FixtureRunner(program, {});
+    final runner = IrInterpreter(program, {});
     for (final (name, expected) in [
       ('skippedClosure', 5),
       ('skippedConstructor', 6),

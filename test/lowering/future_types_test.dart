@@ -3,7 +3,7 @@ import 'package:dartc/analyzer.dart';
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/future_types.dart' as sdk;
 
 void main() {
@@ -43,7 +43,7 @@ void main() {
     );
     // SDK 3.13.7 reference invocation of this legal recursive bound did not
     // complete in the isolated probe. Keep this an explicit IR-only check.
-    expect(FixtureRunner(comparison.program, {}).run(function, []), '1:null');
+    expect(IrInterpreter(comparison.program, {}).run(function, []), '1:null');
   });
   test('union bounds retain both arms', () {
     comparison.compare('unionBound', [], sdk.unionBound);
@@ -119,7 +119,7 @@ void main() {
       (f) => f.target.name == 'checkNative',
     );
     expect(
-      () => FixtureRunner(
+      () => IrInterpreter(
         comparison.program,
         {},
       ).run(function, [Future<int>.value(1)]),

@@ -1,7 +1,7 @@
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/object_to_string.dart' as sdk;
 
 void main() {
@@ -39,7 +39,7 @@ void main() {
         (function) => function.target.name == name,
       );
       expect(
-        () => FixtureRunner(fixture.program, {}).run(entry, []),
+        () => IrInterpreter(fixture.program, {}).run(entry, []),
         throwsUnsupportedError,
       );
     });

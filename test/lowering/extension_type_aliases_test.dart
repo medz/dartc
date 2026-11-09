@@ -1,7 +1,7 @@
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/extension_type_aliases.dart' as sdk;
 
 void main() {
@@ -24,7 +24,7 @@ void main() {
       final run = fixture.program.functions.singleWhere(
         (f) => f.target.name == 'inferred',
       );
-      expect(FixtureRunner(fixture.program, {}).run(run, []), '7:eight');
+      expect(IrInterpreter(fixture.program, {}).run(run, []), '7:eight');
     },
   );
 }

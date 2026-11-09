@@ -5,19 +5,19 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/async_generators.dart' as sdk;
 import 'fixtures/effects.dart' as effects;
 
 void main() {
   late IrProgram program;
-  late FixtureRunner runner;
+  late IrInterpreter runner;
   late Map<String, IrFunction> functions;
   setUpAll(() async {
     program = await AnalysisSession([
       'test/lowering/fixtures/async_generators.dart',
     ]).use((input) => Lowering().lower(input).program);
-    runner = FixtureRunner(program, {
+    runner = IrInterpreter(program, {
       (Uri.base.resolve('test/lowering/fixtures/effects.dart'), 'tick'):
           effects.tick,
     });

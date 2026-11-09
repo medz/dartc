@@ -5,7 +5,7 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixture_comparison.dart';
 import 'fixtures/covariant_forwarder_sources.dart' as sdk;
 
@@ -93,7 +93,7 @@ class D extends R { Object? f([covariant int x = 30]) => x + 1; }
 Object? run() => D().f();
 ''');
     final entry = program.functions.singleWhere((f) => f.target.name == 'run');
-    expect(FixtureRunner(program, {}).run(entry, []), 31);
+    expect(IrInterpreter(program, {}).run(entry, []), 31);
   });
 
   test(
@@ -110,7 +110,7 @@ Object? run() => C().f();
       final entry = program.functions.singleWhere(
         (f) => f.target.name == 'run',
       );
-      expect(FixtureRunner(program, {}).run(entry, []), 10);
+      expect(IrInterpreter(program, {}).run(entry, []), 10);
     },
   );
 
@@ -126,7 +126,7 @@ Object? run() => C().f(10);
       final entry = program.functions.singleWhere(
         (f) => f.target.name == 'run',
       );
-      expect(FixtureRunner(program, {}).run(entry, []), 10);
+      expect(IrInterpreter(program, {}).run(entry, []), 10);
     },
   );
 
@@ -138,7 +138,7 @@ class D extends A { Object? f([covariant int x = 30]) => x + 1; }
 Object? run() => D().f();
 ''');
     final entry = program.functions.singleWhere((f) => f.target.name == 'run');
-    expect(FixtureRunner(program, {}).run(entry, []), 31);
+    expect(IrInterpreter(program, {}).run(entry, []), 31);
   });
 
   test('unchanged deep inheritance reuses a covariant nSM body', () async {
@@ -155,7 +155,7 @@ class F extends E {}
 Object? run() => F().f();
 ''');
     final entry = program.functions.singleWhere((f) => f.target.name == 'run');
-    expect(FixtureRunner(program, {}).run(entry, []), 10);
+    expect(IrInterpreter(program, {}).run(entry, []), 10);
   });
 
   test(
@@ -187,7 +187,7 @@ Object? run() => C().f();
       final entry = program.functions.singleWhere(
         (f) => f.target.name == 'run',
       );
-      expect(FixtureRunner(program, {}).run(entry, []), 10);
+      expect(IrInterpreter(program, {}).run(entry, []), 10);
     },
   );
 
@@ -206,7 +206,7 @@ Object? run() => C().f();
       final entry = program.functions.singleWhere(
         (f) => f.target.name == 'run',
       );
-      expect(FixtureRunner(program, {}).run(entry, []), 10);
+      expect(IrInterpreter(program, {}).run(entry, []), 10);
     },
   );
 
@@ -225,7 +225,7 @@ Object? run() => C().f();
       final entry = program.functions.singleWhere(
         (f) => f.target.name == 'run',
       );
-      expect(FixtureRunner(program, {}).run(entry, []), 10);
+      expect(IrInterpreter(program, {}).run(entry, []), 10);
     },
   );
 

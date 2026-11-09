@@ -1,7 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-import '../lowering/fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 void main() {
   const n = Constant.integer(1);
@@ -87,7 +87,7 @@ void main() {
           function,
         ],
       );
-      expect(FixtureRunner(program, {}).run(function, []), isTrue);
+      expect(IrInterpreter(program, {}).run(function, []), isTrue);
     },
   );
 }

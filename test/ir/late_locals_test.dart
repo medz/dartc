@@ -1,7 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-import '../lowering/fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 final _library = Uri.parse('memory:late_locals');
 
@@ -26,7 +26,7 @@ Object _error(void Function() action) {
   fail('Expected an error.');
 }
 
-({FixtureRunner runner, IrFunction create, IrFunction read, IrFunction write})
+({IrInterpreter runner, IrFunction create, IrFunction read, IrFunction write})
 _fixture(
   CellType type, {
   Value? initial,
@@ -105,7 +105,7 @@ _fixture(
     ?initializer,
   ]);
   return (
-    runner: FixtureRunner(program, imports),
+    runner: IrInterpreter(program, imports),
     create: create,
     read: read,
     write: write,
@@ -435,7 +435,7 @@ void main() {
           success.finish(const Return(Constant.string('success')));
           failure.finish(Return(failure.parameters.single));
           final caught = IrFunction(target, [entry, success, failure]);
-          final error = FixtureRunner(
+          final error = IrInterpreter(
             IrProgram([], [caught]),
             {},
           ).run(caught, []);
@@ -476,7 +476,7 @@ void main() {
         success.finish(const Return(Constant.string('success')));
         failure.finish(Return(failure.parameters.single));
         final body = IrFunction(target, [entry, success, failure]);
-        final runner = FixtureRunner(IrProgram([], [body]), {});
+        final runner = IrInterpreter(IrProgram([], [body]), {});
         expect(
           runner.run(body, [7, 1.5], {t: ValueType.integer}),
           isA<TypeError>(),
@@ -522,7 +522,7 @@ void main() {
       failure.emit(WriteCell(cell, entry.parameters.last));
       failure.finish(Return(failure.emit(ReadCell(cell))));
       final body = IrFunction(target, [entry, success, failure]);
-      final runner = FixtureRunner(IrProgram([], [body]), {});
+      final runner = IrInterpreter(IrProgram([], [body]), {});
       expect(runner.run(body, [1.5, 7], {t: ValueType.integer}), 7);
     });
 
@@ -575,7 +575,7 @@ void main() {
         block.emit(WriteCell(earlier, const Constant.integer(9)));
         block.finish(Return(block.emit(ReadCell(cell))));
       });
-      final runner = FixtureRunner(IrProgram([], [body, initBody]), {});
+      final runner = IrInterpreter(IrProgram([], [body, initBody]), {});
       final result = runner.run(body, [], {
         t: CoreTypes.listOf(ValueType.integer),
       });
@@ -616,7 +616,7 @@ void main() {
         block.emit(WriteCell(source, const Constant.integer(8)));
         block.finish(Return(block.emit(ReadCell(copy))));
       });
-      final runner = FixtureRunner(IrProgram([], [body, initializer]), {
+      final runner = IrInterpreter(IrProgram([], [body, initializer]), {
         (_library, 'observe'): (_) {
           calls++;
           return 3;
@@ -643,7 +643,7 @@ void main() {
         final second = block.emit(ReadCell(copy));
         block.finish(Return(block.emit(IntBinary(.add, first, second))));
       });
-      final runner = FixtureRunner(IrProgram([], [body, initializer]), {
+      final runner = IrInterpreter(IrProgram([], [body, initializer]), {
         (_library, 'observe'): (_) => ++calls,
       });
       expect(runner.run(body, []), 3);

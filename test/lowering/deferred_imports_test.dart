@@ -3,7 +3,7 @@ import 'package:dartc/analyzer.dart';
 import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/deferred_imports.dart' as sdk;
 import 'fixtures/effects.dart' as effects;
 
@@ -15,7 +15,7 @@ void main() {
         'test/lowering/fixtures/deferred_unnamed_tearoff.dart',
         'test/lowering/fixtures/deferred_library.dart',
       ]).use((input) => Lowering().lower(input).program);
-      final runner = FixtureRunner(program, {});
+      final runner = IrInterpreter(program, {});
       final create = program.functions.singleWhere(
         (f) => f.target.name == 'create',
       );
@@ -29,7 +29,7 @@ void main() {
         'test/lowering/fixtures/deferred_imports.dart',
         'test/lowering/fixtures/deferred_library.dart',
       ]).use((input) => Lowering().lower(input).program);
-      final runner = FixtureRunner(program, {
+      final runner = IrInterpreter(program, {
         (Uri.base.resolve('test/lowering/fixtures/effects.dart'), 'tick'):
             effects.tick,
       });

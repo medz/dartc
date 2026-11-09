@@ -4,7 +4,7 @@ import 'package:dartc/lowering.dart';
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 import 'fixtures/extension_types.dart' as sdk;
 
 void main() {
@@ -96,7 +96,7 @@ void main() {
         'test/lowering/fixtures/deferred_library.dart',
       ]).use((input) => Lowering().lower(input).program);
       expect(
-        FixtureRunner(
+        IrInterpreter(
           linked,
           {},
         ).run(linked.functions.singleWhere((f) => f.target.name == 'run'), []),

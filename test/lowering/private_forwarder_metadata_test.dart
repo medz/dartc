@@ -8,7 +8,7 @@ import 'package:dartc/src/lowering/analyzer_metadata.dart';
 import 'package:dartc/src/lowering/bindings.dart';
 import 'package:test/test.dart';
 
-import 'fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 void main() {
   test(
@@ -168,7 +168,7 @@ int invoke() => read(B());
         (f) => f.target.name == 'invoke',
       );
       expect(
-        () => FixtureRunner(program, {}).run(invoke, []),
+        () => IrInterpreter(program, {}).run(invoke, []),
         throwsNoSuchMethodError,
       );
     },

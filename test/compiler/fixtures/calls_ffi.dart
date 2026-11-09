@@ -2,7 +2,7 @@ import 'dart:ffi';
 
 import 'package:dartc/target.dart';
 
-import '../../native_assets.dart';
+import '../../support/native_assets.dart';
 
 final class Calls() {
   final _library = NativeAssets(Target.host()).open('compiler/calls');

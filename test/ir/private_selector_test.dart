@@ -1,7 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-import '../lowering/fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 final _library = Uri.parse('memory:private-selectors');
 final _foreign = Uri.parse('memory:foreign');
@@ -24,7 +24,7 @@ Object? _run(
     FunctionTarget(_library, 'main', value.type, []),
     [block],
   );
-  return FixtureRunner(
+  return IrInterpreter(
     IrProgram(classes, [function, ...bodies]),
     {},
   ).run(function, []);

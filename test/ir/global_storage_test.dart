@@ -1,7 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
-import '../lowering/fixture_runner.dart';
+import '../support/ir_interpreter.dart';
 
 final _library = Uri.parse('memory:globals');
 
@@ -445,7 +445,7 @@ void main() {
         [readOrdinary, readLate, writeLate],
         globals: [ordinary, lateValue],
       );
-      final runner = FixtureRunner(program, {});
+      final runner = IrInterpreter(program, {});
       expect(runner.run(readOrdinary, []), isNull);
       final error = _error(() => runner.run(readLate, []));
       expect(error, isA<Error>());
@@ -472,7 +472,7 @@ void main() {
       final read = _reader(global);
       var calls = 0;
       final program = IrProgram([], [body, read], globals: [global]);
-      FixtureRunner runner() => FixtureRunner(program, {
+      IrInterpreter runner() => IrInterpreter(program, {
         (_library, 'observe'): (value) {
           calls++;
           return value;
@@ -500,7 +500,7 @@ void main() {
         (block) => block.finish(Throw(const Constant.string('must not run'))),
       );
       final read = _reader(global), write = _writer(global);
-      final runner = FixtureRunner(
+      final runner = IrInterpreter(
         IrProgram([], [body, read, write], globals: [global]),
         {},
       );
@@ -519,7 +519,7 @@ void main() {
           isFinal: true,
         );
         final read = _reader(global), write = _writer(global);
-        final runner = FixtureRunner(
+        final runner = IrInterpreter(
           IrProgram([], [read, write], globals: [global]),
           {},
         );
@@ -541,7 +541,7 @@ void main() {
         isFinal: true,
       );
       final read = _reader(global), write = _writer(global);
-      final runner = FixtureRunner(
+      final runner = IrInterpreter(
         IrProgram([], [read, write], globals: [global]),
         {},
       );
@@ -568,7 +568,7 @@ void main() {
       final read = _reader(global);
       var calls = 0;
       final error = StateError('original');
-      final runner = FixtureRunner(
+      final runner = IrInterpreter(
         IrProgram([], [body, read], globals: [global]),
         {
           (_library, 'observe'): (value) {
@@ -602,7 +602,7 @@ void main() {
             );
           });
           final read = _reader(global);
-          final runner = FixtureRunner(
+          final runner = IrInterpreter(
             IrProgram([], [body, read], globals: [global]),
             {},
           );
@@ -629,7 +629,7 @@ void main() {
         block.finish(Return(block.emit(LoadGlobal(global))));
       });
       final read = _reader(global);
-      final runner = FixtureRunner(
+      final runner = IrInterpreter(
         IrProgram([], [body, read], globals: [global]),
         {},
       );
@@ -654,7 +654,7 @@ void main() {
       final read = _reader(global);
       final error = StateError('original');
       final originalTrace = StackTrace.fromString('original initializer trace');
-      final runner = FixtureRunner(
+      final runner = IrInterpreter(
         IrProgram([], [body, read], globals: [global]),
         {
           (_library, 'observe'): (_) =>
@@ -691,8 +691,8 @@ void main() {
           });
           final read = _reader(global);
           var calls = 0;
-          late FixtureRunner runner;
-          runner = FixtureRunner(
+          late IrInterpreter runner;
+          runner = IrInterpreter(
             IrProgram([], [body, read], globals: [global]),
             {
               (_library, 'observe'): (_) =>
