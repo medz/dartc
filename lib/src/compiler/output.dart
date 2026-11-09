@@ -1,5 +1,8 @@
 /// The native file requested from a compilation.
 sealed class const Output() {
+  /// A standalone executable using the first input library's `main`.
+  const factory executable() = ExecutableOutput;
+
   /// A relocatable object file.
   const factory object() = ObjectOutput;
 
@@ -11,6 +14,9 @@ sealed class const Output() {
   /// Compilation rejects empty names and embedded NUL characters.
   const factory sharedLibrary(String name) = SharedLibraryOutput;
 }
+
+/// A standalone executable request.
+final class const ExecutableOutput() extends Output;
 
 /// A relocatable object file request.
 final class const ObjectOutput() extends Output;

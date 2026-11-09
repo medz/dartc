@@ -15,10 +15,14 @@ abstract interface class CodeGenerator() {
   /// native signatures; [exports] exposes a subset of the supplied Dart bodies.
   /// The caller resolves native symbols and supplies their implementations when
   /// linking. Unsupported operations fail before an artifact is returned.
+  /// [entryPoint] adds a process entry with the given link symbol. It
+  /// calls a synchronous, parameterless Dart body and exits successfully after
+  /// discarding its result. The body must belong to [definitions].
   ObjectModule generate(
     IrProgram program, {
     required Iterable<FunctionTarget> definitions,
     Map<FunctionTarget, NativeExport> exports = const {},
     Map<FunctionTarget, NativeImport> imports = const {},
+    ({FunctionTarget function, String symbol})? entryPoint,
   });
 }

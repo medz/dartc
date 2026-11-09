@@ -46,6 +46,22 @@ void main() {
         environment: {'PATH': ''},
       );
       expect(client.exitCode, 0, reason: '${client.stdout}${client.stderr}');
+      final executable = File.fromUri(work.uri.resolve('program'));
+      final compile = await Process.run(
+        assets.file('compiler/dartc').absolute.path,
+        ['program.dart', '-o', executable.path, '--kind', 'exe'],
+        workingDirectory: work.path,
+        includeParentEnvironment: false,
+        environment: {'PATH': ''},
+      );
+      expect(compile.exitCode, 0, reason: '${compile.stdout}${compile.stderr}');
+      final run = await Process.run(
+        executable.path,
+        [],
+        includeParentEnvironment: false,
+        environment: {'PATH': ''},
+      );
+      expect(run.exitCode, 0, reason: '${run.stdout}${run.stderr}');
     },
   );
 }

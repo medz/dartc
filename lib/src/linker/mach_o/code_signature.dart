@@ -7,8 +7,9 @@ import 'package:crypto/crypto.dart';
 final class CodeSignature(
   String identifier,
   final int codeLimit,
-  final int textSize,
-) {
+  final int textSize, {
+  final bool executable = false,
+}) {
   final Uint8List _identifier = utf8.encode(identifier);
 
   int get _slots => (codeLimit + 4095) ~/ 4096;
@@ -37,6 +38,7 @@ final class CodeSignature(
     data.setUint8(directory + 37, 2); // SHA-256.
     data.setUint8(directory + 39, 12);
     data.setUint64(directory + 72, textSize);
+    data.setUint64(directory + 80, executable ? 1 : 0);
     image.setAll(codeLimit + directory + 88, _identifier);
     for (var slot = 0; slot < _slots; slot++) {
       final start = slot * 4096;

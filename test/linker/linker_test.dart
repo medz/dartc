@@ -37,6 +37,65 @@ void main() {
         return Uint8List.sublistView(image, offset, offset + size);
       }
 
+      test('$target links an executable entry, including archive roots', () {
+        final archive = Archive.decode(ArchiveWriter(format).encode([module]));
+        for (final input in [
+          LinkInput.object(module),
+          LinkInput.archive(archive),
+        ]) {
+          final image = linker.linkExecutable([input], entry: 'entry');
+          final data = ByteData.sublistView(image);
+          final int offset;
+          if (os == .linux) {
+            expect(data.getUint16(16, .little), 2);
+            final base = data.getUint64(64 + 16, .little);
+            offset = data.getUint64(24, .little) - base;
+          } else {
+            expect(data.getUint32(12, .little), 2);
+            var cursor = 32;
+            int? entry;
+            for (var i = 0; i < data.getUint32(16, .little); i++) {
+              if (data.getUint32(cursor, .little) == 0x80000028) {
+                entry = data.getUint64(cursor + 8, .little);
+              }
+              cursor += data.getUint32(cursor + 4, .little);
+            }
+            expect(cursor, 32 + data.getUint32(20, .little));
+            expect(entry, isNotNull);
+            offset = entry!;
+          }
+          expect(image.sublist(offset, offset + code.length), code);
+          expect(() => image[0] = 0, throwsUnsupportedError);
+        }
+        for (final name in ['', 'missing', 'bad\u0000entry']) {
+          expect(
+            () => linker.linkExecutable([.object(module)], entry: name),
+            throwsArgumentError,
+          );
+        }
+        for (final symbol in [
+          Symbol('entry', 0, 0, code.length, kind: .data),
+          Symbol('entry', 0, 0, code.length, binding: .local),
+          Symbol('entry', 0, code.length, null),
+          if (arch == .arm64) const Symbol('entry', 0, 1, null, kind: .unknown),
+        ]) {
+          final invalid = ObjectModule(target, module.sections, [symbol]);
+          expect(
+            () => linker.linkExecutable([.object(invalid)], entry: 'entry'),
+            throwsArgumentError,
+          );
+        }
+        if (os == .linux) {
+          expect(
+            () => linker.linkExecutable([
+              .object(module),
+              .sharedLibrary('libc.so.6'),
+            ], entry: 'entry'),
+            throwsUnsupportedError,
+          );
+        }
+      });
+
       test(
         '$target returns a deterministic complete image without file IO',
         () {

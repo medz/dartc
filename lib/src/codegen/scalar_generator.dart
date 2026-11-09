@@ -25,6 +25,7 @@ base class ScalarCodeGenerator<R extends Object>(
     required Iterable<FunctionTarget> definitions,
     Map<FunctionTarget, NativeExport> exports = const {},
     Map<FunctionTarget, NativeImport> imports = const {},
+    ({FunctionTarget function, String symbol})? entryPoint,
   }) {
     final selected = definitions.toSet();
     if (selected.isEmpty ||
@@ -115,6 +116,32 @@ base class ScalarCodeGenerator<R extends Object>(
           exported: true,
         ),
       );
+      code.add(bytes);
+    }
+    if (entryPoint case (:final function, :final symbol)) {
+      final body = program.implementationOf(function);
+      if (!selected.contains(function) ||
+          body is! IrFunction ||
+          body.bodyKind != .synchronous ||
+          function.kind != .function ||
+          function.parameterTypes.isNotEmpty ||
+          function.typeParameters.isNotEmpty) {
+        throw UnsupportedError(
+          'Process entry requires a synchronous, parameterless function.',
+        );
+      }
+      code.add(Uint8List((-code.length) & 15));
+      final bytes = _createFunction().start((fixup) {
+        relocations.add(
+          .new(
+            0,
+            code.length + fixup.offset,
+            fixup.encoding,
+            indices[function]!,
+          ),
+        );
+      });
+      symbols.add(.new(symbol, 0, code.length, bytes.length));
       code.add(bytes);
     }
     return .new(

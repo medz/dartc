@@ -4,6 +4,21 @@ import 'package:dartc/assembler/arm64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('supervisor calls encode the immediate and reject overflow', () {
+    final assembler = Assembler()
+      ..supervisorCall(0)
+      ..supervisorCall(0xffff);
+    final bytes = ByteData.sublistView(assembler.finish());
+    expect(bytes.getUint32(0, .little), 0xd4000001);
+    expect(bytes.getUint32(4, .little), 0xd41fffe1);
+    final invalid = Assembler();
+    for (final value in [-1, 0x10000]) {
+      expect(() => invalid.supervisorCall(value), throwsRangeError);
+    }
+    expect(invalid.finish(), isEmpty);
+    expect(() => assembler.supervisorCall(0), throwsStateError);
+  });
+
   test('register branches preserve the return address and reject SP', () {
     final assembler = Assembler()
       ..branchRegister(.x0)

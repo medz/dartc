@@ -1,6 +1,6 @@
 # 库、脚本与并发边界
 
-转换以调用方明确提供的库批次为单位，包含每个库的所有 part。`package:dartc/frontend.dart` 的 `AnalysisSession` 复用官方 analyzer 的解析结果；名称与指令解析不由 lowering 重复实现。`includeDependencies: true` 纳入非 SDK 导入和导出库，整个批次完成静态检查后才开始转换。导入库的函数调用保留声明身份，但只有批次内的库会生成函数体。一般 Dart 可执行程序的入口和目标运行时链接仍待实现。
+转换以调用方明确提供的库批次为单位，包含每个库的所有 part。`package:dartc/frontend.dart` 的 `AnalysisSession` 复用官方 analyzer 的解析结果；名称与指令解析不由 lowering 重复实现。`includeDependencies: true` 纳入非 SDK 导入和导出库，整个批次完成静态检查后才开始转换。导入库的函数调用保留声明身份，但只有批次内的库会生成函数体。无参数的同步 main 可作为独立进程入口，其他启动能力见下文。
 
 | 特性 | 当前 IR 范围 |
 | --- | --- |
@@ -13,7 +13,7 @@
 | part、URI/具名 part of | 读取官方 analyzer 返回的库单元，在转换前检查所有单元的 error 诊断。 |
 | 相对、file:、package: URI | 支持源码导入 URI 的 analyzer 解析；API 输入仍为文件路径。 |
 | package configuration v2 | 使用首个输入库的包上下文，保留 package URI 身份并检查包语言版本。 |
-| main 入口 | 可转换普通 main 函数体；入口选择、启动参数及进程生命周期待实现。 |
+| main 入口 | `LoweringResult.entryPoint` 保留首个库导出命名空间中的 main 声明身份，包括再导出。原生支持无参数的同步入口，正常返回退出码为 0，返回值不作为进程退出码。启动参数、异步完成、事件处理及完整进程生命周期待实现。 |
 | StackTrace API | 调用保留普通 SDK 导入；catch/rethrow 保留异常与栈信息。完整运行时实现待后续执行领域提供。 |
 | isolate、消息端口与 spawn | 调用保留普通 SDK 导入；isolate 与调度的运行时实现待开发。 |
 
@@ -25,6 +25,16 @@ SDK 成员按已解析的声明生成普通调用、方法提取或扩展调用�
 
 SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.new` 提取](../test/frontend/lowering/fixtures/deferred_unnamed_tearoff.dart)诊断为不是构造器引用；analyzer 14.7 接受后者。IR 对该用例保留已解析构造器及加载检查，并独立验证其结果，不将它计入 SDK 执行对照。
 
+## 独立程序入口
+
+入口选择遵循主规范的 Scripts 条款，使用根库导出命名空间中的 main，不按依赖遍历顺序查找同名函数。`Compiler.compile(output: const Output.executable())` 和 CLI `--kind exe` 接通现有标量函数的独立执行。整个输入依赖图先完成静态检查，未使用代码的错误仍拒绝编译。
+
+无参数同步入口可调用当前支持的标量函数和显式绑定的原生函数。main 正常完成后退出码为 0；其 Dart 返回值被忽略。具有参数的入口、async main、返回 Future 的入口、微任务与事件循环均仍是实现缺口，不静默丢弃参数或异步工作。
+
+Linux ARM64/x86-64 输出当前为固定地址、静态解析的 ELF 可执行映像，直接进入生成的启动代码，不依赖动态加载器。Linux 动态可执行链接与 PIE 尚未实现。macOS 输出使用 LC_MAIN、系统 dyld 和 ad-hoc 签名，并支持显式动态库依赖。macOS x64 具有结构检查，尚无该目标的实际执行证据。
+
+[入口执行验证](../test/compiler/entry_test.dart)检查正常完成、忽略 Dart 返回值、跨库入口、只读/可写/BSS 数据和指针重定位，以及明确拒绝未支持入口。[独立编译器验证](../test/compiler/standalone_test.dart)通过预编译 CLI 在空 PATH 下生成并执行程序；[链接契约](../test/linker/linker_test.dart)检查入口地址、归档成员选择及非法入口。
+
 ## 原生库
 
 `package:dartc/interop.dart` 的 `@Export<T>(symbol: ...)` 声明原生函数导出，`T` 使用 `dart:ffi` 函数类型。绑定依据注解声明身份，符号默认采用函数名。静态库、动态库和目标文件使用同一份声明，并可生成 C/C++ 头文件。
@@ -34,7 +44,7 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 | 导出签名 | 同步、非泛型的顶层函数；参数和结果支持 `Int8/16/32/64`、`Uint8/16/32/64`、`Float`、`Double` 和指向所支持原生类型的 `Pointer<T>`，分别对应非可空 Dart `int`、`double` 和同元素类型的指针。指针类型可递归嵌套，元素另支持 `Void` 和保留完整原生签名的 `NativeFunction<T>`；后两者不能按值传参，结果另支持 `Void`，对应 Dart `void`。原生整数边界按签名扩展或截断，Float 边界转换单精度与 double；普通 Dart 调用注解函数保留完整 int/double，不受原生签名截断。只接受必需位置参数。其他标量、结构体、可变参数和数据导出尚未实现。 |
 | 函数与不透明指针 | `Pointer<NativeFunction<T>>`、`Pointer<Void>` 及所支持类型的多级指针可作为参数和结果、从地址构造、读取地址及比较；普通 Dart 调用、分支和循环保留地址及语义类型，头文件保留嵌套函数指针声明。相等只取决于地址，不同元素类型不影响指针相等。Void 和 NativeFunction 不具有元素存储大小；指针容器读写和回调尚未接通。 |
 | 已绑定原生调用 | 独立 `CodeGenerator.generate` API 接受以 `IrExternal.target` 为键的 `imports`，由 `NativeImport` 明确原生符号、上述标量签名及 `isLeaf`。Dart 参数在出站边界转换，原生结果按宽度/精度转换回 Dart 值；指针类型允许兼容的参数收窄和结果扩大。调用者存活值及写入副作用保留，参数遵循目标平台寄存器和栈布局。绑定必须匹配外部声明，缺失或不匹配均报错；原生实现由链接输入提供。回调及托管调用协议仍未接通。 |
-| `@Native` | 支持顶层和静态 external 函数。前端按 SDK 声明身份保留资产 ID、符号、原生签名及 `isLeaf`，支持常量别名；缺省资产依次取 `DefaultAsset` 和所属库 URI，part 使用所属库默认值，缺省符号采用声明名。省略类型实参时支持从指针和 void 签名推断。`LoweringResult.imports` 交付按声明身份绑定的 `NativeReference`；`Compiler.compile(nativeSymbols: ...)` 按资产 ID 与请求符号查找显式链接符号，shared 输出由 `linkInputs` 提供实现，object/archive 输出保留未决引用。未使用声明仍检查静态义务，未引用的合法导入不要求绑定。自动资产发现、运行时 resolver/进程回退查找、数据字段、实例接收者及完整 FFI 类型仍未接通。当前标量后端不含托管运行时，`isLeaf` 保留声明承诺，不代表已实现托管调用转换。 |
+| `@Native` | 支持顶层和静态 external 函数。前端按 SDK 声明身份保留资产 ID、符号、原生签名及 `isLeaf`，支持常量别名；缺省资产依次取 `DefaultAsset` 和所属库 URI，part 使用所属库默认值，缺省符号采用声明名。省略类型实参时支持从指针和 void 签名推断。`LoweringResult.imports` 交付按声明身份绑定的 `NativeReference`；`Compiler.compile(nativeSymbols: ...)` 按资产 ID 与请求符号查找显式链接符号，shared/executable 输出由 `linkInputs` 提供实现，object/archive 输出保留未决引用。未使用声明仍检查静态义务，未引用的合法导入不要求绑定。自动资产发现、运行时 resolver/进程回退查找、数据字段、实例接收者及完整 FFI 类型仍未接通。当前标量后端不含托管运行时，`isLeaf` 保留声明承诺，不代表已实现托管调用转换。 |
 | 间接原生调用 | 独立 IR/CodeGenerator API 支持 `NativeCall`，从 `Pointer<NativeFunction<T>>` 的完整类型推导签名并检查 Dart 实参；参数和结果执行上述原生边界转换，函数地址通过寄存器调用，无须符号绑定。地址和其他活跃值经过寄存器覆盖、栈传参、分支及循环保持有效。IR 保留 `isLeaf` 承诺，当前后端只提供不含托管运行时的标量调用；闭包原生执行及托管调用协议尚未接通。 |
 | `asFunction` | 前端按 `dart:ffi` 声明身份将调用转换成捕获当时指针值的普通闭包 IR，其函数体执行 `NativeCall`。支持显式/推断 Dart 函数类型、显式 extension override、空参数/void 结果、上述标量和指针签名及兼容的指针返回类型扩大；`isLeaf` 按常量参数求值，默认 false。返回的函数可经普通 IR 的返回、局部变量、集合、分支、循环、动态调用及嵌套闭包使用。同名用户方法仍是普通调用。闭包的目标存储与生命周期、原生函数值调用、托管转换尚未实现，源码尚不能由原生后端执行；`asFunction` 方法本身的提取与间接调用也仍待接通。 |
 | 函数体 | 整数常量、加法、减法、乘法、按位与/或/异或/取反及相应复合赋值、有符号比较，整数与布尔值的相等/不等比较；整数运算保留 64 位环绕结果，`int / int` 产生 double。支持条件表达式、逻辑短路、if/else、while/do/for、含标签的 break/continue、多返回，以及批次内跨库调用和递归。Dart 函数间的直接调用支持可选位置参数、命名参数及常量默认值；原生导出仍只接受必需位置参数。整数截断除法、余数、移位、对象存储、异常及异步尚未接入原生后端。 |

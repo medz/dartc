@@ -12,7 +12,7 @@ import '../link_unit.dart';
 import 'code_signature.dart';
 import 'export_trie.dart';
 
-/// Links macOS shared libraries, including export metadata and an ad-hoc signature.
+/// Links macOS executables and libraries with export metadata and ad-hoc signing.
 final class MachOLinker(@override final Target target) implements Linker {
   this {
     if (target.operatingSystem != .macos) {
@@ -24,11 +24,27 @@ final class MachOLinker(@override final Target target) implements Linker {
   Uint8List linkSharedLibrary(
     Iterable<LinkInput> inputs, {
     required String name,
+  }) => _link(inputs, name: name);
+
+  @override
+  Uint8List linkExecutable(
+    Iterable<LinkInput> inputs, {
+    required String entry,
+  }) => _link(inputs, name: entry, entry: entry);
+
+  Uint8List _link(
+    Iterable<LinkInput> inputs, {
+    required String name,
+    String? entry,
   }) {
-    final unit = LinkUnit(MachO(target), inputs, name),
+    final unit = LinkUnit(MachO(target), inputs, name, entry: entry),
         sections = unit.sections;
-    final installName = '@rpath/$name', nameBytes = utf8.encode(installName);
-    final idSize = (24 + nameBytes.length + 1 + 7) & ~7;
+    final start = entry == null ? null : unit.entryPoint(entry);
+    final imageBase = start == null ? 0 : 0x100000000;
+    final pageZero = start == null ? 0 : 1;
+    final installName = start == null ? '@rpath/$name' : name,
+        nameBytes = utf8.encode(installName);
+    final idSize = start == null ? (24 + nameBytes.length + 1 + 7) & ~7 : 56;
     const systemLibrary = '/usr/lib/libSystem.B.dylib';
     final libraries = [
       systemLibrary,
@@ -49,7 +65,8 @@ final class MachOLinker(@override final Target target) implements Linker {
     final writable = sections.any(
       (s) => s.kind == .data || s.kind == .zeroFill,
     );
-    final segmentCount = 2 + (hasConstants ? 1 : 0) + (writable ? 1 : 0);
+    final segmentCount =
+        2 + pageZero + (hasConstants ? 1 : 0) + (writable ? 1 : 0);
     final commandsSize =
         segmentCount * 72 +
         sections.length * 80 +
@@ -73,7 +90,7 @@ final class MachOLinker(@override final Target target) implements Linker {
         if (section.kind != kind) continue;
         position = (position + section.alignment - 1) & -section.alignment;
         RangeError.checkNotNegative(position, 'section address');
-        addresses[i] = position;
+        addresses[i] = imageBase + position;
         offsets[i] = kind == .zeroFill ? 0 : position;
         position += section.size;
         RangeError.checkNotNegative(position, 'section end');
@@ -106,7 +123,7 @@ final class MachOLinker(@override final Target target) implements Linker {
     final trieOffset = (stringOffset + strings.length + 7) & ~7;
     final trie = ExportTrie([
       for (final symbol in symbols)
-        (symbol.name, addresses[symbol.section] + symbol.offset),
+        (symbol.name, addresses[symbol.section] + symbol.offset - imageBase),
     ]).encode();
     final rebaseOffset = (trieOffset + trie.length + 7) & ~7;
     void uleb(BytesBuilder bytes, int value) {
@@ -119,9 +136,12 @@ final class MachOLinker(@override final Target target) implements Linker {
 
     final rebases = BytesBuilder();
     for (final rebase in unit.rebases) {
-      rebases.add([0x11, 0x20 | (hasConstants ? 2 : 1)]);
+      rebases.add([0x11, 0x20 | (pageZero + (hasConstants ? 2 : 1))]);
       final slot = unit.symbols[rebase.slot];
-      uleb(rebases, addresses[slot.section] + slot.offset - dataStart);
+      uleb(
+        rebases,
+        addresses[slot.section] + slot.offset - imageBase - dataStart,
+      );
       rebases.addByte(0x51);
     }
     if (unit.rebases.isNotEmpty) rebases.addByte(0);
@@ -139,15 +159,23 @@ final class MachOLinker(@override final Target target) implements Linker {
       binds
         ..addByte(0x40)
         ..add(utf8.encode(binding.name))
-        ..add([0, 0x51, 0x70 | (hasConstants ? 2 : 1)]);
+        ..add([0, 0x51, 0x70 | (pageZero + (hasConstants ? 2 : 1))]);
       final slot = unit.symbols[binding.slot];
-      uleb(binds, addresses[slot.section] + slot.offset - dataStart);
+      uleb(
+        binds,
+        addresses[slot.section] + slot.offset - imageBase - dataStart,
+      );
       binds.addByte(0x90);
     }
     if (unit.bindings.isNotEmpty) binds.addByte(0);
     final bindBytes = binds.takeBytes();
     final signatureOffset = (bindOffset + bindBytes.length + 15) & ~15;
-    final signature = CodeSignature(installName, signatureOffset, textSize);
+    final signature = CodeSignature(
+      installName,
+      signatureOffset,
+      textSize,
+      executable: start != null,
+    );
     final data = ByteData(signatureOffset + signature.size),
         bytes = data.buffer.asUint8List();
     data.setUint32(0, 0xfeedfacf, .little);
@@ -157,10 +185,10 @@ final class MachOLinker(@override final Target target) implements Linker {
       .little,
     );
     data.setUint32(8, target.architecture == .arm64 ? 0 : 3, .little);
-    data.setUint32(12, 6, .little);
-    data.setUint32(16, segmentCount + 7 + libraries.length, .little);
+    data.setUint32(12, start == null ? 6 : 2, .little);
+    data.setUint32(16, segmentCount + 7 + pageZero + libraries.length, .little);
     data.setUint32(20, commandsSize, .little);
-    data.setUint32(24, 0x85, .little);
+    data.setUint32(24, start == null ? 0x85 : 0x200085, .little);
     var cursor = 32;
     int command(int kind, int size) {
       final offset = cursor;
@@ -204,13 +232,14 @@ final class MachOLinker(@override final Target target) implements Linker {
       for (final (i, section) in sections.indexed)
         if (section.kind.machSegment == name) i,
     ];
-    segment('__TEXT', 0, textSize, 0, textSize, 5, inSegment('__TEXT'));
+    if (start != null) segment('__PAGEZERO', 0, 0, 0, imageBase, 0, []);
+    segment('__TEXT', 0, textSize, imageBase, textSize, 5, inSegment('__TEXT'));
     if (hasConstants) {
       segment(
         '__CONST',
         textSize,
         dataStart - textSize,
-        textSize,
+        imageBase + textSize,
         dataStart - textSize,
         1,
         inSegment('__CONST'),
@@ -221,7 +250,7 @@ final class MachOLinker(@override final Target target) implements Linker {
         '__DATA',
         dataStart,
         dataFileEnd - dataStart,
-        dataStart,
+        imageBase + dataStart,
         linkAddress - dataStart,
         3,
         inSegment('__DATA'),
@@ -231,16 +260,24 @@ final class MachOLinker(@override final Target target) implements Linker {
       '__LINKEDIT',
       linkOffset,
       bytes.length - linkOffset,
-      linkAddress,
+      imageBase + linkAddress,
       (bytes.length - linkOffset + page - 1) & -page,
       1,
       [],
     );
-    final id = command(0xd, idSize);
-    data.setUint32(id + 8, 24, .little);
-    data.setUint32(id + 16, 0x10000, .little);
-    data.setUint32(id + 20, 0x10000, .little);
-    bytes.setAll(id + 24, nameBytes);
+    if (start == null) {
+      final id = command(0xd, idSize);
+      data.setUint32(id + 8, 24, .little);
+      data.setUint32(id + 16, 0x10000, .little);
+      data.setUint32(id + 20, 0x10000, .little);
+      bytes.setAll(id + 24, nameBytes);
+    } else {
+      final main = command(0x80000028, 24);
+      data.setUint64(main + 8, offsets[start.section] + start.offset, .little);
+      final loader = command(0xe, 32);
+      data.setUint32(loader + 8, 12, .little);
+      bytes.setAll(loader + 12, ascii.encode('/usr/lib/dyld'));
+    }
     // dyld requires libSystem even when the library imports no symbols.
     for (final (i, library) in libraryNames.indexed) {
       final dependency = command(0xc, librarySizes[i]);

@@ -4,6 +4,12 @@ import 'package:dartc/assembler/x64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('system calls encode SYSCALL and respect assembler completion', () {
+    final assembler = Assembler()..syscall();
+    expect(assembler.finish(), [0x0f, 0x05]);
+    expect(assembler.syscall, throwsStateError);
+  });
+
   test('register jumps encode low, extended and stack registers', () {
     final assembler = Assembler()
       ..jumpRegister(.rax)

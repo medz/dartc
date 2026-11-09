@@ -34,6 +34,8 @@ Future<void> main() async {
   }
   await File('test/compiler/fixtures/arithmetic.dart')
       .copy('${input.path}/entry.dart');
+  await File('test/compiler/fixtures/entry/return.dart')
+      .copy('${input.path}/program.dart');
   final config = File('${input.path}/.dart_tool/package_config.json');
   await config.parent.create(recursive: true);
   await File('test/compiler/fixtures/standalone_packages.json')

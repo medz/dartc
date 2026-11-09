@@ -12,6 +12,7 @@ import '../test/codegen/fixtures/aliases.dart';
 import '../test/codegen/fixtures/native_calls.dart';
 import '../test/compiler/fixtures/native_imports_ffi.dart'
     show nativeImportSymbols;
+import '../test/compiler/fixtures/entry/assets.dart';
 import '../test/abi/fixtures/frames.dart';
 import '../test/abi/fixtures/floating_frames.dart';
 import '../test/abi/fixtures/stack_calls.dart';
@@ -56,6 +57,17 @@ Future<void> main(List<String> args) async {
             name: output.uri.pathSegments.last,
           ),
         );
+
+    for (final fixture in ['return', 'void', 'status', 'exported']) {
+      final needsBindings = fixture == 'status' || fixture == 'exported';
+      final result = await Compiler(target).compile(
+        ['test/compiler/fixtures/entry/$fixture.dart'],
+        output: const .executable(),
+        nativeSymbols: needsBindings ? entrySymbols : const {},
+        linkInputs: needsBindings ? entryInputs(target) : const [],
+      );
+      await result.write(assets.file('compiler/entry_$fixture'));
+    }
 
     final io = await Compiler(target)
         .compile(['test/runtime/fixtures/io.dart'], nativeSymbols: ioSymbols);

@@ -1,6 +1,11 @@
-/// Builds native libraries from checked Dart declarations.
+/// Builds native programs and libraries from checked Dart declarations.
 library;
 
 export 'src/compiler/compiler.dart' show Compiler, Compilation;
 export 'src/compiler/output.dart'
-    show Output, ObjectOutput, StaticLibraryOutput, SharedLibraryOutput;
+    show
+        Output,
+        ExecutableOutput,
+        ObjectOutput,
+        StaticLibraryOutput,
+        SharedLibraryOutput;

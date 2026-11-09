@@ -352,6 +352,12 @@ final class Assembler() {
     _word(0xd65f0000 | address.index << 5);
   }
 
+  /// Enters the supervisor with the unsigned 16-bit [immediate].
+  void supervisorCall(int immediate) {
+    RangeError.checkValueInInterval(immediate, 0, 0xffff, 'immediate');
+    _word(0xd4000001 | immediate << 5);
+  }
+
   /// Resolves local branches and returns immutable machine code.
   ///
   /// Closes this assembler even if an unbound or out-of-range label prevents

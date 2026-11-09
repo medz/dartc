@@ -18,8 +18,9 @@ final class SectionGroup(
 final class LinkUnit(
   ObjectFormat format,
   Iterable<LinkInput> input,
-  final String name,
-) {
+  final String name, {
+  String? entry,
+}) {
   final Target target = format.target;
   final sections = <SectionGroup>[];
   final symbols = <Symbol>[];
@@ -33,7 +34,7 @@ final class LinkUnit(
       throw ArgumentError.value(name, 'name');
     }
     final objects = <ObjectModule>[], globals = <String, (int, int)>{};
-    final missing = <String>{}, loaded = <Archive, Set<int>>{};
+    final missing = <String>{?entry}, loaded = <Archive, Set<int>>{};
     void include(ObjectModule object) {
       if (object.target != target) {
         throw ArgumentError('Expected an object for $target.');
@@ -258,6 +259,23 @@ final class LinkUnit(
         );
       }
     }
+  }
+
+  /// Resolves an executable entry to a global definition in code storage.
+  Symbol entryPoint(String name) {
+    final symbol = symbols
+        .where((s) => s.name == name && s.binding == .global)
+        .firstOrNull;
+    if (symbol == null ||
+        symbol.kind == .data ||
+        sections[symbol.section].kind != .code ||
+        target.architecture == .arm64 && symbol.offset % 4 != 0 ||
+        symbol.offset >= sections[symbol.section].size) {
+      throw ArgumentError(
+        'Entry must name a defined global code symbol: $name',
+      );
+    }
+    return symbol;
   }
 
   /// Copies initialized contents and resolves instructions at their final addresses.

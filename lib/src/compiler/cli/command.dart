@@ -6,7 +6,7 @@ import '../compiler.dart';
 
 /// Runs compiler commands with caller-owned output streams.
 final class CompilerCommand(final StringSink output, final StringSink errors) {
-  /// Builds annotated exports, returning a process exit status.
+  /// Builds a native program or library, returning a process exit status.
   Future<int> run(List<String> arguments) async {
     if (arguments.length == 1 && {'--help', '-h'}.contains(arguments.single)) {
       output.writeln(_usage);
@@ -35,6 +35,7 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
               'object' => .object,
               'static' => .staticLibrary,
               'shared' => .sharedLibrary,
+              'exe' => .executable,
               _ => throw FormatException('Unknown output kind: $value'),
             };
           default:
@@ -50,6 +51,7 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
         [source],
         output: switch (kind) {
           .object => const .object(),
+          .executable => const .executable(),
           .staticLibrary => const .staticLibrary(),
           .sharedLibrary => .sharedLibrary(file.uri.pathSegments.last),
         },
@@ -74,10 +76,11 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
 
 const _usage =
     'Usage: dartc <source.dart> -o <output> '
-    '[--kind object|static|shared] [--header <file.h>] '
+    '[--kind object|static|shared|exe] [--header <file.h>] '
     '[--target macos-arm64|macos-x64|linux-arm64|linux-x64]';
 
 enum _OutputKind() {
+  executable,
   object,
   staticLibrary,
   sharedLibrary,

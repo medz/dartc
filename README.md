@@ -2,19 +2,32 @@
 
 A native Dart compiler written in Dart.
 
-The development version uses the official Dart analyzer and provides reusable analysis, IR and native code generation APIs. Its native backend builds integer, double and pointer functions as object files, static libraries and shared libraries. See the [language support tracker](https://github.com/medz/dartc/blob/main/specs/README.md) for supported behavior and remaining gaps.
+The development version uses the official Dart analyzer and provides reusable analysis, IR and native code generation APIs. Its native backend builds integer, double and pointer functions as object files, static libraries, shared libraries and executables. See the [language support tracker](https://github.com/medz/dartc/blob/main/specs/README.md) for supported behavior and remaining gaps.
 
 Use `package:dartc/frontend.dart` to check libraries and translate them to IR, and `package:dartc/ir.dart` to inspect or construct verified SSA functions. Backend APIs are available separately through `target.dart`, `assembler.dart`, `assembler/arm64.dart`, `assembler/x64.dart`, `abi.dart`, `codegen.dart`, `object.dart`, `object/elf.dart`, `object/mach_o.dart` and `linker.dart`.
 
-Compile `@Native<T>` calls with `Compiler.compile(nativeSymbols: ...)`, mapping each asset ID and requested symbol to a link symbol. Supply native objects, archives or explicit shared-library dependencies through `linkInputs` for shared output; object and archive outputs retain imports for later linking. The standalone `CodeGenerator.generate(imports: ...)` API accepts resolved `NativeImport` bindings, and `NativeCall` invokes typed function pointers through IR. Automatic asset discovery and runtime resolver fallback remain unimplemented.
+Compile `@Native<T>` calls with `Compiler.compile(nativeSymbols: ...)`, mapping each asset ID and requested symbol to a link symbol. Supply native objects, archives or explicit shared-library dependencies through `linkInputs` for linked outputs; object and archive outputs retain imports for later linking. The standalone `CodeGenerator.generate(imports: ...)` API accepts resolved `NativeImport` bindings, and `NativeCall` invokes typed function pointers through IR. Automatic asset discovery and runtime resolver fallback remain unimplemented.
 
 Object and linker APIs support code, read-only data, writable data and zero-initialized storage, with cross-module calls and address references. `ObjectFormat.decodeObject(bytes)` reads supported Mach-O/ELF objects; `Archive.decode(bytes)` reads indexed static archives. Pass ordered `LinkInput.object(module)` and `LinkInput.archive(archive)` values to `Linker.linkSharedLibrary` to include objects and select the archive members needed by unresolved references. Dart global variables are not yet compiled to this storage.
 
 Use `LinkInput.sharedLibrary(name, symbols: {localName: nativeName})` to call functions or reference data and function addresses in a separate library. Both symbol names include platform decoration; the dependency name is interpreted by the target loader. Mach-O binds to the named library, while ELF follows global symbol lookup. Required libraries and symbols must be available when loading the output. Address imports use `Relocation(indirect: true)` with ARM64 ADRP/LDR or x86-64 RIP-relative MOV; the loaded pointer refers to the actual definition.
 
-`package:dartc/compiler.dart` combines these APIs. `Compiler.compile` accepts an `Output.object()`, `Output.staticLibrary()` or `Output.sharedLibrary(name)` request and returns a `Compilation` with final bytes and C declarations. `Compilation.write` saves them; it does not change the compiled library name.
+`package:dartc/compiler.dart` combines these APIs. `Compiler.compile` accepts an `Output.executable()`, `Output.object()`, `Output.staticLibrary()` or `Output.sharedLibrary(name)` request and returns a `Compilation` with final bytes and C declarations. `Compilation.write` saves them; it does not change the compiled library name.
 
 For the previous compiler's broader native support, download [dartc 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0). Its [usage guide](https://github.com/medz/dartc/blob/v0.5.0/README.md) applies to those release binaries.
+
+## Executables
+
+Build a program with a synchronous, parameterless `main`:
+
+```sh
+dart run dartc program.dart -o build/program --kind exe
+./build/program
+```
+
+The first input library supplies `main`, including one exposed through a Dart export. Its return value is discarded; normal completion exits with status zero. Supported function bodies have the same native operations as the libraries below. Command-line arguments, asynchronous entries, managed values and event processing remain unsupported.
+
+`Compiler.compile(output: const Output.executable())` returns the linked image, and `Compilation.write` sets executable permissions on macOS and Linux. Independent linker users can call `Linker.linkExecutable(inputs, entry: symbol)` with a defined global code symbol. The entry selects required archive members. Linux currently produces fixed-address ELF executables with statically resolved inputs and no dynamic loader; dynamic executable linking and position-independent executable output remain unimplemented. macOS produces signed Mach-O executables using the system dyld and supports explicit shared-library dependencies.
 
 ## Native libraries
 
@@ -44,7 +57,7 @@ Non-captured scalar locals can be assigned after declaration, including through 
 
 Double operations include constants, negation, addition, subtraction, multiplication, IEEE division and comparisons, preserving NaN and signed-zero behavior. Mixed `int`/`double` arithmetic, exact comparisons, integer `/` and `toDouble` are supported for statically known numeric representations. Mixed parameter lists use both integer and floating-point registers, with excess arguments on the stack. Integer truncating division, remainder, shifts and other numeric conversions remain unsupported. Some mixed numeric constant expressions also remain unsupported; see the [numeric comparison limits](https://github.com/medz/dartc/blob/main/specs/expressions.md#数值比较与-sdk-差异).
 
-Pointers to supported scalar types can use `Pointer<T>.fromAddress`, `.address`, equality, element offsets with `+` and `-`, and `.value` or indexed reads and writes, including compound assignments. Integer writes truncate to the element width; reads sign-extend or zero-extend according to the element type. `Pointer<Float>` stores 32-bit precision and widens reads to Dart `double`; `Pointer<Double>` uses 64-bit storage. A write does not narrow the original Dart variable or assignment expression's value. Callers own the native storage and must keep it alive and naturally aligned for access; indices are not bounds-checked. Pointer casts, other native element types, structs and callbacks remain unimplemented. General Dart executables, managed objects, exceptions and the complete target runtime also remain unimplemented in this checkout.
+Pointers to supported scalar types can use `Pointer<T>.fromAddress`, `.address`, equality, element offsets with `+` and `-`, and `.value` or indexed reads and writes, including compound assignments. Integer writes truncate to the element width; reads sign-extend or zero-extend according to the element type. `Pointer<Float>` stores 32-bit precision and widens reads to Dart `double`; `Pointer<Double>` uses 64-bit storage. A write does not narrow the original Dart variable or assignment expression's value. Callers own the native storage and must keep it alive and naturally aligned for access; indices are not bounds-checked. Pointer casts, other native element types, structs and callbacks remain unimplemented. Managed objects, exceptions and the remaining Dart execution capabilities are not yet implemented in this checkout.
 
 ## SDK sources
 

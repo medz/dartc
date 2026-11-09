@@ -97,17 +97,31 @@ final class Lowering({final bool enableAssertions = false}) {
       externals: functions.whereType<IrExternal>(),
       globals: bindings.globals,
     );
+    final root = input.libraries.first;
     return (
       program: program,
+      entryPoint: switch (root.element.entryPoint) {
+        final entry? => bindings.target(
+          entry,
+          root.units.first,
+          root.units.first.unit,
+        ),
+        null => null,
+      },
       exports: Map.unmodifiable(native.exports),
       imports: Map.unmodifiable(native.imports),
     );
   }
 }
 
-/// Verified Dart IR and native declarations bound to its function identities.
+/// Verified Dart IR, the first library's main, and bound native declarations.
+///
+/// `entryPoint` identifies `main` in the first library's exported namespace,
+/// or is `null` when that namespace has no entry. It retains declaration identity
+/// through re-exports and remains usable after the analysis session closes.
 typedef LoweringResult = ({
   IrProgram program,
+  FunctionTarget? entryPoint,
   Map<FunctionTarget, NativeExport> exports,
   Map<FunctionTarget, NativeReference> imports,
 });

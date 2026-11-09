@@ -24,6 +24,29 @@ final class _Arm64Emitter(
   @override final Arm64Abi convention,
 ) implements FunctionEmitter<CpuRegister> {
   @override
+  Uint8List start(void Function(Fixup) call) {
+    final frame = convention.frameLayout(
+      localBytes: 0,
+      localAlignment: 1,
+      savedRegisters: [],
+      outgoingStackBytes: 0,
+    );
+    if (convention.target.operatingSystem == .macos) {
+      convention.emitPrologue(assembler, frame);
+    }
+    call(assembler.call());
+    assembler.loadImmediate(.x0, 0);
+    if (convention.target.operatingSystem == .macos) {
+      convention.emitEpilogue(assembler, frame);
+    } else {
+      assembler
+        ..loadImmediate(.x8, 94)
+        ..supervisorCall(0);
+    }
+    return assembler.finish();
+  }
+
+  @override
   List<CpuRegister> get allocatableRegisters => [
     ...const <Register>[
       .x0,

@@ -10,7 +10,7 @@ import '../linker.dart';
 import '../input.dart';
 import '../link_unit.dart';
 
-/// Links ELF64 shared libraries with separate executable and writable mappings.
+/// Links ELF64 executables and libraries with separate code and data mappings.
 final class ElfLinker(@override final Target target) implements Linker {
   this {
     if (target.operatingSystem != .linux) {
@@ -22,9 +22,31 @@ final class ElfLinker(@override final Target target) implements Linker {
   Uint8List linkSharedLibrary(
     Iterable<LinkInput> inputs, {
     required String name,
+  }) => _link(inputs, name: name);
+
+  @override
+  Uint8List linkExecutable(
+    Iterable<LinkInput> inputs, {
+    required String entry,
+  }) => _link(inputs, name: entry, entry: entry);
+
+  Uint8List _link(
+    Iterable<LinkInput> inputs, {
+    required String name,
+    String? entry,
   }) {
-    final unit = LinkUnit(Elf(target), inputs, name), sections = unit.sections;
-    final relocationCount = unit.bindings.length + unit.rebases.length;
+    final unit = LinkUnit(Elf(target), inputs, name, entry: entry),
+        sections = unit.sections;
+    final start = entry == null ? null : unit.entryPoint(entry);
+    if (start != null && unit.libraries.isNotEmpty) {
+      throw UnsupportedError(
+        'Linux executables currently require static link inputs.',
+      );
+    }
+    final rebases = start == null
+        ? unit.rebases
+        : const <({int slot, int target})>[];
+    final relocationCount = unit.bindings.length + rebases.length;
     final symbols = unit.symbols.where((symbol) => symbol.exported).toList();
     final hasConstants = sections.any((s) => s.kind == .readOnlyData);
     final writable = sections.any(
@@ -35,6 +57,7 @@ final class ElfLinker(@override final Target target) implements Linker {
     for (final section in sections) {
       if (section.alignment > page) page = section.alignment;
     }
+    final imageBase = start == null ? 0 : (0x400000 + page - 1) & -page;
     final offsets = List.filled(sections.length, 0),
         addresses = List.filled(sections.length, 0);
     var cursor = (64 + programCount * 56 + 15) & ~15;
@@ -43,7 +66,8 @@ final class ElfLinker(@override final Target target) implements Linker {
         if (section.kind != kind) continue;
         cursor = (cursor + section.alignment - 1) & -section.alignment;
         RangeError.checkNotNegative(cursor, 'section address');
-        offsets[i] = addresses[i] = cursor;
+        offsets[i] = cursor;
+        addresses[i] = imageBase + cursor;
         cursor += section.size;
         RangeError.checkNotNegative(cursor, 'section end');
       }
@@ -112,7 +136,8 @@ final class ElfLinker(@override final Target target) implements Linker {
         bytes = data.buffer.asUint8List();
     data.writeElf64Header(
       architecture: target.architecture,
-      type: 3,
+      type: start == null ? 3 : 2,
+      entryAddress: start == null ? 0 : addresses[start.section] + start.offset,
       sectionOffset: sectionOffset,
       sectionCount: sectionNames.length,
       sectionNames: nameIndex,
@@ -149,7 +174,7 @@ final class ElfLinker(@override final Target target) implements Linker {
         .little,
       );
     }
-    for (final (i, rebase) in unit.rebases.indexed) {
+    for (final (i, rebase) in rebases.indexed) {
       final at = relocationOffset + (unit.bindings.length + i) * 24;
       final slot = unit.symbols[rebase.slot],
           symbol = unit.symbols[rebase.target];
@@ -180,7 +205,7 @@ final class ElfLinker(@override final Target target) implements Linker {
         flags: flags,
         fileOffset: offset,
         size: size,
-        address: address ?? (flags & 2 != 0 ? offset : 0),
+        address: address ?? (flags & 2 != 0 ? imageBase + offset : 0),
         link: link,
         info: info,
         alignment: alignment,
@@ -257,8 +282,8 @@ final class ElfLinker(@override final Target target) implements Linker {
       data.setUint32(base, type, .little);
       data.setUint32(base + 4, flags, .little);
       data.setUint64(base + 8, offset, .little);
-      data.setUint64(base + 16, offset, .little);
-      data.setUint64(base + 24, offset, .little);
+      data.setUint64(base + 16, imageBase + offset, .little);
+      data.setUint64(base + 24, imageBase + offset, .little);
       data.setUint64(base + 32, fileSize, .little);
       data.setUint64(base + 40, memorySize, .little);
       data.setUint64(base + 48, alignment, .little);
@@ -306,9 +331,9 @@ final class ElfLinker(@override final Target target) implements Linker {
       data.setUint32(bucket, i + 1, .little);
     }
     final dynamicEntries = [
-      (4, hashOffset),
-      (5, stringOffset),
-      (6, symbolOffset),
+      (4, imageBase + hashOffset),
+      (5, imageBase + stringOffset),
+      (6, imageBase + symbolOffset),
       (10, strings.length),
       (11, 24),
       (14, sonameOffset),

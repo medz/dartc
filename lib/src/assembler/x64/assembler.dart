@@ -377,6 +377,9 @@ final class Assembler() {
   /// Returns through the address at the top of the stack.
   void ret() => _bytes.addByte(0xc3);
 
+  /// Enters the operating system, clobbering RCX and R11.
+  void syscall() => _bytes.add([0x0f, 0x05]);
+
   /// Resolves local branches and returns immutable machine code.
   ///
   /// Closes this assembler even if an unbound or out-of-range label prevents

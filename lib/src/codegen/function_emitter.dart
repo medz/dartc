@@ -26,6 +26,9 @@ abstract interface class FunctionEmitter<R>() {
   /// The calling rules for the explicit output platform.
   CallingConvention<R> get convention;
 
+  /// Emits a process entry that calls the Dart body and exits successfully.
+  Uint8List start(void Function(Fixup) call);
+
   /// The registers this generator makes available to its allocator.
   List<R> get allocatableRegisters;
 

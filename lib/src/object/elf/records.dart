@@ -42,6 +42,7 @@ extension ElfRecords on ByteData {
   ///
   /// [type] is the ELF file type. Program headers, when present, start at byte
   /// 64. Section numbering uses the ordinary 16-bit header fields.
+  /// [entryAddress] is the virtual entry address, or zero for files without one.
   void writeElf64Header({
     required Architecture architecture,
     required int type,
@@ -49,17 +50,20 @@ extension ElfRecords on ByteData {
     required int sectionCount,
     required int sectionNames,
     int programCount = 0,
+    int entryAddress = 0,
   }) {
     RangeError.checkValidRange(0, 64, lengthInBytes);
     for (final value in [type, sectionCount, sectionNames, programCount]) {
       RangeError.checkValueInInterval(value, 0, 0xffff);
     }
     RangeError.checkNotNegative(sectionOffset, 'sectionOffset');
+    RangeError.checkNotNegative(entryAddress, 'entryAddress');
     final bytes = buffer.asUint8List(offsetInBytes, 64)..fillRange(0, 64, 0);
     bytes.setAll(0, [0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]);
     setUint16(16, type, .little);
     setUint16(18, architecture == .arm64 ? 183 : 62, .little);
     setUint32(20, 1, .little);
+    setUint64(24, entryAddress, .little);
     setUint64(32, programCount == 0 ? 0 : 64, .little);
     setUint64(40, sectionOffset, .little);
     setUint16(52, 64, .little);

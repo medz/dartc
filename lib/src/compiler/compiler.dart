@@ -13,19 +13,22 @@ import 'package:dartc/object/mach_o.dart';
 import 'package:dartc/target.dart';
 
 import 'output.dart';
+import 'permissions.dart';
 
-/// Compiles annotated native exports for an explicit output target.
+/// Compiles Dart programs and annotated native exports for an explicit target.
 final class Compiler(final Target target) {
   /// Checks dependencies and returns the final bytes and C declarations.
   ///
   /// All non-SDK dependencies are checked before selecting native definitions.
   /// Analysis resources are closed before code generation. [output] selects
   /// the file kind and, for a shared library, its name. No output files change.
+  /// Executables use `main` from the first library's exported namespace;
+  /// parameterless synchronous entries are currently supported.
   ///
   /// [nativeSymbols] maps exact asset IDs and requested symbols to native names
   /// before platform symbol decoration.
   /// Missing bindings fail when referenced; no asset resolver fallback occurs.
-  /// [linkInputs] supplies implementations when producing a shared library.
+  /// [linkInputs] supplies implementations for libraries and executables.
   /// Shared-library inputs follow the target loader's symbol lookup rules.
   /// Object and archive outputs retain unresolved imports for a later link.
   Future<Compilation> compile(
@@ -35,8 +38,12 @@ final class Compiler(final Target target) {
     Iterable<LinkInput> linkInputs = const [],
   }) async {
     final inputs = linkInputs.toList();
-    if (inputs.isNotEmpty && output is! SharedLibraryOutput) {
-      throw ArgumentError('Link inputs require shared library output.');
+    if (inputs.isNotEmpty &&
+        output is! SharedLibraryOutput &&
+        output is! ExecutableOutput) {
+      throw ArgumentError(
+        'Link inputs require shared library or executable output.',
+      );
     }
     final (
       lowered,
@@ -50,7 +57,10 @@ final class Compiler(final Target target) {
         ],
       ),
     );
-    final (:program, :exports, :imports) = lowered;
+    final (:program, :exports, :imports, :entryPoint) = lowered;
+    if (output is ExecutableOutput && entryPoint == null) {
+      throw ArgumentError('The first input library has no main function.');
+    }
     final CodeGenerator generator = switch (target.architecture) {
       .arm64 => Arm64CodeGenerator(target),
       .x64 => X64CodeGenerator(target),
@@ -82,11 +92,16 @@ final class Compiler(final Target target) {
     }
 
     exports.keys.forEach(include);
+    if (output is ExecutableOutput) include(entryPoint!);
+    const entrySymbol = '.dartc.start';
     final object = generator.generate(
       program,
       definitions: definitions,
       exports: exports,
       imports: nativeImports,
+      entryPoint: output is ExecutableOutput
+          ? (function: entryPoint!, symbol: entrySymbol)
+          : null,
     );
     final ObjectFormat format = switch (target.operatingSystem) {
       .macos => MachO(target),
@@ -95,6 +110,10 @@ final class Compiler(final Target target) {
     final bytes = switch (output) {
       ObjectOutput() => format.encodeObject(object),
       StaticLibraryOutput() => ArchiveWriter(format).encode([object]),
+      ExecutableOutput() => switch (target.operatingSystem) {
+        .macos => MachOLinker(target),
+        .linux => ElfLinker(target),
+      }.linkExecutable([.object(object), ...inputs], entry: entrySymbol),
       SharedLibraryOutput(:final name) => switch (target.operatingSystem) {
         .macos => MachOLinker(target),
         .linux => ElfLinker(target),
@@ -102,7 +121,12 @@ final class Compiler(final Target target) {
     };
     final header = StringBuffer();
     NativeExports(exports.values).writeHeader(header);
-    return Compilation._(bytes, header.toString(), sources);
+    return Compilation._(
+      bytes,
+      header.toString(),
+      sources,
+      output is ExecutableOutput,
+    );
   }
 }
 
@@ -113,6 +137,7 @@ final class Compilation._(
   /// C and C++ declarations for the native exports.
   final String header,
   Iterable<Uri> sources,
+  final bool _executable,
 ) {
   /// Immutable final bytes, including any required linking and signing.
   final Uint8List bytes = bytes.asUnmodifiableView();
@@ -125,6 +150,7 @@ final class Compilation._(
   /// Input files and colliding destinations are protected. Each file is replaced
   /// after staging; the two-file update is not transactional if a filesystem
   /// error occurs between renames.
+  /// Executables gain execute permission wherever their staged file is readable.
   Future<void> write(File output, {File? header}) async {
     final destinations = [output, ?header];
     final protected = {
@@ -147,7 +173,7 @@ final class Compilation._(
         );
       }
     }
-    await _write(output, bytes);
+    await _write(output, bytes, executable: _executable);
     if (header != null) await _write(header, utf8.encode(this.header));
   }
 
@@ -165,12 +191,17 @@ final class Compilation._(
         .toFilePath();
   }
 
-  Future<void> _write(File file, List<int> bytes) async {
+  Future<void> _write(
+    File file,
+    List<int> bytes, {
+    bool executable = false,
+  }) async {
     await file.absolute.parent.create(recursive: true);
     final work = await file.absolute.parent.createTemp('.dartc-write-');
     try {
       final staged = File.fromUri(work.uri.resolve('output'));
       await staged.writeAsBytes(bytes);
+      if (executable) makeExecutable(staged);
       await staged.rename(file.absolute.path);
     } finally {
       await work.delete(recursive: true);
