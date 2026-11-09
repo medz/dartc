@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:dartc/frontend.dart';
+import 'package:dartc/src/frontend/lowering/analyzer_metadata.dart';
 import 'package:dartc/src/frontend/lowering/constant_evaluation.dart';
 import 'package:dartc/src/frontend/lowering/constant_safety.dart';
 import 'package:test/test.dart';
@@ -29,6 +30,8 @@ void main() {
         'exact': true,
         'largeDifferent': true,
         'zeros': true,
+        'signedDoubleZeros': true,
+        'distinctZeros': false,
         'nan': false,
         'strings': true,
         'maximumLess': true,
@@ -101,7 +104,7 @@ void main() {
     },
   );
   test(
-    'constructor evaluation still rejects unsupported mixed numeric folds',
+    'constructor initializers and defaults use exact numeric comparisons',
     () async {
       await AnalysisSession([
         'test/frontend/lowering/fixtures/constant_safety/numeric_constructor.dart',
@@ -112,26 +115,78 @@ void main() {
             in unit.unit.declarations
                 .whereType<TopLevelVariableDeclaration>()) {
           for (final variable in declaration.variables.variables) {
-            expect(
-              () => constants.variable(
-                variable.declaredFragment!.element,
-                unit,
-                variable,
-              ),
-              throwsA(
-                isA<UnsupportedError>().having(
-                  (e) => e.message,
-                  'reason',
-                  contains('exact mixed numeric constant evaluation'),
-                ),
-              ),
-              reason: variable.name.lexeme,
-            );
+            final value = constants.variable(
+              variable.declaredFragment!.element,
+              unit,
+              variable,
+            )!;
+            if (variable.name.lexeme == 'sharedDependency') {
+              final fields = value.toRecordValue()!.positional;
+              expect(fields.first.toBoolValue(), false);
+              expect(fields.last.getField('result')!.toBoolValue(), true);
+            } else {
+              expect(
+                value.toBoolValue() ??
+                    (value.getField('result') ??
+                            constantSuperclass(value)?.getField('result'))!
+                        .toBoolValue(),
+                !{
+                  'defaultValue',
+                  'inherited',
+                  'factoryDefault',
+                }.contains(variable.name.lexeme),
+                reason: variable.name.lexeme,
+              );
+            }
           }
         }
       });
     },
   );
+  test('a rounded comparison cannot hide a failing const assertion', () async {
+    for (final enabled in [false, true]) {
+      await expectLater(
+        AnalysisSession([
+          'test/frontend/lowering/fixtures/constant_safety/numeric_assertion.dart',
+        ]).use(Lowering(enableAssertions: enabled).lower),
+        throwsA(
+          isA<FormatException>()
+              .having(
+                (e) => e.message,
+                'assertion',
+                contains('The numeric values must be equal.'),
+              )
+              .having(
+                (e) => e.message,
+                'source',
+                contains('numeric_assertion.dart'),
+              ),
+        ),
+      );
+    }
+  });
+  test('exact constructor values retain parameter and field checks', () async {
+    await AnalysisSession([
+      'test/frontend/lowering/fixtures/constant_safety/numeric_type_errors.dart',
+    ]).use((checked) {
+      final unit = checked.libraries.single.units.single;
+      final constants = ConstantEvaluation();
+      for (final declaration
+          in unit.unit.declarations.whereType<TopLevelVariableDeclaration>()) {
+        for (final variable in declaration.variables.variables) {
+          expect(
+            () => constants.variable(
+              variable.declaredFragment!.element,
+              unit,
+              variable,
+            ),
+            throwsFormatException,
+            reason: variable.name.lexeme,
+          );
+        }
+      }
+    });
+  });
   test(
     'private symbol comparisons lose identity in analyzer, not the VM',
     () async {

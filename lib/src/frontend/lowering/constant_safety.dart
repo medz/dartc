@@ -2,7 +2,6 @@ import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
-import 'package:analyzer/dart/element/type.dart';
 
 import 'analyzer_metadata.dart';
 
@@ -35,10 +34,9 @@ final class ConstantSafety() {
 final class _UnsafeConstant(final String reason) implements Exception;
 
 final class _Scan() extends RecursiveAstVisitor<void> {
-  final visited = <(Element, bool)>{};
-  bool _originalEvaluation = false;
+  final visited = <Element>{};
 
-  bool enter(Element element) => visited.add((element, _originalEvaluation));
+  bool enter(Element element) => visited.add(element);
 
   void variable(VariableElement element) {
     element = element.baseElement as VariableElement;
@@ -66,16 +64,6 @@ final class _Scan() extends RecursiveAstVisitor<void> {
   }
 
   void constructor(ConstructorElement element) {
-    final original = _originalEvaluation;
-    _originalEvaluation = true;
-    try {
-      _constructor(element);
-    } finally {
-      _originalEvaluation = original;
-    }
-  }
-
-  void _constructor(ConstructorElement element) {
     element = element.baseElement;
     if (!enter(element) || element.library.isInSdk) return;
     if (!element.isConst || element.isExternal) {
@@ -133,118 +121,6 @@ final class _Scan() extends RecursiveAstVisitor<void> {
       constructor(element);
     }
     super.visitAnnotation(node);
-  }
-
-  ({num? value, bool integer, bool floating}) numericOperand(
-    Expression expression,
-  ) {
-    if (expression case ParenthesizedExpression(:final expression)) {
-      return numericOperand(expression);
-    }
-    if (expression case IntegerLiteral(:final value)) {
-      return (value: value, integer: true, floating: false);
-    }
-    if (expression case DoubleLiteral(:final value)) {
-      return (value: value, integer: false, floating: true);
-    }
-    if (expression case PrefixExpression(:final operator, :final operand)
-        when operator.lexeme == '-') {
-      final input = numericOperand(operand);
-      return (
-        value: input.value == null ? null : -input.value!,
-        integer: input.integer,
-        floating: input.floating,
-      );
-    }
-    final element = switch (expression) {
-      SimpleIdentifier(:final element) => element,
-      PrefixedIdentifier(:final identifier) => identifier.element,
-      PropertyAccess(:final propertyName) => propertyName.element,
-      _ => null,
-    };
-    final variable = element is PropertyAccessorElement
-        ? element.variable
-        : element;
-    var type = expression.staticType;
-    if (variable is VariableElement) {
-      type ??= variable.type;
-      if (variable.isConst) {
-        final value = variable.computeConstantValue();
-        if (value?.hasKnownValue == true) {
-          final number = value!.toIntValue() ?? value.toDoubleValue();
-          return (
-            value: number,
-            integer: number is int,
-            floating: number is double,
-          );
-        }
-      }
-    }
-    if (expression case InstanceCreationExpression(:final constructorName)) {
-      type ??= constructorName.element?.enclosingElement.thisType;
-    }
-    if (expression is BooleanLiteral ||
-        expression is NullLiteral ||
-        expression is StringLiteral ||
-        expression is SymbolLiteral ||
-        expression is ListLiteral ||
-        expression is SetOrMapLiteral ||
-        expression is RecordLiteral) {
-      return (value: null, integer: false, floating: false);
-    }
-    return (
-      value: null,
-      integer:
-          type is! InterfaceType ||
-          type.isDartCoreInt ||
-          type.isDartCoreNum ||
-          type.isDartCoreObject,
-      floating:
-          type is! InterfaceType ||
-          type.isDartCoreDouble ||
-          type.isDartCoreNum ||
-          type.isDartCoreObject,
-    );
-  }
-
-  @override
-  void visitBinaryExpression(BinaryExpression node) {
-    super.visitBinaryExpression(node);
-    if (!_originalEvaluation) return;
-    if (!const {
-      '==',
-      '!=',
-      '<',
-      '<=',
-      '>',
-      '>=',
-    }.contains(node.operator.lexeme)) {
-      return;
-    }
-    final left = numericOperand(node.leftOperand),
-        right = numericOperand(node.rightOperand);
-    if (!(left.integer && right.floating || left.floating && right.integer)) {
-      return;
-    }
-    final a = left.value, b = right.value;
-    if (a != null && b != null) {
-      if (a.isNaN || b.isNaN) return;
-      final order = a == 0 && b == 0 ? 0 : a.compareTo(b);
-      final roundedLeft = a.toDouble(), roundedRight = b.toDouble();
-      final (expected, observed) = switch (node.operator.lexeme) {
-        '==' => (order == 0, roundedLeft == roundedRight),
-        '!=' => (order != 0, roundedLeft != roundedRight),
-        '<' => (order < 0, roundedLeft < roundedRight),
-        '<=' => (order <= 0, roundedLeft <= roundedRight),
-        '>' => (order > 0, roundedLeft > roundedRight),
-        _ => (order >= 0, roundedLeft >= roundedRight),
-      };
-      if (observed == expected) return;
-    }
-    // shortcut: reject unsafe constructor folds until their evaluator is replaced.
-    throw _UnsafeConstant(
-      'exact mixed numeric constant evaluation is not implemented',
-    );
   }
 
   @override

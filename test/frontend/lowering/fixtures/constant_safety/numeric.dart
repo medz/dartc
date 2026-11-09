@@ -10,6 +10,8 @@ const selected = equal ? 1 : 2;
 const exact = 42 == 42.0;
 const largeDifferent = integer != 1.0;
 const zeros = -0.0 == 0;
+const signedDoubleZeros = 0.0 == -0.0;
+const distinctZeros = identical(0.0, -0.0);
 // ignore: unnecessary_nan_comparison
 const nan = double.nan == integer;
 const strings = 'value' == 'value';
