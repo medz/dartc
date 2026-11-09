@@ -2,10 +2,23 @@ import 'dart:typed_data';
 
 import 'package:dartc/abi.dart';
 
+/// The signed or equality relation produced by a native scalar comparison.
+enum Comparison() {
+  equal,
+  notEqual,
+  lessThan,
+  lessOrEqual,
+  greaterThan,
+  greaterOrEqual,
+}
+
 /// Emits one function with explicit operand registers.
 abstract interface class FunctionEmitter<R>() {
   /// The calling convention bound to this function's instruction buffer.
   CallingConvention<R> get convention;
+
+  /// The next instruction offset.
+  int get position;
 
   /// Loads all 64 bits of [value] into [destination].
   void loadImmediate(R destination, int value);
@@ -17,6 +30,20 @@ abstract interface class FunctionEmitter<R>() {
 
   /// Subtracts with the same register and flag constraints as [add].
   void subtract(R destination, R left, R right);
+
+  /// Produces a 0/1 result, permitting any input/output register aliases.
+  ///
+  /// Only [destination] and condition flags may change.
+  void compare(R destination, R left, R right, Comparison comparison);
+
+  /// Emits an unresolved jump and returns its displacement field offset.
+  int jump();
+
+  /// Emits a jump taken for zero, preserving registers but possibly changing flags.
+  int jumpIfZero(R value);
+
+  /// Resolves a branch field at [offset] to an offset in the same code buffer.
+  void patchJump(ByteData code, int offset, int destination);
 
   /// Loads a word from a slot in the current frame.
   void loadStack(R destination, int offset);

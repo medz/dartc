@@ -15,6 +15,12 @@ void main() {
         throwsUnsupportedError,
       );
       await expectLater(
+        compiler.compile([
+          'test/compiler/fixtures/unsupported_control_flow.dart',
+        ]),
+        throwsUnsupportedError,
+      );
+      await expectLater(
         compiler.compile(['test/compiler/fixtures/wrong_signature.dart']),
         throwsArgumentError,
       );

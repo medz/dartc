@@ -8,6 +8,7 @@ import 'package:dartc/linker.dart';
 import 'package:dartc/target.dart';
 
 import '../test/codegen/fixtures/aliases.dart';
+import '../test/codegen/fixtures/control_flow.dart';
 import '../test/linker/fixtures/functions.dart';
 import '../test/linker/fixtures/calls.dart';
 import '../test/linker/fixtures/symbols.dart';
@@ -43,6 +44,18 @@ Future<void> main() async {
       await calls.write(assets.file('compiler/calls.o'));
       await calls.write(assets.file('compiler/calls.a'), kind: .staticLibrary);
 
+      final flowLibrary = await Compiler(target)
+          .compile(['test/compiler/fixtures/control_flow.dart']);
+      await flowLibrary.write(
+        assets.library('compiler/control_flow'),
+        kind: .sharedLibrary,
+      );
+      await flowLibrary.write(assets.file('compiler/control_flow.o'));
+      await flowLibrary.write(
+        assets.file('compiler/control_flow.a'),
+        kind: .staticLibrary,
+      );
+
       final ImageFormat format = switch (os) {
         .macos => MachO(target),
         .linux => Elf(target),
@@ -55,6 +68,9 @@ Future<void> main() async {
             ),
           );
       await shared([aliases(target)], assets.library('codegen/aliases'));
+      await shared([
+        controlFlow(target),
+      ], assets.library('codegen/control_flow'));
       final inputs = [
         functions(target, {'first': 40}),
         functions(target, {'second': 2}),

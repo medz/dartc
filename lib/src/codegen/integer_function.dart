@@ -2,18 +2,13 @@ import 'dart:typed_data';
 
 import 'package:dartc/ir.dart';
 
+import 'function_allocation.dart';
 import 'function_emitter.dart';
 
-/// Allocates registers and spill slots for a straight-line integer function.
+/// Generates an integer/boolean control-flow graph with explicit edge transfers.
 final class IntegerFunction<R extends Object>(
   final FunctionEmitter<R> emitter,
 ) {
-  final _uses = <Value, int>{};
-  final _registers = <Value, R>{};
-  final _slots = <Value, int>{};
-  final _spilled = <Value>{};
-  final _free = <R>[];
-
   /// Emits the body and reports direct call sites to the module generator.
   Uint8List generate(
     IrFunction function,
@@ -21,144 +16,125 @@ final class IntegerFunction<R extends Object>(
   ) {
     final abi = emitter.convention;
     if (function.bodyKind != .synchronous ||
-        function.blocks.length != 1 ||
         function.target.kind.hasReceiver ||
         function.target.kind == .closure ||
         function.target.typeParameters.isNotEmpty ||
         function.target.signature.optionalSlots.isNotEmpty ||
         function.target.signature.namedParameters.isNotEmpty ||
-        function.target.returnType != .integer ||
-        function.target.parameterTypes.any((type) => type != .integer) ||
+        !_word(function.target.returnType) ||
+        function.target.parameterTypes.any((type) => !_word(type)) ||
         function.entry.parameters.length > abi.parameters.length) {
       throw UnsupportedError(
-        'Native integer signature or control flow: ${function.target.name}',
+        'Native scalar signature: ${function.target.name}',
       );
     }
-    final block = function.entry;
-    if (block.end case Return(value: final result?)) {
-      var hasCall = false;
+    final allocation = FunctionAllocation(function, emitter);
+    final positions = <Block, int>{};
+    final jumps = <(int, Block)>[], localJumps = <(int, int)>[];
+    if (allocation.framed) abi.enterFrame(allocation.frameBytes);
+    allocation.initialize();
+    void edge(Jump jump) {
+      allocation.copyArguments(jump);
+      jumps.add((emitter.jump(), jump.target));
+    }
+
+    for (final block in function.blocks) {
+      positions[block] = emitter.position;
+      allocation.begin(block);
       for (final instruction in block.instructions) {
         switch (instruction) {
-          case IntBinary(operator: .add || .subtract):
-            break;
           case DirectCall(:final inputs, :final type, :final typeArguments):
-            if (type != .integer ||
+            if (!_word(type) ||
                 typeArguments.isNotEmpty ||
                 inputs.length > abi.parameters.length ||
-                inputs.any((v) => v.type != .integer)) {
+                inputs.any((v) => !_word(v.type))) {
               throw UnsupportedError(
-                'Native call requires register integer arguments.',
+                'Native call requires register scalar arguments.',
               );
             }
-            hasCall = true;
+            allocation.flush();
+            for (final (i, value) in inputs.indexed) {
+              allocation.load(value, abi.parameters[i]);
+              allocation.release(value);
+            }
+            call(emitter.call(), instruction.target);
+            allocation.define(instruction, abi.result);
+          case IntBinary(:final operator, :final left, :final right):
+            final a = allocation.read(left),
+                b = allocation.read(right, except: a);
+            allocation.release(left);
+            allocation.release(right);
+            final destination = allocation.allocate();
+            switch (operator) {
+              case .add:
+                emitter.add(destination, a, b);
+              case .subtract:
+                emitter.subtract(destination, a, b);
+              case .lessThan:
+                emitter.compare(destination, a, b, .lessThan);
+              case .lessOrEqual:
+                emitter.compare(destination, a, b, .lessOrEqual);
+              case .greaterThan:
+                emitter.compare(destination, a, b, .greaterThan);
+              case .greaterOrEqual:
+                emitter.compare(destination, a, b, .greaterOrEqual);
+              default:
+                throw UnsupportedError('Native integer operation: $operator');
+            }
+            allocation.define(instruction, destination);
+          case Equals(:final left, :final right, :final negated):
+            if (!_word(left.type) || !_word(right.type)) {
+              throw UnsupportedError(
+                'Native equality requires integer or boolean operands.',
+              );
+            }
+            final a = allocation.read(left),
+                b = allocation.read(right, except: a);
+            allocation.release(left);
+            allocation.release(right);
+            final destination = allocation.allocate();
+            if (left.type == right.type) {
+              emitter.compare(destination, a, b, negated ? .notEqual : .equal);
+            } else {
+              emitter.loadImmediate(destination, negated ? 1 : 0);
+            }
+            allocation.define(instruction, destination);
           default:
             throw UnsupportedError(
               'Native operation: ${instruction.runtimeType}',
             );
         }
-        for (final value in instruction.inputs) {
-          _uses.update(value, (n) => n + 1, ifAbsent: () => 1);
-        }
       }
-      _uses.update(result, (n) => n + 1, ifAbsent: () => 1);
-      final values = [...block.parameters, ...block.instructions];
-      final framed = hasCall || _uses.length > abi.callerSaved.length;
-      if (framed) {
-        for (final value in values) {
-          if (_uses.containsKey(value)) _slots[value] = _slots.length * 8;
-        }
+      switch (block.end) {
+        case Return(value: final result?):
+          final value = allocation.read(result);
+          if (allocation.framed) abi.leaveFrame(allocation.frameBytes);
+          abi.returnValue(value);
+        case final Jump jump:
+          if (jump.arguments.isNotEmpty) allocation.flush();
+          edge(jump);
+        case Branch(:final condition, :final ifTrue, :final ifFalse):
+          final value = allocation.read(condition);
+          if (ifTrue.arguments.isNotEmpty || ifFalse.arguments.isNotEmpty) {
+            allocation.flush();
+          }
+          final falseJump = emitter.jumpIfZero(value);
+          edge(ifTrue);
+          localJumps.add((falseJump, emitter.position));
+          edge(ifFalse);
+        default:
+          throw UnsupportedError('Native terminator: ${block.end.runtimeType}');
       }
-      final frameBytes = (_slots.length * 8 + 15) & ~15;
-      if (framed) abi.enterFrame(frameBytes);
-      _free.addAll(abi.callerSaved);
-      for (final (i, parameter) in block.parameters.indexed) {
-        if (_uses.containsKey(parameter)) {
-          _registers[parameter] = abi.parameters[i];
-          _free.remove(abi.parameters[i]);
-        }
-      }
-      for (final instruction in block.instructions) {
-        if (instruction is DirectCall) {
-          // Spill before assigning arguments so permutations cannot clobber inputs.
-          for (final entry in _registers.entries) {
-            _spill(entry.key, entry.value);
-          }
-          _registers.clear();
-          _free
-            ..clear()
-            ..addAll(abi.callerSaved);
-          for (final (i, value) in instruction.inputs.indexed) {
-            _load(value, abi.parameters[i]);
-            _release(value);
-          }
-          call(emitter.call(), instruction.target);
-          if (_uses.containsKey(instruction)) {
-            _registers[instruction] = abi.result;
-            _free.remove(abi.result);
-          }
-        } else if (instruction is IntBinary) {
-          final left = _register(instruction.left);
-          final right = _register(instruction.right, except: left);
-          _release(instruction.left);
-          _release(instruction.right);
-          final destination = _allocate();
-          if (instruction.operator == .add) {
-            emitter.add(destination, left, right);
-          } else {
-            emitter.subtract(destination, left, right);
-          }
-          if (_uses.containsKey(instruction)) {
-            _registers[instruction] = destination;
-          } else {
-            _free.add(destination);
-          }
-        }
-      }
-      final value = _register(result);
-      if (framed) abi.leaveFrame(frameBytes);
-      abi.returnValue(value);
-      return emitter.takeBytes();
     }
-    throw UnsupportedError('Native function requires an integer return.');
-  }
-
-  R _register(Value value, {R? except}) {
-    if (_registers[value] case final register?) return register;
-    final register = _allocate(except: except);
-    _load(value, register);
-    return _registers[value] = register;
-  }
-
-  void _load(Value value, R destination) {
-    if (value case ScalarConstant(value: final int number)) {
-      emitter.loadImmediate(destination, number);
-    } else if (_spilled.contains(value)) {
-      emitter.loadStack(destination, _slots[value]!);
-    } else {
-      throw StateError('Missing native value: $value');
+    final code = emitter.takeBytes(), data = ByteData.sublistView(code);
+    for (final (offset, target) in jumps) {
+      emitter.patchJump(data, offset, positions[target]!);
     }
-  }
-
-  R _allocate({R? except}) {
-    if (_free.isNotEmpty) return _free.removeLast();
-    final entry = _registers.entries.firstWhere((e) => e.value != except);
-    _spill(entry.key, entry.value);
-    _registers.remove(entry.key);
-    return entry.value;
-  }
-
-  void _spill(Value value, R register) {
-    if (value is ScalarConstant || !_spilled.add(value)) return;
-    emitter.storeStack(register, _slots[value]!);
-  }
-
-  void _release(Value value) {
-    final count = _uses[value]! - 1;
-    if (count == 0) {
-      _uses.remove(value);
-      if (_registers.remove(value) case final register?) _free.add(register);
-    } else {
-      _uses[value] = count;
+    for (final (offset, target) in localJumps) {
+      emitter.patchJump(data, offset, target);
     }
+    return code;
   }
+
+  bool _word(ValueType type) => type == .integer || type == .boolean;
 }

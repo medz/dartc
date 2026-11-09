@@ -1,0 +1,48 @@
+import 'dart:ffi';
+
+import 'package:dartc/target.dart';
+
+import '../../native_assets.dart';
+
+final class ControlFlow() {
+  final _library = NativeAssets(Target.host()).open('compiler/control_flow');
+  late final choose = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'choose',
+      );
+  late final conditional = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'conditional',
+      );
+  late final relations = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'relations',
+      );
+  late final shortCircuit = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'shortCircuit',
+      );
+  late final whileLoop = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('whileLoop');
+  late final doLoop = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('doLoop');
+  late final forLoop = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('forLoop');
+  late final recursive = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('recursive');
+  late final rotate = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('rotate');
+  late final loopCalls = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('loopCalls');
+  late final foreverWithExit = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'foreverWithExit',
+      );
+
+  late final nestedTransfers = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'nestedTransfers',
+      );
+
+  void close() => _library.close();
+}

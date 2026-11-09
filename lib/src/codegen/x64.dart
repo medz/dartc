@@ -23,6 +23,9 @@ final class _X64Emitter(final Assembler assembler)
   final CallingConvention<Register> convention = X64Abi(assembler);
 
   @override
+  int get position => assembler.length;
+
+  @override
   void loadImmediate(Register destination, int value) =>
       assembler.loadImmediate(destination, value);
 
@@ -46,6 +49,43 @@ final class _X64Emitter(final Assembler assembler)
       assembler.subtract(destination, right);
     }
   }
+
+  @override
+  void compare(
+    Register destination,
+    Register left,
+    Register right,
+    Comparison comparison,
+  ) {
+    assembler.compare(left, right);
+    assembler.setCondition(destination, switch (comparison) {
+      .equal => .equal,
+      .notEqual => .notEqual,
+      .lessThan => .lessThan,
+      .lessOrEqual => .lessOrEqual,
+      .greaterThan => .greaterThan,
+      .greaterOrEqual => .greaterOrEqual,
+    });
+  }
+
+  @override
+  int jump() {
+    final offset = assembler.length + 1;
+    assembler.jump(0);
+    return offset;
+  }
+
+  @override
+  int jumpIfZero(Register value) {
+    assembler.test(value);
+    final offset = assembler.length + 2;
+    assembler.jumpCondition(.equal, 0);
+    return offset;
+  }
+
+  @override
+  void patchJump(ByteData code, int offset, int destination) =>
+      code.patchX64Branch(offset, destination - offset - 4);
 
   @override
   void loadStack(Register destination, int offset) =>

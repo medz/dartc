@@ -58,4 +58,29 @@ void main() {
     expect(stack.getUint32(4, .little), 0xf94007e0);
     expect(stack.getUint32(8, .little), 0xf9000be1);
   });
+  test('encodes comparisons and patches forward and backward branches', () {
+    final assembler = Assembler()
+      ..compare(.x0, .x3)
+      ..setCondition(.x9, .lessThan)
+      ..branchZero(.x5, 0)
+      ..branch(0);
+    final data = ByteData.sublistView(assembler.takeBytes());
+    expect(data.getUint32(0, .little), 0xeb03001f);
+    expect(data.getUint32(4, .little), 0x9a9fa7e9);
+    data.patchArm64Branch(8, 1048572);
+    data.patchArm64Branch(12, -0x8000000);
+    expect(data.getUint32(8, .little), 0xb47fffe5);
+    expect(data.getUint32(12, .little), 0x16000000);
+    data.patchArm64Branch(8, -1048576);
+    data.patchArm64Branch(12, 0x7fffffc);
+    expect(data.getUint32(8, .little), 0xb4800005);
+    expect(data.getUint32(12, .little), 0x15ffffff);
+    final before = data.buffer.asUint8List().toList();
+    expect(() => data.patchArm64Branch(8, 1048576), throwsRangeError);
+    expect(() => data.patchArm64Branch(12, 2), throwsArgumentError);
+    expect(() => data.patchArm64Branch(0, 4), throwsArgumentError);
+    expect(() => assembler.compare(.sp, .x0), throwsArgumentError);
+    expect(() => assembler.setCondition(.sp, .equal), throwsArgumentError);
+    expect(data.buffer.asUint8List(), before);
+  });
 }

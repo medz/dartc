@@ -39,8 +39,10 @@ base class IntegerCodeGenerator<R extends Object>(
       }
       final export = exports[declaration];
       if (export != null &&
-          export.signature.parameterCount !=
-              declaration.parameterTypes.length) {
+          (export.signature.parameterCount !=
+                  declaration.parameterTypes.length ||
+              declaration.returnType != .integer ||
+              declaration.parameterTypes.any((type) => type != .integer))) {
         throw ArgumentError('Native signature mismatch: ${declaration.name}');
       }
       code.add(Uint8List((-code.length) & 15));

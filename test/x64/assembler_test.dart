@@ -80,4 +80,46 @@ void main() {
       ]);
     },
   );
+  test('uses byte-register REX prefixes and patches signed branch fields', () {
+    final assembler = Assembler()
+      ..compare(.r9, .r10)
+      ..setCondition(.rsi, .lessThan)
+      ..setCondition(.r9, .equal)
+      ..test(.r10)
+      ..jumpCondition(.equal, 0)
+      ..jump(0);
+    final bytes = assembler.takeBytes(), data = ByteData.sublistView(bytes);
+    expect(bytes.take(22), [
+      0x4d,
+      0x39,
+      0xd1,
+      0x40,
+      0x0f,
+      0x9c,
+      0xc6,
+      0x48,
+      0x0f,
+      0xb6,
+      0xf6,
+      0x41,
+      0x0f,
+      0x94,
+      0xc1,
+      0x4d,
+      0x0f,
+      0xb6,
+      0xc9,
+      0x4d,
+      0x85,
+      0xd2,
+    ]);
+    data.patchX64Branch(24, -0x80000000);
+    data.patchX64Branch(29, 0x7fffffff);
+    expect(data.getInt32(24, .little), -0x80000000);
+    expect(data.getInt32(29, .little), 0x7fffffff);
+    final before = bytes.toList();
+    expect(() => data.patchX64Branch(24, 0x80000000), throwsRangeError);
+    expect(() => data.patchX64Branch(0, 0), throwsArgumentError);
+    expect(bytes, before);
+  });
 }

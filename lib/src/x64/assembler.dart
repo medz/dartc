@@ -20,6 +20,16 @@ enum Register() {
   r15,
 }
 
+/// A condition on the flags produced by a signed integer comparison.
+enum Condition(final int encoding) {
+  equal(4),
+  notEqual(5),
+  lessThan(12),
+  lessOrEqual(14),
+  greaterThan(15),
+  greaterOrEqual(13),
+}
+
 /// Encodes x86-64 integer instructions.
 final class Assembler() {
   final _bytes = BytesBuilder(copy: false);
@@ -83,9 +93,49 @@ final class Assembler() {
   /// Stores a word at RSP plus a signed 32-bit displacement.
   void storeStack(Register source, int offset) => _stack(0x89, source, offset);
 
+  /// Updates flags as if subtracting [right] from [left], preserving registers.
+  void compare(Register left, Register right) => _binary(0x39, left, right);
+
+  /// Writes 0 or 1 for [condition], preserving flags and other registers.
+  void setCondition(Register destination, Condition condition) {
+    final low = destination.index & 7, high = destination.index >> 3;
+    _bytes.add([
+      0x40 | high,
+      0x0f,
+      0x90 | condition.encoding,
+      0xc0 | low,
+      0x48 | high << 2 | high,
+      0x0f,
+      0xb6,
+      0xc0 | low << 3 | low,
+    ]);
+  }
+
+  /// Jumps relative to the end of this instruction, preserving registers and flags.
+  void jump(int displacement) {
+    _checkDisplacement(displacement);
+    final bytes = ByteData(5)
+      ..setUint8(0, 0xe9)
+      ..setInt32(1, displacement, .little);
+    _bytes.add(bytes.buffer.asUint8List());
+  }
+
+  /// Jumps when flags match [condition], relative to the end of this instruction.
+  void jumpCondition(Condition condition, int displacement) {
+    _checkDisplacement(displacement);
+    final bytes = ByteData(6)
+      ..setUint8(0, 0x0f)
+      ..setUint8(1, 0x80 | condition.encoding)
+      ..setInt32(2, displacement, .little);
+    _bytes.add(bytes.buffer.asUint8List());
+  }
+
+  /// Updates flags by testing [value] against zero, preserving all registers.
+  void test(Register value) => _binary(0x85, value, value);
+
   /// Calls a target relative to the end of this instruction.
   void call(int displacement) {
-    _checkCall(displacement);
+    _checkDisplacement(displacement);
     final bytes = ByteData(5)
       ..setUint8(0, 0xe8)
       ..setInt32(1, displacement, .little);
@@ -117,19 +167,33 @@ final class Assembler() {
       ]);
 }
 
-/// Patches x86-64 direct calls in a writable code buffer.
-extension X64CallPatch on ByteData {
+/// Patches x86-64 relative branches in a writable code buffer.
+extension X64BranchPatch on ByteData {
+  /// Replaces a JMP or near Jcc displacement measured from the field's end.
+  void patchX64Branch(int offset, int displacement) {
+    final jump = offset > 0 && getUint8(offset - 1) == 0xe9;
+    final conditional =
+        offset > 1 &&
+        getUint8(offset - 2) == 0x0f &&
+        getUint8(offset - 1) & 0xf0 == 0x80;
+    if (!jump && !conditional) {
+      throw ArgumentError('Expected a JMP or Jcc field.');
+    }
+    _checkDisplacement(displacement);
+    setInt32(offset, displacement, .little);
+  }
+
   /// Replaces a displacement measured from the end of the four-byte field.
   void patchX64Call(int offset, int displacement) {
     if (offset <= 0 || getUint8(offset - 1) != 0xe8) {
       throw ArgumentError('Expected a CALL displacement field.');
     }
-    _checkCall(displacement);
+    _checkDisplacement(displacement);
     setInt32(offset, displacement, .little);
   }
 }
 
-void _checkCall(int displacement) => RangeError.checkValueInInterval(
+void _checkDisplacement(int displacement) => RangeError.checkValueInInterval(
   displacement,
   -0x80000000,
   0x7fffffff,

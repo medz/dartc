@@ -22,6 +22,9 @@ void main() {
       final result = block.emit(
         DirectCall(callee, [Constant.integer(19), Constant.integer(23)]),
       );
+      block.emit(
+        DirectCall(callee, [Constant.integer(1), Constant.integer(2)]),
+      );
       block.finish(Return(result));
       final program = IrProgram([], [
         ...arithmeticProgram.functions,
@@ -61,7 +64,7 @@ void main() {
           ),
           isTrue,
         );
-        expect(module.relocations.single.symbol, 1);
+        expect(module.relocations.map((r) => r.symbol), [1, 1]);
       }
     },
   );

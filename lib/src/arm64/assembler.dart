@@ -36,6 +36,16 @@ enum Register() {
   sp,
 }
 
+/// A condition on the flags produced by a signed integer comparison.
+enum Condition(final int encoding) {
+  equal(0),
+  notEqual(1),
+  lessThan(11),
+  lessOrEqual(13),
+  greaterThan(12),
+  greaterOrEqual(10),
+}
+
 /// Encodes AArch64 integer instructions in little-endian order.
 final class Assembler() {
   final _bytes = BytesBuilder(copy: false);
@@ -108,6 +118,29 @@ final class Assembler() {
   void store(Register source, Register base, int offset) =>
       _memory(0xf9000000, source, base, offset);
 
+  /// Sets NZCV as if subtracting [right] from [left], without storing a result.
+  void compare(Register left, Register right) {
+    _general(left);
+    _general(right);
+    _word(0xeb00001f | right.index << 16 | left.index << 5);
+  }
+
+  /// Writes 0 or 1 for [condition], preserving NZCV and other registers.
+  void setCondition(Register destination, Condition condition) {
+    _general(destination);
+    _word(0x9a9f07e0 | (condition.encoding ^ 1) << 12 | destination.index);
+  }
+
+  /// Branches relative to this instruction, without changing registers or flags.
+  void branch(int displacement) =>
+      _word(0x14000000 | _branchBits(displacement, 26));
+
+  /// Branches when [value] is zero, preserving registers and flags.
+  void branchZero(Register value, int displacement) {
+    _general(value);
+    _word(0xb4000000 | _branchBits(displacement, 19) << 5 | value.index);
+  }
+
   /// Calls a PC-relative target and places the return address in X30.
   void call(int displacement) => _word(_callWord(displacement));
 
@@ -142,7 +175,24 @@ final class Assembler() {
 }
 
 /// Patches AArch64 branch instructions in a writable code buffer.
-extension Arm64CallPatch on ByteData {
+extension Arm64BranchPatch on ByteData {
+  /// Replaces a B or 64-bit CBZ displacement measured from the instruction.
+  void patchArm64Branch(int offset, int displacement) {
+    if (offset % 4 != 0) throw ArgumentError('Expected an aligned branch.');
+    final word = getUint32(offset, .little);
+    if (word & 0xfc000000 == 0x14000000) {
+      setUint32(offset, 0x14000000 | _branchBits(displacement, 26), .little);
+    } else if (word & 0xff000000 == 0xb4000000) {
+      setUint32(
+        offset,
+        word & 0xff00001f | _branchBits(displacement, 19) << 5,
+        .little,
+      );
+    } else {
+      throw ArgumentError('Expected B or a 64-bit CBZ instruction.');
+    }
+  }
+
   /// Replaces a BL displacement measured from the instruction address.
   void patchArm64Call(int offset, int displacement) {
     if (offset % 4 != 0 ||
@@ -153,15 +203,18 @@ extension Arm64CallPatch on ByteData {
   }
 }
 
-int _callWord(int displacement) {
+int _callWord(int displacement) => 0x94000000 | _branchBits(displacement, 26);
+
+int _branchBits(int displacement, int bits) {
+  final limit = 1 << (bits + 1);
   RangeError.checkValueInInterval(
     displacement,
-    -0x8000000,
-    0x7fffffc,
+    -limit,
+    limit - 4,
     'displacement',
   );
   if (displacement % 4 != 0) {
-    throw ArgumentError('Expected an aligned call target.');
+    throw ArgumentError('Expected an aligned branch target.');
   }
-  return 0x94000000 | (displacement >> 2) & 0x3ffffff;
+  return (displacement >> 2) & ((1 << bits) - 1);
 }
