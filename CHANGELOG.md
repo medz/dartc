@@ -24,6 +24,7 @@ The development checkout uses analyzer 14.7.0 to resolve Dart source, produces v
 - Bundle the original Dart SDK 3.13.7 standard library sources and license at a fixed official commit. The standalone compiler works without an installed SDK, source cache or network access; declared project dependencies remain separate. `const DartSdk().files` exposes the verified source text. The development-only `SdkResolver`, `DartSdk.at/current`, `--sdk` and SDK selection parameters have been removed.
 - Compile non-captured scalar locals initialized after declaration, preserving integer, boolean, double and pointer values across branches, loops and calls. Native generation rejects uninitialized reads, escaping or aliased cells, and unsupported late storage.
 - Remove the development-only `runtime/platform/io.dart` source API.
+- Compile direct `dart:math.sqrt` calls with known `int` or `double` inputs in native libraries and executables, preserving negative zero, NaN and infinities.
 
 Language support and known analyzer differences are tracked in [specs](specs/README.md). IR behavior checks do not establish native execution support or full Dart compatibility.
 

@@ -586,18 +586,18 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         argumentList,
         (e) => lowerExpression(context, e),
       );
-      return args == null
-          ? null
-          : context.emit(
-              DirectCall(
-                target,
-                context.bindings.bind(target, args),
-                typeArguments: context.typeArguments(
-                  typeArgumentTypes,
-                  expression,
-                ),
-              ),
-            );
+      if (args == null) return null;
+      if (callee.library.uri == Uri.parse('dart:math') &&
+          callee.baseElement == callee.library.getTopLevelFunction('sqrt')) {
+        return context.emit(NumericSquareRoot(args.positional.single));
+      }
+      return context.emit(
+        DirectCall(
+          target,
+          context.bindings.bind(target, args),
+          typeArguments: context.typeArguments(typeArgumentTypes, expression),
+        ),
+      );
     case ast.DotShorthandInvocation():
       unsupported(unit, expression, 'dot shorthand invocation');
     case ast.BinaryExpression(

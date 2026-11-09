@@ -106,6 +106,7 @@ export 'src/ir/value.dart'
         NumericOperator,
         NumericNegate,
         NumericToDouble,
+        NumericSquareRoot,
         MakeClosure,
         MakeRecord,
         NewCell,

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ffi' as ffi;
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:dartc/ir.dart';
@@ -2213,6 +2214,8 @@ final class IrInterpreter(
           values[op] = -(read(operand) as num);
         case NumericToDouble(:final operand):
           values[op] = (read(operand) as num).toDouble();
+        case NumericSquareRoot(:final operand):
+          values[op] = math.sqrt(read(operand) as num);
         case NumericBinary(:final operator, :final left, :final right):
           final a = read(left) as num, b = read(right) as num;
           values[op] = switch (operator) {

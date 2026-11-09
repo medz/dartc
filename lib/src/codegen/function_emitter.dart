@@ -67,6 +67,9 @@ abstract interface class FunctionEmitter<R>() {
   /// Converts a signed integer into a floating register without changing inputs.
   void convertIntToDouble(R destination, R source);
 
+  /// Computes a double's square root; the registers may alias.
+  void squareRootDouble(R destination, R source);
+
   /// Truncates a finite double in the range [-2^63, 2^63) into a general register.
   void truncateDoubleToInt(R destination, R source);
 

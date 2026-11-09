@@ -455,6 +455,7 @@ sealed class Instruction(super.type) extends Value {
     NumericBinary() ||
     NumericNegate() ||
     NumericToDouble() ||
+    NumericSquareRoot() ||
     TypeTest() ||
     TypeView() ||
     RecordGet() ||
@@ -1467,6 +1468,20 @@ final class NumericNegate(
 
 /// Converts a number to double, rounding integers to the nearest IEEE value.
 final class NumericToDouble(final Value operand) extends Instruction {
+  this : super(.floating) {
+    if (!ValueType.number.accepts(operand.type)) {
+      throw ArgumentError('A non-nullable numeric operand is required.');
+    }
+  }
+
+  @override
+  Iterable<Value> get inputs => [operand];
+}
+
+/// Converts a number to double and computes its nonnegative square root.
+///
+/// Preserves negative zero; other negative inputs and NaN produce NaN.
+final class NumericSquareRoot(final Value operand) extends Instruction {
   this : super(.floating) {
     if (!ValueType.number.accepts(operand.type)) {
       throw ArgumentError('A non-nullable numeric operand is required.');

@@ -25,6 +25,12 @@ SDK 成员按已解析的声明生成普通调用、方法提取或扩展调用�
 
 SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.new` 提取](../test/frontend/lowering/fixtures/deferred_unnamed_tearoff.dart)诊断为不是构造器引用；analyzer 14.7 接受后者。IR 对该用例保留已解析构造器及加载检查，并独立验证其结果，不将它计入 SDK 执行对照。
 
+## 数学函数
+
+直接调用 `dart:math.sqrt` 保留官方声明身份，支持导入前缀与转导；同名用户函数或静态方法仍调用用户实现。输入先转换为 double，再计算平方根；保留负零，其他负值和 NaN 返回 NaN，正无穷返回正无穷。依据为 [sqrt 库契约](https://api.dart.dev/stable/3.13.7/dart-math/sqrt.html)。
+
+IR 支持 num 参数及 dynamic 实参的类型检查，实参只求值一次。原生调用要求输入具有已知的 int 或 double 表示，可用于当前支持的独立程序和原生库。函数值调用、需要装箱的 num 原生执行及其他数学函数仍是缺口。见[声明与类型检查验证](../test/frontend/lowering/math_test.dart)、[原生行为验证](../test/compiler/math_test.dart)和[独立进程验证](../test/compiler/entry_test.dart)。
+
 ## 独立程序入口
 
 入口选择遵循主规范的 Scripts 条款，使用根库导出命名空间中的 main，不按依赖遍历顺序查找同名函数。`Compiler.compile(output: const Output.executable())` 和 CLI `--kind exe` 接通现有标量函数的独立执行。整个输入依赖图先完成静态检查，未使用代码的错误仍拒绝编译。

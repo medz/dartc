@@ -165,14 +165,22 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
             emitter.move(destination, source);
           }
           allocation.define(instruction, destination);
-        } else if (instruction case NumericToDouble(:final operand)) {
+        } else if (instruction
+            case NumericToDouble(:final operand) ||
+                NumericSquareRoot(:final operand)) {
           final source = allocation.read(operand);
           allocation.release(operand);
           final destination = allocation.allocate(.floating, preferred: source);
           if (operand.type == .integer) {
             emitter.convertIntToDouble(destination, source);
-          } else {
+          } else if (instruction is NumericToDouble) {
             emitter.move(destination, source);
+          }
+          if (instruction is NumericSquareRoot) {
+            emitter.squareRootDouble(
+              destination,
+              operand.type == .integer ? destination : source,
+            );
           }
           allocation.define(instruction, destination);
         } else if (instruction case NumericNegate(:final operand)) {

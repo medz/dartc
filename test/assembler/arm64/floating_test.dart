@@ -41,6 +41,7 @@ void main() {
         ..multiplyDouble(.d8, .d9, .d10)
         ..divideDouble(.d4, .d5, .d6)
         ..negateDouble(.d13, .d14)
+        ..squareRootDouble(.d31, .d17)
         ..compareDouble(.d1, .d2)
         ..loadDouble(.d31, .sp, 24)
         ..storeDouble(.d0, .x30, 8);
@@ -61,6 +62,7 @@ void main() {
           0x1e6a0928,
           0x1e6618a4,
           0x1e6141cd,
+          0x1e61c23f,
           0x1e622020,
           0xfd400fff,
           0xfd0007c0,

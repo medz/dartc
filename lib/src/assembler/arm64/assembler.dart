@@ -209,6 +209,10 @@ final class Assembler() {
   void negateDouble(FloatRegister destination, FloatRegister source) =>
       _float(0x1e614000, destination, source);
 
+  /// Computes FSQRT using the current FPCR rounding and exception controls.
+  void squareRootDouble(FloatRegister destination, FloatRegister source) =>
+      _float(0x1e61c000, destination, source);
+
   /// Sets NZCV for FCMP, including unordered comparisons when an operand is NaN.
   void compareDouble(FloatRegister left, FloatRegister right) =>
       _word(0x1e602000 | right.index << 16 | left.index << 5);

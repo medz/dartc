@@ -54,6 +54,13 @@ void main() {
     expect(NumericToDouble(number).type, ValueType.floating);
     expect(NumericToDouble(i).effects, isEmpty);
     expect(NumericToDouble(d).inputs, [d]);
+    expect(NumericSquareRoot(number).type, ValueType.floating);
+    expect(NumericSquareRoot(i).effects, isEmpty);
+    expect(NumericSquareRoot(d).inputs, [d]);
+    expect(
+      () => NumericSquareRoot(const Constant.nullValue()),
+      throwsArgumentError,
+    );
     expect(
       () => NumericToDouble(const Constant.boolean(false)),
       throwsArgumentError,

@@ -58,8 +58,9 @@ Future<void> main(List<String> args) async {
           ),
         );
 
-    for (final fixture in ['return', 'void', 'status', 'exported']) {
-      final needsBindings = fixture == 'status' || fixture == 'exported';
+    for (final fixture in ['return', 'void', 'status', 'exported', 'math']) {
+      final needsBindings =
+          fixture == 'status' || fixture == 'exported' || fixture == 'math';
       final result = await Compiler(target).compile(
         ['test/compiler/fixtures/entry/$fixture.dart'],
         output: const .executable(),
@@ -112,6 +113,7 @@ Future<void> main(List<String> args) async {
       'pointer_arithmetic',
       'doubles',
       'mixed_numeric',
+      'math',
       'native_integers',
       'native_floats',
       'native_function_pointers',

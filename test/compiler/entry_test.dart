@@ -19,6 +19,7 @@ void main() {
         ('void', 0),
         ('status', 47),
         ('exported', 47),
+        ('math', 73),
       ]) {
         final file = assets.file('compiler/entry_$name');
         expect(file.statSync().mode & 0x40, isNot(0));

@@ -197,6 +197,10 @@ final class Assembler() {
   void divideDouble(FloatRegister destination, FloatRegister source) =>
       _sse(0xf2, 0x5e, destination, source);
 
+  /// Computes SQRTSD using the current MXCSR rounding and exception controls.
+  void squareRootDouble(FloatRegister destination, FloatRegister source) =>
+      _sse(0xf2, 0x51, destination, source);
+
   /// Sets ZF/PF/CF using UCOMISD; unordered comparisons set all three.
   void compareDouble(FloatRegister left, FloatRegister right) =>
       _sse(0x66, 0x2e, left, right);

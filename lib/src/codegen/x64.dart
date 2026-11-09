@@ -125,6 +125,13 @@ final class _X64Emitter(
       );
 
   @override
+  void squareRootDouble(CpuRegister destination, CpuRegister source) =>
+      assembler.squareRootDouble(
+        destination as FloatRegister,
+        source as FloatRegister,
+      );
+
+  @override
   void truncateDoubleToInt(CpuRegister destination, CpuRegister source) =>
       assembler.truncateDoubleToInt(
         destination as Register,

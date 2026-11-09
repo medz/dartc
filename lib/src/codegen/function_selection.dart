@@ -96,10 +96,11 @@ final class FunctionSelection<R>(
             if (type != .floating) {
               throw UnsupportedError('Native numeric negation: $type');
             }
-          case NumericToDouble(:final operand):
+          case NumericToDouble(:final operand) ||
+              NumericSquareRoot(:final operand):
             if (!_number(operand.type)) {
               throw UnsupportedError(
-                'Native conversion requires a known numeric representation.',
+                'Native numeric operand requires a known representation.',
               );
             }
           case NumericBinary(:final operator, :final left, :final right):
