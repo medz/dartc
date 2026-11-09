@@ -55,6 +55,7 @@ void main() {
         const artifact.Relocation(0, .x64Call32, 0),
         const artifact.Relocation(0, .arm64Call26, -1),
         const artifact.Relocation(0, .arm64Call26, 1),
+        const artifact.Relocation(0, .arm64Branch26, 0),
       ]) {
         expect(
           () =>
@@ -78,6 +79,27 @@ void main() {
           [0xc0, 3, 0x5f, 0xd6],
           [symbol],
           relocations: [const artifact.Relocation(0, .arm64Call26, 0)],
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => artifact.ObjectModule(
+          target,
+          [1, 0, 0, 0x94],
+          [symbol],
+          relocations: [const artifact.Relocation(0, .arm64Call26, 0)],
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => artifact.ObjectModule(
+          target,
+          code,
+          [symbol],
+          relocations: [
+            const artifact.Relocation(0, .arm64Call26, 0),
+            const artifact.Relocation(0, .arm64Call26, 0),
+          ],
         ),
         throwsArgumentError,
       );

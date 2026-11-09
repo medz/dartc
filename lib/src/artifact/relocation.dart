@@ -1,8 +1,4 @@
-/// The instruction field patched when resolving a direct call.
-enum RelocationKind() {
-  arm64Call26,
-  x64Call32,
-}
+import 'package:dartc/assembler.dart';
 
 /// A call to a module symbol, with no implicit name lookup for local definitions.
 ///
@@ -10,6 +6,6 @@ enum RelocationKind() {
 /// AArch64 instruction or the x86-64 displacement field, relative to code start.
 final class const Relocation(
   final int offset,
-  final RelocationKind kind,
+  final FixupEncoding encoding,
   final int symbol,
 );

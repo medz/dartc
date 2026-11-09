@@ -138,7 +138,7 @@ final class Elf(@override final Target target) implements ImageFormat {
           ? indices[relocation.symbol]!
           : symbols.length + 1 + relocation.symbol - object.symbols.length;
       final offset = relocationOffset + i * 24;
-      final arm = relocation.kind == .arm64Call26;
+      final arm = relocation.encoding == .arm64Call26;
       data.setUint64(offset, relocation.offset, .little);
       data.setUint64(
         offset + 8,

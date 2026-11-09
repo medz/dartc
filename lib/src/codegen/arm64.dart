@@ -1,7 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:dartc/abi.dart';
-import 'package:dartc/arm64.dart';
+import 'package:dartc/assembler.dart';
+import 'package:dartc/assembler/arm64.dart';
 import 'package:dartc/target.dart';
 
 import 'function_emitter.dart';
@@ -23,7 +24,10 @@ final class _Arm64Emitter(final Assembler assembler)
   final CallingConvention<Register> convention = Arm64Abi(assembler);
 
   @override
-  int get position => assembler.length;
+  Label label() => assembler.label();
+
+  @override
+  void bind(Label label) => assembler.bind(label);
 
   @override
   void loadImmediate(Register destination, int value) =>
@@ -56,22 +60,11 @@ final class _Arm64Emitter(final Assembler assembler)
   }
 
   @override
-  int jump() {
-    final offset = assembler.length;
-    assembler.branch(0);
-    return offset;
-  }
+  void jump(Label target) => assembler.branch(target);
 
   @override
-  int jumpIfZero(Register value) {
-    final offset = assembler.length;
-    assembler.branchZero(value, 0);
-    return offset;
-  }
-
-  @override
-  void patchJump(ByteData code, int offset, int destination) =>
-      code.patchArm64Branch(offset, destination - offset);
+  void jumpIfZero(Register value, Label target) =>
+      assembler.branchZero(value, target);
 
   @override
   void loadStack(Register destination, int offset) =>
@@ -82,12 +75,8 @@ final class _Arm64Emitter(final Assembler assembler)
       assembler.store(source, .sp, offset);
 
   @override
-  int call() {
-    final offset = assembler.length;
-    assembler.call(0);
-    return offset;
-  }
+  Fixup call() => assembler.call();
 
   @override
-  Uint8List takeBytes() => assembler.takeBytes();
+  Uint8List finish() => assembler.finish();
 }

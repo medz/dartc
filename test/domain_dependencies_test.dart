@@ -11,16 +11,15 @@ void main() {
       'target': {},
       'sdk': {},
       'export': {},
-      'arm64': {},
-      'x64': {},
+      'assembler': {'target'},
       'analyzer': {'sdk'},
       'lowering': {'analyzer', 'ir', 'interop'},
-      'abi': {'arm64', 'x64', 'target'},
-      'artifact': {'target'},
+      'abi': {'assembler', 'target'},
+      'artifact': {'target', 'assembler'},
       'formats': {'artifact', 'target'},
       'interop': {},
-      'codegen': {'abi', 'arm64', 'x64', 'artifact', 'ir', 'interop', 'target'},
-      'linker': {'artifact', 'formats', 'arm64', 'x64'},
+      'codegen': {'abi', 'assembler', 'artifact', 'ir', 'interop', 'target'},
+      'linker': {'artifact', 'formats'},
       'compiler': {
         'abi',
         'ir',
@@ -36,6 +35,11 @@ void main() {
       },
       'cli': {'artifact', 'compiler', 'sdk', 'target'},
     };
+    final entries = {
+      for (final domain in dependencies.keys) '$domain.dart': domain,
+      'assembler/arm64.dart': 'assembler',
+      'assembler/x64.dart': 'assembler',
+    };
     final lib = Directory('lib').absolute.uri;
     String domain(Uri uri) {
       final segments = uri.pathSegments
@@ -43,7 +47,7 @@ void main() {
           .toList();
       return segments.first == 'src'
           ? segments[1]
-          : segments.single.split('.').first;
+          : entries[segments.join('/')]!;
     }
 
     final edges = <Uri, Set<Uri>>{};
@@ -100,8 +104,10 @@ void main() {
               reason: '$owner -> $dependency',
             );
             expect(
-              uri.toString(),
-              'package:dartc/$dependency.dart',
+              uri.scheme == 'package' &&
+                  uri.pathSegments.first == 'dartc' &&
+                  entries[uri.pathSegments.skip(1).join('/')] == dependency,
+              isTrue,
               reason: file.path,
             );
           }

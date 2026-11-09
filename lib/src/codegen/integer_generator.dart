@@ -47,17 +47,13 @@ base class IntegerCodeGenerator<R extends Object>(
       }
       code.add(Uint8List((-code.length) & 15));
       final bytes = IntegerFunction(_createFunction())
-          .generate(function, (offset, callee) {
+          .generate(function, (fixup, callee) {
             final index = indices[callee];
             if (index == null) {
               throw ArgumentError('Missing call definition: ${callee.name}');
             }
             relocations.add(
-              .new(
-                code.length + offset,
-                target.architecture == .arm64 ? .arm64Call26 : .x64Call32,
-                index,
-              ),
+              .new(code.length + fixup.offset, fixup.encoding, index),
             );
           });
       symbols.add(

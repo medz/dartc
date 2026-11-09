@@ -1,8 +1,9 @@
 import 'dart:typed_data';
 
 import 'package:dartc/abi.dart';
+import 'package:dartc/assembler.dart';
 import 'package:dartc/target.dart';
-import 'package:dartc/x64.dart';
+import 'package:dartc/assembler/x64.dart';
 
 import 'function_emitter.dart';
 import 'integer_generator.dart';
@@ -23,7 +24,10 @@ final class _X64Emitter(final Assembler assembler)
   final CallingConvention<Register> convention = X64Abi(assembler);
 
   @override
-  int get position => assembler.length;
+  Label label() => assembler.label();
+
+  @override
+  void bind(Label label) => assembler.bind(label);
 
   @override
   void loadImmediate(Register destination, int value) =>
@@ -69,23 +73,13 @@ final class _X64Emitter(final Assembler assembler)
   }
 
   @override
-  int jump() {
-    final offset = assembler.length + 1;
-    assembler.jump(0);
-    return offset;
-  }
+  void jump(Label target) => assembler.jump(target);
 
   @override
-  int jumpIfZero(Register value) {
+  void jumpIfZero(Register value, Label target) {
     assembler.test(value);
-    final offset = assembler.length + 2;
-    assembler.jumpCondition(.equal, 0);
-    return offset;
+    assembler.jumpCondition(.equal, target);
   }
-
-  @override
-  void patchJump(ByteData code, int offset, int destination) =>
-      code.patchX64Branch(offset, destination - offset - 4);
 
   @override
   void loadStack(Register destination, int offset) =>
@@ -96,12 +90,8 @@ final class _X64Emitter(final Assembler assembler)
       assembler.storeStack(source, offset);
 
   @override
-  int call() {
-    final offset = assembler.length + 1;
-    assembler.call(0);
-    return offset;
-  }
+  Fixup call() => assembler.call();
 
   @override
-  Uint8List takeBytes() => assembler.takeBytes();
+  Uint8List finish() => assembler.finish();
 }

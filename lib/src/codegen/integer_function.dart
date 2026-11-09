@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:dartc/assembler.dart';
 import 'package:dartc/ir.dart';
 
 import 'function_allocation.dart';
@@ -12,7 +13,7 @@ final class IntegerFunction<R extends Object>(
   /// Emits the body and reports direct call sites to the module generator.
   Uint8List generate(
     IrFunction function,
-    void Function(int, FunctionTarget) call,
+    void Function(Fixup, FunctionTarget) call,
   ) {
     final abi = emitter.convention;
     if (function.bodyKind != .synchronous ||
@@ -29,17 +30,18 @@ final class IntegerFunction<R extends Object>(
       );
     }
     final allocation = FunctionAllocation(function, emitter);
-    final positions = <Block, int>{};
-    final jumps = <(int, Block)>[], localJumps = <(int, int)>[];
+    final labels = {
+      for (final block in function.blocks) block: emitter.label(),
+    };
     if (allocation.framed) abi.enterFrame(allocation.frameBytes);
     allocation.initialize();
     void edge(Jump jump) {
       allocation.copyArguments(jump);
-      jumps.add((emitter.jump(), jump.target));
+      emitter.jump(labels[jump.target]!);
     }
 
     for (final block in function.blocks) {
-      positions[block] = emitter.position;
+      emitter.bind(labels[block]!);
       allocation.begin(block);
       for (final instruction in block.instructions) {
         switch (instruction) {
@@ -118,22 +120,16 @@ final class IntegerFunction<R extends Object>(
           if (ifTrue.arguments.isNotEmpty || ifFalse.arguments.isNotEmpty) {
             allocation.flush();
           }
-          final falseJump = emitter.jumpIfZero(value);
+          final otherwise = emitter.label();
+          emitter.jumpIfZero(value, otherwise);
           edge(ifTrue);
-          localJumps.add((falseJump, emitter.position));
+          emitter.bind(otherwise);
           edge(ifFalse);
         default:
           throw UnsupportedError('Native terminator: ${block.end.runtimeType}');
       }
     }
-    final code = emitter.takeBytes(), data = ByteData.sublistView(code);
-    for (final (offset, target) in jumps) {
-      emitter.patchJump(data, offset, positions[target]!);
-    }
-    for (final (offset, target) in localJumps) {
-      emitter.patchJump(data, offset, target);
-    }
-    return code;
+    return emitter.finish();
   }
 
   bool _word(ValueType type) => type == .integer || type == .boolean;

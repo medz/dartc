@@ -1,4 +1,4 @@
-import 'package:dartc/x64.dart';
+import 'package:dartc/assembler/x64.dart';
 
 import 'calling_convention.dart';
 

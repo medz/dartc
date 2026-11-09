@@ -1,7 +1,7 @@
-import 'package:dartc/arm64.dart' as arm64;
+import 'package:dartc/assembler/arm64.dart' as arm64;
 import 'package:dartc/artifact.dart';
 import 'package:dartc/target.dart';
-import 'package:dartc/x64.dart' as x64;
+import 'package:dartc/assembler/x64.dart' as x64;
 
 ObjectModule functions(Target target, Map<String, int> values) {
   final code = <int>[], symbols = <Symbol>[];
@@ -11,12 +11,12 @@ ObjectModule functions(Target target, Map<String, int> values) {
       final assembler = arm64.Assembler()
         ..loadImmediate(.x0, value)
         ..ret();
-      body = assembler.takeBytes();
+      body = assembler.finish();
     } else {
       final assembler = x64.Assembler()
         ..loadImmediate(.rax, value)
         ..ret();
-      body = assembler.takeBytes();
+      body = assembler.finish();
     }
     symbols.add(
       .new(

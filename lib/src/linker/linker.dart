@@ -2,8 +2,6 @@ import 'dart:typed_data';
 
 import 'package:dartc/artifact.dart';
 import 'package:dartc/formats.dart';
-import 'package:dartc/arm64.dart';
-import 'package:dartc/x64.dart';
 
 /// Resolves native modules using the placement chosen by an image format.
 final class Linker(final ImageFormat format) {
@@ -60,12 +58,12 @@ final class Linker(final ImageFormat format) {
         final offset = bases[i] + reference.offset;
         final sourceAddress = layout.codeAddress + offset;
         final targetAddress = layout.codeAddress + destination;
-        switch (reference.kind) {
-          case .arm64Call26:
-            data.patchArm64Call(offset, targetAddress - sourceAddress);
-          case .x64Call32:
-            data.patchX64Call(offset, targetAddress - (sourceAddress + 4));
-        }
+        reference.encoding.apply(
+          data,
+          offset,
+          placeAddress: sourceAddress,
+          targetAddress: targetAddress,
+        );
       }
     }
     return LinkedImage(layout, patched);

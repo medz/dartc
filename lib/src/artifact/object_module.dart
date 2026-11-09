@@ -62,19 +62,16 @@ final class ObjectModule(
     final data = ByteData.sublistView(this.code);
     for (final reference in sites) {
       final offset = reference.offset;
-      final arm = reference.kind == .arm64Call26;
-      if (arm != (target.architecture == .arm64) ||
+      final encoding = reference.encoding;
+      if (encoding.architecture != target.architecture ||
+          (encoding != .arm64Call26 && encoding != .x64Call32) ||
           offset < previousEnd ||
           offset > code.length - 4 ||
           reference.symbol < 0 ||
-          reference.symbol >= this.symbols.length + this.imports.length ||
-          (arm
-              ? offset % 4 != 0 || data.getUint32(offset, .little) != 0x94000000
-              : offset == 0 ||
-                    code[offset - 1] != 0xe8 ||
-                    data.getInt32(offset, .little) != 0)) {
+          reference.symbol >= this.symbols.length + this.imports.length) {
         throw ArgumentError('Invalid call relocation at $offset.');
       }
+      encoding.validate(data, offset, unresolved: true);
       previousEnd = offset + 4;
     }
   }

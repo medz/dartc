@@ -1,5 +1,8 @@
 import 'dart:typed_data';
 
+import '../code_buffer.dart';
+import '../fixup.dart';
+
 /// A 64-bit general-purpose register or the stack pointer.
 enum Register() {
   x0,
@@ -48,13 +51,14 @@ enum Condition(final int encoding) {
 
 /// Encodes AArch64 integer instructions in little-endian order.
 final class Assembler() {
-  final _bytes = BytesBuilder(copy: false);
+  final _bytes = CodeBuffer();
 
-  /// The number of encoded bytes.
+  /// The number of bytes in this open assembler.
   int get length => _bytes.length;
 
   /// Moves a register without changing condition flags.
   void move(Register destination, Register source) {
+    _bytes.checkOpen();
     if (destination == .sp || source == .sp) {
       addImmediate(destination, source, 0);
     } else if (destination != source) {
@@ -131,18 +135,31 @@ final class Assembler() {
     _word(0x9a9f07e0 | (condition.encoding ^ 1) << 12 | destination.index);
   }
 
-  /// Branches relative to this instruction, without changing registers or flags.
-  void branch(int displacement) =>
-      _word(0x14000000 | _branchBits(displacement, 26));
+  /// Creates a local branch destination for this assembler.
+  Label label() => _bytes.label();
 
-  /// Branches when [value] is zero, preserving registers and flags.
-  void branchZero(Register value, int displacement) {
-    _general(value);
-    _word(0xb4000000 | _branchBits(displacement, 19) << 5 | value.index);
+  /// Binds a local label to the next instruction.
+  void bind(Label label) => _bytes.bind(label);
+
+  /// Branches to a local label, preserving registers and flags.
+  void branch(Label target) {
+    _bytes.branch(Fixup(length, .arm64Branch26), target);
+    _word(0x14000000);
   }
 
-  /// Calls a PC-relative target and places the return address in X30.
-  void call(int displacement) => _word(_callWord(displacement));
+  /// Branches to a local label when [value] is zero, preserving flags.
+  void branchZero(Register value, Label target) {
+    _general(value);
+    _bytes.branch(Fixup(length, .arm64Zero19), target);
+    _word(0xb4000000 | value.index);
+  }
+
+  /// Emits an unresolved call that places the return address in X30.
+  Fixup call() {
+    final fixup = Fixup(length, .arm64Call26);
+    _word(0x94000000);
+    return fixup;
+  }
 
   void _memory(int opcode, Register value, Register base, int offset) {
     _general(value);
@@ -163,8 +180,11 @@ final class Assembler() {
     _word(0xd65f0000 | address.index << 5);
   }
 
-  /// Returns the encoded bytes and resets the buffer.
-  Uint8List takeBytes() => _bytes.takeBytes();
+  /// Resolves local branches and returns immutable machine code.
+  ///
+  /// Closes this assembler even if an unbound or out-of-range label prevents
+  /// completion. Further emission, label changes and completion are rejected.
+  Uint8List finish() => _bytes.finish();
 
   void _word(int word) => _bytes.add([
     word & 255,
@@ -172,49 +192,4 @@ final class Assembler() {
     (word >>> 16) & 255,
     word >>> 24,
   ]);
-}
-
-/// Patches AArch64 branch instructions in a writable code buffer.
-extension Arm64BranchPatch on ByteData {
-  /// Replaces a B or 64-bit CBZ displacement measured from the instruction.
-  void patchArm64Branch(int offset, int displacement) {
-    if (offset % 4 != 0) throw ArgumentError('Expected an aligned branch.');
-    final word = getUint32(offset, .little);
-    if (word & 0xfc000000 == 0x14000000) {
-      setUint32(offset, 0x14000000 | _branchBits(displacement, 26), .little);
-    } else if (word & 0xff000000 == 0xb4000000) {
-      setUint32(
-        offset,
-        word & 0xff00001f | _branchBits(displacement, 19) << 5,
-        .little,
-      );
-    } else {
-      throw ArgumentError('Expected B or a 64-bit CBZ instruction.');
-    }
-  }
-
-  /// Replaces a BL displacement measured from the instruction address.
-  void patchArm64Call(int offset, int displacement) {
-    if (offset % 4 != 0 ||
-        getUint32(offset, .little) & 0xfc000000 != 0x94000000) {
-      throw ArgumentError('Expected an aligned BL instruction.');
-    }
-    setUint32(offset, _callWord(displacement), .little);
-  }
-}
-
-int _callWord(int displacement) => 0x94000000 | _branchBits(displacement, 26);
-
-int _branchBits(int displacement, int bits) {
-  final limit = 1 << (bits + 1);
-  RangeError.checkValueInInterval(
-    displacement,
-    -limit,
-    limit - 4,
-    'displacement',
-  );
-  if (displacement % 4 != 0) {
-    throw ArgumentError('Expected an aligned branch target.');
-  }
-  return (displacement >> 2) & ((1 << bits) - 1);
 }
