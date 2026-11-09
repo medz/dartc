@@ -6,8 +6,17 @@ import 'dart:ffi';
 import 'package:test/test.dart';
 
 import 'fixtures/addresses_ffi.dart';
+import 'fixtures/memory_protection.dart';
 
 void main() {
+  test('a pointer-only library remains read-only after loading', () {
+    final library = AddressLibrary('addresses_constant');
+    addTearDown(library.close);
+    final table = library.table('table');
+    expect(table[0].value, 37);
+    expect(table[1].address, table.address);
+    expect(memoryProtection(table), 1);
+  });
   for (final asset in [
     'addresses_static',
     'addresses_archive',
@@ -23,6 +32,32 @@ void main() {
       for (final name in ['function', 'constant', 'state', 'zero']) {
         expect(library.address(name), provider.symbol(name));
       }
+      final table = library.table('table');
+      final mutable = library.table('mutable_table');
+      expect(memoryProtection(table), 1);
+      expect(memoryProtection(mutable), 3);
+      for (final slots in [table, mutable]) {
+        for (final (i, name) in [
+          'function',
+          'constant',
+          'state',
+          'zero',
+        ].indexed) {
+          expect(slots[i], provider.symbol(name));
+        }
+        expect(slots[4].value, 29);
+        expect(slots[5].address, table.address);
+        expect(slots[6].address, mutable.address);
+        expect(
+          slots[0]
+              .cast<NativeFunction<Int64 Function()>>()
+              .asFunction<int Function()>()(),
+          42,
+        );
+      }
+      mutable[0] = provider.symbol('state');
+      expect(mutable[0], provider.symbol('state'));
+      expect(table[0], provider.symbol('function'));
       expect(library.call(), 42);
       expect(
         library

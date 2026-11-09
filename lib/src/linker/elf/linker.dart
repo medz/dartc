@@ -45,14 +45,19 @@ final class ElfLinker(@override final Target target) implements Linker {
     }
     final rebases = start == null
         ? unit.rebases
-        : const <({int slot, int target})>[];
+        : const <({int section, int offset, int target})>[];
+    final relocateConstants = start == null && unit.hasReadOnlyFixups;
     final relocationCount = unit.bindings.length + rebases.length;
     final symbols = unit.symbols.where((symbol) => symbol.exported).toList();
     final hasConstants = sections.any((s) => s.kind == .readOnlyData);
     final writable = sections.any(
       (s) => s.kind == .data || s.kind == .zeroFill,
     );
-    final programCount = 3 + (hasConstants ? 1 : 0) + (writable ? 1 : 0);
+    final programCount =
+        3 +
+        (hasConstants ? 1 : 0) +
+        (writable ? 1 : 0) +
+        (relocateConstants ? 1 : 0);
     var page = target.architecture == .arm64 ? 65536 : 4096;
     for (final section in sections) {
       if (section.alignment > page) page = section.alignment;
@@ -162,10 +167,9 @@ final class ElfLinker(@override final Target target) implements Linker {
       final index = symbols.length + i + 1;
       data.setUint32(symbolOffset + index * 24, names[index - 1], .little);
       data.setUint8(symbolOffset + index * 24 + 4, 0x10 | binding.kind.elfType);
-      final slot = unit.symbols[binding.slot];
       data.setUint64(
         relocationOffset + i * 24,
-        addresses[slot.section] + slot.offset,
+        addresses[binding.section] + binding.offset,
         .little,
       );
       data.setUint64(
@@ -176,9 +180,8 @@ final class ElfLinker(@override final Target target) implements Linker {
     }
     for (final (i, rebase) in rebases.indexed) {
       final at = relocationOffset + (unit.bindings.length + i) * 24;
-      final slot = unit.symbols[rebase.slot],
-          symbol = unit.symbols[rebase.target];
-      data.setUint64(at, addresses[slot.section] + slot.offset, .little);
+      final symbol = unit.symbols[rebase.target];
+      data.setUint64(at, addresses[rebase.section] + rebase.offset, .little);
       data.setUint64(at + 8, target.architecture == .arm64 ? 1027 : 8, .little);
       data.setInt64(
         at + 16,
@@ -296,10 +299,10 @@ final class ElfLinker(@override final Target target) implements Linker {
       segment(
         next++,
         1,
-        4,
+        relocateConstants ? 6 : 4,
         readOnlyStart,
         readOnlyEnd - readOnlyStart,
-        readOnlyEnd - readOnlyStart,
+        (relocateConstants ? dataStart : readOnlyEnd) - readOnlyStart,
         page,
       );
     }
@@ -315,7 +318,18 @@ final class ElfLinker(@override final Target target) implements Linker {
       );
     }
     segment(next++, 2, 4, dynamicOffset, dynamicSize, dynamicSize, 8);
-    segment(next, 0x6474e551, 6, 0, 0, 0, 16);
+    segment(next++, 0x6474e551, 6, 0, 0, 0, 16);
+    if (relocateConstants) {
+      segment(
+        next,
+        0x6474e552,
+        4,
+        readOnlyStart,
+        readOnlyEnd - readOnlyStart,
+        dataStart - readOnlyStart,
+        1,
+      );
+    }
     data.setUint32(hashOffset, bucketCount, .little);
     data.setUint32(hashOffset + 4, names.length + 1, .little);
     for (final (i, name) in names.indexed) {

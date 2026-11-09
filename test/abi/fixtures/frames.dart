@@ -82,6 +82,6 @@ ObjectModule frames(Target target) {
       ),
       Symbol('callee', 0, outer.length, inner.length, binding: .local),
     ],
-    relocations: [Relocation(0, call.offset, call.encoding, 1)],
+    relocations: [Relocation.instruction(0, call.offset, call.encoding, 1)],
   );
 }

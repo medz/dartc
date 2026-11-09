@@ -23,8 +23,8 @@ List<ObjectModule> archiveModules(Target target) {
     ],
     imports: [target.nativeSymbol('helper')],
     relocations: [
-      for (final r in helper.relocations)
-        Relocation(r.section, r.offset, r.encoding, 2),
+      for (final r in helper.relocations.cast<InstructionRelocation>())
+        Relocation.instruction(r.section, r.offset, r.encoding, 2),
     ],
   );
   final intermediate = ObjectModule(

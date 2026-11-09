@@ -44,7 +44,7 @@ void main() {
             [],
             imports: ['value'],
             relocations: [
-              Relocation(
+              Relocation.instruction(
                 0,
                 invalid.offset,
                 invalid.encoding,
@@ -67,7 +67,7 @@ void main() {
               imports: ['value'],
               relocations: [
                 for (final load in loads)
-                  Relocation(
+                  Relocation.instruction(
                     0,
                     load.offset,
                     load.encoding,
@@ -82,11 +82,11 @@ void main() {
             expect(decoded.sections.single.bytes, code);
             expect(decoded.imports, ['value']);
             expect(
-              decoded.relocations.map(
+              decoded.relocations.cast<InstructionRelocation>().map(
                 (r) => (r.offset, r.encoding, r.indirect, r.symbol),
               ),
               unorderedEquals(
-                original.relocations.map(
+                original.relocations.cast<InstructionRelocation>().map(
                   (r) => (r.offset, r.encoding, r.indirect, r.symbol),
                 ),
               ),

@@ -25,9 +25,16 @@ final class LinkUnit(
   final sections = <SectionGroup>[];
   final symbols = <Symbol>[];
   final libraries = <String>[];
-  final bindings = <({int library, String name, int slot, SymbolKind kind})>[];
-  final rebases = <({int slot, int target})>[];
-  final _references = <Relocation>[];
+  final bindings =
+      <
+        ({int library, String name, int section, int offset, SymbolKind kind})
+      >[];
+  final rebases = <({int section, int offset, int target})>[];
+  final _references = <InstructionRelocation>[];
+
+  bool get hasReadOnlyFixups =>
+      bindings.any((r) => sections[r.section].kind == .readOnlyData) ||
+      rebases.any((r) => sections[r.section].kind == .readOnlyData);
 
   this {
     if (name.isEmpty || name.contains('\u0000')) {
@@ -119,11 +126,8 @@ final class LinkUnit(
       }
     }
     if (target.operatingSystem == .macos) search(archives);
-    final dynamicSlots = <String, int>{};
-    for (final name in missing) {
-      if (imports.containsKey(name)) dynamicSlots[name] = dynamicSlots.length;
-    }
-    missing.removeAll(dynamicSlots.keys);
+    final dynamicNames = missing.where(imports.containsKey).toSet();
+    missing.removeAll(dynamicNames);
     if (missing.isNotEmpty) {
       throw ArgumentError('Undefined symbol: ${missing.first}');
     }
@@ -138,15 +142,22 @@ final class LinkUnit(
     }
 
     final staticSlots = <(int, int), int>{}, calls = <String>{};
+    final neededSlots = <String>{}, addressImports = <String>{};
     for (final (i, object) in objects.indexed) {
       for (final reference in object.relocations) {
         final resolved = resolve(i, reference.symbol);
+        if (reference is AddressRelocation) {
+          if (resolved == null) {
+            addressImports.add(
+              object.imports[reference.symbol - object.symbols.length],
+            );
+          }
+          continue;
+        }
+        reference as InstructionRelocation;
         if (reference.indirect) {
           if (resolved != null) {
-            staticSlots.putIfAbsent(
-              resolved,
-              () => dynamicSlots.length + staticSlots.length,
-            );
+            staticSlots.putIfAbsent(resolved, () => staticSlots.length);
           }
         } else if (resolved == null) {
           final name = object.imports[reference.symbol - object.symbols.length];
@@ -158,6 +169,18 @@ final class LinkUnit(
           }
           calls.add(name);
         }
+        if (resolved == null) {
+          neededSlots.add(
+            object.imports[reference.symbol - object.symbols.length],
+          );
+        }
+      }
+    }
+    final dynamicSlots = <String, int>{};
+    for (final name in dynamicNames) {
+      // Explicit imports without relocation sites must still be resolved.
+      if (neededSlots.contains(name) || !addressImports.contains(name)) {
+        dynamicSlots[name] = dynamicSlots.length;
       }
     }
     final table = objects.length,
@@ -213,29 +236,59 @@ final class LinkUnit(
     }
     for (final MapEntry(key: name, value: slot) in dynamicSlots.entries) {
       final (library, symbol) = imports[name]!;
+      final location = symbols[symbolBases[table] + slot];
       bindings.add((
         library: library,
         name: symbol,
-        slot: symbolBases[table] + slot,
+        section: location.section,
+        offset: location.offset,
         kind: calls.contains(name) ? .function : .unknown,
       ));
     }
     for (final MapEntry(key: (owner, index), value: slot)
         in staticSlots.entries) {
+      final location = symbols[symbolBases[table] + dynamicSlots.length + slot];
       rebases.add((
-        slot: symbolBases[table] + slot,
+        section: location.section,
+        offset: location.offset,
         target: symbolBases[owner] + index,
       ));
     }
     for (final (i, object) in objects.indexed) {
       for (final reference in object.relocations) {
         final resolved = resolve(i, reference.symbol);
-        final dynamicSlot = reference.symbol < object.symbols.length
+        final imported = reference.symbol < object.symbols.length
             ? null
-            : dynamicSlots[object.imports[reference.symbol -
-                  object.symbols.length]];
+            : object.imports[reference.symbol - object.symbols.length];
+        final (section, base) = bases[i][reference.section]!;
+        final offset = base + reference.offset;
+        if (reference is AddressRelocation) {
+          if (dynamicNames.contains(imported)) {
+            final (library, symbol) = imports[imported]!;
+            bindings.add((
+              library: library,
+              name: symbol,
+              section: section,
+              offset: offset,
+              kind: .unknown,
+            ));
+          } else {
+            final (owner, index) = resolved!;
+            rebases.add((
+              section: section,
+              offset: offset,
+              target: symbolBases[owner] + index,
+            ));
+          }
+          continue;
+        }
+        reference as InstructionRelocation;
         final (owner, index) = reference.indirect
-            ? (table, dynamicSlot ?? staticSlots[resolved]!)
+            ? (
+                table,
+                dynamicSlots[imported] ??
+                    dynamicSlots.length + staticSlots[resolved]!,
+              )
             : resolved!;
         final definition = objects[owner].symbols[index];
         final storage = objects[owner].sections[definition.section];
@@ -248,14 +301,8 @@ final class LinkUnit(
             'Call target is outside code: ${definition.name}',
           );
         }
-        final (section, offset) = bases[i][reference.section]!;
         _references.add(
-          .new(
-            section,
-            offset + reference.offset,
-            reference.encoding,
-            symbolBases[owner] + index,
-          ),
+          .new(section, offset, reference.encoding, symbolBases[owner] + index),
         );
       }
     }
@@ -319,9 +366,9 @@ final class LinkUnit(
       );
     }
     for (final rebase in rebases) {
-      final slot = symbols[rebase.slot], target = symbols[rebase.target];
+      final target = symbols[rebase.target];
       image.setUint64(
-        fileOffsets[slot.section] + slot.offset,
+        fileOffsets[rebase.section] + rebase.offset,
         addresses[target.section] + target.offset,
         .little,
       );

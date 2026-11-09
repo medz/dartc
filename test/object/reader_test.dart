@@ -241,7 +241,8 @@ void main() {
                   )
                 : d.setUint64(
                     relocation + 8,
-                    (data.getUint64(relocation + 8, .little) & ~0xffffffff) | 1,
+                    (data.getUint64(relocation + 8, .little) & ~0xffffffff) |
+                        (arch == .arm64 ? 258 : 10),
                     .little,
                   ),
             if (!darwin)

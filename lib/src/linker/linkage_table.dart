@@ -21,14 +21,18 @@ ObjectModule linkageTable(Target target, int slots, Map<String, int> calls) {
         assembler.pageAddress(.x16),
         assembler.loadPageOffset(.x16, .x16),
       ]) {
-        relocations.add(.new(0, start + fixup.offset, fixup.encoding, slot));
+        relocations.add(
+          .instruction(0, start + fixup.offset, fixup.encoding, slot),
+        );
       }
       assembler.branchRegister(.x16);
       code.add(assembler.finish());
     } else {
       final assembler = x64.Assembler();
       final fixup = assembler.loadAddress(.r11);
-      relocations.add(.new(0, start + fixup.offset, fixup.encoding, slot));
+      relocations.add(
+        .instruction(0, start + fixup.offset, fixup.encoding, slot),
+      );
       assembler.jumpRegister(.r11);
       code.add(assembler.finish());
     }

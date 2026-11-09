@@ -95,7 +95,7 @@ List<ObjectModule> stackCalls(Target target) {
         ),
       ],
       imports: [callee.symbols.single.name],
-      relocations: [Relocation(0, call.offset, call.encoding, 1)],
+      relocations: [Relocation.instruction(0, call.offset, call.encoding, 1)],
     ),
     callee,
   ];

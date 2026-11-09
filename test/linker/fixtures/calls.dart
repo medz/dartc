@@ -61,6 +61,8 @@ ObjectModule _module(Target target, bool first) {
       Symbol('local', 0, wrapper.length, local.length, binding: .local),
     ],
     imports: [if (first) target.nativeSymbol('helper')],
-    relocations: [Relocation(0, fixup.offset, fixup.encoding, first ? 2 : 1)],
+    relocations: [
+      Relocation.instruction(0, fixup.offset, fixup.encoding, first ? 2 : 1),
+    ],
   );
 }

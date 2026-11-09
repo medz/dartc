@@ -41,6 +41,12 @@ Map<String, List<LinkInput>> sharedLibraries(Target target) {
         caller.imports.single: target.nativeSymbol('dartc_absent_symbol'),
       }),
     ],
+    'missing_unused_symbol': [
+      .object(ObjectModule(target, [], [], imports: ['unused'])),
+      dependency(target, 'shared_second', {
+        'unused': target.nativeSymbol('dartc_absent_symbol'),
+      }),
+    ],
   };
 }
 

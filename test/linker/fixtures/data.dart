@@ -80,7 +80,12 @@ List<ObjectModule> dataModules(Target target) {
     }
     for (final fixup in fixups) {
       references.add(
-        Relocation(0, code.length + fixup.offset, fixup.encoding, symbol),
+        Relocation.instruction(
+          0,
+          code.length + fixup.offset,
+          fixup.encoding,
+          symbol,
+        ),
       );
     }
     symbols.add(

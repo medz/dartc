@@ -217,6 +217,10 @@ Future<void> main(List<String> args) async {
     await shared(decodedData, assets.library('linker/data'));
     await shared([decodedData.first], assets.library('linker/storage'));
     final addresses = await objects('addresses_', addressModules(target));
+    await shared(
+      await objects('address_table_', [constantAddressTable(target)]),
+      assets.library('linker/addresses_constant'),
+    );
     await shared([
       addresses.first,
     ], assets.library('linker/addresses_provider'));

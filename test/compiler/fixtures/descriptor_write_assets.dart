@@ -51,7 +51,7 @@ ObjectModule ioStorage(Target target) {
     ],
     relocations: [
       for (final fixup in fixups)
-        Relocation(0, fixup.offset, fixup.encoding, 2),
+        Relocation.instruction(0, fixup.offset, fixup.encoding, 2),
     ],
   );
 }

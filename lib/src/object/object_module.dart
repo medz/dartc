@@ -6,7 +6,7 @@ import 'symbol.dart';
 import 'relocation.dart';
 import 'section.dart';
 
-/// Immutable sections, scoped definitions and unresolved instruction references.
+/// Immutable sections, scoped definitions and unresolved symbol references.
 final class ObjectModule(
   final Target target,
   Iterable<Section> sections,
@@ -23,7 +23,7 @@ final class ObjectModule(
   /// Undefined global symbols, indexed after [symbols].
   final List<String> imports = .unmodifiable(imports);
 
-  /// Instruction references that a linker must resolve.
+  /// References that a linker must resolve.
   final List<Relocation> relocations = .unmodifiable(relocations);
 
   this {
@@ -70,6 +70,25 @@ final class ObjectModule(
       RangeError.checkValidIndex(reference.section, this.sections, 'section');
       final section = this.sections[reference.section];
       final offset = reference.offset;
+      final width = reference is AddressRelocation ? 8 : 4;
+      if (offset < ends[reference.section] ||
+          offset > section.size - width ||
+          reference.symbol < 0 ||
+          reference.symbol >= this.symbols.length + this.imports.length) {
+        throw ArgumentError('Invalid relocation at $offset.');
+      }
+      ends[reference.section] = offset + width;
+      if (reference is AddressRelocation) {
+        if ((section.kind != .data && section.kind != .readOnlyData) ||
+            section.alignment < 8 ||
+            offset % 8 != 0 ||
+            ByteData.sublistView(section.bytes).getUint64(offset, .little) !=
+                0) {
+          throw ArgumentError('Invalid address relocation at $offset.');
+        }
+        continue;
+      }
+      reference as InstructionRelocation;
       final encoding = reference.encoding;
       final call = encoding == .arm64Call26 || encoding == .x64Call32;
       if (encoding.architecture != target.architecture ||
@@ -83,11 +102,7 @@ final class ObjectModule(
               encoding != .arm64Page21 &&
               encoding != .arm64LoadPageOffset12 &&
               encoding != .x64LoadAddress32 ||
-          section.kind != .code ||
-          offset < ends[reference.section] ||
-          offset > section.size - 4 ||
-          reference.symbol < 0 ||
-          reference.symbol >= this.symbols.length + this.imports.length) {
+          section.kind != .code) {
         throw ArgumentError('Invalid relocation at $offset.');
       }
       if (call && reference.symbol < this.symbols.length) {
@@ -106,7 +121,6 @@ final class ObjectModule(
         offset,
         unresolved: true,
       );
-      ends[reference.section] = offset + 4;
     }
   }
 }

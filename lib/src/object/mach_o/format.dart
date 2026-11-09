@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:dartc/target.dart';
 
 import '../object_module.dart';
+import '../relocation.dart';
 import '../object_format.dart';
 import 'sections.dart';
 import 'reader.dart';
@@ -124,17 +125,21 @@ final class MachO(@override final Target target) implements ObjectFormat {
         final index = relocation.symbol < object.symbols.length
             ? indices[relocation.symbol]!
             : symbols.length + relocation.symbol - object.symbols.length;
-        final type = switch ((relocation.encoding, relocation.indirect)) {
-          (.arm64Call26 || .x64Call32, false) => 0x2d000000,
-          (.arm64Page21, false) => 0x3d000000,
-          (.arm64Page21, true) => 0x5d000000,
-          (.arm64PageOffset12 || .arm64LoadPageOffset12, false) => 0x4c000000,
-          (.arm64LoadPageOffset12, true) => 0x6c000000,
-          (.x64Address32 || .x64LoadAddress32, false) => 0x1d000000,
-          (.x64LoadAddress32, true) => 0x3d000000,
-          _ => throw UnsupportedError(
-            'Mach-O relocation: ${relocation.encoding}',
-          ),
+        final type = switch (relocation) {
+          AddressRelocation() => 0x0e000000,
+          InstructionRelocation(:final encoding, :final indirect) => switch ((
+            encoding,
+            indirect,
+          )) {
+            (.arm64Call26 || .x64Call32, false) => 0x2d000000,
+            (.arm64Page21, false) => 0x3d000000,
+            (.arm64Page21, true) => 0x5d000000,
+            (.arm64PageOffset12 || .arm64LoadPageOffset12, false) => 0x4c000000,
+            (.arm64LoadPageOffset12, true) => 0x6c000000,
+            (.x64Address32 || .x64LoadAddress32, false) => 0x1d000000,
+            (.x64LoadAddress32, true) => 0x3d000000,
+            _ => throw UnsupportedError('Mach-O relocation: $encoding'),
+          },
         };
         data.setUint32(
           relocationOffsets[i] + j * 8,

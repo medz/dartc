@@ -26,6 +26,7 @@ The development checkout uses analyzer 14.7.0 to resolve Dart source, produces v
 - Remove the development-only `runtime/platform/io.dart` source API.
 - Compile direct `dart:math.sqrt` calls with known `int` or `double` inputs in native libraries and executables, preserving negative zero, NaN and infinities.
 - Lower referenced SDK top-level functions and static methods from their original Dart bodies, including calls through re-exports and function values. `Lowering.lower` is now asynchronous. Native execution still requires implementations for every referenced operation and callable, including error constructors.
+- Store symbol addresses in read-only or writable data with `Relocation.address(section, offset, symbol)`. ELF and Mach-O objects, archives and linked outputs preserve these references, including across shared libraries; read-only storage is protected after loading. Instruction references now use `Relocation.instruction(...)` and the `InstructionRelocation` subtype. Address fields require eight-byte alignment and do not support symbol addends.
 
 Language support and known analyzer differences are tracked in [specs](specs/README.md). IR behavior checks do not establish native execution support or full Dart compatibility.
 

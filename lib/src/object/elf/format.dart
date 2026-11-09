@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:dartc/target.dart';
 
 import '../object_module.dart';
+import '../relocation.dart';
 import '../object_format.dart';
 import 'records.dart';
 import 'reader.dart';
@@ -163,28 +164,36 @@ final class Elf(@override final Target target) implements ObjectFormat {
         final index = relocation.symbol < object.symbols.length
             ? indices[relocation.symbol]!
             : symbols.length + 1 + relocation.symbol - object.symbols.length;
-        final type = switch ((relocation.encoding, relocation.indirect)) {
-          (.arm64Call26, false) => 283,
-          (.arm64Page21, false) => 275,
-          (.arm64Page21, true) => 311,
-          (.arm64PageOffset12, false) => 277,
-          (.arm64LoadPageOffset12, false) => 286,
-          (.arm64LoadPageOffset12, true) => 312,
-          (.x64Address32 || .x64LoadAddress32, false) => 2,
-          (.x64LoadAddress32, true) => 9,
-          (.x64Call32, false) =>
-            relocation.symbol < object.symbols.length &&
-                    object.symbols[relocation.symbol].binding == .local
-                ? 2
-                : 4,
-          _ => throw UnsupportedError('ELF relocation: ${relocation.encoding}'),
+        final type = switch (relocation) {
+          AddressRelocation() => target.architecture == .arm64 ? 257 : 1,
+          InstructionRelocation(:final encoding, :final indirect) => switch ((
+            encoding,
+            indirect,
+          )) {
+            (.arm64Call26, false) => 283,
+            (.arm64Page21, false) => 275,
+            (.arm64Page21, true) => 311,
+            (.arm64PageOffset12, false) => 277,
+            (.arm64LoadPageOffset12, false) => 286,
+            (.arm64LoadPageOffset12, true) => 312,
+            (.x64Address32 || .x64LoadAddress32, false) => 2,
+            (.x64LoadAddress32, true) => 9,
+            (.x64Call32, false) =>
+              relocation.symbol < object.symbols.length &&
+                      object.symbols[relocation.symbol].binding == .local
+                  ? 2
+                  : 4,
+            _ => throw UnsupportedError('ELF relocation: $encoding'),
+          },
         };
         final offset = relocationOffsets[i] + j * 24;
         data.setUint64(offset, relocation.offset, .little);
         data.setUint64(offset + 8, index << 32 | type, .little);
         data.setInt64(
           offset + 16,
-          target.architecture == .arm64 ? 0 : -4,
+          relocation is AddressRelocation || target.architecture == .arm64
+              ? 0
+              : -4,
           .little,
         );
       }

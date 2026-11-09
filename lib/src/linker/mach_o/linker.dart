@@ -41,6 +41,7 @@ final class MachOLinker(@override final Target target) implements Linker {
         sections = unit.sections;
     final start = entry == null ? null : unit.entryPoint(entry);
     final imageBase = start == null ? 0 : 0x100000000;
+    final relocateConstants = unit.hasReadOnlyFixups;
     final pageZero = start == null ? 0 : 1;
     final installName = start == null ? '@rpath/$name' : name,
         nameBytes = utf8.encode(installName);
@@ -135,13 +136,21 @@ final class MachOLinker(@override final Target target) implements Linker {
     }
 
     final rebases = BytesBuilder();
-    for (final rebase in unit.rebases) {
-      rebases.add([0x11, 0x20 | (pageZero + (hasConstants ? 2 : 1))]);
-      final slot = unit.symbols[rebase.slot];
-      uleb(
-        rebases,
-        addresses[slot.section] + slot.offset - imageBase - dataStart,
+    (int, int) fixupPosition(int section, int offset) {
+      final constant = sections[section].kind == .readOnlyData;
+      return (
+        pageZero + (constant || !hasConstants ? 1 : 2),
+        addresses[section] +
+            offset -
+            imageBase -
+            (constant ? textSize : dataStart),
       );
+    }
+
+    for (final rebase in unit.rebases) {
+      final (segment, offset) = fixupPosition(rebase.section, rebase.offset);
+      rebases.add([0x11, 0x20 | segment]);
+      uleb(rebases, offset);
       rebases.addByte(0x51);
     }
     if (unit.rebases.isNotEmpty) rebases.addByte(0);
@@ -149,6 +158,7 @@ final class MachOLinker(@override final Target target) implements Linker {
     final bindOffset = (rebaseOffset + rebaseBytes.length + 7) & ~7;
     final binds = BytesBuilder();
     for (final binding in unit.bindings) {
+      final (segment, offset) = fixupPosition(binding.section, binding.offset);
       final ordinal = ordinals[binding.library];
       if (ordinal <= 15) {
         binds.addByte(0x10 | ordinal);
@@ -159,12 +169,8 @@ final class MachOLinker(@override final Target target) implements Linker {
       binds
         ..addByte(0x40)
         ..add(utf8.encode(binding.name))
-        ..add([0, 0x51, 0x70 | (pageZero + (hasConstants ? 2 : 1))]);
-      final slot = unit.symbols[binding.slot];
-      uleb(
-        binds,
-        addresses[slot.section] + slot.offset - imageBase - dataStart,
-      );
+        ..add([0, 0x51, 0x70 | segment]);
+      uleb(binds, offset);
       binds.addByte(0x90);
     }
     if (unit.bindings.isNotEmpty) binds.addByte(0);
@@ -205,8 +211,9 @@ final class MachOLinker(@override final Target target) implements Linker {
       int address,
       int memorySize,
       int protection,
-      List<int> indices,
-    ) {
+      List<int> indices, {
+      bool readOnlyAfterFixups = false,
+    }) {
       final base = command(0x19, 72 + indices.length * 80);
       bytes.setAll(base + 8, ascii.encode(name));
       data.setUint64(base + 24, address, .little);
@@ -216,6 +223,7 @@ final class MachOLinker(@override final Target target) implements Linker {
       data.setUint32(base + 56, protection, .little);
       data.setUint32(base + 60, protection, .little);
       data.setUint32(base + 64, indices.length, .little);
+      if (readOnlyAfterFixups) data.setUint32(base + 68, 0x10, .little);
       for (final (j, i) in indices.indexed) {
         final section = sections[i], offset = base + 72 + j * 80;
         bytes.setAll(offset, ascii.encode(section.kind.machName));
@@ -236,13 +244,14 @@ final class MachOLinker(@override final Target target) implements Linker {
     segment('__TEXT', 0, textSize, imageBase, textSize, 5, inSegment('__TEXT'));
     if (hasConstants) {
       segment(
-        '__CONST',
+        relocateConstants ? '__DATA_CONST' : '__CONST',
         textSize,
         dataStart - textSize,
         imageBase + textSize,
         dataStart - textSize,
-        1,
+        relocateConstants ? 3 : 1,
         inSegment('__CONST'),
+        readOnlyAfterFixups: relocateConstants,
       );
     }
     if (writable) {

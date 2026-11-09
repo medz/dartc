@@ -25,6 +25,7 @@ void main() {
       for (final (name, missing) in [
         ('missing_dependency', 'absent_library'),
         ('missing_symbol', 'dartc_absent_symbol'),
+        ('missing_unused_symbol', 'dartc_absent_symbol'),
       ]) {
         expect(
           () => assets.open('linker/$name'),

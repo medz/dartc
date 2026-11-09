@@ -244,6 +244,15 @@ final class ElfReader(final Target target, Uint8List bytes) {
           symbol > 0 && symbol < symbolCount,
           'Invalid ELF relocation symbol.',
         );
+        final index = indices[symbol];
+        final destination = index < 0 ? symbols.length - index - 1 : index;
+        if (type == (target.architecture == .arm64 ? 257 : 1)) {
+          if (data.getInt64(at + 16, .little) != 0) {
+            throw UnsupportedError('ELF address addends.');
+          }
+          references.add(.address(section, offset, destination));
+          continue;
+        }
         final FixupEncoding encoding;
         if (target.architecture == .arm64) {
           encoding = switch (type) {
@@ -275,13 +284,12 @@ final class ElfReader(final Target target, Uint8List bytes) {
             (target.architecture == .arm64 ? 0 : -4)) {
           throw UnsupportedError('ELF symbol addends.');
         }
-        final index = indices[symbol];
         references.add(
-          Relocation(
+          Relocation.instruction(
             section,
             offset,
             encoding,
-            index < 0 ? symbols.length - index - 1 : index,
+            destination,
             indirect: target.architecture == .arm64
                 ? type == 311 || type == 312
                 : type == 9,

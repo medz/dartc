@@ -267,6 +267,19 @@ final class MachOReader(final Target target, Uint8List bytes) {
         }
         input.check(symbol < count, 'Invalid Mach-O relocation symbol.');
         final code = sections[section].bytes;
+        final index = indices[symbol];
+        final destination = index < 0 ? symbols.length - index - 1 : index;
+        if (info >> 24 == 0x0e) {
+          input.check(
+            offset <= code.length - 8,
+            'Invalid Mach-O address relocation offset.',
+          );
+          if (ByteData.sublistView(code).getUint64(offset, .little) != 0) {
+            throw UnsupportedError('Mach-O address addends.');
+          }
+          references.add(.address(section, offset, destination));
+          continue;
+        }
         input.check(
           offset <= code.length - 4,
           'Invalid Mach-O relocation offset.',
@@ -289,13 +302,12 @@ final class MachOReader(final Target target, Uint8List bytes) {
           (.x64, 0x3d) => FixupEncoding.x64LoadAddress32,
           _ => throw UnsupportedError('Mach-O relocation flags ${info >> 24}.'),
         };
-        final index = indices[symbol];
         references.add(
-          Relocation(
+          Relocation.instruction(
             section,
             offset,
             encoding,
-            index < 0 ? symbols.length - index - 1 : index,
+            destination,
             indirect: target.architecture == .arm64
                 ? info >> 24 == 0x5d || info >> 24 == 0x6c
                 : info >> 24 == 0x3d,

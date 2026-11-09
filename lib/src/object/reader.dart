@@ -82,6 +82,24 @@ final class ObjectReader(final Uint8List bytes) {
     }
     for (final reference in relocations) {
       final section = sections[reference.section];
+      if (reference is AddressRelocation) {
+        check(
+          reference.offset >= 0 && reference.offset <= section.size - 8,
+          'Invalid object address relocation site.',
+        );
+        if ((section.kind != .data && section.kind != .readOnlyData) ||
+            section.alignment < 8 ||
+            reference.offset % 8 != 0 ||
+            ByteData.sublistView(section.bytes)
+                    .getUint64(reference.offset, .little) !=
+                0) {
+          throw UnsupportedError(
+            'Address relocation storage or implicit addend.',
+          );
+        }
+        continue;
+      }
+      reference as InstructionRelocation;
       if (section.kind != .code) {
         throw UnsupportedError('Relocations outside instruction sections.');
       }

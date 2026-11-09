@@ -81,7 +81,12 @@ base class ScalarCodeGenerator<R extends Object>(
                 throw ArgumentError('Missing call definition: ${callee.name}');
               }
               relocations.add(
-                .new(0, code.length + fixup.offset, fixup.encoding, index),
+                .instruction(
+                  0,
+                  code.length + fixup.offset,
+                  fixup.encoding,
+                  index,
+                ),
               );
             });
       symbols.add(
@@ -99,13 +104,17 @@ base class ScalarCodeGenerator<R extends Object>(
     for (final MapEntry(:key, :value) in exports.entries) {
       if (!_needsEntry(value.signature)) continue;
       code.add(Uint8List((-code.length) & 15));
-      final bytes = NativeAdapter(_createFunction()).generate(value.signature, (
-        fixup,
-      ) {
-        relocations.add(
-          .new(0, code.length + fixup.offset, fixup.encoding, indices[key]!),
-        );
-      }, intoDart: true);
+      final bytes = NativeAdapter(_createFunction())
+          .generate(value.signature, (fixup) {
+            relocations.add(
+              .instruction(
+                0,
+                code.length + fixup.offset,
+                fixup.encoding,
+                indices[key]!,
+              ),
+            );
+          }, intoDart: true);
       symbols.add(
         .new(
           target.nativeSymbol(value.symbol),
@@ -133,7 +142,7 @@ base class ScalarCodeGenerator<R extends Object>(
       code.add(Uint8List((-code.length) & 15));
       final bytes = _createFunction().start((fixup) {
         relocations.add(
-          .new(
+          .instruction(
             0,
             code.length + fixup.offset,
             fixup.encoding,
@@ -152,7 +161,7 @@ base class ScalarCodeGenerator<R extends Object>(
       relocations: [
         ...relocations,
         for (final (start, fixup, symbol) in nativeCalls)
-          Relocation(
+          Relocation.instruction(
             0,
             start + fixup.offset,
             fixup.encoding,

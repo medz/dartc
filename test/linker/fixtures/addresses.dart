@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/assembler/arm64.dart' as arm;
@@ -69,7 +71,7 @@ List<ObjectModule> addressModules(Target target) {
     }
     for (final fixup in fixups) {
       references.add(
-        Relocation(
+        Relocation.instruction(
           0,
           code.length + fixup.offset,
           fixup.encoding,
@@ -113,5 +115,53 @@ List<ObjectModule> addressModules(Target target) {
       imports: [function.symbols.single.name],
       relocations: caller.relocations,
     ),
+    ObjectModule(
+      target,
+      [
+        Section.readOnlyData(Uint8List(56), alignment: 16),
+        Section.data(Uint8List(56), alignment: 8),
+        Section.data([29, 0, 0, 0, 0, 0, 0, 0], alignment: 8),
+      ],
+      [
+        for (final (section, name) in ['table', 'mutable_table'].indexed)
+          Symbol(
+            target.nativeSymbol('dartc_address_$name'),
+            section,
+            0,
+            56,
+            kind: .data,
+            exported: true,
+          ),
+        const Symbol('local', 2, 0, 8, kind: .data, binding: .local),
+      ],
+      imports: [
+        for (final name in ['function', 'constant', 'state', 'zero'])
+          target.nativeSymbol('dartc_address_$name'),
+      ],
+      relocations: [
+        for (final section in [0, 1])
+          for (final (field, symbol) in [3, 4, 5, 6, 2, 0, 1].indexed)
+            .address(section, field * 8, symbol),
+      ],
+    ),
   ];
 }
+
+ObjectModule constantAddressTable(Target target) => ObjectModule(
+  target,
+  [
+    Section.readOnlyData([...Uint8List(16), 37, ...Uint8List(7)], alignment: 8),
+  ],
+  [
+    Symbol(
+      target.nativeSymbol('dartc_address_table'),
+      0,
+      0,
+      24,
+      kind: .data,
+      exported: true,
+    ),
+    const Symbol('value', 0, 16, 8, kind: .data, binding: .local),
+  ],
+  relocations: [const .address(0, 0, 1), const .address(0, 8, 0)],
+);

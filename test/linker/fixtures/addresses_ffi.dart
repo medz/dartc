@@ -23,5 +23,8 @@ final class AddressLibrary(String asset) {
 
   Pointer<Int64> symbol(String name) => _library.lookup('dartc_address_$name');
 
+  Pointer<Pointer<Int64>> table(String name) =>
+      _library.lookup('dartc_address_$name');
+
   void close() => _library.close();
 }

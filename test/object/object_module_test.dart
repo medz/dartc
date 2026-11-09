@@ -59,10 +59,10 @@ void main() {
         );
       }
       for (final ref in [
-        const native.Relocation(-1, 0, .arm64Call26, 0),
-        const native.Relocation(2, 0, .arm64Call26, 0),
-        const native.Relocation(1, 0, .arm64Call26, 0),
-        const native.Relocation(0, 0, .arm64Call26, 1),
+        const native.Relocation.instruction(-1, 0, .arm64Call26, 0),
+        const native.Relocation.instruction(2, 0, .arm64Call26, 0),
+        const native.Relocation.instruction(1, 0, .arm64Call26, 0),
+        const native.Relocation.instruction(0, 0, .arm64Call26, 1),
       ]) {
         expect(
           () => native.ObjectModule(
@@ -118,7 +118,7 @@ void main() {
       final code = [0, 0, 0, 0x94];
       const symbol = native.Symbol('entry', 0, 0, 4);
       final imports = ['callee'];
-      final refs = [const native.Relocation(0, 0, .arm64Call26, 1)];
+      final refs = [const native.Relocation.instruction(0, 0, .arm64Call26, 1)];
       final module = native.ObjectModule(
         target,
         [native.Section.code(code)],
@@ -131,13 +131,19 @@ void main() {
       expect(module.imports, ['callee']);
       expect(module.relocations.single.symbol, 1);
       for (final ref in [
-        const native.Relocation(0, -1, .arm64Call26, 0),
-        const native.Relocation(0, 1, .arm64Call26, 0),
-        const native.Relocation(0, 0, .x64Call32, 0),
-        const native.Relocation(0, 0, .arm64Call26, -1),
-        const native.Relocation(0, 0, .arm64Call26, 1),
-        const native.Relocation(0, 0, .arm64Branch26, 0),
-        const native.Relocation(0, 0, .arm64Call26, 0, indirect: true),
+        const native.Relocation.instruction(0, -1, .arm64Call26, 0),
+        const native.Relocation.instruction(0, 1, .arm64Call26, 0),
+        const native.Relocation.instruction(0, 0, .x64Call32, 0),
+        const native.Relocation.instruction(0, 0, .arm64Call26, -1),
+        const native.Relocation.instruction(0, 0, .arm64Call26, 1),
+        const native.Relocation.instruction(0, 0, .arm64Branch26, 0),
+        const native.Relocation.instruction(
+          0,
+          0,
+          .arm64Call26,
+          0,
+          indirect: true,
+        ),
       ]) {
         expect(
           () => native.ObjectModule(
@@ -182,7 +188,9 @@ void main() {
             native.Section.code([0xc0, 3, 0x5f, 0xd6]),
           ],
           [symbol],
-          relocations: [const native.Relocation(0, 0, .arm64Call26, 0)],
+          relocations: [
+            const native.Relocation.instruction(0, 0, .arm64Call26, 0),
+          ],
         ),
         throwsArgumentError,
       );
@@ -193,7 +201,9 @@ void main() {
             native.Section.code([1, 0, 0, 0x94]),
           ],
           [symbol],
-          relocations: [const native.Relocation(0, 0, .arm64Call26, 0)],
+          relocations: [
+            const native.Relocation.instruction(0, 0, .arm64Call26, 0),
+          ],
         ),
         throwsArgumentError,
       );
@@ -203,8 +213,8 @@ void main() {
           [native.Section.code(code)],
           [symbol],
           relocations: [
-            const native.Relocation(0, 0, .arm64Call26, 0),
-            const native.Relocation(0, 0, .arm64Call26, 0),
+            const native.Relocation.instruction(0, 0, .arm64Call26, 0),
+            const native.Relocation.instruction(0, 0, .arm64Call26, 0),
           ],
         ),
         throwsArgumentError,
