@@ -2,9 +2,9 @@ import 'dart:io';
 
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:dartc/frontend.dart';
-import 'package:dartc/src/frontend/lowering/analyzer_metadata.dart';
-import 'package:dartc/src/frontend/lowering/constant_evaluation.dart';
-import 'package:dartc/src/frontend/lowering/constant_safety.dart';
+import 'package:dartc/src/frontend/analyzer_metadata.dart';
+import 'package:dartc/src/frontend/constant_evaluation.dart';
+import 'package:dartc/src/frontend/constant_safety.dart';
 import 'package:test/test.dart';
 
 import '../../support/ir_interpreter.dart';
@@ -165,28 +165,16 @@ void main() {
       );
     }
   });
-  test('exact constructor values retain parameter and field checks', () async {
-    await AnalysisSession([
-      'test/frontend/lowering/fixtures/constant_safety/numeric_type_errors.dart',
-    ]).use((checked) {
-      final unit = checked.libraries.single.units.single;
-      final constants = ConstantEvaluation();
-      for (final declaration
-          in unit.unit.declarations.whereType<TopLevelVariableDeclaration>()) {
-        for (final variable in declaration.variables.variables) {
-          expect(
-            () => constants.variable(
-              variable.declaredFragment!.element,
-              unit,
-              variable,
-            ),
-            throwsFormatException,
-            reason: variable.name.lexeme,
-          );
-        }
-      }
+  for (final kind in ['parameter', 'field', 'factory']) {
+    test('exact constructor values retain $kind type checks', () async {
+      await expectLater(
+        AnalysisSession([
+          'test/frontend/lowering/fixtures/constant_safety/numeric_${kind}_error.dart',
+        ]).use((_) => fail('An invalid constant passed analysis.')),
+        throwsFormatException,
+      );
     });
-  });
+  }
   test(
     'private symbol comparisons lose identity in analyzer, not the VM',
     () async {

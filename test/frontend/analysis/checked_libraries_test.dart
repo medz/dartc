@@ -57,4 +57,39 @@ void main() {
       expect(consumed, isFalse);
     },
   );
+
+  test('constant checks use exact comparisons before rejecting SDK errors', () {
+    return AnalysisSession([
+      'test/frontend/analysis/fixtures/valid_constants.dart',
+    ]).use((checked) {
+      expect(checked.libraries, hasLength(1));
+      expect(Lowering().lower(checked).program.functions, isNotEmpty);
+    });
+  });
+
+  for (final fixture in [
+    'invalid_local_constant',
+    'invalid_constant_expression',
+    'invalid_constant_default',
+    'invalid_constant_annotation',
+    'invalid_constant_dependency',
+    'invalid_constant_beside_valid',
+  ]) {
+    test('checks $fixture before allowing consumption', () async {
+      var consumed = false;
+      await expectLater(
+        AnalysisSession([
+          'test/frontend/analysis/fixtures/$fixture.dart',
+        ], includeDependencies: true).use((_) => consumed = true),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'assertion',
+            contains('Expected equal values.'),
+          ),
+        ),
+      );
+      expect(consumed, isFalse);
+    });
+  }
 }

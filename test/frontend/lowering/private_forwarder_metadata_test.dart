@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:dartc/ir.dart';
 import 'package:dartc/frontend.dart';
-import 'package:dartc/src/frontend/lowering/analyzer_metadata.dart';
+import 'package:dartc/src/frontend/analyzer_metadata.dart';
 import 'package:dartc/src/frontend/lowering/bindings.dart';
 import 'package:test/test.dart';
 

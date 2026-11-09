@@ -3,7 +3,7 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
 import 'package:dartc/frontend.dart';
-import 'package:dartc/src/frontend/lowering/analyzer_metadata.dart';
+import 'package:dartc/src/frontend/analyzer_metadata.dart';
 import 'package:dartc/src/frontend/lowering/bindings.dart';
 import 'package:test/test.dart';
 

@@ -5,8 +5,8 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
 
-import 'analyzer_metadata.dart';
-import 'constant_evaluation.dart';
+import '../analyzer_metadata.dart';
+import '../constant_evaluation.dart';
 import 'ffi.dart';
 
 /// An extension's static IR entry, distinct from its source callable signature.
@@ -29,8 +29,11 @@ final class ExtensionApplication(
 );
 
 /// Maps analyzer declarations and formal parameters to their IR identities.
-final class Bindings({final bool enableAssertions = false}) {
-  final constants = ConstantEvaluation();
+final class Bindings({
+  final bool enableAssertions = false,
+  ConstantEvaluation? constants,
+}) {
+  final ConstantEvaluation constants = constants ?? ConstantEvaluation();
   final _targets = <ExecutableElement, FunctionTarget>{};
   final _typeEnvironments =
       <FunctionTarget, Map<TypeParameterType, ValueType>>{};

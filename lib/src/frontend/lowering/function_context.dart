@@ -4,7 +4,7 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart' show DartType;
 import 'package:dartc/ir.dart';
 
-import 'analyzer_metadata.dart';
+import '../analyzer_metadata.dart';
 import 'bindings.dart';
 import 'ffi.dart';
 import 'core_member.dart';

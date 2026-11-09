@@ -8,6 +8,8 @@ import 'package:analyzer/file_system/physical_file_system.dart';
 import 'package:analyzer/src/dart/analysis/analysis_context_collection.dart';
 import 'package:dartc/sdk.dart';
 
+import '../constant_evaluation.dart';
+
 /// Owns the analysis resources and resolved snapshot of one library batch.
 ///
 /// Call [close] after consuming [resolve], or use [use] for scoped access.
@@ -124,8 +126,12 @@ final class CheckedLibraries._(
 ) {
   final List<ResolvedLibraryResult> _libraries = .unmodifiable(input);
   final void Function() _checkOpen = checkOpen;
+  final _constants = ConstantEvaluation();
 
   /// The resolved libraries, accessible until their session is closed.
+  ///
+  /// Analyzer objects retain their original diagnostics and constant values.
+  /// The session's constant checks and IR translation use corrected values.
   List<ResolvedLibraryResult> get libraries {
     _checkOpen();
     return _libraries;
@@ -143,16 +149,16 @@ final class CheckedLibraries._(
         throw ArgumentError('Expected distinct libraries from one session.');
       }
       for (final unit in library.units) {
-        for (final error in unit.diagnostics) {
-          if (error.severity == .error) {
-            throw FormatException(
-              '${unit.uri}: ${error.message}',
-              unit.content,
-              error.offset,
-            );
-          }
-        }
+        _constants.check(unit);
       }
     }
+  }
+}
+
+// Internal handoff; this extension is not exported by frontend.dart.
+extension CheckedConstants on CheckedLibraries {
+  ConstantEvaluation get constants {
+    _checkOpen();
+    return _constants;
   }
 }

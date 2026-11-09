@@ -22,7 +22,10 @@ final class Lowering({final bool enableAssertions = false}) {
   /// Constants appear as operands at their uses. Throws
   /// [UnsupportedError] at the first source construct without an IR translation.
   LoweringResult lower(CheckedLibraries input) {
-    final bindings = Bindings(enableAssertions: enableAssertions);
+    final bindings = Bindings(
+      enableAssertions: enableAssertions,
+      constants: input.constants,
+    );
     for (final unit in input.libraries.expand((library) => library.units)) {
       for (final node in unit.unit.declarations) {
         switch (node) {

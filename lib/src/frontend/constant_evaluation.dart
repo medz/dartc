@@ -4,8 +4,10 @@
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/token.dart';
-import 'package:analyzer/dart/constant/value.dart';
+import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:analyzer/dart/constant/value.dart' show DartObject;
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/diagnostic/diagnostic.dart';
 import 'package:analyzer/error/listener.dart';
 
 // Analyzer 14.7 does not expose a constant-evaluation override publicly.
@@ -30,11 +32,41 @@ import 'package:analyzer/src/diagnostic/diagnostic.dart' as diagnostics;
 
 import 'constant_safety.dart';
 
-/// Evaluates checked constant syntax with exact mixed numeric comparisons.
+/// Checks and evaluates constants with exact mixed numeric comparisons.
 final class ConstantEvaluation() {
   final _safety = ConstantSafety();
   final _values = <VariableElement, internal.Constant?>{};
   final _active = <VariableElement>{};
+
+  /// Checks constant obligations in every declaration, including dead code.
+  void check(ResolvedUnitResult unit) {
+    final errors = unit.diagnostics.where((d) => d.severity == .error).toList();
+    for (final error in errors) {
+      if (!_evaluationErrors.contains(error.diagnosticCode)) {
+        _fail(unit, error);
+      }
+    }
+    unit.unit.accept2(_CheckConstants(this, unit, errors));
+    for (final error in errors) {
+      _fail(unit, error);
+    }
+  }
+
+  // Only value-dependent errors can be discharged by successful evaluation.
+  static final _evaluationErrors = {
+    diagnostics.constEvalThrowsException,
+    diagnostics.constEvalThrowsIdbze,
+    diagnostics.constConstructorParamTypeMismatch,
+    diagnostics.constConstructorFieldTypeMismatch,
+    diagnostics.variableTypeMismatch,
+  };
+
+  static Never _fail(ResolvedUnitResult unit, Diagnostic error) =>
+      throw FormatException(
+        '${unit.uri}: ${error.message}',
+        unit.content,
+        error.offset,
+      );
 
   DartObject? variable(
     VariableElement variable,
@@ -144,6 +176,66 @@ final class ConstantEvaluation() {
       unit.content,
       site.offset,
     );
+  }
+}
+
+final class _CheckConstants(
+  final ConstantEvaluation constants,
+  final ResolvedUnitResult unit,
+  final List<Diagnostic> errors,
+) extends UnifyingAstVisitor2<void> {
+  late final _visitor = _Visitor(
+    constants,
+    unit.libraryElement as internal.LibraryElementImpl,
+  );
+
+  void _check(internal.Constant? value, AstNode site) {
+    constants._value(value, unit, site);
+    if (value case internal.DartObjectImpl(isUnknown: false)) {
+      errors.removeWhere(
+        (error) =>
+            error.offset >= site.offset &&
+            error.offset + error.length <= site.end,
+      );
+    }
+  }
+
+  void _expression(Expression expression) =>
+      _check(_visitor.evaluateConstant(expression), expression);
+
+  @override
+  void visitNode(AstNode node) {
+    switch (node) {
+      case internal.VariableBindingImpl(
+            declaredFragment: final fragment?,
+            initializer2: final initializer?,
+          )
+          when fragment.isConst:
+        _check(constants._variable(fragment.element), initializer);
+      case internal.FormalParameterDefaultClauseImpl(:final value2):
+        final parameter = node.parent2 as internal.FormalParameterImpl;
+        _check(
+          constants._variable(parameter.declaredFragment!.element),
+          value2,
+        );
+      case EnumConstantDeclaration2(declaredFragment: final fragment?):
+        _check(constants._variable(fragment.element), node);
+      case Annotation(:final expression):
+        _expression(expression);
+      case ConstructorInvocation(isConst: true) ||
+          DotShorthandConstructorInvocation2(isConst: true) ||
+          ListLiteral(isConst: true) ||
+          SetOrMapLiteral(isConst: true) ||
+          RecordLiteral(isConst: true):
+        _expression(node as Expression);
+      case ConstantPattern(:final expression2):
+        _expression(expression2);
+      case RelationalPattern(:final operand2):
+        _expression(operand2);
+      case MapPatternEntry(:final key2):
+        _expression(key2);
+    }
+    super.visitNode(node);
   }
 }
 

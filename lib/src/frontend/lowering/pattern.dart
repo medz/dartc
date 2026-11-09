@@ -2,7 +2,7 @@ import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
 
-import 'analyzer_metadata.dart';
+import '../analyzer_metadata.dart';
 import 'bindings.dart';
 import 'core_member.dart';
 import 'function_context.dart';
