@@ -3,10 +3,11 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:dartc/object.dart';
-import 'package:dartc/object/mach_o.dart' show MachOSectionKind;
+import 'package:dartc/object/mach_o.dart' show MachO, MachOSectionKind;
 import 'package:dartc/target.dart';
 
 import '../linker.dart';
+import '../input.dart';
 import '../link_unit.dart';
 import 'code_signature.dart';
 import 'export_trie.dart';
@@ -21,10 +22,11 @@ final class MachOLinker(@override final Target target) implements Linker {
 
   @override
   Uint8List linkSharedLibrary(
-    Iterable<ObjectModule> objects, {
+    Iterable<LinkInput> inputs, {
     required String name,
   }) {
-    final unit = LinkUnit(target, objects, name), sections = unit.sections;
+    final unit = LinkUnit(MachO(target), inputs, name),
+        sections = unit.sections;
     final installName = '@rpath/$name', nameBytes = utf8.encode(installName);
     final idSize = (24 + nameBytes.length + 1 + 7) & ~7;
     final hasConstants = sections.any((s) => s.kind == .readOnlyData);

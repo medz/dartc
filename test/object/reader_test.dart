@@ -32,7 +32,7 @@ void main() {
             final library = assets.library('compiler/$fixture');
             expect(
               linker.linkSharedLibrary([
-                module,
+                .object(module),
               ], name: library.uri.pathSegments.last),
               library.readAsBytesSync(),
               reason: fixture,
@@ -61,7 +61,7 @@ void main() {
             final library = assets.library('linker/$name');
             expect(
               linker.linkSharedLibrary(
-                modules,
+                modules.map(LinkInput.object),
                 name: library.uri.pathSegments.last,
               ),
               library.readAsBytesSync(),
@@ -99,8 +99,8 @@ void main() {
           final decoded = format.decodeObject(format.encodeObject(aliased));
           expect(decoded.symbols.last.name, 'alias');
           expect(
-            linker.linkSharedLibrary([decoded], name: 'aliases'),
-            linker.linkSharedLibrary([aliased], name: 'aliases'),
+            linker.linkSharedLibrary([.object(decoded)], name: 'aliases'),
+            linker.linkSharedLibrary([.object(aliased)], name: 'aliases'),
           );
         },
       );

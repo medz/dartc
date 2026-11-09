@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 
+import 'input.dart';
+
 /// Coalesced storage with source bytes copied only into the final image.
 final class SectionGroup(
   final SectionKind kind,
@@ -13,10 +15,11 @@ final class SectionGroup(
 
 /// Resolves module-local identities and groups sections for one library link.
 final class LinkUnit(
-  final Target target,
-  Iterable<ObjectModule> input,
+  ObjectFormat format,
+  Iterable<LinkInput> input,
   final String name,
 ) {
+  final Target target = format.target;
   final sections = <SectionGroup>[];
   final symbols = <Symbol>[];
   final _references = <Relocation>[];
@@ -25,9 +28,82 @@ final class LinkUnit(
     if (name.isEmpty || name.contains('\u0000')) {
       throw ArgumentError.value(name, 'name');
     }
-    final objects = input.toList();
-    if (objects.isEmpty || objects.any((object) => object.target != target)) {
-      throw ArgumentError('Expected non-empty modules for $target.');
+    final objects = <ObjectModule>[], globals = <String, (int, int)>{};
+    final missing = <String>{}, loaded = <Archive, Set<int>>{};
+    void include(ObjectModule object) {
+      if (object.target != target) {
+        throw ArgumentError('Expected an object for $target.');
+      }
+      for (final (j, symbol) in object.symbols.indexed) {
+        if (symbol.binding != .global) continue;
+        if (globals.containsKey(symbol.name)) {
+          throw ArgumentError('Duplicate global: ${symbol.name}');
+        }
+        globals[symbol.name] = (objects.length, j);
+        missing.remove(symbol.name);
+      }
+      objects.add(object);
+      for (final name in object.imports) {
+        if (!globals.containsKey(name)) missing.add(name);
+      }
+    }
+
+    void includeMember(Archive archive, int member, String name) {
+      if (!(loaded[archive] ??= {}).add(member)) {
+        throw FormatException('Loaded archive member does not define $name.');
+      }
+      final module = format.decodeObject(archive.members[member].bytes);
+      if (!module.symbols.any((s) => s.binding == .global && s.name == name)) {
+        throw FormatException('Archive index member does not define $name.');
+      }
+      include(module);
+    }
+
+    void search(Iterable<Archive> archives) {
+      var previous = -1;
+      while (previous != objects.length) {
+        previous = objects.length;
+        if (target.operatingSystem == .linux) {
+          for (final archive in archives) {
+            for (final (:name, :member) in archive.index) {
+              if (missing.contains(name)) includeMember(archive, member, name);
+            }
+          }
+        } else {
+          nextName:
+          for (final name in missing.toList()) {
+            if (globals.containsKey(name)) continue;
+            for (final archive in archives) {
+              for (final entry in archive.index) {
+                if (entry.name != name) continue;
+                includeMember(archive, entry.member, name);
+                continue nextName;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    final archives = <Archive>[];
+    for (final entry in input) {
+      switch (entry) {
+        case ObjectInput(:final module):
+          include(module);
+        case ArchiveInput(:final archive):
+          if (target.operatingSystem == .linux) {
+            search([archive]);
+          } else {
+            archives.add(archive);
+          }
+      }
+    }
+    if (target.operatingSystem == .macos) search(archives);
+    if (missing.isNotEmpty) {
+      throw ArgumentError('Undefined symbol: ${missing.first}');
+    }
+    if (objects.isEmpty) {
+      throw ArgumentError('Expected at least one included object.');
     }
     final bases = [
       for (final object in objects)
@@ -52,16 +128,10 @@ final class LinkUnit(
         sections.add(SectionGroup(kind, size, alignment, parts));
       }
     }
-    final globals = <String, (int, int)>{}, symbolBases = <int>[];
+    final symbolBases = <int>[];
     for (final (i, object) in objects.indexed) {
       symbolBases.add(symbols.length);
-      for (final (j, symbol) in object.symbols.indexed) {
-        if (symbol.binding == .global) {
-          if (globals.containsKey(symbol.name)) {
-            throw ArgumentError('Duplicate global: ${symbol.name}');
-          }
-          globals[symbol.name] = (i, j);
-        }
+      for (final symbol in object.symbols) {
         final (section, offset) = bases[i][symbol.section]!;
         symbols.add(
           .new(
@@ -77,11 +147,6 @@ final class LinkUnit(
       }
     }
     for (final (i, object) in objects.indexed) {
-      for (final name in object.imports) {
-        if (!globals.containsKey(name)) {
-          throw ArgumentError('Undefined symbol: $name');
-        }
-      }
       for (final reference in object.relocations) {
         final (owner, index) = reference.symbol < object.symbols.length
             ? (i, reference.symbol)

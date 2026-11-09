@@ -69,7 +69,7 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
       SharedLibraryOutput(:final name) => switch (target.operatingSystem) {
         .macos => MachOLinker(target),
         .linux => ElfLinker(target),
-      }.linkSharedLibrary([object], name: name),
+      }.linkSharedLibrary([.object(object)], name: name),
     };
     final header = StringBuffer();
     NativeExports(exports.values).writeHeader(header);

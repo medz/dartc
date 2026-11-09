@@ -16,6 +16,7 @@ import '../test/linker/fixtures/functions.dart';
 import '../test/linker/fixtures/calls.dart';
 import '../test/linker/fixtures/symbols.dart';
 import '../test/linker/fixtures/data.dart';
+import '../test/linker/fixtures/archive.dart';
 import '../test/support/native_assets.dart';
 
 Future<void> main() async {
@@ -63,7 +64,7 @@ Future<void> main() async {
       Future<void> shared(List<ObjectModule> modules, File output) =>
           output.writeAsBytes(
             linker.linkSharedLibrary(
-              modules,
+              modules.map(LinkInput.object),
               name: output.uri.pathSegments.last,
             ),
           );
@@ -112,6 +113,22 @@ Future<void> main() async {
       await assets
           .file('linker/calls.a')
           .writeAsBytes(ArchiveWriter(format).encode(modules));
+      final lazy = archiveModules(target);
+      final roots = await objects('lazy_', [lazy.first]);
+      final archive = assets.file('linker/lazy.a');
+      await archive.writeAsBytes(ArchiveWriter(format).encode(lazy.skip(1)));
+      for (final (name, root, archiveFile) in [
+        ('archive_calls', roots.single, archive),
+        ('archive_data', decodedData.last, assets.file('linker/data.a')),
+      ]) {
+        final output = assets.library('linker/$name');
+        await output.writeAsBytes(
+          linker.linkSharedLibrary([
+            .object(root),
+            .archive(Archive.decode(await archiveFile.readAsBytes())),
+          ], name: output.uri.pathSegments.last),
+        );
+      }
       print('Built test assets for $target.');
     }
   }

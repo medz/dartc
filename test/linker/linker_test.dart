@@ -40,8 +40,12 @@ void main() {
       test(
         '$target returns a deterministic complete image without file IO',
         () {
-          final first = linker.linkSharedLibrary([module], name: 'values');
-          final second = linker.linkSharedLibrary([module], name: 'values');
+          final first = linker.linkSharedLibrary([
+            .object(module),
+          ], name: 'values');
+          final second = linker.linkSharedLibrary([
+            .object(module),
+          ], name: 'values');
           expect(codeOf(first), module.sections.single.bytes);
           expect(second, first);
           expect(() => first[0] = 0, throwsUnsupportedError);
@@ -56,10 +60,17 @@ void main() {
           for (final module in modules) module.sections.single.bytes.toList(),
         ];
         expect(
-          () => linker.linkSharedLibrary([modules.first], name: 'missing'),
+          () => linker.linkSharedLibrary([
+            .object(modules.first),
+          ], name: 'missing'),
           throwsArgumentError,
         );
-        final bytes = codeOf(linker.linkSharedLibrary(modules, name: 'calls'));
+        final bytes = codeOf(
+          linker.linkSharedLibrary(
+            modules.map(LinkInput.object),
+            name: 'calls',
+          ),
+        );
         expect(bytes, isNot(modules.first.sections.single.bytes));
         expect(modules.map((module) => module.sections.single.bytes), before);
         expect(modules.first.imports, isNotEmpty);
@@ -78,7 +89,10 @@ void main() {
             [storage, storage, modules.last],
           ]) {
             expect(
-              () => linker.linkSharedLibrary(inputs, name: 'data'),
+              () => linker.linkSharedLibrary(
+                inputs.map(LinkInput.object),
+                name: 'data',
+              ),
               throwsArgumentError,
             );
           }
@@ -90,8 +104,8 @@ void main() {
           );
           expect(
             () => linker.linkSharedLibrary([
-              caller,
-              dataCallee,
+              .object(caller),
+              .object(dataCallee),
             ], name: 'bad_call'),
             throwsArgumentError,
           );
@@ -110,9 +124,9 @@ void main() {
           );
           expect(
             () => linker.linkSharedLibrary([
-              caller,
-              endMarker,
-              module,
+              .object(caller),
+              .object(endMarker),
+              .object(module),
             ], name: 'end'),
             throwsArgumentError,
           );
@@ -128,8 +142,10 @@ void main() {
             ],
           );
           expect(
-            () =>
-                linker.linkSharedLibrary([distant, modules.last], name: 'far'),
+            () => linker.linkSharedLibrary([
+              .object(distant),
+              .object(modules.last),
+            ], name: 'far'),
             throwsRangeError,
           );
           for (final sections in [
@@ -142,7 +158,8 @@ void main() {
           ]) {
             final large = ObjectModule(target, sections, []);
             expect(
-              () => linker.linkSharedLibrary([large], name: 'overflow'),
+              () =>
+                  linker.linkSharedLibrary([.object(large)], name: 'overflow'),
               throwsRangeError,
             );
             if (os == .macos && sections.length > 1) {
@@ -166,13 +183,16 @@ void main() {
             [module, module],
           ]) {
             expect(
-              () => linker.linkSharedLibrary(inputs, name: 'values'),
+              () => linker.linkSharedLibrary(
+                inputs.map(LinkInput.object),
+                name: 'values',
+              ),
               throwsArgumentError,
             );
           }
           for (final name in ['', 'bad\u0000name']) {
             expect(
-              () => linker.linkSharedLibrary([module], name: name),
+              () => linker.linkSharedLibrary([.object(module)], name: name),
               throwsArgumentError,
             );
           }
@@ -187,9 +207,9 @@ void main() {
             [Symbol('entry', 0, 0, code.length, binding: .local)],
           );
           final image = linker.linkSharedLibrary([
-            local,
-            local,
-            module,
+            .object(local),
+            .object(local),
+            .object(module),
           ], name: 'values');
           final body = codeOf(image);
           for (final offset in [0, 16, 32]) {

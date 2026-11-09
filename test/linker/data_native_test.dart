@@ -5,10 +5,9 @@ import 'package:test/test.dart';
 import 'fixtures/data_ffi.dart';
 
 void main() {
-  test(
-    'cross-module references preserve data identity, initialization and writes',
-    () {
-      final library = DataLibrary(), storage = StorageLibrary();
+  for (final asset in ['linker/data', 'linker/archive_data']) {
+    test('$asset preserves data identity, initialization and writes', () {
+      final library = DataLibrary(asset), storage = StorageLibrary();
       addTearDown(library.close);
       addTearDown(storage.close);
       expect(library.readConstant(), 37);
@@ -40,6 +39,6 @@ void main() {
       expect(storage.counter.value, 0);
       storage.state.value = 73;
       expect(library.state.value, 92);
-    },
-  );
+    });
+  }
 }

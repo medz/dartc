@@ -1,94 +1,191 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'object_module.dart';
-import 'object_format.dart';
+import 'reader.dart';
 
-/// Writes indexed static archives for macOS and Linux.
-final class ArchiveWriter(final ObjectFormat format) {
-  /// Encodes matching [objects] as separate members with deterministic headers.
+/// An indexed native archive whose members have not been decoded as objects.
+final class Archive._(
+  List<ArchiveMember> members,
+  List<({String name, int member})> index,
+) {
+  /// The ordinary members, in file order, excluding index and name tables.
+  final List<ArchiveMember> members = .unmodifiable(members);
+
+  /// Symbol names and indices into [members], in archive index order.
   ///
-  /// Member names are their input indices followed by `.o`. Duplicate symbols
-  /// remain in the index; an archive consumer selects the members it needs.
-  Uint8List encode(Iterable<ObjectModule> objects) {
-    final members = objects.toList();
-    if (members.isEmpty || members.any((o) => o.target != format.target)) {
-      throw ArgumentError('Expected non-empty objects for one target.');
-    }
-    final darwin = members.first.target.operatingSystem == .macos;
-    final symbols = [
-      for (final (i, object) in members.indexed)
-        for (final symbol in object.symbols)
-          if (symbol.binding == .global) (i, utf8.encode(symbol.name)),
-    ];
-    final namesSize = symbols.fold(0, (n, s) => n + s.$2.length + 1);
-    final table = ByteData(
-      darwin
-          ? 8 + symbols.length * 8 + namesSize
-          : 4 + symbols.length * 4 + namesSize,
-    );
-    final output = BytesBuilder(copy: false)..add(ascii.encode('!<arch>\n'));
+  /// Repeated names are retained; member selection depends on this order.
+  final List<({String name, int member})> index = .unmodifiable(index);
 
-    int member(String name, Uint8List bytes) {
-      final padding = darwin ? (-bytes.length) & 7 : 0;
-      final nameSize = darwin
-          ? name.length + (-(output.length + 60 + name.length) & 7)
-          : 0;
-      final size = nameSize + bytes.length + padding;
-      final field = darwin ? '#1/$nameSize' : '$name/';
-      if (field.length > 16 || size > 9999999999) {
-        throw UnsupportedError('Archive member exceeds the header limits.');
-      }
-      output.add(
-        ascii.encode(
-          '${field.padRight(16)}${'0'.padRight(12)}${'0'.padRight(6)}'
-          '${'0'.padRight(6)}${'100644'.padRight(8)}${'$size'.padRight(10)}`\n',
-        ),
+  /// Reads a GNU or little-endian Darwin archive and owns its immutable bytes.
+  ///
+  /// Checks member and index records without interpreting object contents.
+  /// Malformed records throw [FormatException]; unsupported archive variants
+  /// throw [UnsupportedError]. Member selection and target checks belong to
+  /// the linker. Thin archives and 64-bit indices are not supported.
+  factory decode(Uint8List bytes) {
+    final input = ObjectReader(Uint8List.fromList(bytes).asUnmodifiableView());
+    final magic = ascii.decode(input.view(0, 8));
+    if (magic == '!<thin>\n') throw UnsupportedError('Thin archives.');
+    input.check(magic == '!<arch>\n', 'Invalid archive magic.');
+    int number(int at, int width, {int radix = 10, bool optional = false}) {
+      final text = ascii.decode(input.view(at, width));
+      input.check(
+        text.codeUnits.every((c) => c == 32 || (c >= 48 && c < 48 + radix)),
+        'Invalid archive numeric field.',
       );
-      if (darwin) {
-        output.add(ascii.encode(name));
-        output.add(Uint8List(nameSize - name.length));
-      }
-      final contentOffset = output.length;
-      output.add(bytes);
-      output.add(Uint8List(padding));
-      if (output.length.isOdd) output.addByte(10);
-      return contentOffset;
+      if (optional && text.trim().isEmpty) return 0;
+      final value = int.tryParse(text.trim(), radix: radix);
+      input.check(value != null, 'Invalid archive numeric field.');
+      return value!;
     }
 
-    final tableOffset = member(
-      darwin ? '__.SYMDEF' : '',
-      table.buffer.asUint8List(),
-    );
-    final offsets = <int>[];
-    for (final (i, object) in members.indexed) {
-      if (output.length > 0xffffffff) {
-        throw UnsupportedError('Archive requires 64-bit symbol offsets.');
+    final members = <ArchiveMember>[], offsets = <int, int>{};
+    Uint8List? names, table;
+    var darwin = false;
+    for (var offset = 8; offset < bytes.length;) {
+      input.view(offset, 60);
+      input.check(
+        input.bytes[offset + 58] == 96 && input.bytes[offset + 59] == 10,
+        'Invalid archive member header.',
+      );
+      number(offset + 16, 12, optional: true);
+      number(offset + 28, 6, optional: true);
+      number(offset + 34, 6, optional: true);
+      number(offset + 40, 8, radix: 8, optional: true);
+      final size = number(offset + 48, 10), end = offset + 60 + size;
+      input.view(offset + 60, size);
+      var name = ascii.decode(input.view(offset, 16)).trimRight();
+      var content = offset + 60;
+      if (name.startsWith('#1/')) {
+        final length = int.tryParse(name.substring(3));
+        input.check(
+          length != null && length > 0 && length <= size,
+          'Invalid BSD archive name length.',
+        );
+        name = input.string(content, content + length!, fixed: true);
+        final encoded = utf8.encode(name).length;
+        input.check(
+          input.view(content + encoded, length - encoded).every((b) => b == 0),
+          'Invalid BSD archive name padding.',
+        );
+        content += length;
+      } else if (name != '/' && name != '//') {
+        if (name == '/SYM64/') {
+          throw UnsupportedError('64-bit archive indices.');
+        }
+        if (name.startsWith('/')) {
+          final index = int.tryParse(name.substring(1));
+          input.check(
+            names != null &&
+                index != null &&
+                index >= 0 &&
+                index < names.length,
+            'Invalid GNU archive name reference.',
+          );
+          final start = index!;
+          input.check(
+            start == 0 || names![start - 1] == 10,
+            'GNU name reference is not an entry start.',
+          );
+          final end = names!.indexOf(10, start);
+          input.check(
+            end > start && names[end - 1] == 47,
+            'Unterminated GNU archive name.',
+          );
+          name = utf8.decode(Uint8List.sublistView(names, start, end - 1));
+        } else if (name.endsWith('/')) {
+          name = name.substring(0, name.length - 1);
+        }
       }
-      offsets.add(output.length);
-      member('$i.o', format.encodeObject(object));
-    }
-    table.setUint32(
-      0,
-      symbols.length * (darwin ? 8 : 1),
-      darwin ? .little : .big,
-    );
-    var nameOffset = 0;
-    final strings = (darwin ? 8 : 4) + symbols.length * (darwin ? 8 : 4);
-    if (darwin) table.setUint32(strings - 4, namesSize, .little);
-    final bytes = table.buffer.asUint8List();
-    for (final (i, (memberIndex, name)) in symbols.indexed) {
-      if (darwin) {
-        table.setUint32(4 + i * 8, nameOffset, .little);
-        table.setUint32(8 + i * 8, offsets[memberIndex], .little);
+      input.check(
+        name.isNotEmpty && !name.contains('\u0000'),
+        'Invalid archive member name.',
+      );
+      final payload = input.view(content, end - content).asUnmodifiableView();
+      if (name == '/' || name == '__.SYMDEF' || name == '__.SYMDEF SORTED') {
+        input.check(table == null, 'Multiple archive symbol indices.');
+        table = payload;
+        darwin = name != '/';
+      } else if (name == '//') {
+        input.check(names == null, 'Multiple GNU archive name tables.');
+        names = payload;
+      } else if (name == '__.SYMDEF_64' || name == '__.SYMDEF_64 SORTED') {
+        throw UnsupportedError('64-bit archive indices.');
       } else {
-        table.setUint32(4 + i * 4, offsets[memberIndex], .big);
+        offsets[offset] = members.length;
+        members.add(ArchiveMember._(name, payload));
       }
-      bytes.setAll(strings + nameOffset, name);
-      nameOffset += name.length + 1;
+      offset = end;
+      if (offset.isOdd) {
+        input.check(
+          input.view(offset, 1).single == 10,
+          'Invalid archive member padding.',
+        );
+        offset++;
+      }
     }
-    final archive = output.takeBytes();
-    archive.setAll(tableOffset, bytes);
-    return archive;
+    if (table == null) {
+      throw UnsupportedError('Archives without a symbol index.');
+    }
+    final indexInput = ObjectReader(table), data = indexInput.data;
+    indexInput.view(0, darwin ? 8 : 4);
+    final endian = darwin ? Endian.little : Endian.big;
+    final value = data.getUint32(0, endian);
+    indexInput.check(
+      !darwin || value % 8 == 0,
+      'Invalid Darwin archive index size.',
+    );
+    final count = darwin ? value ~/ 8 : value, stride = darwin ? 8 : 4;
+    indexInput.table(4, count, stride);
+    final strings = 4 + count * stride + (darwin ? 4 : 0);
+    final int stringEnd;
+    if (darwin) {
+      indexInput.view(strings - 4, 4);
+      final size = data.getUint32(strings - 4, .little);
+      indexInput.view(strings, size);
+      stringEnd = strings + size;
+      indexInput.check(
+        table.length - stringEnd < 8 &&
+            indexInput
+                .view(stringEnd, table.length - stringEnd)
+                .every((b) => b == 0),
+        'Invalid Darwin archive index padding.',
+      );
+    } else {
+      stringEnd = table.length;
+    }
+    var cursor = strings;
+    final index = <({String name, int member})>[];
+    for (var i = 0; i < count; i++) {
+      final at = 4 + i * stride;
+      final offset = data.getUint32(at + (darwin ? 4 : 0), endian);
+      final member = offsets[offset];
+      indexInput.check(
+        member != null,
+        'Archive index does not point to a member header.',
+      );
+      if (darwin) cursor = strings + data.getUint32(at, .little);
+      indexInput.check(
+        cursor >= strings && cursor < stringEnd,
+        'Invalid archive symbol string index.',
+      );
+      final name = indexInput.string(cursor, stringEnd);
+      indexInput.check(name.isNotEmpty, 'Empty archive index symbol.');
+      index.add((name: name, member: member!));
+      cursor += utf8.encode(name).length + 1;
+    }
+    if (!darwin) {
+      indexInput.check(cursor == stringEnd, 'Extra GNU archive index bytes.');
+    }
+    return ._(members, index);
   }
 }
+
+/// A named member with immutable bytes, independent of object interpretation.
+final class ArchiveMember._(
+  /// The decoded archive name; it is not used as a filesystem path.
+  final String name,
+
+  /// The member payload, including any format-defined trailing padding.
+  final Uint8List bytes,
+);

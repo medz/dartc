@@ -4,8 +4,8 @@ import 'package:dartc/target.dart';
 
 import '../../support/native_assets.dart';
 
-final class DataLibrary() {
-  final _library = NativeAssets(Target.host()).open('linker/data');
+final class DataLibrary(String asset) {
+  final _library = NativeAssets(Target.host()).open(asset);
   late final readConstant = _library
       .lookupFunction<Int64 Function(), int Function()>('read_constant');
   late final readLocal = _library

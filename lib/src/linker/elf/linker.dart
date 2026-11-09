@@ -3,10 +3,11 @@ import 'dart:typed_data';
 
 import 'package:dartc/object.dart';
 import 'package:dartc/object/elf.dart'
-    show ElfRecords, ElfSectionKind, ElfSymbolKind;
+    show Elf, ElfRecords, ElfSectionKind, ElfSymbolKind;
 import 'package:dartc/target.dart';
 
 import '../linker.dart';
+import '../input.dart';
 import '../link_unit.dart';
 
 /// Links ELF64 shared libraries with separate executable and writable mappings.
@@ -19,10 +20,10 @@ final class ElfLinker(@override final Target target) implements Linker {
 
   @override
   Uint8List linkSharedLibrary(
-    Iterable<ObjectModule> objects, {
+    Iterable<LinkInput> inputs, {
     required String name,
   }) {
-    final unit = LinkUnit(target, objects, name), sections = unit.sections;
+    final unit = LinkUnit(Elf(target), inputs, name), sections = unit.sections;
     final symbols = unit.symbols.where((symbol) => symbol.exported).toList();
     final hasConstants = sections.any((s) => s.kind == .readOnlyData);
     final writable = sections.any(
