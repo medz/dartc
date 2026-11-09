@@ -27,7 +27,7 @@ final class CallLayout<R>(
   /// Argument storage at the caller's stack pointer, padded to 16 bytes.
   late final int stackBytes;
 
-  /// Assigns integer and double banks, then naturally aligned stack slots.
+  /// Assigns integer and floating banks, then naturally aligned stack slots.
   ///
   /// [packedStack] uses each scalar's size, as required by Apple ARM64.
   /// Otherwise each stack argument occupies eight bytes.
@@ -40,11 +40,11 @@ final class CallLayout<R>(
     required Iterable<R> clobberedRegisters,
     bool packedStack = false,
   }) {
-    var integers = 0, doubles = 0, stack = 0;
+    var integers = 0, floats = 0, stack = 0;
     final parameters = <ArgumentLocation<R>>[];
     for (final type in signature.parameters) {
-      final bank = type == Double ? floating : general;
-      final index = type == Double ? doubles++ : integers++;
+      final bank = type.isFloating ? floating : general;
+      final index = type.isFloating ? floats++ : integers++;
       if (index < bank.length) {
         parameters.add(RegisterArgument(bank[index]));
       } else {
@@ -58,7 +58,7 @@ final class CallLayout<R>(
       parameters,
       signature.result == Void
           ? null
-          : signature.result == Double
+          : signature.result.isFloating
           ? floatingResult
           : generalResult,
       clobberedRegisters,

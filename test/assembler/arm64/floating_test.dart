@@ -5,6 +5,29 @@ import 'package:test/test.dart';
 
 void main() {
   test(
+    'encodes float-width memory and conversions on the same FP registers',
+    () {
+      final code = Assembler()
+        ..convertFloatToDouble(.d31, .d17)
+        ..convertDoubleToFloat(.d9, .d10)
+        ..loadFloat(.d17, .sp, 12)
+        ..storeFloat(.d30, .x29, 16380);
+      final data = ByteData.sublistView(code.finish());
+      expect(
+        [
+          for (var i = 0; i < data.lengthInBytes; i += 4)
+            data.getUint32(i, .little),
+        ],
+        [0x1e22c23f, 0x1e624149, 0xbd400ff1, 0xbd3fffbe],
+      );
+      final invalid = Assembler();
+      expect(() => invalid.loadFloat(.d0, .sp, 16384), throwsRangeError);
+      expect(() => invalid.storeFloat(.d0, .sp, 2), throwsArgumentError);
+      expect(invalid.finish(), isEmpty);
+    },
+  );
+
+  test(
     'encodes scalar floating operands and general-register bit transfers',
     () {
       final code = Assembler()

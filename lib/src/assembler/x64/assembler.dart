@@ -144,6 +144,14 @@ final class Assembler() {
   void truncateDoubleToInt(Register destination, FloatRegister source) =>
       _sse(0xf2, 0x2c, destination, source, wide: true);
 
+  /// Converts the low 32-bit float to a double, changing only [destination].
+  void convertFloatToDouble(FloatRegister destination, FloatRegister source) =>
+      _sse(0xf3, 0x5a, destination, source);
+
+  /// Rounds a double to the low 32 bits using the current MXCSR rounding mode.
+  void convertDoubleToFloat(FloatRegister destination, FloatRegister source) =>
+      _sse(0xf2, 0x5a, destination, source);
+
   /// Adds two IEEE 754 doubles in [destination].
   void addDouble(FloatRegister destination, FloatRegister source) =>
       _sse(0xf2, 0x58, destination, source);
@@ -183,6 +191,14 @@ final class Assembler() {
   /// Stores a double with the address constraints of [store].
   void storeDouble(FloatRegister source, Register base, int offset) =>
       _memory(0x11, source, base, offset);
+
+  /// Loads 32 float bits with the address constraints of [load].
+  void loadFloat(FloatRegister destination, Register base, int offset) =>
+      _memory(0x10, destination, base, offset, bytes: 4);
+
+  /// Stores the low 32 bits with the address constraints of [store].
+  void storeFloat(FloatRegister source, Register base, int offset) =>
+      _memory(0x11, source, base, offset, bytes: 4);
 
   void _sse(
     int prefix,
@@ -293,7 +309,7 @@ final class Assembler() {
         base.index >> 3;
     final displacement = ByteData(4)..setInt32(0, offset, .little);
     _bytes.add([
-      if (floating) 0xf2,
+      if (floating) bytes == 4 ? 0xf3 : 0xf2,
       if (!floating && !load && bytes == 2) 0x66,
       if (rex != 0x40 || !floating && !load && bytes == 1) rex,
       if (floating || extended) 0x0f,

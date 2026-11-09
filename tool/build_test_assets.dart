@@ -58,6 +58,7 @@ Future<void> main(List<String> args) async {
       'doubles',
       'mixed_numeric',
       'native_integers',
+      'native_floats',
     ]) {
       final library = assets.library('compiler/$fixture');
       final result = await Compiler(target)
@@ -69,7 +70,8 @@ Future<void> main(List<String> args) async {
           'pointers' ||
           'doubles' ||
           'mixed_numeric' ||
-          'native_integers' => assets.file('compiler/$fixture.h'),
+          'native_integers' ||
+          'native_floats' => assets.file('compiler/$fixture.h'),
           _ => null,
         },
       );
@@ -113,16 +115,12 @@ Future<void> main(List<String> args) async {
     final data = dataModules(target);
     final decodedData = await objects('data_', data);
     await shared(decodedData, assets.library('linker/data'));
-    await shared([
-      decodedData.first,
-    ], assets.library('compiler/double_storage'));
-    await shared([
-      decodedData.first,
-    ], assets.library('compiler/numeric_storage'));
     await shared([decodedData.first], assets.library('linker/storage'));
-    await shared([
-      decodedData.first,
-    ], assets.library('compiler/pointer_storage'));
+    for (final name in ['double', 'numeric', 'pointer', 'integer', 'float']) {
+      await shared([
+        decodedData.first,
+      ], assets.library('compiler/${name}_storage'));
+    }
     await assets
         .file('linker/data.a')
         .writeAsBytes(ArchiveWriter(format).encode(data));

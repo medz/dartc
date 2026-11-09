@@ -62,6 +62,12 @@ abstract interface class FunctionEmitter<R>() {
   /// Truncates a finite double in the range [-2^63, 2^63) into a general register.
   void truncateDoubleToInt(R destination, R source);
 
+  /// Widens a native float into a Dart double; the registers may alias.
+  void convertFloatToDouble(R destination, R source);
+
+  /// Rounds a Dart double to native float precision; the registers may alias.
+  void convertDoubleToFloat(R destination, R source);
+
   /// The selected 64-bit wrapping addition and its operand constraint.
   BinaryEncoding<R> get add;
 
@@ -107,7 +113,7 @@ abstract interface class FunctionEmitter<R>() {
   /// Emits a jump taken for zero, preserving registers but possibly changing flags.
   void jumpIfZero(R value, Label target);
 
-  /// Loads a word from a slot in the current frame.
+  /// Loads a scalar from the current frame, extending only integer values.
   void loadStack(
     R destination,
     int offset, {
@@ -118,7 +124,7 @@ abstract interface class FunctionEmitter<R>() {
   /// Saves a word to a slot in the current frame.
   void storeStack(R source, int offset);
 
-  /// Reads and extends a native integer; [destination] may alias [base].
+  /// Loads scalar bits, extending integers; [destination] may alias [base].
   void loadMemory(
     R destination,
     R base, {

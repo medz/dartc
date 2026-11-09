@@ -2,12 +2,24 @@ import 'dart:ffi';
 
 /// Layout and C spelling of the supported fixed-width native scalar types.
 extension NativeTypeLayout on Type {
+  /// Whether this is a supported native floating-point scalar.
+  bool get isFloating => this == Float || this == Double;
+
   /// Integer storage, signedness and its corresponding pointer type, if any.
   ({int bytes, bool signed, Type pointer})? get integerLayout =>
       _integers[this];
 
-  /// The native integer element of a supported pointer, or null.
+  /// The pointer type for a supported scalar, or null.
+  Type? get pointerType {
+    if (this == Float) return Pointer<Float>;
+    if (this == Double) return Pointer<Double>;
+    return integerLayout?.pointer;
+  }
+
+  /// The native scalar element of a supported pointer, or null.
   Type? get pointerElement {
+    if (this == Pointer<Float>) return Float;
+    if (this == Pointer<Double>) return Double;
     for (final MapEntry(:key, :value) in _integers.entries) {
       if (value.pointer == this) return key;
     }
@@ -20,6 +32,7 @@ extension NativeTypeLayout on Type {
   /// including `Void`, throw [UnsupportedError].
   int get nativeSize {
     if (integerLayout case final layout?) return layout.bytes;
+    if (this == Float) return 4;
     if (this == Double || pointerElement != null) return 8;
     throw UnsupportedError('Native scalar type: $this');
   }
@@ -27,6 +40,7 @@ extension NativeTypeLayout on Type {
   /// The C type used in a native declaration.
   String get cType {
     if (this == Void) return 'void';
+    if (this == Float) return 'float';
     if (this == Double) return 'double';
     if (integerLayout case final layout?) {
       return '${layout.signed ? '' : 'u'}int${layout.bytes * 8}_t';

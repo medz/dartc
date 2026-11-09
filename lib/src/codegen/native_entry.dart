@@ -12,10 +12,15 @@ final class NativeEntry<R extends Object>(final FunctionEmitter<R> emitter) {
   /// Emits the boundary conversions and reports the call to the Dart body.
   Uint8List generate(NativeSignature signature, void Function(Fixup) call) {
     final native = emitter.convention.classify(signature);
+    Type fullWidth(Type type) => type.isFloating
+        ? Double
+        : type.integerLayout != null
+        ? Int64
+        : type;
     final body = emitter.convention.classify(
       NativeSignature(
-        signature.result.integerLayout == null ? signature.result : Int64,
-        signature.parameters.map((t) => t.integerLayout == null ? t : Int64),
+        fullWidth(signature.result),
+        signature.parameters.map(fullWidth),
       ),
     );
     final frame = emitter.convention.frameLayout(
@@ -36,12 +41,14 @@ final class NativeEntry<R extends Object>(final FunctionEmitter<R> emitter) {
               bytes: integer.bytes,
               signed: integer.signed,
             );
+          } else if (type == Float) {
+            emitter.convertFloatToDouble(register, register);
           }
         case StackArgument(:final offset):
           final scratch = emitter.allocatableRegisters.lastWhere(
             (r) =>
                 emitter.bank(r) ==
-                    (type == Double
+                    (type.isFloating
                         ? RegisterBank.floating
                         : RegisterBank.general) &&
                 body.clobberedRegisters.contains(r) &&
@@ -55,6 +62,7 @@ final class NativeEntry<R extends Object>(final FunctionEmitter<R> emitter) {
             bytes: type.nativeSize,
             signed: integer?.signed ?? false,
           );
+          if (type == Float) emitter.convertFloatToDouble(scratch, scratch);
           emitter.storeStack(
             scratch,
             (body.parameters[i] as StackArgument<R>).offset,
@@ -69,6 +77,8 @@ final class NativeEntry<R extends Object>(final FunctionEmitter<R> emitter) {
         bytes: integer.bytes,
         signed: integer.signed,
       );
+    } else if (signature.result == Float) {
+      emitter.convertDoubleToFloat(native.result!, native.result!);
     }
     emitter.epilogue(frame);
     return emitter.finish();

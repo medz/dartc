@@ -1,4 +1,4 @@
-/// A physical register used for a 64-bit scalar value.
+/// A physical register used for scalar values.
 sealed class const CpuRegister() {
   /// The register number in machine instruction fields.
   int get index;
@@ -37,7 +37,7 @@ enum Condition(final int encoding) {
   greaterOrEqual(13),
 }
 
-/// A 64-bit floating-point view of an SSE register.
+/// An SSE register for 32-bit and 64-bit scalar floating operations.
 enum FloatRegister() implements CpuRegister {
   xmm0,
   xmm1,

@@ -160,6 +160,14 @@ final class Assembler() {
     _word(0x9e780000 | source.index << 5 | destination.index);
   }
 
+  /// Converts the low 32-bit float to a double, changing only [destination].
+  void convertFloatToDouble(FloatRegister destination, FloatRegister source) =>
+      _float(0x1e22c000, destination, source);
+
+  /// Rounds a double to the low 32 bits using the current FPCR rounding mode.
+  void convertDoubleToFloat(FloatRegister destination, FloatRegister source) =>
+      _float(0x1e624000, destination, source);
+
   /// Adds two IEEE 754 doubles.
   void addDouble(
     FloatRegister destination,
@@ -203,6 +211,14 @@ final class Assembler() {
   /// Stores a double with the address constraints of [store].
   void storeDouble(FloatRegister source, Register base, int offset) =>
       _memory(0xfd000000, source, base, offset);
+
+  /// Loads 32 float bits; [offset] is a nonnegative multiple of four below 16384.
+  void loadFloat(FloatRegister destination, Register base, int offset) =>
+      _memory(0xbd400000, destination, base, offset, 4);
+
+  /// Stores the low 32 bits with the address constraints of [loadFloat].
+  void storeFloat(FloatRegister source, Register base, int offset) =>
+      _memory(0xbd000000, source, base, offset, 4);
 
   void _float(
     int opcode,

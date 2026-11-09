@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:ffi' show Float;
 
 import 'package:dartc/object.dart';
 import 'package:dartc/abi.dart';
@@ -108,5 +109,5 @@ base class ScalarCodeGenerator<R extends Object>(
   bool _needsEntry(NativeSignature signature) => [
     signature.result,
     ...signature.parameters,
-  ].any((t) => (t.integerLayout?.bytes ?? 8) < 8);
+  ].any((t) => t == Float || (t.integerLayout?.bytes ?? 8) < 8);
 }

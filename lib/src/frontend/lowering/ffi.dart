@@ -14,7 +14,7 @@ ClassType? ffiClass(InterfaceElement element) {
   if (element == library.getClass('SizedNativeType')) {
     return FfiTypes.sizedNativeType;
   }
-  for (final type in FfiTypes.integerTypes.values) {
+  for (final type in FfiTypes.scalarTypes.values) {
     if (element == library.getClass(type.name)) return type;
   }
   if (element == library.getClass('Pointer')) return FfiTypes.pointer;
@@ -25,14 +25,13 @@ Type nativeType(dart.DartType type) {
   if (type is dart.InterfaceType && type.nullabilitySuffix == .none) {
     final library = type.element.library;
     if (library.uri == _library) {
-      for (final MapEntry(:key, :value) in FfiTypes.integerTypes.entries) {
+      for (final MapEntry(:key, :value) in FfiTypes.scalarTypes.entries) {
         if (type.element == library.getClass(value.name)) return key;
       }
-      if (type.element == library.getClass('Double')) return ffi.Double;
       if (type.element == library.getClass('Void')) return ffi.Void;
       if (type.element == library.getClass('Pointer')) {
         final element = nativeType(type.typeArguments.single);
-        if (element.integerLayout case final layout?) return layout.pointer;
+        if (element.pointerType case final pointer?) return pointer;
       }
     }
   }
@@ -57,13 +56,13 @@ Instruction? ffiOperation(
       FfiTypes.pointerElement(operands.single.type) != null) {
     return PointerAddress(operands.single);
   }
-  for (final type in FfiTypes.integerTypes.values) {
+  for (final type in FfiTypes.scalarTypes.values) {
     final access = library.getExtension('${type.name}Pointer')!;
     if (member == access.getGetter('value')) {
-      return LoadNativeInteger(operands.single);
+      return LoadNative(operands.single);
     }
     if (member == access.getSetter('value')) {
-      return StoreNativeInteger(operands[0], operands[1]);
+      return StoreNative(operands[0], operands[1]);
     }
   }
   return null;

@@ -95,6 +95,20 @@ final class _X64Emitter(
       );
 
   @override
+  void convertFloatToDouble(CpuRegister destination, CpuRegister source) =>
+      assembler.convertFloatToDouble(
+        destination as FloatRegister,
+        source as FloatRegister,
+      );
+
+  @override
+  void convertDoubleToFloat(CpuRegister destination, CpuRegister source) =>
+      assembler.convertDoubleToFloat(
+        destination as FloatRegister,
+        source as FloatRegister,
+      );
+
+  @override
   BinaryEncoding<CpuRegister> get add => _binary(assembler.add);
 
   @override
@@ -224,7 +238,10 @@ final class _X64Emitter(
       bytes: bytes,
       signed: signed,
     ),
-    FloatRegister() => assembler.loadDouble(destination, .rsp, offset),
+    FloatRegister() =>
+      bytes == 4
+          ? assembler.loadFloat(destination, .rsp, offset)
+          : assembler.loadDouble(destination, .rsp, offset),
   };
 
   @override
@@ -242,20 +259,32 @@ final class _X64Emitter(
     CpuRegister base, {
     required int bytes,
     required bool signed,
-  }) => assembler.load(
-    destination as Register,
-    base as Register,
-    0,
-    bytes: bytes,
-    signed: signed,
-  );
+  }) => switch (destination) {
+    Register() => assembler.load(
+      destination,
+      base as Register,
+      0,
+      bytes: bytes,
+      signed: signed,
+    ),
+    FloatRegister() =>
+      bytes == 4
+          ? assembler.loadFloat(destination, base as Register, 0)
+          : assembler.loadDouble(destination, base as Register, 0),
+  };
 
   @override
   void storeMemory(
     CpuRegister source,
     CpuRegister base, {
     required int bytes,
-  }) => assembler.store(source as Register, base as Register, 0, bytes: bytes);
+  }) => switch (source) {
+    Register() => assembler.store(source, base as Register, 0, bytes: bytes),
+    FloatRegister() =>
+      bytes == 4
+          ? assembler.storeFloat(source, base as Register, 0)
+          : assembler.storeDouble(source, base as Register, 0),
+  };
 
   @override
   Uint8List finish() => assembler.finish();

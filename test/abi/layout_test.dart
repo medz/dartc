@@ -8,6 +8,39 @@ import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('float and double share FP banks but retain distinct stack widths', () {
+    for (final os in OperatingSystem.values) {
+      for (final abi in <CallingConvention<Object>>[
+        Arm64Abi(Target(os, .arm64)),
+        X64Abi(Target(os, .x64)),
+      ]) {
+        final packed = abi.target == const Target(.macos, .arm64);
+        final layout = abi.classify(
+          NativeSignature(Float, [
+            for (var i = 0; i < 4; i++) ...[Float, Double],
+            Float,
+            Float,
+            Double,
+          ]),
+        );
+        expect(
+          layout.parameters.take(8),
+          everyElement(isA<RegisterArgument>()),
+        );
+        final slots = layout.parameters.skip(8).cast<StackArgument>();
+        expect(slots.map((s) => s.offset), packed ? [0, 4, 8] : [0, 8, 16]);
+        expect(slots.map((s) => s.size), packed ? [4, 4, 8] : [8, 8, 8]);
+        expect(layout.stackBytes, packed ? 16 : 32);
+        expect(
+          layout.result,
+          abi.target.architecture == .arm64
+              ? arm.FloatRegister.d0
+              : x64.FloatRegister.xmm0,
+        );
+      }
+    }
+  });
+
   test('narrow stack slots follow the selected platform ABI', () {
     for (final os in OperatingSystem.values) {
       final cases = <(CallingConvention<Object>, int, bool)>[

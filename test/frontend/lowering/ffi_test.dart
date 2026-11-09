@@ -25,11 +25,8 @@ void main() {
         hasLength(1),
       );
       expect(instructions('address').whereType<PointerAddress>(), hasLength(1));
-      expect(instructions('read').whereType<LoadNativeInteger>(), hasLength(1));
-      expect(
-        instructions('write').whereType<StoreNativeInteger>(),
-        hasLength(1),
-      );
+      expect(instructions('read').whereType<LoadNative>(), hasLength(1));
+      expect(instructions('write').whereType<StoreNative>(), hasLength(1));
       expect(
         instructions('ordinaryPointer').whereType<Construct>(),
         hasLength(1),
@@ -38,10 +35,7 @@ void main() {
         instructions('customMember').whereType<DirectCall>(),
         hasLength(1),
       );
-      expect(
-        instructions('customMember').whereType<LoadNativeInteger>(),
-        isEmpty,
-      );
+      expect(instructions('customMember').whereType<LoadNative>(), isEmpty);
       final runner = IrInterpreter(result.program, {});
       for (final address in [
         0,

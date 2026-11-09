@@ -428,7 +428,7 @@ sealed class Instruction(super.type) extends Value {
     LoadGlobal() ||
     LoadField() ||
     ReadCell() ||
-    LoadNativeInteger() => const {.readsStorage},
+    LoadNative() => const {.readsStorage},
     StoreGlobal(global: GlobalVariable(isFinal: true)) ||
     StoreField(field: InstanceField(isLate: true, isFinal: true)) ||
     WriteCell(
@@ -439,7 +439,7 @@ sealed class Instruction(super.type) extends Value {
     StoreGlobal() ||
     StoreField() ||
     WriteCell() ||
-    StoreNativeInteger() => const {.writesStorage},
+    StoreNative() => const {.writesStorage},
     TypeCast() ||
     NullCheck() ||
     IntBinary(operator: IntOperator(mayThrow: true)) ||
@@ -460,13 +460,13 @@ sealed class Instruction(super.type) extends Value {
   bool get mayThrow => effects.contains(Effect.mayThrow);
 }
 
-/// Creates an integer pointer without accessing or owning its storage.
+/// Creates a scalar pointer without accessing or owning its storage.
 final class PointerFromAddress(final Value address, ClassType type)
     extends Instruction {
   this : super(type) {
     if (address.type != .integer || FfiTypes.pointerElement(type) == null) {
       throw ArgumentError(
-        'Expected an integer address and native integer pointer type.',
+        'Expected an integer address and native scalar pointer type.',
       );
     }
   }
@@ -474,41 +474,45 @@ final class PointerFromAddress(final Value address, ClassType type)
   Iterable<Value> get inputs => [address];
 }
 
-/// Extracts a native integer pointer's address without dereferencing it.
+/// Extracts a native scalar pointer's address without dereferencing it.
 final class PointerAddress(final Value pointer) extends Instruction {
   this : super(.integer) {
     if (FfiTypes.pointerElement(pointer.type) == null) {
-      throw ArgumentError('Expected a native integer pointer.');
+      throw ArgumentError('Expected a native scalar pointer.');
     }
   }
   @override
   Iterable<Value> get inputs => [pointer];
 }
 
-/// Reads a native integer, extending it according to the pointer's element type.
+/// Reads native storage as the Dart value of the pointer's element type.
 ///
 /// The caller must keep the storage alive, aligned and readable. Invalid native
 /// memory access is not a Dart exception and is not checked by this operation.
-final class LoadNativeInteger(final Value pointer) extends Instruction {
-  this : super(.integer) {
-    if (FfiTypes.pointerElement(pointer.type) == null) {
-      throw ArgumentError('Expected a native integer pointer.');
-    }
-  }
+final class LoadNative(final Value pointer) extends Instruction {
+  this
+    : super(
+        FfiTypes.valueType(
+          FfiTypes.pointerElement(pointer.type) ??
+              (throw ArgumentError('Expected a native scalar pointer.')),
+        ),
+      );
   @override
   Iterable<Value> get inputs => [pointer];
 }
 
-/// Writes an integer, truncating to the pointer's native element width.
+/// Writes a Dart value with the pointer's native width and precision.
 ///
 /// The caller must keep the storage alive, aligned and writable. The write is
 /// observable through every alias, even when its result is unused.
-final class StoreNativeInteger(final Value pointer, final Value value)
+final class StoreNative(final Value pointer, final Value value)
     extends Instruction {
   this : super(.voidType) {
-    if (FfiTypes.pointerElement(pointer.type) == null ||
-        value.type != .integer) {
-      throw ArgumentError('Expected a native integer pointer and int.');
+    final element = FfiTypes.pointerElement(pointer.type);
+    if (element == null || value.type != FfiTypes.valueType(element)) {
+      throw ArgumentError(
+        'Expected a native scalar pointer and matching value.',
+      );
     }
   }
   @override

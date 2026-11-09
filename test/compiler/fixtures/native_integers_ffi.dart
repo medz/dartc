@@ -7,7 +7,7 @@ import 'native_integers.dart' show MixedNative, MixedDart;
 
 final class NativeIntegers() {
   final _library = NativeAssets(Target.host()).open('compiler/native_integers');
-  final _storage = NativeAssets(Target.host()).open('compiler/pointer_storage');
+  final _storage = NativeAssets(Target.host()).open('compiler/integer_storage');
   late final memory = _storage.lookup<Uint8>('counter');
   late final accesses = [
     for (final name in [

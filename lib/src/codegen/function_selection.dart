@@ -68,11 +68,13 @@ final class FunctionSelection<R>(
                 inputs.map((v) => _nativeType(v.type)),
               ),
             );
-          case PointerFromAddress() ||
-              PointerAddress() ||
-              LoadNativeInteger() ||
-              StoreNativeInteger():
+          case PointerFromAddress() || PointerAddress() || LoadNative():
             break;
+          case StoreNative(:final pointer):
+            if (FfiTypes.pointerElement(pointer.type) == Float &&
+                _floatingTemporaries == 0) {
+              _floatingTemporaries = 1;
+            }
           case NumericNegate(:final type):
             if (type != .floating) {
               throw UnsupportedError('Native numeric negation: $type');

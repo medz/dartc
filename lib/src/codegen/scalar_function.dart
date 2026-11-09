@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:ffi' show Float;
 
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
@@ -66,32 +67,41 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
           if (layout.result case final result?) {
             allocation.define(instruction, result);
           }
-        } else if (instruction case StoreNativeInteger(
-          :final pointer,
-          :final value,
-        )) {
+        } else if (instruction case StoreNative(:final pointer, :final value)) {
           final base = allocation.read(pointer),
               source = allocation.read(value, except: [base]);
-          final layout = FfiTypes.pointerElement(pointer.type)!.integerLayout!;
-          emitter.storeMemory(source, base, bytes: layout.bytes);
-          allocation.release(pointer);
+          final native = FfiTypes.pointerElement(pointer.type)!;
           allocation.release(value);
+          if (native == Float) {
+            final temporary = allocation.allocate(.floating, preferred: source);
+            emitter.convertDoubleToFloat(temporary, source);
+            emitter.storeMemory(temporary, base, bytes: 4);
+            allocation.releaseTemporary(temporary);
+          } else {
+            emitter.storeMemory(source, base, bytes: native.nativeSize);
+          }
+          allocation.release(pointer);
         } else if (instruction
             case PointerFromAddress(address: final operand) ||
                 PointerAddress(pointer: final operand) ||
-                LoadNativeInteger(pointer: final operand)) {
+                LoadNative(pointer: final operand)) {
           final source = allocation.read(operand);
           allocation.release(operand);
-          final destination = allocation.allocate(.general, preferred: source);
-          if (instruction is LoadNativeInteger) {
-            final layout = FfiTypes.pointerElement(operand.type)!
-                .integerLayout!;
+          final destination = allocation.allocate(
+            selection.bank(instruction.type),
+            preferred: source,
+          );
+          if (instruction is LoadNative) {
+            final native = FfiTypes.pointerElement(operand.type)!;
             emitter.loadMemory(
               destination,
               source,
-              bytes: layout.bytes,
-              signed: layout.signed,
+              bytes: native.nativeSize,
+              signed: native.integerLayout?.signed ?? false,
             );
+            if (native == Float) {
+              emitter.convertFloatToDouble(destination, destination);
+            }
           } else {
             emitter.move(destination, source);
           }

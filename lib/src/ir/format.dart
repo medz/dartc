@@ -118,9 +118,8 @@ void writeFunction(
     LoadGlobal() => 'loadGlobal ${global(op.global)}',
     PointerFromAddress() => 'pointerFromAddress ${value(op.address)}',
     PointerAddress() => 'pointerAddress ${value(op.pointer)}',
-    LoadNativeInteger() => 'loadNativeInteger ${value(op.pointer)}',
-    StoreNativeInteger() =>
-      'storeNativeInteger ${value(op.pointer)}, ${value(op.value)}',
+    LoadNative() => 'loadNative ${value(op.pointer)}',
+    StoreNative() => 'storeNative ${value(op.pointer)}, ${value(op.value)}',
     StoreGlobal() => 'storeGlobal ${global(op.global)}, ${value(op.value)}',
     LoadField() =>
       'load ${value(op.receiver)}.${op.field.owner.dartName}::${op.field.name}',

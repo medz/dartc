@@ -2,6 +2,28 @@ import 'package:dartc/assembler/x64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('encodes scalar float prefixes and mixed-width SSE conversions', () {
+    final code = Assembler()
+      ..convertFloatToDouble(.xmm9, .xmm10)
+      ..convertDoubleToFloat(.xmm15, .xmm8)
+      ..loadFloat(.xmm9, .r12, 12)
+      ..storeFloat(.xmm10, .r13, -4);
+    expect(
+      code.finish(),
+      ('f3 45 0f 5a ca f2 45 0f 5a f8 '
+              'f3 45 0f 10 8c 24 0c 00 00 00 f3 45 0f 11 95 fc ff ff ff')
+          .split(' ')
+          .map((v) => int.parse(v, radix: 16)),
+    );
+    final invalid = Assembler();
+    expect(() => invalid.loadFloat(.xmm0, .rsp, 0x80000000), throwsRangeError);
+    expect(
+      () => invalid.storeFloat(.xmm0, .rsp, -0x80000001),
+      throwsRangeError,
+    );
+    expect(invalid.finish(), isEmpty);
+  });
+
   test(
     'encodes SSE prefixes, register extensions, bit transfers and addresses',
     () {
