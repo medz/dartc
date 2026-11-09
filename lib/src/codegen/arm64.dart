@@ -257,6 +257,10 @@ final class _Arm64Emitter(
   Fixup call() => assembler.call();
 
   @override
+  void callRegister(CpuRegister target) =>
+      assembler.callRegister(target as Register);
+
+  @override
   void loadMemory(
     CpuRegister destination,
     CpuRegister base, {

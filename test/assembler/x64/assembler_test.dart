@@ -4,6 +4,27 @@ import 'package:dartc/assembler/x64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('indirect calls encode low, extended and stack registers', () {
+    final assembler = Assembler()
+      ..callRegister(.rax)
+      ..callRegister(.rsp)
+      ..callRegister(.r11)
+      ..callRegister(.r15);
+    expect(assembler.finish(), [
+      0xff,
+      0xd0,
+      0xff,
+      0xd4,
+      0x41,
+      0xff,
+      0xd3,
+      0x41,
+      0xff,
+      0xd7,
+    ]);
+    expect(() => assembler.callRegister(.rcx), throwsStateError);
+  });
+
   test(
     'LEA encodes scaled indices, extended registers and base exceptions',
     () {

@@ -143,6 +143,9 @@ abstract interface class FunctionEmitter<R>() {
   /// Emits an unresolved direct call and returns its instruction field.
   Fixup call();
 
+  /// Calls the native address in a general register.
+  void callRegister(R target);
+
   /// Resolves local branches, returns immutable bytes and closes the assembler.
   Uint8List finish();
 }

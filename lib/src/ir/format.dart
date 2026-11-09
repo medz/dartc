@@ -160,6 +160,8 @@ void writeFunction(
     IntBinary() => '${op.operator.name} ${value(op.left)}, ${value(op.right)}',
     DirectCall() =>
       'call ${symbol(op.target, op.ownerType)}${typeArgs(op.typeArguments)}(${op.inputs.map(value).join(', ')})',
+    NativeCall() =>
+      'callNative${op.isLeaf ? ' leaf' : ''} ${value(op.pointer)}(${op.arguments.map(value).join(', ')})',
   };
   String unwind(Jump? handler) =>
       handler == null ? '' : ' unwind ${edge(handler)}';

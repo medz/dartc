@@ -270,6 +270,12 @@ final class Assembler() {
     return fixup;
   }
 
+  /// Calls the address in [target], placing the return address in X30.
+  void callRegister(Register target) {
+    _general(target);
+    _word(0xd63f0000 | target.index << 5);
+  }
+
   /// Loads the 4 KiB page of an unresolved address, preserving flags.
   Fixup pageAddress(Register destination) {
     _general(destination);

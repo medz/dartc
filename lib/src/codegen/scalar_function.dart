@@ -9,6 +9,7 @@ import 'package:dartc/interop.dart';
 import 'function_allocation.dart';
 import 'function_emitter.dart';
 import 'function_selection.dart';
+import 'native_adapter.dart';
 
 /// Generates a scalar control-flow graph with explicit edge transfers.
 final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
@@ -19,6 +20,7 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
   ) {
     final selection = FunctionSelection(function, emitter);
     final allocation = FunctionAllocation(function, emitter, selection);
+    final adapter = NativeAdapter(emitter);
     final labels = {
       for (final block in function.blocks) block: emitter.label(),
     };
@@ -33,21 +35,31 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
       emitter.bind(labels[block]!);
       allocation.begin(block);
       for (final instruction in block.instructions) {
-        if (instruction case final DirectCall callInstruction) {
-          final layout = selection.calls[callInstruction]!;
+        if (selection.calls[instruction] case final layout?) {
+          final native = instruction is NativeCall ? instruction : null;
+          final arguments =
+              native?.arguments ?? (instruction as DirectCall).inputs;
           allocation.flush(clobbered: layout.clobberedRegisters);
           // Stage stack words before populating registers that the scratch may alias.
           if (layout.stackBytes != 0) {
             for (final (i, location) in layout.parameters.indexed) {
               if (location case StackArgument(:final offset)) {
-                final value = instruction.inputs[i];
+                final value = arguments[i];
                 final scratch = emitter.allocatableRegisters.firstWhere(
                   (r) =>
                       emitter.bank(r) == selection.bank(value.type) &&
                       layout.clobberedRegisters.contains(r),
                 );
                 allocation.load(value, scratch);
-                emitter.storeStack(scratch, offset);
+                final type = native?.signature.parameters[i];
+                if (type != null && type.isSinglePrecision) {
+                  adapter.convert(scratch, type, intoDart: false);
+                }
+                emitter.storeStack(
+                  scratch,
+                  offset,
+                  bytes: type?.nativeSize ?? 8,
+                );
                 allocation.release(value);
               }
             }
@@ -57,14 +69,39 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
             for (final (i, location) in layout.parameters.indexed) {
               if (location case RegisterArgument(:final register)
                   when emitter.bank(register) == bank) {
-                final value = instruction.inputs[i];
+                final value = arguments[i];
                 allocation.load(value, register);
+                if (native != null) {
+                  adapter.convert(
+                    register,
+                    native.signature.parameters[i],
+                    intoDart: false,
+                  );
+                }
                 allocation.release(value);
               }
             }
           }
-          call(emitter.call(), callInstruction.target);
+          if (native == null) {
+            call(emitter.call(), (instruction as DirectCall).target);
+          } else {
+            // Load last so argument staging cannot overwrite the callee address.
+            final address = emitter.allocatableRegisters.lastWhere(
+              (r) =>
+                  emitter.bank(r) == .general &&
+                  layout.clobberedRegisters.contains(r) &&
+                  !layout.parameters.any(
+                    (p) => p is RegisterArgument<R> && p.register == r,
+                  ),
+            );
+            allocation.load(native.pointer, address);
+            allocation.release(native.pointer);
+            emitter.callRegister(address);
+          }
           if (layout.result case final result?) {
+            if (native != null) {
+              adapter.convert(result, native.signature.result, intoDart: true);
+            }
             allocation.define(instruction, result);
           }
         } else if (instruction case PointerOffset(

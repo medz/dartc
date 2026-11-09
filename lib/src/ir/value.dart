@@ -400,6 +400,7 @@ sealed class Instruction(super.type) extends Value {
     IteratorMoveNext() ||
     IteratorCurrent() ||
     DirectCall() ||
+    NativeCall() ||
     LoadLibrary() ||
     InstanceCall() ||
     DynamicDispatch() ||
@@ -1276,6 +1277,43 @@ final class IntBinary(
 
   @override
   Iterable<Value> get inputs => [left, right];
+}
+
+/// A call through a typed native function pointer.
+///
+/// Arguments and results are Dart values. The native signature determines their
+/// boundary conversions, including integer truncation and float rounding.
+final class NativeCall._(
+  /// The address to invoke, retaining its `Pointer<NativeFunction<T>>` type.
+  final Value pointer,
+
+  /// The evaluated Dart arguments in native parameter order.
+  final List<Value> arguments,
+
+  /// The native signature derived from [pointer]'s type.
+  final NativeSignature signature,
+
+  /// Whether the caller promises a short, nonblocking call without Dart callbacks.
+  final bool isLeaf,
+) extends Instruction {
+  this : super(FfiTypes.valueType(signature.result));
+
+  factory(Value pointer, Iterable<Value> arguments, {bool isLeaf = false}) {
+    if (!FfiTypes.isPointer(pointer.type)) {
+      throw ArgumentError('A typed native function pointer is required.');
+    }
+    if (FfiTypes.describe(pointer.type) case NativePointerType(
+      element: NativeFunctionType(:final signature),
+    )) {
+      final values = List<Value>.unmodifiable(arguments);
+      checkArguments(signature.parameters.map(FfiTypes.valueType), values);
+      return ._(pointer, values, signature, isLeaf);
+    }
+    throw ArgumentError('A typed native function pointer is required.');
+  }
+
+  @override
+  Iterable<Value> get inputs => [pointer, ...arguments];
 }
 
 /// A call to a statically bound function.

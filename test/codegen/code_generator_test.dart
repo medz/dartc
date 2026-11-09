@@ -9,6 +9,38 @@ import 'package:test/test.dart';
 import 'fixtures/aliases.dart';
 
 void main() {
+  test('typed native calls require no symbol binding or relocation', () {
+    final callback = FfiTypes.resolve(
+      NativePointerType(NativeFunctionType(NativeSignature(Int8, [Int64]))),
+    );
+    final target = FunctionTarget(
+      .parse('memory:indirect'),
+      'invoke',
+      .integer,
+      [callback, .integer],
+    );
+    final block = Block(target.parameterTypes);
+    block.finish(
+      Return(
+        block.emit(NativeCall(block.parameters[0], [block.parameters[1]])),
+      ),
+    );
+    final program = IrProgram([], [
+      IrFunction(target, [block]),
+    ]);
+    for (final os in OperatingSystem.values) {
+      for (final CodeGenerator generator in [
+        Arm64CodeGenerator(Target(os, .arm64)),
+        X64CodeGenerator(Target(os, .x64)),
+      ]) {
+        final module = generator.generate(program, definitions: [target]);
+        expect(module.relocations, isEmpty);
+        expect(module.symbols.single.name, 'invoke');
+        expect(module.sections.single.bytes, isNotEmpty);
+      }
+    }
+  });
+
   test(
     'definition selection and native exports are separate checked inputs',
     () {

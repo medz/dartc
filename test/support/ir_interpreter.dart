@@ -1817,6 +1817,10 @@ final class IrInterpreter(
             (read(pointer) as ffi.Pointer).address +
                 (read(index) as int) * element.nativeSize,
           );
+        case NativeCall():
+          throw UnsupportedError(
+            'Native function calls require native execution.',
+          );
         case LoadNative(:final pointer):
           final native = FfiTypes.pointerElement(pointer.type)!;
           final data = _nativeData(

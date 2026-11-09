@@ -80,47 +80,131 @@ List<ObjectModule> nativeCalls(Target target) {
         value.parameters.map(fullWidth),
       ),
     };
-    final wrapper = FunctionTarget(
-      library,
-      key,
-      FfiTypes.valueType(signature.result),
-      signature.parameters.map(FfiTypes.valueType).toList(),
-    );
-    final block = Block(wrapper.parameterTypes);
-    final parameters = block.parameters;
-    final List<Value> arguments = switch (key) {
-      'mixed' => [
-        for (var i = 1; i <= 8; i++)
-          block.emit(
-            NumericBinary(.add, parameters[2], Constant.floating(i.toDouble())),
-          ),
-        for (var i = 1; i <= 8; i++)
-          block.emit(IntBinary(.add, parameters[1], Constant.integer(i))),
-        parameters[2],
-        parameters[2],
-        parameters[1],
-        parameters[2],
-        parameters[0],
-      ],
-      'packed' => [
-        for (var i = 0; i < 24; i++)
-          block.emit(
-            IntBinary(.add, parameters.single, Constant.integer(i * 17)),
-          ),
-      ],
-      _ => parameters,
-    };
-    Value result = block.emit(DirectCall(external, arguments));
-    if (value.result.isVoid) {
-      result = block.emit(LoadNative(parameters.first));
-    } else if (key.startsWith('argument') || key == 'mixed') {
-      final original = key == 'mixed' ? parameters[2] : parameters.single;
-      result = block.emit(NumericBinary(.add, result, original));
+    for (final indirect in [false, true]) {
+      final exported = NativeSignature.types(signature.result, [
+        if (indirect) NativeScalarType(Int64),
+        ...signature.parameters,
+      ]);
+      final name = indirect ? 'indirect_$key' : key;
+      final wrapper = FunctionTarget(
+        library,
+        name,
+        FfiTypes.valueType(exported.result),
+        exported.parameters.map(FfiTypes.valueType).toList(),
+      );
+      final block = Block(wrapper.parameterTypes);
+      final pointer = indirect
+          ? block.emit(
+              PointerFromAddress(
+                block.parameters.first,
+                FfiTypes.resolve(NativePointerType(NativeFunctionType(value))),
+              ),
+            )
+          : null;
+      final parameters = block.parameters.skip(indirect ? 1 : 0).toList();
+      final List<Value> arguments = switch (key) {
+        'mixed' => [
+          for (var i = 1; i <= 8; i++)
+            block.emit(
+              NumericBinary(
+                .add,
+                parameters[2],
+                Constant.floating(i.toDouble()),
+              ),
+            ),
+          for (var i = 1; i <= 8; i++)
+            block.emit(IntBinary(.add, parameters[1], Constant.integer(i))),
+          parameters[2],
+          parameters[2],
+          parameters[1],
+          parameters[2],
+          parameters[0],
+        ],
+        'packed' => [
+          for (var i = 0; i < 24; i++)
+            block.emit(
+              IntBinary(.add, parameters.single, Constant.integer(i * 17)),
+            ),
+        ],
+        _ => parameters,
+      };
+      Value result = block.emit(
+        pointer == null
+            ? DirectCall(external, arguments)
+            : NativeCall(pointer, arguments),
+      );
+      if (value.result.isVoid) {
+        result = block.emit(LoadNative(parameters.first));
+      } else if (key.startsWith('argument') || key == 'mixed') {
+        final original = key == 'mixed' ? parameters[2] : parameters.single;
+        result = block.emit(NumericBinary(.add, result, original));
+      }
+      block.finish(Return(result));
+      functions.add(.new(wrapper, [block]));
+      exports[wrapper] = .new(name, exported);
     }
-    block.finish(Return(result));
-    functions.add(.new(wrapper, [block]));
-    exports[wrapper] = .new(key, signature);
   }
+  final repeatedSignature = NativeSignature(Int64, [Int64]);
+  final callback = NativePointerType(NativeFunctionType(repeatedSignature));
+  final repeatedExport = NativeSignature.types(NativeScalarType(Int64), [
+    ...List.filled(8, NativeScalarType(Int64)),
+    callback,
+    callback,
+  ]);
+  final repeated = FunctionTarget(
+    library,
+    'repeated',
+    .integer,
+    repeatedExport.parameters.map(FfiTypes.valueType).toList(),
+  );
+  final entry = Block(repeated.parameterTypes);
+  final first = Block([]), second = Block([]);
+  final loop = Block([
+    FfiTypes.resolve(callback),
+    .integer,
+    .integer,
+    .integer,
+  ]);
+  final invoke = Block([]), exit = Block([]);
+  entry.finish(
+    Branch(
+      entry.emit(Equals(entry.parameters[0], Constant.integer(0))),
+      Jump(first),
+      Jump(second),
+    ),
+  );
+  for (final (block, selected) in [(first, 8), (second, 9)]) {
+    block.finish(
+      Jump(loop, [
+        entry.parameters[selected],
+        entry.parameters[1],
+        entry.parameters[2],
+        Constant.integer(0),
+      ]),
+    );
+  }
+  final [pointer, value, remaining, sum] = loop.parameters;
+  loop.finish(
+    Branch(
+      loop.emit(IntBinary(.greaterThan, remaining, Constant.integer(0))),
+      Jump(invoke),
+      Jump(exit),
+    ),
+  );
+  final result = invoke.emit(NativeCall(pointer, [value]));
+  invoke.finish(
+    Jump(loop, [
+      pointer,
+      value,
+      invoke.emit(IntBinary(.subtract, remaining, Constant.integer(1))),
+      invoke.emit(IntBinary(.add, sum, result)),
+    ]),
+  );
+  exit.finish(Return(sum));
+  functions.add(
+    IrFunction(repeated, [entry, first, second, loop, invoke, exit]),
+  );
+  exports[repeated] = NativeExport('repeated', repeatedExport);
   final program = IrProgram([], functions, externals: externals);
   final CodeGenerator generator = target.architecture == .arm64
       ? Arm64CodeGenerator(target)
@@ -238,6 +322,15 @@ Uint8List _arm(Target target, NativeSignature signature) {
       signed: integer.signed,
     );
   }
+  for (final register in layout.clobberedRegisters) {
+    if (register == layout.result || register == arm.Register.x30) continue;
+    switch (register) {
+      case arm.Register():
+        assembler.loadImmediate(register, 0);
+      case arm.FloatRegister():
+        assembler.moveBitsToDouble(register, .x17);
+    }
+  }
   assembler.ret();
   return assembler.finish();
 }
@@ -313,6 +406,15 @@ Uint8List _x64(Target target, NativeSignature signature) {
     );
   } else {
     assembler.move(.rax, .rdi);
+  }
+  for (final register in layout.clobberedRegisters) {
+    if (register == layout.result) continue;
+    switch (register) {
+      case x64.Register():
+        assembler.loadImmediate(register, 0);
+      case x64.FloatRegister():
+        assembler.moveBitsToDouble(register, .r11);
+    }
   }
   assembler.ret();
   return assembler.finish();

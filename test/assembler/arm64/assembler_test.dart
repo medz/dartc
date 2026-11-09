@@ -5,6 +5,24 @@ import 'package:test/test.dart';
 
 void main() {
   test(
+    'indirect calls encode register targets and reject SP before writing',
+    () {
+      final assembler = Assembler()
+        ..callRegister(.x0)
+        ..callRegister(.x15)
+        ..callRegister(.x30);
+      final bytes = ByteData.sublistView(assembler.finish());
+      expect(bytes.getUint32(0, .little), 0xd63f0000);
+      expect(bytes.getUint32(4, .little), 0xd63f01e0);
+      expect(bytes.getUint32(8, .little), 0xd63f03c0);
+      final invalid = Assembler();
+      expect(() => invalid.callRegister(.sp), throwsArgumentError);
+      expect(invalid.finish(), isEmpty);
+      expect(() => assembler.callRegister(.x1), throwsStateError);
+    },
+  );
+
+  test(
     'shifted addition encodes scale and rejects invalid operands atomically',
     () {
       final assembler = Assembler()

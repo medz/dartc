@@ -289,6 +289,11 @@ final class Assembler() {
     return fixup;
   }
 
+  /// Calls the address in [target], pushing the return address on the stack.
+  void callRegister(Register target) {
+    _bytes.add([if (target.index >= 8) 0x41, 0xff, 0xd0 | (target.index & 7)]);
+  }
+
   /// Loads an unresolved RIP-relative address without changing flags.
   Fixup address(Register destination) {
     final fixup = Fixup(length + 3, .x64Address32);

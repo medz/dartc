@@ -40,7 +40,7 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
       final integer = type.integerLayout;
       switch (location) {
         case RegisterArgument(:final register):
-          _convert(register, type, intoDart: intoDart);
+          convert(register, type, intoDart: intoDart);
         case StackArgument(:final offset):
           final scratch = emitter.allocatableRegisters.lastWhere(
             (r) =>
@@ -60,7 +60,7 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
             signed: intoDart && (integer?.signed ?? false),
           );
           if (type.isSinglePrecision) {
-            _convert(scratch, type, intoDart: intoDart);
+            convert(scratch, type, intoDart: intoDart);
           }
           emitter.storeStack(
             scratch,
@@ -71,13 +71,14 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     }
     call(emitter.call());
     if (destination.result case final result?) {
-      _convert(result, signature.result, intoDart: !intoDart);
+      convert(result, signature.result, intoDart: !intoDart);
     }
     emitter.epilogue(frame);
     return emitter.finish();
   }
 
-  void _convert(R register, NativeTypeRef type, {required bool intoDart}) {
+  /// Converts one scalar in place at a native call boundary.
+  void convert(R register, NativeTypeRef type, {required bool intoDart}) {
     if (type.integerLayout case final integer? when integer.bytes < 8) {
       emitter.extendInteger(
         register,

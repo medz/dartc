@@ -24,7 +24,7 @@ final class FunctionSelection<R>(
       >{};
   final mixedComparisons =
       <Instruction, ({Comparison comparison, Value integer, Value floating})>{};
-  final calls = <DirectCall, CallLayout<R>>{};
+  final calls = <Instruction, CallLayout<R>>{};
   late final CallLayout<R> entry;
   int _generalTemporaries = 0, _floatingTemporaries = 0;
 
@@ -54,6 +54,8 @@ final class FunctionSelection<R>(
     for (final block in function.blocks) {
       for (final instruction in block.instructions) {
         switch (instruction) {
+          case NativeCall(:final signature):
+            calls[instruction] = emitter.convention.classify(signature);
           case DirectCall(:final inputs, :final type, :final typeArguments):
             if (!(type == .voidType || _scalar(type)) ||
                 typeArguments.isNotEmpty ||
