@@ -46,7 +46,7 @@ final class FunctionSelection<R>(
     }
     // Internal booleans use integer locations; exported booleans remain rejected.
     entry = emitter.convention.classify(
-      NativeSignature(
+      NativeSignature.types(
         _nativeType(function.target.returnType),
         function.target.parameterTypes.map(_nativeType),
       ),
@@ -63,7 +63,7 @@ final class FunctionSelection<R>(
               );
             }
             calls[instruction] = emitter.convention.classify(
-              NativeSignature(
+              NativeSignature.types(
                 _nativeType(type),
                 inputs.map((v) => _nativeType(v.type)),
               ),
@@ -163,7 +163,10 @@ final class FunctionSelection<R>(
               _mixed(instruction, negated ? .notEqual : .equal, left, right);
               break;
             }
-            final BinaryEncoding<R> encoding = left.type == right.type
+            final BinaryEncoding<R> encoding =
+                left.type == right.type ||
+                    FfiTypes.isPointer(left.type) &&
+                        FfiTypes.isPointer(right.type)
                 ? emitter.comparison(
                     negated ? .notEqual : .equal,
                     floating: left.type == .floating,
@@ -235,15 +238,13 @@ final class FunctionSelection<R>(
       type == .integer ||
       type == .boolean ||
       type == .floating ||
-      FfiTypes.pointerElement(type) != null;
+      FfiTypes.isPointer(type);
 
-  Type _nativeType(ValueType type) {
-    if (type == .voidType) return Void;
-    if (type == .floating) return Double;
-    if (type == .integer || type == .boolean) return Int64;
-    for (final MapEntry(:key, :value) in FfiTypes.pointerTypes.entries) {
-      if (value == type) return key;
-    }
+  NativeTypeRef _nativeType(ValueType type) {
+    if (type == .voidType) return NativeScalarType(Void);
+    if (type == .floating) return NativeScalarType(Double);
+    if (type == .integer || type == .boolean) return NativeScalarType(Int64);
+    if (FfiTypes.isPointer(type)) return FfiTypes.describe(type);
     throw UnsupportedError('Native representation: $type');
   }
 }

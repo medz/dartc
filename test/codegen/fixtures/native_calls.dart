@@ -67,16 +67,16 @@ List<ObjectModule> nativeCalls(Target target) {
     );
     externals.add(.new(external));
     imports[external] = .new('provided_$key', value);
-    Type fullWidth(Type type) => type.isFloating
-        ? Double
+    NativeTypeRef fullWidth(NativeTypeRef type) => type.isFloating
+        ? NativeScalarType(Double)
         : type.integerLayout != null
-        ? Int64
+        ? NativeScalarType(Int64)
         : type;
     final signature = switch (key) {
       'mixed' => NativeSignature(Double, [Pointer<Double>, Int64, Double]),
       'packed' => NativeSignature(Int64, [Int64]),
-      _ => NativeSignature(
-        value.result == Void ? Int64 : fullWidth(value.result),
+      _ => NativeSignature.types(
+        value.result.isVoid ? NativeScalarType(Int64) : fullWidth(value.result),
         value.parameters.map(fullWidth),
       ),
     };
@@ -111,7 +111,7 @@ List<ObjectModule> nativeCalls(Target target) {
       _ => parameters,
     };
     Value result = block.emit(DirectCall(external, arguments));
-    if (value.result == Void) {
+    if (value.result.isVoid) {
       result = block.emit(LoadNative(parameters.first));
     } else if (key.startsWith('argument') || key == 'mixed') {
       final original = key == 'mixed' ? parameters[2] : parameters.single;
@@ -181,13 +181,13 @@ Uint8List _arm(Target target, NativeSignature signature) {
           case RegisterArgument(:final register):
             assembler.moveDouble(.d17, register as arm.FloatRegister);
           case StackArgument(:final offset):
-            if (type == Float) {
+            if (type.isSinglePrecision) {
               assembler.loadFloat(.d17, .sp, offset);
             } else {
               assembler.loadDouble(.d17, .sp, offset);
             }
         }
-        if (type == Float) assembler.convertFloatToDouble(.d17, .d17);
+        if (type.isSinglePrecision) assembler.convertFloatToDouble(.d17, .d17);
       } else {
         switch (location) {
           case RegisterArgument(:final register):
@@ -201,7 +201,7 @@ Uint8List _arm(Target target, NativeSignature signature) {
               signed: type.integerLayout?.signed ?? false,
             );
         }
-        if (type.pointerElement != null) {
+        if (type is NativePointerType) {
           assembler.loadDouble(.d17, .x9, 0);
         } else {
           final integer = type.integerLayout!;
@@ -216,16 +216,16 @@ Uint8List _arm(Target target, NativeSignature signature) {
       }
       assembler.addDouble(.d16, .d16, .d17);
     }
-    if (signature.result == Double) {
+    if (signature.result.isFloating) {
       assembler.moveDouble(.d0, .d16);
     } else {
       assembler.truncateDoubleToInt(.x0, .d16);
     }
-  } else if (signature.result == Void) {
+  } else if (signature.result.isVoid) {
     assembler.store(.x1, .x0, 0);
-  } else if (signature.parameters.single == Float) {
+  } else if (signature.parameters.single.isSinglePrecision) {
     assembler.convertFloatToDouble(.d0, .d0);
-  } else if (signature.result == Float) {
+  } else if (signature.result.isSinglePrecision) {
     assembler.convertDoubleToFloat(.d0, .d0);
   } else if (signature.parameters.single.integerLayout case final integer?) {
     // Apple callers extend narrow arguments to 32 bits; check that promise too.
@@ -256,13 +256,15 @@ Uint8List _x64(Target target, NativeSignature signature) {
           case RegisterArgument(:final register):
             assembler.moveDouble(.xmm15, register as x64.FloatRegister);
           case StackArgument(:final offset):
-            if (type == Float) {
+            if (type.isSinglePrecision) {
               assembler.loadFloat(.xmm15, .rsp, offset + 8);
             } else {
               assembler.loadDouble(.xmm15, .rsp, offset + 8);
             }
         }
-        if (type == Float) assembler.convertFloatToDouble(.xmm15, .xmm15);
+        if (type.isSinglePrecision) {
+          assembler.convertFloatToDouble(.xmm15, .xmm15);
+        }
       } else {
         switch (location) {
           case RegisterArgument(:final register):
@@ -276,7 +278,7 @@ Uint8List _x64(Target target, NativeSignature signature) {
               signed: type.integerLayout?.signed ?? false,
             );
         }
-        if (type.pointerElement != null) {
+        if (type is NativePointerType) {
           assembler.loadDouble(.xmm15, .r10, 0);
         } else {
           final integer = type.integerLayout!;
@@ -291,16 +293,16 @@ Uint8List _x64(Target target, NativeSignature signature) {
       }
       assembler.addDouble(.xmm14, .xmm15);
     }
-    if (signature.result == Double) {
+    if (signature.result.isFloating) {
       assembler.moveDouble(.xmm0, .xmm14);
     } else {
       assembler.truncateDoubleToInt(.rax, .xmm14);
     }
-  } else if (signature.result == Void) {
+  } else if (signature.result.isVoid) {
     assembler.store(.rsi, .rdi, 0);
-  } else if (signature.parameters.single == Float) {
+  } else if (signature.parameters.single.isSinglePrecision) {
     assembler.convertFloatToDouble(.xmm0, .xmm0);
-  } else if (signature.result == Float) {
+  } else if (signature.result.isSinglePrecision) {
     assembler.convertDoubleToFloat(.xmm0, .xmm0);
   } else if (signature.parameters.single.integerLayout case final integer?) {
     assembler.extendInteger(

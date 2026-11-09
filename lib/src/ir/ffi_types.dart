@@ -1,5 +1,7 @@
 import 'dart:ffi' as ffi;
 
+import 'package:dartc/interop.dart';
+
 import 'type.dart';
 
 /// Canonical Dart FFI declaration identities, independent of pointer layout.
@@ -26,6 +28,27 @@ abstract final class FfiTypes() {
   /// The native signed 64-bit type, distinct from Dart `int`.
   static final int64 = scalarTypes[ffi.Int64]!;
 
+  /// The unsized native void declaration, distinct from Dart `void`.
+  static final voidType = ClassType(
+    _library,
+    'Void',
+    interfaces: [nativeType],
+    isAbstract: true,
+  );
+
+  /// The unsized native function marker, parameterized by its FFI signature.
+  static final nativeFunction = ClassType(
+    _library,
+    'NativeFunction',
+    interfaces: [nativeType],
+    isAbstract: true,
+    typeParameters: [
+      TypeParameterType('T')
+        ..initializeBound(.function)
+        ..initializeDefaultType(.function),
+    ],
+  );
+
   /// The Dart pointer declaration; its type argument describes native storage.
   static final pointer = ClassType(
     _library,
@@ -42,10 +65,58 @@ abstract final class FfiTypes() {
   static final Map<Type, ClassType> pointerTypes = .unmodifiable({
     for (final MapEntry(:key, :value) in _scalars.entries)
       value.$2: pointer.instantiate([scalarTypes[key]!]),
+    ffi.Pointer<ffi.Void>: pointer.instantiate([voidType]),
   });
 
   /// A pointer to native signed 64-bit storage.
   static final int64Pointer = pointerTypes[ffi.Pointer<ffi.Int64>]!;
+
+  /// Whether [type] is a non-nullable instance of the Dart FFI pointer declaration.
+  static bool isPointer(ValueType type) =>
+      type is ClassType && type.declaration == pointer;
+
+  /// Resolves a native type description to its canonical Dart declaration.
+  static ClassType resolve(NativeTypeRef type) => switch (type) {
+    NativeScalarType(:final type) =>
+      type == ffi.Void ? voidType : scalarTypes[type]!,
+    NativePointerType(:final element) => pointer.instantiate([
+      resolve(element),
+    ]),
+    NativeFunctionType(:final signature) => nativeFunction.instantiate([
+      FunctionType(
+        resolve(signature.result),
+        signature.parameters.map(resolve),
+      ),
+    ]),
+  };
+
+  /// Describes an already-bound supported native declaration without host reflection.
+  static NativeTypeRef describe(ValueType type) {
+    if (type == voidType) return NativeScalarType(ffi.Void);
+    for (final MapEntry(:key, :value) in scalarTypes.entries) {
+      if (type == value) return NativeScalarType(key);
+    }
+    if (isPointer(type)) {
+      return NativePointerType(
+        describe((type as ClassType).typeArguments.single),
+      );
+    }
+    if (type is ClassType && type.declaration == nativeFunction) {
+      final signature = type.typeArguments.single;
+      if (signature is FunctionType &&
+          signature.typeParameters.isEmpty &&
+          signature.optionalPositional == 0 &&
+          signature.named.isEmpty) {
+        return NativeFunctionType(
+          NativeSignature.types(
+            describe(signature.result),
+            signature.parameters.map(describe),
+          ),
+        );
+      }
+    }
+    throw UnsupportedError('Native declaration: ${type.dartName}');
+  }
 
   /// The native scalar element of [type], or null for another Dart type.
   static Type? pointerElement(ValueType type) {
@@ -58,13 +129,15 @@ abstract final class FfiTypes() {
   }
 
   /// The Dart value type corresponding to a supported native signature type.
-  static ValueType valueType(Type native) {
-    if (native == ffi.Void) return .voidType;
-    if (native == ffi.Float || native == ffi.Double) return .floating;
-    if (scalarTypes.containsKey(native)) return .integer;
-    if (pointerTypes[native] case final pointer?) return pointer;
-    throw UnsupportedError('Native value type: $native');
-  }
+  static ValueType valueType(NativeTypeRef native) => switch (native) {
+    NativeScalarType() when native.isVoid => .voidType,
+    NativeScalarType() when native.isFloating => .floating,
+    NativeScalarType() => .integer,
+    NativePointerType() => resolve(native),
+    NativeFunctionType() => throw UnsupportedError(
+      'A native function requires a pointer.',
+    ),
+  };
 }
 
 const _scalars = {

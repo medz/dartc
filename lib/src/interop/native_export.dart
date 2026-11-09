@@ -1,5 +1,4 @@
 import 'native_signature.dart';
-import 'native_type.dart';
 
 /// An explicitly named native function, independent of its Dart declaration.
 final class NativeExport(final String symbol, final NativeSignature signature) {
@@ -10,12 +9,9 @@ final class NativeExport(final String symbol, final NativeSignature signature) {
     }
   }
 
-  /// Writes a C prototype with explicit scalar, pointer and void types.
+  /// Writes a C prototype retaining scalar, pointer and native function types.
   void writeDeclaration(StringSink output) {
-    final parameters = signature.parameters.map((type) => type.cType).toList();
-    output.writeln(
-      '${signature.result.cType} $symbol(${parameters.isEmpty ? 'void' : parameters.join(', ')});',
-    );
+    output.writeln('${signature.declaration(symbol)};');
   }
 }
 

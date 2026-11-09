@@ -1,6 +1,7 @@
 import 'dart:ffi' as ffi;
 
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
 import 'package:test/test.dart';
 
 import '../support/ir_interpreter.dart';
@@ -8,6 +9,57 @@ import '../support/ir_interpreter.dart';
 void main() {
   const address = Constant.integer(-1);
   final pointer = PointerFromAddress(address, FfiTypes.int64Pointer);
+
+  test('function pointers preserve native signatures without acquiring storage operations', () {
+    final signature = NativeSignature(ffi.Int64, [ffi.Int8]);
+    final descriptor = NativePointerType(NativeFunctionType(signature));
+    final type = FfiTypes.resolve(descriptor);
+    expect(FfiTypes.describe(type), descriptor);
+    expect(FfiTypes.valueType(descriptor), type);
+    expect(
+      type,
+      isNot(
+        FfiTypes.resolve(
+          NativePointerType(
+            NativeFunctionType(NativeSignature(ffi.Int64, [ffi.Uint8])),
+          ),
+        ),
+      ),
+    );
+    final function = PointerFromAddress(address, type);
+    expect(PointerAddress(function).type, ValueType.integer);
+    expect(() => LoadNative(function), throwsArgumentError);
+    expect(() => StoreNative(function, address), throwsArgumentError);
+    expect(() => PointerOffset(function, address), throwsArgumentError);
+    expect(FfiTypes.isPointer(type.nullable), isFalse);
+    final block = Block([.integer]);
+    final created = block.emit(
+      PointerFromAddress(block.parameters.single, type),
+    );
+    block.finish(Return(block.emit(PointerAddress(created))));
+    final functionBody = IrFunction(
+      FunctionTarget(
+        Uri.parse('memory:function-pointer'),
+        'address',
+        .integer,
+        [.integer],
+      ),
+      [block],
+    );
+    final runner = IrInterpreter(IrProgram([], [functionBody]), {});
+    for (final value in [0, -1, 0x7fffffffffffffff]) {
+      expect(runner.run(functionBody, [value]), value);
+    }
+    expect(
+      () => PointerFromAddress(
+        address,
+        FfiTypes.nativeFunction.instantiate([
+          FunctionType(.integer, [.integer]),
+        ]),
+      ),
+      throwsArgumentError,
+    );
+  });
 
   test('native reads and writes use the element value type', () {
     for (final type in [ffi.Pointer<ffi.Float>, ffi.Pointer<ffi.Double>]) {
@@ -49,10 +101,13 @@ void main() {
     );
     expect(() => StoreNative(pointer, pointer), throwsArgumentError);
     expect(() => PointerOffset(pointer, pointer), throwsArgumentError);
-    expect(FfiTypes.valueType(ffi.Pointer<ffi.Int64>), pointer.type);
     expect(
-      () => FfiTypes.valueType(ffi.Pointer<ffi.Void>),
-      throwsUnsupportedError,
+      FfiTypes.valueType(NativeTypeRef.of(ffi.Pointer<ffi.Int64>)),
+      pointer.type,
+    );
+    expect(
+      FfiTypes.valueType(NativeTypeRef.of(ffi.Pointer<ffi.Void>)),
+      FfiTypes.pointerTypes[ffi.Pointer<ffi.Void>],
     );
   });
 

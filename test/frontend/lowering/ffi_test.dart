@@ -2,11 +2,78 @@ import 'dart:ffi';
 
 import 'package:dartc/frontend.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
 import 'package:test/test.dart';
 
 import '../../support/ir_interpreter.dart';
 
 void main() {
+  test(
+    'function pointer exports retain nested FFI identities through lowering',
+    () async {
+      final result = await AnalysisSession([
+        'test/compiler/fixtures/native_function_pointers.dart',
+      ]).use(Lowering().lower);
+      final functions = {
+        for (final f in result.program.functions)
+          if (f.target.owner == null) f.target.name: f,
+      };
+      final factory = result.exports.entries.singleWhere(
+        (e) => e.key.name == 'identity',
+      );
+      final callback = NativePointerType(
+        NativeFunctionType(NativeSignature(Int64, [Int8])),
+      );
+      expect(
+        factory.value.signature,
+        NativeSignature.types(callback, [callback]),
+      );
+      expect(factory.key.returnType, FfiTypes.resolve(callback));
+      final runner = IrInterpreter(result.program, {});
+      final a = runner.run(functions['fromAddress']!, [0x1000]);
+      final b = runner.run(functions['fromAddress']!, [0x2000]);
+      expect(
+        runner.run(functions['sameAddress']!, [
+          a,
+          Pointer<Void>.fromAddress(0x1000),
+        ]),
+        1,
+      );
+      expect(
+        runner.run(functions['differentAddress']!, [
+          Pointer<Void>.fromAddress(0x1000),
+          a,
+        ]),
+        0,
+      );
+      expect(
+        runner.run(functions['address']!, [
+          runner.run(functions['identity']!, [a]),
+        ]),
+        0x1000,
+      );
+      for (final count in [-1, 0, 1, 2, 5]) {
+        final chosen = runner.run(functions['select']!, [
+          a,
+          a,
+          b,
+          b,
+          a,
+          a,
+          b,
+          b,
+          b,
+          b,
+          count,
+        ]);
+        expect(
+          runner.run(functions['address']!, [chosen]),
+          count < 0 || count.isOdd ? 0x2000 : 0x1000,
+        );
+      }
+    },
+  );
+
   test(
     'FFI lowering uses declarations, preserving user classes and extensions',
     () async {

@@ -40,18 +40,12 @@ final class ExportBindings(final Bindings bindings)
       throw UnsupportedError('Native exports require top-level functions.');
     }
     final native = type.typeArguments.single;
-    if (native is! dart.FunctionType ||
-        native.nullabilitySuffix != .none ||
-        native.typeParameters.isNotEmpty ||
-        native.formalParameters.any((p) => !p.isRequiredPositional)) {
+    if (native is! dart.FunctionType) {
       throw UnsupportedError(
         'Native exports require a non-generic positional FFI function signature.',
       );
     }
-    final signature = NativeSignature(
-      nativeType(native.returnType),
-      native.formalParameters.map((p) => nativeType(p.type)),
-    );
+    final signature = nativeSignature(native);
     final target = bindings.target(
       declaration.declaredFragment!.element,
       unit,

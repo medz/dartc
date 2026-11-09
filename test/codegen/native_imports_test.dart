@@ -82,6 +82,34 @@ void main() {
           ),
           throwsArgumentError,
         );
+        final callback = NativePointerType(
+          NativeFunctionType(NativeSignature(Int64, [Int8])),
+        );
+        final withPointer = FunctionTarget(library, 'withPointer', .integer, [
+          FfiTypes.resolve(callback),
+        ]);
+        final pointerProgram = IrProgram(
+          [],
+          [],
+          externals: [IrExternal(withPointer)],
+        );
+        expect(
+          () => generator.generate(
+            pointerProgram,
+            definitions: [withPointer],
+            imports: {
+              withPointer: NativeImport(
+                'other_signature',
+                NativeSignature.types(NativeScalarType(Int64), [
+                  NativePointerType(
+                    NativeFunctionType(NativeSignature(Int64, [Uint8])),
+                  ),
+                ]),
+              ),
+            },
+          ),
+          throwsArgumentError,
+        );
         expect(
           () => generator.generate(
             program,

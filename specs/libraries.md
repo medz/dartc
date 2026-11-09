@@ -31,7 +31,8 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 
 | 项目 | 当前原生范围与缺口 |
 | --- | --- |
-| 导出签名 | 同步、非泛型的顶层函数；参数和结果支持 `Int8/16/32/64`、`Uint8/16/32/64`、`Float`、`Double` 和这些标量类型的 `Pointer<T>`，分别对应非可空 Dart `int`、`double` 和同元素类型的指针；结果另支持 `Void`，对应 Dart `void`。原生整数边界按签名扩展或截断，Float 边界转换单精度与 double；普通 Dart 调用注解函数保留完整 int/double，不受原生签名截断。只接受必需位置参数。其他标量、指针元素类型、结构体、可变参数和数据导出尚未实现。 |
+| 导出签名 | 同步、非泛型的顶层函数；参数和结果支持 `Int8/16/32/64`、`Uint8/16/32/64`、`Float`、`Double` 和指向所支持原生类型的 `Pointer<T>`，分别对应非可空 Dart `int`、`double` 和同元素类型的指针。指针类型可递归嵌套，元素另支持 `Void` 和保留完整原生签名的 `NativeFunction<T>`；后两者不能按值传参，结果另支持 `Void`，对应 Dart `void`。原生整数边界按签名扩展或截断，Float 边界转换单精度与 double；普通 Dart 调用注解函数保留完整 int/double，不受原生签名截断。只接受必需位置参数。其他标量、结构体、可变参数和数据导出尚未实现。 |
+| 函数与不透明指针 | `Pointer<NativeFunction<T>>`、`Pointer<Void>` 及所支持类型的多级指针可作为参数和结果、从地址构造、读取地址及比较；普通 Dart 调用、分支和循环保留地址及语义类型，头文件保留嵌套函数指针声明。相等只取决于地址，不同元素类型不影响指针相等。Void 和 NativeFunction 不具有元素存储大小；函数指针调用、`asFunction` 产生 Dart 函数值、指针容器读写和回调尚未接通。 |
 | 已绑定原生调用 | 独立 `CodeGenerator.generate` API 接受以 `IrExternal.target` 为键的 `imports`，由 `NativeImport` 明确原生符号及上述标量签名。Dart 参数在出站边界转换，原生结果按宽度/精度转换回 Dart 值；调用者存活值及写入副作用保留，参数遵循目标平台寄存器和栈布局。绑定必须匹配外部声明，缺失或不匹配均报错；原生实现由链接输入提供。`Compiler.compile` 尚未自动绑定 `@Native`，资产解析、函数指针与 `asFunction` 调用、回调及托管调用协议仍未接通，不能据此声称完整 dart:ffi 支持。 |
 | 函数体 | 整数常量、加法、减法、乘法、按位与/或/异或/取反及相应复合赋值、有符号比较，整数与布尔值的相等/不等比较；整数运算保留 64 位环绕结果，`int / int` 产生 double。支持条件表达式、逻辑短路、if/else、while/do/for、含标签的 break/continue、多返回，以及批次内跨库调用和递归。Dart 函数间的直接调用支持可选位置参数、命名参数及常量默认值；原生导出仍只接受必需位置参数。整数截断除法、余数、移位、对象存储、异常及异步尚未接入原生后端。 |
 | 浮点 | 支持静态 int/double 操作数的混合加、减、乘、IEEE 除法、全部数值比较及 `toDouble`，另支持 double 常量和取负；比较保持整数的原始数值，不因算术转换而丢失精度。保留 NaN、无穷、次正规数和正负零行为，不做融合乘加或 fast-math 改写。参数、结果、分支汇合和调用保持 double 表示。部分混合数值常量表达式尚未实现，见[数值比较](expressions.md#数值比较与-sdk-差异)。其他数值转换、浮点取模/截断除法、compareTo 及完整数学库尚未接入。当前执行验证使用 SDK 宿主的默认浮点控制环境，非默认控制状态尚未验证。 |
@@ -47,6 +48,8 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 [整数运算对照](../test/compiler/integer_operations_test.dart)覆盖乘法溢出、按位与/或/异或/取反、复合赋值、重复与重叠操作数，以及调用和循环中的值保存；使用正负边界、跨 32 位值及交替位模式对照 SDK。
 
 [指针对照](../test/compiler/pointers_test.dart)检查地址往返、整数边界读写、寄存器与栈的混合参数、跨调用及循环存活、别名修改和复合赋值顺序。[FFI 声明绑定验证](../test/frontend/lowering/ffi_test.dart)检查同名用户类型和 extension 不被替换为原生操作；[IR 契约](../test/ir/native_memory_test.dart)检查语义类型和存储效果。[签名验证](../test/interop/native_signature_test.dart)与[编译拒绝验证](../test/compiler/compiler_test.dart)覆盖不支持及不匹配的类型。
+
+[函数指针验证](../test/compiler/native_function_pointers_test.dart)检查签名、地址往返、嵌套函数指针、原生栈参数及跨调用存活；返回的函数指针由 SDK FFI 实际调用，不代表 dartc 已能执行 `asFunction`。[签名契约](../test/interop/native_signature_test.dart)验证不能按值传递函数类型、递归 C 声明及完整签名相等性。类型依据为 [NativeFunction](https://api.dart.dev/stable/3.13.7/dart-ffi/NativeFunction-class.html) 与 [asFunction](https://api.dart.dev/stable/3.13.7/dart-ffi/NativeFunctionPointer/asFunction.html)；C 声明按 [N1570 §6.7.6.1/§6.7.6.3](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf)的指针与函数声明规则生成。
 
 [指针偏移与索引验证](../test/compiler/pointer_arithmetic_test.dart)覆盖各标量元素宽度、负偏移、地址回绕、索引读写及相邻字节、增减和复合赋值的求值顺序、别名与跨调用存活。预期地址由整数公式独立计算；SDK 另作对照。规范依据为对应元素类型的标准库契约，包括 [Int32Pointer.operator +](https://api.dart.dev/stable/3.13.7/dart-ffi/Int32Pointer/operator_plus.html)、[operator -](https://api.dart.dev/stable/3.13.7/dart-ffi/Int32Pointer/operator_minus.html)、[operator []](https://api.dart.dev/stable/3.13.7/dart-ffi/Int32Pointer/operator_get.html) 与 [FloatPointer.operator []=](https://api.dart.dev/stable/3.13.7/dart-ffi/FloatPointer/operator_put.html)。
 

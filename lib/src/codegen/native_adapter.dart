@@ -16,13 +16,13 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     required bool intoDart,
   }) {
     final native = emitter.convention.classify(signature);
-    Type fullWidth(Type type) => type.isFloating
-        ? Double
+    NativeTypeRef fullWidth(NativeTypeRef type) => type.isFloating
+        ? NativeScalarType(Double)
         : type.integerLayout != null
-        ? Int64
+        ? NativeScalarType(Int64)
         : type;
     final body = emitter.convention.classify(
-      NativeSignature(
+      NativeSignature.types(
         fullWidth(signature.result),
         signature.parameters.map(fullWidth),
       ),
@@ -59,7 +59,9 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
             bytes: intoDart ? type.nativeSize : 8,
             signed: intoDart && (integer?.signed ?? false),
           );
-          if (type == Float) _convert(scratch, type, intoDart: intoDart);
+          if (type.isSinglePrecision) {
+            _convert(scratch, type, intoDart: intoDart);
+          }
           emitter.storeStack(
             scratch,
             (destination.parameters[i] as StackArgument<R>).offset,
@@ -75,14 +77,14 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     return emitter.finish();
   }
 
-  void _convert(R register, Type type, {required bool intoDart}) {
+  void _convert(R register, NativeTypeRef type, {required bool intoDart}) {
     if (type.integerLayout case final integer? when integer.bytes < 8) {
       emitter.extendInteger(
         register,
         bytes: integer.bytes,
         signed: integer.signed,
       );
-    } else if (type == Float) {
+    } else if (type.isSinglePrecision) {
       if (intoDart) {
         emitter.convertFloatToDouble(register, register);
       } else {

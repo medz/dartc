@@ -1,3 +1,5 @@
+import 'package:dartc/interop.dart';
+
 import 'core_types.dart';
 import 'ffi_types.dart';
 import 'signature.dart';
@@ -462,13 +464,13 @@ sealed class Instruction(super.type) extends Value {
   bool get mayThrow => effects.contains(Effect.mayThrow);
 }
 
-/// Creates a scalar pointer without accessing or owning its storage.
+/// Creates a native pointer without accessing or owning its target.
 final class PointerFromAddress(final Value address, ClassType type)
     extends Instruction {
   this : super(type) {
-    if (address.type != .integer || FfiTypes.pointerElement(type) == null) {
+    if (address.type != .integer || !FfiTypes.isPointer(type)) {
       throw ArgumentError(
-        'Expected an integer address and native scalar pointer type.',
+        'Expected an integer address and native pointer type.',
       );
     }
   }
@@ -476,11 +478,11 @@ final class PointerFromAddress(final Value address, ClassType type)
   Iterable<Value> get inputs => [address];
 }
 
-/// Extracts a native scalar pointer's address without dereferencing it.
+/// Extracts a native pointer's address without dereferencing it.
 final class PointerAddress(final Value pointer) extends Instruction {
   this : super(.integer) {
-    if (FfiTypes.pointerElement(pointer.type) == null) {
-      throw ArgumentError('Expected a native scalar pointer.');
+    if (!FfiTypes.isPointer(pointer.type)) {
+      throw ArgumentError('Expected a native pointer.');
     }
   }
   @override
@@ -513,8 +515,10 @@ final class LoadNative(final Value pointer) extends Instruction {
   this
     : super(
         FfiTypes.valueType(
-          FfiTypes.pointerElement(pointer.type) ??
-              (throw ArgumentError('Expected a native scalar pointer.')),
+          NativeTypeRef.of(
+            FfiTypes.pointerElement(pointer.type) ??
+                (throw ArgumentError('Expected a native scalar pointer.')),
+          ),
         ),
       );
   @override
@@ -529,7 +533,8 @@ final class StoreNative(final Value pointer, final Value value)
     extends Instruction {
   this : super(.voidType) {
     final element = FfiTypes.pointerElement(pointer.type);
-    if (element == null || value.type != FfiTypes.valueType(element)) {
+    if (element == null ||
+        value.type != FfiTypes.valueType(NativeTypeRef.of(element))) {
       throw ArgumentError(
         'Expected a native scalar pointer and matching value.',
       );

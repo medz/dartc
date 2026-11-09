@@ -11,6 +11,7 @@ extension NativeTypeLayout on Type {
 
   /// The pointer type for a supported scalar, or null.
   Type? get pointerType {
+    if (this == Void) return Pointer<Void>;
     if (this == Float) return Pointer<Float>;
     if (this == Double) return Pointer<Double>;
     return integerLayout?.pointer;
@@ -18,6 +19,7 @@ extension NativeTypeLayout on Type {
 
   /// The native scalar element of a supported pointer, or null.
   Type? get pointerElement {
+    if (this == Pointer<Void>) return Void;
     if (this == Pointer<Float>) return Float;
     if (this == Pointer<Double>) return Double;
     for (final MapEntry(:key, :value) in _integers.entries) {

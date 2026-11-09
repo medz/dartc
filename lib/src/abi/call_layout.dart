@@ -1,5 +1,3 @@
-import 'dart:ffi';
-
 import 'package:dartc/interop.dart';
 
 import 'argument_location.dart';
@@ -56,7 +54,7 @@ final class CallLayout<R>(
     }
     return .new(
       parameters,
-      signature.result == Void
+      signature.result.isVoid
           ? null
           : signature.result.isFloating
           ? floatingResult

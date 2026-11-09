@@ -7,7 +7,7 @@ import 'package:test/test.dart';
 void main() {
   test('domains use public entries and have acyclic dependencies', () {
     const dependencies = <String, Set<String>>{
-      'ir': {},
+      'ir': {'interop'},
       'target': {},
       'sdk': {},
       'assembler': {'target'},

@@ -18,24 +18,51 @@ ClassType? ffiClass(InterfaceElement element) {
     if (element == library.getClass(type.name)) return type;
   }
   if (element == library.getClass('Pointer')) return FfiTypes.pointer;
+  if (element == library.getClass('Void')) return FfiTypes.voidType;
+  if (element == library.getClass('NativeFunction')) {
+    return FfiTypes.nativeFunction;
+  }
   return null;
 }
 
-Type nativeType(dart.DartType type) {
+NativeTypeRef nativeType(dart.DartType type) {
   if (type is dart.InterfaceType && type.nullabilitySuffix == .none) {
     final library = type.element.library;
     if (library.uri == _library) {
       for (final MapEntry(:key, :value) in FfiTypes.scalarTypes.entries) {
-        if (type.element == library.getClass(value.name)) return key;
+        if (type.element == library.getClass(value.name)) {
+          return NativeScalarType(key);
+        }
       }
-      if (type.element == library.getClass('Void')) return ffi.Void;
+      if (type.element == library.getClass('Void')) {
+        return NativeScalarType(ffi.Void);
+      }
       if (type.element == library.getClass('Pointer')) {
-        final element = nativeType(type.typeArguments.single);
-        if (element.pointerType case final pointer?) return pointer;
+        return NativePointerType(nativeType(type.typeArguments.single));
+      }
+      if (type.element == library.getClass('NativeFunction')) {
+        final signature = type.typeArguments.single;
+        if (signature is dart.FunctionType) {
+          return NativeFunctionType(nativeSignature(signature));
+        }
       }
     }
   }
   throw UnsupportedError('Native signature type: $type');
+}
+
+NativeSignature nativeSignature(dart.FunctionType type) {
+  if (type.nullabilitySuffix != .none ||
+      type.typeParameters.isNotEmpty ||
+      type.formalParameters.any((p) => !p.isRequiredPositional)) {
+    throw UnsupportedError(
+      'Expected a non-generic positional FFI function signature.',
+    );
+  }
+  return NativeSignature.types(
+    nativeType(type.returnType),
+    type.formalParameters.map((p) => nativeType(p.type)),
+  );
 }
 
 Value? lowerFfi(
@@ -50,11 +77,11 @@ Value? lowerFfi(
   final pointer = library.getClass('Pointer')!;
   if (member == pointer.getNamedConstructor('fromAddress') &&
       result is ClassType &&
-      FfiTypes.pointerElement(result) != null) {
+      FfiTypes.isPointer(result)) {
     return emit(PointerFromAddress(operands.single, result));
   }
   if (member == pointer.getGetter('address') &&
-      FfiTypes.pointerElement(operands.single.type) != null) {
+      FfiTypes.isPointer(operands.single.type)) {
     return emit(PointerAddress(operands.single));
   }
   for (final type in FfiTypes.scalarTypes.values) {
