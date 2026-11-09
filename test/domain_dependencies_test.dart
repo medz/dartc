@@ -10,10 +10,8 @@ void main() {
       'ir': {},
       'target': {},
       'sdk': {},
-      'export': {},
       'assembler': {'target'},
-      'analyzer': {'sdk'},
-      'lowering': {'analyzer', 'ir', 'interop'},
+      'frontend': {'sdk', 'ir', 'interop'},
       'abi': {'assembler', 'target', 'interop'},
       'object': {'target', 'assembler'},
       'interop': {},
@@ -22,10 +20,9 @@ void main() {
       'compiler': {
         'abi',
         'ir',
-        'analyzer',
+        'frontend',
         'codegen',
         'interop',
-        'lowering',
         'sdk',
         'target',
         'object',
@@ -35,6 +32,7 @@ void main() {
     };
     final entries = {
       for (final domain in dependencies.keys) '$domain.dart': domain,
+      'export.dart': 'interop',
       'assembler/arm64.dart': 'assembler',
       'assembler/x64.dart': 'assembler',
       'object/elf.dart': 'object',
@@ -78,7 +76,7 @@ void main() {
           if (uri.scheme == 'package' && uri.pathSegments.first != 'dartc') {
             expect(
               const {
-                'analyzer': {'analyzer', 'lowering'},
+                'analyzer': {'frontend'},
                 'crypto': {'linker'},
               }[uri.pathSegments.first],
               contains(owner),

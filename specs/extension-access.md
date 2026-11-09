@@ -11,17 +11,17 @@
 - getter 返回函数的调用先执行 getter，再计算调用实参；这与普通虚方法查找路径分开。
 - 对象模式 extension getter，包括通配字段和候选分支缓存；关系模式包括可空接收者。静态 extension 调用的缓存键包含声明和结构化类型实参，避免不同选择错误共享结果。
 
-[SDK 差分样本](../test/lowering/fixtures/extension_access.dart)覆盖结果、异常和副作用；[测试](../test/lowering/extension_access_test.dart)单独标明下述规范顺序检查。
+[SDK 差分样本](../test/frontend/lowering/fixtures/extension_access.dart)覆盖结果、异常和副作用；[测试](../test/frontend/lowering/extension_access_test.dart)单独标明下述规范顺序检查。
 
 ## 隐式调用
 
-普通 extension 的 `call` 可通过隐式函数调用语法访问，复用 receiver-first 静态调用。保留泛型静态视图、可空接收者及显式 override；真实成员优先，dynamic 不查找 extension。虚 getter-call 的 getter 读取在实参之后，括号、静态和 extension getter 则先读取，见[调用样本](../test/lowering/fixtures/extension_call.dart)。
+普通 extension 的 `call` 可通过隐式函数调用语法访问，复用 receiver-first 静态调用。保留泛型静态视图、可空接收者及显式 override；真实成员优先，dynamic 不查找 extension。虚 getter-call 的 getter 读取在实参之后，括号、静态和 extension getter 则先读取，见[调用样本](../test/frontend/lowering/fixtures/extension_call.dart)。
 
 ## 方法提取
 
 普通 extension 方法提取、显式 `call` 提取与对象模式的方法字段复用 `MakeClosure`，捕获提取时已检查的接收者，再由普通 wrapper 调用 receiver-first 静态目标。保留方法泛型界限、默认类型、可选参数默认值及词法类型环境；每次提取产生独立闭包，同一个泛型闭包的相同实例化保留既有身份规则。不增加 extension 专用 IR。
 
-在 `finally` 内提取方法时，正常离开、返回和抛错均在清理路径上绑定当次接收者。连续提取两个扩展方法也保留各自的目标。见[方法提取样本](../test/lowering/fixtures/extension_tearoffs.dart)。
+在 `finally` 内提取方法时，正常离开、返回和抛错均在清理路径上绑定当次接收者。连续提取两个扩展方法也保留各自的目标。见[方法提取样本](../test/frontend/lowering/fixtures/extension_tearoffs.dart)。
 
 ## 赋值表达式值的已知差异
 
@@ -41,7 +41,7 @@
 - analyzer 14.7 接受部分显式泛型一元表达式，却把声明的 `T` 留在结果及外围 record 的静态类型中。lowering 对可能逃出词法作用域的结果明确拒绝，而不猜测修复整棵 AST 的类型。
 - 核心库 extension 复用普通静态调用，未提供的函数体保留为导入；extension type 的独立范围见[表示擦除](extension-types.md)。
 
-这些不是完整运算符支持；[边界测试](../test/lowering/extension_boundaries_test.dart)保留相应最小用例。
+这些不是完整运算符支持；[边界测试](../test/frontend/lowering/extension_boundaries_test.dart)保留相应最小用例。
 
 ## 方法提取的运行时泛型默认值
 

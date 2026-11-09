@@ -14,6 +14,6 @@
 
 ## 当前边界
 
-支持枚举混入及其泛型实参和成员重写，见[枚举混入验证](../test/lowering/enum_mixins_test.dart)。协变转发遵循[类成员转发](classes.md)的入口与默认值规则。所有源 mixin 和非 Object 父类声明须包含在输入库批次中；未提供的源码不会自动装配。
+支持枚举混入及其泛型实参和成员重写，见[枚举混入验证](../test/frontend/lowering/enum_mixins_test.dart)。协变转发遵循[类成员转发](classes.md)的入口与默认值规则。所有源 mixin 和非 Object 父类声明须包含在输入库批次中；未提供的源码不会自动装配。
 
-行为验证：[基本应用](../test/lowering/mixins_test.dart)、[字段与词法 super](../test/lowering/mixin_application_state_test.dart)、[泛型、接口、常量及嵌套应用](../test/lowering/mixin_type_environments_test.dart)、[输入库边界](../test/lowering/mixins_unsupported_test.dart)。
+行为验证：[基本应用](../test/frontend/lowering/mixins_test.dart)、[字段与词法 super](../test/frontend/lowering/mixin_application_state_test.dart)、[泛型、接口、常量及嵌套应用](../test/frontend/lowering/mixin_type_environments_test.dart)、[输入库边界](../test/frontend/lowering/mixins_unsupported_test.dart)。

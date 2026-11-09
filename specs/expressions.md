@@ -5,29 +5,29 @@
 | 特性 | 当前 IR 范围 |
 | --- | --- |
 | null、bool、整数、double、字符串 | 支持这五种字面量，包括最小有符号 int、整数在 double 上下文中的解释和负零。 |
-| 普通、raw、多行、插值与相邻字符串 | 支持普通、raw、多行、运行时插值与相邻拼接；保留插值表达式和 toString 的求值顺序、虚派发及异常。见[字符串样本](../test/lowering/fixtures/strings.dart)。 |
-| Symbol 字面量与构造 | 支持公开字面量、Symbol(String) 的普通/const 构造、构造器提取、empty/unaryMinus 与嵌套公开常量；const 按规范身份复用，普通构造保留独立身份。相等、hashCode、Symbol 类型的 toString 调用/提取及对象模式保留用户实现的虚派发。私有源码字面量及其常量依赖仍明确拒绝，避免消费 analyzer 丢失库身份后的错误折叠结果。构造器接收任意字符串，包括以 `_` 开头但不带私有库身份的名字。见[Symbol 样本](../test/lowering/fixtures/symbols.dart)。 |
-| Invocation 工厂与属性 | 支持 method/genericMethod/getter/setter 的直接调用及构造器提取、缺省参数、八个属性和对象模式；保留 Symbol 身份、类型实参、不可变浅快照及拷贝顺序。用户 implements/extends Invocation、抽象重声明及接口访问保留虚派发和继承默认 getter。匹配 SDK 3.13.7 的各类空集合身份与实际类型，这些细节不声明为跨 SDK 的语言保证。见[Invocation 样本](../test/lowering/fixtures/invocations.dart)。 |
-| Record 字面量 | 支持空、单字段、位置与命名混合的 record，以及嵌套和 const record。字段按源码顺序求值及隐式转换，失败时跳过后续字段；支持字段读取和结构相等。见[record 样本](../test/lowering/fixtures/records.dart)。 |
+| 普通、raw、多行、插值与相邻字符串 | 支持普通、raw、多行、运行时插值与相邻拼接；保留插值表达式和 toString 的求值顺序、虚派发及异常。见[字符串样本](../test/frontend/lowering/fixtures/strings.dart)。 |
+| Symbol 字面量与构造 | 支持公开字面量、Symbol(String) 的普通/const 构造、构造器提取、empty/unaryMinus 与嵌套公开常量；const 按规范身份复用，普通构造保留独立身份。相等、hashCode、Symbol 类型的 toString 调用/提取及对象模式保留用户实现的虚派发。私有源码字面量及其常量依赖仍明确拒绝，避免消费 analyzer 丢失库身份后的错误折叠结果。构造器接收任意字符串，包括以 `_` 开头但不带私有库身份的名字。见[Symbol 样本](../test/frontend/lowering/fixtures/symbols.dart)。 |
+| Invocation 工厂与属性 | 支持 method/genericMethod/getter/setter 的直接调用及构造器提取、缺省参数、八个属性和对象模式；保留 Symbol 身份、类型实参、不可变浅快照及拷贝顺序。用户 implements/extends Invocation、抽象重声明及接口访问保留虚派发和继承默认 getter。匹配 SDK 3.13.7 的各类空集合身份与实际类型，这些细节不声明为跨 SDK 的语言保证。见[Invocation 样本](../test/frontend/lowering/fixtures/invocations.dart)。 |
+| Record 字面量 | 支持空、单字段、位置与命名混合的 record，以及嵌套和 const record。字段按源码顺序求值及隐式转换，失败时跳过后续字段；支持字段读取和结构相等。见[record 样本](../test/frontend/lowering/fixtures/records.dart)。 |
 | 可变/const List | 支持保留实际元素类型的可变 List 字面量、length、索引读写、sublist、add 和 addAll。支持 const List 的内容和规范身份；集合构造器和完整 SDK API 待实现。 |
 | Set、Map 字面量 | 支持可变类型化字面量、插入顺序、重复项处理及用户相等和 hashCode。支持 Set 的 length/add/addAll、Map 的 length/索引读写/containsKey/entries，以及 MapEntry 的普通与 const 构造、key/value。支持 const Set/Map；完整 SDK API 待实现。 |
 | List if/for/for-in、spread | 支持 List、Set、Map 的 if/else、三段式 for、同步 for-in 和 spread，按源码顺序执行。sequence spread 使用源 Iterable 的 iterator；Map spread 需要逐项类型检查时使用 entries，否则使用 forEach。dynamic 源先核对 Iterable/Map 协议，再逐项转换。addAll 调用还在遍历前检查实际接收者要求的源类型。 |
 | 空感知集合元素 | 支持空感知元素、spread 以及 Map 的空感知 key/value。空 key 跳过对应 value 的求值。 |
-| 集合 if-case、模式循环 | 支持已表示模式及 when 守卫的 if-case，以及 record、List 和 Map 模式循环头。见[集合样本](../test/lowering/fixtures/collections.dart)。 |
-| 常量运算、类型测试与转换 | 常量声明和默认值支持标量、record、List/Set/Map、普通用户对象、Type 及函数值常量。`is`、`is!` 和 `as` 支持[已表示的类型](types.md)及其可空形式。record 按形状和字段运行值检查，转换失败抛出 TypeError。见[类型检查样本](../test/lowering/fixtures/type_checks.dart)。 |
-| 算术、位运算、移位、关系与短路 | 支持 int 的算术、按位运算和移位，以及 double、num 和混合数字的算术与大小比较。保留整数精度、NaN、无穷及负零。支持 bool 的逻辑运算、标量相等及 record 字段逐项相等。见[数字样本](../test/lowering/fixtures/numeric.dart)。 |
-| 条件表达式 `c ? a : b` | 按条件只计算一个分支，保留该分支的值、写入和异常。结果可为已支持的值类型或 void。见[条件样本](../test/lowering/fixtures/conditionals.dart)。 |
-| 赋值、复合赋值、增减、索引赋值 | 局部变量、参数、实例属性和用户定义的索引支持简单赋值、复合赋值及前后缀增减。接收者与索引仅求值一次，`??=` 只在读到 null 时求值右侧并写入。见[属性与索引样本](../test/lowering/fixtures/nominal/updates.dart)。 |
+| 集合 if-case、模式循环 | 支持已表示模式及 when 守卫的 if-case，以及 record、List 和 Map 模式循环头。见[集合样本](../test/frontend/lowering/fixtures/collections.dart)。 |
+| 常量运算、类型测试与转换 | 常量声明和默认值支持标量、record、List/Set/Map、普通用户对象、Type 及函数值常量。`is`、`is!` 和 `as` 支持[已表示的类型](types.md)及其可空形式。record 按形状和字段运行值检查，转换失败抛出 TypeError。见[类型检查样本](../test/frontend/lowering/fixtures/type_checks.dart)。 |
+| 算术、位运算、移位、关系与短路 | 支持 int 的算术、按位运算和移位，以及 double、num 和混合数字的算术与大小比较。保留整数精度、NaN、无穷及负零。支持 bool 的逻辑运算、标量相等及 record 字段逐项相等。见[数字样本](../test/frontend/lowering/fixtures/numeric.dart)。 |
+| 条件表达式 `c ? a : b` | 按条件只计算一个分支，保留该分支的值、写入和异常。结果可为已支持的值类型或 void。见[条件样本](../test/frontend/lowering/fixtures/conditionals.dart)。 |
+| 赋值、复合赋值、增减、索引赋值 | 局部变量、参数、实例属性和用户定义的索引支持简单赋值、复合赋值及前后缀增减。接收者与索引仅求值一次，`??=` 只在读到 null 时求值右侧并写入。见[属性与索引样本](../test/frontend/lowering/fixtures/nominal/updates.dart)。 |
 | 函数、构造器、成员调用与提取 | 支持普通和泛型顶层函数、实例与静态方法、实例 getter、super 成员、生成式构造器、工厂及工厂重定向。类成员和构造器保留类类型实参，可提取函数、方法及构造器，显式或按上下文实例化后进行间接调用。见[类](classes.md)。 |
 | extension 方法、属性与运算符 | 支持已解析的隐式、显式 override 和未限定词法调用，保留接收者静态视图、类型实参、默认/命名参数、空感知与级联求值顺序。接收者检查先于实参；dynamic 隐式调用不查找 extension。支持实例 getter/setter、索引、运算符、复合赋值、`??=` 和前后缀更新；getter 返回的函数先读取再求值调用实参。方法提取及显式 call 提取复用普通闭包，隐式 extension call 调用复用静态目标；部分显式泛型运算符仍待实现，见[范围与已知 SDK 差异](extension-access.md)。 |
-| dynamic 成员、运算符与更新 | 一条 DynamicDispatch 指令复用调用、属性与索引更新路径；支持动态级联、空感知链、赋值值、前后缀及 `??=`。所有实参先求值，再核对实际目标签名。`d.getter(arg())` 与 `(d.getter)(arg())` 保留不同的 getter/实参顺序。见[动态样本](../test/lowering/fixtures/dynamic_dispatch.dart)。 |
-| 空短路、空断言与级联 | 支持 `??`、可赋值位置的 `??=`、与 null 的比较，以及后缀 `!`。实例与 record 的空感知访问会短路同一条链上的成员、实参、索引、赋值和空断言，括号结束这条链。支持普通与空感知级联，接收者只求值一次；空接收者跳过所有级联段。见[级联样本](../test/lowering/fixtures/cascades.dart)。见[空安全样本](../test/lowering/fixtures/nullability.dart)。 |
-| 点简写 | 支持已表示类型的构造器、工厂、静态方法和显式静态 getter 的点简写。包含已表示的泛型类及枚举成员。见[点简写样本](../test/lowering/fixtures/dot_shorthand.dart)。 |
+| dynamic 成员、运算符与更新 | 一条 DynamicDispatch 指令复用调用、属性与索引更新路径；支持动态级联、空感知链、赋值值、前后缀及 `??=`。所有实参先求值，再核对实际目标签名。`d.getter(arg())` 与 `(d.getter)(arg())` 保留不同的 getter/实参顺序。见[动态样本](../test/frontend/lowering/fixtures/dynamic_dispatch.dart)。 |
+| 空短路、空断言与级联 | 支持 `??`、可赋值位置的 `??=`、与 null 的比较，以及后缀 `!`。实例与 record 的空感知访问会短路同一条链上的成员、实参、索引、赋值和空断言，括号结束这条链。支持普通与空感知级联，接收者只求值一次；空接收者跳过所有级联段。见[级联样本](../test/frontend/lowering/fixtures/cascades.dart)。见[空安全样本](../test/frontend/lowering/fixtures/nullability.dart)。 |
+| 点简写 | 支持已表示类型的构造器、工厂、静态方法和显式静态 getter 的点简写。包含已表示的泛型类及枚举成员。见[点简写样本](../test/frontend/lowering/fixtures/dot_shorthand.dart)。 |
 | switch 表达式、模式赋值 | switch 表达式支持已表示模式及守卫。模式赋值可将嵌套 record、List 和 Map 解构到局部变量和参数，表达式结果为原右值。见[模式](patterns.md)。 |
 | throw、rethrow | 同步函数可抛出非空值，后续实参和更新表达式不再执行。dynamic 操作数先按普通检查转换为非空 Object，非空值保持原身份，null 产生 TypeError；转换失败遵循当前 catch/finally。catch 中的 rethrow 保留原异常对象和栈轨迹。 |
 | await、泛型函数值实例化 | 支持普通异步函数中的 `await`，保留成功与异常两条恢复路径。见[异步函数](functions.md)。泛型函数值支持显式和上下文隐式实例化，保留类型实参及函数身份。 |
 
-复合赋值先读取左侧旧值，再计算右侧。例如 `x += (x = 3)` 把旧值加上 3。简单赋值、复合赋值和前缀增减的结果都是写入值，后缀增减的结果是旧值。短路跳过的操作数不会写入变量。见[赋值样本](../test/lowering/fixtures/updates.dart)和[SDK 行为对照](../test/lowering/lowering_test.dart)。
+复合赋值先读取左侧旧值，再计算右侧。例如 `x += (x = 3)` 把旧值加上 3。简单赋值、复合赋值和前缀增减的结果都是写入值，后缀增减的结果是旧值。短路跳过的操作数不会写入变量。见[赋值样本](../test/frontend/lowering/fixtures/updates.dart)和[SDK 行为对照](../test/frontend/lowering/lowering_test.dart)。
 
 发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/expressions.md)。
 
@@ -39,4 +39,4 @@
 
 NoSuchMethodError.withInvocation 的普通工厂调用与提取复用既有调用路径：构造返回新的错误对象，不触发接收者 noSuchMethod，也不提前读取用户 Invocation getter。支持类型判断、抛出、捕获和重新抛出的身份保持；该工厂支持不代表完整原生 Error 实例 API 或诊断文本与 VM 完全一致。
 
-动态调用 `g<String>('bad')` 遗漏必需命名实参时，传给 `noSuchMethod` 的 Invocation 应保留显式类型实参 `String`。在同一份 `shapeBeforeBounds` 样本上，macOS ARM64 的 Dart SDK 3.13.7 JIT 返回 111，SDK AOT 返回 101。IR 保留显式类型实参，结果为 111。对照使用 SDK 显式构造的 Invocation 和同一接收者的 `noSuchMethod`。[样本](../test/lowering/fixtures/dynamic_dispatch.dart)、[Invocation.typeArguments](https://api.dart.dev/dart-core/Invocation/typeArguments.html)。
+动态调用 `g<String>('bad')` 遗漏必需命名实参时，传给 `noSuchMethod` 的 Invocation 应保留显式类型实参 `String`。在同一份 `shapeBeforeBounds` 样本上，macOS ARM64 的 Dart SDK 3.13.7 JIT 返回 111，SDK AOT 返回 101。IR 保留显式类型实参，结果为 111。对照使用 SDK 显式构造的 Invocation 和同一接收者的 `noSuchMethod`。[样本](../test/frontend/lowering/fixtures/dynamic_dispatch.dart)、[Invocation.typeArguments](https://api.dart.dev/dart-core/Invocation/typeArguments.html)。

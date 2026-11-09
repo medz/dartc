@@ -4,7 +4,7 @@ A native Dart compiler written in Dart.
 
 The development version uses the official Dart analyzer and provides reusable analysis, IR and native code generation APIs. Its native backend builds integer functions as object files, static libraries and shared libraries. See the [language support tracker](https://github.com/medz/dartc/blob/main/specs/README.md) for supported behavior and remaining gaps.
 
-Use `package:dartc/analyzer.dart` to check libraries, `package:dartc/lowering.dart` to translate them, and `package:dartc/ir.dart` to inspect or construct verified SSA functions. Backend APIs are available separately through `target.dart`, `assembler.dart`, `assembler/arm64.dart`, `assembler/x64.dart`, `abi.dart`, `codegen.dart`, `object.dart`, `object/elf.dart`, `object/mach_o.dart` and `linker.dart`.
+Use `package:dartc/frontend.dart` to check libraries and translate them to IR, and `package:dartc/ir.dart` to inspect or construct verified SSA functions. Backend APIs are available separately through `target.dart`, `assembler.dart`, `assembler/arm64.dart`, `assembler/x64.dart`, `abi.dart`, `codegen.dart`, `object.dart`, `object/elf.dart`, `object/mach_o.dart` and `linker.dart`.
 
 For the previous compiler's broader native support, download [dartc 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0). Its [usage guide](https://github.com/medz/dartc/blob/v0.5.0/README.md) applies to those release binaries.
 
@@ -38,7 +38,7 @@ Use Dart SDK `^3.13.7` and run:
 dart pub get
 dart analyze --fatal-infos
 dart run tool/build_test_assets.dart && dart test
-dart run tool/print_ir.dart test/lowering/fixtures/functions.dart
+dart run tool/print_ir.dart test/frontend/lowering/fixtures/functions.dart
 ```
 
 The last command prints the basic blocks, calls and branches for each function in the file's library.

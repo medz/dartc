@@ -1,6 +1,6 @@
 # 库、脚本与并发边界
 
-转换以调用方明确提供的库批次为单位，包含每个库的所有 part。`package:dartc/analyzer.dart` 的 `AnalysisSession` 复用官方 analyzer 的解析结果；名称与指令解析不由 lowering 重复实现。`includeDependencies: true` 纳入非 SDK 导入和导出库，整个批次完成静态检查后才开始转换。导入库的函数调用保留声明身份，但只有批次内的库会生成函数体。一般 Dart 可执行程序的入口和目标运行时链接仍待实现。
+转换以调用方明确提供的库批次为单位，包含每个库的所有 part。`package:dartc/frontend.dart` 的 `AnalysisSession` 复用官方 analyzer 的解析结果；名称与指令解析不由 lowering 重复实现。`includeDependencies: true` 纳入非 SDK 导入和导出库，整个批次完成静态检查后才开始转换。导入库的函数调用保留声明身份，但只有批次内的库会生成函数体。一般 Dart 可执行程序的入口和目标运行时链接仍待实现。
 
 | 特性 | 当前 IR 范围 |
 | --- | --- |
@@ -17,13 +17,13 @@
 | StackTrace API | 调用保留普通 SDK 导入；catch/rethrow 保留异常与栈信息。完整运行时实现待后续执行领域提供。 |
 | isolate、消息端口与 spawn | 调用保留普通 SDK 导入；isolate 与调度的运行时实现待开发。 |
 
-[库与命名空间行为对照](../test/lowering/libraries_test.dart)、[包上下文与诊断对照](../test/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/libraries.md)。
+[库与命名空间行为对照](../test/frontend/lowering/libraries_test.dart)、[包上下文与诊断对照](../test/frontend/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/libraries.md)。
 
-SDK 成员按已解析的声明生成普通调用、方法提取或扩展调用；未提供函数体时保留导入身份。已有语义 IR 操作只替换它们明确表示的操作，其他方法不会因参考执行器缺少实现而在 lowering 阶段拒绝。SDK 实现的装配、链接及执行属于后续交付范围。见[SDK 调用与用户重写测试](../test/lowering/sdk_calls_test.dart)。
+SDK 成员按已解析的声明生成普通调用、方法提取或扩展调用；未提供函数体时保留导入身份。已有语义 IR 操作只替换它们明确表示的操作，其他方法不会因参考执行器缺少实现而在 lowering 阶段拒绝。SDK 实现的装配、链接及执行属于后续交付范围。见[SDK 调用与用户重写测试](../test/frontend/lowering/sdk_calls_test.dart)。
 
-[延迟导入对照](../test/lowering/deferred_imports_test.dart)覆盖未加载、请求已发出但尚未完成、加载完成和重复加载；两个前缀指向同一库时仍各自检查。`LoadLibrary` 返回代表加载完成的 Future，`CheckLibraryLoaded` 保留可抛错的读取效果。`loadLibrary` 的隐式函数保留普通调用和函数值身份。普通 extension 声明不能通过 deferred 导入，由 analyzer 检查。
+[延迟导入对照](../test/frontend/lowering/deferred_imports_test.dart)覆盖未加载、请求已发出但尚未完成、加载完成和重复加载；两个前缀指向同一库时仍各自检查。`LoadLibrary` 返回代表加载完成的 Future，`CheckLibraryLoaded` 保留可抛错的读取效果。`loadLibrary` 的隐式函数保留普通调用和函数值身份。普通 extension 声明不能通过 deferred 导入，由 analyzer 检查。
 
-SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.new` 提取](../test/lowering/fixtures/deferred_unnamed_tearoff.dart)诊断为不是构造器引用；analyzer 14.7 接受后者。IR 对该用例保留已解析构造器及加载检查，并独立验证其结果，不将它计入 SDK 执行对照。
+SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.new` 提取](../test/frontend/lowering/fixtures/deferred_unnamed_tearoff.dart)诊断为不是构造器引用；analyzer 14.7 接受后者。IR 对该用例保留已解析构造器及加载检查，并独立验证其结果，不将它计入 SDK 执行对照。
 
 ## 原生库
 

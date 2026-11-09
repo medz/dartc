@@ -1,10 +1,9 @@
 import 'dart:io';
 
-import 'package:dartc/analyzer.dart';
+import 'package:dartc/frontend.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
-import 'package:dartc/lowering.dart';
 import 'package:dartc/sdk.dart';
 import 'package:dartc/target.dart';
 

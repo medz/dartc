@@ -44,7 +44,7 @@ void main() {
       await expectLater(library.write(File(source)), throwsArgumentError);
       expect(File(source).readAsStringSync(), before);
       await expectLater(
-        library.write(File('lib/src/export/annotation.dart')),
+        library.write(File('lib/src/interop/annotation.dart')),
         throwsArgumentError,
       );
       final directory = (Directory(

@@ -1,7 +1,6 @@
 import 'dart:io';
 
-import 'package:dartc/analyzer.dart';
-import 'package:dartc/lowering.dart';
+import 'package:dartc/frontend.dart';
 
 Future<void> main(List<String> args) async {
   if (args.length != 1 || !File(args.single).existsSync()) {

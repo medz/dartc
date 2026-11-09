@@ -15,21 +15,21 @@
 - 方法提取复用普通 extension 的联合默认值规则，不能把声明默认值简单替换为实际接收者类型参数。支持泛型构造器提取、显式/上下文实例化及 const 构造器函数值。
 - 主构造器返回表示值本身；提取构造器仍保留声明身份。运行时不保存 extension type 的名义身份。
 
-[SDK 差分及边界测试](../test/lowering/extension_types_test.dart)与[样本](../test/lowering/fixtures/extension_types.dart)覆盖结果、异常种类、效果顺序，并检查没有 extension type 的类、Construct 或 representation LoadField。
+[SDK 差分及边界测试](../test/frontend/lowering/extension_types_test.dart)与[样本](../test/frontend/lowering/fixtures/extension_types.dart)覆盖结果、异常种类、效果顺序，并检查没有 extension type 的类、Construct 或 representation LoadField。
 
-[重定向工厂对照](../test/lowering/extension_type_redirects_test.dart)覆盖多级重定向、可选及命名默认值、泛型目标、const 和构造器提取。
+[重定向工厂对照](../test/frontend/lowering/extension_type_redirects_test.dart)覆盖多级重定向、可选及命名默认值、泛型目标、const 和构造器提取。
 
 ## 明确边界
 
-external 构造器保留擦除后的外部调用签名，具体实现由链接方提供。泛型构造器别名支持类型参数重排、固定、重复和未使用参数，以及不同界限；非平凡的泛型别名保留自己的函数值身份。显式应用类型参数的构造器提取复用目标声明；先提取泛型别名再实例化则保留别名身份。见[构造器别名对照](../test/lowering/extension_type_aliases_test.dart)。
+external 构造器保留擦除后的外部调用签名，具体实现由链接方提供。泛型构造器别名支持类型参数重排、固定、重复和未使用参数，以及不同界限；非平凡的泛型别名保留自己的函数值身份。显式应用类型参数的构造器提取复用目标声明；先提取泛型别名再实例化则保留别名身份。见[构造器别名对照](../test/frontend/lowering/extension_type_aliases_test.dart)。
 
-导入的 extension type 可以直接擦除类型并引用其构造器及成员；未提供声明库时保留外部目标，提供该库时生成对应函数体，不要求调用方为类型引用装配无关函数体。见[导入测试](../test/lowering/extension_types_test.dart)。普通 SDK 调用同样保留为导入。普通 extension 的已知边界不变。
+导入的 extension type 可以直接擦除类型并引用其构造器及成员；未提供声明库时保留外部目标，提供该库时生成对应函数体，不要求调用方为类型引用装配无关函数体。见[导入测试](../test/frontend/lowering/extension_types_test.dart)。普通 SDK 调用同样保留为导入。普通 extension 的已知边界不变。
 
-泛型覆盖见[差分测试](../test/lowering/extension_types_generic_test.dart)及[样本](../test/lowering/fixtures/extension_types_generic.dart)。[接口差分测试](../test/lowering/extension_types_interfaces_test.dart)覆盖多个接口、同一声明的菱形继承、own 覆盖、静态父视图、泛型类型参数映射、跨库私有成员、继承提取的默认值，以及普通接口的真实覆盖与协变检查。不同声明的同名冲突、无效表示类型和禁止的接口仍由 analyzer 拒绝。[构造器差分测试](../test/lowering/extension_types_constructors_test.dart)覆盖初始化/断言/body/finally 顺序、异常、可空表示、泛型与 const、默认值及闭包。
+泛型覆盖见[差分测试](../test/frontend/lowering/extension_types_generic_test.dart)及[样本](../test/frontend/lowering/fixtures/extension_types_generic.dart)。[接口差分测试](../test/frontend/lowering/extension_types_interfaces_test.dart)覆盖多个接口、同一声明的菱形继承、own 覆盖、静态父视图、泛型类型参数映射、跨库私有成员、继承提取的默认值，以及普通接口的真实覆盖与协变检查。不同声明的同名冲突、无效表示类型和禁止的接口仍由 analyzer 拒绝。[构造器差分测试](../test/frontend/lowering/extension_types_constructors_test.dart)覆盖初始化/断言/body/finally 顺序、异常、可空表示、泛型与 const、默认值及闭包。
 
 ### analyzer 14.7 边界
 
-[泛型别名上下文实例化](../test/lowering/fixtures/extension_alias_inference.dart)通过 analyzer 检查并可转换为 IR；SDK 3.13.7 的编译器在直接将别名构造器提取赋给具体函数类型时于 `LoweredTypedefTearOff.fromExpression` 崩溃。此用例以明确的参数映射和返回值检查，不计入 SDK 执行一致的用例；先保存泛型提取值再实例化的形式可正常对照。
+[泛型别名上下文实例化](../test/frontend/lowering/fixtures/extension_alias_inference.dart)通过 analyzer 检查并可转换为 IR；SDK 3.13.7 的编译器在直接将别名构造器提取赋给具体函数类型时于 `LoweredTypedefTearOff.fromExpression` 崩溃。此用例以明确的参数映射和返回值检查，不计入 SDK 执行一致的用例；先保存泛型提取值再实例化的形式可正常对照。
 
 对于 `extension type E<T>(T value) { T get() => value; }`，`int read<B extends E<int>>(B value) => value.get();` 被 analyzer 14.7 诊断为接收者可空，连 `!` 与 `?.` 形式也不能消除该诊断。同一最小程序在 SDK 3.13.7 的 JIT 与 AOT 均输出 `3`，这是 analyzer 与 kernel 的差异。已检查库入口保留此错误，不绕过分析；显式转换为 `E<int>` 后访问可工作。边界测试保留最小源程序。
 
