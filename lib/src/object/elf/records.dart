@@ -2,6 +2,29 @@ import 'dart:typed_data';
 
 import 'package:dartc/target.dart';
 
+import '../section.dart';
+
+/// ELF names, storage types and allocation permissions for supported sections.
+extension ElfSectionKind on SectionKind {
+  /// The ELF section name.
+  String get elfName => switch (this) {
+    .code => '.text',
+    .readOnlyData => '.rodata',
+    .data => '.data',
+    .zeroFill => '.bss',
+  };
+
+  /// The SHT_PROGBITS or SHT_NOBITS storage type.
+  int get elfType => this == .zeroFill ? 8 : 1;
+
+  /// The allocation, write and execute flags.
+  int get elfFlags => switch (this) {
+    .code => 6,
+    .readOnlyData => 2,
+    .data || .zeroFill => 3,
+  };
+}
+
 /// Writes little-endian ELF64 file records into a caller-owned buffer.
 extension ElfRecords on ByteData {
   /// Writes the file header, including its reserved zero bytes.

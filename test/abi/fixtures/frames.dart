@@ -47,12 +47,12 @@ ObjectModule frames(Target target) {
     );
     abi.emitPrologue(code, frame);
     code
-      ..storeStack(.rdi, frame.localOffset)
+      ..store(.rdi, .rsp, frame.localOffset)
       ..loadImmediate(.rbx, 41)
       ..loadImmediate(.r12, 13);
     call = code.call();
     code
-      ..loadStack(.rsi, frame.localOffset)
+      ..load(.rsi, .rsp, frame.localOffset)
       ..add(.rax, .rsi)
       ..add(.rax, .rbx)
       ..add(.rax, .r12);
@@ -69,16 +69,19 @@ ObjectModule frames(Target target) {
   }
   return .new(
     target,
-    [...outer, ...inner],
+    [
+      Section.code([...outer, ...inner]),
+    ],
     [
       Symbol(
         target.nativeSymbol('frame_round_trip'),
         0,
+        0,
         outer.length,
         exported: true,
       ),
-      Symbol('callee', outer.length, inner.length, binding: .local),
+      Symbol('callee', 0, outer.length, inner.length, binding: .local),
     ],
-    relocations: [Relocation(call.offset, call.encoding, 1)],
+    relocations: [Relocation(0, call.offset, call.encoding, 1)],
   );
 }

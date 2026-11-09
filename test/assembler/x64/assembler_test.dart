@@ -4,6 +4,37 @@ import 'package:dartc/assembler/x64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('general memory operands encode extended bases and the RSP/R12 SIB', () {
+    final assembler = Assembler()
+      ..load(.r9, .r13, -8)
+      ..store(.r10, .r12, 16);
+    final address = assembler.address(.r10);
+    expect(address.offset, 18);
+    expect(assembler.finish(), [
+      0x4d,
+      0x8b,
+      0x8d,
+      0xf8,
+      0xff,
+      0xff,
+      0xff,
+      0x4d,
+      0x89,
+      0x94,
+      0x24,
+      16,
+      0,
+      0,
+      0,
+      0x4c,
+      0x8d,
+      0x15,
+      0,
+      0,
+      0,
+      0,
+    ]);
+  });
   test('encodes REX register extensions and little-endian immediates', () {
     final assembler = Assembler()
       ..move(.r9, .r10)
@@ -78,12 +109,12 @@ void main() {
   });
   test('validates stack offsets and preserves extended register fields', () {
     final assembler = Assembler();
-    expect(() => assembler.loadStack(.rax, 0x80000000), throwsRangeError);
+    expect(() => assembler.load(.rax, .rsp, 0x80000000), throwsRangeError);
     expect(() => assembler.addImmediate(.rsp, 0x80000000), throwsRangeError);
     assembler
       ..push(.rbp)
-      ..loadStack(.r9, 8)
-      ..storeStack(.r10, 16)
+      ..load(.r9, .rsp, 8)
+      ..store(.r10, .rsp, 16)
       ..pop(.rbp);
     expect(assembler.finish(), [
       0x55,

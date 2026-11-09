@@ -7,7 +7,8 @@ The development checkout uses analyzer 14.7.0 to resolve Dart source, produces v
 - Preserve constructor-alias type mappings and function identity, including erased extension-type constructors. Inherited method entries remain distinct from abstract interface signatures, preserving covariant checks and defaults.
 - Lower deferred imports with independent prefix identities, asynchronous loading and checks before argument evaluation. Ordinary SDK calls and imported extension types retain external targets when their implementations are outside the supplied library batch.
 - Build `@Export<Int64 Function(...)>` functions as Mach-O or ELF objects, static libraries and shared libraries, with matching C/C++ headers. Native bodies support integer constants, addition, subtraction, multiplication, bitwise AND/OR/XOR/NOT, comparisons, boolean expressions, branches, loops and direct calls across Dart libraries. Parameters use registers and the stack; frames preserve values across branches, loop iterations and recursive calls. Linking, archive indexes and Mach-O ad-hoc signing are implemented in Dart, with no external native toolchain dependency.
-- Use target-specific `CodeGenerator` and `CallingConvention` implementations, instance-based object formats and a memory-only `Linker`. Modules distinguish local definitions, globally linkable symbols and public exports; Mach-O/ELF objects and archives retain direct-call relocations. Select an explicit target and installed SDK.
+- Use target-specific `CodeGenerator` and `CallingConvention` implementations, instance-based object formats and a memory-only `Linker`. Modules distinguish local definitions, globally linkable symbols and public exports. Select an explicit target and installed SDK.
+- Assemble and link cross-module reads and writes to read-only, writable and zero-initialized data. Mach-O/ELF objects and archives preserve section identities, data symbols, calls and address relocations. Shared libraries separate executable, read-only and writable mappings; BSS reserves zero-initialized memory without storing its bytes in the file. Dart global-variable initialization and data export annotations remain unimplemented.
 - Manage checked input with `AnalysisSession` from `package:dartc/frontend.dart`. `Lowering().lower(input)` returns the verified program and native exports keyed by the same declaration identities. Analysis can include the non-SDK dependency closure, checking unused declarations and preventing source suppressions or editor settings from hiding language errors.
 
 Language support and known analyzer differences are tracked in [specs](specs/README.md). IR behavior checks do not establish native execution support or full Dart compatibility.
@@ -23,6 +24,8 @@ Development-only type and constant helpers have moved to their owning values:
 | `constantKey(value)` | `value.structuralKey` |
 
 SDK member selection belongs to lowering. Callers of the removed `coreCollectionOperation` helper should construct typed IR operations such as `ListSublist` and `MapContainsKey` directly.
+
+`ObjectModule` takes `Section` values instead of one code buffer. `Symbol` and `Relocation` take a section index before the byte offset; data symbols use `kind: SymbolKind.data`. The x86-64 assembler's `load` and `store` methods accept a base register, replacing `loadStack` and `storeStack`; pass `Register.rsp` for stack access.
 
 ## [0.5.0](https://github.com/medz/dartc/compare/v0.4.0...v0.5.0) — 2026-10-31
 

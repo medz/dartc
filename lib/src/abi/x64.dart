@@ -56,7 +56,7 @@ final class X64Abi(@override final Target target)
     final bytes = frame.stackBytes - 8;
     if (bytes != 0) assembler.addImmediate(.rsp, -bytes);
     for (final MapEntry(:key, :value) in frame.savedRegisters.entries) {
-      if (key != .rbp) assembler.storeStack(key, value);
+      if (key != .rbp) assembler.store(key, .rsp, value);
     }
   }
 
@@ -64,7 +64,7 @@ final class X64Abi(@override final Target target)
   void emitEpilogue(Assembler assembler, FrameLayout<Register> frame) {
     _checkFrame(frame);
     for (final MapEntry(:key, :value) in frame.savedRegisters.entries) {
-      if (key != .rbp) assembler.loadStack(key, value);
+      if (key != .rbp) assembler.load(key, .rsp, value);
     }
     final bytes = frame.stackBytes - 8;
     if (bytes != 0) assembler.addImmediate(.rsp, bytes);

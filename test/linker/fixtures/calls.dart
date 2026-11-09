@@ -47,17 +47,20 @@ ObjectModule _module(Target target, bool first) {
   }
   return ObjectModule(
     target,
-    [...wrapper, ...local],
+    [
+      Section.code([...wrapper, ...local]),
+    ],
     [
       Symbol(
         target.nativeSymbol(first ? 'forward' : 'helper'),
         0,
+        0,
         wrapper.length,
         exported: first,
       ),
-      Symbol('local', wrapper.length, local.length, binding: .local),
+      Symbol('local', 0, wrapper.length, local.length, binding: .local),
     ],
     imports: [if (first) target.nativeSymbol('helper')],
-    relocations: [Relocation(fixup.offset, fixup.encoding, first ? 2 : 1)],
+    relocations: [Relocation(0, fixup.offset, fixup.encoding, first ? 2 : 1)],
   );
 }

@@ -6,6 +6,8 @@ The development version uses the official Dart analyzer and provides reusable an
 
 Use `package:dartc/frontend.dart` to check libraries and translate them to IR, and `package:dartc/ir.dart` to inspect or construct verified SSA functions. Backend APIs are available separately through `target.dart`, `assembler.dart`, `assembler/arm64.dart`, `assembler/x64.dart`, `abi.dart`, `codegen.dart`, `object.dart`, `object/elf.dart`, `object/mach_o.dart` and `linker.dart`.
 
+Object and linker APIs support code, read-only data, writable data and zero-initialized storage, with cross-module calls and address references. Dart global variables are not yet compiled to this storage.
+
 `package:dartc/compiler.dart` combines these APIs. `Compiler.compile` accepts an `Output.object()`, `Output.staticLibrary()` or `Output.sharedLibrary(name)` request and returns a `Compilation` with final bytes and C declarations. `Compilation.write` saves them; it does not change the compiled library name.
 
 For the previous compiler's broader native support, download [dartc 0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0). Its [usage guide](https://github.com/medz/dartc/blob/v0.5.0/README.md) applies to those release binaries.

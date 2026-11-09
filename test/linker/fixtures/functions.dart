@@ -21,6 +21,7 @@ ObjectModule functions(Target target, Map<String, int> values) {
     symbols.add(
       .new(
         target.operatingSystem == .macos ? '_$key' : key,
+        0,
         code.length,
         body.length,
         exported: true,
@@ -28,5 +29,5 @@ ObjectModule functions(Target target, Map<String, int> values) {
     );
     code.addAll(body);
   }
-  return .new(target, code, symbols);
+  return .new(target, [Section.code(code)], symbols);
 }

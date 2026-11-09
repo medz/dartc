@@ -169,6 +169,21 @@ final class Assembler() {
     return fixup;
   }
 
+  /// Loads the 4 KiB page of an unresolved address, preserving flags.
+  Fixup pageAddress(Register destination) {
+    _general(destination);
+    final fixup = Fixup(length, .arm64Page21);
+    _word(0x90000000 | destination.index);
+    return fixup;
+  }
+
+  /// Adds an unresolved address's low 12 bits to [source], preserving flags.
+  Fixup addPageOffset(Register destination, Register source) {
+    final fixup = Fixup(length, .arm64PageOffset12);
+    _word(0x91000000 | source.index << 5 | destination.index);
+    return fixup;
+  }
+
   void _memory(int opcode, Register value, Register base, int offset) {
     _general(value);
     RangeError.checkValueInInterval(offset, 0, 32760, 'offset');

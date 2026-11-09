@@ -62,6 +62,15 @@ void main() {
           0x80000000,
           0x7fffffff,
         ),
+        (
+          .x64Address32,
+          [0x4c, 0x8d, 0x15, 0, 0, 0, 0],
+          3,
+          -0x80000000,
+          0x7fffffff,
+          0x80000000,
+          0x7fffffff,
+        ),
       ]) {
     test('${encoding.name} validates and patches signed bounds atomically', () {
       final code = Uint8List.fromList(bytes), data = ByteData.sublistView(code);
@@ -116,6 +125,59 @@ void main() {
       expect(invalid.buffer.asUint8List(), everyElement(0));
     });
   }
+
+  test('ARM64 address pairs use 4 KiB pages and preserve register fields', () {
+    final assembler = arm.Assembler();
+    final page = assembler.pageAddress(.x9);
+    final low = assembler.addPageOffset(.x9, .x9);
+    final bytes = Uint8List.fromList(assembler.finish());
+    final data = ByteData.sublistView(bytes);
+    const place = 0x100000004;
+    for (final (target, word) in [
+      (0xfff, 0x90800009),
+      (0x1fffffabc, 0xf07fffe9),
+    ]) {
+      page.encoding.apply(
+        data,
+        page.offset,
+        placeAddress: place,
+        targetAddress: target,
+      );
+      low.encoding.apply(
+        data,
+        low.offset,
+        placeAddress: place + 4,
+        targetAddress: target,
+      );
+      expect(data.getUint32(0, .little), word);
+      final add = data.getUint32(4, .little);
+      expect((add >> 10) & 0xfff, target & 0xfff);
+      expect(add & ~0x3ffc00, 0x91000129);
+    }
+    final before = bytes.toList();
+    for (final target in [-0x1000, 0x200000000]) {
+      expect(
+        () => page.encoding.apply(
+          data,
+          page.offset,
+          placeAddress: place,
+          targetAddress: target,
+        ),
+        throwsRangeError,
+      );
+      expect(bytes, before);
+    }
+    expect(
+      () => page.encoding.apply(
+        data,
+        0,
+        placeAddress: place + 1,
+        targetAddress: place,
+      ),
+      throwsArgumentError,
+    );
+    expect(() => arm.Assembler().pageAddress(.sp), throwsArgumentError);
+  });
 
   test('call fixups carry their field offsets and PC semantics', () {
     final armAssembler = arm.Assembler()..ret();

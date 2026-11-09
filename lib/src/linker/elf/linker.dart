@@ -2,13 +2,13 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dartc/object.dart';
-import 'package:dartc/object/elf.dart' show ElfRecords;
+import 'package:dartc/object/elf.dart' show ElfRecords, ElfSectionKind;
 import 'package:dartc/target.dart';
 
 import '../linker.dart';
 import '../link_unit.dart';
 
-/// Links ELF64 shared libraries for Linux ARM64 and x86-64.
+/// Links ELF64 shared libraries with separate executable and writable mappings.
 final class ElfLinker(@override final Target target) implements Linker {
   this {
     if (target.operatingSystem != .linux) {
@@ -21,58 +21,110 @@ final class ElfLinker(@override final Target target) implements Linker {
     Iterable<ObjectModule> objects, {
     required String name,
   }) {
-    final object = LinkUnit(target, objects, name);
-    const textOffset = 240;
-    final symbols = object.symbols.where((symbol) => symbol.exported).toList();
-    final count = symbols.length;
+    final unit = LinkUnit(target, objects, name), sections = unit.sections;
+    final symbols = unit.symbols.where((symbol) => symbol.exported).toList();
+    final hasConstants = sections.any((s) => s.kind == .readOnlyData);
+    final writable = sections.any(
+      (s) => s.kind == .data || s.kind == .zeroFill,
+    );
+    final programCount = 3 + (hasConstants ? 1 : 0) + (writable ? 1 : 0);
+    var page = target.architecture == .arm64 ? 65536 : 4096;
+    for (final section in sections) {
+      if (section.alignment > page) page = section.alignment;
+    }
+    final offsets = List.filled(sections.length, 0),
+        addresses = List.filled(sections.length, 0);
+    var cursor = (64 + programCount * 56 + 15) & ~15;
+    void place(SectionKind kind) {
+      for (final (i, section) in sections.indexed) {
+        if (section.kind != kind) continue;
+        cursor = (cursor + section.alignment - 1) & -section.alignment;
+        RangeError.checkNotNegative(cursor, 'section address');
+        offsets[i] = addresses[i] = cursor;
+        cursor += section.size;
+        RangeError.checkNotNegative(cursor, 'section end');
+      }
+    }
+
+    place(.code);
+    final textEnd = cursor,
+        readOnlyStart = hasConstants ? (cursor + page - 1) & -page : cursor;
+    cursor = readOnlyStart;
+    place(.readOnlyData);
     final strings = <int>[0], names = <int>[];
-    for (final name in symbols.map((s) => s.name)) {
+    for (final symbol in symbols) {
       names.add(strings.length);
-      strings.addAll([...utf8.encode(name), 0]);
+      strings.addAll([...utf8.encode(symbol.name), 0]);
     }
     final sonameOffset = strings.length;
     strings.addAll([...utf8.encode(name), 0]);
-    final sectionNames =
-        '\u0000.text\u0000.dynsym\u0000.dynstr\u0000.shstrtab\u0000.hash\u0000.dynamic\u0000';
-    final symbolOffset = (textOffset + object.code.length + 7) & ~7;
-    final symbolSize = (count + 1) * 24;
+    final symbolOffset = (cursor + 7) & ~7,
+        symbolSize = (symbols.length + 1) * 24;
     final stringOffset = symbolOffset + symbolSize;
     final hashOffset = (stringOffset + strings.length + 7) & ~7;
     final bucketCount = symbols.length | 1;
     final hashSize = (2 + bucketCount + symbols.length + 1) * 4;
     final dynamicOffset = (hashOffset + hashSize + 7) & ~7;
     const dynamicSize = 7 * 16;
-    final nameOffset = dynamicOffset + dynamicSize;
-    final sectionOffset = (nameOffset + sectionNames.length + 7) & ~7;
-    const sectionCount = 7;
-    final data = ByteData(sectionOffset + sectionCount * 64);
-    final bytes = data.buffer.asUint8List();
+    final readOnlyEnd = dynamicOffset + dynamicSize;
+    final dataStart = (readOnlyEnd + page - 1) & -page;
+    cursor = dataStart;
+    place(.data);
+    final dataEnd = cursor;
+    place(.zeroFill);
+    final memoryEnd = cursor;
+    final sectionNames = [
+      '',
+      for (final section in sections) section.kind.elfName,
+      '.dynsym',
+      '.dynstr',
+      '.shstrtab',
+      '.hash',
+      '.dynamic',
+    ];
+    final nameBytes = <int>[], nameOffsets = <int>[];
+    for (final name in sectionNames) {
+      nameOffsets.add(nameBytes.length);
+      nameBytes.addAll([...ascii.encode(name), 0]);
+    }
+    final symbolIndex = sections.length + 1, stringIndex = symbolIndex + 1;
+    final nameIndex = symbolIndex + 2,
+        hashIndex = symbolIndex + 3,
+        dynamicIndex = symbolIndex + 4;
+    final nameOffset = writable ? dataEnd : readOnlyEnd;
+    final sectionOffset = (nameOffset + nameBytes.length + 7) & ~7;
+    final data = ByteData(sectionOffset + sectionNames.length * 64),
+        bytes = data.buffer.asUint8List();
     data.writeElf64Header(
-      architecture: object.target.architecture,
+      architecture: target.architecture,
       type: 3,
       sectionOffset: sectionOffset,
-      sectionCount: sectionCount,
-      sectionNames: 4,
-      programCount: 3,
+      sectionCount: sectionNames.length,
+      sectionNames: nameIndex,
+      programCount: programCount,
     );
-    object.writeCode(data, textOffset, address: textOffset);
+    unit.writeSections(data, offsets, addresses);
     bytes.setAll(stringOffset, strings);
-    bytes.setAll(nameOffset, ascii.encode(sectionNames));
+    bytes.setAll(nameOffset, nameBytes);
     for (final (i, symbol) in symbols.indexed) {
       final offset = symbolOffset + (i + 1) * 24;
       data.setUint32(offset, names[i], .little);
-      data.setUint8(offset + 4, 0x12);
-      data.setUint16(offset + 6, 1, .little);
-      data.setUint64(offset + 8, symbol.offset + textOffset, .little);
+      data.setUint8(offset + 4, symbol.kind == .function ? 0x12 : 0x11);
+      data.setUint16(offset + 6, symbol.section + 1, .little);
+      data.setUint64(
+        offset + 8,
+        addresses[symbol.section] + symbol.offset,
+        .little,
+      );
       data.setUint64(offset + 16, symbol.size, .little);
     }
     void section(
       int index,
-      String name,
       int type,
       int flags,
       int offset,
       int size, {
+      int? address,
       int link = 0,
       int info = 0,
       int alignment = 1,
@@ -80,12 +132,12 @@ final class ElfLinker(@override final Target target) implements Linker {
     }) {
       data.writeElf64Section(
         sectionOffset + index * 64,
-        name: sectionNames.indexOf('$name\u0000'),
+        name: nameOffsets[index],
         type: type,
         flags: flags,
         fileOffset: offset,
         size: size,
-        address: flags & 2 != 0 ? offset : 0,
+        address: address ?? (flags & 2 != 0 ? offset : 0),
         link: link,
         info: info,
         alignment: alignment,
@@ -93,40 +145,47 @@ final class ElfLinker(@override final Target target) implements Linker {
       );
     }
 
-    section(1, '.text', 1, 6, textOffset, object.code.length, alignment: 16);
+    for (final (i, input) in sections.indexed) {
+      section(
+        i + 1,
+        input.kind.elfType,
+        input.kind.elfFlags,
+        offsets[i],
+        input.size,
+        address: addresses[i],
+        alignment: input.alignment,
+      );
+    }
     section(
-      2,
-      '.dynsym',
+      symbolIndex,
       11,
       2,
       symbolOffset,
       symbolSize,
-      link: 3,
+      link: stringIndex,
       info: 1,
       alignment: 8,
       entrySize: 24,
     );
-    section(3, '.dynstr', 3, 2, stringOffset, strings.length);
-    section(4, '.shstrtab', 3, 0, nameOffset, sectionNames.length);
+    section(stringIndex, 3, 2, stringOffset, strings.length);
+    section(nameIndex, 3, 0, nameOffset, nameBytes.length);
     section(
-      5,
-      '.hash',
+      hashIndex,
       5,
       2,
       hashOffset,
       hashSize,
-      link: 2,
+      link: symbolIndex,
       alignment: 8,
       entrySize: 4,
     );
     section(
-      6,
-      '.dynamic',
+      dynamicIndex,
       6,
       2,
       dynamicOffset,
       dynamicSize,
-      link: 3,
+      link: stringIndex,
       alignment: 8,
       entrySize: 16,
     );
@@ -135,7 +194,8 @@ final class ElfLinker(@override final Target target) implements Linker {
       int type,
       int flags,
       int offset,
-      int size,
+      int fileSize,
+      int memorySize,
       int alignment,
     ) {
       final base = 64 + index * 56;
@@ -144,28 +204,38 @@ final class ElfLinker(@override final Target target) implements Linker {
       data.setUint64(base + 8, offset, .little);
       data.setUint64(base + 16, offset, .little);
       data.setUint64(base + 24, offset, .little);
-      data.setUint64(base + 32, size, .little);
-      data.setUint64(base + 40, size, .little);
+      data.setUint64(base + 32, fileSize, .little);
+      data.setUint64(base + 40, memorySize, .little);
       data.setUint64(base + 48, alignment, .little);
     }
 
-    segment(
-      0,
-      1,
-      5,
-      0,
-      nameOffset,
-      object.target.architecture == .arm64 ? 65536 : 4096,
-    );
-    segment(1, 2, 4, dynamicOffset, dynamicSize, 8);
-    segment(
-      2,
-      0x6474e551,
-      6,
-      0,
-      0,
-      16,
-    ); // PT_GNU_STACK: read/write, never execute.
+    final executableEnd = hasConstants ? textEnd : readOnlyEnd;
+    segment(0, 1, 5, 0, executableEnd, executableEnd, page);
+    var next = 1;
+    if (hasConstants) {
+      segment(
+        next++,
+        1,
+        4,
+        readOnlyStart,
+        readOnlyEnd - readOnlyStart,
+        readOnlyEnd - readOnlyStart,
+        page,
+      );
+    }
+    if (writable) {
+      segment(
+        next++,
+        1,
+        6,
+        dataStart,
+        dataEnd - dataStart,
+        memoryEnd - dataStart,
+        page,
+      );
+    }
+    segment(next++, 2, 4, dynamicOffset, dynamicSize, dynamicSize, 8);
+    segment(next, 0x6474e551, 6, 0, 0, 0, 16);
     data.setUint32(hashOffset, bucketCount, .little);
     data.setUint32(hashOffset + 4, symbols.length + 1, .little);
     for (final (i, name) in names.indexed) {

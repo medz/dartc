@@ -15,6 +15,7 @@ import '../test/codegen/fixtures/control_flow.dart';
 import '../test/linker/fixtures/functions.dart';
 import '../test/linker/fixtures/calls.dart';
 import '../test/linker/fixtures/symbols.dart';
+import '../test/linker/fixtures/data.dart';
 import '../test/support/native_assets.dart';
 
 Future<void> main() async {
@@ -88,6 +89,17 @@ Future<void> main() async {
       await shared([
         functions(target, symbolValues),
       ], assets.library('linker/symbols'));
+      final data = dataModules(target);
+      await shared(data, assets.library('linker/data'));
+      await shared([data.first], assets.library('linker/storage'));
+      await assets
+          .file('linker/data.a')
+          .writeAsBytes(ArchiveWriter(format).encode(data));
+      for (final (i, module) in data.indexed) {
+        await assets
+            .file('linker/data_$i.o')
+            .writeAsBytes(format.encodeObject(module));
+      }
       final modules = callModules(target);
       await shared(modules, assets.library('linker/calls'));
       await assets

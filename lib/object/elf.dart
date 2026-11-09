@@ -2,4 +2,4 @@
 library;
 
 export '../src/object/elf/format.dart' show Elf;
-export '../src/object/elf/records.dart' show ElfRecords;
+export '../src/object/elf/records.dart' show ElfRecords, ElfSectionKind;

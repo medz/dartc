@@ -22,7 +22,11 @@ void main() {
         ]);
         if (count == 4102) {
           expect(
-            generator.generate(program, definitions: [target]).code,
+            generator
+                .generate(program, definitions: [target])
+                .sections
+                .single
+                .bytes,
             isNotEmpty,
           );
         } else {

@@ -1,23 +1,19 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:dartc/object.dart';
-
-/// Encodes dyld's compressed symbol trie with image-relative function addresses.
-final class ExportTrie(final List<Symbol> symbols, final int codeOffset) {
+/// Encodes dyld's compressed symbol trie with image-relative addresses.
+final class ExportTrie(final List<(String, int)> symbols) {
   /// Encodes the declared exports into one compressed trie.
   Uint8List encode() {
     final entries =
-        [
-          for (final symbol in symbols)
-            (utf8.encode(symbol.name), codeOffset + symbol.offset),
-        ]..sort((a, b) {
-          for (var i = 0; i < a.$1.length && i < b.$1.length; i++) {
-            final order = a.$1[i].compareTo(b.$1[i]);
-            if (order != 0) return order;
-          }
-          return a.$1.length.compareTo(b.$1.length);
-        });
+        [for (final (name, address) in symbols) (utf8.encode(name), address)]
+          ..sort((a, b) {
+            for (var i = 0; i < a.$1.length && i < b.$1.length; i++) {
+              final order = a.$1[i].compareTo(b.$1[i]);
+              if (order != 0) return order;
+            }
+            return a.$1.length.compareTo(b.$1.length);
+          });
     final nodes = <_Node>[];
     _Node build(int start, int end, int depth, List<int> edge) {
       final node = _Node(edge);

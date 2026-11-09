@@ -34,7 +34,7 @@ void main() {
         final module = controlFlow(Target(.linux, arch));
         final symbol = module.symbols.last;
         final bytes = Uint8List.sublistView(
-          module.code,
+          module.sections.single.bytes,
           symbol.offset,
           symbol.offset + symbol.size,
         );

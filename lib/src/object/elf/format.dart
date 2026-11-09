@@ -18,7 +18,7 @@ final class Elf(@override final Target target) implements ObjectFormat {
   @override
   Uint8List encodeObject(ObjectModule object) {
     if (object.target != target) throw ArgumentError('ELF target mismatch.');
-    const textOffset = 64;
+    final sections = object.sections, relocations = object.relocations;
     final order = [for (var i = 0; i < object.symbols.length; i++) i]
       ..sort(
         (a, b) => object.symbols[a].binding.index.compareTo(
@@ -29,75 +29,86 @@ final class Elf(@override final Target target) implements ObjectFormat {
     final indices = {
       for (final (i, original) in order.indexed) original: i + 1,
     };
-    final imports = object.imports;
-    final count = symbols.length + imports.length;
+    final count = symbols.length + object.imports.length;
     final strings = <int>[0], names = <int>[];
-    for (final name in [...symbols.map((s) => s.name), ...imports]) {
+    for (final name in [...symbols.map((s) => s.name), ...object.imports]) {
       names.add(strings.length);
       strings.addAll([...utf8.encode(name), 0]);
     }
-    final sectionNames =
-        '\u0000.text\u0000.symtab\u0000.strtab\u0000.shstrtab\u0000.note.GNU-stack\u0000.rela.text\u0000';
-    final relocations = object.relocations;
-    final relocationOffset = (textOffset + object.code.length + 7) & ~7;
-    final symbolOffset = relocationOffset + relocations.length * 24;
-    final symbolSize = (count + 1) * 24;
+    final offsets = <int>[], relocationOffsets = <int>[];
+    final groups = [
+      for (var i = 0; i < sections.length; i++)
+        relocations.where((r) => r.section == i).toList(),
+    ];
+    var cursor = 64;
+    for (final section in sections) {
+      cursor = (cursor + section.alignment - 1) & -section.alignment;
+      offsets.add(cursor);
+      cursor += section.bytes.length;
+    }
+    cursor = (cursor + 7) & ~7;
+    for (final group in groups) {
+      relocationOffsets.add(cursor);
+      cursor += group.length * 24;
+    }
+    final symbolIndex = sections.length + 1, stringIndex = symbolIndex + 1;
+    final nameIndex = symbolIndex + 2, stackIndex = symbolIndex + 3;
+    final symbolOffset = cursor, symbolSize = (count + 1) * 24;
     final stringOffset = symbolOffset + symbolSize;
     final nameOffset = stringOffset + strings.length;
-    final sectionOffset = (nameOffset + sectionNames.length + 7) & ~7;
-    final sectionCount = relocations.isNotEmpty ? 7 : 6;
-    final data = ByteData(sectionOffset + sectionCount * 64);
+    final sectionNames = [
+      '',
+      for (final section in sections) section.kind.elfName,
+      '.symtab',
+      '.strtab',
+      '.shstrtab',
+      '.note.GNU-stack',
+      for (final (i, group) in groups.indexed)
+        if (group.isNotEmpty) '.rela${sections[i].kind.elfName}',
+    ];
+    if (sectionNames.length >= 0xff00) {
+      throw UnsupportedError('ELF requires extended section indices.');
+    }
+    final nameBytes = <int>[], nameOffsets = <int>[];
+    for (final name in sectionNames) {
+      nameOffsets.add(nameBytes.length);
+      nameBytes.addAll([...ascii.encode(name), 0]);
+    }
+    final sectionOffset = (nameOffset + nameBytes.length + 7) & ~7;
+    final data = ByteData(sectionOffset + sectionNames.length * 64);
     final bytes = data.buffer.asUint8List();
     data.writeElf64Header(
-      architecture: object.target.architecture,
+      architecture: target.architecture,
       type: 1,
       sectionOffset: sectionOffset,
-      sectionCount: sectionCount,
-      sectionNames: 4,
+      sectionCount: sectionNames.length,
+      sectionNames: nameIndex,
     );
-    bytes.setAll(textOffset, object.code);
     bytes.setAll(stringOffset, strings);
-    bytes.setAll(nameOffset, ascii.encode(sectionNames));
+    bytes.setAll(nameOffset, nameBytes);
     for (final (i, symbol) in symbols.indexed) {
       final offset = symbolOffset + (i + 1) * 24;
       data.setUint32(offset, names[i], .little);
-      data.setUint8(offset + 4, symbol.binding == .local ? 0x02 : 0x12);
+      data.setUint8(
+        offset + 4,
+        (symbol.binding == .local ? 0 : 0x10) |
+            (symbol.kind == .function ? 2 : 1),
+      );
       data.setUint8(
         offset + 5,
         symbol.binding == .global && !symbol.exported ? 2 : 0,
       );
-      data.setUint16(offset + 6, 1, .little);
+      data.setUint16(offset + 6, symbol.section + 1, .little);
       data.setUint64(offset + 8, symbol.offset, .little);
       data.setUint64(offset + 16, symbol.size, .little);
     }
-    for (final (i, _) in imports.indexed) {
+    for (final (i, _) in object.imports.indexed) {
       final offset = symbolOffset + (symbols.length + i + 1) * 24;
       data.setUint32(offset, names[symbols.length + i], .little);
-      data.setUint8(offset + 4, 0x12);
-    }
-    for (final (i, relocation) in relocations.indexed) {
-      final index = relocation.symbol < object.symbols.length
-          ? indices[relocation.symbol]!
-          : symbols.length + 1 + relocation.symbol - object.symbols.length;
-      final offset = relocationOffset + i * 24;
-      final arm = relocation.encoding == .arm64Call26;
-      data.setUint64(offset, relocation.offset, .little);
-      data.setUint64(
-        offset + 8,
-        index << 32 |
-            (arm
-                ? 283
-                : relocation.symbol < object.symbols.length &&
-                      object.symbols[relocation.symbol].binding == .local
-                ? 2
-                : 4),
-        .little,
-      );
-      data.setInt64(offset + 16, arm ? 0 : -4, .little);
+      data.setUint8(offset + 4, 0x10);
     }
     void section(
       int index,
-      String name,
       int type,
       int flags,
       int offset,
@@ -109,7 +120,7 @@ final class Elf(@override final Target target) implements ObjectFormat {
     }) {
       data.writeElf64Section(
         sectionOffset + index * 64,
-        name: sectionNames.indexOf('$name\u0000'),
+        name: nameOffsets[index],
         type: type,
         flags: flags,
         fileOffset: offset,
@@ -121,36 +132,70 @@ final class Elf(@override final Target target) implements ObjectFormat {
       );
     }
 
-    section(1, '.text', 1, 6, textOffset, object.code.length, alignment: 16);
+    var relocationIndex = stackIndex + 1;
+    for (final (i, input) in sections.indexed) {
+      bytes.setAll(offsets[i], input.bytes);
+      section(
+        i + 1,
+        input.kind.elfType,
+        input.kind.elfFlags,
+        offsets[i],
+        input.size,
+        alignment: input.alignment,
+      );
+      final group = groups[i];
+      if (group.isEmpty) continue;
+      section(
+        relocationIndex++,
+        4,
+        0,
+        relocationOffsets[i],
+        group.length * 24,
+        link: symbolIndex,
+        info: i + 1,
+        alignment: 8,
+        entrySize: 24,
+      );
+      for (final (j, relocation) in group.indexed) {
+        final index = relocation.symbol < object.symbols.length
+            ? indices[relocation.symbol]!
+            : symbols.length + 1 + relocation.symbol - object.symbols.length;
+        final type = switch (relocation.encoding) {
+          .arm64Call26 => 283,
+          .arm64Page21 => 275,
+          .arm64PageOffset12 => 277,
+          .x64Address32 => 2,
+          .x64Call32 =>
+            relocation.symbol < object.symbols.length &&
+                    object.symbols[relocation.symbol].binding == .local
+                ? 2
+                : 4,
+          _ => throw UnsupportedError('ELF relocation: ${relocation.encoding}'),
+        };
+        final offset = relocationOffsets[i] + j * 24;
+        data.setUint64(offset, relocation.offset, .little);
+        data.setUint64(offset + 8, index << 32 | type, .little);
+        data.setInt64(
+          offset + 16,
+          target.architecture == .arm64 ? 0 : -4,
+          .little,
+        );
+      }
+    }
     section(
-      2,
-      '.symtab',
+      symbolIndex,
       2,
       0,
       symbolOffset,
       symbolSize,
-      link: 3,
+      link: stringIndex,
       info: 1 + symbols.where((s) => s.binding == .local).length,
       alignment: 8,
       entrySize: 24,
     );
-    section(3, '.strtab', 3, 0, stringOffset, strings.length);
-    section(4, '.shstrtab', 3, 0, nameOffset, sectionNames.length);
-    if (relocations.isNotEmpty) {
-      section(
-        6,
-        '.rela.text',
-        4,
-        0,
-        relocationOffset,
-        relocations.length * 24,
-        link: 2,
-        info: 1,
-        alignment: 8,
-        entrySize: 24,
-      );
-    }
-    section(5, '.note.GNU-stack', 1, 0, 0, 0);
+    section(stringIndex, 3, 0, stringOffset, strings.length);
+    section(nameIndex, 3, 0, nameOffset, nameBytes.length);
+    section(stackIndex, 1, 0, 0, 0);
     return bytes.asUnmodifiableView();
   }
 }

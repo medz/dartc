@@ -110,12 +110,13 @@ final class Assembler() {
     _bytes.addByte(0x58 | destination.index & 7);
   }
 
-  /// Loads a word from RSP plus a signed 32-bit displacement.
-  void loadStack(Register destination, int offset) =>
-      _stack(0x8b, destination, offset);
+  /// Loads a word from [base] plus a signed 32-bit displacement.
+  void load(Register destination, Register base, int offset) =>
+      _memory(0x8b, destination, base, offset);
 
-  /// Stores a word at RSP plus a signed 32-bit displacement.
-  void storeStack(Register source, int offset) => _stack(0x89, source, offset);
+  /// Stores a word at [base] plus a signed 32-bit displacement.
+  void store(Register source, Register base, int offset) =>
+      _memory(0x89, source, base, offset);
 
   /// Updates flags as if subtracting [right] from [left], preserving registers.
   void compare(Register left, Register right) => _binary(0x39, left, right);
@@ -163,14 +164,30 @@ final class Assembler() {
     return fixup;
   }
 
-  void _stack(int opcode, Register value, int offset) {
+  /// Loads an unresolved RIP-relative address without changing flags.
+  Fixup address(Register destination) {
+    final fixup = Fixup(length + 3, .x64Address32);
+    _bytes.add([
+      0x48 | (destination.index >> 3) << 2,
+      0x8d,
+      0x05 | (destination.index & 7) << 3,
+      0,
+      0,
+      0,
+      0,
+    ]);
+    return fixup;
+  }
+
+  void _memory(int opcode, Register value, Register base, int offset) {
     RangeError.checkValueInInterval(offset, -0x80000000, 0x7fffffff, 'offset');
-    final bytes = ByteData(8)
-      ..setUint8(0, 0x48 | (value.index >> 3) << 2)
+    final sib = base.index & 7 == 4;
+    final bytes = ByteData(sib ? 8 : 7)
+      ..setUint8(0, 0x48 | (value.index >> 3) << 2 | base.index >> 3)
       ..setUint8(1, opcode)
-      ..setUint8(2, 0x84 | (value.index & 7) << 3)
-      ..setUint8(3, 0x24)
-      ..setInt32(4, offset, .little);
+      ..setUint8(2, 0x80 | (value.index & 7) << 3 | base.index & 7)
+      ..setInt32(sib ? 4 : 3, offset, .little);
+    if (sib) bytes.setUint8(3, 0x24);
     _bytes.add(bytes.buffer.asUint8List());
   }
 

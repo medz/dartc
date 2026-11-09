@@ -53,7 +53,7 @@ base class IntegerCodeGenerator<R extends Object>(
               throw ArgumentError('Missing call definition: ${callee.name}');
             }
             relocations.add(
-              .new(code.length + fixup.offset, fixup.encoding, index),
+              .new(0, code.length + fixup.offset, fixup.encoding, index),
             );
           });
       symbols.add(
@@ -61,6 +61,7 @@ base class IntegerCodeGenerator<R extends Object>(
           export == null
               ? declaration.name
               : target.nativeSymbol(export.symbol),
+          0,
           code.length,
           bytes.length,
           binding: export == null ? .local : .global,
@@ -69,6 +70,11 @@ base class IntegerCodeGenerator<R extends Object>(
       );
       code.add(bytes);
     }
-    return .new(target, code.takeBytes(), symbols, relocations: relocations);
+    return .new(
+      target,
+      [Section.code(code.takeBytes())],
+      symbols,
+      relocations: relocations,
+    );
   }
 }

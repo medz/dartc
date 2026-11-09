@@ -112,11 +112,11 @@ final class _X64Emitter(
 
   @override
   void loadStack(Register destination, int offset) =>
-      assembler.loadStack(destination, offset);
+      assembler.load(destination, .rsp, offset);
 
   @override
   void storeStack(Register source, int offset) =>
-      assembler.storeStack(source, offset);
+      assembler.store(source, .rsp, offset);
 
   @override
   Fixup call() => assembler.call();

@@ -67,8 +67,8 @@ List<ObjectModule> stackCalls(Target target) {
     abi.emitPrologue(assembler, frame);
     for (final argument in layout.parameters.whereType<StackArgument>()) {
       assembler
-        ..loadStack(.r10, frame.incomingStackOffset + argument.offset)
-        ..storeStack(.r10, argument.offset);
+        ..load(.r10, .rsp, frame.incomingStackOffset + argument.offset)
+        ..store(.r10, .rsp, argument.offset);
     }
     call = assembler.call();
     abi.emitEpilogue(assembler, frame);
@@ -77,17 +77,18 @@ List<ObjectModule> stackCalls(Target target) {
   return [
     ObjectModule(
       target,
-      code,
+      [Section.code(code)],
       [
         Symbol(
           target.nativeSymbol('stack_forward'),
+          0,
           0,
           code.length,
           exported: true,
         ),
       ],
       imports: [callee.symbols.single.name],
-      relocations: [Relocation(call.offset, call.encoding, 1)],
+      relocations: [Relocation(0, call.offset, call.encoding, 1)],
     ),
     callee,
   ];

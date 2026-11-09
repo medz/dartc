@@ -100,7 +100,7 @@ void main() {
         definitions: exports.keys,
         exports: exports,
       );
-      expect(second.code, first.code);
+      expect(second.sections.single.bytes, first.sections.single.bytes);
       expect(second.target, generator.target);
       expect(
         second.symbols.map((s) => s.name),

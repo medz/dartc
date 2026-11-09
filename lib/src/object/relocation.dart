@@ -1,10 +1,11 @@
 import 'package:dartc/assembler.dart';
 
-/// A call to a module symbol, with no implicit name lookup for local definitions.
+/// An instruction reference to a module symbol, preserving local identity.
 ///
 /// [symbol] indexes definitions followed by imports. [offset] identifies the
-/// AArch64 instruction or the x86-64 displacement field, relative to code start.
+/// AArch64 instruction or the x86-64 displacement field within [section].
 final class const Relocation(
+  final int section,
   final int offset,
   final FixupEncoding encoding,
   final int symbol,

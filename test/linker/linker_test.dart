@@ -8,6 +8,7 @@ import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
 import 'fixtures/calls.dart';
+import 'fixtures/data.dart';
 
 void main() {
   for (final os in OperatingSystem.values) {
@@ -18,9 +19,11 @@ void main() {
           ? MachOLinker(target)
           : ElfLinker(target);
       final code = arch == .arm64 ? [0xc0, 0x03, 0x5f, 0xd6] : [0xc3];
-      final module = ObjectModule(target, code, [
-        Symbol('entry', 0, code.length, exported: true),
-      ]);
+      final module = ObjectModule(
+        target,
+        [Section.code(code)],
+        [Symbol('entry', 0, 0, code.length, exported: true)],
+      );
       Uint8List codeOf(Uint8List image) {
         final data = ByteData.sublistView(image);
         final section = os == .macos ? 104 : data.getUint64(40, .little) + 64;
@@ -39,7 +42,7 @@ void main() {
         () {
           final first = linker.linkSharedLibrary([module], name: 'values');
           final second = linker.linkSharedLibrary([module], name: 'values');
-          expect(codeOf(first), module.code);
+          expect(codeOf(first), module.sections.single.bytes);
           expect(second, first);
           expect(() => first[0] = 0, throwsUnsupportedError);
           final archive = ArchiveWriter(format);
@@ -49,14 +52,16 @@ void main() {
 
       test('$target resolves calls without changing input objects', () {
         final modules = callModules(target);
-        final before = [for (final module in modules) module.code.toList()];
+        final before = [
+          for (final module in modules) module.sections.single.bytes.toList(),
+        ];
         expect(
           () => linker.linkSharedLibrary([modules.first], name: 'missing'),
           throwsArgumentError,
         );
         final bytes = codeOf(linker.linkSharedLibrary(modules, name: 'calls'));
-        expect(bytes, isNot(modules.first.code));
-        expect(modules.map((module) => module.code), before);
+        expect(bytes, isNot(modules.first.sections.single.bytes));
+        expect(modules.map((module) => module.sections.single.bytes), before);
         expect(modules.first.imports, isNotEmpty);
         expect(
           modules.every((module) => module.relocations.isNotEmpty),
@@ -65,11 +70,73 @@ void main() {
       });
 
       test(
+        '$target rejects invalid data references and overflowing layouts',
+        () {
+          final modules = dataModules(target), storage = modules.first;
+          for (final inputs in [
+            [modules.last],
+            [storage, storage, modules.last],
+          ]) {
+            expect(
+              () => linker.linkSharedLibrary(inputs, name: 'data'),
+              throwsArgumentError,
+            );
+          }
+          final caller = callModules(target).first;
+          final dataCallee = ObjectModule(
+            target,
+            [Section.zeroFill(8)],
+            [Symbol(caller.imports.single, 0, 0, 8, kind: .data)],
+          );
+          expect(
+            () => linker.linkSharedLibrary([
+              caller,
+              dataCallee,
+            ], name: 'bad_call'),
+            throwsArgumentError,
+          );
+          final distant = ObjectModule(
+            target,
+            [
+              ...storage.sections.take(2),
+              Section.zeroFill(0x200000008, alignment: 32),
+            ],
+            [
+              ...storage.symbols.take(3),
+              Symbol(storage.symbols.last.name, 2, 0x200000000, 8, kind: .data),
+            ],
+          );
+          expect(
+            () =>
+                linker.linkSharedLibrary([distant, modules.last], name: 'far'),
+            throwsRangeError,
+          );
+          for (final sections in [
+            [Section.zeroFill(0x7fffffffffffffff)],
+            [Section.zeroFill(0x7fffffffffffffff), Section.zeroFill(1)],
+            [
+              Section.data([1]),
+              Section.zeroFill(0x7fffffffffffffff),
+            ],
+          ]) {
+            final large = ObjectModule(target, sections, []);
+            expect(
+              () => linker.linkSharedLibrary([large], name: 'overflow'),
+              throwsRangeError,
+            );
+            if (os == .macos && sections.length > 1) {
+              expect(() => format.encodeObject(large), throwsRangeError);
+            }
+          }
+        },
+      );
+
+      test(
         '$target validates inputs and distinguishes locals from exports',
         () {
           final other = ObjectModule(
             Target(os == .macos ? .linux : .macos, arch),
-            code,
+            [Section.code(code)],
             [],
           );
           for (final inputs in [
@@ -93,9 +160,11 @@ void main() {
             () => ArchiveWriter(format).encode([module, other]),
             throwsArgumentError,
           );
-          final local = ObjectModule(target, code, [
-            Symbol('entry', 0, code.length, binding: .local),
-          ]);
+          final local = ObjectModule(
+            target,
+            [Section.code(code)],
+            [Symbol('entry', 0, 0, code.length, binding: .local)],
+          );
           final image = linker.linkSharedLibrary([
             local,
             local,
