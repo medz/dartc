@@ -1,6 +1,6 @@
 import 'dart:ffi';
 
-import 'package:dartc/export.dart';
+import 'package:dartc/interop.dart';
 
 import 'constant_safety/numeric.dart' as numbers;
 

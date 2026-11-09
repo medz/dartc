@@ -30,7 +30,6 @@ void main() {
     };
     final entries = {
       for (final domain in dependencies.keys) '$domain.dart': domain,
-      'export.dart': 'interop',
       'assembler/arm64.dart': 'assembler',
       'assembler/x64.dart': 'assembler',
       'object/elf.dart': 'object',

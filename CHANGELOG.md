@@ -31,6 +31,8 @@ Development-only type and constant helpers have moved to their owning values:
 
 SDK member selection belongs to lowering. Callers of the removed `coreCollectionOperation` helper should construct typed IR operations such as `ListSublist` and `MapContainsKey` directly.
 
+Import `Export` from `package:dartc/interop.dart`, alongside `NativeSignature`, `NativeExport` and `NativeExports`. The separate development entry `package:dartc/export.dart` has been removed; annotation syntax and native signatures are unchanged.
+
 `NativeSignature` now takes actual `dart:ffi` type values: use `NativeSignature(Int64, [Int64, Int64])` instead of `NativeSignature.int64(2)`. It also accepts `Double`, `Pointer<Int64>` and a `Void` result. `CallLayout.result` is nullable for void functions. Architecture-specific ABI results use `CpuRegister`, whose `Register` and `FloatRegister` variants keep general and floating locations distinct. `CallLayout.scalars` replaces `CallLayout.words` with separate parameter banks and result registers.
 
 `ObjectModule` takes `Section` values instead of one code buffer. `Symbol` and `Relocation` take a section index before the byte offset; data symbols use `kind: SymbolKind.data`. The x86-64 assembler's `load` and `store` methods accept a base register, replacing `loadStack` and `storeStack`; pass `Register.rsp` for stack access.

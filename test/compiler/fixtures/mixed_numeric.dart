@@ -1,6 +1,6 @@
 import 'dart:ffi';
 
-import 'package:dartc/export.dart';
+import 'package:dartc/interop.dart';
 
 @Export<Double Function(Int64, Double)>()
 double add(int a, double b) => a + b;

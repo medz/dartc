@@ -1,6 +1,6 @@
 import 'dart:ffi';
 
-import 'package:dartc/export.dart';
+import 'package:dartc/interop.dart';
 
 typedef BinaryNative = Double Function(Double, Double);
 typedef BinaryDart = double Function(double, double);

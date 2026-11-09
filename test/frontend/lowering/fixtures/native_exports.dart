@@ -1,6 +1,6 @@
 import 'dart:ffi';
 
-import 'package:dartc/export.dart' as native;
+import 'package:dartc/interop.dart' as native;
 
 final class const Export<T extends Function>({final String? symbol});
 

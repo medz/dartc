@@ -18,7 +18,7 @@ Mark a top-level function with an explicit FFI signature:
 
 ```dart
 import 'dart:ffi';
-import 'package:dartc/export.dart';
+import 'package:dartc/interop.dart';
 
 @Export<Int64 Function(Int64, Int64)>(symbol: 'math_add')
 int add(int left, int right) => left + right;

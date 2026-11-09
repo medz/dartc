@@ -1,4 +1,4 @@
-import 'package:dartc/export.dart';
+import 'package:dartc/interop.dart';
 
 import 'stack_helpers.dart';
 

@@ -1,6 +1,6 @@
 import 'dart:ffi';
 
-import 'package:dartc/export.dart';
+import 'package:dartc/interop.dart';
 
 @Export<Int64 Function(Int64, Int64)>()
 int choose(int a, int b) {
