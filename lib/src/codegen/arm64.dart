@@ -86,6 +86,18 @@ final class _Arm64Emitter(
       assembler.loadImmediate(destination as Register, value);
 
   @override
+  void extendInteger(
+    CpuRegister register, {
+    required int bytes,
+    required bool signed,
+  }) => assembler.extendInteger(
+    register as Register,
+    register,
+    bytes: bytes,
+    signed: signed,
+  );
+
+  @override
   void convertIntToDouble(CpuRegister destination, CpuRegister source) =>
       assembler.convertIntToDouble(
         destination as FloatRegister,
@@ -180,8 +192,19 @@ final class _Arm64Emitter(
       assembler.branchZero(value as Register, target);
 
   @override
-  void loadStack(CpuRegister destination, int offset) => switch (destination) {
-    Register() => assembler.load(destination, .sp, offset),
+  void loadStack(
+    CpuRegister destination,
+    int offset, {
+    int bytes = 8,
+    bool signed = false,
+  }) => switch (destination) {
+    Register() => assembler.load(
+      destination,
+      .sp,
+      offset,
+      bytes: bytes,
+      signed: signed,
+    ),
     FloatRegister() => assembler.loadDouble(destination, .sp, offset),
   };
 
@@ -195,12 +218,25 @@ final class _Arm64Emitter(
   Fixup call() => assembler.call();
 
   @override
-  void loadMemory(CpuRegister destination, CpuRegister base) =>
-      assembler.load(destination as Register, base as Register, 0);
+  void loadMemory(
+    CpuRegister destination,
+    CpuRegister base, {
+    required int bytes,
+    required bool signed,
+  }) => assembler.load(
+    destination as Register,
+    base as Register,
+    0,
+    bytes: bytes,
+    signed: signed,
+  );
 
   @override
-  void storeMemory(CpuRegister source, CpuRegister base) =>
-      assembler.store(source as Register, base as Register, 0);
+  void storeMemory(
+    CpuRegister source,
+    CpuRegister base, {
+    required int bytes,
+  }) => assembler.store(source as Register, base as Register, 0, bytes: bytes);
 
   @override
   Uint8List finish() => assembler.finish();

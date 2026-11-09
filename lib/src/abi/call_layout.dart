@@ -6,9 +6,9 @@ import 'argument_location.dart';
 
 /// Argument locations and call effects for a native scalar signature.
 ///
-/// Stack words are consecutive in parameter order. The clobber set covers the
-/// represented 64-bit general and floating registers, not allocation policy or
-/// unrepresented vector lanes.
+/// Stack slots follow parameter order with their required alignment. The clobber
+/// set covers represented 64-bit general and floating registers, not allocation
+/// policy or unrepresented vector lanes.
 /// [result] is absent for a `Void` result.
 final class CallLayout<R>(
   Iterable<ArgumentLocation<R>> parameters,
@@ -27,7 +27,10 @@ final class CallLayout<R>(
   /// Argument storage at the caller's stack pointer, padded to 16 bytes.
   late final int stackBytes;
 
-  /// Assigns independent integer and double banks, then consecutive stack words.
+  /// Assigns integer and double banks, then naturally aligned stack slots.
+  ///
+  /// [packedStack] uses each scalar's size, as required by Apple ARM64.
+  /// Otherwise each stack argument occupies eight bytes.
   factory scalars(
     NativeSignature signature, {
     required List<R> general,
@@ -35,17 +38,21 @@ final class CallLayout<R>(
     required R generalResult,
     required R floatingResult,
     required Iterable<R> clobberedRegisters,
+    bool packedStack = false,
   }) {
     var integers = 0, doubles = 0, stack = 0;
     final parameters = <ArgumentLocation<R>>[];
     for (final type in signature.parameters) {
       final bank = type == Double ? floating : general;
       final index = type == Double ? doubles++ : integers++;
-      parameters.add(
-        index < bank.length
-            ? RegisterArgument(bank[index])
-            : StackArgument((stack++) * 8),
-      );
+      if (index < bank.length) {
+        parameters.add(RegisterArgument(bank[index]));
+      } else {
+        final size = packedStack ? type.nativeSize : 8;
+        stack = (stack + size - 1) & -size;
+        parameters.add(StackArgument(stack, size: size));
+        stack += size;
+      }
     }
     return .new(
       parameters,
@@ -67,11 +74,11 @@ final class CallLayout<R>(
           if (!registers.add(register)) {
             throw ArgumentError('Repeated parameter register: $register');
           }
-        case StackArgument(:final offset):
-          if (offset != bytes) {
+        case StackArgument(:final offset, :final size):
+          if (offset != ((bytes + size - 1) & -size)) {
             throw ArgumentError('Expected consecutive stack arguments.');
           }
-          bytes += 8;
+          bytes = offset + size;
       }
     }
     if (!this.clobberedRegisters.containsAll([...registers, ?result])) {

@@ -53,6 +53,9 @@ abstract interface class FunctionEmitter<R>() {
   /// Loads all 64 bits of [value] into a general [destination] register.
   void loadImmediate(R destination, int value);
 
+  /// Extends the low [bytes] in a general register to the Dart integer width.
+  void extendInteger(R register, {required int bytes, required bool signed});
+
   /// Converts a signed integer into a floating register without changing inputs.
   void convertIntToDouble(R destination, R source);
 
@@ -105,16 +108,26 @@ abstract interface class FunctionEmitter<R>() {
   void jumpIfZero(R value, Label target);
 
   /// Loads a word from a slot in the current frame.
-  void loadStack(R destination, int offset);
+  void loadStack(
+    R destination,
+    int offset, {
+    int bytes = 8,
+    bool signed = false,
+  });
 
   /// Saves a word to a slot in the current frame.
   void storeStack(R source, int offset);
 
-  /// Reads a native 64-bit word; [destination] may alias [base].
-  void loadMemory(R destination, R base);
+  /// Reads and extends a native integer; [destination] may alias [base].
+  void loadMemory(
+    R destination,
+    R base, {
+    required int bytes,
+    required bool signed,
+  });
 
-  /// Writes a native 64-bit word without changing either input register.
-  void storeMemory(R source, R base);
+  /// Writes the low [bytes] without changing either input register.
+  void storeMemory(R source, R base, {required int bytes});
 
   /// Emits an unresolved direct call and returns its instruction field.
   Fixup call();

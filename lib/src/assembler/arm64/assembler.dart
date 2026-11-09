@@ -77,13 +77,51 @@ final class Assembler() {
     );
   }
 
-  /// Loads a word at an unsigned, eight-byte-aligned offset from [base].
-  void load(Register destination, Register base, int offset) =>
-      _memory(0xf9400000, destination, base, offset);
+  /// Loads 1, 2, 4 or 8 bytes, extending the value into a 64-bit register.
+  ///
+  /// [offset] is unsigned, aligned to [bytes] and at most `4095 * bytes`.
+  void load(
+    Register destination,
+    Register base,
+    int offset, {
+    int bytes = 8,
+    bool signed = false,
+  }) {
+    final size = _size(bytes);
+    _memory(
+      (size << 30) | (signed && bytes < 8 ? 0x39800000 : 0x39400000),
+      destination,
+      base,
+      offset,
+      bytes,
+    );
+  }
 
-  /// Stores a word with the same address constraints as [load].
-  void store(Register source, Register base, int offset) =>
-      _memory(0xf9000000, source, base, offset);
+  /// Stores the low [bytes] with the same address constraints as [load].
+  void store(Register source, Register base, int offset, {int bytes = 8}) =>
+      _memory((_size(bytes) << 30) | 0x39000000, source, base, offset, bytes);
+
+  /// Extends the low 1, 2, 4 or 8 bytes without changing flags.
+  void extendInteger(
+    Register destination,
+    Register source, {
+    required int bytes,
+    required bool signed,
+  }) {
+    _size(bytes);
+    _general(destination);
+    _general(source);
+    if (bytes == 8) {
+      move(destination, source);
+    } else {
+      _word(
+        (signed ? 0x93400000 : 0xd3400000) |
+            (bytes * 8 - 1) << 10 |
+            source.index << 5 |
+            destination.index,
+      );
+    }
+  }
 
   /// Sets NZCV as if subtracting [right] from [left], without storing a result.
   void compare(Register left, Register right) {
@@ -222,11 +260,25 @@ final class Assembler() {
     return fixup;
   }
 
-  void _memory(int opcode, CpuRegister value, Register base, int offset) {
+  int _size(int bytes) => switch (bytes) {
+    1 => 0,
+    2 => 1,
+    4 => 2,
+    8 => 3,
+    _ => throw ArgumentError.value(bytes, 'bytes', 'Expected 1, 2, 4 or 8.'),
+  };
+
+  void _memory(
+    int opcode,
+    CpuRegister value,
+    Register base,
+    int offset, [
+    int bytes = 8,
+  ]) {
     if (value is Register) _general(value);
-    RangeError.checkValueInInterval(offset, 0, 32760, 'offset');
-    if (offset % 8 != 0) throw ArgumentError('Expected an eight-byte offset.');
-    _word(opcode | (offset ~/ 8) << 10 | base.index << 5 | value.index);
+    RangeError.checkValueInInterval(offset, 0, 4095 * bytes, 'offset');
+    if (offset % bytes != 0) throw ArgumentError('Expected an aligned offset.');
+    _word(opcode | (offset ~/ bytes) << 10 | base.index << 5 | value.index);
   }
 
   void _binary(

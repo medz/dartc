@@ -70,8 +70,8 @@ final class FunctionSelection<R>(
             );
           case PointerFromAddress() ||
               PointerAddress() ||
-              LoadNativeInt64() ||
-              StoreNativeInt64():
+              LoadNativeInteger() ||
+              StoreNativeInteger():
             break;
           case NumericNegate(:final type):
             if (type != .floating) {
@@ -230,13 +230,15 @@ final class FunctionSelection<R>(
       type == .integer ||
       type == .boolean ||
       type == .floating ||
-      type == FfiTypes.int64Pointer;
+      FfiTypes.pointerElement(type) != null;
 
-  Type _nativeType(ValueType type) => type == .voidType
-      ? Void
-      : type == .floating
-      ? Double
-      : type == FfiTypes.int64Pointer
-      ? Pointer<Int64>
-      : Int64;
+  Type _nativeType(ValueType type) {
+    if (type == .voidType) return Void;
+    if (type == .floating) return Double;
+    if (type == .integer || type == .boolean) return Int64;
+    for (final MapEntry(:key, :value) in FfiTypes.pointerTypes.entries) {
+      if (value == type) return key;
+    }
+    throw UnsupportedError('Native representation: $type');
+  }
 }

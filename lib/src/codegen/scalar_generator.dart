@@ -9,6 +9,7 @@ import 'package:dartc/target.dart';
 import 'code_generator.dart';
 import 'function_emitter.dart';
 import 'scalar_function.dart';
+import 'native_entry.dart';
 
 /// Generates scalar modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -38,6 +39,7 @@ base class ScalarCodeGenerator<R extends Object>(
         throw ArgumentError('Definition has no body: ${declaration.name}');
       }
       final export = exports[declaration];
+      final exported = export != null && !_needsEntry(export.signature);
       if (export != null &&
           (export.signature.parameters.length !=
                   declaration.parameterTypes.length ||
@@ -63,14 +65,34 @@ base class ScalarCodeGenerator<R extends Object>(
           });
       symbols.add(
         .new(
-          export == null
-              ? declaration.name
-              : target.nativeSymbol(export.symbol),
+          exported ? target.nativeSymbol(export.symbol) : declaration.name,
           0,
           code.length,
           bytes.length,
-          binding: export == null ? .local : .global,
-          exported: export != null,
+          binding: exported ? .global : .local,
+          exported: exported,
+        ),
+      );
+      code.add(bytes);
+    }
+    for (final MapEntry(:key, :value) in exports.entries) {
+      if (!_needsEntry(value.signature)) continue;
+      code.add(Uint8List((-code.length) & 15));
+      final bytes = NativeEntry(_createFunction()).generate(value.signature, (
+        fixup,
+      ) {
+        relocations.add(
+          .new(0, code.length + fixup.offset, fixup.encoding, indices[key]!),
+        );
+      });
+      symbols.add(
+        .new(
+          target.nativeSymbol(value.symbol),
+          0,
+          code.length,
+          bytes.length,
+          binding: .global,
+          exported: true,
         ),
       );
       code.add(bytes);
@@ -82,4 +104,9 @@ base class ScalarCodeGenerator<R extends Object>(
       relocations: relocations,
     );
   }
+
+  bool _needsEntry(NativeSignature signature) => [
+    signature.result,
+    ...signature.parameters,
+  ].any((t) => (t.integerLayout?.bytes ?? 8) < 8);
 }

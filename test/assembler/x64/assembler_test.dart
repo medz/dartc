@@ -4,6 +4,64 @@ import 'package:dartc/assembler/x64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('narrow operations preserve REX byte registers and memory widths', () {
+    final a = Assembler()
+      ..load(.r9, .r12, 1, bytes: 1, signed: true)
+      ..store(.rsi, .rbp, -1, bytes: 1)
+      ..store(.r9, .r12, 2, bytes: 2)
+      ..load(.r10, .r13, 4, bytes: 4)
+      ..extendInteger(.rax, .rsi, bytes: 1, signed: false)
+      ..extendInteger(.r9, .r10, bytes: 4, signed: true);
+    expect(a.finish(), [
+      0x4d,
+      0x0f,
+      0xbe,
+      0x8c,
+      0x24,
+      1,
+      0,
+      0,
+      0,
+      0x40,
+      0x88,
+      0xb5,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0x66,
+      0x45,
+      0x89,
+      0x8c,
+      0x24,
+      2,
+      0,
+      0,
+      0,
+      0x45,
+      0x8b,
+      0x95,
+      4,
+      0,
+      0,
+      0,
+      0x48,
+      0x0f,
+      0xb6,
+      0xc6,
+      0x4d,
+      0x63,
+      0xca,
+    ]);
+    final invalid = Assembler();
+    expect(() => invalid.load(.rax, .rsp, 0, bytes: 3), throwsArgumentError);
+    expect(
+      () => invalid.extendInteger(.rax, .rax, bytes: 0, signed: false),
+      throwsArgumentError,
+    );
+    expect(invalid.finish(), isEmpty);
+  });
+
   test('general memory operands encode extended bases and the RSP/R12 SIB', () {
     final assembler = Assembler()
       ..load(.r9, .r13, -8)

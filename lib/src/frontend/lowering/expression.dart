@@ -260,9 +260,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       if (expression is ast.InstanceCreationExpression) {
         context.checkDeferred(expression.constructorName.type);
       }
-      if (ffiClass(ctor.enclosingElement) == FfiTypes.pointer &&
-          context.typeOf(expression.staticType!, expression) ==
-              FfiTypes.int64Pointer) {
+      if (ffiClass(ctor.enclosingElement) == FfiTypes.pointer) {
         final args = context.arguments(
           argumentList,
           (e) => lowerExpression(context, e),
@@ -271,7 +269,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         final operation = ffiOperation(
           ctor,
           args.positional,
-          result: FfiTypes.int64Pointer,
+          result: context.typeOf(expression.staticType!, expression),
         );
         if (operation != null) return context.emit(operation);
         unsupported(unit, expression, 'native pointer construction');

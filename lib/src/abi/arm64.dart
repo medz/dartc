@@ -23,6 +23,7 @@ final class Arm64Abi(@override final Target target)
       floating: FloatRegister.values.take(8).toList(),
       generalResult: Register.x0,
       floatingResult: FloatRegister.d0,
+      packedStack: target.operatingSystem == .macos,
       clobberedRegisters: [
         for (var i = 0; i <= 17; i++) Register.values[i],
         if (target.operatingSystem == .linux) Register.x18,

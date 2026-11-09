@@ -81,13 +81,43 @@ final class Assembler() {
     _bytes.addByte(0x58 | destination.index & 7);
   }
 
-  /// Loads a word from [base] plus a signed 32-bit displacement.
-  void load(Register destination, Register base, int offset) =>
-      _memory(0x8b, destination, base, offset);
+  /// Loads 1, 2, 4 or 8 bytes, extending the value into a 64-bit register.
+  ///
+  /// [offset] is a signed 32-bit displacement from [base].
+  void load(
+    Register destination,
+    Register base,
+    int offset, {
+    int bytes = 8,
+    bool signed = false,
+  }) => _memory(0x8b, destination, base, offset, bytes: bytes, signed: signed);
 
-  /// Stores a word at [base] plus a signed 32-bit displacement.
-  void store(Register source, Register base, int offset) =>
-      _memory(0x89, source, base, offset);
+  /// Stores the low 1, 2, 4 or 8 bytes at [base] plus [offset].
+  void store(Register source, Register base, int offset, {int bytes = 8}) =>
+      _memory(0x89, source, base, offset, bytes: bytes);
+
+  /// Extends the low 1, 2, 4 or 8 bytes without changing flags.
+  void extendInteger(
+    Register destination,
+    Register source, {
+    required int bytes,
+    required bool signed,
+  }) {
+    _checkSize(bytes);
+    if (bytes == 8) {
+      move(destination, source);
+      return;
+    }
+    _bytes.add([
+      0x40 |
+          (bytes < 4 || signed ? 8 : 0) |
+          (destination.index >> 3) << 2 |
+          source.index >> 3,
+      if (bytes < 4) 0x0f,
+      bytes == 4 ? (signed ? 0x63 : 0x8b) : (signed ? 0xbe : 0xb6) + bytes - 1,
+      0xc0 | (destination.index & 7) << 3 | source.index & 7,
+    ]);
+  }
 
   /// Updates flags as if subtracting [right] from [left], preserving registers.
   void compare(Register left, Register right) => _binary(0x39, left, right);
@@ -229,17 +259,44 @@ final class Assembler() {
     return fixup;
   }
 
-  void _memory(int opcode, CpuRegister value, Register base, int offset) {
+  void _checkSize(int bytes) {
+    if (![1, 2, 4, 8].contains(bytes)) {
+      throw ArgumentError.value(bytes, 'bytes', 'Expected 1, 2, 4 or 8.');
+    }
+  }
+
+  void _memory(
+    int opcode,
+    CpuRegister value,
+    Register base,
+    int offset, {
+    int bytes = 8,
+    bool signed = false,
+  }) {
+    _checkSize(bytes);
     RangeError.checkValueInInterval(offset, -0x80000000, 0x7fffffff, 'offset');
     final sib = base.index & 7 == 4;
     final floating = value is FloatRegister;
+    final load = opcode == 0x8b;
+    final extended = !floating && load && bytes < 4;
+    if (!floating && bytes < 8) {
+      opcode = load
+          ? (bytes == 4
+                ? (signed ? 0x63 : 0x8b)
+                : (signed ? 0xbe : 0xb6) + bytes - 1)
+          : (bytes == 1 ? 0x88 : 0x89);
+    }
     final rex =
-        0x40 | (floating ? 0 : 8) | (value.index >> 3) << 2 | base.index >> 3;
+        0x40 |
+        (!floating && (bytes == 8 || load && signed) ? 8 : 0) |
+        (value.index >> 3) << 2 |
+        base.index >> 3;
     final displacement = ByteData(4)..setInt32(0, offset, .little);
     _bytes.add([
       if (floating) 0xf2,
-      if (rex != 0x40) rex,
-      if (floating) 0x0f,
+      if (!floating && !load && bytes == 2) 0x66,
+      if (rex != 0x40 || !floating && !load && bytes == 1) rex,
+      if (floating || extended) 0x0f,
       opcode,
       0x80 | (value.index & 7) << 3 | base.index & 7,
       if (sib) 0x24,

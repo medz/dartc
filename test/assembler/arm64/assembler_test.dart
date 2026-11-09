@@ -4,6 +4,44 @@ import 'package:dartc/assembler/arm64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('narrow memory and register operations encode their actual widths', () {
+    final a = Assembler()
+      ..load(.x0, .x1, 1, bytes: 1, signed: true)
+      ..load(.x2, .sp, 2, bytes: 2)
+      ..load(.x3, .x4, 4, bytes: 4, signed: true)
+      ..store(.x5, .x6, 3, bytes: 1)
+      ..store(.x7, .x8, 6, bytes: 2)
+      ..store(.x9, .x10, 12, bytes: 4)
+      ..extendInteger(.x11, .x12, bytes: 1, signed: true)
+      ..extendInteger(.x13, .x14, bytes: 4, signed: false);
+    final data = ByteData.sublistView(a.finish());
+    expect(
+      [
+        for (var i = 0; i < data.lengthInBytes; i += 4)
+          data.getUint32(i, .little),
+      ],
+      [
+        0x39800420,
+        0x794007e2,
+        0xb9800483,
+        0x39000cc5,
+        0x79000d07,
+        0xb9000d49,
+        0x93401d8b,
+        0xd3407dcd,
+      ],
+    );
+    final invalid = Assembler();
+    expect(() => invalid.load(.x0, .sp, 4096, bytes: 1), throwsRangeError);
+    expect(() => invalid.store(.x0, .sp, 1, bytes: 2), throwsArgumentError);
+    expect(() => invalid.load(.x0, .sp, 0, bytes: 3), throwsArgumentError);
+    expect(
+      () => invalid.extendInteger(.sp, .x0, bytes: 1, signed: true),
+      throwsArgumentError,
+    );
+    expect(invalid.finish(), isEmpty);
+  });
+
   test(
     'encodes register fields and signed constants without literal pools',
     () {

@@ -8,6 +8,42 @@ import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('narrow stack slots follow the selected platform ABI', () {
+    for (final os in OperatingSystem.values) {
+      final cases = <(CallingConvention<Object>, int, bool)>[
+        (Arm64Abi(Target(os, .arm64)), 8, os == .macos),
+        (X64Abi(Target(os, .x64)), 6, false),
+      ];
+      for (final (abi, registers, packed) in cases) {
+        final layout = abi.classify(
+          NativeSignature(Int8, [
+            ...List.filled(registers, Int64),
+            Int8,
+            Uint8,
+            Int16,
+            Uint16,
+            Int32,
+            Uint32,
+            Int64,
+          ]),
+        );
+        final slots = layout.parameters.whereType<StackArgument>();
+        expect(
+          slots.map((s) => s.offset),
+          packed ? [0, 1, 2, 4, 8, 12, 16] : [0, 8, 16, 24, 32, 40, 48],
+        );
+        expect(
+          slots.map((s) => s.size),
+          packed ? [1, 1, 2, 2, 4, 4, 8] : List.filled(7, 8),
+        );
+        expect(layout.stackBytes, packed ? 32 : 64);
+      }
+    }
+    for (final (offset, size) in [(0, 0), (0, 3), (-1, 1), (1, 2)]) {
+      expect(() => StackArgument<int>(offset, size: size), throwsArgumentError);
+    }
+  });
+
   void layouts<R>(CallingConvention<R> abi, List<R> saved, R volatile) {
     test(
       '${abi.target} separates stack regions and rejects invalid demands',

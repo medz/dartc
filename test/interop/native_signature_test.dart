@@ -4,6 +4,30 @@ import 'package:dartc/interop.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('integer declarations preserve widths, signs and pointer elements', () {
+    for (final (type, bytes, signed, pointer) in [
+      (Int8, 1, true, Pointer<Int8>),
+      (Uint8, 1, false, Pointer<Uint8>),
+      (Int16, 2, true, Pointer<Int16>),
+      (Uint16, 2, false, Pointer<Uint16>),
+      (Int32, 4, true, Pointer<Int32>),
+      (Uint32, 4, false, Pointer<Uint32>),
+      (Int64, 8, true, Pointer<Int64>),
+      (Uint64, 8, false, Pointer<Uint64>),
+    ]) {
+      final output = StringBuffer();
+      NativeExport(
+        'access',
+        NativeSignature(type, [pointer, type]),
+      ).writeDeclaration(output);
+      final name = '${signed ? '' : 'u'}int${bytes * 8}_t';
+      expect(output.toString(), '$name access($name*, $name);\n');
+      expect(pointer.pointerElement, type);
+      expect(type.nativeSize, bytes);
+      expect(pointer.nativeSize, 8);
+    }
+  });
+
   test('signatures own their supported FFI parameter types', () {
     final parameters = <Type>[Pointer<Int64>, Int64];
     final signature = NativeSignature(Void, parameters);
@@ -24,7 +48,7 @@ void main() {
   });
 
   test('unsupported native types cannot reach ABI classification', () {
-    for (final type in <Type>[Void, Float, Int32, Pointer<Int8>, int]) {
+    for (final type in <Type>[Void, Float, IntPtr, Pointer<Float>, int]) {
       expect(() => NativeSignature(Int64, [type]), throwsUnsupportedError);
       if (type != Void) {
         expect(() => NativeSignature(type, []), throwsUnsupportedError);

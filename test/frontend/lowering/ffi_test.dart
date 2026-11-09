@@ -25,8 +25,11 @@ void main() {
         hasLength(1),
       );
       expect(instructions('address').whereType<PointerAddress>(), hasLength(1));
-      expect(instructions('read').whereType<LoadNativeInt64>(), hasLength(1));
-      expect(instructions('write').whereType<StoreNativeInt64>(), hasLength(1));
+      expect(instructions('read').whereType<LoadNativeInteger>(), hasLength(1));
+      expect(
+        instructions('write').whereType<StoreNativeInteger>(),
+        hasLength(1),
+      );
       expect(
         instructions('ordinaryPointer').whereType<Construct>(),
         hasLength(1),
@@ -36,7 +39,7 @@ void main() {
         hasLength(1),
       );
       expect(
-        instructions('customMember').whereType<LoadNativeInt64>(),
+        instructions('customMember').whereType<LoadNativeInteger>(),
         isEmpty,
       );
       final runner = IrInterpreter(result.program, {});

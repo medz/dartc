@@ -1,10 +1,28 @@
 import 'dart:async';
 import 'dart:ffi' as ffi;
+import 'dart:typed_data';
 
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
 import 'package:test/test.dart';
 
 import 'numeric_order.dart';
+
+final _nativePointers = <Type, ffi.Pointer<ffi.NativeType> Function(int)>{
+  ffi.Int8: ffi.Pointer<ffi.Int8>.fromAddress,
+  ffi.Uint8: ffi.Pointer<ffi.Uint8>.fromAddress,
+  ffi.Int16: ffi.Pointer<ffi.Int16>.fromAddress,
+  ffi.Uint16: ffi.Pointer<ffi.Uint16>.fromAddress,
+  ffi.Int32: ffi.Pointer<ffi.Int32>.fromAddress,
+  ffi.Uint32: ffi.Pointer<ffi.Uint32>.fromAddress,
+  ffi.Int64: ffi.Pointer<ffi.Int64>.fromAddress,
+  ffi.Uint64: ffi.Pointer<ffi.Uint64>.fromAddress,
+};
+
+ByteData _nativeData(ffi.Pointer<ffi.NativeType> pointer, int bytes) =>
+    ByteData.sublistView(
+      ffi.Uint8Pointer(pointer.cast<ffi.Uint8>()).asTypedList(bytes),
+    );
 
 final class IrInterpreter(
   final IrProgram program,
@@ -1767,15 +1785,44 @@ final class IrInterpreter(
     void execute(Instruction op) {
       switch (op) {
         case PointerFromAddress(:final address):
-          values[op] = ffi.Pointer<ffi.Int64>.fromAddress(read(address) as int);
+          values[op] = _nativePointers[FfiTypes.pointerElement(op.type)]!(
+            read(address) as int,
+          );
         case PointerAddress(:final pointer):
-          values[op] = (read(pointer) as ffi.Pointer<ffi.Int64>).address;
-        case LoadNativeInt64(:final pointer):
-          values[op] = ffi.Int64Pointer(read(pointer) as ffi.Pointer<ffi.Int64>)
-              .value;
-        case StoreNativeInt64(:final pointer, :final value):
-          ffi.Int64Pointer(read(pointer) as ffi.Pointer<ffi.Int64>).value =
-              read(value) as int;
+          values[op] = (read(pointer) as ffi.Pointer).address;
+        case LoadNativeInteger(:final pointer):
+          final native = FfiTypes.pointerElement(pointer.type)!;
+          final layout = native.integerLayout!;
+          final data = _nativeData(read(pointer) as ffi.Pointer, layout.bytes);
+          values[op] = switch (layout.bytes) {
+            1 => layout.signed ? data.getInt8(0) : data.getUint8(0),
+            2 =>
+              layout.signed
+                  ? data.getInt16(0, Endian.host)
+                  : data.getUint16(0, Endian.host),
+            4 =>
+              layout.signed
+                  ? data.getInt32(0, Endian.host)
+                  : data.getUint32(0, Endian.host),
+            _ => data.getInt64(0, Endian.host),
+          };
+        case StoreNativeInteger(:final pointer, :final value):
+          final native = FfiTypes.pointerElement(pointer.type)!;
+          final data = _nativeData(
+            read(pointer) as ffi.Pointer,
+            native.nativeSize,
+          );
+          final integer = read(value) as int;
+          switch (native.nativeSize) {
+            case 1:
+              data.setInt8(0, integer);
+            case 2:
+              data.setInt16(0, integer, Endian.host);
+            case 4:
+              data.setInt32(0, integer, Endian.host);
+            case 8:
+              data.setInt64(0, integer, Endian.host);
+          }
         case ReifyType(:final template):
           values[op] = _typeValue(resolve(template));
         case ObjectHashCode(:final operand, :final direct):
@@ -2392,7 +2439,7 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
   Object? run<T>() => cast ? value as T : value is T;
   Object? scalar<T>() => type == type.nonNullable ? run<T>() : run<T?>();
   final actual = switch (value) {
-    ffi.Pointer<ffi.Int64>() => FfiTypes.int64Pointer,
+    ffi.Pointer() => FfiTypes.valueType(value.runtimeType),
     _TypeValue() => ValueType.typeType,
     _Instance(:final type) => type,
     _CollectionValue(:final type) => type,
@@ -2803,7 +2850,7 @@ FunctionType _instantiateSignature(
 final _noDynamicBridge = Object();
 
 ValueType _runtimeValueType(Object? value) => switch (value) {
-  ffi.Pointer<ffi.Int64>() => FfiTypes.int64Pointer,
+  ffi.Pointer() => FfiTypes.valueType(value.runtimeType),
   null => ValueType.nullType,
   _Instance(:final type) => type,
   _CollectionValue(:final type) when type.declaration == CoreTypes.list => type,

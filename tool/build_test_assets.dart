@@ -57,6 +57,7 @@ Future<void> main(List<String> args) async {
       'pointers',
       'doubles',
       'mixed_numeric',
+      'native_integers',
     ]) {
       final library = assets.library('compiler/$fixture');
       final result = await Compiler(target)
@@ -67,7 +68,8 @@ Future<void> main(List<String> args) async {
           'arithmetic' ||
           'pointers' ||
           'doubles' ||
-          'mixed_numeric' => assets.file('compiler/$fixture.h'),
+          'mixed_numeric' ||
+          'native_integers' => assets.file('compiler/$fixture.h'),
           _ => null,
         },
       );

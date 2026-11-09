@@ -428,7 +428,7 @@ sealed class Instruction(super.type) extends Value {
     LoadGlobal() ||
     LoadField() ||
     ReadCell() ||
-    LoadNativeInt64() => const {.readsStorage},
+    LoadNativeInteger() => const {.readsStorage},
     StoreGlobal(global: GlobalVariable(isFinal: true)) ||
     StoreField(field: InstanceField(isLate: true, isFinal: true)) ||
     WriteCell(
@@ -439,7 +439,7 @@ sealed class Instruction(super.type) extends Value {
     StoreGlobal() ||
     StoreField() ||
     WriteCell() ||
-    StoreNativeInt64() => const {.writesStorage},
+    StoreNativeInteger() => const {.writesStorage},
     TypeCast() ||
     NullCheck() ||
     IntBinary(operator: IntOperator(mayThrow: true)) ||
@@ -460,51 +460,55 @@ sealed class Instruction(super.type) extends Value {
   bool get mayThrow => effects.contains(Effect.mayThrow);
 }
 
-/// Creates a `Pointer<Int64>` value without accessing or owning its storage.
-final class PointerFromAddress(final Value address) extends Instruction {
-  this : super(FfiTypes.int64Pointer) {
-    if (address.type != .integer) {
-      throw ArgumentError('Expected an integer address.');
+/// Creates an integer pointer without accessing or owning its storage.
+final class PointerFromAddress(final Value address, ClassType type)
+    extends Instruction {
+  this : super(type) {
+    if (address.type != .integer || FfiTypes.pointerElement(type) == null) {
+      throw ArgumentError(
+        'Expected an integer address and native integer pointer type.',
+      );
     }
   }
   @override
   Iterable<Value> get inputs => [address];
 }
 
-/// Extracts the address bits of a `Pointer<Int64>` without dereferencing it.
+/// Extracts a native integer pointer's address without dereferencing it.
 final class PointerAddress(final Value pointer) extends Instruction {
   this : super(.integer) {
-    if (pointer.type != FfiTypes.int64Pointer) {
-      throw ArgumentError('Expected Pointer<Int64>.');
+    if (FfiTypes.pointerElement(pointer.type) == null) {
+      throw ArgumentError('Expected a native integer pointer.');
     }
   }
   @override
   Iterable<Value> get inputs => [pointer];
 }
 
-/// Reads signed 64-bit native storage at an eight-byte-aligned pointer.
+/// Reads a native integer, extending it according to the pointer's element type.
 ///
-/// The caller must keep the storage alive and readable. Invalid native memory
-/// access is not a Dart exception and is not checked by this operation.
-final class LoadNativeInt64(final Value pointer) extends Instruction {
+/// The caller must keep the storage alive, aligned and readable. Invalid native
+/// memory access is not a Dart exception and is not checked by this operation.
+final class LoadNativeInteger(final Value pointer) extends Instruction {
   this : super(.integer) {
-    if (pointer.type != FfiTypes.int64Pointer) {
-      throw ArgumentError('Expected Pointer<Int64>.');
+    if (FfiTypes.pointerElement(pointer.type) == null) {
+      throw ArgumentError('Expected a native integer pointer.');
     }
   }
   @override
   Iterable<Value> get inputs => [pointer];
 }
 
-/// Writes signed 64-bit native storage at an eight-byte-aligned pointer.
+/// Writes an integer, truncating to the pointer's native element width.
 ///
-/// The caller must keep the storage alive and writable. The write is observable
-/// through every alias, even when its result is unused.
-final class StoreNativeInt64(final Value pointer, final Value value)
+/// The caller must keep the storage alive, aligned and writable. The write is
+/// observable through every alias, even when its result is unused.
+final class StoreNativeInteger(final Value pointer, final Value value)
     extends Instruction {
   this : super(.voidType) {
-    if (pointer.type != FfiTypes.int64Pointer || value.type != .integer) {
-      throw ArgumentError('Expected Pointer<Int64> and int.');
+    if (FfiTypes.pointerElement(pointer.type) == null ||
+        value.type != .integer) {
+      throw ArgumentError('Expected a native integer pointer and int.');
     }
   }
   @override

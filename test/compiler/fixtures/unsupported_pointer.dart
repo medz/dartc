@@ -2,5 +2,5 @@ import 'dart:ffi';
 
 import 'package:dartc/interop.dart';
 
-@Export<Pointer<Int8> Function(Int64)>()
-Pointer<Int8> pointer(int address) => .fromAddress(address);
+@Export<Pointer<Float> Function(Int64)>()
+Pointer<Float> pointer(int address) => .fromAddress(address);

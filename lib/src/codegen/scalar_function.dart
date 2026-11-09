@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
 
 import 'function_allocation.dart';
 import 'function_emitter.dart';
@@ -65,24 +66,32 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
           if (layout.result case final result?) {
             allocation.define(instruction, result);
           }
-        } else if (instruction case StoreNativeInt64(
+        } else if (instruction case StoreNativeInteger(
           :final pointer,
           :final value,
         )) {
           final base = allocation.read(pointer),
               source = allocation.read(value, except: [base]);
-          emitter.storeMemory(source, base);
+          final layout = FfiTypes.pointerElement(pointer.type)!.integerLayout!;
+          emitter.storeMemory(source, base, bytes: layout.bytes);
           allocation.release(pointer);
           allocation.release(value);
         } else if (instruction
             case PointerFromAddress(address: final operand) ||
                 PointerAddress(pointer: final operand) ||
-                LoadNativeInt64(pointer: final operand)) {
+                LoadNativeInteger(pointer: final operand)) {
           final source = allocation.read(operand);
           allocation.release(operand);
           final destination = allocation.allocate(.general, preferred: source);
-          if (instruction is LoadNativeInt64) {
-            emitter.loadMemory(destination, source);
+          if (instruction is LoadNativeInteger) {
+            final layout = FfiTypes.pointerElement(operand.type)!
+                .integerLayout!;
+            emitter.loadMemory(
+              destination,
+              source,
+              bytes: layout.bytes,
+              signed: layout.signed,
+            );
           } else {
             emitter.move(destination, source);
           }
