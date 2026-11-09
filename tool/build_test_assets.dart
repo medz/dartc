@@ -10,6 +10,7 @@ import 'package:dartc/target.dart';
 
 import '../test/codegen/fixtures/aliases.dart';
 import '../test/abi/fixtures/frames.dart';
+import '../test/abi/fixtures/stack_calls.dart';
 import '../test/codegen/fixtures/control_flow.dart';
 import '../test/linker/fixtures/functions.dart';
 import '../test/linker/fixtures/calls.dart';
@@ -25,7 +26,12 @@ Future<void> main() async {
         await Directory.fromUri(assets.directory.uri.resolve('$domain/'))
             .create(recursive: true);
       }
-      for (final fixture in ['arithmetic', 'calls', 'control_flow']) {
+      for (final fixture in [
+        'arithmetic',
+        'calls',
+        'control_flow',
+        'stack_calls',
+      ]) {
         final library = assets.library('compiler/$fixture');
         for (final (file, output) in <(File, Output)>[
           (assets.file('compiler/$fixture.o'), const .object()),
@@ -61,6 +67,7 @@ Future<void> main() async {
           );
       await shared([aliases(target)], assets.library('codegen/aliases'));
       await shared([frames(target)], assets.library('abi/frames'));
+      await shared(stackCalls(target), assets.library('abi/stack_calls'));
       await shared([
         controlFlow(target),
       ], assets.library('codegen/control_flow'));

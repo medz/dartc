@@ -40,7 +40,7 @@ final class FunctionSelection<R>(
                 typeArguments.isNotEmpty ||
                 inputs.any((v) => !_word(v.type))) {
               throw UnsupportedError(
-                'Native call requires register scalar arguments.',
+                'Native call requires integer or boolean arguments.',
               );
             }
             calls[instruction] = emitter.convention.classify(

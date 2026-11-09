@@ -56,24 +56,18 @@ void main() {
     test('$os classifies Int64 locations and actual call clobbers', () {
       final armCall = armAbi.classify(NativeSignature.int64(8));
       final x64Call = x64Abi.classify(NativeSignature.int64(6));
-      expect(armCall.parameters, <arm.Register>[
-        .x0,
-        .x1,
-        .x2,
-        .x3,
-        .x4,
-        .x5,
-        .x6,
-        .x7,
-      ]);
-      expect(x64Call.parameters, <x64.Register>[
-        .rdi,
-        .rsi,
-        .rdx,
-        .rcx,
-        .r8,
-        .r9,
-      ]);
+      expect(
+        armCall.parameters.whereType<RegisterArgument<arm.Register>>().map(
+          (location) => location.register,
+        ),
+        <arm.Register>[.x0, .x1, .x2, .x3, .x4, .x5, .x6, .x7],
+      );
+      expect(
+        x64Call.parameters.whereType<RegisterArgument<x64.Register>>().map(
+          (location) => location.register,
+        ),
+        <x64.Register>[.rdi, .rsi, .rdx, .rcx, .r8, .r9],
+      );
       expect(armCall.result, arm.Register.x0);
       expect(x64Call.result, x64.Register.rax);
       expect(
@@ -96,14 +90,34 @@ void main() {
       expect(() => x64Call.clobberedRegisters.clear(), throwsUnsupportedError);
       expect(armAbi.classify(NativeSignature.int64(0)).parameters, isEmpty);
       expect(x64Abi.classify(NativeSignature.int64(0)).parameters, isEmpty);
-      expect(
-        () => armAbi.classify(NativeSignature.int64(9)),
-        throwsUnsupportedError,
-      );
-      expect(
-        () => x64Abi.classify(NativeSignature.int64(7)),
-        throwsUnsupportedError,
-      );
+      for (final call in [
+        armAbi.classify(NativeSignature.int64(9)),
+        x64Abi.classify(NativeSignature.int64(7)),
+      ]) {
+        expect(
+          call.parameters.last,
+          isA<StackArgument>().having(
+            (location) => location.offset,
+            'offset',
+            0,
+          ),
+        );
+        expect(call.stackBytes, 16);
+      }
+      for (final (call, registerCount) in [
+        (armAbi.classify(NativeSignature.int64(11)), 8),
+        (x64Abi.classify(NativeSignature.int64(9)), 6),
+      ]) {
+        expect(call.parameters, hasLength(registerCount + 3));
+        expect(
+          call.parameters
+              .skip(registerCount)
+              .cast<StackArgument>()
+              .map((location) => location.offset),
+          [0, 8, 16],
+        );
+        expect(call.stackBytes, 32);
+      }
     });
   }
   test('rejects incompatible targets and frame provenance before emission', () {
@@ -134,7 +148,27 @@ void main() {
     );
     expect(armCode.finish(), isEmpty);
     expect(x64Code.finish(), isEmpty);
-    expect(() => CallLayout([1, 1], 0, {0, 1}), throwsArgumentError);
-    expect(() => CallLayout([1], 0, {1}), throwsArgumentError);
+    expect(
+      () => CallLayout([RegisterArgument(1), RegisterArgument(1)], 0, {0, 1}),
+      throwsArgumentError,
+    );
+    expect(
+      () => CallLayout([RegisterArgument(1)], 0, {1}),
+      throwsArgumentError,
+    );
+    for (final offset in [-8, -1, 1, 7]) {
+      expect(() => StackArgument<int>(offset), throwsArgumentError);
+    }
+    for (final offsets in [
+      [8],
+      [0, 0],
+      [0, 16],
+    ]) {
+      expect(
+        () => CallLayout(offsets.map(StackArgument<int>.new), 0, {0}),
+        throwsArgumentError,
+      );
+    }
+    expect(() => NativeSignature.int64(-1), throwsArgumentError);
   });
 }

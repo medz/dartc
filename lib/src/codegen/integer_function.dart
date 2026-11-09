@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/ir.dart';
 
@@ -35,9 +36,26 @@ final class IntegerFunction<R extends Object>(
         if (instruction case final DirectCall callInstruction) {
           final layout = selection.calls[callInstruction]!;
           allocation.flush(clobbered: layout.clobberedRegisters);
-          for (final (i, value) in instruction.inputs.indexed) {
-            allocation.load(value, layout.parameters[i]);
-            allocation.release(value);
+          // Stage stack words before populating registers that the scratch may alias.
+          if (layout.stackBytes != 0) {
+            final scratch = emitter.allocatableRegisters.firstWhere(
+              layout.clobberedRegisters.contains,
+            );
+            for (final (i, location) in layout.parameters.indexed) {
+              if (location case StackArgument(:final offset)) {
+                final value = instruction.inputs[i];
+                allocation.load(value, scratch);
+                emitter.storeStack(scratch, offset);
+                allocation.release(value);
+              }
+            }
+          }
+          for (final (i, location) in layout.parameters.indexed) {
+            if (location case RegisterArgument(:final register)) {
+              final value = instruction.inputs[i];
+              allocation.load(value, register);
+              allocation.release(value);
+            }
           }
           call(emitter.call(), callInstruction.target);
           allocation.define(instruction, layout.result);

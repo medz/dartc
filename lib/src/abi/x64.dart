@@ -18,10 +18,7 @@ final class X64Abi(@override final Target target)
   @override
   CallLayout<Register> classify(NativeSignature signature) {
     const parameters = <Register>[.rdi, .rsi, .rdx, .rcx, .r8, .r9];
-    if (signature.parameterCount > parameters.length) {
-      throw UnsupportedError('Native stack parameters are not implemented.');
-    }
-    return .new(parameters.take(signature.parameterCount), .rax, const [
+    return .int64(signature, parameters, .rax, const [
       .rax,
       .rcx,
       .rdx,

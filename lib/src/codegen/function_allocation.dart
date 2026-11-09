@@ -21,6 +21,7 @@ final class FunctionAllocation<R extends Object>(
   final _spilled = <Value>{};
   final _free = <R>[];
   late Map<Value, int> _uses;
+  late final int _stagingOffset;
 
   /// The queried frame, absent when the function needs no stack storage or calls.
   late final FrameLayout<R>? frame;
@@ -62,7 +63,13 @@ final class FunctionAllocation<R extends Object>(
         }
       }
     }
+    final incoming = <Value, int>{
+      for (final (i, location) in selection.entry.parameters.indexed)
+        if (location case StackArgument(:final offset))
+          function.entry.parameters[i]: offset,
+    };
     final framed =
+        incoming.isNotEmpty ||
         selection.calls.isNotEmpty ||
         _shared.isNotEmpty ||
         _blockUses.values.any(
@@ -70,7 +77,8 @@ final class FunctionAllocation<R extends Object>(
         );
     if (framed) {
       for (final value in _owners.keys) {
-        if (used.contains(value) || _shared.contains(value)) {
+        if (!incoming.containsKey(value) &&
+            (used.contains(value) || _shared.contains(value))) {
           _slots[value] = _slots.length * 8;
         }
       }
@@ -80,16 +88,31 @@ final class FunctionAllocation<R extends Object>(
             localBytes: (_slots.length + edgeWords) * 8,
             localAlignment: 8,
             savedRegisters: [],
-            outgoingStackBytes: 0,
+            outgoingStackBytes: selection.calls.values.fold(
+              0,
+              (bytes, call) =>
+                  call.stackBytes > bytes ? call.stackBytes : bytes,
+            ),
           )
         : null;
+    _stagingOffset = (frame?.localOffset ?? 0) + _slots.length * 8;
+    if (frame case final frame?) {
+      _slots.updateAll((_, offset) => frame.localOffset + offset);
+      for (final MapEntry(:key, :value) in incoming.entries) {
+        _slots[key] = frame.incomingStackOffset + value;
+      }
+    }
   }
 
   /// Saves incoming arguments whose homes must survive beyond entry.
   void initialize() {
     for (final (i, parameter) in function.entry.parameters.indexed) {
       if (_shared.contains(parameter)) {
-        emitter.storeStack(selection.entry.parameters[i], _slot(parameter));
+        if (selection.entry.parameters[i] case RegisterArgument(
+          :final register,
+        )) {
+          emitter.storeStack(register, _slot(parameter));
+        }
       }
     }
   }
@@ -113,9 +136,13 @@ final class FunctionAllocation<R extends Object>(
     if (block == function.entry) {
       for (final (i, parameter) in block.parameters.indexed) {
         if (_uses.containsKey(parameter)) {
-          final register = selection.entry.parameters[i];
-          _registers[parameter] = register;
-          _free.remove(register);
+          switch (selection.entry.parameters[i]) {
+            case RegisterArgument(:final register):
+              _registers[parameter] = register;
+              _free.remove(register);
+            case StackArgument():
+              _spilled.add(parameter);
+          }
         }
       }
     }
@@ -191,13 +218,12 @@ final class FunctionAllocation<R extends Object>(
   /// Assigns block parameters simultaneously after [flush], using one register.
   void copyArguments(Jump edge) {
     final scratch = emitter.allocatableRegisters.last;
-    final staging = (frame?.localOffset ?? 0) + _slots.length * 8;
     for (final (i, argument) in edge.arguments.indexed) {
       load(argument, scratch);
-      emitter.storeStack(scratch, staging + i * 8);
+      emitter.storeStack(scratch, _stagingOffset + i * 8);
     }
     for (final (i, parameter) in edge.target.parameters.indexed) {
-      emitter.loadStack(scratch, staging + i * 8);
+      emitter.loadStack(scratch, _stagingOffset + i * 8);
       emitter.storeStack(scratch, _slot(parameter));
     }
   }
@@ -207,5 +233,5 @@ final class FunctionAllocation<R extends Object>(
     emitter.storeStack(register, _slot(value));
   }
 
-  int _slot(Value value) => frame!.localOffset + _slots[value]!;
+  int _slot(Value value) => _slots[value]!;
 }

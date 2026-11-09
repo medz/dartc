@@ -18,10 +18,7 @@ final class Arm64Abi(@override final Target target)
   @override
   CallLayout<Register> classify(NativeSignature signature) {
     const parameters = <Register>[.x0, .x1, .x2, .x3, .x4, .x5, .x6, .x7];
-    if (signature.parameterCount > parameters.length) {
-      throw UnsupportedError('Native stack parameters are not implemented.');
-    }
-    return .new(parameters.take(signature.parameterCount), .x0, [
+    return .int64(signature, parameters, .x0, [
       for (var i = 0; i <= 17; i++) Register.values[i],
       if (target.operatingSystem == .linux) .x18,
       .x30,

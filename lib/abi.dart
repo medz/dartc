@@ -3,6 +3,8 @@ library;
 
 export 'src/abi/calling_convention.dart' show CallingConvention;
 export 'src/abi/call_layout.dart' show CallLayout;
+export 'src/abi/argument_location.dart'
+    show ArgumentLocation, RegisterArgument, StackArgument;
 export 'src/abi/frame_layout.dart' show FrameLayout;
 export 'src/abi/arm64.dart' show Arm64Abi;
 export 'src/abi/x64.dart' show X64Abi;
