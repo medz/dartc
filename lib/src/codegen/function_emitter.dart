@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 
+import 'binary_encoding.dart';
+
 /// The signed or equality relation produced by a native scalar comparison.
 enum Comparison() {
   equal,
@@ -15,8 +17,23 @@ enum Comparison() {
 
 /// Emits one function with explicit operand registers.
 abstract interface class FunctionEmitter<R>() {
-  /// The calling convention bound to this function's instruction buffer.
+  /// The calling rules for the explicit output platform.
   CallingConvention<R> get convention;
+
+  /// The registers this generator makes available to its allocator.
+  List<R> get allocatableRegisters;
+
+  /// Copies a value between registers without changing flags.
+  void move(R destination, R source);
+
+  /// Establishes the queried frame before the body.
+  void prologue(FrameLayout<R> frame);
+
+  /// Restores the queried frame and returns the already placed result.
+  void epilogue(FrameLayout<R> frame);
+
+  /// Returns from a frameless function with the result already placed.
+  void ret();
 
   /// Creates a local code destination.
   Label label();
@@ -27,18 +44,14 @@ abstract interface class FunctionEmitter<R>() {
   /// Loads all 64 bits of [value] into [destination].
   void loadImmediate(R destination, int value);
 
-  /// Adds with 64-bit wrapping, allowing any operand registers to coincide.
-  ///
-  /// Only [destination] and condition flags may be overwritten.
-  void add(R destination, R left, R right);
+  /// The selected 64-bit wrapping addition and its operand constraint.
+  BinaryEncoding<R> get add;
 
-  /// Subtracts with the same register and flag constraints as [add].
-  void subtract(R destination, R left, R right);
+  /// The selected 64-bit wrapping subtraction and its operand constraint.
+  BinaryEncoding<R> get subtract;
 
-  /// Produces a 0/1 result, permitting any input/output register aliases.
-  ///
-  /// Only [destination] and condition flags may change.
-  void compare(R destination, R left, R right, Comparison comparison);
+  /// Selects a materialized 0/1 comparison, with no live flags after emission.
+  BinaryEncoding<R> comparison(Comparison comparison);
 
   /// Emits a jump to a local destination.
   void jump(Label target);

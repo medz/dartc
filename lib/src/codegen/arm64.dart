@@ -6,22 +6,56 @@ import 'package:dartc/assembler/arm64.dart';
 import 'package:dartc/target.dart';
 
 import 'function_emitter.dart';
+import 'binary_encoding.dart';
 import 'integer_generator.dart';
 
 /// Generates AArch64 integer functions for the selected operating system.
 final class Arm64CodeGenerator(Target target)
     extends IntegerCodeGenerator<Register> {
-  this : super(target, () => _Arm64Emitter(Assembler())) {
+  this : super(target, () => _Arm64Emitter(Assembler(), Arm64Abi(target))) {
     if (target.architecture != .arm64) {
       throw ArgumentError('Expected an ARM64 target.');
     }
   }
 }
 
-final class _Arm64Emitter(final Assembler assembler)
-    implements FunctionEmitter<Register> {
+final class _Arm64Emitter(
+  final Assembler assembler,
+  @override final Arm64Abi convention,
+) implements FunctionEmitter<Register> {
   @override
-  final CallingConvention<Register> convention = Arm64Abi(assembler);
+  List<Register> get allocatableRegisters => const [
+    .x0,
+    .x1,
+    .x2,
+    .x3,
+    .x4,
+    .x5,
+    .x6,
+    .x7,
+    .x9,
+    .x10,
+    .x11,
+    .x12,
+    .x13,
+    .x14,
+    .x15,
+  ];
+
+  @override
+  void move(Register destination, Register source) =>
+      assembler.move(destination, source);
+
+  @override
+  void prologue(FrameLayout<Register> frame) =>
+      convention.emitPrologue(assembler, frame);
+
+  @override
+  void epilogue(FrameLayout<Register> frame) =>
+      convention.emitEpilogue(assembler, frame);
+
+  @override
+  void ret() => assembler.ret();
 
   @override
   Label label() => assembler.label();
@@ -34,28 +68,24 @@ final class _Arm64Emitter(final Assembler assembler)
       assembler.loadImmediate(destination, value);
 
   @override
-  void add(Register destination, Register left, Register right) =>
-      assembler.add(destination, left, right);
+  BinaryEncoding<Register> get add => .new(assembler.add);
 
   @override
-  void subtract(Register destination, Register left, Register right) =>
-      assembler.subtract(destination, left, right);
+  BinaryEncoding<Register> get subtract => .new(assembler.subtract);
 
   @override
-  void compare(
-    Register destination,
-    Register left,
-    Register right,
-    Comparison comparison,
-  ) {
-    assembler.compare(left, right);
-    assembler.setCondition(destination, switch (comparison) {
+  BinaryEncoding<Register> comparison(Comparison comparison) {
+    final Condition condition = switch (comparison) {
       .equal => .equal,
       .notEqual => .notEqual,
       .lessThan => .lessThan,
       .lessOrEqual => .lessOrEqual,
       .greaterThan => .greaterThan,
       .greaterOrEqual => .greaterOrEqual,
+    };
+    return .new((destination, left, right) {
+      assembler.compare(left, right);
+      assembler.setCondition(destination, condition);
     });
   }
 

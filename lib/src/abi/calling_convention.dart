@@ -1,20 +1,22 @@
-/// Implements the register boundary of native integer calls.
+import 'package:dartc/interop.dart';
+import 'package:dartc/target.dart';
+
+import 'call_layout.dart';
+import 'frame_layout.dart';
+
+/// Classifies native calls and stack frames for one explicit target.
 abstract interface class CallingConvention<R>() {
-  /// The registers receiving required integer parameters, in source order.
-  List<R> get parameters;
+  /// The platform whose calling rules apply.
+  Target get target;
 
-  /// The registers a callee may overwrite, excluding reserved scratch registers.
-  List<R> get callerSaved;
+  /// Assigns parameter and result locations for a supported native signature.
+  CallLayout<R> classify(NativeSignature signature);
 
-  /// The register carrying an integer return value.
-  R get result;
-
-  /// Establishes a frame with [localBytes] bytes aligned to 16 bytes.
-  void enterFrame(int localBytes);
-
-  /// Restores a frame created with the same [localBytes], before returning.
-  void leaveFrame(int localBytes);
-
-  /// Returns [value] through the native integer result register.
-  void returnValue(R value);
+  /// Places local storage, outgoing arguments and saved registers in one frame.
+  FrameLayout<R> frameLayout({
+    required int localBytes,
+    required int localAlignment,
+    required Iterable<R> savedRegisters,
+    required int outgoingStackBytes,
+  });
 }

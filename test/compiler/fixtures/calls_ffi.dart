@@ -12,6 +12,8 @@ final class Calls() {
       );
   late final repeated = _library
       .lookupFunction<Int64 Function(Int64), int Function(int)>('repeated');
+  late final sameOperands = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('sameOperands');
   late final literalCall = _library
       .lookupFunction<Int64 Function(), int Function()>('literalCall');
   late final unusedCall = _library

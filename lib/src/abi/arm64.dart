@@ -1,72 +1,84 @@
 import 'package:dartc/assembler/arm64.dart';
+import 'package:dartc/interop.dart';
+import 'package:dartc/target.dart';
 
 import 'calling_convention.dart';
+import 'call_layout.dart';
+import 'frame_layout.dart';
 
-/// Emits integer calls shared by macOS and Linux AArch64.
-final class Arm64Abi(final Assembler assembler)
+/// Classifies integer calls and emits frames for macOS and Linux AArch64.
+final class Arm64Abi(@override final Target target)
     implements CallingConvention<Register> {
-  @override
-  List<Register> get parameters => const [
-    .x0,
-    .x1,
-    .x2,
-    .x3,
-    .x4,
-    .x5,
-    .x6,
-    .x7,
-  ];
-
-  @override
-  List<Register> get callerSaved => const [
-    .x0,
-    .x1,
-    .x2,
-    .x3,
-    .x4,
-    .x5,
-    .x6,
-    .x7,
-    .x9,
-    .x10,
-    .x11,
-    .x12,
-    .x13,
-    .x14,
-    .x15,
-  ];
-
-  @override
-  Register get result => .x0;
-
-  @override
-  void enterFrame(int localBytes) {
-    _checkFrame(localBytes);
-    assembler
-      ..addImmediate(.sp, .sp, -localBytes - 16)
-      ..store(.x29, .sp, localBytes)
-      ..store(.x30, .sp, localBytes + 8)
-      ..addImmediate(.x29, .sp, localBytes);
-  }
-
-  @override
-  void leaveFrame(int localBytes) {
-    _checkFrame(localBytes);
-    assembler
-      ..load(.x29, .sp, localBytes)
-      ..load(.x30, .sp, localBytes + 8)
-      ..addImmediate(.sp, .sp, localBytes + 16);
-  }
-
-  void _checkFrame(int bytes) {
-    if (bytes < 0 || bytes > 32752 || bytes % 16 != 0) {
-      throw ArgumentError('Expected an aligned frame of at most 32752 bytes.');
+  this {
+    if (target.architecture != .arm64) {
+      throw ArgumentError('Expected an ARM64 target.');
     }
   }
 
   @override
-  void returnValue(Register value) {
-    assembler.move(.x0, value);
-    assembler.ret();
+  CallLayout<Register> classify(NativeSignature signature) {
+    const parameters = <Register>[.x0, .x1, .x2, .x3, .x4, .x5, .x6, .x7];
+    if (signature.parameterCount > parameters.length) {
+      throw UnsupportedError('Native stack parameters are not implemented.');
+    }
+    return .new(parameters.take(signature.parameterCount), .x0, [
+      for (var i = 0; i <= 17; i++) Register.values[i],
+      if (target.operatingSystem == .linux) .x18,
+      .x30,
+    ]);
+  }
+
+  @override
+  FrameLayout<Register> frameLayout({
+    required int localBytes,
+    required int localAlignment,
+    required Iterable<Register> savedRegisters,
+    required int outgoingStackBytes,
+  }) => integerFrame(
+    target,
+    localBytes: localBytes,
+    localAlignment: localAlignment,
+    savedRegisters: savedRegisters,
+    outgoingStackBytes: outgoingStackBytes,
+    frameRegisters: const [.x29, .x30],
+    calleeSaved: const {
+      .x19,
+      .x20,
+      .x21,
+      .x22,
+      .x23,
+      .x24,
+      .x25,
+      .x26,
+      .x27,
+      .x28,
+    },
+  );
+
+  /// Establishes [frame] without changing parameter registers or flags.
+  void emitPrologue(Assembler assembler, FrameLayout<Register> frame) {
+    _checkFrame(frame);
+    assembler.addImmediate(.sp, .sp, -frame.stackBytes);
+    for (final MapEntry(:key, :value) in frame.savedRegisters.entries) {
+      assembler.store(key, .sp, value);
+    }
+    assembler.addImmediate(.x29, .sp, frame.savedRegisters[Register.x29]!);
+  }
+
+  /// Restores [frame] and returns with the result already in X0.
+  void emitEpilogue(Assembler assembler, FrameLayout<Register> frame) {
+    _checkFrame(frame);
+    for (final MapEntry(:key, :value) in frame.savedRegisters.entries) {
+      assembler.load(key, .sp, value);
+    }
+    assembler
+      ..addImmediate(.sp, .sp, frame.stackBytes)
+      ..ret();
+  }
+
+  void _checkFrame(FrameLayout<Register> frame) {
+    if (frame.target != target) {
+      throw ArgumentError('Expected a frame produced for $target.');
+    }
   }
 }

@@ -17,6 +17,12 @@ int _difference(int a, int b) => b - a;
 @Export<Int64 Function(Int64)>()
 int repeated(int value) => helper.add(value, value);
 
+@Export<Int64 Function(Int64)>()
+int sameOperands(int value) {
+  final zero = value - value;
+  return zero + value;
+}
+
 @Export<Int64 Function()>()
 int literalCall() => helper.subtract(42, 1);
 

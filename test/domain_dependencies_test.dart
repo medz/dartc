@@ -14,7 +14,7 @@ void main() {
       'assembler': {'target'},
       'analyzer': {'sdk'},
       'lowering': {'analyzer', 'ir', 'interop'},
-      'abi': {'assembler', 'target'},
+      'abi': {'assembler', 'target', 'interop'},
       'artifact': {'target', 'assembler'},
       'formats': {'artifact', 'target'},
       'interop': {},

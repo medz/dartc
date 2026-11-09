@@ -8,6 +8,7 @@ import 'package:dartc/linker.dart';
 import 'package:dartc/target.dart';
 
 import '../test/codegen/fixtures/aliases.dart';
+import '../test/abi/fixtures/frames.dart';
 import '../test/codegen/fixtures/control_flow.dart';
 import '../test/linker/fixtures/functions.dart';
 import '../test/linker/fixtures/calls.dart';
@@ -19,7 +20,7 @@ Future<void> main() async {
     for (final arch in Architecture.values) {
       final target = Target(os, arch);
       final assets = NativeAssets(target);
-      for (final domain in ['compiler', 'codegen', 'linker']) {
+      for (final domain in ['abi', 'compiler', 'codegen', 'linker']) {
         await Directory.fromUri(assets.directory.uri.resolve('$domain/'))
             .create(recursive: true);
       }
@@ -68,6 +69,7 @@ Future<void> main() async {
             ),
           );
       await shared([aliases(target)], assets.library('codegen/aliases'));
+      await shared([frames(target)], assets.library('abi/frames'));
       await shared([
         controlFlow(target),
       ], assets.library('codegen/control_flow'));

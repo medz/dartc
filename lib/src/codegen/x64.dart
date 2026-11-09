@@ -6,22 +6,50 @@ import 'package:dartc/target.dart';
 import 'package:dartc/assembler/x64.dart';
 
 import 'function_emitter.dart';
+import 'binary_encoding.dart';
 import 'integer_generator.dart';
 
 /// Generates x86-64 integer functions for the selected operating system.
 final class X64CodeGenerator(Target target)
     extends IntegerCodeGenerator<Register> {
-  this : super(target, () => _X64Emitter(Assembler())) {
+  this : super(target, () => _X64Emitter(Assembler(), X64Abi(target))) {
     if (target.architecture != .x64) {
       throw ArgumentError('Expected an x64 target.');
     }
   }
 }
 
-final class _X64Emitter(final Assembler assembler)
-    implements FunctionEmitter<Register> {
+final class _X64Emitter(
+  final Assembler assembler,
+  @override final X64Abi convention,
+) implements FunctionEmitter<Register> {
   @override
-  final CallingConvention<Register> convention = X64Abi(assembler);
+  List<Register> get allocatableRegisters => const [
+    .rax,
+    .rcx,
+    .rdx,
+    .rsi,
+    .rdi,
+    .r8,
+    .r9,
+    .r10,
+    .r11,
+  ];
+
+  @override
+  void move(Register destination, Register source) =>
+      assembler.move(destination, source);
+
+  @override
+  void prologue(FrameLayout<Register> frame) =>
+      convention.emitPrologue(assembler, frame);
+
+  @override
+  void epilogue(FrameLayout<Register> frame) =>
+      convention.emitEpilogue(assembler, frame);
+
+  @override
+  void ret() => assembler.ret();
 
   @override
   Label label() => assembler.label();
@@ -34,41 +62,30 @@ final class _X64Emitter(final Assembler assembler)
       assembler.loadImmediate(destination, value);
 
   @override
-  void add(Register destination, Register left, Register right) {
-    if (destination == right) {
-      assembler.add(destination, left);
-    } else {
-      assembler.move(destination, left);
-      assembler.add(destination, right);
-    }
-  }
+  BinaryEncoding<Register> get add => .new(
+    (destination, _, right) => assembler.add(destination, right),
+    reuseLeft: true,
+  );
 
   @override
-  void subtract(Register destination, Register left, Register right) {
-    if (destination == right && destination != left) {
-      assembler.negate(destination);
-      assembler.add(destination, left);
-    } else {
-      assembler.move(destination, left);
-      assembler.subtract(destination, right);
-    }
-  }
+  BinaryEncoding<Register> get subtract => .new(
+    (destination, _, right) => assembler.subtract(destination, right),
+    reuseLeft: true,
+  );
 
   @override
-  void compare(
-    Register destination,
-    Register left,
-    Register right,
-    Comparison comparison,
-  ) {
-    assembler.compare(left, right);
-    assembler.setCondition(destination, switch (comparison) {
+  BinaryEncoding<Register> comparison(Comparison comparison) {
+    final Condition condition = switch (comparison) {
       .equal => .equal,
       .notEqual => .notEqual,
       .lessThan => .lessThan,
       .lessOrEqual => .lessOrEqual,
       .greaterThan => .greaterThan,
       .greaterOrEqual => .greaterOrEqual,
+    };
+    return .new((destination, left, right) {
+      assembler.compare(left, right);
+      assembler.setCondition(destination, condition);
     });
   }
 

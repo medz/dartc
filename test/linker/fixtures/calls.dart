@@ -13,22 +13,32 @@ ObjectModule _module(Target target, bool first) {
   final List<int> wrapper, local;
   final Fixup fixup;
   if (target.architecture == .arm64) {
-    final assembler = arm.Assembler(), abi = Arm64Abi(assembler);
-    abi.enterFrame(0);
+    final assembler = arm.Assembler(), abi = Arm64Abi(target);
+    final frame = abi.frameLayout(
+      localBytes: 0,
+      localAlignment: 8,
+      savedRegisters: [],
+      outgoingStackBytes: 0,
+    );
+    abi.emitPrologue(assembler, frame);
     fixup = assembler.call();
-    abi.leaveFrame(0);
-    abi.returnValue(.x0);
+    abi.emitEpilogue(assembler, frame);
     wrapper = assembler.finish();
     final localAssembler = arm.Assembler()
       ..loadImmediate(.x0, first ? 99 : 42)
       ..ret();
     local = localAssembler.finish();
   } else {
-    final assembler = x64.Assembler(), abi = X64Abi(assembler);
-    abi.enterFrame(0);
+    final assembler = x64.Assembler(), abi = X64Abi(target);
+    final frame = abi.frameLayout(
+      localBytes: 0,
+      localAlignment: 8,
+      savedRegisters: [],
+      outgoingStackBytes: 0,
+    );
+    abi.emitPrologue(assembler, frame);
     fixup = assembler.call();
-    abi.leaveFrame(0);
-    abi.returnValue(.rax);
+    abi.emitEpilogue(assembler, frame);
     wrapper = assembler.finish();
     final localAssembler = x64.Assembler()
       ..loadImmediate(.rax, first ? 99 : 42)

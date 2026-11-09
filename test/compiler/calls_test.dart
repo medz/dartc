@@ -14,6 +14,7 @@ void main() {
       expect(native.literalCall(), sdk.literalCall());
       for (final a in values) {
         expect(native.repeated(a), sdk.repeated(a));
+        expect(native.sameOperands(a), sdk.sameOperands(a));
         expect(native.unusedCall(a), sdk.unusedCall(a));
         expect(native.pressure(a), sdk.pressure(a));
         for (final b in values) {

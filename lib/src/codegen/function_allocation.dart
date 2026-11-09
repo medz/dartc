@@ -1,6 +1,8 @@
+import 'package:dartc/abi.dart';
 import 'package:dartc/ir.dart';
 
 import 'function_emitter.dart';
+import 'function_selection.dart';
 
 /// Keeps block-local registers and distinct frame homes for values crossing blocks.
 ///
@@ -9,6 +11,7 @@ import 'function_emitter.dart';
 final class FunctionAllocation<R extends Object>(
   final IrFunction function,
   final FunctionEmitter<R> emitter,
+  final FunctionSelection<R> selection,
 ) {
   final _owners = <Value, Block>{};
   final _blockUses = <Block, Map<Value, int>>{};
@@ -19,11 +22,8 @@ final class FunctionAllocation<R extends Object>(
   final _free = <R>[];
   late Map<Value, int> _uses;
 
-  /// Whether calls, edges or register pressure require a frame.
-  late final bool framed;
-
-  /// The aligned space for stable homes, spills and simultaneous edge arguments.
-  late final int frameBytes;
+  /// The queried frame, absent when the function needs no stack storage or calls.
+  late final FrameLayout<R>? frame;
 
   this {
     for (final block in function.blocks) {
@@ -32,7 +32,7 @@ final class FunctionAllocation<R extends Object>(
       }
     }
     final used = <Value>{};
-    var calls = false, edgeWords = 0;
+    var edgeWords = 0;
     for (final block in function.blocks) {
       final uses = _blockUses[block] = {};
       void use(Value value) {
@@ -42,7 +42,6 @@ final class FunctionAllocation<R extends Object>(
       }
 
       for (final instruction in block.instructions) {
-        calls |= instruction is DirectCall;
         instruction.inputs.forEach(use);
       }
       switch (block.end) {
@@ -63,11 +62,11 @@ final class FunctionAllocation<R extends Object>(
         }
       }
     }
-    framed =
-        calls ||
+    final framed =
+        selection.calls.isNotEmpty ||
         _shared.isNotEmpty ||
         _blockUses.values.any(
-          (uses) => uses.length >= emitter.convention.callerSaved.length,
+          (uses) => uses.length >= emitter.allocatableRegisters.length,
         );
     if (framed) {
       for (final value in _owners.keys) {
@@ -76,17 +75,21 @@ final class FunctionAllocation<R extends Object>(
         }
       }
     }
-    frameBytes = ((_slots.length + edgeWords) * 8 + 15) & ~15;
+    frame = framed
+        ? emitter.convention.frameLayout(
+            localBytes: (_slots.length + edgeWords) * 8,
+            localAlignment: 8,
+            savedRegisters: [],
+            outgoingStackBytes: 0,
+          )
+        : null;
   }
 
   /// Saves incoming arguments whose homes must survive beyond entry.
   void initialize() {
     for (final (i, parameter) in function.entry.parameters.indexed) {
       if (_shared.contains(parameter)) {
-        emitter.storeStack(
-          emitter.convention.parameters[i],
-          _slots[parameter]!,
-        );
+        emitter.storeStack(selection.entry.parameters[i], _slot(parameter));
       }
     }
   }
@@ -97,7 +100,7 @@ final class FunctionAllocation<R extends Object>(
     _registers.clear();
     _free
       ..clear()
-      ..addAll(emitter.convention.callerSaved);
+      ..addAll(emitter.allocatableRegisters);
     _spilled
       ..clear()
       ..addAll(
@@ -110,7 +113,7 @@ final class FunctionAllocation<R extends Object>(
     if (block == function.entry) {
       for (final (i, parameter) in block.parameters.indexed) {
         if (_uses.containsKey(parameter)) {
-          final register = emitter.convention.parameters[i];
+          final register = selection.entry.parameters[i];
           _registers[parameter] = register;
           _free.remove(register);
         }
@@ -133,15 +136,17 @@ final class FunctionAllocation<R extends Object>(
     } else if (value case ScalarConstant(value: final bool flag)) {
       emitter.loadImmediate(destination, flag ? 1 : 0);
     } else if (_spilled.contains(value)) {
-      emitter.loadStack(destination, _slots[value]!);
+      emitter.loadStack(destination, _slot(value));
     } else {
       throw StateError('Missing native value: $value');
     }
   }
 
   /// Allocates one register, spilling a different resident value if necessary.
-  R allocate({R? except}) {
-    if (_free.isNotEmpty) return _free.removeLast();
+  R allocate({R? except, R? preferred}) {
+    if (preferred != except && _free.remove(preferred)) return preferred!;
+    final index = _free.lastIndexWhere((r) => r != except);
+    if (index >= 0) return _free.removeAt(index);
     final entry = _registers.entries.firstWhere((e) => e.value != except);
     _spill(entry.key, entry.value);
     _registers.remove(entry.key);
@@ -151,7 +156,7 @@ final class FunctionAllocation<R extends Object>(
   /// Publishes a result and stores its home if other blocks can read it.
   void define(Value value, R register) {
     if (_shared.contains(value)) {
-      emitter.storeStack(register, _slots[value]!);
+      emitter.storeStack(register, _slot(value));
       _spilled.add(value);
     }
     if (_uses.containsKey(value)) {
@@ -173,33 +178,34 @@ final class FunctionAllocation<R extends Object>(
     }
   }
 
-  /// Saves resident values before a call or before assigning edge arguments.
-  void flush() {
-    for (final entry in _registers.entries) {
-      _spill(entry.key, entry.value);
-    }
-    _registers.clear();
-    _free
-      ..clear()
-      ..addAll(emitter.convention.callerSaved);
+  /// Saves resident values in the selected clobber set, or all values for an edge.
+  void flush({Set<R>? clobbered}) {
+    _registers.removeWhere((value, register) {
+      if (clobbered != null && !clobbered.contains(register)) return false;
+      _spill(value, register);
+      _free.add(register);
+      return true;
+    });
   }
 
   /// Assigns block parameters simultaneously after [flush], using one register.
   void copyArguments(Jump edge) {
-    final scratch = emitter.convention.callerSaved.last;
-    final staging = _slots.length * 8;
+    final scratch = emitter.allocatableRegisters.last;
+    final staging = (frame?.localOffset ?? 0) + _slots.length * 8;
     for (final (i, argument) in edge.arguments.indexed) {
       load(argument, scratch);
       emitter.storeStack(scratch, staging + i * 8);
     }
     for (final (i, parameter) in edge.target.parameters.indexed) {
       emitter.loadStack(scratch, staging + i * 8);
-      emitter.storeStack(scratch, _slots[parameter]!);
+      emitter.storeStack(scratch, _slot(parameter));
     }
   }
 
   void _spill(Value value, R register) {
     if (value is ScalarConstant || !_spilled.add(value)) return;
-    emitter.storeStack(register, _slots[value]!);
+    emitter.storeStack(register, _slot(value));
   }
+
+  int _slot(Value value) => frame!.localOffset + _slots[value]!;
 }
