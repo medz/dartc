@@ -50,6 +50,10 @@ final class FunctionSelection<R>(
             final encoding = switch (operator) {
               .add => emitter.add,
               .subtract => emitter.subtract,
+              .multiply => emitter.multiply,
+              .bitAnd => emitter.bitAnd,
+              .bitOr => emitter.bitOr,
+              .bitXor => emitter.bitXor,
               .lessThan => emitter.comparison(.lessThan),
               .lessOrEqual => emitter.comparison(.lessOrEqual),
               .greaterThan => emitter.comparison(.greaterThan),

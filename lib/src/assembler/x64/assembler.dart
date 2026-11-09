@@ -63,6 +63,26 @@ final class Assembler() {
   void subtract(Register destination, Register source) =>
       _binary(0x29, destination, source);
 
+  /// Multiplies [destination] by [source], wrapping at 64 bits and changing flags.
+  void multiply(Register destination, Register source) => _bytes.add([
+    0x48 | (destination.index >> 3) << 2 | source.index >> 3,
+    0x0f,
+    0xaf,
+    0xc0 | (destination.index & 7) << 3 | source.index & 7,
+  ]);
+
+  /// Computes a 64-bit bitwise conjunction in [destination], updating flags.
+  void bitAnd(Register destination, Register source) =>
+      _binary(0x21, destination, source);
+
+  /// Computes a 64-bit bitwise disjunction in [destination], updating flags.
+  void bitOr(Register destination, Register source) =>
+      _binary(0x09, destination, source);
+
+  /// Computes a 64-bit bitwise exclusive or in [destination], updating flags.
+  void bitXor(Register destination, Register source) =>
+      _binary(0x31, destination, source);
+
   /// Negates [value], wrapping at 64 bits and updating flags.
   void negate(Register value) =>
       _bytes.add([0x48 | value.index >> 3, 0xf7, 0xd8 | value.index & 7]);

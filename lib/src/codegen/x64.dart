@@ -62,16 +62,28 @@ final class _X64Emitter(
       assembler.loadImmediate(destination, value);
 
   @override
-  BinaryEncoding<Register> get add => .new(
-    (destination, _, right) => assembler.add(destination, right),
-    reuseLeft: true,
-  );
+  BinaryEncoding<Register> get add => _binary(assembler.add);
 
   @override
-  BinaryEncoding<Register> get subtract => .new(
-    (destination, _, right) => assembler.subtract(destination, right),
-    reuseLeft: true,
-  );
+  BinaryEncoding<Register> get subtract => _binary(assembler.subtract);
+
+  @override
+  BinaryEncoding<Register> get multiply => _binary(assembler.multiply);
+
+  @override
+  BinaryEncoding<Register> get bitAnd => _binary(assembler.bitAnd);
+
+  @override
+  BinaryEncoding<Register> get bitOr => _binary(assembler.bitOr);
+
+  @override
+  BinaryEncoding<Register> get bitXor => _binary(assembler.bitXor);
+
+  BinaryEncoding<Register> _binary(void Function(Register, Register) emit) =>
+      .new(
+        (destination, _, right) => emit(destination, right),
+        reuseLeft: true,
+      );
 
   @override
   BinaryEncoding<Register> comparison(Comparison comparison) {

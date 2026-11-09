@@ -50,6 +50,18 @@ abstract interface class FunctionEmitter<R>() {
   /// The selected 64-bit wrapping subtraction and its operand constraint.
   BinaryEncoding<R> get subtract;
 
+  /// The selected 64-bit wrapping multiplication and its operand constraint.
+  BinaryEncoding<R> get multiply;
+
+  /// The selected 64-bit bitwise conjunction and its operand constraint.
+  BinaryEncoding<R> get bitAnd;
+
+  /// The selected 64-bit bitwise disjunction and its operand constraint.
+  BinaryEncoding<R> get bitOr;
+
+  /// The selected 64-bit bitwise exclusive or and its operand constraint.
+  BinaryEncoding<R> get bitXor;
+
   /// Selects a materialized 0/1 comparison, with no live flags after emission.
   BinaryEncoding<R> comparison(Comparison comparison);
 

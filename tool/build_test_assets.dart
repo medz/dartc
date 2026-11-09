@@ -31,6 +31,7 @@ Future<void> main() async {
         'calls',
         'control_flow',
         'stack_calls',
+        'integer_operations',
       ]) {
         final library = assets.library('compiler/$fixture');
         for (final (file, output) in <(File, Output)>[

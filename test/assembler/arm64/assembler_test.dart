@@ -33,9 +33,36 @@ void main() {
       expect(assembler.finish, throwsStateError);
     },
   );
+  test('encodes wrapping multiplication and bitwise register operations', () {
+    final assembler = Assembler()
+      ..multiply(.x0, .x1, .x2)
+      ..bitAnd(.x30, .x29, .x28)
+      ..bitOr(.x9, .x9, .x2)
+      ..bitXor(.x3, .x4, .x3)
+      ..multiply(.x7, .x7, .x7);
+    final bytes = ByteData.sublistView(assembler.finish());
+    expect(
+      [
+        for (var offset = 0; offset < bytes.lengthInBytes; offset += 4)
+          bytes.getUint32(offset, .little),
+      ],
+      [0x9b027c20, 0x8a1c03be, 0xaa020129, 0xca030083, 0x9b077ce7],
+    );
+  });
   test('validates stack operands before writing bytes', () {
     final assembler = Assembler();
-    expect(() => assembler.add(.sp, .x0, .x1), throwsArgumentError);
+    for (final emit in [
+      assembler.add,
+      assembler.subtract,
+      assembler.multiply,
+      assembler.bitAnd,
+      assembler.bitOr,
+      assembler.bitXor,
+    ]) {
+      expect(() => emit(.sp, .x0, .x1), throwsArgumentError);
+      expect(() => emit(.x0, .sp, .x1), throwsArgumentError);
+      expect(() => emit(.x0, .x1, .sp), throwsArgumentError);
+    }
     expect(() => assembler.loadImmediate(.sp, 1), throwsArgumentError);
     expect(() => assembler.load(.x0, .sp, 32768), throwsRangeError);
     expect(() => assembler.store(.x0, .sp, 1), throwsArgumentError);

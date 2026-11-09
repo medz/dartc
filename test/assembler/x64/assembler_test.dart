@@ -39,6 +39,43 @@ void main() {
     ]);
     expect(assembler.finish, throwsStateError);
   });
+  test('encodes multiplication with destination in the ModRM reg field', () {
+    final assembler = Assembler()
+      ..multiply(.r9, .rdi)
+      ..multiply(.rax, .r10)
+      ..multiply(.r11, .r9)
+      ..multiply(.rax, .rax)
+      ..bitAnd(.r9, .rdi)
+      ..bitOr(.rax, .r10)
+      ..bitXor(.r11, .r9);
+    expect(assembler.finish(), [
+      0x4c,
+      0x0f,
+      0xaf,
+      0xcf,
+      0x49,
+      0x0f,
+      0xaf,
+      0xc2,
+      0x4d,
+      0x0f,
+      0xaf,
+      0xd9,
+      0x48,
+      0x0f,
+      0xaf,
+      0xc0,
+      0x49,
+      0x21,
+      0xf9,
+      0x4c,
+      0x09,
+      0xd0,
+      0x4d,
+      0x31,
+      0xcb,
+    ]);
+  });
   test('validates stack offsets and preserves extended register fields', () {
     final assembler = Assembler();
     expect(() => assembler.loadStack(.rax, 0x80000000), throwsRangeError);

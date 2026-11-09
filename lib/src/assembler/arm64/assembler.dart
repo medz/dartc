@@ -79,20 +79,28 @@ final class Assembler() {
   }
 
   /// Adds two registers, wrapping at 64 bits without changing condition flags.
-  void add(Register destination, Register left, Register right) {
-    _general(destination);
-    _general(left);
-    _general(right);
-    _word(0x8b000000 | right.index << 16 | left.index << 5 | destination.index);
-  }
+  void add(Register destination, Register left, Register right) =>
+      _binary(0x8b000000, destination, left, right);
 
   /// Subtracts [right] from [left], wrapping at 64 bits.
-  void subtract(Register destination, Register left, Register right) {
-    _general(destination);
-    _general(left);
-    _general(right);
-    _word(0xcb000000 | right.index << 16 | left.index << 5 | destination.index);
-  }
+  void subtract(Register destination, Register left, Register right) =>
+      _binary(0xcb000000, destination, left, right);
+
+  /// Multiplies two registers, wrapping at 64 bits without changing flags.
+  void multiply(Register destination, Register left, Register right) =>
+      _binary(0x9b007c00, destination, left, right);
+
+  /// Computes a 64-bit bitwise conjunction without changing flags.
+  void bitAnd(Register destination, Register left, Register right) =>
+      _binary(0x8a000000, destination, left, right);
+
+  /// Computes a 64-bit bitwise disjunction without changing flags.
+  void bitOr(Register destination, Register left, Register right) =>
+      _binary(0xaa000000, destination, left, right);
+
+  /// Computes a 64-bit bitwise exclusive or without changing flags.
+  void bitXor(Register destination, Register left, Register right) =>
+      _binary(0xca000000, destination, left, right);
 
   /// Adds a signed 24-bit magnitude, including to or from SP, preserving flags.
   void addImmediate(Register destination, Register source, int value) {
@@ -166,6 +174,18 @@ final class Assembler() {
     RangeError.checkValueInInterval(offset, 0, 32760, 'offset');
     if (offset % 8 != 0) throw ArgumentError('Expected an eight-byte offset.');
     _word(opcode | (offset ~/ 8) << 10 | base.index << 5 | value.index);
+  }
+
+  void _binary(
+    int opcode,
+    Register destination,
+    Register left,
+    Register right,
+  ) {
+    _general(destination);
+    _general(left);
+    _general(right);
+    _word(opcode | right.index << 16 | left.index << 5 | destination.index);
   }
 
   void _general(Register register) {

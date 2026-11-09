@@ -74,6 +74,18 @@ final class _Arm64Emitter(
   BinaryEncoding<Register> get subtract => .new(assembler.subtract);
 
   @override
+  BinaryEncoding<Register> get multiply => .new(assembler.multiply);
+
+  @override
+  BinaryEncoding<Register> get bitAnd => .new(assembler.bitAnd);
+
+  @override
+  BinaryEncoding<Register> get bitOr => .new(assembler.bitOr);
+
+  @override
+  BinaryEncoding<Register> get bitXor => .new(assembler.bitXor);
+
+  @override
   BinaryEncoding<Register> comparison(Comparison comparison) {
     final Condition condition = switch (comparison) {
       .equal => .equal,

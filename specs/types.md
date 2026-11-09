@@ -21,7 +21,7 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 | 基于界限的推断 | 消费 analyzer 对已支持类构造和函数调用的推断结果；推断结果保留 FutureOr 联合类型；未表示的类型交集仍明确拒绝。 |
 | Record 类型、extension type | 支持 Record、具名和位置字段的结构类型、嵌套及可空 record。相同形状按字段类型协变，命名顺序不影响形状。普通/泛型 extension type 按 analyzer 表示擦除处理，保留可空表示及嵌套类型；成员仍按源声明选择。见[范围与边界](extension-types.md)。 |
 | `Future`、`FutureOr` 与异步类型规则 | `Future<T>` 使用规范名义身份；`FutureOr<T>` 单独表示联合类型，支持双臂子类型、规范化、泛型替换、函数类型 alpha 相等/hash、Type 值及同步 `is`/`as`/`!`。`FutureOr<int?>` 的 `!` 保留原静态类型和实际 null 检查；不把内部 Future<int?> 收窄。共同 Future 视图保留联合类型身份，无法求得的视图明确拒绝。async/await 的 IR 与 SDK 微任务参考执行已支持；原生 Future 输入的类型桥仍明确拒绝。公开返回类型与异步完成类型分开，例如 `Object f() async` 和 `FutureOr<Object> f() async` 分别产生 `Future<Object?>` 与 `Future<Object>`，不从规范化后的公开 IR 类型反推完成类型。见[类型样本](../test/frontend/lowering/fixtures/future_types.dart)。 |
-| FFI 标量、指针与原生导出 | 待实现。 |
+| FFI 标量、指针与原生导出 | `Int64` 导出签名已接通[原生库](libraries.md#原生库)；其他 FFI 标量、指针和聚合类型的原生调用仍待实现。 |
 
 [IR 行为对照](../test/frontend/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/types.md)。
 
