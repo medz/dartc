@@ -6,7 +6,7 @@ import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
 
 import 'analyzer_metadata.dart';
-import 'constant_safety.dart';
+import 'constant_evaluation.dart';
 import 'ffi.dart';
 
 /// An extension's static IR entry, distinct from its source callable signature.
@@ -30,7 +30,7 @@ final class ExtensionApplication(
 
 /// Maps analyzer declarations and formal parameters to their IR identities.
 final class Bindings({final bool enableAssertions = false}) {
-  final constantSafety = ConstantSafety();
+  final constants = ConstantEvaluation();
   final _targets = <ExecutableElement, FunctionTarget>{};
   final _typeEnvironments =
       <FunctionTarget, Map<TypeParameterType, ValueType>>{};
@@ -1053,8 +1053,7 @@ final class Bindings({final bool enableAssertions = false}) {
     ResolvedUnitResult unit,
     ast.AstNode site,
   ) => _constants.putIfAbsent(variable, () {
-    constantSafety.check(unit, site, variable: variable);
-    final value = variable.computeConstantValue();
+    final value = constants.variable(variable, unit, site);
     if (value == null &&
         variable is FormalParameterElement &&
         variable.isOptional &&
@@ -1077,14 +1076,13 @@ final class Bindings({final bool enableAssertions = false}) {
       tryConstantExpression(unit, expression) ??
       unsupported(unit, expression, 'constant expression');
 
-  /// Returns a checked constant when the analyzer can evaluate [expression].
+  /// Returns a checked constant when [expression] can be evaluated.
   Constant? tryConstantExpression(
     ResolvedUnitResult unit,
     ast.Expression expression,
   ) {
-    final value = expression.computeConstantValue()?.value;
+    final value = constants.expression(unit, expression);
     if (value == null) return null;
-    constantSafety.check(unit, expression, syntax: expression);
     return _constantValue(value, unit.libraryElement, unit, expression);
   }
 

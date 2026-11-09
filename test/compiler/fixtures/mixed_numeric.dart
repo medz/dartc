@@ -46,6 +46,32 @@ int reverseComparisons(double d, int i) =>
 @Export<Int64 Function()>()
 int constantComparison() => 9007199254740993 == 9007199254740992.0 ? 1 : 0;
 
+const _integer = 9007199254740993;
+const _floating = 9007199254740992.0;
+const _equal = _integer == _floating;
+
+@Export<Int64 Function()>(symbol: _equal ? 'incorrect' : 'constantValues')
+int constantValues() {
+  const local = _integer > _floating;
+  return (_equal ? 1 : 0) |
+      (local ? 2 : 0) |
+      _constantDefault() |
+      (_constantDefault(false) == 0 ? 8 : 0);
+}
+
+int _constantDefault([bool value = _integer != _floating]) => value ? 4 : 0;
+
+@Export<Int64 Function()>()
+int namedConstants() =>
+    _constantNamed() * 100 +
+    _constantNamed(first: 7) * 10 +
+    _constantNamed(condition: false, first: 9);
+
+int _constantNamed({
+  int first = _integer > _floating ? 3 : 4,
+  bool condition = _integer != _floating,
+}) => condition ? first : 0;
+
 @Export<Double Function(Int64, Double)>()
 double pressure(int integer, double d) {
   final a0 = d + 1.0, a1 = d + 2.0, a2 = d + 3.0, a3 = d + 4.0;

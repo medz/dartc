@@ -49,6 +49,10 @@ final class NumericLibrary() {
       );
   late final constantComparison = _library
       .lookupFunction<Int64 Function(), int Function()>('constantComparison');
+  late final constantValues = _library
+      .lookupFunction<Int64 Function(), int Function()>('constantValues');
+  late final namedConstants = _library
+      .lookupFunction<Int64 Function(), int Function()>('namedConstants');
   late final pressure = _library
       .lookupFunction<
         Double Function(Int64, Double),

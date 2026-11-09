@@ -37,8 +37,6 @@ final class FunctionSelection<R>(
         function.target.kind.hasReceiver ||
         function.target.kind == .closure ||
         function.target.typeParameters.isNotEmpty ||
-        function.target.signature.optionalSlots.isNotEmpty ||
-        function.target.signature.namedParameters.isNotEmpty ||
         !(function.target.returnType == .voidType ||
             _scalar(function.target.returnType)) ||
         function.target.parameterTypes.any((type) => !_scalar(type))) {

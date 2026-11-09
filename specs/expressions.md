@@ -47,4 +47,6 @@ NoSuchMethodError.withInvocation 的普通工厂调用与提取复用既有调�
 
 SDK 3.13.7 的 VM JIT/AOT 在这些边界丢失整数精度。官方 [SDK #64728](https://github.com/dart-lang/sdk/issues/64728) 确认把最大整数与其舍入 double 判为相等属于实现错误。IR 数值操作及已接通的原生比较按原始数值执行；[独立数值预期](../test/support/numeric_order.dart)将有限 double 展开为精确整数比例，[原生验证](../test/compiler/mixed_numeric_test.dart)覆盖边界、相邻浮点值、随机位模式、两种操作数顺序和副作用。
 
-analyzer 14.7 的常量求值也存在相同的精度问题。常量依赖包含会改变比较结果的混合数值折叠，或其操作数不能证明安全时，当前明确拒绝，避免消费错误布尔值、分支或嵌套常量；这些合法常量表达式的正确重算仍是实现缺口。[常量依赖验证](../test/frontend/lowering/constant_safety_test.dart)检查六种比较、传递依赖、条件选择、嵌套构造和安全常量；[导出验证](../test/frontend/lowering/native_exports_test.dart)检查注解名称及常量别名的类型选择，避免生成错误的导出名称或遗漏导出。
+analyzer 14.7 的常量求值也存在相同的精度问题。当前对常量声明、局部常量、普通函数默认值、条件选择、集合及 record 内容、传入构造器的实参和导出注解中的六种混合比较重新求值；常量引用与别名使用同一规则。[常量验证](../test/frontend/lowering/constant_safety_test.dart)检查精确结果、数值边界、嵌套内容及进入 IR 的值；[导出验证](../test/frontend/lowering/native_exports_test.dart)检查注解名称及常量别名的类型选择。
+
+构造器内部的字段初始化、断言、重定向和默认值仍使用 analyzer 的求值路径；其中影响结果或不能证明安全的混合比较会被明确拒绝。受错误常量折叠影响的静态诊断尚未校正；修正使用处的值不代表完成这些静态义务。两者仍是实现缺口。

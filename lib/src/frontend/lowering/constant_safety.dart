@@ -12,20 +12,13 @@ import 'analyzer_metadata.dart';
 /// comparison may already have folded to the wrong boolean or selected branch.
 /// This deliberately visits both branches, without evaluating Dart expressions.
 final class ConstantSafety() {
-  final _safe = <Element>{};
-  final _safeSyntax = <AstNode>{};
-
   void check(
     ResolvedUnitResult unit,
     AstNode site, {
     AstNode? syntax,
     VariableElement? variable,
   }) {
-    if ((variable == null || _safe.contains(variable.baseElement)) &&
-        (syntax == null || _safeSyntax.contains(syntax))) {
-      return;
-    }
-    final scan = _Scan(_safe);
+    final scan = _Scan();
     try {
       if (variable != null) scan.variable(variable);
       syntax?.accept(scan);
@@ -36,20 +29,16 @@ final class ConstantSafety() {
         'IR lowering for constant safety: ${error.reason}',
       );
     }
-    // Commit only after the entire reachable graph succeeds. A back edge must
-    // never make a node safe while an ancestor is still being inspected.
-    _safe.addAll(scan.visited);
-    if (syntax != null) _safeSyntax.add(syntax);
   }
 }
 
 final class _UnsafeConstant(final String reason) implements Exception;
 
-final class _Scan(final Set<Element> safe) extends RecursiveAstVisitor<void> {
-  final visited = <Element>{};
+final class _Scan() extends RecursiveAstVisitor<void> {
+  final visited = <(Element, bool)>{};
+  bool _originalEvaluation = false;
 
-  bool enter(Element element) =>
-      !safe.contains(element) && visited.add(element);
+  bool enter(Element element) => visited.add((element, _originalEvaluation));
 
   void variable(VariableElement element) {
     element = element.baseElement as VariableElement;
@@ -77,6 +66,16 @@ final class _Scan(final Set<Element> safe) extends RecursiveAstVisitor<void> {
   }
 
   void constructor(ConstructorElement element) {
+    final original = _originalEvaluation;
+    _originalEvaluation = true;
+    try {
+      _constructor(element);
+    } finally {
+      _originalEvaluation = original;
+    }
+  }
+
+  void _constructor(ConstructorElement element) {
     element = element.baseElement;
     if (!enter(element) || element.library.isInSdk) return;
     if (!element.isConst || element.isExternal) {
@@ -211,6 +210,7 @@ final class _Scan(final Set<Element> safe) extends RecursiveAstVisitor<void> {
   @override
   void visitBinaryExpression(BinaryExpression node) {
     super.visitBinaryExpression(node);
+    if (!_originalEvaluation) return;
     if (!const {
       '==',
       '!=',
@@ -241,7 +241,7 @@ final class _Scan(final Set<Element> safe) extends RecursiveAstVisitor<void> {
       };
       if (observed == expected) return;
     }
-    // shortcut: reject unsafe analyzer folds until exact constant evaluation is available.
+    // shortcut: reject unsafe constructor folds until their evaluator is replaced.
     throw _UnsafeConstant(
       'exact mixed numeric constant evaluation is not implemented',
     );

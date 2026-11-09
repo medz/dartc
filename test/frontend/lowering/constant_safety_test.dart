@@ -2,40 +2,129 @@ import 'dart:io';
 
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:dartc/frontend.dart';
+import 'package:dartc/src/frontend/lowering/constant_evaluation.dart';
 import 'package:dartc/src/frontend/lowering/constant_safety.dart';
 import 'package:test/test.dart';
 
+import '../../support/ir_interpreter.dart';
 import 'fixtures/constant_safety/dependency.dart' as sdk;
 
 void main() {
+  test('numeric constant dependencies retain exact values', () async {
+    await AnalysisSession([
+      'test/frontend/lowering/fixtures/constant_safety/numeric.dart',
+    ]).use((checked) {
+      final unit = checked.libraries.single.units.single;
+      final constants = ConstantEvaluation();
+      const expected = {
+        'integer': 9007199254740993,
+        'floating': 9007199254740992.0,
+        'equal': false,
+        'unequal': true,
+        'less': true,
+        'lessEqual': false,
+        'greater': true,
+        'greaterEqual': false,
+        'selected': 2,
+        'exact': true,
+        'largeDifferent': true,
+        'zeros': true,
+        'nan': false,
+        'strings': true,
+        'maximumLess': true,
+        'reverseMaximum': true,
+        'minimumEqual': true,
+        'zeroOrders': true,
+        'fractional': true,
+        'infinite': true,
+        'nanRelations': true,
+      };
+      for (final declaration
+          in unit.unit.declarations.whereType<TopLevelVariableDeclaration>()) {
+        for (final variable in declaration.variables.variables) {
+          final value = constants.variable(
+            variable.declaredFragment!.element,
+            unit,
+            variable,
+          );
+          final name = variable.name.lexeme;
+          if (name == 'nested' || name == 'literalNested') {
+            expect(value!.getField('value')!.toBoolValue(), false);
+          } else if (name == 'abbreviated') {
+            expect(value!.getField('value')!.toBoolValue(), true);
+          } else if (name == 'record') {
+            expect(
+              value!.toRecordValue()!.positional.single.toBoolValue(),
+              false,
+            );
+            expect(
+              value.toRecordValue()!.named['greater']!.toBoolValue(),
+              true,
+            );
+          } else if (name == 'values') {
+            expect(value!.toListValue()!.map((v) => v.toIntValue()), [2, 3]);
+          } else if (name == 'mapping') {
+            expect(value!.toMapValue()!.values.single!.toBoolValue(), true);
+          } else {
+            expect(expected, contains(name));
+            expect(
+              value!.toBoolValue() ??
+                  value.toIntValue() ??
+                  value.toDoubleValue(),
+              expected[name],
+              reason: name,
+            );
+          }
+        }
+      }
+    });
+  });
+
   test(
-    'numeric constant dependencies cannot import analyzer rounding errors',
+    'constant expressions and constructor arguments reach IR unchanged',
+    () async {
+      final result = await AnalysisSession([
+        'test/frontend/lowering/fixtures/constant_safety/numeric.dart',
+      ]).use(Lowering().lower);
+      final runner = IrInterpreter(result.program, {});
+      for (final (name, expected) in [
+        ('constructedArgument', false),
+        ('recordExpression', true),
+        ('listExpression', true),
+        ('mapExpression', true),
+      ]) {
+        final function = result.program.functions.singleWhere(
+          (f) => f.target.name == name,
+        );
+        expect(runner.run(function, []), expected, reason: name);
+      }
+    },
+  );
+  test(
+    'constructor evaluation still rejects unsupported mixed numeric folds',
     () async {
       await AnalysisSession([
-        'test/frontend/lowering/fixtures/constant_safety/numeric.dart',
+        'test/frontend/lowering/fixtures/constant_safety/numeric_constructor.dart',
       ]).use((checked) {
         final unit = checked.libraries.single.units.single;
-        final safety = ConstantSafety();
+        final constants = ConstantEvaluation();
         for (final declaration
             in unit.unit.declarations
                 .whereType<TopLevelVariableDeclaration>()) {
           for (final variable in declaration.variables.variables) {
-            void check() => safety.check(
-              unit,
-              variable,
-              variable: variable.declaredFragment!.element,
-            );
             expect(
-              check,
-              variable.name.lexeme.startsWith('unsafe')
-                  ? throwsA(
-                      isA<UnsupportedError>().having(
-                        (e) => e.message,
-                        'reason',
-                        contains('exact mixed numeric constant evaluation'),
-                      ),
-                    )
-                  : returnsNormally,
+              () => constants.variable(
+                variable.declaredFragment!.element,
+                unit,
+                variable,
+              ),
+              throwsA(
+                isA<UnsupportedError>().having(
+                  (e) => e.message,
+                  'reason',
+                  contains('exact mixed numeric constant evaluation'),
+                ),
+              ),
               reason: variable.name.lexeme,
             );
           }
@@ -43,7 +132,6 @@ void main() {
       });
     },
   );
-
   test(
     'private symbol comparisons lose identity in analyzer, not the VM',
     () async {
@@ -120,7 +208,7 @@ void main() {
       });
     },
   );
-  test('cached inputs do not hide new failures or cache their locations', () async {
+  test('repeated checks retain failures and their use-site locations', () async {
     await AnalysisSession([
       'test/frontend/lowering/fixtures/constant_safety/entry.dart',
     ]).use((checked) {

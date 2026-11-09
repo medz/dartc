@@ -86,6 +86,8 @@ void main() {
     expect(numericOrder(9007199254740993, 9007199254740992.0), 1);
     expect(numericOrder(0x7fffffffffffffff, 9223372036854775808.0), -1);
     expect(library.constantComparison(), 0);
+    expect(library.constantValues(), 14);
+    expect(library.namedConstants(), 370);
     for (final i in integers) {
       for (final d in doubles) {
         compare(i, d);

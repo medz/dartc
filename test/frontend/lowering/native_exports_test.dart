@@ -3,20 +3,12 @@ import 'package:dartc/interop.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('export symbols cannot consume incorrect constant comparisons', () async {
+  test('export symbols and aliases use exact constant comparisons', () async {
     for (final suffix in ['', '_alias']) {
-      await expectLater(
-        AnalysisSession([
-          'test/frontend/lowering/fixtures/native_exports_numeric$suffix.dart',
-        ]).use(Lowering().lower),
-        throwsA(
-          isA<UnsupportedError>().having(
-            (error) => error.message,
-            'reason',
-            contains('exact mixed numeric constant evaluation'),
-          ),
-        ),
-      );
+      final result = await AnalysisSession([
+        'test/frontend/lowering/fixtures/native_exports_numeric$suffix.dart',
+      ]).use(Lowering().lower);
+      expect(result.exports.values.single.symbol, 'right');
     }
   });
 

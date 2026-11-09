@@ -26,8 +26,7 @@ final class ExportBindings(final Bindings bindings)
       }
     }
     // Constant aliases can select the annotation's type as well as its fields.
-    bindings.constantSafety.check(unit, node, syntax: node);
-    final value = node.elementAnnotation?.computeConstantValue();
+    final value = bindings.constants.annotation(unit, node);
     final type = value?.type;
     if (type is! dart.InterfaceType) return;
     final library = type.element.library;
