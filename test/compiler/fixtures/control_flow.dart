@@ -125,3 +125,50 @@ int nestedTransfers(int limit) {
   }
   return total;
 }
+
+@Export<Int64 Function(Int64)>()
+int deferredLocals(int count) {
+  final int base;
+  bool positiveCount;
+  if (count > 0) {
+    base = increment(count);
+    positiveCount = true;
+  } else {
+    base = increment(-count);
+    positiveCount = false;
+  }
+  int result;
+  do {
+    final int current;
+    if (positiveCount) {
+      current = count;
+    } else {
+      current = -count;
+    }
+    result = current + increment(base);
+    count--;
+  } while (count > 0);
+  return result;
+}
+
+@Export<Double Function(Double, Int64)>()
+double deferredDouble(double value, int count) {
+  double result;
+  do {
+    result = value;
+    value += 1.0;
+    count--;
+  } while (count > 0);
+  return result;
+}
+
+@Export<Pointer<Int64> Function(Pointer<Int64>, Int64)>()
+Pointer<Int64> deferredPointer(Pointer<Int64> value, int count) {
+  final Pointer<Int64> result;
+  if (count > 0) {
+    result = value + increment(count);
+  } else {
+    result = value;
+  }
+  return result;
+}

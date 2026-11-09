@@ -35,7 +35,13 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
       emitter.bind(labels[block]!);
       allocation.begin(block);
       for (final instruction in block.instructions) {
-        if (selection.calls[instruction] case final layout?) {
+        if (instruction case NewCell(:final initial)) {
+          if (initial != null) allocation.writeCell(instruction, initial);
+        } else if (instruction is ReadCell) {
+          allocation.readCell(instruction);
+        } else if (instruction case WriteCell(:final cell, :final value)) {
+          allocation.writeCell(cell, value);
+        } else if (selection.calls[instruction] case final layout?) {
           final native = instruction is NativeCall ? instruction : null;
           final arguments =
               native?.arguments ?? (instruction as DirectCall).inputs;

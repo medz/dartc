@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:dartc/abi.dart';
 import 'package:dartc/compiler.dart';
 import 'package:dartc/linker.dart';
 import 'package:dartc/object.dart';
@@ -22,6 +23,7 @@ import '../test/linker/fixtures/data.dart';
 import '../test/linker/fixtures/archive.dart';
 import '../test/linker/fixtures/shared_libraries.dart';
 import '../test/linker/fixtures/addresses.dart';
+import '../test/runtime/fixtures/assets.dart';
 import '../test/support/native_assets.dart';
 import 'build_sdk_test_assets.dart' as sdk_assets;
 
@@ -43,7 +45,7 @@ Future<void> main(List<String> args) async {
       .linux => ElfLinker(target),
     };
     final assets = NativeAssets(target);
-    for (final domain in ['abi', 'compiler', 'codegen', 'linker']) {
+    for (final domain in ['abi', 'compiler', 'codegen', 'linker', 'runtime']) {
       await Directory.fromUri(assets.directory.uri.resolve('$domain/'))
           .create(recursive: true);
     }
@@ -54,6 +56,40 @@ Future<void> main(List<String> args) async {
             name: output.uri.pathSegments.last,
           ),
         );
+
+    final io = await Compiler(target)
+        .compile(['test/runtime/fixtures/io.dart'], nativeSymbols: ioSymbols);
+    final scriptedIo = await Compiler(target).compile([
+      'test/runtime/fixtures/scripted_io.dart',
+    ], nativeSymbols: ioSymbols);
+    await io.write(assets.file('runtime/io.o'));
+    await scriptedIo.write(assets.file('runtime/scripted_io.o'));
+    final ioModule = format.decodeObject(io.bytes), storage = ioStorage(target);
+    final ioLibrary = assets.library('runtime/io');
+    await ioLibrary.writeAsBytes(
+      linker.linkSharedLibrary([
+        .object(ioModule),
+        .object(storage),
+        .sharedLibrary(
+          target.operatingSystem == .macos
+              ? '/usr/lib/libSystem.B.dylib'
+              : 'libc.so.6',
+          symbols: {
+            target.nativeSymbol('dartc_posix_write'): target.nativeSymbol(
+              'write',
+            ),
+            target.nativeSymbol('dartc_posix_errno'): target.nativeSymbol(
+              target.operatingSystem == .macos ? '__error' : '__errno_location',
+            ),
+          },
+        ),
+      ], name: ioLibrary.uri.pathSegments.last),
+    );
+    await shared([
+      ioModule,
+      format.decodeObject(scriptedIo.bytes),
+      storage,
+    ], assets.library('runtime/io_scripted'));
 
     for (final fixture in [
       'arithmetic',

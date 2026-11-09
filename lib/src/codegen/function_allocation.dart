@@ -39,6 +39,7 @@ final class FunctionAllocation<R extends Object>(
     for (final block in function.blocks) {
       final uses = _blockUses[block] = {};
       void use(Value value) {
+        if (value is NewCell) return;
         used.add(value);
         uses.update(value, (n) => n + 1, ifAbsent: () => 1);
         if (value is! Constant && _owners[value] != block) _shared.add(value);
@@ -71,6 +72,7 @@ final class FunctionAllocation<R extends Object>(
           function.entry.parameters[i]: offset,
     };
     final framed =
+        selection.cells.isNotEmpty ||
         incoming.isNotEmpty ||
         selection.calls.isNotEmpty ||
         _shared.isNotEmpty ||
@@ -90,6 +92,9 @@ final class FunctionAllocation<R extends Object>(
             (used.contains(value) || _shared.contains(value))) {
           _slots[value] = _slots.length * 8;
         }
+      }
+      for (final cell in selection.cells) {
+        _slots[cell] = _slots.length * 8;
       }
     }
     frame = framed
@@ -163,6 +168,20 @@ final class FunctionAllocation<R extends Object>(
     final register = allocate(selection.bank(value.type), except: except);
     load(value, register, except: except);
     return _registers[value] = register;
+  }
+
+  /// Loads the current contents without treating the cell as an SSA value.
+  void readCell(ReadCell operation) {
+    final register = allocate(selection.bank(operation.type));
+    emitter.loadStack(register, _slot(operation.cell));
+    define(operation, register);
+  }
+
+  /// Stores a scalar in its activation's fixed local slot.
+  void writeCell(Value cell, Value value) {
+    final register = read(value);
+    emitter.storeStack(register, _slot(cell));
+    release(value);
   }
 
   /// Loads a constant or a saved value into an explicitly chosen register.

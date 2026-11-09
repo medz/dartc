@@ -5,6 +5,44 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('target support sources do not import host toolchain libraries', () {
+    final root = Directory('runtime').absolute.uri;
+    final edges = <Uri, Set<Uri>>{};
+    for (final file in Directory.fromUri(
+      root,
+    ).listSync(recursive: true).whereType<File>()) {
+      if (!file.path.endsWith('.dart')) continue;
+      final links = edges[file.uri] = {};
+      final unit = parseString(
+        content: file.readAsStringSync(),
+        path: file.path,
+      ).unit;
+      for (final directive in unit.directives) {
+        expect(
+          directive is PartDirective || directive is PartOfDirective,
+          isFalse,
+        );
+        if (directive is NamespaceDirective) {
+          for (final literal in [
+            directive.uri,
+            for (final c in directive.configurations) c.uri,
+          ]) {
+            final uri = Uri.parse(literal.stringValue!);
+            if (uri.scheme == 'dart') continue;
+            final target = file.uri.resolveUri(uri);
+            expect(
+              target.toString().startsWith(root.toString()),
+              isTrue,
+              reason: file.path,
+            );
+            links.add(target);
+          }
+        }
+      }
+    }
+    _checkCycles(edges);
+  });
+
   test('domains use public entries and have acyclic dependencies', () {
     const dependencies = <String, Set<String>>{
       'ir': {'interop'},
@@ -111,26 +149,26 @@ void main() {
         }
       }
     }
-    void checkCycles<T>(Map<T, Set<T>> graph) {
-      final done = <T>{}, visiting = <T>{};
-      void visit(T source) {
-        if (done.contains(source)) return;
-        expect(
-          visiting.add(source),
-          isTrue,
-          reason: [...visiting, source].join(' -> '),
-        );
-        for (final target in graph[source]!) {
-          visit(target);
-        }
-        visiting.remove(source);
-        done.add(source);
-      }
-
-      graph.keys.forEach(visit);
-    }
-
-    checkCycles(edges);
-    checkCycles(dependencies);
+    _checkCycles(edges);
+    _checkCycles(dependencies);
   });
+}
+
+void _checkCycles<T>(Map<T, Set<T>> graph) {
+  final done = <T>{}, visiting = <T>{};
+  void visit(T source) {
+    if (done.contains(source)) return;
+    expect(
+      visiting.add(source),
+      isTrue,
+      reason: [...visiting, source].join(' -> '),
+    );
+    for (final target in graph[source]!) {
+      visit(target);
+    }
+    visiting.remove(source);
+    done.add(source);
+  }
+
+  graph.keys.forEach(visit);
 }

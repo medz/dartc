@@ -1,6 +1,8 @@
 @Tags(['assets', 'native'])
 library;
 
+import 'dart:ffi';
+
 import 'package:test/test.dart';
 
 import 'fixtures/control_flow.dart' as sdk;
@@ -85,4 +87,35 @@ void main() {
       expect(native.recursive(value), sdk.recursive(value), reason: '$value');
     }
   });
+
+  test(
+    'deferred scalar locals retain values across branches, loops and calls',
+    () {
+      final pointer = Pointer<Int64>.fromAddress(0x1000);
+      for (final count in [-3, 0, 1, 7]) {
+        expect(native.deferredLocals(count), sdk.deferredLocals(count));
+        expect(
+          native.deferredPointer(pointer, count).address,
+          sdk.deferredPointer(pointer, count).address,
+        );
+        for (final value in [
+          0.0,
+          -0.0,
+          -3.5,
+          1.25,
+          double.infinity,
+          double.nan,
+        ]) {
+          final expected = sdk.deferredDouble(value, count),
+              actual = native.deferredDouble(value, count);
+          if (expected.isNaN) {
+            expect(actual.isNaN, isTrue);
+          } else {
+            expect(actual, expected);
+            expect(actual.isNegative, expected.isNegative);
+          }
+        }
+      }
+    },
+  );
 }

@@ -25,6 +25,7 @@ final class FunctionSelection<R>(
   final mixedComparisons =
       <Instruction, ({Comparison comparison, Value integer, Value floating})>{};
   final calls = <Instruction, CallLayout<R>>{};
+  final cells = <NewCell>{};
   late final CallLayout<R> entry;
   int _generalTemporaries = 0, _floatingTemporaries = 0;
 
@@ -54,6 +55,17 @@ final class FunctionSelection<R>(
     for (final block in function.blocks) {
       for (final instruction in block.instructions) {
         switch (instruction) {
+          case NewCell(type: final CellType type, :final initializer):
+            if (type.isLate || initializer != null || !_scalar(type.content)) {
+              throw UnsupportedError(
+                'Native local storage requires a non-late scalar.',
+              );
+            }
+            cells.add(instruction);
+          case ReadCell(:final cell) || WriteCell(:final cell):
+            if (cell is! NewCell) {
+              throw UnsupportedError('Native local storage cannot be aliased.');
+            }
           case NativeCall(:final signature):
             calls[instruction] = emitter.convention.classify(signature);
           case DirectCall(:final inputs, :final type, :final typeArguments):
@@ -184,6 +196,76 @@ final class FunctionSelection<R>(
             );
         }
       }
+    }
+    if (cells.isNotEmpty) _checkCells(function);
+  }
+
+  void _checkCells(IrFunction function) {
+    final predecessors = {
+      for (final block in function.blocks) block: <Block>[],
+    };
+    for (final block in function.blocks) {
+      for (final instruction in block.instructions) {
+        for (final value in instruction.inputs.where(cells.contains)) {
+          if (!(instruction is ReadCell && instruction.cell == value ||
+              instruction is WriteCell && instruction.cell == value)) {
+            throw UnsupportedError('Native local storage cannot escape.');
+          }
+        }
+      }
+      if (block.end case Return(value: final value?)
+          when cells.contains(value)) {
+        throw UnsupportedError('Native local storage cannot escape.');
+      }
+      for (final edge in block.successors) {
+        if (edge.arguments.any(cells.contains)) {
+          throw UnsupportedError('Native local storage cannot be aliased.');
+        }
+        predecessors[edge.target]!.add(block);
+      }
+    }
+    final initialized = {
+      for (final block in function.blocks) block: cells.toSet(),
+    };
+    Set<NewCell> after(Block block, {bool checkReads = false}) {
+      final ready = block == function.entry ? <NewCell>{} : cells.toSet();
+      for (final previous in predecessors[block]!) {
+        ready.removeWhere((cell) => !initialized[previous]!.contains(cell));
+      }
+      for (final instruction in block.instructions) {
+        switch (instruction) {
+          case NewCell(:final initial):
+            if (initial == null) {
+              ready.remove(instruction);
+            } else {
+              ready.add(instruction);
+            }
+          case WriteCell(cell: final NewCell cell):
+            ready.add(cell);
+          case ReadCell(:final cell) when checkReads && !ready.contains(cell):
+            throw UnsupportedError(
+              'Native local may be read before initialization.',
+            );
+          default:
+            break;
+        }
+      }
+      return ready;
+    }
+
+    bool changed;
+    do {
+      changed = false;
+      for (final block in function.blocks) {
+        final next = after(block), previous = initialized[block]!;
+        if (next.length != previous.length || !next.containsAll(previous)) {
+          initialized[block] = next;
+          changed = true;
+        }
+      }
+    } while (changed);
+    for (final block in function.blocks) {
+      after(block, checkReads: true);
     }
   }
 

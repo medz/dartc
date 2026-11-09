@@ -40,7 +40,7 @@ dart run tool/build_test_assets.dart linux-arm64
 docker run --rm --platform linux/arm64 \
   -e TEST_TARGET=linux-arm64 -v "$PWD:/src:ro" \
   --tmpfs /work:exec -w /work dart:3.13.7-sdk sh -eu -c '
-    cp -R /src/lib /src/bin /src/test /src/tool /work/
+    cp -R /src/lib /src/bin /src/runtime /src/test /src/tool /work/
     cp /src/pubspec.yaml /src/pubspec.lock /src/analysis_options.yaml /src/dart_test.yaml /work/
     mkdir -p build/test
     cp -R /src/build/test/$TEST_TARGET build/test/
@@ -60,6 +60,7 @@ For Linux x64, use `linux-x64` for the builder and `TEST_TARGET`, and `linux/amd
 | Frontend, constants, lowering, IR | Relevant semantic and contract tests on one host; add native cases when emitted behavior changes |
 | Instruction encoding, object records, relocations | All affected target variants on one host; cross-generation is not execution |
 | Calling conventions, register allocation, memory operations, linking/loading | Relevant native tests on every affected OS/CPU; shared rules can affect all targets |
+| Target support sources | Native execution with real platform services and focused error cases; source imports must not depend on the host toolchain |
 | SDK discovery, CLI, filesystem handling | Relevant host integration tests on the affected operating systems |
 | Dependency upgrades, broad integration, release candidates | Full host regression and the platform execution required by the changed dependencies and supported release targets |
 

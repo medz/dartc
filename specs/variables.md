@@ -18,6 +18,12 @@
 
 [IR 行为对照](../test/frontend/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/variables.md)。
 
+## 原生局部存储
+
+非捕获、非 `late` 的 `int`、`bool`、`double` 和原生指针局部变量支持声明后赋值，包括分支合流、循环和跨调用保存；非 `late final` 的赋值义务仍由前端静态检查。见[原生行为对照](../test/compiler/control_flow_test.dart)。后端在使用局部栈存储前确认每条到达读取的路径都已写入；循环中新声明的存储不能继承上一次迭代的初始化状态。独立 IR 的不安全读取由[发码契约检查](../test/codegen/cells_test.dart)拒绝。
+
+捕获存储、存储别名、可空或托管值以及 `late` 初始化的原生执行仍待实现；已有 IR 支持不代表这些路径已能发码。
+
 ## 已知 SDK 差异
 
 SDK 3.13.7（416e33b0ffaef062a60ec966bb8c82ed2b83f128）的 JIT 和 AOT 均允许 `Box<num> box = Box<int>()` 向 `late final T value` 写入 `1.5`；显式 `covariant` 则会抛出 TypeError。本 IR 按规范的 covariant-by-class 规则拒绝该写入，并保持失败后字段未绑定。这两条安全测试单独列出，不计为 SDK 一致结果。[固定版本前端源码](https://github.com/dart-lang/sdk/blob/3.13.7/pkg/front_end/lib/src/fragment/field/declaration.dart#L914-L934) 的 final 排除条件与相邻 TODO 支持存在遗漏的推断，但这不是上游已确认的问题。

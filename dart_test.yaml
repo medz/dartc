@@ -12,6 +12,7 @@ presets:
       - test/compiler
       - test/frontend/lowering/ffi_functions_test.dart
       - test/linker
+      - test/runtime
       - test/sdk/resolver_native_test.dart
     include_tags: native
     exclude_tags: assets && !native

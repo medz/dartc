@@ -44,5 +44,20 @@ final class ControlFlow() {
         'nestedTransfers',
       );
 
+  late final deferredLocals = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'deferredLocals',
+      );
+  late final deferredDouble = _library
+      .lookupFunction<
+        Double Function(Double, Int64),
+        double Function(double, int)
+      >('deferredDouble');
+  late final deferredPointer = _library
+      .lookupFunction<
+        Pointer<Int64> Function(Pointer<Int64>, Int64),
+        Pointer<Int64> Function(Pointer<Int64>, int)
+      >('deferredPointer');
+
   void close() => _library.close();
 }
