@@ -75,7 +75,8 @@ void main() {
               const {
                 '_fe_analyzer_shared': {'frontend'},
                 'analyzer': {'frontend'},
-                'crypto': {'linker'},
+                'crypto': {'linker', 'sdk'},
+                'archive': {'sdk'},
               }[uri.pathSegments.first],
               contains(owner),
               reason: file.path,

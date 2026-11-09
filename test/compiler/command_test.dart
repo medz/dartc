@@ -3,6 +3,7 @@ library;
 
 import 'dart:io';
 
+import 'package:dartc/sdk.dart';
 import 'package:dartc/src/compiler/cli/command.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
@@ -24,10 +25,32 @@ void main() {
     addTearDown(() => directory.deleteSync(recursive: true));
     final assets = NativeAssets(Target.host());
     final header = File.fromUri(directory.uri.resolve('api.h'));
-    for (final (kind, expected) in [
-      ('object', assets.file('compiler/arithmetic.o')),
-      ('static', assets.file('compiler/arithmetic.a')),
-      ('shared', assets.library('compiler/arithmetic')),
+    final existing = File.fromUri(directory.uri.resolve('existing.o'))
+      ..writeAsStringSync('existing output');
+    expect(
+      await command.run([
+        source,
+        '-o',
+        existing.path,
+        '--sdk',
+        'test/compiler/fixtures',
+      ]),
+      1,
+    );
+    expect(existing.readAsStringSync(), 'existing output');
+    expect(errors.toString(), contains('Missing SDK file:'));
+    for (final (kind, expected, sdk) in [
+      (
+        'object',
+        assets.file('compiler/arithmetic.o'),
+        DartSdk.current().directory.path,
+      ),
+      (
+        'static',
+        assets.file('compiler/arithmetic.a'),
+        Platform.resolvedExecutable,
+      ),
+      ('shared', assets.library('compiler/arithmetic'), null),
     ]) {
       final file = File.fromUri(
         directory.uri.resolve(expected.uri.pathSegments.last),
@@ -38,6 +61,7 @@ void main() {
           '-o',
           file.path,
           if (kind != 'object') ...['--kind', kind],
+          if (sdk != null) ...['--sdk', sdk],
           '--header',
           header.path,
         ]),

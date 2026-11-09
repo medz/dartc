@@ -87,10 +87,11 @@ final class AnalysisSession(
       content: 'analyzer:\n  cannot-ignore: [error]\n',
       modificationStamp: 0,
     );
+    final selectedSdk = sdk ?? await SdkResolver().resolve();
     final contexts = _contexts = AnalysisContextCollectionImpl(
       includedPaths: inputs.toList(),
       resourceProvider: files,
-      sdkPath: sdk?.directory.path,
+      sdkPath: selectedSdk.directory.path,
       optionsFile: options,
     );
     final session = contexts.contextFor(inputs.first).currentSession;

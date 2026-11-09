@@ -14,8 +14,8 @@ Use the standard runner's concurrency. Override `--concurrency` only when measur
 | Command | Coverage | Asset preparation |
 | --- | --- | --- |
 | `dart test <paths>` | The changed contract and affected callers | Only if the selected suites have the `assets` tag |
-| `dart test -P unit` | All suites that need no prebuilt native assets | None |
-| `dart test -P native` | Host Compiler/CLI integration and native execution | Current target only |
+| `dart test -P unit` | All suites that need no prebuilt assets | None |
+| `dart test -P native` | Host Compiler/CLI integration, SDK selection and native execution | Current target and SDK assets |
 | `dart test` | All suites on the current host, including all-target file-format checks | All targets |
 
 The `assets` tag marks suites that consume prebuilt files. The `native` tag selects host compilation, output handling and actual FFI calls; the preset lists the participating files and domains. Add new native suites to that preset without including unrelated test files. Keep target-independent assertions outside native suites so they can run without loading a library.
@@ -28,6 +28,8 @@ dart test -P native
 ```
 
 The builder also accepts `macos-x64`, `linux-arm64` and `linux-x64`, with multiple targets separated by spaces. With no arguments it builds all supported targets. Sources and FFI clients live in each domain's `fixtures/`; outputs go to `build/test/<target>/`. Each compiler fixture is compiled to an object once per target, then archived and linked through the public object/linker APIs. Compiler and CLI tests separately exercise all three output requests.
+
+The builder also prepares SDK assets: verified official sources and a source archive under `build/test/sdk/`, plus a host executable for the fixed SDK-discovery probe. The current Dart SDK builds this probe before tests. The first preparation needs network access to fetch the pinned sources; later runs reuse the verified cache. To prepare only these assets, run `dart run tool/build_sdk_test_assets.dart`. SDK cache tests serve the prepared archive over loopback and require no internet access.
 
 Build assets before tests. A missing asset is an error, never a request to compile from a test setup. Rebuild when its source, compiler, dependency or target configuration changes. The same batch of target assets can be copied into matching execution environments; do not rebuild all targets in every container. Host compiler checks still compile source in that host.
 
@@ -42,7 +44,9 @@ docker run --rm --platform linux/arm64 \
     cp /src/pubspec.yaml /src/pubspec.lock /src/analysis_options.yaml /src/dart_test.yaml /work/
     mkdir -p build/test
     cp -R /src/build/test/$TEST_TARGET build/test/
+    cp -R /src/build/test/sdk build/test/
     dart pub get
+    dart run tool/build_sdk_test_assets.dart
     dart test -P native
   '
 ```

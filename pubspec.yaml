@@ -13,6 +13,7 @@ dependencies:
   # Resolved metadata uses the isolated analyzer compatibility adapter.
   _fe_analyzer_shared: 111.0.0
   analyzer: 14.7.0
+  archive: ^4.6.0
   crypto: ^3.0.8
 
 dev_dependencies:

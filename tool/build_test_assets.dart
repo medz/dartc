@@ -23,8 +23,10 @@ import '../test/linker/fixtures/archive.dart';
 import '../test/linker/fixtures/shared_libraries.dart';
 import '../test/linker/fixtures/addresses.dart';
 import '../test/support/native_assets.dart';
+import 'build_sdk_test_assets.dart' as sdk_assets;
 
 Future<void> main(List<String> args) async {
+  await sdk_assets.main();
   final targets = args.isEmpty
       ? [
           for (final os in OperatingSystem.values)

@@ -49,7 +49,9 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
       }
       final compiler = Compiler(
         target,
-        sdk: sdkPath == null ? null : DartSdk.at(sdkPath),
+        sdk: sdkPath == null
+            ? null
+            : await SdkResolver().resolve(source: sdkPath),
       );
       final file = File(destination);
       final library = await compiler.compile(
@@ -71,7 +73,7 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
     } on UnsupportedError catch (error) {
       errors.writeln(error.message);
       return 1;
-    } on FileSystemException catch (error) {
+    } on IOException catch (error) {
       errors.writeln(error);
       return 1;
     }
@@ -81,7 +83,7 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
 const _usage =
     'Usage: dartc <source.dart> -o <output> '
     '[--kind object|static|shared] [--header <file.h>] '
-    '[--target macos-arm64|macos-x64|linux-arm64|linux-x64] [--sdk <root>]';
+    '[--target macos-arm64|macos-x64|linux-arm64|linux-x64] [--sdk <root|dart-command>]';
 
 enum _OutputKind() {
   object,
