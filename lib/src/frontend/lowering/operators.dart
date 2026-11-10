@@ -141,6 +141,13 @@ Value? lowerBinary(
     .GT_EQ => .greaterOrEqual,
     _ => unsupported(context.unit, site, operator.lexeme),
   };
+  if ((op == .truncateDivide || op == .modulo) &&
+      left.type != .floating &&
+      right.type != .floating) {
+    context.bindings.requireSdkClass(
+      member!.library.getClass('IntegerDivisionByZeroException')!,
+    );
+  }
   if (left.type == .integer && right.type == .integer) {
     if (op == .shiftLeft || op == .shiftRight || op == .unsignedShiftRight) {
       context.bindings.requireSdkClass(
@@ -166,5 +173,10 @@ Value? lowerBinary(
     .greaterOrEqual => NumericOperator.greaterOrEqual,
     _ => unsupported(context.unit, site, 'non-integer bitwise operator'),
   };
+  if (numeric == .truncateDivide) {
+    context.bindings.requireSdkClass(
+      member!.library.getClass('UnsupportedError')!,
+    );
+  }
   return context.emit(NumericBinary(numeric, left, right));
 }

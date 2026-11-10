@@ -41,6 +41,11 @@ Instruction? lowerCoreMember(
             member.library.getClass(name)?.getMethod('remainder'),
       )) {
     final right = arguments.single;
+    if (receiver.type != .floating && right.type != .floating) {
+      bindings.requireSdkClass(
+        member.library.getClass('IntegerDivisionByZeroException')!,
+      );
+    }
     return receiver.type == .integer && right.type == .integer
         ? IntBinary(.remainder, receiver, right)
         : NumericBinary(.remainder, receiver, right);

@@ -27,6 +27,8 @@ abstract interface class CodeGenerator() {
   /// Integer truncating division, modulo and remainder retain signed 64-bit
   /// behavior, including overflow, and throw IntegerDivisionByZeroException
   /// for a zero divisor through normal exception edges.
+  /// Floating and mixed truncating division divides as double, then applies
+  /// [NumericToInt]; boxed integer pairs keep exact integer division.
   /// Integer shifts retain the complete count: counts of 64 or more saturate
   /// arithmetic right shifts and zero the other results. Negative counts throw
   /// ArgumentError using its constructor and inherited class bodies supplied in

@@ -125,3 +125,55 @@ int roundingEffects(double value, int mode) {
   _rounded(state.next(value), mode);
   return state.log * 10 + 2;
 }
+
+int _quotient<T extends num>(T left, T right) => left ~/ right;
+int _leftQuotient(num left, int right) => left ~/ right;
+int _rightQuotient(int left, num right) => left ~/ right;
+
+@Export<Int64 Function(Double, Double, Int64, Int64, Int64)>()
+int truncateDivide(double left, double right, int i, int j, int mode) =>
+    switch (mode) {
+      0 => left ~/ right,
+      1 => left ~/ j,
+      2 => i ~/ right,
+      3 => _quotient(left, right),
+      4 => _quotient(left, j),
+      5 => _quotient(i, right),
+      6 => _quotient(i, j),
+      7 => _leftQuotient(left, j),
+      8 => _rightQuotient(i, right),
+      _ => _leftQuotient(i, j) + _rightQuotient(i, j),
+    };
+
+@Export<Int64 Function(Double, Double, Int64)>()
+int quotientFailure(double left, double right, int boxed) {
+  final state = _State();
+  try {
+    if (boxed == 0) {
+      state.next(left) ~/ state.next(right);
+    } else {
+      _quotient(state.next(left), state.next(right));
+    }
+    state.log = state.log * 10 + 2;
+  } on UnsupportedError {
+    state.log = state.log * 10 + 3;
+  } finally {
+    state.log = state.log * 10 + 4;
+  }
+  return state.log;
+}
+
+@Export<Int64 Function(Int64, Int64)>()
+int integerQuotientFailure(int left, int right) {
+  try {
+    return _quotient(left, right);
+  } on UnsupportedError catch (error) {
+    // Verify the SDK subtype still caught through UnsupportedError.
+    // ignore: deprecated_member_use
+    return error is IntegerDivisionByZeroException &&
+            error.message is String &&
+            error.stackTrace == null
+        ? 77
+        : -77;
+  }
+}

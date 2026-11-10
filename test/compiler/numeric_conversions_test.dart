@@ -15,6 +15,58 @@ void main() {
     addTearDown(native.close);
   });
 
+  test('floating quotient converts the division result and preserves integer paths', () {
+    for (final (left, right, expected) in <(double, double, int)>[
+      (7.0, 2.0, 3),
+      (-7.0, 2.0, -3),
+      (7.0, -2.0, -3),
+      (-0.0, 2.0, 0),
+      (double.minPositive, 2.0, 0),
+      (1e30, 3.0, 0x7fffffffffffffff),
+      (-1e30, 3.0, -0x8000000000000000),
+      (7.0, double.infinity, 0),
+    ]) {
+      for (final mode in [0, 3]) {
+        expect(native.truncateDivide(left, right, 0, 1, mode), expected);
+        expect(sdk.truncateDivide(left, right, 0, 1, mode), expected);
+      }
+    }
+    for (var mode = 0; mode < 10; mode++) {
+      final expected = mode == 9 ? -6 : -3;
+      expect(native.truncateDivide(-7.0, 2.0, -7, 2, mode), expected);
+    }
+    for (final mode in [2, 5, 8]) {
+      expect(
+        native.truncateDivide(0, 1, 9007199254740993, 1, mode),
+        9007199254740992,
+      );
+    }
+    for (final mode in [6, 9]) {
+      // Boxed integer division must not round through double at 2^53.
+      final expected = mode == 6 ? 9007199254740993 : 18014398509481986;
+      expect(native.truncateDivide(0, 1, 9007199254740993, 1, mode), expected);
+    }
+    for (final (left, right) in [
+      (1.0, 0.0),
+      (0.0, -0.0),
+      (double.infinity, 1.0),
+      (double.nan, 1.0),
+      (1.0, double.nan),
+      (double.maxFinite, double.minPositive),
+    ]) {
+      for (final boxed in [0, 1]) {
+        expect(native.quotientFailure(left, right, boxed), 1134);
+        expect(sdk.quotientFailure(left, right, boxed), 1134);
+      }
+    }
+    expect(native.quotientFailure(-7, 2, 0), 1124);
+    expect(native.integerQuotientFailure(7, 0), 77);
+    expect(
+      native.integerQuotientFailure(-0x8000000000000000, -1),
+      -0x8000000000000000,
+    );
+  });
+
   double fromBits(int value) =>
       (ByteData(8)..setUint64(0, value)).getFloat64(0);
 

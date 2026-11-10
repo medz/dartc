@@ -55,5 +55,21 @@ final class NumericConversions() {
         'roundingEffects',
       );
 
+  late final truncateDivide = _library
+      .lookupFunction<
+        Int64 Function(Double, Double, Int64, Int64, Int64),
+        int Function(double, double, int, int, int)
+      >('truncateDivide');
+  late final quotientFailure = _library
+      .lookupFunction<
+        Int64 Function(Double, Double, Int64),
+        int Function(double, double, int)
+      >('quotientFailure');
+
+  late final integerQuotientFailure = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'integerQuotientFailure',
+      );
+
   void close() => _library.close();
 }
