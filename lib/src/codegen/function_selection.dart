@@ -65,9 +65,7 @@ final class FunctionSelection<R>(
   }
 
   this {
-    if (function.bodyKind != .synchronous ||
-        function.target.kind == .closure ||
-        function.target.typeParameters.isNotEmpty) {
+    if (function.bodyKind != .synchronous || function.target.kind == .closure) {
       throw UnsupportedError(
         'Native function signature: ${function.target.name}',
       );
@@ -76,7 +74,7 @@ final class FunctionSelection<R>(
     entry = emitter.convention.classify(
       NativeSignature.types(
         layouts.callType(function.target.returnType),
-        function.target.parameterTypes.map(layouts.callType),
+        layouts.entryTypes(function.target).map(layouts.callType),
       ),
     );
     for (final block in body.blocks) {
@@ -138,16 +136,13 @@ final class FunctionSelection<R>(
           case final Construct operation:
             final target = heap.constructors[operation]!;
             _call(instruction, target, body.inputsOf(operation).toList());
-          case DirectCall(:final target, :final type, :final typeArguments):
-            if (typeArguments.isNotEmpty) {
-              throw UnsupportedError(
-                'Native generic function calls are not implemented.',
-              );
-            }
+          case DirectCall(:final target, :final type):
             if (type != .voidType && type != .never) {
               layouts.checkTransfer(target.returnType, type);
             }
             _call(instruction, target, body.inputsOf(instruction).toList());
+          case ReifyType():
+            break;
           case LoadField(:final field, :final type):
             if (field.isLate) {
               throw UnsupportedError('Native late field: ${field.name}');
@@ -296,7 +291,9 @@ final class FunctionSelection<R>(
           case Equals(:final left, :final right, :final negated):
             final nullComparison =
                 left.type == .nullType || right.type == .nullType;
+            final typeLiteral = left is TypeConstant || left is ReifyType;
             if (!nullComparison &&
+                !typeLiteral &&
                 (!_scalar(left.type) || !_scalar(right.type))) {
               throw UnsupportedError(
                 'Native equality requires supported scalar operands.',
@@ -312,7 +309,7 @@ final class FunctionSelection<R>(
                 left.type == right.type ||
                     FfiTypes.isPointer(left.type) &&
                         FfiTypes.isPointer(right.type) ||
-                    nullComparison &&
+                    (nullComparison || typeLiteral) &&
                         layouts.representation(left.type) == .reference &&
                         layouts.representation(right.type) == .reference
                 ? emitter.comparison(
@@ -362,10 +359,11 @@ final class FunctionSelection<R>(
   }
 
   void _call(Instruction operation, FunctionTarget target, List<Value> inputs) {
+    final parameters = layouts.entryTypes(target);
     for (final (i, input) in inputs.indexed) {
       layouts.checkTransfer(
         input.type,
-        target.parameterTypes[i],
+        parameters[i],
         constant: input is ScalarConstant,
       );
     }
@@ -373,7 +371,7 @@ final class FunctionSelection<R>(
       layout: emitter.convention.classify(
         NativeSignature.types(
           layouts.callType(target.returnType),
-          target.parameterTypes.map(layouts.callType),
+          parameters.map(layouts.callType),
         ),
       ),
       target: target,

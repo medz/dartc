@@ -393,6 +393,7 @@ base class ScalarCodeGenerator<R extends Object>(
   }
 
   bool _matches(FunctionTarget declaration, NativeSignature signature) =>
+      declaration.typeParameters.isEmpty &&
       signature.parameters.length == declaration.parameterTypes.length &&
       declaration.returnType == FfiTypes.valueType(signature.result) &&
       declaration.parameterTypes.indexed.every(

@@ -31,7 +31,13 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 
 `as`、后缀 `!` 及已降为类型转换的隐式检查支持上述具体类型。成功保留原值，失败抛出 TypeError，可由 `on TypeError` 或 `on Error` 捕获并正常经过 `finally`；转换前的表达式只求值一次。`as Never` 始终失败，`as Never?` 仅接受 null；`FutureOr<int?>` 的 `!` 在保留静态类型的同时拒绝 null。见[转换、隐式检查与清理顺序对照](../test/compiler/type_checks_test.dart)。
 
-int、double 和 bool 值均可装箱为引用，包括运行时计算的数值；仍被使用的装箱值在调用及回收后保持不变，见[计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)。地址为零的非空 FFI Pointer 值不等于 Dart null。依赖运行时类型参数的检查和转换、Type/runtimeType 值以及尚无原生存储的函数和 record 值仍是缺口；支持这些类型作为泛型实参不表示对应值已可原生执行。跨模块托管值传递尚未接通。
+int、double 和 bool 值均可装箱为引用，包括运行时计算的数值；仍被使用的装箱值在调用及回收后保持不变，见[计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)。地址为零的非空 FFI Pointer 值不等于 Dart null。依赖运行时类型参数的检查和转换、runtimeType 以及尚无原生存储的函数和 record 值仍是缺口；支持这些类型作为泛型实参不表示对应值已可原生执行。跨模块托管值传递尚未接通。
+
+## 原生泛型调用与 Type 值
+
+直接泛型函数调用支持具体类型实参及函数类型参数的转发，包含递归调用、寄存器与栈参数，以及调用和回收后读取原参数或结果。`T` 表达式读取本次调用传入的 Type 值。具体类型字面量在同一生成模块内保留规范身份；以类型字面量或 `T` 表达式作左操作数的 `==`/`!=` 支持类型相等比较，区分 dynamic、void、Object?、Never 和 Null，并保留函数类型绑定参数的等价身份。见[泛型调用与 SDK 对照](../test/compiler/type_arguments_test.dart)。
+
+`T?`、`List<T>` 等开放复合类型的运行时实例化、类类型参数环境、`is T`/`as T`、泛型字段写入检查、跨模块 Type 规范身份，以及 Type 的通用成员派发、hashCode 和 toString 仍未接通。泛型函数不能直接作为 FFI 导出；原生入口须通过普通 Dart 函数提供明确的 FFI 签名。
 
 ## analyzer 元数据边界
 

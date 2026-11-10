@@ -137,7 +137,9 @@ final class ScalarFunction<R extends Object>(
           :final arguments,
         )) {
           final native = instruction is NativeCall ? instruction : null;
-          final parameterTypes = target?.parameterTypes;
+          final parameterTypes = target == null
+              ? null
+              : layouts.entryTypes(target);
           final roots = allocation.prepareCall(
             instruction,
             layout.clobberedRegisters,
@@ -304,7 +306,8 @@ final class ScalarFunction<R extends Object>(
             );
           }
           allocation.define(instruction, destination);
-        } else if (instruction case TypeView(:final operand)) {
+        } else if (instruction is TypeView || instruction is ReifyType) {
+          final operand = selection.body.inputsOf(instruction).single;
           final R destination;
           if (layouts.representation(operand.type) ==
               layouts.representation(instruction.type)) {

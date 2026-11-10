@@ -14,6 +14,28 @@ final class FunctionRepresentation(
   final _operands = <Instruction, List<Value>>{};
   final boxes = <Instruction, Value>{};
   final introduced = <Instruction>{};
+  late final entryParameters = function.target.typeParameters.isEmpty
+      ? function.entry.parameters
+      : [
+          ...function.entry.parameters,
+          ...Block([
+            for (final _ in function.target.typeParameters) ValueType.typeType,
+          ]).parameters,
+        ];
+
+  List<BlockParameter> parametersOf(Block block) =>
+      block == function.entry ? entryParameters : block.parameters;
+
+  Value _reify(ValueType type) {
+    final index = type is TypeParameterType
+        ? function.target.typeParameters.indexOf(type)
+        : -1;
+    if (index >= 0) {
+      return entryParameters[function.entry.parameters.length + index];
+    }
+    if (type.freeTypeParameters.isEmpty) return TypeConstant(type);
+    throw UnsupportedError('Native type requires runtime instantiation: $type');
+  }
 
   Iterable<Value> inputsOf(Instruction instruction) =>
       _operands[instruction] ?? instruction.inputs;
@@ -79,12 +101,15 @@ final class FunctionRepresentation(
         _ => block.instructions,
       };
       for (final instruction in source) {
+        if (instruction case ReifyType(:final template)) {
+          _operands[instruction] = [_reify(template)];
+        }
         if (instruction case TypeView(:final operand, :final type)
             when needsBox(operand, type)) {
           boxes[instruction] = operand;
         }
         final destinations = switch (instruction) {
-          DirectCall(:final target) => target.parameterTypes,
+          DirectCall(:final target) => layouts.entryTypes(target),
           Construct(:final initializer) => initializer.signature.parameters,
           NewCell(:final initial, type: final CellType type)
               when initial != null =>
@@ -100,8 +125,13 @@ final class FunctionRepresentation(
           _ => null,
         };
         if (destinations != null) {
-          final inputs = instruction.inputs.toList();
-          var changed = false;
+          final inputs = [
+            ...instruction.inputs,
+            if (instruction case DirectCall(:final typeArguments))
+              ...typeArguments.map(_reify),
+          ];
+          var changed =
+              instruction is DirectCall && instruction.typeArguments.isNotEmpty;
           for (final (i, input) in inputs.indexed) {
             final value = convert(input, destinations[i], body);
             changed |= value != input;

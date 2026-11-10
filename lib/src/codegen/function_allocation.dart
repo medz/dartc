@@ -32,7 +32,7 @@ final class FunctionAllocation<R extends Object>(
   this {
     for (final block in selection.body.blocks) {
       for (final value in [
-        ...block.parameters,
+        ...selection.body.parametersOf(block),
         ...selection.body.instructions[block]!,
       ]) {
         _owners[value] = block;
@@ -57,7 +57,7 @@ final class FunctionAllocation<R extends Object>(
     final incoming = <Value, int>{
       for (final (i, location) in selection.entry.parameters.indexed)
         if (location case StackArgument(:final offset))
-          function.entry.parameters[i]: offset,
+          selection.body.entryParameters[i]: offset,
     };
     final framed =
         selection.body.ends.values.any((end) => end is Throw) ||
@@ -113,7 +113,7 @@ final class FunctionAllocation<R extends Object>(
 
   /// Saves incoming arguments whose homes must survive beyond entry.
   void initialize() {
-    for (final (i, parameter) in function.entry.parameters.indexed) {
+    for (final (i, parameter) in selection.body.entryParameters.indexed) {
       if (_shared.contains(parameter)) {
         if (selection.entry.parameters[i] case RegisterArgument(
           :final register,
@@ -142,7 +142,7 @@ final class FunctionAllocation<R extends Object>(
         ),
       );
     if (block == function.entry) {
-      for (final (i, parameter) in block.parameters.indexed) {
+      for (final (i, parameter) in selection.body.entryParameters.indexed) {
         if (_uses.containsKey(parameter)) {
           switch (selection.entry.parameters[i]) {
             case RegisterArgument(:final register):
@@ -246,10 +246,11 @@ final class FunctionAllocation<R extends Object>(
       releaseTemporary(temporary);
     } else if (value case ScalarConstant(value: null)) {
       emitter.loadImmediate(destination, 0);
-    } else if (value is ObjectConstant) {
-      loadObject(value, destination);
     } else if (value is Constant) {
-      throw UnsupportedError('Native constant: ${value.type}');
+      if (value is! ObjectConstant && value is! TypeConstant) {
+        throw UnsupportedError('Native constant: ${value.type}');
+      }
+      loadObject(value, destination);
     } else if (value is UnwindValue || _spilled.contains(value)) {
       emitter.loadStack(destination, _slot(value));
     } else {

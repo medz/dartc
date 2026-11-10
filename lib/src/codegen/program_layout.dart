@@ -6,7 +6,13 @@ import 'package:dartc/layout.dart';
 
 /// Assigns physical storage to declaration identities within one compilation.
 final class ProgramLayout(Iterable<IrClass> classes) {
+  static final typeValue = ClassType(
+    Uri.parse('dartc:types'),
+    '_Type',
+    interfaces: [ValueType.typeType],
+  );
   final _classes = {
+    typeValue: IrClass(typeValue, []),
     for (final declaration in classes) declaration.type: declaration,
   };
   final _storage = <ClassType, ClassStorage>{};
@@ -60,6 +66,15 @@ final class ProgramLayout(Iterable<IrClass> classes) {
       .address || .reference => NativePointerType(NativeScalarType(Void)),
     };
   }
+
+  /// Appends reified function type arguments to the declared Dart parameters.
+  List<ValueType> entryTypes(FunctionTarget target) =>
+      target.typeParameters.isEmpty
+      ? target.parameterTypes
+      : [
+          ...target.parameterTypes,
+          for (final _ in target.typeParameters) ValueType.typeType,
+        ];
 
   /// Checks transfers before a machine word loses its semantic type.
   void checkTransfer(

@@ -4,6 +4,25 @@ import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('Type constants preserve canonical identity without merging distinct top types', () {
+    final data = ConstantData(ProgramLayout([]), 0);
+    final types = <ValueType>[
+      .integer,
+      .dynamicType,
+      .voidType,
+      .object.nullable,
+      .never,
+      .nullType,
+    ];
+    final symbols = types
+        .map((type) => data.addressOf(TypeConstant(type)))
+        .toList();
+    expect(symbols.toSet().length, types.length);
+    for (final (i, type) in types.indexed) {
+      expect(data.addressOf(TypeConstant(type)), symbols[i]);
+    }
+  });
+
   test(
     'type test words retain declaration identity and freeze before emission',
     () {

@@ -20,6 +20,12 @@ abstract interface class CodeGenerator() {
   /// references cannot be exported as native pointers. Integers, doubles and
   /// booleans can enter reference storage, and statically known scalar values
   /// can be unboxed. Computed numeric boxes participate in heap collection.
+  /// Direct generic calls carry closed Type constants or forwarded function type
+  /// arguments through the normal calling convention and root records.
+  /// [ReifyType] reads those arguments; compound open types remain unsupported.
+  /// Type literals are canonical within the module. Equality with a literal or
+  /// reified parameter as receiver compares that identity; general Type member
+  /// dispatch remains unsupported. Generic functions cannot be native exports.
   /// Modules with references live across calls include read-only stack records
   /// keyed by relocated return addresses. These describe initialized reference
   /// slots and frame linkage; native entry wrappers terminate the frame walk.

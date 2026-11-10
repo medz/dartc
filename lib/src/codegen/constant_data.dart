@@ -26,7 +26,11 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     if (_constants[key] case final symbol?) return symbol;
     final ClassStorage? storage;
     final ObjectLayout layout;
-    if (value is ObjectConstant) {
+    if (value is TypeConstant) {
+      // shortcut: module-local Type identities, add structural metadata before runtime instantiation.
+      storage = null;
+      layout = ObjectLayout([]);
+    } else if (value is ObjectConstant) {
       storage = layouts.storageOf(value.type as ClassType);
       if (storage.errorTraceOffset != null) {
         throw UnsupportedError(
@@ -53,9 +57,15 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
       .address(
         1,
         offset + ObjectLayout.typeOffset,
-        _type(value.type as ClassType, layout),
+        _type(
+          value is TypeConstant
+              ? ProgramLayout.typeValue
+              : value.type as ClassType,
+          layout,
+        ),
       ),
     );
+    if (value is TypeConstant) return symbol;
     if (storage == null) {
       _write(value, value.type, offset + layout.offsetOf(0));
     } else {

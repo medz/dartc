@@ -20,7 +20,7 @@ final class FunctionLiveness(
   this {
     final positions = {
       for (final block in body.blocks)
-        for (final (i, parameter) in block.parameters.indexed)
+        for (final (i, parameter) in body.parametersOf(block).indexed)
           parameter: (block, i),
     };
     for (final block in body.blocks) {
@@ -114,7 +114,7 @@ final class FunctionLiveness(
     } while (changed);
     for (final block in body.blocks) {
       liveParameters[block] = [
-        for (final (i, parameter) in block.parameters.indexed)
+        for (final (i, parameter) in body.parametersOf(block).indexed)
           if (liveIn[block]!.contains(parameter)) i,
       ];
     }
