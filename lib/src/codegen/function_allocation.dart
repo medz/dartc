@@ -41,6 +41,7 @@ final class FunctionAllocation<R extends Object>(
     for (final block in function.blocks) {
       final uses = _blockUses[block] = {};
       void use(Value value) {
+        if (value is TestedValue) value = value.test.operand;
         if (value is NewCell) return;
         used.add(value);
         uses.update(value, (n) => n + 1, ifAbsent: () => 1);
@@ -48,7 +49,13 @@ final class FunctionAllocation<R extends Object>(
       }
 
       for (final instruction in block.instructions) {
-        instruction.inputs.forEach(use);
+        if (selection.constantTests.containsKey(instruction)) continue;
+        if (selection.binaries[instruction] case final binary?) {
+          use(binary.left);
+          use(binary.right);
+        } else {
+          instruction.inputs.forEach(use);
+        }
       }
       switch (block.end) {
         case Return(value: final value?):
@@ -202,6 +209,11 @@ final class FunctionAllocation<R extends Object>(
     Iterable<R> except = const [],
     ValueType? asType,
   }) {
+    if (value is TestedValue) {
+      // A refinement changes the type, not the original value's storage.
+      asType ??= value.type;
+      value = value.test.operand;
+    }
     final from = selection.layouts.representation(value.type);
     final to = selection.layouts.representation(asType ?? value.type);
     if (from != to) {

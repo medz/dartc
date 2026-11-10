@@ -20,6 +20,8 @@ abstract interface class CodeGenerator() {
   /// references cannot be exported as native pointers. Scalar constants and
   /// booleans can enter reference storage, and statically known scalar values
   /// can be unboxed. Boxing runtime integers and doubles remains unsupported.
+  /// Type tests support null checks and results proved by static types;
+  /// checks requiring runtime type metadata remain unsupported.
   ///
   /// [entryPoint] adds a process entry with the given link symbol. It
   /// calls a synchronous, parameterless Dart body and exits successfully after

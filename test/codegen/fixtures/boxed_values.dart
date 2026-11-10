@@ -303,6 +303,82 @@ ObjectModule boxedValues(Target target) {
     }
     classes.add(IrClass(bound, [], members: members));
   }
+  for (final (name, sample) in <(String, Constant)>[
+    ('integer', const .integer(7)),
+    ('floating', const .floating(-0.0)),
+  ]) {
+    final type = sample.type;
+    final fallback = type == .integer
+        ? const Constant.integer(13)
+        : const Constant.floating(13);
+    final read = FunctionTarget(library, 'nullable_$name', type, [
+      type.nullable,
+    ]);
+    final body = Block(read.parameterTypes), present = Block([type]);
+    final absent = Block()..finish(Return(fallback));
+    final test = body.emit(
+      TypeTest(body.parameters.single, .nullType, negated: true),
+    );
+    body.finish(
+      Branch(test, Jump(present, [test.refinement(true)!]), Jump(absent)),
+    );
+    present.finish(Return(present.parameters.single));
+    functions.add(IrFunction(read, [body, present, absent]));
+
+    final wrapper = FunctionTarget(library, 'refine_$name', type, [.integer]);
+    final entry = Block(wrapper.parameterTypes), join = Block([type.nullable]);
+    entry.finish(
+      Branch(
+        entry.emit(Equals(entry.parameters.single, const Constant.integer(0))),
+        Jump(join, [sample]),
+        Jump(join, [const Constant.nullValue()]),
+      ),
+    );
+    final check = join.emit(TypeTest(join.parameters.single, type));
+    final yes = Block([type, type.nullable]);
+    final no = Block()..finish(Return(fallback));
+    join.finish(
+      Branch(
+        check,
+        Jump(yes, [check.refinement(true)!, check.refinement(true)!]),
+        Jump(no),
+      ),
+    );
+    final first = yes.emit(DirectCall(read, [yes.parameters[1]]));
+    final second = yes.emit(DirectCall(read, [join.parameters.single]));
+    Value sum = yes.parameters.first;
+    for (final value in [first, second]) {
+      sum = yes.emit(
+        type == .integer
+            ? IntBinary(.add, sum, value)
+            : NumericBinary(.add, sum, value),
+      );
+    }
+    yes.finish(Return(sum));
+    functions.add(IrFunction(wrapper, [entry, join, yes, no]));
+  }
+
+  final pointerTest = FunctionTarget(library, 'pointer_test', .integer, [
+    .integer,
+  ]);
+  final pointerBody = Block(pointerTest.parameterTypes);
+  final pointer = pointerBody.emit(
+    PointerFromAddress(
+      pointerBody.parameters.single,
+      FfiTypes.pointerTypes[Pointer<Int64>]!,
+    ),
+  );
+  final isNull = Block()..finish(Return(const Constant.integer(1)));
+  final notNull = Block()..finish(Return(const Constant.integer(0)));
+  pointerBody.finish(
+    Branch(
+      pointerBody.emit(TypeTest(pointer, .nullType)),
+      Jump(isNull),
+      Jump(notNull),
+    ),
+  );
+  functions.add(IrFunction(pointerTest, [pointerBody, isNull, notNull]));
+
   final program = IrProgram(classes, functions);
   final CodeGenerator generator = target.architecture == .arm64
       ? Arm64CodeGenerator(target)

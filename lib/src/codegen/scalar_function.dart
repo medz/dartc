@@ -45,7 +45,11 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
       emitter.bind(labels[block]!);
       allocation.begin(block);
       for (final instruction in block.instructions) {
-        if (instruction case NewCell(:final initial)) {
+        if (selection.constantTests[instruction] case final value?) {
+          final destination = allocation.allocate(.general);
+          emitter.loadImmediate(destination, value ? 1 : 0);
+          allocation.define(instruction, destination);
+        } else if (instruction case NewCell(:final initial)) {
           if (initial != null) allocation.writeCell(instruction, initial);
         } else if (instruction is ReadCell) {
           allocation.readCell(instruction);

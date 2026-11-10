@@ -31,6 +31,17 @@ final class BoxedValues() {
   late final discard = _library
       .lookupFunction<Int64 Function(), int Function()>('discard_void');
 
+  late final refinedInteger = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'refine_integer',
+      );
+  late final refinedFloating = _library
+      .lookupFunction<Double Function(Int64), double Function(int)>(
+        'refine_floating',
+      );
+  late final pointerIsNull = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('pointer_test');
+
   int isNull(String operation) => _library
       .lookupFunction<Int64 Function(), int Function()>('box_$operation')();
 

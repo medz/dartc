@@ -27,6 +27,7 @@ final class FunctionSelection<R>(
   final mixedComparisons =
       <Instruction, ({Comparison comparison, Value integer, Value floating})>{};
   final calls = <Instruction, CallLayout<R>>{};
+  final constantTests = <TypeTest, bool>{};
   final cells = <NewCell>{};
   late final CallLayout<R> entry;
   int _generalTemporaries = 0, _floatingTemporaries = 0;
@@ -124,6 +125,35 @@ final class FunctionSelection<R>(
               type,
               constant: operand is ScalarConstant,
             );
+          case TypeTest(:final operand, :final testedType, :final negated):
+            final source = operand.type;
+            if (testedType.accepts(source)) {
+              constantTests[instruction] = !negated;
+            } else if (testedType == .never ||
+                source == .nullType && !testedType.mayBeNull ||
+                testedType == .nullType && !source.mayBeNull) {
+              constantTests[instruction] = negated;
+            } else if (testedType == .nullType ||
+                testedType == .object ||
+                !testedType.mayBeNull &&
+                    testedType.accepts(source.nonNullable)) {
+              if (layouts.representation(source) != .reference) {
+                throw UnsupportedError(
+                  'Native null test representation: ${source.dartName}',
+                );
+              }
+              final equal = (testedType == .nullType) != negated;
+              _binary(
+                instruction,
+                emitter.comparison(equal ? .equal : .notEqual),
+                operand,
+                const Constant.nullValue(),
+              );
+            } else {
+              throw UnsupportedError(
+                'Native type test requires runtime type metadata: ${testedType.dartName}',
+              );
+            }
           case PointerFromAddress() ||
               PointerAddress() ||
               PointerOffset() ||
@@ -255,10 +285,13 @@ final class FunctionSelection<R>(
       }
       for (final edge in block.successors) {
         for (final (i, argument) in edge.arguments.indexed) {
+          final stored = argument is TestedValue
+              ? argument.test.operand
+              : argument;
           layouts.checkTransfer(
-            argument.type,
+            stored.type,
             edge.target.parameters[i].type,
-            constant: argument is ScalarConstant,
+            constant: stored is ScalarConstant,
           );
         }
       }

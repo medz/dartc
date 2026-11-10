@@ -109,6 +109,7 @@ Future<void> main(List<String> args) async {
       'arithmetic',
       'calls',
       'control_flow',
+      'nullability',
       'stack_calls',
       'integer_operations',
       'pointers',

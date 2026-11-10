@@ -8,6 +8,20 @@ import 'package:test/test.dart';
 import 'fixtures/boxed_values_ffi.dart';
 
 void main() {
+  test(
+    'refinement retains the original reference alongside its scalar value',
+    () {
+      final values = BoxedValues();
+      addTearDown(values.close);
+      expect(values.refinedInteger(0), 21);
+      expect(1 / values.refinedFloating(0), double.negativeInfinity);
+      expect(values.refinedInteger(1), 13);
+      expect(values.refinedFloating(1), 13.0);
+      expect(values.pointerIsNull(0), 0);
+      expect(values.pointerIsNull(0x1000), 0);
+    },
+  );
+
   test('boxed scalar bits survive generic fields, calls, stack arguments and loops', () {
     final values = BoxedValues();
     addTearDown(values.close);
