@@ -54,6 +54,12 @@ final class Assembler() {
   void multiply(Register destination, Register left, Register right) =>
       _binary(0x9b007c00, destination, left, right);
 
+  /// Divides signed 64-bit operands, truncating toward zero and preserving flags.
+  ///
+  /// Division by zero produces zero; the minimum integer divided by -1 wraps.
+  void divideSigned(Register destination, Register left, Register right) =>
+      _binary(0x9ac00c00, destination, left, right);
+
   /// Computes a 64-bit bitwise conjunction without changing flags.
   void bitAnd(Register destination, Register left, Register right) =>
       _binary(0x8a000000, destination, left, right);

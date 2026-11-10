@@ -4,6 +4,28 @@ import 'package:dartc/assembler/x64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'signed division encodes the RDX:RAX dividend and extended divisors',
+    () {
+      final assembler = Assembler()
+        ..extendDividend()
+        ..divideSigned(.rcx)
+        ..divideSigned(.r10);
+      expect(assembler.finish(), [
+        0x48,
+        0x99,
+        0x48,
+        0xf7,
+        0xf9,
+        0x49,
+        0xf7,
+        0xfa,
+      ]);
+      expect(assembler.extendDividend, throwsStateError);
+      expect(() => assembler.divideSigned(.rcx), throwsStateError);
+    },
+  );
+
   test('system calls encode SYSCALL and respect assembler completion', () {
     final assembler = Assembler()..syscall();
     expect(assembler.finish(), [0x0f, 0x05]);

@@ -21,6 +21,7 @@ import 'frame_lookup.dart';
 import 'stack_traces.dart';
 import 'checked_casts.dart';
 import 'member_calls.dart';
+import 'integer_arithmetic.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -48,8 +49,16 @@ base class ScalarCodeGenerator<R extends Object>(
     final frames = FrameLookup();
     final traces = StackTraces(frames);
     final casts = CheckedCasts();
+    final arithmetic = IntegerArithmetic(
+      selected.map(program.implementationOf).whereType<IrFunction>(),
+    );
     final layouts = ProgramLayout(
-      [...casts.classes, ...program.classes, traces.declaration],
+      [
+        ...casts.classes,
+        ...arithmetic.classes,
+        ...program.classes,
+        traces.declaration,
+      ],
       referencedClasses: selected.expand(
         (target) =>
             program.implementationOf(target)?.referencedClasses ?? const [],
@@ -85,6 +94,7 @@ base class ScalarCodeGenerator<R extends Object>(
           traces,
           casts,
           members,
+          arithmetic,
         );
       }
       final export = exports[declaration];
@@ -94,6 +104,7 @@ base class ScalarCodeGenerator<R extends Object>(
     }
     final generated = <IrFunction>[];
     Iterable<IrFunction> supportFunctions() => [
+      ...arithmetic.functions,
       ...casts.functions,
       ...layouts.relations.functions,
       ...layouts.types.functions,
@@ -112,6 +123,7 @@ base class ScalarCodeGenerator<R extends Object>(
           traces,
           casts,
           members,
+          arithmetic,
         );
       }
       pending = [
@@ -149,6 +161,7 @@ base class ScalarCodeGenerator<R extends Object>(
       IrProgram(
         [
           if (casts.functions.isNotEmpty) ...casts.classes,
+          ...arithmetic.classes,
           ...layouts.types.classes,
           ...layouts.relations.classes,
           if (capture) traces.declaration,
@@ -178,6 +191,7 @@ base class ScalarCodeGenerator<R extends Object>(
           traces,
           casts,
           members,
+          arithmetic,
         );
       }
     }

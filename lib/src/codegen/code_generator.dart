@@ -22,6 +22,9 @@ abstract interface class CodeGenerator() {
   /// references cannot be exported as native pointers. Integers, doubles and
   /// booleans can enter reference storage, and statically known scalar values
   /// can be unboxed. Computed numeric boxes participate in heap collection.
+  /// Integer truncating division, modulo and remainder retain signed 64-bit
+  /// behavior, including overflow, and throw IntegerDivisionByZeroException
+  /// for a zero divisor through normal exception edges.
   /// Direct generic calls carry reified type arguments through the normal
   /// calling convention and root records. [ReifyType] reads or combines class and function
   /// type arguments into nullable, nominal, FutureOr, function and record types.

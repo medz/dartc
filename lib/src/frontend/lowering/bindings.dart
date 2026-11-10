@@ -1464,6 +1464,9 @@ final class Bindings({
             'Object' => ValueType.object,
             'Type' => ValueType.typeType,
             'Error' => ValueType.error,
+            'Exception' => CoreTypes.exception,
+            'IntegerDivisionByZeroException' =>
+              CoreTypes.integerDivisionByZeroException,
             'TypeError' => ValueType.typeError,
             'NoSuchMethodError' => ValueType.noSuchMethodError,
             'ArgumentError' => ValueType.argumentError,

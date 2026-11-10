@@ -11,6 +11,23 @@ final class IntegerOperations() {
   final _library = NativeAssets(Target.host())
       .open('compiler/integer_operations');
 
+  late final truncate = _library.lookupFunction<BinaryNative, BinaryDart>(
+    'truncate',
+  );
+  late final modulo = _library.lookupFunction<BinaryNative, BinaryDart>(
+    'modulo',
+  );
+  late final remainder = _library.lookupFunction<BinaryNative, BinaryDart>(
+    'remainder',
+  );
+  late final divideCompound = _library.lookupFunction<BinaryNative, BinaryDart>(
+    'divideCompound',
+  );
+  late final divisionFailure = _library
+      .lookupFunction<BinaryNative, BinaryDart>('divisionFailure');
+  late final divisionType = _library
+      .lookupFunction<Int64 Function(), int Function()>('divisionType');
+
   late final multiply = _library.lookupFunction<BinaryNative, BinaryDart>(
     'multiply',
   );

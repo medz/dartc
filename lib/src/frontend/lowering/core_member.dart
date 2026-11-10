@@ -8,6 +8,18 @@ Instruction? lowerCoreMember(
   List<Value> arguments,
 ) {
   if (!member.library.isDartCore || member.isStatic) return null;
+  if (member.name == 'remainder' &&
+      arguments.length == 1 &&
+      ['num', 'int', 'double'].any(
+        (name) =>
+            member.baseElement ==
+            member.library.getClass(name)?.getMethod('remainder'),
+      )) {
+    final right = arguments.single;
+    return receiver.type == .integer && right.type == .integer
+        ? IntBinary(.remainder, receiver, right)
+        : NumericBinary(.remainder, receiver, right);
+  }
   if (member.baseElement ==
           member.library.getClass('num')?.getMethod('toDouble') &&
       arguments.isEmpty) {

@@ -4,6 +4,21 @@ import 'package:dartc/assembler/arm64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('signed division encodes registers and rejects SP without writing', () {
+    final assembler = Assembler()
+      ..divideSigned(.x0, .x1, .x2)
+      ..divideSigned(.x30, .x29, .x28);
+    final bytes = ByteData.sublistView(assembler.finish());
+    expect(bytes.getUint32(0, .little), 0x9ac20c20);
+    expect(bytes.getUint32(4, .little), 0x9adc0fbe);
+    final invalid = Assembler();
+    expect(() => invalid.divideSigned(.sp, .x0, .x1), throwsArgumentError);
+    expect(() => invalid.divideSigned(.x0, .sp, .x1), throwsArgumentError);
+    expect(() => invalid.divideSigned(.x0, .x1, .sp), throwsArgumentError);
+    expect(invalid.finish(), isEmpty);
+    expect(() => assembler.divideSigned(.x0, .x1, .x2), throwsStateError);
+  });
+
   test('supervisor calls encode the immediate and reject overflow', () {
     final assembler = Assembler()
       ..supervisorCall(0)

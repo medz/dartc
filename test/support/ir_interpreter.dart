@@ -2199,6 +2199,7 @@ final class IrInterpreter(
             .divide => a / b,
             .truncateDivide => a ~/ b,
             .modulo => a % b,
+            .remainder => a.remainder(b),
             .lessThan => (numericOrder(a, b) ?? 1) < 0,
             .lessOrEqual => (numericOrder(a, b) ?? 1) <= 0,
             .greaterThan => (numericOrder(a, b) ?? -1) > 0,
@@ -2213,6 +2214,7 @@ final class IrInterpreter(
             .divide => a / b,
             .truncateDivide => a ~/ b,
             .modulo => a % b,
+            .remainder => a.remainder(b),
             .bitAnd => a & b,
             .bitOr => a | b,
             .bitXor => a ^ b,
@@ -2533,6 +2535,11 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     throw _AsyncUnsupported('Native Future runtime type checks');
   }
   if (type == .nullType) return run<Null>();
+  if (type.nonNullable == CoreTypes.exception) return scalar<Exception>();
+  if (type.nonNullable == CoreTypes.integerDivisionByZeroException) {
+    // ignore: deprecated_member_use
+    return scalar<IntegerDivisionByZeroException>();
+  }
   return switch (type.nonNullable) {
     ValueType.integer => scalar<int>(),
     ValueType.floating => scalar<double>(),
@@ -2914,6 +2921,8 @@ ValueType _runtimeValueType(Object? value) => switch (value) {
     'Unmodeled concrete TypeError runtime type',
   ),
   StateError() => ValueType.stateError,
+  // ignore: deprecated_member_use
+  IntegerDivisionByZeroException() => CoreTypes.integerDivisionByZeroException,
   UnsupportedError() => ValueType.unsupportedError,
   AssertionError() ||
   Error() => throw UnsupportedError('Unmodeled concrete error runtime type'),

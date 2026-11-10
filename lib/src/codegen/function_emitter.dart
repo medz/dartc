@@ -128,6 +128,9 @@ abstract interface class FunctionEmitter<R>() {
   /// The selected 64-bit wrapping multiplication and its operand constraint.
   BinaryEncoding<R> get multiply;
 
+  /// The signed integer quotient, requiring a nonzero divisor and no overflow.
+  BinaryEncoding<R> get divideSigned;
+
   /// The selected 64-bit bitwise conjunction and its operand constraint.
   BinaryEncoding<R> get bitAnd;
 

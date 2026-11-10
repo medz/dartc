@@ -13,6 +13,7 @@ import 'program_layout.dart';
 import 'stack_traces.dart';
 import 'checked_casts.dart';
 import 'member_calls.dart';
+import 'integer_arithmetic.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
 final class FunctionSelection<R>(
@@ -23,6 +24,7 @@ final class FunctionSelection<R>(
   StackTraces traces,
   CheckedCasts casts,
   MemberCalls members,
+  IntegerArithmetic arithmetic,
 ) {
   final body = FunctionRepresentation(
     function,
@@ -100,6 +102,7 @@ final class FunctionSelection<R>(
         }
         final target =
             body.invocations[instruction] ??
+            arithmetic.callFor(instruction) ??
             (instruction is DirectCall ? instruction.target : null);
         if (target != null) {
           if (instruction.type != .voidType &&
@@ -271,6 +274,7 @@ final class FunctionSelection<R>(
               .add => emitter.add,
               .subtract => emitter.subtract,
               .multiply => emitter.multiply,
+              .truncateDivide => emitter.divideSigned,
               .divide => emitter.divideDouble,
               .bitAnd => emitter.bitAnd,
               .bitOr => emitter.bitOr,

@@ -270,6 +270,10 @@ final class _Arm64Emitter(
   BinaryEncoding<CpuRegister> get multiply => _binary(assembler.multiply);
 
   @override
+  BinaryEncoding<CpuRegister> get divideSigned =>
+      _binary(assembler.divideSigned);
+
+  @override
   BinaryEncoding<CpuRegister> get bitAnd => _binary(assembler.bitAnd);
 
   @override

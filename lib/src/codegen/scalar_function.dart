@@ -16,6 +16,7 @@ import 'heap_plan.dart';
 import 'stack_traces.dart';
 import 'checked_casts.dart';
 import 'member_calls.dart';
+import 'integer_arithmetic.dart';
 
 /// Generates a control-flow graph with explicit edge transfers.
 final class ScalarFunction<R extends Object>(
@@ -26,6 +27,7 @@ final class ScalarFunction<R extends Object>(
   final StackTraces traces,
   CheckedCasts casts,
   MemberCalls members,
+  IntegerArithmetic arithmetic,
 ) {
   final selection = FunctionSelection(
     function,
@@ -35,6 +37,7 @@ final class ScalarFunction<R extends Object>(
     traces,
     casts,
     members,
+    arithmetic,
   );
 
   bool get hasRoots => selection.liveness.acrossCalls.values.any(
@@ -435,6 +438,25 @@ final class ScalarFunction<R extends Object>(
         } else {
           final (:encoding, :left, :right, :floatingInputs) =
               selection.binaries[instruction]!;
+          if (encoding.fixed case final fixed?) {
+            final reserved = {
+              fixed.left,
+              fixed.right,
+              fixed.result,
+              ...fixed.clobbered,
+            };
+            allocation.reserve(reserved);
+            allocation.load(left, fixed.left, except: reserved);
+            allocation.load(right, fixed.right, except: reserved);
+            encoding.emit(fixed.result, fixed.left, fixed.right);
+            allocation.release(left);
+            allocation.release(right);
+            reserved
+                .where((r) => r != fixed.result)
+                .forEach(allocation.releaseTemporary);
+            allocation.define(instruction, fixed.result);
+            continue;
+          }
           var a = allocation.read(left),
               b = allocation.read(right, except: [a]);
           final temporaries = <R>[];

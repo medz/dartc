@@ -64,6 +64,7 @@ final class FunctionAllocation<R extends Object>(
         selection.cells.isNotEmpty ||
         incoming.isNotEmpty ||
         selection.calls.isNotEmpty ||
+        selection.binaries.values.any((b) => b.encoding.fixed != null) ||
         _shared.isNotEmpty ||
         liveness.uses.values.any(
           (uses) => RegisterBank.values.any(
@@ -308,6 +309,16 @@ final class FunctionAllocation<R extends Object>(
 
   /// Releases a temporary that has not been associated with an SSA value.
   void releaseTemporary(R register) => _free.add(register);
+
+  /// Homes occupants before reserving fixed inputs, results and clobbers.
+  void reserve(Set<R> registers) {
+    _registers.removeWhere((value, register) {
+      if (!registers.contains(register)) return false;
+      _spill(value, register);
+      return true;
+    });
+    _free.removeWhere(registers.contains);
+  }
 
   /// Publishes a result and stores its home if other blocks can read it.
   void define(Value value, R register) {

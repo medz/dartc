@@ -258,6 +258,19 @@ final class _X64Emitter(
   BinaryEncoding<CpuRegister> get multiply => _binary(assembler.multiply);
 
   @override
+  BinaryEncoding<CpuRegister> get divideSigned => .new(
+    (_, _, _) => assembler
+      ..extendDividend()
+      ..divideSigned(.rcx),
+    fixed: (
+      left: Register.rax,
+      right: Register.rcx,
+      result: Register.rax,
+      clobbered: const {Register.rdx},
+    ),
+  );
+
+  @override
   BinaryEncoding<CpuRegister> get bitAnd => _binary(assembler.bitAnd);
 
   @override

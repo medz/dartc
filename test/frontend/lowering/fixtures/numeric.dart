@@ -4,6 +4,10 @@ num multiply(num a, num b) => a * b;
 double divide(num a, num b) => a / b;
 int truncate(num a, num b) => a ~/ b;
 num modulo(num a, num b) => a % b;
+num remainder(num a, num b) => a.remainder(b);
+int integerRemainder(int a, int b) => a.remainder(b);
+int userRemainder() => const UserNumber().remainder(7);
+int extensionRemainder() => UserConversion(3).remainder(7);
 bool less(num a, num b) => a < b;
 bool lessEqual(num a, num b) => a <= b;
 bool greater(num a, num b) => a > b;
@@ -17,10 +21,12 @@ double extensionConversion() => UserConversion(3).toDouble();
 
 class const UserNumber() {
   double toDouble() => 7.5;
+  int remainder(int value) => value + 5;
 }
 
 extension UserConversion on int {
   double toDouble() => 8.5;
+  int remainder(int value) => value + 6;
 }
 
 double doubleModulo(double a, num b) => a % b;

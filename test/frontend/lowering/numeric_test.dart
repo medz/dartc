@@ -14,7 +14,10 @@ void main() {
       'test/frontend/lowering/fixtures/numeric.dart',
     ]).use((input) async => (await Lowering().lower(input)).program);
     runner = IrInterpreter(program, {});
-    functions = {for (final f in program.functions) f.target.name: f};
+    functions = {
+      for (final f in program.functions)
+        if (f.target.owner == null) f.target.name: f,
+    };
   });
 
   void compare(String name, List<num> args, Function reference) {
@@ -78,6 +81,7 @@ void main() {
       'divide': sdk.divide,
       'truncate': sdk.truncate,
       'modulo': sdk.modulo,
+      'remainder': sdk.remainder,
       'less': sdk.less,
       'lessEqual': sdk.lessEqual,
       'greater': sdk.greater,
@@ -92,6 +96,9 @@ void main() {
       compare('convertNumber', [a], sdk.convertNumber);
       if (a is double) compare('negateDouble', [a], sdk.negateDouble);
       for (final b in values) {
+        if (a is int && b is int) {
+          compare('integerRemainder', [a, b], sdk.integerRemainder);
+        }
         for (final entry in binary.entries) {
           compare(entry.key, [a, b], entry.value);
         }
@@ -106,6 +113,8 @@ void main() {
   test('numeric conversion only binds the resolved SDK declaration', () {
     expect(runner.run(functions['userConversion']!, []), 7.5);
     expect(runner.run(functions['extensionConversion']!, []), 8.5);
+    expect(runner.run(functions['userRemainder']!, []), 12);
+    expect(runner.run(functions['extensionRemainder']!, []), 13);
     expect(
       functions['convertNumber']!.blocks
           .expand((b) => b.instructions)
@@ -128,6 +137,9 @@ void main() {
     expect(NumericBinary(.lessThan, number, floating).type, ValueType.boolean);
     expect(NumericBinary(.modulo, number, integer).mayThrow, isTrue);
     expect(NumericBinary(.modulo, number, floating).mayThrow, isFalse);
+    expect(NumericBinary(.remainder, number, integer).mayThrow, isTrue);
+    expect(NumericBinary(.remainder, number, floating).mayThrow, isFalse);
+    expect(IntBinary(.remainder, integer, integer).mayThrow, isTrue);
     expect(NumericBinary(.truncateDivide, floating, floating).mayThrow, isTrue);
     expect(NumericBinary(.divide, number, integer).mayThrow, isFalse);
     expect(NumericNegate(floating).mayThrow, isFalse);

@@ -16,10 +16,6 @@ void main() {
     'compilation rejects unsupported operations and invalid signatures',
     () async {
       await expectLater(
-        compiler.compile(['test/compiler/fixtures/unsupported.dart']),
-        throwsUnsupportedError,
-      );
-      await expectLater(
         compiler.compile(['test/compiler/fixtures/wrong_signature.dart']),
         throwsArgumentError,
       );

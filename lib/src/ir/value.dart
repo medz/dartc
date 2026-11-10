@@ -1240,6 +1240,9 @@ enum IntOperator(
   /// Euclidean modulo.
   modulo(.integer),
 
+  /// The remainder with the dividend's sign after truncating division.
+  remainder(.integer),
+
   /// Bitwise conjunction.
   bitAnd(.integer),
 
@@ -1274,6 +1277,7 @@ enum IntOperator(
   bool get mayThrow => switch (this) {
     truncateDivide ||
     modulo ||
+    remainder ||
     shiftLeft ||
     shiftRight ||
     unsignedShiftRight => true,
@@ -1443,6 +1447,9 @@ enum NumericOperator() {
   /// Euclidean modulo, preserving Dart's integer and floating semantics.
   modulo,
 
+  /// The remainder with the dividend's sign after truncating division.
+  remainder,
+
   /// Whether the left operand is smaller than the right.
   lessThan,
 
@@ -1491,7 +1498,9 @@ final class NumericBinary(
   /// Whether runtime operands can cause an arithmetic error.
   bool get canThrow =>
       operator == .truncateDivide ||
-      operator == .modulo && left.type != .floating && right.type != .floating;
+      (operator == .modulo || operator == .remainder) &&
+          left.type != .floating &&
+          right.type != .floating;
 
   @override
   Iterable<Value> get inputs => [left, right];

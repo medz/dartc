@@ -61,4 +61,45 @@ void main() {
       }
     }
   });
+
+  test('integer division and both remainders preserve signs and overflow', () {
+    for (final left in values) {
+      for (final right in values.where((n) => n != 0)) {
+        final a = BigInt.from(left), b = BigInt.from(right);
+        final quotient = (a ~/ b).toSigned(64).toInt();
+        final remainder = a.remainder(b).toInt();
+        final modulo = (a % b).toInt();
+        expect(
+          native.truncate(left, right),
+          quotient,
+          reason: '$left ~/ $right',
+        );
+        expect(
+          native.remainder(left, right),
+          remainder,
+          reason: '$left.remainder($right)',
+        );
+        expect(native.modulo(left, right), modulo, reason: '$left % $right');
+        expect(sdk.truncate(left, right), quotient);
+        expect(sdk.remainder(left, right), remainder);
+        expect(sdk.modulo(left, right), modulo);
+        expect(
+          native.divideCompound(left, right),
+          sdk.divideCompound(left, right),
+        );
+      }
+    }
+  });
+
+  test(
+    'ignored division results still throw after operands and run finally',
+    () {
+      expect(sdk.divisionType(), 1);
+      expect(native.divisionType(), 1);
+      for (final kind in [0, 1, 2]) {
+        expect(sdk.divisionFailure(7, kind), 7074);
+        expect(native.divisionFailure(7, kind), 7074);
+      }
+    },
+  );
 }

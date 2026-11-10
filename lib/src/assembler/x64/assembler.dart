@@ -71,6 +71,15 @@ final class Assembler() {
     0xc0 | (destination.index & 7) << 3 | source.index & 7,
   ]);
 
+  /// Sign-extends RAX into RDX:RAX without changing flags.
+  void extendDividend() => _bytes.add([0x48, 0x99]);
+
+  /// Divides signed RDX:RAX by [divisor], producing RAX quotient and RDX remainder.
+  ///
+  /// Zero divisors and quotients outside signed 64-bit range trap; flags are undefined.
+  void divideSigned(Register divisor) =>
+      _bytes.add([0x48 | divisor.index >> 3, 0xf7, 0xf8 | divisor.index & 7]);
+
   /// Computes a 64-bit bitwise conjunction in [destination], updating flags.
   void bitAnd(Register destination, Register source) =>
       _binary(0x21, destination, source);

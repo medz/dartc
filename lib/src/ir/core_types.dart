@@ -3,6 +3,19 @@ import 'type.dart';
 
 /// Canonical identities and storage for supported core nominal types.
 abstract final class CoreTypes() {
+  static final ClassType exception = ClassType(
+    Uri.parse('dart:core'),
+    'Exception',
+    isAbstract: true,
+  );
+
+  /// The const division failure, which implements Error without inheriting its storage.
+  static final ClassType integerDivisionByZeroException = ClassType(
+    Uri.parse('dart:core'),
+    'IntegerDivisionByZeroException',
+    interfaces: [exception, ValueType.unsupportedError],
+  );
+
   static ClassType _declare(
     String name,
     int arity, {
