@@ -20,6 +20,10 @@ final class TypeArguments() {
       .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
         'integer',
       );
+  late final structures = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'structures',
+      );
   late final floating = _library
       .lookupFunction<
         Double Function(Double, Int64),

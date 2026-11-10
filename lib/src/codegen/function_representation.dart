@@ -5,7 +5,7 @@ import 'program_layout.dart';
 /// Places allocating representation changes before register and root analysis.
 final class FunctionRepresentation(
   final IrFunction function,
-  ProgramLayout layouts, {
+  final ProgramLayout layouts, {
   FunctionTarget? captureTrace,
 }) {
   final blocks = <Block>[];
@@ -18,23 +18,33 @@ final class FunctionRepresentation(
       ? function.entry.parameters
       : [
           ...function.entry.parameters,
-          ...Block([
-            for (final _ in function.target.typeParameters) ValueType.typeType,
-          ]).parameters,
+          ...Block(
+            layouts
+                .entryTypes(function.target)
+                .skip(function.entry.parameters.length),
+          ).parameters,
         ];
 
   List<BlockParameter> parametersOf(Block block) =>
       block == function.entry ? entryParameters : block.parameters;
 
-  Value _reify(ValueType type) {
+  Value _reify(ValueType type, List<Instruction> into) {
     final index = type is TypeParameterType
         ? function.target.typeParameters.indexOf(type)
         : -1;
     if (index >= 0) {
       return entryParameters[function.entry.parameters.length + index];
     }
-    if (type.freeTypeParameters.isEmpty) return TypeConstant(type);
-    throw UnsupportedError('Native type requires runtime instantiation: $type');
+    if (type.freeTypeParameters.isEmpty) return layouts.types.constant(type);
+    final (:target, :parameters) = layouts.types.instantiate(type);
+    if (!parameters.every(function.target.typeParameters.contains)) {
+      throw UnsupportedError('Native type requires a class environment: $type');
+    }
+    final call = DirectCall(target, [
+      for (final parameter in parameters) _reify(parameter, into),
+    ]);
+    into.add(call);
+    return call;
   }
 
   Iterable<Value> inputsOf(Instruction instruction) =>
@@ -102,7 +112,7 @@ final class FunctionRepresentation(
       };
       for (final instruction in source) {
         if (instruction case ReifyType(:final template)) {
-          _operands[instruction] = [_reify(template)];
+          _operands[instruction] = [_reify(template, body)];
         }
         if (instruction case TypeView(:final operand, :final type)
             when needsBox(operand, type)) {
@@ -128,7 +138,7 @@ final class FunctionRepresentation(
           final inputs = [
             ...instruction.inputs,
             if (instruction case DirectCall(:final typeArguments))
-              ...typeArguments.map(_reify),
+              for (final type in typeArguments) _reify(type, body),
           ];
           var changed =
               instruction is DirectCall && instruction.typeArguments.isNotEmpty;

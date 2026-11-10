@@ -235,6 +235,12 @@ final class ScalarFunction<R extends Object>(
           }
           if (layout.result case final result?
               when instruction.type != .voidType) {
+            if (instruction case Equals(negated: true)) {
+              final scratch = allocation.allocate(.general, except: [result]);
+              emitter.loadImmediate(scratch, 1);
+              emitter.bitXor.emit(result, result, scratch);
+              allocation.releaseTemporary(scratch);
+            }
             if (native != null) {
               adapter.convert(result, native.signature.result, intoDart: true);
             }

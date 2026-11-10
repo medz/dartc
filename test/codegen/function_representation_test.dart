@@ -8,6 +8,55 @@ void main() {
   final uri = Uri.parse('memory:representation');
   final layouts = ProgramLayout([]);
 
+  test('equivalent type templates share one ordered argument environment', () {
+    final t = TypeParameterType('T')
+      ..initializeBound(ValueType.object.nullable);
+    final u = TypeParameterType('U')
+      ..initializeBound(ValueType.object.nullable);
+    final a = FunctionType(
+      .voidType,
+      [t, u, t],
+      namedParameters: {'a': false, 'b': false, 'c': false},
+    );
+    final b = FunctionType(
+      .voidType,
+      [u, t, t],
+      namedParameters: {'b': false, 'a': false, 'c': false},
+    );
+    expect(a, b);
+    final target = FunctionTarget(
+      uri,
+      'reify',
+      .voidType,
+      [],
+      typeParameters: [t, u],
+    );
+    final entry = Block();
+    entry.emit(ReifyType(a));
+    entry.emit(ReifyType(b));
+    entry.finish(const Return());
+    final body = FunctionRepresentation(IrFunction(target, [entry]), layouts);
+    final calls = body.instructions[entry]!.whereType<DirectCall>().toList();
+    expect(calls, hasLength(2));
+    expect(calls[0].target, same(calls[1].target));
+    for (final call in calls) {
+      expect(call.inputs, body.entryParameters);
+      expect(call.target.parameterTypes, hasLength(2));
+    }
+
+    FunctionType withDefault(TypeParameterType value) {
+      final binder = TypeParameterType('X')
+        ..initializeBound(ValueType.object.nullable)
+        ..initializeDefaultType(value);
+      return FunctionType(.integer, [], typeParameters: [binder]);
+    }
+
+    final first = layouts.types.instantiate(withDefault(t));
+    final second = layouts.types.instantiate(withDefault(u));
+    expect(first.parameters, isEmpty);
+    expect(second.target, same(first.target));
+  });
+
   test('an earlier boxed argument is live while the next one allocates', () {
     final accept = FunctionTarget(uri, 'accept', .voidType, [.object, .object]);
     final caller = FunctionTarget(uri, 'caller', .voidType, [

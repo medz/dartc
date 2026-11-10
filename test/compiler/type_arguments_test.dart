@@ -47,4 +47,23 @@ void main() {
       }
     }
   });
+
+  test(
+    'runtime type structures normalize and preserve lexical binders across GC',
+    () {
+      final native = TypeArguments();
+      addTearDown(native.close);
+      for (final count in [0, 40000]) {
+        for (var mode = 0; mode < 30; mode++) {
+          final expected = {19, 22, 24, 25}.contains(mode) ? 0 : 1;
+          expect(sdk.structures(mode, count), expected, reason: 'SDK: $mode');
+          expect(
+            native.structures(mode, count),
+            expected,
+            reason: '$mode, $count',
+          );
+        }
+      }
+    },
+  );
 }

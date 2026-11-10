@@ -43,6 +43,15 @@ void main() {
     },
   );
 
+  test('Type constants normalize bound variables before nullable unions', () {
+    final t = TypeParameterType('T')..initializeBound(ValueType.never);
+    final u = TypeParameterType('U')..initializeBound(ValueType.never);
+    final data = ConstantData(ProgramLayout([]), 0);
+    final a = FunctionType(t.nullable, [t], typeParameters: [t]);
+    final b = FunctionType(.nullType, [.never], typeParameters: [u]);
+    expect(data.addressOf(TypeConstant(a)), data.addressOf(TypeConstant(b)));
+  });
+
   test('only Error subclasses retain a traced first-throw slot', () {
     final uri = Uri.parse('memory:error-layout');
     final base = ClassType(uri, 'Base', superclass: ValueType.error);

@@ -87,18 +87,26 @@ base class ScalarCodeGenerator<R extends Object>(
         throw ArgumentError('Native signature mismatch: ${declaration.name}');
       }
     }
-    final checkedFunctions = casts.functions.toList();
-    heap.include(checkedFunctions, layouts);
-    for (final function in checkedFunctions) {
-      selected.add(function.target);
-      functions[function.target] = ScalarFunction(
-        function,
-        _createFunction(),
-        layouts,
-        heap,
-        traces,
-        casts,
-      );
+    final generated = <IrFunction>[];
+    var pending = [...casts.functions, ...layouts.types.functions];
+    while (pending.isNotEmpty) {
+      generated.addAll(pending);
+      heap.include(pending, layouts);
+      for (final function in pending) {
+        selected.add(function.target);
+        functions[function.target] = ScalarFunction(
+          function,
+          _createFunction(),
+          layouts,
+          heap,
+          traces,
+          casts,
+        );
+      }
+      pending = [
+        for (final function in [...casts.functions, ...layouts.types.functions])
+          if (!functions.containsKey(function.target)) function,
+      ];
     }
     heap.retain({
       for (final function in functions.values)
@@ -120,16 +128,17 @@ base class ScalarCodeGenerator<R extends Object>(
     heap.include(traceFunctions, layouts);
     final managed = !heap.isEmpty || exceptions;
     final primitives = managed ? heap.primitives : <FunctionTarget>{};
-    if (managed) {
+    if (managed || generated.isNotEmpty) {
       final support = [
-        ...checkedFunctions,
-        ...heap.functions,
-        frames.function,
+        ...generated,
+        if (managed) ...heap.functions,
+        if (managed) frames.function,
         ...traceFunctions,
       ];
       IrProgram(
         [
-          if (checkedFunctions.isNotEmpty) ...casts.classes,
+          if (casts.functions.isNotEmpty) ...casts.classes,
+          ...layouts.types.classes,
           if (capture) traces.declaration,
         ],
         support,

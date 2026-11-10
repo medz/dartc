@@ -244,6 +244,9 @@ sealed class const ValueType() {
     return accepts(nullType) ? this : _NullableType(this);
   }
 
+  /// The type inside a nullable union, or `null` when there is no such wrapper.
+  ValueType? get nullableBase => null;
+
   /// The static type after Dart's postfix null assertion.
   ValueType get nonNullable => this == nullType ? never : this;
 
@@ -1112,6 +1115,8 @@ final class const _SpecialType(@override final String dartName)
     extends ValueType;
 
 final class const _NullableType(final ValueType base) extends ValueType {
+  @override
+  ValueType get nullableBase => base;
   @override
   ValueType get nonNullable => base.nonNullable;
   @override

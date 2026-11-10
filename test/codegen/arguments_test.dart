@@ -48,7 +48,7 @@ void main() {
     );
 
     test(
-      '${generator.target} rejects unresolved compound type instantiation',
+      '${generator.target} instantiates nullable function type arguments',
       () {
         final parameter = TypeParameterType('T')
           ..initializeBound(ValueType.object.nullable);
@@ -65,12 +65,43 @@ void main() {
           IrFunction(target, [entry]),
         ]);
         expect(
+          generator.generate(program, definitions: [target]).sections,
+          isNotEmpty,
+        );
+      },
+    );
+
+    test(
+      '${generator.target} rejects generic bounds needing runtime normalization',
+      () {
+        final outer = TypeParameterType('T')
+          ..initializeBound(ValueType.object.nullable);
+        final inner = TypeParameterType('U')..initializeBound(outer);
+        final target = FunctionTarget(
+          .parse('memory:type-arguments'),
+          'dependentBound',
+          .typeType,
+          [],
+          typeParameters: [outer],
+        );
+        final entry = Block();
+        entry.finish(
+          Return(
+            entry.emit(
+              ReifyType(FunctionType(inner, [inner], typeParameters: [inner])),
+            ),
+          ),
+        );
+        final program = IrProgram([], [
+          IrFunction(target, [entry]),
+        ]);
+        expect(
           () => generator.generate(program, definitions: [target]),
           throwsA(
             isA<UnsupportedError>().having(
               (error) => error.message,
-              'missing instantiation',
-              contains('requires runtime instantiation'),
+              'unsupported bound',
+              contains('bounds require runtime normalization'),
             ),
           ),
         );

@@ -4,6 +4,14 @@ import 'package:test/test.dart';
 void main() {
   TypeParameterType parameter(String name) =>
       TypeParameterType(name)..initializeBound(ValueType.object.nullable);
+  test('nullable structure retains its parameter before flow narrowing', () {
+    final t = parameter('T');
+    expect(t.nullable.nullableBase, same(t));
+    expect(t.nullable.nonNullable, t.nonNullable);
+    expect(ValueType.nullType.nullableBase, isNull);
+    expect(ValueType.futureOr(ValueType.integer.nullable).nullableBase, isNull);
+  });
+
   test('type constants require closed source types including nested slots', () {
     final t = parameter('T');
     for (final type in <ValueType>[

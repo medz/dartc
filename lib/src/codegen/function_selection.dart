@@ -292,6 +292,11 @@ final class FunctionSelection<R>(
             final nullComparison =
                 left.type == .nullType || right.type == .nullType;
             final typeLiteral = left is TypeConstant || left is ReifyType;
+            if (typeLiteral &&
+                layouts.representation(right.type) == .reference) {
+              _call(instruction, layouts.types.equality, [left, right]);
+              break;
+            }
             if (!nullComparison &&
                 !typeLiteral &&
                 (!_scalar(left.type) || !_scalar(right.type))) {

@@ -4,20 +4,23 @@ import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 
+import 'type_values.dart';
+
 /// Assigns physical storage to declaration identities within one compilation.
 final class ProgramLayout(Iterable<IrClass> classes) {
-  static final typeValue = ClassType(
-    Uri.parse('dartc:types'),
-    '_Type',
-    interfaces: [ValueType.typeType],
-  );
+  final types = TypeValues();
   final _classes = {
-    typeValue: IrClass(typeValue, []),
     for (final declaration in classes) declaration.type: declaration,
   };
   final _storage = <ClassType, ClassStorage>{};
   final _typeTests = <ValueType, int>{};
   bool _typesWritten = false;
+
+  this {
+    for (final declaration in types.classes) {
+      _classes[declaration.type] = declaration;
+    }
+  }
 
   int typeTest(ValueType type) {
     if (type.freeTypeParameters.isNotEmpty) {
@@ -73,7 +76,7 @@ final class ProgramLayout(Iterable<IrClass> classes) {
       ? target.parameterTypes
       : [
           ...target.parameterTypes,
-          for (final _ in target.typeParameters) ValueType.typeType,
+          for (final _ in target.typeParameters) TypeValues.type,
         ];
 
   /// Checks transfers before a machine word loses its semantic type.
