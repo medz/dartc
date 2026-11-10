@@ -11,6 +11,32 @@ void main() {
   ]);
 
   test(
+    'static values share a carrier without allocation or wrapper bodies',
+    () {
+      final target = FunctionTarget(uri, 'plain', .integer, []);
+      final first = FunctionConstant(target), second = FunctionConstant(target);
+      final use = FunctionTarget(uri, 'use', first.type, []);
+      final storage = ClosureStorage([
+        body(target),
+        IrFunction(use, [Block()..finish(Return(first))]),
+        IrFunction(FunctionTarget(uri, 'again', second.type, []), [
+          Block()..finish(Return(second)),
+        ]),
+      ]);
+      expect(storage.constants, hasLength(1));
+      expect(storage.constants[first.structuralKey]!.target, same(target));
+      expect(storage.constants[first.structuralKey]!.initializer, isNull);
+      expect(storage.functions, isEmpty);
+      expect(
+        () => ClosureStorage([
+          IrFunction(use, [Block()..finish(Return(first))]),
+        ]),
+        throwsArgumentError,
+      );
+    },
+  );
+
+  test(
     'carriers retain capture order and outer lexical types, not own binders',
     () {
       final t = TypeParameterType('T')
@@ -48,7 +74,7 @@ void main() {
         ValueType.object.nullable,
         ValueType.floating,
       ]);
-      expect(shape.initializer.signature.parameters, [
+      expect(shape.initializer!.signature.parameters, [
         ValueType.integer,
         ValueType.object.nullable,
         ValueType.object.nullable,

@@ -46,7 +46,16 @@ void main() {
       FunctionTarget(_uri, 'entry', .integer, []),
       newFirst,
     );
-    final tearOff = FunctionConstant(newSecond);
+    final factory = FunctionTarget(
+      _uri,
+      'create',
+      face,
+      [],
+      owner: face,
+      kind: .factory,
+      redirect: newSecond,
+    );
+    final tearOff = FunctionConstant(factory);
     final reference = IrFunction(
       FunctionTarget(_uri, 'constructor', tearOff.type, []),
       [Block()..finish(Return(tearOff))],
@@ -65,7 +74,7 @@ void main() {
     );
     final program = IrProgram(
       [
-        IrClass(face, [], members: [declaration]),
+        IrClass(face, [], members: [declaration], constructors: [factory]),
         IrClass(first, [], members: [readFirst], constructors: [newFirst]),
         IrClass(second, [], members: [readSecond], constructors: [newSecond]),
         IrClass(unused, [], members: [readUnused]),
@@ -89,6 +98,7 @@ void main() {
     expect(root.virtualMembers, {declaration});
     expect(root.instantiatedClasses, {first});
     expect(reference.instantiatedClasses, {second});
+    expect(reference.functionConstants.single.target, same(factory));
     expect(program.reachableFrom([root.target]), {
       root.target,
       newFirst,
@@ -358,6 +368,9 @@ void main() {
       );
       // A batch may reference a body supplied separately.
       expect(() => IrProgram([], [use(original, original)]), returnsNormally);
+      final constants = use(original, original).functionConstants;
+      expect(constants.map((value) => value.target), [original]);
+      expect(() => constants.clear(), throwsUnsupportedError);
     },
   );
 

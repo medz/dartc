@@ -23,11 +23,13 @@
 
 [IR 行为对照](../test/frontend/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/functions.md)。
 
-## 原生词法闭包范围
+## 原生函数值与调用
 
 同步局部函数和匿名函数支持捕获值及共享的非 `late` 可变存储，可在创建函数返回后调用，也可经全局变量跨原生入口保留。普通类型化 `FunctionCall` 按实际闭包目标补齐位置和命名默认值，支持递归及自身引用；循环复制的存储保留各次迭代身份。泛型闭包每次调用绑定自身类型实参，并保留外层函数和类的实际类型环境。闭包对象使用真实 `FunctionType` 作为运行时类型，捕获的引用参与普通 GC 根扫描与异常清理。见[原生闭包验证](../test/compiler/closures_test.dart)。
 
-此范围不包含 `InstantiateFunction` 泛型函数值实例化、顶层/静态函数及方法/构造器提取、dynamic/noSuchMethod 调用、捕获的 `late` 绑定与初始化体存储，也不包含 FFI 回调。一般局部 `late` 的原生绑定语义仍待实现；上表的 IR 支持不表示这些路径均可原生执行。
+顶层函数、静态方法及构造器的常量提取支持类型化调用、默认参数、泛型签名和闭合类型实参。函数常量保持规范身份，可存入常量对象、默认参数或全局变量；调用及 `.call` 使用所选函数的实际参数与返回表示。构造器函数值保留泛型类参数、类型别名身份及工厂重定向；提取的声明身份与最终执行的构造器分开。普通类型别名与目标构造器共享身份，非等价的泛型别名保留自己的函数身份；运行时类型来自实际函数签名。函数值调用保留副作用、异常和 finally，引用参与普通 GC。见[函数值原生验证](../test/compiler/function_values_test.dart)。
+
+此范围不包含 `InstantiateFunction` 的运行时泛型函数值实例化、含自由词法类型参数的构造器提取、绑定实例/super 方法提取、dynamic/noSuchMethod 调用、捕获的 `late` 绑定与初始化体存储，也不包含 FFI 回调。一般局部 `late` 的原生绑定语义仍待实现；上表的 IR 支持不表示这些路径均可原生执行。
 
 ## 异步参考执行器范围
 
@@ -36,5 +38,7 @@
 参考执行器显式拒绝原生 Future 输入的类型桥、自定义 Future 的 await/接续协议、`whenComplete` 及其他未建模 Future API、Future/Completer 的方法提取和具体实现 runtimeType/toString。Zone 用户 API、完整异步堆栈文本和一般 Stream 成员仍待验证。
 
 ## 规范依据
+
+[构造器提取、类型别名与常量身份](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.15/constructor-tearoffs/feature-specification.md)。
 
 [主规范 §9、§17](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)、[类型推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/inference.md)、[水平推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.18/horizontal-inference/feature-specification.md)、[基于界限的推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/inference-using-bounds/design-document.md)、[私有命名形参](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.12/private-named-parameters/feature-specification.md)。

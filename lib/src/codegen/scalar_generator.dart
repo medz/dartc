@@ -140,7 +140,7 @@ base class ScalarCodeGenerator<R extends Object>(
       sourceDefinitions.addAll(discovered);
     }
     final closures = ClosureStorage(
-      selected.map(program.implementationOf).whereType<IrFunction>(),
+      selected.map(program.implementationOf).whereType<IrCallable>(),
     );
     final layouts = ProgramLayout(
       [

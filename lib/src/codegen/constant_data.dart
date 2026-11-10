@@ -33,7 +33,13 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     if (_constants[key] case final symbol?) return symbol;
     final ClassStorage? storage;
     final ObjectLayout layout;
-    if (value is ObjectConstant) {
+    final carrier = value is FunctionConstant
+        ? layouts.closures.constants[value.structuralKey]!
+        : null;
+    if (carrier != null) {
+      storage = layouts.storageOf(carrier.type);
+      layout = storage.layout;
+    } else if (value is ObjectConstant) {
       storage = layouts.storageOf(value.type as ClassType);
       if (storage.errorTraceOffset != null) {
         throw UnsupportedError(
@@ -63,17 +69,23 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
       .address(
         1,
         offset + ObjectLayout.descriptorOffset,
-        _type(value.type as ClassType, layout),
+        _type(carrier?.type ?? value.type as ClassType, layout),
       ),
     );
     relocations.add(
       .address(
         1,
         offset + ObjectLayout.typeOffset,
-        addressOf(layouts.types.constant(value.type)),
+        addressOf(layouts.types.constant(carrier?.signature ?? value.type)),
       ),
     );
-    if (value case ScalarConstant(value: final String text)) {
+    if (carrier != null) {
+      _write(
+        Constant.integer(carrier.tag),
+        .integer,
+        offset + layout.offsetOf(0),
+      );
+    } else if (value case ScalarConstant(value: final String text)) {
       _words[(offset + layout.offsetOf(0)) ~/ 8] = text.length;
       final start = _words.length;
       final data = _reserve(

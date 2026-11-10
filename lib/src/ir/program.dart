@@ -140,7 +140,8 @@ final class IrProgram(
   /// Virtual calls select implementations on classes constructed by reachable
   /// bodies, constructor tear-offs or constants in a closed program. Dynamic
   /// invocation and managed objects supplied from outside the program are not
-  /// included. Direct targets with missing bodies remain in the returned set.
+  /// included. Redirecting factories select their effective body. Direct targets
+  /// with missing bodies remain in the returned set.
   Set<FunctionTarget> reachableFrom(Iterable<FunctionTarget> roots) {
     final pending = roots.toList(), reached = <FunctionTarget>{};
     final instances = <ClassType>{};
@@ -158,7 +159,7 @@ final class IrProgram(
     }
 
     while (pending.isNotEmpty) {
-      final target = pending.removeLast();
+      final target = pending.removeLast().implementation;
       if (!reached.add(target)) continue;
       final body = implementationOf(target);
       if (body == null) continue;

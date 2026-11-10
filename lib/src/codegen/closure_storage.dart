@@ -2,12 +2,13 @@ import 'package:dartc/ir.dart';
 
 import 'type_values.dart';
 
-/// Managed carrier layouts, separate from the closures' actual runtime types.
-final class ClosureStorage(Iterable<IrFunction> selectedBodies) {
+/// Assigns function-value storage, call entries and shared capture layouts.
+final class ClosureStorage(Iterable<IrCallable> selectedBodies) {
   static final _uri = Uri.parse('dartc:closures');
   final _base = ClassType(_uri, 'Closure');
   late final tag = InstanceField(_base, 'target', .integer);
   final closures = <FunctionTarget, ClosureShape>{};
+  final constants = <Object, ClosureShape>{};
   final _cells = <CellType, CellShape>{};
   final _classes = <IrClass>[];
   final _functions = <IrFunction>[];
@@ -17,6 +18,10 @@ final class ClosureStorage(Iterable<IrFunction> selectedBodies) {
 
   this {
     final bodies = selectedBodies.toList();
+    final definitions = {for (final body in bodies) body.target: body};
+    Map<int, Constant> defaultsOf(FunctionTarget target) =>
+        definitions[target]?.defaults ??
+        (throw ArgumentError('Missing callable definition: ${target.name}'));
     final targets = <FunctionTarget>{};
     void includeCell(ValueType type) {
       if (type is! CellType || _cells.containsKey(type)) return;
@@ -32,7 +37,7 @@ final class ClosureStorage(Iterable<IrFunction> selectedBodies) {
       for (final type in body.target.parameterTypes) {
         includeCell(type);
       }
-      for (final block in body.blocks) {
+      for (final block in body is IrFunction ? body.blocks : <Block>[]) {
         for (final parameter in block.parameters) {
           includeCell(parameter.type);
         }
@@ -48,57 +53,141 @@ final class ClosureStorage(Iterable<IrFunction> selectedBodies) {
         }
       }
     }
-    if (targets.isNotEmpty) _classes.add(IrClass(_base, [tag]));
-    for (final target in targets) {
-      final index = closures.length;
-      final owner = ClassType(_uri, 'Closure$index', superclass: _base);
-      final captures = [
-        for (final (i, type) in target.captures.indexed)
-          InstanceField(owner, 'capture$i', _stored(type), isFinal: true),
-      ];
-      final enclosing = <FunctionTarget>[];
-      for (
-        var scope = target.enclosing;
-        scope != null;
-        scope = scope.enclosing
-      ) {
-        enclosing.add(scope);
-      }
-      final parameters = <TypeParameterType>{};
-      for (final scope in enclosing.reversed) {
-        if (scope.kind.hasReceiver || scope.kind == .factory) {
-          parameters.addAll(scope.owner!.typeParameters);
-        }
-        parameters.addAll(scope.typeParameters);
-      }
-      final environment = [
-        for (var i = 0; i < parameters.length; i++)
-          InstanceField(owner, 'type$i', TypeValues.type, isFinal: true),
-      ];
-      final fields = [...captures, ...environment];
-      final initializer = _initialize(owner, [tag, ...fields]);
-      closures[target] = ClosureShape(
-        index,
-        owner,
-        initializer,
-        captures,
-        parameters.toList(),
-        environment,
-      );
-      _classes.add(IrClass(owner, fields, constructors: [initializer]));
+    final values = {
+      for (final body in bodies)
+        for (final value in body.functionConstants) value.structuralKey: value,
+    };
+    if (targets.isNotEmpty || values.isNotEmpty) {
+      _classes.add(IrClass(_base, [tag]));
     }
+    for (final target in targets) {
+      closures[target] = _include(
+        target,
+        target.signature,
+        target.typeParameters,
+        defaultsOf(target),
+      );
+    }
+    for (final entry in values.entries) {
+      final value = entry.value;
+      final original =
+          value.constructorAlias == null &&
+              value.constructorSignature?.typeParameters.isNotEmpty == true
+          ? value.target.tearOffSignature(ownerType: value.ownerType)
+          : value.constructorSignature;
+      final signature = original == null
+          ? value.type as FunctionType
+          : value.typeArguments == null
+          ? original
+          : original.instantiate(value.typeArguments!);
+      if (signature.freeTypeParameters.isNotEmpty ||
+          value.typeArguments?.any((t) => t.freeTypeParameters.isNotEmpty) ==
+              true) {
+        throw UnsupportedError('Native tear-off needs a lexical environment.');
+      }
+      var target = value.target.implementation;
+      final defaults = defaultsOf(target);
+      List<ValueType> arguments = value.typeArguments ?? target.typeParameters;
+      if (target.kind == .initializer || target.kind == .factory) {
+        final applied = value.target.resolveConstruction(
+          signature.result as ClassType,
+        );
+        final bridge = FunctionTarget(
+          _uri,
+          'constructor${constants.length}',
+          signature.result,
+          signature.parameters,
+          typeParameters: signature.typeParameters,
+          optionalPositional: signature.optionalPositional,
+          namedParameters: signature.namedParameters,
+        );
+        final block = Block(bridge.parameterTypes);
+        final call = applied.target.kind == .initializer
+            ? Construct(
+                applied.target,
+                block.parameters,
+                instantiatedType: applied.ownerType,
+              )
+            : DirectCall(
+                applied.target,
+                block.parameters,
+                ownerType: applied.ownerType,
+              );
+        block.finish(Return(block.emit(call)));
+        _functions.add(IrFunction(bridge, [block], defaults: defaults));
+        target = bridge;
+        arguments = bridge.typeParameters;
+      } else if (value.constructorTypeArguments case final types?) {
+        arguments = [
+          for (final type in types)
+            type.substitute({
+              for (final (i, parameter)
+                  in value.constructorSignature!.typeParameters.indexed)
+                parameter:
+                    value.typeArguments?[i] ?? signature.typeParameters[i],
+            }),
+        ];
+      }
+      constants[entry.key] = _include(target, signature, arguments, defaults);
+    }
+  }
+
+  ClosureShape _include(
+    FunctionTarget target,
+    FunctionType signature,
+    List<ValueType> typeArguments,
+    Map<int, Constant> defaults,
+  ) {
+    final index = closures.length + constants.length;
+    final owner = ClassType(_uri, 'Closure$index', superclass: _base);
+    final captures = [
+      for (final (i, type) in target.captures.indexed)
+        InstanceField(owner, 'capture$i', _stored(type), isFinal: true),
+    ];
+    final enclosing = <FunctionTarget>[];
+    for (var scope = target.enclosing; scope != null; scope = scope.enclosing) {
+      enclosing.add(scope);
+    }
+    final parameters = <TypeParameterType>{};
+    for (final scope in enclosing.reversed) {
+      if (scope.kind.hasReceiver || scope.kind == .factory) {
+        parameters.addAll(scope.owner!.typeParameters);
+      }
+      parameters.addAll(scope.typeParameters);
+    }
+    final environment = [
+      for (var i = 0; i < parameters.length; i++)
+        InstanceField(owner, 'type$i', TypeValues.type, isFinal: true),
+    ];
+    final fields = [...captures, ...environment];
+    final initializer = target.kind == .closure
+        ? _initialize(owner, [tag, ...fields])
+        : null;
+    final shape = ClosureShape(
+      target,
+      signature,
+      typeArguments,
+      defaults,
+      index,
+      owner,
+      initializer,
+      captures,
+      parameters.toList(),
+      environment,
+    );
+    _classes.add(IrClass(owner, fields, constructors: [?initializer]));
+    return shape;
   }
 
   CellShape cell(CellType type) =>
       _cells[type] ?? (throw StateError('Uncollected native cell: $type'));
 
-  Map<ClassType, FunctionTarget> targetsFor(FunctionCall call) => {
-    for (final entry in closures.entries)
-      if (_callableAt(call, entry.key)) entry.value.type: entry.key,
-  };
+  Iterable<ClosureShape> targetsFor(FunctionCall call) => closures.values
+      .followedBy(constants.values)
+      .where((shape) => _callableAt(call, shape.signature));
 
-  bool _callableAt(FunctionCall call, FunctionTarget target) {
-    final view = call.function.type as FunctionType, actual = target.signature;
+  bool _callableAt(FunctionCall call, FunctionType actual) {
+    final view = call.function.type as FunctionType;
     if (actual.typeParameters.length != view.typeParameters.length) {
       return false;
     }
@@ -164,9 +253,13 @@ final class ClosureStorage(Iterable<IrFunction> selectedBodies) {
 }
 
 final class ClosureShape(
+  final FunctionTarget target,
+  final FunctionType signature,
+  final List<ValueType> typeArguments,
+  final Map<int, Constant> defaults,
   final int tag,
   final ClassType type,
-  final FunctionTarget initializer,
+  final FunctionTarget? initializer,
   final List<InstanceField> captures,
   final List<TypeParameterType> parameters,
   final List<InstanceField> environment,

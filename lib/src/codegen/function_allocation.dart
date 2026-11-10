@@ -267,6 +267,7 @@ final class FunctionAllocation<R extends Object>(
     } else if (value is Constant) {
       if (value is! ObjectConstant &&
           value is! TypeConstant &&
+          value is! FunctionConstant &&
           value.type != .string) {
         throw UnsupportedError('Native constant: ${value.type.dartName}');
       }

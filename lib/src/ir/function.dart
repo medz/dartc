@@ -37,6 +37,9 @@ sealed class IrCallable(
   /// Constant instances whose complete storage is checked against supplied classes.
   Set<ObjectConstant> get objects => _references.objects;
 
+  /// Function tear-offs referenced by the body or nested constant defaults.
+  Set<FunctionConstant> get functionConstants => _references.functionConstants;
+
   /// Nominal identities used by the signature, constants and graph.
   Set<ClassType> get referencedClasses => _references.classes;
 

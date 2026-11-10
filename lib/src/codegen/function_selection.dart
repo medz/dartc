@@ -310,7 +310,9 @@ final class FunctionSelection<R>(
                 left is TypeConstant ||
                 left is ReifyType ||
                 left is ObjectRuntimeType && left.direct;
-            final identity = body.identities.contains(instruction);
+            final identity =
+                body.identities.contains(instruction) ||
+                ValueType.function.nullable.accepts(left.type);
             if (typeLiteral &&
                 layouts.representation(right.type) == .reference) {
               _call(instruction, layouts.types.equality, [left, right]);

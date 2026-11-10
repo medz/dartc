@@ -13,6 +13,7 @@ typedef FunctionReferences = ({
   Set<GlobalVariable> globals,
   Set<InstanceField> fields,
   Set<ObjectConstant> objects,
+  Set<FunctionConstant> functionConstants,
   Set<ClassType> classes,
   Set<DeferredImport> deferredImports,
 });
@@ -34,6 +35,7 @@ FunctionReferences verifyCallable(
   Set<GlobalVariable>? globals;
   Set<InstanceField>? fields;
   Set<ObjectConstant>? objects;
+  Set<FunctionConstant>? functionConstants;
   Set<ClassType>? classes;
   Set<DeferredImport>? deferredImports;
   final scope = <TypeParameterType>{};
@@ -58,6 +60,7 @@ FunctionReferences verifyCallable(
       globals: _snapshot(globals),
       fields: _snapshot(fields),
       objects: _snapshot(objects),
+      functionConstants: _snapshot(functionConstants),
       classes: _snapshot(classes),
       deferredImports: _snapshot(deferredImports),
     );
@@ -95,9 +98,10 @@ FunctionReferences verifyCallable(
       :final constructorSignature,
       :final constructorTypeArguments,
     )) {
+      (functionConstants ??= {}).add(value);
       (callees ??= {}).add(callee);
-      if (callee.kind == .initializer) {
-        (instantiatedClasses ??= {}).add(callee.owner!);
+      if (callee.implementation.kind == .initializer) {
+        (instantiatedClasses ??= {}).add(callee.implementation.owner!);
       }
       if (constructorSignature != null) checkTypeScope(constructorSignature);
       if (constructorTypeArguments != null) {

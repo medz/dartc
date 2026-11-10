@@ -280,7 +280,7 @@ final class FunctionRepresentation(
           }
           arguments.add(_reify(target.signature, body));
           invocations[instruction] = heap.constructorFor(
-            shape.initializer,
+            shape.initializer!,
             layouts,
           );
           _operands[instruction] = arguments;
@@ -387,31 +387,45 @@ final class FunctionRepresentation(
         };
         if (invocation != null) {
           final (member, receiver, typeArguments) = invocation;
-          final lexical = instruction is FunctionCall;
+          final functionValue = instruction is FunctionCall;
           final virtual = instruction is! DirectCall;
-          final targets = lexical
-              ? layouts.closures.targetsFor(instruction)
-              : virtual
-              ? members.targetsFor(
-                  member?.owner ?? receiver.type,
-                  member?.selector ?? instruction.objectMember!.selector,
-                  hasBuiltin: member == null,
-                )
-              : {member!.owner!: member};
+          final targets = functionValue
+              ? {
+                  for (final closure in layouts.closures.targetsFor(
+                    instruction,
+                  ))
+                    closure.type: (target: closure.target, closure: closure),
+                }
+              : {
+                  for (final entry
+                      in (virtual
+                              ? members.targetsFor(
+                                  member?.owner ?? receiver.type,
+                                  member?.selector ??
+                                      instruction.objectMember!.selector,
+                                  hasBuiltin: member == null,
+                                )
+                              : {member!.owner!: member})
+                          .entries)
+                    entry.key: (target: entry.value, closure: null),
+                };
           if (instruction is Equals) {
-            targets[TypeValues.type] = layouts.types.equality;
+            targets[TypeValues.type] = (
+              target: layouts.types.equality,
+              closure: null,
+            );
           } else if (instruction is ObjectRuntimeType && targets.isEmpty) {
             runtimeType(instruction, body);
             body.add(instruction);
             continue;
           }
           final actual = _receiverType(receiver, body);
-          final shape = lexical
+          final shape = functionValue
               ? _load(layouts.closures.tag, receiver, body)
               : virtual
               ? LoadField(TypeValues.shape, actual)
               : null;
-          if (shape != null && !lexical) body.add(shape);
+          if (shape != null && !functionValue) body.add(shape);
           final types = [for (final type in typeArguments) _reify(type, body)];
           final result = instruction.type;
           final join = result == .never
@@ -434,7 +448,7 @@ final class FunctionRepresentation(
               ends[missing] = Unreachable(invalid);
           }
           var next = block;
-          if (member == null && !lexical) {
+          if (member == null && !functionValue) {
             final nominal = Block();
             blocks.add(nominal);
             instructions[nominal] = [];
@@ -454,7 +468,8 @@ final class FunctionRepresentation(
               next = nonNull;
             }
           }
-          for (final MapEntry(key: type, value: target) in targets.entries) {
+          for (final MapEntry(key: type, value: (:target, :closure))
+              in targets.entries) {
             var current = next;
             if (shape != null) {
               final selected = Block(), otherwise = Block();
@@ -462,9 +477,7 @@ final class FunctionRepresentation(
               final test = Equals(
                 shape,
                 Constant.integer(
-                  lexical
-                      ? layouts.closures.closures[target]!.tag
-                      : layouts.types.id(type),
+                  closure != null ? closure.tag : layouts.types.id(type),
                 ),
               );
               instructions[next]!.add(test);
@@ -479,7 +492,6 @@ final class FunctionRepresentation(
             }
 
             final setup = <Instruction>[];
-            final closure = lexical ? layouts.closures.closures[target]! : null;
             final parameters =
                 closure?.parameters ??
                 target.owner?.typeParameters ??
@@ -496,7 +508,10 @@ final class FunctionRepresentation(
             final environment = {
               for (final (i, parameter) in parameters.indexed)
                 parameter: classTypes[i],
-              for (final (i, parameter) in target.typeParameters.indexed)
+              for (final (i, parameter)
+                  in (closure?.signature.typeParameters ??
+                          target.typeParameters)
+                      .indexed)
                 parameter: types[i],
             };
             Value reify(ValueType type) {
@@ -513,10 +528,16 @@ final class FunctionRepresentation(
               return call;
             }
 
+            final invocationTypes = closure == null
+                ? types
+                : [for (final type in closure.typeArguments) reify(type)];
+            for (final (i, parameter) in target.typeParameters.indexed) {
+              environment[parameter] = invocationTypes[i];
+            }
             for (final (i, parameter) in target.typeParameters.indexed) {
               append(
                 DirectCall(casts.bounds(layouts), [
-                  types[i],
+                  invocationTypes[i],
                   reify(parameter.bound),
                 ]),
               );
@@ -529,14 +550,18 @@ final class FunctionRepresentation(
               ) => target.signature.bind<Value>(
                 positional,
                 named,
-                (i) => members.program.implementationOf(target)!.defaults[i]!,
+                (i) =>
+                    (closure?.defaults ??
+                    members.program.implementationOf(target)!.defaults)[i]!,
               ),
               DirectCall(:final inputs) => inputs.skip(1),
               ObjectRuntimeType() => const <Value>[],
               Equals(:final right) => [right],
               _ => throw StateError('Expected a member call.'),
             };
-            final arguments = <Value>[receiver];
+            final arguments = <Value>[
+              if (!functionValue || target.kind == .closure) receiver,
+            ];
             if (closure != null) {
               final captures = <Instruction>[];
               for (final field in closure.captures) {
@@ -545,9 +570,9 @@ final class FunctionRepresentation(
               captures.forEach(append);
             }
             for (final (i, value) in inputs.indexed) {
-              final destination = target
-                  .signature
-                  .parameters[i + (target.kind.hasReceiver || lexical ? 0 : 1)];
+              final destination =
+                  target.signature.parameters[i +
+                      (target.kind.hasReceiver || functionValue ? 0 : 1)];
               if (destination == .never) {
                 throw UnsupportedError(
                   'Native Never parameter: ${target.name}',
@@ -605,7 +630,7 @@ final class FunctionRepresentation(
               _ => throw StateError('Expected a member call.'),
             };
             invocations[call] = target;
-            _operands[call] = [...arguments, ...types];
+            _operands[call] = [...arguments, ...invocationTypes];
             if (join == null || target.returnType == .never) {
               instructions[current]!.add(call);
               final returned = join == null ? null : Jump(missing);
