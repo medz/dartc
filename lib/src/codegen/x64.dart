@@ -48,6 +48,10 @@ final class _X64Emitter(
   }
 
   @override
+  void address(CpuRegister destination, void Function(Fixup) reference) =>
+      reference(assembler.address(destination as Register));
+
+  @override
   List<CpuRegister> get allocatableRegisters => [
     ...const <Register>[.rax, .rcx, .rdx, .rsi, .rdi, .r8, .r9, .r10, .r11],
     ...FloatRegister.values,
@@ -309,20 +313,21 @@ final class _X64Emitter(
   void loadMemory(
     CpuRegister destination,
     CpuRegister base, {
+    int offset = 0,
     required int bytes,
     required bool signed,
   }) => switch (destination) {
     Register() => assembler.load(
       destination,
       base as Register,
-      0,
+      offset,
       bytes: bytes,
       signed: signed,
     ),
     FloatRegister() =>
       bytes == 4
-          ? assembler.loadFloat(destination, base as Register, 0)
-          : assembler.loadDouble(destination, base as Register, 0),
+          ? assembler.loadFloat(destination, base as Register, offset)
+          : assembler.loadDouble(destination, base as Register, offset),
   };
 
   @override

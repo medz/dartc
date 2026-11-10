@@ -9,13 +9,22 @@ void main() {
     const dependencies = <String, Set<String>>{
       'ir': {'interop'},
       'target': {},
+      'layout': {},
       'sdk': {},
       'assembler': {'target'},
       'frontend': {'sdk', 'ir', 'interop'},
       'abi': {'assembler', 'target', 'interop'},
       'object': {'target', 'assembler'},
       'interop': {},
-      'codegen': {'abi', 'assembler', 'object', 'ir', 'interop', 'target'},
+      'codegen': {
+        'abi',
+        'assembler',
+        'object',
+        'ir',
+        'interop',
+        'target',
+        'layout',
+      },
       'linker': {'object', 'assembler', 'target'},
       'compiler': {
         'ir',

@@ -15,6 +15,11 @@ abstract interface class CodeGenerator() {
   /// native signatures; [exports] exposes a subset of the supplied Dart bodies.
   /// The caller resolves native symbols and supplies their implementations when
   /// linking. Unsupported operations fail before an artifact is returned.
+  /// Object constants require their class and inherited field definitions in
+  /// [program]. Equal constants share storage within the generated module;
+  /// references cannot be exported as native pointers. Transfers requiring
+  /// boxing or unboxing remain unsupported.
+  ///
   /// [entryPoint] adds a process entry with the given link symbol. It
   /// calls a synchronous, parameterless Dart body and exits successfully after
   /// discarding its result. The body must belong to [definitions].

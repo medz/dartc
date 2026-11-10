@@ -47,6 +47,13 @@ final class _Arm64Emitter(
   }
 
   @override
+  void address(CpuRegister destination, void Function(Fixup) reference) {
+    final register = destination as Register;
+    reference(assembler.pageAddress(register));
+    reference(assembler.addPageOffset(register, register));
+  }
+
+  @override
   List<CpuRegister> get allocatableRegisters => [
     ...const <Register>[
       .x0,
@@ -294,20 +301,21 @@ final class _Arm64Emitter(
   void loadMemory(
     CpuRegister destination,
     CpuRegister base, {
+    int offset = 0,
     required int bytes,
     required bool signed,
   }) => switch (destination) {
     Register() => assembler.load(
       destination,
       base as Register,
-      0,
+      offset,
       bytes: bytes,
       signed: signed,
     ),
     FloatRegister() =>
       bytes == 4
-          ? assembler.loadFloat(destination, base as Register, 0)
-          : assembler.loadDouble(destination, base as Register, 0),
+          ? assembler.loadFloat(destination, base as Register, offset)
+          : assembler.loadDouble(destination, base as Register, offset),
   };
 
   @override

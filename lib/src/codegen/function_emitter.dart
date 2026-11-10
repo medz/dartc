@@ -56,6 +56,9 @@ abstract interface class FunctionEmitter<R>() {
   /// Loads all 64 bits of [value] into a general [destination] register.
   void loadImmediate(R destination, int value);
 
+  /// Materializes a symbol address and reports its instruction fields.
+  void address(R destination, void Function(Fixup) reference);
+
   /// Adds [base] and [index] times 1, 2, 4 or 8, wrapping at 64 bits.
   ///
   /// The destination may alias either input; flags and other registers survive.
@@ -139,6 +142,7 @@ abstract interface class FunctionEmitter<R>() {
   void loadMemory(
     R destination,
     R base, {
+    int offset = 0,
     required int bytes,
     required bool signed,
   });

@@ -14,6 +14,7 @@ final class FunctionAllocation<R extends Object>(
   final IrFunction function,
   final FunctionEmitter<R> emitter,
   final FunctionSelection<R> selection,
+  final void Function(ObjectConstant, R) loadObject,
 ) {
   final _owners = <Value, Block>{};
   final _blockUses = <Block, Map<Value, int>>{};
@@ -177,7 +178,7 @@ final class FunctionAllocation<R extends Object>(
     define(operation, register);
   }
 
-  /// Stores a scalar in its activation's fixed local slot.
+  /// Stores a value in its activation's fixed local slot.
   void writeCell(Value cell, Value value) {
     final register = read(value);
     emitter.storeStack(register, _slot(cell));
@@ -196,6 +197,12 @@ final class FunctionAllocation<R extends Object>(
       emitter.loadImmediate(temporary, bits.getInt64(0, .little));
       emitter.move(destination, temporary);
       releaseTemporary(temporary);
+    } else if (value case ScalarConstant(value: null)) {
+      emitter.loadImmediate(destination, 0);
+    } else if (value is ObjectConstant) {
+      loadObject(value, destination);
+    } else if (value is Constant) {
+      throw UnsupportedError('Native constant: ${value.type}');
     } else if (_spilled.contains(value)) {
       emitter.loadStack(destination, _slot(value));
     } else {
@@ -280,7 +287,7 @@ final class FunctionAllocation<R extends Object>(
   }
 
   void _spill(Value value, R register) {
-    if (value is ScalarConstant || !_spilled.add(value)) return;
+    if (value is Constant || !_spilled.add(value)) return;
     emitter.storeStack(register, _slot(value));
   }
 

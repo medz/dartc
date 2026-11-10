@@ -4,7 +4,7 @@ A native Dart compiler written in Dart.
 
 The development version uses the official Dart analyzer and provides reusable analysis, IR and native code generation APIs. Its native backend builds integer, double and pointer functions as object files, static libraries, shared libraries and executables. See the [language support tracker](https://github.com/medz/dartc/blob/main/specs/README.md) for supported behavior and remaining gaps.
 
-Use `package:dartc/frontend.dart` to check libraries and translate them to IR, and `package:dartc/ir.dart` to inspect or construct verified SSA functions. Backend APIs are available separately through `target.dart`, `assembler.dart`, `assembler/arm64.dart`, `assembler/x64.dart`, `abi.dart`, `codegen.dart`, `object.dart`, `object/elf.dart`, `object/mach_o.dart` and `linker.dart`.
+Use `package:dartc/frontend.dart` to check libraries and translate them to IR, and `package:dartc/ir.dart` to inspect or construct verified SSA functions. Backend APIs are available separately through `target.dart`, `layout.dart`, `assembler.dart`, `assembler/arm64.dart`, `assembler/x64.dart`, `abi.dart`, `codegen.dart`, `object.dart`, `object/elf.dart`, `object/mach_o.dart` and `linker.dart`.
 
 Compile `@Native<T>` calls with `Compiler.compile(nativeSymbols: ...)`, mapping each asset ID and requested symbol to a link symbol. Supply native objects, archives or explicit shared-library dependencies through `linkInputs` for linked outputs; object and archive outputs retain imports for later linking. The standalone `CodeGenerator.generate(imports: ...)` API accepts resolved `NativeImport` bindings, and `NativeCall` invokes typed function pointers through IR. Automatic asset discovery and runtime resolver fallback remain unimplemented.
 

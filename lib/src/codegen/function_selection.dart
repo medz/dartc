@@ -6,11 +6,13 @@ import 'package:dartc/ir.dart';
 
 import 'binary_encoding.dart';
 import 'function_emitter.dart';
+import 'program_layout.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
 final class FunctionSelection<R>(
   IrFunction function,
   FunctionEmitter<R> emitter,
+  final ProgramLayout layouts,
 ) {
   final binaries =
       <
@@ -35,14 +37,10 @@ final class FunctionSelection<R>(
 
   this {
     if (function.bodyKind != .synchronous ||
-        function.target.kind.hasReceiver ||
         function.target.kind == .closure ||
-        function.target.typeParameters.isNotEmpty ||
-        !(function.target.returnType == .voidType ||
-            _scalar(function.target.returnType)) ||
-        function.target.parameterTypes.any((type) => !_scalar(type))) {
+        function.target.typeParameters.isNotEmpty) {
       throw UnsupportedError(
-        'Native scalar signature: ${function.target.name}',
+        'Native function signature: ${function.target.name}',
       );
     }
     // Internal booleans use integer locations; exported booleans remain rejected.
@@ -55,33 +53,64 @@ final class FunctionSelection<R>(
     for (final block in function.blocks) {
       for (final instruction in block.instructions) {
         switch (instruction) {
-          case NewCell(type: final CellType type, :final initializer):
-            if (type.isLate || initializer != null || !_scalar(type.content)) {
+          case NewCell(
+            type: final CellType type,
+            :final initializer,
+            :final initial,
+          ):
+            if (type.isLate || initializer != null) {
               throw UnsupportedError(
-                'Native local storage requires a non-late scalar.',
+                'Native local storage requires a non-late value.',
               );
+            }
+            layouts.representation(type.content);
+            if (initial != null) {
+              layouts.checkTransfer(initial.type, type.content);
             }
             cells.add(instruction);
           case ReadCell(:final cell) || WriteCell(:final cell):
             if (cell is! NewCell) {
               throw UnsupportedError('Native local storage cannot be aliased.');
             }
+            if (instruction case WriteCell(:final value)) {
+              layouts.checkTransfer(
+                value.type,
+                (cell.type as CellType).content,
+              );
+            }
           case NativeCall(:final signature):
             calls[instruction] = emitter.convention.classify(signature);
-          case DirectCall(:final inputs, :final type, :final typeArguments):
-            if (!(type == .voidType || _scalar(type)) ||
-                typeArguments.isNotEmpty ||
-                inputs.any((v) => !_scalar(v.type))) {
+          case DirectCall(
+            :final target,
+            :final inputs,
+            :final type,
+            :final typeArguments,
+          ):
+            if (typeArguments.isNotEmpty) {
               throw UnsupportedError(
-                'Native call requires supported scalar arguments.',
+                'Native generic function calls are not implemented.',
               );
+            }
+            for (final (i, input) in inputs.indexed) {
+              layouts.checkTransfer(input.type, target.parameterTypes[i]);
+            }
+            if (type != .voidType) {
+              layouts.checkTransfer(target.returnType, type);
             }
             calls[instruction] = emitter.convention.classify(
               NativeSignature.types(
                 _callType(type),
-                inputs.map((v) => _callType(v.type)),
+                target.parameterTypes.map(_callType),
               ),
             );
+          case LoadField(:final field, :final type):
+            if (field.isLate) {
+              throw UnsupportedError('Native late field: ${field.name}');
+            }
+            layouts.fieldOffset(field);
+            layouts.checkTransfer(field.type, type);
+          case TypeView(:final operand, :final type):
+            layouts.checkTransfer(operand.type, type);
           case PointerFromAddress() ||
               PointerAddress() ||
               PointerOffset() ||
@@ -167,7 +196,10 @@ final class FunctionSelection<R>(
               floatingInputs: operator == .divide,
             );
           case Equals(:final left, :final right, :final negated):
-            if (!_scalar(left.type) || !_scalar(right.type)) {
+            final nullComparison =
+                left.type == .nullType || right.type == .nullType;
+            if (!nullComparison &&
+                (!_scalar(left.type) || !_scalar(right.type))) {
               throw UnsupportedError(
                 'Native equality requires supported scalar operands.',
               );
@@ -181,7 +213,10 @@ final class FunctionSelection<R>(
             final BinaryEncoding<R> encoding =
                 left.type == right.type ||
                     FfiTypes.isPointer(left.type) &&
-                        FfiTypes.isPointer(right.type)
+                        FfiTypes.isPointer(right.type) ||
+                    nullComparison &&
+                        layouts.representation(left.type) == .reference &&
+                        layouts.representation(right.type) == .reference
                 ? emitter.comparison(
                     negated ? .notEqual : .equal,
                     floating: left.type == .floating,
@@ -195,6 +230,15 @@ final class FunctionSelection<R>(
             throw UnsupportedError(
               'Native operation: ${instruction.runtimeType}',
             );
+        }
+      }
+      if (block.end case Return(value: final value?)
+          when function.target.returnType != .voidType) {
+        layouts.checkTransfer(value.type, function.target.returnType);
+      }
+      for (final edge in block.successors) {
+        for (final (i, argument) in edge.arguments.indexed) {
+          layouts.checkTransfer(argument.type, edge.target.parameters[i].type);
         }
       }
     }
@@ -317,7 +361,8 @@ final class FunctionSelection<R>(
   bool _number(ValueType type) => type == .integer || type == .floating;
 
   /// Selects the physical bank for an already supported value representation.
-  RegisterBank bank(ValueType type) => type == .floating ? .floating : .general;
+  RegisterBank bank(ValueType type) =>
+      layouts.representation(type) == .floating ? .floating : .general;
 
   bool _scalar(ValueType type) =>
       type == .integer ||
@@ -327,12 +372,11 @@ final class FunctionSelection<R>(
 
   NativeTypeRef _callType(ValueType type) {
     if (type == .voidType) return NativeScalarType(Void);
-    if (type == .floating) return NativeScalarType(Double);
-    if (type == .integer || type == .boolean) return NativeScalarType(Int64);
-    // Dart calls classify addresses without requiring a concrete pointee type.
-    if (FfiTypes.isPointer(type)) {
-      return NativePointerType(NativeScalarType(Void));
-    }
-    throw UnsupportedError('Native representation: $type');
+    // Internal references use pointer locations without becoming FFI values.
+    return switch (layouts.representation(type)) {
+      .word => NativeScalarType(Int64),
+      .floating => NativeScalarType(Double),
+      .address || .reference => NativePointerType(NativeScalarType(Void)),
+    };
   }
 }

@@ -10,16 +10,25 @@ import 'function_allocation.dart';
 import 'function_emitter.dart';
 import 'function_selection.dart';
 import 'native_adapter.dart';
+import 'program_layout.dart';
 
-/// Generates a scalar control-flow graph with explicit edge transfers.
+/// Generates a control-flow graph with explicit edge transfers.
 final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
   /// Emits the body and reports direct call sites to the module generator.
   Uint8List generate(
     IrFunction function,
     void Function(Fixup, FunctionTarget) call,
+    ProgramLayout layouts,
+    void Function(Fixup, ObjectConstant) constant,
   ) {
-    final selection = FunctionSelection(function, emitter);
-    final allocation = FunctionAllocation(function, emitter, selection);
+    final selection = FunctionSelection(function, emitter, layouts);
+    final allocation = FunctionAllocation(
+      function,
+      emitter,
+      selection,
+      (value, register) =>
+          emitter.address(register, (fixup) => constant(fixup, value)),
+    );
     final adapter = NativeAdapter(emitter);
     final labels = {
       for (final block in function.blocks) block: emitter.label(),
@@ -110,6 +119,30 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
             }
             allocation.define(instruction, result);
           }
+        } else if (instruction case LoadField(:final receiver, :final field)) {
+          final source = allocation.read(receiver);
+          allocation.release(receiver);
+          final destination = allocation.allocate(
+            selection.bank(instruction.type),
+            preferred: source,
+          );
+          emitter.loadMemory(
+            destination,
+            source,
+            offset: layouts.fieldOffset(field),
+            bytes: 8,
+            signed: false,
+          );
+          allocation.define(instruction, destination);
+        } else if (instruction case TypeView(:final operand)) {
+          final source = allocation.read(operand);
+          allocation.release(operand);
+          final destination = allocation.allocate(
+            selection.bank(instruction.type),
+            preferred: source,
+          );
+          emitter.move(destination, source);
+          allocation.define(instruction, destination);
         } else if (instruction case PointerOffset(
           :final pointer,
           :final index,

@@ -11,8 +11,10 @@ import 'code_generator.dart';
 import 'function_emitter.dart';
 import 'scalar_function.dart';
 import 'native_adapter.dart';
+import 'program_layout.dart';
+import 'constant_data.dart';
 
-/// Generates scalar modules with target-specific function emitters.
+/// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
   @override final Target target,
   FunctionEmitter<R> Function() createFunction,
@@ -42,6 +44,13 @@ base class ScalarCodeGenerator<R extends Object>(
     final nativeSymbols = <String, int>{};
     final nativeCalls = <(int, Fixup, int)>[];
     final code = BytesBuilder(copy: false), symbols = <Symbol>[];
+    final layouts = ProgramLayout(program);
+    final constants = ConstantData(
+      layouts,
+      selected.length +
+          exports.values.where((e) => _needsEntry(e.signature)).length +
+          (entryPoint == null ? 0 : 1),
+    );
     for (final declaration in selected) {
       final function = program.implementationOf(declaration);
       final binding = imports[declaration];
@@ -72,23 +81,36 @@ base class ScalarCodeGenerator<R extends Object>(
                   );
                   nativeCalls.add((code.length, fixup, symbol));
                 }, intoDart: false)
-          : ScalarFunction(_createFunction()).generate(function as IrFunction, (
-              fixup,
-              callee,
-            ) {
-              final index = indices[callee];
-              if (index == null) {
-                throw ArgumentError('Missing call definition: ${callee.name}');
-              }
-              relocations.add(
-                .instruction(
-                  0,
-                  code.length + fixup.offset,
-                  fixup.encoding,
-                  index,
-                ),
-              );
-            });
+          : ScalarFunction(_createFunction()).generate(
+              function as IrFunction,
+              (fixup, callee) {
+                final index = indices[callee];
+                if (index == null) {
+                  throw ArgumentError(
+                    'Missing call definition: ${callee.name}',
+                  );
+                }
+                relocations.add(
+                  .instruction(
+                    0,
+                    code.length + fixup.offset,
+                    fixup.encoding,
+                    index,
+                  ),
+                );
+              },
+              layouts,
+              (fixup, constant) {
+                relocations.add(
+                  .instruction(
+                    0,
+                    code.length + fixup.offset,
+                    fixup.encoding,
+                    constants.addressOf(constant),
+                  ),
+                );
+              },
+            );
       symbols.add(
         .new(
           exported ? target.nativeSymbol(export.symbol) : declaration.name,
@@ -153,13 +175,18 @@ base class ScalarCodeGenerator<R extends Object>(
       symbols.add(.new(symbol, 0, code.length, bytes.length));
       code.add(bytes);
     }
+    symbols.addAll(constants.symbols);
     return .new(
       target,
-      [Section.code(code.takeBytes())],
+      [
+        Section.code(code.takeBytes()),
+        if (constants.symbols.isNotEmpty) constants.finish(),
+      ],
       symbols,
       imports: nativeSymbols.keys,
       relocations: [
         ...relocations,
+        ...constants.relocations,
         for (final (start, fixup, symbol) in nativeCalls)
           Relocation.instruction(
             0,

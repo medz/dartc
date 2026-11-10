@@ -17,6 +17,7 @@ import '../test/abi/fixtures/frames.dart';
 import '../test/abi/fixtures/floating_frames.dart';
 import '../test/abi/fixtures/stack_calls.dart';
 import '../test/codegen/fixtures/control_flow.dart';
+import '../test/codegen/fixtures/object_values.dart';
 import '../test/linker/fixtures/functions.dart';
 import '../test/linker/fixtures/calls.dart';
 import '../test/linker/fixtures/symbols.dart';
@@ -201,6 +202,10 @@ Future<void> main(List<String> args) async {
     await shared([frames(target)], assets.library('abi/frames'));
     await shared(stackCalls(target), assets.library('abi/stack_calls'));
     await shared([controlFlow(target)], assets.library('codegen/control_flow'));
+    await shared([
+      objectValues(target),
+      functions(target, {'object_touch': 123}),
+    ], assets.library('codegen/object_values'));
     final inputs = [
       functions(target, {'first': 40}),
       functions(target, {'second': 2}),

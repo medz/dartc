@@ -1,6 +1,6 @@
 # 类及相关声明
 
-类的身份由声明库和声明共同确定。字段按声明区分，机器布局由后端决定。
+类的身份由声明库和声明共同确定。字段按声明区分，物理存储由 layout 表达，codegen 将声明和语义类型映射到该布局。
 
 | 特性 | 当前 IR 范围 |
 | --- | --- |
@@ -26,6 +26,14 @@
 | 构造器 assert initializer | 非 const 调用的断言默认关闭，使用 `enableAssertions: true` 启用，保持初始化列表顺序及抛错行为。const 求值始终检查断言，失败属于静态错误；数值常量及已知诊断缺口见[数值比较](expressions.md#数值比较与-sdk-差异)。 |
 
 [构造样本](../test/frontend/lowering/fixtures/nominal/constructors.dart)和[分派、默认参数与私有成员样本](../test/frontend/lowering/fixtures/nominal/members.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/classes.md)。
+
+## 原生执行范围
+
+`CodeGenerator` 支持已检查 IR 中的不可变 `ObjectConstant`、直接 `LoadField`、同表示的 `TypeView`，以及对象引用的直接调用、参数、返回、分支和循环传递。字段可以存储 int、bool、double、null 或嵌套常量对象；继承字段及不同声明库的同名私有字段分别保留。普通 getter 和方法仍保留虚派发语义，不能用直接读取字段代替。
+
+单个生成模块中的同类型、同字段值常量共用存储；负零与正零、不同具体类型保持各自身份。泛型字段按声明类型确定存储，支持引用类型实参；需要标量装箱或拆箱的常量、字段及传值明确拒绝。跨模块常量身份统一、动态分配、GC、完整类型元数据与检查、虚派发和完整源码类的原生执行仍是缺口。此处的 IR 原生路径不表示上表的全部行为已能生成机器码。
+
+[布局契约](../test/layout/object_layout_test.dart)、[常量身份与表示检查](../test/codegen/object_values_test.dart)和[原生对象引用验证](../test/codegen/object_values_native_test.dart)覆盖字段、具体类型身份、嵌套引用、寄存器与栈参数、调用保存、循环交换及 null。
 
 ## 规范依据
 
