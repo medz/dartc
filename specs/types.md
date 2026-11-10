@@ -35,21 +35,21 @@ int、double 和 bool 值均可装箱为引用，包括运行时计算的数值�
 
 泛型实参中的函数子类型检查保留绑定变量的词法作用域、界限、参数逆变和返回值协变。继承类型代入不能捕获嵌套函数的绑定变量；递归界限不能导致无限检查。固定样本包含 `X extends FutureOr<X>` 和 `FunctionProjection<T> extends Box<T Function<U>(U)>`，见[子类型规则验证](../test/codegen/type_relations_test.dart)与[原生行为验证](../test/compiler/type_arguments_test.dart)。macOS ARM64 的 SDK 3.13.7 JIT/AOT 对样本中两项递归界限检查触发 SIGILL，对上述继承投影在嵌套泛型函数中的检查返回 false。按函数子类型与直接超接口规则，投影样本应返回 true；这些样本单独断言规范结果，其余样本继续与 SDK 对照。
 
-内置 `Object.runtimeType` 支持上述原生标量、null、指针、用户类及 Type 值，包含装箱值和常量。通过宽化引用读取时保留实例的实际泛型实参，回收前后结果相等；指针零地址不会读作 null。对需要用户 getter override 派发的读取明确拒绝，不能返回对象头中的类型来绕过 override。`super.runtimeType` 选中内置 getter 时可直接读取实际类型。见[runtimeType 行为对照](../test/compiler/type_arguments_test.dart)和[继承 override 边界](../test/codegen/type_tests_test.dart)。
+`Object.runtimeType` 支持上述原生标量、null、指针、用户类及 Type 值，包含装箱值和常量。通过宽化引用读取时保留实例的实际泛型实参，回收前后结果相等；指针零地址不会读作 null。普通读取按实际对象选择用户 getter，包含继承、接口视图及泛型接收者；模式 getter 的求值次数、异常及副作用保留。`super.runtimeType` 调用选中的祖先实现，选中内置 getter 时直接读取实际类型。见[内置读取验证](../test/compiler/type_arguments_test.dart)、[用户 getter 与 SDK 对照](../test/compiler/object_members_test.dart)和[选中实现的依赖检查](../test/codegen/type_tests_test.dart)。
 
 ## 原生泛型调用与 Type 值
 
 直接泛型函数调用支持具体类型实参及函数类型参数的转发，包含递归调用、寄存器与栈参数，以及调用和回收后读取原参数或结果。`T` 表达式读取本次调用传入的 Type 值；可在运行时组合为 `T?`、`C<T>`、`FutureOr<T>`、函数和 record 类型，包含递归调用中持续嵌套的类型实参。具体类型字面量在同一生成模块内保留规范身份。见[泛型调用与 SDK 对照](../test/compiler/type_arguments_test.dart)。
 
-以类型字面量、实化表达式或内置 `runtimeType` 读取作左操作数的 `==`/`!=` 按规范化后的结构比较类型。可空类型及 FutureOr 保持规范化规则；dynamic、void、Object?、Never 和 Null 仍可区分。函数类型忽略绑定参数名称和命名参数顺序，保留绑定层级、位置参数顺序及参数必需性；record 保留位置字段和命名字段的身份。泛型函数类型的界限可依赖外层函数实参，支持嵌套绑定及界限链；绑定变量仅在其界限规范化为 Never 时归一为 Never，其他界限保留变量身份。
+`Type`/`Type?` 值的 `==`/`!=` 按左操作数的实际实现执行：内建 Type 比较规范化结构，用户 Type 保留自己的运算符或继承的身份比较，任一操作数为 null 时遵守空值规则，不调用用户运算符。getter 返回的自定义 Type 不被当作内建实现；用户比较中的分配、异常和副作用保留。可空类型及 FutureOr 保持规范化规则；dynamic、void、Object?、Never 和 Null 仍可区分。函数类型忽略绑定参数名称和命名参数顺序，保留绑定层级、位置参数顺序及参数必需性；record 保留位置字段和命名字段的身份。泛型函数类型的界限可依赖外层函数实参，支持嵌套绑定及界限链；绑定变量仅在其界限规范化为 Never 时归一为 Never，其他界限保留变量身份。见[相等与身份验证](../test/compiler/object_members_test.dart)。
 
 macOS ARM64 的 Dart SDK 3.13.7 JIT/AOT 对泛型函数界限存在规范化差异：`U Function<U extends T>(U Function<V extends U>(V, U))` 在运行时以 Never 实化，与直接指定 Never 的闭合字面量比较返回 false；与显式写出全部 Never 的规范形式比较返回 true。`T Function<T extends Never>(T)` 与 `Never Function<T extends Never>(Never)` 的常量形式相等，但作为类型实参传给 `Type reify<T>() => T` 后不相等。空安全规范要求 Type 相等和常量身份使用 NORM；dartc 对上述等价类型保持相等。原生 `bounds` 样本及[类型值验证](../test/frontend/lowering/type_values_test.dart)分别保留这些案例，规范化契约见 [IR 验证](../test/ir/type_values_test.dart)与[常量池验证](../test/codegen/program_layout_test.dart)。
 
 开放泛型构造 `C<T>()` 保留实际实参，初始化器和直接成员调用从实际接收者读取所属类的实参，包含继承中的重排、嵌套代入及与方法类型参数同名的声明。factory 使用调用方请求的类类型环境。构造参数和类型环境在分配、栈传参及回收后仍有效，见[原生类环境对照](../test/compiler/class_types_test.dart)与[继承投影契约](../test/codegen/type_relations_test.dart)。
 
-泛型字段写入按被写对象的实际类型检查，不能用调用者的类环境或变量的宽化静态类型替代。检查失败抛出 TypeError，保留旧值并进入原异常处理器；成功后才写入。见[字段写入验证](../test/codegen/dynamic_boxes_native_test.dart)和[检查期间存活及控制流契约](../test/codegen/function_representation_test.dart)。普通源码实例成员派发仍未接通，此处支持 IR 的直接字段访问及源码 super 调用。
+泛型字段写入按被写对象的实际类型检查，不能用调用者的类环境或变量的宽化静态类型替代。检查失败抛出 TypeError，保留旧值并进入原异常处理器；成功后才写入。见[字段写入验证](../test/codegen/dynamic_boxes_native_test.dart)、[普通实例成员验证](../test/compiler/member_calls_test.dart)和[检查期间存活及控制流契约](../test/codegen/function_representation_test.dart)。
 
-跨模块 Type 规范身份，以及 Type 的通用成员派发、hashCode 和 toString 仍未接通。泛型函数不能直接作为 FFI 导出；原生入口须通过普通 Dart 函数提供明确的 FFI 签名。
+跨模块 Type 规范身份、内建 Type 的 hashCode 和 toString，以及通过 Object/dynamic 视图进行的一般相等派发仍未接通。泛型函数不能直接作为 FFI 导出；原生入口须通过普通 Dart 函数提供明确的 FFI 签名。
 
 ## analyzer 元数据边界
 

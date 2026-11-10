@@ -24,6 +24,10 @@ sealed class IrCallable(
   /// Statically selected declarations whose implementation needs virtual lookup.
   Set<FunctionTarget> get virtualMembers => _references.virtualMembers;
 
+  /// Implicit Object member calls, including their possible receiver types.
+  Set<({ValueType receiver, MemberSelector selector})> get objectMembers =>
+      _references.objectMembers;
+
   /// Classes referenced by construction, constructor tear-offs or object constants.
   Set<ClassType> get instantiatedClasses => _references.instantiatedClasses;
 

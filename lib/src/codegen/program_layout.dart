@@ -142,33 +142,6 @@ final class ProgramLayout(
 
   int fieldOffset(InstanceField field) =>
       storageOf(field.owner).offsetOf(field);
-
-  bool hasRuntimeTypeOverride(ValueType source) {
-    const selector = (
-      kind: FunctionKind.getter,
-      name: 'runtimeType',
-      privateLibrary: null,
-    );
-    for (final candidate in _classes.keys) {
-      if (source.nonNullable case final ClassType type
-          when candidate.asInstanceOf(type.declaration) == null) {
-        continue;
-      }
-      for (
-        ClassType? type = candidate;
-        type != null && type != ValueType.object;
-        type = type.superclass
-      ) {
-        final definition = _classes[type.declaration];
-        if (definition == null ||
-            definition.members.containsKey(selector) ||
-            definition.unsupportedForwarders.contains(selector)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
 }
 
 /// Declared field identities paired with their shared physical layout.

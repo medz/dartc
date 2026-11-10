@@ -21,7 +21,8 @@ final class FunctionRepresentation(
   final boxes = <Instruction, Value>{};
   final introduced = <Instruction>{};
   final tests = <TypeTest, TypeTestKind>{};
-  final invocations = <InstanceCall, FunctionTarget>{};
+  final invocations = <Instruction, FunctionTarget>{};
+  final identities = <Equals>{};
   final aliases = <Instruction>{};
   final _resultTypes = <Instruction, ValueType>{};
   final _prologue = <Instruction>[];
@@ -209,14 +210,37 @@ final class FunctionRepresentation(
               when target.kind.isVirtual &&
                   target.owner!.typeParameters.isNotEmpty =>
             (target, inputs.first, typeArguments),
+          ObjectRuntimeType(:final operand, direct: false)
+              when operand.type != .nullType &&
+                  layouts.representation(operand.type) == .reference =>
+            (null, operand, const <ValueType>[]),
+          Equals(:final left, :final right)
+              when left is! TypeConstant &&
+                  left is! ReifyType &&
+                  !(left is ObjectRuntimeType && left.direct) &&
+                  left.type != .nullType &&
+                  right.type != .nullType &&
+                  ValueType.typeType.accepts(left.type.nonNullable) =>
+            (null, left, const <ValueType>[]),
           _ => null,
         };
         if (invocation != null) {
           final (member, receiver, typeArguments) = invocation;
-          final virtual = instruction is InstanceCall;
+          final virtual = instruction is! DirectCall;
           final targets = virtual
-              ? members.targetsFor(member)
-              : {member.owner!: member};
+              ? members.targetsFor(
+                  member?.owner ?? receiver.type,
+                  member?.selector ?? instruction.objectMember!.selector,
+                  hasBuiltin: member == null,
+                )
+              : {member!.owner!: member};
+          if (instruction is Equals) {
+            targets[TypeValues.type] = layouts.types.equality;
+          } else if (instruction is ObjectRuntimeType && targets.isEmpty) {
+            runtimeType(instruction, body);
+            body.add(instruction);
+            continue;
+          }
           final actual = _receiverType(receiver, body);
           final shape = virtual ? LoadField(TypeValues.shape, actual) : null;
           if (shape != null) body.add(shape);
@@ -233,10 +257,41 @@ final class FunctionRepresentation(
               : Block(result == .voidType ? [] : [result]);
           final missing = Block();
           blocks.add(missing);
-          final invalid = DirectCall(members.invalid, []);
-          instructions[missing] = [invalid];
-          ends[missing] = Unreachable(invalid);
+          switch (instruction) {
+            case ObjectRuntimeType():
+              instructions[missing] = [];
+              ends[missing] = Jump(join!, [actual]);
+            case Equals(:final left, :final right, :final negated):
+              final identity = Equals(left, right, negated: negated);
+              identities.add(identity);
+              instructions[missing] = [identity];
+              ends[missing] = Jump(join!, [identity]);
+            default:
+              final invalid = DirectCall(members.invalid, []);
+              instructions[missing] = [invalid];
+              ends[missing] = Unreachable(invalid);
+          }
           var next = block;
+          if (member == null) {
+            final nominal = Block();
+            blocks.add(nominal);
+            instructions[nominal] = [];
+            final kind = LoadField(TypeValues.kind, actual);
+            final test = Equals(kind, Constant.integer(TypeKind.nominal.index));
+            body.addAll([kind, test]);
+            ends[next] = Branch(test, Jump(nominal), Jump(missing));
+            next = nominal;
+            if (instruction case Equals(:final right)
+                when right.type.accepts(.nullType)) {
+              final nonNull = Block();
+              blocks.add(nonNull);
+              instructions[nonNull] = [];
+              final test = Equals(right, const Constant.nullValue());
+              instructions[next]!.add(test);
+              ends[next] = Branch(test, Jump(missing), Jump(nonNull));
+              next = nonNull;
+            }
+          }
           for (final MapEntry(key: type, value: target) in targets.entries) {
             var current = next;
             if (shape != null) {
@@ -270,12 +325,13 @@ final class FunctionRepresentation(
             }
 
             final setup = <Instruction>[];
-            final classTypes = target.owner!.typeParameters.isEmpty
+            final parameters = target.owner?.typeParameters ?? const [];
+            final classTypes = parameters.isEmpty
                 ? <Value>[]
                 : _ownerArguments(actual, target.owner!, setup);
             setup.forEach(append);
             final environment = {
-              for (final (i, parameter) in target.owner!.typeParameters.indexed)
+              for (final (i, parameter) in parameters.indexed)
                 parameter: classTypes[i],
               for (final (i, parameter) in target.typeParameters.indexed)
                 parameter: types[i],
@@ -310,11 +366,15 @@ final class FunctionRepresentation(
                   (i) => members.program.implementationOf(target)!.defaults[i]!,
                 ),
               DirectCall(:final inputs) => inputs.skip(1),
+              ObjectRuntimeType() => const <Value>[],
+              Equals(:final right) => [right],
               _ => throw StateError('Expected a member call.'),
             };
             final arguments = <Value>[receiver];
             for (final (i, value) in inputs.indexed) {
-              final destination = target.signature.parameters[i];
+              final destination = target
+                  .signature
+                  .parameters[i + (target.kind.hasReceiver ? 0 : 1)];
               if (destination == .never) {
                 throw UnsupportedError(
                   'Native Never parameter: ${target.name}',
@@ -348,7 +408,7 @@ final class FunctionRepresentation(
             final call = switch (instruction) {
               InstanceCall(:final positional, :final named, :final ownerType) =>
                 InstanceCall(
-                  member,
+                  member!,
                   receiver,
                   positional,
                   named,
@@ -356,14 +416,20 @@ final class FunctionRepresentation(
                   typeArguments,
                 ),
               DirectCall(:final inputs, :final ownerType) => DirectCall(
-                member,
+                member!,
                 inputs,
                 ownerType: ownerType,
                 typeArguments: typeArguments,
               ),
+              ObjectRuntimeType(:final operand) => ObjectRuntimeType(operand),
+              Equals(:final left, :final right, :final negated) => Equals(
+                left,
+                right,
+                negated: negated,
+              ),
               _ => throw StateError('Expected a member call.'),
             };
-            if (call is InstanceCall) invocations[call] = target;
+            invocations[call] = target;
             _operands[call] = [...arguments, ...types];
             if (join == null || target.returnType == .never) {
               work.add(call);

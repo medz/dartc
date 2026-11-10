@@ -37,7 +37,7 @@ void main() {
         isNotEmpty,
       );
     });
-    test('${generator.target} preserves the runtimeType override boundary', () {
+    test('${generator.target} selects reachable runtimeType overrides', () {
       final owner = ClassType(library, 'Override');
       final interface = ClassType(library, 'Interface');
       final child = ClassType(
@@ -72,6 +72,11 @@ void main() {
             ),
           ),
         );
+        final root = FunctionTarget(library, 'entry', .typeType, []);
+        final entry = Block();
+        entry.finish(
+          Return(entry.emit(DirectCall(target, [ObjectConstant(child, {})]))),
+        );
         final program = IrProgram(
           [
             IrClass(owner, [], members: [getter]),
@@ -81,26 +86,81 @@ void main() {
           [
             IrFunction(getter, [getterBody]),
             IrFunction(target, [body]),
+            IrFunction(root, [entry]),
           ],
         );
-        if (direct) {
+        final definitions = program.reachableFrom([root]);
+        expect(definitions, {root, target, if (!direct) getter});
+        expect(
+          generator.generate(program, definitions: definitions).sections,
+          isNotEmpty,
+        );
+        if (!direct) {
           expect(
-            generator.generate(program, definitions: [target]).sections,
-            isNotEmpty,
-          );
-        } else {
-          expect(
-            () => generator.generate(program, definitions: [target]),
+            () => generator.generate(program, definitions: [root, target]),
             throwsA(
-              isA<UnsupportedError>().having(
+              isA<ArgumentError>().having(
                 (e) => e.message,
                 'reason',
-                contains('override dispatch'),
+                contains('Missing member definition'),
               ),
             ),
           );
         }
       }
+    });
+    test('${generator.target} rejects missing built-in Type members', () {
+      final custom = ClassType(
+        library,
+        'CustomType',
+        interfaces: [ValueType.typeType],
+      );
+      FunctionTarget hash(ClassType owner, {bool abstract = false}) =>
+          FunctionTarget(
+            owner.library,
+            'hashCode',
+            .integer,
+            [],
+            owner: owner,
+            kind: .getter,
+            isAbstract: abstract,
+          );
+      final declaration = hash(ValueType.typeType, abstract: true);
+      final override = hash(custom);
+      final target = FunctionTarget(library, 'hashType', .integer, []);
+      final entry = Block();
+      entry.emit(TypeView(ObjectConstant(custom, {}), .typeType));
+      entry.finish(
+        Return(
+          entry.emit(InstanceCall(declaration, TypeConstant(.integer), [])),
+        ),
+      );
+      final program = IrProgram(
+        [
+          IrClass(ValueType.typeType, [], members: [declaration]),
+          IrClass(custom, [], members: [override]),
+        ],
+        [
+          IrFunction(target, [entry]),
+          IrFunction(override, [
+            Block(override.parameterTypes)
+              ..finish(const Return(Constant.integer(7))),
+          ]),
+        ],
+      );
+      expect(
+        () => generator.generate(
+          program,
+          definitions: program.reachableFrom([target]),
+        ),
+        throwsA(
+          isA<UnsupportedError>().having(
+            (error) => error.message,
+            'missing built-in implementation',
+            contains('built-in member unavailable: Type.hashCode'),
+          ),
+        ),
+      );
     });
     test(
       '${generator.target} folds proved tests without loading the operand',

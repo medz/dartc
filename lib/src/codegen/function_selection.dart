@@ -98,6 +98,19 @@ final class FunctionSelection<R>(
           _call(instruction, heap.box(body.typeOf(value)), [value]);
           continue;
         }
+        final target =
+            body.invocations[instruction] ??
+            (instruction is DirectCall ? instruction.target : null);
+        if (target != null) {
+          if (instruction.type != .voidType &&
+              instruction.type != .never &&
+              target.returnType != .voidType &&
+              target.returnType != .never) {
+            layouts.checkTransfer(target.returnType, body.typeOf(instruction));
+          }
+          _call(instruction, target, body.inputsOf(instruction).toList());
+          continue;
+        }
         switch (instruction) {
           case NewCell(
             type: final CellType type,
@@ -144,33 +157,9 @@ final class FunctionSelection<R>(
           case final Construct operation:
             final target = heap.constructors[operation]!;
             _call(instruction, target, body.inputsOf(operation).toList());
-          case DirectCall(:final target, :final type):
-            if (type != .voidType && type != .never) {
-              layouts.checkTransfer(
-                target.returnType,
-                body.typeOf(instruction),
-              );
-            }
-            _call(instruction, target, body.inputsOf(instruction).toList());
-          case final InstanceCall invocation:
-            final target = body.invocations[invocation]!;
-            if (invocation.type != .voidType &&
-                invocation.type != .never &&
-                target.returnType != .voidType &&
-                target.returnType != .never) {
-              layouts.checkTransfer(target.returnType, body.typeOf(invocation));
-            }
-            _call(instruction, target, body.inputsOf(instruction).toList());
           case ReifyType():
             break;
-          case ObjectRuntimeType(:final operand, :final direct):
-            if (!direct &&
-                operand.type != .nullType &&
-                layouts.hasRuntimeTypeOverride(operand.type)) {
-              throw UnsupportedError(
-                'Native runtimeType override dispatch is not implemented.',
-              );
-            }
+          case ObjectRuntimeType():
             if (_generalTemporaries < 1) _generalTemporaries = 1;
           case LoadField(:final field, :final type):
             if (field.isLate) {
@@ -307,7 +296,8 @@ final class FunctionSelection<R>(
             final typeLiteral =
                 left is TypeConstant ||
                 left is ReifyType ||
-                left is ObjectRuntimeType;
+                left is ObjectRuntimeType && left.direct;
+            final identity = body.identities.contains(instruction);
             if (typeLiteral &&
                 layouts.representation(right.type) == .reference) {
               _call(instruction, layouts.types.equality, [left, right]);
@@ -315,6 +305,7 @@ final class FunctionSelection<R>(
             }
             if (!nullComparison &&
                 !typeLiteral &&
+                !identity &&
                 (!_scalar(left.type) || !_scalar(right.type))) {
               throw UnsupportedError(
                 'Native equality requires supported scalar operands.',
@@ -330,7 +321,7 @@ final class FunctionSelection<R>(
                 left.type == right.type ||
                     FfiTypes.isPointer(left.type) &&
                         FfiTypes.isPointer(right.type) ||
-                    (nullComparison || typeLiteral) &&
+                    (nullComparison || typeLiteral || identity) &&
                         layouts.representation(left.type) == .reference &&
                         layouts.representation(right.type) == .reference
                 ? emitter.comparison(

@@ -25,19 +25,20 @@ abstract interface class CodeGenerator() {
   /// Direct generic calls carry reified type arguments through the normal
   /// calling convention and root records. [ReifyType] reads or combines class and function
   /// type arguments into nullable, nominal, FutureOr, function and record types.
-  /// Type literals are canonical within the module. Equality with a literal,
-  /// reified type or [ObjectRuntimeType] as receiver compares normalized structures.
+  /// Type literals are canonical within the module. Built-in Type equality
+  /// compares normalized structures; user Type implementations retain their
+  /// equality override or inherited identity comparison, including the null rule.
   /// Object runtime types survive collection and preserve actual generic arguments.
-  /// Native runtimeType override dispatch remains unsupported; it is never
-  /// bypassed by a direct object-header read. Generic function
+  /// [ObjectRuntimeType] selects user overrides unless a super call chose the
+  /// built-in getter. Generic function
   /// bounds use the actual enclosing function arguments, including nested and
   /// chained binders. Class environments follow the actual receiver's inherited
-  /// arguments; factories receive the requested owner type. General Type member
-  /// dispatch remains unsupported. Generic functions cannot be native exports.
+  /// arguments; factories receive the requested owner type. Built-in Type hashing
+  /// and formatting remain unsupported. Generic functions cannot be native exports.
   /// Ordinary class member calls select the actual implementation, bind its
   /// defaults and check parameters and generic bounds before entering the body.
   /// Inherited and mixin implementations retain super calls. Scalar results are
-  /// converted to the caller's representation. Object member dispatch, Never
+  /// converted to the caller's representation. Other Object member dispatch, Never
   /// parameters and value-returning views of void implementations remain unsupported.
   /// Modules with references live across calls include read-only stack records
   /// keyed by relocated return addresses. These describe initialized reference

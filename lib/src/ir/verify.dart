@@ -8,6 +8,7 @@ typedef FunctionReferences = ({
   Set<FunctionTarget> closures,
   Set<FunctionTarget> callees,
   Set<FunctionTarget> virtualMembers,
+  Set<({ValueType receiver, MemberSelector selector})> objectMembers,
   Set<ClassType> instantiatedClasses,
   Set<GlobalVariable> globals,
   Set<InstanceField> fields,
@@ -28,6 +29,7 @@ FunctionReferences verifyCallable(
   Set<FunctionTarget>? closures;
   Set<FunctionTarget>? callees;
   Set<FunctionTarget>? virtualMembers;
+  Set<({ValueType receiver, MemberSelector selector})>? objectMembers;
   Set<ClassType>? instantiatedClasses;
   Set<GlobalVariable>? globals;
   Set<InstanceField>? fields;
@@ -51,6 +53,7 @@ FunctionReferences verifyCallable(
       closures: _snapshot(closures),
       callees: _snapshot(callees),
       virtualMembers: _snapshot(virtualMembers),
+      objectMembers: _snapshot(objectMembers),
       instantiatedClasses: _snapshot(instantiatedClasses),
       globals: _snapshot(globals),
       fields: _snapshot(fields),
@@ -271,6 +274,9 @@ FunctionReferences verifyCallable(
       };
       for (final type in typeArguments) {
         checkTypeScope(type);
+      }
+      if (op.objectMember case final member?) {
+        (objectMembers ??= {}).add(member);
       }
       switch (op) {
         case LoadLibrary(:final reference) ||

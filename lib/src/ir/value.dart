@@ -390,6 +390,29 @@ sealed class Instruction(super.type) extends Value {
   /// The SSA operands consumed by the operation.
   Iterable<Value> get inputs;
 
+  /// The implicit Object member whose user override this operation may invoke.
+  ({ValueType receiver, MemberSelector selector})? get objectMember =>
+      switch (this) {
+        ObjectRuntimeType(:final operand, direct: false) => (
+          receiver: operand.type,
+          selector: (kind: .getter, name: 'runtimeType', privateLibrary: null),
+        ),
+        ObjectHashCode(:final operand, direct: false) => (
+          receiver: operand.type,
+          selector: (kind: .getter, name: 'hashCode', privateLibrary: null),
+        ),
+        Equals(:final left, :final right, mayCallUserCode: true)
+            when left is! TypeConstant &&
+                left is! ReifyType &&
+                left.type != .nullType &&
+                right.type != .nullType =>
+          (
+            receiver: left.type,
+            selector: (kind: .method, name: '==', privateLibrary: null),
+          ),
+        _ => null,
+      };
+
   static const _call = <Effect>{
     .readsStorage,
     .writesStorage,

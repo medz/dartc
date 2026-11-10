@@ -89,7 +89,9 @@ final class ScalarFunction<R extends Object>(
           emitter.loadImmediate(destination, value ? 1 : 0);
           allocation.define(instruction, destination);
         } else if (instruction case ObjectRuntimeType(:final operand)
-            when operand.type != .nullType &&
+            when !selection.calls.containsKey(instruction) &&
+                !selection.body.aliases.contains(instruction) &&
+                operand.type != .nullType &&
                 layouts.representation(operand.type) == .reference) {
           final value = allocation.read(operand);
           final result = allocation.allocate(.general, except: [value]);

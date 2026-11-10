@@ -143,12 +143,18 @@ final class IrProgram(
   /// included. Direct targets with missing bodies remain in the returned set.
   Set<FunctionTarget> reachableFrom(Iterable<FunctionTarget> roots) {
     final pending = roots.toList(), reached = <FunctionTarget>{};
-    final instances = <ClassType>{}, members = <FunctionTarget>{};
-    void select(ClassType type, FunctionTarget member) {
-      if (type.asInstanceOf(member.owner!) != null) {
-        final target = dispatch(type, member);
-        if (target != null) pending.add(target);
+    final instances = <ClassType>{};
+    final members = <({ValueType receiver, MemberSelector selector})>{};
+    void select(
+      ClassType type,
+      ({ValueType receiver, MemberSelector selector}) member,
+    ) {
+      if (member.receiver.nonNullable case final ClassType owner
+          when type.asInstanceOf(owner.declaration) == null) {
+        return;
       }
+      final target = lookupMember(type, member.selector).target;
+      if (target != null) pending.add(target);
     }
 
     while (pending.isNotEmpty) {
@@ -172,7 +178,11 @@ final class IrProgram(
           }
         }
       }
-      for (final member in body.virtualMembers) {
+      for (final member in [
+        for (final target in body.virtualMembers)
+          (receiver: target.owner!, selector: target.selector),
+        ...body.objectMembers,
+      ]) {
         if (members.add(member)) {
           for (final type in instances) {
             select(type, member);

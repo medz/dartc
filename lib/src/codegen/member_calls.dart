@@ -11,28 +11,40 @@ final class MemberCalls(
       ...?program.implementationOf(target)?.instantiatedClasses,
   };
 
-  Map<ClassType, FunctionTarget> targetsFor(FunctionTarget member) {
-    if (member.owner == ValueType.object) {
-      throw UnsupportedError('Native Object member dispatch: ${member.name}');
+  Map<ClassType, FunctionTarget> targetsFor(
+    ValueType receiver,
+    MemberSelector selector, {
+    bool hasBuiltin = false,
+  }) {
+    if (!hasBuiltin &&
+        (receiver == ValueType.object || receiver == ValueType.typeType)) {
+      throw UnsupportedError(
+        'Native built-in member unavailable: ${receiver.dartName}.${selector.name}',
+      );
     }
     final targets = <ClassType, FunctionTarget>{};
     for (final type in _instances) {
-      if (type.asInstanceOf(member.owner!) == null) continue;
-      final lookup = program.lookupMember(type, member.selector);
-      final target = lookup.target;
-      if (target == null) {
+      if (receiver.nonNullable case final ClassType owner
+          when type.asInstanceOf(owner.declaration) == null) {
+        continue;
+      }
+      final lookup = program.lookupMember(type, selector);
+      if (lookup.target case final target?) {
+        if (!definitions.contains(target)) {
+          throw ArgumentError('Missing member definition: ${target.name}');
+        }
+        targets[type] = target;
+      } else if (!hasBuiltin ||
+          lookup.unmodeledBoundary != null ||
+          lookup.unsupportedForwarder) {
         throw UnsupportedError(
-          'Native member unavailable: ${type.dartName}.${member.name}',
+          'Native member unavailable: ${type.dartName}.${selector.name}',
         );
       }
-      if (!definitions.contains(target)) {
-        throw ArgumentError('Missing member definition: ${target.name}');
-      }
-      targets[type] = target;
     }
-    if (targets.isEmpty) {
+    if (!hasBuiltin && targets.isEmpty) {
       throw UnsupportedError(
-        'Native receiver classes unavailable: ${member.name}',
+        'Native receiver classes unavailable: ${selector.name}',
       );
     }
     return targets;
