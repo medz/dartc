@@ -17,6 +17,9 @@ final class FunctionLiveness(
   /// Physical operand reads in each block, excluding local storage addresses.
   final uses = <Block, Map<Value, int>>{};
 
+  /// Values needed after a call, excluding the result it has yet to produce.
+  final acrossCalls = <Instruction, Set<Value>>{};
+
   this {
     final reads = <Block, Set<Value>>{}, writes = <Block, Set<Value>>{};
     final positions = {
@@ -97,6 +100,29 @@ final class FunctionLiveness(
               : argument;
           if (stored is! NewCell) {
             uses[block]!.update(stored, (n) => n + 1, ifAbsent: () => 1);
+          }
+        }
+      }
+    }
+    for (final block in function.blocks) {
+      final live = {...liveOut[block]!};
+      switch (block.end) {
+        case Return(value: final value?) when value.type != .voidType:
+          if (value is! Constant) live.add(value);
+        case Branch(:final condition):
+          if (condition is! Constant) live.add(condition);
+        default:
+          break;
+      }
+      for (final instruction in block.instructions.reversed) {
+        live.remove(instruction is WriteCell ? instruction.cell : instruction);
+        if (instruction is DirectCall || instruction is NativeCall) {
+          acrossCalls[instruction] = {...live};
+        }
+        for (final input in inputsOf(instruction)) {
+          if (input is! Constant &&
+              (instruction is! WriteCell || input != instruction.cell)) {
+            live.add(input);
           }
         }
       }

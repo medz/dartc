@@ -5,6 +5,7 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/layout.dart';
 import 'package:dartc/target.dart';
 
 import 'code_generator.dart';
@@ -13,6 +14,7 @@ import 'scalar_function.dart';
 import 'native_adapter.dart';
 import 'program_layout.dart';
 import 'constant_data.dart';
+import 'stack_maps.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -45,12 +47,7 @@ base class ScalarCodeGenerator<R extends Object>(
     final nativeCalls = <(int, Fixup, int)>[];
     final code = BytesBuilder(copy: false), symbols = <Symbol>[];
     final layouts = ProgramLayout(program);
-    final constants = ConstantData(
-      layouts,
-      selected.length +
-          exports.values.where((e) => _needsEntry(e.signature)).length +
-          (entryPoint == null ? 0 : 1),
-    );
+    final functions = <FunctionTarget, ScalarFunction<R>>{};
     for (final declaration in selected) {
       final function = program.implementationOf(declaration);
       final binding = imports[declaration];
@@ -65,24 +62,54 @@ base class ScalarCodeGenerator<R extends Object>(
         }
       } else if (function is! IrFunction) {
         throw ArgumentError('Definition has no body: ${declaration.name}');
+      } else {
+        functions[declaration] = ScalarFunction(
+          function,
+          _createFunction(),
+          layouts,
+        );
       }
       final export = exports[declaration];
-      final exported = export != null && !_needsEntry(export.signature);
       if (export != null && !_matches(declaration, export.signature)) {
         throw ArgumentError('Native signature mismatch: ${declaration.name}');
       }
+    }
+    final hasRoots = functions.values.any((f) => f.hasRoots);
+    bool needsEntry(NativeSignature signature) =>
+        hasRoots || _needsEntry(signature);
+    final maps = StackMaps();
+    void safepoint(int position, StackRoots roots) {
+      if (hasRoots) maps.add(code.length + position, roots);
+    }
+
+    final constants = ConstantData(
+      layouts,
+      selected.length +
+          exports.values.where((e) => needsEntry(e.signature)).length +
+          (entryPoint == null ? 0 : 1),
+    );
+    for (final declaration in selected) {
+      final binding = imports[declaration], export = exports[declaration];
+      final exported = export != null && !needsEntry(export.signature);
       code.add(Uint8List((-code.length) & 15));
       final bytes = binding != null
           ? NativeAdapter(_createFunction())
-                .generate(binding.signature, (fixup) {
+                .generate(binding.signature, (fixup, position, frame) {
                   final symbol = nativeSymbols.putIfAbsent(
                     target.nativeSymbol(binding.symbol),
                     () => nativeSymbols.length,
                   );
                   nativeCalls.add((code.length, fixup, symbol));
+                  safepoint(
+                    position,
+                    StackRoots(
+                      frame.incomingStackOffset,
+                      frame.returnAddressOffset,
+                      [],
+                    ),
+                  );
                 }, intoDart: false)
-          : ScalarFunction(_createFunction()).generate(
-              function as IrFunction,
+          : functions[declaration]!.generate(
               (fixup, callee) {
                 final index = indices[callee];
                 if (index == null) {
@@ -99,7 +126,6 @@ base class ScalarCodeGenerator<R extends Object>(
                   ),
                 );
               },
-              layouts,
               (fixup, constant) {
                 relocations.add(
                   .instruction(
@@ -110,6 +136,7 @@ base class ScalarCodeGenerator<R extends Object>(
                   ),
                 );
               },
+              safepoint,
             );
       symbols.add(
         .new(
@@ -124,10 +151,10 @@ base class ScalarCodeGenerator<R extends Object>(
       code.add(bytes);
     }
     for (final MapEntry(:key, :value) in exports.entries) {
-      if (!_needsEntry(value.signature)) continue;
+      if (!needsEntry(value.signature)) continue;
       code.add(Uint8List((-code.length) & 15));
       final bytes = NativeAdapter(_createFunction())
-          .generate(value.signature, (fixup) {
+          .generate(value.signature, (fixup, position, frame) {
             relocations.add(
               .instruction(
                 0,
@@ -136,6 +163,7 @@ base class ScalarCodeGenerator<R extends Object>(
                 indices[key]!,
               ),
             );
+            safepoint(position, StackRoots(0, 0, []));
           }, intoDart: true);
       symbols.add(
         .new(
@@ -162,7 +190,8 @@ base class ScalarCodeGenerator<R extends Object>(
         );
       }
       code.add(Uint8List((-code.length) & 15));
-      final bytes = _createFunction().start((fixup) {
+      final emitter = _createFunction();
+      final bytes = emitter.start((fixup) {
         relocations.add(
           .instruction(
             0,
@@ -171,17 +200,20 @@ base class ScalarCodeGenerator<R extends Object>(
             indices[function]!,
           ),
         );
+        safepoint(emitter.position, StackRoots(0, 0, []));
       });
       symbols.add(.new(symbol, 0, code.length, bytes.length));
       code.add(bytes);
     }
     symbols.addAll(constants.symbols);
+    final sections = [
+      Section.code(code.takeBytes()),
+      if (constants.symbols.isNotEmpty) constants.finish(),
+    ];
+    maps.finish(sections, symbols, relocations);
     return .new(
       target,
-      [
-        Section.code(code.takeBytes()),
-        if (constants.symbols.isNotEmpty) constants.finish(),
-      ],
+      sections,
       symbols,
       imports: nativeSymbols.keys,
       relocations: [

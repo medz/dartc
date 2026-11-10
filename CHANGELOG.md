@@ -31,6 +31,7 @@ The development checkout uses analyzer 14.7.0 to resolve Dart source, produces v
 - Preserve distinct NaN bit patterns in IR constant identity, including nested constant objects. Numerically equal positive and negative zero also retain distinct constant identities.
 - Compile null comparisons, `??`, `??=` and type tests whose results follow from static types and null checks. Nullable scalar values retain their representations across calls and control flow, and short circuits preserve required side effects. General runtime type checks, checked casts, null assertions and boxing computed integers or doubles remain unimplemented.
 - Omit unused block-argument transfers and dead register saves in native control flow. Operand evaluation, calls and writes still run, and live values survive branches and loop backedges.
+- Generate stack records for references live across calls, with frame linkage and explicit native entry boundaries. References reload from their stack slots after calls; integers and native pointers remain untraced. `StackRoots` in `package:dartc/layout.dart` reads and writes these records. Heap allocation and collection remain unimplemented.
 
 Language support and known analyzer differences are tracked in [specs](specs/README.md). IR behavior checks do not establish native execution support or full Dart compatibility.
 

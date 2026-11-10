@@ -29,6 +29,22 @@ void main() {
     expect(flow.uses[entry], {condition: 1, a: 1, b: 1});
   });
 
+  test(
+    'calls retain survivors, not results, consumed arguments or old locals',
+    () {
+      final callee = FunctionTarget(library, 'callee', .object, [.object]);
+      final body = Block([.object, .object]);
+      final cell = body.emit(NewCell(CellType(.object), body.parameters.first));
+      final first = body.emit(DirectCall(callee, [body.parameters.last]));
+      body.emit(WriteCell(cell, first));
+      final second = body.emit(DirectCall(callee, [first]));
+      body.finish(Return(body.emit(ReadCell(cell))));
+      final flow = analyze([body], .object);
+      expect(flow.acrossCalls[first], isEmpty);
+      expect(flow.acrossCalls[second], {cell});
+    },
+  );
+
   test('scrambled loops propagate swaps without retaining dead cycles', () {
     final entry = Block([.object, .object, .integer, .object]);
     final loop = Block(entry.parameters.map((p) => p.type));

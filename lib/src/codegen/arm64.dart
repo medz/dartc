@@ -24,6 +24,9 @@ final class _Arm64Emitter(
   @override final Arm64Abi convention,
 ) implements FunctionEmitter<CpuRegister> {
   @override
+  int get position => assembler.length;
+
+  @override
   Uint8List start(void Function(Fixup) call) {
     final frame = convention.frameLayout(
       localBytes: 0,

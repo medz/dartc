@@ -40,6 +40,10 @@ final class ProgramLayout(IrProgram program) {
   bool isBoxable(ValueType type) =>
       type == .integer || type == .boolean || type == .floating;
 
+  /// Whether the value or local contents are traced by a managed collector.
+  bool isReference(ValueType type) =>
+      representation(type is CellType ? type.content : type) == .reference;
+
   ClassStorage storageOf(ClassType type) {
     final declaration = type.declaration;
     if (_storage[declaration] case final known?) return known;

@@ -94,6 +94,7 @@ void main() {
         expect(frame.savedRegisters[saved[1]], 56);
         expect(frame.stackBytes, abi.target.architecture == .arm64 ? 80 : 72);
         expect(frame.incomingStackOffset, 80);
+        expect(frame.returnAddressOffset, 72);
         expect(() => frame.savedRegisters.clear(), throwsUnsupportedError);
         for (final (bytes, alignment, registers, outgoing) in [
           (-1, 8, saved, 0),

@@ -22,6 +22,11 @@ abstract interface class CodeGenerator() {
   /// can be unboxed. Boxing runtime integers and doubles remains unsupported.
   /// Type tests support null checks and results proved by static types;
   /// checks requiring runtime type metadata remain unsupported.
+  /// Modules with references live across calls include read-only stack records
+  /// keyed by relocated return addresses. These describe initialized reference
+  /// slots and frame linkage; native entry wrappers terminate the frame walk.
+  /// Updated root slots are reloaded after calls. This does not provide heap
+  /// allocation, collection, asynchronous safepoints or native reentry tracking.
   ///
   /// [entryPoint] adds a process entry with the given link symbol. It
   /// calls a synchronous, parameterless Dart body and exits successfully after

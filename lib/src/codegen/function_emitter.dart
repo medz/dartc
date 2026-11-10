@@ -23,6 +23,9 @@ enum RegisterBank() {
 
 /// Emits one function with explicit operand registers.
 abstract interface class FunctionEmitter<R>() {
+  /// The next byte position in this function's code.
+  int get position;
+
   /// The calling rules for the explicit output platform.
   CallingConvention<R> get convention;
 

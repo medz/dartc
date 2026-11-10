@@ -22,6 +22,9 @@ final class FrameLayout<R>._(
 
   /// The start of incoming stack arguments relative to the body SP.
   required final int incomingStackOffset,
+
+  /// The saved return address relative to SP after the prologue.
+  required final int returnAddressOffset,
   required Map<R, int> savedRegisters,
 }) {
   /// Saved register positions, including the platform frame record.
@@ -81,6 +84,7 @@ FrameLayout<R> scalarFrame<R>(
     localBytes: localBytes,
     outgoingStackBytes: outgoingStackBytes,
     incomingStackOffset: incomingStackOffset,
+    returnAddressOffset: stackBytes - (arm ? 8 : 0),
     savedRegisters: positions,
   );
 }

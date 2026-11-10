@@ -347,6 +347,14 @@ final class FunctionSelection<R>(
         ready.removeWhere((cell) => !initialized[previous]!.contains(cell));
       }
       for (final instruction in block.instructions) {
+        if (checkReads && calls.containsKey(instruction)) {
+          for (final cell
+              in liveness.acrossCalls[instruction]!.whereType<NewCell>()) {
+            if (!ready.contains(cell)) {
+              throw UnsupportedError('Live local is uninitialized at a call.');
+            }
+          }
+        }
         switch (instruction) {
           case NewCell(:final initial):
             if (initial == null) {

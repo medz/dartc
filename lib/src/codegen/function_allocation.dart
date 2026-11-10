@@ -126,8 +126,9 @@ final class FunctionAllocation<R extends Object>(
     _spilled
       ..clear()
       ..addAll(
-        _uses.keys.where(
+        selection.liveness.liveIn[block]!.where(
           (v) =>
+              v is! NewCell &&
               _shared.contains(v) &&
               (v is BlockParameter || _owners[v] != block),
         ),
@@ -294,14 +295,50 @@ final class FunctionAllocation<R extends Object>(
     }
   }
 
-  /// Saves clobbered residents needed in [live], discarding other bindings.
-  void flush({Set<R>? clobbered, Set<Value>? live}) {
+  /// Saves residents needed in [live], discarding other bindings.
+  void flush({Set<Value>? live}) {
     _registers.removeWhere((value, register) {
-      if (clobbered != null && !clobbered.contains(register)) return false;
       if (live == null || live.contains(value)) _spill(value, register);
       _free.add(register);
       return true;
     });
+  }
+
+  /// Homes caller-live references before argument staging and invalidates registers.
+  StackRoots prepareCall(Instruction instruction, Set<R> clobbered) {
+    final roots = selection.liveness.acrossCalls[instruction]!
+        .where((v) => selection.layouts.isReference(v.type))
+        .toSet();
+    _registers.removeWhere((value, register) {
+      if (!clobbered.contains(register) && !roots.contains(value)) return false;
+      _spill(value, register);
+      _free.add(register);
+      return true;
+    });
+    final frame = this.frame!;
+    final offsets = <int>[];
+    for (final root in roots) {
+      if (root is! NewCell && !_spilled.contains(root)) {
+        throw StateError('Live reference has no initialized stack home.');
+      }
+      final offset = _slot(root);
+      final local =
+          offset >= frame.localOffset &&
+          offset < frame.localOffset + frame.localBytes;
+      final incoming =
+          offset >= frame.incomingStackOffset &&
+          offset < frame.incomingStackOffset + selection.entry.stackBytes;
+      if (!local && !incoming || frame.savedRegisters.containsValue(offset)) {
+        throw StateError('Live reference is outside value storage.');
+      }
+      offsets.add(offset);
+    }
+    offsets.sort();
+    return StackRoots(
+      frame.incomingStackOffset,
+      frame.returnAddressOffset,
+      offsets,
+    );
   }
 
   /// Assigns block parameters simultaneously after [flush], using one register.

@@ -12,7 +12,7 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
   /// Emits an incoming or outgoing native boundary and reports its direct call.
   Uint8List generate(
     NativeSignature signature,
-    void Function(Fixup) call, {
+    void Function(Fixup, int, FrameLayout<R>) call, {
     required bool intoDart,
   }) {
     final native = emitter.convention.classify(signature);
@@ -69,7 +69,8 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
           );
       }
     }
-    call(emitter.call());
+    final fixup = emitter.call();
+    call(fixup, emitter.position, frame);
     if (destination.result case final result?) {
       convert(result, signature.result, intoDart: !intoDart);
     }

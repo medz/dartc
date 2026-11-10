@@ -19,6 +19,7 @@ import '../test/abi/fixtures/stack_calls.dart';
 import '../test/codegen/fixtures/control_flow.dart';
 import '../test/codegen/fixtures/object_values.dart';
 import '../test/codegen/fixtures/boxed_values.dart';
+import '../test/codegen/fixtures/stack_roots.dart';
 import '../test/linker/fixtures/functions.dart';
 import '../test/linker/fixtures/calls.dart';
 import '../test/linker/fixtures/symbols.dart';
@@ -209,6 +210,10 @@ Future<void> main(List<String> args) async {
       functions(target, {'object_touch': 123}),
     ], assets.library('codegen/object_values'));
     await shared([boxedValues(target)], assets.library('codegen/boxed_values'));
+    await shared(
+      await objects('stack_roots_', [stackRoots(target), rootsProbe(target)]),
+      assets.library('codegen/stack_roots'),
+    );
     final inputs = [
       functions(target, {'first': 40}),
       functions(target, {'second': 2}),

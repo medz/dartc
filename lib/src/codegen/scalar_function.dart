@@ -14,15 +14,23 @@ import 'native_adapter.dart';
 import 'program_layout.dart';
 
 /// Generates a control-flow graph with explicit edge transfers.
-final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
+final class ScalarFunction<R extends Object>(
+  final IrFunction function,
+  final FunctionEmitter<R> emitter,
+  final ProgramLayout layouts,
+) {
+  late final selection = FunctionSelection(function, emitter, layouts);
+
+  bool get hasRoots => selection.liveness.acrossCalls.values.any(
+    (values) => values.any((v) => layouts.isReference(v.type)),
+  );
+
   /// Emits the body and reports direct call sites to the module generator.
   Uint8List generate(
-    IrFunction function,
     void Function(Fixup, FunctionTarget) call,
-    ProgramLayout layouts,
     void Function(Fixup, Constant) constant,
+    void Function(int, StackRoots) safepoint,
   ) {
-    final selection = FunctionSelection(function, emitter, layouts);
     final allocation = FunctionAllocation(
       function,
       emitter,
@@ -62,7 +70,10 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
           final parameterTypes = native == null
               ? (instruction as DirectCall).target.parameterTypes
               : null;
-          allocation.flush(clobbered: layout.clobberedRegisters);
+          final roots = allocation.prepareCall(
+            instruction,
+            layout.clobberedRegisters,
+          );
           // Stage stack words before populating registers that the scratch may alias.
           if (layout.stackBytes != 0) {
             for (final (i, location) in layout.parameters.indexed) {
@@ -122,6 +133,7 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
             allocation.release(native.pointer);
             emitter.callRegister(address);
           }
+          safepoint(emitter.position, roots);
           if (layout.result case final result?
               when instruction.type != .voidType) {
             if (native != null) {
