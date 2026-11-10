@@ -12,6 +12,7 @@ import 'heap_plan.dart';
 import 'program_layout.dart';
 import 'stack_traces.dart';
 import 'checked_casts.dart';
+import 'member_calls.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
 final class FunctionSelection<R>(
@@ -21,11 +22,13 @@ final class FunctionSelection<R>(
   HeapPlan heap,
   StackTraces traces,
   CheckedCasts casts,
+  MemberCalls members,
 ) {
   final body = FunctionRepresentation(
     function,
     layouts,
     casts,
+    members,
     captureTrace: traces.capture,
   );
   final binaries =
@@ -90,8 +93,9 @@ final class FunctionSelection<R>(
           throw UnsupportedError('Native terminator: ${end.runtimeType}');
       }
       for (final instruction in body.instructions[block]!) {
+        if (body.aliases.contains(instruction)) continue;
         if (body.boxes[instruction] case final value?) {
-          _call(instruction, heap.box(value.type), [value]);
+          _call(instruction, heap.box(body.typeOf(value)), [value]);
           continue;
         }
         switch (instruction) {
@@ -142,7 +146,19 @@ final class FunctionSelection<R>(
             _call(instruction, target, body.inputsOf(operation).toList());
           case DirectCall(:final target, :final type):
             if (type != .voidType && type != .never) {
-              layouts.checkTransfer(target.returnType, type);
+              layouts.checkTransfer(
+                target.returnType,
+                body.typeOf(instruction),
+              );
+            }
+            _call(instruction, target, body.inputsOf(instruction).toList());
+          case final InstanceCall invocation:
+            final target = body.invocations[invocation]!;
+            if (invocation.type != .voidType &&
+                invocation.type != .never &&
+                target.returnType != .voidType &&
+                target.returnType != .never) {
+              layouts.checkTransfer(target.returnType, body.typeOf(invocation));
             }
             _call(instruction, target, body.inputsOf(instruction).toList());
           case ReifyType():
@@ -367,7 +383,7 @@ final class FunctionSelection<R>(
     final parameters = layouts.entryTypes(target);
     for (final (i, input) in inputs.indexed) {
       layouts.checkTransfer(
-        input.type,
+        body.typeOf(input),
         parameters[i],
         constant: input is ScalarConstant,
       );

@@ -135,6 +135,54 @@ final class IrProgram(
   IrCallable? implementationOf(FunctionTarget target) =>
       _implementations[target];
 
+  /// Selects direct and nominal virtual call dependencies starting at [roots].
+  ///
+  /// Virtual calls select implementations on classes constructed by reachable
+  /// bodies, constructor tear-offs or constants in a closed program. Dynamic
+  /// invocation and managed objects supplied from outside the program are not
+  /// included. Direct targets with missing bodies remain in the returned set.
+  Set<FunctionTarget> reachableFrom(Iterable<FunctionTarget> roots) {
+    final pending = roots.toList(), reached = <FunctionTarget>{};
+    final instances = <ClassType>{}, members = <FunctionTarget>{};
+    void select(ClassType type, FunctionTarget member) {
+      if (type.asInstanceOf(member.owner!) != null) {
+        final target = dispatch(type, member);
+        if (target != null) pending.add(target);
+      }
+    }
+
+    while (pending.isNotEmpty) {
+      final target = pending.removeLast();
+      if (!reached.add(target)) continue;
+      final body = implementationOf(target);
+      if (body == null) continue;
+      pending.addAll(body.callees);
+      if (body is IrFunction) {
+        pending.addAll(body.closures);
+        for (final global in body.globals) {
+          if (global.initializer case final initializer?) {
+            pending.add(initializer);
+          }
+        }
+      }
+      for (final type in body.instantiatedClasses) {
+        if (instances.add(type)) {
+          for (final member in members) {
+            select(type, member);
+          }
+        }
+      }
+      for (final member in body.virtualMembers) {
+        if (members.add(member)) {
+          for (final type in instances) {
+            select(type, member);
+          }
+        }
+      }
+    }
+    return reached;
+  }
+
   /// Resolves [member] on [receiver], returning `null` if the batch supplies no implementation.
   FunctionTarget? dispatch(ClassType receiver, FunctionTarget member) {
     if (!member.kind.isVirtual ||
@@ -405,7 +453,7 @@ final class IrProgram(
       }
       if (f.target.owner case final owner?) definitionOf(owner);
       f.referencedClasses.forEach(definitionOf);
-      f.callees.forEach(checkTarget);
+      f.callees.followedBy(f.virtualMembers).forEach(checkTarget);
       for (final field in f.fields) {
         final c = definitionOf(field.owner);
         if (c != null && !c.fields.contains(field)) {

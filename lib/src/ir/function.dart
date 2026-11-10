@@ -18,8 +18,14 @@ sealed class IrCallable(
   final Map<int, Constant> defaults = .unmodifiable(defaults);
   late final FunctionReferences _references;
 
-  /// Statically identified call and tear-off targets, including those in defaults.
+  /// Direct call and tear-off targets, including those in defaults.
   Set<FunctionTarget> get callees => _references.callees;
+
+  /// Statically selected declarations whose implementation needs virtual lookup.
+  Set<FunctionTarget> get virtualMembers => _references.virtualMembers;
+
+  /// Classes referenced by construction, constructor tear-offs or object constants.
+  Set<ClassType> get instantiatedClasses => _references.instantiatedClasses;
 
   /// Instance slots referenced by instructions or embedded constants.
   Set<InstanceField> get fields => _references.fields;

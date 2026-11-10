@@ -20,6 +20,7 @@ import 'heap_entry.dart';
 import 'frame_lookup.dart';
 import 'stack_traces.dart';
 import 'checked_casts.dart';
+import 'member_calls.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -55,6 +56,7 @@ base class ScalarCodeGenerator<R extends Object>(
       ),
     );
     final heap = HeapPlan(program, selected, layouts, frames);
+    final members = MemberCalls(program, selected, heap.heap.invalid);
     final relocations = <Relocation>[];
     final nativeSymbols = <String, int>{};
     final nativeCalls = <(int, Fixup, int)>[];
@@ -82,6 +84,7 @@ base class ScalarCodeGenerator<R extends Object>(
           heap,
           traces,
           casts,
+          members,
         );
       }
       final export = exports[declaration];
@@ -108,6 +111,7 @@ base class ScalarCodeGenerator<R extends Object>(
           heap,
           traces,
           casts,
+          members,
         );
       }
       pending = [
@@ -173,6 +177,7 @@ base class ScalarCodeGenerator<R extends Object>(
           heap,
           traces,
           casts,
+          members,
         );
       }
     }

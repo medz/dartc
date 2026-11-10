@@ -7,6 +7,105 @@ final _uri = Uri.parse('memory:references');
 const _one = Constant.integer(1);
 
 void main() {
+  test('reachability follows instantiated entries without compiling abstract declarations', () {
+    final face = ClassType(_uri, 'Face');
+    final first = ClassType(_uri, 'First', interfaces: [face]);
+    final second = ClassType(_uri, 'Second', interfaces: [face]);
+    final unused = ClassType(_uri, 'Unused', interfaces: [face]);
+    FunctionTarget read(ClassType owner, {bool abstract = false}) =>
+        FunctionTarget(
+          _uri,
+          'read',
+          .integer,
+          [],
+          owner: owner,
+          kind: .method,
+          isAbstract: abstract,
+        );
+    FunctionTarget constructor(ClassType owner) => FunctionTarget(
+      _uri,
+      'new',
+      .voidType,
+      [],
+      owner: owner,
+      kind: .initializer,
+    );
+    final declaration = read(face, abstract: true);
+    final readFirst = read(first),
+        readSecond = read(second),
+        readUnused = read(unused);
+    final newFirst = constructor(first), newSecond = constructor(second);
+    IrFunction constructAndCall(FunctionTarget target, FunctionTarget ctor) {
+      final entry = Block(target.parameterTypes);
+      final instance = entry.emit(Construct(ctor, []));
+      entry.finish(Return(entry.emit(InstanceCall(declaration, instance, []))));
+      return IrFunction(target, [entry]);
+    }
+
+    final root = constructAndCall(
+      FunctionTarget(_uri, 'entry', .integer, []),
+      newFirst,
+    );
+    final tearOff = FunctionConstant(newSecond);
+    final reference = IrFunction(
+      FunctionTarget(_uri, 'constructor', tearOff.type, []),
+      [Block()..finish(Return(tearOff))],
+    );
+    final constantEntry = Block();
+    constantEntry.finish(
+      Return(
+        constantEntry.emit(
+          InstanceCall(declaration, ObjectConstant(second, {}), []),
+        ),
+      ),
+    );
+    final constantRoot = IrFunction(
+      FunctionTarget(_uri, 'constant', .integer, []),
+      [constantEntry],
+    );
+    final program = IrProgram(
+      [
+        IrClass(face, [], members: [declaration]),
+        IrClass(first, [], members: [readFirst], constructors: [newFirst]),
+        IrClass(second, [], members: [readSecond], constructors: [newSecond]),
+        IrClass(unused, [], members: [readUnused]),
+      ],
+      [
+        root,
+        reference,
+        constantRoot,
+        constructAndCall(readFirst, newSecond),
+        IrFunction(readSecond, [
+          Block(readSecond.parameterTypes)..finish(const Return(_one)),
+        ]),
+        for (final ctor in [newFirst, newSecond])
+          IrFunction(ctor, [
+            Block(ctor.parameterTypes)..finish(const Return()),
+          ]),
+      ],
+      externals: [IrExternal(readUnused)],
+    );
+    expect(root.callees, {newFirst});
+    expect(root.virtualMembers, {declaration});
+    expect(root.instantiatedClasses, {first});
+    expect(reference.instantiatedClasses, {second});
+    expect(program.reachableFrom([root.target]), {
+      root.target,
+      newFirst,
+      newSecond,
+      readFirst,
+      readSecond,
+    });
+    expect(program.reachableFrom([reference.target]), {
+      reference.target,
+      newSecond,
+    });
+    expect(program.reachableFrom([constantRoot.target]), {
+      constantRoot.target,
+      readSecond,
+    });
+  });
+
   test('verified graphs seal reachable binders and nominal metadata', () {
     final t = TypeParameterType('T')..initializeBound(.object.nullable);
     final owner = ClassType.declare(_uri, 'Pending', typeParameters: [t]);

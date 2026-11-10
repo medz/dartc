@@ -1,6 +1,7 @@
 import 'package:dartc/ir.dart';
 
 import 'program_layout.dart';
+import 'type_values.dart';
 
 /// Generates checked conversions using ordinary type tests and exception edges.
 final class CheckedCasts() {
@@ -19,6 +20,29 @@ final class CheckedCasts() {
         (ValueType, ValueType, bool),
         ({IrFunction body, List<TypeParameterType> parameters})
       >{};
+  IrFunction? _bounds;
+
+  FunctionTarget bounds(ProgramLayout layouts) {
+    if (_bounds case final body?) return body.target;
+    final target = FunctionTarget(_uri, 'bound', .voidType, [
+      TypeValues.type,
+      TypeValues.type,
+    ]);
+    final entry = Block(target.parameterTypes),
+        done = Block(),
+        failed = Block();
+    entry.finish(
+      Branch(
+        entry.emit(DirectCall(layouts.relations.test, entry.parameters)),
+        Jump(done),
+        Jump(failed),
+      ),
+    );
+    done.finish(const Return());
+    failed.finish(Throw(failed.emit(Construct(_initializer, []))));
+    _bounds = IrFunction(target, [entry, done, failed]);
+    return target;
+  }
 
   late final classes = [
     IrClass(ValueType.error, []),
@@ -27,11 +51,12 @@ final class CheckedCasts() {
   ];
 
   Iterable<IrFunction> get functions sync* {
-    if (_checks.isEmpty) return;
+    if (_checks.isEmpty && _bounds == null) return;
     yield IrFunction(_initializer, [
       Block(_initializer.parameterTypes)..finish(const Return()),
     ]);
     yield* _checks.values.map((check) => check.body);
+    if (_bounds case final body?) yield body;
   }
 
   ({FunctionTarget target, List<TypeParameterType> parameters}) targetFor(

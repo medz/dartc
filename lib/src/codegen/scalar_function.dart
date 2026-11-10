@@ -15,6 +15,7 @@ import 'program_layout.dart';
 import 'heap_plan.dart';
 import 'stack_traces.dart';
 import 'checked_casts.dart';
+import 'member_calls.dart';
 
 /// Generates a control-flow graph with explicit edge transfers.
 final class ScalarFunction<R extends Object>(
@@ -24,6 +25,7 @@ final class ScalarFunction<R extends Object>(
   HeapPlan heap,
   final StackTraces traces,
   CheckedCasts casts,
+  MemberCalls members,
 ) {
   final selection = FunctionSelection(
     function,
@@ -32,10 +34,12 @@ final class ScalarFunction<R extends Object>(
     heap,
     traces,
     casts,
+    members,
   );
 
   bool get hasRoots => selection.liveness.acrossCalls.values.any(
-    (values) => values.any((v) => layouts.isReference(v.type)),
+    (values) =>
+        values.any((v) => layouts.isReference(selection.body.typeOf(v))),
   );
 
   /// Emits the body and reports direct call sites to the module generator.
@@ -76,6 +80,10 @@ final class ScalarFunction<R extends Object>(
       allocation.begin(block);
       for (final instruction in selection.body.instructions[block]!) {
         if (selection.liveness.omitted.contains(instruction)) continue;
+        if (selection.body.aliases.contains(instruction) &&
+            instruction.type == .voidType) {
+          continue;
+        }
         if (selection.constantTests[instruction] case final value?) {
           final destination = allocation.allocate(.general);
           emitter.loadImmediate(destination, value ? 1 : 0);
@@ -216,6 +224,7 @@ final class ScalarFunction<R extends Object>(
           }
           if (layout.result case final result?
               when instruction.type != .voidType) {
+            final resultType = selection.body.typeOf(instruction);
             if (instruction
                 case Equals(negated: true) || TypeTest(negated: true)) {
               final scratch = allocation.allocate(.general, except: [result]);
@@ -228,9 +237,9 @@ final class ScalarFunction<R extends Object>(
             }
             if (native == null &&
                 layouts.representation(target!.returnType) !=
-                    layouts.representation(instruction.type)) {
+                    layouts.representation(resultType)) {
               final destination = allocation.allocate(
-                selection.bank(instruction.type),
+                selection.bank(resultType),
                 preferred: result,
               );
               emitter.loadMemory(
@@ -294,12 +303,13 @@ final class ScalarFunction<R extends Object>(
             );
           }
           allocation.define(instruction, destination);
-        } else if (instruction is TypeView ||
+        } else if (selection.body.aliases.contains(instruction) ||
+            instruction is TypeView ||
             instruction is ReifyType ||
             instruction is ObjectRuntimeType) {
           final operand = selection.body.inputsOf(instruction).single;
           final R destination;
-          if (layouts.representation(operand.type) ==
+          if (layouts.representation(selection.body.typeOf(operand)) ==
               layouts.representation(instruction.type)) {
             final source = allocation.read(operand);
             allocation.release(operand);

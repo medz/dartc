@@ -51,6 +51,8 @@ void main() {
         compiler.compile(
           [source],
           nativeSymbols: {
+            ...nativeImportSymbols,
+            'math:first': {'pointer': 'opaque'},
             'other': {'step': 'increment'},
           },
         ),

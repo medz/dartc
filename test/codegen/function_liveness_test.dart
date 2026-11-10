@@ -3,6 +3,7 @@ import 'package:dartc/src/codegen/function_liveness.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
+import 'package:dartc/src/codegen/member_calls.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -18,6 +19,11 @@ void main() {
       IrFunction(target, blocks),
       ProgramLayout([]),
       CheckedCasts(),
+      MemberCalls(
+        IrProgram([], []),
+        {},
+        FunctionTarget(library, 'invalid', .never, []),
+      ),
     );
     return FunctionLiveness(body, body.inputsOf, {
       ...body.boxes.keys,

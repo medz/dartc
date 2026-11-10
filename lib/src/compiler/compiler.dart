@@ -65,10 +65,12 @@ final class Compiler(final Target target) {
       .arm64 => Arm64CodeGenerator(target),
       .x64 => X64CodeGenerator(target),
     };
-    final definitions = <FunctionTarget>{};
+    final definitions = program.reachableFrom([
+      ...exports.keys,
+      if (output is ExecutableOutput) entryPoint!,
+    ]);
     final nativeImports = <FunctionTarget, NativeImport>{};
-    void include(FunctionTarget target) {
-      if (!definitions.add(target)) return;
+    for (final target in definitions) {
       final function = program.implementationOf(target);
       final reference = imports[target];
       if (function is IrExternal && reference != null) {
@@ -83,16 +85,12 @@ final class Compiler(final Target target) {
           reference.signature,
           isLeaf: reference.isLeaf,
         );
-        return;
+        continue;
       }
       if (function is! IrFunction) {
         throw UnsupportedError('Native body unavailable: ${target.name}');
       }
-      function.callees.forEach(include);
     }
-
-    exports.keys.forEach(include);
-    if (output is ExecutableOutput) include(entryPoint!);
     const entrySymbol = '.dartc.start';
     final object = generator.generate(
       program,

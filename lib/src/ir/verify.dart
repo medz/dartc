@@ -7,6 +7,8 @@ import 'value.dart';
 typedef FunctionReferences = ({
   Set<FunctionTarget> closures,
   Set<FunctionTarget> callees,
+  Set<FunctionTarget> virtualMembers,
+  Set<ClassType> instantiatedClasses,
   Set<GlobalVariable> globals,
   Set<InstanceField> fields,
   Set<ObjectConstant> objects,
@@ -25,6 +27,8 @@ FunctionReferences verifyCallable(
 }) {
   Set<FunctionTarget>? closures;
   Set<FunctionTarget>? callees;
+  Set<FunctionTarget>? virtualMembers;
+  Set<ClassType>? instantiatedClasses;
   Set<GlobalVariable>? globals;
   Set<InstanceField>? fields;
   Set<ObjectConstant>? objects;
@@ -38,7 +42,7 @@ FunctionReferences verifyCallable(
       ...checkedTypes,
       ...scope,
       ?target.owner,
-      for (final callee in callees ?? const <FunctionTarget>{}) ...[
+      for (final callee in [...?callees, ...?virtualMembers]) ...[
         callee.signature,
         ?callee.owner,
       ],
@@ -46,6 +50,8 @@ FunctionReferences verifyCallable(
     return (
       closures: _snapshot(closures),
       callees: _snapshot(callees),
+      virtualMembers: _snapshot(virtualMembers),
+      instantiatedClasses: _snapshot(instantiatedClasses),
       globals: _snapshot(globals),
       fields: _snapshot(fields),
       objects: _snapshot(objects),
@@ -87,6 +93,9 @@ FunctionReferences verifyCallable(
       :final constructorTypeArguments,
     )) {
       (callees ??= {}).add(callee);
+      if (callee.kind == .initializer) {
+        (instantiatedClasses ??= {}).add(callee.owner!);
+      }
       if (constructorSignature != null) checkTypeScope(constructorSignature);
       if (constructorTypeArguments != null) {
         checkTypeScope(
@@ -103,6 +112,7 @@ FunctionReferences verifyCallable(
       }
     }
     if (value is ObjectConstant) {
+      (instantiatedClasses ??= {}).add((value.type as ClassType).declaration);
       (objects ??= {}).add(value);
       (fields ??= {}).addAll(value.fields.keys);
     }
@@ -266,8 +276,10 @@ FunctionReferences verifyCallable(
         case LoadLibrary(:final reference) ||
             CheckLibraryLoaded(:final reference):
           (deferredImports ??= {}).add(reference);
+        case InstanceCall(member: final callee) ||
+            BindMethod(method: final callee, direct: false):
+          (virtualMembers ??= {}).add(callee);
         case DirectCall(target: final callee) ||
-            InstanceCall(member: final callee) ||
             BindMethod(method: final callee) ||
             Construct(initializer: final callee):
           (callees ??= {}).add(callee);
@@ -277,6 +289,8 @@ FunctionReferences verifyCallable(
           break;
       }
       switch (op) {
+        case Construct(:final instantiatedType):
+          (instantiatedClasses ??= {}).add(instantiatedType.declaration);
         case LoadGlobal(:final global) || StoreGlobal(:final global):
           (globals ??= {}).add(global);
         case MakeClosure(target: final child):

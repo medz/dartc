@@ -68,7 +68,12 @@ final class FunctionAllocation<R extends Object>(
         liveness.uses.values.any(
           (uses) => RegisterBank.values.any(
             (bank) =>
-                uses.keys.where((v) => selection.bank(v.type) == bank).length +
+                uses.keys
+                        .where(
+                          (v) =>
+                              selection.bank(selection.body.typeOf(v)) == bank,
+                        )
+                        .length +
                     selection.temporaries(bank) >=
                 emitter.allocatableRegisters
                     .where((r) => emitter.bank(r) == bank)
@@ -159,7 +164,10 @@ final class FunctionAllocation<R extends Object>(
   /// Reads an operand without evicting registers in [except].
   R read(Value value, {Iterable<R> except = const []}) {
     if (_registers[value] case final register?) return register;
-    final register = allocate(selection.bank(value.type), except: except);
+    final register = allocate(
+      selection.bank(selection.body.typeOf(value)),
+      except: except,
+    );
     load(value, register, except: except);
     return _registers[value] = register;
   }
@@ -199,14 +207,15 @@ final class FunctionAllocation<R extends Object>(
       asType ??= value.type;
       value = value.test.operand;
     }
-    final from = selection.layouts.representation(value.type);
-    final to = selection.layouts.representation(asType ?? value.type);
+    final storedType = selection.body.typeOf(value);
+    final from = selection.layouts.representation(storedType);
+    final to = selection.layouts.representation(asType ?? storedType);
     if (from != to) {
       if (to == .reference) {
         if (value is Constant) {
           loadObject(value, destination);
         } else {
-          if (value.type != .boolean) {
+          if (storedType != .boolean) {
             throw StateError('Allocating conversion was not selected.');
           }
           final no = emitter.label(), done = emitter.label();
@@ -337,7 +346,7 @@ final class FunctionAllocation<R extends Object>(
   /// Homes caller-live references before argument staging and invalidates registers.
   StackRoots prepareCall(Instruction instruction, Set<R> clobbered) {
     final roots = selection.liveness.acrossCalls[instruction]!
-        .where((v) => selection.layouts.isReference(v.type))
+        .where((v) => selection.layouts.isReference(selection.body.typeOf(v)))
         .toSet();
     _registers.removeWhere((value, register) {
       if (!clobbered.contains(register) && !roots.contains(value)) return false;

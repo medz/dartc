@@ -11,7 +11,9 @@ abstract interface class CodeGenerator() {
   /// Generates the selected definitions and exposes the declared native exports.
   ///
   /// Definitions must belong to [program] and include every directly called
-  /// body or external declaration. [imports] binds external declarations to
+  /// body or external declaration, including implementations selected by virtual
+  /// calls. [IrProgram.reachableFrom] selects these for a closed program. Managed
+  /// receivers from other modules are not supported. [imports] binds external declarations to
   /// native signatures; [exports] exposes a subset of the supplied Dart bodies.
   /// The caller resolves native symbols and supplies their implementations when
   /// linking. Unsupported operations fail before an artifact is returned.
@@ -32,6 +34,11 @@ abstract interface class CodeGenerator() {
   /// chained binders. Class environments follow the actual receiver's inherited
   /// arguments; factories receive the requested owner type. General Type member
   /// dispatch remains unsupported. Generic functions cannot be native exports.
+  /// Ordinary class member calls select the actual implementation, bind its
+  /// defaults and check parameters and generic bounds before entering the body.
+  /// Inherited and mixin implementations retain super calls. Scalar results are
+  /// converted to the caller's representation. Object member dispatch, Never
+  /// parameters and value-returning views of void implementations remain unsupported.
   /// Modules with references live across calls include read-only stack records
   /// keyed by relocated return addresses. These describe initialized reference
   /// slots and frame linkage; native entry wrappers terminate the frame walk.
@@ -48,8 +55,8 @@ abstract interface class CodeGenerator() {
   /// [TypeTest] and typed catches inspect actual object types, including inherited
   /// interfaces and fully determined generic arguments. [TypeCast] and [NullCheck]
   /// preserve the value on success and throw TypeError on failure, following the
-  /// same exception and cleanup paths. Checks requiring runtime type parameters,
-  /// trace formatting and the Error.stackTrace getter remain unsupported.
+  /// same exception and cleanup paths. Trace formatting and the Error.stackTrace
+  /// getter remain unsupported.
   /// Exceptions cannot unwind foreign frames.
   /// Escaping managed state, asynchronous execution and catchable allocation
   /// failures remain unsupported. A failure escaping the native entry releases

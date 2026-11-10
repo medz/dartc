@@ -3,11 +3,98 @@ import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/function_liveness.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
+import 'package:dartc/src/codegen/member_calls.dart';
 import 'package:test/test.dart';
 
 void main() {
   final uri = Uri.parse('memory:representation');
   final layouts = ProgramLayout([]);
+  final members = MemberCalls(
+    IrProgram([], []),
+    {},
+    FunctionTarget(uri, 'invalid', .never, []),
+  );
+
+  test(
+    'selected scalar returns are boxed before joining the semantic result',
+    () {
+      final face = ClassType(uri, 'Face');
+      final type = ClassType(uri, 'Concrete', interfaces: [face]);
+      final declaration = FunctionTarget(
+        uri,
+        'read',
+        .number,
+        [],
+        owner: face,
+        kind: .method,
+        isAbstract: true,
+      );
+      final implementation = FunctionTarget(
+        uri,
+        'read',
+        .floating,
+        [],
+        owner: type,
+        kind: .method,
+      );
+      final entry = Block(), done = Block([.number]), failed = Block();
+      final original = InstanceCall(declaration, ObjectConstant(type, {}), []);
+      entry.finish(
+        Invoke(
+          original,
+          onReturn: Jump(done, [original]),
+          onThrow: Jump(failed),
+        ),
+      );
+      done.finish(Return(done.parameters.single));
+      failed.finish(const Return(Constant.floating(0)));
+      final function = IrFunction(FunctionTarget(uri, 'caller', .number, []), [
+        entry,
+        done,
+        failed,
+      ]);
+      final program = IrProgram(
+        [
+          IrClass(face, [], members: [declaration]),
+          IrClass(type, [], members: [implementation]),
+        ],
+        [
+          function,
+          IrFunction(implementation, [
+            Block(implementation.parameterTypes)
+              ..finish(const Return(Constant.floating(1))),
+          ]),
+        ],
+      );
+      final body = FunctionRepresentation(
+        function,
+        ProgramLayout(program.classes),
+        CheckedCasts(),
+        MemberCalls(
+          program,
+          program.reachableFrom([function.target]),
+          members.invalid,
+        ),
+      );
+      final selected = body.invocations.keys.single;
+      expect(body.invocations[selected], same(implementation));
+      expect(selected.type, ValueType.number);
+      expect(body.typeOf(selected), ValueType.floating);
+      expect(body.boxes.values.single, same(selected));
+      expect(body.boxes.keys.single.type, ValueType.number);
+      expect(body.aliases, {original});
+      expect((entry.end as Invoke).operation, same(original));
+      expect(
+        body.ends.values
+            .whereType<Invoke>()
+            .where((end) => end.operation == selected)
+            .single
+            .onThrow
+            .target,
+        same(failed),
+      );
+    },
+  );
 
   test(
     'checked field stores keep the receiver live and write only on success',
@@ -38,6 +125,7 @@ void main() {
           IrClass(owner, [field], members: [target]),
         ]),
         CheckedCasts(),
+        members,
       );
       final invoke = body.ends[entry] as Invoke;
       expect(invoke.operation, isA<TypeCast>());
@@ -101,6 +189,7 @@ void main() {
       IrFunction(target, [entry, yes, no]),
       layouts,
       CheckedCasts(),
+      members,
     );
     final actual = body.instructions[entry]!
         .whereType<ObjectRuntimeType>()
@@ -143,6 +232,7 @@ void main() {
       IrFunction(target, [entry]),
       layouts,
       CheckedCasts(),
+      members,
     );
     final calls = body.instructions[entry]!.whereType<DirectCall>().toList();
     expect(calls, hasLength(2));
@@ -178,6 +268,7 @@ void main() {
       IrFunction(caller, [entry]),
       layouts,
       CheckedCasts(),
+      members,
     );
     final boxes = body.boxes.keys.toList();
     final flow = FunctionLiveness(body, body.inputsOf, {...boxes, call});
@@ -209,6 +300,7 @@ void main() {
       IrFunction(target, [entry, taken, other]),
       layouts,
       CheckedCasts(),
+      members,
     );
     final flow = FunctionLiveness(body, body.inputsOf, body.boxes.keys.toSet());
     final branch = body.ends[entry] as Branch;
@@ -233,6 +325,7 @@ void main() {
       IrFunction(target, [entry, done]),
       layouts,
       CheckedCasts(),
+      members,
     );
     final branch = body.ends[entry] as Branch;
     expect(branch.ifTrue.target, isNot(same(branch.ifFalse.target)));
@@ -276,6 +369,7 @@ void main() {
         IrFunction(target, [entry, success, failure]),
         layouts,
         CheckedCasts(),
+        members,
       );
       final selected = body.ends[entry] as Invoke;
       final normalEdge = selected.onReturn!.target,
@@ -319,6 +413,7 @@ void main() {
       IrFunction(target, [entry]),
       layouts,
       CheckedCasts(),
+      members,
     );
     final box = body.boxes.keys.single;
     final flow = FunctionLiveness(body, body.inputsOf, {box});

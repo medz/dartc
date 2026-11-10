@@ -12,7 +12,7 @@ void main() {
     'SDK members without intrinsics retain ordinary declaration references',
     () {
       final calls = fixture.program.functions.expand(
-        (function) => function.callees,
+        (function) => function.callees.followedBy(function.virtualMembers),
       );
       expect(
         calls
