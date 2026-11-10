@@ -9,6 +9,13 @@ import 'fixture_comparison.dart';
 import 'fixtures/covariant_forwarder_sources.dart' as sdk;
 
 void main() {
+  late IrProgram sourceProgram;
+  setUpAll(() async {
+    sourceProgram = (await FixtureComparison.load(
+      'covariant_forwarder_sources',
+    )).program;
+  });
+
   Future<IrProgram> lower(String source) async {
     final directory = Directory.systemTemp.createTempSync(
       'dartc-wrapper-guard-',
@@ -158,23 +165,6 @@ Object? run() => F().f();
   });
 
   test(
-    'specialized source covariance matches SDK in first-generation bodies',
-    () async {
-      final fixture = await FixtureComparison.load(
-        'covariant_forwarder_sources',
-      );
-      for (var form = 0; form < 11; form++) {
-        for (final value in [7, 1.5, 'bad', null]) {
-          fixture.compare('sourceCovariance', [
-            form,
-            value,
-          ], () => sdk.sourceCovariance(form, value));
-        }
-      }
-    },
-  );
-
-  test(
     'inherited method-bound class covariance survives specialization',
     () async {
       final program = await lower('''
@@ -228,32 +218,19 @@ Object? run() => C().f();
     },
   );
 
-  test('own source covariance is cache-safe and leaves unrelated ancestors unchanged', () async {
-    final fixture = await FixtureComparison.load('covariant_forwarder_sources');
-    for (var form = 0; form < 11; form++) {
-      for (final value in [7, 1.5, 'bad', null]) {
-        fixture.compare('ownSourceCovariance', [
-          form,
-          value,
-        ], () => sdk.ownSourceCovariance(form, value));
-      }
-    }
-  });
-
-  test(
-    'source class covariance propagates transitively through real overrides',
-    () async {
-      final fixture = await FixtureComparison.load(
-        'covariant_forwarder_sources',
-      );
-      for (var form = 0; form < 5; form++) {
-        for (final value in [7, 1.5, 'bad', null]) {
-          fixture.compare('transitiveSourceCovariance', [
-            form,
-            value,
-          ], () => sdk.transitiveSourceCovariance(form, value));
+  for (final (name, run, forms, valueForms) in [
+    ('sourceCovariance', sdk.sourceCovariance, 11, {1, 5, 8, 9, 10}),
+    ('ownSourceCovariance', sdk.ownSourceCovariance, 11, {1, 5, 8, 9, 10}),
+    ('transitiveSourceCovariance', sdk.transitiveSourceCovariance, 5, {1, 3}),
+  ]) {
+    test('$name preserves checks, defaults and tearoff types', () {
+      final fixture = FixtureComparison(sourceProgram);
+      for (var form = 0; form < forms; form++) {
+        for (final value
+            in valueForms.contains(form) ? [7, 1.5, 'bad', null] : [null]) {
+          fixture.compare(name, [form, value], () => run(form, value));
         }
       }
-    },
-  );
+    });
+  }
 }
