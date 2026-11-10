@@ -55,8 +55,15 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     relocations.add(
       .address(
         1,
-        offset + ObjectLayout.typeOffset,
+        offset + ObjectLayout.descriptorOffset,
         _type(value.type as ClassType, layout),
+      ),
+    );
+    relocations.add(
+      .address(
+        1,
+        offset + ObjectLayout.typeOffset,
+        addressOf(layouts.types.constant(value.type)),
       ),
     );
     if (storage == null) {

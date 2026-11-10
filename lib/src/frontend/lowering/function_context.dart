@@ -285,9 +285,8 @@ final class FunctionContext(
         extension == null && !isClassLike(member.enclosingElement)) {
       unsupported(unit, site, 'instance member binding');
     }
-    if (coreRuntimeType(member) && !direct) {
-      final value = dynamicMember(receiver, .getter, 'runtimeType', []);
-      return value == null ? null : normal(cast(value, ValueType.typeType));
+    if (coreRuntimeType(member)) {
+      return normal(emit(ObjectRuntimeType(receiver, direct: direct)));
     }
     final checked = memberReceiver(receiver, extension);
     if (checked == null) return null;

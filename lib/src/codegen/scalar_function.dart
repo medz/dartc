@@ -120,6 +120,27 @@ final class ScalarFunction<R extends Object>(
           allocation.release(test.operand);
           allocation.releaseTemporary(scratch);
           allocation.define(instruction, result);
+        } else if (instruction case ObjectRuntimeType(:final operand)
+            when operand.type != .nullType &&
+                layouts.representation(operand.type) == .reference) {
+          final value = allocation.read(operand);
+          final result = allocation.allocate(.general, except: [value]);
+          final done = emitter.label();
+          emitter.address(
+            result,
+            (fixup) => constant(fixup, layouts.types.constant(.nullType)),
+          );
+          emitter.jumpIfZero(value, done);
+          emitter.loadMemory(
+            result,
+            value,
+            offset: ObjectLayout.typeOffset,
+            bytes: 8,
+            signed: false,
+          );
+          emitter.bind(done);
+          allocation.release(operand);
+          allocation.define(instruction, result);
         } else if (instruction case NewCell(:final initial)) {
           if (initial != null) {
             allocation.writeCell(
@@ -254,7 +275,7 @@ final class ScalarFunction<R extends Object>(
               emitter.loadMemory(
                 destination,
                 result,
-                offset: ObjectLayout.alignment,
+                offset: ObjectLayout.fieldsOffset,
                 bytes: 8,
                 signed: false,
               );
@@ -306,13 +327,15 @@ final class ScalarFunction<R extends Object>(
             emitter.loadMemory(
               destination,
               stored,
-              offset: ObjectLayout.alignment,
+              offset: ObjectLayout.fieldsOffset,
               bytes: 8,
               signed: false,
             );
           }
           allocation.define(instruction, destination);
-        } else if (instruction is TypeView || instruction is ReifyType) {
+        } else if (instruction is TypeView ||
+            instruction is ReifyType ||
+            instruction is ObjectRuntimeType) {
           final operand = selection.body.inputsOf(instruction).single;
           final R destination;
           if (layouts.representation(operand.type) ==

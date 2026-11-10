@@ -143,6 +143,15 @@ final class FunctionSelection<R>(
             _call(instruction, target, body.inputsOf(instruction).toList());
           case ReifyType():
             break;
+          case ObjectRuntimeType(:final operand, :final direct):
+            if (!direct &&
+                operand.type != .nullType &&
+                layouts.hasRuntimeTypeOverride(operand.type)) {
+              throw UnsupportedError(
+                'Native runtimeType override dispatch is not implemented.',
+              );
+            }
+            if (_generalTemporaries < 1) _generalTemporaries = 1;
           case LoadField(:final field, :final type):
             if (field.isLate) {
               throw UnsupportedError('Native late field: ${field.name}');
@@ -168,16 +177,16 @@ final class FunctionSelection<R>(
               constant: operand is ScalarConstant,
             );
           case TypeTest(:final operand, :final testedType, :final negated):
-            final source = operand.type;
+            final source = FfiTypes.isPointer(operand.type)
+                ? FfiTypes.pointerRuntimeType
+                : operand.type;
             if (testedType.accepts(source)) {
               constantTests[instruction] = !negated;
             } else if (testedType == .never ||
                 source == .nullType && !testedType.mayBeNull ||
                 testedType == .nullType && !source.mayBeNull ||
                 testedType.freeTypeParameters.isEmpty &&
-                    (layouts.isBoxable(source) ||
-                        FfiTypes.isPointer(source) &&
-                            source.freeTypeParameters.isEmpty)) {
+                    (layouts.isBoxable(source) || FfiTypes.isPointer(source))) {
               constantTests[instruction] = negated;
             } else if (testedType == .nullType ||
                 testedType == .object ||
@@ -291,7 +300,10 @@ final class FunctionSelection<R>(
           case Equals(:final left, :final right, :final negated):
             final nullComparison =
                 left.type == .nullType || right.type == .nullType;
-            final typeLiteral = left is TypeConstant || left is ReifyType;
+            final typeLiteral =
+                left is TypeConstant ||
+                left is ReifyType ||
+                left is ObjectRuntimeType;
             if (typeLiteral &&
                 layouts.representation(right.type) == .reference) {
               _call(instruction, layouts.types.equality, [left, right]);

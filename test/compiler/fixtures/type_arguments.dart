@@ -3,7 +3,8 @@ import 'dart:ffi';
 
 import 'package:dartc/interop.dart';
 
-import 'type_checks.dart' show Box, churn;
+import 'type_checks.dart'
+    show Base, Child, Marked, Box, Projected, churn, value;
 
 typedef Pair = (int, {bool flag});
 typedef FunctionA = T Function<T extends num>(T);
@@ -13,6 +14,70 @@ typedef Top = Object?;
 typedef FutureObject = FutureOr<Object>;
 
 Type typeOf<T>() => T;
+
+class const TypeTag<T>(final int number);
+
+int compareRuntime(Object? object, Type expected, int count) {
+  final before = object.runtimeType;
+  churn(count);
+  return (before == expected ? 1 : 0) |
+      (object.runtimeType == expected ? 2 : 0);
+}
+
+int heapType<T>(int count) =>
+    compareRuntime(typeOf<Box<T>>(), (int).runtimeType, count);
+
+@Export<Int64 Function(Int64, Int64)>()
+int runtimeTypes(int mode, int count) {
+  if (mode == 23) return heapType<int>(count);
+  if (mode == 16) {
+    churn(count);
+    return null.runtimeType == Null ? 3 : 0;
+  }
+  if (mode == 17) {
+    final pointer = Pointer<Int64>.fromAddress(0);
+    churn(count);
+    return (pointer.runtimeType == typeOf<Pointer<Never>>() ? 1 : 0) |
+        (pointer is Pointer<Double> && pointer.runtimeType != Null ? 2 : 0);
+  }
+  if (mode == 18) {
+    return compareRuntime(
+      const TypeTag<List<int>>(7),
+      TypeTag<List<int>>,
+      count,
+    );
+  }
+  if (mode >= 19 && mode <= 21) {
+    churn(count);
+    return switch (mode) {
+      19 => 1.runtimeType == int ? 3 : 0,
+      20 => 1.5.runtimeType == double ? 3 : 0,
+      _ => true.runtimeType == bool ? 3 : 0,
+    };
+  }
+  if (mode == 22) {
+    return compareRuntime(int, (int).runtimeType, count);
+  }
+  final expected = switch (mode) {
+    0 => int,
+    1 => double,
+    2 => bool,
+    3 => Null,
+    4 => Base,
+    5 => Child,
+    6 => Marked,
+    7 => Box<int>,
+    8 => Box<num>,
+    9 => Box<int?>,
+    10 => Projected<int>,
+    11 => Box<Child>,
+    12 => Box<Base>,
+    13 => Box<FutureOr<int>>,
+    14 => typeOf<Box<int Function(num)>>(),
+    _ => typeOf<Box<({int n, bool b})>>(),
+  };
+  return compareRuntime(value(mode, 5), expected, count);
+}
 
 int inspect<T>(Type expected, int depth, int count) {
   if (depth > 0) return inspect<T>(expected, depth - 1, count);

@@ -14,6 +14,7 @@ void main() {
     ('shapedRuntimeTypes', sdk.shapedRuntimeTypes),
     ('overriddenRuntimeType', sdk.overriddenRuntimeType),
     ('runtimeTypeWildcard', sdk.runtimeTypeWildcard),
+    ('pointerRuntimeTypes', sdk.pointerRuntimeTypes),
   ]) {
     test('$name matches the Dart SDK', () {
       fixture.compare(name, [], expected);
@@ -45,10 +46,9 @@ void main() {
     final actual = fixture.program.functions.singleWhere(
       (function) => function.target.name == 'actual',
     );
-    final calls = actual.blocks
+    final reads = actual.blocks
         .expand((block) => block.instructions)
-        .whereType<DirectCall>();
-    expect(calls.single.target.owner, ValueType.object);
-    expect(calls.single.target.name, 'runtimeType');
+        .whereType<ObjectRuntimeType>();
+    expect(reads.single.direct, isTrue);
   });
 }

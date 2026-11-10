@@ -18,6 +18,12 @@ void main() {
     );
     final plain = GlobalVariable(uri, 'plain', ValueType.integer.nullable);
     expect(IntBinary(.add, n, n).effects, isEmpty);
+    expect(ObjectRuntimeType(n).effects, Effect.values.toSet());
+    expect(ObjectRuntimeType(n, direct: true).effects, {Effect.readsStorage});
+    expect(
+      () => ObjectRuntimeType(NewCell(CellType(.integer), n)),
+      throwsArgumentError,
+    );
     expect(IntBinary(.truncateDivide, n, n).effects, {Effect.mayThrow});
     expect(LoadField(slot, receiver).effects, {Effect.readsStorage});
     expect(StoreField(slot, receiver, n).effects, {Effect.writesStorage});

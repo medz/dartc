@@ -9,6 +9,16 @@ import 'fixtures/type_arguments.dart' as sdk;
 import 'fixtures/type_arguments_ffi.dart';
 
 void main() {
+  test('actual runtime types survive boxing, constants and collection', () {
+    final native = TypeArguments();
+    addTearDown(native.close);
+    for (final count in [0, 40000]) {
+      for (var mode = 0; mode < 24; mode++) {
+        expect(sdk.runtimeTypes(mode, count), 3, reason: 'SDK: $mode');
+        expect(native.runtimeTypes(mode, count), 3, reason: '$mode, $count');
+      }
+    }
+  });
   test('function bounds normalize from actual arguments across GC', () {
     final native = TypeArguments();
     addTearDown(native.close);

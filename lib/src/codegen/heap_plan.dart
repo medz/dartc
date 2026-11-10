@@ -56,6 +56,7 @@ final class HeapPlan(
     ProgramLayout layouts,
     void Function(Fixup, FunctionTarget) call,
     void Function(Fixup, ClassType) descriptor,
+    void Function(Fixup, Constant) constant,
     void Function(int, StackRoots) safepoint,
     void Function(Fixup, int) codeAddress,
   ) {
@@ -91,10 +92,11 @@ final class HeapPlan(
     final objectOffset = frame.localOffset + parameterTypes.length * 8;
     R scratch(ValueType type) => emitter.allocatableRegisters.lastWhere(
       (r) =>
+          r != allocation.result &&
           emitter.bank(r) ==
-          (layouts.representation(type) == .floating
-              ? RegisterBank.floating
-              : RegisterBank.general),
+              (layouts.representation(type) == .floating
+                  ? RegisterBank.floating
+                  : RegisterBank.general),
     );
     emitter.prologue(frame);
     for (final (i, location) in source.parameters.indexed) {
@@ -134,13 +136,25 @@ final class HeapPlan(
     emitter.jumpIfZero(emitter.failureRegister, allocated);
     emitter.epilogue(frame);
     emitter.bind(allocated);
+    final runtimeType = scratch(ValueType.typeType);
+    emitter.address(
+      runtimeType,
+      (fixup) => constant(fixup, layouts.types.constant(type)),
+    );
+    emitter.storeMemory(
+      runtimeType,
+      allocation.result!,
+      offset: ObjectLayout.typeOffset,
+      bytes: 8,
+    );
+    emitter.loadImmediate(emitter.failureRegister, 0);
     if (initializer == null) {
       final value = scratch(type);
       emitter.loadStack(value, frame.localOffset);
       emitter.storeMemory(
         value,
         allocation.result!,
-        offset: ObjectLayout.alignment,
+        offset: ObjectLayout.fieldsOffset,
         bytes: 8,
       );
       // The payload scratch may also carry the call failure flag.

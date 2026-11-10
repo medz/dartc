@@ -61,6 +61,9 @@ abstract final class FfiTypes() {
     ],
   );
 
+  /// The reified pointer type; element types describe native storage statically.
+  static final pointerRuntimeType = pointer.instantiate([ValueType.never]);
+
   /// Supported FFI pointer type values and their canonical Dart types.
   static final Map<Type, ClassType> pointerTypes = .unmodifiable({
     for (final MapEntry(:key, :value) in _scalars.entries)

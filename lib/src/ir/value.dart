@@ -108,6 +108,20 @@ final class ReifyType(final ValueType template) extends Instruction {
   Iterable<Value> get inputs => const [];
 }
 
+/// Reads Dart Object.runtimeType, retaining virtual dispatch for user objects.
+final class ObjectRuntimeType(
+  final Value operand, {
+
+  /// Whether `super` selected the built-in getter without virtual dispatch.
+  final bool direct = false,
+}) extends Instruction {
+  this : super(.typeType) {
+    if (operand.type is CellType) throw ArgumentError('Expected a Dart value.');
+  }
+  @override
+  Iterable<Value> get inputs => [operand];
+}
+
 /// Reads Dart Object.hashCode, retaining virtual dispatch for user objects.
 final class ObjectHashCode(
   final Value operand, {
@@ -393,6 +407,8 @@ sealed class Instruction(super.type) extends Value {
   /// the operation itself; temporary boxes and GC safepoints depend on the backend.
   Set<Effect> get effects => switch (this) {
     ObjectHashCode(direct: true) => _bindOnce,
+    ObjectRuntimeType(direct: true) => const {.readsStorage},
+    ObjectRuntimeType() ||
     ObjectHashCode() ||
     ListSublist() ||
     MapContainsKey() ||

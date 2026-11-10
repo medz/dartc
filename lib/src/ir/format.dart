@@ -144,6 +144,8 @@ void writeFunction(
     Equals() =>
       '${value(op.left)} ${op.negated ? '!=' : '=='} ${value(op.right)}',
     ReifyType() => 'reify ${op.template.dartName}',
+    ObjectRuntimeType() =>
+      '${op.direct ? 'direct ' : ''}runtimeType ${value(op.operand)}',
     ObjectHashCode() =>
       '${op.direct ? 'direct ' : ''}hashCode ${value(op.operand)}',
     TypeTest() =>

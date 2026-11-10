@@ -11,6 +11,7 @@ import 'fixtures/stack_roots_ffi.dart' show RootVisitor;
 
 void main() {
   test('exception identity, traces and Error storage survive rethrow and collection', () {
+    const payload = ObjectLayout.fieldsOffset ~/ ObjectLayout.alignment;
     final native = ExceptionCalls();
     addTearDown(native.close);
     final maps = <int, StackRoots>{};
@@ -31,12 +32,12 @@ void main() {
         if (seen.length > 20) fail('Captured trace did not end.');
         final node = Pointer<Uint64>.fromAddress(address);
         expect(
-          maps.containsKey(node[1]),
+          maps.containsKey(node[payload]),
           isTrue,
           reason: 'Unknown captured PC',
         );
-        result.add(node[1]);
-        address = node[2];
+        result.add(node[payload]);
+        address = node[payload + 1];
       }
       return result;
     }
@@ -66,14 +67,16 @@ void main() {
               .where(
                 (address) =>
                     address != 0 &&
-                    Pointer<Uint64>.fromAddress(address)[1] == 123,
+                    Pointer<Uint64>.fromAddress(address)[payload] == 123,
               )
               .toList();
           final traces = roots
               .where(
                 (address) =>
                     address != 0 &&
-                    maps.containsKey(Pointer<Uint64>.fromAddress(address)[1]),
+                    maps.containsKey(
+                      Pointer<Uint64>.fromAddress(address)[payload],
+                    ),
               )
               .toSet();
           expect(payloads.length, greaterThanOrEqualTo(2));
@@ -87,7 +90,7 @@ void main() {
             final object = Pointer<Uint64>.fromAddress(payloads.first);
             final descriptor = Pointer<Uint64>.fromAddress(object.value);
             final slot = descriptor[2 + descriptor[1]] ~/ 8;
-            expect(slot, 2);
+            expect(slot, payload + 1);
             expect(trace(object[slot]), originalTrace);
             expect(object[slot] == traces.single, calls < 2);
           }

@@ -9,32 +9,6 @@ import 'package:test/test.dart';
 
 import 'numeric_order.dart';
 
-final _nativePointers = <Type, ffi.Pointer<ffi.NativeType> Function(int)>{
-  ffi.Int8: ffi.Pointer<ffi.Int8>.fromAddress,
-  ffi.Uint8: ffi.Pointer<ffi.Uint8>.fromAddress,
-  ffi.Int16: ffi.Pointer<ffi.Int16>.fromAddress,
-  ffi.Uint16: ffi.Pointer<ffi.Uint16>.fromAddress,
-  ffi.Int32: ffi.Pointer<ffi.Int32>.fromAddress,
-  ffi.Uint32: ffi.Pointer<ffi.Uint32>.fromAddress,
-  ffi.Int64: ffi.Pointer<ffi.Int64>.fromAddress,
-  ffi.Uint64: ffi.Pointer<ffi.Uint64>.fromAddress,
-  ffi.Float: ffi.Pointer<ffi.Float>.fromAddress,
-  ffi.Double: ffi.Pointer<ffi.Double>.fromAddress,
-};
-
-// Host Type values cannot be constructed for arbitrary nested FFI signatures.
-final class _TypedPointer(final int address, final ValueType type) {
-  @override
-  bool operator ==(Object other) => switch (other) {
-    _TypedPointer(:final address) ||
-    ffi.Pointer(:final address) => this.address == address,
-    _ => false,
-  };
-
-  @override
-  int get hashCode => ffi.Pointer<ffi.Void>.fromAddress(address).hashCode;
-}
-
 ByteData _nativeData(ffi.Pointer<ffi.NativeType> pointer, int bytes) =>
     ByteData.sublistView(
       ffi.Uint8Pointer(pointer.cast<ffi.Uint8>()).asTypedList(bytes),
@@ -1804,20 +1778,12 @@ final class IrInterpreter(
     void execute(Instruction op) {
       switch (op) {
         case PointerFromAddress(:final address):
-          final value = read(address) as int;
-          final create = _nativePointers[FfiTypes.pointerElement(op.type)];
-          values[op] = create == null
-              ? _TypedPointer(value, resolve(op.type))
-              : create(value);
+          values[op] = ffi.Pointer<ffi.Void>.fromAddress(read(address) as int);
         case PointerAddress(:final pointer):
-          values[op] = switch (read(pointer)) {
-            _TypedPointer(:final address) ||
-            ffi.Pointer(:final address) => address,
-            _ => throw StateError('Expected a pointer value.'),
-          };
+          values[op] = (read(pointer) as ffi.Pointer).address;
         case PointerOffset(:final pointer, :final index):
           final element = FfiTypes.pointerElement(op.type)!;
-          values[op] = _nativePointers[element]!(
+          values[op] = ffi.Pointer<ffi.Void>.fromAddress(
             (read(pointer) as ffi.Pointer).address +
                 (read(index) as int) * element.nativeSize,
           );
@@ -1828,11 +1794,7 @@ final class IrInterpreter(
               'Native function calls require native execution.',
             );
           }
-          final address = switch (read(pointer)) {
-            _TypedPointer(:final address) ||
-            ffi.Pointer(:final address) => address,
-            _ => throw StateError('Expected a pointer value.'),
-          };
+          final address = (read(pointer) as ffi.Pointer).address;
           values[op] = invoke(op, address, arguments.map(read).toList());
         case LoadNative(:final pointer):
           final native = FfiTypes.pointerElement(pointer.type)!;
@@ -1891,6 +1853,16 @@ final class IrInterpreter(
           values[op] = direct
               ? identityHashCode(read(operand))
               : read(operand).hashCode;
+        case ObjectRuntimeType(:final operand, :final direct):
+          values[op] = direct
+              ? _typeValue(_runtimeValueType(read(operand)))
+              : _dynamicDispatch(
+                  read(operand),
+                  _selector('runtimeType', .getter),
+                  const [],
+                  const {},
+                  const [],
+                );
         case NewCollection(:final collectionType):
           final type = resolve(collectionType) as ClassType;
           values[op] = _CollectionValue(
@@ -2255,11 +2227,7 @@ final class IrInterpreter(
         case Equals(:final left, :final right, :final negated):
           final a = read(left), b = read(right);
           values[op] =
-              (a is num && b is num
-                  ? numericOrder(a, b) == 0
-                  : b is _TypedPointer
-                  ? b == a
-                  : a == b) !=
+              (a is num && b is num ? numericOrder(a, b) == 0 : a == b) !=
               negated;
         case DirectCall(
           :final target,
@@ -2507,8 +2475,7 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
   Object? run<T>() => cast ? value as T : value is T;
   Object? scalar<T>() => type == type.nonNullable ? run<T>() : run<T?>();
   final actual = switch (value) {
-    _TypedPointer(:final type) => type,
-    ffi.Pointer() => FfiTypes.valueType(NativeTypeRef.of(value.runtimeType)),
+    ffi.Pointer() => FfiTypes.pointerRuntimeType,
     _TypeValue() => ValueType.typeType,
     _Instance(:final type) => type,
     _CollectionValue(:final type) => type,
@@ -2921,8 +2888,7 @@ FunctionType _instantiateSignature(
 final _noDynamicBridge = Object();
 
 ValueType _runtimeValueType(Object? value) => switch (value) {
-  _TypedPointer(:final type) => type,
-  ffi.Pointer() => FfiTypes.valueType(NativeTypeRef.of(value.runtimeType)),
+  ffi.Pointer() => FfiTypes.pointerRuntimeType,
   null => ValueType.nullType,
   _Instance(:final type) => type,
   _CollectionValue(:final type) when type.declaration == CoreTypes.list => type,

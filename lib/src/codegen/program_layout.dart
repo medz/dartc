@@ -133,6 +133,33 @@ final class ProgramLayout(Iterable<IrClass> classes) {
 
   int fieldOffset(InstanceField field) =>
       storageOf(field.owner).offsetOf(field);
+
+  bool hasRuntimeTypeOverride(ValueType source) {
+    const selector = (
+      kind: FunctionKind.getter,
+      name: 'runtimeType',
+      privateLibrary: null,
+    );
+    for (final candidate in _classes.keys) {
+      if (source.nonNullable case final ClassType type
+          when candidate.asInstanceOf(type.declaration) == null) {
+        continue;
+      }
+      for (
+        ClassType? type = candidate;
+        type != null && type != ValueType.object;
+        type = type.superclass
+      ) {
+        final definition = _classes[type.declaration];
+        if (definition == null ||
+            definition.members.containsKey(selector) ||
+            definition.unsupportedForwarders.contains(selector)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 }
 
 /// Declared field identities paired with their shared physical layout.
@@ -146,7 +173,10 @@ final class ClassStorage(
   late final int? errorTraceOffset;
 
   this {
-    errorTraceOffset = storesErrorTrace ? (this.fields.length + 1) * 8 : null;
+    errorTraceOffset = storesErrorTrace
+        ? ObjectLayout.fieldsOffset +
+              this.fields.length * ObjectLayout.alignment
+        : null;
     layout = .new([
       ...this.fields.map((f) => program.representation(f.type)),
       if (storesErrorTrace) ValueRepresentation.reference,

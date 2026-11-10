@@ -28,6 +28,10 @@ final class TypeArguments() {
       .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
         'bounds',
       );
+  late final runtimeTypes = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'runtimeTypes',
+      );
   late final floating = _library
       .lookupFunction<
         Double Function(Double, Int64),

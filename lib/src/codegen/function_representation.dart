@@ -114,6 +114,18 @@ final class FunctionRepresentation(
         if (instruction case ReifyType(:final template)) {
           _operands[instruction] = [_reify(template, body)];
         }
+        if (instruction case ObjectRuntimeType(:final operand)
+            when operand.type == .nullType ||
+                layouts.representation(operand.type) != .reference) {
+          _operands[instruction] = [
+            _reify(
+              FfiTypes.isPointer(operand.type)
+                  ? FfiTypes.pointerRuntimeType
+                  : operand.type,
+              body,
+            ),
+          ];
+        }
         if (instruction case TypeView(:final operand, :final type)
             when needsBox(operand, type)) {
           boxes[instruction] = operand;

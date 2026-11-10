@@ -23,8 +23,11 @@ abstract interface class CodeGenerator() {
   /// Direct generic calls carry reified type arguments through the normal
   /// calling convention and root records. [ReifyType] reads or combines function
   /// type arguments into nullable, nominal, FutureOr, function and record types.
-  /// Type literals are canonical within the module. Equality with a literal or
-  /// reified type as receiver compares normalized structures. Generic function
+  /// Type literals are canonical within the module. Equality with a literal,
+  /// reified type or [ObjectRuntimeType] as receiver compares normalized structures.
+  /// Object runtime types survive collection and preserve actual generic arguments.
+  /// Native runtimeType override dispatch remains unsupported; it is never
+  /// bypassed by a direct object-header read. Generic function
   /// bounds use the actual enclosing function arguments, including nested and
   /// chained binders. Class type environments and general Type member dispatch
   /// remain unsupported. Generic functions cannot be native exports.

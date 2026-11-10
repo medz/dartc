@@ -231,6 +231,16 @@ base class ScalarCodeGenerator<R extends Object>(
                   ),
                 );
               },
+              (fixup, value) {
+                relocations.add(
+                  .instruction(
+                    0,
+                    code.length + fixup.offset,
+                    fixup.encoding,
+                    constants.addressOf(value),
+                  ),
+                );
+              },
               safepoint,
               (fixup, position) {
                 maps.reference(

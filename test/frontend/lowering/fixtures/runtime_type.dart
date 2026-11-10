@@ -1,4 +1,6 @@
 // ignore_for_file: use_primary_constructors, unnecessary_type_check
+import 'dart:ffi';
+
 import 'effects.dart';
 
 typedef IntFunction = int Function(int);
@@ -19,6 +21,17 @@ class Override {
 Type objectType(Object? value) => value.runtimeType;
 Type genericType<T>(T value) => value.runtimeType;
 Type? optionalType(Object? value) => value?.runtimeType;
+
+bool pointerRuntimeTypes() {
+  final data = Pointer<Int64>.fromAddress(0);
+  final function = Pointer<NativeFunction<Int64 Function()>>.fromAddress(8);
+  return data.runtimeType == (Pointer<Never>) &&
+      function.runtimeType == (Pointer<Never>) &&
+      data is Pointer<Double> &&
+      function is Pointer<Int64> &&
+      objectType(data) == (Pointer<Never>) &&
+      objectType(function) == (Pointer<Never>);
+}
 
 int staticRuntimeTypes() {
   Box<num> box = Box<int>();

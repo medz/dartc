@@ -61,6 +61,7 @@ export 'src/ir/value.dart'
         CheckLibraryLoaded,
         TypeConstant,
         ReifyType,
+        ObjectRuntimeType,
         ObjectHashCode,
         CollectionLength,
         CollectionGet,

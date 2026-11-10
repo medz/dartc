@@ -31,13 +31,15 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 
 `as`、后缀 `!` 及已降为类型转换的隐式检查支持上述具体类型。成功保留原值，失败抛出 TypeError，可由 `on TypeError` 或 `on Error` 捕获并正常经过 `finally`；转换前的表达式只求值一次。`as Never` 始终失败，`as Never?` 仅接受 null；`FutureOr<int?>` 的 `!` 在保留静态类型的同时拒绝 null。见[转换、隐式检查与清理顺序对照](../test/compiler/type_checks_test.dart)。
 
-int、double 和 bool 值均可装箱为引用，包括运行时计算的数值；仍被使用的装箱值在调用及回收后保持不变，见[计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)。地址为零的非空 FFI Pointer 值不等于 Dart null。依赖运行时类型参数的检查和转换、runtimeType 以及尚无原生存储的函数和 record 值仍是缺口；支持这些类型作为泛型实参不表示对应值已可原生执行。跨模块托管值传递尚未接通。
+int、double 和 bool 值均可装箱为引用，包括运行时计算的数值；仍被使用的装箱值在调用及回收后保持不变，见[计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)。地址为零的非空 FFI Pointer 值不等于 Dart null；指针的运行时类型为 `Pointer<Never>`，因此元素类型不同的 Pointer 类型测试仍可成功。静态元素类型继续决定 FFI 签名和访存大小。依赖运行时类型参数的检查和转换，以及尚无原生存储的函数和 record 值仍是缺口；支持这些类型作为泛型实参不表示对应值已可原生执行。跨模块托管值传递尚未接通。
+
+内置 `Object.runtimeType` 支持上述原生标量、null、指针、用户类及 Type 值，包含装箱值和常量。通过宽化引用读取时保留实例的实际泛型实参，回收前后结果相等；指针零地址不会读作 null。对需要用户 getter override 派发的读取明确拒绝，不能返回对象头中的类型来绕过 override。`super.runtimeType` 选中内置 getter 时可直接读取实际类型。见[runtimeType 行为对照](../test/compiler/type_arguments_test.dart)和[继承 override 边界](../test/codegen/type_tests_test.dart)。
 
 ## 原生泛型调用与 Type 值
 
 直接泛型函数调用支持具体类型实参及函数类型参数的转发，包含递归调用、寄存器与栈参数，以及调用和回收后读取原参数或结果。`T` 表达式读取本次调用传入的 Type 值；可在运行时组合为 `T?`、`C<T>`、`FutureOr<T>`、函数和 record 类型，包含递归调用中持续嵌套的类型实参。具体类型字面量在同一生成模块内保留规范身份。见[泛型调用与 SDK 对照](../test/compiler/type_arguments_test.dart)。
 
-以类型字面量或实化表达式作左操作数的 `==`/`!=` 按规范化后的结构比较类型。可空类型及 FutureOr 保持规范化规则；dynamic、void、Object?、Never 和 Null 仍可区分。函数类型忽略绑定参数名称和命名参数顺序，保留绑定层级、位置参数顺序及参数必需性；record 保留位置字段和命名字段的身份。泛型函数类型的界限可依赖外层函数实参，支持嵌套绑定及界限链；绑定变量仅在其界限规范化为 Never 时归一为 Never，其他界限保留变量身份。
+以类型字面量、实化表达式或内置 `runtimeType` 读取作左操作数的 `==`/`!=` 按规范化后的结构比较类型。可空类型及 FutureOr 保持规范化规则；dynamic、void、Object?、Never 和 Null 仍可区分。函数类型忽略绑定参数名称和命名参数顺序，保留绑定层级、位置参数顺序及参数必需性；record 保留位置字段和命名字段的身份。泛型函数类型的界限可依赖外层函数实参，支持嵌套绑定及界限链；绑定变量仅在其界限规范化为 Never 时归一为 Never，其他界限保留变量身份。
 
 macOS ARM64 的 Dart SDK 3.13.7 JIT/AOT 对泛型函数界限存在规范化差异：`U Function<U extends T>(U Function<V extends U>(V, U))` 在运行时以 Never 实化，与直接指定 Never 的闭合字面量比较返回 false；与显式写出全部 Never 的规范形式比较返回 true。`T Function<T extends Never>(T)` 与 `Never Function<T extends Never>(Never)` 的常量形式相等，但作为类型实参传给 `Type reify<T>() => T` 后不相等。空安全规范要求 Type 相等和常量身份使用 NORM；dartc 对上述等价类型保持相等。原生 `bounds` 样本及[类型值验证](../test/frontend/lowering/type_values_test.dart)分别保留这些案例，规范化契约见 [IR 验证](../test/ir/type_values_test.dart)与[常量池验证](../test/codegen/program_layout_test.dart)。
 

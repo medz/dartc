@@ -116,29 +116,36 @@ void main() {
       final data = module.sections[1];
       expect(data.kind, SectionKind.readOnlyData);
       final words = ByteData.sublistView(data.bytes);
-      final descriptors = <int>[];
+      final descriptors = <int>[], runtimeTypes = <int>[];
       for (final (i, symbol) in addresses.indexed) {
         final object = module.symbols[symbol];
         final reference = module.relocations
             .whereType<AddressRelocation>()
             .singleWhere((r) => r.offset == object.offset);
         descriptors.add(reference.symbol);
+        runtimeTypes.add(
+          module.relocations
+              .whereType<AddressRelocation>()
+              .singleWhere((r) => r.offset == object.offset + 8)
+              .symbol,
+        );
         final descriptor = module.symbols[reference.symbol];
-        expect(words.getInt64(descriptor.offset, .little), i < 4 ? 24 : 16);
-        expect(words.getInt64(descriptor.offset + 8, .little), i < 4 ? 0 : 1);
+        expect(words.getInt64(descriptor.offset, .little), i < 4 ? 32 : 24);
+        expect(words.getInt64(descriptor.offset + 8, .little), i < 4 ? 1 : 2);
+        expect(words.getInt64(descriptor.offset + 16, .little), 8);
         if (i < 4) {
-          expect(words.getInt64(object.offset + 8, .little), 7);
-          final floating = words.getFloat64(object.offset + 16, .little);
+          expect(words.getInt64(object.offset + 16, .little), 7);
+          final floating = words.getFloat64(object.offset + 24, .little);
           expect(
             1 / floating,
             i == 2 ? double.infinity : double.negativeInfinity,
           );
         } else {
-          expect(words.getInt64(descriptor.offset + 16, .little), 8);
+          expect(words.getInt64(descriptor.offset + 24, .little), 16);
           expect(
             module.relocations
                 .whereType<AddressRelocation>()
-                .singleWhere((r) => r.offset == object.offset + 8)
+                .singleWhere((r) => r.offset == object.offset + 16)
                 .symbol,
             addresses.first,
           );
@@ -146,6 +153,8 @@ void main() {
       }
       expect(descriptors[0], descriptors[2]);
       expect(descriptors.toSet(), hasLength(4));
+      expect(runtimeTypes[0], runtimeTypes[2]);
+      expect(runtimeTypes.toSet(), hasLength(4));
       expect(
         module.symbols.skip(functions.length).every((s) => s.binding == .local),
         isTrue,

@@ -1,5 +1,4 @@
 import 'dart:ffi';
-import 'dart:typed_data';
 
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler/arm64.dart' as arm;
@@ -141,12 +140,27 @@ ObjectModule stackRoots(Target target) {
     },
     imports: {external: NativeImport('roots_probe', signature)},
   );
-  final data = ByteData.sublistView(module.sections[1].bytes);
+  final aliases = {
+    for (final (i, function) in module.symbols.take(2).indexed)
+      module.relocations
+          .whereType<InstructionRelocation>()
+          .where(
+            (r) =>
+                r.section == function.section &&
+                r.offset >= function.offset &&
+                r.offset < function.offset + function.size!,
+          )
+          .map((r) => r.symbol)
+          .toSet()
+          .single: i == 0
+          ? 'roots_original'
+          : 'roots_replacement',
+  };
   return ObjectModule(
     target,
     module.sections,
     [
-      for (final symbol in module.symbols)
+      for (final (i, symbol) in module.symbols.indexed)
         if (symbol.name == '.dartc.roots')
           Symbol(
             target.nativeSymbol('roots_table'),
@@ -156,13 +170,9 @@ ObjectModule stackRoots(Target target) {
             kind: .data,
             exported: true,
           )
-        else if (symbol.name.startsWith('constant'))
+        else if (aliases[i] case final name?)
           Symbol(
-            target.nativeSymbol(
-              data.getInt64(symbol.offset + 8, .little) == 41
-                  ? 'roots_original'
-                  : 'roots_replacement',
-            ),
+            target.nativeSymbol(name),
             symbol.section,
             symbol.offset,
             symbol.size,

@@ -12,6 +12,71 @@ void main() {
     Arm64CodeGenerator(const Target(.linux, .arm64)),
     X64CodeGenerator(const Target(.linux, .x64)),
   ]) {
+    test('${generator.target} preserves the runtimeType override boundary', () {
+      final owner = ClassType(library, 'Override');
+      final interface = ClassType(library, 'Interface');
+      final child = ClassType(
+        library,
+        'Child',
+        superclass: owner,
+        interfaces: [interface],
+      );
+      final getter = FunctionTarget(
+        library,
+        'runtimeType',
+        .typeType,
+        [],
+        owner: owner,
+        kind: .getter,
+      );
+      final getterBody = Block(getter.parameterTypes)
+        ..finish(Return(TypeConstant(.integer)));
+      for (final (source, direct) in [
+        (ValueType.object.nullable, false),
+        (owner, false),
+        (child, false),
+        (interface, false),
+        (ValueType.object.nullable, true),
+      ]) {
+        final target = FunctionTarget(library, 'readType', .typeType, [source]);
+        final body = Block(target.parameterTypes);
+        body.finish(
+          Return(
+            body.emit(
+              ObjectRuntimeType(body.parameters.single, direct: direct),
+            ),
+          ),
+        );
+        final program = IrProgram(
+          [
+            IrClass(owner, [], members: [getter]),
+            IrClass(interface, []),
+            IrClass(child, []),
+          ],
+          [
+            IrFunction(getter, [getterBody]),
+            IrFunction(target, [body]),
+          ],
+        );
+        if (direct) {
+          expect(
+            generator.generate(program, definitions: [target]).sections,
+            isNotEmpty,
+          );
+        } else {
+          expect(
+            () => generator.generate(program, definitions: [target]),
+            throwsA(
+              isA<UnsupportedError>().having(
+                (e) => e.message,
+                'reason',
+                contains('override dispatch'),
+              ),
+            ),
+          );
+        }
+      }
+    });
     test(
       '${generator.target} folds proved tests without loading the operand',
       () {
