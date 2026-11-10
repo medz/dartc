@@ -30,6 +30,10 @@ final class BoxedValues() {
 
   late final discard = _library
       .lookupFunction<Int64 Function(), int Function()>('discard_void');
+  late final markedTypes = _library
+      .lookupFunction<Int64 Function(), int Function()>('marked_types');
+  late final absentTypes = _library
+      .lookupFunction<Int64 Function(), int Function()>('absent_types');
 
   late final refinedInteger = _library
       .lookupFunction<Int64 Function(Int64), int Function(int)>(

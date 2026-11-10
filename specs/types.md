@@ -27,9 +27,9 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 
 ## 原生类型判断与空安全
 
-原生代码支持 `== null`、`!= null`、`??`、`??=`，以及可由静态类型和判空确定结果的 `is`、`is!`。例如 `int?` 的 `is int` 只需判断是否为空；`Object?` 的 `is int` 仍需要尚未实现的运行时类型检查。精化后的值可按目标类型拆箱为 int、double、bool，或继续作为引用传递；短路只执行必要分支。见[源码与 SDK 对照](../test/compiler/nullability_test.dart)和[精化值验证](../test/codegen/boxed_values_native_test.dart)。
+原生代码支持 `== null`、`!= null`、`??`、`??=`、`is` 和 `is!`。类型判断读取值的实际类型，支持已接通原生存储的标量和用户类、继承与接口、可空类型及实参已确定的泛型类型；`Object?` 的 `is int` 不依赖变量的静态类型猜测结果。泛型实参中的函数按参数逆变、返回协变检查，record 按形状与字段类型检查，FutureOr 保留联合类型关系。精化后的值可拆箱为 int、double、bool，或继续作为引用传递；短路只执行必要分支。见[类型与异常筛选对照](../test/compiler/type_checks_test.dart)、[空安全对照](../test/compiler/nullability_test.dart)和[精化值验证](../test/codegen/boxed_values_native_test.dart)。
 
-int、double 和 bool 值均可装箱为引用，包括运行时计算的数值；仍被使用的装箱值在调用及回收后保持不变，见[计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)。地址为零的非空 FFI Pointer 值不等于 Dart null。一般 `is`、`as`、后缀 `!` 的原生检查和失败异常路径仍待实现，IR 支持不表示这些路径已可原生执行。
+int、double 和 bool 值均可装箱为引用，包括运行时计算的数值；仍被使用的装箱值在调用及回收后保持不变，见[计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)。地址为零的非空 FFI Pointer 值不等于 Dart null。依赖运行时类型参数的检查、`as`、后缀 `!`、Type/runtimeType 值以及尚无原生存储的函数和 record 值仍是缺口；支持这些类型作为泛型实参不表示对应值已可原生执行。跨模块托管值传递尚未接通。
 
 ## analyzer 元数据边界
 

@@ -35,8 +35,10 @@ abstract interface class CodeGenerator() {
   /// [Throw] and [Invoke] support synchronous exception propagation and cleanup.
   /// Fresh throws capture the managed call sequence; rethrows retain the same
   /// exception and trace. Error subclasses retain their first throw's trace.
-  /// Trace formatting, the Error.stackTrace getter and catches requiring runtime
-  /// type checks remain unsupported. Exceptions cannot unwind foreign frames.
+  /// [TypeTest] and typed catches inspect actual object types, including inherited
+  /// interfaces and fully determined generic arguments. Checks requiring runtime
+  /// type parameters, trace formatting and the Error.stackTrace getter remain
+  /// unsupported. Exceptions cannot unwind foreign frames.
   /// Escaping managed state, asynchronous execution and catchable allocation
   /// failures remain unsupported. A failure escaping the native entry releases
   /// the heap, reports to stderr and terminates the process with status 255.

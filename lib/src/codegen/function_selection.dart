@@ -43,6 +43,7 @@ final class FunctionSelection<R>(
         ({CallLayout<R> layout, FunctionTarget? target, List<Value> arguments})
       >{};
   final constantTests = <TypeTest, bool>{};
+  final typeTests = <TypeTest, int>{};
   final cells = <NewCell>{};
   late final CallLayout<R> entry;
   late final FunctionLiveness liveness;
@@ -173,7 +174,11 @@ final class FunctionSelection<R>(
               constantTests[instruction] = !negated;
             } else if (testedType == .never ||
                 source == .nullType && !testedType.mayBeNull ||
-                testedType == .nullType && !source.mayBeNull) {
+                testedType == .nullType && !source.mayBeNull ||
+                testedType.freeTypeParameters.isEmpty &&
+                    (layouts.isBoxable(source) ||
+                        FfiTypes.isPointer(source) &&
+                            source.freeTypeParameters.isEmpty)) {
               constantTests[instruction] = negated;
             } else if (testedType == .nullType ||
                 testedType == .object ||
@@ -192,9 +197,13 @@ final class FunctionSelection<R>(
                 const Constant.nullValue(),
               );
             } else {
-              throw UnsupportedError(
-                'Native type test requires runtime type metadata: ${testedType.dartName}',
-              );
+              if (layouts.representation(source) != .reference) {
+                throw UnsupportedError(
+                  'Native type test requires a type environment: $source is $testedType',
+                );
+              }
+              typeTests[instruction] = layouts.typeTest(testedType);
+              if (_generalTemporaries < 2) _generalTemporaries = 2;
             }
           case PointerFromAddress() ||
               PointerAddress() ||

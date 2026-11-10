@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/object.dart';
@@ -20,6 +22,8 @@ void main() {
           (const .integer(1), .nullType, false),
           (const .nullValue(), .nullType, true),
           (const .integer(1), .never, false),
+          (const .integer(1), .floating, false),
+          (const .floating(1), .boolean, false),
         ]) {
           for (final negated in [false, true]) {
             final target = FunctionTarget(library, 'test', .boolean, []);
@@ -71,7 +75,7 @@ void main() {
     );
 
     test(
-      '${generator.target} rejects tests that require runtime type metadata',
+      '${generator.target} selects concrete tests and rejects missing type environments',
       () {
         final parameter = TypeParameterType('T')
           ..initializeBound(ValueType.object.nullable)
@@ -87,6 +91,8 @@ void main() {
             box.instantiate([ValueType.integer]),
           ),
           (.nullType, parameter),
+          (.integer, parameter),
+          (FfiTypes.pointerTypes[Pointer<Int64>]!, parameter),
         ]) {
           final target = FunctionTarget(
             library,
@@ -108,13 +114,20 @@ void main() {
               IrFunction(target, [body]),
             ],
           );
+          if (tested != parameter) {
+            expect(
+              generator.generate(program, definitions: [target]).sections,
+              isNotEmpty,
+            );
+            continue;
+          }
           expect(
             () => generator.generate(program, definitions: [target]),
             throwsA(
               isA<UnsupportedError>().having(
                 (error) => error.message,
-                'missing metadata',
-                contains('requires runtime type metadata'),
+                'missing environment',
+                contains('requires a type environment'),
               ),
             ),
           );

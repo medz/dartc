@@ -71,6 +71,46 @@ final class ScalarFunction<R extends Object>(
           final destination = allocation.allocate(.general);
           emitter.loadImmediate(destination, value ? 1 : 0);
           allocation.define(instruction, destination);
+        } else if (selection.typeTests[instruction] case final index?) {
+          final test = instruction as TypeTest;
+          final value = allocation.read(test.operand);
+          final result = allocation.allocate(.general, except: [value]);
+          final scratch = allocation.allocate(
+            .general,
+            except: [value, result],
+          );
+          final done = emitter.label();
+          emitter.loadImmediate(
+            result,
+            test.testedType.accepts(.nullType) != test.negated ? 1 : 0,
+          );
+          emitter.jumpIfZero(value, done);
+          emitter.loadMemory(result, value, offset: 0, bytes: 8, signed: false);
+          emitter.loadMemory(
+            scratch,
+            result,
+            offset: 8,
+            bytes: 8,
+            signed: false,
+          );
+          emitter.addScaled(result, result, scratch, scale: 8);
+          emitter.loadMemory(
+            result,
+            result,
+            offset: 24 + index ~/ 64 * 8,
+            bytes: 8,
+            signed: false,
+          );
+          emitter.loadImmediate(scratch, 1 << (index % 64));
+          emitter.bitAnd.emit(result, result, scratch);
+          emitter.loadImmediate(scratch, 0);
+          emitter
+              .comparison(test.negated ? .equal : .notEqual)
+              .emit(result, result, scratch);
+          emitter.bind(done);
+          allocation.release(test.operand);
+          allocation.releaseTemporary(scratch);
+          allocation.define(instruction, result);
         } else if (instruction case NewCell(:final initial)) {
           if (initial != null) {
             allocation.writeCell(

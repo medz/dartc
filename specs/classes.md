@@ -39,6 +39,8 @@
 
 [布局契约](../test/layout/object_layout_test.dart)、[常量身份与表示检查](../test/codegen/object_values_test.dart)和[原生对象引用验证](../test/codegen/object_values_native_test.dart)覆盖字段、具体类型身份、嵌套引用、寄存器与栈参数、调用保存、循环交换及 null。
 
+实参已确定的泛型类、继承与接口可用于原生 `is`、`is!` 和类型化异常捕获，见[原生类型判断范围](types.md#原生类型判断与空安全)。
+
 [标量装箱验证](../test/codegen/boxed_values_native_test.dart)覆盖 int 边界、负零、次正规数、无穷及不同 NaN 载荷，检查泛型字段、成员返回、引用栈参数和循环中的精确值，以及 bool 装箱与各类传值位置的拆箱。
 
 [计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)覆盖数值的参数、返回、分支、局部和字段传递，以及连续装箱和调用期间回收后的存活值；[可空数值源码验证](../test/compiler/numeric_boxes_test.dart)检查可空返回、计算结果及未选择分支的行为。

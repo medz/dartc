@@ -379,6 +379,52 @@ ObjectModule boxedValues(Target target) {
   );
   functions.add(IrFunction(pointerTest, [pointerBody, isNull, notNull]));
 
+  final markers = [for (var i = 0; i < 66; i++) ClassType(library, 'Marker$i')];
+  final marked = ClassType(
+    library,
+    'Marked',
+    interfaces: [markers[1], markers[63], markers[65]],
+  );
+  classes.addAll([
+    for (final type in [...markers, marked]) IrClass(type, []),
+  ]);
+  final checks = FunctionTarget(library, 'type_words', .integer, [
+    ValueType.object.nullable,
+  ]);
+  final checksEntry = Block(checks.parameterTypes);
+  final checksBlocks = [checksEntry];
+  var nextCheck = checksEntry;
+  Value total = const Constant.integer(0);
+  for (final (i, type) in markers.indexed) {
+    final matched = Block(), join = Block([.integer]);
+    nextCheck.finish(
+      Branch(
+        nextCheck.emit(TypeTest(checksEntry.parameters.single, type)),
+        Jump(matched),
+        Jump(join, [total]),
+      ),
+    );
+    matched.finish(
+      Jump(join, [
+        matched.emit(IntBinary(.add, total, Constant.integer(i + 1))),
+      ]),
+    );
+    checksBlocks.addAll([matched, join]);
+    nextCheck = join;
+    total = join.parameters.single;
+  }
+  nextCheck.finish(Return(total));
+  functions.add(IrFunction(checks, checksBlocks));
+  for (final (name, value) in <(String, Constant)>[
+    ('marked_types', ObjectConstant(marked, {})),
+    ('absent_types', const Constant.nullValue()),
+  ]) {
+    final run = FunctionTarget(library, name, .integer, []);
+    final body = Block();
+    body.finish(Return(body.emit(DirectCall(checks, [value]))));
+    functions.add(IrFunction(run, [body]));
+  }
+
   final program = IrProgram(classes, functions);
   final CodeGenerator generator = target.architecture == .arm64
       ? Arm64CodeGenerator(target)

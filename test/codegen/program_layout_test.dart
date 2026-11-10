@@ -4,6 +4,26 @@ import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'type test words retain declaration identity and freeze before emission',
+    () {
+      final uri = Uri.parse('memory:type-bits');
+      final types = [for (var i = 0; i < 66; i++) ClassType(uri, 'SameName')];
+      final actual = ClassType(
+        uri,
+        'Actual',
+        interfaces: [types[1], types[63], types[65]],
+      );
+      final layouts = ProgramLayout([]);
+      for (final (i, type) in types.indexed) {
+        expect(layouts.typeTest(type), i);
+      }
+      expect(layouts.typeTestBits(actual), [2 | (1 << 63), 2]);
+      expect(layouts.typeTest(types[63]), 63);
+      expect(() => layouts.typeTest(.integer), throwsStateError);
+    },
+  );
+
   test('only Error subclasses retain a traced first-throw slot', () {
     final uri = Uri.parse('memory:error-layout');
     final base = ClassType(uri, 'Base', superclass: ValueType.error);

@@ -92,14 +92,19 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
   int _type(ClassType type, ObjectLayout layout) {
     if (_types[type] case final symbol?) return symbol;
     final references = layout.referenceOffsets.toList();
+    final tests = layouts.typeTestBits(type);
     final start = _words.length;
-    final symbol = _types[type] = _reserve('type', 3 + references.length);
+    final symbol = _types[type] = _reserve(
+      'type',
+      3 + references.length + tests.length,
+    );
     _words[start] = layout.size;
     _words[start + 1] = references.length;
     _words.setRange(start + 2, start + 2 + references.length, references);
-    _words.last = layouts.isBoxable(type)
+    _words[start + 2 + references.length] = layouts.isBoxable(type)
         ? 0
         : layouts.storageOf(type).errorTraceOffset ?? 0;
+    _words.setRange(start + 3 + references.length, _words.length, tests);
     return symbol;
   }
 

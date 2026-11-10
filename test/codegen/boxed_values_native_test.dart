@@ -48,6 +48,8 @@ void main() {
     expect(values.boolean(0), 0);
     expect(values.boolean(1), 1);
     expect(values.discard(), 7);
+    expect(values.markedTypes(), 132);
+    expect(values.absentTypes(), 0);
     for (final input in [-1, 0, 1, 2]) {
       expect(values.runtimeBoolean(input), input > 0 ? 1 : 0);
     }

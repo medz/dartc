@@ -10,6 +10,36 @@ final class ProgramLayout(Iterable<IrClass> classes) {
     for (final declaration in classes) declaration.type: declaration,
   };
   final _storage = <ClassType, ClassStorage>{};
+  final _typeTests = <ValueType, int>{};
+  bool _typesWritten = false;
+
+  int typeTest(ValueType type) {
+    if (type.freeTypeParameters.isNotEmpty) {
+      throw UnsupportedError(
+        'Native type test requires a type environment: $type',
+      );
+    }
+    if (_typeTests[type] case final index?) return index;
+    if (_typesWritten) {
+      throw StateError('Type tests must precede descriptor emission.');
+    }
+    return _typeTests[type] = _typeTests.length;
+  }
+
+  List<int> typeTestBits(ClassType type) {
+    if (type.freeTypeParameters.isNotEmpty) {
+      throw UnsupportedError(
+        'Native object type requires a type environment: $type',
+      );
+    }
+    _typesWritten = true;
+    // shortcut: module-local closed types, reify environments before open generics or managed cross-module calls.
+    final words = List.filled((_typeTests.length + 63) ~/ 64, 0);
+    for (final MapEntry(key: tested, value: index) in _typeTests.entries) {
+      if (tested.accepts(type)) words[index ~/ 64] |= 1 << (index % 64);
+    }
+    return words;
+  }
 
   ValueRepresentation representation(ValueType type) {
     if (type == .integer || type == .boolean) return .word;
