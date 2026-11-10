@@ -57,12 +57,12 @@ final class Archive._(
       var name = ascii.decode(input.view(offset, 16)).trimRight();
       var content = offset + 60;
       if (name.startsWith('#1/')) {
-        final length = int.tryParse(name.substring(3));
+        final length = number(offset + 3, 13);
         input.check(
-          length != null && length > 0 && length <= size,
+          length > 0 && length <= size,
           'Invalid BSD archive name length.',
         );
-        name = input.string(content, content + length!, fixed: true);
+        name = input.string(content, content + length, fixed: true);
         final encoded = utf8.encode(name).length;
         input.check(
           input.view(content + encoded, length - encoded).every((b) => b == 0),
@@ -74,15 +74,12 @@ final class Archive._(
           throw UnsupportedError('64-bit archive indices.');
         }
         if (name.startsWith('/')) {
-          final index = int.tryParse(name.substring(1));
+          final index = number(offset + 1, 15);
           input.check(
-            names != null &&
-                index != null &&
-                index >= 0 &&
-                index < names.length,
+            names != null && index >= 0 && index < names.length,
             'Invalid GNU archive name reference.',
           );
-          final start = index!;
+          final start = index;
           input.check(
             start == 0 || names![start - 1] == 10,
             'GNU name reference is not an entry start.',
