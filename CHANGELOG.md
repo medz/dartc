@@ -30,6 +30,7 @@ The development checkout uses analyzer 14.7.0 to resolve Dart source, produces v
 - Generate immutable object constants and direct field reads through `CodeGenerator`, including inherited fields and nested references. Integer and double constants, and boolean values, can enter reference storage; generic fields and member calls unbox known scalar results. References retain their values across calls, stack arguments and control flow. `package:dartc/layout.dart` provides 64-bit object sizes, field offsets and reference slots. Heap allocation, runtime numeric boxing, virtual member calls and complete Dart class execution remain unimplemented.
 - Preserve distinct NaN bit patterns in IR constant identity, including nested constant objects. Numerically equal positive and negative zero also retain distinct constant identities.
 - Compile null comparisons, `??`, `??=` and type tests whose results follow from static types and null checks. Nullable scalar values retain their representations across calls and control flow, and short circuits preserve required side effects. General runtime type checks, checked casts, null assertions and boxing computed integers or doubles remain unimplemented.
+- Omit unused block-argument transfers and dead register saves in native control flow. Operand evaluation, calls and writes still run, and live values survive branches and loop backedges.
 
 Language support and known analyzer differences are tracked in [specs](specs/README.md). IR behavior checks do not establish native execution support or full Dart compatibility.
 

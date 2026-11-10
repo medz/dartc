@@ -67,6 +67,32 @@ IrProgram controlFlowGraphs() {
   body.finish(Return(body.parameters.first));
   functions.add(IrFunction(pressure, [body]));
 
+  final dropped = FunctionTarget(uri, 'dropped_arguments', .integer, [
+    .integer,
+    .integer,
+  ]);
+  final from = Block(dropped.parameterTypes),
+      to = Block([.integer, .object, .floating, .integer]);
+  final pointer = from.emit(
+    PointerFromAddress(
+      from.parameters.first,
+      FfiTypes.resolve(
+        NativePointerType(NativeFunctionType(NativeSignature(Int64, [Int64]))),
+      ),
+    ),
+  );
+  final effect = from.emit(NativeCall(pointer, [from.parameters.last]));
+  from.finish(
+    Jump(to, [
+      effect,
+      const Constant.string('unused'),
+      const Constant.floating(-0.0),
+      from.parameters.last,
+    ]),
+  );
+  to.finish(Return(to.parameters.last));
+  functions.add(IrFunction(dropped, [from, to]));
+
   final forever = FunctionTarget(uri, 'forever', .integer, []);
   final initial = Block(), loop = Block();
   initial.finish(Jump(loop));

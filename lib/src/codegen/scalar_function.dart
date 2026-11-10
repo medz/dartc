@@ -354,13 +354,11 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
             emitter.ret();
           }
         case final Jump jump:
-          if (jump.arguments.isNotEmpty) allocation.flush();
+          allocation.flush(live: selection.liveness.liveOut[block]);
           edge(jump);
         case Branch(:final condition, :final ifTrue, :final ifFalse):
           final value = allocation.read(condition);
-          if (ifTrue.arguments.isNotEmpty || ifFalse.arguments.isNotEmpty) {
-            allocation.flush();
-          }
+          allocation.flush(live: selection.liveness.liveOut[block]);
           final otherwise = emitter.label();
           emitter.jumpIfZero(value, otherwise);
           edge(ifTrue);

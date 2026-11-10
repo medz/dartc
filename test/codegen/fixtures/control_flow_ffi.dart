@@ -18,5 +18,10 @@ final class ControlFlowGraphs() {
         int Function(int, int, int, int, int, int)
       >('unused_result');
 
+  late final droppedArguments = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'dropped_arguments',
+      );
+
   void close() => _library.close();
 }

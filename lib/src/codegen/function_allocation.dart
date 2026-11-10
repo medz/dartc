@@ -18,7 +18,6 @@ final class FunctionAllocation<R extends Object>(
   final void Function(Constant, R) loadObject,
 ) {
   final _owners = <Value, Block>{};
-  final _blockUses = <Block, Map<Value, int>>{};
   final _shared = <Value>{};
   final _slots = <Value, int>{};
   final _registers = <Value, R>{};
@@ -36,43 +35,20 @@ final class FunctionAllocation<R extends Object>(
         _owners[value] = block;
       }
     }
-    final used = <Value>{};
+    final liveness = selection.liveness;
+    final used = liveness.uses.values.expand((uses) => uses.keys).toSet();
     var edgeWords = 0;
     for (final block in function.blocks) {
-      final uses = _blockUses[block] = {};
-      void use(Value value) {
-        if (value is TestedValue) value = value.test.operand;
-        if (value is NewCell) return;
-        used.add(value);
-        uses.update(value, (n) => n + 1, ifAbsent: () => 1);
-        if (value is! Constant && _owners[value] != block) _shared.add(value);
-      }
-
-      for (final instruction in block.instructions) {
-        if (selection.constantTests.containsKey(instruction)) continue;
-        if (selection.binaries[instruction] case final binary?) {
-          use(binary.left);
-          use(binary.right);
-        } else {
-          instruction.inputs.forEach(use);
+      for (final value in liveness.liveIn[block]!) {
+        if (value is NewCell) continue;
+        if (_owners[value] != block ||
+            block != function.entry && value is BlockParameter) {
+          _shared.add(value);
         }
-      }
-      switch (block.end) {
-        case Return(value: final value?):
-          if (value.type != .voidType) use(value);
-        case Branch(:final condition):
-          use(condition);
-        case Jump() || Return():
-          break;
-        default:
-          throw UnsupportedError('Native terminator: ${block.end.runtimeType}');
       }
       for (final edge in block.successors) {
-        edge.arguments.forEach(use);
-        _shared.addAll(edge.target.parameters);
-        if (edge.arguments.length > edgeWords) {
-          edgeWords = edge.arguments.length;
-        }
+        final words = liveness.liveParameters[edge.target]!.length;
+        if (words > edgeWords) edgeWords = words;
       }
     }
     final incoming = <Value, int>{
@@ -85,7 +61,7 @@ final class FunctionAllocation<R extends Object>(
         incoming.isNotEmpty ||
         selection.calls.isNotEmpty ||
         _shared.isNotEmpty ||
-        _blockUses.values.any(
+        liveness.uses.values.any(
           (uses) => RegisterBank.values.any(
             (bank) =>
                 uses.keys.where((v) => selection.bank(v.type) == bank).length +
@@ -142,7 +118,7 @@ final class FunctionAllocation<R extends Object>(
 
   /// Starts independent register-use accounting at a block boundary.
   void begin(Block block) {
-    _uses = Map.of(_blockUses[block]!);
+    _uses = Map.of(selection.liveness.uses[block]!);
     _registers.clear();
     _free
       ..clear()
@@ -318,11 +294,11 @@ final class FunctionAllocation<R extends Object>(
     }
   }
 
-  /// Saves resident values in the selected clobber set, or all values for an edge.
-  void flush({Set<R>? clobbered}) {
+  /// Saves clobbered residents needed in [live], discarding other bindings.
+  void flush({Set<R>? clobbered, Set<Value>? live}) {
     _registers.removeWhere((value, register) {
       if (clobbered != null && !clobbered.contains(register)) return false;
-      _spill(value, register);
+      if (live == null || live.contains(value)) _spill(value, register);
       _free.add(register);
       return true;
     });
@@ -330,19 +306,22 @@ final class FunctionAllocation<R extends Object>(
 
   /// Assigns block parameters simultaneously after [flush], using one register.
   void copyArguments(Jump edge) {
-    for (final (i, argument) in edge.arguments.indexed) {
+    final parameters = selection.liveness.liveParameters[edge.target]!;
+    for (final (slot, i) in parameters.indexed) {
+      final argument = edge.arguments[i];
       final type = edge.target.parameters[i].type;
       final scratch = emitter.allocatableRegisters.lastWhere(
         (r) => emitter.bank(r) == selection.bank(type),
       );
       load(argument, scratch, asType: type);
-      emitter.storeStack(scratch, _stagingOffset + i * 8);
+      emitter.storeStack(scratch, _stagingOffset + slot * 8);
     }
-    for (final (i, parameter) in edge.target.parameters.indexed) {
+    for (final (slot, i) in parameters.indexed) {
+      final parameter = edge.target.parameters[i];
       final scratch = emitter.allocatableRegisters.lastWhere(
         (r) => emitter.bank(r) == selection.bank(parameter.type),
       );
-      emitter.loadStack(scratch, _stagingOffset + i * 8);
+      emitter.loadStack(scratch, _stagingOffset + slot * 8);
       emitter.storeStack(scratch, _slot(parameter));
     }
   }

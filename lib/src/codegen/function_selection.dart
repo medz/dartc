@@ -6,6 +6,7 @@ import 'package:dartc/ir.dart';
 
 import 'binary_encoding.dart';
 import 'function_emitter.dart';
+import 'function_liveness.dart';
 import 'program_layout.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
@@ -30,11 +31,21 @@ final class FunctionSelection<R>(
   final constantTests = <TypeTest, bool>{};
   final cells = <NewCell>{};
   late final CallLayout<R> entry;
+  late final FunctionLiveness liveness;
   int _generalTemporaries = 0, _floatingTemporaries = 0;
 
   /// The maximum additional scratch demand of a selected operation.
   int temporaries(RegisterBank bank) =>
       bank == .general ? _generalTemporaries : _floatingTemporaries;
+
+  /// The operands read by the selected encoding, including generated constants.
+  Iterable<Value> inputsOf(Instruction instruction) {
+    if (constantTests.containsKey(instruction)) return const [];
+    if (binaries[instruction] case final binary?) {
+      return [binary.left, binary.right];
+    }
+    return instruction.inputs;
+  }
 
   this {
     if (function.bodyKind != .synchronous ||
@@ -275,6 +286,9 @@ final class FunctionSelection<R>(
             );
         }
       }
+    }
+    liveness = FunctionLiveness(function, inputsOf);
+    for (final block in function.blocks) {
       if (block.end case Return(value: final value?)
           when function.target.returnType != .voidType) {
         layouts.checkTransfer(
@@ -284,7 +298,8 @@ final class FunctionSelection<R>(
         );
       }
       for (final edge in block.successors) {
-        for (final (i, argument) in edge.arguments.indexed) {
+        for (final i in liveness.liveParameters[edge.target]!) {
+          final argument = edge.arguments[i];
           final stored = argument is TestedValue
               ? argument.test.operand
               : argument;
