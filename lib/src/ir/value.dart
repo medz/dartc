@@ -35,7 +35,10 @@ sealed class const Constant(super.type) extends Value {
   /// Scalar representation, collection order, nominal field slots and complete
   /// function instantiations are retained. Constructor sites are not identities.
   Object get structuralKey => switch (this) {
-    TypeConstant(:final representedType) => (TypeConstant, representedType),
+    TypeConstant(:final representedType) => (
+      TypeConstant,
+      representedType.normalize(),
+    ),
     ScalarConstant(:final type, :final value) => (
       type,
       value is double
@@ -44,25 +47,25 @@ sealed class const Constant(super.type) extends Value {
     ),
     final FunctionConstant value => _functionConstantKey(value),
     RecordConstant(:final type, :final fields) => (
-      type,
+      type.normalize(),
       fields.fold<Object?>(null, (tail, field) => (tail, field.structuralKey)),
     ),
     SequenceConstant(:final type, :final elements) => (
-      type,
+      type.normalize(),
       elements.fold<Object?>(
         null,
         (tail, element) => (tail, element.structuralKey),
       ),
     ),
     MapConstant(:final type, :final entries) => (
-      type,
+      type.normalize(),
       entries.fold<Object?>(
         null,
         (tail, entry) => (tail, entry.$1.structuralKey, entry.$2.structuralKey),
       ),
     ),
     ObjectConstant(:final type, :final fields) => (
-      type,
+      type.normalize(),
       _orderedFields(fields).fold<Object?>(
         null,
         (tail, field) => (tail, field, (fields[field]!).structuralKey),
@@ -314,9 +317,9 @@ Object _functionConstantKey(FunctionConstant value) {
       : value.typeArguments;
   return (
     value.target,
-    owner,
+    owner?.normalize(),
     value.constructorAlias,
-    arguments?.fold<Object?>(null, (tail, type) => (tail, type)),
+    arguments?.fold<Object?>(null, (tail, type) => (tail, type.normalize())),
   );
 }
 

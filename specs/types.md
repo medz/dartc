@@ -8,7 +8,7 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 | 核心标量、`Object`、`dynamic`、`void`、`Never` | 支持这些类型及 Null；dynamic 与 Object? 保持不同类型身份和双向顶类型关系。typed 存储、参数、返回值和 bool 上下文保留逐次隐式检查。dynamic 接收者的成员、函数和运算符通过统一运行时派发，未建模 SDK 成员明确拒绝。Never 没有正常返回值，Never? 等价于 Null。 |
 | 异常及栈轨迹 | 支持 Error、TypeError、NoSuchMethodError、AssertionError、StateError、UnsupportedError、StackTrace，以及按用户声明的类和接口捕获异常。 |
 | `List<T>` 及实际类型检查 | 支持 List、Set、Map、MapEntry、Iterable 和 Iterator 的参数化类型及其继承关系。字面量保留实际类型实参，宽化引用不绕过写入类型检查。 |
-| Type 值和类型参数实化 | 支持已表示类型的 Type 字面量、别名与泛型 T 值，以及类型相等、哈希和集合键；泛型函数 Never 界限的 IR 常量身份仍有下述规范化缺口。闭包保留实化环境。支持 Type/Type? 测试和转换；dynamic runtimeType 支持已表示的具体用户类、函数、record、List 及标量。Set/Map 和部分错误的 SDK 私有实现类型尚未建模，读取明确拒绝，不将公开接口伪装成实际类型。静态 runtimeType 读取和 object pattern 字段复用相同虚分派，保持用户 override、实际泛型类型和模式 getter 缓存；super.runtimeType 直接调用选中的祖先实现，不重新分派到 override。见[类型值样本](../test/frontend/lowering/fixtures/type_values.dart)及[runtimeType 样本](../test/frontend/lowering/fixtures/runtime_type.dart)。 |
+| Type 值和类型参数实化 | 支持已表示类型的 Type 字面量、别名与泛型 T 值，以及类型相等、哈希和集合键。IR 常量身份、复合常量的类型实参和泛型函数引用使用规范化类型；支持泛型函数的 Never 界限及嵌套绑定，不合并不同顶类型。闭包保留实化环境。支持 Type/Type? 测试和转换；dynamic runtimeType 支持已表示的具体用户类、函数、record、List 及标量。Set/Map 和部分错误的 SDK 私有实现类型尚未建模，读取明确拒绝，不将公开接口伪装成实际类型。静态 runtimeType 读取和 object pattern 字段复用相同虚分派，保持用户 override、实际泛型类型和模式 getter 缓存；super.runtimeType 直接调用选中的祖先实现，不重新分派到 override。见[类型值样本](../test/frontend/lowering/fixtures/type_values.dart)及[runtimeType 样本](../test/frontend/lowering/fixtures/runtime_type.dart)。 |
 | 函数签名 | 顶层函数、方法和构造器保留必需及可选形参。实例调用在选定实现后按其签名绑定参数。函数类型按参数逆变、返回值协变、位置参数范围及命名参数的必需性判断子类型。 |
 | 泛型函数类型与泛型函数值签名 | 支持独立绑定的函数类型参数、界限、嵌套泛型函数类型及显式实例化。类型相等、哈希和子类型比较忽略绑定参数名称；外层自由类型参数仍按声明身份区分，类型代换避免捕获。 |
 | 类型参数、上界、泛型别名 | 支持类和函数类型参数、递归上界、嵌套代入及解析为已表示类型的别名。类型参数保留声明身份和作用域，实例化同时检查全部参数的界限。函数或程序校验完成后，引用的类型参数与继承元数据不可再初始化。 |
@@ -39,9 +39,7 @@ int、double 和 bool 值均可装箱为引用，包括运行时计算的数值�
 
 以类型字面量或实化表达式作左操作数的 `==`/`!=` 按规范化后的结构比较类型。可空类型及 FutureOr 保持规范化规则；dynamic、void、Object?、Never 和 Null 仍可区分。函数类型忽略绑定参数名称和命名参数顺序，保留绑定层级、位置参数顺序及参数必需性；record 保留位置字段和命名字段的身份。泛型函数类型的界限可依赖外层函数实参，支持嵌套绑定及界限链；绑定变量仅在其界限规范化为 Never 时归一为 Never，其他界限保留变量身份。
 
-macOS ARM64 的 Dart SDK 3.13.7 JIT/AOT 对嵌套界限存在一处规范化差异：`U Function<U extends T>(U Function<V extends U>(V, U))` 在运行时以 Never 实化，与直接指定 Never 的闭合字面量比较返回 false；与显式写出全部 Never 的规范形式比较返回 true。依据空安全规范的 Type 相等及 NORM 规则，dartc 对两种比较均返回 true。固定样本中的 `bounds` 覆盖该差异及显式规范形式。
-
-IR 常量键及参考执行尚未完成泛型函数 Never 界限的规范化，相等类型可能得到不同常量键，也会影响含 Type 值的复合常量。
+macOS ARM64 的 Dart SDK 3.13.7 JIT/AOT 对泛型函数界限存在规范化差异：`U Function<U extends T>(U Function<V extends U>(V, U))` 在运行时以 Never 实化，与直接指定 Never 的闭合字面量比较返回 false；与显式写出全部 Never 的规范形式比较返回 true。`T Function<T extends Never>(T)` 与 `Never Function<T extends Never>(Never)` 的常量形式相等，但作为类型实参传给 `Type reify<T>() => T` 后不相等。空安全规范要求 Type 相等和常量身份使用 NORM；dartc 对上述等价类型保持相等。原生 `bounds` 样本及[类型值验证](../test/frontend/lowering/type_values_test.dart)分别保留这些案例，规范化契约见 [IR 验证](../test/ir/type_values_test.dart)与[常量池验证](../test/codegen/program_layout_test.dart)。
 
 类类型参数环境、`is T`/`as T`、泛型字段写入检查、跨模块 Type 规范身份，以及 Type 的通用成员派发、hashCode 和 toString 仍未接通。泛型函数不能直接作为 FFI 导出；原生入口须通过普通 Dart 函数提供明确的 FFI 签名。
 

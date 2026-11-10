@@ -1,5 +1,103 @@
 /// A static SSA type. Source values carry Dart types; capture cells carry a storage type.
 sealed class const ValueType() {
+  /// Normalizes a source type for runtime equality and constant identity.
+  ///
+  /// Preserves declaration identity and default type metadata. Function
+  /// binders are freshened without modifying this type or its static equality.
+  ValueType normalize() {
+    ValueType visit(ValueType type, Map<TypeParameterType, ValueType> scope) {
+      switch (type) {
+        case TypeParameterType():
+          final seen = <TypeParameterType>{};
+          ValueType bound = type;
+          while (bound is TypeParameterType && seen.add(bound)) {
+            bound = bound.bound;
+          }
+          return bound == never ? never : scope[type] ?? type;
+        case _NullableType(:final base):
+          return visit(base, scope).nullable;
+        case FutureOrType(:final argument):
+          return ValueType.futureOr(visit(argument, scope));
+        case ClassType():
+          return type.typeArguments.isEmpty
+              ? type
+              : type.declaration.instantiate(
+                  type.typeArguments.map((t) => visit(t, scope)),
+                );
+        case RecordType():
+          return RecordType(
+            type.fields.take(type.positionalCount).map((t) => visit(t, scope)),
+            {
+              for (final entry in type.slots.entries.skip(type.positionalCount))
+                entry.key: visit(type.fields[entry.value], scope),
+            },
+          );
+        case FunctionType():
+          final fresh = [
+            for (final parameter in type.typeParameters)
+              TypeParameterType(parameter.name),
+          ];
+          final nested = {
+            ...scope,
+            for (final (i, parameter) in type.typeParameters.indexed)
+              parameter: fresh[i],
+          };
+          for (final (i, parameter) in type.typeParameters.indexed) {
+            fresh[i].initializeBound(visit(parameter.bound, nested));
+          }
+          for (final (i, parameter) in type.typeParameters.indexed) {
+            if (parameter.defaultType case final value?) {
+              fresh[i].initializeDefaultType(visit(value, nested));
+            }
+          }
+          return FunctionType(
+            visit(type.result, nested),
+            type.parameters.map((t) => visit(t, nested)),
+            typeParameters: fresh,
+            optionalPositional: type.optionalPositional,
+            namedParameters: type.namedParameters,
+          );
+        case NonNullableTypeParameterType(:final parameter):
+          final result = visit(parameter, scope);
+          return object.accepts(parameter.bound) ? result : result.nonNullable;
+        case PromotedTypeParameterType(
+          :final parameter,
+          :final bound,
+          :final isNonNullable,
+        ):
+          final result = visit(parameter, scope),
+              normalizedBound = visit(bound, scope);
+          if (result == never ||
+              normalizedBound == never ||
+              isNonNullable && normalizedBound == nullType) {
+            return never;
+          }
+          if (normalizedBound == dynamicType ||
+              normalizedBound == voidType ||
+              normalizedBound == object.nullable ||
+              normalizedBound == result ||
+              bound.accepts(parameter.bound)) {
+            return isNonNullable && parameter.mayBeNull
+                ? result.nonNullable
+                : result;
+          }
+          if (normalizedBound == object) return result.nonNullable;
+          return PromotedTypeParameterType(
+            result as TypeParameterType,
+            normalizedBound,
+            isNonNullable:
+                isNonNullable && parameter.mayBeNull && bound.mayBeNull,
+          );
+        case CellType():
+          throw ArgumentError('Capture storage has no runtime type identity.');
+        default:
+          return type;
+      }
+    }
+
+    return visit(this, const {});
+  }
+
   /// Substitutes free type variables simultaneously without capturing binders.
   ValueType substitute(Map<TypeParameterType, ValueType> environment) {
     if (environment.isEmpty) return this;

@@ -512,6 +512,7 @@ final class SelectorChain(
         member.name == 'hashCode' &&
         (member.enclosingElement.name == 'Object' ||
             member.enclosingElement.name == 'Type' ||
+            member.enclosingElement.name == 'Function' ||
             coreRuntimeMember(member))) {
       return context.normal(
         context.emit(ObjectHashCode(known, direct: direct)),

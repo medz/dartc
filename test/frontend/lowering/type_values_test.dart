@@ -32,4 +32,15 @@ void main() {
       fixture.compare(name, [], expected);
     });
   }
+  test('constant values and type arguments share normalized identity', () {
+    expect(sdk.normalizedConstants(), 1023);
+    fixture.compare('normalizedConstants', [], () => 1023);
+  });
+  test(
+    'reified types and instantiated functions use normalized equality and hash',
+    () {
+      // SDK 3.13.7 skips normalization of closed type arguments; see specs/types.md.
+      fixture.compare('normalizedRuntime', [], () => 31);
+    },
+  );
 }

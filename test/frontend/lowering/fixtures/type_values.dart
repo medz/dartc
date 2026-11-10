@@ -8,6 +8,52 @@ typedef FnObject = T Function<T extends Object?>(T);
 typedef NullableObject = Object?;
 typedef Void = void;
 typedef Rec = (int, {String name});
+typedef Bottom = T Function<T extends Never>(T);
+typedef NormalBottom = Never Function<T extends Never>(Never);
+
+class const TypeTag<T>();
+
+T identity<T>(T value) => value;
+Function instantiated<T>() => identity<T>;
+
+int normalizedConstants() {
+  const left = Bottom, right = NormalBottom;
+  var result = 0;
+  if (left == right) result += 1;
+  if (identical(left, right)) result += 2;
+  if (left.hashCode == right.hashCode) result += 4;
+  if (identical(const Holder(Bottom), const Holder(NormalBottom))) result += 8;
+  if (identical(const <Bottom>[], const <NormalBottom>[])) result += 16;
+  if (identical(const <Bottom>{}, const <NormalBottom>{})) result += 32;
+  if (identical(const <int, Bottom>{}, const <int, NormalBottom>{})) {
+    result += 64;
+  }
+  if (identical(const TypeTag<Bottom>(), const TypeTag<NormalBottom>())) {
+    result += 128;
+  }
+  if (identical(
+    const (Bottom, <Bottom>[]),
+    const (NormalBottom, <NormalBottom>[]),
+  )) {
+    result += 256;
+  }
+  if (identical(identity<Bottom>, identity<NormalBottom>)) result += 512;
+  return result;
+}
+
+int normalizedRuntime() {
+  final a = reify<Bottom>(), b = reify<NormalBottom>();
+  final left = instantiated<Bottom>(), right = instantiated<NormalBottom>();
+  final types = <Type, int>{a: 1, b: 2};
+  final functions = <Function>{left, right};
+  var result = 0;
+  if (a == b && a.hashCode == b.hashCode) result += 1;
+  if (identical(a, b)) result += 2;
+  if (types.length == 1 && types[a] == 2) result += 4;
+  if (left == right && left.hashCode == right.hashCode) result += 8;
+  if (functions.length == 1) result += 16;
+  return result;
+}
 
 Type reify<T>() => T;
 Type nested<T>() => List<T>;

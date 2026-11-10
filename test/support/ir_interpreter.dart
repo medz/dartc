@@ -123,8 +123,10 @@ final class IrInterpreter(
 
   final _types = <ValueType, _TypeValue>{};
 
-  _TypeValue _typeValue(ValueType type) =>
-      _types.putIfAbsent(type, () => _TypeValue(type));
+  _TypeValue _typeValue(ValueType type) {
+    final normalized = type.normalize();
+    return _types.putIfAbsent(normalized, () => _TypeValue(normalized));
+  }
 
   // Canonical keys describe IR data, never runtime user equality or hashCode.
   Constant _resolvedConstant(
@@ -2686,10 +2688,12 @@ final class _FunctionValue(
     ...environment,
     if (isConstructor && typeArguments != null)
       ...(reifiedSignature.result as ClassType).typeEnvironment,
-  };
+  }.map((parameter, type) => MapEntry(parameter, type.normalize()));
 
   List<ValueType>? get identityTypeArguments =>
-      isConstructor && constructorAlias == null ? null : typeArguments;
+      isConstructor && constructorAlias == null
+      ? null
+      : typeArguments?.map((type) => type.normalize()).toList();
 
   @override
   bool operator ==(Object other) =>

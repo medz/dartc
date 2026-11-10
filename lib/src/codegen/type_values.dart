@@ -94,7 +94,8 @@ final class TypeValues() {
     return _equal;
   }
 
-  ObjectConstant constant(ValueType value) => _constant(value, const []);
+  ObjectConstant constant(ValueType value) =>
+      _constant(value.normalize(), const []);
 
   ObjectConstant _constant(
     ValueType value,
@@ -102,21 +103,6 @@ final class TypeValues() {
   ) {
     final (kind, shape, children, nested) = _describe(value, scopes);
     final parts = children.map((t) => _constant(t, nested)).toList();
-    if (kind == .nullable) {
-      final child = parts.single;
-      if (_tag(child) == .never) return constant(.nullType);
-      if ((child.fields[_allowsNull]! as ScalarConstant).value == true) {
-        return child;
-      }
-    }
-    if (kind == .futureOr) {
-      final child = parts.single, tag = _tag(child);
-      if (_top(child)) return child;
-      if (tag == .never || tag == .nullType) {
-        final future = _node(.nominal, _id(ValueType.future), [child]);
-        return tag == .never ? future : _node(.nullable, 0, [future]);
-      }
-    }
     return _node(kind, shape, parts);
   }
 
@@ -140,22 +126,6 @@ final class TypeValues() {
       ),
       _parts: parts,
     });
-  }
-
-  _Kind _tag(ObjectConstant value) =>
-      _Kind.values[(value.fields[_kind]! as ScalarConstant).value as int];
-
-  bool _top(ObjectConstant value) {
-    final tag = _tag(value);
-    if (tag == .dynamicType || tag == .voidType) return true;
-    if (tag == .nullable) {
-      value =
-          (value.fields[_parts]! as ObjectConstant).fields[_head]!
-              as ObjectConstant;
-    }
-    return _tag(value) == .nominal &&
-        (value.fields[_shape]! as ScalarConstant).value ==
-            _id(ValueType.object);
   }
 
   int _id(Object key) => _shapes.putIfAbsent(key, () => _shapes.length);

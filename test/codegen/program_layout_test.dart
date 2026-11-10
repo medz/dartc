@@ -52,6 +52,35 @@ void main() {
     expect(data.addressOf(TypeConstant(a)), data.addressOf(TypeConstant(b)));
   });
 
+  test(
+    'constant objects canonicalize normalized type arguments and Type fields',
+    () {
+      final t = TypeParameterType('T')..initializeBound(ValueType.never);
+      final u = TypeParameterType('U')..initializeBound(ValueType.never);
+      final a = FunctionType(t, [t], typeParameters: [t]);
+      final b = FunctionType(.never, [.never], typeParameters: [u]);
+      final p = TypeParameterType('P')
+        ..initializeBound(ValueType.object.nullable);
+      final box = ClassType(
+        Uri.parse('memory:constant-types'),
+        'Box',
+        typeParameters: [p],
+      );
+      final field = InstanceField(box, 'type', .typeType, isFinal: true);
+      final data = ConstantData(
+        ProgramLayout([
+          IrClass(box, [field]),
+        ]),
+        0,
+      );
+      int address(ValueType type) => data.addressOf(
+        ObjectConstant(box.instantiate([type]), {field: TypeConstant(type)}),
+      );
+      expect(address(a), address(b));
+      expect(address(a), isNot(address(ValueType.integer)));
+    },
+  );
+
   test('only Error subclasses retain a traced first-throw slot', () {
     final uri = Uri.parse('memory:error-layout');
     final base = ClassType(uri, 'Base', superclass: ValueType.error);
