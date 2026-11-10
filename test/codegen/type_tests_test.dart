@@ -134,5 +134,54 @@ void main() {
         }
       },
     );
+
+    test('${generator.target} rejects casts needing type environments', () {
+      final parameter = TypeParameterType('T')
+        ..initializeBound(ValueType.object.nullable)
+        ..initializeDefaultType(.dynamicType);
+      final owner = ClassType(library, 'Box', typeParameters: [parameter]);
+      for (final (source, cast) in <(ValueType, ValueType?)>[
+        (.object.nullable, parameter),
+        (parameter, .integer),
+        (parameter.nullable, null),
+      ]) {
+        final target = FunctionTarget(
+          library,
+          'cast',
+          .object.nullable,
+          [source],
+          owner: owner,
+          kind: .method,
+        );
+        final body = Block(target.parameterTypes);
+        body.finish(
+          Return(
+            body.emit(
+              cast == null
+                  ? NullCheck(body.parameters[1])
+                  : TypeCast(body.parameters[1], cast),
+            ),
+          ),
+        );
+        final program = IrProgram(
+          [
+            IrClass(owner, [], members: [target]),
+          ],
+          [
+            IrFunction(target, [body]),
+          ],
+        );
+        expect(
+          () => generator.generate(program, definitions: [target]),
+          throwsA(
+            isA<UnsupportedError>().having(
+              (error) => error.message,
+              'missing environment',
+              contains('requires a type environment'),
+            ),
+          ),
+        );
+      }
+    });
   }
 }

@@ -95,3 +95,101 @@ int caught(int mode, int seed, int count) {
     return 8;
   }
 }
+
+@Export<Int64 Function(Int64, Int64, Int64)>()
+int castInteger(int mode, int seed, int count) {
+  try {
+    final number = value(mode, seed) as int;
+    churn(count);
+    return number;
+  } on TypeError {
+    return -999;
+  }
+}
+
+@Export<Double Function(Int64, Int64, Int64)>()
+double castDouble(int mode, int seed, int count) {
+  try {
+    final number = value(mode, seed) as double;
+    churn(count);
+    return number;
+  } on TypeError {
+    return -999.5;
+  }
+}
+
+@Export<Int64 Function(Int64, Int64, Int64)>()
+int castKinds(int mode, int seed, int kind) {
+  final object = value(mode, seed);
+  try {
+    if (kind == 0) return (object as int?) ?? 123;
+    if (kind == 1) return (object as bool) ? 11 : 12;
+    if (kind == 2) {
+      final box = object as Box<num>;
+      churn(40000);
+      return box is Box<int> ? 21 : 22;
+    }
+    if (kind == 3) return object! is int ? 31 : 32;
+    if (kind == 4) return (object as FutureOr<int?>)! is int ? 41 : 42;
+    if (kind == 5) {
+      final dynamic dynamicValue = object;
+      final bool flag = dynamicValue;
+      return flag ? 51 : 52;
+    }
+    if (kind == 6) return object as Never;
+    if (kind == 8) return (object as int?)!;
+    object as Never?;
+    return 71;
+  } on TypeError {
+    return -999;
+  }
+}
+
+Object? effectValue(int mode, Pointer<Int64> effects) {
+  effects.value = effects.value * 10 + 1;
+  return value(mode, 17);
+}
+
+int checkedEffect(int mode, Pointer<Int64> effects) =>
+    effectValue(mode, effects) as int;
+
+@Export<Int64 Function(Int64, Int64, Pointer<Int64>)>()
+int castCleanup(int mode, int count, Pointer<Int64> effects) {
+  try {
+    try {
+      final result = checkedEffect(mode, effects);
+      effects.value = effects.value * 10 + 2;
+      return result;
+    } on TypeError {
+      effects.value = effects.value * 10 + 3;
+      churn(count);
+      rethrow;
+    } finally {
+      effects.value = effects.value * 10 + 4;
+    }
+  } on Error {
+    effects.value = effects.value * 10 + 5;
+    return -999;
+  } finally {
+    effects.value = effects.value * 10 + 6;
+  }
+}
+
+@Export<Int64 Function(Int64)>()
+int dynamicThrow(int mode) {
+  final dynamic object = value(mode, 17);
+  try {
+    throw object;
+  } on TypeError {
+    return 1;
+  } on int {
+    return 2;
+  } catch (_) {
+    return 3;
+  }
+}
+
+Object boxedDouble(double value) => value;
+
+@Export<Double Function(Double)>()
+double castFloating(double value) => boxedDouble(value) as double;

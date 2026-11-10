@@ -14,6 +14,7 @@ import 'native_adapter.dart';
 import 'program_layout.dart';
 import 'heap_plan.dart';
 import 'stack_traces.dart';
+import 'checked_casts.dart';
 
 /// Generates a control-flow graph with explicit edge transfers.
 final class ScalarFunction<R extends Object>(
@@ -22,8 +23,16 @@ final class ScalarFunction<R extends Object>(
   final ProgramLayout layouts,
   HeapPlan heap,
   final StackTraces traces,
+  CheckedCasts casts,
 ) {
-  final selection = FunctionSelection(function, emitter, layouts, heap, traces);
+  final selection = FunctionSelection(
+    function,
+    emitter,
+    layouts,
+    heap,
+    traces,
+    casts,
+  );
 
   bool get hasRoots => selection.liveness.acrossCalls.values.any(
     (values) => values.any((v) => layouts.isReference(v.type)),

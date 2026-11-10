@@ -11,6 +11,7 @@ import 'function_representation.dart';
 import 'heap_plan.dart';
 import 'program_layout.dart';
 import 'stack_traces.dart';
+import 'checked_casts.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
 final class FunctionSelection<R>(
@@ -19,6 +20,7 @@ final class FunctionSelection<R>(
   final ProgramLayout layouts,
   HeapPlan heap,
   StackTraces traces,
+  CheckedCasts casts,
 ) {
   final body = FunctionRepresentation(
     function,
@@ -131,6 +133,8 @@ final class FunctionSelection<R>(
               target: null,
               arguments: arguments,
             );
+          case TypeCast(:final operand) || NullCheck(:final operand):
+            _call(instruction, casts.targetFor(instruction), [operand]);
           case final Construct operation:
             final target = heap.constructors[operation]!;
             _call(instruction, target, body.inputsOf(operation).toList());

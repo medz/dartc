@@ -29,7 +29,9 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 
 原生代码支持 `== null`、`!= null`、`??`、`??=`、`is` 和 `is!`。类型判断读取值的实际类型，支持已接通原生存储的标量和用户类、继承与接口、可空类型及实参已确定的泛型类型；`Object?` 的 `is int` 不依赖变量的静态类型猜测结果。泛型实参中的函数按参数逆变、返回协变检查，record 按形状与字段类型检查，FutureOr 保留联合类型关系。精化后的值可拆箱为 int、double、bool，或继续作为引用传递；短路只执行必要分支。见[类型与异常筛选对照](../test/compiler/type_checks_test.dart)、[空安全对照](../test/compiler/nullability_test.dart)和[精化值验证](../test/codegen/boxed_values_native_test.dart)。
 
-int、double 和 bool 值均可装箱为引用，包括运行时计算的数值；仍被使用的装箱值在调用及回收后保持不变，见[计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)。地址为零的非空 FFI Pointer 值不等于 Dart null。依赖运行时类型参数的检查、`as`、后缀 `!`、Type/runtimeType 值以及尚无原生存储的函数和 record 值仍是缺口；支持这些类型作为泛型实参不表示对应值已可原生执行。跨模块托管值传递尚未接通。
+`as`、后缀 `!` 及已降为类型转换的隐式检查支持上述具体类型。成功保留原值，失败抛出 TypeError，可由 `on TypeError` 或 `on Error` 捕获并正常经过 `finally`；转换前的表达式只求值一次。`as Never` 始终失败，`as Never?` 仅接受 null；`FutureOr<int?>` 的 `!` 在保留静态类型的同时拒绝 null。见[转换、隐式检查与清理顺序对照](../test/compiler/type_checks_test.dart)。
+
+int、double 和 bool 值均可装箱为引用，包括运行时计算的数值；仍被使用的装箱值在调用及回收后保持不变，见[计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)。地址为零的非空 FFI Pointer 值不等于 Dart null。依赖运行时类型参数的检查和转换、Type/runtimeType 值以及尚无原生存储的函数和 record 值仍是缺口；支持这些类型作为泛型实参不表示对应值已可原生执行。跨模块托管值传递尚未接通。
 
 ## analyzer 元数据边界
 

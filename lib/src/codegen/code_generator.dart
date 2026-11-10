@@ -20,8 +20,6 @@ abstract interface class CodeGenerator() {
   /// references cannot be exported as native pointers. Integers, doubles and
   /// booleans can enter reference storage, and statically known scalar values
   /// can be unboxed. Computed numeric boxes participate in heap collection.
-  /// Type tests support null checks and results proved by static types;
-  /// checks requiring runtime type metadata remain unsupported.
   /// Modules with references live across calls include read-only stack records
   /// keyed by relocated return addresses. These describe initialized reference
   /// slots and frame linkage; native entry wrappers terminate the frame walk.
@@ -36,9 +34,11 @@ abstract interface class CodeGenerator() {
   /// Fresh throws capture the managed call sequence; rethrows retain the same
   /// exception and trace. Error subclasses retain their first throw's trace.
   /// [TypeTest] and typed catches inspect actual object types, including inherited
-  /// interfaces and fully determined generic arguments. Checks requiring runtime
-  /// type parameters, trace formatting and the Error.stackTrace getter remain
-  /// unsupported. Exceptions cannot unwind foreign frames.
+  /// interfaces and fully determined generic arguments. [TypeCast] and [NullCheck]
+  /// preserve the value on success and throw TypeError on failure, following the
+  /// same exception and cleanup paths. Checks requiring runtime type parameters,
+  /// trace formatting and the Error.stackTrace getter remain unsupported.
+  /// Exceptions cannot unwind foreign frames.
   /// Escaping managed state, asynchronous execution and catchable allocation
   /// failures remain unsupported. A failure escaping the native entry releases
   /// the heap, reports to stderr and terminates the process with status 255.

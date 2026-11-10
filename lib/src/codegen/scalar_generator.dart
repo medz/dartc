@@ -19,6 +19,7 @@ import 'heap_plan.dart';
 import 'heap_entry.dart';
 import 'frame_lookup.dart';
 import 'stack_traces.dart';
+import 'checked_casts.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -45,7 +46,12 @@ base class ScalarCodeGenerator<R extends Object>(
     }
     final frames = FrameLookup();
     final traces = StackTraces(frames);
-    final layouts = ProgramLayout([...program.classes, traces.declaration]);
+    final casts = CheckedCasts();
+    final layouts = ProgramLayout([
+      ...casts.classes,
+      ...program.classes,
+      traces.declaration,
+    ]);
     final heap = HeapPlan(program, selected, layouts, frames);
     final relocations = <Relocation>[];
     final nativeSymbols = <String, int>{};
@@ -73,12 +79,26 @@ base class ScalarCodeGenerator<R extends Object>(
           layouts,
           heap,
           traces,
+          casts,
         );
       }
       final export = exports[declaration];
       if (export != null && !_matches(declaration, export.signature)) {
         throw ArgumentError('Native signature mismatch: ${declaration.name}');
       }
+    }
+    final checkedFunctions = casts.functions.toList();
+    heap.include(checkedFunctions, layouts);
+    for (final function in checkedFunctions) {
+      selected.add(function.target);
+      functions[function.target] = ScalarFunction(
+        function,
+        _createFunction(),
+        layouts,
+        heap,
+        traces,
+        casts,
+      );
     }
     heap.retain({
       for (final function in functions.values)
@@ -101,9 +121,17 @@ base class ScalarCodeGenerator<R extends Object>(
     final managed = !heap.isEmpty || exceptions;
     final primitives = managed ? heap.primitives : <FunctionTarget>{};
     if (managed) {
-      final support = [...heap.functions, frames.function, ...traceFunctions];
+      final support = [
+        ...checkedFunctions,
+        ...heap.functions,
+        frames.function,
+        ...traceFunctions,
+      ];
       IrProgram(
-        [if (capture) traces.declaration],
+        [
+          if (checkedFunctions.isNotEmpty) ...casts.classes,
+          if (capture) traces.declaration,
+        ],
         support,
         externals: [
           for (final target in [
@@ -120,12 +148,14 @@ base class ScalarCodeGenerator<R extends Object>(
         if (capture) traces.capture,
       ]);
       for (final function in support) {
+        if (functions.containsKey(function.target)) continue;
         functions[function.target] = ScalarFunction(
           function,
           _createFunction(),
           layouts,
           heap,
           traces,
+          casts,
         );
       }
     }
