@@ -15,6 +15,7 @@ import 'checked_casts.dart';
 import 'member_calls.dart';
 import 'numeric_operations.dart';
 import 'global_storage.dart';
+import 'storage_access.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
 final class FunctionSelection<R>(
@@ -64,7 +65,7 @@ final class FunctionSelection<R>(
       bank == .general ? _generalTemporaries : _floatingTemporaries;
 
   /// The operands read by the selected encoding, including generated constants.
-  Iterable<Value> inputsOf(Instruction instruction) {
+  Iterable<Value> inputsOf(Value instruction) {
     if (constantTests.containsKey(instruction)) return const [];
     if (binaries[instruction] case final binary?) {
       return [binary.left, binary.right];
@@ -99,24 +100,20 @@ final class FunctionSelection<R>(
       }
       for (final instruction in body.instructions[block]!) {
         if (body.aliases.contains(instruction)) continue;
-        if (body.boxes[instruction] case final value?) {
-          _call(instruction, heap.box(body.typeOf(value)), [value]);
-          continue;
-        }
-        final target =
-            body.invocations[instruction] ??
-            arithmetic.callFor(instruction) ??
-            globals.callFor(instruction) ??
-            (instruction is DirectCall ? instruction.target : null);
-        if (target != null) {
-          if (instruction.type != .voidType &&
-              instruction.type != .never &&
-              target.returnType != .voidType &&
-              target.returnType != .never) {
-            layouts.checkTransfer(target.returnType, body.typeOf(instruction));
+        if (instruction is Instruction) {
+          if (body.boxes[instruction] case final value?) {
+            _call(instruction, heap.box(body.typeOf(value)), [value]);
+            continue;
           }
-          _call(instruction, target, body.inputsOf(instruction).toList());
-          continue;
+          final target =
+              body.invocations[instruction] ??
+              arithmetic.callFor(instruction) ??
+              globals.callFor(instruction) ??
+              (instruction is DirectCall ? instruction.target : null);
+          if (target != null) {
+            _call(instruction, target, body.inputsOf(instruction).toList());
+            continue;
+          }
         }
         switch (instruction) {
           case NewCell(
@@ -155,7 +152,7 @@ final class FunctionSelection<R>(
               target: null,
               arguments: arguments,
             );
-          case TypeCast() || NullCheck():
+          case Instruction() && (TypeCast() || NullCheck()):
             _call(
               instruction,
               casts.targetFor(instruction, layouts).target,
@@ -168,21 +165,15 @@ final class FunctionSelection<R>(
             break;
           case ObjectRuntimeType():
             if (_generalTemporaries < 1) _generalTemporaries = 1;
-          case LoadField(:final field, :final type):
-            if (field.isLate) {
-              throw UnsupportedError('Native late field: ${field.name}');
-            }
-            layouts.fieldOffset(field);
+          case LoadField(:final field, :final type) ||
+              StorageRead(:final field, :final type):
+            _storage(field, body.inputsOf(instruction).first);
             layouts.checkTransfer(field.type, type);
-          case StoreField(:final field, :final value):
-            if (field.isLate) {
-              throw UnsupportedError(
-                'Native checked field write: ${field.name}',
-              );
-            }
-            layouts.fieldOffset(field);
+          case StoreField(:final field, :final value) ||
+              StorageWrite(:final field, :final value):
+            _storage(field, body.inputsOf(instruction).first);
             layouts.checkTransfer(
-              body.inputsOf(instruction).last.type,
+              body.typeOf(body.inputsOf(instruction).last),
               field.type,
               constant: value is ScalarConstant,
             );
@@ -384,6 +375,15 @@ final class FunctionSelection<R>(
 
   void _call(Instruction operation, FunctionTarget target, List<Value> inputs) {
     final parameters = layouts.entryTypes(target);
+    if (inputs.length != parameters.length) {
+      throw StateError('Selected call arity does not match ${target.name}.');
+    }
+    if (operation.type != .voidType &&
+        operation.type != .never &&
+        target.returnType != .voidType &&
+        target.returnType != .never) {
+      layouts.checkTransfer(target.returnType, body.typeOf(operation));
+    }
     for (final (i, input) in inputs.indexed) {
       layouts.checkTransfer(
         body.typeOf(input),
@@ -401,6 +401,14 @@ final class FunctionSelection<R>(
       target: target,
       arguments: inputs,
     );
+  }
+
+  void _storage(InstanceField field, Value receiver) {
+    if (field.isLate ||
+        layouts.representation(body.typeOf(receiver)) != .reference) {
+      throw StateError('Expected a checked field and a storage reference.');
+    }
+    layouts.fieldOffset(field);
   }
 
   void _binary(

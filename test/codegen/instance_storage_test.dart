@@ -98,7 +98,7 @@ void main() {
         HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
       );
       var block = entry;
-      final operations = <Instruction>[];
+      final operations = <Value>[];
       while (body.ends[block] is Invoke) {
         operations.addAll(body.instructions[block]!);
         final invoke = body.ends[block] as Invoke;

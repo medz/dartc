@@ -6,12 +6,68 @@ import 'package:dartc/src/codegen/function_liveness.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
 import 'package:dartc/src/codegen/member_calls.dart';
+import 'package:dartc/src/codegen/storage_access.dart';
 import 'package:test/test.dart';
 
 void main() {
   final uri = Uri.parse('memory:representation');
   final layouts = ProgramLayout([]);
   final members = MemberCalls(IrProgram([], []), {});
+
+  test(
+    'storage operands retain live references and require real definitions',
+    () {
+      final field = InstanceField(ClassType(uri, 'Carrier'), 'value', .object);
+      final target = FunctionTarget(uri, 'storage', .object, [.object]);
+      final entry = Block(target.parameterTypes);
+      final receiver = entry.parameters.single;
+      final call = entry.emit(
+        DirectCall(FunctionTarget(uri, 'collect', .voidType, []), []),
+      );
+      entry.finish(Return(receiver));
+      final body = FunctionRepresentation(
+        IrFunction(target, [entry]),
+        layouts,
+        CheckedCasts(),
+        members,
+        HeapPlan(IrProgram([], []), {}, layouts, FrameLookup()),
+      );
+      final read = StorageRead(field, receiver);
+      final write = StorageWrite(field, receiver, read);
+      body.instructions[entry] = [read, call, write];
+      final flow = FunctionLiveness(body, body.inputsOf, {call});
+      expect(body.inputsOf(read), [receiver]);
+      expect(body.inputsOf(write), [receiver, read]);
+      expect(flow.acrossCalls[call], {receiver, read});
+      expect(entry.instructions, [call]);
+
+      body.instructions[entry] = [write, call, read];
+      expect(
+        () => FunctionLiveness(body, body.inputsOf, {call}),
+        throwsStateError,
+      );
+      body.instructions[entry] = [
+        StorageRead(field, Block([.object]).parameters.single),
+      ];
+      expect(() => FunctionLiveness(body, body.inputsOf, {}), throwsStateError);
+
+      final left = Block(), right = Block(), join = Block();
+      body.blocks.addAll([left, right, join]);
+      body.instructions[entry] = [];
+      body.instructions[left] = [read];
+      body.instructions[right] = [];
+      body.instructions[join] = [write];
+      body.ends[entry] = Branch(
+        const Constant.boolean(true),
+        Jump(left),
+        Jump(right),
+      );
+      body.ends[left] = Jump(join);
+      body.ends[right] = Jump(join);
+      body.ends[join] = Return(receiver);
+      expect(() => FunctionLiveness(body, body.inputsOf, {}), throwsStateError);
+    },
+  );
 
   test(
     'selected scalar returns are boxed before joining the semantic result',

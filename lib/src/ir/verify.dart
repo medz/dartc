@@ -173,7 +173,7 @@ FunctionReferences verifyCallable(
   if (predecessors != null && predecessors.length != blocks.length) {
     throw StateError('Repeated block.');
   }
-  final definitions = <Value, (Block, int)>{};
+  final definitions = Map<Value, (Block, int)>.identity();
   for (final block in blocks) {
     void define(Value value, int position) {
       checkTypeScope(value.type);

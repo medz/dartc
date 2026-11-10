@@ -49,7 +49,7 @@ void main() {
     expect(() => IrFunction(f, [entry, yes, no, join]), throwsStateError);
   });
 
-  test('uses before definition and foreign block parameters are rejected', () {
+  test('uses before definition and foreign values are rejected', () {
     final entry = Block(f.parameterTypes);
     final next = IntBinary(.add, one, one);
     final result = entry.emit(IntBinary(.subtract, next, one));
@@ -61,6 +61,11 @@ void main() {
     final other = Block(f.parameterTypes)
       ..finish(Return(foreign.parameters.single));
     expect(() => IrFunction(f, [other]), throwsStateError);
+
+    final external = Block(f.parameterTypes);
+    final known = external.emit(IntBinary(.add, one, one));
+    external.finish(Return(_ForeignValue(known)));
+    expect(() => IrFunction(f, [external]), throwsStateError);
   });
 
   test('edges and function returns check arity, type and block membership', () {
@@ -382,4 +387,14 @@ void main() {
     dead.finish(const Return(one));
     expect(() => IrFunction(target, [dead]), throwsStateError);
   });
+}
+
+final class _ForeignValue(final Value shadow) extends Value {
+  this : super(shadow.type);
+
+  @override
+  bool operator ==(Object other) => identical(other, shadow);
+
+  @override
+  int get hashCode => shadow.hashCode;
 }

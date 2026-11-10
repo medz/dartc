@@ -366,7 +366,7 @@ final class FunctionAllocation<R extends Object>(
   }
 
   /// Homes caller-live references before argument staging and invalidates registers.
-  StackRoots prepareCall(Instruction instruction, Set<R> clobbered) {
+  StackRoots prepareCall(Value instruction, Set<R> clobbered) {
     final roots = selection.liveness.acrossCalls[instruction]!
         .where((v) => selection.layouts.isReference(selection.body.typeOf(v)))
         .toSet();

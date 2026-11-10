@@ -10,6 +10,7 @@ import 'package:dartc/layout.dart';
 import 'function_allocation.dart';
 import 'function_emitter.dart';
 import 'function_selection.dart';
+import 'storage_access.dart';
 import 'native_adapter.dart';
 import 'program_layout.dart';
 import 'heap_plan.dart';
@@ -284,7 +285,8 @@ final class ScalarFunction<R extends Object>(
               allocation.define(instruction, result);
             }
           }
-        } else if (instruction case StoreField(:final field)) {
+        } else if (instruction
+            case StoreField(:final field) || StorageWrite(:final field)) {
           final receiver = selection.body.inputsOf(instruction).first;
           final value = selection.body.inputsOf(instruction).last;
           final base = allocation.read(receiver);
@@ -302,7 +304,8 @@ final class ScalarFunction<R extends Object>(
           allocation.releaseTemporary(source);
           allocation.release(value);
           allocation.release(receiver);
-        } else if (instruction case LoadField(:final field)
+        } else if (instruction
+            case LoadField(:final field) || StorageRead(:final field)
             when !selection.body.aliases.contains(instruction)) {
           final receiver = selection.body.inputsOf(instruction).first;
           final source = allocation.read(receiver);

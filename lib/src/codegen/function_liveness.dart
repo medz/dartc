@@ -5,17 +5,17 @@ import 'function_representation.dart';
 /// Tracks selected values and local contents across control-flow edges and calls.
 final class FunctionLiveness(
   FunctionRepresentation body,
-  Iterable<Value> Function(Instruction) inputsOf,
-  Set<Instruction> calls,
+  Iterable<Value> Function(Value) inputsOf,
+  Set<Value> calls,
 ) {
   final liveIn = <Block, Set<Value>>{};
   final liveOut = <Block, Set<Value>>{};
   final liveParameters = <Block, List<int>>{};
   final uses = <Block, Map<Value, int>>{};
-  final acrossCalls = <Instruction, Set<Value>>{};
+  final acrossCalls = <Value, Set<Value>>{};
 
   /// Introduced conversions whose results are never consumed.
-  final omitted = <Instruction>{};
+  final omitted = <Value>{};
 
   this {
     final positions = {
@@ -118,6 +118,12 @@ final class FunctionLiveness(
         changed |= incoming.length != length;
       }
     } while (changed);
+    final parameters = body.parametersOf(body.function.entry).toSet();
+    if (liveIn[body.function.entry]!.any(
+      (value) => !parameters.contains(value),
+    )) {
+      throw StateError('Selected value lacks a dominating definition.');
+    }
     for (final block in body.blocks) {
       liveParameters[block] = [
         for (final (i, parameter) in body.parametersOf(block).indexed)

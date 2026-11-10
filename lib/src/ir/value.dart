@@ -1,3 +1,6 @@
+/// @docImport 'function.dart';
+library;
+
 import 'dart:typed_data';
 
 import 'package:dartc/interop.dart';
@@ -11,8 +14,10 @@ import 'type.dart';
 ///
 /// A use refers to its defining instruction or block parameter by identity.
 /// A [Constant] can be used in any block.
-sealed class const Value(
-  /// The static Dart type before machine representation selection.
+/// Other domains may define values for their own graphs; an [IrFunction]
+/// accepts only constants and values defined by its verified blocks.
+abstract class const Value(
+  /// The semantic or compiler storage type, independent of machine locations.
   final ValueType type,
 );
 

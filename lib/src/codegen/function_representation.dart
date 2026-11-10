@@ -6,6 +6,7 @@ import 'type_values.dart';
 import 'member_calls.dart';
 import 'heap_plan.dart';
 import 'cell_initialization.dart';
+import 'storage_access.dart';
 
 /// Places allocating representation changes before register and root analysis.
 final class FunctionRepresentation(
@@ -17,7 +18,7 @@ final class FunctionRepresentation(
   FunctionTarget? captureTrace,
 }) {
   final blocks = <Block>[];
-  final instructions = <Block, List<Instruction>>{};
+  final instructions = <Block, List<Value>>{};
   final ends = <Block, Terminator>{};
   final _operands = <Instruction, List<Value>>{};
   final _arguments = <Jump, List<Value>>{};
@@ -29,7 +30,7 @@ final class FunctionRepresentation(
   final aliases = <Instruction>{};
   final _resultTypes = <Value, ValueType>{};
   final stackCells = <NewCell>{};
-  final _prologue = <Instruction>[];
+  final _prologue = <Value>[];
   bool get _factoryEnvironment =>
       function.target.kind == .factory &&
       function.target.owner!.typeParameters.isNotEmpty;
@@ -54,18 +55,14 @@ final class FunctionRepresentation(
     _prologue,
   );
 
-  Value _receiverType(Value receiver, List<Instruction> into) {
+  Value _receiverType(Value receiver, List<Value> into) {
     final actual = ObjectRuntimeType(receiver, direct: true);
     final concrete = TypeCast(actual, TypeValues.type);
     into.addAll([actual, concrete]);
     return concrete;
   }
 
-  List<Value> _ownerArguments(
-    Value actual,
-    ClassType owner,
-    List<Instruction> into,
-  ) {
+  List<Value> _ownerArguments(Value actual, ClassType owner, List<Value> into) {
     final view = DirectCall(layouts.relations.viewOf(owner), [actual]);
     final checked = NullCheck(view);
     var parts = LoadField(TypeValues.parts, checked);
@@ -85,7 +82,7 @@ final class FunctionRepresentation(
   List<BlockParameter> parametersOf(Block block) =>
       block == function.entry ? entryParameters : block.parameters;
 
-  Value _reify(ValueType type, List<Instruction> into) {
+  Value _reify(ValueType type, List<Value> into) {
     if (type is TypeParameterType) {
       final index = function.target.typeParameters.indexOf(type);
       if (index >= 0) {
@@ -117,8 +114,11 @@ final class FunctionRepresentation(
     return call;
   }
 
-  Iterable<Value> inputsOf(Instruction instruction) =>
-      _operands[instruction] ?? instruction.inputs;
+  Iterable<Value> inputsOf(Value operation) => switch (operation) {
+    StorageAccess(:final inputs) => inputs,
+    Instruction() => _operands[operation] ?? operation.inputs,
+    _ => throw ArgumentError('Expected a selected operation.'),
+  };
 
   /// The stored type before a selected call result is boxed for its caller.
   ValueType typeOf(Value value) =>
@@ -127,10 +127,8 @@ final class FunctionRepresentation(
           ? (value.type as CellType).content
           : value.type);
 
-  LoadField _load(InstanceField field, Value receiver, List<Instruction> into) {
-    // The selected carrier is physical storage, not the function's Dart type.
-    final load = LoadField(field, Block([field.owner]).parameters.single);
-    _operands[load] = [receiver];
+  StorageRead _load(InstanceField field, Value receiver, List<Value> into) {
+    final load = StorageRead(field, receiver);
     into.add(load);
     return load;
   }
@@ -276,7 +274,7 @@ final class FunctionRepresentation(
           layouts.representation(type) == .reference;
     }
 
-    Value convert(Value value, ValueType type, List<Instruction> into) {
+    Value convert(Value value, ValueType type, List<Value> into) {
       if (!needsBox(value, type)) return value;
       final box = TypeView(
         value,
@@ -288,14 +286,14 @@ final class FunctionRepresentation(
       return box;
     }
 
-    Value? traceFor(Value? trace, List<Instruction> into) {
+    Value? traceFor(Value? trace, List<Value> into) {
       if (trace != null || captureTrace == null) return trace;
       final capture = DirectCall(captureTrace, []);
       into.add(capture);
       return capture;
     }
 
-    void runtimeType(ObjectRuntimeType instruction, List<Instruction> into) {
+    void runtimeType(ObjectRuntimeType instruction, List<Value> into) {
       final source = instruction.operand.type;
       if (source == .nullType || layouts.representation(source) != .reference) {
         _operands[instruction] = [
@@ -322,7 +320,7 @@ final class FunctionRepresentation(
       ];
       final block = Block(inputs.map((v) => v.type));
       blocks.add(block);
-      final body = instructions[block] = <Instruction>[];
+      final body = instructions[block] = <Value>[];
       final arguments = [
         for (final (i, value) in block.parameters.indexed)
           convert(value, jump.target.parameters[i].type, body),
@@ -335,9 +333,11 @@ final class FunctionRepresentation(
       return Jump(block, inputs);
     }
 
-    Block appendTo(Block block, Instruction operation, Jump? handler) {
+    Block appendTo(Block block, Value operation, Jump? handler) {
       instructions[block]!.add(operation);
-      if (handler == null || !operation.mayThrow) return block;
+      if (handler == null || operation is! Instruction || !operation.mayThrow) {
+        return block;
+      }
       final next = Block();
       blocks.add(next);
       instructions[next] = [];
@@ -353,7 +353,7 @@ final class FunctionRepresentation(
     sourceBlocks:
     for (final sourceBlock in function.blocks) {
       var block = sourceBlock;
-      var body = instructions[block] = <Instruction>[];
+      var body = instructions[block] = <Value>[];
       final source = switch (sourceBlock.end) {
         Invoke(:final operation) => sourceBlock.instructions.followedBy([
           operation,
@@ -442,15 +442,7 @@ final class FunctionRepresentation(
               shape.value.type,
               body,
             );
-            final placeholder = Block([shape.type, shape.value.type])
-                .parameters;
-            final write = StoreField(
-              shape.value,
-              placeholder[0],
-              placeholder[1],
-            );
-            _operands[write] = [cell, value];
-            body.add(write);
+            body.add(StorageWrite(shape.value, cell, value));
             aliases.add(instruction);
             _operands[instruction] = [];
           }
@@ -609,11 +601,11 @@ final class FunctionRepresentation(
               next = otherwise;
               current = selected;
             }
-            void append(Instruction operation) {
+            void append(Value operation) {
               current = appendTo(current, operation, handler);
             }
 
-            final setup = <Instruction>[];
+            final setup = <Value>[];
             final specialization = closure?.instantiation;
             final storage = specialization?.generic ?? closure;
             final carrier = specialization == null
@@ -700,7 +692,7 @@ final class FunctionRepresentation(
               final widened = TypeView(bound, .object);
               append(widened);
               final check = TypeCast(widened, instruction.type);
-              final checkTypes = <Instruction>[];
+              final checkTypes = <Value>[];
               _operands[check] = [
                 widened,
                 for (final parameter
@@ -784,7 +776,7 @@ final class FunctionRepresentation(
               if (!functionValue || target.kind == .closure) carrier,
             ];
             if (closure != null) {
-              final captures = <Instruction>[];
+              final captures = <Value>[];
               for (final field in storage!.captures) {
                 arguments.add(_load(field, carrier, captures));
               }
@@ -799,7 +791,7 @@ final class FunctionRepresentation(
                   'Native Never parameter: ${target.name}',
                 );
               }
-              final pending = <Instruction>[];
+              final pending = <Value>[];
               if (destination.freeTypeParameters.isEmpty &&
                   destination.accepts(value.type)) {
                 arguments.add(convert(value, destination, pending));
@@ -871,7 +863,7 @@ final class FunctionRepresentation(
               _resultTypes[call] = target.returnType;
             }
             append(call);
-            final conversions = <Instruction>[];
+            final conversions = <Value>[];
             final value = result == .voidType
                 ? null
                 : convert(call, result, conversions);
@@ -904,7 +896,7 @@ final class FunctionRepresentation(
             body = instructions[next]!;
           }
 
-          void append(Instruction operation) =>
+          void append(Value operation) =>
               enter(appendTo(block, operation, handler));
 
           void fail(Block failed, String message) {
@@ -931,13 +923,13 @@ final class FunctionRepresentation(
           );
           blocks.add(join);
           if (instruction case StoreField(:final value)) {
-            final conversions = <Instruction>[];
+            final conversions = <Value>[];
             var stored = convert(value, field.type, conversions);
             conversions.forEach(append);
             if (field.type.freeTypeParameters.isNotEmpty) {
               final widened = TypeView(stored, .object.nullable);
               append(widened);
-              final pending = <Instruction>[];
+              final pending = <Value>[];
               final arguments = _ownerArguments(
                 _receiverType(receiver, pending),
                 field.owner,
@@ -959,9 +951,7 @@ final class FunctionRepresentation(
                 "Field '${field.name}' has already been initialized.",
               );
             }
-            final write = StoreField(valueField, receiver, value);
-            _operands[write] = [receiver, stored];
-            append(write);
+            append(StorageWrite(valueField, receiver, stored));
             append(
               StoreField(boundField, receiver, const Constant.boolean(true)),
             );
@@ -985,12 +975,10 @@ final class FunctionRepresentation(
                   "Field '${field.name}' has been assigned during initialization.",
                 );
               }
-              final write = StoreField(valueField, receiver, value);
-              final conversions = <Instruction>[];
+              final conversions = <Value>[];
               final stored = convert(value, field.type, conversions);
               conversions.forEach(append);
-              _operands[write] = [receiver, stored];
-              append(write);
+              append(StorageWrite(valueField, receiver, stored));
               append(
                 StoreField(boundField, receiver, const Constant.boolean(true)),
               );
