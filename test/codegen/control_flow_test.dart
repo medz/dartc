@@ -11,6 +11,32 @@ import 'package:test/test.dart';
 import 'fixtures/control_flow.dart';
 
 void main() {
+  test('exception analysis does not enable unsupported native propagation', () {
+    final target = FunctionTarget(.parse('memory:throw'), 'fail', .voidType, [
+      .object,
+    ]);
+    final body = Block(target.parameterTypes);
+    body.finish(Throw(body.parameters.single));
+    final program = IrProgram([], [
+      IrFunction(target, [body]),
+    ]);
+    for (final CodeGenerator generator in [
+      Arm64CodeGenerator(const Target(.linux, .arm64)),
+      X64CodeGenerator(const Target(.linux, .x64)),
+    ]) {
+      expect(
+        () => generator.generate(program, definitions: [target]),
+        throwsA(
+          isA<UnsupportedError>().having(
+            (error) => error.message,
+            'message',
+            'Native terminator: Throw',
+          ),
+        ),
+      );
+    }
+  });
+
   test(
     'an infinite graph emits backward control flow without inventing a return',
     () {

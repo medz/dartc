@@ -20,6 +20,9 @@ final class FunctionRepresentation(
   Iterable<Jump> successors(Block block) => switch (ends[block]!) {
     final Jump jump => [jump],
     Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],
+    Invoke(:final onReturn, :final onThrow) => [?onReturn, onThrow],
+    Throw(:final onThrow) ||
+    ExhaustivenessFailure(:final onThrow) => [?onThrow],
     _ => block.successors,
   };
 
@@ -63,7 +66,11 @@ final class FunctionRepresentation(
     blocks.addAll(function.blocks);
     for (final block in function.blocks) {
       final body = instructions[block] = <Instruction>[];
-      for (final instruction in block.instructions) {
+      final source = switch (block.end) {
+        Invoke(:final operation) => block.instructions.followedBy([operation]),
+        _ => block.instructions,
+      };
+      for (final instruction in source) {
         if (instruction case TypeView(:final operand, :final type)
             when needsBox(operand, type)) {
           boxes[instruction] = operand;
@@ -105,6 +112,19 @@ final class FunctionRepresentation(
           condition,
           edge(ifTrue),
           edge(ifFalse),
+        ),
+        Invoke(:final operation, :final onReturn, :final onThrow) => Invoke(
+          operation,
+          onReturn: onReturn == null ? null : edge(onReturn),
+          onThrow: edge(onThrow),
+        ),
+        Throw(:final exception, :final stackTrace, :final onThrow) => Throw(
+          convert(exception, .object, body),
+          stackTrace: stackTrace,
+          onThrow: onThrow == null ? null : edge(onThrow),
+        ),
+        ExhaustivenessFailure(:final onThrow) => ExhaustivenessFailure(
+          onThrow == null ? null : edge(onThrow),
         ),
         final end => end,
       };

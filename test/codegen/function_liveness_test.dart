@@ -18,8 +18,9 @@ void main() {
       ProgramLayout(IrProgram([], [])),
     );
     return FunctionLiveness(body, body.inputsOf, {
-      for (final block in blocks)
-        for (final operation in block.instructions)
+      ...body.boxes.keys,
+      for (final block in body.blocks)
+        for (final operation in body.instructions[block]!)
           if (operation is DirectCall || operation is NativeCall) operation,
     });
   }
@@ -37,6 +38,130 @@ void main() {
     expect(flow.liveIn[entry], {condition, a, b});
     expect(flow.liveOut[entry], {a, b});
     expect(flow.uses[entry], {condition: 1, a: 1, b: 1});
+  });
+
+  test(
+    'invoke outcomes are created after the call and survive handler calls',
+    () {
+      for (final neverReturns in [false, true]) {
+        final callee = FunctionTarget(
+          library,
+          'callee',
+          neverReturns ? .never : .object,
+          [.object],
+        );
+        final collect = FunctionTarget(library, 'collect', .voidType, []);
+        final handle = FunctionTarget(library, 'handle', .object, [
+          .object,
+          .stackTrace,
+          .object,
+        ]);
+        final entry = Block([.object, .object]);
+        final success = neverReturns ? null : Block([.object]);
+        final failure = Block([.object, .stackTrace]);
+        final [keep, consumed] = entry.parameters;
+        final call = DirectCall(callee, [consumed]);
+        entry.finish(
+          Invoke(
+            call,
+            onReturn: success == null ? null : Jump(success, [call]),
+            onThrow: Jump(failure, [
+              UnwindValue.exception,
+              UnwindValue.stackTrace,
+            ]),
+          ),
+        );
+        success?.finish(Return(success.parameters.single));
+        final nested = failure.emit(DirectCall(collect, []));
+        failure.finish(
+          Return(
+            failure.emit(DirectCall(handle, [...failure.parameters, keep])),
+          ),
+        );
+
+        final flow = analyze([entry, ?success, failure], .object);
+        expect(flow.acrossCalls[call], {keep});
+        expect(flow.acrossCalls[nested], {...failure.parameters, keep});
+        expect(flow.liveIn[entry], {keep, consumed});
+        expect(flow.liveOut[entry], {keep, if (!neverReturns) call});
+      }
+    },
+  );
+
+  test(
+    'rethrow keeps the original pair and handler locals across prior calls',
+    () {
+      final entry = Block([.object, .stackTrace, .object]);
+      final handler = Block([.object, .stackTrace, .object]);
+      final collect = FunctionTarget(library, 'collect', .voidType, []);
+      final call = entry.emit(DirectCall(collect, []));
+      entry.finish(
+        Throw(
+          entry.parameters[0],
+          stackTrace: entry.parameters[1],
+          onThrow: Jump(handler, [
+            UnwindValue.exception,
+            UnwindValue.stackTrace,
+            entry.parameters[2],
+          ]),
+        ),
+      );
+      final handle = FunctionTarget(
+        library,
+        'handle',
+        .voidType,
+        handler.parameters.map((p) => p.type),
+      );
+      handler.emit(DirectCall(handle, handler.parameters));
+      handler.finish(const Return());
+
+      final flow = analyze([entry, handler], .voidType);
+      expect(flow.acrossCalls[call], entry.parameters.toSet());
+      expect(flow.liveIn[entry], entry.parameters.toSet());
+      expect(flow.liveOut[entry], {entry.parameters[2]});
+    },
+  );
+
+  test(
+    'a failed write retains old contents only when its handler reads them',
+    () {
+      for (final readsOldValue in [false, true]) {
+        final entry = Block([.object, .object]),
+            success = Block(),
+            failure = Block();
+        final [initial, replacement] = entry.parameters;
+        final cell = entry.emit(
+          NewCell(CellType(.object, isLate: true, isFinal: true), initial),
+        );
+        final collect = FunctionTarget(library, 'collect', .voidType, []);
+        final call = entry.emit(DirectCall(collect, []));
+        entry.finish(
+          Invoke(
+            WriteCell(cell, replacement),
+            onReturn: Jump(success),
+            onThrow: Jump(failure),
+          ),
+        );
+        success.finish(Return(replacement));
+        failure.finish(
+          Return(readsOldValue ? failure.emit(ReadCell(cell)) : replacement),
+        );
+
+        final flow = analyze([entry, success, failure], .object);
+        expect(flow.acrossCalls[call], {replacement, if (readsOldValue) cell});
+      }
+    },
+  );
+
+  test('a Never result is not a runtime operand of Unreachable', () {
+    final entry = Block([.object]);
+    final fail = FunctionTarget(library, 'fail', .never, [.object]);
+    final call = entry.emit(DirectCall(fail, entry.parameters));
+    entry.finish(Unreachable(call));
+    final flow = analyze([entry], .never);
+    expect(flow.liveIn[entry], entry.parameters.toSet());
+    expect(flow.uses[entry], {entry.parameters.single: 1});
+    expect(flow.acrossCalls[call], isEmpty);
   });
 
   test(

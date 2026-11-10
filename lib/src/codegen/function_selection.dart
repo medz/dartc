@@ -71,6 +71,12 @@ final class FunctionSelection<R>(
       ),
     );
     for (final block in body.blocks) {
+      switch (body.ends[block]!) {
+        case Return() || Jump() || Branch():
+          break;
+        case final end:
+          throw UnsupportedError('Native terminator: ${end.runtimeType}');
+      }
       for (final instruction in body.instructions[block]!) {
         if (body.boxes[instruction] case final value?) {
           _call(instruction, heap.box(value.type), [value]);

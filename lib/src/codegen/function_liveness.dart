@@ -27,7 +27,19 @@ final class FunctionLiveness(
       liveIn[block] = {};
     }
 
+    Iterable<Value> edgeValues(Jump edge) sync* {
+      for (var value in liveIn[edge.target]!) {
+        if (positions[value] case (final owner, final index)
+            when owner == edge.target) {
+          value = edge.arguments[index];
+        }
+        if (value is TestedValue) value = value.test.operand;
+        if (value is! Constant && value is! UnwindValue) yield value;
+      }
+    }
+
     Set<Value> transfer(Block block, {bool record = false}) {
+      final end = body.ends[block]!;
       final live = <Value>{};
       final counts = record ? uses[block] = <Value, int>{} : null;
       void read(Value value) {
@@ -35,18 +47,11 @@ final class FunctionLiveness(
         if (counts != null && value is! NewCell) {
           counts.update(value, (n) => n + 1, ifAbsent: () => 1);
         }
-        if (value is! Constant) live.add(value);
+        if (value is! Constant && value is! UnwindValue) live.add(value);
       }
 
       for (final edge in body.successors(block)) {
-        for (var value in liveIn[edge.target]!) {
-          if (positions[value] case (final owner, final index)
-              when owner == edge.target) {
-            value = edge.arguments[index];
-          }
-          if (value is TestedValue) value = value.test.operand;
-          if (value is! Constant) live.add(value);
-        }
+        live.addAll(edgeValues(edge));
       }
       liveOut[block] = {...live};
       if (record) {
@@ -56,17 +61,22 @@ final class FunctionLiveness(
           }
         }
       }
-      switch (body.ends[block]!) {
+      switch (end) {
         case Return(value: final value?) when value.type != .voidType:
           read(value);
         case Branch(:final condition):
           read(condition);
-        case Jump() || Return():
+        case Throw(:final exception, :final stackTrace):
+          read(exception);
+          if (stackTrace != null) read(stackTrace);
+        case Jump() ||
+            Return() ||
+            Invoke() ||
+            Unreachable() ||
+            ExhaustivenessFailure():
           break;
         default:
-          throw UnsupportedError(
-            'Native terminator: ${body.ends[block].runtimeType}',
-          );
+          throw UnsupportedError('Native terminator: ${end.runtimeType}');
       }
       for (final instruction in body.instructions[block]!.reversed) {
         if (body.introduced.contains(instruction) &&
@@ -75,6 +85,11 @@ final class FunctionLiveness(
           continue;
         }
         live.remove(instruction is WriteCell ? instruction.cell : instruction);
+        if (end case Invoke(operation: WriteCell(:final cell), :final onThrow)
+            when end.operation == instruction &&
+                edgeValues(onThrow).contains(cell)) {
+          live.add(cell);
+        }
         if (record && calls.contains(instruction)) {
           acrossCalls[instruction] = {...live};
         }

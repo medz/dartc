@@ -57,4 +57,85 @@ void main() {
     expect(flow.acrossCalls, isEmpty);
     expect(flow.liveIn[entry], {entry.parameters.first});
   });
+
+  test(
+    'invoke arguments and outcomes convert at their own execution points',
+    () {
+      final target = FunctionTarget(uri, 'invoke', .object, [.integer]);
+      final callee = FunctionTarget(uri, 'callee', .integer, [.object]);
+      final handle = FunctionTarget(uri, 'handle', .object, [
+        .object,
+        .stackTrace,
+        .object,
+      ]);
+      final entry = Block(target.parameterTypes), success = Block([.object]);
+      final failure = Block([.object, .stackTrace, .object]);
+      final argument = entry.parameters.single;
+      final call = DirectCall(callee, [argument]);
+      final invoke = Invoke(
+        call,
+        onReturn: Jump(success, [call]),
+        onThrow: Jump(failure, [
+          UnwindValue.exception,
+          UnwindValue.stackTrace,
+          argument,
+        ]),
+      );
+      entry.finish(invoke);
+      success.finish(Return(success.parameters.single));
+      failure.finish(
+        Return(failure.emit(DirectCall(handle, failure.parameters))),
+      );
+      final body = FunctionRepresentation(
+        IrFunction(target, [entry, success, failure]),
+        layouts,
+      );
+      final selected = body.ends[entry] as Invoke;
+      final normalEdge = selected.onReturn!.target,
+          failedEdge = selected.onThrow.target;
+      final inputBox = body.instructions[entry]!.first;
+      final normalBox = body.instructions[normalEdge]!.single;
+      final failedBox = body.instructions[failedEdge]!.single;
+      final flow = FunctionLiveness(body, body.inputsOf, {
+        ...body.boxes.keys,
+        call,
+      });
+
+      expect(body.instructions[entry], [inputBox, call]);
+      expect(body.inputsOf(call), [inputBox]);
+      expect(body.successors(entry), [selected.onReturn, selected.onThrow]);
+      expect(selected.onReturn!.arguments, [call]);
+      expect(selected.onThrow.arguments, invoke.onThrow.arguments);
+      expect(flow.acrossCalls[call], {argument});
+      expect(flow.acrossCalls[normalBox], isEmpty);
+      expect(
+        flow.acrossCalls[failedBox],
+        failedEdge.parameters.take(2).toSet(),
+      );
+      expect(flow.liveIn[entry], {argument});
+      expect(entry.instructions, isEmpty);
+      expect(entry.end, same(invoke));
+      expect(call.inputs, [argument]);
+    },
+  );
+
+  test('boxing a thrown scalar keeps an existing trace alive', () {
+    final target = FunctionTarget(uri, 'rethrow', .voidType, [
+      .integer,
+      .stackTrace,
+    ]);
+    final entry = Block(target.parameterTypes);
+    entry.finish(
+      Throw(entry.parameters.first, stackTrace: entry.parameters.last),
+    );
+    final body = FunctionRepresentation(IrFunction(target, [entry]), layouts);
+    final box = body.boxes.keys.single;
+    final flow = FunctionLiveness(body, body.inputsOf, {box});
+    final end = body.ends[entry] as Throw;
+    expect(end.exception, same(box));
+    expect(end.stackTrace, same(entry.parameters.last));
+    expect(flow.acrossCalls[box], {entry.parameters.last});
+    expect(flow.liveIn[entry], entry.parameters.toSet());
+    expect(entry.instructions, isEmpty);
+  });
 }
