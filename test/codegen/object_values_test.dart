@@ -102,61 +102,6 @@ void main() {
       );
     });
 
-    test('${generator.target} rejects dynamic boxing at every transfer', () {
-      final callee = FunctionTarget(library, 'accept', .object, [.object]);
-      final targetBody = Block(callee.parameterTypes);
-      targetBody.finish(Return(targetBody.parameters.single));
-      final target = IrFunction(callee, [targetBody]);
-      for (final operation in [
-        'return',
-        'call',
-        'edge',
-        'view',
-        'initial',
-        'write',
-      ]) {
-        final declaration = FunctionTarget(library, operation, .object, [
-          .integer,
-        ]);
-        final body = Block(declaration.parameterTypes), join = Block([.object]);
-        final value = body.parameters.single;
-        final blocks = [body];
-        Value result = value;
-        switch (operation) {
-          case 'call':
-            result = body.emit(DirectCall(callee, [value]));
-          case 'edge':
-            body.finish(Jump(join, [value]));
-            blocks.add(join);
-            result = join.parameters.single;
-          case 'view':
-            result = body.emit(TypeView(value, .object));
-          case 'initial' || 'write':
-            final cell = body.emit(
-              NewCell(CellType(.object), operation == 'initial' ? value : null),
-            );
-            if (operation == 'write') body.emit(WriteCell(cell, value));
-            result = body.emit(ReadCell(cell));
-        }
-        blocks.last.finish(Return(result));
-        final program = IrProgram([], [
-          IrFunction(declaration, blocks),
-          target,
-        ]);
-        expect(
-          () => generator.generate(program, definitions: [declaration, callee]),
-          throwsA(
-            isA<UnsupportedError>().having(
-              (e) => e.message,
-              'reason',
-              contains('representation conversion'),
-            ),
-          ),
-          reason: operation,
-        );
-      }
-    });
-
     test(
       '${generator.target} requires storage and supports boxed generic fields',
       () {

@@ -17,9 +17,9 @@ abstract interface class CodeGenerator() {
   /// linking. Unsupported operations fail before an artifact is returned.
   /// Object constants require their class and inherited field definitions in
   /// [program]. Equal constants share storage within the generated module;
-  /// references cannot be exported as native pointers. Scalar constants and
+  /// references cannot be exported as native pointers. Integers, doubles and
   /// booleans can enter reference storage, and statically known scalar values
-  /// can be unboxed. Boxing runtime integers and doubles remains unsupported.
+  /// can be unboxed. Computed numeric boxes participate in heap collection.
   /// Type tests support null checks and results proved by static types;
   /// checks requiring runtime type metadata remain unsupported.
   /// Modules with references live across calls include read-only stack records

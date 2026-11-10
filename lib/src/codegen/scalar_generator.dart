@@ -42,19 +42,6 @@ base class ScalarCodeGenerator<R extends Object>(
       );
     }
     final heap = HeapPlan(program, selected);
-    final primitives = heap.isEmpty ? <FunctionTarget>{} : heap.primitives;
-    if (!heap.isEmpty) {
-      program = IrProgram(
-        program.classes,
-        [...program.functions, ...heap.functions],
-        globals: program.globals,
-        externals: [...program.externals, ...primitives.map(IrExternal.new)],
-      );
-      selected.addAll([...heap.functions.map((f) => f.target), ...primitives]);
-    }
-    final indices = {
-      for (final (i, declaration) in selected.indexed) declaration: i,
-    };
     final relocations = <Relocation>[];
     final nativeSymbols = <String, int>{};
     final nativeCalls = <(int, Fixup, int)>[];
@@ -62,7 +49,6 @@ base class ScalarCodeGenerator<R extends Object>(
     final layouts = ProgramLayout(program);
     final functions = <FunctionTarget, ScalarFunction<R>>{};
     for (final declaration in selected) {
-      if (primitives.contains(declaration)) continue;
       final function = program.implementationOf(declaration);
       final binding = imports[declaration];
       if (binding != null) {
@@ -81,7 +67,7 @@ base class ScalarCodeGenerator<R extends Object>(
           function,
           _createFunction(),
           layouts,
-          heap.constructors,
+          heap,
         );
       }
       final export = exports[declaration];
@@ -89,6 +75,37 @@ base class ScalarCodeGenerator<R extends Object>(
         throw ArgumentError('Native signature mismatch: ${declaration.name}');
       }
     }
+    heap.retain({
+      for (final function in functions.values)
+        for (final call in function.selection.calls.values) ?call.target,
+    });
+    final primitives = heap.isEmpty ? <FunctionTarget>{} : heap.primitives;
+    if (!heap.isEmpty) {
+      IrProgram(
+        [],
+        heap.functions,
+        externals: [
+          for (final target in [
+            heap.heap.map,
+            heap.heap.unmap,
+            heap.heap.invalid,
+          ])
+            IrExternal(target),
+        ],
+      );
+      selected.addAll([...heap.functions.map((f) => f.target), ...primitives]);
+      for (final function in heap.functions) {
+        functions[function.target] = ScalarFunction(
+          function,
+          _createFunction(),
+          layouts,
+          heap,
+        );
+      }
+    }
+    final indices = {
+      for (final (i, declaration) in selected.indexed) declaration: i,
+    };
     final hasRoots = !heap.isEmpty || functions.values.any((f) => f.hasRoots);
     bool needsEntry(NativeSignature signature) =>
         hasRoots || _needsEntry(signature);

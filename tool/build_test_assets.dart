@@ -21,6 +21,7 @@ import '../test/codegen/fixtures/object_values.dart';
 import '../test/codegen/fixtures/boxed_values.dart';
 import '../test/codegen/fixtures/stack_roots.dart';
 import '../test/codegen/fixtures/managed_heap.dart';
+import '../test/codegen/fixtures/dynamic_boxes.dart';
 import '../test/linker/fixtures/functions.dart';
 import '../test/linker/fixtures/calls.dart';
 import '../test/linker/fixtures/symbols.dart';
@@ -80,7 +81,11 @@ Future<void> main(List<String> args) async {
     ], output: const .executable());
     await managedEntry.write(assets.file('compiler/entry_managed'));
     if (target.operatingSystem == .linux) {
-      for (final name in ['managed_failure', 'managed_growth_failure']) {
+      for (final name in [
+        'managed_failure',
+        'managed_growth_failure',
+        'boxing_null_entry',
+      ]) {
         final failure = await Compiler(target).compile(
           ['test/compiler/fixtures/$name.dart'],
           output: const .executable(),
@@ -143,6 +148,7 @@ Future<void> main(List<String> args) async {
       'native_function_pointers',
       'native_imports',
       'managed_objects',
+      'numeric_boxes',
     ]) {
       final library = assets.library('compiler/$fixture');
       final result = await Compiler(target).compile(
@@ -231,6 +237,9 @@ Future<void> main(List<String> args) async {
       functions(target, {'object_touch': 123}),
     ], assets.library('codegen/object_values'));
     await shared([boxedValues(target)], assets.library('codegen/boxed_values'));
+    await shared([
+      dynamicBoxes(target),
+    ], assets.library('codegen/dynamic_boxes'));
     await shared(
       await objects('stack_roots_', [stackRoots(target), rootsProbe(target)]),
       assets.library('codegen/stack_roots'),

@@ -7,6 +7,8 @@ import 'package:dartc/ir.dart';
 import 'binary_encoding.dart';
 import 'function_emitter.dart';
 import 'function_liveness.dart';
+import 'function_representation.dart';
+import 'heap_plan.dart';
 import 'program_layout.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
@@ -14,8 +16,9 @@ final class FunctionSelection<R>(
   IrFunction function,
   final FunctionEmitter<R> emitter,
   final ProgramLayout layouts,
-  Map<Construct, FunctionTarget> constructors,
+  HeapPlan heap,
 ) {
+  final body = FunctionRepresentation(function, layouts);
   final binaries =
       <
         Instruction,
@@ -49,7 +52,7 @@ final class FunctionSelection<R>(
     if (binaries[instruction] case final binary?) {
       return [binary.left, binary.right];
     }
-    return instruction.inputs;
+    return body.inputsOf(instruction);
   }
 
   this {
@@ -67,8 +70,12 @@ final class FunctionSelection<R>(
         function.target.parameterTypes.map(layouts.callType),
       ),
     );
-    for (final block in function.blocks) {
-      for (final instruction in block.instructions) {
+    for (final block in body.blocks) {
+      for (final instruction in body.instructions[block]!) {
+        if (body.boxes[instruction] case final value?) {
+          _call(instruction, heap.box(value.type), [value]);
+          continue;
+        }
         switch (instruction) {
           case NewCell(
             type: final CellType type,
@@ -83,7 +90,7 @@ final class FunctionSelection<R>(
             layouts.representation(type.content);
             if (initial != null) {
               layouts.checkTransfer(
-                initial.type,
+                body.inputsOf(instruction).single.type,
                 type.content,
                 constant: initial is ScalarConstant,
               );
@@ -95,7 +102,7 @@ final class FunctionSelection<R>(
             }
             if (instruction case WriteCell(:final value)) {
               layouts.checkTransfer(
-                value.type,
+                body.inputsOf(instruction).last.type,
                 (cell.type as CellType).content,
                 constant: value is ScalarConstant,
               );
@@ -107,14 +114,9 @@ final class FunctionSelection<R>(
               arguments: arguments,
             );
           case final Construct operation:
-            final target = constructors[operation]!;
-            _call(instruction, target, operation.inputs);
-          case DirectCall(
-            :final target,
-            :final inputs,
-            :final type,
-            :final typeArguments,
-          ):
+            final target = heap.constructors[operation]!;
+            _call(instruction, target, body.inputsOf(operation).toList());
+          case DirectCall(:final target, :final type, :final typeArguments):
             if (typeArguments.isNotEmpty) {
               throw UnsupportedError(
                 'Native generic function calls are not implemented.',
@@ -123,7 +125,7 @@ final class FunctionSelection<R>(
             if (type != .voidType) {
               layouts.checkTransfer(target.returnType, type);
             }
-            _call(instruction, target, inputs);
+            _call(instruction, target, body.inputsOf(instruction).toList());
           case LoadField(:final field, :final type):
             if (field.isLate) {
               throw UnsupportedError('Native late field: ${field.name}');
@@ -138,7 +140,7 @@ final class FunctionSelection<R>(
             }
             layouts.fieldOffset(field);
             layouts.checkTransfer(
-              value.type,
+              body.inputsOf(instruction).last.type,
               field.type,
               constant: value is ScalarConstant,
             );
@@ -299,9 +301,12 @@ final class FunctionSelection<R>(
         }
       }
     }
-    liveness = FunctionLiveness(function, inputsOf, calls.keys.toSet());
-    for (final block in function.blocks) {
-      if (block.end case Return(value: final value?)
+    liveness = FunctionLiveness(body, inputsOf, calls.keys.toSet());
+    calls.removeWhere(
+      (instruction, _) => liveness.omitted.contains(instruction),
+    );
+    for (final block in body.blocks) {
+      if (body.ends[block] case Return(value: final value?)
           when function.target.returnType != .voidType) {
         layouts.checkTransfer(
           value.type,
@@ -309,7 +314,7 @@ final class FunctionSelection<R>(
           constant: value is ScalarConstant,
         );
       }
-      for (final edge in block.successors) {
+      for (final edge in body.successors(block)) {
         for (final i in liveness.liveParameters[edge.target]!) {
           final argument = edge.arguments[i];
           final stored = argument is TestedValue

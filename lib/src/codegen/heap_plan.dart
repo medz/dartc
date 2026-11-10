@@ -11,15 +11,30 @@ import 'heap_functions.dart';
 import 'function_emitter.dart';
 import 'program_layout.dart';
 
-/// Connects construction to allocation and initialization with precise roots.
+/// Generates allocation wrappers with precise roots and optional initialization.
 final class HeapPlan(IrProgram program, Set<FunctionTarget> selected) {
   final constructors = <Construct, FunctionTarget>{};
   final _factories =
-      <FunctionTarget, ({FunctionTarget initializer, ClassType type})>{};
-  late final HeapFunctions heap;
+      <FunctionTarget, ({FunctionTarget? initializer, ClassType type})>{};
+  final _boxes = <ValueType, FunctionTarget>{};
+  late final heap = HeapFunctions();
 
-  bool get isEmpty => constructors.isEmpty;
+  bool get isEmpty => _factories.isEmpty;
   List<IrFunction> get functions => heap.functions;
+
+  FunctionTarget box(ValueType type) => _boxes.putIfAbsent(type, () {
+    final target = FunctionTarget(
+      Uri.parse('dartc:heap'),
+      'box${_boxes.length}',
+      .object,
+      [type],
+    );
+    _factories[target] = (initializer: null, type: type as ClassType);
+    return target;
+  });
+
+  void retain(Set<FunctionTarget> calls) =>
+      _factories.removeWhere((target, _) => !calls.contains(target));
 
   Set<FunctionTarget> get primitives => {
     heap.map,
@@ -51,9 +66,11 @@ final class HeapPlan(IrProgram program, Set<FunctionTarget> selected) {
             function.parameterTypes.map(layouts.callType),
           ),
         );
-    final source = classify(target), destination = classify(initializer);
+    final source = classify(target),
+        destination = initializer == null ? null : classify(initializer);
     final parameterTypes = target.parameterTypes;
     for (final (i, type) in parameterTypes.indexed) {
+      if (initializer == null) break;
       if (layouts.representation(type) !=
           layouts.representation(initializer.parameterTypes[i + 1])) {
         throw UnsupportedError('Native constructor argument conversion: $type');
@@ -66,10 +83,10 @@ final class HeapPlan(IrProgram program, Set<FunctionTarget> selected) {
         .map((p) => (p as RegisterArgument<R>).register)
         .toList();
     final frame = emitter.convention.frameLayout(
-      localBytes: (parameterTypes.length + 1) * 8,
+      localBytes: (parameterTypes.length + (initializer == null ? 0 : 1)) * 8,
       localAlignment: 8,
       savedRegisters: [],
-      outgoingStackBytes: destination.stackBytes,
+      outgoingStackBytes: destination?.stackBytes ?? 0,
     );
     final objectOffset = frame.localOffset + parameterTypes.length * 8;
     R scratch(ValueType type) => emitter.allocatableRegisters.lastWhere(
@@ -117,11 +134,25 @@ final class HeapPlan(IrProgram program, Set<FunctionTarget> selected) {
     emitter.jumpIfZero(emitter.failureRegister, allocated);
     emitter.epilogue(frame);
     emitter.bind(allocated);
+    if (initializer == null) {
+      final value = scratch(type);
+      emitter.loadStack(value, frame.localOffset);
+      emitter.storeMemory(
+        value,
+        allocation.result!,
+        offset: ObjectLayout.alignment,
+        bytes: 8,
+      );
+      // The payload scratch may also carry the call failure flag.
+      emitter.loadImmediate(emitter.failureRegister, 0);
+      emitter.epilogue(frame);
+      return emitter.finish();
+    }
     emitter.storeStack(allocation.result!, objectOffset);
 
     int offsetOf(int i) =>
         i == 0 ? objectOffset : frame.localOffset + (i - 1) * 8;
-    for (final (i, location) in destination.parameters.indexed) {
+    for (final (i, location) in destination!.parameters.indexed) {
       if (location case StackArgument(:final offset)) {
         final register = scratch(initializer.parameterTypes[i]);
         emitter.loadStack(register, offsetOf(i));
@@ -177,9 +208,6 @@ final class HeapPlan(IrProgram program, Set<FunctionTarget> selected) {
           );
         }
       }
-    }
-    if (!isEmpty) {
-      heap = HeapFunctions();
     }
   }
 }

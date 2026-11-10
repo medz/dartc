@@ -12,15 +12,16 @@ import 'function_emitter.dart';
 import 'function_selection.dart';
 import 'native_adapter.dart';
 import 'program_layout.dart';
+import 'heap_plan.dart';
 
 /// Generates a control-flow graph with explicit edge transfers.
 final class ScalarFunction<R extends Object>(
   final IrFunction function,
   final FunctionEmitter<R> emitter,
   final ProgramLayout layouts,
-  Map<Construct, FunctionTarget> constructors,
+  HeapPlan heap,
 ) {
-  final selection = FunctionSelection(function, emitter, layouts, constructors);
+  final selection = FunctionSelection(function, emitter, layouts, heap);
 
   bool get hasRoots => selection.liveness.acrossCalls.values.any(
     (values) => values.any((v) => layouts.isReference(v.type)),
@@ -42,7 +43,7 @@ final class ScalarFunction<R extends Object>(
     );
     final adapter = NativeAdapter(emitter);
     final labels = {
-      for (final block in function.blocks) block: emitter.label(),
+      for (final block in selection.body.blocks) block: emitter.label(),
     };
     if (allocation.frame case final frame?) emitter.prologue(frame);
     allocation.initialize();
@@ -51,20 +52,26 @@ final class ScalarFunction<R extends Object>(
       emitter.jump(labels[jump.target]!);
     }
 
-    for (final block in function.blocks) {
+    for (final block in selection.body.blocks) {
       emitter.bind(labels[block]!);
       allocation.begin(block);
-      for (final instruction in block.instructions) {
+      for (final instruction in selection.body.instructions[block]!) {
+        if (selection.liveness.omitted.contains(instruction)) continue;
         if (selection.constantTests[instruction] case final value?) {
           final destination = allocation.allocate(.general);
           emitter.loadImmediate(destination, value ? 1 : 0);
           allocation.define(instruction, destination);
         } else if (instruction case NewCell(:final initial)) {
-          if (initial != null) allocation.writeCell(instruction, initial);
+          if (initial != null) {
+            allocation.writeCell(
+              instruction,
+              selection.body.inputsOf(instruction).single,
+            );
+          }
         } else if (instruction is ReadCell) {
           allocation.readCell(instruction);
-        } else if (instruction case WriteCell(:final cell, :final value)) {
-          allocation.writeCell(cell, value);
+        } else if (instruction case WriteCell(:final cell)) {
+          allocation.writeCell(cell, selection.body.inputsOf(instruction).last);
         } else if (selection.calls[instruction] case (
           :final layout,
           :final target,
@@ -171,11 +178,8 @@ final class ScalarFunction<R extends Object>(
               allocation.define(instruction, result);
             }
           }
-        } else if (instruction case StoreField(
-          :final receiver,
-          :final field,
-          :final value,
-        )) {
+        } else if (instruction case StoreField(:final receiver, :final field)) {
+          final value = selection.body.inputsOf(instruction).last;
           final base = allocation.read(receiver);
           final source = allocation.allocate(
             selection.bank(field.type),
@@ -377,7 +381,7 @@ final class ScalarFunction<R extends Object>(
           allocation.define(instruction, destination);
         }
       }
-      switch (block.end) {
+      switch (selection.body.ends[block]!) {
         case Return(:final value):
           if (selection.entry.result case final result?) {
             if (layouts.representation(value!.type) ==

@@ -30,15 +30,18 @@ final class FunctionAllocation<R extends Object>(
   late final FrameLayout<R>? frame;
 
   this {
-    for (final block in function.blocks) {
-      for (final value in [...block.parameters, ...block.instructions]) {
+    for (final block in selection.body.blocks) {
+      for (final value in [
+        ...block.parameters,
+        ...selection.body.instructions[block]!,
+      ]) {
         _owners[value] = block;
       }
     }
     final liveness = selection.liveness;
     final used = liveness.uses.values.expand((uses) => uses.keys).toSet();
     var edgeWords = 0;
-    for (final block in function.blocks) {
+    for (final block in selection.body.blocks) {
       for (final value in liveness.liveIn[block]!) {
         if (value is NewCell) continue;
         if (_owners[value] != block ||
@@ -46,7 +49,7 @@ final class FunctionAllocation<R extends Object>(
           _shared.add(value);
         }
       }
-      for (final edge in block.successors) {
+      for (final edge in selection.body.successors(block)) {
         final words = liveness.liveParameters[edge.target]!.length;
         if (words > edgeWords) edgeWords = words;
       }
@@ -199,7 +202,9 @@ final class FunctionAllocation<R extends Object>(
         if (value is Constant) {
           loadObject(value, destination);
         } else {
-          assert(value.type == .boolean);
+          if (value.type != .boolean) {
+            throw StateError('Allocating conversion was not selected.');
+          }
           final no = emitter.label(), done = emitter.label();
           load(value, destination, except: except);
           emitter.jumpIfZero(destination, no);

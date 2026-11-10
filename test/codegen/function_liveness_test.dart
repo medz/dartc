@@ -1,5 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/function_liveness.dart';
+import 'package:dartc/src/codegen/function_representation.dart';
+import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -11,7 +13,11 @@ void main() {
       result,
       blocks.first.parameters.map((p) => p.type),
     );
-    return FunctionLiveness(IrFunction(target, blocks), (i) => i.inputs, {
+    final body = FunctionRepresentation(
+      IrFunction(target, blocks),
+      ProgramLayout(IrProgram([], [])),
+    );
+    return FunctionLiveness(body, body.inputsOf, {
       for (final block in blocks)
         for (final operation in block.instructions)
           if (operation is DirectCall || operation is NativeCall) operation,
