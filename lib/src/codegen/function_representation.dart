@@ -137,6 +137,72 @@ final class FunctionRepresentation(
 
   List<Value> argumentsOf(Jump edge) => _arguments[edge] ?? edge.arguments;
 
+  Block _functionEquality(Equals operation, Block entry) {
+    final Equals(:left, :right, :negated) = operation;
+    Block fresh([List<ValueType> parameters = const []]) {
+      final block = Block(parameters);
+      blocks.add(block);
+      instructions[block] = [];
+      return block;
+    }
+
+    final join = fresh([.boolean]);
+    Jump result(bool equal) => Jump(join, [Constant.boolean(equal != negated)]);
+    Equals identity(Value a, Value b, Block block) {
+      final comparison = Equals(a, b);
+      identities.add(comparison);
+      instructions[block]!.add(comparison);
+      return comparison;
+    }
+
+    if (layouts.representation(right.type) != .reference) {
+      ends[entry] = result(false);
+      return join;
+    }
+    var current = fresh();
+    ends[entry] = Branch(
+      identity(left, right, entry),
+      result(true),
+      Jump(current),
+    );
+    if (layouts.closures.methods.isEmpty) {
+      ends[current] = result(false);
+      return join;
+    }
+    // Runtime signatures identify function values; carrier tags identify bodies.
+    for (final value in [left, right]) {
+      final body = instructions[current]!;
+      final type = _receiverType(value, body);
+      final kind = LoadField(TypeValues.kind, type);
+      final test = Equals(kind, Constant.integer(TypeKind.function.index));
+      body.addAll([kind, test]);
+      final next = fresh();
+      ends[current] = Branch(test, Jump(next), result(false));
+      current = next;
+    }
+    final body = instructions[current]!;
+    final leftTag = _load(layouts.closures.tag, left, body);
+    final rightTag = _load(layouts.closures.tag, right, body);
+    final same = Equals(leftTag, rightTag);
+    body.add(same);
+    final selected = fresh();
+    ends[current] = Branch(same, Jump(selected), result(false));
+    current = selected;
+    for (final shape in layouts.closures.methods.values) {
+      final match = Equals(leftTag, Constant.integer(shape.tag));
+      instructions[current]!.add(match);
+      final bound = fresh(), next = fresh();
+      ends[current] = Branch(match, Jump(bound), Jump(next));
+      final body = instructions[bound]!;
+      final a = _load(shape.captures.single, left, body);
+      final b = _load(shape.captures.single, right, body);
+      ends[bound] = Branch(identity(a, b, bound), result(true), result(false));
+      current = next;
+    }
+    ends[current] = result(false);
+    return join;
+  }
+
   Iterable<Jump> successors(Block block) => switch (ends[block]!) {
     final Jump jump => [jump],
     Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],
@@ -359,7 +425,22 @@ final class FunctionRepresentation(
           body.add(instruction);
           continue;
         }
+        if (instruction case Equals(:final left)
+            when left.type != .nullType &&
+                ValueType.function.nullable.accepts(left.type)) {
+          block = _functionEquality(instruction, block);
+          body = instructions[block]!;
+          body.add(instruction);
+          aliases.add(instruction);
+          _operands[instruction] = block.parameters;
+          continue;
+        }
         final invocation = switch (instruction) {
+          BindMethod(:final method, :final receiver) => (
+            method,
+            receiver,
+            const <ValueType>[],
+          ),
           FunctionCall(:final function, :final typeArguments) => (
             null,
             function,
@@ -388,7 +469,10 @@ final class FunctionRepresentation(
         if (invocation != null) {
           final (member, receiver, typeArguments) = invocation;
           final functionValue = instruction is FunctionCall;
-          final virtual = instruction is! DirectCall;
+          final binding = instruction is BindMethod;
+          final virtual =
+              instruction is! DirectCall &&
+              !(instruction is BindMethod && instruction.direct);
           final targets = functionValue
               ? {
                   for (final closure in layouts.closures.targetsFor(
@@ -443,7 +527,7 @@ final class FunctionRepresentation(
               instructions[missing] = [identity];
               ends[missing] = Jump(join!, [identity]);
             default:
-              final invalid = DirectCall(members.invalid, []);
+              final invalid = DirectCall(heap.heap.invalid, []);
               instructions[missing] = [invalid];
               ends[missing] = Unreachable(invalid);
           }
@@ -508,11 +592,12 @@ final class FunctionRepresentation(
             final environment = {
               for (final (i, parameter) in parameters.indexed)
                 parameter: classTypes[i],
-              for (final (i, parameter)
-                  in (closure?.signature.typeParameters ??
-                          target.typeParameters)
-                      .indexed)
-                parameter: types[i],
+              if (!binding)
+                for (final (i, parameter)
+                    in (closure?.signature.typeParameters ??
+                            target.typeParameters)
+                        .indexed)
+                  parameter: types[i],
             };
             Value reify(ValueType type) {
               if (type.freeTypeParameters.isEmpty) {
@@ -526,6 +611,46 @@ final class FunctionRepresentation(
               ]);
               append(call);
               return call;
+            }
+
+            if (instruction case BindMethod(
+              :final method,
+              :final direct,
+              :final ownerType,
+            )) {
+              final shape = layouts.closures.methods[target]!;
+              final actualType = reify(shape.signature);
+              final bound = BindMethod(
+                method,
+                receiver,
+                direct: direct,
+                ownerType: ownerType,
+              );
+              invocations[bound] = heap.constructorFor(
+                shape.initializer!,
+                layouts,
+              );
+              _operands[bound] = [
+                Constant.integer(shape.tag),
+                receiver,
+                ...classTypes,
+                actualType,
+              ];
+              append(bound);
+              final widened = TypeView(bound, .object);
+              append(widened);
+              final check = TypeCast(widened, instruction.type);
+              final checkTypes = <Instruction>[];
+              _operands[check] = [
+                widened,
+                for (final parameter
+                    in casts.targetFor(check, layouts).parameters)
+                  _reify(parameter, checkTypes),
+              ];
+              checkTypes.forEach(append);
+              append(check);
+              ends[current] = Jump(join!, [check]);
+              continue;
             }
 
             final invocationTypes = closure == null

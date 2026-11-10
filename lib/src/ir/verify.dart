@@ -8,6 +8,7 @@ typedef FunctionReferences = ({
   Set<FunctionTarget> closures,
   Set<FunctionTarget> callees,
   Set<FunctionTarget> virtualMembers,
+  Set<({FunctionTarget method, bool direct})> methodTearOffs,
   Set<({ValueType receiver, MemberSelector selector})> objectMembers,
   Set<ClassType> instantiatedClasses,
   Set<GlobalVariable> globals,
@@ -30,6 +31,7 @@ FunctionReferences verifyCallable(
   Set<FunctionTarget>? closures;
   Set<FunctionTarget>? callees;
   Set<FunctionTarget>? virtualMembers;
+  Set<({FunctionTarget method, bool direct})>? methodTearOffs;
   Set<({ValueType receiver, MemberSelector selector})>? objectMembers;
   Set<ClassType>? instantiatedClasses;
   Set<GlobalVariable>? globals;
@@ -55,6 +57,7 @@ FunctionReferences verifyCallable(
       closures: _snapshot(closures),
       callees: _snapshot(callees),
       virtualMembers: _snapshot(virtualMembers),
+      methodTearOffs: _snapshot(methodTearOffs),
       objectMembers: _snapshot(objectMembers),
       instantiatedClasses: _snapshot(instantiatedClasses),
       globals: _snapshot(globals),
@@ -302,6 +305,8 @@ FunctionReferences verifyCallable(
           break;
       }
       switch (op) {
+        case BindMethod(:final method, :final direct):
+          (methodTearOffs ??= {}).add((method: method, direct: direct));
         case Construct(:final instantiatedType):
           (instantiatedClasses ??= {}).add(instantiatedType.declaration);
         case LoadGlobal(:final global) || StoreGlobal(:final global):

@@ -11,11 +11,7 @@ import 'package:test/test.dart';
 void main() {
   final uri = Uri.parse('memory:representation');
   final layouts = ProgramLayout([]);
-  final members = MemberCalls(
-    IrProgram([], []),
-    {},
-    FunctionTarget(uri, 'invalid', .never, []),
-  );
+  final members = MemberCalls(IrProgram([], []), {});
 
   test(
     'selected scalar returns are boxed before joining the semantic result',
@@ -72,11 +68,7 @@ void main() {
         function,
         ProgramLayout(program.classes),
         CheckedCasts(),
-        MemberCalls(
-          program,
-          program.reachableFrom([function.target]),
-          members.invalid,
-        ),
+        MemberCalls(program, program.reachableFrom([function.target])),
         HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
       );
       final selected = body.invocations.keys.single;

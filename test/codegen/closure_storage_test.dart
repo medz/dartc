@@ -124,4 +124,54 @@ void main() {
       IrProgram(storage.classes, storage.functions);
     },
   );
+
+  test('bound methods capture the receiver and owner types once', () {
+    final t = TypeParameterType('T')
+      ..initializeBound(ValueType.object.nullable);
+    final u = TypeParameterType('U')
+      ..initializeBound(ValueType.object.nullable);
+    final owner = ClassType(uri, 'Owner', typeParameters: [t]);
+    final method = FunctionTarget(
+      uri,
+      'apply',
+      .integer,
+      [t],
+      kind: .method,
+      owner: owner,
+      typeParameters: [u],
+      covariantParameters: [0],
+    );
+    final storage = ClosureStorage([body(method)], boundMethods: [method]);
+    final shape = storage.methods[method]!;
+    expect(shape.target, same(method));
+    expect(shape.captures.single.type, ValueType.object);
+    expect(shape.parameters, [t]);
+    expect(shape.typeArguments, [u]);
+    expect(shape.signature, method.reifiedSignature);
+    expect(shape.initializer!.signature.parameters, [
+      ValueType.integer,
+      ValueType.object,
+      TypeValues.type,
+    ]);
+    IrProgram([...storage.classes, ...TypeValues().classes], storage.functions);
+
+    final receiver = Block([
+      owner.instantiate([.integer]),
+    ]);
+    final bound = receiver.emit(
+      BindMethod(method, receiver.parameters.single, direct: true),
+    );
+    receiver.finish(Return(bound));
+    final caller = IrFunction(
+      FunctionTarget(
+        uri,
+        'bound',
+        bound.type,
+        receiver.parameters.map((p) => p.type),
+      ),
+      [receiver],
+    );
+    expect(caller.methodTearOffs, {(method: method, direct: true)});
+    expect(() => caller.methodTearOffs.clear(), throwsUnsupportedError);
+  });
 }

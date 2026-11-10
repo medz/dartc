@@ -139,8 +139,10 @@ base class ScalarCodeGenerator<R extends Object>(
       }
       sourceDefinitions.addAll(discovered);
     }
+    final members = MemberCalls(program, selected);
     final closures = ClosureStorage(
       selected.map(program.implementationOf).whereType<IrCallable>(),
+      boundMethods: members.tearOffTargets,
     );
     final layouts = ProgramLayout(
       [
@@ -158,7 +160,6 @@ base class ScalarCodeGenerator<R extends Object>(
     );
     final persistent = !globals.isEmpty && globals.hasReferences(layouts);
     final heap = HeapPlan(program, selected, layouts, frames);
-    final members = MemberCalls(program, selected, heap.heap.invalid);
     final relocations = <Relocation>[];
     final nativeSymbols = <String, int>{};
     final nativeCalls = <(int, Fixup, int)>[];

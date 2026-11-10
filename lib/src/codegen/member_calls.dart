@@ -4,11 +4,21 @@ import 'package:dartc/ir.dart';
 final class MemberCalls(
   final IrProgram program,
   final Set<FunctionTarget> definitions,
-  final FunctionTarget invalid,
 ) {
   final _instances = {
     for (final target in definitions)
       ...?program.implementationOf(target)?.instantiatedClasses,
+  };
+
+  Set<FunctionTarget> get tearOffTargets => {
+    for (final target in definitions)
+      for (final tearOff
+          in program.implementationOf(target)?.methodTearOffs ??
+              const <({FunctionTarget method, bool direct})>{})
+        if (tearOff.direct)
+          tearOff.method
+        else
+          ...targetsFor(tearOff.method.owner!, tearOff.method.selector).values,
   };
 
   Map<ClassType, FunctionTarget> targetsFor(

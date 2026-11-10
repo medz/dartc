@@ -94,11 +94,7 @@ void main() {
         function,
         layouts,
         CheckedCasts(),
-        MemberCalls(
-          IrProgram([], []),
-          {},
-          FunctionTarget(uri, 'invalid', .never, []),
-        ),
+        MemberCalls(IrProgram([], []), {}),
         HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
       );
       var block = entry;

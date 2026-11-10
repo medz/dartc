@@ -24,6 +24,10 @@ sealed class IrCallable(
   /// Statically selected declarations whose implementation needs virtual lookup.
   Set<FunctionTarget> get virtualMembers => _references.virtualMembers;
 
+  /// Methods extracted as function values, retaining direct `super` selection.
+  Set<({FunctionTarget method, bool direct})> get methodTearOffs =>
+      _references.methodTearOffs;
+
   /// Implicit Object member calls, including their possible receiver types.
   Set<({ValueType receiver, MemberSelector selector})> get objectMembers =>
       _references.objectMembers;

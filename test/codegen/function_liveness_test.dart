@@ -21,11 +21,7 @@ void main() {
       IrFunction(target, blocks),
       ProgramLayout([]),
       CheckedCasts(),
-      MemberCalls(
-        IrProgram([], []),
-        {},
-        FunctionTarget(library, 'invalid', .never, []),
-      ),
+      MemberCalls(IrProgram([], []), {}),
       HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
     );
     return FunctionLiveness(body, body.inputsOf, {

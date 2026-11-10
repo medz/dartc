@@ -151,6 +151,7 @@ Future<void> main(List<String> args) async {
       'calls',
       'closures',
       'function_values',
+      'bound_methods',
       'control_flow',
       'nullability',
       'stack_calls',

@@ -3,12 +3,16 @@ import 'package:dartc/ir.dart';
 import 'type_values.dart';
 
 /// Assigns function-value storage, call entries and shared capture layouts.
-final class ClosureStorage(Iterable<IrCallable> selectedBodies) {
+final class ClosureStorage(
+  Iterable<IrCallable> selectedBodies, {
+  Iterable<FunctionTarget> boundMethods = const [],
+}) {
   static final _uri = Uri.parse('dartc:closures');
   final _base = ClassType(_uri, 'Closure');
   late final tag = InstanceField(_base, 'target', .integer);
   final closures = <FunctionTarget, ClosureShape>{};
   final constants = <Object, ClosureShape>{};
+  final methods = <FunctionTarget, ClosureShape>{};
   final _cells = <CellType, CellShape>{};
   final _classes = <IrClass>[];
   final _functions = <IrFunction>[];
@@ -57,7 +61,7 @@ final class ClosureStorage(Iterable<IrCallable> selectedBodies) {
       for (final body in bodies)
         for (final value in body.functionConstants) value.structuralKey: value,
     };
-    if (targets.isNotEmpty || values.isNotEmpty) {
+    if (targets.isNotEmpty || values.isNotEmpty || boundMethods.isNotEmpty) {
       _classes.add(IrClass(_base, [tag]));
     }
     for (final target in targets) {
@@ -130,6 +134,14 @@ final class ClosureStorage(Iterable<IrCallable> selectedBodies) {
       }
       constants[entry.key] = _include(target, signature, arguments, defaults);
     }
+    for (final target in boundMethods) {
+      methods[target] = _include(
+        target,
+        target.reifiedSignature,
+        target.typeParameters,
+        defaultsOf(target),
+      );
+    }
   }
 
   ClosureShape _include(
@@ -138,9 +150,11 @@ final class ClosureStorage(Iterable<IrCallable> selectedBodies) {
     List<ValueType> typeArguments,
     Map<int, Constant> defaults,
   ) {
-    final index = closures.length + constants.length;
+    final index = closures.length + constants.length + methods.length;
     final owner = ClassType(_uri, 'Closure$index', superclass: _base);
     final captures = [
+      if (target.kind.isVirtual)
+        InstanceField(owner, 'receiver', .object, isFinal: true),
       for (final (i, type) in target.captures.indexed)
         InstanceField(owner, 'capture$i', _stored(type), isFinal: true),
     ];
@@ -148,7 +162,9 @@ final class ClosureStorage(Iterable<IrCallable> selectedBodies) {
     for (var scope = target.enclosing; scope != null; scope = scope.enclosing) {
       enclosing.add(scope);
     }
-    final parameters = <TypeParameterType>{};
+    final parameters = <TypeParameterType>{
+      if (target.kind.isVirtual) ...target.owner!.typeParameters,
+    };
     for (final scope in enclosing.reversed) {
       if (scope.kind.hasReceiver || scope.kind == .factory) {
         parameters.addAll(scope.owner!.typeParameters);
@@ -160,7 +176,7 @@ final class ClosureStorage(Iterable<IrCallable> selectedBodies) {
         InstanceField(owner, 'type$i', TypeValues.type, isFinal: true),
     ];
     final fields = [...captures, ...environment];
-    final initializer = target.kind == .closure
+    final initializer = target.kind == .closure || target.kind.isVirtual
         ? _initialize(owner, [tag, ...fields])
         : null;
     final shape = ClosureShape(
@@ -184,6 +200,7 @@ final class ClosureStorage(Iterable<IrCallable> selectedBodies) {
 
   Iterable<ClosureShape> targetsFor(FunctionCall call) => closures.values
       .followedBy(constants.values)
+      .followedBy(methods.values)
       .where((shape) => _callableAt(call, shape.signature));
 
   bool _callableAt(FunctionCall call, FunctionType actual) {

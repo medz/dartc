@@ -29,7 +29,9 @@
 
 顶层函数、静态方法及构造器的常量提取支持类型化调用、默认参数、泛型签名和闭合类型实参。函数常量保持规范身份，可存入常量对象、默认参数或全局变量；调用及 `.call` 使用所选函数的实际参数与返回表示。构造器函数值保留泛型类参数、类型别名身份及工厂重定向；提取的声明身份与最终执行的构造器分开。普通类型别名与目标构造器共享身份，非等价的泛型别名保留自己的函数身份；运行时类型来自实际函数签名。函数值调用保留副作用、异常和 finally，引用参与普通 GC。见[函数值原生验证](../test/compiler/function_values_test.dart)。
 
-此范围不包含 `InstantiateFunction` 的运行时泛型函数值实例化、含自由词法类型参数的构造器提取、绑定实例/super 方法提取、dynamic/noSuchMethod 调用、捕获的 `late` 绑定与初始化体存储，也不包含 FFI 回调。一般局部 `late` 的原生绑定语义仍待实现；上表的 IR 支持不表示这些路径均可原生执行。
+绑定实例及 `super` 方法支持类型化函数调用。提取时选定实际实现并保存接收者、类类型实参和实际函数签名，`super` 保留直接选定的实现。提取签名不满足静态视图时立即抛出 TypeError，后续实参不求值；协变参数在调用时按实现类型检查。相等比较使用接收者身份和所选方法，不调用接收者的 `==`。默认参数、方法自身泛型、void 副作用、异常与 GC 见[绑定方法原生验证](../test/compiler/bound_methods_test.dart)。
+
+此范围不包含 `InstantiateFunction` 的运行时泛型函数值实例化、含自由词法类型参数的构造器提取、dynamic/noSuchMethod 调用、捕获的 `late` 绑定与初始化体存储，也不包含 FFI 回调。函数值经 Object/dynamic 视图的通用相等分派和 hashCode 尚未接通。一般局部 `late` 的原生绑定语义仍待实现；上表的 IR 支持不表示这些路径均可原生执行。
 
 ## 异步参考执行器范围
 
@@ -40,5 +42,7 @@
 ## 规范依据
 
 [构造器提取、类型别名与常量身份](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.15/constructor-tearoffs/feature-specification.md)。
+
+[函数值相等](https://api.dart.dev/dart-core/Function/operator_equals.html)。
 
 [主规范 §9、§17](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)、[类型推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/inference.md)、[水平推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.18/horizontal-inference/feature-specification.md)、[基于界限的推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/inference-using-bounds/design-document.md)、[私有命名形参](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.12/private-named-parameters/feature-specification.md)。
