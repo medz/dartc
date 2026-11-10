@@ -25,6 +25,7 @@ import 'checked_casts.dart';
 import 'member_calls.dart';
 import 'numeric_operations.dart';
 import 'global_storage.dart';
+import 'instance_storage.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -72,6 +73,7 @@ base class ScalarCodeGenerator<R extends Object>(
         ?.type;
     late NumericOperations arithmetic;
     late GlobalStorage globals;
+    late InstanceStorage instances;
     // Helpers can reach SDK bodies with further globals or numeric operations.
     // Close those dependencies before fixing the holder and its physical layout.
     while (true) {
@@ -87,8 +89,20 @@ base class ScalarCodeGenerator<R extends Object>(
         bodies,
         lateError: lateErrorType == null ? null : constructor(lateErrorType),
       );
-      if (arithmetic.functions.isEmpty && globals.isEmpty) break;
-      final helpers = [...arithmetic.functions, ...globals.functions];
+      instances = InstanceStorage(
+        bodies,
+        lateError: lateErrorType == null ? null : constructor(lateErrorType),
+      );
+      if (arithmetic.functions.isEmpty &&
+          globals.isEmpty &&
+          instances.functions.isEmpty) {
+        break;
+      }
+      final helpers = [
+        ...arithmetic.functions,
+        ...globals.functions,
+        ...instances.functions,
+      ];
       final expanded = IrProgram(
         [
           ...sourceProgram.classes,
@@ -126,6 +140,7 @@ base class ScalarCodeGenerator<R extends Object>(
     }
     final layouts = ProgramLayout(
       [...casts.classes, ...program.classes, traces.declaration],
+      instanceStorage: instances,
       referencedClasses: selected.expand(
         (target) =>
             program.implementationOf(target)?.referencedClasses ?? const [],
@@ -173,7 +188,11 @@ base class ScalarCodeGenerator<R extends Object>(
         throw ArgumentError('Native signature mismatch: ${declaration.name}');
       }
     }
-    final generated = [...arithmetic.functions, ...globals.functions];
+    final generated = [
+      ...arithmetic.functions,
+      ...globals.functions,
+      ...instances.functions,
+    ];
     Iterable<IrFunction> supportFunctions() => [
       ...arithmetic.functions,
       ...globals.functions,

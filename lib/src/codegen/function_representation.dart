@@ -467,6 +467,140 @@ final class FunctionRepresentation(
           continue;
         }
         if (instruction
+            case LoadField(field: final field, :final receiver) ||
+                StoreField(field: final field, :final receiver)
+            when field.isLate) {
+          final (valueField, boundField) = layouts.instances.slots(field);
+          final handler = switch (sourceBlock.end) {
+            Invoke(:final operation, :final onThrow)
+                when operation == instruction =>
+              onThrow,
+            _ => null,
+          };
+          Block fresh() {
+            final next = Block();
+            blocks.add(next);
+            instructions[next] = [];
+            return next;
+          }
+
+          void enter(Block next) {
+            block = next;
+            body = instructions[next]!;
+          }
+
+          void append(Instruction operation) {
+            body.add(operation);
+            if (handler != null && operation.mayThrow) {
+              final next = fresh();
+              ends[block] = Invoke(
+                operation,
+                onReturn: Jump(next),
+                onThrow: edge(handler),
+              );
+              enter(next);
+            }
+          }
+
+          void fail(Block failed, String message) {
+            final call = DirectCall(layouts.instances.failure!.target, [
+              Constant.string(message),
+            ]);
+            instructions[failed]!.add(call);
+            ends[failed] = handler == null
+                ? Unreachable(call)
+                : Invoke(call, onReturn: null, onThrow: edge(handler));
+          }
+
+          void requireUnbound(String message) {
+            final commit = fresh(), failed = fresh();
+            final flag = LoadField(boundField, receiver);
+            append(flag);
+            ends[block] = Branch(flag, Jump(failed), Jump(commit));
+            fail(failed, message);
+            enter(commit);
+          }
+
+          final join = Block(
+            instruction is LoadField ? [instruction.type] : [],
+          );
+          blocks.add(join);
+          if (instruction case StoreField(:final value)) {
+            final conversions = <Instruction>[];
+            var stored = convert(value, field.type, conversions);
+            conversions.forEach(append);
+            if (field.type.freeTypeParameters.isNotEmpty) {
+              final widened = TypeView(stored, .object.nullable);
+              append(widened);
+              final pending = <Instruction>[];
+              final arguments = _ownerArguments(
+                _receiverType(receiver, pending),
+                field.owner,
+                pending,
+              );
+              pending.forEach(append);
+              final check = TypeCast(widened, field.type);
+              final signature = casts.targetFor(check, layouts);
+              _operands[check] = [
+                widened,
+                for (final parameter in signature.parameters)
+                  arguments[field.owner.typeParameters.indexOf(parameter)],
+              ];
+              append(check);
+              stored = check;
+            }
+            if (field.isFinal) {
+              requireUnbound(
+                "Field '${field.name}' has already been initialized.",
+              );
+            }
+            final write = StoreField(valueField, receiver, value);
+            _operands[write] = [receiver, stored];
+            append(write);
+            append(
+              StoreField(boundField, receiver, const Constant.boolean(true)),
+            );
+            ends[block] = Jump(join);
+          } else {
+            final bound = fresh(), initialize = fresh();
+            final flag = LoadField(boundField, receiver);
+            append(flag);
+            ends[block] = Branch(flag, Jump(bound), Jump(initialize));
+            final read = LoadField(valueField, receiver);
+            instructions[bound]!.add(read);
+            ends[bound] = Jump(join, [read]);
+            enter(initialize);
+            if (field.initializer case final initializer?) {
+              final value = DirectCall(initializer, [
+                receiver,
+              ], ownerType: CoreTypes.view(receiver.type, field.owner));
+              append(value);
+              if (field.isFinal) {
+                requireUnbound(
+                  "Field '${field.name}' has been assigned during initialization.",
+                );
+              }
+              final write = StoreField(valueField, receiver, value);
+              final conversions = <Instruction>[];
+              final stored = convert(value, field.type, conversions);
+              conversions.forEach(append);
+              _operands[write] = [receiver, stored];
+              append(write);
+              append(
+                StoreField(boundField, receiver, const Constant.boolean(true)),
+              );
+              ends[block] = Jump(join, [value]);
+            } else {
+              fail(block, "Field '${field.name}' has not been initialized.");
+            }
+          }
+          block = join;
+          body = instructions[block] = [instruction];
+          aliases.add(instruction);
+          _operands[instruction] = join.parameters;
+          continue;
+        }
+        if (instruction
             case StoreField(:final field, :final receiver, :final value)
             when !field.isLate && field.type.freeTypeParameters.isNotEmpty) {
           final widened = TypeView(

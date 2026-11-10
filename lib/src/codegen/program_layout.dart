@@ -5,6 +5,7 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 
 import 'type_values.dart';
+import 'instance_storage.dart';
 import 'type_relations.dart';
 
 enum TypeTestKind() {
@@ -19,7 +20,9 @@ enum TypeTestKind() {
 final class ProgramLayout(
   Iterable<IrClass> classes, {
   Iterable<ClassType> referencedClasses = const [],
+  InstanceStorage? instanceStorage,
 }) {
+  final instances = instanceStorage ?? InstanceStorage([]);
   final types = TypeValues();
   late final TypeRelations relations;
   final _classes = {
@@ -128,7 +131,12 @@ final class ProgramLayout(
       [
         if (declaration.superclass case final parent?)
           ...storageOf(parent).fields,
-        ...definition.fields,
+        for (final field in definition.fields)
+          if (field.isLate) ...[
+            instances.slots(field).$1,
+            instances.slots(field).$2,
+          ] else
+            field,
       ],
       this,
       storesErrorTrace:
@@ -141,7 +149,8 @@ final class ProgramLayout(
   }
 
   int fieldOffset(InstanceField field) =>
-      storageOf(field.owner).offsetOf(field);
+      storageOf(field.owner)
+          .offsetOf(field.isLate ? instances.slots(field).$1 : field);
 }
 
 /// Declared field identities paired with their shared physical layout.

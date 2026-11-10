@@ -291,6 +291,9 @@ FunctionReferences verifyCallable(
           (callees ??= {}).add(callee);
         case LoadField(:final field) || StoreField(:final field):
           (fields ??= {}).add(field);
+          if (field.initializer case final initializer? when op is LoadField) {
+            (callees ??= {}).add(initializer);
+          }
         default:
           break;
       }

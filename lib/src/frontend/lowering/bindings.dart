@@ -52,6 +52,24 @@ final class Bindings({
     sdkClasses.add(element);
   }
 
+  /// Includes the actual SDK error used by failed late binding operations.
+  void requireLateError(
+    LibraryElement library,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    final core = library.typeProvider.objectElement.library;
+    final error = core.fragments
+        .expand((fragment) => fragment.importedLibraries)
+        .where((library) => library.uri == Uri.parse('dart:_internal'))
+        .firstOrNull
+        ?.getClass('LateError');
+    if (error == null || error.unnamedConstructor == null) {
+      unsupported(unit, site, 'SDK late initialization error unavailable');
+    }
+    requireSdkClass(error);
+  }
+
   final _typeEnvironments =
       <FunctionTarget, Map<TypeParameterType, ValueType>>{};
   final _extensions = <ExecutableElement, ExtensionExecutable>{};

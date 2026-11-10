@@ -20,17 +20,19 @@
 
 ## 原生局部存储
 
-非捕获、非 `late` 的 `int`、`bool`、`double` 和原生指针局部变量支持声明后赋值，包括分支合流、循环和跨调用保存；非 `late final` 的赋值义务仍由前端静态检查。见[原生行为对照](../test/compiler/control_flow_test.dart)。后端在使用局部栈存储前确认每条到达读取的路径都已写入；循环中新声明的存储不能继承上一次迭代的初始化状态。独立 IR 的不安全读取由[发码契约检查](../test/codegen/cells_test.dart)拒绝。
+非捕获、非逃逸、非 `late` 的局部存储支持已表示的标量、原生指针、对象引用及可空类型，包括声明后赋值、分支合流、循环和跨调用保存；非 `late final` 的赋值义务仍由前端静态检查。见[原生行为对照](../test/compiler/control_flow_test.dart)。后端在使用局部栈存储前确认每条到达读取的路径都已写入；循环中新声明的存储不能继承上一次迭代的初始化状态。独立 IR 的不安全读取由[发码契约检查](../test/codegen/cells_test.dart)拒绝。引用槽参与栈根扫描并在调用后重载；[栈根验证](../test/codegen/stack_roots_native_test.dart)覆盖对象引用和 null，[装箱验证](../test/codegen/boxed_values_native_test.dart)及[动态装箱验证](../test/codegen/dynamic_boxes_native_test.dart)覆盖 Object、int? 和 double? 存储的初始化与写入。
 
-顶层变量和类静态变量已支持标量、对象引用、可空类型和 num 的原生持久存储，包括 final、late 和 late final。模块存储跨 native 调用保留，泛型类共享声明槽位。先写跳过初始化，未绑定失败后重试，已经完成的写入不回滚；可变递归初始化以成功的外层结果为准，final 递归初始化在求值后检查绑定并保留内层值。未绑定 late 读取和重复 final 绑定通过 SDK 实际 dart:_internal LateError 类抛出普通 Error，RHS 与类型转换先于重复写检查。诊断字符串按固定 SDK 的 NI/AI/ADI 文本构造；动态错误格式化仍未接通。引用槽参与 GC，跨入口保留对象别名、循环引用和装箱数值；已绑定的 null 与未初始化状态分开。含引用全局槽的模块在同线程同步重入时共享堆并扫描暂停的外层栈帧，其他模块仍使用入口返回即释放的独立堆。持久堆由 dartc 链接的共享库在卸载时释放，独立程序在退出前显式释放，详见[库生命周期](libraries.md#模块清理与卸载)。见[标量验证](../test/compiler/scalar_globals_test.dart)、[托管全局验证](../test/compiler/managed_globals_test.dart)与[分配中的 native 重入](../test/codegen/managed_heap_native_test.dart)。实例 late、捕获 late、跨线程调用、并发调用和跨模块托管值 ABI 尚未支持。
+顶层变量和类静态变量已支持标量、对象引用、可空类型和 num 的原生持久存储，包括 final、late 和 late final。模块存储跨 native 调用保留，泛型类共享声明槽位。先写跳过初始化，未绑定失败后重试，已经完成的写入不回滚；可变递归初始化以成功的外层结果为准，final 递归初始化在求值后检查绑定并保留内层值。未绑定 late 读取和重复 final 绑定通过 SDK 实际 dart:_internal LateError 类抛出普通 Error，RHS 与类型转换先于重复写检查。诊断字符串按固定 SDK 的 NI/AI/ADI 文本构造；动态错误格式化仍未接通。引用槽参与 GC，跨入口保留对象别名、循环引用和装箱数值；已绑定的 null 与未初始化状态分开。含引用全局槽的模块在同线程同步重入时共享堆并扫描暂停的外层栈帧，其他模块仍使用入口返回即释放的独立堆。持久堆由 dartc 链接的共享库在卸载时释放，独立程序在退出前显式释放，详见[库生命周期](libraries.md#模块清理与卸载)。见[标量验证](../test/compiler/scalar_globals_test.dart)、[托管全局验证](../test/compiler/managed_globals_test.dart)与[分配中的 native 重入](../test/codegen/managed_heap_native_test.dart)。捕获 late、跨线程调用、并发调用和跨模块托管值 ABI 尚未支持。
 
-局部变量的捕获存储、存储别名、可空或托管值以及 `late` 初始化的原生执行仍待实现；已有 IR 支持不代表这些路径已能发码。
+实例 late/late final 已支持可表示的标量、对象引用、可空及泛型字段。物理存储为每个声明字段保留值槽和独立绑定位，区分未绑定与已绑定的 null；各实例独立，继承字段按原声明身份寻址。显式构造写入绑定字段，惰性初始化体接收实际对象及继承后的泛型环境。先写跳过初始化，失败后未绑定字段可重试，抛错前已完成的写入保留；可变递归初始化提交成功的外层结果，final 在初始化求值后检查绑定并保留内层值。赋值的 RHS、表示转换和实际泛型类型检查先于重复 final 绑定检查，失败不修改字段；未绑定读取和绑定冲突通过普通 SDK LateError 抛错。接收者、字段引用及初始化结果参与 GC 根与异常清理。见[实例 late 原生验证](../test/compiler/late_fields_test.dart)；泛型 late-final 的规范安全检查与 SDK 差异见下节。未表示类型不在此支持范围内。
+
+局部变量的捕获存储、存储别名以及 `late` 初始化的原生执行仍待实现；已有 IR 支持不代表这些路径已能发码。
 
 ## 已知 SDK 差异
 
-SDK 3.13.7（416e33b0ffaef062a60ec966bb8c82ed2b83f128）的 JIT 和 AOT 均允许 `Box<num> box = Box<int>()` 向 `late final T value` 写入 `1.5`；显式 `covariant` 则会抛出 TypeError。本 IR 按规范的 covariant-by-class 规则拒绝该写入，并保持失败后字段未绑定。这两条安全测试单独列出，不计为 SDK 一致结果。[固定版本前端源码](https://github.com/dart-lang/sdk/blob/3.13.7/pkg/front_end/lib/src/fragment/field/declaration.dart#L914-L934) 的 final 排除条件与相邻 TODO 支持存在遗漏的推断，但这不是上游已确认的问题。
+SDK 3.13.7（416e33b0ffaef062a60ec966bb8c82ed2b83f128）的 JIT 和 AOT 均允许 `Box<num> box = Box<int>()` 向 `late final T value` 写入 `1.5`；显式 `covariant` 则会抛出 TypeError。IR 与原生后端按规范的 covariant-by-class 规则拒绝该写入，并保持失败后字段未绑定。这两条安全测试单独列出，不计为 SDK 一致结果。[固定版本前端源码](https://github.com/dart-lang/sdk/blob/3.13.7/pkg/front_end/lib/src/fragment/field/declaration.dart#L914-L934) 的 final 排除条件与相邻 TODO 支持存在遗漏的推断，但这不是上游已确认的问题。
 
-最小复现：`class Box<T> { late final T value; } void main() { Box<num> box = Box<int>(); box.value = 1.5; print(box.value); }`。当前 SDK 两种模式输出 `1.5`；IR 在赋值时抛出 TypeError。见[独立安全测试](../test/frontend/lowering/late_fields_test.dart)。
+最小复现：`class Box<T> { late final T value; } void main() { Box<num> box = Box<int>(); box.value = 1.5; print(box.value); }`。当前 SDK 两种模式输出 `1.5`；IR 与原生后端在赋值时抛出 TypeError。见[独立安全测试](../test/frontend/lowering/late_fields_test.dart)与[原生安全测试](../test/compiler/late_fields_test.dart)。
 
 ## 规范依据
 

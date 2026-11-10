@@ -296,7 +296,8 @@ final class ScalarFunction<R extends Object>(
           allocation.releaseTemporary(source);
           allocation.release(value);
           allocation.release(receiver);
-        } else if (instruction case LoadField(:final receiver, :final field)) {
+        } else if (instruction case LoadField(:final receiver, :final field)
+            when !selection.body.aliases.contains(instruction)) {
           final source = allocation.read(receiver);
           allocation.release(receiver);
           final stored = allocation.allocate(

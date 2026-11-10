@@ -78,7 +78,12 @@ IrClass lowerClass(
     final slot = field.isAbstract || field.isExternal || interfaceOnly
         ? null
         : bindings.field(field, unit, declaration, owner: type);
-    if (slot != null) fields.add(slot);
+    if (slot != null) {
+      fields.add(slot);
+      if (slot.isLate && (slot.isFinal || slot.initializer == null)) {
+        bindings.requireLateError(element.library, unit, declaration);
+      }
+    }
     for (final accessor in [field.getter, field.setter].nonNulls) {
       final target = memberTarget(accessor, declaration);
       members.add(target);

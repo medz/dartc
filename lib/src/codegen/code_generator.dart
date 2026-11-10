@@ -72,6 +72,15 @@ abstract interface class CodeGenerator() {
   /// are reclaimed during allocation. Constructor arguments use their declared
   /// representations and runtime type arguments. Generic field writes check the
   /// actual receiver's field type before modifying storage; failure throws TypeError.
+  /// Instance late and late-final fields of represented types have independent
+  /// bound flags, including nullable and generic fields. Constructor writes bind;
+  /// lazy initializers receive the actual receiver and inherited type arguments.
+  /// Failed initialization preserves committed writes and permits unbound retries.
+  /// Recursive final initialization retains an inner binding; mutable fields
+  /// commit the successful outer result. Assignment values and actual generic type
+  /// checks precede final-binding checks. Receivers and stored references remain
+  /// traced through initialization, collection and exception cleanup.
+  /// Captured and late locals remain unsupported.
   /// Persistent heaps share roots during same-module, single-threaded synchronous
   /// native reentry, including suspended outer frames. Activation-local heaps
   /// remain independent and are released on return. Persistent modules emit

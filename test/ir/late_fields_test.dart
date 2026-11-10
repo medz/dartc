@@ -96,6 +96,57 @@ Object _error(void Function() action) {
 }
 
 void main() {
+  test('late reads reach initializer dependencies but writes skip them', () {
+    final owner = ClassType(_library, 'Lazy');
+    final initializer = _initializer(owner, .integer);
+    final dependency = _target('seed', .integer);
+    final field = InstanceField(
+      owner,
+      'value',
+      .integer,
+      isLate: true,
+      initializer: initializer,
+    );
+    final read = _body(_target('read', .integer, [owner]), (block) {
+      block.finish(
+        Return(block.emit(LoadField(field, block.parameters.single))),
+      );
+    });
+    final write = _body(_target('write', .voidType, [owner]), (block) {
+      block.emit(
+        StoreField(field, block.parameters.single, const Constant.integer(1)),
+      );
+      block.finish(const Return());
+    });
+    final declaration = IrClass(owner, [field]);
+    final functions = [
+      read,
+      write,
+      _body(
+        dependency,
+        (block) => block.finish(const Return(Constant.integer(7))),
+      ),
+    ];
+    expect(() => IrProgram([declaration], functions), throwsArgumentError);
+    final program = IrProgram(
+      [declaration],
+      [
+        ...functions,
+        _body(initializer, (block) {
+          block.finish(Return(block.emit(DirectCall(dependency, []))));
+        }),
+      ],
+    );
+    expect(read.callees, {initializer});
+    expect(write.callees, isEmpty);
+    expect(program.reachableFrom([read.target]), {
+      read.target,
+      initializer,
+      dependency,
+    });
+    expect(program.reachableFrom([write.target]), {write.target});
+  });
+
   group('late field declarations', () {
     test('preserve ordinary storage and use a receiver-only initializer', () {
       final owner = ClassType(_library, 'Box');
