@@ -36,5 +36,24 @@ final class NumericConversions() {
         'checkedNonnegative',
       );
 
+  late final floatingRounds = [
+    for (final name in ['roundDoubleToDouble', 'roundBoxedDouble'])
+      _library.lookupFunction<
+        Double Function(Double, Int64),
+        double Function(double, int)
+      >(name),
+  ];
+  late final integerRounds = [
+    for (final name in ['roundIntToDouble', 'roundBoxedInt'])
+      _library.lookupFunction<
+        Double Function(Int64, Int64),
+        double Function(int, int)
+      >(name),
+  ];
+  late final roundingEffects = _library
+      .lookupFunction<Int64 Function(Double, Int64), int Function(double, int)>(
+        'roundingEffects',
+      );
+
   void close() => _library.close();
 }

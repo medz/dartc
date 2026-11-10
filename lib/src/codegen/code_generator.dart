@@ -35,7 +35,9 @@ abstract interface class CodeGenerator() {
   /// the requested direction, clamping finite overflow to signed 64-bit bounds.
   /// Non-finite inputs require the supplied UnsupportedError constructor body
   /// and throw through normal exception edges. Boxed num operands retain their
-  /// actual integer or double representation.
+  /// actual integer or double representation. [NumericRoundToDouble] rounds to
+  /// integral doubles without saturation, preserving non-finite values and
+  /// negative zero. It does not require an exception constructor.
   /// Direct generic calls carry reified type arguments through the normal
   /// calling convention and root records. [ReifyType] reads or combines class and function
   /// type arguments into nullable, nominal, FutureOr, function and record types.

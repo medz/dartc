@@ -503,6 +503,7 @@ sealed class Instruction(super.type) extends Value {
     NumericBinary() ||
     NumericNegate() ||
     NumericToDouble() ||
+    NumericRoundToDouble() ||
     NumericToInt() ||
     NumericSquareRoot() ||
     TypeTest() ||
@@ -1536,7 +1537,7 @@ final class NumericToDouble(final Value operand) extends Instruction {
   Iterable<Value> get inputs => [operand];
 }
 
-/// The rounding direction of a numeric conversion to an integer.
+/// The rounding direction used to obtain an integral numeric value.
 enum IntegerRounding() {
   /// Discards the fractional part.
   truncate,
@@ -1558,6 +1559,24 @@ enum IntegerRounding() {
 final class NumericToInt(final Value operand, final IntegerRounding rounding)
     extends Instruction {
   this : super(.integer) {
+    if (!ValueType.number.accepts(operand.type)) {
+      throw ArgumentError('A non-nullable numeric operand is required.');
+    }
+  }
+
+  @override
+  Iterable<Value> get inputs => [operand];
+}
+
+/// Rounds a number to an integral double without clamping its range.
+///
+/// Non-finite and already integral doubles, including negative zero, are
+/// unchanged. A negative value rounded to zero produces negative zero.
+final class NumericRoundToDouble(
+  final Value operand,
+  final IntegerRounding rounding,
+) extends Instruction {
+  this : super(.floating) {
     if (!ValueType.number.accepts(operand.type)) {
       throw ArgumentError('A non-nullable numeric operand is required.');
     }

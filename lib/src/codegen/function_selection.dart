@@ -225,6 +225,7 @@ final class FunctionSelection<R>(
             }
           case NumericToDouble(:final operand) ||
               NumericToInt(:final operand) ||
+              NumericRoundToDouble(:final operand) ||
               NumericSquareRoot(:final operand):
             if (!_number(operand.type)) {
               throw UnsupportedError(

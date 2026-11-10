@@ -396,6 +396,7 @@ final class ScalarFunction<R extends Object>(
           allocation.define(instruction, destination);
         } else if (instruction
             case NumericToDouble(:final operand) ||
+                NumericRoundToDouble(:final operand) ||
                 NumericSquareRoot(:final operand)) {
           final source = allocation.read(operand);
           allocation.release(operand);

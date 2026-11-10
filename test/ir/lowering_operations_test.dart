@@ -60,9 +60,17 @@ void main() {
       expect(NumericToInt(d, rounding).mayThrow, isTrue);
       expect(NumericToInt(i, rounding).effects, isEmpty);
       expect(NumericToInt(d, rounding).inputs, [d]);
+      final rounded = NumericRoundToDouble(number, rounding);
+      expect(rounded.type, ValueType.floating);
+      expect(rounded.effects, isEmpty);
+      expect(rounded.inputs, [number]);
     }
     expect(
       () => NumericToInt(const Constant.nullValue(), .truncate),
+      throwsArgumentError,
+    );
+    expect(
+      () => NumericRoundToDouble(const Constant.nullValue(), .round),
       throwsArgumentError,
     );
     expect(NumericSquareRoot(number).type, ValueType.floating);

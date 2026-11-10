@@ -23,6 +23,14 @@ int convertInteger(num value, int mode) => switch (mode) {
   3 => value.ceil(),
   _ => value.round(),
 };
+double roundNumber(num value, int mode) => switch (mode) {
+  0 => value.truncateToDouble(),
+  1 => value.floorToDouble(),
+  2 => value.ceilToDouble(),
+  _ => value.roundToDouble(),
+};
+double userRounding() => const UserNumber().roundToDouble();
+double extensionRounding() => UserConversion(3).roundToDouble();
 int userIntegerConversion() => const UserNumber().toInt();
 int extensionIntegerConversion() => UserConversion(3).toInt();
 double userConversion() => const UserNumber().toDouble();
@@ -31,12 +39,14 @@ double extensionConversion() => UserConversion(3).toDouble();
 class const UserNumber() {
   int toInt() => 12;
   double toDouble() => 7.5;
+  double roundToDouble() => 17.0;
   int remainder(int value) => value + 5;
 }
 
 extension UserConversion on int {
   int toInt() => 13;
   double toDouble() => 8.5;
+  double roundToDouble() => 18.0;
   int remainder(int value) => value + 6;
 }
 

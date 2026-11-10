@@ -46,6 +46,41 @@ void main() {
       },
     );
 
+    test(
+      '${generator.target} rounds to double without an error dependency',
+      () {
+        for (final type in [
+          ValueType.integer,
+          ValueType.floating,
+          ValueType.number,
+        ]) {
+          for (final rounding in IntegerRounding.values) {
+            final target = FunctionTarget(
+              Uri.parse('memory:rounding'),
+              'round',
+              .floating,
+              [type],
+            );
+            final entry = Block(target.parameterTypes);
+            entry.finish(
+              Return(
+                entry.emit(
+                  NumericRoundToDouble(entry.parameters.single, rounding),
+                ),
+              ),
+            );
+            final program = IrProgram([], [
+              IrFunction(target, [entry]),
+            ]);
+            expect(
+              generator.generate(program, definitions: [target]).sections,
+              isNotEmpty,
+            );
+          }
+        }
+      },
+    );
+
     test('${generator.target} requires shift error constructor bodies', () {
       final target = FunctionTarget(
         Uri.parse('memory:shift'),

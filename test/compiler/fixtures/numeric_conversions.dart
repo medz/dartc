@@ -89,3 +89,39 @@ class _State() {
     return value;
   }
 }
+
+@Export<Double Function(Double, Int64)>()
+double roundDoubleToDouble(double value, int mode) => switch (mode) {
+  0 => value.truncateToDouble(),
+  1 => value.floorToDouble(),
+  2 => value.ceilToDouble(),
+  _ => value.roundToDouble(),
+};
+
+@Export<Double Function(Int64, Int64)>()
+double roundIntToDouble(int value, int mode) => switch (mode) {
+  0 => value.truncateToDouble(),
+  1 => value.floorToDouble(),
+  2 => value.ceilToDouble(),
+  _ => value.roundToDouble(),
+};
+
+double _rounded(num value, int mode) => switch (mode) {
+  0 => value.truncateToDouble(),
+  1 => value.floorToDouble(),
+  2 => value.ceilToDouble(),
+  _ => value.roundToDouble(),
+};
+
+@Export<Double Function(Double, Int64)>()
+double roundBoxedDouble(double value, int mode) => _rounded(value, mode);
+
+@Export<Double Function(Int64, Int64)>()
+double roundBoxedInt(int value, int mode) => _rounded(value, mode);
+
+@Export<Int64 Function(Double, Int64)>()
+int roundingEffects(double value, int mode) {
+  final state = _State();
+  _rounded(state.next(value), mode);
+  return state.log * 10 + 2;
+}

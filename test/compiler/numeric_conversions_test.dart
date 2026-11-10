@@ -18,6 +18,95 @@ void main() {
   double fromBits(int value) =>
       (ByteData(8)..setUint64(0, value)).getFloat64(0);
 
+  test(
+    'integral doubles preserve range, negative zero and non-finite values',
+    () {
+      int bits(double value) =>
+          (ByteData(8)..setFloat64(0, value)).getUint64(0);
+      final cases = <(double, List<double>)>[
+        (0.0, List.filled(4, 0.0)),
+        (-0.0, List.filled(4, -0.0)),
+        (double.minPositive, [0.0, 0.0, 1.0, 0.0]),
+        (-double.minPositive, [-0.0, -1.0, -0.0, -0.0]),
+        (fromBits(0x3fdfffffffffffff), [0.0, 0.0, 1.0, 0.0]),
+        (-fromBits(0x3fdfffffffffffff), [-0.0, -1.0, -0.0, -0.0]),
+        (0.5, [0.0, 0.0, 1.0, 1.0]),
+        (-0.5, [-0.0, -1.0, -0.0, -1.0]),
+        (1.5, [1.0, 1.0, 2.0, 2.0]),
+        (-1.5, [-1.0, -2.0, -1.0, -2.0]),
+        (
+          4503599627370495.5,
+          [
+            4503599627370495.0,
+            4503599627370495.0,
+            4503599627370496.0,
+            4503599627370496.0,
+          ],
+        ),
+        (
+          -4503599627370495.5,
+          [
+            -4503599627370495.0,
+            -4503599627370496.0,
+            -4503599627370495.0,
+            -4503599627370496.0,
+          ],
+        ),
+        for (final value in [
+          4503599627370496.0,
+          -4503599627370496.0,
+          9223372036854775808.0,
+          -9223372036854775808.0,
+          double.maxFinite,
+          -double.maxFinite,
+          double.infinity,
+          double.negativeInfinity,
+        ])
+          (value, List.filled(4, value)),
+      ];
+      for (final (value, results) in cases) {
+        for (var mode = 0; mode < 4; mode++) {
+          expect(
+            bits(sdk.roundDoubleToDouble(value, mode)),
+            bits(results[mode]),
+          );
+          for (final round in native.floatingRounds) {
+            expect(
+              bits(round(value, mode)),
+              bits(results[mode]),
+              reason: '$value / mode $mode',
+            );
+          }
+          expect(native.roundingEffects(value, mode), 12);
+        }
+      }
+      for (final value in [
+        fromBits(0x7ff8000000000042),
+        fromBits(0xfff8000000000042),
+      ]) {
+        for (var mode = 0; mode < 4; mode++) {
+          for (final round in native.floatingRounds) {
+            expect(bits(round(value, mode)), bits(value));
+          }
+          expect(native.roundingEffects(value, mode), 12);
+        }
+      }
+      for (final value in [
+        -0x8000000000000000,
+        -9007199254740993,
+        0,
+        9007199254740993,
+        0x7fffffffffffffff,
+      ]) {
+        for (var mode = 0; mode < 4; mode++) {
+          for (final round in native.integerRounds) {
+            expect(round(value, mode), value.toDouble());
+          }
+        }
+      }
+    },
+  );
+
   test('rounding directions, halfway neighbors and saturation match SDK', () {
     final cases = <(double, List<int>)>[
       (0.0, [0, 0, 0, 0]),

@@ -2188,6 +2188,14 @@ final class IrInterpreter(
           values[op] = -(read(operand) as num);
         case NumericToDouble(:final operand):
           values[op] = (read(operand) as num).toDouble();
+        case NumericRoundToDouble(:final operand, :final rounding):
+          final number = read(operand) as num;
+          values[op] = switch (rounding) {
+            .truncate => number.truncateToDouble(),
+            .floor => number.floorToDouble(),
+            .ceil => number.ceilToDouble(),
+            .round => number.roundToDouble(),
+          };
         case NumericToInt(:final operand, :final rounding):
           final number = read(operand) as num;
           values[op] = switch (rounding) {

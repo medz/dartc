@@ -12,10 +12,10 @@ Instruction? lowerCoreMember(
 ) {
   if (!member.library.isDartCore || member.isStatic) return null;
   final rounding = switch (member.name) {
-    'toInt' || 'truncate' => IntegerRounding.truncate,
-    'floor' => IntegerRounding.floor,
-    'ceil' => IntegerRounding.ceil,
-    'round' => IntegerRounding.round,
+    'toInt' || 'truncate' || 'truncateToDouble' => IntegerRounding.truncate,
+    'floor' || 'floorToDouble' => IntegerRounding.floor,
+    'ceil' || 'ceilToDouble' => IntegerRounding.ceil,
+    'round' || 'roundToDouble' => IntegerRounding.round,
     _ => null,
   };
   if (rounding != null &&
@@ -25,6 +25,9 @@ Instruction? lowerCoreMember(
             member.baseElement ==
             member.library.getClass(name)?.getMethod(member.name!),
       )) {
+    if (member.name!.endsWith('ToDouble')) {
+      return NumericRoundToDouble(receiver, rounding);
+    }
     if (receiver.type != .integer) {
       bindings.requireSdkClass(member.library.getClass('UnsupportedError')!);
     }

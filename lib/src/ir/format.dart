@@ -160,6 +160,8 @@ void writeFunction(
     NumericNegate() => 'negate ${value(op.operand)}',
     NumericToDouble() => 'toDouble ${value(op.operand)}',
     NumericToInt() => '${op.rounding.name} ${value(op.operand)}',
+    NumericRoundToDouble() =>
+      '${op.rounding.name}ToDouble ${value(op.operand)}',
     NumericSquareRoot() => 'sqrt ${value(op.operand)}',
     IntBinary() => '${op.operator.name} ${value(op.left)}, ${value(op.right)}',
     DirectCall() =>
