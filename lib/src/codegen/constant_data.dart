@@ -65,6 +65,8 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     final offset = _words.length * 8;
     final symbol = _reserve('constant', layout.size ~/ 8);
     _constants[key] = symbol;
+    _words[(offset + ObjectLayout.identityHashOffset) ~/ 8] =
+        ((symbol + 1) * 0x9e3779b9) & 0x3fffffff;
     relocations.add(
       .address(
         1,

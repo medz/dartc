@@ -165,6 +165,13 @@ final class FunctionSelection<R>(
             break;
           case ObjectRuntimeType():
             if (_generalTemporaries < 1) _generalTemporaries = 1;
+          case ObjectHashCode(:final operand, direct: true):
+            if (layouts.representation(operand.type) != .reference) {
+              throw UnsupportedError(
+                'Native identity hash requires a managed reference.',
+              );
+            }
+            if (_generalTemporaries < 1) _generalTemporaries = 1;
           case LoadField(:final field, :final type) ||
               StorageRead(:final field, :final type):
             _storage(field, body.inputsOf(instruction).first);

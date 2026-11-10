@@ -2,6 +2,7 @@ import 'dart:ffi';
 
 import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
+import 'package:dartc/layout.dart';
 
 import 'frame_lookup.dart';
 
@@ -19,8 +20,9 @@ final class HeapFunctions(final FrameLookup frames) {
       copied = 32,
       maps = 40,
       globalRoots = 48,
-      active = 56;
-  static const contextBytes = 64;
+      active = 56,
+      identityHash = 64;
+  static const contextBytes = 72;
   static const previousEntry = 0, suspendedSp = 8, suspendedPc = 16;
   static const entryBytes = 24;
 
@@ -399,6 +401,15 @@ final class HeapFunctions(final FrameLookup frames) {
     _store(zero, _op(zero, .add, address, offset), _int(0));
     zero.finish(Jump(fill, [_op(zero, .add, offset, _int(8))]));
     _store(done, address, descriptor);
+    // An odd step visits every 30-bit hash without depending on object addresses.
+    final hash = _op(
+      done,
+      .bitAnd,
+      _op(done, .add, _load(done, context, identityHash), _int(0x9e3779b9)),
+      _int(0x3fffffff),
+    );
+    _store(done, context, hash, identityHash);
+    _store(done, address, hash, ObjectLayout.identityHashOffset);
     done.finish(Return(address));
     failed.finish(Return(_int(0)));
     return IrFunction(allocate, [

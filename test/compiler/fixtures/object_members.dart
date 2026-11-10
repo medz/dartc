@@ -50,6 +50,40 @@ class FakeType(final Trace trace, final int count) implements Type {
 
 class IdentityType() implements Type;
 
+class const IdentityBox(final int value) {
+  int identity() => super.hashCode;
+
+  @override
+  int get hashCode => throw value;
+
+  @override
+  bool operator ==(Object other) => throw value;
+}
+
+IdentityBox? retained;
+int retainedHash = 0;
+
+int stableHash(int count) {
+  final box = IdentityBox(17), constant = const IdentityBox(42);
+  final before = box.identity(), constantHash = constant.identity();
+  churn(count);
+  return (before == box.identity() ? 1 : 0) +
+      (constantHash == constant.identity() ? 2 : 0) +
+      (constantHash == const IdentityBox(42).identity() ? 4 : 0);
+}
+
+int keepHash(int count) {
+  retained = IdentityBox(count);
+  retainedHash = retained!.identity();
+  churn(count);
+  return retainedHash == retained!.identity() ? 1 : 0;
+}
+
+int readHash(int count) {
+  churn(count);
+  return retainedHash == retained!.identity() ? 1 : 0;
+}
+
 Type readType(Object? value) => value.runtimeType;
 Type genericType<T>(T value) => value.runtimeType;
 Type? optionalType(Object? value) => value?.runtimeType;
@@ -154,5 +188,8 @@ int objectMembers(int mode, int count) => switch (mode) {
   1 => getters(count),
   2 => customEquality(count),
   3 => identity(count),
-  _ => throwing(count),
+  4 => throwing(count),
+  5 => stableHash(count),
+  6 => keepHash(count),
+  _ => readHash(count),
 };

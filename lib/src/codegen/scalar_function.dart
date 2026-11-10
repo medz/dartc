@@ -98,23 +98,31 @@ final class ScalarFunction<R extends Object>(
           final destination = allocation.allocate(.general);
           emitter.loadImmediate(destination, value ? 1 : 0);
           allocation.define(instruction, destination);
-        } else if (instruction case ObjectRuntimeType(:final operand)
+        } else if (instruction
+            case ObjectRuntimeType(:final operand) ||
+                ObjectHashCode(:final operand, direct: true)
             when !selection.calls.containsKey(instruction) &&
                 !selection.body.aliases.contains(instruction) &&
-                operand.type != .nullType &&
+                (instruction is ObjectHashCode || operand.type != .nullType) &&
                 layouts.representation(operand.type) == .reference) {
           final value = allocation.read(operand);
           final result = allocation.allocate(.general, except: [value]);
           final done = emitter.label();
-          emitter.address(
-            result,
-            (fixup) => constant(fixup, layouts.types.constant(.nullType)),
-          );
+          if (instruction is ObjectRuntimeType) {
+            emitter.address(
+              result,
+              (fixup) => constant(fixup, layouts.types.constant(.nullType)),
+            );
+          } else {
+            emitter.loadImmediate(result, 0);
+          }
           emitter.jumpIfZero(value, done);
           emitter.loadMemory(
             result,
             value,
-            offset: ObjectLayout.typeOffset,
+            offset: instruction is ObjectRuntimeType
+                ? ObjectLayout.typeOffset
+                : ObjectLayout.identityHashOffset,
             bytes: 8,
             signed: false,
           );

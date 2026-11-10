@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/layout.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
@@ -65,11 +66,17 @@ void main() {
         final address = references.single;
         addresses.add(address);
         final object = module.symbols[address];
-        expect(data.getInt64(object.offset + 16, .little), texts[i].length);
+        expect(
+          data.getInt64(object.offset + ObjectLayout.fieldsOffset, .little),
+          texts[i].length,
+        );
         final units =
             module.symbols[module.relocations
                 .whereType<AddressRelocation>()
-                .singleWhere((r) => r.offset == object.offset + 24)
+                .singleWhere(
+                  (r) =>
+                      r.offset == object.offset + ObjectLayout.fieldsOffset + 8,
+                )
                 .symbol];
         expect([
           for (var j = 0; j < texts[i].length; j++)
@@ -80,7 +87,7 @@ void main() {
                 .whereType<AddressRelocation>()
                 .singleWhere((r) => r.offset == object.offset)
                 .symbol];
-        expect(data.getInt64(descriptor.offset, .little), 32);
+        expect(data.getInt64(descriptor.offset, .little), 40);
         expect(data.getInt64(descriptor.offset + 8, .little), 1);
         expect(data.getInt64(descriptor.offset + 16, .little), 8);
       }
@@ -184,22 +191,33 @@ void main() {
               .symbol,
         );
         final descriptor = module.symbols[reference.symbol];
-        expect(words.getInt64(descriptor.offset, .little), i < 4 ? 32 : 24);
+        expect(words.getInt64(descriptor.offset, .little), i < 4 ? 40 : 32);
         expect(words.getInt64(descriptor.offset + 8, .little), i < 4 ? 1 : 2);
         expect(words.getInt64(descriptor.offset + 16, .little), 8);
         if (i < 4) {
-          expect(words.getInt64(object.offset + 16, .little), 7);
-          final floating = words.getFloat64(object.offset + 24, .little);
+          expect(
+            words.getInt64(object.offset + ObjectLayout.fieldsOffset, .little),
+            7,
+          );
+          final floating = words.getFloat64(
+            object.offset + ObjectLayout.fieldsOffset + 8,
+            .little,
+          );
           expect(
             1 / floating,
             i == 2 ? double.infinity : double.negativeInfinity,
           );
         } else {
-          expect(words.getInt64(descriptor.offset + 24, .little), 16);
+          expect(
+            words.getInt64(descriptor.offset + 24, .little),
+            ObjectLayout.fieldsOffset,
+          );
           expect(
             module.relocations
                 .whereType<AddressRelocation>()
-                .singleWhere((r) => r.offset == object.offset + 16)
+                .singleWhere(
+                  (r) => r.offset == object.offset + ObjectLayout.fieldsOffset,
+                )
                 .symbol,
             addresses.first,
           );

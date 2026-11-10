@@ -15,8 +15,9 @@ enum ValueRepresentation() {
 
 /// An object header followed by its fields, including inherited storage.
 ///
-/// The header contains a storage descriptor and a traced runtime type. Fields
-/// keep their declaration's representation across generic instantiations.
+/// The header contains a storage descriptor, a traced runtime type and a stable
+/// identity hash. Fields keep their declaration's representation across generic
+/// instantiations.
 final class ObjectLayout(Iterable<ValueRepresentation> fields) {
   /// Immutable representations in physical field order.
   final List<ValueRepresentation> fields = .unmodifiable(fields);
@@ -30,8 +31,11 @@ final class ObjectLayout(Iterable<ValueRepresentation> fields) {
   /// The byte offset of the managed runtime type reference.
   static const int typeOffset = alignment;
 
+  /// The byte offset of the identity hash retained when the object moves.
+  static const int identityHashOffset = 2 * alignment;
+
   /// The byte offset of the first instance field or boxed scalar payload.
-  static const int fieldsOffset = 2 * alignment;
+  static const int fieldsOffset = 3 * alignment;
 
   /// The total storage size, including the header of an empty object.
   int get size => fieldsOffset + fields.length * alignment;
@@ -42,7 +46,7 @@ final class ObjectLayout(Iterable<ValueRepresentation> fields) {
     return fieldsOffset + field * alignment;
   }
 
-  /// The runtime type and fields traced by the collector, excluding the descriptor.
+  /// The runtime type and fields traced by the collector, excluding other headers.
   Iterable<int> get referenceOffsets sync* {
     yield typeOffset;
     for (final (i, representation) in fields.indexed) {

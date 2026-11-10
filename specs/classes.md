@@ -33,6 +33,8 @@
 
 单个生成模块中的同类型、同字段值常量共用存储；负零与正零、不同 NaN 位模式及不同具体类型保持各自身份。double 身份保留二进制表示，见 [identical 契约](https://api.dart.dev/dart-core/identical.html)与[常量身份验证](../test/ir/constants_test.dart)。
 
+`super.hashCode` 选择 Object 默认实现时，原生对象返回稳定的身份哈希，不调用自身的重写 getter。常量重复引用、移动回收及同模块跨入口保留的对象保持该值，见[原生行为验证](../test/compiler/object_members_test.dart)与[身份哈希契约](https://api.dart.dev/dart-core/identityHashCode.html)。一般虚 `hashCode` 派发、函数值和内建 Type 的原生哈希仍未接通。
+
 泛型字段按声明类型确定存储，类型参数字段保存引用。int、double 及 bool 值可以装箱进入参数、返回值、分支和局部存储；计算所得的数值也可以写入非泛型引用字段，其装箱对象参与回收。泛型字段、成员调用及静态类型界限已确定的标量可以拆箱。泛型调用按声明的表示传值，具体化后的结果再转换；具体化为 void 的结果可以丢弃。构造调用支持参数表示转换和运行时类类型实参，在分配、初始化和嵌套回收期间保留实参。类环境按实际接收者的继承关系代入，factory 接收请求的类类型；泛型字段写入在检查实际字段类型成功后才修改存储。见[类环境与 SDK 对照](../test/compiler/class_types_test.dart)和[字段检查验证](../test/codegen/dynamic_boxes_native_test.dart)。late/late final 字段使用独立绑定位，支持实际泛型检查、惰性初始化及 GC 存活，见[实例存储](variables.md#原生局部存储)。跨模块常量身份统一和完整源码类的原生执行仍是缺口。此处的 IR 原生路径不表示上表的全部行为已能生成机器码。
 
 普通类的原生方法、getter/setter 和运算符按实际接收者选择实现，支持抽象接口、继承与 mixin；super 保留直接选择的实现。省略参数采用实际实现的默认值，命名实参保持源码求值顺序。协变形参和方法类型实参按接收者的实际类环境检查，失败在执行方法体前抛出 TypeError；检查与方法体共享 catch/finally 清理路径。返回值在声明表示与调用方表示之间转换，装箱值参与回收。见[原生成员调用与 SDK 对照](../test/compiler/member_calls_test.dart)。
