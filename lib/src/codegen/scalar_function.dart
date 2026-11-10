@@ -16,7 +16,7 @@ import 'heap_plan.dart';
 import 'stack_traces.dart';
 import 'checked_casts.dart';
 import 'member_calls.dart';
-import 'integer_arithmetic.dart';
+import 'numeric_operations.dart';
 
 /// Generates a control-flow graph with explicit edge transfers.
 final class ScalarFunction<R extends Object>(
@@ -27,7 +27,7 @@ final class ScalarFunction<R extends Object>(
   final StackTraces traces,
   CheckedCasts casts,
   MemberCalls members,
-  IntegerArithmetic arithmetic,
+  NumericOperations arithmetic,
 ) {
   final selection = FunctionSelection(
     function,
@@ -382,6 +382,16 @@ final class ScalarFunction<R extends Object>(
             }
           } else {
             emitter.move(destination, source);
+          }
+          allocation.define(instruction, destination);
+        } else if (instruction case NumericToInt(:final operand)) {
+          final source = allocation.read(operand);
+          allocation.release(operand);
+          final destination = allocation.allocate(.general, preferred: source);
+          if (operand.type == .integer) {
+            emitter.move(destination, source);
+          } else {
+            emitter.truncateDoubleToInt(destination, source);
           }
           allocation.define(instruction, destination);
         } else if (instruction

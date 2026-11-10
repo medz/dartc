@@ -31,6 +31,63 @@ void main() {
     Arm64CodeGenerator(const Target(.linux, .arm64)),
     X64CodeGenerator(const Target(.linux, .x64)),
   ]) {
+    test('${generator.target} stores canonical UTF-16 string constants', () {
+      final texts = [
+        '',
+        'a',
+        'a',
+        'Dart 🐦',
+        '\uD800x\uDC00',
+        'Infinity or NaN toInt',
+      ];
+      final functions = [
+        for (final (i, text) in texts.indexed)
+          _returning(library, 'string$i', Constant.string(text), .string),
+      ];
+      final module = generator.generate(
+        IrProgram([], functions),
+        definitions: functions.map((f) => f.target),
+      );
+      final data = ByteData.sublistView(module.sections[1].bytes);
+      expect(module.sections[1].kind, SectionKind.readOnlyData);
+      final addresses = <int>[];
+      for (final (i, function)
+          in module.symbols.take(functions.length).indexed) {
+        final references = module.relocations
+            .whereType<InstructionRelocation>()
+            .where(
+              (r) =>
+                  r.offset >= function.offset &&
+                  r.offset < function.offset + function.size!,
+            )
+            .map((r) => r.symbol)
+            .toSet();
+        final address = references.single;
+        addresses.add(address);
+        final object = module.symbols[address];
+        expect(data.getInt64(object.offset + 16, .little), texts[i].length);
+        final units =
+            module.symbols[module.relocations
+                .whereType<AddressRelocation>()
+                .singleWhere((r) => r.offset == object.offset + 24)
+                .symbol];
+        expect([
+          for (var j = 0; j < texts[i].length; j++)
+            data.getUint16(units.offset + j * 2, .little),
+        ], texts[i].codeUnits);
+        final descriptor =
+            module.symbols[module.relocations
+                .whereType<AddressRelocation>()
+                .singleWhere((r) => r.offset == object.offset)
+                .symbol];
+        expect(data.getInt64(descriptor.offset, .little), 32);
+        expect(data.getInt64(descriptor.offset + 8, .little), 1);
+        expect(data.getInt64(descriptor.offset + 16, .little), 8);
+      }
+      expect(addresses[1], addresses[2]);
+      expect(addresses.toSet(), hasLength(texts.length - 1));
+    });
+
     test(
       '${generator.target} constructs using the receiver type environment',
       () {

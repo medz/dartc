@@ -257,7 +257,9 @@ final class FunctionAllocation<R extends Object>(
     } else if (value case ScalarConstant(value: null)) {
       emitter.loadImmediate(destination, 0);
     } else if (value is Constant) {
-      if (value is! ObjectConstant && value is! TypeConstant) {
+      if (value is! ObjectConstant &&
+          value is! TypeConstant &&
+          value.type != .string) {
         throw UnsupportedError('Native constant: ${value.type.dartName}');
       }
       loadObject(value, destination);

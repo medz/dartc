@@ -143,6 +143,7 @@ Future<void> main(List<String> args) async {
       'nullability',
       'stack_calls',
       'integer_operations',
+      'numeric_conversions',
       'pointers',
       'pointer_arithmetic',
       'doubles',

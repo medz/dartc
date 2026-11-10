@@ -541,7 +541,12 @@ final class SelectorChain(
         !coreRuntimeMember(member) &&
         (member is GetterElement || arguments != null)) {
       if (args.named.isEmpty) {
-        final operation = lowerCoreMember(member, known, args.positional);
+        final operation = lowerCoreMember(
+          member,
+          known,
+          args.positional,
+          context.bindings,
+        );
         if (operation != null) return context.normal(context.emit(operation));
       }
     }

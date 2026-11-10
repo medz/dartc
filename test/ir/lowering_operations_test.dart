@@ -54,6 +54,17 @@ void main() {
     expect(NumericToDouble(number).type, ValueType.floating);
     expect(NumericToDouble(i).effects, isEmpty);
     expect(NumericToDouble(d).inputs, [d]);
+    for (final rounding in IntegerRounding.values) {
+      expect(NumericToInt(number, rounding).type, ValueType.integer);
+      expect(NumericToInt(number, rounding).mayThrow, isTrue);
+      expect(NumericToInt(d, rounding).mayThrow, isTrue);
+      expect(NumericToInt(i, rounding).effects, isEmpty);
+      expect(NumericToInt(d, rounding).inputs, [d]);
+    }
+    expect(
+      () => NumericToInt(const Constant.nullValue(), .truncate),
+      throwsArgumentError,
+    );
     expect(NumericSquareRoot(number).type, ValueType.floating);
     expect(NumericSquareRoot(i).effects, isEmpty);
     expect(NumericSquareRoot(d).inputs, [d]);

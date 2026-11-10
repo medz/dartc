@@ -94,6 +94,9 @@ void main() {
       compare('negate', [a], sdk.negate);
       compare('increment', [a], sdk.increment);
       compare('convertNumber', [a], sdk.convertNumber);
+      for (var mode = 0; mode < 5; mode++) {
+        compare('convertInteger', [a, mode], sdk.convertInteger);
+      }
       if (a is double) compare('negateDouble', [a], sdk.negateDouble);
       for (final b in values) {
         if (a is int && b is int) {
@@ -113,6 +116,8 @@ void main() {
   test('numeric conversion only binds the resolved SDK declaration', () {
     expect(runner.run(functions['userConversion']!, []), 7.5);
     expect(runner.run(functions['extensionConversion']!, []), 8.5);
+    expect(runner.run(functions['userIntegerConversion']!, []), 12);
+    expect(runner.run(functions['extensionIntegerConversion']!, []), 13);
     expect(runner.run(functions['userRemainder']!, []), 12);
     expect(runner.run(functions['extensionRemainder']!, []), 13);
     expect(

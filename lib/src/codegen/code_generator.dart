@@ -22,6 +22,8 @@ abstract interface class CodeGenerator() {
   /// references cannot be exported as native pointers. Integers, doubles and
   /// booleans can enter reference storage, and statically known scalar values
   /// can be unboxed. Computed numeric boxes participate in heap collection.
+  /// String constants retain their UTF-16 code units and canonical identity in
+  /// immutable module storage. String operations remain unsupported.
   /// Integer truncating division, modulo and remainder retain signed 64-bit
   /// behavior, including overflow, and throw IntegerDivisionByZeroException
   /// for a zero divisor through normal exception edges.
@@ -29,6 +31,11 @@ abstract interface class CodeGenerator() {
   /// arithmetic right shifts and zero the other results. Negative counts throw
   /// ArgumentError using its constructor and inherited class bodies supplied in
   /// [program]. Generated dependencies use the same member selection as user code.
+  /// [NumericToInt] preserves integer operands and rounds floating operands in
+  /// the requested direction, clamping finite overflow to signed 64-bit bounds.
+  /// Non-finite inputs require the supplied UnsupportedError constructor body
+  /// and throw through normal exception edges. Boxed num operands retain their
+  /// actual integer or double representation.
   /// Direct generic calls carry reified type arguments through the normal
   /// calling convention and root records. [ReifyType] reads or combines class and function
   /// type arguments into nullable, nominal, FutureOr, function and record types.

@@ -13,7 +13,7 @@ import 'program_layout.dart';
 import 'stack_traces.dart';
 import 'checked_casts.dart';
 import 'member_calls.dart';
-import 'integer_arithmetic.dart';
+import 'numeric_operations.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
 final class FunctionSelection<R>(
@@ -24,7 +24,7 @@ final class FunctionSelection<R>(
   StackTraces traces,
   CheckedCasts casts,
   MemberCalls members,
-  IntegerArithmetic arithmetic,
+  NumericOperations arithmetic,
 ) {
   final body = FunctionRepresentation(
     function,
@@ -224,6 +224,7 @@ final class FunctionSelection<R>(
               throw UnsupportedError('Native numeric negation: $type');
             }
           case NumericToDouble(:final operand) ||
+              NumericToInt(:final operand) ||
               NumericSquareRoot(:final operand):
             if (!_number(operand.type)) {
               throw UnsupportedError(

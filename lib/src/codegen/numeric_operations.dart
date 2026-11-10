@@ -1,20 +1,23 @@
 import 'package:dartc/ir.dart';
 
-/// Builds checked integer arithmetic with ordinary control flow and exceptions.
-final class IntegerArithmetic(
+/// Builds checked numeric operations with ordinary control flow and exceptions.
+final class NumericOperations(
   Iterable<IrFunction> functions, {
   IrCallable? argumentError,
+  IrCallable? unsupportedError,
 }) {
   final IrCallable? _argumentError = argumentError;
-  static final _uri = Uri.parse('dartc:integer');
+  final IrCallable? _unsupportedError = unsupportedError;
+  static final _uri = Uri.parse('dartc:numeric');
   final _functions = <IntOperator, IrFunction>{};
+  final _conversions = <(IntegerRounding, bool), IrFunction>{};
   final _nativeOperations = <Instruction>{};
 
   this {
     for (final function in functions) {
       for (final block in function.blocks) {
         for (final instruction in block.instructions) {
-          if (_operator(instruction) case final operator?) _function(operator);
+          callFor(instruction);
         }
       }
     }
@@ -27,10 +30,16 @@ final class IntegerArithmetic(
       IrClass(CoreTypes.integerDivisionByZeroException, []),
   ];
 
-  Iterable<IrFunction> get functions => _functions.values;
+  Iterable<IrFunction> get functions =>
+      _functions.values.followedBy(_conversions.values);
 
   FunctionTarget? callFor(Instruction instruction) {
     if (_nativeOperations.contains(instruction)) return null;
+    if (instruction case NumericToInt(:final operand, :final rounding)) {
+      return operand.type == .integer
+          ? null
+          : _conversion(rounding, operand.type == .floating).target;
+    }
     final operator = _operator(instruction);
     return operator == null ? null : _function(operator).target;
   }
@@ -196,4 +205,191 @@ final class IntegerArithmetic(
     shift.finish(Return(result));
     return IrFunction(target, [entry, valid, failed, large, shift]);
   }
+
+  IrFunction _conversion(
+    IntegerRounding rounding,
+    bool floating,
+  ) => _conversions.putIfAbsent((rounding, floating), () {
+    final target = FunctionTarget(
+      _uri,
+      '${rounding.name}${floating ? 'Double' : 'Num'}',
+      .integer,
+      [floating ? .floating : .number],
+    );
+    final entry = Block(target.parameterTypes);
+    final value = entry.parameters.single;
+    if (!floating) {
+      final integer = Block(), other = Block();
+      entry.finish(
+        Branch(
+          entry.emit(TypeTest(value, .integer)),
+          Jump(integer),
+          Jump(other),
+        ),
+      );
+      integer.finish(Return(integer.emit(TypeCast(value, .integer))));
+      other.finish(
+        Return(
+          other.emit(
+            DirectCall(_conversion(rounding, true).target, [
+              other.emit(TypeCast(value, .floating)),
+            ]),
+          ),
+        ),
+      );
+      return IrFunction(target, [entry, integer, other]);
+    }
+    final error = _unsupportedError;
+    if (error == null) {
+      throw UnsupportedError(
+        'Numeric conversions require the UnsupportedError constructor body.',
+      );
+    }
+    final finite = Block(),
+        upper = Block(),
+        lower = Block(),
+        high = Block(),
+        low = Block(),
+        convert = Block(),
+        failed = Block();
+    final blocks = [entry, finite, upper, lower, high, low, convert, failed];
+    entry.finish(
+      Branch(
+        entry.emit(
+          NumericBinary(
+            .greaterOrEqual,
+            value,
+            const Constant.floating(-double.maxFinite),
+          ),
+        ),
+        Jump(finite),
+        Jump(failed),
+      ),
+    );
+    finite.finish(
+      Branch(
+        finite.emit(
+          NumericBinary(
+            .lessOrEqual,
+            value,
+            const Constant.floating(double.maxFinite),
+          ),
+        ),
+        Jump(upper),
+        Jump(failed),
+      ),
+    );
+    upper.finish(
+      Branch(
+        upper.emit(
+          NumericBinary(
+            .lessThan,
+            value,
+            const Constant.floating(9223372036854775808.0),
+          ),
+        ),
+        Jump(lower),
+        Jump(high),
+      ),
+    );
+    lower.finish(
+      Branch(
+        lower.emit(
+          NumericBinary(
+            .greaterThan,
+            value,
+            const Constant.floating(-9223372036854775808.0),
+          ),
+        ),
+        Jump(convert),
+        Jump(low),
+      ),
+    );
+    high.finish(const Return(Constant.integer(0x7fffffffffffffff)));
+    low.finish(const Return(Constant.integer(-0x8000000000000000)));
+    failed.finish(
+      Throw(
+        failed.emit(
+          Construct(error.target, [
+            const Constant.string('Infinity or NaN toInt'),
+          ]),
+        ),
+      ),
+    );
+    final result = convert.emit(NumericToInt(value, .truncate));
+    _nativeOperations.add(result);
+    if (rounding == .truncate) {
+      convert.finish(Return(result));
+    } else {
+      final fraction = convert.emit(
+        NumericBinary(.subtract, value, convert.emit(NumericToDouble(result))),
+      );
+      final done = Block(), adjust = Block();
+      blocks.addAll([done, adjust]);
+      done.finish(Return(result));
+      if (rounding == .round) {
+        final negative = Block(), subtract = Block();
+        blocks.addAll([negative, subtract]);
+        convert.finish(
+          Branch(
+            convert.emit(
+              NumericBinary(
+                .greaterOrEqual,
+                fraction,
+                const Constant.floating(0.5),
+              ),
+            ),
+            Jump(adjust),
+            Jump(negative),
+          ),
+        );
+        negative.finish(
+          Branch(
+            negative.emit(
+              NumericBinary(
+                .lessOrEqual,
+                fraction,
+                const Constant.floating(-0.5),
+              ),
+            ),
+            Jump(subtract),
+            Jump(done),
+          ),
+        );
+        subtract.finish(
+          Return(
+            subtract.emit(
+              IntBinary(.subtract, result, const Constant.integer(1)),
+            ),
+          ),
+        );
+      } else {
+        convert.finish(
+          Branch(
+            convert.emit(
+              NumericBinary(
+                rounding == .floor ? .lessThan : .greaterThan,
+                fraction,
+                const Constant.floating(0),
+              ),
+            ),
+            Jump(adjust),
+            Jump(done),
+          ),
+        );
+      }
+      adjust.finish(
+        Return(
+          adjust.emit(
+            IntBinary(
+              rounding == .floor ? .subtract : .add,
+              result,
+              const Constant.integer(1),
+            ),
+          ),
+        ),
+      );
+    }
+    return IrFunction(target, blocks);
+  });
 }

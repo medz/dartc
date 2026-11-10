@@ -8,6 +8,8 @@ import 'program_layout.dart';
 
 /// Writes canonical constant objects and their concrete type descriptors.
 final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
+  // UTF-16 payloads live in immutable module storage, outside the moving heap.
+  static final _stringLayout = ObjectLayout([.word, .address]);
   final symbols = <Symbol>[];
   final relocations = <Relocation>[];
   final _words = <int>[];
@@ -16,7 +18,9 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
 
   int typeAddress(ClassType type) => _type(
     type,
-    layouts.isBoxable(type)
+    type == ValueType.string
+        ? _stringLayout
+        : layouts.isBoxable(type)
         ? ObjectLayout([layouts.representation(type)])
         : layouts.storageOf(type).layout,
   );
@@ -43,6 +47,9 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
           'Incomplete native constant storage: ${value.type}',
         );
       }
+    } else if (value is ScalarConstant && value.type == ValueType.string) {
+      storage = null;
+      layout = _stringLayout;
     } else if (value is ScalarConstant && layouts.isBoxable(value.type)) {
       storage = null;
       layout = .new([layouts.representation(value.type)]);
@@ -66,7 +73,18 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
         addressOf(layouts.types.constant(value.type)),
       ),
     );
-    if (storage == null) {
+    if (value case ScalarConstant(value: final String text)) {
+      _words[(offset + layout.offsetOf(0)) ~/ 8] = text.length;
+      final start = _words.length;
+      final data = _reserve(
+        'string-data',
+        text.isEmpty ? 1 : (text.length + 3) ~/ 4,
+      );
+      relocations.add(.address(1, offset + layout.offsetOf(1), data));
+      for (var i = 0; i < text.length; i++) {
+        _words[start + i ~/ 4] |= text.codeUnitAt(i) << ((i % 4) * 16);
+      }
+    } else if (storage == null) {
       _write(value, value.type, offset + layout.offsetOf(0));
     } else {
       for (final (i, field) in storage.fields.indexed) {
@@ -107,7 +125,9 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     _words[start] = layout.size;
     _words[start + 1] = references.length;
     _words.setRange(start + 2, start + 2 + references.length, references);
-    _words[start + 2 + references.length] = layouts.isBoxable(type)
+    _words[start +
+        2 +
+        references.length] = layouts.isBoxable(type) || type == ValueType.string
         ? 0
         : layouts.storageOf(type).errorTraceOffset ?? 0;
     return symbol;

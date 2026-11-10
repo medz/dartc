@@ -41,18 +41,15 @@ void main() {
     },
   );
 
-  test('SDK error branches reject unsupported string constants', () async {
-    await expectLater(
-      compiler.compile(['test/compiler/fixtures/sdk_functions.dart']),
-      throwsA(
-        isA<UnsupportedError>().having(
-          (error) => error.message,
-          'unsupported value',
-          'Native constant: String',
-        ),
-      ),
-    );
-  });
+  test(
+    'SDK range checks include error constructors and string constants',
+    () async {
+      final result = await compiler.compile([
+        'test/compiler/fixtures/sdk_functions.dart',
+      ]);
+      expect(result.bytes, isNotEmpty);
+    },
+  );
 
   test(
     'compilation owns final bytes and keeps the library name across writes',

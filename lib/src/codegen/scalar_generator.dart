@@ -21,7 +21,7 @@ import 'frame_lookup.dart';
 import 'stack_traces.dart';
 import 'checked_casts.dart';
 import 'member_calls.dart';
-import 'integer_arithmetic.dart';
+import 'numeric_operations.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -49,15 +49,18 @@ base class ScalarCodeGenerator<R extends Object>(
     final frames = FrameLookup();
     final traces = StackTraces(frames);
     final casts = CheckedCasts();
-    final argumentError = program.classes
-        .where((c) => c.type == ValueType.argumentError)
-        .firstOrNull
-        ?.constructors['new'];
-    final arithmetic = IntegerArithmetic(
+    IrCallable? constructor(ValueType type) {
+      final target = program.classes
+          .where((c) => c.type == type)
+          .firstOrNull
+          ?.constructors['new'];
+      return target == null ? null : program.implementationOf(target);
+    }
+
+    final arithmetic = NumericOperations(
       selected.map(program.implementationOf).whereType<IrFunction>(),
-      argumentError: argumentError == null
-          ? null
-          : program.implementationOf(argumentError),
+      argumentError: constructor(.argumentError),
+      unsupportedError: constructor(.unsupportedError),
     );
     if (arithmetic.functions.isNotEmpty) {
       program = IrProgram(

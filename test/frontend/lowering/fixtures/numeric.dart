@@ -16,15 +16,26 @@ num negate(num a) => -a;
 double negateDouble(double a) => -a;
 double mixedAdd(int a, double b) => a + b;
 double convertNumber(num value) => value.toDouble();
+int convertInteger(num value, int mode) => switch (mode) {
+  0 => value.toInt(),
+  1 => value.truncate(),
+  2 => value.floor(),
+  3 => value.ceil(),
+  _ => value.round(),
+};
+int userIntegerConversion() => const UserNumber().toInt();
+int extensionIntegerConversion() => UserConversion(3).toInt();
 double userConversion() => const UserNumber().toDouble();
 double extensionConversion() => UserConversion(3).toDouble();
 
 class const UserNumber() {
+  int toInt() => 12;
   double toDouble() => 7.5;
   int remainder(int value) => value + 5;
 }
 
 extension UserConversion on int {
+  int toInt() => 13;
   double toDouble() => 8.5;
   int remainder(int value) => value + 6;
 }

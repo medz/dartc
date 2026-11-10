@@ -493,6 +493,8 @@ sealed class Instruction(super.type) extends Value {
     NullCheck() ||
     IntBinary(operator: IntOperator(mayThrow: true)) ||
     NumericBinary(canThrow: true) => const {.mayThrow},
+    NumericToInt(operand: Value(type: final type)) when type != .integer =>
+      const {.mayThrow},
     ReifyType() ||
     PointerFromAddress() ||
     PointerOffset() => const {.allocates},
@@ -501,6 +503,7 @@ sealed class Instruction(super.type) extends Value {
     NumericBinary() ||
     NumericNegate() ||
     NumericToDouble() ||
+    NumericToInt() ||
     NumericSquareRoot() ||
     TypeTest() ||
     TypeView() ||
@@ -1524,6 +1527,37 @@ final class NumericNegate(
 /// Converts a number to double, rounding integers to the nearest IEEE value.
 final class NumericToDouble(final Value operand) extends Instruction {
   this : super(.floating) {
+    if (!ValueType.number.accepts(operand.type)) {
+      throw ArgumentError('A non-nullable numeric operand is required.');
+    }
+  }
+
+  @override
+  Iterable<Value> get inputs => [operand];
+}
+
+/// The rounding direction of a numeric conversion to an integer.
+enum IntegerRounding() {
+  /// Discards the fractional part.
+  truncate,
+
+  /// Rounds towards negative infinity.
+  floor,
+
+  /// Rounds towards positive infinity.
+  ceil,
+
+  /// Chooses the nearest integer, resolving ties away from zero.
+  round,
+}
+
+/// Converts a number to an integer with explicit rounding.
+///
+/// Finite values outside the native integer range clamp to its bounds.
+/// Non-finite values throw UnsupportedError; integer operands retain their value.
+final class NumericToInt(final Value operand, final IntegerRounding rounding)
+    extends Instruction {
+  this : super(.integer) {
     if (!ValueType.number.accepts(operand.type)) {
       throw ArgumentError('A non-nullable numeric operand is required.');
     }

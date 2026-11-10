@@ -47,6 +47,12 @@ NoSuchMethodError.withInvocation 的普通工厂调用与提取复用既有调�
 
 原生 `<<`、`>>`、`>>>` 及其复合赋值保留完整的位移计数。左移按 64 位回绕，算术右移补符号位，逻辑右移补零；计数大于等于 64 时，左移和逻辑右移为 0，算术右移为 0 或 -1。负计数抛出 ArgumentError，操作数只求值一次，忽略结果仍须抛错。错误的 message 保留负计数这个 int，name 与 invalidValue 为 null；这一载荷对应当前固定 SDK 的库行为，不扩大为跨版本语言保证。构造器与属性读取使用 SDK 的普通 Dart 实现，用户重写仍按实际接收者派发。见 [int 的原生整数范围](https://api.dart.dev/dart-core/int-class.html)、[逻辑右移规范](https://github.com/dart-lang/language/blob/main/accepted/2.14/triple-shift-operator/feature-specification.md)和[原生边界验证](../test/compiler/integer_operations_test.dart)。
 
+## 原生转整数与字符串常量
+
+`toInt`、`truncate`、`floor`、`ceil` 和 `round` 支持 int、double 及装箱 num 接收者。整数保持全部 64 位；浮点的 toInt/truncate 向零舍入，floor 向下、ceil 向上，round 就近舍入且半数远离零。有限值超出有符号 64 位范围时饱和到对应边界；正负零转换为 0，NaN 与正负无穷抛出 UnsupportedError。求值和 finally 顺序不变，未使用转换结果仍须执行可能抛错的转换。错误通过 SDK 构造器携带当前固定版本的字符串消息，用户同名成员与 extension 不会被拦截。见 [num.truncate](https://api.dart.dev/dart-core/num/truncate.html)、[num.round](https://api.dart.dev/dart-core/num/round.html)、[double.round](https://api.dart.dev/dart-core/double/round.html)和[原生转换验证](../test/compiler/numeric_conversions_test.dart)。保留 double 结果的舍入方法、浮点截断除法与余数仍未接通。
+
+原生字符串常量保留 UTF-16 码元和规范身份，可在普通参数、字段与错误载荷中传递。空串、非 BMP 字符及孤立代理项不会被重新编码或规范化；见[常量数据验证](../test/codegen/object_values_test.dart)。动态字符串构造、拼接、比较、索引及完整 String API 仍待实现。异常格式化和 Error.stackTrace getter 也尚未接通。
+
 ## 数值比较与 SDK 差异
 
 [`num.==`](https://api.dart.dev/stable/3.13.7/dart-core/num/operator_equals.html) 要求 int 与 double 具有相同数值；[`num.<`](https://api.dart.dev/stable/3.13.7/dart-core/num/operator_less.html) 按数值大小比较。正负零在这些运算符下相等；NaN 与任何值不等，四种大小关系均为假。整数先舍入成 double 再比较不满足这一契约。例如 `9007199254740993 > 9007199254740992.0` 应为真，两者相等应为假；最大 int 小于 `9223372036854775808.0`。

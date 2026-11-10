@@ -1,13 +1,35 @@
 import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
 
+import 'bindings.dart';
+
 /// Selects the IR operation for a resolved SDK core member.
 Instruction? lowerCoreMember(
   ExecutableElement member,
   Value receiver,
   List<Value> arguments,
+  Bindings bindings,
 ) {
   if (!member.library.isDartCore || member.isStatic) return null;
+  final rounding = switch (member.name) {
+    'toInt' || 'truncate' => IntegerRounding.truncate,
+    'floor' => IntegerRounding.floor,
+    'ceil' => IntegerRounding.ceil,
+    'round' => IntegerRounding.round,
+    _ => null,
+  };
+  if (rounding != null &&
+      arguments.isEmpty &&
+      ['num', 'int', 'double'].any(
+        (name) =>
+            member.baseElement ==
+            member.library.getClass(name)?.getMethod(member.name!),
+      )) {
+    if (receiver.type != .integer) {
+      bindings.requireSdkClass(member.library.getClass('UnsupportedError')!);
+    }
+    return NumericToInt(receiver, rounding);
+  }
   if (member.name == 'remainder' &&
       arguments.length == 1 &&
       ['num', 'int', 'double'].any(

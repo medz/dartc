@@ -21,8 +21,8 @@ final class Lowering({final bool enableAssertions = false}) {
   /// Calls to the same declaration share a target throughout the batch.
   /// Referenced SDK top-level functions, static methods and generative classes
   /// are resolved and checked in the same session, then lowered normally.
-  /// SDK factory bodies remain imports. Integer shifts also include ArgumentError
-  /// and its superclass for the negative-count path.
+  /// SDK factory bodies remain imports. Numeric error paths also include their
+  /// SDK error classes and superclasses.
   /// Keep the owning analysis session open until the returned future completes.
   /// Constants appear as operands at their uses. Throws [FormatException] for
   /// dependency static errors and [UnsupportedError] for missing translations.
