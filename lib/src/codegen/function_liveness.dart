@@ -31,7 +31,7 @@ final class FunctionLiveness(
       for (var value in liveIn[edge.target]!) {
         if (positions[value] case (final owner, final index)
             when owner == edge.target) {
-          value = edge.arguments[index];
+          value = body.argumentsOf(edge)[index];
         }
         if (value is TestedValue) value = value.test.operand;
         if (value is! Constant && value is! UnwindValue) yield value;
@@ -57,7 +57,7 @@ final class FunctionLiveness(
       if (record) {
         for (final edge in body.successors(block)) {
           for (final index in liveParameters[edge.target]!) {
-            read(edge.arguments[index]);
+            read(body.argumentsOf(edge)[index]);
           }
         }
       }

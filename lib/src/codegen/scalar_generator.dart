@@ -47,11 +47,13 @@ base class ScalarCodeGenerator<R extends Object>(
     final frames = FrameLookup();
     final traces = StackTraces(frames);
     final casts = CheckedCasts();
-    final layouts = ProgramLayout([
-      ...casts.classes,
-      ...program.classes,
-      traces.declaration,
-    ]);
+    final layouts = ProgramLayout(
+      [...casts.classes, ...program.classes, traces.declaration],
+      referencedClasses: selected.expand(
+        (target) =>
+            program.implementationOf(target)?.referencedClasses ?? const [],
+      ),
+    );
     final heap = HeapPlan(program, selected, layouts, frames);
     final relocations = <Relocation>[];
     final nativeSymbols = <String, int>{};
@@ -88,7 +90,12 @@ base class ScalarCodeGenerator<R extends Object>(
       }
     }
     final generated = <IrFunction>[];
-    var pending = [...casts.functions, ...layouts.types.functions];
+    Iterable<IrFunction> supportFunctions() => [
+      ...casts.functions,
+      ...layouts.relations.functions,
+      ...layouts.types.functions,
+    ];
+    var pending = supportFunctions().toList();
     while (pending.isNotEmpty) {
       generated.addAll(pending);
       heap.include(pending, layouts);
@@ -104,7 +111,7 @@ base class ScalarCodeGenerator<R extends Object>(
         );
       }
       pending = [
-        for (final function in [...casts.functions, ...layouts.types.functions])
+        for (final function in supportFunctions())
           if (!functions.containsKey(function.target)) function,
       ];
     }
@@ -139,6 +146,7 @@ base class ScalarCodeGenerator<R extends Object>(
         [
           if (casts.functions.isNotEmpty) ...casts.classes,
           ...layouts.types.classes,
+          ...layouts.relations.classes,
           if (capture) traces.declaration,
         ],
         support,

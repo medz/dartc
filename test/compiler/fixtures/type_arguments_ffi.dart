@@ -6,6 +6,29 @@ import '../../support/native_assets.dart';
 
 final class TypeArguments() {
   final _library = NativeAssets(Target.host()).open('compiler/type_arguments');
+  late final subtypeStress = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'subtypeStress',
+      );
+  late final openChecks = _library
+      .lookupFunction<
+        Int64 Function(Int64, Int64, Int64),
+        int Function(int, int, int)
+      >('openChecks');
+  late final subtypeShapes = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'subtypeShapes',
+      );
+  late final wordCast = _library
+      .lookupFunction<
+        Int64 Function(Int64, Int64, Int64),
+        int Function(int, int, int)
+      >('wordCast');
+  late final doubleCast = _library
+      .lookupFunction<
+        Double Function(Double, Int64),
+        double Function(double, int)
+      >('doubleCast');
   late final types = _library
       .lookupFunction<
         Int64 Function(Int64, Int64, Int64),

@@ -5,49 +5,54 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 
 import 'type_values.dart';
+import 'type_relations.dart';
+
+enum TypeTestKind() {
+  constantTrue,
+  constantFalse,
+  isNull,
+  isNotNull,
+  subtype,
+}
 
 /// Assigns physical storage to declaration identities within one compilation.
-final class ProgramLayout(Iterable<IrClass> classes) {
+final class ProgramLayout(
+  Iterable<IrClass> classes, {
+  Iterable<ClassType> referencedClasses = const [],
+}) {
   final types = TypeValues();
+  late final TypeRelations relations;
   final _classes = {
     for (final declaration in classes) declaration.type: declaration,
   };
   final _storage = <ClassType, ClassStorage>{};
-  final _typeTests = <ValueType, int>{};
-  bool _typesWritten = false;
 
   this {
     for (final declaration in types.classes) {
       _classes[declaration.type] = declaration;
     }
+    relations = TypeRelations(types, [..._classes.keys, ...referencedClasses]);
+    for (final declaration in relations.classes) {
+      _classes[declaration.type] = declaration;
+    }
   }
 
-  int typeTest(ValueType type) {
-    if (type.freeTypeParameters.isNotEmpty) {
-      throw UnsupportedError(
-        'Native type test requires a type environment: $type',
-      );
+  TypeTestKind typeTest(ValueType source, ValueType tested) {
+    if (FfiTypes.isPointer(source)) source = FfiTypes.pointerRuntimeType;
+    if (tested.accepts(source)) return .constantTrue;
+    if (tested == .never ||
+        source == .nullType && !tested.mayBeNull ||
+        tested == .nullType && !source.mayBeNull ||
+        tested.freeTypeParameters.isEmpty &&
+            (isBoxable(source) || FfiTypes.isPointer(source))) {
+      return .constantFalse;
     }
-    if (_typeTests[type] case final index?) return index;
-    if (_typesWritten) {
-      throw StateError('Type tests must precede descriptor emission.');
+    if (tested == .nullType) return .isNull;
+    if (tested == .object ||
+        !tested.mayBeNull && tested.accepts(source.nonNullable)) {
+      return .isNotNull;
     }
-    return _typeTests[type] = _typeTests.length;
-  }
-
-  List<int> typeTestBits(ClassType type) {
-    if (type.freeTypeParameters.isNotEmpty) {
-      throw UnsupportedError(
-        'Native object type requires a type environment: $type',
-      );
-    }
-    _typesWritten = true;
-    // shortcut: module-local closed types, reify environments before open generics or managed cross-module calls.
-    final words = List.filled((_typeTests.length + 63) ~/ 64, 0);
-    for (final MapEntry(key: tested, value: index) in _typeTests.entries) {
-      if (tested.accepts(type)) words[index ~/ 64] |= 1 << (index % 64);
-    }
-    return words;
+    return .subtype;
   }
 
   ValueRepresentation representation(ValueType type) {
@@ -94,7 +99,7 @@ final class ProgramLayout(Iterable<IrClass> classes) {
       return;
     }
     throw UnsupportedError(
-      'Native representation conversion: $source to $destination',
+      'Native representation conversion: ${source.dartName} to ${destination.dartName}',
     );
   }
 

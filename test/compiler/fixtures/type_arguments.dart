@@ -17,6 +17,163 @@ Type typeOf<T>() => T;
 
 class const TypeTag<T>(final int number);
 
+int check<T>(Object? item, int count) {
+  var result =
+      (item is T ? 1 : 0) | (item is! T ? 2 : 0) | (item is T? ? 4 : 0);
+  churn(count);
+  try {
+    final converted = item as T;
+    result |= 8;
+    churn(count);
+    try {
+      result |= identity<T>(converted!, 0) == null ? 0 : 16;
+    } on TypeError {
+      result |= 32;
+    }
+  } on TypeError {
+    result |= 64;
+  } finally {
+    result |= 128;
+  }
+  return result;
+}
+
+@Export<Int64 Function(Int64, Int64, Int64)>()
+int openChecks(int kind, int mode, int count) {
+  final item = value(mode, 17);
+  return switch (kind) {
+    0 => check<int>(item, count),
+    1 => check<double>(item, count),
+    2 => check<bool>(item, count),
+    3 => check<int?>(item, count),
+    4 => check<Null>(item, count),
+    5 => check<Never>(item, count),
+    6 => check<Base>(item, count),
+    7 => check<Child>(item, count),
+    8 => check<Box<int>>(item, count),
+    9 => check<Box<num>>(item, count),
+    10 => check<Box<int?>>(item, count),
+    11 => check<Box<Base>>(item, count),
+    12 => check<Box<FutureOr<num>>>(item, count),
+    13 => check<Box<num Function(int)>>(item, count),
+    14 => check<Box<({num n, Object b})>>(item, count),
+    15 => check<FutureOr<int?>>(item, count),
+    16 => check<dynamic>(item, count),
+    17 => check<VoidType>(item, count),
+    18 => check<Object>(item, count),
+    _ => check<Object?>(item, count),
+  };
+}
+
+T wordAs<T>(int value, int count) {
+  final converted = value as T;
+  churn(count);
+  return converted;
+}
+
+T doubleAs<T>(double value, int count) {
+  final converted = value as T;
+  churn(count);
+  return converted;
+}
+
+int? promotedWord<T>(int value, int count) {
+  if (value is T) {
+    churn(count);
+    return value;
+  }
+  return null;
+}
+
+@Export<Int64 Function(Int64, Int64, Int64)>()
+int wordCast(int mode, int value, int count) {
+  try {
+    return switch (mode) {
+      0 => wordAs<int>(value, count),
+      1 => wordAs<int?>(value, count)!,
+      2 => wordAs<num>(value, count) as int,
+      4 => promotedWord<int>(value, count) ?? -999,
+      5 => promotedWord<num>(value, count) as int,
+      6 => promotedWord<double>(value, count) == null ? -999 : 1,
+      _ => wordAs<double>(value, count) as int,
+    };
+  } on TypeError {
+    return -999;
+  }
+}
+
+@Export<Double Function(Double, Int64)>()
+double doubleCast(double value, int count) => doubleAs<double>(value, count);
+
+class FunctionProjection<T>() extends Box<T Function<U>(U)>;
+typedef RecursiveResult = X Function<X extends FutureOr<X>>();
+typedef RecursiveObject = Object Function<X extends FutureOr<X>>();
+typedef RecursiveTop = Object? Function<X extends FutureOr<X>>();
+typedef ProjectedResult = FunctionProjection<X> Function<X>();
+typedef ExplicitResult = Box<X Function<Y>(Y)> Function<X>();
+typedef CapturedResult = Box<Y Function<Y>(X)> Function<X>();
+
+int subtype<T>(Object item, int count) {
+  churn(count);
+  return item is TypeTag<T> ? 1 : 0;
+}
+
+@Export<Int64 Function(Int64)>()
+int subtypeStress(int count) {
+  var result = 0;
+  for (var i = 0; i < count; i++) {
+    result += subtype<ExplicitResult>(const TypeTag<ProjectedResult>(1), 0);
+  }
+  return result;
+}
+
+@Export<Int64 Function(Int64, Int64)>()
+int subtypeShapes(int mode, int count) => switch (mode) {
+  0 => subtype<num Function(int)>(const TypeTag<int Function(num)>(1), count),
+  1 => subtype<int Function(num)>(const TypeTag<num Function(int)>(1), count),
+  2 => subtype<int Function(int)>(
+    const TypeTag<int Function(int, [bool])>(1),
+    count,
+  ),
+  3 => subtype<int Function(int, [bool])>(
+    const TypeTag<int Function(int)>(1),
+    count,
+  ),
+  4 => subtype<num Function({required int value})>(
+    const TypeTag<int Function({num value})>(1),
+    count,
+  ),
+  5 => subtype<num Function({int value})>(
+    const TypeTag<int Function({required num value})>(1),
+    count,
+  ),
+  6 => subtype<num Function({required int value})>(
+    const TypeTag<int Function({num value, bool flag})>(1),
+    count,
+  ),
+  7 => subtype<num Function({required int value})>(
+    const TypeTag<int Function({num value, required bool flag})>(1),
+    count,
+  ),
+  8 => subtype<num Function<X extends num>()>(
+    const TypeTag<X Function<X extends num>()>(1),
+    count,
+  ),
+  9 => subtype<X Function<X extends num>()>(
+    const TypeTag<num Function<X extends num>()>(1),
+    count,
+  ),
+  10 => subtype<RecursiveTop>(const TypeTag<RecursiveResult>(1), count),
+  11 => subtype<RecursiveObject>(const TypeTag<RecursiveResult>(1), count),
+  12 => subtype<ExplicitResult>(const TypeTag<ProjectedResult>(1), count),
+  13 => subtype<CapturedResult>(const TypeTag<ProjectedResult>(1), count),
+  14 => subtype<void Function<X extends int>()>(
+    const TypeTag<void Function<X extends num>()>(1),
+    count,
+  ),
+  _ => subtype<Function>(const TypeTag<RecursiveResult>(1), count),
+};
+
 int compareRuntime(Object? object, Type expected, int count) {
   final before = object.runtimeType;
   churn(count);

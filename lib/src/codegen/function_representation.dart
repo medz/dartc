@@ -1,19 +1,23 @@
 import 'package:dartc/ir.dart';
 
 import 'program_layout.dart';
+import 'checked_casts.dart';
 
 /// Places allocating representation changes before register and root analysis.
 final class FunctionRepresentation(
   final IrFunction function,
-  final ProgramLayout layouts, {
+  final ProgramLayout layouts,
+  CheckedCasts casts, {
   FunctionTarget? captureTrace,
 }) {
   final blocks = <Block>[];
   final instructions = <Block, List<Instruction>>{};
   final ends = <Block, Terminator>{};
   final _operands = <Instruction, List<Value>>{};
+  final _arguments = <Jump, List<Value>>{};
   final boxes = <Instruction, Value>{};
   final introduced = <Instruction>{};
+  final tests = <TypeTest, TypeTestKind>{};
   late final entryParameters = function.target.typeParameters.isEmpty
       ? function.entry.parameters
       : [
@@ -50,6 +54,8 @@ final class FunctionRepresentation(
   Iterable<Value> inputsOf(Instruction instruction) =>
       _operands[instruction] ?? instruction.inputs;
 
+  List<Value> argumentsOf(Jump edge) => _arguments[edge] ?? edge.arguments;
+
   Iterable<Jump> successors(Block block) => switch (ends[block]!) {
     final Jump jump => [jump],
     Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],
@@ -60,10 +66,12 @@ final class FunctionRepresentation(
   };
 
   this {
-    bool needsBox(Value value, ValueType type) =>
-        value is! Constant &&
-        (value.type == .integer || value.type == .floating) &&
-        layouts.representation(type) == .reference;
+    bool needsBox(Value value, ValueType type) {
+      if (value is TestedValue) value = value.test.operand;
+      return value is! Constant &&
+          (value.type == .integer || value.type == .floating) &&
+          layouts.representation(type) == .reference;
+    }
 
     Value convert(Value value, ValueType type, List<Instruction> into) {
       if (!needsBox(value, type)) return value;
@@ -84,23 +92,44 @@ final class FunctionRepresentation(
       return capture;
     }
 
+    void runtimeType(ObjectRuntimeType instruction, List<Instruction> into) {
+      final source = instruction.operand.type;
+      if (source == .nullType || layouts.representation(source) != .reference) {
+        _operands[instruction] = [
+          _reify(
+            FfiTypes.isPointer(source) ? FfiTypes.pointerRuntimeType : source,
+            into,
+          ),
+        ];
+      }
+    }
+
     Jump edge(Jump jump) {
       if (!jump.arguments.indexed.any(
         (item) => needsBox(item.$2, jump.target.parameters[item.$1].type),
       )) {
         return jump;
       }
-      // Keep conversions on their chosen edge and refinements on the source edge.
-      final block = Block(jump.arguments.map((v) => v.type));
+      final inputs = [
+        for (final (i, value) in jump.arguments.indexed)
+          value is TestedValue &&
+                  needsBox(value, jump.target.parameters[i].type)
+              ? value.test.operand
+              : value,
+      ];
+      final block = Block(inputs.map((v) => v.type));
       blocks.add(block);
       final body = instructions[block] = <Instruction>[];
       final arguments = [
         for (final (i, value) in block.parameters.indexed)
           convert(value, jump.target.parameters[i].type, body),
       ];
-      ends[block] = Jump(jump.target, arguments);
-      block.finish(ends[block]!);
-      return Jump(block, jump.arguments);
+      // Retain the verified edge's type proof while assigning its physical operands.
+      final transfer = Jump(jump.target, jump.arguments);
+      _arguments[transfer] = arguments;
+      ends[block] = transfer;
+      block.finish(transfer);
+      return Jump(block, inputs);
     }
 
     blocks.addAll(function.blocks);
@@ -114,16 +143,25 @@ final class FunctionRepresentation(
         if (instruction case ReifyType(:final template)) {
           _operands[instruction] = [_reify(template, body)];
         }
-        if (instruction case ObjectRuntimeType(:final operand)
-            when operand.type == .nullType ||
-                layouts.representation(operand.type) != .reference) {
+        if (instruction is ObjectRuntimeType) runtimeType(instruction, body);
+        if (instruction case TypeTest(:final operand, :final testedType)) {
+          final kind = tests[instruction] = layouts.typeTest(
+            operand.type,
+            testedType,
+          );
+          if (kind == .subtype) {
+            final actual = ObjectRuntimeType(operand, direct: true);
+            runtimeType(actual, body);
+            body.add(actual);
+            _operands[instruction] = [actual, _reify(testedType, body)];
+          }
+        }
+        if (instruction
+            case TypeCast(:final operand) || NullCheck(:final operand)) {
+          final check = casts.targetFor(instruction, layouts);
           _operands[instruction] = [
-            _reify(
-              FfiTypes.isPointer(operand.type)
-                  ? FfiTypes.pointerRuntimeType
-                  : operand.type,
-              body,
-            ),
+            operand,
+            for (final parameter in check.parameters) _reify(parameter, body),
           ];
         }
         if (instruction case TypeView(:final operand, :final type)

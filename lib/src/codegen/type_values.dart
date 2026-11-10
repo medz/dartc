@@ -1,6 +1,6 @@
 import 'package:dartc/ir.dart';
 
-enum _Kind() {
+enum TypeKind() {
   nominal,
   nullable,
   futureOr,
@@ -21,42 +21,93 @@ final class TypeValues() {
     '_Type',
     interfaces: [ValueType.typeType],
   );
-  static final _list = ClassType(_uri, '_TypeArguments');
-  static final _kind = InstanceField(type, 'kind', .integer, isFinal: true);
-  static final _shape = InstanceField(type, 'shape', .integer, isFinal: true);
-  static final _allowsNull = InstanceField(
+  static final list = ClassType(_uri, '_TypeArguments');
+  static final functionShape = ClassType(_uri, '_FunctionShape');
+  static final namedParameter = ClassType(_uri, '_NamedParameter');
+  static final signature = InstanceField(
+    type,
+    'signature',
+    functionShape.nullable,
+    isFinal: true,
+  );
+  static final binderCount = InstanceField(
+    functionShape,
+    'binders',
+    .integer,
+    isFinal: true,
+  );
+  static final positionalCount = InstanceField(
+    functionShape,
+    'positional',
+    .integer,
+    isFinal: true,
+  );
+  static final requiredCount = InstanceField(
+    functionShape,
+    'required',
+    .integer,
+    isFinal: true,
+  );
+  static final named = InstanceField(
+    functionShape,
+    'named',
+    namedParameter.nullable,
+    isFinal: true,
+  );
+  static final name = InstanceField(
+    namedParameter,
+    'name',
+    .integer,
+    isFinal: true,
+  );
+  static final nameSlot = InstanceField(
+    namedParameter,
+    'slot',
+    .integer,
+    isFinal: true,
+  );
+  static final requiredName = InstanceField(
+    namedParameter,
+    'required',
+    .boolean,
+    isFinal: true,
+  );
+  static final nextName = InstanceField(
+    namedParameter,
+    'next',
+    namedParameter.nullable,
+    isFinal: true,
+  );
+  static final kind = InstanceField(type, 'kind', .integer, isFinal: true);
+  static final shape = InstanceField(type, 'shape', .integer, isFinal: true);
+  static final allowsNull = InstanceField(
     type,
     'allowsNull',
     .boolean,
     isFinal: true,
   );
-  static final _parts = InstanceField(
+  static final parts = InstanceField(
     type,
     'parts',
-    _list.nullable,
+    list.nullable,
     isFinal: true,
   );
-  static final _head = InstanceField(_list, 'head', type, isFinal: true);
-  static final _tail = InstanceField(
-    _list,
-    'tail',
-    _list.nullable,
-    isFinal: true,
-  );
+  static final head = InstanceField(list, 'head', type, isFinal: true);
+  static final tail = InstanceField(list, 'tail', list.nullable, isFinal: true);
   static final _init = FunctionTarget(
     _uri,
     '_Type',
     .voidType,
-    [.integer, .integer, .boolean, _list.nullable],
+    [.integer, .integer, .boolean, list.nullable, functionShape.nullable],
     owner: type,
     kind: .initializer,
   );
-  static final _listInit = FunctionTarget(
+  static final listInit = FunctionTarget(
     _uri,
     '_TypeArguments',
     .voidType,
-    [type, _list.nullable],
-    owner: _list,
+    [type, list.nullable],
+    owner: list,
     kind: .initializer,
   );
   final _nullable = FunctionTarget(_uri, 'nullableType', type, [type]);
@@ -75,15 +126,22 @@ final class TypeValues() {
   final _functions = <FunctionTarget, IrFunction>{};
 
   List<IrClass> get classes => [
+    IrClass(functionShape, [
+      binderCount,
+      positionalCount,
+      requiredCount,
+      named,
+    ]),
+    IrClass(namedParameter, [name, nameSlot, requiredName, nextName]),
     IrClass(
       type,
-      [_kind, _shape, _allowsNull, _parts],
+      [kind, shape, allowsNull, parts, signature],
       constructors: [if (_functions.containsKey(_init)) _init],
     ),
     IrClass(
-      _list,
-      [_head, _tail],
-      constructors: [if (_functions.containsKey(_listInit)) _listInit],
+      list,
+      [head, tail],
+      constructors: [if (_functions.containsKey(listInit)) listInit],
     ),
   ];
 
@@ -103,32 +161,65 @@ final class TypeValues() {
   ) {
     final (kind, shape, children, nested) = _describe(value, scopes);
     final parts = children.map((t) => _constant(t, nested)).toList();
-    return _node(kind, shape, parts);
+    return _node(
+      kind,
+      shape,
+      parts,
+      function: value is FunctionType ? value : null,
+    );
   }
 
-  ObjectConstant _node(_Kind kind, int shape, List<ObjectConstant> children) {
+  ObjectConstant _node(
+    TypeKind kind,
+    int shape,
+    List<ObjectConstant> children, {
+    FunctionType? function,
+  }) {
     Constant parts = const Constant.nullValue();
     for (final child in children.reversed) {
-      parts = ObjectConstant(_list, {_head: child, _tail: parts});
+      parts = ObjectConstant(list, {head: child, tail: parts});
     }
     return ObjectConstant(type, {
-      _kind: Constant.integer(kind.index),
-      _shape: Constant.integer(shape),
-      _allowsNull: Constant.boolean(
+      TypeValues.kind: Constant.integer(kind.index),
+      TypeValues.shape: Constant.integer(shape),
+      allowsNull: Constant.boolean(
         kind == .nullable ||
             kind == .nullType ||
             kind == .dynamicType ||
             kind == .voidType ||
             kind == .futureOr &&
-                (children.single.fields[_allowsNull]! as ScalarConstant)
-                        .value ==
+                (children.single.fields[allowsNull]! as ScalarConstant).value ==
                     true,
       ),
-      _parts: parts,
+      TypeValues.parts: parts,
+      signature: function == null
+          ? const Constant.nullValue()
+          : _signature(function),
     });
   }
 
-  int _id(Object key) => _shapes.putIfAbsent(key, () => _shapes.length);
+  ObjectConstant _signature(FunctionType value) {
+    final names = value.named.keys.toList()..sort();
+    Constant entries = const Constant.nullValue();
+    for (final (index, key) in names.indexed.toList().reversed) {
+      entries = ObjectConstant(namedParameter, {
+        name: Constant.integer(id(key)),
+        nameSlot: Constant.integer(
+          value.typeParameters.length + 1 + value.positionalCount + index,
+        ),
+        requiredName: Constant.boolean(value.named[key]!.required),
+        nextName: entries,
+      });
+    }
+    return ObjectConstant(functionShape, {
+      binderCount: Constant.integer(value.typeParameters.length),
+      positionalCount: Constant.integer(value.positionalCount),
+      requiredCount: Constant.integer(value.requiredPositional),
+      named: entries,
+    });
+  }
+
+  int id(Object key) => _shapes.putIfAbsent(key, () => _shapes.length);
 
   ValueType _bound(
     TypeParameterType parameter,
@@ -144,15 +235,17 @@ final class TypeValues() {
     return bound;
   }
 
-  (_Kind, int, List<ValueType>, List<List<TypeParameterType>>) _describe(
+  (TypeKind, int, List<ValueType>, List<List<TypeParameterType>>) _describe(
     ValueType value,
     List<List<TypeParameterType>> scopes,
   ) {
     if (value is TypeParameterType) {
       if (_bound(value, const []) == .never) return (.never, 0, [], scopes);
-      for (final (depth, scope) in scopes.indexed) {
+      var offset = 0;
+      for (final scope in scopes) {
         final index = scope.indexOf(value);
-        if (index >= 0) return (.parameter, _id((depth, index)), [], scopes);
+        if (index >= 0) return (.parameter, offset + index, [], scopes);
+        offset += scope.length;
       }
       throw UnsupportedError('Native type needs a lexical environment: $value');
     }
@@ -167,7 +260,7 @@ final class TypeValues() {
       return (.futureOr, 0, [argument], scopes);
     }
     if (value is ClassType) {
-      return (.nominal, _id(value.declaration), value.typeArguments, scopes);
+      return (.nominal, id(value.declaration), value.typeArguments, scopes);
     }
     if (value is RecordType) {
       final names = value.slots.keys
@@ -175,7 +268,7 @@ final class TypeValues() {
           .fold<Object?>(null, (key, name) => (key, name));
       return (
         .record,
-        _id((value.positionalCount, names)),
+        id((value.positionalCount, names)),
         value.fields,
         scopes,
       );
@@ -193,7 +286,7 @@ final class TypeValues() {
       );
       return (
         .function,
-        _id(shape),
+        id(shape),
         [
           for (final parameter in value.typeParameters) parameter.bound,
           value.result,
@@ -236,8 +329,22 @@ final class TypeValues() {
       for (final (i, parameter) in parameters.indexed)
         parameter: entry.parameters[i],
     };
-    Value build(ValueType value, List<List<TypeParameterType>> scopes) {
-      if (environment[value] case final argument?) return argument;
+    entry.finish(Return(build(entry, template, environment)));
+    _functions[target] = IrFunction(target, [entry]);
+    return (target: target, parameters: parameters);
+  });
+
+  Value build(
+    Block block,
+    ValueType template,
+    Map<TypeParameterType, Value> environment, {
+    Value Function(Value, int)? shift,
+  }) {
+    Value visit(ValueType value, List<List<TypeParameterType>> scopes) {
+      if (environment[value] case final argument?) {
+        final count = scopes.fold(0, (count, scope) => count + scope.length);
+        return count == 0 || shift == null ? argument : shift(argument, count);
+      }
       if (value.freeTypeParameters.isEmpty) return constant(value);
       final (kind, shape, children, nested) = _describe(value, scopes);
       if (kind == .parameter || kind == .never) {
@@ -245,27 +352,31 @@ final class TypeValues() {
         if (kind == .parameter && value is TypeParameterType) {
           if (environment[_bound(value, environment.keys)] case final bound?) {
             _functions.putIfAbsent(_parameter, _parameterBody);
-            return entry.emit(DirectCall(_parameter, [node, bound]));
+            return block.emit(DirectCall(_parameter, [node, bound]));
           }
         }
         return node;
       }
-      final parts = children.map((t) => build(t, nested)).toList();
+      final parts = children.map((t) => visit(t, nested)).toList();
       if (kind == .nullable) {
         _functions.putIfAbsent(_nullable, _nullableBody);
-        return entry.emit(DirectCall(_nullable, parts));
+        return block.emit(DirectCall(_nullable, parts));
       }
       if (kind == .futureOr) {
         _functions.putIfAbsent(_futureOr, _futureOrBody);
-        return entry.emit(DirectCall(_futureOr, parts));
+        return block.emit(DirectCall(_futureOr, parts));
       }
-      return _construct(entry, kind, shape, parts);
+      return construct(
+        block,
+        kind,
+        shape,
+        parts,
+        signature: value is FunctionType ? _signature(value) : null,
+      );
     }
 
-    entry.finish(Return(build(template, const [])));
-    _functions[target] = IrFunction(target, [entry]);
-    return (target: target, parameters: parameters);
-  });
+    return visit(template, const []);
+  }
 
   IrFunction _parameterBody() {
     final entry = Block(_parameter.parameterTypes),
@@ -276,8 +387,8 @@ final class TypeValues() {
       Branch(
         entry.emit(
           Equals(
-            entry.emit(LoadField(_kind, bound)),
-            Constant.integer(_Kind.never.index),
+            entry.emit(LoadField(TypeValues.kind, bound)),
+            Constant.integer(TypeKind.never.index),
           ),
         ),
         Jump(bottom),
@@ -300,39 +411,63 @@ final class TypeValues() {
     return IrFunction(target, [entry]);
   }
 
-  Value _construct(
+  Value construct(
     Block block,
-    _Kind kind,
+    TypeKind kind,
     int shape,
     List<Value> children, {
     Value? allowsNull,
+    Value? signature,
   }) {
-    _functions.putIfAbsent(
-      _init,
-      () => _initializer(_init, [_kind, _shape, _allowsNull, _parts]),
-    );
-    Value parts = const Constant.nullValue();
+    Value childrenList = const Constant.nullValue();
     for (final child in children.reversed) {
-      _functions.putIfAbsent(
-        _listInit,
-        () => _initializer(_listInit, [_head, _tail]),
-      );
-      parts = block.emit(Construct(_listInit, [child, parts]));
+      childrenList = cons(block, child, childrenList);
     }
-    return block.emit(
-      Construct(_init, [
-        Constant.integer(kind.index),
-        Constant.integer(shape),
-        allowsNull ?? Constant.boolean(kind == .nullable),
-        parts,
-      ]),
+    return node(
+      block,
+      Constant.integer(kind.index),
+      Constant.integer(shape),
+      allowsNull ?? Constant.boolean(kind == .nullable),
+      childrenList,
+      signature ?? const Constant.nullValue(),
     );
   }
 
-  Value _first(Block block, Value value) => block.emit(
+  Value cons(Block block, Value value, Value next) {
+    _functions.putIfAbsent(
+      listInit,
+      () => _initializer(listInit, [head, tail]),
+    );
+    return block.emit(Construct(listInit, [value, next]));
+  }
+
+  Value node(
+    Block block,
+    Value kind,
+    Value shape,
+    Value allowsNull,
+    Value parts,
+    Value signature,
+  ) {
+    _functions.putIfAbsent(
+      _init,
+      () => _initializer(_init, [
+        TypeValues.kind,
+        TypeValues.shape,
+        TypeValues.allowsNull,
+        TypeValues.parts,
+        TypeValues.signature,
+      ]),
+    );
+    return block.emit(
+      Construct(_init, [kind, shape, allowsNull, parts, signature]),
+    );
+  }
+
+  Value first(Block block, Value value) => block.emit(
     LoadField(
-      _head,
-      block.emit(NullCheck(block.emit(LoadField(_parts, value)))),
+      head,
+      block.emit(NullCheck(block.emit(LoadField(TypeValues.parts, value)))),
     ),
   );
 
@@ -344,7 +479,7 @@ final class TypeValues() {
     final value = entry.parameters.single;
     entry.finish(
       Branch(
-        entry.emit(LoadField(_allowsNull, value)),
+        entry.emit(LoadField(allowsNull, value)),
         Jump(done),
         Jump(bottom),
       ),
@@ -355,15 +490,15 @@ final class TypeValues() {
       Branch(
         bottom.emit(
           Equals(
-            bottom.emit(LoadField(_kind, value)),
-            Constant.integer(_Kind.never.index),
+            bottom.emit(LoadField(TypeValues.kind, value)),
+            Constant.integer(TypeKind.never.index),
           ),
         ),
         Jump(nullValue),
         Jump(make),
       ),
     );
-    make.finish(Return(_construct(make, .nullable, 0, [value])));
+    make.finish(Return(construct(make, .nullable, 0, [value])));
     return IrFunction(_nullable, [entry, bottom, make, done, nullValue]);
   }
 
@@ -381,54 +516,54 @@ final class TypeValues() {
         make = Block(),
         done = Block();
     final value = entry.parameters.single;
-    final kind = entry.emit(LoadField(_kind, value));
+    final kind = entry.emit(LoadField(TypeValues.kind, value));
     void check(Block b, Value a, int tag, Block yes, Block no) => b.finish(
       Branch(b.emit(Equals(a, Constant.integer(tag))), Jump(yes), Jump(no)),
     );
-    check(entry, kind, _Kind.dynamicType.index, done, voidType);
-    check(voidType, kind, _Kind.voidType.index, done, nullable);
+    check(entry, kind, TypeKind.dynamicType.index, done, voidType);
+    check(voidType, kind, TypeKind.voidType.index, done, nullable);
     nullable.finish(
       Branch(
-        nullable.emit(Equals(kind, Constant.integer(_Kind.nullable.index))),
+        nullable.emit(Equals(kind, Constant.integer(TypeKind.nullable.index))),
         Jump(unwrap),
         Jump(nominal, [value]),
       ),
     );
-    unwrap.finish(Jump(nominal, [_first(unwrap, value)]));
+    unwrap.finish(Jump(nominal, [first(unwrap, value)]));
     final base = nominal.parameters.single;
     check(
       nominal,
-      nominal.emit(LoadField(_kind, base)),
-      _Kind.nominal.index,
+      nominal.emit(LoadField(TypeValues.kind, base)),
+      TypeKind.nominal.index,
       object,
       bottom,
     );
     check(
       object,
-      object.emit(LoadField(_shape, base)),
-      _id(ValueType.object),
+      object.emit(LoadField(TypeValues.shape, base)),
+      id(ValueType.object),
       done,
       bottom,
     );
-    check(bottom, kind, _Kind.never.index, future, nullType);
-    check(nullType, kind, _Kind.nullType.index, optionalFuture, make);
+    check(bottom, kind, TypeKind.never.index, future, nullType);
+    check(nullType, kind, TypeKind.nullType.index, optionalFuture, make);
     future.finish(
-      Return(_construct(future, .nominal, _id(ValueType.future), [value])),
+      Return(construct(future, .nominal, id(ValueType.future), [value])),
     );
-    final futureValue = _construct(
+    final futureValue = construct(
       optionalFuture,
       .nominal,
-      _id(ValueType.future),
+      id(ValueType.future),
       [value],
     );
     optionalFuture.finish(
-      Return(_construct(optionalFuture, .nullable, 0, [futureValue])),
+      Return(construct(optionalFuture, .nullable, 0, [futureValue])),
     );
     make.finish(
       Return(
-        _construct(make, .futureOr, 0, [
+        construct(make, .futureOr, 0, [
           value,
-        ], allowsNull: make.emit(LoadField(_allowsNull, value))),
+        ], allowsNull: make.emit(LoadField(allowsNull, value))),
       ),
     );
     done.finish(Return(value));
@@ -453,9 +588,8 @@ final class TypeValues() {
         kind = Block([type]),
         shape = Block(),
         parts = Block();
-    final loop = Block([_list.nullable, _list.nullable]),
-        second = Block([_list]);
-    final compare = Block([_list]),
+    final loop = Block([list.nullable, list.nullable]), second = Block([list]);
+    final compare = Block([list]),
         next = Block(),
         end = Block(),
         yes = Block(),
@@ -468,8 +602,8 @@ final class TypeValues() {
       Branch(
         kind.emit(
           Equals(
-            kind.emit(LoadField(_kind, left)),
-            kind.emit(LoadField(_kind, right)),
+            kind.emit(LoadField(TypeValues.kind, left)),
+            kind.emit(LoadField(TypeValues.kind, right)),
           ),
         ),
         Jump(shape),
@@ -480,8 +614,8 @@ final class TypeValues() {
       Branch(
         shape.emit(
           Equals(
-            shape.emit(LoadField(_shape, left)),
-            shape.emit(LoadField(_shape, right)),
+            shape.emit(LoadField(TypeValues.shape, left)),
+            shape.emit(LoadField(TypeValues.shape, right)),
           ),
         ),
         Jump(parts),
@@ -490,31 +624,31 @@ final class TypeValues() {
     );
     parts.finish(
       Jump(loop, [
-        parts.emit(LoadField(_parts, left)),
-        parts.emit(LoadField(_parts, right)),
+        parts.emit(LoadField(TypeValues.parts, left)),
+        parts.emit(LoadField(TypeValues.parts, right)),
       ]),
     );
     final [a, b] = loop.parameters;
-    final first = loop.emit(TypeTest(a, _list));
+    final first = loop.emit(TypeTest(a, list));
     loop.finish(
       Branch(first, Jump(second, [first.refinement(true)!]), Jump(end)),
     );
-    final exists = second.emit(TypeTest(b, _list));
+    final exists = second.emit(TypeTest(b, list));
     second.finish(
       Branch(exists, Jump(compare, [exists.refinement(true)!]), Jump(no)),
     );
     final aPart = second.parameters.single, bPart = compare.parameters.single;
     final equal = compare.emit(
       DirectCall(_equal, [
-        compare.emit(LoadField(_head, aPart)),
-        compare.emit(LoadField(_head, bPart)),
+        compare.emit(LoadField(head, aPart)),
+        compare.emit(LoadField(head, bPart)),
       ]),
     );
     compare.finish(Branch(equal, Jump(next), Jump(no)));
     next.finish(
       Jump(loop, [
-        next.emit(LoadField(_tail, aPart)),
-        next.emit(LoadField(_tail, bPart)),
+        next.emit(LoadField(tail, aPart)),
+        next.emit(LoadField(tail, bPart)),
       ]),
     );
     end.finish(

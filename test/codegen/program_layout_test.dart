@@ -23,25 +23,15 @@ void main() {
     }
   });
 
-  test(
-    'type test words retain declaration identity and freeze before emission',
-    () {
-      final uri = Uri.parse('memory:type-bits');
-      final types = [for (var i = 0; i < 66; i++) ClassType(uri, 'SameName')];
-      final actual = ClassType(
-        uri,
-        'Actual',
-        interfaces: [types[1], types[63], types[65]],
-      );
-      final layouts = ProgramLayout([]);
-      for (final (i, type) in types.indexed) {
-        expect(layouts.typeTest(type), i);
-      }
-      expect(layouts.typeTestBits(actual), [2 | (1 << 63), 2]);
-      expect(layouts.typeTest(types[63]), 63);
-      expect(() => layouts.typeTest(.integer), throwsStateError);
-    },
-  );
+  test('Type constants retain declaration identity for matching names', () {
+    final uri = Uri.parse('memory:type-identities');
+    final types = [for (var i = 0; i < 66; i++) ClassType(uri, 'SameName')];
+    final data = ConstantData(ProgramLayout([]), 0);
+    expect(
+      types.map((t) => data.addressOf(TypeConstant(t))).toSet(),
+      hasLength(66),
+    );
+  });
 
   test('Type constants normalize bound variables before nullable unions', () {
     final t = TypeParameterType('T')..initializeBound(ValueType.never);

@@ -2,6 +2,7 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/function_liveness.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
+import 'package:dartc/src/codegen/checked_casts.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -16,6 +17,7 @@ void main() {
     final body = FunctionRepresentation(
       IrFunction(target, blocks),
       ProgramLayout([]),
+      CheckedCasts(),
     );
     return FunctionLiveness(body, body.inputsOf, {
       ...body.boxes.keys,

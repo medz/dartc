@@ -12,6 +12,31 @@ void main() {
     Arm64CodeGenerator(const Target(.linux, .arm64)),
     X64CodeGenerator(const Target(.linux, .x64)),
   ]) {
+    test('${generator.target} boxes scalar refinements to open references', () {
+      final parameter = TypeParameterType('T')
+        ..initializeBound(ValueType.object.nullable);
+      final target = FunctionTarget(
+        library,
+        'promote',
+        .object.nullable,
+        [.integer],
+        typeParameters: [parameter],
+      );
+      final entry = Block(target.parameterTypes),
+          yes = Block([parameter]),
+          no = Block();
+      final test = entry.emit(TypeTest(entry.parameters.single, parameter));
+      entry.finish(Branch(test, Jump(yes, [test.refinement(true)!]), Jump(no)));
+      yes.finish(Return(yes.parameters.single));
+      no.finish(Return(const Constant.nullValue()));
+      final program = IrProgram([], [
+        IrFunction(target, [entry, yes, no]),
+      ]);
+      expect(
+        generator.generate(program, definitions: [target]).sections,
+        isNotEmpty,
+      );
+    });
     test('${generator.target} preserves the runtimeType override boundary', () {
       final owner = ClassType(library, 'Override');
       final interface = ClassType(library, 'Interface');
@@ -192,7 +217,7 @@ void main() {
               isA<UnsupportedError>().having(
                 (error) => error.message,
                 'missing environment',
-                contains('requires a type environment'),
+                contains('requires a class environment'),
               ),
             ),
           );
@@ -242,7 +267,7 @@ void main() {
             isA<UnsupportedError>().having(
               (error) => error.message,
               'missing environment',
-              contains('requires a type environment'),
+              contains('requires a class environment'),
             ),
           ),
         );

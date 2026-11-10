@@ -25,6 +25,7 @@ final class FunctionSelection<R>(
   final body = FunctionRepresentation(
     function,
     layouts,
+    casts,
     captureTrace: traces.capture,
   );
   final binaries =
@@ -45,7 +46,6 @@ final class FunctionSelection<R>(
         ({CallLayout<R> layout, FunctionTarget? target, List<Value> arguments})
       >{};
   final constantTests = <TypeTest, bool>{};
-  final typeTests = <TypeTest, int>{};
   final cells = <NewCell>{};
   late final CallLayout<R> entry;
   late final FunctionLiveness liveness;
@@ -131,8 +131,12 @@ final class FunctionSelection<R>(
               target: null,
               arguments: arguments,
             );
-          case TypeCast(:final operand) || NullCheck(:final operand):
-            _call(instruction, casts.targetFor(instruction), [operand]);
+          case TypeCast() || NullCheck():
+            _call(
+              instruction,
+              casts.targetFor(instruction, layouts).target,
+              body.inputsOf(instruction).toList(),
+            );
           case final Construct operation:
             final target = heap.constructors[operation]!;
             _call(instruction, target, body.inputsOf(operation).toList());
@@ -176,28 +180,14 @@ final class FunctionSelection<R>(
               type,
               constant: operand is ScalarConstant,
             );
-          case TypeTest(:final operand, :final testedType, :final negated):
-            final source = FfiTypes.isPointer(operand.type)
-                ? FfiTypes.pointerRuntimeType
-                : operand.type;
-            if (testedType.accepts(source)) {
+          case TypeTest(:final operand, :final negated):
+            final kind = body.tests[instruction]!;
+            if (kind == .constantTrue) {
               constantTests[instruction] = !negated;
-            } else if (testedType == .never ||
-                source == .nullType && !testedType.mayBeNull ||
-                testedType == .nullType && !source.mayBeNull ||
-                testedType.freeTypeParameters.isEmpty &&
-                    (layouts.isBoxable(source) || FfiTypes.isPointer(source))) {
+            } else if (kind == .constantFalse) {
               constantTests[instruction] = negated;
-            } else if (testedType == .nullType ||
-                testedType == .object ||
-                !testedType.mayBeNull &&
-                    testedType.accepts(source.nonNullable)) {
-              if (layouts.representation(source) != .reference) {
-                throw UnsupportedError(
-                  'Native null test representation: ${source.dartName}',
-                );
-              }
-              final equal = (testedType == .nullType) != negated;
+            } else if (kind == .isNull || kind == .isNotNull) {
+              final equal = (kind == .isNull) != negated;
               _binary(
                 instruction,
                 emitter.comparison(equal ? .equal : .notEqual),
@@ -205,13 +195,11 @@ final class FunctionSelection<R>(
                 const Constant.nullValue(),
               );
             } else {
-              if (layouts.representation(source) != .reference) {
-                throw UnsupportedError(
-                  'Native type test requires a type environment: $source is $testedType',
-                );
-              }
-              typeTests[instruction] = layouts.typeTest(testedType);
-              if (_generalTemporaries < 2) _generalTemporaries = 2;
+              _call(
+                instruction,
+                layouts.relations.test,
+                body.inputsOf(instruction).toList(),
+              );
             }
           case PointerFromAddress() ||
               PointerAddress() ||
@@ -360,7 +348,7 @@ final class FunctionSelection<R>(
       }
       for (final edge in body.successors(block)) {
         for (final i in liveness.liveParameters[edge.target]!) {
-          final argument = edge.arguments[i];
+          final argument = body.argumentsOf(edge)[i];
           final stored = argument is TestedValue
               ? argument.test.operand
               : argument;
@@ -414,7 +402,7 @@ final class FunctionSelection<R>(
         throw UnsupportedError('Native local storage cannot escape.');
       }
       for (final (i, edge) in body.successors(block).indexed) {
-        if (edge.arguments.any(cells.contains)) {
+        if (body.argumentsOf(edge).any(cells.contains)) {
           throw UnsupportedError('Native local storage cannot be aliased.');
         }
         final end = body.ends[block]!;

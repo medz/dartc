@@ -375,7 +375,7 @@ final class FunctionAllocation<R extends Object>(
   void copyArguments(Jump edge) {
     final parameters = selection.liveness.liveParameters[edge.target]!;
     for (final (slot, i) in parameters.indexed) {
-      final argument = edge.arguments[i];
+      final argument = selection.body.argumentsOf(edge)[i];
       final type = edge.target.parameters[i].type;
       final scratch = emitter.allocatableRegisters.lastWhere(
         (r) => emitter.bank(r) == selection.bank(type),

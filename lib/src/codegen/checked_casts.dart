@@ -1,5 +1,7 @@
 import 'package:dartc/ir.dart';
 
+import 'program_layout.dart';
+
 /// Generates checked conversions using ordinary type tests and exception edges.
 final class CheckedCasts() {
   static final _uri = Uri.parse('dartc:checks');
@@ -12,7 +14,11 @@ final class CheckedCasts() {
     owner: _error,
     kind: .initializer,
   );
-  final _checks = <(ValueType, ValueType, bool), IrFunction>{};
+  final _checks =
+      <
+        (ValueType, ValueType, bool),
+        ({IrFunction body, List<TypeParameterType> parameters})
+      >{};
 
   late final classes = [
     IrClass(ValueType.error, []),
@@ -25,52 +31,75 @@ final class CheckedCasts() {
     yield IrFunction(_initializer, [
       Block(_initializer.parameterTypes)..finish(const Return()),
     ]);
-    yield* _checks.values;
+    yield* _checks.values.map((check) => check.body);
   }
 
-  FunctionTarget targetFor(Instruction instruction) {
+  ({FunctionTarget target, List<TypeParameterType> parameters}) targetFor(
+    Instruction instruction,
+    ProgramLayout layouts,
+  ) {
     final (operand, nullOnly) = switch (instruction) {
       TypeCast(:final operand) => (operand, false),
       NullCheck(:final operand) => (operand, true),
       _ => throw ArgumentError('Expected a checked conversion.'),
     };
-    final source = operand.type, result = instruction.type;
-    if (source.freeTypeParameters.isNotEmpty ||
-        result.freeTypeParameters.isNotEmpty) {
-      throw UnsupportedError(
-        'Native cast requires a type environment: $source to $result',
-      );
-    }
-    return _checks.putIfAbsent((source, result, nullOnly), () {
-      final target = FunctionTarget(_uri, 'check${_checks.length}', result, [
-        source,
-      ]);
-      final entry = Block(target.parameterTypes), failed = Block();
-      final blocks = [entry, failed];
-      if (result == .never) {
-        entry.finish(Jump(failed));
-      } else {
-        final operand = entry.parameters.single;
-        final test = entry.emit(TypeTest(operand, nullOnly ? .object : result));
-        // FutureOr<int?> keeps its static type after a null assertion.
-        final accepted = nullOnly && result == source
-            ? operand
-            : test.refinement(true) ?? operand;
-        final done = Block(result == .voidType ? [] : [result]);
-        entry.finish(
-          Branch(
-            test,
-            Jump(done, result == .voidType ? [] : [accepted]),
-            Jump(failed),
-          ),
-        );
-        done.finish(
-          Return(result == .voidType ? null : done.parameters.single),
-        );
-        blocks.add(done);
-      }
-      failed.finish(Throw(failed.emit(Construct(_initializer, []))));
-      return IrFunction(target, blocks);
-    }).target;
+    final check = _checks.putIfAbsent(
+      (operand.type, instruction.type, nullOnly),
+      () {
+        final parameters = <TypeParameterType>[];
+        void include(TypeParameterType parameter) {
+          if (parameters.contains(parameter)) return;
+          parameters.add(parameter);
+          parameter.bound.freeTypeParameters.forEach(include);
+        }
+
+        operand.type.freeTypeParameters.forEach(include);
+        instruction.type.freeTypeParameters.forEach(include);
+        final environment = {
+          for (final parameter in parameters)
+            parameter: TypeParameterType(parameter.name),
+        };
+        for (final parameter in parameters) {
+          environment[parameter]!.initializeBound(
+            parameter.bound.substitute(environment),
+          );
+        }
+        final source = operand.type.substitute(environment),
+            result = instruction.type.substitute(environment);
+        final kind = layouts.typeTest(source, nullOnly ? .object : result);
+        final target = FunctionTarget(_uri, 'check${_checks.length}', result, [
+          source,
+        ], typeParameters: environment.values);
+        final entry = Block(target.parameterTypes), failed = Block();
+        final blocks = [entry, failed];
+        if (result == .never || kind == .constantFalse) {
+          entry.finish(Jump(failed));
+        } else {
+          final operand = entry.parameters.single;
+          final test = entry.emit(
+            TypeTest(operand, nullOnly ? .object : result),
+          );
+          // FutureOr<int?> keeps its static type after a null assertion.
+          final accepted = nullOnly && result == source
+              ? operand
+              : test.refinement(true) ?? operand;
+          final done = Block(result == .voidType ? [] : [result]);
+          entry.finish(
+            Branch(
+              test,
+              Jump(done, result == .voidType ? [] : [accepted]),
+              Jump(failed),
+            ),
+          );
+          done.finish(
+            Return(result == .voidType ? null : done.parameters.single),
+          );
+          blocks.add(done);
+        }
+        failed.finish(Throw(failed.emit(Construct(_initializer, []))));
+        return (body: IrFunction(target, blocks), parameters: parameters);
+      },
+    );
+    return (target: check.body.target, parameters: check.parameters);
   }
 }

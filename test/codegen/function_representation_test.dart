@@ -2,11 +2,50 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/function_liveness.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
+import 'package:dartc/src/codegen/checked_casts.dart';
 import 'package:test/test.dart';
 
 void main() {
   final uri = Uri.parse('memory:representation');
   final layouts = ProgramLayout([]);
+
+  test('reifying a tested type keeps actual metadata and the promoted operand live', () {
+    final t = TypeParameterType('T')
+      ..initializeBound(ValueType.object.nullable);
+    final p = TypeParameterType('P')
+      ..initializeBound(ValueType.object.nullable);
+    final box = ClassType(uri, 'Box', typeParameters: [p]);
+    final target = FunctionTarget(
+      uri,
+      'test',
+      .object.nullable,
+      [.object.nullable],
+      typeParameters: [t],
+    );
+    final entry = Block(target.parameterTypes),
+        yes = Block([
+          box.instantiate([t]),
+        ]),
+        no = Block();
+    final operand = entry.parameters.single;
+    final test = entry.emit(TypeTest(operand, box.instantiate([t])));
+    entry.finish(Branch(test, Jump(yes, [test.refinement(true)!]), Jump(no)));
+    yes.finish(Return(yes.parameters.single));
+    no.finish(Return(const Constant.nullValue()));
+    final body = FunctionRepresentation(
+      IrFunction(target, [entry, yes, no]),
+      layouts,
+      CheckedCasts(),
+    );
+    final actual = body.instructions[entry]!
+        .whereType<ObjectRuntimeType>()
+        .single;
+    final reify = body.instructions[entry]!.whereType<DirectCall>().single;
+    final flow = FunctionLiveness(body, body.inputsOf, {reify, test});
+    expect(body.inputsOf(test), [actual, reify]);
+    expect(flow.acrossCalls[reify], containsAll([actual, operand]));
+    expect(flow.acrossCalls[test], contains(operand));
+  });
 
   test('equivalent type templates share one ordered argument environment', () {
     final t = TypeParameterType('T')
@@ -35,7 +74,11 @@ void main() {
     entry.emit(ReifyType(a));
     entry.emit(ReifyType(b));
     entry.finish(const Return());
-    final body = FunctionRepresentation(IrFunction(target, [entry]), layouts);
+    final body = FunctionRepresentation(
+      IrFunction(target, [entry]),
+      layouts,
+      CheckedCasts(),
+    );
     final calls = body.instructions[entry]!.whereType<DirectCall>().toList();
     expect(calls, hasLength(2));
     expect(calls[0].target, same(calls[1].target));
@@ -66,7 +109,11 @@ void main() {
     final entry = Block(caller.parameterTypes);
     final call = entry.emit(DirectCall(accept, entry.parameters));
     entry.finish(const Return());
-    final body = FunctionRepresentation(IrFunction(caller, [entry]), layouts);
+    final body = FunctionRepresentation(
+      IrFunction(caller, [entry]),
+      layouts,
+      CheckedCasts(),
+    );
     final boxes = body.boxes.keys.toList();
     final flow = FunctionLiveness(body, body.inputsOf, {...boxes, call});
     expect(boxes, hasLength(2));
@@ -96,6 +143,7 @@ void main() {
     final body = FunctionRepresentation(
       IrFunction(target, [entry, taken, other]),
       layouts,
+      CheckedCasts(),
     );
     final flow = FunctionLiveness(body, body.inputsOf, body.boxes.keys.toSet());
     final branch = body.ends[entry] as Branch;
@@ -105,6 +153,30 @@ void main() {
     expect(flow.omitted, body.introduced);
     expect(flow.acrossCalls, isEmpty);
     expect(flow.liveIn[entry], {entry.parameters.first});
+  });
+
+  test('shared edges keep separate physical conversion operands', () {
+    final target = FunctionTarget(uri, 'sharedEdge', .object, [
+      .boolean,
+      .integer,
+    ]);
+    final entry = Block(target.parameterTypes), done = Block([.object]);
+    final edge = Jump(done, [entry.parameters.last]);
+    entry.finish(Branch(entry.parameters.first, edge, edge));
+    done.finish(Return(done.parameters.single));
+    final body = FunctionRepresentation(
+      IrFunction(target, [entry, done]),
+      layouts,
+      CheckedCasts(),
+    );
+    final branch = body.ends[entry] as Branch;
+    expect(branch.ifTrue.target, isNot(same(branch.ifFalse.target)));
+    for (final edge in [branch.ifTrue, branch.ifFalse]) {
+      final transfer = body.ends[edge.target] as Jump;
+      expect(body.argumentsOf(transfer), [
+        body.instructions[edge.target]!.single,
+      ]);
+    }
   });
 
   test(
@@ -138,6 +210,7 @@ void main() {
       final body = FunctionRepresentation(
         IrFunction(target, [entry, success, failure]),
         layouts,
+        CheckedCasts(),
       );
       final selected = body.ends[entry] as Invoke;
       final normalEdge = selected.onReturn!.target,
@@ -177,7 +250,11 @@ void main() {
     entry.finish(
       Throw(entry.parameters.first, stackTrace: entry.parameters.last),
     );
-    final body = FunctionRepresentation(IrFunction(target, [entry]), layouts);
+    final body = FunctionRepresentation(
+      IrFunction(target, [entry]),
+      layouts,
+      CheckedCasts(),
+    );
     final box = body.boxes.keys.single;
     final flow = FunctionLiveness(body, body.inputsOf, {box});
     final end = body.ends[entry] as Throw;
