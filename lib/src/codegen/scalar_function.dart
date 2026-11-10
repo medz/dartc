@@ -5,6 +5,7 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
+import 'package:dartc/layout.dart';
 
 import 'function_allocation.dart';
 import 'function_emitter.dart';
@@ -19,7 +20,7 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
     IrFunction function,
     void Function(Fixup, FunctionTarget) call,
     ProgramLayout layouts,
-    void Function(Fixup, ObjectConstant) constant,
+    void Function(Fixup, Constant) constant,
   ) {
     final selection = FunctionSelection(function, emitter, layouts);
     final allocation = FunctionAllocation(
@@ -54,6 +55,9 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
           final native = instruction is NativeCall ? instruction : null;
           final arguments =
               native?.arguments ?? (instruction as DirectCall).inputs;
+          final parameterTypes = native == null
+              ? (instruction as DirectCall).target.parameterTypes
+              : null;
           allocation.flush(clobbered: layout.clobberedRegisters);
           // Stage stack words before populating registers that the scratch may alias.
           if (layout.stackBytes != 0) {
@@ -62,10 +66,11 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
                 final value = arguments[i];
                 final scratch = emitter.allocatableRegisters.firstWhere(
                   (r) =>
-                      emitter.bank(r) == selection.bank(value.type) &&
+                      emitter.bank(r) ==
+                          selection.bank(parameterTypes?[i] ?? value.type) &&
                       layout.clobberedRegisters.contains(r),
                 );
-                allocation.load(value, scratch);
+                allocation.load(value, scratch, asType: parameterTypes?[i]);
                 final type = native?.signature.parameters[i];
                 if (type != null && type.isSinglePrecision) {
                   adapter.convert(scratch, type, intoDart: false);
@@ -85,7 +90,7 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
               if (location case RegisterArgument(:final register)
                   when emitter.bank(register) == bank) {
                 final value = arguments[i];
-                allocation.load(value, register);
+                allocation.load(value, register, asType: parameterTypes?[i]);
                 if (native != null) {
                   adapter.convert(
                     register,
@@ -113,35 +118,80 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
             allocation.release(native.pointer);
             emitter.callRegister(address);
           }
-          if (layout.result case final result?) {
+          if (layout.result case final result?
+              when instruction.type != .voidType) {
             if (native != null) {
               adapter.convert(result, native.signature.result, intoDart: true);
             }
-            allocation.define(instruction, result);
+            if (native == null &&
+                layouts.representation(
+                      (instruction as DirectCall).target.returnType,
+                    ) !=
+                    layouts.representation(instruction.type)) {
+              final destination = allocation.allocate(
+                selection.bank(instruction.type),
+                preferred: result,
+              );
+              emitter.loadMemory(
+                destination,
+                result,
+                offset: ObjectLayout.alignment,
+                bytes: 8,
+                signed: false,
+              );
+              allocation.define(instruction, destination);
+            } else {
+              allocation.define(instruction, result);
+            }
           }
         } else if (instruction case LoadField(:final receiver, :final field)) {
           final source = allocation.read(receiver);
           allocation.release(receiver);
-          final destination = allocation.allocate(
-            selection.bank(instruction.type),
+          final stored = allocation.allocate(
+            selection.bank(field.type),
             preferred: source,
           );
           emitter.loadMemory(
-            destination,
+            stored,
             source,
             offset: layouts.fieldOffset(field),
             bytes: 8,
             signed: false,
           );
+          var destination = stored;
+          if (layouts.representation(field.type) !=
+              layouts.representation(instruction.type)) {
+            if (selection.bank(instruction.type) != emitter.bank(stored)) {
+              destination = allocation.allocate(
+                selection.bank(instruction.type),
+              );
+              allocation.releaseTemporary(stored);
+            }
+            emitter.loadMemory(
+              destination,
+              stored,
+              offset: ObjectLayout.alignment,
+              bytes: 8,
+              signed: false,
+            );
+          }
           allocation.define(instruction, destination);
         } else if (instruction case TypeView(:final operand)) {
-          final source = allocation.read(operand);
-          allocation.release(operand);
-          final destination = allocation.allocate(
-            selection.bank(instruction.type),
-            preferred: source,
-          );
-          emitter.move(destination, source);
+          final R destination;
+          if (layouts.representation(operand.type) ==
+              layouts.representation(instruction.type)) {
+            final source = allocation.read(operand);
+            allocation.release(operand);
+            destination = allocation.allocate(
+              selection.bank(instruction.type),
+              preferred: source,
+            );
+            emitter.move(destination, source);
+          } else {
+            destination = allocation.allocate(selection.bank(instruction.type));
+            allocation.load(operand, destination, asType: instruction.type);
+            allocation.release(operand);
+          }
           allocation.define(instruction, destination);
         } else if (instruction case PointerOffset(
           :final pointer,
@@ -283,7 +333,16 @@ final class ScalarFunction<R extends Object>(final FunctionEmitter<R> emitter) {
       switch (block.end) {
         case Return(:final value):
           if (selection.entry.result case final result?) {
-            emitter.move(result, allocation.read(value!));
+            if (layouts.representation(value!.type) ==
+                layouts.representation(function.target.returnType)) {
+              emitter.move(result, allocation.read(value));
+            } else {
+              allocation.load(
+                value,
+                result,
+                asType: function.target.returnType,
+              );
+            }
           }
           if (allocation.frame case final frame?) {
             emitter.epilogue(frame);

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
@@ -174,6 +176,17 @@ void main() {
       const Constant.floating(double.nan).structuralKey,
       const Constant.floating(double.nan).structuralKey,
     );
+    final keys = <Object>{};
+    for (final bits in [
+      0x7ff8000000000001,
+      0x7ff8000000000002,
+      0xfff8000000000001,
+    ]) {
+      final value = (ByteData(8)..setUint64(0, bits)).getFloat64(0);
+      expect(value.isNaN, isTrue);
+      keys.add(Constant.floating(value).structuralKey);
+    }
+    expect(keys, hasLength(3));
   });
 
   test('constructor keys normalize applied owner and proper aliases', () {

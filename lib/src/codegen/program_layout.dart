@@ -19,13 +19,26 @@ final class ProgramLayout(IrProgram program) {
   }
 
   /// Checks transfers before a machine word loses its semantic type.
-  void checkTransfer(ValueType source, ValueType destination) {
-    if (representation(source) != representation(destination)) {
-      throw UnsupportedError(
-        'Native representation conversion: $source to $destination',
-      );
+  void checkTransfer(
+    ValueType source,
+    ValueType destination, {
+    bool constant = false,
+  }) {
+    final from = representation(source), to = representation(destination);
+    // IR proves assignment or generic substitution; checked casts are separate.
+    if (from == to ||
+        from == .reference && isBoxable(destination) ||
+        to == .reference &&
+            (source == .boolean || constant && isBoxable(source))) {
+      return;
     }
+    throw UnsupportedError(
+      'Native representation conversion: $source to $destination',
+    );
   }
+
+  bool isBoxable(ValueType type) =>
+      type == .integer || type == .boolean || type == .floating;
 
   ClassStorage storageOf(ClassType type) {
     final declaration = type.declaration;

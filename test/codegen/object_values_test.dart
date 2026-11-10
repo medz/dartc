@@ -102,8 +102,7 @@ void main() {
       );
     });
 
-    test('${generator.target} rejects implicit boxing at every transfer', () {
-      const value = Constant.integer(7);
+    test('${generator.target} rejects dynamic boxing at every transfer', () {
       final callee = FunctionTarget(library, 'accept', .object, [.object]);
       final targetBody = Block(callee.parameterTypes);
       targetBody.finish(Return(targetBody.parameters.single));
@@ -116,8 +115,11 @@ void main() {
         'initial',
         'write',
       ]) {
-        final declaration = FunctionTarget(library, operation, .object, []);
-        final body = Block(), join = Block([.object]);
+        final declaration = FunctionTarget(library, operation, .object, [
+          .integer,
+        ]);
+        final body = Block(declaration.parameterTypes), join = Block([.object]);
+        final value = body.parameters.single;
         final blocks = [body];
         Value result = value;
         switch (operation) {
@@ -156,7 +158,7 @@ void main() {
     });
 
     test(
-      '${generator.target} requires storage and rejects generic unboxing',
+      '${generator.target} requires storage and supports boxed generic fields',
       () {
         final missing = _returning(library, 'missing', first, base);
         expect(
@@ -179,19 +181,17 @@ void main() {
         final body = Block(declaration.parameterTypes);
         body.finish(Return(body.emit(LoadField(item, body.parameters.single))));
         expect(
-          () => generator.generate(
-            IrProgram(classes, [
-              IrFunction(declaration, [body]),
-            ]),
-            definitions: [declaration],
-          ),
-          throwsA(
-            isA<UnsupportedError>().having(
-              (e) => e.message,
-              'reason',
-              contains('representation conversion'),
-            ),
-          ),
+          generator
+              .generate(
+                IrProgram(classes, [
+                  IrFunction(declaration, [body]),
+                ]),
+                definitions: [declaration],
+              )
+              .sections
+              .single
+              .kind,
+          SectionKind.code,
         );
         final boxedInteger = _returning(
           library,
@@ -200,17 +200,15 @@ void main() {
           integers,
         );
         expect(
-          () => generator.generate(
-            IrProgram(classes, [boxedInteger]),
-            definitions: [boxedInteger.target],
-          ),
-          throwsA(
-            isA<UnsupportedError>().having(
-              (e) => e.message,
-              'reason',
-              contains('representation conversion'),
-            ),
-          ),
+          generator
+              .generate(
+                IrProgram(classes, [boxedInteger]),
+                definitions: [boxedInteger.target],
+              )
+              .sections
+              .last
+              .kind,
+          SectionKind.readOnlyData,
         );
       },
     );

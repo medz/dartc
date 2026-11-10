@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dartc/interop.dart';
 
 import 'core_types.dart';
@@ -36,7 +38,9 @@ sealed class const Constant(super.type) extends Value {
     TypeConstant(:final representedType) => (TypeConstant, representedType),
     ScalarConstant(:final type, :final value) => (
       type,
-      value is double ? value.toString() : value,
+      value is double
+          ? (ByteData(8)..setFloat64(0, value)).getUint64(0)
+          : value,
     ),
     final FunctionConstant value => _functionConstantKey(value),
     RecordConstant(:final type, :final fields) => (

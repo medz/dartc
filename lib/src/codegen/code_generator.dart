@@ -17,8 +17,9 @@ abstract interface class CodeGenerator() {
   /// linking. Unsupported operations fail before an artifact is returned.
   /// Object constants require their class and inherited field definitions in
   /// [program]. Equal constants share storage within the generated module;
-  /// references cannot be exported as native pointers. Transfers requiring
-  /// boxing or unboxing remain unsupported.
+  /// references cannot be exported as native pointers. Scalar constants and
+  /// booleans can enter reference storage, and statically known scalar values
+  /// can be unboxed. Boxing runtime integers and doubles remains unsupported.
   ///
   /// [entryPoint] adds a process entry with the given link symbol. It
   /// calls a synchronous, parameterless Dart body and exits successfully after

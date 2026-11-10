@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:dartc/abi.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/layout.dart';
 
 import 'function_emitter.dart';
 import 'function_selection.dart';
@@ -14,7 +15,7 @@ final class FunctionAllocation<R extends Object>(
   final IrFunction function,
   final FunctionEmitter<R> emitter,
   final FunctionSelection<R> selection,
-  final void Function(ObjectConstant, R) loadObject,
+  final void Function(Constant, R) loadObject,
 ) {
   final _owners = <Value, Block>{};
   final _blockUses = <Block, Map<Value, int>>{};
@@ -180,14 +181,61 @@ final class FunctionAllocation<R extends Object>(
 
   /// Stores a value in its activation's fixed local slot.
   void writeCell(Value cell, Value value) {
-    final register = read(value);
+    final type = (cell.type as CellType).content;
+    if (selection.layouts.representation(value.type) ==
+        selection.layouts.representation(type)) {
+      emitter.storeStack(read(value), _slot(cell));
+      release(value);
+      return;
+    }
+    final register = allocate(selection.bank(type));
+    load(value, register, asType: type);
     emitter.storeStack(register, _slot(cell));
     release(value);
+    releaseTemporary(register);
   }
 
-  /// Loads a constant or a saved value into an explicitly chosen register.
-  void load(Value value, R destination, {Iterable<R> except = const []}) {
-    if (value case ScalarConstant(value: final int number)) {
+  /// Transfers a value using the representation required by [asType].
+  void load(
+    Value value,
+    R destination, {
+    Iterable<R> except = const [],
+    ValueType? asType,
+  }) {
+    final from = selection.layouts.representation(value.type);
+    final to = selection.layouts.representation(asType ?? value.type);
+    if (from != to) {
+      if (to == .reference) {
+        if (value is Constant) {
+          loadObject(value, destination);
+        } else {
+          assert(value.type == .boolean);
+          final no = emitter.label(), done = emitter.label();
+          load(value, destination, except: except);
+          emitter.jumpIfZero(destination, no);
+          loadObject(const Constant.boolean(true), destination);
+          emitter.jump(done);
+          emitter.bind(no);
+          loadObject(const Constant.boolean(false), destination);
+          emitter.bind(done);
+        }
+      } else {
+        final source = emitter.bank(destination) == .general
+            ? destination
+            : allocate(.general, except: except);
+        load(value, source, except: except);
+        emitter.loadMemory(
+          destination,
+          source,
+          offset: ObjectLayout.alignment,
+          bytes: 8,
+          signed: false,
+        );
+        if (source != destination) releaseTemporary(source);
+      }
+    } else if (_registers[value] case final register?) {
+      emitter.move(destination, register);
+    } else if (value case ScalarConstant(value: final int number)) {
       emitter.loadImmediate(destination, number);
     } else if (value case ScalarConstant(value: final bool flag)) {
       emitter.loadImmediate(destination, flag ? 1 : 0);
@@ -271,10 +319,11 @@ final class FunctionAllocation<R extends Object>(
   /// Assigns block parameters simultaneously after [flush], using one register.
   void copyArguments(Jump edge) {
     for (final (i, argument) in edge.arguments.indexed) {
+      final type = edge.target.parameters[i].type;
       final scratch = emitter.allocatableRegisters.lastWhere(
-        (r) => emitter.bank(r) == selection.bank(argument.type),
+        (r) => emitter.bank(r) == selection.bank(type),
       );
-      load(argument, scratch);
+      load(argument, scratch, asType: type);
       emitter.storeStack(scratch, _stagingOffset + i * 8);
     }
     for (final (i, parameter) in edge.target.parameters.indexed) {

@@ -18,6 +18,7 @@ import '../test/abi/fixtures/floating_frames.dart';
 import '../test/abi/fixtures/stack_calls.dart';
 import '../test/codegen/fixtures/control_flow.dart';
 import '../test/codegen/fixtures/object_values.dart';
+import '../test/codegen/fixtures/boxed_values.dart';
 import '../test/linker/fixtures/functions.dart';
 import '../test/linker/fixtures/calls.dart';
 import '../test/linker/fixtures/symbols.dart';
@@ -206,6 +207,7 @@ Future<void> main(List<String> args) async {
       objectValues(target),
       functions(target, {'object_touch': 123}),
     ], assets.library('codegen/object_values'));
+    await shared([boxedValues(target)], assets.library('codegen/boxed_values'));
     final inputs = [
       functions(target, {'first': 40}),
       functions(target, {'second': 2}),

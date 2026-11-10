@@ -29,11 +29,15 @@
 
 ## 原生执行范围
 
-`CodeGenerator` 支持已检查 IR 中的不可变 `ObjectConstant`、直接 `LoadField`、同表示的 `TypeView`，以及对象引用的直接调用、参数、返回、分支和循环传递。字段可以存储 int、bool、double、null 或嵌套常量对象；继承字段及不同声明库的同名私有字段分别保留。普通 getter 和方法仍保留虚派发语义，不能用直接读取字段代替。
+`CodeGenerator` 支持已检查 IR 中的不可变 `ObjectConstant`、直接 `LoadField`、`TypeView`，以及对象引用的直接调用、参数、返回、分支和循环传递。字段可以存储 int、bool、double、null 或嵌套常量对象；继承字段及不同声明库的同名私有字段分别保留。普通 getter 和方法仍保留虚派发语义，不能用直接读取字段代替。
 
-单个生成模块中的同类型、同字段值常量共用存储；负零与正零、不同具体类型保持各自身份。泛型字段按声明类型确定存储，支持引用类型实参；需要标量装箱或拆箱的常量、字段及传值明确拒绝。跨模块常量身份统一、动态分配、GC、完整类型元数据与检查、虚派发和完整源码类的原生执行仍是缺口。此处的 IR 原生路径不表示上表的全部行为已能生成机器码。
+单个生成模块中的同类型、同字段值常量共用存储；负零与正零、不同 NaN 位模式及不同具体类型保持各自身份。double 身份保留二进制表示，见 [identical 契约](https://api.dart.dev/dart-core/identical.html)与[常量身份验证](../test/ir/constants_test.dart)。
+
+泛型字段按声明类型确定存储，类型参数字段保存引用。int/double 常量及 bool 值可以装箱进入参数、返回值、分支和局部存储；泛型字段、成员调用及静态类型界限已确定的标量可以拆箱。泛型调用按声明的表示传值，具体化后的结果再转换；具体化为 void 的结果可以丢弃。运行时产生的 int/double 装箱、跨模块常量身份统一、动态分配、GC、完整类型元数据与检查、虚派发和完整源码类的原生执行仍是缺口。此处的 IR 原生路径不表示上表的全部行为已能生成机器码。
 
 [布局契约](../test/layout/object_layout_test.dart)、[常量身份与表示检查](../test/codegen/object_values_test.dart)和[原生对象引用验证](../test/codegen/object_values_native_test.dart)覆盖字段、具体类型身份、嵌套引用、寄存器与栈参数、调用保存、循环交换及 null。
+
+[标量装箱验证](../test/codegen/boxed_values_native_test.dart)覆盖 int 边界、负零、次正规数、无穷及不同 NaN 载荷，检查泛型字段、成员返回、引用栈参数和循环中的精确值，以及 bool 装箱与各类传值位置的拆箱。
 
 ## 规范依据
 

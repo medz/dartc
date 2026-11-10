@@ -14,50 +14,67 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
   final _constants = <Object, int>{};
   final _types = <ClassType, int>{};
 
-  int addressOf(ObjectConstant value) {
+  int addressOf(Constant value) {
     final key = value.structuralKey;
     if (_constants[key] case final symbol?) return symbol;
-    final type = value.type as ClassType, storage = layouts.storageOf(type);
-    if (storage.fields.length != value.fields.length ||
-        storage.fields.any((f) => !value.fields.containsKey(f))) {
-      throw ArgumentError('Incomplete native constant storage: $type');
+    final ClassStorage? storage;
+    final ObjectLayout layout;
+    if (value is ObjectConstant) {
+      storage = layouts.storageOf(value.type as ClassType);
+      layout = storage.layout;
+      if (storage.fields.length != value.fields.length ||
+          storage.fields.any((f) => !value.fields.containsKey(f))) {
+        throw ArgumentError(
+          'Incomplete native constant storage: ${value.type}',
+        );
+      }
+    } else if (value is ScalarConstant && layouts.isBoxable(value.type)) {
+      storage = null;
+      layout = .new([layouts.representation(value.type)]);
+    } else {
+      throw UnsupportedError('Native boxed constant: ${value.type}');
     }
     final offset = _words.length * 8;
-    final symbol = _reserve('constant', storage.layout.size ~/ 8);
+    final symbol = _reserve('constant', layout.size ~/ 8);
     _constants[key] = symbol;
     relocations.add(
       .address(
         1,
         offset + ObjectLayout.typeOffset,
-        _type(type, storage.layout),
+        _type(value.type as ClassType, layout),
       ),
     );
-    for (final (i, field) in storage.fields.indexed) {
-      final constant = value.fields[field]!;
-      layouts.checkTransfer(constant.type, field.type);
-      final position = offset + storage.layout.offsetOf(i);
-      switch (constant) {
-        case final ObjectConstant object:
-          relocations.add(.address(1, position, addressOf(object)));
-        case ScalarConstant(:final value):
-          _words[position ~/ 8] = switch (value) {
-            int() => value,
-            bool() => value ? 1 : 0,
-            double() => (ByteData(
-              8,
-            )..setFloat64(0, value, .little)).getInt64(0, .little),
-            null => 0,
-            _ => throw UnsupportedError(
-              'Native object field constant: ${constant.type}',
-            ),
-          };
-        default:
-          throw UnsupportedError(
-            'Native object field constant: ${constant.type}',
-          );
+    if (storage == null) {
+      _write(value, value.type, offset + layout.offsetOf(0));
+    } else {
+      for (final (i, field) in storage.fields.indexed) {
+        _write(
+          (value as ObjectConstant).fields[field]!,
+          field.type,
+          offset + layout.offsetOf(i),
+        );
       }
     }
     return symbol;
+  }
+
+  void _write(Constant value, ValueType type, int offset) {
+    layouts.checkTransfer(value.type, type, constant: value is ScalarConstant);
+    if (layouts.representation(type) == .reference && value.type != .nullType) {
+      relocations.add(.address(1, offset, addressOf(value)));
+      return;
+    }
+    _words[offset ~/ 8] = switch (value) {
+      ScalarConstant(value: final int number) => number,
+      ScalarConstant(value: final bool flag) => flag ? 1 : 0,
+      ScalarConstant(value: final double number) => (ByteData(
+        8,
+      )..setFloat64(0, number, .little)).getInt64(0, .little),
+      ScalarConstant(value: null) => 0,
+      _ => throw UnsupportedError(
+        'Native object field constant: ${value.type}',
+      ),
+    };
   }
 
   int _type(ClassType type, ObjectLayout layout) {

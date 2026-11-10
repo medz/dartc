@@ -65,7 +65,11 @@ final class FunctionSelection<R>(
             }
             layouts.representation(type.content);
             if (initial != null) {
-              layouts.checkTransfer(initial.type, type.content);
+              layouts.checkTransfer(
+                initial.type,
+                type.content,
+                constant: initial is ScalarConstant,
+              );
             }
             cells.add(instruction);
           case ReadCell(:final cell) || WriteCell(:final cell):
@@ -76,6 +80,7 @@ final class FunctionSelection<R>(
               layouts.checkTransfer(
                 value.type,
                 (cell.type as CellType).content,
+                constant: value is ScalarConstant,
               );
             }
           case NativeCall(:final signature):
@@ -92,14 +97,18 @@ final class FunctionSelection<R>(
               );
             }
             for (final (i, input) in inputs.indexed) {
-              layouts.checkTransfer(input.type, target.parameterTypes[i]);
+              layouts.checkTransfer(
+                input.type,
+                target.parameterTypes[i],
+                constant: input is ScalarConstant,
+              );
             }
             if (type != .voidType) {
               layouts.checkTransfer(target.returnType, type);
             }
             calls[instruction] = emitter.convention.classify(
               NativeSignature.types(
-                _callType(type),
+                _callType(target.returnType),
                 target.parameterTypes.map(_callType),
               ),
             );
@@ -110,7 +119,11 @@ final class FunctionSelection<R>(
             layouts.fieldOffset(field);
             layouts.checkTransfer(field.type, type);
           case TypeView(:final operand, :final type):
-            layouts.checkTransfer(operand.type, type);
+            layouts.checkTransfer(
+              operand.type,
+              type,
+              constant: operand is ScalarConstant,
+            );
           case PointerFromAddress() ||
               PointerAddress() ||
               PointerOffset() ||
@@ -234,11 +247,19 @@ final class FunctionSelection<R>(
       }
       if (block.end case Return(value: final value?)
           when function.target.returnType != .voidType) {
-        layouts.checkTransfer(value.type, function.target.returnType);
+        layouts.checkTransfer(
+          value.type,
+          function.target.returnType,
+          constant: value is ScalarConstant,
+        );
       }
       for (final edge in block.successors) {
         for (final (i, argument) in edge.arguments.indexed) {
-          layouts.checkTransfer(argument.type, edge.target.parameters[i].type);
+          layouts.checkTransfer(
+            argument.type,
+            edge.target.parameters[i].type,
+            constant: argument is ScalarConstant,
+          );
         }
       }
     }
