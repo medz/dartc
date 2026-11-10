@@ -95,7 +95,7 @@ void main() {
         layouts,
         CheckedCasts(),
         MemberCalls(IrProgram([], []), {}),
-        HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
+        HeapPlan(FrameLookup()),
       );
       var block = entry;
       final operations = <Value>[];

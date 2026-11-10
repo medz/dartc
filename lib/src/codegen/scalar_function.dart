@@ -10,41 +10,22 @@ import 'package:dartc/layout.dart';
 import 'function_allocation.dart';
 import 'function_emitter.dart';
 import 'function_selection.dart';
+import 'function_representation.dart';
 import 'storage_access.dart';
 import 'double_bits.dart';
 import 'native_adapter.dart';
-import 'program_layout.dart';
-import 'heap_plan.dart';
 import 'stack_traces.dart';
-import 'checked_casts.dart';
-import 'member_calls.dart';
-import 'numeric_operations.dart';
-import 'global_storage.dart';
 import 'heap_entry.dart';
 
 /// Generates a control-flow graph with explicit edge transfers.
 final class ScalarFunction<R extends Object>(
-  final IrFunction function,
+  FunctionRepresentation body,
   final FunctionEmitter<R> emitter,
-  final ProgramLayout layouts,
-  HeapPlan heap,
   final StackTraces traces,
-  CheckedCasts casts,
-  MemberCalls members,
-  NumericOperations arithmetic,
-  GlobalStorage globals,
 ) {
-  final selection = FunctionSelection(
-    function,
-    emitter,
-    layouts,
-    heap,
-    traces,
-    casts,
-    members,
-    arithmetic,
-    globals,
-  );
+  final function = body.function;
+  final layouts = body.layouts;
+  final selection = FunctionSelection(body, emitter);
 
   bool get hasRoots => selection.liveness.acrossCalls.values.any(
     (values) =>

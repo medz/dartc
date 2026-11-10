@@ -8,37 +8,16 @@ import 'binary_encoding.dart';
 import 'function_emitter.dart';
 import 'function_liveness.dart';
 import 'function_representation.dart';
-import 'heap_plan.dart';
-import 'program_layout.dart';
-import 'stack_traces.dart';
-import 'checked_casts.dart';
-import 'member_calls.dart';
-import 'numeric_operations.dart';
-import 'global_storage.dart';
 import 'storage_access.dart';
 import 'double_bits.dart';
 import 'reference_equality.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
 final class FunctionSelection<R>(
-  IrFunction function,
+  final FunctionRepresentation body,
   final FunctionEmitter<R> emitter,
-  final ProgramLayout layouts,
-  HeapPlan heap,
-  StackTraces traces,
-  CheckedCasts casts,
-  MemberCalls members,
-  NumericOperations arithmetic,
-  GlobalStorage globals,
 ) {
-  final body = FunctionRepresentation(
-    function,
-    layouts,
-    casts,
-    members,
-    heap,
-    captureTrace: traces.capture,
-  );
+  final layouts = body.layouts;
   final binaries =
       <
         Value,
@@ -76,6 +55,7 @@ final class FunctionSelection<R>(
   }
 
   this {
+    final function = body.function;
     if (function.bodyKind != .synchronous) {
       throw UnsupportedError(
         'Native function signature: ${function.target.name}',
@@ -103,15 +83,7 @@ final class FunctionSelection<R>(
       for (final instruction in body.instructions[block]!) {
         if (body.aliases.contains(instruction)) continue;
         if (instruction is Instruction) {
-          if (body.boxes[instruction] case final value?) {
-            _call(instruction, heap.box(body.typeOf(value)), [value]);
-            continue;
-          }
-          final target =
-              body.invocations[instruction] ??
-              arithmetic.callFor(instruction) ??
-              globals.callFor(instruction) ??
-              (instruction is DirectCall ? instruction.target : null);
+          final target = body.invocations[instruction];
           if (target != null) {
             _call(instruction, target, body.inputsOf(instruction).toList());
             continue;
@@ -154,15 +126,6 @@ final class FunctionSelection<R>(
               target: null,
               arguments: arguments,
             );
-          case Instruction() && (TypeCast() || NullCheck()):
-            _call(
-              instruction,
-              casts.targetFor(instruction, layouts).target,
-              body.inputsOf(instruction).toList(),
-            );
-          case final Construct operation:
-            final target = heap.constructors[operation]!;
-            _call(instruction, target, body.inputsOf(operation).toList());
           case ReifyType():
           case DoubleBits():
             break;
@@ -208,11 +171,7 @@ final class FunctionSelection<R>(
                 const Constant.nullValue(),
               );
             } else {
-              _call(
-                instruction,
-                layouts.relations.test,
-                body.inputsOf(instruction).toList(),
-              );
+              throw StateError('Unresolved type test.');
             }
           case PointerFromAddress() ||
               PointerAddress() ||
@@ -324,8 +283,7 @@ final class FunctionSelection<R>(
                 left is ObjectRuntimeType && left.direct;
             if (typeLiteral &&
                 layouts.representation(right.type) == .reference) {
-              _call(instruction, layouts.types.equality, [left, right]);
-              break;
+              throw StateError('Unresolved Type equality.');
             }
             if (!nullComparison &&
                 !typeLiteral &&

@@ -22,7 +22,7 @@ void main() {
       ProgramLayout([]),
       CheckedCasts(),
       MemberCalls(IrProgram([], []), {}),
-      HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
+      HeapPlan(FrameLookup()),
     );
     return FunctionLiveness(body, body.inputsOf, {
       ...body.boxes.keys,

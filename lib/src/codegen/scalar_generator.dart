@@ -11,6 +11,7 @@ import 'package:dartc/target.dart';
 
 import 'code_generator.dart';
 import 'function_emitter.dart';
+import 'program_selection.dart';
 import 'scalar_function.dart';
 import 'native_adapter.dart';
 import 'program_layout.dart';
@@ -51,271 +52,188 @@ base class ScalarCodeGenerator<R extends Object>(
         'Expected distinct exports and imports in definitions.',
       );
     }
-    final frames = FrameLookup();
-    final traces = StackTraces(frames);
-    final casts = CheckedCasts();
-    IrCallable? constructor(ValueType type) {
-      final target = program.classes
-          .where((c) => c.type == type)
-          .firstOrNull
-          ?.constructors['new'];
-      return target == null ? null : program.implementationOf(target);
+    for (final declaration in selected) {
+      for (final callee
+          in program.implementationOf(declaration)?.callees ??
+              const <FunctionTarget>[]) {
+        if (!selected.contains(callee.implementation)) {
+          throw ArgumentError('Missing call definition: ${callee.name}');
+        }
+      }
     }
-
     final sourceProgram = program;
     final sourceDefinitions = {...selected};
-    final lateErrorType = program.classes
-        .where(
-          (declaration) =>
-              declaration.type.library == Uri.parse('dart:_internal') &&
-              declaration.type.name == 'LateError',
-        )
-        .firstOrNull
-        ?.type;
-    late NumericOperations arithmetic;
-    late GlobalStorage globals;
-    late InstanceStorage instances;
-    // Helpers can reach SDK bodies with further globals or numeric operations.
-    // Close those dependencies before fixing the holder and its physical layout.
+    late final ProgramSelection resolved;
     while (true) {
+      program = sourceProgram;
+      selected
+        ..clear()
+        ..addAll(sourceDefinitions);
+      final frames = FrameLookup();
+      final traces = StackTraces(frames);
+      final casts = CheckedCasts();
+      IrCallable? constructor(ValueType type) {
+        final target = program.classes
+            .where((c) => c.type == type)
+            .firstOrNull
+            ?.constructors['new'];
+        return target == null ? null : program.implementationOf(target);
+      }
+
+      final lateErrorType = program.classes
+          .where(
+            (declaration) =>
+                declaration.type.library == Uri.parse('dart:_internal') &&
+                declaration.type.name == 'LateError',
+          )
+          .firstOrNull
+          ?.type;
       final bodies = sourceDefinitions
           .map(sourceProgram.implementationOf)
           .whereType<IrFunction>();
-      arithmetic = NumericOperations(
+      final arithmetic = NumericOperations(
         bodies,
         argumentError: constructor(.argumentError),
         unsupportedError: constructor(.unsupportedError),
       );
-      globals = GlobalStorage(
+      final globals = GlobalStorage(
         bodies,
         lateError: lateErrorType == null ? null : constructor(lateErrorType),
       );
-      instances = InstanceStorage(
+      final instances = InstanceStorage(
         bodies,
         lateError: lateErrorType == null ? null : constructor(lateErrorType),
       );
-      if (arithmetic.functions.isEmpty &&
-          globals.isEmpty &&
-          instances.functions.isEmpty) {
-        break;
-      }
       final helpers = [
         ...arithmetic.functions,
         ...globals.functions,
         ...instances.functions,
       ];
-      final expanded = IrProgram(
-        [
-          ...sourceProgram.classes,
-          if (!globals.isEmpty) globals.declaration,
-          for (final declaration in arithmetic.classes)
-            if (!sourceProgram.classes.any((c) => c.type == declaration.type))
-              declaration,
-        ],
-        [...sourceProgram.functions, ...helpers],
-        globals: sourceProgram.globals,
-        externals: [
-          ...sourceProgram.externals,
-          if (!globals.isEmpty) IrExternal(globals.address),
-        ],
-      );
-      final required = expanded.reachableFrom([
-        ...sourceDefinitions,
-        for (final function in helpers) function.target,
-      ]);
-      final discovered = required
-          .where(
-            (target) =>
-                sourceProgram.implementationOf(target) != null &&
-                !sourceDefinitions.contains(target),
-          )
-          .toList();
-      if (discovered.isEmpty) {
+      if (helpers.isNotEmpty) {
+        final expanded = IrProgram(
+          [
+            ...sourceProgram.classes,
+            if (!globals.isEmpty) globals.declaration,
+            for (final declaration in arithmetic.classes)
+              if (!sourceProgram.classes.any((c) => c.type == declaration.type))
+                declaration,
+          ],
+          [...sourceProgram.functions, ...helpers],
+          globals: sourceProgram.globals,
+          externals: [
+            ...sourceProgram.externals,
+            if (!globals.isEmpty) IrExternal(globals.address),
+          ],
+        );
+        final required = expanded.reachableFrom([
+          ...sourceDefinitions,
+          for (final function in helpers) function.target,
+        ]);
+        final discovered = required
+            .where(
+              (target) =>
+                  sourceProgram.implementationOf(target) != null &&
+                  !sourceDefinitions.contains(target),
+            )
+            .toList();
+        if (discovered.isNotEmpty) {
+          sourceDefinitions.addAll(discovered);
+          continue;
+        }
         program = expanded;
         selected
           ..clear()
           ..addAll(required);
-        break;
       }
-      sourceDefinitions.addAll(discovered);
+      final members = MemberCalls(program, selected);
+      final closures = ClosureStorage(
+        selected.map(program.implementationOf).whereType<IrCallable>(),
+        boundMethods: members.tearOffTargets,
+      );
+      final layouts = ProgramLayout(
+        [
+          ...casts.classes,
+          ...arithmetic.classes,
+          ...program.classes,
+          ...closures.classes,
+          traces.declaration,
+        ],
+        instanceStorage: instances,
+        closureStorage: closures,
+        referencedClasses: selected.expand(
+          (target) =>
+              program.implementationOf(target)?.referencedClasses ?? const [],
+        ),
+      );
+      final persistent = !globals.isEmpty && globals.hasReferences(layouts);
+      final heap = HeapPlan(frames);
+      final selection = ProgramSelection(
+        layouts,
+        heap,
+        frames,
+        traces,
+        casts,
+        members,
+        arithmetic,
+        globals,
+        instances,
+      );
+      for (final declaration in selected) {
+        final function = program.implementationOf(declaration);
+        final binding = imports[declaration];
+        if (binding != null) {
+          if (function is! IrExternal ||
+              declaration.kind.hasReceiver ||
+              declaration.typeParameters.isNotEmpty ||
+              !FfiTypes.canCall(binding.signature, declaration.signature)) {
+            throw ArgumentError(
+              'Native import requires a matching external declaration: ${declaration.name}',
+            );
+          }
+        } else if (declaration == globals.address) {
+          // The module storage address is emitted below as a leaf primitive.
+        } else if (function is! IrFunction) {
+          throw ArgumentError('Definition has no body: ${declaration.name}');
+        } else {
+          selection.include(function);
+        }
+        final export = exports[declaration];
+        if (export != null && !_matches(declaration, export.signature)) {
+          throw ArgumentError('Native signature mismatch: ${declaration.name}');
+        }
+      }
+      final missing = selection.close(persistent: persistent);
+      for (final target in missing) {
+        if (sourceProgram.implementationOf(target) == null) {
+          throw ArgumentError('Missing support dependency: ${target.name}');
+        }
+      }
+      if (missing.isNotEmpty) {
+        sourceDefinitions.addAll(sourceProgram.reachableFrom(missing));
+        continue;
+      }
+      resolved = selection;
+      break;
     }
-    final members = MemberCalls(program, selected);
-    final closures = ClosureStorage(
-      selected.map(program.implementationOf).whereType<IrCallable>(),
-      boundMethods: members.tearOffTargets,
-    );
-    final layouts = ProgramLayout(
-      [
-        ...casts.classes,
-        ...program.classes,
-        ...closures.classes,
-        traces.declaration,
-      ],
-      instanceStorage: instances,
-      closureStorage: closures,
-      referencedClasses: selected.expand(
-        (target) =>
-            program.implementationOf(target)?.referencedClasses ?? const [],
-      ),
-    );
+    final selection = resolved;
+    final layouts = selection.layouts, heap = selection.heap;
+    final globals = selection.globals, traces = selection.traces;
     final persistent = !globals.isEmpty && globals.hasReferences(layouts);
-    final heap = HeapPlan(program, selected, layouts, frames);
     final relocations = <Relocation>[];
     final nativeSymbols = <String, int>{};
     final nativeCalls = <(int, Fixup, int)>[];
     final code = BytesBuilder(copy: false), symbols = <Symbol>[];
-    final functions = <FunctionTarget, ScalarFunction<R>>{};
-    for (final declaration in selected) {
-      final function = program.implementationOf(declaration);
-      final binding = imports[declaration];
-      if (binding != null) {
-        if (function is! IrExternal ||
-            declaration.kind.hasReceiver ||
-            declaration.typeParameters.isNotEmpty ||
-            !FfiTypes.canCall(binding.signature, declaration.signature)) {
-          throw ArgumentError(
-            'Native import requires a matching external declaration: ${declaration.name}',
-          );
-        }
-      } else if (declaration == globals.address) {
-        // The module storage address is emitted below as a leaf primitive.
-      } else if (function is! IrFunction) {
-        throw ArgumentError('Definition has no body: ${declaration.name}');
-      } else {
-        functions[declaration] = ScalarFunction(
-          function,
-          _createFunction(),
-          layouts,
-          heap,
-          traces,
-          casts,
-          members,
-          arithmetic,
-          globals,
-        );
-      }
-      final export = exports[declaration];
-      if (export != null && !_matches(declaration, export.signature)) {
-        throw ArgumentError('Native signature mismatch: ${declaration.name}');
-      }
-    }
-    final generated = [
-      ...arithmetic.functions,
-      ...globals.functions,
-      ...instances.functions,
-    ];
-    Iterable<IrFunction> supportFunctions() => [
-      ...members.functions,
-      ...closures.functions,
-      ...arithmetic.functions,
-      ...globals.functions,
-      ...casts.functions,
-      ...layouts.relations.functions,
-      ...layouts.types.functions,
-    ];
-    var pending = [
-      for (final function in supportFunctions())
-        if (!functions.containsKey(function.target)) function,
-    ];
-    while (pending.isNotEmpty) {
-      generated.addAll(pending);
-      heap.include(pending, layouts);
-      for (final function in pending) {
-        selected.add(function.target);
-        functions[function.target] = ScalarFunction(
-          function,
-          _createFunction(),
-          layouts,
-          heap,
-          traces,
-          casts,
-          members,
-          arithmetic,
-          globals,
-        );
-      }
-      pending = [
-        for (final function in supportFunctions())
-          if (!functions.containsKey(function.target)) function,
-      ];
-    }
-    heap.retain({
-      for (final function in functions.values)
-        for (final call in function.selection.calls.values) ?call.target,
-    });
-    final capture = functions.values.any(
-      (function) => function.selection.calls.values.any(
-        (call) => call.target == traces.capture,
-      ),
-    );
-    final exceptions = functions.values.any(
-      (function) => function.selection.body.ends.values.any(
-        (end) => end is Throw || end is Invoke,
-      ),
-    );
-    final traceFunctions = capture
-        ? traces.functions(heap.heap.invalid)
-        : <IrFunction>[];
-    heap.include(traceFunctions, layouts);
-    final managed = persistent || !heap.isEmpty || exceptions;
-    final primitives = managed
-        ? heap.primitives
-        : {
-            if (functions.values.any(
-              (function) => function.selection.calls.values.any(
-                (call) => call.target == heap.heap.invalid,
-              ),
-            ))
-              heap.heap.invalid,
-          };
-    if (managed || generated.isNotEmpty) {
-      final support = [
-        ...generated,
-        if (managed) ...heap.functions,
-        if (managed) frames.function,
-        ...traceFunctions,
-      ];
-      IrProgram(
-        [
-          if (casts.functions.isNotEmpty) ...casts.classes,
-          if (!globals.isEmpty) globals.declaration,
-          ...arithmetic.classes,
-          ...closures.classes,
-          ...layouts.types.classes,
-          ...layouts.relations.classes,
-          if (capture) traces.declaration,
-        ],
-        support,
-        externals: [
-          for (final target in [
-            heap.heap.map,
-            heap.heap.unmap,
-            heap.heap.invalid,
-          ])
-            IrExternal(target),
-          if (!globals.isEmpty) IrExternal(globals.address),
-        ],
-      );
-      selected.addAll([
-        ...support.map((f) => f.target),
-        ...primitives,
-        if (capture) traces.capture,
-      ]);
-      for (final function in support) {
-        if (functions.containsKey(function.target)) continue;
-        functions[function.target] = ScalarFunction(
-          function,
-          _createFunction(),
-          layouts,
-          heap,
-          traces,
-          casts,
-          members,
-          arithmetic,
-          globals,
-        );
-      }
-    }
+    final functions = {
+      for (final body in selection.functions.values)
+        body.function.target: ScalarFunction(body, _createFunction(), traces),
+    };
+    final capture = selection.capture, managed = selection.managed;
+    final primitives = selection.primitives;
+    selected.addAll([
+      ...functions.keys,
+      ...primitives,
+      if (capture) traces.capture,
+    ]);
     final cleanup = FunctionTarget(
       Uri.parse('dartc:globals'),
       'release',

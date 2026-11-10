@@ -14,21 +14,21 @@ import 'frame_lookup.dart';
 import 'type_values.dart';
 
 /// Generates allocation wrappers with precise roots and optional initialization.
-final class HeapPlan(
-  IrProgram program,
-  Set<FunctionTarget> selected,
-  ProgramLayout layouts,
-  FrameLookup frames,
-) {
-  final constructors = <Construct, FunctionTarget>{};
+final class HeapPlan(FrameLookup frames) {
   final _factories =
       <FunctionTarget, ({FunctionTarget? initializer, ClassType type})>{};
   final _boxes = <ValueType, FunctionTarget>{};
   final _initializers = <FunctionTarget, FunctionTarget>{};
   final heap = HeapFunctions(frames);
 
-  bool get isEmpty => _factories.isEmpty;
   List<IrFunction> get functions => heap.functions;
+
+  bool allocates(Iterable<FunctionTarget> calls) =>
+      calls.any(_factories.containsKey);
+
+  /// Source initializers called by the retained allocation wrappers.
+  Iterable<FunctionTarget> get initializers =>
+      _factories.values.map((entry) => entry.initializer).nonNulls;
 
   FunctionTarget box(ValueType type) => _boxes.putIfAbsent(type, () {
     final target = FunctionTarget(
@@ -200,27 +200,6 @@ final class HeapPlan(
     emitter.loadStack(source.result!, objectOffset);
     emitter.epilogue(frame);
     return emitter.finish();
-  }
-
-  this {
-    include([
-      for (final target in selected)
-        if (program.implementationOf(target) case final IrFunction body) body,
-    ], layouts);
-  }
-
-  void include(Iterable<IrFunction> functions, ProgramLayout layouts) {
-    for (final body in functions) {
-      for (final block in body.blocks) {
-        for (final operation in [
-          ...block.instructions,
-          if (block.end case Invoke(:final operation)) operation,
-        ].whereType<Construct>()) {
-          final initializer = operation.initializer;
-          constructors[operation] = constructorFor(initializer, layouts);
-        }
-      }
-    }
   }
 
   FunctionTarget constructorFor(

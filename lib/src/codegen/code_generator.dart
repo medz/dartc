@@ -15,6 +15,8 @@ abstract interface class CodeGenerator() {
   /// [IrProgram.reachableFrom] selects these for a closed program. Required class
   /// definitions include inherited fields and SDK error constructors used by
   /// generated checks. Unsupported operations fail before returning an artifact.
+  /// Generated support functions and their source dependencies are resolved
+  /// before native instruction selection.
   ///
   /// [imports] binds external declarations to native signatures; [exports]
   /// exposes supplied Dart bodies. The caller supplies native implementations

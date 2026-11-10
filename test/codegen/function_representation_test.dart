@@ -30,7 +30,7 @@ void main() {
         layouts,
         CheckedCasts(),
         members,
-        HeapPlan(IrProgram([], []), {}, layouts, FrameLookup()),
+        HeapPlan(FrameLookup()),
       );
       final read = StorageRead(field, receiver);
       final write = StorageWrite(field, receiver, read);
@@ -125,7 +125,7 @@ void main() {
         ProgramLayout(program.classes),
         CheckedCasts(),
         MemberCalls(program, program.reachableFrom([function.target])),
-        HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
+        HeapPlan(FrameLookup()),
       );
       final selected = body.invocations.keys.single;
       expect(body.invocations[selected], same(implementation));
@@ -177,7 +177,7 @@ void main() {
         ]),
         CheckedCasts(),
         members,
-        HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
+        HeapPlan(FrameLookup()),
       );
       final invoke = body.ends[entry] as Invoke;
       expect(invoke.operation, isA<TypeCast>());
@@ -242,7 +242,7 @@ void main() {
       layouts,
       CheckedCasts(),
       members,
-      HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
+      HeapPlan(FrameLookup()),
     );
     final actual = body.instructions[entry]!
         .whereType<ObjectRuntimeType>()
@@ -286,7 +286,7 @@ void main() {
       layouts,
       CheckedCasts(),
       members,
-      HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
+      HeapPlan(FrameLookup()),
     );
     final calls = body.instructions[entry]!.whereType<DirectCall>().toList();
     expect(calls, hasLength(2));
@@ -323,7 +323,7 @@ void main() {
       layouts,
       CheckedCasts(),
       members,
-      HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
+      HeapPlan(FrameLookup()),
     );
     final boxes = body.boxes.keys.toList();
     final flow = FunctionLiveness(body, body.inputsOf, {...boxes, call});
@@ -356,7 +356,7 @@ void main() {
       layouts,
       CheckedCasts(),
       members,
-      HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
+      HeapPlan(FrameLookup()),
     );
     final flow = FunctionLiveness(body, body.inputsOf, body.boxes.keys.toSet());
     final branch = body.ends[entry] as Branch;
@@ -382,7 +382,7 @@ void main() {
       layouts,
       CheckedCasts(),
       members,
-      HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
+      HeapPlan(FrameLookup()),
     );
     final branch = body.ends[entry] as Branch;
     expect(branch.ifTrue.target, isNot(same(branch.ifFalse.target)));
@@ -427,7 +427,7 @@ void main() {
         layouts,
         CheckedCasts(),
         members,
-        HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
+        HeapPlan(FrameLookup()),
       );
       final selected = body.ends[entry] as Invoke;
       final normalEdge = selected.onReturn!.target,
@@ -472,7 +472,7 @@ void main() {
       layouts,
       CheckedCasts(),
       members,
-      HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
+      HeapPlan(FrameLookup()),
     );
     final box = body.boxes.keys.single;
     final flow = FunctionLiveness(body, body.inputsOf, {box});

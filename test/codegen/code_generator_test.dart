@@ -72,6 +72,30 @@ void main() {
           () => generator.generate(program, definitions: [entry]),
           throwsArgumentError,
         );
+        final withSupport = Block();
+        withSupport.emit(
+          NumericRoundToDouble(const Constant.floating(1.5), .round),
+        );
+        withSupport.finish(
+          Return(
+            withSupport.emit(
+              DirectCall(callee, [
+                const Constant.integer(1),
+                const Constant.integer(2),
+              ]),
+            ),
+          ),
+        );
+        expect(
+          () => generator.generate(
+            IrProgram([], [
+              ...arithmeticProgram.functions,
+              IrFunction(entry, [withSupport]),
+            ]),
+            definitions: [entry],
+          ),
+          throwsArgumentError,
+        );
         expect(
           () => generator.generate(
             program,

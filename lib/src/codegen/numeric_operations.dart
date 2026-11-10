@@ -26,12 +26,8 @@ final class NumericOperations(
     }
   }
 
-  List<IrClass> get classes => [
-    if (_functions.keys.any(
-      (op) => op == .truncateDivide || op == .modulo || op == .remainder,
-    ))
-      IrClass(CoreTypes.integerDivisionByZeroException, []),
-  ];
+  // Helper types must be available before their bodies are selected lazily.
+  final classes = [IrClass(CoreTypes.integerDivisionByZeroException, [])];
 
   Iterable<IrFunction> get functions => _functions.values
       .followedBy(_quotients.values)
