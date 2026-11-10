@@ -200,6 +200,35 @@ int genericAliasConstructor(int seed) {
   return constructor<int>(seed).stored;
 }
 
+GenericHost<T> Function(T) lexicalConstructor<T>() => GenericHost<T>.new;
+
+class ConstructorValues<T>() {
+  final field = GenericHost<T>.new;
+  late final lazy = GenericHost<T>.new;
+  GenericHost<T> Function(T) get getter => GenericHost<T>.new;
+  GenericHost<T> Function(T) method() => GenericHost<T>.new;
+}
+
+int genericLexicalConstructorChecks(int seed) {
+  final ConstructorValues<num> wide = ConstructorValues<int>();
+  var checks = 0;
+  for (var kind = 0; kind < 4; kind++) {
+    try {
+      final make = switch (kind) {
+        0 => wide.field,
+        1 => wide.lazy,
+        2 => wide.getter,
+        _ => wide.method(),
+      };
+      tick(301);
+      make(seed);
+    } on TypeError {
+      checks += 10;
+    }
+  }
+  return lexicalConstructor<int>()(seed).stored + checks;
+}
+
 class GenericFactory<T> {
   final T stored;
   GenericFactory._(this.stored);

@@ -142,6 +142,8 @@ final class ObjectHashCode(
 }
 
 /// A canonical tear-off of a top-level function, static method or constructor.
+///
+/// All types must be closed. Use [InstantiateFunction] to apply lexical types.
 final class FunctionConstant._(
   /// The referenced declaration, including the source factory for a redirect.
   final FunctionTarget target,
@@ -183,6 +185,17 @@ final class FunctionConstant._(
                       target.tearOffSignature(ownerType: ownerType))
                   .instantiate(typeArguments),
       ) {
+    if (type.freeTypeParameters.isNotEmpty ||
+        typeArguments?.any((type) => type.freeTypeParameters.isNotEmpty) ==
+            true ||
+        constructorTypeArguments != null &&
+            FunctionType(
+              .voidType,
+              constructorTypeArguments!,
+              typeParameters: constructorSignature?.typeParameters ?? const [],
+            ).freeTypeParameters.isNotEmpty) {
+      throw ArgumentError('Function constants require closed types.');
+    }
     ownerType?.validateTypeArguments();
     if (constructorAlias != null &&
         (constructorSignature == null ||
@@ -476,8 +489,9 @@ sealed class Instruction(super.type) extends Value {
     ReadCell(cell: Value(type: CellType(isLate: true))) => _call,
     CheckLibraryLoaded() ||
     LoadGlobal(global: GlobalVariable(isLate: true)) ||
+    LoadField(field: InstanceField(isLate: true)) ||
     LoadField(
-      field: InstanceField(isLate: true),
+      field: InstanceField(requiresReadCheck: true),
     ) => const {.readsStorage, .mayThrow},
     LoadGlobal() ||
     LoadField() ||

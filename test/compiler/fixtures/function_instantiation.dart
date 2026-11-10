@@ -132,3 +132,132 @@ int useThrow(Identity generic, int count) {
 
 @Export<Int64 Function(Int64)>()
 int exceptions(int count) => useThrow(throwing, count);
+
+abstract class Package<T> {
+  factory make(T value, {int mark}) = Parcel<T>;
+  T get value;
+  int get mark;
+}
+
+class Parcel<T>(@override final T value, {@override final int mark = 7})
+    implements Package<T> {
+  new named(T value, {int mark = 9}) : this(value, mark: mark);
+}
+
+typedef ParcelMaker<T> = Parcel<T> Function(T, {int mark});
+typedef PhantomParcel<T, S> = Parcel<T>;
+ParcelMaker<T> parcelFor<T>() => Parcel<T>.new;
+ParcelMaker<T> inferredParcelFor<T>() => Parcel.new;
+ParcelMaker<T> namedParcelFor<T>() => Parcel<T>.named;
+ParcelMaker<int> phantomParcelFor<T>() => PhantomParcel<int, T>.new;
+ParcelMaker<Parcel<T>?> nestedParcelFor<T>() => Parcel<Parcel<T>?>.new;
+ParcelMaker<T> Function() closedParcelFor<T>() =>
+    () => Parcel<T>.new;
+Package<T> Function(T, {int mark}) packageFor<T>() => Package<T>.make;
+
+class Maker<T>() {
+  final ParcelMaker<T> stored = Parcel<T>.new;
+  late final ParcelMaker<T> lazy = Parcel<T>.new;
+  ParcelMaker<T> get make => Parcel<T>.new;
+  ParcelMaker<T> method() => Parcel<T>.new;
+}
+
+class IntMaker() extends Maker<int>;
+
+extension type Token<T>(T value);
+Token<T> Function(T) tokenFor<T>() => Token<T>.new;
+
+@Export<Int64 Function(Int64)>()
+int lexicalConstructors(int count) {
+  final direct = parcelFor<int>(), inferred = inferredParcelFor<int>();
+  final named = namedParcelFor<int>(), phantom = phantomParcelFor<String>();
+  final nested = nestedParcelFor<int>(), closed = closedParcelFor<int>()();
+  final owner = IntMaker();
+  final inherited = owner.make, factory = packageFor<int>();
+  final token = tokenFor<int>();
+  collect(count);
+  final Object actual = nested;
+  return (direct == Parcel<int>.new &&
+              direct == inferred &&
+              direct == inherited &&
+              direct == owner.stored &&
+              direct == owner.lazy &&
+              direct == owner.method() &&
+              direct == closed &&
+              direct == phantom &&
+              named == Parcel<int>.named &&
+              factory == Package<int>.make &&
+              factory != direct
+          ? 1000000
+          : 0) +
+      (actual is ParcelMaker<Parcel<int>?> ? 100000 : 0) +
+      direct(1).mark * 10000 +
+      named(2).mark * 1000 +
+      factory(3).mark * 100 +
+      nested(direct(4), mark: 5).value!.value * 10 +
+      token(6).value;
+}
+
+ParcelMaker<Parcel<int>?>? savedConstructor;
+
+@Export<Int64 Function(Int64)>()
+int keepConstructor(int count) {
+  savedConstructor = nestedParcelFor<int>();
+  collect(count);
+  return savedConstructor == Parcel<Parcel<int>?>.new ? 1 : 0;
+}
+
+@Export<Int64 Function(Int64)>()
+int callConstructor(int count) {
+  final make = savedConstructor!;
+  collect(count);
+  return make(Parcel<int>(4)).value!.value * 10 + make(null).mark;
+}
+
+class Broken<T>(T value) {
+  this {
+    events = events * 10 + 2;
+    throw value as Object;
+  }
+}
+
+Broken<T> Function(T) brokenFor<T>() => Broken<T>.new;
+int constructorArgument(int value) {
+  events = events * 10 + 1;
+  return value;
+}
+
+@Export<Int64 Function(Int64)>()
+int constructorFailures(int count) {
+  events = 0;
+  final make = brokenFor<int>();
+  collect(count);
+  try {
+    make(constructorArgument(4));
+  } on int catch (value) {
+    events = events * 10 + value;
+  } finally {
+    events = events * 10 + 5;
+  }
+  final thrown = events;
+  final Maker<num> maker = IntMaker();
+  var checks = 0;
+  for (var kind = 0; kind < 4; kind++) {
+    events = 0;
+    try {
+      final make = switch (kind) {
+        0 => maker.make,
+        1 => maker.stored,
+        2 => maker.lazy,
+        _ => maker.method(),
+      };
+      events = 1;
+      collect(count);
+      make(1.5);
+      return -1;
+    } on TypeError {
+      checks = checks * 10 + events;
+    }
+  }
+  return thrown * 10 + checks;
+}

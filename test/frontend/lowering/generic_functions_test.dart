@@ -90,6 +90,7 @@ void main() {
     compareIntegers([
       ('genericConstructorFunction', sdk.genericConstructorFunction),
       ('genericAliasConstructor', sdk.genericAliasConstructor),
+      ('genericLexicalConstructorChecks', sdk.genericLexicalConstructorChecks),
       ('genericFactoryConstructor', sdk.genericFactoryConstructor),
       (
         'genericReorderedAliasConstructor',

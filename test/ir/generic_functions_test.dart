@@ -272,7 +272,7 @@ void main() {
   );
 
   test(
-    'phantom type arguments in nested constants and defaults cannot escape',
+    'function constants require closed types even when arguments are unused',
     () {
       final t = parameter('T');
       final foreign = parameter('T');
@@ -283,19 +283,25 @@ void main() {
         [],
         typeParameters: [t],
       );
-      final illegal = FunctionConstant(phantom, typeArguments: [foreign]);
-      final recordType = RecordType([illegal.type]);
-      final root = FunctionTarget(library, 'returnRecord', recordType, []);
-      final entry = Block([])
-        ..finish(Return(RecordConstant(recordType, [illegal])));
-      expect(() => IrFunction(root, [entry]), throwsStateError);
-      final defaultTarget = FunctionTarget(library, 'withDefault', .voidType, [
-        illegal.type,
-      ], optionalPositional: 1);
-      final body = Block(defaultTarget.parameterTypes)..finish(const Return());
       expect(
-        () => IrFunction(defaultTarget, [body], defaults: {0: illegal}),
-        throwsStateError,
+        () => FunctionConstant(phantom, typeArguments: [foreign]),
+        throwsArgumentError,
+      );
+      final owner = ClassType(library, 'Owner', typeParameters: [t]);
+      final constructor = FunctionTarget(
+        library,
+        'new',
+        .voidType,
+        [],
+        owner: owner,
+        kind: .initializer,
+      );
+      expect(
+        () => FunctionConstant(
+          constructor,
+          ownerType: owner.instantiate([foreign]),
+        ),
+        throwsArgumentError,
       );
       final generic = FunctionConstant(phantom);
       final goodTarget = FunctionTarget(
@@ -306,6 +312,17 @@ void main() {
       );
       final good = Block([])..finish(Return(generic));
       expect(() => IrFunction(goodTarget, [good]), returnsNormally);
+      final entry = Block();
+      final applied = entry.emit(InstantiateFunction(generic, [foreign]));
+      entry.finish(Return(applied));
+      final lexical = FunctionTarget(
+        library,
+        'lexical',
+        applied.type,
+        [],
+        typeParameters: [foreign],
+      );
+      expect(() => IrFunction(lexical, [entry]), returnsNormally);
     },
   );
 
@@ -497,14 +514,14 @@ void main() {
       [ValueType.integer],
       typeParameters: [phantom],
     );
-    final constant = FunctionConstant(
-      ctor,
-      constructorSignature: hidden,
-      constructorAlias: (library, 'Hidden'),
+    expect(
+      () => FunctionConstant(
+        ctor,
+        constructorSignature: hidden,
+        constructorAlias: (library, 'Hidden'),
+      ),
+      throwsArgumentError,
     );
-    final root = FunctionTarget(library, 'badAlias', constant.type, []);
-    final body = Block([])..finish(Return(constant));
-    expect(() => IrFunction(root, [body]), throwsStateError);
   });
 
   test(

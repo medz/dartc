@@ -8,6 +8,7 @@
 | 必需/可选位置、命名、required 参数 | 支持顶层、静态和实例调用，以及构造器。按源码顺序计算实际传入的参数，省略的参数由最终调用目标补齐。默认值支持标量、record、集合、普通用户对象和常量函数值。见[默认参数](../test/frontend/lowering/fixtures/defaults.dart)和[工厂转发样本](../test/frontend/lowering/fixtures/nominal/factories.dart)。 |
 | 字段、super、私有命名形参 | 支持构造器中绑定到实例字段或父类形参的参数。私有命名字段形参及主构造器声明形参使用对应的公开命名键；跨库调用、super 转发、默认值、required、构造器函数值与 dynamic 调用已有 [SDK 行为对照](../test/frontend/lowering/private_named_parameters_test.dart)。普通函数的私有命名形参由 analyzer 拒绝。 |
 | `covariant` 参数 | 实例分派按选中的实现和实际类型实参检查形参类型。类类型参数的协变出现也触发入口检查。协变收窄失败在进入方法体前抛出 TypeError。 |
+| 成员结果中的非协变类类型参数 | 方法、getter 和字段结果类型在逆变或不变位置使用类类型参数时，按调用方的接收者视图检查返回值。检查失败在成员读取或方法调用完成前抛出 TypeError，后续实参及调用方副作用不执行。普通与 late 字段使用相同的读取检查。见[IR 行为验证](../test/ir/effects_test.dart)与[源码对照](../test/frontend/lowering/generic_functions_test.dart)。 |
 | 顶层 getter/setter | 支持显式 getter/setter、函数值 getter 的调用及复合更新。支持顶层及静态存储的合成访问器，初始化表达式复用普通函数/闭包 lowering。见[访问器样本](../test/frontend/lowering/fixtures/static_accessors.dart)。 |
 | 同步局部/匿名函数 | 支持递归局部函数、嵌套函数与逃逸闭包。闭包可捕获参数、局部变量、其他局部函数、实例接收者，以及外层类和函数的类型环境；泛型闭包还保留自身类型参数。同一次调用中的闭包共享被捕获变量的后续写入。见[闭包样本](../test/frontend/lowering/fixtures/closures.dart)。 |
 | 泛型顶层函数、方法的直接调用 | 支持顶层、静态和实例方法的显式及推断调用，包括 super、虚派发、callable object 和不同类型实参的递归。类和函数类型实参分别传递，入口检查遵循运行时实现及其界限。 |
@@ -33,7 +34,9 @@
 
 泛型函数值支持显式及上下文推断的运行时实例化，包括顶层函数、闭包、绑定方法与构造器。类型实参可来自外层函数或类的词法环境；实例化检查实际泛型界限，后续调用保留原函数的默认参数、协变检查、捕获状态和异常行为。相等比较区分源声明、闭包或接收者身份及类型实参，包括未出现在函数签名中的实参；运行时实例化与对应常量实例化保持相等，非等价构造器别名保持自己的身份。见[函数实例化原生验证](../test/compiler/function_instantiation_test.dart)。
 
-此范围不包含含自由词法类型参数的构造器直接提取、dynamic/noSuchMethod 调用、捕获的 `late` 绑定与初始化体存储，也不包含 FFI 回调。函数值经 Object/dynamic 视图的通用相等分派和 hashCode 尚未接通。一般局部 `late` 的原生绑定语义仍待实现；上表的 IR 支持不表示这些路径均可原生执行。
+构造器可直接使用词法类型实参提取，例如 `C<T>.new` 和 `C<T>.named`，也可由上下文推断实参。支持类与函数类型环境、嵌套类型、实例化的类型别名、重定向工厂和 extension type 构造器；函数值保留默认参数及源声明身份，可经闭包或全局变量保存并在 GC 后调用。读取更宽接收者中的构造器回调时，先完成结果类型检查，再执行调用方后续副作用。见同一[原生验证](../test/compiler/function_instantiation_test.dart)。
+
+此范围不包含 dynamic/noSuchMethod 调用、捕获的 `late` 绑定与初始化体存储，也不包含 FFI 回调。函数值经 Object/dynamic 视图的通用相等分派和 hashCode 尚未接通。一般局部 `late` 的原生绑定语义仍待实现；上表的 IR 支持不表示这些路径均可原生执行。
 
 ## 异步参考执行器范围
 

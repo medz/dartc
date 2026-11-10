@@ -182,6 +182,15 @@ final class FunctionTarget(
   /// Explicit method parameters checked covariantly at entry.
   Set<int> get covariantParameters => _covariantParameters;
 
+  /// Whether a member result needs checking against the caller's receiver view.
+  bool get requiresResultCheck =>
+      kind.isVirtual &&
+      owner!.typeParameters.isNotEmpty &&
+      returnType.requiresCovariantCheck(
+        owner!.typeParameters.toSet(),
+        forResult: true,
+      );
+
   /// The runtime type of a tear-off. Covariant parameters reify as `Object?`.
   late final FunctionType reifiedSignature = covariantParameters.isEmpty
       ? signature
@@ -374,6 +383,14 @@ final class InstanceField(
 }) {
   /// Whether source assignment can write the storage outside a constructor.
   bool get isWritable => !isFinal || isLate && initializer == null;
+
+  /// Whether reading through a wider receiver view can fail a type check.
+  bool get requiresReadCheck =>
+      owner.typeParameters.isNotEmpty &&
+      type.requiresCovariantCheck(
+        owner.typeParameters.toSet(),
+        forResult: true,
+      );
 
   /// Substitutes type arguments along the superclass chain that supplies this slot.
   ValueType typeFor(ClassType receiver) {

@@ -110,30 +110,6 @@ final class IrInterpreter(
     if (environment.isEmpty) return value;
     ValueType resolve(ValueType type) => type.substitute(environment);
     Constant child(Constant value) => _resolvedConstant(value, environment);
-    if (value is FunctionConstant) {
-      final original = value.constructorSignature;
-      final signature = original == null
-          ? null
-          : resolve(original) as FunctionType;
-      final scoped = {
-        ...environment,
-        if (original != null)
-          for (final (i, p) in original.typeParameters.indexed)
-            p: signature!.typeParameters[i],
-      };
-      return FunctionConstant(
-        value.target,
-        ownerType: value.ownerType == null
-            ? null
-            : resolve(value.ownerType!) as ClassType,
-        typeArguments: value.typeArguments?.map(resolve),
-        constructorSignature: signature,
-        constructorAlias: value.constructorAlias,
-        constructorTypeArguments: value.constructorTypeArguments?.map(
-          (t) => t.substitute(scoped),
-        ),
-      );
-    }
     return switch (value) {
       ScalarConstant() || TypeConstant() || FunctionConstant() => value,
       RecordConstant(:final type, :final fields) => RecordConstant(
@@ -2112,6 +2088,9 @@ final class IrInterpreter(
               : field.isLate
               ? _loadLateField(read(receiver) as _Instance, field)
               : (read(receiver) as _Instance).fields[field];
+          if (field.requiresReadCheck) {
+            values[op] = checkType(op.type, values[op], cast: true);
+          }
         case InstanceCall(
           :final typeArguments,
           :final member,
@@ -2159,6 +2138,9 @@ final class IrInterpreter(
             {for (final e in named.entries) e.key: read(e.value)},
             typeArguments.map(resolve).toList(),
           );
+          if (member.requiresResultCheck) {
+            values[op] = checkType(op.type, values[op], cast: true);
+          }
         case MakeRecord(:final type, :final inputs):
           values[op] = _RecordValue(
             resolve(type) as RecordType,
@@ -2261,6 +2243,9 @@ final class IrInterpreter(
             for (final (i, parameter) in target.typeParameters.indexed)
               parameter: resolve(typeArguments[i]),
           });
+          if (target.requiresResultCheck) {
+            values[op] = checkType(op.type, values[op], cast: true);
+          }
       }
     }
 

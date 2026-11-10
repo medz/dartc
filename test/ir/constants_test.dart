@@ -287,16 +287,7 @@ void main() {
     () {
       final foreign = TypeParameterType('Foreign')
         ..initializeBound(ValueType.object.nullable);
-      final t = TypeParameterType('T')
-        ..initializeBound(ValueType.object.nullable);
-      final phantom = FunctionTarget(
-        library,
-        'phantom',
-        .integer,
-        [],
-        typeParameters: [t],
-      );
-      final hidden = FunctionConstant(phantom, typeArguments: [foreign]);
+      final hidden = SequenceConstant(CoreTypes.listOf(foreign), []);
       final holder = ClassType(library, 'Holder');
       final field = InstanceField(
         holder,

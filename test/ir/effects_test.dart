@@ -6,6 +6,31 @@ import '../support/ir_interpreter.dart';
 void main() {
   const n = Constant.integer(1);
   final uri = Uri.parse('memory:effects');
+  test('non-covariant field results can throw before their value is used', () {
+    final t = TypeParameterType('T')..initializeBound(.object.nullable);
+    final owner = ClassType(uri, 'Callbacks', typeParameters: [t]);
+    final callback = FunctionType(.boolean, [t]);
+    final field = InstanceField(owner, 'callback', callback);
+    final getter = FunctionTarget(
+      uri,
+      'callback',
+      callback,
+      [],
+      owner: owner,
+      kind: .getter,
+    );
+    final receiver = Block([
+      owner.instantiate([.number]),
+    ]).parameters.single;
+    expect(field.requiresReadCheck, isTrue);
+    expect(getter.requiresResultCheck, isTrue);
+    expect(callback.requiresCovariantCheck({t}), isFalse);
+    expect(LoadField(field, receiver).effects, {
+      Effect.readsStorage,
+      Effect.mayThrow,
+    });
+    expect(InstanceField(owner, 'value', t).requiresReadCheck, isFalse);
+  });
   test('ordinary storage, lazy initialization and arbitrary calls stay distinguishable', () {
     final owner = ClassType(uri, 'C');
     final slot = InstanceField(owner, 'value', .integer);
@@ -96,4 +121,70 @@ void main() {
       expect(IrInterpreter(program, {}).run(function, []), isTrue);
     },
   );
+  test('ordinary and late callback reads check the receiver view', () {
+    final t = TypeParameterType('T')..initializeBound(.object.nullable);
+    final owner = ClassType(uri, 'Callbacks', typeParameters: [t]);
+    final callback = FunctionType(.boolean, [t]);
+    final target = FunctionTarget(uri, 'accept', .boolean, [.integer]);
+    final implementation = IrFunction(target, [
+      Block(target.parameterTypes)
+        ..finish(const Return(Constant.boolean(true))),
+    ]);
+    for (final late in [false, true]) {
+      final field = InstanceField(owner, 'callback', callback, isLate: late);
+      final ctor = FunctionTarget(
+        uri,
+        'new',
+        .voidType,
+        [callback],
+        owner: owner,
+        kind: .initializer,
+      );
+      final init = Block(ctor.parameterTypes);
+      init.emit(StoreField(field, init.parameters.first, init.parameters.last));
+      init.finish(const Return());
+      for (final type in [ValueType.integer, ValueType.number]) {
+        final entry = Block();
+        final instance = entry.emit(
+          Construct(ctor, [
+            FunctionConstant(target),
+          ], instantiatedType: owner.instantiate([.integer])),
+        );
+        final receiver = entry.emit(
+          TypeView(instance, owner.instantiate([type])),
+        );
+        final done = Block()..finish(const Return(Constant.boolean(false)));
+        final failed = Block([.object]);
+        failed.finish(
+          Return(failed.emit(TypeTest(failed.parameters.single, .typeError))),
+        );
+        entry.finish(
+          Invoke(
+            LoadField(field, receiver),
+            onReturn: Jump(done),
+            onThrow: Jump(failed, [UnwindValue.exception]),
+          ),
+        );
+        final function = IrFunction(FunctionTarget(uri, 'read', .boolean, []), [
+          entry,
+          done,
+          failed,
+        ]);
+        final program = IrProgram(
+          [
+            IrClass(owner, [field], constructors: [ctor]),
+          ],
+          [
+            implementation,
+            IrFunction(ctor, [init]),
+            function,
+          ],
+        );
+        expect(
+          IrInterpreter(program, {}).run(function, []),
+          type == ValueType.number,
+        );
+      }
+    }
+  });
 }

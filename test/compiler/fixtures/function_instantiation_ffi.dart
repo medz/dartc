@@ -19,6 +19,22 @@ final class FunctionInstantiation() {
       .lookupFunction<Int64 Function(Int64), int Function(int)>('methods');
   late final exceptions = _library
       .lookupFunction<Int64 Function(Int64), int Function(int)>('exceptions');
+  late final lexicalConstructors = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'lexicalConstructors',
+      );
+  late final keepConstructor = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'keepConstructor',
+      );
+  late final callConstructor = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'callConstructor',
+      );
+  late final constructorFailures = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'constructorFailures',
+      );
 
   void close() => _library.close();
 }

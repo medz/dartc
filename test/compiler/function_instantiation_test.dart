@@ -39,4 +39,19 @@ void main() {
       expect(native.exceptions(count), 245);
     }
   });
+  test('constructor tear-offs retain lexical types, aliases and defaults', () {
+    for (final count in [0, 40000]) {
+      expect(native.lexicalConstructors(count), 1179746);
+      expect(native.constructorFailures(count), 12450);
+    }
+  });
+  test(
+    'lexical constructor values survive collection across native entries',
+    () {
+      for (final count in [0, 40000]) {
+        expect(native.keepConstructor(count), 1);
+        expect(native.callConstructor(count), 47);
+      }
+    },
+  );
 }

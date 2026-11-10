@@ -293,6 +293,19 @@ final class FunctionRepresentation(
       return capture;
     }
 
+    Value checkResult(Value value, ValueType type, List<Value> into) {
+      final raw = TypeView(value, .object.nullable);
+      final check = TypeCast(raw, type);
+      into.add(raw);
+      final signature = casts.targetFor(check, layouts);
+      _operands[check] = [
+        raw,
+        for (final parameter in signature.parameters) _reify(parameter, into),
+      ];
+      into.add(check);
+      return check;
+    }
+
     void runtimeType(ObjectRuntimeType instruction, List<Value> into) {
       final source = instruction.operand.type;
       if (source == .nullType || layouts.representation(source) != .reference) {
@@ -864,9 +877,12 @@ final class FunctionRepresentation(
             }
             append(call);
             final conversions = <Value>[];
-            final value = result == .voidType
+            var value = result == .voidType
                 ? null
                 : convert(call, result, conversions);
+            if (value != null && member?.requiresResultCheck == true) {
+              value = checkResult(value, result, conversions);
+            }
             conversions.forEach(append);
             ends[current] = Jump(join, [?value]);
           }
@@ -919,7 +935,13 @@ final class FunctionRepresentation(
           }
 
           final join = Block(
-            instruction is LoadField ? [instruction.type] : [],
+            instruction is LoadField
+                ? [
+                    field.requiresReadCheck
+                        ? .object.nullable
+                        : instruction.type,
+                  ]
+                : [],
           );
           blocks.add(join);
           if (instruction case StoreField(:final value)) {
@@ -988,9 +1010,15 @@ final class FunctionRepresentation(
             }
           }
           block = join;
-          body = instructions[block] = [instruction];
+          body = instructions[block] = [];
+          final pending = <Value>[];
+          final values = instruction is LoadField && field.requiresReadCheck
+              ? [checkResult(join.parameters.single, instruction.type, pending)]
+              : join.parameters;
+          pending.forEach(append);
+          body.add(instruction);
           aliases.add(instruction);
-          _operands[instruction] = join.parameters;
+          _operands[instruction] = values;
           continue;
         }
         if (instruction
@@ -1030,6 +1058,23 @@ final class FunctionRepresentation(
           } else {
             body.add(instruction);
           }
+          continue;
+        }
+        if (instruction case LoadField(:final field, :final receiver)
+            when field.requiresReadCheck) {
+          final pending = <Value>[];
+          final value = checkResult(
+            _load(field, receiver, pending),
+            instruction.type,
+            pending,
+          );
+          for (final operation in pending) {
+            block = appendTo(block, operation, handler);
+          }
+          body = instructions[block]!;
+          body.add(instruction);
+          aliases.add(instruction);
+          _operands[instruction] = [value];
           continue;
         }
         if (instruction case ReifyType(:final template)) {

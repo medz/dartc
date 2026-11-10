@@ -180,8 +180,29 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         unit,
         expression,
       );
+      final resolved = expression.staticType! as dart.FunctionType;
+      final arguments = resolved.typeParameters.isNotEmpty
+          ? const <ValueType>[]
+          : context.typeArguments(
+              (resolved.returnType as dart.InterfaceType).typeArguments,
+              expression,
+            );
+      if (resolved.typeParameters.isEmpty &&
+          arguments.isNotEmpty &&
+          (arguments.any((type) => type.freeTypeParameters.isNotEmpty) ||
+              context
+                  .typeArguments(
+                    constructorName.type.typeArguments?.arguments.map(
+                      (type) => type.type!,
+                    ),
+                    expression,
+                  )
+                  .any((type) => type.freeTypeParameters.isNotEmpty))) {
+        return context.emit(
+          InstantiateFunction(FunctionConstant(target), arguments),
+        );
+      }
       if (constructorName.element!.enclosingElement is ExtensionTypeElement) {
-        final resolved = expression.staticType! as dart.FunctionType;
         if (constructorName.type.element case final TypeAliasElement alias
             when resolved.typeParameters.isNotEmpty) {
           return context.bindings.constructorAliasConstant(
@@ -193,15 +214,9 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         }
         return FunctionConstant(
           target,
-          typeArguments: resolved.typeParameters.isNotEmpty
-              ? null
-              : context.typeArguments(
-                  (resolved.returnType as dart.InterfaceType).typeArguments,
-                  expression,
-                ),
+          typeArguments: resolved.typeParameters.isNotEmpty ? null : arguments,
         );
       }
-      final resolved = expression.staticType! as dart.FunctionType;
       final signature = context.typeOf(resolved, expression) as FunctionType;
       final generic = signature.typeParameters.isNotEmpty;
       final alias = constructorName.type.element;

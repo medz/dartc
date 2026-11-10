@@ -90,11 +90,6 @@ final class ClosureStorage(
           : value.typeArguments == null
           ? original
           : original.instantiate(value.typeArguments!);
-      if (signature.freeTypeParameters.isNotEmpty ||
-          value.typeArguments?.any((t) => t.freeTypeParameters.isNotEmpty) ==
-              true) {
-        throw UnsupportedError('Native tear-off needs a lexical environment.');
-      }
       var target = value.target.implementation;
       final defaults = defaultsOf(target);
       List<ValueType> arguments = value.typeArguments ?? target.typeParameters;

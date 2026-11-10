@@ -83,7 +83,7 @@ void main() {
     },
   );
 
-  test('unused target arguments still require a valid lexical scope', () {
+  test('unused target arguments cannot introduce free types in constants', () {
     final phantom = FunctionTarget(
       library,
       'phantom',
@@ -94,20 +94,18 @@ void main() {
     final x = TypeParameterType('X')..initializeBound(ValueType.number);
     final foreign = TypeParameterType('Foreign')
       ..initializeBound(ValueType.number);
-    final alias = FunctionConstant(
-      phantom,
-      constructorSignature: FunctionType(
-        ValueType.integer,
-        [],
-        typeParameters: [x],
-      ),
-      constructorAlias: (library, 'Phantom'),
-      constructorTypeArguments: [foreign],
-    );
-    final caller = FunctionTarget(library, 'invalid', alias.type, []);
     expect(
-      () => IrFunction(caller, [Block([])..finish(Return(alias))]),
-      throwsStateError,
+      () => FunctionConstant(
+        phantom,
+        constructorSignature: FunctionType(
+          ValueType.integer,
+          [],
+          typeParameters: [x],
+        ),
+        constructorAlias: (library, 'Phantom'),
+        constructorTypeArguments: [foreign],
+      ),
+      throwsArgumentError,
     );
   });
 }

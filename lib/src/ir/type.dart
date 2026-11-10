@@ -154,10 +154,14 @@ sealed class const ValueType() {
     };
   }
 
-  /// Checks whether these class variables require a covariant parameter check.
+  /// Checks whether these class variables require a runtime variance check.
   ///
   /// Variables in nested function bounds require a check in either variance.
-  bool requiresCovariantCheck(Set<TypeParameterType> parameters) {
+  /// Set [forResult] for a field or return type instead of a parameter type.
+  bool requiresCovariantCheck(
+    Set<TypeParameterType> parameters, {
+    bool forResult = false,
+  }) {
     bool visit(ValueType type, Set<TypeParameterType> scope, bool positive) {
       if (type is FunctionType) {
         final free = scope.difference(type.typeParameters.toSet());
@@ -182,7 +186,7 @@ sealed class const ValueType() {
       };
     }
 
-    return visit(this, parameters, true);
+    return visit(this, parameters, !forResult);
   }
 
   /// Free lexical type-variable identities mentioned by this type expression.
