@@ -31,7 +31,7 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 
 `as`、后缀 `!` 及已降为类型转换的隐式检查支持上述具体类型。函数类型参数可用于 `is T`、`is! T`、`is T?` 和 `as T`，也可组成检查所用的泛型类型。成功保留原值，失败抛出 TypeError，可由 `on TypeError` 或 `on Error` 捕获并正常经过 `finally`；转换前的表达式只求值一次。标量转为泛型引用时保留整数和浮点值，成功结果在回收后仍可读取。`as Never` 始终失败，`as Never?` 仅接受 null；`FutureOr<int?>` 的 `!` 在保留静态类型的同时拒绝 null。见[转换、隐式检查与清理顺序对照](../test/compiler/type_checks_test.dart)及[开放类型检查](../test/compiler/type_arguments_test.dart)。
 
-int、double 和 bool 值均可装箱为引用，包括运行时计算的数值；仍被使用的装箱值在调用及回收后保持不变，见[计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)。地址为零的非空 FFI Pointer 值不等于 Dart null；指针的运行时类型为 `Pointer<Never>`，因此元素类型不同的 Pointer 类型测试仍可成功。静态元素类型继续决定 FFI 签名和访存大小。类类型参数环境、FFI Pointer 与泛型引用的表示转换，以及尚无原生存储的函数和 record 值仍是缺口；支持这些类型作为泛型实参不表示对应值已可原生执行。跨模块托管值传递尚未接通。
+int、double 和 bool 值均可装箱为引用，包括运行时计算的数值；仍被使用的装箱值在调用及回收后保持不变，见[计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)。地址为零的非空 FFI Pointer 值不等于 Dart null；指针的运行时类型为 `Pointer<Never>`，因此元素类型不同的 Pointer 类型测试仍可成功。静态元素类型继续决定 FFI 签名和访存大小。FFI Pointer 与泛型引用的表示转换，以及尚无原生存储的函数和 record 值仍是缺口；支持这些类型作为泛型实参不表示对应值已可原生执行。跨模块托管值传递尚未接通。
 
 泛型实参中的函数子类型检查保留绑定变量的词法作用域、界限、参数逆变和返回值协变。继承类型代入不能捕获嵌套函数的绑定变量；递归界限不能导致无限检查。固定样本包含 `X extends FutureOr<X>` 和 `FunctionProjection<T> extends Box<T Function<U>(U)>`，见[子类型规则验证](../test/codegen/type_relations_test.dart)与[原生行为验证](../test/compiler/type_arguments_test.dart)。macOS ARM64 的 SDK 3.13.7 JIT/AOT 对样本中两项递归界限检查触发 SIGILL，对上述继承投影在嵌套泛型函数中的检查返回 false。按函数子类型与直接超接口规则，投影样本应返回 true；这些样本单独断言规范结果，其余样本继续与 SDK 对照。
 
@@ -45,7 +45,11 @@ int、double 和 bool 值均可装箱为引用，包括运行时计算的数值�
 
 macOS ARM64 的 Dart SDK 3.13.7 JIT/AOT 对泛型函数界限存在规范化差异：`U Function<U extends T>(U Function<V extends U>(V, U))` 在运行时以 Never 实化，与直接指定 Never 的闭合字面量比较返回 false；与显式写出全部 Never 的规范形式比较返回 true。`T Function<T extends Never>(T)` 与 `Never Function<T extends Never>(Never)` 的常量形式相等，但作为类型实参传给 `Type reify<T>() => T` 后不相等。空安全规范要求 Type 相等和常量身份使用 NORM；dartc 对上述等价类型保持相等。原生 `bounds` 样本及[类型值验证](../test/frontend/lowering/type_values_test.dart)分别保留这些案例，规范化契约见 [IR 验证](../test/ir/type_values_test.dart)与[常量池验证](../test/codegen/program_layout_test.dart)。
 
-类类型参数环境、开放泛型构造、泛型字段写入检查、跨模块 Type 规范身份，以及 Type 的通用成员派发、hashCode 和 toString 仍未接通。泛型函数不能直接作为 FFI 导出；原生入口须通过普通 Dart 函数提供明确的 FFI 签名。
+开放泛型构造 `C<T>()` 保留实际实参，初始化器和直接成员调用从实际接收者读取所属类的实参，包含继承中的重排、嵌套代入及与方法类型参数同名的声明。factory 使用调用方请求的类类型环境。构造参数和类型环境在分配、栈传参及回收后仍有效，见[原生类环境对照](../test/compiler/class_types_test.dart)与[继承投影契约](../test/codegen/type_relations_test.dart)。
+
+泛型字段写入按被写对象的实际类型检查，不能用调用者的类环境或变量的宽化静态类型替代。检查失败抛出 TypeError，保留旧值并进入原异常处理器；成功后才写入。见[字段写入验证](../test/codegen/dynamic_boxes_native_test.dart)和[检查期间存活及控制流契约](../test/codegen/function_representation_test.dart)。普通源码实例成员派发仍未接通，此处支持 IR 的直接字段访问及源码 super 调用。
+
+跨模块 Type 规范身份，以及 Type 的通用成员派发、hashCode 和 toString 仍未接通。泛型函数不能直接作为 FFI 导出；原生入口须通过普通 Dart 函数提供明确的 FFI 签名。
 
 ## analyzer 元数据边界
 

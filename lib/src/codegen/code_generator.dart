@@ -21,7 +21,7 @@ abstract interface class CodeGenerator() {
   /// booleans can enter reference storage, and statically known scalar values
   /// can be unboxed. Computed numeric boxes participate in heap collection.
   /// Direct generic calls carry reified type arguments through the normal
-  /// calling convention and root records. [ReifyType] reads or combines function
+  /// calling convention and root records. [ReifyType] reads or combines class and function
   /// type arguments into nullable, nominal, FutureOr, function and record types.
   /// Type literals are canonical within the module. Equality with a literal,
   /// reified type or [ObjectRuntimeType] as receiver compares normalized structures.
@@ -29,16 +29,17 @@ abstract interface class CodeGenerator() {
   /// Native runtimeType override dispatch remains unsupported; it is never
   /// bypassed by a direct object-header read. Generic function
   /// bounds use the actual enclosing function arguments, including nested and
-  /// chained binders. Class type environments and general Type member dispatch
-  /// remain unsupported. Generic functions cannot be native exports.
+  /// chained binders. Class environments follow the actual receiver's inherited
+  /// arguments; factories receive the requested owner type. General Type member
+  /// dispatch remains unsupported. Generic functions cannot be native exports.
   /// Modules with references live across calls include read-only stack records
   /// keyed by relocated return addresses. These describe initialized reference
   /// slots and frame linkage; native entry wrappers terminate the frame walk.
   /// Updated root slots are reloaded after calls. [Construct] allocates objects,
   /// initializes their fields and calls their initializer; unreachable objects
   /// are reclaimed during allocation. Constructor arguments use their declared
-  /// representations; the instantiated class must have resolved type arguments.
-  /// Generic field writes still require runtime checks and are unsupported.
+  /// representations and runtime type arguments. Generic field writes check the
+  /// actual receiver's field type before modifying storage; failure throws TypeError.
   /// Each synchronous native entry owns its heap until return, including entries
   /// made through a native callback.
   /// [Throw] and [Invoke] support synchronous exception propagation and cleanup.

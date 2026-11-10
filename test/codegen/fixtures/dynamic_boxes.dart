@@ -240,6 +240,108 @@ ObjectModule dynamicBoxes(Target target) {
   functions.add(IrFunction(run, [entry]));
   exports[run] = NativeExport(run.name, NativeSignature(Int64, [Int64, Int64]));
 
+  final element = TypeParameterType('T')
+    ..initializeBound(ValueType.object.nullable);
+  final slot = ClassType(uri, 'Slot', typeParameters: [element]);
+  final item = InstanceField(slot, 'item', element);
+  final slotInit = FunctionTarget(
+    uri,
+    'Slot',
+    .voidType,
+    [element],
+    owner: slot,
+    kind: .initializer,
+  );
+  final initialized = Block(slotInit.parameterTypes);
+  initialized.emit(
+    StoreField(item, initialized.parameters[0], initialized.parameters[1]),
+  );
+  initialized.finish(const Return());
+  functions.add(IrFunction(slotInit, [initialized]));
+  final replace = FunctionTarget(
+    uri,
+    'replace',
+    .integer,
+    [slot, element],
+    owner: slot,
+    kind: .method,
+  );
+  final replacing = Block(replace.parameterTypes),
+      written = Block(),
+      failed = Block([.object]),
+      rejected = Block(),
+      unexpected = Block();
+  replacing.emit(DirectCall(burn, [const Constant.integer(10000)]));
+  replacing.finish(
+    Invoke(
+      StoreField(item, replacing.parameters[1], replacing.parameters[2]),
+      onReturn: Jump(written),
+      onThrow: Jump(failed, [UnwindValue.exception]),
+    ),
+  );
+  written.finish(Return(const Constant.integer(1)));
+  failed.finish(
+    Branch(
+      failed.emit(TypeTest(failed.parameters.single, .typeError)),
+      Jump(rejected),
+      Jump(unexpected),
+    ),
+  );
+  rejected.finish(Return(const Constant.integer(2)));
+  unexpected.finish(Return(const Constant.integer(3)));
+  functions.add(
+    IrFunction(replace, [replacing, written, failed, rejected, unexpected]),
+  );
+  classes.add(
+    IrClass(slot, [item], constructors: [slotInit], members: [replace]),
+  );
+
+  for (final type in <ValueType>[.integer, .floating]) {
+    final name = type == .integer ? 'integer' : 'floating';
+    final wrapper = FunctionTarget(uri, 'checked_$name', type, [type]);
+    final entry = Block(wrapper.parameterTypes),
+        correct = Block(),
+        wrong = Block();
+    final value = entry.parameters.single;
+    final object = entry.emit(
+      Construct(slotInit, [value], instantiatedType: slot.instantiate([type])),
+    );
+    final wide = slot.instantiate([ValueType.number]);
+    final receiver = entry.emit(
+      Construct(slotInit, [const Constant.integer(0)], instantiatedType: wide),
+    );
+    final result = entry.emit(
+      DirectCall(replace, [
+        receiver,
+        object,
+        type == .integer ? const Constant.floating(0.5) : value,
+      ], ownerType: wide),
+    );
+    entry.finish(
+      Branch(
+        entry.emit(Equals(result, Constant.integer(type == .integer ? 2 : 1))),
+        Jump(correct),
+        Jump(wrong),
+      ),
+    );
+    correct.emit(DirectCall(burn, [const Constant.integer(10000)]));
+    correct.finish(Return(correct.emit(LoadField(item, object))));
+    wrong.finish(
+      Return(
+        type == .integer
+            ? const Constant.integer(-999)
+            : const Constant.floating(-999),
+      ),
+    );
+    functions.add(IrFunction(wrapper, [entry, correct, wrong]));
+    exports[wrapper] = NativeExport(
+      wrapper.name,
+      NativeSignature(type == .integer ? Int64 : Double, [
+        type == .integer ? Int64 : Double,
+      ]),
+    );
+  }
+
   final program = IrProgram(classes, functions);
   final CodeGenerator generator = target.architecture == .arm64
       ? Arm64CodeGenerator(target)

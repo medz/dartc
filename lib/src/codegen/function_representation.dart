@@ -2,6 +2,7 @@ import 'package:dartc/ir.dart';
 
 import 'program_layout.dart';
 import 'checked_casts.dart';
+import 'type_values.dart';
 
 /// Places allocating representation changes before register and root analysis.
 final class FunctionRepresentation(
@@ -18,7 +19,13 @@ final class FunctionRepresentation(
   final boxes = <Instruction, Value>{};
   final introduced = <Instruction>{};
   final tests = <TypeTest, TypeTestKind>{};
-  late final entryParameters = function.target.typeParameters.isEmpty
+  final _prologue = <Instruction>[];
+  bool get _factoryEnvironment =>
+      function.target.kind == .factory &&
+      function.target.owner!.typeParameters.isNotEmpty;
+  late final entryParameters =
+      layouts.entryTypes(function.target).length ==
+          function.entry.parameters.length
       ? function.entry.parameters
       : [
           ...function.entry.parameters,
@@ -29,21 +36,63 @@ final class FunctionRepresentation(
           ).parameters,
         ];
 
+  late final _classArguments = _ownerArguments(
+    _factoryEnvironment
+        ? entryParameters[function.entry.parameters.length]
+        : _receiverType(function.entry.parameters.first, _prologue),
+    function.target.owner!,
+    _prologue,
+  );
+
+  Value _receiverType(Value receiver, List<Instruction> into) {
+    final actual = ObjectRuntimeType(receiver, direct: true);
+    final concrete = TypeCast(actual, TypeValues.type);
+    into.addAll([actual, concrete]);
+    return concrete;
+  }
+
+  List<Value> _ownerArguments(
+    Value actual,
+    ClassType owner,
+    List<Instruction> into,
+  ) {
+    final view = DirectCall(layouts.relations.viewOf(owner), [actual]);
+    final checked = NullCheck(view);
+    var parts = LoadField(TypeValues.parts, checked);
+    into.addAll([view, checked, parts]);
+    final arguments = <Value>[];
+    for (final _ in owner.typeParameters) {
+      final node = NullCheck(parts);
+      final head = LoadField(TypeValues.head, node);
+      final tail = LoadField(TypeValues.tail, node);
+      into.addAll([node, head, tail]);
+      arguments.add(head);
+      parts = tail;
+    }
+    return arguments;
+  }
+
   List<BlockParameter> parametersOf(Block block) =>
       block == function.entry ? entryParameters : block.parameters;
 
   Value _reify(ValueType type, List<Instruction> into) {
-    final index = type is TypeParameterType
-        ? function.target.typeParameters.indexOf(type)
-        : -1;
-    if (index >= 0) {
-      return entryParameters[function.entry.parameters.length + index];
+    if (type is TypeParameterType) {
+      final index = function.target.typeParameters.indexOf(type);
+      if (index >= 0) {
+        return entryParameters[function.entry.parameters.length +
+            (_factoryEnvironment ? 1 : 0) +
+            index];
+      }
+      final owner = function.target.owner;
+      if (owner != null &&
+          (function.target.kind.hasReceiver || _factoryEnvironment)) {
+        final index = owner.typeParameters.indexOf(type);
+        if (index >= 0) return _classArguments[index];
+      }
+      throw UnsupportedError('Native type needs a lexical environment: $type');
     }
     if (type.freeTypeParameters.isEmpty) return layouts.types.constant(type);
     final (:target, :parameters) = layouts.types.instantiate(type);
-    if (!parameters.every(function.target.typeParameters.contains)) {
-      throw UnsupportedError('Native type requires a class environment: $type');
-    }
     final call = DirectCall(target, [
       for (final parameter in parameters) _reify(parameter, into),
     ]);
@@ -140,6 +189,45 @@ final class FunctionRepresentation(
         _ => block.instructions,
       };
       for (final instruction in source) {
+        if (instruction
+            case StoreField(:final field, :final receiver, :final value)
+            when !field.isLate && field.type.freeTypeParameters.isNotEmpty) {
+          final widened = TypeView(
+            convert(value, .object.nullable, body),
+            .object.nullable,
+          );
+          body.add(widened);
+          final arguments = _ownerArguments(
+            _receiverType(receiver, body),
+            field.owner,
+            body,
+          );
+          final check = TypeCast(widened, field.type);
+          final signature = casts.targetFor(check, layouts);
+          _operands[check] = [
+            widened,
+            for (final parameter in signature.parameters)
+              arguments[field.owner.typeParameters.indexOf(parameter)],
+          ];
+          _operands[instruction] = [receiver, check];
+          body.add(check);
+          if (block.end
+              case Invoke(:final operation, :final onReturn, :final onThrow)
+              when operation == instruction) {
+            final stored = Block();
+            blocks.add(stored);
+            instructions[stored] = [instruction];
+            ends[stored] = edge(onReturn!);
+            ends[block] = Invoke(
+              check,
+              onReturn: Jump(stored),
+              onThrow: edge(onThrow),
+            );
+          } else {
+            body.add(instruction);
+          }
+          continue;
+        }
         if (instruction case ReifyType(:final template)) {
           _operands[instruction] = [_reify(template, body)];
         }
@@ -170,7 +258,10 @@ final class FunctionRepresentation(
         }
         final destinations = switch (instruction) {
           DirectCall(:final target) => layouts.entryTypes(target),
-          Construct(:final initializer) => initializer.signature.parameters,
+          Construct(:final initializer) => [
+            ...initializer.signature.parameters,
+            TypeValues.type,
+          ],
           NewCell(:final initial, type: final CellType type)
               when initial != null =>
             [type.content],
@@ -187,11 +278,16 @@ final class FunctionRepresentation(
         if (destinations != null) {
           final inputs = [
             ...instruction.inputs,
+            if (instruction case DirectCall(:final target, :final ownerType)
+                when target.kind == .factory &&
+                    target.owner!.typeParameters.isNotEmpty)
+              _reify(ownerType ?? target.owner!, body),
             if (instruction case DirectCall(:final typeArguments))
               for (final type in typeArguments) _reify(type, body),
+            if (instruction case Construct(:final instantiatedType))
+              _reify(instantiatedType, body),
           ];
-          var changed =
-              instruction is DirectCall && instruction.typeArguments.isNotEmpty;
+          var changed = inputs.length != instruction.inputs.length;
           for (final (i, input) in inputs.indexed) {
             final value = convert(input, destinations[i], body);
             changed |= value != input;
@@ -201,7 +297,7 @@ final class FunctionRepresentation(
         }
         body.add(instruction);
       }
-      ends[block] = switch (block.end) {
+      ends[block] ??= switch (block.end) {
         Return(value: final value?)
             when function.target.returnType != .voidType =>
           Return(convert(value, function.target.returnType, body)),
@@ -227,5 +323,6 @@ final class FunctionRepresentation(
         final end => end,
       };
     }
+    instructions[function.entry]!.insertAll(0, _prologue);
   }
 }

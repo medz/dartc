@@ -8,6 +8,18 @@ import 'package:test/test.dart';
 import 'fixtures/dynamic_boxes_ffi.dart';
 
 void main() {
+  test('field writes use the target receiver environment and preserve rejected values', () {
+    final boxes = DynamicBoxes();
+    addTearDown(boxes.close);
+    for (final value in [-0x8000000000000000, 0x7fffffffffffffff, 0, 42]) {
+      expect(boxes.checkedInteger(value), value);
+    }
+    for (final bits in [0x8000000000000000, 0x7ff8000000000001, 1]) {
+      final data = ByteData(8)..setUint64(0, bits);
+      final result = boxes.checkedFloating(data.getFloat64(0));
+      expect((data..setFloat64(0, result)).getUint64(0), bits);
+    }
+  });
   test('runtime scalars retain every bit through allocating transfers', () {
     final boxes = DynamicBoxes();
     addTearDown(boxes.close);

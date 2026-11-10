@@ -10,6 +10,14 @@ final class DynamicBoxes() {
       .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
         'gc_arguments',
       );
+  late final checkedInteger = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'checked_integer',
+      );
+  late final checkedFloating = _library
+      .lookupFunction<Double Function(Double), double Function(double)>(
+        'checked_floating',
+      );
 
   int integer(String operation, int value) =>
       _library.lookupFunction<Int64 Function(Int64), int Function(int)>(

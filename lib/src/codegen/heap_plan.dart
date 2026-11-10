@@ -11,6 +11,7 @@ import 'heap_functions.dart';
 import 'function_emitter.dart';
 import 'program_layout.dart';
 import 'frame_lookup.dart';
+import 'type_values.dart';
 
 /// Generates allocation wrappers with precise roots and optional initialization.
 final class HeapPlan(
@@ -23,7 +24,7 @@ final class HeapPlan(
   final _factories =
       <FunctionTarget, ({FunctionTarget? initializer, ClassType type})>{};
   final _boxes = <ValueType, FunctionTarget>{};
-  final _initializers = <(FunctionTarget, ClassType), FunctionTarget>{};
+  final _initializers = <FunctionTarget, FunctionTarget>{};
   final heap = HeapFunctions(frames);
 
   bool get isEmpty => _factories.isEmpty;
@@ -137,10 +138,17 @@ final class HeapPlan(
     emitter.epilogue(frame);
     emitter.bind(allocated);
     final runtimeType = scratch(ValueType.typeType);
-    emitter.address(
-      runtimeType,
-      (fixup) => constant(fixup, layouts.types.constant(type)),
-    );
+    if (initializer == null) {
+      emitter.address(
+        runtimeType,
+        (fixup) => constant(fixup, layouts.types.constant(type)),
+      );
+    } else {
+      emitter.loadStack(
+        runtimeType,
+        frame.localOffset + (parameterTypes.length - 1) * 8,
+      );
+    }
     emitter.storeMemory(
       runtimeType,
       allocation.result!,
@@ -209,31 +217,26 @@ final class HeapPlan(
           ...block.instructions,
           if (block.end case Invoke(:final operation)) operation,
         ].whereType<Construct>()) {
-          final type = operation.instantiatedType,
-              initializer = operation.initializer;
-          if (type.freeTypeParameters.isNotEmpty) {
-            throw UnsupportedError(
-              'Native construction requires runtime type arguments: $type',
+          final initializer = operation.initializer;
+          constructors[operation] = _initializers.putIfAbsent(initializer, () {
+            final target = FunctionTarget(
+              uri,
+              'construct${_initializers.length}',
+              .object,
+              [
+                for (final parameter in initializer.signature.parameters)
+                  layouts.representation(parameter) == .reference
+                      ? ValueType.object.nullable
+                      : parameter,
+                TypeValues.type,
+              ],
             );
-          }
-          constructors[operation] = _initializers.putIfAbsent(
-            (initializer, type),
-            () {
-              final target = FunctionTarget(
-                uri,
-                'construct${_initializers.length}',
-                type,
-                [
-                  for (final parameter in initializer.signature.parameters)
-                    layouts.representation(parameter) == .reference
-                        ? ValueType.object.nullable
-                        : parameter.substitute(type.typeEnvironment),
-                ],
-              );
-              _factories[target] = (initializer: initializer, type: type);
-              return target;
-            },
-          );
+            _factories[target] = (
+              initializer: initializer,
+              type: initializer.owner!,
+            );
+            return target;
+          });
         }
       }
     }

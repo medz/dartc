@@ -164,68 +164,52 @@ void main() {
       },
     );
 
-    test(
-      '${generator.target} selects concrete tests and rejects missing type environments',
-      () {
-        final parameter = TypeParameterType('T')
-          ..initializeBound(ValueType.object.nullable)
-          ..initializeDefaultType(.dynamicType);
-        final base = ClassType(library, 'Base');
-        final child = ClassType(library, 'Child', superclass: base);
-        final box = ClassType(library, 'Box', typeParameters: [parameter]);
-        for (final (source, tested) in <(ValueType, ValueType)>[
-          (.object.nullable, .integer),
-          (base, child),
-          (
-            box.instantiate([ValueType.number]),
-            box.instantiate([ValueType.integer]),
-          ),
-          (.nullType, parameter),
-          (.integer, parameter),
-          (FfiTypes.pointerTypes[Pointer<Int64>]!, parameter),
-        ]) {
-          final target = FunctionTarget(
-            library,
-            'test',
-            .boolean,
-            [source],
-            owner: box,
-            kind: .method,
-          );
-          final body = Block(target.parameterTypes);
-          body.finish(Return(body.emit(TypeTest(body.parameters[1], tested))));
-          final program = IrProgram(
-            [
-              IrClass(base, []),
-              IrClass(child, []),
-              IrClass(box, [], members: [target]),
-            ],
-            [
-              IrFunction(target, [body]),
-            ],
-          );
-          if (tested != parameter) {
-            expect(
-              generator.generate(program, definitions: [target]).sections,
-              isNotEmpty,
-            );
-            continue;
-          }
-          expect(
-            () => generator.generate(program, definitions: [target]),
-            throwsA(
-              isA<UnsupportedError>().having(
-                (error) => error.message,
-                'missing environment',
-                contains('requires a class environment'),
-              ),
-            ),
-          );
-        }
-      },
-    );
+    test('${generator.target} selects concrete and receiver type tests', () {
+      final parameter = TypeParameterType('T')
+        ..initializeBound(ValueType.object.nullable)
+        ..initializeDefaultType(.dynamicType);
+      final base = ClassType(library, 'Base');
+      final child = ClassType(library, 'Child', superclass: base);
+      final box = ClassType(library, 'Box', typeParameters: [parameter]);
+      for (final (source, tested) in <(ValueType, ValueType)>[
+        (.object.nullable, .integer),
+        (base, child),
+        (
+          box.instantiate([ValueType.number]),
+          box.instantiate([ValueType.integer]),
+        ),
+        (.nullType, parameter),
+        (.integer, parameter),
+        (FfiTypes.pointerTypes[Pointer<Int64>]!, parameter),
+      ]) {
+        final target = FunctionTarget(
+          library,
+          'test',
+          .boolean,
+          [source],
+          owner: box,
+          kind: .method,
+        );
+        final body = Block(target.parameterTypes);
+        body.finish(Return(body.emit(TypeTest(body.parameters[1], tested))));
+        final program = IrProgram(
+          [
+            IrClass(base, []),
+            IrClass(child, []),
+            IrClass(box, [], members: [target]),
+          ],
+          [
+            IrFunction(target, [body]),
+          ],
+        );
+        expect(
+          generator.generate(program, definitions: [target]).sections,
+          isNotEmpty,
+        );
+      }
+    });
 
-    test('${generator.target} rejects casts needing type environments', () {
+    test('${generator.target} casts using the receiver type environment', () {
       final parameter = TypeParameterType('T')
         ..initializeBound(ValueType.object.nullable)
         ..initializeDefaultType(.dynamicType);
@@ -262,14 +246,8 @@ void main() {
           ],
         );
         expect(
-          () => generator.generate(program, definitions: [target]),
-          throwsA(
-            isA<UnsupportedError>().having(
-              (error) => error.message,
-              'missing environment',
-              contains('requires a class environment'),
-            ),
-          ),
+          generator.generate(program, definitions: [target]).sections,
+          isNotEmpty,
         );
       }
     });

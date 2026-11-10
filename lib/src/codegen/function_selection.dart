@@ -163,7 +163,7 @@ final class FunctionSelection<R>(
             layouts.fieldOffset(field);
             layouts.checkTransfer(field.type, type);
           case StoreField(:final field, :final value):
-            if (field.isLate || field.type.freeTypeParameters.isNotEmpty) {
+            if (field.isLate) {
               throw UnsupportedError(
                 'Native checked field write: ${field.name}',
               );

@@ -75,12 +75,16 @@ final class ProgramLayout(
     };
   }
 
-  /// Appends reified function type arguments to the declared Dart parameters.
+  /// Appends factory owner and function type arguments to Dart parameters.
   List<ValueType> entryTypes(FunctionTarget target) =>
-      target.typeParameters.isEmpty
+      target.typeParameters.isEmpty &&
+          !(target.kind == .factory && target.owner!.typeParameters.isNotEmpty)
       ? target.parameterTypes
       : [
           ...target.parameterTypes,
+          if (target.kind == .factory &&
+              target.owner!.typeParameters.isNotEmpty)
+            TypeValues.type,
           for (final _ in target.typeParameters) TypeValues.type,
         ];
 

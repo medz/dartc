@@ -147,6 +147,8 @@ final class TypeRelations(
     [TypeValues.list.nullable, .integer, .integer],
   );
   final _declarations = <ClassType>{};
+  final _views = <ClassType, IrFunction>{};
+  late final _atFunction = _atBody();
   bool _used = false;
 
   this {
@@ -189,7 +191,58 @@ final class TypeRelations(
     return _entry;
   }
 
-  Iterable<IrFunction> get functions => _used ? _bodies : const [];
+  Iterable<IrFunction> get functions sync* {
+    if (_used) {
+      yield* _bodies;
+    } else if (_views.isNotEmpty) {
+      yield _atFunction;
+    }
+    yield* _views.values;
+  }
+
+  /// Projects a closed instance type onto its declaring superclass or interface.
+  FunctionTarget viewOf(ClassType owner) => _views.putIfAbsent(owner, () {
+    final target = FunctionTarget(
+      _uri,
+      'view${_views.length}',
+      TypeValues.type.nullable,
+      [TypeValues.type],
+    );
+    final entry = Block(target.parameterTypes), nominal = Block();
+    final missing = Block()..finish(Return(const Constant.nullValue()));
+    final blocks = [entry, nominal, missing];
+    final actual = entry.parameters.single;
+    _equal(
+      entry,
+      _load(entry, TypeValues.kind, actual),
+      _int(TypeKind.nominal.index),
+      nominal,
+      missing,
+    );
+    final shape = _load(nominal, TypeValues.shape, actual);
+    var current = nominal;
+    for (final declaration in _declarations) {
+      final view = declaration.asInstanceOf(owner);
+      if (view == null) continue;
+      final found = Block(), next = Block();
+      blocks.addAll([found, next]);
+      _equal(current, shape, _int(values.id(declaration)), found, next);
+      found.finish(
+        Return(
+          declaration == owner
+              ? actual
+              : values.build(found, view, {
+                  for (final (i, parameter)
+                      in declaration.typeParameters.indexed)
+                    parameter: _part(found, actual, _int(i)),
+                }),
+        ),
+      );
+      current = next;
+    }
+    current.finish(Jump(missing));
+    return IrFunction(target, blocks);
+  }).target;
 
   late final _bodies = [
     _initializer(_scopeInit, [
@@ -211,7 +264,7 @@ final class TypeRelations(
     _bindingOwnerBody(),
     _scopeFieldBody(_scopeValue, _scopeId),
     _scopeFieldBody(_scopeSize, _total),
-    _atBody(),
+    _atFunction,
     _findNameBody(),
     _shiftBody(),
     _shiftPartsBody(),

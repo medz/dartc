@@ -7,6 +7,57 @@ import '../support/ir_interpreter.dart';
 
 void main() {
   test(
+    'class projection substitutes reordered and nested actual arguments',
+    () {
+      final uri = Uri.parse('memory:projection');
+      TypeParameterType parameter(String name) =>
+          TypeParameterType(name)..initializeBound(ValueType.object.nullable);
+      final a = parameter('A'), b = parameter('B');
+      final base = ClassType(uri, 'Base', typeParameters: [a, b]);
+      final t = parameter('T'), u = parameter('U'), w = parameter('W');
+      final child = ClassType(
+        uri,
+        'Child',
+        typeParameters: [t, w],
+        superclass: base.instantiate([
+          w.nullable,
+          FunctionType(t, [u], typeParameters: [u]),
+        ]),
+      );
+      final v = parameter('V');
+      final expected = base.instantiate([
+        ValueType.boolean.nullable,
+        FunctionType(.integer, [v], typeParameters: [v]),
+      ]);
+      final values = TypeValues();
+      final projection = TypeRelations(values, [base, child]);
+      final target = FunctionTarget(uri, 'project', .boolean, []);
+      final entry = Block();
+      final view = entry.emit(
+        DirectCall(projection.viewOf(base), [
+          values.constant(child.instantiate([.integer, .boolean])),
+        ]),
+      );
+      entry.finish(
+        Return(
+          entry.emit(
+            DirectCall(values.equality, [
+              entry.emit(NullCheck(view)),
+              values.constant(expected),
+            ]),
+          ),
+        ),
+      );
+      final function = IrFunction(target, [entry]);
+      final projected = projection.functions.toList();
+      final program = IrProgram(
+        [...values.classes, ...projection.classes],
+        [function, ...projected, ...values.functions],
+      );
+      expect(IrInterpreter(program, {}).run(function, []), isTrue);
+    },
+  );
+  test(
     'runtime subtype rules preserve unions, variance and lexical bounds',
     () {
       final uri = Uri.parse('memory:subtypes');

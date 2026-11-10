@@ -9,6 +9,71 @@ void main() {
   final uri = Uri.parse('memory:representation');
   final layouts = ProgramLayout([]);
 
+  test(
+    'checked field stores keep the receiver live and write only on success',
+    () {
+      final t = TypeParameterType('T')
+        ..initializeBound(ValueType.object.nullable);
+      final owner = ClassType(uri, 'Cell', typeParameters: [t]);
+      final field = InstanceField(owner, 'value', t);
+      final target = FunctionTarget(
+        uri,
+        'write',
+        .typeType,
+        [owner, t],
+        owner: owner,
+        kind: .method,
+      );
+      final entry = Block(target.parameterTypes),
+          done = Block(),
+          failed = Block();
+      final type = entry.emit(ReifyType(t));
+      final store = StoreField(field, entry.parameters[1], entry.parameters[2]);
+      entry.finish(Invoke(store, onReturn: Jump(done), onThrow: Jump(failed)));
+      done.finish(Return(type));
+      failed.finish(Return(type));
+      final body = FunctionRepresentation(
+        IrFunction(target, [entry, done, failed]),
+        ProgramLayout([
+          IrClass(owner, [field], members: [target]),
+        ]),
+        CheckedCasts(),
+      );
+      final invoke = body.ends[entry] as Invoke;
+      expect(invoke.operation, isA<TypeCast>());
+      expect(invoke.onThrow.target, same(failed));
+      expect(body.instructions[entry], isNot(contains(store)));
+      expect(body.instructions[invoke.onReturn!.target], [store]);
+      expect((body.ends[invoke.onReturn!.target] as Jump).target, same(done));
+      expect(
+        body.instructions[entry]!.whereType<ObjectRuntimeType>().map(
+          (read) => read.operand,
+        ),
+        [entry.parameters[0], entry.parameters[1]],
+      );
+      final calls = body.instructions.values
+          .expand((body) => body)
+          .where(
+            (instruction) =>
+                instruction is DirectCall ||
+                instruction is TypeCast ||
+                instruction is NullCheck,
+          )
+          .toSet();
+      final flow = FunctionLiveness(body, body.inputsOf, calls);
+      expect(flow.acrossCalls[invoke.operation], contains(entry.parameters[1]));
+      expect(body.inputsOf(store).last, same(invoke.operation));
+      expect(
+        entry.end,
+        isA<Invoke>().having(
+          (end) => end.operation,
+          'original operation',
+          same(store),
+        ),
+      );
+    },
+  );
+
   test('reifying a tested type keeps actual metadata and the promoted operand live', () {
     final t = TypeParameterType('T')
       ..initializeBound(ValueType.object.nullable);

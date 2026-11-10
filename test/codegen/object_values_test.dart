@@ -31,55 +31,52 @@ void main() {
     Arm64CodeGenerator(const Target(.linux, .arm64)),
     X64CodeGenerator(const Target(.linux, .x64)),
   ]) {
-    test('${generator.target} rejects an unreified constructor type', () {
-      final parameter = TypeParameterType('T')
-        ..initializeBound(ValueType.object.nullable)
-        ..initializeDefaultType(.dynamicType);
-      final generic = ClassType(
-        library,
-        'Generic',
-        typeParameters: [parameter],
-      );
-      final ctor = FunctionTarget(
-        library,
-        '',
-        .voidType,
-        [],
-        owner: generic,
-        kind: .initializer,
-      );
-      final create = FunctionTarget(
-        library,
-        'create',
-        generic,
-        [],
-        owner: generic,
-        kind: .method,
-      );
-      final body = Block(create.parameterTypes);
-      body.finish(Return(body.emit(Construct(ctor, []))));
-      final program = IrProgram(
-        [
-          IrClass(generic, [], constructors: [ctor], members: [create]),
-        ],
-        [
-          IrFunction(ctor, [
-            Block(ctor.parameterTypes)..finish(const Return()),
-          ]),
-          IrFunction(create, [body]),
-        ],
-      );
-      expect(
-        () => generator.generate(program, definitions: [ctor, create]),
-        throwsA(
-          isA<UnsupportedError>().having(
-            (error) => error.message,
-            'reason',
-            contains('runtime type arguments'),
-          ),
-        ),
-      );
-    });
+    test(
+      '${generator.target} constructs using the receiver type environment',
+      () {
+        final parameter = TypeParameterType('T')
+          ..initializeBound(ValueType.object.nullable)
+          ..initializeDefaultType(.dynamicType);
+        final generic = ClassType(
+          library,
+          'Generic',
+          typeParameters: [parameter],
+        );
+        final ctor = FunctionTarget(
+          library,
+          '',
+          .voidType,
+          [],
+          owner: generic,
+          kind: .initializer,
+        );
+        final create = FunctionTarget(
+          library,
+          'create',
+          generic,
+          [],
+          owner: generic,
+          kind: .method,
+        );
+        final body = Block(create.parameterTypes);
+        body.finish(Return(body.emit(Construct(ctor, []))));
+        final program = IrProgram(
+          [
+            IrClass(generic, [], constructors: [ctor], members: [create]),
+          ],
+          [
+            IrFunction(ctor, [
+              Block(ctor.parameterTypes)..finish(const Return()),
+            ]),
+            IrFunction(create, [body]),
+          ],
+        );
+        expect(
+          generator.generate(program, definitions: [ctor, create]).sections,
+          isNotEmpty,
+        );
+      },
+    );
 
     test('${generator.target} preserves constant and type identities', () {
       final values = [

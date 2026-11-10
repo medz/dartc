@@ -157,6 +157,7 @@ Future<void> main(List<String> args) async {
       'exceptions',
       'type_checks',
       'type_arguments',
+      'class_types',
     ]) {
       final library = assets.library('compiler/$fixture');
       final result = await Compiler(target).compile(
