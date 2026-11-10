@@ -7,6 +7,10 @@ import 'member_calls.dart';
 import 'heap_plan.dart';
 import 'cell_initialization.dart';
 import 'storage_access.dart';
+import 'double_bits.dart';
+import 'reference_equality.dart';
+import 'selected_graph.dart';
+import 'value_operations.dart';
 
 /// Places allocating representation changes before register and root analysis.
 final class FunctionRepresentation(
@@ -16,17 +20,13 @@ final class FunctionRepresentation(
   MemberCalls members,
   HeapPlan heap, {
   FunctionTarget? captureTrace,
-}) {
-  final blocks = <Block>[];
-  final instructions = <Block, List<Value>>{};
-  final ends = <Block, Terminator>{};
+}) extends SelectedGraph {
   final _operands = <Instruction, List<Value>>{};
   final _arguments = <Jump, List<Value>>{};
   final boxes = <Instruction, Value>{};
   final introduced = <Instruction>{};
   final tests = <TypeTest, TypeTestKind>{};
   final invocations = <Instruction, FunctionTarget>{};
-  final identities = <Equals>{};
   final aliases = <Instruction>{};
   final _resultTypes = <Value, ValueType>{};
   final stackCells = <NewCell>{};
@@ -50,17 +50,13 @@ final class FunctionRepresentation(
   late final _classArguments = _ownerArguments(
     _factoryEnvironment
         ? entryParameters[function.entry.parameters.length]
-        : _receiverType(function.entry.parameters.first, _prologue),
+        : layouts.types.runtimeTypeOf(
+            function.entry.parameters.first,
+            _prologue,
+          ),
     function.target.owner!,
     _prologue,
   );
-
-  Value _receiverType(Value receiver, List<Value> into) {
-    final actual = ObjectRuntimeType(receiver, direct: true);
-    final concrete = TypeCast(actual, TypeValues.type);
-    into.addAll([actual, concrete]);
-    return concrete;
-  }
 
   List<Value> _ownerArguments(Value actual, ClassType owner, List<Value> into) {
     final view = DirectCall(layouts.relations.viewOf(owner), [actual]);
@@ -116,6 +112,8 @@ final class FunctionRepresentation(
 
   Iterable<Value> inputsOf(Value operation) => switch (operation) {
     StorageAccess(:final inputs) => inputs,
+    DoubleBits(:final operand) => [operand],
+    ReferenceEquality(:final left, :final right) => [left, right],
     Instruction() => _operands[operation] ?? operation.inputs,
     _ => throw ArgumentError('Expected a selected operation.'),
   };
@@ -135,104 +133,6 @@ final class FunctionRepresentation(
 
   List<Value> argumentsOf(Jump edge) => _arguments[edge] ?? edge.arguments;
 
-  Block _functionEquality(Equals operation, Block entry) {
-    final Equals(:left, :right, :negated) = operation;
-    Block fresh([List<ValueType> parameters = const []]) {
-      final block = Block(parameters);
-      blocks.add(block);
-      instructions[block] = [];
-      return block;
-    }
-
-    final join = fresh([.boolean]);
-    Jump result(bool equal) => Jump(join, [Constant.boolean(equal != negated)]);
-    Equals identity(Value a, Value b, Block block) {
-      final comparison = Equals(a, b);
-      identities.add(comparison);
-      instructions[block]!.add(comparison);
-      return comparison;
-    }
-
-    if (layouts.representation(right.type) != .reference) {
-      ends[entry] = result(false);
-      return join;
-    }
-    var current = fresh();
-    ends[entry] = Branch(
-      identity(left, right, entry),
-      result(true),
-      Jump(current),
-    );
-    if (layouts.closures.methods.isEmpty &&
-        layouts.closures.specializations.isEmpty) {
-      ends[current] = result(false);
-      return join;
-    }
-    // Runtime signatures identify function values; carrier tags identify bodies.
-    for (final value in [left, right]) {
-      final body = instructions[current]!;
-      final type = _receiverType(value, body);
-      final kind = LoadField(TypeValues.kind, type);
-      final test = Equals(kind, Constant.integer(TypeKind.function.index));
-      body.addAll([kind, test]);
-      final next = fresh();
-      ends[current] = Branch(test, Jump(next), result(false));
-      current = next;
-    }
-    List<Value> describe(Value value) {
-      final tag = _load(layouts.closures.tag, value, instructions[current]!);
-      final done = fresh([
-        .integer,
-        .object.nullable,
-        TypeValues.list.nullable,
-      ]);
-      for (final shape in layouts.closures.all) {
-        final selected = fresh(), next = fresh();
-        final match = Equals(tag, Constant.integer(shape.tag));
-        instructions[current]!.add(match);
-        ends[current] = Branch(match, Jump(selected), Jump(next));
-        final body = instructions[selected]!;
-        final applied = shape.instantiation;
-        final original = applied == null
-            ? value
-            : _load(applied.origin, value, body);
-        final generic = applied?.generic ?? shape;
-        final anchor = generic.target.kind == .closure
-            ? original
-            : generic.target.kind.isVirtual
-            ? _load(generic.captures.single, original, body)
-            : const Constant.nullValue();
-        final arguments = applied == null
-            ? layouts.types.argumentConstants(shape.identityArguments)
-            : _load(applied.arguments, value, body);
-        ends[selected] = Jump(done, [
-          Constant.integer(shape.identity),
-          anchor,
-          arguments,
-        ]);
-        current = next;
-      }
-      ends[current] = result(false);
-      current = done;
-      return done.parameters;
-    }
-
-    final a = describe(left), b = describe(right);
-    final same = Equals(a[0], b[0]);
-    instructions[current]!.add(same);
-    final anchor = fresh(), arguments = fresh();
-    ends[current] = Branch(same, Jump(anchor), result(false));
-    ends[anchor] = Branch(
-      identity(a[1], b[1], anchor),
-      Jump(arguments),
-      result(false),
-    );
-    final equal = DirectCall(layouts.types.argumentEquality, [a[2], b[2]]);
-    instructions[arguments]!.add(equal);
-    ends[arguments] = Branch(equal, result(true), result(false));
-    return join;
-  }
-
   Iterable<Jump> successors(Block block) => switch (ends[block]!) {
     final Jump jump => [jump],
     Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],
@@ -244,6 +144,7 @@ final class FunctionRepresentation(
   };
 
   this {
+    final valueOperations = ValueOperations(this, layouts, heap.heap.invalid);
     checkCellInitialization(function);
     final operations = [
       for (final block in function.blocks) ...[
@@ -465,11 +366,28 @@ final class FunctionRepresentation(
         if (instruction case Equals(:final left)
             when left.type != .nullType &&
                 ValueType.function.nullable.accepts(left.type)) {
-          block = _functionEquality(instruction, block);
+          block = valueOperations.equalFunction(instruction, block);
           body = instructions[block]!;
           body.add(instruction);
           aliases.add(instruction);
           _operands[instruction] = block.parameters;
+          continue;
+        }
+        if (instruction case ObjectHashCode(:final operand, direct: false)
+            when operand.type == .nullType || layouts.isBoxable(operand.type)) {
+          block = valueOperations.hashScalar(operand, block);
+          body = instructions[block]!;
+          body.add(instruction);
+          aliases.add(instruction);
+          _operands[instruction] = block.parameters;
+          continue;
+        }
+        if (instruction case Equals(:final left, :final right)
+            when layouts.isBoxable(left.type) &&
+                right.type != .nullType &&
+                layouts.representation(right.type) == .reference) {
+          invocations[instruction] = members.builtin(left.type, hash: false);
+          body.add(instruction);
           continue;
         }
         final invocation = switch (instruction) {
@@ -494,7 +412,8 @@ final class FunctionRepresentation(
               when target.kind.isVirtual &&
                   target.owner!.typeParameters.isNotEmpty =>
             (target, inputs.first, typeArguments),
-          ObjectRuntimeType(:final operand, direct: false)
+          ObjectRuntimeType(:final operand, direct: false) ||
+          ObjectHashCode(:final operand, direct: false)
               when operand.type != .nullType &&
                   layouts.representation(operand.type) == .reference =>
             (null, operand, const <ValueType>[]),
@@ -504,7 +423,7 @@ final class FunctionRepresentation(
                   !(left is ObjectRuntimeType && left.direct) &&
                   left.type != .nullType &&
                   right.type != .nullType &&
-                  ValueType.typeType.accepts(left.type.nonNullable) =>
+                  layouts.representation(left.type) == .reference =>
             (null, left, const <ValueType>[]),
           _ => null,
         };
@@ -541,12 +460,32 @@ final class FunctionRepresentation(
               target: layouts.types.equality,
               closure: null,
             );
+          } else if (instruction is ObjectHashCode) {
+            targets[TypeValues.type] = (
+              target: layouts.types.hash,
+              closure: null,
+            );
           } else if (instruction is ObjectRuntimeType && targets.isEmpty) {
             runtimeType(instruction, body);
             body.add(instruction);
             continue;
           }
-          final actual = _receiverType(receiver, body);
+          if (instruction is Equals || instruction is ObjectHashCode) {
+            for (final type in [
+              ValueType.integer,
+              ValueType.floating,
+              ValueType.boolean,
+            ]) {
+              targets[type] = (
+                target: members.builtin(
+                  type,
+                  hash: instruction is ObjectHashCode,
+                ),
+                closure: null,
+              );
+            }
+          }
+          final actual = layouts.types.runtimeTypeOf(receiver, body);
           final shape = functionValue
               ? _load(layouts.closures.tag, receiver, body)
               : virtual
@@ -565,14 +504,38 @@ final class FunctionRepresentation(
               instructions[missing] = [];
               ends[missing] = Jump(join!, [actual]);
             case Equals(:final left, :final right, :final negated):
-              final identity = Equals(left, right, negated: negated);
-              identities.add(identity);
-              instructions[missing] = [identity];
+              // shortcut: native strings are canonical literals; compare contents when adding constructed strings.
+              final identity = layouts.representation(right.type) == .reference
+                  ? ReferenceEquality(left, right, negated: negated)
+                  : Constant.boolean(negated);
+              instructions[missing] = [
+                if (identity is ReferenceEquality) identity,
+              ];
               ends[missing] = Jump(join!, [identity]);
+            case ObjectHashCode(:final operand):
+              final hash = ObjectHashCode(operand, direct: true);
+              instructions[missing] = [hash];
+              ends[missing] = Jump(join!, [hash]);
             default:
               final invalid = DirectCall(heap.heap.invalid, []);
               instructions[missing] = [invalid];
               ends[missing] = Unreachable(invalid);
+          }
+          var builtin = missing;
+          if (instruction is Equals || instruction is ObjectHashCode) {
+            builtin = addBlock();
+            final selected = addBlock();
+            final kind = LoadField(TypeValues.kind, actual);
+            final test = Equals(
+              kind,
+              Constant.integer(TypeKind.function.index),
+            );
+            instructions[builtin]!.addAll([kind, test]);
+            ends[builtin] = Branch(test, Jump(selected), Jump(missing));
+            final result = instruction is Equals
+                ? valueOperations.equalFunction(instruction, selected)
+                : valueOperations.hashFunction(receiver, selected);
+            ends[result] = Jump(join!, result.parameters);
           }
           var next = block;
           if (member == null && !functionValue) {
@@ -582,7 +545,7 @@ final class FunctionRepresentation(
             final kind = LoadField(TypeValues.kind, actual);
             final test = Equals(kind, Constant.integer(TypeKind.nominal.index));
             body.addAll([kind, test]);
-            ends[next] = Branch(test, Jump(nominal), Jump(missing));
+            ends[next] = Branch(test, Jump(nominal), Jump(builtin));
             next = nominal;
             if (instruction case Equals(:final right)
                 when right.type.accepts(.nullType)) {
@@ -781,7 +744,7 @@ final class FunctionRepresentation(
                     members.program.implementationOf(target)!.defaults)[i]!,
               ),
               DirectCall(:final inputs) => inputs.skip(1),
-              ObjectRuntimeType() => const <Value>[],
+              ObjectRuntimeType() || ObjectHashCode() => const <Value>[],
               Equals(:final right) => [right],
               _ => throw StateError('Expected a member call.'),
             };
@@ -848,6 +811,7 @@ final class FunctionRepresentation(
                 typeArguments: typeArguments,
               ),
               ObjectRuntimeType(:final operand) => ObjectRuntimeType(operand),
+              ObjectHashCode(:final operand) => ObjectHashCode(operand),
               Equals(:final left, :final right, :final negated) => Equals(
                 left,
                 right,
@@ -953,7 +917,7 @@ final class FunctionRepresentation(
               append(widened);
               final pending = <Value>[];
               final arguments = _ownerArguments(
-                _receiverType(receiver, pending),
+                layouts.types.runtimeTypeOf(receiver, pending),
                 field.owner,
                 pending,
               );
@@ -1030,7 +994,7 @@ final class FunctionRepresentation(
           );
           body.add(widened);
           final arguments = _ownerArguments(
-            _receiverType(receiver, body),
+            layouts.types.runtimeTypeOf(receiver, body),
             field.owner,
             body,
           );

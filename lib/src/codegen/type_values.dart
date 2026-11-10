@@ -121,6 +121,10 @@ final class TypeValues() {
     list.nullable,
     list.nullable,
   ]);
+  final _hash = FunctionTarget(_uri, 'typeHash', .integer, [type]);
+  final _hashArguments = FunctionTarget(_uri, 'typeArgumentsHash', .integer, [
+    list.nullable,
+  ]);
   final _shapes = <Object, int>{};
   final _templates =
       <
@@ -151,6 +155,14 @@ final class TypeValues() {
 
   Iterable<IrFunction> get functions => _functions.values;
 
+  /// Reads the built-in runtime type without invoking user overrides.
+  Value runtimeTypeOf(Value receiver, List<Value> into) {
+    final actual = ObjectRuntimeType(receiver, direct: true);
+    final concrete = TypeCast(actual, TypeValues.type);
+    into.addAll([actual, concrete]);
+    return concrete;
+  }
+
   FunctionTarget get equality {
     _includeEquality();
     return _equal;
@@ -159,6 +171,21 @@ final class TypeValues() {
   FunctionTarget get argumentEquality {
     _includeEquality();
     return _equalArguments;
+  }
+
+  FunctionTarget get hash {
+    _includeHash();
+    return _hash;
+  }
+
+  FunctionTarget get argumentHash {
+    _includeHash();
+    return _hashArguments;
+  }
+
+  void _includeHash() {
+    _functions.putIfAbsent(_hash, _hashBody);
+    _functions.putIfAbsent(_hashArguments, _argumentHashBody);
   }
 
   void _includeEquality() {
@@ -602,6 +629,56 @@ final class TypeValues() {
       make,
       done,
     ]);
+  }
+
+  Value _mixHash(Block block, Value seed, Value value) => block.emit(
+    IntBinary(
+      .bitAnd,
+      block.emit(
+        IntBinary(
+          .add,
+          block.emit(IntBinary(.multiply, seed, const Constant.integer(31))),
+          value,
+        ),
+      ),
+      const Constant.integer(0x3fffffff),
+    ),
+  );
+
+  IrFunction _hashBody() {
+    final entry = Block(_hash.parameterTypes);
+    final value = entry.parameters.single;
+    final seed = _mixHash(
+      entry,
+      entry.emit(LoadField(kind, value)),
+      entry.emit(LoadField(shape, value)),
+    );
+    final partsHash = entry.emit(
+      DirectCall(_hashArguments, [entry.emit(LoadField(parts, value))]),
+    );
+    entry.finish(Return(_mixHash(entry, seed, partsHash)));
+    return IrFunction(_hash, [entry]);
+  }
+
+  IrFunction _argumentHashBody() {
+    final entry = Block(_hashArguments.parameterTypes);
+    final loop = Block([list.nullable, .integer]),
+        step = Block([list]),
+        done = Block();
+    entry.finish(
+      Jump(loop, [entry.parameters.single, const Constant.integer(0)]),
+    );
+    final [values, seed] = loop.parameters;
+    final test = loop.emit(TypeTest(values, list));
+    loop.finish(Branch(test, Jump(step, [test.refinement(true)!]), Jump(done)));
+    final node = step.parameters.single;
+    final value = step.emit(
+      DirectCall(_hash, [step.emit(LoadField(head, node))]),
+    );
+    final hash = _mixHash(step, seed, value);
+    step.finish(Jump(loop, [step.emit(LoadField(tail, node)), hash]));
+    done.finish(Return(seed));
+    return IrFunction(_hashArguments, [entry, loop, step, done]);
   }
 
   IrFunction _equalityBody() {

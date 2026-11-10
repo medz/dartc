@@ -11,6 +11,7 @@ import 'function_allocation.dart';
 import 'function_emitter.dart';
 import 'function_selection.dart';
 import 'storage_access.dart';
+import 'double_bits.dart';
 import 'native_adapter.dart';
 import 'program_layout.dart';
 import 'heap_plan.dart';
@@ -97,6 +98,12 @@ final class ScalarFunction<R extends Object>(
         if (selection.constantTests[instruction] case final value?) {
           final destination = allocation.allocate(.general);
           emitter.loadImmediate(destination, value ? 1 : 0);
+          allocation.define(instruction, destination);
+        } else if (instruction case DoubleBits(:final operand)) {
+          final source = allocation.read(operand);
+          final destination = allocation.allocate(.general);
+          emitter.move(destination, source);
+          allocation.release(operand);
           allocation.define(instruction, destination);
         } else if (instruction
             case ObjectRuntimeType(:final operand) ||

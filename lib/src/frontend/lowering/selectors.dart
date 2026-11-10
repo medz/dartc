@@ -513,6 +513,8 @@ final class SelectorChain(
         (member.enclosingElement.name == 'Object' ||
             member.enclosingElement.name == 'Type' ||
             member.enclosingElement.name == 'Function' ||
+            member.enclosingElement.name == 'num' ||
+            member.enclosingElement.name == 'bool' ||
             coreRuntimeMember(member))) {
       return context.normal(
         context.emit(ObjectHashCode(known, direct: direct)),

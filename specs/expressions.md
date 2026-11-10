@@ -41,6 +41,12 @@ NoSuchMethodError.withInvocation 的普通工厂调用与提取复用既有调�
 
 动态调用 `g<String>('bad')` 遗漏必需命名实参时，传给 `noSuchMethod` 的 Invocation 应保留显式类型实参 `String`。在同一份 `shapeBeforeBounds` 样本上，macOS ARM64 的 Dart SDK 3.13.7 JIT 返回 111，SDK AOT 返回 101。IR 保留显式类型实参，结果为 111。对照使用 SDK 显式构造的 Invocation 和同一接收者的 `noSuchMethod`。[样本](../test/frontend/lowering/fixtures/dynamic_dispatch.dart)、[Invocation.typeArguments](https://api.dart.dev/dart-core/Invocation/typeArguments.html)。
 
+## 原生相等与哈希
+
+Object/Object? 视图的 `==`、`!=` 和 hashCode 按实际值选择实现。普通用户对象保留重写、异常和副作用；继承 Object 默认实现时使用身份相等与稳定身份哈希。null 的相等比较不调用用户运算符。int、double、bool 和 null 的内置行为不因装箱改变；数值相等保留整数精度及 NaN 规则，相等的 int/double 与正负零具有相同哈希。见[宽类型与数值边界验证](../test/compiler/bound_methods_test.dart)。函数与 Type 的规则分别见[函数值](functions.md)和[类型值](types.md)。
+
+原生字符串目前只有规范化字面量；一般字符串的值比较和哈希、record 结构比较、dynamic 成员派发仍待接通。哈希值不保证跨运行或编译版本相同，也不保证不等值的哈希不同。
+
 ## 原生整数除法、余数与移位
 
 原生整数 `~/` 向零截断，`%` 返回非负欧几里得余数，`remainder` 返回与被除数同号的截断余数；结果遵循 64 位整数回绕。最小整数除以 -1 返回最小整数，相应余数为 0。三个操作遇到整数零除数均抛出 IntegerDivisionByZeroException，保留操作数求值顺序、typed catch 与 finally；忽略结果不会删除抛错。见 [~/ 契约](https://api.dart.dev/dart-core/num/operator_truncate_divide.html)、[% 契约](https://api.dart.dev/dart-core/num/operator_modulo.html)、[remainder 契约](https://api.dart.dev/dart-core/num/remainder.html)和[原生边界验证](../test/compiler/integer_operations_test.dart)。源码数值运算需要的异常类采用官方 SDK 声明，其 message 字符串与空 stackTrace getter 已接通；异常格式化仍未验证。浮点余数仍待实现。

@@ -81,6 +81,55 @@ void main() {
       },
     );
 
+    test('${generator.target} emits bounded constant shifts directly', () {
+      for (final operator in [
+        IntOperator.shiftLeft,
+        IntOperator.shiftRight,
+        IntOperator.unsignedShiftRight,
+      ]) {
+        for (final count in [-1, 0, 63, 64]) {
+          final target = FunctionTarget(
+            Uri.parse('memory:shift'),
+            'shift',
+            .integer,
+            [.integer],
+          );
+          final entry = Block(target.parameterTypes);
+          entry.finish(
+            Return(
+              entry.emit(
+                IntBinary(
+                  operator,
+                  entry.parameters.single,
+                  Constant.integer(count),
+                ),
+              ),
+            ),
+          );
+          final program = IrProgram([], [
+            IrFunction(target, [entry]),
+          ]);
+          if (count >= 0 && count < 64) {
+            expect(
+              generator.generate(program, definitions: [target]).sections,
+              isNotEmpty,
+            );
+          } else {
+            expect(
+              () => generator.generate(program, definitions: [target]),
+              throwsA(
+                isA<UnsupportedError>().having(
+                  (error) => error.message,
+                  'dependency',
+                  contains('ArgumentError constructor'),
+                ),
+              ),
+            );
+          }
+        }
+      }
+    });
+
     test('${generator.target} requires shift error constructor bodies', () {
       final target = FunctionTarget(
         Uri.parse('memory:shift'),

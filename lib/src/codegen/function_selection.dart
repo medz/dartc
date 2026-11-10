@@ -16,6 +16,8 @@ import 'member_calls.dart';
 import 'numeric_operations.dart';
 import 'global_storage.dart';
 import 'storage_access.dart';
+import 'double_bits.dart';
+import 'reference_equality.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
 final class FunctionSelection<R>(
@@ -39,7 +41,7 @@ final class FunctionSelection<R>(
   );
   final binaries =
       <
-        Instruction,
+        Value,
         ({
           BinaryEncoding<R> encoding,
           Value left,
@@ -162,6 +164,7 @@ final class FunctionSelection<R>(
             final target = heap.constructors[operation]!;
             _call(instruction, target, body.inputsOf(operation).toList());
           case ReifyType():
+          case DoubleBits():
             break;
           case ObjectRuntimeType():
             if (_generalTemporaries < 1) _generalTemporaries = 1;
@@ -301,6 +304,17 @@ final class FunctionSelection<R>(
               right,
               floatingInputs: operator == .divide,
             );
+          case ReferenceEquality(:final left, :final right, :final negated):
+            if (layouts.representation(left.type) != .reference ||
+                layouts.representation(right.type) != .reference) {
+              throw ArgumentError('Reference equality requires references.');
+            }
+            _binary(
+              instruction,
+              emitter.comparison(negated ? .notEqual : .equal),
+              left,
+              right,
+            );
           case Equals(:final left, :final right, :final negated):
             final nullComparison =
                 left.type == .nullType || right.type == .nullType;
@@ -308,7 +322,6 @@ final class FunctionSelection<R>(
                 left is TypeConstant ||
                 left is ReifyType ||
                 left is ObjectRuntimeType && left.direct;
-            final identity = body.identities.contains(instruction);
             if (typeLiteral &&
                 layouts.representation(right.type) == .reference) {
               _call(instruction, layouts.types.equality, [left, right]);
@@ -316,7 +329,6 @@ final class FunctionSelection<R>(
             }
             if (!nullComparison &&
                 !typeLiteral &&
-                !identity &&
                 (!_scalar(left.type) || !_scalar(right.type))) {
               throw UnsupportedError(
                 'Native equality requires supported scalar operands.',
@@ -332,7 +344,7 @@ final class FunctionSelection<R>(
                 left.type == right.type ||
                     FfiTypes.isPointer(left.type) &&
                         FfiTypes.isPointer(right.type) ||
-                    (nullComparison || typeLiteral || identity) &&
+                    (nullComparison || typeLiteral) &&
                         layouts.representation(left.type) == .reference &&
                         layouts.representation(right.type) == .reference
                 ? emitter.comparison(
@@ -419,7 +431,7 @@ final class FunctionSelection<R>(
   }
 
   void _binary(
-    Instruction instruction,
+    Value instruction,
     BinaryEncoding<R> encoding,
     Value left,
     Value right, {

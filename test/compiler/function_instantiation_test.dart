@@ -3,6 +3,7 @@ library;
 
 import 'package:test/test.dart';
 
+import 'fixtures/function_instantiation.dart' as sdk;
 import 'fixtures/function_instantiation_ffi.dart';
 
 void main() {
@@ -37,6 +38,14 @@ void main() {
   test('instantiated calls preserve throwing behavior and cleanup', () {
     for (final count in [0, 40000]) {
       expect(native.exceptions(count), 245);
+    }
+  });
+  test('function and Type hashes preserve equality and survive collection', () {
+    for (final count in [0, 40000]) {
+      expect(sdk.functionHashes(count), 63);
+      expect(native.hashes(count), 63);
+      expect(sdk.typeHashes(count), 31);
+      expect(native.types(count), 31);
     }
   });
   test('constructor tear-offs retain lexical types, aliases and defaults', () {

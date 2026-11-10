@@ -205,6 +205,7 @@ base class ScalarCodeGenerator<R extends Object>(
       ...instances.functions,
     ];
     Iterable<IrFunction> supportFunctions() => [
+      ...members.functions,
       ...closures.functions,
       ...arithmetic.functions,
       ...globals.functions,
@@ -257,7 +258,16 @@ base class ScalarCodeGenerator<R extends Object>(
         : <IrFunction>[];
     heap.include(traceFunctions, layouts);
     final managed = persistent || !heap.isEmpty || exceptions;
-    final primitives = managed ? heap.primitives : <FunctionTarget>{};
+    final primitives = managed
+        ? heap.primitives
+        : {
+            if (functions.values.any(
+              (function) => function.selection.calls.values.any(
+                (call) => call.target == heap.heap.invalid,
+              ),
+            ))
+              heap.heap.invalid,
+          };
     if (managed || generated.isNotEmpty) {
       final support = [
         ...generated,

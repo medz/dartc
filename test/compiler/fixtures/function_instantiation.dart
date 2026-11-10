@@ -5,6 +5,7 @@ import 'package:dartc/interop.dart';
 import 'closures.dart' show collect;
 
 typedef Identity = T Function<T>(T);
+typedef RenamedIdentity = U Function<U>(U);
 T identity<T>(T value) => value;
 T Function(T) identityFor<T>() => identity<T>;
 int phantom<T>([int value = 7]) => value;
@@ -110,6 +111,67 @@ int methods(int count) {
       (actual is int Function(Object?, int) ? 1 : 0);
 }
 
+bool sameFunction(Object first, Object second) =>
+    first == second && first.hashCode == second.hashCode;
+
+@Export<Int64 Function(Int64)>()
+int functionHashes(int count) {
+  final Identity generic = identity;
+  final closure = counter(1), box = Box<int>(2);
+  final method = box.choose, make = Box.new, alias = PhantomBox.new;
+  final applied = generic<int>, closed = closure<int>;
+  final bound = method<int>, constructor = make<int>;
+  final phantom = alias<int, String>, nested = nestedParcelFor<int>();
+  final staticHash = applied.hashCode, closureHash = closed.hashCode;
+  final methodHash = bound.hashCode, constructorHash = constructor.hashCode;
+  final phantomHash = phantom.hashCode, nestedHash = nested.hashCode;
+  collect(count);
+  var flags = 0;
+  if (sameFunction(applied, identity<int>) && applied.hashCode == staticHash) {
+    flags |= 1;
+  }
+  if (sameFunction(closed, closure<int>) && closed.hashCode == closureHash) {
+    flags |= 2;
+  }
+  if (sameFunction(bound, box.bind()) && bound.hashCode == methodHash) {
+    flags |= 4;
+  }
+  if (sameFunction(constructor, Box<int>.new) &&
+      constructor.hashCode == constructorHash) {
+    flags |= 8;
+  }
+  if (sameFunction(phantom, phantomBox<int, String>) &&
+      phantom.hashCode == phantomHash &&
+      phantom != (alias<int, bool>) &&
+      phantom != constructor) {
+    flags |= 16;
+  }
+  if (sameFunction(nested, Parcel<Parcel<int>?>.new) &&
+      nested.hashCode == nestedHash) {
+    flags |= 32;
+  }
+  return flags;
+}
+
+bool sameType<T>(Type expected, int count) {
+  final Object actual = T;
+  final hash = actual.hashCode;
+  collect(count);
+  return actual == expected &&
+      hash == expected.hashCode &&
+      actual.hashCode == hash;
+}
+
+@Export<Int64 Function(Int64)>()
+int typeHashes(int count) =>
+    (sameType<Identity>(RenamedIdentity, count) ? 1 : 0) |
+    (sameType<Box<Identity>>(Box<RenamedIdentity>, count) ? 2 : 0) |
+    (sameType<Identity>(identity.runtimeType, count) ? 4 : 0) |
+    (sameType<Never?>(Null, count) ? 8 : 0) |
+    (sameType<Parcel<int>?>(typeOf<Parcel<int>?>(), count) ? 16 : 0);
+
+Type typeOf<T>() => T;
+
 int events = 0;
 T throwing<T>(T value) {
   events = 2;
@@ -199,10 +261,12 @@ int lexicalConstructors(int count) {
 }
 
 ParcelMaker<Parcel<int>?>? savedConstructor;
+int savedHash = 0;
 
 @Export<Int64 Function(Int64)>()
 int keepConstructor(int count) {
   savedConstructor = nestedParcelFor<int>();
+  savedHash = savedConstructor.hashCode;
   collect(count);
   return savedConstructor == Parcel<Parcel<int>?>.new ? 1 : 0;
 }
@@ -211,7 +275,9 @@ int keepConstructor(int count) {
 int callConstructor(int count) {
   final make = savedConstructor!;
   collect(count);
-  return make(Parcel<int>(4)).value!.value * 10 + make(null).mark;
+  return make.hashCode == savedHash
+      ? make(Parcel<int>(4)).value!.value * 10 + make(null).mark
+      : 0;
 }
 
 class Broken<T>(T value) {

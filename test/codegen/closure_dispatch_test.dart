@@ -7,6 +7,32 @@ void main() {
   for (final os in OperatingSystem.values) {
     for (final arch in Architecture.values) {
       final platform = Target(os, arch);
+      test(
+        '$platform hashes function constants without managed allocation',
+        () {
+          final uri = Uri.parse('memory:function-hash');
+          final function = FunctionTarget(uri, 'function', .integer, []);
+          final hash = FunctionTarget(uri, 'hash', .integer, []);
+          final entry = Block()..finish(const Return(Constant.integer(7)));
+          final hashing = Block();
+          hashing.finish(
+            Return(hashing.emit(ObjectHashCode(FunctionConstant(function)))),
+          );
+          final program = IrProgram([], [
+            IrFunction(function, [entry]),
+            IrFunction(hash, [hashing]),
+          ]);
+          final CodeGenerator generator = arch == .arm64
+              ? Arm64CodeGenerator(platform)
+              : X64CodeGenerator(platform);
+          expect(
+            generator
+                .generate(program, definitions: program.reachableFrom([hash]))
+                .sections,
+            isNotEmpty,
+          );
+        },
+      );
       test('$platform excludes unrelated open closure signatures', () {
         for (final genericView in [false, true]) {
           for (final unrelatedResult in [

@@ -17,6 +17,12 @@ final class FunctionInstantiation() {
       .lookupFunction<Int64 Function(Int64), int Function(int)>('constructors');
   late final methods = _library
       .lookupFunction<Int64 Function(Int64), int Function(int)>('methods');
+  late final hashes = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'functionHashes',
+      );
+  late final types = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('typeHashes');
   late final exceptions = _library
       .lookupFunction<Int64 Function(Int64), int Function(int)>('exceptions');
   late final lexicalConstructors = _library

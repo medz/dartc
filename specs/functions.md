@@ -36,7 +36,9 @@
 
 构造器可直接使用词法类型实参提取，例如 `C<T>.new` 和 `C<T>.named`，也可由上下文推断实参。支持类与函数类型环境、嵌套类型、实例化的类型别名、重定向工厂和 extension type 构造器；函数值保留默认参数及源声明身份，可经闭包或全局变量保存并在 GC 后调用。读取更宽接收者中的构造器回调时，先完成结果类型检查，再执行调用方后续副作用。见同一[原生验证](../test/compiler/function_instantiation_test.dart)。
 
-此范围不包含 dynamic/noSuchMethod 调用、捕获的 `late` 绑定与初始化体存储，也不包含 FFI 回调。函数值经 Object/dynamic 视图的通用相等分派和 hashCode 尚未接通。一般局部 `late` 的原生绑定语义仍待实现；上表的 IR 支持不表示这些路径均可原生执行。
+函数值经具体函数类型、Function、Object 或 Object? 视图进行 `==`、`!=` 和 hashCode 读取时保留相同语义。相等的函数具有相同哈希，移动回收和同模块跨入口保留不会改变哈希；绑定方法使用接收者身份，不调用接收者重写的 `==` 或 hashCode。泛型实例化的哈希包含全部类型实参，与常量实例化及等价构造器提取一致。不承诺具体哈希数值，也不要求不等函数具有不同哈希。见[宽类型视图验证](../test/compiler/bound_methods_test.dart)及[实例化与跨入口验证](../test/compiler/function_instantiation_test.dart)。
+
+此范围不包含 dynamic/noSuchMethod 调用及 dynamic 成员读取、捕获的 `late` 绑定与初始化体存储，也不包含 FFI 回调。一般局部 `late` 的原生绑定语义仍待实现；上表的 IR 支持不表示这些路径均可原生执行。
 
 ## 异步参考执行器范围
 

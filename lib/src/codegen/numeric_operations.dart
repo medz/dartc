@@ -41,6 +41,14 @@ final class NumericOperations(
 
   FunctionTarget? callFor(Instruction instruction) {
     if (_nativeOperations.contains(instruction)) return null;
+    if (instruction
+        case IntBinary(
+          operator: .shiftLeft || .shiftRight || .unsignedShiftRight,
+          right: ScalarConstant(value: final int count),
+        )
+        when count >= 0 && count < 64) {
+      return null;
+    }
     if (instruction case NumericToInt(:final operand, :final rounding)) {
       return operand.type == .integer
           ? null

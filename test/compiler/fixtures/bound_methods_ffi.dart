@@ -15,6 +15,14 @@ final class BoundMethods() {
       .lookupFunction<Int64 Function(Int64), int Function(int)>(
         'methodIdentity',
       );
+  late final objects = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'functionObjects',
+      );
+  late final scalars = _library
+      .lookupFunction<Int64 Function(Int64, Double), int Function(int, double)>(
+        'scalarObjects',
+      );
   late final generic = _library
       .lookupFunction<Int64 Function(Int64), int Function(int)>(
         'genericMethods',

@@ -9,6 +9,45 @@ final class MemberCalls(
     for (final target in definitions)
       ...?program.implementationOf(target)?.instantiatedClasses,
   };
+  final _builtins = <(ValueType, bool), IrFunction>{};
+
+  Iterable<IrFunction> get functions => _builtins.values;
+
+  FunctionTarget builtin(
+    ValueType type, {
+    required bool hash,
+  }) => _builtins.putIfAbsent((type, hash), () {
+    final target = FunctionTarget(
+      Uri.parse('dartc:objects'),
+      '${type.dartName}.${hash ? 'hash' : 'equals'}',
+      hash ? .integer : .boolean,
+      [type, if (!hash) .object.nullable],
+    );
+    final entry = Block(target.parameterTypes);
+    if (hash) {
+      entry.finish(Return(entry.emit(ObjectHashCode(entry.parameters.first))));
+      return IrFunction(target, [entry]);
+    }
+    final blocks = [entry];
+    var current = entry;
+    for (final other
+        in type == .boolean
+            ? [ValueType.boolean]
+            : [ValueType.integer, ValueType.floating]) {
+      final yes = Block([other]), no = Block();
+      blocks.addAll([yes, no]);
+      final test = current.emit(TypeTest(entry.parameters[1], other));
+      current.finish(
+        Branch(test, Jump(yes, [test.refinement(true)!]), Jump(no)),
+      );
+      yes.finish(
+        Return(yes.emit(Equals(entry.parameters.first, yes.parameters.single))),
+      );
+      current = no;
+    }
+    current.finish(const Return(Constant.boolean(false)));
+    return IrFunction(target, blocks);
+  }).target;
 
   Set<FunctionTarget> get tearOffTargets => {
     for (final target in definitions)
