@@ -21,6 +21,30 @@ void main() {
     expect(calls, 1);
   });
 
+  test('nested native reentry restores every suspended activation heap', () {
+    final heap = ManagedHeap();
+    addTearDown(heap.close);
+    var depth = 0;
+    final results = <int>[];
+    late final NativeCallable<HeapCallback> callback;
+    callback = NativeCallable<HeapCallback>.isolateLocal((int count) {
+      depth++;
+      if (depth < 3) {
+        results.add(heap.reenter(callback.nativeFunction, count));
+      }
+      results.add(heap.chain(count));
+      depth--;
+    });
+    addTearDown(callback.close);
+    const count = 40000, sum = count * (count - 1) ~/ 2;
+    for (var i = 0; i < 2; i++) {
+      results.clear();
+      expect(heap.reenter(callback.nativeFunction, count), 42);
+      expect(results, [sum, 42, sum, 42, sum]);
+      expect(depth, 0);
+    }
+  });
+
   test('growing retained chains survive repeated copying collections', () {
     final heap = ManagedHeap();
     addTearDown(heap.close);
