@@ -174,4 +174,47 @@ void main() {
     expect(caller.methodTearOffs, {(method: method, direct: true)});
     expect(() => caller.methodTearOffs.clear(), throwsUnsupportedError);
   });
+
+  test('runtime specializations share the generic body and preserve semantic identity', () {
+    final t = TypeParameterType('T')
+      ..initializeBound(ValueType.object.nullable);
+    final generic = FunctionTarget(
+      uri,
+      'identity',
+      t,
+      [t],
+      typeParameters: [t],
+    );
+    final implementation = Block(generic.parameterTypes);
+    implementation.finish(Return(implementation.parameters.single));
+    final value = FunctionConstant(generic);
+    final fixed = FunctionConstant(generic, typeArguments: [.integer]);
+    final apply = Block();
+    final applied = apply.emit(InstantiateFunction(value, [.integer]));
+    apply.finish(Return(applied));
+    final storage = ClosureStorage([
+      IrFunction(generic, [implementation]),
+      IrFunction(FunctionTarget(uri, 'apply', applied.type, []), [apply]),
+      IrFunction(FunctionTarget(uri, 'fixed', fixed.type, []), [
+        Block()..finish(Return(fixed)),
+      ]),
+    ]);
+    final original = storage.constants[value.structuralKey]!;
+    final specialized = storage.specializations[original]!;
+    expect(storage.specializations, hasLength(1));
+    expect(specialized.target, same(generic));
+    expect(specialized.instantiation!.generic, same(original));
+    expect(specialized.captures, isEmpty);
+    expect(specialized.environment, isEmpty);
+    expect(
+      specialized.identity,
+      storage.constants[fixed.structuralKey]!.identity,
+    );
+    expect(specialized.tag, isNot(storage.constants[fixed.structuralKey]!.tag));
+    expect(
+      storage.targetsFor(fixed.type as FunctionType),
+      contains(specialized),
+    );
+    IrProgram([...storage.classes, ...TypeValues().classes], storage.functions);
+  });
 }

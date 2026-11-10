@@ -1,0 +1,24 @@
+import 'dart:ffi';
+
+import 'package:dartc/target.dart';
+
+import '../../support/native_assets.dart';
+
+final class FunctionInstantiation() {
+  final _library = NativeAssets(Target.host())
+      .open('compiler/function_instantiation');
+  late final staticFunctions = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'staticFunctions',
+      );
+  late final closures = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('closures');
+  late final constructors = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('constructors');
+  late final methods = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('methods');
+  late final exceptions = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('exceptions');
+
+  void close() => _library.close();
+}

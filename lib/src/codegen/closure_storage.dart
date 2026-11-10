@@ -13,6 +13,8 @@ final class ClosureStorage(
   final closures = <FunctionTarget, ClosureShape>{};
   final constants = <Object, ClosureShape>{};
   final methods = <FunctionTarget, ClosureShape>{};
+  final specializations = <ClosureShape, ClosureShape>{};
+  final _identities = <Object, int>{};
   final _cells = <CellType, CellShape>{};
   final _classes = <IrClass>[];
   final _functions = <IrFunction>[];
@@ -27,6 +29,7 @@ final class ClosureStorage(
         definitions[target]?.defaults ??
         (throw ArgumentError('Missing callable definition: ${target.name}'));
     final targets = <FunctionTarget>{};
+    final instantiations = <FunctionType>{};
     void includeCell(ValueType type) {
       if (type is! CellType || _cells.containsKey(type)) return;
       final owner = ClassType(_uri, 'Cell${_cells.length}');
@@ -54,6 +57,9 @@ final class ClosureStorage(
             includeCell(input.type);
           }
           if (operation case MakeClosure(:final target)) targets.add(target);
+          if (operation case InstantiateFunction(:final function)) {
+            instantiations.add(function.type as FunctionType);
+          }
         }
       }
     }
@@ -132,7 +138,21 @@ final class ClosureStorage(
             }),
         ];
       }
-      constants[entry.key] = _include(target, signature, arguments, defaults);
+      final constructor =
+          value.target.kind == .initializer || value.target.kind == .factory;
+      constants[entry.key] = _include(
+        target,
+        signature,
+        arguments,
+        defaults,
+        identity: (value.target, value.constructorAlias),
+        identityArguments:
+            constructor &&
+                value.constructorAlias == null &&
+                signature.typeParameters.isEmpty
+            ? (signature.result as ClassType).typeArguments
+            : value.typeArguments ?? const [],
+      );
     }
     for (final target in boundMethods) {
       methods[target] = _include(
@@ -142,14 +162,47 @@ final class ClosureStorage(
         defaultsOf(target),
       );
     }
+    for (final generic in all.toList()) {
+      if (!instantiations.any((view) => _callableAt(view, generic.signature))) {
+        continue;
+      }
+      final index = all.length;
+      final owner = ClassType(_uri, 'Closure$index', superclass: _base);
+      final origin = InstanceField(owner, 'origin', .object, isFinal: true);
+      final arguments = InstanceField(
+        owner,
+        'arguments',
+        TypeValues.list,
+        isFinal: true,
+      );
+      final initializer = _initialize(owner, [tag, origin, arguments]);
+      _classes.add(
+        IrClass(owner, [origin, arguments], constructors: [initializer]),
+      );
+      specializations[generic] = ClosureShape(
+        target: generic.target,
+        signature: generic.signature.instantiate(
+          generic.signature.typeParameters,
+        ),
+        typeArguments: generic.typeArguments,
+        defaults: generic.defaults,
+        tag: index,
+        type: owner,
+        initializer: initializer,
+        identity: generic.identity,
+        instantiation: FunctionInstantiation(generic, origin, arguments),
+      );
+    }
   }
 
   ClosureShape _include(
     FunctionTarget target,
     FunctionType signature,
     List<ValueType> typeArguments,
-    Map<int, Constant> defaults,
-  ) {
+    Map<int, Constant> defaults, {
+    Object? identity,
+    List<ValueType> identityArguments = const [],
+  }) {
     final index = closures.length + constants.length + methods.length;
     final owner = ClassType(_uri, 'Closure$index', superclass: _base);
     final captures = [
@@ -180,16 +233,21 @@ final class ClosureStorage(
         ? _initialize(owner, [tag, ...fields])
         : null;
     final shape = ClosureShape(
-      target,
-      signature,
-      typeArguments,
-      defaults,
-      index,
-      owner,
-      initializer,
-      captures,
-      parameters.toList(),
-      environment,
+      target: target,
+      signature: signature,
+      typeArguments: typeArguments,
+      defaults: defaults,
+      tag: index,
+      type: owner,
+      initializer: initializer,
+      captures: captures,
+      parameters: parameters.toList(),
+      environment: environment,
+      identity: _identities.putIfAbsent(
+        identity ?? target,
+        () => _identities.length,
+      ),
+      identityArguments: identityArguments,
     );
     _classes.add(IrClass(owner, fields, constructors: [?initializer]));
     return shape;
@@ -198,13 +256,15 @@ final class ClosureStorage(
   CellShape cell(CellType type) =>
       _cells[type] ?? (throw StateError('Uncollected native cell: $type'));
 
-  Iterable<ClosureShape> targetsFor(FunctionCall call) => closures.values
+  Iterable<ClosureShape> get all => closures.values
       .followedBy(constants.values)
       .followedBy(methods.values)
-      .where((shape) => _callableAt(call, shape.signature));
+      .followedBy(specializations.values);
 
-  bool _callableAt(FunctionCall call, FunctionType actual) {
-    final view = call.function.type as FunctionType;
+  Iterable<ClosureShape> targetsFor(FunctionType view) =>
+      all.where((shape) => _callableAt(view, shape.signature));
+
+  bool _callableAt(FunctionType view, FunctionType actual) {
     if (actual.typeParameters.length != view.typeParameters.length) {
       return false;
     }
@@ -269,17 +329,30 @@ final class ClosureStorage(
   }
 }
 
-final class ClosureShape(
-  final FunctionTarget target,
-  final FunctionType signature,
-  final List<ValueType> typeArguments,
-  final Map<int, Constant> defaults,
-  final int tag,
-  final ClassType type,
-  final FunctionTarget? initializer,
-  final List<InstanceField> captures,
-  final List<TypeParameterType> parameters,
-  final List<InstanceField> environment,
+final class ClosureShape({
+  required final FunctionTarget target,
+  required final FunctionType signature,
+  required final List<ValueType> typeArguments,
+  required final Map<int, Constant> defaults,
+  required final int tag,
+  required final ClassType type,
+  required final FunctionTarget? initializer,
+  final List<InstanceField> captures = const [],
+  final List<TypeParameterType> parameters = const [],
+  final List<InstanceField> environment = const [],
+
+  /// The source declaration identity, independent of the selected call entry.
+  required final int identity,
+
+  /// Closed arguments retained even when absent from the function signature.
+  final List<ValueType> identityArguments = const [],
+  final FunctionInstantiation? instantiation,
+});
+
+final class FunctionInstantiation(
+  final ClosureShape generic,
+  final InstanceField origin,
+  final InstanceField arguments,
 );
 
 final class CellShape(

@@ -1113,7 +1113,7 @@ final class TypeRelations(
       amount,
       cutoff,
     ]);
-    copy.finish(Return(values.cons(copy, head, tail)));
+    copy.finish(Return(copy.emit(values.cons(head, tail))));
     return IrFunction(_shiftParts, [entry, empty, copy]);
   }
 }

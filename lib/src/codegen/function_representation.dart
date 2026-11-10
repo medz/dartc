@@ -165,7 +165,8 @@ final class FunctionRepresentation(
       result(true),
       Jump(current),
     );
-    if (layouts.closures.methods.isEmpty) {
+    if (layouts.closures.methods.isEmpty &&
+        layouts.closures.specializations.isEmpty) {
       ends[current] = result(false);
       return join;
     }
@@ -180,26 +181,57 @@ final class FunctionRepresentation(
       ends[current] = Branch(test, Jump(next), result(false));
       current = next;
     }
-    final body = instructions[current]!;
-    final leftTag = _load(layouts.closures.tag, left, body);
-    final rightTag = _load(layouts.closures.tag, right, body);
-    final same = Equals(leftTag, rightTag);
-    body.add(same);
-    final selected = fresh();
-    ends[current] = Branch(same, Jump(selected), result(false));
-    current = selected;
-    for (final shape in layouts.closures.methods.values) {
-      final match = Equals(leftTag, Constant.integer(shape.tag));
-      instructions[current]!.add(match);
-      final bound = fresh(), next = fresh();
-      ends[current] = Branch(match, Jump(bound), Jump(next));
-      final body = instructions[bound]!;
-      final a = _load(shape.captures.single, left, body);
-      final b = _load(shape.captures.single, right, body);
-      ends[bound] = Branch(identity(a, b, bound), result(true), result(false));
-      current = next;
+    List<Value> describe(Value value) {
+      final tag = _load(layouts.closures.tag, value, instructions[current]!);
+      final done = fresh([
+        .integer,
+        .object.nullable,
+        TypeValues.list.nullable,
+      ]);
+      for (final shape in layouts.closures.all) {
+        final selected = fresh(), next = fresh();
+        final match = Equals(tag, Constant.integer(shape.tag));
+        instructions[current]!.add(match);
+        ends[current] = Branch(match, Jump(selected), Jump(next));
+        final body = instructions[selected]!;
+        final applied = shape.instantiation;
+        final original = applied == null
+            ? value
+            : _load(applied.origin, value, body);
+        final generic = applied?.generic ?? shape;
+        final anchor = generic.target.kind == .closure
+            ? original
+            : generic.target.kind.isVirtual
+            ? _load(generic.captures.single, original, body)
+            : const Constant.nullValue();
+        final arguments = applied == null
+            ? layouts.types.argumentConstants(shape.identityArguments)
+            : _load(applied.arguments, value, body);
+        ends[selected] = Jump(done, [
+          Constant.integer(shape.identity),
+          anchor,
+          arguments,
+        ]);
+        current = next;
+      }
+      ends[current] = result(false);
+      current = done;
+      return done.parameters;
     }
-    ends[current] = result(false);
+
+    final a = describe(left), b = describe(right);
+    final same = Equals(a[0], b[0]);
+    instructions[current]!.add(same);
+    final anchor = fresh(), arguments = fresh();
+    ends[current] = Branch(same, Jump(anchor), result(false));
+    ends[anchor] = Branch(
+      identity(a[1], b[1], anchor),
+      Jump(arguments),
+      result(false),
+    );
+    final equal = DirectCall(layouts.types.argumentEquality, [a[2], b[2]]);
+    instructions[arguments]!.add(equal);
+    ends[arguments] = Branch(equal, result(true), result(false));
     return join;
   }
 
@@ -436,6 +468,11 @@ final class FunctionRepresentation(
           continue;
         }
         final invocation = switch (instruction) {
+          InstantiateFunction(:final function, :final typeArguments) => (
+            null,
+            function,
+            typeArguments,
+          ),
           BindMethod(:final method, :final receiver) => (
             method,
             receiver,
@@ -468,7 +505,8 @@ final class FunctionRepresentation(
         };
         if (invocation != null) {
           final (member, receiver, typeArguments) = invocation;
-          final functionValue = instruction is FunctionCall;
+          final functionValue =
+              instruction is FunctionCall || instruction is InstantiateFunction;
           final binding = instruction is BindMethod;
           final virtual =
               instruction is! DirectCall &&
@@ -476,7 +514,7 @@ final class FunctionRepresentation(
           final targets = functionValue
               ? {
                   for (final closure in layouts.closures.targetsFor(
-                    instruction,
+                    receiver.type as FunctionType,
                   ))
                     closure.type: (target: closure.target, closure: closure),
                 }
@@ -576,14 +614,36 @@ final class FunctionRepresentation(
             }
 
             final setup = <Instruction>[];
+            final specialization = closure?.instantiation;
+            final storage = specialization?.generic ?? closure;
+            final carrier = specialization == null
+                ? receiver
+                : _load(specialization.origin, receiver, setup);
+            var functionTypes = types;
+            if (specialization != null) {
+              Value arguments = _load(
+                specialization.arguments,
+                receiver,
+                setup,
+              );
+              functionTypes = [];
+              for (final _ in storage!.signature.typeParameters) {
+                final node = NullCheck(arguments);
+                final value = LoadField(TypeValues.head, node);
+                final next = LoadField(TypeValues.tail, node);
+                setup.addAll([node, value, next]);
+                arguments = next;
+                functionTypes.add(value);
+              }
+            }
             final parameters =
-                closure?.parameters ??
+                storage?.parameters ??
                 target.owner?.typeParameters ??
                 const <TypeParameterType>[];
             final classTypes = closure != null
                 ? [
-                    for (final field in closure.environment)
-                      _load(field, receiver, setup),
+                    for (final field in storage!.environment)
+                      _load(field, carrier, setup),
                   ]
                 : parameters.isEmpty
                 ? <Value>[]
@@ -594,10 +654,10 @@ final class FunctionRepresentation(
                 parameter: classTypes[i],
               if (!binding)
                 for (final (i, parameter)
-                    in (closure?.signature.typeParameters ??
+                    in (storage?.signature.typeParameters ??
                             target.typeParameters)
                         .indexed)
-                  parameter: types[i],
+                  parameter: functionTypes[i],
             };
             Value reify(ValueType type) {
               if (type.freeTypeParameters.isEmpty) {
@@ -659,13 +719,49 @@ final class FunctionRepresentation(
             for (final (i, parameter) in target.typeParameters.indexed) {
               environment[parameter] = invocationTypes[i];
             }
-            for (final (i, parameter) in target.typeParameters.indexed) {
-              append(
-                DirectCall(casts.bounds(layouts), [
-                  invocationTypes[i],
-                  reify(parameter.bound),
-                ]),
+            final bounds =
+                storage?.signature.typeParameters ?? target.typeParameters;
+            if (specialization == null) {
+              for (final (i, parameter) in bounds.indexed) {
+                append(
+                  DirectCall(casts.bounds(layouts), [
+                    storage == null ? invocationTypes[i] : functionTypes[i],
+                    reify(parameter.bound),
+                  ]),
+                );
+              }
+            }
+            if (instruction is InstantiateFunction) {
+              final shape = layouts.closures.specializations[closure]!;
+              final actualType = reify(shape.signature);
+              Value arguments = const Constant.nullValue();
+              for (final type in types.reversed) {
+                final node = layouts.types.cons(type, arguments);
+                invocations[node] = heap.constructorFor(
+                  node.initializer,
+                  layouts,
+                );
+                _operands[node] = [
+                  ...node.inputs,
+                  layouts.types.constant(TypeValues.list),
+                ];
+                append(node);
+                arguments = node;
+              }
+              final applied = InstantiateFunction(receiver, typeArguments);
+              invocations[applied] = heap.constructorFor(
+                shape.initializer!,
+                layouts,
               );
+              _operands[applied] = [
+                Constant.integer(shape.tag),
+                receiver,
+                arguments,
+                actualType,
+              ];
+              append(applied);
+              ends[current] = Jump(join!, [applied]);
+              continue;
             }
             final inputs = switch (instruction) {
               InstanceCall(:final positional, :final named) ||
@@ -685,12 +781,12 @@ final class FunctionRepresentation(
               _ => throw StateError('Expected a member call.'),
             };
             final arguments = <Value>[
-              if (!functionValue || target.kind == .closure) receiver,
+              if (!functionValue || target.kind == .closure) carrier,
             ];
             if (closure != null) {
               final captures = <Instruction>[];
-              for (final field in closure.captures) {
-                arguments.add(_load(field, receiver, captures));
+              for (final field in storage!.captures) {
+                arguments.add(_load(field, carrier, captures));
               }
               captures.forEach(append);
             }

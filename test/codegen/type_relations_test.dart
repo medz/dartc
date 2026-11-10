@@ -6,6 +6,45 @@ import 'package:test/test.dart';
 import '../support/ir_interpreter.dart';
 
 void main() {
+  test('type argument equality compares every element and list length', () {
+    final values = TypeValues();
+    final cases = <(List<ValueType>, List<ValueType>, bool)>[
+      ([], [], true),
+      ([.integer], [.integer], true),
+      ([.integer], [.number], false),
+      ([], [.integer], false),
+      ([.integer], [], false),
+      ([.integer, .number], [.integer], false),
+    ];
+    final functions = <IrFunction>[];
+    for (final (a, b, _) in cases) {
+      final target = FunctionTarget(
+        Uri.parse('memory:arguments'),
+        'compare${functions.length}',
+        .boolean,
+        [],
+      );
+      final entry = Block();
+      entry.finish(
+        Return(
+          entry.emit(
+            DirectCall(values.argumentEquality, [
+              values.argumentConstants(a),
+              values.argumentConstants(b),
+            ]),
+          ),
+        ),
+      );
+      functions.add(IrFunction(target, [entry]));
+    }
+    final interpreter = IrInterpreter(
+      IrProgram(values.classes, [...functions, ...values.functions]),
+      {},
+    );
+    for (final (i, (_, _, expected)) in cases.indexed) {
+      expect(interpreter.run(functions[i], []), expected);
+    }
+  });
   test(
     'class projection substitutes reordered and nested actual arguments',
     () {

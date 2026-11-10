@@ -117,6 +117,10 @@ final class TypeValues() {
     type,
     .object.nullable,
   ]);
+  final _equalArguments = FunctionTarget(_uri, 'typeArgumentsEqual', .boolean, [
+    list.nullable,
+    list.nullable,
+  ]);
   final _shapes = <Object, int>{};
   final _templates =
       <
@@ -148,9 +152,26 @@ final class TypeValues() {
   Iterable<IrFunction> get functions => _functions.values;
 
   FunctionTarget get equality {
-    _functions.putIfAbsent(_equal, _equalityBody);
+    _includeEquality();
     return _equal;
   }
+
+  FunctionTarget get argumentEquality {
+    _includeEquality();
+    return _equalArguments;
+  }
+
+  void _includeEquality() {
+    _functions.putIfAbsent(_equal, _equalityBody);
+    _functions.putIfAbsent(_equalArguments, _argumentEqualityBody);
+  }
+
+  Constant argumentConstants(Iterable<ValueType> arguments) =>
+      arguments.toList().reversed.fold<Constant>(
+        const Constant.nullValue(),
+        (next, value) =>
+            ObjectConstant(list, {head: constant(value), tail: next}),
+      );
 
   ObjectConstant constant(ValueType value) =>
       _constant(value.normalize(), const []);
@@ -421,7 +442,7 @@ final class TypeValues() {
   }) {
     Value childrenList = const Constant.nullValue();
     for (final child in children.reversed) {
-      childrenList = cons(block, child, childrenList);
+      childrenList = block.emit(cons(child, childrenList));
     }
     return node(
       block,
@@ -433,12 +454,12 @@ final class TypeValues() {
     );
   }
 
-  Value cons(Block block, Value value, Value next) {
+  Construct cons(Value value, Value next) {
     _functions.putIfAbsent(
       listInit,
       () => _initializer(listInit, [head, tail]),
     );
-    return block.emit(Construct(listInit, [value, next]));
+    return Construct(listInit, [value, next]);
   }
 
   Value node(
@@ -588,12 +609,7 @@ final class TypeValues() {
         kind = Block([type]),
         shape = Block(),
         parts = Block();
-    final loop = Block([list.nullable, list.nullable]), second = Block([list]);
-    final compare = Block([list]),
-        next = Block(),
-        end = Block(),
-        yes = Block(),
-        no = Block();
+    final no = Block();
     final [left, other] = entry.parameters;
     final test = entry.emit(TypeTest(other, type));
     entry.finish(Branch(test, Jump(kind, [test.refinement(true)!]), Jump(no)));
@@ -623,11 +639,28 @@ final class TypeValues() {
       ),
     );
     parts.finish(
-      Jump(loop, [
-        parts.emit(LoadField(TypeValues.parts, left)),
-        parts.emit(LoadField(TypeValues.parts, right)),
-      ]),
+      Return(
+        parts.emit(
+          DirectCall(_equalArguments, [
+            parts.emit(LoadField(TypeValues.parts, left)),
+            parts.emit(LoadField(TypeValues.parts, right)),
+          ]),
+        ),
+      ),
     );
+    no.finish(Return(const Constant.boolean(false)));
+    return IrFunction(_equal, [entry, kind, shape, parts, no]);
+  }
+
+  IrFunction _argumentEqualityBody() {
+    final entry = Block(_equalArguments.parameterTypes);
+    final loop = Block(_equalArguments.parameterTypes), second = Block([list]);
+    entry.finish(Jump(loop, entry.parameters));
+    final compare = Block([list]),
+        next = Block(),
+        end = Block(),
+        yes = Block(),
+        no = Block();
     final [a, b] = loop.parameters;
     final first = loop.emit(TypeTest(a, list));
     loop.finish(
@@ -660,11 +693,8 @@ final class TypeValues() {
     );
     yes.finish(Return(const Constant.boolean(true)));
     no.finish(Return(const Constant.boolean(false)));
-    return IrFunction(_equal, [
+    return IrFunction(_equalArguments, [
       entry,
-      kind,
-      shape,
-      parts,
       loop,
       second,
       compare,
