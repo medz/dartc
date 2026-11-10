@@ -4,13 +4,16 @@ import 'program_layout.dart';
 import 'checked_casts.dart';
 import 'type_values.dart';
 import 'member_calls.dart';
+import 'heap_plan.dart';
+import 'cell_initialization.dart';
 
 /// Places allocating representation changes before register and root analysis.
 final class FunctionRepresentation(
   final IrFunction function,
   final ProgramLayout layouts,
   CheckedCasts casts,
-  MemberCalls members, {
+  MemberCalls members,
+  HeapPlan heap, {
   FunctionTarget? captureTrace,
 }) {
   final blocks = <Block>[];
@@ -24,7 +27,8 @@ final class FunctionRepresentation(
   final invocations = <Instruction, FunctionTarget>{};
   final identities = <Equals>{};
   final aliases = <Instruction>{};
-  final _resultTypes = <Instruction, ValueType>{};
+  final _resultTypes = <Value, ValueType>{};
+  final stackCells = <NewCell>{};
   final _prologue = <Instruction>[];
   bool get _factoryEnvironment =>
       function.target.kind == .factory &&
@@ -95,6 +99,13 @@ final class FunctionRepresentation(
         final index = owner.typeParameters.indexOf(type);
         if (index >= 0) return _classArguments[index];
       }
+      if (function.target.kind == .closure) {
+        final shape = layouts.closures.closures[function.target]!;
+        final index = shape.parameters.indexOf(type);
+        if (index >= 0) {
+          return _load(shape.environment[index], entryParameters.first, into);
+        }
+      }
       throw UnsupportedError('Native type needs a lexical environment: $type');
     }
     if (type.freeTypeParameters.isEmpty) return layouts.types.constant(type);
@@ -110,7 +121,19 @@ final class FunctionRepresentation(
       _operands[instruction] ?? instruction.inputs;
 
   /// The stored type before a selected call result is boxed for its caller.
-  ValueType typeOf(Value value) => _resultTypes[value] ?? value.type;
+  ValueType typeOf(Value value) =>
+      _resultTypes[value] ??
+      (stackCells.contains(value)
+          ? (value.type as CellType).content
+          : value.type);
+
+  LoadField _load(InstanceField field, Value receiver, List<Instruction> into) {
+    // The selected carrier is physical storage, not the function's Dart type.
+    final load = LoadField(field, Block([field.owner]).parameters.single);
+    _operands[load] = [receiver];
+    into.add(load);
+    return load;
+  }
 
   List<Value> argumentsOf(Jump edge) => _arguments[edge] ?? edge.arguments;
 
@@ -125,9 +148,32 @@ final class FunctionRepresentation(
   };
 
   this {
+    checkCellInitialization(function);
+    final operations = [
+      for (final block in function.blocks) ...[
+        ...block.instructions,
+        if (block.end case Invoke(:final operation)) operation,
+      ],
+    ];
+    stackCells.addAll(operations.whereType<NewCell>());
+    for (final operation in operations) {
+      for (final input in operation.inputs) {
+        if (!(operation is ReadCell && operation.cell == input ||
+            operation is WriteCell && operation.cell == input)) {
+          stackCells.remove(input);
+        }
+      }
+    }
+    for (final block in function.blocks) {
+      if (block.end case Return(value: final value?)) stackCells.remove(value);
+      for (final edge in block.successors) {
+        stackCells.removeAll(edge.arguments);
+      }
+    }
     bool needsBox(Value value, ValueType type) {
       if (value is TestedValue) value = value.test.operand;
       return value is! Constant &&
+          value.type is! CellType &&
           (typeOf(value) == .integer || typeOf(value) == .floating) &&
           layouts.representation(type) == .reference;
     }
@@ -191,6 +237,20 @@ final class FunctionRepresentation(
       return Jump(block, inputs);
     }
 
+    Block appendTo(Block block, Instruction operation, Jump? handler) {
+      instructions[block]!.add(operation);
+      if (handler == null || !operation.mayThrow) return block;
+      final next = Block();
+      blocks.add(next);
+      instructions[next] = [];
+      ends[block] = Invoke(
+        operation,
+        onReturn: Jump(next),
+        onThrow: edge(handler),
+      );
+      return next;
+    }
+
     blocks.addAll(function.blocks);
     sourceBlocks:
     for (final sourceBlock in function.blocks) {
@@ -203,7 +263,108 @@ final class FunctionRepresentation(
         _ => sourceBlock.instructions,
       };
       for (final instruction in source) {
+        final handler = switch (sourceBlock.end) {
+          Invoke(:final operation, :final onThrow)
+              when operation == instruction =>
+            onThrow,
+          _ => null,
+        };
+        if (instruction case MakeClosure(:final target, :final inputs)) {
+          final shape = layouts.closures.closures[target]!;
+          final arguments = <Value>[Constant.integer(shape.tag)];
+          for (final (i, value) in inputs.indexed) {
+            arguments.add(convert(value, shape.captures[i].type, body));
+          }
+          for (final parameter in shape.parameters) {
+            arguments.add(_reify(parameter, body));
+          }
+          arguments.add(_reify(target.signature, body));
+          invocations[instruction] = heap.constructorFor(
+            shape.initializer,
+            layouts,
+          );
+          _operands[instruction] = arguments;
+          body.add(instruction);
+          continue;
+        }
+        if (instruction.type is CellType &&
+                instruction is NewCell &&
+                !stackCells.contains(instruction) ||
+            instruction is CopyCell) {
+          final type = instruction.type as CellType;
+          if (type.isLate ||
+              instruction is NewCell && instruction.initializer != null) {
+            throw UnsupportedError(
+              'Native captured late storage is not implemented.',
+            );
+          }
+          final shape = layouts.closures.cell(type);
+          Value initial;
+          if (instruction is CopyCell) {
+            initial = _load(shape.value, instruction.cell, body);
+          } else if ((instruction as NewCell).initial case final value?) {
+            initial = convert(value, shape.value.type, body);
+          } else {
+            initial = switch (shape.value.type) {
+              ValueType.integer => const Constant.integer(0),
+              ValueType.floating => const Constant.floating(0),
+              ValueType.boolean => const Constant.boolean(false),
+              final ClassType pointer when FfiTypes.isPointer(pointer) =>
+                PointerFromAddress(const Constant.integer(0), pointer),
+              _ => const Constant.nullValue(),
+            };
+            if (initial is Instruction) body.add(initial);
+          }
+          invocations[instruction] = heap.constructorFor(
+            shape.initializer,
+            layouts,
+          );
+          _operands[instruction] = [
+            initial,
+            layouts.types.constant(shape.type),
+          ];
+          body.add(instruction);
+          continue;
+        }
+        if (instruction case ReadCell(:final cell) || WriteCell(:final cell)
+            when !stackCells.contains(cell)) {
+          final shape = layouts.closures.cell(cell.type as CellType);
+          if ((cell.type as CellType).isLate) {
+            throw UnsupportedError(
+              'Native captured late storage is not implemented.',
+            );
+          }
+          if (instruction is ReadCell) {
+            final read = _load(shape.value, cell, body);
+            aliases.add(instruction);
+            _operands[instruction] = [read];
+          } else {
+            final value = convert(
+              (instruction as WriteCell).value,
+              shape.value.type,
+              body,
+            );
+            final placeholder = Block([shape.type, shape.value.type])
+                .parameters;
+            final write = StoreField(
+              shape.value,
+              placeholder[0],
+              placeholder[1],
+            );
+            _operands[write] = [cell, value];
+            body.add(write);
+            aliases.add(instruction);
+            _operands[instruction] = [];
+          }
+          body.add(instruction);
+          continue;
+        }
         final invocation = switch (instruction) {
+          FunctionCall(:final function, :final typeArguments) => (
+            null,
+            function,
+            typeArguments,
+          ),
           InstanceCall(:final member, :final receiver, :final typeArguments) =>
             (member, receiver, typeArguments),
           DirectCall(:final target, :final inputs, :final typeArguments)
@@ -226,8 +387,11 @@ final class FunctionRepresentation(
         };
         if (invocation != null) {
           final (member, receiver, typeArguments) = invocation;
+          final lexical = instruction is FunctionCall;
           final virtual = instruction is! DirectCall;
-          final targets = virtual
+          final targets = lexical
+              ? layouts.closures.targetsFor(instruction)
+              : virtual
               ? members.targetsFor(
                   member?.owner ?? receiver.type,
                   member?.selector ?? instruction.objectMember!.selector,
@@ -242,15 +406,13 @@ final class FunctionRepresentation(
             continue;
           }
           final actual = _receiverType(receiver, body);
-          final shape = virtual ? LoadField(TypeValues.shape, actual) : null;
-          if (shape != null) body.add(shape);
+          final shape = lexical
+              ? _load(layouts.closures.tag, receiver, body)
+              : virtual
+              ? LoadField(TypeValues.shape, actual)
+              : null;
+          if (shape != null && !lexical) body.add(shape);
           final types = [for (final type in typeArguments) _reify(type, body)];
-          final handler = switch (sourceBlock.end) {
-            Invoke(:final operation, :final onThrow)
-                when operation == instruction =>
-              onThrow,
-            _ => null,
-          };
           final result = instruction.type;
           final join = result == .never
               ? null
@@ -272,7 +434,7 @@ final class FunctionRepresentation(
               ends[missing] = Unreachable(invalid);
           }
           var next = block;
-          if (member == null) {
+          if (member == null && !lexical) {
             final nominal = Block();
             blocks.add(nominal);
             instructions[nominal] = [];
@@ -299,7 +461,11 @@ final class FunctionRepresentation(
               blocks.addAll([selected, otherwise]);
               final test = Equals(
                 shape,
-                Constant.integer(layouts.types.id(type)),
+                Constant.integer(
+                  lexical
+                      ? layouts.closures.closures[target]!.tag
+                      : layouts.types.id(type),
+                ),
               );
               instructions[next]!.add(test);
               ends[next] = Branch(test, Jump(selected), Jump(otherwise));
@@ -308,25 +474,22 @@ final class FunctionRepresentation(
               next = otherwise;
               current = selected;
             }
-            var work = instructions[current]!;
             void append(Instruction operation) {
-              work.add(operation);
-              if (handler != null && operation.mayThrow) {
-                final continued = Block();
-                blocks.add(continued);
-                ends[current] = Invoke(
-                  operation,
-                  onReturn: Jump(continued),
-                  onThrow: edge(handler),
-                );
-                current = continued;
-                work = instructions[current] = [];
-              }
+              current = appendTo(current, operation, handler);
             }
 
             final setup = <Instruction>[];
-            final parameters = target.owner?.typeParameters ?? const [];
-            final classTypes = parameters.isEmpty
+            final closure = lexical ? layouts.closures.closures[target]! : null;
+            final parameters =
+                closure?.parameters ??
+                target.owner?.typeParameters ??
+                const <TypeParameterType>[];
+            final classTypes = closure != null
+                ? [
+                    for (final field in closure.environment)
+                      _load(field, receiver, setup),
+                  ]
+                : parameters.isEmpty
                 ? <Value>[]
                 : _ownerArguments(actual, target.owner!, setup);
             setup.forEach(append);
@@ -359,22 +522,32 @@ final class FunctionRepresentation(
               );
             }
             final inputs = switch (instruction) {
-              InstanceCall(:final positional, :final named) =>
-                target.signature.bind<Value>(
-                  positional,
-                  named,
-                  (i) => members.program.implementationOf(target)!.defaults[i]!,
-                ),
+              InstanceCall(:final positional, :final named) ||
+              FunctionCall(
+                :final positional,
+                :final named,
+              ) => target.signature.bind<Value>(
+                positional,
+                named,
+                (i) => members.program.implementationOf(target)!.defaults[i]!,
+              ),
               DirectCall(:final inputs) => inputs.skip(1),
               ObjectRuntimeType() => const <Value>[],
               Equals(:final right) => [right],
               _ => throw StateError('Expected a member call.'),
             };
             final arguments = <Value>[receiver];
+            if (closure != null) {
+              final captures = <Instruction>[];
+              for (final field in closure.captures) {
+                arguments.add(_load(field, receiver, captures));
+              }
+              captures.forEach(append);
+            }
             for (final (i, value) in inputs.indexed) {
               final destination = target
                   .signature
-                  .parameters[i + (target.kind.hasReceiver ? 0 : 1)];
+                  .parameters[i + (target.kind.hasReceiver || lexical ? 0 : 1)];
               if (destination == .never) {
                 throw UnsupportedError(
                   'Native Never parameter: ${target.name}',
@@ -406,6 +579,8 @@ final class FunctionRepresentation(
               arguments.add(check);
             }
             final call = switch (instruction) {
+              FunctionCall(:final function, :final positional, :final named) =>
+                FunctionCall(function, positional, named, typeArguments),
               InstanceCall(:final positional, :final named, :final ownerType) =>
                 InstanceCall(
                   member!,
@@ -432,7 +607,7 @@ final class FunctionRepresentation(
             invocations[call] = target;
             _operands[call] = [...arguments, ...types];
             if (join == null || target.returnType == .never) {
-              work.add(call);
+              instructions[current]!.add(call);
               final returned = join == null ? null : Jump(missing);
               ends[current] = handler == null
                   ? returned ?? Unreachable(call)
@@ -471,12 +646,6 @@ final class FunctionRepresentation(
                 StoreField(field: final field, :final receiver)
             when field.isLate) {
           final (valueField, boundField) = layouts.instances.slots(field);
-          final handler = switch (sourceBlock.end) {
-            Invoke(:final operation, :final onThrow)
-                when operation == instruction =>
-              onThrow,
-            _ => null,
-          };
           Block fresh() {
             final next = Block();
             blocks.add(next);
@@ -489,18 +658,8 @@ final class FunctionRepresentation(
             body = instructions[next]!;
           }
 
-          void append(Instruction operation) {
-            body.add(operation);
-            if (handler != null && operation.mayThrow) {
-              final next = fresh();
-              ends[block] = Invoke(
-                operation,
-                onReturn: Jump(next),
-                onThrow: edge(handler),
-              );
-              enter(next);
-            }
-          }
+          void append(Instruction operation) =>
+              enter(appendTo(block, operation, handler));
 
           void fail(Block failed, String message) {
             final call = DirectCall(layouts.instances.failure!.target, [

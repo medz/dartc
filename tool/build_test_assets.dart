@@ -149,6 +149,7 @@ Future<void> main(List<String> args) async {
     for (final fixture in [
       'arithmetic',
       'calls',
+      'closures',
       'control_flow',
       'nullability',
       'stack_calls',

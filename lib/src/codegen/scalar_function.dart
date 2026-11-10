@@ -120,16 +120,21 @@ final class ScalarFunction<R extends Object>(
           emitter.bind(done);
           allocation.release(operand);
           allocation.define(instruction, result);
-        } else if (instruction case NewCell(:final initial)) {
+        } else if (instruction case NewCell(:final initial)
+            when selection.cells.contains(instruction)) {
           if (initial != null) {
             allocation.writeCell(
               instruction,
               selection.body.inputsOf(instruction).single,
             );
+          } else if (layouts.isReference(selection.body.typeOf(instruction))) {
+            allocation.clearCell(instruction);
           }
-        } else if (instruction is ReadCell) {
+        } else if (instruction is ReadCell &&
+            !selection.body.aliases.contains(instruction)) {
           allocation.readCell(instruction);
-        } else if (instruction case WriteCell(:final cell)) {
+        } else if (instruction case WriteCell(:final cell)
+            when selection.cells.contains(cell)) {
           allocation.writeCell(cell, selection.body.inputsOf(instruction).last);
         } else if (selection.calls[instruction] case (
           :final layout,
@@ -279,7 +284,8 @@ final class ScalarFunction<R extends Object>(
               allocation.define(instruction, result);
             }
           }
-        } else if (instruction case StoreField(:final receiver, :final field)) {
+        } else if (instruction case StoreField(:final field)) {
+          final receiver = selection.body.inputsOf(instruction).first;
           final value = selection.body.inputsOf(instruction).last;
           final base = allocation.read(receiver);
           final source = allocation.allocate(
@@ -296,8 +302,9 @@ final class ScalarFunction<R extends Object>(
           allocation.releaseTemporary(source);
           allocation.release(value);
           allocation.release(receiver);
-        } else if (instruction case LoadField(:final receiver, :final field)
+        } else if (instruction case LoadField(:final field)
             when !selection.body.aliases.contains(instruction)) {
+          final receiver = selection.body.inputsOf(instruction).first;
           final source = allocation.read(receiver);
           allocation.release(receiver);
           final stored = allocation.allocate(

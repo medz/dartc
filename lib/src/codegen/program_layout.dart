@@ -4,6 +4,7 @@ import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 
+import 'closure_storage.dart';
 import 'type_values.dart';
 import 'instance_storage.dart';
 import 'type_relations.dart';
@@ -21,8 +22,10 @@ final class ProgramLayout(
   Iterable<IrClass> classes, {
   Iterable<ClassType> referencedClasses = const [],
   InstanceStorage? instanceStorage,
+  ClosureStorage? closureStorage,
 }) {
   final instances = instanceStorage ?? InstanceStorage([]);
+  final closures = closureStorage ?? ClosureStorage([]);
   final types = TypeValues();
   late final TypeRelations relations;
   final _classes = {
@@ -62,7 +65,7 @@ final class ProgramLayout(
     if (type == .integer || type == .boolean) return .word;
     if (type == .floating) return .floating;
     if (FfiTypes.isPointer(type)) return .address;
-    if (type is CellType || type == .voidType || type == .never) {
+    if (type == .voidType || type == .never) {
       throw UnsupportedError('Native value representation: $type');
     }
     return .reference;
@@ -113,9 +116,8 @@ final class ProgramLayout(
   bool isBoxable(ValueType type) =>
       type == .integer || type == .boolean || type == .floating;
 
-  /// Whether the value or local contents are traced by a managed collector.
-  bool isReference(ValueType type) =>
-      representation(type is CellType ? type.content : type) == .reference;
+  /// Whether the physical value is traced; stack cells supply their content type.
+  bool isReference(ValueType type) => representation(type) == .reference;
 
   ClassStorage storageOf(ClassType type) {
     final declaration = type.declaration;

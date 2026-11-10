@@ -43,7 +43,7 @@ final class FunctionAllocation<R extends Object>(
     var edgeWords = 0;
     for (final block in selection.body.blocks) {
       for (final value in liveness.liveIn[block]!) {
-        if (value is NewCell) continue;
+        if (selection.cells.contains(value)) continue;
         if (_owners[value] != block ||
             block != function.entry && value is BlockParameter) {
           _shared.add(value);
@@ -142,7 +142,7 @@ final class FunctionAllocation<R extends Object>(
       ..addAll(
         selection.liveness.liveIn[block]!.where(
           (v) =>
-              v is! NewCell &&
+              !selection.cells.contains(v) &&
               _shared.contains(v) &&
               (v is BlockParameter || _owners[v] != block),
         ),
@@ -178,6 +178,14 @@ final class FunctionAllocation<R extends Object>(
     final register = allocate(selection.bank(operation.type));
     emitter.loadStack(register, _slot(operation.cell));
     define(operation, register);
+  }
+
+  /// Makes unbound reference storage safe to scan without binding the local.
+  void clearCell(Value cell) {
+    final register = allocate(.general);
+    emitter.loadImmediate(register, 0);
+    emitter.storeStack(register, _slot(cell));
+    releaseTemporary(register);
   }
 
   /// Stores a value in its activation's fixed local slot.
@@ -370,7 +378,7 @@ final class FunctionAllocation<R extends Object>(
     final frame = this.frame!;
     final offsets = <int>[];
     for (final root in roots) {
-      if (root is! NewCell && !_spilled.contains(root)) {
+      if (!selection.cells.contains(root) && !_spilled.contains(root)) {
         throw StateError('Live reference has no initialized stack home.');
       }
       final offset = _slot(root);

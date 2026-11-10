@@ -1,3 +1,5 @@
+import 'package:dartc/src/codegen/heap_plan.dart';
+import 'package:dartc/src/codegen/frame_lookup.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
@@ -97,6 +99,7 @@ void main() {
           {},
           FunctionTarget(uri, 'invalid', .never, []),
         ),
+        HeapPlan(IrProgram([], []), {}, ProgramLayout([]), FrameLookup()),
       );
       var block = entry;
       final operations = <Instruction>[];

@@ -33,6 +33,7 @@ final class FunctionSelection<R>(
     layouts,
     casts,
     members,
+    heap,
     captureTrace: traces.capture,
   );
   final binaries =
@@ -72,7 +73,7 @@ final class FunctionSelection<R>(
   }
 
   this {
-    if (function.bodyKind != .synchronous || function.target.kind == .closure) {
+    if (function.bodyKind != .synchronous) {
       throw UnsupportedError(
         'Native function signature: ${function.target.name}',
       );
@@ -379,7 +380,6 @@ final class FunctionSelection<R>(
         }
       }
     }
-    if (cells.isNotEmpty) _checkCells(function);
   }
 
   void _call(Instruction operation, FunctionTarget target, List<Value> inputs) {
@@ -401,100 +401,6 @@ final class FunctionSelection<R>(
       target: target,
       arguments: inputs,
     );
-  }
-
-  void _checkCells(IrFunction function) {
-    final predecessors = {
-      for (final block in body.blocks) block: <(Block, bool)>[],
-    };
-    for (final block in body.blocks) {
-      for (final instruction in body.instructions[block]!) {
-        for (final value in body.inputsOf(instruction).where(cells.contains)) {
-          if (!(instruction is ReadCell && instruction.cell == value ||
-              instruction is WriteCell && instruction.cell == value)) {
-            throw UnsupportedError('Native local storage cannot escape.');
-          }
-        }
-      }
-      if (body.ends[block] case Return(value: final value?)
-          when cells.contains(value)) {
-        throw UnsupportedError('Native local storage cannot escape.');
-      }
-      for (final (i, edge) in body.successors(block).indexed) {
-        if (body.argumentsOf(edge).any(cells.contains)) {
-          throw UnsupportedError('Native local storage cannot be aliased.');
-        }
-        final end = body.ends[block]!;
-        predecessors[edge.target]!.add((
-          block,
-          end is Invoke && i == (end.onReturn == null ? 0 : 1),
-        ));
-      }
-    }
-    final initialized = {
-      for (final block in body.blocks)
-        block: (normal: cells.toSet(), exceptional: cells.toSet()),
-    };
-    ({Set<NewCell> normal, Set<NewCell> exceptional}) after(
-      Block block, {
-      bool checkReads = false,
-    }) {
-      final ready = block == function.entry ? <NewCell>{} : cells.toSet();
-      for (final (previous, exceptional) in predecessors[block]!) {
-        final state = initialized[previous]!;
-        ready.retainAll(exceptional ? state.exceptional : state.normal);
-      }
-      Set<NewCell>? failed;
-      for (final instruction in body.instructions[block]!) {
-        if (body.ends[block] case Invoke(:final operation)
-            when operation == instruction) {
-          failed = ready.toSet();
-        }
-        if (checkReads && calls.containsKey(instruction)) {
-          for (final cell
-              in liveness.acrossCalls[instruction]!.whereType<NewCell>()) {
-            if (!ready.contains(cell)) {
-              throw UnsupportedError('Live local is uninitialized at a call.');
-            }
-          }
-        }
-        switch (instruction) {
-          case NewCell(:final initial):
-            if (initial == null) {
-              ready.remove(instruction);
-            } else {
-              ready.add(instruction);
-            }
-          case WriteCell(cell: final NewCell cell):
-            ready.add(cell);
-          case ReadCell(:final cell) when checkReads && !ready.contains(cell):
-            throw UnsupportedError(
-              'Native local may be read before initialization.',
-            );
-          default:
-            break;
-        }
-      }
-      return (normal: ready, exceptional: failed ?? ready);
-    }
-
-    bool changed;
-    do {
-      changed = false;
-      for (final block in body.blocks) {
-        final next = after(block), previous = initialized[block]!;
-        if (next.normal.length != previous.normal.length ||
-            !next.normal.containsAll(previous.normal) ||
-            next.exceptional.length != previous.exceptional.length ||
-            !next.exceptional.containsAll(previous.exceptional)) {
-          initialized[block] = next;
-          changed = true;
-        }
-      }
-    } while (changed);
-    for (final block in body.blocks) {
-      after(block, checkReads: true);
-    }
   }
 
   void _binary(

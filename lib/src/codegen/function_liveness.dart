@@ -44,7 +44,7 @@ final class FunctionLiveness(
       final counts = record ? uses[block] = <Value, int>{} : null;
       void read(Value value) {
         if (value is TestedValue) value = value.test.operand;
-        if (counts != null && value is! NewCell) {
+        if (counts != null && !body.stackCells.contains(value)) {
           counts.update(value, (n) => n + 1, ifAbsent: () => 1);
         }
         if (value is! Constant && value is! UnwindValue) live.add(value);
@@ -84,7 +84,11 @@ final class FunctionLiveness(
           if (record) omitted.add(instruction);
           continue;
         }
-        live.remove(instruction is WriteCell ? instruction.cell : instruction);
+        live.remove(
+          instruction is WriteCell && body.stackCells.contains(instruction.cell)
+              ? instruction.cell
+              : instruction,
+        );
         if (end case Invoke(operation: WriteCell(:final cell), :final onThrow)
             when end.operation == instruction &&
                 edgeValues(onThrow).contains(cell)) {
@@ -95,7 +99,9 @@ final class FunctionLiveness(
         }
         for (final input in inputsOf(instruction)) {
           // Writing needs the slot's address, not its previous contents.
-          if (instruction is! WriteCell || input != instruction.cell) {
+          if (instruction is! WriteCell ||
+              !body.stackCells.contains(instruction.cell) ||
+              input != instruction.cell) {
             read(input);
           }
         }

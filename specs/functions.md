@@ -23,6 +23,12 @@
 
 [IR 行为对照](../test/frontend/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/functions.md)。
 
+## 原生词法闭包范围
+
+同步局部函数和匿名函数支持捕获值及共享的非 `late` 可变存储，可在创建函数返回后调用，也可经全局变量跨原生入口保留。普通类型化 `FunctionCall` 按实际闭包目标补齐位置和命名默认值，支持递归及自身引用；循环复制的存储保留各次迭代身份。泛型闭包每次调用绑定自身类型实参，并保留外层函数和类的实际类型环境。闭包对象使用真实 `FunctionType` 作为运行时类型，捕获的引用参与普通 GC 根扫描与异常清理。见[原生闭包验证](../test/compiler/closures_test.dart)。
+
+此范围不包含 `InstantiateFunction` 泛型函数值实例化、顶层/静态函数及方法/构造器提取、dynamic/noSuchMethod 调用、捕获的 `late` 绑定与初始化体存储，也不包含 FFI 回调。一般局部 `late` 的原生绑定语义仍待实现；上表的 IR 支持不表示这些路径均可原生执行。
+
 ## 异步参考执行器范围
 
 测试执行器将 guest Future 的类型与载荷分开保存，使用真实 SDK Future 调度，而非把暂停伪装成普通调用或同步循环。支持 `Future.value/error/sync/microtask`、`Completer`/`Completer.sync`、`then`、`catchError` 和 `scheduleMicrotask` 的已建模协议；`Future.sync` 保留可直接返回的 Future 身份与实际类型。普通同步函数不创建异步帧。

@@ -210,7 +210,6 @@ final class HeapPlan(
   }
 
   void include(Iterable<IrFunction> functions, ProgramLayout layouts) {
-    final uri = Uri.parse('dartc:heap');
     for (final body in functions) {
       for (final block in body.blocks) {
         for (final operation in [
@@ -218,27 +217,29 @@ final class HeapPlan(
           if (block.end case Invoke(:final operation)) operation,
         ].whereType<Construct>()) {
           final initializer = operation.initializer;
-          constructors[operation] = _initializers.putIfAbsent(initializer, () {
-            final target = FunctionTarget(
-              uri,
-              'construct${_initializers.length}',
-              .object,
-              [
-                for (final parameter in initializer.signature.parameters)
-                  layouts.representation(parameter) == .reference
-                      ? ValueType.object.nullable
-                      : parameter,
-                TypeValues.type,
-              ],
-            );
-            _factories[target] = (
-              initializer: initializer,
-              type: initializer.owner!,
-            );
-            return target;
-          });
+          constructors[operation] = constructorFor(initializer, layouts);
         }
       }
     }
   }
+
+  FunctionTarget constructorFor(
+    FunctionTarget initializer,
+    ProgramLayout layouts,
+  ) => _initializers.putIfAbsent(initializer, () {
+    final target = FunctionTarget(
+      Uri.parse('dartc:heap'),
+      'construct${_initializers.length}',
+      .object,
+      [
+        for (final parameter in initializer.signature.parameters)
+          layouts.representation(parameter) == .reference
+              ? ValueType.object.nullable
+              : parameter,
+        TypeValues.type,
+      ],
+    );
+    _factories[target] = (initializer: initializer, type: initializer.owner!);
+    return target;
+  });
 }

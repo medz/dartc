@@ -26,6 +26,7 @@ import 'member_calls.dart';
 import 'numeric_operations.dart';
 import 'global_storage.dart';
 import 'instance_storage.dart';
+import 'closure_storage.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -138,9 +139,18 @@ base class ScalarCodeGenerator<R extends Object>(
       }
       sourceDefinitions.addAll(discovered);
     }
+    final closures = ClosureStorage(
+      selected.map(program.implementationOf).whereType<IrFunction>(),
+    );
     final layouts = ProgramLayout(
-      [...casts.classes, ...program.classes, traces.declaration],
+      [
+        ...casts.classes,
+        ...program.classes,
+        ...closures.classes,
+        traces.declaration,
+      ],
       instanceStorage: instances,
+      closureStorage: closures,
       referencedClasses: selected.expand(
         (target) =>
             program.implementationOf(target)?.referencedClasses ?? const [],
@@ -194,6 +204,7 @@ base class ScalarCodeGenerator<R extends Object>(
       ...instances.functions,
     ];
     Iterable<IrFunction> supportFunctions() => [
+      ...closures.functions,
       ...arithmetic.functions,
       ...globals.functions,
       ...casts.functions,
@@ -258,6 +269,7 @@ base class ScalarCodeGenerator<R extends Object>(
           if (casts.functions.isNotEmpty) ...casts.classes,
           if (!globals.isEmpty) globals.declaration,
           ...arithmetic.classes,
+          ...closures.classes,
           ...layouts.types.classes,
           ...layouts.relations.classes,
           if (capture) traces.declaration,
