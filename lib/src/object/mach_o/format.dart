@@ -30,9 +30,11 @@ final class MachO(@override final Target target) implements ObjectFormat {
     }
     final order = List.generate(object.symbols.length, (i) => i)
       ..sort(
-        (a, b) => object.symbols[a].binding.index.compareTo(
-          object.symbols[b].binding.index,
-        ),
+        (a, b) => object.symbols[a].binding == object.symbols[b].binding
+            ? a.compareTo(b)
+            : object.symbols[a].binding.index.compareTo(
+                object.symbols[b].binding.index,
+              ),
       );
     final symbols = [for (final i in order) object.symbols[i]];
     final indices = {for (final (i, original) in order.indexed) original: i};

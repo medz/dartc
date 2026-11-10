@@ -26,9 +26,11 @@ final class Elf(@override final Target target) implements ObjectFormat {
     final sections = object.sections, relocations = object.relocations;
     final order = [for (var i = 0; i < object.symbols.length; i++) i]
       ..sort(
-        (a, b) => object.symbols[a].binding.index.compareTo(
-          object.symbols[b].binding.index,
-        ),
+        (a, b) => object.symbols[a].binding == object.symbols[b].binding
+            ? a.compareTo(b)
+            : object.symbols[a].binding.index.compareTo(
+                object.symbols[b].binding.index,
+              ),
       );
     final symbols = [for (final i in order) object.symbols[i]];
     final indices = {
