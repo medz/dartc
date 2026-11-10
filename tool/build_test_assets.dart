@@ -30,6 +30,7 @@ import '../test/linker/fixtures/data.dart';
 import '../test/linker/fixtures/archive.dart';
 import '../test/linker/fixtures/shared_libraries.dart';
 import '../test/linker/fixtures/addresses.dart';
+import '../test/linker/fixtures/finalizers.dart';
 import '../test/compiler/fixtures/descriptor_write_assets.dart';
 import '../test/compiler/fixtures/managed_objects_assets.dart';
 import '../test/support/native_assets.dart';
@@ -57,13 +58,16 @@ Future<void> main(List<String> args) async {
       await Directory.fromUri(assets.directory.uri.resolve('$domain/'))
           .create(recursive: true);
     }
-    Future<void> shared(List<ObjectModule> modules, File output) =>
-        output.writeAsBytes(
-          linker.linkSharedLibrary(
-            modules.map(LinkInput.object),
-            name: output.uri.pathSegments.last,
-          ),
-        );
+    Future<void> shared(
+      List<ObjectModule> modules,
+      File output, {
+      Iterable<LinkInput> dependencies = const [],
+    }) => output.writeAsBytes(
+      linker.linkSharedLibrary([
+        ...modules.map(LinkInput.object),
+        ...dependencies,
+      ], name: output.uri.pathSegments.last),
+    );
 
     for (final fixture in ['return', 'void', 'status', 'exported', 'math']) {
       final needsBindings =
@@ -81,6 +85,12 @@ Future<void> main(List<String> args) async {
       'test/compiler/fixtures/managed_objects.dart',
     ], output: const .executable());
     await managedEntry.write(assets.file('compiler/entry_managed'));
+    final managedGlobalEntry = await Compiler(target).compile([
+      'test/compiler/fixtures/managed_globals.dart',
+    ], output: const .executable());
+    await managedGlobalEntry.write(
+      assets.file('compiler/entry_managed_globals'),
+    );
     final exceptionEntry = await Compiler(target).compile([
       'test/compiler/fixtures/exceptions.dart',
     ], output: const .executable());
@@ -145,6 +155,7 @@ Future<void> main(List<String> args) async {
       'integer_operations',
       'numeric_conversions',
       'scalar_globals',
+      'managed_globals',
       'pointers',
       'pointer_arithmetic',
       'doubles',
@@ -260,11 +271,39 @@ Future<void> main(List<String> args) async {
     await shared(
       await objects('managed_heap_', [managedHeap(target)]),
       assets.library('codegen/managed_heap'),
+      dependencies: [
+        LinkInput.sharedLibrary(
+          target.operatingSystem == .macos
+              ? '/usr/lib/libSystem.B.dylib'
+              : 'libc.so.6',
+          symbols: {target.nativeSymbol('qsort'): target.nativeSymbol('qsort')},
+        ),
+      ],
     );
     await shared([
       exceptions(target),
       rootsProbe(target),
     ], assets.library('codegen/exceptions'));
+    final finalizers = await objects('finalizers_', finalizerModules(target));
+    await shared(finalizers, assets.library('linker/finalizers'));
+    final finalizerArchive = Archive.decode(
+      ArchiveWriter(format).encode([finalizers.last]),
+    );
+    final finalizerLibrary = assets.library('linker/finalizers_archive');
+    await finalizerLibrary.writeAsBytes(
+      linker.linkSharedLibrary([
+        LinkInput.object(finalizers.first),
+        LinkInput.object(
+          ObjectModule(
+            target,
+            [],
+            [],
+            imports: [target.nativeSymbol('marker_1')],
+          ),
+        ),
+        LinkInput.archive(finalizerArchive),
+      ], name: finalizerLibrary.uri.pathSegments.last),
+    );
     final inputs = [
       functions(target, {'first': 40}),
       functions(target, {'second': 2}),

@@ -87,7 +87,9 @@ final class ObjectReader(final Uint8List bytes) {
           reference.offset >= 0 && reference.offset <= section.size - 8,
           'Invalid object address relocation site.',
         );
-        if ((section.kind != .data && section.kind != .readOnlyData) ||
+        if ((section.kind != .data &&
+                section.kind != .readOnlyData &&
+                section.kind != .finalizers) ||
             section.alignment < 8 ||
             reference.offset % 8 != 0 ||
             ByteData.sublistView(section.bytes)

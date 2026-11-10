@@ -148,6 +148,7 @@ final class Elf(@override final Target target) implements ObjectFormat {
         offsets[i],
         input.size,
         alignment: input.alignment,
+        entrySize: input.kind == .finalizers ? 8 : 0,
       );
       final group = groups[i];
       if (group.isEmpty) continue;

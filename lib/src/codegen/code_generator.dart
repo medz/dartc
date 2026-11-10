@@ -17,12 +17,12 @@ abstract interface class CodeGenerator() {
   /// native signatures; [exports] exposes a subset of the supplied Dart bodies.
   /// The caller resolves native symbols and supplies their implementations when
   /// linking. Unsupported operations fail before an artifact is returned.
-  /// Globals of exact int, double and bool type use module
-  /// storage shared across native calls. Initializers run lazily, retry after
-  /// failure and preserve writes made before an exception. Final and late bindings
+  /// Scalar, reference, nullable and num globals use module storage shared
+  /// across native calls. Initializers run lazily, retry after failure and preserve
+  /// writes made before an exception. Final and late bindings
   /// use the supplied SDK LateError constructor for failed binding checks.
-  /// Reference and nullable global types remain unsupported. Only scalar bits
-  /// persist; managed heaps still belong to individual synchronous activations.
+  /// Modules with reference globals retain a traced heap across calls; modules
+  /// without them keep activation-local heaps.
   /// Object constants require their class and inherited field definitions in
   /// [program]. Equal constants share storage within the generated module;
   /// references cannot be exported as native pointers. Integers, doubles and
@@ -72,8 +72,12 @@ abstract interface class CodeGenerator() {
   /// are reclaimed during allocation. Constructor arguments use their declared
   /// representations and runtime type arguments. Generic field writes check the
   /// actual receiver's field type before modifying storage; failure throws TypeError.
-  /// Each synchronous native entry owns its heap until return, including entries
-  /// made through a native callback.
+  /// Persistent heaps share roots during same-module, single-threaded synchronous
+  /// native reentry, including suspended outer frames. Activation-local heaps
+  /// remain independent and are released on return. Persistent modules emit
+  /// [Section.finalizers] cleanup for shared-library unload through dartc linking.
+  /// ELF uses its finalizer array; the Mach-O linker registers callbacks with
+  /// __cxa_atexit. External linking of raw Mach-O objects does not guarantee cleanup.
   /// [Throw] and [Invoke] support synchronous exception propagation and cleanup.
   /// Fresh throws capture the managed call sequence; rethrows retain the same
   /// exception and trace. Error subclasses retain their first throw's trace.
@@ -83,13 +87,16 @@ abstract interface class CodeGenerator() {
   /// same exception and cleanup paths. Trace formatting and the Error.stackTrace
   /// getter remain unsupported.
   /// Exceptions cannot unwind foreign frames.
-  /// Escaping managed state, asynchronous execution and catchable allocation
-  /// failures remain unsupported. A failure escaping the native entry releases
-  /// the heap, reports to stderr and terminates the process with status 255.
+  /// Concurrent calls, cross-thread calls, cross-module managed values,
+  /// asynchronous execution and catchable allocation failures remain unsupported.
+  /// A failure escaping the native entry releases the heap, reports to stderr and
+  /// terminates the process with status 255.
   ///
   /// [entryPoint] adds a process entry with the given link symbol. It
   /// calls a synchronous, parameterless Dart body and exits successfully after
-  /// discarding its result. The body must belong to [definitions].
+  /// discarding its result and explicitly releasing the heap. No finalizer section
+  /// is emitted; executable linking rejects inputs containing one. The body must
+  /// belong to [definitions].
   ObjectModule generate(
     IrProgram program, {
     required Iterable<FunctionTarget> definitions,

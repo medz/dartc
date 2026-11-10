@@ -49,9 +49,10 @@ final class ElfLinker(@override final Target target) implements Linker {
     final relocateConstants = start == null && unit.hasReadOnlyFixups;
     final relocationCount = unit.bindings.length + rebases.length;
     final symbols = unit.symbols.where((symbol) => symbol.exported).toList();
+    final finalizers = sections.indexWhere((s) => s.kind == .finalizers);
     final hasConstants = sections.any((s) => s.kind == .readOnlyData);
     final writable = sections.any(
-      (s) => s.kind == .data || s.kind == .zeroFill,
+      (s) => s.kind == .data || s.kind == .zeroFill || s.kind == .finalizers,
     );
     final programCount =
         3 +
@@ -108,11 +109,16 @@ final class ElfLinker(@override final Target target) implements Linker {
     final relocationSize = relocationCount * 24;
     final dynamicOffset = relocationOffset + relocationSize;
     final dynamicSize =
-        (7 + dependencies.length + (relocationCount == 0 ? 0 : 3)) * 16;
+        (7 +
+            dependencies.length +
+            (relocationCount == 0 ? 0 : 3) +
+            (finalizers < 0 ? 0 : 2)) *
+        16;
     final readOnlyEnd = dynamicOffset + dynamicSize;
     final dataStart = (readOnlyEnd + page - 1) & -page;
     cursor = dataStart;
     place(.data);
+    place(.finalizers);
     final dataEnd = cursor;
     place(.zeroFill);
     final memoryEnd = cursor;
@@ -225,6 +231,7 @@ final class ElfLinker(@override final Target target) implements Linker {
         input.size,
         address: addresses[i],
         alignment: input.alignment,
+        entrySize: input.kind == .finalizers ? 8 : 0,
       );
     }
     section(
@@ -356,6 +363,10 @@ final class ElfLinker(@override final Target target) implements Linker {
         (7, relocationOffset),
         (8, relocationSize),
         (9, 24),
+      ],
+      if (finalizers >= 0) ...[
+        (26, addresses[finalizers]),
+        (28, sections[finalizers].size),
       ],
       (0, 0),
     ];

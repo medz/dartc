@@ -546,6 +546,7 @@ final class FunctionRepresentation(
             cell.type,
             (cell.type as CellType).content,
           ],
+          StoreGlobal(:final global) => [global.type],
           StoreField(:final receiver, :final field) => [
             receiver.type,
             field.type,

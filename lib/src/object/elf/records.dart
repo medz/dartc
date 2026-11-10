@@ -23,16 +23,21 @@ extension ElfSectionKind on SectionKind {
     .readOnlyData => '.rodata',
     .data => '.data',
     .zeroFill => '.bss',
+    .finalizers => '.fini_array',
   };
 
-  /// The SHT_PROGBITS or SHT_NOBITS storage type.
-  int get elfType => this == .zeroFill ? 8 : 1;
+  /// The ELF storage type.
+  int get elfType => switch (this) {
+    .zeroFill => 8,
+    .finalizers => 15,
+    _ => 1,
+  };
 
   /// The allocation, write and execute flags.
   int get elfFlags => switch (this) {
     .code => 6,
     .readOnlyData => 2,
-    .data || .zeroFill => 3,
+    .data || .zeroFill || .finalizers => 3,
   };
 }
 

@@ -5,6 +5,7 @@ import 'package:dartc/target.dart';
 import '../../support/native_assets.dart';
 
 typedef HeapCallback = Void Function(Int64);
+typedef HeapComparator = Int32 Function(Pointer<Void>, Pointer<Void>);
 
 final class ManagedHeap() {
   final _library = NativeAssets(Target.host()).open('codegen/managed_heap');
@@ -34,6 +35,10 @@ final class ManagedHeap() {
         int Function(Pointer<NativeFunction<HeapCallback>>, int)
       >('heap_reenter');
 
+  late final mutateShared = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'heap_mutate_shared',
+      );
   late final readState = _library
       .lookupFunction<Int64 Function(), int Function()>('heap_read_state');
   late final writeState = _library
@@ -45,6 +50,12 @@ final class ManagedHeap() {
         Int64 Function(Pointer<NativeFunction<HeapCallback>>, Int64),
         int Function(Pointer<NativeFunction<HeapCallback>>, int)
       >('heap_global_reenter');
+
+  late final importedReenter = _library
+      .lookupFunction<
+        Int64 Function(Pointer<Void>, Pointer<NativeFunction<HeapComparator>>),
+        int Function(Pointer<Void>, Pointer<NativeFunction<HeapComparator>>)
+      >('heap_imported_reenter');
 
   void close() => _library.close();
 }

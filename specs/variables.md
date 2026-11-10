@@ -22,9 +22,9 @@
 
 非捕获、非 `late` 的 `int`、`bool`、`double` 和原生指针局部变量支持声明后赋值，包括分支合流、循环和跨调用保存；非 `late final` 的赋值义务仍由前端静态检查。见[原生行为对照](../test/compiler/control_flow_test.dart)。后端在使用局部栈存储前确认每条到达读取的路径都已写入；循环中新声明的存储不能继承上一次迭代的初始化状态。独立 IR 的不安全读取由[发码契约检查](../test/codegen/cells_test.dart)拒绝。
 
-精确类型为 int/double/bool 的顶层变量和类静态变量已支持原生持久存储，包括 final、late 和 late final。模块存储跨 native 调用保留，泛型类共享声明槽位。先写跳过初始化，未绑定失败后重试，已经完成的写入不回滚；可变递归初始化以成功的外层结果为准，final 递归初始化在求值后检查绑定并保留内层值。未绑定 late 读取和重复 final 绑定通过 SDK 实际 dart:_internal LateError 类抛出普通 Error，RHS 与类型转换先于重复写检查。诊断字符串按固定 SDK 的 NI/AI/ADI 文本构造；动态错误格式化仍未接通。初始化和错误可以分配对象，但只有标量结果持久保存，入口堆仍在返回时释放。见[原生验证](../test/compiler/scalar_globals_test.dart)与[分配中的 native 重入](../test/codegen/managed_heap_native_test.dart)。可空、num 和对象引用全局变量仍拒绝发码；实例 late、捕获 late、跨线程隔离和并发同步协议尚未支持。
+顶层变量和类静态变量已支持标量、对象引用、可空类型和 num 的原生持久存储，包括 final、late 和 late final。模块存储跨 native 调用保留，泛型类共享声明槽位。先写跳过初始化，未绑定失败后重试，已经完成的写入不回滚；可变递归初始化以成功的外层结果为准，final 递归初始化在求值后检查绑定并保留内层值。未绑定 late 读取和重复 final 绑定通过 SDK 实际 dart:_internal LateError 类抛出普通 Error，RHS 与类型转换先于重复写检查。诊断字符串按固定 SDK 的 NI/AI/ADI 文本构造；动态错误格式化仍未接通。引用槽参与 GC，跨入口保留对象别名、循环引用和装箱数值；已绑定的 null 与未初始化状态分开。含引用全局槽的模块在同线程同步重入时共享堆并扫描暂停的外层栈帧，其他模块仍使用入口返回即释放的独立堆。持久堆由 dartc 链接的共享库在卸载时释放，独立程序在退出前显式释放，详见[库生命周期](libraries.md#模块清理与卸载)。见[标量验证](../test/compiler/scalar_globals_test.dart)、[托管全局验证](../test/compiler/managed_globals_test.dart)与[分配中的 native 重入](../test/codegen/managed_heap_native_test.dart)。实例 late、捕获 late、跨线程调用、并发调用和跨模块托管值 ABI 尚未支持。
 
-捕获存储、存储别名、可空或托管值以及 `late` 初始化的原生执行仍待实现；已有 IR 支持不代表这些路径已能发码。
+局部变量的捕获存储、存储别名、可空或托管值以及 `late` 初始化的原生执行仍待实现；已有 IR 支持不代表这些路径已能发码。
 
 ## 已知 SDK 差异
 

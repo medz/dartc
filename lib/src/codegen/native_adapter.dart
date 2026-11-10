@@ -16,6 +16,7 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     void Function(Fixup, int, FrameLayout<R>) call, {
     required bool intoDart,
     HeapEntry<R>? heap,
+    void Function(Fixup, int)? codeAddress,
   }) {
     final native = emitter.convention.classify(signature);
     NativeTypeRef fullWidth(NativeTypeRef type) => type.isFloating
@@ -74,8 +75,25 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
           );
       }
     }
+    final parked = !intoDart && heap?.persistent == true
+        ? HeapEntry.park(
+            emitter,
+            emitter.allocatableRegisters.lastWhere(
+              (r) =>
+                  emitter.bank(r) == .general &&
+                  r != emitter.failureRegister &&
+                  destination.clobberedRegisters.contains(r) &&
+                  !destination.parameters.any(
+                    (p) => p is RegisterArgument<R> && p.register == r,
+                  ),
+            ),
+          )
+        : const <Fixup>[];
     final fixup = emitter.call();
     call(fixup, emitter.position, frame);
+    for (final address in parked) {
+      codeAddress!(address, emitter.position);
+    }
     if (intoDart) heap?.leave(frame, destination.result);
     if (destination.result case final result?) {
       convert(result, signature.result, intoDart: !intoDart);

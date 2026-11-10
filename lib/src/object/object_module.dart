@@ -79,12 +79,28 @@ final class ObjectModule(
       }
       ends[reference.section] = offset + width;
       if (reference is AddressRelocation) {
-        if ((section.kind != .data && section.kind != .readOnlyData) ||
+        if ((section.kind != .data &&
+                section.kind != .readOnlyData &&
+                section.kind != .finalizers) ||
             section.alignment < 8 ||
             offset % 8 != 0 ||
             ByteData.sublistView(section.bytes).getUint64(offset, .little) !=
                 0) {
           throw ArgumentError('Invalid address relocation at $offset.');
+        }
+        if (section.kind == .finalizers) {
+          if (reference.symbol >= this.symbols.length) {
+            throw ArgumentError('Finalizer must name local code.');
+          }
+          final symbol = this.symbols[reference.symbol];
+          final storage = this.sections[symbol.section];
+          if (symbol.binding != .local ||
+              symbol.kind == .data ||
+              storage.kind != .code ||
+              symbol.offset >= storage.size ||
+              target.architecture == .arm64 && symbol.offset % 4 != 0) {
+            throw ArgumentError('Finalizer must name local code.');
+          }
         }
         continue;
       }
@@ -121,6 +137,12 @@ final class ObjectModule(
         offset,
         unresolved: true,
       );
+    }
+    for (final (index, section) in this.sections.indexed) {
+      if (section.kind == .finalizers &&
+          sites.where((r) => r.section == index).length != section.size ~/ 8) {
+        throw ArgumentError('Every finalizer requires an address relocation.');
+      }
     }
   }
 }

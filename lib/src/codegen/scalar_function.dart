@@ -18,6 +18,7 @@ import 'checked_casts.dart';
 import 'member_calls.dart';
 import 'numeric_operations.dart';
 import 'global_storage.dart';
+import 'heap_entry.dart';
 
 /// Generates a control-flow graph with explicit edge transfers.
 final class ScalarFunction<R extends Object>(
@@ -54,6 +55,8 @@ final class ScalarFunction<R extends Object>(
     void Function(Fixup, Constant) constant,
     void Function(int, StackRoots) safepoint, {
     bool failures = false,
+    bool persistent = false,
+    void Function(Fixup, int)? codeAddress,
   }) {
     final allocation = FunctionAllocation(
       function,
@@ -141,6 +144,17 @@ final class ScalarFunction<R extends Object>(
             instruction,
             layout.clobberedRegisters,
           );
+          final parked = persistent && native != null
+              ? HeapEntry.park(
+                  emitter,
+                  emitter.allocatableRegisters.firstWhere(
+                    (r) =>
+                        emitter.bank(r) == .general &&
+                        r != emitter.failureRegister &&
+                        layout.clobberedRegisters.contains(r),
+                  ),
+                )
+              : const <Fixup>[];
           // Stage stack words before populating registers that the scratch may alias.
           if (layout.stackBytes != 0) {
             for (final (i, location) in layout.parameters.indexed) {
@@ -199,6 +213,9 @@ final class ScalarFunction<R extends Object>(
             allocation.load(native.pointer, address);
             allocation.release(native.pointer);
             emitter.callRegister(address);
+          }
+          for (final fixup in parked) {
+            codeAddress!(fixup, emitter.position);
           }
           safepoint(emitter.position, roots);
           if (failures && native == null) {

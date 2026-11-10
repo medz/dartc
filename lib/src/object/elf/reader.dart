@@ -88,13 +88,22 @@ final class ElfReader(final Target target, Uint8List bytes) {
         (1, 2, '.rodata') => SectionKind.readOnlyData,
         (1, 3, '.data') => SectionKind.data,
         (8, 3, '.bss') => SectionKind.zeroFill,
+        (15, 3, '.fini_array') => SectionKind.finalizers,
         _ => null,
       };
       if (kind != null) {
-        if (h.link != 0 || h.info != 0 || h.entrySize != 0) {
+        if (h.link != 0 ||
+            h.info != 0 ||
+            h.entrySize != (kind == .finalizers ? 8 : 0)) {
           throw UnsupportedError('ELF storage section attributes.');
         }
         final alignment = h.alignment == 0 ? 1 : h.alignment;
+        if (kind == .finalizers) {
+          input.check(
+            alignment == 8 && h.size % 8 == 0,
+            'Invalid ELF finalizer array.',
+          );
+        }
         sectionMap[i] = sections.length;
         sections.add(switch (kind) {
           .code => .code(input.view(h.offset, h.size), alignment: alignment),
@@ -104,6 +113,7 @@ final class ElfReader(final Target target, Uint8List bytes) {
           ),
           .data => .data(input.view(h.offset, h.size), alignment: alignment),
           .zeroFill => .zeroFill(h.size, alignment: alignment),
+          .finalizers => .finalizers(input.view(h.offset, h.size)),
         });
       } else if (h.flags == 0 && h.type == 2) {
         input.check(symbolIndex == -1, 'Multiple ELF symbol tables.');

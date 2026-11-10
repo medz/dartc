@@ -17,8 +17,12 @@ final class HeapFunctions(final FrameLookup frames) {
       top = 16,
       spare = 24,
       copied = 32,
-      maps = 40;
-  static const contextBytes = 48;
+      maps = 40,
+      globalRoots = 48,
+      active = 56;
+  static const contextBytes = 64;
+  static const previousEntry = 0, suspendedSp = 8, suspendedPc = 16;
+  static const entryBytes = 24;
 
   final map = _target('map', .integer, 1);
   final unmap = _target('unmap', .voidType, 2);
@@ -108,12 +112,16 @@ final class HeapFunctions(final FrameLookup frames) {
 
   IrFunction _collectBody() {
     final entry = Block(_collect.parameterTypes);
-    final frame = Block([.integer, .integer]);
+    final holder = Block(), holderFields = Block([.integer]);
+    final holderField = Block(), currentFrame = Block();
+    final frame = Block([.integer, .integer, .integer]);
     final found = Block(), invalid = Block();
     final roots = Block([.integer]),
         root = Block(),
         linked = Block(),
         caller = Block();
+    final segmentEnd = Block(), previousSegment = Block();
+    final parked = Block(), parkedPc = Block(), resume = Block();
     final scan = Block([.integer]),
         object = Block(),
         fields = Block([.integer]);
@@ -121,8 +129,50 @@ final class HeapFunctions(final FrameLookup frames) {
     final [context, destination, capacity, initialSp, initialPc] =
         entry.parameters;
     _store(entry, context, destination, copied);
-    entry.finish(Jump(frame, [initialSp, initialPc]));
-    final [sp, pc] = frame.parameters;
+    final rootHolder = _load(entry, context, globalRoots);
+    _equal(entry, rootHolder, _int(0), currentFrame, holder);
+    // The stable holder is outside from-space, so _copy cannot trace it.
+    final holderDescriptor = _load(holder, rootHolder),
+        holderReferences = _load(holder, holderDescriptor, 8);
+    holder.finish(Jump(holderFields, [_int(0)]));
+    final holderIndex = holderFields.parameters.single;
+    _branch(
+      holderFields,
+      .lessThan,
+      holderIndex,
+      holderReferences,
+      holderField,
+      currentFrame,
+    );
+    final holderSlot = _op(
+      holderField,
+      .add,
+      rootHolder,
+      _load(
+        holderField,
+        _op(
+          holderField,
+          .add,
+          holderDescriptor,
+          _op(holderField, .multiply, holderIndex, _int(8)),
+        ),
+        16,
+      ),
+    );
+    _store(
+      holderField,
+      holderSlot,
+      holderField.emit(
+        DirectCall(_copy, [context, _load(holderField, holderSlot)]),
+      ),
+    );
+    holderField.finish(
+      Jump(holderFields, [_op(holderField, .add, holderIndex, _int(1))]),
+    );
+    currentFrame.finish(
+      Jump(frame, [initialSp, initialPc, _load(currentFrame, context, active)]),
+    );
+    final [sp, pc, segment] = frame.parameters;
     final table = _load(frame, context, maps);
     final record = frame.emit(DirectCall(frames.target, [table, pc]));
     _equal(frame, record, _int(0), invalid, found);
@@ -152,7 +202,7 @@ final class HeapFunctions(final FrameLookup frames) {
     linked.finish(
       Branch(
         linked.emit(Equals(callerOffset, _int(0))),
-        Jump(scan, [destination]),
+        Jump(segmentEnd),
         Jump(caller),
       ),
     );
@@ -160,8 +210,29 @@ final class HeapFunctions(final FrameLookup frames) {
       Jump(frame, [
         _op(caller, .add, sp, callerOffset),
         _load(caller, _op(caller, .add, sp, returnOffset)),
+        segment,
       ]),
     );
+    segmentEnd.finish(
+      Branch(
+        segmentEnd.emit(Equals(segment, _int(0))),
+        Jump(scan, [destination]),
+        Jump(previousSegment),
+      ),
+    );
+    final previous = _load(previousSegment, segment, previousEntry);
+    previousSegment.finish(
+      Branch(
+        previousSegment.emit(Equals(previous, _int(0))),
+        Jump(scan, [destination]),
+        Jump(parked),
+      ),
+    );
+    final parentSp = _load(parked, previous, suspendedSp);
+    _equal(parked, parentSp, _int(0), invalid, parkedPc);
+    final parentPc = _load(parkedPc, previous, suspendedPc);
+    _equal(parkedPc, parentPc, _int(0), invalid, resume);
+    resume.finish(Jump(frame, [parentSp, parentPc, previous]));
     final address = scan.parameters.single;
     _branch(
       scan,
@@ -203,6 +274,10 @@ final class HeapFunctions(final FrameLookup frames) {
     done.finish(const Return());
     return IrFunction(_collect, [
       entry,
+      holder,
+      holderFields,
+      holderField,
+      currentFrame,
       frame,
       found,
       invalid,
@@ -210,6 +285,11 @@ final class HeapFunctions(final FrameLookup frames) {
       root,
       linked,
       caller,
+      segmentEnd,
+      previousSegment,
+      parked,
+      parkedPc,
+      resume,
       scan,
       object,
       fields,
@@ -351,6 +431,9 @@ final class HeapFunctions(final FrameLookup frames) {
     final capacity = _op(free, .subtract, _load(free, context, limit), address);
     free.emit(DirectCall(unmap, [address, capacity]));
     free.emit(DirectCall(unmap, [_load(free, context, spare), capacity]));
+    for (final offset in [start, limit, top, spare, copied]) {
+      _store(free, context, _int(0), offset);
+    }
     free.finish(Jump(done));
     done.finish(const Return());
     return IrFunction(release, [entry, free, done]);

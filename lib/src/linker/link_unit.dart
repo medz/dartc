@@ -5,6 +5,7 @@ import 'package:dartc/target.dart';
 
 import 'input.dart';
 import 'linkage_table.dart';
+import 'mach_o/finalizers.dart';
 
 /// Coalesced storage with source bytes copied only into the final image.
 final class SectionGroup(
@@ -45,6 +46,14 @@ final class LinkUnit(
     void include(ObjectModule object) {
       if (object.target != target) {
         throw ArgumentError('Expected an object for $target.');
+      }
+      // shortcut: raw executable exits skip loader callbacks; add dispatch before supporting owners.
+      if (entry != null && object.sections.any((s) => s.kind == .finalizers)) {
+        throw UnsupportedError('Executable inputs cannot contain finalizers.');
+      }
+      if (target.operatingSystem == .macos &&
+          object.sections.any((s) => s.kind == .finalizers)) {
+        object = registerFinalizers(object);
       }
       for (final (j, symbol) in object.symbols.indexed) {
         if (symbol.binding != .global) continue;
@@ -126,6 +135,23 @@ final class LinkUnit(
       }
     }
     if (target.operatingSystem == .macos) search(archives);
+    if (target.operatingSystem == .macos &&
+        objects.any(
+          (o) => o.sections.any((s) => s.kind == .finalizers && s.size != 0),
+        )) {
+      const libraryName = '/usr/lib/libSystem.B.dylib';
+      var library = libraries.indexOf(libraryName);
+      if (library < 0) {
+        library = libraries.length;
+        libraries.add(libraryName);
+      }
+      for (final service in finalizerServices.entries) {
+        if (globals.containsKey(service.key)) {
+          throw ArgumentError('Reserved loader service: ${service.key}');
+        }
+        imports[service.key] = (library, service.value);
+      }
+    }
     final dynamicNames = missing.where(imports.containsKey).toSet();
     missing.removeAll(dynamicNames);
     if (missing.isNotEmpty) {
@@ -197,7 +223,13 @@ final class LinkUnit(
       for (final object in objects)
         List<(int, int)?>.filled(object.sections.length, null),
     ];
-    for (final kind in SectionKind.values) {
+    for (final kind in const [
+      SectionKind.code,
+      SectionKind.readOnlyData,
+      SectionKind.data,
+      SectionKind.finalizers,
+      SectionKind.zeroFill,
+    ]) {
       final parts = <(int, Section)>[];
       var size = 0, alignment = 1;
       for (final (i, object) in objects.indexed) {

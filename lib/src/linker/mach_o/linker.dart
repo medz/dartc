@@ -64,7 +64,7 @@ final class MachOLinker(@override final Target target) implements Linker {
     final hasFixups = unit.bindings.isNotEmpty || unit.rebases.isNotEmpty;
     final hasConstants = sections.any((s) => s.kind == .readOnlyData);
     final writable = sections.any(
-      (s) => s.kind == .data || s.kind == .zeroFill,
+      (s) => s.kind == .data || s.kind == .zeroFill || s.kind == .finalizers,
     );
     final segmentCount =
         2 + pageZero + (hasConstants ? 1 : 0) + (writable ? 1 : 0);
@@ -105,6 +105,7 @@ final class MachOLinker(@override final Target target) implements Linker {
     final dataStart = (position + page - 1) & -page;
     position = dataStart;
     place(.data);
+    place(.finalizers);
     final dataFileEnd = (position + page - 1) & -page;
     position = dataFileEnd;
     place(.zeroFill);
@@ -226,13 +227,24 @@ final class MachOLinker(@override final Target target) implements Linker {
       if (readOnlyAfterFixups) data.setUint32(base + 68, 0x10, .little);
       for (final (j, i) in indices.indexed) {
         final section = sections[i], offset = base + 72 + j * 80;
-        bytes.setAll(offset, ascii.encode(section.kind.machName));
+        bytes.setAll(
+          offset,
+          ascii.encode(
+            section.kind == .finalizers
+                ? '__mod_init_func'
+                : section.kind.machName,
+          ),
+        );
         bytes.setAll(offset + 16, ascii.encode(name));
         data.setUint64(offset + 32, addresses[i], .little);
         data.setUint64(offset + 40, section.size, .little);
         data.setUint32(offset + 48, offsets[i], .little);
         data.setUint32(offset + 52, section.alignment.bitLength - 1, .little);
-        data.setUint32(offset + 64, section.kind.machFlags, .little);
+        data.setUint32(
+          offset + 64,
+          section.kind == .finalizers ? 0x9 : section.kind.machFlags,
+          .little,
+        );
       }
     }
 

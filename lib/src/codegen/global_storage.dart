@@ -6,42 +6,48 @@ import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 
 import 'function_emitter.dart';
+import 'program_layout.dart';
 
-/// Generates lazy scalar bindings in module-owned zero-filled storage.
+/// Generates lazy bindings in a stable, module-owned root-holder object.
 final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
   final IrCallable? _lateError = lateError;
   static final _uri = Uri.parse('dartc:globals');
-  static final _wordPointer = FfiTypes.resolve(
-    NativePointerType(NativeScalarType(Int64)),
-  );
-  static final _doublePointer = FfiTypes.resolve(
-    NativePointerType(NativeScalarType(Double)),
-  );
+  final _type = ClassType(_uri, 'Root');
   final _getters = <GlobalVariable, IrFunction>{};
   final _setters = <GlobalVariable, IrFunction>{};
+  final _fields = <GlobalVariable, (InstanceField, InstanceField)>{};
 
-  /// The internal primitive returning the address of the first storage record.
-  final FunctionTarget address = .new(_uri, 'address', .integer, []);
+  late final IrClass declaration;
+
+  /// The internal primitive returning the immortal root-holder object.
+  late final FunctionTarget address = .new(_uri, 'address', _type, []);
 
   this {
     final globals = {for (final function in input) ...function.globals};
     for (final global in globals) {
-      if (global.type != .integer &&
-          global.type != .floating &&
-          global.type != .boolean) {
+      if (global.type == .voidType || global.type == .never) {
         throw UnsupportedError(
-          'Native global storage requires int, double or bool: '
+          'Native global storage requires a representable value type: '
           '${global.library} ${global.owner?.name ?? ''}.${global.name}.',
         );
       }
-      if ((global.isFinal || global.initializer == null) && lateError == null) {
+      if ((global.isFinal || global.isLate && global.initializer == null) &&
+          lateError == null) {
         throw UnsupportedError(
           'Native final/late global storage requires the unnamed SDK '
           'dart:_internal LateError constructor: '
           '${global.library} ${global.owner?.name ?? ''}.${global.name}.',
         );
       }
+      final index = _fields.length;
+      _fields[global] = (
+        InstanceField(_type, 'value.$index', global.type),
+        InstanceField(_type, 'bound.$index', .boolean),
+      );
     }
+    declaration = IrClass(_type, [
+      for (final (value, bound) in _fields.values) ...[value, bound],
+    ]);
     for (final global in globals) {
       final index = _getters.length;
       final setter = _setter(global, index);
@@ -52,8 +58,21 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
 
   bool get isEmpty => _getters.isEmpty;
 
-  /// Each record contains the value bits followed by an independent bound word.
-  int get bytes => _getters.length * 16;
+  bool hasReferences(ProgramLayout layouts) =>
+      declaration.fields.any((field) => layouts.isReference(field.type));
+
+  /// Headers are relocated by the generator; null can be an already-bound value.
+  Uint8List initialData(ProgramLayout layouts) {
+    final storage = layouts.storageOf(_type);
+    final data = Uint8List(storage.layout.size);
+    final words = ByteData.sublistView(data);
+    for (final entry in _fields.entries) {
+      if (!entry.key.isLate && entry.key.initializer == null) {
+        words.setUint64(storage.offsetOf(entry.value.$2), 1, Endian.little);
+      }
+    }
+    return data;
+  }
 
   Iterable<IrFunction> get functions =>
       _getters.values.followedBy(_setters.values);
@@ -68,7 +87,9 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
     FunctionEmitter<R> emitter,
     void Function(Fixup) storage,
   ) {
-    final result = emitter.convention.classify(NativeSignature(Int64, []));
+    final result = emitter.convention.classify(
+      NativeSignature(Pointer<Void>, []),
+    );
     emitter.address(result.result!, storage);
     emitter.loadImmediate(emitter.failureRegister, CallStatus.returned.index);
     emitter.ret();
@@ -77,28 +98,17 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
 
   IrFunction _getter(GlobalVariable global, int index, FunctionTarget setter) {
     final target = FunctionTarget(_uri, 'get.$index', global.type, []);
-    final entry = Block(), bound = Block(), initialize = Block();
+    final entry = Block();
     final base = entry.emit(DirectCall(address, []));
-    final flag = entry.emit(
-      LoadNative(_pointer(entry, base, index * 16 + 8, _wordPointer)),
-    );
-    entry.finish(
-      Branch(
-        entry.emit(Equals(flag, const Constant.integer(0))),
-        Jump(initialize),
-        Jump(bound),
-      ),
-    );
-    final stored = bound.emit(
-      LoadNative(_pointer(bound, base, index * 16, _pointerType(global))),
-    );
-    bound.finish(
-      Return(
-        global.type == .boolean
-            ? bound.emit(Equals(stored, const Constant.integer(1)))
-            : stored,
-      ),
-    );
+    final (valueField, boundField) = _fields[global]!;
+    if (!global.isLate && global.initializer == null) {
+      entry.finish(Return(entry.emit(LoadField(valueField, base))));
+      return IrFunction(target, [entry]);
+    }
+    final bound = Block(), initialize = Block();
+    final flag = entry.emit(LoadField(boundField, base));
+    entry.finish(Branch(flag, Jump(bound), Jump(initialize)));
+    bound.finish(Return(bound.emit(LoadField(valueField, base))));
     if (global.initializer case final initializer?) {
       final value = initialize.emit(DirectCall(initializer, []));
       // Commit only after success; writes by a throwing initializer survive.
@@ -117,23 +127,15 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
     final target = FunctionTarget(_uri, 'set.$index', .voidType, [global.type]);
     final entry = Block(target.parameterTypes);
     final blocks = [entry];
+    final (valueField, boundField) = _fields[global]!;
+    final base = entry.emit(DirectCall(address, []));
     Block commit = entry;
-    Value value = entry.parameters.single;
     if (global.isFinal) {
       commit = Block();
       final failed = Block();
       blocks.addAll([commit, failed]);
-      final base = entry.emit(DirectCall(address, []));
-      final flag = entry.emit(
-        LoadNative(_pointer(entry, base, index * 16 + 8, _wordPointer)),
-      );
-      entry.finish(
-        Branch(
-          entry.emit(Equals(flag, const Constant.integer(0))),
-          Jump(commit),
-          Jump(failed),
-        ),
-      );
+      final flag = entry.emit(LoadField(boundField, base));
+      entry.finish(Branch(flag, Jump(failed), Jump(commit)));
       _throwLateError(
         failed,
         global.initializer != null
@@ -141,32 +143,8 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
             : "Field '${global.name}' has already been initialized.",
       );
     }
-    if (global.type == .boolean) {
-      final convert = commit;
-      commit = Block([.integer]);
-      blocks.add(commit);
-      convert.finish(
-        Branch(
-          value,
-          Jump(commit, [const Constant.integer(1)]),
-          Jump(commit, [const Constant.integer(0)]),
-        ),
-      );
-      value = commit.parameters.single;
-    }
-    final base = commit.emit(DirectCall(address, []));
-    commit.emit(
-      StoreNative(
-        _pointer(commit, base, index * 16, _pointerType(global)),
-        value,
-      ),
-    );
-    commit.emit(
-      StoreNative(
-        _pointer(commit, base, index * 16 + 8, _wordPointer),
-        const Constant.integer(1),
-      ),
-    );
+    commit.emit(StoreField(valueField, base, entry.parameters.single));
+    commit.emit(StoreField(boundField, base, const Constant.boolean(true)));
     commit.finish(const Return());
     return IrFunction(target, blocks);
   }
@@ -178,17 +156,4 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
       ),
     );
   }
-
-  static ClassType _pointerType(GlobalVariable global) =>
-      global.type == .floating ? _doublePointer : _wordPointer;
-
-  static Value _pointer(Block block, Value base, int offset, ClassType type) =>
-      block.emit(
-        PointerFromAddress(
-          offset == 0
-              ? base
-              : block.emit(IntBinary(.add, base, Constant.integer(offset))),
-          type,
-        ),
-      );
 }

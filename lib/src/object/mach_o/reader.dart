@@ -139,10 +139,17 @@ final class MachOReader(final Target target, Uint8List bytes) {
         ('__const', '__CONST', 0) => SectionKind.readOnlyData,
         ('__data', '__DATA', 0) => SectionKind.data,
         ('__bss', '__DATA', 1) => SectionKind.zeroFill,
+        ('__mod_term_func', '__DATA', 0xa) => SectionKind.finalizers,
         _ => throw UnsupportedError(
           'Mach-O section ${h.segment},${h.name} (${h.flags}).',
         ),
       };
+      if (kind == .finalizers) {
+        input.check(
+          alignment == 8 && h.size % 8 == 0,
+          'Invalid Mach-O finalizer array.',
+        );
+      }
       if (kind == .zeroFill) {
         input.check(
           h.offset == 0,
@@ -162,6 +169,7 @@ final class MachOReader(final Target target, Uint8List bytes) {
         final content = input.view(h.offset, h.size);
         sections.add(switch (kind) {
           .code => .code(content, alignment: alignment),
+          .finalizers => .finalizers(content),
           .readOnlyData => .readOnlyData(content, alignment: alignment),
           _ => .data(content, alignment: alignment),
         });

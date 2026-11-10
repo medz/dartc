@@ -189,6 +189,38 @@ ObjectModule managedHeap(Target target) {
   final writeEntry = Block(writeState.parameterTypes);
   writeEntry.emit(StoreGlobal(state, writeEntry.parameters.single));
   writeEntry.finish(const Return());
+  final initializeShared = FunctionTarget(uri, 'initialize_shared', node, []);
+  final sharedEntry = Block([]);
+  sharedEntry.finish(
+    Return(
+      sharedEntry.emit(
+        Construct(ctor, [
+          const Constant.integer(100),
+          const Constant.nullValue(),
+        ]),
+      ),
+    ),
+  );
+  final shared = GlobalVariable(
+    uri,
+    'shared',
+    node,
+    initializer: initializeShared,
+  );
+  final mutateShared = FunctionTarget(uri, 'heap_mutate_shared', .integer, [
+    .integer,
+  ]);
+  final mutateEntry = Block(mutateShared.parameterTypes);
+  final sharedObject = mutateEntry.emit(LoadGlobal(shared));
+  final updated = mutateEntry.emit(
+    IntBinary(
+      .add,
+      mutateEntry.emit(LoadField(value, sharedObject)),
+      mutateEntry.parameters.single,
+    ),
+  );
+  mutateEntry.emit(StoreField(value, sharedObject, updated));
+  mutateEntry.finish(Return(updated));
   final globalReenter = FunctionTarget(
     uri,
     'heap_global_reenter',
@@ -196,37 +228,133 @@ ObjectModule managedHeap(Target target) {
     reenter.parameterTypes,
   );
   final globalEntry = Block(globalReenter.parameterTypes);
+  // Keep an alias in the suspended frame as well as in the global holder.
+  final sharedAlias = globalEntry.emit(LoadGlobal(shared));
   final retainedResult = globalEntry.emit(
     DirectCall(reenter, globalEntry.parameters),
   );
   globalEntry.finish(
     Return(
       globalEntry.emit(
-        IntBinary(.add, retainedResult, globalEntry.emit(LoadGlobal(state))),
+        IntBinary(
+          .add,
+          globalEntry.emit(
+            IntBinary(
+              .add,
+              retainedResult,
+              globalEntry.emit(LoadGlobal(state)),
+            ),
+          ),
+          globalEntry.emit(
+            IntBinary(
+              .add,
+              globalEntry.emit(LoadField(value, sharedAlias)),
+              globalEntry.emit(
+                LoadField(value, globalEntry.emit(LoadGlobal(shared))),
+              ),
+            ),
+          ),
+        ),
       ),
     ),
   );
   functions.addAll([
+    IrFunction(initializeShared, [sharedEntry]),
+    IrFunction(mutateShared, [mutateEntry]),
     IrFunction(initializeState, [stateEntry]),
     IrFunction(readState, [readEntry]),
     IrFunction(writeState, [writeEntry]),
     IrFunction(globalReenter, [globalEntry]),
   ]);
 
+  final pointerType = NativePointerType(NativeScalarType(Void));
+  final comparatorType = NativePointerType(
+    NativeFunctionType(
+      NativeSignature.types(NativeScalarType(Int32), [
+        pointerType,
+        pointerType,
+      ]),
+    ),
+  );
+  final qsortSignature = NativeSignature.types(NativeScalarType(Void), [
+    pointerType,
+    NativeScalarType(Uint64),
+    NativeScalarType(Uint64),
+    comparatorType,
+  ]);
+  final qsort = FunctionTarget(uri, 'qsort', .voidType, [
+    FfiTypes.resolve(pointerType),
+    ValueType.integer,
+    ValueType.integer,
+    FfiTypes.resolve(comparatorType),
+  ]);
+  final importedReenter = FunctionTarget(
+    uri,
+    'heap_imported_reenter',
+    .integer,
+    [FfiTypes.resolve(pointerType), FfiTypes.resolve(comparatorType)],
+  );
+  final importedEntry = Block(importedReenter.parameterTypes);
+  final importedLocal = importedEntry.emit(
+    Construct(ctor, [const Constant.integer(42), const Constant.nullValue()]),
+  );
+  final importedAlias = importedEntry.emit(LoadGlobal(shared));
+  importedEntry.emit(
+    DirectCall(qsort, [
+      importedEntry.parameters[0],
+      const Constant.integer(2),
+      const Constant.integer(8),
+      importedEntry.parameters[1],
+    ]),
+  );
+  importedEntry.finish(
+    Return(
+      importedEntry.emit(
+        IntBinary(
+          .add,
+          importedEntry.emit(LoadField(value, importedLocal)),
+          importedEntry.emit(
+            IntBinary(
+              .add,
+              importedEntry.emit(LoadField(value, importedAlias)),
+              importedEntry.emit(
+                LoadField(value, importedEntry.emit(LoadGlobal(shared))),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  functions.add(IrFunction(importedReenter, [importedEntry]));
+
   final program = IrProgram(
     [
       IrClass(node, [value, next], constructors: [ctor, nestedCtor]),
     ],
     functions,
-    globals: [state],
+    globals: [state, shared],
+    externals: [IrExternal(qsort)],
   );
   final CodeGenerator generator = target.architecture == .arm64
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);
   return generator.generate(
     program,
-    definitions: functions.map((f) => f.target),
+    definitions: [...functions.map((f) => f.target), qsort],
+    imports: {qsort: NativeImport('qsort', qsortSignature)},
     exports: {
+      importedReenter: NativeExport(
+        importedReenter.name,
+        NativeSignature.types(NativeScalarType(Int64), [
+          pointerType,
+          comparatorType,
+        ]),
+      ),
+      mutateShared: NativeExport(
+        mutateShared.name,
+        NativeSignature(Int64, [Int64]),
+      ),
       readState: NativeExport(readState.name, NativeSignature(Int64, [])),
       writeState: NativeExport(writeState.name, NativeSignature(Void, [Int64])),
       globalReenter: NativeExport(
