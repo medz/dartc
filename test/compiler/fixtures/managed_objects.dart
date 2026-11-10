@@ -27,3 +27,26 @@ double allocateAndNotify(int count, double fraction, Pointer<Int64> output) {
 }
 
 void main() => allocateAndNotify(40000, 1.25, .fromAddress(0));
+
+class NumericConstruction<I extends int, F extends double>(
+  I integer,
+  F floating,
+  int count,
+  Pointer<Int64> integers,
+  Pointer<Double> doubles,
+) {
+  this {
+    allocateAndNotify(count, 0.0, .fromAddress(0));
+    integers.value = integer;
+    doubles.value = floating;
+  }
+}
+
+@Export<Void Function(Int64, Double, Int64, Pointer<Int64>, Pointer<Double>)>()
+void constructNumbers(
+  int integer,
+  double floating,
+  int count,
+  Pointer<Int64> integers,
+  Pointer<Double> doubles,
+) => NumericConstruction(integer, floating, count, integers, doubles);

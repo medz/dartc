@@ -69,7 +69,7 @@ Linux ARM64/x86-64 输出当前为固定地址、静态解析的 ELF 可执行�
 
 [整数运算对照](../test/compiler/integer_operations_test.dart)覆盖乘法溢出、按位与/或/异或/取反、复合赋值、重复与重叠操作数，以及调用和循环中的值保存；使用正负边界、跨 32 位值及交替位模式对照 SDK。
 
-[指针对照](../test/compiler/pointers_test.dart)检查地址往返、整数边界读写、寄存器与栈的混合参数、跨调用及循环存活、别名修改和复合赋值顺序。[FFI 声明绑定验证](../test/frontend/lowering/ffi_test.dart)检查同名用户类型和 extension 不被替换为原生操作；[IR 契约](../test/ir/native_memory_test.dart)检查语义类型和存储效果。[签名验证](../test/interop/native_signature_test.dart)与[编译拒绝验证](../test/compiler/compiler_test.dart)覆盖不支持及不匹配的类型。
+[指针对照](../test/compiler/pointers_test.dart)检查地址往返、整数边界读写、寄存器与栈的混合参数、跨调用及循环存活、别名修改和复合赋值顺序。[FFI 声明绑定验证](../test/frontend/lowering/ffi_test.dart)检查同名用户类型和 extension 不被替换为原生操作，以及 int 界限用于地址和索引、对应的 int/double 界限用于存储值；[泛型构造源码验证](../test/compiler/managed_objects_test.dart)检查这些参数在嵌套回收后的原生存储结果。[IR 契约](../test/ir/native_memory_test.dart)检查语义类型和存储效果。[签名验证](../test/interop/native_signature_test.dart)与[编译拒绝验证](../test/compiler/compiler_test.dart)覆盖不支持及不匹配的类型。
 
 [函数指针验证](../test/compiler/native_function_pointers_test.dart)检查签名、地址往返、嵌套函数指针、原生栈参数及跨调用存活；返回的函数指针由 SDK FFI 实际调用，不代表 dartc 已能执行 `asFunction`。[签名契约](../test/interop/native_signature_test.dart)验证不能按值传递函数类型、递归 C 声明及完整签名相等性。类型依据为 [NativeFunction](https://api.dart.dev/stable/3.13.7/dart-ffi/NativeFunction-class.html) 与 [asFunction](https://api.dart.dev/stable/3.13.7/dart-ffi/NativeFunctionPointer/asFunction.html)；C 声明按 [N1570 §6.7.6.1/§6.7.6.3](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf)的指针与函数声明规则生成。
 

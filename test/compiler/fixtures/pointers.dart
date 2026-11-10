@@ -107,3 +107,19 @@ Pointer<Int64> forward(
 
 @Export<Int64 Function(Pointer<Int64>)>()
 int declaredMember(Pointer<Int64> pointer) => customMember(pointer);
+
+void boundedWrite<I extends int, F extends double>(
+  I address,
+  I index,
+  I integer,
+  F floating,
+) {
+  final integers = Pointer<Int64>.fromAddress(address);
+  integers.value = integer;
+  integers[index] = integer;
+  (integers + index).value = integer;
+  (integers - index).value = integer;
+  final doubles = Pointer<Double>.fromAddress(address);
+  doubles.value = floating;
+  doubles[index] = floating;
+}

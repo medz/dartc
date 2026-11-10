@@ -12,7 +12,11 @@ import 'function_emitter.dart';
 import 'program_layout.dart';
 
 /// Generates allocation wrappers with precise roots and optional initialization.
-final class HeapPlan(IrProgram program, Set<FunctionTarget> selected) {
+final class HeapPlan(
+  IrProgram program,
+  Set<FunctionTarget> selected,
+  ProgramLayout layouts,
+) {
   final constructors = <Construct, FunctionTarget>{};
   final _factories =
       <FunctionTarget, ({FunctionTarget? initializer, ClassType type})>{};
@@ -69,13 +73,6 @@ final class HeapPlan(IrProgram program, Set<FunctionTarget> selected) {
     final source = classify(target),
         destination = initializer == null ? null : classify(initializer);
     final parameterTypes = target.parameterTypes;
-    for (final (i, type) in parameterTypes.indexed) {
-      if (initializer == null) break;
-      if (layouts.representation(type) !=
-          layouts.representation(initializer.parameterTypes[i + 1])) {
-        throw UnsupportedError('Native constructor argument conversion: $type');
-      }
-    }
     final allocation = emitter.convention.classify(
       NativeSignature(Int64, List.filled(4, Int64)),
     );
@@ -193,6 +190,11 @@ final class HeapPlan(IrProgram program, Set<FunctionTarget> selected) {
         ].whereType<Construct>()) {
           final type = operation.instantiatedType,
               initializer = operation.initializer;
+          if (type.freeTypeParameters.isNotEmpty) {
+            throw UnsupportedError(
+              'Native construction requires runtime type arguments: $type',
+            );
+          }
           constructors[operation] = factories.putIfAbsent(
             (initializer, type),
             () {
@@ -200,7 +202,12 @@ final class HeapPlan(IrProgram program, Set<FunctionTarget> selected) {
                 uri,
                 'construct${factories.length}',
                 type,
-                initializer.signatureFor(type).parameters,
+                [
+                  for (final parameter in initializer.signature.parameters)
+                    layouts.representation(parameter) == .reference
+                        ? ValueType.object.nullable
+                        : parameter.substitute(type.typeEnvironment),
+                ],
               );
               _factories[target] = (initializer: initializer, type: type);
               return target;

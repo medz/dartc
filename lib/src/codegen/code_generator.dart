@@ -27,8 +27,11 @@ abstract interface class CodeGenerator() {
   /// slots and frame linkage; native entry wrappers terminate the frame walk.
   /// Updated root slots are reloaded after calls. [Construct] allocates objects,
   /// initializes their fields and calls their initializer; unreachable objects
-  /// are reclaimed during allocation. Each synchronous native entry owns its
-  /// heap until return, including entries made through a native callback.
+  /// are reclaimed during allocation. Constructor arguments use their declared
+  /// representations; the instantiated class must have resolved type arguments.
+  /// Generic field writes still require runtime checks and are unsupported.
+  /// Each synchronous native entry owns its heap until return, including entries
+  /// made through a native callback.
   /// Escaping managed state, asynchronous execution and catchable allocation
   /// failures remain unsupported. An uncaught allocation failure releases the
   /// heap, reports to stderr and terminates the process with status 255.

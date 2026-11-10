@@ -48,6 +48,41 @@ void main() {
   });
 
   test(
+    'generic constructor arguments survive allocation and nested collection',
+    () {
+      final native = ManagedObjects();
+      addTearDown(native.close);
+      for (final count in [0, 10000]) {
+        for (final (integer, floating) in [
+          (-0x8000000000000000, -0.0),
+          (0x7fffffffffffffff, 1.25),
+        ]) {
+          sdk.constructNumbers(
+            integer,
+            floating,
+            count,
+            native.output,
+            native.floatingOutput,
+          );
+          final expected = native.output.value;
+          final floatingBits = native.floatingOutput.cast<Int64>().value;
+          native.output.value = 0;
+          native.floatingOutput.value = 0;
+          native.constructNumbers(
+            integer,
+            floating,
+            count,
+            native.output,
+            native.floatingOutput,
+          );
+          expect(native.output.value, expected);
+          expect(native.floatingOutput.cast<Int64>().value, floatingBits);
+        }
+      }
+    },
+  );
+
+  test(
     'a standalone entry allocates and collects without an SDK process',
     () async {
       final result = await Process.run(

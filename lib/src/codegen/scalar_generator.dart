@@ -41,12 +41,12 @@ base class ScalarCodeGenerator<R extends Object>(
         'Expected distinct exports and imports in definitions.',
       );
     }
-    final heap = HeapPlan(program, selected);
+    final layouts = ProgramLayout(program);
+    final heap = HeapPlan(program, selected, layouts);
     final relocations = <Relocation>[];
     final nativeSymbols = <String, int>{};
     final nativeCalls = <(int, Fixup, int)>[];
     final code = BytesBuilder(copy: false), symbols = <Symbol>[];
-    final layouts = ProgramLayout(program);
     final functions = <FunctionTarget, ScalarFunction<R>>{};
     for (final declaration in selected) {
       final function = program.implementationOf(declaration);
@@ -208,7 +208,11 @@ base class ScalarCodeGenerator<R extends Object>(
             );
       symbols.add(
         .new(
-          exported ? target.nativeSymbol(export.symbol) : declaration.name,
+          exported
+              ? target.nativeSymbol(export.symbol)
+              : declaration.name.isEmpty
+              ? '.function${symbols.length}'
+              : declaration.name,
           0,
           code.length,
           bytes.length,

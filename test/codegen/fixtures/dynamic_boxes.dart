@@ -44,9 +44,39 @@ ObjectModule dynamicBoxes(Target target) {
   final identityBody = Block(identity.parameterTypes);
   identityBody.finish(Return(identityBody.parameters.last));
   functions.add(IrFunction(identity, [identityBody]));
+  final classes = [
+    IrClass(holder, fields, constructors: [ctor]),
+    IrClass(generic, [], members: [identity]),
+  ];
+  final burn = FunctionTarget(uri, 'burn', .voidType, [.integer]);
   final exports = <FunctionTarget, NativeExport>{};
   for (final type in <ValueType>[.integer, .floating]) {
     final name = type == .integer ? 'integer' : 'floating';
+    final bounded = TypeParameterType('N')
+      ..initializeBound(type)
+      ..initializeDefaultType(type);
+    final container = ClassType(uri, 'Scalar_$name', typeParameters: [bounded]);
+    final field = InstanceField(container, 'value', type, isFinal: true);
+    final scalarCtor = FunctionTarget(
+      uri,
+      '',
+      .voidType,
+      List.filled(10, bounded),
+      owner: container,
+      kind: .initializer,
+    );
+    final initialize = Block(scalarCtor.parameterTypes);
+    initialize.emit(DirectCall(burn, [const Constant.integer(4096)]));
+    initialize.emit(
+      StoreField(
+        field,
+        initialize.parameters.first,
+        initialize.emit(TypeView(initialize.parameters.last, type)),
+      ),
+    );
+    initialize.finish(const Return());
+    functions.add(IrFunction(scalarCtor, [initialize]));
+    classes.add(IrClass(container, [field], constructors: [scalarCtor]));
     final accept = FunctionTarget(uri, 'accept_$name', type.nullable, [
       type.nullable,
     ]);
@@ -63,6 +93,7 @@ ObjectModule dynamicBoxes(Target target) {
       'field',
       'construct',
       'generic',
+      'generic_construct',
     ]) {
       final factory = FunctionTarget(uri, '${name}_$operation', type.nullable, [
         type,
@@ -108,6 +139,17 @@ ObjectModule dynamicBoxes(Target target) {
               value,
             ], ownerType: receiver),
           );
+        case 'generic_construct':
+          final object = body.emit(
+            Construct(scalarCtor, [
+              for (var i = 0; i < 9; i++)
+                type == .integer
+                    ? Constant.integer(i)
+                    : Constant.floating(i.toDouble()),
+              value,
+            ], instantiatedType: container.instantiate([type])),
+          );
+          result = body.emit(LoadField(field, object));
       }
       blocks.last.finish(Return(result));
       functions.add(IrFunction(factory, blocks));
@@ -138,7 +180,6 @@ ObjectModule dynamicBoxes(Target target) {
     }
   }
 
-  final burn = FunctionTarget(uri, 'burn', .voidType, [.integer]);
   final start = Block(burn.parameterTypes),
       loop = Block([.integer]),
       allocate = Block(),
@@ -199,10 +240,7 @@ ObjectModule dynamicBoxes(Target target) {
   functions.add(IrFunction(run, [entry]));
   exports[run] = NativeExport(run.name, NativeSignature(Int64, [Int64, Int64]));
 
-  final program = IrProgram([
-    IrClass(holder, fields, constructors: [ctor]),
-    IrClass(generic, [], members: [identity]),
-  ], functions);
+  final program = IrProgram(classes, functions);
   final CodeGenerator generator = target.architecture == .arm64
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);

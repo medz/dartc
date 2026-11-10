@@ -21,6 +21,7 @@ void main() {
       'field',
       'construct',
       'generic',
+      'generic_construct',
     ]) {
       for (final value in [
         -0x8000000000000000,

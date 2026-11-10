@@ -80,12 +80,14 @@ Value? lowerFfi(
 }) {
   final library = member.library;
   if (library.uri != _library) return null;
+  Value scalar(Value value, ValueType type) =>
+      value.type == type ? value : emit(TypeView(value, type));
   member = member.baseElement;
   final pointer = library.getClass('Pointer')!;
   if (member == pointer.getNamedConstructor('fromAddress') &&
       result is ClassType &&
       FfiTypes.isPointer(result)) {
-    return emit(PointerFromAddress(operands.single, result));
+    return emit(PointerFromAddress(scalar(operands.single, .integer), result));
   }
   if (member == pointer.getGetter('address') &&
       FfiTypes.isPointer(operands.single.type)) {
@@ -97,25 +99,43 @@ Value? lowerFfi(
       return emit(LoadNative(operands.single));
     }
     if (member == access.getSetter('value')) {
-      return emit(StoreNative(operands[0], operands[1]));
+      return emit(
+        StoreNative(
+          operands[0],
+          scalar(operands[1], FfiTypes.valueType(FfiTypes.describe(type))),
+        ),
+      );
     }
     if (member == access.getMethod('+') ||
         member == access.getMethod('elementAt')) {
-      return emit(PointerOffset(operands[0], operands[1]));
+      return emit(PointerOffset(operands[0], scalar(operands[1], .integer)));
     }
     if (member == access.getMethod('-')) {
       final index = emit(
-        IntBinary(.subtract, const Constant.integer(0), operands[1]),
+        IntBinary(
+          .subtract,
+          const Constant.integer(0),
+          scalar(operands[1], .integer),
+        ),
       );
       return emit(PointerOffset(operands[0], index));
     }
     if (member == access.getMethod('[]')) {
-      final pointer = emit(PointerOffset(operands[0], operands[1]));
+      final pointer = emit(
+        PointerOffset(operands[0], scalar(operands[1], .integer)),
+      );
       return emit(LoadNative(pointer));
     }
     if (member == access.getMethod('[]=')) {
-      final pointer = emit(PointerOffset(operands[0], operands[1]));
-      return emit(StoreNative(pointer, operands[2]));
+      final pointer = emit(
+        PointerOffset(operands[0], scalar(operands[1], .integer)),
+      );
+      return emit(
+        StoreNative(
+          pointer,
+          scalar(operands[2], FfiTypes.valueType(FfiTypes.describe(type))),
+        ),
+      );
     }
   }
   return null;

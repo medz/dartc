@@ -160,6 +160,16 @@ void main() {
       expect(instructions('address').whereType<PointerAddress>(), hasLength(1));
       expect(instructions('read').whereType<LoadNative>(), hasLength(1));
       expect(instructions('write').whereType<StoreNative>(), hasLength(1));
+      final bounded = instructions('boundedWrite').toList();
+      expect(bounded.whereType<PointerFromAddress>(), hasLength(2));
+      expect(bounded.whereType<PointerOffset>(), hasLength(4));
+      expect(
+        bounded.whereType<StoreNative>().map((store) => store.value.type),
+        [
+          ...List.filled(4, ValueType.integer),
+          ...List.filled(2, ValueType.floating),
+        ],
+      );
       expect(
         instructions('ordinaryPointer').whereType<Construct>(),
         hasLength(1),

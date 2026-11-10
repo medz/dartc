@@ -70,8 +70,7 @@ final class FunctionRepresentation(
         }
         final destinations = switch (instruction) {
           DirectCall(:final target) => target.parameterTypes,
-          Construct(:final initializer, :final instantiatedType) =>
-            initializer.signatureFor(instantiatedType).parameters,
+          Construct(:final initializer) => initializer.signature.parameters,
           NewCell(:final initial, type: final CellType type)
               when initial != null =>
             [type.content],
