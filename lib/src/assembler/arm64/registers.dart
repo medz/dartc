@@ -44,6 +44,7 @@ enum Register() implements CpuRegister {
 enum Condition(final int encoding) {
   equal(0),
   notEqual(1),
+  carrySet(2),
   negative(4),
   lowerOrEqual(9),
   lessThan(11),

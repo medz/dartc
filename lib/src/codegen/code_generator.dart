@@ -25,8 +25,13 @@ abstract interface class CodeGenerator() {
   /// Modules with references live across calls include read-only stack records
   /// keyed by relocated return addresses. These describe initialized reference
   /// slots and frame linkage; native entry wrappers terminate the frame walk.
-  /// Updated root slots are reloaded after calls. This does not provide heap
-  /// allocation, collection, asynchronous safepoints or native reentry tracking.
+  /// Updated root slots are reloaded after calls. [Construct] allocates objects,
+  /// initializes their fields and calls their initializer; unreachable objects
+  /// are reclaimed during allocation. Each synchronous native entry owns its
+  /// heap until return, including entries made through a native callback.
+  /// Escaping managed state, asynchronous execution and catchable allocation
+  /// failures remain unsupported. An uncaught allocation failure releases the
+  /// heap, reports to stderr and terminates the process with status 255.
   ///
   /// [entryPoint] adds a process entry with the given link symbol. It
   /// calls a synchronous, parameterless Dart body and exits successfully after

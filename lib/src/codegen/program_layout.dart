@@ -1,3 +1,6 @@
+import 'dart:ffi';
+
+import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 
@@ -16,6 +19,16 @@ final class ProgramLayout(IrProgram program) {
       throw UnsupportedError('Native value representation: $type');
     }
     return .reference;
+  }
+
+  NativeTypeRef callType(ValueType type) {
+    if (type == .voidType) return NativeScalarType(Void);
+    // Internal references occupy pointer locations without becoming FFI values.
+    return switch (representation(type)) {
+      .word => NativeScalarType(Int64),
+      .floating => NativeScalarType(Double),
+      .address || .reference => NativePointerType(NativeScalarType(Void)),
+    };
   }
 
   /// Checks transfers before a machine word loses its semantic type.

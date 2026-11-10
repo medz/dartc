@@ -4,6 +4,7 @@ import 'package:dartc/ir.dart';
 final class FunctionLiveness(
   IrFunction function,
   Iterable<Value> Function(Instruction) inputsOf,
+  Set<Instruction> calls,
 ) {
   /// Values needed at entry, including used parameters and local contents.
   final liveIn = <Block, Set<Value>>{};
@@ -116,7 +117,7 @@ final class FunctionLiveness(
       }
       for (final instruction in block.instructions.reversed) {
         live.remove(instruction is WriteCell ? instruction.cell : instruction);
-        if (instruction is DirectCall || instruction is NativeCall) {
+        if (calls.contains(instruction)) {
           acrossCalls[instruction] = {...live};
         }
         for (final input in inputsOf(instruction)) {

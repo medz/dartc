@@ -20,6 +20,7 @@ import '../test/codegen/fixtures/control_flow.dart';
 import '../test/codegen/fixtures/object_values.dart';
 import '../test/codegen/fixtures/boxed_values.dart';
 import '../test/codegen/fixtures/stack_roots.dart';
+import '../test/codegen/fixtures/managed_heap.dart';
 import '../test/linker/fixtures/functions.dart';
 import '../test/linker/fixtures/calls.dart';
 import '../test/linker/fixtures/symbols.dart';
@@ -28,6 +29,7 @@ import '../test/linker/fixtures/archive.dart';
 import '../test/linker/fixtures/shared_libraries.dart';
 import '../test/linker/fixtures/addresses.dart';
 import '../test/compiler/fixtures/descriptor_write_assets.dart';
+import '../test/compiler/fixtures/managed_objects_assets.dart';
 import '../test/support/native_assets.dart';
 import 'build_compiler_test_assets.dart' as compiler_assets;
 
@@ -71,6 +73,24 @@ Future<void> main(List<String> args) async {
         linkInputs: needsBindings ? entryInputs(target) : const [],
       );
       await result.write(assets.file('compiler/entry_$fixture'));
+    }
+
+    final managedEntry = await Compiler(target).compile([
+      'test/compiler/fixtures/managed_objects.dart',
+    ], output: const .executable());
+    await managedEntry.write(assets.file('compiler/entry_managed'));
+    if (target.operatingSystem == .linux) {
+      for (final name in ['managed_failure', 'managed_growth_failure']) {
+        final failure = await Compiler(target).compile(
+          ['test/compiler/fixtures/$name.dart'],
+          output: const .executable(),
+          nativeSymbols: const {
+            'heap-test': {'limit': 'heap_limit'},
+          },
+          linkInputs: [.object(restrictAddressSpace(target))],
+        );
+        await failure.write(assets.file('compiler/$name'));
+      }
     }
 
     final io = await Compiler(target).compile([
@@ -122,6 +142,7 @@ Future<void> main(List<String> args) async {
       'native_floats',
       'native_function_pointers',
       'native_imports',
+      'managed_objects',
     ]) {
       final library = assets.library('compiler/$fixture');
       final result = await Compiler(target).compile(
@@ -213,6 +234,10 @@ Future<void> main(List<String> args) async {
     await shared(
       await objects('stack_roots_', [stackRoots(target), rootsProbe(target)]),
       assets.library('codegen/stack_roots'),
+    );
+    await shared(
+      await objects('managed_heap_', [managedHeap(target)]),
+      assets.library('codegen/managed_heap'),
     );
     final inputs = [
       functions(target, {'first': 40}),

@@ -14,6 +14,9 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
   final _constants = <Object, int>{};
   final _types = <ClassType, int>{};
 
+  int typeAddress(ClassType type) =>
+      _type(type, layouts.storageOf(type).layout);
+
   int addressOf(Constant value) {
     final key = value.structuralKey;
     if (_constants[key] case final symbol?) return symbol;

@@ -15,6 +15,8 @@ import 'native_adapter.dart';
 import 'program_layout.dart';
 import 'constant_data.dart';
 import 'stack_maps.dart';
+import 'heap_plan.dart';
+import 'heap_entry.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -39,6 +41,17 @@ base class ScalarCodeGenerator<R extends Object>(
         'Expected distinct exports and imports in definitions.',
       );
     }
+    final heap = HeapPlan(program, selected);
+    final primitives = heap.isEmpty ? <FunctionTarget>{} : heap.primitives;
+    if (!heap.isEmpty) {
+      program = IrProgram(
+        program.classes,
+        [...program.functions, ...heap.functions],
+        globals: program.globals,
+        externals: [...program.externals, ...primitives.map(IrExternal.new)],
+      );
+      selected.addAll([...heap.functions.map((f) => f.target), ...primitives]);
+    }
     final indices = {
       for (final (i, declaration) in selected.indexed) declaration: i,
     };
@@ -49,6 +62,7 @@ base class ScalarCodeGenerator<R extends Object>(
     final layouts = ProgramLayout(program);
     final functions = <FunctionTarget, ScalarFunction<R>>{};
     for (final declaration in selected) {
+      if (primitives.contains(declaration)) continue;
       final function = program.implementationOf(declaration);
       final binding = imports[declaration];
       if (binding != null) {
@@ -67,6 +81,7 @@ base class ScalarCodeGenerator<R extends Object>(
           function,
           _createFunction(),
           layouts,
+          heap.constructors,
         );
       }
       final export = exports[declaration];
@@ -74,7 +89,7 @@ base class ScalarCodeGenerator<R extends Object>(
         throw ArgumentError('Native signature mismatch: ${declaration.name}');
       }
     }
-    final hasRoots = functions.values.any((f) => f.hasRoots);
+    final hasRoots = !heap.isEmpty || functions.values.any((f) => f.hasRoots);
     bool needsEntry(NativeSignature signature) =>
         hasRoots || _needsEntry(signature);
     final maps = StackMaps();
@@ -88,44 +103,79 @@ base class ScalarCodeGenerator<R extends Object>(
           exports.values.where((e) => needsEntry(e.signature)).length +
           (entryPoint == null ? 0 : 1),
     );
+    final rootAddresses = <(int, Fixup)>[], errorAddresses = <(int, Fixup)>[];
+    void call(Fixup fixup, FunctionTarget callee) {
+      final index = indices[callee];
+      if (index == null) {
+        throw ArgumentError('Missing call definition: ${callee.name}');
+      }
+      relocations.add(
+        .instruction(0, code.length + fixup.offset, fixup.encoding, index),
+      );
+    }
+
+    HeapEntry<R>? entry(FunctionEmitter<R> emitter) => heap.isEmpty
+        ? null
+        : HeapEntry(
+            emitter,
+            heap.heap,
+            (fixup) => rootAddresses.add((code.length, fixup)),
+            (fixup) => errorAddresses.add((code.length, fixup)),
+            call,
+          );
     for (final declaration in selected) {
       final binding = imports[declaration], export = exports[declaration];
       final exported = export != null && !needsEntry(export.signature);
       code.add(Uint8List((-code.length) & 15));
-      final bytes = binding != null
-          ? NativeAdapter(_createFunction())
-                .generate(binding.signature, (fixup, position, frame) {
-                  final symbol = nativeSymbols.putIfAbsent(
-                    target.nativeSymbol(binding.symbol),
-                    () => nativeSymbols.length,
-                  );
-                  nativeCalls.add((code.length, fixup, symbol));
-                  safepoint(
-                    position,
-                    StackRoots(
-                      frame.incomingStackOffset,
-                      frame.returnAddressOffset,
-                      [],
-                    ),
-                  );
-                }, intoDart: false)
-          : functions[declaration]!.generate(
-              (fixup, callee) {
-                final index = indices[callee];
-                if (index == null) {
-                  throw ArgumentError(
-                    'Missing call definition: ${callee.name}',
-                  );
-                }
+      final emitter = functions[declaration]?.emitter ?? _createFunction();
+      final bytes = primitives.contains(declaration)
+          ? heap.emit(
+              declaration,
+              emitter,
+              layouts,
+              call,
+              (fixup, type) {
                 relocations.add(
                   .instruction(
                     0,
                     code.length + fixup.offset,
                     fixup.encoding,
-                    index,
+                    constants.typeAddress(type),
                   ),
                 );
               },
+              safepoint,
+              (fixup, position) {
+                maps.reference(
+                  code.length + fixup.offset,
+                  fixup.encoding,
+                  code.length + position,
+                );
+              },
+            )
+          : binding != null
+          ? NativeAdapter(emitter).generate(
+              binding.signature,
+              (fixup, position, frame) {
+                final symbol = nativeSymbols.putIfAbsent(
+                  target.nativeSymbol(binding.symbol),
+                  () => nativeSymbols.length,
+                );
+                nativeCalls.add((code.length, fixup, symbol));
+                safepoint(
+                  position,
+                  StackRoots(
+                    frame.incomingStackOffset,
+                    frame.returnAddressOffset,
+                    [],
+                  ),
+                );
+              },
+              intoDart: false,
+              heap: entry(emitter),
+            )
+          : functions[declaration]!.generate(
+              call,
               (fixup, constant) {
                 relocations.add(
                   .instruction(
@@ -137,6 +187,7 @@ base class ScalarCodeGenerator<R extends Object>(
                 );
               },
               safepoint,
+              failures: !heap.isEmpty,
             );
       symbols.add(
         .new(
@@ -153,18 +204,16 @@ base class ScalarCodeGenerator<R extends Object>(
     for (final MapEntry(:key, :value) in exports.entries) {
       if (!needsEntry(value.signature)) continue;
       code.add(Uint8List((-code.length) & 15));
-      final bytes = NativeAdapter(_createFunction())
-          .generate(value.signature, (fixup, position, frame) {
-            relocations.add(
-              .instruction(
-                0,
-                code.length + fixup.offset,
-                fixup.encoding,
-                indices[key]!,
-              ),
-            );
-            safepoint(position, StackRoots(0, 0, []));
-          }, intoDart: true);
+      final emitter = _createFunction();
+      final bytes = NativeAdapter(emitter).generate(
+        value.signature,
+        (fixup, position, frame) {
+          call(fixup, key);
+          safepoint(position, StackRoots(0, 0, []));
+        },
+        intoDart: true,
+        heap: entry(emitter),
+      );
       symbols.add(
         .new(
           target.nativeSymbol(value.symbol),
@@ -191,17 +240,15 @@ base class ScalarCodeGenerator<R extends Object>(
       }
       code.add(Uint8List((-code.length) & 15));
       final emitter = _createFunction();
-      final bytes = emitter.start((fixup) {
-        relocations.add(
-          .instruction(
-            0,
-            code.length + fixup.offset,
-            fixup.encoding,
-            indices[function]!,
-          ),
-        );
+      final context = entry(emitter);
+      final frame = context?.frame(0);
+      final bytes = emitter.start(() {
+        if (context != null) context.enter(frame!);
+        final fixup = emitter.call();
+        call(fixup, function);
         safepoint(emitter.position, StackRoots(0, 0, []));
-      });
+        if (context != null) context.leave(frame!, null);
+      }, frame);
       symbols.add(.new(symbol, 0, code.length, bytes.length));
       code.add(bytes);
     }
@@ -210,7 +257,31 @@ base class ScalarCodeGenerator<R extends Object>(
       Section.code(code.takeBytes()),
       if (constants.symbols.isNotEmpty) constants.finish(),
     ];
-    maps.finish(sections, symbols, relocations);
+    final rootSymbol = maps.finish(sections, symbols, relocations);
+    if (!heap.isEmpty) {
+      final message = symbols.length;
+      symbols.add(
+        .new(
+          '.dartc.oom',
+          sections.length,
+          0,
+          HeapEntry.message.length,
+          kind: .data,
+          binding: .local,
+        ),
+      );
+      sections.add(.readOnlyData(HeapEntry.message.codeUnits));
+      for (final (uses, symbol) in [
+        (rootAddresses, rootSymbol!),
+        (errorAddresses, message),
+      ]) {
+        for (final (start, fixup) in uses) {
+          relocations.add(
+            .instruction(0, start + fixup.offset, fixup.encoding, symbol),
+          );
+        }
+      }
+    }
     return .new(
       target,
       sections,

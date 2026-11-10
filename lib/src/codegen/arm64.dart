@@ -27,26 +27,97 @@ final class _Arm64Emitter(
   int get position => assembler.length;
 
   @override
-  Uint8List start(void Function(Fixup) call) {
-    final frame = convention.frameLayout(
-      localBytes: 0,
-      localAlignment: 1,
-      savedRegisters: [],
-      outgoingStackBytes: 0,
-    );
+  Uint8List start(void Function() body, FrameLayout<CpuRegister>? frame) {
+    frame ??= convention.target.operatingSystem == .macos
+        ? convention.frameLayout(
+            localBytes: 0,
+            localAlignment: 1,
+            savedRegisters: [],
+            outgoingStackBytes: 0,
+          )
+        : null;
+    if (frame != null) convention.emitPrologue(assembler, frame);
+    body();
     if (convention.target.operatingSystem == .macos) {
-      convention.emitPrologue(assembler, frame);
-    }
-    call(assembler.call());
-    assembler.loadImmediate(.x0, 0);
-    if (convention.target.operatingSystem == .macos) {
-      convention.emitEpilogue(assembler, frame);
+      assembler.loadImmediate(.x0, 0);
+      convention.emitEpilogue(assembler, frame!);
     } else {
-      assembler
-        ..loadImmediate(.x8, 94)
-        ..supervisorCall(0);
+      abort(0);
     }
     return assembler.finish();
+  }
+
+  @override
+  Register get heapRegister => .x28;
+
+  @override
+  Register get failureRegister => .x8;
+
+  @override
+  void stackAddress(CpuRegister destination, int offset) =>
+      assembler.addImmediate(destination as Register, .sp, offset);
+
+  void _systemCall(int linux, int macos) {
+    final mac = convention.target.operatingSystem == .macos;
+    assembler
+      ..loadImmediate(mac ? .x16 : .x8, mac ? macos : linux)
+      ..supervisorCall(mac ? 0x80 : 0);
+  }
+
+  @override
+  Uint8List mapMemory() {
+    final done = assembler.label();
+    final mac = convention.target.operatingSystem == .macos;
+    assembler
+      ..move(.x1, .x0)
+      ..loadImmediate(.x0, 0)
+      ..loadImmediate(.x2, 3)
+      ..loadImmediate(.x3, mac ? 0x1002 : 0x22)
+      ..loadImmediate(.x4, -1)
+      ..loadImmediate(.x5, 0);
+    _systemCall(222, 197);
+    if (mac) {
+      assembler.setCondition(.x9, .carrySet);
+    } else {
+      assembler.loadImmediate(.x10, 0);
+      comparison(.lessThan).emit(Register.x9, Register.x0, Register.x10);
+    }
+    assembler
+      ..branchZero(.x9, done)
+      ..loadImmediate(.x0, 0)
+      ..bind(done)
+      ..loadImmediate(.x8, 0)
+      ..ret();
+    return assembler.finish();
+  }
+
+  @override
+  Uint8List unmapMemory() {
+    final done = assembler.label();
+    _systemCall(215, 73);
+    assembler.branchZero(.x0, done);
+    abort(71);
+    assembler
+      ..bind(done)
+      ..loadImmediate(.x8, 0)
+      ..ret();
+    return assembler.finish();
+  }
+
+  @override
+  void abort(int status) {
+    assembler.loadImmediate(.x0, status);
+    _systemCall(94, 1);
+  }
+
+  @override
+  void outOfMemory(void Function(Fixup) message, int length) {
+    address(Register.x1, message);
+    assembler
+      ..loadImmediate(.x0, 2)
+      ..loadImmediate(.x2, length);
+    _systemCall(64, 4);
+    abort(255);
   }
 
   @override
@@ -325,13 +396,19 @@ final class _Arm64Emitter(
   void storeMemory(
     CpuRegister source,
     CpuRegister base, {
+    int offset = 0,
     required int bytes,
   }) => switch (source) {
-    Register() => assembler.store(source, base as Register, 0, bytes: bytes),
+    Register() => assembler.store(
+      source,
+      base as Register,
+      offset,
+      bytes: bytes,
+    ),
     FloatRegister() =>
       bytes == 4
-          ? assembler.storeFloat(source, base as Register, 0)
-          : assembler.storeDouble(source, base as Register, 0),
+          ? assembler.storeFloat(source, base as Register, offset)
+          : assembler.storeDouble(source, base as Register, offset),
   };
 
   @override

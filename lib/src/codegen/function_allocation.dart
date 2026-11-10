@@ -89,8 +89,9 @@ final class FunctionAllocation<R extends Object>(
             savedRegisters: [],
             outgoingStackBytes: selection.calls.values.fold(
               0,
-              (bytes, call) =>
-                  call.stackBytes > bytes ? call.stackBytes : bytes,
+              (bytes, call) => call.layout.stackBytes > bytes
+                  ? call.layout.stackBytes
+                  : bytes,
             ),
           )
         : null;

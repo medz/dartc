@@ -6,6 +6,7 @@ import 'package:dartc/assembler.dart';
 import 'package:dartc/interop.dart';
 
 import 'function_emitter.dart';
+import 'heap_entry.dart';
 
 /// Converts between native scalar signatures and full-width Dart calls.
 final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
@@ -14,6 +15,7 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     NativeSignature signature,
     void Function(Fixup, int, FrameLayout<R>) call, {
     required bool intoDart,
+    HeapEntry<R>? heap,
   }) {
     final native = emitter.convention.classify(signature);
     NativeTypeRef fullWidth(NativeTypeRef type) => type.isFloating
@@ -28,13 +30,16 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
       ),
     );
     final (source, destination) = intoDart ? (native, body) : (body, native);
-    final frame = emitter.convention.frameLayout(
-      localBytes: 0,
-      localAlignment: 8,
-      savedRegisters: [],
-      outgoingStackBytes: destination.stackBytes,
-    );
+    final frame = intoDart && heap != null
+        ? heap.frame(destination.stackBytes)
+        : emitter.convention.frameLayout(
+            localBytes: 0,
+            localAlignment: 8,
+            savedRegisters: [],
+            outgoingStackBytes: destination.stackBytes,
+          );
     emitter.prologue(frame);
+    if (intoDart) heap?.enter(frame);
     for (final (i, location) in source.parameters.indexed) {
       final type = signature.parameters[i];
       final integer = type.integerLayout;
@@ -71,8 +76,12 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     }
     final fixup = emitter.call();
     call(fixup, emitter.position, frame);
+    if (intoDart) heap?.leave(frame, destination.result);
     if (destination.result case final result?) {
       convert(result, signature.result, intoDart: !intoDart);
+    }
+    if (!intoDart && heap != null) {
+      emitter.loadImmediate(emitter.failureRegister, 0);
     }
     emitter.epilogue(frame);
     return emitter.finish();

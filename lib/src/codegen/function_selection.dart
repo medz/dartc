@@ -12,8 +12,9 @@ import 'program_layout.dart';
 /// Selects encodings and fixed call locations before allocating a function.
 final class FunctionSelection<R>(
   IrFunction function,
-  FunctionEmitter<R> emitter,
+  final FunctionEmitter<R> emitter,
   final ProgramLayout layouts,
+  Map<Construct, FunctionTarget> constructors,
 ) {
   final binaries =
       <
@@ -27,7 +28,11 @@ final class FunctionSelection<R>(
       >{};
   final mixedComparisons =
       <Instruction, ({Comparison comparison, Value integer, Value floating})>{};
-  final calls = <Instruction, CallLayout<R>>{};
+  final calls =
+      <
+        Instruction,
+        ({CallLayout<R> layout, FunctionTarget? target, List<Value> arguments})
+      >{};
   final constantTests = <TypeTest, bool>{};
   final cells = <NewCell>{};
   late final CallLayout<R> entry;
@@ -58,8 +63,8 @@ final class FunctionSelection<R>(
     // Internal booleans use integer locations; exported booleans remain rejected.
     entry = emitter.convention.classify(
       NativeSignature.types(
-        _callType(function.target.returnType),
-        function.target.parameterTypes.map(_callType),
+        layouts.callType(function.target.returnType),
+        function.target.parameterTypes.map(layouts.callType),
       ),
     );
     for (final block in function.blocks) {
@@ -95,8 +100,15 @@ final class FunctionSelection<R>(
                 constant: value is ScalarConstant,
               );
             }
-          case NativeCall(:final signature):
-            calls[instruction] = emitter.convention.classify(signature);
+          case NativeCall(:final signature, :final arguments):
+            calls[instruction] = (
+              layout: emitter.convention.classify(signature),
+              target: null,
+              arguments: arguments,
+            );
+          case final Construct operation:
+            final target = constructors[operation]!;
+            _call(instruction, target, operation.inputs);
           case DirectCall(
             :final target,
             :final inputs,
@@ -108,28 +120,28 @@ final class FunctionSelection<R>(
                 'Native generic function calls are not implemented.',
               );
             }
-            for (final (i, input) in inputs.indexed) {
-              layouts.checkTransfer(
-                input.type,
-                target.parameterTypes[i],
-                constant: input is ScalarConstant,
-              );
-            }
             if (type != .voidType) {
               layouts.checkTransfer(target.returnType, type);
             }
-            calls[instruction] = emitter.convention.classify(
-              NativeSignature.types(
-                _callType(target.returnType),
-                target.parameterTypes.map(_callType),
-              ),
-            );
+            _call(instruction, target, inputs);
           case LoadField(:final field, :final type):
             if (field.isLate) {
               throw UnsupportedError('Native late field: ${field.name}');
             }
             layouts.fieldOffset(field);
             layouts.checkTransfer(field.type, type);
+          case StoreField(:final field, :final value):
+            if (field.isLate || field.type.freeTypeParameters.isNotEmpty) {
+              throw UnsupportedError(
+                'Native checked field write: ${field.name}',
+              );
+            }
+            layouts.fieldOffset(field);
+            layouts.checkTransfer(
+              value.type,
+              field.type,
+              constant: value is ScalarConstant,
+            );
           case TypeView(:final operand, :final type):
             layouts.checkTransfer(
               operand.type,
@@ -287,7 +299,7 @@ final class FunctionSelection<R>(
         }
       }
     }
-    liveness = FunctionLiveness(function, inputsOf);
+    liveness = FunctionLiveness(function, inputsOf, calls.keys.toSet());
     for (final block in function.blocks) {
       if (block.end case Return(value: final value?)
           when function.target.returnType != .voidType) {
@@ -312,6 +324,26 @@ final class FunctionSelection<R>(
       }
     }
     if (cells.isNotEmpty) _checkCells(function);
+  }
+
+  void _call(Instruction operation, FunctionTarget target, List<Value> inputs) {
+    for (final (i, input) in inputs.indexed) {
+      layouts.checkTransfer(
+        input.type,
+        target.parameterTypes[i],
+        constant: input is ScalarConstant,
+      );
+    }
+    calls[operation] = (
+      layout: emitter.convention.classify(
+        NativeSignature.types(
+          layouts.callType(target.returnType),
+          target.parameterTypes.map(layouts.callType),
+        ),
+      ),
+      target: target,
+      arguments: inputs,
+    );
   }
 
   void _checkCells(IrFunction function) {
@@ -446,14 +478,4 @@ final class FunctionSelection<R>(
       type == .boolean ||
       type == .floating ||
       FfiTypes.isPointer(type);
-
-  NativeTypeRef _callType(ValueType type) {
-    if (type == .voidType) return NativeScalarType(Void);
-    // Internal references use pointer locations without becoming FFI values.
-    return switch (layouts.representation(type)) {
-      .word => NativeScalarType(Int64),
-      .floating => NativeScalarType(Double),
-      .address || .reference => NativePointerType(NativeScalarType(Void)),
-    };
-  }
 }

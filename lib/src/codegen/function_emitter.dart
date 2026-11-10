@@ -30,7 +30,28 @@ abstract interface class FunctionEmitter<R>() {
   CallingConvention<R> get convention;
 
   /// Emits a process entry that calls the Dart body and exits successfully.
-  Uint8List start(void Function(Fixup) call);
+  Uint8List start(void Function() body, FrameLayout<R>? frame);
+
+  /// The callee-saved register holding this native activation's managed heap.
+  R get heapRegister;
+
+  /// The call-clobbered allocation-failure result, checked before other results.
+  R get failureRegister;
+
+  /// Forms a body-SP-relative address without reading the stack.
+  void stackAddress(R destination, int offset);
+
+  /// Generates the internal (byte size) -> address-or-zero mapping primitive.
+  Uint8List mapMemory();
+
+  /// Generates the internal (address, byte size) -> void unmapping primitive.
+  Uint8List unmapMemory();
+
+  /// Terminates on a broken target invariant; this is not a Dart exception.
+  void abort(int status);
+
+  /// Reports an allocation failure escaping the native boundary, then terminates.
+  void outOfMemory(void Function(Fixup) message, int length);
 
   /// The registers this generator makes available to its allocator.
   List<R> get allocatableRegisters;
@@ -151,7 +172,7 @@ abstract interface class FunctionEmitter<R>() {
   });
 
   /// Writes the low [bytes] without changing either input register.
-  void storeMemory(R source, R base, {required int bytes});
+  void storeMemory(R source, R base, {int offset = 0, required int bytes});
 
   /// Emits an unresolved direct call and returns its instruction field.
   Fixup call();

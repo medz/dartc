@@ -11,7 +11,11 @@ void main() {
       result,
       blocks.first.parameters.map((p) => p.type),
     );
-    return FunctionLiveness(IrFunction(target, blocks), (i) => i.inputs);
+    return FunctionLiveness(IrFunction(target, blocks), (i) => i.inputs, {
+      for (final block in blocks)
+        for (final operation in block.instructions)
+          if (operation is DirectCall || operation is NativeCall) operation,
+    });
   }
 
   test('parallel edges map only the used target parameters', () {

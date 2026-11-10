@@ -18,8 +18,9 @@ final class ScalarFunction<R extends Object>(
   final IrFunction function,
   final FunctionEmitter<R> emitter,
   final ProgramLayout layouts,
+  Map<Construct, FunctionTarget> constructors,
 ) {
-  late final selection = FunctionSelection(function, emitter, layouts);
+  final selection = FunctionSelection(function, emitter, layouts, constructors);
 
   bool get hasRoots => selection.liveness.acrossCalls.values.any(
     (values) => values.any((v) => layouts.isReference(v.type)),
@@ -29,8 +30,9 @@ final class ScalarFunction<R extends Object>(
   Uint8List generate(
     void Function(Fixup, FunctionTarget) call,
     void Function(Fixup, Constant) constant,
-    void Function(int, StackRoots) safepoint,
-  ) {
+    void Function(int, StackRoots) safepoint, {
+    bool failures = false,
+  }) {
     final allocation = FunctionAllocation(
       function,
       emitter,
@@ -63,13 +65,13 @@ final class ScalarFunction<R extends Object>(
           allocation.readCell(instruction);
         } else if (instruction case WriteCell(:final cell, :final value)) {
           allocation.writeCell(cell, value);
-        } else if (selection.calls[instruction] case final layout?) {
+        } else if (selection.calls[instruction] case (
+          :final layout,
+          :final target,
+          :final arguments,
+        )) {
           final native = instruction is NativeCall ? instruction : null;
-          final arguments =
-              native?.arguments ?? (instruction as DirectCall).inputs;
-          final parameterTypes = native == null
-              ? (instruction as DirectCall).target.parameterTypes
-              : null;
+          final parameterTypes = target?.parameterTypes;
           final roots = allocation.prepareCall(
             instruction,
             layout.clobberedRegisters,
@@ -118,7 +120,7 @@ final class ScalarFunction<R extends Object>(
             }
           }
           if (native == null) {
-            call(emitter.call(), (instruction as DirectCall).target);
+            call(emitter.call(), target!);
           } else {
             // Load last so argument staging cannot overwrite the callee address.
             final address = emitter.allocatableRegisters.lastWhere(
@@ -134,15 +136,24 @@ final class ScalarFunction<R extends Object>(
             emitter.callRegister(address);
           }
           safepoint(emitter.position, roots);
+          // shortcut: allocation failures only, use exceptional edges before enabling handlers.
+          if (failures && native == null) {
+            final returned = emitter.label();
+            emitter.jumpIfZero(emitter.failureRegister, returned);
+            if (allocation.frame case final frame?) {
+              emitter.epilogue(frame);
+            } else {
+              emitter.ret();
+            }
+            emitter.bind(returned);
+          }
           if (layout.result case final result?
               when instruction.type != .voidType) {
             if (native != null) {
               adapter.convert(result, native.signature.result, intoDart: true);
             }
             if (native == null &&
-                layouts.representation(
-                      (instruction as DirectCall).target.returnType,
-                    ) !=
+                layouts.representation(target!.returnType) !=
                     layouts.representation(instruction.type)) {
               final destination = allocation.allocate(
                 selection.bank(instruction.type),
@@ -160,6 +171,26 @@ final class ScalarFunction<R extends Object>(
               allocation.define(instruction, result);
             }
           }
+        } else if (instruction case StoreField(
+          :final receiver,
+          :final field,
+          :final value,
+        )) {
+          final base = allocation.read(receiver);
+          final source = allocation.allocate(
+            selection.bank(field.type),
+            except: [base],
+          );
+          allocation.load(value, source, asType: field.type, except: [base]);
+          emitter.storeMemory(
+            source,
+            base,
+            offset: layouts.fieldOffset(field),
+            bytes: 8,
+          );
+          allocation.releaseTemporary(source);
+          allocation.release(value);
+          allocation.release(receiver);
         } else if (instruction case LoadField(:final receiver, :final field)) {
           final source = allocation.read(receiver);
           allocation.release(receiver);
@@ -360,6 +391,7 @@ final class ScalarFunction<R extends Object>(
               );
             }
           }
+          if (failures) emitter.loadImmediate(emitter.failureRegister, 0);
           if (allocation.frame case final frame?) {
             emitter.epilogue(frame);
           } else {
