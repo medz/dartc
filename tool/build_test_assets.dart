@@ -144,6 +144,7 @@ Future<void> main(List<String> args) async {
       'stack_calls',
       'integer_operations',
       'numeric_conversions',
+      'scalar_globals',
       'pointers',
       'pointer_arithmetic',
       'doubles',

@@ -172,9 +172,54 @@ ObjectModule managedHeap(Target target) {
   reentry.finish(Return(reentry.emit(LoadField(value, retained))));
   functions.add(IrFunction(reenter, [reentry]));
 
-  final program = IrProgram([
-    IrClass(node, [value, next], constructors: [ctor, nestedCtor]),
-  ], functions);
+  final initializeState = FunctionTarget(uri, 'initialize_state', .integer, []);
+  final stateEntry = Block([])..finish(Return(const Constant.integer(7)));
+  final state = GlobalVariable(
+    uri,
+    'state',
+    .integer,
+    initializer: initializeState,
+  );
+  final readState = FunctionTarget(uri, 'heap_read_state', .integer, []);
+  final readEntry = Block([]);
+  readEntry.finish(Return(readEntry.emit(LoadGlobal(state))));
+  final writeState = FunctionTarget(uri, 'heap_write_state', .voidType, [
+    .integer,
+  ]);
+  final writeEntry = Block(writeState.parameterTypes);
+  writeEntry.emit(StoreGlobal(state, writeEntry.parameters.single));
+  writeEntry.finish(const Return());
+  final globalReenter = FunctionTarget(
+    uri,
+    'heap_global_reenter',
+    .integer,
+    reenter.parameterTypes,
+  );
+  final globalEntry = Block(globalReenter.parameterTypes);
+  final retainedResult = globalEntry.emit(
+    DirectCall(reenter, globalEntry.parameters),
+  );
+  globalEntry.finish(
+    Return(
+      globalEntry.emit(
+        IntBinary(.add, retainedResult, globalEntry.emit(LoadGlobal(state))),
+      ),
+    ),
+  );
+  functions.addAll([
+    IrFunction(initializeState, [stateEntry]),
+    IrFunction(readState, [readEntry]),
+    IrFunction(writeState, [writeEntry]),
+    IrFunction(globalReenter, [globalEntry]),
+  ]);
+
+  final program = IrProgram(
+    [
+      IrClass(node, [value, next], constructors: [ctor, nestedCtor]),
+    ],
+    functions,
+    globals: [state],
+  );
   final CodeGenerator generator = target.architecture == .arm64
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);
@@ -182,6 +227,15 @@ ObjectModule managedHeap(Target target) {
     program,
     definitions: functions.map((f) => f.target),
     exports: {
+      readState: NativeExport(readState.name, NativeSignature(Int64, [])),
+      writeState: NativeExport(writeState.name, NativeSignature(Void, [Int64])),
+      globalReenter: NativeExport(
+        globalReenter.name,
+        NativeSignature.types(NativeScalarType(Int64), [
+          callbackType,
+          NativeScalarType(Int64),
+        ]),
+      ),
       for (final function in [chain, cycles])
         function: NativeExport(function.name, NativeSignature(Int64, [Int64])),
       nested: NativeExport(

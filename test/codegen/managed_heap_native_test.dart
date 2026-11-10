@@ -8,6 +8,24 @@ import 'package:test/test.dart';
 import 'fixtures/managed_heap_ffi.dart';
 
 void main() {
+  test(
+    'persistent scalar state is shared across allocating native reentry',
+    () {
+      final heap = ManagedHeap();
+      addTearDown(heap.close);
+      heap.writeState(11);
+      final callback = NativeCallable<HeapCallback>.isolateLocal((int count) {
+        expect(heap.chain(count), count * (count - 1) ~/ 2);
+        heap.writeState(heap.readState() + 31);
+      });
+      addTearDown(callback.close);
+      expect(heap.globalReenter(callback.nativeFunction, 40000), 84);
+      expect(heap.readState(), 42);
+      expect(heap.globalReenter(callback.nativeFunction, 40000), 115);
+      expect(heap.readState(), 73);
+    },
+  );
+
   test('native reentry preserves the suspended activation heap', () {
     final heap = ManagedHeap();
     addTearDown(heap.close);

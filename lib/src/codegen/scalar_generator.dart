@@ -22,6 +22,7 @@ import 'stack_traces.dart';
 import 'checked_casts.dart';
 import 'member_calls.dart';
 import 'numeric_operations.dart';
+import 'global_storage.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -62,7 +63,10 @@ base class ScalarCodeGenerator<R extends Object>(
       argumentError: constructor(.argumentError),
       unsupportedError: constructor(.unsupportedError),
     );
-    if (arithmetic.functions.isNotEmpty) {
+    final globals = GlobalStorage(
+      selected.map(program.implementationOf).whereType<IrFunction>(),
+    );
+    if (arithmetic.functions.isNotEmpty || !globals.isEmpty) {
       program = IrProgram(
         [
           ...program.classes,
@@ -70,14 +74,21 @@ base class ScalarCodeGenerator<R extends Object>(
             if (!program.classes.any((c) => c.type == declaration.type))
               declaration,
         ],
-        [...program.functions, ...arithmetic.functions],
+        [...program.functions, ...arithmetic.functions, ...globals.functions],
         globals: program.globals,
-        externals: program.externals,
+        externals: [
+          ...program.externals,
+          if (!globals.isEmpty) IrExternal(globals.address),
+        ],
       );
       selected.addAll(
         program.reachableFrom([
           ...selected,
-          for (final function in arithmetic.functions) function.target,
+          for (final function in [
+            ...arithmetic.functions,
+            ...globals.functions,
+          ])
+            function.target,
         ]),
       );
     }
@@ -107,6 +118,8 @@ base class ScalarCodeGenerator<R extends Object>(
             'Native import requires a matching external declaration: ${declaration.name}',
           );
         }
+      } else if (declaration == globals.address) {
+        // The module storage address is emitted below as a leaf primitive.
       } else if (function is! IrFunction) {
         throw ArgumentError('Definition has no body: ${declaration.name}');
       } else {
@@ -119,6 +132,7 @@ base class ScalarCodeGenerator<R extends Object>(
           casts,
           members,
           arithmetic,
+          globals,
         );
       }
       final export = exports[declaration];
@@ -126,9 +140,10 @@ base class ScalarCodeGenerator<R extends Object>(
         throw ArgumentError('Native signature mismatch: ${declaration.name}');
       }
     }
-    final generated = arithmetic.functions.toList();
+    final generated = [...arithmetic.functions, ...globals.functions];
     Iterable<IrFunction> supportFunctions() => [
       ...arithmetic.functions,
+      ...globals.functions,
       ...casts.functions,
       ...layouts.relations.functions,
       ...layouts.types.functions,
@@ -151,6 +166,7 @@ base class ScalarCodeGenerator<R extends Object>(
           casts,
           members,
           arithmetic,
+          globals,
         );
       }
       pending = [
@@ -201,6 +217,7 @@ base class ScalarCodeGenerator<R extends Object>(
             heap.heap.invalid,
           ])
             IrExternal(target),
+          if (!globals.isEmpty) IrExternal(globals.address),
         ],
       );
       selected.addAll([
@@ -219,6 +236,7 @@ base class ScalarCodeGenerator<R extends Object>(
           casts,
           members,
           arithmetic,
+          globals,
         );
       }
     }
@@ -239,6 +257,7 @@ base class ScalarCodeGenerator<R extends Object>(
           exports.values.where((e) => needsEntry(e.signature)).length +
           (entryPoint == null ? 0 : 1),
     );
+    final globalAddresses = <(int, Fixup)>[];
     final rootAddresses = <(int, Fixup)>[],
         errorAddresses = <(int, Fixup)>[],
         uncaughtAddresses = <(int, Fixup)>[];
@@ -267,7 +286,12 @@ base class ScalarCodeGenerator<R extends Object>(
       final exported = export != null && !needsEntry(export.signature);
       code.add(Uint8List((-code.length) & 15));
       final emitter = functions[declaration]?.emitter ?? _createFunction();
-      final bytes = declaration == traces.capture
+      final bytes = declaration == globals.address
+          ? globals.emitAddress(
+              emitter,
+              (fixup) => globalAddresses.add((code.length, fixup)),
+            )
+          : declaration == traces.capture
           ? traces.emit(emitter, call, safepoint)
           : primitives.contains(declaration)
           ? heap.emit(
@@ -412,6 +436,30 @@ base class ScalarCodeGenerator<R extends Object>(
       Section.code(code.takeBytes()),
       if (constants.symbols.isNotEmpty) constants.finish(),
     ];
+    if (!globals.isEmpty) {
+      final symbol = symbols.length;
+      symbols.add(
+        Symbol(
+          '.dartc.globals',
+          sections.length,
+          0,
+          globals.bytes,
+          kind: .data,
+          binding: .local,
+        ),
+      );
+      sections.add(Section.zeroFill(globals.bytes, alignment: 8));
+      for (final (start, fixup) in globalAddresses) {
+        relocations.add(
+          Relocation.instruction(
+            0,
+            start + fixup.offset,
+            fixup.encoding,
+            symbol,
+          ),
+        );
+      }
+    }
     final rootSymbol = maps.finish(sections, symbols, relocations);
     if (managed) {
       for (final (uses, name, message) in [

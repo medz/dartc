@@ -17,6 +17,7 @@ import 'stack_traces.dart';
 import 'checked_casts.dart';
 import 'member_calls.dart';
 import 'numeric_operations.dart';
+import 'global_storage.dart';
 
 /// Generates a control-flow graph with explicit edge transfers.
 final class ScalarFunction<R extends Object>(
@@ -28,6 +29,7 @@ final class ScalarFunction<R extends Object>(
   CheckedCasts casts,
   MemberCalls members,
   NumericOperations arithmetic,
+  GlobalStorage globals,
 ) {
   final selection = FunctionSelection(
     function,
@@ -38,6 +40,7 @@ final class ScalarFunction<R extends Object>(
     casts,
     members,
     arithmetic,
+    globals,
   );
 
   bool get hasRoots => selection.liveness.acrossCalls.values.any(

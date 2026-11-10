@@ -14,6 +14,7 @@ import 'stack_traces.dart';
 import 'checked_casts.dart';
 import 'member_calls.dart';
 import 'numeric_operations.dart';
+import 'global_storage.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
 final class FunctionSelection<R>(
@@ -25,6 +26,7 @@ final class FunctionSelection<R>(
   CheckedCasts casts,
   MemberCalls members,
   NumericOperations arithmetic,
+  GlobalStorage globals,
 ) {
   final body = FunctionRepresentation(
     function,
@@ -103,6 +105,7 @@ final class FunctionSelection<R>(
         final target =
             body.invocations[instruction] ??
             arithmetic.callFor(instruction) ??
+            globals.callFor(instruction) ??
             (instruction is DirectCall ? instruction.target : null);
         if (target != null) {
           if (instruction.type != .voidType &&

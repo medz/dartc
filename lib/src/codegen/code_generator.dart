@@ -17,6 +17,11 @@ abstract interface class CodeGenerator() {
   /// native signatures; [exports] exposes a subset of the supplied Dart bodies.
   /// The caller resolves native symbols and supplies their implementations when
   /// linking. Unsupported operations fail before an artifact is returned.
+  /// Mutable, non-late globals of exact int, double and bool type use module
+  /// storage shared across native calls. Initializers run lazily, retry after
+  /// failure and preserve writes made before an exception. Other global types,
+  /// final bindings and late bindings remain unsupported. Only scalar bits
+  /// persist; managed heaps still belong to individual synchronous activations.
   /// Object constants require their class and inherited field definitions in
   /// [program]. Equal constants share storage within the generated module;
   /// references cannot be exported as native pointers. Integers, doubles and
