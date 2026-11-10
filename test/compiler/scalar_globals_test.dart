@@ -110,4 +110,46 @@ void main() {
       expect(native.allocatedState(1), 1);
     },
   );
+
+  test('late scalar reads fail until binding and final writes bind once', () {
+    expect(
+      [
+        for (final mode in [0, 1, 2, 0, 4, 6]) native.lateState(mode),
+      ],
+      [-1, -1, -1, -1, -1, -1],
+    );
+    expect(
+      [
+        for (final mode in [3, 0, 1, 2, 5, 4, 8, 4, 7, 6, 7, 6])
+          native.lateState(mode),
+      ],
+      [3, 0, 1, 0, 5, 1, -1, 1, 7, 1, -1, 1],
+    );
+    // Wrong-typed and throwing RHS expressions win over a bound-final error.
+    expect(
+      [
+        for (final mode in [0, 1, 2, 3, 4, 5]) native.finalWriteState(mode),
+      ],
+      [42, -1, -2, -3, 42, 4],
+    );
+  });
+
+  test(
+    'recursive final initialization preserves the inner binding on failure',
+    () {
+      expect(
+        [
+          for (final mode in [1, 0, 0, 1, 3, 2, 2, 3, 5, 4, 4, 5])
+            native.finalRecursiveState(mode),
+        ],
+        [0, -1, 20, 2, 0, -1, 30, 2, 0, -2, 40, 2],
+      );
+    },
+  );
+
+  test('late errors and captured traces survive allocating cleanup', () {
+    expect(native.lateErrorCleanup(40000), 1234);
+    // Failure never binds the slot, even across exported activations.
+    expect(native.lateErrorCleanup(1), 1234);
+  });
 }

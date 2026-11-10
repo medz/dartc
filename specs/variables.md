@@ -22,7 +22,7 @@
 
 非捕获、非 `late` 的 `int`、`bool`、`double` 和原生指针局部变量支持声明后赋值，包括分支合流、循环和跨调用保存；非 `late final` 的赋值义务仍由前端静态检查。见[原生行为对照](../test/compiler/control_flow_test.dart)。后端在使用局部栈存储前确认每条到达读取的路径都已写入；循环中新声明的存储不能继承上一次迭代的初始化状态。独立 IR 的不安全读取由[发码契约检查](../test/codegen/cells_test.dart)拒绝。
 
-非 late、可变、精确类型为 int/double/bool 的顶层变量和类静态变量已支持原生执行。模块存储跨 native 调用保留，泛型类的所有实例共享同一声明槽位；初始化在首次读取运行，先写跳过初始化，未绑定失败后重试，已经完成的写入不回滚。有限递归读取不设 busy 错误，成功的外层可变初始化最后覆盖内层结果。初始化期间可以分配托管对象，但只有标量结果持久保存，现有每次同步入口的堆仍在返回时释放。见[固定原生验证](../test/compiler/scalar_globals_test.dart)与[分配中的 native 重入](../test/codegen/managed_heap_native_test.dart)。可空、num、对象引用、final/late 全局变量仍明确拒绝发码；没有提供跨线程隔离或并发同步协议。
+精确类型为 int/double/bool 的顶层变量和类静态变量已支持原生持久存储，包括 final、late 和 late final。模块存储跨 native 调用保留，泛型类共享声明槽位。先写跳过初始化，未绑定失败后重试，已经完成的写入不回滚；可变递归初始化以成功的外层结果为准，final 递归初始化在求值后检查绑定并保留内层值。未绑定 late 读取和重复 final 绑定通过 SDK 实际 dart:_internal LateError 类抛出普通 Error，RHS 与类型转换先于重复写检查。诊断字符串按固定 SDK 的 NI/AI/ADI 文本构造；动态错误格式化仍未接通。初始化和错误可以分配对象，但只有标量结果持久保存，入口堆仍在返回时释放。见[原生验证](../test/compiler/scalar_globals_test.dart)与[分配中的 native 重入](../test/codegen/managed_heap_native_test.dart)。可空、num 和对象引用全局变量仍拒绝发码；实例 late、捕获 late、跨线程隔离和并发同步协议尚未支持。
 
 捕获存储、存储别名、可空或托管值以及 `late` 初始化的原生执行仍待实现；已有 IR 支持不代表这些路径已能发码。
 

@@ -46,5 +46,20 @@ final class ScalarGlobals() {
         'allocatedState',
       );
 
+  late final lateState = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('lateState');
+  late final finalWriteState = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'finalWriteState',
+      );
+  late final finalRecursiveState = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'finalRecursiveState',
+      );
+  late final lateErrorCleanup = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'lateErrorCleanup',
+      );
+
   void close() => _library.close();
 }

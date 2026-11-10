@@ -63,8 +63,17 @@ base class ScalarCodeGenerator<R extends Object>(
       argumentError: constructor(.argumentError),
       unsupportedError: constructor(.unsupportedError),
     );
+    final lateErrorType = program.classes
+        .where(
+          (declaration) =>
+              declaration.type.library == Uri.parse('dart:_internal') &&
+              declaration.type.name == 'LateError',
+        )
+        .firstOrNull
+        ?.type;
     final globals = GlobalStorage(
       selected.map(program.implementationOf).whereType<IrFunction>(),
+      lateError: lateErrorType == null ? null : constructor(lateErrorType),
     );
     if (arithmetic.functions.isNotEmpty || !globals.isEmpty) {
       program = IrProgram(

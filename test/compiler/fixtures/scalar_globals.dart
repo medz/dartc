@@ -6,7 +6,7 @@ int counter = 0;
 double floating = -0.0;
 bool flag = false;
 
-// Unsupported storage must not block unrelated reachable exports.
+// Unselected declarations need no storage, including unsupported types.
 final int unusedFinal = 1;
 late int unusedLate;
 int? unusedNullable;
@@ -58,7 +58,7 @@ int classState(int mode, int value) => switch (mode) {
 };
 
 int lazyCalls = 0;
-int lazyValue = initializeLazy();
+final int lazyValue = initializeLazy();
 int initializeLazy() {
   lazyCalls++;
   return 42;
@@ -68,7 +68,8 @@ int initializeLazy() {
 int lazyState(int mode) => mode == 0 ? lazyValue : lazyCalls;
 
 int skippedCalls = 0;
-int skippedValue = initializeSkipped();
+// ignore: unnecessary_late
+late int skippedValue = initializeSkipped();
 int initializeSkipped() {
   skippedCalls++;
   return -1;
@@ -82,7 +83,8 @@ int skippedState(int mode, int value) => switch (mode) {
 };
 
 int retryCalls = 0;
-int retryValue = initializeRetry();
+// ignore: unnecessary_late
+late final int retryValue = initializeRetry();
 int initializeRetry() {
   retryCalls++;
   if (retryCalls == 1) throw StateError('retry');
@@ -100,7 +102,8 @@ int retryState(int mode) {
 }
 
 int writtenCalls = 0;
-int writtenValue = initializeWritten();
+// ignore: unnecessary_late
+late int writtenValue = initializeWritten();
 int initializeWritten() {
   writtenCalls++;
   writtenValue = 91;
@@ -118,7 +121,8 @@ int writtenState(int mode) {
 }
 
 int recursiveCalls = 0;
-int recursiveValue = initializeRecursive();
+// ignore: unnecessary_late
+late int recursiveValue = initializeRecursive();
 int initializeRecursive() {
   recursiveCalls++;
   if (recursiveCalls == 1) return recursiveValue + 10;
@@ -132,7 +136,7 @@ int recursiveState(int mode) => mode == 0 ? recursiveValue : recursiveCalls;
 class Cell(final int value, final Cell? previous);
 
 int allocationCalls = 0;
-int allocatedValue = initializeAllocated();
+final int allocatedValue = initializeAllocated();
 int initializeAllocated() {
   allocationCalls++;
   final retained = Cell(42, null);
@@ -145,3 +149,171 @@ int initializeAllocated() {
 
 @Export<Int64 Function(Int64)>()
 int allocatedState(int mode) => mode == 0 ? allocatedValue : allocationCalls;
+
+late int unboundInt;
+late double unboundDouble;
+
+class LateSlots() {
+  static late bool flag;
+  static late final double floating;
+  static late final bool fixedFlag;
+}
+
+@Export<Int64 Function(Int64)>()
+int lateState(int mode) {
+  try {
+    switch (mode) {
+      case 0:
+        return unboundInt;
+      case 1:
+        return unboundDouble == -0.0 ? 1 : 0;
+      case 2:
+        return LateSlots.flag ? 1 : 0;
+      case 3:
+        unboundInt = 0;
+        unboundDouble = -0.0;
+        LateSlots.flag = false;
+        return 3;
+      case 4:
+        return 1.0 / LateSlots.floating == double.negativeInfinity ? 1 : 0;
+      case 5:
+        LateSlots.floating = -0.0;
+        return 5;
+      case 6:
+        return LateSlots.fixedFlag ? 1 : 0;
+      case 8:
+        LateSlots.floating = 1.25;
+        return 8;
+      default:
+        LateSlots.fixedFlag = true;
+        return 7;
+    }
+  } on TypeError {
+    return -2;
+  } on StateError {
+    return -3;
+  } on Error {
+    return -1;
+  }
+}
+
+late final int boundOnce;
+int rhsCalls = 0;
+dynamic nextRhs(int mode) {
+  rhsCalls++;
+  if (mode == 2) return false;
+  if (mode == 3) throw StateError('RHS first');
+  return 42;
+}
+
+@Export<Int64 Function(Int64)>()
+int finalWriteState(int mode) {
+  if (mode == 4) return boundOnce;
+  if (mode == 5) return rhsCalls;
+  try {
+    boundOnce = nextRhs(mode);
+    return boundOnce;
+  } on TypeError {
+    return -2;
+  } on StateError {
+    return -3;
+  } on Error {
+    return -1;
+  }
+}
+
+int finalRecursiveCalls = 0;
+final int finalRecursiveValue = initializeFinalRecursive();
+int initializeFinalRecursive() {
+  finalRecursiveCalls++;
+  if (finalRecursiveCalls == 1) return finalRecursiveValue + 10;
+  return 20;
+}
+
+class FinalSlots() {
+  static int calls = 0;
+  // ignore: unnecessary_late
+  static late final int value = initialize();
+  static int initialize() {
+    calls++;
+    if (calls == 1) return value + 10;
+    return 30;
+  }
+
+  static int throwingCalls = 0;
+  static final int throwingValue = initializeThrowing();
+  static int initializeThrowing() {
+    throwingCalls++;
+    if (throwingCalls == 1) {
+      if (throwingValue == 40) throw StateError('inner value survives');
+    }
+    return 40;
+  }
+}
+
+@Export<Int64 Function(Int64)>()
+int finalRecursiveState(int mode) {
+  try {
+    return switch (mode) {
+      0 => finalRecursiveValue,
+      1 => finalRecursiveCalls,
+      2 => FinalSlots.value,
+      3 => FinalSlots.calls,
+      4 => FinalSlots.throwingValue,
+      _ => FinalSlots.throwingCalls,
+    };
+  } on StateError {
+    return -2;
+  } on TypeError {
+    return -3;
+  } on Error {
+    return -1;
+  }
+}
+
+late int neverBound;
+
+@Export<Int64 Function(Int64)>()
+int lateErrorCleanup(int count) {
+  Object? retained;
+  Object? retainedTrace;
+  var effects = 0;
+  var valid = true;
+  try {
+    try {
+      return neverBound;
+    } on Error catch (error, trace) {
+      retained = error;
+      retainedTrace = trace;
+      valid = error is! TypeError && error is! StateError;
+      effects = 1;
+      try {
+        for (var i = 0; i < count; i++) {
+          try {
+            return neverBound;
+          } on Error catch (next) {
+            if (next.runtimeType != retained.runtimeType ||
+                next is TypeError ||
+                next is StateError) {
+              valid = false;
+            }
+          }
+        }
+        rethrow;
+      } finally {
+        effects = effects * 10 + 2;
+      }
+    }
+  } on Error catch (error, trace) {
+    valid =
+        valid &&
+        retained is Error &&
+        retainedTrace is StackTrace &&
+        error.runtimeType == retained.runtimeType &&
+        trace.runtimeType == retainedTrace.runtimeType;
+    effects = effects * 10 + 3;
+  } finally {
+    effects = effects * 10 + 4;
+  }
+  return valid ? effects : -1;
+}

@@ -8,7 +8,8 @@ import 'package:dartc/ir.dart';
 import 'function_emitter.dart';
 
 /// Generates lazy scalar bindings in module-owned zero-filled storage.
-final class GlobalStorage(Iterable<IrFunction> input) {
+final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
+  final IrCallable? _lateError = lateError;
   static final _uri = Uri.parse('dartc:globals');
   static final _wordPointer = FfiTypes.resolve(
     NativePointerType(NativeScalarType(Int64)),
@@ -25,14 +26,19 @@ final class GlobalStorage(Iterable<IrFunction> input) {
   this {
     final globals = {for (final function in input) ...function.globals};
     for (final global in globals) {
-      if (global.isLate ||
-          global.isFinal ||
-          (global.type != .integer &&
-              global.type != .floating &&
-              global.type != .boolean)) {
+      if (global.type != .integer &&
+          global.type != .floating &&
+          global.type != .boolean) {
         throw UnsupportedError(
-          'Native global storage requires a non-late mutable int, double or '
-          'bool: ${global.library} ${global.owner?.name ?? ''}.${global.name}.',
+          'Native global storage requires int, double or bool: '
+          '${global.library} ${global.owner?.name ?? ''}.${global.name}.',
+        );
+      }
+      if ((global.isFinal || global.initializer == null) && lateError == null) {
+        throw UnsupportedError(
+          'Native final/late global storage requires the unnamed SDK '
+          'dart:_internal LateError constructor: '
+          '${global.library} ${global.owner?.name ?? ''}.${global.name}.',
         );
       }
     }
@@ -93,10 +99,17 @@ final class GlobalStorage(Iterable<IrFunction> input) {
             : stored,
       ),
     );
-    final value = initialize.emit(DirectCall(global.initializer!, []));
-    // Commit only after success; writes performed by a throwing initializer survive.
-    initialize.emit(DirectCall(setter, [value]));
-    initialize.finish(Return(value));
+    if (global.initializer case final initializer?) {
+      final value = initialize.emit(DirectCall(initializer, []));
+      // Commit only after success; writes by a throwing initializer survive.
+      initialize.emit(DirectCall(setter, [value]));
+      initialize.finish(Return(value));
+    } else {
+      _throwLateError(
+        initialize,
+        "Field '${global.name}' has not been initialized.",
+      );
+    }
     return IrFunction(target, [entry, bound, initialize]);
   }
 
@@ -106,10 +119,33 @@ final class GlobalStorage(Iterable<IrFunction> input) {
     final blocks = [entry];
     Block commit = entry;
     Value value = entry.parameters.single;
+    if (global.isFinal) {
+      commit = Block();
+      final failed = Block();
+      blocks.addAll([commit, failed]);
+      final base = entry.emit(DirectCall(address, []));
+      final flag = entry.emit(
+        LoadNative(_pointer(entry, base, index * 16 + 8, _wordPointer)),
+      );
+      entry.finish(
+        Branch(
+          entry.emit(Equals(flag, const Constant.integer(0))),
+          Jump(commit),
+          Jump(failed),
+        ),
+      );
+      _throwLateError(
+        failed,
+        global.initializer != null
+            ? "Field '${global.name}' has been assigned during initialization."
+            : "Field '${global.name}' has already been initialized.",
+      );
+    }
     if (global.type == .boolean) {
+      final convert = commit;
       commit = Block([.integer]);
       blocks.add(commit);
-      entry.finish(
+      convert.finish(
         Branch(
           value,
           Jump(commit, [const Constant.integer(1)]),
@@ -133,6 +169,14 @@ final class GlobalStorage(Iterable<IrFunction> input) {
     );
     commit.finish(const Return());
     return IrFunction(target, blocks);
+  }
+
+  void _throwLateError(Block block, String message) {
+    block.finish(
+      Throw(
+        block.emit(Construct(_lateError!.target, [Constant.string(message)])),
+      ),
+    );
   }
 
   static ClassType _pointerType(GlobalVariable global) =>

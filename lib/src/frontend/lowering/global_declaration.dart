@@ -27,6 +27,22 @@ void lowerGlobal(
     }
     return;
   }
+  if (element.isLate || element.isFinal) {
+    final core = element.library.typeProvider.objectElement.library;
+    final error = core.fragments
+        .expand((fragment) => fragment.importedLibraries)
+        .where((library) => library.uri == Uri.parse('dart:_internal'))
+        .firstOrNull
+        ?.getClass('LateError');
+    if (error == null) {
+      unsupported(
+        unit,
+        declaration,
+        'SDK late initialization error unavailable',
+      );
+    }
+    bindings.requireSdkClass(error);
+  }
   final slot = bindings.global(element, unit, declaration);
   if (declaration.initializer case final expression?) {
     FunctionLowering.appendExpression(

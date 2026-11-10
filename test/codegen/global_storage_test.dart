@@ -10,12 +10,13 @@ void main() {
       final CodeGenerator generator = arch == .arm64
           ? Arm64CodeGenerator(target)
           : X64CodeGenerator(target);
-      test('$target rejects unsupported persistent global storage', () {
-        for (final (type, late, final_) in [
-          (ValueType.integer.nullable, false, false),
-          (ValueType.number, false, false),
-          (ValueType.integer, true, false),
-          (ValueType.integer, false, true),
+      test('$target checks global storage and error-body dependencies', () {
+        for (final (type, late, final_, initialized) in [
+          (ValueType.integer.nullable, false, false, true),
+          (ValueType.number, false, false, true),
+          (ValueType.integer, true, false, false),
+          (ValueType.integer, true, false, true),
+          (ValueType.integer, false, true, true),
         ]) {
           final uri = Uri.parse('memory:globals');
           final init = FunctionTarget(uri, 'init', type, []);
@@ -26,7 +27,7 @@ void main() {
             type,
             isLate: late,
             isFinal: final_,
-            initializer: init,
+            initializer: initialized ? init : null,
           );
           final read = FunctionTarget(uri, 'read', type, []);
           final entry = Block([]);
@@ -39,6 +40,15 @@ void main() {
             ],
             globals: [global],
           );
+          if (late && initialized) {
+            expect(
+              generator
+                  .generate(program, definitions: program.reachableFrom([read]))
+                  .sections,
+              isNotEmpty,
+            );
+            continue;
+          }
           expect(
             () => generator.generate(
               program,
@@ -48,7 +58,7 @@ void main() {
               isA<UnsupportedError>().having(
                 (e) => e.message,
                 'reason',
-                contains('global'),
+                contains(late || final_ ? 'LateError constructor' : 'global'),
               ),
             ),
           );
