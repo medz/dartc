@@ -72,7 +72,7 @@ void main() {
     );
 
     test(
-      '${generator.target} rejects generic bounds needing runtime normalization',
+      '${generator.target} instantiates generic bounds from runtime arguments',
       () {
         final outer = TypeParameterType('T')
           ..initializeBound(ValueType.object.nullable);
@@ -96,14 +96,8 @@ void main() {
           IrFunction(target, [entry]),
         ]);
         expect(
-          () => generator.generate(program, definitions: [target]),
-          throwsA(
-            isA<UnsupportedError>().having(
-              (error) => error.message,
-              'unsupported bound',
-              contains('bounds require runtime normalization'),
-            ),
-          ),
+          generator.generate(program, definitions: [target]).sections,
+          isNotEmpty,
         );
       },
     );

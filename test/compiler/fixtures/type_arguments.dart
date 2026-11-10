@@ -170,3 +170,52 @@ int structures(int mode, int count) => switch (mode) {
   28 => unequal<Box<int>>(Box<int>(), count),
   _ => namedOrder<int, bool>(count),
 };
+
+typedef Bounded<T> = U Function<U extends T>(U);
+typedef ConcreteInt = int Function<U extends int>(int);
+typedef Empty = Never Function<U extends Never>(Never);
+typedef BoundedOptional<T> = U? Function<U extends T>(U?, FutureOr<U>);
+typedef EmptyOptional = Null Function<U extends Never>(Null, Future<Never>);
+typedef BoundedChain<T> = U Function<V extends T, U extends V>(V, U);
+typedef EmptyChain = Never Function<V extends Never, U extends Never>(
+  Never,
+  Never,
+);
+typedef BoundedNested<T> = U Function<U extends T>(
+  U Function<V extends U>(V, U),
+);
+typedef EmptyNested = Never Function<U extends Never>(
+  Never Function<V extends Never>(Never, Never),
+);
+
+int bound<T>(int mode, Type expected, int count) => switch (mode) {
+  0 => inspect<Bounded<T>>(expected, 2, count),
+  1 => inspect<BoundedOptional<T>>(expected, 2, count),
+  2 => inspect<BoundedChain<T>>(expected, 2, count),
+  _ => inspect<BoundedNested<T>>(expected, 2, count),
+};
+
+int underBound<T extends U, U>(Type expected, int count) =>
+    inspect<Bounded<T>>(expected, 2, count);
+
+@Export<Int64 Function(Int64, Int64)>()
+int bounds(int mode, int count) => switch (mode) {
+  0 => bound<Never>(0, Empty, count),
+  1 => bound<int>(0, typeOf<Bounded<int>>(), count),
+  2 => bound<int>(0, ConcreteInt, count),
+  3 => bound<Null>(0, typeOf<Bounded<Null>>(), count),
+  4 => bound<dynamic>(0, typeOf<Bounded<dynamic>>(), count),
+  5 => bound<VoidType>(0, typeOf<Bounded<VoidType>>(), count),
+  6 => bound<Never>(1, EmptyOptional, count),
+  7 => bound<Top>(1, typeOf<BoundedOptional<Top>>(), count),
+  8 => bound<Never>(2, EmptyChain, count),
+  9 => bound<int>(2, typeOf<BoundedChain<int>>(), count),
+  10 => bound<Never>(3, typeOf<BoundedNested<Never>>(), count),
+  11 => bound<int>(3, typeOf<BoundedNested<int>>(), count),
+  12 => bound<Box<int>>(0, typeOf<Bounded<Box<int>>>(), count),
+  13 => bound<FutureOr<Null>>(0, typeOf<Bounded<FutureOr<Null>>>(), count),
+  14 => bound<Bounded<int>>(3, typeOf<BoundedNested<Bounded<int>>>(), count),
+  15 => underBound<Never, Top>(Empty, count),
+  16 => underBound<int, num>(typeOf<Bounded<int>>(), count),
+  _ => bound<Never>(3, EmptyNested, count),
+};

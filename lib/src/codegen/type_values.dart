@@ -61,6 +61,7 @@ final class TypeValues() {
   );
   final _nullable = FunctionTarget(_uri, 'nullableType', type, [type]);
   final _futureOr = FunctionTarget(_uri, 'futureOrType', type, [type]);
+  final _parameter = FunctionTarget(_uri, 'boundParameter', type, [type, type]);
   final _equal = FunctionTarget(_uri, 'typeEquals', .boolean, [
     type,
     .object.nullable,
@@ -159,17 +160,26 @@ final class TypeValues() {
 
   int _id(Object key) => _shapes.putIfAbsent(key, () => _shapes.length);
 
+  ValueType _bound(
+    TypeParameterType parameter,
+    Iterable<TypeParameterType> arguments,
+  ) {
+    final seen = <TypeParameterType>{};
+    ValueType bound = parameter;
+    while (bound is TypeParameterType &&
+        !arguments.contains(bound) &&
+        seen.add(bound)) {
+      bound = bound.bound;
+    }
+    return bound;
+  }
+
   (_Kind, int, List<ValueType>, List<List<TypeParameterType>>) _describe(
     ValueType value,
     List<List<TypeParameterType>> scopes,
   ) {
     if (value is TypeParameterType) {
-      final seen = <TypeParameterType>{};
-      ValueType bound = value;
-      while (bound is TypeParameterType && seen.add(bound)) {
-        bound = bound.bound;
-      }
-      if (bound == .never) return (.never, 0, [], scopes);
+      if (_bound(value, const []) == .never) return (.never, 0, [], scopes);
       for (final (depth, scope) in scopes.indexed) {
         final index = scope.indexOf(value);
         if (index >= 0) return (.parameter, _id((depth, index)), [], scopes);
@@ -259,16 +269,17 @@ final class TypeValues() {
     Value build(ValueType value, List<List<TypeParameterType>> scopes) {
       if (environment[value] case final argument?) return argument;
       if (value.freeTypeParameters.isEmpty) return constant(value);
-      if (value is FunctionType &&
-          value.typeParameters.any(
-            (p) => _variablesIn(p.bound).any(environment.containsKey),
-          )) {
-        throw UnsupportedError(
-          'Native generic function bounds require runtime normalization: $value',
-        );
-      }
       final (kind, shape, children, nested) = _describe(value, scopes);
-      if (kind == .parameter || kind == .never) return _node(kind, shape, []);
+      if (kind == .parameter || kind == .never) {
+        final node = _node(kind, shape, []);
+        if (kind == .parameter && value is TypeParameterType) {
+          if (environment[_bound(value, environment.keys)] case final bound?) {
+            _functions.putIfAbsent(_parameter, _parameterBody);
+            return entry.emit(DirectCall(_parameter, [node, bound]));
+          }
+        }
+        return node;
+      }
       final parts = children.map((t) => build(t, nested)).toList();
       if (kind == .nullable) {
         _functions.putIfAbsent(_nullable, _nullableBody);
@@ -285,6 +296,28 @@ final class TypeValues() {
     _functions[target] = IrFunction(target, [entry]);
     return (target: target, parameters: parameters);
   });
+
+  IrFunction _parameterBody() {
+    final entry = Block(_parameter.parameterTypes),
+        bottom = Block(),
+        unchanged = Block();
+    final [parameter, bound] = entry.parameters;
+    entry.finish(
+      Branch(
+        entry.emit(
+          Equals(
+            entry.emit(LoadField(_kind, bound)),
+            Constant.integer(_Kind.never.index),
+          ),
+        ),
+        Jump(bottom),
+        Jump(unchanged),
+      ),
+    );
+    bottom.finish(Return(bound));
+    unchanged.finish(Return(parameter));
+    return IrFunction(_parameter, [entry, bottom, unchanged]);
+  }
 
   IrFunction _initializer(FunctionTarget target, List<InstanceField> fields) {
     final entry = Block(target.parameterTypes);

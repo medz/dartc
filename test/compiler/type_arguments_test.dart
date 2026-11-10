@@ -9,6 +9,21 @@ import 'fixtures/type_arguments.dart' as sdk;
 import 'fixtures/type_arguments_ffi.dart';
 
 void main() {
+  test('function bounds normalize from actual arguments across GC', () {
+    final native = TypeArguments();
+    addTearDown(native.close);
+    for (final count in [0, 40000]) {
+      for (var mode = 0; mode < 18; mode++) {
+        final expected = mode == 2 ? 0 : 1;
+        expect(native.bounds(mode, count), expected, reason: '$mode, $count');
+        // SDK 3.13.7 leaves mode 10's closed nested literal unnormalized; see specs/types.md.
+        if (mode != 10) {
+          expect(sdk.bounds(mode, count), expected, reason: 'SDK: $mode');
+        }
+      }
+    }
+  });
+
   test('reified arguments survive forwarding, recursion, stacks and GC', () {
     final native = TypeArguments();
     addTearDown(native.close);

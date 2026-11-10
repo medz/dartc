@@ -25,9 +25,9 @@ abstract interface class CodeGenerator() {
   /// type arguments into nullable, nominal, FutureOr, function and record types.
   /// Type literals are canonical within the module. Equality with a literal or
   /// reified type as receiver compares normalized structures. Generic function
-  /// bounds depending on runtime arguments, class type environments and general
-  /// Type member dispatch remain unsupported. Generic functions cannot be native
-  /// exports.
+  /// bounds use the actual enclosing function arguments, including nested and
+  /// chained binders. Class type environments and general Type member dispatch
+  /// remain unsupported. Generic functions cannot be native exports.
   /// Modules with references live across calls include read-only stack records
   /// keyed by relocated return addresses. These describe initialized reference
   /// slots and frame linkage; native entry wrappers terminate the frame walk.
