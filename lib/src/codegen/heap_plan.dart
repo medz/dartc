@@ -10,18 +10,21 @@ import 'package:dartc/layout.dart';
 import 'heap_functions.dart';
 import 'function_emitter.dart';
 import 'program_layout.dart';
+import 'frame_lookup.dart';
 
 /// Generates allocation wrappers with precise roots and optional initialization.
 final class HeapPlan(
   IrProgram program,
   Set<FunctionTarget> selected,
   ProgramLayout layouts,
+  FrameLookup frames,
 ) {
   final constructors = <Construct, FunctionTarget>{};
   final _factories =
       <FunctionTarget, ({FunctionTarget? initializer, ClassType type})>{};
   final _boxes = <ValueType, FunctionTarget>{};
-  late final heap = HeapFunctions();
+  final _initializers = <(FunctionTarget, ClassType), FunctionTarget>{};
+  final heap = HeapFunctions(frames);
 
   bool get isEmpty => _factories.isEmpty;
   List<IrFunction> get functions => heap.functions;
@@ -178,11 +181,15 @@ final class HeapPlan(
   }
 
   this {
-    final factories = <(FunctionTarget, ClassType), FunctionTarget>{};
+    include([
+      for (final target in selected)
+        if (program.implementationOf(target) case final IrFunction body) body,
+    ], layouts);
+  }
+
+  void include(Iterable<IrFunction> functions, ProgramLayout layouts) {
     final uri = Uri.parse('dartc:heap');
-    for (final target in selected) {
-      final body = program.implementationOf(target);
-      if (body is! IrFunction) continue;
+    for (final body in functions) {
       for (final block in body.blocks) {
         for (final operation in [
           ...block.instructions,
@@ -195,12 +202,12 @@ final class HeapPlan(
               'Native construction requires runtime type arguments: $type',
             );
           }
-          constructors[operation] = factories.putIfAbsent(
+          constructors[operation] = _initializers.putIfAbsent(
             (initializer, type),
             () {
               final target = FunctionTarget(
                 uri,
-                'construct${factories.length}',
+                'construct${_initializers.length}',
                 type,
                 [
                   for (final parameter in initializer.signature.parameters)

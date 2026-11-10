@@ -21,6 +21,13 @@ enum RegisterBank() {
   floating,
 }
 
+/// The completion status accompanying an internal Dart call's result registers.
+enum CallStatus() {
+  returned,
+  exhausted,
+  threw,
+}
+
 /// Emits one function with explicit operand registers.
 abstract interface class FunctionEmitter<R>() {
   /// The next byte position in this function's code.
@@ -35,8 +42,14 @@ abstract interface class FunctionEmitter<R>() {
   /// The callee-saved register holding this native activation's managed heap.
   R get heapRegister;
 
-  /// The call-clobbered allocation-failure result, checked before other results.
+  /// The call-clobbered [CallStatus], checked before reading normal results.
   R get failureRegister;
+
+  /// The exception object returned when the status is [CallStatus.threw].
+  R get exceptionRegister;
+
+  /// The trace returned alongside [exceptionRegister].
+  R get traceRegister;
 
   /// Forms a body-SP-relative address without reading the stack.
   void stackAddress(R destination, int offset);
@@ -50,8 +63,8 @@ abstract interface class FunctionEmitter<R>() {
   /// Terminates on a broken target invariant; this is not a Dart exception.
   void abort(int status);
 
-  /// Reports an allocation failure escaping the native boundary, then terminates.
-  void outOfMemory(void Function(Fixup) message, int length);
+  /// Reports a failure escaping the native boundary, then terminates.
+  void reportFailure(void Function(Fixup) message, int length);
 
   /// The registers this generator makes available to its allocator.
   List<R> get allocatableRegisters;

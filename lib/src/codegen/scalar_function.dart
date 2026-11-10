@@ -13,6 +13,7 @@ import 'function_selection.dart';
 import 'native_adapter.dart';
 import 'program_layout.dart';
 import 'heap_plan.dart';
+import 'stack_traces.dart';
 
 /// Generates a control-flow graph with explicit edge transfers.
 final class ScalarFunction<R extends Object>(
@@ -20,8 +21,9 @@ final class ScalarFunction<R extends Object>(
   final FunctionEmitter<R> emitter,
   final ProgramLayout layouts,
   HeapPlan heap,
+  final StackTraces traces,
 ) {
-  final selection = FunctionSelection(function, emitter, layouts, heap);
+  final selection = FunctionSelection(function, emitter, layouts, heap, traces);
 
   bool get hasRoots => selection.liveness.acrossCalls.values.any(
     (values) => values.any((v) => layouts.isReference(v.type)),
@@ -50,6 +52,14 @@ final class ScalarFunction<R extends Object>(
     void edge(Jump jump) {
       allocation.copyArguments(jump);
       emitter.jump(labels[jump.target]!);
+    }
+
+    void leave() {
+      if (allocation.frame case final frame?) {
+        emitter.epilogue(frame);
+      } else {
+        emitter.ret();
+      }
     }
 
     for (final block in selection.body.blocks) {
@@ -143,15 +153,33 @@ final class ScalarFunction<R extends Object>(
             emitter.callRegister(address);
           }
           safepoint(emitter.position, roots);
-          // shortcut: allocation failures only, use exceptional edges before enabling handlers.
           if (failures && native == null) {
             final returned = emitter.label();
-            emitter.jumpIfZero(emitter.failureRegister, returned);
-            if (allocation.frame case final frame?) {
-              emitter.epilogue(frame);
-            } else {
-              emitter.ret();
+            final end = selection.body.ends[block]!;
+            if (end is Invoke && end.operation == instruction) {
+              allocation.flush(live: selection.liveness.liveOut[block]);
             }
+            emitter.jumpIfZero(emitter.failureRegister, returned);
+            if (end case Invoke(:final operation, :final onThrow)
+                when operation == instruction) {
+              final propagated = emitter.label();
+              final scratch = emitter.allocatableRegisters.lastWhere(
+                (r) =>
+                    emitter.bank(r) == .general &&
+                    r != emitter.failureRegister &&
+                    r != emitter.exceptionRegister &&
+                    r != emitter.traceRegister,
+              );
+              emitter.loadImmediate(scratch, CallStatus.threw.index);
+              emitter
+                  .comparison(.equal)
+                  .emit(scratch, emitter.failureRegister, scratch);
+              emitter.jumpIfZero(scratch, propagated);
+              allocation.saveUnwind();
+              edge(onThrow);
+              emitter.bind(propagated);
+            }
+            leave();
             emitter.bind(returned);
           }
           if (layout.result case final result?
@@ -395,12 +423,37 @@ final class ScalarFunction<R extends Object>(
               );
             }
           }
-          if (failures) emitter.loadImmediate(emitter.failureRegister, 0);
-          if (allocation.frame case final frame?) {
-            emitter.epilogue(frame);
-          } else {
-            emitter.ret();
+          if (failures) {
+            emitter.loadImmediate(
+              emitter.failureRegister,
+              CallStatus.returned.index,
+            );
           }
+          leave();
+        case Invoke(:final onReturn):
+          if (onReturn == null) {
+            emitter.abort(71);
+          } else {
+            allocation.flush(live: selection.liveness.liveOut[block]);
+            edge(onReturn);
+          }
+        case Throw(:final exception, stackTrace: final trace!, :final onThrow):
+          allocation.placeException(exception, trace);
+          if ((block.end as Throw).stackTrace == null) {
+            traces.recordError(emitter);
+          }
+          emitter.loadImmediate(
+            emitter.failureRegister,
+            CallStatus.threw.index,
+          );
+          if (onThrow == null) {
+            leave();
+          } else {
+            allocation.saveUnwind();
+            edge(onThrow);
+          }
+        case Unreachable():
+          emitter.abort(71);
         case final Jump jump:
           allocation.flush(live: selection.liveness.liveOut[block]);
           edge(jump);

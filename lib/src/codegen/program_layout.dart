@@ -5,9 +5,9 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 
 /// Assigns physical storage to declaration identities within one compilation.
-final class ProgramLayout(IrProgram program) {
+final class ProgramLayout(Iterable<IrClass> classes) {
   final _classes = {
-    for (final declaration in program.classes) declaration.type: declaration,
+    for (final declaration in classes) declaration.type: declaration,
   };
   final _storage = <ClassType, ClassStorage>{};
 
@@ -22,7 +22,7 @@ final class ProgramLayout(IrProgram program) {
   }
 
   NativeTypeRef callType(ValueType type) {
-    if (type == .voidType) return NativeScalarType(Void);
+    if (type == .voidType || type == .never) return NativeScalarType(Void);
     // Internal references occupy pointer locations without becoming FFI values.
     return switch (representation(type)) {
       .word => NativeScalarType(Int64),
@@ -67,11 +67,20 @@ final class ProgramLayout(IrProgram program) {
     if (definition == null) {
       throw UnsupportedError('Native class storage unavailable: $declaration');
     }
-    return _storage[declaration] = ClassStorage([
-      if (declaration.superclass case final parent?)
-        ...storageOf(parent).fields,
-      ...definition.fields,
-    ], this);
+    return _storage[declaration] = ClassStorage(
+      [
+        if (declaration.superclass case final parent?)
+          ...storageOf(parent).fields,
+        ...definition.fields,
+      ],
+      this,
+      storesErrorTrace:
+          declaration == ValueType.error ||
+          switch (declaration.superclass) {
+            null => false,
+            final parent => storageOf(parent).errorTraceOffset != null,
+          },
+    );
   }
 
   int fieldOffset(InstanceField field) =>
@@ -81,13 +90,19 @@ final class ProgramLayout(IrProgram program) {
 /// Declared field identities paired with their shared physical layout.
 final class ClassStorage(
   Iterable<InstanceField> fields,
-  ProgramLayout program,
-) {
+  ProgramLayout program, {
+  bool storesErrorTrace = false,
+}) {
   final List<InstanceField> fields = .unmodifiable(fields);
   late final ObjectLayout layout;
+  late final int? errorTraceOffset;
 
   this {
-    layout = .new(this.fields.map((f) => program.representation(f.type)));
+    errorTraceOffset = storesErrorTrace ? (this.fields.length + 1) * 8 : null;
+    layout = .new([
+      ...this.fields.map((f) => program.representation(f.type)),
+      if (storesErrorTrace) ValueRepresentation.reference,
+    ]);
   }
 
   int offsetOf(InstanceField field) {

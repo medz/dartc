@@ -5,8 +5,9 @@ import 'program_layout.dart';
 /// Places allocating representation changes before register and root analysis.
 final class FunctionRepresentation(
   final IrFunction function,
-  ProgramLayout layouts,
-) {
+  ProgramLayout layouts, {
+  FunctionTarget? captureTrace,
+}) {
   final blocks = <Block>[];
   final instructions = <Block, List<Instruction>>{};
   final ends = <Block, Terminator>{};
@@ -42,6 +43,13 @@ final class FunctionRepresentation(
       introduced.add(box);
       into.add(box);
       return box;
+    }
+
+    Value? traceFor(Value? trace, List<Instruction> into) {
+      if (trace != null || captureTrace == null) return trace;
+      final capture = DirectCall(captureTrace, []);
+      into.add(capture);
+      return capture;
     }
 
     Jump edge(Jump jump) {
@@ -120,7 +128,7 @@ final class FunctionRepresentation(
         ),
         Throw(:final exception, :final stackTrace, :final onThrow) => Throw(
           convert(exception, .object, body),
-          stackTrace: stackTrace,
+          stackTrace: traceFor(stackTrace, body),
           onThrow: onThrow == null ? null : edge(onThrow),
         ),
         ExhaustivenessFailure(:final onThrow) => ExhaustivenessFailure(

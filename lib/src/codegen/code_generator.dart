@@ -32,9 +32,14 @@ abstract interface class CodeGenerator() {
   /// Generic field writes still require runtime checks and are unsupported.
   /// Each synchronous native entry owns its heap until return, including entries
   /// made through a native callback.
+  /// [Throw] and [Invoke] support synchronous exception propagation and cleanup.
+  /// Fresh throws capture the managed call sequence; rethrows retain the same
+  /// exception and trace. Error subclasses retain their first throw's trace.
+  /// Trace formatting, the Error.stackTrace getter and catches requiring runtime
+  /// type checks remain unsupported. Exceptions cannot unwind foreign frames.
   /// Escaping managed state, asynchronous execution and catchable allocation
-  /// failures remain unsupported. An uncaught allocation failure releases the
-  /// heap, reports to stderr and terminates the process with status 255.
+  /// failures remain unsupported. A failure escaping the native entry releases
+  /// the heap, reports to stderr and terminates the process with status 255.
   ///
   /// [entryPoint] adds a process entry with the given link symbol. It
   /// calls a synchronous, parameterless Dart body and exits successfully after

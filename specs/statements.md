@@ -20,6 +20,14 @@
 
 [循环样本](../test/frontend/lowering/fixtures/loops.dart)与[SDK 行为对照](../test/frontend/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/statements.md)。
 
+## 原生异常与清理
+
+支持同步 `throw`、不带运行时类型筛选的 `catch`、`rethrow` 与 `finally`，包括跨函数传播和构造器失败。正常调用结果只在成功后读取；异常保留同一个对象和关联的栈轨迹。`rethrow` 沿用原轨迹，新的 `throw` 捕获当时的调用链。异常与轨迹在处理器分配和回收期间仍然存活。
+
+`finally` 保留返回表达式的求值顺序；清理正常结束时继续原完成方式，清理自身的返回或抛错会替换待处理结果。见[源码与 SDK 对照](../test/compiler/exceptions_test.dart)及[身份、轨迹与回收验证](../test/codegen/exceptions_native_test.dart)。
+
+需要实际类型检查的 `on T`、动态抛出值的类型检查、断言与穷尽性错误构造、可捕获分配失败、异步展开仍是缺口。异常不能越过原生入口展开外部栈；未捕获异常释放入口资源、输出错误提示并以 255 退出，尚不格式化异常对象和栈轨迹。
+
 ## 规范依据
 
 [主规范 §18](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)、[模式规范](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md)、[流分析](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/flow-analysis.md#statements)、[Error API](https://api.dart.dev/stable/3.13.7/dart-core/Error-class.html)。

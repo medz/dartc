@@ -54,6 +54,12 @@ final class _Arm64Emitter(
   Register get failureRegister => .x8;
 
   @override
+  Register get exceptionRegister => .x0;
+
+  @override
+  Register get traceRegister => .x1;
+
+  @override
   void stackAddress(CpuRegister destination, int offset) =>
       assembler.addImmediate(destination as Register, .sp, offset);
 
@@ -111,7 +117,7 @@ final class _Arm64Emitter(
   }
 
   @override
-  void outOfMemory(void Function(Fixup) message, int length) {
+  void reportFailure(void Function(Fixup) message, int length) {
     address(Register.x1, message);
     assembler
       ..loadImmediate(.x0, 2)

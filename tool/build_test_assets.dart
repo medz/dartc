@@ -22,6 +22,7 @@ import '../test/codegen/fixtures/boxed_values.dart';
 import '../test/codegen/fixtures/stack_roots.dart';
 import '../test/codegen/fixtures/managed_heap.dart';
 import '../test/codegen/fixtures/dynamic_boxes.dart';
+import '../test/codegen/fixtures/exceptions.dart';
 import '../test/linker/fixtures/functions.dart';
 import '../test/linker/fixtures/calls.dart';
 import '../test/linker/fixtures/symbols.dart';
@@ -80,6 +81,10 @@ Future<void> main(List<String> args) async {
       'test/compiler/fixtures/managed_objects.dart',
     ], output: const .executable());
     await managedEntry.write(assets.file('compiler/entry_managed'));
+    final exceptionEntry = await Compiler(target).compile([
+      'test/compiler/fixtures/exceptions.dart',
+    ], output: const .executable());
+    await exceptionEntry.write(assets.file('compiler/entry_exception'));
     if (target.operatingSystem == .linux) {
       for (final name in [
         'managed_failure',
@@ -149,6 +154,7 @@ Future<void> main(List<String> args) async {
       'native_imports',
       'managed_objects',
       'numeric_boxes',
+      'exceptions',
     ]) {
       final library = assets.library('compiler/$fixture');
       final result = await Compiler(target).compile(
@@ -248,6 +254,10 @@ Future<void> main(List<String> args) async {
       await objects('managed_heap_', [managedHeap(target)]),
       assets.library('codegen/managed_heap'),
     );
+    await shared([
+      exceptions(target),
+      rootsProbe(target),
+    ], assets.library('codegen/exceptions'));
     final inputs = [
       functions(target, {'first': 40}),
       functions(target, {'second': 2}),

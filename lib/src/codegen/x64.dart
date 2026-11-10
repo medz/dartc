@@ -62,6 +62,12 @@ final class _X64Emitter(
   Register get failureRegister => .r11;
 
   @override
+  Register get exceptionRegister => .rax;
+
+  @override
+  Register get traceRegister => .rdx;
+
+  @override
   void stackAddress(CpuRegister destination, int offset) {
     assembler
       ..move(destination as Register, .rsp)
@@ -124,7 +130,7 @@ final class _X64Emitter(
   }
 
   @override
-  void outOfMemory(void Function(Fixup) message, int length) {
+  void reportFailure(void Function(Fixup) message, int length) {
     address(Register.rsi, message);
     assembler
       ..loadImmediate(.rdi, 2)

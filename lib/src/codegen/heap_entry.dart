@@ -15,9 +15,12 @@ final class HeapEntry<R extends Object>(
   final HeapFunctions functions,
   final void Function(Fixup) roots,
   final void Function(Fixup) error,
+  final void Function(Fixup) uncaught,
   final void Function(Fixup, FunctionTarget) call,
 ) {
   static const message = 'Unhandled exception:\nOut of Memory\n';
+  static const uncaughtMessage =
+      'Unhandled Dart exception at native boundary.\n';
   static const _result = HeapFunctions.contextBytes, _failure = _result + 8;
 
   FrameLayout<R> frame(int outgoingStackBytes) =>
@@ -62,7 +65,16 @@ final class HeapEntry<R extends Object>(
     emitter.loadStack(emitter.failureRegister, frame.localOffset + _failure);
     final returned = emitter.label();
     emitter.jumpIfZero(emitter.failureRegister, returned);
-    emitter.outOfMemory(error, message.length);
+    final thrown = emitter.label();
+    final scratch = emitter.allocatableRegisters.firstWhere(
+      (r) => emitter.bank(r) == .general && r != emitter.failureRegister,
+    );
+    emitter.loadImmediate(scratch, CallStatus.exhausted.index);
+    emitter.comparison(.equal).emit(scratch, emitter.failureRegister, scratch);
+    emitter.jumpIfZero(scratch, thrown);
+    emitter.reportFailure(error, message.length);
+    emitter.bind(thrown);
+    emitter.reportFailure(uncaught, uncaughtMessage.length);
     emitter.bind(returned);
     if (result != null) emitter.loadStack(result, frame.localOffset + _result);
   }

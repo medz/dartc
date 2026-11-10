@@ -6,7 +6,7 @@ import 'package:test/test.dart';
 
 void main() {
   final uri = Uri.parse('memory:representation');
-  final layouts = ProgramLayout(IrProgram([], []));
+  final layouts = ProgramLayout([]);
 
   test('an earlier boxed argument is live while the next one allocates', () {
     final accept = FunctionTarget(uri, 'accept', .voidType, [.object, .object]);

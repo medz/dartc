@@ -3,8 +3,10 @@ import 'dart:ffi';
 import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
 
+import 'frame_lookup.dart';
+
 /// Generates allocation and copying collection through ordinary typed IR.
-final class HeapFunctions() {
+final class HeapFunctions(final FrameLookup frames) {
   static final _uri = Uri.parse('dartc:heap');
   static final _wordPointer = FfiTypes.resolve(
     NativePointerType(NativeScalarType(Int64)),
@@ -20,7 +22,7 @@ final class HeapFunctions() {
 
   final map = _target('map', .integer, 1);
   final unmap = _target('unmap', .voidType, 2);
-  final invalid = _target('invalid', .voidType, 0);
+  final invalid = _target('invalid', .never, 0);
   final allocate = _target('allocate', .integer, 4);
   final release = _target('release', .voidType, 1);
   final _copy = _target('copy', .integer, 2);
@@ -106,12 +108,8 @@ final class HeapFunctions() {
 
   IrFunction _collectBody() {
     final entry = Block(_collect.parameterTypes);
-    final frame = Block([.integer, .integer]),
-        search = Block([.integer, .integer]);
-    final candidate = Block(),
-        next = Block(),
-        found = Block(),
-        invalid = Block();
+    final frame = Block([.integer, .integer]);
+    final found = Block(), invalid = Block();
     final roots = Block([.integer]),
         root = Block(),
         linked = Block(),
@@ -126,26 +124,9 @@ final class HeapFunctions() {
     entry.finish(Jump(frame, [initialSp, initialPc]));
     final [sp, pc] = frame.parameters;
     final table = _load(frame, context, maps);
-    frame.finish(
-      Jump(search, [_op(frame, .add, table, _int(8)), _load(frame, table)]),
-    );
-    final [record, remaining] = search.parameters;
-    _equal(search, remaining, _int(0), invalid, candidate);
-    _equal(candidate, _load(candidate, record), pc, found, next);
-    final count = _load(next, record, 24);
-    next.finish(
-      Jump(search, [
-        _op(
-          next,
-          .add,
-          _op(next, .add, record, _int(32)),
-          _op(next, .multiply, count, _int(8)),
-        ),
-        _op(next, .subtract, remaining, _int(1)),
-      ]),
-    );
-    invalid.emit(DirectCall(this.invalid, []));
-    invalid.finish(const Return());
+    final record = frame.emit(DirectCall(frames.target, [table, pc]));
+    _equal(frame, record, _int(0), invalid, found);
+    invalid.finish(Unreachable(invalid.emit(DirectCall(this.invalid, []))));
     final callerOffset = _load(found, record, 8),
         returnOffset = _load(found, record, 16);
     final rootCount = _load(found, record, 24);
@@ -223,9 +204,6 @@ final class HeapFunctions() {
     return IrFunction(_collect, [
       entry,
       frame,
-      search,
-      candidate,
-      next,
       found,
       invalid,
       roots,

@@ -28,6 +28,11 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     final ObjectLayout layout;
     if (value is ObjectConstant) {
       storage = layouts.storageOf(value.type as ClassType);
+      if (storage.errorTraceOffset != null) {
+        throw UnsupportedError(
+          'An Error instance cannot use immutable constant storage.',
+        );
+      }
       layout = storage.layout;
       if (storage.fields.length != value.fields.length ||
           storage.fields.any((f) => !value.fields.containsKey(f))) {
@@ -88,10 +93,13 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     if (_types[type] case final symbol?) return symbol;
     final references = layout.referenceOffsets.toList();
     final start = _words.length;
-    final symbol = _types[type] = _reserve('type', 2 + references.length);
+    final symbol = _types[type] = _reserve('type', 3 + references.length);
     _words[start] = layout.size;
     _words[start + 1] = references.length;
-    _words.setRange(start + 2, _words.length, references);
+    _words.setRange(start + 2, start + 2 + references.length, references);
+    _words.last = layouts.isBoxable(type)
+        ? 0
+        : layouts.storageOf(type).errorTraceOffset ?? 0;
     return symbol;
   }
 

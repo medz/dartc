@@ -11,7 +11,7 @@ import 'package:test/test.dart';
 import 'fixtures/control_flow.dart';
 
 void main() {
-  test('exception analysis does not enable unsupported native propagation', () {
+  test('throw generation supplies trace capture and managed frame records', () {
     final target = FunctionTarget(.parse('memory:throw'), 'fail', .voidType, [
       .object,
     ]);
@@ -24,15 +24,11 @@ void main() {
       Arm64CodeGenerator(const Target(.linux, .arm64)),
       X64CodeGenerator(const Target(.linux, .x64)),
     ]) {
+      final module = generator.generate(program, definitions: [target]);
+      expect(module.imports, isEmpty);
       expect(
-        () => generator.generate(program, definitions: [target]),
-        throwsA(
-          isA<UnsupportedError>().having(
-            (error) => error.message,
-            'message',
-            'Native terminator: Throw',
-          ),
-        ),
+        module.symbols.map((s) => s.name),
+        containsAll(['capture', 'captureFrames', '.dartc.roots']),
       );
     }
   });

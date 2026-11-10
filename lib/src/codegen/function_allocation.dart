@@ -60,6 +60,7 @@ final class FunctionAllocation<R extends Object>(
           function.entry.parameters[i]: offset,
     };
     final framed =
+        selection.body.ends.values.any((end) => end is Throw) ||
         selection.cells.isNotEmpty ||
         incoming.isNotEmpty ||
         selection.calls.isNotEmpty ||
@@ -83,6 +84,9 @@ final class FunctionAllocation<R extends Object>(
       }
       for (final cell in selection.cells) {
         _slots[cell] = _slots.length * 8;
+      }
+      for (final value in used.whereType<UnwindValue>()) {
+        _slots[value] = _slots.length * 8;
       }
     }
     frame = framed
@@ -246,11 +250,30 @@ final class FunctionAllocation<R extends Object>(
       loadObject(value, destination);
     } else if (value is Constant) {
       throw UnsupportedError('Native constant: ${value.type}');
-    } else if (_spilled.contains(value)) {
+    } else if (value is UnwindValue || _spilled.contains(value)) {
       emitter.loadStack(destination, _slot(value));
     } else {
       throw StateError('Missing native value: $value');
     }
+  }
+
+  /// Homes the exceptional results before edge argument staging can clobber them.
+  void saveUnwind() {
+    for (final (value, register) in [
+      (UnwindValue.exception, emitter.exceptionRegister),
+      (UnwindValue.stackTrace, emitter.traceRegister),
+    ]) {
+      if (_slots[value] case final offset?) {
+        emitter.storeStack(register, offset);
+      }
+    }
+  }
+
+  /// Places both exceptional results without overwriting either source operand.
+  void placeException(Value exception, Value trace) {
+    flush();
+    load(exception, emitter.exceptionRegister, asType: .object);
+    load(trace, emitter.traceRegister, except: [emitter.exceptionRegister]);
   }
 
   /// Allocates one register, spilling a different resident value if necessary.

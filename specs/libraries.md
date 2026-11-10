@@ -14,7 +14,7 @@
 | 相对、file:、package: URI | 支持源码导入 URI 的 analyzer 解析；API 输入仍为文件路径。 |
 | package configuration v2 | 使用首个输入库的包上下文，保留 package URI 身份并检查包语言版本。 |
 | main 入口 | `LoweringResult.entryPoint` 保留首个库导出命名空间中的 main 声明身份，包括再导出。原生支持无参数的同步入口，正常返回退出码为 0，返回值不作为进程退出码。启动参数、异步完成、事件处理及完整进程生命周期待实现。 |
-| StackTrace API | 调用保留普通 SDK 导入；catch/rethrow 保留异常与栈信息。完整运行时实现待后续执行领域提供。 |
+| StackTrace API | 同步原生 throw 捕获调用链，catch/rethrow 保留关联轨迹；Error 子类记录首次抛出的轨迹。`StackTrace.current/fromString/toString`、`Error.stackTrace` getter 及轨迹格式化尚未接通。 |
 | isolate、消息端口与 spawn | 调用保留普通 SDK 导入；isolate 与调度的运行时实现待开发。 |
 
 [库与命名空间行为对照](../test/frontend/lowering/libraries_test.dart)、[包上下文与诊断对照](../test/frontend/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/libraries.md)。
@@ -53,7 +53,7 @@ Linux ARM64/x86-64 输出当前为固定地址、静态解析的 ELF 可执行�
 | `@Native` | 支持顶层和静态 external 函数。前端按 SDK 声明身份保留资产 ID、符号、原生签名及 `isLeaf`，支持常量别名；缺省资产依次取 `DefaultAsset` 和所属库 URI，part 使用所属库默认值，缺省符号采用声明名。省略类型实参时支持从指针和 void 签名推断。`LoweringResult.imports` 交付按声明身份绑定的 `NativeReference`；`Compiler.compile(nativeSymbols: ...)` 按资产 ID 与请求符号查找显式链接符号，shared/executable 输出由 `linkInputs` 提供实现，object/archive 输出保留未决引用。未使用声明仍检查静态义务，未引用的合法导入不要求绑定。自动资产发现、运行时 resolver/进程回退查找、数据字段、实例接收者及完整 FFI 类型仍未接通。当前后端支持同步入口内不逃逸的托管对象；`isLeaf` 保留声明承诺，跨线程及异步托管调用转换仍未实现。 |
 | 间接原生调用 | 独立 IR/CodeGenerator API 支持 `NativeCall`，从 `Pointer<NativeFunction<T>>` 的完整类型推导签名并检查 Dart 实参；参数和结果执行上述原生边界转换，函数地址通过寄存器调用，无须符号绑定。地址和其他活跃值经过寄存器覆盖、栈传参、分支及循环保持有效。IR 保留 `isLeaf` 承诺，当前后端支持同步标量/指针调用和入口内对象存活；闭包原生执行及跨线程托管调用协议尚未接通。 |
 | `asFunction` | 前端按 `dart:ffi` 声明身份将调用转换成捕获当时指针值的普通闭包 IR，其函数体执行 `NativeCall`。支持显式/推断 Dart 函数类型、显式 extension override、空参数/void 结果、上述标量和指针签名及兼容的指针返回类型扩大；`isLeaf` 按常量参数求值，默认 false。返回的函数可经普通 IR 的返回、局部变量、集合、分支、循环、动态调用及嵌套闭包使用。同名用户方法仍是普通调用。闭包的目标存储与生命周期、原生函数值调用、托管转换尚未实现，源码尚不能由原生后端执行；`asFunction` 方法本身的提取与间接调用也仍待接通。 |
-| 函数体 | 整数常量、加法、减法、乘法、按位与/或/异或/取反及相应复合赋值、有符号比较，整数与布尔值的相等/不等比较；整数运算保留 64 位环绕结果，`int / int` 产生 double。支持条件表达式、逻辑短路、if/else、while/do/for、含标签的 break/continue、多返回，以及批次内跨库调用和递归。Dart 函数间的直接调用支持可选位置参数、命名参数及常量默认值；原生导出仍只接受必需位置参数。整数截断除法、余数、移位、对象存储、异常及异步尚未接入原生后端。 |
+| 函数体 | 整数常量、加法、减法、乘法、按位与/或/异或/取反及相应复合赋值、有符号比较，整数与布尔值的相等/不等比较；整数运算保留 64 位环绕结果，`int / int` 产生 double。支持条件表达式、逻辑短路、if/else、while/do/for、含标签的 break/continue、多返回，以及批次内跨库调用和递归。Dart 函数间的直接调用支持可选位置参数、命名参数及常量默认值；原生导出仍只接受必需位置参数。同步异常与清理见[原生异常范围](statements.md#原生异常与清理)，对象存储见[类的原生范围](classes.md#原生执行范围)。整数截断除法、余数、移位及异步尚未接入原生后端。 |
 | 浮点 | 支持静态 int/double 操作数的混合加、减、乘、IEEE 除法、全部数值比较及 `toDouble`，另支持 double 常量和取负；比较保持整数的原始数值，不因算术转换而丢失精度。保留 NaN、无穷、次正规数和正负零行为，不做融合乘加或 fast-math 改写。参数、结果、分支汇合和调用保持 double 表示。部分混合数值常量表达式尚未实现，见[数值比较](expressions.md#数值比较与-sdk-差异)。其他数值转换、浮点取模/截断除法、compareTo 及完整数学库尚未接入。当前执行验证使用 SDK 宿主的默认浮点控制环境，非默认控制状态尚未验证。 |
 | 参数与存储 | ARM64 的前八个、x86-64 的前六个原生整数或指针参数使用通用寄存器；两者另有八个由 `Float` 和 `Double` 共用的浮点参数寄存器，与通用寄存器独立分配。各类超出的参数按源顺序使用栈：macOS ARM64 按实际大小自然对齐，Linux ARM64 与 x86-64 使用八字节槽。Dart 函数间另支持布尔参数及结果，不隐式扩展原生导出签名。分支、循环和调用之间保留活跃值，块参数遵循同时赋值语义；栈帧保持 16 字节对齐及帧指针链，出参区与局部存储分开。ARM64 帧支持保存 D8–D15 的低 64 位，x86-64 的标量浮点寄存器均按调用可破坏处理。超出当前栈访问、栈帧或分支/调用位移编码范围时明确报错。 |
 | 原生指针 | 支持上述整数、Float 和 Double 元素类型的 `Pointer<T>.fromAddress`、`.address`、相等/不等比较、`+`、`-`、`elementAt`、`.value` 及 `[]`/`[]=` 读写，包括增减和复合赋值。偏移和索引以元素计数，允许负值，地址运算保留目标指针位宽；计算地址不访问存储。整数读取按有符号/无符号规则扩展，写入截断到元素宽度；Float 使用四字节存储，写入舍入精度、读取转换为 double；Double 使用八字节存储。写入不改变原 Dart 变量或赋值表达式的值，不影响邻接字节。接收者、索引及右值按 Dart 顺序各求值一次，别名修改可见。访问要求有效、存活且按元素大小自然对齐的原生存储；不进行集合边界检查，不将机器访存失败当作 Dart 异常。cast、其他元素类型、结构体、回调及分配器尚未接入。 |
@@ -107,7 +107,7 @@ Linux ARM64/x86-64 输出当前为固定地址、静态解析的 ELF 可执行�
 
 [栈参数验证](../test/compiler/stack_calls_test.dart)对照 SDK 检查十参数入口、十及十一参数调用、嵌套调用、参数轮换与整数边界；[独立 ABI 调用](../test/abi/native_test.dart)通过另一个目标模块传递栈参数。[位置契约](../test/abi/layout_test.dart)检查参数位置、栈区大小和非法输入；[栈访问边界](../test/codegen/arguments_test.dart)检查机器位移上限。
 
-[原生控制流对照](../test/compiler/control_flow_test.dart)覆盖整数边界比较、布尔辅助函数、短路副作用、循环的零次/一次/多次执行、嵌套循环及标签转移、循环变量轮换和递归返回。[图交接验证](../test/codegen/native_test.dart)覆盖同目标的不同边参数、乱序块布局和空块；[控制流编码验证](../test/codegen/control_flow_test.dart)检查不返回的循环。[不支持的异常路径](../test/compiler/fixtures/unsupported_control_flow.dart)仍明确拒绝生成，不因分支或未使用结果而丢弃。
+[原生控制流对照](../test/compiler/control_flow_test.dart)覆盖整数边界比较、布尔辅助函数、短路副作用、循环的零次/一次/多次执行、嵌套循环及标签转移、循环变量轮换和递归返回。[图交接验证](../test/codegen/native_test.dart)覆盖同目标的不同边参数、乱序块布局和空块；[控制流编码验证](../test/codegen/control_flow_test.dart)检查不返回的循环。[同步异常对照](../test/compiler/exceptions_test.dart)覆盖捕获、重抛、构造器失败、finally 的完成替换及未捕获异常退出。
 
 ## 规范依据
 

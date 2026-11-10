@@ -15,7 +15,7 @@ void main() {
     );
     final body = FunctionRepresentation(
       IrFunction(target, blocks),
-      ProgramLayout(IrProgram([], [])),
+      ProgramLayout([]),
     );
     return FunctionLiveness(body, body.inputsOf, {
       ...body.boxes.keys,

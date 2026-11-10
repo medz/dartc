@@ -10,6 +10,7 @@ import 'function_liveness.dart';
 import 'function_representation.dart';
 import 'heap_plan.dart';
 import 'program_layout.dart';
+import 'stack_traces.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
 final class FunctionSelection<R>(
@@ -17,8 +18,13 @@ final class FunctionSelection<R>(
   final FunctionEmitter<R> emitter,
   final ProgramLayout layouts,
   HeapPlan heap,
+  StackTraces traces,
 ) {
-  final body = FunctionRepresentation(function, layouts);
+  final body = FunctionRepresentation(
+    function,
+    layouts,
+    captureTrace: traces.capture,
+  );
   final binaries =
       <
         Instruction,
@@ -72,7 +78,12 @@ final class FunctionSelection<R>(
     );
     for (final block in body.blocks) {
       switch (body.ends[block]!) {
-        case Return() || Jump() || Branch():
+        case Return() ||
+            Jump() ||
+            Branch() ||
+            Invoke() ||
+            Throw() ||
+            Unreachable():
           break;
         case final end:
           throw UnsupportedError('Native terminator: ${end.runtimeType}');
@@ -128,7 +139,7 @@ final class FunctionSelection<R>(
                 'Native generic function calls are not implemented.',
               );
             }
-            if (type != .voidType) {
+            if (type != .voidType && type != .never) {
               layouts.checkTransfer(target.returnType, type);
             }
             _call(instruction, target, body.inputsOf(instruction).toList());
@@ -359,37 +370,51 @@ final class FunctionSelection<R>(
 
   void _checkCells(IrFunction function) {
     final predecessors = {
-      for (final block in function.blocks) block: <Block>[],
+      for (final block in body.blocks) block: <(Block, bool)>[],
     };
-    for (final block in function.blocks) {
-      for (final instruction in block.instructions) {
-        for (final value in instruction.inputs.where(cells.contains)) {
+    for (final block in body.blocks) {
+      for (final instruction in body.instructions[block]!) {
+        for (final value in body.inputsOf(instruction).where(cells.contains)) {
           if (!(instruction is ReadCell && instruction.cell == value ||
               instruction is WriteCell && instruction.cell == value)) {
             throw UnsupportedError('Native local storage cannot escape.');
           }
         }
       }
-      if (block.end case Return(value: final value?)
+      if (body.ends[block] case Return(value: final value?)
           when cells.contains(value)) {
         throw UnsupportedError('Native local storage cannot escape.');
       }
-      for (final edge in block.successors) {
+      for (final (i, edge) in body.successors(block).indexed) {
         if (edge.arguments.any(cells.contains)) {
           throw UnsupportedError('Native local storage cannot be aliased.');
         }
-        predecessors[edge.target]!.add(block);
+        final end = body.ends[block]!;
+        predecessors[edge.target]!.add((
+          block,
+          end is Invoke && i == (end.onReturn == null ? 0 : 1),
+        ));
       }
     }
     final initialized = {
-      for (final block in function.blocks) block: cells.toSet(),
+      for (final block in body.blocks)
+        block: (normal: cells.toSet(), exceptional: cells.toSet()),
     };
-    Set<NewCell> after(Block block, {bool checkReads = false}) {
+    ({Set<NewCell> normal, Set<NewCell> exceptional}) after(
+      Block block, {
+      bool checkReads = false,
+    }) {
       final ready = block == function.entry ? <NewCell>{} : cells.toSet();
-      for (final previous in predecessors[block]!) {
-        ready.removeWhere((cell) => !initialized[previous]!.contains(cell));
+      for (final (previous, exceptional) in predecessors[block]!) {
+        final state = initialized[previous]!;
+        ready.retainAll(exceptional ? state.exceptional : state.normal);
       }
-      for (final instruction in block.instructions) {
+      Set<NewCell>? failed;
+      for (final instruction in body.instructions[block]!) {
+        if (body.ends[block] case Invoke(:final operation)
+            when operation == instruction) {
+          failed = ready.toSet();
+        }
         if (checkReads && calls.containsKey(instruction)) {
           for (final cell
               in liveness.acrossCalls[instruction]!.whereType<NewCell>()) {
@@ -415,21 +440,24 @@ final class FunctionSelection<R>(
             break;
         }
       }
-      return ready;
+      return (normal: ready, exceptional: failed ?? ready);
     }
 
     bool changed;
     do {
       changed = false;
-      for (final block in function.blocks) {
+      for (final block in body.blocks) {
         final next = after(block), previous = initialized[block]!;
-        if (next.length != previous.length || !next.containsAll(previous)) {
+        if (next.normal.length != previous.normal.length ||
+            !next.normal.containsAll(previous.normal) ||
+            next.exceptional.length != previous.exceptional.length ||
+            !next.exceptional.containsAll(previous.exceptional)) {
           initialized[block] = next;
           changed = true;
         }
       }
     } while (changed);
-    for (final block in function.blocks) {
+    for (final block in body.blocks) {
       after(block, checkReads: true);
     }
   }

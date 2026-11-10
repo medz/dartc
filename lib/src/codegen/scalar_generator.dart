@@ -17,6 +17,8 @@ import 'constant_data.dart';
 import 'stack_maps.dart';
 import 'heap_plan.dart';
 import 'heap_entry.dart';
+import 'frame_lookup.dart';
+import 'stack_traces.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -41,8 +43,10 @@ base class ScalarCodeGenerator<R extends Object>(
         'Expected distinct exports and imports in definitions.',
       );
     }
-    final layouts = ProgramLayout(program);
-    final heap = HeapPlan(program, selected, layouts);
+    final frames = FrameLookup();
+    final traces = StackTraces(frames);
+    final layouts = ProgramLayout([...program.classes, traces.declaration]);
+    final heap = HeapPlan(program, selected, layouts, frames);
     final relocations = <Relocation>[];
     final nativeSymbols = <String, int>{};
     final nativeCalls = <(int, Fixup, int)>[];
@@ -68,6 +72,7 @@ base class ScalarCodeGenerator<R extends Object>(
           _createFunction(),
           layouts,
           heap,
+          traces,
         );
       }
       final export = exports[declaration];
@@ -79,11 +84,27 @@ base class ScalarCodeGenerator<R extends Object>(
       for (final function in functions.values)
         for (final call in function.selection.calls.values) ?call.target,
     });
-    final primitives = heap.isEmpty ? <FunctionTarget>{} : heap.primitives;
-    if (!heap.isEmpty) {
+    final capture = functions.values.any(
+      (function) => function.selection.calls.values.any(
+        (call) => call.target == traces.capture,
+      ),
+    );
+    final exceptions = functions.values.any(
+      (function) => function.selection.body.ends.values.any(
+        (end) => end is Throw || end is Invoke,
+      ),
+    );
+    final traceFunctions = capture
+        ? traces.functions(heap.heap.invalid)
+        : <IrFunction>[];
+    heap.include(traceFunctions, layouts);
+    final managed = !heap.isEmpty || exceptions;
+    final primitives = managed ? heap.primitives : <FunctionTarget>{};
+    if (managed) {
+      final support = [...heap.functions, frames.function, ...traceFunctions];
       IrProgram(
-        [],
-        heap.functions,
+        [if (capture) traces.declaration],
+        support,
         externals: [
           for (final target in [
             heap.heap.map,
@@ -93,20 +114,25 @@ base class ScalarCodeGenerator<R extends Object>(
             IrExternal(target),
         ],
       );
-      selected.addAll([...heap.functions.map((f) => f.target), ...primitives]);
-      for (final function in heap.functions) {
+      selected.addAll([
+        ...support.map((f) => f.target),
+        ...primitives,
+        if (capture) traces.capture,
+      ]);
+      for (final function in support) {
         functions[function.target] = ScalarFunction(
           function,
           _createFunction(),
           layouts,
           heap,
+          traces,
         );
       }
     }
     final indices = {
       for (final (i, declaration) in selected.indexed) declaration: i,
     };
-    final hasRoots = !heap.isEmpty || functions.values.any((f) => f.hasRoots);
+    final hasRoots = managed || functions.values.any((f) => f.hasRoots);
     bool needsEntry(NativeSignature signature) =>
         hasRoots || _needsEntry(signature);
     final maps = StackMaps();
@@ -120,7 +146,9 @@ base class ScalarCodeGenerator<R extends Object>(
           exports.values.where((e) => needsEntry(e.signature)).length +
           (entryPoint == null ? 0 : 1),
     );
-    final rootAddresses = <(int, Fixup)>[], errorAddresses = <(int, Fixup)>[];
+    final rootAddresses = <(int, Fixup)>[],
+        errorAddresses = <(int, Fixup)>[],
+        uncaughtAddresses = <(int, Fixup)>[];
     void call(Fixup fixup, FunctionTarget callee) {
       final index = indices[callee];
       if (index == null) {
@@ -131,13 +159,14 @@ base class ScalarCodeGenerator<R extends Object>(
       );
     }
 
-    HeapEntry<R>? entry(FunctionEmitter<R> emitter) => heap.isEmpty
+    HeapEntry<R>? entry(FunctionEmitter<R> emitter) => !managed
         ? null
         : HeapEntry(
             emitter,
             heap.heap,
             (fixup) => rootAddresses.add((code.length, fixup)),
             (fixup) => errorAddresses.add((code.length, fixup)),
+            (fixup) => uncaughtAddresses.add((code.length, fixup)),
             call,
           );
     for (final declaration in selected) {
@@ -145,7 +174,9 @@ base class ScalarCodeGenerator<R extends Object>(
       final exported = export != null && !needsEntry(export.signature);
       code.add(Uint8List((-code.length) & 15));
       final emitter = functions[declaration]?.emitter ?? _createFunction();
-      final bytes = primitives.contains(declaration)
+      final bytes = declaration == traces.capture
+          ? traces.emit(emitter, call, safepoint)
+          : primitives.contains(declaration)
           ? heap.emit(
               declaration,
               emitter,
@@ -204,7 +235,7 @@ base class ScalarCodeGenerator<R extends Object>(
                 );
               },
               safepoint,
-              failures: !heap.isEmpty,
+              failures: managed,
             );
       symbols.add(
         .new(
@@ -279,28 +310,37 @@ base class ScalarCodeGenerator<R extends Object>(
       if (constants.symbols.isNotEmpty) constants.finish(),
     ];
     final rootSymbol = maps.finish(sections, symbols, relocations);
-    if (!heap.isEmpty) {
-      final message = symbols.length;
-      symbols.add(
-        .new(
-          '.dartc.oom',
-          sections.length,
-          0,
-          HeapEntry.message.length,
-          kind: .data,
-          binding: .local,
-        ),
-      );
-      sections.add(.readOnlyData(HeapEntry.message.codeUnits));
-      for (final (uses, symbol) in [
-        (rootAddresses, rootSymbol!),
-        (errorAddresses, message),
+    if (managed) {
+      for (final (uses, name, message) in [
+        (errorAddresses, '.dartc.oom', HeapEntry.message),
+        (uncaughtAddresses, '.dartc.uncaught', HeapEntry.uncaughtMessage),
       ]) {
         for (final (start, fixup) in uses) {
           relocations.add(
-            .instruction(0, start + fixup.offset, fixup.encoding, symbol),
+            .instruction(
+              0,
+              start + fixup.offset,
+              fixup.encoding,
+              symbols.length,
+            ),
           );
         }
+        symbols.add(
+          .new(
+            name,
+            sections.length,
+            0,
+            message.length,
+            kind: .data,
+            binding: .local,
+          ),
+        );
+        sections.add(.readOnlyData(message.codeUnits));
+      }
+      for (final (start, fixup) in rootAddresses) {
+        relocations.add(
+          .instruction(0, start + fixup.offset, fixup.encoding, rootSymbol!),
+        );
       }
     }
     return .new(
