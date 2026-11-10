@@ -271,6 +271,27 @@ final class _X64Emitter(
   );
 
   @override
+  BinaryEncoding<CpuRegister> get shiftLeft => _shift(assembler.shiftLeft);
+
+  @override
+  BinaryEncoding<CpuRegister> get shiftRight =>
+      _shift(assembler.shiftRightSigned);
+
+  @override
+  BinaryEncoding<CpuRegister> get unsignedShiftRight =>
+      _shift(assembler.shiftRightUnsigned);
+
+  BinaryEncoding<CpuRegister> _shift(void Function(Register) emit) => .new(
+    (_, _, _) => emit(.rax),
+    fixed: (
+      left: Register.rax,
+      right: Register.rcx,
+      result: Register.rax,
+      clobbered: const {},
+    ),
+  );
+
+  @override
   BinaryEncoding<CpuRegister> get bitAnd => _binary(assembler.bitAnd);
 
   @override

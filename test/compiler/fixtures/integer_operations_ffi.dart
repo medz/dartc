@@ -11,6 +11,26 @@ final class IntegerOperations() {
   final _library = NativeAssets(Target.host())
       .open('compiler/integer_operations');
 
+  late final shiftLeft = _library.lookupFunction<BinaryNative, BinaryDart>(
+    'shiftLeft',
+  );
+  late final shiftRight = _library.lookupFunction<BinaryNative, BinaryDart>(
+    'shiftRight',
+  );
+  late final unsignedShiftRight = _library
+      .lookupFunction<BinaryNative, BinaryDart>('unsignedShiftRight');
+  late final shiftCompound = _library.lookupFunction<BinaryNative, BinaryDart>(
+    'shiftCompound',
+  );
+  late final argumentErrors = _library.lookupFunction<BinaryNative, BinaryDart>(
+    'argumentErrors',
+  );
+  late final shiftFailure = _library
+      .lookupFunction<
+        Int64 Function(Int64, Int64, Int64),
+        int Function(int, int, int)
+      >('shiftFailure');
+
   late final truncate = _library.lookupFunction<BinaryNative, BinaryDart>(
     'truncate',
   );

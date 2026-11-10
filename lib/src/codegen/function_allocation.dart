@@ -258,7 +258,7 @@ final class FunctionAllocation<R extends Object>(
       emitter.loadImmediate(destination, 0);
     } else if (value is Constant) {
       if (value is! ObjectConstant && value is! TypeConstant) {
-        throw UnsupportedError('Native constant: ${value.type}');
+        throw UnsupportedError('Native constant: ${value.type.dartName}');
       }
       loadObject(value, destination);
     } else if (value is UnwindValue || _spilled.contains(value)) {

@@ -20,3 +20,8 @@ void ignoredFuture() => unawaited(null);
 int checkNotNegative(int value) => value - 5;
 
 int local(int value) => checkNotNegative(value);
+
+int errorPayload(int value) => ArgumentError(value).message as int;
+
+int invalidArgument(int value) =>
+    ArgumentError.value(value).invalidValue as int;

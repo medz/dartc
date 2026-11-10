@@ -4,6 +4,25 @@ import 'package:dartc/assembler/x64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('variable shifts encode CL counts and extended registers', () {
+    final assembler = Assembler()
+      ..shiftLeft(.rax)
+      ..shiftRightSigned(.r9)
+      ..shiftRightUnsigned(.r15);
+    expect(assembler.finish(), [
+      0x48,
+      0xd3,
+      0xe0,
+      0x49,
+      0xd3,
+      0xf9,
+      0x49,
+      0xd3,
+      0xef,
+    ]);
+    expect(() => assembler.shiftLeft(.rax), throwsStateError);
+  });
+
   test(
     'signed division encodes the RDX:RAX dividend and extended divisors',
     () {

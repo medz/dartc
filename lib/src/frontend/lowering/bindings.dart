@@ -38,6 +38,20 @@ final class Bindings({
 
   /// SDK functions with Dart bodies, discovered while binding direct references.
   final sdkFunctions = <ExecutableElement>[];
+
+  /// Constructed SDK classes, with superclasses preceding their children.
+  final sdkClasses = <InterfaceElement>[];
+
+  /// Includes a constructed SDK class and the bodies it inherits.
+  void requireSdkClass(InterfaceElement element) {
+    if (element.library.typeProvider.objectElement == element ||
+        sdkClasses.contains(element)) {
+      return;
+    }
+    if (element.supertype case final parent?) requireSdkClass(parent.element);
+    sdkClasses.add(element);
+  }
+
   final _typeEnvironments =
       <FunctionTarget, Map<TypeParameterType, ValueType>>{};
   final _extensions = <ExecutableElement, ExtensionExecutable>{};
@@ -761,6 +775,13 @@ final class Bindings({
     }
     if (enclosing == null) {
       _targets[element] = function;
+      if (element is ConstructorElement &&
+          !element.isFactory &&
+          redirects == null &&
+          element.library.isInSdk &&
+          !element.isExternal) {
+        requireSdkClass(element.enclosingElement);
+      }
       if (element.library.isInSdk &&
           element.isStatic &&
           !element.isExternal &&

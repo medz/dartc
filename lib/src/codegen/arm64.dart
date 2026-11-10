@@ -274,6 +274,17 @@ final class _Arm64Emitter(
       _binary(assembler.divideSigned);
 
   @override
+  BinaryEncoding<CpuRegister> get shiftLeft => _binary(assembler.shiftLeft);
+
+  @override
+  BinaryEncoding<CpuRegister> get shiftRight =>
+      _binary(assembler.shiftRightSigned);
+
+  @override
+  BinaryEncoding<CpuRegister> get unsignedShiftRight =>
+      _binary(assembler.shiftRightUnsigned);
+
+  @override
   BinaryEncoding<CpuRegister> get bitAnd => _binary(assembler.bitAnd);
 
   @override

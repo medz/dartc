@@ -5,6 +5,88 @@ import 'package:dartc/interop.dart';
 typedef BinaryNative = Int64 Function(Int64, Int64);
 
 @Export<BinaryNative>()
+int shiftLeft(int value, int count) => value << count;
+
+@Export<BinaryNative>()
+int shiftRight(int value, int count) => value >> count;
+
+@Export<BinaryNative>()
+int unsignedShiftRight(int value, int count) => value >>> count;
+
+@Export<BinaryNative>()
+int shiftCompound(int value, int count) {
+  final original = value;
+  value <<= count;
+  value >>= count;
+  value >>>= count;
+  return value ^ original;
+}
+
+@Export<Int64 Function(Int64, Int64, Int64)>()
+int shiftFailure(int value, int count, int kind) {
+  final state = _DivisionState();
+  var message = 0;
+  try {
+    switch (kind) {
+      case 0:
+        state.next(value) << state.next(count);
+      case 1:
+        state.next(value) >> state.next(count);
+      default:
+        state.next(value) >>> state.next(count);
+    }
+  } on ArgumentError catch (error) {
+    final Object? payload = error.message;
+    if (payload is! int ||
+        error.name != null ||
+        error.invalidValue != null ||
+        error.runtimeType != ArgumentError) {
+      return 12345;
+    }
+    message = payload;
+    state.log = state.log * 10 + 3;
+  } finally {
+    state.log = state.log * 10 + 4;
+  }
+  return state.log ^ message;
+}
+
+@Export<BinaryNative>()
+int argumentErrors(int message, int value) {
+  final override = _UserArgumentError(value);
+  final result =
+      _errorValue(ArgumentError(message)) +
+      _errorValue(ArgumentError.value(value)) +
+      _errorValue(override);
+  return result ^ override.reads;
+}
+
+int _errorValue(ArgumentError error) {
+  final Object? message = error.message, value = error.invalidValue;
+  if (message is int) return message;
+  return value is int ? value : 0;
+}
+
+class _UserArgumentError(final int value) implements ArgumentError {
+  int reads = 0;
+
+  @override
+  int get message {
+    reads++;
+    return value;
+  }
+
+  @override
+  Object? get invalidValue => null;
+
+  @override
+  String? get name => null;
+
+  @override
+  StackTrace? get stackTrace => null;
+}
+
+@Export<BinaryNative>()
 int truncate(int left, int right) => left ~/ right;
 
 @Export<BinaryNative>()

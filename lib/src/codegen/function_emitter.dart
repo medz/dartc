@@ -131,6 +131,15 @@ abstract interface class FunctionEmitter<R>() {
   /// The signed integer quotient, requiring a nonzero divisor and no overflow.
   BinaryEncoding<R> get divideSigned;
 
+  /// The left shift for a count between 0 and 63.
+  BinaryEncoding<R> get shiftLeft;
+
+  /// The sign-extending right shift for a count between 0 and 63.
+  BinaryEncoding<R> get shiftRight;
+
+  /// The zero-extending right shift for a count between 0 and 63.
+  BinaryEncoding<R> get unsignedShiftRight;
+
   /// The selected 64-bit bitwise conjunction and its operand constraint.
   BinaryEncoding<R> get bitAnd;
 

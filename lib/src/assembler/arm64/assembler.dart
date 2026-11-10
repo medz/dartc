@@ -60,6 +60,21 @@ final class Assembler() {
   void divideSigned(Register destination, Register left, Register right) =>
       _binary(0x9ac00c00, destination, left, right);
 
+  /// Shifts left by the low six bits of [count], preserving flags.
+  void shiftLeft(Register destination, Register value, Register count) =>
+      _binary(0x9ac02000, destination, value, count);
+
+  /// Shifts right with sign extension by the low six bits of [count].
+  void shiftRightSigned(Register destination, Register value, Register count) =>
+      _binary(0x9ac02800, destination, value, count);
+
+  /// Shifts right with zero extension by the low six bits of [count].
+  void shiftRightUnsigned(
+    Register destination,
+    Register value,
+    Register count,
+  ) => _binary(0x9ac02400, destination, value, count);
+
   /// Computes a 64-bit bitwise conjunction without changing flags.
   void bitAnd(Register destination, Register left, Register right) =>
       _binary(0x8a000000, destination, left, right);

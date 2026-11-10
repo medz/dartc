@@ -41,21 +41,18 @@ void main() {
     },
   );
 
-  test(
-    'SDK error branches still require their native implementations',
-    () async {
-      await expectLater(
-        compiler.compile(['test/compiler/fixtures/sdk_functions.dart']),
-        throwsA(
-          isA<UnsupportedError>().having(
-            (error) => error.message,
-            'missing error constructor',
-            'Native body unavailable: range',
-          ),
+  test('SDK error branches reject unsupported string constants', () async {
+    await expectLater(
+      compiler.compile(['test/compiler/fixtures/sdk_functions.dart']),
+      throwsA(
+        isA<UnsupportedError>().having(
+          (error) => error.message,
+          'unsupported value',
+          'Native constant: String',
         ),
-      );
-    },
-  );
+      ),
+    );
+  });
 
   test(
     'compilation owns final bytes and keeps the library name across writes',

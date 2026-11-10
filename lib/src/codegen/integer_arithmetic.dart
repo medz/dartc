@@ -1,10 +1,14 @@
 import 'package:dartc/ir.dart';
 
-/// Builds checked integer division and remainders with ordinary control flow.
-final class IntegerArithmetic(Iterable<IrFunction> functions) {
+/// Builds checked integer arithmetic with ordinary control flow and exceptions.
+final class IntegerArithmetic(
+  Iterable<IrFunction> functions, {
+  IrCallable? argumentError,
+}) {
+  final IrCallable? _argumentError = argumentError;
   static final _uri = Uri.parse('dartc:integer');
   final _functions = <IntOperator, IrFunction>{};
-  final _quotients = <Instruction>{};
+  final _nativeOperations = <Instruction>{};
 
   this {
     for (final function in functions) {
@@ -17,14 +21,16 @@ final class IntegerArithmetic(Iterable<IrFunction> functions) {
   }
 
   List<IrClass> get classes => [
-    if (_functions.isNotEmpty)
+    if (_functions.keys.any(
+      (op) => op == .truncateDivide || op == .modulo || op == .remainder,
+    ))
       IrClass(CoreTypes.integerDivisionByZeroException, []),
   ];
 
   Iterable<IrFunction> get functions => _functions.values;
 
   FunctionTarget? callFor(Instruction instruction) {
-    if (_quotients.contains(instruction)) return null;
+    if (_nativeOperations.contains(instruction)) return null;
     final operator = _operator(instruction);
     return operator == null ? null : _function(operator).target;
   }
@@ -32,7 +38,12 @@ final class IntegerArithmetic(Iterable<IrFunction> functions) {
   static IntOperator? _operator(Instruction instruction) =>
       switch (instruction) {
         IntBinary(operator: final op)
-            when op == .truncateDivide || op == .modulo || op == .remainder =>
+            when op == .truncateDivide ||
+                op == .modulo ||
+                op == .remainder ||
+                op == .shiftLeft ||
+                op == .shiftRight ||
+                op == .unsignedShiftRight =>
           op,
         NumericBinary(:final operator, :final left, :final right)
             when left.type == .integer && right.type == .integer =>
@@ -51,6 +62,11 @@ final class IntegerArithmetic(Iterable<IrFunction> functions) {
           .integer,
           .integer,
         ]);
+        if (operator == .shiftLeft ||
+            operator == .shiftRight ||
+            operator == .unsignedShiftRight) {
+          return _shift(target, operator);
+        }
         final entry = Block(target.parameterTypes);
         final [left, right] = entry.parameters;
         final nonzero = Block(),
@@ -85,7 +101,7 @@ final class IntegerArithmetic(Iterable<IrFunction> functions) {
           ),
         );
         final quotient = divide.emit(IntBinary(.truncateDivide, left, right));
-        _quotients.add(quotient);
+        _nativeOperations.add(quotient);
         if (operator == .truncateDivide) {
           divide.finish(Return(quotient));
         } else {
@@ -126,4 +142,58 @@ final class IntegerArithmetic(Iterable<IrFunction> functions) {
         }
         return IrFunction(target, blocks);
       });
+
+  IrFunction _shift(FunctionTarget target, IntOperator operator) {
+    final error = _argumentError;
+    if (error == null) {
+      throw UnsupportedError(
+        'Integer shifts require the ArgumentError constructor body.',
+      );
+    }
+    final entry = Block(target.parameterTypes);
+    final [value, count] = entry.parameters;
+    final valid = Block(),
+        failed = Block(),
+        large = Block(),
+        shift = Block([.integer]);
+    entry.finish(
+      Branch(
+        entry.emit(IntBinary(.lessThan, count, const Constant.integer(0))),
+        Jump(failed),
+        Jump(valid),
+      ),
+    );
+    failed.finish(
+      Throw(
+        failed.emit(
+          Construct(
+            error.target,
+            error.target.signature.bind<Value>(
+              [count],
+              {},
+              (i) => error.defaults[i]!,
+            ),
+          ),
+        ),
+      ),
+    );
+    valid.finish(
+      Branch(
+        valid.emit(IntBinary(.lessThan, count, const Constant.integer(64))),
+        Jump(shift, [count]),
+        Jump(large),
+      ),
+    );
+    large.finish(
+      operator == .shiftRight
+          ? Jump(shift, [const Constant.integer(63)])
+          : const Return(Constant.integer(0)),
+    );
+    final result = shift.emit(
+      IntBinary(operator, value, shift.parameters.single),
+    );
+    _nativeOperations.add(result);
+    shift.finish(Return(result));
+    return IrFunction(target, [entry, valid, failed, large, shift]);
+  }
 }

@@ -25,6 +25,10 @@ abstract interface class CodeGenerator() {
   /// Integer truncating division, modulo and remainder retain signed 64-bit
   /// behavior, including overflow, and throw IntegerDivisionByZeroException
   /// for a zero divisor through normal exception edges.
+  /// Integer shifts retain the complete count: counts of 64 or more saturate
+  /// arithmetic right shifts and zero the other results. Negative counts throw
+  /// ArgumentError using its constructor and inherited class bodies supplied in
+  /// [program]. Generated dependencies use the same member selection as user code.
   /// Direct generic calls carry reified type arguments through the normal
   /// calling convention and root records. [ReifyType] reads or combines class and function
   /// type arguments into nullable, nominal, FutureOr, function and record types.

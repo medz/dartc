@@ -1,6 +1,6 @@
 # 库、脚本与并发边界
 
-转换以调用方明确提供的库批次为单位，包含每个库的所有 part。`package:dartc/frontend.dart` 的 `AnalysisSession` 复用官方 analyzer 的解析结果；名称与指令解析不由 lowering 重复实现。`includeDependencies: true` 纳入非 SDK 导入和导出库，整个批次完成静态检查后才开始转换。用户库的函数体由输入批次提供；引用的 SDK 普通顶层函数和静态方法按声明身份读取函数体，并在转换前检查所在库的全部单元。`Lowering.lower` 返回 `Future<LoweringResult>`，须在分析会话关闭前等待完成。无参数的同步 main 可作为独立进程入口，其他启动能力见下文。
+转换以调用方明确提供的库批次为单位，包含每个库的所有 part。`package:dartc/frontend.dart` 的 `AnalysisSession` 复用官方 analyzer 的解析结果；名称与指令解析不由 lowering 重复实现。`includeDependencies: true` 纳入非 SDK 导入和导出库，整个批次完成静态检查后才开始转换。用户库的函数体由输入批次提供；引用的 SDK 普通顶层函数、静态方法和生成式构造器所属类按声明身份读取源码，并在转换前检查所在库的全部单元。`Lowering.lower` 返回 `Future<LoweringResult>`，须在分析会话关闭前等待完成。无参数的同步 main 可作为独立进程入口，其他启动能力见下文。
 
 | 特性 | 当前 IR 范围 |
 | --- | --- |
@@ -19,7 +19,7 @@
 
 [库与命名空间行为对照](../test/frontend/lowering/libraries_test.dart)、[包上下文与诊断对照](../test/frontend/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/libraries.md)。
 
-SDK 成员按已解析的声明生成普通调用、方法提取或扩展调用；未提供函数体时保留导入身份。普通顶层函数和类静态方法的 Dart 函数体支持别名、再导出、函数提取、默认参数及继续引用其他函数；静态方法不要求先提供类的实例布局。范围检查的成功分支与 SDK 对照，失败分支保留构造和抛错操作。SDK 构造器、实例及 extension 成员、访问器和全局存储的实现装配仍未接通，外部声明所需原语和托管对象执行也未完整实现。缺少原生依赖时拒绝生成产物。见[SDK 函数体对照](../test/frontend/lowering/sdk_functions_test.dart)、[原生依赖拒绝](../test/compiler/compiler_test.dart)及[SDK 调用与用户重写测试](../test/frontend/lowering/sdk_calls_test.dart)。
+SDK 成员按已解析的声明生成普通调用、方法提取或扩展调用；未提供函数体时保留导入身份。普通顶层函数和类静态方法的 Dart 函数体支持别名、再导出、函数提取、默认参数及继续引用其他函数；静态方法不要求先提供类的实例布局。范围检查的成功分支与 SDK 对照，失败分支保留构造和抛错操作。直接引用的 SDK 非 external 生成式构造器会纳入所属类、父类及普通实例成员；整数移位也纳入负计数所需的 ArgumentError 类。ArgumentError 的生成式构造器和 message、name、invalidValue 属性已通过原生验证。SDK 工厂及其重定向目标、未纳入类的实例成员、extension 成员和全局存储的实现装配仍有缺口；external 声明所需原语也未完整实现，Error.stackTrace getter 和错误格式化尚不能原生执行。RangeError.checkNotNegative 的构造器现已纳入，但失败分支的字符串常量仍阻止原生生成。缺少原生依赖时拒绝生成产物。见[SDK 函数体对照](../test/frontend/lowering/sdk_functions_test.dart)、[原生依赖拒绝](../test/compiler/compiler_test.dart)及[SDK 调用与用户重写测试](../test/frontend/lowering/sdk_calls_test.dart)。
 
 [延迟导入对照](../test/frontend/lowering/deferred_imports_test.dart)覆盖未加载、请求已发出但尚未完成、加载完成和重复加载；两个前缀指向同一库时仍各自检查。`LoadLibrary` 返回代表加载完成的 Future，`CheckLibraryLoaded` 保留可抛错的读取效果。`loadLibrary` 的隐式函数保留普通调用和函数值身份。普通 extension 声明不能通过 deferred 导入，由 analyzer 检查。
 
@@ -53,7 +53,7 @@ Linux ARM64/x86-64 输出当前为固定地址、静态解析的 ELF 可执行�
 | `@Native` | 支持顶层和静态 external 函数。前端按 SDK 声明身份保留资产 ID、符号、原生签名及 `isLeaf`，支持常量别名；缺省资产依次取 `DefaultAsset` 和所属库 URI，part 使用所属库默认值，缺省符号采用声明名。省略类型实参时支持从指针和 void 签名推断。`LoweringResult.imports` 交付按声明身份绑定的 `NativeReference`；`Compiler.compile(nativeSymbols: ...)` 按资产 ID 与请求符号查找显式链接符号，shared/executable 输出由 `linkInputs` 提供实现，object/archive 输出保留未决引用。未使用声明仍检查静态义务，未引用的合法导入不要求绑定。自动资产发现、运行时 resolver/进程回退查找、数据字段、实例接收者及完整 FFI 类型仍未接通。当前后端支持同步入口内不逃逸的托管对象；`isLeaf` 保留声明承诺，跨线程及异步托管调用转换仍未实现。 |
 | 间接原生调用 | 独立 IR/CodeGenerator API 支持 `NativeCall`，从 `Pointer<NativeFunction<T>>` 的完整类型推导签名并检查 Dart 实参；参数和结果执行上述原生边界转换，函数地址通过寄存器调用，无须符号绑定。地址和其他活跃值经过寄存器覆盖、栈传参、分支及循环保持有效。IR 保留 `isLeaf` 承诺，当前后端支持同步标量/指针调用和入口内对象存活；闭包原生执行及跨线程托管调用协议尚未接通。 |
 | `asFunction` | 前端按 `dart:ffi` 声明身份将调用转换成捕获当时指针值的普通闭包 IR，其函数体执行 `NativeCall`。支持显式/推断 Dart 函数类型、显式 extension override、空参数/void 结果、上述标量和指针签名及兼容的指针返回类型扩大；`isLeaf` 按常量参数求值，默认 false。返回的函数可经普通 IR 的返回、局部变量、集合、分支、循环、动态调用及嵌套闭包使用。同名用户方法仍是普通调用。闭包的目标存储与生命周期、原生函数值调用、托管转换尚未实现，源码尚不能由原生后端执行；`asFunction` 方法本身的提取与间接调用也仍待接通。 |
-| 函数体 | 整数常量、加法、减法、乘法、截断除法、欧几里得取模、remainder、按位与/或/异或/取反及相应复合赋值、有符号比较，整数与布尔值的相等/不等比较；整数运算保留 64 位环绕结果，`int / int` 产生 double。支持条件表达式、逻辑短路、if/else、while/do/for、含标签的 break/continue、多返回，以及批次内跨库调用和递归。Dart 函数间的直接调用支持可选位置参数、命名参数及常量默认值；原生导出仍只接受必需位置参数。同步异常与清理见[原生异常范围](statements.md#原生异常与清理)，对象存储见[类的原生范围](classes.md#原生执行范围)。除零按 Dart 异常路径传播，保留 catch/finally；整数移位及异步尚未接入原生后端。 |
+| 函数体 | 整数常量、加法、减法、乘法、截断除法、欧几里得取模、remainder、按位与/或/异或/取反及相应复合赋值、有符号比较，整数与布尔值的相等/不等比较；整数运算保留 64 位环绕结果，`int / int` 产生 double。支持条件表达式、逻辑短路、if/else、while/do/for、含标签的 break/continue、多返回，以及批次内跨库调用和递归。Dart 函数间的直接调用支持可选位置参数、命名参数及常量默认值；原生导出仍只接受必需位置参数。同步异常与清理见[原生异常范围](statements.md#原生异常与清理)，对象存储见[类的原生范围](classes.md#原生执行范围)。除零与负移位按 Dart 异常路径传播，保留 catch/finally；三种整数移位保留完整计数及 64 位边界，异步尚未接入原生后端。 |
 | 浮点 | 支持静态 int/double 操作数的混合加、减、乘、IEEE 除法、全部数值比较及 `toDouble`，另支持 double 常量和取负；比较保持整数的原始数值，不因算术转换而丢失精度。保留 NaN、无穷、次正规数和正负零行为，不做融合乘加或 fast-math 改写。参数、结果、分支汇合和调用保持 double 表示。部分混合数值常量表达式尚未实现，见[数值比较](expressions.md#数值比较与-sdk-差异)。其他数值转换、浮点取模/截断除法、compareTo 及完整数学库尚未接入。当前执行验证使用 SDK 宿主的默认浮点控制环境，非默认控制状态尚未验证。 |
 | 参数与存储 | ARM64 的前八个、x86-64 的前六个原生整数或指针参数使用通用寄存器；两者另有八个由 `Float` 和 `Double` 共用的浮点参数寄存器，与通用寄存器独立分配。各类超出的参数按源顺序使用栈：macOS ARM64 按实际大小自然对齐，Linux ARM64 与 x86-64 使用八字节槽。Dart 函数间另支持布尔参数及结果，不隐式扩展原生导出签名。分支、循环和调用之间保留活跃值，块参数遵循同时赋值语义；栈帧保持 16 字节对齐及帧指针链，出参区与局部存储分开。ARM64 帧支持保存 D8–D15 的低 64 位，x86-64 的标量浮点寄存器均按调用可破坏处理。超出当前栈访问、栈帧或分支/调用位移编码范围时明确报错。 |
 | 原生指针 | 支持上述整数、Float 和 Double 元素类型的 `Pointer<T>.fromAddress`、`.address`、相等/不等比较、`+`、`-`、`elementAt`、`.value` 及 `[]`/`[]=` 读写，包括增减和复合赋值。偏移和索引以元素计数，允许负值，地址运算保留目标指针位宽；计算地址不访问存储。整数读取按有符号/无符号规则扩展，写入截断到元素宽度；Float 使用四字节存储，写入舍入精度、读取转换为 double；Double 使用八字节存储。写入不改变原 Dart 变量或赋值表达式的值，不影响邻接字节。接收者、索引及右值按 Dart 顺序各求值一次，别名修改可见。访问要求有效、存活且按元素大小自然对齐的原生存储；不进行集合边界检查，不将机器访存失败当作 Dart 异常。cast、其他元素类型、结构体、回调及分配器尚未接入。 |
@@ -67,7 +67,7 @@ Linux ARM64/x86-64 输出当前为固定地址、静态解析的 ELF 可执行�
 
 [共享库绑定契约](../test/linker/shared_libraries_test.dart)检查依赖顺序、符号别名、可写指针槽、装载表及无效引用；[装载验证](../test/linker/native_test.dart)检查同名符号的目标平台查找规则、缺库和缺符号的具体错误。[地址验证](../test/linker/addresses_native_test.dart)检查静态对象、归档和共享库的函数地址身份、数据初始化与双向修改，以及本地地址槽；[重定位契约](../test/object/indirect_relocations_test.dart)检查指令形式、直接/间接引用和损坏记录。[调用验证](../test/codegen/native_calls_test.dart)使用同一组窄整数、Float、混合栈参数、副作用和跨调用存活用例执行独立共享库；[编译验证](../test/compiler/native_imports_test.dart)覆盖源码 `@Native` 到共享库依赖的完整路径。
 
-[整数运算对照](../test/compiler/integer_operations_test.dart)覆盖乘法和截断除法溢出、两种余数的符号、除零与清理、按位与/或/异或/取反、复合赋值、重复与重叠操作数，以及调用和循环中的值保存；使用正负边界、跨 32 位值及交替位模式对照 SDK。
+[整数运算对照](../test/compiler/integer_operations_test.dart)覆盖乘法和截断除法溢出、两种余数的符号、除零与清理、三种移位的完整计数与负计数错误载荷、按位与/或/异或/取反、复合赋值、重复与重叠操作数，以及调用和循环中的值保存；使用正负边界、跨 32 位值及交替位模式对照 SDK。
 
 [指针对照](../test/compiler/pointers_test.dart)检查地址往返、整数边界读写、寄存器与栈的混合参数、跨调用及循环存活、别名修改和复合赋值顺序。[FFI 声明绑定验证](../test/frontend/lowering/ffi_test.dart)检查同名用户类型和 extension 不被替换为原生操作，以及 int 界限用于地址和索引、对应的 int/double 界限用于存储值；[泛型构造源码验证](../test/compiler/managed_objects_test.dart)检查这些参数在嵌套回收后的原生存储结果。[IR 契约](../test/ir/native_memory_test.dart)检查语义类型和存储效果。[签名验证](../test/interop/native_signature_test.dart)与[编译拒绝验证](../test/compiler/compiler_test.dart)覆盖不支持及不匹配的类型。
 

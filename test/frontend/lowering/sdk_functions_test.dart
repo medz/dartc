@@ -10,6 +10,25 @@ void main() {
     fixture = await FixtureComparison.load('sdk_functions');
   });
 
+  test('SDK constructors and inherited members use ordinary class bodies', () {
+    final argument = fixture.program.classes.singleWhere(
+      (c) => c.type == ValueType.argumentError,
+    );
+    expect(argument.type.superclass, ValueType.error);
+    for (final name in ['new', 'value']) {
+      expect(
+        fixture.program.implementationOf(argument.constructors[name]!),
+        isA<IrFunction>(),
+      );
+    }
+    for (final value in [-0x8000000000000000, -1, 0, 0x7fffffffffffffff]) {
+      fixture.compare('errorPayload', [value], () => sdk.errorPayload(value));
+      fixture.compare('invalidArgument', [
+        value,
+      ], () => sdk.invalidArgument(value));
+    }
+  });
+
   test('SDK bodies retain identity through aliases and function values', () {
     final functions = fixture.program.functions;
     final check = functions.singleWhere(

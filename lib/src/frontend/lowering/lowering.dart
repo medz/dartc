@@ -19,8 +19,10 @@ final class Lowering({final bool enableAssertions = false}) {
   /// assertion conditions and raise assertion errors on failures.
   ///
   /// Calls to the same declaration share a target throughout the batch.
-  /// Referenced SDK top-level functions and class static methods with Dart bodies
+  /// Referenced SDK top-level functions, static methods and generative classes
   /// are resolved and checked in the same session, then lowered normally.
+  /// SDK factory bodies remain imports. Integer shifts also include ArgumentError
+  /// and its superclass for the negative-count path.
   /// Keep the owning analysis session open until the returned future completes.
   /// Constants appear as operands at their uses. Throws [FormatException] for
   /// dependency static errors and [UnsupportedError] for missing translations.
@@ -90,13 +92,35 @@ final class Lowering({final bool enableAssertions = false}) {
         lowerClass(unit, bindings, source, functions, application: application),
       );
     }
-    for (var i = 0; i < bindings.sdkFunctions.length; i++) {
-      final element = bindings.sdkFunctions[i];
+    var sdkClass = 0, sdkFunction = 0;
+    while (sdkClass < bindings.sdkClasses.length ||
+        sdkFunction < bindings.sdkFunctions.length) {
+      if (sdkClass < bindings.sdkClasses.length) {
+        final element = bindings.sdkClasses[sdkClass++];
+        final library = await input.resolveLibrary(element.library);
+        final declaration = library.getFragmentDeclaration(
+          element.firstFragment,
+        );
+        if (declaration == null) {
+          throw UnsupportedError('SDK class unavailable: ${element.name}');
+        }
+        final unit = declaration.resolvedUnit!, node = declaration.node;
+        bindings.registerClass(element, unit, node);
+        classes.add(lowerClass(unit, bindings, node, functions));
+        continue;
+      }
+      final element = bindings.sdkFunctions[sdkFunction++];
       final library = await input.resolveLibrary(element.library);
       final declaration = library.getFragmentDeclaration(element.firstFragment);
       if (declaration == null) {
         throw UnsupportedError('SDK declaration unavailable: ${element.name}');
       }
+      final target = bindings.target(
+        element,
+        declaration.resolvedUnit!,
+        declaration.node,
+      );
+      if (functions.any((function) => function.target == target)) continue;
       final body = switch (declaration.node) {
         ast.FunctionDeclaration(:final functionExpression) =>
           functionExpression.body,

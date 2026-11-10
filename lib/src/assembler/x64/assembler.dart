@@ -80,6 +80,18 @@ final class Assembler() {
   void divideSigned(Register divisor) =>
       _bytes.add([0x48 | divisor.index >> 3, 0xf7, 0xf8 | divisor.index & 7]);
 
+  /// Shifts [value] left by the low six bits of CL, changing flags.
+  void shiftLeft(Register value) =>
+      _bytes.add([0x48 | value.index >> 3, 0xd3, 0xe0 | value.index & 7]);
+
+  /// Shifts [value] right with sign extension by the low six bits of CL.
+  void shiftRightSigned(Register value) =>
+      _bytes.add([0x48 | value.index >> 3, 0xd3, 0xf8 | value.index & 7]);
+
+  /// Shifts [value] right with zero extension by the low six bits of CL.
+  void shiftRightUnsigned(Register value) =>
+      _bytes.add([0x48 | value.index >> 3, 0xd3, 0xe8 | value.index & 7]);
+
   /// Computes a 64-bit bitwise conjunction in [destination], updating flags.
   void bitAnd(Register destination, Register source) =>
       _binary(0x21, destination, source);

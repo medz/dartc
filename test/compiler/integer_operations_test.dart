@@ -26,6 +26,74 @@ void main() {
     0xaaaaaaaaaaaaaaaa,
     0x5555555555555555,
   ];
+  test('shifts retain the full count and signed 64-bit semantics', () {
+    for (final value in values) {
+      for (final count in [
+        0,
+        1,
+        31,
+        32,
+        63,
+        64,
+        65,
+        127,
+        0x100000000,
+        0x7fffffffffffffff,
+      ]) {
+        final bits = BigInt.from(value);
+        final left = count >= 64 ? 0 : (bits << count).toSigned(64).toInt();
+        final right = count >= 64
+            ? (value < 0 ? -1 : 0)
+            : (bits >> count).toInt();
+        final unsigned = count >= 64
+            ? 0
+            : (bits.toUnsigned(64) >> count).toSigned(64).toInt();
+        expect(
+          native.shiftLeft(value, count),
+          left,
+          reason: '$value << $count',
+        );
+        expect(
+          native.shiftRight(value, count),
+          right,
+          reason: '$value >> $count',
+        );
+        expect(
+          native.unsignedShiftRight(value, count),
+          unsigned,
+          reason: '$value >>> $count',
+        );
+        expect(sdk.shiftLeft(value, count), left);
+        expect(sdk.shiftRight(value, count), right);
+        expect(sdk.unsignedShiftRight(value, count), unsigned);
+        expect(
+          native.shiftCompound(value, count),
+          sdk.shiftCompound(value, count),
+        );
+      }
+    }
+  });
+
+  test(
+    'negative counts preserve ArgumentError payload, evaluation and cleanup',
+    () {
+      for (final count in [-1, -64, -0x8000000000000000, 0, 65]) {
+        for (final kind in [0, 1, 2]) {
+          final expected = count < 0
+              ? (((70 + count) * 10 + 3) * 10 + 4) ^ count
+              : (70 + count) * 10 + 4;
+          expect(native.shiftFailure(7, count, kind), expected);
+          expect(sdk.shiftFailure(7, count, kind), expected);
+        }
+      }
+      for (final value in values) {
+        expect(
+          native.argumentErrors(-37, value),
+          sdk.argumentErrors(-37, value),
+        );
+      }
+    },
+  );
   test('native integer operations retain all 64 bits and wrap overflow', () {
     final operations = <(String, BinaryDart, BinaryDart)>[
       ('multiply', native.multiply, sdk.multiply),

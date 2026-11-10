@@ -4,6 +4,18 @@ import 'package:dartc/assembler/arm64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('variable shifts encode distinct signed and unsigned operations', () {
+    final assembler = Assembler()
+      ..shiftLeft(.x0, .x1, .x2)
+      ..shiftRightSigned(.x30, .x29, .x28)
+      ..shiftRightUnsigned(.x9, .x8, .x7);
+    final bytes = ByteData.sublistView(assembler.finish());
+    expect(bytes.getUint32(0, .little), 0x9ac22020);
+    expect(bytes.getUint32(4, .little), 0x9adc2bbe);
+    expect(bytes.getUint32(8, .little), 0x9ac72509);
+    expect(() => assembler.shiftLeft(.x0, .x1, .x2), throwsStateError);
+  });
+
   test('signed division encodes registers and rejects SP without writing', () {
     final assembler = Assembler()
       ..divideSigned(.x0, .x1, .x2)
@@ -180,6 +192,9 @@ void main() {
       assembler.bitAnd,
       assembler.bitOr,
       assembler.bitXor,
+      assembler.shiftLeft,
+      assembler.shiftRightSigned,
+      assembler.shiftRightUnsigned,
     ]) {
       expect(() => emit(.sp, .x0, .x1), throwsArgumentError);
       expect(() => emit(.x0, .sp, .x1), throwsArgumentError);

@@ -112,6 +112,11 @@ IrClass lowerClass(
     final target = bindings.target(ctor, unit, site);
     constructors.add(target);
     if (target.redirect != null) return;
+    if (ctor.isFactory && element.library.isInSdk) {
+      // shortcut: SDK factories stay imported until their dependencies are supported.
+      functions.add(IrExternal(target, defaults: bindings.defaults(target)));
+      return;
+    }
     FunctionLowering.append(
       functions,
       unit,
@@ -205,7 +210,8 @@ IrClass lowerClass(
         final method = member.declaredFragment!.element;
         final target = memberTarget(method, member);
         if (target.kind.isVirtual) members.add(target);
-        if (!target.isAbstract) {
+        if (!target.isAbstract &&
+            !functions.any((function) => function.target == target)) {
           FunctionLowering.append(
             functions,
             unit,

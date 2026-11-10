@@ -49,16 +49,37 @@ base class ScalarCodeGenerator<R extends Object>(
     final frames = FrameLookup();
     final traces = StackTraces(frames);
     final casts = CheckedCasts();
+    final argumentError = program.classes
+        .where((c) => c.type == ValueType.argumentError)
+        .firstOrNull
+        ?.constructors['new'];
     final arithmetic = IntegerArithmetic(
       selected.map(program.implementationOf).whereType<IrFunction>(),
+      argumentError: argumentError == null
+          ? null
+          : program.implementationOf(argumentError),
     );
+    if (arithmetic.functions.isNotEmpty) {
+      program = IrProgram(
+        [
+          ...program.classes,
+          for (final declaration in arithmetic.classes)
+            if (!program.classes.any((c) => c.type == declaration.type))
+              declaration,
+        ],
+        [...program.functions, ...arithmetic.functions],
+        globals: program.globals,
+        externals: program.externals,
+      );
+      selected.addAll(
+        program.reachableFrom([
+          ...selected,
+          for (final function in arithmetic.functions) function.target,
+        ]),
+      );
+    }
     final layouts = ProgramLayout(
-      [
-        ...casts.classes,
-        ...arithmetic.classes,
-        ...program.classes,
-        traces.declaration,
-      ],
+      [...casts.classes, ...program.classes, traces.declaration],
       referencedClasses: selected.expand(
         (target) =>
             program.implementationOf(target)?.referencedClasses ?? const [],
@@ -102,14 +123,17 @@ base class ScalarCodeGenerator<R extends Object>(
         throw ArgumentError('Native signature mismatch: ${declaration.name}');
       }
     }
-    final generated = <IrFunction>[];
+    final generated = arithmetic.functions.toList();
     Iterable<IrFunction> supportFunctions() => [
       ...arithmetic.functions,
       ...casts.functions,
       ...layouts.relations.functions,
       ...layouts.types.functions,
     ];
-    var pending = supportFunctions().toList();
+    var pending = [
+      for (final function in supportFunctions())
+        if (!functions.containsKey(function.target)) function,
+    ];
     while (pending.isNotEmpty) {
       generated.addAll(pending);
       heap.include(pending, layouts);

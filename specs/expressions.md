@@ -41,9 +41,11 @@ NoSuchMethodError.withInvocation 的普通工厂调用与提取复用既有调�
 
 动态调用 `g<String>('bad')` 遗漏必需命名实参时，传给 `noSuchMethod` 的 Invocation 应保留显式类型实参 `String`。在同一份 `shapeBeforeBounds` 样本上，macOS ARM64 的 Dart SDK 3.13.7 JIT 返回 111，SDK AOT 返回 101。IR 保留显式类型实参，结果为 111。对照使用 SDK 显式构造的 Invocation 和同一接收者的 `noSuchMethod`。[样本](../test/frontend/lowering/fixtures/dynamic_dispatch.dart)、[Invocation.typeArguments](https://api.dart.dev/dart-core/Invocation/typeArguments.html)。
 
-## 原生整数除法与余数
+## 原生整数除法、余数与移位
 
-原生整数 `~/` 向零截断，`%` 返回非负欧几里得余数，`remainder` 返回与被除数同号的截断余数；结果遵循 64 位整数回绕。最小整数除以 -1 返回最小整数，相应余数为 0。三个操作遇到整数零除数均抛出 IntegerDivisionByZeroException，保留操作数求值顺序、typed catch 与 finally；忽略结果不会删除抛错。见 [~/ 契约](https://api.dart.dev/dart-core/num/operator_truncate_divide.html)、[% 契约](https://api.dart.dev/dart-core/num/operator_modulo.html)、[remainder 契约](https://api.dart.dev/dart-core/num/remainder.html)和[原生边界验证](../test/compiler/integer_operations_test.dart)。该异常的消息、stackTrace getter 和格式化尚未接通；原生移位及浮点余数/截断除法仍待实现。
+原生整数 `~/` 向零截断，`%` 返回非负欧几里得余数，`remainder` 返回与被除数同号的截断余数；结果遵循 64 位整数回绕。最小整数除以 -1 返回最小整数，相应余数为 0。三个操作遇到整数零除数均抛出 IntegerDivisionByZeroException，保留操作数求值顺序、typed catch 与 finally；忽略结果不会删除抛错。见 [~/ 契约](https://api.dart.dev/dart-core/num/operator_truncate_divide.html)、[% 契约](https://api.dart.dev/dart-core/num/operator_modulo.html)、[remainder 契约](https://api.dart.dev/dart-core/num/remainder.html)和[原生边界验证](../test/compiler/integer_operations_test.dart)。该异常的消息、stackTrace getter 和格式化尚未接通；浮点余数/截断除法仍待实现。
+
+原生 `<<`、`>>`、`>>>` 及其复合赋值保留完整的位移计数。左移按 64 位回绕，算术右移补符号位，逻辑右移补零；计数大于等于 64 时，左移和逻辑右移为 0，算术右移为 0 或 -1。负计数抛出 ArgumentError，操作数只求值一次，忽略结果仍须抛错。错误的 message 保留负计数这个 int，name 与 invalidValue 为 null；这一载荷对应当前固定 SDK 的库行为，不扩大为跨版本语言保证。构造器与属性读取使用 SDK 的普通 Dart 实现，用户重写仍按实际接收者派发。见 [int 的原生整数范围](https://api.dart.dev/dart-core/int-class.html)、[逻辑右移规范](https://github.com/dart-lang/language/blob/main/accepted/2.14/triple-shift-operator/feature-specification.md)和[原生边界验证](../test/compiler/integer_operations_test.dart)。
 
 ## 数值比较与 SDK 差异
 

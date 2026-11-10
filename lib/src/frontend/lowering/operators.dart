@@ -142,6 +142,11 @@ Value? lowerBinary(
     _ => unsupported(context.unit, site, operator.lexeme),
   };
   if (left.type == .integer && right.type == .integer) {
+    if (op == .shiftLeft || op == .shiftRight || op == .unsignedShiftRight) {
+      context.bindings.requireSdkClass(
+        member!.library.getClass('ArgumentError')!,
+      );
+    }
     return context.emit(IntBinary(op, left, right));
   }
   if (!ValueType.number.accepts(left.type) ||
