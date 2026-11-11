@@ -4,11 +4,27 @@ import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
+import 'package:dartc/src/codegen/frame_lookup.dart';
+import 'package:dartc/src/codegen/heap_functions.dart';
+import 'package:dartc/src/codegen/stack_traces.dart';
 import 'package:test/test.dart';
 
 import 'fixtures/aliases.dart';
 
 void main() {
+  test('heap and stack inspection do not construct Dart pointer objects', () {
+    final frames = FrameLookup(), heap = HeapFunctions(frames);
+    for (final function in [
+      ...heap.functions,
+      frames.function,
+      ...StackTraces(frames).functions(heap.invalid),
+    ]) {
+      final operations = function.blocks.expand((block) => block.instructions);
+      expect(operations.whereType<PointerFromAddress>(), isEmpty);
+      expect(operations.whereType<PointerOffset>(), isEmpty);
+    }
+  });
+
   test('void store results remain readable as null', () {
     final target = FunctionTarget(
       .parse('memory:void-store'),
@@ -20,7 +36,11 @@ void main() {
     block.finish(
       Return(
         block.emit(
-          StoreNative(block.parameters.single, const Constant.integer(42)),
+          StoreNative(
+            block.emit(PointerAddress(block.parameters.single)),
+            .new(Int64),
+            const Constant.integer(42),
+          ),
         ),
       ),
     );

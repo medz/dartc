@@ -28,8 +28,11 @@ void main() {
     );
     final function = PointerFromAddress(address, type);
     expect(PointerAddress(function).type, ValueType.integer);
-    expect(() => LoadNative(function), throwsArgumentError);
-    expect(() => StoreNative(function, address), throwsArgumentError);
+    expect(() => LoadNative(function, .new(ffi.Int64)), throwsArgumentError);
+    expect(
+      () => StoreNative(function, .new(ffi.Int64), address),
+      throwsArgumentError,
+    );
     expect(() => PointerOffset(function, address), throwsArgumentError);
     expect(FfiTypes.isPointer(type.nullable), isFalse);
     final block = Block([.integer]);
@@ -61,17 +64,18 @@ void main() {
     );
   });
 
-  test('native reads and writes use the element value type', () {
-    for (final type in [ffi.Pointer<ffi.Float>, ffi.Pointer<ffi.Double>]) {
-      final pointer = PointerFromAddress(address, FfiTypes.pointerTypes[type]!);
-      expect(LoadNative(pointer).type, ValueType.floating);
-      expect(StoreNative(pointer, const Constant.floating(1.5)).effects, {
-        Effect.writesStorage,
-      });
-      expect(() => StoreNative(pointer, address), throwsArgumentError);
+  test('native reads and writes use their explicit storage type', () {
+    for (final type in [ffi.Float, ffi.Double]) {
+      final native = NativeScalarType(type);
+      expect(LoadNative(address, native).type, ValueType.floating);
+      expect(
+        StoreNative(address, native, const Constant.floating(1.5)).effects,
+        {Effect.writesStorage},
+      );
+      expect(() => StoreNative(address, native, address), throwsArgumentError);
     }
     expect(
-      () => StoreNative(pointer, const Constant.floating(1.5)),
+      () => StoreNative(address, .new(ffi.Int64), const Constant.floating(1.5)),
       throwsArgumentError,
     );
   });
@@ -83,23 +87,41 @@ void main() {
     expect(PointerAddress(pointer).effects, isEmpty);
     expect(PointerOffset(pointer, address).effects, {Effect.allocates});
     expect(PointerOffset(pointer, address).type, pointer.type);
-    expect(LoadNative(pointer).effects, {Effect.readsStorage});
-    expect(StoreNative(pointer, address).effects, {Effect.writesStorage});
-    expect(StoreNative(pointer, address).type, ValueType.voidType);
+    expect(LoadNative(address, .new(ffi.Int64)).effects, {Effect.readsStorage});
+    expect(StoreNative(address, .new(ffi.Int64), address).effects, {
+      Effect.writesStorage,
+    });
+    expect(
+      StoreNative(address, .new(ffi.Int64), address).type,
+      ValueType.voidType,
+    );
     final impostor = Block([ClassType(Uri.parse('dart:ffi'), 'Pointer')])
         .parameters
         .single;
     for (final value in [address, impostor, const Constant.nullValue()]) {
       expect(() => PointerAddress(value), throwsArgumentError);
       expect(() => PointerOffset(value, address), throwsArgumentError);
-      expect(() => LoadNative(value), throwsArgumentError);
-      expect(() => StoreNative(value, address), throwsArgumentError);
     }
     expect(
       () => PointerFromAddress(pointer, FfiTypes.int64Pointer),
       throwsArgumentError,
     );
-    expect(() => StoreNative(pointer, pointer), throwsArgumentError);
+    for (final value in [pointer, impostor, const Constant.nullValue()]) {
+      expect(() => LoadNative(value, .new(ffi.Int64)), throwsArgumentError);
+      expect(
+        () => StoreNative(value, .new(ffi.Int64), address),
+        throwsArgumentError,
+      );
+    }
+    expect(() => LoadNative(address, .new(ffi.Void)), throwsArgumentError);
+    expect(
+      () => StoreNative(address, .new(ffi.Void), address),
+      throwsArgumentError,
+    );
+    expect(
+      () => StoreNative(address, .new(ffi.Int64), pointer),
+      throwsArgumentError,
+    );
     expect(() => PointerOffset(pointer, pointer), throwsArgumentError);
     expect(
       FfiTypes.valueType(NativeTypeRef.of(ffi.Pointer<ffi.Int64>)),

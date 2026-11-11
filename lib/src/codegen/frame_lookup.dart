@@ -1,6 +1,5 @@
 import 'dart:ffi';
 
-import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 
 /// Generates the shared return-PC lookup for stack roots and captured traces.
@@ -14,19 +13,12 @@ final class FrameLookup() {
   late final IrFunction function = _body();
 
   IrFunction _body() {
-    final pointer = FfiTypes.resolve(
-      NativePointerType(NativeScalarType(Int64)),
-    );
     Value load(Block block, Value base, [int offset = 0]) => block.emit(
       LoadNative(
-        block.emit(
-          PointerFromAddress(
-            offset == 0
-                ? base
-                : block.emit(IntBinary(.add, base, Constant.integer(offset))),
-            pointer,
-          ),
-        ),
+        offset == 0
+            ? base
+            : block.emit(IntBinary(.add, base, Constant.integer(offset))),
+        .new(Int64),
       ),
     );
     Value op(Block block, IntOperator operator, Value a, Value b) =>

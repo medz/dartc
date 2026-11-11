@@ -1,5 +1,4 @@
 import 'dart:typed_data';
-import 'dart:ffi' show Float;
 
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
@@ -388,25 +387,28 @@ final class ScalarFunction<R extends Object>(
             scale: FfiTypes.pointerElement(pointer.type)!.nativeSize,
           );
           allocation.define(instruction, destination);
-        } else if (instruction case StoreNative(:final pointer, :final value)) {
-          final base = allocation.read(pointer),
+        } else if (instruction case StoreNative(
+          :final address,
+          :final nativeType,
+          :final value,
+        )) {
+          final base = allocation.read(address),
               source = allocation.read(value, except: [base]);
-          final native = FfiTypes.pointerElement(pointer.type)!;
           allocation.release(value);
-          if (native == Float) {
+          if (nativeType.isSinglePrecision) {
             final temporary = allocation.allocate(.floating, preferred: source);
             emitter.convertDoubleToFloat(temporary, source);
             emitter.storeMemory(temporary, base, bytes: 4);
             allocation.releaseTemporary(temporary);
           } else {
-            emitter.storeMemory(source, base, bytes: native.nativeSize);
+            emitter.storeMemory(source, base, bytes: nativeType.nativeSize);
           }
-          allocation.release(pointer);
+          allocation.release(address);
           emptyResult(instruction);
         } else if (instruction
             case PointerFromAddress(address: final operand) ||
                 PointerAddress(pointer: final operand) ||
-                LoadNative(pointer: final operand)) {
+                LoadNative(address: final operand)) {
           final source = allocation.read(operand);
           allocation.release(operand);
           final destination = allocation.allocate(
@@ -414,14 +416,14 @@ final class ScalarFunction<R extends Object>(
             preferred: source,
           );
           if (instruction is LoadNative) {
-            final native = FfiTypes.pointerElement(operand.type)!;
+            final native = instruction.nativeType;
             emitter.loadMemory(
               destination,
               source,
               bytes: native.nativeSize,
               signed: native.integerLayout?.signed ?? false,
             );
-            if (native == Float) {
+            if (native.isSinglePrecision) {
               emitter.convertFloatToDouble(destination, destination);
             }
           } else {

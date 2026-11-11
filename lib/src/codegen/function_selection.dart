@@ -1,5 +1,3 @@
-import 'dart:ffi';
-
 import 'package:dartc/abi.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -178,9 +176,8 @@ final class FunctionSelection<R>(
               PointerOffset() ||
               LoadNative():
             break;
-          case StoreNative(:final pointer):
-            if (FfiTypes.pointerElement(pointer.type) == Float &&
-                _floatingTemporaries == 0) {
+          case StoreNative(:final nativeType):
+            if (nativeType.isSinglePrecision && _floatingTemporaries == 0) {
               _floatingTemporaries = 1;
             }
           case NumericNegate(:final type):

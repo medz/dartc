@@ -1772,14 +1772,13 @@ final class IrInterpreter(
           }
           final address = (read(pointer) as ffi.Pointer).address;
           values[op] = invoke(op, address, arguments.map(read).toList());
-        case LoadNative(:final pointer):
-          final native = FfiTypes.pointerElement(pointer.type)!;
+        case LoadNative(:final address, nativeType: final native):
           final data = _nativeData(
-            read(pointer) as ffi.Pointer,
+            ffi.Pointer<ffi.Void>.fromAddress(read(address) as int),
             native.nativeSize,
           );
           if (native.isFloating) {
-            values[op] = native == ffi.Float
+            values[op] = native.isSinglePrecision
                 ? data.getFloat32(0, Endian.host)
                 : data.getFloat64(0, Endian.host);
             break;
@@ -1797,15 +1796,18 @@ final class IrInterpreter(
                   : data.getUint32(0, Endian.host),
             _ => data.getInt64(0, Endian.host),
           };
-        case StoreNative(:final pointer, :final value):
-          final native = FfiTypes.pointerElement(pointer.type)!;
+        case StoreNative(
+          :final address,
+          nativeType: final native,
+          :final value,
+        ):
           final data = _nativeData(
-            read(pointer) as ffi.Pointer,
+            ffi.Pointer<ffi.Void>.fromAddress(read(address) as int),
             native.nativeSize,
           );
           if (native.isFloating) {
             final number = read(value) as double;
-            if (native == ffi.Float) {
+            if (native.isSinglePrecision) {
               data.setFloat32(0, number, Endian.host);
             } else {
               data.setFloat64(0, number, Endian.host);

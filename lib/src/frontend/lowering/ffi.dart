@@ -93,15 +93,18 @@ Value? lowerFfi(
       FfiTypes.isPointer(operands.single.type)) {
     return emit(PointerAddress(operands.single));
   }
-  for (final type in FfiTypes.scalarTypes.values) {
+  for (final MapEntry(key: native, value: type)
+      in FfiTypes.scalarTypes.entries) {
+    final storage = NativeScalarType(native);
     final access = library.getExtension('${type.name}Pointer')!;
     if (member == access.getGetter('value')) {
-      return emit(LoadNative(operands.single));
+      return emit(LoadNative(emit(PointerAddress(operands.single)), storage));
     }
     if (member == access.getSetter('value')) {
       return emit(
         StoreNative(
-          operands[0],
+          emit(PointerAddress(operands[0])),
+          storage,
           scalar(operands[1], FfiTypes.valueType(FfiTypes.describe(type))),
         ),
       );
@@ -120,21 +123,26 @@ Value? lowerFfi(
       );
       return emit(PointerOffset(operands[0], index));
     }
-    if (member == access.getMethod('[]')) {
-      final pointer = emit(
-        PointerOffset(operands[0], scalar(operands[1], .integer)),
+    final read = member == access.getMethod('[]');
+    if (read || member == access.getMethod('[]=')) {
+      final offset = emit(
+        IntBinary(
+          .multiply,
+          scalar(operands[1], .integer),
+          Constant.integer(storage.nativeSize),
+        ),
       );
-      return emit(LoadNative(pointer));
-    }
-    if (member == access.getMethod('[]=')) {
-      final pointer = emit(
-        PointerOffset(operands[0], scalar(operands[1], .integer)),
+      final address = emit(
+        IntBinary(.add, emit(PointerAddress(operands[0])), offset),
       );
       return emit(
-        StoreNative(
-          pointer,
-          scalar(operands[2], FfiTypes.valueType(FfiTypes.describe(type))),
-        ),
+        read
+            ? LoadNative(address, storage)
+            : StoreNative(
+                address,
+                storage,
+                scalar(operands[2], FfiTypes.valueType(storage)),
+              ),
       );
     }
   }

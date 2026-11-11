@@ -48,19 +48,12 @@ final class StackTraces(final FrameLookup frames) {
     init.emit(StoreField(caller, init.parameters[0], init.parameters[2]));
     init.finish(const Return());
 
-    final pointer = FfiTypes.resolve(
-      NativePointerType(NativeScalarType(Int64)),
-    );
     Value add(Block block, Value a, Value b) =>
         block.emit(IntBinary(.add, a, b));
     Value load(Block block, Value base, [int offset = 0]) => block.emit(
       LoadNative(
-        block.emit(
-          PointerFromAddress(
-            offset == 0 ? base : add(block, base, Constant.integer(offset)),
-            pointer,
-          ),
-        ),
+        offset == 0 ? base : add(block, base, Constant.integer(offset)),
+        .new(Int64),
       ),
     );
     final entry = Block(_walk.parameterTypes);

@@ -162,7 +162,13 @@ void main() {
       expect(instructions('write').whereType<StoreNative>(), hasLength(1));
       final bounded = instructions('boundedWrite').toList();
       expect(bounded.whereType<PointerFromAddress>(), hasLength(2));
-      expect(bounded.whereType<PointerOffset>(), hasLength(4));
+      expect(bounded.whereType<PointerOffset>(), hasLength(2));
+      expect(
+        bounded.whereType<StoreNative>().every(
+          (store) => store.address.type == .integer,
+        ),
+        isTrue,
+      );
       expect(
         bounded.whereType<StoreNative>().map((store) => store.value.type),
         [

@@ -578,41 +578,43 @@ final class PointerOffset(final Value pointer, final Value index)
   Iterable<Value> get inputs => [pointer, index];
 }
 
-/// Reads native storage as the Dart value of the pointer's element type.
+/// Reads [nativeType] storage at an integer [address].
 ///
 /// The caller must keep the storage alive, aligned and readable. Invalid native
 /// memory access is not a Dart exception and is not checked by this operation.
-final class LoadNative(final Value pointer) extends Instruction {
-  this
-    : super(
-        FfiTypes.valueType(
-          NativeTypeRef.of(
-            FfiTypes.pointerElement(pointer.type) ??
-                (throw ArgumentError('Expected a native scalar pointer.')),
-          ),
-        ),
-      );
-  @override
-  Iterable<Value> get inputs => [pointer];
-}
-
-/// Writes a Dart value with the pointer's native width and precision.
-///
-/// The caller must keep the storage alive, aligned and writable. The write is
-/// observable through every alias, even when its result is unused.
-final class StoreNative(final Value pointer, final Value value)
+final class LoadNative(final Value address, final NativeScalarType nativeType)
     extends Instruction {
-  this : super(.voidType) {
-    final element = FfiTypes.pointerElement(pointer.type);
-    if (element == null ||
-        value.type != FfiTypes.valueType(NativeTypeRef.of(element))) {
+  this : super(FfiTypes.valueType(nativeType)) {
+    if (address.type != .integer || nativeType.isVoid) {
       throw ArgumentError(
-        'Expected a native scalar pointer and matching value.',
+        'Expected an integer address and sized native scalar.',
       );
     }
   }
   @override
-  Iterable<Value> get inputs => [pointer, value];
+  Iterable<Value> get inputs => [address];
+}
+
+/// Writes [value] at an integer [address] using [nativeType]'s width and precision.
+///
+/// The caller must keep the storage alive, aligned and writable. The write is
+/// observable through every alias, even when its result is unused.
+final class StoreNative(
+  final Value address,
+  final NativeScalarType nativeType,
+  final Value value,
+) extends Instruction {
+  this : super(.voidType) {
+    if (address.type != .integer ||
+        nativeType.isVoid ||
+        value.type != FfiTypes.valueType(nativeType)) {
+      throw ArgumentError(
+        'Expected an integer address, sized native scalar and matching value.',
+      );
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [address, value];
 }
 
 /// Starts loading a deferred import and returns its completion Future.

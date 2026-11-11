@@ -1,7 +1,6 @@
 import 'dart:ffi';
 
 import 'package:dartc/ir.dart';
-import 'package:dartc/interop.dart';
 import 'package:dartc/layout.dart';
 
 import 'frame_lookup.dart';
@@ -9,10 +8,6 @@ import 'frame_lookup.dart';
 /// Generates allocation and copying collection through ordinary typed IR.
 final class HeapFunctions(final FrameLookup frames) {
   static final _uri = Uri.parse('dartc:heap');
-  static final _wordPointer = FfiTypes.resolve(
-    NativePointerType(NativeScalarType(Int64)),
-  );
-
   static const start = 0,
       limit = 8,
       top = 16,
@@ -456,12 +451,8 @@ final class HeapFunctions(final FrameLookup frames) {
   static Value _load(Block block, Value address, [int offset = 0]) =>
       block.emit(
         LoadNative(
-          block.emit(
-            PointerFromAddress(
-              offset == 0 ? address : _op(block, .add, address, _int(offset)),
-              _wordPointer,
-            ),
-          ),
+          offset == 0 ? address : _op(block, .add, address, _int(offset)),
+          .new(Int64),
         ),
       );
   static void _store(
@@ -471,12 +462,8 @@ final class HeapFunctions(final FrameLookup frames) {
     int offset = 0,
   ]) => block.emit(
     StoreNative(
-      block.emit(
-        PointerFromAddress(
-          offset == 0 ? address : _op(block, .add, address, _int(offset)),
-          _wordPointer,
-        ),
-      ),
+      offset == 0 ? address : _op(block, .add, address, _int(offset)),
+      .new(Int64),
       value,
     ),
   );

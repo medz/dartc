@@ -145,7 +145,16 @@ List<ObjectModule> nativeCalls(Target target) {
             Jump(failed),
           ),
         );
-        returned.finish(Return(returned.emit(LoadNative(parameters.first))));
+        returned.finish(
+          Return(
+            returned.emit(
+              LoadNative(
+                returned.emit(PointerAddress(parameters.first)),
+                .new(Int64),
+              ),
+            ),
+          ),
+        );
         failed.finish(const Return(Constant.integer(-999)));
       } else if (key.startsWith('argument') || key == 'mixed') {
         final original = key == 'mixed' ? parameters[2] : parameters.single;
