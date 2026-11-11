@@ -70,10 +70,21 @@ final class ScalarFunction<R extends Object>(
     for (final block in selection.body.blocks) {
       emitter.bind(labels[block]!);
       allocation.begin(block);
+      void emptyResult(Value operation) {
+        if (!selection.liveness.uses[block]!.containsKey(operation) &&
+            !selection.liveness.liveOut[block]!.contains(operation)) {
+          return;
+        }
+        final result = allocation.allocate(.general);
+        emitter.loadImmediate(result, 0);
+        allocation.define(operation, result);
+      }
+
       for (final instruction in selection.body.instructions[block]!) {
         if (selection.liveness.omitted.contains(instruction)) continue;
         if (selection.body.aliases.contains(instruction) &&
-            instruction.type == .voidType) {
+            selection.body.inputsOf(instruction).isEmpty) {
+          emptyResult(instruction);
           continue;
         }
         if (selection.constantTests[instruction] case final value?) {
@@ -133,6 +144,7 @@ final class ScalarFunction<R extends Object>(
         } else if (instruction case WriteCell(:final cell)
             when selection.cells.contains(cell)) {
           allocation.writeCell(cell, selection.body.inputsOf(instruction).last);
+          emptyResult(instruction);
         } else if (selection.calls[instruction] case (
           :final layout,
           :final target,
@@ -249,8 +261,11 @@ final class ScalarFunction<R extends Object>(
             leave();
             emitter.bind(returned);
           }
-          if (layout.result case final result?
-              when instruction.type != .voidType) {
+          if (native != null && native.signature.result.isVoid) {
+            final result = allocation.allocate(.general);
+            emitter.loadImmediate(result, 0);
+            allocation.define(instruction, result);
+          } else if (layout.result case final result?) {
             final resultType = selection.body.typeOf(instruction);
             if (instruction
                 case Equals(negated: true) || TypeTest(negated: true)) {
@@ -300,6 +315,7 @@ final class ScalarFunction<R extends Object>(
           allocation.releaseTemporary(source);
           allocation.release(value);
           allocation.release(receiver);
+          emptyResult(instruction);
         } else if (instruction
             case LoadField(:final field) || StorageRead(:final field)
             when !selection.body.aliases.contains(instruction)) {
@@ -386,6 +402,7 @@ final class ScalarFunction<R extends Object>(
             emitter.storeMemory(source, base, bytes: native.nativeSize);
           }
           allocation.release(pointer);
+          emptyResult(instruction);
         } else if (instruction
             case PointerFromAddress(address: final operand) ||
                 PointerAddress(pointer: final operand) ||

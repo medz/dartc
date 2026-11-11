@@ -80,17 +80,14 @@ void main() {
         }
       });
 
-      test(
-        'native pointer results and void calls preserve addresses and writes',
-        () {
-          final memory = library.memory;
-          expect(library.pointer(memory).address, memory.address);
-          for (final value in [-1, 0, 0x123456789abcdef]) {
-            expect(library.write(memory, value), value);
-            expect(memory.value, value);
-          }
-        },
-      );
+      test('native pointers and void calls preserve addresses, writes and null results', () {
+        final memory = library.memory;
+        expect(library.pointer(memory).address, memory.address);
+        for (final value in [-1, 0, 0x123456789abcdef]) {
+          expect(library.write(memory, value), value);
+          expect(memory.value, value);
+        }
+      });
 
       test('byte-sized stack arguments can fill the outgoing area exactly', () {
         final packed = library.integer('packed');

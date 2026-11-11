@@ -203,11 +203,100 @@ int floating(int count) {
   return result is double && result == 62 ? 1 : 0;
 }
 
+abstract class Sink() {
+  int put(Object? value, {int after = 0});
+}
+
+class EmptySink(final Trace trace) implements Sink {
+  @override
+  int put(covariant Never value, {int after = 0}) => trace.mark(9);
+}
+
+class GenericSink<T>(final Trace trace) {
+  int put(T value) => trace.mark(9);
+}
+
+int neverParameters(int count) {
+  final trace = Trace();
+  final Sink sink = EmptySink(trace);
+  var flags = 0;
+  try {
+    sink.put(trace.mark(1), after: trace.mark(2));
+  } on TypeError {
+    if (trace.value == 12) flags |= 1;
+  }
+  final callback = sink.put;
+  try {
+    callback(null, after: trace.mark(3));
+  } on TypeError {
+    if (trace.value == 123) flags |= 2;
+  } finally {
+    churn(count);
+  }
+  final GenericSink<Object?> generic = GenericSink<Never>(trace);
+  try {
+    generic.put(null);
+  } on TypeError {
+    if (trace.value == 123) flags |= 4;
+  }
+  return flags;
+}
+
+abstract class Producer<T>() {
+  T produce();
+}
+
+class VoidProducer(final int count) implements Producer<void> {
+  @override
+  void produce() => Trace(41);
+
+  void relay() {
+    try {
+      return produce();
+    } finally {
+      churn(count);
+    }
+  }
+}
+
+class VoidSlot(var void value);
+
+void voidInteger(int value) => value + 1;
+void voidDouble(double value) => -value;
+void voidIdentity(void value) => value;
+void voidEmpty() {}
+
+int voidResults(int count) {
+  final producer = VoidProducer(count);
+  final Producer<Object?> view = producer;
+  var flags = 0;
+  if ((view.produce() as Trace).value == 41) flags |= 1;
+  final Object? Function() relay = producer.relay;
+  if ((relay() as Trace).value == 41) flags |= 2;
+  final Object? Function(int) integer = voidInteger;
+  if (integer(41) == 42) flags |= 4;
+  final Object? Function(double) floating = voidDouble;
+  if (1 / (floating(0.0) as double) == double.negativeInfinity) flags |= 8;
+  void local() => Trace(43);
+  void forwarded() => local();
+  final Object? Function() callback = forwarded;
+  if ((callback() as Trace).value == 43) flags |= 16;
+  final Object? Function() empty = voidEmpty;
+  if (empty() == null) flags |= 32;
+  // ignore: void_checks
+  final slot = VoidSlot(Trace(47));
+  slot.value = voidIdentity(slot.value);
+  if ((slot.value as Trace).value == 47) flags |= 64;
+  return flags;
+}
+
 @Export<Int64 Function(Int64, Int64, Double, Int64)>()
 int memberCalls(int mode, int word, double number, int count) => switch (mode) {
   < 3 => defaults(mode, word, count),
   3 => generic(word, number, count),
   4 => covariance(word, number, count),
   5 => throwing(count),
-  _ => floating(count),
+  6 => floating(count),
+  7 => neverParameters(count),
+  _ => voidResults(count),
 };

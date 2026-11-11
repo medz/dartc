@@ -494,9 +494,7 @@ final class FunctionRepresentation(
           if (shape != null && !functionValue) body.add(shape);
           final types = [for (final type in typeArguments) _reify(type, body)];
           final result = instruction.type;
-          final join = result == .never
-              ? null
-              : Block(result == .voidType ? [] : [result]);
+          final join = result == .never ? null : Block([result]);
           final missing = Block();
           blocks.add(missing);
           switch (instruction) {
@@ -558,6 +556,7 @@ final class FunctionRepresentation(
               next = nonNull;
             }
           }
+          candidates:
           for (final MapEntry(key: type, value: (:target, :closure))
               in targets.entries) {
             var current = next;
@@ -762,11 +761,6 @@ final class FunctionRepresentation(
               final destination =
                   target.signature.parameters[i +
                       (target.kind.hasReceiver || functionValue ? 0 : 1)];
-              if (destination == .never) {
-                throw UnsupportedError(
-                  'Native Never parameter: ${target.name}',
-                );
-              }
               final pending = <Value>[];
               if (destination.freeTypeParameters.isEmpty &&
                   destination.accepts(value.type)) {
@@ -789,6 +783,13 @@ final class FunctionRepresentation(
                 for (final parameter in signature.parameters)
                   environment[parameter]!,
               ];
+              if (destination == .never) {
+                instructions[current]!.add(check);
+                ends[current] = handler == null
+                    ? Unreachable(check)
+                    : Invoke(check, onReturn: null, onThrow: edge(handler));
+                continue candidates;
+              }
               append(check);
               arguments.add(check);
             }
@@ -829,26 +830,18 @@ final class FunctionRepresentation(
                   : Invoke(call, onReturn: returned, onThrow: edge(handler));
               continue;
             }
-            if (target.returnType == .voidType && result != .voidType) {
-              throw UnsupportedError(
-                'Native void member result: ${target.name}',
-              );
-            }
-            if (result != .voidType &&
-                layouts.representation(result) == .reference &&
+            if (layouts.representation(result) == .reference &&
                 layouts.isBoxable(target.returnType)) {
               _resultTypes[call] = target.returnType;
             }
             append(call);
             final conversions = <Value>[];
-            var value = result == .voidType
-                ? null
-                : convert(call, result, conversions);
-            if (value != null && member?.requiresResultCheck == true) {
+            var value = convert(call, result, conversions);
+            if (member?.requiresResultCheck == true) {
               value = checkResult(value, result, conversions);
             }
             conversions.forEach(append);
-            ends[current] = Jump(join, [?value]);
+            ends[current] = Jump(join, [value]);
           }
           if (virtual) ends[next] = Jump(missing);
           if (join == null) continue sourceBlocks;
@@ -1112,9 +1105,13 @@ final class FunctionRepresentation(
         body.add(instruction);
       }
       ends[block] ??= switch (sourceBlock.end) {
-        Return(value: final value?)
-            when function.target.returnType != .voidType =>
-          Return(convert(value, function.target.returnType, body)),
+        Return(:final value) => Return(
+          convert(
+            value ?? const Constant.nullValue(),
+            function.target.returnType,
+            body,
+          ),
+        ),
         final Jump jump => edge(jump),
         Branch(:final condition, :final ifTrue, :final ifFalse) => Branch(
           condition,

@@ -38,6 +38,10 @@
 
 函数值经具体函数类型、Function、Object 或 Object? 视图进行 `==`、`!=` 和 hashCode 读取时保留相同语义。相等的函数具有相同哈希，移动回收和同模块跨入口保留不会改变哈希；绑定方法使用接收者身份，不调用接收者重写的 `==` 或 hashCode。泛型实例化的哈希包含全部类型实参，与常量实例化及等价构造器提取一致。不承诺具体哈希数值，也不要求不等函数具有不同哈希。见[宽类型视图验证](../test/compiler/bound_methods_test.dart)及[实例化与跨入口验证](../test/compiler/function_instantiation_test.dart)。
 
+原生同步调用保留 `void` 函数的实际返回值，包括普通函数、成员、闭包、连续转发和 `finally`。合法的 Object? 返回视图或显式转换可以读取该值；无返回表达式时得到 null。`void` 参数和字段也保留实际值，标量与托管引用均遵循正常的调用、存储和 GC 规则。原生 FFI `Void` 没有机器返回值，返回 Dart 后得到 null。见[源码调用边界](../test/compiler/member_calls_test.dart)及[直接、间接原生调用](../test/codegen/native_calls_test.dart)。
+
+原生协变方法及其提取值支持 `Never` 形参，泛型形参也可实际代入 `Never`。实参按源码顺序求值，之后的形参检查必定失败，不进入方法体；异常仍执行适用的 catch/finally。见同一[调用边界验证](../test/compiler/member_calls_test.dart)。
+
 此范围不包含 dynamic/noSuchMethod 调用及 dynamic 成员读取、捕获的 `late` 绑定与初始化体存储，也不包含 FFI 回调。一般局部 `late` 的原生绑定语义仍待实现；上表的 IR 支持不表示这些路径均可原生执行。
 
 ## 异步参考执行器范围

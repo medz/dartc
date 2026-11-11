@@ -26,7 +26,9 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
         : type;
     final body = emitter.convention.classify(
       NativeSignature.types(
-        fullWidth(signature.result),
+        signature.result.isVoid
+            ? NativePointerType(NativeScalarType(Void))
+            : fullWidth(signature.result),
         signature.parameters.map(fullWidth),
       ),
     );
@@ -97,6 +99,9 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     if (intoDart) heap?.leave(frame, destination.result);
     if (destination.result case final result?) {
       convert(result, signature.result, intoDart: !intoDart);
+    }
+    if (!intoDart && signature.result.isVoid) {
+      emitter.loadImmediate(body.result!, 0);
     }
     if (!intoDart && heap != null) {
       emitter.loadImmediate(emitter.failureRegister, 0);

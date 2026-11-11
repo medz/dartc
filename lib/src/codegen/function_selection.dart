@@ -326,8 +326,7 @@ final class FunctionSelection<R>(
       (instruction, _) => liveness.omitted.contains(instruction),
     );
     for (final block in body.blocks) {
-      if (body.ends[block] case Return(value: final value?)
-          when function.target.returnType != .voidType) {
+      if (body.ends[block] case Return(value: final value?)) {
         layouts.checkTransfer(
           value.type,
           function.target.returnType,
@@ -355,10 +354,7 @@ final class FunctionSelection<R>(
     if (inputs.length != parameters.length) {
       throw StateError('Selected call arity does not match ${target.name}.');
     }
-    if (operation.type != .voidType &&
-        operation.type != .never &&
-        target.returnType != .voidType &&
-        target.returnType != .never) {
+    if (operation.type != .never && target.returnType != .never) {
       layouts.checkTransfer(target.returnType, body.typeOf(operation));
     }
     for (final (i, input) in inputs.indexed) {

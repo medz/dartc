@@ -17,6 +17,8 @@ abstract interface class CodeGenerator() {
   /// generated checks. Unsupported operations fail before returning an artifact.
   /// Generated support functions and their source dependencies are resolved
   /// before native instruction selection.
+  /// Dart void results retain their actual values; native Void calls produce
+  /// null when their results are observed from Dart.
   ///
   /// [imports] binds external declarations to native signatures; [exports]
   /// exposes supplied Dart bodies. The caller supplies native implementations

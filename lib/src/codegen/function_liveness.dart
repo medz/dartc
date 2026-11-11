@@ -62,7 +62,7 @@ final class FunctionLiveness(
         }
       }
       switch (end) {
-        case Return(value: final value?) when value.type != .voidType:
+        case Return(value: final value?):
           read(value);
         case Branch(:final condition):
           read(condition);

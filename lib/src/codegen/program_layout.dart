@@ -65,15 +65,11 @@ final class ProgramLayout(
     if (type == .integer || type == .boolean) return .word;
     if (type == .floating) return .floating;
     if (FfiTypes.isPointer(type)) return .address;
-    if (type == .voidType || type == .never) {
-      throw UnsupportedError('Native value representation: $type');
-    }
     return .reference;
   }
 
   NativeTypeRef callType(ValueType type) {
-    if (type == .voidType || type == .never) return NativeScalarType(Void);
-    // Internal references occupy pointer locations without becoming FFI values.
+    // Dart void carries a value; native Void belongs only to FFI boundaries.
     return switch (representation(type)) {
       .word => NativeScalarType(Int64),
       .floating => NativeScalarType(Double),

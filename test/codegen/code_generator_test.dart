@@ -9,6 +9,35 @@ import 'package:test/test.dart';
 import 'fixtures/aliases.dart';
 
 void main() {
+  test('void store results remain readable as null', () {
+    final target = FunctionTarget(
+      .parse('memory:void-store'),
+      'store',
+      .voidType,
+      [FfiTypes.resolve(NativePointerType(NativeScalarType(Int64)))],
+    );
+    final block = Block(target.parameterTypes);
+    block.finish(
+      Return(
+        block.emit(
+          StoreNative(block.parameters.single, const Constant.integer(42)),
+        ),
+      ),
+    );
+    final program = IrProgram([], [
+      IrFunction(target, [block]),
+    ]);
+    for (final CodeGenerator generator in [
+      Arm64CodeGenerator(const Target(.macos, .arm64)),
+      X64CodeGenerator(const Target(.linux, .x64)),
+    ]) {
+      expect(
+        generator.generate(program, definitions: [target]).sections,
+        isNotEmpty,
+      );
+    }
+  });
+
   test('typed native calls require no symbol binding or relocation', () {
     final callback = FfiTypes.resolve(
       NativePointerType(NativeFunctionType(NativeSignature(Int8, [Int64]))),

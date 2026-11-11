@@ -133,14 +133,26 @@ List<ObjectModule> nativeCalls(Target target) {
             ? DirectCall(external, arguments)
             : NativeCall(pointer, arguments),
       );
+      final blocks = [block];
       if (value.result.isVoid) {
-        result = block.emit(LoadNative(parameters.first));
+        final returned = Block(), failed = Block();
+        blocks.addAll([returned, failed]);
+        final visible = block.emit(TypeView(result, .object.nullable));
+        block.finish(
+          Branch(
+            block.emit(Equals(visible, const Constant.nullValue())),
+            Jump(returned),
+            Jump(failed),
+          ),
+        );
+        returned.finish(Return(returned.emit(LoadNative(parameters.first))));
+        failed.finish(const Return(Constant.integer(-999)));
       } else if (key.startsWith('argument') || key == 'mixed') {
         final original = key == 'mixed' ? parameters[2] : parameters.single;
         result = block.emit(NumericBinary(.add, result, original));
       }
-      block.finish(Return(result));
-      functions.add(.new(wrapper, [block]));
+      if (!value.result.isVoid) block.finish(Return(result));
+      functions.add(.new(wrapper, blocks));
       exports[wrapper] = .new(name, exported);
     }
   }
