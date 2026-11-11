@@ -75,7 +75,10 @@ final class MemberCalls(
     }
     final targets = <ClassType, FunctionTarget>{};
     for (final type in _instances) {
-      if (hasBuiltin && type == FfiTypes.pointer) continue;
+      if (hasBuiltin &&
+          (type == FfiTypes.pointer || type == ValueType.string)) {
+        continue;
+      }
       if (receiver.nonNullable case final ClassType owner
           when type.asInstanceOf(owner.declaration) == null) {
         continue;

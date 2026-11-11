@@ -496,7 +496,9 @@ sealed class Instruction(super.type) extends Value {
     LoadGlobal() ||
     LoadField() ||
     ReadCell() ||
+    StringLength() ||
     LoadNative() => const {.readsStorage},
+    StringCodeUnitAt() => const {.readsStorage, .mayThrow},
     StoreGlobal(global: GlobalVariable(isFinal: true)) ||
     StoreField(field: InstanceField(isLate: true, isFinal: true)) ||
     WriteCell(
@@ -1662,6 +1664,32 @@ final class StringConcat(
   }
   @override
   Iterable<Value> get inputs => [left, right];
+}
+
+/// Reads the number of UTF-16 code units in a string.
+final class StringLength(final Value string) extends Instruction {
+  this : super(.integer) {
+    if (!ValueType.string.accepts(string.type)) {
+      throw ArgumentError('A non-nullable string is required.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [string];
+}
+
+/// Reads one UTF-16 code unit, throwing [RangeError] for an invalid [index].
+final class StringCodeUnitAt(final Value string, final Value index)
+    extends Instruction {
+  this : super(.integer) {
+    if (!ValueType.string.accepts(string.type) ||
+        !ValueType.integer.accepts(index.type)) {
+      throw ArgumentError(
+        'A non-nullable string and integer index are required.',
+      );
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [string, index];
 }
 
 ClassType _classReceiver(ValueType type, [ClassType? owner]) {

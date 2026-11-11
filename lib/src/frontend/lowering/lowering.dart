@@ -139,22 +139,8 @@ final class Lowering({final bool enableAssertions = false}) {
       );
     }
 
-    final intrinsicMembers = <ClassType, List<FunctionTarget>>{};
-    for (final body in bindings.intrinsics) {
-      if (body.target.kind.isVirtual) {
-        intrinsicMembers
-            .putIfAbsent(body.target.owner!, () => [])
-            .add(body.target);
-      }
-    }
     final program = IrProgram(
-      [
-        ...classes,
-        ...bindings.mixinApplications,
-        for (final MapEntry(key: owner, value: members)
-            in intrinsicMembers.entries)
-          IrClass(owner, [], members: members),
-      ],
+      [...classes, ...bindings.mixinApplications, ...bindings.intrinsicClasses],
       [
         ...functions.whereType<IrFunction>(),
         ...bindings.intrinsics,

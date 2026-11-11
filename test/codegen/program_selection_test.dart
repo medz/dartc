@@ -15,7 +15,7 @@ void main() {
     final program = IrProgram([], []);
     final frames = FrameLookup(), casts = CheckedCasts();
     final traces = StackTraces(frames);
-    final arithmetic = NumericOperations([]);
+    final arithmetic = NumericOperations();
     final layouts = ProgramLayout([
       ...casts.classes,
       ...arithmetic.classes,
@@ -135,7 +135,7 @@ void main() {
       traces,
       casts,
       MemberCalls(program, {}),
-      NumericOperations([], argumentError: init),
+      NumericOperations(argumentError: init),
       GlobalStorage([]),
       layouts.instances,
     );

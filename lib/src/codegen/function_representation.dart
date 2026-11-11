@@ -305,9 +305,17 @@ final class FunctionRepresentation(
           _operands[instruction] = block.parameters;
           continue;
         }
-        if (instruction case PointerAddress(:final pointer)) {
+        if (instruction
+            case PointerAddress(pointer: final receiver) ||
+                StringLength(string: final receiver)) {
           _operands[instruction] = [
-            _load(layouts.pointers.address, pointer, body),
+            _load(
+              instruction is PointerAddress
+                  ? layouts.pointers.address
+                  : layouts.strings.length,
+              receiver,
+              body,
+            ),
           ];
           aliases.add(instruction);
           body.add(instruction);

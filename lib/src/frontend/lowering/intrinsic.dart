@@ -3,23 +3,53 @@ import 'package:dartc/ir.dart';
 
 import 'ffi.dart';
 
-/// Supplies ordinary IR bodies for SDK declarations with compiler-owned semantics.
-IrFunction? intrinsicBody(ExecutableElement element, FunctionTarget target) {
-  final entry = Block(target.parameterTypes);
-  final Value result;
+/// Supplies bodies and SDK dependencies for compiler-owned declarations.
+IrFunction Function(FunctionTarget)? intrinsicFor(
+  ExecutableElement element,
+  void Function(InterfaceElement) requireClass,
+) {
   if (element.library.isDartCore &&
       element.baseElement == element.library.getTopLevelFunction('identical')) {
-    result = entry.emit(Identical(entry.parameters[0], entry.parameters[1]));
-  } else if (isPointerCast(element)) {
-    result = lowerFfi(
-      element,
-      entry.parameters,
-      entry.emit,
-      result: target.returnType,
-    )!;
-  } else {
-    return null;
+    return (target) => _body(
+      target,
+      (entry) =>
+          entry.emit(Identical(entry.parameters[0], entry.parameters[1])),
+    );
   }
-  entry.finish(Return(result));
+  if (isPointerCast(element)) {
+    return (target) => _body(
+      target,
+      (entry) => lowerFfi(
+        element,
+        entry.parameters,
+        entry.emit,
+        result: target.returnType,
+      )!,
+    );
+  }
+  if (element.library.isDartCore) {
+    final string = element.library.getClass('String')!;
+    if (element == string.getGetter('length')) {
+      return (target) => _body(
+        target,
+        (entry) => entry.emit(StringLength(entry.parameters.single)),
+      );
+    }
+    if (element == string.getMethod('codeUnitAt')) {
+      requireClass(element.library.getClass('IndexError')!);
+      return (target) => _body(
+        target,
+        (entry) => entry.emit(
+          StringCodeUnitAt(entry.parameters[0], entry.parameters[1]),
+        ),
+      );
+    }
+  }
+  return null;
+}
+
+IrFunction _body(FunctionTarget target, Value Function(Block) result) {
+  final entry = Block(target.parameterTypes);
+  entry.finish(Return(result(entry)));
   return IrFunction(target, [entry]);
 }

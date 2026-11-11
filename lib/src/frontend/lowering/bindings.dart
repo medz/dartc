@@ -40,8 +40,24 @@ final class Bindings({
   /// SDK functions with Dart bodies, discovered while binding direct references.
   final sdkFunctions = <ExecutableElement>[];
 
-  /// Resolved external declarations whose behavior is supplied by the compiler.
+  /// Resolved SDK declarations whose behavior is supplied by the compiler.
   final intrinsics = <IrFunction>[];
+
+  /// Compiler-owned classes, retaining all referenced abstract members.
+  Iterable<IrClass> get intrinsicClasses => [
+    for (final owner in {
+      for (final body in intrinsics)
+        if (body.target.kind.isVirtual) body.target.owner!,
+    })
+      IrClass(
+        owner,
+        [],
+        members: [
+          for (final target in _targets.values)
+            if (target.owner == owner && target.kind.isVirtual) target,
+        ],
+      ),
+  ];
 
   /// Constructed SDK classes, with superclasses preceding their children.
   final sdkClasses = <InterfaceElement>[];
@@ -754,6 +770,7 @@ final class Bindings({
         ? _classCovarianceFor(element)
         : (parameters: const <int>{}, bounds: const <int>{});
     final classFlags = classCovariance.parameters;
+    final intrinsic = intrinsicFor(element, requireSdkClass);
     final function = FunctionTarget(
       enclosing?.library ?? element.library.uri,
       element.name ?? '<anonymous>',
@@ -772,7 +789,9 @@ final class Bindings({
       captures: captures,
       covariantParameters: {...declarationFlags, ...classFlags},
       isAbstract:
-          kind.isVirtual && (element.isAbstract || container is MixinElement),
+          intrinsic == null &&
+          kind.isVirtual &&
+          (element.isAbstract || container is MixinElement),
       optionalPositional: parameters
           .where((p) => p.isOptionalPositional)
           .length,
@@ -797,11 +816,7 @@ final class Bindings({
     }
     if (enclosing == null) {
       _targets[element] = function;
-      if (element.isExternal) {
-        if (intrinsicBody(element, function) case final body?) {
-          intrinsics.add(body);
-        }
-      }
+      if (intrinsic != null) intrinsics.add(intrinsic(function));
       if (element is ConstructorElement &&
           !element.isFactory &&
           redirects == null &&

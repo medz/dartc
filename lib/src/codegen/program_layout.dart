@@ -9,6 +9,7 @@ import 'type_values.dart';
 import 'instance_storage.dart';
 import 'type_relations.dart';
 import 'pointer_storage.dart';
+import 'string_storage.dart';
 
 enum TypeTestKind() {
   constantTrue,
@@ -24,11 +25,13 @@ final class ProgramLayout(
   Iterable<ClassType> referencedClasses = const [],
   InstanceStorage? instanceStorage,
   ClosureStorage? closureStorage,
+  StringStorage? stringStorage,
 }) {
   final instances = instanceStorage ?? InstanceStorage([]);
   final closures = closureStorage ?? ClosureStorage([]);
   final types = TypeValues();
   final pointers = PointerStorage();
+  final strings = stringStorage ?? StringStorage();
   late final TypeRelations relations;
   final _classes = {
     for (final declaration in classes) declaration.type: declaration,
@@ -37,6 +40,7 @@ final class ProgramLayout(
 
   this {
     _classes[FfiTypes.pointer] = pointers.declaration;
+    _classes[ValueType.string] = strings.declaration;
     for (final declaration in types.classes) {
       _classes[declaration.type] = declaration;
     }

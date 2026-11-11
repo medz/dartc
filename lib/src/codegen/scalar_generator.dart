@@ -29,6 +29,7 @@ import 'numeric_operations.dart';
 import 'global_storage.dart';
 import 'instance_storage.dart';
 import 'closure_storage.dart';
+import 'string_storage.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -78,11 +79,11 @@ base class ScalarCodeGenerator<R extends Object>(
       final frames = FrameLookup();
       final traces = StackTraces(frames);
       final casts = CheckedCasts();
-      IrCallable? constructor(ValueType type) {
+      IrCallable? constructor(ValueType type, [String name = 'new']) {
         final target = program.classes
             .where((c) => c.type == type)
             .firstOrNull
-            ?.constructors['new'];
+            ?.constructors[name];
         return target == null ? null : program.implementationOf(target);
       }
 
@@ -97,8 +98,20 @@ base class ScalarCodeGenerator<R extends Object>(
       final bodies = sourceDefinitions
           .map(sourceProgram.implementationOf)
           .whereType<IrFunction>();
+      final indexErrorType = program.classes
+          .where(
+            (c) =>
+                c.type.library == Uri.parse('dart:core') &&
+                c.type.name == 'IndexError',
+          )
+          .firstOrNull
+          ?.type;
+      final strings = StringStorage(
+        indexError: indexErrorType == null
+            ? null
+            : constructor(indexErrorType, 'withLength'),
+      );
       final arithmetic = NumericOperations(
-        bodies,
         argumentError: constructor(.argumentError),
         unsupportedError: constructor(.unsupportedError),
       );
@@ -110,15 +123,45 @@ base class ScalarCodeGenerator<R extends Object>(
         bodies,
         lateError: lateErrorType == null ? null : constructor(lateErrorType),
       );
+      for (final body in bodies) {
+        for (final block in body.blocks) {
+          final operations = switch (block.end) {
+            Invoke(:final operation) => block.instructions.followedBy([
+              operation,
+            ]),
+            _ => block.instructions,
+          };
+          for (final operation in operations) {
+            arithmetic.callFor(operation);
+            strings.callFor(operation);
+          }
+        }
+      }
       final helpers = [
         ...arithmetic.functions,
+        ...strings.functions,
         ...globals.functions,
         ...instances.functions,
       ];
       if (helpers.isNotEmpty) {
         final expanded = IrProgram(
           [
-            ...sourceProgram.classes,
+            for (final declaration in sourceProgram.classes)
+              if (declaration.type == ValueType.string &&
+                  strings.functions.isNotEmpty)
+                IrClass(
+                  declaration.type,
+                  strings.declaration.fields,
+                  members: declaration.members.values,
+                  implementations: declaration.implementations.values,
+                  constructors: declaration.constructors.values,
+                  unsupportedForwarders: declaration.unsupportedForwarders,
+                )
+              else
+                declaration,
+            if (strings.functions.isNotEmpty &&
+                !sourceProgram.classes.any((c) => c.type == ValueType.string))
+              strings.declaration,
             if (!globals.isEmpty) globals.declaration,
             for (final declaration in arithmetic.classes)
               if (!sourceProgram.classes.any((c) => c.type == declaration.type))
@@ -167,6 +210,7 @@ base class ScalarCodeGenerator<R extends Object>(
         ],
         instanceStorage: instances,
         closureStorage: closures,
+        stringStorage: strings,
         referencedClasses: selected.expand(
           (target) =>
               program.implementationOf(target)?.referencedClasses ?? const [],

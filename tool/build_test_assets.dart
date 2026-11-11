@@ -165,6 +165,7 @@ Future<void> main(List<String> args) async {
       'pointers',
       'pointer_arithmetic',
       'pointer_values',
+      'strings',
       'doubles',
       'mixed_numeric',
       'math',

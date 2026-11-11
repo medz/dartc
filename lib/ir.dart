@@ -104,6 +104,8 @@ export 'src/ir/value.dart'
         IntOperator,
         Interpolate,
         StringConcat,
+        StringLength,
+        StringCodeUnitAt,
         NumericBinary,
         NumericOperator,
         NumericNegate,

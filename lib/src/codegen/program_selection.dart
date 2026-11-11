@@ -45,6 +45,7 @@ final class ProgramSelection(
           ? heap.box(body.typeOf(box))
           : body.invocations[instruction] ??
                 arithmetic.callFor(instruction) ??
+                layouts.strings.callFor(instruction) ??
                 globals.callFor(instruction) ??
                 switch (instruction) {
                   DirectCall(:final target) => target,
@@ -75,6 +76,7 @@ final class ProgramSelection(
     Iterable<IrFunction> supportFunctions() => [
       ...members.functions,
       ...layouts.closures.functions,
+      ...layouts.strings.functions,
       ...arithmetic.functions,
       ...globals.functions,
       ...instances.functions,
@@ -139,6 +141,7 @@ final class ProgramSelection(
         if (!globals.isEmpty) globals.declaration,
         ...arithmetic.classes,
         ...layouts.closures.classes,
+        layouts.strings.declaration,
         ...layouts.types.classes,
         if (functions.containsKey(layouts.pointers.initializer))
           layouts.pointers.declaration,

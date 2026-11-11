@@ -2168,6 +2168,10 @@ final class IrInterpreter(
           values[op] = buffer.toString();
         case StringConcat(:final left, :final right):
           values[op] = (read(left) as String) + (read(right) as String);
+        case StringLength(:final string):
+          values[op] = (read(string) as String).length;
+        case StringCodeUnitAt(:final string, :final index):
+          values[op] = (read(string) as String).codeUnitAt(read(index) as int);
         case NumericNegate(:final operand):
           values[op] = -(read(operand) as num);
         case NumericToDouble(:final operand):

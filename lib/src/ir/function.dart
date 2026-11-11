@@ -32,7 +32,7 @@ sealed class IrCallable(
   Set<({ValueType receiver, MemberSelector selector})> get objectMembers =>
       _references.objectMembers;
 
-  /// Classes referenced by construction, constructor tear-offs or object constants.
+  /// Classes instantiated by this body, constructor tear-offs or its constants.
   Set<ClassType> get instantiatedClasses => _references.instantiatedClasses;
 
   /// Instance slots referenced by instructions or embedded constants.

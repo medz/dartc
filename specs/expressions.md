@@ -57,11 +57,11 @@ Object/Object? 视图的 `==`、`!=` 和 hashCode 按实际值选择实现。普
 
 ## 原生转整数与字符串常量
 
-`toInt`、`truncate`、`floor`、`ceil` 和 `round` 支持 int、double 及装箱 num 接收者。整数保持全部 64 位；浮点的 toInt/truncate 向零舍入，floor 向下、ceil 向上，round 就近舍入且半数远离零。有限值超出有符号 64 位范围时饱和到对应边界；正负零转换为 0，NaN 与正负无穷抛出 UnsupportedError。求值和 finally 顺序不变，未使用转换结果仍须执行可能抛错的转换。错误通过 SDK 构造器携带当前固定版本的字符串消息，用户同名成员与 extension 不会被拦截。见 [num.truncate](https://api.dart.dev/dart-core/num/truncate.html)、[num.round](https://api.dart.dev/dart-core/num/round.html)、[double.round](https://api.dart.dev/dart-core/double/round.html)和[原生转换验证](../test/compiler/numeric_conversions_test.dart)。浮点截断除法与余数仍未接通。
+`toInt`、`truncate`、`floor`、`ceil` 和 `round` 支持 int、double 及装箱 num 接收者。整数保持全部 64 位；浮点的 toInt/truncate 向零舍入，floor 向下、ceil 向上，round 就近舍入且半数远离零。有限值超出有符号 64 位范围时饱和到对应边界；正负零转换为 0，NaN 与正负无穷抛出 UnsupportedError。求值和 finally 顺序不变，未使用转换结果仍须执行可能抛错的转换。错误通过 SDK 构造器携带当前固定版本的字符串消息，用户同名成员与 extension 不会被拦截。见 [num.truncate](https://api.dart.dev/dart-core/num/truncate.html)、[num.round](https://api.dart.dev/dart-core/num/round.html)、[double.round](https://api.dart.dev/dart-core/double/round.html)和[原生转换验证](../test/compiler/numeric_conversions_test.dart)。浮点余数仍未接通。
 
 `truncateToDouble`、`floorToDouble`、`ceilToDouble` 和 `roundToDouble` 同样支持 int、double 及装箱 num，返回 double 而不饱和到整数范围。已经为整数的 double、正负零和非有限值保持不变；负数舍入到零得到 -0.0，roundToDouble 的半数远离零。int 接收者仅执行通常的 int 到 double 转换。实现先排除绝对值大于等于 2^52 的 double，再复用安全范围内的整数舍入计算，不把 NaN 或无穷送进整数转换。契约见[固定 SDK double 声明](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/double.dart)，行为及负零位模式由同一[原生转换验证](../test/compiler/numeric_conversions_test.dart)覆盖。
 
-原生字符串常量保留 UTF-16 码元和规范身份，可在普通参数、字段与错误载荷中传递。空串、非 BMP 字符及孤立代理项不会被重新编码或规范化；见[常量数据验证](../test/codegen/object_values_test.dart)。动态字符串构造、拼接、比较、索引及完整 String API 仍待实现。异常格式化和 Error.stackTrace getter 也尚未接通。
+原生字符串常量保留 UTF-16 码元和规范身份，可在普通参数、字段与错误载荷中传递。空串、非 BMP 字符及孤立代理项不会被重新编码或规范化；见[常量数据验证](../test/codegen/object_values_test.dart)。支持 `String.length` 和 `codeUnitAt(index)` 的直接调用、泛型接收者和方法值；长度按 UTF-16 码元计数，读取保留零码元、代理项和非 BMP 字符的两个码元。`index < 0` 或 `index >= length` 时，在访问载荷前抛出 RangeError；未使用结果也保留边界检查、求值和 catch/finally 顺序。见 [`length` 契约](https://api.dart.dev/stable/3.13.7/dart-core/String/length.html)、[`codeUnitAt` 契约](https://api.dart.dev/stable/3.13.7/dart-core/String/codeUnitAt.html)、[IR 契约](../test/ir/strings_test.dart)和[原生读取验证](../test/compiler/strings_test.dart)。动态字符串构造、拼接、一般值比较、返回单字符字符串的 `[]` 及完整 String API 仍待实现。异常格式化和 Error.stackTrace getter 也尚未接通。
 
 ## 数值比较与 SDK 差异
 

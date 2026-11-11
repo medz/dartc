@@ -1,8 +1,7 @@
 import 'package:dartc/ir.dart';
 
 /// Builds checked numeric operations with ordinary control flow and exceptions.
-final class NumericOperations(
-  Iterable<IrFunction> functions, {
+final class NumericOperations({
   IrCallable? argumentError,
   IrCallable? unsupportedError,
 }) {
@@ -15,16 +14,6 @@ final class NumericOperations(
   final _finiteConversions = <IntegerRounding, IrFunction>{};
   final _doubleRoundings = <(IntegerRounding, bool), IrFunction>{};
   final _nativeOperations = <Instruction>{};
-
-  this {
-    for (final function in functions) {
-      for (final block in function.blocks) {
-        for (final instruction in block.instructions) {
-          callFor(instruction);
-        }
-      }
-    }
-  }
 
   // Helper types must be available before their bodies are selected lazily.
   final classes = [IrClass(CoreTypes.integerDivisionByZeroException, [])];

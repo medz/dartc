@@ -159,6 +159,8 @@ void writeFunction(
       'numeric.${op.operator.name} ${value(op.left)}, ${value(op.right)}',
     Interpolate() => 'interpolate [${op.inputs.map(value).join(', ')}]',
     StringConcat() => 'concat ${value(op.left)}, ${value(op.right)}',
+    StringLength() => 'stringLength ${value(op.string)}',
+    StringCodeUnitAt() => 'codeUnitAt ${value(op.string)}, ${value(op.index)}',
     NumericNegate() => 'negate ${value(op.operand)}',
     NumericToDouble() => 'toDouble ${value(op.operand)}',
     NumericToInt() => '${op.rounding.name} ${value(op.operand)}',

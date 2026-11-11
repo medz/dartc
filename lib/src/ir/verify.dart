@@ -94,6 +94,9 @@ FunctionReferences verifyCallable(
 
   void constant(Constant value) {
     checkTypeScope(value.type);
+    if (value.type == ValueType.string) {
+      (instantiatedClasses ??= {}).add(ValueType.string);
+    }
     if (value is TypeConstant) checkTypeScope(value.representedType);
     if (value case FunctionConstant(
       target: final callee,
