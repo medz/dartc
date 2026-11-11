@@ -6,7 +6,10 @@ import 'package:dartc/layout.dart';
 import 'frame_lookup.dart';
 
 /// Generates allocation and copying collection through ordinary typed IR.
-final class HeapFunctions(final FrameLookup frames) {
+final class HeapFunctions(
+  final FrameLookup frames, {
+  final FunctionTarget? capacity,
+}) {
   static final _uri = Uri.parse('dartc:heap');
   static const start = 0,
       limit = 8,
@@ -342,11 +345,8 @@ final class HeapFunctions(final FrameLookup frames) {
     final entry = Block(allocate.parameterTypes),
         available = Block(),
         collect = Block();
-    final retry = Block(), grow = Block(), sizeLoop = Block([.integer]);
-    final enlarge = Block(),
-        doubleSize = Block(),
-        first = Block(),
-        second = Block();
+    final retry = Block(), grow = Block();
+    final first = Block(), second = Block();
     final discard = Block(),
         migrate = Block(),
         old = Block(),
@@ -414,26 +414,16 @@ final class HeapFunctions(final FrameLookup frames) {
       _op(grow, .subtract, _load(grow, context, top), oldStart),
       size,
     );
-    grow.finish(
-      Branch(
-        grow.emit(Equals(oldCapacity, _int(0))),
-        Jump(sizeLoop, [_int(65536)]),
-        Jump(sizeLoop, [oldCapacity]),
+    final capacity = grow.emit(
+      DirectCall(
+        this.capacity ??
+            (throw ArgumentError(
+              'Managed allocation requires a heap capacity body.',
+            )),
+        [oldCapacity, needed],
       ),
     );
-    final capacity = sizeLoop.parameters.single;
-    _branch(sizeLoop, .lessThan, capacity, needed, enlarge, first);
-    _branch(
-      enlarge,
-      .greaterOrEqual,
-      capacity,
-      _int(0x2000000000000000),
-      failed,
-      doubleSize,
-    );
-    doubleSize.finish(
-      Jump(sizeLoop, [_op(doubleSize, .multiply, capacity, _int(2))]),
-    );
+    _equal(grow, capacity, _int(0), failed, first);
     final from = first.emit(DirectCall(map, [capacity]));
     _equal(first, from, _int(0), failed, second);
     final to = second.emit(DirectCall(map, [capacity]));
@@ -474,9 +464,6 @@ final class HeapFunctions(final FrameLookup frames) {
       collect,
       retry,
       grow,
-      sizeLoop,
-      enlarge,
-      doubleSize,
       first,
       second,
       discard,

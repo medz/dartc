@@ -6,6 +6,8 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 
+import '../../support/runtime.dart';
+
 ObjectModule managedHeap(Target target) {
   final uri = Uri.parse('memory:managed-heap');
   final node = ClassType(uri, 'Node');
@@ -341,6 +343,7 @@ ObjectModule managedHeap(Target target) {
       : X64CodeGenerator(target);
   return generator.generate(
     program,
+    heapCapacity: heapCapacity,
     definitions: [...functions.map((f) => f.target), qsort],
     imports: {qsort: NativeImport('qsort', qsortSignature)},
     exports: {

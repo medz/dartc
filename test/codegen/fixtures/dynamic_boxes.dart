@@ -6,6 +6,8 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 
+import '../../support/runtime.dart';
+
 ObjectModule dynamicBoxes(Target target) {
   final uri = Uri.parse('memory:dynamic-boxes');
   final holder = ClassType(uri, 'Holder');
@@ -348,6 +350,7 @@ ObjectModule dynamicBoxes(Target target) {
       : X64CodeGenerator(target);
   return generator.generate(
     program,
+    heapCapacity: heapCapacity,
     definitions: functions.map((f) => f.target),
     exports: exports,
   );

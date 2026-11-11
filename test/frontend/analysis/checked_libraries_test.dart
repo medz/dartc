@@ -3,6 +3,36 @@ import 'package:test/test.dart';
 
 void main() {
   const path = 'test/compiler/fixtures/arithmetic.dart';
+  test(
+    'source resources share analysis identities and lifetime with inputs',
+    () async {
+      final session = AnalysisSession([path], resources: ['runtime/heap.dart']);
+      final checked = await session.resolve();
+      final runtime = checked.resources['runtime/heap.dart']!;
+      expect(runtime.session, same(checked.libraries.first.session));
+      expect(
+        runtime.element.typeProvider.intType.element,
+        same(checked.libraries.first.element.typeProvider.intType.element),
+      );
+      final lowered = await Lowering().lower(checked);
+      final body = lowered.program.functions.singleWhere(
+        (f) =>
+            f.target.library == runtime.element.uri &&
+            f.target.name == 'heapCapacity',
+      );
+      expect(body.target.library.scheme, 'file');
+      expect(body.callees, isEmpty);
+      await session.close();
+      expect(() => checked.resources, throwsStateError);
+    },
+  );
+
+  test('missing source resources fail before analysis', () async {
+    await expectLater(
+      AnalysisSession([path], resources: ['runtime/missing.dart']).use((_) {}),
+      throwsArgumentError,
+    );
+  });
   test('resolution and disposal belong to the session', () async {
     final session = AnalysisSession([path]);
     final resolving = session.resolve();

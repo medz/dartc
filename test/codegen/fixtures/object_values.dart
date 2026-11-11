@@ -6,6 +6,8 @@ import 'package:dartc/interop.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 
+import '../../support/runtime.dart';
+
 IrProgram objectGraphs() {
   final uri = Uri.parse('memory:objects');
   final base = ClassType(.parse('memory:base'), 'Base');
@@ -184,6 +186,7 @@ ObjectModule objectValues(Target target) {
       : X64CodeGenerator(target);
   return generator.generate(
     program,
+    heapCapacity: heapCapacity,
     definitions: [
       ...program.functions.map((f) => f.target),
       program.externals.single.target,

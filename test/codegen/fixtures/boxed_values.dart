@@ -7,6 +7,8 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 
+import '../../support/runtime.dart';
+
 ObjectModule boxedValues(Target target) {
   final library = Uri.parse('memory:boxed-values');
   final parameter = TypeParameterType('T')
@@ -431,6 +433,7 @@ ObjectModule boxedValues(Target target) {
       : X64CodeGenerator(target);
   return generator.generate(
     program,
+    heapCapacity: heapCapacity,
     definitions: functions.map((f) => f.target),
     exports: {
       for (final f in functions)

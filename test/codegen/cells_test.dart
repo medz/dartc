@@ -4,7 +4,10 @@ import 'package:dartc/src/codegen/cell_initialization.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
+import '../support/runtime.dart';
+
 void main() {
+  setUpAll(prepareRuntime);
   final uri = Uri.parse('memory:source-cells');
   final target = FunctionTarget(uri, 'source', .integer, [.boolean]);
   final capture = FunctionTarget(
@@ -202,8 +205,11 @@ void main() {
             IrFunction(child, [childEntry]),
           ]);
           expect(
-            () =>
-                generator.generate(program, definitions: [declaration, child]),
+            () => generator.generate(
+              program,
+              heapCapacity: heapCapacity,
+              definitions: [declaration, child],
+            ),
             throwsA(
               isA<UnsupportedError>().having(
                 (error) => error.message,
@@ -241,12 +247,22 @@ void main() {
           ]);
           if (initial || both) {
             expect(
-              generator.generate(program, definitions: [declaration]).sections,
+              generator
+                  .generate(
+                    program,
+                    heapCapacity: heapCapacity,
+                    definitions: [declaration],
+                  )
+                  .sections,
               isNotEmpty,
             );
           } else {
             expect(
-              () => generator.generate(program, definitions: [declaration]),
+              () => generator.generate(
+                program,
+                heapCapacity: heapCapacity,
+                definitions: [declaration],
+              ),
               throwsA(
                 isA<UnsupportedError>().having(
                   (e) => e.message,
@@ -276,7 +292,11 @@ void main() {
             IrFunction(declaration, [entry, loop, done]),
           ]);
           expect(
-            () => generator.generate(program, definitions: [declaration]),
+            () => generator.generate(
+              program,
+              heapCapacity: heapCapacity,
+              definitions: [declaration],
+            ),
             throwsA(
               isA<UnsupportedError>().having(
                 (e) => e.message,
@@ -304,7 +324,11 @@ void main() {
           ]);
           if (late) {
             expect(
-              () => generator.generate(program, definitions: [declaration]),
+              () => generator.generate(
+                program,
+                heapCapacity: heapCapacity,
+                definitions: [declaration],
+              ),
               throwsA(
                 isA<UnsupportedError>().having(
                   (error) => error.message,
@@ -315,7 +339,13 @@ void main() {
             );
           } else {
             expect(
-              generator.generate(program, definitions: [declaration]).sections,
+              generator
+                  .generate(
+                    program,
+                    heapCapacity: heapCapacity,
+                    definitions: [declaration],
+                  )
+                  .sections,
               isNotEmpty,
             );
           }

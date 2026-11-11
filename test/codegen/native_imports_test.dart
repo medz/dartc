@@ -7,7 +7,10 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
+import '../support/runtime.dart';
+
 void main() {
+  setUpAll(prepareRuntime);
   final library = Uri.parse('memory:native-imports');
   final first = FunctionTarget(library, 'first', .integer, [.integer]);
   final second = FunctionTarget(library, 'second', .integer, [.integer]);
@@ -36,6 +39,7 @@ void main() {
         () {
           final module = generator.generate(
             program,
+            heapCapacity: heapCapacity,
             definitions: [first, caller, second],
             imports: {first: binding, second: binding},
             exports: {
@@ -61,7 +65,11 @@ void main() {
       test('$target rejects missing, mismatched and non-external bindings', () {
         final definitions = [first, caller, second];
         expect(
-          () => generator.generate(program, definitions: definitions),
+          () => generator.generate(
+            program,
+            heapCapacity: heapCapacity,
+            definitions: definitions,
+          ),
           throwsArgumentError,
         );
         for (final invalid in [
@@ -71,6 +79,7 @@ void main() {
           expect(
             () => generator.generate(
               program,
+              heapCapacity: heapCapacity,
               definitions: definitions,
               imports: {first: NativeImport('wrong', invalid), second: binding},
             ),
@@ -80,6 +89,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
+            heapCapacity: heapCapacity,
             definitions: definitions,
             imports: {first: binding, second: binding, caller: binding},
           ),
@@ -99,6 +109,7 @@ void main() {
         expect(
           () => generator.generate(
             pointerProgram,
+            heapCapacity: heapCapacity,
             definitions: [withPointer],
             imports: {
               withPointer: NativeImport(
@@ -116,6 +127,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
+            heapCapacity: heapCapacity,
             definitions: [caller],
             imports: {first: binding},
           ),
@@ -124,6 +136,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
+            heapCapacity: heapCapacity,
             definitions: definitions,
             imports: {first: binding, second: binding},
             exports: {first: NativeExport('first', binding.signature)},

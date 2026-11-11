@@ -6,6 +6,8 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/target.dart';
 
+import '../../support/runtime.dart';
+
 IrProgram arithmetic() {
   final functions = <IrFunction>[];
   for (final op in [IntOperator.add, IntOperator.subtract]) {
@@ -33,6 +35,7 @@ ObjectModule aliases(Target target) {
   final program = arithmetic();
   return generator.generate(
     program,
+    heapCapacity: heapCapacity,
     definitions: program.functions.map((f) => f.target),
     exports: {
       for (final f in program.functions)

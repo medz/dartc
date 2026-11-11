@@ -7,7 +7,10 @@ import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
+import '../support/runtime.dart';
+
 void main() {
+  setUpAll(prepareRuntime);
   final library = Uri.parse('memory:constant-objects');
   final base = ClassType(library, 'Base');
   final child = ClassType(library, 'Child', superclass: base);
@@ -47,6 +50,7 @@ void main() {
       ];
       final module = generator.generate(
         IrProgram([], functions),
+        heapCapacity: heapCapacity,
         definitions: functions.map((f) => f.target),
       );
       final data = ByteData.sublistView(module.sections[1].bytes);
@@ -134,7 +138,13 @@ void main() {
           ],
         );
         expect(
-          generator.generate(program, definitions: [ctor, create]).sections,
+          generator
+              .generate(
+                program,
+                heapCapacity: heapCapacity,
+                definitions: [ctor, create],
+              )
+              .sections,
           isNotEmpty,
         );
       },
@@ -155,6 +165,7 @@ void main() {
       ];
       final module = generator.generate(
         IrProgram(classes, functions),
+        heapCapacity: heapCapacity,
         definitions: functions.map((f) => f.target),
       );
       final addresses = [
@@ -238,6 +249,7 @@ void main() {
         expect(
           () => generator.generate(
             IrProgram([], [missing]),
+            heapCapacity: heapCapacity,
             definitions: [missing.target],
           ),
           throwsA(
@@ -260,6 +272,7 @@ void main() {
                 IrProgram(classes, [
                   IrFunction(declaration, [body]),
                 ]),
+                heapCapacity: heapCapacity,
                 definitions: [declaration],
               )
               .sections
@@ -277,6 +290,7 @@ void main() {
           generator
               .generate(
                 IrProgram(classes, [boxedInteger]),
+                heapCapacity: heapCapacity,
                 definitions: [boxedInteger.target],
               )
               .sections

@@ -3,7 +3,10 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
+import '../support/runtime.dart';
+
 void main() {
+  setUpAll(prepareRuntime);
   for (final os in OperatingSystem.values) {
     for (final arch in Architecture.values) {
       final target = Target(os, arch);
@@ -52,7 +55,11 @@ void main() {
             ],
             globals: [slot],
           );
-          final module = generator.generate(program, definitions: [convert]);
+          final module = generator.generate(
+            program,
+            heapCapacity: heapCapacity,
+            definitions: [convert],
+          );
           expect(
             module.symbols.any((symbol) => symbol.name == '.dartc.globals'),
             isTrue,
@@ -92,7 +99,11 @@ void main() {
           if (!final_ && (!late || initialized)) {
             expect(
               generator
-                  .generate(program, definitions: program.reachableFrom([read]))
+                  .generate(
+                    program,
+                    heapCapacity: heapCapacity,
+                    definitions: program.reachableFrom([read]),
+                  )
                   .sections,
               isNotEmpty,
             );
@@ -101,6 +112,7 @@ void main() {
           expect(
             () => generator.generate(
               program,
+              heapCapacity: heapCapacity,
               definitions: program.reachableFrom([read]),
             ),
             throwsA(

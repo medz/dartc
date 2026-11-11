@@ -3,7 +3,10 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
+import '../support/runtime.dart';
+
 void main() {
+  setUpAll(prepareRuntime);
   for (final os in OperatingSystem.values) {
     for (final arch in Architecture.values) {
       final platform = Target(os, arch);
@@ -40,6 +43,7 @@ void main() {
           expect(
             () => generator.generate(
               program,
+              heapCapacity: heapCapacity,
               definitions: program.reachableFrom([caller]),
             ),
             returnsNormally,
@@ -67,7 +71,11 @@ void main() {
               : X64CodeGenerator(platform);
           expect(
             generator
-                .generate(program, definitions: program.reachableFrom([hash]))
+                .generate(
+                  program,
+                  heapCapacity: heapCapacity,
+                  definitions: program.reachableFrom([hash]),
+                )
                 .sections,
             isNotEmpty,
           );
@@ -134,6 +142,7 @@ void main() {
               generator
                   .generate(
                     program,
+                    heapCapacity: heapCapacity,
                     definitions: program.reachableFrom([outer]),
                   )
                   .sections,

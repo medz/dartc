@@ -14,13 +14,13 @@ import 'frame_lookup.dart';
 import 'type_values.dart';
 
 /// Generates allocation wrappers with precise roots and optional initialization.
-final class HeapPlan(FrameLookup frames) {
+final class HeapPlan(FrameLookup frames, {FunctionTarget? capacity}) {
   final _factories =
       <FunctionTarget, ({FunctionTarget? initializer, ClassType type})>{};
   final _boxes = <ValueType, FunctionTarget>{};
   final _initializers = <FunctionTarget, FunctionTarget>{};
   final _payloads = <ClassType, FunctionTarget>{};
-  final heap = HeapFunctions(frames);
+  final heap = HeapFunctions(frames, capacity: capacity);
 
   List<IrFunction> get functions => heap.functions;
 

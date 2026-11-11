@@ -11,6 +11,7 @@ void main() {
       'target': {},
       'layout': {},
       'sdk': {},
+      'runtime': {},
       'assembler': {'target'},
       'frontend': {'sdk', 'ir', 'interop'},
       'abi': {'assembler', 'target', 'interop'},

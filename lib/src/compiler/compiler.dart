@@ -52,15 +52,30 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
     final (
       lowered,
       sources,
-    ) = await AnalysisSession(paths, includeDependencies: true, sdk: sdk).use(
-      (input) async => (
-        await Lowering().lower(input),
+      heapCapacity,
+    ) = await AnalysisSession(
+      paths,
+      includeDependencies: true,
+      sdk: sdk,
+      resources: const ['runtime/heap.dart'],
+    ).use((input) async {
+      final lowered = await Lowering().lower(input);
+      final runtime = input.resources['runtime/heap.dart']!.element.uri;
+      return (
+        lowered,
         [
           for (final library in input.libraries)
-            for (final unit in library.units) File(unit.path).absolute.uri,
+            if (!input.resources.containsValue(library))
+              for (final unit in library.units) File(unit.path).absolute.uri,
         ],
-      ),
-    );
+        lowered.program.functions.singleWhere(
+          (f) =>
+              f.target.library == runtime &&
+              f.target.owner == null &&
+              f.target.name == 'heapCapacity',
+        ),
+      );
+    });
     final (:program, :exports, :imports, :entryPoint) = lowered;
     if (output is ExecutableOutput && entryPoint == null) {
       throw ArgumentError('The first input library has no main function.');
@@ -114,6 +129,7 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
       entryPoint: output is ExecutableOutput
           ? (function: entryPoint!, symbol: entrySymbol)
           : null,
+      heapCapacity: heapCapacity,
     );
     final ObjectFormat format = switch (target.operatingSystem) {
       .macos => MachO(target),

@@ -34,9 +34,11 @@ import '../test/linker/fixtures/finalizers.dart';
 import '../test/compiler/fixtures/descriptor_write_assets.dart';
 import '../test/compiler/fixtures/managed_objects_assets.dart';
 import '../test/support/native_assets.dart';
+import '../test/support/runtime.dart';
 import 'build_compiler_test_assets.dart' as compiler_assets;
 
 Future<void> main(List<String> args) async {
+  await prepareRuntime();
   await compiler_assets.main();
   final targets = args.isEmpty
       ? [
@@ -180,6 +182,7 @@ Future<void> main(List<String> args) async {
       'native_function_pointers',
       'native_imports',
       'managed_objects',
+      'heap_capacity',
       'numeric_boxes',
       'exceptions',
       'type_checks',

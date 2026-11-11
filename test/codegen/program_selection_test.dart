@@ -10,7 +10,10 @@ import 'package:dartc/src/codegen/program_selection.dart';
 import 'package:dartc/src/codegen/stack_traces.dart';
 import 'package:test/test.dart';
 
+import '../support/runtime.dart';
+
 void main() {
+  setUpAll(prepareRuntime);
   test('heap support closes transitively generated call dependencies', () {
     final program = IrProgram([], []);
     final frames = FrameLookup(), casts = CheckedCasts();
@@ -21,7 +24,7 @@ void main() {
       ...arithmetic.classes,
       traces.declaration,
     ]);
-    final heap = HeapPlan(frames);
+    final heap = HeapPlan(frames, capacity: heapCapacity.target);
     final helper = FunctionTarget(
       Uri.parse('memory:heap-support'),
       'round',
@@ -61,6 +64,7 @@ void main() {
       GlobalStorage([]),
       layouts.instances,
     );
+    selection.include(heapCapacity);
     expect(selection.close(persistent: true), isEmpty);
     expect(arithmetic.functions.length, greaterThanOrEqualTo(2));
     expect(
@@ -108,7 +112,7 @@ void main() {
       ...program.classes,
       traces.declaration,
     ]);
-    final heap = HeapPlan(frames);
+    final heap = HeapPlan(frames, capacity: heapCapacity.target);
     final helper = FunctionTarget(
       Uri.parse('memory:heap-support'),
       'shift',
@@ -139,6 +143,7 @@ void main() {
       GlobalStorage([]),
       layouts.instances,
     );
+    selection.include(heapCapacity);
     expect(selection.close(persistent: true), {constructor});
   });
 }

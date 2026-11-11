@@ -10,9 +10,12 @@ import 'package:dartc/src/codegen/heap_functions.dart';
 import 'package:dartc/src/codegen/stack_traces.dart';
 import 'package:test/test.dart';
 
+import '../support/runtime.dart';
+
 import 'fixtures/aliases.dart';
 
 void main() {
+  setUpAll(prepareRuntime);
   test(
     'string construction prepares Lists used only by generated bodies',
     () async {
@@ -37,6 +40,7 @@ void main() {
       ]) {
         final module = generator.generate(
           lowered.program,
+          heapCapacity: heapCapacity,
           definitions: definitions,
         );
         expect(
@@ -71,7 +75,11 @@ void main() {
       ]) {
         expect(
           generator
-              .generate(program, definitions: [function.target])
+              .generate(
+                program,
+                heapCapacity: heapCapacity,
+                definitions: [function.target],
+              )
               .symbols
               .map((s) => s.name),
           contains('length'),
@@ -99,6 +107,7 @@ void main() {
         ]) {
           final module = generator.generate(
             lowered.program,
+            heapCapacity: heapCapacity,
             definitions: lowered.program.reachableFrom([entry]),
           );
           final names = module.symbols.map((symbol) => symbol.name);
@@ -123,7 +132,8 @@ void main() {
   );
 
   test('heap and stack inspection do not construct Dart pointer objects', () {
-    final frames = FrameLookup(), heap = HeapFunctions(frames);
+    final frames = FrameLookup(),
+        heap = HeapFunctions(frames, capacity: heapCapacity.target);
     for (final function in [
       ...heap.functions,
       frames.function,
@@ -162,7 +172,13 @@ void main() {
       X64CodeGenerator(const Target(.linux, .x64)),
     ]) {
       expect(
-        generator.generate(program, definitions: [target]).sections,
+        generator
+            .generate(
+              program,
+              heapCapacity: heapCapacity,
+              definitions: [target],
+            )
+            .sections,
         isNotEmpty,
       );
     }
@@ -192,7 +208,11 @@ void main() {
         Arm64CodeGenerator(Target(os, .arm64)),
         X64CodeGenerator(Target(os, .x64)),
       ]) {
-        final module = generator.generate(program, definitions: [target]);
+        final module = generator.generate(
+          program,
+          heapCapacity: heapCapacity,
+          definitions: [target],
+        );
         expect(module.relocations, isEmpty);
         expect(module.symbols.single.name, 'invoke');
         expect(module.sections.single.bytes, isNotEmpty);
@@ -228,7 +248,11 @@ void main() {
         X64CodeGenerator(const Target(.linux, .x64)),
       ]) {
         expect(
-          () => generator.generate(program, definitions: [entry]),
+          () => generator.generate(
+            program,
+            heapCapacity: heapCapacity,
+            definitions: [entry],
+          ),
           throwsArgumentError,
         );
         final withSupport = Block();
@@ -251,6 +275,7 @@ void main() {
               ...arithmeticProgram.functions,
               IrFunction(entry, [withSupport]),
             ]),
+            heapCapacity: heapCapacity,
             definitions: [entry],
           ),
           throwsArgumentError,
@@ -258,6 +283,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
+            heapCapacity: heapCapacity,
             definitions: [callee],
             exports: {
               entry: NativeExport(
@@ -271,6 +297,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
+            heapCapacity: heapCapacity,
             definitions: [callee],
             exports: {
               callee: NativeExport(
@@ -283,6 +310,7 @@ void main() {
         );
         final module = generator.generate(
           program,
+          heapCapacity: heapCapacity,
           definitions: [entry, callee],
         );
         expect(
@@ -322,11 +350,13 @@ void main() {
     ]) {
       final first = generator.generate(
         program,
+        heapCapacity: heapCapacity,
         definitions: exports.keys,
         exports: exports,
       );
       final second = generator.generate(
         program,
+        heapCapacity: heapCapacity,
         definitions: exports.keys,
         exports: exports,
       );

@@ -6,7 +6,10 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
+import '../support/runtime.dart';
+
 void main() {
+  setUpAll(prepareRuntime);
   for (final CodeGenerator generator in [
     Arm64CodeGenerator(const Target(.linux, .arm64)),
     X64CodeGenerator(const Target(.linux, .x64)),
@@ -29,7 +32,13 @@ void main() {
           IrFunction(target, [entry]),
         ]);
         expect(
-          generator.generate(program, definitions: [target]).sections,
+          generator
+              .generate(
+                program,
+                heapCapacity: heapCapacity,
+                definitions: [target],
+              )
+              .sections,
           isNotEmpty,
         );
         expect(entry.parameters, isEmpty);
@@ -37,6 +46,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
+            heapCapacity: heapCapacity,
             definitions: [target],
             exports: {
               target: NativeExport('generic', NativeSignature(Int64, [])),
@@ -65,7 +75,13 @@ void main() {
           IrFunction(target, [entry]),
         ]);
         expect(
-          generator.generate(program, definitions: [target]).sections,
+          generator
+              .generate(
+                program,
+                heapCapacity: heapCapacity,
+                definitions: [target],
+              )
+              .sections,
           isNotEmpty,
         );
       },
@@ -96,7 +112,13 @@ void main() {
           IrFunction(target, [entry]),
         ]);
         expect(
-          generator.generate(program, definitions: [target]).sections,
+          generator
+              .generate(
+                program,
+                heapCapacity: heapCapacity,
+                definitions: [target],
+              )
+              .sections,
           isNotEmpty,
         );
       },
@@ -122,7 +144,11 @@ void main() {
         if (count == 4102) {
           expect(
             generator
-                .generate(program, definitions: [target])
+                .generate(
+                  program,
+                  heapCapacity: heapCapacity,
+                  definitions: [target],
+                )
                 .sections
                 .single
                 .bytes,
@@ -130,7 +156,11 @@ void main() {
           );
         } else {
           expect(
-            () => generator.generate(program, definitions: [target]),
+            () => generator.generate(
+              program,
+              heapCapacity: heapCapacity,
+              definitions: [target],
+            ),
             throwsRangeError,
           );
         }

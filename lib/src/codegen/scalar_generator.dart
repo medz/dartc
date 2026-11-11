@@ -47,7 +47,28 @@ base class ScalarCodeGenerator<R extends Object>(
     Map<FunctionTarget, NativeExport> exports = const {},
     Map<FunctionTarget, NativeImport> imports = const {},
     ({FunctionTarget function, String symbol})? entryPoint,
+    IrFunction? heapCapacity,
   }) {
+    if (heapCapacity != null) {
+      final function = heapCapacity.target;
+      if (function.kind != .function ||
+          function.typeParameters.isNotEmpty ||
+          function.signature != FunctionType(.integer, [.integer, .integer])) {
+        throw ArgumentError('Heap capacity requires int Function(int, int).');
+      }
+      final existing = program.implementationOf(function);
+      if (existing != null && !identical(existing, heapCapacity)) {
+        throw ArgumentError('Conflicting heap capacity definition.');
+      }
+      if (existing == null) {
+        program = IrProgram(
+          program.classes,
+          [...program.functions, heapCapacity],
+          globals: program.globals,
+          externals: program.externals,
+        );
+      }
+    }
     final selected = definitions.toSet();
     if (selected.isEmpty ||
         !selected.containsAll([...exports.keys, ...imports.keys]) ||
@@ -79,7 +100,7 @@ base class ScalarCodeGenerator<R extends Object>(
         ..clear()
         ..addAll(sourceDefinitions);
       final frames = FrameLookup();
-      final heap = HeapPlan(frames);
+      final heap = HeapPlan(frames, capacity: heapCapacity?.target);
       final traces = StackTraces(frames);
       final casts = CheckedCasts();
       IrCallable? constructor(ValueType? type, [String name = 'new']) {
@@ -341,6 +362,7 @@ base class ScalarCodeGenerator<R extends Object>(
       resolved = selection;
       break;
     }
+    if (resolved.managed) resolved.checkNonAllocating(heapCapacity!.target);
     final selection = resolved;
     final layouts = selection.layouts, heap = selection.heap;
     final globals = selection.globals, traces = selection.traces;

@@ -3,7 +3,10 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
+import '../support/runtime.dart';
+
 void main() {
+  setUpAll(prepareRuntime);
   for (final CodeGenerator generator in [
     Arm64CodeGenerator(const Target(.linux, .arm64)),
     X64CodeGenerator(const Target(.linux, .x64)),
@@ -27,12 +30,22 @@ void main() {
           ]);
           if (input == ValueType.integer) {
             expect(
-              generator.generate(program, definitions: [target]).sections,
+              generator
+                  .generate(
+                    program,
+                    heapCapacity: heapCapacity,
+                    definitions: [target],
+                  )
+                  .sections,
               isNotEmpty,
             );
           } else {
             expect(
-              () => generator.generate(program, definitions: [target]),
+              () => generator.generate(
+                program,
+                heapCapacity: heapCapacity,
+                definitions: [target],
+              ),
               throwsA(
                 isA<UnsupportedError>().having(
                   (error) => error.message,
@@ -73,7 +86,13 @@ void main() {
               IrFunction(target, [entry]),
             ]);
             expect(
-              generator.generate(program, definitions: [target]).sections,
+              generator
+                  .generate(
+                    program,
+                    heapCapacity: heapCapacity,
+                    definitions: [target],
+                  )
+                  .sections,
               isNotEmpty,
             );
           }
@@ -111,12 +130,22 @@ void main() {
           ]);
           if (count >= 0 && count < 64) {
             expect(
-              generator.generate(program, definitions: [target]).sections,
+              generator
+                  .generate(
+                    program,
+                    heapCapacity: heapCapacity,
+                    definitions: [target],
+                  )
+                  .sections,
               isNotEmpty,
             );
           } else {
             expect(
-              () => generator.generate(program, definitions: [target]),
+              () => generator.generate(
+                program,
+                heapCapacity: heapCapacity,
+                definitions: [target],
+              ),
               throwsA(
                 isA<UnsupportedError>().having(
                   (error) => error.message,
@@ -149,7 +178,11 @@ void main() {
         IrFunction(target, [entry]),
       ]);
       expect(
-        () => generator.generate(program, definitions: [target]),
+        () => generator.generate(
+          program,
+          heapCapacity: heapCapacity,
+          definitions: [target],
+        ),
         throwsA(
           isA<UnsupportedError>().having(
             (error) => error.message,
@@ -186,7 +219,13 @@ void main() {
         ],
       );
       expect(
-        generator.generate(program, definitions: [target]).sections,
+        generator
+            .generate(
+              program,
+              heapCapacity: heapCapacity,
+              definitions: [target],
+            )
+            .sections,
         isNotEmpty,
       );
     });

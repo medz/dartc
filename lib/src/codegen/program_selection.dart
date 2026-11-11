@@ -7,6 +7,7 @@ import 'global_storage.dart';
 import 'heap_plan.dart';
 import 'instance_storage.dart';
 import 'member_calls.dart';
+import 'native_invocation.dart';
 import 'numeric_operations.dart';
 import 'program_layout.dart';
 import 'stack_traces.dart';
@@ -26,6 +27,28 @@ final class ProgramSelection(
   final functions = <FunctionTarget, FunctionRepresentation>{};
   var capture = false, managed = false;
   Set<FunctionTarget> primitives = {};
+
+  /// Rejects hidden allocation, exceptions and foreign calls in a runtime closure.
+  void checkNonAllocating(FunctionTarget entry) {
+    final pending = [entry], checked = <FunctionTarget>{};
+    while (pending.isNotEmpty) {
+      final target = pending.removeLast();
+      if (!checked.add(target)) continue;
+      final body = functions[target];
+      if (body == null ||
+          target == heap.heap.allocate ||
+          heap.allocates([target]) ||
+          body.ends.values.any((end) => end is Throw || end is Invoke) ||
+          body.instructions.values.any(
+            (values) => values.any((value) => value is NativeInvocation),
+          )) {
+        throw UnsupportedError(
+          'Runtime call must not allocate, throw or enter foreign code: ${target.name}',
+        );
+      }
+      pending.addAll(body.invocations.values);
+    }
+  }
 
   void include(IrFunction function) {
     if (functions.containsKey(function.target)) return;

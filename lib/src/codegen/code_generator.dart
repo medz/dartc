@@ -17,6 +17,12 @@ abstract interface class CodeGenerator() {
   /// generated checks. Unsupported operations fail before returning an artifact.
   /// Generated support functions and their source dependencies are resolved
   /// before native instruction selection.
+  /// [heapCapacity] supplies the runtime's `int Function(int, int)` capacity
+  /// calculation. Managed allocation requires it; unused bodies are omitted.
+  /// Its transitive dependencies must be present in [program]. The selected
+  /// call closure must not allocate, throw or call an unverified native entry.
+  /// It receives the current capacity and required live bytes, and returns zero
+  /// on failure or a capacity between the requirement and `2^61`, inclusive.
   /// Dart void results retain their actual values; native Void calls produce
   /// null when their results are observed from Dart.
   ///
@@ -46,5 +52,6 @@ abstract interface class CodeGenerator() {
     Map<FunctionTarget, NativeExport> exports = const {},
     Map<FunctionTarget, NativeImport> imports = const {},
     ({FunctionTarget function, String symbol})? entryPoint,
+    IrFunction? heapCapacity,
   });
 }

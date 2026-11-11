@@ -18,12 +18,18 @@ import 'source_files.dart';
 /// Call [close] after consuming [resolve], or use [use] for scoped access.
 /// [sdk] supplies fixed source resources; when omitted, the dartc package's
 /// resources are used. No installed SDK is discovered.
+/// Additional source-resource libraries join the same checked batch and package
+/// context; [CheckedLibraries.resources] retains their archive identities.
 final class AnalysisSession(
   Iterable<String> paths, {
   final bool includeDependencies = false,
   final DartSdk? sdk,
+
+  /// Archive paths of libraries to check alongside the file inputs.
+  Iterable<String> resources = const [],
 }) {
   final List<String> _paths = .unmodifiable(paths);
+  final List<String> _resources = .unmodifiable(resources);
   AnalysisContextCollectionImpl? _contexts;
   Future<CheckedLibraries>? _resolution;
   Future<void>? _closing;
@@ -85,6 +91,12 @@ final class AnalysisSession(
     }
     final sources = sdk ?? await DartSdk.load();
     final root = path.join(path.rootPrefix(inputs.first), '__dartc__');
+    for (final name in _resources) {
+      if (!sources.sources.contains(name)) {
+        throw ArgumentError('Source resource unavailable: $name');
+      }
+      inputs.add(path.join(root, name));
+    }
     final files = OverlayResourceProvider(SourceFiles(sources.sources, root));
     final sdkPath = path.join(root, 'sdk');
     final options = path.join(
@@ -104,6 +116,7 @@ final class AnalysisSession(
     );
     final session = contexts.contextFor(inputs.first).currentSession;
     final libraries = <ResolvedLibraryResult>[];
+    final resources = <String, ResolvedLibraryResult>{};
     final queue = inputs.toList();
     for (var i = 0; i < queue.length; i++) {
       final result = await session.getResolvedLibrary(queue[i]);
@@ -111,6 +124,12 @@ final class AnalysisSession(
         throw FormatException('Expected a Dart library: ${queue[i]}');
       }
       libraries.add(result);
+      if (path.isWithin(root, queue[i])) {
+        final name = path
+            .relative(queue[i], from: root)
+            .replaceAll(path.separator, '/');
+        if (sources.sources.contains(name)) resources[name] = result;
+      }
       if (includeDependencies) {
         for (final dependency in [
           for (final fragment in result.element.fragments)
@@ -124,16 +143,20 @@ final class AnalysisSession(
         }
       }
     }
-    return CheckedLibraries._(libraries, _checkOpen);
+    return CheckedLibraries._(libraries, resources, _checkOpen);
   }
 }
 
 /// Libraries whose units have passed static checks in their owning session.
 final class CheckedLibraries._(
   Iterable<ResolvedLibraryResult> input,
+  Map<String, ResolvedLibraryResult> resources,
   void Function() checkOpen,
 ) {
   final List<ResolvedLibraryResult> _libraries = .unmodifiable(input);
+  final Map<String, ResolvedLibraryResult> _resources = .unmodifiable(
+    resources,
+  );
   final void Function() _checkOpen = checkOpen;
   final _constants = ConstantEvaluation();
   final _dependencies = <LibraryElement, Future<ResolvedLibraryResult>>{};
@@ -145,6 +168,12 @@ final class CheckedLibraries._(
   List<ResolvedLibraryResult> get libraries {
     _checkOpen();
     return _libraries;
+  }
+
+  /// Checked source-resource libraries, keyed by their archive paths.
+  Map<String, ResolvedLibraryResult> get resources {
+    _checkOpen();
+    return _resources;
   }
 
   this {

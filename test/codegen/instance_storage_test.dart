@@ -12,7 +12,10 @@ import 'package:dartc/src/codegen/closure_storage.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
+import '../support/runtime.dart';
+
 void main() {
+  setUpAll(prepareRuntime);
   final uri = Uri.parse('memory:instance-storage');
   test(
     'late cell copies preserve raw binding state without reading the value',
@@ -227,7 +230,11 @@ void main() {
         );
         expect(
           generator
-              .generate(program, definitions: program.reachableFrom([read]))
+              .generate(
+                program,
+                heapCapacity: heapCapacity,
+                definitions: program.reachableFrom([read]),
+              )
               .sections,
           isNotEmpty,
         );
@@ -267,7 +274,11 @@ void main() {
         );
         expect(
           generator
-              .generate(program, definitions: program.reachableFrom([read]))
+              .generate(
+                program,
+                heapCapacity: heapCapacity,
+                definitions: program.reachableFrom([read]),
+              )
               .sections,
           isNotEmpty,
         );

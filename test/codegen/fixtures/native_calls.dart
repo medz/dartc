@@ -10,6 +10,8 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 
+import '../../support/runtime.dart';
+
 List<ObjectModule> nativeCalls(Target target) {
   final signatures = <String, NativeSignature>{
     for (final type in [
@@ -232,6 +234,7 @@ List<ObjectModule> nativeCalls(Target target) {
       : X64CodeGenerator(target);
   final caller = generator.generate(
     program,
+    heapCapacity: heapCapacity,
     definitions: [...functions.map((f) => f.target), ...imports.keys],
     exports: exports,
     imports: imports,

@@ -8,9 +8,12 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
+import '../support/runtime.dart';
+
 import 'fixtures/control_flow.dart';
 
 void main() {
+  setUpAll(prepareRuntime);
   test('throw generation supplies trace capture and managed frame records', () {
     final target = FunctionTarget(.parse('memory:throw'), 'fail', .voidType, [
       .object,
@@ -24,7 +27,11 @@ void main() {
       Arm64CodeGenerator(const Target(.linux, .arm64)),
       X64CodeGenerator(const Target(.linux, .x64)),
     ]) {
-      final module = generator.generate(program, definitions: [target]);
+      final module = generator.generate(
+        program,
+        heapCapacity: heapCapacity,
+        definitions: [target],
+      );
       expect(module.imports, isEmpty);
       expect(
         module.symbols.map((s) => s.name),
@@ -76,6 +83,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
+            heapCapacity: heapCapacity,
             definitions: [target],
             exports: {
               target: NativeExport(

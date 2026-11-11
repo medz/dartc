@@ -6,6 +6,8 @@ import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
 
+import '../../support/runtime.dart';
+
 IrProgram controlFlowGraphs() {
   final functions = <IrFunction>[];
   final uri = Uri.parse('memory:control_flow');
@@ -108,6 +110,7 @@ ObjectModule controlFlow(Target target) {
       : X64CodeGenerator(target);
   return generator.generate(
     program,
+    heapCapacity: heapCapacity,
     definitions: program.functions.map((f) => f.target),
     exports: {
       for (final function in program.functions)

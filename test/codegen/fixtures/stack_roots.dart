@@ -9,6 +9,8 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 
+import '../../support/runtime.dart';
+
 ObjectModule stackRoots(Target target) {
   final uri = Uri.parse('memory:stack-roots');
   final base = ClassType(uri, 'Base');
@@ -131,6 +133,7 @@ ObjectModule stackRoots(Target target) {
       functions,
       externals: [IrExternal(external)],
     ),
+    heapCapacity: heapCapacity,
     definitions: [...functions.map((f) => f.target), external],
     exports: {
       run: NativeExport(

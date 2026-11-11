@@ -7,6 +7,8 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 
+import '../../support/runtime.dart';
+
 ObjectModule exceptions(Target target) {
   final uri = Uri.parse('memory:exceptions');
   final node = ClassType(uri, 'Payload');
@@ -159,6 +161,7 @@ ObjectModule exceptions(Target target) {
       : X64CodeGenerator(target);
   final module = generator.generate(
     IrProgram(classes, bodies),
+    heapCapacity: heapCapacity,
     definitions: bodies.map((f) => f.target),
     exports: exports,
   );

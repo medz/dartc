@@ -6,7 +6,10 @@ import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
+import '../support/runtime.dart';
+
 void main() {
+  setUpAll(prepareRuntime);
   final library = Uri.parse('memory:type-tests');
   for (final CodeGenerator generator in [
     Arm64CodeGenerator(const Target(.linux, .arm64)),
@@ -33,7 +36,13 @@ void main() {
         IrFunction(target, [entry, yes, no]),
       ]);
       expect(
-        generator.generate(program, definitions: [target]).sections,
+        generator
+            .generate(
+              program,
+              heapCapacity: heapCapacity,
+              definitions: [target],
+            )
+            .sections,
         isNotEmpty,
       );
     });
@@ -92,12 +101,22 @@ void main() {
         final definitions = program.reachableFrom([root]);
         expect(definitions, {root, target, if (!direct) getter});
         expect(
-          generator.generate(program, definitions: definitions).sections,
+          generator
+              .generate(
+                program,
+                heapCapacity: heapCapacity,
+                definitions: definitions,
+              )
+              .sections,
           isNotEmpty,
         );
         if (!direct) {
           expect(
-            () => generator.generate(program, definitions: [root, target]),
+            () => generator.generate(
+              program,
+              heapCapacity: heapCapacity,
+              definitions: [root, target],
+            ),
             throwsA(
               isA<ArgumentError>().having(
                 (e) => e.message,
@@ -151,6 +170,7 @@ void main() {
       expect(
         () => generator.generate(
           program,
+          heapCapacity: heapCapacity,
           definitions: program.reachableFrom([target]),
         ),
         throwsA(
@@ -187,6 +207,7 @@ void main() {
               IrProgram([], [
                 IrFunction(target, [block]),
               ]),
+              heapCapacity: heapCapacity,
               definitions: [target],
             );
             expect(
@@ -215,6 +236,7 @@ void main() {
             IrFunction(producer, [produced]),
             IrFunction(target, [body]),
           ]),
+          heapCapacity: heapCapacity,
           definitions: [producer, target],
         );
         final call = module.relocations
@@ -263,7 +285,13 @@ void main() {
           ],
         );
         expect(
-          generator.generate(program, definitions: [target]).sections,
+          generator
+              .generate(
+                program,
+                heapCapacity: heapCapacity,
+                definitions: [target],
+              )
+              .sections,
           isNotEmpty,
         );
       }
@@ -306,7 +334,13 @@ void main() {
           ],
         );
         expect(
-          generator.generate(program, definitions: [target]).sections,
+          generator
+              .generate(
+                program,
+                heapCapacity: heapCapacity,
+                definitions: [target],
+              )
+              .sections,
           isNotEmpty,
         );
       }
