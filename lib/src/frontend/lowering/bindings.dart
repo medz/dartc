@@ -8,6 +8,7 @@ import 'package:dartc/ir.dart';
 import '../analyzer_metadata.dart';
 import '../constant_evaluation.dart';
 import 'ffi.dart';
+import 'intrinsic.dart';
 
 /// An extension's static IR entry, distinct from its source callable signature.
 final class ExtensionExecutable(
@@ -38,6 +39,9 @@ final class Bindings({
 
   /// SDK functions with Dart bodies, discovered while binding direct references.
   final sdkFunctions = <ExecutableElement>[];
+
+  /// Resolved external declarations whose behavior is supplied by the compiler.
+  final intrinsics = <IrFunction>[];
 
   /// Constructed SDK classes, with superclasses preceding their children.
   final sdkClasses = <InterfaceElement>[];
@@ -793,6 +797,11 @@ final class Bindings({
     }
     if (enclosing == null) {
       _targets[element] = function;
+      if (element.isExternal) {
+        if (intrinsicBody(element, function) case final body?) {
+          intrinsics.add(body);
+        }
+      }
       if (element is ConstructorElement &&
           !element.isFactory &&
           redirects == null &&
@@ -802,10 +811,7 @@ final class Bindings({
       }
       if (element.library.isInSdk &&
           element.isStatic &&
-          (!element.isExternal ||
-              element.library.isDartCore &&
-                  element.baseElement ==
-                      element.library.getTopLevelFunction('identical')) &&
+          !element.isExternal &&
           !element.isAbstract &&
           (element is TopLevelFunctionElement || element is MethodElement)) {
         sdkFunctions.add(element);

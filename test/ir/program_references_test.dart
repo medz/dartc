@@ -72,6 +72,16 @@ void main() {
       FunctionTarget(_uri, 'constant', .integer, []),
       [constantEntry],
     );
+    final input = Block([face]);
+    input.finish(
+      Return(
+        input.emit(InstanceCall(declaration, input.parameters.single, [])),
+      ),
+    );
+    final supplied = IrFunction(
+      FunctionTarget(_uri, 'supplied', .integer, [face]),
+      [input],
+    );
     final program = IrProgram(
       [
         IrClass(face, [], members: [declaration], constructors: [factory]),
@@ -83,6 +93,7 @@ void main() {
         root,
         reference,
         constantRoot,
+        supplied,
         constructAndCall(readFirst, newSecond),
         IrFunction(readSecond, [
           Block(readSecond.parameterTypes)..finish(const Return(_one)),
@@ -114,6 +125,11 @@ void main() {
       constantRoot.target,
       readSecond,
     });
+    expect(program.reachableFrom([supplied.target]), {supplied.target});
+    expect(
+      program.reachableFrom([supplied.target], instantiatedTypes: [first]),
+      {supplied.target, readFirst, newSecond, readSecond},
+    );
   });
 
   test('verified graphs seal reachable binders and nominal metadata', () {

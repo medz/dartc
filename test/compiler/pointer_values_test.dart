@@ -37,6 +37,19 @@ void main() {
     }
   });
 
+  test(
+    'pointer casts preserve addresses through generic calls and method values',
+    () {
+      for (final address in [0, -1, 1, 0x7fffffffffffffff]) {
+        final pointer = Pointer<Void>.fromAddress(address);
+        for (final count in [0, 40000]) {
+          expect(sdk.pointerCasts(pointer, count), 127);
+          expect(native.casts(pointer, count), 127);
+        }
+      }
+    },
+  );
+
   test('identical retains integer values and floating bit patterns', () {
     double bits(int value) => (ByteData(8)..setInt64(0, value)).getFloat64(0);
     final nan = bits(0x7ff8000000000001);

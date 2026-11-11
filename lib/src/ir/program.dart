@@ -138,13 +138,15 @@ final class IrProgram(
   /// Selects direct and nominal virtual call dependencies starting at [roots].
   ///
   /// Virtual calls select implementations on classes constructed by reachable
-  /// bodies, constructor tear-offs or constants in a closed program. Dynamic
-  /// invocation and managed objects supplied from outside the program are not
-  /// included. Redirecting factories select their effective body. Direct targets
-  /// with missing bodies remain in the returned set.
-  Set<FunctionTarget> reachableFrom(Iterable<FunctionTarget> roots) {
+  /// bodies, constructor tear-offs, constants or [instantiatedTypes] supplied by
+  /// the caller. Dynamic invocation is not included. Redirecting factories select
+  /// their effective body. Direct targets with missing bodies remain in the set.
+  Set<FunctionTarget> reachableFrom(
+    Iterable<FunctionTarget> roots, {
+    Iterable<ClassType> instantiatedTypes = const [],
+  }) {
     final pending = roots.toList(), reached = <FunctionTarget>{};
-    final instances = <ClassType>{};
+    final instances = {for (final type in instantiatedTypes) type.declaration};
     final members = <({ValueType receiver, MemberSelector selector})>{};
     void select(
       ClassType type,

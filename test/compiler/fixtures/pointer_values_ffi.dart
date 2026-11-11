@@ -18,6 +18,12 @@ final class PointerValues() {
         Int64 Function(Int64, Int64, Int64),
         int Function(int, int, int)
       >('persistentPointer');
+
+  late final casts = _library
+      .lookupFunction<
+        Int64 Function(Pointer<Void>, Int64),
+        int Function(Pointer<Void>, int)
+      >('pointerCasts');
   late final scalars = _library
       .lookupFunction<
         Int64 Function(Int64, Int64, Double, Double),

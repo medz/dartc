@@ -14,6 +14,10 @@ bool isAsFunction(ExecutableElement member) =>
             .getExtension('NativeFunctionPointer')
             ?.getMethod('asFunction');
 
+bool isPointerCast(ExecutableElement member) =>
+    member.library.uri == _library &&
+    member.baseElement == member.library.getClass('Pointer')?.getMethod('cast');
+
 ClassType? ffiClass(InterfaceElement element) {
   final library = element.library;
   if (library.uri != _library) return null;
@@ -84,6 +88,11 @@ Value? lowerFfi(
       value.type == type ? value : emit(TypeView(value, type));
   member = member.baseElement;
   final pointer = library.getClass('Pointer')!;
+  if (isPointerCast(member) && result is ClassType) {
+    return emit(
+      PointerFromAddress(emit(PointerAddress(operands.single)), result),
+    );
+  }
   if (member == pointer.getNamedConstructor('fromAddress') &&
       result is ClassType &&
       FfiTypes.isPointer(result)) {

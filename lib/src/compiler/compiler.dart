@@ -65,10 +65,20 @@ final class Compiler(final Target target) {
       .arm64 => Arm64CodeGenerator(target),
       .x64 => X64CodeGenerator(target),
     };
-    final definitions = program.reachableFrom([
-      ...exports.keys,
-      if (output is ExecutableOutput) entryPoint!,
-    ]);
+    final definitions = program.reachableFrom(
+      [...exports.keys, if (output is ExecutableOutput) entryPoint!],
+      instantiatedTypes: [
+        if (exports.values.any(
+              (export) => export.signature.parameters.any(
+                (type) => type is NativePointerType,
+              ),
+            ) ||
+            imports.values.any(
+              (import) => import.signature.result is NativePointerType,
+            ))
+          FfiTypes.pointer,
+      ],
+    );
     final nativeImports = <FunctionTarget, NativeImport>{};
     for (final target in definitions) {
       final function = program.implementationOf(target);

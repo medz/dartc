@@ -561,7 +561,14 @@ final class FunctionRepresentation(
                               ? members.targetsFor(
                                   member?.owner ?? receiver.type,
                                   member?.selector ??
-                                      instruction.objectMember!.selector,
+                                      switch (instruction) {
+                                        Equals() => (
+                                          kind: .method,
+                                          name: '==',
+                                          privateLibrary: null,
+                                        ),
+                                        _ => instruction.objectMember!.selector,
+                                      },
                                   hasBuiltin: member == null,
                                 )
                               : {member!.owner!: member})

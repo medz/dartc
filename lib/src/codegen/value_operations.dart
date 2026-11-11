@@ -206,8 +206,10 @@ final class ValueOperations(
       result(true),
       Jump(current),
     );
-    if (layouts.closures.methods.isEmpty &&
-        layouts.closures.specializations.isEmpty) {
+    if (left.type == .nullType ||
+        right.type == .nullType ||
+        layouts.closures.methods.isEmpty &&
+            layouts.closures.specializations.isEmpty) {
       graph.ends[current] = result(false);
       return join;
     }

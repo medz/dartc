@@ -5,6 +5,7 @@ import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/function_liveness.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
+import 'package:dartc/src/codegen/closure_storage.dart';
 import 'package:dartc/src/codegen/member_calls.dart';
 import 'package:dartc/src/codegen/storage_access.dart';
 import 'package:test/test.dart';
@@ -13,6 +14,60 @@ void main() {
   final uri = Uri.parse('memory:representation');
   final layouts = ProgramLayout([]);
   final members = MemberCalls(IrProgram([], []), {});
+
+  test('function null comparisons do not inspect method identities', () {
+    final method = FunctionTarget(
+      uri,
+      'method',
+      .integer,
+      [],
+      owner: ClassType(uri, 'Receiver'),
+      kind: .method,
+    );
+    final closures = ClosureStorage(
+      [
+        IrFunction(method, [
+          Block(method.parameterTypes)
+            ..finish(const Return(Constant.integer(0))),
+        ]),
+      ],
+      boundMethods: [method],
+    );
+    final function = FunctionTarget(uri, 'isNull', .boolean, [
+      method.signature.nullable,
+    ]);
+    for (final negated in [false, true]) {
+      final entry = Block(function.parameterTypes);
+      entry.finish(
+        Return(
+          entry.emit(
+            Equals(
+              entry.parameters.single,
+              const Constant.nullValue(),
+              negated: negated,
+            ),
+          ),
+        ),
+      );
+      final body = FunctionRepresentation(
+        IrFunction(function, [entry]),
+        ProgramLayout(closures.classes, closureStorage: closures),
+        CheckedCasts(),
+        members,
+        HeapPlan(FrameLookup()),
+      );
+      expect(
+        body.instructions.values.expand((v) => v).whereType<TypeCast>(),
+        isEmpty,
+      );
+      expect(
+        body.instructions.values
+            .expand((v) => v)
+            .whereType<ObjectRuntimeType>(),
+        isEmpty,
+      );
+    }
+  });
 
   test(
     'storage operands retain live references and require real definitions',

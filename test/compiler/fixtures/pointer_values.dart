@@ -102,3 +102,37 @@ int indirectPointer(
       ? 1
       : 0;
 }
+
+Pointer<T> reinterpret<T extends NativeType>(Pointer<Void> pointer) =>
+    pointer.cast<T>();
+
+final class Caster() {
+  int cast<T>() => 7;
+}
+
+@Export<Int64 Function(Pointer<Void>, Int64)>()
+int pointerCasts(Pointer<Void> pointer, int count) {
+  final direct = pointer.cast<Int64>();
+  final generic = reinterpret<Double>(pointer);
+  final cast = pointer.cast;
+  final typed = pointer.cast<Pointer<Int8>>;
+  final function = cast<NativeFunction<EchoNative>>;
+  churn(count);
+  final indirect = typed();
+  final opaque = function();
+  Pointer<Void>? nullable = pointer.address == 0 ? null : pointer;
+  var flags = direct.address == pointer.address ? 1 : 0;
+  if (generic.address == pointer.address) flags |= 2;
+  if (indirect.address == pointer.address) flags |= 4;
+  if (opaque.address == pointer.address) flags |= 8;
+  if (nullable?.cast<Int64>().address ==
+      (pointer.address == 0 ? null : pointer.address)) {
+    flags |= 16;
+  }
+  final view = reinterpret<Never>(pointer);
+  churn(count);
+  if (view == pointer && view.runtimeType == Pointer<Never>) flags |= 32;
+  final custom = Caster();
+  if (custom.cast<int>() == 7 && custom.cast<double>() == 7) flags |= 64;
+  return flags;
+}

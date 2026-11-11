@@ -88,18 +88,6 @@ final class FunctionLowering._(
   }) {
     final target = destination ?? bindings.target(element, unit, site);
     if (element.isExternal) {
-      if (element.library.isDartCore &&
-          element.baseElement ==
-              element.library.getTopLevelFunction('identical')) {
-        final entry = Block(target.parameterTypes);
-        entry.finish(
-          Return(
-            entry.emit(Identical(entry.parameters[0], entry.parameters[1])),
-          ),
-        );
-        output.add(IrFunction(target, [entry]));
-        return;
-      }
       output.add(IrExternal(target, defaults: bindings.defaults(target)));
       return;
     }

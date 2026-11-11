@@ -1,5 +1,6 @@
 import 'block.dart';
 import 'core_types.dart';
+import 'ffi_types.dart';
 import 'signature.dart';
 import 'type.dart';
 import 'value.dart';
@@ -309,6 +310,9 @@ FunctionReferences verifyCallable(
           (methodTearOffs ??= {}).add((method: method, direct: direct));
         case Construct(:final instantiatedType):
           (instantiatedClasses ??= {}).add(instantiatedType.declaration);
+        case PointerFromAddress() || PointerOffset() || NativeCall()
+            when FfiTypes.isPointer(op.type):
+          (instantiatedClasses ??= {}).add(FfiTypes.pointer);
         case LoadGlobal(:final global) || StoreGlobal(:final global):
           (globals ??= {}).add(global);
         case MakeClosure(target: final child):
