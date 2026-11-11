@@ -11,13 +11,17 @@ import 'package:dartc/sdk.dart';
 
 import '../analyzer_metadata.dart';
 import '../constant_evaluation.dart';
+import 'source_files.dart';
 
 /// Owns the analysis resources and resolved snapshot of one library batch.
 ///
 /// Call [close] after consuming [resolve], or use [use] for scoped access.
+/// [sdk] supplies fixed source resources; when omitted, the dartc package's
+/// resources are used. No installed SDK is discovered.
 final class AnalysisSession(
   Iterable<String> paths, {
   final bool includeDependencies = false,
+  final DartSdk? sdk,
 }) {
   final List<String> _paths = .unmodifiable(paths);
   AnalysisContextCollectionImpl? _contexts;
@@ -72,22 +76,17 @@ final class AnalysisSession(
     if (_paths.isEmpty) {
       throw ArgumentError('At least one library is required.');
     }
-    final files = OverlayResourceProvider(PhysicalResourceProvider.INSTANCE);
-    final path = files.pathContext;
+    final path = PhysicalResourceProvider.INSTANCE.pathContext;
     final inputs = {
       for (final file in _paths) path.normalize(path.absolute(file)),
     };
     if (inputs.length != _paths.length) {
       throw ArgumentError('Duplicate input library.');
     }
-    final sdk = path.join(path.rootPrefix(inputs.first), '__dartc__', 'sdk');
-    for (final entry in const DartSdk().files.entries) {
-      files.setOverlay(
-        path.joinAll([sdk, ...entry.key.split('/')]),
-        content: entry.value,
-        modificationStamp: 0,
-      );
-    }
+    final sources = sdk ?? await DartSdk.load();
+    final root = path.join(path.rootPrefix(inputs.first), '__dartc__');
+    final files = OverlayResourceProvider(SourceFiles(sources.sources, root));
+    final sdkPath = path.join(root, 'sdk');
     final options = path.join(
       path.dirname(inputs.first),
       '.dartc-analysis.yaml',
@@ -100,7 +99,7 @@ final class AnalysisSession(
     final contexts = _contexts = AnalysisContextCollectionImpl(
       includedPaths: inputs.toList(),
       resourceProvider: files,
-      sdkPath: sdk,
+      sdkPath: sdkPath,
       optionsFile: options,
     );
     final session = contexts.contextFor(inputs.first).currentSession;

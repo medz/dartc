@@ -27,6 +27,7 @@ void main() {
       },
       'linker': {'object', 'assembler', 'target'},
       'compiler': {
+        'sdk',
         'ir',
         'frontend',
         'codegen',

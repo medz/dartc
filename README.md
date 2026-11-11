@@ -280,6 +280,15 @@ dart test -P unit
 
 Native tests require prepared assets; follow the testing guide for the relevant platform and feature.
 
+Build a standalone development compiler with Dart SDK 3.13.7:
+
+```sh
+dart run tool/build.dart
+./build/dartc --help
+```
+
+The build includes the package's fixed source resources. To regenerate those resources from the pinned official SDK sources, run `dart run tool/build_sources.dart`; only this resource preparation step may download the fixed source revision.
+
 ---
 
 <div align="center">

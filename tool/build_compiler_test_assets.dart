@@ -5,17 +5,19 @@ import 'package:dartc/sdk.dart';
 import 'package:dartc/target.dart';
 
 import '../test/support/native_assets.dart';
+import 'src/compiler_build.dart';
 
 Future<void> main() async {
   final directory = Directory('build/test/sdk')..createSync(recursive: true);
   final archive = Archive();
-  for (final entry in const DartSdk().files.entries) {
-    final name = entry.key;
+  final sources = (await DartSdk.load()).sources;
+  for (final path in sources.paths.where((path) => path.startsWith('sdk/'))) {
+    final name = path.substring(4);
     if (name == 'version' || name == 'revision') continue;
     archive.add(
-      ArchiveFile.string(
+      ArchiveFile.bytes(
         'sdk-${DartSdk.sourceRevision}/${name == 'LICENSE' ? name : 'sdk/$name'}',
-        entry.value,
+        sources.read(path),
       )..lastModTime = 0,
     );
   }
@@ -42,8 +44,8 @@ Future<void> main() async {
       .copy(config.path);
 
   final assets = NativeAssets(Target.host());
+  await buildCompiler(assets.file('compiler/dartc'));
   for (final (source, name) in [
-    ('bin/dartc.dart', 'dartc'),
     ('test/compiler/fixtures/standalone_client.dart', 'client'),
   ]) {
     final output = assets.file('compiler/$name');

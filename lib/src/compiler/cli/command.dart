@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:dartc/linker.dart';
+import 'package:dartc/sdk.dart';
 import 'package:dartc/target.dart';
 
 import '../compiler.dart';
@@ -45,7 +47,16 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
       if (destination == null) {
         throw FormatException('Missing -o output path.\n$_usage');
       }
-      final compiler = Compiler(target);
+      const digest = String.fromEnvironment('dartc.resources');
+      final DartSdk sdk;
+      if (digest.isEmpty) {
+        sdk = await DartSdk.load();
+      } else {
+        final bytes = ExecutableResources(File(Platform.resolvedExecutable))
+            .read();
+        sdk = DartSdk(SourceArchive(bytes, digest: digest));
+      }
+      final compiler = Compiler(target, sdk: sdk);
       final file = File(destination);
       final library = await compiler.compile(
         [source],

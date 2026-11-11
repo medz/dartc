@@ -11,12 +11,16 @@ import 'package:dartc/object.dart';
 import 'package:dartc/object/elf.dart';
 import 'package:dartc/object/mach_o.dart';
 import 'package:dartc/target.dart';
+import 'package:dartc/sdk.dart';
 
 import 'output.dart';
 import 'permissions.dart';
 
 /// Compiles Dart programs and annotated native exports for an explicit target.
-final class Compiler(final Target target) {
+///
+/// [sdk] supplies fixed source resources for embedded library use. When omitted,
+/// sources are loaded from the dartc package; AOT callers must supply resources.
+final class Compiler(final Target target, {final DartSdk? sdk}) {
   /// Checks dependencies and returns the final bytes and C declarations.
   ///
   /// All non-SDK dependencies are checked before selecting native definitions.
@@ -48,7 +52,7 @@ final class Compiler(final Target target) {
     final (
       lowered,
       sources,
-    ) = await AnalysisSession(paths, includeDependencies: true).use(
+    ) = await AnalysisSession(paths, includeDependencies: true, sdk: sdk).use(
       (input) async => (
         await Lowering().lower(input),
         [

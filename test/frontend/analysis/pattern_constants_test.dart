@@ -49,7 +49,7 @@ void main() {
   ]) {
     test('$name $arguments uses the checked pattern values', () {
       final function = result.program.functions.singleWhere(
-        (f) => f.target.name == name,
+        (f) => f.target.name == name && f.target.owner == null,
       );
       expect(
         IrInterpreter(result.program, {}).run(function, arguments),

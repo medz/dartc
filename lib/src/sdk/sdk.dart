@@ -1,13 +1,21 @@
 import 'dart:convert';
-import 'dart:io' show gzip;
+import 'dart:io';
+import 'dart:isolate';
 
-import 'package:archive/archive.dart';
-import 'package:crypto/crypto.dart';
+import 'source_archive.dart';
 
-import 'sources.g.dart';
+/// The fixed official SDK libraries within a source archive.
+final class DartSdk(final SourceArchive sources) {
+  this {
+    if (sources.fingerprint('sdk/') != sourceFingerprint ||
+        utf8.decode(sources.read('sdk/version')).trim() != version ||
+        utf8.decode(sources.read('sdk/revision')).trim() != sourceRevision) {
+      throw const FormatException(
+        'SDK sources do not match the fixed revision.',
+      );
+    }
+  }
 
-/// The immutable official standard library sources bundled with this compiler.
-final class const DartSdk() {
   /// The fixed standard library version.
   static const version = '3.13.7';
 
@@ -18,42 +26,23 @@ final class const DartSdk() {
   static const sourceFingerprint =
       'a054ede359302c352757ea57878e5e4033c6c955a9d4e2da3ec02c4087dc8b8e';
 
-  /// Source text and metadata keyed by paths relative to the SDK root.
+  /// Loads the fixed sources shipped in this Dart package.
   ///
-  /// Includes the original license, version and revision. Damaged or incomplete
-  /// bundled contents throw [FormatException]; no external source is consulted.
-  Map<String, String> get files => _files;
+  /// AOT library consumers can instead pass their own [SourceArchive] to
+  /// [DartSdk.new]. Missing or corrupt resources fail without SDK discovery.
+  static Future<DartSdk> load() => _bundled;
 
-  static final _files = _read();
+  static final _bundled = _load();
 
-  static Map<String, String> _read() {
-    final files = <String, String>{}, records = <String>[];
-    try {
-      final archive = TarDecoder().decodeBytes(
-        gzip.decode(base64.decode(sdkArchive)),
-        verify: true,
-      );
-      for (final file in archive) {
-        if (!file.isFile ||
-            file.isSymbolicLink ||
-            file.isHardLink ||
-            files.containsKey(file.name)) {
-          throw const FormatException('Invalid bundled SDK entry.');
-        }
-        final bytes = file.content;
-        records.add('${file.name}\u0000${sha256.convert(bytes)}\n');
-        files[file.name] = utf8.decode(bytes);
-      }
-    } on ArchiveException catch (error) {
-      throw FormatException('Invalid bundled SDK: $error');
-    }
-    records.sort();
-    if (sha256.convert(utf8.encode(records.join())).toString() !=
-        sourceFingerprint) {
+  static Future<DartSdk> _load() async {
+    final uri = await Isolate.resolvePackageUri(
+      Uri.parse('package:dartc/src/sdk/sources.zip'),
+    );
+    if (uri == null || uri.scheme != 'file') {
       throw const FormatException(
-        'Bundled SDK contents do not match the fixed source revision.',
+        'Source resources are unavailable. Package the executable or provide DartSdk sources.',
       );
     }
-    return Map.unmodifiable(files);
+    return DartSdk(SourceArchive(await File.fromUri(uri).readAsBytes()));
   }
 }
