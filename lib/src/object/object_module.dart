@@ -23,8 +23,14 @@ final class ObjectModule(
   /// Undefined global symbols, indexed after [symbols].
   final List<String> imports = .unmodifiable(imports);
 
-  /// References that a linker must resolve.
-  final List<Relocation> relocations = .unmodifiable(relocations);
+  /// References ordered by section and patch offset, independent of file format.
+  final List<Relocation> relocations = .unmodifiable(
+    relocations.toList()..sort(
+      (a, b) => a.section == b.section
+          ? a.offset.compareTo(b.offset)
+          : a.section.compareTo(b.section),
+    ),
+  );
 
   this {
     for (final section in this.sections) {
@@ -59,14 +65,8 @@ final class ObjectModule(
         throw ArgumentError('Invalid or duplicate import: $name');
       }
     }
-    final sites = this.relocations.toList()
-      ..sort(
-        (a, b) => a.section == b.section
-            ? a.offset.compareTo(b.offset)
-            : a.section.compareTo(b.section),
-      );
     final ends = List.filled(this.sections.length, 0);
-    for (final reference in sites) {
+    for (final reference in this.relocations) {
       RangeError.checkValidIndex(reference.section, this.sections, 'section');
       final section = this.sections[reference.section];
       final offset = reference.offset;
@@ -140,7 +140,8 @@ final class ObjectModule(
     }
     for (final (index, section) in this.sections.indexed) {
       if (section.kind == .finalizers &&
-          sites.where((r) => r.section == index).length != section.size ~/ 8) {
+          this.relocations.where((r) => r.section == index).length !=
+              section.size ~/ 8) {
         throw ArgumentError('Every finalizer requires an address relocation.');
       }
     }

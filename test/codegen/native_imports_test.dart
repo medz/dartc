@@ -44,7 +44,10 @@ void main() {
           );
           expect(module.imports, [target.nativeSymbol('actual_native')]);
           expect(module.symbols, hasLength(4));
-          expect(module.relocations.map((r) => r.symbol), [0, 2, 1, 4, 4]);
+          expect(
+            module.relocations.map((r) => r.symbol),
+            unorderedEquals([0, 2, 1, 4, 4]),
+          );
           expect(
             module.symbols
                 .take(3)

@@ -70,8 +70,7 @@ final class MachO(@override final Target target) implements ObjectFormat {
     }
     final groups = [
       for (var i = 0; i < sections.length; i++)
-        object.relocations.where((r) => r.section == i).toList()
-          ..sort((a, b) => b.offset.compareTo(a.offset)),
+        object.relocations.reversed.where((r) => r.section == i).toList(),
     ];
     final relocationOffsets = <int>[];
     var cursor = (contentOffset + fileSize + 7) & ~7;

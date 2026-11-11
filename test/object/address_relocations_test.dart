@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:dartc/linker.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/object/elf.dart';
 import 'package:dartc/object/mach_o.dart';
@@ -23,12 +24,17 @@ void main() {
         ],
         imports: ['external'],
         relocations: [
-          const .address(0, 0, 0),
-          const .address(0, 8, 2),
           const .address(1, 0, 1),
+          const .address(0, 8, 2),
+          const .address(0, 0, 0),
         ],
       );
       test('$target preserves absolute data references in object files', () {
+        expect(module.relocations.map((r) => (r.section, r.offset)), [
+          (0, 0),
+          (0, 8),
+          (1, 0),
+        ]);
         final bytes = format.encodeObject(module);
         final decoded = format.decodeObject(bytes);
         expect(decoded.relocations, everyElement(isA<AddressRelocation>()));
@@ -38,6 +44,17 @@ void main() {
         );
         expect(decoded.imports, ['external']);
         expect(format.encodeObject(decoded), bytes);
+        final Linker linker = os == .macos
+            ? MachOLinker(target)
+            : ElfLinker(target);
+        final provider = SharedLibraryInput(
+          'provider',
+          symbols: {'external': 'external'},
+        );
+        expect(
+          linker.linkSharedLibrary([.object(decoded), provider], name: 'table'),
+          linker.linkSharedLibrary([.object(module), provider], name: 'table'),
+        );
 
         final data = ByteData.sublistView(bytes);
         final int relocation, contents;
