@@ -98,11 +98,12 @@ void main() {
     final heap = ManagedHeap();
     addTearDown(heap.close);
     var depth = 0;
+    var limit = 1;
     final results = <int>[];
     late final NativeCallable<HeapCallback> callback;
     callback = NativeCallable<HeapCallback>.isolateLocal((int count) {
       depth++;
-      if (depth < 3) {
+      if (depth < limit) {
         results.add(heap.reenter(callback.nativeFunction, count));
       }
       results.add(heap.chain(count));
@@ -110,10 +111,13 @@ void main() {
     });
     addTearDown(callback.close);
     const count = 40000, sum = count * (count - 1) ~/ 2;
-    for (var i = 0; i < 2; i++) {
+    for (limit in [1, 3, 6, 1]) {
       results.clear();
       expect(heap.reenter(callback.nativeFunction, count), 42);
-      expect(results, [sum, 42, sum, 42, sum]);
+      expect(results, [
+        sum,
+        for (var level = 1; level < limit; level++) ...[42, sum],
+      ]);
       expect(depth, 0);
     }
   });

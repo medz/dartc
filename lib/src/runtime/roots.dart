@@ -8,14 +8,6 @@ final class NativeRoots(final int context, final ObjectAccess objects)
     implements RootSet {
   int _entrySp = 0, _entryPc = 0;
   bool _stopped = false, _closed = false;
-  int _table = 0;
-  int _sp = 0;
-  int _pc = 0;
-  int _segment = 0;
-  int _record = 0;
-  int _index = 0;
-  bool _done = true;
-  int current = 0;
 
   void publish(int sp, int pc) {
     if (_stopped || _closed) Memory.fail();
@@ -27,7 +19,6 @@ final class NativeRoots(final int context, final ObjectAccess objects)
   bool stop() {
     if (_stopped || _closed || _entrySp == 0 || _entryPc == 0) Memory.fail();
     _stopped = true;
-    _reset();
     return true;
   }
 
@@ -38,9 +29,30 @@ final class NativeRoots(final int context, final ObjectAccess objects)
     if (global != 0) {
       objects.visitStrong(Memory.objectAt<Object>(global), visitor);
     }
-    while (moveNext()) {
-      visitor.visit(ObjectMemory.reference(current));
+    final table = Memory.read(context + RuntimeContext.maps);
+    var segment = Memory.read(context + RuntimeContext.active);
+    var sp = _entrySp, pc = _entryPc;
+    while (sp != 0 && pc != 0) {
+      final record = _findFrame(table, pc);
+      final count = Memory.read(record + 24);
+      for (var i = 0; i < count; i++) {
+        final slot = sp + Memory.read(record + 32 + i * 8);
+        visitor.visit(ObjectMemory.reference(slot));
+      }
+      final caller = Memory.read(record + 8);
+      if (caller != 0) {
+        pc = Memory.read(sp + Memory.read(record + 16));
+        sp += caller;
+      } else {
+        segment = segment == 0
+            ? 0
+            : Memory.read(segment + RuntimeContext.previousEntry);
+        if (segment == 0) return;
+        sp = Memory.read(segment + RuntimeContext.suspendedSp);
+        pc = Memory.read(segment + RuntimeContext.suspendedPc);
+      }
     }
+    Memory.fail();
   }
 
   @override
@@ -55,51 +67,11 @@ final class NativeRoots(final int context, final ObjectAccess objects)
     _closed = true;
   }
 
-  void _reset() {
-    _table = Memory.read(context + RuntimeContext.maps);
-    _segment = Memory.read(context + RuntimeContext.active);
-    _sp = _entrySp;
-    _pc = _entryPc;
-    _record = 0;
-    _index = 0;
-    _done = false;
-  }
-
-  bool moveNext() {
-    while (!_done) {
-      if (_record == 0) _record = _findFrame();
-      if (_index < Memory.read(_record + 24)) {
-        current = _sp + Memory.read(_record + 32 + _index * 8);
-        _index++;
-        return true;
-      }
-      final caller = Memory.read(_record + 8);
-      if (caller != 0) {
-        _pc = Memory.read(_sp + Memory.read(_record + 16));
-        _sp += caller;
-      } else {
-        _segment = _segment == 0
-            ? 0
-            : Memory.read(_segment + RuntimeContext.previousEntry);
-        if (_segment == 0) {
-          _done = true;
-          return false;
-        }
-        _sp = Memory.read(_segment + RuntimeContext.suspendedSp);
-        _pc = Memory.read(_segment + RuntimeContext.suspendedPc);
-        if (_sp == 0 || _pc == 0) Memory.fail();
-      }
-      _record = 0;
-      _index = 0;
-    }
-    return false;
-  }
-
-  int _findFrame() {
-    final count = Memory.read(_table);
-    var record = _table + 8;
+  int _findFrame(int table, int pc) {
+    final count = Memory.read(table);
+    var record = table + 8;
     for (var i = 0; i < count; i++) {
-      if (Memory.read(record) == _pc) return record;
+      if (Memory.read(record) == pc) return record;
       record += 32 + Memory.read(record + 24) * 8;
     }
     Memory.fail();
