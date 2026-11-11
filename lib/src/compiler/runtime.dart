@@ -55,24 +55,7 @@ HeapRuntime bindRuntime(
   }
   final supplied = bodies.map((body) => body.target).toSet();
   program = IrProgram(
-    program.classes.map(
-      (declaration) => IrClass(
-        declaration.type,
-        declaration.fields,
-        members: declaration.members.values,
-        implementations: declaration.implementations.values,
-        constructors: declaration.constructors.values,
-        unsupportedForwarders: declaration.unsupportedForwarders,
-        weakFields: declaration.fields.where(annotations.weakFields.contains),
-        ephemerons: {
-          for (final field in declaration.fields)
-            if (annotations.ephemerons[field] case final name?)
-              field: declaration.fields.singleWhere(
-                (candidate) => candidate.name == name,
-              ),
-        },
-      ),
-    ),
+    program.classes,
     [...program.functions, ...bodies],
     globals: program.globals,
     externals: program.externals.where(

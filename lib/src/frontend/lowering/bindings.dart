@@ -33,6 +33,7 @@ final class ExtensionApplication(
 final class Bindings({
   final bool enableAssertions = false,
   ConstantEvaluation? constants,
+  final Uri? runtimeContracts,
 }) {
   final ConstantEvaluation constants = constants ?? ConstantEvaluation();
   final _targets = <ExecutableElement, FunctionTarget>{};

@@ -68,6 +68,7 @@ const _compilerLibraries = {
   'native_imports',
   'managed_objects',
   'heap_runtime',
+  'weak_references',
   'numeric_boxes',
   'exceptions',
   'type_checks',

@@ -31,45 +31,7 @@ final class RuntimeDeclarations(
   final entries = <RuntimeRole, FunctionTarget>{};
   final primitives = <FunctionTarget, MemoryOperation>{};
   final nonAllocating = <FunctionTarget>[];
-  final weakFields = <InstanceField>{};
-  final ephemerons = <InstanceField, String>{};
   late ResolvedUnitResult unit;
-
-  @override
-  void visitFieldDeclaration(ast.FieldDeclaration node) {
-    for (final annotation in node.metadata) {
-      final value = input.annotationValue(unit, annotation);
-      final type = value?.type;
-      if (type is! dart.InterfaceType ||
-          type.element.library.uri != contracts) {
-        continue;
-      }
-      final weak = type.element == type.element.library.getClass('WeakSlot');
-      final conditional =
-          type.element == type.element.library.getClass('EphemeronKey');
-      if (!weak && !conditional) continue;
-      for (final variable in node.fields.variables) {
-        final element = variable.declaredFragment!.element as FieldElement;
-        final owner = element.enclosingElement as InterfaceElement;
-        final declaration = program.classes.singleWhere(
-          (c) =>
-              c.type.library == owner.library.uri && c.type.name == owner.name,
-        );
-        final field = declaration.fields.singleWhere(
-          (f) => f.name == element.name,
-        );
-        if (weak) {
-          weakFields.add(field);
-        } else {
-          final name = value!.getField('valueField')?.toStringValue();
-          if (name == null) {
-            throw ArgumentError('Invalid ephemeron value field.');
-          }
-          ephemerons[field] = name;
-        }
-      }
-    }
-  }
 
   @override
   void visitAnnotation(ast.Annotation node) {

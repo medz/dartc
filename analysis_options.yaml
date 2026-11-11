@@ -4,6 +4,8 @@ analyzer:
   exclude:
     - build/**
     - .worktrees/**
+    # SDK parts are checked after their external factory bodies are installed.
+    - lib/src/runtime/patches/**
 
 linter:
   rules:

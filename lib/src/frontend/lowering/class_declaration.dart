@@ -1,6 +1,7 @@
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
 
 import 'assertion.dart';
@@ -66,6 +67,8 @@ IrClass lowerClass(
   }
 
   final fields = <InstanceField>[];
+  final weakFields = <InstanceField>[];
+  final ephemeronNames = <InstanceField, String>{};
   final members = <FunctionTarget>[];
   final implementations = <FunctionTarget>[];
   final constructors = <FunctionTarget>[...?application?.constructors.values];
@@ -172,6 +175,32 @@ IrClass lowerClass(
     constructor(ctor, declaration, null, const []);
   }
   for (final member in sourceMembers) {
+    final contracts = bindings.runtimeContracts;
+    if (member is ast.FieldDeclaration &&
+        contracts != null &&
+        unit.uri.toString().startsWith(contracts.resolve('.').toString())) {
+      for (final annotation in member.metadata) {
+        final value = bindings.constants.annotation(unit, annotation);
+        if (value?.type case dart.InterfaceType(:final element)
+            when element.library.uri == contracts) {
+          for (final variable in member.fields.variables) {
+            final field = bindings.field(
+              variable.declaredFragment!.element as FieldElement,
+              unit,
+              variable,
+              owner: type,
+            );
+            if (element == element.library.getClass('WeakSlot')) {
+              weakFields.add(field);
+            } else if (element == element.library.getClass('EphemeronKey')) {
+              ephemeronNames[field] = value!
+                  .getField('valueField')!
+                  .toStringValue()!;
+            }
+          }
+        }
+      }
+    }
     if (application != null &&
         (member is ast.ConstructorDeclaration ||
             member is ast.MethodDeclaration && member.isStatic ||
@@ -290,6 +319,11 @@ IrClass lowerClass(
     members: members,
     implementations: implementations,
     constructors: constructors,
+    weakFields: weakFields,
+    ephemerons: {
+      for (final MapEntry(:key, :value) in ephemeronNames.entries)
+        key: fields.singleWhere((field) => field.name == value),
+    },
     unsupportedForwarders: application == null
         ? bindings.unsupportedForwarders(element)
         : const {},

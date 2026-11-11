@@ -14,6 +14,7 @@ import 'package:dartc/sdk.dart';
 import '../analyzer_metadata.dart';
 import '../constant_evaluation.dart';
 import 'source_files.dart';
+import 'sdk_patches.dart';
 
 /// Owns the analysis resources and resolved snapshot of one library batch.
 ///
@@ -42,7 +43,8 @@ final class AnalysisSession(
 
   /// Resolves and checks this batch, sharing one in-flight result per session.
   ///
-  /// The first path supplies the package context. Parts and unused declarations
+  /// The first path supplies the package context. A resource-only batch has no
+  /// user package context. Parts and unused declarations
   /// are checked; source suppressions cannot hide static errors. When
   /// [includeDependencies] is enabled, non-SDK imports and exports are included.
   /// Throws [StateError] after closing, [ArgumentError] for invalid input paths,
@@ -84,7 +86,7 @@ final class AnalysisSession(
   }
 
   Future<CheckedLibraries> _resolve() async {
-    if (_paths.isEmpty) {
+    if (_paths.isEmpty && _resources.isEmpty) {
       throw ArgumentError('At least one library is required.');
     }
     final path = PhysicalResourceProvider.INSTANCE.pathContext;
@@ -95,7 +97,10 @@ final class AnalysisSession(
       throw ArgumentError('Duplicate input library.');
     }
     final sources = sdk ?? await DartSdk.load();
-    final root = path.join(path.rootPrefix(inputs.first), '__dartc__');
+    final root = path.join(
+      path.rootPrefix(inputs.firstOrNull ?? path.current),
+      '__dartc__',
+    );
     for (final name in _resources) {
       if (sourceArchive?.contains(name) != true) {
         throw ArgumentError('Source resource unavailable: $name');
@@ -106,6 +111,14 @@ final class AnalysisSession(
       SourceFiles(sources.sources, root, extraSources: sourceArchive),
     );
     final sdkPath = path.join(root, 'sdk');
+    if (sourceArchive?.contains('dartc/src/runtime/patches/core.dart') ==
+        true) {
+      SdkPatches(files).apply(
+        path.join(sdkPath, 'lib/core/core.dart'),
+        path.join(sdkPath, 'lib/core/weak.dart'),
+        path.join(root, 'dartc/src/runtime/patches/core.dart'),
+      );
+    }
     final options = path.join(
       path.dirname(inputs.first),
       '.dartc-analysis.yaml',
@@ -150,7 +163,14 @@ final class AnalysisSession(
         }
       }
     }
-    return CheckedLibraries._(libraries, resources, _checkOpen);
+    return CheckedLibraries._(
+      libraries,
+      resources,
+      sourceArchive?.contains('dartc/src/runtime/contracts.dart') == true
+          ? path.toUri(path.join(root, 'dartc/src/runtime/contracts.dart'))
+          : null,
+      _checkOpen,
+    );
   }
 }
 
@@ -158,6 +178,7 @@ final class AnalysisSession(
 final class CheckedLibraries._(
   Iterable<ResolvedLibraryResult> input,
   Map<String, ResolvedLibraryResult> resources,
+  final Uri? _runtimeContracts,
   void Function() checkOpen,
 ) {
   final List<ResolvedLibraryResult> _libraries = .unmodifiable(input);
@@ -213,6 +234,8 @@ final class CheckedLibraries._(
 
 // Internal handoff; this extension is not exported by frontend.dart.
 extension CheckedSources on CheckedLibraries {
+  Uri? get runtimeContracts => _runtimeContracts;
+
   ConstantEvaluation get constants {
     _checkOpen();
     return _constants;
