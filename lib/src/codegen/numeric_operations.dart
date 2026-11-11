@@ -29,9 +29,20 @@ final class NumericOperations({
     if (instruction
         case IntBinary(
           operator: .shiftLeft || .shiftRight || .unsignedShiftRight,
-          right: ScalarConstant(value: final int count),
+          :final right,
         )
-        when count >= 0 && count < 64) {
+        when switch (right) {
+          ScalarConstant(value: final int count) => count >= 0 && count < 64,
+          IntBinary(
+            operator: .bitAnd,
+            right: ScalarConstant(value: final int mask),
+          ) ||
+          IntBinary(
+            operator: .bitAnd,
+            left: ScalarConstant(value: final int mask),
+          ) => mask >= 0 && mask < 64,
+          _ => false,
+        }) {
       return null;
     }
     if (instruction case NumericToInt(:final operand, :final rounding)) {

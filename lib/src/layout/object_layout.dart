@@ -25,9 +25,31 @@ final class ObjectLayout(
 
   /// Whether every aligned slot after the fixed fields is a managed reference.
   final bool tracesPayload = false,
+  Iterable<int> weakFields = const [],
+  Map<int, int> ephemerons = const {},
 }) {
   /// Immutable representations in physical field order.
   final List<ValueRepresentation> fields = .unmodifiable(fields);
+
+  /// Field indices that do not retain their references.
+  final Set<int> weakFields = .unmodifiable(weakFields);
+
+  /// Conditional key/value field indices.
+  final Map<int, int> ephemerons = .unmodifiable(ephemerons);
+
+  this {
+    final conditional = {...this.ephemerons.keys, ...this.ephemerons.values};
+    if (conditional.length != this.ephemerons.length * 2 ||
+        conditional.any(this.weakFields.contains)) {
+      throw ArgumentError('Repeated conditional reference slot.');
+    }
+    for (final index in {...this.weakFields, ...conditional}) {
+      RangeError.checkValidIndex(index, this.fields);
+      if (this.fields[index] != .reference) {
+        throw ArgumentError('Weak storage requires a reference.');
+      }
+    }
+  }
 
   /// The fixed storage size, including the header but excluding inline payloads.
   int get size =>
@@ -43,7 +65,12 @@ final class ObjectLayout(
   Iterable<int> get referenceOffsets sync* {
     yield ObjectHeader.typeOffset;
     for (final (i, representation) in fields.indexed) {
-      if (representation == .reference) yield offsetOf(i);
+      if (representation == .reference &&
+          !weakFields.contains(i) &&
+          !ephemerons.containsKey(i) &&
+          !ephemerons.containsValue(i)) {
+        yield offsetOf(i);
+      }
     }
   }
 }

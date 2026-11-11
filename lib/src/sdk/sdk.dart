@@ -1,6 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
-import 'dart:isolate';
 
 import 'source_archive.dart';
 
@@ -30,19 +28,5 @@ final class DartSdk(final SourceArchive sources) {
   ///
   /// AOT library consumers can instead pass their own [SourceArchive] to
   /// [DartSdk.new]. Missing or corrupt resources fail without SDK discovery.
-  static Future<DartSdk> load() => _bundled;
-
-  static final _bundled = _load();
-
-  static Future<DartSdk> _load() async {
-    final uri = await Isolate.resolvePackageUri(
-      Uri.parse('package:dartc/src/sdk/sources.zip'),
-    );
-    if (uri == null || uri.scheme != 'file') {
-      throw const FormatException(
-        'Source resources are unavailable. Package the executable or provide DartSdk sources.',
-      );
-    }
-    return DartSdk(SourceArchive(await File.fromUri(uri).readAsBytes()));
-  }
+  static Future<DartSdk> load() async => DartSdk(await SourceArchive.load());
 }

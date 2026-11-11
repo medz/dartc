@@ -38,6 +38,13 @@ void main() {
   }
 
   test('runtime entries must implement their machine boundary signatures', () {
+    final record = heapRuntime.program.classes.singleWhere(
+      (c) => c.type.name == 'FinalizationRecord',
+    );
+    expect(
+      record.weakFields.map((f) => f.name),
+      unorderedEquals(['target', 'detachKey', '_registryNext']),
+    );
     expect(
       () => HeapRuntime(
         heapRuntime.program,
@@ -60,6 +67,23 @@ void main() {
               .fail,
         },
         nonAllocating: [],
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('runtime linking rejects conflicting instance storage', () {
+    final declaration = heapRuntime.program.classes.firstWhere(
+      (c) => c.fields.isNotEmpty,
+    );
+    final changed = IrClass(declaration.type, [
+      InstanceField(declaration.type, 'foreign', .integer),
+    ]);
+    expect(
+      () => Arm64CodeGenerator(const Target(.linux, .arm64)).generate(
+        IrProgram([changed], [mainBody(true)]),
+        definitions: [entry],
+        runtime: heapRuntime,
       ),
       throwsArgumentError,
     );
@@ -88,6 +112,28 @@ void main() {
         }
       }
     });
+
+    test(
+      '${generator.target} checks collection with live finalization records',
+      () {
+        final attach = heapRuntime.program.functions.singleWhere(
+          (f) =>
+              f.target.owner?.name == 'FinalizationQueue' &&
+              f.target.name == 'attach',
+        );
+        expect(
+          () => generator.generate(
+            IrProgram([], [mainBody(true)]),
+            definitions: [
+              entry,
+              ...heapRuntime.program.reachableFrom([attach.target]),
+            ],
+            runtime: heapRuntime,
+          ),
+          returnsNormally,
+        );
+      },
+    );
 
     test(
       '${generator.target} rejects transitive allocation and exceptions',

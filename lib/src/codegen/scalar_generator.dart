@@ -50,6 +50,27 @@ base class ScalarCodeGenerator<R extends Object>(
     HeapRuntime? runtime,
   }) {
     if (runtime != null) {
+      final classes = {for (final c in program.classes) c.type: c};
+      for (final declaration in runtime.program.classes) {
+        final existing = classes[declaration.type];
+        if (existing != null &&
+            (existing.fields.isNotEmpty &&
+                    (existing.fields.length != declaration.fields.length ||
+                        existing.fields.indexed.any(
+                          (entry) => entry.$2 != declaration.fields[entry.$1],
+                        )) ||
+                existing.members.entries.any(
+                  (entry) => declaration.members[entry.key] != entry.value,
+                ) ||
+                existing.constructors.entries.any(
+                  (entry) => declaration.constructors[entry.key] != entry.value,
+                ))) {
+          throw ArgumentError(
+            'Conflicting runtime class: ${declaration.type.name}',
+          );
+        }
+        classes[declaration.type] = declaration;
+      }
       final functions = {
         for (final function in program.functions) function.target: function,
       };
@@ -63,10 +84,7 @@ base class ScalarCodeGenerator<R extends Object>(
         functions[function.target] = function;
       }
       program = IrProgram(
-        {
-          for (final c in [...runtime.program.classes, ...program.classes])
-            c.type: c,
-        }.values,
+        classes.values,
         functions.values,
         globals: {...program.globals, ...runtime.program.globals},
         externals: {

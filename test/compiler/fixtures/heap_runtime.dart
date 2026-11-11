@@ -1,7 +1,7 @@
 import 'dart:ffi';
 
 import 'package:dartc/interop.dart';
-import 'package:dartc/src/runtime/space.dart';
+import 'package:dartc/src/runtime/allocator.dart';
 
-@Export<Int64 Function(Int64, Int64)>()
-int capacity(int current, int needed) => heapCapacity(current, needed);
+@Export<Int64 Function(Int64)>()
+int capacity(int needed) => slotSize(needed);

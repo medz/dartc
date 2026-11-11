@@ -630,7 +630,10 @@ final class FunctionContext(
     final end = count ?? mutableLocals.length;
     return end == 0
         ? const []
-        : [for (var i = 0; i < end; i++) _locals[mutableLocals[i].$1]!];
+        : [
+            for (var i = 0; i < end; i++)
+              refined(_locals[mutableLocals[i].$1]!),
+          ];
   }
 
   /// Restores [values] at the same lexical scope in which they were captured.
@@ -650,7 +653,7 @@ final class FunctionContext(
     final second = <Value>[if (result != null) result.$3];
     final changed = <VariableElement>[];
     for (final (i, (variable, type)) in mutableLocals.indexed) {
-      final value = _locals[variable]!;
+      final value = refined(_locals[variable]!);
       if (saved[i] == value) continue;
       types.add(type);
       first.add(saved[i]);

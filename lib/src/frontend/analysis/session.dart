@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:analyzer/dart/analysis/results.dart';
+import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/file_system/overlay_file_system.dart';
 import 'package:analyzer/file_system/physical_file_system.dart';
@@ -24,6 +26,9 @@ final class AnalysisSession(
   Iterable<String> paths, {
   final bool includeDependencies = false,
   final DartSdk? sdk,
+
+  /// Additional private sources, separate from the standard library selection.
+  final SourceArchive? sourceArchive,
 
   /// Archive paths of libraries to check alongside the file inputs.
   Iterable<String> resources = const [],
@@ -92,12 +97,14 @@ final class AnalysisSession(
     final sources = sdk ?? await DartSdk.load();
     final root = path.join(path.rootPrefix(inputs.first), '__dartc__');
     for (final name in _resources) {
-      if (!sources.sources.contains(name)) {
+      if (sourceArchive?.contains(name) != true) {
         throw ArgumentError('Source resource unavailable: $name');
       }
       inputs.add(path.join(root, name));
     }
-    final files = OverlayResourceProvider(SourceFiles(sources.sources, root));
+    final files = OverlayResourceProvider(
+      SourceFiles(sources.sources, root, extraSources: sourceArchive),
+    );
     final sdkPath = path.join(root, 'sdk');
     final options = path.join(
       path.dirname(inputs.first),
@@ -128,7 +135,7 @@ final class AnalysisSession(
         final name = path
             .relative(queue[i], from: root)
             .replaceAll(path.separator, '/');
-        if (sources.sources.contains(name)) resources[name] = result;
+        if (sourceArchive?.contains(name) == true) resources[name] = result;
       }
       if (includeDependencies) {
         for (final dependency in [
@@ -174,6 +181,16 @@ final class CheckedLibraries._(
   Map<String, ResolvedLibraryResult> get resources {
     _checkOpen();
     return _resources;
+  }
+
+  /// Evaluates an annotation using this session's checked constant semantics.
+  DartObject? annotationValue(ResolvedUnitResult unit, Annotation annotation) {
+    _checkOpen();
+    if (!identical(unit.session, _libraries.first.session) ||
+        !identical(annotation.root, unit.unit)) {
+      throw ArgumentError('Annotation does not belong to this resolved unit.');
+    }
+    return _constants.annotation(unit, annotation);
   }
 
   this {

@@ -6,8 +6,19 @@ import 'package:analyzer/file_system/physical_file_system.dart';
 import 'package:dartc/sdk.dart';
 
 /// Mounts immutable compiler sources alongside the user's physical files.
-final class SourceFiles(final SourceArchive sources, final String root)
-    implements ResourceProvider {
+final class SourceFiles(
+  final SourceArchive sources,
+  final String root, {
+  final SourceArchive? extraSources,
+}) implements ResourceProvider {
+  Iterable<String> get _paths => sources.paths
+      .where((path) => path.startsWith('sdk/'))
+      .followedBy(
+        extraSources?.paths.where((path) => !path.startsWith('sdk/')) ??
+            const [],
+      );
+  SourceArchive? _archive(String name) =>
+      name.startsWith('sdk/') ? sources : extraSources;
   final _physical = PhysicalResourceProvider.INSTANCE;
   @override
   final pathContext = PhysicalResourceProvider.INSTANCE.pathContext;
@@ -21,9 +32,7 @@ final class SourceFiles(final SourceArchive sources, final String root)
             .replaceAll(pathContext.separator, '/');
   bool _folder(String path) {
     final name = _name(path);
-    return sources.paths.any(
-      (file) => name.isEmpty || file.startsWith('$name/'),
-    );
+    return _paths.any((file) => name.isEmpty || file.startsWith('$name/'));
   }
 
   @override
@@ -80,7 +89,9 @@ final class _SourceFile(super.provider, super.path)
     extends _SourceResource
     implements File {
   @override
-  bool get exists => provider.sources.contains(provider._name(path));
+  bool get exists =>
+      provider._archive(provider._name(path))?.contains(provider._name(path)) ==
+      true;
   @override
   int get modificationStamp {
     if (!exists) {
@@ -91,14 +102,14 @@ final class _SourceFile(super.provider, super.path)
 
   @override
   int get lengthSync =>
-      provider.sources.length(provider._name(path)) ??
+      provider._archive(provider._name(path))?.length(provider._name(path)) ??
       (throw PathNotFoundException(path, 'Source file does not exist.'));
   @override
   Uint8List readAsBytesSync() {
     if (!exists) {
       throw PathNotFoundException(path, 'Source file does not exist.');
     }
-    return provider.sources.read(provider._name(path));
+    return provider._archive(provider._name(path))!.read(provider._name(path));
   }
 
   @override
@@ -153,7 +164,7 @@ final class _SourceFolder(super.provider, super.path)
     final prefix = name.isEmpty ? '' : '$name/';
     return [
       for (final child in {
-        for (final file in provider.sources.paths)
+        for (final file in provider._paths)
           if (file.startsWith(prefix))
             file.substring(prefix.length).split('/').first,
       })

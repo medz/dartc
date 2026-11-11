@@ -104,11 +104,7 @@ final class MemberCalls(
         );
       }
     }
-    if (!hasBuiltin && targets.isEmpty) {
-      throw UnsupportedError(
-        'Native receiver classes unavailable: ${selector.name}',
-      );
-    }
+    // No constructed receiver means this call cannot execute in the closed program.
     return targets;
   }
 }

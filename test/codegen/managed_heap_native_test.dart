@@ -118,7 +118,7 @@ void main() {
     }
   });
 
-  test('nested callbacks relocate outer aliases and share graph mutations', () {
+  test('nested callbacks retain outer aliases and share graph mutations', () {
     final heap = ManagedHeap();
     addTearDown(heap.close);
     heap.writeState(0);
@@ -153,7 +153,7 @@ void main() {
     }
   });
 
-  test('growing retained chains survive repeated copying collections', () {
+  test('growing retained chains survive repeated collections', () {
     final heap = ManagedHeap();
     addTearDown(heap.close);
     for (final count in [0, 1, 2730, 2731, 10000, 40000]) {

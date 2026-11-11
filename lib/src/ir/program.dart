@@ -12,9 +12,19 @@ final class IrClass(
   Iterable<FunctionTarget> implementations = const [],
   Iterable<FunctionTarget> constructors = const [],
   Iterable<MemberSelector> unsupportedForwarders = const [],
+  Iterable<InstanceField> weakFields = const [],
+  Map<InstanceField, InstanceField> ephemerons = const {},
 }) {
   /// Declared fields in initialization order, excluding inherited storage.
   final List<InstanceField> fields = .unmodifiable(fields);
+
+  /// Nullable reference slots that do not retain their contents.
+  final Set<InstanceField> weakFields = .unmodifiable(weakFields);
+
+  /// Key/value pairs retained only when both the owner and key are reachable.
+  final Map<InstanceField, InstanceField> ephemerons = .unmodifiable(
+    ephemerons,
+  );
 
   /// Instance members declared here, including implicit accessors and abstract members.
   final Map<MemberSelector, FunctionTarget> members = _members(type, members);
@@ -95,6 +105,18 @@ final class IrClass(
     for (final field in this.fields) {
       if (field.owner != type || !names.add(field.name)) {
         throw ArgumentError('Foreign or repeated field in ${type.dartName}.');
+      }
+    }
+    final conditional = {...this.ephemerons.keys, ...this.ephemerons.values};
+    if (conditional.length != this.ephemerons.length * 2 ||
+        conditional.any(this.weakFields.contains)) {
+      throw ArgumentError('Repeated conditional reference slot.');
+    }
+    for (final field in {...this.weakFields, ...conditional}) {
+      if (!this.fields.contains(field) ||
+          field.isLate ||
+          !field.type.mayBeNull) {
+        throw ArgumentError('Weak storage requires a declared nullable field.');
       }
     }
   }

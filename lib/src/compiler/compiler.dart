@@ -20,9 +20,9 @@ import 'permissions.dart';
 
 /// Compiles Dart programs and annotated native exports for an explicit target.
 ///
-/// [sdk] supplies fixed source resources for embedded library use. When omitted,
+/// [resources] supplies fixed resources for embedded library use. When omitted,
 /// sources are loaded from the dartc package; AOT callers must supply resources.
-final class Compiler(final Target target, {final DartSdk? sdk}) {
+final class Compiler(final Target target, {final SourceArchive? resources}) {
   /// Checks dependencies and returns the final bytes and C declarations.
   ///
   /// All non-SDK dependencies are checked before selecting native definitions.
@@ -51,6 +51,7 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
         'Link inputs require shared library or executable output.',
       );
     }
+    final archive = resources ?? await SourceArchive.load();
     final (
       lowered,
       sources,
@@ -58,12 +59,13 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
     ) = await AnalysisSession(
       paths,
       includeDependencies: true,
-      sdk: sdk,
-      resources: const ['dartc/src/runtime/heap.dart'],
+      sdk: DartSdk(archive),
+      sourceArchive: archive,
+      resources: const ['dartc/src/runtime/allocator.dart'],
     ).use((input) async {
       final lowered = await Lowering().lower(input);
       final library =
-          input.resources['dartc/src/runtime/heap.dart']!.element.uri;
+          input.resources['dartc/src/runtime/allocator.dart']!.element.uri;
       return (
         lowered,
         [
@@ -71,7 +73,7 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
             if (!input.resources.containsValue(library))
               for (final unit in library.units) File(unit.path).absolute.uri,
         ],
-        bindRuntime(lowered.program, library),
+        bindRuntime(lowered.program, input, library),
       );
     });
     final (:program, :exports, :imports, :entryPoint) = lowered;

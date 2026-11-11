@@ -21,6 +21,7 @@ import '../test/codegen/fixtures/object_values.dart';
 import '../test/codegen/fixtures/boxed_values.dart';
 import '../test/codegen/fixtures/stack_roots.dart';
 import '../test/codegen/fixtures/managed_heap.dart';
+import '../test/codegen/fixtures/weak_heap.dart';
 import '../test/codegen/fixtures/dynamic_boxes.dart';
 import '../test/codegen/fixtures/exceptions.dart';
 import '../test/linker/fixtures/functions.dart';
@@ -347,6 +348,7 @@ Future<void> main(List<String> args) async {
       exceptions(target),
       rootsProbe(target),
     ], assets.library('codegen/exceptions'));
+    await shared([weakHeap(target)], assets.library('codegen/weak_heap'));
     final finalizers = await objects('finalizers_', finalizerModules(target));
     await shared(finalizers, assets.library('linker/finalizers'));
     final finalizerArchive = Archive.decode(

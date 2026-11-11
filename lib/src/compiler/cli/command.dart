@@ -48,15 +48,15 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
         throw FormatException('Missing -o output path.\n$_usage');
       }
       const digest = String.fromEnvironment('dartc.resources');
-      final DartSdk sdk;
+      final SourceArchive resources;
       if (digest.isEmpty) {
-        sdk = await DartSdk.load();
+        resources = await SourceArchive.load();
       } else {
         final bytes = ExecutableResources(File(Platform.resolvedExecutable))
             .read();
-        sdk = DartSdk(SourceArchive(bytes, digest: digest));
+        resources = SourceArchive(bytes, digest: digest);
       }
-      final compiler = Compiler(target, sdk: sdk);
+      final compiler = Compiler(target, resources: resources);
       final file = File(destination);
       final library = await compiler.compile(
         [source],

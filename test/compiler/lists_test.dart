@@ -201,20 +201,17 @@ void main() {
     }
   });
 
-  test(
-    'generic elements, shared fills, cycles and globals survive moving GC',
-    () {
-      for (final count in [0, 10, 40000]) {
-        final expected = 69 + count * (count - 1) ~/ 2;
-        expect(sdk.listReferences(count), expected);
-        expect(native.references(count), expected);
-        expect(native.saved(0), 23);
-        expect(native.saved(count + 2), count == 0 ? 23 : count - 1);
-        expect(sdk.listCycles(count), count == 0 ? 41 : count + 40);
-        expect(native.cycles(count), count == 0 ? 41 : count + 40);
-      }
-    },
-  );
+  test('generic elements, shared fills, cycles and globals survive GC', () {
+    for (final count in [0, 10, 40000]) {
+      final expected = 69 + count * (count - 1) ~/ 2;
+      expect(sdk.listReferences(count), expected);
+      expect(native.references(count), expected);
+      expect(native.saved(0), 23);
+      expect(native.saved(count + 2), count == 0 ? 23 : count - 1);
+      expect(sdk.listCycles(count), count == 0 ? 41 : count + 40);
+      expect(native.cycles(count), count == 0 ? 41 : count + 40);
+    }
+  });
 
   test(
     'covariant writes check the actual type before bounds or mutability',

@@ -140,7 +140,9 @@ final class ProgramLayout(
     }
     final definition = _classes[declaration];
     if (definition == null) {
-      throw UnsupportedError('Native class storage unavailable: $declaration');
+      throw UnsupportedError(
+        'Native class storage unavailable: ${declaration.library}::${declaration.name}',
+      );
     }
     return _storage[declaration] = ClassStorage(
       [
@@ -155,6 +157,16 @@ final class ProgramLayout(
       ],
       this,
       tracesPayload: declaration == lists.buffer || declaration == maps.buffer,
+      weakFields: {
+        if (declaration.superclass case final parent?)
+          ...storageOf(parent).weakFields,
+        ...definition.weakFields,
+      },
+      ephemerons: {
+        if (declaration.superclass case final parent?)
+          ...storageOf(parent).ephemerons,
+        ...definition.ephemerons,
+      },
       storesErrorTrace:
           declaration == ValueType.error ||
           switch (declaration.superclass) {
@@ -175,6 +187,8 @@ final class ClassStorage(
   ProgramLayout program, {
   bool storesErrorTrace = false,
   bool tracesPayload = false,
+  final Set<InstanceField> weakFields = const {},
+  final Map<InstanceField, InstanceField> ephemerons = const {},
 }) {
   final List<InstanceField> fields = .unmodifiable(fields);
   late final ObjectLayout layout;
@@ -185,10 +199,18 @@ final class ClassStorage(
         ? ObjectHeader.fieldsOffset +
               this.fields.length * ObjectHeader.alignment
         : null;
-    layout = .new([
-      ...this.fields.map((f) => program.representation(f.type)),
-      if (storesErrorTrace) ValueRepresentation.reference,
-    ], tracesPayload: tracesPayload);
+    layout = .new(
+      [
+        ...this.fields.map((f) => program.representation(f.type)),
+        if (storesErrorTrace) ValueRepresentation.reference,
+      ],
+      tracesPayload: tracesPayload,
+      weakFields: weakFields.map(this.fields.indexOf),
+      ephemerons: {
+        for (final pair in ephemerons.entries)
+          this.fields.indexOf(pair.key): this.fields.indexOf(pair.value),
+      },
+    );
   }
 
   int offsetOf(InstanceField field) {

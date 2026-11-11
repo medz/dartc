@@ -1,8 +1,13 @@
 import '../../layout/memory.dart';
 import 'memory.dart';
+import 'object_memory.dart';
+import 'heap.dart';
 
 /// Walks the precise roots of stopped Dart frames, including native reentry.
-final class RootSlots() {
+final class NativeRoots(final int context, final ObjectAccess objects)
+    implements RootSet {
+  int _entrySp = 0, _entryPc = 0;
+  bool _stopped = false, _closed = false;
   int _table = 0;
   int _sp = 0;
   int _pc = 0;
@@ -12,11 +17,49 @@ final class RootSlots() {
   bool _done = true;
   int current = 0;
 
-  void reset(int context, int sp, int pc) {
+  void publish(int sp, int pc) {
+    if (_stopped || _closed) Memory.fail();
+    _entrySp = sp;
+    _entryPc = pc;
+  }
+
+  @override
+  bool stop() {
+    if (_stopped || _closed || _entrySp == 0 || _entryPc == 0) Memory.fail();
+    _stopped = true;
+    _reset();
+    return true;
+  }
+
+  @override
+  void visit(ReferenceVisitor visitor) {
+    if (!_stopped) Memory.fail();
+    final global = Memory.read(context + RuntimeContext.globalRoots);
+    if (global != 0) {
+      objects.visitStrong(Memory.objectAt<Object>(global), visitor);
+    }
+    while (moveNext()) {
+      visitor.visit(ObjectMemory.reference(current));
+    }
+  }
+
+  @override
+  void resume() {
+    if (!_stopped || _closed) Memory.fail();
+    _stopped = false;
+  }
+
+  @override
+  void close() {
+    if (_stopped) Memory.fail();
+    _closed = true;
+  }
+
+  void _reset() {
     _table = Memory.read(context + RuntimeContext.maps);
     _segment = Memory.read(context + RuntimeContext.active);
-    _sp = sp;
-    _pc = pc;
+    _sp = _entrySp;
+    _pc = _entryPc;
     _record = 0;
     _index = 0;
     _done = false;

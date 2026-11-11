@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -12,6 +14,24 @@ import 'package:crypto/crypto.dart';
 /// Archives may contain up to 8192 files, 32 MiB compressed, 64 MiB expanded,
 /// and 8 MiB per file. Invalid archives throw [FormatException].
 final class SourceArchive(Uint8List bytes, {String? digest}) {
+  /// Loads the resources distributed with this Dart package.
+  ///
+  /// AOT consumers must supply an archive when package resources are unavailable.
+  static Future<SourceArchive> load() => _bundled;
+
+  static final _bundled = _load();
+  static Future<SourceArchive> _load() async {
+    final uri = await Isolate.resolvePackageUri(
+      Uri.parse('package:dartc/src/sdk/sources.zip'),
+    );
+    if (uri == null || uri.scheme != 'file') {
+      throw const FormatException(
+        'Bundled resources are unavailable; provide a SourceArchive.',
+      );
+    }
+    return SourceArchive(await File.fromUri(uri).readAsBytes());
+  }
+
   final _files = <String, (ZipFileHeader, String)>{};
 
   this {

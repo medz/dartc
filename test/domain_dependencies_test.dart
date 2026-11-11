@@ -13,7 +13,7 @@ void main() {
       'sdk': {},
       'runtime': {'layout'},
       'assembler': {'target'},
-      'frontend': {'sdk', 'ir', 'interop'},
+      'frontend': {'sdk', 'ir', 'interop', 'runtime'},
       'abi': {'assembler', 'target', 'interop'},
       'object': {'target', 'assembler'},
       'interop': {},
@@ -28,6 +28,7 @@ void main() {
       },
       'linker': {'object', 'assembler', 'target'},
       'compiler': {
+        'runtime',
         'sdk',
         'ir',
         'frontend',
@@ -43,6 +44,7 @@ void main() {
       'assembler/arm64.dart': 'assembler',
       'assembler/x64.dart': 'assembler',
       'layout/memory.dart': 'layout',
+      'runtime/contracts.dart': 'runtime',
       'object/elf.dart': 'object',
       'object/mach_o.dart': 'object',
     };

@@ -12,19 +12,19 @@ abstract final class ObjectMemory() {
   static void storeReference(int slot, Object? value) =>
       Memory.write(slot, Memory.addressOf(value));
 
-  static void copy(int destination, Object source, int bytes) {
-    final address = Memory.addressOf(source);
-    for (var offset = 0; offset < bytes; offset += ObjectHeader.alignment) {
-      Memory.write(destination + offset, Memory.read(address + offset));
-    }
-  }
-
-  static void initialize(int address, int descriptor, int size, int hash) {
+  static void initialize(
+    int address,
+    int descriptor,
+    int size,
+    int hash,
+    Object? page,
+  ) {
     for (var offset = 0; offset < size; offset += ObjectHeader.alignment) {
       Memory.write(address + offset, 0);
     }
     Memory.write(address + ObjectHeader.descriptorOffset, descriptor);
     Memory.write(address + ObjectHeader.sizeOffset, size);
     Memory.write(address + ObjectHeader.identityHashOffset, hash);
+    storeReference(address + ObjectHeader.pageOffset, page);
   }
 }

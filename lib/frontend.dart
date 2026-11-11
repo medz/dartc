@@ -13,3 +13,5 @@ library;
 export 'src/frontend/analysis/session.dart'
     show AnalysisSession, CheckedLibraries;
 export 'src/frontend/lowering/lowering.dart' show Lowering, LoweringResult;
+
+export 'src/frontend/runtime_declarations.dart' show RuntimeDeclarations;

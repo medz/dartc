@@ -1,43 +1,53 @@
 import 'dart:ffi';
 
+import 'package:dartc/frontend.dart';
+
+import 'package:dartc/runtime/contracts.dart';
+
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 
 /// Binds the bundled runtime's external memory operations to trusted IR.
-HeapRuntime bindRuntime(IrProgram program, Uri library) {
+HeapRuntime bindRuntime(
+  IrProgram program,
+  CheckedLibraries input,
+  Uri library,
+) {
+  final annotations = RuntimeDeclarations(
+    program,
+    input,
+    library.resolve('contracts.dart'),
+  );
   final memory = library.resolve('memory.dart');
   final bodies = <IrFunction>[];
   final primitives = <FunctionTarget, MemoryPrimitive>{};
   for (final external in program.externals) {
     final target = external.target;
-    if (target.library != memory) continue;
+    final operation = annotations.primitives[target];
+    if (operation == null) continue;
     final block = Block(target.parameterTypes);
     final args = block.parameters;
     final Value? value;
-    switch (target.name) {
-      case 'map':
+    switch (operation) {
+      case .map:
         primitives[target] = .map;
         continue;
-      case 'unmap':
+      case .unmap:
         primitives[target] = .unmap;
         continue;
-      case 'fail':
+      case .fail:
         primitives[target] = .fail;
         continue;
-      case 'read':
+      case .read:
         value = block.emit(LoadNative(args.single, .new(Int64)));
-      case 'write':
+      case .write:
         block.emit(StoreNative(args.first, .new(Int64), args.last));
         value = null;
-      case 'addressOf':
+      case .addressOf:
         value = block.emit(ReferenceAddress(args.single));
-      case 'objectAt':
+      case .objectAt:
         value = block.emit(
           ReferenceFromAddress(args.single, target.returnType),
-        );
-      default:
-        throw ArgumentError(
-          'Unknown runtime memory declaration: ${target.name}',
         );
     }
     block.finish(Return(value));
@@ -45,22 +55,35 @@ HeapRuntime bindRuntime(IrProgram program, Uri library) {
   }
   final supplied = bodies.map((body) => body.target).toSet();
   program = IrProgram(
-    program.classes,
+    program.classes.map(
+      (declaration) => IrClass(
+        declaration.type,
+        declaration.fields,
+        members: declaration.members.values,
+        implementations: declaration.implementations.values,
+        constructors: declaration.constructors.values,
+        unsupportedForwarders: declaration.unsupportedForwarders,
+        weakFields: declaration.fields.where(annotations.weakFields.contains),
+        ephemerons: {
+          for (final field in declaration.fields)
+            if (annotations.ephemerons[field] case final name?)
+              field: declaration.fields.singleWhere(
+                (candidate) => candidate.name == name,
+              ),
+        },
+      ),
+    ),
     [...program.functions, ...bodies],
     globals: program.globals,
     externals: program.externals.where(
       (external) => !supplied.contains(external.target),
     ),
   );
-  FunctionTarget entry(String name) => program.functions
-      .singleWhere(
-        (function) =>
-            function.target.library == library &&
-            function.target.owner == null &&
-            function.target.name == name,
-      )
-      .target;
-  final allocate = entry('allocate'), release = entry('release');
+  final allocate = annotations.entries[RuntimeRole.allocate],
+      release = annotations.entries[RuntimeRole.release];
+  if (allocate == null || release == null) {
+    throw ArgumentError('Missing runtime entry contract.');
+  }
   final required = program.reachableFrom([allocate, release]);
   final libraries = {
     for (final function in program.functions)
@@ -103,16 +126,6 @@ HeapRuntime bindRuntime(IrProgram program, Uri library) {
     allocate: allocate,
     release: release,
     primitives: primitives,
-    nonAllocating: [
-      entry('release'),
-      program.functions
-          .singleWhere(
-            (function) =>
-                function.target.library == library &&
-                function.target.owner?.name == 'CopyingHeap' &&
-                function.target.name == 'allocate',
-          )
-          .target,
-    ],
+    nonAllocating: annotations.nonAllocating,
   );
 }

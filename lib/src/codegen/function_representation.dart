@@ -12,6 +12,7 @@ import 'reference_equality.dart';
 import 'selected_graph.dart';
 import 'value_operations.dart';
 import 'native_invocation.dart';
+import 'non_null_values.dart';
 
 /// Places allocating representation changes before register and root analysis.
 final class FunctionRepresentation(
@@ -147,6 +148,7 @@ final class FunctionRepresentation(
   };
 
   this {
+    final nonNull = NonNullValues(function);
     final valueOperations = ValueOperations(this, layouts, heap.invalid);
     checkCellInitialization(function);
     final operations = [
@@ -268,6 +270,21 @@ final class FunctionRepresentation(
         final actual = ObjectRuntimeType(instruction.operand, direct: true);
         runtimeType(actual, into);
         into.add(actual);
+        if ([
+          ValueType.integer,
+          ValueType.floating,
+          ValueType.boolean,
+        ].contains(instruction.testedType)) {
+          final comparison = ReferenceEquality(
+            actual,
+            layouts.types.constant(instruction.testedType),
+            negated: instruction.negated,
+          );
+          aliases.add(instruction);
+          _operands[instruction] = [comparison];
+          into.addAll([comparison, instruction]);
+          return;
+        }
         _operands[instruction] = [actual, _reify(instruction.testedType, into)];
       }
       into.add(instruction);
@@ -679,7 +696,7 @@ final class FunctionRepresentation(
                     entry.key: (target: entry.value, closure: null),
                 };
           final plainObject =
-              receiver.type is ClassType &&
+              receiver.type.nonNullable is ClassType &&
               ![
                 ValueType.integer,
                 ValueType.floating,
@@ -748,7 +765,9 @@ final class FunctionRepresentation(
             }
           }
           final actual = layouts.types.runtimeTypeOf(receiver, body);
-          final shape = functionValue
+          final shape = targets.isEmpty
+              ? null
+              : functionValue
               ? _load(layouts.closures.tag, receiver, body)
               : virtual
               ? LoadField(TypeValues.shape, actual)
@@ -1404,6 +1423,13 @@ final class FunctionRepresentation(
         }
         if (instruction
             case TypeCast(:final operand) || NullCheck(:final operand)) {
+          if (nonNull.contains(operand) &&
+              instruction.type.accepts(operand.type.nonNullable)) {
+            aliases.add(instruction);
+            _operands[instruction] = [operand];
+            body.add(instruction);
+            continue;
+          }
           final check = casts.targetFor(instruction, layouts);
           _operands[instruction] = [
             operand,

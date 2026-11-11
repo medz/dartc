@@ -1,17 +1,28 @@
 import 'package:dartc/frontend.dart';
+import 'package:dartc/sdk.dart';
 import 'package:test/test.dart';
 
 void main() {
   const path = 'test/compiler/fixtures/arithmetic.dart';
+  test('SDK selection alone does not mount private runtime sources', () async {
+    await expectLater(
+      AnalysisSession(
+        [path],
+        resources: ['dartc/src/runtime/allocator.dart'],
+      ).use((_) {}),
+      throwsArgumentError,
+    );
+  });
   test(
     'source resources share analysis identities and lifetime with inputs',
     () async {
       final session = AnalysisSession(
         [path],
-        resources: ['dartc/src/runtime/space.dart'],
+        sourceArchive: await SourceArchive.load(),
+        resources: ['dartc/src/runtime/allocator.dart'],
       );
       final checked = await session.resolve();
-      final runtime = checked.resources['dartc/src/runtime/space.dart']!;
+      final runtime = checked.resources['dartc/src/runtime/allocator.dart']!;
       expect(runtime.session, same(checked.libraries.first.session));
       expect(
         runtime.element.typeProvider.intType.element,
@@ -21,7 +32,7 @@ void main() {
       final body = lowered.program.functions.singleWhere(
         (f) =>
             f.target.library == runtime.element.uri &&
-            f.target.name == 'heapCapacity',
+            f.target.name == 'slotSize',
       );
       expect(body.target.library.scheme, 'file');
       expect(body.callees, isEmpty);
