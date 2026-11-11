@@ -12,10 +12,12 @@ import 'function_emitter.dart';
 final class HeapEntry<R extends Object>(
   final FunctionEmitter<R> emitter,
   final FunctionTarget releaseFunction,
+  final FunctionTarget? runEvents,
   final void Function(Fixup) roots,
   final void Function(Fixup) error,
   final void Function(Fixup) uncaught,
-  final void Function(Fixup, FunctionTarget) call, {
+  final void Function(Fixup, FunctionTarget) call,
+  final void Function(int) safepoint, {
   final void Function(Fixup)? context,
   final void Function(Fixup)? globals,
 }) {
@@ -130,6 +132,33 @@ final class HeapEntry<R extends Object>(
   void leave(FrameLayout<R> frame, R? result, {bool release = false}) {
     if (result != null) emitter.storeStack(result, frame.localOffset + _result);
     emitter.storeStack(emitter.failureRegister, frame.localOffset + _failure);
+    if (runEvents case final events?) {
+      final idle = emitter.label(), finished = emitter.label();
+      emitter.jumpIfZero(emitter.failureRegister, idle);
+      emitter.jump(finished);
+      emitter.bind(idle);
+      if (persistent) {
+        emitter.loadStack(
+          emitter.failureRegister,
+          frame.localOffset + RuntimeContext.previousEntry,
+        );
+        final outermost = emitter.label();
+        emitter.jumpIfZero(emitter.failureRegister, outermost);
+        emitter.jump(finished);
+        emitter.bind(outermost);
+      }
+      final argument =
+          emitter.convention
+                  .classify(NativeSignature(Void, [Int64]))
+                  .parameters
+                  .single
+              as RegisterArgument<R>;
+      emitter.move(argument.register, emitter.heapRegister);
+      call(emitter.call(), events);
+      safepoint(emitter.position);
+      emitter.storeStack(emitter.failureRegister, frame.localOffset + _failure);
+      emitter.bind(finished);
+    }
     if (persistent) {
       emitter.loadStack(
         emitter.failureRegister,

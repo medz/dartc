@@ -2,6 +2,7 @@ import '../../layout/memory.dart';
 import 'contracts.dart';
 import 'control.dart';
 import 'finalization.dart';
+import 'event_loop.dart';
 import 'heap.dart';
 import 'memory.dart';
 import 'native_objects.dart';
@@ -13,6 +14,7 @@ final class Allocator(
   final NativeObjects objects,
   final NativeRoots roots,
   final FinalizationQueue finalization,
+  final EventLoop events,
 ) {
   final Heap heap = Heap(objects, roots, finalization);
   int _identityHash = 0;
@@ -92,6 +94,10 @@ int allocate(int context, int descriptor, int sp, int pc, int payloadBytes) {
   if (Memory.read(context + RuntimeContext.initializing) != 0) {
     return allocateControl(context, descriptor, bytes);
   }
+  return _allocator(context).allocate(context, descriptor, bytes, sp, pc);
+}
+
+Allocator _allocator(int context) {
   var allocator = Memory.objectAt<Allocator?>(
     Memory.read(context + RuntimeContext.heap),
   );
@@ -99,10 +105,13 @@ int allocate(int context, int descriptor, int sp, int pc, int payloadBytes) {
     Memory.write(context + RuntimeContext.initializing, 1);
     try {
       final objects = NativeObjects();
+      final finalization = FinalizationQueue();
+      final events = EventLoop(finalization);
       allocator = Allocator(
         objects,
-        NativeRoots(context, objects),
-        FinalizationQueue(),
+        NativeRoots(context, objects, events),
+        finalization,
+        events,
       );
       Memory.write(context + RuntimeContext.heap, Memory.addressOf(allocator));
     } catch (_) {
@@ -112,7 +121,20 @@ int allocate(int context, int descriptor, int sp, int pc, int payloadBytes) {
       Memory.write(context + RuntimeContext.initializing, 0);
     }
   }
-  return allocator.allocate(context, descriptor, bytes, sp, pc);
+  return allocator;
+}
+
+/// Selects event delivery only for programs that use scheduling facilities.
+@RuntimeEntry(.events)
+EventLoop events() => _allocator(Memory.context()).events;
+
+/// Runs pending work while the entry frame and heap are still available.
+@RuntimeEntry(.runEvents)
+void runEvents(int context) {
+  final allocator = Memory.objectAt<Allocator?>(
+    Memory.read(context + RuntimeContext.heap),
+  );
+  if (allocator != null) allocator.events.run();
 }
 
 /// Releases the user heap before destroying its control storage.

@@ -118,6 +118,26 @@ final class AnalysisSession(
         path.join(sdkPath, 'lib/core/weak.dart'),
         path.join(root, 'dartc/src/runtime/patches/core.dart'),
       );
+      SdkPatches(files).apply(
+        path.join(sdkPath, 'lib/async/async.dart'),
+        path.join(sdkPath, 'lib/async/schedule_microtask.dart'),
+        path.join(root, 'dartc/src/runtime/patches/async.dart'),
+      );
+      SdkPatches(files).apply(
+        path.join(sdkPath, 'lib/internal/internal.dart'),
+        path.join(sdkPath, 'lib/internal/print.dart'),
+        path.join(root, 'dartc/src/runtime/patches/print.dart'),
+      );
+      SdkPatches(files).apply(
+        path.join(sdkPath, 'lib/async/async.dart'),
+        path.join(sdkPath, 'lib/async/timer.dart'),
+        path.join(root, 'dartc/src/runtime/patches/timer.dart'),
+      );
+      SdkPatches(files).apply(
+        path.join(sdkPath, 'lib/collection/collection.dart'),
+        path.join(sdkPath, 'lib/collection/hash_map.dart'),
+        path.join(root, 'dartc/src/runtime/patches/hash_map.dart'),
+      );
     }
     final options = path.join(
       path.dirname(inputs.first),

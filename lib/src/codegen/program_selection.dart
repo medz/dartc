@@ -158,11 +158,14 @@ final class ProgramSelection(
       capture = needsTrace;
       managed = needsHeap;
     }
-    if (managed) calls.addAll([heap.allocate, heap.release]);
+    if (managed) {
+      calls.addAll([heap.allocate, heap.release]);
+      if (calls.contains(heap.eventAccess)) calls.add(heap.runEvents);
+    }
     heap.retain(calls);
     calls.addAll(heap.initializers);
     primitives = managed
-        ? heap.primitives
+        ? heap.primitives.intersection({...calls, heap.invalid})
         : {if (calls.contains(heap.invalid)) heap.invalid};
     final missing = calls.difference({
       ...functions.keys,

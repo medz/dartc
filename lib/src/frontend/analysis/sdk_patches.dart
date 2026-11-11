@@ -20,11 +20,9 @@ final class SdkPatches(final OverlayResourceProvider files) {
     final partSource = part.readAsStringSync();
     final additions = parse(source, patchPath);
     final edits = <(int, int, String)>[];
+    final declarations = parse(partSource, partPath).declarations;
     final classes = {
-      for (final declaration in parse(
-        partSource,
-        partPath,
-      ).declarations.whereType<ClassDeclaration>())
+      for (final declaration in declarations.whereType<ClassDeclaration>())
         declaration.namePart.typeName.lexeme: declaration,
     };
     final helpers = <String>[];
@@ -34,6 +32,44 @@ final class SdkPatches(final OverlayResourceProvider files) {
       );
       if (!patched) {
         helpers.add(source.substring(declaration.offset, declaration.end));
+        continue;
+      }
+      if (declaration is FunctionDeclaration) {
+        final target = declarations
+            .whereType<FunctionDeclaration>()
+            .where(
+              (d) =>
+                  d.name.lexeme == declaration.name.lexeme &&
+                  d.propertyKeyword?.lexeme ==
+                      declaration.propertyKeyword?.lexeme,
+            )
+            .singleOrNull;
+        if (target == null ||
+            target.externalKeyword == null ||
+            target.returnType?.toSource() !=
+                declaration.returnType?.toSource() ||
+            target.functionExpression.parameters?.toSource() !=
+                declaration.functionExpression.parameters?.toSource() ||
+            target.functionExpression.typeParameters?.toSource() !=
+                declaration.functionExpression.typeParameters?.toSource() ||
+            declaration.functionExpression.body is EmptyFunctionBody) {
+          throw FormatException(
+            'SDK function patch does not match: $patchPath',
+          );
+        }
+        edits.add((
+          target.externalKeyword!.offset,
+          target.externalKeyword!.end,
+          '',
+        ));
+        edits.add((
+          target.functionExpression.body.offset,
+          target.functionExpression.body.end,
+          source.substring(
+            declaration.functionExpression.body.offset,
+            declaration.end,
+          ),
+        ));
         continue;
       }
       if (declaration is! ClassDeclaration) {
@@ -51,7 +87,11 @@ final class SdkPatches(final OverlayResourceProvider files) {
                 member.fields.variables.every(
                   (field) => field.name.lexeme.startsWith('_'),
                 ) ||
-            member is MethodDeclaration && member.name.lexeme.startsWith('_')) {
+            member is MethodDeclaration &&
+                member.name.lexeme.startsWith('_') &&
+                !match.body.members.whereType<MethodDeclaration>().any(
+                  (method) => method.name.lexeme == member.name.lexeme,
+                )) {
           privateMembers.add(source.substring(member.offset, member.end));
           continue;
         }

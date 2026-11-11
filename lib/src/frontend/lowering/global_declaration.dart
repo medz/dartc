@@ -19,6 +19,8 @@ void lowerGlobal(
     bindings.constantOf(element, unit, declaration);
     return;
   }
+  final getter = bindings.target(element.getter!, unit, declaration);
+  if (functions.any((function) => function.target == getter)) return;
   if (element
       case FieldElement(isExternal: true) ||
           TopLevelVariableElement(isExternal: true)) {

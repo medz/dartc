@@ -1,6 +1,6 @@
 # 库、脚本与并发边界
 
-转换以调用方明确提供的库批次为单位，包含每个库的所有 part。`package:dartc/frontend.dart` 的 `AnalysisSession` 复用官方 analyzer 的解析结果；名称与指令解析不由 lowering 重复实现。`includeDependencies: true` 纳入非 SDK 导入和导出库，整个批次完成静态检查后才开始转换。用户库的函数体由输入批次提供；引用的 SDK 普通顶层函数、静态方法和构造器所属类按声明身份读取源码，并在转换前检查所在库的全部单元。`Lowering.lower` 返回 `Future<LoweringResult>`，须在分析会话关闭前等待完成。无参数的同步 main 可作为独立进程入口，其他启动能力见下文。
+转换以调用方明确提供的库批次为单位，包含每个库的所有 part。`package:dartc/frontend.dart` 的 `AnalysisSession` 复用官方 analyzer 的解析结果；名称与指令解析不由 lowering 重复实现。`includeDependencies: true` 纳入非 SDK 导入和导出库，整个批次完成静态检查后才开始转换。用户库的函数体由输入批次提供；引用的 SDK 普通顶层函数、静态方法、属性、全局存储及构造器和常量所属类按声明身份读取源码，并在转换前检查所在库的全部单元。`Lowering.lower` 返回 `Future<LoweringResult>`，须在分析会话关闭前等待完成。无参数的同步 main 可作为独立进程入口，其他启动能力见下文。
 
 | 特性 | 当前 IR 范围 |
 | --- | --- |
@@ -13,17 +13,23 @@
 | part、URI/具名 part of | 读取官方 analyzer 返回的库单元，在转换前检查所有单元的 error 诊断。 |
 | 相对、file:、package: URI | 支持源码导入 URI 的 analyzer 解析；API 输入仍为文件路径。 |
 | package configuration v2 | 使用首个输入库的包上下文，保留 package URI 身份并检查包语言版本。 |
-| main 入口 | `LoweringResult.entryPoint` 保留首个库导出命名空间中的 main 声明身份，包括再导出。原生支持无参数的同步入口，正常返回退出码为 0，返回值不作为进程退出码。启动参数、异步完成、事件处理及完整进程生命周期待实现。 |
-| StackTrace API | 同步原生 throw 捕获调用链，catch/rethrow 保留关联轨迹；Error 子类记录首次抛出的轨迹。`StackTrace.current/fromString/toString`、`Error.stackTrace` getter 及轨迹格式化尚未接通。 |
-| isolate、消息端口与 spawn | 调用保留普通 SDK 导入；isolate 与调度的运行时实现待开发。 |
+| main 入口 | `LoweringResult.entryPoint` 保留首个库导出命名空间中的 main 声明身份，包括再导出。原生支持无参数的同步入口，正常返回退出码为 0，返回值不作为进程退出码。返回后处理微任务、定时器和终结事件；启动参数、异步 main 及完整进程生命周期待实现。 |
+| StackTrace API | 同步原生 throw 捕获调用链，catch/rethrow 保留关联轨迹；Error 子类记录首次抛出的轨迹。`Error.throwWithStackTrace` 使用传入轨迹重抛；`StackTrace.current/fromString/toString`、`Error.stackTrace` getter 及轨迹格式化尚未接通。 |
+| isolate、消息端口与 spawn | 调用保留普通 SDK 导入；isolate 的创建、消息调度及线程进入协议待开发。 |
 
 [库与命名空间行为对照](../test/frontend/lowering/libraries_test.dart)、[包上下文与诊断对照](../test/frontend/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/libraries.md)。
 
-SDK 成员按已解析的声明生成普通调用、方法提取或扩展调用；未提供函数体时保留导入身份。普通顶层函数和类静态方法的 Dart 函数体支持别名、再导出、函数提取、默认参数及继续引用其他函数；静态方法不要求先提供类的实例布局。范围检查的成功分支与 SDK 对照，失败分支保留构造和抛错操作。引用的 SDK 非 external 构造器会纳入所属类、父类及普通实例成员；有 Dart 函数体的工厂和重定向目标通过相同路径转换；整数移位也纳入负计数所需的 ArgumentError 类。ArgumentError 的生成式构造器和 message、name、invalidValue 属性已通过原生验证。SDK 的 MapEntry 重定向构造及 Iterable.map 使用的工厂体已有[原生验证](../test/compiler/maps_test.dart)；未纳入类的实例成员、extension 成员和全局存储的实现装配仍有缺口；external 声明所需原语也未完整实现，Error.stackTrace getter 和错误格式化尚不能原生执行。RangeError.checkNotNegative 的成功和失败分支已原生执行，保留实际 RangeError 的 invalidValue、start、end 与字符串 message。UnsupportedError 的普通构造器和 message 已用于非有限数值转换，完整错误格式化仍未实现。缺少原生依赖时拒绝生成产物。见[SDK 函数体对照](../test/frontend/lowering/sdk_functions_test.dart)、[原生依赖拒绝](../test/compiler/compiler_test.dart)及[SDK 调用与用户重写测试](../test/frontend/lowering/sdk_calls_test.dart)。
+SDK 成员按已解析的声明生成普通调用、方法提取或扩展调用；未提供函数体时保留导入身份。普通顶层函数和类静态方法的 Dart 函数体支持别名、再导出、函数提取、默认参数及继续引用其他函数；静态方法不要求先提供类的实例布局。范围检查的成功分支与 SDK 对照，失败分支保留构造和抛错操作。引用的 SDK 非 external 构造器会纳入所属类、父类及普通实例成员；有 Dart 函数体的工厂和重定向目标通过相同路径转换；整数移位也纳入负计数所需的 ArgumentError 类。ArgumentError 的生成式构造器和 message、name、invalidValue 属性已通过原生验证。SDK 的 MapEntry 重定向构造及 Iterable.map 使用的工厂体已有[原生验证](../test/compiler/maps_test.dart)；未纳入类的实例成员及 extension 成员的实现装配仍有缺口；external 声明所需原语也未完整实现，Error.stackTrace getter 和错误格式化尚不能原生执行。RangeError.checkNotNegative 的成功和失败分支已原生执行，保留实际 RangeError 的 invalidValue、start、end 与字符串 message。UnsupportedError 的普通构造器和 message 已用于非有限数值转换，完整错误格式化仍未实现。缺少原生依赖时拒绝生成产物。见[SDK 函数体对照](../test/frontend/lowering/sdk_functions_test.dart)、[原生依赖拒绝](../test/compiler/compiler_test.dart)及[SDK 调用与用户重写测试](../test/frontend/lowering/sdk_calls_test.dart)。
 
 [延迟导入对照](../test/frontend/lowering/deferred_imports_test.dart)覆盖未加载、请求已发出但尚未完成、加载完成和重复加载；两个前缀指向同一库时仍各自检查。`LoadLibrary` 返回代表加载完成的 Future，`CheckLibraryLoaded` 保留可抛错的读取效果。`loadLibrary` 的隐式函数保留普通调用和函数值身份。普通 extension 声明不能通过 deferred 导入，由 analyzer 检查。
 
 SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.new` 提取](../test/frontend/lowering/fixtures/deferred_unnamed_tearoff.dart)诊断为不是构造器引用；analyzer 14.7 接受后者。IR 对该用例保留已解析构造器及加载检查，并独立验证其结果，不将它计入 SDK 执行对照。
+
+## 微任务、事件与终结回调
+
+支持 `scheduleMicrotask`、`Timer`、`Timer.run` 和 `Timer.periodic`，包括取消、isActive、tick 与负时长按零处理。复用 SDK Zone 的 Dart 实现；`Finalizer` 在创建 Zone 内调用，未处理异常经该 Zone 的处理器转交。根 Zone 未处理的异步异常终止原生入口。Zone 值及错误处理、微任务优先级、定时取消、零周期回调、同一目标的多次终结和回调内 GC 见[调度与终结验证](../test/compiler/finalizers_test.dart)。这不代表 Future、async/await、Stream 或 isolate 已能原生执行。
+
+动态库在最外层同步 Dart 入口返回前处理待执行事件。重入的 FFI 入口不启动第二个事件循环；持续活动的周期定时器会使这次调用保持运行。卸载库只释放存储，不启动新回调。外部线程和异步宿主驱动入口尚未接通。
 
 ## 数学函数
 
@@ -35,7 +41,7 @@ IR 支持 num 参数及 dynamic 实参的类型检查，实参只求值一次。
 
 入口选择遵循主规范的 Scripts 条款，使用根库导出命名空间中的 main，不按依赖遍历顺序查找同名函数。`Compiler.compile(output: const Output.executable())` 和 CLI `--kind exe` 接通现有标量函数的独立执行。整个输入依赖图先完成静态检查，未使用代码的错误仍拒绝编译。
 
-无参数同步入口可调用当前支持的标量函数和显式绑定的原生函数。main 正常完成后退出码为 0；其 Dart 返回值被忽略。具有参数的入口、async main、返回 Future 的入口、微任务与事件循环均仍是实现缺口，不静默丢弃参数或异步工作。
+无参数同步入口可调用当前支持的标量函数和显式绑定的原生函数。main 正常完成后退出码为 0；其 Dart 返回值被忽略。main 返回后先处理微任务，再执行终结和定时事件；每个事件结束后重新处理微任务，直到队列为空才释放堆。定时器使用单调时钟及平台等待，取消的定时器不再保活。具有参数的入口、async main、返回 Future 的入口、I/O 事件源和跨线程唤醒仍是实现缺口。
 
 Linux ARM64/x86-64 输出当前为固定地址、静态解析的 ELF 可执行映像，直接进入生成的启动代码，不依赖动态加载器。Linux 动态可执行链接与 PIE 尚未实现。macOS 输出使用 LC_MAIN、系统 dyld 和 ad-hoc 签名，并支持显式动态库依赖。macOS x64 具有结构检查，尚无该目标的实际执行证据。
 
@@ -57,7 +63,7 @@ Linux ARM64/x86-64 输出当前为固定地址、静态解析的 ELF 可执行�
 | 浮点 | 支持静态 int/double 操作数的混合加、减、乘、IEEE 除法、全部数值比较及 `toDouble`，另支持 double 常量和取负；比较保持整数的原始数值，不因算术转换而丢失精度。保留 NaN、无穷、次正规数和正负零行为，不做融合乘加或 fast-math 改写。参数、结果、分支汇合和调用保持 double 表示。部分混合数值常量表达式尚未实现，见[数值比较](expressions.md#数值比较与-sdk-差异)。toInt/truncate/floor/ceil/round 支持已知和装箱数值，保留整数精度、有限溢出饱和和非有限异常。已接通保留 double 结果的舍入方法及浮点、混合和装箱 `~/`；浮点取模、compareTo 及完整数学库尚未接入。当前执行验证使用 SDK 宿主的默认浮点控制环境，非默认控制状态尚未验证。 |
 | WeakReference | 支持泛型工厂、构造器提取和只读 `target`。弱引用不会保活目标；普通强引用保留目标，失去强引用后允许清空。原生验证覆盖用户对象、自引用环、集合、闭包、类型对象、常量和跨导出调用存活，以及数值、字符串、布尔值和 FFI 指针的 `ArgumentError`。records、Struct/Union 的目标表示尚缺，未验证其拒绝路径。见[源码与原生验证](../test/compiler/weak_references_test.dart)。回收时机和是否清空不构成语言保证。 |
 | Expando | 支持可选名称、构造器提取、`name`、`toString`、按对象身份读取/替换属性及写入 null 删除；相同名称的实例互不共享属性。不调用键的重写 hashCode/==；写入保持实际泛型值类型检查。GC 仅在 Expando 与 key 均存活时保留 value，支持跨 Expando 的条件依赖与循环回收。数值、字符串、布尔值和 FFI 指针键抛出 ArgumentError，动态 null 参数受非空类型检查；records、Struct/Union 的目标表示仍缺。见[源码与原生验证](../test/compiler/expandos_test.dart)。 |
-| 终结 | `Finalizer`、`NativeFinalizer` 的标准库入口及调度仍未接通。内部终结记录的入队、分离和关闭状态机不等于完整标准库支持。 |
+| 终结 | `Finalizer<T>` 支持可空 token、多重附着、弱 target/detach key、创建 Zone 绑定及至多一次的事件回调。detach 也取消尚未执行的回调；失去 finalizer 本身的强引用不保留其记录。GC 仅入队，回调可分配并再次触发 GC；关闭堆丢弃剩余附着，不强制调用回调。`NativeFinalizer`、外部内存计量与原生资源关闭保证仍待实现。 |
 | 字符串 | 原生常量保留 UTF-16 码元；`length`、`codeUnitAt` 支持普通调用、泛型接收者和方法值，越界抛出可捕获的 RangeError。`String.fromCharCode`、构造器值、`+`、`[]` 和内容相等/哈希已接通，动态载荷在 GC 与跨入口全局存储中保持有效。fromCharCodes、一般插值格式化与其他 String 方法仍待接通；见[字符串范围与验证](expressions.md#原生转整数与字符串常量)。 |
 | 参数与存储 | ARM64 的前八个、x86-64 的前六个原生整数或指针参数使用通用寄存器；两者另有八个由 `Float` 和 `Double` 共用的浮点参数寄存器，与通用寄存器独立分配。各类超出的参数按源顺序使用栈：macOS ARM64 按实际大小自然对齐，Linux ARM64 与 x86-64 使用八字节槽。Dart 函数间另支持布尔参数及结果，不隐式扩展原生导出签名。分支、循环和调用之间保留活跃值，块参数遵循同时赋值语义；栈帧保持 16 字节对齐及帧指针链，出参区与局部存储分开。ARM64 帧支持保存 D8–D15 的低 64 位，x86-64 的标量浮点寄存器均按调用可破坏处理。超出当前栈访问、栈帧或分支/调用位移编码范围时明确报错。 |
 | 原生指针 | 支持上述整数、Float 和 Double 元素类型的 `Pointer<T>.fromAddress`、`.address`、相等/不等比较、`+`、`-`、`elementAt`、`.value` 及 `[]`/`[]=` 读写，包括增减和复合赋值。偏移和索引以元素计数，允许负值，地址运算保留目标指针位宽；计算地址不访问存储。整数读取按有符号/无符号规则扩展，写入截断到元素宽度；Float 使用四字节存储，写入舍入精度、读取转换为 double；Double 使用八字节存储。写入不改变原 Dart 变量或赋值表达式的值，不影响邻接字节。接收者、索引及右值按 Dart 顺序各求值一次，别名修改可见。访问要求有效、存活且按元素大小自然对齐的原生存储；不进行集合边界检查，不将机器访存失败当作 Dart 异常。其他元素存储类型、结构体、回调及分配器尚未接入。 |
@@ -67,7 +73,7 @@ Linux ARM64/x86-64 输出当前为固定地址、静态解析的 ELF 可执行�
 | 跨共享库符号 | `LinkInput.sharedLibrary(name, symbols: ...)` 将未决对象符号映射到装载器的原生符号名，两者均包含平台符号修饰；对象和已选归档定义优先。依赖顺序保留，相同库名合并，即使没有引用也保留依赖。Mach-O 绑定指定库，ELF 遵循全局符号查找顺序，不能用 ELF 库依赖冒充 Dart 资产隔离。支持函数调用，以及通过间接地址重定位取得数据和真实函数地址；地址槽在装载时解析，缺库或缺符号导致装载失败。`Compiler.compile(linkInputs: ...)` 可使用同一路径；链接器不读取依赖库或验证其导出。自动资产发现、Dart resolver/进程回退及源码 Native 字段仍是缺口。 |
 | 数据存储 | 独立 object/linker API 支持只读、可写及零初始化节，保留节对齐、数据符号及跨模块寻址；共享库分别映射可执行、只读和可写内存，BSS 不占用对应的文件字节。直接地址使用 ARM64 ADRP/ADD 或 x86-64 RIP 相对 LEA；加载符号内容使用 ADRP/LDR 或 RIP 相对 MOV。`Relocation.indirect` 明确将后两种加载的目标改为保存符号地址的槽，支持局部、静态和共享库定义；静态地址槽随映像装载修正。超出寻址范围或不符合指令对齐要求时报错。Dart 顶层/静态变量和惰性初始化使用模块存储，见[变量](variables.md#原生局部存储)；数据导出注解尚未接入。 |
 | 平台验证 | macOS ARM64、Linux ARM64/x86-64 已验证原生调用；macOS x86-64 当前检查文件生成、重定位表与签名，尚无运行验证。 |
-| 标准库与执行支持 | 同步入口内支持对象构造与不可达对象回收，具体范围见[类](classes.md#原生执行范围)。托管全局状态可跨入口保存；并发调用、跨线程调用、跨模块托管值 ABI、调度及一般标准库执行能力尚未实现；标准库源码可用不等于目标侧实现已经存在。 |
+| 标准库与执行支持 | 同步入口内支持对象构造与不可达对象回收，具体范围见[类](classes.md#原生执行范围)。托管全局状态可跨入口保存；并发调用、跨线程调用、跨模块托管值 ABI、I/O 事件及一般标准库执行能力尚未实现；标准库源码可用不等于目标侧实现已经存在。 |
 
 [原生函数验证](../test/compiler/native_test.dart)通过固定 Dart FFI 调用代码执行预编译资产，并与 SDK 对照整数边界行为。[寄存器别名验证](../test/codegen/native_test.dart)覆盖目标寄存器重叠时的实际结果。[格式验证](../test/object/formats_test.dart)检查目标标识、静态归档成员与符号索引；[签名验证](../test/linker/signature_test.dart)检查 Mach-O 签名对全部映像页的覆盖；[头文件验证](../test/compiler/artifacts_test.dart)检查导出原型。上述范围是当前后端实现进度，不改变完整语言目标。
 

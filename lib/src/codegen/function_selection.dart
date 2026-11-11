@@ -207,7 +207,9 @@ final class FunctionSelection<R>(
           case NumericBinary(:final operator, :final left, :final right):
             if (!_number(left.type) || !_number(right.type)) {
               throw UnsupportedError(
-                'Native arithmetic requires known numeric representations.',
+                'Native arithmetic requires known numeric representations in '
+                '${function.target.library}::${function.target.name}: '
+                '${left.type.dartName} $operator ${right.type.dartName}',
               );
             }
             final Comparison? comparison = switch (operator) {

@@ -136,9 +136,11 @@ final class LinkUnit(
     }
     if (target.operatingSystem == .macos) search(archives);
     if (target.operatingSystem == .macos &&
-        objects.any(
-          (o) => o.sections.any((s) => s.kind == .finalizers && s.size != 0),
-        )) {
+        (missing.contains('.dartc.clock') ||
+            objects.any(
+              (o) =>
+                  o.sections.any((s) => s.kind == .finalizers && s.size != 0),
+            ))) {
       const libraryName = '/usr/lib/libSystem.B.dylib';
       var library = libraries.indexOf(libraryName);
       if (library < 0) {
@@ -151,6 +153,7 @@ final class LinkUnit(
         }
         imports[service.key] = (library, service.value);
       }
+      imports['.dartc.clock'] = (library, '_clock_gettime_nsec_np');
     }
     final dynamicNames = missing.where(imports.containsKey).toSet();
     missing.removeAll(dynamicNames);

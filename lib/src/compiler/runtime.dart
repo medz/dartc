@@ -38,10 +38,25 @@ HeapRuntime bindRuntime(
       case .fail:
         primitives[target] = .fail;
         continue;
+      case .context:
+        primitives[target] = .context;
+        continue;
+      case .writeBytes:
+        primitives[target] = .writeBytes;
+        continue;
+      case .clock:
+        primitives[target] = .clock;
+        continue;
+      case .sleep:
+        primitives[target] = .sleep;
+        continue;
       case .read:
         value = block.emit(LoadNative(args.single, .new(Int64)));
       case .write:
         block.emit(StoreNative(args.first, .new(Int64), args.last));
+        value = null;
+      case .writeByte:
+        block.emit(StoreNative(args.first, .new(Uint8), args.last));
         value = null;
       case .addressOf:
         value = block.emit(ReferenceAddress(args.single));
@@ -63,11 +78,16 @@ HeapRuntime bindRuntime(
     ),
   );
   final allocate = annotations.entries[RuntimeRole.allocate],
-      release = annotations.entries[RuntimeRole.release];
-  if (allocate == null || release == null) {
+      release = annotations.entries[RuntimeRole.release],
+      runEvents = annotations.entries[RuntimeRole.runEvents],
+      eventAccess = annotations.entries[RuntimeRole.events];
+  if (allocate == null ||
+      release == null ||
+      runEvents == null ||
+      eventAccess == null) {
     throw ArgumentError('Missing runtime entry contract.');
   }
-  final required = program.reachableFrom([allocate, release]);
+  final required = program.reachableFrom([allocate, release, runEvents]);
   final libraries = {
     for (final function in program.functions)
       if (required.contains(function.target)) function.target.library,
@@ -108,6 +128,8 @@ HeapRuntime bindRuntime(
     source,
     allocate: allocate,
     release: release,
+    runEvents: runEvents,
+    eventAccess: eventAccess,
     primitives: primitives,
     nonAllocating: annotations.nonAllocating,
   );

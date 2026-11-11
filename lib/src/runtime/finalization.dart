@@ -8,19 +8,26 @@ enum FinalizationState() {
   delivered,
 }
 
-/// Owns registrations whose callback and tokens remain live with this owner.
-final class FinalizerHandle(
-  final void Function(Object) callback, {
-  final bool runOnShutdown = false,
-}) {
+/// Keeps registrations alive for exactly as long as their finalizer is alive.
+base class FinalizerHandle<T>(
+  final FinalizationQueue queue,
+  final void Function(T) callback,
+) {
   FinalizationRecord? _first;
+
+  void attach(Object value, T token, {Object? detach}) =>
+      queue.attach(this, value, token, detachKey: detach);
+
+  void detach(Object key) => queue.detach(this, key);
+
+  void _invoke(Object? token) => callback(token as T);
 }
 
-/// Retains a token without retaining its target or registry neighbours.
+/// Retains its token, but neither its target nor the collector's registry links.
 final class FinalizationRecord(
-  final FinalizerHandle owner,
+  final FinalizerHandle<Object?> owner,
   Object target,
-  final Object token,
+  Object? token,
   Object? detachKey,
 ) {
   @WeakSlot()
@@ -29,29 +36,39 @@ final class FinalizationRecord(
   Object? detachKey = detachKey;
   @WeakSlot()
   FinalizationRecord? _registryNext;
-  FinalizationRecord? _ownerNext;
-  FinalizationRecord? _queueNext;
-  FinalizationRecord? _shutdownPrevious, _shutdownNext;
+  Object? _token = token;
+  FinalizationRecord? _ownerPrevious, _ownerNext, _queueNext;
   FinalizationState _state = .attached;
 
-  /// The registration's lifecycle state.
   FinalizationState get state => _state;
+
+  void _unlink() {
+    final previous = _ownerPrevious, next = _ownerNext;
+    if (previous == null) {
+      owner._first = next;
+    } else {
+      previous._ownerNext = next;
+    }
+    next?._ownerPrevious = previous;
+    _ownerPrevious = null;
+    _ownerNext = null;
+    target = null;
+    detachKey = null;
+    _token = null;
+  }
 }
 
-/// Queues existing records during collection and delivers them after resuming.
+/// Stages existing records without allocation; the event loop delivers them.
 final class FinalizationQueue() implements Finalization {
   @WeakSlot()
   FinalizationRecord? _records;
-  FinalizationRecord? _head;
-  FinalizationRecord? _tail;
-  FinalizationRecord? _shutdown;
+  FinalizationRecord? _head, _tail;
   bool _closed = false;
 
-  /// Attaches a registration to its owner and the weak collector registry.
   FinalizationRecord attach(
-    FinalizerHandle owner,
+    FinalizerHandle<Object?> owner,
     Object target,
-    Object token, {
+    Object? token, {
     Object? detachKey,
   }) {
     if (_closed) throw StateError('Finalization is closed.');
@@ -59,42 +76,30 @@ final class FinalizationQueue() implements Finalization {
     record._registryNext = _records;
     _records = record;
     record._ownerNext = owner._first;
+    owner._first?._ownerPrevious = record;
     owner._first = record;
-    if (owner.runOnShutdown) {
-      record._shutdownNext = _shutdown;
-      _shutdown?._shutdownPrevious = record;
-      _shutdown = record;
-    }
     return record;
   }
 
-  /// Detaches registrations that have not already been queued for delivery.
-  void detach(FinalizerHandle owner, Object key) {
-    var record = owner._first;
-    while (record != null) {
+  /// Cancels all matching attachments, including events awaiting delivery.
+  void detach(FinalizerHandle<Object?> owner, Object key) {
+    for (var record = owner._first; record != null;) {
       final next = record._ownerNext;
       if (identical(record.detachKey, key)) {
-        _unlinkOwner(record);
-        _unlinkShutdown(record);
+        record._unlink();
         record._state = .detached;
-        record.target = null;
-        record.detachKey = null;
       }
       record = next;
     }
   }
 
   @override
-  void visitPending(ReferenceVisitor visitor) {
-    visitor.visit(_head);
-    visitor.visit(_shutdown);
-  }
+  void visitPending(ReferenceVisitor visitor) => visitor.visit(_head);
 
   @override
   void stage(Liveness live) {
     FinalizationRecord? previous;
-    var record = _records;
-    while (record != null) {
+    for (var record = _records; record != null;) {
       final next = record._registryNext;
       final reachable = live.isAlive(record);
       if (!reachable ||
@@ -107,8 +112,6 @@ final class FinalizationQueue() implements Finalization {
         }
         record._registryNext = null;
         if (reachable && record._state == .attached) {
-          _unlinkOwner(record);
-          _unlinkShutdown(record);
           record._state = .queued;
           if (_tail case final tail?) {
             tail._queueNext = record;
@@ -124,90 +127,42 @@ final class FinalizationQueue() implements Finalization {
     }
   }
 
-  /// Delivers queued callbacks outside collection, removing each record first.
-  void deliver() {
+  /// Removes one event before calling user code, allowing collection in it.
+  bool deliverNext() {
     for (var record = _head; record != null; record = _head) {
       _head = record._queueNext;
       if (_head == null) _tail = null;
       record._queueNext = null;
+      if (record._state != .queued) continue;
+      final token = record._token;
+      record._unlink();
       record._state = .delivered;
-      record.owner.callback(record.token);
+      record.owner._invoke(token);
+      return true;
     }
+    return false;
   }
 
   @override
   void finishShutdown() {
     if (_closed) return;
     _closed = true;
-    Object? failure;
-    var record = _records;
-    _records = null;
-    while (record != null) {
+    for (var record = _records; record != null;) {
       final next = record._registryNext;
       record._registryNext = null;
-      _unlinkOwner(record);
-      _unlinkShutdown(record);
-      if (record._state == .attached && record.owner.runOnShutdown) {
-        record._state = .delivered;
-        try {
-          record.owner.callback(record.token);
-        } catch (error) {
-          failure ??= error;
-        }
-      } else {
-        record._state = .detached;
-      }
+      if (record._state == .attached) record._unlink();
+      record._state = .detached;
       record = next;
     }
-    record = _head;
-    _head = null;
-    _tail = null;
-    while (record != null) {
+    _records = null;
+    for (var record = _head; record != null;) {
       final next = record._queueNext;
       record._queueNext = null;
-      if (record.owner.runOnShutdown) {
-        record._state = .delivered;
-        try {
-          record.owner.callback(record.token);
-        } catch (error) {
-          failure ??= error;
-        }
-      } else {
-        record._state = .detached;
-      }
+      if (record._state == .queued) record._unlink();
+      record._state = .detached;
       record = next;
     }
-    if (failure case final error?) throw error;
-  }
-
-  void _unlinkOwner(FinalizationRecord removed) {
-    FinalizationRecord? previous;
-    var record = removed.owner._first;
-    while (record != null) {
-      if (identical(record, removed)) {
-        if (previous == null) {
-          removed.owner._first = record._ownerNext;
-        } else {
-          previous._ownerNext = record._ownerNext;
-        }
-        record._ownerNext = null;
-        return;
-      }
-      previous = record;
-      record = record._ownerNext;
-    }
-  }
-
-  void _unlinkShutdown(FinalizationRecord record) {
-    if (!record.owner.runOnShutdown || record._state != .attached) return;
-    final previous = record._shutdownPrevious, next = record._shutdownNext;
-    if (previous == null) {
-      _shutdown = next;
-    } else {
-      previous._shutdownNext = next;
-    }
-    next?._shutdownPrevious = previous;
-    record._shutdownPrevious = null;
-    record._shutdownNext = null;
+    _head = null;
+    _tail = null;
   }
 }

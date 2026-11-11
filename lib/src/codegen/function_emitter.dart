@@ -60,6 +60,15 @@ abstract interface class FunctionEmitter<R>() {
   /// Generates the internal (address, byte size) -> void unmapping primitive.
   Uint8List unmapMemory();
 
+  /// Writes bytes, returning a count or negative errno.
+  Uint8List writeBytes();
+
+  /// Returns monotonic nanoseconds; Darwin resolves its clock through libSystem.
+  Uint8List clock(void Function(Fixup) systemClock);
+
+  /// Waits for (seconds, nanoseconds), returning early on interruption.
+  Uint8List sleep();
+
   /// Terminates on a broken target invariant; this is not a Dart exception.
   void abort(int status);
 

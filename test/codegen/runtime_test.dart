@@ -17,6 +17,8 @@ void main() {
     heapRuntime.program,
     allocate: heapRuntime.allocate,
     release: heapRuntime.release,
+    runEvents: heapRuntime.runEvents,
+    eventAccess: heapRuntime.eventAccess,
     primitives: heapRuntime.primitives,
     nonAllocating: [...heapRuntime.nonAllocating, function],
   );
@@ -50,6 +52,8 @@ void main() {
         heapRuntime.program,
         allocate: heapRuntime.release,
         release: heapRuntime.release,
+        runEvents: heapRuntime.runEvents,
+        eventAccess: heapRuntime.eventAccess,
         primitives: heapRuntime.primitives,
         nonAllocating: [],
       ),
@@ -60,6 +64,8 @@ void main() {
         heapRuntime.program,
         allocate: heapRuntime.allocate,
         release: heapRuntime.release,
+        runEvents: heapRuntime.runEvents,
+        eventAccess: heapRuntime.eventAccess,
         primitives: {
           heapRuntime.primitives.entries
                   .singleWhere((entry) => entry.value == .map)
@@ -104,6 +110,11 @@ void main() {
         for (final target in [heapRuntime.allocate, heapRuntime.release]) {
           expect(module.symbols.any((s) => s.name == target.name), managed);
         }
+        expect(
+          module.symbols.any((s) => s.name == heapRuntime.runEvents.name),
+          isFalse,
+        );
+        expect(module.imports, isNot(contains('.dartc.clock')));
         if (managed) {
           expect(
             () => generator.generate(program, definitions: [entry]),
@@ -112,28 +123,6 @@ void main() {
         }
       }
     });
-
-    test(
-      '${generator.target} checks collection with live finalization records',
-      () {
-        final attach = heapRuntime.program.functions.singleWhere(
-          (f) =>
-              f.target.owner?.name == 'FinalizationQueue' &&
-              f.target.name == 'attach',
-        );
-        expect(
-          () => generator.generate(
-            IrProgram([], [mainBody(true)]),
-            definitions: [
-              entry,
-              ...heapRuntime.program.reachableFrom([attach.target]),
-            ],
-            runtime: heapRuntime,
-          ),
-          returnsNormally,
-        );
-      },
-    );
 
     test(
       '${generator.target} rejects transitive allocation and exceptions',

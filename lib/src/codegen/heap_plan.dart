@@ -34,6 +34,8 @@ final class HeapPlan({final HeapRuntime? runtime}) {
       _invalid;
   FunctionTarget get allocate => _runtime.allocate;
   FunctionTarget get release => _runtime.release;
+  FunctionTarget get runEvents => _runtime.runEvents;
+  FunctionTarget get eventAccess => _runtime.eventAccess;
   HeapRuntime get _runtime =>
       runtime ??
       (throw ArgumentError(
@@ -89,6 +91,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
     void Function(Fixup, Constant) constant,
     void Function(int, StackRoots) safepoint,
     void Function(Fixup, int) codeAddress,
+    void Function(Fixup) systemClock,
   ) {
     if (runtime?.primitives[target] == MemoryPrimitive.map) {
       return emitter.mapMemory();
@@ -96,8 +99,26 @@ final class HeapPlan({final HeapRuntime? runtime}) {
     if (runtime?.primitives[target] == MemoryPrimitive.unmap) {
       return emitter.unmapMemory();
     }
+    if (runtime?.primitives[target] == MemoryPrimitive.writeBytes) {
+      return emitter.writeBytes();
+    }
+    if (runtime?.primitives[target] == MemoryPrimitive.clock) {
+      return emitter.clock(systemClock);
+    }
+    if (runtime?.primitives[target] == MemoryPrimitive.sleep) {
+      return emitter.sleep();
+    }
     if (target == invalid) {
       emitter.abort(71);
+      return emitter.finish();
+    }
+    if (runtime?.primitives[target] == MemoryPrimitive.context) {
+      final result = emitter.convention
+          .classify(NativeSignature(Int64, []))
+          .result!;
+      emitter.move(result, emitter.heapRegister);
+      emitter.loadImmediate(emitter.failureRegister, 0);
+      emitter.ret();
       return emitter.finish();
     }
     final (:initializer, :type) = _factories[target]!;

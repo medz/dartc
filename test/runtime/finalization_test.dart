@@ -1,3 +1,4 @@
+import 'package:dartc/src/runtime/event_loop.dart';
 import 'package:dartc/src/runtime/finalization.dart';
 import 'package:dartc/src/runtime/heap.dart';
 import 'package:test/test.dart';
@@ -7,78 +8,65 @@ final class Alive(final Set<Object> values) implements Liveness {
   bool isAlive(Object? value) => values.contains(value);
 }
 
-final class Roots() implements ReferenceVisitor {
-  final values = <Object>[];
-  @override
-  void visit(Object? value) {
-    if (value != null) values.add(value);
-  }
-}
-
 void main() {
-  test('required shutdown registrations remain roots until detached', () {
-    final queue = FinalizationQueue(), roots = Roots(), key = Object();
-    final owner = FinalizerHandle((_) {}, runOnShutdown: true);
-    final record = queue.attach(owner, Object(), 'token', detachKey: key);
-    queue.visitPending(roots);
-    expect(roots.values, [record]);
-    queue.detach(owner, key);
-    roots.values.clear();
-    queue.visitPending(roots);
-    expect(roots.values, isEmpty);
-  });
-  test('shutdown closes registration and continues after callback failure', () {
-    final queue = FinalizationQueue(), events = <Object>[];
-    final failure = StateError('callback');
-    final owner = FinalizerHandle((token) {
-      events.add(token);
-      if (token == 'first') throw failure;
-    }, runOnShutdown: true);
-    queue.attach(owner, Object(), 'second');
-    queue.attach(owner, Object(), 'first');
-    expect(queue.finishShutdown, throwsA(same(failure)));
-    expect(events, ['first', 'second']);
-    expect(queue.finishShutdown, returnsNormally);
-    expect(() => queue.attach(owner, Object(), 'late'), throwsStateError);
-  });
-  test('queues once and invokes callbacks only after resuming', () {
-    final queue = FinalizationQueue(), events = <Object>[];
-    final owner = FinalizerHandle(events.add);
-    final record = queue.attach(owner, Object(), 'token');
-    final live = Alive({record});
-    queue.stage(live);
-    queue.stage(live);
+  test('microtasks precede events and reentry cannot drain the next event', () {
+    final queue = FinalizationQueue(), events = <String>[];
+    final loop = EventLoop(queue);
+    final owner = FinalizerHandle<String?>(queue, (token) {
+      events.add('$token');
+      loop.scheduleMicrotasks(() => events.add('microtask'));
+      loop.run();
+      events.add('return');
+    });
+    final first = queue.attach(owner, Object(), null);
+    final second = queue.attach(owner, Object(), 'second');
+    queue.stage(Alive({first, second}));
+    queue.stage(Alive({first, second}));
     expect(events, isEmpty);
-    expect(record.state, FinalizationState.queued);
-    queue.deliver();
-    queue.deliver();
-    expect(events, ['token']);
-    expect(record.state, FinalizationState.delivered);
+    loop.scheduleMicrotasks(() => events.add('first'));
+    loop.run();
+    loop.run();
+    expect(events, [
+      'first',
+      'second',
+      'return',
+      'microtask',
+      'null',
+      'return',
+      'microtask',
+    ]);
+    expect(first.state, FinalizationState.delivered);
+    expect(second.state, FinalizationState.delivered);
   });
 
-  test('detached and unreachable registrations do not deliver', () {
-    final queue = FinalizationQueue(), events = <Object>[];
-    final owner = FinalizerHandle(events.add), key = Object();
-    final detached = queue.attach(owner, Object(), 'detached', detachKey: key);
+  test('detach cancels queued attachments and preserves other owners', () {
+    final queue = FinalizationQueue(), events = <Object?>[];
+    final owner = FinalizerHandle(queue, events.add), key = Object();
+    final other = FinalizerHandle(queue, events.add);
+    final first = queue.attach(owner, Object(), 'first', detachKey: key);
+    final second = queue.attach(owner, Object(), 'second', detachKey: key);
+    final retained = queue.attach(other, Object(), 'other', detachKey: key);
     queue.attach(owner, Object(), 'unreachable');
-    queue.detach(owner, key);
-    queue.stage(Alive({detached}));
-    queue.deliver();
-    expect(events, isEmpty);
-    expect(detached.state, FinalizationState.detached);
+    queue.stage(Alive({first, second, retained}));
+    owner.detach(key);
+    EventLoop(queue).run();
+    expect(events, ['other']);
+    expect(first.state, FinalizationState.detached);
+    expect(second.state, FinalizationState.detached);
   });
 
-  test(
-    'shutdown runs required callbacks once and discards optional delivery',
-    () {
-      final queue = FinalizationQueue(), events = <Object>[];
-      final native = FinalizerHandle(events.add, runOnShutdown: true);
-      final dart = FinalizerHandle(events.add);
-      queue.attach(native, Object(), 'native');
-      queue.attach(dart, Object(), 'dart');
-      queue.finishShutdown();
-      queue.finishShutdown();
-      expect(events, ['native']);
-    },
-  );
+  test('shutdown discards pending and attached records without callbacks', () {
+    final queue = FinalizationQueue(), events = <Object?>[];
+    final owner = FinalizerHandle(queue, events.add), target = Object();
+    final attached = queue.attach(owner, target, 'attached');
+    final queued = queue.attach(owner, Object(), 'queued');
+    queue.stage(Alive({attached, target, queued}));
+    queue.finishShutdown();
+    queue.finishShutdown();
+    EventLoop(queue).run();
+    expect(events, isEmpty);
+    expect(attached.state, FinalizationState.detached);
+    expect(queued.state, FinalizationState.detached);
+    expect(() => owner.attach(Object(), 'late'), throwsStateError);
+  });
 }

@@ -95,7 +95,7 @@ List.addAll 支持普通调用、方法提取及用户重写，先检查实际�
 
 协变视图的写入按实际键和值类型检查；类型错误、hashCode 或 == 抛错时不执行该次条目写入，异常保留 catch/finally。keys 是实时视图，迭代器检查新增、删除及清空等结构修改；仅替换已有值不改变键的迭代顺序。支持 values、entries、forEach、addAll、putIfAbsent 和 update 的普通库行为，以及用户 Map 重写、方法值和已有 Map 模式。键、值和迭代状态在移动回收及跨原生入口保存后保持有效，用户哈希和相等回调中也可分配。见[原生 Map 验证](../test/compiler/maps_test.dart)和 [IR 操作契约](../test/ir/collections_test.dart)。
 
-const Map、字面量 Map spread、其余 Map 工厂、自定义哈希/相等构造及完整集合 API 仍是原生实现缺口。
+`const Map` 通过不可变 Dart 实现保留查询、键顺序、类型参数与常量身份；写入、remove 和 clear 抛出 UnsupportedError。`HashMap` 支持默认、自定义 equals/hashCode/isValidKey 和 identity 构造，查询不兼容类型的键按契约处理；普通 SDK 工厂继续使用这些入口。见[常量与自定义哈希验证](../test/compiler/finalizers_test.dart)。字面量 Map spread、未验证的工厂和完整集合 API 仍是原生实现缺口。
 
 ## 数值比较与 SDK 差异
 

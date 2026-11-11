@@ -459,10 +459,12 @@ base class ScalarCodeGenerator<R extends Object>(
         : HeapEntry(
             emitter,
             heap.release,
+            selected.contains(heap.eventAccess) ? heap.runEvents : null,
             (fixup) => rootAddresses.add((code.length, fixup)),
             (fixup) => errorAddresses.add((code.length, fixup)),
             (fixup) => uncaughtAddresses.add((code.length, fixup)),
             call,
+            (position) => safepoint(position, StackRoots(0, 0, [])),
             context: persistent
                 ? (fixup) => contextAddresses.add((code.length, fixup))
                 : null,
@@ -544,6 +546,13 @@ base class ScalarCodeGenerator<R extends Object>(
                   fixup.encoding,
                   code.length + position,
                 );
+              },
+              (fixup) {
+                final symbol = nativeSymbols.putIfAbsent(
+                  '.dartc.clock',
+                  () => nativeSymbols.length,
+                );
+                nativeCalls.add((code.length, fixup, symbol));
               },
             )
           : binding != null

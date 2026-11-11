@@ -5,6 +5,10 @@ enum MemoryPrimitive() {
   map,
   unmap,
   fail,
+  context,
+  writeBytes,
+  clock,
+  sleep,
 }
 
 /// Source program and entry contracts used by managed code generation.
@@ -12,6 +16,8 @@ final class HeapRuntime(
   final IrProgram program, {
   required final FunctionTarget allocate,
   required final FunctionTarget release,
+  required final FunctionTarget runEvents,
+  required final FunctionTarget eventAccess,
   required Map<FunctionTarget, MemoryPrimitive> primitives,
   required Iterable<FunctionTarget> nonAllocating,
 }) {
@@ -27,6 +33,8 @@ final class HeapRuntime(
     for (final (target, signature) in [
       (allocate, FunctionType(.integer, List.filled(5, ValueType.integer))),
       (release, FunctionType(.voidType, [.integer])),
+      (runEvents, FunctionType(.voidType, [.integer])),
+      (eventAccess, FunctionType(eventAccess.returnType, [])),
     ]) {
       if (target.kind != .function ||
           target.typeParameters.isNotEmpty ||
@@ -40,6 +48,10 @@ final class HeapRuntime(
         .map => FunctionType(.integer, [.integer]),
         .unmap => FunctionType(.voidType, [.integer, .integer]),
         .fail => FunctionType(.never, []),
+        .context => FunctionType(.integer, []),
+        .writeBytes => FunctionType(.integer, [.integer, .integer, .integer]),
+        .clock => FunctionType(.integer, []),
+        .sleep => FunctionType(.voidType, [.integer, .integer]),
       };
       if (target.kind != .function ||
           target.typeParameters.isNotEmpty ||

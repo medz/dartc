@@ -42,7 +42,7 @@ void requireMapSupport(
 }
 
 /// Supplies bodies and SDK dependencies for compiler-owned declarations.
-Value Function(FunctionTarget, Block)? intrinsicFor(
+Value? Function(FunctionTarget, Block)? intrinsicFor(
   ExecutableElement element,
   void Function(InterfaceElement) requireClass,
   FunctionTarget Function(ExecutableElement) bind,
@@ -61,6 +61,14 @@ Value Function(FunctionTarget, Block)? intrinsicFor(
     )!;
   }
   if (element.library.isDartCore) {
+    if (element == element.library.getClass('Error')!.getMethod('_throw')) {
+      return (target, entry) {
+        entry.finish(
+          Throw(entry.parameters[0], stackTrace: entry.parameters[1]),
+        );
+        return null;
+      };
+    }
     if (element.baseElement ==
         element.library.getTopLevelFunction('identityHashCode')) {
       return (target, entry) =>

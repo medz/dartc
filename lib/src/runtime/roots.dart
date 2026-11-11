@@ -2,10 +2,14 @@ import '../../layout/memory.dart';
 import 'memory.dart';
 import 'object_memory.dart';
 import 'heap.dart';
+import 'event_loop.dart';
 
 /// Walks the precise roots of stopped Dart frames, including native reentry.
-final class NativeRoots(final int context, final ObjectAccess objects)
-    implements RootSet {
+final class NativeRoots(
+  final int context,
+  final ObjectAccess objects,
+  final EventLoop events,
+) implements RootSet {
   int _entrySp = 0, _entryPc = 0;
   bool _stopped = false, _closed = false;
 
@@ -25,6 +29,7 @@ final class NativeRoots(final int context, final ObjectAccess objects)
   @override
   void visit(ReferenceVisitor visitor) {
     if (!_stopped) Memory.fail();
+    events.visitRoots(visitor);
     final global = Memory.read(context + RuntimeContext.globalRoots);
     if (global != 0) {
       objects.visitStrong(Memory.objectAt<Object>(global), visitor);

@@ -237,6 +237,8 @@ IrClass lowerClass(
         break;
       case ast.MethodDeclaration(:final body):
         final method = member.declaredFragment!.element;
+        // Object's external protocols use the IR's identity and type operations.
+        if (type == ValueType.object && method.isExternal) continue;
         final target = memberTarget(method, member);
         if (target.kind.isVirtual) members.add(target);
         if (!target.isAbstract &&
@@ -418,7 +420,9 @@ void _initialize(
         unsupported(unit, init, 'constructor initializer');
     }
   }
-  invoke(ctor.superConstructor!, superArguments, forwardSuper: true);
+  if (ctor.superConstructor case final parent?) {
+    invoke(parent, superArguments, forwardSuper: true);
+  }
 }
 
 void _initializeFields(

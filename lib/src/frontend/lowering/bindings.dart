@@ -37,19 +37,22 @@ final class Bindings({
 }) {
   final ConstantEvaluation constants = constants ?? ConstantEvaluation();
   final _targets = <ExecutableElement, FunctionTarget>{};
+  (InterfaceElement, FieldElement, FieldElement)? _constantMapStorage;
 
   /// SDK functions with Dart bodies, discovered while binding direct references.
   final sdkFunctions = <ExecutableElement>[];
 
   /// Resolved SDK declarations whose behavior is supplied by the compiler.
-  final _intrinsics = <FunctionTarget, Value Function(FunctionTarget, Block)>{};
+  final _intrinsics =
+      <FunctionTarget, Value? Function(FunctionTarget, Block)>{};
 
   /// Builds intrinsic bodies after their SDK declarations have been lowered.
   List<IrFunction> lowerIntrinsics() {
     final functions = <IrFunction>[];
     for (final MapEntry(key: target, value: build) in _intrinsics.entries) {
       final entry = Block(target.parameterTypes);
-      entry.finish(Return(build(target, entry)));
+      final value = build(target, entry);
+      if (value != null) entry.finish(Return(value));
       functions.add(IrFunction(target, [entry], defaults: defaults(target)));
     }
     return functions;
@@ -80,8 +83,7 @@ final class Bindings({
 
   /// Includes a constructed SDK class and the bodies it inherits.
   void requireSdkClass(InterfaceElement element) {
-    if (element.library.typeProvider.objectElement == element ||
-        sdkClasses.contains(element)) {
+    if (!element.library.isInSdk || sdkClasses.contains(element)) {
       return;
     }
     if (element.supertype case final parent?) requireSdkClass(parent.element);
@@ -219,6 +221,23 @@ final class Bindings({
         };
         if (element == null) continue;
         registerClass(element, unit, node);
+        if (runtimeContracts != null &&
+            unit.uri.toString().startsWith(
+              runtimeContracts!.resolve('.').toString(),
+            )) {
+          for (final annotation in node.metadata) {
+            final value = constants.annotation(unit, annotation);
+            if (value?.type case dart.InterfaceType(element: final contract)
+                when contract.library.uri == runtimeContracts &&
+                    contract.name == 'ConstantMapStorage') {
+              _constantMapStorage = (
+                element,
+                element.getField(value!.getField('keys')!.toStringValue()!)!,
+                element.getField(value.getField('values')!.toStringValue()!)!,
+              );
+            }
+          }
+        }
         if (!library.element.isInSdk) {
           for (final parent in [
             // Lowering supplies the implicit Enum superclass storage.
@@ -877,7 +896,9 @@ final class Bindings({
           element.isStatic &&
           !element.isExternal &&
           !element.isAbstract &&
-          (element is TopLevelFunctionElement || element is MethodElement)) {
+          (element is TopLevelFunctionElement ||
+              element is MethodElement ||
+              element is PropertyAccessorElement)) {
         sdkFunctions.add(element);
       }
     }
@@ -1097,6 +1118,9 @@ final class Bindings({
     ast.VariableDeclaration declaration,
   ) => _globals.putIfAbsent(element.baseElement as VariableElement, () {
     final container = element.enclosingElement;
+    if (container is InterfaceElement && element.library.isInSdk) {
+      requireSdkClass(container);
+    }
     final owner =
         container is InterfaceElement && container is! ExtensionTypeElement
         ? classType(container, unit, declaration)
@@ -1300,6 +1324,28 @@ final class Bindings({
         );
       }
       if (value.toMapValue() case final entries?) {
+        if (_constantMapStorage case (
+          final storage,
+          final keys,
+          final values,
+        )) {
+          requireSdkClass(storage);
+          requireListSupport(origin, requireSdkClass);
+          final type = valueType(value.type!, unit, site) as ClassType;
+          return ObjectConstant(
+            classType(storage, unit, site).instantiate(type.typeArguments),
+            {
+              field(keys, unit, site): SequenceConstant(
+                CoreTypes.listOf(type.typeArguments[0]),
+                entries.keys.map(convert),
+              ),
+              field(values, unit, site): SequenceConstant(
+                CoreTypes.listOf(type.typeArguments[1]),
+                entries.values.map(convert),
+              ),
+            },
+          );
+        }
         return MapConstant(
           valueType(value.type!, unit, site) as ClassType,
           entries.entries.map(
@@ -1318,6 +1364,7 @@ final class Bindings({
         }
       }
       if (value.type case final dart.InterfaceType objectType) {
+        requireSdkClass(objectType.element);
         final fields = <InstanceField, Constant>{};
         DartObject? layer = value;
         while (layer != null) {

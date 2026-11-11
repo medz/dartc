@@ -117,6 +117,104 @@ final class _Arm64Emitter(
   }
 
   @override
+  Uint8List writeBytes() {
+    _systemCall(64, 4);
+    if (convention.target.operatingSystem == .macos) {
+      final done = assembler.label();
+      assembler
+        ..setCondition(.x9, .carrySet)
+        ..branchZero(.x9, done)
+        ..loadImmediate(.x9, 0)
+        ..subtract(.x0, .x9, .x0)
+        ..bind(done);
+    }
+    assembler
+      ..loadImmediate(.x8, 0)
+      ..ret();
+    return assembler.finish();
+  }
+
+  @override
+  Uint8List clock(void Function(Fixup) systemClock) {
+    final frame = convention.frameLayout(
+      localBytes: 16,
+      localAlignment: 8,
+      savedRegisters: [],
+      outgoingStackBytes: 0,
+    );
+    prologue(frame);
+    if (convention.target.operatingSystem == .macos) {
+      assembler.loadImmediate(.x0, 6); // CLOCK_MONOTONIC.
+      systemClock(call());
+    } else {
+      assembler.loadImmediate(.x0, 1);
+      stackAddress(Register.x1, frame.localOffset);
+      _systemCall(113, 0);
+      final success = assembler.label();
+      assembler.branchZero(.x0, success);
+      abort(71);
+      assembler.bind(success);
+      loadStack(Register.x0, frame.localOffset);
+      loadStack(Register.x9, frame.localOffset + 8);
+      assembler
+        ..loadImmediate(.x10, 1000000000)
+        ..multiply(.x0, .x0, .x10)
+        ..add(.x0, .x0, .x9);
+    }
+    assembler.loadImmediate(.x8, 0);
+    epilogue(frame);
+    return assembler.finish();
+  }
+
+  @override
+  Uint8List sleep() {
+    final frame = convention.frameLayout(
+      localBytes: 16,
+      localAlignment: 8,
+      savedRegisters: [],
+      outgoingStackBytes: 0,
+    );
+    prologue(frame);
+    storeStack(Register.x0, frame.localOffset);
+    final mac = convention.target.operatingSystem == .macos;
+    if (mac) {
+      assembler
+        ..loadImmediate(.x9, 1000)
+        ..divideSigned(.x1, .x1, .x9);
+    }
+    storeStack(Register.x1, frame.localOffset + 8);
+    if (mac) {
+      stackAddress(Register.x4, frame.localOffset);
+      for (final register in [
+        Register.x0,
+        Register.x1,
+        Register.x2,
+        Register.x3,
+      ]) {
+        assembler.loadImmediate(register, 0);
+      }
+    } else {
+      stackAddress(Register.x0, frame.localOffset);
+      assembler.loadImmediate(.x1, 0);
+    }
+    _systemCall(101, 93);
+    final done = assembler.label();
+    assembler.branchZero(.x0, done);
+    assembler.loadImmediate(.x9, mac ? 4 : -4);
+    comparison(.equal).emit(Register.x9, Register.x0, Register.x9);
+    final failed = assembler.label();
+    assembler.branchZero(.x9, failed);
+    assembler.branch(done);
+    assembler.bind(failed);
+    abort(71);
+    assembler
+      ..bind(done)
+      ..loadImmediate(.x8, 0);
+    epilogue(frame);
+    return assembler.finish();
+  }
+
+  @override
   void reportFailure(void Function(Fixup) message, int length) {
     address(Register.x1, message);
     assembler

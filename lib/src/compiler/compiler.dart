@@ -61,7 +61,10 @@ final class Compiler(final Target target, {final SourceArchive? resources}) {
       includeDependencies: true,
       sdk: DartSdk(archive),
       sourceArchive: archive,
-      resources: const ['dartc/src/runtime/allocator.dart'],
+      resources: const [
+        'dartc/src/runtime/allocator.dart',
+        'dartc/src/runtime/console.dart',
+      ],
     ).use((input) async {
       final lowered = await Lowering().lower(input);
       final library =
@@ -101,6 +104,10 @@ final class Compiler(final Target target, {final SourceArchive? resources}) {
     final nativeImports = <FunctionTarget, NativeImport>{};
     for (final target in definitions) {
       final function = program.implementationOf(target);
+      if (runtime.primitives.containsKey(target) ||
+          runtime.program.implementationOf(target) is IrFunction) {
+        continue;
+      }
       final reference = imports[target];
       if (function is IrExternal && reference != null) {
         final symbol = nativeSymbols[reference.assetId]?[reference.symbol];
@@ -117,7 +124,10 @@ final class Compiler(final Target target, {final SourceArchive? resources}) {
         continue;
       }
       if (function is! IrFunction) {
-        throw UnsupportedError('Native body unavailable: ${target.name}');
+        throw UnsupportedError(
+          'Native body unavailable: ${target.library}::'
+          '${target.owner == null ? '' : '${target.owner!.name}.'}${target.name}',
+        );
       }
     }
     const entrySymbol = '.dartc.start';

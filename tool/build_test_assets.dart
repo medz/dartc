@@ -70,6 +70,7 @@ const _compilerLibraries = {
   'heap_runtime',
   'weak_references',
   'expandos',
+  'finalizers',
   'numeric_boxes',
   'exceptions',
   'type_checks',
@@ -147,14 +148,15 @@ Future<void> main(List<String> args) async {
       }
     }
 
-    for (final (fixture, output) in [
-      ('managed_objects', 'entry_managed'),
-      ('lists', 'entry_lists_overflow'),
-      ('managed_globals', 'entry_managed_globals'),
-      ('exceptions', 'entry_exception'),
+    for (final (fixture, source, output) in [
+      ('managed_objects', 'managed_objects', 'entry_managed'),
+      ('lists', 'lists_overflow', 'entry_lists_overflow'),
+      ('managed_globals', 'managed_globals', 'entry_managed_globals'),
+      ('exceptions', 'exceptions', 'entry_exception'),
+      ('finalizers', 'finalizers_entry', 'entry_finalizers'),
+      ('finalizers', 'finalizers_error', 'entry_finalizers_error'),
     ]) {
       if (!selected.contains(fixture)) continue;
-      final source = fixture == 'lists' ? 'lists_overflow' : fixture;
       final entry = await Compiler(target).compile([
         'test/compiler/fixtures/$source.dart',
       ], output: const .executable());

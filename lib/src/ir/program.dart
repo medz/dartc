@@ -331,11 +331,14 @@ final class IrProgram(
   }
 
   this {
-    final owners = {
-      for (final c in this.classes) (c.type.library, c.type.name): c.type,
-    };
-    if (owners.length != this.classes.length) {
-      throw ArgumentError('Repeated class.');
+    final owners = <(Uri, String), ClassType>{};
+    for (final c in this.classes) {
+      if (owners.containsKey((c.type.library, c.type.name))) {
+        throw ArgumentError(
+          'Repeated class: ${c.type.library}::${c.type.name}',
+        );
+      }
+      owners[(c.type.library, c.type.name)] = c.type;
     }
     (Uri, ClassType?, FunctionKind, String, Uri?) nameOf(FunctionTarget t) => (
       t.library,

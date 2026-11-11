@@ -130,6 +130,106 @@ final class _X64Emitter(
   }
 
   @override
+  Uint8List writeBytes() {
+    _systemCall(1, 4);
+    if (convention.target.operatingSystem == .macos) {
+      final done = assembler.label();
+      assembler
+        ..jumpCondition(.aboveOrEqual, done)
+        ..negate(.rax)
+        ..bind(done);
+    }
+    assembler
+      ..loadImmediate(.r11, 0)
+      ..ret();
+    return assembler.finish();
+  }
+
+  @override
+  Uint8List clock(void Function(Fixup) systemClock) {
+    final frame = convention.frameLayout(
+      localBytes: 16,
+      localAlignment: 8,
+      savedRegisters: [],
+      outgoingStackBytes: 0,
+    );
+    prologue(frame);
+    if (convention.target.operatingSystem == .macos) {
+      assembler.loadImmediate(.rdi, 6); // CLOCK_MONOTONIC.
+      systemClock(call());
+    } else {
+      assembler.loadImmediate(.rdi, 1);
+      stackAddress(Register.rsi, frame.localOffset);
+      _systemCall(228, 0);
+      final success = assembler.label();
+      assembler
+        ..test(.rax)
+        ..jumpCondition(.equal, success);
+      abort(71);
+      assembler.bind(success);
+      loadStack(Register.rax, frame.localOffset);
+      loadStack(Register.rdx, frame.localOffset + 8);
+      assembler
+        ..loadImmediate(.rcx, 1000000000)
+        ..multiply(.rax, .rcx)
+        ..add(.rax, .rdx);
+    }
+    assembler.loadImmediate(.r11, 0);
+    epilogue(frame);
+    return assembler.finish();
+  }
+
+  @override
+  Uint8List sleep() {
+    final frame = convention.frameLayout(
+      localBytes: 16,
+      localAlignment: 8,
+      savedRegisters: [],
+      outgoingStackBytes: 0,
+    );
+    prologue(frame);
+    storeStack(Register.rdi, frame.localOffset);
+    final mac = convention.target.operatingSystem == .macos;
+    if (mac) {
+      assembler
+        ..move(.rax, .rsi)
+        ..loadImmediate(.rcx, 1000)
+        ..extendDividend()
+        ..divideSigned(.rcx)
+        ..move(.rsi, .rax);
+    }
+    storeStack(Register.rsi, frame.localOffset + 8);
+    if (mac) {
+      stackAddress(Register.r8, frame.localOffset);
+      for (final register in [
+        Register.rdi,
+        Register.rsi,
+        Register.rdx,
+        Register.r10,
+      ]) {
+        assembler.loadImmediate(register, 0);
+      }
+    } else {
+      stackAddress(Register.rdi, frame.localOffset);
+      assembler.loadImmediate(.rsi, 0);
+    }
+    _systemCall(35, 93);
+    final done = assembler.label();
+    assembler
+      ..test(.rax)
+      ..jumpCondition(.equal, done)
+      ..loadImmediate(.rcx, mac ? 4 : -4)
+      ..compare(.rax, .rcx)
+      ..jumpCondition(.equal, done);
+    abort(71);
+    assembler
+      ..bind(done)
+      ..loadImmediate(.r11, 0);
+    epilogue(frame);
+    return assembler.finish();
+  }
+
+  @override
   void reportFailure(void Function(Fixup) message, int length) {
     address(Register.rsi, message);
     assembler

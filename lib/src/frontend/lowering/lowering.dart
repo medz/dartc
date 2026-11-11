@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/ast/ast.dart' as ast;
+import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
 
@@ -113,7 +114,11 @@ final class Lowering({final bool enableAssertions = false}) {
       }
       final element = bindings.sdkFunctions[sdkFunction++];
       final library = await input.resolveLibrary(element.library);
-      final declaration = library.getFragmentDeclaration(element.firstFragment);
+      final declaration = library.getFragmentDeclaration(
+        element is PropertyAccessorElement && element.isOriginVariable
+            ? element.variable.firstFragment
+            : element.firstFragment,
+      );
       if (declaration == null) {
         throw UnsupportedError('SDK declaration unavailable: ${element.name}');
       }
@@ -123,6 +128,10 @@ final class Lowering({final bool enableAssertions = false}) {
         declaration.node,
       );
       if (functions.any((function) => function.target == target)) continue;
+      if (declaration.node case ast.VariableDeclaration variable) {
+        lowerGlobal(declaration.resolvedUnit!, bindings, variable, functions);
+        continue;
+      }
       final body = switch (declaration.node) {
         ast.FunctionDeclaration(:final functionExpression) =>
           functionExpression.body,
@@ -142,7 +151,10 @@ final class Lowering({final bool enableAssertions = false}) {
     }
 
     final intrinsics = bindings.lowerIntrinsics();
-    final intrinsicClasses = bindings.intrinsicClasses;
+    final intrinsicTargets = {for (final body in intrinsics) body.target};
+    final intrinsicClasses = bindings.intrinsicClasses.where(
+      (intrinsic) => !classes.any((source) => source.type == intrinsic.type),
+    );
     final defined = {
       for (final function in [...functions, ...intrinsics]) function.target,
     };
@@ -167,7 +179,9 @@ final class Lowering({final bool enableAssertions = false}) {
         ...bindings.libraryLoaders,
       ],
       externals: [
-        ...functions.whereType<IrExternal>(),
+        ...functions.whereType<IrExternal>().where(
+          (external) => !intrinsicTargets.contains(external.target),
+        ),
         for (final declaration in intrinsicClasses)
           for (final target in [
             ...declaration.members.values,

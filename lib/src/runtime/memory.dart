@@ -2,6 +2,24 @@ import 'contracts.dart';
 
 /// Trusted machine capabilities; callers own bounds, alignment and lifetimes.
 abstract final class Memory() {
+  /// The active Dart execution context, preserved across native reentry.
+  @Primitive(.context)
+  external static int context();
+
+  @Primitive(.writeByte)
+  external static void writeByte(int address, int value);
+
+  @Primitive(.writeBytes)
+  external static int writeBytes(int descriptor, int address, int count);
+
+  /// Monotonic nanoseconds since an unspecified origin.
+  @Primitive(.clock)
+  external static int clock();
+
+  /// Waits for a relative timeout, or returns early on a signal.
+  @Primitive(.sleep)
+  external static void sleep(int seconds, int nanoseconds);
+
   /// Reserves zero-filled pages, or returns zero on exhaustion.
   @Primitive(.map)
   external static int map(int bytes);
