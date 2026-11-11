@@ -120,6 +120,10 @@ void writeFunction(
     PointerAddress() => 'pointerAddress ${value(op.pointer)}',
     PointerOffset() => 'pointerOffset ${value(op.pointer)}, ${value(op.index)}',
     LoadNative() => 'loadNative ${op.nativeType} ${value(op.address)}',
+    LoadObjectData() =>
+      'loadObjectData ${op.nativeType} ${value(op.object)}, ${value(op.byteOffset)}',
+    StoreObjectData() =>
+      'storeObjectData ${op.nativeType} ${value(op.object)}, ${value(op.byteOffset)}, ${value(op.value)}',
     StoreNative() =>
       'storeNative ${op.nativeType} ${value(op.address)}, ${value(op.value)}',
     StoreGlobal() => 'storeGlobal ${global(op.global)}, ${value(op.value)}',
@@ -160,6 +164,7 @@ void writeFunction(
     Interpolate() => 'interpolate [${op.inputs.map(value).join(', ')}]',
     StringConcat() => 'concat ${value(op.left)}, ${value(op.right)}',
     StringLength() => 'stringLength ${value(op.string)}',
+    StringFromCharCode() => 'stringFromCharCode ${value(op.code)}',
     StringCodeUnitAt() => 'codeUnitAt ${value(op.string)}, ${value(op.index)}',
     NumericNegate() => 'negate ${value(op.operand)}',
     NumericToDouble() => 'toDouble ${value(op.operand)}',

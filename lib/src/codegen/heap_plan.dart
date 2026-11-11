@@ -19,6 +19,7 @@ final class HeapPlan(FrameLookup frames) {
       <FunctionTarget, ({FunctionTarget? initializer, ClassType type})>{};
   final _boxes = <ValueType, FunctionTarget>{};
   final _initializers = <FunctionTarget, FunctionTarget>{};
+  final _payloads = <ClassType, FunctionTarget>{};
   final heap = HeapFunctions(frames);
 
   List<IrFunction> get functions => heap.functions;
@@ -40,6 +41,19 @@ final class HeapPlan(FrameLookup frames) {
     _factories[target] = (initializer: null, type: type as ClassType);
     return target;
   });
+
+  /// Allocates zeroed inline bytes after a class's fixed fields.
+  FunctionTarget allocatePayload(ClassType type) =>
+      _payloads.putIfAbsent(type, () {
+        final target = FunctionTarget(
+          Uri.parse('dartc:heap'),
+          'payload${_payloads.length}',
+          type,
+          [.integer],
+        );
+        _factories[target] = (initializer: null, type: type);
+        return target;
+      });
 
   void retain(Set<FunctionTarget> calls) =>
       _factories.removeWhere((target, _) => !calls.contains(target));
@@ -79,7 +93,7 @@ final class HeapPlan(FrameLookup frames) {
         destination = initializer == null ? null : classify(initializer);
     final parameterTypes = target.parameterTypes;
     final allocation = emitter.convention.classify(
-      NativeSignature(Int64, List.filled(4, Int64)),
+      NativeSignature(Int64, List.filled(5, Int64)),
     );
     final arguments = allocation.parameters
         .map((p) => (p as RegisterArgument<R>).register)
@@ -117,6 +131,12 @@ final class HeapPlan(FrameLookup frames) {
     emitter.stackAddress(arguments[2], 0);
     final returnAddress = <Fixup>[];
     emitter.address(arguments[3], returnAddress.add);
+    final payload = _payloads[type] == target;
+    if (payload) {
+      emitter.loadStack(arguments[4], frame.localOffset);
+    } else {
+      emitter.loadImmediate(arguments[4], 0);
+    }
     call(emitter.call(), heap.allocate);
     final position = emitter.position;
     for (final fixup in returnAddress) {
@@ -157,6 +177,10 @@ final class HeapPlan(FrameLookup frames) {
     );
     emitter.loadImmediate(emitter.failureRegister, 0);
     if (initializer == null) {
+      if (payload) {
+        emitter.epilogue(frame);
+        return emitter.finish();
+      }
       final value = scratch(type);
       emitter.loadStack(value, frame.localOffset);
       emitter.storeMemory(

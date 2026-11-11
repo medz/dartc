@@ -1772,6 +1772,10 @@ final class IrInterpreter(
           }
           final address = (read(pointer) as ffi.Pointer).address;
           values[op] = invoke(op, address, arguments.map(read).toList());
+        case LoadObjectData() || StoreObjectData():
+          throw UnsupportedError(
+            'Managed physical storage requires native execution.',
+          );
         case LoadNative(:final address, nativeType: final native):
           final data = _nativeData(
             ffi.Pointer<ffi.Void>.fromAddress(read(address) as int),
@@ -2170,6 +2174,8 @@ final class IrInterpreter(
           values[op] = (read(left) as String) + (read(right) as String);
         case StringLength(:final string):
           values[op] = (read(string) as String).length;
+        case StringFromCharCode(:final code):
+          values[op] = String.fromCharCode(read(code) as int);
         case StringCodeUnitAt(:final string, :final index):
           values[op] = (read(string) as String).codeUnitAt(read(index) as int);
         case NumericNegate(:final operand):

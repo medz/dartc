@@ -481,6 +481,7 @@ sealed class Instruction(super.type) extends Value {
     NewCell() ||
     MakeRecord() ||
     StringConcat() ||
+    StringFromCharCode() ||
     AssertionFailure() ||
     PatternMatchFailure() => _allocate,
     CopyCell() => const {.readsStorage, .allocates, .mayThrow},
@@ -497,6 +498,7 @@ sealed class Instruction(super.type) extends Value {
     LoadField() ||
     ReadCell() ||
     StringLength() ||
+    LoadObjectData() ||
     LoadNative() => const {.readsStorage},
     StringCodeUnitAt() => const {.readsStorage, .mayThrow},
     StoreGlobal(global: GlobalVariable(isFinal: true)) ||
@@ -509,7 +511,8 @@ sealed class Instruction(super.type) extends Value {
     StoreGlobal() ||
     StoreField() ||
     WriteCell() ||
-    StoreNative() => const {.writesStorage},
+    StoreNative() ||
+    StoreObjectData() => const {.writesStorage},
     TypeCast() ||
     NullCheck() ||
     IntBinary(operator: IntOperator(mayThrow: true)) ||
@@ -618,6 +621,57 @@ final class StoreNative(
   }
   @override
   Iterable<Value> get inputs => [address, value];
+}
+
+/// Reads scalar storage at [byteOffset] from a managed [object]'s header.
+///
+/// The layout owner must prove bounds and alignment. The object stays traced;
+/// no interior address escapes this operation or survives a safepoint.
+final class LoadObjectData(
+  final Value object,
+  final Value byteOffset,
+  final NativeScalarType nativeType,
+) extends Instruction {
+  this : super(FfiTypes.valueType(nativeType)) {
+    _checkObjectData(object, byteOffset, nativeType);
+  }
+  @override
+  Iterable<Value> get inputs => [object, byteOffset];
+}
+
+/// Writes scalar [value] into a managed object's inline storage.
+///
+/// The layout owner must prove bounds, alignment and exclusive initialization
+/// of immutable data. Managed references cannot be written through this operation.
+final class StoreObjectData(
+  final Value object,
+  final Value byteOffset,
+  final NativeScalarType nativeType,
+  final Value value,
+) extends Instruction {
+  this : super(.voidType) {
+    _checkObjectData(object, byteOffset, nativeType);
+    if (value.type != FfiTypes.valueType(nativeType)) {
+      throw ArgumentError('The stored value must match the native scalar.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [object, byteOffset, value];
+}
+
+void _checkObjectData(Value object, Value offset, NativeScalarType native) {
+  final type = object.type;
+  if (type is! ClassType ||
+      type.mayBeNull ||
+      type == ValueType.integer ||
+      type == ValueType.floating ||
+      type == ValueType.boolean ||
+      offset.type != .integer ||
+      native.isVoid) {
+    throw ArgumentError(
+      'A non-null managed object, integer offset and sized scalar are required.',
+    );
+  }
 }
 
 /// Starts loading a deferred import and returns its completion Future.
@@ -1664,6 +1718,17 @@ final class StringConcat(
   }
   @override
   Iterable<Value> get inputs => [left, right];
+}
+
+/// Reads the number of UTF-16 code units in a string.
+final class StringFromCharCode(final Value code) extends Instruction {
+  this : super(.string) {
+    if (!ValueType.integer.accepts(code.type)) {
+      throw ArgumentError('An integer character code is required.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [code];
 }
 
 /// Reads the number of UTF-16 code units in a string.

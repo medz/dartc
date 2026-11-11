@@ -59,8 +59,14 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
       throw UnsupportedError('Native boxed constant: ${value.type}');
     }
     final offset = _words.length * 8;
-    final symbol = _reserve('constant', layout.size ~/ 8);
+    final payloadWords = switch (value) {
+      ScalarConstant(value: final String text) => (text.length + 3) ~/ 4,
+      _ => 0,
+    };
+    final size = layout.size + payloadWords * 8;
+    final symbol = _reserve('constant', size ~/ 8);
     _constants[key] = symbol;
+    _words[(offset + ObjectLayout.sizeOffset) ~/ 8] = size;
     _words[(offset + ObjectLayout.identityHashOffset) ~/ 8] =
         ((symbol + 1) * 0x9e3779b9) & 0x3fffffff;
     relocations.add(
@@ -86,14 +92,7 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     } else if (value case ScalarConstant(value: final String text)) {
       _words[(offset + layouts.fieldOffset(layouts.strings.length)) ~/ 8] =
           text.length;
-      final start = _words.length;
-      final data = _reserve(
-        'string-data',
-        text.isEmpty ? 1 : (text.length + 3) ~/ 4,
-      );
-      relocations.add(
-        .address(1, offset + layouts.fieldOffset(layouts.strings.data), data),
-      );
+      final start = (offset + layout.size) ~/ 8;
       for (var i = 0; i < text.length; i++) {
         _words[start + i ~/ 4] |= text.codeUnitAt(i) << ((i % 4) * 16);
       }

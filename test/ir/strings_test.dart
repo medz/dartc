@@ -1,9 +1,51 @@
 import 'package:dartc/ir.dart';
+
+import 'dart:ffi' show Uint16;
+
 import 'package:test/test.dart';
 
 import '../support/ir_interpreter.dart';
 
 void main() {
+  test(
+    'inline scalar access retains the managed base and validates operands',
+    () {
+      final block = Block([.string, .integer]);
+      final [object, offset] = block.parameters;
+      final load = LoadObjectData(object, offset, .new(Uint16));
+      final store = StoreObjectData(
+        object,
+        offset,
+        .new(Uint16),
+        const Constant.integer(65),
+      );
+      expect(load.inputs, [object, offset]);
+      expect(load.type, ValueType.integer);
+      expect(store.inputs, [object, offset, const Constant.integer(65)]);
+      expect(store.effects, {Effect.writesStorage});
+      for (final invalid in [
+        const Constant.nullValue(),
+        const Constant.integer(0),
+        const Constant.floating(0),
+      ]) {
+        expect(
+          () => LoadObjectData(invalid, offset, .new(Uint16)),
+          throwsArgumentError,
+        );
+      }
+      expect(
+        () => StoreObjectData(object, offset, .new(Uint16), object),
+        throwsArgumentError,
+      );
+      expect(
+        () => LoadObjectData(object, object, .new(Uint16)),
+        throwsArgumentError,
+      );
+      final create = StringFromCharCode(offset);
+      expect(create.effects, {Effect.allocates, Effect.mayThrow});
+      expect(() => StringFromCharCode(object), throwsArgumentError);
+    },
+  );
   test('string access validates operands and preserves effects', () {
     const text = Constant.string('');
     final length = StringLength(text);

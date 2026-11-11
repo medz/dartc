@@ -93,13 +93,13 @@ void main() {
       IrClass(implementation, []),
     ]);
     final storage = layouts.storageOf(child);
-    expect(layouts.storageOf(ValueType.error).errorTraceOffset, 24);
-    expect(layouts.storageOf(base).errorTraceOffset, 32);
-    expect(storage.errorTraceOffset, 40);
-    expect(storage.layout.size, 48);
-    expect(storage.layout.referenceOffsets, [8, 32, 40]);
-    expect(layouts.fieldOffset(number), 24);
-    expect(layouts.fieldOffset(reference), 32);
+    expect(layouts.storageOf(ValueType.error).errorTraceOffset, 32);
+    expect(layouts.storageOf(base).errorTraceOffset, 40);
+    expect(storage.errorTraceOffset, 48);
+    expect(storage.layout.size, 56);
+    expect(storage.layout.referenceOffsets, [8, 40, 48]);
+    expect(layouts.fieldOffset(number), 32);
+    expect(layouts.fieldOffset(reference), 40);
     expect(layouts.storageOf(implementation).errorTraceOffset, isNull);
     expect(layouts.storageOf(implementation).layout.referenceOffsets, [8]);
     expect(

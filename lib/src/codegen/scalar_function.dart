@@ -66,6 +66,16 @@ final class ScalarFunction<R extends Object>(
       }
     }
 
+    R objectDataAddress(Value object, Value offset) {
+      final base = allocation.read(object);
+      final index = allocation.read(offset, except: [base]);
+      final address = allocation.allocate(.general, except: [base, index]);
+      emitter.addScaled(address, base, index, scale: 1);
+      allocation.release(object);
+      allocation.release(offset);
+      return address;
+    }
+
     for (final block in selection.body.blocks) {
       emitter.bind(labels[block]!);
       allocation.begin(block);
@@ -371,12 +381,19 @@ final class ScalarFunction<R extends Object>(
             allocation.release(operand);
           }
           allocation.define(instruction, destination);
-        } else if (instruction case StoreNative(
-          :final address,
-          :final nativeType,
-          :final value,
-        )) {
-          final base = allocation.read(address),
+        } else if (instruction
+            case StoreNative(:final address, :final nativeType, :final value) ||
+                StoreObjectData(
+                  object: final address,
+                  :final nativeType,
+                  :final value,
+                )) {
+          final offset = instruction is StoreObjectData
+              ? instruction.byteOffset
+              : null;
+          final base = offset == null
+                  ? allocation.read(address)
+                  : objectDataAddress(address, offset),
               source = allocation.read(value, except: [base]);
           allocation.release(value);
           if (nativeType.isSinglePrecision) {
@@ -387,14 +404,26 @@ final class ScalarFunction<R extends Object>(
           } else {
             emitter.storeMemory(source, base, bytes: nativeType.nativeSize);
           }
-          allocation.release(address);
+          if (offset == null) {
+            allocation.release(address);
+          } else {
+            allocation.releaseTemporary(base);
+          }
           emptyResult(instruction);
-        } else if (instruction case LoadNative(
-          address: final operand,
-          :final nativeType,
-        )) {
-          final source = allocation.read(operand);
-          allocation.release(operand);
+        } else if (instruction
+            case LoadNative(address: final operand, :final nativeType) ||
+                LoadObjectData(object: final operand, :final nativeType)) {
+          final offset = instruction is LoadObjectData
+              ? instruction.byteOffset
+              : null;
+          final source = offset == null
+              ? allocation.read(operand)
+              : objectDataAddress(operand, offset);
+          if (offset == null) {
+            allocation.release(operand);
+          } else {
+            allocation.releaseTemporary(source);
+          }
           final destination = allocation.allocate(
             selection.bank(instruction.type),
             preferred: source,

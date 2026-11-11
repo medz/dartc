@@ -12,16 +12,17 @@ void main() {
     ];
     final layout = ObjectLayout(fields);
     fields.clear();
-    expect(layout.size, 64);
+    expect(layout.size, 72);
     expect(
       [for (var i = 0; i < layout.fields.length; i++) layout.offsetOf(i)],
-      [24, 32, 40, 48, 56],
+      [32, 40, 48, 56, 64],
     );
-    expect(layout.referenceOffsets, [8, 32, 56]);
+    expect(layout.referenceOffsets, [8, 40, 64]);
     expect(() => layout.fields.clear(), throwsUnsupportedError);
     expect(() => layout.offsetOf(-1), throwsRangeError);
     expect(() => layout.offsetOf(5), throwsRangeError);
-    expect(ObjectLayout([]).size, 24);
+    expect(ObjectLayout([]).size, 32);
+    expect(ObjectLayout.sizeOffset, 24);
     expect(ObjectLayout.identityHashOffset, 16);
     expect(ObjectLayout([]).referenceOffsets, [8]);
   });

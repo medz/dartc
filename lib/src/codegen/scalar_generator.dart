@@ -77,9 +77,10 @@ base class ScalarCodeGenerator<R extends Object>(
         ..clear()
         ..addAll(sourceDefinitions);
       final frames = FrameLookup();
+      final heap = HeapPlan(frames);
       final traces = StackTraces(frames);
       final casts = CheckedCasts();
-      IrCallable? constructor(ValueType type, [String name = 'new']) {
+      IrCallable? constructor(ValueType? type, [String name = 'new']) {
         final target = program.classes
             .where((c) => c.type == type)
             .firstOrNull
@@ -107,6 +108,21 @@ base class ScalarCodeGenerator<R extends Object>(
           .firstOrNull
           ?.type;
       final strings = StringStorage(
+        source: program.classes
+            .where((c) => c.type == ValueType.string)
+            .firstOrNull,
+        allocate: heap.allocatePayload,
+        rangeError: constructor(
+          program.classes
+              .where(
+                (c) =>
+                    c.type.library == Uri.parse('dart:core') &&
+                    c.type.name == 'RangeError',
+              )
+              .firstOrNull
+              ?.type,
+          'range',
+        ),
         indexError: indexErrorType == null
             ? null
             : constructor(indexErrorType, 'withLength'),
@@ -149,14 +165,7 @@ base class ScalarCodeGenerator<R extends Object>(
             for (final declaration in sourceProgram.classes)
               if (declaration.type == ValueType.string &&
                   strings.functions.isNotEmpty)
-                IrClass(
-                  declaration.type,
-                  strings.declaration.fields,
-                  members: declaration.members.values,
-                  implementations: declaration.implementations.values,
-                  constructors: declaration.constructors.values,
-                  unsupportedForwarders: declaration.unsupportedForwarders,
-                )
+                strings.declaration
               else
                 declaration,
             if (strings.functions.isNotEmpty &&
@@ -171,6 +180,7 @@ base class ScalarCodeGenerator<R extends Object>(
           globals: sourceProgram.globals,
           externals: [
             ...sourceProgram.externals,
+            for (final target in strings.allocations) IrExternal(target),
             if (!globals.isEmpty) IrExternal(globals.address),
           ],
         );
@@ -217,7 +227,6 @@ base class ScalarCodeGenerator<R extends Object>(
         ),
       );
       final persistent = !globals.isEmpty && globals.hasReferences(layouts);
-      final heap = HeapPlan(frames);
       final selection = ProgramSelection(
         layouts,
         heap,
@@ -232,7 +241,11 @@ base class ScalarCodeGenerator<R extends Object>(
       for (final declaration in selected) {
         final function = program.implementationOf(declaration);
         final binding = imports[declaration];
-        if (binding != null || declaration == globals.address) continue;
+        if (binding != null ||
+            declaration == globals.address ||
+            heap.primitives.contains(declaration)) {
+          continue;
+        }
         if (function is! IrFunction) {
           throw ArgumentError('Definition has no body: ${declaration.name}');
         } else {

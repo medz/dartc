@@ -47,7 +47,7 @@ final class Bindings({
   Iterable<IrClass> get intrinsicClasses => [
     for (final owner in {
       for (final body in intrinsics)
-        if (body.target.kind.isVirtual) body.target.owner!,
+        if (body.target.owner != null) body.target.owner!,
     })
       IrClass(
         owner,
@@ -55,6 +55,10 @@ final class Bindings({
         members: [
           for (final target in _targets.values)
             if (target.owner == owner && target.kind.isVirtual) target,
+        ],
+        constructors: [
+          for (final target in _targets.values)
+            if (target.owner == owner && target.kind == .factory) target,
         ],
       ),
   ];

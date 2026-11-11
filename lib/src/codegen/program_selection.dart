@@ -150,12 +150,18 @@ final class ProgramSelection(
       ],
       support.map((body) => functions[body.target]!.function),
       externals: [
-        for (final target in [
-          heap.heap.map,
-          heap.heap.unmap,
-          heap.heap.invalid,
-        ])
-          IrExternal(target),
+        for (final target in heap.primitives) IrExternal(target),
+        // Source bodies were verified already; this boundary owns generated bodies.
+        for (final target in {
+          ...layouts.strings.declaration.members.values,
+          ...layouts.strings.declaration.implementations.values,
+          ...layouts.strings.declaration.constructors.values,
+        })
+          if (!target.isAbstract)
+            IrExternal(
+              target,
+              defaults: members.program.implementationOf(target)!.defaults,
+            ),
         if (!globals.isEmpty) IrExternal(globals.address),
       ],
     );

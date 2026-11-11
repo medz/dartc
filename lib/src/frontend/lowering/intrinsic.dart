@@ -29,6 +29,46 @@ IrFunction Function(FunctionTarget)? intrinsicFor(
   }
   if (element.library.isDartCore) {
     final string = element.library.getClass('String')!;
+    if (element == string.getNamedConstructor('fromCharCode')) {
+      requireClass(element.library.getClass('RangeError')!);
+      return (target) => _body(
+        target,
+        (entry) => entry.emit(StringFromCharCode(entry.parameters.single)),
+      );
+    }
+    if (element == string.getMethod('[]')) {
+      requireClass(element.library.getClass('IndexError')!);
+      requireClass(element.library.getClass('RangeError')!);
+      return (target) => _body(
+        target,
+        (entry) => entry.emit(
+          StringFromCharCode(
+            entry.emit(
+              StringCodeUnitAt(entry.parameters[0], entry.parameters[1]),
+            ),
+          ),
+        ),
+      );
+    }
+    if (element == string.getMethod('+')) {
+      return (target) => _body(
+        target,
+        (entry) =>
+            entry.emit(StringConcat(entry.parameters[0], entry.parameters[1])),
+      );
+    }
+    if (element == string.getMethod('==')) {
+      return (target) => _body(
+        target,
+        (entry) => entry.emit(Equals(entry.parameters[0], entry.parameters[1])),
+      );
+    }
+    if (element == string.getGetter('hashCode')) {
+      return (target) => _body(
+        target,
+        (entry) => entry.emit(ObjectHashCode(entry.parameters.single)),
+      );
+    }
     if (element == string.getGetter('length')) {
       return (target) => _body(
         target,

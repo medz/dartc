@@ -90,7 +90,7 @@ void main() {
       final layouts = ProgramLayout(program.classes);
       final fields = layouts.storageOf(shape.type);
       expect(fields.fields.first, same(storage.tag));
-      expect(fields.layout.referenceOffsets, [8, 32, 40, 56, 64]);
+      expect(fields.layout.referenceOffsets, [8, 40, 48, 64, 72]);
       expect(storage.cell(CellType(.integer)).value.type, ValueType.integer);
     },
   );

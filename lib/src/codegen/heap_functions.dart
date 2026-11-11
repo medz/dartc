@@ -24,7 +24,7 @@ final class HeapFunctions(final FrameLookup frames) {
   final map = _target('map', .integer, 1);
   final unmap = _target('unmap', .voidType, 2);
   final invalid = _target('invalid', .never, 0);
-  final allocate = _target('allocate', .integer, 4);
+  final allocate = _target('allocate', .integer, 5);
   final release = _target('release', .voidType, 1);
   final _copy = _target('copy', .integer, 2);
   final _collect = _target('collect', .voidType, 5);
@@ -80,7 +80,7 @@ final class HeapFunctions(final FrameLookup frames) {
       forwarded,
     );
     forwarded.finish(Return(_op(forwarded, .bitAnd, descriptor, _int(-2))));
-    final size = _load(fresh, descriptor),
+    final size = _load(fresh, reference, ObjectLayout.sizeOffset),
         destination = _load(fresh, context, copied);
     _store(fresh, context, _op(fresh, .add, destination, size), copied);
     fresh.finish(Jump(loop, [_int(0)]));
@@ -262,7 +262,12 @@ final class HeapFunctions(final FrameLookup frames) {
     field.finish(Jump(fields, [_op(field, .add, i, _int(1))]));
     nextObject.finish(
       Jump(scan, [
-        _op(nextObject, .add, address, _load(nextObject, descriptor)),
+        _op(
+          nextObject,
+          .add,
+          address,
+          _load(nextObject, address, ObjectLayout.sizeOffset),
+        ),
       ]),
     );
     _store(done, context, destination, start);
@@ -311,9 +316,25 @@ final class HeapFunctions(final FrameLookup frames) {
         ready = Block(),
         failed = Block();
     final fill = Block([.integer]), zero = Block(), done = Block();
-    final [context, descriptor, sp, pc] = entry.parameters;
-    final size = _load(entry, descriptor);
-    _equal(entry, _load(entry, context, start), _int(0), grow, available);
+    final [context, descriptor, sp, pc, payloadBytes] = entry.parameters;
+    final sized = Block(), aligned = Block();
+    _branch(entry, .lessThan, payloadBytes, _int(0), failed, sized);
+    final prefix = _load(sized, descriptor);
+    _branch(
+      sized,
+      .greaterThan,
+      payloadBytes,
+      _op(sized, .subtract, _int(0x1ffffffffffffff8), prefix),
+      failed,
+      aligned,
+    );
+    final size = _op(
+      aligned,
+      .bitAnd,
+      _op(aligned, .add, _op(aligned, .add, prefix, payloadBytes), _int(7)),
+      _int(-8),
+    );
+    _equal(aligned, _load(aligned, context, start), _int(0), grow, available);
     _branch(
       available,
       .lessOrEqual,
@@ -396,6 +417,7 @@ final class HeapFunctions(final FrameLookup frames) {
     _store(zero, _op(zero, .add, address, offset), _int(0));
     zero.finish(Jump(fill, [_op(zero, .add, offset, _int(8))]));
     _store(done, address, descriptor);
+    _store(done, address, size, ObjectLayout.sizeOffset);
     // An odd step visits every 30-bit hash without depending on object addresses.
     final hash = _op(
       done,
@@ -409,6 +431,8 @@ final class HeapFunctions(final FrameLookup frames) {
     failed.finish(Return(_int(0)));
     return IrFunction(allocate, [
       entry,
+      sized,
+      aligned,
       available,
       collect,
       retry,

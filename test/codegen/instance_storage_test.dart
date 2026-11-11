@@ -85,8 +85,8 @@ void main() {
         layouts.instances.slots(number).$2,
       ],
     ]);
-    expect(storage.layout.size, 56);
-    expect(storage.layout.referenceOffsets, [8, 24]);
+    expect(storage.layout.size, 64);
+    expect(storage.layout.referenceOffsets, [8, 32]);
     expect(layouts.fieldOffset(value), layouts.fieldOffset(backing));
     expect(storage.offsetOf(bound), layouts.storageOf(owner).offsetOf(bound));
     expect(layouts.instances.slots(value).$1, same(backing));

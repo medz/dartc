@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/layout.dart';
 
 import 'function_emitter.dart';
 import 'program_layout.dart';
@@ -66,6 +67,7 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
     final storage = layouts.storageOf(_type);
     final data = Uint8List(storage.layout.size);
     final words = ByteData.sublistView(data);
+    words.setUint64(ObjectLayout.sizeOffset, data.length, Endian.little);
     for (final entry in _fields.entries) {
       if (!entry.key.isLate && entry.key.initializer == null) {
         words.setUint64(storage.offsetOf(entry.value.$2), 1, Endian.little);

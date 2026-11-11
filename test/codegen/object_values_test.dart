@@ -70,17 +70,15 @@ void main() {
           data.getInt64(object.offset + ObjectLayout.fieldsOffset, .little),
           texts[i].length,
         );
-        final units =
-            module.symbols[module.relocations
-                .whereType<AddressRelocation>()
-                .singleWhere(
-                  (r) =>
-                      r.offset == object.offset + ObjectLayout.fieldsOffset + 8,
-                )
-                .symbol];
+        final units = object.offset + ObjectLayout.fieldsOffset + 8;
+        expect(
+          data.getInt64(object.offset + ObjectLayout.sizeOffset, .little),
+          object.size,
+        );
+        expect(object.size, 40 + ((texts[i].length + 3) ~/ 4) * 8);
         expect([
           for (var j = 0; j < texts[i].length; j++)
-            data.getUint16(units.offset + j * 2, .little),
+            data.getUint16(units + j * 2, .little),
         ], texts[i].codeUnits);
         final descriptor =
             module.symbols[module.relocations
@@ -191,7 +189,7 @@ void main() {
               .symbol,
         );
         final descriptor = module.symbols[reference.symbol];
-        expect(words.getInt64(descriptor.offset, .little), i < 4 ? 40 : 32);
+        expect(words.getInt64(descriptor.offset, .little), i < 4 ? 48 : 40);
         expect(words.getInt64(descriptor.offset + 8, .little), i < 4 ? 1 : 2);
         expect(words.getInt64(descriptor.offset + 16, .little), 8);
         if (i < 4) {

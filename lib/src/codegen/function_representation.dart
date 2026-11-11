@@ -599,6 +599,12 @@ final class FunctionRepresentation(
             continue;
           }
           if (instruction is Equals || instruction is ObjectHashCode) {
+            targets[ValueType.string] = (
+              target: instruction is Equals
+                  ? layouts.strings.equality
+                  : layouts.strings.hash,
+              closure: null,
+            );
             for (final type in [
               ValueType.integer,
               ValueType.floating,
@@ -631,7 +637,6 @@ final class FunctionRepresentation(
               instructions[missing] = [];
               ends[missing] = Jump(join!, [actual]);
             case Equals(:final left, :final right, :final negated):
-              // shortcut: native strings are canonical literals; compare contents when adding constructed strings.
               final identity = layouts.representation(right.type) == .reference
                   ? ReferenceEquality(left, right, negated: negated)
                   : Constant.boolean(negated);
