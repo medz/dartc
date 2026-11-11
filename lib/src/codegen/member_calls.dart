@@ -83,6 +83,11 @@ final class MemberCalls(
           when type.asInstanceOf(owner.declaration) == null) {
         continue;
       }
+      if (receiver.freeTypeParameters.isEmpty &&
+          type.freeTypeParameters.isEmpty &&
+          !receiver.accepts(type)) {
+        continue;
+      }
       final lookup = program.lookupMember(type, selector);
       if (lookup.target case final target?) {
         if (!definitions.contains(target)) {

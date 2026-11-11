@@ -10,7 +10,7 @@ typedef FunctionReferences = ({
   Set<FunctionTarget> callees,
   Set<FunctionTarget> virtualMembers,
   Set<({FunctionTarget method, bool direct})> methodTearOffs,
-  Set<({ValueType receiver, MemberSelector selector})> objectMembers,
+  Set<({ValueType receiver, MemberSelector selector})> implicitMembers,
   Set<ClassType> instantiatedClasses,
   Set<GlobalVariable> globals,
   Set<InstanceField> fields,
@@ -33,7 +33,7 @@ FunctionReferences verifyCallable(
   Set<FunctionTarget>? callees;
   Set<FunctionTarget>? virtualMembers;
   Set<({FunctionTarget method, bool direct})>? methodTearOffs;
-  Set<({ValueType receiver, MemberSelector selector})>? objectMembers;
+  Set<({ValueType receiver, MemberSelector selector})>? implicitMembers;
   Set<ClassType>? instantiatedClasses;
   Set<GlobalVariable>? globals;
   Set<InstanceField>? fields;
@@ -59,7 +59,7 @@ FunctionReferences verifyCallable(
       callees: _snapshot(callees),
       virtualMembers: _snapshot(virtualMembers),
       methodTearOffs: _snapshot(methodTearOffs),
-      objectMembers: _snapshot(objectMembers),
+      implicitMembers: _snapshot(implicitMembers),
       instantiatedClasses: _snapshot(instantiatedClasses),
       globals: _snapshot(globals),
       fields: _snapshot(fields),
@@ -286,8 +286,8 @@ FunctionReferences verifyCallable(
       for (final type in typeArguments) {
         checkTypeScope(type);
       }
-      if (op.objectMember case final member?) {
-        (objectMembers ??= {}).add(member);
+      if (op.implicitMember case final member?) {
+        (implicitMembers ??= {}).add(member);
       }
       switch (op) {
         case LoadLibrary(:final reference) ||

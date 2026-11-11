@@ -16,6 +16,9 @@ Value? lowerCollection(
     return context.bindings.constantExpression(context.unit, literal);
   }
   final type = context.typeOf(literal.staticType!, literal) as ClassType;
+  if (type.declaration == CoreTypes.list) {
+    context.bindings.requireListSupport(context.unit.libraryElement);
+  }
   final result = context.emit(NewCollection(type));
   final elements = switch (literal) {
     ast.ListLiteral(:final elements) => elements,

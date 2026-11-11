@@ -30,6 +30,7 @@ import 'global_storage.dart';
 import 'instance_storage.dart';
 import 'closure_storage.dart';
 import 'string_storage.dart';
+import 'list_storage.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -131,6 +132,12 @@ base class ScalarCodeGenerator<R extends Object>(
         argumentError: constructor(.argumentError),
         unsupportedError: constructor(.unsupportedError),
       );
+      final lists = ListStorage(
+        allocate: heap.allocatePayload,
+        indexError: strings.indexError,
+        rangeError: strings.rangeError,
+        unsupportedError: constructor(.unsupportedError),
+      );
       final globals = GlobalStorage(
         bodies,
         lateError: lateErrorType == null ? null : constructor(lateErrorType),
@@ -150,6 +157,7 @@ base class ScalarCodeGenerator<R extends Object>(
           for (final operation in operations) {
             arithmetic.callFor(operation);
             strings.callFor(operation);
+            lists.callFor(operation);
           }
         }
       }
@@ -159,7 +167,7 @@ base class ScalarCodeGenerator<R extends Object>(
         ...globals.functions,
         ...instances.functions,
       ];
-      if (helpers.isNotEmpty) {
+      if (helpers.isNotEmpty || lists.functions.isNotEmpty) {
         final expanded = IrProgram(
           [
             for (final declaration in sourceProgram.classes)
@@ -172,21 +180,24 @@ base class ScalarCodeGenerator<R extends Object>(
                 !sourceProgram.classes.any((c) => c.type == ValueType.string))
               strings.declaration,
             if (!globals.isEmpty) globals.declaration,
+            ...lists.classes,
             for (final declaration in arithmetic.classes)
               if (!sourceProgram.classes.any((c) => c.type == declaration.type))
                 declaration,
           ],
-          [...sourceProgram.functions, ...helpers],
+          [...sourceProgram.functions, ...helpers, ...lists.functions],
           globals: sourceProgram.globals,
           externals: [
             ...sourceProgram.externals,
             for (final target in strings.allocations) IrExternal(target),
+            for (final target in lists.allocations) IrExternal(target),
             if (!globals.isEmpty) IrExternal(globals.address),
           ],
         );
         final required = expanded.reachableFrom([
           ...sourceDefinitions,
           for (final function in helpers) function.target,
+          ...lists.entryPoints,
         ]);
         final discovered = required
             .where(
@@ -221,6 +232,7 @@ base class ScalarCodeGenerator<R extends Object>(
         instanceStorage: instances,
         closureStorage: closures,
         stringStorage: strings,
+        listStorage: lists,
         referencedClasses: selected.expand(
           (target) =>
               program.implementationOf(target)?.referencedClasses ?? const [],

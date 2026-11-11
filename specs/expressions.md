@@ -9,7 +9,7 @@
 | Symbol 字面量与构造 | 支持公开字面量、Symbol(String) 的普通/const 构造、构造器提取、empty/unaryMinus 与嵌套公开常量；const 按规范身份复用，普通构造保留独立身份。相等、hashCode、Symbol 类型的 toString 调用/提取及对象模式保留用户实现的虚派发。私有源码字面量及其常量依赖仍明确拒绝，避免消费 analyzer 丢失库身份后的错误折叠结果。构造器接收任意字符串，包括以 `_` 开头但不带私有库身份的名字。见[Symbol 样本](../test/frontend/lowering/fixtures/symbols.dart)。 |
 | Invocation 工厂与属性 | 支持 method/genericMethod/getter/setter 的直接调用及构造器提取、缺省参数、八个属性和对象模式；保留 Symbol 身份、类型实参、不可变浅快照及拷贝顺序。用户 implements/extends Invocation、抽象重声明及接口访问保留虚派发和继承默认 getter。匹配 SDK 3.13.7 的各类空集合身份与实际类型，这些细节不声明为跨 SDK 的语言保证。见[Invocation 样本](../test/frontend/lowering/fixtures/invocations.dart)。 |
 | Record 字面量 | 支持空、单字段、位置与命名混合的 record，以及嵌套和 const record。字段按源码顺序求值及隐式转换，失败时跳过后续字段；支持字段读取和结构相等。见[record 样本](../test/frontend/lowering/fixtures/records.dart)。 |
-| 可变/const List | 支持保留实际元素类型的可变 List 字面量、length、索引读写、sublist、add 和 addAll。支持 const List 的内容和规范身份；集合构造器和完整 SDK API 待实现。 |
+| 可变/const List | 支持保留实际元素类型的可变 List 字面量、length、索引读写、sublist、add 和 addAll，以及 List.empty/filled 和 length setter。支持 const List 的内容和规范身份；其他集合构造器和完整 SDK API 待实现。原生范围见下文。 |
 | Set、Map 字面量 | 支持可变类型化字面量、插入顺序、重复项处理及用户相等和 hashCode。支持 Set 的 length/add/addAll、Map 的 length/索引读写/containsKey/entries，以及 MapEntry 的普通与 const 构造、key/value。支持 const Set/Map；完整 SDK API 待实现。 |
 | List if/for/for-in、spread | 支持 List、Set、Map 的 if/else、三段式 for、同步 for-in 和 spread，按源码顺序执行。sequence spread 使用源 Iterable 的 iterator；Map spread 需要逐项类型检查时使用 entries，否则使用 forEach。dynamic 源先核对 Iterable/Map 协议，再逐项转换。addAll 调用还在遍历前检查实际接收者要求的源类型。 |
 | 空感知集合元素 | 支持空感知元素、spread 以及 Map 的空感知 key/value。空 key 跳过对应 value 的求值。 |
@@ -64,6 +64,14 @@ Object/Object? 视图的 `==`、`!=` 和 hashCode 按实际值选择实现。普
 原生字符串常量保留 UTF-16 码元和规范身份，可在普通参数、字段与错误载荷中传递。空串、非 BMP 字符及孤立代理项不会被重新编码或规范化；见[常量数据验证](../test/codegen/object_values_test.dart)。支持 `String.length` 和 `codeUnitAt(index)` 的直接调用、泛型接收者和方法值；长度按 UTF-16 码元计数，读取保留零码元、代理项和非 BMP 字符的两个码元。`index < 0` 或 `index >= length` 时，在访问载荷前抛出 RangeError；未使用结果也保留边界检查、求值和 catch/finally 顺序。见 [`length` 契约](https://api.dart.dev/stable/3.13.7/dart-core/String/length.html)、[`codeUnitAt` 契约](https://api.dart.dev/stable/3.13.7/dart-core/String/codeUnitAt.html)、[IR 契约](../test/ir/strings_test.dart)和[原生读取验证](../test/compiler/strings_test.dart)。
 
 `String.fromCharCode` 支持直接调用和构造器值；0 到 0xffff（含单独代理项）生成一个码元，0x10000 到 0x10ffff 生成代理对，范围外抛出 RangeError。`[]` 从 `codeUnitAt` 结果构造单码元字符串，越界保留接收者、下标的求值及清理顺序。`+` 按顺序连接全部码元，空串与孤立代理项不改变内容；动态字符串经过回收、绑定方法及跨入口全局保存后仍可读取。`==`、`!=` 和 hashCode 按内容处理，包括 Object 视图；相等字符串的哈希相同，不要求与 SDK 的具体哈希值一致。见 [`fromCharCode`](https://api.dart.dev/stable/3.13.7/dart-core/String/String.fromCharCode.html)、[`[]`](https://api.dart.dev/stable/3.13.7/dart-core/String/operator_get.html)及[构造、拼接与回收验证](../test/compiler/strings_test.dart)。fromCharCodes、插值的一般值格式化、切片、编码和其余 String API 尚未接通。异常格式化和 Error.stackTrace getter 也尚未接通。
+
+## 原生 List
+
+支持可变 List 字面量、`List.empty`、`List.filled`、length 读写、索引读写及 add。构造器保留实际元素类型、默认 growable 参数与函数值调用；filled 的所有初始槽引用同一个 fill。固定长度列表允许改写元素，改变长度的操作抛出 UnsupportedError。可增长列表缩短时移除尾部元素，再增长时填入 null；非可空元素类型的列表不能通过 length 增长。依据为 [`List.filled`](https://api.dart.dev/stable/3.13.7/dart-core/List/List.filled.html)、[`List.empty`](https://api.dart.dev/stable/3.13.7/dart-core/List/List.empty.html)和 [`length`](https://api.dart.dev/stable/3.13.7/dart-core/List/length.html)。
+
+协变视图的写入按实际接收者元素类型检查，失败不修改列表；检查先于方法体中的边界与可变性检查。下标访问保持接收者、下标及赋值右侧的求值顺序。超大元素数量不能在转换为存储字节数时回绕；当前分配失败按原生 OOM 路径退出，尚不能作为 Dart 异常捕获。列表及元素经过移动回收、别名、循环引用和全局保存后保持身份与内容。用户实现的 List 保留普通虚调用和方法提取，不使用内置列表布局。见[原生 List 验证](../test/compiler/lists_test.dart)和 [IR 操作契约](../test/ir/collections_test.dart)。
+
+const List、sublist、addAll、迭代/spread、其他构造器及 typed_data 的原生实现仍是缺口；上表的 IR 范围不等于这些行为已经原生执行。
 
 ## 数值比较与 SDK 差异
 

@@ -1772,7 +1772,10 @@ final class IrInterpreter(
           }
           final address = (read(pointer) as ffi.Pointer).address;
           values[op] = invoke(op, address, arguments.map(read).toList());
-        case LoadObjectData() || StoreObjectData():
+        case LoadObjectData() ||
+            StoreObjectData() ||
+            LoadObjectReference() ||
+            StoreObjectReference():
           throw UnsupportedError(
             'Managed physical storage requires native execution.',
           );
@@ -1845,7 +1848,7 @@ final class IrInterpreter(
                   const {},
                   const [],
                 );
-        case NewCollection(:final collectionType):
+        case NewCollection(:final collectionType, :final growable):
           final type = resolve(collectionType) as ClassType;
           values[op] = _CollectionValue(
             type,
@@ -1853,7 +1856,23 @@ final class IrInterpreter(
                 ? <Object?, Object?>{}
                 : type.declaration == CoreTypes.set
                 ? <Object?>{}
-                : <Object?>[],
+                : List<Object?>.empty(
+                    growable: growable == null || read(growable) as bool,
+                  ),
+          );
+        case ListFilled(
+          :final type,
+          :final length,
+          :final fill,
+          :final growable,
+        ):
+          values[op] = _CollectionValue(
+            resolve(type) as ClassType,
+            List<Object?>.filled(
+              read(length) as int,
+              read(fill),
+              growable: read(growable) as bool,
+            ),
           );
         case CollectionAdd(:final collection, :final value):
           values[op] = _add(read(collection), read(value));

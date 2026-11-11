@@ -25,5 +25,10 @@ void main() {
     expect(ObjectLayout.sizeOffset, 24);
     expect(ObjectLayout.identityHashOffset, 16);
     expect(ObjectLayout([]).referenceOffsets, [8]);
+    final buffer = ObjectLayout([], tracesPayload: true);
+    expect(buffer.size, 32);
+    expect(buffer.referenceOffsets, [8]);
+    expect(buffer.tracesPayload, isTrue);
+    expect(layout.tracesPayload, isFalse);
   });
 }

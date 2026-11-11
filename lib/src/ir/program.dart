@@ -184,7 +184,7 @@ final class IrProgram(
       for (final member in [
         for (final target in body.virtualMembers)
           (receiver: target.owner!, selector: target.selector),
-        ...body.objectMembers,
+        ...body.implicitMembers,
       ]) {
         if (members.add(member)) {
           for (final type in instances) {
@@ -527,13 +527,17 @@ final class IrProgram(
         final destination = ctor.redirect;
         if (destination != null) checkTarget(destination);
         if (ctor.redirect == null && implementationOf(ctor) == null) {
-          throw ArgumentError('Missing constructor implementation.');
+          throw ArgumentError(
+            'Missing constructor implementation: ${c.type.name}.${ctor.name}.',
+          );
         }
       }
       for (final member in [...c.members.values, ...c.implementations.values]) {
         checkSignature(member);
         if (!member.isAbstract && implementationOf(member) == null) {
-          throw ArgumentError('Missing member implementation.');
+          throw ArgumentError(
+            'Missing member implementation: ${c.type.name}.${member.name}.',
+          );
         }
       }
     }

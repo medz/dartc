@@ -42,6 +42,26 @@ void main() {
     // reified receiver at runtime instead of rejecting the narrower SSA operand.
     expect(CollectionAdd(list, const Constant.floating(1.5)).mayThrow, isTrue);
   });
+  test('List construction retains fill and growability operands', () {
+    final type = CoreTypes.listOf(.integer);
+    const count = Constant.integer(3),
+        fill = Constant.integer(7),
+        fixed = Constant.boolean(false);
+    final empty = NewCollection(type, growable: fixed);
+    final list = ListFilled(type, count, fill, fixed);
+    expect(empty.inputs, [fixed]);
+    expect(list.inputs, [count, fill, fixed]);
+    expect(list.type, type);
+    expect(list.effects, {Effect.allocates, Effect.mayThrow});
+    expect(
+      () => ListFilled(type, fill, const Constant.nullValue(), fixed),
+      throwsArgumentError,
+    );
+    expect(
+      () => NewCollection(CoreTypes.setOf(.integer), growable: fixed),
+      throwsArgumentError,
+    );
+  });
   test(
     'collection instructions reject storage and invalid receiver protocols',
     () {

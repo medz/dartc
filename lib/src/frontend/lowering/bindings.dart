@@ -76,6 +76,14 @@ final class Bindings({
     sdkClasses.add(element);
   }
 
+  /// Includes the SDK failures used by built-in List storage.
+  void requireListSupport(LibraryElement library) {
+    final core = library.typeProvider.objectElement.library;
+    for (final name in ['IndexError', 'RangeError', 'UnsupportedError']) {
+      requireSdkClass(core.getClass(name)!);
+    }
+  }
+
   /// Includes the actual SDK error used by failed late binding operations.
   void requireLateError(
     LibraryElement library,
@@ -820,7 +828,6 @@ final class Bindings({
     }
     if (enclosing == null) {
       _targets[element] = function;
-      if (intrinsic != null) intrinsics.add(intrinsic(function));
       if (element is ConstructorElement &&
           !element.isFactory &&
           redirects == null &&
@@ -841,6 +848,15 @@ final class Bindings({
         for (final (i, p) in parameters.indexed)
           if (p.isOptional) i: constantOf(p, unit, site),
       };
+    }
+    if (intrinsic != null) {
+      final entry = Block(function.parameterTypes);
+      entry.finish(Return(intrinsic(function, entry)));
+      intrinsics.add(
+        IrFunction(function, [
+          entry,
+        ], defaults: _defaults[function] ?? const {}),
+      );
     }
     return function;
   }

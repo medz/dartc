@@ -18,7 +18,12 @@ enum ValueRepresentation() {
 /// The header contains a storage descriptor, a traced runtime type and a stable
 /// identity hash and allocated size. Fields keep their representation across generic
 /// instantiations.
-final class ObjectLayout(Iterable<ValueRepresentation> fields) {
+final class ObjectLayout(
+  Iterable<ValueRepresentation> fields, {
+
+  /// Whether every aligned slot after the fixed fields is a managed reference.
+  final bool tracesPayload = false,
+}) {
   /// Immutable representations in physical field order.
   final List<ValueRepresentation> fields = .unmodifiable(fields);
 

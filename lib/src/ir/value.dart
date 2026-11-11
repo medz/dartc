@@ -408,9 +408,25 @@ sealed class Instruction(super.type) extends Value {
   /// The SSA operands consumed by the operation.
   Iterable<Value> get inputs;
 
-  /// The implicit Object member whose user override this operation may invoke.
-  ({ValueType receiver, MemberSelector selector})? get objectMember =>
+  /// The virtual member invoked by an operation with a built-in spelling.
+  ({ValueType receiver, MemberSelector selector})? get implicitMember =>
       switch (this) {
+        CollectionLength(:final collection) => (
+          receiver: collection.type,
+          selector: (kind: .getter, name: 'length', privateLibrary: null),
+        ),
+        CollectionGet(:final collection) => (
+          receiver: collection.type,
+          selector: (kind: .method, name: '[]', privateLibrary: null),
+        ),
+        ListSet(:final collection) => (
+          receiver: collection.type,
+          selector: (kind: .method, name: '[]=', privateLibrary: null),
+        ),
+        CollectionAdd(:final collection) => (
+          receiver: collection.type,
+          selector: (kind: .method, name: 'add', privateLibrary: null),
+        ),
         ObjectRuntimeType(:final operand, direct: false) => (
           receiver: operand.type,
           selector: (kind: .getter, name: 'runtimeType', privateLibrary: null),
@@ -474,6 +490,7 @@ sealed class Instruction(super.type) extends Value {
     Interpolate() ||
     Equals(mayCallUserCode: true) => _call,
     NewCollection() ||
+    ListFilled() ||
     MakeInvocation() ||
     BindMethod(direct: true) ||
     InstantiateFunction() ||
@@ -499,6 +516,7 @@ sealed class Instruction(super.type) extends Value {
     ReadCell() ||
     StringLength() ||
     LoadObjectData() ||
+    LoadObjectReference() ||
     LoadNative() => const {.readsStorage},
     StringCodeUnitAt() => const {.readsStorage, .mayThrow},
     StoreGlobal(global: GlobalVariable(isFinal: true)) ||
@@ -512,6 +530,7 @@ sealed class Instruction(super.type) extends Value {
     StoreField() ||
     WriteCell() ||
     StoreNative() ||
+    StoreObjectReference() ||
     StoreObjectData() => const {.writesStorage},
     TypeCast() ||
     NullCheck() ||
@@ -633,7 +652,8 @@ final class LoadObjectData(
   final NativeScalarType nativeType,
 ) extends Instruction {
   this : super(FfiTypes.valueType(nativeType)) {
-    _checkObjectData(object, byteOffset, nativeType);
+    _checkObjectData(object, byteOffset);
+    if (nativeType.isVoid) throw ArgumentError('A sized scalar is required.');
   }
   @override
   Iterable<Value> get inputs => [object, byteOffset];
@@ -650,8 +670,8 @@ final class StoreObjectData(
   final Value value,
 ) extends Instruction {
   this : super(.voidType) {
-    _checkObjectData(object, byteOffset, nativeType);
-    if (value.type != FfiTypes.valueType(nativeType)) {
+    _checkObjectData(object, byteOffset);
+    if (nativeType.isVoid || value.type != FfiTypes.valueType(nativeType)) {
       throw ArgumentError('The stored value must match the native scalar.');
     }
   }
@@ -659,17 +679,46 @@ final class StoreObjectData(
   Iterable<Value> get inputs => [object, byteOffset, value];
 }
 
-void _checkObjectData(Value object, Value offset, NativeScalarType native) {
+/// Reads a traced reference slot from a managed object's inline payload.
+///
+/// The layout owner must prove bounds, alignment and collector metadata.
+final class LoadObjectReference(final Value object, final Value byteOffset)
+    extends Instruction {
+  this : super(.object.nullable) {
+    _checkObjectData(object, byteOffset);
+  }
+  @override
+  Iterable<Value> get inputs => [object, byteOffset];
+}
+
+/// Writes a traced reference slot, retaining both operands across safepoints.
+///
+/// The layout owner must prove bounds, alignment, mutability and collector metadata.
+final class StoreObjectReference(
+  final Value object,
+  final Value byteOffset,
+  final Value value,
+) extends Instruction {
+  this : super(.voidType) {
+    _checkObjectData(object, byteOffset);
+    if (!ValueType.object.nullable.accepts(value.type)) {
+      throw ArgumentError('A Dart value is required.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [object, byteOffset, value];
+}
+
+void _checkObjectData(Value object, Value offset) {
   final type = object.type;
   if (type is! ClassType ||
       type.mayBeNull ||
       type == ValueType.integer ||
       type == ValueType.floating ||
       type == ValueType.boolean ||
-      offset.type != .integer ||
-      native.isVoid) {
+      offset.type != .integer) {
     throw ArgumentError(
-      'A non-null managed object, integer offset and sized scalar are required.',
+      'A non-null managed object and integer offset are required.',
     );
   }
 }
@@ -1777,7 +1826,12 @@ ClassType _classReceiver(ValueType type, [ClassType? owner]) {
 }
 
 /// Allocates a fresh mutable literal, retaining its reified type arguments.
-final class NewCollection(ClassType super.type) extends Instruction {
+final class NewCollection(
+  ClassType super.type, {
+
+  /// Whether a new List can change length. Literal collections default to growable.
+  final Value? growable,
+}) extends Instruction {
   /// The collection type, including its reified element or key and value types.
   ClassType get collectionType => type as ClassType;
   this {
@@ -1788,9 +1842,33 @@ final class NewCollection(ClassType super.type) extends Instruction {
     ].contains(collectionType.declaration)) {
       throw ArgumentError('Expected a core literal collection type.');
     }
+    if (growable != null &&
+        (collectionType.declaration != CoreTypes.list ||
+            growable!.type != .boolean)) {
+      throw ArgumentError('Only a List accepts a boolean growability operand.');
+    }
   }
   @override
-  Iterable<Value> get inputs => const [];
+  Iterable<Value> get inputs => [?growable];
+}
+
+/// Creates a fixed-length or growable List whose entries share [fill].
+final class ListFilled(
+  ClassType super.type,
+  final Value length,
+  final Value fill,
+  final Value growable,
+) extends Instruction {
+  this {
+    if ((type as ClassType).declaration != CoreTypes.list ||
+        length.type != .integer ||
+        growable.type != .boolean ||
+        !(type as ClassType).typeArguments.single.accepts(fill.type)) {
+      throw ArgumentError('Invalid filled List operands.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [length, fill, growable];
 }
 
 /// Appends/inserts using the actual receiver's reified element type checks.

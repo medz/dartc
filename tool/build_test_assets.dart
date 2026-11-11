@@ -85,6 +85,10 @@ Future<void> main(List<String> args) async {
       'test/compiler/fixtures/managed_objects.dart',
     ], output: const .executable());
     await managedEntry.write(assets.file('compiler/entry_managed'));
+    final listOverflow = await Compiler(target).compile([
+      'test/compiler/fixtures/lists_overflow.dart',
+    ], output: const .executable());
+    await listOverflow.write(assets.file('compiler/entry_lists_overflow'));
     final managedGlobalEntry = await Compiler(target).compile([
       'test/compiler/fixtures/managed_globals.dart',
     ], output: const .executable());
@@ -166,6 +170,7 @@ Future<void> main(List<String> args) async {
       'pointer_arithmetic',
       'pointer_values',
       'strings',
+      'lists',
       'doubles',
       'mixed_numeric',
       'math',

@@ -28,9 +28,9 @@ sealed class IrCallable(
   Set<({FunctionTarget method, bool direct})> get methodTearOffs =>
       _references.methodTearOffs;
 
-  /// Implicit Object member calls, including their possible receiver types.
-  Set<({ValueType receiver, MemberSelector selector})> get objectMembers =>
-      _references.objectMembers;
+  /// Implicit virtual calls, including their possible receiver types.
+  Set<({ValueType receiver, MemberSelector selector})> get implicitMembers =>
+      _references.implicitMembers;
 
   /// Classes instantiated by this body, constructor tear-offs or its constants.
   Set<ClassType> get instantiatedClasses => _references.instantiatedClasses;

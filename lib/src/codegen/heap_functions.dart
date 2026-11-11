@@ -122,7 +122,8 @@ final class HeapFunctions(final FrameLookup frames) {
     final scan = Block([.integer]),
         object = Block(),
         fields = Block([.integer]);
-    final field = Block(), nextObject = Block(), done = Block();
+    final field = Block(), payload = Block(), elements = Block([.integer]);
+    final element = Block(), nextObject = Block(), done = Block();
     final [context, destination, capacity, initialSp, initialPc] =
         entry.parameters;
     _store(entry, context, destination, copied);
@@ -243,7 +244,7 @@ final class HeapFunctions(final FrameLookup frames) {
         references = _load(object, descriptor, 8);
     object.finish(Jump(fields, [_int(0)]));
     final i = fields.parameters.single;
-    _branch(fields, .lessThan, i, references, field, nextObject);
+    _branch(fields, .lessThan, i, references, field, payload);
     final location = _op(
       field,
       .add,
@@ -260,6 +261,39 @@ final class HeapFunctions(final FrameLookup frames) {
       field.emit(DirectCall(_copy, [context, _load(field, location)])),
     );
     field.finish(Jump(fields, [_op(field, .add, i, _int(1))]));
+    final payloadOffset = _load(
+      payload,
+      _op(
+        payload,
+        .add,
+        descriptor,
+        _op(payload, .multiply, references, _int(8)),
+      ),
+      24,
+    );
+    payload.finish(
+      Branch(
+        payload.emit(Equals(payloadOffset, _int(0))),
+        Jump(nextObject),
+        Jump(elements, [payloadOffset]),
+      ),
+    );
+    final offset = elements.parameters.single;
+    _branch(
+      elements,
+      .lessThan,
+      offset,
+      _load(elements, address, ObjectLayout.sizeOffset),
+      element,
+      nextObject,
+    );
+    final elementSlot = _op(element, .add, address, offset);
+    _store(
+      element,
+      elementSlot,
+      element.emit(DirectCall(_copy, [context, _load(element, elementSlot)])),
+    );
+    element.finish(Jump(elements, [_op(element, .add, offset, _int(8))]));
     nextObject.finish(
       Jump(scan, [
         _op(
@@ -296,6 +330,9 @@ final class HeapFunctions(final FrameLookup frames) {
       object,
       fields,
       field,
+      payload,
+      elements,
+      element,
       nextObject,
       done,
     ]);

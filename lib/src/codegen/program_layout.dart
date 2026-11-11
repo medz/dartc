@@ -10,6 +10,7 @@ import 'instance_storage.dart';
 import 'type_relations.dart';
 import 'pointer_storage.dart';
 import 'string_storage.dart';
+import 'list_storage.dart';
 
 enum TypeTestKind() {
   constantTrue,
@@ -26,12 +27,14 @@ final class ProgramLayout(
   InstanceStorage? instanceStorage,
   ClosureStorage? closureStorage,
   StringStorage? stringStorage,
+  ListStorage? listStorage,
 }) {
   final instances = instanceStorage ?? InstanceStorage([]);
   final closures = closureStorage ?? ClosureStorage([]);
   final types = TypeValues();
   final pointers = PointerStorage();
   final strings = stringStorage ?? StringStorage();
+  final lists = listStorage ?? ListStorage();
   late final TypeRelations relations;
   final _classes = {
     for (final declaration in classes) declaration.type: declaration,
@@ -41,6 +44,9 @@ final class ProgramLayout(
   this {
     _classes[FfiTypes.pointer] = pointers.declaration;
     _classes[ValueType.string] = strings.declaration;
+    for (final declaration in lists.classes) {
+      _classes[declaration.type] = declaration;
+    }
     for (final declaration in types.classes) {
       _classes[declaration.type] = declaration;
     }
@@ -143,6 +149,7 @@ final class ProgramLayout(
             field,
       ],
       this,
+      tracesPayload: declaration == lists.buffer,
       storesErrorTrace:
           declaration == ValueType.error ||
           switch (declaration.superclass) {
@@ -162,6 +169,7 @@ final class ClassStorage(
   Iterable<InstanceField> fields,
   ProgramLayout program, {
   bool storesErrorTrace = false,
+  bool tracesPayload = false,
 }) {
   final List<InstanceField> fields = .unmodifiable(fields);
   late final ObjectLayout layout;
@@ -175,7 +183,7 @@ final class ClassStorage(
     layout = .new([
       ...this.fields.map((f) => program.representation(f.type)),
       if (storesErrorTrace) ValueRepresentation.reference,
-    ]);
+    ], tracesPayload: tracesPayload);
   }
 
   int offsetOf(InstanceField field) {

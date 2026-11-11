@@ -142,6 +142,7 @@ final class ProgramSelection(
         ...arithmetic.classes,
         ...layouts.closures.classes,
         layouts.strings.declaration,
+        ...layouts.lists.classes,
         ...layouts.types.classes,
         if (functions.containsKey(layouts.pointers.initializer))
           layouts.pointers.declaration,
@@ -152,16 +153,20 @@ final class ProgramSelection(
       externals: [
         for (final target in heap.primitives) IrExternal(target),
         // Source bodies were verified already; this boundary owns generated bodies.
-        for (final target in {
-          ...layouts.strings.declaration.members.values,
-          ...layouts.strings.declaration.implementations.values,
-          ...layouts.strings.declaration.constructors.values,
-        })
-          if (!target.isAbstract)
-            IrExternal(
-              target,
-              defaults: members.program.implementationOf(target)!.defaults,
-            ),
+        for (final declaration in [
+          layouts.strings.declaration,
+          ...layouts.lists.classes,
+        ])
+          for (final target in {
+            ...declaration.members.values,
+            ...declaration.implementations.values,
+            ...declaration.constructors.values,
+          })
+            if (!target.isAbstract)
+              IrExternal(
+                target,
+                defaults: members.program.implementationOf(target)!.defaults,
+              ),
         if (!globals.isEmpty) IrExternal(globals.address),
       ],
     );

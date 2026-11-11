@@ -139,15 +139,31 @@ final class Lowering({final bool enableAssertions = false}) {
       );
     }
 
+    final intrinsicClasses = bindings.intrinsicClasses;
+    final defined = {
+      for (final function in [...functions, ...bindings.intrinsics])
+        function.target,
+    };
     final program = IrProgram(
-      [...classes, ...bindings.mixinApplications, ...bindings.intrinsicClasses],
+      [...classes, ...bindings.mixinApplications, ...intrinsicClasses],
       [
         ...functions.whereType<IrFunction>(),
         ...bindings.intrinsics,
         ...bindings.mixinInitializers,
         ...bindings.libraryLoaders,
       ],
-      externals: functions.whereType<IrExternal>(),
+      externals: [
+        ...functions.whereType<IrExternal>(),
+        for (final declaration in intrinsicClasses)
+          for (final target in [
+            ...declaration.members.values,
+            ...declaration.constructors.values,
+          ])
+            if (!target.isAbstract &&
+                target.redirect == null &&
+                !defined.contains(target))
+              IrExternal(target, defaults: bindings.defaults(target)),
+      ],
       globals: bindings.globals,
     );
     final root = input.libraries.first;

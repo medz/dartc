@@ -305,6 +305,24 @@ final class FunctionRepresentation(
           _operands[instruction] = block.parameters;
           continue;
         }
+        if (layouts.lists.callFor(instruction) case final target?) {
+          final inputs = instruction is NewCollection
+              ? [instruction.growable ?? const Constant.boolean(true)]
+              : instruction.inputs.toList();
+          invocations[instruction] = target;
+          _operands[instruction] = [
+            for (final (i, input) in inputs.indexed)
+              convert(input, target.parameterTypes[i], body),
+            _reify(
+              layouts.lists.type.instantiate(
+                (instruction.type as ClassType).typeArguments,
+              ),
+              body,
+            ),
+          ];
+          body.add(instruction);
+          continue;
+        }
         if (instruction
             case PointerAddress(pointer: final receiver) ||
                 StringLength(string: final receiver)) {
@@ -512,6 +530,12 @@ final class FunctionRepresentation(
           continue;
         }
         final invocation = switch (instruction) {
+          CollectionLength(:final collection) ||
+          CollectionGet(:final collection) ||
+          ListSet(:final collection) ||
+          CollectionAdd(
+            :final collection,
+          ) => (null, collection, const <ValueType>[]),
           InstantiateFunction(:final function, :final typeArguments) => (
             null,
             function,
@@ -553,6 +577,10 @@ final class FunctionRepresentation(
           final functionValue =
               instruction is FunctionCall || instruction is InstantiateFunction;
           final binding = instruction is BindMethod;
+          final builtin =
+              instruction is Equals ||
+              instruction is ObjectRuntimeType ||
+              instruction is ObjectHashCode;
           final virtual =
               instruction is! DirectCall &&
               !(instruction is BindMethod && instruction.direct);
@@ -575,9 +603,10 @@ final class FunctionRepresentation(
                                           name: '==',
                                           privateLibrary: null,
                                         ),
-                                        _ => instruction.objectMember!.selector,
+                                        _ =>
+                                          instruction.implicitMember!.selector,
                                       },
-                                  hasBuiltin: member == null,
+                                  hasBuiltin: builtin,
                                 )
                               : {member!.owner!: member})
                           .entries)
@@ -653,31 +682,31 @@ final class FunctionRepresentation(
               instructions[missing] = [invalid];
               ends[missing] = Unreachable(invalid);
           }
-          var builtin = missing;
+          var builtinEntry = missing;
           if (instruction is Equals || instruction is ObjectHashCode) {
-            builtin = addBlock();
+            builtinEntry = addBlock();
             final selected = addBlock();
             final kind = LoadField(TypeValues.kind, actual);
             final test = Equals(
               kind,
               Constant.integer(TypeKind.function.index),
             );
-            instructions[builtin]!.addAll([kind, test]);
-            ends[builtin] = Branch(test, Jump(selected), Jump(missing));
+            instructions[builtinEntry]!.addAll([kind, test]);
+            ends[builtinEntry] = Branch(test, Jump(selected), Jump(missing));
             final result = instruction is Equals
                 ? valueOperations.equalFunction(instruction, selected)
                 : valueOperations.hashFunction(receiver, selected);
             ends[result] = Jump(join!, result.parameters);
           }
           var next = block;
-          if (member == null && !functionValue) {
+          if (builtin) {
             final nominal = Block();
             blocks.add(nominal);
             instructions[nominal] = [];
             final kind = LoadField(TypeValues.kind, actual);
             final test = Equals(kind, Constant.integer(TypeKind.nominal.index));
             body.addAll([kind, test]);
-            ends[next] = Branch(test, Jump(nominal), Jump(builtin));
+            ends[next] = Branch(test, Jump(nominal), Jump(builtinEntry));
             next = nominal;
             if (instruction case Equals(:final right)
                 when right.type.accepts(.nullType)) {
@@ -881,6 +910,10 @@ final class FunctionRepresentation(
               DirectCall(:final inputs) => inputs.skip(1),
               ObjectRuntimeType() || ObjectHashCode() => const <Value>[],
               Equals(:final right) => [right],
+              CollectionLength() ||
+              CollectionGet() ||
+              ListSet() ||
+              CollectionAdd() => instruction.inputs.skip(1),
               _ => throw StateError('Expected a member call.'),
             };
             final arguments = <Value>[
@@ -954,6 +987,22 @@ final class FunctionRepresentation(
                 right,
                 negated: negated,
               ),
+              CollectionLength(:final collection) => CollectionLength(
+                collection,
+              ),
+              CollectionGet(:final collection, :final key) => CollectionGet(
+                collection,
+                key,
+              ),
+              CollectionAdd(:final collection, :final value) => CollectionAdd(
+                collection,
+                value,
+              ),
+              ListSet(:final collection, :final key, :final value) => ListSet(
+                collection,
+                key,
+                value,
+              ),
               _ => throw StateError('Expected a member call.'),
             };
             invocations[call] = target;
@@ -973,7 +1022,7 @@ final class FunctionRepresentation(
             append(call);
             final conversions = <Value>[];
             var value = convert(call, result, conversions);
-            if (member?.requiresResultCheck == true) {
+            if (member?.requiresResultCheck ?? target.requiresResultCheck) {
               value = checkResult(value, result, conversions);
             }
             conversions.forEach(append);
@@ -1244,6 +1293,11 @@ final class FunctionRepresentation(
             (cell.type as CellType).content,
           ],
           StoreGlobal(:final global) => [global.type],
+          StoreObjectReference(:final object) => <ValueType>[
+            object.type,
+            .integer,
+            .object.nullable,
+          ],
           StoreField(:final receiver, :final field) => [
             receiver.type,
             field.type,

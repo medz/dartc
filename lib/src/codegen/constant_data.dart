@@ -133,13 +133,16 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     if (_types[type] case final symbol?) return symbol;
     final references = layout.referenceOffsets.toList();
     final start = _words.length;
-    final symbol = _types[type] = _reserve('type', 3 + references.length);
+    final symbol = _types[type] = _reserve('type', 4 + references.length);
     _words[start] = layout.size;
     _words[start + 1] = references.length;
     _words.setRange(start + 2, start + 2 + references.length, references);
     _words[start + 2 + references.length] = layouts.isBoxable(type)
         ? 0
         : layouts.storageOf(type).errorTraceOffset ?? 0;
+    _words[start + 3 + references.length] = layout.tracesPayload
+        ? layout.size
+        : 0;
     return symbol;
   }
 

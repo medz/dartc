@@ -92,7 +92,10 @@ void writeFunction(
       'collectionGet ${value(op.collection)}, ${value(op.key)}',
     ListSet() =>
       'listSet ${value(op.collection)}, ${value(op.key)}, ${value(op.value)}',
-    NewCollection() => 'newCollection ${op.type.dartName}',
+    NewCollection() =>
+      'newCollection ${op.type.dartName}${op.growable == null ? '' : ', growable: ${value(op.growable!)}'}',
+    ListFilled() =>
+      'listFilled ${op.type.dartName} ${op.inputs.map(value).join(', ')}',
     CollectionAdd() =>
       'collectionAdd ${value(op.collection)}, ${value(op.value)}',
     CollectionSpread() =>
@@ -124,6 +127,10 @@ void writeFunction(
       'loadObjectData ${op.nativeType} ${value(op.object)}, ${value(op.byteOffset)}',
     StoreObjectData() =>
       'storeObjectData ${op.nativeType} ${value(op.object)}, ${value(op.byteOffset)}, ${value(op.value)}',
+    LoadObjectReference() =>
+      'loadObjectReference ${op.inputs.map(value).join(', ')}',
+    StoreObjectReference() =>
+      'storeObjectReference ${op.inputs.map(value).join(', ')}',
     StoreNative() =>
       'storeNative ${op.nativeType} ${value(op.address)}, ${value(op.value)}',
     StoreGlobal() => 'storeGlobal ${global(op.global)}, ${value(op.value)}',

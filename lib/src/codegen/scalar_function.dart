@@ -381,6 +381,26 @@ final class ScalarFunction<R extends Object>(
             allocation.release(operand);
           }
           allocation.define(instruction, destination);
+        } else if (instruction case StoreObjectReference(
+          :final object,
+          :final byteOffset,
+        )) {
+          final base = objectDataAddress(object, byteOffset);
+          final value = selection.body.inputsOf(instruction).last;
+          final source = allocation.read(value, except: [base]);
+          allocation.release(value);
+          emitter.storeMemory(source, base, bytes: 8);
+          allocation.releaseTemporary(base);
+          emptyResult(instruction);
+        } else if (instruction case LoadObjectReference(
+          :final object,
+          :final byteOffset,
+        )) {
+          final source = objectDataAddress(object, byteOffset);
+          allocation.releaseTemporary(source);
+          final destination = allocation.allocate(.general, preferred: source);
+          emitter.loadMemory(destination, source, bytes: 8, signed: false);
+          allocation.define(instruction, destination);
         } else if (instruction
             case StoreNative(:final address, :final nativeType, :final value) ||
                 StoreObjectData(

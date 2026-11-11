@@ -172,7 +172,10 @@ final class FunctionSelection<R>(
             } else {
               throw StateError('Unresolved type test.');
             }
-          case LoadObjectData() || StoreObjectData():
+          case LoadObjectData() ||
+              StoreObjectData() ||
+              LoadObjectReference() ||
+              StoreObjectReference():
             if (_generalTemporaries < 1) _generalTemporaries = 1;
             if (instruction case StoreObjectData(nativeType: final native)
                 when native.isSinglePrecision && _floatingTemporaries == 0) {

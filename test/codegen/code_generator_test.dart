@@ -1,6 +1,7 @@
 import 'dart:ffi';
 
 import 'package:dartc/codegen.dart';
+import 'package:dartc/frontend.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
@@ -12,6 +13,36 @@ import 'package:test/test.dart';
 import 'fixtures/aliases.dart';
 
 void main() {
+  test(
+    'List construction omits unused factories and virtual members',
+    () async {
+      final lowered = await AnalysisSession([
+        'test/compiler/fixtures/lists_overflow.dart',
+      ]).use((input) => Lowering().lower(input));
+      for (final CodeGenerator generator in [
+        Arm64CodeGenerator(const Target(.macos, .arm64)),
+        X64CodeGenerator(const Target(.linux, .x64)),
+      ]) {
+        final module = generator.generate(
+          lowered.program,
+          definitions: lowered.program.reachableFrom([lowered.entryPoint!]),
+        );
+        final names = module.symbols.map((symbol) => symbol.name);
+        expect(names, contains('filled'));
+        for (final name in [
+          'empty',
+          'add',
+          '[]',
+          '[]=',
+          '_reserve',
+          'length',
+        ]) {
+          expect(names, isNot(contains(name)), reason: name);
+        }
+      }
+    },
+  );
+
   test('heap and stack inspection do not construct Dart pointer objects', () {
     final frames = FrameLookup(), heap = HeapFunctions(frames);
     for (final function in [
