@@ -17,6 +17,48 @@ void main() {
     addTearDown(native.close);
   });
 
+  test('iteration dispatch preserves constants, mutation checks and iterator roots', () {
+    for (final (mode, expected) in [
+      (0, 1234234253),
+      (1, 1234251),
+      (2, 12342351),
+    ]) {
+      expect(sdk.iteratorProtocol(mode), expected);
+      expect(native.iteratorProtocol(mode), expected);
+    }
+    for (final count in [0, 10000]) {
+      for (final (mode, expected) in [(0, count * 3), (1, 8), (2, 181)]) {
+        expect(sdk.listIteration(count, mode), expected);
+        expect(native.iteration(count, mode), expected);
+      }
+    }
+    for (final (mode, expected) in [(0, 9), (1, 20), (2, 20), (3, 2)]) {
+      expect(sdk.listIteratorMutation(mode), expected);
+      expect(native.iteratorMutation(mode), expected);
+    }
+    for (final count in [0, 40000]) {
+      expect(sdk.listIteratorState(count), 7);
+      expect(sdk.listIteratorFinish(), 7);
+      expect(native.iteratorState(count), 7);
+      expect(native.iteratorFinish(), 7);
+    }
+  });
+
+  test('constant Lists preserve identity and reject mutation before storage writes', () {
+    expect(sdk.listConstantOnly(), 5);
+    expect(native.constantOnly(), 5);
+    for (final count in [0, 40000]) {
+      final expected = count == 0 ? 40 : 41;
+      expect(sdk.listConstants(count), expected);
+      expect(native.constants(count), expected);
+    }
+    for (var mode = 0; mode < 5; mode++) {
+      final expected = mode == 3 ? 13 : 3;
+      expect(sdk.listConstMutation(mode), expected);
+      expect(native.constMutation(mode), expected);
+    }
+  });
+
   test('literal, empty and filled Lists grow and preserve indexed values', () {
     for (final count in [0, 1, 8, 10000]) {
       for (final mode in [0, 1, 2]) {

@@ -76,14 +76,6 @@ final class Bindings({
     sdkClasses.add(element);
   }
 
-  /// Includes the SDK failures used by built-in List storage.
-  void requireListSupport(LibraryElement library) {
-    final core = library.typeProvider.objectElement.library;
-    for (final name in ['IndexError', 'RangeError', 'UnsupportedError']) {
-      requireSdkClass(core.getClass(name)!);
-    }
-  }
-
   /// Includes the actual SDK error used by failed late binding operations.
   void requireLateError(
     LibraryElement library,
@@ -1257,8 +1249,11 @@ final class Bindings({
           typeArguments: arguments?.map((t) => valueType(t, unit, site)),
         );
       }
-      if (value.toListValue() ?? value.toSetValue()?.toList()
-          case final elements?) {
+      final list = value.toListValue();
+      if (list ?? value.toSetValue()?.toList() case final elements?) {
+        if (list != null) {
+          requireListSupport(origin, requireSdkClass);
+        }
         return SequenceConstant(
           valueType(value.type!, unit, site) as ClassType,
           elements.map(convert),

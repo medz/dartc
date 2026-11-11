@@ -530,12 +530,6 @@ final class FunctionRepresentation(
           continue;
         }
         final invocation = switch (instruction) {
-          CollectionLength(:final collection) ||
-          CollectionGet(:final collection) ||
-          ListSet(:final collection) ||
-          CollectionAdd(
-            :final collection,
-          ) => (null, collection, const <ValueType>[]),
           InstantiateFunction(:final function, :final typeArguments) => (
             null,
             function,
@@ -570,6 +564,11 @@ final class FunctionRepresentation(
                   right.type != .nullType &&
                   layouts.representation(left.type) == .reference =>
             (null, left, const <ValueType>[]),
+          _ when instruction.implicitMember != null => (
+            null,
+            instruction.inputs.first,
+            const <ValueType>[],
+          ),
           _ => null,
         };
         if (invocation != null) {
@@ -910,10 +909,8 @@ final class FunctionRepresentation(
               DirectCall(:final inputs) => inputs.skip(1),
               ObjectRuntimeType() || ObjectHashCode() => const <Value>[],
               Equals(:final right) => [right],
-              CollectionLength() ||
-              CollectionGet() ||
-              ListSet() ||
-              CollectionAdd() => instruction.inputs.skip(1),
+              _ when instruction.implicitMember != null =>
+                instruction.inputs.skip(1),
               _ => throw StateError('Expected a member call.'),
             };
             final arguments = <Value>[
@@ -990,6 +987,9 @@ final class FunctionRepresentation(
               CollectionLength(:final collection) => CollectionLength(
                 collection,
               ),
+              GetIterator(:final iterable) => GetIterator(iterable),
+              IteratorMoveNext(:final iterator) => IteratorMoveNext(iterator),
+              IteratorCurrent(:final iterator) => IteratorCurrent(iterator),
               CollectionGet(:final collection, :final key) => CollectionGet(
                 collection,
                 key,

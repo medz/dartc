@@ -4,6 +4,7 @@ import 'package:dartc/ir.dart';
 import 'bindings.dart';
 import 'function_context.dart';
 import 'iteration.dart';
+import 'intrinsic.dart';
 import 'pattern.dart';
 
 /// Converts a constant literal or evaluates mutable elements in source order.
@@ -17,7 +18,10 @@ Value? lowerCollection(
   }
   final type = context.typeOf(literal.staticType!, literal) as ClassType;
   if (type.declaration == CoreTypes.list) {
-    context.bindings.requireListSupport(context.unit.libraryElement);
+    requireListSupport(
+      context.unit.libraryElement,
+      context.bindings.requireSdkClass,
+    );
   }
   final result = context.emit(NewCollection(type));
   final elements = switch (literal) {

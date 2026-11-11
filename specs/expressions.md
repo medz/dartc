@@ -71,7 +71,11 @@ Object/Object? 视图的 `==`、`!=` 和 hashCode 按实际值选择实现。普
 
 协变视图的写入按实际接收者元素类型检查，失败不修改列表；检查先于方法体中的边界与可变性检查。下标访问保持接收者、下标及赋值右侧的求值顺序。超大元素数量不能在转换为存储字节数时回绕；当前分配失败按原生 OOM 路径退出，尚不能作为 Dart 异常捕获。列表及元素经过移动回收、别名、循环引用和全局保存后保持身份与内容。用户实现的 List 保留普通虚调用和方法提取，不使用内置列表布局。见[原生 List 验证](../test/compiler/lists_test.dart)和 [IR 操作契约](../test/ir/collections_test.dart)。
 
-const List、sublist、addAll、迭代/spread、其他构造器及 typed_data 的原生实现仍是缺口；上表的 IR 范围不等于这些行为已经原生执行。
+const List 保留实际元素类型、嵌套内容和规范身份，支持读取及元素参与的已有原生行为；[]=/add/length setter 在写入前拒绝不可变列表，协变参数检查仍先执行。常量与其元素在回收及全局保存后保留身份；不可变、固定长度和可增长列表共用索引读取行为。
+
+同步 for-in、iterator、moveNext、current 和 elementAt 已接通普通派发，包括自定义 Iterable/Iterator、提取的 moveNext 方法及迭代器跨入口保存。内置列表按索引顺序遍历，元素改写可以被后续步骤读取；两次迭代步骤之间长度变化时抛出 ConcurrentModificationError。循环只在 moveNext 返回 true 后读取 current，异常仍执行 finally；在未改变集合且迭代完成后，再次 moveNext 返回 false。不把首次移动前、结束后或 moveNext 抛错后的 current 固化为特定结果。依据为 [List 迭代约束](https://api.dart.dev/stable/3.13.7/dart-core/List-class.html)、[Iterator.current](https://api.dart.dev/stable/3.13.7/dart-core/Iterator/current.html)和 [Iterator.moveNext](https://api.dart.dev/stable/3.13.7/dart-core/Iterator/moveNext.html)，验证见[原生 List 与迭代用例](../test/compiler/lists_test.dart)。
+
+sublist、addAll、spread、其他构造器及 typed_data 的原生实现仍是缺口；上表的 IR 范围不等于这些行为已经原生执行。
 
 ## 数值比较与 SDK 差异
 

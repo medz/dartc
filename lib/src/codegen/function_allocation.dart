@@ -265,12 +265,6 @@ final class FunctionAllocation<R extends Object>(
     } else if (value case ScalarConstant(value: null)) {
       emitter.loadImmediate(destination, 0);
     } else if (value is Constant) {
-      if (value is! ObjectConstant &&
-          value is! TypeConstant &&
-          value is! FunctionConstant &&
-          value.type != .string) {
-        throw UnsupportedError('Native constant: ${value.type.dartName}');
-      }
       loadObject(value, destination);
     } else if (value is UnwindValue || _spilled.contains(value)) {
       emitter.loadStack(destination, _slot(value));

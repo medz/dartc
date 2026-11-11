@@ -3,11 +3,19 @@ import 'dart:ffi' show Uint64;
 import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 
+/// Permitted List changes encoded in the storage flag.
+enum ListMutability() {
+  immutable,
+  fixed,
+  growable,
+}
+
 /// Owns List storage and generates ordinary Dart member bodies for it.
 final class ListStorage({
   final IrCallable? indexError,
   final IrCallable? rangeError,
   final IrCallable? unsupportedError,
+  final IrCallable? iteratorConstructor,
   final FunctionTarget Function(ClassType)? allocate,
 }) {
   static final _uri = Uri.parse('dartc:lists');
@@ -16,7 +24,7 @@ final class ListStorage({
     ..initializeDefaultType(.dynamicType);
   final buffer = ClassType(_uri, '_ListData');
   late final ClassType type;
-  late final InstanceField length, data, growable;
+  late final InstanceField length, data, mutability;
   late final FunctionTarget initializer, empty, filled, reserve;
   final _functions = <IrFunction>[];
   final entryPoints = <FunctionTarget>{};
@@ -28,11 +36,11 @@ final class ListStorage({
     type.initializeHierarchy(interfaces: [CoreTypes.listOf(element)]);
     length = InstanceField(type, 'length', .integer);
     data = InstanceField(type, 'data', buffer);
-    growable = InstanceField(type, 'growable', .boolean);
+    mutability = InstanceField(type, 'mutability', .integer);
     initializer = _target('new', .voidType, [
       .integer,
       buffer,
-      .boolean,
+      .integer,
     ], .initializer);
     empty = _target('empty', type, [.boolean], .factory);
     filled = _target('filled', type, [.integer, element, .boolean], .factory);
@@ -53,7 +61,7 @@ final class ListStorage({
       _ => null,
     };
     if (target != null) {
-      if (_functions.isEmpty) _prepare();
+      prepare();
       entryPoints.add(target);
     }
     return target;
@@ -102,12 +110,14 @@ final class ListStorage({
     );
   }
 
-  void _prepare() {
+  /// Defines storage members before native reachability is computed.
+  void prepare() {
+    if (_functions.isNotEmpty) return;
     _allocation =
         allocate?.call(buffer) ??
         (throw UnsupportedError('List storage requires managed allocation.'));
     final init = Block(initializer.parameterTypes);
-    for (final (i, field) in [length, data, growable].indexed) {
+    for (final (i, field) in [length, data, mutability].indexed) {
       init.emit(
         StoreField(field, init.parameters.first, init.parameters[i + 1]),
       );
@@ -130,13 +140,41 @@ final class ListStorage({
       _reserve(),
       _add(),
       _resize(),
+      if (iteratorConstructor != null) _iterator(),
     ]);
+    final elementAt = _target('elementAt', element, [.integer], .method);
+    final at = Block(elementAt.parameterTypes);
+    at.finish(Return(at.emit(DirectCall(read.target, at.parameters))));
+    _functions.add(IrFunction(elementAt, [at]));
     declaration = IrClass(
       type,
-      [length, data, growable],
+      [length, data, mutability],
       constructors: [initializer, empty, filled],
       members: _functions.map((f) => f.target).where((t) => t.kind.isVirtual),
     );
+  }
+
+  IrFunction _iterator() {
+    final target = _target(
+      'iterator',
+      CoreTypes.iteratorOf(element),
+      [],
+      .getter,
+    );
+    final entry = Block(target.parameterTypes);
+    final constructor = iteratorConstructor!.target;
+    entry.finish(
+      Return(
+        entry.emit(
+          Construct(
+            constructor,
+            entry.parameters,
+            instantiatedType: constructor.owner!.instantiate([element]),
+          ),
+        ),
+      ),
+    );
+    return IrFunction(target, [entry]);
   }
 
   late final _newBuffer = FunctionTarget(_uri, 'buffer', buffer, [.integer]);
@@ -194,10 +232,18 @@ final class ListStorage({
       );
       current = valid;
     }
-    final create = current;
+    final create = Block([.integer]);
+    blocks.add(create);
+    current.finish(
+      Branch(
+        entry.parameters.last,
+        Jump(create, [_int(ListMutability.growable.index)]),
+        Jump(create, [_int(ListMutability.fixed.index)]),
+      ),
+    );
     final storage = create.emit(DirectCall(_newBuffer, [count]));
     final list = create.emit(
-      Construct(initializer, [count, storage, entry.parameters.last]),
+      Construct(initializer, [count, storage, create.parameters.single]),
     );
     if (fill) {
       final loop = Block([.integer]), write = Block(), done = Block();
@@ -226,10 +272,11 @@ final class ListStorage({
         access = Block(),
         failed = Block();
     final list = entry.parameters[0], index = entry.parameters[1];
-    final count = entry.emit(LoadField(length, list));
     final blocks = [entry, upper, access, failed];
-    entry.finish(
-      Branch(_op(entry, .lessThan, index, _int(0)), Jump(failed), Jump(upper)),
+    final check = write ? _modifiable(entry, list, blocks) : entry;
+    final count = check.emit(LoadField(length, list));
+    check.finish(
+      Branch(_op(check, .lessThan, index, _int(0)), Jump(failed), Jump(upper)),
     );
     upper.finish(
       Branch(_op(upper, .lessThan, index, count), Jump(access), Jump(failed)),
@@ -256,17 +303,35 @@ final class ListStorage({
     return IrFunction(target, blocks);
   }
 
-  Block _growable(Block entry, Value list, List<Block> blocks) {
+  Block _modifiable(
+    Block entry,
+    Value list,
+    List<Block> blocks, {
+    bool resizing = false,
+  }) {
     final valid = Block(), failed = Block();
     blocks.addAll([valid, failed]);
     entry.finish(
-      Branch(entry.emit(LoadField(growable, list)), Jump(valid), Jump(failed)),
+      Branch(
+        _op(
+          entry,
+          .greaterOrEqual,
+          entry.emit(LoadField(mutability, list)),
+          _int(
+            (resizing ? ListMutability.growable : ListMutability.fixed).index,
+          ),
+        ),
+        Jump(valid),
+        Jump(failed),
+      ),
     );
     failed.finish(
       Throw(
         _error(failed, unsupportedError, [
-          const Constant.string(
-            'Cannot change the length of a fixed-length list',
+          Constant.string(
+            resizing
+                ? 'Cannot change the length of a fixed-length list'
+                : 'Cannot modify an unmodifiable list',
           ),
         ]),
       ),
@@ -346,7 +411,7 @@ final class ListStorage({
     final target = _target('add', .voidType, [element], .method);
     final entry = Block(target.parameterTypes), blocks = [entry];
     final [list, value] = entry.parameters;
-    final write = _growable(entry, list, blocks);
+    final write = _modifiable(entry, list, blocks, resizing: true);
     final count = write.emit(LoadField(length, list));
     final next = _op(write, .add, count, _int(1));
     write.emit(DirectCall(reserve, [list, next]));
@@ -360,7 +425,7 @@ final class ListStorage({
     final target = _target('length', .voidType, [.integer], .setter);
     final entry = Block(target.parameterTypes), blocks = [entry];
     final [list, count] = entry.parameters;
-    final check = _growable(entry, list, blocks),
+    final check = _modifiable(entry, list, blocks, resizing: true),
         valid = Block(),
         failed = Block();
     check.finish(

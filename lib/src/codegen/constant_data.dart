@@ -5,6 +5,7 @@ import 'package:dartc/layout.dart';
 import 'package:dartc/object.dart';
 
 import 'program_layout.dart';
+import 'list_storage.dart';
 
 /// Writes canonical constant objects and their concrete type descriptors.
 final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
@@ -29,11 +30,19 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     if (_constants[key] case final symbol?) return symbol;
     final ClassStorage? storage;
     final ObjectLayout layout;
+    final list =
+        value is SequenceConstant &&
+            (value.type as ClassType).declaration == CoreTypes.list
+        ? value
+        : null;
     final carrier = value is FunctionConstant
         ? layouts.closures.constants[value.structuralKey]!
         : null;
     if (carrier != null) {
       storage = layouts.storageOf(carrier.type);
+      layout = storage.layout;
+    } else if (list != null) {
+      storage = layouts.storageOf(layouts.lists.type);
       layout = storage.layout;
     } else if (value is ObjectConstant) {
       storage = layouts.storageOf(value.type as ClassType);
@@ -66,24 +75,27 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     final size = layout.size + payloadWords * 8;
     final symbol = _reserve('constant', size ~/ 8);
     _constants[key] = symbol;
-    _words[(offset + ObjectLayout.sizeOffset) ~/ 8] = size;
-    _words[(offset + ObjectLayout.identityHashOffset) ~/ 8] =
-        ((symbol + 1) * 0x9e3779b9) & 0x3fffffff;
-    relocations.add(
-      .address(
-        1,
-        offset + ObjectLayout.descriptorOffset,
-        _type(carrier?.type ?? value.type as ClassType, layout),
-      ),
-    );
-    relocations.add(
-      .address(
-        1,
-        offset + ObjectLayout.typeOffset,
-        addressOf(layouts.types.constant(carrier?.signature ?? value.type)),
-      ),
-    );
-    if (carrier != null) {
+    final type =
+        carrier?.type ??
+        (list == null
+            ? value.type as ClassType
+            : layouts.lists.type.instantiate(
+                (list.type as ClassType).typeArguments,
+              ));
+    _header(symbol, offset, type, layout, size, carrier?.signature ?? type);
+    if (list != null) {
+      _words[(offset + layouts.fieldOffset(layouts.lists.mutability)) ~/ 8] =
+          ListMutability.immutable.index;
+      _words[(offset + layouts.fieldOffset(layouts.lists.length)) ~/ 8] =
+          list.elements.length;
+      relocations.add(
+        .address(
+          1,
+          offset + layouts.fieldOffset(layouts.lists.data),
+          _listData(list.elements),
+        ),
+      );
+    } else if (carrier != null) {
       _write(
         Constant.integer(carrier.tag),
         .integer,
@@ -106,6 +118,40 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
           offset + layout.offsetOf(i),
         );
       }
+    }
+    return symbol;
+  }
+
+  void _header(
+    int symbol,
+    int offset,
+    ClassType type,
+    ObjectLayout layout,
+    int size,
+    ValueType runtimeType,
+  ) {
+    _words[(offset + ObjectLayout.sizeOffset) ~/ 8] = size;
+    _words[(offset + ObjectLayout.identityHashOffset) ~/ 8] =
+        ((symbol + 1) * 0x9e3779b9) & 0x3fffffff;
+    relocations.add(
+      .address(1, offset + ObjectLayout.descriptorOffset, _type(type, layout)),
+    );
+    relocations.add(
+      .address(
+        1,
+        offset + ObjectLayout.typeOffset,
+        addressOf(layouts.types.constant(runtimeType)),
+      ),
+    );
+  }
+
+  int _listData(List<Constant> elements) {
+    final type = layouts.lists.buffer, layout = layouts.storageOf(type).layout;
+    final offset = _words.length * 8, size = layout.size + elements.length * 8;
+    final symbol = _reserve('list-data', size ~/ 8);
+    _header(symbol, offset, type, layout, size, type);
+    for (final (i, element) in elements.indexed) {
+      _write(element, .object.nullable, offset + layout.size + i * 8);
     }
     return symbol;
   }

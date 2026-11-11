@@ -6,6 +6,34 @@ import '../../support/native_assets.dart';
 
 final class Lists() {
   final _library = NativeAssets(Target.host()).open('compiler/lists');
+  late final constantOnly = _library
+      .lookupFunction<Int64 Function(), int Function()>('listConstantOnly');
+  late final iteratorProtocol = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'iteratorProtocol',
+      );
+  late final iteration = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'listIteration',
+      );
+  late final iteratorMutation = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'listIteratorMutation',
+      );
+  late final iteratorState = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'listIteratorState',
+      );
+  late final iteratorFinish = _library
+      .lookupFunction<Int64 Function(), int Function()>('listIteratorFinish');
+  late final constants = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'listConstants',
+      );
+  late final constMutation = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'listConstMutation',
+      );
   late final values = _library
       .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
         'listValues',

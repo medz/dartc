@@ -137,7 +137,23 @@ base class ScalarCodeGenerator<R extends Object>(
         indexError: strings.indexError,
         rangeError: strings.rangeError,
         unsupportedError: constructor(.unsupportedError),
+        iteratorConstructor: constructor(
+          program.classes
+              .where(
+                (c) =>
+                    c.type.library == Uri.parse('dart:_internal') &&
+                    c.type.name == 'ListIterator',
+              )
+              .firstOrNull
+              ?.type,
+        ),
       );
+      final constantLists = bodies.any(
+        (body) => body.sequenceConstants.any(
+          (value) => (value.type as ClassType).declaration == CoreTypes.list,
+        ),
+      );
+      if (constantLists) lists.prepare();
       final globals = GlobalStorage(
         bodies,
         lateError: lateErrorType == null ? null : constructor(lateErrorType),
@@ -194,11 +210,14 @@ base class ScalarCodeGenerator<R extends Object>(
             if (!globals.isEmpty) IrExternal(globals.address),
           ],
         );
-        final required = expanded.reachableFrom([
-          ...sourceDefinitions,
-          for (final function in helpers) function.target,
-          ...lists.entryPoints,
-        ]);
+        final required = expanded.reachableFrom(
+          [
+            ...sourceDefinitions,
+            for (final function in helpers) function.target,
+            ...lists.entryPoints,
+          ],
+          instantiatedTypes: [if (constantLists) lists.type],
+        );
         final discovered = required
             .where(
               (target) =>
@@ -215,7 +234,11 @@ base class ScalarCodeGenerator<R extends Object>(
           ..clear()
           ..addAll(required);
       }
-      final members = MemberCalls(program, selected);
+      final members = MemberCalls(
+        program,
+        selected,
+        instantiatedTypes: [if (constantLists) lists.type],
+      );
       final closures = ClosureStorage(
         selected.map(program.implementationOf).whereType<IrCallable>(),
         boundMethods: members.tearOffTargets,

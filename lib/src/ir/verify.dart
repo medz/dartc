@@ -16,6 +16,7 @@ typedef FunctionReferences = ({
   Set<InstanceField> fields,
   Set<ObjectConstant> objects,
   Set<FunctionConstant> functionConstants,
+  Set<SequenceConstant> sequenceConstants,
   Set<ClassType> classes,
   Set<DeferredImport> deferredImports,
 });
@@ -39,6 +40,7 @@ FunctionReferences verifyCallable(
   Set<InstanceField>? fields;
   Set<ObjectConstant>? objects;
   Set<FunctionConstant>? functionConstants;
+  Set<SequenceConstant>? sequenceConstants;
   Set<ClassType>? classes;
   Set<DeferredImport>? deferredImports;
   final scope = <TypeParameterType>{};
@@ -65,6 +67,7 @@ FunctionReferences verifyCallable(
       fields: _snapshot(fields),
       objects: _snapshot(objects),
       functionConstants: _snapshot(functionConstants),
+      sequenceConstants: _snapshot(sequenceConstants),
       classes: _snapshot(classes),
       deferredImports: _snapshot(deferredImports),
     );
@@ -98,6 +101,9 @@ FunctionReferences verifyCallable(
       (instantiatedClasses ??= {}).add(ValueType.string);
     }
     if (value is TypeConstant) checkTypeScope(value.representedType);
+    if (value is SequenceConstant) {
+      (sequenceConstants ??= {}).add(value);
+    }
     if (value case FunctionConstant(
       target: final callee,
       :final ownerType,

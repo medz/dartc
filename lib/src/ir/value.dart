@@ -411,6 +411,18 @@ sealed class Instruction(super.type) extends Value {
   /// The virtual member invoked by an operation with a built-in spelling.
   ({ValueType receiver, MemberSelector selector})? get implicitMember =>
       switch (this) {
+        GetIterator(:final iterable) => (
+          receiver: iterable.type,
+          selector: (kind: .getter, name: 'iterator', privateLibrary: null),
+        ),
+        IteratorMoveNext(:final iterator) => (
+          receiver: iterator.type,
+          selector: (kind: .method, name: 'moveNext', privateLibrary: null),
+        ),
+        IteratorCurrent(:final iterator) => (
+          receiver: iterator.type,
+          selector: (kind: .getter, name: 'current', privateLibrary: null),
+        ),
         CollectionLength(:final collection) => (
           receiver: collection.type,
           selector: (kind: .getter, name: 'length', privateLibrary: null),

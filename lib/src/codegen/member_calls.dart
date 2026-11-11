@@ -3,9 +3,11 @@ import 'package:dartc/ir.dart';
 /// Resolves native member entries for the concrete classes in a compilation.
 final class MemberCalls(
   final IrProgram program,
-  final Set<FunctionTarget> definitions,
-) {
+  final Set<FunctionTarget> definitions, {
+  Iterable<ClassType> instantiatedTypes = const [],
+}) {
   final _instances = {
+    ...instantiatedTypes,
     for (final target in definitions)
       ...?program.implementationOf(target)?.instantiatedClasses,
   };

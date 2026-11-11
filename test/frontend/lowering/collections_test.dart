@@ -117,7 +117,10 @@ void main() {
       final program = await AnalysisSession([
         'test/frontend/lowering/fixtures/$file',
       ]).use((input) async => (await Lowering().lower(input)).program);
-      final result = (program.functions.single.entry.end as Return).value;
+      final function = program.functions.singleWhere(
+        (function) => function.target.name == 'unsupportedCollection',
+      );
+      final result = (function.entry.end as Return).value;
       expect(result, anyOf(isA<SequenceConstant>(), isA<MapConstant>()));
       expect(result!.type, type);
     });

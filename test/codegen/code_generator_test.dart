@@ -14,30 +14,42 @@ import 'fixtures/aliases.dart';
 
 void main() {
   test(
-    'List construction omits unused factories and virtual members',
+    'List constants and construction select only required native bodies',
     () async {
-      final lowered = await AnalysisSession([
-        'test/compiler/fixtures/lists_overflow.dart',
-      ]).use((input) => Lowering().lower(input));
-      for (final CodeGenerator generator in [
-        Arm64CodeGenerator(const Target(.macos, .arm64)),
-        X64CodeGenerator(const Target(.linux, .x64)),
+      for (final (fixture, root, required) in [
+        ('lists_overflow', 'main', 'filled'),
+        ('lists', 'listConstantOnly', '[]'),
       ]) {
-        final module = generator.generate(
-          lowered.program,
-          definitions: lowered.program.reachableFrom([lowered.entryPoint!]),
-        );
-        final names = module.symbols.map((symbol) => symbol.name);
-        expect(names, contains('filled'));
-        for (final name in [
-          'empty',
-          'add',
-          '[]',
-          '[]=',
-          '_reserve',
-          'length',
+        final lowered = await AnalysisSession([
+          'test/compiler/fixtures/$fixture.dart',
+        ]).use((input) => Lowering().lower(input));
+        final entry = lowered.program.functions
+            .firstWhere((body) => body.target.name == root)
+            .target;
+        for (final CodeGenerator generator in [
+          Arm64CodeGenerator(const Target(.macos, .arm64)),
+          X64CodeGenerator(const Target(.linux, .x64)),
         ]) {
-          expect(names, isNot(contains(name)), reason: name);
+          final module = generator.generate(
+            lowered.program,
+            definitions: lowered.program.reachableFrom([entry]),
+          );
+          final names = module.symbols.map((symbol) => symbol.name);
+          expect(names, contains(required));
+          for (final name in [
+            if (required != 'filled') 'filled',
+            'empty',
+            'add',
+            if (required != '[]') '[]',
+            '[]=',
+            '_reserve',
+            'length',
+            'elementAt',
+            'iterator',
+            'moveNext',
+          ]) {
+            expect(names, isNot(contains(name)), reason: name);
+          }
         }
       }
     },

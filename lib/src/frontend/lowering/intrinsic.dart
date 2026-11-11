@@ -3,6 +3,21 @@ import 'package:dartc/ir.dart';
 
 import 'ffi.dart';
 
+/// Includes the SDK declarations consumed by built-in List bodies.
+void requireListSupport(
+  LibraryElement library,
+  void Function(InterfaceElement) requireClass,
+) {
+  final core = library.typeProvider.objectElement.library;
+  for (final name in ['IndexError', 'RangeError', 'UnsupportedError']) {
+    requireClass(core.getClass(name)!);
+  }
+  final internal = core.fragments
+      .expand((fragment) => fragment.importedLibraries)
+      .firstWhere((library) => library.uri == Uri.parse('dart:_internal'));
+  requireClass(internal.getClass('ListIterator')!);
+}
+
 /// Supplies bodies and SDK dependencies for compiler-owned declarations.
 Value Function(FunctionTarget, Block)? intrinsicFor(
   ExecutableElement element,
@@ -25,9 +40,7 @@ Value Function(FunctionTarget, Block)? intrinsicFor(
     final list = element.library.getClass('List')!;
     if (element == list.getNamedConstructor('filled') ||
         element == list.getNamedConstructor('empty')) {
-      for (final name in ['IndexError', 'RangeError', 'UnsupportedError']) {
-        requireClass(element.library.getClass(name)!);
-      }
+      requireListSupport(element.library, requireClass);
       return (target, entry) => entry.emit(
         element == list.getNamedConstructor('empty')
             ? NewCollection(
