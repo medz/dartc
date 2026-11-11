@@ -90,7 +90,8 @@ Value? lowerBinary(
   if (member is MethodElement &&
       (isClassLike(member.enclosingElement) ||
           isExtensionOwner(member.enclosingElement)) &&
-      !member.library.isDartCore) {
+      (!member.library.isDartCore ||
+          !ValueType.number.accepts(left.type) && left.type != .string)) {
     return context.callPositionalMember(
       member,
       left,

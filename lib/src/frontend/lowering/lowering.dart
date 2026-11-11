@@ -19,10 +19,10 @@ final class Lowering({final bool enableAssertions = false}) {
   /// assertion conditions and raise assertion errors on failures.
   ///
   /// Calls to the same declaration share a target throughout the batch.
-  /// Referenced SDK top-level functions, static methods and generative classes
+  /// Referenced SDK top-level functions, static methods and classes
   /// are resolved and checked in the same session, then lowered normally.
-  /// SDK factory bodies remain imports. Numeric error paths also include their
-  /// SDK error classes and superclasses.
+  /// External SDK entries still require target implementations. Numeric error
+  /// paths also include their SDK error classes and superclasses.
   /// Keep the owning analysis session open until the returned future completes.
   /// Constants appear as operands at their uses. Throws [FormatException] for
   /// dependency static errors and [UnsupportedError] for missing translations.

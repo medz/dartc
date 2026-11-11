@@ -305,6 +305,19 @@ final class FunctionRepresentation(
           _operands[instruction] = block.parameters;
           continue;
         }
+        if (layouts.maps.callFor(instruction) case final target?) {
+          invocations[instruction] = target;
+          _operands[instruction] = [
+            _reify(
+              layouts.maps.type.instantiate(
+                (instruction.type as ClassType).typeArguments,
+              ),
+              body,
+            ),
+          ];
+          body.add(instruction);
+          continue;
+        }
         if (layouts.lists.callFor(instruction) case final target?) {
           final element = instruction is CollectionSpread
               ? CoreTypes.view(
@@ -1023,6 +1036,16 @@ final class FunctionRepresentation(
                 key,
                 value,
               ),
+              MapPut(:final map, :final key, :final value) => MapPut(
+                map,
+                key,
+                value,
+              ),
+              MapContainsKey(:final map, :final key) => MapContainsKey(
+                map,
+                key,
+              ),
+              MapEntries(:final map) => MapEntries(map),
               ListSublist(:final list, :final start, :final end) => ListSublist(
                 list,
                 start,

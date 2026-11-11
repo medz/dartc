@@ -88,4 +88,11 @@ void main() {
       fixture.compare('index', [value, length], () => sdk.index(value, length));
     }
   });
+  test('non-numeric core operators retain their resolved member call', () {
+    final function = fixture.program.functions.singleWhere(
+      (f) => f.target.name == 'subtractDuration',
+    );
+    expect(function.virtualMembers.single.owner!.name, 'Duration');
+    expect(function.virtualMembers.single.name, '-');
+  });
 }

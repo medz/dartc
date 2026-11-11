@@ -38,6 +38,25 @@ void main() {
     expect(run('mapNullOrder'), sdk.mapNullOrder());
     expect(run('equalityKeys'), sdk.equalityKeys());
   });
+  test('redirecting SDK factories retain storage and initializer bodies', () {
+    final entry = program.classes.singleWhere(
+      (c) => c.type == CoreTypes.mapEntry,
+    );
+    expect(entry.fields, [CoreTypes.mapEntryKey, CoreTypes.mapEntryValue]);
+    expect(
+      program.implementationOf(entry.constructors['_']!),
+      isA<IrFunction>(),
+    );
+    final mapped = program.classes.singleWhere(
+      (c) =>
+          c.type.library == Uri.parse('dart:_internal') &&
+          c.type.name == 'MappedIterable',
+    );
+    expect(
+      program.implementationOf(mapped.constructors['new']!),
+      isA<IrFunction>(),
+    );
+  });
   test('iterator loops, pattern headers and per-iteration captures', () {
     expect(run('loopControl'), sdk.loopControl());
     expect(run('capturedLoop'), sdk.capturedLoop());

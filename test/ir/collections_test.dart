@@ -68,6 +68,24 @@ void main() {
       throwsArgumentError,
     );
   });
+  test('map operations expose dispatch and callback effects', () {
+    final map = NewCollection(CoreTypes.mapOf(.integer, .string));
+    const key = Constant.integer(1), value = Constant.string('v');
+    for (final (operation, name, kind) in <(Instruction, String, FunctionKind)>[
+      (MapPut(map, key, value), '[]=', .method),
+      (MapContainsKey(map, key), 'containsKey', .method),
+      (MapEntries(map), 'entries', .getter),
+    ]) {
+      expect(operation.implicitMember, (
+        receiver: map.type,
+        selector: (kind: kind, name: name, privateLibrary: null),
+      ));
+      expect(
+        operation.effects,
+        containsAll([Effect.callsUserCode, Effect.allocates, Effect.mayThrow]),
+      );
+    }
+  });
   test(
     'collection instructions reject storage and invalid receiver protocols',
     () {

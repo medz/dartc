@@ -34,6 +34,8 @@ int throughValue(int value) {
 
 void ignoredFuture() => unawaited(null);
 
+Duration subtractDuration(Duration left, Duration right) => left - right;
+
 int checkNotNegative(int value) => value - 5;
 
 int local(int value) => checkNotNegative(value);

@@ -19,6 +19,8 @@ void main() {
     ('enumStrings', sdk.enumStrings),
     ('overrideTearOffIdentity', sdk.overrideTearOffIdentity),
     ('symbolTearOffIdentity', sdk.symbolTearOffIdentity),
+    ('sdkStorageString', sdk.sdkStorageString),
+    ('sdkStoragePattern', sdk.sdkStoragePattern),
   ]) {
     test('$name matches the Dart SDK', () {
       fixture.compare(name, [], expected);
@@ -31,8 +33,6 @@ void main() {
     'recordString',
     'listString',
     'errorString',
-    'sdkStorageString',
-    'sdkStoragePattern',
   ]) {
     test('$name rejects an unmodeled representation', () {
       final entry = fixture.program.functions.singleWhere(

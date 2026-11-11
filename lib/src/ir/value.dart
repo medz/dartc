@@ -435,6 +435,18 @@ sealed class Instruction(super.type) extends Value {
           receiver: collection.type,
           selector: (kind: .method, name: '[]=', privateLibrary: null),
         ),
+        MapPut(:final map) => (
+          receiver: map.type,
+          selector: (kind: .method, name: '[]=', privateLibrary: null),
+        ),
+        MapContainsKey(:final map) => (
+          receiver: map.type,
+          selector: (kind: .method, name: 'containsKey', privateLibrary: null),
+        ),
+        MapEntries(:final map) => (
+          receiver: map.type,
+          selector: (kind: .getter, name: 'entries', privateLibrary: null),
+        ),
         ListSublist(:final list) => (
           receiver: list.type,
           selector: (kind: .method, name: 'sublist', privateLibrary: null),

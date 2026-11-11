@@ -11,6 +11,7 @@ import 'type_relations.dart';
 import 'pointer_storage.dart';
 import 'string_storage.dart';
 import 'list_storage.dart';
+import 'map_storage.dart';
 
 enum TypeTestKind() {
   constantTrue,
@@ -28,6 +29,7 @@ final class ProgramLayout(
   ClosureStorage? closureStorage,
   StringStorage? stringStorage,
   ListStorage? listStorage,
+  MapStorage? mapStorage,
 }) {
   final instances = instanceStorage ?? InstanceStorage([]);
   final closures = closureStorage ?? ClosureStorage([]);
@@ -35,6 +37,7 @@ final class ProgramLayout(
   final pointers = PointerStorage();
   final strings = stringStorage ?? StringStorage();
   final lists = listStorage ?? ListStorage();
+  final maps = mapStorage ?? MapStorage();
   late final TypeRelations relations;
   final _classes = {
     for (final declaration in classes) declaration.type: declaration,
@@ -45,6 +48,9 @@ final class ProgramLayout(
     _classes[FfiTypes.pointer] = pointers.declaration;
     _classes[ValueType.string] = strings.declaration;
     for (final declaration in lists.classes) {
+      _classes[declaration.type] = declaration;
+    }
+    for (final declaration in maps.classes) {
       _classes[declaration.type] = declaration;
     }
     for (final declaration in types.classes) {
@@ -149,7 +155,7 @@ final class ProgramLayout(
             field,
       ],
       this,
-      tracesPayload: declaration == lists.buffer,
+      tracesPayload: declaration == lists.buffer || declaration == maps.buffer,
       storesErrorTrace:
           declaration == ValueType.error ||
           switch (declaration.superclass) {

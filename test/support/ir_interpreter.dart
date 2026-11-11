@@ -273,14 +273,12 @@ final class IrInterpreter(
         return _GuestFuture(CoreTypes.futureOf(element), carrier);
       }
     }
-    if (program.implementationOf(target) case final IrFunction body) {
-      return run(body, arguments, environment);
-    }
     if (target.owner == ValueType.object &&
         target.kind == .getter &&
         target.name == 'runtimeType') {
       return _typeValue(_runtimeValueType(arguments.single));
     }
+    // Keep access on the same canonical storage used by MakeInvocation.
     if (_isInvocationFactory(target)) {
       return target.name == 'method'
           ? _invocation(arguments[0], null, arguments[1], arguments[2], 0)
@@ -329,6 +327,9 @@ final class IrInterpreter(
           return flag('isGetter') || flag('isSetter');
         }
       }
+    }
+    if (program.implementationOf(target) case final IrFunction body) {
+      return run(body, arguments, environment);
     }
     if (target.library.toString() == 'dart:core' &&
         target.name == 'identical') {

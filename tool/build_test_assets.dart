@@ -171,6 +171,7 @@ Future<void> main(List<String> args) async {
       'pointer_values',
       'strings',
       'lists',
+      'maps',
       'doubles',
       'mixed_numeric',
       'math',

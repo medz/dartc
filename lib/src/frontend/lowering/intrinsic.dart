@@ -26,6 +26,21 @@ void requireListSupport(
   requireClass(collection.getClass('ListBase')!);
 }
 
+/// Includes ordinary Map algorithms and the key iteration contract.
+void requireMapSupport(
+  LibraryElement library,
+  void Function(InterfaceElement) requireClass,
+) {
+  final core = library.typeProvider.objectElement.library;
+  requireClass(core.getClass('ConcurrentModificationError')!);
+  requireClass(core.getClass('Iterable')!);
+  final collection = core.fragments
+      .expand((fragment) => fragment.importedLibraries)
+      .firstWhere((library) => library.uri == Uri.parse('dart:collection'));
+  requireClass(collection.getClass('MapBase')!);
+  requireClass(collection.getClass('LinkedHashMap')!);
+}
+
 /// Supplies bodies and SDK dependencies for compiler-owned declarations.
 Value Function(FunctionTarget, Block)? intrinsicFor(
   ExecutableElement element,
@@ -46,6 +61,11 @@ Value Function(FunctionTarget, Block)? intrinsicFor(
     )!;
   }
   if (element.library.isDartCore) {
+    if (element == element.library.getClass('Map')!.unnamedConstructor) {
+      requireMapSupport(element.library, requireClass);
+      return (target, entry) =>
+          entry.emit(NewCollection(target.returnType as ClassType));
+    }
     final list = element.library.getClass('List')!;
     if (element == list.getNamedConstructor('of') ||
         element == list.getNamedConstructor('from')) {

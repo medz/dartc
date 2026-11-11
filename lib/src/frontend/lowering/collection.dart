@@ -22,6 +22,11 @@ Value? lowerCollection(
       context.unit.libraryElement,
       context.bindings.requireSdkClass,
     );
+  } else if (type.declaration == CoreTypes.map) {
+    requireMapSupport(
+      context.unit.libraryElement,
+      context.bindings.requireSdkClass,
+    );
   }
   final result = context.emit(NewCollection(type));
   final elements = switch (literal) {

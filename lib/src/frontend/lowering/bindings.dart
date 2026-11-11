@@ -868,8 +868,6 @@ final class Bindings({
     if (enclosing == null) {
       _targets[element] = function;
       if (element is ConstructorElement &&
-          !element.isFactory &&
-          redirects == null &&
           element.library.isInSdk &&
           !element.isExternal) {
         requireSdkClass(element.enclosingElement);

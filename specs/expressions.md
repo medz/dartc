@@ -83,7 +83,15 @@ List.addAll 支持普通调用、方法提取及用户重写，先检查实际�
 
 `sublist` 支持省略或显式 null 的 end、空范围和边界错误。内置 List、const/固定长度列表与 String.codeUnits 的切片返回独立的可增长 List，保留实际元素类型和共享对象；用户重写和方法值使用选中实现的默认参数。列表模式中的命名 rest 同样复制相应元素。依据为 [List.sublist](https://api.dart.dev/stable/3.13.7/dart-core/List/sublist.html)，验证见[源码对照](../test/frontend/lowering/list_copies_test.dart)与[原生 List 用例](../test/compiler/lists_test.dart)。
 
-其他 List 构造器和完整集合 API、Set/Map 存储及 typed_data 的原生实现仍有缺口；上表的 IR 范围不等于这些行为已经原生执行。
+其他 List 构造器和完整集合 API、Set 存储及 typed_data 的原生实现仍有缺口；上表的 IR 范围不等于这些行为已经原生执行。
+
+## 原生 Map
+
+支持可变 Map 字面量和 `Map()`，结果满足 `LinkedHashMap<K, V>` 的类型关系。索引读写、containsKey、length、remove、clear 和 keys 保留插入顺序；更新相等键的值保留原键对象与位置，删除后重新插入移到末尾。不存在的键返回 null，containsKey 可区分缺失键与值为 null 的条目。null 键、整数与相等浮点数的键查询遵循 Dart 相等和哈希契约，clear 不要求键与自身相等。依据为 [Map](https://api.dart.dev/stable/3.13.7/dart-core/Map-class.html) 和 [LinkedHashMap](https://api.dart.dev/stable/3.13.7/dart-collection/LinkedHashMap-class.html)。
+
+协变视图的写入按实际键和值类型检查；类型错误、hashCode 或 == 抛错时不执行该次条目写入，异常保留 catch/finally。keys 是实时视图，迭代器检查新增、删除及清空等结构修改；仅替换已有值不改变键的迭代顺序。支持 values、entries、forEach、addAll、putIfAbsent 和 update 的普通库行为，以及用户 Map 重写、方法值和已有 Map 模式。键、值和迭代状态在移动回收及跨原生入口保存后保持有效，用户哈希和相等回调中也可分配。见[原生 Map 验证](../test/compiler/maps_test.dart)和 [IR 操作契约](../test/ir/collections_test.dart)。
+
+const Map、字面量 Map spread、其余 Map 工厂、自定义哈希/相等构造及完整集合 API 仍是原生实现缺口。
 
 ## 数值比较与 SDK 差异
 

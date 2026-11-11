@@ -117,11 +117,6 @@ IrClass lowerClass(
     final target = bindings.target(ctor, unit, site);
     constructors.add(target);
     if (target.redirect != null) return;
-    if (ctor.isFactory && element.library.isInSdk) {
-      // shortcut: SDK factories stay imported until their dependencies are supported.
-      functions.add(IrExternal(target, defaults: bindings.defaults(target)));
-      return;
-    }
     FunctionLowering.append(
       functions,
       unit,

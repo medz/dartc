@@ -143,6 +143,7 @@ final class ProgramSelection(
         ...layouts.closures.classes,
         layouts.strings.declaration,
         ...layouts.lists.classes,
+        ...layouts.maps.classes,
         ...layouts.types.classes,
         if (functions.containsKey(layouts.pointers.initializer))
           layouts.pointers.declaration,
@@ -156,6 +157,7 @@ final class ProgramSelection(
         for (final declaration in [
           layouts.strings.declaration,
           ...layouts.lists.classes,
+          ...layouts.maps.classes,
         ])
           for (final target in {
             ...declaration.members.values,
