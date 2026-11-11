@@ -7,11 +7,65 @@ import 'package:dartc/src/codegen/instance_storage.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
 import 'package:dartc/src/codegen/member_calls.dart';
+import 'package:dartc/src/codegen/storage_access.dart';
+import 'package:dartc/src/codegen/closure_storage.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
 void main() {
   final uri = Uri.parse('memory:instance-storage');
+  test(
+    'late cell copies preserve raw binding state without reading the value',
+    () {
+      final target = FunctionTarget(uri, 'copy', .voidType, []);
+      final type = CellType(.integer, isLate: true);
+      final entry = Block([]), done = Block([type]), failed = Block();
+      final cell = NewCell(type, null);
+      entry.finish(
+        Invoke(cell, onReturn: Jump(done, [cell]), onThrow: Jump(failed)),
+      );
+      final copy = done.emit(CopyCell(done.parameters.single));
+      done.finish(const Return());
+      failed.finish(const Return());
+      final function = IrFunction(target, [entry, done, failed]);
+      final closures = ClosureStorage([
+        function,
+      ], lateFailure: FunctionTarget(uri, 'fail', .never, [.string]));
+      final layouts = ProgramLayout(closures.classes, closureStorage: closures);
+      final body = FunctionRepresentation(
+        function,
+        layouts,
+        CheckedCasts(),
+        MemberCalls(IrProgram([], []), {}),
+        HeapPlan(FrameLookup()),
+      );
+      final shape = closures.cell(cell.type as CellType);
+      final reads = body.inputsOf(copy).whereType<StorageRead>().toList();
+      expect(reads.map((read) => read.field), [
+        shape.value,
+        shape.lazy!.bound,
+        shape.lazy!.thunk,
+      ]);
+      expect(
+        reads.every((read) => identical(read.receiver, done.parameters.single)),
+        isTrue,
+      );
+      expect(body.invocations.values, isNot(contains(shape.lazy!.initialize)));
+      expect(
+        layouts.storageOf(shape.type).layout.referenceOffsets,
+        contains(layouts.fieldOffset(shape.lazy!.thunk)),
+      );
+      expect(
+        body.ends[entry],
+        isA<Invoke>().having(
+          (end) => end.onThrow.target,
+          'handler',
+          same(failed),
+        ),
+      );
+    },
+  );
+
   test('late aliases share one value slot and inherited binding identity', () {
     final owner = ClassType(uri, 'Base');
     final child = ClassType(uri, 'Child', superclass: owner);
@@ -110,7 +164,7 @@ void main() {
       final check = operations.whereType<TypeCast>().singleWhere(
         (cast) => cast.type == t,
       );
-      final bound = operations.whereType<LoadField>().singleWhere(
+      final bound = operations.whereType<StorageRead>().singleWhere(
         (load) => load.field == storage.slots(field).$2,
       );
       expect(operations.indexOf(check), lessThan(operations.indexOf(bound)));

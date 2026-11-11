@@ -8,6 +8,54 @@ void main() {
     for (final arch in Architecture.values) {
       final platform = Target(os, arch);
       test(
+        '$platform rejects unsupported pointer boxing in function results',
+        () {
+          final uri = Uri.parse('memory:pointer-result');
+          final pointer = FfiTypes.pointer.instantiate([FfiTypes.int64]);
+          final source = FunctionTarget(uri, 'pointer', pointer, []);
+          final sourceEntry = Block();
+          sourceEntry.finish(
+            Return(
+              sourceEntry.emit(
+                PointerFromAddress(const Constant.integer(16), pointer),
+              ),
+            ),
+          );
+          final caller = FunctionTarget(uri, 'widen', .object.nullable, []);
+          final entry = Block();
+          final view = entry.emit(
+            TypeView(
+              FunctionConstant(source),
+              FunctionType(.object.nullable, []),
+            ),
+          );
+          entry.finish(Return(entry.emit(FunctionCall(view, []))));
+          final program = IrProgram([], [
+            IrFunction(source, [sourceEntry]),
+            IrFunction(caller, [entry]),
+          ]);
+          final CodeGenerator generator = arch == .arm64
+              ? Arm64CodeGenerator(platform)
+              : X64CodeGenerator(platform);
+          expect(
+            () => generator.generate(
+              program,
+              definitions: program.reachableFrom([caller]),
+            ),
+            throwsA(
+              isA<UnsupportedError>().having(
+                (error) => error.message,
+                'reason',
+                contains(
+                  'Native representation conversion: Pointer<Int64> to Object?',
+                ),
+              ),
+            ),
+          );
+        },
+      );
+
+      test(
         '$platform hashes function constants without managed allocation',
         () {
           final uri = Uri.parse('memory:function-hash');

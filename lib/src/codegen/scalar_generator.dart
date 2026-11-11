@@ -149,6 +149,7 @@ base class ScalarCodeGenerator<R extends Object>(
       final closures = ClosureStorage(
         selected.map(program.implementationOf).whereType<IrCallable>(),
         boundMethods: members.tearOffTargets,
+        lateFailure: instances.failure?.target,
       );
       final layouts = ProgramLayout(
         [

@@ -31,7 +31,7 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 
 `as`、后缀 `!` 及已降为类型转换的隐式检查支持上述具体类型。函数类型参数可用于 `is T`、`is! T`、`is T?` 和 `as T`，也可组成检查所用的泛型类型。成功保留原值，失败抛出 TypeError，可由 `on TypeError` 或 `on Error` 捕获并正常经过 `finally`；转换前的表达式只求值一次。标量转为泛型引用时保留整数和浮点值，成功结果在回收后仍可读取。`as Never` 始终失败，`as Never?` 仅接受 null；`FutureOr<int?>` 的 `!` 在保留静态类型的同时拒绝 null。见[转换、隐式检查与清理顺序对照](../test/compiler/type_checks_test.dart)及[开放类型检查](../test/compiler/type_arguments_test.dart)。
 
-int、double 和 bool 值均可装箱为引用，包括运行时计算的数值；仍被使用的装箱值在调用及回收后保持不变，见[计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)。地址为零的非空 FFI Pointer 值不等于 Dart null；指针的运行时类型为 `Pointer<Never>`，因此元素类型不同的 Pointer 类型测试仍可成功。静态元素类型继续决定 FFI 签名和访存大小。FFI Pointer 与泛型引用的表示转换，以及尚无原生存储的 record 值仍是缺口；支持这些类型作为泛型实参不表示对应值已可原生执行。跨模块托管值传递尚未接通。
+int、double 和 bool 值均可装箱为引用，包括运行时计算的数值；仍被使用的装箱值在调用及回收后保持不变，见[计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)。地址为零的非空 FFI Pointer 值不等于 Dart null；指针的运行时类型为 `Pointer<Never>`，因此元素类型不同的 Pointer 类型测试仍可成功。静态元素类型继续决定 FFI 签名和访存大小。FFI Pointer 与泛型引用的表示转换，以及尚无原生存储的 record 值仍是缺口；指针返回值经 Object? 或开放泛型函数视图调用时仍会拒绝发码，见[函数返回表示边界](../test/codegen/closure_dispatch_test.dart)。支持这些类型作为泛型实参不表示对应值已可原生执行。跨模块托管值传递尚未接通。
 
 泛型实参中的函数子类型检查保留绑定变量的词法作用域、界限、参数逆变和返回值协变。继承类型代入不能捕获嵌套函数的绑定变量；递归界限不能导致无限检查。固定样本包含 `X extends FutureOr<X>` 和 `FunctionProjection<T> extends Box<T Function<U>(U)>`，见[子类型规则验证](../test/codegen/type_relations_test.dart)与[原生行为验证](../test/compiler/type_arguments_test.dart)。macOS ARM64 的 SDK 3.13.7 JIT/AOT 对样本中两项递归界限检查触发 SIGILL，对上述继承投影在嵌套泛型函数中的检查返回 false。按函数子类型与直接超接口规则，投影样本应返回 true；这些样本单独断言规范结果，其余样本继续与 SDK 对照。
 

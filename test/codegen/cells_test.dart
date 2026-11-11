@@ -287,7 +287,7 @@ void main() {
           );
         },
       );
-      test('$target supports cell aliases but rejects late initialization', () {
+      test('$target supports aliases and requires the SDK late error body', () {
         for (final late in [false, true]) {
           final entry = Block(declaration.parameterTypes);
           final cell = entry.emit(
@@ -305,7 +305,13 @@ void main() {
           if (late) {
             expect(
               () => generator.generate(program, definitions: [declaration]),
-              throwsUnsupportedError,
+              throwsA(
+                isA<UnsupportedError>().having(
+                  (error) => error.message,
+                  'reason',
+                  contains('LateError constructor'),
+                ),
+              ),
             );
           } else {
             expect(

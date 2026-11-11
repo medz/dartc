@@ -22,13 +22,13 @@
 
 非捕获、非逃逸、非 `late` 的局部存储支持已表示的标量、原生指针、对象引用及可空类型，包括声明后赋值、分支合流、循环和跨调用保存；非 `late final` 的赋值义务仍由前端静态检查。见[原生行为对照](../test/compiler/control_flow_test.dart)。后端在使用局部栈存储前确认每条到达读取的路径都已写入；循环中新声明的存储不能继承上一次迭代的初始化状态。独立 IR 的不安全读取由[发码契约检查](../test/codegen/cells_test.dart)拒绝。引用槽参与栈根扫描并在调用后重载；[栈根验证](../test/codegen/stack_roots_native_test.dart)覆盖对象引用和 null，[装箱验证](../test/codegen/boxed_values_native_test.dart)及[动态装箱验证](../test/codegen/dynamic_boxes_native_test.dart)覆盖 Object、int? 和 double? 存储的初始化与写入。
 
-顶层变量和类静态变量已支持标量、对象引用、可空类型和 num 的原生持久存储，包括 final、late 和 late final。模块存储跨 native 调用保留，泛型类共享声明槽位。先写跳过初始化，未绑定失败后重试，已经完成的写入不回滚；可变递归初始化以成功的外层结果为准，final 递归初始化在求值后检查绑定并保留内层值。未绑定 late 读取和重复 final 绑定通过 SDK 实际 dart:_internal LateError 类抛出普通 Error，RHS 与类型转换先于重复写检查。诊断字符串按固定 SDK 的 NI/AI/ADI 文本构造；动态错误格式化仍未接通。引用槽参与 GC，跨入口保留对象别名、循环引用和装箱数值；已绑定的 null 与未初始化状态分开。含引用全局槽的模块在同线程同步重入时共享堆并扫描暂停的外层栈帧，其他模块仍使用入口返回即释放的独立堆。持久堆由 dartc 链接的共享库在卸载时释放，独立程序在退出前显式释放，详见[库生命周期](libraries.md#模块清理与卸载)。见[标量验证](../test/compiler/scalar_globals_test.dart)、[托管全局验证](../test/compiler/managed_globals_test.dart)与[分配中的 native 重入](../test/codegen/managed_heap_native_test.dart)。捕获 late、跨线程调用、并发调用和跨模块托管值 ABI 尚未支持。
+顶层变量和类静态变量已支持标量、对象引用、可空类型和 num 的原生持久存储，包括 final、late 和 late final。模块存储跨 native 调用保留，泛型类共享声明槽位。先写跳过初始化，未绑定失败后重试，已经完成的写入不回滚；可变递归初始化以成功的外层结果为准，final 递归初始化在求值后检查绑定并保留内层值。未绑定 late 读取和重复 final 绑定通过 SDK 实际 dart:_internal LateError 类抛出普通 Error，RHS 与类型转换先于重复写检查。诊断字符串按固定 SDK 的 NI/AI/ADI 文本构造；动态错误格式化仍未接通。引用槽参与 GC，跨入口保留对象别名、循环引用和装箱数值；已绑定的 null 与未初始化状态分开。含引用全局槽的模块在同线程同步重入时共享堆并扫描暂停的外层栈帧，其他模块仍使用入口返回即释放的独立堆。持久堆由 dartc 链接的共享库在卸载时释放，独立程序在退出前显式释放，详见[库生命周期](libraries.md#模块清理与卸载)。见[标量验证](../test/compiler/scalar_globals_test.dart)、[托管全局验证](../test/compiler/managed_globals_test.dart)与[分配中的 native 重入](../test/codegen/managed_heap_native_test.dart)。跨线程调用、并发调用和跨模块托管值 ABI 尚未支持。
 
 实例 late/late final 已支持可表示的标量、对象引用、可空及泛型字段。物理存储为每个声明字段保留值槽和独立绑定位，区分未绑定与已绑定的 null；各实例独立，继承字段按原声明身份寻址。显式构造写入绑定字段，惰性初始化体接收实际对象及继承后的泛型环境。先写跳过初始化，失败后未绑定字段可重试，抛错前已完成的写入保留；可变递归初始化提交成功的外层结果，final 在初始化求值后检查绑定并保留内层值。赋值的 RHS、表示转换和实际泛型类型检查先于重复 final 绑定检查，失败不修改字段；未绑定读取和绑定冲突通过普通 SDK LateError 抛错。接收者、字段引用及初始化结果参与 GC 根与异常清理。见[实例 late 原生验证](../test/compiler/late_fields_test.dart)；泛型 late-final 的规范安全检查与 SDK 差异见下节。未表示类型不在此支持范围内。
 
 非 `late` 捕获存储与存储别名已支持原生执行：同一绑定的闭包共享后续写入，逃逸闭包及全局保存的闭包保留其存储，`CopyCell` 为循环迭代创建独立身份。无需共享身份的局部变量仍使用栈槽，只有需要存储身份的 cell 使用托管指针；捕获值和引用随普通对象参与 GC。未初始化引用载荷的物理清零仅保证 GC 安全，不表示源码变量已绑定，也不替代初始化检查。见[原生闭包验证](../test/compiler/closures_test.dart)与[存储契约检查](../test/codegen/cells_test.dart)。
 
-捕获的 `late` 绑定、惰性初始化体存储及一般局部 `late` 的原生绑定语义仍待实现；已有 IR 支持不代表这些路径已能发码。
+局部及捕获的 `late`、`late final` 已支持可表示类型的原生执行。未绑定读取抛出 SDK LateError，null 与未绑定状态分开。先赋值跳过初始化，未绑定初始化失败后可重试；失败前的写入保留，成功的可变初始化覆盖中途写入，递归 final 初始化保留内层绑定并使外层初始化失败。赋值 RHS 和类型检查先于 final 绑定检查，失败不改变原值。初始化器保留词法泛型环境、可变捕获及循环内每次声明的独立存储；跨入口闭包和初始化结果参与 GC。首次成功绑定后释放不再需要的初始化闭包引用。见[局部 late 原生验证](../test/compiler/late_locals_test.dart)和[复制存储与异常边契约](../test/codegen/instance_storage_test.dart)。初始化表达式仍受各项原生执行能力的限制。
 
 ## 已知 SDK 差异
 

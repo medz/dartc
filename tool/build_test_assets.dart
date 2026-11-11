@@ -161,6 +161,7 @@ Future<void> main(List<String> args) async {
       'scalar_globals',
       'managed_globals',
       'late_fields',
+      'late_locals',
       'pointers',
       'pointer_arithmetic',
       'doubles',

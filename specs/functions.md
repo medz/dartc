@@ -42,7 +42,9 @@
 
 原生协变方法及其提取值支持 `Never` 形参，泛型形参也可实际代入 `Never`。实参按源码顺序求值，之后的形参检查必定失败，不进入方法体；异常仍执行适用的 catch/finally。见同一[调用边界验证](../test/compiler/member_calls_test.dart)。
 
-此范围不包含 dynamic/noSuchMethod 调用及 dynamic 成员读取、捕获的 `late` 绑定与初始化体存储，也不包含 FFI 回调。一般局部 `late` 的原生绑定语义仍待实现；上表的 IR 支持不表示这些路径均可原生执行。
+原生闭包支持捕获 `late` 和 `late final`，包括未绑定存储、惰性初始化闭包及其词法泛型环境。初始化器在第一次读取时执行；逃逸闭包在创建者返回后及同模块后续原生入口中保留绑定。见[局部 late 原生验证](../test/compiler/late_locals_test.dart)。
+
+此范围不包含 dynamic/noSuchMethod 调用、dynamic 成员读取及 FFI 回调；上表的 IR 支持不表示这些路径均可原生执行。
 
 ## 异步参考执行器范围
 

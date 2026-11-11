@@ -6,6 +6,7 @@ import 'type_values.dart';
 final class ClosureStorage(
   Iterable<IrCallable> selectedBodies, {
   Iterable<FunctionTarget> boundMethods = const [],
+  FunctionTarget? lateFailure,
 }) {
   static final _uri = Uri.parse('dartc:closures');
   final _base = ClassType(_uri, 'Closure');
@@ -34,9 +35,27 @@ final class ClosureStorage(
       if (type is! CellType || _cells.containsKey(type)) return;
       final owner = ClassType(_uri, 'Cell${_cells.length}');
       final value = InstanceField(owner, 'value', _stored(type.content));
-      final initializer = _initialize(owner, [value]);
-      _cells[type] = CellShape(owner, value, initializer);
-      _classes.add(IrClass(owner, [value], constructors: [initializer]));
+      final bound = type.isLate
+          ? InstanceField(owner, 'bound', .boolean)
+          : null;
+      final thunk = type.isLate
+          ? InstanceField(owner, 'thunk', FunctionType(value.type, []).nullable)
+          : null;
+      final fields = [value, ?bound, ?thunk];
+      final initializer = _initialize(owner, fields);
+      _cells[type] = CellShape(
+        owner,
+        value,
+        initializer,
+        lazy: bound == null || thunk == null
+            ? null
+            : (
+                bound: bound,
+                thunk: thunk,
+                initialize: _lateInitializer(thunk, value.type, lateFailure),
+              ),
+      );
+      _classes.add(IrClass(owner, fields, constructors: [initializer]));
     }
 
     for (final body in bodies) {
@@ -322,6 +341,49 @@ final class ClosureStorage(
     _functions.add(IrFunction(target, [entry]));
     return target;
   }
+
+  FunctionTarget _lateInitializer(
+    InstanceField thunk,
+    ValueType result,
+    FunctionTarget? failure,
+  ) {
+    if (failure == null) {
+      throw UnsupportedError(
+        'Native late cells require the SDK LateError constructor.',
+      );
+    }
+    final target = FunctionTarget(
+      _uri,
+      '${thunk.owner.name}.initialize',
+      result,
+      [thunk.type],
+    );
+    final entry = Block(target.parameterTypes),
+        missing = Block(),
+        evaluate = Block();
+    final value = entry.parameters.single;
+    entry.finish(
+      Branch(
+        entry.emit(Equals(value, const Constant.nullValue())),
+        Jump(missing),
+        Jump(evaluate),
+      ),
+    );
+    missing.finish(
+      Unreachable(
+        missing.emit(
+          DirectCall(failure, [
+            const Constant.string('Local has not been initialized.'),
+          ]),
+        ),
+      ),
+    );
+    evaluate.finish(
+      Return(evaluate.emit(FunctionCall(evaluate.emit(NullCheck(value)), []))),
+    );
+    _functions.add(IrFunction(target, [entry, missing, evaluate]));
+    return target;
+  }
 }
 
 final class ClosureShape({
@@ -353,5 +415,7 @@ final class FunctionInstantiation(
 final class CellShape(
   final ClassType type,
   final InstanceField value,
-  final FunctionTarget initializer,
-);
+  final FunctionTarget initializer, {
+  final ({InstanceField bound, InstanceField thunk, FunctionTarget initialize})?
+  lazy,
+});

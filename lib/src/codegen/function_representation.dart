@@ -152,7 +152,11 @@ final class FunctionRepresentation(
         if (block.end case Invoke(:final operation)) operation,
       ],
     ];
-    stackCells.addAll(operations.whereType<NewCell>());
+    stackCells.addAll(
+      operations.whereType<NewCell>().where(
+        (cell) => !(cell.type as CellType).isLate,
+      ),
+    );
     for (final operation in operations) {
       for (final input in operation.inputs) {
         if (!(operation is ReadCell && operation.cell == input ||
@@ -304,12 +308,6 @@ final class FunctionRepresentation(
                 !stackCells.contains(instruction) ||
             instruction is CopyCell) {
           final type = instruction.type as CellType;
-          if (type.isLate ||
-              instruction is NewCell && instruction.initializer != null) {
-            throw UnsupportedError(
-              'Native captured late storage is not implemented.',
-            );
-          }
           final shape = layouts.closures.cell(type);
           Value initial;
           if (instruction is CopyCell) {
@@ -333,19 +331,24 @@ final class FunctionRepresentation(
           );
           _operands[instruction] = [
             initial,
+            if (shape.lazy case final lazy?) ...[
+              instruction is CopyCell
+                  ? _load(lazy.bound, instruction.cell, body)
+                  : Constant.boolean((instruction as NewCell).initial != null),
+              instruction is CopyCell
+                  ? _load(lazy.thunk, instruction.cell, body)
+                  : (instruction as NewCell).initializer ??
+                        const Constant.nullValue(),
+            ],
             layouts.types.constant(shape.type),
           ];
           body.add(instruction);
           continue;
         }
         if (instruction case ReadCell(:final cell) || WriteCell(:final cell)
-            when !stackCells.contains(cell)) {
+            when !stackCells.contains(cell) &&
+                !(cell.type as CellType).isLate) {
           final shape = layouts.closures.cell(cell.type as CellType);
-          if ((cell.type as CellType).isLate) {
-            throw UnsupportedError(
-              'Native captured late storage is not implemented.',
-            );
-          }
           if (instruction is ReadCell) {
             final read = _load(shape.value, cell, body);
             aliases.add(instruction);
@@ -852,11 +855,33 @@ final class FunctionRepresentation(
           _operands[instruction] = join.parameters;
           continue;
         }
-        if (instruction
-            case LoadField(field: final field, :final receiver) ||
-                StoreField(field: final field, :final receiver)
-            when field.isLate) {
-          final (valueField, boundField) = layouts.instances.slots(field);
+        final lateCell = switch (instruction) {
+          ReadCell(:final cell) ||
+          WriteCell(:final cell) when (cell.type as CellType).isLate => cell,
+          _ => null,
+        };
+        final lateField = switch (instruction) {
+          LoadField(:final field) ||
+          StoreField(:final field) when field.isLate => field,
+          _ => null,
+        };
+        if (lateField != null || lateCell != null) {
+          final shape = lateCell == null
+              ? null
+              : layouts.closures.cell(lateCell.type as CellType);
+          final field = lateField ?? shape!.value;
+          final receiver = switch (instruction) {
+            LoadField(:final receiver) ||
+            StoreField(:final receiver) => receiver,
+            _ => lateCell!,
+          };
+          final (valueField, boundField) = shape == null
+              ? layouts.instances.slots(field)
+              : (shape.value, shape.lazy!.bound);
+          final isFinal = lateCell == null
+              ? field.isFinal
+              : (lateCell.type as CellType).isFinal;
+          final isRead = instruction is LoadField || instruction is ReadCell;
           Block fresh() {
             final next = Block();
             blocks.add(next);
@@ -884,24 +909,41 @@ final class FunctionRepresentation(
 
           void requireUnbound(String message) {
             final commit = fresh(), failed = fresh();
-            final flag = LoadField(boundField, receiver);
+            final flag = StorageRead(boundField, receiver);
             append(flag);
             ends[block] = Branch(flag, Jump(failed), Jump(commit));
             fail(failed, message);
             enter(commit);
           }
 
+          void bind(Value value) {
+            append(StorageWrite(valueField, receiver, value));
+            append(
+              StorageWrite(boundField, receiver, const Constant.boolean(true)),
+            );
+            if (shape != null) {
+              append(
+                StorageWrite(
+                  shape.lazy!.thunk,
+                  receiver,
+                  const Constant.nullValue(),
+                ),
+              );
+            }
+          }
+
           final join = Block(
-            instruction is LoadField
+            isRead
                 ? [
                     field.requiresReadCheck
                         ? .object.nullable
-                        : instruction.type,
+                        : shape?.value.type ?? instruction.type,
                   ]
                 : [],
           );
           blocks.add(join);
-          if (instruction case StoreField(:final value)) {
+          if (instruction
+              case StoreField(:final value) || WriteCell(:final value)) {
             final conversions = <Value>[];
             var stored = convert(value, field.type, conversions);
             conversions.forEach(append);
@@ -925,31 +967,35 @@ final class FunctionRepresentation(
               append(check);
               stored = check;
             }
-            if (field.isFinal) {
+            if (isFinal) {
               requireUnbound(
                 "Field '${field.name}' has already been initialized.",
               );
             }
-            append(StorageWrite(valueField, receiver, stored));
-            append(
-              StoreField(boundField, receiver, const Constant.boolean(true)),
-            );
+            bind(stored);
             ends[block] = Jump(join);
           } else {
             final bound = fresh(), initialize = fresh();
-            final flag = LoadField(boundField, receiver);
+            final flag = StorageRead(boundField, receiver);
             append(flag);
             ends[block] = Branch(flag, Jump(bound), Jump(initialize));
-            final read = LoadField(valueField, receiver);
+            final read = shape == null
+                ? LoadField(valueField, receiver)
+                : StorageRead(valueField, receiver);
             instructions[bound]!.add(read);
             ends[bound] = Jump(join, [read]);
             enter(initialize);
-            if (field.initializer case final initializer?) {
-              final value = DirectCall(initializer, [
-                receiver,
-              ], ownerType: CoreTypes.view(receiver.type, field.owner));
+            if (shape?.lazy?.initialize ?? field.initializer
+                case final initializer?) {
+              final value = shape == null
+                  ? DirectCall(initializer, [
+                      receiver,
+                    ], ownerType: CoreTypes.view(receiver.type, field.owner))
+                  : DirectCall(initializer, [
+                      _load(shape.lazy!.thunk, receiver, body),
+                    ]);
               append(value);
-              if (field.isFinal) {
+              if (isFinal) {
                 requireUnbound(
                   "Field '${field.name}' has been assigned during initialization.",
                 );
@@ -957,10 +1003,7 @@ final class FunctionRepresentation(
               final conversions = <Value>[];
               final stored = convert(value, field.type, conversions);
               conversions.forEach(append);
-              append(StorageWrite(valueField, receiver, stored));
-              append(
-                StoreField(boundField, receiver, const Constant.boolean(true)),
-              );
+              bind(stored);
               ends[block] = Jump(join, [value]);
             } else {
               fail(block, "Field '${field.name}' has not been initialized.");
@@ -969,7 +1012,7 @@ final class FunctionRepresentation(
           block = join;
           body = instructions[block] = [];
           final pending = <Value>[];
-          final values = instruction is LoadField && field.requiresReadCheck
+          final values = isRead && field.requiresReadCheck
               ? [checkResult(join.parameters.single, instruction.type, pending)]
               : join.parameters;
           pending.forEach(append);

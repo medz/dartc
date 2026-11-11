@@ -456,6 +456,7 @@ final class FunctionContext(
 
   /// Reserves late storage without evaluating or reading its lazy captures.
   void declareLate(ast.VariableDeclaration declaration, ValueType type) {
+    bindings.requireLateError(unit.libraryElement, unit, declaration);
     final variable = declaration.declaredFragment!.element;
     final initializer = declaration.initializer == null
         ? null

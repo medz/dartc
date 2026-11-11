@@ -1,6 +1,6 @@
 import 'package:dartc/ir.dart';
 
-/// Physical aliases and the ordinary SDK error path for instance late bindings.
+/// Physical field aliases and the SDK error path shared by late bindings.
 final class InstanceStorage(
   Iterable<IrFunction> bodies, {
   IrCallable? lateError,
@@ -10,15 +10,30 @@ final class InstanceStorage(
 
   this {
     if (!bodies.any(
-      (body) => body.fields.any(
-        (field) => field.isLate && (field.isFinal || field.initializer == null),
-      ),
+      (body) =>
+          body.target.parameterTypes.any(
+            (type) => type is CellType && type.isLate,
+          ) ||
+          body.fields.any(
+            (field) =>
+                field.isLate && (field.isFinal || field.initializer == null),
+          ) ||
+          body.blocks.any(
+            (block) =>
+                [
+                  ...block.instructions,
+                  if (block.end case Invoke(:final operation)) operation,
+                ].any(
+                  (value) =>
+                      value is NewCell && (value.type as CellType).isLate,
+                ),
+          ),
     )) {
       return;
     }
     if (lateError == null) {
       throw UnsupportedError(
-        'Native late instance storage requires the SDK dart:_internal LateError constructor.',
+        'Native late storage requires the SDK dart:_internal LateError constructor.',
       );
     }
     final target = FunctionTarget(
