@@ -31,22 +31,18 @@ final class Lowering({final bool enableAssertions = false}) {
       enableAssertions: enableAssertions,
       constants: input.constants,
     );
-    for (final unit in input.libraries.expand((library) => library.units)) {
-      for (final node in unit.unit.declarations) {
-        switch (node) {
-          case ast.ClassDeclaration():
-            bindings.registerClass(node.declaredFragment!.element, unit, node);
-          case ast.EnumDeclaration():
-            bindings.registerClass(node.declaredFragment!.element, unit, node);
-          case ast.MixinDeclaration():
-            bindings.registerClass(node.declaredFragment!.element, unit, node);
-          case ast.ClassTypeAlias():
-            bindings.registerClass(node.declaredFragment!.element, unit, node);
-          default:
-            break;
+    for (final library in input.libraries) {
+      bindings.registerLibrary(library);
+    }
+    Future<void> registerSdkSources(int from) async {
+      for (final element in bindings.sdkClasses.skip(from)) {
+        if (bindings.sourceOf(element) == null) {
+          bindings.registerLibrary(await input.resolveLibrary(element.library));
         }
       }
     }
+
+    await registerSdkSources(0);
     final native = NativeBindings(bindings);
     input.libraries.forEach(native.bind);
     final functions = <IrCallable>[];
@@ -87,26 +83,31 @@ final class Lowering({final bool enableAssertions = false}) {
       }
     }
 
-    for (final (application, unit, source) in bindings.mixinDeclarations) {
-      bindings.replaceMixinApplication(
-        lowerClass(unit, bindings, source, functions, application: application),
-      );
-    }
-    var sdkClass = 0, sdkFunction = 0;
+    var sdkClass = 0, sdkFunction = 0, mixin = 0;
     while (sdkClass < bindings.sdkClasses.length ||
-        sdkFunction < bindings.sdkFunctions.length) {
+        sdkFunction < bindings.sdkFunctions.length ||
+        mixin < bindings.mixinDeclarations.length) {
       if (sdkClass < bindings.sdkClasses.length) {
+        await registerSdkSources(sdkClass);
         final element = bindings.sdkClasses[sdkClass++];
-        final library = await input.resolveLibrary(element.library);
-        final declaration = library.getFragmentDeclaration(
-          element.firstFragment,
-        );
-        if (declaration == null) {
-          throw UnsupportedError('SDK class unavailable: ${element.name}');
-        }
-        final unit = declaration.resolvedUnit!, node = declaration.node;
-        bindings.registerClass(element, unit, node);
+        final (unit, node) =
+            bindings.sourceOf(element) ??
+            (throw UnsupportedError('SDK class unavailable: ${element.name}'));
         classes.add(lowerClass(unit, bindings, node, functions));
+        continue;
+      }
+      if (mixin < bindings.mixinDeclarations.length) {
+        final (application, unit, source) = bindings.mixinDeclarations
+            .elementAt(mixin++);
+        bindings.replaceMixinApplication(
+          lowerClass(
+            unit,
+            bindings,
+            source,
+            functions,
+            application: application,
+          ),
+        );
         continue;
       }
       final element = bindings.sdkFunctions[sdkFunction++];
@@ -139,16 +140,16 @@ final class Lowering({final bool enableAssertions = false}) {
       );
     }
 
+    final intrinsics = bindings.lowerIntrinsics();
     final intrinsicClasses = bindings.intrinsicClasses;
     final defined = {
-      for (final function in [...functions, ...bindings.intrinsics])
-        function.target,
+      for (final function in [...functions, ...intrinsics]) function.target,
     };
     final program = IrProgram(
       [...classes, ...bindings.mixinApplications, ...intrinsicClasses],
       [
         ...functions.whereType<IrFunction>(),
-        ...bindings.intrinsics,
+        ...intrinsics,
         ...bindings.mixinInitializers,
         ...bindings.libraryLoaders,
       ],

@@ -493,6 +493,7 @@ sealed class Instruction(super.type) extends Value {
     CollectionSpread() ||
     MapPut() ||
     GetIterator() ||
+    StringFromCharCodes() ||
     IteratorMoveNext() ||
     IteratorCurrent() ||
     DirectCall() ||
@@ -1785,7 +1786,7 @@ final class StringConcat(
   Iterable<Value> get inputs => [left, right];
 }
 
-/// Reads the number of UTF-16 code units in a string.
+/// Constructs a string from one Unicode code point or UTF-16 code unit.
 final class StringFromCharCode(final Value code) extends Instruction {
   this : super(.string) {
     if (!ValueType.integer.accepts(code.type)) {
@@ -1794,6 +1795,23 @@ final class StringFromCharCode(final Value code) extends Instruction {
   }
   @override
   Iterable<Value> get inputs => [code];
+}
+
+/// Constructs a string from the selected range of [codes], iterating once.
+final class StringFromCharCodes(
+  final Value codes, [
+  final Value start = const Constant.integer(0),
+  final Value end = const Constant.nullValue(),
+]) extends Instruction {
+  this : super(.string) {
+    if (!CoreTypes.iterableOf(.integer).accepts(codes.type) ||
+        !ValueType.integer.accepts(start.type) ||
+        !ValueType.integer.nullable.accepts(end.type)) {
+      throw ArgumentError('Integer character codes and range are required.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [codes, start, end];
 }
 
 /// Reads the number of UTF-16 code units in a string.

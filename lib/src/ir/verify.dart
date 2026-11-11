@@ -319,7 +319,7 @@ FunctionReferences verifyCallable(
           (methodTearOffs ??= {}).add((method: method, direct: direct));
         case Construct(:final instantiatedType):
           (instantiatedClasses ??= {}).add(instantiatedType.declaration);
-        case StringFromCharCode() || StringConcat():
+        case StringFromCharCode() || StringFromCharCodes() || StringConcat():
           (instantiatedClasses ??= {}).add(ValueType.string);
         case PointerFromAddress() || PointerOffset() || NativeCall()
             when FfiTypes.isPointer(op.type):

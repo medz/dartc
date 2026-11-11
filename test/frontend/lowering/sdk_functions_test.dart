@@ -45,6 +45,8 @@ void main() {
     expect(check.blocks.map((b) => b.end).whereType<Throw>(), isNotEmpty);
     for (final value in [0, 1, 0x7fffffffffffffff]) {
       fixture.compare('nonnegative', [value], () => sdk.nonnegative(value));
+      fixture.compare('aliasCheck', [value], () => sdk.aliasCheck(value));
+      fixture.compare('sdkMixin', [value], () => sdk.sdkMixin(value));
       fixture.compare('throughValue', [value], () => sdk.throughValue(value));
       fixture.compare('local', [value], () => sdk.local(value));
     }

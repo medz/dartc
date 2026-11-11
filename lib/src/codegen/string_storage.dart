@@ -9,6 +9,7 @@ final class StringStorage({
   IrClass? source,
   final IrCallable? indexError,
   final IrCallable? rangeError,
+  final IrCallable? argumentError,
   final FunctionTarget Function(ClassType)? allocate,
 }) {
   static const dataOffset = ObjectLayout.fieldsOffset + ObjectLayout.alignment;
@@ -25,12 +26,13 @@ final class StringStorage({
       unsupportedForwarders: source?.unsupportedForwarders ?? const {},
     );
   }
-  IrFunction? _read, _fromCode, _concat, _equal, _hash;
+  IrFunction? _read, _fromCode, _fromCodes, _concat, _equal, _hash;
   FunctionTarget? _allocation;
 
   Iterable<IrFunction> get functions => [
     ?_read,
     ?_fromCode,
+    ?_fromCodes,
     ?_concat,
     ?_equal,
     ?_hash,
@@ -40,6 +42,7 @@ final class StringStorage({
   FunctionTarget? callFor(Instruction operation) => switch (operation) {
     StringCodeUnitAt() => (_read ??= _codeUnitAt()).target,
     StringFromCharCode() => (_fromCode ??= _fromCharCode()).target,
+    StringFromCharCodes() => (_fromCodes ??= _fromCharCodes()).target,
     StringConcat() => (_concat ??= _concatenate()).target,
     _ => null,
   };
@@ -183,6 +186,225 @@ final class StringStorage({
       Throw(_error(failed, rangeError, [code, _int(0), _int(0x10ffff)])),
     );
     return IrFunction(target, [entry, upper, valid, single, pair, failed]);
+  }
+
+  IrFunction _fromCharCodes() {
+    final target = _target('fromCharCodes', .string, [
+      CoreTypes.iterableOf(.integer),
+      .integer,
+      ValueType.integer.nullable,
+    ]);
+    final entry = Block(target.parameterTypes),
+        checkEnd = Block(),
+        bound = Block(),
+        validEnd = Block(),
+        badStart = Block(),
+        badEnd = Block(),
+        empty = Block(),
+        ready = Block([.integer]),
+        skip = Block([.integer]),
+        skipNext = Block(),
+        skipped = Block(),
+        loop = Block([.integer, .integer]),
+        move = Block(),
+        read = Block(),
+        single = Block(),
+        pair = Block(),
+        validate = Block([.integer]),
+        upper = Block(),
+        badCode = Block(),
+        create = Block(),
+        allocate = Block(),
+        copy = Block([.integer]),
+        write = Block(),
+        done = Block();
+    final [codes, start, end] = entry.parameters;
+    entry.finish(
+      Branch(
+        _op(entry, .lessThan, start, _int(0)),
+        Jump(badStart),
+        Jump(checkEnd),
+      ),
+    );
+    badStart.finish(
+      Throw(
+        _error(badStart, rangeError, [
+          start,
+          _int(0),
+          const Constant.nullValue(),
+          const Constant.string('start'),
+        ]),
+      ),
+    );
+    checkEnd.finish(
+      Branch(
+        checkEnd.emit(Equals(end, const Constant.nullValue())),
+        Jump(ready, [_int(-1)]),
+        Jump(bound),
+      ),
+    );
+    final limit = bound.emit(TypeCast(end, .integer));
+    bound.finish(
+      Branch(_op(bound, .lessThan, limit, start), Jump(badEnd), Jump(validEnd)),
+    );
+    badEnd.finish(
+      Throw(
+        _error(badEnd, rangeError, [
+          limit,
+          start,
+          const Constant.nullValue(),
+          const Constant.string('end'),
+        ]),
+      ),
+    );
+    validEnd.finish(
+      Branch(
+        validEnd.emit(Equals(limit, start)),
+        Jump(empty),
+        Jump(ready, [_op(validEnd, .subtract, limit, start)]),
+      ),
+    );
+    empty.finish(const Return(Constant.string('')));
+
+    final units = ready.emit(NewCollection(CoreTypes.listOf(.integer)));
+    final iterator = ready.emit(GetIterator(codes));
+    ready.finish(Jump(skip, [start]));
+    final remaining = skip.parameters.single;
+    skip.finish(
+      Branch(
+        skip.emit(Equals(remaining, _int(0))),
+        Jump(loop, [ready.parameters.single, _int(0)]),
+        Jump(skipNext),
+      ),
+    );
+    skipNext.finish(
+      Branch(
+        skipNext.emit(IteratorMoveNext(iterator)),
+        Jump(skipped),
+        Jump(empty),
+      ),
+    );
+    skipped.finish(Jump(skip, [_op(skipped, .subtract, remaining, _int(1))]));
+    final [take, bits] = loop.parameters;
+    loop.finish(
+      Branch(
+        loop.emit(Equals(take, _int(0))),
+        Jump(validate, [bits]),
+        Jump(move),
+      ),
+    );
+    move.finish(
+      Branch(
+        move.emit(IteratorMoveNext(iterator)),
+        Jump(read),
+        Jump(validate, [bits]),
+      ),
+    );
+    final code = read.emit(
+      TypeCast(read.emit(IteratorCurrent(iterator)), .integer),
+    );
+    read.finish(
+      Branch(
+        _op(read, .lessOrEqual, code, _int(0xffff)),
+        Jump(single),
+        Jump(pair),
+      ),
+    );
+    single.emit(CollectionAdd(units, code));
+    single.finish(
+      Jump(loop, [
+        _op(single, .subtract, take, _int(1)),
+        _op(single, .bitOr, bits, code),
+      ]),
+    );
+    final point = _op(pair, .subtract, code, _int(0x10000));
+    pair.emit(
+      CollectionAdd(
+        units,
+        _op(
+          pair,
+          .add,
+          _int(0xd800),
+          _op(pair, .unsignedShiftRight, point, _int(10)),
+        ),
+      ),
+    );
+    pair.emit(
+      CollectionAdd(
+        units,
+        _op(pair, .add, _int(0xdc00), _op(pair, .bitAnd, point, _int(0x3ff))),
+      ),
+    );
+    pair.finish(
+      Jump(loop, [
+        _op(pair, .subtract, take, _int(1)),
+        _op(pair, .bitOr, bits, _op(pair, .bitOr, point, _int(0xd800))),
+      ]),
+    );
+
+    // Validate after iteration so a later iterator exception is not hidden.
+    final combined = validate.parameters.single;
+    validate.finish(
+      Branch(
+        _op(validate, .lessThan, combined, _int(0)),
+        Jump(badCode),
+        Jump(upper),
+      ),
+    );
+    upper.finish(
+      Branch(
+        _op(upper, .greaterThan, combined, _int(0xfffff)),
+        Jump(badCode),
+        Jump(create),
+      ),
+    );
+    badCode.finish(
+      Throw(
+        _error(badCode, argumentError, [
+          codes,
+          const Constant.string('charCodes'),
+        ]),
+      ),
+    );
+    final count = create.emit(CollectionLength(units));
+    create.finish(
+      Branch(create.emit(Equals(count, _int(0))), Jump(empty), Jump(allocate)),
+    );
+    final string = _create(allocate, count);
+    allocate.finish(Jump(copy, [_int(0)]));
+    final index = copy.parameters.single;
+    copy.finish(
+      Branch(_op(copy, .lessThan, index, count), Jump(write), Jump(done)),
+    );
+    _set(write, string, index, write.emit(CollectionGet(units, index)));
+    write.finish(Jump(copy, [_op(write, .add, index, _int(1))]));
+    done.finish(Return(string));
+    return IrFunction(target, [
+      entry,
+      checkEnd,
+      bound,
+      validEnd,
+      badStart,
+      badEnd,
+      empty,
+      ready,
+      skip,
+      skipNext,
+      skipped,
+      loop,
+      move,
+      read,
+      single,
+      pair,
+      validate,
+      upper,
+      badCode,
+      create,
+      allocate,
+      copy,
+      write,
+      done,
+    ]);
   }
 
   IrFunction _concatenate() {

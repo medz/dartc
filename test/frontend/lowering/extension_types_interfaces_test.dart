@@ -92,11 +92,13 @@ void main() {
     },
   );
   test('extension interfaces do not create nominal classes', () {
-    expect(fixture.program.classes.map((c) => c.type.name).toSet(), {
-      'Interface',
-      'Representation',
-      'Specialized',
-    });
+    expect(
+      fixture.program.classes
+          .where((c) => c.type.library.scheme != 'dart')
+          .map((c) => c.type.name)
+          .toSet(),
+      {'Interface', 'Representation', 'Specialized'},
+    );
     final inherited = fixture.program.functions.singleWhere(
       (f) => f.target.name == 'inherited',
     );

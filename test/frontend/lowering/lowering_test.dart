@@ -663,7 +663,9 @@ void main() {
 
   test('void parameters retain constant collection defaults', () async {
     final program = await _lower(['object_default.dart']);
-    final value = program.functions.single.defaults[0];
+    final value = program.functions
+        .singleWhere((f) => f.target.name == 'objectDefault')
+        .defaults[0];
     expect(value, isA<SequenceConstant>());
     expect(value!.type, CoreTypes.listOf(ValueType.integer));
   });

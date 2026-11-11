@@ -41,13 +41,24 @@ final class Bindings({
   final sdkFunctions = <ExecutableElement>[];
 
   /// Resolved SDK declarations whose behavior is supplied by the compiler.
-  final intrinsics = <IrFunction>[];
+  final _intrinsics = <FunctionTarget, Value Function(FunctionTarget, Block)>{};
+
+  /// Builds intrinsic bodies after their SDK declarations have been lowered.
+  List<IrFunction> lowerIntrinsics() {
+    final functions = <IrFunction>[];
+    for (final MapEntry(key: target, value: build) in _intrinsics.entries) {
+      final entry = Block(target.parameterTypes);
+      entry.finish(Return(build(target, entry)));
+      functions.add(IrFunction(target, [entry], defaults: defaults(target)));
+    }
+    return functions;
+  }
 
   /// Compiler-owned classes, retaining all referenced abstract members.
   Iterable<IrClass> get intrinsicClasses => [
     for (final owner in {
-      for (final body in intrinsics)
-        if (body.target.owner != null) body.target.owner!,
+      for (final target in _intrinsics.keys)
+        if (target.owner != null) target.owner!,
     })
       IrClass(
         owner,
@@ -73,6 +84,9 @@ final class Bindings({
       return;
     }
     if (element.supertype case final parent?) requireSdkClass(parent.element);
+    for (final mixin in element.mixins) {
+      requireSdkClass(mixin.element);
+    }
     sdkClasses.add(element);
   }
 
@@ -190,6 +204,35 @@ final class Bindings({
   ) {
     _modeledClasses[element] = (unit, site);
   }
+
+  /// Records a library's class sources before binding inherited members.
+  void registerLibrary(ResolvedLibraryResult library) {
+    for (final unit in library.units) {
+      for (final node in unit.unit.declarations) {
+        final element = switch (node) {
+          ast.ClassDeclaration() => node.declaredFragment!.element,
+          ast.EnumDeclaration() => node.declaredFragment!.element,
+          ast.MixinDeclaration() => node.declaredFragment!.element,
+          ast.ClassTypeAlias() => node.declaredFragment!.element,
+          _ => null,
+        };
+        if (element == null) continue;
+        registerClass(element, unit, node);
+        if (!library.element.isInSdk) {
+          for (final parent in [
+            // Lowering supplies the implicit Enum superclass storage.
+            if (element is! EnumElement) ?element.supertype,
+            ...element.mixins,
+          ]) {
+            if (parent.element.library.isInSdk) requireSdkClass(parent.element);
+          }
+        }
+      }
+    }
+  }
+
+  (ResolvedUnitResult, ast.AstNode)? sourceOf(InterfaceElement element) =>
+      _modeledClasses[element];
 
   MemberSelector _memberSelector(
     ExecutableElement member, [
@@ -774,7 +817,11 @@ final class Bindings({
         ? _classCovarianceFor(element)
         : (parameters: const <int>{}, bounds: const <int>{});
     final classFlags = classCovariance.parameters;
-    final intrinsic = intrinsicFor(element, requireSdkClass);
+    final intrinsic = intrinsicFor(
+      element,
+      requireSdkClass,
+      (declaration) => target(declaration, unit, site),
+    );
     final function = FunctionTarget(
       enclosing?.library ?? element.library.uri,
       element.name ?? '<anonymous>',
@@ -842,13 +889,7 @@ final class Bindings({
       };
     }
     if (intrinsic != null) {
-      final entry = Block(function.parameterTypes);
-      entry.finish(Return(intrinsic(function, entry)));
-      intrinsics.add(
-        IrFunction(function, [
-          entry,
-        ], defaults: _defaults[function] ?? const {}),
-      );
+      _intrinsics[function] = intrinsic;
     }
     return function;
   }

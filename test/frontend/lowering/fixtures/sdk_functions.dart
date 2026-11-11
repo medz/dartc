@@ -1,6 +1,23 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'sdk_export.dart' as sdk;
+
+typedef Bounds = RangeError;
+int aliasCheck(int value) => Bounds.checkNotNegative(value);
+
+final class _Values(final int value) with ListMixin<int> {
+  @override
+  int get length => 1;
+  @override
+  int operator [](int index) => value;
+  @override
+  set length(int length) => throw UnsupportedError('fixed');
+  @override
+  void operator []=(int index, int value) => throw UnsupportedError('fixed');
+}
+
+int sdkMixin(int value) => _Values(value).first;
 
 int nonnegative(int value) => sdk.RangeError.checkNotNegative(value);
 

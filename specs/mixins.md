@@ -14,6 +14,6 @@
 
 ## 当前边界
 
-支持枚举混入及其泛型实参和成员重写，见[枚举混入验证](../test/frontend/lowering/enum_mixins_test.dart)。协变转发遵循[类成员转发](classes.md)的入口与默认值规则。所有源 mixin 和非 Object 父类声明须包含在输入库批次中；未提供的源码不会自动装配。
+支持枚举混入及其泛型实参和成员重写，见[枚举混入验证](../test/frontend/lowering/enum_mixins_test.dart)。协变转发遵循[类成员转发](classes.md)的入口与默认值规则。用户源码中的 mixin 和非 Object 父类声明须包含在输入库批次中。官方 SDK 的普通父类与 mixin 源码按引用接入；已验证 `ListMixin<int>` 的继承成员，以及 `String.codeUnits` 使用的不可变列表 mixin。其余成员能否原生执行仍取决于所用语言和库能力，不能视为完整标准库支持。
 
-行为验证：[基本应用](../test/frontend/lowering/mixins_test.dart)、[字段与词法 super](../test/frontend/lowering/mixin_application_state_test.dart)、[泛型、接口、常量及嵌套应用](../test/frontend/lowering/mixin_type_environments_test.dart)、[输入库边界](../test/frontend/lowering/mixins_unsupported_test.dart)。
+行为验证：[基本应用](../test/frontend/lowering/mixins_test.dart)、[字段与词法 super](../test/frontend/lowering/mixin_application_state_test.dart)、[泛型、接口、常量及嵌套应用](../test/frontend/lowering/mixin_type_environments_test.dart)、[输入库边界](../test/frontend/lowering/mixins_unsupported_test.dart)、[SDK 继承成员](../test/frontend/lowering/sdk_functions_test.dart)、[不可变码元视图](../test/compiler/strings_test.dart)。

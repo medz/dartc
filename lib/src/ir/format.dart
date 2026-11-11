@@ -172,6 +172,8 @@ void writeFunction(
     StringConcat() => 'concat ${value(op.left)}, ${value(op.right)}',
     StringLength() => 'stringLength ${value(op.string)}',
     StringFromCharCode() => 'stringFromCharCode ${value(op.code)}',
+    StringFromCharCodes() =>
+      'stringFromCharCodes ${value(op.codes)}, ${value(op.start)}, ${value(op.end)}',
     StringCodeUnitAt() => 'codeUnitAt ${value(op.string)}, ${value(op.index)}',
     NumericNegate() => 'negate ${value(op.operand)}',
     NumericToDouble() => 'toDouble ${value(op.operand)}',

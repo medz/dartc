@@ -576,6 +576,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           ast.Identifier(
             element: ClassElement() ||
                 EnumElement() ||
+                TypeAliasElement() ||
                 ExtensionElement() ||
                 ExtensionTypeElement(),
           )

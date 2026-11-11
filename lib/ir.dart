@@ -111,6 +111,7 @@ export 'src/ir/value.dart'
         StringConcat,
         StringLength,
         StringFromCharCode,
+        StringFromCharCodes,
         StringCodeUnitAt,
         NumericBinary,
         NumericOperator,

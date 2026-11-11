@@ -13,6 +13,40 @@ import 'package:test/test.dart';
 import 'fixtures/aliases.dart';
 
 void main() {
+  test(
+    'string construction prepares Lists used only by generated bodies',
+    () async {
+      final lowered = await AnalysisSession([
+        'test/compiler/fixtures/strings.dart',
+      ]).use((input) => Lowering().lower(input));
+      final entry = lowered.program.functions
+          .firstWhere((f) => f.target.name == 'stringCodesProtocol')
+          .target;
+      final definitions = lowered.program.reachableFrom([entry]).toSet();
+      expect(
+        lowered.program.functions
+            .where((f) => definitions.contains(f.target))
+            .expand((f) => f.blocks)
+            .expand((b) => b.instructions)
+            .whereType<NewCollection>(),
+        isEmpty,
+      );
+      for (final CodeGenerator generator in [
+        Arm64CodeGenerator(const Target(.macos, .arm64)),
+        X64CodeGenerator(const Target(.linux, .x64)),
+      ]) {
+        final module = generator.generate(
+          lowered.program,
+          definitions: definitions,
+        );
+        expect(
+          module.symbols.map((s) => s.name),
+          containsAll(['fromCharCodes', 'empty', 'add']),
+        );
+      }
+    },
+  );
+
   test('List length needs no unused SDK error or iterator declarations', () {
     for (final constant in [false, true]) {
       final entry = Block();

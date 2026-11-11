@@ -7,6 +7,48 @@ import 'package:test/test.dart';
 import '../support/ir_interpreter.dart';
 
 void main() {
+  test('character ranges preserve UTF-16 values and reject invalid codes', () {
+    final target = FunctionTarget(
+      Uri.parse('memory:characters'),
+      'build',
+      .string,
+      [CoreTypes.iterableOf(.integer), .integer, ValueType.integer.nullable],
+    );
+    final entry = Block(target.parameterTypes);
+    entry.finish(
+      Return(
+        entry.emit(
+          StringFromCharCodes(
+            entry.parameters[0],
+            entry.parameters[1],
+            entry.parameters[2],
+          ),
+        ),
+      ),
+    );
+    final function = IrFunction(target, [entry]);
+    final runner = IrInterpreter(IrProgram([], [function]), {});
+    for (final (codes, start, end, expected)
+        in <(List<int>, int, int?, String)>[
+          ([0x41, 0x1f600, 0xdfff], 0, null, 'A\u{1F600}\uDFFF'),
+          ([0x41, 0x1f600, 0xdfff], 1, 2, '\u{1F600}'),
+          ([0x41], 3, 99, ''),
+          ([-1, 0x41], 1, null, 'A'),
+        ]) {
+      expect(runner.run(function, [codes, start, end]), expected);
+    }
+    expect(() => runner.run(function, [<int>[], -1, null]), throwsRangeError);
+    expect(() => runner.run(function, [<int>[], 2, 1]), throwsRangeError);
+    expect(
+      () => runner.run(function, [
+        [0x110000],
+        0,
+        null,
+      ]),
+      throwsArgumentError,
+    );
+  });
+
   test(
     'inline scalar access retains the managed base and validates operands',
     () {
@@ -44,6 +86,25 @@ void main() {
       final create = StringFromCharCode(offset);
       expect(create.effects, {Effect.allocates, Effect.mayThrow});
       expect(() => StringFromCharCode(object), throwsArgumentError);
+      final codes = SequenceConstant(CoreTypes.listOf(.integer), [
+        const Constant.integer(65),
+      ]);
+      final createMany = StringFromCharCodes(codes);
+      expect(createMany.inputs, [
+        codes,
+        const Constant.integer(0),
+        const Constant.nullValue(),
+      ]);
+      expect(
+        createMany.effects,
+        containsAll([Effect.callsUserCode, Effect.allocates, Effect.mayThrow]),
+      );
+      expect(() => StringFromCharCodes(object), throwsArgumentError);
+      expect(() => StringFromCharCodes(codes, object), throwsArgumentError);
+      expect(
+        () => StringFromCharCodes(codes, offset, object),
+        throwsArgumentError,
+      );
     },
   );
   test('string access validates operands and preserves effects', () {

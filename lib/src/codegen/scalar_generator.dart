@@ -127,6 +127,7 @@ base class ScalarCodeGenerator<R extends Object>(
         indexError: indexErrorType == null
             ? null
             : constructor(indexErrorType, 'withLength'),
+        argumentError: constructor(.argumentError, 'value'),
       );
       final arithmetic = NumericOperations(
         argumentError: constructor(.argumentError),
@@ -183,7 +184,6 @@ base class ScalarCodeGenerator<R extends Object>(
           for (final operation in operations) {
             arithmetic.callFor(operation);
             strings.callFor(operation);
-            lists.callFor(operation);
           }
         }
       }
@@ -193,7 +193,7 @@ base class ScalarCodeGenerator<R extends Object>(
         ...globals.functions,
         ...instances.functions,
       ];
-      lists.prepareMembers([...bodies, ...helpers]);
+      lists.prepare([...bodies, ...helpers]);
       if (helpers.isNotEmpty || !lists.isEmpty) {
         final expanded = IrProgram(
           [

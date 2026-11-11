@@ -1464,6 +1464,23 @@ final class IrInterpreter(
       ? _member(iterator, 'moveNext', .method, []) as bool
       : (iterator as Iterator<Object?>).moveNext();
 
+  String _fromCharCodes(Object? codes, int start, int? end) {
+    RangeError.checkNotNegative(start, 'start');
+    if (end != null && end < start) {
+      throw RangeError.range(end, start, null, 'end');
+    }
+    if (end == start) return '';
+    final iterator = _iterator(codes);
+    for (var i = 0; i < start; i++) {
+      if (!_moveNext(iterator)) return '';
+    }
+    final values = <int>[];
+    for (var i = start; (end == null || i < end) && _moveNext(iterator); i++) {
+      values.add(_current(iterator) as int);
+    }
+    return String.fromCharCodes(values);
+  }
+
   Object? _current(Object iterator) => iterator is _Instance
       ? _member(iterator, 'current', .getter, [])
       : (iterator as Iterator<Object?>).current;
@@ -2195,6 +2212,12 @@ final class IrInterpreter(
           values[op] = (read(string) as String).length;
         case StringFromCharCode(:final code):
           values[op] = String.fromCharCode(read(code) as int);
+        case StringFromCharCodes(:final codes, :final start, :final end):
+          values[op] = _fromCharCodes(
+            read(codes),
+            read(start) as int,
+            read(end) as int?,
+          );
         case StringCodeUnitAt(:final string, :final index):
           values[op] = (read(string) as String).codeUnitAt(read(index) as int);
         case NumericNegate(:final operand):

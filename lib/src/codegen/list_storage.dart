@@ -139,10 +139,19 @@ final class ListStorage({
   IrFunction _define(FunctionTarget target, IrFunction Function() build) =>
       _functions.putIfAbsent((target.kind, target.name), build);
 
-  /// Defines referenced List members and their generated dependencies.
-  void prepareMembers(Iterable<IrCallable> roots) {
+  /// Defines requested construction, members and their generated dependencies.
+  void prepare(Iterable<IrCallable> roots) {
+    final pending = <IrCallable>[...roots];
+    for (final body in pending.whereType<IrFunction>()) {
+      for (final block in body.blocks) {
+        for (final operation in block.instructions) {
+          callFor(operation);
+        }
+        if (block.end case Invoke(:final operation)) callFor(operation);
+      }
+    }
     if (isEmpty) return;
-    final pending = <IrCallable>[...roots, ...functions];
+    pending.addAll(functions);
     for (var i = 0; i < pending.length; i++) {
       final body = pending[i], previous = _functions.length;
       for (final member in [

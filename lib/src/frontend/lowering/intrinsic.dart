@@ -3,6 +3,14 @@ import 'package:dartc/ir.dart';
 
 import 'ffi.dart';
 
+LibraryElement _internal(LibraryElement library) => library
+    .typeProvider
+    .objectElement
+    .library
+    .fragments
+    .expand((fragment) => fragment.importedLibraries)
+    .firstWhere((library) => library.uri == Uri.parse('dart:_internal'));
+
 /// Includes the SDK declarations consumed by built-in List bodies.
 void requireListSupport(
   LibraryElement library,
@@ -12,16 +20,14 @@ void requireListSupport(
   for (final name in ['IndexError', 'RangeError', 'UnsupportedError']) {
     requireClass(core.getClass(name)!);
   }
-  final internal = core.fragments
-      .expand((fragment) => fragment.importedLibraries)
-      .firstWhere((library) => library.uri == Uri.parse('dart:_internal'));
-  requireClass(internal.getClass('ListIterator')!);
+  requireClass(_internal(core).getClass('ListIterator')!);
 }
 
 /// Supplies bodies and SDK dependencies for compiler-owned declarations.
 Value Function(FunctionTarget, Block)? intrinsicFor(
   ExecutableElement element,
   void Function(InterfaceElement) requireClass,
+  FunctionTarget Function(ExecutableElement) bind,
 ) {
   if (element.library.isDartCore &&
       element.baseElement == element.library.getTopLevelFunction('identical')) {
@@ -56,6 +62,23 @@ Value Function(FunctionTarget, Block)? intrinsicFor(
       );
     }
     final string = element.library.getClass('String')!;
+    if (element == string.getNamedConstructor('fromCharCodes')) {
+      requireListSupport(element.library, requireClass);
+      return (target, entry) => entry.emit(
+        StringFromCharCodes(
+          entry.parameters[0],
+          entry.parameters[1],
+          entry.parameters[2],
+        ),
+      );
+    }
+    if (element == string.getGetter('codeUnits')) {
+      final units = _internal(element.library).getClass('CodeUnits')!;
+      requireClass(units);
+      return (target, entry) => entry.emit(
+        Construct(bind(units.unnamedConstructor!), entry.parameters),
+      );
+    }
     if (element == string.getNamedConstructor('fromCharCode')) {
       requireClass(element.library.getClass('RangeError')!);
       return (target, entry) =>
